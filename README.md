@@ -30,17 +30,25 @@ review:
 ## Layout
 
 ```
-firmware/   Arduino sketches for the Alvik (ESP32 + micro-ROS)
-tools/      Python: planning, analysis, testbed utilities
-docs/       Design notes, baselines, results
+firmware/
+  sensor_explorer/   print every sensor reading over USB
+  home_lab/          WiFi-logged experiments: sensor stream, turn test,
+                     lap timer, stop-vs-drive-through grid test
+tools/
+  alvik_console.py   laptop console: saves robot logs to CSV, sends commands
+  summarize.py       tables and stats from saved sessions
+docs/
+  home-experiments.md  how to run the home experiments
 ```
+
+Start with [docs/home-experiments.md](docs/home-experiments.md).
 
 ## Secrets
 
 This repo is public. WiFi credentials, agent IPs and other lab details go in
 files that are git-ignored:
 
-- `firmware/**/secrets.h`: copy `firmware/secrets.example.h` and fill it in
+- `firmware/home_lab/secrets.h`: copy `secrets.example.h` in that folder and fill it in
 - `.env`: for Python tools
 
 Never commit real credentials.
