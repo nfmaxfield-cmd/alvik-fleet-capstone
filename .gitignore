@@ -1,0 +1,29 @@
+# Secrets — never commit (public repo)
+secrets.h
+.env
+*.secret
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# Arduino / build output
+build/
+*.bin
+*.elf
+
+# Run data and logs (keep large captures out of git)
+data/
+logs/
+*.log
+*.sqlite3
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
