@@ -140,9 +140,9 @@ def summarize_turn(folders):
     rows = [r for r in rows if r.get("ok", "1") != "0"]
     groups = defaultdict(list)
     for r in rows:
-        groups[(r["_session"], r["run"])].append(r)
+        groups[(r["_session"], r.get("robot", "-"), r["run"])].append(r)
     out = []
-    for (sess, run), rs in groups.items():
+    for (sess, robot, run), rs in groups.items():
         rel = [num(r["err_rel_deg"]) for r in rs]
         odo = [num(r.get("odo_dyaw_deg")) - num(r["cmd_deg"]) for r in rs]
         m_rel, sd_rel, n = mean_sd(rel)
@@ -151,9 +151,9 @@ def summarize_turn(folders):
         drift = num(rs[-1]["err_abs_deg"])
         r0 = rs[0]
         m_odo, _, _ = mean_sd(odo)
-        out.append([sess, run, r0["method"], r0["max_rpm"], r0["kp"], r0["tol_deg"], n,
+        out.append([sess, robot, run, r0["method"], r0["max_rpm"], r0["kp"], r0["tol_deg"], n,
                     fmt(m_rel, 2), fmt(sd_rel, 2), fmt(m_abs_rel, 2), fmt(m_odo, 2), fmt(t_done, 0), fmt(drift, 2)])
-    table(["session", "run", "method", "max_rpm", "kp", "tol", "n",
+    table(["session", "robot", "run", "method", "max_rpm", "kp", "tol", "n",
            "mean_err", "sd_err", "mean_|err|", "odo_err", "time_ms", "final_drift"], out)
     print("  mean_err: average signed miss per turn by the IMU (bias); sd_err: spread; odo_err: the same\n"
           "  miss judged by wheel odometry instead (a check on the IMU); final_drift: IMU heading error\n"
@@ -169,15 +169,15 @@ def summarize_lap(folders):
     print("\nLAP TEST - per run")
     groups = defaultdict(list)
     for r in rows:
-        groups[(r["_session"], r["run"])].append(r)
+        groups[(r["_session"], r.get("robot", "-"), r["run"])].append(r)
     out = []
-    for (sess, run), rs in groups.items():
+    for (sess, robot, run), rs in groups.items():
         lap, sd, n = mean_sd([num(r["lap_ms"]) for r in rs])
         err, _, _ = mean_sd([num(r["mean_abs_err"]) for r in rs])
         r0 = rs[0]
-        out.append([sess, run, r0["base_rpm"], r0["kp"], r0["kd"], n,
+        out.append([sess, robot, run, r0["base_rpm"], r0["kp"], r0["kd"], n,
                     fmt(lap / 1000, 2), fmt(sd / 1000, 2), fmt(err, 3)])
-    table(["session", "run", "base_rpm", "kp", "kd", "laps", "lap_s", "sd_s", "mean_|err|"], out)
+    table(["session", "robot", "run", "base_rpm", "kp", "kd", "laps", "lap_s", "sd_s", "mean_|err|"], out)
 
 
 def summarize_grid(folders):
@@ -189,20 +189,20 @@ def summarize_grid(folders):
     by = defaultdict(list)
     for r in rows:
         if r["result"] == "done":
-            key = (r["route"], r["base_rpm"], r["stop_ms"])
+            key = (r.get("robot", "-"), r["route"], r["base_rpm"], r["stop_ms"])
             by[key + (r["mode"],)].append(num(r["total_ms"]) / 1000)
     skipped = sum(1 for r in rows if r["result"] != "done")
     out = []
-    for (route, rpm, stop_ms, mode), vals in sorted(by.items()):
+    for (robot, route, rpm, stop_ms, mode), vals in sorted(by.items()):
         m, sd, n = mean_sd(vals)
-        out.append([route, rpm, stop_ms, "stop" if mode == "0" else "drive-through", n, fmt(m, 2), fmt(sd, 2)])
-    table(["route", "rpm", "stop_ms", "mode", "runs", "mean_s", "sd_s"], out)
+        out.append([robot, route, rpm, stop_ms, "stop" if mode == "0" else "drive-through", n, fmt(m, 2), fmt(sd, 2)])
+    table(["robot", "route", "rpm", "stop_ms", "mode", "runs", "mean_s", "sd_s"], out)
     if skipped:
         print(f"  ({skipped} unfinished runs left out)")
-    for key in sorted({k[:3] for k in by}):
-        route, rpm, stop_ms = key
+    for key in sorted({k[:4] for k in by}):
+        robot, route, rpm, stop_ms = key
         a, b = by.get(key + ("0",), []), by.get(key + ("1",), [])
-        label = f"{route} at {rpm} rpm"
+        label = f"{robot} {route} at {rpm} rpm"
         res = welch(a, b)
         if res is None:
             print(f"  {label}: need at least 2 finished runs in each mode to compare.")

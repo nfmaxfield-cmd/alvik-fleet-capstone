@@ -23,6 +23,34 @@ run three timed experiments that preview the lab's improvement ideas.
    repo folder. The first time, Windows asks to let Python through the
    firewall: allow **private networks**.
 
+## Flashing (each robot, same sketch)
+
+Every robot gets the identical `home_lab` sketch. Each one names itself from
+its WiFi hardware address (e.g. `AL-3F2A`), so there's nothing to edit per
+robot.
+
+1. Plug the robot's Nano ESP32 into the laptop by USB-C. Switch the robot's
+   power switch **ON**: the sketch talks to the motor board at startup.
+2. Arduino IDE: open `firmware/home_lab/home_lab.ino`, select **Arduino Nano
+   ESP32** and its port, then **Upload**.
+3. Open Serial Monitor (115200). Within ~15 s it prints
+   `This robot is AL-xxxx` and `joined WiFi`. **Write the name on a piece of
+   tape on the robot.**
+4. If upload fails with "no device found", double-tap the Nano's reset button
+   (its LED pulses) and upload again.
+5. If Serial Monitor says the robot firmware doesn't match the library, see
+   *Firmware mismatch* below before going further.
+
+Flashing an Arduino sketch replaces the MicroPython the Alvik ships with.
+That's expected. Arduino's MicroPython installer puts it back if you ever want
+it.
+
+**Firmware mismatch:** the motor board (STM32) runs its own firmware, and the
+library expects a matching version. Updating it uses the library's
+`bridge_firmware_updater` example plus STMicroelectronics' STM32CubeProgrammer.
+The steps are in the [Arduino_Alvik README](https://github.com/arduino-libraries/Arduino_Alvik#how-to-update-firmware-of-arduino-alvik-carrier).
+Do one robot first, and only if the warning appears.
+
 ## Step 1: sensor explorer
 
 Upload `sensor_explorer`, open Serial Monitor at 115200, and switch the robot
@@ -47,16 +75,28 @@ library's `bridge_firmware_updater` example before going on.
 
 ## Step 2: WiFi logger
 
-1. Upload `home_lab` and switch the robot on.
+1. Switch the robots on.
 2. On the laptop: `python tools/alvik_console.py`
-3. When it says `robot is talking from ...`, type `run stream`. Move the robot
-   by hand for 30 s, then type `stop` and `quit`.
-4. The console prints how many packets were dropped. Under 1% is fine. Each
-   session is saved to `logs/<date-time>/`, one CSV per record type.
+3. Each robot announces itself: `[AL-3F2A is talking from ...]`. Type
+   `robots` to list them. `use AL-3F2A`, then `identify`, flashes that robot's
+   lights white so you can match names to robots.
+4. `use all`, then `run stream`. Move a robot by hand for 30 s, then `stop`.
+5. `stats` shows packets dropped per robot. Under 1% is fine. Each session is
+   saved to `logs/<date-time>/`, one CSV per record type, with a `robot`
+   column.
 
-Console commands: `help`, `params`, `get <name>`, `set <name> <value>`,
-`route <letters>`, `run stream|turn|lap|grid`, `stop`, `status`. The console
-also accepts `stats` and `quit`. Without a laptop, the robot's buttons work:
+Commands go to the robot(s) chosen with `use` (default: all). `AL-3F2A: run
+turn` sends one command to one robot; the last 4 characters alone work too
+(`3F2A: run turn`). `stop` always stops every robot. Robot commands: `help`,
+`params`, `get <name>`, `set <name> <value>`, `route <letters>`,
+`run stream|turn|lap|grid`, `stop`, `status`, `identify`. Console-only:
+`robots`, `use`, `stats`, `quit`.
+
+**Several robots at once:** the turn test is safe to run on all of them
+together (they turn in place), and it shows how much robots differ from
+each other. The lap and grid tests have no collision avoidance, so run
+those one robot at a time. The console asks you to confirm if you try them
+on all robots. Without a laptop, each robot's buttons work:
 LEFT/RIGHT pick an experiment (left LED: blue = stream, green = turn,
 yellow = lap, purple = grid), OK starts, and CANCEL stops.
 

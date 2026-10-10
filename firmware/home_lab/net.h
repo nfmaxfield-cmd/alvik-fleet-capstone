@@ -1,7 +1,9 @@
 // WiFi logging and commands over UDP.
 //
-// Robot -> laptop (port 5005): one text line per packet, "seq|line".
-//   seq lets the laptop count dropped packets. Lines are:
+// Robot -> laptop (port 5005): one text line per packet, "name|seq|line".
+//   name is this robot's id, made from the last 4 hex digits of its WiFi MAC
+//   (e.g. AL-3F2A), so the same sketch runs on every robot unchanged.
+//   seq lets the laptop count dropped packets per robot. Lines are:
 //     H,TYPE,col,col,...   column names for a record type
 //     D,TYPE,val,val,...   one data row
 //     M,text               a message to show on screen
@@ -31,12 +33,21 @@ IPAddress laptop;
 bool haveLaptop = false;
 bool up = false;
 uint32_t seq = 0;
+char name[12] = "AL-????";
+
+// Robot id from the MAC address; valid once WiFi.mode() has been called.
+void makeName() {
+  String mac = WiFi.macAddress();   // "AA:BB:CC:DD:EE:FF"
+  if (mac.length() >= 17) {
+    snprintf(name, sizeof(name), "AL-%c%c%c%c", mac.charAt(12), mac.charAt(13), mac.charAt(15), mac.charAt(16));
+  }
+}
 
 void sendLine(const char* line) {
   if (Serial) Serial.println(line);
   if (!up) return;
   udp.beginPacket(haveLaptop ? laptop : dest, LOG_PORT);
-  udp.printf("%lu|%s", (unsigned long)seq++, line);
+  udp.printf("%s|%lu|%s", name, (unsigned long)seq++, line);
   udp.endPacket();
 }
 
@@ -52,6 +63,8 @@ void logf(const char* fmt, ...) {
 // Join WiFi. Returns false (and the lab still runs over USB) if it can't.
 bool begin(unsigned long timeout_ms = 15000) {
   WiFi.mode(WIFI_STA);
+  makeName();
+  if (Serial) Serial.printf("This robot is %s (MAC %s)\n", name, WiFi.macAddress().c_str());
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   unsigned long t0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - t0 < timeout_ms) {
@@ -67,7 +80,7 @@ bool begin(unsigned long timeout_ms = 15000) {
   WiFi.setSleep(false);   // power-save mode delays incoming commands (e.g. stop) by 100-300 ms
   udp.begin(CMD_PORT);
   up = true;
-  logf("M,joined WiFi as %s (signal %d dBm)", WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
+  logf("M,%s joined WiFi as %s (signal %d dBm)", name, WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
   return true;
 }
 
@@ -77,7 +90,7 @@ void heartbeat() {
   static unsigned long last = 0;
   if (!up || haveLaptop || millis() - last < 2000) return;
   last = millis();
-  logf("M,hello from %s (type help in the console)", WiFi.localIP().toString().c_str());
+  logf("M,hello from %s at %s (type help in the console)", name, WiFi.localIP().toString().c_str());
 }
 
 // Returns true and fills `out` when a command has arrived.

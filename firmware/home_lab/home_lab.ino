@@ -52,7 +52,7 @@ void showSelection(bool running) {
 }
 
 void printHelp() {
-  net::sendLine("M,commands: run stream|turn|lap|grid  stop  set <name> <value>  get <name>  params  route <SLRE...>  status  help");
+  net::sendLine("M,commands: run stream|turn|lap|grid  stop  set <name> <value>  get <name>  params  route <SLRE...>  status  identify  help");
 }
 
 void printParams() {
@@ -85,9 +85,19 @@ bool handleCommand(const String& raw, bool running) {
     return true;
   }
   if (verb == "help") { printHelp(); return false; }
+  if (verb == "identify") {
+    // Flash both LEDs white so you can tell which physical robot this is.
+    for (int i = 0; i < 6; i++) {
+      alvik.left_led.set_color(1, 1, 1); alvik.right_led.set_color(1, 1, 1); delay(250);
+      alvik.left_led.set_color(0, 0, 0); alvik.right_led.set_color(0, 0, 0); delay(250);
+    }
+    showSelection(running);
+    net::logf("M,%s: that was me", net::name);
+    return false;
+  }
   if (verb == "params") { printParams(); return false; }
   if (verb == "ping" || verb == "status") {
-    net::logf("M,status: %s, selected %s, battery %d%%, WiFi %d dBm",
+    net::logf("M,status %s: %s, selected %s, battery %d%%, WiFi %d dBm", net::name,
               running ? "running" : "idle", EXP_NAMES[gSelected],
               alvik.get_battery_charge(), (int)WiFi.RSSI());
     return false;
