@@ -77,8 +77,8 @@ the AL-xxxx name.
 - **Right:** no routine yet.
 
 Give each robot at least a metre of clear floor. Center's circle swings 40 cm
-to its left, and Left's right turn heads toward whatever is on its right, so
-place them with Left on the right-hand side, or run them one at a time. Put a
+to its left, and Left turns right, so keep Left's right side and Center's
+left side clear of each other, or run them one at a time. Put a
 piece of tape at each start point. Afterwards, measure how far each robot
 stopped from its mark: the robot's own report is wheel odometry and can't see
 slip. Distances and the circle size are settings (`demo_a_cm`, `demo_b_cm`,
