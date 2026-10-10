@@ -222,3 +222,82 @@ void runGrid() {
             gRunId.c_str(), mode, route.c_str(), result.c_str(), millis() - t0, node, turns,
             base, P("grid_stop_ms"), alvik.get_battery_charge());
 }
+
+// ===================================================================
+// DEMO: open-floor routines, no tape. Which routine runs depends on the
+// robot's saved name (set once from the console: `name Left`).
+//   Left:   forward A, turn right, forward B, then retrace in reverse:
+//           back B, turn back left, back A. Ends where it started,
+//           facing the same way.
+//   Center: forward A, one full circle of radius R, back A.
+//   Right:  no routine yet.
+// Odometry is zeroed at the start, so the final pose is the return error.
+// ===================================================================
+void demoLog(const char* step) {
+  float x, y, th;
+  alvik.get_pose(x, y, th);
+  net::logf("D,DEMO_STEP,%s,%s,%s,%.1f,%.1f,%.1f,%lu", gRunId.c_str(), net::name, step, x, y, th, millis());
+}
+
+// One full circle (left), stopping when the IMU says 360 deg have passed.
+bool driveCircle(float radiusCm, float speedCms) {
+  float wDeg = speedCms / radiusCm * 57.2958f;
+  float prev = heading(), turned = 0;
+  unsigned long t0 = millis();
+  unsigned long limit = (unsigned long)(360.0f / wDeg * 1000.0f * 2.0f) + 3000;
+  alvik.drive(speedCms, wDeg);
+  while (fabsf(turned) < 360.0f - P("demo_circle_lead_deg")) {
+    if (shouldAbort()) return false;
+    if (millis() - t0 > limit) { alvik.brake(); gAbortReason = "circle timed out"; return false; }
+    float h = heading();
+    turned += wrap180(h - prev);
+    prev = h;
+    delay(5);
+  }
+  alvik.brake();
+  return true;
+}
+
+void runDemo() {
+  String who = String(net::name);
+  bool left = who.equalsIgnoreCase("Left"), center = who.equalsIgnoreCase("Center");
+  if (!left && !center) {
+    net::logf("M,%s has no demo routine (only Left and Center do). Set a name with: name Left", net::name);
+    return;
+  }
+  if (!calibrateYawSign()) return;
+  net::sendLine("H,DEMO_STEP,run,robot,step,x_cm,y_cm,theta_deg,ms");
+  net::sendLine("H,DEMO_END,run,robot,result,return_err_cm,heading_err_deg,total_ms,a_cm,b_cm,r_cm,battery");
+  alvik.reset_pose(0, 0, 0);
+  float start = heading();
+  float a = P("demo_a_cm"), b = P("demo_b_cm"), r = P("demo_r_cm");
+  unsigned long t0 = millis();
+  bool ok = true;
+  demoLog("start");
+
+  if (left) {
+    ok = ok && libraryMove(a);                         if (ok) demoLog("forward_a");
+    ok = ok && imuTurnTo(wrap180(start - 90)).ok;      if (ok) demoLog("turn_right");
+    ok = ok && libraryMove(b);                         if (ok) demoLog("forward_b");
+    ok = ok && waitMs(500);
+    ok = ok && libraryMove(-b);                        if (ok) demoLog("back_b");
+    ok = ok && imuTurnTo(start).ok;                    if (ok) demoLog("turn_back_left");
+    ok = ok && libraryMove(-a);                        if (ok) demoLog("back_a");
+  } else {
+    ok = ok && libraryMove(a);                         if (ok) demoLog("forward_a");
+    ok = ok && driveCircle(r, P("demo_speed_cms"));    if (ok) demoLog("circle");
+    ok = ok && imuTurnTo(start).ok;                    if (ok) demoLog("square_up");
+    ok = ok && libraryMove(-a);                        if (ok) demoLog("back_a");
+  }
+  alvik.brake();
+
+  float x, y, th;
+  alvik.get_pose(x, y, th);
+  float err = sqrtf(x * x + y * y);
+  float headErr = wrap180(heading() - start);
+  String result = ok ? String("done") : String("aborted:") + gAbortReason;
+  net::logf("D,DEMO_END,%s,%s,%s,%.1f,%.1f,%lu,%.0f,%.0f,%.0f,%d", gRunId.c_str(), net::name, result.c_str(),
+            err, headErr, millis() - t0, a, b, r, alvik.get_battery_charge());
+  net::logf("M,%s demo %s: back within %.1f cm of start (wheel odometry), heading off by %.1f deg. Measure with a ruler too.",
+            net::name, ok ? "finished" : "stopped", err, headErr);
+}

@@ -29,7 +29,7 @@ import threading
 
 LOG_PORT = 5005   # robot -> laptop
 CMD_PORT = 5006   # laptop -> robot
-MOVING = ("run lap", "run grid")   # experiments where robots drive around
+MOVING = ("run lap", "run grid", "run demo")   # experiments where robots drive around
 
 
 class Session:
@@ -72,6 +72,11 @@ class Session:
         new = False
         with self.lock:
             r = self.robots.get(name)
+            if r is None:
+                # A renamed robot (e.g. AL-3F2A -> Left) keeps its address: drop the old name.
+                for old in [n for n, v in self.robots.items() if v["ip"] == ip and n != name]:
+                    print(f"[{old} is now {name}]")
+                    del self.robots[old]
             if r is None or r["ip"] != ip:
                 r = self.robots.setdefault(name, dict(ip=ip, last_seq=None, received=0, dropped=0))
                 r["ip"] = ip

@@ -24,8 +24,8 @@
 
 Arduino_Alvik alvik;
 
-const char* EXP_NAMES[] = {"stream", "turn", "lap", "grid"};
-const int N_EXP = 4;
+const char* EXP_NAMES[] = {"stream", "turn", "lap", "grid", "demo"};
+const int N_EXP = 5;
 int gSelected = 1;
 int gPending = -1;   // experiment requested by the laptop, started from loop()
 
@@ -45,6 +45,7 @@ void showSelection(bool running) {
     case 1: g = 1; break;              // turn: green
     case 2: r = 1; g = 1; break;       // lap: yellow
     case 3: r = 1; b = 1; break;       // grid: purple
+    case 4: r = 1; g = 1; b = 1; break; // demo: white
   }
   alvik.left_led.set_color(r, g, b);
   if (running) alvik.right_led.set_color(r, g, b);
@@ -52,7 +53,7 @@ void showSelection(bool running) {
 }
 
 void printHelp() {
-  net::sendLine("M,commands: run stream|turn|lap|grid  stop  set <name> <value>  get <name>  params  route <SLRE...>  status  identify  help");
+  net::sendLine("M,commands: run stream|turn|lap|grid|demo  stop  name <Left|Center|Right>  set <name> <value>  get <name>  params  route <SLRE...>  status  identify  help");
 }
 
 void printParams() {
@@ -85,6 +86,18 @@ bool handleCommand(const String& raw, bool running) {
     return true;
   }
   if (verb == "help") { printHelp(); return false; }
+  if (verb == "name") {
+    if (running) { net::sendLine("M,busy: send stop first"); return false; }
+    if (rest.length() > 10) { net::sendLine("M,names can be at most 10 characters"); return false; }
+    for (unsigned i = 0; i < rest.length(); i++) {
+      char c = rest.charAt(i);
+      if (!isalnum((unsigned char)c) && c != '-' && c != '_') { net::sendLine("M,names use letters, digits, - and _ only"); return false; }
+    }
+    String old = String(net::name);
+    net::saveName(rest);   // empty name = back to the MAC-based one
+    net::logf("M,%s is now called %s (kept after power-off)", old.c_str(), net::name);
+    return false;
+  }
   if (verb == "identify") {
     // Flash both LEDs white so you can tell which physical robot this is.
     for (int i = 0; i < 6; i++) {
@@ -139,7 +152,7 @@ bool handleCommand(const String& raw, bool running) {
   if (verb == "run") {
     if (running) { net::sendLine("M,busy: send stop first"); return false; }
     int i = expIndex(rest);
-    if (i < 0) { net::sendLine("M,run what? stream, turn, lap or grid"); return false; }
+    if (i < 0) { net::sendLine("M,run what? stream, turn, lap, grid or demo"); return false; }
     gSelected = i;
     gPending = i;
     return false;
@@ -164,6 +177,7 @@ void runExperiment(int i) {
     case 1: runTurn(); break;
     case 2: runLap(); break;
     case 3: runGrid(); break;
+    case 4: runDemo(); break;
   }
   alvik.brake();
   if (gAbortReason.length()) net::logf("M,run %s: stopped (%s)", gRunId.c_str(), gAbortReason.c_str());

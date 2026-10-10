@@ -51,6 +51,39 @@ library expects a matching version. Updating it uses the library's
 The steps are in the [Arduino_Alvik README](https://github.com/arduino-libraries/Arduino_Alvik#how-to-update-firmware-of-arduino-alvik-carrier).
 Do one robot first, and only if the warning appears.
 
+## Naming the robots: Left, Center, Right
+
+In the console, point at each robot and give it its name once. It's saved
+on the robot and survives power-off:
+
+```
+use AL-3F2A
+identify          (that robot's lights flash white)
+name Left
+```
+
+Repeat for `Center` and `Right`. `name` with nothing after it goes back to
+the AL-xxxx name.
+
+## Demo routines (open floor, no tape)
+
+`run demo` runs a routine that depends on the robot's name:
+
+- **Left:** forward 30 cm, turn right, forward 30 cm, then retraces in
+  reverse (back 30, turn back left, back 30). It should end where it started,
+  facing the same way.
+- **Center:** forward 30 cm, one full circle of radius 20 cm, then back 30 cm
+  to where it started.
+- **Right:** no routine yet.
+
+Give each robot at least a metre of clear floor. Center's circle swings 40 cm
+to its left, and Left's right turn heads toward whatever is on its right, so
+place them with Left on the right-hand side, or run them one at a time. Put a
+piece of tape at each start point. Afterwards, measure how far each robot
+stopped from its mark: the robot's own report is wheel odometry and can't see
+slip. Distances and the circle size are settings (`demo_a_cm`, `demo_b_cm`,
+`demo_r_cm`, `demo_speed_cms`).
+
 ## Step 1: sensor explorer
 
 Upload `sensor_explorer`, open Serial Monitor at 115200, and switch the robot

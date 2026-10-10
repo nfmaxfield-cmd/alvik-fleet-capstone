@@ -159,6 +159,25 @@ TurnResult libraryTurn(float delta) {
   return {true, millis() - t0, overhead};
 }
 
+// Drive straight `cm` (negative = backward) with the library's closed-loop
+// move(). Non-blocking for the same reason as libraryTurn: the blocking
+// version never returns for moves of about -50 cm or more.
+bool libraryMove(float cm) {
+  unsigned long t0 = millis();
+  unsigned long limit = 3000 + (unsigned long)(fabsf(cm) * 400);   // generous: ~2.5 cm/s minimum
+  alvik.move(cm, CM, false);
+  while (!alvik.is_target_reached()) {
+    if (shouldAbort()) return false;
+    if (millis() - t0 > limit) {
+      alvik.brake();
+      gAbortReason = "move timed out";
+      return false;
+    }
+    delay(10);
+  }
+  return true;
+}
+
 // ---------- line following ----------
 
 struct LineState {

@@ -16,6 +16,7 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <stdarg.h>
+#include <Preferences.h>
 #include "secrets.h"
 
 #ifndef LOG_PORT
@@ -35,12 +36,31 @@ bool up = false;
 uint32_t seq = 0;
 char name[12] = "AL-????";
 
-// Robot id from the MAC address; valid once WiFi.mode() has been called.
+// Robot id: a saved name (e.g. "Left", set once with the console's
+// `name` command and kept in flash across reboots), otherwise one made
+// from the MAC address. Valid once WiFi.mode() has been called.
 void makeName() {
+  Preferences prefs;
+  prefs.begin("homelab", true);
+  String saved = prefs.getString("name", "");
+  prefs.end();
+  if (saved.length()) {
+    snprintf(name, sizeof(name), "%s", saved.c_str());
+    return;
+  }
   String mac = WiFi.macAddress();   // "AA:BB:CC:DD:EE:FF"
   if (mac.length() >= 17) {
     snprintf(name, sizeof(name), "AL-%c%c%c%c", mac.charAt(12), mac.charAt(13), mac.charAt(15), mac.charAt(16));
   }
+}
+
+// Save a new name ("" clears it back to the MAC-based one). Max 10 chars.
+void saveName(const String& n) {
+  Preferences prefs;
+  prefs.begin("homelab", false);
+  prefs.putString("name", n);
+  prefs.end();
+  makeName();
 }
 
 void sendLine(const char* line) {

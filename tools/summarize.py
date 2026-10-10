@@ -27,7 +27,7 @@ def read_rows(folders, prefix):
             base = os.path.basename(path)
             if not (base == f"{prefix}.csv" or base.startswith(f"{prefix}_")):
                 continue
-            if prefix == "grid" and not base.startswith("grid_"):
+            if prefix in ("grid", "demo") and not base.startswith(prefix + "_"):
                 continue
             with open(path, newline="") as f:
                 for r in csv.DictReader(f):
@@ -215,6 +215,17 @@ def summarize_grid(folders):
           "  equal spread; an interval that stays above 0 means the saving is unlikely to be luck.")
 
 
+def summarize_demo(folders):
+    rows = [r for r in read_rows(folders, "demo") if "return_err_cm" in r]
+    if not rows:
+        return
+    print("\nDEMO ROUTINES - how close each robot got back to its start (wheel odometry)")
+    out = [[r["_session"], r["robot"], r["run"], r["result"], r["return_err_cm"], r["heading_err_deg"],
+            fmt(num(r["total_ms"]) / 1000, 1)] for r in rows]
+    table(["session", "robot", "run", "result", "return_err_cm", "heading_err_deg", "time_s"], out)
+    print("  Odometry can't see wheel slip; measure the real offset from a tape mark with a ruler too.")
+
+
 def main():
     folders = [f for a in sys.argv[1:] for f in glob.glob(a) if os.path.isdir(f)]
     if not folders:
@@ -226,6 +237,7 @@ def main():
     summarize_turn(folders)
     summarize_lap(folders)
     summarize_grid(folders)
+    summarize_demo(folders)
     return 0
 
 

@@ -52,6 +52,13 @@ Param PARAMS[] = {
   {"grid_ignore_cm",   5,   "after a node, ignore crossings for this distance"},
   {"grid_cross_samples", 2, "consecutive all-dark readings to count a crossing"},
 
+  // --- demo routines (open floor, no tape) ---
+  {"demo_a_cm",       30,   "first straight leg, cm"},
+  {"demo_b_cm",       30,   "Left: leg after the right turn, cm"},
+  {"demo_r_cm",       20,   "Center: circle radius, cm"},
+  {"demo_speed_cms",   8,   "Center: speed around the circle, cm/s (max about 12)"},
+  {"demo_circle_lead_deg", 3, "Center: stop the circle this many degrees early (it coasts)"},
+
   // --- sensor stream ---
   {"stream_hz",       20,   "sensor stream rate"},
 
