@@ -52,7 +52,14 @@ Param PARAMS[] = {
   {"grid_ignore_cm",   5,   "after a node, ignore crossings for this distance"},
   {"grid_cross_samples", 2, "consecutive all-dark readings to count a crossing"},
 
+  // --- straight-line test (E2) ---
+  {"straight_cm",     60,   "straight test: distance to drive, cm"},
+  {"straight_rpm",     0,   "straight test: 0 = library move(), otherwise both wheels at this rpm"},
+
   // --- demo routines (open floor, no tape) ---
+  {"demo_route",       0,   "0 = by robot name, 1 = L route (Left's), 2 = circle (Center's), 3 = square"},
+  {"square_cm",       50,   "square route: side length, cm"},
+  {"square_laps",      1,   "square route: laps (left turns, ends where it started)"},
   {"demo_a_cm",       30,   "first straight leg, cm"},
   {"demo_b_cm",       30,   "Left: leg after the right turn, cm"},
   {"demo_r_cm",       20,   "Center: circle radius, cm"},

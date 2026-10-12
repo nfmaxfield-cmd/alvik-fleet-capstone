@@ -1,4 +1,4 @@
-// The four experiments. Each one logs H (header) and D (data) lines that the
+// The experiments. Each one logs H (header) and D (data) lines that the
 // laptop console saves to CSV, one file per record type.
 #pragma once
 
@@ -225,7 +225,9 @@ void runGrid() {
 
 // ===================================================================
 // DEMO: open-floor routines, no tape. Which routine runs depends on the
-// robot's saved name (set once from the console: `name Left`).
+// robot's saved name (set once from the console: `name Left`), unless
+// demo_route picks one: 1 = the L route, 2 = the circle, 3 = a square
+// (square_cm sides, square_laps laps, left turns), on any robot.
 //   Left:   forward A, turn right, forward B, then retrace in reverse:
 //           back B, turn back left, back A. Ends where it started,
 //           facing the same way.
@@ -260,14 +262,17 @@ bool driveCircle(float radiusCm, float speedCms) {
 
 void runDemo() {
   String who = String(net::name);
-  bool left = who.equalsIgnoreCase("Left"), center = who.equalsIgnoreCase("Center");
-  if (!left && !center) {
-    net::logf("M,%s has no demo routine (only Left and Center do). Set a name with: name Left", net::name);
+  int route = (int)P("demo_route");
+  bool left = route == 1 || (route == 0 && who.equalsIgnoreCase("Left"));
+  bool center = route == 2 || (route == 0 && who.equalsIgnoreCase("Center"));
+  bool square = route == 3;
+  if (!left && !center && !square) {
+    net::logf("M,%s has no demo routine of its own. Pick one with: set demo_route 1 (L), 2 (circle) or 3 (square)", net::name);
     return;
   }
   if (!calibrateYawSign()) return;
   net::sendLine("H,DEMO_STEP,run,robot,step,x_cm,y_cm,theta_deg,ms");
-  net::sendLine("H,DEMO_END,run,robot,result,return_err_cm,heading_err_deg,total_ms,a_cm,b_cm,r_cm,battery");
+  net::sendLine("H,DEMO_END,run,robot,route,result,return_err_cm,heading_err_deg,total_ms,a_cm,b_cm,r_cm,battery");
   alvik.reset_pose(0, 0, 0);
   float start = heading();
   float a = P("demo_a_cm"), b = P("demo_b_cm"), r = P("demo_r_cm");
@@ -275,7 +280,16 @@ void runDemo() {
   bool ok = true;
   demoLog("start");
 
-  if (left) {
+  if (square) {
+    float side = P("square_cm");
+    int laps = (int)P("square_laps");
+    if (laps < 1) laps = 1;
+    a = side; b = laps; r = 0;   // logged in DEMO_END's a_cm / b_cm columns: side and laps
+    for (int k = 1; ok && k <= 4 * laps; k++) {
+      ok = ok && libraryMove(side);                    if (ok) demoLog("side");
+      ok = ok && imuTurnTo(wrap180(start + 90.0f * k)).ok; if (ok) demoLog("turn_left");
+    }
+  } else if (left) {
     ok = ok && libraryMove(a);                         if (ok) demoLog("forward_a");
     ok = ok && imuTurnTo(wrap180(start - 90)).ok;      if (ok) demoLog("turn_right");
     ok = ok && libraryMove(b);                         if (ok) demoLog("forward_b");
@@ -296,8 +310,35 @@ void runDemo() {
   float err = sqrtf(x * x + y * y);
   float headErr = wrap180(heading() - start);
   String result = ok ? String("done") : String("aborted:") + gAbortReason;
-  net::logf("D,DEMO_END,%s,%s,%s,%.1f,%.1f,%lu,%.0f,%.0f,%.0f,%d", gRunId.c_str(), net::name, result.c_str(),
+  net::logf("D,DEMO_END,%s,%s,%s,%s,%.1f,%.1f,%lu,%.0f,%.0f,%.0f,%d", gRunId.c_str(), net::name,
+            square ? "square" : (left ? "L" : "circle"), result.c_str(),
             err, headErr, millis() - t0, a, b, r, alvik.get_battery_charge());
   net::logf("M,%s demo %s: back within %.1f cm of start (wheel odometry), heading off by %.1f deg. Measure with a ruler too.",
             net::name, ok ? "finished" : "stopped", err, headErr);
+}
+
+// ===================================================================
+// STRAIGHT (experiment E2): drive straight_cm with the library's move()
+// and log where odometry and the IMU think the robot ended up. The true
+// end point is measured on the floor with the tape rig; this record is
+// the comparison. x is along the commanded line, y to the left.
+// ===================================================================
+void runStraight() {
+  if (!calibrateYawSign()) return;
+  net::sendLine("H,STRAIGHT,run,robot,result,cmd_cm,rpm,odo_x_cm,odo_y_cm,odo_theta_deg,imu_dyaw_deg,total_ms,battery");
+  float d = P("straight_cm"), rpm = P("straight_rpm");
+  alvik.reset_pose(0, 0, 0);
+  float start = heading();
+  unsigned long t0 = millis();
+  bool ok = rpm > 0 ? rollStraight(d, rpm) : libraryMove(d);   // rpm 0 = library's own speed control
+  alvik.brake();
+  ok = ok && waitMs((unsigned long)P("settle_ms"));
+  float x, y, th;
+  alvik.get_pose(x, y, th);
+  float dyaw = wrap180(heading() - start);
+  String result = ok ? String("done") : String("aborted:") + gAbortReason;
+  net::logf("D,STRAIGHT,%s,%s,%s,%.0f,%.0f,%.2f,%.2f,%.2f,%.2f,%lu,%d", gRunId.c_str(), net::name, result.c_str(),
+            d, rpm, x, y, th, dyaw, millis() - t0, alvik.get_battery_charge());
+  net::logf("M,run %s: odometry says %.1f cm along, %.1f cm sideways. Now mark and measure the real end point.",
+            gRunId.c_str(), x, y);
 }

@@ -1,0 +1,17 @@
+order,robot,level,commands,run_id,target_x_cm,target_y_cm,target_heading_deg,xf_cm,yf_cm,xr_cm,yr_cm,battery_pct,excluded,note
+1,Left,50rpm-high,set straight_cm 60 / set straight_rpm 50 / run straight,,60,0,0,,,,,,,battery above 80%
+2,Left,20rpm-high,set straight_cm 60 / set straight_rpm 20 / run straight,,60,0,0,,,,,,,battery above 80%
+3,Left,50rpm-high,set straight_cm 60 / set straight_rpm 50 / run straight,,60,0,0,,,,,,,battery above 80%
+4,Left,20rpm-high,set straight_cm 60 / set straight_rpm 20 / run straight,,60,0,0,,,,,,,battery above 80%
+5,Left,50rpm-high,set straight_cm 60 / set straight_rpm 50 / run straight,,60,0,0,,,,,,,battery above 80%
+6,Left,50rpm-high,set straight_cm 60 / set straight_rpm 50 / run straight,,60,0,0,,,,,,,battery above 80%
+7,Left,20rpm-high,set straight_cm 60 / set straight_rpm 20 / run straight,,60,0,0,,,,,,,battery above 80%
+8,Left,20rpm-high,set straight_cm 60 / set straight_rpm 20 / run straight,,60,0,0,,,,,,,battery above 80%
+9,Left,50rpm-low,set straight_cm 60 / set straight_rpm 50 / run straight,,60,0,0,,,,,,,battery below 30%
+10,Left,20rpm-low,set straight_cm 60 / set straight_rpm 20 / run straight,,60,0,0,,,,,,,battery below 30%
+11,Left,50rpm-low,set straight_cm 60 / set straight_rpm 50 / run straight,,60,0,0,,,,,,,battery below 30%
+12,Left,20rpm-low,set straight_cm 60 / set straight_rpm 20 / run straight,,60,0,0,,,,,,,battery below 30%
+13,Left,20rpm-low,set straight_cm 60 / set straight_rpm 20 / run straight,,60,0,0,,,,,,,battery below 30%
+14,Left,50rpm-low,set straight_cm 60 / set straight_rpm 50 / run straight,,60,0,0,,,,,,,battery below 30%
+15,Left,50rpm-low,set straight_cm 60 / set straight_rpm 50 / run straight,,60,0,0,,,,,,,battery below 30%
+16,Left,20rpm-low,set straight_cm 60 / set straight_rpm 20 / run straight,,60,0,0,,,,,,,battery below 30%

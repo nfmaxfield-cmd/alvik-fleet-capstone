@@ -29,7 +29,7 @@ import threading
 
 LOG_PORT = 5005   # robot -> laptop
 CMD_PORT = 5006   # laptop -> robot
-MOVING = ("run lap", "run grid", "run demo")   # experiments where robots drive around
+MOVING = ("run lap", "run grid", "run demo", "run straight")   # experiments where robots drive around
 
 
 class Session:

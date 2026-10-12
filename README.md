@@ -17,9 +17,13 @@ his repos carry no license.
 
 ## Goal
 
-Pick one measurable area of improvement, establish a baseline on the real
-testbed, then build and measure the change. Candidate areas, from the onboarding
-review:
+How much does adding sensors improve an Alvik's locational accuracy? A series
+of weekly experiments (E1-E8) measures the robot on odometry alone, the
+overhead AprilTag camera, and the two combined, against the proposal target of
+under 5 cm. The running record is
+[docs/experiments/INDEX.md](docs/experiments/INDEX.md).
+
+Earlier candidate areas, from the onboarding review:
 
 1. Drive through straight grid nodes instead of stopping at each one
 2. Faster, confirmed in-place turns
@@ -33,12 +37,15 @@ review:
 firmware/
   sensor_explorer/   print every sensor reading over USB
   home_lab/          WiFi-logged experiments: sensor stream, turn test,
-                     lap timer, stop-vs-drive-through grid test
+                     lap timer, grid test, demo routes, straight-line test
 tools/
   alvik_console.py   laptop console: saves robot logs to CSV, sends commands
   summarize.py       tables and stats from saved sessions
+  make_run_order.py  shuffled run order + tape measurement sheet per experiment
+  tape_results.py    tape measurements -> errors, stats, chart for a record
 docs/
   home-experiments.md  how to run the home experiments
+  experiments/         one record per experiment (E0-E8), index, template
 ```
 
 Start with [docs/home-experiments.md](docs/home-experiments.md).

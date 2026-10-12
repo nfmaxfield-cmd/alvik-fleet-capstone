@@ -2,7 +2,8 @@
   home_lab — WiFi-logged experiments for one Alvik at home.
 
   Experiments:  stream (sensor log), turn (turn accuracy/time),
-                lap (line-following lap timer), grid (stop vs drive-through)
+                lap (line-following lap timer), grid (stop vs drive-through),
+                demo (open-floor routes), straight (straight-line accuracy)
 
   Setup:
     1. Copy secrets.example.h to secrets.h in this folder and add your WiFi.
@@ -11,7 +12,8 @@
 
   Without the laptop, use the buttons:
     LEFT / RIGHT  choose an experiment (left LED color shows which)
-                  blue = stream, green = turn, yellow = lap, purple = grid
+                  blue = stream, green = turn, yellow = lap, purple = grid,
+                  white = demo, cyan = straight
     OK            start it        CANCEL  stop it
   Results are logged over WiFi either way (and to Serial if USB is plugged in).
 */
@@ -24,8 +26,8 @@
 
 Arduino_Alvik alvik;
 
-const char* EXP_NAMES[] = {"stream", "turn", "lap", "grid", "demo"};
-const int N_EXP = 5;
+const char* EXP_NAMES[] = {"stream", "turn", "lap", "grid", "demo", "straight"};
+const int N_EXP = 6;
 int gSelected = 1;
 int gPending = -1;   // experiment requested by the laptop, started from loop()
 
@@ -46,6 +48,7 @@ void showSelection(bool running) {
     case 2: r = 1; g = 1; break;       // lap: yellow
     case 3: r = 1; b = 1; break;       // grid: purple
     case 4: r = 1; g = 1; b = 1; break; // demo: white
+    case 5: g = 1; b = 1; break;       // straight: cyan
   }
   alvik.left_led.set_color(r, g, b);
   if (running) alvik.right_led.set_color(r, g, b);
@@ -53,7 +56,7 @@ void showSelection(bool running) {
 }
 
 void printHelp() {
-  net::sendLine("M,commands: run stream|turn|lap|grid|demo  stop  name <Left|Center|Right>  set <name> <value>  get <name>  params  route <SLRE...>  status  identify  help");
+  net::sendLine("M,commands: run stream|turn|lap|grid|demo|straight  stop  calibrate  name <Left|Center|Right>  set <name> <value>  get <name>  params  route <SLRE...>  status  identify  help");
 }
 
 void printParams() {
@@ -109,6 +112,11 @@ bool handleCommand(const String& raw, bool running) {
     return false;
   }
   if (verb == "params") { printParams(); return false; }
+  if (verb == "calibrate") {
+    if (running) { net::sendLine("M,busy: send stop first"); return false; }
+    if (calibrateYawSign(true)) net::sendLine("M,calibrated: now place the robot on its start mark");
+    return false;
+  }
   if (verb == "ping" || verb == "status") {
     net::logf("M,status %s: %s, selected %s, battery %d%%, WiFi %d dBm", net::name,
               running ? "running" : "idle", EXP_NAMES[gSelected],
@@ -152,7 +160,7 @@ bool handleCommand(const String& raw, bool running) {
   if (verb == "run") {
     if (running) { net::sendLine("M,busy: send stop first"); return false; }
     int i = expIndex(rest);
-    if (i < 0) { net::sendLine("M,run what? stream, turn, lap, grid or demo"); return false; }
+    if (i < 0) { net::sendLine("M,run what? stream, turn, lap, grid, demo or straight"); return false; }
     gSelected = i;
     gPending = i;
     return false;
@@ -178,6 +186,7 @@ void runExperiment(int i) {
     case 2: runLap(); break;
     case 3: runGrid(); break;
     case 4: runDemo(); break;
+    case 5: runStraight(); break;
   }
   alvik.brake();
   if (gAbortReason.length()) net::logf("M,run %s: stopped (%s)", gRunId.c_str(), gAbortReason.c_str());

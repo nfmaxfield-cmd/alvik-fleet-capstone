@@ -16,8 +16,9 @@ build/
 *.bin
 *.elf
 
-# Run data and logs (keep large captures out of git)
-data/
+# Run data and logs (keep large captures out of git).
+# Experiment records keep their data in docs/experiments/*/data, which IS committed.
+/data/
 logs/
 *.log
 *.sqlite3

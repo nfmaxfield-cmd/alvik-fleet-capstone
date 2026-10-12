@@ -1,0 +1,13 @@
+order,robot,level,commands,run_id,target_x_cm,target_y_cm,target_heading_deg,xf_cm,yf_cm,xr_cm,yr_cm,battery_pct,excluded,note
+1,Left,3laps,set demo_route 3 / set square_cm 50 / set square_laps 3 / run demo,,0,0,0,,,,,,,
+2,Left,3laps,set demo_route 3 / set square_cm 50 / set square_laps 3 / run demo,,0,0,0,,,,,,,
+3,Left,3laps,set demo_route 3 / set square_cm 50 / set square_laps 3 / run demo,,0,0,0,,,,,,,
+4,Left,1lap,set demo_route 3 / set square_cm 50 / set square_laps 1 / run demo,,0,0,0,,,,,,,
+5,Left,3laps,set demo_route 3 / set square_cm 50 / set square_laps 3 / run demo,,0,0,0,,,,,,,
+6,Left,1lap,set demo_route 3 / set square_cm 50 / set square_laps 1 / run demo,,0,0,0,,,,,,,
+7,Left,1lap,set demo_route 3 / set square_cm 50 / set square_laps 1 / run demo,,0,0,0,,,,,,,
+8,Left,1lap,set demo_route 3 / set square_cm 50 / set square_laps 1 / run demo,,0,0,0,,,,,,,
+9,Left,1lap,set demo_route 3 / set square_cm 50 / set square_laps 1 / run demo,,0,0,0,,,,,,,
+10,Left,3laps,set demo_route 3 / set square_cm 50 / set square_laps 3 / run demo,,0,0,0,,,,,,,
+11,Left,3laps,set demo_route 3 / set square_cm 50 / set square_laps 3 / run demo,,0,0,0,,,,,,,
+12,Left,1lap,set demo_route 3 / set square_cm 50 / set square_laps 1 / run demo,,0,0,0,,,,,,,

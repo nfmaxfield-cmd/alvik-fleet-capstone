@@ -76,7 +76,11 @@ float rawOdo() {
 }
 float odoHeading() { return wrap180(gOdoSign * rawOdo()); }
 
-bool calibrateYawSign() {
+// The sign check moves the robot (a timed wiggle whose undo is not exact),
+// so it runs once per power-on. For tape-measured experiments, send
+// `calibrate` first, THEN place the robot on its start mark.
+bool calibrateYawSign(bool force = false) {
+  if (gYawSign != 0 && !force) return true;
   net::sendLine("M,checking compass direction: small wiggle left and back");
   float y0 = rawYaw(), o0 = rawOdo();
   alvik.set_wheels_speed(-20, 20);  // left wheel back, right forward = turn left
@@ -251,7 +255,7 @@ bool rollStraight(float cm, float rpm) {
   alvik.set_wheels_speed(rpm, rpm);
   while (distFrom(x0, y0) < cm) {
     if (shouldAbort()) return false;
-    if (millis() - t0 > 5000) {
+    if (millis() - t0 > 3000 + (unsigned long)(cm * 600)) {   // ~1.7 cm/s minimum
       alvik.brake();
       gAbortReason = "wheels did not cover the roll distance (stalled?)";
       return false;

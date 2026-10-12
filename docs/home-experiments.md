@@ -76,6 +76,19 @@ the AL-xxxx name.
   to where it started.
 - **Right:** no routine yet.
 
+`set demo_route 1` (L), `2` (circle) or `3` (square, `square_cm` sides,
+`square_laps` laps) runs that route on any robot; `0` goes back to choosing
+by name. `run straight` drives `straight_cm` straight, with the library's
+speed control (`straight_rpm 0`) or both wheels at a set rpm.
+
+**Before any run you'll measure with a tape:** send `calibrate` first. Each
+power-on, the robot wiggles once to check its compass direction, and that
+wiggle doesn't end exactly where it started. After `calibrate`, place the
+robot on its mark; later runs skip the wiggle.
+
+The measured experiments (E0, E1, ...) are set up in
+[experiments/INDEX.md](experiments/INDEX.md).
+
 Give each robot at least a metre of clear floor. Center's circle swings 40 cm
 to its left, and Left turns right, so keep Left's right side and Center's
 left side clear of each other, or run them one at a time. Put a
@@ -122,7 +135,8 @@ Commands go to the robot(s) chosen with `use` (default: all). `AL-3F2A: run
 turn` sends one command to one robot; the last 4 characters alone work too
 (`3F2A: run turn`). `stop` always stops every robot. Robot commands: `help`,
 `params`, `get <name>`, `set <name> <value>`, `route <letters>`,
-`run stream|turn|lap|grid`, `stop`, `status`, `identify`. Console-only:
+`run stream|turn|lap|grid|demo|straight`, `stop`, `status`, `identify`,
+`calibrate`, `name <Left|Center|Right>`. Console-only:
 `robots`, `use`, `stats`, `quit`.
 
 **Several robots at once:** the turn test is safe to run on all of them
