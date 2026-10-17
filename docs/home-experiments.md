@@ -51,6 +51,24 @@ library expects a matching version. Updating it uses the library's
 The steps are in the [Arduino_Alvik README](https://github.com/arduino-libraries/Arduino_Alvik#how-to-update-firmware-of-arduino-alvik-carrier).
 Do one robot first, and only if the warning appears.
 
+## Updating firmware over WiFi (no cable)
+
+Once each robot has been flashed by USB with firmware 2026-10-17c or later,
+later updates can go over WiFi:
+
+1. In `firmware/home_lab/secrets.h`, add a line with a password only you know:
+   `#define OTA_PASSWORD "choose-a-password"`, then flash each robot by USB
+   one last time. Serial Monitor shows `WiFi firmware updates on`.
+2. With the robot switched on and idle, open **Tools > Port** in the Arduino
+   IDE. Under "Network ports" it appears by name (e.g. `Left at 192.168.1.250`).
+   It can take up to a minute to show up.
+3. Pick it, click **Upload**, and type the password when asked. Both lights
+   turn blue while it updates, then green; the robot restarts on its own.
+
+Updates are refused while an experiment runs. If a robot doesn't show up as a
+network port, the laptop and robot may be on different networks, or the
+network blocks device discovery; the USB cable still works as before.
+
 ## Naming the robots: Left, Center, Right
 
 In the console, point at each robot and give it its name once. It's saved

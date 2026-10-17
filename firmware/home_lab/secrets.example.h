@@ -10,3 +10,7 @@
 // your network, so you don't need your laptop's IP. If your router blocks
 // broadcast (logs never show up), put the laptop's IP here instead:
 // #define LOG_HOST "192.168.1.50"
+
+// Optional. Turns on firmware updates over WiFi (see ota.h): pick a password
+// only you know. Without this line, updates need the USB cable as before.
+// #define OTA_PASSWORD "choose-a-password"

@@ -23,11 +23,12 @@
 #include "net.h"
 #include "motion.h"
 #include "experiments.h"
+#include "ota.h"
 
 Arduino_Alvik alvik;
 
 // Bump this whenever the firmware changes, so every logged run says which code it ran.
-#define FW_VERSION "2026-10-17b"
+#define FW_VERSION "2026-10-17c"
 
 uint16_t gBootId = 0;   // random each power-on; starts every run id
 
@@ -289,6 +290,7 @@ void setup() {
   alvik.right_led.set_color(1, 1, 0);
 
   net::begin();
+  ota::begin();
   if (!alvik.check_firmware_compatibility()) {
     // begin() skips part of its setup on a mismatch, including the color
     // sensor's light, so turn that on ourselves and warn loudly.
@@ -300,7 +302,19 @@ void setup() {
   showSelection(false);
 }
 
+// Called by the WiFi updater (ota.h) at the start and end of an update.
+void otaStarting() {
+  alvik.brake();
+  alvik.left_led.set_color(0, 0, 1);
+  alvik.right_led.set_color(0, 0, 1);   // both blue while updating
+}
+void otaFinished(bool ok) {
+  alvik.left_led.set_color(ok ? 0 : 1, ok ? 1 : 0, 0);   // green = done (restarting), red = failed
+  alvik.right_led.set_color(ok ? 0 : 1, ok ? 1 : 0, 0);
+}
+
 void loop() {
+  ota::handle();      // WiFi firmware updates, only while idle
   net::heartbeat();
   String cmd;
   if (net::poll(cmd)) handleCommand(cmd, false);

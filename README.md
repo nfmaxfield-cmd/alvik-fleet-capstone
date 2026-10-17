@@ -44,6 +44,8 @@ tools/
   make_run_order.py  shuffled run order + tape measurement sheet per experiment
   tape_results.py    tape measurements -> errors, stats, chart for a record
   check_session.py   after a session: sensor log, clocks and video line up?
+  run_sheet.py       guided experiment runs: commands, run ids, tape entry with checks
+  commtest.py        WiFi delay, jitter and delivery per robot (experiment E3)
   pi/camrec.py       overhead camera recorder for the Raspberry Pi
 docs/
   home-experiments.md  how to run the home experiments
