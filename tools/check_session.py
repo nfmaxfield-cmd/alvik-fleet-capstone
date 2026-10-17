@@ -82,7 +82,7 @@ def clock_fits(folder):
             a = st.median(y - x for x, y in zip(xs, ys))
         resid = [y - (a + b * x) for x, y in zip(xs, ys)]
         fits[key] = (a, b, dict(n=len(rs), bursts=len(best), used=len(kept), rtt_med=st.median(rtts),
-                                rtt_max=max(rtts), drift_ppm=(b - 1) * 1e6,
+                                rtt_max=max(rtts), drift_ppm=(1 / b - 1) * 1e6,   # + = robot clock runs fast vs laptop
                                 resid_ms=max(abs(e) for e in resid) * 1000))
     return fits
 
@@ -134,28 +134,60 @@ def video_flashes(folder, sync_ms_guess=300):
         on = np.min(np.stack(b[1:1 + smin]), axis=0) - before          # stayed brighter than before
         offs = [b[1 + s - 1] - b[1 + s] for s in range(smin, smax + 1) if 1 + s < len(b)]
         off = np.max(np.stack(offs), axis=0)                            # then went dark again
-        p = np.minimum(on, off).ravel()
+        p = np.minimum(on, off)
+        # A flash that switches on or off partway through a frame's exposure
+        # splits its brightness change over two frames, halving each jump.
+        # Also score it with one in-between frame skipped at each edge.
+        on2 = np.min(np.stack(b[2:2 + smin]), axis=0) - before
+        offs2 = [b[1 + s - 1] - b[1 + s + 1] for s in range(smin, smax + 1) if 2 + s < len(b)]
+        off2 = np.max(np.stack(offs2), axis=0)
+        p = np.maximum(p, np.minimum(on2, off2)).ravel()
         idx = np.argpartition(p, -k)[-k:]
         ys, xs = np.unravel_index(idx, before.shape)
-        return float(np.mean(p[idx])), float(np.median(xs)), float(np.median(ys))
+        # how much of the first bright frame was lit: 1 = the whole exposure,
+        # 0.5 = the light came on halfway through it
+        rise = (b[2].ravel()[idx] - before.ravel()[idx]).astype(float)
+        part = (b[1].ravel()[idx] - before.ravel()[idx]) / np.maximum(rise, 1.0)
+        lit = float(np.clip(np.median(part), 0.0, 1.0))
+        return float(np.mean(p[idx])), float(np.median(xs)), float(np.median(ys)), lit
 
     while True:
         ok, img = cap.read()
         if not ok:
             break
         buf.append(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.int16))
-        if len(buf) == smax + 2:
+        if len(buf) == smax + 3:
             scores.append(score_at(buf))
             buf.pop(0)
     cap.release()
     if len(scores) < 3:
         return [], frames
-    v = [x[0] for x in scores]
-    med = st.median(v)
-    mad = st.median(abs(x - med) for x in v)
-    thr = max(30.0, med + 10 * mad)
-    # candidate "on" frames: (laptop-clock time of the frame, frame number, strength)
-    found = [(frames[j + 1], j + 1, sc[0]) for j, sc in enumerate(scores) if sc[0] > thr and j + 1 < len(frames)]
+    # A flash must stand out from what is happening around it, not from the
+    # whole video: a fixed threshold set from the whole video sat above flashes
+    # whose brightness change was split over two frames whenever robots moved
+    # a lot elsewhere in the recording. Keep each local peak that is at least
+    # 1.5x stronger than the strongest score in the second around it (with the
+    # flash itself left out). Callers then take the strongest peak near each
+    # flash the robot logged.
+    v = np.array([x[0] for x in scores])
+    w = int(round(fps))                     # one second of frames
+    guard = smax + 2                        # the flash's own frames
+    found = []
+    for j in range(len(v)):
+        if v[j] < 40 or j + 1 >= len(frames):
+            continue
+        lo, hi = max(0, j - guard), min(len(v), j + guard + 1)
+        if v[j] < v[lo:hi].max():
+            continue                        # not the peak of this flash
+        around = np.concatenate([v[max(0, j - w):lo], v[hi:j + w + 1]])
+        bg = float(around.max()) if around.size else 0.0
+        if v[j] >= 1.5 * bg:
+            t_on = frames[j + 1]
+            if j + 2 < len(frames):         # light came on partway through frame j + 1
+                t_on += (1.0 - scores[j][3]) * (frames[j + 2] - frames[j + 1])
+            found.append((t_on, j + 1, float(v[j]), bg))
+    if os.environ.get("FLASH_DEBUG"):
+        print("flash peaks kept:", len(found))
     return found, frames
 
 
@@ -227,7 +259,7 @@ def main():
     for (robot, boot), (a, b, i) in sorted(fits.items()):
         print(f"  {robot} (boot {boot or '?'}): {i['n']} checks in {i['bursts']} bursts ({i['used']} used); "
               f"round trip median {i['rtt_med']:.1f} ms, "
-              f"worst {i['rtt_max']:.1f} ms; drift {i['drift_ppm']:+.0f} ppm; fit within {i['resid_ms']:.1f} ms")
+              f"worst {i['rtt_max']:.1f} ms; robot clock {abs(i['drift_ppm']):.0f} ppm {'fast' if i['drift_ppm'] >= 0 else 'slow'}; fit within {i['resid_ms']:.1f} ms")
         if i["rtt_med"] > 50:
             problems.append(f"{robot}: slow WiFi round trips ({i['rtt_med']:.0f} ms median)")
 
