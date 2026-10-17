@@ -64,9 +64,10 @@ rewinds, applies the fix, and replays the wheel and gyro readings since.
 
 - Full simulated E1 session (`tools/sim`, 36 runs, 3 robots, seed 7), end
   error against the tape: wheels only 9.2 cm, wheels + gyro 3.8 cm, wheel
-  distance + gyro heading 1.5 cm, + camera 0.15 cm (filter and factor graph
-  alike); 0.19 cm with half the frames lost or 200 ms late, 0.42 cm at 1
-  frame/s.
+  distance + gyro heading 1.5 cm, + camera 0.15 cm (filter) and 0.13 cm
+  (factor graph; along the whole path 0.23 vs 0.15 cm); 0.19 cm with half the
+  frames lost or 200 ms late, 0.42 cm at 1 frame/s. The p-values treat runs
+  as independent and aren't corrected for comparing ten setups.
 
 ## Camera height
 
