@@ -26,7 +26,7 @@ int step = 0;               // route steps completed so far; matches the DEMO_ST
 void header() {
   net::sendLine("H,RAW,run,ms,step,wl_deg,wr_deg,wl_rpm,wr_rpm,v_cms,w_dps,x_cm,y_cm,th_deg,"
                 "ax,ay,az,gx,gy,gz,roll_deg,pitch_deg,yaw_deg,"
-                "dL_cm,dCL_cm,dC_cm,dCR_cm,dR_cm,dtop_cm,dbot_cm,lineL,lineC,lineR,battery,charging");
+                "dL_cm,dCL_cm,dC_cm,dCR_cm,dR_cm,dtop_cm,dbot_cm,lineL,lineC,lineR,battery,charging,lifted");
 }
 
 void start() {
@@ -63,11 +63,12 @@ void tick() {
   alvik.get_line_sensors(lL, lC, lR);
   net::logf("D,RAW,%s,%lu,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,"
             "%.4f,%.4f,%.4f,%.3f,%.3f,%.3f,%.2f,%.2f,%.2f,"
-            "%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%d,%d,%d,%d,%d",
+            "%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%d,%d,%d,%d,%d,%d",
             gRunId.c_str(), now, step, wl, wr, sl, sr, v, w, x, y, th,
             ax, ay, az, gx, gy, gz, roll, pitch, yaw,
             dL, dCL, dC, dCR, dR, alvik.get_distance_top(), alvik.get_distance_bottom(), lL, lC, lR,
-            alvik.get_battery_charge(), alvik.is_battery_charging() ? 1 : 0);
+            alvik.get_battery_charge(), alvik.is_battery_charging() ? 1 : 0,
+            alvik.get_lifted() ? 1 : 0);   // picked up: position must be re-found ("kidnapped robot")
   rows++;
 }
 
