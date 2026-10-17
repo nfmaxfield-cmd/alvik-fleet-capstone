@@ -14,6 +14,7 @@ bool handleCommand(const String& cmd, bool running);
 // ---------- abort / safety ----------
 
 String gAbortReason = "";
+String gFail = "";   // why a run failed without being stopped (a timeout, a failed check); shown in RUNEND
 
 // Call often inside every loop. True means stop the experiment.
 bool shouldAbort() {
@@ -94,6 +95,7 @@ bool calibrateYawSign(bool force = false) {
   if (fabsf(dOdo) >= 2.0f) gOdoSign = dOdo > 0 ? 1 : -1;
   if (fabs(dy) < 2.0f) {
     net::logf("M,yaw check failed: heading moved only %.1f deg", dy);
+    gFail = "yaw check failed";
     return false;
   }
   gYawSign = dy > 0 ? 1 : -1;
@@ -125,6 +127,7 @@ TurnResult imuTurnTo(float target) {
     if (millis() - t0 > (unsigned long)P("turn_timeout_ms")) {
       alvik.brake();
       net::logf("M,turn timed out");
+      gFail = "turn timed out";
       return {false, millis() - t0, 0};
     }
     float err = wrap180(target - heading());
@@ -150,6 +153,7 @@ TurnResult imuTurnTo(float target) {
 // more and (by our reading of the library) never returns.
 TurnResult libraryTurn(float delta) {
   unsigned long t0 = millis();
+  rawlog::tick();   // rotate() blocks ~200 ms inside the library: log right before it
   alvik.rotate(delta, DEG, false);   // the library waits 200 ms in here first
   unsigned long overhead = millis() - t0;
   while (!alvik.is_target_reached()) {
@@ -157,6 +161,7 @@ TurnResult libraryTurn(float delta) {
     if (millis() - t0 > (unsigned long)P("turn_timeout_ms")) {
       alvik.brake();
       net::logf("M,library turn timed out");
+      gFail = "turn timed out";
       return {false, millis() - t0, 0};
     }
     delay(10);
@@ -171,6 +176,7 @@ TurnResult libraryTurn(float delta) {
 bool libraryMove(float cm) {
   unsigned long t0 = millis();
   unsigned long limit = 3000 + (unsigned long)(fabsf(cm) * 400);   // generous: ~2.5 cm/s minimum
+  rawlog::tick();   // move() blocks ~200 ms inside the library: log right before it
   alvik.move(cm, CM, false);
   while (!alvik.is_target_reached()) {
     if (shouldAbort()) return false;

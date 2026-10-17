@@ -107,6 +107,7 @@ void runLap() {
   while (!shouldAbort()) {
     if (!lineStep(s, P("lf_base_rpm"))) {
       net::logf("M,lap run %s: lost the tape (lap %d)", gRunId.c_str(), lap + 1);
+      gFail = "lost the tape";
       return;
     }
     bool mk = markerSeen();
@@ -176,7 +177,7 @@ void runGrid() {
 
   while (true) {
     if (shouldAbort()) { result = String("aborted:") + gAbortReason; break; }
-    if (!lineStep(s, base)) { result = "lost_tape"; break; }
+    if (!lineStep(s, base)) { result = "lost_tape"; gFail = "lost the tape"; break; }
     bool armed = first || distFrom(nx, ny) > P("grid_ignore_cm");
     streak = (armed && crossingNow(s)) ? streak + 1 : 0;
     if (streak < (int)P("grid_cross_samples")) { delay(10); continue; }
@@ -205,6 +206,7 @@ void runGrid() {
         TurnResult tr = imuTurnTo(gridHeading);
         if (!tr.ok) {
           result = "turn_failed";
+          gFail = "turn failed";
           if (gAbortReason.length()) result = String("aborted:") + gAbortReason;
           break;
         }
@@ -269,6 +271,7 @@ void runDemo() {
   bool square = route == 3;
   if (!left && !center && !square) {
     net::logf("M,%s has no demo routine of its own. Pick one with: set demo_route 1 (L), 2 (circle) or 3 (square)", net::name);
+    gFail = "no demo routine";
     return;
   }
   if (!calibrateYawSign()) return;
@@ -310,7 +313,8 @@ void runDemo() {
   alvik.get_pose(x, y, th);
   float err = sqrtf(x * x + y * y);
   float headErr = wrap180(heading() - start);
-  String result = ok ? String("done") : String("aborted:") + gAbortReason;
+  String result = ok ? String("done")
+                : gAbortReason.length() ? String("aborted:") + gAbortReason : String("failed:") + gFail;
   net::logf("D,DEMO_END,%s,%s,%s,%s,%.1f,%.1f,%lu,%.0f,%.0f,%.0f,%d", gRunId.c_str(), net::name,
             square ? "square" : (left ? "L" : "circle"), result.c_str(),
             err, headErr, millis() - t0, a, b, r, alvik.get_battery_charge());
@@ -338,7 +342,8 @@ void runStraight() {
   float x, y, th;
   alvik.get_pose(x, y, th);
   float dyaw = wrap180(heading() - start);
-  String result = ok ? String("done") : String("aborted:") + gAbortReason;
+  String result = ok ? String("done")
+                : gAbortReason.length() ? String("aborted:") + gAbortReason : String("failed:") + gFail;
   net::logf("D,STRAIGHT,%s,%s,%s,%.0f,%.0f,%.2f,%.2f,%.2f,%.2f,%lu,%d", gRunId.c_str(), net::name, result.c_str(),
             d, rpm, x, y, th, dyaw, millis() - t0, alvik.get_battery_charge());
   net::logf("M,run %s: odometry says %.1f cm along, %.1f cm sideways. Now mark and measure the real end point.",

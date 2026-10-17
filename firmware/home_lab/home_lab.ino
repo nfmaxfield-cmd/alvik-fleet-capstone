@@ -27,7 +27,9 @@
 Arduino_Alvik alvik;
 
 // Bump this whenever the firmware changes, so every logged run says which code it ran.
-#define FW_VERSION "2026-10-17a"
+#define FW_VERSION "2026-10-17b"
+
+uint16_t gBootId = 0;   // random each power-on; starts every run id
 
 const char* EXP_NAMES[] = {"stream", "turn", "lap", "grid", "demo", "straight"};
 const int N_EXP = 6;
@@ -119,8 +121,8 @@ bool handleCommand(const String& raw, bool running) {
     // Clock check from the laptop: answer at once with our own clock, so the
     // laptop can work out the offset and the round-trip time.
     unsigned long now = millis();
-    net::sendLine("H,CLOCK,token,robot_ms");
-    net::logf("D,CLOCK,%s,%lu", rest.c_str(), now);
+    net::sendLine("H,CLOCK,token,robot_ms,boot");
+    net::logf("D,CLOCK,%s,%lu,%04X", rest.c_str(), now, gBootId);   // boot id: the clock restarts if the robot reboots
     return false;
   }
   if (verb == "calibrate") {
@@ -129,7 +131,7 @@ bool handleCommand(const String& raw, bool running) {
     return false;
   }
   if (verb == "ping" || verb == "status") {
-    net::logf("M,status %s: %s, selected %s, battery %d%%, WiFi %d dBm", net::name,
+    net::logf("M,status %s (firmware %s): %s, selected %s, battery %d%%, WiFi %d dBm", net::name, FW_VERSION,
               running ? "running" : "idle", EXP_NAMES[gSelected],
               alvik.get_battery_charge(), (int)WiFi.RSSI());
     return false;
@@ -180,19 +182,33 @@ bool handleCommand(const String& raw, bool running) {
   return false;
 }
 
-uint16_t gBootId = 0;
 
-// Both lights white for sync_ms: the camera sees it, and the robot logs its
-// own clock at that moment, which lines up video time with robot time.
+// Wait while still logging, but WITHOUT the safety checks or command
+// polling in waitMs(): used around the sync flashes, which must run to full
+// length even when the run was stopped by a still-pressed cancel button, a
+// lift or an obstacle. Commands sent meanwhile wait in the WiFi buffer.
+void logWait(unsigned long ms) {
+  unsigned long t0 = millis();
+  while (millis() - t0 < ms) { rawlog::tick(); delay(5); }
+}
+
+// Dark, then both lights white for sync_ms, then dark again: the camera sees
+// the change, and the robot logs its own clock at that moment, which lines up
+// video time with robot time. The lights stay dark ~150 ms either side so the
+// flash stands out whatever color they showed before.
 void syncFlash(const char* tag) {
   if (P("sync_flash") <= 0) return;
+  alvik.left_led.set_color(0, 0, 0);
+  alvik.right_led.set_color(0, 0, 0);
+  logWait(150);
   unsigned long on = millis();
   alvik.left_led.set_color(1, 1, 1);
   alvik.right_led.set_color(1, 1, 1);
-  waitMs((unsigned long)P("sync_ms"));
+  logWait((unsigned long)P("sync_ms"));
   alvik.left_led.set_color(0, 0, 0);
   alvik.right_led.set_color(0, 0, 0);
   unsigned long off = millis();
+  logWait(150);
   net::sendLine("H,SYNC,run,tag,ms_on,ms_off");
   net::logf("D,SYNC,%s,%s,%lu,%lu", gRunId.c_str(), tag, on, off);
 }
@@ -219,6 +235,7 @@ void runExperiment(int i) {
   snprintf(id, sizeof(id), "%04X-%d", gBootId, gRun);
   gRunId = id;
   gAbortReason = "";
+  gFail = "";
   gSelected = i;
   showSelection(true);
   net::logf("M,run %s: %s starting", gRunId.c_str(), EXP_NAMES[i]);
@@ -231,7 +248,8 @@ void runExperiment(int i) {
     syncFlash("start");
     showSelection(true);
   }
-  switch (i) {
+  // A stop during the settle pause skips the experiment itself.
+  if (!gAbortReason.length()) switch (i) {
     case 0: runStream(); break;
     case 1: runTurn(); break;
     case 2: runLap(); break;
@@ -241,14 +259,13 @@ void runExperiment(int i) {
   }
   alvik.brake();
   if (logged) {
-    String reason = gAbortReason;   // the end flash must run even after a stop
-    gAbortReason = "";
-    syncFlash("end");
+    syncFlash("end");   // runs to full length even after a stop (no safety checks inside)
     rawlog::stop();
-    gAbortReason = reason;
+    String result = gAbortReason.length() ? String("stopped:") + gAbortReason
+                  : gFail.length()        ? String("failed:") + gFail : String("done");
     net::sendLine("H,RUNEND,run,result,ms_end,duration_ms,battery,wifi_dbm,raw_rows_sent,packets_sent");
     net::logf("D,RUNEND,%s,%s,%lu,%lu,%d,%d,%lu,%lu", gRunId.c_str(),
-              gAbortReason.length() ? (String("stopped:") + gAbortReason).c_str() : "done",
+              result.c_str(),
               millis(), millis() - t0, alvik.get_battery_charge(), (int)WiFi.RSSI(), rawlog::rows,
               (unsigned long)net::seq);
   }

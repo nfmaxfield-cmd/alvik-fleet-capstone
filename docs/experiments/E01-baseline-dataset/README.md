@@ -30,7 +30,7 @@ replaying it in software.
 | Held constant | robot (Left), surface, lighting, camera position, route settings | |
 
 ## Setup
-- Robot: Left. Firmware: 2026-10-17a (printed by `status`, logged with every run).
+- Robot: Left. Firmware: 2026-10-17b or later (shown by `status`, logged with every run).
 - Repo commit:
 - Surface:    Lighting:
 - Camera: height above floor ___ cm; area seen ___ x ___ cm; real frame rate ___ fps.
@@ -62,8 +62,10 @@ placement does not count as robot error.
 4. Quit the console (`quit`), stop the recorder (Ctrl+C), copy the recording to
    the laptop, then:
    `python tools/check_session.py logs/<session> --video <recording folder>`
-5. Pass if: sensor rows lost under 2%; no gap over 200 ms; clock round trips
-   under 50 ms; every flash found in the video; "az still" near 1.00.
+5. Pass if: sensor rows lost under 2%; no gap over 300 ms (the library's own
+   move and turn commands pause the robot's logging about 200 ms each, by
+   design); clock round trips under 50 ms; every flash found in the video;
+   "az still" near 1.00 (confirms the accelerometer columns are in g).
    If rows are lost, `set raw_hz 25` and repeat. If flashes are not found,
    lower the camera or brighten the lights' view.
 
@@ -108,6 +110,15 @@ route are used to check that and add runs if needed.
 - (b) end error by route, Welch's t-test L vs square
 - (c) heading after each of the square's 12 turns from gyro vs wheels, against
   the end heading by tape (needs the RAW log)
+
+## Known limits of this setup
+- The tape marks the midpoint of the robot's front and rear faces, not its
+  wheel axle. If the two differ, any end heading error adds a small offset
+  (offset x sin(heading error)) when tape and odometry positions are compared.
+  Measure the face-midpoint-to-axle distance once and note it here: ___ cm.
+- Route end headings: DEMO_END reports the IMU's heading, DEMO_STEP the
+  wheels'. Both are kept (`imu_heading_err`, `wheel_heading_err` in results.csv).
+- Sensor rows lost over WiFi are gone for good; the check reports how many.
 
 ## Conclusion
 

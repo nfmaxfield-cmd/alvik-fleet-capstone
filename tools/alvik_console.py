@@ -74,22 +74,22 @@ class Session:
         self.headers[rtype] = cols
 
     # ---- clock sync ----
-    def clock_row(self, name, token, robot_ms, t_recv):
+    def clock_row(self, name, token, robot_ms, boot, t_recv):
         """Called with the lock held. Pairs a robot's clock answer with when we asked."""
         sent = self.clock_sent.pop(token, None)
-        if sent is None or sent[0] != name:
+        if sent is None or sent[0] != name or sent[1] is None:
             return
         t_send = sent[1]
         if self.clock_file is None:
             os.makedirs(self.outdir, exist_ok=True)
             f = open(os.path.join(self.outdir, "clock_sync.csv"), "w", newline="")
             w = csv.writer(f)
-            w.writerow(["robot", "token", "t_send", "t_recv", "robot_ms", "rtt_ms", "offset_s"])
+            w.writerow(["robot", "boot", "token", "t_send", "t_recv", "robot_ms", "rtt_ms", "offset_s"])
             self.clock_file = (f, w)
         f, w = self.clock_file
         # Assume the answer was made halfway through the round trip.
         offset = (t_send + t_recv) / 2 - robot_ms / 1000.0
-        w.writerow([name, token, f"{t_send:.4f}", f"{t_recv:.4f}", robot_ms,
+        w.writerow([name, boot, token, f"{t_send:.4f}", f"{t_recv:.4f}", robot_ms,
                     f"{(t_recv - t_send) * 1000:.1f}", f"{offset:.4f}"])
         f.flush()
 
@@ -133,6 +133,10 @@ class Session:
                     self._open(rtype, cols)
             elif kind == "D":
                 rtype, _, vals = rest.partition(",")
+                if rtype == "CLOCK":   # pair it with our question even if its header packet was lost
+                    parts = vals.split(",")
+                    if len(parts) >= 2 and parts[1].strip().isdigit():
+                        self.clock_row(name, parts[0], int(parts[1]), parts[2] if len(parts) > 2 else "", t_recv)
                 if rtype not in self.writers:
                     print(f"[{name}: data for {rtype} arrived before its header; skipped]")
                 else:
@@ -141,10 +145,6 @@ class Session:
                     self.rows[rtype] = self.rows.get(rtype, 0) + 1
                     if rtype not in ("RAW", "STREAM", "TRACE") or self.rows[rtype] % 250 == 0:
                         f.flush()   # high-rate files are flushed every 250 rows (~5 s) and on close
-                    if rtype == "CLOCK":
-                        tok, _, ms = vals.partition(",")
-                        if ms.strip().isdigit():
-                            self.clock_row(name, tok, int(ms), t_recv)
                     if self.show_rows or rtype not in QUIET:
                         print(f"  {name} {rtype}: {vals}")
             else:
@@ -252,14 +252,21 @@ def main():
                     token += 1
                     tok = f"c{token}"
                     with session.lock:
-                        session.clock_sent[tok] = (name, time.time())
+                        ip = session.robots.get(name, {}).get("ip")
+                        session.clock_sent[tok] = (name, None)
                         if len(session.clock_sent) > 300:      # forget questions nobody answered
                             for k in list(session.clock_sent)[:150]:
                                 del session.clock_sent[k]
-                    try:
-                        send_name(name, f"clock {tok}")
-                    except (KeyError, OSError):
+                    if ip is None:
                         break
+                    t_send = time.time()                       # stamped right at sending
+                    try:
+                        send_ip(ip, f"clock {tok}")
+                    except OSError:
+                        break
+                    with session.lock:
+                        if tok in session.clock_sent:
+                            session.clock_sent[tok] = (name, t_send)
                     time.sleep(0.05)
     threading.Thread(target=clock_loop, daemon=True).start()
 
@@ -333,6 +340,7 @@ def main():
     finally:
         if session.robots:
             send_all("stop")   # never leave robots driving when the console closes
+            time.sleep(1.2)    # let a stopped run's end flash and RUNEND record arrive before closing files
         stop.set()
         session.close()
         print(f"\nSaved to {outdir}.")

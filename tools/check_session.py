@@ -50,13 +50,14 @@ def fnum(x, default=float("nan")):
 
 # ------------------------------------------------------------------ clock
 def clock_fits(folder):
-    """robot -> (a, b, info): laptop_time = a + b * robot_ms / 1000, from the
-    fastest answer in each burst of clock checks."""
+    """(robot, boot) -> (a, b, info): laptop_time = a + b * robot_ms / 1000, from
+    the fastest answer in each burst of clock checks. Bursts that were slow even
+    at best (answered while the robot was busy) are left out."""
     by = defaultdict(list)
     for r in rows(folder, "clock_sync"):
-        by[r["robot"]].append(r)
+        by[(r["robot"], r.get("boot", ""))].append(r)
     fits = {}
-    for robot, rs in by.items():
+    for key, rs in by.items():
         rs.sort(key=lambda r: fnum(r["t_send"]))
         bursts, cur = [], []
         for r in rs:   # answers less than 1 s apart belong to one burst
@@ -67,10 +68,12 @@ def clock_fits(folder):
         if cur:
             bursts.append(cur)
         best = [min(b, key=lambda r: fnum(r["rtt_ms"])) for b in bursts]
-        xs = [fnum(r["robot_ms"]) / 1000 for r in best]
-        ys = [(fnum(r["t_send"]) + fnum(r["t_recv"])) / 2 for r in best]
+        med_best = st.median(fnum(r["rtt_ms"]) for r in best)
+        kept = [r for r in best if fnum(r["rtt_ms"]) <= max(2 * med_best, med_best + 10)]
+        xs = [fnum(r["robot_ms"]) / 1000 for r in kept]
+        ys = [(fnum(r["t_send"]) + fnum(r["t_recv"])) / 2 for r in kept]
         rtts = [fnum(r["rtt_ms"]) for r in rs]
-        if len(best) >= 2 and max(xs) - min(xs) > 5:
+        if len(kept) >= 2 and max(xs) - min(xs) > 5:
             mx, my = st.mean(xs), st.mean(ys)
             b = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sum((x - mx) ** 2 for x in xs)
             a = my - b * mx
@@ -78,13 +81,23 @@ def clock_fits(folder):
             b = 1.0
             a = st.median(y - x for x, y in zip(xs, ys))
         resid = [y - (a + b * x) for x, y in zip(xs, ys)]
-        fits[robot] = (a, b, dict(n=len(rs), bursts=len(best), rtt_med=st.median(rtts), rtt_max=max(rtts),
-                                  drift_ppm=(b - 1) * 1e6, resid_ms=max(abs(e) for e in resid) * 1000))
+        fits[key] = (a, b, dict(n=len(rs), bursts=len(best), used=len(kept), rtt_med=st.median(rtts),
+                                rtt_max=max(rtts), drift_ppm=(b - 1) * 1e6,
+                                resid_ms=max(abs(e) for e in resid) * 1000))
     return fits
 
 
-def to_laptop(fits, robot, ms):
-    a, b, _ = fits[robot]
+def fit_for(fits, robot, run):
+    """The clock fit for the boot a run belongs to (run ids start with the boot id)."""
+    boot = run.split("-")[0] if run else ""
+    if (robot, boot) in fits:
+        return fits[(robot, boot)]
+    same = [v for (r, bt), v in fits.items() if r == robot and bt == ""]   # older console: no boot column
+    return same[0] if len(same) == 1 else None
+
+
+def to_laptop(fit, ms):
+    a, b, _ = fit
     return a + b * ms / 1000
 
 
@@ -113,7 +126,7 @@ def video_flashes(folder, sync_ms_guess=300):
     # A light flash: pixels that brighten at frame j, STAY bright for about the
     # flash length, then darken. Moving robots and hands brighten and darken
     # pixels too, but almost never in that pattern.
-    buf, scores = [], []   # scores[j] = (strength, x, y) for "a flash turned on at frame j"
+    buf, scores = [], []   # scores[j] = (strength, x, y) for "a flash turned on at frame j + 1" (buf[0] is frame j)
     k = 4                  # strongest pixels averaged; a light seen from 2 m covers only a few pixels
 
     def score_at(b):       # b[0] is the frame before the candidate "on" frame
@@ -197,7 +210,7 @@ def main():
             problems.append(f"{key}: no RUNEND record (run still going, or its packet was lost)")
         if sent and loss > 2:
             problems.append(f"{key}: {loss:.1f}% of sensor rows lost; consider raw_hz 25")
-        if gap == gap and gap > 200:
+        if gap == gap and gap > 300:   # library move()/rotate() block ~200 ms by design
             problems.append(f"{key}: a {gap:.0f} ms gap in the sensor log")
     if table:
         w = [max(len(h), *(len(str(t[i])) for t in table)) for i, h in enumerate(hdr)]
@@ -211,47 +224,79 @@ def main():
     fits = clock_fits(S)
     if not fits:
         print("  no clock checks recorded")
-    for robot, (a, b, i) in sorted(fits.items()):
-        print(f"  {robot}: {i['n']} checks in {i['bursts']} bursts; round trip median {i['rtt_med']:.1f} ms, "
+    for (robot, boot), (a, b, i) in sorted(fits.items()):
+        print(f"  {robot} (boot {boot or '?'}): {i['n']} checks in {i['bursts']} bursts ({i['used']} used); "
+              f"round trip median {i['rtt_med']:.1f} ms, "
               f"worst {i['rtt_max']:.1f} ms; drift {i['drift_ppm']:+.0f} ppm; fit within {i['resid_ms']:.1f} ms")
         if i["rtt_med"] > 50:
             problems.append(f"{robot}: slow WiFi round trips ({i['rtt_med']:.0f} ms median)")
 
     syncs = rows(S, "sync")
+    sync_ms = [fnum(r["value"]) for r in rows(S, "param") if r["name"] == "sync_ms"]
+    sync_len = st.median(sync_ms) if sync_ms else 300.0
+    for sy in syncs:
+        if fit_for(fits, sy["robot"], sy["run"]) is None:
+            problems.append(f"{sy['robot']} {sy['run']}: no clock checks for this boot, flash can't be placed in time")
     if args.video:
         print("\nVIDEO")
     for vf in args.video:
-        found, frames = video_flashes(vf)
+        found, frames = video_flashes(vf, sync_len)
         if frames is None:
             continue
         name = os.path.basename(os.path.normpath(vf))
+        fps = 30.0
         if len(frames) > 2:
             iv = [b - a for a, b in zip(frames, frames[1:])]
             fps = (len(frames) - 1) / (frames[-1] - frames[0])
             slow = sum(1 for x in iv if x > 1.5 * st.median(iv))
             print(f"  {name}: {len(frames)} frames, {fps:.1f} fps, {slow} late frames (>1.5x normal spacing), "
                   f"longest gap {max(iv) * 1000:.0f} ms")
+        placed = []
+        for sy in syncs:
+            fit = fit_for(fits, sy["robot"], sy["run"])
+            if fit:
+                placed.append((to_laptop(fit, fnum(sy["ms_on"])), sy))
         offs = []
-        for s in syncs:
-            if s["robot"] not in fits:
+        for t, sy in placed:
+            label = f"{sy['robot']} run {sy['run']} {sy['tag']} flash"
+            if not frames or not (frames[0] - 1 <= t <= frames[-1] + 1):
+                continue   # recorded outside this video; reported below if no video covers it
+            crowd = [o for o, q in placed if q is not sy and abs(o - t) < 1.0]
+            if crowd:
+                print(f"    {label}: another flash within 1 s, can't tell them apart (run robots one at a time)")
+                problems.append(f"{label}: overlapping flashes")
                 continue
-            t = to_laptop(fits, s["robot"], fnum(s["ms_on"]))
             # Pi and laptop clocks normally agree within a second: search that window only
             cands = [f for f in found if abs(f[0] - t) < 1.0]
             near = max(cands, key=lambda f: f[2], default=None)
             if near:
                 offs.append(near[0] - t)
-                print(f"    {s['robot']} run {s['run']} {s['tag']} flash: video frame {near[1]}, "
-                      f"video minus robot time {1000 * (near[0] - t):+.0f} ms")
-            elif frames and frames[0] - 1 <= t <= frames[-1] + 1:
-                print(f"    {s['robot']} run {s['run']} {s['tag']} flash: not seen in the video "
-                      f"(lights out of view, or too small at this camera height?)")
-                problems.append(f"flash {s['run']} {s['tag']} not found in {name}")
+                print(f"    {label}: video frame {near[1]}, video minus robot time {1000 * (near[0] - t):+.0f} ms")
+            else:
+                print(f"    {label}: not seen in the video (lights out of view, or too small at this camera height?)")
+                problems.append(f"{label} not found in {name}")
         if len(offs) >= 2:
             print(f"  video vs robot clock: {1000 * st.mean(offs):+.0f} ms on average, spread "
-                  f"{1000 * st.stdev(offs):.0f} ms (one frame is {1000 / 30:.0f} ms)")
+                  f"{1000 * st.stdev(offs):.0f} ms (one frame is {1000 / fps:.0f} ms)")
             if st.stdev(offs) > 0.05:
                 problems.append("flash offsets vary by more than 50 ms: check the Pi's and laptop's clocks")
+    if args.video:
+        spans = []
+        for vf in args.video:
+            try:
+                with open(os.path.join(vf, "frames.csv"), newline="") as f:
+                    ts = [fnum(r["t_wall"]) for r in csv.DictReader(f)]
+                if ts:
+                    spans.append((ts[0] - 1, ts[-1] + 1))
+            except OSError:
+                pass
+        for sy in syncs:
+            fit = fit_for(fits, sy["robot"], sy["run"])
+            if fit:
+                t = to_laptop(fit, fnum(sy["ms_on"]))
+                if not any(a <= t <= b for a, b in spans):
+                    problems.append(f"{sy['robot']} run {sy['run']} {sy['tag']} flash falls outside every video's "
+                                    f"time range (recorder not running, or the Pi's clock is off?)")
 
     print("\nCHECK")
     if problems:

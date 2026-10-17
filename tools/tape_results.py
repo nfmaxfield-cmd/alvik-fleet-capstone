@@ -27,6 +27,7 @@ import math
 import os
 import statistics as st
 import sys
+from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from summarize import mean_sd, t_quantile, t_cdf, welch, fmt, table  # noqa: E402
@@ -112,8 +113,11 @@ def load_trials(folder):
 
 # ---------------------------------------------------------------- robot logs
 def load_odometry(log_globs):
-    """run_id -> dict of what the robot itself believed."""
-    odo = {}
+    """run_id -> what the robot itself believed at the end of the run:
+    pos_err / along_err / cross_err (wheel odometry), wheel_heading_err (wheel
+    odometry) and imu_heading_err (gyro/IMU)."""
+    odo = defaultdict(dict)
+    last_step = {}
     folders = [f for g in log_globs for f in glob.glob(g) if os.path.isdir(f)]
     for folder in folders:
         for path in glob.glob(os.path.join(folder, "*.csv")):
@@ -127,15 +131,25 @@ def load_odometry(log_globs):
                 if base.startswith("straight"):
                     cmd, x, y = num(r.get("cmd_cm")), num(r.get("odo_x_cm")), num(r.get("odo_y_cm"))
                     if None not in (cmd, x, y):
-                        odo[rid] = dict(along_err=x - cmd, cross_err=y, pos_err=math.hypot(x - cmd, y),
-                                        heading_err=num(r.get("imu_dyaw_deg")))
+                        odo[rid].update(along_err=x - cmd, cross_err=y, pos_err=math.hypot(x - cmd, y),
+                                        wheel_heading_err=num(r.get("odo_theta_deg")),
+                                        imu_heading_err=num(r.get("imu_dyaw_deg")))
                 elif base.startswith("demo_end"):
-                    odo[rid] = dict(pos_err=num(r.get("return_err_cm")), heading_err=num(r.get("heading_err_deg")))
+                    # return_err_cm is from wheel odometry; heading_err_deg is the IMU's
+                    odo[rid].update(pos_err=num(r.get("return_err_cm")), imu_heading_err=num(r.get("heading_err_deg")))
+                elif base.startswith("demo_step"):
+                    ms = num(r.get("ms")) or 0
+                    if rid not in last_step or ms >= last_step[rid][0]:
+                        last_step[rid] = (ms, num(r.get("theta_deg")))   # wheel-odometry heading at the last step
                 elif base == "turn.csv" or (base.startswith("turn_") and base[5:6].isdigit()):
-                    cmd, imu = num(r.get("cmd_deg")), num(r.get("dyaw_deg"))
-                    if cmd is not None and imu is not None:
-                        odo[rid] = dict(heading_err=imu - cmd)   # the IMU's own view of the turn
-    return odo
+                    cmd, imu, od = num(r.get("cmd_deg")), num(r.get("dyaw_deg")), num(r.get("odo_dyaw_deg"))
+                    if cmd is not None:
+                        odo[rid].update(imu_heading_err=None if imu is None else imu - cmd,
+                                        wheel_heading_err=None if od is None else od - cmd)
+    for rid, (_, th) in last_step.items():
+        if th is not None:
+            odo[rid]["wheel_heading_err"] = wrap180(th)
+    return dict(odo)
 
 
 # ---------------------------------------------------------------- chart
@@ -245,7 +259,7 @@ def main():
     res_path = os.path.join(args.folder, "data", "results.csv")
     cols = ["order", "robot", "level", "run_id", "x", "y", "heading"] + [m for m, _, _ in metrics]
     if odo:
-        cols += ["odo_pos_err", "odo_along_err", "odo_heading_err"]
+        cols += ["odo_pos_err", "odo_along_err", "wheel_heading_err", "imu_heading_err"]
     with open(res_path, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(cols)
@@ -254,7 +268,8 @@ def main():
             row = [t["order"], t["robot"], t["level"], t.get("run_id", "")] + \
                   [f"{t[k]:.2f}" if t.get(k) is not None else "" for k in ["x", "y", "heading"] + [m for m, _, _ in metrics]]
             if odo:
-                row += [f"{o[k]:.2f}" if o.get(k) is not None else "" for k in ("pos_err", "along_err", "heading_err")]
+                row += [f"{o[k]:.2f}" if o.get(k) is not None else ""
+                        for k in ("pos_err", "along_err", "wheel_heading_err", "imu_heading_err")]
             w.writerow(row)
 
     # summary per level (robots pooled; per robot when there are several)
@@ -282,22 +297,17 @@ def main():
         print(f"\n{main_metric[1]} by robot ({main_metric[2]})")
         table(["robot", "level", "n", "mean", "sd"], rows)
 
-    # two levels: Welch's test on the main metric
+    # comparisons between levels on the main metric
     key, label, unit = main_metric
     groups = {}
     for t in trials:
         if t.get(key) is not None:
             groups.setdefault(t["level"], []).append(t[key])
-    if len(groups) == 2:
-        a, b = sorted(groups, key=level_key)
-        r = welch(groups[a], groups[b])
-        if r:
-            d, half, df, p = r
-            print(f"\n{label}: {a} minus {b} = {d:.2f} {unit}, 95% interval {d - half:.2f} to {d + half:.2f}, "
-                  f"p = {p:.3g} (Welch's t-test)")
-    elif len(groups) > 2 and has_pos:
+    levels = sorted(groups, key=level_key)
+    numeric = all(num(lv) is not None for lv in levels)
+    if len(levels) > 2 and numeric and has_pos:
         # error growth with distance: least-squares slope of error vs level
-        pts = [(num(t["level"]), t[key]) for t in trials if num(t["level"]) is not None and t.get(key) is not None]
+        pts = [(num(t["level"]), t[key]) for t in trials if t.get(key) is not None]
         if len(pts) > 2:
             xs, ys = zip(*pts)
             mx, my = st.mean(xs), st.mean(ys)
@@ -308,22 +318,34 @@ def main():
             h = t_quantile(0.975, len(pts) - 2) * se
             print(f"\n{label} grows {slope * 100:.2f} cm per metre driven "
                   f"(95% interval {(slope - h) * 100:.2f} to {(slope + h) * 100:.2f})")
+    elif len(levels) >= 2:
+        print(f"\n{label}, level vs level (Welch's t-test: compares two means without assuming equal spread)")
+        for i, a in enumerate(levels):
+            for b in levels[i + 1:]:
+                r = welch(groups[a], groups[b])
+                if r:
+                    d, half, df, p = r
+                    print(f"  {a} minus {b} = {d:.2f} {unit}, 95% interval {d - half:.2f} to {d + half:.2f}, p = {p:.3g}")
 
-    # tape vs the robot's own estimate
+    # tape vs the robot's own estimate, per level
     if odo:
-        okey = "pos_err" if has_pos else "heading_err"
         tkey = "pos_err" if has_pos else "heading_err"
-        pairs = [(t[tkey], odo[t["run_id"].strip()][okey]) for t in trials
-                 if t.get("run_id", "").strip() in odo and odo[t["run_id"].strip()].get(okey) is not None
-                 and t.get(tkey) is not None]
-        if len(pairs) >= 2:
-            tape, rob = zip(*pairs)
-            m, half, p, n = paired(tape, rob)
-            what = "position error" if has_pos else "heading error"
-            print(f"\nTape vs robot's own estimate, {n} paired trials: tape {what} minus robot's = {m:.2f}, "
-                  f"95% interval {m - half:.2f} to {m + half:.2f}, p = {p:.3g} (paired t-test)")
-        else:
-            print("\n(no trials matched to the logs: is run_id filled in?)")
+        okey = "pos_err" if has_pos else "imu_heading_err"
+        what = "position error" if has_pos else "heading error"
+        print(f"\nTape vs robot's own estimate of {what} (paired t-test: same run measured both ways)")
+        any_pairs = False
+        for lv in levels:
+            pairs = [(t[tkey], odo[t["run_id"].strip()][okey]) for t in trials
+                     if t["level"] == lv and t.get("run_id", "").strip() in odo
+                     and odo[t["run_id"].strip()].get(okey) is not None and t.get(tkey) is not None]
+            if len(pairs) >= 2:
+                any_pairs = True
+                tape, rob = zip(*pairs)
+                m, half, p, n = paired(tape, rob)
+                print(f"  {lv}: {n} runs, tape minus robot = {m:.2f}, 95% interval {m - half:.2f} to {m + half:.2f}, "
+                      f"p = {p:.3g}")
+        if not any_pairs:
+            print("  (no trials matched to the logs: is run_id filled in?)")
 
     chart_groups = {}
     for t in trials:
