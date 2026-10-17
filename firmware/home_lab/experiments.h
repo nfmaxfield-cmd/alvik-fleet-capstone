@@ -241,6 +241,7 @@ void demoLog(const char* step) {
   rawlog::step++;   // RAW records carry this count, so samples can be matched to route steps
   float x, y, th;
   alvik.get_pose(x, y, th);
+  y *= gOdoSign; th *= gOdoSign;   // left-positive, like every other heading we log (RAW stays raw)
   net::logf("D,DEMO_STEP,%s,%s,%s,%.1f,%.1f,%.1f,%lu", gRunId.c_str(), net::name, step, x, y, th, millis());
 }
 
@@ -341,6 +342,7 @@ void runStraight() {
   ok = ok && waitMs((unsigned long)P("settle_ms"));
   float x, y, th;
   alvik.get_pose(x, y, th);
+  y *= gOdoSign; th *= gOdoSign;   // left-positive, like every other heading we log (RAW stays raw)
   float dyaw = wrap180(heading() - start);
   String result = ok ? String("done")
                 : gAbortReason.length() ? String("aborted:") + gAbortReason : String("failed:") + gFail;

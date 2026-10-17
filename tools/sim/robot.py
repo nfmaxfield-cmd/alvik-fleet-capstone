@@ -638,10 +638,12 @@ class Robot:
         return int(round(self.rng.gauss(self.wifi_dbm_mean, 2)))
 
     def log_run_info(self, i):
-        self.send("H,RUNINFO,run,experiment,fw_version,motor_fw,ms_start,battery,charging,wifi_dbm,route")
-        self.send("D,RUNINFO,%s,%s,%s,%s,%d,%d,%d,%d,%s" % (self.run_id, EXP_NAMES[i], self.fw_version,
-                                                           self.cfg.session.motor_fw, self.millis(), int(self.battery), 0,
-                                                           self.wifi_dbm(), "SSLSE"))
+        self.send("H,RUNINFO,run,experiment,fw_version,motor_fw,ms_start,battery,charging,wifi_dbm,route,"
+                  "yaw_sign,odo_sign")
+        self.send("D,RUNINFO,%s,%s,%s,%s,%d,%d,%d,%d,%s,%d,%d" % (self.run_id, EXP_NAMES[i], self.fw_version,
+                                                                 self.cfg.session.motor_fw, self.millis(),
+                                                                 int(self.battery), 0, self.wifi_dbm(), "SSLSE",
+                                                                 self.imu_m.yaw_sign, 1))
         self.send("H,PARAM,run,name,value")
         for name in self.param_order:
             self.send("D,PARAM,%s,%s,%.4f" % (self.run_id, name, self.params[name]))

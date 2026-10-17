@@ -12,7 +12,8 @@ recording time.
 
 Each recording is a folder ~/recordings/<date-time>_<label>/ with:
   video.avi    the frames, Motion-JPEG
-  frames.csv   frame, t_wall (Unix seconds), t_mono (seconds since start)
+  frames.csv   frame, t_wall (Unix seconds), t_mono (seconds since start),
+               cam_ms (the camera driver's own capture time, ms; for checking delay)
   events.csv   anything you type while recording, with its time and frame
   meta.json    camera, size, frame rate, host, start time
 
@@ -104,6 +105,9 @@ def open_camera(device, width, height, fps):
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
         cap.set(cv2.CAP_PROP_FPS, fps)
+        # Keep at most one frame waiting in the driver, so t_wall (stamped when
+        # we receive the frame) isn't late by a varying number of frames.
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     if not cap.isOpened():
         sys.exit(f"Could not open camera {device}. Check it with: v4l2-ctl --list-devices")
     return cap
@@ -146,7 +150,7 @@ def main():
         writer = cv2.VideoWriter(os.path.join(folder, "video.avi"), cv2.VideoWriter_fourcc(*"MJPG"), real_fps, (w, h))
         ff = open(os.path.join(folder, "frames.csv"), "w", newline="")
         fcsv = csv.writer(ff)
-        fcsv.writerow(["frame", "t_wall", "t_mono"])
+        fcsv.writerow(["frame", "t_wall", "t_mono", "cam_ms"])
         ef = open(os.path.join(folder, "events.csv"), "w", newline="")
         ecsv = csv.writer(ef)
         ecsv.writerow(["t_wall", "frame", "text"])
@@ -195,16 +199,17 @@ def main():
     shown_fps, n_fps, t_fps = 0.0, 0, time.monotonic()
     try:
         while True:
-            if state["frame"] > 0:   # the first frame was read above
-                ok, frame = cap.read()
-                if not ok:
-                    print("Camera stopped sending pictures.")
-                    break
+            # (the frame read during setup is not recorded: it was stamped late)
+            ok, frame = cap.read()
+            if not ok:
+                print("Camera stopped sending pictures.")
+                break
             t_wall, t_mono = time.time(), time.monotonic() - state["t0"]
+            cam_ms = cap.get(cv2.CAP_PROP_POS_MSEC)   # driver's own capture time, if it gives one
             if writer is not None:
                 writer.write(frame)
                 with lock:
-                    fcsv.writerow([state["frame"], f"{t_wall:.4f}", f"{t_mono:.4f}"])
+                    fcsv.writerow([state["frame"], f"{t_wall:.4f}", f"{t_mono:.4f}", f"{cam_ms:.1f}"])
             state["frame"] += 1
             n_fps += 1
             if time.monotonic() - t_fps >= 1.0:

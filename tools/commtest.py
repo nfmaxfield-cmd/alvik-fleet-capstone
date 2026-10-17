@@ -34,7 +34,7 @@ import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from alvik_console import Link  # noqa: E402
+from alvik_console import Link, now  # noqa: E402
 
 
 def pct(vals, p):
@@ -54,7 +54,7 @@ class Answers:
     def __call__(self, name, kind, rtype, vals):
         if kind == "D" and rtype == "CLOCK" and vals and vals[0].startswith("t"):
             with self.lock:
-                self.got.setdefault(vals[0], (time.time(), vals[1] if len(vals) > 1 else ""))
+                self.got.setdefault(vals[0], (now(), vals[1] if len(vals) > 1 else ""))
 
 
 def main():
@@ -103,7 +103,7 @@ def main():
         for k in range(args.count):
             tok = f"t{robot}{k}"
             with lock:
-                sent[tok] = (robot, time.time())
+                sent[tok] = (robot, now())
             link.send_name(robot, f"clock {tok}")
             nxt += period
             time.sleep(max(0.0, nxt - time.time()))

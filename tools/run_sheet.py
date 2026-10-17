@@ -78,6 +78,7 @@ class RunWatcher:
         self.demo_end = {}   # run id -> robot's own return error (cm)
         self.straight = {}   # run id -> robot's own end (x, y)
         self.boots = {}      # robot -> boot id seen in clock answers
+        self.params = {}     # run id -> {param name: value} from its PARAM records
         self.messages = []
 
     def __call__(self, name, kind, rtype, vals):
@@ -94,6 +95,8 @@ class RunWatcher:
                 self.straight[vals[0]] = (num(vals[5]), num(vals[6]))
             elif rtype == "CLOCK" and len(vals) >= 3:
                 self.boots[name] = vals[2]
+            elif rtype == "PARAM" and len(vals) >= 3:
+                self.params.setdefault(vals[0], {})[vals[1]] = num(vals[2])
             self.cv.notify_all()
 
     def wait_start(self, robot, before, timeout):
@@ -161,13 +164,58 @@ def ask_marks(what, spacing, near=None, max_dist=None, heading_near=None):
         return vals
 
 
-def save_sheet(path, cols, rows):
+def _write_csv(path, cols, rows):
     tmp = path + ".tmp"
     with open(tmp, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader()
         w.writerows(rows)
     os.replace(tmp, path)
+
+
+def check_params(watch, run, cmds, wait_s=1.5):
+    """Compare 'set name value' commands with the run's PARAM records.
+    Returns (mismatches, names not reported)."""
+    wanted = {}
+    for c in cmds:
+        p = c.split()
+        if len(p) == 3 and p[0] == "set" and num(p[2]) is not None:
+            wanted[p[1]] = num(p[2])
+    if not wanted:
+        return [], []
+    end = time.time() + wait_s
+    with watch.cv:
+        while time.time() < end and not set(wanted) <= set(watch.params.get(run, {})):
+            watch.cv.wait(0.1)
+        got = dict(watch.params.get(run, {}))
+    bad = [f"{k} is {got[k]:g}, not {v:g}" for k, v in wanted.items() if k in got and abs(got[k] - v) > 1e-3]
+    unseen = [k for k in wanted if k not in got]
+    return bad, unseen
+
+
+def save_sheet(path, cols, rows, interactive=True):
+    """Save atomically. Windows refuses to replace a file Excel has open, so a
+    failed save never loses the marks: they always go to a backup copy first,
+    and the user is asked to close Excel and retry."""
+    backup = path + ".backup.csv"
+    try:
+        _write_csv(backup, cols, rows)
+    except OSError as e:
+        print(f"    (could not write the backup {backup}: {e})")
+    while True:
+        try:
+            _write_csv(path, cols, rows)
+            return True
+        except OSError as e:
+            print(f"\n  Could not save {path}: {e}")
+            print(f"  (Is it open in Excel? Everything is safe in {backup}.)")
+            if not interactive:
+                return False
+            try:
+                if input("  Close it, then press Enter to retry (or type skip): ").strip().lower() == "skip":
+                    return False
+            except (EOFError, KeyboardInterrupt):
+                return False
 
 
 class PiNotes:
@@ -216,7 +264,7 @@ def main():
         rows = list(reader)
 
     def done(r):
-        return (r.get("excluded") or "").strip() in ("1", "yes") or all(
+        return (r.get("excluded") or "").strip().lower() in ("1", "yes", "y", "x", "true") or all(
             (r.get(k) or "").strip() for k in ("xf_cm", "yf_cm", "xr_cm", "yr_cm"))
     todo = [r for r in rows if not done(r)]
     print(f"{len(rows)} runs on the sheet, {len(rows) - len(todo)} done, {len(todo)} to go.")
@@ -287,9 +335,31 @@ def main():
                     time.sleep(0.2)
                 run = watch.wait_start(robot, before, 6)
                 if not run:
+                    with watch.cv:
+                        said = [v for t, n, v in watch.messages if n == robot and time.time() - t < 10]
+                    for v in said[-3:]:
+                        print(f"  {robot} says: {v if isinstance(v, str) else ','.join(v)}")
+                    if any("not calibrated" in (v if isinstance(v, str) else ",".join(v)) for v in said):
+                        calibrated.pop(robot, None)     # it rebooted: check the compass again next time
+                        print("  It restarted since its compass check. Redoing this trial with the check first.")
+                        continue
                     print("  The robot didn't report a run start. Is it busy, or out of WiFi range? (s = skip)")
                     raise Skip()
                 print(f"  Running: {run}  (Ctrl+C stops the robot)")
+                # Each "set" went out as one WiFi packet with no reply; a lost one
+                # would leave the robot on its old value. Check the robot's own
+                # PARAM records against what the sheet asked for.
+                bad, unseen = check_params(watch, run, cmds)
+                if bad:
+                    link.send_name(robot, "stop")
+                    print("  The robot didn't get every setting (a WiFi packet was lost): " + "; ".join(bad))
+                    print("  Stopped it. Put it back on the start mark; the trial will be redone.")
+                    watch.wait_end(run, 5)
+                    r["run_id"] = ""
+                    continue
+                if unseen:
+                    print(f"  (couldn't confirm {', '.join(unseen)}: their PARAM records didn't arrive; "
+                          f"check_session will show the values)")
                 note = f"trial {r['order']} {robot} {level} run {run} start"
                 if pi:
                     print("  Marked in video." if pi.send(note) else "  (The Pi recorder didn't answer: type the note there.)")
@@ -359,9 +429,9 @@ def main():
     except (Quit, KeyboardInterrupt):
         print("\nStopping.")
     finally:
-        save_sheet(sheet, cols, rows)
+        link.close()             # stops the robots first, whatever happens next
         logf.close()
-        link.close()
+        save_sheet(sheet, cols, rows)
         left = sum(1 for x in rows if not done(x))
         print(f"\nSheet saved: {sheet} ({len(rows) - left} done, {left} to go).")
         print(f"Robot logs: {outdir}")

@@ -77,7 +77,7 @@ def load_trials(folder):
             xf, yf, xr, yr = (num(r.get(k)) for k in ("xf_cm", "yf_cm", "xr_cm", "yr_cm"))
             if None in (xf, yf, xr, yr):
                 continue                       # not measured yet
-            if (r.get("excluded") or "").strip() in ("1", "yes", "y", "x"):
+            if (r.get("excluded") or "").strip().lower() in ("1", "yes", "y", "x", "true"):
                 continue
             t = dict(r)
             t["x"], t["y"] = (xf + xr) / 2, (yf + yr) / 2

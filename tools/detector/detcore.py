@@ -181,7 +181,8 @@ def read_labels(label_dir, classes=None, verbose=True):
         if not os.path.isfile(img):
             missing_img += 1
             continue
-        samples.append(dict(recording=rec, label_dir=label_dir, frame=fr, image=img, objects=objects))
+        auto = any((r.get("status") or "").strip() == "auto" for r in rows)
+        samples.append(dict(recording=rec, label_dir=label_dir, frame=fr, image=img, objects=objects, auto=auto))
 
     if verbose and (skipped_pending or missing_img or unknown_cls):
         msg = f"{rec}: {len(samples)} frames used"
@@ -193,6 +194,13 @@ def read_labels(label_dir, classes=None, verbose=True):
             msg += f", ignored unknown classes {sorted(unknown_cls)}"
         print(msg)
     return samples
+
+
+def human_checked(samples):
+    """Only frames a person looked at (drops labelling-tool auto-accepted
+    frames). Score on these: auto frames are the easy, high-confidence ones,
+    and may even be this model's own guesses."""
+    return [s for s in samples if not s.get("auto")]
 
 
 def read_many(paths, classes=None, verbose=True):
@@ -512,7 +520,8 @@ def load_homography(path):
     with open(path) as f:
         data = json.load(f)
     if isinstance(data, dict):
-        for k in ("H_floor_to_image", "H", "homography", "matrix", "floor_to_image"):
+        for k in ("H_floor_to_px", "homography_floor_cm_to_px", "H_floor_to_image", "H", "homography",
+                  "matrix", "floor_to_image"):
             if k in data:
                 data = data[k]
                 break

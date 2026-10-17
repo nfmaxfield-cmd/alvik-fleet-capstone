@@ -116,6 +116,8 @@ def main():
     ap.add_argument("--score-thresh", type=float, help="ignore predictions below this (default: each detector's own)")
     ap.add_argument("--sweep", action="store_true", help="also show F1 at a range of score thresholds")
     ap.add_argument("--calibration", help="floor_calibration.json for recordings that lack their own")
+    ap.add_argument("--include-auto", action="store_true",
+                    help="also score frames the labelling tool auto-accepted (default: only frames a person checked)")
     ap.add_argument("--out", default="eval.csv")
     ap.add_argument("--save-predictions", help="write all predictions to this CSV (first non-csv model)")
     a = ap.parse_args()
@@ -130,6 +132,12 @@ def main():
             assign = detcore.make_split(samples, a.val_frac, a.test_frac, a.seed)
             print("No --split given: made one with the same rules as train.py (pass --split to be sure it matches).")
         samples = detcore.select(samples, assign, a.part)
+    if not a.include_auto:
+        n0 = len(samples)
+        samples = detcore.human_checked(samples)
+        if n0 != len(samples):
+            print(f"Left out {n0 - len(samples)} auto-accepted frames (only frames a person checked are scored; "
+                  f"--include-auto to keep them).")
     if not samples:
         sys.exit("No frames to score.")
     recs = sorted({s["recording"] for s in samples})

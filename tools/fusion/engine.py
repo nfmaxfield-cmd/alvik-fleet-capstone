@@ -69,7 +69,22 @@ def fnum(x, default=0.0):
 
 
 # ---------------------------------------------------------------- gyro units
-def gyro_factors(runs):
+def wheel_turn_signs(runs):
+    """robot -> +1 or -1 so that w_dps * sign is counter-clockwise positive.
+    Checked against the wheels themselves (right wheel faster = turning
+    left), since the library's sign convention isn't documented."""
+    acc = {}
+    for run in runs:
+        a = acc.setdefault(run.robot, 0.0)
+        for r in run.raw:
+            w, d = fnum(r.get("w_dps")), fnum(r.get("wr_rpm")) - fnum(r.get("wl_rpm"))
+            if abs(w) > 20 and not math.isnan(d):
+                a += w * d
+        acc[run.robot] = a
+    return {robot: (-1.0 if a < 0 else 1.0) for robot, a in acc.items()}
+
+
+def gyro_factors(runs, wsign=None):
     """robot -> factor turning RAW gz into rad/s with the floor's sign
     (counter-clockwise positive). Only the SIGN and UNIT (deg/s or rad/s) are
     taken from comparing with the wheels; the scale stays the gyro's own, so
@@ -77,8 +92,9 @@ def gyro_factors(runs):
     acc = {}
     for run in runs:
         a = acc.setdefault(run.robot, [0.0, 0.0])
+        ws = (wsign or {}).get(run.robot, 1.0)
         for r in run.raw:
-            w, g = fnum(r.get("w_dps")), fnum(r.get("gz"))
+            w, g = fnum(r.get("w_dps")) * ws, fnum(r.get("gz"))
             if abs(w) > 20:
                 a[0] += g * w
                 a[1] += w * w
@@ -252,14 +268,16 @@ def run_engine(runs, detections, cfg, gyro_f=None):
     information would have reached the robots. Returns robot run_id -> Tracked,
     and the unknown-object tracker."""
     rng = random.Random(cfg["seed"])
-    gyro_f = gyro_f or gyro_factors(runs)
+    wsign = wheel_turn_signs(runs)
+    gyro_f = gyro_f or gyro_factors(runs, wsign)
     use_cam = "camera" in cfg["sensors"] and detections
     events = []   # (arrival, order, payload)
     for ri, run in enumerate(runs):
         gf = gyro_f.get(run.robot, (D2R, ""))[0]
+        ws = wsign.get(run.robot, 1.0)
         for r in run.raw:
             v = fnum(r.get("v_cms"))
-            w = fnum(r.get("w_dps")) * D2R
+            w = fnum(r.get("w_dps")) * D2R * ws
             # still = wheels not turning at all (a turn in place moves the wheels too)
             still = (abs(fnum(r.get("wl_rpm"))) < 0.2 and abs(fnum(r.get("wr_rpm"))) < 0.2
                      and abs(v) < 0.1 and abs(fnum(r.get("w_dps"))) < 0.5)

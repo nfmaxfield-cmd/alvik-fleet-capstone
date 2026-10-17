@@ -18,13 +18,13 @@ then the robot's own columns:
 | File | Columns after robot,t_recv |
 | --- | --- |
 | raw.csv | run,ms,step,wl_deg,wr_deg,wl_rpm,wr_rpm,v_cms,w_dps,x_cm,y_cm,th_deg,ax,ay,az,gx,gy,gz,roll_deg,pitch_deg,yaw_deg,dL_cm,dCL_cm,dC_cm,dCR_cm,dR_cm,dtop_cm,dbot_cm,lineL,lineC,lineR,battery,charging,lifted |
-| runinfo.csv | run,experiment,fw_version,motor_fw,ms_start,battery,charging,wifi_dbm,route |
+| runinfo.csv | run,experiment,fw_version,motor_fw,ms_start,battery,charging,wifi_dbm,route,yaw_sign,odo_sign (signs from the compass check, 0 = not checked; raw yaw_deg / th_deg times these = left-positive; from 2026-10-17d) |
 | param.csv | run,name,value |
 | runend.csv | run,result,ms_end,duration_ms,battery,wifi_dbm,raw_rows_sent,packets_sent |
 | sync.csv | run,tag,ms_on,ms_off (tag = start or end; light flash on/off, robot ms) |
 | clock.csv | token,robot_ms,boot |
-| straight.csv | run,robot,result,cmd_cm,rpm,odo_x_cm,odo_y_cm,odo_theta_deg,imu_dyaw_deg,total_ms,battery |
-| demo_step.csv | run,robot,step,x_cm,y_cm,theta_deg,ms |
+| straight.csv | run,robot,result,cmd_cm,rpm,odo_x_cm,odo_y_cm,odo_theta_deg,imu_dyaw_deg,total_ms,battery (odo y and theta left-positive from 2026-10-17d; raw library sign before) |
+| demo_step.csv | run,robot,step,x_cm,y_cm,theta_deg,ms (y and theta left-positive from 2026-10-17d) |
 | demo_end.csv | run,robot,route,result,return_err_cm,heading_err_deg,total_ms,a_cm,b_cm,r_cm,battery |
 
 Also in the folder:
@@ -47,7 +47,7 @@ Notes:
 ## Camera recording (`~/recordings/<date-time>_<label>/`, written by tools/pi/camrec.py)
 
 - `video.avi`: Motion-JPEG, 640x480, about 30 fps
-- `frames.csv`: frame,t_wall,t_mono (t_wall = Pi clock, Unix seconds, when the frame arrived)
+- `frames.csv`: frame,t_wall,t_mono,cam_ms (t_wall = Pi clock, Unix seconds, when the frame arrived; cam_ms = the camera driver's own capture time in ms, optional, for checking delay)
 - `events.csv`: t_wall,frame,text (notes typed while recording)
 - `meta.json`: device,width,height,fps_requested,fps_reported,host,start,label,note
 
@@ -59,6 +59,14 @@ xf0_cm,yf0_cm,xr0_cm,yr0_cm,xf_cm,yf_cm,xr_cm,yr_cm,battery_pct,excluded,note
 - xf/yf = front mark, xr/yr = rear mark, `0` = before the run (start), no
   suffix = after (end). Position = midpoint, heading = rear -> front.
 - target_* are relative to the start pose (ahead, left, turned left).
+- `excluded`: 1, yes, y, x or true (any case) leaves the run out of every analysis.
+
+## Floor calibration (`floor_calibration.json`, beside the recording)
+
+- `H_floor_to_px`: 3x3 matrix, floor cm -> image px: `[u, v, w] = H @ [x_cm, y_cm, 1]`, pixel = (u/w, v/w), pixel centres on whole numbers. Floor axes are the tape-sheet axes.
+  Readers also accept `homography_floor_cm_to_px`, `H_floor_to_image`, `H`, `homography`, `matrix`.
+- optional `camera.height_cm`: lens height above the floor (tape measure)
+- optional `camera.nadir_floor_cm`: [x, y], the floor point straight below the lens (plumb line). With both, the fusion moves sightings of the robot's top (4 cm up; `object_height_cm` overrides) down to the floor point below it.
 
 ## Labels for the camera detector (`<recording>/labels/`)
 

@@ -236,6 +236,13 @@ def main():
     detcore.save_split(assign, os.path.join(a.out, "split.json"))
     tr, va = detcore.select(samples, assign, "train"), detcore.select(samples, assign, "val")
     te = detcore.select(samples, assign, "test")
+    # Validation picks the best epoch, so it is scored only on frames a person
+    # checked; training may use auto-accepted frames too.
+    n_va = len(va)
+    va = detcore.human_checked(va)
+    if n_va != len(va):
+        print(f"val: left out {n_va - len(va)} auto-accepted frames")
+    te = detcore.human_checked(te)
     for name, part in (("train", tr), ("val", va), ("test", te)):
         recs = sorted({s["recording"] for s in part})
         n_obj = sum(len(s["objects"]) for s in part)

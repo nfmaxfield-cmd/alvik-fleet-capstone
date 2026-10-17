@@ -179,7 +179,11 @@ def main():
         dets = rn.load_detections(args.detections, Hinv, off, parallax=par)
     truth = load_truth(args.truth) if args.truth else None
     configs = json.load(open(args.configs)) if args.configs else BUILTIN
-    gyro_f = eng.gyro_factors(runs)
+    wsign = eng.wheel_turn_signs(runs)
+    for robot, sgn in sorted(wsign.items()):
+        if sgn < 0:
+            print(f"{robot}: wheel turn rate (w_dps) is clockwise-positive; flipped to counter-clockwise")
+    gyro_f = eng.gyro_factors(runs, wsign)
     for robot, (f, how) in sorted(gyro_f.items()):
         print(f"gyro units for {robot}: {how}{' (sign flipped)' if f < 0 else ''}")
 

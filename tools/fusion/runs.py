@@ -128,7 +128,7 @@ def load_runs(session, sheet=None):
                     continue
                 run = runs[rid]
                 run.level = r.get("level", "")
-                run.excluded = (r.get("excluded") or "").strip() in ("1", "yes")
+                run.excluded = (r.get("excluded") or "").strip().lower() in ("1", "yes", "y", "x", "true")
                 s4 = [fnum(r.get(k)) for k in ("xf0_cm", "yf0_cm", "xr0_cm", "yr0_cm")]
                 e4 = [fnum(r.get(k)) for k in ("xf_cm", "yf_cm", "xr_cm", "yr_cm")]
                 if not any(math.isnan(v) for v in s4):
@@ -145,8 +145,12 @@ def load_homography(path):
     """Returns (floor_to_px 3x3, px_to_floor 3x3) as nested lists."""
     with open(path) as f:
         d = json.load(f)
-    H = (d.get("H_floor_to_px") or d.get("homography_floor_cm_to_px") or d.get("H")
-         or d.get("homography"))
+    H = None
+    for k in ("H_floor_to_px", "homography_floor_cm_to_px", "H_floor_to_image", "H", "homography", "matrix",
+              "floor_to_image"):    # same keys as tools/detector/detcore.py
+        if d.get(k) is not None:
+            H = d[k]
+            break
     if H is None:
         raise ValueError(f"{path}: expected a key H_floor_to_px with a 3x3 matrix")
     return H, invert3(H)

@@ -140,10 +140,11 @@ def replay_console(outdir, packets, clock_sends, log_path=None):
              [(t, 0, ("clk", name, tok)) for t, name, tok in clock_sends]
     events.sort(key=lambda e: (e[0], e[1]))
     fake = _FakeTime()
-    real_time = alvik_console.time
+    real_time, real_now = alvik_console.time, alvik_console.now
     printed = io.StringIO()
     session = alvik_console.Session(outdir, show_rows=False, on_new_robot=lambda n: None)
     alvik_console.time = fake
+    alvik_console.now = fake.time
     try:
         with contextlib.redirect_stdout(printed):
             for t, _, ev in events:
@@ -154,7 +155,7 @@ def replay_console(outdir, packets, clock_sends, log_path=None):
                 else:
                     session.handle(ev[1], ev[2])
     finally:
-        alvik_console.time = real_time
+        alvik_console.time, alvik_console.now = real_time, real_now
         session.close()
     if log_path:
         with open(log_path, "w") as f:

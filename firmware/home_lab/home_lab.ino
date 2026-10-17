@@ -28,7 +28,7 @@
 Arduino_Alvik alvik;
 
 // Bump this whenever the firmware changes, so every logged run says which code it ran.
-#define FW_VERSION "2026-10-17c"
+#define FW_VERSION "2026-10-17d"
 
 uint16_t gBootId = 0;   // random each power-on; starts every run id
 
@@ -108,6 +108,9 @@ bool handleCommand(const String& raw, bool running) {
     return false;
   }
   if (verb == "identify") {
+    // Blocks for 3 s: never during a run (the wheels would keep going unchecked,
+    // and the white flashes would look like sync flashes in the video).
+    if (running) { net::sendLine("M,busy: send stop first"); return false; }
     // Flash both LEDs white so you can tell which physical robot this is.
     for (int i = 0; i < 6; i++) {
       alvik.left_led.set_color(1, 1, 1); alvik.right_led.set_color(1, 1, 1); delay(250);
@@ -117,7 +120,11 @@ bool handleCommand(const String& raw, bool running) {
     net::logf("M,%s: that was me", net::name);
     return false;
   }
-  if (verb == "params") { printParams(); return false; }
+  if (verb == "params") {
+    if (running) { net::sendLine("M,busy: send stop first"); return false; }   // blocks ~135 ms
+    printParams();
+    return false;
+  }
   if (verb == "clock") {
     // Clock check from the laptop: answer at once with our own clock, so the
     // laptop can work out the offset and the round-trip time.
@@ -219,10 +226,12 @@ void syncFlash(const char* tag) {
 void logRunInfo(int i) {
   uint8_t a, b, c;
   alvik.get_fw_version(a, b, c);
-  net::sendLine("H,RUNINFO,run,experiment,fw_version,motor_fw,ms_start,battery,charging,wifi_dbm,route");
-  net::logf("D,RUNINFO,%s,%s,%s,%d.%d.%d,%lu,%d,%d,%d,%s", gRunId.c_str(), EXP_NAMES[i], FW_VERSION,
+  // yaw_sign / odo_sign: what the compass check found (0 = not checked). RAW
+  // yaw_deg and th_deg are raw library values; multiply by these for left-positive.
+  net::sendLine("H,RUNINFO,run,experiment,fw_version,motor_fw,ms_start,battery,charging,wifi_dbm,route,yaw_sign,odo_sign");
+  net::logf("D,RUNINFO,%s,%s,%s,%d.%d.%d,%lu,%d,%d,%d,%s,%d,%d", gRunId.c_str(), EXP_NAMES[i], FW_VERSION,
             a, b, c, millis(), alvik.get_battery_charge(), alvik.is_battery_charging() ? 1 : 0, (int)WiFi.RSSI(),
-            gRoute.c_str());
+            gRoute.c_str(), gYawSign, gOdoSign);
   net::sendLine("H,PARAM,run,name,value");
   for (int k = 0; k < N_PARAMS; k++) {
     net::logf("D,PARAM,%s,%s,%.4f", gRunId.c_str(), PARAMS[k].name, PARAMS[k].value);
@@ -230,7 +239,24 @@ void logRunInfo(int i) {
   }
 }
 
-void runExperiment(int i) {
+// Experiments that turn need the compass direction checked once per power-on.
+// The check wiggles the robot, so it must never happen inside a measured run
+// (after the tape start marks were taken).
+bool needsYawSign(int i) { return i == 1 || i == 3 || i == 4 || i == 5; }
+
+void runExperiment(int i, bool fromButton) {
+  if (needsYawSign(i) && gYawSign == 0) {
+    if (!fromButton) {
+      net::logf("M,not calibrated since power-on: lift the robot off its mark, send calibrate, put it back, "
+                "then start again (%s not started)", EXP_NAMES[i]);
+      return;
+    }
+    // Started from the buttons (no laptop): check now, before anything is logged.
+    gFail = "";
+    if (!calibrateYawSign()) { showSelection(false); return; }
+    net::sendLine("M,compass checked: the robot moved slightly, place it again if it is tape-measured");
+    delay(1500);
+  }
   gRun++;
   char id[16];
   snprintf(id, sizeof(id), "%04X-%d", gBootId, gRun);
@@ -322,7 +348,7 @@ void loop() {
   if (gPending >= 0) {
     int i = gPending;
     gPending = -1;
-    runExperiment(i);
+    runExperiment(i, false);
     return;
   }
 
@@ -335,7 +361,7 @@ void loop() {
       lastPress = millis();
       while (alvik.get_touch_ok()) delay(20);   // start after your finger is off
       delay(500);
-      runExperiment(gSelected);
+      runExperiment(gSelected, true);
     }
   }
   delay(10);

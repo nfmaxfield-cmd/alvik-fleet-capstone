@@ -42,6 +42,45 @@ QUIET = ("STREAM", "TRACE", "RAW", "CLOCK", "PARAM")   # saved but not printed (
 CLOCK_EVERY_S = 10
 
 
+
+_T0_WALL, _T0_PERF = time.time(), time.perf_counter()
+
+
+def now():
+    """Wall-clock time (Unix seconds) with sub-millisecond resolution. On
+    Windows before Python 3.13, time.time() only ticks every ~15.6 ms, which
+    would show up in every round-trip and latency figure."""
+    return _T0_WALL + (time.perf_counter() - _T0_PERF)
+
+def _firmware_headers():
+    """Column lists of every record type, read from the firmware source
+    (net::sendLine("H,TYPE,...") calls), so data whose header packet was lost
+    over WiFi can still be saved."""
+    import re
+    out = {}
+    fw = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "firmware", "home_lab")
+    try:
+        names = [n for n in os.listdir(fw) if n.endswith((".h", ".ino"))]
+    except OSError:
+        return out
+    call = re.compile(r'sendLine\(((?:\s*"(?:[^"\\]|\\.)*")+)\s*\)')
+    lit = re.compile(r'"((?:[^"\\]|\\.)*)"')
+    for n in names:
+        try:
+            with open(os.path.join(fw, n), encoding="utf-8", errors="replace") as f:
+                src = f.read()
+        except OSError:
+            continue
+        for m in call.finditer(src):
+            text = "".join(lit.findall(m.group(1)))
+            if text.startswith("H,"):
+                parts = text.split(",")
+                out[parts[1]] = parts[2:]
+    return out
+
+
+KNOWN_HEADERS = _firmware_headers()
+
 class Session:
     """Tracks robots, writes H/D records to CSV, counts dropped packets."""
 
@@ -106,7 +145,7 @@ class Session:
         else:
             name, seq, line = ip, None, payload
         new = False
-        t_recv = time.time()
+        t_recv = now()
         events = []
         with self.lock:
             r = self.robots.get(name)
@@ -144,8 +183,14 @@ class Session:
                     parts = vals.split(",")
                     if len(parts) >= 2 and parts[1].strip().isdigit():
                         self.clock_row(name, parts[0], int(parts[1]), parts[2] if len(parts) > 2 else "", t_recv)
+                if rtype not in self.writers and rtype != "CLOCK":
+                    # Its header packet was lost: fall back to the header in the firmware source.
+                    known = KNOWN_HEADERS.get(rtype)
+                    if known and len(known) == len(vals.split(",")):
+                        self._open(rtype, known)
+                        print(f"[{name}: {rtype} header packet lost; using the header from the firmware source]")
                 if rtype not in self.writers:
-                    if rtype != "CLOCK" and not self.quiet:   # clock answers are already saved above
+                    if rtype != "CLOCK":   # clock answers are already saved above
                         print(f"[{name}: data for {rtype} arrived before its header; skipped]")
                 else:
                     f, w = self.writers[rtype]
@@ -230,12 +275,22 @@ class Link:
         self.session = Session(outdir, show_rows, on_new_robot=lambda n: self.send_name(n, "ping"))
         write_session_info(outdir)
         self.rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.rx.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.rx.bind(("", LOG_PORT))
+        # No SO_REUSEADDR: with it, a second program on this port binds fine
+        # and each robot packet then reaches only one of the two, silently
+        # splitting the log. Without it, the second program stops here.
+        if os.name == "nt" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.rx.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        try:
+            self.rx.bind(("", LOG_PORT))
+        except OSError as e:
+            raise SystemExit(f"Port {LOG_PORT} is already in use: another console, run_sheet or commtest is "
+                             f"probably still running. Close it first. ({e})")
         self.rx.settimeout(0.5)
         self.stop = threading.Event()
-        threading.Thread(target=receiver, args=(self.rx, self.session, self.stop), daemon=True).start()
-        threading.Thread(target=self._clock_loop, daemon=True).start()
+        self.threads = [threading.Thread(target=receiver, args=(self.rx, self.session, self.stop), daemon=True),
+                        threading.Thread(target=self._clock_loop, daemon=True)]
+        for t in self.threads:
+            t.start()
         self.send_all("ping")
 
     def send_ip(self, ip, cmd):
@@ -284,7 +339,7 @@ class Link:
                                 del session.clock_sent[k]
                     if ip is None:
                         break
-                    t_send = time.time()                       # stamped right at sending
+                    t_send = now()                             # stamped right at sending
                     try:
                         self.send_ip(ip, f"clock {tok}")
                     except OSError:
@@ -300,6 +355,10 @@ class Link:
             self.send_all("stop")   # never leave robots driving when the program closes
             time.sleep(1.2)         # let a stopped run's end flash and RUNEND record arrive
         self.stop.set()
+        for t in self.threads:
+            t.join(timeout=2)
+        self.rx.close()          # free the port for the next program
+        self.tx.close()
         self.session.close()
 
     def summary(self):
