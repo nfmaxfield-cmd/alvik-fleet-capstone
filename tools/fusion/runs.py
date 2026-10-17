@@ -221,16 +221,19 @@ def video_offset(session, recording, fits=None):
     found, frames = cs.video_flashes(recording, st.median(sync_ms) if sync_ms else 300.0)
     if not found:
         return None
-    offs = []
+    placed = []
     for s in syncs:
         fit = cs.fit_for(fits, s["robot"], s["run"])
-        if not fit:
-            continue
-        t = cs.to_laptop(fit, fnum(s["ms_on"]))
-        cands = [f for f in found if abs(f[0] - t) < 1.0]
-        if cands:
-            offs.append(max(cands, key=lambda f: f[2])[0] - t)
-    if not offs:
+        if fit:
+            placed.append(cs.to_laptop(fit, fnum(s["ms_on"])))
+    fps = (len(frames) - 1) / (frames[-1] - frames[0]) if len(frames) > 2 and frames[-1] > frames[0] else 30.0
+    coarse, picks = cs.match_flashes(found, placed, 1 / fps)
+    offs = [p[0] - t for t, p in zip(placed, picks) if p]
+    if coarse is None or len(offs) < 2:
+        return None
+    med = st.median(offs)
+    offs = [o for o in offs if abs(o - med) <= 0.05]      # drop odd ones out
+    if len(offs) < 2:
         return None
     return st.mean(offs), (st.stdev(offs) if len(offs) > 1 else float("nan")), len(offs)
 

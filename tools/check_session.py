@@ -191,6 +191,46 @@ def video_flashes(folder, sync_ms_guess=300):
     return found, frames
 
 
+def coarse_video_offset(found, logged, max_s=300.0, bin_s=0.02):
+    """Rough (video clock - laptop clock) from the whole flash sequence: the
+    time shift that lines up the most logged flashes with video flashes.
+    Works even when the Pi's and laptop's clocks are minutes apart, where
+    matching each flash in a fixed window would lock onto look-alikes.
+    Returns (offset_s, n_flashes_agreeing) or (None, 0)."""
+    from collections import Counter
+    votes = Counter()
+    for t in logged:
+        mine = set()
+        for f in found:
+            d = f[0] - t
+            if abs(d) <= max_s:
+                b = round(d / bin_s)
+                mine.update((b - 1, b, b + 1))      # tolerate falling on a bin edge
+        votes.update(mine)
+    if not votes:
+        return None, 0
+    b, n = votes.most_common(1)[0]
+    if n < 2:
+        return None, n
+    ds = [f[0] - t for t in logged for f in found if abs(f[0] - t - b * bin_s) <= 1.5 * bin_s]
+    return st.median(ds), n
+
+
+def match_flashes(found, logged, frame_s=1 / 30):
+    """Match each logged flash time (laptop clock) to a video flash.
+    Returns (coarse_offset_s or None, [candidate or None per logged flash]).
+    A match must sit within 3 frames of where the flash sequence as a whole
+    says it should be."""
+    coarse, n = coarse_video_offset(found, logged)
+    if coarse is None:
+        return None, [None] * len(logged)
+    out = []
+    for t in logged:
+        c = [f for f in found if abs(f[0] - (t + coarse)) <= 3 * frame_s]
+        out.append(max(c, key=lambda f: f[2]) if c else None)
+    return coarse, out
+
+
 # ------------------------------------------------------------------ report
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -269,6 +309,7 @@ def main():
     for sy in syncs:
         if fit_for(fits, sy["robot"], sy["run"]) is None:
             problems.append(f"{sy['robot']} {sy['run']}: no clock checks for this boot, flash can't be placed in time")
+    coarse_by_video = {}
     if args.video:
         print("\nVIDEO")
     for vf in args.video:
@@ -289,22 +330,28 @@ def main():
             if fit:
                 placed.append((to_laptop(fit, fnum(sy["ms_on"])), sy))
         offs = []
-        for t, sy in placed:
+        coarse, picks = match_flashes(found or [], [t for t, _ in placed], 1 / fps)
+        coarse_by_video[vf] = coarse or 0.0
+        if coarse is None and placed:
+            print("    the flash sequence in the video doesn't line up with the robots' flashes: is this the "
+                  "right recording, and are the lights in view?")
+            problems.append(f"{name}: flashes could not be lined up with the robot logs")
+        elif placed:
+            print(f"  video clock - laptop clock, rough: {coarse * 1000:+.0f} ms")
+        for (t, sy), near in zip(placed, picks):
             label = f"{sy['robot']} run {sy['run']} {sy['tag']} flash"
-            if not frames or not (frames[0] - 1 <= t <= frames[-1] + 1):
+            tv = t + (coarse or 0.0)
+            if not frames or not (frames[0] - 1 <= tv <= frames[-1] + 1):
                 continue   # recorded outside this video; reported below if no video covers it
             crowd = [o for o, q in placed if q is not sy and abs(o - t) < 1.0]
             if crowd:
                 print(f"    {label}: another flash within 1 s, can't tell them apart (run robots one at a time)")
                 problems.append(f"{label}: overlapping flashes")
                 continue
-            # Pi and laptop clocks normally agree within a second: search that window only
-            cands = [f for f in found if abs(f[0] - t) < 1.0]
-            near = max(cands, key=lambda f: f[2], default=None)
             if near:
                 offs.append(near[0] - t)
                 print(f"    {label}: video frame {near[1]}, video minus robot time {1000 * (near[0] - t):+.0f} ms")
-            else:
+            elif coarse is not None:
                 print(f"    {label}: not seen in the video (lights out of view, or too small at this camera height?)")
                 problems.append(f"{label} not found in {name}")
         if len(offs) >= 2:
@@ -319,7 +366,8 @@ def main():
                 with open(os.path.join(vf, "frames.csv"), newline="") as f:
                     ts = [fnum(r["t_wall"]) for r in csv.DictReader(f)]
                 if ts:
-                    spans.append((ts[0] - 1, ts[-1] + 1))
+                    c = coarse_by_video.get(vf, 0.0)          # video clock -> laptop clock
+                    spans.append((ts[0] - c - 1, ts[-1] - c + 1))
             except OSError:
                 pass
         for sy in syncs:

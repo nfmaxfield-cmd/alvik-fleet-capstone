@@ -57,23 +57,30 @@ def smooth(tracked, kf_hz=20.0, use_gyro=True, use_wheel_w=True, use_camera=True
     guess[-1] = tracked.ekf.s[5]   # gyro bias
 
     # integrate the wheel and gyro readings between keyframes
-    segs = []   # (dist, dth_gyro_raw, dt, dth_wheel, still, n_turn)
-    j = 0
-    for k in range(K - 1):
-        d = g = w = 0.0
-        dt_tot = 0.0
-        still = True
-        while j + 1 < len(raw) and raw[j + 1][0] <= tk[k + 1]:
-            a, b = raw[j], raw[j + 1]
-            dt = b[0] - a[0]
-            if a[0] >= tk[k] - 1e-9 and dt > 0 and not a[3]["lifted"]:
-                d += a[3]["v"] * dt
-                g += a[3]["g"] * dt
-                w += a[3]["w"] * dt
-                dt_tot += dt
-                still = still and a[3]["still"]
-            j += 1
-        segs.append((d, g, dt_tot, w, still and dt_tot > 0))
+    # Each reading holds from its own time to the next reading's. A reading
+    # interval that crosses a keyframe is split between the two segments in
+    # proportion to time, so no motion is lost at the boundaries.
+    acc = [[0.0, 0.0, 0.0, 0.0, True] for _ in range(K - 1)]   # dist, gyro, dt, wheel turn, still
+    k = 0
+    for a, b in zip(raw, raw[1:]):
+        ta, tb = a[0], b[0]
+        if tb <= ta or a[3]["lifted"]:
+            continue
+        while k < K - 2 and tk[k + 1] <= ta:
+            k += 1
+        kk = k
+        while kk < K - 1 and tk[kk] < tb:
+            lo, hi = max(ta, tk[kk]), min(tb, tk[kk + 1])
+            if hi > lo:
+                dt = hi - lo
+                s = acc[kk]
+                s[0] += a[3]["v"] * dt
+                s[1] += a[3]["g"] * dt
+                s[2] += dt
+                s[3] += a[3]["w"] * dt
+                s[4] = s[4] and a[3]["still"]
+            kk += 1
+    segs = [(d, g, dt, w, still and dt > 0) for d, g, dt, w, still in acc]
 
     start = tracked.run.tape_start
     rows = []   # residual builders: (kind, k, extra)
@@ -135,7 +142,15 @@ def smooth(tracked, kf_hz=20.0, use_gyro=True, use_wheel_w=True, use_camera=True
         J[r, 3 * k] = 1
         J[r + 1, 3 * k + 1] = 1
         r += 2
-    sol = least_squares(residuals, guess, jac_sparsity=J, loss="huber", f_scale=huber, x_scale="jac",
-                        max_nfev=200)
+    # Plain least squares first (converges quickly from any reasonable guess),
+    # then the robust weighting from there, so a few bad camera fixes can't
+    # drag the path.
+    # The inner sparse solver (lsmr) must be run to tight tolerances, or each
+    # step is too rough for the outer solver ever to settle.
+    opts = dict(jac_sparsity=J, x_scale="jac", max_nfev=200, tr_options=dict(atol=1e-12, btol=1e-12))
+    sol = least_squares(residuals, guess, loss="linear", **opts)
+    sol = least_squares(residuals, sol.x, loss="huber", f_scale=huber, **opts)
+    if sol.status <= 0:
+        print(f"  factor graph for {tracked.run.run_id}: solver stopped before settling ({sol.message})")
     p = sol.x
     return [(tk[k], p[3 * k], p[3 * k + 1], wrap(p[3 * k + 2])) for k in range(K)]
