@@ -56,6 +56,7 @@ class Session:
         self.lock = threading.Lock()
         self.clock_sent = {}   # token -> (robot name, laptop send time)
         self.rows = {}         # record type -> rows written
+        self.renamed = {}      # old robot name -> new name
         self.clock_file = None
 
     # ---- CSV ----
@@ -111,6 +112,7 @@ class Session:
                 for old in [n for n, v in self.robots.items() if v["ip"] == ip and n != name]:
                     print(f"[{old} is now {name}]")
                     del self.robots[old]
+                    self.renamed[old] = name
             if r is None or r["ip"] != ip:
                 r = self.robots.setdefault(name, dict(ip=ip, last_seq=None, received=0, dropped=0))
                 r["ip"] = ip
@@ -218,8 +220,11 @@ def main():
 
     def send_name(name, cmd):
         with session.lock:
-            ip = session.robots[name]["ip"]
-        send_ip(ip, cmd)
+            r = session.robots.get(name)
+        if r is None:
+            print(f"[{name} isn't connected (type robots)]")
+            return
+        send_ip(r["ip"], cmd)
 
     def send_all(cmd):
         with session.lock:
@@ -291,6 +296,13 @@ def main():
                 break
             if not line:
                 continue
+            if target != "all":
+                with session.lock:
+                    known = target in session.robots
+                    renamed = session.renamed.get(target)
+                if not known:   # the robot was renamed (or went away): follow it
+                    target = renamed if renamed else "all"
+                    print(f"[now talking to {target}]")
             low = line.lower()
             if low in ("quit", "exit"):
                 break
