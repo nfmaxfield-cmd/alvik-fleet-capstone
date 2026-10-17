@@ -173,7 +173,10 @@ def main():
                 sys.exit("Couldn't line up video and robot clocks: give --recording (with flashes) or --video-offset")
             off = vo[0]
             print(f"video clock = laptop clock {off * 1000:+.0f} ms ({vo[2]} flashes)")
-        dets = rn.load_detections(args.detections, Hinv, off)
+        par = rn.load_parallax(args.calib)
+        if par is None:
+            print("note: calibration has no camera height; robot-top positions not corrected for height")
+        dets = rn.load_detections(args.detections, Hinv, off, parallax=par)
     truth = load_truth(args.truth) if args.truth else None
     configs = json.load(open(args.configs)) if args.configs else BUILTIN
     gyro_f = eng.gyro_factors(runs)

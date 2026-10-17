@@ -145,10 +145,42 @@ def load_homography(path):
     """Returns (floor_to_px 3x3, px_to_floor 3x3) as nested lists."""
     with open(path) as f:
         d = json.load(f)
-    H = d.get("H_floor_to_px") or d.get("H") or d.get("homography")
+    H = (d.get("H_floor_to_px") or d.get("homography_floor_cm_to_px") or d.get("H")
+         or d.get("homography"))
     if H is None:
         raise ValueError(f"{path}: expected a key H_floor_to_px with a 3x3 matrix")
     return H, invert3(H)
+
+
+ALVIK_TOP_CM = 4.0   # the camera sees the robot's top, about 4 cm above the floor
+
+
+def load_parallax(path, obj_height_cm=None):
+    """Camera height and the floor point straight below the lens, if the
+    calibration file gives them (camera.height_cm, camera.nadir_floor_cm or
+    camera.center_floor_cm). Needed because the homography is exact only for
+    points ON the floor: the robot's top appears pushed away from the point
+    below the camera by height/(camera height - height), about 3.5% at 115 cm,
+    which is 1.7 cm at 50 cm from the centre. Returns None if not given."""
+    with open(path) as f:
+        d = json.load(f)
+    cam = d.get("camera") or {}
+    hc = cam.get("height_cm")
+    nadir = cam.get("nadir_floor_cm") or cam.get("center_floor_cm")
+    if not hc or not nadir:
+        return None
+    h = obj_height_cm if obj_height_cm is not None else d.get("object_height_cm", ALVIK_TOP_CM)
+    return (float(nadir[0]), float(nadir[1]), float(hc), float(h))
+
+
+def floor_from_top(x, y, parallax):
+    """Map a point seen on the robot's top (projected to the floor plane by the
+    homography) back to the floor point directly below it."""
+    if not parallax:
+        return x, y
+    nx, ny, hc, h = parallax
+    k = (hc - h) / hc
+    return nx + (x - nx) * k, ny + (y - ny) * k
 
 
 def invert3(m):
@@ -203,7 +235,7 @@ def video_offset(session, recording, fits=None):
     return st.mean(offs), (st.stdev(offs) if len(offs) > 1 else float("nan")), len(offs)
 
 
-def load_detections(path, H_px_to_floor, offset_s, labels_ok=("confirmed", "corrected")):
+def load_detections(path, H_px_to_floor, offset_s, labels_ok=("confirmed", "corrected"), parallax=None):
     """Camera detections as floor positions on the laptop clock.
     Accepts a detections CSV (frame,t_wall,x_px,y_px,score[,cls,heading_deg])
     or a labels.csv (uses confirmed/corrected alvik rows)."""
@@ -219,7 +251,7 @@ def load_detections(path, H_px_to_floor, offset_s, labels_ok=("confirmed", "corr
             t = fnum(r.get("t_wall"))
             if any(math.isnan(v) for v in (x, y, t)):
                 continue
-            fx, fy = apply_h(H_px_to_floor, x, y)
+            fx, fy = floor_from_top(*apply_h(H_px_to_floor, x, y), parallax)
             h = fnum(r.get("heading_deg"))
             hf = heading_img_to_floor(H_px_to_floor, x, y, h) if not math.isnan(h) else None
             out.append(dict(t=t - offset_s, frame=int(fnum(r.get("frame"), -1)), x=fx, y=fy,
@@ -299,7 +331,10 @@ def main():
             off, spread, n = vo
             print(f"video clock = laptop clock {off * 1000:+.0f} ms (from {n} flashes, spread {spread * 1000:.0f} ms)")
         extra = dict(video_offset_s=off)
-        dets = load_detections(args.detections, Hinv, off)
+        par = load_parallax(args.calib)
+        if par is None:
+            print("note: calibration has no camera height; robot-top positions not corrected for height")
+        dets = load_detections(args.detections, Hinv, off, parallax=par)
         print(f"{len(dets)} camera detections")
     man = write_runs(runs, dets, args.out, extra)
     w = [max(len(str(r[i])) for r in man + [["run_id", "robot", "route", "result", "raw", "cam", "tape", "missing"]]) for i in range(8)]

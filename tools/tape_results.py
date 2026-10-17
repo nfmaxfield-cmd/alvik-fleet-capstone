@@ -229,6 +229,14 @@ def repeatability(trials):
 
 
 # ---------------------------------------------------------------- main
+def _short(path):
+    """Path relative to here when possible (fails across Windows drives)."""
+    try:
+        return os.path.relpath(path)
+    except ValueError:
+        return path
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("folder", help="experiment folder, e.g. docs/experiments/E01-baseline-dataset")
@@ -353,7 +361,7 @@ def main():
             chart_groups.setdefault(t["level"], []).append(t[key])
     chart = os.path.join(args.folder, "chart.svg")
     svg_chart(chart_groups, label, unit, f"{name}: {label} by level (tape)", chart)
-    print(f"\nwrote {os.path.relpath(res_path)} and {os.path.relpath(chart)}")
+    print(f"\nwrote {_short(res_path)} and {_short(chart)}")
     return 0
 
 

@@ -98,7 +98,7 @@ def main():
         for i, (robot, lv, cmd, note) in enumerate(rows, 1):
             tx, ty, th = target(lv)
             w.writerow([i, robot, lv, cmd, "", blank(tx), blank(ty), blank(th)] + [""] * 8 + ["", "", note])
-    print(f"wrote {len(rows)} trials to {os.path.relpath(out, ROOT)}" + (f" (seed {args.seed})" if args.seed is not None else ""))
+    print(f"wrote {len(rows)} trials to {(os.path.relpath(out, ROOT) if os.path.splitdrive(os.path.abspath(out))[0] == os.path.splitdrive(ROOT)[0] else out)}" + (f" (seed {args.seed})" if args.seed is not None else ""))
     return 0
 
 
