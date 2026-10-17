@@ -27,10 +27,11 @@ replaying it in software.
 | Logged | battery and WiFi signal at start and end, every setting, firmware version (RUNINFO, PARAM, RUNEND) | robot log |
 | Logged | clock checks robot <-> laptop every 10 s (clock_sync.csv) | console |
 | Logged | overhead video, every frame timestamped; light flash at each run's start and end | Pi |
-| Held constant | robot (Left), surface, lighting, camera position, route settings | |
+| Blocked by | robot (Left, Center, Right): each robot runs every route | |
+| Held constant | surface, lighting, camera position, route settings | |
 
 ## Setup
-- Robot: Left. Firmware: 2026-10-17b or later (shown by `status`, logged with every run).
+- Robots: Left, Center, Right. Firmware: 2026-10-17b or later (shown by `status`, logged with every run). Center's motor-board firmware updated to 1.1.1 on Oct 17.
 - Repo commit:
 - Surface:    Lighting:
 - Camera: height above floor ___ cm; area seen ___ x ___ cm; real frame rate ___ fps.
@@ -69,22 +70,21 @@ placement does not count as robot error.
    If rows are lost, `set raw_hz 25` and repeat. If flashes are not found,
    lower the camera or brighten the lights' view.
 
-## Procedure (the 24 runs)
-1. Start the console and the recorder (`python3 camrec.py --label E1`).
-2. Send `calibrate` once after power-on, before placing the robot.
-3. For each row of `data/measurements.csv`, in order:
-   1. Place the robot at the origin facing +x. Mark and measure the start dots
-      (xf0..yr0).
-   2. Type the trial number into the recorder window (e.g. `trial 4`).
-   3. Send the row's commands. Write the run id from the console
-      (`run 3F2A-7: demo starting`) into the sheet.
-   4. When it finishes (second flash), mark and measure the end dots (xf..yr).
-   5. Every few runs, send `status` and write the battery into battery_pct.
-4. Quit the console and stop the recorder. Copy both folders into
-   `data/logs/` and `data/video/` (video stays out of git).
+## Procedure (the 36 runs)
+1. On the Pi: `python3 camrec.py --label E1`.
+2. On the laptop: `python tools/run_sheet.py docs/experiments/E01-baseline-dataset --pi st1maxfini.local`
+3. It walks you through every run in order: the compass check once per robot
+   per power-on, placing the robot at the origin facing +x, typing the start
+   marks, starting the run, typing the end marks. It sends the commands, fills
+   in the run id and battery, marks each run in the video, checks the numbers
+   for typos, saves after every run, and shows each run's error right away.
+   Type q to stop; running it again continues where you left off.
+4. Afterwards: stop the recorder (Ctrl+C), copy the robot log folder into
+   `data/logs/` and the recording into `data/video/` (video stays out of git).
 
-Run order is shuffled (seed 21) so battery drain and floor wear don't line up
-with one route.
+Runs are grouped by robot (all of Left's, then Center's, then Right's) and
+shuffled within each robot (seed 21), so battery drain and floor wear don't
+line up with one route.
 
 ## Training video for the detector (after the runs)
 10 minutes, no measuring: robots without tape strips if possible, all flashed
@@ -92,9 +92,10 @@ robots, driving the three routes from different start spots and headings, plus
 robots standing still at various places. `python3 camrec.py --label training`.
 
 ## Trials
-8 runs per route, 24 in total. Eight gives a 95% interval of about +/-0.8 cm
-on each route's mean error if the spread is near 1 cm; the first 5 runs per
-route are used to check that and add runs if needed.
+4 runs per route per robot, 36 in total (12 per route across the robots).
+Twelve per route gives a 95% interval of about +/-0.6 cm on each route's mean
+error if the spread is near 1 cm; 4 per robot shows whether robots differ.
+After the first robot's 12 runs, check the spread and add runs if needed.
 
 ## Raw data
 - `data/measurements.csv`: tape marks, one row per run, with run_id

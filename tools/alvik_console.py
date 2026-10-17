@@ -57,6 +57,8 @@ class Session:
         self.clock_sent = {}   # token -> (robot name, laptop send time)
         self.rows = {}         # record type -> rows written
         self.renamed = {}      # old robot name -> new name
+        self.listeners = []    # functions(name, kind, rtype, values) called for every M and D line
+        self.quiet = False     # True: don't print rows/messages (another program shows its own)
         self.clock_file = None
 
     # ---- CSV ----
@@ -105,6 +107,7 @@ class Session:
             name, seq, line = ip, None, payload
         new = False
         t_recv = time.time()
+        events = []
         with self.lock:
             r = self.robots.get(name)
             if r is None:
@@ -127,7 +130,9 @@ class Session:
 
             kind, _, rest = line.partition(",")
             if kind == "M":
-                print(f"{name}: {rest}")
+                events.append((name, "M", "", rest))
+                if not self.quiet:
+                    print(f"{name}: {rest}")
             elif kind == "H":
                 rtype, _, cols = rest.partition(",")
                 cols = cols.split(",")
@@ -140,20 +145,29 @@ class Session:
                     if len(parts) >= 2 and parts[1].strip().isdigit():
                         self.clock_row(name, parts[0], int(parts[1]), parts[2] if len(parts) > 2 else "", t_recv)
                 if rtype not in self.writers:
-                    print(f"[{name}: data for {rtype} arrived before its header; skipped]")
+                    if rtype != "CLOCK" and not self.quiet:   # clock answers are already saved above
+                        print(f"[{name}: data for {rtype} arrived before its header; skipped]")
                 else:
                     f, w = self.writers[rtype]
                     w.writerow([name, f"{t_recv:.4f}"] + vals.split(","))
                     self.rows[rtype] = self.rows.get(rtype, 0) + 1
                     if rtype not in ("RAW", "STREAM", "TRACE") or self.rows[rtype] % 250 == 0:
                         f.flush()   # high-rate files are flushed every 250 rows (~5 s) and on close
-                    if self.show_rows or rtype not in QUIET:
+                    events.append((name, "D", rtype, vals.split(",")))
+                    if not self.quiet and (self.show_rows or rtype not in QUIET):
                         print(f"  {name} {rtype}: {vals}")
             else:
                 print(f"{name}? {line}")
         if new:
-            print(f"[{name} is talking from {ip}]")
+            if not self.quiet:
+                print(f"[{name} is talking from {ip}]")
             self.on_new_robot(name)   # reply so the robot learns our address
+        for ev in events:             # outside the lock, so a listener can send commands
+            for fn in self.listeners:
+                try:
+                    fn(*ev)
+                except Exception as e:
+                    print(f"[listener error: {e}]")
 
     def close(self):
         with self.lock:
@@ -204,49 +218,55 @@ def receiver(sock, session, stop):
             print(f"[could not handle a packet: {e}]")
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--robot", action="append", default=[], help="robot IP, if robots aren't found automatically (repeatable)")
-    ap.add_argument("--outdir", help="folder for the CSV files (default logs/<date-time>)")
-    ap.add_argument("--show-stream", action="store_true", help="also print STREAM and TRACE rows")
-    args = ap.parse_args()
+class Link:
+    """The WiFi link to the robots: receives and logs everything, checks clocks,
+    sends commands. Used by this console and by tools/run_sheet.py."""
 
-    outdir = args.outdir or os.path.join("logs", dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
-    tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    tx.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    def __init__(self, outdir, robot_ips=(), show_rows=False):
+        self.outdir = outdir
+        self.robot_ips = list(robot_ips)
+        self.tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.tx.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        self.session = Session(outdir, show_rows, on_new_robot=lambda n: self.send_name(n, "ping"))
+        write_session_info(outdir)
+        self.rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.rx.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.rx.bind(("", LOG_PORT))
+        self.rx.settimeout(0.5)
+        self.stop = threading.Event()
+        threading.Thread(target=receiver, args=(self.rx, self.session, self.stop), daemon=True).start()
+        threading.Thread(target=self._clock_loop, daemon=True).start()
+        self.send_all("ping")
 
-    def send_ip(ip, cmd):
-        tx.sendto(cmd.encode(), (ip, CMD_PORT))
+    def send_ip(self, ip, cmd):
+        self.tx.sendto(cmd.encode(), (ip, CMD_PORT))
 
-    def send_name(name, cmd):
-        with session.lock:
-            r = session.robots.get(name)
+    def send_name(self, name, cmd):
+        with self.session.lock:
+            r = self.session.robots.get(name)
         if r is None:
-            print(f"[{name} isn't connected (type robots)]")
-            return
-        send_ip(r["ip"], cmd)
+            if not self.session.quiet:
+                print(f"[{name} isn't connected (type robots)]")
+            return False
+        self.send_ip(r["ip"], cmd)
+        return True
 
-    def send_all(cmd):
-        with session.lock:
-            ips = {r["ip"] for r in session.robots.values()}
-        for ip in ips or set(args.robot) or {"255.255.255.255"}:
-            send_ip(ip, cmd)
+    def send_all(self, cmd):
+        with self.session.lock:
+            ips = {r["ip"] for r in self.session.robots.values()}
+        for ip in ips or set(self.robot_ips) or {"255.255.255.255"}:
+            self.send_ip(ip, cmd)
 
-    session = Session(outdir, args.show_stream, on_new_robot=lambda n: send_name(n, "ping"))
-    write_session_info(outdir)
+    def robots(self):
+        with self.session.lock:
+            return sorted(self.session.robots)
 
-    rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    rx.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    rx.bind(("", LOG_PORT))
-    rx.settimeout(0.5)
-    stop = threading.Event()
-    threading.Thread(target=receiver, args=(rx, session, stop), daemon=True).start()
-
-    def clock_loop():
+    def _clock_loop(self):
         """Ask each robot for its clock: as soon as it appears, then every CLOCK_EVERY_S.
         Each check is a burst of 3; analysis keeps the one with the shortest round trip."""
+        session = self.session
         token, last = 0, {}
-        while not stop.wait(1.0):
+        while not self.stop.wait(1.0):
             with session.lock:
                 robots = list(session.robots)
             for name in robots:
@@ -266,14 +286,41 @@ def main():
                         break
                     t_send = time.time()                       # stamped right at sending
                     try:
-                        send_ip(ip, f"clock {tok}")
+                        self.send_ip(ip, f"clock {tok}")
                     except OSError:
                         break
                     with session.lock:
                         if tok in session.clock_sent:
                             session.clock_sent[tok] = (name, t_send)
                     time.sleep(0.05)
-    threading.Thread(target=clock_loop, daemon=True).start()
+
+    def close(self):
+        """Stop every robot, wait for their end records, close the files."""
+        if self.session.robots:
+            self.send_all("stop")   # never leave robots driving when the program closes
+            time.sleep(1.2)         # let a stopped run's end flash and RUNEND record arrive
+        self.stop.set()
+        self.session.close()
+
+    def summary(self):
+        with self.session.lock:
+            rows = sorted(self.session.robots.items())
+        return [(n, r["received"], r["dropped"],
+                 100.0 * r["dropped"] / (r["received"] + r["dropped"]) if r["received"] + r["dropped"] else 0.0)
+                for n, r in rows]
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--robot", action="append", default=[], help="robot IP, if robots aren't found automatically (repeatable)")
+    ap.add_argument("--outdir", help="folder for the CSV files (default logs/<date-time>)")
+    ap.add_argument("--show-stream", action="store_true", help="also print STREAM and TRACE rows")
+    args = ap.parse_args()
+
+    outdir = args.outdir or os.path.join("logs", dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
+    link = Link(outdir, args.robot, args.show_stream)
+    session, stop = link.session, link.stop
+    send_name, send_all = link.send_name, link.send_all
 
     def hint():
         if not session.robots and not stop.is_set():
@@ -286,7 +333,6 @@ def main():
 
     print(f"Listening on UDP {LOG_PORT}; saving to {outdir}")
     print("Waiting for robots... (switch them on, or press reset)")
-    send_all("ping")
     target = "all"
     try:
         while True:
@@ -350,17 +396,10 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        if session.robots:
-            send_all("stop")   # never leave robots driving when the console closes
-            time.sleep(1.2)    # let a stopped run's end flash and RUNEND record arrive before closing files
-        stop.set()
-        session.close()
+        link.close()
         print(f"\nSaved to {outdir}.")
-        with session.lock:
-            for n, r in sorted(session.robots.items()):
-                tot = r["received"] + r["dropped"]
-                loss = 100.0 * r["dropped"] / tot if tot else 0.0
-                print(f"  {n}: {r['received']} packets, {r['dropped']} dropped ({loss:.1f}%)")
+        for n, got, dropped, loss in link.summary():
+            print(f"  {n}: {got} packets, {dropped} dropped ({loss:.1f}%)")
 
 
 if __name__ == "__main__":

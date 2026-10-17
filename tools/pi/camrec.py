@@ -18,7 +18,8 @@ Each recording is a folder ~/recordings/<date-time>_<label>/ with:
 
 While it records, type a short note and press Enter to mark a moment, e.g.
 "trial 5 run 3F2A-7 start". That is how a video is matched to rows on the
-measurement sheet later. Ctrl+C stops and saves.
+measurement sheet later. tools/run_sheet.py sends these notes automatically
+over the network (UDP port --notes-port, default 5007). Ctrl+C stops and saves.
 
 Timestamps are taken when the Pi receives each frame, so they run about one
 frame (~33 ms) after the moment the picture was taken. The latency
@@ -119,6 +120,7 @@ def main():
     ap.add_argument("--port", type=int, default=8000, help="preview web page port (0 = no preview)")
     ap.add_argument("--no-record", action="store_true", help="preview only")
     ap.add_argument("--seconds", type=float, default=0, help="stop after this long (0 = until Ctrl+C)")
+    ap.add_argument("--notes-port", type=int, default=5007, help="UDP port for notes sent by run_sheet.py (0 = off)")
     args = ap.parse_args()
 
     cap = open_camera(args.device, args.width, args.height, args.fps)
@@ -165,6 +167,30 @@ def main():
                     ef.flush()
                 print(f"  marked at frame {state['frame']}: {text}")
         threading.Thread(target=notes, daemon=True).start()
+
+        def net_notes():
+            """Notes sent by tools/run_sheet.py on the laptop, one UDP packet each."""
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                sock.bind(("", args.notes_port))
+            except OSError as e:
+                print(f"(network notes off: {e})")
+                return
+            while True:
+                data, addr = sock.recvfrom(512)
+                text = data.decode("utf-8", "replace").strip()
+                if not text:
+                    continue
+                with lock:
+                    ecsv.writerow([f"{time.time():.3f}", state["frame"], text])
+                    ef.flush()
+                print(f"  marked at frame {state['frame']} (from {addr[0]}): {text}")
+                try:
+                    sock.sendto(b"ok " + data[:200], addr)   # receipt, so the sender knows the Pi heard it
+                except OSError:
+                    pass
+        if args.notes_port:
+            threading.Thread(target=net_notes, daemon=True).start()
 
     shown_fps, n_fps, t_fps = 0.0, 0, time.monotonic()
     try:
