@@ -28,3 +28,7 @@ logs/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Video recordings are large: keep them out of git
+*.avi
+*.mp4
