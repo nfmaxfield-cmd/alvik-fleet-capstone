@@ -89,6 +89,16 @@ robot on its mark; later runs skip the wiggle.
 The measured experiments (E0, E1, ...) are set up in
 [experiments/INDEX.md](experiments/INDEX.md).
 
+**Full sensor log.** Every experiment except `stream` now logs every sensor
+`raw_hz` times a second (default 50) to `raw.csv`, with a RUNINFO record before
+the run (firmware version, battery, WiFi signal), every setting (`param.csv`),
+and a RUNEND record after it. Both lights flash white for `sync_ms` at the
+start and end of each run so video can be lined up with the robot's clock;
+`set sync_flash 0` turns that off. The console adds the laptop's receive time
+(`t_recv`) to every row and checks each robot's clock every 10 s
+(`clock_sync.csv`). After a session, `python tools/check_session.py logs/<session>`
+reports anything missing or out of line.
+
 Give each robot at least a metre of clear floor. Center's circle swings 40 cm
 to its left, and Left turns right, so keep Left's right side and Center's
 left side clear of each other, or run them one at a time. Put a
@@ -136,7 +146,7 @@ turn` sends one command to one robot; the last 4 characters alone work too
 (`3F2A: run turn`). `stop` always stops every robot. Robot commands: `help`,
 `params`, `get <name>`, `set <name> <value>`, `route <letters>`,
 `run stream|turn|lap|grid|demo|straight`, `stop`, `status`, `identify`,
-`calibrate`, `name <Left|Center|Right>`. Console-only:
+`calibrate`, `clock`, `name <Left|Center|Right>`. Console-only:
 `robots`, `use`, `stats`, `quit`.
 
 **Several robots at once:** the turn test is safe to run on all of them

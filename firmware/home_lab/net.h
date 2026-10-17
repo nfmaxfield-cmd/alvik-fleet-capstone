@@ -71,6 +71,7 @@ void sendLine(const char* line) {
   udp.endPacket();
 }
 
+__attribute__((format(printf, 1, 2)))
 void logf(const char* fmt, ...) {
   char buf[512];
   va_list ap;

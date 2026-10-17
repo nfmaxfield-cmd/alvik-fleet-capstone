@@ -26,6 +26,9 @@
 
 Arduino_Alvik alvik;
 
+// Bump this whenever the firmware changes, so every logged run says which code it ran.
+#define FW_VERSION "2026-10-17a"
+
 const char* EXP_NAMES[] = {"stream", "turn", "lap", "grid", "demo", "straight"};
 const int N_EXP = 6;
 int gSelected = 1;
@@ -56,7 +59,7 @@ void showSelection(bool running) {
 }
 
 void printHelp() {
-  net::sendLine("M,commands: run stream|turn|lap|grid|demo|straight  stop  calibrate  name <Left|Center|Right>  set <name> <value>  get <name>  params  route <SLRE...>  status  identify  help");
+  net::sendLine("M,commands: run stream|turn|lap|grid|demo|straight  stop  calibrate  clock  name <Left|Center|Right>  set <name> <value>  get <name>  params  route <SLRE...>  status  identify  help");
 }
 
 void printParams() {
@@ -112,6 +115,14 @@ bool handleCommand(const String& raw, bool running) {
     return false;
   }
   if (verb == "params") { printParams(); return false; }
+  if (verb == "clock") {
+    // Clock check from the laptop: answer at once with our own clock, so the
+    // laptop can work out the offset and the round-trip time.
+    unsigned long now = millis();
+    net::sendLine("H,CLOCK,token,robot_ms");
+    net::logf("D,CLOCK,%s,%lu", rest.c_str(), now);
+    return false;
+  }
   if (verb == "calibrate") {
     if (running) { net::sendLine("M,busy: send stop first"); return false; }
     if (calibrateYawSign(true)) net::sendLine("M,calibrated: now place the robot on its start mark");
@@ -171,6 +182,37 @@ bool handleCommand(const String& raw, bool running) {
 
 uint16_t gBootId = 0;
 
+// Both lights white for sync_ms: the camera sees it, and the robot logs its
+// own clock at that moment, which lines up video time with robot time.
+void syncFlash(const char* tag) {
+  if (P("sync_flash") <= 0) return;
+  unsigned long on = millis();
+  alvik.left_led.set_color(1, 1, 1);
+  alvik.right_led.set_color(1, 1, 1);
+  waitMs((unsigned long)P("sync_ms"));
+  alvik.left_led.set_color(0, 0, 0);
+  alvik.right_led.set_color(0, 0, 0);
+  unsigned long off = millis();
+  net::sendLine("H,SYNC,run,tag,ms_on,ms_off");
+  net::logf("D,SYNC,%s,%s,%lu,%lu", gRunId.c_str(), tag, on, off);
+}
+
+// One record describing the run before it starts: what ran, on what, in
+// what state. Every setting follows as its own PARAM record.
+void logRunInfo(int i) {
+  uint8_t a, b, c;
+  alvik.get_fw_version(a, b, c);
+  net::sendLine("H,RUNINFO,run,experiment,fw_version,motor_fw,ms_start,battery,charging,wifi_dbm,route");
+  net::logf("D,RUNINFO,%s,%s,%s,%d.%d.%d,%lu,%d,%d,%d,%s", gRunId.c_str(), EXP_NAMES[i], FW_VERSION,
+            a, b, c, millis(), alvik.get_battery_charge(), alvik.is_battery_charging() ? 1 : 0, (int)WiFi.RSSI(),
+            gRoute.c_str());
+  net::sendLine("H,PARAM,run,name,value");
+  for (int k = 0; k < N_PARAMS; k++) {
+    net::logf("D,PARAM,%s,%s,%.4f", gRunId.c_str(), PARAMS[k].name, PARAMS[k].value);
+    delay(2);   // a burst of back-to-back UDP sends can drop packets
+  }
+}
+
 void runExperiment(int i) {
   gRun++;
   char id[16];
@@ -180,6 +222,15 @@ void runExperiment(int i) {
   gSelected = i;
   showSelection(true);
   net::logf("M,run %s: %s starting", gRunId.c_str(), EXP_NAMES[i]);
+  bool logged = i != 0;   // the stream experiment is its own log
+  unsigned long t0 = millis();
+  if (logged) {
+    logRunInfo(i);
+    rawlog::start();
+    waitMs((unsigned long)P("settle_start_ms"));
+    syncFlash("start");
+    showSelection(true);
+  }
   switch (i) {
     case 0: runStream(); break;
     case 1: runTurn(); break;
@@ -189,6 +240,18 @@ void runExperiment(int i) {
     case 5: runStraight(); break;
   }
   alvik.brake();
+  if (logged) {
+    String reason = gAbortReason;   // the end flash must run even after a stop
+    gAbortReason = "";
+    syncFlash("end");
+    rawlog::stop();
+    gAbortReason = reason;
+    net::sendLine("H,RUNEND,run,result,ms_end,duration_ms,battery,wifi_dbm,raw_rows_sent,packets_sent");
+    net::logf("D,RUNEND,%s,%s,%lu,%lu,%d,%d,%lu,%lu", gRunId.c_str(),
+              gAbortReason.length() ? (String("stopped:") + gAbortReason).c_str() : "done",
+              millis(), millis() - t0, alvik.get_battery_charge(), (int)WiFi.RSSI(), rawlog::rows,
+              (unsigned long)net::seq);
+  }
   if (gAbortReason.length()) net::logf("M,run %s: stopped (%s)", gRunId.c_str(), gAbortReason.c_str());
   else                       net::logf("M,run %s: %s finished", gRunId.c_str(), EXP_NAMES[i]);
   gAbortReason = "";
@@ -215,7 +278,7 @@ void setup() {
     alvik.set_illuminator(true);
     net::sendLine("M,WARNING: robot firmware doesn't match the Alvik library; run the library's firmware updater example. Color readings may be off.");
   }
-  net::logf("M,home_lab ready, battery %d%%", alvik.get_battery_charge());
+  net::logf("M,home_lab %s ready, battery %d%%", FW_VERSION, alvik.get_battery_charge());
   printHelp();
   showSelection(false);
 }

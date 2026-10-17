@@ -3,7 +3,7 @@
 frame and a live preview in your laptop's browser.
 
     python3 camrec.py                      # /dev/video0, 640x480, 30 fps
-    python3 camrec.py --device 2 --label E1b-straight
+    python3 camrec.py --device 2 --label E1
     python3 camrec.py --no-record          # preview only, for aiming the camera
 
 Preview: open http://<pi-hostname>.local:8000 on the laptop (e.g.
@@ -114,7 +114,7 @@ def main():
     ap.add_argument("--width", type=int, default=640)
     ap.add_argument("--height", type=int, default=480)
     ap.add_argument("--fps", type=int, default=30)
-    ap.add_argument("--label", default="", help="added to the folder name, e.g. E1b-straight")
+    ap.add_argument("--label", default="", help="added to the folder name, e.g. E1")
     ap.add_argument("--out", default=os.path.expanduser("~/recordings"))
     ap.add_argument("--port", type=int, default=8000, help="preview web page port (0 = no preview)")
     ap.add_argument("--no-record", action="store_true", help="preview only")

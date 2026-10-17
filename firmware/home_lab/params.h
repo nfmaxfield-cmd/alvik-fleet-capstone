@@ -69,6 +69,12 @@ Param PARAMS[] = {
   // --- sensor stream ---
   {"stream_hz",       20,   "sensor stream rate"},
 
+  // --- data set logging (every experiment except stream) ---
+  {"raw_hz",          50,   "full sensor log rate during runs, per second (0 = off)"},
+  {"sync_flash",       1,   "1 = flash both lights white at the start and end of each run, for lining up video"},
+  {"sync_ms",        300,   "how long each sync flash stays on, ms (at least 3 camera frames)"},
+  {"settle_start_ms", 500,  "pause before the start flash so the robot is still"},
+
   // --- safety ---
   {"safe_front_cm",    7,   "stop if something is closer than this in front (0 = off)"},
   {"safe_lift",        1,   "1 = stop if the robot reports being lifted (0 = off, if it false-trips)"},

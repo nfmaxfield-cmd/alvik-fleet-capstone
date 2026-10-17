@@ -2,7 +2,11 @@
 """Laptop console for firmware/home_lab, for one robot or several.
 
 Receives every robot's WiFi log, saves each record type to its own CSV file
-(with a `robot` column), and sends the commands you type.
+(with `robot` and `t_recv` columns: t_recv is the laptop's clock, Unix seconds,
+when the line arrived), and sends the commands you type.
+
+Every 10 s it also asks each robot for its clock and saves the answers to
+clock_sync.csv, so robot time can be converted to laptop time afterwards.
 
     python tools/alvik_console.py                 # logs go to logs/<date-time>/
     python tools/alvik_console.py --robot 192.168.1.42 --robot 192.168.1.43
@@ -22,14 +26,20 @@ firewall when asked (private networks), or no packets arrive.
 import argparse
 import csv
 import datetime as dt
+import json
 import os
+import platform
 import socket
+import subprocess
 import sys
 import threading
+import time
 
 LOG_PORT = 5005   # robot -> laptop
 CMD_PORT = 5006   # laptop -> robot
 MOVING = ("run lap", "run grid", "run demo", "run straight")   # experiments where robots drive around
+QUIET = ("STREAM", "TRACE", "RAW", "CLOCK", "PARAM")   # saved but not printed (too many rows)
+CLOCK_EVERY_S = 10
 
 
 class Session:
@@ -44,6 +54,9 @@ class Session:
         self.writers = {}      # record type -> (file, csv.writer)
         self.versions = {}     # record type -> how many files opened so far
         self.lock = threading.Lock()
+        self.clock_sent = {}   # token -> (robot name, laptop send time)
+        self.rows = {}         # record type -> rows written
+        self.clock_file = None
 
     # ---- CSV ----
     def _open(self, rtype, cols):
@@ -55,10 +68,30 @@ class Session:
         self.versions[rtype] = v + 1
         f = open(os.path.join(self.outdir, name), "w", newline="")
         w = csv.writer(f)
-        w.writerow(["robot"] + cols)
+        w.writerow(["robot", "t_recv"] + cols)
         f.flush()
         self.writers[rtype] = (f, w)
         self.headers[rtype] = cols
+
+    # ---- clock sync ----
+    def clock_row(self, name, token, robot_ms, t_recv):
+        """Called with the lock held. Pairs a robot's clock answer with when we asked."""
+        sent = self.clock_sent.pop(token, None)
+        if sent is None or sent[0] != name:
+            return
+        t_send = sent[1]
+        if self.clock_file is None:
+            os.makedirs(self.outdir, exist_ok=True)
+            f = open(os.path.join(self.outdir, "clock_sync.csv"), "w", newline="")
+            w = csv.writer(f)
+            w.writerow(["robot", "token", "t_send", "t_recv", "robot_ms", "rtt_ms", "offset_s"])
+            self.clock_file = (f, w)
+        f, w = self.clock_file
+        # Assume the answer was made halfway through the round trip.
+        offset = (t_send + t_recv) / 2 - robot_ms / 1000.0
+        w.writerow([name, token, f"{t_send:.4f}", f"{t_recv:.4f}", robot_ms,
+                    f"{(t_recv - t_send) * 1000:.1f}", f"{offset:.4f}"])
+        f.flush()
 
     # ---- one packet ----
     def handle(self, payload, ip):
@@ -70,6 +103,7 @@ class Session:
         else:
             name, seq, line = ip, None, payload
         new = False
+        t_recv = time.time()
         with self.lock:
             r = self.robots.get(name)
             if r is None:
@@ -103,9 +137,15 @@ class Session:
                     print(f"[{name}: data for {rtype} arrived before its header; skipped]")
                 else:
                     f, w = self.writers[rtype]
-                    w.writerow([name] + vals.split(","))
-                    f.flush()
-                    if self.show_rows or rtype not in ("STREAM", "TRACE"):
+                    w.writerow([name, f"{t_recv:.4f}"] + vals.split(","))
+                    self.rows[rtype] = self.rows.get(rtype, 0) + 1
+                    if rtype not in ("RAW", "STREAM", "TRACE") or self.rows[rtype] % 250 == 0:
+                        f.flush()   # high-rate files are flushed every 250 rows (~5 s) and on close
+                    if rtype == "CLOCK":
+                        tok, _, ms = vals.partition(",")
+                        if ms.strip().isdigit():
+                            self.clock_row(name, tok, int(ms), t_recv)
+                    if self.show_rows or rtype not in QUIET:
                         print(f"  {name} {rtype}: {vals}")
             else:
                 print(f"{name}? {line}")
@@ -118,6 +158,9 @@ class Session:
             for f, _ in self.writers.values():
                 f.close()
             self.writers.clear()
+            if self.clock_file:
+                self.clock_file[0].close()
+                self.clock_file = None
 
     def find(self, key):
         """Robot name from a full name or its last few characters."""
@@ -129,6 +172,20 @@ class Session:
             return exact[0]
         tail = [n for n in names if n.upper().endswith(key)]
         return tail[0] if len(tail) == 1 else None
+
+
+def write_session_info(outdir):
+    """Who, where and with what code this session was recorded."""
+    try:
+        commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
+                                cwd=os.path.dirname(os.path.abspath(__file__)), timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        commit = ""
+    os.makedirs(outdir, exist_ok=True)
+    with open(os.path.join(outdir, "session.json"), "w") as f:
+        json.dump(dict(start=dt.datetime.now().astimezone().isoformat(timespec="seconds"), start_unix=time.time(),
+                       laptop=platform.node(), python=platform.python_version(), repo_commit=commit or "unknown",
+                       note="t_recv in every CSV is the laptop clock (Unix seconds) when the line arrived"), f, indent=2)
 
 
 def receiver(sock, session, stop):
@@ -171,6 +228,7 @@ def main():
             send_ip(ip, cmd)
 
     session = Session(outdir, args.show_stream, on_new_robot=lambda n: send_name(n, "ping"))
+    write_session_info(outdir)
 
     rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     rx.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -178,6 +236,32 @@ def main():
     rx.settimeout(0.5)
     stop = threading.Event()
     threading.Thread(target=receiver, args=(rx, session, stop), daemon=True).start()
+
+    def clock_loop():
+        """Ask each robot for its clock: as soon as it appears, then every CLOCK_EVERY_S.
+        Each check is a burst of 3; analysis keeps the one with the shortest round trip."""
+        token, last = 0, {}
+        while not stop.wait(1.0):
+            with session.lock:
+                robots = list(session.robots)
+            for name in robots:
+                if time.time() - last.get(name, 0) < CLOCK_EVERY_S:
+                    continue
+                last[name] = time.time()
+                for _ in range(3):
+                    token += 1
+                    tok = f"c{token}"
+                    with session.lock:
+                        session.clock_sent[tok] = (name, time.time())
+                        if len(session.clock_sent) > 300:      # forget questions nobody answered
+                            for k in list(session.clock_sent)[:150]:
+                                del session.clock_sent[k]
+                    try:
+                        send_name(name, f"clock {tok}")
+                    except (KeyError, OSError):
+                        break
+                    time.sleep(0.05)
+    threading.Thread(target=clock_loop, daemon=True).start()
 
     def hint():
         if not session.robots and not stop.is_set():

@@ -13,7 +13,7 @@ To get updates later: `cd ~/alvik-fleet-capstone && git pull`
 
 ```
 cd ~/alvik-fleet-capstone/tools/pi
-python3 camrec.py --label E1b-straight
+python3 camrec.py --label E1
 ```
 
 - Preview on the laptop: http://st1maxfini.local:8000

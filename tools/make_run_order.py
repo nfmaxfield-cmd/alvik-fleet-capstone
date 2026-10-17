@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """Make a randomized run order that doubles as the tape-measurement sheet.
 
-    python tools/make_run_order.py E1a --robots Left --reps 16
-    python tools/make_run_order.py E1b --robots Left,Center,Right --reps 3
+    python tools/make_run_order.py E1 --robots Left --reps 8 --seed 21
+    python tools/make_run_order.py E0 --seed 5
 
 Writes docs/experiments/<folder>/data/measurements.csv (refuses to overwrite
 a sheet that already has measurements, unless --force). Print it or open it
 in Excel, fill in the blank columns as you go, and save it as CSV.
 
-Columns you fill in after each trial:
+Columns you fill in for each trial:
   run_id         from the console line "run 3F2A-7: ... starting"
-  xf_cm, yf_cm   front end of the pointer ruler, from the taped axes
-  xr_cm, yr_cm   rear end of the pointer ruler
+  xf0_cm..yr0_cm the robot's front and rear marks BEFORE the run (where it really started)
+  xf_cm, yf_cm   front mark after the run, from the taped axes
+  xr_cm, yr_cm   rear mark after the run
   battery_pct    from `status` (optional)
   excluded       1 if the trial is thrown out, with the reason in note
 
@@ -29,31 +30,22 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # experiment -> (folder, levels, commands(level), target(level))
-# target = (x_cm, y_cm, heading_deg); None = not measured for that experiment.
-# Folders follow the course numbering: E1 = Alvik precision, odometry only.
-E1 = "E01-odometry-precision/"
+# target = (x_cm ahead, y_cm to the left, heading_deg turned left) relative to
+# where the robot starts; None = not measured for that experiment.
 EXPERIMENTS = {
     "E0": ("E00-measurement-check", [f"P{i:02d}" for i in range(1, 11)],
            lambda lv: f"place the robot by hand at spot {lv}", lambda lv: (None, None, None)),
-    "E1a": (E1 + "a-turns", ["library", "imu"],
-            lambda lv: f"set turn_n 1 / set turn_method {0 if lv == 'library' else 1} / run turn",
-            lambda lv: (None, None, 90.0)),
-    "E1b": (E1 + "b-straight", ["30", "60", "120"],
-            lambda lv: f"set straight_rpm 0 / set straight_cm {lv} / run straight",
-            lambda lv: (float(lv), 0.0, 0.0)),
-    "E1c": (E1 + "c-l-path", ["L"],
-            lambda lv: "set demo_route 1 / run demo", lambda lv: (0.0, 0.0, 0.0)),
-    "E1d": (E1 + "d-square", ["1lap", "3laps"],
-            lambda lv: f"set demo_route 3 / set square_cm 50 / set square_laps {lv[0]} / run demo",
-            lambda lv: (0.0, 0.0, 0.0)),
-    # E1e: speed is shuffled; battery can't be, so it runs as two blocks (high first, then low).
-    "E1e": (E1 + "e-speed-battery", ["20rpm", "50rpm"],
-            lambda lv: f"set straight_cm 60 / set straight_rpm {lv[:2]} / run straight",
-            lambda lv: (60.0, 0.0, 0.0)),
+    # E1 baseline data set: every run logs all sensors, is filmed, and gets
+    # tape marks at its start and its end.
+    "E1": ("E01-baseline-dataset", ["straight120", "L", "square3"],
+           lambda lv: {"straight120": "set straight_rpm 0 / set straight_cm 120 / run straight",
+                       "L": "set demo_route 1 / set demo_a_cm 30 / set demo_b_cm 30 / run demo",
+                       "square3": "set demo_route 3 / set square_cm 50 / set square_laps 3 / run demo"}[lv],
+           lambda lv: (120.0, 0.0, 0.0) if lv == "straight120" else (0.0, 0.0, 0.0)),
 }
 
 COLS = ["order", "robot", "level", "commands", "run_id", "target_x_cm", "target_y_cm", "target_heading_deg",
-        "xf_cm", "yf_cm", "xr_cm", "yr_cm", "battery_pct", "excluded", "note"]
+        "xf0_cm", "yf0_cm", "xr0_cm", "yr0_cm", "xf_cm", "yf_cm", "xr_cm", "yr_cm", "battery_pct", "excluded", "note"]
 
 
 def blank(v):
@@ -83,16 +75,6 @@ def main():
             rng.shuffle(spots)   # a new order each pass, so the second reading isn't from memory
             for lv in spots:
                 rows.append((robot, lv, how(lv), f"pass {rep}"))
-    elif args.exp == "E1e":
-        if not args.reps:
-            ap.error("--reps is required (trials per speed per battery block per robot)")
-        for robot in robots:
-            for block in ("high", "low"):
-                trials = [lv for lv in levels for _ in range(args.reps)]
-                rng.shuffle(trials)
-                for lv in trials:
-                    note = "battery above 80%" if block == "high" else "battery below 30%"
-                    rows.append((robot, f"{lv}-{block}", how(lv), note))
     else:
         if not args.reps:
             ap.error("--reps is required (trials per level per robot)")
@@ -114,8 +96,8 @@ def main():
         w = csv.writer(f)
         w.writerow(COLS)
         for i, (robot, lv, cmd, note) in enumerate(rows, 1):
-            tx, ty, th = target(lv.split("-")[0])
-            w.writerow([i, robot, lv, cmd, "", blank(tx), blank(ty), blank(th), "", "", "", "", "", "", note])
+            tx, ty, th = target(lv)
+            w.writerow([i, robot, lv, cmd, "", blank(tx), blank(ty), blank(th)] + [""] * 8 + ["", "", note])
     print(f"wrote {len(rows)} trials to {os.path.relpath(out, ROOT)}" + (f" (seed {args.seed})" if args.seed is not None else ""))
     return 0
 

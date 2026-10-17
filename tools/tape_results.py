@@ -2,8 +2,8 @@
 """Turn a filled-in tape measurement sheet into the numbers and chart for an
 experiment record.
 
-    python tools/tape_results.py docs/experiments/E01-odometry-precision/b-straight
-    python tools/tape_results.py docs/experiments/E01-odometry-precision/c-l-path --logs logs/20261015-*
+    python tools/tape_results.py docs/experiments/E01-baseline-dataset
+    python tools/tape_results.py docs/experiments/E01-baseline-dataset --logs docs/experiments/E01-baseline-dataset/data/logs/*
 
 Reads <folder>/data/measurements.csv (made by make_run_order.py) and writes:
   <folder>/data/results.csv   one row per trial: position, heading and errors
@@ -14,8 +14,10 @@ With --logs, each trial's run_id is matched to the robot's own log, and the
 robot's odometry estimate is compared with the tape in pairs (paired t-test):
 does odometry see the real error?
 
-Position = midpoint of the pointer ruler's two ends. Heading = direction from
-the rear end to the front end. x is along the taped x axis, y to the left.
+Position = midpoint of the robot's front and rear marks. Heading = direction
+from the rear mark to the front mark. x is along the taped x axis, y to the left.
+If the start marks (xf0_cm ... yr0_cm) are filled in, errors are measured from
+where the robot really started; otherwise from the origin facing +x.
 Standard library only.
 """
 import argparse
@@ -79,12 +81,29 @@ def load_trials(folder):
             t = dict(r)
             t["x"], t["y"] = (xf + xr) / 2, (yf + yr) / 2
             t["heading"] = math.degrees(math.atan2(yf - yr, xf - xr))
+            # Where the run really started: measured start marks if filled in,
+            # otherwise the origin facing +x (the intended placement).
+            s4 = [num(r.get(k)) for k in ("xf0_cm", "yf0_cm", "xr0_cm", "yr0_cm")]
+            if None not in s4:
+                sx, sy = (s4[0] + s4[2]) / 2, (s4[1] + s4[3]) / 2
+                sh = math.degrees(math.atan2(s4[1] - s4[3], s4[0] - s4[2]))
+                t["start_measured"] = 1
+            else:
+                sx = sy = sh = 0.0
+                t["start_measured"] = 0
+            t["start_x"], t["start_y"], t["start_heading"] = sx, sy, sh
+            # Targets are relative to the start: target_x_cm ahead, target_y_cm to the left,
+            # target_heading_deg turned left.
             tx, ty, th = (num(r.get(k)) for k in ("target_x_cm", "target_y_cm", "target_heading_deg"))
-            t["heading_err"] = wrap180(t["heading"] - th) if th is not None else None
+            t["heading_err"] = wrap180(t["heading"] - (sh + th)) if th is not None else None
             t["abs_heading_err"] = abs(t["heading_err"]) if th is not None else None
             if tx is not None and ty is not None:
-                t["along_err"], t["cross_err"] = t["x"] - tx, t["y"] - ty
-                t["pos_err"] = math.hypot(t["along_err"], t["cross_err"])
+                c, sn = math.cos(math.radians(sh)), math.sin(math.radians(sh))
+                ex, ey = sx + c * tx - sn * ty, sy + sn * tx + c * ty      # expected end point
+                dx, dy = t["x"] - ex, t["y"] - ey
+                t["along_err"] = c * dx + sn * dy                          # along the start heading
+                t["cross_err"] = -sn * dx + c * dy                         # to the left of it
+                t["pos_err"] = math.hypot(dx, dy)
             else:
                 t["along_err"] = t["cross_err"] = t["pos_err"] = None
             out.append(t)
@@ -198,7 +217,7 @@ def repeatability(trials):
 # ---------------------------------------------------------------- main
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("folder", help="experiment folder, e.g. docs/experiments/E01-odometry-precision/b-straight")
+    ap.add_argument("folder", help="experiment folder, e.g. docs/experiments/E01-baseline-dataset")
     ap.add_argument("--logs", nargs="*", default=[], help="console log folders, to compare with odometry")
     args = ap.parse_args()
 

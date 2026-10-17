@@ -4,6 +4,7 @@
 #include "Arduino_Alvik.h"
 #include "params.h"
 #include "net.h"
+#include "rawlog.h"
 
 extern Arduino_Alvik alvik;
 
@@ -16,6 +17,7 @@ String gAbortReason = "";
 
 // Call often inside every loop. True means stop the experiment.
 bool shouldAbort() {
+  rawlog::tick();   // full sensor log rides along with every motion loop
   if (gAbortReason.length()) return true;
   if (alvik.get_touch_cancel()) { gAbortReason = "cancel button"; }
   else if (P("safe_lift") > 0 && alvik.get_lifted()) { gAbortReason = "robot lifted"; }

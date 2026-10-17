@@ -236,6 +236,7 @@ void runGrid() {
 // Odometry is zeroed at the start, so the final pose is the return error.
 // ===================================================================
 void demoLog(const char* step) {
+  rawlog::step++;   // RAW records carry this count, so samples can be matched to route steps
   float x, y, th;
   alvik.get_pose(x, y, th);
   net::logf("D,DEMO_STEP,%s,%s,%s,%.1f,%.1f,%.1f,%lu", gRunId.c_str(), net::name, step, x, y, th, millis());
@@ -332,6 +333,7 @@ void runStraight() {
   unsigned long t0 = millis();
   bool ok = rpm > 0 ? rollStraight(d, rpm) : libraryMove(d);   // rpm 0 = library's own speed control
   alvik.brake();
+  rawlog::step = 1;   // RAW records after this are the robot settling
   ok = ok && waitMs((unsigned long)P("settle_ms"));
   float x, y, th;
   alvik.get_pose(x, y, th);

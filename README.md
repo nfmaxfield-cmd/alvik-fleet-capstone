@@ -43,6 +43,8 @@ tools/
   summarize.py       tables and stats from saved sessions
   make_run_order.py  shuffled run order + tape measurement sheet per experiment
   tape_results.py    tape measurements -> errors, stats, chart for a record
+  check_session.py   after a session: sensor log, clocks and video line up?
+  pi/camrec.py       overhead camera recorder for the Raspberry Pi
 docs/
   home-experiments.md  how to run the home experiments
   experiments/         one record per experiment (E0-E8), index, template
