@@ -62,7 +62,28 @@ rewinds, applies the fix, and replays the wheel and gyro readings since.
 - Robot picked up and set down 30 cm away: re-found within 0.5 s of being
   set down (0.3 cm error after).
 
+- Full simulated E1 session (`tools/sim`, 36 runs, 3 robots, seed 7), end
+  error against the tape: wheels only 9.2 cm, wheels + gyro 3.8 cm, wheel
+  distance + gyro heading 1.5 cm, + camera 0.15 cm (filter and factor graph
+  alike); 0.19 cm with half the frames lost or 200 ms late, 0.42 cm at 1
+  frame/s.
+
+## Camera height
+
+The floor calibration maps the floor plane to pixels, but the camera sees the
+robot's top, about 4 cm up, which appears pushed away from the point below the
+camera (about 1.7 cm at 50 cm out, with the camera 115 cm up). If the
+calibration file gives `camera.height_cm` and `camera.nadir_floor_cm` (the
+floor point straight below the lens), sightings are moved back to the floor
+point below the robot's top. In simulation this took the camera end error
+from 2.2 cm to 0.15 cm. Measure both when the camera is mounted.
+
 ## Known limits
+
+- Wheels + gyro together came out worse than gyro heading alone in
+  simulation (3.8 vs 1.5 cm): the filter trusts the wheels' turn rate more
+  than it should during turns. Fitting the noise settings from E1 should fix
+  this; check it is gone after the fit.
 
 - The noise settings in `ekf.Noise` are starting guesses. Fit them from E1:
   gyro noise and bias from the still periods, wheel errors from tape vs
