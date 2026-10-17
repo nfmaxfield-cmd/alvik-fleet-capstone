@@ -1,0 +1,633 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alvik labelling</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1c1f24; --panel2: #23272e; --line: #31363f;
+    --text: #e7e9ec; --dim: #9aa1ab; --accent: #6cb6ff; --bad: #ff6b6b; --ok: #3ddc97;
+    --alvik: #3ddc97; --hand: #ffb347; --unknown: #c792ea; --machine: #4fc3f7; --rejected: #8a8f98;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { display: grid; grid-template-rows: auto 1fr; overflow: hidden; }
+  header { display: flex; align-items: center; gap: 14px; padding: 8px 14px; background: var(--panel);
+    border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; white-space: nowrap; }
+  header .src { color: var(--dim); font-size: 12px; }
+  .tabs { display: flex; gap: 4px; }
+  .tabs button { background: var(--panel2); color: var(--dim); border: 1px solid var(--line); border-radius: 6px;
+    padding: 5px 10px; cursor: pointer; font: inherit; }
+  .tabs button.on { color: var(--text); border-color: var(--accent); background: #233041; }
+  .progress { flex: 1; min-width: 180px; display: flex; align-items: center; gap: 10px; }
+  .bar { flex: 1; height: 10px; background: var(--panel2); border-radius: 5px; overflow: hidden; display: flex; }
+  .bar span { height: 100%; }
+  .bar .rev { background: var(--ok); } .bar .auto { background: #2a7f5d; } .bar .edit { background: var(--hand); }
+  .progress .txt { color: var(--dim); font-size: 12px; white-space: nowrap; }
+  main { display: grid; grid-template-columns: 1fr 330px; min-height: 0; }
+  #stage { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 10px; gap: 8px; }
+  #wrap { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+  canvas#view { background: #000; border-radius: 4px; cursor: default; }
+  canvas#view.hmode { cursor: crosshair; }
+  canvas#strip { width: 100%; height: 18px; cursor: pointer; border-radius: 3px; background: var(--panel2); }
+  .framebar { display: flex; gap: 12px; align-items: baseline; color: var(--dim); font-size: 13px; }
+  .framebar b { color: var(--text); font-weight: 600; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; background: var(--panel2);
+    border: 1px solid var(--line); color: var(--text); }
+  .pill.pending { border-color: var(--dim); } .pill.edited { border-color: var(--hand); color: var(--hand); }
+  .pill.reviewed { border-color: var(--ok); color: var(--ok); } .pill.auto { border-color: #2a7f5d; color: #7fd8b1; }
+  aside { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding: 12px; }
+  aside h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 16px 0 6px; }
+  aside > h2:first-child { margin-top: 0; }
+  .objs { display: flex; flex-direction: column; gap: 4px; }
+  .obj { display: grid; grid-template-columns: 12px 1fr auto; gap: 8px; align-items: center; padding: 5px 7px;
+    border-radius: 6px; background: var(--panel2); cursor: pointer; border: 1px solid transparent; font-size: 13px; }
+  .obj.sel { border-color: #fff; }
+  .obj .sw { width: 12px; height: 12px; border-radius: 50%; }
+  .obj .st { color: var(--dim); font-size: 12px; }
+  .obj.rejected { opacity: .55; text-decoration: line-through; }
+  .muted { color: var(--dim); font-size: 12px; }
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 12.5px; }
+  kbd { font: 11.5px ui-monospace, Consolas, monospace; background: var(--panel2); border: 1px solid var(--line);
+    border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; color: var(--text); white-space: nowrap;
+    align-self: start; justify-self: start; }
+  .btn { display: block; width: 100%; text-align: left; margin: 6px 0; padding: 7px 10px; background: var(--panel2);
+    color: var(--text); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; font: inherit; }
+  .btn:hover { border-color: var(--accent); }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .spot { background: #1f2a24; border: 1px solid #2a4d3c; border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+  .row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .row input { width: 64px; background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 4px; padding: 3px 5px; font: inherit; }
+  #toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); background: #2b3340; color: var(--text);
+    padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line); opacity: 0; transition: opacity .2s;
+    pointer-events: none; max-width: 70vw; z-index: 5; }
+  #toast.show { opacity: 1; } #toast.err { background: #4a2326; border-color: var(--bad); }
+  #saveerr { display: none; background: #4a2326; color: #ffd7d7; padding: 6px 14px; font-size: 13px; }
+  .legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--dim); }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } aside { border-left: 0; border-top: 1px solid var(--line); } }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Alvik labelling</h1>
+  <span class="src" id="src"></span>
+  <div class="tabs" id="tabs">
+    <button data-mode="all">All picked frames <span id="n-all"></span></button>
+    <button data-mode="low">Low confidence <span id="n-low"></span></button>
+    <button data-mode="spot">Spot check <span id="n-spot"></span></button>
+  </div>
+  <div class="progress">
+    <div class="bar" id="bar"><span class="rev"></span><span class="auto"></span><span class="edit"></span></div>
+    <span class="txt" id="progtxt"></span>
+  </div>
+</header>
+<div id="saveerr"></div>
+<main>
+  <section id="stage">
+    <div class="framebar">
+      <span>Frame <b id="fno">-</b></span>
+      <span id="ftime"></span>
+      <span id="fstate" class="pill"></span>
+      <span id="fconf"></span>
+      <span id="freasons"></span>
+      <span style="flex:1"></span>
+      <span id="fpos"></span>
+    </div>
+    <div id="wrap"><canvas id="view" width="640" height="480"></canvas></div>
+    <canvas id="strip" title="Frames in this list: click to jump. Green = reviewed, dark green = auto-accepted, orange = changed but not finished, grey = not looked at."></canvas>
+  </section>
+  <aside>
+    <h2>Objects on this frame</h2>
+    <div class="objs" id="objs"></div>
+    <div class="legend" style="margin-top:8px">
+      <span><i style="background:var(--alvik)"></i>1 alvik</span><span><i style="background:var(--hand)"></i>2 hand</span>
+      <span><i style="background:var(--unknown)"></i>3 unknown</span><span><i style="background:var(--machine)"></i>4 machine</span>
+    </div>
+
+    <div id="spotbox" style="display:none">
+      <h2>Spot check</h2>
+      <div class="spot" id="spottxt"></div>
+      <button class="btn" id="spotdraw">Draw a new random sample</button>
+    </div>
+
+    <h2>High-confidence frames</h2>
+    <div class="row">Low confidence below <input id="thr" type="number" min="0" max="1" step="0.05"></div>
+    <div class="muted" id="hightxt" style="margin-top:6px"></div>
+    <button class="btn" id="autoacc">Accept remaining high-confidence frames</button>
+    <button class="btn" id="autoundo">Undo auto-accept</button>
+    <button class="btn" id="reset">Reset this frame to the guesses</button>
+
+    <h2>Keys</h2>
+    <div class="keys">
+      <kbd>Enter</kbd><span>Accept this frame, go to the next one to do</span>
+      <kbd>click</kbd><span>Select an object; drag to move it</span>
+      <kbd>H</kbd><span>then click: set heading of the selected object (or drag its arrow tip, or Shift+drag)</span>
+      <kbd>F</kbd><span>Flip heading 180&deg;</span>
+      <kbd>Del</kbd><span>Reject selected guess (again: bring it back)</span>
+      <kbd>N</kbd><span>New object at the mouse (or double-click)</span>
+      <kbd>1-4</kbd><span>Class: alvik, hand, unknown, machine</span>
+      <kbd>E</kbd><span>Frame is empty (no objects), go next</span>
+      <kbd>&larr; &rarr;</kbd><span>Previous / next frame (Shift: 10)</span>
+      <kbd>Tab</kbd><span>Select next object</span>
+      <kbd>I</kbd><span>Change the selected object's number</span>
+      <kbd>G</kbd><span>Go to a frame number</span>
+      <kbd>Z</kbd><span>Undo (also Ctrl+Z)</span>
+      <kbd>Esc</kbd><span>Cancel / deselect</span>
+    </div>
+    <p class="muted">A dashed arrow is only a heading guess (robot turning or maybe reversing). It is saved as unknown unless you set it with H, drag, or F.</p>
+    <p class="muted" id="paths"></p>
+  </aside>
+</main>
+<div id="toast"></div>
+
+<script>
+"use strict";
+const COLORS = { alvik: "#3ddc97", hand: "#ffb347", unknown: "#c792ea", machine: "#4fc3f7" };
+const CLASSES = ["alvik", "hand", "unknown", "machine"];
+const S = {
+  info: null, mode: "all", queue: [], idx: 0, frame: null, sel: -1, img: null, scale: 1, dpr: 1,
+  mouse: null, drag: null, hmode: false, undo: [], busy: false, stats: null, lastCls: "alvik", imgCache: new Map(),
+};
+const $ = (id) => document.getElementById(id);
+const view = $("view"), ctx = view.getContext("2d");
+const strip = $("strip"), sctx = strip.getContext("2d");
+
+// ---------------------------------------------------------------- server calls
+async function api(path, body) {
+  const opt = body === undefined ? {} :
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const r = await fetch(path, opt);
+  let j;
+  try { j = await r.json(); } catch (e) { j = { error: "The app did not answer properly (" + r.status + ")" }; }
+  if (!r.ok || j.error) throw new Error(j.error || r.statusText);
+  return j;
+}
+function toast(msg, err) {
+  const t = $("toast");
+  t.textContent = msg; t.className = "show" + (err ? " err" : "");
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => t.className = "", err ? 5000 : 2200);
+}
+
+// ---------------------------------------------------------------- loading
+async function init() {
+  try {
+    S.info = await api("/api/info");
+  } catch (e) { toast("Cannot reach the app: " + e.message, true); return; }
+  $("title").textContent = S.info.recording;
+  $("src").textContent = "guesses: " + S.info.guess_source + " · robot " + S.info.robot_px.toFixed(0) + " px";
+  $("paths").textContent = "Saved to " + S.info.labels_path;
+  const pos = S.info.position || {};
+  S.mode = pos.mode || "all";
+  await loadQueue();
+  let i = S.queue.findIndex((q) => q.f === pos.frame);
+  if (i < 0) i = firstToDo(0);
+  await showFrame(Math.max(0, i));
+}
+async function loadQueue() {
+  const j = await api("/api/queue?mode=" + S.mode);
+  S.queue = j.frames;
+  setStats(j.stats);
+  document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.mode === S.mode));
+}
+function firstToDo(from) {
+  for (let k = 0; k < S.queue.length; k++) {
+    const i = (from + k) % S.queue.length;
+    if (S.queue[i].state === "pending" || S.queue[i].state === "edited") return i;
+  }
+  return -1;
+}
+async function showFrame(i) {
+  if (!S.queue.length) { S.frame = null; draw(); renderSide(); drawStrip(); return; }
+  i = Math.max(0, Math.min(S.queue.length - 1, i));
+  S.idx = i;
+  const f = S.queue[i].f;
+  let fr;
+  try { fr = await api("/api/frame?f=" + f); } catch (e) { toast(e.message, true); return; }
+  if (S.queue[S.idx].f !== f) return;          // user moved on meanwhile
+  S.frame = fr; S.sel = -1; S.hmode = false; S.drag = null;
+  S.img = await getImage(f);
+  fit(); draw(); renderSide(); drawStrip();
+  for (const k of [1, 2]) if (S.queue[i + k]) getImage(S.queue[i + k].f);   // preload
+  api("/api/position", { mode: S.mode, frame: f }).catch(() => {});
+}
+function getImage(f) {
+  if (S.imgCache.has(f)) return S.imgCache.get(f);
+  const p = new Promise((res) => {
+    const im = new Image();
+    im.onload = () => res(im);
+    im.onerror = () => res(null);
+    im.src = "/img/" + String(f).padStart(6, "0") + ".jpg";
+  });
+  S.imgCache.set(f, p);
+  if (S.imgCache.size > 40) S.imgCache.delete(S.imgCache.keys().next().value);
+  return p;
+}
+
+// ---------------------------------------------------------------- drawing
+function fit() {
+  const w = S.info.width, h = S.info.height, box = $("wrap").getBoundingClientRect();
+  S.scale = Math.max(0.5, Math.min(box.width / w, box.height / h, 2.5));
+  S.dpr = window.devicePixelRatio || 1;
+  view.style.width = Math.round(w * S.scale) + "px"; view.style.height = Math.round(h * S.scale) + "px";
+  view.width = Math.round(w * S.scale * S.dpr); view.height = Math.round(h * S.scale * S.dpr);
+}
+function headingOf(o) {
+  if (o.heading_known && o.heading_deg !== null && o.heading_deg !== undefined) return { h: o.heading_deg, solid: true };
+  if (o.heading_guess !== null && o.heading_guess !== undefined) return { h: o.heading_guess, solid: false };
+  return null;
+}
+function arrowLen() { return S.info.robot_px * 1.05; }
+function tipOf(o) {
+  const hd = headingOf(o); if (!hd) return null;
+  const a = hd.h * Math.PI / 180, L = arrowLen();
+  return { x: o.x + L * Math.cos(a), y: o.y - L * Math.sin(a) };
+}
+function statusText(o) {
+  if (S.frame.state === "auto" && o.status === "confirmed") return "auto";
+  if (o.status === "pending") return o.score !== null && o.score !== undefined ? "guess " + o.score.toFixed(2) : "guess";
+  return o.status;
+}
+function draw() {
+  const s = S.scale * S.dpr;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, view.width, view.height);
+  if (!S.frame) { ctx.fillStyle = "#888"; ctx.font = 16 * S.dpr + "px system-ui"; ctx.fillText("No frames in this list.", 20 * S.dpr, 40 * S.dpr); return; }
+  ctx.setTransform(s, 0, 0, s, 0, 0);
+  if (S.img) ctx.drawImage(S.img, 0, 0, S.info.width, S.info.height);
+  const lw = 1 / S.scale;                       // one screen pixel in image units
+  const r = S.info.robot_px / 2;
+  S.frame.objects.forEach((o, i) => {
+    const rej = o.status === "rejected";
+    const col = rej ? "#8a8f98" : COLORS[o.cls] || "#fff";
+    const sel = i === S.sel;
+    ctx.save();
+    // body ring
+    ctx.lineWidth = (sel ? 2.5 : 1.5) * lw;
+    ctx.strokeStyle = col; ctx.globalAlpha = rej ? 0.7 : 0.9;
+    if (rej) ctx.setLineDash([4 * lw, 3 * lw]);
+    ctx.beginPath(); ctx.arc(o.x, o.y, r, 0, 2 * Math.PI); ctx.stroke();
+    ctx.setLineDash([]);
+    if (sel) { ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5 * lw; ctx.beginPath(); ctx.arc(o.x, o.y, r + 4 * lw, 0, 2 * Math.PI); ctx.stroke(); }
+    // heading arrow
+    const hd = headingOf(o);
+    if (hd && !rej) {
+      const t = tipOf(o), a = hd.h * Math.PI / 180;
+      ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 2.2 * lw; ctx.globalAlpha = 1;
+      if (!hd.solid) ctx.setLineDash([5 * lw, 4 * lw]);
+      ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.lineTo(t.x, t.y); ctx.stroke(); ctx.setLineDash([]);
+      const hl = 8 * lw * 1.2, sp = 0.45;
+      ctx.beginPath(); ctx.moveTo(t.x, t.y);
+      ctx.lineTo(t.x - hl * Math.cos(a - sp), t.y + hl * Math.sin(a - sp));
+      ctx.lineTo(t.x - hl * Math.cos(a + sp), t.y + hl * Math.sin(a + sp)); ctx.closePath();
+      if (hd.solid) ctx.fill(); else ctx.stroke();
+      if (sel) { ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5 * lw; ctx.beginPath(); ctx.arc(t.x, t.y, 5 * lw, 0, 2 * Math.PI); ctx.stroke(); }
+    }
+    // centre dot
+    ctx.globalAlpha = 1; ctx.fillStyle = col;
+    ctx.beginPath(); ctx.arc(o.x, o.y, 3.2 * lw, 0, 2 * Math.PI); ctx.fill();
+    ctx.strokeStyle = "#000"; ctx.lineWidth = 1 * lw; ctx.stroke();
+    if (rej) { ctx.strokeStyle = col; ctx.lineWidth = 2 * lw; const k = r * 0.6;
+      ctx.beginPath(); ctx.moveTo(o.x - k, o.y - k); ctx.lineTo(o.x + k, o.y + k); ctx.moveTo(o.x + k, o.y - k); ctx.lineTo(o.x - k, o.y + k); ctx.stroke(); }
+    // label
+    const txt = "#" + o.obj + " " + o.cls + " · " + statusText(o);
+    ctx.font = 12 * lw + "px system-ui, sans-serif";
+    const tw = ctx.measureText(txt).width, th = 15 * lw;
+    let lx = o.x + r * 0.8, ly = o.y - r - 4 * lw;
+    if (lx + tw + 8 * lw > S.info.width) lx = o.x - r * 0.8 - tw - 8 * lw;
+    if (ly - th < 0) ly = o.y + r + th + 4 * lw;
+    ctx.fillStyle = "rgba(10,12,15,0.78)"; ctx.fillRect(lx, ly - th + 3 * lw, tw + 8 * lw, th);
+    ctx.fillStyle = sel ? "#fff" : col; ctx.fillText(txt, lx + 4 * lw, ly);
+    ctx.restore();
+  });
+  // heading-setting line
+  if (S.hmode && S.sel >= 0 && S.mouse) {
+    const o = S.frame.objects[S.sel];
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5 * lw; ctx.setLineDash([4 * lw, 4 * lw]);
+    ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.lineTo(S.mouse.x, S.mouse.y); ctx.stroke(); ctx.setLineDash([]);
+  }
+  view.classList.toggle("hmode", S.hmode);
+}
+function drawStrip() {
+  const w = strip.clientWidth, h = strip.clientHeight, d = window.devicePixelRatio || 1;
+  strip.width = w * d; strip.height = h * d;
+  sctx.setTransform(d, 0, 0, d, 0, 0);
+  sctx.clearRect(0, 0, w, h);
+  const n = S.queue.length; if (!n) return;
+  const cw = w / n;
+  const col = { reviewed: "#3ddc97", auto: "#2a7f5d", edited: "#ffb347", pending: "#4a515c" };
+  S.queue.forEach((q, i) => { sctx.fillStyle = col[q.state] || "#4a515c"; sctx.fillRect(i * cw, 3, Math.max(1, cw - (cw > 3 ? 1 : 0)), h - 6); });
+  sctx.fillStyle = "#fff"; sctx.fillRect(Math.min(w - 2, S.idx * cw + cw / 2 - 1), 0, 2, h);
+}
+function renderSide() {
+  const fr = S.frame;
+  if (!fr) { $("objs").innerHTML = ""; return; }
+  $("fno").textContent = fr.frame;
+  $("ftime").textContent = fr.time_s.toFixed(1) + " s";
+  const st = $("fstate"); st.textContent = fr.state === "auto" ? "auto-accepted" : fr.state === "edited" ? "changed, not finished" : fr.state;
+  st.className = "pill " + fr.state;
+  $("fconf").textContent = "confidence " + fr.conf.toFixed(2);
+  $("freasons").textContent = (fr.reasons || []).filter((r) => r !== "regular").join(", ") + (fr.in_spot ? "  [spot check]" : "");
+  $("fpos").textContent = (S.idx + 1) + " / " + S.queue.length + " in list";
+  const box = $("objs"); box.innerHTML = "";
+  if (!fr.objects.length) {
+    box.innerHTML = '<div class="muted">' + (fr.empty ? "Marked empty." : "No guesses. Click N (or double-click) on each robot to add it; the tracker follows it from here. Or press E if the floor is empty.") + "</div>";
+  }
+  fr.objects.forEach((o, i) => {
+    const d = document.createElement("div");
+    d.className = "obj" + (i === S.sel ? " sel" : "") + (o.status === "rejected" ? " rejected" : "");
+    const hd = headingOf(o);
+    const htxt = hd ? (hd.solid ? Math.round(hd.h) + "°" : "~" + Math.round(hd.h) + "°?") : "no heading";
+    d.innerHTML = '<span class="sw" style="background:' + (COLORS[o.cls] || "#fff") + '"></span><span>#' + o.obj + " " + o.cls +
+      ' <span class="st">' + htxt + "</span></span><span class=\"st\">" + statusText(o) + "</span>";
+    d.onclick = () => { S.sel = i; draw(); renderSide(); };
+    box.appendChild(d);
+  });
+}
+function setStats(st) {
+  S.stats = st;
+  $("n-all").textContent = "(" + st.selected + ")";
+  $("n-low").textContent = "(" + st.low_left + " left)";
+  $("n-spot").textContent = st.spot.sample ? "(" + st.spot.checked + "/" + st.spot.sample + ")" : "";
+  const q = S.queue, n = Math.max(1, q.length);
+  const c = (s) => q.filter((x) => x.state === s).length;
+  const rev = c("reviewed"), au = c("auto"), ed = c("edited");
+  const spans = $("bar").children;
+  spans[0].style.width = (100 * rev / n) + "%"; spans[1].style.width = (100 * au / n) + "%"; spans[2].style.width = (100 * ed / n) + "%";
+  $("progtxt").textContent = rev + " reviewed" + (au ? " · " + au + " auto" : "") + " · " + (q.length - rev - au) + " left of " + q.length;
+  $("thr").value = st.low_threshold;
+  $("hightxt").textContent = st.high_pending + " high-confidence frames not looked at; " + st.auto + " auto-accepted.";
+  $("autoacc").disabled = !st.high_pending; $("autoundo").disabled = !st.auto;
+  const sp = st.spot;
+  $("spotbox").style.display = S.mode === "spot" ? "" : "none";
+  let t;
+  if (!sp.sample) t = "No sample yet. It takes a random 10% of the high-confidence frames nobody has looked at.";
+  else if (!sp.checked) t = "Sample of " + sp.sample + " frames (from " + sp.pool + "). Check each one: Enter if every guess is right, otherwise fix it.";
+  else t = "<b>" + sp.agree + " of " + sp.checked + "</b> checked frames needed no correction (" + Math.round(100 * sp.agreement) +
+    "%, 95% range " + Math.round(100 * sp.range95[0]) + "–" + Math.round(100 * sp.range95[1]) + "%). Objects: " +
+    (sp.objects - sp.objects_changed) + " of " + sp.objects + " right. " + (sp.sample - sp.checked) + " left to check.";
+  $("spottxt").innerHTML = t;
+  const se = $("saveerr");
+  se.style.display = st.save_error ? "block" : "none"; se.textContent = st.save_error ? "Not saved: " + st.save_error : "";
+}
+
+// ---------------------------------------------------------------- changes
+function clone(x) { return JSON.parse(JSON.stringify(x)); }
+function pushUndo() { S.undo.push({ f: S.frame.frame, objects: clone(S.frame.objects), state: S.frame.state, how: S.frame.how, sel: S.sel }); if (S.undo.length > 200) S.undo.shift(); }
+function markCorrected(o) { if (o.status === "pending" || o.status === "confirmed") o.status = "corrected"; }
+async function save(state, how) {
+  const fr = S.frame;
+  const body = { frame: fr.frame, objects: fr.objects, state: state, how: how || fr.how || null };
+  S.busy = true;
+  const slow = setTimeout(() => toast("Updating the guesses after this frame\u2026"), 400);
+  try {
+    const j = await api("/api/frame", body);
+    if (S.frame && S.frame.frame === fr.frame) {
+      const sel = S.sel; S.frame = j.frame; S.sel = Math.min(sel, S.frame.objects.length - 1);
+    }
+    const q = S.queue.find((x) => x.f === fr.frame); if (q) { q.state = j.frame.state; q.conf = j.frame.conf; }
+    setStats(j.stats);
+    if (j.updated) {
+      toast("Guesses updated on " + j.updated + " later frame" + (j.updated > 1 ? "s" : ""));
+      if (S.mode === "low") S.queueStale = true;   // which frames are low-confidence may have changed
+    }
+  } catch (e) { toast("Not saved: " + e.message, true); }
+  finally { clearTimeout(slow); S.busy = false; }
+  draw(); renderSide(); drawStrip();
+}
+function editState() { return S.frame.state === "reviewed" ? "reviewed" : "edited"; }
+async function change(fn) {
+  if (!S.frame || S.busy) return;
+  pushUndo(); fn(); draw(); renderSide();
+  await save(editState(), editHow());
+}
+function editHow() { return S.frame.how && S.frame.how !== "auto" ? S.frame.how : (S.mode === "spot" ? "spot" : "user"); }
+async function accept() {
+  if (!S.frame || S.busy) return;
+  pushUndo();
+  for (const o of S.frame.objects) if (o.status === "pending") o.status = "confirmed";
+  await save("reviewed", editHow());
+  await goNextToDo();
+}
+async function markEmpty() {
+  if (!S.frame || S.busy) return;
+  pushUndo();
+  S.frame.objects = S.frame.objects.filter((o) => o.source !== "user");
+  for (const o of S.frame.objects) o.status = "rejected";
+  await save("reviewed", S.mode === "spot" ? "spot" : "user");
+  await goNextToDo();
+}
+async function goNextToDo() {
+  if (S.queueStale) {
+    const cur = S.frame ? S.frame.frame : -1;
+    S.queueStale = false;
+    await loadQueue();
+    let k = S.queue.findIndex((q) => q.f >= cur);
+    S.idx = k < 0 ? S.queue.length - 1 : (S.queue[k].f === cur ? k : k - 1);
+  }
+  const i = firstToDo(S.idx + 1);
+  if (i < 0) { toast("Every frame in this list is done."); return; }
+  if (i <= S.idx) toast("Back to the first unfinished frame.");
+  await showFrame(i);
+}
+async function undo() {
+  const u = S.undo.pop();
+  if (!u) { toast("Nothing to undo."); return; }
+  if (!S.frame || S.frame.frame !== u.f) {
+    let i = S.queue.findIndex((q) => q.f === u.f);
+    if (i < 0) { await loadQueue(); i = S.queue.findIndex((q) => q.f === u.f); }
+    if (i >= 0) await showFrame(i);
+  }
+  if (!S.frame || S.frame.frame !== u.f) { toast("Cannot go back to frame " + u.f, true); return; }
+  S.frame.objects = u.objects; S.frame.how = u.how; S.sel = u.sel;
+  await save(u.state, u.how);
+  toast("Undone (frame " + u.f + ")");
+}
+function addAt(x, y) {
+  change(() => {
+    S.frame.objects.push({ obj: null, cls: S.lastCls, x: x, y: y, heading_deg: null, heading_known: false,
+      heading_guess: null, source: "user", status: "corrected", score: null });
+    S.sel = S.frame.objects.length - 1;
+  });
+}
+function setHeading(o, px, py) {
+  const h = (Math.atan2(-(py - o.y), px - o.x) * 180 / Math.PI + 360) % 360;
+  o.heading_deg = Math.round(h * 10) / 10; o.heading_known = true; o.heading_guess = null; markCorrected(o);
+}
+
+// ---------------------------------------------------------------- mouse
+function imgPos(ev) {
+  const b = view.getBoundingClientRect();
+  return { x: (ev.clientX - b.left) / S.scale, y: (ev.clientY - b.top) / S.scale };
+}
+function hit(p) {
+  if (!S.frame) return -1;
+  const lim = Math.max(10 / S.scale, S.info.robot_px * 0.6);
+  let best = -1, bd = 1e9;
+  S.frame.objects.forEach((o, i) => { const d = Math.hypot(o.x - p.x, o.y - p.y); if (d < lim && d < bd) { best = i; bd = d; } });
+  return best;
+}
+view.addEventListener("contextmenu", (e) => e.preventDefault());
+view.addEventListener("mousedown", (ev) => {
+  if (!S.frame || S.busy) return;
+  const p = imgPos(ev);
+  if (S.hmode && S.sel >= 0) {
+    S.hmode = false;
+    const i = S.sel; change(() => setHeading(S.frame.objects[i], p.x, p.y));
+    return;
+  }
+  // arrow tip of the selected object: drag to turn it
+  if (S.sel >= 0) {
+    const t = tipOf(S.frame.objects[S.sel]);
+    if (t && Math.hypot(t.x - p.x, t.y - p.y) < 8 / S.scale) { S.drag = { kind: "turn", i: S.sel, before: clone(S.frame.objects) }; return; }
+  }
+  const i = hit(p);
+  if (i < 0) { S.sel = -1; draw(); renderSide(); return; }
+  S.sel = i;
+  const kind = ev.shiftKey || ev.button === 2 ? "turn" : "move";
+  S.drag = { kind: kind, i: i, start: p, before: clone(S.frame.objects), moved: false,
+    ox: S.frame.objects[i].x, oy: S.frame.objects[i].y };
+  draw(); renderSide();
+});
+window.addEventListener("mousemove", (ev) => {
+  if (!S.frame) return;
+  const p = imgPos(ev);
+  const inside = p.x >= 0 && p.y >= 0 && p.x <= S.info.width && p.y <= S.info.height;
+  S.mouse = inside ? p : null;
+  const d = S.drag;
+  if (d) {
+    const o = S.frame.objects[d.i];
+    if (d.kind === "move") {
+      if (Math.hypot(p.x - d.start.x, p.y - d.start.y) > 1.5 / S.scale || d.moved) {
+        d.moved = true;
+        o.x = Math.min(S.info.width, Math.max(0, d.ox + p.x - d.start.x));
+        o.y = Math.min(S.info.height, Math.max(0, d.oy + p.y - d.start.y));
+      }
+    } else if (Math.hypot(p.x - o.x, p.y - o.y) > 4) { setHeading(o, p.x, p.y); d.moved = true; }
+    draw();
+  } else if (S.hmode) draw();
+});
+window.addEventListener("mouseup", () => {
+  const d = S.drag; S.drag = null;
+  if (!d || !d.moved) return;
+  const o = S.frame.objects[d.i];
+  if (d.kind === "move") { o.x = Math.round(o.x * 10) / 10; o.y = Math.round(o.y * 10) / 10; markCorrected(o); }
+  S.undo.push({ f: S.frame.frame, objects: d.before, state: S.frame.state, how: S.frame.how, sel: d.i });
+  renderSide();
+  save(editState(), editHow());
+});
+view.addEventListener("dblclick", (ev) => { const p = imgPos(ev); if (hit(p) < 0) addAt(p.x, p.y); });
+strip.addEventListener("click", (ev) => {
+  const b = strip.getBoundingClientRect();
+  showFrame(Math.floor((ev.clientX - b.left) / b.width * S.queue.length));
+});
+
+// ---------------------------------------------------------------- keys
+// Buttons give the keyboard back right away, so Enter never presses a button by accident.
+document.addEventListener("click", (ev) => { const b = ev.target.closest && ev.target.closest("button"); if (b) b.blur(); });
+window.addEventListener("keydown", async (ev) => {
+  if (ev.target && (ev.target.tagName === "INPUT" || ev.target.tagName === "TEXTAREA")) return;
+  if (ev.target && ev.target.tagName === "BUTTON") ev.target.blur();
+  if (!S.frame && !["ArrowLeft", "ArrowRight"].includes(ev.key)) return;
+  const k = ev.key, sel = S.sel >= 0 ? S.frame.objects[S.sel] : null;
+  if ((k === "z" || k === "Z") && !ev.altKey) { ev.preventDefault(); await undo(); return; }
+  if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  if (S.busy && k !== "Escape") { ev.preventDefault(); return; }
+  switch (k) {
+    case "Enter": ev.preventDefault(); await accept(); break;
+    case "ArrowRight": ev.preventDefault(); await showFrame(S.idx + (ev.shiftKey ? 10 : 1)); break;
+    case "ArrowLeft": ev.preventDefault(); await showFrame(S.idx - (ev.shiftKey ? 10 : 1)); break;
+    case "Delete": case "Backspace":
+      ev.preventDefault();
+      if (!sel) { toast("Click an object first."); break; }
+      await change(() => {
+        if (sel.source === "user" && sel.status !== "rejected") { S.frame.objects.splice(S.sel, 1); S.sel = -1; }
+        else if (sel.status === "rejected") sel.status = sel._was || "corrected";
+        else { sel._was = sel.status; sel.status = "rejected"; }
+      });
+      break;
+    case "n": case "N": {
+      const p = S.mouse || { x: S.info.width / 2, y: S.info.height / 2 };
+      addAt(Math.round(p.x * 10) / 10, Math.round(p.y * 10) / 10); break;
+    }
+    case "1": case "2": case "3": case "4": {
+      const cls = CLASSES[+k - 1]; S.lastCls = cls;
+      if (!sel) { toast("New objects will be " + cls + ". Click an object to change its class."); break; }
+      await change(() => { sel.cls = cls; markCorrected(sel); }); break;
+    }
+    case "h": case "H":
+      if (!sel) { const i = S.mouse ? hit(S.mouse) : -1; if (i < 0) { toast("Click an object first."); break; } S.sel = i; }
+      S.hmode = true; draw(); renderSide(); toast("Click where the robot is facing."); break;
+    case "f": case "F": {
+      if (!sel) { toast("Click an object first."); break; }
+      const hd = headingOf(sel); if (!hd) { toast("No heading to flip: press H to set one."); break; }
+      await change(() => { sel.heading_deg = (hd.h + 180) % 360; sel.heading_known = true; sel.heading_guess = null; markCorrected(sel); });
+      break;
+    }
+    case "e": case "E": await markEmpty(); break;
+    case "Tab":
+      ev.preventDefault();
+      if (S.frame.objects.length) { S.sel = (S.sel + (ev.shiftKey ? -1 + S.frame.objects.length : 1)) % S.frame.objects.length; draw(); renderSide(); }
+      break;
+    case "Escape": S.hmode = false; S.sel = -1; draw(); renderSide(); break;
+    case "i": case "I": {
+      if (!sel) { toast("Click an object first."); break; }
+      const v = prompt("New number for object #" + sel.obj + " (it keeps this number in the frames after):", sel.obj);
+      if (v === null || !/^\d+$/.test(v.trim())) break;
+      await change(() => { sel.obj = parseInt(v, 10); markCorrected(sel); }); break;
+    }
+    case "g": case "G": {
+      const v = prompt("Go to frame number:"); if (v === null) break;
+      const f = parseInt(v, 10); let best = 0;
+      S.queue.forEach((q, i) => { if (Math.abs(q.f - f) < Math.abs(S.queue[best].f - f)) best = i; });
+      await showFrame(best); break;
+    }
+  }
+});
+
+// ---------------------------------------------------------------- buttons
+document.querySelectorAll("#tabs button").forEach((b) => b.addEventListener("click", async () => {
+  S.mode = b.dataset.mode;                       // undo history is kept across lists
+  if (S.mode === "spot" && !(S.stats && S.stats.spot.sample)) {
+    try { await api("/api/spot/draw", {}); } catch (e) { toast(e.message, true); }
+  }
+  const cur = S.frame ? S.frame.frame : null;
+  await loadQueue();
+  let i = S.queue.findIndex((q) => q.f === cur);
+  if (i < 0) i = Math.max(0, firstToDo(0));
+  await showFrame(i);
+  b.blur();
+}));
+$("spotdraw").addEventListener("click", async () => {
+  if (!confirm("Draw a new random sample? Frames already checked keep their labels.")) return;
+  try { await api("/api/spot/draw", {}); await loadQueue(); await showFrame(Math.max(0, firstToDo(0))); } catch (e) { toast(e.message, true); }
+});
+$("autoacc").addEventListener("click", async () => {
+  const st = S.stats, sp = st.spot;
+  let msg = "Accept the guesses on " + st.high_pending + " high-confidence frames without looking at them?\n\n";
+  msg += sp.checked ? "Spot check so far: " + sp.agree + " of " + sp.checked + " frames were right (" + Math.round(100 * sp.agreement) + "%, 95% range " +
+    Math.round(100 * sp.range95[0]) + "-" + Math.round(100 * sp.range95[1]) + "%)." : "There is no spot check yet, so their accuracy is unknown. Do the spot check first?";
+  if (!confirm(msg)) return;
+  try { const j = await api("/api/auto_accept", {}); toast(j.accepted + " frames accepted."); await loadQueue(); await showFrame(S.idx); } catch (e) { toast(e.message, true); }
+});
+$("autoundo").addEventListener("click", async () => {
+  if (!confirm("Take back every auto-accepted frame (they become unchecked guesses again)?")) return;
+  try { const j = await api("/api/auto_undo", {}); toast(j.undone + " frames are guesses again."); await loadQueue(); await showFrame(S.idx); } catch (e) { toast(e.message, true); }
+});
+$("reset").addEventListener("click", async () => {
+  if (!S.frame) return;
+  pushUndo(); await save("pending"); await showFrame(S.idx);
+});
+$("thr").addEventListener("change", async () => {
+  try { const j = await api("/api/settings", { low_threshold: parseFloat($("thr").value) }); setStats(j.stats); if (S.mode === "low") { await loadQueue(); await showFrame(Math.max(0, firstToDo(0))); } } catch (e) { toast(e.message, true); }
+  $("thr").blur();
+});
+window.addEventListener("resize", () => { if (S.info) { fit(); draw(); drawStrip(); } });
+init();
+</script>
+</body>
+</html>
