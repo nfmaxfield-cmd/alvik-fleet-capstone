@@ -235,7 +235,7 @@ def video_offset(session, recording, fits=None):
     return st.mean(offs), (st.stdev(offs) if len(offs) > 1 else float("nan")), len(offs)
 
 
-def load_detections(path, H_px_to_floor, offset_s, labels_ok=("confirmed", "corrected"), parallax=None):
+def load_detections(path, H_px_to_floor, offset_s, labels_ok=("confirmed", "corrected", "auto"), parallax=None):
     """Camera detections as floor positions on the laptop clock.
     Accepts a detections CSV (frame,t_wall,x_px,y_px,score[,cls,heading_deg])
     or a labels.csv (uses confirmed/corrected alvik rows)."""

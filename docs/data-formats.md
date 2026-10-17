@@ -65,12 +65,12 @@ xf0_cm,yf0_cm,xr0_cm,yr0_cm,xf_cm,yf_cm,xr_cm,yr_cm,battery_pct,excluded,note
 - `labels.csv`: frame,t_wall,obj,cls,x_px,y_px,heading_deg,heading_known,source,status,score
   - `obj`: object id within the recording (track id), integer
   - `cls`: alvik | hand | unknown | machine
-  - `x_px,y_px`: object centre in image pixels (origin top-left, x right, y down)
+  - `x_px,y_px`: object centre in image pixels (origin top-left, x right, y down); pixel centres on whole numbers, as in OpenCV (the top-left pixel's centre is 0,0)
   - `heading_deg`: image-frame heading, 0 = image +x (right), counter-clockwise
     positive as seen on screen (i.e. towards image -y); blank if unknown
   - `heading_known`: 1 if heading is given
   - `source`: motion | track | model | user | log
-  - `status`: pending | confirmed | corrected | rejected
+  - `status`: pending | confirmed | corrected | rejected | auto (accepted by the labelling tool as high-confidence, without a person looking; trained on, but filterable)
   - `score`: confidence 0..1 of the automatic guess (blank for user)
   - A frame with no objects that the user confirmed empty has one row with
     cls `none` (so empty frames count as reviewed negatives).

@@ -259,6 +259,9 @@ function draw() {
   if (!S.frame) { ctx.fillStyle = "#888"; ctx.font = 16 * S.dpr + "px system-ui"; ctx.fillText("No frames in this list.", 20 * S.dpr, 40 * S.dpr); return; }
   ctx.setTransform(s, 0, 0, s, 0, 0);
   if (S.img) ctx.drawImage(S.img, 0, 0, S.info.width, S.info.height);
+  // Label coordinates put pixel centres on whole numbers (OpenCV style), but
+  // pixel i covers [i, i+1) on the canvas: shift overlays half a pixel.
+  ctx.setTransform(s, 0, 0, s, 0.5 * s, 0.5 * s);
   const lw = 1 / S.scale;                       // one screen pixel in image units
   const r = S.info.robot_px / 2;
   S.frame.objects.forEach((o, i) => {
@@ -462,7 +465,7 @@ function setHeading(o, px, py) {
 // ---------------------------------------------------------------- mouse
 function imgPos(ev) {
   const b = view.getBoundingClientRect();
-  return { x: (ev.clientX - b.left) / S.scale, y: (ev.clientY - b.top) / S.scale };
+  return { x: (ev.clientX - b.left) / S.scale - 0.5, y: (ev.clientY - b.top) / S.scale - 0.5 };   // pixel centres on whole numbers
 }
 function hit(p) {
   if (!S.frame) return -1;

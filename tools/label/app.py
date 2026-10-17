@@ -52,6 +52,12 @@ import select_frames   # noqa: E402
 
 CLASSES = ["alvik", "hand", "unknown", "machine"]
 STATUSES = ["pending", "confirmed", "corrected", "rejected"]
+
+
+def _mem_status(st):
+    """labels.csv writes "auto" for rows of auto-accepted frames; in memory
+    they are confirmed rows of a frame whose state is auto."""
+    return "confirmed" if st == "auto" else st
 SOURCES = ["motion", "track", "model", "user", "log"]
 LABEL_COLUMNS = ["frame", "t_wall", "obj", "cls", "x_px", "y_px", "heading_deg", "heading_known",
                  "source", "status", "score"]
@@ -368,7 +374,7 @@ class Session:
                 h = r["heading_deg"]
                 objs.append(dict(obj=int(r["obj"]), cls=r["cls"], x=float(r["x_px"]), y=float(r["y_px"]),
                                  heading_deg=float(h) if h else None, heading_known=r["heading_known"] == "1",
-                                 heading_guess=None, source=r["source"], status=r["status"],
+                                 heading_guess=None, source=r["source"], status=_mem_status(r["status"]),
                                  score=float(r["score"]) if r["score"] else None))
             self.frames[f] = dict(state=st.get("state", "reviewed"), how=st.get("how", "user"), objects=objs,
                                   auto_conf=st.get("auto_conf"), changed=st.get("changed", False),
@@ -376,8 +382,9 @@ class Session:
         # Frames with user rows in labels.csv that review.json does not know (it was lost).
         for f, rows in rows_by_frame.items():
             if f not in self.frames and any(r["status"] != "pending" for r in rows):
-                self.frames[f] = dict(state="reviewed", how="user", objects=[], auto_conf=None, changed=True,
-                                      updated=None, empty=False)
+                was_auto = all(r["status"] == "auto" for r in rows)
+                self.frames[f] = dict(state="auto" if was_auto else "reviewed", how="auto" if was_auto else "user",
+                                      objects=[], auto_conf=None, changed=not was_auto, updated=None, empty=False)
                 for r in rows:
                     if r["cls"] == "none":
                         self.frames[f]["empty"] = True
@@ -386,7 +393,7 @@ class Session:
                     self.frames[f]["objects"].append(dict(
                         obj=int(r["obj"]), cls=r["cls"], x=float(r["x_px"]), y=float(r["y_px"]),
                         heading_deg=float(h) if h else None, heading_known=r["heading_known"] == "1",
-                        heading_guess=None, source=r["source"], status=r["status"],
+                        heading_guess=None, source=r["source"], status=_mem_status(r["status"]),
                         score=float(r["score"]) if r["score"] else None))
         if self.frames:
             n_rev = sum(1 for v in self.frames.values() if v["state"] in ("edited", "reviewed"))
@@ -676,12 +683,16 @@ class Session:
             objs = st["objects"] if st else self.guess_objects(f)
             for o in sorted(objs, key=lambda o: o["obj"]):
                 known = bool(o.get("heading_known")) and o.get("heading_deg") is not None
+                status = o["status"]
+                if st and st["state"] == "auto" and status == "confirmed":
+                    status = "auto"          # accepted without a person looking at it
                 rows.append([f, t, o["obj"], o["cls"], "%.1f" % o["x"], "%.1f" % o["y"],
                              "%.1f" % o["heading_deg"] if known else "", 1 if known else 0,
-                             o["source"], o["status"], "" if o.get("score") is None else "%.3f" % o["score"]])
+                             o["source"], status, "" if o.get("score") is None else "%.3f" % o["score"]])
             if st and st["state"] in ("reviewed", "auto") and not any(o["status"] != "rejected" for o in objs):
                 rows.append([f, t, "", "none", "", "", "", 0,
-                             "user" if st["state"] == "reviewed" else self.run.det_source, "confirmed", ""])
+                             "user" if st["state"] == "reviewed" else self.run.det_source,
+                             "confirmed" if st["state"] == "reviewed" else "auto", ""])
         return rows
 
     def _write_review(self):
@@ -697,7 +708,7 @@ class Session:
         r["summary"] = {k: v for k, v in self.stats().items() if k != "save_error"}
         r["help"] = ("frames: state reviewed = checked by a person (how: user, or spot = in the spot check); "
                      "edited = changed but Enter not pressed yet; auto = accepted without looking because the "
-                     "guesses were high-confidence (their rows in labels.csv say confirmed). Pending rows in "
+                     "guesses were high-confidence (their rows in labels.csv say auto). Pending rows in "
                      "labels.csv are guesses nobody has checked.")
         write_atomic(self.review_path, json.dumps(r, indent=1))
 

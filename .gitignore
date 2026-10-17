@@ -32,3 +32,7 @@ Thumbs.db
 # Video recordings are large: keep them out of git
 *.avi
 *.mp4
+__pycache__/
+.pytest_cache/
+*.pt
+*.onnx
