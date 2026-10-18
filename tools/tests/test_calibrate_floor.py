@@ -242,3 +242,141 @@ def test_page_server_round_trip(tmp_path):
         assert len(app2.points) == len(SPREAD) and app2.settings["height_cm"] == 115.0
     finally:
         srv.shutdown()
+
+
+def test_e00_both_passes_at_a_spot_keep_their_heldout_errors(tmp_path):
+    """E00: rows 1 and 13 are the same placement spot (one group, left out together).
+    Each pass's held-out error has its own column (keyed by sheet row), none overwritten."""
+    cam = Cam()
+    rng = np.random.default_rng(5)
+    pts = []
+    spots = [(rng.uniform(0, 120), rng.uniform(-35, 55)) for _ in range(8)]
+    for k, (x, y) in enumerate(spots):
+        for order in (k + 1, k + 13):                       # two passes, two sheet rows, same spot
+            u, v = cam.project(x, y, 4.0)
+            du = 6.0 if order == 13 else 0.0                # spot P0's second pass clicked 6 px off
+            pts.append(dict(id=len(pts) + 1, kind="robot", u=u + du, v=v, x=x, y=y, z=4.0, group=f"spot P{k}",
+                            spot=f"{order}-end", enabled=True))
+
+    def fit_without(excl):
+        return cf.fit([p for p in pts if p["group"] not in excl], (640, 480), 115.0, None, "off")
+    man, rows = cf.write_loro(str(tmp_path / "floor_calibration.json"), [p["group"] for p in pts], fit_without,
+                              cf.points_heldout(pts), log=lambda *_: 0)
+    r0 = next(r for r in rows if r["run_id"] == "spot P0")
+    assert "heldout_1_end_err_cm" in r0 and "heldout_13_end_err_cm" in r0
+    assert r0["heldout_13_end_err_cm"] > r0["heldout_1_end_err_cm"] + 0.5       # the 6 px pass is clearly worse
+    header = open(man).readline()
+    assert "heldout_end_err_cm" not in header
+    # run points keep the documented names
+    rp = [dict(id=1, u=100, v=100, x=0, y=0, z=0, group="ab12-3", spot="ab12-3-start"),
+          dict(id=2, u=200, v=100, x=10, y=0, z=0, group="ab12-3", spot="ab12-3-end")]
+    keys = cf.points_heldout(rp)(fit_without(set()), "ab12-3")
+    assert set(keys) == {"heldout_start_err_cm", "heldout_end_err_cm"}
+
+
+def test_leave_one_robot_out(tmp_path):
+    """--holdout robot: one calibration per robot, made without any of its runs; one row per run."""
+    cam = Cam()
+    rng = np.random.default_rng(6)
+    robot_of = {f"R{k}": ("Left", "Center", "Right")[k % 3] for k in range(9)}
+    pts = []
+    for rid in robot_of:
+        for which in ("start", "end"):
+            x, y = rng.uniform(-5, 125), rng.uniform(-35, 55)
+            u, v = cam.project(x, y, 4.0)
+            pts.append(dict(id=len(pts) + 1, kind="run", u=u, v=v, x=x, y=y, z=4.0, group=rid,
+                            spot=f"{rid}-{which}", enabled=True))
+    seen = []
+
+    def fit_without(excl):
+        seen.append(set(excl))
+        res = cf.fit([p for p in pts if p["group"] not in excl], (640, 480), 115.0, None, "off")
+        res["used_runs"] = sorted({p["group"] for p in pts if p["group"] not in excl})
+        res["used_robots"] = sorted({robot_of[r] for r in res["used_runs"]})
+        return res
+    members = {}
+    for rid, rb in robot_of.items():
+        members.setdefault(rb, []).append(rid)
+    man, rows = cf.write_loro(str(tmp_path / "floor_calibration.json"), list(members), fit_without,
+                              cf.points_heldout(pts), members=members, holdout="robot", log=lambda *_: 0)
+    assert os.path.basename(man) == "floor_calibration_loro_robot.csv" and len(rows) == 9
+    assert {frozenset(s) for s in seen} == {frozenset(v) for v in members.values()}
+    for r in rows:
+        cal = json.load(open(tmp_path / r["calibration"]))
+        assert robot_of[r["run_id"]] not in cal["fit"]["used_robots"]
+        assert cal["held_out_robots"] == [robot_of[r["run_id"]]] and r["holdout"] == "robot"
+        assert not set(members[robot_of[r["run_id"]]]) & set(cal["fit"]["used_runs"])
+
+
+def test_fleet_map_found_in_current_folder_or_given(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cf, "FLEET_MAP", str(tmp_path / "nowhere" / "map.json"))
+    monkeypatch.setattr(cf, "MAP_PATH", None)
+    assert cf.find_map() is None and cf.default_area() == [0.0, 0.0, 122.0, 122.0]
+    (tmp_path / "map.json").write_text(json.dumps({"floor": {"x_min": 0, "x_max": 150, "y_min": 0, "y_max": 90}}))
+    assert cf.find_map() == str(tmp_path / "map.json")              # tools/fleet/app.py's default spot
+    assert "map.json" in capsys.readouterr().out
+    assert cf.default_area() == [0.0, 0.0, 150.0, 90.0]
+    other = tmp_path / "other.json"
+    other.write_text(json.dumps({"floor": {"x_min": 0, "x_max": 100, "y_min": 0, "y_max": 100}}))
+    monkeypatch.setattr(cf, "MAP_PATH", cf.find_map(str(other)))
+    assert cf.default_area() == [0.0, 0.0, 100.0, 100.0] and "--map" in capsys.readouterr().out
+    with pytest.raises(SystemExit):
+        cf.find_map(str(tmp_path / "missing.json"))
+
+
+BOM_SHEET = ("order,robot,level,commands,run_id,target_x_cm,target_y_cm,target_heading_deg,xf0_cm,yf0_cm,xr0_cm,"
+             "yr0_cm,xf_cm,yf_cm,xr_cm,yr_cm,battery_pct,excluded,note\n"
+             "1,Left,1,run,ab12-1,10,0,0,4.5,0,-4.5,0,14.5,0,5.5,0,90,,\n")
+
+
+def test_excel_bom_sheet_read_everywhere(tmp_path):
+    """Excel's "CSV UTF-8" starts with a BOM: the first column must still be 'order'."""
+    import tape_results
+    import runs as rn
+    folder = tmp_path / "E01"
+    (folder / "data").mkdir(parents=True)
+    sheet = folder / "data" / "measurements.csv"
+    sheet.write_bytes(b"\xef\xbb\xbf" + BOM_SHEET.encode("utf-8"))
+    spots = cf.read_sheet_spots(str(sheet))
+    assert spots and spots[0]["order"] == "1" and spots[0]["key"] == "1-start"
+    trials = tape_results.load_trials(str(folder))
+    assert len(trials) == 1 and trials[0]["order"] == "1"
+    sess = tmp_path / "session"
+    sess.mkdir()
+    (sess / "runinfo.csv").write_text("robot,t_recv,run,experiment\nLeft,1000,ab12-1,E1\n")
+    (sess / "raw.csv").write_text("robot,t_recv,run,ms\nLeft,1000.0,ab12-1,0\nLeft,1000.1,ab12-1,100\n")
+    runs, _ = rn.load_runs(str(sess), str(sheet))
+    assert runs[0].tape_start == (0.0, 0.0, 0.0) and runs[0].level == "1"
+
+
+def test_make_run_order_reads_bom_and_writes_plain_utf8(tmp_path):
+    import subprocess
+    import sys
+    import make_run_order as mro
+    out = tmp_path / "m.csv"
+    out.write_bytes(b"\xef\xbb\xbf" + BOM_SHEET.encode())          # a measured sheet saved from Excel
+    cmd = [sys.executable, mro.__file__, sorted(mro.EXPERIMENTS)[0], "--out", str(out)]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    assert "already has 1 measured trials" in r.stdout, r.stdout + r.stderr     # it saw xf_cm through the BOM
+    r = subprocess.run(cmd + ["--force"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert out.read_bytes()[:5] == b"order"                          # written back without a BOM
+
+
+def test_second_server_on_same_port_is_refused():
+    import socket
+    import sys
+    s1 = cf.make_server(0, cf.make_handler(None))
+    port = s1.server_address[1]
+    try:
+        assert cf.LocalServer.allow_reuse_address == (os.name != "nt")
+        with pytest.raises(SystemExit, match="already running"):
+            cf.make_server(port, cf.make_handler(None))
+        sys.path.insert(0, os.path.join(os.path.dirname(cf.__file__), "fleet"))
+        import app
+        assert app.LocalServer.allow_reuse_address == (os.name != "nt")
+        with pytest.raises(SystemExit, match="already running"):
+            app.serve(None, port)
+    finally:
+        s1.server_close()

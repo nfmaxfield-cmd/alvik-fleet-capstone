@@ -169,7 +169,7 @@ setups, off by default and in the older ones).
   distance + gyro heading 1.5 cm, + camera 0.15 cm (filter) and 0.13 cm
   (factor graph; along the whole path 0.23 vs 0.15 cm); 0.19 cm with half the
   frames lost or 200 ms late, 0.42 cm at 1 frame/s. The p-values treat runs
-  as independent and aren't corrected for comparing ten setups.
+  as independent (p_holm, added later, corrects for comparing many setups).
 
 - Blink lights, identity and heading (2026-10-18; simulator seed 7, full E1
   sheet, 36 runs, 3 robots one at a time; blink.py + calib.py on its video;
@@ -220,10 +220,41 @@ A lens term `k1` (with `cx`, `cy`, `f_px`) in the file is applied too.
 
 If the floor calibration was made from runs' tape marks or odometry
 (`tools/calibrate_floor.py --from-runs` or `--survey`), those runs must not be
-scored against the camera with it. `runs.py --calib-per-run
-floor_calibration_loro.csv` converts each listed run's camera sightings with the
-calibration made without that run; `fit.used_runs` in a calibration file lists
-the runs it used.
+scored against the camera with it. `replay.py --calib-per-run
+floor_calibration_loro.csv` (and `runs.py`, same option) converts each listed
+run's camera sightings with the calibration made without that run;
+`fit.used_runs` in a calibration file lists the runs it used. Both tools
+refuse to score a run with a calibration whose `fit.used_runs` includes it
+(a run missing from the per-run file falls back to `--calib`, and is refused
+if `--calib` used it); `--allow-in-sample` overrides. With `--calib` alone they
+warn when its `used_runs` overlap the runs. results.csv records, per run and
+camera setup, `calib_file` and `calib_includes_run`.
+
+```
+python tools/fusion/replay.py --session ... --sheet ... --detections ... --recording ... \
+    --calib <rec>/floor_calibration.json --calib-per-run <rec>/floor_calibration_loro.csv --out results/E1
+```
+
+**Survey calibrations and the wheels.** A survey fit hangs the camera on the
+robots' own wheel + gyro paths, so a robot's wheel-size error goes into the
+calibration. Holding out one run doesn't remove it: the robot's other runs
+carry the same error, and the camera then agrees with that robot's wheels
+for the wrong reason, which flatters camera-vs-wheels comparisons. replay.py
+prints a note when a run is scored with a survey calibration that used the
+same robot. **Headline T2/T3 results should use a click / tape-point
+calibration, or a leave-one-robot-out survey** (`calibrate_floor.py --survey
+--holdout robot`, which writes `floor_calibration_loro_robot.csv`: pass that
+as `--calib-per-run`; needs two or more robots).
+
+## Statistics in replay.py
+
+Each setup is compared with wheels only on the same runs (paired t-test). With
+about 19 setups, some p-values under 0.05 turn up by chance, so the table also
+has `p_holm`: p adjusted for comparing many setups at once (Holm method:
+the smallest p times the number of comparisons, the next times one fewer, and
+so on, never decreasing). Routes are pooled in the main table; summary.csv
+also has every setup per route (`route` column: runs, mean end error, 95%
+interval), since a setup can help on squares and not on straights.
 
 ## Known limits
 

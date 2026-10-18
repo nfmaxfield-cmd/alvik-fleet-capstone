@@ -12,7 +12,8 @@ scale (px per cm); --px-per-cm overrides it.
 
 Firmware 2026-10-18a+ code (rate code): after 300 ms dark, one 100 ms
 flash every (n + 2) x 100 ms: Left 0.3 s, Center 0.4 s, Right 0.5 s, other
-names 0.6 s (--names changes the mapping). A flash can be stretched to
+names 0.6 s, unless a robot's PARAM blink_code (1..4) chose its code: give
+--session <console log folder> to read that from the runs (or --names). A flash can be stretched to
 ~215 ms, cut short (the lights go dark before long blocking calls), and its
 start can now and then be delayed by up to ~115 ms.
 
@@ -125,6 +126,28 @@ def parse_names(s):
             k, v = part.split("=")
             out[int(k)] = v.strip()
     return out
+
+
+def names_from_session(session, log=print):
+    """{code: name} from a console log folder: each robot's PARAM blink_code (0 =
+    from its name, exactly as firmware/home_lab/blink.h codeFor(): Left 1,
+    Center 2, Right 3, any other name 4, case-sensitive). Warns (via log) when
+    two robots share a code, a robot's code changes between runs, a name is not
+    exactly Left / Center / Right, or blink_code was set."""
+    if TOOLS not in sys.path:
+        sys.path.insert(0, TOOLS)
+    import check_session as cs
+    codes, notes = cs.session_blink_codes(session)
+    if not codes:
+        log(f"warning: no PARAM records with blinking on in {session}: default names "
+            + ", ".join(f"{k}={v}" for k, v in DEFAULT_NAMES.items()))
+        return dict(DEFAULT_NAMES)
+    for n in notes:
+        log("warning: " + n)
+    names = cs.blink_names(codes)
+    log("blink codes from " + session + ": " + ", ".join(
+        f"{k}={v}{'' if any(k in c for c in codes.values()) else ' (no robot)'}" for k, v in sorted(names.items())))
+    return names
 
 
 def read_frame_times(folder):
@@ -929,13 +952,26 @@ def main(argv=None):
     ap.add_argument("--video", help="video file, if not <recording>/video.avi")
     ap.add_argument("--calib", help="floor_calibration.json, for the pixel scale (default: beside the recording)")
     ap.add_argument("--px-per-cm", type=float, help="pixel scale (default from --calib, else 4)")
-    ap.add_argument("--names", help="code to name, e.g. 1=Left,2=Center,3=Right,4=other")
+    ap.add_argument("--names", help="code to name, e.g. 1=Left,2=Center,3=Right,4=other (default: from --session, "
+                                    "else that)")
+    ap.add_argument("--session", help="console log folder of the same runs: code -> name from each robot's PARAM "
+                                      "blink_code and name, as the firmware picks it (warns about clashes)")
     ap.add_argument("--interpolate", action="store_true", help="also write rows between flashes (lit=0)")
     ap.add_argument("--vmax-cms", type=float, default=40.0, help="fastest robot speed to allow (cm/s)")
     ap.add_argument("--min-name-p", type=float, default=0.6, help="name a track only above this probability")
     ap.add_argument("--max-frames", type=int, help="only the first N frames (quick look)")
     args = ap.parse_args(argv)
-    p = Params(names=parse_names(args.names), vmax_cms=args.vmax_cms, min_name_p=args.min_name_p)
+    names = parse_names(args.names)
+    if args.session:
+        sess_names = names_from_session(args.session)
+        if not args.names:
+            names = sess_names
+        elif sess_names != names:
+            print(f"warning: --names {names} differs from what the session's robots blink {sess_names}")
+    elif not args.names:
+        print("note: no --session or --names: assuming Left=1, Center=2, Right=3, other=4 (PARAM blink_code 0 "
+              "everywhere; give --session to check)")
+    p = Params(names=names, vmax_cms=args.vmax_cms, min_name_p=args.min_name_p)
     calib = args.calib or os.path.join(args.recording, "floor_calibration.json")
     if args.px_per_cm:
         p.px_per_cm = args.px_per_cm

@@ -90,13 +90,13 @@ def main():
 
     out = args.out or os.path.join(ROOT, "docs", "experiments", folder, "data", "measurements.csv")
     if os.path.exists(out) and not args.force:
-        with open(out, newline="") as f:
+        with open(out, newline="", encoding="utf-8-sig") as f:   # -sig: Excel's "CSV UTF-8" starts with a BOM
             filled = [r for r in csv.DictReader(f) if r.get("xf_cm", "").strip()]
         if filled:
             print(f"{out} already has {len(filled)} measured trials. Use --force to replace it.")
             return 1
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    with open(out, "w", newline="") as f:
+    with open(out, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(COLS)
         for i, (robot, lv, cmd, note) in enumerate(rows, 1):

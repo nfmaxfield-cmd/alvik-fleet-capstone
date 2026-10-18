@@ -46,8 +46,16 @@ against those same runs. Whenever points or pairs come from two or more runs
 (or E00 placement spots: both passes at a spot are one group, left out
 together), floor_calibration_loro/<run>.json (made WITHOUT that run;
 --folds k for k-fold) and floor_calibration_loro.csv (which file scores which
-run, with that run's held-out error) are written too; tools/fusion/runs.py
---calib-per-run uses them.
+run, with that run's held-out error) are written too; tools/fusion/replay.py
+and runs.py --calib-per-run use them (and refuse a run its calibration used).
+
+Survey and wheel odometry: the survey hangs the camera fit on the robots' own
+wheel + gyro paths, so a robot's wheel-size error goes into the calibration.
+Leaving out one run doesn't remove it (the robot's other runs carry the same
+error), and the camera then agrees with that robot's wheels for the wrong
+reason. Headline T2/T3 results (camera vs wheels) should use a click /
+tape-point calibration, or a leave-one-robot-out survey:
+--survey --holdout robot (floor_calibration_loro_robot.csv, used the same way).
 
 Every change refits and shows, for every point, where the fit puts its typed
 cm position (circle) against where you clicked (cross), with the error in cm.
@@ -76,6 +84,7 @@ import json
 import math
 import os
 import re
+import socket
 import sys
 import threading
 import time
@@ -92,20 +101,60 @@ except ImportError:
 
 DEFAULT_AREA = [0.0, 0.0, 122.0, 122.0]      # the plywood floor, about 122 x 122 cm (until measured)
 FLEET_MAP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fleet", "map.json")
+MAP_PATH = None       # the fleet map whose floor bounds are the default area (set by main: --map or found)
 
 
-def default_area(map_path=FLEET_MAP):
-    """The floor the robots use, cm [x0, y0, x1, y1]: tools/fleet/map.json's floor
-    bounds if that file exists, else DEFAULT_AREA."""
+def map_candidates():
+    """Where a fleet map may be: ./map.json (tools/fleet/app.py's default, saved in the
+    folder it was started from) and tools/fleet/map.json."""
+    out = []
+    for c in (os.path.abspath("map.json"), FLEET_MAP):
+        if c not in out:
+            out.append(c)
+    return out
+
+
+def read_map_area(map_path):
+    """[x0, y0, x1, y1] cm from a fleet map's floor bounds, or None if missing/broken."""
     try:
-        with open(map_path) as f:
+        with open(map_path, encoding="utf-8-sig") as f:
             fl = json.load(f)["floor"]
         a = [float(fl["x_min"]), float(fl["y_min"]), float(fl["x_max"]), float(fl["y_max"])]
         if a[2] > a[0] and a[3] > a[1]:
             return a
     except (OSError, ValueError, KeyError, TypeError):
         pass
-    return list(DEFAULT_AREA)
+    return None
+
+
+def find_map(arg=None, log=print):
+    """The fleet map to take the default area from: --map if given, else the first of
+    map_candidates() that exists. Says which one it used (and if two disagree)."""
+    if arg:
+        if not os.path.isfile(arg):
+            raise SystemExit(f"--map {arg}: no such file")
+        log(f"floor area from the fleet map {os.path.abspath(arg)} (--map)")
+        return os.path.abspath(arg)
+    found = [c for c in map_candidates() if os.path.isfile(c)]
+    if not found:
+        log("no fleet map (looked for " + " and ".join(map_candidates()) + f"): default area {DEFAULT_AREA}")
+        return None
+    log(f"floor area from the fleet map {found[0]}" + (" (--map picks another)" if len(found) > 1 else ""))
+    if len(found) > 1 and read_map_area(found[0]) != read_map_area(found[1]):
+        log(f"  note: {found[1]} has a different floor ({read_map_area(found[1])} vs {read_map_area(found[0])})")
+    return found[0]
+
+
+def default_area(map_path=None):
+    """The floor the robots use, cm [x0, y0, x1, y1]: the fleet map's floor bounds
+    (map_path, else MAP_PATH, else the first of map_candidates() that exists) if
+    there is one, else DEFAULT_AREA."""
+    if map_path is None:
+        map_path = MAP_PATH or next((c for c in map_candidates() if os.path.isfile(c)), None)
+    a = read_map_area(map_path) if map_path else None
+    return a if a else list(DEFAULT_AREA)
+
+
 ROBOT_TOP_CM = 4.0
 RANSAC_PX = 6.0           # a click this far (px) from the fit counts as an outlier (about 1.5 cm)
 MIN_RANSAC_POINTS = 6     # fewer points than this: no RANSAC (a bad click can't be told apart)
@@ -470,6 +519,7 @@ def to_calibration(res, source=None, extra_note=""):
         k1=round(float(res["k1"]), 5), cx=res["cx"], cy=res["cy"], f_px=round(float(res["f_px"]), 2),
         camera=cam,
         fit=dict(mode=res.get("mode", "points"), used_runs=res.get("used_runs") or [],
+                 **({"used_robots": res["used_robots"]} if res.get("used_robots") is not None else {}),
                  survey=res.get("survey"),n_points=res["n_points"], n_inliers=res["n_inliers"], rms_cm=round(res["rms_cm"], 3),
                  max_cm=round(res["max_cm"], 3), loo_rms_cm=round(res["loo_rms_cm"], 3),
                  coverage_of_area=round(res["coverage"], 3), area_cm=res["area"], warnings=res["warnings"],
@@ -550,17 +600,23 @@ def draw_check(img, res):
 
 
 # ------------------------------------------------------------------ leave-one-run-out
-def write_loro(out_path, groups, fit_fn, heldout_fn, folds=0, source=None, log=print):
+def write_loro(out_path, groups, fit_fn, heldout_fn, folds=0, source=None, log=print, members=None, holdout="run"):
     """One calibration per run (or per fold of runs) made WITHOUT that run, so the
     camera can be scored against a run's tape marks without circularity.
     Writes <out dir>/floor_calibration_loro/<run or fold>.json and
     <out dir>/floor_calibration_loro.csv (run_id -> the file to score it with).
-    fit_fn(excluded runs) -> fit result; heldout_fn(result, run) -> dict of numbers."""
+    fit_fn(excluded runs) -> fit result; heldout_fn(result, run) -> dict of numbers.
+
+    members: {group: [run ids]} to leave out whole groups of runs at a time
+    (holdout="robot": a group is a robot and all its runs; files go to
+    floor_calibration_loro_robot/ and floor_calibration_loro_robot.csv, one row
+    per run, so they are used exactly like the per-run ones)."""
     groups = sorted(set(groups))
     if len(groups) < 2:
         return None
     base = os.path.dirname(os.path.abspath(out_path))
-    d = os.path.join(base, "floor_calibration_loro")
+    stem = "floor_calibration_loro" + ("" if holdout == "run" else "_" + holdout)
+    d = os.path.join(base, stem)
     os.makedirs(d, exist_ok=True)
     if folds and folds < len(groups):
         fold_sets = [groups[k::folds] for k in range(folds)]
@@ -568,49 +624,67 @@ def write_loro(out_path, groups, fit_fn, heldout_fn, folds=0, source=None, log=p
     else:
         fold_sets = [[g] for g in groups]
         names = groups
+    runs_of = (lambda g: sorted(members.get(g, []))) if members else (lambda g: [g])
     rows = []
     for name, held in zip(names, fold_sets):
         fname = os.path.join(d, re.sub(r"[^A-Za-z0-9_.-]", "_", name) + ".json")
+        held_runs = [r for g in held for r in runs_of(g)]
         try:
-            res = fit_fn(set(held))
+            res = fit_fn(set(held_runs))
         except FitError as e:
-            for g in held:
-                rows.append(dict(run_id=g, calibration="", left_out=";".join(held), n_used="", fit_rms_cm="",
-                                 note=f"no fit without it: {e}"))
+            for r in held_runs:
+                rows.append(dict(run_id=r, calibration="", left_out=";".join(held), n_used="", fit_rms_cm="",
+                                 note=f"no fit without it: {e}", holdout=holdout))
             continue
         cal = to_calibration(res, source=source)
-        cal["held_out_runs"] = list(held)
+        cal["held_out_runs"] = list(held_runs)
+        if holdout != "run":
+            cal["held_out_" + holdout + "s"] = list(held)
         cal["use_for"] = ("score the camera against the tape marks / odometry of the held_out_runs only; "
                           "these runs did not help make this calibration")
         with open(fname, "w") as f:
             json.dump(cal, f, indent=2, default=_jsonable)
-        for g in held:
-            row = dict(run_id=g, calibration=os.path.relpath(fname, base), left_out=";".join(held),
-                       n_used=res["n_inliers"], fit_rms_cm=round(res["rms_cm"], 3), note="")
-            row.update(heldout_fn(res, g) or {})
+        for r in held_runs:
+            row = dict(run_id=r, calibration=os.path.relpath(fname, base), left_out=";".join(held),
+                       n_used=res["n_inliers"], fit_rms_cm=round(res["rms_cm"], 3), note="", holdout=holdout)
+            row.update(heldout_fn(res, r) or {})
             rows.append(row)
     cols = []
     for r in rows:
         cols += [k for k in r if k not in cols]
-    man = os.path.join(base, "floor_calibration_loro.csv")
-    with open(man, "w", newline="") as f:
+    man = os.path.join(base, stem + ".csv")
+    with open(man, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader()
         w.writerows(rows)
-    log(f"Wrote {len(fold_sets)} held-out calibrations to {d}\n  and {man} (which file scores which run)")
+    log(f"Wrote {len(fold_sets)} held-out calibrations (leave one {holdout if not folds else 'fold'} out) to {d}\n"
+        f"  and {man} (which file scores which run)")
     return man, rows
 
 
 def points_heldout(points):
-    """For write_loro: a run's own points' errors (cm) under a fit made without them."""
+    """For write_loro: a run's own points' errors (cm) under a fit made without them.
+    Run points (--from-runs: one start and one end per run) give heldout_start_err_cm /
+    heldout_end_err_cm. E00 placement spots (several sheet rows at the same spot, left
+    out together) give one column per sheet row: heldout_<order>_<start|end>_err_cm."""
     def fn(res, g):
         cal = to_calibration(res)
         out = {}
         for p in points:
             if str(p.get("group")) == str(g) and p.get("enabled", True):
                 x, y = to_floor(cal, p["u"], p["v"], float(p.get("z") or 0))
-                key = "heldout_" + (p.get("spot", "").rsplit("-", 1)[-1] or "point") + "_err_cm"
-                out[key] = round(math.hypot(x - p["x"], y - p["y"]), 3)
+                spot = str(p.get("spot") or "")
+                row, _, which = spot.rpartition("-")
+                if not spot:
+                    key = f"heldout_point{p.get('id', '')}_err_cm"
+                elif row == str(g):           # a run's own start / end
+                    key = f"heldout_{which}_err_cm"
+                else:                         # sheet row <order>: both passes at a spot stay apart
+                    key = "heldout_" + re.sub(r"[^A-Za-z0-9]+", "_", spot) + "_err_cm"
+                k, n = key, 2
+                while k in out:               # never overwrite another point's error
+                    k, n = key.replace("_err_cm", f"_{n}_err_cm"), n + 1
+                out[k] = round(math.hypot(x - p["x"], y - p["y"]), 3)
         return out
     return fn
 
@@ -660,7 +734,7 @@ def read_sheet_spots(path):
     """Robot positions from a tape sheet (docs/data-formats.md): midpoint of the
     front and rear marks, for the end marks and (if filled) the start marks."""
     spots = []
-    with open(path, newline="") as f:
+    with open(path, newline="", encoding="utf-8-sig") as f:   # -sig: Excel's "CSV UTF-8" starts with a BOM
         for r in csv.DictReader(f):
             if str(r.get("excluded", "")).strip().lower() in TRUTHY:
                 continue
@@ -682,7 +756,7 @@ def read_events(folder):
     if not p or not os.path.isfile(p):
         return []
     out = []
-    with open(p, newline="") as f:
+    with open(p, newline="", encoding="utf-8-sig") as f:
         for r in csv.DictReader(f):
             try:
                 out.append(dict(frame=int(float(r["frame"])), text=r.get("text", "")))
@@ -709,7 +783,7 @@ def spot_frames(spots, events):
 def read_detections(path):
     """frame -> list of (x_px, y_px) from a detections CSV or labels.csv (alvik rows)."""
     dets = {}
-    with open(path, newline="") as f:
+    with open(path, newline="", encoding="utf-8-sig") as f:
         for r in csv.DictReader(f):
             if r.get("cls") not in (None, "", "alvik"):
                 continue
@@ -911,6 +985,27 @@ def _jsonable(o):
     raise TypeError(f"{type(o).__name__} is not JSON serializable")
 
 
+class LocalServer(ThreadingHTTPServer):
+    """The page server. On Windows, SO_REUSEADDR lets a second copy bind the same port
+    without an error (the browser then talks to either copy), so it is off there and
+    the port is claimed exclusively."""
+    allow_reuse_address = os.name != "nt"
+    daemon_threads = True
+
+    def server_bind(self):
+        if os.name == "nt" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
+def make_server(port, handler):
+    try:
+        return LocalServer(("127.0.0.1", port), handler)
+    except OSError as e:
+        raise SystemExit(f"Port {port} is in use ({e.strerror or e}): is calibrate_floor.py already running in "
+                         f"another window? Close it, or start with --port {port + 1}.")
+
+
 def make_handler(app):
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -1021,8 +1116,10 @@ def main(argv=None):
     ap.add_argument("--nadir", type=parse_pair, help="floor x,y (cm) straight below the lens (plumb line)")
     ap.add_argument("--robot-top-cm", type=float, help=f"height of the robot's top, cm (default {ROBOT_TOP_CM})")
     ap.add_argument("--k1", help="lens term: auto (default; kept only if it clearly helps), off, fit, or a number")
-    ap.add_argument("--area", help="x0,y0,x1,y1 cm: the floor the robots use (default: tools/fleet/map.json's floor "
-                                   "bounds if it exists, else 0,0,122,122)")
+    ap.add_argument("--area", help="x0,y0,x1,y1 cm: the floor the robots use (default: the fleet map's floor "
+                                   "bounds, else 0,0,122,122)")
+    ap.add_argument("--map", help="fleet map.json for the default area (default: ./map.json, where tools/fleet/app.py "
+                                  "saves it, else tools/fleet/map.json)")
     ap.add_argument("--points", help="points file (default floor_points.json beside the output); share one "
                                      "across sessions to accumulate (only while the camera stays put)")
     ap.add_argument("--out", help="output (default floor_calibration.json in the recording folder)")
@@ -1037,6 +1134,11 @@ def main(argv=None):
                    help="fit from the robots' wheel+gyro paths while driving (tape start pose = the anchor)")
     g.add_argument("--video-offset", type=float, help="video clock minus laptop clock, s (skips the flash search)")
     g.add_argument("--folds", type=int, default=0, help="held-out calibrations: 0 = leave one run out, k = k folds by run")
+    g.add_argument("--holdout", choices=("run", "robot"), default="run",
+                   help="survey: held-out calibrations leave out one run (default) or one ROBOT with all its runs "
+                        "(floor_calibration_loro_robot.csv). A survey fit carries each robot's wheel-size error, so "
+                        "headline T2/T3 camera-vs-wheels results should use --holdout robot or a click / tape-point "
+                        "calibration")
     g.add_argument("--led-offset-cm", type=parse_pair, help="blink detections: LED midpoint ahead,left of the centre, cm")
     g.add_argument("--axle-to-centre-cm", type=float, default=0.0,
                    help="survey: robot centre this far ahead of the wheel axle (odometry tracks the axle)")
@@ -1047,6 +1149,11 @@ def main(argv=None):
     g.add_argument("--max-path-sigma-cm", type=float, default=3.0,
                    help="survey: stop using a path once its uncertainty passes this")
     args = ap.parse_args(argv)
+    global MAP_PATH
+    if args.area:
+        print(f"area {args.area} cm (--area)")
+    else:
+        MAP_PATH = find_map(args.map)
 
     if args.camera is not None or os.path.isdir(args.source):
         folder = args.source
@@ -1092,7 +1199,7 @@ def main(argv=None):
             sys.exit("Can't fit: " + r["error"])
         print(r["summary"] + f"\nSaved {r['path']}\n      {r['check']}")
         return
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(app))
+    server = make_server(args.port, make_handler(app))
     url = f"http://127.0.0.1:{args.port}/"
     print(f"Calibration page: {url}  (points save to {pts_path}; Ctrl+C stops)")
     if not args.no_browser:
@@ -1132,11 +1239,16 @@ def survey_main(args, app, folder, out):
             k1 = float(intr["k1"])
         print(f"webcam focal length {f_px} px, k1 {k1} from {args.intrinsics}")
 
+    robot_of = {p["run"]: p["robot"] for p in pairs if p.get("robot")}
+    robot_of.update({r.run_id: r.robot for r in runs})
+    no_robot = sorted({p["run"] for p in pairs} - set(robot_of))
+
     def fit_without(excl):
         res = fr.fit_survey(pairs, app.src.size, s.get("height_cm"), s.get("nadir_floor_cm"), f_px, k1,
                             s.get("area"), s["robot_top_cm"], exclude_runs=excl)
         res["mode"] = "survey"
         res["used_runs"] = sorted({p["run"] for p in pairs if p["run"] not in excl})
+        res["used_robots"] = sorted({robot_of[r] for r in res["used_runs"] if r in robot_of})
         return res
     try:
         res = fit_without(set())
@@ -1156,7 +1268,24 @@ def survey_main(args, app, folder, out):
         return dict(heldout_path_median_cm=None if med is None else round(med, 3),
                     heldout_path_rms_cm=None if rms is None else round(rms, 3),
                     heldout_end_mark_err_cm=None if end is None else round(end, 3))
-    write_loro(out, [p["run"] for p in pairs], fit_without, heldout, args.folds, source=cal["source"])
+    if args.holdout == "robot":
+        members = {}
+        for rid, rb in robot_of.items():
+            if any(p["run"] == rid for p in pairs):
+                members.setdefault(rb, []).append(rid)
+        if no_robot:
+            print(f"WARNING: {len(no_robot)} run(s) in {pairs_path} have no robot name (pairs written before "
+                  f"2026-10-18): {', '.join(no_robot[:6])}{' ...' if len(no_robot) > 6 else ''}. They stay in every "
+                  "leave-one-robot-out calibration; re-run --survey on their sessions to fix that.")
+        if write_loro(out, list(members), fit_without, heldout, args.folds, source=cal["source"], members=members,
+                      holdout="robot") is None:
+            print(f"Only one robot ({', '.join(members) or '?'}) in the survey: no leave-one-robot-out calibration "
+                  "possible. For camera-vs-wheels numbers use a click / tape-point calibration instead.")
+    else:
+        write_loro(out, [p["run"] for p in pairs], fit_without, heldout, args.folds, source=cal["source"])
+        print("Note: these leave-one-RUN-out survey calibrations still use the scored robot's other runs, so its "
+              "wheel-size error is in the camera fit. For headline T2/T3 numbers use --holdout robot or a "
+              "click / tape-point calibration.")
 
 
 PAGE = r"""<!doctype html>

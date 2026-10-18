@@ -607,20 +607,23 @@ def wheel_fwd_signs(runs):
     return {robot: (-1.0 if a < 0 else 1.0) for robot, a in acc.items()}
 
 
-def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, led_offsets=None):
+def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, led_offsets=None, signs=None):
     """Process all runs (and camera sightings) together, in the order the
     information would have reached the robots. Returns robot run_id -> Tracked,
     and the unknown-object tracker.
 
     blink: runs.load_blink rows (used if "blink" is in the sensors);
     calib_rows: runs.load_calib_results rows (start-nudge headings);
-    led_offsets: {robot or None: (forward, left) cm} (runs.led_offsets)."""
+    led_offsets: {robot or None: (forward, left) cm} (runs.led_offsets);
+    signs: (wheel_turn_signs, wheel_fwd_signs) worked out from a larger set of
+    runs, so a subset of runs is processed exactly as within the whole set
+    (replay.py with one calibration per run); default: from `runs`."""
     rng = random.Random(cfg["seed"])
     if cfg["vmax"] == "auto":
         cfg = dict(cfg, vmax=fastest_speed(runs))
-    wsign = wheel_turn_signs(runs)
+    wsign = signs[0] if signs else wheel_turn_signs(runs)
     gyro_f = gyro_f or gyro_factors(runs, wsign)
-    fsign = wheel_fwd_signs(runs)
+    fsign = signs[1] if signs else wheel_fwd_signs(runs)
     rpm2cms = 2 * math.pi * cfg["wheel_radius_cm"] / 60
     use_cam = "camera" in cfg["sensors"] and detections
     use_blink = bool("blink" in cfg["sensors"] and blink)

@@ -20,6 +20,8 @@ class FakeCap:
         self.auto_exposure_now = 80.0       # what auto exposure settled on
         self.stale = stale
         self.sets = []
+        self.fps = 30.0                     # the mode asked for
+        self.t = 0.0                        # the camera's clock: each frame takes a frame time, or the exposure if longer
 
     def get(self, prop):
         if prop not in self.supported:
@@ -38,8 +40,10 @@ class FakeCap:
     def read(self):
         if self.p[cv2.CAP_PROP_AUTO_EXPOSURE] == 3.0:
             b = 120.0
+            self.t += 1.0 / self.fps
         else:
             b = min(255.0, 120.0 * self.p[cv2.CAP_PROP_EXPOSURE] / self.auto_exposure_now)
+            self.t += max(1.0 / self.fps, self.p[cv2.CAP_PROP_EXPOSURE] * 1e-4)     # V4L2 units: 100 us
         img = np.full((48, 64, 3), b, np.uint8)
         img[::8, :] = min(255, b + 60)        # some texture for the sharpness measure
         return True, img
@@ -56,9 +60,14 @@ def clock():
 
 def run(cap, **kw):
     lines = []
-    rep = camrec.apply_controls(cap, "0", log=lines.append, run=lambda *a, **k: (_ for _ in ()).throw(OSError()),
-                                now=clock(), **kw)
+    kw.setdefault("run", lambda *a, **k: (_ for _ in ()).throw(OSError()))
+    rep = camrec.apply_controls(cap, "0", log=lines.append, now=lambda: cap.t, **kw)
     return rep, lines
+
+
+class R:
+    def __init__(self, out="", code=0):
+        self.stdout, self.stderr, self.returncode = out, "", code
 
 
 def test_lock_freezes_auto_values():
@@ -140,3 +149,57 @@ def test_file_replay_touches_nothing():
     cap = FakeCap()
     rep = camrec.apply_controls(cap, "video.avi", log=lambda *_: None)
     assert "replaying" in rep["note"] and not cap.sets
+
+
+def test_lock_caps_exposure_at_one_frame_time():
+    """Dim room: auto exposure settled on 500 (50 ms), longer than a 30 fps frame (33 ms)."""
+    cap = FakeCap()
+    cap.auto_exposure_now = 500.0
+    rep, lines = run(cap)
+    assert cap.p[cv2.CAP_PROP_EXPOSURE] <= 10000 / 30
+    assert all(v <= 10000 / 30 for p, v in cap.sets if p == cv2.CAP_PROP_EXPOSURE)   # matching stays under too
+    assert any("longer than one frame" in w for w in rep["warnings"])
+    assert rep["fps_check"]["ok"] and rep["fps_check"]["measured"] > 27
+    assert rep["exposure_cap"] == 333.3
+
+
+def test_brightness_matching_never_passes_the_cap():
+    cap = FakeCap(stale=300.0)               # stale reading under the cap, but the match would want ~500
+    cap.auto_exposure_now = 500.0
+    rep, _ = run(cap)
+    assert max(v for p, v in cap.sets if p == cv2.CAP_PROP_EXPOSURE) <= 10000 / 30
+    assert rep["fps_check"]["ok"]
+
+
+def test_long_manual_exposure_warns_loudly_about_fps():
+    cap = FakeCap()
+    rep, lines = run(cap, exposure=600.0, focus=None, wb=None)      # 60 ms: about 16.7 fps
+    assert cap.p[cv2.CAP_PROP_EXPOSURE] == 600.0                   # a number given by hand is kept...
+    fc = rep["fps_check"]
+    assert not fc["ok"] and 15 < fc["measured"] < 18 and fc["requested"] == 30
+    assert any("FRAME RATE TOO LOW" in w for w in rep["warnings"])
+    assert any("!!!!" in l and "FRAME RATE TOO LOW" in l for l in lines)   # ...but loudly
+
+
+def test_dynamic_framerate_turned_off_when_offered():
+    listing = ("                     auto_exposure 0x009a0901 (menu)   : min=0 max=3 default=3 value=3\n"
+               "            exposure_time_absolute 0x009a0902 (int)    : min=3 max=2047 step=1 default=250 value=80\n"
+               "        exposure_dynamic_framerate 0x009a0903 (bool)   : default=0 value=1\n")
+    calls = []
+
+    def fake_run(cmd, **k):
+        calls.append(cmd)
+        return R(listing) if "--list-ctrls" in cmd else R()
+    cap = FakeCap()
+    rep, _ = run(cap, run=fake_run, focus=None, wb=None)
+    assert ["v4l2-ctl", "-d", "/dev/video0", "-c", "exposure_dynamic_framerate=0"] in calls
+    assert rep["dynamic_framerate"] == "set to 0"
+    # not offered: skipped quietly
+    calls.clear()
+    rep, _ = run(FakeCap(), run=lambda cmd, **k: (calls.append(cmd), R(listing.splitlines()[0]) if "--list-ctrls" in cmd
+                                                   else R())[1], focus=None, wb=None)
+    assert not any("exposure_dynamic_framerate=0" in " ".join(c) for c in calls)
+    assert rep["dynamic_framerate"] == "not offered by this camera" and not rep["warnings"]
+    # no v4l2-ctl at all: nothing tried, no warning
+    rep, _ = run(FakeCap(), focus=None, wb=None)
+    assert "dynamic_framerate" not in rep and not rep["warnings"]

@@ -20,7 +20,9 @@ Inputs (all but --session optional):
                 term k1 (cx, cy, f_px), camera height and nadir are used if present
   --calib-per-run  floor_calibration_loro.csv from tools/calibrate_floor.py: each run's
                 camera positions use the calibration made WITHOUT that run (so camera
-                vs tape / odometry comparisons aren't circular); runs not listed use --calib
+                vs tape / odometry comparisons aren't circular); runs not listed use --calib.
+                A run whose calibration was made with it (fit.used_runs) is refused
+                unless --allow-in-sample; meta.json records calib_file and calib_includes_run
   --video-offset  skip the flash search and use this offset (s, video minus laptop)
   --blink       blink_detections.csv from tools/blink/blink.py: light positions
                 with per-robot name probabilities (needs --calib and the clock offset)
@@ -133,7 +135,7 @@ def load_runs(session, sheet=None):
         if fit:
             run.clock = dict(fit[2])
     if sheet and os.path.exists(sheet):
-        with open(sheet, newline="") as f:
+        with open(sheet, newline="", encoding="utf-8-sig") as f:   # -sig: Excel's "CSV UTF-8" starts with a BOM
             for r in csv.DictReader(f):
                 rid = (r.get("run_id") or "").strip()
                 if rid not in runs:
@@ -200,6 +202,88 @@ def load_distortion(path):
     if any(d.get(k) is None for k in ("cx", "cy", "f_px")):
         raise ValueError(f"{path}: k1 given without cx, cy, f_px")
     return (float(k1), float(d["cx"]), float(d["cy"]), float(d["f_px"]))
+
+
+def calib_info(path):
+    """What a floor_calibration.json says about how it was made: dict(path,
+    used_runs (set of run ids whose tape marks or odometry made it), mode
+    (points / survey), used_robots (set; survey files from 2026-10-18 on, else
+    empty), held_out_runs, held_out_robots)."""
+    with open(path) as f:
+        d = json.load(f)
+    fit = d.get("fit") or {}
+    return dict(path=os.path.abspath(path), used_runs={str(r) for r in fit.get("used_runs") or []},
+                mode=fit.get("mode") or "points", used_robots={str(r) for r in fit.get("used_robots") or []},
+                held_out_runs=[str(r) for r in d.get("held_out_runs") or []],
+                held_out_robots=[str(r) for r in d.get("held_out_robots") or []])
+
+
+def read_calib_per_run(path):
+    """floor_calibration_loro.csv (or the leave-one-robot-out one) -> {run_id:
+    absolute path of the calibration made without it, or None if the file lists
+    the run but no calibration could be made without it}."""
+    base = os.path.dirname(os.path.abspath(path))
+    out = {}
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        for r in csv.DictReader(f):
+            rid = (r.get("run_id") or "").strip()
+            if rid:
+                c = (r.get("calibration") or "").strip()
+                out[rid] = os.path.join(base, c) if c else None
+    return out
+
+
+def assign_calibrations(run_ids, calib, per_run_csv=None):
+    """Which calibration file scores each run: its held-out file from
+    per_run_csv if listed there, else `calib`. Returns ({run_id: path},
+    {run_id: why it fell back to calib} for runs not covered by per_run_csv)."""
+    per = read_calib_per_run(per_run_csv) if per_run_csv else {}
+    out, fell_back = {}, {}
+    for rid in run_ids:
+        p = per.get(rid)
+        if p:
+            out[rid] = os.path.abspath(p)
+            continue
+        out[rid] = os.path.abspath(calib) if calib else None
+        if per_run_csv:
+            fell_back[rid] = ("listed with no calibration (none could be made without it)" if rid in per
+                              else "not listed")
+    return out, fell_back
+
+
+def in_sample(assign, robots=None, infos=None):
+    """Runs whose assigned calibration was made with that very run:
+    [(run_id, path)]. infos: {path: calib_info} cache (filled in)."""
+    infos = {} if infos is None else infos
+    bad = []
+    for rid, p in sorted(assign.items()):
+        if not p:
+            continue
+        if p not in infos:
+            infos[p] = calib_info(p)
+        if rid in infos[p]["used_runs"]:
+            bad.append((rid, p))
+    return bad
+
+
+def same_robot_survey(assign, robot_of, infos):
+    """Runs scored with a SURVEY calibration made from other runs of the same
+    robot (their wheel odometry carries that robot's wheel-size error into the
+    camera fit): [(run_id, robot, path)]."""
+    out = []
+    for rid, p in sorted(assign.items()):
+        info = infos.get(p) if p else None
+        if not info or info["mode"] != "survey":
+            continue
+        robot = robot_of.get(rid)
+        used = info["used_robots"] or {robot_of[r] for r in info["used_runs"] if r in robot_of}
+        if robot and robot in used:
+            out.append((rid, robot, p))
+    return out
+
+
+IN_SAMPLE_HELP = ("A run's camera positions would be scored with a calibration made FROM that run (its tape marks "
+                  "or odometry), so the camera would be checked against the data it was fitted to (circular).")
 
 
 def undistort_px(x, y, dist):
@@ -376,7 +460,10 @@ def led_offsets(calib_rows, default=LED_OFFSET_CM):
 
 
 # ---------------------------------------------------------------- write
-def write_runs(runs, detections, out, extra=None, blink=None, calib_rows=None, led=None):
+def write_runs(runs, detections, out, extra=None, blink=None, calib_rows=None, led=None, calib_of=None,
+               calib_infos=None):
+    """calib_of: {run_id: calibration file used for its camera positions}
+    (written to meta.json as calib_file, with calib_includes_run)."""
     os.makedirs(out, exist_ok=True)
     man = []
     for run in runs:
@@ -389,8 +476,8 @@ def write_runs(runs, detections, out, extra=None, blink=None, calib_rows=None, l
             for r in run.raw:
                 w.writerow({**r, "t": f"{r['t']:.4f}"})
         n_det = 0
-        if isinstance(detections, dict):      # per-run detections (--calib-per-run)
-            dets_run = detections.get(run.run_id, detections.get(None))
+        if isinstance(detections, dict):      # per-run detections (--calib-per-run): no silent fallback
+            dets_run = detections.get(run.run_id)
         else:
             dets_run = detections
         if dets_run is not None:
@@ -404,7 +491,7 @@ def write_runs(runs, detections, out, extra=None, blink=None, calib_rows=None, l
                         w.writerow([f"{det['t']:.4f}", det["frame"], f"{det['x']:.2f}", f"{det['y']:.2f}",
                                     f"{det['score']:.3f}", "" if det["heading"] is None else f"{det['heading']:.1f}"])
         if blink is not None:
-            b_run = blink.get(run.run_id, blink.get(None)) if isinstance(blink, dict) else blink
+            b_run = (blink.get(run.run_id) or []) if isinstance(blink, dict) else blink
             names = sorted({n for b in b_run for n in b["probs"]})
             t0, t1 = run.t_start - 1.0, run.t_end + 1.0
             with open(os.path.join(d, "blink.csv"), "w", newline="") as f:
@@ -422,6 +509,10 @@ def write_runs(runs, detections, out, extra=None, blink=None, calib_rows=None, l
                                            if c["run"] == run.run_id and c["t"] is not None and c["heading"] is not None]
         if led is not None:
             run_extra["led_offset_cm"] = list(led.get(run.robot, led[None]))
+        if calib_of is not None:
+            cp = calib_of.get(run.run_id)
+            run_extra["calib_file"] = cp
+            run_extra["calib_includes_run"] = run.run_id in (calib_infos or {}).get(cp, {}).get("used_runs", ())
         meta = dict(run_id=run.run_id, robot=run.robot, experiment=run.experiment, level=run.level,
                     result=run.result, excluded=run.excluded, battery_start=run.battery_start,
                     battery_end=run.battery_end, t_start=run.t_start, t_end=run.t_end,
@@ -449,6 +540,8 @@ def main():
     ap.add_argument("--detections")
     ap.add_argument("--calib")
     ap.add_argument("--calib-per-run", help="floor_calibration_loro.csv: score each run with the calibration made without it")
+    ap.add_argument("--allow-in-sample", action="store_true",
+                    help="convert a run's camera positions with a calibration made from that run anyway (circular)")
     ap.add_argument("--video-offset", type=float)
     ap.add_argument("--blink", help="blink_detections.csv (tools/blink/blink.py)")
     ap.add_argument("--calib-results", help="calibration_results.csv (tools/blink/calib.py)")
@@ -476,43 +569,57 @@ def main():
             crow = load_calib_results(args.calib_results, off)
             led, how = led_offsets(crow)
             print(f"{len(crow)} calibration rolls; light offset from {how}")
-    if args.blink:
-        H, Hinv = load_homography(args.calib)
-        par = load_parallax(args.calib)
-        blink = load_blink(args.blink, Hinv, off, parallax=par, dist=load_distortion(args.calib))
-        print(f"{len(blink)} blink light sightings")
+    calib_of, infos = None, {}
+    if args.detections or args.blink:
+        calib_of, fell_back = assign_calibrations([r.run_id for r in runs], args.calib, args.calib_per_run)
+        for rid, why in sorted(fell_back.items()):
+            print(f"note: {rid} {why} in {args.calib_per_run}: uses {args.calib}")
+        bad = in_sample(calib_of, infos=infos)
+        if not args.calib_per_run:
+            over = sorted({r.run_id for r in runs} & calib_info(args.calib)["used_runs"])
+            if over:
+                print(f"WARNING: {args.calib} was made from {len(over)} of these runs ({', '.join(over[:8])}"
+                      f"{' ...' if len(over) > 8 else ''}): give --calib-per-run floor_calibration_loro.csv")
+        if bad and not args.allow_in_sample:
+            sys.exit(f"Refusing: {len(bad)} run(s) would get camera positions from a calibration made with them: "
+                     + ", ".join(f"{rid} ({os.path.basename(p)})" for rid, p in bad[:8])
+                     + f"{' ...' if len(bad) > 8 else ''}.\n{IN_SAMPLE_HELP}\nUse --calib-per-run "
+                     "floor_calibration_loro.csv (from tools/calibrate_floor.py), or --allow-in-sample to do it anyway "
+                     "(meta.json then says calib_includes_run: true).")
+        groups = defaultdict(list)
+        for rid, p in calib_of.items():
+            groups[p].append(rid)
         if args.calib_per_run:
-            per = {None: blink}
-            base = os.path.dirname(os.path.abspath(args.calib_per_run))
-            with open(args.calib_per_run, newline="") as f:
-                for r in csv.DictReader(f):
-                    if r.get("calibration"):
-                        c = os.path.join(base, r["calibration"])
-                        _, Hi = load_homography(c)
-                        per[r["run_id"]] = load_blink(args.blink, Hi, off, parallax=load_parallax(c),
-                                                      dist=load_distortion(c))
-            blink = per
-    if args.detections:
-        H, Hinv = load_homography(args.calib)
-        par = load_parallax(args.calib)
-        if par is None:
-            print("note: calibration has no camera height; robot-top positions not corrected for height")
-        dets = load_detections(args.detections, Hinv, off, parallax=par, dist=load_distortion(args.calib))
-        print(f"{len(dets)} camera detections")
-        if args.calib_per_run:
-            per = {None: dets}
-            base = os.path.dirname(os.path.abspath(args.calib_per_run))
-            with open(args.calib_per_run, newline="") as f:
-                for r in csv.DictReader(f):
-                    if r.get("calibration"):
-                        c = os.path.join(base, r["calibration"])
-                        _, Hi = load_homography(c)
-                        per[r["run_id"]] = load_detections(args.detections, Hi, off, parallax=load_parallax(c),
-                                                           dist=load_distortion(c))
-            print(f"{len(per) - 1} runs use their held-out calibration ({args.calib_per_run})")
+            print(f"{sum(1 for p in calib_of.values() if p != os.path.abspath(args.calib))} runs use their "
+                  f"held-out calibration ({args.calib_per_run})")
             extra["calib_per_run"] = os.path.abspath(args.calib_per_run)
-            dets = per
-    man = write_runs(runs, dets, args.out, extra, blink=blink, calib_rows=crow, led=led)
+        conv = {p: (load_homography(p)[1], load_parallax(p), load_distortion(p)) for p in groups}
+        if any(c[1] is None for c in conv.values()):
+            print("note: calibration has no camera height; robot-top positions not corrected for height")
+        span = {r.run_id: (r.t_start - 1.0, r.t_end + 1.0) for r in runs}
+
+        def per_run(load):
+            """One list for every run: its own time window, converted with its own calibration
+            (a plain list when every run uses the same calibration)."""
+            if len(groups) == 1:
+                p = next(iter(groups))
+                rows = load(*conv[p])
+                return rows, len(rows)
+            out, n = {}, 0
+            for p, rids in groups.items():
+                rows = load(*conv[p])
+                n = len(rows)
+                for rid in rids:
+                    out[rid] = [d for d in rows if span[rid][0] <= d["t"] <= span[rid][1]]
+            return out, n
+        if args.blink:
+            blink, n = per_run(lambda Hi, par, dist: load_blink(args.blink, Hi, off, parallax=par, dist=dist))
+            print(f"{n} blink light sightings")
+        if args.detections:
+            dets, n = per_run(lambda Hi, par, dist: load_detections(args.detections, Hi, off, parallax=par, dist=dist))
+            print(f"{n} camera detections")
+    man = write_runs(runs, dets, args.out, extra, blink=blink, calib_rows=crow, led=led, calib_of=calib_of,
+                     calib_infos=infos)
     w = [max(len(str(r[i])) for r in man + [["run_id", "robot", "route", "result", "raw", "cam", "tape", "missing"]]) for i in range(8)]
     for r in [["run_id", "robot", "route", "result", "raw", "cam", "tape", "missing"]] + man:
         print("  " + "  ".join(str(c).ljust(w[i]) for i, c in enumerate(r)))

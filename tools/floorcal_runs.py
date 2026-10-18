@@ -20,6 +20,13 @@ must not be used to score the camera against that same run. calibrate_floor.py
 therefore also writes one calibration per run made WITHOUT that run
 (leave-one-run-out, or k-fold by run) and floor_calibration_loro.csv saying
 which file to use to score which run.
+
+Survey goes further: the odometry path carries the robot's own wheel-size and
+gyro errors into the camera fit, so a calibration made from Left's other runs
+shares Left's wheel error with the run being scored (camera and wheels would
+then agree for the wrong reason). --holdout robot leaves each robot out
+entirely (floor_calibration_loro_robot.csv); use that, or a click / tape-point
+calibration, for headline camera-vs-wheels numbers (T2/T3).
 """
 import csv
 import math
@@ -53,7 +60,7 @@ def read_detections(path):
     tools/blink's blink_detections.csv (robot known, but the point is the LEDs'
     midpoint, ahead of the robot's centre: kind 'led')."""
     out = []
-    with open(path, newline="") as f:
+    with open(path, newline="", encoding="utf-8-sig") as f:
         rd = csv.DictReader(f)
         blink = "code" in (rd.fieldnames or []) and "lit" in (rd.fieldnames or [])
         for r in rd:
@@ -209,7 +216,7 @@ TAPE_XY_CM = 0.3        # tape start pose: position error (midpoint of two marks
 TAPE_HEADING_DEG = 1.5  # ... and heading error (two marks ~9 cm apart)
 CLOCK_PRIOR_S = 0.1     # video clock offset (runs.video_offset) is refined within about this much
 PAIR_COLS = ["u", "v", "x_cm", "y_cm", "vx_cms", "vy_cms", "sigma_cm", "run", "t", "frame", "kind",
-             "anchor_x_cm", "anchor_y_cm", "session"]
+             "anchor_x_cm", "anchor_y_cm", "session", "robot"]
 
 
 def survey_pairs(runs, dets, offset, paths, axle_to_centre_cm=0.0, led_offset_cm=None, max_sigma_cm=3.0,
@@ -246,7 +253,8 @@ def survey_pairs(runs, dets, offset, paths, axle_to_centre_cm=0.0, led_offset_cm
             x1, y1 = (float(np.interp(t - dt, ts, a)) for a in (P[:, 1], P[:, 2]))
             rows.append(dict(u=d["x"], v=d["y"], x_cm=x, y_cm=y, vx_cms=(x2 - x1) / (2 * dt), vy_cms=(y2 - y1) / (2 * dt),
                              sigma_cm=sg, run=run.run_id, t=t, frame=d["frame"], kind=d["kind"],
-                             anchor_x_cm=run.tape_start[0], anchor_y_cm=run.tape_start[1], session=session))
+                             anchor_x_cm=run.tape_start[0], anchor_y_cm=run.tape_start[1], session=session,
+                             robot=run.robot))
         if len(rows) > max_pairs_per_run:      # thin out evenly in time, keeping all detections of a kept frame
             frames = sorted({r["frame"] for r in rows})
             keep = set(frames[::max(1, int(math.ceil(len(frames) / max_pairs_per_run)))])
@@ -262,13 +270,14 @@ def end_mark_pairs(runs, dets, offset, robot_top_cm=4.0, led_offset_cm=None, ses
     the held-out calibrations a run's own end marks never calibrate the camera
     that scores it."""
     pts, notes = still_points(runs, dets, offset, robot_top_cm, led_offset_cm)
+    robot_of = {r.run_id: r.robot for r in runs}
     out = []
     for p in pts:
         if not p["spot"].endswith("-end"):
             continue
         out.append(dict(u=p["u"], v=p["v"], x_cm=p["x"], y_cm=p["y"], vx_cms=0.0, vy_cms=0.0, sigma_cm=TAPE_XY_CM,
                         run=p["group"], t=0.0, frame=p["frame"], kind="tape_end", anchor_x_cm=p["x"],
-                        anchor_y_cm=p["y"], session=session))
+                        anchor_y_cm=p["y"], session=session, robot=robot_of.get(p["group"], "")))
     return out, notes
 
 
@@ -277,9 +286,9 @@ def write_pairs(path, pairs):
     old = []
     if os.path.isfile(path):
         new_runs = {p["run"] for p in pairs}
-        with open(path, newline="") as f:
+        with open(path, newline="", encoding="utf-8-sig") as f:
             old = [r for r in csv.DictReader(f) if r["run"] not in new_runs]
-    with open(path, "w", newline="") as f:
+    with open(path, "w", newline="", encoding="utf-8") as f:
         wr = csv.DictWriter(f, fieldnames=PAIR_COLS, extrasaction="ignore")
         wr.writeheader()
         wr.writerows(old)
@@ -289,9 +298,10 @@ def write_pairs(path, pairs):
 
 def read_pairs(path):
     out = []
-    with open(path, newline="") as f:
+    with open(path, newline="", encoding="utf-8-sig") as f:
         for r in csv.DictReader(f):
             d = dict(r)
+            d["robot"] = (d.get("robot") or "").strip()     # files before 2026-10-18 have no robot column
             for k in ("u", "v", "x_cm", "y_cm", "vx_cms", "vy_cms", "sigma_cm", "t", "anchor_x_cm", "anchor_y_cm"):
                 d[k] = float(d[k])
             d["frame"] = int(float(d["frame"]))

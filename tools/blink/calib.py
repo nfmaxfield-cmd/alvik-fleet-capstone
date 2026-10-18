@@ -537,10 +537,11 @@ def main(argv=None):
     ap.add_argument("--video", help="video file, if not <recording>/video.avi")
     ap.add_argument("--video-offset", type=float, help="video clock minus laptop clock, s")
     ap.add_argument("--led-height-cm", type=float, default=fr.ALVIK_TOP_CM)
-    ap.add_argument("--names", help="code to name, e.g. 1=Left,2=Center,3=Right,4=other")
+    ap.add_argument("--names", help="code to name, e.g. 1=Left,2=Center,3=Right,4=other (default: from the "
+                                    "session's PARAM blink_code and robot names, as blink.py --session)")
     ap.add_argument("--out", help="default <recording>/calibration_results.csv")
     args = ap.parse_args(argv)
-    names = blink.parse_names(args.names)
+    names = blink.parse_names(args.names) if args.names else blink.names_from_session(args.session)
     calib = args.calib or os.path.join(args.recording, "floor_calibration.json")
     if not os.path.exists(calib):
         sys.exit(f"{calib} not found: give --calib floor_calibration.json")
@@ -558,7 +559,8 @@ def main(argv=None):
     bpath = args.blink or os.path.join(args.recording, "blink_detections.csv")
     if not os.path.exists(bpath):
         print(f"{bpath} not found: running blink.py first")
-        blink.main([args.recording, "--out", bpath] + (["--names", args.names] if args.names else [])
+        blink.main([args.recording, "--out", bpath] + (["--names", args.names] if args.names else
+                                                       ["--session", args.session])
                    + (["--video", args.video] if args.video else []))
     tracks = blink_tracks(blink.read_blink_csv(bpath))
     dets = read_detections(args.detections) if args.detections else None

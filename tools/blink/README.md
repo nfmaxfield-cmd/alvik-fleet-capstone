@@ -28,7 +28,7 @@ a name when the code is clear.
 ## How to run
 
 ```
-python tools/blink/blink.py recordings/20261018-101455_E1
+python tools/blink/blink.py recordings/20261018-101455_E1 --session logs/20261018-101500
 python tools/blink/calib.py --session logs/20261018-101500 --recording recordings/20261018-101455_E1
 python tools/blink/calib.py --session ... --recording ... --detections recordings/.../detections.csv
 ```
@@ -39,8 +39,18 @@ calib.py runs blink.py itself if `blink_detections.csv` is missing. Without
 `camera_detections.csv`), calib.py still finds identity and heading, but not
 the LED offset.
 
-Options worth knowing: `--names 1=Left,2=Center,3=Right,4=other` (both
-programs), `--interpolate` (blink.py: also rows between flashes), `--min-name-p` (blink.py),
+Which code is which robot: the firmware picks a robot's code from its PARAM
+`blink_code` (1..4), or, when that is 0 (the default), from its name, exactly
+and case-sensitively: Left 1, Center 2, Right 3, any other name 4 (`left` or
+`Bob` blink code 4). `blink.py --session <console log folder>` reads that from
+the runs' PARAM records and warns when two robots blink the same code or a
+name isn't exactly Left / Center / Right; calib.py does the same from its
+`--session`. Without `--session`, blink.py assumes the default mapping.
+tools/check_session.py also warns about a non-zero `blink_code` or a shared
+code.
+
+Options worth knowing: `--session` (blink.py), `--names 1=Left,2=Center,3=Right,4=other` (both
+programs; overrides the session), `--interpolate` (blink.py: also rows between flashes), `--min-name-p` (blink.py),
 `--vmax-cms` (blink.py: fastest robot speed, default 40), `--video-offset`
 (calib.py: skip the sync-flash search).
 

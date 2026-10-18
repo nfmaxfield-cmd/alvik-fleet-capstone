@@ -72,7 +72,7 @@ def load_trials(folder):
     if not os.path.exists(path):
         sys.exit(f"no sheet at {path}. Make one with tools/make_run_order.py")
     out = []
-    with open(path, newline="") as f:
+    with open(path, newline="", encoding="utf-8-sig") as f:   # -sig: Excel's "CSV UTF-8" starts with a BOM
         for r in csv.DictReader(f):
             xf, yf, xr, yr = (num(r.get(k)) for k in ("xf_cm", "yf_cm", "xr_cm", "yr_cm"))
             if None in (xf, yf, xr, yr):

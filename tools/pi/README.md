@@ -47,6 +47,15 @@ python3 camrec.py --no-lock                              # leave everything auto
 Light the floor the same way for the whole session: a locked exposure won't
 follow a lamp being switched on.
 
+Frame rate: an exposure longer than one frame (10000 / fps in 100 us units,
+333 at 30 fps) makes the webcam slow down. A locked or brightness-matched
+exposure is capped there (the picture may then be darker: add light), and
+`exposure_dynamic_framerate` is set to 0 with v4l2-ctl if the camera has it.
+After setting the exposure camrec.py counts frames for 2 s; under 90% of the
+requested rate it prints a FRAME RATE TOO LOW warning between rows of `!` and
+records it in meta.json (`fps_check`). A manual `--exposure` above the cap is
+kept as given, with that warning.
+
 The Vitade AF's exact control names and ranges are not known until tried on
 the Pi. List them (needs `sudo apt install -y v4l-utils`; camrec.py works
 without it but uses it as a fallback and logs its list in meta.json):

@@ -166,7 +166,7 @@ def ask_marks(what, spacing, near=None, max_dist=None, heading_near=None):
 
 def _write_csv(path, cols, rows):
     tmp = path + ".tmp"
-    with open(tmp, "w", newline="") as f:
+    with open(tmp, "w", newline="", encoding="utf-8") as f:     # plain UTF-8 (no BOM)
         w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader()
         w.writerows(rows)
@@ -258,7 +258,7 @@ def main():
     sheet = os.path.join(args.experiment, "data", "measurements.csv")
     if not os.path.exists(sheet):
         sys.exit(f"No sheet at {sheet}. Make one with tools/make_run_order.py")
-    with open(sheet, newline="") as f:
+    with open(sheet, newline="", encoding="utf-8-sig") as f:   # -sig: Excel's "CSV UTF-8" starts with a BOM
         reader = csv.DictReader(f)
         cols = reader.fieldnames
         rows = list(reader)

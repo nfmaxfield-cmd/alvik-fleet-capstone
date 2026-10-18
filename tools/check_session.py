@@ -48,6 +48,87 @@ def fnum(x, default=float("nan")):
         return default
 
 
+# ------------------------------------------------------------------ blink codes
+BLINK_NAMES = {"Left": 1, "Center": 2, "Right": 3}    # firmware/home_lab/blink.h codeFor(): exact, case-sensitive
+BLINK_OTHER = 4                                     # any other name
+BLINK_DEFAULT_NAMES = {1: "Left", 2: "Center", 3: "Right", 4: "other"}   # = tools/blink/blink.py DEFAULT_NAMES
+
+
+def blink_code_for(name, blink_code):
+    """The code a robot blinks, exactly as the firmware's codeFor(): PARAM blink_code
+    1..4 is used as given; anything else (0 = default) takes it from the name."""
+    v = fnum(blink_code, 0.0)
+    c = int(v) if v == v else 0           # (int)P("blink_code") in the firmware
+    if 1 <= c <= 4:
+        return c
+    return BLINK_NAMES.get(name, BLINK_OTHER)
+
+
+def session_blink_codes(folder):
+    """What each robot of a console session blinks, from its runs' PARAM records.
+    Returns (codes, notes): codes = {robot: {code: [run ids]}} (runs with
+    blink_codes = 0 don't blink and are left out); notes = list of warnings:
+    a non-zero blink_code, a name that isn't exactly Left / Center / Right
+    (case matters: "left" blinks the 'other' code), one robot blinking
+    different codes in different runs, two robots blinking the same code."""
+    params = defaultdict(dict)
+    for r in rows(folder, "param"):
+        params[(r["robot"], r["run"])][r["name"]] = r["value"]
+    codes = defaultdict(lambda: defaultdict(list))
+    nonzero = defaultdict(list)
+    notes = []
+    for (robot, run), pr in sorted(params.items()):
+        if "blink_codes" in pr and fnum(pr["blink_codes"], 1) <= 0:
+            continue
+        bc = pr.get("blink_code", "0")
+        c = blink_code_for(robot, bc)
+        if fnum(bc, 0) != 0:
+            nonzero[robot].append((run, f"{fnum(bc):g}", c))
+        codes[robot][c].append(run)
+    for robot, lst in sorted(nonzero.items()):
+        vals = sorted({v for _, v, _ in lst})
+        notes.append(f"{robot}: PARAM blink_code = {'/'.join(vals)} (not 0) in {len(lst)} run(s) "
+                     f"(e.g. {lst[0][0]}): it blinks code {'/'.join(sorted({str(c) for _, _, c in lst}))}"
+                     + (" whatever its name" if all(1 <= int(float(v)) <= 4 for v in vals)
+                        else " (a value outside 1..4 falls back to the name)"))
+    for robot in sorted(codes):
+        if robot not in BLINK_NAMES:
+            near = next((n for n in BLINK_NAMES if n.lower() == robot.strip().lower()), None)
+            notes.append(f"robot name {robot!r} is not one of Left / Center / Right"
+                         + (f" (the firmware compares exactly: {robot!r} is not {near!r})" if near else "")
+                         + f": unless blink_code is set it blinks the 'other' code {BLINK_OTHER}")
+        if len(codes[robot]) > 1:
+            notes.append(f"{robot} blinks different codes in different runs: "
+                         + ", ".join(f"code {c} in {len(r)} run(s)" for c, r in sorted(codes[robot].items())))
+    by_code = defaultdict(set)
+    for robot, cs in codes.items():
+        for c in cs:
+            by_code[c].add(robot)
+    for c, robots in sorted(by_code.items()):
+        if len(robots) > 1:
+            notes.append(f"{' and '.join(sorted(robots))} both blink code {c}: the camera can't tell them apart "
+                         "by their lights (set PARAM blink_code so each has its own, or rename)")
+    return {r: dict(cs) for r, cs in codes.items()}, notes
+
+
+def blink_names(codes):
+    """{code: name} for tools/blink/blink.py from session_blink_codes(): each code
+    named after the robot that blinks it; a code two robots share gets both names
+    joined by '/' (no robot matches it: the fusion treats it as an unknown name);
+    unused codes keep their default name unless a robot already has it."""
+    users = defaultdict(set)
+    for robot, cs in codes.items():
+        for c in cs:
+            users[c].add(robot)
+    names = {c: "/".join(sorted(rb)) for c, rb in users.items()}
+    taken = set(names.values())
+    for c in range(1, BLINK_OTHER + 1):
+        if c not in names:
+            d = BLINK_DEFAULT_NAMES[c]
+            names[c] = d if d not in taken else f"code{c}"
+    return dict(sorted(names.items()))
+
+
 # ------------------------------------------------------------------ clock
 def clock_fits(folder):
     """(robot, boot) -> (a, b, info): laptop_time = a + b * robot_ms / 1000, from
@@ -402,6 +483,20 @@ def main():
                 if not any(a <= t <= b for a, b in spans):
                     problems.append(f"{sy['robot']} run {sy['run']} {sy['tag']} flash falls outside every video's "
                                     f"time range (recorder not running, or the Pi's clock is off?)")
+
+    print("\nBLINK CODES (from each run's PARAM blink_code and the robot's name)")
+    bcodes, bnotes = session_blink_codes(S)
+    if not bcodes:
+        print("  no PARAM records with blinking on")
+    for robot, cs in sorted(bcodes.items()):
+        print(f"  {robot}: " + ", ".join(f"code {c} ({len(r)} run(s), flash every {(c + 2) / 10:.1f} s)"
+                                        for c, r in sorted(cs.items())))
+    for n in bnotes:
+        problems.append("blink: " + n)
+    if bcodes:
+        nm = blink_names(bcodes)
+        if nm != BLINK_DEFAULT_NAMES:
+            print("  not the default code -> name mapping: run tools/blink/blink.py with --session " + S)
 
     print("\nCHECK")
     if problems:

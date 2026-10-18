@@ -9,7 +9,9 @@ frame and a live preview in your laptop's browser.
     python3 camrec.py --no-lock            # leave auto exposure / focus / white balance running
 
 Exposure, focus and white balance are LOCKED by default: after a 2 s warm-up
-the camera's own automatic values are read and frozen, so brightness and
+the camera's own automatic values are read and frozen (exposure capped at one
+frame time, 10000/fps x 100 us, so the frame rate can't drop; the frame rate is
+then measured for 2 s and a loud warning given below 90%), so brightness and
 sharpness can't drift during a recording (the flash and blink detectors look
 for brightness changes). What was asked for, what the camera reports back and
 the brightness/sharpness before and after are printed and saved in meta.json
@@ -257,11 +259,38 @@ def exposure_ms(controls):
     return None
 
 
+def max_exposure(fps):
+    """Longest exposure (V4L2 units of 100 us) that still fits in one frame at fps:
+    10000 / fps (333 at 30 fps). Longer, and the webcam slows its frame rate."""
+    return 10000.0 / fps if fps and fps > 0 else None
+
+
+def measure_fps(cap, seconds=2.0, now=time.monotonic):
+    """Frames per second actually delivered over about `seconds`: (frames, s, fps)."""
+    t0 = now()
+    n, t = 0, t0
+    while t - t0 < seconds:
+        ok, _ = cap.read()
+        t = now()
+        if ok:
+            n += 1
+        elif t - t0 > 2 * seconds:
+            break
+    dt_ = t - t0
+    return n, dt_, (n / dt_ if dt_ > 0 else 0.0)
+
+
 def apply_controls(cap, device, exposure="lock", focus="lock", wb="lock", warmup_s=2.0, log=print,
-                   run=subprocess.run, now=time.monotonic):
+                   run=subprocess.run, now=time.monotonic, fps=30, fps_check_s=2.0):
     """Exposure, focus and white balance: 'lock' = after a warm-up, freeze the camera's
     own automatic values; 'auto' = leave/turn automatic on; a number = that manual
-    value; None = don't touch. Returns a report for meta.json."""
+    value; None = don't touch. Returns a report for meta.json.
+
+    The frame rate is protected: a locked or brightness-matched exposure is capped at
+    one frame time (max_exposure(fps)); exposure_dynamic_framerate is set to 0 with
+    v4l2-ctl when the camera has it (it lets auto exposure slow the frame rate); and
+    after setting a manual exposure the frame rate is measured for fps_check_s and a
+    loud warning given (rep["fps_check"], also in meta.json) below 0.9 x fps."""
     rep = dict(requested=dict(exposure=exposure, focus=focus, white_balance=wb), warmup_s=warmup_s)
     if not str(device).isdigit():
         rep["note"] = "replaying a file: no camera controls"
@@ -280,6 +309,19 @@ def apply_controls(cap, device, exposure="lock", focus="lock", wb="lock", warmup
     rep["auto_values"] = snap
 
     # exposure
+    cap_exp = max_exposure(fps)
+    rep["exposure_cap"] = None if cap_exp is None else round(cap_exp, 1)
+    manual_exposure = False
+    if exposure is not None and c.v4l2 is not None:
+        # auto exposure may otherwise lower the frame rate in dim light (UVC "dynamic framerate")
+        if "exposure_dynamic_framerate" in c.v4l2:
+            ok, err = v4l2_set(dev, "exposure_dynamic_framerate", 0, run)
+            c.steps.append(dict(control="exposure_dynamic_framerate", ok=ok,
+                                tried=[dict(via="v4l2-ctl exposure_dynamic_framerate", value=0, accepted=ok,
+                                            error=err or None)]))
+            rep["dynamic_framerate"] = "set to 0" if ok else f"could not set to 0 ({err})"
+        else:
+            rep["dynamic_framerate"] = "not offered by this camera"
     if exposure == "auto":
         c.set("auto_exposure", AE_AUTO)
     elif exposure is not None:
@@ -288,17 +330,33 @@ def apply_controls(cap, device, exposure="lock", focus="lock", wb="lock", warmup
             c.warnings.append("exposure: the camera doesn't report its exposure through OpenCV; not locked")
             log("  ! " + c.warnings[-1])
         else:
+            if exposure == "lock" and cap_exp and val > cap_exp:
+                c.warnings.append(f"exposure: the automatic value {val:g} is longer than one frame at {fps} fps "
+                                  f"(max {cap_exp:.0f} x 100 us); locked at {cap_exp:.0f}. The picture may be darker: "
+                                  "add light, or raise the gain")
+                log("  ! " + c.warnings[-1])
+                val = float(int(cap_exp))
+            elif exposure != "lock" and cap_exp and val > cap_exp:
+                c.warnings.append(f"exposure: --exposure {val:g} is longer than one frame at {fps} fps (max "
+                                  f"{cap_exp:.0f}): the camera will drop its frame rate")
+                log("  ! " + c.warnings[-1])
+            manual_exposure = True
             if c.set("auto_exposure", AE_MANUAL, alt=AE_MANUAL_OLD) and c.set("exposure", val) and exposure == "lock" \
                     and auto_stats and auto_stats["brightness"] > 5:
                 # the reported value can be stale while auto exposure runs: match the auto brightness
                 target = auto_stats["brightness"]
                 rng = (c.v4l2 or {}).get(c._v4l2_name("exposure") or "", {})
                 lo, hi = rng.get("min", 1), rng.get("max", 10000)
+                if cap_exp:
+                    hi = min(hi, int(cap_exp))        # never longer than a frame: that would drop the fps
                 for _ in range(4):
                     st = frame_stats(cap, 5)
                     if not st or abs(st["brightness"] / target - 1) <= 0.12 or st["brightness"] >= 250:
                         break
-                    val = float(min(hi, max(lo, round(val * target / max(st["brightness"], 1.0)))))
+                    new = float(min(hi, max(lo, round(val * target / max(st["brightness"], 1.0)))))
+                    if new == val:
+                        break                         # at the cap (or the camera's limit): can't get brighter
+                    val = new
                     c.set("exposure", val)
                 rep["exposure_matched_to_auto_brightness"] = target
     # focus
@@ -334,6 +392,15 @@ def apply_controls(cap, device, exposure="lock", focus="lock", wb="lock", warmup
         if a["sharpness"] > 1 and b["sharpness"] < 0.7 * a["sharpness"]:
             c.warnings.append(f"sharpness dropped {a['sharpness']} -> {b['sharpness']} when locking focus; "
                               "set --focus by hand (see README)")
+    if manual_exposure and fps and fps_check_s:
+        n, secs, got = measure_fps(cap, fps_check_s, now)
+        ok = got >= 0.9 * fps
+        rep["fps_check"] = dict(requested=fps, measured=round(got, 2), frames=n, seconds=round(secs, 2), ok=ok)
+        if not ok:
+            c.warnings.append(f"FRAME RATE TOO LOW: {got:.1f} fps measured over {secs:.1f} s after setting the "
+                              f"exposure, {fps} fps requested. Timing and blink codes need the full rate: "
+                              f"lower --exposure (at most {cap_exp:.0f}) or add light.")
+            log("\n" + "!" * 78 + "\n  ! " + c.warnings[-1] + "\n" + "!" * 78)
     rep["steps"], rep["warnings"] = c.steps, c.warnings
     if c.v4l2 is not None:
         rep["v4l2_after"] = v4l2_list(dev, run)
@@ -381,7 +448,7 @@ def main():
     dflt = "lock" if args.lock else None
     controls = apply_controls(cap, args.device, args.exposure if args.exposure is not None else dflt,
                               args.focus if args.focus is not None else dflt,
-                              args.wb if args.wb is not None else dflt)
+                              args.wb if args.wb is not None else dflt, fps=args.fps)
     ok, frame = cap.read()
     if not ok:
         sys.exit("The camera opened but sent no picture.")
@@ -412,7 +479,8 @@ def main():
             json.dump(dict(device=args.device, width=w, height=h, fps_requested=args.fps, fps_reported=real_fps,
                            host=socket.gethostname(), start=dt.datetime.now().isoformat(timespec="seconds"),
                            label=args.label, note="t_wall is when the Pi received the frame",
-                           camera_controls=controls, exposure_ms=exposure_ms(controls)), f, indent=2)
+                           camera_controls=controls, exposure_ms=exposure_ms(controls),
+                           fps_check=controls.get("fps_check")), f, indent=2)
         print(f"Recording {w}x{h} to {folder}")
         print("Type a note and press Enter to mark a moment. Ctrl+C stops.")
 
