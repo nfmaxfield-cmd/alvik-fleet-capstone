@@ -29,7 +29,7 @@ them, like `3 3/4`; save as CSV). Each row says what to measure and how.
   gap, try the dime and the penny.
 - **Room (C15):** temperature.
 
-## Part 2: robots logging while still (about 45 min, plus 10 min warm-up)
+## Part 2: robots logging while still (about 50 min, plus 10 min warm-up)
 Camera recording, as in T1. Robots switched on **just before** this part.
 1. Stand the board on the floor with its face along x = 110 cm (43 5/16 in),
    square to the x axis, across y = 61 cm (24 in).
@@ -43,8 +43,12 @@ Camera recording, as in T1. Robots switched on **just before** this part.
      it sits.
    - **tof10 ... tof100:** the robot faces the board, front face 10 to 100 cm
      from it (the start spot is given). 10 s still each.
-   - **edge_in, edge_over:** take the board away first, so the far x edge of
-     the plywood (x = 122 cm, 48 1/16 in) is open. The robot faces that edge.
+   - **edge_n15, edge_n10, edge_n5:** take the board away first, so the far
+     x edge of the plywood (x = 122 cm, 48 1/16 in) is open. The robot faces
+     that edge with its front face 15, 10 and 5 cm (5 7/8, 3 15/16, 1 15/16 in)
+     from it. Checks whether the distance sensor's lowest zone sees the floor
+     drop away before the robot gets close.
+   - **edge_in, edge_over:** the board still away. The robot faces the open edge.
      edge_in: its nose about 7/8 in inside the edge. edge_over: its nose
      sticking out about 1 in past the edge (the wheels stay about 1 in
      inside, so it can't tip). 10 s still each. Don't let it move.
@@ -60,7 +64,8 @@ Camera recording, as in T1. Robots switched on **just before** this part.
   lifted flag; the front sensor's reading vs distance gives its noise and bias
   per zone (B26 in ACCURACY-CHECKS.md).
 - Edge rows: the three line sensors under the nose read the plywood, the tape
-  and the open edge. If the edge reading is clearly different from both
+  and the open edge, and the distance sensor's lowest zone reads the floor
+  ahead at 15, 10 and 5 cm from the edge. If the edge reading is clearly different from both
   plywood and tape, the next firmware's edge guard (stop before the nose
   passes an open edge) gets its threshold from these numbers.
 
