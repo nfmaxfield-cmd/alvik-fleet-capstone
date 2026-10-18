@@ -327,3 +327,18 @@ def test_limited_runs_are_left_out_and_counted(tmp_path):
     e.runs["A-1"] = SimpleNamespace(result="limited:plywood edge")
     e.drop_limited()
     assert e.trials == [] and len(e.limited) == 3
+
+
+def test_run_sheet_adds_a_replacement_for_a_limited_run():
+    import run_sheet as rs
+    rows = [dict(order="1", robot="Left", level="L", commands="run demo", run_id="A-1", xf_cm="1", note="x"),
+            dict(order="2", robot="Left", level="sq", commands="run demo", run_id="", note=""),
+            dict(order="3", robot="Right", level="L", commands="run demo", run_id="", note=""),
+            dict(order="4", robot="Left", level="L", commands="run demo", run_id="", note="")]
+    new = rs.add_replacement(rows, 0)
+    assert [r["order"] for r in rows] == ["1", "2", "5", "3", "4"]       # end of Left's first block
+    assert new["robot"] == "Left" and new["level"] == "L" and new["commands"] == "run demo"
+    assert new["run_id"] == "" and new["xf_cm"] == ""
+    assert new["note"] == "replaces order 1 (limited: plywood edge)"
+    assert not tr.is_limited(new) and tr.is_limited(dict(note="limited: plywood edge"))
+    assert tr.is_limited(dict(note="replaces order 1 (limited: plywood edge) limited: plywood edge"))

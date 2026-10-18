@@ -202,13 +202,24 @@ else), but the run did not finish its route. So:
 - run_sheet.py says so and asks: Enter marks the row `excluded` = 1 with the
   note `limited: plywood edge` (r = redo, m = measure it anyway: the note then
   says `limited: plywood edge (measured anyway)` and it still stays out of
-  the statistics).
+  the statistics). Unless redone, it also adds a replacement row (same robot,
+  level, commands and targets; a new order number; note `replaces order N
+  (limited: plywood edge)`) at the end of that robot's block of rows, so each
+  level keeps its planned number of runs; the replacement itself is an
+  ordinary run.
 - tape_results.py and accuracy_checks.py leave such rows out of every
   statistic (a measured row whose RUNEND says limited too) and print how many
   were left out; check_session.py and summarize.py count them apart from
   unfinished runs; simulate.py marks them the same way on its sheet.
-- tools/fleet/run_plan.py ends a plan whose follow run was limited with result
-  `limited: ...`, exit code 0.
+- Follow runs (fleet) don't end at an edge: the guard stops only the step
+  (STEP failed `plywood edge at X Y TH CUE`, "Step follower"), the robot holds,
+  and tools/fleet/run_plan.py adds the edge to the map as a no-go strip
+  (obstacle source `edge_guard`: a rectangle square to the robot's heading,
+  starting 3.5 cm ahead of the axle for the line cue or 8 cm for the bottom
+  zone, 40 cm either side, 25 cm deep: assumptions until hardware trips
+  confirm them), logs it (`edge_boundary` in its log) and re-plans the
+  affected robots; the others carry on. A follow run from older firmware that
+  ends `limited:` ends the plan with result `limited: ...`, exit code 0.
 
 A calibration run is the exception: its forward roll stopped at an edge rolls
 back and ends `done` (limited (plywood edge) through CALIB_LOOK, above).
@@ -489,7 +500,7 @@ left, heading degrees, 0 = +x, counter-clockwise positive. Poses are
 - `keepouts`: areas robots must not enter (no physical wall; the distance
   sensor does not see them).
 - `obstacles`: things found on the floor: `shape` circle (`center`, `radius`)
-  or polygon (`points`); `source` camera | distance_sensor | user; `time`
+  or polygon (`points`); `source` camera | distance_sensor | edge_guard (an open plywood edge a follow step stopped at) | user; `time`
   when seen (ISO 8601). Optional `note`.
 - `robots`: start and park poses (park defaults to start).
 - `tasks` (optional): per robot, boards (by name) or `{"goto": [x, y]}` /
@@ -680,7 +691,7 @@ Robot -> laptop, record STEP (step.csv): run,id,state,ms,x_cm,y_cm,th_deg,front_
 | full | buffer (8) full: send again later | |
 | bad | could not read the step | why |
 | started / done | the step began / finished | done approach: "N readings; wheels from R cm", "wheels only: no distance readings" or "travel cap C cm reached; N readings" |
-| failed | the step stopped | `obstacle D cm ahead; zones L CL C CR R` (the five readings, for the obstacle's outline), `halted`, `turn timed out`, `drive timed out`, `approach timed out`, or the run's end reason (`robot lifted`, `stop command`, `cancel button`) |
+| failed | the step stopped | `obstacle D cm ahead; zones L CL C CR R` (the five readings, for the obstacle's outline), `plywood edge at X Y TH CUE` (2026-10-18c+, `safe_edge` on: the edge guard stopped the step at an open plywood edge; own pose and the cue, `line` or `bottom`; the robot holds and stays in follow mode, and run_plan.py maps the edge as a no-go strip and re-plans), `halted`, `turn timed out`, `drive timed out`, `approach timed out`, or the run's end reason (`robot lifted`, `stop command`, `cancel button`) |
 | dropped | a queued step was removed | `hold`, `halt`, `an earlier step failed`, `run ended` |
 | held / halted | ack of hold / halt | |
 

@@ -605,7 +605,9 @@ class Coordinator:
             for e in events:
                 if e["robot"] == cause:
                     e.update(action="stopped", reason="its distance sensor saw something ahead"
-                             if ob and ob.get("source") == "distance_sensor" else "its step failed")
+                             if ob and ob.get("source") == "distance_sensor" else
+                             "its edge guard stopped it at an open plywood edge (limited, holding)"
+                             if ob and ob.get("source") == "edge_guard" else "its step failed")
         # did a robot get past the steps it was allowed to carry on with? then this plan is stale
         stale = [n for n in self.names
                  if any((st["status"] == "started" and st.get("t_started", 0) > t_event)
@@ -708,6 +710,16 @@ class Coordinator:
             return                                      # the run ended: handled in the main loop
         if info.startswith("halted"):
             return                                      # we stopped it for a re-plan
+        if info.startswith("plywood edge"):
+            # the edge guard (follow mode) refused to drive off the board: not a failure. The robot holds;
+            # the edge becomes a no-go strip in the map and the affected robot(s) re-plan around it
+            self.n_sensor_obstacles += 1
+            ob = self.edge_boundary(b, pose, info)
+            self.log("edge_boundary", robot=b.name, i=i, info=info, obstacle=ob)
+            self.say("%s: limited at a plywood edge during %s step (%s); holding, mapped the edge as a no-go strip, "
+                     "re-planning around it" % (b.name, stp["type"], info))
+            self.handle_obstacle(ob, cause=b.name)
+            return
         if info.startswith("obstacle"):
             self.n_sensor_obstacles += 1
             ob = self.sensor_obstacle(b, pose, front, info)
@@ -722,6 +734,38 @@ class Coordinator:
         self.handle_obstacle(None, cause=b.name)
 
     ZONE_DEG = (22.0, 11.0, 0.0, -11.0, -22.0)   # the five front zones' directions (firmware motion.h)
+
+    # Where the open edge is, ahead of the wheel axle, when the guard trips (ASSUMPTIONS until the E0c edge rows
+    # and hardware trips confirm them): the line sensors sit 3.5 cm ahead (grid_center_cm) and trip right over
+    # the edge; the bottom zone's floor patch is ~7-9 cm ahead of the sensor (4.5 cm ahead), so the edge is
+    # somewhere between the front face and ~12 cm: 8 cm is used, erring near.
+    EDGE_AHEAD_CM = {"line": 3.5, "bottom": 8.0, "": 3.5}
+    EDGE_STRIP_HALF_CM = 40.0   # the strip runs this far either side of the trip point, ASSUMED square to the heading
+    EDGE_STRIP_DEPTH_CM = 25.0  # and this far past the edge (off the board: nothing to plan there anyway)
+
+    def edge_boundary(self, b, pose, info=""):
+        """The no-go strip for an open plywood edge from a follow step stopped by the edge guard (STEP failed
+        "plywood edge at <x> <y> <th> <line|bottom>"): a rectangle starting at the edge, square to the robot's
+        heading, EDGE_STRIP_HALF_CM either side, EDGE_STRIP_DEPTH_CM deep. pose: the STEP record's pose
+        (used if the info has none)."""
+        x, y, thd, cue = pose[0], pose[1], pose[2], ""
+        parts = info.split()
+        try:
+            k = parts.index("at")
+            x, y, thd = float(parts[k + 1]), float(parts[k + 2]), float(parts[k + 3])
+            cue = parts[k + 4] if len(parts) > k + 4 else ""
+        except (ValueError, IndexError):
+            pass
+        th = math.radians(thd)
+        u = (math.cos(th), math.sin(th))
+        n = (-u[1], u[0])
+        a = self.EDGE_AHEAD_CM.get(cue, 3.5)
+        h, dep = self.EDGE_STRIP_HALF_CM, self.EDGE_STRIP_DEPTH_CM
+        ex, ey = x + a * u[0], y + a * u[1]
+        pts = [(ex + s * h * n[0] + t * u[0], ey + s * h * n[1] + t * u[1]) for s, t in ((-1, 0), (1, 0), (1, dep), (-1, dep))]
+        return {"id": "edge-by-%s-%d" % (b.name, self.n_sensor_obstacles), "shape": "polygon",
+                "points": [[round(px, 2), round(py, 2)] for px, py in pts], "source": "edge_guard",
+                "cue": cue or "?", "time": FM.now_iso()}
 
     def sensor_obstacle(self, b, pose, front, info=""):
         """The obstacle's outline from the front zones that see something (STEP
@@ -808,7 +852,8 @@ class Coordinator:
             self.fixes()
             for b in self.bots.values():
                 if b.ended and not self.abort:
-                    if SC.run_outcome(b.ended) == SC.CALIB_LIMITED:   # not a failure: it refused to leave the board
+                    if SC.run_outcome(b.ended) == SC.CALIB_LIMITED:   # (follow runs hold instead: firmware older than
+                        #                                                 2026-10-18c's step-only edge stop)
                         self.abort = "limited: %s's edge guard stopped it before an open plywood edge" % b.name
                     else:
                         self.abort = "%s's follow run ended (%s)" % (b.name, b.ended)

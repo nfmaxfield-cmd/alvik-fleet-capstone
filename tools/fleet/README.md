@@ -70,8 +70,11 @@ python -m pytest tools/fleet/tests -q
    before it was acked. Unacked steps are resent every 0.3 s. Camera fixes go
    to each robot 10 times a second with the robot's own clock time of the
    frame, so it can correct where it was then.
-4. Something new on the floor (the camera's `obstacle` message, or a robot
-   whose distance sensor stops a step): the quick part of the obstacle rules
+4. Something new on the floor (the camera's `obstacle` message, a robot
+   whose distance sensor stops a step, or a robot whose plywood edge guard
+   stops a step at an open edge: that robot holds and the edge goes into the
+   map as a no-go strip, source `edge_guard`, logged as `edge_boundary`;
+   not a failure): the quick part of the obstacle rules
    runs at once (imminent robots get `halt`, carrying-on robots `hold` after
    their last carried-on step), the new plan is computed in the background
    while the others drive on, then takes over. A robot left without a route is

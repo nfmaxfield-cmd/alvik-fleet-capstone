@@ -642,6 +642,7 @@ class FollowMixin:
         self.f_active = True
         self.tick_hook = self.f_tick
         self.front_soft = True
+        self.edge_soft = True
         self.front_limit = 0.0
         self.step_stop = ""
         self.send("M,%s follow: ready for steps (needs fpose or a camera fix first)" % self.name)
@@ -686,6 +687,9 @@ class FollowMixin:
                 if self.step_stop == "obstacle":
                     d = self.tof()
                     why = "obstacle %.1f cm ahead; zones %.1f %.1f %.1f %.1f %.1f" % ((self.front_trip,) + tuple(d))
+                elif self.step_stop == "edge":
+                    why = "plywood edge at %.1f %.1f %.1f %s" % (self.pose.x, self.pose.y, self.pose.th(),
+                                                               getattr(self, "edge_last_cue", ""))
                 else:
                     why = self.step_stop or self.fail or "failed"
                 self.f_last_failed = s["id"]
@@ -700,6 +704,7 @@ class FollowMixin:
         self.f_active = False
         self.tick_hook = None
         self.front_soft = False
+        self.edge_soft = False
         self.front_limit = -1.0
         self.step_stop = ""
         self.pose.stop()

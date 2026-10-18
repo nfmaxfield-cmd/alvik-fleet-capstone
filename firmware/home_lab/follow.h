@@ -15,7 +15,10 @@
 //   stop          stop at once and end the run (as for every experiment)
 //
 // fmin: smallest front-face distance the map expects ahead during the step
-// ("-" = nothing within 100 cm). The front check stops the step (failed:obstacle)
+// ("-" = nothing within 100 cm). The plywood edge guard (safe_edge) stops only
+// the step too (failed "plywood edge at <x> <y> <th> <line|bottom>": the robot holds, the
+// laptop maps that edge and replans), not the run.
+// The front check stops the step (failed:obstacle)
 // below min(safe_front_cm, fmin + tof_recess_cm - front_margin_cm), so planned
 // passes near boards don't trip the 7 cm stop. Approaches do their own check.
 //
@@ -319,6 +322,7 @@ void run() {
   active = true;
   gTickHook = tickHook;
   gFrontSoft = true;
+  gEdgeSoft = true;
   gFrontLimitCm = 0;
   gStepStop = "";
   net::logf("M,%s follow: ready for steps (needs fpose or a camera fix first)", net::name);
@@ -370,6 +374,10 @@ void run() {
         snprintf(why, sizeof(why), "obstacle %.1f cm ahead; zones %.1f %.1f %.1f %.1f %.1f", gFrontTripCm,
                  d[0], d[1], d[2], d[3], d[4]);
       }
+      else if (gStepStop == "edge")
+        // where it stopped (own pose, floor cm / deg): the laptop maps the open edge just ahead of the line
+        // sensors as a no-go strip and replans (run_plan.py); the robot holds
+        snprintf(why, sizeof(why), "plywood edge at %.1f %.1f %.1f %s", pose::x, pose::y, pose::th(), edge::lastCue);
       else snprintf(why, sizeof(why), "%s", gStepStop.length() ? gStepStop.c_str() : gFail.length() ? gFail.c_str() : "failed");
       lastFailed = s.id;
       report(s.id, "failed", why);
@@ -385,6 +393,7 @@ void run() {
   active = false;
   gTickHook = nullptr;
   gFrontSoft = false;
+  gEdgeSoft = false;
   gFrontLimitCm = -1;
   gStepStop = "";
   pose::stop();

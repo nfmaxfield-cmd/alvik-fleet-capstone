@@ -287,6 +287,28 @@ def check_params(watch, run, cmds, wait_s=1.5):
     return bad, unseen
 
 
+# Filled in by a run: a replacement row starts without them.
+RUN_FILLED_COLS = ("run_id", "xf0_cm", "yf0_cm", "xr0_cm", "yr0_cm", "xf_cm", "yf_cm", "xr_cm", "yr_cm",
+                   "battery_pct", "excluded", "note")
+
+
+def add_replacement(rows, i):
+    """A limited run (edge guard: limited:plywood edge) is left out of the statistics, so its level would
+    lose a run: append a copy of rows[i] (same robot, level, commands, targets) at the end of that robot's
+    block (the stretch of consecutive rows of the same robot that row i is in), with a new order number
+    and the note "replaces order N (limited: plywood edge)". Returns the new row."""
+    r = rows[i]
+    j = i
+    while j + 1 < len(rows) and rows[j + 1].get("robot") == r.get("robot"):
+        j += 1
+    orders = [int(float(x["order"])) for x in rows if str(x.get("order", "")).strip().lstrip("-").replace(".", "", 1).isdigit()]
+    new = {k: ("" if k in RUN_FILLED_COLS else v) for k, v in r.items()}
+    new["order"] = str(max(orders, default=0) + 1)
+    new["note"] = f"replaces order {r.get('order')} ({sc.LIMITED_EDGE_NOTE})"
+    rows.insert(j + 1, new)
+    return new
+
+
 def save_sheet(path, cols, rows, interactive=True):
     """Save atomically. Windows refuses to replace a file Excel has open, so a
     failed save never loses the marks: they always go to a backup copy first,
@@ -538,12 +560,16 @@ def main():
                     # the edge guard refused to drive off the work area: not a localization failure, but the
                     # run didn't finish its route, so accuracy statistics leave it out (counted apart)
                     print("  The edge guard stopped it before an open plywood edge. That is not a failure, but the "
-                          "run didn't finish its route, so the accuracy statistics should leave it out.")
+                          "run didn't finish its route, so the accuracy statistics should leave it out. Unless you "
+                          "redo it now, a replacement run (same robot and level) is added at the end of this "
+                          f"robot's block, so {level} keeps its planned number of runs.")
                     a = ask(f"  Press Enter to mark it excluded with the note \"{sc.LIMITED_EDGE_NOTE}\", r to redo "
                             f"it, or m to measure it anyway: ").lower()
                     if a == "r":
                         r["run_id"] = ""
                         continue
+                    rep = add_replacement(rows, i)
+                    print(f"  Added run {rep['order']} to replace it ({robot}, {level}).")
                     if a != "m":
                         r["excluded"] = "1"
                         r["note"] = (r.get("note", "") + " " + sc.LIMITED_EDGE_NOTE).strip()

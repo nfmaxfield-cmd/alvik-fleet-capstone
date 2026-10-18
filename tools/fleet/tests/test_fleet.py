@@ -566,3 +566,40 @@ def test_dry_run_end_to_end(tmp_path):
     assert sim["min_body_gap_cm"] > 5.0, why
     assert len(sim["dockings"]) == 6 and sim["dock_gap_error_cm_max"] < 0.4, why
     assert not s["boards_not_visited"], why
+
+
+def test_edge_stop_maps_a_no_go_strip_and_replans(demo_plan):
+    """A follow step stopped by the plywood edge guard ("plywood edge at x y th cue"): the robot holds,
+    the edge becomes a no-go strip square to its heading just past the line sensors (or further for the
+    bottom zone), it is logged, and the re-plan goes round it; the run is not ended."""
+    import run_plan as RP
+    co = RP.Coordinator.__new__(RP.Coordinator)
+    co.m = FM.normalize(demo_map())
+    co.n_sensor_obstacles = 0
+    co.bots = {n: RP.Bot(n) for n in ("Left", "Center", "Right")}
+    ob = co.edge_boundary(co.bots["Left"], (0.0, 0.0, 0.0), "plywood edge at 50.0 20.0 90.0 line")
+    pts = np.array(ob["points"])
+    assert ob["source"] == "edge_guard" and ob["cue"] == "line"
+    assert pts[:, 1].min() == pytest.approx(23.5, abs=0.01)                 # 3.5 cm ahead of the axle (+y)
+    assert pts[:, 1].max() == pytest.approx(23.5 + RP.Coordinator.EDGE_STRIP_DEPTH_CM, abs=0.01)
+    assert pts[:, 0].min() == pytest.approx(50 - RP.Coordinator.EDGE_STRIP_HALF_CM, abs=0.01)
+    ob2 = co.edge_boundary(co.bots["Left"], (50.0, 20.0, 90.0), "plywood edge at 50.0 20.0 90.0 bottom")
+    assert np.array(ob2["points"])[:, 1].min() == pytest.approx(28.0, abs=0.01)
+    FM.normalize(dict(demo_map(), obstacles=[ob]))                         # a valid map obstacle
+    # on_failed: logged, said, handed to the re-planner as an obstacle caused by that robot
+    got = {}
+    co.steps = lambda n: [{"type": "D"}]
+    logs = []
+    co.log = lambda ev, **kw: logs.append((ev, kw))
+    co.say = lambda text: got.setdefault("say", text)
+    co.handle_obstacle = lambda o, cause=None: got.setdefault("ob", (o, cause))
+    co.on_failed(co.bots["Left"], 0, "plywood edge at 50.0 20.0 90.0 line", (50.0, 20.0, 90.0), 99.0)
+    edge_logs = [kw for ev, kw in logs if ev == "edge_boundary"]
+    assert len(edge_logs) == 1 and edge_logs[0]["obstacle"]["source"] == "edge_guard"
+    assert got["ob"][1] == "Left" and got["ob"][0]["source"] == "edge_guard"
+    assert "holding" in got["say"]
+    # the planner accepts it and re-plans everyone safely
+    states = P.states_at(demo_plan, 15.0)
+    new, events = P.obstacle_event(demo_map(), demo_plan, states, [dict(ob, points=[[150, 150], [190, 150],
+                                                                                    [190, 175], [150, 175]])])
+    assert new["robots"]

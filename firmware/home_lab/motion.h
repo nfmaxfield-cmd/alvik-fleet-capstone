@@ -25,6 +25,8 @@ String gFail = "";   // why a run failed without being stopped (a timeout, a fai
 void (*gTickHook)() = nullptr;
 float gFrontLimitCm = -1;
 bool gFrontSoft = false;
+bool gEdgeSoft = false;   // follow: an edge-guard trip ends only the current step (gStepStop = "edge"), not the
+                          // run: the robot holds and the laptop maps the edge and replans (run_plan.py)
 String gStepStop = "";
 bool gFrontPath = false;  // straight drives: check all five zones inside the robot's path, not just the centre
 float gFrontEndBase = -1; // follow drives (>= 0): gFrontLimitCm = min(this, distance left in the step + front_end_cm)
@@ -64,7 +66,7 @@ bool shouldAbort() {
   // open plywood edge (edge.h; safe_edge 0 = off): forward driving only, backing up is blind;
   // a hard stop in every experiment, follow steps and approaches included (gFrontLimitCm doesn't apply);
   // not a failure: RUNEND says "limited:plywood edge" (runExperiment), the calibration rolls back (runCalib)
-  else if (edge::check()) { gAbortReason = "plywood edge ahead"; }
+  else if (edge::check()) { if (gEdgeSoft) gStepStop = "edge"; else gAbortReason = "plywood edge ahead"; }
   else if (!gStepStop.length()) {
     float lim = gFrontLimitCm >= 0 ? gFrontLimitCm : P("safe_front_cm");
     if (lim > 0) {

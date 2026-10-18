@@ -24,6 +24,7 @@ import argparse
 import csv
 import glob
 import math
+import re
 import os
 import statistics as st
 import sys
@@ -86,7 +87,8 @@ def is_limited(r):
     """A row whose run the edge guard stopped before an open plywood edge ("limited: plywood edge" in its
     note, set by run_sheet.py): not a failure, but not a finished route either, so it is left out of the
     statistics and counted apart (session_checks.is_limited_row)."""
-    return "limited:" in (r.get("note") or "").lower()
+    note = re.sub(r"replaces order \S+ \([^)]*\)", "", (r.get("note") or "").lower())   # a replacement row is not
+    return "limited:" in note                                                            # limited itself
 
 
 def limited_trials(folder):

@@ -211,3 +211,30 @@ class CalibEdgeTests(unittest.TestCase):
                             for _, t in r.lines))
         for wx, _ in wheels(r):
             self.assertLess(wx, EDGE_X)
+
+
+class FollowEdgeTests(unittest.TestCase):
+    """Follow mode (fleet): the edge guard stops only the step; the robot holds, reports where, and takes
+    the laptop's next steps (run_plan.py maps the edge and re-plans)."""
+
+    def test_step_stops_robot_holds_and_carries_on(self):
+        from test_follow import run_follow
+        r = make(board_config(), 95.0, 61.0, 0.0, seed=2, safe_edge=1, **GUARD)
+        cmds = [(10.5, "run follow"), (13.0, "fpose 95 61 0 0.3 1"),
+                (13.1, "fs 1 D 95 61 140 61 0 10 0 -"),          # straight at the open edge (x = 122)
+                (13.2, "fs 2 W 500"),                            # dropped: the step before it failed
+                (25.0, "fs 3 T 180 -"), (25.1, "fs 4 D 116 61 100 61 180 10 0 -"), (40.0, "stop")]
+        run = run_follow(r, cmds)
+        steps = {int(v[3]): v for v in r.radio.steps() if v[4] in ("failed", "done", "dropped")}
+        self.assertEqual(steps[1][4], "failed")
+        info = ",".join(steps[1][10:])
+        self.assertTrue(info.startswith("plywood edge at "), info)
+        x, y, th, cue = info.split()[3:7]
+        self.assertEqual(cue, "line")
+        self.assertLess(abs(float(x) + 3.5 - EDGE_X), 3.0)       # line sensors 3.5 cm ahead, at the edge
+        self.assertEqual(steps[2][4], "dropped")
+        self.assertEqual(steps[3][4], "done")                    # still following: turned around
+        self.assertEqual(steps[4][4], "done")
+        self.assertEqual(run["result"], "stopped:stop command")  # ended by the laptop, not by the edge
+        self.assertEqual(len(r.edge_trips), 1)
+        self.assertGreater(min(EDGE_X - wx for wx, _ in wheels(r)), 2.0)

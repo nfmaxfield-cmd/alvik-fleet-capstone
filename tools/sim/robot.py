@@ -703,7 +703,10 @@ class Robot(FollowMixin):
         if self.P("safe_lift") > 0 and self.lifted:
             self.abort_reason = "robot lifted"
         elif self.edge_check():
-            self.abort_reason = "plywood edge ahead"
+            if getattr(self, "edge_soft", False):
+                self.step_stop = "edge"           # follow: only the step stops (motion.h gEdgeSoft)
+            else:
+                self.abort_reason = "plywood edge ahead"
         elif not self.step_stop:
             lim = self.front_limit if self.front_limit >= 0 else self.P("safe_front_cm")
             if lim > 0:
@@ -818,7 +821,7 @@ class Robot(FollowMixin):
             if self.edge_count >= max(1, int(self.P("edge_n"))):
                 self.edge_record("trip", L, C, R, self.bottom(er), "line sensors")
                 self.edge_trips.append((self.ms, "line", (self.x, self.y, self.th)))
-                self.edge_braking, self.edge_count = True, 0
+                self.edge_braking, self.edge_count, self.edge_last_cue = True, 0, "line"
                 return True
         lim = self.P("edge_bot_cm")
         if (mode & 2) and lim > 0:
@@ -829,7 +832,7 @@ class Robot(FollowMixin):
                 if self.millis() - self.edge_bot_since >= self.P("edge_bot_ms"):
                     self.edge_record("trip", L, C, R, d, "bottom zone")
                     self.edge_trips.append((self.ms, "bottom", (self.x, self.y, self.th)))
-                    self.edge_braking, self.edge_bot_since = True, 0
+                    self.edge_braking, self.edge_bot_since, self.edge_last_cue = True, 0, "bottom"
                     return True
             else:
                 self.edge_bot_since = 0

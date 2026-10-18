@@ -65,6 +65,7 @@ float base[3] = {0, 0, 0};
 unsigned long t0 = 0;
 int lineCount = 0;                 // consecutive checks with a line sensor past the edge
 unsigned long botSince = 0;        // when dbot first went above edge_bot_cm (0 = it isn't)
+const char* lastCue = "";          // the cue of the last trip: "line" or "bottom" (follow.h reports it)
 bool braking = false;              // tripped: quiet until the wheels are still (the stop is under way;
                                    // a caller that carries on, the calibration's roll, isn't stopped twice)
 
@@ -151,6 +152,7 @@ bool check() {
     else lineCount = 0;
     if (lineCount >= (int)fmaxf(1.0f, P("edge_n"))) {
       record("trip", L, C, R, alvik.get_distance_bottom(), "line sensors");
+      lastCue = "line";
       braking = true;
       lineCount = 0;
       return true;
@@ -163,6 +165,7 @@ bool check() {
       if (!botSince) botSince = millis() | 1;
       if (millis() - botSince >= (unsigned long)P("edge_bot_ms")) {
         record("trip", L, C, R, d, "bottom zone");
+        lastCue = "bottom";
         braking = true;
         botSince = 0;
         return true;
