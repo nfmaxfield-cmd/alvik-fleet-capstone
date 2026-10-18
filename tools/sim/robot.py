@@ -95,6 +95,27 @@ class Move:
         return self.d
 
 
+def ray_polys(px, py, dx, dy, polys, best):
+    """Distance along the ray (px, py) + s (dx, dy) to the first polygon edge, if below best."""
+    for poly in polys:
+        n = len(poly)
+        for i in range(n):
+            ax, ay = poly[i]
+            bx, by = poly[(i + 1) % n]
+            ex, ey = bx - ax, by - ay
+            den = dx * (-ey) - dy * (-ex)
+            if abs(den) < 1e-12:
+                continue
+            rx, ry = ax - px, ay - py
+            s = (rx * (-ey) - ry * (-ex)) / den
+            if s <= 0 or s >= best:
+                continue
+            g = (dx * ry - dy * rx) / den
+            if 0.0 <= g <= 1.0:
+                best = s
+    return best
+
+
 class Robot:
     def __init__(self, name, cfg, rng, params, fw_version, t_boot, boot_id, ip):
         self.name, self.cfg, self.rng = name, cfg, rng
@@ -113,6 +134,12 @@ class Robot:
         self.rL = m.wheel_radius_cm * scale * (1 - mism / 2)
         self.rR = m.wheel_radius_cm * scale * (1 + mism / 2)
         self.track = m.wheel_track_cm * (1 + uniform_pm(rng, m.track_err_pct) / 100)
+        if name in m.radius_scale_err_pct_by_robot:          # exact values for tests (the draws above still
+            scale = 1 + m.radius_scale_err_pct_by_robot[name] / 100     # happen, so the random stream is unchanged)
+            self.rL = m.wheel_radius_cm * scale * (1 - mism / 2)
+            self.rR = m.wheel_radius_cm * scale * (1 + mism / 2)
+        if name in m.track_err_pct_by_robot:
+            self.track = m.wheel_track_cm * (1 + m.track_err_pct_by_robot[name] / 100)
         self.gyro_scale = uniform_pm(rng, im.gyro_scale_err_pct) / 100
         self.gyro_bias = rng.gauss(0, im.gyro_bias_dps)
         self.acc_bias = [rng.gauss(0, im.accel_bias_g) for _ in range(3)]
@@ -140,6 +167,13 @@ class Robot:
         self.lift = None                          # dict while lifted
         self.kidnap_at = None
         self.kidnap_plan = None
+        # what the front distance sensor sees besides the room walls: polygons [[x, y], ...]
+        # (boards, obstacles), and a function giving the other robots' outlines (fleet_sim.py)
+        self.world_polys = []
+        self.others = None
+        self._tof_ms = -1e9
+        self._tof_vals = None
+        self._tof_phase = rng.uniform(0, 66.0)     # when the free-running sensor's frames fall
 
         # ---- firmware state ----
         self.run_n = 0
@@ -362,11 +396,32 @@ class Robot:
         the true sign stands in, so the motion helpers also work on their own (unit tests)."""
         return wrap180((self.fw_yaw_sign or self.imu_m.yaw_sign) * self.yaw_raw)
 
-    def _tof_true(self, ang_deg):
+    def settled_pose(self, ms, after_ms=300.0):
+        """True pose (x, y, th) after_ms after robot time ms, from the whole trajectory (analysis)."""
+        import bisect
+        t = ms + after_ms
+        k = bisect.bisect_left([p[0] for p in self.traj], t)
+        k = min(max(k, 0), len(self.traj) - 1)
+        return self.traj[k][1:4]
+
+    def pose_at_ms(self, ms):
+        """True pose (x, y, th) at robot time ms, from the recorded trajectory (recent past only)."""
+        tr = self.traj
+        if not tr or ms >= tr[-1][0]:
+            return self.x, self.y, self.th
+        for k in range(len(tr) - 1, max(0, len(tr) - 400), -1):
+            a, b = tr[k - 1], tr[k]
+            if a[0] <= ms:
+                f = (ms - a[0]) / (b[0] - a[0]) if b[0] > a[0] else 1.0
+                return a[1] + f * (b[1] - a[1]), a[2] + f * (b[2] - a[2]), a[3] + f * (b[3] - a[3])
+        return tr[max(0, len(tr) - 400)][1:4]
+
+    def _tof_true(self, ang_deg, others=None, pose=None):
         t = self.tof_m
-        a = self.th + math.radians(ang_deg)
-        px = self.x + t.sensor_forward_cm * math.cos(self.th)
-        py = self.y + t.sensor_forward_cm * math.sin(self.th)
+        x0, y0, th0 = pose if pose is not None else (self.x, self.y, self.th)
+        a = th0 + math.radians(ang_deg)
+        px = x0 + t.sensor_forward_cm * math.cos(th0)
+        py = y0 + t.sensor_forward_cm * math.sin(th0)
         dx, dy = math.cos(a), math.sin(a)
         best = float("inf")
         for wall, d, p in ((t.arena_x[0], dx, px), (t.arena_x[1], dx, px), (t.arena_y[0], dy, py), (t.arena_y[1], dy, py)):
@@ -374,17 +429,43 @@ class Robot:
                 s = (wall - p) / d
                 if s > 0:
                     best = min(best, s)
+        if self.world_polys:
+            best = ray_polys(px, py, dx, dy, self.world_polys, best)
+        if others:
+            best = ray_polys(px, py, dx, dy, others, best)
         return best
 
     def tof(self):
+        """get_distance(): the five front zones. The sensor delivers a new frame tof_hz times a
+        second (the reading is held in between); below min_range_cm it is untrustworthy (here:
+        any value under min_range_cm)."""
         t, rng = self.tof_m, self.rng
+        if t.hz > 0:
+            period = 1000.0 / t.hz
+            frame = math.floor((self.ms - self._tof_phase) / period) * period + self._tof_phase
+            if self._tof_vals is not None and frame <= self._tof_ms:
+                return self._tof_vals
+            self._tof_ms = frame
+            pose = self.pose_at_ms(frame)          # the sensor runs on its own: the newest frame was taken then
+        else:
+            self._tof_ms = self.ms
+            pose = None
+        others = self.others() if self.others else None
         out = []
-        for ang in t.zone_angles_deg:
-            d = self._tof_true(ang)
+        w = t.zone_width_deg / 3.0
+        errs = t.zone_angle_err_deg_by_robot.get(self.name) or [0.0] * len(t.zone_angles_deg)
+        bias, scale = t.range_err_by_robot.get(self.name) or (0.0, 0.0)
+        for ang, err in zip(t.zone_angles_deg, errs):
+            ang = ang + err
+            d = min(self._tof_true(ang + k * w, others, pose) for k in (-1, 0, 1)) if w > 0 else \
+                self._tof_true(ang, others, pose)
             if d >= t.max_range_cm:
                 out.append(t.max_range_cm)
+            elif d < t.min_range_cm:
+                out.append(rng.uniform(0.0, t.min_range_cm))
             else:
-                out.append(max(0.0, d + rng.gauss(0, t.noise_cm + d * t.noise_pct / 100)))
+                out.append(max(0.0, d * (1 + scale / 100) + bias + rng.gauss(0, t.noise_cm + d * t.noise_pct / 100)))
+        self._tof_vals = out
         return out
 
     def line_sensors(self):
@@ -563,7 +644,7 @@ class Robot:
         else:
             lim = self.P("safe_front_cm")
             if lim > 0:
-                dc = self._tof_true(0.0)
+                dc = self.tof()[2]                 # the robot's own (held, noisy) centre-zone reading
                 if 0 < dc < lim:
                     self.abort_reason = "obstacle ahead"
         if self.abort_reason:

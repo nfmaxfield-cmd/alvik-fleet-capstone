@@ -470,5 +470,64 @@ class BlinkSessionTests(CalibAndNudgeChecks, unittest.TestCase):
             best = max(best, n)
         self.assertGreaterEqual(best, sync_frames - 1)
 
+class MapBoardsTests(unittest.TestCase):
+    def test_map_boards_reach_raw_zones(self):
+        """simulate.py --map: a board 40 cm ahead shows in RAW dC (sensor 4.5 cm ahead of the axle)."""
+        d = tempfile.mkdtemp()
+        try:
+            path = os.path.join(d, "map.json")
+            with open(path, "w") as f:
+                json.dump({"boards": [{"name": "A", "p1": [40.75, -20], "p2": [40.75, 20], "thickness_cm": 1.5}]}, f)
+            cfg = perfect_config()
+            cfg.tof.noise_cm = cfg.tof.noise_pct = 0.0
+            cfg.tof.hz = 0                       # fresh reading from the pose set here
+            r = make_robot(cfg)
+            r.world_polys = simulate.map_polys(path)
+            vals = r.raw_values(r.ms)
+            self.assertAlmostEqual(vals["dC_cm"], 40.0 - 4.5, delta=1e-6)
+            self.assertLess(vals["dL_cm"], 60.0)
+        finally:
+            shutil.rmtree(d)
+
+
+class PerRobotErrorTests(unittest.TestCase):
+    def test_exact_wheel_size_and_track_per_robot(self):
+        """radius_scale_err_pct_by_robot / track_err_pct_by_robot replace the random draws for listed robots
+        only, and leave the random stream alone (the next draws are the same)."""
+        cfg = config.load_config()
+        a = make_robot(cfg, seed=5)
+        cfg.robot.radius_scale_err_pct_by_robot = {"Left": -5.0}
+        cfg.robot.track_err_pct_by_robot = {"Left": 3.0}
+        b = make_robot(cfg, seed=5)
+        self.assertAlmostEqual((b.rL + b.rR) / 2, 1.7 * 0.95, places=9)
+        self.assertAlmostEqual(b.track, 9.0 * 1.03, places=9)
+        self.assertAlmostEqual(b.rR / b.rL, a.rR / a.rL, places=12)          # left/right mismatch kept
+        self.assertEqual(a.gyro_bias, b.gyro_bias)
+        cfg.robot.radius_scale_err_pct_by_robot = {"Right": -5.0}
+        c = make_robot(cfg, seed=5)
+        self.assertEqual((c.rL, c.rR), (a.rL, a.rR))
+
+    def test_zone_direction_and_range_errors(self):
+        """A board 40 cm ahead; the centre zone turned 10 deg reads 40 / cos(10); a range bias adds on."""
+        d = tempfile.mkdtemp()
+        try:
+            path = os.path.join(d, "map.json")
+            with open(path, "w") as f:
+                json.dump({"boards": [{"name": "A", "p1": [45.25, -40], "p2": [45.25, 40], "thickness_cm": 1.5}]}, f)
+            cfg = perfect_config()
+            cfg.tof.noise_cm = cfg.tof.noise_pct = 0.0
+            cfg.tof.hz = 0
+            cfg.tof.zone_width_deg = 0.0
+            cfg.tof.zone_angle_err_deg_by_robot = {"Left": [0.0, 0.0, 10.0, 0.0, 0.0]}
+            cfg.tof.range_err_by_robot = {"Left": [0.5, 2.0]}
+            r = make_robot(cfg)
+            r.world_polys = simulate.map_polys(path)
+            vals = r.raw_values(r.ms)
+            self.assertAlmostEqual(vals["dC_cm"], 40.0 / math.cos(math.radians(10)) * 1.02 + 0.5, delta=1e-6)
+            self.assertAlmostEqual(vals["dCL_cm"], 40.0 / math.cos(math.radians(11)) * 1.02 + 0.5, delta=1e-6)
+        finally:
+            shutil.rmtree(d)
+
+
 if __name__ == "__main__":
     unittest.main()
