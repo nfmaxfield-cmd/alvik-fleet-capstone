@@ -37,6 +37,8 @@ D2R = math.pi / 180.0
 
 # what happened to each zone reading (counts per run, written by replay.py)
 OUTCOMES = ("used", "gated", "no_face", "ambiguous", "edge", "grazing", "bad_reading", "pose_unknown")
+# not counted in OUTCOMES (so results.csv's columns stay as before): "camera_on" = skipped while the camera is
+# tracking (engine tof_camera_gap_s)
 
 
 class Face:

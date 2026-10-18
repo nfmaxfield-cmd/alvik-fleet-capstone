@@ -177,6 +177,8 @@ DEFAULT = dict(
     tof_heading_with_camera=True,  # False: while the camera saw the robot in the last tof_cam_recent_s, landmark
     tof_cam_recent_s=1.0,          # readings correct position only, not heading (the camera's track does that)
     tof_yaw_sigma_min_deg=0.0,     # floor on the sensor-turn uncertainty a calibration gives
+    tof_camera_gap_s=0.0,          # > 0: landmark ranging only once the camera hasn't corrected this robot for this
+                                   # long (a fallback for when the camera is blocked); 0 = always
     tof_cal_systematic=True,       # widen each face's consider uncertainty by the calibration's systematic_cm
                                    # (what it leaves per run, zone and face)
     tof_lag_inflate=False,    # widen the noise for frame-to-frame correlation: x sqrt((1 + r) / (1 - r)),
@@ -395,7 +397,7 @@ class Tracked:
             return []
         c = self.tcfg
         if (self.tof_cal is not None or c["tof_consider"] or c["tof_joint"] or c["tof_adapt"] or c["tof_every"] > 1
-                or c["tof_lag_inflate"] or not c["tof_heading_with_camera"]):
+                or c["tof_lag_inflate"] or not c["tof_heading_with_camera"] or c["tof_camera_gap_s"] > 0):
             return self._tof2(t, zones)
         unknown = math.sqrt(max(k.P[0, 0], k.P[1, 1])) > cfg["tof_max_sigma_cm"]
         out = []
@@ -426,6 +428,9 @@ class Tracked:
         self.tof_n += 1
         if cfg["tof_every"] > 1 and (self.tof_n - 1) % cfg["tof_every"]:
             return []
+        if (cfg["tof_camera_gap_s"] > 0 and ("camera" in cfg["sensors"] or "blink" in cfg["sensors"])
+                and k.t - k.last_cam < cfg["tof_camera_gap_s"]):        # (last_cam starts at the run's start)
+            return [("camera_on", None)] * len(zones)
         unknown = math.sqrt(max(k.P[0, 0], k.P[1, 1])) > cfg["tof_max_sigma_cm"]
         fwd = cfg["tof_forward_cm"] - cfg["tof_recess_cm"]
         lag = 1.0
@@ -494,6 +499,8 @@ class Tracked:
         for ev in self.events:
             if ev[2] == "tof":
                 for o, info in ev[3].get("res", []):
+                    if o not in out:          # camera_on: skipped by choice, not counted
+                        continue
                     out[o] += 1
                     if info:
                         out["resid"].append(info["resid"])

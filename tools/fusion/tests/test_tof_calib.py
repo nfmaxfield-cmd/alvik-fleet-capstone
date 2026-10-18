@@ -214,3 +214,18 @@ def test_systematic_leftover():
         d["z"][i] += off.setdefault(key, rng.normal(0, 0.3))
     m = tc.Model(d, ["L"], faces, cfg)
     assert tc.systematic(m, m.x0()) == pytest.approx(0.3, abs=0.12)
+
+
+def test_landmarks_only_as_camera_fallback():
+    """tof_camera_gap_s 1: while the camera corrects the robot, landmark readings are skipped (the result is the
+    camera's alone); once the camera is blocked for longer than 1 s they are used."""
+    run, truth = drive([wall(100.0)], wheel_scale=1.0)
+    mapped = [wall(101.5)]
+    dets = sightings(truth, seed=4)
+    cam = run_cfg(run, dets, None, sensors=CAM)
+    fb = run_cfg(run, dets, mapped, sensors=CAMTOF, tof_camera_gap_s=1.0)
+    assert fb.trajectory() == cam.trajectory()
+    assert fb.tof_counts()["used"] == 0
+    blocked = [d for d in dets if not (1003.0 <= d["t"] <= 1006.0)]
+    fb2 = run_cfg(run, blocked, mapped, sensors=CAMTOF, tof_camera_gap_s=1.0)
+    assert fb2.tof_counts()["used"] > 50
