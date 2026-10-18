@@ -168,7 +168,8 @@ def default_area(map_path=None):
 
 ROBOT_TOP_CM = 4.0
 RANSAC_PX = 6.0           # a click this far (px) from the fit counts as an outlier (about 1.5 cm)
-MIN_RANSAC_POINTS = 6     # fewer points than this: no RANSAC (a bad click can't be told apart)
+MIN_RANSAC_POINTS = 6     # fewer points (or separate spots) than this: no RANSAC (a bad click can't be told apart)
+SPOT_TOL_CM = 3.0         # points closer than this count as one spot (tape repeat of the same mark)
 K1_GRID = np.round(np.arange(-0.40, 0.2001, 0.02), 4)
 K1_KEEP_RATIO = 0.85      # --k1 auto keeps k1 only if left-one-out RMS drops below this share of the k1 = 0 one
 K1_MIN_POINTS = 8
@@ -269,16 +270,28 @@ def _check_spread(xy):
         raise FitError("the points lie (nearly) on one line: add points off that line (the other axis, or a measured dot)")
 
 
+def distinct_spots(floor_xy, tol_cm=SPOT_TOL_CM):
+    """How many separate floor spots the points are on (points within tol_cm of an earlier spot
+    count once: e.g. a run's start and end on the same mark, or repeats of one start spot)."""
+    spots = []
+    for p in np.asarray(floor_xy, float).reshape(-1, 2):
+        if not any(np.hypot(*(p - q)) < tol_cm for q in spots):
+            spots.append(p)
+    return len(spots)
+
+
 def fit_h(floor_xy, px, ransac_px=None):
-    """floor cm -> px homography. RANSAC (if ransac_px and >= MIN_RANSAC_POINTS),
-    then least squares on the inliers. Returns (H, inlier mask)."""
+    """floor cm -> px homography. RANSAC (if ransac_px and the points are on >= MIN_RANSAC_POINTS
+    separate spots), then least squares on the inliers. Returns (H, inlier mask)."""
     src = np.asarray(floor_xy, np.float64).reshape(-1, 2)
     dst = np.asarray(px, np.float64).reshape(-1, 2)
     n = len(src)
     if n < 4:
         raise FitError(f"need at least 4 points, have {n}")
     mask = np.ones(n, bool)
-    if ransac_px and n >= MIN_RANSAC_POINTS:
+    # RANSAC needs separate spots, not just many points: with points on only 4-5 spots (repeated
+    # start marks) any 4-point sample fits exactly and a good spot gets thrown out as an "outlier"
+    if ransac_px and n >= MIN_RANSAC_POINTS and distinct_spots(src) >= MIN_RANSAC_POINTS:
         cv2.setRNGSeed(12345)
         H, m = cv2.findHomography(src, dst, cv2.RANSAC, ransac_px, maxIters=4000, confidence=0.999)
         if H is not None and m is not None and int(m.sum()) >= 4:
@@ -467,8 +480,13 @@ def fit(points, size, height_cm=None, nadir=None, k1_mode="auto", area=None, ran
     outside = [f"({x:g}, {y:g})" for (x, y), (u, v) in zip(corners, cpx) if not (0 <= u < W and 0 <= v < Hh)]
     if outside:
         warnings.append("area corners outside the camera's view: " + ", ".join(outside))
+    n_spots = distinct_spots(xy)
     if len(pts) < MIN_RANSAC_POINTS:
         warnings.append(f"only {len(pts)} points: a bad click can't be spotted. Use 8 or more.")
+    elif n_spots < MIN_RANSAC_POINTS:
+        warnings.append(f"the {len(pts)} points are on only {n_spots} separate spots: a bad point can't be spotted "
+                        "and the fit between and beyond them is poorly pinned. Add points on other spots "
+                        "(axis clicks or measured dots).")
     if not mask.all():
         warnings.append(f"{int((~mask).sum())} point(s) left out of the fit as outliers (RANSAC): check them")
     gap = None

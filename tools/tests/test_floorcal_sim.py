@@ -1,5 +1,6 @@
 """End to end on the simulator (about a minute): the camera is moved to a very
-different pose (higher, turned 30 deg, tilted 10 deg, lens distortion) and
+different pose (higher, turned 30 deg, tilted 10 deg, lens distortion; still
+seeing all of the E01 sheet's start spots and the 122 cm board) and
 survey mode recovers the mapping from the robot's own logs, the camera track
 and the tape start poses only; still-point mode + simulated axis clicks too.
 Skip with FLOORCAL_FAST=1."""
@@ -26,7 +27,7 @@ def moved_sim(tmp_path_factory):
     subprocess.run([sys.executable, os.path.join(TOOLS, "sim", "simulate.py"), "--write-config", str(cfg)],
                    check=True, capture_output=True)
     c = json.loads(cfg.read_text())
-    c["camera"].update(height_cm=140.0, floor_width_cm=230.0, center_floor_cm=[55.0, 5.0], yaw_deg=30.0,
+    c["camera"].update(height_cm=140.0, floor_width_cm=230.0, center_floor_cm=[60.0, 40.0], yaw_deg=30.0,
                        tilt_deg=[10.0, -6.0], k1=-0.04)
     cfg.write_text(json.dumps(c))
     out = d / "out"
@@ -67,13 +68,20 @@ def test_cli_survey_and_loro(moved_sim, tmp_path):
     import csv
     rows = list(csv.DictReader(open(tmp_path / "floor_calibration_loro.csv")))
     assert {r["run_id"] for r in rows} == set(cal["fit"]["used_runs"])
+    with_end = {p["run"] for p in csv.DictReader(open(tmp_path / "survey_pairs.csv")) if p["kind"] == "tape_end"}
     for row in rows:
         held = json.loads((tmp_path / row["calibration"]).read_text())
         assert row["run_id"] not in held["fit"]["used_runs"]
         assert float(row["heldout_path_median_cm"]) < 3.0
         # its own end mark, not used for its file (only 4 runs here: with the one straight run held out, its
-        # end at x = 120 cm is extrapolated, so this is loose)
-        assert float(row["heldout_end_mark_err_cm"]) < 5.0
+        # end at x = 110 cm is extrapolated, so this is loose). A run whose end mark the camera didn't see
+        # gets a blank cell, not a number
+        if row["run_id"] in with_end:
+            assert float(row["heldout_end_mark_err_cm"]) < 5.0, row
+        else:
+            assert row["heldout_end_mark_err_cm"] == "", row
+    # every run's end spot is in this camera's view, so every run must have its end mark
+    assert with_end == set(cal["fit"]["used_runs"])
     assert cal["fit"]["survey"]["end_marks_used"] >= 3
 
 
@@ -101,8 +109,14 @@ def test_still_points_with_axis_clicks(moved_sim):
     for p in pts:   # every still point is where the true camera sees that tape pose (tape + detector noise)
         u, v = cam.project(p["x"], p["y"], 4.0)
         assert np.hypot(u - p["u"], v - p["v"]) < 6, p
-    with pytest.raises(cf.FitError):          # E01 runs all start at the origin: on their own, points on a line
-        cf.fit(pts, (cam.W, cam.H), 140.0, None, "off")
+    # E01 runs start on 3 spots (square, straight, L), so the still points alone are on few separate spots
+    # (5 here): no RANSAC (it would throw out a good spot), a warning, a rough but sane fit
+    alone = cf.fit(pts, (cam.W, cam.H), 140.0, None, "off")
+    assert alone["n_inliers"] == len(pts)
+    assert any("separate spots" in w for w in alone["warnings"]), alone["warnings"]
+    assert floor_error(cf.to_calibration(alone), cam, z=4.0).mean() < 3.0
+    with pytest.raises(cf.FitError):          # the square runs alone (one start spot, start = end): a point
+        cf.fit([p for p in pts if p["x"] < 50 and p["y"] < 50], (cam.W, cam.H), 140.0, None, "off")
     axes = [(x, 0.0) for x in range(-10, 141, 10)] + [(0.0, y) for y in range(-40, 61, 10) if y]
     res = cf.fit(pts + click_points(cam, axes), (cam.W, cam.H), 140.0, None, "auto")
     assert floor_error(cf.to_calibration(res), cam, z=4.0).mean() < 0.6
