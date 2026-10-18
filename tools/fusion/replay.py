@@ -27,6 +27,10 @@ dropouts, and compare how far off each setup ends up.
         --calib-results sim/recording/calibration_results.csv --truth sim/truth.csv --out results/sim
     (with --truth, camera_truth.csv beside it, if there, scores which robot each fix went to)
 
+    # landmark ranging: the front distance sensor against boards / blocks at tape-measured spots
+    # (tools/fleet map.json, or landmarks.csv: name,x1_cm,y1_cm,x2_cm,y2_cm, one face per row):
+    python tools/fusion/replay.py ... --map map.json --truth sim/truth.csv --out results/sim
+
 Each setup ("configuration") is run over exactly the same recorded runs, so
 setups are compared run by run (paired), which removes run-to-run luck.
 Configurations come from --configs <file.json> (a list of settings, see
@@ -50,7 +54,10 @@ Output in --out: results.csv (one row per run and setup), summary.csv, and
 end_error.svg (every run's end error per setup); with blink or motion
 identity also identity.csv (per setup and robot: how many fixes got their
 identity from blink, motion, both, combined, or position alone, and, with
-camera_truth.csv, how many went to the right robot).
+camera_truth.csv, how many went to the right robot); with --map also
+landmark_ranging.csv (per setup: distance-sensor zone readings used, rejected
+by the gate, and why the others could not be tied to a mapped face) and tof_*
+columns in results.csv. Without --map nothing changes.
 """
 import argparse
 import csv
@@ -65,6 +72,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
 import engine as eng  # noqa: E402
 import graph  # noqa: E402
+import landmarks as lm  # noqa: E402
 import runs as rn  # noqa: E402
 from ekf import D2R, wrap  # noqa: E402
 from tape_results import paired, interval  # noqa: E402
@@ -104,6 +112,22 @@ BUILTIN_CAMERA_EXTRA = [
     dict(name="+ detector positions only, heading from motion", sensors=WWG + ["camera"], cam_heading=False,
          calib_heading=True, heading_from_motion=True),
 ]
+# need --map (landmark ranging: the front distance sensor against mapped boards / blocks)
+BUILTIN_TOF = [
+    dict(name="+ landmark ranging", sensors=WWG + ["tof"]),
+    dict(name="+ landmark ranging (factor graph)", sensors=WWG + ["tof"], method="graph"),
+    dict(name="wheel distance + gyro heading + landmark ranging", sensors=["wheel_v", "gyro", "tof"]),
+]
+# need --map and --detections ("camera blocked the whole run + landmark ranging" is "+ landmark ranging")
+BUILTIN_TOF_CAMERA = [
+    dict(name="+ camera + landmark ranging", sensors=WWG + ["camera", "tof"]),
+    dict(name="+ camera + landmark ranging (factor graph)", sensors=WWG + ["camera", "tof"], method="graph"),
+    dict(name="+ camera, blocked 5 s mid-run + landmark ranging", sensors=WWG + ["camera", "tof"], cam_off_mid_s=5.0),
+    dict(name="+ camera, blocked 20 s mid-run", sensors=WWG + ["camera"], cam_off_mid_s=20.0),
+    dict(name="+ camera, blocked 20 s mid-run + landmark ranging", sensors=WWG + ["camera", "tof"],
+         cam_off_mid_s=20.0),
+]
+TOF_COLS = ["tof_" + o for o in lm.OUTCOMES] + ["tof_resid_mean_cm", "tof_resid_sd_cm"]
 BASELINE = "wheels only"
 
 
@@ -216,6 +240,27 @@ def identity_table(results, names, has_id):
     return out
 
 
+def landmark_table(results, names):
+    """Per landmark setup: zone readings by outcome (share of all readings), and
+    the used readings' residual (reading minus map prediction)."""
+    out = []
+    for n in names:
+        rs = [r for r in results if r["config"] == n and "tof_used" in r]
+        tot = sum(r["tof_" + o] for r in rs for o in lm.OUTCOMES)
+        if not tot or not any(r["tof_used"] + r["tof_gated"] for r in rs):
+            continue
+        row = dict(setup=n, readings=tot)
+        for o in lm.OUTCOMES:
+            row[o] = f"{100 * sum(r['tof_' + o] for r in rs) / tot:.1f}%"
+        tried = sum(r["tof_used"] + r["tof_gated"] for r in rs)
+        row["gated of tied to a face"] = f"{100 * sum(r['tof_gated'] for r in rs) / tried:.1f}%" if tried else "-"
+        used = [(r["tof_used"], r["tof_resid_mean_cm"]) for r in rs if r["tof_used"] and not math.isnan(r["tof_resid_mean_cm"])]
+        nu = sum(k for k, _ in used)
+        row["mean residual cm"] = f"{sum(k * m for k, m in used) / nu:+.2f}" if nu else "-"
+        out.append(row)
+    return out
+
+
 def dot_chart(results, names, path, metric="end_err_cm", label="End position error vs tape (cm)"):
     """Horizontal dot plot: one row per setup, every run a dot, mean and 95% interval."""
     rows = [(n, [r[metric] for r in results if r["config"] == n and not math.isnan(r[metric])]) for n in names]
@@ -291,6 +336,8 @@ def main():
     ap.add_argument("--truth", help="simulator truth.csv: also report errors along the whole path")
     ap.add_argument("--camera-truth", help="simulator camera_truth.csv (default: beside --truth): score identity")
     ap.add_argument("--configs", help="JSON file: list of settings (default: the built-in list)")
+    ap.add_argument("--map", help="landmarks for landmark ranging: tools/fleet map.json (boards, user-measured "
+                    "polygon obstacles) or landmarks.csv (name,x1_cm,y1_cm,x2_cm,y2_cm); adds the landmark setups")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
@@ -399,8 +446,14 @@ def main():
             print(f"warning: no blink name column for {', '.join(missing)}: their lights can't be named")
     has_ct = any(u["cam_truth"] is not None for u in units)
     truth = load_truth(args.truth) if args.truth else None
+    faces = lm.load(args.map) if args.map else None
+    if args.map:
+        print(f"landmark ranging: {len(faces)} mapped faces from {args.map}")
+        if not faces:
+            print("warning: the map has no boards (or user-measured polygon obstacles): landmark setups skipped")
     configs = json.load(open(args.configs)) if args.configs else (
-        BUILTIN + (BUILTIN_CAMERA_EXTRA if dets else []) + (BUILTIN_BLINK if blink else []))
+        BUILTIN + (BUILTIN_CAMERA_EXTRA if dets else []) + (BUILTIN_BLINK if blink else [])
+        + (BUILTIN_TOF + (BUILTIN_TOF_CAMERA if dets else []) if faces else []))
     wsign = eng.wheel_turn_signs(runs)
     signs = (wsign, eng.wheel_fwd_signs(runs))
     vmax = eng.fastest_speed(runs)
@@ -424,6 +477,8 @@ def main():
             continue
         if "blink" in cfg["sensors"] and not blink:
             continue
+        if "tof" in cfg["sensors"] and not faces:
+            continue
         names.append(cfg["name"])
         led_used = led or {None: tuple(rn.LED_OFFSET_CM)}
         if cfg["led_offset_cm"] != "auto":
@@ -433,7 +488,7 @@ def main():
         n_unknown = 0
         for u in todo:
             tracked, unknown = eng.run_engine(u["runs"], u["dets"], cfg, gyro_f, blink=u["blink"], calib_rows=crow,
-                                              led_offsets=led, signs=signs)
+                                              led_offsets=led, signs=signs, landmarks=faces)
             n_unknown += len(unknown.confirmed_ever)
             cam_truth = u["cam_truth"]
             for run in runs:
@@ -455,7 +510,14 @@ def main():
                     for fx in tr.fixes:
                         chk[identity_check(fx, run.robot, led_used, cam_truth)] += 1
                 cp = calib_of.get(run.run_id) if cam_cfg else None
-                results.append(dict(config=cfg["name"], run_id=run.run_id, robot=run.robot, route=run.level,
+                tof = {}
+                if faces:
+                    tc = tr.tof_counts()
+                    rs_ = tc.pop("resid")
+                    tof = {"tof_" + k: v for k, v in tc.items()}
+                    tof["tof_resid_mean_cm"] = st.mean(rs_) if rs_ else float("nan")
+                    tof["tof_resid_sd_cm"] = st.stdev(rs_) if len(rs_) > 1 else float("nan")
+                results.append(dict(**tof,config=cfg["name"], run_id=run.run_id, robot=run.robot, route=run.level,
                                     cam_used=tr.cam_used, cam_blocked=tr.cam_blocked, kidnaps=len(tr.kidnaps), **ev,
                                     hdg_motion=tr.hdg_used["motion"], hdg_calib=tr.hdg_used["calib"],
                                     id_right=chk["right"] if has_ct else "",
@@ -470,7 +532,8 @@ def main():
     os.makedirs(args.out, exist_ok=True)
     cols = ["config", "run_id", "robot", "route", "end_err_cm", "end_head_err_deg", "path_rmse_cm", "path_max_cm",
             "head_rmse_deg", "cam_used", "cam_blocked", "kidnaps", "hdg_motion", "hdg_calib", "id_right", "id_wrong",
-            "id_false"] + ["id_" + k for k in ID_SOURCES] + ["calib_file", "calib_includes_run"]
+            "id_false"] + ["id_" + k for k in ID_SOURCES] + ["calib_file", "calib_includes_run"] + (
+            TOF_COLS if faces else [])
     with open(os.path.join(args.out, "results.csv"), "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader()
@@ -549,6 +612,24 @@ def main():
         print("  ".join(h.ljust(ww[i]) for i, h in enumerate(hd)))
         for r in id_rows:
             print("  ".join(str(r[k]).ljust(ww[i]) for i, k in enumerate(hd)))
+    if faces:
+        tof_rows = landmark_table(results, names)
+        if tof_rows:
+            with open(os.path.join(args.out, "landmark_ranging.csv"), "w", newline="") as f:
+                dw = csv.DictWriter(f, fieldnames=list(tof_rows[0].keys()))
+                dw.writeheader()
+                dw.writerows(tof_rows)
+            wrote.append("landmark_ranging.csv")
+            print("\nLandmark ranging: what happened to the distance-sensor zone readings (one per zone per sensor "
+                  "frame), per setup:")
+            hd = list(tof_rows[0].keys())
+            ww = [max(len(str(x)) for x in col) for col in zip(hd, *[[r[k] for k in hd] for r in tof_rows])]
+            print("  ".join(h.ljust(ww[i]) for i, h in enumerate(hd)))
+            for r in tof_rows:
+                print("  ".join(str(r[k]).ljust(ww[i]) for i, k in enumerate(hd)))
+            print("used: merged; gated: rejected, too far from what the map predicts (something unmapped in front, "
+                  "or the pose is off);\nthe other columns could not be tied to one mapped face (see "
+                  "tools/fusion/README.md, Landmark ranging).")
     print(f"\nwrote {args.out}/" + ", ".join(wrote))
     return 0
 

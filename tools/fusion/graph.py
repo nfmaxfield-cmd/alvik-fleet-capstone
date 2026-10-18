@@ -14,6 +14,9 @@ second by default) as unknowns and finds the path that best agrees with:
   - blink light fixes (the light sits a fixed offset ahead of the centre, so
     they pull on heading too) and heading fixes (heading from motion, start
     nudges), when the filter used them
+  - landmark ranging: each distance-sensor zone reading the filter used, with
+    the face the filter tied it to (the pose between two keyframes is
+    interpolated to the reading's time)
 
 Each agreement is a "factor"; each disagreement is weighted by how much that
 sensor is trusted. A robust (Huber) weighting stops a single wrong camera
@@ -27,6 +30,7 @@ import math
 import numpy as np
 
 from ekf import Noise, D2R, wrap
+from landmarks import line_range
 
 try:
     from scipy.optimize import least_squares
@@ -35,7 +39,7 @@ except ImportError:   # pragma: no cover
     least_squares = None
 
 
-def smooth(tracked, kf_hz=20.0, use_gyro=True, use_wheel_w=True, use_camera=True, huber=1.5):
+def smooth(tracked, kf_hz=20.0, use_gyro=True, use_wheel_w=True, use_camera=True, use_tof=True, huber=1.5):
     """Smooth one robot's run. `tracked` is an engine.Tracked (gives the events,
     the initial guess and which camera fixes belong to this robot).
     Returns a list of (t, x, y, th) at the keyframes."""
@@ -46,6 +50,9 @@ def smooth(tracked, kf_hz=20.0, use_gyro=True, use_wheel_w=True, use_camera=True
     cams = [e for e in tracked.events if e[2] == "cam"] if use_camera else []
     lights = [e for e in tracked.events if e[2] == "blink"] if use_camera else []
     hdgs = [e for e in tracked.events if e[2] == "hdg"]
+    tofs = [(e[0], info) for e in tracked.events if e[2] == "tof" and use_tof
+            for o, info in e[3].get("res", []) if o == "used"]
+    fwd = tracked.cfg["tof_forward_cm"] - tracked.cfg["tof_recess_cm"]
     if len(raw) < 3:
         return []
     t0, t1 = raw[0][0], raw[-1][0]
@@ -102,6 +109,20 @@ def smooth(tracked, kf_hz=20.0, use_gyro=True, use_wheel_w=True, use_camera=True
     light_k = [(k, d) for k, d in light_k if 0 <= k < K]
     hdg_k = [(int(round((e[0] - t0) * kf_hz)), e[3]) for e in hdgs]
     hdg_k = [(k, d) for k, d in hdg_k if 0 <= k < K]
+    tof_k = []                         # (k, fraction of the way to keyframe k + 1, info)
+    for t, info in tofs:
+        q = (t - t0) * kf_hz
+        k = min(max(int(math.floor(q)), 0), K - 2)
+        tof_k.append((k, min(max(q - k, 0.0), 1.0), info))
+
+    def tof_res(p, k, f, info):
+        xa, ya, tha = p[3 * k:3 * k + 3]
+        xb, yb, thb = p[3 * k + 3:3 * k + 6]
+        s = (xa + f * (xb - xa), ya + f * (yb - ya), tha + f * wrap(thb - tha))
+        r = line_range(s, info["ang"], fwd, info["a"], info["n"])
+        if r is None:                  # the pose moved so the ray no longer meets the face: a big but finite miss
+            return 10.0
+        return (r[0] - info["z"]) / info["sigma"]
 
     def residuals(p):
         out = []
@@ -133,6 +154,8 @@ def smooth(tracked, kf_hz=20.0, use_gyro=True, use_wheel_w=True, use_camera=True
             out += [(p[3 * k] + c * f - s * l - d["x"]) / n.blink_xy, (p[3 * k + 1] + s * f + c * l - d["y"]) / n.blink_xy]
         for k, d in hdg_k:
             out.append(wrap(p[3 * k + 2] - d["th"]) / d["sigma"])
+        for k, f, info in tof_k:
+            out.append(tof_res(p, k, f, info))
         return np.array(out)
 
     # which unknowns each residual touches (keeps the solver fast)
@@ -163,6 +186,9 @@ def smooth(tracked, kf_hz=20.0, use_gyro=True, use_wheel_w=True, use_camera=True
         r += 2
     for k, _ in hdg_k:
         J[r, 3 * k + 2] = 1
+        r += 1
+    for k, _, _ in tof_k:
+        J[r, 3 * k:3 * k + 6] = 1
         r += 1
     # Plain least squares first (converges quickly from any reasonable guess),
     # then the robust weighting from there, so a few bad camera fixes can't

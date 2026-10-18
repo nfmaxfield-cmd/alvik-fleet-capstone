@@ -28,6 +28,10 @@ Inputs (all but --session optional):
                 with per-robot name probabilities (needs --calib and the clock offset)
   --calib-results  calibration_results.csv from tools/blink/calib.py: start-nudge
                 headings (per run) and the light's offset on the robot
+  --map         landmarks for landmark ranging: tools/fleet map.json or landmarks.csv
+                (name,x1_cm,y1_cm,x2_cm,y2_cm); written to <out>/landmarks.csv as the
+                faces the fusion uses (each run's raw.csv already has the distance
+                sensor's zones dL_cm..dR_cm)
 
 Output, per run: <out>/<run_id>/raw.csv (t + every sensor column),
 camera.csv (t, x_cm, y_cm, score, heading_deg), meta.json (robot, route,
@@ -36,7 +40,8 @@ With --blink also blink.csv (t, frame, x_cm, y_cm: the LIGHT's floor point,
 not the robot centre; track, n_spots, robot, p_<name>..., p_none); with
 --calib-results meta.json also gets calib_headings ([t, heading_deg, event])
 and led_offset_cm ([forward, left]).
-Plus <out>/manifest.csv listing every run and what is missing.
+With --map, meta.json gets landmarks_file (the map given) and landmark_faces
+(how many faces). Plus <out>/manifest.csv listing every run and what is missing.
 
 Clock conversions:
   robot ms   -> laptop: per robot and boot, a straight-line fit to the clock
@@ -545,6 +550,7 @@ def main():
     ap.add_argument("--video-offset", type=float)
     ap.add_argument("--blink", help="blink_detections.csv (tools/blink/blink.py)")
     ap.add_argument("--calib-results", help="calibration_results.csv (tools/blink/calib.py)")
+    ap.add_argument("--map", help="map.json (tools/fleet) or landmarks.csv: landmark faces for landmark ranging")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
@@ -618,6 +624,13 @@ def main():
         if args.detections:
             dets, n = per_run(lambda Hi, par, dist: load_detections(args.detections, Hi, off, parallax=par, dist=dist))
             print(f"{n} camera detections")
+    if args.map:
+        import landmarks as lm
+        faces = lm.load(args.map)
+        os.makedirs(args.out, exist_ok=True)
+        lm.write_csv(faces, os.path.join(args.out, "landmarks.csv"))
+        extra = dict(extra, landmarks_file=os.path.abspath(args.map), landmark_faces=len(faces))
+        print(f"{len(faces)} landmark faces from {args.map} -> {os.path.join(args.out, 'landmarks.csv')}")
     man = write_runs(runs, dets, args.out, extra, blink=blink, calib_rows=crow, led=led, calib_of=calib_of,
                      calib_infos=infos)
     w = [max(len(str(r[i])) for r in man + [["run_id", "robot", "route", "result", "raw", "cam", "tape", "missing"]]) for i in range(8)]

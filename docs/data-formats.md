@@ -41,6 +41,12 @@ Notes:
   -1 = the start nudge (2026-10-17e+). In a `calib` run: 1 blinking still,
   2 rolling forward, 3 back, 4 compass wiggle, 5 settling.
 - RAW `lifted` (firmware 2026-10-17c+): 1 while the robot reports being picked up.
+- RAW `dL_cm, dCL_cm, dC_cm, dCR_cm, dR_cm`: the front distance sensor's five
+  zones, left to right (the fusion takes them as +22, +11, 0, -11, -22 deg,
+  left positive: `tof_zone_deg`, to be checked on hardware); `dtop_cm`,
+  `dbot_cm` its top and bottom zones. The sensor makes fewer frames than RAW
+  rows (about 15 a second in tools/sim, to be measured); RAW repeats the last
+  frame until the next.
 - RAW gx..gz: gyro, deg/s; ax..az: accelerometer, g (to be confirmed on
   hardware: az about 1 at rest). yaw_deg: the IMU's fused yaw.
 - Wheel angles (wl_deg, wr_deg) are cumulative degrees; distance = angle/360 x
@@ -228,6 +234,29 @@ left, heading degrees, 0 = +x, counter-clockwise positive. Poses are
 The **map hash** in plan.json is sha256 (first 16 hex digits) of floor,
 robot, dock, boards, keep-outs, obstacles (without time/note) and robots;
 tasks and notes do not change it.
+
+## Landmarks for landmark ranging (`map.json` or `landmarks.csv`, read by tools/fusion)
+
+`replay.py --map` and `runs.py --map` take either file. The fusion compares
+each RAW distance-sensor zone (`dL_cm, dCL_cm, dC_cm, dCR_cm, dR_cm`) with the
+distance to the first mapped face along that zone's direction
+(tools/fusion/README.md, "Landmark ranging").
+
+- `map.json` (Fleet map above): each board is a rectangle around its centre
+  line `p1`-`p2`, `thickness_cm` thick: its two long faces and two end faces.
+  Polygon `obstacles` with `source` `user` (tape-measured, e.g. a cinderblock)
+  add their edges. Obstacles found by the camera or distance sensor, and
+  circles, are not used.
+- `landmarks.csv`: `name,x1_cm,y1_cm,x2_cm,y2_cm`, one straight face per row:
+  the two ends of the surface the sensor sees, floor cm (tape-sheet axes).
+  Seen from either side. A board standing on edge is one row (its face toward
+  the robots); a block can be up to four rows. `runs.py --map` writes the
+  faces it read from a map.json in this format (`<out>/landmarks.csv`), with
+  faces named `<board> left` / `right` (side of p1 -> p2) and `<board> end p1`
+  / `end p2`.
+
+Measure the face, not the board's centre: for a 1.5 cm board on its centre
+line, the face is 0.75 cm closer to the robots.
 
 ## Fleet plan (`plan.json`, written by tools/fleet/planner.py and app.py)
 

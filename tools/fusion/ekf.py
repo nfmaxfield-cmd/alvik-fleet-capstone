@@ -24,6 +24,8 @@ Measurements:
               R(th) offset, so it also says a little about heading
     heading   a heading fix with its own noise (heading from motion, the
               calibration rolls / start nudges)
+    landmark_range  the front distance sensor's reading of a mapped board or
+              block (landmark ranging; geometry in landmarks.py)
 """
 import math
 
@@ -199,6 +201,22 @@ class EKF:
         H = np.zeros((1, 6))
         H[0, 2] = 1
         return self._update(np.array([th]), np.array([self.s[2]]), H, np.array([[sigma ** 2]]), angle_rows=(0,))
+
+    def range_d2(self, z, h, J, sigma):
+        """Squared Mahalanobis distance of a distance-sensor reading z from its
+        prediction h (J: dh/d(x, y, th))."""
+        H = np.zeros(6)
+        H[:3] = J
+        y = z - h
+        return y * y / (float(H @ self.P @ H) + sigma * sigma)
+
+    def landmark_range(self, z, h, J, sigma):
+        """Landmark ranging: the front distance sensor reads z where the map says
+        h (landmarks.predict_zone gives h and J = dh/d(x, y, th)). Returns the
+        squared Mahalanobis distance (before the update)."""
+        H = np.zeros((1, 6))
+        H[0, :3] = J
+        return self._update(np.array([z]), np.array([h]), H, np.array([[sigma * sigma]]))
 
     def heading_d2(self, th):
         y = wrap(th - self.s[2])

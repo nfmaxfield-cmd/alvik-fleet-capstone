@@ -61,6 +61,16 @@ filter already turns them into heading as the robot drives); it may help
 when only a detector without heading is available.
 Calibration rolls / start nudges (calibration_results.csv) are heading fixes
 at their times, in setups that opt in (calib_heading).
+
+Landmark ranging (sensor "tof", with a map of boards / blocks: replay.py --map):
+each new frame of the front distance sensor's five zones (RAW dL..dR) is a
+"tof" event. Per zone: the reading must be in range (tof_min_cm..tof_max_cm);
+the zone's ray from the predicted pose must hit a mapped face first, the same
+face across +-tof_assoc_deg (else two faces are too close in angle: skipped),
+away from its ends (tof_end_margin_cm + 2 sigma of where the ray lands), not
+at a grazing angle; and the reading must agree with the prediction (gate
+tof_gate_chi2, 1 dof) or it is rejected: something unmapped (a hand, another
+robot, a brick) is in front. Geometry in landmarks.py.
 """
 import bisect
 import math
@@ -70,6 +80,7 @@ from collections import deque
 import numpy as np
 
 from ekf import EKF, Noise, D2R, wrap
+import landmarks as lm
 
 DEFAULT = dict(
     name="wheels+gyro+camera",
@@ -115,6 +126,24 @@ DEFAULT = dict(
     calib_heading=False,      # opt in: calibration_results.csv start-nudge headings become heading fixes
                               # (off by default so the older setups stay comparable when the file is given)
     calib_heading_sigma_deg=0.8,  # calib.py vs simulator truth: mean 0.45-0.62 deg, max 1.33 deg
+    # --- landmark ranging (sensor "tof"; needs a map of landmark faces: replay.py --map). Not used otherwise.
+    tof_forward_cm=4.75,      # sensor ahead of the tracked point (robot centre): the front face ...
+    tof_recess_cm=0.25,       # ... minus how far the sensor sits behind it
+    tof_zone_deg=[22.0, 11.0, 0.0, -11.0, -22.0],   # direction of dL, dCL, dC, dCR, dR (deg, left positive)
+    tof_min_cm=2.0,           # readings (and predictions) outside this range are not used
+    tof_max_cm=120.0,
+    tof_noise_cm=0.5,         # reading noise: this ...
+    tof_noise_rel=0.03,       # ... plus this fraction of the distance
+    tof_gate_chi2=10.83,      # reject a reading this far (squared sigmas, 1 dof: 99.9%) from the prediction
+    tof_end_margin_cm=2.0,    # the ray must land this far (+ 2 sigma of where it lands) from a face's ends
+    tof_assoc_deg=5.5,        # rays this far either side must hit the same face (half an 11 deg zone)
+    tof_zone_width_deg=0.0,   # 0: one ray along the zone direction; > 0: nearest point within the slice
+    tof_max_incidence_deg=20.0,   # skip faces hit more obliquely than this: there the reading depends on where in
+                                  # the zone it comes from (not measured yet); 60 once tof_zone_width_deg is measured
+    tof_angle_sigma_deg=0.0,  # uncertainty of each zone's direction: adds distance x tan(incidence) x this
+    tof_max_sigma_cm=10.0,    # don't use landmarks while the position is this unsure (picked up, lost)
+    tof_new_frames_only=True, # the sensor makes ~15 frames/s; RAW repeats a frame until the next: use each once
+    tof_delay_s=0.0,          # a frame describes the pose this long before its RAW row
 )
 
 
@@ -228,6 +257,7 @@ class Tracked:
         self.fix_hist = {"det": deque(), "blink": deque()}   # (t, x, y) of assigned fixes, for heading from motion
         self.led = (0.0, 0.0)
         self._odo_v, self._odo_lifted = 0.0, False
+        self.faces = None     # landmark faces (landmarks.Face) for landmark ranging
 
     def off(self, sensor, t):
         return any(a <= t - self.t0 <= b for a, b in self.cfg["sensor_off"].get(sensor, []))
@@ -259,10 +289,53 @@ class Tracked:
             k.cam_light((d["x"], d["y"]), d["off"])
         elif kind == "hdg":
             k.heading(d["th"], d["sigma"])
+        elif kind == "tof":
+            d["res"] = self._tof(t, d["zones"])     # (re)written on every replay, so the counts are the last pass
         elif kind == "lost":
             k.lost()
         elif kind == "reset":
             k.reset_position(d["x"], d["y"], d.get("sigma", 1.0))
+
+    def _tof(self, t, zones):
+        """Landmark ranging, one sensor frame: [(outcome, used-info or None)] per zone."""
+        cfg, k = self.cfg, self.ekf
+        if self.off("tof", t) or not self.faces:
+            return []
+        unknown = math.sqrt(max(k.P[0, 0], k.P[1, 1])) > cfg["tof_max_sigma_cm"]
+        out = []
+        for ang, z in zip(cfg["tof_zone_deg"], zones):
+            if z is None or not cfg["tof_min_cm"] <= z <= cfg["tof_max_cm"]:
+                out.append(("bad_reading", None))
+                continue
+            if unknown:
+                out.append(("pose_unknown", None))
+                continue
+            why, info = lm.predict_zone(k.s, k.P, ang * D2R, self.faces, cfg)
+            if why:
+                out.append((why, None))
+                continue
+            sigma = lm.zone_sigma(info["h"], cfg, info["tan_inc"])
+            if k.range_d2(z, info["h"], info["J"], sigma) > cfg["tof_gate_chi2"]:
+                out.append(("gated", None))
+                continue
+            k.landmark_range(z, info["h"], info["J"], sigma)
+            f = self.faces[info["face"]]
+            out.append(("used", dict(z=z, sigma=sigma, ang=info["ang"], a=(f.a[0], f.a[1]), n=(f.n[0], f.n[1]),
+                                     resid=z - info["h"], face=f.name)))
+        return out
+
+    def tof_counts(self):
+        """Landmark ranging outcomes over the run: {outcome: zone readings}, plus
+        'resid' (reading minus prediction, cm, of the used ones)."""
+        out = {o: 0 for o in lm.OUTCOMES}
+        out["resid"] = []
+        for ev in self.events:
+            if ev[2] == "tof":
+                for o, info in ev[3].get("res", []):
+                    out[o] += 1
+                    if info:
+                        out["resid"].append(info["resid"])
+        return out
 
     def add(self, ev):
         """Apply an event; if it is older than ones already applied, rewind and replay."""
@@ -607,7 +680,13 @@ def wheel_fwd_signs(runs):
     return {robot: (-1.0 if a < 0 else 1.0) for robot, a in acc.items()}
 
 
-def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, led_offsets=None, signs=None):
+def zone_reading(v):
+    x = fnum(v, float("nan"))
+    return None if math.isnan(x) else x
+
+
+def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, led_offsets=None, signs=None,
+               landmarks=None):
     """Process all runs (and camera sightings) together, in the order the
     information would have reached the robots. Returns robot run_id -> Tracked,
     and the unknown-object tracker.
@@ -617,7 +696,8 @@ def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, 
     led_offsets: {robot or None: (forward, left) cm} (runs.led_offsets);
     signs: (wheel_turn_signs, wheel_fwd_signs) worked out from a larger set of
     runs, so a subset of runs is processed exactly as within the whole set
-    (replay.py with one calibration per run); default: from `runs`."""
+    (replay.py with one calibration per run); default: from `runs`.
+    landmarks: list of landmarks.Face (used if "tof" is in the sensors)."""
     rng = random.Random(cfg["seed"])
     if cfg["vmax"] == "auto":
         cfg = dict(cfg, vmax=fastest_speed(runs))
@@ -628,6 +708,7 @@ def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, 
     use_cam = "camera" in cfg["sensors"] and detections
     use_blink = bool("blink" in cfg["sensors"] and blink)
     ident = use_blink or cfg["motion_identity"]
+    use_tof = "tof" in cfg["sensors"] and bool(landmarks)
     if cfg["led_offset_cm"] == "auto":
         led = dict(led_offsets) if led_offsets else {None: (2.75, 0.0)}
     else:
@@ -638,6 +719,7 @@ def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, 
         gf = gyro_f.get(run.robot, (D2R, ""))[0]
         ws = wsign.get(run.robot, 1.0)
         fs = fsign.get(run.robot, 1.0)
+        prev_z = None
         for r in run.raw:
             v = fnum(r.get("v_cms"))
             w = fnum(r.get("w_dps")) * D2R * ws
@@ -646,6 +728,11 @@ def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, 
                      and abs(v) < 0.1 and abs(fnum(r.get("w_dps"))) < 0.5)
             d = dict(v=v, w=w, g=fnum(r.get("gz")) * gf, still=still, lifted=fnum(r.get("lifted")) > 0.5,
                      vl=fnum(r.get("wl_rpm")) * fs * rpm2cms, vr=fnum(r.get("wr_rpm")) * fs * rpm2cms)
+            if use_tof:
+                z = tuple(zone_reading(r.get(c)) for c in lm.ZONE_COLS)
+                if not cfg["tof_new_frames_only"] or z != prev_z:
+                    d["zones"] = z            # a new sensor frame in this row
+                prev_z = z
             events.append((r["t"], 0, ("raw", ri, d)))
     if calib_rows and cfg["calib_heading"]:
         idx = {run.run_id: ri for ri, run in enumerate(runs)}
@@ -686,6 +773,7 @@ def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, 
             if tr is None:
                 tr = tracked[run.run_id] = Tracked(run, cfg, gyro_f.get(run.robot, (D2R, ""))[0])
                 tr.led = tuple(led.get(run.robot, led[None]))
+                tr.faces = landmarks if use_tof else None
             if d["lifted"] and not tr.was_lifted:          # rule 5: picked up
                 tr.was_lifted = True
                 tr.lost_state = True
@@ -694,6 +782,8 @@ def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, 
             elif not d["lifted"]:
                 tr.was_lifted = False
             tr.add((arrival, order, "raw", d))
+            if use_tof and "zones" in d and not d["lifted"]:
+                tr.add((arrival - cfg["tof_delay_s"], order + 0.5, "tof", dict(zones=d["zones"])))
             tr.odo_step(arrival, d, use_gyro)
             s = tr.ekf.s
             tr.live.append((arrival, s[0], s[1], s[2]))
