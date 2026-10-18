@@ -377,6 +377,7 @@ void runExperiment(int i, bool fromButton) {
     case EXP_CALIB: runCalib(); break;
   }
   alvik.brake();
+  if (logged) tickWait((unsigned long)P("settle_end_ms"));   // at rest, still logging and blinking
   edge::stop();
   blink::stop();
   if (logged) {

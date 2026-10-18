@@ -98,6 +98,9 @@ Notes:
 - RAW `lifted` (firmware 2026-10-17c+): 1 while the robot reports being picked up.
 - RAW `raw_n` (firmware 2026-10-18b+, last column): the row's number within the
   run (0, 1, 2, ... = rows sent before it; RUNEND raw_rows_sent is the count).
+- From 2026-10-18b every logged run ends with `settle_end_ms` (1000) standing
+  still, logging and blinking, before the end flash: a clean end pose for the
+  camera and the end-marks check, and a still period for the gyro bias.
   A jump in raw_n is a row lost over WiFi; a gap in `ms` between consecutive
   raw_n is a real pause on the robot (library move()/rotate() block ~200 ms).
   Older logs have no raw_n column (everything reads columns by name, and the

@@ -1287,6 +1287,7 @@ class Robot(FollowMixin):
             else:
                 raise ValueError("the simulator runs only the straight, demo, survey, follow and calib experiments, not " + exp)
         self.brake()
+        self.tick_wait(self.P("settle_end_ms"))   # firmware: still at the end, logging and blinking
         self.edge_stop()
         self.kidnap_at = None
         self.blink_stop()
