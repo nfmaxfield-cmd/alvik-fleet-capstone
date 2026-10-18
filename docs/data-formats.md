@@ -51,7 +51,14 @@ Notes:
 - `video.avi`: Motion-JPEG, 640x480, about 30 fps
 - `frames.csv`: frame,t_wall,t_mono,cam_ms (t_wall = Pi clock, Unix seconds, when the frame arrived; cam_ms = the camera driver's own capture time in ms, optional, for checking delay)
 - `events.csv`: t_wall,frame,text (notes typed while recording)
-- `meta.json`: device,width,height,fps_requested,fps_reported,host,start,label,note
+- `meta.json`: device,width,height,fps_requested,fps_reported,host,start,label,note,
+  `camera_controls` (exposure / focus / white balance: `requested` (lock, auto, a
+  number, or null = untouched), `auto_values` read after the 2 s warm-up, `after`
+  = what the camera reports once set, `stats_auto` / `stats_after` = brightness
+  and sharpness of a few frames, `steps` = every set tried (OpenCV or v4l2-ctl)
+  and whether it took, `warnings`, `v4l2_after` = `v4l2-ctl --list-ctrls` if
+  installed) and `camera_controls_end` (what the camera reports when recording
+  stops). From 2026-10-18.
 
 ## Tape measurement sheet (`docs/experiments/<exp>/data/measurements.csv`)
 
@@ -69,6 +76,44 @@ xf0_cm,yf0_cm,xr0_cm,yr0_cm,xf_cm,yf_cm,xr_cm,yr_cm,battery_pct,excluded,note
   Readers also accept `homography_floor_cm_to_px`, `H_floor_to_image`, `H`, `homography`, `matrix`.
 - optional `camera.height_cm`: lens height above the floor (tape measure)
 - optional `camera.nadir_floor_cm`: [x, y], the floor point straight below the lens (plumb line). With both, the fusion moves sightings of the robot's top (4 cm up; `object_height_cm` overrides) down to the floor point below it.
+- optional `camera.height_source`, `camera.nadir_source`: how they were found
+  ("tape (given)", "plumb line (given)", or "estimated: ..." from the fit).
+- optional `k1`, `cx`, `cy`, `f_px`: radial lens term. The homography gives an
+  ideal pixel (u, v); the recorded pixel is `c + f_px n (1 + k1 |n|^2)` with
+  `n = ((u, v) - c) / f_px`. Absent or 0 = no distortion (older files). Read by
+  tools/fusion/runs.py, replay.py and tools/detector/detcore.py; tools/blink
+  ignores it (calibrate_floor.py prints how many cm that costs).
+- optional `plane_height_cm`: if set, the homography maps that plane (the
+  robot's top) instead of the floor (survey without a camera height).
+- `view_floor_polygon_cm`: the image border mapped to the floor, [[x, y], ...]
+  cm: the floor area the camera sees (for checking a route stays in view);
+  `view_robot_polygon_cm`: where the robot's top centre is in view (needs the
+  camera height).
+- `fit`: how it was made (tools/calibrate_floor.py): `mode` (points / survey),
+  n_points, n_inliers, rms_cm, max_cm, loo_rms_cm (left-one-out), coverage of
+  `area_cm` (the floor bounds in tools/fleet/map.json if present, else
+  0..122 x 0..122 cm; `--area` overrides), warnings, per-point errors (`points`) or per-run survey results
+  (`survey`), and `used_runs`: runs whose tape marks or odometry were used.
+  Don't score those runs' camera positions with this file: use
+  `floor_calibration_loro.csv`.
+
+Beside it, from tools/calibrate_floor.py:
+
+- `floor_points.json`: the point pairs (resume file): `settings` and `points`,
+  each {id, kind (floor / robot / run), u, v (px), x, y (cm), z (cm above the
+  floor), frame, label, enabled, spot, group (run id), session}.
+- `survey_pairs.csv`: u,v,x_cm,y_cm,vx_cms,vy_cms,sigma_cm,run,t,frame,kind,
+  anchor_x_cm,anchor_y_cm,session (odometry path point, its velocity and
+  uncertainty, paired with a camera sighting; accumulates across sessions).
+  `kind` is `odo` for a path point or `tape_end` for a run's tape end marks
+  (used only in calibrations that score other runs; `--no-end-marks` = off).
+- `floor_calibration_loro.csv`: run_id,calibration,left_out,n_used,fit_rms_cm,
+  note, then held-out errors of that run (heldout_start_err_cm /
+  heldout_end_err_cm for run points, heldout_path_median_cm / _rms_cm and
+  heldout_end_mark_err_cm for survey):
+  which file in `floor_calibration_loro/` (made WITHOUT that run, or its fold)
+  to score the run with.
+- `floor_calibration_check.jpg`: a frame with the fitted 10 cm grid drawn on it.
 
 ## Labels for the camera detector (`<recording>/labels/`)
 
@@ -96,3 +141,38 @@ A detector is a Python module with:
 
 (x, y in image pixels.) The labelling program can use any detector with this
 interface to make its guesses.
+
+## Blink detections (`<recording>/blink_detections.csv`, written by tools/blink/blink.py)
+
+frame,t_wall,robot,x_px,y_px,code,score,track,lit,n_spots,period_s,shared,p_Left,p_Center,p_Right,p_other,p_none
+
+- One row per frame in which a tracked blinking light (firmware 2026-10-18a
+  rate code: one 100 ms flash every 0.3 s Left, 0.4 s Center, 0.5 s Right,
+  0.6 s other) was lit; with `--interpolate` also rows between flashes (`lit` 0).
+- `x_px,y_px`: the light's centre (midpoint of the two LEDs), image pixels as
+  in labels.csv; a point on the robot's top (4 cm up), ahead of its centre.
+- Per track (same on all its rows): `p_<name>` probability that the track is
+  that robot (names follow `--names`), `p_none` that it is no robot code;
+  `robot`/`code` filled only when the code is clear (else empty / 0);
+  `score` = probability of the name given (or of the best code);
+  `period_s` measured flash period; `shared` other flashing on its spot per flash.
+- `track` id; `n_spots` 2 = both LEDs seen, 1 = one (moved to the pair
+  midpoint), 0 = interpolated.
+
+## Calibration results (`<recording>/calibration_results.csv`, written by tools/blink/calib.py)
+
+run,robot_log,experiment,event,t_video,robot_blink,blink_code,blink_score,blink_p_log,identity,
+others_moving,lights_moved,onset_diff_ms,heading_img_deg,heading_floor_deg,heading_method,
+moved_px,moved_cm,commanded_cm,motion_quality,det_heading_floor_deg,light_x_px,light_y_px,
+centre_x_px,centre_y_px,led_fwd_px,led_left_px,led_fwd_cm,led_left_cm,note
+
+- One row per forward roll: `event` calib (RAW step 2 of a calib run) or
+  nudge (RAW step -1, the start nudge). `t_video`: wheels start, video clock.
+- `identity`: agree / DISAGREE between the blink code of the light that moved
+  and the robot whose RAW log shows the roll then (`code not readable` if the
+  light was not named); `blink_p_log`: the blink probability for that robot.
+- `heading_img_deg` (image convention, as labels.csv) and `heading_floor_deg`
+  (floor convention): direction of the forward roll.
+- `led_fwd_*`, `led_left_*`: the light's offset from the robot's centre in
+  the robot's own frame (forward, left), px and cm; needs robot-centre
+  detections (`--detections`). Column details: tools/blink/README.md.
