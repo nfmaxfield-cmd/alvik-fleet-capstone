@@ -21,6 +21,11 @@ Preview: open http://<pi-hostname>.local:8000 on the laptop (e.g.
 http://st1maxfini.local:8000). The picture shows the frame rate and the
 recording time.
 
+Live link: http://<pi-hostname>.local:8000/live sends every frame (grey JPEG,
+quality 90; ?q=80 for less) with its frame number and t_wall (X-Frame, X-Time
+headers) for tools/live/track_live.py --stream. It reuses the frame recorded
+here (no second camera open) and costs nothing while no one is connected.
+
 Each recording is a folder ~/recordings/<date-time>_<label>/ with:
   video.avi    the frames, Motion-JPEG
   frames.csv   frame, t_wall (Unix seconds), t_mono (seconds since start),
@@ -77,13 +82,77 @@ class Latest:
             return self.jpeg
 
 
-def make_handler(latest):
+class LiveFrames:
+    """Every frame for /live (tools/live/track_live.py on the laptop): the
+    newest picture with its frame number and t_wall. Costs nothing while no
+    one is connected; with a viewer, each frame is turned grey and JPEG-encoded
+    in the viewer's own thread (OpenCV lets the recording loop run meanwhile)."""
+
+    def __init__(self):
+        self.item = None
+        self.cond = threading.Condition()
+        self.clients = 0
+
+    def put(self, frame, n, t_wall):
+        with self.cond:
+            self.item = (frame, n, t_wall)
+            self.cond.notify_all()
+
+    def wait_newer(self, n_last, timeout=2.0):
+        with self.cond:
+            if self.item is None or self.item[1] <= n_last:
+                self.cond.wait(timeout)
+            return self.item
+
+
+def live_part(frame, n, t_wall, quality=90):
+    """One multipart part of /live: grey JPEG, with the frame number and the Pi time in its headers."""
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+    ok, jpg = cv2.imencode(".jpg", gray, [cv2.IMWRITE_JPEG_QUALITY, int(quality)])
+    if not ok:
+        return None
+    body = jpg.tobytes()
+    return (b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + str(len(body)).encode()
+            + b"\r\nX-Frame: " + str(n).encode() + b"\r\nX-Time: " + f"{t_wall:.4f}".encode()
+            + b"\r\n\r\n" + body + b"\r\n")
+
+
+def make_handler(latest, live=None):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
 
         def do_GET(self):
-            if self.path == "/stream":
+            if self.path.split("?")[0] == "/live" and live is not None:
+                q = 90
+                if "q=" in self.path:
+                    try:
+                        q = max(30, min(100, int(self.path.split("q=")[1].split("&")[0])))
+                    except ValueError:
+                        pass
+                self.send_response(200)
+                self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                with live.cond:
+                    live.clients += 1
+                last = -1
+                try:
+                    while True:
+                        item = live.wait_newer(last)
+                        if item is None or item[1] <= last:
+                            continue
+                        frame, n, t_wall = item
+                        part = live_part(frame, n, t_wall, q)
+                        last = n
+                        if part:
+                            self.wfile.write(part)
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    return
+                finally:
+                    with live.cond:
+                        live.clients -= 1
+            elif self.path == "/stream":
                 self.send_response(200)
                 self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
                 self.send_header("Cache-Control", "no-store")
@@ -468,10 +537,12 @@ def main():
     real_fps = cap.get(cv2.CAP_PROP_FPS) or args.fps
 
     latest = Latest()
+    live = LiveFrames()
     if args.port:
-        server = ThreadingHTTPServer(("", args.port), make_handler(latest))
+        server = ThreadingHTTPServer(("", args.port), make_handler(latest, live))
         threading.Thread(target=server.serve_forever, daemon=True).start()
-        print(f"Preview: http://{socket.gethostname()}.local:{args.port}")
+        print(f"Preview: http://{socket.gethostname()}.local:{args.port}   "
+              f"(live link for tools/live/track_live.py: --stream {socket.gethostname()}.local:{args.port})")
 
     folder = writer = fcsv = ecsv = None
     lock = threading.Lock()
@@ -545,6 +616,8 @@ def main():
                 writer.write(frame)
                 with lock:
                     fcsv.writerow([state["frame"], f"{t_wall:.4f}", f"{t_mono:.4f}", f"{cam_ms:.1f}"])
+            if live.clients:
+                live.put(frame, state["frame"], t_wall)   # same number and time as frames.csv
             state["frame"] += 1
             n_fps += 1
             if time.monotonic() - t_fps >= 1.0:

@@ -86,6 +86,95 @@ python -m pytest tools/fleet/tests -q
 
 Files and the protocol: docs/data-formats.md, "Step follower".
 
+## Running with the live camera (the live link)
+
+The overhead camera tells each robot where it is while the plan runs. Three
+programs work together: **camrec.py** on the Pi (the camera), **track_live.py**
+on the laptop (finds each robot by its blinking lights and works out where it
+is), and **run_plan.py** on the laptop (drives the robots and passes the
+positions on). How it works: tools/live/README.md.
+
+You need: the Pi with the camera, the laptop, both with the newest code, and a
+`floor_calibration.json` made for where the camera is now (tools/pi/README.md,
+"Floor calibration"). The robots blink automatically during their run.
+
+**Once, after the code changed: update both computers.**
+
+On the Pi (in a PowerShell window, log in to the Pi first: type the line
+below, press Enter, then type the Pi's password):
+
+```
+ssh st1maxfini@st1maxfini.local
+```
+```
+cd ~/alvik-fleet-capstone
+```
+```
+git pull
+```
+
+On the laptop (a second PowerShell window, in the project folder):
+
+```
+git pull
+```
+
+**Every time:**
+
+1. **Start the camera (Pi window).** Type this and press Enter:
+
+   ```
+   python3 tools/pi/camrec.py --device 0 --fps 25 --label live
+   ```
+
+   You should see `Preview: http://st1maxfini.local:8000 (live link for
+   tools/live/track_live.py: --stream st1maxfini.local:8000)` and `Recording
+   640x480 to ...`. Leave this window alone (it also records the video).
+
+2. **Start the live link (laptop, PowerShell window 1).** Put your
+   calibration file's path after `--calib`:
+
+   ```
+   python tools/live/track_live.py --stream st1maxfini.local:8000 --calib C:\path\to\floor_calibration.json
+   ```
+
+   You should see `floor calibration ...; 3.4 px per cm` (about 3.4 for the
+   camera at 262 cm), then a status line every 2 seconds:
+   `... ms/frame  fixes: none yet  lights: none`. Once the robots' run starts
+   and they blink, after 2-4 seconds it says `fixes: Left 12, Center 9, ...`.
+   If it says `camera stream: ... trying again in 1 s` over and over, step 1
+   isn't running, or the Pi's code is old (`git pull` on the Pi).
+   If you have a `calibration_results.csv` from the robots' calibration runs
+   (tools/blink/calib.py), add `--calib-results C:\path\to\calibration_results.csv`:
+   it gives each robot's light position on its body exactly.
+
+3. **Run the plan (laptop, PowerShell window 2).**
+
+   ```
+   python tools/fleet/run_plan.py --map map.json --plan plan.json --fixes udp
+   ```
+
+   It starts the robots' runs, then says `Waiting for camera fixes...` and,
+   for each robot, `Left: camera puts it 0.8 cm / 1.2 deg from its start spot`.
+   Then the robots drive. If it says `No camera fix for Center`, look at
+   window 1: is Center listed after `fixes:`? (Not listed: is it in view and
+   blinking? Its name must be exactly `Center`.)
+
+4. **Stop.** Press Ctrl+C in window 2 first (that stops the robots), then in
+   window 1, then in the Pi window (that saves the video).
+
+Window 1 saves what it sent in `logs\<date-time>-live\` (messages.jsonl,
+live_summary.json). It never sends a position under a name it isn't sure of:
+a robot whose blink rhythm isn't clear yet, or two lights that could both be
+the same robot, get no fixes until that clears up.
+
+**Try it without robots:** play a recording back in real time and print what
+would be sent (tools/sim/simulate.py --video makes a recording):
+
+```
+python tools/live/track_live.py --replay C:\path\to\recording --dry-run
+```
+
 ## How the planner works
 
 1. **Where a robot can be.** The floor becomes a grid of 1 cm cells. A cell is

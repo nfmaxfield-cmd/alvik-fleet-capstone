@@ -25,7 +25,7 @@ Position source (--fixes): where camera poses come from (data-formats.md,
   none            no camera: each robot gets its plan start pose once (fpose)
                   and then drives on wheels + gyro alone;
   udp[:PORT]      JSON lines on UDP PORT (default 5010), e.g. from the live
-                  fusion or the simulator: {"type": "fix", "robot", "t" (laptop
+                  link (tools/live/track_live.py) or the simulator: {"type": "fix", "robot", "t" (laptop
                   Unix time of the camera frame), "x", "y", "th" (deg),
                   "sigma" (cm), "sigma_th" (deg)} and {"type": "obstacle", "id",
                   "shape", "points" or "center"/"radius", "source"};
@@ -1014,10 +1014,10 @@ def start_robots(coord, link, args, source):
 
         def got():
             for ev in source.poll():
-                if ev.get("type") == "fix" and ev.get("robot") in starts:
-                    seen[ev["robot"]] = ev
+                if ev.get("type") == "fix" and ev.get("robot") in starts and ev.get("th") is not None:
+                    seen[ev["robot"]] = ev     # (the start check needs a heading: position-only fixes wait)
             return set(seen) == set(names)
-        wait_for(got, 5, coord)
+        wait_for(got, args.fix_wait_s, coord)
         for n in names:
             ev = seen.get(n)
             if ev is None:
@@ -1064,6 +1064,9 @@ def main(argv=None):
     ap.add_argument("--ahead", type=int, default=2, help="steps a robot may hold beyond the one it runs (default 2)")
     ap.add_argument("--resend-s", type=float, default=0.3, help="resend an unacknowledged step after this")
     ap.add_argument("--fix-hz", type=float, default=10.0, help="most camera fixes per robot per second")
+    ap.add_argument("--fix-wait-s", type=float, default=10.0,
+                    help="at the start, wait this long for a camera fix of every robot (the live link needs about "
+                         "6 flashes to name a robot: 2-4 s)")
     ap.add_argument("--retry-s", type=float, default=3.0, help="a robot left without a route gets a new try this often")
     ap.add_argument("--improve-after-s", type=float, default=1.0)
     ap.add_argument("--improve-budget-s", type=float, default=6.0)

@@ -260,6 +260,13 @@ run only, then are cleared; `set calib_dir_limits off` clears them sooner and
   `offset_s` is on the switch-on timing convention of check_session's flash
   finder (the one tools/fusion/runs.py video_offset() uses).
 
+**Live stream** (`http://<pi>:8000/live`, camrec.py 2026-10-18+): every frame
+camrec.py records, as an HTTP `multipart/x-mixed-replace; boundary=frame`
+stream. Each part: `Content-Type: image/jpeg`, `Content-Length`, `X-Frame` (the
+frame number, as in frames.csv), `X-Time` (its t_wall, Pi clock), then a
+grey JPEG (quality 90; `/live?q=80` for less). A part is skipped (X-Frame jumps)
+when the reader falls behind. Read by tools/live/track_live.py --stream.
+
 ## Tape measurement sheet (`docs/experiments/<exp>/data/measurements.csv`)
 
 order,robot,level,commands,run_id,start_x_cm,start_y_cm,start_heading_deg,target_x_cm,target_y_cm,target_heading_deg,
@@ -721,6 +728,32 @@ simulator, or a replay):
   a second per robot.
 - `replay:FILE`: CSV t,robot,x_cm,y_cm,heading_deg[,sigma_cm]; t in seconds
   from the start of the run, or laptop Unix time.
+
+**The live link** (tools/live/track_live.py) sends these `fix` objects, plus
+fields run_plan.py ignores: `id_p` (probability of the name, from the blink
+rhythm; a fix is sent only at 0.9 or more and when no other light may carry
+the same name), `path` (`fast`: from the frame itself, the flash was due
+there; `late`: once the flash had ended and passed blink.py's checks), `t_pi`
+(the frame's Pi t_wall), `frame` (frame number since track_live.py started),
+`track`. `th` is always given (from the line between the two LEDs);
+`sigma` 0.5 cm, `sigma_th` about 1.5 deg. With `--sightings` it also sends
+`{"type": "sighting", "t_pi", "t", "x", "y" (light midpoint, cm), "track",
+"best" (likeliest name), "probs" {name: p}, "p_none", "why" (why no fix:
+`too few flashes`, `code unclear (p ..)`, `off its beat`, `other flashing on
+its spot`, `named` = name sure but front/back not yet), "heading" (resolved /
+unsure)}`; run_plan.py ignores those. track_live.py writes in its `--log`
+folder (default `logs/<date-time>-live/`):
+- `messages.jsonl`: every fix and sighting, sent or not (`sent`), with `t`
+  (laptop time of the picture), `t_sent`, `proc_ms` (frame arrived -> sent);
+- `clock.csv`: t_laptop,t_pi,offset_s,capture_delay_s once a second (offset_s =
+  laptop - Pi clock: the smallest arrival - t_wall over the last 30 s);
+- `live_summary.json`: frames, frames_missing (skipped by the Pi), processing_ms
+  (median, p95, max per frame), fix_age_ms per path (picture taken -> sent,
+  including the assumed capture delay), robots {name: fixes, fast, late,
+  span_s, fixes_per_s, id_p_min}, tracker (counts: fixes, fast, late,
+  sightings, contested, unresolved, fast_unconfirmed = fast fixes whose flash
+  the full check never confirmed, sep_reject, flips, merged).
+tools/live/eval_live.py adds `eval.json` (scores against simulator truth).
 
 Files run_plan.py writes in its session folder, besides the console's CSVs:
 `coordinator.jsonl` (one JSON object per line: t (laptop time), event =
