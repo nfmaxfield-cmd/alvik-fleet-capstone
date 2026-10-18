@@ -10,6 +10,7 @@ a ground truth that the real setup can never give.
     python tools/sim/simulate.py --out sim_out --kidnap 5      # robot picked up and moved during sheet row 5
     python tools/sim/simulate.py --write-config my.json        # every assumed number, to edit
     python tools/sim/simulate.py --out sim_out --config my.json
+    python tools/sim/simulate.py --out sim_out --video --config tools/sim/configs/real_oct18.json   # the real Oct 18 camera
     python -m unittest discover tools/sim/tests -v             # tests (about 10 s)
 
 Needs Python 3.8+, `numpy` and `opencv-python` (`pip install numpy opencv-python`).

@@ -1,0 +1,57 @@
+{
+  "_comment": "The real T0/T1 setup as built on Oct 18 (docs/experiments/E00-measurement-check/README.md, 'Setup as built'). Use: python tools/sim/simulate.py --config tools/sim/configs/real_oct18.json --out <dir>. Only the settings listed here differ from the defaults (simulate.py --write-config shows them all). Not modelled: the black-and-white picture (the simulator has no grayscale setting; the real camera has saturation 0).",
+  "camera": {
+    "_comment": "Overhead USB camera: about 262 cm (103 in) above the board, looking straight down, 640 x 480 at 25 fps, about 3.4 px per cm (640 px / 3.4 = 188 cm of floor across the picture). Floor origin (0, 0) at the bottom-right of the picture, x up the picture, y to the left: yaw -90. Lens point straight down over the board's middle (not measured: no plumb line), level, no lens term (the calibration fits one if needed). No boxes: the simulator puts them at y 62-68 cm, which is on this board.",
+    "width": 640,
+    "height": 480,
+    "fps": 25.0,
+    "height_cm": 262.0,
+    "floor_width_cm": 188.2,
+    "center_floor_cm": [
+      61.0,
+      61.0
+    ],
+    "yaw_deg": -90.0,
+    "tilt_deg": [
+      0.0,
+      0.0
+    ],
+    "k1": 0.0,
+    "boxes_per_10min": 0.0
+  },
+  "session": {
+    "_comment": "The board is 122 x 122 cm (48 x 48 in) plywood with no tape axes: its edges are drawn as the 'tape lines'. The simulator starts every route from one pose; (20, 40) facing +x keeps the straight 100 cm run, the 50 cm square and the L on the board and in view (the real sheet uses a separate start spot per route).",
+    "start_pose": [
+      20.0,
+      40.0,
+      0.0
+    ],
+    "tape_lines": [
+      [
+        0.0,
+        0.0,
+        122.0,
+        0.0
+      ],
+      [
+        122.0,
+        0.0,
+        122.0,
+        122.0
+      ],
+      [
+        122.0,
+        122.0,
+        0.0,
+        122.0
+      ],
+      [
+        0.0,
+        122.0,
+        0.0,
+        0.0
+      ]
+    ],
+    "tape_width_cm": 1.0
+  }
+}

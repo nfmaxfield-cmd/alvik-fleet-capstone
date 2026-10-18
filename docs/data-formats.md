@@ -77,6 +77,32 @@ xf0_cm,yf0_cm,xr0_cm,yr0_cm,xf_cm,yf_cm,xr_cm,yr_cm,battery_pct,excluded,note
 - target_* are relative to the start pose (ahead, left, turned left).
 - `excluded`: 1, yes, y, x or true (any case) leaves the run out of every analysis.
 
+## Accuracy checks (written by tools/accuracy_checks.py, in T1's `data/` or `--out`)
+
+- `accuracy_checks.csv`: id,check,subject,result,pass_rule,verdict,meaning,if_fails,value,n.
+  One row per check and robot (or other subject). `verdict` PASS | CHECK |
+  FAIL | NOT YET (an input is missing; `result` says which). `value` is the
+  row's headline number in the unit its result names (e.g. % for scales, cm,
+  deg/s, ms).
+- `measured_noise.json`: the camera noise measured against the tape while the
+  robot sits still (T0 placements, each run's start and end), for the fusion:
+  - `cam_xy_cm`: robot detector, SD per floor axis of camera minus tape, cm
+  - `cam_heading_deg`: robot detector heading minus tape heading, SD, deg
+  - `blink_xy_cm`: blink light (tools/blink) minus where the tape puts the
+    light (robot centre + the light's measured offset), SD per axis, cm
+  - `start_nudge_heading_deg`: heading from the start nudge
+    (calibration_results.csv) minus tape start heading, SD, deg (includes the
+    tape's own heading error)
+  - `null` = not measured yet. `_detail` holds the biases (mean differences)
+    and counts, `_made` when it was written. The tape's own reading error
+    (about 0.06 cm, T0) is not taken out.
+- `data/split.csv` (T1 only): order,robot,route,level,run_id,half,excluded.
+  The held-out split: within each robot x route, in sheet order, runs 1 and 4
+  of every four are `tune`, runs 2 and 3 `score` (A B B A, so both halves
+  span the session). It depends only on the sheet's order, never on results.
+  **Rule: fusion settings (noise levels, gates, scales) are tuned only on the
+  `tune` runs; reported fusion accuracy comes only from the `score` runs.**
+
 ## Floor calibration (`floor_calibration.json`, beside the recording)
 
 - `H_floor_to_px`: 3x3 matrix, floor cm -> image px: `[u, v, w] = H @ [x_cm, y_cm, 1]`, pixel = (u/w, v/w), pixel centres on whole numbers. Floor axes are the tape-sheet axes.

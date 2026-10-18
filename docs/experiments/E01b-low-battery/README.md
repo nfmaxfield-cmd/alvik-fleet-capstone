@@ -36,9 +36,16 @@ Right was at 17% on Oct 17, which gives a low-battery set without waiting.
    are the full-battery half of the comparison.
 
 ## Analysis
-Paired by route: low vs full battery for the same robot. Welch's t-test per
-route on end error (wheels only, then wheels + gyro from the fusion replay).
-Battery is also a column on every E1 run, so the full E1 set gets a
-battery-vs-error scatter as a check.
+Paired: each low-battery run is matched with Right's full-battery E1 run of
+the same route and the same place in that route's order on the sheet (1st low
+square with 1st full square, and so on). Paired t-test on the differences
+(low minus full) of end error (wheels only, then wheels + gyro from the
+fusion replay), and of gyro bias and noise at rest. Pairing takes the route
+out of the comparison, so fewer runs are needed than for two separate groups.
+`python tools/accuracy_checks.py docs/experiments/E01-baseline-dataset docs/experiments/E01b-low-battery`
+does this (checks 5 and 13). Battery is also a column on every E1 run, so
+the full E1 set gets a battery-vs-error trend as a check (check 10).
+Caveat: the low and full halves are different power-ons, so a change in gyro
+bias between them can be the new power-on rather than the battery.
 
 ## Deviations
