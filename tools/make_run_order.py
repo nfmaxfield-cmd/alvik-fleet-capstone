@@ -38,17 +38,25 @@ EXPERIMENTS = {
            lambda lv: f"place the robot by hand at spot {lv}", lambda lv: (None, None, None)),
     # E1 baseline data set: every run logs all sensors, is filmed, and gets
     # tape marks at its start and its end.
-    "E1": ("E01-baseline-dataset", ["straight120", "L", "square3"],
-           lambda lv: {"straight120": "set straight_rpm 0 / set straight_cm 120 / run straight",
+    # Routes sized for the 122 x 122 cm plywood; each starts at its own spot
+    # (robot centre, facing +x), chosen so the whole route stays on the board.
+    "E1": ("E01-baseline-dataset", ["straight100", "L", "square3"],
+           lambda lv: {"straight100": "set straight_rpm 0 / set straight_cm 100 / run straight",
                        "L": "set demo_route 1 / set demo_a_cm 30 / set demo_b_cm 30 / run demo",
                        "square3": "set demo_route 3 / set square_cm 50 / set square_laps 3 / run demo"}[lv],
-           lambda lv: (120.0, 0.0, 0.0) if lv == "straight120" else (0.0, 0.0, 0.0)),
+           lambda lv: (100.0, 0.0, 0.0) if lv == "straight100" else (0.0, 0.0, 0.0)),
 }
+# Start spot per route: (x_cm, y_cm, heading_deg) of the robot centre on the floor.
+START = {"straight100": (10.0, 61.0, 0.0),   # ends near x = 110 (front face ~115 of 122)
+         "L": (40.0, 80.0, 0.0),             # out 30, right turn, out 30 (to y = 50), then back
+         "square3": (35.0, 35.0, 0.0)}       # left turns: corners (85,35), (85,85), (35,85)
+
 # E1b: the same runs as E1 at low battery, for a paired comparison with the
 # same robot's E1 runs at full battery.
 EXPERIMENTS["E1B"] = ("E01b-low-battery",) + EXPERIMENTS["E1"][1:]
 
-COLS = ["order", "robot", "level", "commands", "run_id", "target_x_cm", "target_y_cm", "target_heading_deg",
+COLS = ["order", "robot", "level", "commands", "run_id", "start_x_cm", "start_y_cm", "start_heading_deg",
+        "target_x_cm", "target_y_cm", "target_heading_deg",
         "xf0_cm", "yf0_cm", "xr0_cm", "yr0_cm", "xf_cm", "yf_cm", "xr_cm", "yr_cm", "battery_pct", "excluded", "note"]
 
 
@@ -101,7 +109,9 @@ def main():
         w.writerow(COLS)
         for i, (robot, lv, cmd, note) in enumerate(rows, 1):
             tx, ty, th = target(lv)
-            w.writerow([i, robot, lv, cmd, "", blank(tx), blank(ty), blank(th)] + [""] * 8 + ["", "", note])
+            sx, sy, sh = START.get(lv, (None, None, None))
+            w.writerow([i, robot, lv, cmd, "", blank(sx), blank(sy), blank(sh), blank(tx), blank(ty), blank(th)]
+                       + [""] * 8 + ["", "", note])
     print(f"wrote {len(rows)} trials to {(os.path.relpath(out, ROOT) if os.path.splitdrive(os.path.abspath(out))[0] == os.path.splitdrive(ROOT)[0] else out)}" + (f" (seed {args.seed})" if args.seed is not None else ""))
     return 0
 

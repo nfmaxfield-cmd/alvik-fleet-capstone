@@ -20,7 +20,7 @@ replaying it in software.
 ## Variables
 | Kind | Variable | Levels or units |
 | --- | --- | --- |
-| Independent | route | straight 120 cm; L-path (30 cm, right turn, 30 cm, then back); square 50 cm sides x 3 laps |
+| Independent | route | straight 100 cm; L-path (30 cm, right turn, 30 cm, then back); square 50 cm sides x 3 laps. Each starts at its own spot on the 122 x 122 cm board (start_x/y_cm on the sheet): straight (10, 61), L (40, 80), square (35, 35), robot centre, facing +x |
 | Dependent | end position error, along and across the start heading | cm, tape |
 | Dependent | end heading error | deg, tape |
 | Logged | every sensor, 50 times a second (RAW): wheel angles and speeds, robot speed, odometry pose, accelerometer, gyro, IMU angles, 5-zone distance sensor, top/bottom distance, line sensors, battery, charging | robot log |
