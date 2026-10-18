@@ -4,22 +4,25 @@ The running record of every experiment. Each row links to its full record.
 Units: cm and degrees throughout. Ground truth: tape measure (see E0), and
 from E4 on the overhead camera once it agrees with the tape.
 
-Objective: how much adding sensors improves an Alvik's locational accuracy.
-Core result: E6 (camera-corrected) against E1 (odometry only), against the
-proposal target of under 5 cm.
+Objective: how much merging several imperfect sensors improves an Alvik's
+locational accuracy, and whether it holds up when sensors fail. Our own test
+list T0-T9 replaces the original E1-E8 (reasons in the plan-changes note); the
+first two records keep their E00/E01 folder names.
 
-| Exp | Week | Title | Status | Headline result |
+| Test | Week | Title | Status | Headline result |
 | --- | --- | --- | --- | --- |
-| [E0](E00-measurement-check/) | 5 (Oct 12-18) | Measurement check (tape rig) | planned | |
-| [E1](E01-baseline-dataset/) | 5 (Oct 17-18) | Baseline data set: odometry-only accuracy, plus every sensor logged and filmed for fusion replay | planned | |
-| [E1b](E01b-low-battery/) | 5 (Oct 18) | Low battery: Right's E1 routes at low charge, paired with its full-charge E1 runs | planned | |
-| E2 | 6 (Oct 19-25) | Lab system baseline | planned | |
-| E3 | 7 (Oct 26-Nov 1) | Communication baseline | planned | |
-| E4 | 8 (Nov 2-8) | AprilTag precision, static | planned | |
-| E5 | 9 (Nov 9-15) | AprilTag tracking, moving | planned | |
-| E6 | 10 (Nov 16-22) | Alvik with camera corrections | planned | |
-| E7 | 11 (Nov 23-29) | Speed vs. accuracy | planned | |
-| E8 | 12 (Nov 30-Dec 6) | Multi-robot coordination | planned | |
+| [T0](E00-measurement-check/) | 5 (Oct 18) | Reference check (tape repeatability; also calibrates the camera) | planned | |
+| [T1](E01-baseline-dataset/) | 5-6 (Oct 18-19) | Baseline data set: 36 runs, every sensor logged and filmed | planned | |
+| [E1b](E01b-low-battery/) | 5 (Oct 18) | Low battery: Right's routes at low charge, paired with its full-charge T1 runs | planned | |
+| T2 | 6 | Each sensor's own errors (camera included) | planned | |
+| T3 | 7 | Fusion gain: every sensor combination on T1 | planned | |
+| T4 | 8 | Failures: sensors off, blocked, late; robot picked up | planned | |
+| T5 | 6-8 | Delay budget: WiFi, camera, processing | planned | |
+| T6 | 8 | Difficult scenes: floors, lighting, hands, look-alikes | planned | |
+| T7 | 9 | Several robots: identity and tracking | planned | |
+| Dock | 10 | Docking task: planned routes to boards, 1 cm stops | planned | |
+| T8 | 11 | Speed vs accuracy, with and without fusion | planned | |
+| T9 | 11-12 | Comparison with the lab's AprilTag system | planned | |
 
 Start a new record by copying [TEMPLATE.md](TEMPLATE.md) into a folder
 `E<nn>-<name>/README.md`, and fill in everything above Results before the
