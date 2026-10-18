@@ -111,7 +111,7 @@ def make_handler(latest):
     return Handler
 
 
-def open_camera(device, width, height, fps):
+def open_camera(device, width, height, fps, buffers=4):
     src = int(device) if str(device).isdigit() else device
     cap = cv2.VideoCapture(src, cv2.CAP_V4L2) if isinstance(src, int) else cv2.VideoCapture(src)
     if isinstance(src, int):
@@ -119,9 +119,13 @@ def open_camera(device, width, height, fps):
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
         cap.set(cv2.CAP_PROP_FPS, fps)
-        # Keep at most one frame waiting in the driver, so t_wall (stamped when
-        # we receive the frame) isn't late by a varying number of frames.
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        # Driver buffers. One buffer would keep frames fresh, but on many USB
+        # webcams it halves the frame rate or worse (the camera waits for the
+        # buffer to come back): measured 12.5 fps instead of 30 on the Vitade.
+        # With the recorder keeping up, frames don't queue anyway, and each
+        # frame's own driver timestamp is logged (cam_ms) to check.
+        if buffers:
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, buffers)
     if not cap.isOpened():
         sys.exit(f"Could not open camera {device}. Check it with: v4l2-ctl --list-devices")
     return cap
@@ -393,13 +397,20 @@ def apply_controls(cap, device, exposure="lock", focus="lock", wb="lock", warmup
             c.warnings.append(f"sharpness dropped {a['sharpness']} -> {b['sharpness']} when locking focus; "
                               "set --focus by hand (see README)")
     if manual_exposure and fps and fps_check_s:
+        try:
+            exp_now = float(rep["after"].get("exposure"))
+        except (TypeError, ValueError):
+            exp_now = None
         n, secs, got = measure_fps(cap, fps_check_s, now)
         ok = got >= 0.9 * fps
         rep["fps_check"] = dict(requested=fps, measured=round(got, 2), frames=n, seconds=round(secs, 2), ok=ok)
         if not ok:
             c.warnings.append(f"FRAME RATE TOO LOW: {got:.1f} fps measured over {secs:.1f} s after setting the "
-                              f"exposure, {fps} fps requested. Timing and blink codes need the full rate: "
-                              f"lower --exposure (at most {cap_exp:.0f}) or add light.")
+                              f"exposure, {fps} fps requested. Timing and blink codes need the full rate. "
+                              + (f"Lower --exposure (at most {cap_exp:.0f}) or add light."
+                                 if exp_now is not None and cap_exp and exp_now > 0.9 * cap_exp else
+                                 "The exposure isn't the cause (it fits in a frame): try --buffers 4, another "
+                                 "USB port, or check the Pi isn't overloaded (top)."))
             log("\n" + "!" * 78 + "\n  ! " + c.warnings[-1] + "\n" + "!" * 78)
     rep["steps"], rep["warnings"] = c.steps, c.warnings
     if c.v4l2 is not None:
@@ -430,6 +441,7 @@ def main():
     ap.add_argument("--width", type=int, default=640)
     ap.add_argument("--height", type=int, default=480)
     ap.add_argument("--fps", type=int, default=30)
+    ap.add_argument("--buffers", type=int, default=4, help="driver frame buffers (1 can halve the frame rate)")
     ap.add_argument("--label", default="", help="added to the folder name, e.g. E1")
     ap.add_argument("--out", default=os.path.expanduser("~/recordings"))
     ap.add_argument("--port", type=int, default=8000, help="preview web page port (0 = no preview)")
@@ -444,7 +456,7 @@ def main():
     ap.add_argument("--no-lock", dest="lock", action="store_false", help="leave the camera's automatics alone")
     args = ap.parse_args()
 
-    cap = open_camera(args.device, args.width, args.height, args.fps)
+    cap = open_camera(args.device, args.width, args.height, args.fps, args.buffers)
     dflt = "lock" if args.lock else None
     controls = apply_controls(cap, args.device, args.exposure if args.exposure is not None else dflt,
                               args.focus if args.focus is not None else dflt,
