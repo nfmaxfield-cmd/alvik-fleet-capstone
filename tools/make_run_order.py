@@ -62,12 +62,18 @@ EXPERIMENTS["E0B"] = ("E00b-nudge-check", ["nudge2", "nudge5"],
 #   lift    lift it once after ~5 s and set it down (the run must stop: lifted)
 #   tofNN   front face NN cm from a board standing across the floor at
 #           x = 110 cm, 10 s still (front distance sensor noise and bias)
+#   edge_in / edge_over  the line sensors under the robot's nose 3.5 cm inside
+#           an open edge of the plywood (no board there) / 1 cm past it,
+#           10 s still: can the line sensors see the edge?
+#   edge_tape  the line sensors on the painter's tape along the x axis: tape
+#           must not look like the edge
 # Every row sets every setting it changes; switch the robots off and on
 # after E0c so all settings go back to normal.
 _STILL = "set start_nudge_cm 0 / set straight_rpm 1 / set straight_cm 0 / "
 TOF_BOARD_X = 110.0
 TOF_D = (10, 20, 40, 60, 80, 100)
-EXPERIMENTS["E0C"] = ("E00c-rig-measurements", ["warmup", "still60", "lift"] + [f"tof{d}" for d in TOF_D],
+EXPERIMENTS["E0C"] = ("E00c-rig-measurements", ["warmup", "still60", "lift"] + [f"tof{d}" for d in TOF_D]
+                      + ["edge_in", "edge_over", "edge_tape"],
                       lambda lv: _STILL + {
                           "warmup": "set settle_ms 600000 / set safe_front_cm 7 / run straight",
                           "still60": "set settle_ms 60000 / set safe_front_cm 7 / run straight",
@@ -82,6 +88,10 @@ START = {"straight100": (10.0, 61.0, 0.0),   # ends near x = 110 (front face ~11
          "nudge5": (40.0, 80.0, 0.0),
          "warmup": (40.0, 80.0, 0.0), "still60": (40.0, 80.0, 0.0), "lift": (40.0, 80.0, 0.0)}
 START.update({f"tof{d}": (round(TOF_BOARD_X - d - 4.76, 2), 61.0, 0.0) for d in TOF_D})   # robot centre 4.76 cm behind its front face
+# Line sensors sit 3.5 cm ahead of the wheel axle (grid_center_cm). Far x edge at 122 cm.
+START.update({"edge_in": (122.0 - 3.5 - 3.5, 61.0, 0.0),     # sensors 3.5 cm inside the edge
+              "edge_over": (122.0 + 1.0 - 3.5, 61.0, 0.0),   # sensors 1 cm past it; wheels 2.5 cm inside
+              "edge_tape": (61.0, 3.5 + 1.0, -90.0)})        # facing -y, sensors on the x-axis tape about 1 cm in
 
 # E1b: the same runs as E1 at low battery, for a paired comparison with the
 # same robot's E1 runs at full battery.
