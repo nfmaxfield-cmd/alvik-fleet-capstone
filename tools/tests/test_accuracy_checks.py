@@ -258,3 +258,36 @@ def test_real_camera_preset_loads(tmp_path):
     subprocess.run([sys.executable, os.path.join(TOOLS, "sim", "simulate.py"), "--config", ac.SIM_PRESET,
                     "--write-config", str(out)], check=True, capture_output=True)
     assert json.load(open(out))["camera"]["fps"] == 25.0
+
+
+def test_identity_counts_no_room_calibrations_separately():
+    """A calibration that skipped its roll for lack of room has no roll to name: it is its own state
+    ("limited (no room)"), not an unreadable run, so it can't turn the check into CHECK."""
+    def row(identity, outcome=""):
+        return dict(identity=identity, outcome=outcome)
+    cam = SimpleNamespace(calib_rows=[row("agree"), row("agree"), row("agree"),
+                                      row("blink code only (no roll)", "limited (no room)"),
+                                      row("blink code only (no roll)", "limited (no room)")])
+    tb = ac.Table()
+    ac.check_identity(tb, cam)
+    r = [x for x in tb.rows if x["id"] == "11"][-1]
+    assert r["verdict"] == ac.PASS, r
+    assert "0 not readable" in r["result"] and "2 calibration(s) limited (no room" in r["result"]
+    # the same rows without the outcome column (older calib.py output) still count as not readable
+    cam.calib_rows = [row("agree"), row("agree"), row("agree"), row("blink code only (no roll)"),
+                      row("blink code only (no roll)")]
+    tb = ac.Table()
+    ac.check_identity(tb, cam)
+    assert [x for x in tb.rows if x["id"] == "11"][-1]["verdict"] == ac.CHECK
+
+
+def test_run_sheet_reads_the_calib_look_skip_columns():
+    import run_sheet as rs
+    import session_checks as sc
+    w = rs.RunWatcher()
+    vals = "AF76-1,0,7.2,0.0,0.0,2.1,-1.0,0.0,0.0,no_room,2.1;-1.0;-1.0;-1.0;-1.0;-1.0;-1.0;-1.0,,skipped,skipped,no room"
+    w("Left", "D", "CALIB_LOOK", vals.split(","))
+    look = w.looks["AF76-1"]
+    assert (look["spin"], look["roll_step"], look["reason"]) == ("skipped", "skipped", "no room")
+    assert sc.calib_outcome("done", look) == sc.CALIB_LIMITED
+    assert sc.calib_outcome("failed:spin timed out", look) == sc.CALIB_FAILED

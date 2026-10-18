@@ -17,9 +17,10 @@ Inputs:
                 (detector output, the simulator's camera_detections.csv, ...)
   --video-offset  video clock minus laptop clock, s (default: from the sync flashes)
 
-For every calib run (RAW step 2 = roll forward calib_roll_cm, 15 cm; 3 cm
-before firmware 2026-10-18b) and every start nudge (RAW step -1 = roll
-forward 2 cm and back) it reports:
+For every calib run (the forward roll: RAW step 9 from firmware 2026-10-18c, which
+looks around first and rolls up to calib_roll_cm where it finds room, the length in its
+CALIB_LOOK record; step 2 before, 15 cm in 2026-10-18b, 3 cm earlier) and every start
+nudge (RAW step -1 = roll forward 2 cm and back) it reports:
   - who: the robot named by the log (the robot whose RAW shows the roll at
     that moment) and the robot named by the blink code of the light that
     moved at that moment, and whether they agree
@@ -29,7 +30,7 @@ forward 2 cm and back) it reports:
     that best lines the two up; the floor does not move, the robot does)
   - LED offset: where the light (midpoint of the two LEDs) sits on the robot,
     forward and left of the robot's centre, in px and cm (needs --detections)
-and for a calib run of firmware 2026-10-18b or later (steps: docs/data-formats.md):
+and for a calib run of firmware 2026-10-18b or later (steps: docs/data-formats.md; STEPS_* below):
   - heading from the forward AND back roll, each corrected for the roll's
     curve (half the heading change the gyro saw during it), combined
   - wheel distance scale: camera distance / wheel odometry distance
@@ -57,6 +58,7 @@ sys.path.insert(0, TOOLS)
 sys.path.insert(0, os.path.join(TOOLS, "fusion"))
 sys.path.insert(0, HERE)
 import check_session as cs  # noqa: E402
+import session_checks as sc  # noqa: E402
 import runs as fr  # noqa: E402
 import blink  # noqa: E402
 
@@ -71,7 +73,18 @@ OUT_COLS = ["run", "robot_log", "experiment", "event", "t_video", "robot_blink",
             "wheel_scale_quality", "gyro_bias_dps", "spin1_gyro_deg", "spin1_cam_deg", "spin2_gyro_deg", "spin2_cam_deg",
             "spin_match", "gyro_scale", "gyro_scale_spread", "gyro_scale_trace", "gyro_scale_quality", "spin_centre_x_px", "spin_centre_y_px",
             "led_points", "led_radius_cm", "led_fit_rms_cm", "led_angle_sd_deg", "spin_led_fwd_cm", "spin_led_left_cm",
-            "led_offset_quality", "note"]
+            "led_offset_quality",
+            # calib runs from firmware 2026-10-18c on: what the look-around chose (CALIB_LOOK)
+            "look_result", "look_heading_deg", "look_room_cm", "look_spin", "look_roll", "look_reason",
+            # calib runs: done / limited (no room) / failed (session_checks.calib_outcome; blank for nudges)
+            "outcome", "note"]
+
+SKIPPED_NO_ROOM = "skipped: no room"     # quality of a value the robot was not allowed to measure (not a check)
+
+# RAW step numbers of a calib run, by firmware (docs/data-formats.md "calibration run")
+STEPS_LOOK = dict(blink=1, wiggle=2, pre_spin=3, spin1=4, mid=5, spin2=6, post=7, pre_roll=8, fwd=9, back=10)  # 2026-10-18c+
+STEPS_18B = dict(blink=1, fwd=2, back=3, wiggle=4, pre_spin=5, spin1=6, mid=7, spin2=8, post=9)  # 2026-10-18b
+STEPS_OLD = dict(blink=1, fwd=2, back=3, wiggle=4, post=5)                                        # before
 
 
 def fnum(x, default=float("nan")):
@@ -583,20 +596,33 @@ def centre_near(dets, t0, t1, x, y, rad):
     return float(np.median(dets[m, 1])), float(np.median(dets[m, 2])), int(m.sum())
 
 
-def analyse_event(run, ev, kind, cmd_cm, off, frames, tracks, dets, geo, all_runs, names, S=None, still_ms=None):
+def analyse_event(run, ev, kind, cmd_cm, off, frames, tracks, dets, geo, all_runs, names, S=None, still_ms=None,
+                  steps=None, look=None):
     """One forward roll (and, in a calib run from firmware 2026-10-18b on, the roll back and
-    the spins): returns an output row (dict)."""
+    the spins): returns an output row (dict). steps: the run's RAW step numbers (STEPS_*);
+    look: its CALIB_LOOK record (2026-10-18c+)."""
     row = dict(run=run.run_id, robot_log=run.robot, experiment=run.experiment, event=kind, commanded_cm=cmd_cm)
+    steps = steps or STEPS_OLD
+    if look:
+        row.update(look_result=look.get("result", ""), look_heading_deg=look.get("heading_deg", ""),
+                   look_room_cm=look.get("room_cm", ""))
     notes = []
     S = S or Series(run)
     nmed = 15 if (still_ms or 0) >= 600 else 9      # long stills: median of more frames
+    if kind == "calib" and look and fnum(look.get("roll_cm"), 1.0) <= 0:
+        # 2026-10-18c+: it found no room to roll; the spins can still be measured
+        return analyse_spin_only(run, row, S, steps, off, frames, tracks, dets, geo, names, nmed)
     if ev is None or ev.get("onset") is None:
-        row["note"] = "no forward roll in the wheel log" if ev else f"no RAW step {'2' if kind == 'calib' else '-1'}"
+        row["note"] = "no forward roll in the wheel log" if ev else \
+            f"no RAW step {steps['fwd'] if kind == 'calib' else -1}"
         return row
     v = lambda t: t + off            # laptop -> video clock
     row["t_video"] = round(v(ev["onset"]), 3)
     # still before the roll
-    if kind == "calib":
+    if kind == "calib" and "pre_roll" in steps and S.still(steps["pre_roll"]) is not None:
+        s8 = S.still(steps["pre_roll"])      # 2026-10-18c+: the still after turning to the roll heading
+        r0 = (s8[0], min(s8[1], ev["onset"] - 0.08))
+    elif kind == "calib":
         s1 = [r["t"] for r in run.raw if fnum(r.get("step"), 99) == 1]
         r0 = (s1[0] + 0.3, ev["onset"] - 0.08) if s1 else (ev["onset"] - 1.0, ev["onset"] - 0.08)
     else:
@@ -700,7 +726,8 @@ def analyse_event(run, ev, kind, cmd_cm, off, frames, tracks, dets, geo, all_run
     # 2026-10-18b the stills after the rolls and around the spins); not for start nudges
     bias = float("nan")
     if kind == "calib":
-        bias, b_s = S.bias([still0, pause, S.still(3), S.still(5), S.still(7), S.still(9)])
+        bias, b_s = S.bias([still0, pause] + [S.still(steps[k]) for k in ("back", "pre_spin", "mid", "post")
+                                               if k in steps])
         if b_s < 1.5:
             bias = float("nan")
     d_fwd = S.turned(still0, pause, bias)
@@ -713,7 +740,7 @@ def analyse_event(run, ev, kind, cmd_cm, off, frames, tracks, dets, geo, all_run
     if odo_f > 0.3:
         row["wheel_cm"] = round(odo_f, 3)
     # the roll back (calib runs, firmware 2026-10-18b+: step 3 ends with a still of calib_still_ms)
-    back = S.still(3) if kind == "calib" and still_ms else None
+    back = S.still(steps["back"]) if kind == "calib" and still_ms else None
     if back is not None:
         after, n_after = frames.median(v(back[0]), v(back[1]), kind=0, max_n=nmed)
         res = None
@@ -792,24 +819,28 @@ def analyse_event(run, ev, kind, cmd_cm, off, frames, tracks, dets, geo, all_run
             row["led_left_cm"] = round(-ex * math.sin(h) + ey * math.cos(h), 2)
         else:
             notes.append("no robot-centre detections near the light while still")
-    if kind == "calib" and still_ms and L0 and S.span(6) is not None:
+    if kind == "calib" and still_ms and L0 and "spin1" in steps and S.span(steps["spin1"]) is not None:
         # the pause at the far end of the roll is a picture of the floor where the robot
         # stood (and spins), with the robot 15 cm away: the spin pictures' background
         empty = paus if cmd_cm >= 12 else None
-        analyse_spin(run, S, row, c, L0, h0, still0, bias, off, frames, tracks, dets, geo, nmed, notes, empty=empty)
+        analyse_spin(run, S, row, c, L0, h0, still0, bias, off, frames, tracks, dets, geo, nmed, notes, empty=empty,
+                     steps=steps)
     row["note"] = "; ".join(notes)
     return row
 
 
-def analyse_spin(run, S, row, c, L0, h0, still0, b, off, frames, tracks, dets, geo, nmed, notes, empty=None):
-    """Steps 5-9 of a calib run (2026-10-18b+): spin left, still, spin back right, still.
+def analyse_spin(run, S, row, c, L0, h0, still0, b, off, frames, tracks, dets, geo, nmed, notes, empty=None,
+                 steps=STEPS_18B):
+    """The spins of a calib run (2026-10-18b+): still, spin left, still, spin back right, still
+    (steps 5-9 in 2026-10-18b, 3-7 from 2026-10-18c). h0 None (no roll): no heading, so the
+    light's offset is reported as a radius only.
     Gyro scale: the camera's rotation (whole-robot picture alignment between the stills)
     against the gyro's (bias from the stills taken out). Light offset: the lights circle
     the turning centre; the circle's centre and radius, and where on it the light sits
     relative to the heading, give the light's (forward, left) offset from the turning centre."""
     v = lambda t: t + off
-    s5, s7, s9 = S.still(5), S.still(7), S.still(9)
-    sp6, sp8 = S.span(6), S.span(8)
+    s5, s7, s9 = S.still(steps["pre_spin"]), S.still(steps["mid"]), S.still(steps["post"])
+    sp6, sp8 = S.span(steps["spin1"]), S.span(steps["spin2"])
     if None in (s5, s7, s9, sp6, sp8):
         notes.append("spin steps incomplete in the log")
         return
@@ -829,7 +860,9 @@ def analyse_spin(run, S, row, c, L0, h0, still0, b, off, frames, tracks, dets, g
     pts = []
     for T in tracks.values():
         m = (T["t"] >= v(s5[0])) & (T["t"] <= v(s5[1]))
-        if m.any() and math.hypot(np.median(T["x"][m]) - L0[0], np.median(T["y"][m]) - L0[1]) <= 6 * ppc:
+        # (8 cm: from 2026-10-18c L0 is the light after the turn to the roll heading, which
+        # moves it around the turning centre by up to twice its ~3 cm radius)
+        if m.any() and math.hypot(np.median(T["x"][m]) - L0[0], np.median(T["y"][m]) - L0[1]) <= 8 * ppc:
             rest = (float(np.median(T["x"][m])), float(np.median(T["y"][m])))
     near = rest or L0
     for T in tracks.values():
@@ -868,6 +901,9 @@ def analyse_spin(run, S, row, c, L0, h0, still0, b, off, frames, tracks, dets, g
             centre_px = C0[:2]
             notes.append("spin centre from the robot-centre detections")
         else:
+            if row.get("heading_img_deg") in (None, ""):
+                notes.append("spin centre not found (no light circle, no roll heading)")
+                return
             a = math.radians(row.get("heading_img_deg", 0.0))
             centre_px = (near[0] - 2.75 * ppc * math.cos(a), near[1] + 2.75 * ppc * math.sin(a))
             notes.append("spin centre ASSUMED 2.75 cm behind the light")
@@ -909,6 +945,9 @@ def analyse_spin(run, S, row, c, L0, h0, still0, b, off, frames, tracks, dets, g
         row["gyro_scale"] = round(gs, 5)
         row["gyro_scale_quality"] = "check: first spin only"
     # ---- light offset from the turning centre, in the robot's frame
+    if "_fits" in row and h0 is None:
+        row.pop("_fits")
+        row["led_offset_quality"] = SKIPPED_NO_ROOM + " (no roll, so no heading: radius only)"
     if "_fits" in row:
         fits, F, tl = row.pop("_fits")
         k_scale = gs if not math.isnan(gs) else 1.0
@@ -947,6 +986,77 @@ def analyse_spin(run, S, row, c, L0, h0, still0, b, off, frames, tracks, dets, g
             q for q, bad in (("circle fit rms %.2f cm" % row["led_fit_rms_cm"], row["led_fit_rms_cm"] > 0.3),
                              ("only %d flashes" % row["led_points"], row["led_points"] < 12),
                              ("radius %.1f cm" % r, not 0.5 <= r <= 8)) if bad)
+
+
+def look_roll_cm(run, S, look):
+    """The forward roll's commanded length in a 2026-10-18c+ calib run: its CALIB_LOOK roll_cm;
+    without that record (lost over WiFi), the wheels' own distance over RAW step 9 (the library
+    stops the wheels at the commanded distance by their encoders), else calib_roll_cm."""
+    v = fnum((look or {}).get("roll_cm"))
+    if v == v:
+        return v
+    d = S.odo_dist(S.still(STEPS_LOOK["pre_roll"]), S.still(STEPS_LOOK["fwd"]))
+    if d == d and d > 0.3:
+        return round(d, 1)
+    return run.params.get("calib_roll_cm", 15.0)
+
+
+def analyse_spin_only(run, row, S, steps, off, frames, tracks, dets, geo, names, nmed):
+    """A 2026-10-18c+ calib run that found no room to roll: who (blink code only) and the spins
+    (gyro scale; the light's circle radius, but no offset direction: no roll, no heading)."""
+    v = lambda t: t + off
+    notes = ["no roll (the robot found no room): no heading or wheel scale"]
+    row["heading_quality"] = row["wheel_scale_quality"] = SKIPPED_NO_ROOM     # not measured: blank values
+    s3 = S.still(steps["pre_spin"])
+    if s3 is None:
+        row["note"] = "; ".join(notes + ["no still before the spin in the log"])
+        return row
+    expect = run.robot if run.robot in names.values() else names.get(4, "other")
+    best = None
+    for T in tracks.values():
+        pos = track_position(T, v(s3[0]), v(s3[1]))
+        if pos is None:
+            continue
+        p = T["probs"].get(expect, 1.0 if T["robot"] == expect else 0.0)
+        if best is None or p > best[0]:
+            best = (p, T, pos)
+    if best is None or best[0] < 0.5:
+        row["note"] = "; ".join(notes + ["no blinking light with this robot's code seen before the spin"])
+        return row
+    p, T, pos = best
+    row.update(robot_blink=T["robot"], blink_code=T["code"], blink_score=round(T["score"], 3), blink_p_log=round(p, 3),
+               identity="blink code only (no roll)", light_x_px=round(pos[0], 2), light_y_px=round(pos[1], 2))
+    c = dict(ppc=geo.px_per_cm(pos[0], pos[1]))
+    if "spin1" in steps and S.span(steps["spin1"]) is not None:
+        bias, b_s = S.bias([S.still(steps[k]) for k in ("pre_spin", "mid", "post", "pre_roll")])
+        if b_s < 1.5:
+            bias = float("nan")
+        analyse_spin(run, S, row, c, pos[:2], None, s3, bias, off, frames, tracks, dets, geo, nmed, notes,
+                     empty=None, steps=steps)
+    else:
+        notes.append("no spin either")
+    row["note"] = "; ".join(notes)
+    return row
+
+
+def mark_outcome(row, run, look):
+    """A 2026-10-18c+ calib run's row: its outcome (done / limited (no room) / failed) and, for what
+    the robot skipped for lack of room, quality SKIPPED_NO_ROOM with the values left blank (not
+    measured): neither ok nor a check, since nothing went wrong."""
+    look = look or {}
+    row["look_spin"], row["look_roll"], row["look_reason"] = look.get("spin", ""), look.get("roll", ""), look.get("reason", "")
+    row["outcome"] = sc.calib_outcome(run.result, look)
+    if row["outcome"] != sc.CALIB_LIMITED:
+        return row
+    if look.get("roll") == "skipped" or ("roll" not in look and fnum(look.get("roll_cm"), 1.0) <= 0):
+        for k in ("heading_floor_deg", "heading_img_deg", "wheel_scale"):
+            row[k] = ""
+        row["heading_quality"] = row["wheel_scale_quality"] = SKIPPED_NO_ROOM
+    if look.get("spin") == "skipped":
+        for k in ("gyro_scale", "spin_led_fwd_cm", "spin_led_left_cm"):
+            row[k] = ""
+        row["gyro_scale_quality"] = row["led_offset_quality"] = SKIPPED_NO_ROOM
+    return row
 
 
 def motion_onset(frames, c, ref, t_log_v, t_pause_v):
@@ -1004,6 +1114,7 @@ def main(argv=None):
     if geo.par is None:
         print("note: floor_calibration.json has no camera height/nadir: light positions not corrected for height")
     runs, fits = fr.load_runs(args.session)
+    looks = {r["run"]: r for r in cs.rows(args.session, "calib_look")}     # 2026-10-18c+
     off = args.video_offset
     if off is None:
         vo = fr.video_offset(args.session, args.recording, fits)
@@ -1025,14 +1136,22 @@ def main(argv=None):
         cmd = run.params.get("start_nudge_cm", 2.0)
         cmd = 2.0 if cmd != cmd else cmd
         if run.experiment == "calib":
-            ev = motion_event(run, 2)
             S = Series(run)
             roll = run.params.get("calib_roll_cm", float("nan"))
-            if roll == roll:          # firmware 2026-10-18b+: the long roll, stills, spins
-                still = run.params.get("calib_still_ms", 1000.0)
+            still = run.params.get("calib_still_ms", 1000.0)
+            still = still if still == still else 1000.0
+            if "calib_roll_min_cm" in run.params:     # 2026-10-18c+: spins first, then a roll where there is room
+                look = looks.get(run.run_id)
+                ev = motion_event(run, STEPS_LOOK["fwd"])
+                out.append(mark_outcome(analyse_event(run, ev, "calib", look_roll_cm(run, S, look), off, frames, tracks,
+                                                      dets, geo, runs, names, S=S, still_ms=still, steps=STEPS_LOOK,
+                                                      look=look or {}), run, look))
+            elif roll == roll:          # firmware 2026-10-18b: the long roll, stills, spins
+                ev = motion_event(run, 2)
                 out.append(analyse_event(run, ev, "calib", max(3.0, roll), off, frames, tracks, dets, geo, runs, names,
-                                         S=S, still_ms=still if still == still else 1000.0))
+                                         S=S, still_ms=still, steps=STEPS_18B))
             else:                     # older: a 3 cm roll (max(3, start_nudge_cm)), no spin
+                ev = motion_event(run, 2)
                 out.append(analyse_event(run, ev, "calib", max(3.0, cmd), off, frames, tracks, dets, geo, runs, names,
                                          S=S))
         if any(fnum(r.get("step"), 99) == -1 for r in run.raw):
@@ -1062,6 +1181,11 @@ def print_summary(out):
     ok = sum(1 for r in cal if str(r.get("identity", "")).startswith("agree"))
     bad = sum(1 for r in cal if "DISAGREE" in str(r.get("identity", "")))
     print(f"calibration runs: {len(cal)}, blink code and wheel log agree on {ok}, disagree on {bad}")
+    outc = [r.get("outcome") for r in cal if r.get("outcome")]
+    if outc:
+        print("calibration outcomes: " + ", ".join(f"{outc.count(k)} {k}" for k in
+                                                  (sc.CALIB_DONE, sc.CALIB_LIMITED, sc.CALIB_FAILED))
+              + " (limited = it skipped the spin or roll for lack of room: not a failure)")
     offs = [(r["led_fwd_cm"], r["led_left_cm"]) for r in out if r.get("led_fwd_cm") not in (None, "")]
     if offs:
         print(f"light offset from robot centre (median of {len(offs)}): forward "

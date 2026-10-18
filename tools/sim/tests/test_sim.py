@@ -218,20 +218,29 @@ class CalibAndNudgeChecks:
             self.assertTrue(all(r["yaw_sign"] == "1" for _, r in mine[1:]))
             steps = [int(r["step"]) for r in raw[mine[0][1]["run"]]]
             first = [s for k, s in enumerate(steps) if k == 0 or s != steps[k - 1]]
-            self.assertEqual(first, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], name)
-            # the spins: calib_spin_deg left (step 6), then back right (step 8), by the gyro;
+            self.assertEqual(first, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], name)
+            # the spins: calib_spin_deg left (step 4), then back right (step 6), by the gyro;
             # the front distance zones are logged all the way round
             rows = raw[mine[0][1]["run"]]
             spin = float(next(v for k, v in config.firmware_params() if k == "calib_spin_deg"))
-            for st, sgn in ((6, 1), (8, -1)):
+            for st, sgn in ((4, 1), (6, -1)):
                 seg = [r for r in rows if int(r["step"]) == st]
                 yaw = [float(r["yaw_deg"]) for r in seg]
                 turned = sum(((b - a + 180) % 360) - 180 for a, b in zip(yaw, yaw[1:]))
                 self.assertAlmostEqual(sgn * turned, spin - 1.0, delta=6.0, msg=(name, st))
                 self.assertGreater(len(seg), 400, (name, st))          # ~11 s at 50 rows/s
                 self.assertTrue(all(r["dC_cm"] not in ("", None) for r in seg))
+        # what the look-around chose: open floor in the calibration area, so the full roll
+        looks = {}
+        for path in sorted(os.listdir(os.path.join(self.o, "session"))):
+            if path.startswith("calib_look"):
+                with open(os.path.join(self.o, "session", path), newline="") as f:
+                    looks.update({r["run"]: r for r in csv.DictReader(f)})
         for c in info["calib_runs"]:
             self.assertEqual(c["result"], "done")
+            self.assertIn(c["run"], looks)
+            self.assertEqual(looks[c["run"]]["result"], "roll")
+            self.assertEqual(float(looks[c["run"]]["roll_cm"]), 15.0)
             # put down in view, off the start mark
             self.assertGreater(math.hypot(c["start"][0], c["start"][1]), 15)
 
@@ -428,21 +437,25 @@ class BlinkSessionTests(CalibAndNudgeChecks, unittest.TestCase):
     def test_led_on_follows_code(self):
         """Identity is the flash period, (code + 2) x 100 ms. From camera_truth: the time between
         flash starts (rising edges of led_on) is one period (+-50 ms: 30 fps frames and tick
-        latency) whenever the robot was not blocked in the library between them; a block can
-        only drop flashes or start one late, never add one. The median period names the robot."""
+        latency) whenever the robot was not blocked in the library between them and the camera
+        lost no frame just before either; a block can only drop flashes or start one late, never
+        add one, and a lost frame (camera frame_drop_prob) shows a flash start one frame late. The
+        median period names the robot."""
         info, series = self.lit_series()
         raw = raw_by_run(self.o)
         per_robot = {}
         for run, ser, t_stop in series:
             period = (run["blink_code"] + 2) * 0.1
             gaps = raw_gaps(info, raw[run["run"]], run["robot"])
-            rise_t = [t1 for (t0, p), (t1, q) in zip(ser, ser[1:]) if q and not p]
+            fp = 1.0 / info["config"]["camera"]["fps"]
+            rises = [(t1, t1 - t0 > 1.5 * fp) for (t0, p), (t1, q) in zip(ser, ser[1:]) if q and not p]
+            rise_t = [t for t, _ in rises]
             self.assertGreaterEqual(len(rise_t), 5, run["run"])
             self.assertGreater(rise_t[0] - run["blink_start"], 0.28)          # 300 ms dark first
-            for a, b in zip(rise_t, rise_t[1:]):
+            for (a, lost_a), (b, lost_b) in zip(rises, rises[1:]):
                 d = b - a
                 blocked = any(g0 < b and g1 > a - 0.12 for g0, g1 in gaps)   # a block just before a can start it late
-                if blocked:
+                if blocked or lost_a or lost_b:
                     self.assertGreater(d, period - 0.11, (run["run"], d))
                 else:
                     self.assertAlmostEqual(d, period, delta=0.05, msg=(run["run"], d))

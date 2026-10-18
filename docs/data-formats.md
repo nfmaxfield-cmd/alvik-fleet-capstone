@@ -28,6 +28,7 @@ then the robot's own columns:
 | demo_end.csv | run,robot,route,result,return_err_cm,heading_err_deg,total_ms,a_cm,b_cm,r_cm,battery |
 | survey_leg.csv | run,leg,cmd_cm,driven_cm,end,x_cm,y_cm,th_deg,front_cm,ms: one row per leg of a `survey` run (2026-10-18b+); `end` full / obstacle (stopped early: something within survey_clear_cm in its path) / stopped / timeout; pose = the robot's own (wheels + gyro) in its start frame (0, 0, 0 where it was put down, x ahead, y left) |
 | survey_end.csv | run,result,legs,path_cm,return_cm,x_cm,y_cm,th_deg,total_ms,size_cm,battery: `result` done, done:blocked (a leg ended at an obstacle, then it drove back), failed:..., aborted:...; x,y,th = own pose at the end (0,0,0 = back exactly where it started, by its own reckoning) |
+| calib_look.csv | `calib` runs (2026-10-18c+), one row: run,spun,near_cm,heading_deg,turn_deg,room_cm,cap_cm,live_cm,roll_cm,result,room8,caps,spin,roll,reason: what the look-around saw and chose, and what it skipped for lack of room (see "Calibration look-around" and "Calibration outcomes" below) |
 | step.csv | `follow` runs: run,id,state,ms,x_cm,y_cm,th_deg,front_cm,info (see "Step follower" below) |
 | edge.csv | plywood edge guard (firmware 2026-10-18b+, only with `safe_edge` on; edge.h): run,ms,event,lineL,lineC,lineR,baseL,baseC,baseR,dbot_cm,info. `event` base = the line sensors' plywood level learned at the start of the run (base* = each sensor's level; info says when a sensor on tape took the others' level), nobase = it could not be learned (info: all three on tape, or the robot moved too soon): the line cue is off for that run, trip = the guard stopped the robot (info: line sensors / bottom zone; RUNEND says stopped:plywood edge ahead). line* and dbot_cm are the readings at that moment. Settings: safe_edge (0 off, 1 line sensors, 2 bottom zone, 3 both), edge_dir, edge_thr, edge_max, edge_n, edge_learn_ms, edge_min_rpm, edge_bot_cm, edge_bot_ms (params.h help; tools/edge_check.py recommends them from the E0c edge rows) |
 | follow.csv | `follow` runs, follow_log_hz (10) a second: run,ms,step_id,state,queued,last_done,last_failed,x_cm,y_cm,th_deg,pos_sd_cm,th_sd_deg,fixes_used,fixes_rejected,front_cm,travel_cm,quiet_ms (see "Step follower") |
@@ -76,21 +77,39 @@ Notes:
 - RAW `x_cm,y_cm,th_deg` are the robot's own wheel odometry, reset to 0 at the
   start of straight and demo runs. `step` counts completed route steps;
   -1 = the start nudge (2026-10-17e+). In a `calib` run (firmware
-  2026-10-18b+; tools/blink/calib.py reads each step):
+  2026-10-18c+; tools/blink/calib.py reads each step) the robot looks
+  around first and rolls where it found room (firmware look.h):
 
   | step | what the robot does | what it is for |
   | --- | --- | --- |
-  | 1 | stands still blinking its code, `calib_blink_ms` (3 s) | who is who (blink code); gyro drift |
-  | 2 | `move(+calib_roll_cm)` (15 cm), then still `calib_still_ms` (1 s) | heading (direction of the roll on video, gyro-corrected for any curve), wheel distance scale (camera cm / odometry cm) |
-  | 3 | `move(-calib_roll_cm)`, then still `calib_still_ms` | the same measured the other way (heading spread, second wheel scale) |
-  | 4 | compass wiggle (`calibrateYawSign(true)`, ~1.2 s) | gyro sign (RUNINFO yaw_sign of later runs) |
-  | 5 | still `calib_still_ms` | gyro drift; the camera's picture before the spin |
-  | 6 | spin left `calib_spin_deg` (720 = two turns) at `calib_spin_rpm` (15, ~34 deg/s, ~22 s), counted by the gyro; front stop off | gyro scale (camera rotation / gyro rotation), light offset (the lights circle the turning centre), front sensor sweep: `dL_cm..dR_cm` at `raw_hz` (50/s; the sensor itself updates ~15/s, so every frame is logged, ~2.3 deg apart) |
-  | 7 | still `calib_still_ms` | picture between the spins; gyro drift |
-  | 8 | spin right `calib_spin_deg` back | the same the other way (gyro drift cancels in the pair) |
-  | 9 | still `calib_still_ms` (300 ms when `calib_spin_deg` is 0, which skips 5-8) | picture after; gyro drift |
+  | 1 | stands still blinking its code, `calib_blink_ms` (3 s) | who is who (blink code); gyro drift; front view (anything inside its spin circle?) |
+  | 2 | compass wiggle (`calibrateYawSign(true)`, ~1.2 s) | gyro sign (RUNINFO yaw_sign of later runs) |
+  | 3 | still `calib_still_ms` (1 s) | gyro drift; the camera's picture before the spin; front view again |
+  | 4 | spin left `calib_spin_deg` (720 = two turns) at `calib_spin_rpm` (15, ~34 deg/s, ~22 s), counted by the gyro | gyro scale (camera rotation / gyro rotation), light offset (the lights circle the turning centre), the front sensor's sweep: where there is room to roll (`dL_cm..dR_cm`, `dtop_cm` at `raw_hz`) |
+  | 5 | still `calib_still_ms` | picture between the spins; gyro drift |
+  | 6 | spin right `calib_spin_deg` back | the same the other way (gyro drift cancels in the pair) |
+  | 7 | still `calib_still_ms` | picture after the spins; gyro drift |
+  | 8 | turns to the roll heading it chose (IMU turn; none if it already faces it), then still `calib_still_ms` | the picture before the roll; the front view along the lane is checked once more |
+  | 9 | `move(+roll_cm)` (CALIB_LOOK `roll_cm`, up to `calib_roll_cm` 15), then still `calib_still_ms` | heading (direction of the roll on video, gyro-corrected for any curve), wheel distance scale (camera cm / odometry cm) |
+  | 10 | `move(-roll_cm)`, then still `calib_still_ms` | the same measured the other way (heading spread, second wheel scale) |
 
-  About 60 s from RUNINFO to RUNEND with the defaults. Before 2026-10-18b:
+  4-7 are skipped when `calib_spin_deg` is 0 or something is within
+  `calib_spin_r_cm` (8) of the turning centre in steps 1-3 (then it knows
+  only the view straight ahead); 9-10 are skipped when there is no room to
+  roll. Skipping for lack of room is not a failure: the run still ends
+  `done`, CALIB_LOOK's spin / roll / reason columns say what was skipped,
+  and the tools count it as "limited (no room)" (see "Calibration
+  outcomes"). The front stop (`safe_front_cm`) is on only during 9 and 10.
+  With the plywood edge guard on (`safe_edge`), the forward roll (9) stops
+  at an open edge the front sensor can't see (RUNEND
+  `stopped:plywood edge ahead`, no roll back); the spins, the turn in 8 and
+  the roll back are not guarded. About 62-65 s from RUNINFO to RUNEND with
+  the defaults and a roll (the turn in step 8 takes 0-3 s; the 1 s
+  `settle_end_ms` still at the end included), about 54 s without a roll.
+  Firmware 2026-10-18b (rolled first, straight ahead): 1 blinking still,
+  2 `move(+calib_roll_cm)` + still, 3 back + still, 4 compass wiggle, 5
+  still, 6 spin left, 7 still, 8 spin right, 9 still (`calib_spin_deg` 0
+  skipped 5-8). Before 2026-10-18b:
   1 blinking still, 2 roll max(3, `start_nudge_cm`) forward, 3 back (300 ms
   pauses), 4 compass wiggle, 5 300 ms settling. In a `survey` run
   (2026-10-18b+): the leg number (1, 2, ...), legs + 1 = the drive back to the
@@ -116,6 +135,65 @@ Notes:
   hardware: az about 1 at rest). yaw_deg: the IMU's fused yaw.
 - Wheel angles (wl_deg, wr_deg) are cumulative degrees; distance = angle/360 x
   2 pi r with wheel radius r (about 1.7 cm, to be measured).
+
+### Calibration look-around (`calib_look.csv`, firmware 2026-10-18c+)
+
+While it spins (RAW steps 4 and 6) the robot turns every front reading (the
+five zones at +22..-22 deg and the top zone straight ahead, `tof_ahead_cm`
+4.5 cm ahead of the axle) into a point around its turning centre and keeps the
+nearest point per 3 deg. For each heading, the room is the distance from the
+sensor to the nearest point inside the robot's lane (`path_half_cm` either
+side of its centre line); the roll that fits is
+min(`calib_roll_cm`, room - `safe_front_cm` - `calib_margin_cm`, laptop cap).
+It picks the middle of the widest stretch of headings with room for the full
+roll (straight ahead if every heading has room), else the heading with the
+longest roll that fits; it does not roll if that is under
+`calib_roll_min_cm` (5). It keeps the nearest of many noisy readings per
+direction, and a zone reports the nearest thing across its ~11 deg, so the
+room comes out short of the truth, never long: in the simulator (sensor
+noise sd ~0.8 cm at 30 cm) 2-3.5 cm short, 0.25 cm without noise.
+Headings are relative to the way the robot faced at step 3 (after the
+wiggle, within a few degrees of where it was put down), left positive.
+
+| column | meaning |
+| --- | --- |
+| spun | 1 = it spun (steps 4-7), 0 = it did not (`calib_spin_deg` 0, or something inside its spin circle) |
+| near_cm | nearest point seen in steps 1-3, cm from the turning centre (0 = none); under `calib_spin_r_cm` = no spin |
+| heading_deg | the roll heading it chose, relative (see above) |
+| turn_deg | how far it turned in step 8 to face it, by the gyro (0 = no roll, or already facing it) |
+| room_cm | room at that heading, cm ahead of the sensor (999 = nothing seen in the lane) |
+| cap_cm | the laptop's cap at that heading (-1 = none) |
+| live_cm | after the turn: nearest thing in the lane by the live front view during step 8's still (0 = nothing in range) |
+| roll_cm | the roll it made (0 = none) |
+| result | `roll` (full roll), `short` (less room: shorter roll), `no_room` (no heading had room for `calib_roll_min_cm`), `no_room_after_turn` (the live view after the turn had less room than the sweep) |
+| room8 | room at 0, 45, ..., 315 deg, `;` between (-1 = not seen) |
+| caps | the laptop's caps used, `deg:cm` with `;` between (empty = none) |
+| spin | `done` (it spun), `skipped` (something inside its spin circle: no room to spin), `off` (`calib_spin_deg` 0) |
+| roll | `full`, `short` (less room: a shorter roll) or `skipped` (no room to roll in any direction, or after the turn) |
+| reason | `no room` when the spin or the roll was skipped for lack of room, else empty |
+
+### Calibration outcomes (three states)
+
+Every calibration run ends in one of three states (tools/session_checks.py
+`calib_outcome()`, used by run_sheet.py, check_session.py, tools/blink/calib.py,
+accuracy_checks.py and tools/fleet/run_plan.py):
+
+| outcome | when | what it means |
+| --- | --- | --- |
+| `done` | RUNEND `done`, CALIB_LOOK `reason` empty | everything it tries was measured |
+| `limited (no room)` | RUNEND `done`, CALIB_LOOK `reason` = `no room` (spin and/or roll `skipped`) | NOT a failure: the robot was not allowed to spin or roll there. What it did is kept (blink code, compass sign, and the spins or the roll, whichever it made); the rest comes from the camera, later runs or a later calibration. calibration_results.csv leaves those values blank with quality `skipped: no room`; run_sheet.py offers `r` to move it and redo, Enter to go on |
+| `failed` | RUNEND `failed:...` or `stopped:...` (a stop command, cancel button, lifted, plywood edge), or no RUNEND | it did not finish: calibrate again |
+
+Logs from before the spin / roll / reason columns: CALIB_LOOK result
+`no_room` or `no_room_after_turn` with RUNEND `done` counts as limited.
+
+Laptop caps (the front sensor cannot see an open plywood edge): the console
+command `set calib_dir_limits <deg> <cm> [<deg> <cm> ...]` (up to 8 pairs;
+`:` or `,` may separate them) caps the roll to `cm` for headings within
+22.5 deg of `deg` (relative, as above; the smaller cap where two overlap;
+headings no pair covers are not capped). They apply to the next calibration
+run only, then are cleared; `set calib_dir_limits off` clears them sooner and
+`get calib_dir_limits` shows them. Off unless sent.
 
 ## Camera recording (`~/recordings/<date-time>_<label>/`, written by tools/pi/camrec.py)
 
@@ -306,8 +384,11 @@ others_moving,lights_moved,onset_diff_ms,heading_img_deg,heading_floor_deg,headi
 moved_px,moved_cm,commanded_cm,motion_quality,det_heading_floor_deg,light_x_px,light_y_px,
 centre_x_px,centre_y_px,led_fwd_px,led_left_px,led_fwd_cm,led_left_cm,note
 
-- One row per forward roll: `event` calib (RAW step 2 of a calib run) or
-  nudge (RAW step -1, the start nudge). `t_video`: wheels start, video clock.
+- One row per calib run and per forward roll: `event` calib (the forward
+  roll of a calib run: RAW step 9 from 2026-10-18c, step 2 before; a
+  2026-10-18c run that found no room to roll still gets a row, with the spin
+  results, identity from the blink code only and `note` saying so) or nudge
+  (RAW step -1, the start nudge). `t_video`: wheels start, video clock.
 - `identity`: agree / DISAGREE between the blink code of the light that moved
   and the robot whose RAW log shows the roll then (`code not readable` if the
   light was not named); `blink_p_log`: the blink probability for that robot.
@@ -323,13 +404,22 @@ centre_x_px,centre_y_px,led_fwd_px,led_left_px,led_fwd_cm,led_left_cm,note
   spin1_gyro_deg, spin1_cam_deg, spin2_gyro_deg, spin2_cam_deg, spin_match,
   gyro_scale, gyro_scale_spread, gyro_scale_trace, gyro_scale_quality, spin_centre_x_px,
   spin_centre_y_px, led_points, led_radius_cm, led_fit_rms_cm,
-  led_angle_sd_deg, spin_led_fwd_cm, spin_led_left_cm, led_offset_quality.
+  led_angle_sd_deg, spin_led_fwd_cm, spin_led_left_cm, led_offset_quality;
+  from 2026-10-18c also look_result, look_heading_deg, look_room_cm,
+  look_spin, look_roll, look_reason (its CALIB_LOOK result, heading_deg,
+  room_cm, spin, roll, reason) and `outcome` (`done`, `limited (no room)` or
+  `failed`: "Calibration outcomes" above). `commanded_cm` is then the roll
+  it made (CALIB_LOOK roll_cm). What the robot skipped for lack of room is
+  left blank (not measured) with quality `skipped: no room`: no roll =
+  heading and wheel scale (and the light's offset has no direction, no
+  heading: led_radius_cm only); no spin = gyro scale and the light's offset.
   `heading_floor_deg` is then the heading the robot stood at before the roll
   (forward and back roll combined); `wheel_scale` = camera cm / wheel
   odometry cm (multiply odometry distances by it); `gyro_scale` = camera
   degrees / gyro degrees (multiply gyro turns by it); `spin_led_*` = the
   light's offset from the turning centre (the wheel-axle midpoint, the point
-  the robot's pose refers to). Each `*_quality` is `ok` or `check: <why>`.
+  the robot's pose refers to). Each `*_quality` is `ok`, `check: <why>`, or
+  `skipped: no room` (not measured, and not a problem).
   Column details and thresholds: tools/blink/README.md.
 
 ## Fleet map (`map.json`, written by tools/fleet/app.py)

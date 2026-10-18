@@ -104,21 +104,35 @@ speed control (`straight_rpm 0`) or both wheels at a set rpm.
 
 **Before any run you'll measure with a tape:** send `calibrate` first, with
 the robot in the camera's view but off its mark. This is a logged calibration
-run (about 60 s from firmware 2026-10-18b; about 10 s before): the robot
-stands still blinking its own light code (who is who), rolls `calib_roll_cm`
-(15 cm) forward and back (which way it faces, and how far its wheels really
-carry it, both seen by the camera), wiggles to check its compass direction,
-then spins slowly twice around to the left and twice back (`calib_spin_deg`
-720, `calib_spin_rpm` 15: the gyro's scale, where its lights sit relative to
-its turning centre, and a sweep of the front distance sensor across any
-boards in range), with `calib_still_ms` (1 s) still periods in between for
-the gyro's drift. It needs a clear 32 cm (12 5/8") lane ahead, counting its
-own body (15 cm roll + 7 cm stop distance + 10 cm robot), and a 25 cm
-(9 13/16") circle around it. tools/blink/calib.py reads all of it from the
-video and the log (calibration_results.csv). It doesn't end exactly where it
-started, so place the robot on its mark afterwards. Turn, grid, demo
-and straight runs then refuse to start until a robot has been calibrated since
-power-on (run_sheet.py does this for you).
+run (about 65 s from firmware 2026-10-18c, 60 s in 2026-10-18b, 10 s before): the robot
+stands still blinking its own light code (who is who), wiggles to check its
+compass direction, then spins slowly twice around to the left and twice back
+(`calib_spin_deg` 720, `calib_spin_rpm` 15: the gyro's scale, where its lights
+sit relative to its turning centre, and a sweep of the front distance sensor
+all the way round). From firmware 2026-10-18c it uses that sweep to choose
+where to roll: it turns to the direction with room and rolls up to
+`calib_roll_cm` (15 cm) forward and back there (which way it faces, and how far
+its wheels really carry it, both seen by the camera), shorter if there is less
+room, not at all if no direction has room for `calib_roll_min_cm` (5 cm); the
+CALIB_LOOK record says what it chose. `calib_still_ms` (1 s) still periods
+come in between for the gyro's drift. It needs a 25 cm (9 13/16") circle
+around it to spin (it won't spin if something is within `calib_spin_r_cm`,
+8 cm, of its middle) and, for the full roll, 35 cm (13 3/4") of clear floor
+in some direction counted from its back (10 cm robot + 15 cm roll + 7 cm stop
+distance + 3 cm margin). Keep it 25 cm from any open plywood edge: the front
+sensor can't see an edge, so open space past it looks like room (the laptop
+can cap the roll per direction with `set calib_dir_limits`, for the camera
+map later; with the edge guard on, `safe_edge`, its forward roll stops at an
+open edge, but the run then ends stopped, without the roll back). If it finds
+no room to roll, or something sits inside its spin circle, it skips that part
+and the run still ends `done`: that is not a failure but a third outcome,
+"limited (no room)" (docs/data-formats.md, "Calibration outcomes").
+run_sheet.py then says what was kept and lets you press r to move it and redo,
+or Enter to continue. tools/blink/calib.py reads all of it from the video and the log
+(calibration_results.csv). It doesn't end exactly where it started, so place
+the robot on its mark afterwards. Turn, grid, demo and straight runs then
+refuse to start until a robot has been calibrated since power-on
+(run_sheet.py does this for you).
 
 **During runs (firmware 2026-10-17e+):** both top lights blink the robot's
 rhythm (one short flash every 0.3 s for Left, 0.4 s Center, 0.5 s Right; firmware 2026-10-18a+) so the camera can find
@@ -227,7 +241,10 @@ on the board, the bottom zone about 9 cm. Limits: backing up and turning in
 place are not guarded, and a robot meeting the edge at a shallow slant (under
 about 45 degrees) puts a wheel over it before the line sensors get there.
 Lap and grid runs on dark tape: dark tape may look like the edge to the line
-cue; use `safe_edge 2` or `0` for those.
+cue; use `safe_edge 2` or `0` for those. The calibration run is guarded only on
+its forward roll (the roll its look-around chose, which can't see an open
+edge): a trip there ends the run `stopped:plywood edge ahead` without the roll
+back; calibrate again further from the edge.
 
 ## Step 1: sensor explorer
 

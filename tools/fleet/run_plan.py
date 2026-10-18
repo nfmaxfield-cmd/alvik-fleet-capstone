@@ -58,6 +58,7 @@ for p in (HERE, TOOLS):
 
 import alvik_console as AC  # noqa: E402
 import fleetmap as FM       # noqa: E402
+import session_checks as SC  # noqa: E402
 import planner as P         # noqa: E402
 
 MIN_FIRMWARE = "2026-10-18b"
@@ -208,6 +209,7 @@ class Bot:
         self.run_exp = None
         self.ended = None       # RUNEND result once its follow run ended
         self.calibrated = None
+        self.calib_look = None  # its last CALIB_LOOK record (spin / roll / reason: what it skipped for lack of room)
         self.said = []
         self.resends = 0
 
@@ -313,6 +315,11 @@ class Coordinator:
                     if b.run_exp == "follow":
                         b.ended = vals[1]
                         self.log("runend", robot=name, result=vals[1])
+                continue
+            if rtype == "CALIB_LOOK" and len(vals) >= 10:
+                b.calib_look = dict(result=vals[9])
+                if len(vals) >= 15:
+                    b.calib_look.update(spin=vals[12], roll=vals[13], reason=vals[14])
                 continue
             if rtype == "STEP" and len(vals) >= 9:
                 self.on_step(b, t, vals)
@@ -903,11 +910,22 @@ def start_robots(coord, link, args, source):
     if args.calibrate:
         for n in names:
             link.send_name(n, "calibrate")
-        print("Calibrating (about 60 s each, all at once: each needs a clear 32 cm lane ahead and a 25 cm circle)...")
+        print("Calibrating (about 65 s each, all at once: each needs a 25 cm circle to spin in and, in some direction, "
+              "35 cm of clear floor from its back to roll)...")
         if not wait_for(lambda: all(getattr(coord.bots[n], "last_runend", (None,))[0] == "calib" for n in names), 120, coord):
             print("  not every calibration run reported its end; carrying on")
         time.sleep(1.0)
         coord.drain()
+        for n in names:
+            b = coord.bots[n]
+            le = getattr(b, "last_runend", None)
+            oc = SC.calib_outcome(le[1] if le and le[0] == "calib" else None, b.calib_look)
+            if oc == SC.CALIB_LIMITED:    # not a failure: it did what the space allowed
+                print("  %s: calibrated, limited (no room): %s" % (n, "; ".join(
+                    w for k, w in (("spin", "no spin (something inside its circle)"), ("roll", "no roll (no room in any "
+                                   "direction)")) if (b.calib_look or {}).get(k) == "skipped") or "no roll"))
+            elif oc == SC.CALIB_FAILED:
+                print("  %s: calibration did not finish (%s)" % (n, le[1] if le and le[0] == "calib" else "no end record"))
         if not args.yes and not args.dry_run:
             input("Calibrated. Put every robot on its start spot, then press Enter: ")
     for n in names:

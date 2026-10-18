@@ -371,6 +371,8 @@ def main(argv=None):
     if not info:
         print("No RUNINFO records here: was the robot running firmware 2026-10-17a or later?")
     ends = {(r["robot"], r["run"]): r for r in rows(S, "runend")}
+    looks = {r["run"]: r for r in rows(S, "calib_look")}     # calibration runs, firmware 2026-10-18c+
+    calib_outcomes = []
     raw = defaultdict(list)
     for r in rows(S, "raw"):
         raw[(r["robot"], r["run"])].append(r)
@@ -413,7 +415,13 @@ def main(argv=None):
         az = st.mean(still) if still else float("nan")
         secs = fnum(e.get("duration_ms")) / 1000 if e else float("nan")
         bat = f"{r['battery']}->{e.get('battery', '?')}%"
-        table.append([r["robot"], r["run"], r["experiment"], r["fw_version"], e.get("result", "no end record"),
+        res = e.get("result", "no end record")
+        if r["experiment"] == "calib":
+            oc = sc.calib_outcome(e.get("result"), looks.get(r["run"]))
+            calib_outcomes.append(oc)
+            if oc == sc.CALIB_LIMITED:
+                res += " (limited: no room)"
+        table.append([r["robot"], r["run"], r["experiment"], r["fw_version"], res,
                       f"{secs:.1f}", bat, f"{got}/{sent}", f"{loss:.1f}%", f"{rate:.0f}", f"{gap:.0f}", f"{az:.2f}"])
         if not e:
             problems.append(f"{key}: no RUNEND record (run still going, or its packet was lost)")
@@ -429,6 +437,10 @@ def main(argv=None):
             print("  " + "  ".join(str(c).ljust(w[i]) for i, c in enumerate(t)))
         print("  az still: vertical acceleration while the robot sits still before moving; about 1.00 means the"
               "\n  accelerometer columns are in g.")
+    if calib_outcomes:
+        print("  calibration runs: " + ", ".join(f"{calib_outcomes.count(k)} {k}" for k in
+                                                (sc.CALIB_DONE, sc.CALIB_LIMITED, sc.CALIB_FAILED))
+              + " (limited: it skipped the spin or the roll for lack of room; not a failure)")
 
     print("\nCLOCKS (robot time -> laptop time)")
     fits = clock_fits(S)

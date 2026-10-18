@@ -1048,11 +1048,16 @@ def check_identity(tb, cam):
         return
     agree = sum(1 for c in rows if c["identity"].lower() == "agree")
     dis = sum(1 for c in rows if "disagree" in c["identity"].lower())
-    unread = len(rows) - agree - dis
+    # calibrations limited by lack of room (no roll to name): their own state, neither read nor unreadable
+    limited = sum(1 for c in rows if c.get("outcome") == cs.sc.CALIB_LIMITED and c["identity"].lower() != "agree"
+                  and "disagree" not in c["identity"].lower())
+    unread = len(rows) - agree - dis - limited
     lo, hi = wilson(dis, agree + dis)
-    verdict = FAIL if dis else (CHECK if unread > 0.2 * len(rows) else PASS)
+    verdict = FAIL if dis else (CHECK if unread > 0.2 * (len(rows) - limited) else PASS)
     tb.add("11", "all runs", f"{dis} wrong of {agree + dis} named rolls (error rate 95% interval {lo * 100:.0f}% to "
-           f"{hi * 100:.0f}%); {unread} not readable", verdict, dis / (agree + dis) if agree + dis else None, agree + dis)
+           f"{hi * 100:.0f}%); {unread} not readable"
+           + (f"; {limited} calibration(s) limited (no room: no roll to name, not counted)" if limited else ""),
+           verdict, dis / (agree + dis) if agree + dis else None, agree + dis)
 
 
 def check_robots(tb, t1):

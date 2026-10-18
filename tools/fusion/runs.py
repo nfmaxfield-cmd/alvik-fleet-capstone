@@ -448,6 +448,7 @@ def load_calib_results(path, offset_s):
                     lf, ll = sf, sl
             out.append(dict(run=(r.get("run") or "").strip(), robot=(r.get("robot_log") or "").strip(),
                             event=(r.get("event") or "").strip(), identity=(r.get("identity") or "").strip(),
+                            outcome=(r.get("outcome") or "").strip(),
                             t=None if math.isnan(tv) else tv - offset_s,
                             heading=None if math.isnan(h) else h,
                             led=None if (math.isnan(lf) or math.isnan(ll)) else (lf, ll)))

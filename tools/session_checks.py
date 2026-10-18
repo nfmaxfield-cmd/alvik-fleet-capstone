@@ -53,6 +53,28 @@ class Result:
         return [self.check, self.scope, self.status, v, self.unit, self.rule, self.detail]
 
 
+# A calibration run's outcome (docs/data-formats.md, "Calibration outcomes"): three states.
+CALIB_DONE = "done"                    # everything it tries was done
+CALIB_LIMITED = "limited (no room)"    # RUNEND done, but the spin and/or the roll were skipped for lack of room
+CALIB_FAILED = "failed"                # RUNEND failed:... or stopped:..., or no RUNEND at all
+
+
+def calib_outcome(result, look=None):
+    """The outcome of a calibration run from its RUNEND result and its CALIB_LOOK record (a dict
+    with the record's column names; None for firmware before 2026-10-18c). Skipping the spin or
+    the roll because there was no room is not a failure: the robot was not allowed to, so it is
+    its own state, CALIB_LIMITED."""
+    if (result or "").strip() != "done":
+        return CALIB_FAILED
+    look = look or {}
+    reason = (look.get("reason") or "").strip()
+    if reason:
+        return CALIB_LIMITED if reason == "no room" else CALIB_DONE
+    if "reason" not in look and (look.get("result") or "").strip() in ("no_room", "no_room_after_turn"):
+        return CALIB_LIMITED               # a CALIB_LOOK without the spin/roll/reason columns
+    return CALIB_DONE
+
+
 def grade(x, limit, fail_factor=2.0):
     """PASS below limit, CHECK below fail_factor x limit, else FAIL (nan: SKIP)."""
     if x is None or x != x:
