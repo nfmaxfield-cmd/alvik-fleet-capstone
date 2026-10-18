@@ -328,7 +328,10 @@ deg, mean of both sessions:
 | + calibrated, consider, fallback (factor graph) | 0.34 / 0.30 / 0.54 | | |
 
 Camera blocked 5 s: 0.21 / 0.43 / 1.10 without, 0.25 / 0.44 / 1.00 with the
-fallback. So: calibrated landmark ranging with consider states halves the
+fallback. Exact sensors and map (session w7e3, wheels 3% off): camera 0.27 / 0.31 /
+1.02; with the calibrated fallback 0.28 / 0.30 / 0.95; camera blocked 20 s
+1.05 / 0.93 / 1.23 -> 0.44 / 0.53 / 0.89; no camera, as before 1.04 / 0.79 /
+1.15, calibrated with consider states 0.51 / 0.60 / 0.91. So: calibrated landmark ranging with consider states halves the
 error whenever the camera is blocked or absent, and as a fallback it matches
 the camera on path and improves heading, but with the camera working it still
 costs 0.05 cm of end error on average (r7: 0.27 vs 0.27; r11: 0.35 vs 0.25),
