@@ -1,6 +1,6 @@
 # E0: Measurement check (tape rig)
 
-Status: planned    Week: 5    Run dates:
+Status: done (pass 1 only)    Week: 5    Run dates:
 
 ## Question
 Is the tape rig precise enough to be the ground truth?
@@ -70,8 +70,42 @@ measurement errors, so one reading's SD = SD(differences) / sqrt(2).
 Sheet: data/measurements.csv (seed 5). Fill the end columns (xf_cm..yr_cm); the start columns stay empty.
 
 ## Results
-`python tools/tape_results.py docs/experiments/E00-measurement-check`
+Run Oct 18, Left switched off, overhead camera recording (25 fps). Readings
+were taken in inches (to 1/32 in) and converted to cm (x 2.54).
+
+| Spot | Front x, y (cm) | Rear x, y (cm) | Front-rear spacing (cm) |
+| --- | --- | --- | --- |
+| P03 | 91.68, 109.06 | 101.20, 108.74 | 9.53 |
+| P04 | 53.66, 11.99 | 63.10, 11.75 | 9.44 |
+| P02 | 91.60, 57.71 | 101.12, 57.71 | 9.52 |
+| P01 | 89.85, 18.65 | 99.54, 18.41 | 9.69 |
+| P09 | 6.11, 107.24 | 15.56, 106.92 | 9.46 |
+| P08 | 6.91, 57.31 | 16.43, 57.31 | 9.52 |
+| P07 | 6.83, 13.26 | 16.27, 13.18 | 9.44 |
+| P06 | 49.85, 103.90 | 59.37, 104.30 | 9.53 |
+| P05 | 50.80, 57.31 | 60.40, 57.79 | 9.61 |
+| P10 | 22.86, 83.66 | 32.31, 83.98 | 9.46 |
+
+Front-rear spacing: mean 9.52 cm, SD 0.08 cm (n = 10); the robot is 9.5 cm
+long. Each spacing combines four readings, so the reading error along the
+robot's length is at most about 0.06 cm per coordinate.
+<sub>SD: standard deviation, the typical distance of a value from the mean.</sub>
+
+P05's rear x was entered as "23 25 32" and read as 23 25/32 in. Every
+placement happened to face -x (heading about 180 deg).
 
 ## Conclusion
+Reading the tape is precise to well under the 0.5 cm rule. Not shown: how
+repeatably a dot is placed sideways at the middle of a face, which sets the
+heading error (1 mm sideways is about 0.6 deg). That is checked instead in
+T1, by comparing each run's tape start heading with the heading the camera
+measures from the start nudge, and later by the camera against the tape.
 
 ## Deviations
+- Pass 2 skipped (Nick's decision, Oct 18): pass 1 was measured with care and
+  time went to T1. Consequence: no direct repeat measurement; the reading
+  precision comes from the spacing check above, and the heading precision from
+  the T1 cross-check.
+- Origin moved to a factory-cut corner (a cut edge may not be straight).
+- Robot face centres found by eye or measured 4.75 cm from a corner; no tape
+  on the robot.
