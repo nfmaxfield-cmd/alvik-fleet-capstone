@@ -1,0 +1,89 @@
+"""End to end on the simulator (about a minute): the camera is moved to a very
+different pose (higher, turned 30 deg, tilted 10 deg, lens distortion) and
+survey mode recovers the mapping from the robot's own logs, the camera track
+and the tape start poses only; still-point mode + simulated axis clicks too.
+Skip with FLOORCAL_FAST=1."""
+import json
+import os
+import subprocess
+import sys
+
+import numpy as np
+import pytest
+
+import calibrate_floor as cf
+import floorcal_runs as fr
+from conftest import TOOLS, floor_error
+from floorcal_sim_check import TrueCam, click_points
+
+pytestmark = pytest.mark.skipif(os.environ.get("FLOORCAL_FAST") == "1", reason="FLOORCAL_FAST=1")
+
+
+@pytest.fixture(scope="module")
+def moved_sim(tmp_path_factory):
+    d = tmp_path_factory.mktemp("sim")
+    cfg = d / "cfg.json"
+    subprocess.run([sys.executable, os.path.join(TOOLS, "sim", "simulate.py"), "--write-config", str(cfg)],
+                   check=True, capture_output=True)
+    c = json.loads(cfg.read_text())
+    c["camera"].update(height_cm=140.0, floor_width_cm=230.0, center_floor_cm=[55.0, 5.0], yaw_deg=30.0,
+                       tilt_deg=[10.0, -6.0], k1=-0.04)
+    cfg.write_text(json.dumps(c))
+    out = d / "out"
+    subprocess.run([sys.executable, os.path.join(TOOLS, "sim", "simulate.py"), "--out", str(out), "--video",
+                    "--seed", "5", "--max-runs", "4", "--fps", "10", "--config", str(cfg)], check=True,
+                   capture_output=True)
+    # video clock offset ~ Pi clock offset + one frame of delivery; survey refines it (prior 0.1 s)
+    return out, c["camera"]["pi_clock_offset_s"] + 1 / 10
+
+
+def test_survey_recovers_moved_camera(moved_sim):
+    sim, off = moved_sim
+    cam = TrueCam(str(sim / "floor_calibration.json"))
+    runs, _ = fr.rn.load_runs(str(sim / "session"), str(sim / "measurements.csv"))
+    pairs = fr.survey_pairs(runs, fr.read_detections(str(sim / "camera_detections.csv")), off, fr.odometry_paths(runs))
+    assert len(pairs) > 300
+    res = fr.fit_survey(pairs, (cam.W, cam.H), height_cm=140.0, k1_mode="off")
+    cal = cf.to_calibration(res)
+    e = floor_error(cal, cam, z=4.0)
+    assert e.mean() < 1.0 and np.percentile(e, 95) < 2.5, (e.mean(), np.percentile(e, 95))
+    assert cal["view_floor_polygon_cm"] and cal["camera"]["height_cm"] == 140.0
+    # without the tape height but with the webcam's focal length (kept from an earlier calibration)
+    res2 = fr.fit_survey(pairs, (cam.W, cam.H), f_px=cam.f, k1_mode="off")
+    assert abs(res2["height_cm"] - 140.0) < 6
+    assert floor_error(cf.to_calibration(res2), cam, z=4.0).mean() < 1.2
+
+
+def test_cli_survey_and_loro(moved_sim, tmp_path):
+    sim, off = moved_sim
+    out = tmp_path / "floor_calibration.json"
+    r = subprocess.run([sys.executable, os.path.join(TOOLS, "calibrate_floor.py"), str(sim / "recording"), "--survey",
+                        "--session", str(sim / "session"), "--sheet", str(sim / "measurements.csv"), "--detections",
+                        str(sim / "camera_detections.csv"), "--video-offset", str(off), "--height-cm", "140",
+                        "--k1", "off", "--out", str(out)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    cal = json.loads(out.read_text())
+    assert cal["fit"]["mode"] == "survey" and len(cal["fit"]["used_runs"]) >= 3
+    import csv
+    rows = list(csv.DictReader(open(tmp_path / "floor_calibration_loro.csv")))
+    assert {r["run_id"] for r in rows} == set(cal["fit"]["used_runs"])
+    for row in rows:
+        held = json.loads((tmp_path / row["calibration"]).read_text())
+        assert row["run_id"] not in held["fit"]["used_runs"]
+        assert float(row["heldout_path_median_cm"]) < 3.0
+
+
+def test_still_points_with_axis_clicks(moved_sim):
+    sim, off = moved_sim
+    cam = TrueCam(str(sim / "floor_calibration.json"))
+    runs, _ = fr.rn.load_runs(str(sim / "session"), str(sim / "measurements.csv"))
+    pts, notes = fr.still_points(runs, fr.read_detections(str(sim / "camera_detections.csv")), off)
+    assert len(pts) >= 6
+    for p in pts:   # every still point is where the true camera sees that tape pose (tape + detector noise)
+        u, v = cam.project(p["x"], p["y"], 4.0)
+        assert np.hypot(u - p["u"], v - p["v"]) < 6, p
+    with pytest.raises(cf.FitError):          # E01 runs all start at the origin: on their own, points on a line
+        cf.fit(pts, (cam.W, cam.H), 140.0, None, "off")
+    axes = [(x, 0.0) for x in range(-10, 141, 10)] + [(0.0, y) for y in range(-40, 61, 10) if y]
+    res = cf.fit(pts + click_points(cam, axes), (cam.W, cam.H), 140.0, None, "auto")
+    assert floor_error(cf.to_calibration(res), cam, z=4.0).mean() < 0.6

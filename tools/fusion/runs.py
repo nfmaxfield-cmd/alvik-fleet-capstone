@@ -16,7 +16,11 @@ Inputs (all but --session optional):
                 video.avi give the video-to-laptop clock offset
   --detections  camera detections: frame,t_wall,x_px,y_px,score[,cls,heading_deg]
                 (from a detector, the simulator, or labels.csv)
-  --calib       floor_calibration.json: {"H_floor_to_px": 3x3} (floor cm -> image px)
+  --calib       floor_calibration.json: {"H_floor_to_px": 3x3} (floor cm -> image px); its lens
+                term k1 (cx, cy, f_px), camera height and nadir are used if present
+  --calib-per-run  floor_calibration_loro.csv from tools/calibrate_floor.py: each run's
+                camera positions use the calibration made WITHOUT that run (so camera
+                vs tape / odometry comparisons aren't circular); runs not listed use --calib
   --video-offset  skip the flash search and use this offset (s, video minus laptop)
 
 Output, per run: <out>/<run_id>/raw.csv (t + every sensor column),
@@ -177,6 +181,33 @@ def load_parallax(path, obj_height_cm=None):
     return (float(nadir[0]), float(nadir[1]), float(hc), float(h))
 
 
+def load_distortion(path):
+    """Radial lens term from floor_calibration.json: (k1, cx, cy, f_px), or None if
+    absent or 0 (then pixels go straight into the homography, as before)."""
+    with open(path) as f:
+        d = json.load(f)
+    k1 = d.get("k1") or 0.0
+    if not k1:
+        return None
+    if any(d.get(k) is None for k in ("cx", "cy", "f_px")):
+        raise ValueError(f"{path}: k1 given without cx, cy, f_px")
+    return (float(k1), float(d["cx"]), float(d["cy"]), float(d["f_px"]))
+
+
+def undistort_px(x, y, dist):
+    """Pixel as the camera recorded it -> pixel the homography expects (inverse of
+    pixel = c + f n (1 + k1 |n|^2), n = (homography pixel - c) / f)."""
+    if not dist:
+        return x, y
+    k1, cx, cy, f = dist
+    dx, dy = (x - cx) / f, (y - cy) / f
+    nx, ny = dx, dy
+    for _ in range(20):
+        fac = 1 + k1 * (nx * nx + ny * ny)
+        nx, ny = dx / fac, dy / fac
+    return cx + f * nx, cy + f * ny
+
+
 def floor_from_top(x, y, parallax):
     """Map a point seen on the robot's top (projected to the floor plane by the
     homography) back to the floor point directly below it."""
@@ -206,13 +237,13 @@ def apply_h(H, x, y):
     return u / w, v / w
 
 
-def heading_img_to_floor(H_px_to_floor, x, y, heading_img_deg):
+def heading_img_to_floor(H_px_to_floor, x, y, heading_img_deg, dist=None):
     """Convert an image-frame heading (0 = image right, CCW on screen) to floor heading."""
     a = math.radians(heading_img_deg)
     d = 3.0   # px step along the heading; screen CCW means towards image -y
     x2, y2 = x + d * math.cos(a), y - d * math.sin(a)
-    fx, fy = apply_h(H_px_to_floor, x, y)
-    gx, gy = apply_h(H_px_to_floor, x2, y2)
+    fx, fy = apply_h(H_px_to_floor, *undistort_px(x, y, dist))
+    gx, gy = apply_h(H_px_to_floor, *undistort_px(x2, y2, dist))
     return math.degrees(math.atan2(gy - fy, gx - fx))
 
 
@@ -242,7 +273,8 @@ def video_offset(session, recording, fits=None):
     return st.mean(offs), (st.stdev(offs) if len(offs) > 1 else float("nan")), len(offs)
 
 
-def load_detections(path, H_px_to_floor, offset_s, labels_ok=("confirmed", "corrected", "auto"), parallax=None):
+def load_detections(path, H_px_to_floor, offset_s, labels_ok=("confirmed", "corrected", "auto"), parallax=None,
+                    dist=None):
     """Camera detections as floor positions on the laptop clock.
     Accepts a detections CSV (frame,t_wall,x_px,y_px,score[,cls,heading_deg])
     or a labels.csv (uses confirmed/corrected alvik rows)."""
@@ -258,9 +290,9 @@ def load_detections(path, H_px_to_floor, offset_s, labels_ok=("confirmed", "corr
             t = fnum(r.get("t_wall"))
             if any(math.isnan(v) for v in (x, y, t)):
                 continue
-            fx, fy = floor_from_top(*apply_h(H_px_to_floor, x, y), parallax)
+            fx, fy = floor_from_top(*apply_h(H_px_to_floor, *undistort_px(x, y, dist)), parallax)
             h = fnum(r.get("heading_deg"))
-            hf = heading_img_to_floor(H_px_to_floor, x, y, h) if not math.isnan(h) else None
+            hf = heading_img_to_floor(H_px_to_floor, x, y, h, dist) if not math.isnan(h) else None
             out.append(dict(t=t - offset_s, frame=int(fnum(r.get("frame"), -1)), x=fx, y=fy,
                             score=fnum(r.get("score"), 1.0), heading=hf))
     out.sort(key=lambda d: d["t"])
@@ -281,12 +313,16 @@ def write_runs(runs, detections, out, extra=None):
             for r in run.raw:
                 w.writerow({**r, "t": f"{r['t']:.4f}"})
         n_det = 0
-        if detections is not None:
+        if isinstance(detections, dict):      # per-run detections (--calib-per-run)
+            dets_run = detections.get(run.run_id, detections.get(None))
+        else:
+            dets_run = detections
+        if dets_run is not None:
             t0, t1 = run.t_start - 1.0, run.t_end + 1.0
             with open(os.path.join(d, "camera.csv"), "w", newline="") as f:
                 w = csv.writer(f)
                 w.writerow(["t", "frame", "x_cm", "y_cm", "score", "heading_deg"])
-                for det in detections:
+                for det in dets_run:
                     if t0 <= det["t"] <= t1:
                         n_det += 1
                         w.writerow([f"{det['t']:.4f}", det["frame"], f"{det['x']:.2f}", f"{det['y']:.2f}",
@@ -317,6 +353,7 @@ def main():
     ap.add_argument("--recording")
     ap.add_argument("--detections")
     ap.add_argument("--calib")
+    ap.add_argument("--calib-per-run", help="floor_calibration_loro.csv: score each run with the calibration made without it")
     ap.add_argument("--video-offset", type=float)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
@@ -341,8 +378,21 @@ def main():
         par = load_parallax(args.calib)
         if par is None:
             print("note: calibration has no camera height; robot-top positions not corrected for height")
-        dets = load_detections(args.detections, Hinv, off, parallax=par)
+        dets = load_detections(args.detections, Hinv, off, parallax=par, dist=load_distortion(args.calib))
         print(f"{len(dets)} camera detections")
+        if args.calib_per_run:
+            per = {None: dets}
+            base = os.path.dirname(os.path.abspath(args.calib_per_run))
+            with open(args.calib_per_run, newline="") as f:
+                for r in csv.DictReader(f):
+                    if r.get("calibration"):
+                        c = os.path.join(base, r["calibration"])
+                        _, Hi = load_homography(c)
+                        per[r["run_id"]] = load_detections(args.detections, Hi, off, parallax=load_parallax(c),
+                                                           dist=load_distortion(c))
+            print(f"{len(per) - 1} runs use their held-out calibration ({args.calib_per_run})")
+            extra["calib_per_run"] = os.path.abspath(args.calib_per_run)
+            dets = per
     man = write_runs(runs, dets, args.out, extra)
     w = [max(len(str(r[i])) for r in man + [["run_id", "robot", "route", "result", "raw", "cam", "tape", "missing"]]) for i in range(8)]
     for r in [["run_id", "robot", "route", "result", "raw", "cam", "tape", "missing"]] + man:

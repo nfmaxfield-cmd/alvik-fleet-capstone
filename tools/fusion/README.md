@@ -78,6 +78,16 @@ calibration file gives `camera.height_cm` and `camera.nadir_floor_cm` (the
 floor point straight below the lens), sightings are moved back to the floor
 point below the robot's top. In simulation this took the camera end error
 from 2.2 cm to 0.15 cm. Measure both when the camera is mounted.
+A lens term `k1` (with `cx`, `cy`, `f_px`) in the file is applied too.
+
+## Held-out calibrations (no circularity)
+
+If the floor calibration was made from runs' tape marks or odometry
+(`tools/calibrate_floor.py --from-runs` or `--survey`), those runs must not be
+scored against the camera with it. `runs.py --calib-per-run
+floor_calibration_loro.csv` converts each listed run's camera sightings with the
+calibration made without that run; `fit.used_runs` in a calibration file lists
+the runs it used.
 
 ## Known limits
 

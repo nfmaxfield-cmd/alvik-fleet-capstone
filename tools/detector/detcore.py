@@ -516,9 +516,13 @@ def load_homography(path):
     """Read floor_calibration.json: a 3x3 matrix mapping floor cm -> image px.
     Accepts {"H": [[...]]}, {"homography": ...}, {"matrix": ...},
     {"H_floor_to_image": ...} or a bare 3x3 list.
-    Returns a function to_cm(x_px, y_px) -> (x_cm, y_cm), using the inverse."""
+    Returns a function to_cm(x_px, y_px) -> (x_cm, y_cm), using the inverse. If the file has a
+    radial lens term k1 (with cx, cy, f_px), pixels are undistorted first."""
     with open(path) as f:
         data = json.load(f)
+    dist = None
+    if isinstance(data, dict) and data.get("k1"):     # radial lens term (tools/calibrate_floor.py, simulator)
+        dist = (float(data["k1"]), float(data["cx"]), float(data["cy"]), float(data["f_px"]))
     if isinstance(data, dict):
         for k in ("H_floor_to_px", "homography_floor_cm_to_px", "H_floor_to_image", "H", "homography",
                   "matrix", "floor_to_image"):
@@ -531,6 +535,13 @@ def load_homography(path):
     Hinv = np.linalg.inv(H)
 
     def to_cm(x, y):
+        if dist:
+            k1, cx, cy, f = dist
+            d = np.array([(x - cx) / f, (y - cy) / f])
+            n = d.copy()
+            for _ in range(20):
+                n = d / (1 + k1 * (n @ n))
+            x, y = cx + f * n[0], cy + f * n[1]
         v = Hinv @ np.array([x, y, 1.0])
         return v[0] / v[2], v[1] / v[2]
     return to_cm

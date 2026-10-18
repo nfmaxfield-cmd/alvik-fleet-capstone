@@ -176,7 +176,7 @@ def main():
         par = rn.load_parallax(args.calib)
         if par is None:
             print("note: calibration has no camera height; robot-top positions not corrected for height")
-        dets = rn.load_detections(args.detections, Hinv, off, parallax=par)
+        dets = rn.load_detections(args.detections, Hinv, off, parallax=par, dist=rn.load_distortion(args.calib))
     truth = load_truth(args.truth) if args.truth else None
     configs = json.load(open(args.configs)) if args.configs else BUILTIN
     wsign = eng.wheel_turn_signs(runs)

@@ -48,6 +48,8 @@ tools/
   run_sheet.py       guided experiment runs: commands, run ids, tape entry with checks
   commtest.py        WiFi delay, jitter and delivery per robot (experiment E3)
   pi/camrec.py       overhead camera recorder for the Raspberry Pi
+  calibrate_floor.py floor calibration (floor cm <-> image px) without printed markers:
+                     clicks, robot placements, or the runs themselves (survey)
 docs/
   home-experiments.md  how to run the home experiments
   experiments/         one record per experiment (E0-E8), index, template
