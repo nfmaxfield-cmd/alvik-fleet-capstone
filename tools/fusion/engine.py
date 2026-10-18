@@ -154,6 +154,10 @@ DEFAULT = dict(
     tof_max_sigma_cm=10.0,    # don't use landmarks while the position is this unsure (picked up, lost)
     tof_new_frames_only=True, # the sensor makes ~15 frames/s; RAW repeats a frame until the next: use each once
     tof_delay_s=0.0,          # a frame describes the pose this long before its RAW row
+    still_mode="encoder",     # how "standing still" is decided (zero-velocity updates): encoder = wheel angles
+                              # unchanged; speed = the old wheel-speed thresholds (too strict for the noise)
+    still_window_s=0.25,      # ... over this long, looking back
+    still_deg=0.75,           # ... by no more than this (about 2 encoder counts of 0.36 deg)
     # landmark ranging, handling errors that many readings share (all off by default: as before)
     tof_use_cal=True,         # use the distance-sensor calibration given to replay.py (--tof-cal), if any: zone
                               # directions, range bias / scale, zone width, frame delay, noise, refined landmarks
@@ -874,6 +878,36 @@ def wheel_fwd_signs(runs):
     return {robot: (-1.0 if a < 0 else 1.0) for robot, a in acc.items()}
 
 
+class StillTest:
+    """Is the robot standing still (for zero-velocity updates)? still_mode "encoder": neither wheel's
+    angle (RAW wl_deg / wr_deg) moved more than still_deg over the last still_window_s, looking back only
+    (so it works live). The wheel speeds (wl_rpm, v_cms, w_dps) are too noisy for this at rest: the
+    simulator reads up to 0.7 rpm on a still wheel, so the old thresholds passed only ~15% of still rows.
+    Rows without wheel angles fall back to those thresholds (still_mode "speed")."""
+
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.hist = deque()           # (t, wl_deg, wr_deg)
+
+    def step(self, r, v):
+        cfg = self.cfg
+        wl, wr = fnum(r.get("wl_deg"), float("nan")), fnum(r.get("wr_deg"), float("nan"))
+        if cfg["still_mode"] == "speed" or math.isnan(wl) or math.isnan(wr):
+            return (abs(fnum(r.get("wl_rpm"))) < 0.2 and abs(fnum(r.get("wr_rpm"))) < 0.2
+                    and abs(v) < 0.1 and abs(fnum(r.get("w_dps"))) < 0.5)
+        t = r["t"]
+        h = self.hist
+        h.append((t, wl, wr))
+        W = cfg["still_window_s"]
+        while len(h) > 1 and t - h[1][0] >= W:          # keep one row at least W old
+            h.popleft()
+        if t - h[0][0] < W * 0.999:                      # not enough history yet (run start)
+            return False
+        lim = cfg["still_deg"]
+        return (max(x[1] for x in h) - min(x[1] for x in h) <= lim
+                and max(x[2] for x in h) - min(x[2] for x in h) <= lim)
+
+
 def zone_reading(v):
     x = fnum(v, float("nan"))
     return None if math.isnan(x) else x
@@ -915,13 +949,13 @@ def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, 
         ws = wsign.get(run.robot, 1.0)
         fs = fsign.get(run.robot, 1.0)
         rpm2cms = 2 * math.pi * radius_of(cfg, run.robot) / 60
+        still_test = StillTest(cfg)
         prev_z = None
         for r in run.raw:
             v = fnum(r.get("v_cms"))
             w = fnum(r.get("w_dps")) * D2R * ws
             # still = wheels not turning at all (a turn in place moves the wheels too)
-            still = (abs(fnum(r.get("wl_rpm"))) < 0.2 and abs(fnum(r.get("wr_rpm"))) < 0.2
-                     and abs(v) < 0.1 and abs(fnum(r.get("w_dps"))) < 0.5)
+            still = still_test.step(r, v)
             d = dict(v=v, w=w, g=fnum(r.get("gz")) * gf, still=still, lifted=fnum(r.get("lifted")) > 0.5,
                      vl=fnum(r.get("wl_rpm")) * fs * rpm2cms, vr=fnum(r.get("wr_rpm")) * fs * rpm2cms)
             if use_tof:

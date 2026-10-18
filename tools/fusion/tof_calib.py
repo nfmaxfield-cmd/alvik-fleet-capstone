@@ -370,12 +370,11 @@ def main(argv=None):
 
     all_runs, fits = rn.load_runs(args.session, args.sheet)
     runs = [r for r in all_runs if not r.excluded and r.tape_start]
-    off = args.video_offset
-    if off is None:
-        vo = rn.video_offset(args.session, args.recording, fits) if args.recording else None
-        if vo is None:
-            sys.exit("Couldn't line up video and robot clocks: give --recording (with flashes) or --video-offset")
-        off = vo[0]
+    vc = rn.video_clock(args.session, args.recording, fits, args.video_offset)
+    if vc is None:
+        sys.exit("Couldn't line up video and robot clocks: give --recording (with flashes) or --video-offset")
+    off, how = vc
+    print(how)
     calib_of, _ = rn.assign_calibrations([r.run_id for r in runs], args.calib, args.calib_per_run)
     bad = rn.in_sample(calib_of)
     if bad:

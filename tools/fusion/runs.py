@@ -23,7 +23,9 @@ Inputs (all but --session optional):
                 vs tape / odometry comparisons aren't circular); runs not listed use --calib.
                 A run whose calibration was made with it (fit.used_runs) is refused
                 unless --allow-in-sample; meta.json records calib_file and calib_includes_run
-  --video-offset  skip the flash search and use this offset (s, video minus laptop)
+  --video-offset  skip the flash search and use this offset (s, video minus laptop). Without it,
+                <recording>/video_clock.json (tools/check_session.py) is used if there, with its
+                clock drift when it says use_drift; else the flashes are searched here
   --blink       blink_detections.csv from tools/blink/blink.py: light positions
                 with per-robot name probabilities (needs --calib and the clock offset)
   --calib-results  calibration_results.csv from tools/blink/calib.py: start-nudge
@@ -370,6 +372,55 @@ def video_offset(session, recording, fits=None):
     return st.mean(offs), (st.stdev(offs) if len(offs) > 1 else float("nan")), len(offs)
 
 
+class VideoClock:
+    """The video clock against the laptop clock from <recording>/video_clock.json (tools/check_session.py;
+    docs/data-formats.md): video t_wall = laptop + offset_s + drift_ppm * 1e-6 * (laptop - t_ref). The drift
+    is used only when the file says use_drift (it is real and worth 1 ms or more), else offset_s alone."""
+
+    def __init__(self, offset_s, drift_ppm=0.0, t_ref=0.0, path=None):
+        self.offset_s, self.drift, self.t_ref, self.path = float(offset_s), float(drift_ppm) * 1e-6, float(t_ref), path
+
+    @classmethod
+    def load(cls, path):
+        with open(path) as f:
+            d = json.load(f)
+        drift = float(d.get("drift_ppm") or 0.0) if d.get("use_drift") else 0.0
+        return cls(d["offset_s"], drift, d.get("t_ref") or 0.0, path)
+
+    def to_laptop(self, t_wall):
+        return (t_wall - self.offset_s + self.drift * self.t_ref) / (1.0 + self.drift)
+
+    def describe(self):
+        s = f"video clock = laptop clock {self.offset_s * 1000:+.0f} ms"
+        if self.drift:
+            s += f", drifting {self.drift * 1e6:+.1f} ppm"
+        return s + (f" (from {os.path.basename(self.path)})" if self.path else "")
+
+
+def to_laptop(clock, t_wall):
+    """Video t_wall -> laptop time: clock is a VideoClock or a plain offset (s, video minus laptop)."""
+    return clock.to_laptop(t_wall) if isinstance(clock, VideoClock) else t_wall - clock
+
+
+def video_clock(session, recording, fits=None, explicit=None):
+    """How video time maps to laptop time: `explicit` (--video-offset) if given; else the recording's
+    video_clock.json (check_session.py wrote it from the flashes: with the drift if use_drift); else the
+    flash search here (video_offset). Returns (clock, text) or None."""
+    if explicit is not None:
+        return float(explicit), f"video clock = laptop clock {explicit * 1000:+.0f} ms (given)"
+    if recording and os.path.exists(os.path.join(recording, "video_clock.json")):
+        try:
+            c = VideoClock.load(os.path.join(recording, "video_clock.json"))
+            return c, c.describe()
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            print(f"note: {recording}/video_clock.json unreadable ({e}); finding the flashes instead")
+    vo = video_offset(session, recording, fits) if recording else None
+    if vo is None:
+        return None
+    return vo[0], (f"video clock = laptop clock {vo[0] * 1000:+.0f} ms (from {vo[2]} flashes, spread "
+                   f"{vo[1] * 1000:.0f} ms)")
+
+
 def load_detections(path, H_px_to_floor, offset_s, labels_ok=("confirmed", "corrected", "auto"), parallax=None,
                     dist=None):
     """Camera detections as floor positions on the laptop clock.
@@ -390,7 +441,7 @@ def load_detections(path, H_px_to_floor, offset_s, labels_ok=("confirmed", "corr
             fx, fy = floor_from_top(*apply_h(H_px_to_floor, *undistort_px(x, y, dist)), parallax)
             h = fnum(r.get("heading_deg"))
             hf = heading_img_to_floor(H_px_to_floor, x, y, h, dist) if not math.isnan(h) else None
-            out.append(dict(t=t - offset_s, frame=int(fnum(r.get("frame"), -1)), x=fx, y=fy,
+            out.append(dict(t=to_laptop(offset_s, t), frame=int(fnum(r.get("frame"), -1)), x=fx, y=fy,
                             score=fnum(r.get("score"), 1.0), heading=hf))
     out.sort(key=lambda d: d["t"])
     return out
@@ -422,7 +473,7 @@ def load_blink(path, H_px_to_floor, offset_s, parallax=None, dist=None, lit_only
             probs = {n: fnum(r.get("p_" + n), 0.0) for n in names}
             probs = {n: (0.0 if math.isnan(p) else p) for n, p in probs.items()}
             pn = fnum(r.get("p_none"), 0.0)
-            out.append(dict(t=t - offset_s, frame=int(fnum(r.get("frame"), -1)), x=fx, y=fy,
+            out.append(dict(t=to_laptop(offset_s, t), frame=int(fnum(r.get("frame"), -1)), x=fx, y=fy,
                             track=int(fnum(r.get("track"), -1)), robot=(r.get("robot") or "").strip(),
                             probs=probs, p_none=0.0 if math.isnan(pn) else pn,
                             n_spots=int(fnum(r.get("n_spots"), 0)), score=fnum(r.get("score"), 0.0)))
@@ -442,7 +493,7 @@ def load_calib_results(path, offset_s):
             mp = fnum(r.get("moved_px"))
             out.append(dict(run=(r.get("run") or "").strip(), robot=(r.get("robot_log") or "").strip(),
                             event=(r.get("event") or "").strip(), identity=(r.get("identity") or "").strip(),
-                            t=None if math.isnan(tv) else tv - offset_s,
+                            t=None if math.isnan(tv) else to_laptop(offset_s, tv),
                             heading=None if math.isnan(h) else h,
                             led=None if (math.isnan(lf) or math.isnan(ll)) else (lf, ll),
                             moved_px=None if math.isnan(mp) else mp))
@@ -607,16 +658,17 @@ def main():
     if args.detections or args.blink or args.calib_results:
         if not args.calib and (args.detections or args.blink):
             sys.exit("--detections / --blink need --calib (floor_calibration.json)")
-        off = args.video_offset
-        if off is None:
-            if not args.recording:
-                sys.exit("--detections needs --recording (to find the flashes) or --video-offset")
-            vo = video_offset(args.session, args.recording, fits)
-            if vo is None:
-                sys.exit("No light flashes matched between video and robot logs; give --video-offset")
-            off, spread, n = vo
-            print(f"video clock = laptop clock {off * 1000:+.0f} ms (from {n} flashes, spread {spread * 1000:.0f} ms)")
-        extra = dict(video_offset_s=off)
+        if args.video_offset is None and not args.recording:
+            sys.exit("--detections needs --recording (to find the flashes) or --video-offset")
+        vc = video_clock(args.session, args.recording, fits, args.video_offset)
+        if vc is None:
+            sys.exit("No light flashes matched between video and robot logs; give --video-offset")
+        off, how = vc
+        print(how)
+        if isinstance(off, VideoClock):
+            extra = dict(video_offset_s=off.offset_s, video_drift_ppm=off.drift * 1e6, video_t_ref=off.t_ref)
+        else:
+            extra = dict(video_offset_s=off)
         if args.calib_results:
             crow = load_calib_results(args.calib_results, off)
             led, how = led_offsets(crow)

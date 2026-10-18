@@ -414,13 +414,12 @@ def main():
             print(f"{len(groups)} calibrations: each run's camera sightings converted with its own "
                   f"({args.calib_per_run})")
     if args.detections or args.blink or args.calib_results:
-        off = args.video_offset
-        if off is None:
-            vo = rn.video_offset(args.session, args.recording, fits) if args.recording else None
-            if vo is None:
-                sys.exit("Couldn't line up video and robot clocks: give --recording (with flashes) or --video-offset")
-            off = vo[0]
-            print(f"video clock = laptop clock {off * 1000:+.0f} ms ({vo[2]} flashes)")
+        vc = rn.video_clock(args.session, args.recording, fits, args.video_offset)
+        if vc is None:
+            sys.exit("Couldn't line up video and robot clocks: give --recording (with flashes) or --video-offset")
+        off, how = vc
+        if args.video_offset is None:
+            print(how)
     if args.calib_results:
         crow = rn.load_calib_results(args.calib_results, off)
         led, how = rn.led_offsets(crow)

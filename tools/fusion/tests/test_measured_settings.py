@@ -73,3 +73,37 @@ def test_noise_file(tmp_path):
     p.write_text(json.dumps({"noise": {"nonsense": 1}}))
     with pytest.raises(KeyError):
         load_noise_file(str(p))
+
+
+def test_video_clock_file(tmp_path):
+    """video_clock.json: video = laptop + offset + drift (laptop - t_ref); the drift only with use_drift."""
+    d = dict(format="video-clock", version=1, offset_s=0.1, t_ref=1000.0, drift_ppm=50.0, use_drift=True)
+    (tmp_path / "video_clock.json").write_text(json.dumps(d))
+    c, how = rn.video_clock("unused", str(tmp_path))
+    lap = 1600.0
+    vid = lap + 0.1 + 50e-6 * (lap - 1000.0)
+    assert rn.to_laptop(c, vid) == pytest.approx(lap, abs=1e-9)
+    assert "ppm" in how
+    d["use_drift"] = False
+    (tmp_path / "video_clock.json").write_text(json.dumps(d))
+    c, _ = rn.video_clock("unused", str(tmp_path))
+    assert rn.to_laptop(c, vid) == pytest.approx(vid - 0.1)
+    c, _ = rn.video_clock("unused", str(tmp_path), explicit=0.25)          # --video-offset wins
+    assert c == 0.25 and rn.to_laptop(c, 10.0) == pytest.approx(9.75)
+
+
+def test_still_from_wheel_angles():
+    """Encoder test: still once neither wheel angle moved > 0.75 deg for 0.25 s, despite noisy wheel speeds;
+    rows without wheel angles keep the old speed thresholds."""
+    st_ = eng.StillTest(eng.config())
+    out = []
+    for i in range(60):                                   # 10 ms rows: 0.3 s still, then the wheels turn
+        t = i * 0.01
+        ang = 0.0 if i < 30 else (i - 29) * 0.5
+        out.append(st_.step(dict(t=t, wl_deg=ang, wr_deg=-ang, wl_rpm=0.6, wr_rpm=-0.5, w_dps=1.0), 0.3))
+    assert out[:25] == [False] * 25                       # not enough history yet
+    assert all(out[26:30])                                # still, although the speeds read 0.6 rpm
+    assert not any(out[32:])                              # moving (2 rows of slack: < 0.75 deg moved)
+    old = eng.StillTest(eng.config())
+    assert old.step(dict(t=0.0, wl_rpm=0.1, wr_rpm=0.1, w_dps=0.1), 0.05) is True
+    assert old.step(dict(t=0.01, wl_rpm=0.6, wr_rpm=0.1, w_dps=0.1), 0.05) is False
