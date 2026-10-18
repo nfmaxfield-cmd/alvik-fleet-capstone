@@ -71,16 +71,30 @@ placement does not count as robot error.
    lower the camera or brighten the lights' view.
 
 ## Procedure (the 36 runs)
-1. On the Pi: `python3 camrec.py --label E1`.
-2. On the laptop: `python tools/run_sheet.py docs/experiments/E01-baseline-dataset --pi st1maxfini.local`
-3. It walks you through every run in order: the compass check once per robot
-   per power-on, placing the robot at the origin facing +x, typing the start
-   marks, starting the run, typing the end marks. It sends the commands, fills
-   in the run id and battery, marks each run in the video, checks the numbers
-   for typos, saves after every run, and shows each run's error right away.
-   Type q to stop; running it again continues where you left off.
-4. Afterwards: stop the recorder (Ctrl+C), copy the robot log folder into
+1. Mark the three start spots on the board (robot centre, facing +x):
+   straight (10, 61) cm = (3 15/16, 24) in; L (40, 80) cm = (15 3/4, 31 1/2) in;
+   square (35, 35) cm = (13 3/4, 13 3/4) in. Rough is fine: run_sheet checks
+   the measured start is within 5 cm.
+2. On the Pi (overhead camera, 25 fps):
+   `python3 tools/pi/camrec.py --device 0 --fps 25 --label E1`
+   and, optionally, the second camera in another window:
+   `python3 tools/pi/camrec.py --device 2 --port 8001 --notes-port 0 --exposure auto --wb auto --label E1-emeet`
+3. On the laptop, in the repo folder:
+   `python tools/preflight.py --robots Left,Center,Right --pi st1maxfini.local`
+4. On the laptop:
+   `python tools/run_sheet.py docs/experiments/E01-baseline-dataset --pi st1maxfini.local --inches`
+   (`--inches`: type tape readings as you read them, e.g. `36 3/32, 42 15/16, 39 27/32, 42 13/16`).
+5. It walks you through every run in order: the calibration run once per
+   robot per power-on (robot in view, off its mark), placing the robot at the
+   row's start spot, typing the start marks, starting the run, typing the end
+   marks. It sends the commands, fills in the run id and battery, marks each
+   run in the video, checks the numbers, saves after every run, and shows each
+   run's error right away. Type q to stop; running it again continues.
+6. Afterwards: stop the recorders (Ctrl+C), copy the robot log folder into
    `data/logs/` and the recording into `data/video/` (video stays out of git).
+
+E1b (Right at low battery) runs first, the same way, with its own folder:
+`python tools/run_sheet.py docs/experiments/E01b-low-battery --pi st1maxfini.local --inches`
 
 Runs are grouped by robot (all of Left's, then Center's, then Right's) and
 shuffled within each robot (seed 21), so battery drain and floor wear don't
