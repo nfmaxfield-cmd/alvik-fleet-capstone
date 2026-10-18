@@ -210,6 +210,25 @@ stopped from its mark: the robot's own report is wheel odometry and can't see
 slip. Distances and the circle size are settings (`demo_a_cm`, `demo_b_cm`,
 `demo_r_cm`, `demo_speed_cms`).
 
+## Plywood edge guard (firmware 2026-10-18b+, off until measured)
+
+Where the plywood has no border board, the front distance sensor can't see the
+small step down. The edge guard (`safe_edge`, firmware edge.h) can stop a
+robot driving forward at an open edge from either of two cues: the line
+sensors under the nose (`safe_edge 1`: their reading jumps when they pass the
+edge; the painter's tape must not look the same) or the distance sensor's
+bottom zone (`safe_edge 2`: it looks at the floor a few cm ahead, which drops
+to the cement past the edge), or both (`3`). It is **off** until the E0c edge
+rows are in: then `python tools/edge_check.py` says whether each cue separates
+the edge from plywood and tape and prints the `set` commands to try. Try them
+on one robot first, driving slowly at an open edge and across the tape. In the
+simulator (guessed readings) the line cue stops with about 3 cm of wheel still
+on the board, the bottom zone about 9 cm. Limits: backing up and turning in
+place are not guarded, and a robot meeting the edge at a shallow slant (under
+about 45 degrees) puts a wheel over it before the line sensors get there.
+Lap and grid runs on dark tape: dark tape may look like the edge to the line
+cue; use `safe_edge 2` or `0` for those.
+
 ## Step 1: sensor explorer
 
 Upload `sensor_explorer`, open Serial Monitor at 115200, and switch the robot
@@ -332,6 +351,10 @@ if it hangs.
   wheel slip changes both time and the odometry check.
 - Check the lifted and front-obstacle safety stops don't trip during normal
   runs. Set `safe_lift 0` or `safe_front_cm 0` if they do.
+- Edge guard, once tools/edge_check.py recommends settings: drive slowly at an
+  open edge (head-on and at 45 and 30 degrees), across the painter's tape, and
+  fast over plain plywood (the bottom zone tilts when the robot speeds up or
+  brakes); measure how much wheel is left on the board each time.
 
 ## Possible inaccuracies in what this relied on
 

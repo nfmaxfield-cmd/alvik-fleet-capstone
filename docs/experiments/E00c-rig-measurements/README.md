@@ -67,7 +67,9 @@ Camera recording, as in T1. Robots switched on **just before** this part.
   and the open edge, and the distance sensor's lowest zone reads the floor
   ahead at 15, 10 and 5 cm from the edge. If the edge reading is clearly different from both
   plywood and tape, the next firmware's edge guard (stop before the nose
-  passes an open edge) gets its threshold from these numbers.
+  passes an open edge) gets its threshold from these numbers:
+  `python tools/edge_check.py` reads these rows and prints the verdict and the
+  settings (safe_edge, edge_dir, edge_thr, edge_max, edge_bot_cm).
 
 ## Results
 

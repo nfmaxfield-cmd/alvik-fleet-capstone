@@ -170,6 +170,10 @@ class Robot(FollowMixin):
         self._tof_ms = -1e9
         self._tof_vals = None
         self._tof_phase = rng.uniform(0, 66.0)     # when the free-running sensor's frames fall
+        self._tof_bot = None                       # bottom zone, per frame (only with a board: session.board_cm)
+        # the edge guard's own sensor noise, so switching it on does not shift every other random draw
+        self.edge_rng = random.Random(boot_id * 7919 + sum(map(ord, name)))
+        self.edge_init()
 
         # ---- firmware state ----
         self.run_n = 0
@@ -461,10 +465,54 @@ class Robot(FollowMixin):
             else:
                 out.append(max(0.0, d + rng.gauss(0, t.noise_cm + d * t.noise_pct / 100)))
         self._tof_vals = out
+        if self.cfg.session.board_cm:
+            fr = pose if pose is not None else (self.x, self.y, self.th)
+            self._tof_bot = max(0.0, rng.gauss(self.bottom_true(fr), t.bottom_noise_cm))
         return out
 
-    def line_sensors(self):
-        lm, rng = self.line_m, self.rng
+    # ---- the plywood board (session.board_cm) ----
+    def past_open_edge(self, px, py):
+        """How far (cm) the floor point (px, py) is past the nearest OPEN side of the board
+        (negative: still on the board, or only past a bordered side). -inf without a board."""
+        s = self.cfg.session
+        if not s.board_cm:
+            return float("-inf")
+        x0, y0, x1, y1 = s.board_cm
+        out = {"x0": x0 - px, "x1": px - x1, "y0": y0 - py, "y1": py - y1}
+        return max((out[k] for k in s.open_edges if k in out), default=float("-inf"))
+
+    def bottom_true(self, pose):
+        """The distance sensor's bottom zone, from the geometry in TofModel (guesses): the nearest hit of
+        5 x 3 rays: the plywood, the cement past an open edge (one board thickness lower), or a board
+        (world_polys) standing in the way."""
+        t, s = self.tof_m, self.cfg.session
+        x0, y0, th0 = pose
+        px = x0 + t.sensor_forward_cm * math.cos(th0)
+        py = y0 + t.sensor_forward_cm * math.sin(th0)
+        H, T = t.sensor_height_cm, s.board_thick_cm
+        best = float("inf")
+        for vi in (-0.5, 0.0, 0.5):
+            e = math.radians(t.bottom_deg + vi * t.bottom_vspan_deg)
+            for hj in (-0.5, -0.25, 0.0, 0.25, 0.5):
+                a = th0 + math.radians(hj * t.bottom_hspan_deg)
+                dx, dy = math.cos(a), math.sin(a)
+                g = H / math.tan(e)                         # horizontal distance to the plywood's surface
+                if self.past_open_edge(px + g * dx, py + g * dy) > 0:
+                    g = (H + T) / math.tan(e)               # past an open edge: down to the cement
+                if self.world_polys:
+                    g = min(g, ray_polys(px, py, dx, dy, self.world_polys, g))
+                best = min(best, g / math.cos(e))
+        return best
+
+    def bottom(self, rng=None):
+        """get_distance_bottom() (with a board: held per sensor frame like the other zones)."""
+        if self.cfg.session.board_cm:
+            self.tof()
+            return self._tof_bot
+        return max(0.0, (rng or self.rng).gauss(self.tof_m.bottom_cm, 0.3))
+
+    def line_sensors(self, rng=None):
+        lm, rng = self.line_m, rng or self.rng
         if self.lifted:
             return [int(max(0, rng.gauss(20, 5))) for _ in range(3)]
         s = self.cfg.session
@@ -483,6 +531,11 @@ class Robot(FollowMixin):
                 cover = max(cover, min(1.0, max(0.0, (half + lm.footprint_cm / 2 - dist) / lm.footprint_cm)))
             val = lm.floor_reading + (lm.tape_reading - lm.floor_reading) * cover
             noise = lm.floor_noise + (lm.tape_noise - lm.floor_noise) * cover
+            if s.board_cm:                                          # past an open edge: the cement below
+                o = self.past_open_edge(px, py)
+                ce = min(1.0, max(0.0, (o + lm.footprint_cm / 2) / lm.footprint_cm))
+                val += (lm.past_edge_reading - val) * ce
+                noise += (lm.past_edge_noise - noise) * ce
             out.append(int(max(0, rng.gauss(val, noise))))
         return out
 
@@ -509,7 +562,7 @@ class Robot(FollowMixin):
         pitch = -math.degrees(self.acc_bias[0]) + rng.gauss(0, tn)
         d = self.tof()
         dtop = min(self.tof_m.max_range_cm, d[2] * (1 + self.tof_m.top_extra_pct / 100))
-        dbot = max(0.0, rng.gauss(self.tof_m.bottom_cm, 0.3))
+        dbot = self._tof_bot if self.cfg.session.board_cm else max(0.0, rng.gauss(self.tof_m.bottom_cm, 0.3))
         lL, lC, lR = self.line_sensors()
         vals = dict(run=self.run_id, ms=now, step=self.step, wl_deg=self.encL, wr_deg=self.encR,
                     wl_rpm=wl_rpm, wr_rpm=wr_rpm, v_cms=v_cms, w_dps=w_dps,
@@ -642,6 +695,8 @@ class Robot(FollowMixin):
             return True
         if self.P("safe_lift") > 0 and self.lifted:
             self.abort_reason = "robot lifted"
+        elif self.edge_check():
+            self.abort_reason = "plywood edge ahead"
         elif not self.step_stop:
             lim = self.front_limit if self.front_limit >= 0 else self.P("safe_front_cm")
             if lim > 0:
@@ -664,6 +719,105 @@ class Robot(FollowMixin):
         if self.abort_reason or self.step_stop:
             self.brake()
             return True
+        return False
+
+    # ================================================= firmware: plywood edge guard (edge.h)
+    EDGE_NL = 40
+
+    def edge_init(self):
+        self.edge_learning = self.edge_ready = False
+        self.edge_buf = [[], [], []]
+        self.edge_base = [0.0, 0.0, 0.0]
+        self.edge_t0 = 0
+        self.edge_count = 0
+        self.edge_bot_since = 0
+        self.edge_trips = []                       # (robot ms, cue, true pose) for tests
+
+    def edge_record(self, ev, l, c, r, dbot, info):
+        self.send("H,EDGE,run,ms,event,lineL,lineC,lineR,baseL,baseC,baseR,dbot_cm,info")
+        b = self.edge_base
+        self.send("D,EDGE,%s,%d,%s,%d,%d,%d,%.0f,%.0f,%.0f,%.1f,%s" % (self.run_id, self.millis(), ev, l, c, r,
+                                                                     b[0], b[1], b[2], dbot, info))
+
+    def edge_begin(self):
+        trips = getattr(self, "edge_trips", [])
+        self.edge_init()
+        self.edge_trips = trips
+        self.edge_learning = self.P("safe_edge") > 0
+        self.edge_t0 = self.millis()
+
+    def edge_stop(self):
+        self.edge_learning = self.edge_ready = False
+
+    def _edge_finish(self, l, c, r):
+        self.edge_learning = False
+        n = len(self.edge_buf[0])
+        if n < 5:
+            self.edge_record("nobase", l, c, r, self.bottom(self.edge_rng), "too few still readings")
+            return
+        thr = self.P("lf_line_thr")
+        base, tape = [], []
+        for k in range(3):
+            v = sorted(self.edge_buf[k])
+            base.append(v[n // 2] if n % 2 else 0.5 * (v[n // 2 - 1] + v[n // 2]))
+            tape.append(base[k] > thr)
+        ok = [b for b, t in zip(base, tape) if not t]
+        if not ok:
+            self.edge_record("nobase", l, c, r, self.bottom(self.edge_rng), "all three sensors on tape")
+            return
+        self.edge_base = [sum(ok) / len(ok) if t else b for b, t in zip(base, tape)]
+        self.edge_ready = True
+        self.edge_record("base", l, c, r, self.bottom(self.edge_rng), "a sensor on tape took the others' level" if len(ok) < 3 else "")
+
+    def _edge_past(self, v, k):
+        d, dr = v - self.edge_base[k], self.P("edge_dir")
+        s = d if dr > 0 else -d if dr < 0 else abs(d)
+        mx = self.P("edge_max")
+        return s >= self.P("edge_thr") and (mx <= 0 or s <= mx)
+
+    def edge_check(self):
+        """edge.h check(): True = stop, the nose is at an open plywood edge."""
+        mode = int(self.P("safe_edge"))
+        if mode <= 0:
+            return False
+        nm, er = self.m.wheel_speed_noise_rpm, self.edge_rng
+        sl, sr = self.wL / 6 + er.gauss(0, nm), self.wR / 6 + er.gauss(0, nm)
+        mn = self.P("edge_min_rpm")
+        still = abs(sl) < mn and abs(sr) < mn
+        forward = 0.5 * (sl + sr) > mn
+        L, C, R = self.line_sensors(er)
+        if self.edge_learning:
+            if still and len(self.edge_buf[0]) < self.EDGE_NL:
+                for k, v in enumerate((L, C, R)):
+                    self.edge_buf[k].append(v)
+            n = len(self.edge_buf[0])
+            if n >= self.EDGE_NL or (self.millis() - self.edge_t0 >= self.P("edge_learn_ms") and n >= 5) or forward:
+                self._edge_finish(L, C, R)
+        if not forward:
+            self.edge_count = 0
+            self.edge_bot_since = 0
+            return False
+        if (mode & 1) and self.edge_ready:
+            if any(self._edge_past(v, k) for k, v in enumerate((L, C, R))):
+                self.edge_count += 1
+            else:
+                self.edge_count = 0
+            if self.edge_count >= max(1, int(self.P("edge_n"))):
+                self.edge_record("trip", L, C, R, self.bottom(er), "line sensors")
+                self.edge_trips.append((self.ms, "line", (self.x, self.y, self.th)))
+                return True
+        lim = self.P("edge_bot_cm")
+        if (mode & 2) and lim > 0:
+            d = self.bottom(er)
+            if d > lim:
+                if not self.edge_bot_since:
+                    self.edge_bot_since = self.millis() | 1
+                if self.millis() - self.edge_bot_since >= self.P("edge_bot_ms"):
+                    self.edge_record("trip", L, C, R, d, "bottom zone")
+                    self.edge_trips.append((self.ms, "bottom", (self.x, self.y, self.th)))
+                    return True
+            else:
+                self.edge_bot_since = 0
         return False
 
     def wait_ms(self, ms):
@@ -1109,6 +1263,7 @@ class Robot(FollowMixin):
         ms_runinfo = self.ms
         if i == EXP_FOLLOW:
             self.front_limit = 0.0             # follow: no centre stop while it waits on its start spot
+        self.edge_begin()                      # edge guard learns the plywood during the settle pause
         self.log_run_info(i)
         self.raw_start()
         self.wait_ms(self.P("settle_start_ms"))
@@ -1132,6 +1287,7 @@ class Robot(FollowMixin):
             else:
                 raise ValueError("the simulator runs only the straight, demo, survey, follow and calib experiments, not " + exp)
         self.brake()
+        self.edge_stop()
         self.kidnap_at = None
         self.blink_stop()
         self.sync_flash("end")

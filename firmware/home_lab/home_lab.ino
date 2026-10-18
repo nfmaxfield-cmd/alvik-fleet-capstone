@@ -283,7 +283,8 @@ bool needsYawSign(int i) { return i == 1 || (i >= 3 && i <= 7); }
 // throughout (moves go dark before the library's blocking call, as elsewhere).
 // Defaults: about 38 s from RUNINFO to RUNEND; clear floor: a 32 cm lane (10 cm
 // robot + 15 cm roll + 7 cm safe_front_cm stop distance) and a 25 cm circle
-// for the spin. Firmware before 2026-10-18b: 1 still, 2 roll
+// for the spin. With safe_edge on, the roll stops at an open plywood edge
+// ("stopped:plywood edge ahead"; the spin is not guarded). Firmware before 2026-10-18b: 1 still, 2 roll
 // max(3, start_nudge_cm) with 300 ms pauses, 3 back, 4 wiggle, 5 300 ms.
 void runCalib() {
   float n = fmaxf(3.0f, P("calib_roll_cm"));
@@ -353,6 +354,7 @@ void runExperiment(int i, bool fromButton) {
   // follow: the robot stands on its start spot (which may face a board closer than
   // safe_front_cm) until steps arrive; each step sets its own front check (follow.h)
   if (i == EXP_FOLLOW) gFrontLimitCm = 0;
+  edge::begin();   // the edge guard learns the plywood under the line sensors during the settle pause
   if (logged) {
     logRunInfo(i);
     rawlog::start();
@@ -375,6 +377,7 @@ void runExperiment(int i, bool fromButton) {
     case EXP_CALIB: runCalib(); break;
   }
   alvik.brake();
+  edge::stop();
   blink::stop();
   if (logged) {
     syncFlash("end");   // runs to full length even after a stop (no safety checks inside)

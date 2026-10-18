@@ -116,6 +116,16 @@ Param PARAMS[] = {
   // --- safety ---
   {"safe_front_cm",    7,   "stop if something is closer than this in front (0 = off)"},
   {"safe_lift",        1,   "1 = stop if the robot reports being lifted (0 = off, if it false-trips)"},
+  // --- plywood edge guard (edge.h): OFF until tools/edge_check.py has the E0c edge rows ---
+  {"safe_edge",        0,   "stop before an open plywood edge while driving forward: 0 = off, 1 = line sensors, 2 = distance sensor's bottom zone, 3 = both (backing up is blind)"},
+  {"edge_dir",         0,   "line cue: +1 = readings go up past an edge, -1 = down, 0 = either way (from tools/edge_check.py)"},
+  {"edge_thr",       400,   "line cue: a sensor this far from its learned plywood level (in edge_dir) is past the edge (placeholder)"},
+  {"edge_max",         0,   "line cue: ...but no further than this (0 = no limit; set when tape moves the reading further than the edge)"},
+  {"edge_n",           3,   "line cue: this many checks in a row (5-10 ms apart) before stopping"},
+  {"edge_learn_ms",  300,   "line cue: learn each sensor's plywood level for this long at the start of a run, standing still"},
+  {"edge_min_rpm",     2,   "edge guard: active only while the wheels average more than this forward (rpm)"},
+  {"edge_bot_cm",     13,   "bottom-zone cue: the floor ahead has dropped away when the bottom zone reads more than this (placeholder)"},
+  {"edge_bot_ms",    100,   "bottom-zone cue: ...for this long (2 sensor frames)"},
 };
 
 const int N_PARAMS = sizeof(PARAMS) / sizeof(PARAMS[0]);

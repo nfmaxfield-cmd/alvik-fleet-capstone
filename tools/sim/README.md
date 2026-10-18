@@ -164,6 +164,20 @@ plus `Robot.world_polys` (boards and obstacles, set by fleet_sim.py) and the
 other robots (`Robot.others`). Before 2026-10-18b it was one fresh ray per zone
 on every call; RAW dC values now repeat between frames, as on the robot.
 
+**Plywood board and edge guard** (firmware 2026-10-18b, edge.h). Off unless
+`session.board_cm` ([x0, y0, x1, y1]) is set: then `session.open_edges`
+("x0", "x1", "y0", "y1": sides with no border board) and `board_thick_cm` (1.9)
+decide what the line sensors and the distance sensor's bottom zone see past an
+open side. Line sensors there read `line.past_edge_reading` (1000, noise 40),
+blended across the sensor's footprint; the bottom zone becomes geometric
+(`tof.sensor_height_cm` 2.6, `bottom_deg` 16.8, spans 5.6 x 45 deg, nearest of
+5 x 3 rays: 9.0 cm on plywood, about 15.8 cm once its whole floor patch is over
+the cement). All GUESSES until E0c (edge rows, sensor height, plywood
+thickness). Nothing falls off: tests check the wheel positions. The guard
+itself (`safe_edge` and the `edge_*` settings) is copied from edge.h, with its
+own random stream so switching it on doesn't change other draws;
+tests/test_edge.py covers stopping distance, tape, calibration and survey runs.
+
 ## Live fleet simulation (fleet_sim.py)
 
 Simulated robots that run the firmware's `follow` and `survey` code in real
@@ -223,7 +237,7 @@ robot, uniformly.
 | accelerometer | noise 0.004 g (+0.01 g moving), bias 0.01 g sd | units g, az about 1 |
 | ToF zones | +22, +11, 0, -11, -22 deg, 4.5 cm ahead of axle (0.25 cm behind the 4.75 cm front face) | noise 0.5 cm + 1%, max 350 cm; 15 frames/s; 11 deg per zone; untrustworthy below 2 cm |
 | room walls (ToF) | x -80..220, y -120..140 cm | |
-| line sensors | 3.5 cm ahead, 1.2 cm apart; floor 150, tape 850 | tape axes 1.9 cm wide |
+| line sensors | 3.5 cm ahead, 1.2 cm apart; floor 150, tape 850, past an open edge 1000 | tape axes 1.9 cm wide |
 | battery | starts 90-100%, -3%/h idle, -20%/h moving | |
 | WiFi RAW loss | 0.5% | bursts off by default (`burst_per_min`) |
 | one-way delay | 1.5 ms + exponential 3 ms, 1% held 20-120 ms | |

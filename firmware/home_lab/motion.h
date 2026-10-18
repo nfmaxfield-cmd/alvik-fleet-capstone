@@ -5,6 +5,7 @@
 #include "params.h"
 #include "net.h"
 #include "rawlog.h"
+#include "edge.h"
 
 extern Arduino_Alvik alvik;
 
@@ -60,6 +61,9 @@ bool shouldAbort() {
   if (gAbortReason.length()) return true;
   if (alvik.get_touch_cancel()) { gAbortReason = "cancel button"; }
   else if (P("safe_lift") > 0 && alvik.get_lifted()) { gAbortReason = "robot lifted"; }
+  // open plywood edge (edge.h; safe_edge 0 = off): forward driving only, backing up is blind;
+  // a hard stop in every experiment, follow steps and approaches included (gFrontLimitCm doesn't apply)
+  else if (edge::check()) { gAbortReason = "plywood edge ahead"; }
   else if (!gStepStop.length()) {
     float lim = gFrontLimitCm >= 0 ? gFrontLimitCm : P("safe_front_cm");
     if (lim > 0) {
