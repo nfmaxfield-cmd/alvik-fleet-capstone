@@ -13,6 +13,7 @@ first two records keep their E00/E01 folder names.
 | --- | --- | --- | --- | --- |
 | [T0](E00-measurement-check/) | 5 (Oct 18) | Reference check (tape repeatability; also calibrates the camera) | planned | |
 | [E0b](E00b-nudge-check/) | 5 (Oct 18) | Start-roll check: 2 vs 5 cm roll (camera heading vs staying on the marks); also the tape's heading repeatability | planned | |
+| [E0c](E00c-rig-measurements/) | 6 | Rig and robot measurements: robot sizes, board, camera plumb point, front sensor vs distance, gyro warm-up, lifted flag | planned | |
 | [T1](E01-baseline-dataset/) | 5-6 (Oct 18-19) | Baseline data set: 36 runs, every sensor logged and filmed | planned | |
 | [E1b](E01b-low-battery/) | 5 (Oct 18) | Low battery: Right's routes at low charge, paired with its full-charge T1 runs | planned | |
 | T2 | 6 | Each sensor's own errors (camera included) | planned | |
@@ -24,6 +25,8 @@ first two records keep their E00/E01 folder names.
 | Dock | 10 | Docking task: planned routes to boards, 1 cm stops | planned | |
 | T8 | 11 | Speed vs accuracy, with and without fusion | planned | |
 | T9 | 11-12 | Comparison with the lab's AprilTag system | planned | |
+
+Every possible source of inaccuracy and the check for it: [ACCURACY-CHECKS.md](ACCURACY-CHECKS.md).
 
 Start a new record by copying [TEMPLATE.md](TEMPLATE.md) into a folder
 `E<nn>-<name>/README.md`, and fill in everything above Results before the
