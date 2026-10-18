@@ -470,5 +470,25 @@ class BlinkSessionTests(CalibAndNudgeChecks, unittest.TestCase):
             best = max(best, n)
         self.assertGreaterEqual(best, sync_frames - 1)
 
+class MapBoardsTests(unittest.TestCase):
+    def test_map_boards_reach_raw_zones(self):
+        """simulate.py --map: a board 40 cm ahead shows in RAW dC (sensor 4.5 cm ahead of the axle)."""
+        d = tempfile.mkdtemp()
+        try:
+            path = os.path.join(d, "map.json")
+            with open(path, "w") as f:
+                json.dump({"boards": [{"name": "A", "p1": [40.75, -20], "p2": [40.75, 20], "thickness_cm": 1.5}]}, f)
+            cfg = perfect_config()
+            cfg.tof.noise_cm = cfg.tof.noise_pct = 0.0
+            cfg.tof.hz = 0                       # fresh reading from the pose set here
+            r = make_robot(cfg)
+            r.world_polys = simulate.map_polys(path)
+            vals = r.raw_values(r.ms)
+            self.assertAlmostEqual(vals["dC_cm"], 40.0 - 4.5, delta=1e-6)
+            self.assertLess(vals["dL_cm"], 60.0)
+        finally:
+            shutil.rmtree(d)
+
+
 if __name__ == "__main__":
     unittest.main()

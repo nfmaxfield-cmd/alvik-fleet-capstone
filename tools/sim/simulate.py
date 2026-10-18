@@ -93,6 +93,24 @@ def body_marks(x, y, th_rad, cfg, rng, noise=True):
     return [("%.1f" % (round(p / q) * q)) for p in pts]
 
 
+def map_polys(path):
+    """Outlines of a map.json's boards (rectangles: centre line +/- thickness/2) and obstacles, as fleet_sim.py."""
+    fleet = os.path.join(REPO, "tools", "fleet")
+    if fleet not in sys.path:
+        sys.path.insert(0, fleet)
+    import fleetmap as FM
+    import geometry as G
+    m = FM.load(path)
+    polys = [G.segment_rect(b["p1"], b["p2"], b["thickness_cm"]).tolist() for b in m["boards"]]
+    for o in m["obstacles"]:
+        if o["shape"] == "polygon":
+            polys.append([list(p) for p in o["points"]])
+        else:
+            c, r = o["center"], o["radius"]
+            polys.append([[c[0] + r * math.cos(a), c[1] + r * math.sin(a)] for a in np.linspace(0, 2 * np.pi, 16, endpoint=False)])
+    return polys
+
+
 # ------------------------------------------------------------------ main
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -106,6 +124,8 @@ def main(argv=None):
     ap.add_argument("--kidnap", type=int, metavar="ORDER", help="pick the robot up mid-run in this sheet row")
     ap.add_argument("--fps", type=float, help="camera frame rate (overrides the config; lower = faster)")
     ap.add_argument("--max-runs", type=int, help="only the first N runs (quick tests)")
+    ap.add_argument("--map", help="tools/fleet map.json: its boards and obstacles stand on the floor during every run "
+                    "(the front distance sensor's RAW dL..dR see them, as in fleet_sim.py)")
     args = ap.parse_args(argv)
 
     cfg = load_config(args.config)
@@ -155,6 +175,11 @@ def main(argv=None):
         rb.idle_until(rb.t_hello)
         rb.send("M,hello from %s at %s (type help in the console)" % (name, rb.ip))
         robots[name] = rb
+    if args.map:
+        polys = map_polys(args.map)
+        for rb in robots.values():
+            rb.world_polys = polys
+        print(f"map {args.map}: {len(polys)} boards / obstacles in front of the distance sensor")
     print(f"simulating {len(rows)} runs on {', '.join(robots)} (firmware {fw}, seed {args.seed})")
 
     # ---- the session, run by run ----
