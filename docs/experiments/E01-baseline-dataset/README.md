@@ -122,8 +122,23 @@ After the first robot's 12 runs, check the spread and add runs if needed.
 ## Results
 `python tools/tape_results.py docs/experiments/E01-baseline-dataset --logs docs/experiments/E01-baseline-dataset/data/logs/*`
 
+Every data-derived accuracy check (mark spacing, wheel and gyro scales, gyro
+bias and noise, timing, camera vs tape, robot moved before marking, trends,
+identity, robot differences, statistics rules) in one table:
+`python tools/accuracy_checks.py docs/experiments/E01-baseline-dataset docs/experiments/E01b-low-battery docs/experiments/E00b-nudge-check docs/experiments/E00-measurement-check`
+(add `--video-offset <s>` once it has printed the video clock offset, to skip
+the slow search). It writes data/accuracy_checks.csv, data/measured_noise.json
+(the camera noise, for the fusion) and data/split.csv.
+
+**Held-out split** (data/split.csv, fixed by the sheet's order before any
+run): fusion settings are tuned only on the `tune` runs and the fusion's
+accuracy is reported only on the `score` runs.
+
 ## Analysis
 - (a) paired t-test, tape vs odometry end error, per route
+- end error intervals: t-interval and bootstrap interval (tape_results.py
+  prints both; end error is skewed and never negative, so the bootstrap one
+  is the one to report when they differ)
 - (b) end error by route, Welch's t-test L vs square
 - (c) heading after each of the square's 12 turns from gyro vs wheels, against
   the end heading by tape (needs the RAW log)

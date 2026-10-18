@@ -51,6 +51,21 @@ def interval(vals):
     return m, sd, n, half
 
 
+def bootstrap_ci(vals, reps=4000, seed=1):
+    """95% bootstrap interval of the mean (percentile method): re-draw the runs at
+    random with replacement, take the mean each time, keep the middle 95%. Suits
+    end error, which is skewed and never negative (a t-interval can dip below 0).
+    Fixed seed, so the same data always gives the same interval."""
+    import random
+    vals = [v for v in vals if v is not None and not math.isnan(v)]
+    n = len(vals)
+    if n < 2:
+        return float("nan"), float("nan")
+    rng = random.Random(seed)
+    means = sorted(sum(rng.choice(vals) for _ in range(n)) / n for _ in range(reps))
+    return means[int(0.025 * reps)], means[int(0.975 * reps) - 1]
+
+
 def paired(a, b):
     """Mean of a-b, 95% half-width, p (paired t-test)."""
     d = [x - y for x, y in zip(a, b)]
@@ -291,9 +306,13 @@ def main():
                 groups.setdefault(t["level"], []).append(t[key])
         for lv in sorted(groups, key=level_key):
             m, sd, n, h = interval(groups[lv])
-            rows.append([lv, n, fmt(m, 2), fmt(sd, 2), f"{fmt(m - h, 2)} to {fmt(m + h, 2)}"])
+            blo, bhi = bootstrap_ci(groups[lv])
+            rows.append([lv, n, fmt(m, 2), fmt(sd, 2), f"{fmt(m - h, 2)} to {fmt(m + h, 2)}",
+                         f"{fmt(blo, 2)} to {fmt(bhi, 2)}"])
         print(f"\n{label} ({unit})")
-        table(["level", "n", "mean", "sd", "95% interval"], rows)
+        table(["level", "n", "mean", "sd", "95% interval (t)", "95% interval (bootstrap)"], rows)
+    print("  (bootstrap: the interval found by re-drawing the runs at random 4000 times; use it for position error, "
+          "which is skewed and never negative, where the t-interval can dip below 0)")
     if len(robots) > 1:
         key = main_metric[0]
         rows = []
