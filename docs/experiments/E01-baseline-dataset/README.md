@@ -75,7 +75,9 @@ placement does not count as robot error.
    straight (10, 61) cm = (3 15/16, 24) in; L (40, 80) cm = (15 3/4, 31 1/2) in;
    square (35, 35) cm = (13 3/4, 13 3/4) in. Rough is fine: run_sheet checks
    the measured start is within 5 cm.
-2. On the Pi (overhead camera, 25 fps):
+2. On the Pi (overhead camera, 25 fps), first go to the repo folder:
+   `cd ~/alvik-fleet-capstone`
+   then:
    `python3 tools/pi/camrec.py --device 0 --fps 25 --label E1`
    and, optionally, the second camera in another window:
    `python3 tools/pi/camrec.py --device 2 --port 8001 --notes-port 0 --exposure auto --wb auto --label E1-emeet`
@@ -93,8 +95,8 @@ placement does not count as robot error.
 6. Afterwards: stop the recorders (Ctrl+C), copy the robot log folder into
    `data/logs/` and the recording into `data/video/` (video stays out of git).
 
-E1b (Right at low battery) runs first, the same way, with its own folder:
-`python tools/run_sheet.py docs/experiments/E01b-low-battery --pi st1maxfini.local --inches`
+E1b (Right at low battery) runs first, with its own folder and commands:
+see `docs/experiments/E01b-low-battery/README.md`.
 
 Runs are grouped by robot (all of Left's, then Center's, then Right's) and
 shuffled within each robot (seed 21), so battery drain and floor wear don't

@@ -409,7 +409,7 @@ def apply_controls(cap, device, exposure="lock", focus="lock", wb="lock", warmup
                               f"exposure, {fps} fps requested. Timing and blink codes need the full rate. "
                               + (f"Lower --exposure (at most {cap_exp:.0f}) or add light."
                                  if exp_now is not None and cap_exp and exp_now > 0.9 * cap_exp else
-                                 "The exposure isn't the cause (it fits in a frame): try --buffers 4, another "
+                                 "The exposure isn't the cause (it fits in a frame): try --buffers 8, another "
                                  "USB port, or check the Pi isn't overloaded (top)."))
             log("\n" + "!" * 78 + "\n  ! " + c.warnings[-1] + "\n" + "!" * 78)
     rep["steps"], rep["warnings"] = c.steps, c.warnings

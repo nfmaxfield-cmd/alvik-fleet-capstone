@@ -29,6 +29,7 @@ import csv
 import datetime as dt
 import math
 import os
+import re
 import socket
 import sys
 import threading
@@ -42,7 +43,8 @@ NOTES_PORT = 5007
 
 def num(x):
     try:
-        return float(x)
+        v = float(x)
+        return v if math.isfinite(v) else None
     except (TypeError, ValueError):
         return None
 
@@ -137,24 +139,49 @@ def ask(prompt):
     return s
 
 
+SPACING_TOL = 0.3   # cm: T0 measured the front-to-rear spacing to SD 0.08 cm; 1/8" off is 0.32 cm
 INCHES = False   # --inches: tape entries are typed in inches and converted to cm
 
 
+_INCH_RE = re.compile(r"^(-)?\s*(?:(\d+(?:\.\d+)?)(?:\s*[\s-]\s*(\d+)\s*/\s*(\d+))?|(\d+)\s*/\s*(\d+))$")
+
+
 def inches(text):
-    """'36 3/32', '36-3/32', '36.09', '3/8' -> inches as a float, or None."""
-    t = text.strip().replace('"', "").replace("in", "").strip()
-    t = t.replace("-", " ") if t.count("-") == 1 and not t.startswith("-") else t
-    total = 0.0
-    try:
-        for part in t.split():
-            if "/" in part:
-                a, b = part.split("/")
-                total += float(a) / float(b)
-            else:
-                total += float(part)
-        return total if t else None
-    except (ValueError, ZeroDivisionError):
+    """'36 3/32', '36-3/32', '36.09', '3/8', '-1 1/2' -> inches as a float.
+    Anything else (two whole numbers, a fraction of 1 or more, a fraction
+    first, nan) -> None, so a typo is asked again instead of saved."""
+    t = text.strip().replace('"', "").strip()
+    if t.lower().endswith("in"):
+        t = t[:-2].strip()
+    m = _INCH_RE.match(t)
+    if not m:
         return None
+    neg, whole, a, b, fa, fb = m.groups()
+    if whole is not None:
+        v = float(whole)
+        if a is not None:
+            if int(b) == 0 or int(a) >= int(b):
+                return None
+            v += int(a) / int(b)
+    else:
+        if int(fb) == 0 or int(fa) >= int(fb):
+            return None
+        v = int(fa) / int(fb)
+    return -v if neg else v
+
+
+def to_in(cm):
+    """cm -> inches to the nearest 1/16, written like 15 3/4 (for messages)."""
+    n = round(abs(cm) / 2.54 * 16)
+    w, f = divmod(n, 16)
+    g = math.gcd(f, 16)
+    frac = f" {f // g}/{16 // g}" if f else ""
+    return f"{'-' if cm < 0 and n else ''}{w}{frac}\""
+
+
+def where(x, y):
+    """A floor position for messages: cm, plus inches in --inches mode."""
+    return f"({x:.1f}, {y:.1f}) cm" + (f" = ({to_in(x)}, {to_in(y)})" if INCHES else "")
 
 
 def parse_marks(s):
@@ -167,7 +194,7 @@ def parse_marks(s):
     return [num(p) for p in s.replace(",", " ").split()]
 
 
-def ask_marks(what, spacing, near=None, max_dist=None, heading_near=None):
+def ask_marks(what, spacing, near=None, max_dist=None, heading_near=None, heading_tol=20):
     """Ask for 'front_x front_y rear_x rear_y' and check it. Returns the 4 numbers (cm)."""
     while True:
         unit = 'inches, comma between each: front x, front y, rear x, rear y' if INCHES else \
@@ -182,19 +209,19 @@ def ask_marks(what, spacing, near=None, max_dist=None, heading_near=None):
             print("    = " + ", ".join(f"{v:.2f}" for v in vals) + " cm")
         x, y, h, d = pose(*vals)
         warn = []
-        if spacing and abs(d - spacing) > 0.5:
+        if spacing and abs(d - spacing) > SPACING_TOL:
             warn.append(f"front-to-rear distance is {d:.1f} cm, expected about {spacing:.1f}")
         if near is not None and max_dist is not None and math.hypot(x - near[0], y - near[1]) > max_dist:
-            warn.append(f"position ({x:.1f}, {y:.1f}) is {math.hypot(x - near[0], y - near[1]):.1f} cm from "
-                        f"where it should be about ({near[0]:.0f}, {near[1]:.0f})")
-        if heading_near is not None and abs(wrap180(h - heading_near)) > 20:
-            warn.append(f"heading {h:.0f} deg is far from the expected {heading_near:.0f} deg "
-                        f"(front and rear swapped?)")
+            warn.append(f"position {where(x, y)} is {math.hypot(x - near[0], y - near[1]):.1f} cm from "
+                        f"where it should be about {where(near[0], near[1])}")
+        if heading_near is not None and abs(wrap180(h - heading_near)) > heading_tol:
+            warn.append(f"heading {h:.0f} deg is {abs(wrap180(h - heading_near)):.0f} deg from the expected "
+                        f"{heading_near:.0f} deg (a misread inch, or front and rear swapped?)")
         if warn:
             print("    Check: " + "; ".join(warn))
             if ask("    Keep these numbers anyway? (y = keep, anything else = re-enter) ").lower() != "y":
                 continue
-        print(f"    -> position ({x:.1f}, {y:.1f}) cm, heading {h:.1f} deg")
+        print(f"    -> position {where(x, y)}, heading {h:.1f} deg")
         return vals
 
 
@@ -286,7 +313,8 @@ def main():
     ap.add_argument("--robot", action="append", default=[], help="robot IP, if robots aren't found automatically")
     ap.add_argument("--outdir", help="log folder (default logs/<date-time>)")
     ap.add_argument("--inches", action="store_true", help="type tape measurements in inches (e.g. 36 3/32); saved in cm")
-    ap.add_argument("--spacing", type=float, help="distance between the front and rear marks, cm (default: learned from the first entry)")
+    ap.add_argument("--spacing", type=float, default=9.5,
+                    help="distance between the front and rear marks, cm (T0 measured 9.52; 0 = learn from the first entry)")
     ap.add_argument("--run-timeout", type=float, default=180, help="give up waiting for a run to finish after this many seconds")
     args = ap.parse_args()
     global INCHES
@@ -322,7 +350,7 @@ def main():
     if new_log:
         logw.writerow(["t", "order", "robot", "level", "run_id", "result", "event"])
 
-    spacing = args.spacing
+    spacing = args.spacing or None
     calibrated = {}   # robot -> boot id it was calibrated in
     needed = sorted({r["robot"] for r in todo})
     print(f"Logging to {outdir}. Waiting for robots: {', '.join(needed)} ...")
@@ -372,10 +400,11 @@ def main():
                 if sx is None or sy is None:
                     sx, sy = 0.0, 0.0
                 sh = 0.0 if sh is None else sh
-                where = "the origin" if (sx, sy) == (0.0, 0.0) else f"x = {sx:g} cm, y = {sy:g} cm"
-                print(f"  Place {robot} with its centre at {where}, facing {'+x' if sh == 0 else f'{sh:g} deg'}. "
+                spot = "the origin" if (sx, sy) == (0.0, 0.0) else (
+                    f"x = {sx:g} cm, y = {sy:g} cm" + (f" (x = {to_in(sx)}, y = {to_in(sy)})" if INCHES else ""))
+                print(f"  Place {robot} with its centre at {spot}, facing {'+x' if sh == 0 else f'{sh:g} deg'}. "
                       f"Mark its front and rear, then measure.")
-                start = ask_marks("START", spacing, near=(sx, sy), max_dist=5, heading_near=sh)
+                start = ask_marks("START", spacing, near=(sx, sy), max_dist=5, heading_near=sh, heading_tol=5)
                 xs, ys, hs, d = pose(*start)
                 if spacing is None:
                     spacing = round(d, 1)
@@ -445,7 +474,7 @@ def main():
                               num(r.get("target_heading_deg")) or 0.0)
                 c, s = math.cos(math.radians(hs)), math.sin(math.radians(hs))
                 ex, ey = xs + c * tx - s * ty, ys + s * tx + c * ty
-                end = ask_marks("END", spacing, near=(ex, ey), max_dist=20, heading_near=hs + th)
+                end = ask_marks("END", spacing, near=(ex, ey), max_dist=20, heading_near=hs + th, heading_tol=10)
                 xe, ye, he, _ = pose(*end)
                 for k, v in zip(("xf0_cm", "yf0_cm", "xr0_cm", "yr0_cm"), start):
                     r[k] = f"{v:g}"
