@@ -200,6 +200,19 @@ def to_laptop(fit, ms):
 
 
 # ------------------------------------------------------------------ video
+def recording_fps(folder, frames=None):
+    """Frame rate of a camrec.py recording: from frames.csv's times (the real rate), else the camera's
+    setting in meta.json (session_checks.nominal_fps), else 25 (the T1 camera; only when the folder says
+    nothing)."""
+    if frames and len(frames) > 2 and frames[-1] > frames[0]:
+        return (len(frames) - 1) / (frames[-1] - frames[0])
+    try:
+        v = sc.nominal_fps(folder)
+    except (OSError, ValueError, TypeError, AttributeError):
+        v = None
+    return v or 25.0
+
+
 def exposure_s(folder, dt_frame):
     """Exposure time of each frame, from the recorder's meta.json when it knows
     it (camrec.py writes exposure_ms when exposure is locked), else assume the
@@ -231,9 +244,7 @@ def video_flashes(folder, sync_ms_guess=300):
         for r in csv.DictReader(f):
             frames.append(fnum(r["t_wall"]))
     cap = cv2.VideoCapture(os.path.join(folder, "video.avi"))
-    fps = sc.nominal_fps(folder) or 25.0      # the camera's setting (meta.json) if frames.csv can't say
-    if len(frames) > 2 and frames[-1] > frames[0]:
-        fps = (len(frames) - 1) / (frames[-1] - frames[0])
+    fps = recording_fps(folder, frames)
     dt_frame = 1.0 / fps
     expo = exposure_s(folder, dt_frame)
     span = sync_ms_guess / 1000 * fps                  # flash length in frames
@@ -472,10 +483,9 @@ def main(argv=None):
         if frames is None:
             continue
         name = os.path.basename(os.path.normpath(vf))
-        fps = sc.nominal_fps(vf) or 25.0
+        fps = recording_fps(vf, frames)
         if len(frames) > 2:
             iv = [b - a for a, b in zip(frames, frames[1:])]
-            fps = (len(frames) - 1) / (frames[-1] - frames[0])
             slow = sum(1 for x in iv if x > 1.5 * st.median(iv))
             print(f"  {name}: {len(frames)} frames, {fps:.1f} fps, {slow} late frames (>1.5x normal spacing), "
                   f"longest gap {max(iv) * 1000:.0f} ms")

@@ -17,7 +17,7 @@ import config  # noqa: E402
 import fw_look  # noqa: E402
 import robot  # noqa: E402
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(SIM)))      # tools/
+sys.path.insert(0, os.path.dirname(SIM))                        # tools/
 import session_checks as sc  # noqa: E402
 
 START = (50.0, 0.0, 0.0)        # robot centre (wheel axle midpoint), facing +x; front face at x 54.75

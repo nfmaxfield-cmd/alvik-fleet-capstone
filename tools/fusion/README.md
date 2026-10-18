@@ -11,7 +11,8 @@ sensor switched off or degraded, and compare the results against the tape.
 | `graph.py` | Factor graph: re-solves a whole run so every reading fits together |
 | `landmarks.py` | Landmark ranging: map faces, distance-sensor ray geometry, which zones can be used |
 | `replay.py` | Runs every sensor setup over the same runs and compares them |
-| `tests/` | Unit tests: light-offset model, identity combination, heading from motion, landmark ranging (`python -m pytest tools/fusion/tests -q`, about 10 s) |
+| `tof_calib.py` | Distance-sensor calibration: each robot's zone directions and range error, and refined board positions, from runs the camera saw |
+| `tests/` | Unit tests: light-offset model, identity combination, heading from motion, landmark ranging, wheel size, calibration, settings read from the session (`python -m pytest tools/fusion/tests -q`, about 1 minute) |
 
 ## Quick start
 
@@ -285,7 +286,192 @@ readings where the models agree. Once the zone footprint is measured on the
 robot, set `tof_zone_width_deg` and raise the limit: in simulation, with the
 right width and 60 deg, path error drops a further 0.84 -> 0.47 cm.
 
+
+### Shared errors: consider states, joint update, adaptive weighting (options)
+
+Many readings share the same error: a board 1 cm off its tape spot, a sensor
+turned 2 deg on its mount, a range bias. Treated as independent, 100 readings
+of that board count as 100 fixes and pull the pose the whole 1 cm. Options:
+
+- `tof_consider` (Schmidt "consider" states): each face's offset, the
+  sensor's range bias and its mount turn are carried as extra uncertainty that
+  every reading of them shares (never estimated). The filter then knows the
+  board can't place the robot better than the board itself is placed.
+  Uncertainties: `tof_face_sigma_cm` 1.0, `tof_bias_sigma_cm` 0.3,
+  `tof_yaw_sigma_deg` 1.0, or per face / robot from a calibration. The factor
+  graph estimates the same three as unknowns with those priors.
+- `tof_joint`: the zones of one frame in one update, their errors correlated
+  by `tof_frame_corr` (the calibration measures it: about 0.1 in simulation).
+- `tof_adapt`: a zone whose readings of a face keep disagreeing the same way
+  gets that average disagreement added to its noise.
+- `tof_every`: use every n-th frame. `tof_lag_inflate`: widen the noise for
+  frame-to-frame correlation (the calibration's `lag1_corr`).
+- `tof_heading_with_camera` false: while the camera saw the robot in the
+  last second, landmark readings correct position only, not heading.
+
+### Results (simulation, 2026-10-18)
+
+Sessions r7 and r11 (seeds 7, 11; 36 runs each): realistic sensor errors on
+purpose: each robot's zones turned 0.4-3.3 deg (mostly one way per robot),
+range bias -0.3 to +0.4 cm and scale +-1%, every board 1 cm off in the map
+given to the fusion, wheels 3% off; wheel size on in every setup. Calibration
+by tof_calib.py, leave-one-run-out. End error / path RMSE cm / heading RMSE
+deg, mean of both sessions:
+
+| setup | camera working | camera blocked 20 s mid-run | no camera |
+| --- | --- | --- | --- |
+| camera (+ wheels + gyro) | 0.26 / 0.32 / 1.04 | 1.06 / 0.97 / 1.32 | - |
+| + landmark ranging as before | 0.68 / 0.58 / 1.37 | 1.02 / 0.95 / 1.35 | 1.24 / 1.03 / 1.38 |
+| + calibrated, consider states | 0.34 / 0.36 / 1.06 | 0.58 / 0.59 / 1.00 | 0.66 / 0.64 / 0.95 |
+| + calibrated, consider, only when the camera missed the robot 1 s | 0.31 / 0.32 / 0.97 | 0.58 / 0.58 / 0.97 | (same as above) |
+| camera, factor graph | 0.23 / 0.21 / 0.50 | | |
+| + calibrated, consider, fallback (factor graph) | 0.34 / 0.30 / 0.54 | | |
+
+Camera blocked 5 s: 0.21 / 0.43 / 1.10 without, 0.25 / 0.44 / 1.00 with the
+fallback. Exact sensors and map (session w7e3, wheels 3% off): camera 0.27 / 0.31 /
+1.02; with the calibrated fallback 0.28 / 0.30 / 0.95; camera blocked 20 s
+1.05 / 0.93 / 1.23 -> 0.44 / 0.53 / 0.89; no camera, as before 1.04 / 0.79 /
+1.15, calibrated with consider states 0.51 / 0.60 / 0.91. So: calibrated landmark ranging with consider states halves the
+error whenever the camera is blocked or absent, and as a fallback it matches
+the camera on path and improves heading, but with the camera working it still
+costs 0.05 cm of end error on average (r7: 0.27 vs 0.27; r11: 0.35 vs 0.25),
+and the factor graph is better without it. The target "never worse than the
+camera alone" is NOT met for end error. Not shipped as default: the options
+are off and the plain setups are byte-identical to before. Recommended until
+real data says otherwise: `"tof_consider": true, "tof_camera_gap_s": 1.0` with
+a calibration, in the filter (not the factor graph).
+
+What was tried and dropped (r7/r11, camera working): joint update per frame
+(no change: zone errors within a frame correlate only ~0.1), adaptive
+down-weighting (no change), every 3rd frame (better than every frame without
+consider states, still worse than the camera), position-only updates while
+the camera tracks (r7: heading 1.05 -> 1.28 deg, worse), a 1 deg floor on the
+mount-turn uncertainty (no change), steeper hits up to 60 deg (no clear
+change).
+Without calibration, consider states alone made the no-camera case worse
+(1.6 -> 2.2 cm, r7, wheel size off): the 1 cm board uncertainty then limits what the boards
+can teach.
+
+**Calibration recovery** (r7, true errors known): zone directions within
+1.6 deg (a common -0.75 deg shift), each board's position along the
+direction the sensor sees it within 0.2-0.9 cm (worst: the board mostly seen
+by one robot), robots' range bias / scale only partly. The readings then
+agree with the map to the noise (rms 1.40 -> 0.93 cm; left over per run,
+zone and face 0.2 cm). With the calibration runs' spins (branch follow-18b's
+simulator, 9 runs, boards 1 cm off): zone directions within 0.8 deg (2.7 deg
+without the spins) and boards within 0.06 cm.
+
+### Calibration (tof_calib.py)
+
+```
+python tools/fusion/tof_calib.py --session <session> --sheet <measurements.csv> \
+    --detections <detections.csv> --calib <floor_calibration.json> --recording <recording> \
+    --map landmarks.csv [--calib-results <recording>/calibration_results.csv] --out <session>/tof_cal
+python tools/fusion/replay.py ... --map landmarks.csv --tof-cal-per-run <session>/tof_cal/tof_calibration_loro.csv
+```
+
+The camera (with wheels and gyro, smoothed by the factor graph) gives the
+robot's path; the map gives the boards' rough positions (tape, or clicked on
+the video with calibrate_floor.py's Landmarks mode). The tool fits, by robust
+least squares: each robot's five zone directions, range bias (relative to the
+robots' average: a bias every sensor shares looks exactly like every board
+being further, so it goes into the boards) and range scale; the zone width
+and frame delay; each board's position and turn; the reading noise, and how
+alike errors are within a frame and from frame to frame. Priors keep each
+near nominal (zone 5 deg, bias 1 cm, scale 3%, board 2 cm / 3 deg). With
+`--calib-results`, the calibration runs' 360 deg spins (firmware 2026-10-18b)
+are used too: the sensor sweeps the boards at every angle, which pins the zone
+directions down. It also fits once without each run (leave-one-run-out):
+replay.py scores a run only with a calibration made without it, and refuses
+otherwise. The spread of those fits (jackknife) is how sure each board and
+sensor setting is; the consider states use it. Files: docs/data-formats.md.
+`tof_use_cal` false makes a setup ignore the calibration.
+
 Simulator results: see "Tested so far".
+
+## Wheel size (engine.py `wheel_scale`, ekf.py, graph.py)
+
+The wheels report distance with the nominal 1.7 cm radius; real wheels are a
+little bigger or smaller and slip a little, so every robot's odometry reads a
+few percent long or short. With `wheel_scale` on, the filter learns this for
+each robot: one more number, the wheel scale k (wheels report k x the true
+distance), starting at 1 (or at the calibration run's measured
+`wheel_scale`, below) give or take 3%, allowed to drift slowly (0.05% per
+second). Only a position sensor (camera, landmark ranging) can teach it;
+with wheels and gyro alone nothing measures it and it stays exactly at its
+start, so it cannot drift on its own (checked in the unit tests). A robot's
+next run starts from what its previous run learned (`scale_carry`). The
+factor graph treats k as one more unknown per run. `turn_scale` does the same
+for the wheels' turn rate; it made wheels + gyro worse in every test (3.3 ->
+4.0 cm, the turn scrub varies turn to turn) and stays off.
+
+Simulation (36-run E1 sessions, seeds 7 and 11 for each level, robots' wheels
+off by the amount shown, boards in the world; measured before the still-test
+change below; end error vs tape / path RMSE, cm):
+
+| setup | 0%: off | 0%: on | 3%: off | 3%: on | 5%: off | 5%: on |
+| --- | --- | --- | --- | --- | --- | --- |
+| wheels + gyro (no position sensor) | 3.66 / 2.15 | same | 3.86 / 2.48 | same | 3.93 / 2.88 | same |
+| + camera | 0.26 / 0.35 | 0.28 / 0.35 | 0.59 / 0.72 | 0.26 / 0.35 | 1.19 / 1.14 | 0.26 / 0.30 |
+| + camera, blocked 5 s | 0.20 / 0.45 | 0.23 / 0.46 | 0.50 / 0.92 | 0.23 / 0.48 | 1.24 / 1.51 | 0.24 / 0.46 |
+| + camera, blocked 20 s | 1.03 / 0.93 | 1.06 / 0.94 | 1.60 / 1.55 | 1.26 / 1.09 | 2.75 / 2.30 | 1.65 / 1.29 |
+| + landmark ranging | 1.09 / 0.86 | 1.07 / 0.85 | 1.22 / 1.14 | 1.08 / 0.87 | 1.37 / 1.45 | 1.12 / 0.83 |
+| + camera + landmark ranging | 0.38 / 0.32 | 0.38 / 0.31 | 0.70 / 0.59 | 0.44 / 0.34 | 0.99 / 0.80 | 0.42 / 0.30 |
+
+**Off by default**, because with exact wheels it costs a little (0.02-0.03
+cm of end error with the camera): the learned k wanders between 1.000 and
+1.012 depending on the route (squares pull it up), so it partly soaks up other
+model errors, probably the heading in turns. Tighter priors (1-1.5%) or no
+drift did not remove that. With wheels 3% or 5% off it more than halves the
+camera's end and path error. Turn it on (`"wheel_scale": true` in a setup)
+once T1 or the calibration runs show wheel-size errors of 1% or more.
+
+**Calibration runs** (firmware 2026-10-18b: 15 cm roll, 360 deg spins): give
+`--calib-results calibration_results.csv` and each robot's `wheel_scale`
+(camera cm / odometry cm, rated ok) becomes its starting k = 1 / wheel_scale,
+give or take its forward/back spread (at least 0.3%), and `gyro_scale`
+multiplies its gyro (`calib_scales`, on; older files have neither column and
+nothing changes). A measured wheel radius per robot (`--wheel-radius
+Left=1.69,...`) also sets the starting k (1.7 / radius) and the wheel speeds
+used by identity and heading from motion.
+
+## Standing still (engine.py `still_mode`)
+
+Zero-velocity updates (the filter is told speed and turn are exactly 0, which
+also pins down the gyro's bias) need a reliable "still". The old test (wheel
+speeds under 0.2 rpm, 0.1 cm/s, 0.5 deg/s) sat below the wheel-speed noise at
+rest: in simulation it passed 13% of truly still rows. Now: still when
+neither wheel's angle (RAW `wl_deg`, `wr_deg`) moved more than 0.75 deg (about
+2 encoder counts) over the last 0.25 s, looking back only. It passes 80% of
+truly still rows; 0.8% of moving rows also pass, almost all in the first
+fraction of a millimetre as the wheels start. Simulation (seed 7 / seed 11,
+end error cm): wheels + gyro 3.35 -> 3.03 / 4.19 -> 3.66, + camera 0.29 ->
+0.29 / 0.55 -> 0.54, camera blocked 20 s 1.02 -> 0.88 / 1.64 -> 1.44,
+landmark ranging 1.05 -> 0.96 / 1.15 -> 1.03, camera in the factor graph
+0.27 -> 0.24 / 0.49 -> 0.47; one setup got worse (wheel distance + gyro
+heading, seed 11: 1.98 -> 2.23). `still_mode: "speed"` gives the old test;
+rows without wheel angles use it anyway.
+
+## Settings from the session's own files
+
+These used to be the simulator's numbers; now they come from the session:
+
+- **Camera view area** (`clutter_cm2` "auto", used by the identity rules):
+  the floor area of `view_floor_polygon_cm` in floor_calibration.json, or its
+  image corners mapped to the floor. Was 19200 cm2 (the simulator's view).
+- **Start-nudge heading noise** (`calib_heading_sigma_deg` "auto"):
+  atan(0.15 px / how far the nudge moved on camera, `moved_px`), so a 2 cm
+  roll seen as 7 px gets 1.2 deg, not 0.8. `--heading-check heading_check.csv`
+  sets the 0.15 px from the spread measured on this setup;
+  `start_nudge_heading_deg` in a `--noise-file` fixes it outright.
+- **Frame rate**: from the recording's frames.csv, else its meta.json, else
+  25 (was 30).
+- **Video clock**: `<recording>/video_clock.json` (tools/check_session.py),
+  with its drift when it says `use_drift`; `--video-offset` still wins.
+- **Camera, camera-heading and blink-light noise** (were 0.8 cm, 8 deg,
+  0.5 cm): `--noise-file measured_noise.json` (tools/accuracy_checks.py;
+  docs/data-formats.md).
+- **Wheel radius**: per robot, `--wheel-radius` (see Wheel size).
 
 ## Camera height
 
@@ -376,12 +562,16 @@ interval), since a setup can help on squares and not on straights.
 - The factor graph here smooths a whole run after the fact. A live
   sliding-window version for the Pi comes with E6.
 - Landmark ranging: tested in simulation only, where the sensor model is
-  itself a guess (3 rays per zone, 15 frames/s, 0.5 cm + 1% noise). The five
-  zones and successive frames are treated as independent; a shared error
-  (sensor mounted a little turned, a board's position off) is counted many
-  times over. Zone directions, the sensor's offset, the noise and the zone
-  footprint (`tof_zone_width_deg`) are chosen, not measured. The filter has
-  no wheel-size state, so with wheels reading 5% long a lag of about 0.9 cm
-  stays while driving at a board (unit test). Circles in map.json are not
-  landmarks. The association check (+-5.5 deg) may be stricter than needed:
-  switched off, the seed 7 path error was 0.74 instead of 0.84 cm.
+  itself a guess (3 rays per zone, 15 frames/s, 0.5 cm + 1% noise). Without
+  options the five zones and successive frames are treated as independent;
+  `tof_consider` carries the shared errors, but only per face, per robot range
+  bias and per robot mount turn; errors particular to one zone and one face
+  are covered only by widening (`systematic_cm`). Circles in map.json are not
+  landmarks. The association check (+-5.5 deg) may be stricter than needed.
+- tof_calib.py: a robot's range bias and scale trade off against the board
+  positions (only partly separable without the calibration spins); a bias all
+  robots share goes into the boards. Its reference is the camera path, so any
+  camera error (floor calibration, video clock) goes into the calibration.
+  Graph setups with `tof_consider` often hit the solver's step limit.
+- Wheel size: one scale per robot for both wheels; a left/right difference
+  (which curves the path) is not a state. Off by default (see Wheel size).

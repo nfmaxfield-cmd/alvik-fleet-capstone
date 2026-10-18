@@ -137,6 +137,12 @@ class Robot(FollowMixin):
         self.rL = m.wheel_radius_cm * scale * (1 - mism / 2)
         self.rR = m.wheel_radius_cm * scale * (1 + mism / 2)
         self.track = m.wheel_track_cm * (1 + uniform_pm(rng, m.track_err_pct) / 100)
+        if name in m.radius_scale_err_pct_by_robot:          # exact values for tests (the draws above still
+            scale = 1 + m.radius_scale_err_pct_by_robot[name] / 100     # happen, so the random stream is unchanged)
+            self.rL = m.wheel_radius_cm * scale * (1 - mism / 2)
+            self.rR = m.wheel_radius_cm * scale * (1 + mism / 2)
+        if name in m.track_err_pct_by_robot:
+            self.track = m.wheel_track_cm * (1 + m.track_err_pct_by_robot[name] / 100)
         self.gyro_scale = uniform_pm(rng, im.gyro_scale_err_pct) / 100
         self.gyro_bias = rng.gauss(0, im.gyro_bias_dps)
         self.acc_bias = [rng.gauss(0, im.accel_bias_g) for _ in range(3)]
@@ -458,7 +464,10 @@ class Robot(FollowMixin):
         others = self.others() if self.others else None
         out = []
         w = t.zone_width_deg / 3.0
-        for ang in t.zone_angles_deg:
+        errs = t.zone_angle_err_deg_by_robot.get(self.name) or [0.0] * len(t.zone_angles_deg)
+        bias, scale = t.range_err_by_robot.get(self.name) or (0.0, 0.0)
+        for ang, err in zip(t.zone_angles_deg, errs):
+            ang = ang + err
             d = min(self._tof_true(ang + k * w, others, pose) for k in (-1, 0, 1)) if w > 0 else \
                 self._tof_true(ang, others, pose)
             if d >= t.max_range_cm:
@@ -466,7 +475,7 @@ class Robot(FollowMixin):
             elif d < t.min_range_cm:
                 out.append(rng.uniform(0.0, t.min_range_cm))
             else:
-                out.append(max(0.0, d + rng.gauss(0, t.noise_cm + d * t.noise_pct / 100)))
+                out.append(max(0.0, d * (1 + scale / 100) + bias + rng.gauss(0, t.noise_cm + d * t.noise_pct / 100)))
         self._tof_vals = out
         if self.cfg.session.board_cm:
             fr = pose if pose is not None else (self.x, self.y, self.th)
