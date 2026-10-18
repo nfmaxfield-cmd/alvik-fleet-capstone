@@ -136,6 +136,24 @@ in each frame is the average over a 12 ms exposure. Detections: 1.5 px noise,
 3% missed (60% when a hand covers the robot), false alarms on hands, boxes and
 random clutter, and an optional `blind_region_px` where nothing is detected.
 
+**Start spots** (ported from branch follow-18b): optional sheet columns
+start_x_cm, start_y_cm, start_heading_deg give that row its own start spot.
+
+**Front distance sensor** (ported from follow-18b). Free-running at `tof.hz`
+(15) frames a second: a reading is the newest frame, measured from where the
+robot was when the frame was taken (on average 33 ms old). Each of the five
+zones reports the nearest thing on 3 rays across its `zone_width_deg` (11 deg)
+slice. Below `min_range_cm` (2) the reading is any value under 2 cm. It sees
+the room walls plus boards and obstacles from `simulate.py --map map.json`.
+
+**Known errors on purpose** (for testing the fusion's wheel-size and sensor
+calibration): `robot.radius_scale_err_pct_by_robot` ({"Left": -5}: Left's
+wheels 5% smaller than nominal, so its odometry reads about 5% long) and
+`robot.track_err_pct_by_robot` replace the random draws for the robots listed;
+`tof.zone_angle_err_deg_by_robot` ({"Left": [dL, dCL, dC, dCR, dR]} degrees,
+left positive) turns each zone, and `tof.range_err_by_robot` ({"Left": [bias
+cm, scale %]}) adds a range error. All empty by default.
+
 ## Assumed numbers (replace with measurements)
 
 Every number below is a guess unless marked "firmware". All of them are in
