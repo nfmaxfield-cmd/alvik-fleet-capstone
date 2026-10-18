@@ -104,12 +104,12 @@ the robot in the camera's view but off its mark. This is a logged calibration
 run (about 10 s): the robot stands still blinking its own light code (who is
 who), rolls a few cm forward and back (which way it faces, seen by the
 camera), then wiggles to check its compass direction. It doesn't end exactly
-where it started, so place the robot on its mark afterwards. Turn, demo and
-straight runs then refuse to start until a robot has been calibrated since
+where it started, so place the robot on its mark afterwards. Turn, grid, demo
+and straight runs then refuse to start until a robot has been calibrated since
 power-on (run_sheet.py does this for you).
 
 **During runs (firmware 2026-10-17e+):** both top lights blink the robot's
-code (Left 1 pulse, Center 2, Right 3, every 1.5 s) so the camera can find
+code (short pulses: Left 1, Center 2, Right 3, every 1.8 s; firmware 2026-10-17g+) so the camera can find
 and name it on any floor; `set blink_codes 0` turns it off. Turn, demo and
 straight runs also roll `start_nudge_cm` (2 cm) forward and back right after
 the start flash, so the camera sees which way the robot faces; `set

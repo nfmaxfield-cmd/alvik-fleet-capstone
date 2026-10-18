@@ -28,7 +28,7 @@
 Arduino_Alvik alvik;
 
 // Bump this whenever the firmware changes, so every logged run says which code it ran.
-#define FW_VERSION "2026-10-17f"
+#define FW_VERSION "2026-10-17g"
 
 uint16_t gBootId = 0;   // random each power-on; starts every run id
 
@@ -254,7 +254,7 @@ bool needsYawSign(int i) { return i == 1 || i == 3 || i == 4 || i == 5; }
 // 4 the compass wiggle (gyro sign, on the robot), 5 settling.
 void runCalib() {
   net::logf("M,%s calibration: blinking %d pulses, rolling forward and back, then a small wiggle",
-            net::name, blink::code);
+            net::name, blink::codeFor(net::name));
   float n = fmaxf(3.0f, P("start_nudge_cm"));
   rawlog::step = 1;
   if (!waitMs((unsigned long)P("calib_blink_ms"))) return;
@@ -299,7 +299,7 @@ void runExperiment(int i, bool fromButton) {
   gRunId = id;
   gAbortReason = "";
   gFail = "";
-  gSelected = i;
+  if (i != EXP_CALIB) gSelected = i;   // keep showing the chosen experiment after a calibration
   showSelection(true);
   net::logf("M,run %s: %s starting", gRunId.c_str(), EXP_NAMES[i]);
   bool logged = i != 0;   // the stream experiment is its own log
