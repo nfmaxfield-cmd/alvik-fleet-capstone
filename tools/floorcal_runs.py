@@ -255,6 +255,23 @@ def survey_pairs(runs, dets, offset, paths, axle_to_centre_cm=0.0, led_offset_cm
     return out
 
 
+def end_mark_pairs(runs, dets, offset, robot_top_cm=4.0, led_offset_cm=None, session=""):
+    """Survey pairs from the runs' tape END marks (robot sitting still after the
+    run, median detection): absolute floor points (kind 'tape_end'), not moved by
+    the start-pose / clock refinement. Grouped by run like the path pairs, so in
+    the held-out calibrations a run's own end marks never calibrate the camera
+    that scores it."""
+    pts, notes = still_points(runs, dets, offset, robot_top_cm, led_offset_cm)
+    out = []
+    for p in pts:
+        if not p["spot"].endswith("-end"):
+            continue
+        out.append(dict(u=p["u"], v=p["v"], x_cm=p["x"], y_cm=p["y"], vx_cms=0.0, vy_cms=0.0, sigma_cm=TAPE_XY_CM,
+                        run=p["group"], t=0.0, frame=p["frame"], kind="tape_end", anchor_x_cm=p["x"],
+                        anchor_y_cm=p["y"], session=session))
+    return out, notes
+
+
 def write_pairs(path, pairs):
     """Accumulate survey pairs across sessions: rows of runs in `pairs` replace earlier rows of those runs."""
     old = []
@@ -361,7 +378,8 @@ def fit_survey(pairs, size, height_cm=None, nadir=None, f_px=None, k1_mode="off"
     sess = np.array([str(p.get("session", "")) for p in pairs])
     sess_u = sorted(set(sess))
     si = np.array([sess_u.index(s) for s in sess])
-    frame_key = np.array([f"{p['run']}:{p['frame']}" for p in pairs])
+    absolute = np.array([p.get("kind") == "tape_end" for p in pairs])   # tape end marks: not moved by refinement
+    frame_key = np.array([f"{p['run']}:{p['frame']}" + (":end" if a else "") for p, a in zip(pairs, absolute)])
     z = robot_top_cm
     warnings = []
     hc, hc_src = height_cm, ("tape (given)" if height_cm else None)
@@ -372,8 +390,8 @@ def fit_survey(pairs, size, height_cm=None, nadir=None, f_px=None, k1_mode="off"
     corr = np.zeros(3 * len(runs_u) + len(sess_u))   # per run dx, dy, dth (rad); per session dt (s)
 
     def targets(corr):
-        d = corr[:3 * len(runs_u)].reshape(-1, 3)[ri]
-        dt = corr[3 * len(runs_u):][si]
+        d = corr[:3 * len(runs_u)].reshape(-1, 3)[ri] * (~absolute)[:, None]
+        dt = corr[3 * len(runs_u):][si] * (~absolute)
         q = fl0 + vel * dt[:, None] - anc
         cs, sn = np.cos(d[:, 2]), np.sin(d[:, 2])
         return anc + np.c_[cs * q[:, 0] - sn * q[:, 1], sn * q[:, 0] + cs * q[:, 1]] + d[:, :2]
@@ -484,11 +502,14 @@ def fit_survey(pairs, size, height_cm=None, nadir=None, f_px=None, k1_mode="off"
         per_run[str(rid)] = dict(pairs=int((run_ids == rid).sum()), used=int(m.sum()),
                                  rms_cm=round(cf._rms(err[m]), 3) if m.any() else None,
                                  start_shift_cm=[round(float(cr[k, 0]), 2), round(float(cr[k, 1]), 2)],
-                                 start_turn_deg=round(math.degrees(cr[k, 2]), 2))
-    s_used = sig[mask]
-    early = mask & (sig <= np.median(s_used))
-    late = mask & (sig > np.median(s_used))
-    area = list(area or cf.DEFAULT_AREA)
+                                 start_turn_deg=round(math.degrees(cr[k, 2]), 2),
+                                 end_mark_err_cm=(round(float(err[(run_ids == rid) & absolute][0]), 3)
+                                                  if ((run_ids == rid) & absolute).any() else None))
+    path = mask & ~absolute
+    s_used = sig[path] if path.any() else sig[mask]
+    early = path & (sig <= np.median(s_used))
+    late = path & (sig > np.median(s_used))
+    area = list(area or cf.default_area())
     cov, far = cf.coverage(tg[mask], area)
     if cov < 0.5:
         warnings.append(f"the survey path covers only {cov * 100:.0f}% of the area {area}: the mapping is "
@@ -510,17 +531,19 @@ def fit_survey(pairs, size, height_cm=None, nadir=None, f_px=None, k1_mode="off"
                                                     for k, s in enumerate(sess_u)},
                             weighted_rms_cm=round(float(np.sqrt(np.sum(w[mask] * err[mask] ** 2) / np.sum(w[mask]))), 3),
                             rms_early_cm=round(cf._rms(err[early]), 3), rms_late_cm=round(cf._rms(err[late]), 3),
-                            path_sigma_cm_median=round(float(np.median(s_used)), 3), refined=bool(refine)))
+                            path_sigma_cm_median=round(float(np.median(s_used)), 3), refined=bool(refine),
+                            end_marks_used=int((mask & absolute).sum())))
 
 
-def survey_error(res, pairs, run):
+def survey_error(res, pairs, run, kind=None):
     """A run's pairs under a calibration that did not use them (held-out check):
-    median and RMS floor error (cm) of its pairs after one-per-frame, ignoring > 10 cm."""
+    median and RMS floor error (cm) of its path pairs (or kind='tape_end': its end
+    mark) after one-per-frame, ignoring > 10 cm."""
     import calibrate_floor as cf
     cal = cf.to_calibration(res)
     e = {}
     for p in pairs:
-        if p["run"] != run:
+        if p["run"] != run or (p.get("kind") == "tape_end") != (kind == "tape_end"):
             continue
         x, y = cf.to_floor(cal, p["u"], p["v"], 4.0 if res.get("height_cm") else 0.0)
         d = math.hypot(x - p["x_cm"], y - p["y_cm"])

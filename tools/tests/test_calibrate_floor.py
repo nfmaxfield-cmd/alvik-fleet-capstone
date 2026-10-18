@@ -59,11 +59,24 @@ def test_points_on_one_line_refused():
         cf.fit(clicks(cam, [(0, 0), (10, 0), (0, 10)]), (640, 480))
 
 
+E01_AREA = [-10, -40, 130, 60]     # the simulated camera views the E01 floor
+
+
 def test_coverage_warning_for_axes_only():
-    res = cf.fit(clicks(Cam(), AXES), (640, 480), k1_mode="off")
+    res = cf.fit(clicks(Cam(), AXES), (640, 480), k1_mode="off", area=E01_AREA)
     assert any("cover only" in w for w in res["warnings"])
-    res = cf.fit(clicks(Cam(), SPREAD + [(130, 60), (-10, 60), (130, -40), (-10, -40)]), (640, 480), k1_mode="off")
+    res = cf.fit(clicks(Cam(), SPREAD + [(130, 60), (-10, 60), (130, -40), (-10, -40)]), (640, 480), k1_mode="off",
+                 area=E01_AREA)
     assert not any("cover only" in w for w in res["warnings"])
+
+
+def test_default_area_from_fleet_map(tmp_path):
+    p = tmp_path / "map.json"
+    assert cf.default_area(str(p)) == [0.0, 0.0, 122.0, 122.0]          # no map: the plywood default
+    p.write_text(json.dumps({"floor": {"x_min": -5, "x_max": 118.5, "y_min": 0, "y_max": 121}}))
+    assert cf.default_area(str(p)) == [-5.0, 0.0, 118.5, 121.0]
+    p.write_text(json.dumps({"floor": {"x_min": 5, "x_max": 1}}))      # broken: fall back
+    assert cf.default_area(str(p)) == [0.0, 0.0, 122.0, 122.0]
 
 
 def test_robot_top_points_need_and_use_camera_height():

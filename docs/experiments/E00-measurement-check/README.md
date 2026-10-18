@@ -45,8 +45,9 @@ position and 0.5 deg in heading (a tenth of the 5 cm target).
    find a frame where the robot sits still, click the centre of its top. Fix or
    untick red points, then Save calibration. It writes floor_calibration.json,
    floor_calibration_check.jpg (grid should sit on the tape) and, because the
-   placements helped make it, one held-out calibration per placement row:
-   score the camera on a row only with its file from floor_calibration_loro.csv.
+   placements helped make it, one held-out calibration per spot (both passes
+   at a spot left out together): score the camera on a row only with its
+   spot's file from floor_calibration_loro.csv.
 
 ## Trials
 20 readings: 10 spots x 2 passes. Each pair's difference holds two

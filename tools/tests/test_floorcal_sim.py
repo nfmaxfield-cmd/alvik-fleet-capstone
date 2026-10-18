@@ -71,6 +71,25 @@ def test_cli_survey_and_loro(moved_sim, tmp_path):
         held = json.loads((tmp_path / row["calibration"]).read_text())
         assert row["run_id"] not in held["fit"]["used_runs"]
         assert float(row["heldout_path_median_cm"]) < 3.0
+        # its own end mark, not used for its file (only 4 runs here: with the one straight run held out, its
+        # end at x = 120 cm is extrapolated, so this is loose)
+        assert float(row["heldout_end_mark_err_cm"]) < 5.0
+    assert cal["fit"]["survey"]["end_marks_used"] >= 3
+
+
+def test_survey_end_marks_are_absolute_and_help(moved_sim):
+    sim, off = moved_sim
+    cam = TrueCam(str(sim / "floor_calibration.json"))
+    runs, _ = fr.rn.load_runs(str(sim / "session"), str(sim / "measurements.csv"))
+    dets = fr.read_detections(str(sim / "camera_detections.csv"))
+    pairs = fr.survey_pairs(runs, dets, off, fr.odometry_paths(runs))
+    ends, _ = fr.end_mark_pairs(runs, dets, off)
+    assert len(ends) >= 3 and all(p["kind"] == "tape_end" for p in ends)
+    e0 = floor_error(cf.to_calibration(fr.fit_survey(pairs, (cam.W, cam.H), 140.0, k1_mode="off")), cam, z=4.0)
+    e1 = floor_error(cf.to_calibration(fr.fit_survey(pairs + ends, (cam.W, cam.H), 140.0, k1_mode="off")), cam, z=4.0)
+    # with 6 runs end marks took the mean from 0.57 to 0.41 cm (p95 1.58 -> 1.02); with these 4 runs they are
+    # about even (0.44 vs 0.55), so only check they don't hurt much
+    assert e1.mean() < 1.0 and e1.mean() <= e0.mean() + 0.2, (e0.mean(), e1.mean())
 
 
 def test_still_points_with_axis_clicks(moved_sim):

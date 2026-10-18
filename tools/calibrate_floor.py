@@ -38,9 +38,13 @@ No clicking (needs the console log folder --session, the runs' tape sheet
     python tools/calibrate_floor.py <recording> --survey --session logs/<x> \
         --sheet <sheet> --detections <recording>/detections.csv --height-cm 140
 
+Survey also uses each run's tape END marks (robot sitting still after the run)
+as absolute points when the sheet has them (--no-end-marks: start marks only).
+
 Circularity: a calibration made from runs must not be used to score the camera
 against those same runs. Whenever points or pairs come from two or more runs
-(or placement rows), floor_calibration_loro/<run>.json (made WITHOUT that run;
+(or E00 placement spots: both passes at a spot are one group, left out
+together), floor_calibration_loro/<run>.json (made WITHOUT that run;
 --folds k for k-fold) and floor_calibration_loro.csv (which file scores which
 run, with that run's held-out error) are written too; tools/fusion/runs.py
 --calib-per-run uses them.
@@ -86,7 +90,22 @@ try:
 except ImportError:
     sys.exit("OpenCV is missing. Install it with: pip install opencv-python")
 
-DEFAULT_AREA = [-10.0, -40.0, 130.0, 60.0]   # E01's clear floor: x -10..130, y -40..60 cm
+DEFAULT_AREA = [0.0, 0.0, 122.0, 122.0]      # the plywood floor, about 122 x 122 cm (until measured)
+FLEET_MAP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fleet", "map.json")
+
+
+def default_area(map_path=FLEET_MAP):
+    """The floor the robots use, cm [x0, y0, x1, y1]: tools/fleet/map.json's floor
+    bounds if that file exists, else DEFAULT_AREA."""
+    try:
+        with open(map_path) as f:
+            fl = json.load(f)["floor"]
+        a = [float(fl["x_min"]), float(fl["y_min"]), float(fl["x_max"]), float(fl["y_max"])]
+        if a[2] > a[0] and a[3] > a[1]:
+            return a
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return list(DEFAULT_AREA)
 ROBOT_TOP_CM = 4.0
 RANSAC_PX = 6.0           # a click this far (px) from the fit counts as an outlier (about 1.5 cm)
 MIN_RANSAC_POINTS = 6     # fewer points than this: no RANSAC (a bad click can't be told apart)
@@ -377,7 +396,7 @@ def fit(points, size, height_cm=None, nadir=None, k1_mode="auto", area=None, ran
     if k1 == 0 and edge.sum() >= 3 and mid.sum() >= 3 and _rms(err[edge]) > 2 * _rms(err[mid]) and _rms(err[edge]) > 0.5:
         warnings.append(f"points near the image edges fit worse ({_rms(err[edge]):.2f} cm RMS) than near the centre "
                         f"({_rms(err[mid]):.2f} cm): lens distortion? Try --k1 fit (or more edge points with --k1 auto).")
-    area = list(area or DEFAULT_AREA)
+    area = list(area or default_area())
     cov, far = coverage(xy[mask], area)
     if cov < 0.6:
         warnings.append(f"the points cover only {cov * 100:.0f}% of the robots' area x {area[0]:g}..{area[2]:g}, "
@@ -616,6 +635,8 @@ def summary_text(res):
     lines.append(f"Points cover {res['coverage'] * 100:.0f}% of the area {res['area']}.")
     sv = res.get("survey")
     if sv:
+        if sv.get("end_marks_used"):
+            lines.append(f"Survey used {sv['end_marks_used']} tape end marks (absolute points).")
         lines.append(f"Survey: path error weighted RMS {sv['weighted_rms_cm']} cm; early half of the paths "
                      f"{sv['rms_early_cm']} cm, later half {sv['rms_late_cm']} cm. Video clock refined by "
                      + ", ".join(f"{v:+.0f} ms" for v in sv["sessions"].values()) + ".")
@@ -842,7 +863,7 @@ class App:
         s = self.settings
         try:
             res = fit(self.points, self.src.size, s.get("height_cm"), s.get("nadir_floor_cm"),
-                      parse_k1(s.get("k1", "auto")), s.get("area") or DEFAULT_AREA)
+                      parse_k1(s.get("k1", "auto")), s.get("area") or default_area())
         except FitError as e:
             return None, str(e)
         return res, None
@@ -875,7 +896,7 @@ class App:
             def fit_without(excl):
                 return fit([p for p in self.points if str(p.get("group")) not in excl], self.src.size,
                            s.get("height_cm"), s.get("nadir_floor_cm"), parse_k1(s.get("k1", "auto")),
-                           s.get("area") or DEFAULT_AREA)
+                           s.get("area") or default_area())
             write_loro(self.out_path, groups, fit_without, points_heldout(self.points), self.folds,
                        source=cal["source"], log=msg.append)
         return dict(ok=True, path=os.path.abspath(self.out_path), check=check,
@@ -1000,7 +1021,8 @@ def main(argv=None):
     ap.add_argument("--nadir", type=parse_pair, help="floor x,y (cm) straight below the lens (plumb line)")
     ap.add_argument("--robot-top-cm", type=float, help=f"height of the robot's top, cm (default {ROBOT_TOP_CM})")
     ap.add_argument("--k1", help="lens term: auto (default; kept only if it clearly helps), off, fit, or a number")
-    ap.add_argument("--area", help="x0,y0,x1,y1 cm: the floor the robots use (default E01's -10,-40,130,60)")
+    ap.add_argument("--area", help="x0,y0,x1,y1 cm: the floor the robots use (default: tools/fleet/map.json's floor "
+                                   "bounds if it exists, else 0,0,122,122)")
     ap.add_argument("--points", help="points file (default floor_points.json beside the output); share one "
                                      "across sessions to accumulate (only while the camera stays put)")
     ap.add_argument("--out", help="output (default floor_calibration.json in the recording folder)")
@@ -1020,6 +1042,8 @@ def main(argv=None):
                    help="survey: robot centre this far ahead of the wheel axle (odometry tracks the axle)")
     g.add_argument("--intrinsics", help="survey without a camera height: an earlier floor_calibration.json of this "
                                         "webcam; its f_px (and k1) give the height")
+    g.add_argument("--no-end-marks", action="store_true",
+                   help="survey: don't use the runs' tape end marks (by default they are used, held out per run)")
     g.add_argument("--max-path-sigma-cm", type=float, default=3.0,
                    help="survey: stop using a path once its uncertainty passes this")
     args = ap.parse_args(argv)
@@ -1039,7 +1063,7 @@ def main(argv=None):
     dets = read_detections(args.detections) if (args.detections and not auto) else None
     app = App(src, pts_path, out, settings, spots, events, dets)
     app.folds = args.folds
-    for k, v in (("robot_top_cm", ROBOT_TOP_CM), ("k1", "auto"), ("area", DEFAULT_AREA)):
+    for k, v in (("robot_top_cm", ROBOT_TOP_CM), ("k1", "auto"), ("area", default_area())):
         if app.settings.get(k) is None:
             app.settings[k] = v
     if spots:
@@ -1088,6 +1112,13 @@ def survey_main(args, app, folder, out):
     session = os.path.basename(os.path.normpath(args.session))
     new = fr.survey_pairs(runs, rdets, off, paths, args.axle_to_centre_cm, args.led_offset_cm,
                           args.max_path_sigma_cm, session=session)
+    if not args.no_end_marks:
+        ends, notes = fr.end_mark_pairs(runs, rdets, off, s["robot_top_cm"], args.led_offset_cm, session=session)
+        for n in notes:
+            if "end" in n or "WARNING" in n:
+                print("  " + n)
+        new += ends
+        print(f"{len(ends)} tape end marks added (each held out with its own run in the per-run calibrations)")
     pairs_path = os.path.join(os.path.dirname(os.path.abspath(out)), "survey_pairs.csv")
     fr.write_pairs(pairs_path, new)
     pairs = fr.read_pairs(pairs_path)
@@ -1121,8 +1152,10 @@ def survey_main(args, app, folder, out):
 
     def heldout(r, g):
         med, rms = fr.survey_error(r, pairs, g)
+        end, _ = fr.survey_error(r, pairs, g, kind="tape_end")
         return dict(heldout_path_median_cm=None if med is None else round(med, 3),
-                    heldout_path_rms_cm=None if rms is None else round(rms, 3))
+                    heldout_path_rms_cm=None if rms is None else round(rms, 3),
+                    heldout_end_mark_err_cm=None if end is None else round(end, 3))
     write_loro(out, [p["run"] for p in pairs], fit_without, heldout, args.folds, source=cal["source"])
 
 
@@ -1239,7 +1272,7 @@ cv.addEventListener('click',async e=>{const[u,v]=evPx(e);const uv={u:+u.toFixed(
   const s=S.spots.find(s=>s.key==selSpot);if(!s){alert('Pick a placement in the list first.');return}
   let note='';if(S.has_dets){const r=await j(`/api/snap?frame=${frame}&u=${uv.u}&v=${uv.v}`);if(r.snap&&!e.shiftKey){uv.u=+r.snap[0].toFixed(2);uv.v=+r.snap[1].toFixed(2);note=` (detector median of ${r.snap[2]}, spread ${r.snap[3].toFixed(1)} px)`}}
   const pts=S.points.filter(p=>p.spot!=s.key);   // re-clicking a placement replaces its point
-  pts.push({id:nextId(),kind:'robot',u:uv.u,v:uv.v,x:s.x,y:s.y,z:readSettings().robot_top_cm,frame:frame,spot:s.key,group:'row '+s.order,label:`#${s.order} ${s.which} ${s.level}`+note,enabled:true});
+  pts.push({id:nextId(),kind:'robot',u:uv.u,v:uv.v,x:s.x,y:s.y,z:readSettings().robot_top_cm,frame:frame,spot:s.key,group:s.level?'spot '+s.level:'row '+s.order,label:`#${s.order} ${s.which} ${s.level}`+note,enabled:true});
   await change(pts);const i=S.spots.findIndex(t=>t.key==s.key);const nx=S.spots.slice(i+1).find(t=>!S.points.some(p=>p.spot==t.key));if(nx)pickSpot(nx.key)});
 function nextId(){return S.points.reduce((m,p)=>Math.max(m,p.id),0)+1}
 function suggest(){const f=S.points.filter(p=>p.kind=='floor');if(f.length>=2){const a=f[f.length-2],b=f[f.length-1];return `${+(2*b.x-a.x).toFixed(2)}, ${+(2*b.y-a.y).toFixed(2)}`}return ''}
