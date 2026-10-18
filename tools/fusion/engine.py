@@ -42,7 +42,7 @@ DEFAULT = dict(
     cam_latency_s=0.0,        # camera fixes reach the filter this late
     cam_heading=True,         # use the detector's heading when it gives one
     gate_chi2=13.8,           # possible-area size (chi-square, 2 dof, 99.9%)
-    vmax=30.0,                # cm/s, fastest an Alvik can move
+    vmax="auto",              # cm/s, fastest a robot can move; auto = 1.5x the fastest wheel speed in the data + 5
     confirm_hits=5,           # an unknown object is real after this many sightings...
     confirm_window_s=0.5,     # ...within this long
     start_from="tape",        # tape: start at the measured start pose; camera: find it
@@ -82,6 +82,16 @@ def wheel_turn_signs(runs):
                 a += w * d
         acc[run.robot] = a
     return {robot: (-1.0 if a < 0 else 1.0) for robot, a in acc.items()}
+
+
+def fastest_speed(runs):
+    """Top speed (cm/s) for the "possible area" rule, from the robots' own
+    wheel speeds, with room to spare for slips and pushes."""
+    top = 0.0
+    for run in runs:
+        for r in run.raw:
+            top = max(top, abs(fnum(r.get("v_cms"))))
+    return max(15.0, 1.5 * top + 5.0)
 
 
 def gyro_factors(runs, wsign=None):
@@ -268,6 +278,8 @@ def run_engine(runs, detections, cfg, gyro_f=None):
     information would have reached the robots. Returns robot run_id -> Tracked,
     and the unknown-object tracker."""
     rng = random.Random(cfg["seed"])
+    if cfg["vmax"] == "auto":
+        cfg = dict(cfg, vmax=fastest_speed(runs))
     wsign = wheel_turn_signs(runs)
     gyro_f = gyro_f or gyro_factors(runs, wsign)
     use_cam = "camera" in cfg["sensors"] and detections
