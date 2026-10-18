@@ -292,3 +292,38 @@ def test_run_sheet_reads_the_calib_look_skip_columns():
     assert sc.calib_outcome("done", look) == sc.CALIB_LIMITED
     assert sc.calib_outcome_text("done", look) == "limited (no room)"
     assert sc.calib_outcome("failed:spin timed out", look) == sc.CALIB_FAILED
+
+
+def test_limited_runs_are_left_out_and_counted(tmp_path):
+    """Runs the edge guard stopped before an open plywood edge ("limited: plywood edge", set by run_sheet.py):
+    left out of every statistic, counted apart; one whose log says limited but whose row wasn't marked too."""
+    import session_checks as sc
+    assert sc.run_outcome("done") == sc.CALIB_DONE
+    assert sc.run_outcome("limited:plywood edge") == sc.CALIB_LIMITED
+    assert sc.run_limit_reason("limited:plywood edge") == "plywood edge"
+    assert sc.run_outcome("stopped:cancel button") == sc.CALIB_FAILED and sc.run_outcome(None) == sc.CALIB_FAILED
+    assert sc.calib_outcome_text("limited:plywood edge", None) == "limited (plywood edge)"
+    d = tmp_path / "E01" / "data"
+    d.mkdir(parents=True)
+    cols = ["order", "robot", "level", "run_id", "target_x_cm", "target_y_cm", "target_heading_deg",
+            "xf_cm", "yf_cm", "xr_cm", "yr_cm", "excluded", "note"]
+    marks = dict(xf_cm="34.75", yf_cm="0", xr_cm="25.25", yr_cm="0")
+    rows = [dict(order=1, robot="Left", level="straight30", run_id="A-1", target_x_cm=30, target_y_cm=0,
+                 target_heading_deg=0, **marks),
+            dict(order=2, robot="Left", level="straight30", run_id="A-2", excluded="1", note="limited: plywood edge"),
+            dict(order=3, robot="Left", level="straight30", run_id="A-3", target_x_cm=30, target_y_cm=0,
+                 target_heading_deg=0, note="limited: plywood edge (measured anyway)", **marks),
+            dict(order=4, robot="Left", level="straight30", run_id="A-4", excluded="1", note="slipped")]
+    with open(d / "measurements.csv", "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=cols)
+        w.writeheader()
+        w.writerows(rows)
+    trials = tr.load_trials(str(tmp_path / "E01"))
+    assert [t["order"] for t in trials] == ["1"]
+    assert [r["order"] for r in tr.limited_trials(str(tmp_path / "E01"))] == ["2", "3"]
+    e = ac.Experiment(str(tmp_path / "E01"), "t1")
+    assert len(e.trials) == 1 and len(e.limited) == 2
+    # a measured, unmarked row whose RUNEND says limited is left out too
+    e.runs["A-1"] = SimpleNamespace(result="limited:plywood edge")
+    e.drop_limited()
+    assert e.trials == [] and len(e.limited) == 3

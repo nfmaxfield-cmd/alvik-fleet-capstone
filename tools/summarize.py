@@ -191,7 +191,8 @@ def summarize_grid(folders):
         if r["result"] == "done":
             key = (r.get("robot", "-"), r["route"], r["base_rpm"], r["stop_ms"])
             by[key + (r["mode"],)].append(num(r["total_ms"]) / 1000)
-    skipped = sum(1 for r in rows if r["result"] != "done")
+    limited = sum(1 for r in rows if r["result"].startswith("limited:"))   # edge guard: not a failure
+    skipped = sum(1 for r in rows if r["result"] != "done") - limited
     out = []
     for (robot, route, rpm, stop_ms, mode), vals in sorted(by.items()):
         m, sd, n = mean_sd(vals)
@@ -199,6 +200,8 @@ def summarize_grid(folders):
     table(["robot", "route", "rpm", "stop_ms", "mode", "runs", "mean_s", "sd_s"], out)
     if skipped:
         print(f"  ({skipped} unfinished runs left out)")
+    if limited:
+        print(f"  ({limited} runs limited (plywood edge: the edge guard stopped them) left out, counted apart)")
     for key in sorted({k[:4] for k in by}):
         robot, route, rpm, stop_ms = key
         a, b = by.get(key + ("0",), []), by.get(key + ("1",), [])

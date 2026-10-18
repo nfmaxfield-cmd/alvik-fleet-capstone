@@ -30,7 +30,7 @@ then the robot's own columns:
 | survey_end.csv | run,result,legs,path_cm,return_cm,x_cm,y_cm,th_deg,total_ms,size_cm,battery: `result` done, done:blocked (a leg ended at an obstacle, then it drove back), failed:..., aborted:...; x,y,th = own pose at the end (0,0,0 = back exactly where it started, by its own reckoning) |
 | calib_look.csv | `calib` runs (2026-10-18c+), one row: run,spun,near_cm,heading_deg,turn_deg,room_cm,cap_cm,live_cm,roll_cm,result,room8,caps,spin,roll,reason: what the look-around saw and chose, what it did, and what it skipped or cut short and why (sent after the rolls; see "Calibration look-around" and "Calibration outcomes" below) |
 | step.csv | `follow` runs: run,id,state,ms,x_cm,y_cm,th_deg,front_cm,info (see "Step follower" below) |
-| edge.csv | plywood edge guard (firmware 2026-10-18b+, only with `safe_edge` on; edge.h): run,ms,event,lineL,lineC,lineR,baseL,baseC,baseR,dbot_cm,info. `event` base = the line sensors' plywood level learned at the start of the run (base* = each sensor's level; info says when a sensor on tape took the others' level), nobase = it could not be learned (info: all three on tape, or the robot moved too soon): the line cue is off for that run, trip = the guard stopped the robot (info: line sensors / bottom zone; RUNEND says stopped:plywood edge ahead, except in a calibration's forward roll, which rolls back and ends done, limited (plywood edge)). After a trip the guard stays quiet until the wheels are still. line* and dbot_cm are the readings at that moment. Settings: safe_edge (0 off, 1 line sensors, 2 bottom zone, 3 both), edge_dir, edge_thr, edge_max, edge_n, edge_learn_ms, edge_min_rpm, edge_bot_cm, edge_bot_ms (params.h help; tools/edge_check.py recommends them from the E0c edge rows) |
+| edge.csv | plywood edge guard (firmware 2026-10-18b+, only with `safe_edge` on; edge.h): run,ms,event,lineL,lineC,lineR,baseL,baseC,baseR,dbot_cm,info. `event` base = the line sensors' plywood level learned at the start of the run (base* = each sensor's level; info says when a sensor on tape took the others' level), nobase = it could not be learned (info: all three on tape, or the robot moved too soon): the line cue is off for that run, trip = the guard stopped the robot (info: line sensors / bottom zone; RUNEND says limited:plywood edge, not a failure: "Run outcomes" below; in a calibration's forward roll it rolls back and ends done, limited (plywood edge)). After a trip the guard stays quiet until the wheels are still. line* and dbot_cm are the readings at that moment. Settings: safe_edge (0 off, 1 line sensors, 2 bottom zone, 3 both), edge_dir, edge_thr, edge_max, edge_n, edge_learn_ms, edge_min_rpm, edge_bot_cm, edge_bot_ms (params.h help; tools/edge_check.py recommends them from the E0c edge rows) |
 | follow.csv | `follow` runs, follow_log_hz (10) a second: run,ms,step_id,state,queued,last_done,last_failed,x_cm,y_cm,th_deg,pos_sd_cm,th_sd_deg,fixes_used,fixes_rejected,front_cm,travel_cm,quiet_ms (see "Step follower") |
 
 Also in the folder:
@@ -185,10 +185,33 @@ accuracy_checks.py and tools/fleet/run_plan.py):
 | --- | --- | --- |
 | `done` | RUNEND `done`, CALIB_LOOK `reason` empty | everything it tries was measured |
 | `limited (<reason>)`: `limited (no room)`, `limited (plywood edge)`, `limited (no room; plywood edge)` | RUNEND `done`, CALIB_LOOK `reason` not empty | NOT a failure: the robot refused to spin or roll where it had no room, or the edge guard stopped its roll at an open plywood edge. What it did is kept (blink code, compass sign, the spins, and the roll if it made one: a roll cut short at an edge counts when it covered at least `calib_roll_min_cm`); the rest comes from the camera, later runs or a later calibration. calibration_results.csv leaves those values blank with quality `skipped: no room` or `skipped: plywood edge`; run_sheet.py says what was kept and offers `r` to move it and redo, Enter to go on |
-| `failed` | RUNEND `failed:...` or `stopped:...` (a stop command, cancel button, lifted, an obstacle or the edge guard outside the calibration's forward roll), or no RUNEND | it did not finish: calibrate again |
+| `failed` | RUNEND `failed:...` or `stopped:...` (a stop command, cancel button, lifted, an obstacle), or no RUNEND | it did not finish: calibrate again |
 
 Logs from before the spin / roll / reason columns: CALIB_LOOK result
 `no_room` or `no_room_after_turn` with RUNEND `done` counts as limited.
+
+### Run outcomes (every experiment, firmware 2026-10-18c+)
+
+RUNEND `result` is `done`, `limited:plywood edge`, `stopped:<why>` or
+`failed:<why>` (tools/session_checks.py `run_outcome()`: done / limited /
+failed). `limited:plywood edge` = the edge guard (`safe_edge`) stopped the
+robot before it drove off an open edge of the board: the system refused to
+leave the work area, which is not a failure (of localization or anything
+else), but the run did not finish its route. So:
+
+- run_sheet.py says so and asks: Enter marks the row `excluded` = 1 with the
+  note `limited: plywood edge` (r = redo, m = measure it anyway: the note then
+  says `limited: plywood edge (measured anyway)` and it still stays out of
+  the statistics).
+- tape_results.py and accuracy_checks.py leave such rows out of every
+  statistic (a measured row whose RUNEND says limited too) and print how many
+  were left out; check_session.py and summarize.py count them apart from
+  unfinished runs; simulate.py marks them the same way on its sheet.
+- tools/fleet/run_plan.py ends a plan whose follow run was limited with result
+  `limited: ...`, exit code 0.
+
+A calibration run is the exception: its forward roll stopped at an edge rolls
+back and ends `done` (limited (plywood edge) through CALIB_LOOK, above).
 
 Laptop caps (the front sensor cannot see an open plywood edge): the console
 command `set calib_dir_limits <deg> <cm> [<deg> <cm> ...]` (up to 8 pairs;

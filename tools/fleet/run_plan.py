@@ -808,7 +808,10 @@ class Coordinator:
             self.fixes()
             for b in self.bots.values():
                 if b.ended and not self.abort:
-                    self.abort = "%s's follow run ended (%s)" % (b.name, b.ended)
+                    if SC.run_outcome(b.ended) == SC.CALIB_LIMITED:   # not a failure: it refused to leave the board
+                        self.abort = "limited: %s's edge guard stopped it before an open plywood edge" % b.name
+                    else:
+                        self.abort = "%s's follow run ended (%s)" % (b.name, b.ended)
                     self.say(self.abort + ": stopping everyone")
                     self.halt_all()
             if self.abort:
@@ -1109,8 +1112,8 @@ def main(argv=None):
             json.dump(summ, f, indent=1)
         print_summary(summ)
         print("Saved to %s" % outdir)
-    if summ.get("result") != "done":
-        code = code or 1
+    if summ.get("result") != "done" and not str(summ.get("result")).startswith("limited:"):
+        code = code or 1          # a plan cut short at a plywood edge ("limited: ...") is not a failure
     return code
 
 

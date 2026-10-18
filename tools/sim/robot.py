@@ -1283,14 +1283,18 @@ class Robot(FollowMixin):
         self.blink_stop()
         self.sync_flash("end")
         self.raw_on = False
-        result = ("stopped:" + self.abort_reason) if self.abort_reason else \
+        edge_stop = self.abort_reason == "plywood edge ahead"
+        result = "limited:plywood edge" if edge_stop else ("stopped:" + self.abort_reason) if self.abort_reason else \
                  ("failed:" + self.fail) if self.fail else "done"
         self.send("H,RUNEND,run,result,ms_end,duration_ms,battery,wifi_dbm,raw_rows_sent,packets_sent")
         # packets_sent (net::seq) is only known once clock answers are merged in: filled later
         self.send("D,RUNEND,%s,%s,%d,%d,%d,%d,%d,{SEQ}" % (self.run_id, result, self.millis(), self.millis() - t0,
                                                          int(self.battery), self.wifi_dbm(), self.raw_rows))
         ms_end = self.ms
-        if self.abort_reason:
+        if edge_stop:
+            self.send("M,run %s: limited: the edge guard stopped it before an open plywood edge (not a failure; "
+                      "left out of accuracy statistics)" % self.run_id)
+        elif self.abort_reason:
             self.send("M,run %s: stopped (%s)" % (self.run_id, self.abort_reason))
         else:
             self.send("M,run %s: %s finished" % (self.run_id, exp))

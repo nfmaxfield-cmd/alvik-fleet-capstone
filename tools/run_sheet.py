@@ -534,7 +534,26 @@ def main():
                 logf.flush()
                 r["run_id"] = run
                 r["battery_pct"] = res.get("battery", "")
-                if res["result"] != "done":
+                if sc.run_outcome(res["result"]) == sc.CALIB_LIMITED:
+                    # the edge guard refused to drive off the work area: not a localization failure, but the
+                    # run didn't finish its route, so accuracy statistics leave it out (counted apart)
+                    print("  The edge guard stopped it before an open plywood edge. That is not a failure, but the "
+                          "run didn't finish its route, so the accuracy statistics should leave it out.")
+                    a = ask(f"  Press Enter to mark it excluded with the note \"{sc.LIMITED_EDGE_NOTE}\", r to redo "
+                            f"it, or m to measure it anyway: ").lower()
+                    if a == "r":
+                        r["run_id"] = ""
+                        continue
+                    if a != "m":
+                        r["excluded"] = "1"
+                        r["note"] = (r.get("note", "") + " " + sc.LIMITED_EDGE_NOTE).strip()
+                        save_sheet(sheet, cols, rows)
+                        print("  Excluded (limited: plywood edge) and saved.")
+                        i += 1
+                        continue
+                    # measured for the record: the note still keeps it out of the accuracy statistics
+                    r["note"] = (r.get("note", "") + " " + sc.LIMITED_EDGE_NOTE + " (measured anyway)").strip()
+                elif res["result"] != "done":
                     a = ask("  The run didn't finish normally. Measure it anyway (y), redo it (r) or exclude it (x)? ").lower()
                     if a == "r":
                         r["run_id"] = ""

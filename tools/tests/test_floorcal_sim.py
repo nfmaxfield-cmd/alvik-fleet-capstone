@@ -20,6 +20,16 @@ from floorcal_sim_check import TrueCam, click_points
 pytestmark = pytest.mark.skipif(os.environ.get("FLOORCAL_FAST") == "1", reason="FLOORCAL_FAST=1")
 
 
+# Measured spread (firmware 2026-10-18c, CALIB_LOOK after the rolls), seeds 5 / 6 / 7 / 8:
+#   survey, tape height:          mean 0.80 / 1.40 / 0.84 / 0.99 cm, p95 2.23 / 3.33 / 2.60 / 2.66 cm
+#   survey, focal length only:    height 143.4 / 142.3 / 142.9 / 143.0 cm, mean 0.80 / 1.40 / 0.84 / 0.99 cm
+#   survey + end marks:           mean 0.78 / 1.34 / 0.79 / 0.98 cm
+# (earlier firmware: mean 0.7-1.7 cm over seeds 5-10). Bounds: just above the worst seed, mean < 1.5 cm,
+# p95 < 4.0 cm. Survey from only 4 runs with an extreme camera move; headline camera numbers use a
+# click/tape calibration, not survey (ACCURACY-CHECKS B1).
+SPREAD_MEAN_CM, SPREAD_P95_CM = 1.5, 4.0
+
+
 @pytest.fixture(scope="module")
 def moved_sim(tmp_path_factory):
     d = tmp_path_factory.mktemp("sim")
@@ -32,12 +42,10 @@ def moved_sim(tmp_path_factory):
     cfg.write_text(json.dumps(c))
     out = d / "out"
     subprocess.run([sys.executable, os.path.join(TOOLS, "sim", "simulate.py"), "--out", str(out), "--video",
-                    # seed 8: the calibration run before the sheet rows draws on each robot's random numbers,
-                    # so a firmware change there reshuffles the runs (2026-10-18c, look first: mean 0.7-1.7 cm
-                    # over seeds 5-10, median 0.85; seed 5 went from 1.11 to 1.69, seed 6 was 0.93). Sending
-                    # CALIB_LOOK after the rolls (edge-limited calibration) left every robot pose identical but
-                    # reshuffled the WiFi delay/loss draws: seeds 5-8 now 0.80, 1.40, 0.84, 0.99.
-                    "--seed", "8", "--max-runs", "4", "--fps", "10", "--config", str(cfg),
+                    # seed 5, fixed: the bounds below come from the spread over seeds, not from picking a seed
+                    # that passes (any firmware change in the calibration run before the sheet rows reshuffles
+                    # the random draws: robot noise, WiFi delay/loss). See SPREAD.
+                    "--seed", "5", "--max-runs", "4", "--fps", "10", "--config", str(cfg),
                     # a frozen copy of the T1 sheet: editing the real sheet mustn't change this test's data
                     "--sheet", os.path.join(TOOLS, "tests", "data", "e01_sheet_oct18.csv")], check=True,
                    capture_output=True)
@@ -54,15 +62,13 @@ def test_survey_recovers_moved_camera(moved_sim):
     res = fr.fit_survey(pairs, (cam.W, cam.H), height_cm=140.0, k1_mode="off")
     cal = cf.to_calibration(res)
     e = floor_error(cal, cam, z=4.0)
-    # Survey from only 4 runs with an extreme camera move: mean 0.8-1.2 cm over the
-    # view across seeds 5-8 (worst near the view's corners), so the bound is 1.3 cm (seed choice: above).
-    # Headline camera numbers use a click/tape calibration, not survey (ACCURACY-CHECKS B1).
-    assert e.mean() < 1.3 and np.percentile(e, 95) < 3.5, (e.mean(), np.percentile(e, 95))
+    # bounds from the spread over seeds (SPREAD above); worst near the view's corners
+    assert e.mean() < SPREAD_MEAN_CM and np.percentile(e, 95) < SPREAD_P95_CM, (e.mean(), np.percentile(e, 95))
     assert cal["view_floor_polygon_cm"] and cal["camera"]["height_cm"] == 140.0
     # without the tape height but with the webcam's focal length (kept from an earlier calibration)
     res2 = fr.fit_survey(pairs, (cam.W, cam.H), f_px=cam.f, k1_mode="off")
     assert abs(res2["height_cm"] - 140.0) < 6
-    assert floor_error(cf.to_calibration(res2), cam, z=4.0).mean() < 1.2
+    assert floor_error(cf.to_calibration(res2), cam, z=4.0).mean() < SPREAD_MEAN_CM
 
 
 def test_cli_survey_and_loro(moved_sim, tmp_path):
@@ -107,7 +113,7 @@ def test_survey_end_marks_are_absolute_and_help(moved_sim):
     e1 = floor_error(cf.to_calibration(fr.fit_survey(pairs + ends, (cam.W, cam.H), 140.0, k1_mode="off")), cam, z=4.0)
     # with 6 runs end marks took the mean from 0.57 to 0.41 cm (p95 1.58 -> 1.02); with these 4 runs they are
     # about even (0.44 vs 0.55), so only check they don't hurt much
-    assert e1.mean() < 1.3 and e1.mean() <= e0.mean() + 0.2, (e0.mean(), e1.mean())
+    assert e1.mean() < SPREAD_MEAN_CM and e1.mean() <= e0.mean() + 0.2, (e0.mean(), e1.mean())
 
 
 def test_still_points_with_axis_clicks(moved_sim):

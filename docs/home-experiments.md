@@ -239,7 +239,10 @@ rows are in: then `python tools/edge_check.py` says whether each cue separates
 the edge from plywood and tape and prints the `set` commands to try. Try them
 on one robot first, driving slowly at an open edge and across the tape. In the
 simulator (guessed readings) the line cue stops with about 3 cm of wheel still
-on the board, the bottom zone about 9 cm. Limits: backing up and turning in
+on the board, the bottom zone about 9 cm. A stop at an edge is not a failure:
+the run ends `limited:plywood edge`, run_sheet.py asks you to confirm and marks
+the row excluded with the note "limited: plywood edge", and the accuracy
+statistics leave it out and count it apart. Limits: backing up and turning in
 place are not guarded, and a robot meeting the edge at a shallow slant (under
 about 45 degrees) puts a wheel over it before the line sensors get there.
 Lap and grid runs on dark tape: dark tape may look like the edge to the line
@@ -247,7 +250,9 @@ cue; use `safe_edge 2` or `0` for those. The calibration run is guarded only on
 its forward roll (the roll its look-around chose, which can't see an open
 edge): a trip there is not a failure; it rolls back the distance it covered
 and the run ends `done`, limited (plywood edge), keeping the roll if it went
-at least `calib_roll_min_cm` (5 cm).
+at least `calib_roll_min_cm` (5 cm). That roll back is not guarded, on
+purpose: it retraces the path the robot has just driven forward on the
+board, so it can only end where the roll started.
 
 ## Step 1: sensor explorer
 

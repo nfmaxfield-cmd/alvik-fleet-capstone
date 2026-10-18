@@ -78,7 +78,7 @@ class EdgeGuardTests(unittest.TestCase):
             for seed in range(3):
                 r = make(board_config(), 80.0, 61.0, 0.0, seed=seed, safe_edge=1, **GUARD)
                 run = straight(r, 60, rpm)
-                self.assertEqual(run["result"], "stopped:plywood edge ahead", (rpm, seed))
+                self.assertEqual(run["result"], "limited:plywood edge", (rpm, seed))
                 margin = min(EDGE_X - wx for wx, _ in wheels(r))
                 self.assertGreater(margin, 2.0, (rpm, seed))     # line sensors 3.5 cm ahead of the axle
                 self.assertLess(margin, 3.5, (rpm, seed))
@@ -87,7 +87,7 @@ class EdgeGuardTests(unittest.TestCase):
         for rpm in (0, 70):
             r = make(board_config(), 80.0, 61.0, 0.0, safe_edge=2, **GUARD)
             run = straight(r, 60, rpm)
-            self.assertEqual(run["result"], "stopped:plywood edge ahead")
+            self.assertEqual(run["result"], "limited:plywood edge")
             self.assertEqual(r.edge_trips[-1][1], "bottom")
             self.assertGreater(EDGE_X - r.x, 6.0)
 
@@ -104,7 +104,7 @@ class EdgeGuardTests(unittest.TestCase):
         cfg.session.tape_width_cm = 1.9
         r = make(cfg, 61.0, 30.0, -90.0, safe_edge=1, **GUARD)
         run = straight(r, 40, 0)
-        self.assertEqual(run["result"], "stopped:plywood edge ahead")
+        self.assertEqual(run["result"], "limited:plywood edge")
         _, _, (x, y, th) = r.edge_trips[-1]
         sensor_y = y - r.line_m.sensor_forward_cm
         self.assertLess(sensor_y, 0.3)                       # past the edge, not on the tape (0.05 .. 1.95)
@@ -125,7 +125,7 @@ class EdgeGuardTests(unittest.TestCase):
         # own-pose straight drives (pose.h driveLine, survey_cms 10 cm/s), as follow drives use
         r = make(board_config(), 95.0, 61.0, 0.0, safe_edge=1, **GUARD)
         run = r.run_experiment("survey")
-        self.assertEqual(run["result"], "stopped:plywood edge ahead")
+        self.assertEqual(run["result"], "limited:plywood edge")
         self.assertGreater(min(EDGE_X - wx for wx, _ in wheels(r)), 2.0)
 
     def test_backing_up_is_blind(self):

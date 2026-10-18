@@ -62,7 +62,8 @@ bool shouldAbort() {
   if (alvik.get_touch_cancel()) { gAbortReason = "cancel button"; }
   else if (P("safe_lift") > 0 && alvik.get_lifted()) { gAbortReason = "robot lifted"; }
   // open plywood edge (edge.h; safe_edge 0 = off): forward driving only, backing up is blind;
-  // a hard stop in every experiment, follow steps and approaches included (gFrontLimitCm doesn't apply)
+  // a hard stop in every experiment, follow steps and approaches included (gFrontLimitCm doesn't apply);
+  // not a failure: RUNEND says "limited:plywood edge" (runExperiment), the calibration rolls back (runCalib)
   else if (edge::check()) { gAbortReason = "plywood edge ahead"; }
   else if (!gStepStop.length()) {
     float lim = gFrontLimitCm >= 0 ? gFrontLimitCm : P("safe_front_cm");

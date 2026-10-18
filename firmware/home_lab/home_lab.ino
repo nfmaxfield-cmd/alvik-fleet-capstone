@@ -313,7 +313,8 @@ bool needsYawSign(int i) { return i == 1 || (i >= 3 && i <= 7); }
 // its own path) and the run still ends done, limited (plywood edge); the roll
 // counts (roll "edge", roll_cm = the distance covered) if that distance is at
 // least calib_roll_min_cm, else it is skipped. The spins, the turn and the
-// roll back are not guarded. Firmware 2026-10-18b
+// roll back are not guarded; for the roll back that is by design: it retraces
+// the path just driven forward on the board, ending where the roll started. Firmware 2026-10-18b
 // rolled first, straight ahead (1 blink, 2 roll, 3 back, 4 wiggle, 5 still,
 // 6 spin, 7 still, 8 spin back, 9 still); before that: 1 still, 2 roll
 // max(3, start_nudge_cm) with 300 ms pauses, 3 back, 4 wiggle, 5 300 ms.
@@ -533,13 +534,17 @@ void runExperiment(int i, bool fromButton) {
     case EXP_CALIB: runCalib(); break;
   }
   alvik.brake();
+  bool edgeStop = !strcmp(gAbortReason.c_str(), "plywood edge ahead");
   if (logged) tickWait((unsigned long)P("settle_end_ms"));   // at rest, still logging and blinking
   edge::stop();
   blink::stop();
   if (logged) {
     syncFlash("end");   // runs to full length even after a stop (no safety checks inside)
     rawlog::stop();
-    String result = gAbortReason.length() ? String("stopped:") + gAbortReason
+    // The edge guard refusing to drive off the work area is not a failure: "limited:plywood edge"
+    // (the tools leave such runs out of accuracy statistics and count them separately).
+    String result = edgeStop             ? String("limited:plywood edge")
+                  : gAbortReason.length() ? String("stopped:") + gAbortReason
                   : gFail.length()        ? String("failed:") + gFail : String("done");
     net::sendLine("H,RUNEND,run,result,ms_end,duration_ms,battery,wifi_dbm,raw_rows_sent,packets_sent");
     net::logf("D,RUNEND,%s,%s,%lu,%lu,%d,%d,%lu,%lu", gRunId.c_str(),
@@ -547,7 +552,9 @@ void runExperiment(int i, bool fromButton) {
               millis(), millis() - t0, alvik.get_battery_charge(), (int)WiFi.RSSI(), rawlog::rows,
               (unsigned long)net::seq);
   }
-  if (gAbortReason.length()) net::logf("M,run %s: stopped (%s)", gRunId.c_str(), gAbortReason.c_str());
+  if (edgeStop) net::logf("M,run %s: limited: the edge guard stopped it before an open plywood edge (not a failure; "
+                          "left out of accuracy statistics)", gRunId.c_str());
+  else if (gAbortReason.length()) net::logf("M,run %s: stopped (%s)", gRunId.c_str(), gAbortReason.c_str());
   else                       net::logf("M,run %s: %s finished", gRunId.c_str(), EXP_NAMES[i]);
   gAbortReason = "";
   // Wait for the cancel button to be released so it doesn't stop the next run.

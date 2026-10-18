@@ -39,6 +39,10 @@
 // under way), so a caller that carries on after it (the calibration run rolls
 // back the way it came: home_lab.ino) is not stopped twice.
 //
+// A trip is not a failure: the run ends RUNEND "limited:plywood edge" (the tools
+// leave it out of accuracy statistics and count it apart; docs/data-formats.md
+// "Run outcomes"); the calibration's forward roll rolls back and ends done.
+//
 // EDGE records (docs/data-formats.md): "base" when the plywood level is learned,
 // "nobase" when it could not be, "trip" when the guard stops the robot.
 #pragma once

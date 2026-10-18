@@ -316,7 +316,11 @@ def main(argv=None):
             note = "simulated"
             if run["kidnapped"]:
                 note += "; robot picked up and moved mid-run (kidnap test)"
-            if run["result"] != "done":
+            if run["result"].startswith("limited:"):
+                # run_sheet.py, the user confirming: excluded, "limited: plywood edge" (not a failure)
+                row["excluded"] = "1"
+                note += "; limited: " + run["result"][len("limited:"):]
+            elif run["result"] != "done":
                 note += "; run ended: " + run["result"]
             row["note"] = note
             w.writerow(row)

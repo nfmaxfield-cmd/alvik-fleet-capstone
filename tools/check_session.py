@@ -437,6 +437,10 @@ def main(argv=None):
             print("  " + "  ".join(str(c).ljust(w[i]) for i, c in enumerate(t)))
         print("  az still: vertical acceleration while the robot sits still before moving; about 1.00 means the"
               "\n  accelerometer columns are in g.")
+    n_lim = sum(1 for e in ends.values() if sc.run_outcome(e.get("result")) == sc.CALIB_LIMITED)
+    if n_lim:
+        print(f"  {n_lim} run(s) limited:plywood edge: the edge guard stopped them before an open edge (not a failure; "
+              "run_sheet.py marks them excluded, and the accuracy statistics leave them out)")
     if calib_outcomes:
         print("  calibration runs: " + ", ".join(f"{calib_outcomes.count(k)} {k}" for k in
                                                 (sc.CALIB_DONE, sc.CALIB_LIMITED, sc.CALIB_FAILED))
