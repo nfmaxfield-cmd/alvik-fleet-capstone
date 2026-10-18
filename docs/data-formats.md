@@ -372,6 +372,10 @@ really are, learned from runs where the camera saw the robots. Read by
   next. `systematic_cm`: what the calibration leaves that stays put for a whole
   run (the spread of each run x zone x face's mean residual, noise taken out);
   the fusion widens each face's uncertainty by it.
+- `corr_time_frames`: how many readings are worth one independent one (the
+  zone errors' correlation over about 1 s, times what the other zones of the
+  same frame add); `tof_weight: "corr"` widens each reading's noise by its
+  square root.
 - `robots`: per robot name, `zone_offset_deg` (5 numbers, dL..dR: the zone's
   real direction minus 22, 11, 0, -11, -22 deg; left positive), `range_bias_cm`
   and `range_scale` (reading = scale x true distance + bias; the robots' average
@@ -390,6 +394,15 @@ Beside it: `landmarks_refined.csv` (the refined faces as a landmarks.csv),
 WITHOUT that run, in `loro/<run_id>.json`, same format) and `residuals.csv`
 (every reading used: run, robot, zone, face, t, reading_cm, resid_nominal_cm,
 resid_calibrated_cm).
+
+## Landmark safety gate (`tof_gate.csv`, written by replay.py --tof-gate)
+
+One row per landmark setup: `setup`, `tune_runs` (how many tuning runs it was
+judged on), `decision` (landmarks ON / OFF), and `end_err_cm with/without`
+(and `path_rmse_cm with/without` with --truth): the mean on the tuning runs
+with landmarks and with the same setup without them. results.csv then has
+`half` (tune / score) and `tof_gate` (on / off) columns and only the scoring
+runs.
 
 ## Measured sensor noise (`replay.py --noise-file`)
 

@@ -177,13 +177,14 @@ DEFAULT = dict(
     tof_heading_with_camera=True,  # False: while the camera saw the robot in the last tof_cam_recent_s, landmark
     tof_cam_recent_s=1.0,          # readings correct position only, not heading (the camera's track does that)
     tof_yaw_sigma_min_deg=0.0,     # floor on the sensor-turn uncertainty a calibration gives
-    tof_camera_gap_s=0.0,          # > 0: landmark ranging only once the camera hasn't corrected this robot for this
-                                   # long (a fallback for when the camera is blocked); 0 = always
+    tof_camera_gap_s=1.0,          # landmark ranging only once the camera hasn't corrected this robot for this long (a
+                                   # fallback for when the camera is blocked; setups without a camera: always); 0 = always
     tof_learn_map=False,           # with tof_consider: while the camera tracks the robot, landmark readings refine the
                                    # board / sensor states (carried to later runs) and never move the pose
     tof_freeze_shared=True,        # in setups with the camera: landmark readings never move the gyro bias or wheel size
-    tof_weight="none",             # none | half (each reading counts half) | corr (noise widened by the calibration's
-                                   # error correlation time) | ci (covariance intersection)
+    tof_weight="auto",             # none | half (each reading counts half) | corr (noise widened by the calibration's
+                                   # error correlation time) | ci (covariance intersection) | auto: half in setups with
+                                   # the camera, corr without (best in simulation, 2026-10-18)
     tof_cal_systematic=True,       # widen each face's consider uncertainty by the calibration's systematic_cm
                                    # (what it leaves per run, zone and face)
     tof_lag_inflate=False,    # widen the noise for frame-to-frame correlation: x sqrt((1 + r) / (1 - r)),
@@ -456,6 +457,8 @@ class Tracked:
             r = min(max(float(self.tof_cal["lag1_corr"]), 0.0), 0.9)
             lag = math.sqrt((1 + r) / (1 - r))
         wt = cfg["tof_weight"]
+        if wt == "auto":
+            wt = "half" if has_cam else "corr"
         if wt == "half":
             lag *= math.sqrt(2.0)
         elif wt == "corr":                       # effective number of independent readings (calibration)

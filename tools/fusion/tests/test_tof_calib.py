@@ -21,6 +21,9 @@ CAM = WWG + ["camera"]
 CAMTOF = WWG + ["camera", "tof"]
 
 
+ALWAYS = dict(tof_camera_gap_s=0.0, tof_weight="none")   # merge every reading at full weight (the old way)
+
+
 def run_cfg(run, dets, faces, **kw):
     sens = kw.pop("sensors")
     return eng.run_engine([run], dets, eng.config(sensors=sens, **kw), landmarks=faces)[0]["r1"]
@@ -33,8 +36,8 @@ def test_consider_states_keep_a_misplaced_board_from_hurting():
     mapped = [wall(101.5)]
     dets = sightings(truth, seed=4)
     cam = end_err(run_cfg(run, dets, None, sensors=CAM), truth)
-    plain = end_err(run_cfg(run, dets, mapped, sensors=CAMTOF), truth)
-    cons = run_cfg(run, dets, mapped, sensors=CAMTOF, tof_consider=True, tof_face_sigma_cm=1.5)
+    plain = end_err(run_cfg(run, dets, mapped, sensors=CAMTOF, **ALWAYS), truth)
+    cons = run_cfg(run, dets, mapped, sensors=CAMTOF, tof_consider=True, tof_face_sigma_cm=1.5, **ALWAYS)
     assert plain > 3 * cam
     assert end_err(cons, truth) < cam + 0.05
     assert cons.ekf.N == 8 + 3                     # (wheel-size states,) one face, range bias, mount turn
@@ -60,8 +63,8 @@ def test_adaptive_weighting_reduces_a_persistent_bias():
     run, truth = drive([wall(100.0)], wheel_scale=1.0)
     mapped = [wall(101.5)]
     dets = sightings(truth, seed=4)
-    plain = end_err(run_cfg(run, dets, mapped, sensors=CAMTOF), truth)
-    adapt = end_err(run_cfg(run, dets, mapped, sensors=CAMTOF, tof_adapt=True), truth)
+    plain = end_err(run_cfg(run, dets, mapped, sensors=CAMTOF, **ALWAYS), truth)
+    adapt = end_err(run_cfg(run, dets, mapped, sensors=CAMTOF, tof_adapt=True, **ALWAYS), truth)
     assert adapt < plain
 
 
@@ -262,7 +265,8 @@ def test_learning_the_board_while_the_camera_tracks_never_moves_the_pose():
     mapped = [wall(101.5)]
     dets = sightings(truth, seed=4)
     cam = run_cfg(run, dets, None, sensors=CAM)
-    kw = dict(sensors=CAMTOF, tof_consider=True, tof_face_sigma_cm=2.0, tof_camera_gap_s=1.0, tof_learn_map=True)
+    kw = dict(sensors=CAMTOF, tof_consider=True, tof_face_sigma_cm=2.0, tof_camera_gap_s=1.0, tof_learn_map=True,
+              tof_weight="none")
     lrn = run_cfg(run, dets, mapped, **kw)
     a, b = cam.trajectory(), lrn.trajectory()
     assert max(math.hypot(p[1] - q[1], p[2] - q[2]) for p, q in zip(a, b)) < 1e-9
@@ -283,3 +287,21 @@ def test_covariance_intersection_update():
     k2 = EKF(0.0, 0.0, 0.0, 0.0, sigma_xy=2.0)
     k2.landmark_range(38.0, 40.0, J, 0.5)
     assert k.P[0, 0] > k2.P[0, 0]                                  # never as confident as the plain update
+
+
+
+def test_default_is_camera_fallback_at_half_weight():
+    """Defaults: with the camera tracking, landmark readings are not merged (the result is the camera's); once
+    the camera has missed the robot for 1 s they are, each counting half (tof_weight auto)."""
+    cfg = eng.config()
+    assert cfg["tof_camera_gap_s"] == 1.0 and cfg["tof_weight"] == "auto"
+    run, truth = drive([wall(100.0)], wheel_scale=1.0)
+    dets = sightings(truth, seed=4)
+    cam = run_cfg(run, dets, None, sensors=CAM)
+    dflt = run_cfg(run, dets, [wall(101.5)], sensors=CAMTOF)
+    assert dflt.trajectory() == cam.trajectory()
+    blocked = [d for d in dets if not (1003.0 <= d["t"] <= 1006.0)]
+    b = run_cfg(run, blocked, [wall(100.0)], sensors=CAMTOF)
+    used = [i for e in b.events if e[2] == "tof" for o, i in e[3]["res"] if o == "used"]
+    assert used and all(i["sigma"] == pytest.approx(math.sqrt(2) * lm.zone_sigma(i["z"], b.tcfg), rel=0.05)
+                        for i in used[:20])
