@@ -254,6 +254,12 @@ class Coordinator:
         self.deferred = []           # re-plan requests that came while one was being computed
         self.abort = None
         self.dockings = []
+        self.change = None           # tools/site/change.py: does a landmark disagree with the locked site map?
+        if getattr(args, "site_map", None):
+            sys.path.insert(0, os.path.join(TOOLS, "site"))
+            import change as SITE_CHANGE
+            self.change = SITE_CHANGE.ChangeCheck(args.site_map, log_path=os.path.join(outdir, "site_changes.jsonl"),
+                                                  say=lambda msg: self.say("site map: " + msg))
         self.save_plan()
         self._install(plan, keep={}, first={}, old=None)
 
@@ -321,10 +327,32 @@ class Coordinator:
                 if len(vals) >= 15:
                     b.calib_look.update(spin=vals[12], roll=vals[13], reason=vals[14])
                 continue
+            if rtype == "RAW" and self.change is not None:
+                self.site_check(b, t, vals)
+                continue
             if rtype == "STEP" and len(vals) >= 9:
                 self.on_step(b, t, vals)
             elif rtype == "FOLLOW" and len(vals) >= 17:
                 self.on_follow(b, t, vals)
+
+    def site_check(self, b, t, vals):
+        """Change check on one RAW row, at the robot's own latest pose (FOLLOW, at most 0.3 s old)."""
+        cols = self.link.session.headers.get("RAW") or []
+        f = b.follow
+        if not cols or not f or f.get("state") == "nopose" or t - f.get("t", 0) > 0.3:
+            return
+        row = dict(zip(cols, vals))
+        try:
+            zones = [float(row[c]) if row.get(c) not in (None, "") else None
+                     for c in ("dL_cm", "dCL_cm", "dC_cm", "dCR_cm", "dR_cm")]
+            sd = float(f.get("sd") or 0.0)
+        except ValueError:
+            return
+        try:
+            self.change.feed(b.name, t, (f["x"], f["y"], f["th"]), zones, sd)
+        except Exception as e:      # noqa: BLE001  (the check must never stop a plan)
+            self.say("site map check error: %s" % e)
+            self.change = None
 
     def on_step(self, b, t, v):
         try:
@@ -945,6 +973,10 @@ def start_robots(coord, link, args, source):
     for n in names:
         link.send_name(n, "stop")          # a follow run left over from an earlier run_plan would refuse a new one
     time.sleep(1.5)
+    for cmd in getattr(args, "send", None) or []:      # e.g. set safe_edge 1 (tools/site/setup.py's edge approaches)
+        for n in names:
+            link.send_name(n, cmd)
+        time.sleep(0.3)
     for n in names:
         link.send_name(n, "status")
     wait_for(lambda: all(coord.bots[n].firmware for n in names), 5, coord)
@@ -1077,6 +1109,11 @@ def main(argv=None):
     ap.add_argument("--place-tol-deg", type=float, default=5.0)
     ap.add_argument("--calibrate", action="store_true", help="send calibrate to every robot first")
     ap.add_argument("--yes", action="store_true", help="don't ask before starting")
+    ap.add_argument("--send", action="append", default=[], metavar="COMMAND",
+                    help="console command for every robot before its follow run starts, e.g. \"set safe_edge 1\" "
+                         "(repeatable)")
+    ap.add_argument("--site-map", help="locked site map (tools/site/setup.py): warn when the robots' front sensors "
+                                       "keep disagreeing with a landmark on it (tools/site/change.py)")
     g = ap.add_argument_group("dry run against the simulator (tools/sim/fleet_sim.py)")
     g.add_argument("--dry-run", action="store_true")
     g.add_argument("--brick", help="auto@T or x,y[,angle]@T")

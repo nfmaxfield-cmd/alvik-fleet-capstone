@@ -36,6 +36,11 @@ class RobotModel:
     radius_scale_err_pct: float = 1.0     # both wheels bigger/smaller than nominal together
     radius_mismatch_pct: float = 0.5      # left vs right wheel radius difference
     track_err_pct: float = 3.0            # real wheel track vs nominal
+    # exact per-robot values instead of the random draws above (robot name -> percent), for tests of
+    # wheel-size estimation, e.g. {"Left": -5, "Center": 5}: Left's wheels 5% smaller than nominal (its
+    # odometry reads about 5% long). Robots not listed keep their random draw.
+    radius_scale_err_pct_by_robot: dict = field(default_factory=dict)
+    track_err_pct_by_robot: dict = field(default_factory=dict)
     # --- motion (library defaults are not documented; guesses) ---
     move_speed_cms: float = 10.0          # library move() cruise speed
     move_accel_cms2: float = 20.0         # library move() ramp up/down
@@ -84,6 +89,11 @@ class TofModel:
     max_range_cm: float = 350.0           # reading when nothing is in range
     min_range_cm: float = 2.0             # below this the reading is untrustworthy (here: any value under it)
     hz: float = 15.0                      # new readings per second (held in between); 0 = fresh every call
+    # how the real sensor differs from the nominal zone directions (deg, left positive), per robot name:
+    # {"Left": [dL, dCL, dC, dCR, dR]} (sensor turned on its mount + each zone's own offset); and a range
+    # error per robot: {"Left": [bias_cm, scale_pct]}. Empty = perfect, as before.
+    zone_angle_err_deg_by_robot: dict = field(default_factory=dict)
+    range_err_by_robot: dict = field(default_factory=dict)
     bottom_cm: float = 9.0                # "bottom" zones see the floor about this far ahead (no board set)
     # bottom zone geometry, used when session.board_cm is set (GUESSES; E0c rows edge_n15/10/5 and the
     # sensor height measured by hand confirm or replace them): the sensor sits sensor_height_cm above the

@@ -168,8 +168,8 @@ reading is the newest frame, measured from where the robot was when the frame
 was taken (on average 33 ms old). Each of the five zones reports the nearest
 thing on 3 rays across its `zone_width_deg` (11 deg) slice. Below
 `min_range_cm` (2) the reading is any value under 2 cm. It sees the room walls,
-plus `Robot.world_polys` (boards and obstacles, set by fleet_sim.py) and the
-other robots (`Robot.others`). Before 2026-10-18b it was one fresh ray per zone
+plus `Robot.world_polys` (boards and obstacles: `simulate.py --map map.json`,
+or set by fleet_sim.py) and the other robots (`Robot.others`). Before 2026-10-18b it was one fresh ray per zone
 on every call; RAW dC values now repeat between frames, as on the robot.
 
 **Plywood board and edge guard** (firmware 2026-10-18b, edge.h). Off unless
@@ -185,6 +185,14 @@ thickness). Nothing falls off: tests check the wheel positions. The guard
 itself (`safe_edge` and the `edge_*` settings) is copied from edge.h, with its
 own random stream so switching it on doesn't change other draws;
 tests/test_edge.py covers stopping distance, tape, calibration and survey runs.
+
+**Known errors on purpose** (for testing the fusion's wheel-size and sensor
+calibration): `robot.radius_scale_err_pct_by_robot` ({"Left": -5}: Left's
+wheels 5% smaller than nominal, so its odometry reads about 5% long) and
+`robot.track_err_pct_by_robot` replace the random draws for the robots listed;
+`tof.zone_angle_err_deg_by_robot` ({"Left": [dL, dCL, dC, dCR, dR]} degrees,
+left positive) turns each zone, and `tof.range_err_by_robot` ({"Left": [bias
+cm, scale %]}) adds a range error. All empty by default.
 
 ## Live fleet simulation (fleet_sim.py)
 

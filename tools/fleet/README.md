@@ -84,6 +84,13 @@ python -m pytest tools/fleet/tests -q
    what each is waiting for. At the end every robot gets `stop` (RUNEND), and
    run_plan_summary.json says what happened, including boards not visited.
 
+6. Options for the site setup (tools/site): `--send "set safe_edge 1"` sends a
+   console command to every robot before its follow run starts (repeatable);
+   `--site-map site/map.json` runs the change check on every RAW row: a
+   landmark whose front-sensor readings keep disagreeing with the locked map is
+   reported ("landmark B may have moved ...") and written to
+   `site_changes.jsonl`.
+
 Files and the protocol: docs/data-formats.md, "Step follower".
 
 ## Running with the live camera (the live link)

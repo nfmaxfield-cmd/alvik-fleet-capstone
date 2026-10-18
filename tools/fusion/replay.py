@@ -338,8 +338,36 @@ def main():
     ap.add_argument("--configs", help="JSON file: list of settings (default: the built-in list)")
     ap.add_argument("--map", help="landmarks for landmark ranging: tools/fleet map.json (boards, user-measured "
                     "polygon obstacles) or landmarks.csv (name,x1_cm,y1_cm,x2_cm,y2_cm); adds the landmark setups")
+    ap.add_argument("--tof-cal", help="tof_calibration.json (tools/fusion/tof_calib.py): the distance sensors' zone "
+                    "directions, range bias, zone width, frame delay, noise and refined landmarks, for the landmark setups")
+    ap.add_argument("--tof-cal-per-run", help="tof_calibration_loro.csv (tof_calib.py): each run scored with the "
+                    "distance-sensor calibration made WITHOUT it; runs not listed use --tof-cal")
+    ap.add_argument("--noise-file", help="measured sensor noise (JSON, docs/data-formats.md \"Measured noise\"): "
+                    "camera, camera heading and blink light noise for every setup (a setup's own noise wins)")
+    ap.add_argument("--heading-check", help="heading_check.csv (tools/heading_check.py): sets how much the "
+                    "start-nudge headings are trusted from the spread measured on this setup")
+    ap.add_argument("--wheel-radius", help="measured wheel radius per robot, e.g. Left=1.69,Center=1.71 (cm); "
+                    "robots not listed keep 1.7")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
+    extra_cfg = {}          # settings from measured files, put in every setup that doesn't set them itself
+    if args.noise_file:
+        from ekf import load_noise_file
+        extra_cfg["noise"] = load_noise_file(args.noise_file, extra_cfg)
+        print(f"measured noise from {args.noise_file}: " + ", ".join(f"{k} {v:.4g}" for k, v in extra_cfg["noise"].items()))
+    if args.heading_check:
+        px = rn.heading_px_sd(args.heading_check)
+        if px is None:
+            print(f"note: {args.heading_check} has too few runs; start-nudge heading noise stays at the setting")
+        else:
+            extra_cfg["calib_heading_px_sd"] = px
+            print(f"start-nudge heading precision from {args.heading_check}: {px:.3f} px")
+    if args.wheel_radius:
+        wr = {"default": eng.DEFAULT["lib_wheel_radius_cm"]}
+        for part in args.wheel_radius.split(","):
+            name, _, v = part.partition("=")
+            wr[name.strip()] = float(v)
+        extra_cfg["wheel_radius_cm"] = wr
 
     all_runs, fits = rn.load_runs(args.session, args.sheet)
     runs = [r for r in all_runs if not r.excluded and r.tape_start]
@@ -386,13 +414,12 @@ def main():
             print(f"{len(groups)} calibrations: each run's camera sightings converted with its own "
                   f"({args.calib_per_run})")
     if args.detections or args.blink or args.calib_results:
-        off = args.video_offset
-        if off is None:
-            vo = rn.video_offset(args.session, args.recording, fits) if args.recording else None
-            if vo is None:
-                sys.exit("Couldn't line up video and robot clocks: give --recording (with flashes) or --video-offset")
-            off = vo[0]
-            print(f"video clock = laptop clock {off * 1000:+.0f} ms ({vo[2]} flashes)")
+        vc = rn.video_clock(args.session, args.recording, fits, args.video_offset)
+        if vc is None:
+            sys.exit("Couldn't line up video and robot clocks: give --recording (with flashes) or --video-offset")
+        off, how = vc
+        if args.video_offset is None:
+            print(how)
     if args.calib_results:
         crow = rn.load_calib_results(args.calib_results, off)
         led, how = rn.led_offsets(crow)
@@ -447,6 +474,28 @@ def main():
     has_ct = any(u["cam_truth"] is not None for u in units)
     truth = load_truth(args.truth) if args.truth else None
     faces = lm.load(args.map) if args.map else None
+    tof_cal = None
+    if args.tof_cal or args.tof_cal_per_run:
+        default = lm.load_cal(args.tof_cal) if args.tof_cal else None
+        per = {}
+        if args.tof_cal_per_run:
+            cache = {}
+            for rid, pth in lm.read_cal_per_run(args.tof_cal_per_run).items():
+                per[rid] = cache.setdefault(pth, lm.load_cal(pth))
+        bad = sorted(r.run_id for r in runs if r.run_id in (per.get(r.run_id) or default or {}).get("used_runs", []))
+        if bad and not args.allow_in_sample:
+            sys.exit(f"Refusing to score {len(bad)} run(s) with a distance-sensor calibration made from them "
+                     f"({', '.join(bad[:6])}{' ...' if len(bad) > 6 else ''}). Give --tof-cal-per-run "
+                     "tof_calibration_loro.csv (from tof_calib.py), or --allow-in-sample.")
+        if bad:
+            print(f"WARNING (--allow-in-sample): {len(bad)} run(s) scored with a distance-sensor calibration made "
+                  "from them")
+        tof_cal = {"per_run": per, "default": default}
+        src = default or next(iter(per.values()), None)
+        if src and src.get("faces") and not faces:
+            faces = src["faces"]
+        print(f"distance-sensor calibration: {len(per)} runs with their own (leave-one-run-out)"
+              + (f", the rest {os.path.basename(args.tof_cal)}" if default else ""))
     if args.map:
         print(f"landmark ranging: {len(faces)} mapped faces from {args.map}")
         if not faces:
@@ -454,6 +503,9 @@ def main():
     configs = json.load(open(args.configs)) if args.configs else (
         BUILTIN + (BUILTIN_CAMERA_EXTRA if dets else []) + (BUILTIN_BLINK if blink else [])
         + (BUILTIN_TOF + (BUILTIN_TOF_CAMERA if dets else []) if faces else []))
+    view_area = rn.view_area_cm2(args.calib) if (args.calib and use_cam) else None
+    if view_area:
+        print(f"camera view: {view_area:.0f} cm^2 of floor (from {os.path.basename(args.calib)})")
     wsign = eng.wheel_turn_signs(runs)
     signs = (wsign, eng.wheel_fwd_signs(runs))
     vmax = eng.fastest_speed(runs)
@@ -469,7 +521,14 @@ def main():
     for c in configs:
         c = dict(c)
         method = c.pop("method", "ekf")
+        for k, v in extra_cfg.items():
+            if k == "noise":
+                c["noise"] = dict(v, **c.get("noise", {}))
+            else:
+                c.setdefault(k, v)
         cfg = eng.config(**c)
+        if cfg["clutter_cm2"] == "auto" and view_area:
+            cfg["clutter_cm2"] = view_area
         if cfg["vmax"] == "auto":
             cfg["vmax"] = vmax           # from all runs, also when a group of them is replayed alone
         cam_cfg = "camera" in cfg["sensors"] or "blink" in cfg["sensors"]
@@ -488,7 +547,7 @@ def main():
         n_unknown = 0
         for u in todo:
             tracked, unknown = eng.run_engine(u["runs"], u["dets"], cfg, gyro_f, blink=u["blink"], calib_rows=crow,
-                                              led_offsets=led, signs=signs, landmarks=faces)
+                                              led_offsets=led, signs=signs, landmarks=faces, tof_cal=tof_cal)
             n_unknown += len(unknown.confirmed_ever)
             cam_truth = u["cam_truth"]
             for run in runs:

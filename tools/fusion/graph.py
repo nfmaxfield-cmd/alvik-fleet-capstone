@@ -10,13 +10,19 @@ second by default) as unknowns and finds the path that best agrees with:
   - heading change between keyframes from the gyro (minus its bias) and,
     less trusted, from the wheels
   - the gyro reading equals its bias whenever the wheels say the robot is still
+  - with wheel-size estimation on: two more unknowns per run, the wheel distance
+    scale k and turn scale kw (wheel distance / k and wheel turn / kw are the true
+    ones), each with the prior the filter started the run from
   - camera fixes assigned to this robot by the filter's tracking rules
   - blink light fixes (the light sits a fixed offset ahead of the centre, so
     they pull on heading too) and heading fixes (heading from motion, start
     nudges), when the filter used them
   - landmark ranging: each distance-sensor zone reading the filter used, with
     the face the filter tied it to (the pose between two keyframes is
-    interpolated to the reading's time)
+    interpolated to the reading's time); with tof_consider, each face's offset
+    from its map position, the sensor's range bias and its mount turn are
+    unknowns too (with the same uncertainty as priors), so the many readings
+    of one board can't all pull the same way
 
 Each agreement is a "factor"; each disagreement is weighted by how much that
 sensor is trusted. A robust (Huber) weighting stops a single wrong camera
@@ -62,11 +68,23 @@ def smooth(tracked, kf_hz=20.0, use_gyro=True, use_wheel_w=True, use_camera=True
     # initial guess: the filter's own estimate at each keyframe
     traj = tracked.trajectory()
     tt = np.array([p[0] for p in traj])
-    guess = np.zeros(3 * K + 1)
+    sc = getattr(tracked, "scale0", None)
+    use_k = bool(sc and sc["sk"] > 0)
+    use_kw = bool(sc and sc["skw"] > 0)
+    tcfg = getattr(tracked, "tcfg", tracked.cfg)
+    cons = bool(tcfg.get("tof_consider")) and bool(tofs)
+    fnames = sorted({info["face"] for _, info in tofs}) if cons else []
+    NB = 3 * K + 1 + (2 if sc else 0)          # poses, gyro bias, (k, kw)
+    NP = NB + (len(fnames) + 2 if cons else 0)  # (face offsets, range bias, mount turn)
+    fidx = {f: NB + i for i, f in enumerate(fnames)}
+    fsig = getattr(tracked, "face_sig", {})
+    guess = np.zeros(NP)
     for k in range(K):
         j = min(int(np.searchsorted(tt, tk[k])), len(traj) - 1)
         guess[3 * k:3 * k + 3] = traj[j][1:4]
-    guess[-1] = tracked.ekf.s[5]   # gyro bias
+    guess[3 * K] = tracked.ekf.s[5]   # gyro bias
+    if sc:
+        guess[3 * K + 1], guess[3 * K + 2] = tracked.ekf.s[6], tracked.ekf.s[7]
 
     # integrate the wheel and gyro readings between keyframes
     # Each reading holds from its own time to the next reading's. A reading
@@ -119,19 +137,35 @@ def smooth(tracked, kf_hz=20.0, use_gyro=True, use_wheel_w=True, use_camera=True
         xa, ya, tha = p[3 * k:3 * k + 3]
         xb, yb, thb = p[3 * k + 3:3 * k + 6]
         s = (xa + f * (xb - xa), ya + f * (yb - ya), tha + f * wrap(thb - tha))
+        if cons:
+            j = fidx[info["face"]]
+            a = (info["a"][0] + p[j] * info["n"][0], info["a"][1] + p[j] * info["n"][1])
+            r = line_range(s, info["ang"] + p[NP - 1], fwd, a, info["n"])
+            if r is None:
+                return 10.0
+            return (r[0] * info.get("scale", 1.0) + info.get("bias", 0.0) + p[NP - 2] - info["z"]) / info["sigma"]
         r = line_range(s, info["ang"], fwd, info["a"], info["n"])
         if r is None:                  # the pose moved so the ray no longer meets the face: a big but finite miss
             return 10.0
+        if "scale" in info:
+            return (r[0] * info["scale"] + info["bias"] - info["z"]) / info["sigma"]
         return (r[0] - info["z"]) / info["sigma"]
 
     def residuals(p):
         out = []
-        b = p[-1]
+        b = p[3 * K]
+        kd, kt = (p[3 * K + 1], p[3 * K + 2]) if sc else (1.0, 1.0)
+        if use_k:
+            out.append((kd - sc["k"]) / sc["sk"])
+        if use_kw:
+            out.append((kt - sc["kw"]) / sc["skw"])
         for kind, k, x in rows:
             if kind == "prior":
                 out += [(p[0] - x[0]) / 0.3, (p[1] - x[1]) / 0.3, wrap(p[2] - x[2] * D2R) / (1.0 * D2R)]
             else:
                 d, g, dt, w, still = x
+                if sc:
+                    d, w = d / kd, w / kt
                 xa, ya, tha = p[3 * k:3 * k + 3]
                 xb, yb, thb = p[3 * k + 3:3 * k + 6]
                 if use_gyro:
@@ -156,12 +190,23 @@ def smooth(tracked, kf_hz=20.0, use_gyro=True, use_wheel_w=True, use_camera=True
             out.append(wrap(p[3 * k + 2] - d["th"]) / d["sigma"])
         for k, f, info in tof_k:
             out.append(tof_res(p, k, f, info))
+        if cons:
+            for fn in fnames:
+                out.append(p[fidx[fn]] / fsig.get(fn, tcfg["tof_face_sigma_cm"]))
+            out.append(p[NP - 2] / tcfg["tof_bias_sigma_cm"])
+            out.append(p[NP - 1] / (tcfg["tof_yaw_sigma_deg"] * D2R))
         return np.array(out)
 
     # which unknowns each residual touches (keeps the solver fast)
     m = len(residuals(guess))
-    J = lil_matrix((m, 3 * K + 1), dtype=int)
+    J = lil_matrix((m, NP), dtype=int)
     r = 0
+    if use_k:
+        J[r, 3 * K + 1] = 1
+        r += 1
+    if use_kw:
+        J[r, 3 * K + 2] = 1
+        r += 1
     for kind, k, x in rows:
         if kind == "prior":
             for i in range(3):
@@ -172,6 +217,8 @@ def smooth(tracked, kf_hz=20.0, use_gyro=True, use_wheel_w=True, use_camera=True
         for i in range(cnt):
             J[r + i, 3 * k:3 * k + 6] = 1
             J[r + i, 3 * K] = 1
+            if sc:
+                J[r + i, 3 * K + 1] = J[r + i, 3 * K + 2] = 1
         r += cnt
         if use_gyro and x[4]:
             J[r, 3 * K] = 1
@@ -187,9 +234,15 @@ def smooth(tracked, kf_hz=20.0, use_gyro=True, use_wheel_w=True, use_camera=True
     for k, _ in hdg_k:
         J[r, 3 * k + 2] = 1
         r += 1
-    for k, _, _ in tof_k:
+    for k, _, info in tof_k:
         J[r, 3 * k:3 * k + 6] = 1
+        if cons:
+            J[r, fidx[info["face"]]] = J[r, NP - 2] = J[r, NP - 1] = 1
         r += 1
+    if cons:
+        for i in range(len(fnames) + 2):
+            J[r + i, NB + i] = 1
+        r += len(fnames) + 2
     # Plain least squares first (converges quickly from any reasonable guess),
     # then the robust weighting from there, so a few bad camera fixes can't
     # drag the path.

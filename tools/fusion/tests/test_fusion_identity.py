@@ -208,7 +208,8 @@ def test_heading_from_motion_fixes_a_bad_start_heading():
 def test_calib_heading_fix_applied():
     run, truth = straight_run("A-1", "A", 0.0, 0.0, 0.0)
     run.tape_start = (0.0, 0.0, 4.0)
-    rows = [dict(run="A-1", robot="A", event="nudge", identity="agree", t=truth[50][0], heading=0.0, led=None)]
+    rows = [dict(run="A-1", robot="A", event="nudge", identity="agree", t=truth[50][0], heading=0.0, led=None,
+                 moved_px=12.0)]
     cfg = eng.config(sensors=["wheel_v", "wheel_w", "gyro"], calib_heading=True)
     tr, _ = eng.run_engine([run], None, cfg, calib_rows=rows)
     assert tr["A-1"].hdg_used["calib"] == 1
@@ -217,6 +218,15 @@ def test_calib_heading_fix_applied():
                             calib_rows=rows)
     assert tr0["A-1"].hdg_used["calib"] == 0
     assert abs(tr0["A-1"].trajectory()[-1][3] - 4.0 * D2R) < 0.5 * D2R
+
+
+def test_nudge_heading_noise_from_pixels():
+    """auto: atan(px_sd / moved_px): a 7 px nudge is trusted less than a 14 px one; a number fixes it."""
+    cfg = eng.config()
+    assert eng.nudge_sigma(cfg, 7.0) == pytest.approx(math.atan2(0.15, 7.0))
+    assert eng.nudge_sigma(cfg, 7.0) > 1.9 * eng.nudge_sigma(cfg, 14.0) * 0.99
+    assert eng.nudge_sigma(cfg, None) == pytest.approx(2.0 * D2R)
+    assert eng.nudge_sigma(eng.config(calib_heading_sigma_deg=0.8), 7.0) == pytest.approx(0.8 * D2R)
 
 
 def test_detector_track_carries_a_fading_name():

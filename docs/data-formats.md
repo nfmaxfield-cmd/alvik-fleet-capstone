@@ -569,6 +569,101 @@ below the lens. Block clicks are 2 opposite corners (rectangle along the
 floor axes), 3 corners in a row (4th completed) or 4 corners, on the floor,
 or on its top (`clicked_at` top, needs `height_cm` and the camera height).
 
+## Distance-sensor calibration (`tof_calibration.json`, written by tools/fusion/tof_calib.py)
+
+What each robot's front distance sensor really reads, and where the boards
+really are, learned from runs where the camera saw the robots. Read by
+`replay.py --tof-cal` (and `--tof-cal-per-run`). JSON:
+
+- `format` "alvik-tof-calibration", `version` 1.
+- `used_runs`: run ids whose readings made it. replay.py refuses to score these
+  runs with this file (no circularity) unless `--allow-in-sample`.
+- `zone_width_deg`: where in its slice a zone reads (0 = one ray down the
+  middle; > 0 = the nearest point within a slice this wide).
+- `delay_s`: how old a sensor frame is when its RAW row is sent.
+- `noise_cm`, `noise_rel`: reading noise, 1 standard deviation = noise_cm +
+  noise_rel x distance.
+- `frame_corr`: how alike the errors of zones in the same frame are (0 = not at
+  all, 1 = the same); `lag1_corr`: the same for one zone from one frame to the
+  next. `systematic_cm`: what the calibration leaves that stays put for a whole
+  run (the spread of each run x zone x face's mean residual, noise taken out);
+  the fusion widens each face's uncertainty by it.
+- `robots`: per robot name, `zone_offset_deg` (5 numbers, dL..dR: the zone's
+  real direction minus 22, 11, 0, -11, -22 deg; left positive), `range_bias_cm`
+  and `range_scale` (reading = scale x true distance + bias; the robots' average
+  bias is held at 0, since a bias they all share can't be told from the boards
+  being further), `bias_sigma_cm` and
+  `yaw_sigma_deg` (how sure those are), `readings` (how many went in).
+- `boards`: per board, `dx_cm`, `dy_cm`, `turn_deg` (how far it moved from the
+  map given) and `readings`.
+- `landmarks`: the refined faces, one per entry: `name`, `x1_cm`, `y1_cm`,
+  `x2_cm`, `y2_cm` (as landmarks.csv), `board`, `sigma_cm` (how sure its
+  position is). `face_sigma_cm`: the largest of these.
+- `map_given`: the map the boards started from.
+
+Beside it: `landmarks_refined.csv` (the refined faces as a landmarks.csv),
+`tof_calibration_loro.csv` (`run_id,calibration`: each run's calibration made
+WITHOUT that run, in `loro/<run_id>.json`, same format) and `residuals.csv`
+(every reading used: run, robot, zone, face, t, reading_cm, resid_nominal_cm,
+resid_calibrated_cm).
+
+## Locked site map (`<site>/map.json` + `landmarks.csv`, written by tools/site/setup.py)
+
+The floor as the site setup measured and checked it (tools/site/README.md).
+
+**map.json** is a Fleet map (above), readable by every tool that reads one,
+with the boards, user blocks and the floor's open sides moved to where the
+setup found them, plus a `"site"` block:
+
+| Field | Meaning |
+| --- | --- |
+| `format`, `version` | `"alvik-site-map"`; the map's version, 1, 2, ... (each lock of the same site folder adds 1) |
+| `locked`, `locked_at` | true; ISO 8601 time of the lock |
+| `map_hash` | Fleet map hash (above) of this map when locked. A reader treats the map as locked only if it still matches: editing the map in tools/fleet/app.py (which drops unknown blocks anyway) unlocks it |
+| `camera_calibration` | `path`, `hash` (sha256, 16 hex) and fit quality (`mode`, `rms_cm`, `loo_rms_cm`, `n_points`) of the floor_calibration.json the survey used. A new camera calibration means a new site setup |
+| `camera_frame_sigma_cm` | the camera calibration's own error, included in every sigma below |
+| `landmarks` | per landmark: `kind` (board / block), `move_cm` [dx, dy] and `turn_deg` from the clicked position, `stretch_cm` (board made this much longer), their sds (`sd_move_cm`, `sd_turn_deg`, `sd_stretch_cm`), `sigma_cm` / `sigma_in` (the largest sd of any of its points), `points`: each tape-measurable point (`left p1`, `left p2`, `right p1`, `right p2` = the floor corners of each long face, left/right of p1 -> p2; blocks: `corner N`) with `x_cm`, `y_cm`, `sigma_cm` (larger semi-axis) |
+| `edges` | per side `x0`, `x1`, `y0`, `y1`: `open`, `offset_cm` (outwards), `turn_deg`, `position_cm` (its x or y at the middle), `sigma_cm` (open sides) |
+| `audit` | rounds: `round`, `passed`, `points` (each: `point`, `why` = largest uncertainty / random check, `est` [x, y] cm, `sigma_cm`, `tape` [x, y] cm, `error_cm`, `allowed_cm` = max(0.3, 3 x hypot(sigma, 0.1)), `passed`). The map is written only after a passed round |
+| `fill_in` | points tape-measured before the audit because the robots left them less sure than 0.5 cm: `point`, `sigma_cm`, `tape` |
+| `robots` | each robot's front sensor as the survey measured it: `zone_offset_deg` (5), `range_bias_cm`, `range_scale` and their sds (as tof_calibration.json) |
+| `sensor` | `zone_width_deg` |
+| `survey` | what was driven (session folders, robots) |
+
+**landmarks.csv** (beside it): the faces as the fusion reads them
+(`name,x1_cm,y1_cm,x2_cm,y2_cm`, Landmarks above), plus `landmark`, `kind`,
+`source` (`site-setup`), `sigma_cm`, `sigma_in`, `map_version`, `locked_at`.
+Earlier files are kept as `map.json.bak`, `landmarks.csv.bak`.
+
+**tof_calibration.json** (beside it): the same landmarks and robots in the
+distance-sensor calibration format (above; `source` `site-setup`, `used_runs` =
+the survey's runs, none of them scored runs), so `replay.py --tof-cal` uses the
+locked landmarks with their sigma.
+
+**audit.csv**: one row per audited point: round, point, why, map_x_cm,
+map_y_cm, sigma_cm, tape_x_cm, tape_y_cm, error_cm, allowed_cm, passed.
+
+**site_state.json**: the setup's own progress (open sides, landmarks kept,
+session folders); not read by other tools.
+
+**site_changes.jsonl** (in a session folder, tools/site/change.py or
+`run_plan.py --site-map`): one JSON line per flagged landmark: `t`, `landmark`,
+`median_resid_cm` (reading minus map: + = further than the map), `threshold_cm`,
+`readings`, `seconds`, `robots`, `message`.
+
+## Measured sensor noise (`replay.py --noise-file`)
+
+`replay.py --noise-file measured_noise.json` puts the noise measured on the
+real setup into every setup, instead of the simulator's guesses. It reads
+accuracy_checks.py's `measured_noise.json` (above) as it is: `cam_xy_cm`,
+`cam_heading_deg`, `blink_xy_cm` (null = not measured: the setting stays) and
+`start_nudge_heading_deg` (start-nudge heading noise; an upper bound, since
+the tape's own heading error is in it). The same keys spelled
+`camera_xy_cm` / `camera_heading_deg` work too, and an optional `"noise":
+{...}` sets any other `ekf.Noise` setting in its own units (radians for
+angles). Keys starting with `_` and anything else are ignored. A setup's own
+`noise` settings win over the file.
+
 ## Fleet plan (`plan.json`, written by tools/fleet/planner.py and app.py)
 
 What the laptop sends to the robots, one step at a time. Times are seconds
