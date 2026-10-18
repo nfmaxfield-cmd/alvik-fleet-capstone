@@ -258,6 +258,33 @@ distance to the first mapped face along that zone's direction
 Measure the face, not the board's centre: for a 1.5 cm board on its centre
 line, the face is 0.75 cm closer to the robots.
 
+Landmarks picked on the video (tools/calibrate_floor.py, Landmarks mode, or
+`--landmarks-from`; tools/landmark_pick.py) are written to `landmarks.csv`
+beside `floor_calibration.json` with extra columns after the five above
+(the fusion ignores them): `landmark` (the board or block name), `kind`
+(board / block), `source` (`user-picked`), `thickness_cm`, `height_cm`
+(blank if not typed), `tape_fixed` (how many of its ends were replaced by a
+tape measurement). A board is written as its four faces around the centre
+line, named as runs.py does (`<name> left` / `right` / `end p1` / `end p2`);
+a block as its edges (`<name> edge 1..4`), so the fusion picks the face the
+robot sees. Saving replaces earlier `user-picked` rows and rows of a landmark
+with the same name, keeps all other rows, and keeps the old file as
+`landmarks.csv.bak`. With `--map`, boards go into `boards` (same name: p1,
+p2, thickness replaced, `side` and `dock_at` kept) and blocks into
+`obstacles` (polygon, source `user`, `note` starting `user-picked`; such
+obstacles no longer on the page are removed); old map kept as `map.json.bak`.
+
+The clicks are kept in `landmarks_picked.json` (same format as the
+`--landmarks-from` input): `landmarks`, each {name, kind (board / block),
+clicks [[u, v], ...] (px), frame, thickness_cm, height_cm, clicked_at
+(block: floor / top), fix (per click: null, or a tape position "x, y" in
+inches like "36 3/32, 12 1/2", or "x, y cm", or [x_cm, y_cm])}. Board clicks
+are the two ends of its foot (where it meets the floor) on the side the
+camera sees; the centre line is half a thickness further from the point
+below the lens. Block clicks are 2 opposite corners (rectangle along the
+floor axes), 3 corners in a row (4th completed) or 4 corners, on the floor,
+or on its top (`clicked_at` top, needs `height_cm` and the camera height).
+
 ## Fleet plan (`plan.json`, written by tools/fleet/planner.py and app.py)
 
 What the laptop sends to the robots, one step at a time. Times are seconds
