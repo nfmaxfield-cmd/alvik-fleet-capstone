@@ -45,7 +45,7 @@ Camera recording, as in T1. Robots switched on **just before** this part.
      from it (the start spot is given). 10 s still each.
    - **edge_in, edge_over:** take the board away first, so the far x edge of
      the plywood (x = 122 cm, 48 1/16 in) is open. The robot faces that edge.
-     edge_in: its nose about 1 1/2 in inside the edge. edge_over: its nose
+     edge_in: its nose about 7/8 in inside the edge. edge_over: its nose
      sticking out about 1 in past the edge (the wheels stay about 1 in
      inside, so it can't tip). 10 s still each. Don't let it move.
    - **edge_tape:** the robot faces the x-axis tape (the origin-side edge),
