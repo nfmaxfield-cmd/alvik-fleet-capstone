@@ -37,7 +37,9 @@ Notes:
 - `run` ids are `<boot>-<n>`: boot is 4 hex digits, random per power-on.
 - `ms` is the robot's millis() (ms since its power-on).
 - RAW `x_cm,y_cm,th_deg` are the robot's own wheel odometry, reset to 0 at the
-  start of straight and demo runs. `step` counts completed route steps.
+  start of straight and demo runs. `step` counts completed route steps;
+  -1 = the start nudge (2026-10-17e+). In a `calib` run: 1 blinking still,
+  2 rolling forward, 3 back, 4 compass wiggle, 5 settling.
 - RAW `lifted` (firmware 2026-10-17c+): 1 while the robot reports being picked up.
 - RAW gx..gz: gyro, deg/s; ax..az: accelerometer, g (to be confirmed on
   hardware: az about 1 at rest). yaw_deg: the IMU's fused yaw.

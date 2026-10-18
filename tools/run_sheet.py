@@ -316,10 +316,20 @@ def main():
                         ask("  Press Enter once it's on: ")
                 boot = watch.boots.get(robot)
                 if calibrated.get(robot) is None or (boot and calibrated[robot] != boot):
-                    print(f"  {robot} needs its compass check (once per power-on). It will wiggle in place.")
-                    ask("  Put it on the floor, NOT on the mark, and press Enter: ")
+                    print(f"  {robot} needs its calibration run (once per power-on, about 10 s): it blinks its "
+                          f"code, rolls a little forward and back, then wiggles.")
+                    ask("  Put it on the floor where the camera can see it, NOT on the mark, and press Enter: ")
+                    before = watch.started.get(robot)
                     link.send_name(robot, "calibrate")
-                    time.sleep(3)
+                    crun = watch.wait_start(robot, before, 8)
+                    cres = watch.wait_end(crun, 30) if crun else None
+                    if not cres or cres["result"] != "done":
+                        why = cres["result"] if cres else "no answer"
+                        print(f"  Calibration didn't finish ({why}). Check the robot has room, then try again.")
+                        continue
+                    print(f"  Calibrated (run {crun}).")
+                    if pi:
+                        pi.send(f"calibration {robot} run {crun}")
                     calibrated[robot] = watch.boots.get(robot, "?")
                 print(f"  Place {robot} at the origin, facing +x. Mark its front and rear, then measure.")
                 start = ask_marks("START", spacing, near=(0, 0), max_dist=5, heading_near=0)

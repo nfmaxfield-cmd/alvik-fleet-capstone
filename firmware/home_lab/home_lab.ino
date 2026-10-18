@@ -28,12 +28,15 @@
 Arduino_Alvik alvik;
 
 // Bump this whenever the firmware changes, so every logged run says which code it ran.
-#define FW_VERSION "2026-10-17d"
+#define FW_VERSION "2026-10-17e"
 
 uint16_t gBootId = 0;   // random each power-on; starts every run id
 
-const char* EXP_NAMES[] = {"stream", "turn", "lap", "grid", "demo", "straight"};
+// "calib" (index 6) is the calibration run, started with the calibrate
+// command only; the buttons cycle through the first N_EXP.
+const char* EXP_NAMES[] = {"stream", "turn", "lap", "grid", "demo", "straight", "calib"};
 const int N_EXP = 6;
+const int EXP_CALIB = 6;
 int gSelected = 1;
 int gPending = -1;   // experiment requested by the laptop, started from loop()
 
@@ -135,7 +138,7 @@ bool handleCommand(const String& raw, bool running) {
   }
   if (verb == "calibrate") {
     if (running) { net::sendLine("M,busy: send stop first"); return false; }
-    if (calibrateYawSign(true)) net::sendLine("M,calibrated: now place the robot on its start mark");
+    gPending = EXP_CALIB;   // a logged run, so the camera sees it too
     return false;
   }
   if (verb == "ping" || verb == "status") {
@@ -244,6 +247,39 @@ void logRunInfo(int i) {
 // (after the tape start marks were taken).
 bool needsYawSign(int i) { return i == 1 || i == 3 || i == 4 || i == 5; }
 
+// Calibration run, once per power-on and whenever robots may have been mixed
+// up. Logged like any run (RUNINFO, RAW, flashes), so the camera recording
+// holds it too. RAW step: 1 standing still blinking its code (who is who),
+// 2 rolling forward and 3 back (which way it faces, from the camera),
+// 4 the compass wiggle (gyro sign, on the robot), 5 settling.
+void runCalib() {
+  net::logf("M,%s calibration: blinking %d pulses, rolling forward and back, then a small wiggle",
+            net::name, blink::code);
+  float n = fmaxf(3.0f, P("start_nudge_cm"));
+  rawlog::step = 1;
+  if (!waitMs((unsigned long)P("calib_blink_ms"))) return;
+  rawlog::step = 2;
+  if (!libraryMove(n) || !waitMs(300)) return;
+  rawlog::step = 3;
+  if (!libraryMove(-n) || !waitMs(300)) return;
+  rawlog::step = 4;
+  if (!calibrateYawSign(true)) return;
+  rawlog::step = 5;
+  if (!waitMs(300)) return;
+  net::sendLine("M,calibrated: now place the robot on its start mark");
+}
+
+// Start nudge: a short roll forward and back right after the start flash, so
+// the camera sees which way the robot faces. RAW step -1 while it happens.
+bool startNudge(int i) {
+  float n = P("start_nudge_cm");
+  if (n <= 0 || !(i == 1 || i == 4 || i == 5)) return true;
+  rawlog::step = -1;
+  bool ok = libraryMove(n) && waitMs(200) && libraryMove(-n) && waitMs(300);
+  rawlog::step = 0;
+  return ok;
+}
+
 void runExperiment(int i, bool fromButton) {
   if (needsYawSign(i) && gYawSign == 0) {
     if (!fromButton) {
@@ -274,6 +310,8 @@ void runExperiment(int i, bool fromButton) {
     waitMs((unsigned long)P("settle_start_ms"));
     syncFlash("start");
     showSelection(true);
+    blink::start();   // after the start flash, so the two can't be confused
+    if (!gAbortReason.length()) startNudge(i);
   }
   // A stop during the settle pause skips the experiment itself.
   if (!gAbortReason.length()) switch (i) {
@@ -283,8 +321,10 @@ void runExperiment(int i, bool fromButton) {
     case 3: runGrid(); break;
     case 4: runDemo(); break;
     case 5: runStraight(); break;
+    case EXP_CALIB: runCalib(); break;
   }
   alvik.brake();
+  blink::stop();
   if (logged) {
     syncFlash("end");   // runs to full length even after a stop (no safety checks inside)
     rawlog::stop();

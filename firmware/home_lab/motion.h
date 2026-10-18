@@ -79,6 +79,12 @@ float rawOdo() {
 }
 float odoHeading() { return wrap180(gOdoSign * rawOdo()); }
 
+// Wait while logging (and blinking), with no safety checks: for short timed moves.
+void tickWait(unsigned long ms) {
+  unsigned long t0 = millis();
+  while (millis() - t0 < ms) { rawlog::tick(); delay(5); }
+}
+
 // The sign check moves the robot (a timed wiggle whose undo is not exact),
 // so it runs once per power-on. For tape-measured experiments, send
 // `calibrate` first, THEN place the robot on its start mark.
@@ -87,9 +93,9 @@ bool calibrateYawSign(bool force = false) {
   net::sendLine("M,checking compass direction: small wiggle left and back");
   float y0 = rawYaw(), o0 = rawOdo();
   alvik.set_wheels_speed(-20, 20);  // left wheel back, right forward = turn left
-  delay(300);
+  tickWait(300);
   alvik.brake();
-  delay(300);
+  tickWait(300);
   float dy = wrap180(rawYaw() - y0);
   float dOdo = wrap180(rawOdo() - o0);
   if (fabsf(dOdo) >= 2.0f) gOdoSign = dOdo > 0 ? 1 : -1;
@@ -102,9 +108,9 @@ bool calibrateYawSign(bool force = false) {
   net::logf("M,yaw check ok: left turn moved raw yaw %.1f deg, sign %d", dy, gYawSign);
   // Undo the nudge so the robot faces where you put it.
   alvik.set_wheels_speed(20, -20);
-  delay(300);
+  tickWait(300);
   alvik.brake();
-  delay(300);
+  tickWait(300);
   return true;
 }
 
@@ -154,6 +160,7 @@ TurnResult imuTurnTo(float target) {
 TurnResult libraryTurn(float delta) {
   unsigned long t0 = millis();
   rawlog::tick();   // rotate() blocks ~200 ms inside the library: log right before it
+  blink::hold();
   alvik.rotate(delta, DEG, false);   // the library waits 200 ms in here first
   unsigned long overhead = millis() - t0;
   while (!alvik.is_target_reached()) {
@@ -177,6 +184,7 @@ bool libraryMove(float cm) {
   unsigned long t0 = millis();
   unsigned long limit = 3000 + (unsigned long)(fabsf(cm) * 400);   // generous: ~2.5 cm/s minimum
   rawlog::tick();   // move() blocks ~200 ms inside the library: log right before it
+  blink::hold();
   alvik.move(cm, CM, false);
   while (!alvik.is_target_reached()) {
     if (shouldAbort()) return false;

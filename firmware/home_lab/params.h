@@ -74,6 +74,10 @@ Param PARAMS[] = {
   {"sync_flash",       1,   "1 = flash both lights white at the start and end of each run, for lining up video"},
   {"sync_ms",        300,   "how long each sync flash stays on, ms (at least 3 camera frames)"},
   {"settle_start_ms", 500,  "pause before the start flash so the robot is still"},
+  {"start_nudge_cm",   2,   "turn/demo/straight runs: roll this far forward and back after the start flash, so the camera sees which way the robot faces (0 = off)"},
+  {"blink_codes",      1,   "1 = blink the robot's own light pattern during runs, so the camera can find and name it"},
+  {"blink_code",       0,   "0 = pattern from the name (Left 1, Center 2, Right 3, others 4 pulses), or 1..4"},
+  {"calib_blink_ms", 3000,  "calibration run: how long to stand still blinking its code before moving"},
 
   // --- safety ---
   {"safe_front_cm",    7,   "stop if something is closer than this in front (0 = off)"},
