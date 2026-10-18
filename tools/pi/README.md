@@ -17,6 +17,14 @@ python3 tools/pi/camrec.py --device 0 --fps 25 --label E1
 ```
 
 - Preview on the laptop: http://st1maxfini.local:8000
+- Live link: http://st1maxfini.local:8000/live sends every frame (grey JPEG,
+  with its frame number and Pi time) to tools/live/track_live.py on the
+  laptop, which turns the robots' blinking lights into positions for
+  run_plan.py (tools/fleet/README.md, "Running with the live camera"). It
+  uses the frame camrec.py already has (no second camera open) and costs
+  nothing until the laptop connects; then about 1 ms of JPEG work per frame
+  on this computer (measured on the laptop; a Pi is slower, see
+  tools/live/README.md).
 - `--no-record` previews only (for aiming the camera). `--device 2` picks
   another camera (see `v4l2-ctl --list-devices`).
 - While recording, type a note and press Enter to mark a moment, e.g.
