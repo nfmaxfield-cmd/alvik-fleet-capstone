@@ -507,34 +507,44 @@ def main(argv=None):
         json.dump(FM.normalize(m), f, indent=1)
     robots = args.robots.split(",") if args.robots else [r["name"] for r in m["robots"]]
     only = args.refresh.split(",") if args.refresh else None
-    if state.get("sessions") and args.detections and ask.yes(
-            f"A survey was already driven ({len(state['sessions'])} runs saved in {args.site}/sessions). "
+    key = "sessions_refresh" if only else "sessions"      # a refresh uses only its own runs (the old ones saw
+    if state.get(key) and args.detections and ask.yes(    # the landmark where it was before it moved)
+            f"A survey was already driven ({len(state[key])} runs saved in {args.site}/sessions). "
             "Use it (no new driving)?"):
         pass
     else:
         plans = plan_survey(ask, m, robots, open_edges, {}, args.site, only=only)
-        sessions = run_real_survey(ask, m, plans, args, args.site)
-        state["sessions"] = state.get("sessions", []) + sessions
+        state[key] = run_real_survey(ask, m, plans, args, args.site)
         save_state(args.site, state)
     if not (args.detections and args.calib):
         ask.say("\nNext: run the detector on the survey recording, then run this again with --detections and "
                 "--calib (and --recording) to solve, check and lock the map.")
         return 0
     ask.step(5, "solve")
-    runs, sight = collect_real(state["sessions"], args.detections, args.calib, args.recording, robots,
-                               args.video_offset)
+    runs, sight = collect_real(state[key], args.detections, args.calib, args.recording, robots, args.video_offset)
     cal = json.load(open(args.tof_cal)) if args.tof_cal else None
     bench = json.load(open(args.bench)) if args.bench else None
     pri = PL.robot_priors_from_cal(cal, bench)
     cam_sys = (camera.get("loo_rms_cm") or camera.get("rms_cm") or 0.15)
 
+    prior_by, edge_sd = None, args.click_sd
+    if only:
+        # a refresh: the landmarks not surveyed again keep their locked uncertainty as their prior
+        _, old = SM.read_lock(map_path)
+        if old:
+            prior_by = {n: max(float(v.get("sigma_cm", 0.3)), 0.05) for n, v in old.get("landmarks", {}).items()
+                        if n not in only}
+            es = [float(v["sigma_cm"]) for v in old.get("edges", {}).values() if v.get("open") and v.get("sigma_cm")]
+            edge_sd = max(es) if es else edge_sd
+
     def solve_fn(tape):
         return PL.solve_site(m, open_edges, runs, sight, robots, opts=dict(cam_sys_cm=cam_sys), robot_priors=pri,
-                             tape=tape, click_sigma_cm=args.click_sd, verbose=True)
+                             tape=tape, click_sigma_cm=args.click_sd, edge_sigma_cm=edge_sd, verbose=True,
+                             prior_sigma_by_landmark=prior_by)
     res = solve_fn([])
     show_estimate(ask, res.est)
     final, rounds, fill, tape, _ = tape_and_audit(ask, solve_fn, res, n_worst=99 if args.audit_every_landmark else 2)
-    lock(ask, args.site, m, final, rounds, fill, camera, dict(sessions=state["sessions"], robots=robots), runs)
+    lock(ask, args.site, m, final, rounds, fill, camera, dict(sessions=state[key], robots=robots, refresh=only), runs)
     return 0
 
 

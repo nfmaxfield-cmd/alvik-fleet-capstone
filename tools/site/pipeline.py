@@ -147,9 +147,14 @@ def robot_priors_from_cal(cal, bench=None):
 
 
 def solve_site(user_map, open_sides, runs, sightings, robots, opts=None, robot_priors=None, tape=None,
-               click_sigma_cm=1.0, edge_sigma_cm=1.0, cam_sys_cm=None, verbose=False):
+               click_sigma_cm=1.0, edge_sigma_cm=1.0, cam_sys_cm=None, verbose=False, prior_sigma_by_landmark=None):
+    """prior_sigma_by_landmark: {name: cm} instead of click_sigma_cm for those landmarks (a refresh: the
+    landmarks not surveyed again keep their locked uncertainty as their prior)."""
     m = FM.normalize(user_map)
     L = SM.landmarks_from_map(m, prior_sigma_cm=click_sigma_cm)
+    for l in L:
+        if prior_sigma_by_landmark and l.name in prior_sigma_by_landmark:
+            l.prior_sigma_cm = float(prior_sigma_by_landmark[l.name])
     E = SM.edges_from_map(m, open_sides, prior_sigma_cm=edge_sigma_cm)
     prob = SO.build(L, E, runs, sightings, robots, opts, robot_priors, tape)
     return SO.solve(prob, cam_sys_cm=cam_sys_cm, verbose=verbose)

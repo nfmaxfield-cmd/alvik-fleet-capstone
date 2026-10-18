@@ -42,8 +42,9 @@ def to_in(cm):
     n = round(abs(cm) / CM_PER_IN * 16)
     w, f = divmod(n, 16)
     g = math.gcd(f, 16)
-    frac = f" {f // g}/{16 // g}" if f else ""
-    return f"{'-' if cm < 0 and n else ''}{w}{frac}\""
+    frac = f"{f // g}/{16 // g}" if f else ""
+    body = f"{w} {frac}" if (w and frac) else (frac or str(w))
+    return f"{'-' if cm < 0 and n else ''}{body}\""
 
 
 def cm_and_in(cm, digits=2):

@@ -163,7 +163,33 @@ three robots one after another: about 39 spots each, a third of them corner
 sweeps, and 5-6 edge approaches; 13-15 of 15-18 approaches stopped by the edge
 guard, the others ended at the drive's end inside the edge).
 
-Fusion with the locked map: see "Fusion with the locked map" below.
+### Fusion with the locked map
+
+The fusion's landmark test sessions r7 and r11 (tools/fusion/README.md, 36
+runs each, same robots and sensor errors), replayed with the current fusion
+(`replay.py`, setups from that README) twice: as before (the boards 1 cm off in
+the map, refined by tof_calib.py leave-one-run-out from the session's own runs)
+and with the locked site map and the site setup's sensor model
+(`--map site/landmarks.csv --tof-cal site/tof_calibration.json`: made from the
+survey's own runs, none of the scored ones; site map of seed 1 with no camera
+calibration error, as the sessions have their own camera frame; its worst
+landmark point 0.40 cm off, the cinderblock's far end). End error / path RMSE
+cm / heading RMSE deg, r7 and r11:
+
+| setup | 1 cm map + tof_calib | locked site map |
+| --- | --- | --- |
+| camera alone | 0.270 / 0.308 / 1.02 and 0.249 / 0.338 / 1.05 | (same) |
+| + landmark ranging, always merged (consider states) | 0.309 / 0.339 / 1.05 and 0.362 / 0.382 / 1.07 | **0.221 / 0.280 / 0.99** and **0.288 / 0.300 / 1.02** |
+| + landmark ranging, after 1 s without the camera | 0.275 / 0.295 / 0.96 and 0.346 / 0.349 / 0.98 | 0.242 / 0.256 / 0.94 and 0.316 / 0.289 / 0.96 |
+| no camera, landmark ranging | 0.617 / 0.597 / 0.91 and 0.700 / 0.672 / 0.99 | 0.450 / 0.496 / 0.83 and 0.516 / 0.533 / 0.95 |
+| camera blocked 20 s | 1.053 and 1.070 | (same) |
+| ... + landmark ranging | 0.552 / 0.552 / 0.95 and 0.608 / 0.618 / 1.05 | 0.419 / 0.455 / 0.87 and 0.476 / 0.489 / 0.99 |
+
+The always-merge penalty with the camera working (mean of both sessions) goes
+from +0.08 cm (0.34 vs 0.26) to none (0.25 vs 0.26): r7 now gains 0.05 cm, r11
+still loses 0.04 cm. Path and heading are better than the camera alone in both
+sessions. Without the camera, or with it blocked 20 s, landmark ranging is 20-27%
+better than with the 1 cm map.
 
 ## Analysis
 (after the real run) P1-P4 from score.py and the change-check runs. Then:

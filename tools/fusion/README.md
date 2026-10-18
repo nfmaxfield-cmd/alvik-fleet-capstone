@@ -394,8 +394,13 @@ spin back and the turn to the roll heading).
 The site setup (tools/site) writes the locked landmarks and each robot's sensor
 model in this same format (`<site>/tof_calibration.json`, made from the survey's
 own runs, so none of the scored runs is in it): `replay.py --tof-cal
-<site>/tof_calibration.json --map <site>/landmarks.csv`. Simulation results with
-it: docs/experiments/E00d-site-setup.
+<site>/tof_calibration.json --map <site>/landmarks.csv`. On r7/r11 (same setups
+as above, current code) the always-merge setup's end error with the camera
+working goes from 0.309 / 0.362 cm (1 cm map + tof_calib) to 0.221 / 0.288 cm
+with the locked site map (camera alone 0.270 / 0.249): no penalty on average
+(r7 gains 0.05 cm, r11 loses 0.04 cm), path RMSE better than the camera alone
+in both; no camera 0.62 / 0.70 -> 0.45 / 0.52 cm. Details:
+docs/experiments/E00d-site-setup.
 
 Simulator results: see "Tested so far".
 
