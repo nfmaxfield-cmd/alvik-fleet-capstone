@@ -53,6 +53,9 @@ Do one robot first, and only if the warning appears.
 
 ## Updating firmware over WiFi (no cable)
 
+> **Next USB flash (to do):** before uploading, add the `OTA_PASSWORD` line
+> below to `secrets.h`, so every flash after that can go over WiFi.
+
 Once each robot has been flashed by USB with firmware 2026-10-17c or later,
 later updates can go over WiFi:
 
