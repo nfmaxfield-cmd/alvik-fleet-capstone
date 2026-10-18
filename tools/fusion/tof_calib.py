@@ -14,7 +14,9 @@ check of the sensor and the board together. The tool finds the settings that
 make the readings agree best:
 
   per robot   each zone's real direction (offset from 22, 11, 0, -11, -22 deg),
-              range bias (cm) and range scale
+              range bias (cm; relative to the robots' average, which is held at 0:
+              a bias every sensor shares looks exactly like every board being that
+              much further, so it goes into the boards) and range scale
   all robots  zone width (where in its slice a zone reads; 0 = one ray down the
               middle), frame delay (how old a frame is when its RAW row is sent)
   per board   its position and turn (dx, dy cm, turn deg): REFINED LANDMARKS
@@ -243,8 +245,11 @@ class Model:
 
     def priors(self, p):
         off, bias, scale, width, delay, g = self.unpack(p)
+        # the sensors' COMMON range bias can't be told from every board being that much further (each board
+        # is seen from one side): the robots' average bias is held at 0 and the common part goes into the boards
         return np.r_[off.ravel() / PRIOR["zone_deg"], bias / PRIOR["bias_cm"], scale / PRIOR["scale"],
-                     g[:, 0] / self.board_cm, g[:, 1] / self.board_cm, g[:, 2] / PRIOR["board_deg"]]
+                     g[:, 0] / self.board_cm, g[:, 1] / self.board_cm, g[:, 2] / PRIOR["board_deg"],
+                     np.mean(bias) / 0.01]
 
 
 def fit(model, sigma, idx=None, p0=None, max_nfev=60):

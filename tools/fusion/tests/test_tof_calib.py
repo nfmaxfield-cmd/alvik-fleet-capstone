@@ -86,13 +86,14 @@ def synth_data(model_true_p, faces, robots, cfg, n=3000, seed=1, noise=0.3):
         th = rng.uniform(-0.4, 0.4) + (0.0 if rng.random() < 0.6 else math.pi / 2)
         s = np.array([x, y, th, 0, 0, 0])
         r = int(rng.integers(len(robots)))
+        sp = 10.0 if rng.random() < 0.5 else -10.0          # driving towards and away (delay vs bias)
         for zi, ang in enumerate(cfg["tof_zone_deg"]):
             why, info = lm.predict_zone(s, P, ang * D2R, faces, cfg)
             if why:
                 continue
             for k, v in (("run", f"R{i % 6}"), ("robot", r), ("zone", zi), ("face", info["face"]), ("t", i * 0.07),
-                         ("z", 0.0), ("x", x), ("y", y), ("th", th), ("vx", 10 * math.cos(th)),
-                         ("vy", 10 * math.sin(th)), ("vth", 0.0)):
+                         ("z", 0.0), ("x", x), ("y", y), ("th", th), ("vx", sp * math.cos(th)),
+                         ("vy", sp * math.sin(th)), ("vth", 0.0)):
                 rows[k].append(v)
     d = {k: np.array(v) for k, v in rows.items()}
     m = tc.Model(d, robots, faces, cfg)
@@ -111,7 +112,8 @@ def test_calibration_recovers_zone_directions_bias_delay_and_board_position():
     R = len(robots)
     p_true[:7 * R].reshape(R, 7)[0, :5] = [3.0, 2.0, 2.5, 1.5, 3.0]       # Left's sensor turned ~2.5 deg
     p_true[:7 * R].reshape(R, 7)[1, :5] = [-1.0, -2.0, -1.5, -2.5, -1.0]
-    p_true[:7 * R].reshape(R, 7)[0, 5] = 0.4                               # range bias 0.4 cm
+    p_true[:7 * R].reshape(R, 7)[0, 5] = 0.4                               # range bias +-0.4 cm (the robots'
+    p_true[:7 * R].reshape(R, 7)[1, 5] = -0.4                              # average is held at 0)
     p_true[7 * R + 1] = 0.03                                               # 30 ms frame delay
     g = p_true[7 * R + 2:].reshape(m0.G, 3)
     g[m0.groups.index("A")] = [0.8, -0.6, 0.0]                             # board A 1 cm off
