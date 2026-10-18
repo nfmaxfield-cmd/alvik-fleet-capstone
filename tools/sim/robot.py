@@ -738,6 +738,7 @@ class Robot(FollowMixin):
         self.edge_t0 = 0
         self.edge_count = 0
         self.edge_bot_since = 0
+        self.edge_braking = False                  # tripped: quiet until the wheels are still
         self.edge_trips = []                       # (robot ms, cue, true pose) for tests
 
     def edge_record(self, ev, l, c, r, dbot, info):
@@ -800,6 +801,11 @@ class Robot(FollowMixin):
             n = len(self.edge_buf[0])
             if n >= self.EDGE_NL or (self.millis() - self.edge_t0 >= self.P("edge_learn_ms") and n >= 5) or forward:
                 self._edge_finish(L, C, R)
+        if self.edge_braking:
+            if still:
+                self.edge_braking = False
+            else:
+                return False
         if not forward:
             self.edge_count = 0
             self.edge_bot_since = 0
@@ -812,6 +818,7 @@ class Robot(FollowMixin):
             if self.edge_count >= max(1, int(self.P("edge_n"))):
                 self.edge_record("trip", L, C, R, self.bottom(er), "line sensors")
                 self.edge_trips.append((self.ms, "line", (self.x, self.y, self.th)))
+                self.edge_braking, self.edge_count = True, 0
                 return True
         lim = self.P("edge_bot_cm")
         if (mode & 2) and lim > 0:
@@ -822,6 +829,7 @@ class Robot(FollowMixin):
                 if self.millis() - self.edge_bot_since >= self.P("edge_bot_ms"):
                     self.edge_record("trip", L, C, R, d, "bottom zone")
                     self.edge_trips.append((self.ms, "bottom", (self.x, self.y, self.th)))
+                    self.edge_braking, self.edge_bot_since = True, 0
                     return True
             else:
                 self.edge_bot_since = 0

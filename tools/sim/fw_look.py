@@ -175,7 +175,7 @@ def calib_steps(rb, lk):
     spin = P("calib_spin_deg")
     rb.calib_spin = "done" if spin != 0 else "off"     # gCalibSpin / gCalibRoll / gCalibNoRoom
     rb.calib_roll = "skipped"
-    rb.calib_no_room = False
+    rb.calib_no_room = rb.calib_edge = False
     still = int(max(300.0, P("calib_still_ms")))
     rb.send("M,%s calibration: blinking code %d, a small wiggle%s, then a roll of up to %.0f cm forward and back "
             "where it finds room" % (rb.name, rb.blink_code_for(), ", a slow spin each way" if spin != 0 else "",
@@ -223,43 +223,54 @@ def calib_steps(rb, lk):
     ch, room, cap, roll_len, full = lk.choose()
     roll_min = max(1.0, P("calib_roll_min_cm"))
     roll = roll_len >= roll_min
-    target, turn = wrap180(lk.h0 + ch), 0.0
+    st = dict(target=wrap180(lk.h0 + ch), turn=0.0, live=0.0, L=roll_len if roll else 0.0,
+              result="no_room" if not roll else ("roll" if full else "short"))
+    _turn_and_roll(rb, lk, st, ch, room, cap, roll, roll_min, still)
+    reason = calib_reason(rb)
+    rb.send("H,CALIB_LOOK,run,spun,near_cm,heading_deg,turn_deg,room_cm,cap_cm,live_cm,roll_cm,result,room8,caps,"
+            "spin,roll,reason")
+    rb.send("D,CALIB_LOOK,%s,%d,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%s,%s,%s,%s,%s,%s" % (
+        rb.run_id, 1 if spun else 0, nearest, ch, st["turn"], room, cap, st["live"], st["L"], st["result"],
+        lk.room_summary(), lk.caps_text(), rb.calib_spin, rb.calib_roll, reason))
+    rb.calib_look = dict(spun=spun, near_cm=nearest, heading_deg=ch, turn_deg=st["turn"], room_cm=room, cap_cm=cap,
+                         live_cm=st["live"], roll_cm=st["L"], result=st["result"], h0=lk.h0, spin=rb.calib_spin,
+                         roll=rb.calib_roll, reason=reason)
+
+
+def calib_reason(rb):
+    """home_lab.ino calibReason()."""
+    if rb.calib_no_room and rb.calib_edge:
+        return "no room; plywood edge"
+    return "no room" if rb.calib_no_room else ("plywood edge" if rb.calib_edge else "")
+
+
+def _turn_and_roll(rb, lk, st, ch, room, cap, roll, roll_min, still):
+    """The turnAndRoll lambda in calibSteps(): turn, look again, roll; fills st."""
+    P = rb.P
     rb.step = 8
     if roll:
-        turn = wrap180(target - rb.heading())
-        if abs(turn) > P("turn_tol_deg") and not rb.imu_turn_to(target):
+        st["turn"] = wrap180(st["target"] - rb.heading())
+        if abs(st["turn"]) > P("turn_tol_deg") and not rb.imu_turn_to(st["target"]):
             return
-    live = 0.0
     t0 = rb.millis()
     while rb.millis() - t0 < still:
         if rb.should_abort():
             return
         f = rb.front_in_path()
-        if f > 0 and (live == 0 or f < live):
-            live = f
+        if f > 0 and (st["live"] == 0 or f < st["live"]):
+            st["live"] = f
         rb.loop_delay(5)
-    L = roll_len if roll else 0.0
-    result = "no_room" if not roll else ("roll" if full else "short")
-    if roll and live > 0:
-        fit = live - P("safe_front_cm") - P("calib_margin_cm")
-        if fit < L:
-            L = fit
-            result = "short" if L >= roll_min else "no_room_after_turn"
-            if L < roll_min:
-                L = 0.0
-    rb.calib_roll = "skipped" if L <= 0 else ("full" if result == "roll" else "short")
+    if roll and st["live"] > 0:
+        fit = st["live"] - P("safe_front_cm") - P("calib_margin_cm")
+        if fit < st["L"]:
+            st["L"] = fit
+            st["result"] = "short" if fit >= roll_min else "no_room_after_turn"
+            if fit < roll_min:
+                st["L"] = 0.0
+    L = st["L"]
+    rb.calib_roll = "skipped" if L <= 0 else ("full" if st["result"] == "roll" else "short")
     if L <= 0:
         rb.calib_no_room = True
-    reason = "no room" if rb.calib_no_room else ""
-    rb.send("H,CALIB_LOOK,run,spun,near_cm,heading_deg,turn_deg,room_cm,cap_cm,live_cm,roll_cm,result,room8,caps,"
-            "spin,roll,reason")
-    rb.send("D,CALIB_LOOK,%s,%d,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%s,%s,%s,%s,%s,%s" % (
-        rb.run_id, 1 if spun else 0, nearest, ch, turn, room, cap, live, L, result, lk.room_summary(), lk.caps_text(),
-        rb.calib_spin, rb.calib_roll, reason))
-    rb.calib_look = dict(spun=spun, near_cm=nearest, heading_deg=ch, turn_deg=turn, room_cm=room, cap_cm=cap,
-                         live_cm=live, roll_cm=L, result=result, h0=lk.h0, spin=rb.calib_spin, roll=rb.calib_roll,
-                         reason=reason)
-    if L <= 0:
         rb.send("M,%s: no room to roll (best direction %.0f deg from where it faced: %.0f cm clear ahead%s, a %.0f cm "
                 "roll needs %.0f): no heading or wheel scale this time. Give it 13 in (33 cm) of clear floor in some "
                 "direction and calibrate again for those." % (
@@ -270,7 +281,29 @@ def calib_steps(rb, lk):
         rb.send("M,%s: rolling %.1f cm towards %.0f deg (left positive) from where it faced" % (rb.name, L, ch))
     rb.front_limit = -1.0
     rb.step = 9
-    if not rb.library_move(L) or not rb.wait_ms(still):
+    x0, y0 = rb.odo_x, rb.odo_y
+    if not rb.library_move(L):
+        if rb.abort_reason != "plywood edge ahead":
+            return
+        # the edge guard refused to roll on: not a failure; keep the roll if long enough, retrace it
+        rb.abort_reason = ""
+        rb.calib_edge = True
+        planned = L
+        rb.calib_roll, st["result"], st["L"] = "skipped", "edge", 0.0    # until it knows how far it went
+        if not rb.wait_ms(still):
+            return
+        went = math.hypot(rb.odo_x - x0, rb.odo_y - y0)
+        keep = went >= roll_min
+        rb.send("M,%s: stopped at a plywood edge after %.1f cm of a %.1f cm roll; %s" % (
+            rb.name, went, planned, "keeping that roll, rolling back" if keep else "too short to measure, rolling back"))
+        rb.calib_roll = "edge" if keep else "skipped"
+        st["L"] = went if keep else 0.0
+        rb.step = 10
+        if went >= 0.5 and (not rb.library_move(-went) or not rb.wait_ms(still)):
+            return
+        rb.front_limit = 0.0
+        return
+    if not rb.wait_ms(still):
         return
     rb.step = 10
     if not rb.library_move(-L) or not rb.wait_ms(still):
@@ -292,9 +325,13 @@ def run_calib(rb):
     rb.front_limit = -1.0              # back to the usual front stop for the next run
     if rb.abort_reason or rb.fail:
         return
-    if rb.calib_no_room:      # not a failure: it did what the space allowed (RUNEND done; "limited (no room)")
-        rb.send("M,calibrated, limited (no room):%s%s the rest is kept. Now place the robot on its start mark" % (
-            " no spin (something inside its spin circle);" if rb.calib_spin == "skipped" else "",
-            " no roll (no room in any direction);" if rb.calib_roll == "skipped" else ""))
+    if rb.calib_no_room or rb.calib_edge:      # not a failure: it did what the space allowed (RUNEND done; "limited")
+        if rb.calib_edge:
+            r = " roll cut short at a plywood edge;" if rb.calib_roll == "edge" else \
+                " no roll (stopped at a plywood edge too soon);"
+        else:
+            r = " no roll (no room in any direction);" if rb.calib_roll == "skipped" else ""
+        rb.send("M,calibrated, limited (%s):%s%s the rest is kept. Now place the robot on its start mark" % (
+            calib_reason(rb), " no spin (something inside its spin circle);" if rb.calib_spin == "skipped" else "", r))
     else:
         rb.send("M,calibrated: now place the robot on its start mark")

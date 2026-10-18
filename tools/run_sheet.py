@@ -434,9 +434,19 @@ def main():
                     if outcome == sc.CALIB_LIMITED:
                         # not a failure: it did what the space allowed; nothing is counted against it
                         no_spin = look.get("spin") == "skipped"
+                        edge = look.get("result") == "edge"
+                        edge_kept = look.get("roll_step") == "edge"
                         no_roll = look.get("roll_step") == "skipped" or ("roll_step" not in look and
                                                                           (look["roll"] or 0) <= 0)
-                        if no_roll and not no_spin:
+                        if edge_kept:
+                            print(f"  Calibrated with a shorter roll: the edge guard stopped it at a plywood edge after "
+                                  f"{look['roll']:.1f} cm (the look-around can't see an open edge). That roll is kept"
+                                  + ("; no spin either (something inside its 25 cm circle)." if no_spin else "."))
+                        elif edge and no_roll:
+                            print("  Calibrated without the roll: the edge guard stopped it at a plywood edge too soon "
+                                  "to measure. " + ("Spin results are kept; " if not no_spin else "")
+                                  + "heading and wheel size come from the camera and later runs instead.")
+                        elif no_roll and not no_spin:
                             print("  Calibrated without the roll: no room in any direction. Spin results are kept; "
                                   "heading and wheel size come from the camera and later runs instead.")
                         elif no_spin and not no_roll:
@@ -449,7 +459,7 @@ def main():
                                   "runs and a later calibration instead.")
                         if ask("  Move it and press r to redo, or Enter to continue: ").lower() == "r":
                             continue
-                        print(f"  Calibrated, limited (no room) (run {crun}).")
+                        print(f"  Calibrated, {sc.calib_outcome_text(cres['result'], look)} (run {crun}).")
                     else:
                         if look and look["result"] == "short":
                             print(f"  (It rolled {look['roll']:.1f} cm, not the full {CALIB_ROLL_CM:g}: not much room.)")

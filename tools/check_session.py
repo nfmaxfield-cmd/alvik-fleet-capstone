@@ -420,7 +420,7 @@ def main(argv=None):
             oc = sc.calib_outcome(e.get("result"), looks.get(r["run"]))
             calib_outcomes.append(oc)
             if oc == sc.CALIB_LIMITED:
-                res += " (limited: no room)"
+                res += " (" + sc.calib_outcome_text(e.get("result"), looks.get(r["run"])) + ")"
         table.append([r["robot"], r["run"], r["experiment"], r["fw_version"], res,
                       f"{secs:.1f}", bat, f"{got}/{sent}", f"{loss:.1f}%", f"{rate:.0f}", f"{gap:.0f}", f"{az:.2f}"])
         if not e:
@@ -440,7 +440,8 @@ def main(argv=None):
     if calib_outcomes:
         print("  calibration runs: " + ", ".join(f"{calib_outcomes.count(k)} {k}" for k in
                                                 (sc.CALIB_DONE, sc.CALIB_LIMITED, sc.CALIB_FAILED))
-              + " (limited: it skipped the spin or the roll for lack of room; not a failure)")
+              + " (limited: it skipped or cut short the spin or the roll, for lack of room or at a plywood edge;"
+                " not a failure)")
 
     print("\nCLOCKS (robot time -> laptop time)")
     fits = clock_fits(S)

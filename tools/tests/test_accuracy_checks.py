@@ -272,7 +272,7 @@ def test_identity_counts_no_room_calibrations_separately():
     ac.check_identity(tb, cam)
     r = [x for x in tb.rows if x["id"] == "11"][-1]
     assert r["verdict"] == ac.PASS, r
-    assert "0 not readable" in r["result"] and "2 calibration(s) limited (no room" in r["result"]
+    assert "0 not readable" in r["result"] and "2 calibration(s) limited" in r["result"]
     # the same rows without the outcome column (older calib.py output) still count as not readable
     cam.calib_rows = [row("agree"), row("agree"), row("agree"), row("blink code only (no roll)"),
                       row("blink code only (no roll)")]
@@ -290,4 +290,5 @@ def test_run_sheet_reads_the_calib_look_skip_columns():
     look = w.looks["AF76-1"]
     assert (look["spin"], look["roll_step"], look["reason"]) == ("skipped", "skipped", "no room")
     assert sc.calib_outcome("done", look) == sc.CALIB_LIMITED
+    assert sc.calib_outcome_text("done", look) == "limited (no room)"
     assert sc.calib_outcome("failed:spin timed out", look) == sc.CALIB_FAILED

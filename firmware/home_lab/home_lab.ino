@@ -295,11 +295,13 @@ bool needsYawSign(int i) { return i == 1 || (i >= 3 && i <= 7); }
 // 4-7 are skipped when calib_spin_deg is 0 or something is within calib_spin_r_cm
 // of its turning centre at steps 1-3 (it then only knows the view straight
 // ahead); 9-10 are skipped when no heading has room for calib_roll_min_cm. One
-// CALIB_LOOK record (docs/data-formats.md) says what it saw and chose; its
-// spin / roll / reason columns say what was skipped for lack of room. A run
-// that skips the spin or the roll for lack of room is NOT a failure: RUNEND
-// says done, and the tools (run_sheet.py, blink/calib.py, accuracy_checks.py)
-// count it as a third outcome, "limited (no room)". The front stop is off
+// CALIB_LOOK record (docs/data-formats.md), sent after the rolls, says what it
+// saw, chose and did; its spin / roll / reason columns say what was skipped or
+// cut short and why. A run that skips the spin or the roll for lack of room,
+// or whose forward roll the edge guard stops, is NOT a failure (the robot
+// refused something it had no room for or that was unsafe): RUNEND says done,
+// and the tools (session_checks.calib_outcome) count it as a third outcome,
+// "limited" (reason "no room" and/or "plywood edge"). The front stop is off
 // except during the rolls (standing and spinning in place it may face a
 // board). The blink code runs throughout (moves go dark before the library's
 // blocking call, as elsewhere). Defaults: about 62-65 s from RUNINFO to RUNEND
@@ -307,21 +309,29 @@ bool needsYawSign(int i) { return i == 1 || (i >= 3 && i <= 7); }
 // end included); it needs a 25 cm circle to spin in and, in some direction,
 // 15 + 7 + 3 cm clear ahead of its front. With safe_edge on (edge.h), the
 // forward roll (step 9) stops at an open plywood edge, which the front sensor
-// cannot see ("stopped:plywood edge ahead", no roll back); the spins, the turn
-// and the roll back are not guarded. Firmware 2026-10-18b
+// cannot see: it then rolls back the distance it covered (step 10, retracing
+// its own path) and the run still ends done, limited (plywood edge); the roll
+// counts (roll "edge", roll_cm = the distance covered) if that distance is at
+// least calib_roll_min_cm, else it is skipped. The spins, the turn and the
+// roll back are not guarded. Firmware 2026-10-18b
 // rolled first, straight ahead (1 blink, 2 roll, 3 back, 4 wiggle, 5 still,
 // 6 spin, 7 still, 8 spin back, 9 still); before that: 1 still, 2 roll
 // max(3, start_nudge_cm) with 300 ms pauses, 3 back, 4 wiggle, 5 300 ms.
-// What the calibration skipped for lack of room (CALIB_LOOK spin / roll / reason), for runCalib().
+// What the calibration skipped or cut short (CALIB_LOOK spin / roll / reason), for runCalib().
 const char* gCalibSpin = "done";   // done, skipped (something inside its spin circle), off (calib_spin_deg 0)
-const char* gCalibRoll = "full";   // full, short, skipped (no room in any direction)
-bool gCalibNoRoom = false;         // spin or roll skipped for lack of room: the "limited (no room)" outcome
+const char* gCalibRoll = "full";   // full, short, edge (stopped at a plywood edge, kept), skipped
+bool gCalibNoRoom = false;         // spin or roll skipped for lack of room          } the "limited"
+bool gCalibEdge = false;           // the edge guard stopped the forward roll         } outcome
+
+const char* calibReason() {
+  return gCalibNoRoom && gCalibEdge ? "no room; plywood edge" : gCalibNoRoom ? "no room" : gCalibEdge ? "plywood edge" : "";
+}
 
 void calibSteps() {
   float spin = P("calib_spin_deg");
   gCalibSpin = spin != 0 ? "done" : "off";
   gCalibRoll = "skipped";
-  gCalibNoRoom = false;
+  gCalibNoRoom = gCalibEdge = false;
   unsigned long still = (unsigned long)fmaxf(300.0f, P("calib_still_ms"));
   net::logf("M,%s calibration: blinking code %d, a small wiggle%s, then a roll of up to %.0f cm forward and back "
             "where it finds room", net::name, blink::codeFor(net::name), spin != 0 ? ", a slow spin each way" : "",
@@ -363,54 +373,81 @@ void calibSteps() {
   float rollMin = fmaxf(1.0f, P("calib_roll_min_cm"));
   bool roll = c.roll >= rollMin;
   float target = wrap180(look::h0 + c.heading), turn = 0;
-  rawlog::step = 8;
-  if (roll) {
-    turn = wrap180(target - heading());
-    if (fabsf(turn) > P("turn_tol_deg") && !imuTurnTo(target).ok) return;
-  }
-  // still: the picture before the roll, and the live front view along the lane once more
-  float live = 0;
-  unsigned long t0 = millis();
-  while (millis() - t0 < still) {
-    if (shouldAbort()) return;
-    float f = frontInPath();
-    if (f > 0 && (live == 0 || f < live)) live = f;
-    delay(5);
-  }
-  float L = roll ? c.roll : 0;
+  float live = 0, L = roll ? c.roll : 0;
   const char* result = !roll ? "no_room" : c.full ? "roll" : "short";
-  if (roll && live > 0) {
-    float fit = live - P("safe_front_cm") - P("calib_margin_cm");
-    if (fit < L) {
-      L = fit;
-      result = L >= rollMin ? "short" : "no_room_after_turn";
-      if (L < rollMin) L = 0;
+  // turn, look again, roll: every way out of it (an abort included) ends with the one CALIB_LOOK record
+  auto turnAndRoll = [&]() {
+    rawlog::step = 8;
+    if (roll) {
+      turn = wrap180(target - heading());
+      if (fabsf(turn) > P("turn_tol_deg") && !imuTurnTo(target).ok) return;
     }
-  }
-  gCalibRoll = L <= 0 ? "skipped" : !strcmp(result, "roll") ? "full" : "short";
-  if (L <= 0) gCalibNoRoom = true;
+    // still: the picture before the roll, and the live front view along the lane once more
+    unsigned long t0 = millis();
+    while (millis() - t0 < still) {
+      if (shouldAbort()) return;
+      float f = frontInPath();
+      if (f > 0 && (live == 0 || f < live)) live = f;
+      delay(5);
+    }
+    if (roll && live > 0) {
+      float fit = live - P("safe_front_cm") - P("calib_margin_cm");
+      if (fit < L) {
+        L = fit;
+        result = L >= rollMin ? "short" : "no_room_after_turn";
+        if (L < rollMin) L = 0;
+      }
+    }
+    gCalibRoll = L <= 0 ? "skipped" : !strcmp(result, "roll") ? "full" : "short";
+    if (L <= 0) {
+      gCalibNoRoom = true;
+      net::logf("M,%s: no room to roll (best direction %.0f deg from where it faced: %.0f cm clear ahead%s, a %.0f cm "
+                "roll needs %.0f): no heading or wheel scale this time. Give it 13 in (33 cm) of clear floor in some "
+                "direction and calibrate again for those.", net::name, c.heading, c.room,
+                c.cap >= 0 ? ", capped by the laptop" : "", rollMin, rollMin + P("safe_front_cm") + P("calib_margin_cm"));
+      return;
+    }
+    if (fabsf(c.heading) > 2) net::logf("M,%s: rolling %.1f cm towards %.0f deg (left positive) from where it faced",
+                                         net::name, L, c.heading);
+    gFrontLimitCm = -1;        // rolling: the usual front stop (safe_front_cm)
+    rawlog::step = 9;
+    float x0, y0;
+    poseXY(x0, y0);
+    if (!libraryMove(L)) {
+      if (strcmp(gAbortReason.c_str(), "plywood edge ahead")) return;
+      // The edge guard refused to roll on (the look-around can't see an open edge): not a failure.
+      // Settle, keep the roll if it went far enough, and roll back the way it came (retracing is safe).
+      gAbortReason = "";
+      gCalibEdge = true;
+      float planned = L;
+      gCalibRoll = "skipped";  // until it knows how far it went
+      result = "edge";
+      L = 0;
+      if (!waitMs(still)) return;
+      float went = distFrom(x0, y0);
+      bool keep = went >= rollMin;
+      net::logf("M,%s: stopped at a plywood edge after %.1f cm of a %.1f cm roll; %s", net::name, went, planned,
+                keep ? "keeping that roll, rolling back" : "too short to measure, rolling back");
+      gCalibRoll = keep ? "edge" : "skipped";
+      L = keep ? went : 0;
+      rawlog::step = 10;
+      if (went >= 0.5f && (!libraryMove(-went) || !waitMs(still))) return;
+      gFrontLimitCm = 0;
+      return;
+    }
+    if (!waitMs(still)) return;
+    rawlog::step = 10;
+    if (!libraryMove(-L) || !waitMs(still)) return;
+    gFrontLimitCm = 0;
+  };
+  turnAndRoll();
   String caps = "";
   for (int k = 0; k < look::nCap; k++) caps += String(k ? ";" : "") + String(look::capDeg[k], 0) + ":" + String(look::capCm[k], 1);
   net::sendLine("H,CALIB_LOOK,run,spun,near_cm,heading_deg,turn_deg,room_cm,cap_cm,live_cm,roll_cm,result,room8,caps,"
                 "spin,roll,reason");
   net::logf("D,CALIB_LOOK,%s,%d,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%s,%s,%s,%s,%s,%s", gRunId.c_str(), spun ? 1 : 0,
             nearest, c.heading, turn, c.room, c.cap, live, L, result, look::roomSummary().c_str(), caps.c_str(),
-            gCalibSpin, gCalibRoll, gCalibNoRoom ? "no room" : "");
-  if (L <= 0) {
-    net::logf("M,%s: no room to roll (best direction %.0f deg from where it faced: %.0f cm clear ahead%s, a %.0f cm "
-              "roll needs %.0f): no heading or wheel scale this time. Give it 13 in (33 cm) of clear floor in some "
-              "direction and calibrate again for those.", net::name, c.heading, c.room,
-              c.cap >= 0 ? ", capped by the laptop" : "", rollMin, rollMin + P("safe_front_cm") + P("calib_margin_cm"));
-    return;
-  }
-  if (fabsf(c.heading) > 2) net::logf("M,%s: rolling %.1f cm towards %.0f deg (left positive) from where it faced",
-                                       net::name, L, c.heading);
-  gFrontLimitCm = -1;        // rolling: the usual front stop (safe_front_cm)
-  rawlog::step = 9;
-  if (!libraryMove(L) || !waitMs(still)) return;
-  rawlog::step = 10;
-  if (!libraryMove(-L) || !waitMs(still)) return;
-  gFrontLimitCm = 0;
+            gCalibSpin, gCalibRoll, calibReason());
 }
 
 void runCalib() {
@@ -423,10 +460,12 @@ void runCalib() {
   gTickHook = savedHook;
   gFrontLimitCm = -1;        // back to the usual front stop for the next run
   if (gAbortReason.length() || gFail.length()) return;
-  if (gCalibNoRoom)   // not a failure: it did what the space allowed (RUNEND done; tools say "limited (no room)")
-    net::logf("M,calibrated, limited (no room):%s%s the rest is kept. Now place the robot on its start mark",
+  if (gCalibNoRoom || gCalibEdge)   // not a failure: it did what the space allowed (RUNEND done; "limited")
+    net::logf("M,calibrated, limited (%s):%s%s the rest is kept. Now place the robot on its start mark", calibReason(),
               !strcmp(gCalibSpin, "skipped") ? " no spin (something inside its spin circle);" : "",
-              !strcmp(gCalibRoll, "skipped") ? " no roll (no room in any direction);" : "");
+              gCalibEdge ? (!strcmp(gCalibRoll, "edge") ? " roll cut short at a plywood edge;"
+                                                       : " no roll (stopped at a plywood edge too soon);")
+                         : !strcmp(gCalibRoll, "skipped") ? " no roll (no room in any direction);" : "");
   else
     net::sendLine("M,calibrated: now place the robot on its start mark");
 }

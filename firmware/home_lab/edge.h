@@ -35,6 +35,10 @@
 // alone, the outer wheel reaches an edge before the outer line sensor whenever
 // the robot meets the edge at less than about 45 degrees.
 //
+// After a trip the guard stays quiet until the wheels are still (the stop is
+// under way), so a caller that carries on after it (the calibration run rolls
+// back the way it came: home_lab.ino) is not stopped twice.
+//
 // EDGE records (docs/data-formats.md): "base" when the plywood level is learned,
 // "nobase" when it could not be, "trip" when the guard stops the robot.
 #pragma once
@@ -57,6 +61,8 @@ float base[3] = {0, 0, 0};
 unsigned long t0 = 0;
 int lineCount = 0;                 // consecutive checks with a line sensor past the edge
 unsigned long botSince = 0;        // when dbot first went above edge_bot_cm (0 = it isn't)
+bool braking = false;              // tripped: quiet until the wheels are still (the stop is under way;
+                                   // a caller that carries on, the calibration's roll, isn't stopped twice)
 
 void record(const char* ev, int l, int c, int r, float dbot, const char* info) {
   net::sendLine("H,EDGE,run,ms,event,lineL,lineC,lineR,baseL,baseC,baseR,dbot_cm,info");
@@ -71,6 +77,7 @@ void begin() {
   nLearn = 0;
   lineCount = 0;
   botSince = 0;
+  braking = false;
   base[0] = base[1] = base[2] = 0;
   t0 = millis();
 }
@@ -130,12 +137,18 @@ bool check() {
     if (nLearn >= NL || (millis() - t0 >= (unsigned long)P("edge_learn_ms") && nLearn >= 5) || forward)
       finishLearning(L, C, R);
   }
+  if (braking) {
+    if (still) braking = false;
+    else return false;
+  }
   if (!forward) { lineCount = 0; botSince = 0; return false; }
   if ((mode & 1) && ready) {
     if (pastEdge(L, 0) || pastEdge(C, 1) || pastEdge(R, 2)) lineCount++;
     else lineCount = 0;
     if (lineCount >= (int)fmaxf(1.0f, P("edge_n"))) {
       record("trip", L, C, R, alvik.get_distance_bottom(), "line sensors");
+      braking = true;
+      lineCount = 0;
       return true;
     }
   }
@@ -146,6 +159,8 @@ bool check() {
       if (!botSince) botSince = millis() | 1;
       if (millis() - botSince >= (unsigned long)P("edge_bot_ms")) {
         record("trip", L, C, R, d, "bottom zone");
+        braking = true;
+        botSince = 0;
         return true;
       }
     } else {

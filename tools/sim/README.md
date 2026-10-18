@@ -81,8 +81,9 @@ boards, or boards a test places) and the room walls; tools/sim/tests/test_look.p
 puts boards around the robot. About 62-65 s with the defaults and a roll
 (the 1 s `settle_end_ms` at the end included); one CALIB_LOOK record per run
 (docs/data-formats.md), whose spin / roll / reason columns say what was
-skipped for lack of room (RUNEND still `done`: the "limited (no room)"
-outcome, not a failure).
+skipped or cut short (RUNEND still `done`: the "limited" outcome, not a
+failure; with a board and `safe_edge` on, tests/test_edge.py has the edge
+guard stop the forward roll).
 
 **RAW raw_n and SYNC ms_on_after** (2026-10-18b): RAW rows carry `raw_n`
 (rows sent before this one in the run), so lost rows show as jumps; SYNC

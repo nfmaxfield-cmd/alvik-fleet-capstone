@@ -113,7 +113,12 @@ class EdgeGuardTests(unittest.TestCase):
     def test_calibration_roll_respects_it(self):
         r = make(board_config(), EDGE_X - 12.0, 61.0, 0.0, safe_edge=1, **GUARD)   # 15 cm roll would leave
         run = r.run_experiment("calib")
-        self.assertEqual(run["result"], "stopped:plywood edge ahead")
+        # stopped at the edge, then (2026-10-18c) rolled back: a limited calibration, not a stopped run
+        self.assertEqual(run["result"], "done")
+        self.assertTrue(r.calib_edge)
+        x, y, th = r.edge_trips[0][2]
+        h = r.track / 2
+        self.assertGreater(EDGE_X - max(x - h * math.sin(th), x + h * math.sin(th)), 2.0)   # wheels at the trip
         self.assertGreater(min(EDGE_X - wx for wx, _ in wheels(r)), 2.0)
 
     def test_survey_drive_respects_it(self):
@@ -158,3 +163,51 @@ class EdgeGuardTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CalibEdgeTests(unittest.TestCase):
+    """The calibration run's forward roll (its look-around can't see an open edge) stopped by the
+    guard: RUNEND done, outcome "limited (plywood edge)", the roll kept if it went far enough."""
+
+    def calib(self, x, seed):
+        r = make(board_config(), x, 61.0, 0.0, seed=seed, safe_edge=3, **GUARD)
+        run = r.run_experiment("calib")
+        head = [t for _, t in r.lines if t.startswith("H,CALIB_LOOK,")][0].split(",")[2:]
+        rec = dict(zip(head, [t for _, t in r.lines if t.startswith("D,CALIB_LOOK,")][0].split(",")[2:]))
+        return r, run, rec
+
+    def test_roll_cut_short_at_the_edge_is_kept(self):
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(HERE))) + "/tools")
+        import session_checks as sc
+        for seed in (1, 2):
+            r, run, rec = self.calib(106.0, seed)     # line sensors 12.5 cm from the edge: a 15 cm roll would cross it
+            self.assertEqual(run["result"], "done", seed)
+            self.assertEqual(float(rec["heading_deg"]), 0.0)
+            self.assertEqual((rec["result"], rec["roll"], rec["reason"]), ("edge", "edge", "plywood edge"), rec)
+            self.assertTrue(5.0 <= float(rec["roll_cm"]) < 15.0, rec["roll_cm"])   # bottom zone trips ~9 cm early
+            self.assertTrue(any(t.startswith("D,EDGE") and ",trip," in t for _, t in r.lines))
+            self.assertEqual(sc.calib_outcome(run["result"], rec), sc.CALIB_LIMITED)
+            self.assertEqual(sc.calib_outcome_text(run["result"], rec), "limited (plywood edge)")
+            said = [t for _, t in r.lines if t.startswith("M,")]
+            self.assertTrue(any(t.startswith("M,calibrated, limited (plywood edge): roll cut short") for t in said), said)
+            # it rolled back the way it came: ends near its start, wheels on the board
+            self.assertLess(abs(r.x - 106.0), 1.5)
+            for wx, _ in wheels(r):
+                self.assertLess(wx, EDGE_X)
+            steps = []
+            for _, t in r.lines:
+                if t.startswith("D,RAW,"):
+                    st = int(t.split(",")[4])
+                    if not steps or steps[-1] != st:
+                        steps.append(st)
+            self.assertEqual(steps[-3:], [8, 9, 10])
+
+    def test_stopped_too_soon_skips_the_roll(self):
+        r, run, rec = self.calib(117.0, 3)            # line sensors 1.5 cm from the edge
+        self.assertEqual(run["result"], "done")
+        self.assertEqual((rec["result"], rec["roll"], rec["reason"]), ("edge", "skipped", "plywood edge"), rec)
+        self.assertEqual(float(rec["roll_cm"]), 0.0)
+        self.assertTrue(any(t.startswith("M,calibrated, limited (plywood edge): no roll (stopped at a plywood edge")
+                            for _, t in r.lines))
+        for wx, _ in wheels(r):
+            self.assertLess(wx, EDGE_X)

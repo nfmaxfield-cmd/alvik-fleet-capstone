@@ -123,10 +123,12 @@ distance + 3 cm margin). Keep it 25 cm from any open plywood edge: the front
 sensor can't see an edge, so open space past it looks like room (the laptop
 can cap the roll per direction with `set calib_dir_limits`, for the camera
 map later; with the edge guard on, `safe_edge`, its forward roll stops at an
-open edge, but the run then ends stopped, without the roll back). If it finds
-no room to roll, or something sits inside its spin circle, it skips that part
-and the run still ends `done`: that is not a failure but a third outcome,
-"limited (no room)" (docs/data-formats.md, "Calibration outcomes").
+open edge and it rolls back the way it came). If it finds no room to roll,
+or something sits inside its spin circle, it skips that part, and if the edge
+guard stops its roll it keeps the roll when it went at least 5 cm: either way
+the run still ends `done`. That is not a failure but a third outcome,
+"limited (no room)" or "limited (plywood edge)" (docs/data-formats.md,
+"Calibration outcomes").
 run_sheet.py then says what was kept and lets you press r to move it and redo,
 or Enter to continue. tools/blink/calib.py reads all of it from the video and the log
 (calibration_results.csv). It doesn't end exactly where it started, so place
@@ -243,8 +245,9 @@ about 45 degrees) puts a wheel over it before the line sensors get there.
 Lap and grid runs on dark tape: dark tape may look like the edge to the line
 cue; use `safe_edge 2` or `0` for those. The calibration run is guarded only on
 its forward roll (the roll its look-around chose, which can't see an open
-edge): a trip there ends the run `stopped:plywood edge ahead` without the roll
-back; calibrate again further from the edge.
+edge): a trip there is not a failure; it rolls back the distance it covered
+and the run ends `done`, limited (plywood edge), keeping the roll if it went
+at least `calib_roll_min_cm` (5 cm).
 
 ## Step 1: sensor explorer
 

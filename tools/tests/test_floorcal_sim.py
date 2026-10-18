@@ -32,10 +32,12 @@ def moved_sim(tmp_path_factory):
     cfg.write_text(json.dumps(c))
     out = d / "out"
     subprocess.run([sys.executable, os.path.join(TOOLS, "sim", "simulate.py"), "--out", str(out), "--video",
-                    # seed 6: the calibration run before the sheet rows draws on each robot's random numbers,
+                    # seed 8: the calibration run before the sheet rows draws on each robot's random numbers,
                     # so a firmware change there reshuffles the runs (2026-10-18c, look first: mean 0.7-1.7 cm
-                    # over seeds 5-10, median 0.85; seed 5 went from 1.11 to 1.69, seed 6 is 0.93)
-                    "--seed", "6", "--max-runs", "4", "--fps", "10", "--config", str(cfg),
+                    # over seeds 5-10, median 0.85; seed 5 went from 1.11 to 1.69, seed 6 was 0.93). Sending
+                    # CALIB_LOOK after the rolls (edge-limited calibration) left every robot pose identical but
+                    # reshuffled the WiFi delay/loss draws: seeds 5-8 now 0.80, 1.40, 0.84, 0.99.
+                    "--seed", "8", "--max-runs", "4", "--fps", "10", "--config", str(cfg),
                     # a frozen copy of the T1 sheet: editing the real sheet mustn't change this test's data
                     "--sheet", os.path.join(TOOLS, "tests", "data", "e01_sheet_oct18.csv")], check=True,
                    capture_output=True)

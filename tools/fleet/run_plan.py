@@ -921,9 +921,16 @@ def start_robots(coord, link, args, source):
             le = getattr(b, "last_runend", None)
             oc = SC.calib_outcome(le[1] if le and le[0] == "calib" else None, b.calib_look)
             if oc == SC.CALIB_LIMITED:    # not a failure: it did what the space allowed
-                print("  %s: calibrated, limited (no room): %s" % (n, "; ".join(
-                    w for k, w in (("spin", "no spin (something inside its circle)"), ("roll", "no roll (no room in any "
-                                   "direction)")) if (b.calib_look or {}).get(k) == "skipped") or "no roll"))
+                lk = b.calib_look or {}
+                what = []
+                if lk.get("spin") == "skipped":
+                    what.append("no spin (something inside its circle)")
+                if lk.get("roll") == "edge":
+                    what.append("roll cut short at a plywood edge (kept)")
+                elif lk.get("roll") == "skipped" or not lk.get("roll"):
+                    what.append("no roll (stopped at a plywood edge too soon)" if lk.get("result") == "edge"
+                                else "no roll (no room in any direction)")
+                print("  %s: calibrated, %s: %s" % (n, SC.calib_outcome_text(le[1], lk), "; ".join(what)))
             elif oc == SC.CALIB_FAILED:
                 print("  %s: calibration did not finish (%s)" % (n, le[1] if le and le[0] == "calib" else "no end record"))
         if not args.yes and not args.dry_run:

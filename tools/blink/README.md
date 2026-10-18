@@ -122,9 +122,12 @@ firmware 2026-10-18b or later also covers the roll back and the two spins
 its blink code only, the spins' gyro scale and the light's circle radius (no
 heading, so no offset direction); what it could not measure is blank with
 quality `skipped: no room`, and its `outcome` is `limited (no room)`, not a
-failure (a run that skipped the spin likewise). `outcome` is `done`,
-`limited (no room)` or `failed` for every 2026-10-18c+ calib row, and the
-summary counts the three. The calib run's steps (by firmware) are listed in
+failure (a run that skipped the spin likewise). A roll the edge guard stopped
+at a plywood edge is kept if it covered at least `calib_roll_min_cm`
+(commanded_cm = the distance covered, a note says so), else it is blank with
+quality `skipped: plywood edge`; outcome `limited (plywood edge)`. `outcome`
+is `done`, `limited (<reason>)` or `failed` for every 2026-10-18c+ calib row,
+and the summary counts the three. The calib run's steps (by firmware) are listed in
 docs/data-formats.md ("Calibration outcomes" for the three states) and in
 calib.py's STEPS_*.
 

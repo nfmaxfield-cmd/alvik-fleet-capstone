@@ -183,3 +183,29 @@ def test_led_offset_from_turning_centre(sim):
     assert abs(float(r["spin_led_fwd_cm"]) - fwd) < 0.1, r["spin_led_fwd_cm"]
     assert abs(float(r["spin_led_left_cm"])) < 0.1, r["spin_led_left_cm"]
     assert abs(float(r["led_radius_cm"]) - math.hypot(fwd, 0)) < 0.1
+
+
+def test_outcome_marks_edge_stops():
+    """mark_outcome(): an edge-guard stop in the roll is "limited (plywood edge)": a roll long enough
+    is kept as measured (with a note), one too short is blank with quality "skipped: plywood edge"."""
+    from types import SimpleNamespace
+    run = SimpleNamespace(result="done")
+    base = dict(heading_floor_deg=12.3, wheel_scale=1.01, heading_quality="ok", wheel_scale_quality="ok",
+                gyro_scale=0.998, gyro_scale_quality="ok", note="")
+    kept = calib.mark_outcome(dict(base), run, dict(result="edge", roll_cm="7.4", spin="done", roll="edge",
+                                                    reason="plywood edge"))
+    assert kept["outcome"] == "limited (plywood edge)"
+    assert kept["heading_floor_deg"] == 12.3 and kept["wheel_scale_quality"] == "ok"
+    assert "plywood edge" in kept["note"]
+    short = calib.mark_outcome(dict(base), run, dict(result="edge", roll_cm="0.0", spin="done", roll="skipped",
+                                                     reason="plywood edge"))
+    assert short["heading_floor_deg"] == "" and short["wheel_scale"] == ""
+    assert short["heading_quality"] == short["wheel_scale_quality"] == "skipped: plywood edge"
+    assert short["gyro_scale_quality"] == "ok"
+    both = calib.mark_outcome(dict(base), run, dict(result="edge", roll_cm="6.0", spin="skipped", roll="edge",
+                                                    reason="no room; plywood edge"))
+    assert both["outcome"] == "limited (no room; plywood edge)"
+    assert both["gyro_scale_quality"] == "skipped: no room" and both["gyro_scale"] == ""
+    failed = calib.mark_outcome(dict(base), SimpleNamespace(result="stopped:cancel button"),
+                                dict(result="roll", roll_cm="15.0", spin="done", roll="full", reason=""))
+    assert failed["outcome"] == "failed" and failed["heading_quality"] == "ok"

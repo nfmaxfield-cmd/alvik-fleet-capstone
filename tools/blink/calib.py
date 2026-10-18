@@ -76,10 +76,11 @@ OUT_COLS = ["run", "robot_log", "experiment", "event", "t_video", "robot_blink",
             "led_offset_quality",
             # calib runs from firmware 2026-10-18c on: what the look-around chose (CALIB_LOOK)
             "look_result", "look_heading_deg", "look_room_cm", "look_spin", "look_roll", "look_reason",
-            # calib runs: done / limited (no room) / failed (session_checks.calib_outcome; blank for nudges)
+            # calib runs: done / limited (<reason>) / failed (session_checks.calib_outcome_text; blank for nudges)
             "outcome", "note"]
 
 SKIPPED_NO_ROOM = "skipped: no room"     # quality of a value the robot was not allowed to measure (not a check)
+SKIPPED_EDGE = "skipped: plywood edge"   # the same, the edge guard stopped the roll too soon to measure it
 
 # RAW step numbers of a calib run, by firmware (docs/data-formats.md "calibration run")
 STEPS_LOOK = dict(blink=1, wiggle=2, pre_spin=3, spin1=4, mid=5, spin2=6, post=7, pre_roll=8, fwd=9, back=10)  # 2026-10-18c+
@@ -1005,8 +1006,10 @@ def analyse_spin_only(run, row, S, steps, off, frames, tracks, dets, geo, names,
     """A 2026-10-18c+ calib run that found no room to roll: who (blink code only) and the spins
     (gyro scale; the light's circle radius, but no offset direction: no roll, no heading)."""
     v = lambda t: t + off
-    notes = ["no roll (the robot found no room): no heading or wheel scale"]
-    row["heading_quality"] = row["wheel_scale_quality"] = SKIPPED_NO_ROOM     # not measured: blank values
+    edge = row.get("look_result") == "edge"
+    notes = ["no roll (%s): no heading or wheel scale" % (
+        "the edge guard stopped it at a plywood edge too soon" if edge else "the robot found no room")]
+    row["heading_quality"] = row["wheel_scale_quality"] = SKIPPED_EDGE if edge else SKIPPED_NO_ROOM   # blank values
     s3 = S.still(steps["pre_spin"])
     if s3 is None:
         row["note"] = "; ".join(notes + ["no still before the spin in the log"])
@@ -1040,18 +1043,24 @@ def analyse_spin_only(run, row, S, steps, off, frames, tracks, dets, geo, names,
 
 
 def mark_outcome(row, run, look):
-    """A 2026-10-18c+ calib run's row: its outcome (done / limited (no room) / failed) and, for what
-    the robot skipped for lack of room, quality SKIPPED_NO_ROOM with the values left blank (not
-    measured): neither ok nor a check, since nothing went wrong."""
+    """A 2026-10-18c+ calib run's row: its outcome (done / limited (<reason>) / failed) and, for what
+    the robot skipped (no room, or the edge guard stopped its roll too soon), quality SKIPPED_NO_ROOM
+    or SKIPPED_EDGE with the values left blank (not measured): neither ok nor a check, since nothing
+    went wrong. A roll the edge guard cut short but long enough (CALIB_LOOK roll "edge") is kept:
+    roll_cm is the distance it covered, and its qualities are judged as usual."""
     look = look or {}
     row["look_spin"], row["look_roll"], row["look_reason"] = look.get("spin", ""), look.get("roll", ""), look.get("reason", "")
-    row["outcome"] = sc.calib_outcome(run.result, look)
-    if row["outcome"] != sc.CALIB_LIMITED:
+    row["outcome"] = sc.calib_outcome_text(run.result, look)
+    if sc.calib_outcome(run.result, look) != sc.CALIB_LIMITED:
         return row
+    if look.get("roll") == "edge":
+        row["note"] = "; ".join(x for x in (row.get("note"), "roll cut short at a plywood edge (edge guard) after "
+                                            "%s cm: kept" % look.get("roll_cm", "?")) if x)
     if look.get("roll") == "skipped" or ("roll" not in look and fnum(look.get("roll_cm"), 1.0) <= 0):
         for k in ("heading_floor_deg", "heading_img_deg", "wheel_scale"):
             row[k] = ""
-        row["heading_quality"] = row["wheel_scale_quality"] = SKIPPED_NO_ROOM
+        row["heading_quality"] = row["wheel_scale_quality"] = \
+            SKIPPED_EDGE if look.get("result") == "edge" else SKIPPED_NO_ROOM
     if look.get("spin") == "skipped":
         for k in ("gyro_scale", "spin_led_fwd_cm", "spin_led_left_cm"):
             row[k] = ""
@@ -1181,11 +1190,11 @@ def print_summary(out):
     ok = sum(1 for r in cal if str(r.get("identity", "")).startswith("agree"))
     bad = sum(1 for r in cal if "DISAGREE" in str(r.get("identity", "")))
     print(f"calibration runs: {len(cal)}, blink code and wheel log agree on {ok}, disagree on {bad}")
-    outc = [r.get("outcome") for r in cal if r.get("outcome")]
+    outc = [str(r.get("outcome")).split(" ")[0] for r in cal if r.get("outcome")]
     if outc:
         print("calibration outcomes: " + ", ".join(f"{outc.count(k)} {k}" for k in
                                                   (sc.CALIB_DONE, sc.CALIB_LIMITED, sc.CALIB_FAILED))
-              + " (limited = it skipped the spin or roll for lack of room: not a failure)")
+              + " (limited = it skipped or cut short the spin or roll: no room, or a plywood edge; not a failure)")
     offs = [(r["led_fwd_cm"], r["led_left_cm"]) for r in out if r.get("led_fwd_cm") not in (None, "")]
     if offs:
         print(f"light offset from robot centre (median of {len(offs)}): forward "

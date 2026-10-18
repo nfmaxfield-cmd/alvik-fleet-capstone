@@ -203,6 +203,10 @@ class LookTests(unittest.TestCase):
         self.assertEqual(sc.calib_outcome("failed:yaw check failed", {"reason": ""}), sc.CALIB_FAILED)
         self.assertEqual(sc.calib_outcome("stopped:plywood edge ahead", {"reason": "no room"}), sc.CALIB_FAILED)
         self.assertEqual(sc.calib_outcome(None, None), sc.CALIB_FAILED)
+        self.assertEqual(sc.calib_outcome_text("done", {"reason": "plywood edge"}), "limited (plywood edge)")
+        self.assertEqual(sc.calib_outcome_text("done", {"reason": "no room; plywood edge"}),
+                         "limited (no room; plywood edge)")
+        self.assertEqual(sc.calib_outcome_text("done", {"reason": ""}), "done")
         self.assertEqual(sc.calib_outcome("done", {"result": "no_room"}), sc.CALIB_LIMITED)   # without the new columns
         self.assertEqual(sc.calib_outcome("done", None), sc.CALIB_DONE)                     # before 2026-10-18c
         r = make_robot(13, [])
