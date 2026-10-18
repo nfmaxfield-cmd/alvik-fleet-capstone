@@ -1,0 +1,627 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alvik fleet planner</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1c1f24; --panel2: #23272e; --line: #31363f;
+    --text: #e7e9ec; --dim: #9aa1ab; --accent: #6cb6ff; --bad: #ff6b6b; --warn: #ffb347; --ok: #3ddc97;
+    --floor: #d9c7a3; --board: #3a2a1a; --keep: #8a8f98; --obst: #b5542c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { display: grid; grid-template-rows: auto 1fr; overflow: hidden; }
+  header { display: flex; align-items: center; gap: 12px; padding: 8px 14px; background: var(--panel);
+    border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .src { color: var(--dim); font-size: 12px; }
+  .tools { display: flex; gap: 4px; flex-wrap: wrap; }
+  button { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+    padding: 5px 10px; cursor: pointer; font: inherit; }
+  button.on { border-color: var(--accent); background: #233041; }
+  button.primary { background: #1f4b7a; border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  main { display: grid; grid-template-columns: 1fr 380px; min-height: 0; }
+  #stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 10px; gap: 8px; }
+  #wrap { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+  canvas { background: #0d0f12; border-radius: 4px; }
+  .timebar { display: flex; gap: 10px; align-items: center; color: var(--dim); }
+  .timebar input[type=range] { flex: 1; }
+  aside { background: var(--panel); border-left: 1px solid var(--line); overflow: auto; padding: 10px 12px; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+  .tabs button { flex: 1; }
+  h3 { font-size: 13px; margin: 14px 0 6px; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; }
+  .row { display: flex; gap: 6px; align-items: center; margin: 4px 0; flex-wrap: wrap; }
+  .row label { color: var(--dim); min-width: 92px; }
+  input[type=number], input[type=text], select { background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 5px; padding: 3px 6px; font: inherit; width: 78px; }
+  input[type=text] { width: 140px; }
+  .list { border: 1px solid var(--line); border-radius: 6px; }
+  .item { display: flex; gap: 6px; align-items: center; padding: 4px 8px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .item:last-child { border-bottom: 0; }
+  .item.sel { background: #233041; }
+  .item .grow { flex: 1; }
+  .item button { padding: 1px 7px; }
+  .msg { padding: 6px 8px; border-radius: 6px; margin: 6px 0; font-size: 13px; }
+  .msg.bad { background: #3a1f22; color: #ffb3b3; } .msg.warn { background: #3a2f1c; color: #ffd9a3; }
+  .msg.ok { background: #18352a; color: #a6f0cd; }
+  .pill { display: inline-block; padding: 0 7px; border-radius: 9px; font-size: 12px; border: 1px solid var(--line); }
+  .pill.stopped { border-color: var(--bad); color: var(--bad); } .pill.continues { border-color: var(--ok); color: var(--ok); }
+  .pill.holds { border-color: var(--warn); color: var(--warn); }
+  .dim { color: var(--dim); font-size: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  td, th { padding: 2px 4px; text-align: left; border-bottom: 1px solid var(--line); }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Alvik fleet planner</h1>
+  <div class="tools" id="tools">
+    <button data-tool="select" class="on" title="Drag end points, corners, robots">Select / drag</button>
+    <button data-tool="board" title="Click the two ends of a board">+ Board</button>
+    <button data-tool="keepout" title="Click to drop a 20 x 20 cm keep-out; drag its corners">+ Keep-out</button>
+    <button data-tool="obstacle" title="Click to drop a round obstacle">+ Obstacle</button>
+    <button data-tool="robot" title="Click to add a robot's start spot">+ Robot</button>
+    <button id="del" title="Delete the selected thing (Delete key)">Delete</button>
+    <label class="dim"><input type="checkbox" id="showInfl" checked> no-go margin</label>
+  </div>
+  <span class="src" id="src"></span>
+  <span style="flex:1"></span>
+  <button id="save" class="primary">Save map + plan</button>
+</header>
+<main>
+  <section id="stage">
+    <div id="wrap"><canvas id="cv" width="800" height="800"></canvas></div>
+    <div class="timebar">
+      <button id="play" disabled>Play</button>
+      <select id="speed"><option value="1">x1</option><option value="4" selected>x4</option><option value="10">x10</option></select>
+      <input type="range" id="time" min="0" max="0" step="0.1" value="0" disabled>
+      <span id="tlabel">no plan yet</span>
+    </div>
+    <div class="dim" id="hint">Floor in cm, x to the right, y up (the taped axes). Shading around things = where a robot's centre may not go.</div>
+  </section>
+  <aside>
+    <div class="tabs">
+      <button data-tab="map" class="on">Map</button>
+      <button data-tab="tasks">Tasks</button>
+      <button data-tab="plan">Plan</button>
+    </div>
+    <div id="tab-map">
+      <div id="msgs"></div>
+      <h3>Floor</h3>
+      <div class="row"><label>x from / to</label><input type="number" id="fx0" step="0.5"><input type="number" id="fx1" step="0.5"></div>
+      <div class="row"><label>y from / to</label><input type="number" id="fy0" step="0.5"><input type="number" id="fy1" step="0.5"></div>
+      <h3>Robot and docking</h3>
+      <div class="row"><label>length / width</label><input type="number" id="rl" step="0.1"><input type="number" id="rw" step="0.1"></div>
+      <div class="row"><label>front from centre</label><input type="number" id="rf" step="0.05"></div>
+      <div class="row"><label>gap at board</label><input type="number" id="dg" step="0.1"> <span class="dim">front face to board, cm</span></div>
+      <div class="row"><label>pre-dock out</label><input type="number" id="dp" step="0.5"> <span class="dim">slow approach length</span></div>
+      <h3>Selected</h3>
+      <div id="selbox" class="dim">Click a board, keep-out, obstacle or robot on the map, or in the lists below.</div>
+      <h3>Boards</h3><div class="list" id="lboards"></div>
+      <h3>Keep-outs</h3><div class="list" id="lkeep"></div>
+      <h3>Obstacles</h3><div class="list" id="lobst"></div>
+      <h3>Robots</h3><div class="list" id="lrob"></div>
+    </div>
+    <div id="tab-tasks" class="hidden">
+      <div class="dim">Each robot visits its boards in this order, then parks. Tick "any order" to let the planner choose the order that finishes soonest.</div>
+      <div id="tasks"></div>
+    </div>
+    <div id="tab-plan" class="hidden">
+      <h3>Settings</h3>
+      <div id="settings"></div>
+      <div class="row"><button id="planbtn" class="primary">Plan</button><span id="planinfo" class="dim"></span></div>
+      <div id="pmsgs"></div>
+      <div id="summary"></div>
+      <h3>Surprise: obstacle appears</h3>
+      <div class="dim">Move the time slider to a moment, choose a size, press the button, then click the map where it appears. The planner decides which robots stop and re-plans.</div>
+      <div class="row"><label>shape</label><select id="evshape"><option value="brick">brick 20 x 9</option><option value="circle">circle</option></select>
+        <label style="min-width:auto">radius</label><input type="number" id="evr" value="5" step="0.5"></div>
+      <div class="row"><button id="evbtn" disabled>Drop obstacle at this time</button>
+        <button id="rpbtn" disabled title="Plan the rest from this moment, as if nothing new appeared">Re-plan from this time</button></div>
+      <div id="events"></div>
+    </div>
+  </aside>
+</main>
+<script>
+"use strict";
+const COLORS = ["#4fc3f7", "#3ddc97", "#ff8a65", "#c792ea", "#ffd54f", "#f06292"];
+let M = null, D = {}, INFO = {}, SETTINGS = {}, DEFAULTS = {};
+let HIST = [];          // [{plan, t0, map, events}]
+let tool = "select", sel = null, drag = null, pendingBoard = null;
+let T = 0, playing = false, lastFrame = 0;
+const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+const $ = id => document.getElementById(id);
+const deg = r => r * 180 / Math.PI, rad = d => d * Math.PI / 180;
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+function msg(el, kind, text) { const d = document.createElement("div"); d.className = "msg " + kind; d.textContent = text; $(el).appendChild(d); }
+
+// ---------------------------------------------------------------- geometry
+function view() {
+  const f = M.floor, pad = 24;
+  const W = cv.width - 2 * pad, H = cv.height - 2 * pad;
+  const s = Math.min(W / (f.x_max - f.x_min), H / (f.y_max - f.y_min));
+  return {s, ox: pad - f.x_min * s, oy: pad + f.y_max * s};
+}
+function toPx(x, y) { const v = view(); return [v.ox + x * v.s, v.oy - y * v.s]; }
+function toCm(px, py) { const v = view(); return [(px - v.ox) / v.s, (v.oy - py) / v.s]; }
+function robotCorners(x, y, th) {
+  const r = M.robot, fr = r.front_offset_cm, bk = r.length_cm - fr, hw = r.width_cm / 2;
+  const c = Math.cos(th), s = Math.sin(th);
+  return [[fr, hw], [-bk, hw], [-bk, -hw], [fr, -hw]].map(([a, b]) => [x + c * a - s * b, y + s * a + c * b]);
+}
+function boardRect(b) {
+  const [x1, y1] = b.p1, [x2, y2] = b.p2, L = Math.hypot(x2 - x1, y2 - y1) || 1;
+  const nx = -(y2 - y1) / L * b.thickness_cm / 2, ny = (x2 - x1) / L * b.thickness_cm / 2;
+  return [[x1 + nx, y1 + ny], [x2 + nx, y2 + ny], [x2 - nx, y2 - ny], [x1 - nx, y1 - ny]];
+}
+function brick(cx, cy, a) {
+  const c = Math.cos(a), s = Math.sin(a);
+  return [[10, 4.5], [-10, 4.5], [-10, -4.5], [10, -4.5]].map(([x, y]) => [+(cx + c * x - s * y).toFixed(2), +(cy + s * x + c * y).toFixed(2)]);
+}
+
+// ---------------------------------------------------------------- plan playback
+function current(t) {        // which plan is in force at time t
+  let h = HIST[0];
+  for (const x of HIST) if (t >= x.t0) h = x;
+  return h;
+}
+function poseAt(plan, name, t) {
+  const r = plan.robots[name];
+  if (!r) return null;
+  const st = r.steps;
+  const P = p => [p[0], p[1], rad(p[2])];
+  if (!st.length || t <= st[0].t_start) return P(r.start);
+  for (const s of st) {
+    if (t >= s.t_start && t < s.t_end) {
+      const f = s.move_s > 0 ? Math.min(1, Math.max(0, (t - s.t_start) / s.move_s)) : 1;
+      const a = P(s.from), b = P(s.to);
+      if (s.type === "turn" || s.type === "park") return [a[0], a[1], a[2] + f * rad(s.turn_deg)];
+      return [a[0] + f * (b[0] - a[0]), a[1] + f * (b[1] - a[1]), a[2]];
+    }
+  }
+  return P(st[st.length - 1].to);
+}
+function endTime() {
+  if (!HIST.length) return 0;
+  const h = HIST[HIST.length - 1];
+  return h.t0 + h.plan.summary.makespan_s;
+}
+
+// ---------------------------------------------------------------- drawing
+function poly(pts, fill, stroke, lw) {
+  ctx.beginPath();
+  pts.forEach((p, i) => { const [x, y] = toPx(p[0], p[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+  ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw || 1; ctx.stroke(); }
+}
+function inflate(pts, r, closed) {
+  const v = view();
+  ctx.save(); ctx.strokeStyle = "rgba(255,90,90,0.18)"; ctx.fillStyle = "rgba(255,90,90,0.18)";
+  ctx.lineWidth = 2 * r * v.s; ctx.lineJoin = "round"; ctx.lineCap = "round";
+  ctx.beginPath();
+  pts.forEach((p, i) => { const [x, y] = toPx(p[0], p[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+  if (closed) ctx.closePath();
+  ctx.stroke(); if (closed) ctx.fill(); ctx.restore();
+}
+function arrow(x, y, th, len, color) {
+  const [a, b] = toPx(x, y), [c, d] = toPx(x + len * Math.cos(th), y + len * Math.sin(th));
+  ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(a, b); ctx.lineTo(c, d); ctx.stroke();
+}
+function label(x, y, text, color) {
+  const [a, b] = toPx(x, y); ctx.fillStyle = color || "#e7e9ec"; ctx.font = "12px system-ui"; ctx.fillText(text, a + 4, b - 4);
+}
+function obstacleShape(o) {
+  if (o.shape === "circle") { const pts = []; for (let k = 0; k < 24; k++) { const a = k / 24 * 2 * Math.PI; pts.push([o.center[0] + o.radius * Math.cos(a), o.center[1] + o.radius * Math.sin(a)]); } return pts; }
+  return o.points;
+}
+function draw() {
+  if (!M) return;
+  const f = M.floor, v = view();
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  const floorPts = [[f.x_min, f.y_min], [f.x_max, f.y_min], [f.x_max, f.y_max], [f.x_min, f.y_max]];
+  poly(floorPts, "#d9c7a3", "#7d6b4a", 2);
+  ctx.strokeStyle = "rgba(0,0,0,0.08)"; ctx.lineWidth = 1;
+  for (let x = Math.ceil(f.x_min / 10) * 10; x <= f.x_max; x += 10) { const [a, b] = toPx(x, f.y_min), [c, d] = toPx(x, f.y_max); ctx.beginPath(); ctx.moveTo(a, b); ctx.lineTo(c, d); ctx.stroke(); }
+  for (let y = Math.ceil(f.y_min / 10) * 10; y <= f.y_max; y += 10) { const [a, b] = toPx(f.x_min, y), [c, d] = toPx(f.x_max, y); ctx.beginPath(); ctx.moveTo(a, b); ctx.lineTo(c, d); ctx.stroke(); }
+  const h = HIST.length ? current(T) : null;
+  const map = h ? h.map : M;
+  const R = (INFO.r_turn || 6.7) + (+SETTINGS.safety_margin_cm || 1.5);
+  if ($("showInfl").checked) {
+    ctx.save(); ctx.beginPath();
+    const [ax, ay] = toPx(f.x_min, f.y_max), [bx, by] = toPx(f.x_max, f.y_min);
+    ctx.rect(ax, ay, bx - ax, by - ay); ctx.rect(ax + R * v.s, ay + R * v.s, bx - ax - 2 * R * v.s, by - ay - 2 * R * v.s);
+    ctx.fillStyle = "rgba(255,90,90,0.18)"; ctx.fill("evenodd"); ctx.restore();
+    map.boards.forEach(b => inflate(boardRect(b), R, true));
+    map.keepouts.forEach(k => inflate(k.polygon, R, true));
+    map.obstacles.forEach(o => inflate(obstacleShape(o), R, true));
+  }
+  map.keepouts.forEach((k, i) => { poly(k.polygon, "rgba(90,95,105,0.55)", sel && sel.kind === "keep" && sel.i === i ? "#6cb6ff" : "#555", 2); label(k.polygon[0][0], k.polygon[0][1], k.name, "#333"); });
+  map.obstacles.forEach((o, i) => { poly(obstacleShape(o), "#b5542c", sel && sel.kind === "obst" && sel.i === i ? "#6cb6ff" : "#5b2a14", 2); const c = o.center || o.points[0]; label(c[0], c[1], o.id + " (" + o.source + ")", "#222"); });
+  M.boards.forEach((b, i) => {
+    poly(boardRect(b), "#3a2a1a", sel && sel.kind === "board" && sel.i === i ? "#6cb6ff" : "#000", 2);
+    for (const p of [b.p1, b.p2]) { const [x, y] = toPx(p[0], p[1]); ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(x, y, 4, 0, 7); ctx.fill(); }
+    const d = D[b.name];
+    if (d) {
+      const [a, bb] = toPx(d.predock[0], d.predock[1]), [c, e] = toPx(d.dock[0], d.dock[1]);
+      ctx.setLineDash([4, 3]); ctx.strokeStyle = "#333"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(a, bb); ctx.lineTo(c, e); ctx.stroke(); ctx.setLineDash([]);
+      poly(robotCorners(d.dock[0], d.dock[1], rad(d.dock[2])), null, "rgba(0,0,0,0.45)", 1);
+      ctx.fillStyle = "#333"; ctx.beginPath(); ctx.arc(a, bb, 3, 0, 7); ctx.fill();
+      label((b.p1[0] + b.p2[0]) / 2, (b.p1[1] + b.p2[1]) / 2, b.name, "#000");
+    }
+  });
+  if (pendingBoard) { const [x, y] = toPx(pendingBoard[0], pendingBoard[1]); ctx.fillStyle = "#6cb6ff"; ctx.beginPath(); ctx.arc(x, y, 5, 0, 7); ctx.fill(); }
+  M.robots.forEach((r, i) => {
+    const col = COLORS[i % COLORS.length];
+    const isSel = sel && sel.kind === "robot" && sel.i === i;
+    ctx.setLineDash([3, 3]); poly(robotCorners(r.park[0], r.park[1], rad(r.park[2])), null, col, isSel ? 2 : 1); ctx.setLineDash([]);
+    if (!HIST.length) { poly(robotCorners(r.start[0], r.start[1], rad(r.start[2])), col + "55", col, isSel ? 3 : 2); arrow(r.start[0], r.start[1], rad(r.start[2]), 7, col); label(r.start[0], r.start[1] + 6, r.name, "#111"); }
+  });
+  if (!h) return;
+  // planned paths
+  const names = Object.keys(h.plan.robots);
+  names.forEach(n => {
+    const i = M.robots.findIndex(r => r.name === n), col = COLORS[(i < 0 ? 0 : i) % COLORS.length];
+    const st = h.plan.robots[n].steps;
+    ctx.lineWidth = 2;
+    for (const s of st) {
+      if (s.type !== "drive" && s.type !== "approach") continue;
+      const [a, b] = toPx(s.from[0], s.from[1]), [c, d] = toPx(s.to[0], s.to[1]);
+      ctx.strokeStyle = col; ctx.setLineDash(s.type === "approach" || s.reverse ? [3, 3] : []);
+      ctx.globalAlpha = s.t_end + h.t0 < T ? 0.3 : 0.9;
+      ctx.beginPath(); ctx.moveTo(a, b); ctx.lineTo(c, d); ctx.stroke();
+    }
+    ctx.globalAlpha = 1; ctx.setLineDash([]);
+  });
+  // near misses now
+  const close = new Set(), tooClose = new Set();
+  for (const nm of (h.plan.summary.near_misses || [])) {
+    const t = T - h.t0;
+    if (t >= nm.t_from && t <= nm.t_to) nm.robots.forEach(r => (nm.kind === "too close" ? tooClose : close).add(r));
+  }
+  names.forEach(n => {
+    const i = M.robots.findIndex(r => r.name === n), col = COLORS[(i < 0 ? 0 : i) % COLORS.length];
+    const p = poseAt(h.plan, n, T - h.t0); if (!p) return;
+    const edge = tooClose.has(n) ? "#ff3030" : close.has(n) ? "#ffb347" : "#111";
+    poly(robotCorners(p[0], p[1], p[2]), col, edge, tooClose.has(n) || close.has(n) ? 3 : 1.5);
+    arrow(p[0], p[1], p[2], 7, "#111");
+    label(p[0], p[1] + 6, n, "#111");
+    const ev = (h.events || []).find(e => e.robot === n);
+    if (ev && ev.action === "stopped" && T - h.t0 < (h.plan.settings.replan_budget_s + 1.5)) label(p[0] - 4, p[1] + 13, "STOPPED", "#c00");
+    if ((h.plan.stranded || []).includes(n)) label(p[0] - 4, p[1] + 13, "waiting for a route", "#c00");
+  });
+}
+
+// ---------------------------------------------------------------- hit testing and dragging
+function hit(x, y) {
+  const near = (p, r) => Math.hypot(p[0] - x, p[1] - y) < r;
+  for (let i = 0; i < M.robots.length; i++) {
+    if (near(M.robots[i].start, 5)) return {kind: "robot", i, part: "start"};
+    if (near(M.robots[i].park, 5)) return {kind: "robot", i, part: "park"};
+  }
+  for (let i = 0; i < M.boards.length; i++) {
+    const b = M.boards[i];
+    if (near(b.p1, 3)) return {kind: "board", i, part: "p1"};
+    if (near(b.p2, 3)) return {kind: "board", i, part: "p2"};
+  }
+  for (let i = 0; i < M.keepouts.length; i++) for (let k = 0; k < M.keepouts[i].polygon.length; k++)
+    if (near(M.keepouts[i].polygon[k], 3)) return {kind: "keep", i, part: k};
+  for (let i = 0; i < M.obstacles.length; i++) {
+    const o = M.obstacles[i];
+    if (o.shape === "circle" && near(o.center, Math.max(3, o.radius))) return {kind: "obst", i, part: "c"};
+    if (o.shape === "polygon") for (let k = 0; k < o.points.length; k++) if (near(o.points[k], 3)) return {kind: "obst", i, part: k};
+  }
+  for (let i = 0; i < M.boards.length; i++) {
+    const b = M.boards[i], mx = (b.p1[0] + b.p2[0]) / 2, my = (b.p1[1] + b.p2[1]) / 2;
+    if (Math.hypot(mx - x, my - y) < Math.hypot(b.p2[0] - b.p1[0], b.p2[1] - b.p1[1]) / 2) {
+      const ax = b.p2[0] - b.p1[0], ay = b.p2[1] - b.p1[1], L = Math.hypot(ax, ay);
+      if (Math.abs((x - b.p1[0]) * ay - (y - b.p1[1]) * ax) / L < 3) return {kind: "board", i, part: "all"};
+    }
+  }
+  return null;
+}
+const r1 = v => Math.round(v * 2) / 2;
+cv.addEventListener("mousedown", e => {
+  const rect = cv.getBoundingClientRect();
+  const [x, y] = toCm((e.clientX - rect.left) * cv.width / rect.width, (e.clientY - rect.top) * cv.height / rect.height);
+  if (tool === "event") { dropEvent(x, y); return; }
+  if (HIST.length && tool !== "select") { HIST = []; }
+  if (tool === "board") {
+    if (!pendingBoard) { pendingBoard = [r1(x), r1(y)]; draw(); return; }
+    let n = 1; while (M.boards.some(b => b.name === "M" + n)) n++;
+    M.boards.push({name: "M" + n, p1: pendingBoard, p2: [r1(x), r1(y)], thickness_cm: 1.5, side: "auto", dock_at: 0.5});
+    pendingBoard = null; sel = {kind: "board", i: M.boards.length - 1}; changed(); return;
+  }
+  if (tool === "keepout") { const a = r1(x), b = r1(y); M.keepouts.push({name: "keepout" + (M.keepouts.length + 1), polygon: [[a - 10, b - 10], [a + 10, b - 10], [a + 10, b + 10], [a - 10, b + 10]]}); sel = {kind: "keep", i: M.keepouts.length - 1}; changed(); return; }
+  if (tool === "obstacle") { M.obstacles.push({id: "obstacle" + (M.obstacles.length + 1), shape: "circle", center: [r1(x), r1(y)], radius: 5, source: "user", time: new Date().toISOString().slice(0, 19)}); sel = {kind: "obst", i: M.obstacles.length - 1}; changed(); return; }
+  if (tool === "robot") { const names = ["Left", "Center", "Right"]; let nm = names.find(n => !M.robots.some(r => r.name === n)) || "robot" + (M.robots.length + 1); M.robots.push({name: nm, start: [r1(x), r1(y), 90], park: [r1(x), r1(y), 90]}); sel = {kind: "robot", i: M.robots.length - 1}; changed(); return; }
+  const h = hit(x, y);
+  sel = h; drag = h ? {h, x0: x, y0: y} : null;
+  if (h && HIST.length) HIST = [];
+  renderSel(); renderLists(); draw();
+});
+cv.addEventListener("mousemove", e => {
+  if (!drag) return;
+  const rect = cv.getBoundingClientRect();
+  const [x, y] = toCm((e.clientX - rect.left) * cv.width / rect.width, (e.clientY - rect.top) * cv.height / rect.height);
+  const {h} = drag, X = r1(x), Y = r1(y);
+  if (h.kind === "robot") { const r = M.robots[h.i]; r[h.part][0] = X; r[h.part][1] = Y; if (h.part === "start" && e.shiftKey) { r.park[0] = X; r.park[1] = Y; } }
+  if (h.kind === "board") {
+    const b = M.boards[h.i];
+    if (h.part === "all") { const dx = X - r1(drag.x0), dy = Y - r1(drag.y0); b.p1 = [b.p1[0] + dx, b.p1[1] + dy]; b.p2 = [b.p2[0] + dx, b.p2[1] + dy]; drag.x0 = x; drag.y0 = y; }
+    else b[h.part] = [X, Y];
+  }
+  if (h.kind === "keep") M.keepouts[h.i].polygon[h.part] = [X, Y];
+  if (h.kind === "obst") { const o = M.obstacles[h.i]; if (h.part === "c") o.center = [X, Y]; else o.points[h.part] = [X, Y]; }
+  draw(); renderSel();
+});
+window.addEventListener("mouseup", () => { if (drag) { drag = null; changed(); } });
+window.addEventListener("keydown", e => { if ((e.key === "Delete" || e.key === "Backspace") && e.target.tagName !== "INPUT") delSel(); if (e.key === "Escape") { pendingBoard = null; setTool("select"); } });
+function delSel() {
+  if (!sel) return;
+  const arr = {board: M.boards, keep: M.keepouts, obst: M.obstacles, robot: M.robots}[sel.kind];
+  const gone = arr.splice(sel.i, 1)[0];
+  if (sel.kind === "board") for (const k in M.tasks) M.tasks[k].visit = M.tasks[k].visit.filter(v => v !== gone.name);
+  if (sel.kind === "robot") delete M.tasks[gone.name];
+  sel = null; HIST = []; changed();
+}
+$("del").onclick = delSel;
+
+// ---------------------------------------------------------------- side panel
+function numField(label, get, set, step) {
+  const row = document.createElement("div"); row.className = "row";
+  const l = document.createElement("label"); l.textContent = label; row.appendChild(l);
+  for (let k = 0; k < get.length; k++) {
+    const inp = document.createElement("input"); inp.type = "number"; inp.step = step || 0.5; inp.value = get[k]();
+    inp.onchange = () => { set[k](parseFloat(inp.value)); HIST = []; changed(); };
+    row.appendChild(inp);
+  }
+  return row;
+}
+function textField(label, get, set) {
+  const row = document.createElement("div"); row.className = "row";
+  const l = document.createElement("label"); l.textContent = label; row.appendChild(l);
+  const inp = document.createElement("input"); inp.type = "text"; inp.value = get();
+  inp.onchange = () => { set(inp.value); changed(); }; row.appendChild(inp); return row;
+}
+function selectField(label, opts, get, set) {
+  const row = document.createElement("div"); row.className = "row";
+  const l = document.createElement("label"); l.textContent = label; row.appendChild(l);
+  const s = document.createElement("select"); opts.forEach(o => { const op = document.createElement("option"); op.value = o; op.textContent = o; s.appendChild(op); });
+  s.value = get(); s.onchange = () => { set(s.value); HIST = []; changed(); }; row.appendChild(s); return row;
+}
+function renderSel() {
+  const box = $("selbox"); box.innerHTML = ""; box.className = "";
+  if (!sel) { box.className = "dim"; box.textContent = "Click a board, keep-out, obstacle or robot on the map, or in the lists below."; return; }
+  if (sel.kind === "board") {
+    const b = M.boards[sel.i];
+    box.appendChild(textField("name", () => b.name, v => { const old = b.name; b.name = v; for (const k in M.tasks) M.tasks[k].visit = M.tasks[k].visit.map(x => x === old ? v : x); }));
+    box.appendChild(numField("end 1 x, y", [() => b.p1[0], () => b.p1[1]], [v => b.p1[0] = v, v => b.p1[1] = v]));
+    box.appendChild(numField("end 2 x, y", [() => b.p2[0], () => b.p2[1]], [v => b.p2[0] = v, v => b.p2[1] = v]));
+    box.appendChild(numField("thickness", [() => b.thickness_cm], [v => b.thickness_cm = v], 0.1));
+    box.appendChild(numField("dock at (0-1)", [() => b.dock_at], [v => b.dock_at = v], 0.05));
+    box.appendChild(selectField("open side", ["auto", "left", "right"], () => b.side, v => b.side = v));
+    const d = D[b.name]; if (d) { const p = document.createElement("div"); p.className = "dim"; p.textContent = `dock (${d.dock.join(", ")}), pre-dock (${d.predock.slice(0, 2).join(", ")}); side: ${d.side} of end 1 -> end 2`; box.appendChild(p); }
+  } else if (sel.kind === "keep") {
+    const k = M.keepouts[sel.i];
+    box.appendChild(textField("name", () => k.name, v => k.name = v));
+    k.polygon.forEach((p, j) => box.appendChild(numField("corner " + (j + 1), [() => p[0], () => p[1]], [v => p[0] = v, v => p[1] = v])));
+  } else if (sel.kind === "obst") {
+    const o = M.obstacles[sel.i];
+    box.appendChild(textField("id", () => o.id, v => o.id = v));
+    box.appendChild(selectField("seen by", ["user", "camera", "distance_sensor"], () => o.source, v => o.source = v));
+    if (o.shape === "circle") { box.appendChild(numField("centre x, y", [() => o.center[0], () => o.center[1]], [v => o.center[0] = v, v => o.center[1] = v])); box.appendChild(numField("radius", [() => o.radius], [v => o.radius = v])); }
+    else o.points.forEach((p, j) => box.appendChild(numField("corner " + (j + 1), [() => p[0], () => p[1]], [v => p[0] = v, v => p[1] = v])));
+  } else if (sel.kind === "robot") {
+    const r = M.robots[sel.i];
+    box.appendChild(textField("name", () => r.name, v => { if (M.tasks[r.name]) { M.tasks[v] = M.tasks[r.name]; delete M.tasks[r.name]; } r.name = v; }));
+    box.appendChild(numField("start x, y, deg", [() => r.start[0], () => r.start[1], () => r.start[2]], [v => r.start[0] = v, v => r.start[1] = v, v => r.start[2] = v], 1));
+    box.appendChild(numField("park x, y, deg", [() => r.park[0], () => r.park[1], () => r.park[2]], [v => r.park[0] = v, v => r.park[1] = v, v => r.park[2] = v], 1));
+    const p = document.createElement("div"); p.className = "dim"; p.textContent = "Heading 0 = +x, 90 = +y (counter-clockwise). Shift+drag the start to move the park spot with it."; box.appendChild(p);
+  }
+}
+function renderLists() {
+  const mk = (el, arr, kind, text) => {
+    const L = $(el); L.innerHTML = "";
+    arr.forEach((it, i) => { const d = document.createElement("div"); d.className = "item" + (sel && sel.kind === kind && sel.i === i ? " sel" : ""); d.innerHTML = `<span class="grow"></span>`; d.firstChild.textContent = text(it, i); d.onclick = () => { sel = {kind, i}; renderSel(); renderLists(); draw(); }; L.appendChild(d); });
+    if (!arr.length) L.innerHTML = '<div class="item dim">none</div>';
+  };
+  mk("lboards", M.boards, "board", b => `${b.name}: (${b.p1}) to (${b.p2})`);
+  mk("lkeep", M.keepouts, "keep", k => `${k.name}: ${k.polygon.length} corners`);
+  mk("lobst", M.obstacles, "obst", o => `${o.id}: ${o.shape}, seen by ${o.source}`);
+  mk("lrob", M.robots, "robot", (r, i) => `${r.name}: start (${r.start})`);
+  const f = M.floor;
+  $("fx0").value = f.x_min; $("fx1").value = f.x_max; $("fy0").value = f.y_min; $("fy1").value = f.y_max;
+  $("rl").value = M.robot.length_cm; $("rw").value = M.robot.width_cm; $("rf").value = M.robot.front_offset_cm;
+  $("dg").value = M.dock.gap_cm; $("dp").value = M.dock.predock_cm;
+}
+[["fx0", v => M.floor.x_min = v], ["fx1", v => M.floor.x_max = v], ["fy0", v => M.floor.y_min = v], ["fy1", v => M.floor.y_max = v],
+ ["rl", v => M.robot.length_cm = v], ["rw", v => M.robot.width_cm = v], ["rf", v => M.robot.front_offset_cm = v],
+ ["dg", v => M.dock.gap_cm = v], ["dp", v => M.dock.predock_cm = v]].forEach(([id, f]) => $(id).onchange = () => { f(parseFloat($(id).value)); HIST = []; changed(); });
+
+function renderTasks() {
+  const box = $("tasks"); box.innerHTML = "";
+  M.robots.forEach((r, i) => {
+    const t = M.tasks[r.name] || (M.tasks[r.name] = {visit: [], any_order: false, park: true});
+    const h = document.createElement("h3"); h.innerHTML = `<span class="sw" style="background:${COLORS[i % COLORS.length]}"></span>`; h.appendChild(document.createTextNode(r.name)); box.appendChild(h);
+    const L = document.createElement("div"); L.className = "list";
+    t.visit.forEach((v, k) => {
+      const d = document.createElement("div"); d.className = "item";
+      const s = document.createElement("span"); s.className = "grow"; s.textContent = (k + 1) + ". " + (typeof v === "string" ? "board " + v : `point (${v.goto.join(", ")})`); d.appendChild(s);
+      const up = document.createElement("button"); up.textContent = "up"; up.disabled = k === 0; up.onclick = () => { [t.visit[k - 1], t.visit[k]] = [t.visit[k], t.visit[k - 1]]; HIST = []; changed(); };
+      const rm = document.createElement("button"); rm.textContent = "remove"; rm.onclick = () => { t.visit.splice(k, 1); HIST = []; changed(); };
+      d.appendChild(up); d.appendChild(rm); L.appendChild(d);
+    });
+    const end = document.createElement("div"); end.className = "item dim"; end.textContent = t.park ? (t.visit.length + 1) + ". park at its park spot" : "(stays at its last task)"; L.appendChild(end);
+    box.appendChild(L);
+    const row = document.createElement("div"); row.className = "row";
+    const s = document.createElement("select"); M.boards.forEach(b => { const o = document.createElement("option"); o.value = b.name; o.textContent = b.name; s.appendChild(o); });
+    const add = document.createElement("button"); add.textContent = "add board"; add.disabled = !M.boards.length; add.onclick = () => { t.visit.push(s.value); HIST = []; changed(); };
+    const gx = document.createElement("input"); gx.type = "number"; gx.placeholder = "x"; gx.style.width = "52px";
+    const gy = document.createElement("input"); gy.type = "number"; gy.placeholder = "y"; gy.style.width = "52px";
+    const addp = document.createElement("button"); addp.textContent = "add point"; addp.onclick = () => { if (gx.value !== "" && gy.value !== "") { t.visit.push({goto: [parseFloat(gx.value), parseFloat(gy.value)]}); HIST = []; changed(); } };
+    row.append(s, add, gx, gy, addp); box.appendChild(row);
+    const row2 = document.createElement("div"); row2.className = "row";
+    const ao = document.createElement("label"); ao.style.minWidth = "auto"; ao.innerHTML = '<input type="checkbox"> any order';
+    ao.firstChild.checked = t.any_order; ao.firstChild.onchange = e => { t.any_order = e.target.checked; HIST = []; changed(); };
+    const pk = document.createElement("label"); pk.style.minWidth = "auto"; pk.innerHTML = '<input type="checkbox"> park at the end';
+    pk.firstChild.checked = t.park; pk.firstChild.onchange = e => { t.park = e.target.checked; HIST = []; changed(); };
+    row2.append(ao, pk); box.appendChild(row2);
+  });
+}
+const SETTING_LABELS = {
+  separation_cm: "closest two robots may come (cm)", safety_margin_cm: "room kept from things (cm)",
+  cruise_cms: "driving speed (cm/s)", approach_cms: "final approach speed (cm/s)", backout_cms: "backing out speed (cm/s)",
+  turn_dps: "turn rate (deg/s)", turn_settle_s: "pause after a turn (s)", drive_settle_s: "pause after driving (s)",
+  dwell_s: "time at each board (s)", chunk_cm: "longest single drive step (cm)", stop_horizon_s: "stop horizon for surprises (s)",
+  replan_budget_s: "time allowed to re-plan (s)"};
+function renderSettings() {
+  const box = $("settings"); box.innerHTML = "";
+  for (const k in SETTING_LABELS) {
+    const row = document.createElement("div"); row.className = "row";
+    const l = document.createElement("label"); l.textContent = SETTING_LABELS[k]; l.style.minWidth = "210px"; row.appendChild(l);
+    const inp = document.createElement("input"); inp.type = "number"; inp.step = "0.1"; inp.value = SETTINGS[k];
+    inp.onchange = () => { SETTINGS[k] = parseFloat(inp.value); }; row.appendChild(inp); box.appendChild(row);
+  }
+}
+
+// ---------------------------------------------------------------- server round trips
+let checkTimer = null;
+function changed() {
+  renderSel(); renderLists(); renderTasks(); draw(); updateTimebar();
+  clearTimeout(checkTimer);
+  checkTimer = setTimeout(async () => {
+    $("msgs").innerHTML = "";
+    try {
+      const r = await api("/api/check", {map: M});
+      D = r.docks; INFO = r.robot;
+      r.warnings.forEach(w => msg("msgs", "warn", w));
+      if (!r.warnings.length) msg("msgs", "ok", "Map looks fine.");
+    } catch (e) { msg("msgs", "bad", e.message); }
+    draw();
+  }, 150);
+}
+$("planbtn").onclick = async () => {
+  $("pmsgs").innerHTML = ""; $("planinfo").textContent = "planning..."; $("planbtn").disabled = true;
+  try {
+    const over = {}; for (const k in SETTING_LABELS) over[k] = SETTINGS[k];
+    const r = await api("/api/plan", {map: M, settings: over});
+    HIST = [{plan: r.plan, t0: 0, map: JSON.parse(JSON.stringify(M)), events: []}];
+    T = 0; $("planinfo").textContent = "";
+    renderSummary(); $("events").innerHTML = ""; updateTimebar(); draw();
+  } catch (e) { msg("pmsgs", "bad", e.message); $("planinfo").textContent = ""; }
+  $("planbtn").disabled = false;
+};
+function renderSummary() {
+  const box = $("summary"); box.innerHTML = "";
+  if (!HIST.length) return;
+  const h = HIST[HIST.length - 1], p = h.plan, sm = p.summary;
+  const d = document.createElement("div");
+  const sep = p.settings.separation_cm;
+  d.className = "msg " + (sm.min_separation_cm >= sep ? "ok" : "bad");
+  d.textContent = `Last robot done after ${(h.t0 + sm.makespan_s).toFixed(1)} s. Closest two robots come ${sm.min_separation_cm} cm apart (limit ${sep}). Planned in ${sm.planning_time_s} s, ${sm.orders_tried} orders tried, best: ${p.priority_order.join(", ")} first.`;
+  box.appendChild(d);
+  (p.warnings || []).forEach(w => msg("summary", "warn", w));
+  const tbl = document.createElement("table");
+  tbl.innerHTML = "<tr><th>robot</th><th>visits</th><th>done at</th><th>steps</th></tr>";
+  for (const n in p.robots) {
+    const r = p.robots[n], tr = document.createElement("tr");
+    [n, r.visit_order.map(v => typeof v === "string" ? v : "point").join(" > "), (h.t0 + r.finish_s).toFixed(1) + " s", r.steps.length].forEach(x => { const td = document.createElement("td"); td.textContent = x; tr.appendChild(td); });
+    tbl.appendChild(tr);
+  }
+  box.appendChild(tbl);
+  const nm = sm.near_misses || [];
+  const h3 = document.createElement("h3"); h3.textContent = "Close passes (under separation + 3 cm)"; box.appendChild(h3);
+  if (!nm.length) { const x = document.createElement("div"); x.className = "dim"; x.textContent = "none"; box.appendChild(x); }
+  nm.forEach(n => { const x = document.createElement("div"); x.className = "item"; x.textContent = `${n.robots.join(" & ")}: ${n.min_gap_cm} cm at ${(h.t0 + n.t_from).toFixed(1)}-${(h.t0 + n.t_to).toFixed(1)} s (${n.kind})`; x.style.color = n.kind === "too close" ? "#ff6b6b" : "#ffb347"; x.onclick = () => { T = h.t0 + n.t_from; updateTimebar(); draw(); }; box.appendChild(x); });
+}
+function setTool(t) { tool = t; document.querySelectorAll("#tools button[data-tool]").forEach(b => b.classList.toggle("on", b.dataset.tool === t)); if (t !== "board") pendingBoard = null; }
+document.querySelectorAll("#tools button[data-tool]").forEach(b => b.onclick = () => setTool(b.dataset.tool));
+$("evbtn").onclick = () => { setTool("event"); $("hint").textContent = "Click the map where the obstacle appears (Esc cancels)."; };
+async function dropEvent(x, y) {
+  setTool("select"); $("hint").textContent = "";
+  const ob = $("evshape").value === "brick"
+    ? {id: "brick" + (HIST.length), shape: "polygon", points: brick(x, y, 0), source: "camera"}
+    : {id: "obstacle-t" + T.toFixed(1), shape: "circle", center: [r1(x), r1(y)], radius: parseFloat($("evr").value), source: "camera"};
+  $("events").innerHTML = '<div class="dim">re-planning...</div>';
+  await replanAt(T, ob, true);
+}
+async function replanAt(tAbs, ob, fresh, tries) {
+  // the plan in force at tAbs, re-planned from the robots' planned poses then
+  const h = current(tAbs);
+  tries = tries || 0;
+  const budget = tries ? Math.min(12, h.plan.settings.replan_budget_s * Math.pow(3, tries)) : null;
+  try {
+    const r = await api("/api/event", {map: h.map, plan: h.plan, t: tAbs - h.t0, obstacle: ob, budget_s: budget});
+    HIST = HIST.filter(x => x.t0 <= tAbs);
+    HIST.push({plan: r.plan, t0: tAbs, map: r.map, events: r.events});
+    renderEvents(r.events, tAbs, r.plan, ob, fresh); renderSummary(); updateTimebar(); draw();
+    // a robot left without a route gets another try a few seconds later,
+    // as on the real floor (the others have moved on by then)
+    // (stopped robots are safe, so each retry may take longer)
+    if ((r.plan.stranded || []).length && tries < 4) await replanAt(tAbs + 3.0, null, false, tries + 1);
+  } catch (e) { msg("events", "bad", e.message); }
+}
+$("rpbtn").onclick = () => { $("events").innerHTML = ""; replanAt(T, null, true); };
+function renderEvents(events, t0, plan, ob, fresh) {
+  const box = $("events"); if (fresh) box.innerHTML = ""; else box.appendChild(document.createElement("hr"));
+  const h = document.createElement("div"); h.className = "dim"; h.textContent = `${ob ? "Obstacle" : "Re-plan"} at ${t0.toFixed(1)} s; new plan computed in ${plan.summary.planning_time_s} s (allowed ${plan.settings.replan_budget_s} s).`; box.appendChild(h);
+  events.forEach(e => { const d = document.createElement("div"); d.className = "item"; d.innerHTML = `<span class="pill ${e.action}"></span> <b></b> <span class="grow dim"></span>`; d.children[0].textContent = e.action; d.children[1].textContent = e.robot; d.children[2].textContent = e.reason; box.appendChild(d); });
+  (plan.warnings || []).forEach(w => msg("events", "warn", w));
+}
+$("save").onclick = async () => {
+  try {
+    const h = HIST.length ? HIST[HIST.length - 1] : null;
+    const r = await api("/api/save", {map: h ? h.map : M, plan: h ? h.plan : null});
+    alert("Saved:\n" + r.saved.join("\n") + (HIST.length > 1 ? "\n\n(plan.json is the latest re-plan, its times count from the obstacle)" : ""));
+  } catch (e) { alert("Not saved: " + e.message); }
+};
+
+// ---------------------------------------------------------------- time bar
+function updateTimebar() {
+  const has = HIST.length > 0;
+  $("time").disabled = !has; $("play").disabled = !has; $("evbtn").disabled = !has; $("rpbtn").disabled = !has;
+  if (!has) { $("tlabel").textContent = "no plan yet"; return; }
+  $("time").max = endTime().toFixed(1); $("time").value = T;
+  $("tlabel").textContent = T.toFixed(1) + " / " + endTime().toFixed(1) + " s";
+}
+$("time").oninput = () => { T = parseFloat($("time").value); updateTimebar(); draw(); };
+$("play").onclick = () => { playing = !playing; $("play").textContent = playing ? "Pause" : "Play"; if (playing && T >= endTime()) T = 0; lastFrame = performance.now(); requestAnimationFrame(tick); };
+function tick(now) {
+  if (!playing) return;
+  T = Math.min(endTime(), T + (now - lastFrame) / 1000 * parseFloat($("speed").value)); lastFrame = now;
+  updateTimebar(); draw();
+  if (T >= endTime()) { playing = false; $("play").textContent = "Play"; return; }
+  requestAnimationFrame(tick);
+}
+document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b));
+  ["map", "tasks", "plan"].forEach(t => $("tab-" + t).classList.toggle("hidden", t !== b.dataset.tab));
+});
+$("showInfl").onchange = draw;
+function fit() { const w = $("wrap"); const s = Math.max(300, Math.min(w.clientWidth, w.clientHeight)); cv.style.width = s + "px"; cv.style.height = s + "px"; }
+window.addEventListener("resize", fit);
+
+(async () => {
+  const st = await api("/api/state");
+  M = st.map; D = st.docks; INFO = st.robot; DEFAULTS = st.settings;
+  SETTINGS = Object.assign({}, st.settings, st.plan ? st.plan.settings : {});
+  $("src").textContent = st.map_path;
+  if (st.plan && st.plan_matches) HIST = [{plan: st.plan, t0: 0, map: M, events: st.plan.events || []}];
+  renderSettings(); fit(); changed(); renderSummary();
+})();
+</script>
+</body>
+</html>

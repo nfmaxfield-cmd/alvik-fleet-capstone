@@ -176,3 +176,105 @@ centre_x_px,centre_y_px,led_fwd_px,led_left_px,led_fwd_cm,led_left_cm,note
 - `led_fwd_*`, `led_left_*`: the light's offset from the robot's centre in
   the robot's own frame (forward, left), px and cm; needs robot-centre
   detections (`--detections`). Column details: tools/blink/README.md.
+
+## Fleet map (`map.json`, written by tools/fleet/app.py)
+
+Floor frame as everywhere else: cm, x along the long taped axis, y to its
+left, heading degrees, 0 = +x, counter-clockwise positive. Poses are
+`[x, y, heading_deg]`. Anything left out takes the default shown.
+
+```json
+{
+ "format": "alvik-fleet-map", "version": 1,
+ "floor":  {"x_min": 0, "x_max": 122, "y_min": 0, "y_max": 122},
+ "robot":  {"length_cm": 9.5, "width_cm": 9.5, "front_offset_cm": 4.75},
+ "dock":   {"gap_cm": 1.0, "predock_cm": 15.0},
+ "boards": [{"name": "A", "p1": [30, 2], "p2": [50, 2], "thickness_cm": 1.5, "side": "auto", "dock_at": 0.5}],
+ "keepouts":  [{"name": "camera stand", "polygon": [[0, 110], [12, 110], [12, 122], [0, 122]]}],
+ "obstacles": [{"id": "brick-1", "shape": "polygon", "points": [[50, 70], [70, 70], [70, 79], [50, 79]],
+                "source": "camera", "time": "2026-10-18T14:03:12"},
+               {"id": "cup", "shape": "circle", "center": [80, 40], "radius": 4, "source": "user", "time": "..."}],
+ "robots": [{"name": "Left", "start": [20, 30, 0], "park": [20, 30, 0]}],
+ "tasks":  {"Left": {"visit": ["A", {"goto": [60, 90]}], "any_order": false, "park": true}}
+}
+```
+
+- `floor`: the plywood's edges. Robots keep their whole body (plus the safety
+  margin) on it. The default is 4 ft x 4 ft; set the measured size.
+- `robot`: outer size and how far the front face is ahead of the turning
+  centre (the point the fusion tracks).
+- `dock.gap_cm`: front face to board surface when docked.
+  `dock.predock_cm`: how far out the slow, straight final approach starts.
+- `boards`: the "machines". `p1`, `p2` are the two ends of the board's centre
+  line; `thickness_cm` its thickness. `side`: which side robots dock on: `left`
+  or `right` of the direction p1 -> p2, or `auto` (the side facing the middle
+  of the floor). `dock_at`: where along the board, 0 = p1, 1 = p2.
+- Derived for each board (not stored; shown in the page and copied into
+  plan.json): **dock** = the pose square to the board on its open side,
+  centre `gap_cm + front_offset_cm` from the surface, facing the board;
+  **pre-dock** = `predock_cm` further out on the same line, same heading.
+- `keepouts`: areas robots must not enter (no physical wall; the distance
+  sensor does not see them).
+- `obstacles`: things found on the floor: `shape` circle (`center`, `radius`)
+  or polygon (`points`); `source` camera | distance_sensor | user; `time`
+  when seen (ISO 8601). Optional `note`.
+- `robots`: start and park poses (park defaults to start).
+- `tasks` (optional): per robot, boards (by name) or `{"goto": [x, y]}` /
+  `{"goto": [x, y, heading]}` points, in order; `any_order` lets the planner
+  pick the order that finishes everyone soonest; `park` (default true) ends
+  at the park pose. A plain list `["A", "B"]` also works.
+
+The **map hash** in plan.json is sha256 (first 16 hex digits) of floor,
+robot, dock, boards, keep-outs, obstacles (without time/note) and robots;
+tasks and notes do not change it.
+
+## Fleet plan (`plan.json`, written by tools/fleet/planner.py and app.py)
+
+What the laptop sends to the robots, one step at a time. Times are seconds
+from the start of this plan (`t0_s` is 0; after an obstacle the new plan
+counts from the moment the obstacle was handled).
+
+Top level: `format` ("alvik-fleet-plan"), `version` 1, `plan_id`, `created`,
+`map_hash`, `replan_of` (plan_id it replaces, or null), `settings` (every
+planner setting used), `priority_order`, `docks` (dock and pre-dock pose of
+every board used), `events` (after an obstacle: per robot `action` stopped |
+continues | holds | done and the `reason`), `warnings`, `stranded` (robots
+left where they are until the next re-plan), `summary` (makespan_s,
+sum_finish_s, planning_time_s, orders_tried, min_separation_cm,
+closest_pair, near_misses, min_static_clearance_cm, approach_min_clearance_cm,
+planned_dock_gaps_cm), and `robots`:
+
+```
+"robots": {"Left": {"start": [x, y, deg], "visit_order": ["B", "C", "park"],
+                    "task_offset": 0, "pending": null, "finish_s": 61.2,
+                    "steps": [ ...step... ]}}
+```
+
+`pending` (only for a stranded robot): the work it still has to do
+(`visits`, `task_offset`, `park`, `lead_board`, `lead_phase`).
+
+Each step:
+
+| Field | Meaning |
+| --- | --- |
+| `i` | step number within this robot's list |
+| `type` | `turn` (in place), `drive` (straight), `approach` (slow straight to a board, stop on the distance sensor), `wait`, `park` (final turn in place at the park spot) |
+| `phase` | travel, align (turn to face a board), approach, dwell (docked, a wait), backout, escape (straight move out of a tight spot), wait, hold (waiting for the new plan), park |
+| `from`, `to` | poses at the start and end of the step, `[x, y, heading_deg]` |
+| `speed` | cm/s for drive/approach, deg/s for turn/park, null for wait |
+| `reverse` | drive/approach only: true = backwards (heading stays `from`'s) |
+| `turn_deg` | turn/park only: signed turn, counter-clockwise positive |
+| `t_start`, `t_end` | planned times; `move_s` = time spent moving (the rest is settling) |
+| `board`, `task` | board name (align/approach/dwell/backout) and task number |
+| `after` | `[[robot, step], ...]`: steps of other robots that must be reported done before this one starts |
+| `stop_at_front_cm` | approach only: stop when the front distance sensor reads this |
+| `max_travel_cm` | approach only: give up (and report) if it has driven this far without the reading |
+| `front_clear_cm` | forward drives: what the front distance sensor should read at the end of the step (nearest board/obstacle straight ahead; absent = nothing within 100 cm). A reading well below it means something new is in the way |
+| `not_before_s` | do not start before this time (first new step after an obstacle) |
+| `committed` | step carried on from the previous plan while the new one was computed |
+
+The `after` lists are the safety rule: two steps of different robots whose
+swept areas come within the separation distance never run at the same time;
+whichever the plan has first must be finished before the other starts.
+A robot that obeys `after` cannot run into another robot, even when some run
+late. `t_start` alone does not give that (see tools/fleet/README.md).

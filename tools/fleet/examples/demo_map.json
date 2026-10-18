@@ -1,0 +1,28 @@
+{
+ "format": "alvik-fleet-map",
+ "version": 1,
+ "notes": "Example: 4 ft x 4 ft plywood, four boards on the edges, routes that cross. Replace with the measured floor and board positions.",
+ "floor": {"x_min": 0, "x_max": 122, "y_min": 0, "y_max": 122},
+ "robot": {"length_cm": 9.5, "width_cm": 9.5, "front_offset_cm": 4.75},
+ "dock": {"gap_cm": 1.0, "predock_cm": 15.0},
+ "boards": [
+  {"name": "A", "p1": [30, 2], "p2": [50, 2], "thickness_cm": 1.5},
+  {"name": "B", "p1": [120, 45], "p2": [120, 65], "thickness_cm": 1.5},
+  {"name": "C", "p1": [72, 120], "p2": [92, 120], "thickness_cm": 1.5},
+  {"name": "D", "p1": [2, 60], "p2": [2, 80], "thickness_cm": 1.5}
+ ],
+ "keepouts": [
+  {"name": "camera stand foot", "polygon": [[0, 110], [12, 110], [12, 122], [0, 122]]}
+ ],
+ "obstacles": [],
+ "robots": [
+  {"name": "Left",   "start": [20, 30, 0],   "park": [20, 30, 0]},
+  {"name": "Center", "start": [61, 25, 90],  "park": [61, 25, 90]},
+  {"name": "Right",  "start": [102, 30, 180], "park": [102, 30, 180]}
+ ],
+ "tasks": {
+  "Left":   {"visit": ["B", "C"]},
+  "Center": {"visit": ["C", "A"]},
+  "Right":  {"visit": ["D", "A"]}
+ }
+}
