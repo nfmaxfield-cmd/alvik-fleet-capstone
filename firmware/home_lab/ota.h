@@ -17,8 +17,11 @@ void otaFinished(bool ok);
 namespace ota {
 
 bool on = false;
+bool tried = false;
 
+// Call once WiFi is up (at startup or later).
 void begin() {
+  tried = true;
 #ifdef OTA_PASSWORD
   if (!net::up) return;
   ArduinoOTA.setHostname(net::name);     // shows as "<name>" in the IDE's network ports

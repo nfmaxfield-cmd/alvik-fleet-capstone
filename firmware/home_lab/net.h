@@ -81,6 +81,8 @@ void logf(const char* fmt, ...) {
   sendLine(buf);
 }
 
+void finishUp();
+
 // Join WiFi. Returns false (and the lab still runs over USB) if it can't.
 bool begin(unsigned long timeout_ms = 15000) {
   WiFi.mode(WIFI_STA);
@@ -92,9 +94,15 @@ bool begin(unsigned long timeout_ms = 15000) {
     delay(250);
   }
   if (WiFi.status() != WL_CONNECTED) {
-    if (Serial) Serial.println("M,WiFi did not connect; logging over USB only");
+    if (Serial) Serial.println("M,WiFi did not connect yet; logging over USB, and still trying in the background");
     return false;
   }
+  finishUp();
+  return true;
+}
+
+// Called once WiFi is connected, at startup or later.
+void finishUp() {
 #ifdef LOG_HOST
   dest.fromString(LOG_HOST);
 #endif
@@ -102,7 +110,22 @@ bool begin(unsigned long timeout_ms = 15000) {
   udp.begin(CMD_PORT);
   up = true;
   logf("M,%s joined WiFi as %s (signal %d dBm)", name, WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
-  return true;
+}
+
+// If WiFi didn't connect at startup, keep trying (call often while idle):
+// a slow router or a weak signal at power-on no longer leaves the robot
+// offline until it is restarted.
+void keepTrying() {
+  static unsigned long lastCheck = 0, lastBegin = 0;
+  if (up || millis() - lastCheck < 1000) return;
+  lastCheck = millis();
+  if (WiFi.status() == WL_CONNECTED) { finishUp(); return; }
+  if (millis() - lastBegin > 20000) {
+    lastBegin = millis();
+    if (Serial) Serial.println("M,still trying to join WiFi...");
+    WiFi.disconnect();
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  }
 }
 
 // Until a laptop has talked to us, announce ourselves every 2 s so a console
