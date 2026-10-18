@@ -46,7 +46,7 @@ def test_recording_fps(tmp_path):
     assert cs.recording_fps(str(tmp_path), [0.0, 0.04, 0.08, 0.12]) == pytest.approx(25.0)
     (tmp_path / "meta.json").write_text(json.dumps({"fps_requested": 30, "fps_reported": 25.0}))
     assert cs.recording_fps(str(tmp_path), []) == 25.0
-    assert cs.recording_fps(str(tmp_path / "none")) == 30.0
+    assert cs.recording_fps(str(tmp_path / "none")) == 25.0             # nothing to go by: the T1 camera
 
 
 def test_wheel_radius_per_robot_and_scale_prior():
@@ -65,6 +65,11 @@ def test_noise_file(tmp_path):
     assert o == {"cam_xy": 0.6, "cam_th": pytest.approx(5.0 * D2R), "blink_xy": 0.4, "g_base": 0.004}
     n = Noise(**o)
     assert n.cam_xy == 0.6
+    p.write_text(json.dumps({"cam_xy_cm": 0.45, "cam_heading_deg": None, "blink_xy_cm": None,
+                             "start_nudge_heading_deg": 1.7, "_made": "2026-10-18"}))   # accuracy_checks.py's file
+    extra = {}
+    assert load_noise_file(str(p), extra) == {"cam_xy": 0.45}
+    assert extra == {"calib_heading_sigma_deg": 1.7}
     p.write_text(json.dumps({"noise": {"nonsense": 1}}))
     with pytest.raises(KeyError):
         load_noise_file(str(p))

@@ -644,7 +644,7 @@ class Robot:
         else:
             lim = self.P("safe_front_cm")
             if lim > 0:
-                dc = self._tof_true(0.0)
+                dc = self.tof()[2]                 # the robot's own (held, noisy) centre-zone reading
                 if 0 < dc < lim:
                     self.abort_reason = "obstacle ahead"
         if self.abort_reason:

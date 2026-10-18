@@ -353,7 +353,7 @@ def main():
     extra_cfg = {}          # settings from measured files, put in every setup that doesn't set them itself
     if args.noise_file:
         from ekf import load_noise_file
-        extra_cfg["noise"] = load_noise_file(args.noise_file)
+        extra_cfg["noise"] = load_noise_file(args.noise_file, extra_cfg)
         print(f"measured noise from {args.noise_file}: " + ", ".join(f"{k} {v:.4g}" for k, v in extra_cfg["noise"].items()))
     if args.heading_check:
         px = rn.heading_px_sd(args.heading_check)

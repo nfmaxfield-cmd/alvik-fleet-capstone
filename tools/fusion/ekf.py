@@ -78,14 +78,16 @@ class Noise:
             setattr(self, k, v)
 
 
-MEASURED_KEYS = {"camera_xy_cm": ("cam_xy", 1.0), "camera_heading_deg": ("cam_th", D2R),
+MEASURED_KEYS = {"cam_xy_cm": ("cam_xy", 1.0), "camera_xy_cm": ("cam_xy", 1.0),
+                 "cam_heading_deg": ("cam_th", D2R), "camera_heading_deg": ("cam_th", D2R),
                  "blink_xy_cm": ("blink_xy", 1.0)}
 
 
-def load_noise_file(path):
-    """Measured sensor noise (docs/data-formats.md, "Measured noise"): JSON with any of camera_xy_cm,
-    camera_heading_deg, blink_xy_cm (1 standard deviation), and optionally "noise": {any Noise setting, in
-    its own units}. Returns overrides for Noise(**...)."""
+def load_noise_file(path, settings=None):
+    """Measured sensor noise: accuracy_checks.py's measured_noise.json (docs/data-formats.md): cam_xy_cm,
+    cam_heading_deg, blink_xy_cm (1 standard deviation; null = not measured), and optionally "noise": {any
+    Noise setting, in its own units}. Returns overrides for Noise(**...). If `settings` (a dict) is given,
+    start_nudge_heading_deg goes into it as calib_heading_sigma_deg (an engine setting, not a Noise one)."""
     import json
     with open(path) as f:
         d = json.load(f)
@@ -100,6 +102,8 @@ def load_noise_file(path):
         if not hasattr(Noise(), k):
             raise KeyError(f"{path}: unknown noise setting {k}")
         out[k] = float(v)
+    if settings is not None and d.get("start_nudge_heading_deg") is not None:
+        settings["calib_heading_sigma_deg"] = float(d["start_nudge_heading_deg"])
     return out
 
 

@@ -31,19 +31,18 @@ replaying it in software.
 | Held constant | surface, lighting, camera position, route settings | |
 
 ## Setup
-- Robots: Left, Center, Right. Firmware: 2026-10-17b or later (shown by `status`, logged with every run). Center's motor-board firmware updated to 1.1.1 on Oct 17.
+- Robots: Left, Center, Right. Firmware: 2026-10-18a or later (shown by `status`, logged with every run). Center's motor-board firmware updated to 1.1.1 on Oct 17.
 - Repo commit:
 - Surface:    Lighting:
 - Camera: height above floor ___ cm; area seen ___ x ___ cm; real frame rate ___ fps.
-- Clear floor: the L-path swings 30 cm to the robot's right and the square
-  50 cm to its left, so keep x -10..130 cm and y -40..60 cm clear and in the
-  camera's view.
+- Clear floor: every route stays on the 122 x 122 cm board from its own start
+  spot (the closest any route comes to an edge is the straight run's front,
+  about 7 cm from the far edge), so keep the whole board clear and in view.
 
 ## How position is measured
-1. Put a thin strip of tape on the robot's **front and rear faces**, on its
-   centerline (once).
+1. Nothing is stuck on the robots.
 2. To mark the robot: hold a small square flat on the floor, upright edge
-   against the front face at the tape strip, and pencil a dot on the floor.
+   against the middle of the front face, and pencil a dot on the floor.
    Same at the rear.
 3. Measure each dot's x and y from the taped axes, to 0.1 cm.
 4. Position = midpoint of the two dots; heading = direction from rear dot to
@@ -95,8 +94,9 @@ placement does not count as robot error.
 6. Afterwards: stop the recorders (Ctrl+C), copy the robot log folder into
    `data/logs/` and the recording into `data/video/` (video stays out of git).
 
-E1b (Right at low battery) runs first, with its own folder and commands:
-see `docs/experiments/E01b-low-battery/README.md`.
+Order on the day: E0b start-roll check (`docs/experiments/E00b-nudge-check/`,
+which decides 2 or 5 cm for the start roll), then E1b (Right at low battery,
+`docs/experiments/E01b-low-battery/README.md`), then these runs.
 
 Runs are grouped by robot (all of Left's, then Center's, then Right's) and
 shuffled within each robot (seed 21), so battery drain and floor wear don't
@@ -122,8 +122,23 @@ After the first robot's 12 runs, check the spread and add runs if needed.
 ## Results
 `python tools/tape_results.py docs/experiments/E01-baseline-dataset --logs docs/experiments/E01-baseline-dataset/data/logs/*`
 
+Every data-derived accuracy check (mark spacing, wheel and gyro scales, gyro
+bias and noise, timing, camera vs tape, robot moved before marking, trends,
+identity, robot differences, statistics rules) in one table:
+`python tools/accuracy_checks.py docs/experiments/E01-baseline-dataset docs/experiments/E01b-low-battery docs/experiments/E00b-nudge-check docs/experiments/E00-measurement-check`
+(add `--video-offset <s>` once it has printed the video clock offset, to skip
+the slow search). It writes data/accuracy_checks.csv, data/measured_noise.json
+(the camera noise, for the fusion) and data/split.csv.
+
+**Held-out split** (data/split.csv, fixed by the sheet's order before any
+run): fusion settings are tuned only on the `tune` runs and the fusion's
+accuracy is reported only on the `score` runs.
+
 ## Analysis
 - (a) paired t-test, tape vs odometry end error, per route
+- end error intervals: t-interval and bootstrap interval (tape_results.py
+  prints both; end error is skewed and never negative, so the bootstrap one
+  is the one to report when they differ)
 - (b) end error by route, Welch's t-test L vs square
 - (c) heading after each of the square's 12 turns from gyro vs wheels, against
   the end heading by tape (needs the RAW log)

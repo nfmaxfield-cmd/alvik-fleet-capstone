@@ -110,6 +110,9 @@ class Params:
     min_rhythm: float = 0.75      # ...and at least this share of its flashes start right on its beat
     min_pulses: int = 3           # tracks with fewer flashes are not reported
     max_foreign: float = 0.25     # other flashes on a track's own spot, per flash of the track
+    # camera: how long each frame's exposure lasts, s. 0 = not given: analyse() reads exposure_ms from the
+    # recording's meta.json (camrec.py writes it when exposure is locked), else EXPOSURE_FALLBACK_S
+    exposure_s: float = 0.0
 
     def period(self, n):
         return (n + self.gap_slots) * self.slot_s
@@ -117,6 +120,22 @@ class Params:
     @property
     def vmax_px(self):
         return self.vmax_cms * self.px_per_cm
+
+
+EXPOSURE_FALLBACK_S = 0.012   # used when meta.json doesn't give exposure_ms (exposure not locked, older recording)
+
+
+def exposure_from_meta(recording, fallback=EXPOSURE_FALLBACK_S):
+    """(exposure_s, source): exposure_ms from <recording>/meta.json if present and
+    positive, else the fallback."""
+    try:
+        with open(os.path.join(recording, "meta.json")) as f:
+            e = float(json.load(f).get("exposure_ms") or 0)
+        if e > 0:
+            return e / 1000.0, "meta.json"
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return fallback, "assumed"
 
 
 def parse_names(s):
@@ -361,7 +380,7 @@ def finish_segment(s, cores, p, frame_t):
     # when did it switch on and off? A partly lit frame just outside means it
     # switched during that frame's exposure; otherwise it switched somewhere
     # between the last dark frame and the first lit one (take the middle).
-    E = 0.012     # assumed exposure, s
+    E = p.exposure_s or EXPOSURE_FALLBACK_S     # exposure, s (from meta.json via analyse())
     f0, f1 = s.fi[0], s.fi[-1]
     s.u, s.w = s.t[0], s.t[-1]
     if f0 - 1 >= 0:
@@ -856,6 +875,9 @@ def single_led_fix(T):
 def analyse(recording, p=None, video=None, progress=None, max_frames=None):
     """Run every stage on a recording folder. Returns (tracks, segments, lights, frame_t)."""
     p = p or Params()
+    if not p.exposure_s:
+        from dataclasses import replace
+        p = replace(p, exposure_s=exposure_from_meta(recording)[0])
     frame_t = read_frame_times(recording)
     segs, n = find_segments(video or os.path.join(recording, "video.avi"), repair_late_frames(frame_t), p, progress,
                             max_frames)
@@ -981,6 +1003,8 @@ def main(argv=None):
         except (ValueError, OSError, KeyError) as e:
             print(f"note: {calib}: {e}; using {p.px_per_cm} px/cm")
     print(f"pixel scale {p.px_per_cm:.2f} px/cm")
+    p.exposure_s, src = exposure_from_meta(args.recording)
+    print(f"exposure {p.exposure_s * 1000:.1f} ms ({src})")
 
     def prog(i, n):
         print(f"  frame {i} of {n}")
