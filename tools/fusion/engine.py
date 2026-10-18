@@ -154,6 +154,9 @@ DEFAULT = dict(
     tof_max_sigma_cm=10.0,    # don't use landmarks while the position is this unsure (picked up, lost)
     tof_new_frames_only=True, # the sensor makes ~15 frames/s; RAW repeats a frame until the next: use each once
     tof_delay_s=0.0,          # a frame describes the pose this long before its RAW row
+    calib_scales=True,        # use the calibration runs' wheel_scale / gyro_scale (calibration_results.csv, firmware
+                              # 2026-10-18b+) when given: gyro turns x gyro_scale; wheel_scale is the robot's
+                              # starting wheel scale (with wheel_scale on). Older files have none: no change
     still_mode="encoder",     # how "standing still" is decided (zero-velocity updates): encoder = wheel angles
                               # unchanged; speed = the old wheel-speed thresholds (too strict for the noise)
     still_window_s=0.25,      # ... over this long, looking back
@@ -261,7 +264,7 @@ class Tracked:
     """One robot's filter plus its event history, so late readings can be
     slotted in at the right moment."""
 
-    def __init__(self, run, cfg, gyro_factor, carry=None):
+    def __init__(self, run, cfg, gyro_factor, carry=None, measured=None):
         self.run = run
         self.cfg = cfg
         self.gf = gyro_factor
@@ -272,7 +275,7 @@ class Tracked:
         self.was_lifted = False
         self.events = []      # (t, order, kind, data), applied in this order
         self.snaps = []       # filter snapshot taken BEFORE each event
-        scale = scale_prior(cfg, carry, run.robot)
+        scale = scale_prior(cfg, carry, run.robot, measured)
         if cfg["start_from"] == "tape" and run.tape_start:
             x, y, h = run.tape_start
             self.ekf = EKF(x, y, h * D2R, self.t0, self.noise, scale=scale)
@@ -647,7 +650,7 @@ def clutter_area(cfg):
     return 19200.0 if v == "auto" else float(v)
 
 
-def scale_prior(cfg, carry=None, robot=None):
+def scale_prior(cfg, carry=None, robot=None, measured=None):
     """Wheel-size states for a new run (ekf.EKF scale=), or None if both are off. carry: the same
     robot's previous run (k, var k, kw, var kw, t_end, t_start of this run): start from what it learned,
     its uncertainty grown by the drift over the gap, never above the prior."""
@@ -661,6 +664,8 @@ def scale_prior(cfg, carry=None, robot=None):
     qk = cfg["wheel_scale_walk"] if cfg["wheel_scale"] else 0.0
     qkw = cfg["turn_scale_walk"] if turn else 0.0
     k0 = cfg["lib_wheel_radius_cm"] / radius_of(cfg, robot) if sk else 1.0
+    if sk and measured and measured.get("k"):          # the calibration run's roll measured it
+        k0, sk = measured["k"], min(sk, measured["sk"])
     out = dict(k=k0, sk=sk, kw=1.0, skw=skw, qk=qk, qkw=qkw)
     if carry and cfg["scale_carry"]:
         k, vk, kw, vkw, t_end, t_now = carry
@@ -929,6 +934,10 @@ def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, 
     tof_cal: distance-sensor calibration (landmarks.load_cal): one dict for every run, or
     {"per_run": {run_id: cal}, "default": cal or None} (leave-one-run-out calibrations)."""
     rng = random.Random(cfg["seed"])
+    cal_sc = {}
+    if calib_rows and cfg["calib_scales"]:
+        import runs as rn_
+        cal_sc = rn_.calib_scales(calib_rows)
     if cfg["vmax"] == "auto":
         cfg = dict(cfg, vmax=fastest_speed(runs))
     wsign = signs[0] if signs else wheel_turn_signs(runs)
@@ -945,7 +954,7 @@ def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, 
     led.setdefault(None, (2.75, 0.0))
     events = []   # (arrival, order, payload)
     for ri, run in enumerate(runs):
-        gf = gyro_f.get(run.robot, (D2R, ""))[0]
+        gf = gyro_f.get(run.robot, (D2R, ""))[0] * cal_sc.get(run.robot, {}).get("gs", 1.0)
         ws = wsign.get(run.robot, 1.0)
         fs = fsign.get(run.robot, 1.0)
         rpm2cms = 2 * math.pi * radius_of(cfg, run.robot) / 60
@@ -1007,7 +1016,8 @@ def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, 
                 if prev is not None and prev.ekf.N == 8:
                     e = prev.ekf
                     carry = (e.s[6], e.P[6, 6], e.s[7], e.P[7, 7], prev.t1, arrival)
-                tr = tracked[run.run_id] = Tracked(run, cfg, gyro_f.get(run.robot, (D2R, ""))[0], carry)
+                tr = tracked[run.run_id] = Tracked(run, cfg, gyro_f.get(run.robot, (D2R, ""))[0], carry,
+                                                   cal_sc.get(run.robot))
                 last_of[run.robot] = tr
                 tr.led = tuple(led.get(run.robot, led[None]))
                 tr.faces = landmarks if use_tof else None

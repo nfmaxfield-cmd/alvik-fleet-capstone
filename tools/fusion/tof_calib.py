@@ -25,6 +25,13 @@ Robust fit (soft-L1: a reading far off, e.g. a hand in front, counts little),
 with priors that keep each setting near its nominal value unless the data say
 otherwise (zone direction 5 deg, bias 1 cm, scale 3%, board 2 cm and 3 deg).
 
+Calibration runs (firmware 2026-10-18b+, `--calib-results calibration_results.csv`
+from tools/blink/calib.py): during their two slow 360 deg spins (RAW steps 6 and 8)
+the front sensor sweeps the boards around it at every angle, the best data for
+zone directions and width. Their reference pose: position from the camera (the
+robot turns on the spot), heading from the gyro (x calib.py's gyro_scale, bias
+from the still start) anchored to calib.py's measured start heading.
+
 No circularity: a run must never be scored with a calibration made from it.
 The tool also fits once without each run (leave-one-run-out) and writes
 tof_calibration_loro.csv; give that to replay.py as --tof-cal-per-run. The
@@ -89,7 +96,38 @@ def reference_paths(runs, dets, cfg_over=None, method="graph", gyro_f=None, sign
     return out
 
 
-def collect(runs, refs, faces, cfg, new_frames_only=True):
+SPIN_STEPS = {6, 8}
+
+
+def spin_reference(run, dets, crow, gf, max_cm=8.0, win_s=0.3):
+    """Reference path of a calibration run (see the module help): (t, x, y, th unwrapped) array at its RAW
+    rows, or None (no camera, or no measured start heading)."""
+    row = next((c for c in crow or [] if c["run"] == run.run_id and c.get("event") == "calib"
+                and c.get("heading") is not None and c.get("t") is not None), None)
+    if row is None or len(run.raw) < 10:
+        return None
+    t0, t1 = run.raw[0]["t"], run.raw[-1]["t"]
+    pts = [(d["t"], d["x"], d["y"]) for d in dets if t0 - 0.5 <= d["t"] <= t1 + 0.5]
+    if len(pts) < 20:
+        return None
+    P = np.array(pts)
+    mx, my = np.median(P[:, 1]), np.median(P[:, 2])
+    P = P[np.hypot(P[:, 1] - mx, P[:, 2] - my) < 15.0 + max_cm]       # this robot (it rolls 15 cm and spins)
+    T = np.array([r["t"] for r in run.raw])
+    g = np.array([eng.fnum(r.get("gz")) for r in run.raw]) * gf * row.get("gs", 1.0)
+    still = [i for i, r in enumerate(run.raw) if eng.fnum(r.get("step")) == 1]
+    bias = float(np.median(g[still])) if len(still) > 10 else 0.0
+    th = np.r_[0.0, np.cumsum(0.5 * ((g[1:] - bias) + (g[:-1] - bias)) * np.diff(T))]
+    th += row["heading"] * D2R - np.interp(row["t"], T, th)
+    out = []
+    for i, t in enumerate(T):
+        m = np.abs(P[:, 0] - t) <= win_s
+        if m.sum() >= 3:
+            out.append((t, float(np.median(P[m, 1])), float(np.median(P[m, 2])), th[i]))
+    return np.array(out) if len(out) > 10 else None
+
+
+def collect(runs, refs, faces, cfg, new_frames_only=True, steps=None):
     """Every zone reading that ties to one mapped face at the reference pose (nominal sensor model).
     Returns a dict of arrays (one entry per reading) and the robot names."""
     robots = sorted({r.robot for r in runs if r.run_id in refs})
@@ -108,6 +146,8 @@ def collect(runs, refs, faces, cfg, new_frames_only=True):
             prev = z
             t = r["t"]
             if eng.fnum(r.get("lifted")) > 0.5 or t < T[0] + 0.1 or t > T[-1] - 0.1:
+                continue
+            if steps and run.run_id in steps and int(eng.fnum(r.get("step"), -99)) not in steps[run.run_id]:
                 continue
             j = min(max(int(np.searchsorted(T, t)), 1), len(T) - 1)
             f = (t - T[j - 1]) / (T[j] - T[j - 1])
@@ -358,6 +398,9 @@ def main(argv=None):
     ap.add_argument("--video-offset", type=float)
     ap.add_argument("--map", required=True, help="map.json or landmarks.csv: the boards' approximate positions")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--calib-results", help="calibration_results.csv (tools/blink/calib.py): also use the "
+                    "calibration runs' 360 deg spins (firmware 2026-10-18b+), with calib.py's start heading and "
+                    "gyro scale")
     ap.add_argument("--reference", choices=["graph", "filter"], default="graph",
                     help="camera + wheels + gyro path used as the reference (default: factor graph)")
     ap.add_argument("--max-incidence", type=float, default=45.0, help="deg; steeper hits are left out")
@@ -390,13 +433,41 @@ def main(argv=None):
             if any(a <= dd["t"] <= b for a, b in span):
                 dets.append(dd)
     dets.sort(key=lambda dd: dd["t"])
+    crow, spins = None, []
+    if args.calib_results:
+        crow = rn.load_calib_results(args.calib_results, off)
+        for r in rn.calib_scales(crow).items():
+            for c in crow:
+                if c["robot"] == r[0]:
+                    c["gs"] = r[1].get("gs", 1.0)
+        spins = [r for r in all_runs if r.experiment == "calib" and not r.excluded]
+        _, Hinv = rn.load_homography(args.calib)
+        span = [(r.t_start - 1, r.t_end + 1) for r in spins]
+        for dd in rn.load_detections(args.detections, Hinv, off, parallax=rn.load_parallax(args.calib),
+                                     dist=rn.load_distortion(args.calib)):
+            if any(a <= dd["t"] <= b for a, b in span):
+                dets.append(dd)
+        dets.sort(key=lambda dd: dd["t"])
     faces = lm.load(args.map)
     print(f"{len(runs)} runs, {len(dets)} camera sightings, {len(faces)} mapped faces")
     signs = (eng.wheel_turn_signs(runs), eng.wheel_fwd_signs(runs))
     print(f"reference paths (camera + wheels + gyro, {args.reference}) ...")
     refs = reference_paths(runs, dets, method=args.reference, signs=signs)
+    steps = {}
+    if spins:
+        wsign = eng.wheel_turn_signs(all_runs)
+        gyro_f = eng.gyro_factors(all_runs, wsign)
+        n_ok = 0
+        for r in spins:
+            ref = spin_reference(r, dets, crow, gyro_f.get(r.robot, (D2R, ""))[0])
+            if ref is not None:
+                refs[r.run_id] = ref
+                steps[r.run_id] = SPIN_STEPS
+                n_ok += 1
+        print(f"calibration runs: {n_ok} of {len(spins)} with a camera position and a measured start heading "
+              "(their spins are used)")
     cfg = eng.config(tof_max_incidence_deg=args.max_incidence)
-    data, robots = collect(runs, refs, faces, cfg)
+    data, robots = collect(runs + [r for r in spins if r.run_id in steps], refs, faces, cfg, steps=steps)
     if data is None:
         sys.exit("No distance-sensor reading could be tied to a mapped face: check the map and that the runs drive "
                  "near the boards")

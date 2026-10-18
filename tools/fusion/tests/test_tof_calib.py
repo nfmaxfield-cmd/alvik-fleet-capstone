@@ -160,3 +160,28 @@ def test_calibration_file_roundtrip_and_engine_use(tmp_path):
 def test_face_group_names():
     assert tc.face_group("A left") == "A" and tc.face_group("board 2 end p1") == "board 2"
     assert tc.face_group("block edge 3") == "block" and tc.face_group("wall") == "wall"
+
+
+def test_spin_reference_from_camera_and_gyro():
+    """A calibration run: 1 s still (step 1), then a 360 deg spin left at 36 deg/s (step 6) on the spot at
+    (50, 20). The reference: camera position, gyro heading (bias from the still part) anchored to calib.py's
+    start heading of 30 deg."""
+    import runs as rn
+    run = rn.Run("C-1", "A")
+    rows, dets = [], []
+    for i in range(1100):
+        t = 1000.0 + i * 0.01
+        spin = i >= 100
+        rate = 36.0 if spin else 0.0
+        rows.append(dict(t=t, step=6 if spin else 1, gz=rate + 0.5))           # gyro bias 0.5 deg/s
+        if i % 3 == 0:
+            dets.append(dict(t=t, x=50.0 + 0.1 * math.sin(i), y=20.0 + 0.1 * math.cos(i)))
+    run.raw = rows
+    crow = [dict(run="C-1", robot="A", event="calib", heading=30.0, t=1000.5, gs=1.0)]
+    ref = tc.spin_reference(run, dets, crow, D2R)
+    assert ref is not None
+    i = np.searchsorted(ref[:, 0], 1006.0)
+    assert ref[i, 1] == pytest.approx(50.0, abs=0.1) and ref[i, 2] == pytest.approx(20.0, abs=0.1)
+    true_th = 30.0 + 36.0 * (ref[i, 0] - 1001.0)
+    assert ref[i, 3] / D2R == pytest.approx(true_th, abs=0.5)
+    assert tc.spin_reference(run, dets, [], D2R) is None                     # no measured heading: not used

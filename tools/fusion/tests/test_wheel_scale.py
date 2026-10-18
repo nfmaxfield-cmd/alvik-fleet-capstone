@@ -67,3 +67,21 @@ def test_turn_scale_only_with_gyro():
     assert eng.scale_prior(eng.config(sensors=["wheel_v", "wheel_w"], turn_scale=True)) is not None
     assert eng.scale_prior(eng.config(sensors=["wheel_v", "wheel_w"], turn_scale=True))["skw"] == 0.0
     assert eng.scale_prior(eng.config(sensors=WWG, turn_scale=True))["skw"] == 0.05
+
+
+def test_calibration_run_scales_set_the_priors():
+    """calibration_results.csv (firmware 2026-10-18b calibration runs): wheel_scale = camera cm / odometry cm,
+    so wheels reading 5% long give wheel_scale 1/1.05 and the robot starts from k = 1.05; gyro_scale
+    multiplies its gyro. Rows not rated ok are ignored."""
+    import runs as rn
+    rows = [dict(run="X-1", robot="A", event="calib", identity="agree", wheel_scale=1 / 1.05,
+                 wheel_scale_spread=0.001, gyro_scale=1.01, gyro_scale_spread=0.0005),
+            dict(run="X-2", robot="B", event="calib", identity="agree", wheel_scale=None,
+                 wheel_scale_spread=float("nan"), gyro_scale=None, gyro_scale_spread=float("nan"))]
+    sc = rn.calib_scales(rows)
+    assert sc == {"A": dict(k=pytest.approx(1.05), sk=0.003, gs=1.01)}
+    run, truth = drive([wall(100.0)], wheel_scale=1.05)
+    cfg = eng.config(sensors=WWG, wheel_scale=True)
+    tr = eng.run_engine([run], None, cfg, calib_rows=[dict(rows[0], robot="A")])[0]["r1"]
+    assert tr.scale0["k"] == pytest.approx(1.05) and tr.scale0["sk"] == 0.003
+    assert end_err(tr, truth) < 0.3                           # the wheels' 5% is taken out from the start

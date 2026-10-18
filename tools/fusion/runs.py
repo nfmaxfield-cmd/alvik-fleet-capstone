@@ -491,12 +491,46 @@ def load_calib_results(path, offset_s):
             tv, h = fnum(r.get("t_video")), fnum(r.get("heading_floor_deg"))
             lf, ll = fnum(r.get("led_fwd_cm")), fnum(r.get("led_left_cm"))
             mp = fnum(r.get("moved_px"))
+            ws, gs = fnum(r.get("wheel_scale")), fnum(r.get("gyro_scale"))
+            ok = lambda k: (r.get(k) or "").strip().lower().startswith("ok")
             out.append(dict(run=(r.get("run") or "").strip(), robot=(r.get("robot_log") or "").strip(),
                             event=(r.get("event") or "").strip(), identity=(r.get("identity") or "").strip(),
                             t=None if math.isnan(tv) else to_laptop(offset_s, tv),
                             heading=None if math.isnan(h) else h,
                             led=None if (math.isnan(lf) or math.isnan(ll)) else (lf, ll),
-                            moved_px=None if math.isnan(mp) else mp))
+                            moved_px=None if math.isnan(mp) else mp,
+                            # calibration runs from firmware 2026-10-18b (15 cm roll, 360 deg spins): camera cm /
+                            # odometry cm and camera deg / gyro deg, only where calib.py rated them ok
+                            wheel_scale=ws if (ws > 0 and ok("wheel_scale_quality")) else None,
+                            wheel_scale_spread=fnum(r.get("wheel_scale_spread")),
+                            gyro_scale=gs if (gs > 0 and ok("gyro_scale_quality")) else None,
+                            gyro_scale_spread=fnum(r.get("gyro_scale_spread"))))
+    return out
+
+
+def calib_scales(calib_rows):
+    """Per robot, from the calibration runs' rolls and spins (calibration_results.csv): dict(k, sk) the
+    wheel distance scale for the fusion (k = wheels' reading / true distance = 1 / wheel_scale) and how sure
+    (the forward / back spread, at least 0.3%), and gs (multiply gyro turns by it). Medians over a robot's
+    rows; robots or values without an ok row are left out."""
+    by = defaultdict(list)
+    for r in calib_rows or []:
+        if r.get("event") == "calib" and r.get("identity", "").lower() != "disagree":
+            by[r["robot"]].append(r)
+    out = {}
+    for robot, rows in by.items():
+        d = {}
+        ws = [r["wheel_scale"] for r in rows if r.get("wheel_scale")]
+        if ws:
+            sp = [abs(r["wheel_scale_spread"]) for r in rows if r.get("wheel_scale") and
+                  not math.isnan(r.get("wheel_scale_spread", float("nan")))]
+            d["k"] = 1.0 / st.median(ws)
+            d["sk"] = max(st.median(sp) if sp else 0.0, 0.003)
+        gs = [r["gyro_scale"] for r in rows if r.get("gyro_scale")]
+        if gs:
+            d["gs"] = st.median(gs)
+        if d:
+            out[robot] = d
     return out
 
 
