@@ -62,6 +62,7 @@ colour) has about 77k parameters and 99 M multiply-adds per frame.
 | `benchmark.py` | time per frame and frames per second, per size and thread count |
 | `evaluate.py` | precision / recall / F1, centre and heading errors, per class; compares detectors |
 | `baseline_tv.py` | off-the-shelf comparison: torchvision SSDlite / Faster R-CNN fine-tuned on our labels |
+| `baseline_yolo.py` | **research only, not shipped**: Ultralytics YOLO (AGPL-3.0) fine-tuned on our labels, for the report's comparison |
 | `make_synthetic.py` | fake labelled recordings, for testing the pipeline without real labels |
 | `tests/` | `python -m pytest tools/detector/tests` |
 
@@ -221,7 +222,7 @@ python evaluate.py --labels D:/recordings --split runs/v1/split.json \
 ```
 
 - `--model KIND:PATH`, repeatable: `infer` (.onnx), `predict_torch` (.pt),
-  `baseline_tv`, any `.py` file with `load`/`predict`, or `csv` (columns
+  `baseline_tv`, `baseline_yolo` (research only), any `.py` file with `load`/`predict`, or `csv` (columns
   `recording,frame,cls,x_px,y_px,heading_deg,score`, as written by
   `infer.py --csv` or `--save-predictions`)
 - by default it scores the **test** recordings of the split; `--all` scores
@@ -260,6 +261,37 @@ blocked, copy the file into `~/.cache/torch/hub/checkpoints/`, or use
 `--weights imagenet` (backbone only) or `--weights none` (random start; much
 weaker unless trained far longer).
 
+### YOLO comparison (research only, not part of the program)
+
+`baseline_yolo.py` does the same as `baseline_tv.py` with Ultralytics YOLO
+(default YOLO11n, 320 input): fixed-size boxes from the centre labels, box
+centre = position, heading `None`. It is there only so the report can say how
+our detector compares with the best-known off-the-shelf detector. Install it
+separately (`pip install -r requirements-research.txt`, from the repo root);
+nothing else in the repo imports it (a test checks this).
+
+```
+python baseline_yolo.py train --labels D:/recordings --out runs/yolo --split runs/v1/split.json --max-minutes 40
+python baseline_yolo.py train ... --weights none          # random start, like our model
+python baseline_yolo.py train ... --task pose             # also learns the heading (see below)
+python evaluate.py ... --model baseline_yolo:runs/yolo/best.pt
+python benchmark.py --detector baseline_yolo --weights runs/yolo/best.pt --threads 1,4
+```
+
+`--weights coco` (default) starts from COCO-pretrained weights downloaded from
+GitHub (`yolo11n.pt`); if blocked, download it elsewhere and pass
+`--weights-dir`. `--max-minutes` is a training-time budget (Ultralytics fits
+its epochs and learning-rate schedule to it). `--model yolo26n` / `yolov8n`
+pick other small models.
+
+**Heading option (`--task pose`)**: YOLO's keypoint model with one keypoint
+placed at the same front point our model uses (0.35 x robot size ahead of the
+centre, only where `heading_known` is 1). The heading is the direction from
+the box centre to that keypoint, `None` if its confidence is under 0.5. It
+needs no extra labels and costs almost nothing at run time. The oriented-box
+model (`-obb`) was not used: a square box's angle repeats every 90 deg, and
+even a long box cannot tell front from back.
+
 ### Licences
 
 | Part | Licence |
@@ -277,10 +309,25 @@ dataset (annotations CC BY 4.0, images under their Flickr owners' terms); check
 those terms before any commercial use of the baseline. Our own model
 (`CentreNet`) uses no pretrained weights.
 
-Ultralytics YOLO (v5 / v8 / 11) was deliberately **not** used: it is licensed
-AGPL-3.0, which requires releasing the source of anything built on it that is
-distributed or offered as a network service, unless a paid enterprise licence
-is bought. That would be a problem for a factory deployment.
+**Ultralytics YOLO is used for the comparison only and is not part of the
+program.** It is licensed AGPL-3.0: anyone who distributes software built on
+it, or lets others use a modified version over a network, must release that
+whole program's source under AGPL-3.0, unless they buy Ultralytics' paid
+enterprise licence. Ultralytics' licensing page says models trained with its code
+are covered too. For a factory deployment that is not acceptable, so:
+
+- `ultralytics` is only in `requirements-research.txt`, never in
+  `requirements.txt`; only `baseline_yolo.py` imports it, and nothing in the
+  program imports `baseline_yolo.py` (`tests/test_baseline_yolo.py` fails if
+  that changes)
+- running it privately to produce numbers for the report is ordinary use, which
+  AGPL-3.0 allows
+- **YOLO weights trained here (`runs/yolo*/best.pt`) must not be distributed
+  with the program** or put on the robots' Pi; keep them out of releases
+- the delivered detector is our own `CentreNet` (no YOLO code or weights)
+
+The COCO-pretrained YOLO weights carry the same AGPL-3.0 terms and the COCO
+dataset terms above.
 
 ## Adding a class
 
@@ -316,8 +363,9 @@ They check: headings turn and mirror correctly with the picture (including a
 picture-level check after random augmentation), label filtering rules, split by
 recording, decoding and scoring maths, the homography inversion, export
 (PyTorch and ONNX Runtime agree), adding a class with `--init-from`, a short
-train -> export -> evaluate -> benchmark run on synthetic data, and the
-baseline's interface.
+train -> export -> evaluate -> benchmark run on synthetic data, the
+baselines' interfaces, and that `ultralytics` stays out of the program (the
+YOLO training tests are skipped when `ultralytics` is not installed).
 
 ## Results so far (synthetic data only)
 

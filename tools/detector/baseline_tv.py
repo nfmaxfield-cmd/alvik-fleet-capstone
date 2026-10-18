@@ -29,8 +29,9 @@ download.pytorch.org into the torch cache (~/.cache/torch/hub/checkpoints).
 If the network blocks it, copy the .pth file there by hand, or use
 --weights imagenet (backbone only) or --weights none.
 
-Ultralytics YOLO was deliberately not used: it is AGPL-3.0, which would
+Ultralytics YOLO is not used here: it is AGPL-3.0, which would
 oblige anyone running a modified version as a service to publish their source.
+It is compared for the report only, in baseline_yolo.py (research only, not shipped).
 """
 import argparse
 import csv

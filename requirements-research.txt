@@ -1,0 +1,7 @@
+# RESEARCH ONLY - not part of the delivered program.
+# Used only by tools/detector/baseline_yolo.py to benchmark YOLO against our
+# detector for the report. Ultralytics is AGPL-3.0: do not add it to
+# requirements.txt, do not import it anywhere else, and do not ship YOLO
+# weights trained with it. See tools/detector/README.md, "Licences".
+#   python -m pip install -r requirements-research.txt
+ultralytics>=8.3
