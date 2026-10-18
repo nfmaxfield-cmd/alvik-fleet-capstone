@@ -81,7 +81,9 @@ def face_group(name):
 
 # ---------------------------------------------------------------- data
 def reference_paths(runs, dets, cfg_over=None, method="graph", gyro_f=None, signs=None):
-    """Camera + wheels + gyro estimate of every run: {run_id: (t, x, y, th unwrapped) arrays}."""
+    """Camera + wheels + gyro estimate of every run: {run_id: (t, x, y, th unwrapped) arrays}. Each array
+    has a 5th column: seconds to the nearest camera fix (where the camera wasn't seeing the robot the path is
+    only dead reckoning, not a reference for the sensor; collect() leaves those readings out)."""
     cfg = eng.config(name="reference", sensors=["wheel_v", "wheel_w", "gyro", "camera"], **(cfg_over or {}))
     tracked, _ = eng.run_engine(runs, dets, cfg, gyro_f, signs=signs)
     out = {}
@@ -94,7 +96,10 @@ def reference_paths(runs, dets, cfg_over=None, method="graph", gyro_f=None, sign
             continue
         a = np.array([p[:4] for p in traj], float)
         a[:, 3] = np.unwrap(a[:, 3])
-        out[run.run_id] = a
+        ft = np.array(sorted(f["t"] for f in tr.fixes)) if tr.fixes else np.array([np.inf])
+        j = np.clip(np.searchsorted(ft, a[:, 0]), 1, len(ft) - 1) if len(ft) > 1 else np.zeros(len(a), int)
+        gap = np.minimum(np.abs(ft[j] - a[:, 0]), np.abs(ft[np.maximum(j - 1, 0)] - a[:, 0]))
+        out[run.run_id] = np.c_[a, gap]
     return out
 
 
@@ -129,7 +134,7 @@ def spin_reference(run, dets, crow, gf, max_cm=8.0, win_s=0.3):
     return np.array(out) if len(out) > 10 else None
 
 
-def collect(runs, refs, faces, cfg, new_frames_only=True, steps=None):
+def collect(runs, refs, faces, cfg, new_frames_only=True, steps=None, max_cam_gap_s=0.3):
     """Every zone reading that ties to one mapped face at the reference pose (nominal sensor model).
     Returns a dict of arrays (one entry per reading) and the robot names."""
     robots = sorted({r.robot for r in runs if r.run_id in refs})
@@ -151,6 +156,10 @@ def collect(runs, refs, faces, cfg, new_frames_only=True, steps=None):
                 continue
             if steps and run.run_id in steps and int(eng.fnum(r.get("step"), -99)) not in steps[run.run_id]:
                 continue
+            if ref.shape[1] > 4:                     # only where the camera was really seeing the robot
+                jj = min(max(int(np.searchsorted(T, t)), 0), len(T) - 1)
+                if ref[jj, 4] > max_cam_gap_s:
+                    continue
             j = min(max(int(np.searchsorted(T, t)), 1), len(T) - 1)
             f = (t - T[j - 1]) / (T[j] - T[j - 1])
             pose = ref[j - 1, 1:4] + f * (ref[j, 1:4] - ref[j - 1, 1:4])
@@ -359,8 +368,42 @@ def correlations(model, p, sigma):
     return float(within), lag1
 
 
+def corr_time(model, p, sigma, frame_corr, max_lag=15, frame_s=1 / 15):
+    """How many readings are worth one independent one: the integrated correlation time of a zone's errors on
+    one face (frames: 1 + 2 sum over lags of (1 - k / (max_lag + 1)) rho_k, lags up to 1 s), times what the
+    other zones of the same frame add (1 + (m - 1) frame_corr, m = readings per frame). Widening each
+    reading's noise by its square root gives the filter the information the readings really carry."""
+    d = model.d
+    e = np.clip((d["z"] - model.predict(p)) / sigma, -4, 4)
+    seqs = {}
+    for i, key in enumerate(zip(d["run"], d["zone"], d["face"])):
+        seqs.setdefault(key, []).append(i)
+    num = np.zeros(max_lag + 1)
+    cnt = np.zeros(max_lag + 1)
+    for ids in seqs.values():
+        ids = sorted(ids, key=lambda i: d["t"][i])
+        tt = d["t"][ids]
+        v = e[ids] - e[ids].mean() if len(ids) > 1 else e[ids]
+        for a in range(len(ids)):
+            for b in range(a + 1, min(a + 3 * max_lag, len(ids))):
+                k = int(round((tt[b] - tt[a]) / frame_s))
+                if k > max_lag:
+                    break
+                if k >= 1:
+                    num[k] += v[a] * v[b]
+                    cnt[k] += 1
+    var = float(np.mean(e * e))
+    rho = np.where(cnt > 30, num / np.maximum(cnt, 1) / var, 0.0)
+    tau = 1.0 + 2.0 * sum((1 - k / (max_lag + 1)) * rho[k] for k in range(1, max_lag + 1))
+    per_frame = {}
+    for rid, t in zip(d["run"], d["t"]):
+        per_frame[(rid, round(float(t), 4))] = per_frame.get((rid, round(float(t), 4)), 0) + 1
+    m = float(np.mean(list(per_frame.values()))) if per_frame else 1.0
+    return max(tau, 1.0) * max(1.0 + (m - 1.0) * frame_corr, 1.0)
+
+
 # ---------------------------------------------------------------- output
-def cal_dict(model, p, noise, corr, used_runs, faces_ref, sig=None, syst=0.0):
+def cal_dict(model, p, noise, corr, used_runs, faces_ref, sig=None, syst=0.0, ctime=1.0):
     off, bias, scale, width, delay, g = model.unpack(p)
     a_f, n_f = model.faces_at(g)
     faces = []
@@ -388,6 +431,7 @@ def cal_dict(model, p, noise, corr, used_runs, faces_ref, sig=None, syst=0.0):
     out = dict(format=lm.CAL_FORMAT, version=1, used_runs=sorted(used_runs), zone_width_deg=round(float(width), 3),
                delay_s=round(float(delay), 4), noise_cm=round(noise[0], 3), noise_rel=round(noise[1], 4),
                frame_corr=round(corr[0], 3), lag1_corr=round(corr[1], 3), systematic_cm=round(syst, 3),
+               corr_time_frames=round(ctime, 3),
                robots=robots, boards=boards,
                landmarks=faces, map_given=faces_ref)
     if sig:
@@ -510,6 +554,7 @@ def main(argv=None):
     sigma = noise[0] + noise[1] * np.abs(data["z"])
     corr = correlations(model, p, sigma)
     syst = systematic(model, p)
+    ctime = corr_time(model, p, sigma, corr[0])
     used = sorted(set(data["run"]))
     folds = {}
     if not args.no_loro:
@@ -519,7 +564,7 @@ def main(argv=None):
     sig = jackknife(model, folds, p) if folds else None
     faces_ref = os.path.abspath(args.map)
     os.makedirs(os.path.join(args.out, "loro"), exist_ok=True)
-    full = cal_dict(model, p, noise, corr, used, faces_ref, sig, syst)
+    full = cal_dict(model, p, noise, corr, used, faces_ref, sig, syst, ctime)
     with open(os.path.join(args.out, "tof_calibration.json"), "w") as f:
         json.dump(full, f, indent=1)
     lm.write_csv([lm.Face(r["name"], (r["x1_cm"], r["y1_cm"]), (r["x2_cm"], r["y2_cm"])) for r in full["landmarks"]],
@@ -531,7 +576,7 @@ def main(argv=None):
             for rid, pf in folds.items():
                 fn = os.path.join("loro", f"{rid}.json")
                 with open(os.path.join(args.out, fn), "w") as g:
-                    json.dump(cal_dict(model, pf, noise, corr, [r for r in used if r != rid], faces_ref, sig, syst), g,
+                    json.dump(cal_dict(model, pf, noise, corr, [r for r in used if r != rid], faces_ref, sig, syst, ctime), g,
                               indent=1)
                 w.writerow([rid, fn])
     h0 = model.predict(model.x0())
@@ -550,7 +595,7 @@ def main(argv=None):
     print(f"zone width {full['zone_width_deg']:.2f} deg, frame delay {1000 * full['delay_s']:.0f} ms, noise "
           f"{full['noise_cm']:.2f} cm + {100 * full['noise_rel']:.1f}% of the distance; errors alike within a frame "
           f"{full['frame_corr']:+.2f}, frame to frame {full['lag1_corr']:+.2f}; left over per run, zone and face "
-          f"{full['systematic_cm']:.2f} cm")
+          f"{full['systematic_cm']:.2f} cm; one reading in {full['corr_time_frames']:.1f} is independent")
     for name, r in full["robots"].items():
         print(f"  {name}: zones turned {', '.join(f'{v:+.1f}' for v in r['zone_offset_deg'])} deg, range bias "
               f"{r['range_bias_cm']:+.2f} cm, scale {r['range_scale']:.4f} ({r['readings']} readings)")

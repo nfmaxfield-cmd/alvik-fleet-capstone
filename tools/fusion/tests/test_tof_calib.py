@@ -229,3 +229,57 @@ def test_landmarks_only_as_camera_fallback():
     blocked = [d for d in dets if not (1003.0 <= d["t"] <= 1006.0)]
     fb2 = run_cfg(run, blocked, mapped, sensors=CAMTOF, tof_camera_gap_s=1.0)
     assert fb2.tof_counts()["used"] > 50
+
+
+def test_tof_gate_split_and_decision(tmp_path):
+    """--tof-gate: A B B A split per robot and route; landmarks kept only if not worse on the tuning runs;
+    tables keep the scoring runs only, which take the twin's numbers when the gate says off."""
+    import replay as rp
+    sheet = tmp_path / "m.csv"
+    sheet.write_text("order,robot,level,run_id\n" + "".join(f"{i},A,L,R{i}\n" for i in range(1, 9)))
+    half = rp.gate_split("auto", str(sheet))
+    assert [half[f"R{i}"] for i in range(1, 9)] == ["tune", "score", "score", "tune"] * 2
+    nan = float("nan")
+    def row(cfg, rid, e):
+        return dict(config=cfg, run_id=rid, end_err_cm=e, end_head_err_deg=0.0, path_rmse_cm=nan,
+                    path_max_cm=nan, head_rmse_deg=0.0)
+    res = []
+    for i in range(1, 9):
+        rid = f"R{i}"
+        res += [row("good", rid, 0.2), row("good [no landmarks]", rid, 0.3),
+                row("bad", rid, 0.5 if half[rid] == "tune" else 0.1), row("bad [no landmarks]", rid, 0.3)]
+    out, rep_ = rp.apply_gate(res, ["good", "bad"], half, False)
+    dec = {r["setup"]: r["decision"] for r in rep_}
+    assert dec == {"good": "landmarks ON", "bad": "landmarks OFF"}
+    assert all(r["half"] == "score" for r in out) and len(out) == 4 * 4
+    assert all(r["end_err_cm"] == 0.3 for r in out if r["config"] == "bad")       # the twin's numbers
+
+
+def test_learning_the_board_while_the_camera_tracks_never_moves_the_pose():
+    """tof_learn_map: with the camera tracking, readings only refine the board's offset (learned close to the
+    true 1.5 cm); the pose is exactly the camera's. Once the camera is blocked, the learned board is used."""
+    run, truth = drive([wall(100.0)], wheel_scale=1.0)
+    mapped = [wall(101.5)]
+    dets = sightings(truth, seed=4)
+    cam = run_cfg(run, dets, None, sensors=CAM)
+    kw = dict(sensors=CAMTOF, tof_consider=True, tof_face_sigma_cm=2.0, tof_camera_gap_s=1.0, tof_learn_map=True)
+    lrn = run_cfg(run, dets, mapped, **kw)
+    a, b = cam.trajectory(), lrn.trajectory()
+    assert max(math.hypot(p[1] - q[1], p[2] - q[2]) for p, q in zip(a, b)) < 1e-9
+    j = lrn.cons_map[("face", "wall")] + lrn.ekf.n_base
+    assert abs(lrn.ekf.s[j]) == pytest.approx(1.5, abs=0.3)        # the face is 1.5 cm off its map position
+    run5, truth5 = drive([wall(100.0)], wheel_scale=1.05)          # wheels 5% long, wheel size not learned
+    blocked = [d for d in sightings(truth5, seed=4) if d["t"] < 1004.0]
+    lb = run_cfg(run5, blocked, mapped, **dict(kw, wheel_scale=False))
+    plain = run_cfg(run5, blocked, mapped, **dict(kw, wheel_scale=False, tof_learn_map=False))
+    assert end_err(lb, truth5) < 0.85 * end_err(plain, truth5)
+
+
+def test_covariance_intersection_update():
+    k = EKF(0.0, 0.0, 0.0, 0.0, sigma_xy=2.0)
+    J = np.array([-1.0, 0.0, 0.0])
+    k.landmark_ci(38.0, 40.0, J, 0.5)
+    assert 0.5 < k.s[0] < 2.0 and k.P[0, 0] < 4.0
+    k2 = EKF(0.0, 0.0, 0.0, 0.0, sigma_xy=2.0)
+    k2.landmark_range(38.0, 40.0, J, 0.5)
+    assert k.P[0, 0] > k2.P[0, 0]                                  # never as confident as the plain update

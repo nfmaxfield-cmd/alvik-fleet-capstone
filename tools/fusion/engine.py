@@ -179,6 +179,11 @@ DEFAULT = dict(
     tof_yaw_sigma_min_deg=0.0,     # floor on the sensor-turn uncertainty a calibration gives
     tof_camera_gap_s=0.0,          # > 0: landmark ranging only once the camera hasn't corrected this robot for this
                                    # long (a fallback for when the camera is blocked); 0 = always
+    tof_learn_map=False,           # with tof_consider: while the camera tracks the robot, landmark readings refine the
+                                   # board / sensor states (carried to later runs) and never move the pose
+    tof_freeze_shared=True,        # in setups with the camera: landmark readings never move the gyro bias or wheel size
+    tof_weight="none",             # none | half (each reading counts half) | corr (noise widened by the calibration's
+                                   # error correlation time) | ci (covariance intersection)
     tof_cal_systematic=True,       # widen each face's consider uncertainty by the calibration's systematic_cm
                                    # (what it leaves per run, zone and face)
     tof_lag_inflate=False,    # widen the noise for frame-to-frame correlation: x sqrt((1 + r) / (1 - r)),
@@ -315,6 +320,7 @@ class Tracked:
         self.adapt = {}       # (zone, face) -> running mean of the residual (cm)
         self.tof_n = 0
         self.face_sig = {}    # face name -> how sure its position is (cm), from the calibration
+        self.map_mem = None   # shared {consider key: (mean, var)} learned while the camera tracked (tof_learn_map)
 
     def off(self, sensor, t):
         return any(a <= t - self.t0 <= b for a, b in self.cfg["sensor_off"].get(sensor, []))
@@ -379,15 +385,22 @@ class Tracked:
                              if r.get("sigma_cm")}
 
     def _cons_index(self, key, sigma):
-        """Filter index of a consider state, added on first use (the same order on every replay)."""
+        """Filter index of a consider state, added on first use (the same order on every replay). With
+        tof_learn_map, a board / sensor state this robot (boards: any robot) learned before starts from that."""
         k = self.ekf
         if key not in self.cons_map:
+            mean = 0.0
+            mem = self.map_mem.get(key) if self.map_mem is not None else None
+            if mem is not None:
+                floor = max(float((self.tof_cal or {}).get("systematic_cm") or 0.0), 0.05) if key[0] != "yaw" else 0.1 * D2R
+                mean, sigma = mem[0], math.sqrt(max(mem[1], floor * floor))
             self.cons_map[key] = len(self.cons_order)
-            self.cons_order.append((key, sigma))
+            self.cons_order.append((key, sigma, mean))
         j = self.cons_map[key]
         base = k.N - len(k.cons)
         while len(k.cons) <= j:
-            k.add_consider([self.cons_order[len(k.cons)][1]])
+            _, sg, mn = self.cons_order[len(k.cons)]
+            k.add_consider([sg], [mn])
         return base + j
 
     def _tof(self, t, zones):
@@ -397,7 +410,8 @@ class Tracked:
             return []
         c = self.tcfg
         if (self.tof_cal is not None or c["tof_consider"] or c["tof_joint"] or c["tof_adapt"] or c["tof_every"] > 1
-                or c["tof_lag_inflate"] or not c["tof_heading_with_camera"] or c["tof_camera_gap_s"] > 0):
+                or c["tof_lag_inflate"] or not c["tof_heading_with_camera"] or c["tof_camera_gap_s"] > 0
+                or c["tof_weight"] != "none"):
             return self._tof2(t, zones)
         unknown = math.sqrt(max(k.P[0, 0], k.P[1, 1])) > cfg["tof_max_sigma_cm"]
         out = []
@@ -423,13 +437,17 @@ class Tracked:
         return out
 
     def _tof2(self, t, zones):
-        """_tof with the calibration, consider states, joint update, adaptive weighting, decimation."""
+        """_tof with the calibration, consider states, joint update, adaptive weighting, decimation, the camera
+        fallback, learning the boards while the camera tracks, and the weighting schemes (tof_weight)."""
         cfg, k = self.tcfg, self.ekf
         self.tof_n += 1
         if cfg["tof_every"] > 1 and (self.tof_n - 1) % cfg["tof_every"]:
             return []
-        if (cfg["tof_camera_gap_s"] > 0 and ("camera" in cfg["sensors"] or "blink" in cfg["sensors"])
-                and k.t - k.last_cam < cfg["tof_camera_gap_s"]):        # (last_cam starts at the run's start)
+        has_cam = "camera" in cfg["sensors"] or "blink" in cfg["sensors"]
+        gap = cfg["tof_camera_gap_s"] if cfg["tof_camera_gap_s"] > 0 else 1.0
+        cam_now = has_cam and k.t - k.last_cam < gap                 # (last_cam starts at the run's start)
+        learn = cam_now and cfg["tof_learn_map"] and cfg["tof_consider"]
+        if cam_now and cfg["tof_camera_gap_s"] > 0 and not learn:
             return [("camera_on", None)] * len(zones)
         unknown = math.sqrt(max(k.P[0, 0], k.P[1, 1])) > cfg["tof_max_sigma_cm"]
         fwd = cfg["tof_forward_cm"] - cfg["tof_recess_cm"]
@@ -437,9 +455,20 @@ class Tracked:
         if cfg["tof_lag_inflate"] and self.tof_cal and self.tof_cal.get("lag1_corr"):
             r = min(max(float(self.tof_cal["lag1_corr"]), 0.0), 0.9)
             lag = math.sqrt((1 + r) / (1 - r))
+        wt = cfg["tof_weight"]
+        if wt == "half":
+            lag *= math.sqrt(2.0)
+        elif wt == "corr":                       # effective number of independent readings (calibration)
+            lag *= math.sqrt(max(float((self.tof_cal or {}).get("corr_time_frames") or 1.0), 1.0))
         out, joint = [], []
-        frz = (2,) if (not cfg["tof_heading_with_camera"] and k.t - k.last_cam < cfg["tof_cam_recent_s"]
-                       and self.cam_used) else ()
+        frz = []
+        if not cfg["tof_heading_with_camera"] and k.t - k.last_cam < cfg["tof_cam_recent_s"] and self.cam_used:
+            frz.append(2)
+        if cfg["tof_freeze_shared"] and has_cam:  # the camera teaches gyro bias and wheel size; landmarks don't
+            frz += [i for i in (5, 6, 7) if i < k.n_base]
+        if learn:                                # camera tracking: readings refine boards / sensor, never the pose
+            frz = list(range(k.n_base))
+        robot = self.run.robot
         for zi, (ang0, z) in enumerate(zip(cfg["tof_zone_deg"], zones)):
             if z is None or not cfg["tof_min_cm"] <= z <= cfg["tof_max_cm"]:
                 out.append(("bad_reading", None))
@@ -455,15 +484,19 @@ class Tracked:
             f = self.faces[info["face"]]
             h = self.rscale * info["h"] + self.rbias
             row = list(self.rscale * info["J"])
+            ckeys = []
             if cfg["tof_consider"]:
                 pr = lm.range_partials(k.s, info["ang"], fwd, f.a, f.n)
-                idx = {("face", f.name): self.rscale * pr[1], ("bias",): 1.0, ("yaw",): self.rscale * pr[0]}
-                sig = {("face", f.name): self.face_sig.get(f.name, cfg["tof_face_sigma_cm"]), ("bias",): cfg["tof_bias_sigma_cm"],
-                       ("yaw",): cfg["tof_yaw_sigma_deg"] * D2R}
+                idx = {("face", f.name): self.rscale * pr[1], ("bias", robot): 1.0, ("yaw", robot): self.rscale * pr[0]}
+                sig = {("face", f.name): self.face_sig.get(f.name, cfg["tof_face_sigma_cm"]),
+                       ("bias", robot): cfg["tof_bias_sigma_cm"], ("yaw", robot): cfg["tof_yaw_sigma_deg"] * D2R}
                 full = np.zeros(k.N + 3)
                 full[:3] = row
                 for key, v in idx.items():
-                    full[self._cons_index(key, sig[key])] = v
+                    ci = self._cons_index(key, sig[key])
+                    full[ci] = v
+                    h += v * k.s[ci]               # a learned board / sensor offset (0 unless tof_learn_map)
+                    ckeys.append((key, ci))
                 row = full[:k.N]
             sigma = lm.zone_sigma(info["h"], cfg, info["tan_inc"]) * lag
             akey = (zi, f.name)
@@ -476,14 +509,22 @@ class Tracked:
             if cfg["tof_adapt"]:
                 a = 1.0 / cfg["tof_adapt_n"]
                 self.adapt[akey] = (1 - a) * self.adapt.get(akey, 0.0) + a * y
+            if learn:
+                k.landmark_range(z, h, row, sigma, freeze=frz, estimate_cons=True)
+                if self.map_mem is not None:
+                    for key, ci in ckeys:
+                        self.map_mem[key] = (float(k.s[ci]), float(k.P[ci, ci]))
+                out.append(("learn", None))
+                continue
             if cfg["tof_joint"]:
                 joint.append((z, h, row, sigma))
+            elif wt == "ci":
+                k.landmark_ci(z, h, row, sigma, freeze=frz)
             else:
                 k.landmark_range(z, h, row, sigma, freeze=frz)
             out.append(("used", dict(z=z, sigma=sigma, ang=info["ang"], a=(f.a[0], f.a[1]), n=(f.n[0], f.n[1]),
                                      resid=y, face=f.name, scale=self.rscale, bias=self.rbias)))
         if joint:
-            n = len(joint)
             rho = cfg["tof_frame_corr"]
             sg = np.array([j[3] for j in joint])
             R = np.outer(sg, sg) * rho
@@ -1016,6 +1057,7 @@ def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, 
 
     tracked = {}
     last_of = {}          # robot -> its latest Tracked (wheel-size carry-over)
+    map_mem = {}          # boards / sensor offsets learned while the camera tracked (tof_learn_map)
     unknown = Unknowns(cfg)
     ctracks = CamTracks(cfg)
     use_gyro = "gyro" in cfg["sensors"]
@@ -1037,6 +1079,7 @@ def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, 
                 last_of[run.robot] = tr
                 tr.led = tuple(led.get(run.robot, led[None]))
                 tr.faces = landmarks if use_tof else None
+                tr.map_mem = map_mem
                 if use_tof and tof_cal:
                     tr.set_tof_cal(tof_cal["per_run"].get(run.run_id, tof_cal.get("default"))
                                    if "per_run" in tof_cal else tof_cal)

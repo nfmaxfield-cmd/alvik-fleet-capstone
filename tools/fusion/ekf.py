@@ -125,10 +125,10 @@ class EKF:
         self.last_cam = t   # when the camera last corrected position
         self.n_base = self.N  # states after this index are consider states (never updated, see add_consider)
 
-    def add_consider(self, sigmas):
-        """Append consider states with these sds (all 0, uncorrelated); returns their first index."""
+    def add_consider(self, sigmas, means=None):
+        """Append consider states with these sds (0 unless `means`, uncorrelated); returns their first index."""
         i0, m = self.N, len(sigmas)
-        self.s = np.concatenate([self.s, np.zeros(m)])
+        self.s = np.concatenate([self.s, np.zeros(m) if means is None else np.asarray(means, float)])
         P = np.zeros((self.N + m, self.N + m))
         P[:self.N, :self.N] = self.P
         P[self.N:, self.N:] = np.diag(np.asarray(sigmas, float) ** 2)
@@ -197,13 +197,13 @@ class EKF:
         return out
 
     # ---- measurement update ----
-    def _update(self, z, h, H, R, angle_rows=(), freeze=()):
+    def _update(self, z, h, H, R, angle_rows=(), freeze=(), estimate_cons=False):
         y = np.atleast_1d(z - h)
         for i in angle_rows:
             y[i] = wrap(y[i])
         S = H @ self.P @ H.T + R
         K = self.P @ H.T @ np.linalg.inv(S)
-        if self.N > self.n_base:
+        if self.N > self.n_base and not estimate_cons:
             K[self.n_base:, :] = 0.0                # consider states: never estimated (Schmidt)
         for i in freeze:                         # states this reading may not move (treated as consider)
             K[i, :] = 0.0
@@ -307,7 +307,7 @@ class EKF:
         y = z - h
         return y * y / (float(H @ self.P @ H) + sigma * sigma)
 
-    def landmark_range(self, z, h, J, sigma, freeze=()):
+    def landmark_range(self, z, h, J, sigma, freeze=(), estimate_cons=False):
         """Landmark ranging: the front distance sensor reads z where the map says
         h (landmarks.predict_zone gives h and J = dh/d(x, y, th)). Returns the
         squared Mahalanobis distance (before the update). J may also be a full
@@ -315,7 +315,37 @@ class EKF:
         H = np.zeros((1, self.N))
         J = np.asarray(J, float)
         H[0, :len(J)] = J
-        return self._update(np.array([z]), np.array([h]), H, np.array([[sigma * sigma]]), freeze=freeze)
+        return self._update(np.array([z]), np.array([h]), H, np.array([[sigma * sigma]]), freeze=freeze,
+                            estimate_cons=estimate_cons)
+
+    def landmark_ci(self, z, h, J, sigma, freeze=(), omegas=(0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95)):
+        """Covariance intersection for a reading whose error may be correlated, in an unknown way, with what
+        the filter already knows: the pose part of the covariance is widened by 1/w and the reading's noise by
+        1/(1 - w), w chosen to make the position uncertainty smallest. The result is never more confident
+        than either source alone justifies, whatever the correlation."""
+        H = np.zeros((1, self.N))
+        J = np.asarray(J, float)
+        H[0, :len(J)] = J
+        best, P0 = None, self.P
+        for w in omegas:
+            d = np.ones(self.N)
+            d[:3] = 1.0 / math.sqrt(w)
+            Pw = P0 * np.outer(d, d)
+            Rw = sigma * sigma / (1.0 - w)
+            S = (H @ Pw @ H.T).item() + Rw
+            K = (Pw @ H.T) / S
+            K[self.n_base:, :] = 0.0
+            for i in freeze:
+                K[i, :] = 0.0
+            I_KH = np.eye(self.N) - K @ H
+            Pn = I_KH @ Pw @ I_KH.T + K @ K.T * Rw
+            cost = Pn[0, 0] + Pn[1, 1]
+            if best is None or cost < best[0]:
+                best = (cost, K, Pn)
+        _, K, Pn = best
+        self.s = self.s + (K * (z - h)).ravel()
+        self.s[2] = wrap(self.s[2])
+        self.P = Pn
 
     def landmark_ranges(self, z, h, Hrows, R, freeze=()):
         """Several zone readings of one sensor frame in one update (their errors may be correlated:

@@ -318,6 +318,67 @@ def holm(pvals):
     return out
 
 
+def gate_split(spec, sheet):
+    """{run_id: "tune" | "score"} from data/split.csv (tools/accuracy_checks.py; rows without a run_id are
+    matched to the sheet by order), or "auto": the same split made here from the sheet (within each robot
+    and route in sheet order, runs 1 and 4 of every four tune, 2 and 3 score)."""
+    rows = list(csv.DictReader(open(sheet, newline="", encoding="utf-8-sig"))) if sheet else []
+    rid_of_order = {(r.get("order") or "").strip(): (r.get("run_id") or "").strip() for r in rows}
+    out = {}
+    if spec != "auto":
+        for r in csv.DictReader(open(spec, newline="", encoding="utf-8-sig")):
+            rid = (r.get("run_id") or "").strip() or rid_of_order.get((r.get("order") or "").strip(), "")
+            if rid:
+                out[rid] = (r.get("half") or "").strip()
+        return out
+    groups = {}
+    for r in rows:
+        groups.setdefault(((r.get("robot") or "").strip(), (r.get("level") or "").strip()), []).append(r)
+    for g in groups.values():
+        for k, r in enumerate(sorted(g, key=lambda r: float(r.get("order") or 0))):
+            rid = (r.get("run_id") or "").strip()
+            if rid:
+                out[rid] = "tune" if k % 4 in (0, 3) else "score"
+    return out
+
+
+def apply_gate(results, names, half_of, use_path):
+    """The held-out safety gate (--tof-gate): for each landmark setup and its twin without landmarks
+    ("<name> [no landmarks]"), compare the mean end error (and path RMSE) on the tuning runs. Not worse in
+    any: landmarks stay. Worse: the setup's scoring runs take the twin's numbers (tof_gate "off").
+    Every row gets its half; only scoring runs are kept, so all tables are on runs the gate never saw.
+    Returns (results, gate report rows)."""
+    by = {}
+    for r in results:
+        by.setdefault(r["config"], {})[r["run_id"]] = r
+    report = []
+    for n in names:
+        tw = n + " [no landmarks]"
+        if tw not in by:
+            continue
+        tune = [rid for rid in by[n] if half_of.get(rid) == "tune" and rid in by[tw]]
+        def mean(cfg, key):
+            v = [by[cfg][rid][key] for rid in tune if not math.isnan(by[cfg][rid][key])]
+            return sum(v) / len(v) if v else float("nan")
+        keys = ["end_err_cm"] + (["path_rmse_cm"] if use_path else [])
+        cmp_ = {k: (mean(n, k), mean(tw, k)) for k in keys}
+        ok = bool(tune) and all(not (a > b) for a, b in cmp_.values())
+        report.append(dict(setup=n, tune_runs=len(tune), decision="landmarks ON" if ok else "landmarks OFF",
+                           **{f"{k} with/without": f"{a:.3f} / {b:.3f}" for k, (a, b) in cmp_.items()}))
+        for rid, r in by[n].items():
+            r["tof_gate"] = "on" if ok else "off"
+            if not ok and rid in by[tw]:
+                for k in ("end_err_cm", "end_head_err_deg", "path_rmse_cm", "path_max_cm", "head_rmse_deg"):
+                    r[k] = by[tw][rid][k]
+    out = []
+    for r in results:
+        r["half"] = half_of.get(r["run_id"], "")
+        r.setdefault("tof_gate", "")
+        if r["half"] == "score":
+            out.append(r)
+    return out, report
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--session", required=True)
@@ -342,6 +403,11 @@ def main():
                     "directions, range bias, zone width, frame delay, noise and refined landmarks, for the landmark setups")
     ap.add_argument("--tof-cal-per-run", help="tof_calibration_loro.csv (tof_calib.py): each run scored with the "
                     "distance-sensor calibration made WITHOUT it; runs not listed use --tof-cal")
+    ap.add_argument("--tof-gate", metavar="SPLIT", help="held-out safety gate for landmark ranging: data/split.csv "
+                    "(tools/accuracy_checks.py; 'auto' = the same A B B A split made here from the sheet). Each "
+                    "landmark setup is kept only if, on the tuning runs, it is not worse than the same setup "
+                    "without landmarks (end error, and path error with --truth); otherwise its scoring runs get "
+                    "the setup without landmarks. Tables then count the scoring runs only")
     ap.add_argument("--noise-file", help="measured sensor noise (JSON, docs/data-formats.md \"Measured noise\"): "
                     "camera, camera heading and blink light noise for every setup (a setup's own noise wins)")
     ap.add_argument("--heading-check", help="heading_check.csv (tools/heading_check.py): sets how much the "
@@ -503,6 +569,16 @@ def main():
     configs = json.load(open(args.configs)) if args.configs else (
         BUILTIN + (BUILTIN_CAMERA_EXTRA if dets else []) + (BUILTIN_BLINK if blink else [])
         + (BUILTIN_TOF + (BUILTIN_TOF_CAMERA if dets else []) if faces else []))
+    half_of = None
+    if args.tof_gate:
+        half_of = gate_split(args.tof_gate, args.sheet)
+        twins = []
+        for c in configs:
+            if "tof" in c.get("sensors", []) and faces:
+                tw = dict(c, name=c["name"] + " [no landmarks]", sensors=[x for x in c["sensors"] if x != "tof"])
+                if tw["name"] not in {x["name"] for x in configs}:
+                    twins.append(tw)
+        configs = list(configs) + twins
     view_area = rn.view_area_cm2(args.calib) if (args.calib and use_cam) else None
     if view_area:
         print(f"camera view: {view_area:.0f} cm^2 of floor (from {os.path.basename(args.calib)})")
@@ -588,11 +664,14 @@ def main():
         if n_unknown:
             print(f"  [{cfg['name']}] {n_unknown} unknown object(s) seen and kept apart from the robots")
 
+    gate_rows = []
+    if half_of is not None:
+        results, gate_rows = apply_gate(results, names, half_of, any(not math.isnan(r["path_rmse_cm"]) for r in results))
     os.makedirs(args.out, exist_ok=True)
     cols = ["config", "run_id", "robot", "route", "end_err_cm", "end_head_err_deg", "path_rmse_cm", "path_max_cm",
             "head_rmse_deg", "cam_used", "cam_blocked", "kidnaps", "hdg_motion", "hdg_calib", "id_right", "id_wrong",
             "id_false"] + ["id_" + k for k in ID_SOURCES] + ["calib_file", "calib_includes_run"] + (
-            TOF_COLS if faces else [])
+            TOF_COLS if faces else []) + (["half", "tof_gate"] if half_of is not None else [])
     with open(os.path.join(args.out, "results.csv"), "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader()
@@ -689,6 +768,15 @@ def main():
             print("used: merged; gated: rejected, too far from what the map predicts (something unmapped in front, "
                   "or the pose is off);\nthe other columns could not be tied to one mapped face (see "
                   "tools/fusion/README.md, Landmark ranging).")
+    if gate_rows:
+        with open(os.path.join(args.out, "tof_gate.csv"), "w", newline="") as f:
+            dw = csv.DictWriter(f, fieldnames=list(gate_rows[0].keys()))
+            dw.writeheader()
+            dw.writerows(gate_rows)
+        wrote.append("tof_gate.csv")
+        print("\nLandmark safety gate (decided on the tuning runs; the tables above are the scoring runs only):")
+        for g in gate_rows:
+            print("  " + "; ".join(f"{k}: {v}" for k, v in g.items()))
     print(f"\nwrote {args.out}/" + ", ".join(wrote))
     return 0
 
