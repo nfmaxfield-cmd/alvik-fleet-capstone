@@ -32,6 +32,38 @@ Also in the folder:
 - `clock_sync.csv`: robot,boot,token,t_send,t_recv,robot_ms,rtt_ms,offset_s
   (laptop asks, robot answers with its millis(); offset_s = (t_send+t_recv)/2 - robot_ms/1000)
 - `session.json`: start, start_unix, laptop, python, repo_commit
+- `session_checks.csv` (written by tools/check_session.py, every time it runs):
+  check,scope,status,value,unit,rule,detail, one row per check and robot /
+  run / recording. `status`: PASS, CHECK (look at it before trusting the
+  data), FAIL, SKIP (data missing; `detail` says why), INFO (reported only).
+  Unless the rule says otherwise: under the limit PASS, up to twice it CHECK,
+  more FAIL. `value` is the number the rule is about, in `unit`. Checks:
+
+  | check | scope | value | pass rule |
+  | --- | --- | --- | --- |
+  | wifi_loss | robot run | longest RAW gap, ms | gap < 300 ms (library move pauses are ~200 ms) and loss < 2% |
+  | wifi_bursts | robot run | longest run of lost rows (not counting 90-300 ms gaps that start while the wheels are still: library pauses) | INFO; detail = holes by size |
+  | robot_clock | robot boot | worst clock-fit error, ms | < 5 ms, round trip < 50 ms, drift < 200 ppm and measured (clock checks span > 5 s) |
+  | video_clock_drift | recording | ms the video-vs-laptop drift adds over the session | < 5 ms and scatter around the line < 10 ms (SD). A drift within the scatter is CHECK, not FAIL. Writes `video_clock.json` (below) |
+  | frame_drops | recording | % of frames missing | < 0.5% (late frames, followed by an early one, are not drops) |
+  | frame_rate | recording | fps | within 2% of meta.json's fps |
+  | frame_jitter | recording | SD of arrival time around the camera's own timing, ms | < 5 ms; uses cam_ms, else an even frame grid (proxy) |
+  | exposure | recording | exposure_ms | PASS if meta.json gives it (locked), else CHECK |
+  | camera_settings | recording | settings changed | none changed between camera_controls.after and camera_controls_end |
+  | camera_moved | recording | largest shift of the image centre, px | < 0.5 px and turn < 0.1 deg (first 2 s against 3 moments between and the last 2 s; image registration on the parts that don't move) |
+  | lighting | recording | largest brightness change of the static floor, % | < 10% (sampled every 2 s) |
+  | sync_flash_length | recording | largest error of a sync flash's length, ms | within 15 ms + (frame interval - exposure) of sync_ms |
+  | blink_flash_length | recording | longest blink flash, ms | every one < 220 ms (CHECK if <= 1% are longer) |
+  | tilt | robot | worst accelerometer tilt at rest, deg | < 2 deg (floor tilt + sensor mounting, not separable) |
+  | gravity | robot | total acceleration at rest, g | within 0.05 g of 1 |
+  | rest_noise | robot | % of still rows that pass the fusion's still test | >= 95% (CHECK >= 50%) |
+  | gyro_bias | robot boot | largest first-to-last change of the at-rest gyro reading, deg/s | < 0.2 deg/s |
+  | lifted | robot run | rows with lifted = 1 | none (CHECK otherwise) |
+  | tof_rate | robot | new distance-sensor frames per second | >= 10/s (CHECK >= 5) and no reading older than 200 ms |
+  | note | session | | any other problem check_session found (CHECK) |
+
+  "Still" (tilt, rest_noise, gyro_bias) = both wheel angles stay within 0.72
+  deg (2 encoder steps) for 0.9 s or more, not lifted; 0.2 s cut from each end.
 
 Notes:
 - `run` ids are `<boot>-<n>`: boot is 4 hex digits, random per power-on.
@@ -45,8 +77,9 @@ Notes:
   zones, left to right (the fusion takes them as +22, +11, 0, -11, -22 deg,
   left positive: `tof_zone_deg`, to be checked on hardware); `dtop_cm`,
   `dbot_cm` its top and bottom zones. The sensor makes fewer frames than RAW
-  rows (about 15 a second in tools/sim, to be measured); RAW repeats the last
-  frame until the next.
+  rows (about 15 a second expected, as tools/fleet's simulator assumes;
+  tools/sim gives a new frame every row; check_session's tof_rate check
+  measures it); RAW repeats the last frame until the next.
 - RAW gx..gz: gyro, deg/s; ax..az: accelerometer, g (to be confirmed on
   hardware: az about 1 at rest). yaw_deg: the IMU's fused yaw.
 - Wheel angles (wl_deg, wr_deg) are cumulative degrees; distance = angle/360 x
@@ -54,7 +87,7 @@ Notes:
 
 ## Camera recording (`~/recordings/<date-time>_<label>/`, written by tools/pi/camrec.py)
 
-- `video.avi`: Motion-JPEG, 640x480, about 30 fps
+- `video.avi`: Motion-JPEG, 640x480, at the camera's set rate (25 fps on the Vitade; meta.json fps_reported)
 - `frames.csv`: frame,t_wall,t_mono,cam_ms (t_wall = Pi clock, Unix seconds, when the frame arrived; cam_ms = the camera driver's own capture time in ms, optional, for checking delay)
 - `events.csv`: t_wall,frame,text (notes typed while recording)
 - `meta.json`: device,width,height,fps_requested,fps_reported,host,start,label,note,
@@ -65,6 +98,15 @@ Notes:
   and whether it took, `warnings`, `v4l2_after` = `v4l2-ctl --list-ctrls` if
   installed) and `camera_controls_end` (what the camera reports when recording
   stops). From 2026-10-18.
+- `video_clock.json` (written by tools/check_session.py when 2+ sync flashes
+  were matched): the video clock against the laptop clock,
+  `video t_wall = laptop time + offset_s + drift_ppm * 1e-6 * (laptop time - t_ref)`.
+  Also `drift_significant` (slope beyond 3 standard errors), `use_drift`
+  (significant and worth 1 ms or more over the session: tools should use the
+  slope only then, else offset_s alone), `resid_sd_ms`, `n_flashes`, `span_s`,
+  `from_edges` (slope from the flashes' switch-on times, or both edges).
+  `offset_s` is on the switch-on timing convention of check_session's flash
+  finder (the one tools/fusion/runs.py video_offset() uses).
 
 ## Tape measurement sheet (`docs/experiments/<exp>/data/measurements.csv`)
 

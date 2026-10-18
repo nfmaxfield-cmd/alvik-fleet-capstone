@@ -18,6 +18,20 @@ With --video (a camrec.py recording folder; needs opencv-python and numpy):
 The laptop and Pi clocks are set over the internet and usually agree within
 tens of milliseconds; the flash offset measures that difference plus the
 camera's own delay, which is what latency work needs.
+
+Then the automatic checks (tools/session_checks.py), each printed as one line
+PASS / CHECK / FAIL (SKIP = no data, INFO = reported only) with its number and
+pass rule, and all written to <session>/session_checks.csv
+(docs/data-formats.md lists every check and rule):
+  robot logs: WiFi loss and loss bursts; robot clock fit per boot; floor tilt
+    and 1 g at rest; wheel/speed noise at rest against the fusion's 'still'
+    test; gyro bias change at rest (warm-up); lifted rows; distance-sensor
+    frame rate and reading age
+  video: clock drift against the laptop over the session (writes
+    <recording>/video_clock.json); dropped frames, frame rate, delivery
+    jitter; exposure locked; camera settings start vs end; camera moved;
+    lighting; sync and blink flash lengths (a second pass over the video:
+    --quick skips it)
 """
 import argparse
 import csv
@@ -28,6 +42,9 @@ import os
 import statistics as st
 import sys
 from collections import defaultdict
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import session_checks as sc  # noqa: E402
 
 
 def rows(folder, name):
@@ -214,7 +231,7 @@ def video_flashes(folder, sync_ms_guess=300):
         for r in csv.DictReader(f):
             frames.append(fnum(r["t_wall"]))
     cap = cv2.VideoCapture(os.path.join(folder, "video.avi"))
-    fps = 30.0
+    fps = sc.nominal_fps(folder) or 25.0      # the camera's setting (meta.json) if frames.csv can't say
     if len(frames) > 2 and frames[-1] > frames[0]:
         fps = (len(frames) - 1) / (frames[-1] - frames[0])
     dt_frame = 1.0 / fps
@@ -338,12 +355,17 @@ def match_flashes(found, logged, frame_s=1 / 30):
 
 
 # ------------------------------------------------------------------ report
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("session", help="console session folder, e.g. logs/20261018-101500")
     ap.add_argument("--video", nargs="*", default=[], help="camrec.py recording folder(s) from the same session")
-    args = ap.parse_args()
+    ap.add_argument("--quick", action="store_true", help="skip the flash-length check (reads the whole video "
+                                                          "a second time)")
+    ap.add_argument("--px-per-cm", type=float, default=3.4, help="camera pixels per floor cm, for the camera-move "
+                                                                 "check's cm figure (default 3.4)")
+    args = ap.parse_args(argv)
     S = args.session
+    results = []
 
     info = rows(S, "runinfo")
     if not info:
@@ -390,6 +412,7 @@ def main():
             problems.append(f"{key}: {loss:.1f}% of sensor rows lost; consider raw_hz 25")
         if gap == gap and gap > 300:   # library move()/rotate() block ~200 ms by design
             problems.append(f"{key}: a {gap:.0f} ms gap in the sensor log")
+        results += sc.wifi_checks(key, rr, sent)
     if table:
         w = [max(len(h), *(len(str(t[i])) for t in table)) for i, h in enumerate(hdr)]
         print("  " + "  ".join(h.ljust(w[i]) for i, h in enumerate(hdr)))
@@ -408,6 +431,7 @@ def main():
               f"worst {i['rtt_max']:.1f} ms; robot clock {abs(i['drift_ppm']):.0f} ppm {'fast' if i['drift_ppm'] >= 0 else 'slow'}; fit within {i['resid_ms']:.1f} ms")
         if i["rtt_med"] > 50:
             problems.append(f"{robot}: slow WiFi round trips ({i['rtt_med']:.0f} ms median)")
+    results += sc.clock_checks(fits)
 
     syncs = rows(S, "sync")
     sync_ms = [fnum(r["value"]) for r in rows(S, "param") if r["name"] == "sync_ms"]
@@ -423,7 +447,7 @@ def main():
         if frames is None:
             continue
         name = os.path.basename(os.path.normpath(vf))
-        fps = 30.0
+        fps = sc.nominal_fps(vf) or 25.0
         if len(frames) > 2:
             iv = [b - a for a, b in zip(frames, frames[1:])]
             fps = (len(frames) - 1) / (frames[-1] - frames[0])
@@ -435,7 +459,7 @@ def main():
             fit = fit_for(fits, sy["robot"], sy["run"])
             if fit:
                 placed.append((to_laptop(fit, fnum(sy["ms_on"])), sy))
-        offs = []
+        offs, pairs, in_video = [], [], []
         coarse, picks = match_flashes(found or [], [t for t, _ in placed], 1 / fps)
         coarse_by_video[vf] = coarse or 0.0
         if coarse is None and placed:
@@ -449,6 +473,7 @@ def main():
             tv = t + (coarse or 0.0)
             if not frames or not (frames[0] - 1 <= tv <= frames[-1] + 1):
                 continue   # recorded outside this video; reported below if no video covers it
+            in_video.append((tv, t, to_laptop(fit_for(fits, sy["robot"], sy["run"]), fnum(sy["ms_off"]))))
             crowd = [o for o, q in placed if q is not sy and abs(o - t) < 1.0]
             if crowd:
                 print(f"    {label}: another flash within 1 s, can't tell them apart (run robots one at a time)")
@@ -456,6 +481,7 @@ def main():
                 continue
             if near:
                 offs.append(near[0] - t)
+                pairs.append((t, near[0] - t))
                 print(f"    {label}: video frame {near[1]}, video minus robot time {1000 * (near[0] - t):+.0f} ms")
             elif coarse is not None:
                 print(f"    {label}: not seen in the video (lights out of view, or too small at this camera height?)")
@@ -465,6 +491,26 @@ def main():
                   f"{1000 * st.stdev(offs):.0f} ms (one frame is {1000 / fps:.0f} ms)")
             if st.stdev(offs) > 0.05:
                 problems.append("flash offsets vary by more than 50 ms: check the Pi's and laptop's clocks")
+        edges = {}
+        if args.quick:
+            results.append(sc.Result("flash_length", "Flash lengths in the video", name, "SKIP", float("nan"), "",
+                                     "", "skipped (--quick)"))
+        else:
+            results += sc.flash_length_checks(vf, [x[0] for x in in_video], sync_len, frame_times=frames,
+                                              edges_out=edges)
+        # Clock drift from the sync flashes. Both edges of each flash (switch-on and
+        # switch-off, from the flash-length pass) where measured: when the flash
+        # isn't a whole number of frames long (300 ms at 25 fps = 7.5 frames) their
+        # timing errors partly cancel. Else the switch-on times found above.
+        if len(edges) >= 2:
+            pairs2 = [(t_on, ((a - t_on) + (b - t_off)) / 2) for i, (tv, t_on, t_off) in enumerate(in_video)
+                      if i in edges for a, b in [edges[i]]]
+            results += sc.video_clock_check(name, pairs2, write_to=vf, how="both edges", level_pairs=pairs)
+        else:
+            results += sc.video_clock_check(name, pairs, write_to=vf)
+        results += sc.frame_timing_checks(vf)
+        results += sc.camera_settings_check(vf)
+        results += sc.camera_still_and_light_checks(vf, px_per_cm=args.px_per_cm)
     if args.video:
         spans = []
         for vf in args.video:
@@ -498,12 +544,39 @@ def main():
         if nm != BLINK_DEFAULT_NAMES:
             print("  not the default code -> name mapping: run tools/blink/blink.py with --session " + S)
 
-    print("\nCHECK")
+    if not args.video:
+        for cid, title in (("video_clock_drift", "Video clock drift vs laptop"), ("camera_moved", "Camera didn't move"),
+                           ("lighting", "Lighting steady"), ("frame_drops", "Dropped camera frames"),
+                           ("frame_jitter", "Frame delivery jitter"), ("flash_length", "Flash lengths in the video"),
+                           ("exposure", "Exposure locked and known")):
+            results.append(sc.Result(cid, title, "no recording", "SKIP", float("nan"), "", "",
+                                     "no recording given (add --video <recording folder>)"))
+    results += sc.tilt_checks(raw)
+    results += sc.rest_noise_checks(raw)
+    results += sc.gyro_bias_checks(raw)
+    results += sc.lifted_checks(raw)
+    results += sc.tof_checks(raw)
+    for p in problems:
+        results.append(sc.Result("note", "Other problem", "session", "CHECK", float("nan"), "", "", p))
+
+    print("\nCHECKS (PASS = fine; CHECK = look at it before trusting the data; FAIL = this data has a problem;"
+          "\n        SKIP = couldn't check; INFO = reported only)")
+    for r in results:
+        if r.check != "note":
+            print("  " + r.line())
+    print("\nOTHER PROBLEMS")
     if problems:
         for p in problems:
             print("  - " + p)
     else:
-        print("  everything lines up")
+        print("  none")
+    out = os.path.join(S, "session_checks.csv")
+    try:
+        sc.write_csv(out, results)
+        counts = {k: sum(1 for r in results if r.status == k) for k in ("PASS", "CHECK", "FAIL", "SKIP", "INFO")}
+        print(f"\n{', '.join(f'{v} {k}' for k, v in counts.items() if v)}; all results in {out}")
+    except OSError as e:
+        print(f"\ncould not write {out}: {e}")
     return 0
 
 
