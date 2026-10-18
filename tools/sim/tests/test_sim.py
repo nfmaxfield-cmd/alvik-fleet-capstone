@@ -218,20 +218,29 @@ class CalibAndNudgeChecks:
             self.assertTrue(all(r["yaw_sign"] == "1" for _, r in mine[1:]))
             steps = [int(r["step"]) for r in raw[mine[0][1]["run"]]]
             first = [s for k, s in enumerate(steps) if k == 0 or s != steps[k - 1]]
-            self.assertEqual(first, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], name)
-            # the spins: calib_spin_deg left (step 6), then back right (step 8), by the gyro;
+            self.assertEqual(first, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], name)
+            # the spins: calib_spin_deg left (step 4), then back right (step 6), by the gyro;
             # the front distance zones are logged all the way round
             rows = raw[mine[0][1]["run"]]
             spin = float(next(v for k, v in config.firmware_params() if k == "calib_spin_deg"))
-            for st, sgn in ((6, 1), (8, -1)):
+            for st, sgn in ((4, 1), (6, -1)):
                 seg = [r for r in rows if int(r["step"]) == st]
                 yaw = [float(r["yaw_deg"]) for r in seg]
                 turned = sum(((b - a + 180) % 360) - 180 for a, b in zip(yaw, yaw[1:]))
                 self.assertAlmostEqual(sgn * turned, spin - 1.0, delta=6.0, msg=(name, st))
                 self.assertGreater(len(seg), 400, (name, st))          # ~11 s at 50 rows/s
                 self.assertTrue(all(r["dC_cm"] not in ("", None) for r in seg))
+        # what the look-around chose: open floor in the calibration area, so the full roll
+        looks = {}
+        for path in sorted(os.listdir(os.path.join(self.o, "session"))):
+            if path.startswith("calib_look"):
+                with open(os.path.join(self.o, "session", path), newline="") as f:
+                    looks.update({r["run"]: r for r in csv.DictReader(f)})
         for c in info["calib_runs"]:
             self.assertEqual(c["result"], "done")
+            self.assertIn(c["run"], looks)
+            self.assertEqual(looks[c["run"]]["result"], "roll")
+            self.assertEqual(float(looks[c["run"]]["roll_cm"]), 15.0)
             # put down in view, off the start mark
             self.assertGreater(math.hypot(c["start"][0], c["start"][1]), 15)
 

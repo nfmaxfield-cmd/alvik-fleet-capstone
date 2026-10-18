@@ -25,6 +25,7 @@ import random
 
 from config import firmware_raw_columns
 from fw_follow import FollowMixin
+import fw_look
 
 EXP_NAMES = ["stream", "turn", "lap", "grid", "demo", "straight", "survey", "follow", "calib"]
 EXP_SURVEY, EXP_FOLLOW, EXP_CALIB = 6, 7, 8
@@ -197,6 +198,8 @@ class Robot(FollowMixin):
         self.runs = []         # one dict per run
         self.kidnaps = []
         self.follow_init()
+        self.look = fw_look.Look(self)             # look.h: the calibration run's look-around
+        self.calib_look = None                     # what the last calibration run chose (CALIB_LOOK)
         self.pending = -1                          # gPending: experiment asked for by a command
         self._record()
 
@@ -462,6 +465,10 @@ class Robot(FollowMixin):
                 out.append(max(0.0, d + rng.gauss(0, t.noise_cm + d * t.noise_pct / 100)))
         self._tof_vals = out
         return out
+
+    def tof_top(self):
+        """get_distance_top(): the top zone looks slightly up, a bit further than the centre zone."""
+        return min(self.tof_m.max_range_cm, self.tof()[2] * (1 + self.tof_m.top_extra_pct / 100))
 
     def line_sensors(self):
         lm, rng = self.line_m, self.rng
@@ -902,6 +909,9 @@ class Robot(FollowMixin):
             return False
         if verb == "set":
             parts = rest.split()
+            if parts and parts[0].lower() == "calib_dir_limits":
+                self.look.set_limits(rest[len(parts[0]):])
+                return False
             if len(parts) == 2 and parts[0] in self.params:
                 try:
                     self.params[parts[0]] = float(parts[1])
@@ -912,7 +922,9 @@ class Robot(FollowMixin):
                 self.send("M,usage: set <name> <value>")
             return False
         if verb == "get":
-            if rest in self.params:
+            if rest.lower() == "calib_dir_limits":
+                self.send("M,calib_dir_limits" + ("".join(" %.0f:%.1f" % c for c in self.look.caps) or " off"))
+            elif rest in self.params:
                 self.send("M,%s = %.3f" % (rest, self.params[rest]))
             return False
         if verb == "calibrate":
@@ -939,7 +951,9 @@ class Robot(FollowMixin):
     def receive_command(self, text):
         """A console command arrived (set ... only; `run` goes through run_experiment)."""
         parts = text.split()
-        if parts[0] == "set" and len(parts) == 3 and parts[1] in self.params:
+        if parts[0] == "set" and len(parts) >= 2 and parts[1].lower() == "calib_dir_limits":
+            self.look.set_limits(" ".join(parts[2:]))
+        elif parts[0] == "set" and len(parts) == 3 and parts[1] in self.params:
             self.params[parts[1]] = float(parts[2])
             self.send("M,%s = %.3f" % (parts[1], float(parts[2])))
         else:
@@ -1040,44 +1054,11 @@ class Robot(FollowMixin):
                   % (self.name, "finished" if ok else "stopped", err, head_err))
 
     def run_calib(self):
-        """runCalib() from home_lab.ino (2026-10-18b): RAW step 1 still and blinking, 2 roll forward
-        calib_roll_cm + still, 3 back + still, 4 compass wiggle, 5 still, 6 spin left calib_spin_deg,
-        7 still, 8 spin back right, 9 still (calib_still_ms each; 6-8 skipped when calib_spin_deg is 0,
-        and step 9 is then 300 ms)."""
-        n = max(3.0, self.P("calib_roll_cm"))
-        spin = self.P("calib_spin_deg")
-        still = int(max(300.0, self.P("calib_still_ms")))
-        self.send("M,%s calibration: blinking code %d, rolling %.0f cm forward and back, a small wiggle%s"
-                  % (self.name, self.blink_code_for(), n, ", then a slow spin each way" if spin != 0 else ""))
-        self.step = 1
-        if not self.wait_ms(int(self.P("calib_blink_ms"))):
-            return
-        self.step = 2
-        if not self.library_move(n) or not self.wait_ms(still):
-            return
-        self.step = 3
-        if not self.library_move(-n) or not self.wait_ms(still):
-            return
-        self.step = 4
-        if not self.calibrate_yaw_sign(True):
-            return
-        if spin != 0:
-            self.step = 5
-            if not self.wait_ms(still):
-                return
-            self.step = 6
-            if not self.spin_by(abs(spin), self.P("calib_spin_rpm")):
-                return
-            self.step = 7
-            if not self.wait_ms(still):
-                return
-            self.step = 8
-            if not self.spin_by(-abs(spin), self.P("calib_spin_rpm")):
-                return
-        self.step = 9
-        if not self.wait_ms(still if spin != 0 else 300):
-            return
-        self.send("M,calibrated: now place the robot on its start mark")
+        """runCalib() from home_lab.ino (2026-10-18c): look first, then roll where there is room.
+        RAW step 1 still and blinking, 2 compass wiggle, 3 still, 4 spin left calib_spin_deg, 5 still,
+        6 spin back right, 7 still, 8 turn to the roll heading + still, 9 roll forward + still, 10 back +
+        still (fw_look.py, a copy of look.h and calibSteps())."""
+        fw_look.run_calib(self)
 
     def start_nudge(self, i):
         """startNudge(): roll start_nudge_cm forward and back after the start flash (RAW step -1)."""
@@ -1107,8 +1088,9 @@ class Robot(FollowMixin):
         self.send("M,run %s: %s starting" % (self.run_id, exp))
         t0 = self.millis()
         ms_runinfo = self.ms
-        if i == EXP_FOLLOW:
-            self.front_limit = 0.0             # follow: no centre stop while it waits on its start spot
+        if i in (EXP_FOLLOW, EXP_CALIB):
+            self.front_limit = 0.0             # follow: no centre stop while it waits on its start spot;
+            #                                    calib: it may face a board, only its rolls check ahead
         self.log_run_info(i)
         self.raw_start()
         self.wait_ms(self.P("settle_start_ms"))

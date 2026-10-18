@@ -81,6 +81,7 @@ class RunWatcher:
         self.straight = {}   # run id -> robot's own end (x, y)
         self.boots = {}      # robot -> boot id seen in clock answers
         self.params = {}     # run id -> {param name: value} from its PARAM records
+        self.looks = {}      # run id -> its CALIB_LOOK record (calibration runs, firmware 2026-10-18c+)
         self.messages = []
 
     def __call__(self, name, kind, rtype, vals):
@@ -97,6 +98,8 @@ class RunWatcher:
                 self.straight[vals[0]] = (num(vals[5]), num(vals[6]))
             elif rtype == "CLOCK" and len(vals) >= 3:
                 self.boots[name] = vals[2]
+            elif rtype == "CALIB_LOOK" and len(vals) >= 10:
+                self.looks[vals[0]] = dict(heading=num(vals[3]), room=num(vals[5]), roll=num(vals[8]), result=vals[9])
             elif rtype == "PARAM" and len(vals) >= 3:
                 self.params.setdefault(vals[0], {})[vals[1]] = num(vals[2])
             self.cv.notify_all()
@@ -170,25 +173,31 @@ def inches(text):
     return -v if neg else v
 
 
-# The calibration run's moves with the firmware defaults (params.h, 2026-10-18b): roll
-# calib_roll_cm forward and back, spin calib_spin_deg each way. Space it needs, cm.
+# The calibration run's moves with the firmware defaults (params.h, 2026-10-18c): it spins
+# calib_spin_deg each way first, looking around with its front sensor, then turns to the
+# direction with the most room and rolls up to calib_roll_cm forward and back. Space it needs, cm.
 CALIB_ROLL_CM = 15.0      # calib_roll_cm
 CALIB_STOP_CM = 7.0       # safe_front_cm: it stops if anything is this close in front, even at the end of the roll
+CALIB_MARGIN_CM = 3.0     # calib_margin_cm: it plans to end the roll this much further from anything than that
 ROBOT_LEN_CM = 10.0       # the robot's own length (9.5 cm), rounded up
 SPIN_CIRCLE_CM = 25.0     # spin in place: corners sweep a ~13.5 cm circle; 25 cm leaves room for drift
-CALIB_S = 60              # how long it takes, about (about 60 s in the simulator with two turns each way)
+EDGE_CM = 25.0            # open plywood edge: roll (15) + half the robot (5) + 5 cm to spare
+CALIB_S = 65              # how long it takes, about (58-64 s in the simulator; the turn to its roll direction varies)
 
 
 def calib_space_text():
     """The calibration prompt's space instructions, in cm and inches."""
-    ahead = CALIB_ROLL_CM + CALIB_STOP_CM
-    lane = ahead + ROBOT_LEN_CM
-    return (f"  It needs clear floor: a straight lane {lane:g} cm ({to_in(lane)}) long, about {SPIN_CIRCLE_CM:g} cm "
-            f"({to_in(SPIN_CIRCLE_CM)}) wide, starting at its back: its own {ROBOT_LEN_CM:g} cm "
-            f"({to_in(ROBOT_LEN_CM)}), the {CALIB_ROLL_CM:g} cm ({to_in(CALIB_ROLL_CM)}) roll, and "
-            f"{CALIB_STOP_CM:g} cm ({to_in(CALIB_STOP_CM)}) more, because it stops if anything is that close in "
-            f"front.\n  For the spin it also needs a circle {SPIN_CIRCLE_CM:g} cm ({to_in(SPIN_CIRCLE_CM)}) across "
-            f"around where it stands. Nothing else may move inside that space (hands, other robots).")
+    lane = ROBOT_LEN_CM + CALIB_ROLL_CM + CALIB_STOP_CM + CALIB_MARGIN_CM
+    return (f"  It needs a clear circle {SPIN_CIRCLE_CM:g} cm ({to_in(SPIN_CIRCLE_CM)}) across around where it stands, "
+            f"to spin.\n"
+            f"  It picks its own direction to roll: the one where its front sensor saw the most room. It rolls the "
+            f"full {CALIB_ROLL_CM:g} cm when some direction has {lane:g} cm ({to_in(lane)}) of clear floor, counted "
+            f"from its back (its own {ROBOT_LEN_CM:g} cm, the roll, and {CALIB_STOP_CM + CALIB_MARGIN_CM:g} cm to spare); "
+            f"less room, a shorter roll; under {ROBOT_LEN_CM + 5 + CALIB_STOP_CM + CALIB_MARGIN_CM:g} cm "
+            f"({to_in(ROBOT_LEN_CM + 5 + CALIB_STOP_CM + CALIB_MARGIN_CM)}) every way, no roll.\n"
+            f"  Keep it at least {EDGE_CM:g} cm ({to_in(EDGE_CM)}) from any open plywood edge (an edge with no board "
+            f"along it): the front sensor can't see an edge, so open space past it looks like room.\n"
+            f"  Nothing else may move inside that space (hands, other robots).")
 
 
 def to_in(cm):
@@ -403,11 +412,12 @@ def main():
                 boot = watch.boots.get(robot)
                 if calibrated.get(robot) is None or (boot and calibrated[robot] != boot):
                     print(f"  {robot} needs its calibration run (once per power-on, about {CALIB_S} s): it blinks "
-                          f"its code, rolls {CALIB_ROLL_CM:g} cm ({to_in(CALIB_ROLL_CM)}) forward and back, wiggles, "
-                          f"then spins slowly once around to the left and once back to the right.")
+                          f"its code, wiggles, spins slowly twice around to the left and back to the right while it "
+                          f"looks around, then turns to where it saw the most room and rolls up to {CALIB_ROLL_CM:g} cm "
+                          f"({to_in(CALIB_ROLL_CM)}) forward and back.")
                     print(calib_space_text())
                     ask("  Put it on the floor where the camera can see all of that space, NOT on the mark, facing "
-                        "along the clear lane, and press Enter: ")
+                        "any way, and press Enter: ")
                     before = watch.started.get(robot)
                     link.send_name(robot, "calibrate")
                     crun = watch.wait_start(robot, before, 8)
@@ -416,6 +426,16 @@ def main():
                         why = cres["result"] if cres else "no answer"
                         print(f"  Calibration didn't finish ({why}). Check the robot has room, then try again.")
                         continue
+                    look = watch.looks.get(crun)
+                    if look and look["roll"] is not None and look["roll"] <= 0:
+                        print(f"  It found no room to roll (most room: {look['room']:.0f} cm ahead of its front, "
+                              f"{look['heading']:.0f} deg from where it faced), so this calibration has no heading "
+                              f"or wheel scale; the rest is fine.")
+                        if ask("  Type r and Enter to move it to more open floor and calibrate again, or just "
+                               "Enter to go on: ").lower() == "r":
+                            continue
+                    elif look and look["result"] == "short":
+                        print(f"  (It rolled {look['roll']:.1f} cm, not the full {CALIB_ROLL_CM:g}: not much room.)")
                     print(f"  Calibrated (run {crun}).")
                     if pi:
                         pi.send(f"calibration {robot} run {crun}")

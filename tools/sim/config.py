@@ -184,6 +184,8 @@ class SessionModel:
     calib_area_cm: List[float] = field(default_factory=lambda: [20.0, 50.0, 20.0, 45.0])   # x0, x1, y0, y1
     calib_wait_s: float = 2.0             # put down -> Enter pressed -> `calibrate` sent
     after_calib_s: float = 2.0            # RUNEND seen -> robot picked up to go to the start mark
+    calib_commands: List[str] = field(default_factory=list)   # console commands sent just before `calibrate`
+    #                                       (e.g. "set calib_dir_limits 0 2": the laptop's roll caps, firmware look.h)
     parked_pose: List[float] = field(default_factory=lambda: [-160.0, -60.0, 0.0])   # robots not running wait here, out of view
     video_lead_s: float = 5.0
     video_tail_s: float = 5.0

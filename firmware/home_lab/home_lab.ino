@@ -26,12 +26,13 @@
 #include "motion.h"
 #include "experiments.h"
 #include "follow.h"
+#include "look.h"
 #include "ota.h"
 
 Arduino_Alvik alvik;
 
 // Bump this whenever the firmware changes, so every logged run says which code it ran.
-#define FW_VERSION "2026-10-18b"
+#define FW_VERSION "2026-10-18c"
 
 uint16_t gBootId = 0;   // random each power-on; starts every run id
 
@@ -75,6 +76,7 @@ void showSelection(bool running) {
 void printHelp() {
   net::sendLine("M,commands: run stream|turn|lap|grid|demo|straight|survey|follow  stop  calibrate  clock  name <Left|Center|Right>  set <name> <value>  get <name>  params  route <SLRE...>  status  identify  help");
   net::sendLine("M,during run follow: fs <id> <T|D|A|W> ...  fix <t_ms> <x> <y> <th> <sigma>  fpose <x> <y> <th>  hold [id]  halt  (tools/fleet/run_plan.py sends these)");
+  net::sendLine("M,before calibrate: set calib_dir_limits <deg> <cm> ... caps its roll per direction (deg from where it faces, left +; next calibration only; off = none)");
 }
 
 void printParams() {
@@ -162,6 +164,7 @@ bool handleCommand(const String& raw, bool running) {
     return false;
   }
   if (verb == "get") {
+    if (rest.equalsIgnoreCase("calib_dir_limits")) { look::printLimits(); return false; }
     Param* p = findParam(rest);
     if (p) net::logf("M,%s = %.3f  (%s)", p->name, p->value, p->help);
     else   net::logf("M,no parameter called %s (type params)", rest.c_str());
@@ -169,6 +172,11 @@ bool handleCommand(const String& raw, bool running) {
   }
   if (verb == "set") {
     int sp2 = rest.indexOf(' ');
+    // caps on the calibration roll per heading, from the laptop (look.h); not a single number
+    if ((sp2 < 0 ? rest : rest.substring(0, sp2)).equalsIgnoreCase("calib_dir_limits")) {
+      look::setLimits(sp2 < 0 ? String("") : rest.substring(sp2 + 1));
+      return false;
+    }
     if (sp2 < 0) { net::sendLine("M,usage: set <name> <value>"); return false; }
     String name = rest.substring(0, sp2);
     String val = rest.substring(sp2 + 1);
@@ -268,50 +276,131 @@ bool needsYawSign(int i) { return i == 1 || (i >= 3 && i <= 7); }
 // Calibration run, once per power-on and whenever robots may have been mixed
 // up. Logged like any run (RUNINFO, PARAM, RAW at raw_hz, flashes), so the
 // camera recording holds it too; tools/blink/calib.py reads it from the video
-// and the log. RAW step (what the camera / log measure in it):
-//   1  still, blinking its code, calib_blink_ms       who is who
-//   2  roll forward calib_roll_cm, still calib_still_ms   heading, wheel distance scale
-//   3  roll back, still calib_still_ms                 the same, the other way
-//   4  compass wiggle (calibrateYawSign(true))         gyro sign
-//   5  still calib_still_ms                            gyro bias; picture before the spin
-//   6  spin left calib_spin_deg at calib_spin_rpm      gyro scale, light offset from the
-//                                                      turning centre, front sensor sweep
-//   7  still calib_still_ms                            picture after the spin; gyro bias
-//   8  spin back right calib_spin_deg                  the same, the other way
-//   9  still calib_still_ms                            picture after; gyro bias
-// calib_spin_deg 0 skips 6-8 (step 9 is then 300 ms). The blink code runs
-// throughout (moves go dark before the library's blocking call, as elsewhere).
-// Defaults: about 38 s from RUNINFO to RUNEND; clear floor: a 32 cm lane (10 cm
-// robot + 15 cm roll + 7 cm safe_front_cm stop distance) and a 25 cm circle
-// for the spin. Firmware before 2026-10-18b: 1 still, 2 roll
+// and the log. It LOOKS before it rolls (look.h): the spins come first, the
+// front sensor's sweep during them shows where there is room, and the roll
+// goes that way. RAW step (what the camera / log measure in it):
+//   1  still, blinking its code, calib_blink_ms        who is who; front view
+//                                                      (anything inside its spin circle?)
+//   2  compass wiggle (calibrateYawSign(true))         gyro sign
+//   3  still calib_still_ms                            gyro bias; picture before the spin
+//   4  spin left calib_spin_deg at calib_spin_rpm      gyro scale, light offset from the
+//                                                      turning centre, front sensor sweep (look)
+//   5  still calib_still_ms                            picture between the spins; gyro bias
+//   6  spin back right calib_spin_deg                  the same, the other way
+//   7  still calib_still_ms                            picture after the spins; gyro bias
+//   8  turn to the roll heading (IMU turn; none if     heading before the roll (picture);
+//      it already faces it), still calib_still_ms      front view re-checked
+//   9  roll forward (up to calib_roll_cm), still       heading, wheel distance scale
+//  10  roll back the same, still                       the same, the other way
+// 4-7 are skipped when calib_spin_deg is 0 or something is within calib_spin_r_cm
+// of its turning centre at steps 1-3 (it then only knows the view straight
+// ahead); 9-10 are skipped when no heading has room for calib_roll_min_cm. One
+// CALIB_LOOK record (docs/data-formats.md) says what it saw and chose. The
+// front stop is off except during the rolls (standing and spinning in place
+// it may face a board). The blink code runs throughout (moves go dark before
+// the library's blocking call, as elsewhere). Defaults: about 63 s from
+// RUNINFO to RUNEND; it needs a 25 cm circle to spin in and, in some
+// direction, 15 + 7 + 3 cm clear ahead of its front. Firmware 2026-10-18b
+// rolled first, straight ahead (1 blink, 2 roll, 3 back, 4 wiggle, 5 still,
+// 6 spin, 7 still, 8 spin back, 9 still); before that: 1 still, 2 roll
 // max(3, start_nudge_cm) with 300 ms pauses, 3 back, 4 wiggle, 5 300 ms.
-void runCalib() {
-  float n = fmaxf(3.0f, P("calib_roll_cm"));
+void calibSteps() {
   float spin = P("calib_spin_deg");
   unsigned long still = (unsigned long)fmaxf(300.0f, P("calib_still_ms"));
-  net::logf("M,%s calibration: blinking code %d, rolling %.0f cm forward and back, a small wiggle%s",
-            net::name, blink::codeFor(net::name), n, spin != 0 ? ", then a slow spin each way" : "");
+  net::logf("M,%s calibration: blinking code %d, a small wiggle%s, then a roll of up to %.0f cm forward and back "
+            "where it finds room", net::name, blink::codeFor(net::name), spin != 0 ? ", a slow spin each way" : "",
+            fmaxf(3.0f, P("calib_roll_cm")));
   rawlog::step = 1;
+  look::reset();
+  look::active = true;
   if (!waitMs((unsigned long)P("calib_blink_ms"))) return;
+  float nearStart = look::nearNow;
+  look::active = false;
   rawlog::step = 2;
-  if (!libraryMove(n) || !waitMs(still)) return;
-  rawlog::step = 3;
-  if (!libraryMove(-n) || !waitMs(still)) return;
-  rawlog::step = 4;
   if (!calibrateYawSign(true)) return;
-  if (spin != 0) {
+  rawlog::step = 3;
+  look::reset();             // headings from here on are relative to this one
+  look::active = true;
+  if (!waitMs(still)) return;
+  float nearest = look::nearNow;
+  if (nearStart > 0 && (nearest <= 0 || nearStart < nearest)) nearest = nearStart;
+  bool spun = false;
+  if (spin != 0 && nearest > 0 && nearest < P("calib_spin_r_cm")) {
+    net::logf("M,%s: something is %.1f cm from its middle, inside the %.0f cm circle it needs to spin: no spin "
+              "(no gyro scale or light offset this time); it can only look straight ahead",
+              net::name, nearest, 2 * P("calib_spin_r_cm"));
+  } else if (spin != 0) {
+    rawlog::step = 4;
+    if (!spinBy(fabsf(spin), P("calib_spin_rpm"))) return;
     rawlog::step = 5;
     if (!waitMs(still)) return;
     rawlog::step = 6;
-    if (!spinBy(fabsf(spin), P("calib_spin_rpm"))) return;
+    if (!spinBy(-fabsf(spin), P("calib_spin_rpm"))) return;
     rawlog::step = 7;
     if (!waitMs(still)) return;
-    rawlog::step = 8;
-    if (!spinBy(-fabsf(spin), P("calib_spin_rpm"))) return;
+    spun = true;
   }
+  look::active = false;
+  look::Choice c = look::choose();
+  float rollMin = fmaxf(1.0f, P("calib_roll_min_cm"));
+  bool roll = c.roll >= rollMin;
+  float target = wrap180(look::h0 + c.heading), turn = 0;
+  rawlog::step = 8;
+  if (roll) {
+    turn = wrap180(target - heading());
+    if (fabsf(turn) > P("turn_tol_deg") && !imuTurnTo(target).ok) return;
+  }
+  // still: the picture before the roll, and the live front view along the lane once more
+  float live = 0;
+  unsigned long t0 = millis();
+  while (millis() - t0 < still) {
+    if (shouldAbort()) return;
+    float f = frontInPath();
+    if (f > 0 && (live == 0 || f < live)) live = f;
+    delay(5);
+  }
+  float L = roll ? c.roll : 0;
+  const char* result = !roll ? "no_room" : c.full ? "roll" : "short";
+  if (roll && live > 0) {
+    float fit = live - P("safe_front_cm") - P("calib_margin_cm");
+    if (fit < L) {
+      L = fit;
+      result = L >= rollMin ? "short" : "no_room_after_turn";
+      if (L < rollMin) L = 0;
+    }
+  }
+  String caps = "";
+  for (int k = 0; k < look::nCap; k++) caps += String(k ? ";" : "") + String(look::capDeg[k], 0) + ":" + String(look::capCm[k], 1);
+  net::sendLine("H,CALIB_LOOK,run,spun,near_cm,heading_deg,turn_deg,room_cm,cap_cm,live_cm,roll_cm,result,room8,caps");
+  net::logf("D,CALIB_LOOK,%s,%d,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%s,%s,%s", gRunId.c_str(), spun ? 1 : 0, nearest,
+            c.heading, turn, c.room, c.cap, live, L, result, look::roomSummary().c_str(), caps.c_str());
+  if (L <= 0) {
+    net::logf("M,%s: no room to roll (best direction %.0f deg from where it faced: %.0f cm clear ahead%s, a %.0f cm "
+              "roll needs %.0f): no heading or wheel scale this time. Give it 13 in (33 cm) of clear floor in some "
+              "direction and calibrate again for those.", net::name, c.heading, c.room,
+              c.cap >= 0 ? ", capped by the laptop" : "", rollMin, rollMin + P("safe_front_cm") + P("calib_margin_cm"));
+    return;
+  }
+  if (fabsf(c.heading) > 2) net::logf("M,%s: rolling %.1f cm towards %.0f deg (left positive) from where it faced",
+                                       net::name, L, c.heading);
+  gFrontLimitCm = -1;        // rolling: the usual front stop (safe_front_cm)
   rawlog::step = 9;
-  if (!waitMs(spin != 0 ? still : 300)) return;
-  net::sendLine("M,calibrated: now place the robot on its start mark");
+  if (!libraryMove(L) || !waitMs(still)) return;
+  rawlog::step = 10;
+  if (!libraryMove(-L) || !waitMs(still)) return;
+  gFrontLimitCm = 0;
+}
+
+void runCalib() {
+  void (*savedHook)() = gTickHook;
+  gFrontLimitCm = 0;
+  gTickHook = look::tickHook;
+  calibSteps();
+  look::active = false;
+  look::nCap = 0;            // the laptop's caps were for this placement only
+  gTickHook = savedHook;
+  gFrontLimitCm = -1;        // back to the usual front stop for the next run
+  if (!gAbortReason.length() && !gFail.length()) net::sendLine("M,calibrated: now place the robot on its start mark");
 }
 
 // Start nudge: a short roll forward and back right after the start flash, so
@@ -351,8 +440,9 @@ void runExperiment(int i, bool fromButton) {
   bool logged = i != 0;   // the stream experiment is its own log
   unsigned long t0 = millis();
   // follow: the robot stands on its start spot (which may face a board closer than
-  // safe_front_cm) until steps arrive; each step sets its own front check (follow.h)
-  if (i == EXP_FOLLOW) gFrontLimitCm = 0;
+  // safe_front_cm) until steps arrive; each step sets its own front check (follow.h).
+  // calib: it may be put down facing a board; only its rolls check ahead (runCalib).
+  if (i == EXP_FOLLOW || i == EXP_CALIB) gFrontLimitCm = 0;
   if (logged) {
     logRunInfo(i);
     rawlog::start();
