@@ -336,8 +336,8 @@ error whenever the camera is blocked or absent, and as a fallback it matches
 the camera on path and improves heading, but with the camera working it still
 costs 0.05 cm of end error on average (r7: 0.27 vs 0.27; r11: 0.35 vs 0.25),
 and the factor graph is better without it. The target "never worse than the
-camera alone" is NOT met for end error. Not shipped as default: the landmark
-options are off. Recommended until
+camera alone" was NOT met for end error by these options; see "Default:
+camera fallback, weighted" below for what is now the default. Recommended until
 real data says otherwise: `"tof_consider": true, "tof_camera_gap_s": 1.0` with
 a calibration, in the filter (not the factor graph).
 
@@ -360,6 +360,61 @@ agree with the map to the noise (rms 1.40 -> 0.93 cm; left over per run,
 zone and face 0.2 cm). With the calibration runs' spins (branch follow-18b's
 simulator, 9 runs, boards 1 cm off): zone directions within 0.8 deg (2.7 deg
 without the spins) and boards within 0.06 cm.
+
+### Default: camera fallback, weighted (decided 2026-10-18)
+
+Landmark readings are merged only once the camera has missed the robot for
+1 s (`tof_camera_gap_s`); while it tracks, the pose is the camera's.
+Each reading counts at half weight in setups with the camera (the user's
+rule: two sensors measuring the same thing mustn't count it twice), and by
+the measured error correlation without one (`tof_weight` "auto"). Landmark
+readings never move the gyro bias or wheel size in camera setups
+(`tof_freeze_shared`): before that, a run that used no landmark reading still
+differed slightly through the wheel size learned in an earlier run.
+
+Why camera + landmarks still differed from the camera alone: on the L routes
+the robot leaves the camera's view (about 65 camera fixes in a 23 s run), so
+the fallback is really used there; and the calibration had been fitting the
+boards seen from out of view against a dead-reckoned path. tof_calib.py now
+uses only readings where the camera was seeing the robot (within 0.3 s):
+zone directions then come back within 0.5 deg for most zones, the range
+biases and scales are recovered, and what is left per run, zone and face
+drops from 0.2 to 0.06-0.09 cm.
+
+Simulation, sessions r7 and r11 (realistic sensor errors, boards 1 cm off,
+leave-one-run-out calibration, wheel size on), end / path cm / heading deg:
+
+| | camera alone | fallback, half weight | fallback, correlation weight | always, consider states | covariance intersection |
+| --- | --- | --- | --- | --- | --- |
+| camera working | 0.260 / 0.323 / 1.04 | 0.271 / 0.286 / 0.98 | 0.289 / 0.287 / 0.97 | 0.320 / 0.342 / 1.04 | 0.494 / 0.561 / 1.44 |
+| blocked 5 s | 0.212 / 0.434 / 1.10 | 0.210 / 0.350 / 1.01 | 0.229 / 0.352 / 1.01 | 0.353 / 0.440 / 1.07 | 0.485 / 0.645 / 1.49 |
+| blocked 20 s | 1.061 / 0.966 / 1.32 | 0.470 / 0.470 / 0.96 | 0.463 / 0.462 / 0.93 | 0.576 / 0.525 / 0.96 | 0.984 / 0.957 / 1.28 |
+| no camera (vs wheels + gyro 3.47) | | 0.489 / 0.505 / 0.95 | 0.446 / 0.482 / 0.90 | 0.478 / 0.537 / 0.92 | 1.561 / 1.269 / 1.40 |
+
+"Always" = merged whenever seen, at full weight with consider states.
+Covariance intersection (never more confident than either source, whatever
+the correlation) widens the pose's uncertainty at every reading, 15 times a
+second, and gives landmarks far too little say. Learning the boards while
+the camera tracks (`tof_learn_map`) changed nothing once the calibration
+had done it. With the camera working the fallback is better on path and
+heading and within 0.01 cm on end error on average, but one session got
+worse (r11 0.25 -> 0.29 cm end; r7 0.27 -> 0.25), hence the gate below.
+
+**Safety gate** (`replay.py --tof-gate data/split.csv`, or `auto`): each
+landmark setup is compared, on the tuning runs only (T1's split.csv), with
+the same setup without landmarks; if it is worse in end error or path
+error, its scoring runs use the setup without landmarks. tof_gate.csv says
+what it decided; all tables then show the scoring runs only.
+
+Gate on r7 and r11 (default setups, A B B A split, 18 tuning and 18 scoring
+runs each): every landmark setup ON except camera working on r11 (tuning
+runs 0.230 vs 0.209 cm without). Scoring runs, both sessions, end / path:
+camera working 0.259 / 0.310 with vs 0.256 / 0.318 without; camera blocked
+5 s 0.211 / 0.357 vs 0.194 / 0.426; blocked 20 s 0.41 / 0.45 vs 1.08 / 0.97;
+no camera 0.39 / 0.46 vs 3.30 / 2.21 (wheels + gyro). So the gate keeps the
+large gains but does not guarantee "never worse" on runs it hasn't seen: a
+short block (5 s) still costs about 0.02 cm of end error while saving 0.07 cm
+of path error.
 
 ### Calibration (tof_calib.py)
 
