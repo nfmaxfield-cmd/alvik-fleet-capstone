@@ -500,6 +500,11 @@ def main():
                 ex, ey = xs + c * tx - s * ty, ys + s * tx + c * ty
                 end = ask_marks("END", spacing, near=(ex, ey), max_dist=20, heading_near=hs + th, heading_tol=10)
                 xe, ye, he, _ = pose(*end)
+                # when the end marks were typed: the robot must not have moved before this (accuracy check B14)
+                logw.writerow([f"{time.time():.3f}", r["order"], robot, level, run, res["result"], "end_marks"])
+                logf.flush()
+                if pi:
+                    pi.send(f"trial {r['order']} run {run} final marks typed")
                 for k, v in zip(("xf0_cm", "yf0_cm", "xr0_cm", "yr0_cm"), start):
                     r[k] = f"{v:g}"
                 for k, v in zip(("xf_cm", "yf_cm", "xr_cm", "yr_cm"), end):

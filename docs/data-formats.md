@@ -36,6 +36,38 @@ Also in the folder:
 - `clock_sync.csv`: robot,boot,token,t_send,t_recv,robot_ms,rtt_ms,offset_s
   (laptop asks, robot answers with its millis(); offset_s = (t_send+t_recv)/2 - robot_ms/1000)
 - `session.json`: start, start_unix, laptop, python, repo_commit
+- `session_checks.csv` (written by tools/check_session.py, every time it runs):
+  check,scope,status,value,unit,rule,detail, one row per check and robot /
+  run / recording. `status`: PASS, CHECK (look at it before trusting the
+  data), FAIL, SKIP (data missing; `detail` says why), INFO (reported only).
+  Unless the rule says otherwise: under the limit PASS, up to twice it CHECK,
+  more FAIL. `value` is the number the rule is about, in `unit`. Checks:
+
+  | check | scope | value | pass rule |
+  | --- | --- | --- | --- |
+  | wifi_loss | robot run | longest RAW gap, ms | gap < 300 ms (library move pauses are ~200 ms) and loss < 2% |
+  | wifi_bursts | robot run | longest run of lost rows (not counting 90-300 ms gaps that start while the wheels are still: library pauses) | INFO; detail = holes by size |
+  | robot_clock | robot boot | worst clock-fit error, ms | < 5 ms, round trip < 50 ms, drift < 200 ppm and measured (clock checks span > 5 s) |
+  | video_clock_drift | recording | ms the video-vs-laptop drift adds over the session | < 5 ms and scatter around the line < 10 ms (SD). A drift within the scatter is CHECK, not FAIL. Writes `video_clock.json` (below) |
+  | frame_drops | recording | % of frames missing | < 0.5% (late frames, followed by an early one, are not drops) |
+  | frame_rate | recording | fps | within 2% of meta.json's fps |
+  | frame_jitter | recording | SD of arrival time around the camera's own timing, ms | < 5 ms; uses cam_ms, else an even frame grid (proxy) |
+  | exposure | recording | exposure_ms | PASS if meta.json gives it (locked), else CHECK |
+  | camera_settings | recording | settings changed | none changed between camera_controls.after and camera_controls_end |
+  | camera_moved | recording | largest shift of the image centre, px | < 0.5 px and turn < 0.1 deg (first 2 s against 3 moments between and the last 2 s; image registration on the parts that don't move) |
+  | lighting | recording | largest brightness change of the static floor, % | < 10% (sampled every 2 s) |
+  | sync_flash_length | recording | largest error of a sync flash's length, ms | within 15 ms + (frame interval - exposure) of sync_ms |
+  | blink_flash_length | recording | longest blink flash, ms | every one < 220 ms (CHECK if <= 1% are longer) |
+  | tilt | robot | worst accelerometer tilt at rest, deg | < 2 deg (floor tilt + sensor mounting, not separable) |
+  | gravity | robot | total acceleration at rest, g | within 0.05 g of 1 |
+  | rest_noise | robot | % of still rows that pass the fusion's still test | >= 95% (CHECK >= 50%) |
+  | gyro_bias | robot boot | largest first-to-last change of the at-rest gyro reading, deg/s | < 0.2 deg/s |
+  | lifted | robot run | rows with lifted = 1 | none (CHECK otherwise) |
+  | tof_rate | robot | new distance-sensor frames per second | >= 10/s (CHECK >= 5) and no reading older than 200 ms |
+  | note | session | | any other problem check_session found (CHECK) |
+
+  "Still" (tilt, rest_noise, gyro_bias) = both wheel angles stay within 0.72
+  deg (2 encoder steps) for 0.9 s or more, not lifted; 0.2 s cut from each end.
 
 Notes:
 - `run` ids are `<boot>-<n>`: boot is 4 hex digits, random per power-on.
@@ -73,8 +105,9 @@ Notes:
   zones, left to right (the fusion takes them as +22, +11, 0, -11, -22 deg,
   left positive: `tof_zone_deg`, to be checked on hardware); `dtop_cm`,
   `dbot_cm` its top and bottom zones. The sensor makes fewer frames than RAW
-  rows (about 15 a second in tools/sim, to be measured); RAW repeats the last
-  frame until the next.
+  rows (about 15 a second expected, as tools/fleet's simulator assumes;
+  tools/sim gives a new frame every row; check_session's tof_rate check
+  measures it); RAW repeats the last frame until the next.
 - RAW gx..gz: gyro, deg/s; ax..az: accelerometer, g (to be confirmed on
   hardware: az about 1 at rest). yaw_deg: the IMU's fused yaw.
 - Wheel angles (wl_deg, wr_deg) are cumulative degrees; distance = angle/360 x
@@ -82,7 +115,7 @@ Notes:
 
 ## Camera recording (`~/recordings/<date-time>_<label>/`, written by tools/pi/camrec.py)
 
-- `video.avi`: Motion-JPEG, 640x480, about 30 fps
+- `video.avi`: Motion-JPEG, 640x480, at the camera's set rate (25 fps on the Vitade; meta.json fps_reported)
 - `frames.csv`: frame,t_wall,t_mono,cam_ms (t_wall = Pi clock, Unix seconds, when the frame arrived; cam_ms = the camera driver's own capture time in ms, optional, for checking delay)
 - `events.csv`: t_wall,frame,text (notes typed while recording)
 - `meta.json`: device,width,height,fps_requested,fps_reported,host,start,label,note,
@@ -98,6 +131,15 @@ Notes:
   measured, frames, seconds, ok (false below 0.9 x requested; also copied to the
   top level as `fps_check`)) and `camera_controls_end` (what the camera reports when recording
   stops). From 2026-10-18.
+- `video_clock.json` (written by tools/check_session.py when 2+ sync flashes
+  were matched): the video clock against the laptop clock,
+  `video t_wall = laptop time + offset_s + drift_ppm * 1e-6 * (laptop time - t_ref)`.
+  Also `drift_significant` (slope beyond 3 standard errors), `use_drift`
+  (significant and worth 1 ms or more over the session: tools should use the
+  slope only then, else offset_s alone), `resid_sd_ms`, `n_flashes`, `span_s`,
+  `from_edges` (slope from the flashes' switch-on times, or both edges).
+  `offset_s` is on the switch-on timing convention of check_session's flash
+  finder (the one tools/fusion/runs.py video_offset() uses).
 
 ## Tape measurement sheet (`docs/experiments/<exp>/data/measurements.csv`)
 
@@ -111,6 +153,32 @@ xf0_cm,yf0_cm,xr0_cm,yr0_cm,xf_cm,yf_cm,xr_cm,yr_cm,battery_pct,excluded,note
 - `excluded`: 1, yes, y, x or true (any case) leaves the run out of every analysis.
 - Readers accept a UTF-8 byte-order mark (Excel's "CSV UTF-8" adds one);
   the tools write plain UTF-8 without it.
+
+## Accuracy checks (written by tools/accuracy_checks.py, in T1's `data/` or `--out`)
+
+- `accuracy_checks.csv`: id,check,subject,result,pass_rule,verdict,meaning,if_fails,value,n.
+  One row per check and robot (or other subject). `verdict` PASS | CHECK |
+  FAIL | NOT YET (an input is missing; `result` says which). `value` is the
+  row's headline number in the unit its result names (e.g. % for scales, cm,
+  deg/s, ms).
+- `measured_noise.json`: the camera noise measured against the tape while the
+  robot sits still (T0 placements, each run's start and end), for the fusion:
+  - `cam_xy_cm`: robot detector, SD per floor axis of camera minus tape, cm
+  - `cam_heading_deg`: robot detector heading minus tape heading, SD, deg
+  - `blink_xy_cm`: blink light (tools/blink) minus where the tape puts the
+    light (robot centre + the light's measured offset), SD per axis, cm
+  - `start_nudge_heading_deg`: heading from the start nudge
+    (calibration_results.csv) minus tape start heading, SD, deg (includes the
+    tape's own heading error)
+  - `null` = not measured yet. `_detail` holds the biases (mean differences)
+    and counts, `_made` when it was written. The tape's own reading error
+    (about 0.06 cm, T0) is not taken out.
+- `data/split.csv` (T1 only): order,robot,route,level,run_id,half,excluded.
+  The held-out split: within each robot x route, in sheet order, runs 1 and 4
+  of every four are `tune`, runs 2 and 3 `score` (A B B A, so both halves
+  span the session). It depends only on the sheet's order, never on results.
+  **Rule: fusion settings (noise levels, gates, scales) are tuned only on the
+  `tune` runs; reported fusion accuracy comes only from the `score` runs.**
 
 ## Floor calibration (`floor_calibration.json`, beside the recording)
 
@@ -333,6 +401,33 @@ distance to the first mapped face along that zone's direction
 
 Measure the face, not the board's centre: for a 1.5 cm board on its centre
 line, the face is 0.75 cm closer to the robots.
+
+Landmarks picked on the video (tools/calibrate_floor.py, Landmarks mode, or
+`--landmarks-from`; tools/landmark_pick.py) are written to `landmarks.csv`
+beside `floor_calibration.json` with extra columns after the five above
+(the fusion ignores them): `landmark` (the board or block name), `kind`
+(board / block), `source` (`user-picked`), `thickness_cm`, `height_cm`
+(blank if not typed), `tape_fixed` (how many of its ends were replaced by a
+tape measurement). A board is written as its four faces around the centre
+line, named as runs.py does (`<name> left` / `right` / `end p1` / `end p2`);
+a block as its edges (`<name> edge 1..4`), so the fusion picks the face the
+robot sees. Saving replaces earlier `user-picked` rows and rows of a landmark
+with the same name, keeps all other rows, and keeps the old file as
+`landmarks.csv.bak`. With `--map`, boards go into `boards` (same name: p1,
+p2, thickness replaced, `side` and `dock_at` kept) and blocks into
+`obstacles` (polygon, source `user`, `note` starting `user-picked`; such
+obstacles no longer on the page are removed); old map kept as `map.json.bak`.
+
+The clicks are kept in `landmarks_picked.json` (same format as the
+`--landmarks-from` input): `landmarks`, each {name, kind (board / block),
+clicks [[u, v], ...] (px), frame, thickness_cm, height_cm, clicked_at
+(block: floor / top), fix (per click: null, or a tape position "x, y" in
+inches like "36 3/32, 12 1/2", or "x, y cm", or [x_cm, y_cm])}. Board clicks
+are the two ends of its foot (where it meets the floor) on the side the
+camera sees; the centre line is half a thickness further from the point
+below the lens. Block clicks are 2 opposite corners (rectangle along the
+floor axes), 3 corners in a row (4th completed) or 4 corners, on the floor,
+or on its top (`clicked_at` top, needs `height_cm` and the camera height).
 
 ## Fleet plan (`plan.json`, written by tools/fleet/planner.py and app.py)
 

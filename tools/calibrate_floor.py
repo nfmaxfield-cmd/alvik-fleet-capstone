@@ -86,6 +86,23 @@ below the lens, plumb line) are optional; without the nadir it is estimated
 from the fit, which is fine for the robot-top correction (a 3 cm nadir error
 moves a robot-top point by 0.1 cm) and is labelled as an estimate in the file.
 
+Landmarks (boards and blocks the robots' distance sensor can range, for
+tools/fusion --map): the page's Landmarks mode, after a calibration is saved.
+Pick a frame where the boards show; for a board click the two ends of its FOOT
+(where it meets the floor: its top edge is higher and looks shifted in the
+picture, so it must not be used); for a brick or cinderblock click 2-4 corners
+of its footprint, or of its top face with its height typed in. Positions show
+in cm and inches; drag a click to adjust it, or type a tape-measured position
+(inches) for any end. "Save landmarks" writes landmarks.csv beside the
+calibration (docs/data-formats.md "Landmarks", source user-picked) and, if
+--map was given, puts them into that map.json. Clicks are kept in
+landmarks_picked.json. Which face of a board the robot sees is left to the
+fusion: all faces are written. No page (tests, scripts):
+
+    python tools/calibrate_floor.py <recording folder> --landmarks-from picks.json [--map map.json]
+
+(picks.json in the landmarks_picked.json format, tools/landmark_pick.py.)
+
 Needs numpy and opencv-python. Stop with Ctrl+C.
 """
 import argparse
@@ -961,6 +978,39 @@ class App:
                 self.settings[k] = v
         self.lock = threading.Lock()
         self.folds = 0
+        base = os.path.dirname(os.path.abspath(out_path))
+        self.lm_path = os.path.join(base, "landmarks_picked.json")     # landmark clicks (resume file)
+        self.lm_csv = os.path.join(base, "landmarks.csv")
+        self.lm_map = None                                              # map.json to update (--map given)
+        self.lm_picks = None
+
+    def landmarks_json(self, picks=None):
+        import landmark_pick as lp
+        if picks is not None:
+            self.lm_picks = picks
+            lp.save_picks(self.lm_path, picks)
+        if self.lm_picks is None:
+            self.lm_picks = lp.load_picks(self.lm_path)
+        cal, err = lp.load_calibration(self.out_path)
+        warn = []
+        if cal is not None and list(cal.get("image_size") or self.src.size) != list(self.src.size):
+            warn.append(f"the calibration was made on {cal.get('image_size')} px pictures, this video is "
+                        f"{self.src.size}: it doesn't fit this camera setup")
+        area = self.settings.get("area") or default_area()
+        return dict(ok=True, picks=self.lm_picks, results=lp.compute_all(cal, self.lm_picks, area),
+                    cal_ok=cal is not None, cal_error=err, cal_warnings=warn,
+                    cam_height_cm=((cal or {}).get("camera") or {}).get("height_cm"),
+                    calibration=os.path.abspath(self.out_path), csv=os.path.abspath(self.lm_csv),
+                    map=self.lm_map, picks_file=os.path.abspath(self.lm_path))
+
+    def save_landmarks(self):
+        import landmark_pick as lp
+        if self.lm_picks is None:
+            self.lm_picks = lp.load_picks(self.lm_path)
+        r = lp.save_all(self.lm_picks, self.out_path, self.lm_csv, self.lm_map,
+                        self.settings.get("area") or default_area())
+        r.pop("results", None)
+        return r
 
     def fit(self):
         s = self.settings
@@ -1071,6 +1121,9 @@ def make_handler(app):
                 if u.path == "/api/dets":
                     fr = int(q.get("frame", 0))
                     return self._send(200, dict(dets=(app.dets or {}).get(fr, [])))
+                if u.path == "/api/landmarks":
+                    with app.lock:
+                        return self._send(200, app.landmarks_json())
                 if u.path == "/api/snap":
                     s = snap_to_detection(app.dets or {}, int(q["frame"]), float(q["u"]), float(q["v"]))
                     return self._send(200, dict(snap=s))
@@ -1089,6 +1142,13 @@ def make_handler(app):
                         app.settings.update(body.get("settings") or {})
                         save_points(app.points_path, app.points, app.settings, app.src.desc, app.src.size)
                         return self._send(200, app.fit_json())
+                    if u.path == "/api/landmarks":
+                        return self._send(200, app.landmarks_json(dict(version=1, landmarks=body.get("landmarks", []))))
+                    if u.path == "/api/landmarks/save":
+                        r = app.save_landmarks()
+                        if r.get("ok"):
+                            print("\n".join(["Landmarks:"] + r["messages"]))
+                        return self._send(200, r)
                     if u.path == "/api/save":
                         r = app.save_calibration()
                         if r.get("ok"):
@@ -1148,7 +1208,11 @@ def main(argv=None):
     ap.add_argument("--area", help="x0,y0,x1,y1 cm: the floor the robots use (default: the fleet map's floor "
                                    "bounds, else 0,0,122,122)")
     ap.add_argument("--map", help="fleet map.json for the default area (default: ./map.json, where tools/fleet/app.py "
-                                  "saves it, else tools/fleet/map.json)")
+                                  "saves it, else tools/fleet/map.json). Given here, saving landmarks also "
+                                  "writes them into it (old copy kept as .bak)")
+    ap.add_argument("--landmarks-from", help="no page: landmark clicks (landmarks_picked.json format) -> landmarks.csv "
+                                             "(and --map), using the saved floor calibration (--out)")
+    ap.add_argument("--landmarks-out", help="landmarks.csv to write (default: beside the floor calibration)")
     ap.add_argument("--points", help="points file (default floor_points.json beside the output); share one "
                                      "across sessions to accumulate (only while the camera stays put)")
     ap.add_argument("--out", help="output (default floor_calibration.json in the recording folder)")
@@ -1189,6 +1253,17 @@ def main(argv=None):
     else:
         folder = os.path.dirname(os.path.abspath(args.source))
     out = args.out or os.path.join(folder, "floor_calibration.json")
+    lm_csv = args.landmarks_out or os.path.join(os.path.dirname(os.path.abspath(out)), "landmarks.csv")
+    if args.landmarks_from:
+        import landmark_pick as lp
+        if not os.path.isfile(args.landmarks_from):
+            raise SystemExit(f"--landmarks-from {args.landmarks_from}: no such file")
+        r = lp.save_all(lp.load_picks(args.landmarks_from), out, lm_csv, os.path.abspath(args.map) if args.map else None,
+                        [float(v) for v in args.area.split(",")] if args.area else default_area())
+        if not r["ok"]:
+            sys.exit("Landmarks not saved: " + r["error"])
+        print("\n".join(r["messages"]))
+        return r
     pts_path = args.points or os.path.join(os.path.dirname(os.path.abspath(out)), "floor_points.json")
     settings = dict(height_cm=args.height_cm, nadir_floor_cm=args.nadir, robot_top_cm=args.robot_top_cm,
                     k1=args.k1, area=[float(v) for v in args.area.split(",")] if args.area else None)
@@ -1199,6 +1274,8 @@ def main(argv=None):
     dets = read_detections(args.detections) if (args.detections and not auto) else None
     app = App(src, pts_path, out, settings, spots, events, dets)
     app.folds = args.folds
+    app.lm_csv = lm_csv
+    app.lm_map = os.path.abspath(args.map) if args.map else None
     for k, v in (("robot_top_cm", ROBOT_TOP_CM), ("k1", "auto"), ("area", default_area())):
         if app.settings.get(k) is None:
             app.settings[k] = v
@@ -1340,6 +1417,10 @@ tr.flag td{color:var(--bad)}tr.off td{color:#666;text-decoration:line-through}tr
 .spot{cursor:pointer;padding:2px 4px;border-radius:3px}.spot.sel{background:#3a2f12}.spot.done{color:var(--ok)}
 .tabs button.on{border-color:var(--acc);color:var(--acc)}
 .dim{color:var(--dim)}
+.lm{border:1px solid var(--line);border-radius:4px;padding:5px;margin:6px 0}.lm.sel{border-color:var(--ok)}
+.lm table td,.lm table th{text-align:left}.lm input.tape{width:120px}
+#lmStatus{background:#3a2f12;border:1px solid var(--acc);border-radius:4px;padding:6px;margin:6px 0;font-size:14px}
+details summary{cursor:pointer;color:var(--acc)}.big{font-size:14px}
 </style></head><body>
 <div id="left">
   <div id="entry"><span id="entryLbl"></span> x, y (cm): <input id="entryIn" size="12" placeholder="e.g. 10, 0">
@@ -1354,13 +1435,53 @@ tr.flag td{color:var(--bad)}tr.off td{color:#666;text-decoration:line-through}tr
     <label>zoom <select id="zoom" onchange="layout()"><option>1</option><option selected>1.5</option><option>2</option><option>3</option></select></label>
   </div>
   <div id="wrap"><canvas id="cv"></canvas></div>
-  <div class="dim">Click a point you know. Cross = your click; blue circle = where the fit puts the cm you typed; the line between them is the error.
+  <div class="dim" id="hint">Click a point you know. Cross = your click; blue circle = where the fit puts the cm you typed; the line between them is the error.
   Ctrl+Z undo, Delete removes the selected point, G grid on/off.</div>
 </div>
 <canvas id="loupe" width="180" height="180"></canvas>
 <div id="right">
   <div class="row tabs"><b>Mode:</b> <button id="mFloor" onclick="setMode('floor')">Floor points</button>
-    <button id="mRobot" onclick="setMode('robot')">Robot points</button></div>
+    <button id="mRobot" onclick="setMode('robot')">Robot points</button>
+    <button id="mLm" onclick="setMode('lm')">Landmarks</button></div>
+  <div id="lmBox" style="display:none">
+    <div id="lmCal"></div>
+    <div id="lmStatus"></div>
+    <div class="row"><button class="big" onclick="lmNew('board')">+ New board</button>
+      <button class="big" onclick="lmNew('block')">+ New brick / block</button>
+      <button id="lmFinishBtn" style="display:none" onclick="lmFinish()">Finish this block</button></div>
+    <div class="row">Thickness of new boards <input id="lmT" size="4" value="2"> cm <span class="dim">(tape it once; you can change it per board)</span></div>
+    <details id="lmHelp"><summary>How to click a board, and why (read once)</summary>
+      <div class="row" style="align-items:flex-start">
+      <svg width="150" height="92" viewBox="0 0 150 92" style="flex:none;background:#111;border-radius:4px">
+        <rect x="8" y="4" width="16" height="9" fill="#9aa0a6"/><text x="27" y="12" fill="#9aa0a6" font-size="9">camera</text>
+        <line x1="0" y1="80" x2="150" y2="80" stroke="#777"/>
+        <rect x="70" y="48" width="5" height="32" fill="#c8a165"/>
+        <line x1="16" y1="13" x2="70" y2="48" stroke="#ff5a5a" stroke-dasharray="3,2"/>
+        <line x1="70" y1="48" x2="108" y2="73" stroke="#ff5a5a" stroke-dasharray="3,2"/>
+        <path d="M104 76l8 8M112 76l-8 8" stroke="#ff5a5a" stroke-width="2"/>
+        <circle cx="70" cy="80" r="4" fill="#3ccf6e"/>
+        <text x="30" y="90" fill="#3ccf6e" font-size="9">click here</text>
+        <text x="96" y="70" fill="#ff5a5a" font-size="9">not here</text>
+      </svg>
+      <div>The camera looks down from about <span id="lmCamH">262</span> cm. A board's top edge is above the floor,
+      so in the picture it looks pushed outward, away from the middle of the picture (red). Only the line where the
+      board <b>meets the floor</b> (its foot, green) shows where it really is.<br>
+      So: click the two <b>ends of the foot</b>, on the side of the board you can see. The hidden back side doesn't
+      matter; the tools work out which side the robot sees.</div></div>
+      <div style="margin-top:4px"><b>Brick or cinderblock:</b> click its corners one after another, going around it.
+      3 corners are enough for a box (the 4th is filled in); press Finish after 2 or 3. 2 opposite corners only if it
+      lines up with the taped axes. A tall block hides its far floor corners: then pick "corners of its top", type its
+      height (tape, floor to top) and click the top corners instead.</div>
+      <div style="margin-top:4px"><b>Adjust:</b> drag a circle. <b>Tape:</b> if you measure an end with the tape, type
+      it in the end's tape box (x, y in inches from the taped origin, comma between, e.g. <i>36 3/32, 12 1/2</i>); it
+      then replaces your click. Ctrl+Z undoes, Esc stops clicking.</div>
+    </details>
+    <div class="row"><button class="big" onclick="lmSave()" style="border-color:var(--ok)">Save landmarks</button>
+      <span class="dim">writes landmarks.csv (and the map, if you started with --map)</span></div>
+    <div id="lmSaved" class="dim" style="white-space:pre-wrap"></div>
+    <div id="lmList"></div>
+  </div>
+  <div id="calBox">
   <div id="robotBox" style="display:none">
     <div class="dim">Pick a placement, find a frame where the robot sits there, click the centre of its top.</div>
     <div id="spots" style="max-height:180px;overflow:auto;border:1px solid var(--line);margin-top:4px"></div>
@@ -1376,6 +1497,7 @@ tr.flag td{color:var(--bad)}tr.off td{color:#666;text-decoration:line-through}tr
   <h3>Points</h3>
   <table id="tbl"></table>
   <h3>Details</h3><div id="msg"></div>
+  </div>
 </div>
 <script>
 let S={points:[],settings:{},spots:[],events:[],size:[640,480],n_frames:1},fit=null,hist=[],frame=0,mode='floor',
@@ -1395,6 +1517,10 @@ function readSettings(){const num=v=>v.trim()===''?null:+v;const pair=v=>{const 
   return {height_cm:num(sH.value),nadir_floor_cm:pair(sN.value),robot_top_cm:num(sZ.value)??4,k1:sK.value.trim()||'auto',area:a.length==4?a:null}}
 async function applySettings(){S.settings=readSettings();await push(false)}
 function setMode(m){mode=m;mFloor.classList.toggle('on',m=='floor');mRobot.classList.toggle('on',m=='robot');
+  mLm.classList.toggle('on',m=='lm');lmBox.style.display=m=='lm'?'':'none';calBox.style.display=m=='lm'?'none':'';
+  hint.textContent=m=='lm'?'Landmarks: find a frame where the boards show (slider above), then use the buttons on the right. Drag a circle to adjust it.':
+   'Click a point you know. Cross = your click; blue circle = where the fit puts the cm you typed; the line between them is the error. Ctrl+Z undo, Delete removes the selected point, G grid on/off.';
+  if(m=='lm')lmLoad();
   robotBox.style.display=m=='robot'?'':'none';if(m=='robot'&&!S.spots.length){robotBox.innerHTML='<div class="err">No sheet given: start the tool with --sheet docs/experiments/E00-measurement-check/data/measurements.csv</div>'}
   drawSpots();}
 function drawSpots(){const box=document.getElementById('spots');if(!box)return;
@@ -1410,6 +1536,7 @@ function draw(){ctx.setTransform(1,0,0,1,0,0);ctx.imageSmoothingEnabled=Z<2;ctx.
   if(fit&&showGrid.checked){for(const l of fit.grid){ctx.beginPath();l.pts.forEach((p,i)=>{const[x,y]=P(p[0],p[1]);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});
     ctx.strokeStyle=l.axis?'rgba(255,60,60,.8)':'rgba(255,190,0,.45)';ctx.lineWidth=1;ctx.stroke()}}
   for(const d of dets){const[x,y]=P(d[0],d[1]);ctx.strokeStyle='#c0f';ctx.beginPath();ctx.arc(x,y,7*Z,0,7);ctx.stroke()}
+  if(mode=='lm'){drawLm();return}
   const rows=fit?Object.fromEntries(fit.points.map(r=>[r.id,r])):{};
   for(const p of S.points){const r=rows[p.id];const[x,y]=P(p.u,p.v);
     const col=p.enabled===false?'#777':(r&&r.flagged?'#ff5a5a':'#3ccf6e');
@@ -1425,6 +1552,7 @@ cv.addEventListener('mousemove',e=>{const[u,v]=evPx(e);lp.style.display='block';
   lctx.fillStyle='#ffb020';lctx.fillText(u.toFixed(1)+', '+v.toFixed(1),4,176)});
 cv.addEventListener('mouseleave',()=>lp.style.display='none');
 cv.addEventListener('click',async e=>{const[u,v]=evPx(e);const uv={u:+u.toFixed(2),v:+v.toFixed(2)};
+  if(mode=='lm'){if(dragged){dragged=false;return}lmClick(uv);return}
   if(mode=='floor'){pending=uv;entry.style.display='block';entryLbl.textContent=`Point at pixel (${uv.u.toFixed(1)}, ${uv.v.toFixed(1)}):`;
     entryIn.value=suggest();entryIn.focus();entryIn.select();draw();return}
   const s=S.spots.find(s=>s.key==selSpot);if(!s){alert('Pick a placement in the list first.');return}
@@ -1460,9 +1588,87 @@ function togglePt(id){change(S.points.map(p=>p.id==id?Object.assign({},p,{enable
 async function undo(){if(!hist.length)return;S.points=JSON.parse(hist.pop());await push()}
 async function save(){const r=await j('/api/save',{});saved.innerHTML=r.ok?`Saved ${esc(r.path)}<br>and ${esc(r.check)}`:`<span class="err">${esc(r.error)}</span>`}
 document.addEventListener('keydown',e=>{if(e.target.tagName=='INPUT')return;
-  if((e.ctrlKey||e.metaKey)&&e.key=='z'){e.preventDefault();undo()}
-  else if(e.key=='Delete'&&sel!=null)delPt(sel);else if(e.key=='g'||e.key=='G'){showGrid.checked=!showGrid.checked;draw()}
+  if((e.ctrlKey||e.metaKey)&&e.key=='z'){e.preventDefault();mode=='lm'?lmUndo():undo()}
+  else if(mode=='lm'&&e.key=='Escape'){lmActive=null;lmRender()}
+  else if(e.key=='Delete'&&sel!=null&&mode!='lm')delPt(sel);else if(e.key=='g'||e.key=='G'){showGrid.checked=!showGrid.checked;draw()}
   else if(e.key=='ArrowRight')step(e.shiftKey?30:1);else if(e.key=='ArrowLeft')step(e.shiftKey?-30:-1)});
+
+// ---------------------------------------------------------------- landmarks
+let LM={picks:{landmarks:[]},results:[],cal_ok:false},lmActive=null,lmSel=null,lmHist=[],drag=null,dragged=false,lmSeq=0;
+function L(){return LM.picks.landmarks}
+async function lmLoad(){const r=await j('/api/landmarks');LM=r;lmRender()}
+async function lmPush(){const my=++lmSeq;const r=await j('/api/landmarks',{landmarks:L()});if(my!==lmSeq)return;LM=r;lmRender()}
+function lmChange(fn){lmHist.push(JSON.stringify(L()));fn();lmRender();return lmPush()}
+async function lmUndo(){if(!lmHist.length)return;LM.picks.landmarks=JSON.parse(lmHist.pop());lmActive=null;lmRender();await lmPush()}
+function defName(kind){const used=new Set(L().map(l=>String(l.name).toLowerCase()));
+  if(kind=='board'){for(const c of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ')if(!used.has(c.toLowerCase()))return c}
+  for(let i=1;;i++){const n=(kind=='board'?'board ':'block ')+i;if(!used.has(n))return n}}
+function lmNew(kind){if(lmActive!=null&&L()[lmActive]&&!L()[lmActive].clicks.length)L().splice(lmActive,1);
+  const t=parseFloat(lmT.value);
+  lmChange(()=>{L().push({name:defName(kind),kind:kind,clicks:[],fix:[],frame:frame,thickness_cm:kind=='board'?(t>0?t:2):null,
+    height_cm:null,clicked_at:'floor'})});lmActive=lmSel=L().length-1;lmRender()}
+function lmClick(uv){
+  if(lmActive==null||!L()[lmActive]){flash('First press "+ New board" or "+ New brick / block" (on the right), then click.');return}
+  const i=lmActive,lm=L()[i];
+  lmChange(()=>{lm.clicks.push([uv.u,uv.v]);lm.fix.push(null);lm.frame=frame;
+    if((lm.kind=='board'&&lm.clicks.length>=2)||lm.clicks.length>=4)lmActive=null});}
+function lmFinish(){const lm=L()[lmActive];if(lm&&lm.clicks.length>=2){lmActive=null;lmRender()}}
+function lmRepick(i){lmChange(()=>{L()[i].clicks=[];L()[i].fix=[]});lmActive=lmSel=i;lmRender()}
+function lmDel(i){if(!confirm('Delete "'+L()[i].name+'"?'))return;lmChange(()=>{L().splice(i,1)});
+  if(lmActive===i)lmActive=null;else if(lmActive>i)lmActive--;lmSel=null;lmRender()}
+function lmSet(i,k,v){lmChange(()=>{const lm=L()[i];
+  if(k=='name')lm.name=v.trim();else if(k=='clicked_at')lm.clicked_at=v;
+  else{const x=v.trim()===''?null:parseFloat(v);lm[k]=(x===null||isFinite(x))?x:lm[k]}})}
+function lmFix(i,k,v){lmChange(()=>{const lm=L()[i];while(lm.fix.length<lm.clicks.length)lm.fix.push(null);lm.fix[k]=v.trim()||null})}
+function lmSelect(i){lmSel=i;const lm=L()[i];lmRender();if(lm&&lm.frame!=null&&lm.frame!=frame)goFrame(lm.frame)}
+let flashT=null;function flash(t){lmStatus.innerHTML='<span class="err">'+esc(t)+'</span>';clearTimeout(flashT);flashT=setTimeout(lmRender,3500)}
+function f1(v){return v==null?'-':(+v).toFixed(1)}
+function lmRender(){const act=document.activeElement,aid=act&&act.id,pos=act&&act.selectionStart;
+  lmCal.innerHTML=LM.cal_ok?(LM.cal_warnings||[]).map(w=>`<div class="warn">&#9888; ${esc(w)}</div>`).join(''):
+    `<div class="err big">${esc(LM.cal_error||'No floor calibration.')}</div>`;
+  if(LM.cam_height_cm)lmCamH.textContent=Math.round(LM.cam_height_cm);
+  const a=lmActive!=null?L()[lmActive]:null;let st;
+  if(!a)st=L().length?'Done clicking. Check the positions below, then press <b>Save landmarks</b>. To add another: <b>+ New board</b> or <b>+ New brick / block</b>.':
+    'Move the slider to a frame where the boards show, then press <b>+ New board</b> (or <b>+ New brick / block</b>).';
+  else if(a.kind=='board')st=a.clicks.length==0?`Board <b>${esc(a.name)}</b>: click one <b>end of its foot</b> (where the board meets the floor, not its top edge).`:
+    `Board <b>${esc(a.name)}</b>: now click the <b>other end</b> of its foot.`;
+  else st=`Block <b>${esc(a.name)}</b>: click corner ${a.clicks.length+1} of its ${a.clicked_at=='top'?'<b>top</b>':'footprint <b>on the floor</b>'}, going around it.`+
+    (a.clicks.length>=2?' Or press <b>Finish this block</b>'+(a.clicks.length==2?' (2 opposite corners: only if it lines up with the taped axes).':' (the 4th corner is filled in).'):'');
+  lmStatus.innerHTML=st;lmFinishBtn.style.display=a&&a.kind=='block'&&a.clicks.length>=2?'':'none';
+  lmList.innerHTML=L().map((lm,i)=>{const r=LM.results[i]||{ends:[],errors:[],warnings:[]};const board=lm.kind=='board';
+    const ends=lm.clicks.map((c,k)=>{const e=r.ends[k];return `<tr><td>${board?'end':'corner'} ${k+1}</td>
+      <td>${e?f1(e.x)+', '+f1(e.y):'-'}</td><td>${e?esc(e.x_in)+', '+esc(e.y_in):'-'}</td>
+      <td><input class="tape" id="lm-f-${i}-${k}" value="${esc(lm.fix[k]||'')}" placeholder="tape, inches: x, y" title="${board?'Tape the same spot you clicked: this end of the foot, on the side the camera sees.':'Tape this corner where it meets the floor.'} x, y from the taped origin, comma between, e.g. 36 3/32, 12 1/2" onchange="lmFix(${i},${k},this.value)"></td></tr>`+
+      (e&&e.tape&&!e.tape_error?`<tr><td></td><td colspan="3" class="dim">using the tape; your click said ${f1(e.click_x)}, ${f1(e.click_y)} cm (${esc(e.click_x_in)}, ${esc(e.click_y_in)}), ${f1(e.diff_cm)} cm away</td></tr>`:'')}).join('');
+    const size=r.length_cm!=null?`Length ${f1(r.length_cm)} cm (${esc(r.length_in)})`:(r.sides_cm?`Sides ${r.sides_cm.map(f1).join(', ')} cm (${r.sides_in.map(esc).join(', ')})`:'');
+    return `<div class="lm ${i===lmSel?'sel':''}" onclick="if(event.target.tagName!='INPUT'&&event.target.tagName!='SELECT'&&event.target.tagName!='BUTTON')lmSelect(${i})">
+     <div class="row"><b>${board?'Board':'Block'}</b> name <input id="lm-n-${i}" size="10" value="${esc(lm.name)}" onchange="lmSet(${i},'name',this.value)">
+      <span class="dim">frame ${lm.frame??'-'}</span> <button onclick="lmRepick(${i})">Click again</button> <button onclick="lmDel(${i})">Delete</button></div>
+     <div class="row">${board?`thickness <input id="lm-t-${i}" size="4" value="${lm.thickness_cm??''}" onchange="lmSet(${i},'thickness_cm',this.value)"> cm &nbsp;`:
+       `I clicked the <select id="lm-a-${i}" onchange="lmSet(${i},'clicked_at',this.value)"><option value="floor" ${lm.clicked_at!='top'?'selected':''}>corners on the floor</option><option value="top" ${lm.clicked_at=='top'?'selected':''}>corners of its top</option></select>`}
+      height <input id="lm-h-${i}" size="4" value="${lm.height_cm??''}" onchange="lmSet(${i},'height_cm',this.value)"> cm <span class="dim">${board||lm.clicked_at!='top'?'(optional: draws its top, to check)':'(needed)'}</span></div>
+     ${lm.clicks.length?`<table><tr><th></th><th>floor x, y (cm)</th><th>inches</th><th>tape (inches)</th></tr>${ends}</table>`:''}
+     <div class="dim">${size}</div>
+     ${r.errors.filter(x=>x!='no floor calibration').map(x=>`<div class="err">${esc(x)}</div>`).join('')}${r.warnings.map(x=>`<div class="warn">&#9888; ${esc(x)}</div>`).join('')}</div>`}).join('');
+  if(aid){const el=document.getElementById(aid);if(el&&el!==act){el.focus();try{el.setSelectionRange(pos,pos)}catch(_){}}}
+  draw()}
+function poly(pts,col,w,dash){ctx.strokeStyle=col;ctx.lineWidth=w;ctx.setLineDash(dash);ctx.beginPath();
+  pts.forEach((p,i)=>{const[x,y]=P(p[0],p[1]);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.closePath();ctx.stroke();ctx.setLineDash([])}
+function drawLm(){L().forEach((lm,i)=>{const r=LM.results[i];const hi=i===lmSel||i===lmActive;
+  if(r&&r.outline)poly(r.outline,hi?'#3ccf6e':'rgba(60,207,110,.65)',hi?2:1.2,[]);
+  if(r&&r.top_outline)poly(r.top_outline,'rgba(255,176,32,.85)',1,[4,3]);
+  if(lm.kind=='board'&&lm.clicks.length==2){const[a,b]=lm.clicks.map(c=>P(c[0],c[1]));ctx.strokeStyle='#ffe040';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...b);ctx.stroke()}
+  lm.clicks.forEach((c,k)=>{const[x,y]=P(c[0],c[1]);ctx.strokeStyle=i===lmActive?'#ffb020':(hi?'#fff':'#ddd');ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(x,y,5,0,7);ctx.stroke();ctx.fillStyle='#fff';ctx.font='11px sans-serif';ctx.fillText((k==0?lm.name+' ':'')+(k+1),x+6,y-6);
+    const e=r&&r.ends[k];if(e&&e.tape_px){const[a,b]=P(e.tape_px[0],e.tape_px[1]);ctx.strokeStyle='#4aa3ff';ctx.setLineDash([3,2]);ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(a,b);ctx.stroke();ctx.setLineDash([]);
+      ctx.beginPath();ctx.moveTo(a,b-5);ctx.lineTo(a+5,b);ctx.lineTo(a,b+5);ctx.lineTo(a-5,b);ctx.closePath();ctx.stroke()}})})}
+cv.addEventListener('mousedown',e=>{if(mode!='lm')return;const r=cv.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;let best=null;
+  L().forEach((lm,i)=>lm.clicks.forEach((c,k)=>{const[x,y]=P(c[0],c[1]);const d=Math.hypot(x-mx,y-my);if(d<9&&(!best||d<best.d))best={i,k,d}}));
+  if(best){drag={i:best.i,k:best.k,moved:false,before:JSON.stringify(L())};e.preventDefault()}});
+cv.addEventListener('mousemove',e=>{if(!drag)return;const[u,v]=evPx(e);L()[drag.i].clicks[drag.k]=[+u.toFixed(2),+v.toFixed(2)];drag.moved=true;draw()});
+window.addEventListener('mouseup',()=>{if(!drag)return;const d=drag;drag=null;if(d.moved){dragged=true;lmHist.push(d.before);lmSel=d.i;lmPush();setTimeout(()=>{dragged=false},50)}});
+async function lmSave(){lmSaved.textContent='saving...';await lmPush();const r=await j('/api/landmarks/save',{});
+  lmSaved.innerHTML=r.ok?esc(r.messages.join('\n')):`<span class="err">${esc(r.error)}</span>`}
 init();
 </script></body></html>
 """

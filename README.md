@@ -47,6 +47,7 @@ tools/
   check_session.py   after a session: sensor log, clocks and video line up?
   preflight.py       before a session: packages, detector weights, robot firmware and battery, Pi recorder
   heading_check.py   tape start headings vs the camera's start-nudge headings (T0/T1 heading precision)
+  accuracy_checks.py every data-derived accuracy check on T0/T1 in one table; measured camera noise for the fusion
   run_sheet.py       guided experiment runs: commands, run ids, tape entry with checks
   commtest.py        WiFi delay, jitter and delivery per robot (experiment E3)
   pi/camrec.py       overhead camera recorder for the Raspberry Pi
