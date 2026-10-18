@@ -67,13 +67,16 @@ EXPERIMENTS["E0B"] = ("E00b-nudge-check", ["nudge2", "nudge5"],
 #           10 s still: can the line sensors see the edge?
 #   edge_tape  the line sensors on the painter's tape along the x axis: tape
 #           must not look like the edge
+#   edge_n15 / n10 / n5  the robot's front face 15, 10, 5 cm from the open
+#           edge: does the distance sensor's bottom zone (dbot) see the floor
+#           drop away before the line sensors reach it?
 # Every row sets every setting it changes; switch the robots off and on
 # after E0c so all settings go back to normal.
 _STILL = "set start_nudge_cm 0 / set straight_rpm 1 / set straight_cm 0 / "
 TOF_BOARD_X = 110.0
 TOF_D = (10, 20, 40, 60, 80, 100)
 EXPERIMENTS["E0C"] = ("E00c-rig-measurements", ["warmup", "still60", "lift"] + [f"tof{d}" for d in TOF_D]
-                      + ["edge_in", "edge_over", "edge_tape"],
+                      + ["edge_n15", "edge_n10", "edge_n5", "edge_in", "edge_over", "edge_tape"],
                       lambda lv: _STILL + {
                           "warmup": "set settle_ms 600000 / set safe_front_cm 7 / run straight",
                           "still60": "set settle_ms 60000 / set safe_front_cm 7 / run straight",
@@ -91,7 +94,8 @@ START.update({f"tof{d}": (round(TOF_BOARD_X - d - 4.76, 2), 61.0, 0.0) for d in 
 # Line sensors sit 3.5 cm ahead of the wheel axle (grid_center_cm). Far x edge at 122 cm.
 START.update({"edge_in": (122.0 - 3.5 - 3.5, 61.0, 0.0),     # sensors 3.5 cm inside the edge
               "edge_over": (122.0 + 1.0 - 3.5, 61.0, 0.0),   # sensors 1 cm past it; wheels 2.5 cm inside
-              "edge_tape": (61.0, 3.5 + 1.0, -90.0)})        # facing -y, sensors on the x-axis tape about 1 cm in
+              "edge_tape": (61.0, 3.5 + 1.0, -90.0)})
+START.update({f"edge_n{d}": (round(122.0 - d - 4.76, 2), 61.0, 0.0) for d in (15, 10, 5)})        # facing -y, sensors on the x-axis tape about 1 cm in
 
 # E1b: the same runs as E1 at low battery, for a paired comparison with the
 # same robot's E1 runs at full battery.
