@@ -114,7 +114,9 @@ DEFAULT = dict(
     id_exclude_p=0.05,        # robots below this probability are not candidates under the normal rules
     det_blink_link_cm=5.0,    # a detector sighting this close to a blink light shares its name probabilities
     name_carry_s=5.0,         # ...and its track keeps them, fading with this time constant (0.6 s -> still 0.9)
-    clutter_cm2=19200.0,      # position likelihood of "not this robot" = 1 / this area (the camera's view, cm^2)
+    clutter_cm2="auto",       # position likelihood of "not this robot" = 1 / this area (the camera's view, cm^2);
+                              # auto: the floor area the calibration file's image covers (replay.py), else 19200
+                              # (the simulator's 160 x 120 cm view)
     heading_from_motion=False,
     hfm_window_s=1.0,         # direction of travel over this long
     hfm_wheel_min_cms=3.0,    # both wheels at least this fast, forward
@@ -122,10 +124,18 @@ DEFAULT = dict(
     hfm_track_min_cms=3.0,    # and the camera fixes moved at least this fast
     hfm_floor_deg=1.0,        # added to the heading noise (rolling straight is assumed: no side slip)
     hfm_gate_chi2=16.0,       # drop a heading fix this far (squared sigmas) from the estimate
-    wheel_radius_cm=1.7,      # turns RAW wl_rpm / wr_rpm into cm/s (nominal; to be measured)
+    wheel_radius_cm=1.7,      # turns RAW wl_rpm / wr_rpm into cm/s: a number, or per robot {"Left": 1.69, ...,
+                              # "default": 1.7} once measured. With wheel_scale on it also sets each robot's
+                              # starting wheel scale: lib_wheel_radius_cm / this (the robot's own v_cms uses 1.7)
+    lib_wheel_radius_cm=1.7,  # the radius the Alvik library itself converts wheel speed with (RAW v_cms)
     calib_heading=False,      # opt in: calibration_results.csv start-nudge headings become heading fixes
                               # (off by default so the older setups stay comparable when the file is given)
-    calib_heading_sigma_deg=0.8,  # calib.py vs simulator truth: mean 0.45-0.62 deg, max 1.33 deg
+    calib_heading_sigma_deg="auto",  # noise of each start-nudge heading; auto: from how far the nudge moved on
+                              # camera (calibration_results.csv moved_px): atan(calib_heading_px_sd / moved_px),
+                              # so a short roll seen with few pixels is trusted less. A number (deg) fixes it.
+    calib_heading_px_sd=0.15, # how precisely calib.py finds the nudge's shift, px (chosen: simulator 0.06-0.1 px at
+                              # 8 px; replay.py --heading-check sets it from a measured heading_check.csv)
+    calib_heading_fallback_deg=2.0,  # auto, but moved_px missing
     # --- landmark ranging (sensor "tof"; needs a map of landmark faces: replay.py --map). Not used otherwise.
     tof_forward_cm=4.75,      # sensor ahead of the tracked point (robot centre): the front face ...
     tof_recess_cm=0.25,       # ... minus how far the sensor sits behind it
@@ -144,6 +154,29 @@ DEFAULT = dict(
     tof_max_sigma_cm=10.0,    # don't use landmarks while the position is this unsure (picked up, lost)
     tof_new_frames_only=True, # the sensor makes ~15 frames/s; RAW repeats a frame until the next: use each once
     tof_delay_s=0.0,          # a frame describes the pose this long before its RAW row
+    # landmark ranging, handling errors that many readings share (all off by default: as before)
+    tof_use_cal=True,         # use the distance-sensor calibration given to replay.py (--tof-cal), if any: zone
+                              # directions, range bias / scale, zone width, frame delay, noise, refined landmarks
+    tof_consider=False,       # Schmidt "consider" states: board position (each face), the sensor's range bias and
+                              # mount turn are shared by every reading; carried as uncertainty, never estimated
+    tof_face_sigma_cm=1.0,    # how far a face may be from its map position (tape / clicks; a calibration gives its own)
+    tof_bias_sigma_cm=0.3,    # the sensor's range bias left over (after calibration)
+    tof_yaw_sigma_deg=1.0,    # how far the sensor may be turned on its mount (after calibration)
+    tof_joint=False,          # the zones of one frame in one update, their errors correlated by tof_frame_corr
+    tof_frame_corr=0.0,       # correlation of the zone errors within one frame (a calibration measures it)
+    tof_adapt=False,          # down-weight a zone whose readings of a face keep disagreeing the same way
+    tof_adapt_n=20,           # ... averaged over about this many readings
+    tof_every=1,              # use every n-th sensor frame (decimation; 1 = all)
+    tof_lag_inflate=False,    # widen the noise for frame-to-frame correlation: x sqrt((1 + r) / (1 - r)),
+                              # r = the calibration's lag-1 correlation of the zone errors
+    # --- wheel size (ekf.py states k, kw): learned from the position sensors, carried from run to run
+    wheel_scale=False,        # estimate the wheel distance scale (wheels read k x the true distance)
+    wheel_scale_sigma=0.03,   # prior: wheel sizes / slip within about 3% of nominal
+    wheel_scale_walk=0.0005,  # how fast it may drift, per sqrt(s) (0.5% over 100 s)
+    turn_scale=False,         # estimate the wheel turn-rate scale too (wheel track, scrub in turns)
+    turn_scale_sigma=0.05,
+    turn_scale_walk=0.001,
+    scale_carry=True,         # a robot's next run starts from what its previous run learned (online: past only)
 )
 
 
@@ -224,7 +257,7 @@ class Tracked:
     """One robot's filter plus its event history, so late readings can be
     slotted in at the right moment."""
 
-    def __init__(self, run, cfg, gyro_factor):
+    def __init__(self, run, cfg, gyro_factor, carry=None):
         self.run = run
         self.cfg = cfg
         self.gf = gyro_factor
@@ -235,11 +268,12 @@ class Tracked:
         self.was_lifted = False
         self.events = []      # (t, order, kind, data), applied in this order
         self.snaps = []       # filter snapshot taken BEFORE each event
+        scale = scale_prior(cfg, carry, run.robot)
         if cfg["start_from"] == "tape" and run.tape_start:
             x, y, h = run.tape_start
-            self.ekf = EKF(x, y, h * D2R, self.t0, self.noise)
+            self.ekf = EKF(x, y, h * D2R, self.t0, self.noise, scale=scale)
         else:
-            self.ekf = EKF(0.0, 0.0, 0.0, self.t0, self.noise)
+            self.ekf = EKF(0.0, 0.0, 0.0, self.t0, self.noise, scale=scale)
             self.ekf.lost()
             self.lost_state = True
         self.cam_used = 0
@@ -258,6 +292,15 @@ class Tracked:
         self.led = (0.0, 0.0)
         self._odo_v, self._odo_lifted = 0.0, False
         self.faces = None     # landmark faces (landmarks.Face) for landmark ranging
+        self.scale0 = scale   # the wheel-size prior this run started from (graph.py uses it too)
+        self.tcfg = cfg       # settings for landmark ranging (cfg with this run's calibration put in)
+        self.tof_cal = None
+        self.zone_off, self.rbias, self.rscale = [0.0] * len(lm.ZONE_COLS), 0.0, 1.0
+        self.cons_map = {}    # consider state -> index in the filter state
+        self.cons_order = []  # (key, sigma) in the order they were added
+        self.adapt = {}       # (zone, face) -> running mean of the residual (cm)
+        self.tof_n = 0
+        self.face_sig = {}    # face name -> how sure its position is (cm), from the calibration
 
     def off(self, sensor, t):
         return any(a <= t - self.t0 <= b for a, b in self.cfg["sensor_off"].get(sensor, []))
@@ -296,11 +339,50 @@ class Tracked:
         elif kind == "reset":
             k.reset_position(d["x"], d["y"], d.get("sigma", 1.0))
 
+    def set_tof_cal(self, cal):
+        """Put a distance-sensor calibration (landmarks.load_cal) into this run's settings."""
+        if not cal or not self.cfg["tof_use_cal"]:
+            return
+        self.tof_cal = cal
+        c = dict(self.cfg)
+        for k_cal, k_cfg in (("zone_width_deg", "tof_zone_width_deg"), ("delay_s", "tof_delay_s"),
+                             ("noise_cm", "tof_noise_cm"), ("noise_rel", "tof_noise_rel"),
+                             ("frame_corr", "tof_frame_corr"), ("face_sigma_cm", "tof_face_sigma_cm"),
+                             ("bias_sigma_cm", "tof_bias_sigma_cm"), ("yaw_sigma_deg", "tof_yaw_sigma_deg")):
+            if cal.get(k_cal) is not None:
+                c[k_cfg] = cal[k_cal]
+        self.tcfg = c
+        self.zone_off, self.rbias, self.rscale = lm.cal_robot(cal, self.run.robot)
+        rb = (cal.get("robots") or {}).get(self.run.robot) or {}
+        if rb.get("bias_sigma_cm") is not None:
+            c["tof_bias_sigma_cm"] = rb["bias_sigma_cm"]
+        if rb.get("yaw_sigma_deg") is not None:
+            c["tof_yaw_sigma_deg"] = rb["yaw_sigma_deg"]
+        if cal.get("faces"):
+            self.faces = cal["faces"]
+            self.face_sig = {r["name"]: r["sigma_cm"] for r in cal.get("landmarks", []) if r.get("sigma_cm")}
+
+    def _cons_index(self, key, sigma):
+        """Filter index of a consider state, added on first use (the same order on every replay)."""
+        k = self.ekf
+        if key not in self.cons_map:
+            self.cons_map[key] = len(self.cons_order)
+            self.cons_order.append((key, sigma))
+        j = self.cons_map[key]
+        base = k.N - len(k.cons)
+        while len(k.cons) <= j:
+            k.add_consider([self.cons_order[len(k.cons)][1]])
+        return base + j
+
     def _tof(self, t, zones):
         """Landmark ranging, one sensor frame: [(outcome, used-info or None)] per zone."""
         cfg, k = self.cfg, self.ekf
         if self.off("tof", t) or not self.faces:
             return []
+        c = self.tcfg
+        if (self.tof_cal is not None or c["tof_consider"] or c["tof_joint"] or c["tof_adapt"] or c["tof_every"] > 1
+                or c["tof_lag_inflate"]):
+            return self._tof2(t, zones)
         unknown = math.sqrt(max(k.P[0, 0], k.P[1, 1])) > cfg["tof_max_sigma_cm"]
         out = []
         for ang, z in zip(cfg["tof_zone_deg"], zones):
@@ -322,6 +404,70 @@ class Tracked:
             f = self.faces[info["face"]]
             out.append(("used", dict(z=z, sigma=sigma, ang=info["ang"], a=(f.a[0], f.a[1]), n=(f.n[0], f.n[1]),
                                      resid=z - info["h"], face=f.name)))
+        return out
+
+    def _tof2(self, t, zones):
+        """_tof with the calibration, consider states, joint update, adaptive weighting, decimation."""
+        cfg, k = self.tcfg, self.ekf
+        self.tof_n += 1
+        if cfg["tof_every"] > 1 and (self.tof_n - 1) % cfg["tof_every"]:
+            return []
+        unknown = math.sqrt(max(k.P[0, 0], k.P[1, 1])) > cfg["tof_max_sigma_cm"]
+        fwd = cfg["tof_forward_cm"] - cfg["tof_recess_cm"]
+        lag = 1.0
+        if cfg["tof_lag_inflate"] and self.tof_cal and self.tof_cal.get("lag1_corr"):
+            r = min(max(float(self.tof_cal["lag1_corr"]), 0.0), 0.9)
+            lag = math.sqrt((1 + r) / (1 - r))
+        out, joint = [], []
+        for zi, (ang0, z) in enumerate(zip(cfg["tof_zone_deg"], zones)):
+            if z is None or not cfg["tof_min_cm"] <= z <= cfg["tof_max_cm"]:
+                out.append(("bad_reading", None))
+                continue
+            if unknown:
+                out.append(("pose_unknown", None))
+                continue
+            ang = (ang0 + self.zone_off[zi]) * D2R
+            why, info = lm.predict_zone(k.s, k.P, ang, self.faces, cfg)
+            if why:
+                out.append((why, None))
+                continue
+            f = self.faces[info["face"]]
+            h = self.rscale * info["h"] + self.rbias
+            row = list(self.rscale * info["J"])
+            if cfg["tof_consider"]:
+                pr = lm.range_partials(k.s, info["ang"], fwd, f.a, f.n)
+                idx = {("face", f.name): self.rscale * pr[1], ("bias",): 1.0, ("yaw",): self.rscale * pr[0]}
+                sig = {("face", f.name): self.face_sig.get(f.name, cfg["tof_face_sigma_cm"]), ("bias",): cfg["tof_bias_sigma_cm"],
+                       ("yaw",): cfg["tof_yaw_sigma_deg"] * D2R}
+                full = np.zeros(k.N + 3)
+                full[:3] = row
+                for key, v in idx.items():
+                    full[self._cons_index(key, sig[key])] = v
+                row = full[:k.N]
+            sigma = lm.zone_sigma(info["h"], cfg, info["tan_inc"]) * lag
+            akey = (zi, f.name)
+            if cfg["tof_adapt"]:
+                sigma = math.sqrt(sigma * sigma + self.adapt.get(akey, 0.0) ** 2)
+            y = z - h
+            if y * y / k.innov_var(row, sigma) > cfg["tof_gate_chi2"]:
+                out.append(("gated", None))
+                continue
+            if cfg["tof_adapt"]:
+                a = 1.0 / cfg["tof_adapt_n"]
+                self.adapt[akey] = (1 - a) * self.adapt.get(akey, 0.0) + a * y
+            if cfg["tof_joint"]:
+                joint.append((z, h, row, sigma))
+            else:
+                k.landmark_range(z, h, row, sigma)
+            out.append(("used", dict(z=z, sigma=sigma, ang=info["ang"], a=(f.a[0], f.a[1]), n=(f.n[0], f.n[1]),
+                                     resid=y, face=f.name, scale=self.rscale, bias=self.rbias)))
+        if joint:
+            n = len(joint)
+            rho = cfg["tof_frame_corr"]
+            sg = np.array([j[3] for j in joint])
+            R = np.outer(sg, sg) * rho
+            np.fill_diagonal(R, sg * sg)
+            k.landmark_ranges([j[0] for j in joint], [j[1] for j in joint], [j[2] for j in joint], R)
         return out
 
     def tof_counts(self):
@@ -472,6 +618,54 @@ class Tracked:
                 s, P = snap[0], snap[1]
                 out.append((ev[0], s[0], s[1], s[2], math.sqrt(P[0, 0]), math.sqrt(P[1, 1])))
         return out
+
+
+def radius_of(cfg, robot):
+    """Wheel radius (cm) of this robot: wheel_radius_cm is a number or {robot: cm, "default": cm}."""
+    r = cfg["wheel_radius_cm"]
+    if isinstance(r, dict):
+        return float(r.get(robot, r.get("default", cfg["lib_wheel_radius_cm"])))
+    return float(r)
+
+
+def nudge_sigma(cfg, moved_px):
+    """Noise (rad) of a start-nudge heading fix (calib_heading_sigma_deg, see DEFAULT)."""
+    v = cfg["calib_heading_sigma_deg"]
+    if v != "auto":
+        return float(v) * D2R
+    if moved_px is None or not moved_px > 0:
+        return cfg["calib_heading_fallback_deg"] * D2R
+    return math.atan2(cfg["calib_heading_px_sd"], moved_px)
+
+
+def clutter_area(cfg):
+    v = cfg["clutter_cm2"]
+    return 19200.0 if v == "auto" else float(v)
+
+
+def scale_prior(cfg, carry=None, robot=None):
+    """Wheel-size states for a new run (ekf.EKF scale=), or None if both are off. carry: the same
+    robot's previous run (k, var k, kw, var kw, t_end, t_start of this run): start from what it learned,
+    its uncertainty grown by the drift over the gap, never above the prior."""
+    if not (cfg["wheel_scale"] or cfg["turn_scale"]):
+        return None
+    # the turn scale is learned against the gyro: without the gyro (or the wheel turn rate) it stays at 1,
+    # since the wheels' turn reading would otherwise be the only thing moving it (no drift)
+    turn = cfg["turn_scale"] and "gyro" in cfg["sensors"] and "wheel_w" in cfg["sensors"]
+    sk = cfg["wheel_scale_sigma"] if cfg["wheel_scale"] else 0.0
+    skw = cfg["turn_scale_sigma"] if turn else 0.0
+    qk = cfg["wheel_scale_walk"] if cfg["wheel_scale"] else 0.0
+    qkw = cfg["turn_scale_walk"] if turn else 0.0
+    k0 = cfg["lib_wheel_radius_cm"] / radius_of(cfg, robot) if sk else 1.0
+    out = dict(k=k0, sk=sk, kw=1.0, skw=skw, qk=qk, qkw=qkw)
+    if carry and cfg["scale_carry"]:
+        k, vk, kw, vkw, t_end, t_now = carry
+        gap = max(0.0, t_now - t_end)
+        if sk:
+            out["k"], out["sk"] = k, math.sqrt(min(vk + qk * qk * gap, sk * sk))
+        if skw:
+            out["kw"], out["skw"] = kw, math.sqrt(min(vkw + qkw * qkw * gap, skw * skw))
+    return out
 
 
 def rot(off, th):
@@ -686,7 +880,7 @@ def zone_reading(v):
 
 
 def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, led_offsets=None, signs=None,
-               landmarks=None):
+               landmarks=None, tof_cal=None):
     """Process all runs (and camera sightings) together, in the order the
     information would have reached the robots. Returns robot run_id -> Tracked,
     and the unknown-object tracker.
@@ -697,14 +891,15 @@ def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, 
     signs: (wheel_turn_signs, wheel_fwd_signs) worked out from a larger set of
     runs, so a subset of runs is processed exactly as within the whole set
     (replay.py with one calibration per run); default: from `runs`.
-    landmarks: list of landmarks.Face (used if "tof" is in the sensors)."""
+    landmarks: list of landmarks.Face (used if "tof" is in the sensors).
+    tof_cal: distance-sensor calibration (landmarks.load_cal): one dict for every run, or
+    {"per_run": {run_id: cal}, "default": cal or None} (leave-one-run-out calibrations)."""
     rng = random.Random(cfg["seed"])
     if cfg["vmax"] == "auto":
         cfg = dict(cfg, vmax=fastest_speed(runs))
     wsign = signs[0] if signs else wheel_turn_signs(runs)
     gyro_f = gyro_f or gyro_factors(runs, wsign)
     fsign = signs[1] if signs else wheel_fwd_signs(runs)
-    rpm2cms = 2 * math.pi * cfg["wheel_radius_cm"] / 60
     use_cam = "camera" in cfg["sensors"] and detections
     use_blink = bool("blink" in cfg["sensors"] and blink)
     ident = use_blink or cfg["motion_identity"]
@@ -719,6 +914,7 @@ def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, 
         gf = gyro_f.get(run.robot, (D2R, ""))[0]
         ws = wsign.get(run.robot, 1.0)
         fs = fsign.get(run.robot, 1.0)
+        rpm2cms = 2 * math.pi * radius_of(cfg, run.robot) / 60
         prev_z = None
         for r in run.raw:
             v = fnum(r.get("v_cms"))
@@ -739,7 +935,7 @@ def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, 
         for c in calib_rows:
             if c["run"] in idx and c["t"] is not None and c["heading"] is not None:
                 events.append((c["t"], 2, ("hdg", idx[c["run"]], dict(
-                    th=wrap(c["heading"] * D2R), sigma=cfg["calib_heading_sigma_deg"] * D2R, src="calib"))))
+                    th=wrap(c["heading"] * D2R), sigma=nudge_sigma(cfg, c.get("moved_px")), src="calib"))))
     sights = list(detections) if use_cam else []
     if use_blink:
         sights += [dict(b, kind="blink") for b in blink]
@@ -760,6 +956,7 @@ def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, 
     events.sort(key=lambda e: (e[0], e[1]))
 
     tracked = {}
+    last_of = {}          # robot -> its latest Tracked (wheel-size carry-over)
     unknown = Unknowns(cfg)
     ctracks = CamTracks(cfg)
     use_gyro = "gyro" in cfg["sensors"]
@@ -771,9 +968,18 @@ def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, 
             run = runs[ri]
             tr = tracked.get(run.run_id)
             if tr is None:
-                tr = tracked[run.run_id] = Tracked(run, cfg, gyro_f.get(run.robot, (D2R, ""))[0])
+                prev = last_of.get(run.robot)
+                carry = None
+                if prev is not None and prev.ekf.N == 8:
+                    e = prev.ekf
+                    carry = (e.s[6], e.P[6, 6], e.s[7], e.P[7, 7], prev.t1, arrival)
+                tr = tracked[run.run_id] = Tracked(run, cfg, gyro_f.get(run.robot, (D2R, ""))[0], carry)
+                last_of[run.robot] = tr
                 tr.led = tuple(led.get(run.robot, led[None]))
                 tr.faces = landmarks if use_tof else None
+                if use_tof and tof_cal:
+                    tr.set_tof_cal(tof_cal["per_run"].get(run.run_id, tof_cal.get("default"))
+                                   if "per_run" in tof_cal else tof_cal)
             if d["lifted"] and not tr.was_lifted:          # rule 5: picked up
                 tr.was_lifted = True
                 tr.lost_state = True
@@ -783,7 +989,7 @@ def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, 
                 tr.was_lifted = False
             tr.add((arrival, order, "raw", d))
             if use_tof and "zones" in d and not d["lifted"]:
-                tr.add((arrival - cfg["tof_delay_s"], order + 0.5, "tof", dict(zones=d["zones"])))
+                tr.add((arrival - tr.tcfg["tof_delay_s"], order + 0.5, "tof", dict(zones=d["zones"])))
             tr.odo_step(arrival, d, use_gyro)
             s = tr.ekf.s
             tr.live.append((arrival, s[0], s[1], s[2]))
@@ -982,7 +1188,7 @@ def _decide(pb, pm, gates, hyps, cfg):
     post, best, source = combine_identity(pb, pm, tau)
     if not post:
         return False, gates, None, None
-    lz = -math.log(cfg["clutter_cm2"])
+    lz = -math.log(clutter_area(cfg))
     ll = {h: (gates[h][1] if h in gates else (lz if h in ("none", "elsewhere") else None)) for h in hyps}
     m = max(v for v in ll.values() if v is not None)
     pp = normalise({h: post[h] * math.exp(v - m) for h, v in ll.items() if v is not None})

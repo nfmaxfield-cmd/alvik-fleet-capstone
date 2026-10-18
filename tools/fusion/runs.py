@@ -358,7 +358,7 @@ def video_offset(session, recording, fits=None):
         fit = cs.fit_for(fits, s["robot"], s["run"])
         if fit:
             placed.append(cs.to_laptop(fit, fnum(s["ms_on"])))
-    fps = (len(frames) - 1) / (frames[-1] - frames[0]) if len(frames) > 2 and frames[-1] > frames[0] else 30.0
+    fps = cs.recording_fps(recording, frames)
     coarse, picks = cs.match_flashes(found, placed, 1 / fps)
     offs = [p[0] - t for t, p in zip(placed, picks) if p]
     if coarse is None or len(offs) < 2:
@@ -439,12 +439,58 @@ def load_calib_results(path, offset_s):
         for r in csv.DictReader(f):
             tv, h = fnum(r.get("t_video")), fnum(r.get("heading_floor_deg"))
             lf, ll = fnum(r.get("led_fwd_cm")), fnum(r.get("led_left_cm"))
+            mp = fnum(r.get("moved_px"))
             out.append(dict(run=(r.get("run") or "").strip(), robot=(r.get("robot_log") or "").strip(),
                             event=(r.get("event") or "").strip(), identity=(r.get("identity") or "").strip(),
                             t=None if math.isnan(tv) else tv - offset_s,
                             heading=None if math.isnan(h) else h,
-                            led=None if (math.isnan(lf) or math.isnan(ll)) else (lf, ll)))
+                            led=None if (math.isnan(lf) or math.isnan(ll)) else (lf, ll),
+                            moved_px=None if math.isnan(mp) else mp))
     return out
+
+
+def view_area_cm2(path):
+    """Floor area (cm^2) the camera sees: the calibration file's view_floor_polygon_cm, else its image
+    corners (image_size) mapped to the floor. None if neither is there."""
+    with open(path) as f:
+        d = json.load(f)
+    poly = d.get("view_floor_polygon_cm")
+    if not poly and d.get("image_size"):
+        w, h = d["image_size"]
+        Hinv = load_homography(path)[1]
+        dist = load_distortion(path)
+        poly = [apply_h(Hinv, *undistort_px(x, y, dist)) for x, y in ((0, 0), (w, 0), (w, h), (0, h))]
+    if not poly or len(poly) < 3:
+        return None
+    a = 0.0
+    for (x0, y0), (x1, y1) in zip(poly, poly[1:] + poly[:1]):
+        a += x0 * y1 - x1 * y0
+    return abs(a) / 2
+
+
+def heading_px_sd(path):
+    """From heading_check.csv (tools/heading_check.py): how precisely the camera finds a start nudge's
+    shift, in px, so start-nudge headings get the noise measured on this setup. The camera's heading spread:
+    half the variance of (detector heading - nudge heading) where both exist (3 or more runs), else the
+    whole spread of (camera - tape) (an upper bound: tape error is in it too). Turned into px with the
+    median moved_px: px_sd = tan(spread) x median moved_px. None if the file has too few rows."""
+    rows = []
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        for r in csv.DictReader(f):
+            rows.append(r)
+    diffs = [fnum(r.get("diff_deg")) for r in rows]
+    diffs = [d for d in diffs if not math.isnan(d)]
+    pairs = []
+    for r in rows:
+        a, b = fnum(r.get("det_heading_deg")), fnum(r.get("camera_heading_deg"))
+        if not (math.isnan(a) or math.isnan(b)):
+            pairs.append((a - b + 180.0) % 360.0 - 180.0)
+    moved = [fnum(r.get("moved_px")) for r in rows]
+    moved = [m for m in moved if m > 0]
+    if len(diffs) < 3 or not moved:
+        return None
+    sd = math.sqrt(st.variance(pairs) / 2) if len(pairs) >= 3 else st.stdev(diffs)
+    return math.tan(math.radians(sd)) * st.median(moved)
 
 
 def led_offsets(calib_rows, default=LED_OFFSET_CM):

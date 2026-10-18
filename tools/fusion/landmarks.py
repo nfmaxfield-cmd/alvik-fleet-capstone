@@ -164,6 +164,20 @@ def line_range(s, ang, fwd, a, n):
     return d, J
 
 
+def range_partials(s, ang, fwd, a, n):
+    """For the ray at `ang` against the line (a, n): (d dh/d(zone direction), d dh/d(line moved along n)).
+    The first is what a sensor turned on its mount does, the second what a board off its tape spot does.
+    None if the ray misses the line."""
+    r = line_range(s, ang, fwd, a, n)
+    if r is None:
+        return None
+    d = r[0]
+    th = s[2]
+    ux, uy = math.cos(th + ang), math.sin(th + ang)
+    nu = n[0] * ux + n[1] * uy
+    return -d * (n[0] * -uy + n[1] * ux) / nu, 1.0 / nu
+
+
 def zone_angle(s, ang, width, face, fwd):
     """Direction (rad, from the heading) whose ray gives the zone's reading of
     `face`: the zone's own direction for a single ray; with a slice `width`,
@@ -241,3 +255,42 @@ def zone_sigma(h, cfg, tan_inc=0.0):
     where in the zone the reading comes from) does to a face hit obliquely:
     distance x tan(incidence) x that angle."""
     return cfg["tof_noise_cm"] + cfg["tof_noise_rel"] * h + h * tan_inc * cfg["tof_angle_sigma_deg"] * D2R
+
+
+# ---------------------------------------------------------------- calibration (tools/fusion/tof_calib.py)
+CAL_FORMAT = "alvik-tof-calibration"
+
+
+def load_cal(path):
+    """tof_calibration.json (docs/data-formats.md) -> dict, with "faces" (list of Face) if it carries
+    refined landmarks. Checks the format name."""
+    import json
+    with open(path) as f:
+        d = json.load(f)
+    if d.get("format") != CAL_FORMAT:
+        raise ValueError(f"{path}: not a {CAL_FORMAT} file")
+    d["path"] = os.path.abspath(path)
+    d["used_runs"] = [str(r) for r in d.get("used_runs") or []]
+    if d.get("landmarks"):
+        d["faces"] = [Face(r["name"], (r["x1_cm"], r["y1_cm"]), (r["x2_cm"], r["y2_cm"])) for r in d["landmarks"]]
+    return d
+
+
+def read_cal_per_run(path):
+    """tof_calibration_loro.csv -> {run_id: absolute path of the calibration made without it}."""
+    base = os.path.dirname(os.path.abspath(path))
+    out = {}
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        for r in csv.DictReader(f):
+            rid = (r.get("run_id") or "").strip()
+            c = (r.get("calibration") or "").strip()
+            if rid and c:
+                out[rid] = os.path.join(base, c)
+    return out
+
+
+def cal_robot(cal, robot):
+    """Per-robot part of a calibration: (zone direction offsets deg [5], range bias cm, range scale)."""
+    r = (cal or {}).get("robots", {}).get(robot) or (cal or {}).get("robots", {}).get("default") or {}
+    off = r.get("zone_offset_deg") or [0.0] * len(ZONE_COLS)
+    return [float(v) for v in off], float(r.get("range_bias_cm", 0.0)), float(r.get("range_scale", 1.0))

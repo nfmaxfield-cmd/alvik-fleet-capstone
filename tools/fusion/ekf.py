@@ -11,6 +11,20 @@ State (floor frame, cm and radians):
     v        forward speed (cm/s)
     w        turn rate (rad/s)
     b        gyro bias (rad/s): what the gyro reads when the robot is still
+  with wheel-size estimation on (`scale`), two more:
+    k        wheel distance scale: the wheels report k x the true speed (k = 1.05: they read 5% long,
+             e.g. wheels a little smaller than the nominal 1.7 cm radius, or slipping). With it on, v is
+             the speed the WHEELS report and the robot moves v / k: a wheel reading then never moves k
+             by itself (no drift when nothing else measures position)
+    kw       wheel turn scale: the wheels' turn rate is kw x the true one (wheel track not the nominal
+             9 cm, wheels scrubbing in turns)
+  Both start at 1 with a prior (wheel_scale_sigma, turn_scale_sigma) and drift slowly (random walk).
+  Without a position sensor (camera, landmarks) they can't be learned and simply stay at 1.
+  "consider" states (landmark ranging, Schmidt filter): errors that every reading of a board shares,
+  such as the board's tape-measured position, the distance sensor's range bias and how it is turned on
+  its mount. They are not estimated (always 0) but their uncertainty is carried, so the filter knows
+  that 100 readings of the same board are not 100 independent fixes: a board 1 cm off can pull the
+  pose by at most about that much, however long the robot looks at it.
 
 Measurements:
     wheel_v   forward speed from the wheel encoders (RAW v_cms)
@@ -64,13 +78,63 @@ class Noise:
             setattr(self, k, v)
 
 
+MEASURED_KEYS = {"camera_xy_cm": ("cam_xy", 1.0), "camera_heading_deg": ("cam_th", D2R),
+                 "blink_xy_cm": ("blink_xy", 1.0)}
+
+
+def load_noise_file(path):
+    """Measured sensor noise (docs/data-formats.md, "Measured noise"): JSON with any of camera_xy_cm,
+    camera_heading_deg, blink_xy_cm (1 standard deviation), and optionally "noise": {any Noise setting, in
+    its own units}. Returns overrides for Noise(**...)."""
+    import json
+    with open(path) as f:
+        d = json.load(f)
+    out = {}
+    for k, (name, unit) in MEASURED_KEYS.items():
+        if d.get(k) is not None:
+            v = float(d[k])
+            if not v > 0:
+                raise ValueError(f"{path}: {k} must be a positive number")
+            out[name] = v * unit
+    for k, v in (d.get("noise") or {}).items():
+        if not hasattr(Noise(), k):
+            raise KeyError(f"{path}: unknown noise setting {k}")
+        out[k] = float(v)
+    return out
+
+
 class EKF:
-    def __init__(self, x, y, th, t, noise=None, sigma_xy=0.3, sigma_th=1.0 * D2R):
+    def __init__(self, x, y, th, t, noise=None, sigma_xy=0.3, sigma_th=1.0 * D2R, scale=None):
+        """scale: None (no wheel-size states, the filter as before) or dict(k, sk, kw, skw, qk, qkw):
+        starting wheel distance / turn scale, their sd, and their random walk per sqrt(s)."""
         self.n = noise or Noise()
-        self.s = np.array([x, y, th, 0.0, 0.0, 0.0])
-        self.P = np.diag([sigma_xy ** 2, sigma_xy ** 2, sigma_th ** 2, 1.0, (5 * D2R) ** 2, (1.0 * D2R) ** 2])
+        self.scale = scale
+        self.N = 8 if scale else 6
+        if scale:
+            self.s = np.array([x, y, th, 0.0, 0.0, 0.0, scale["k"], scale["kw"]])
+            self.P = np.diag([sigma_xy ** 2, sigma_xy ** 2, sigma_th ** 2, 1.0, (5 * D2R) ** 2, (1.0 * D2R) ** 2,
+                              scale["sk"] ** 2, scale["skw"] ** 2])
+        else:
+            self.s = np.array([x, y, th, 0.0, 0.0, 0.0])
+            self.P = np.diag([sigma_xy ** 2, sigma_xy ** 2, sigma_th ** 2, 1.0, (5 * D2R) ** 2, (1.0 * D2R) ** 2])
         self.t = t
         self.last_cam = t   # when the camera last corrected position
+        self.n_base = self.N  # states after this index are consider states (never updated, see add_consider)
+
+    def add_consider(self, sigmas):
+        """Append consider states with these sds (all 0, uncorrelated); returns their first index."""
+        i0, m = self.N, len(sigmas)
+        self.s = np.concatenate([self.s, np.zeros(m)])
+        P = np.zeros((self.N + m, self.N + m))
+        P[:self.N, :self.N] = self.P
+        P[self.N:, self.N:] = np.diag(np.asarray(sigmas, float) ** 2)
+        self.P = P
+        self.N += m
+        return i0
+
+    @property
+    def cons(self):
+        return range(self.n_base, self.N)
 
     # ---- copy / restore (used to rewind for late camera readings) ----
     def snapshot(self):
@@ -78,25 +142,45 @@ class EKF:
 
     def restore(self, snap):
         self.s, self.P, self.t, self.last_cam = snap[0].copy(), snap[1].copy(), snap[2], snap[3]
+        self.N = len(self.s)
 
     # ---- motion ----
     def predict(self, t):
         dt = t - self.t
         if dt <= 0:
             return
-        x, y, th, v, w, b = self.s
+        x, y, th, v, w = self.s[:5]
         c, s = math.cos(th), math.sin(th)
-        self.s[0] = x + v * c * dt
-        self.s[1] = y + v * s * dt
-        self.s[2] = wrap(th + w * dt)
-        F = np.eye(6)
-        F[0, 2] = -v * s * dt
-        F[0, 3] = c * dt
-        F[1, 2] = v * c * dt
-        F[1, 3] = s * dt
-        F[2, 4] = dt
+        if self.scale:                       # v is the wheels' speed; the robot really moves v / k
+            k = self.s[6]
+            u = v / k
+            self.s[0] = x + u * c * dt
+            self.s[1] = y + u * s * dt
+            self.s[2] = wrap(th + w * dt)
+            F = np.eye(self.N)
+            F[0, 2] = -u * s * dt
+            F[0, 3] = c * dt / k
+            F[0, 6] = -u / k * c * dt
+            F[1, 2] = u * c * dt
+            F[1, 3] = s * dt / k
+            F[1, 6] = -u / k * s * dt
+            F[2, 4] = dt
+        else:
+            self.s[0] = x + v * c * dt
+            self.s[1] = y + v * s * dt
+            self.s[2] = wrap(th + w * dt)
+            F = np.eye(self.N)
+            F[0, 2] = -v * s * dt
+            F[0, 3] = c * dt
+            F[1, 2] = v * c * dt
+            F[1, 3] = s * dt
+            F[2, 4] = dt
         n = self.n
-        Q = np.diag([n.q_pos ** 2 * dt, n.q_pos ** 2 * dt, 0.0, n.q_v ** 2 * dt, n.q_w ** 2 * dt, n.q_b ** 2 * dt])
+        q = [n.q_pos ** 2 * dt, n.q_pos ** 2 * dt, 0.0, n.q_v ** 2 * dt, n.q_w ** 2 * dt, n.q_b ** 2 * dt]
+        if self.scale:
+            q += [self.scale["qk"] ** 2 * dt, self.scale["qkw"] ** 2 * dt]
+        q += [0.0] * (self.N - len(q))
+        Q = np.diag(q)
         self.P = F @ self.P @ F.T + Q
         self.t = t
 
@@ -115,33 +199,40 @@ class EKF:
             y[i] = wrap(y[i])
         S = H @ self.P @ H.T + R
         K = self.P @ H.T @ np.linalg.inv(S)
+        if self.N > self.n_base:
+            K[self.n_base:, :] = 0.0                # consider states: never estimated (Schmidt)
         self.s = self.s + K @ y
         self.s[2] = wrap(self.s[2])
-        I_KH = np.eye(6) - K @ H
+        I_KH = np.eye(self.N) - K @ H
         self.P = I_KH @ self.P @ I_KH.T + K @ R @ K.T   # Joseph form: stays symmetric and positive
         return float(y @ np.linalg.solve(S, y))          # squared Mahalanobis distance of the reading
 
     def wheel_v(self, v):
         r = self.n.v_base + self.n.v_rel * abs(v)
-        H = np.zeros((1, 6))
-        H[0, 3] = 1
+        H = np.zeros((1, self.N))
+        H[0, 3] = 1                          # (with wheel size on, v is the wheels' own speed: same reading)
         self._update(np.array([v]), np.array([self.s[3]]), H, np.array([[r * r]]))
 
     def wheel_w(self, w):
         r = self.n.w_base + self.n.w_rel * abs(w)
-        H = np.zeros((1, 6))
+        H = np.zeros((1, self.N))
+        if self.scale:                       # the wheels' turn rate is kw x the true one
+            H[0, 4] = self.s[7]
+            H[0, 7] = self.s[4]
+            self._update(np.array([w]), np.array([self.s[7] * self.s[4]]), H, np.array([[r * r]]))
+            return
         H[0, 4] = 1
         self._update(np.array([w]), np.array([self.s[4]]), H, np.array([[r * r]]))
 
     def gyro(self, g):
         r = self.n.g_base + self.n.g_rel * abs(g)
-        H = np.zeros((1, 6))
+        H = np.zeros((1, self.N))
         H[0, 4] = 1
         H[0, 5] = 1
         self._update(np.array([g]), np.array([self.s[4] + self.s[5]]), H, np.array([[r * r]]))
 
     def zupt(self):
-        H = np.zeros((2, 6))
+        H = np.zeros((2, self.N))
         H[0, 3] = 1
         H[1, 4] = 1
         r = self.n.zupt
@@ -155,7 +246,7 @@ class EKF:
         return float(d @ np.linalg.solve(S, d))
 
     def cam_xy(self, xy):
-        H = np.zeros((2, 6))
+        H = np.zeros((2, self.N))
         H[0, 0] = 1
         H[1, 1] = 1
         d2 = self._update(np.asarray(xy, float), self.s[:2].copy(), H, np.eye(2) * self.n.cam_xy ** 2)
@@ -163,7 +254,7 @@ class EKF:
         return d2
 
     def cam_th(self, th):
-        H = np.zeros((1, 6))
+        H = np.zeros((1, self.N))
         H[0, 2] = 1
         self._update(np.array([th]), np.array([self.s[2]]), H, np.array([[self.n.cam_th ** 2]]), angle_rows=(0,))
 
@@ -174,7 +265,7 @@ class EKF:
         f, l = off
         c, sn = math.cos(s[2]), math.sin(s[2])
         h = np.array([s[0] + c * f - sn * l, s[1] + sn * f + c * l])
-        H = np.zeros((2, 6))
+        H = np.zeros((2, self.N))
         H[0, 0] = H[1, 1] = 1
         H[0, 2] = -sn * f - c * l
         H[1, 2] = c * f - sn * l
@@ -198,14 +289,14 @@ class EKF:
     def heading(self, th, sigma):
         """Heading fix th (rad) with noise sigma (rad). Returns its squared
         Mahalanobis distance (before the update)."""
-        H = np.zeros((1, 6))
+        H = np.zeros((1, self.N))
         H[0, 2] = 1
         return self._update(np.array([th]), np.array([self.s[2]]), H, np.array([[sigma ** 2]]), angle_rows=(0,))
 
     def range_d2(self, z, h, J, sigma):
         """Squared Mahalanobis distance of a distance-sensor reading z from its
         prediction h (J: dh/d(x, y, th))."""
-        H = np.zeros(6)
+        H = np.zeros(self.N)
         H[:3] = J
         y = z - h
         return y * y / (float(H @ self.P @ H) + sigma * sigma)
@@ -213,10 +304,28 @@ class EKF:
     def landmark_range(self, z, h, J, sigma):
         """Landmark ranging: the front distance sensor reads z where the map says
         h (landmarks.predict_zone gives h and J = dh/d(x, y, th)). Returns the
-        squared Mahalanobis distance (before the update)."""
-        H = np.zeros((1, 6))
-        H[0, :3] = J
+        squared Mahalanobis distance (before the update). J may also be a full
+        row (length N, with consider-state columns)."""
+        H = np.zeros((1, self.N))
+        J = np.asarray(J, float)
+        H[0, :len(J)] = J
         return self._update(np.array([z]), np.array([h]), H, np.array([[sigma * sigma]]))
+
+    def landmark_ranges(self, z, h, Hrows, R):
+        """Several zone readings of one sensor frame in one update (their errors may be correlated:
+        R full). Hrows: one row per reading (length <= N, padded with zeros)."""
+        H = np.zeros((len(z), self.N))
+        for i, r in enumerate(Hrows):
+            r = np.asarray(r, float)
+            H[i, :len(r)] = r
+        return self._update(np.asarray(z, float), np.asarray(h, float), H, np.asarray(R, float))
+
+    def innov_var(self, Hrow, sigma):
+        """Innovation variance of a reading with Jacobian row Hrow (length <= N) and noise sigma."""
+        H = np.zeros(self.N)
+        r = np.asarray(Hrow, float)
+        H[:len(r)] = r
+        return float(H @ self.P @ H) + sigma * sigma
 
     def heading_d2(self, th):
         y = wrap(th - self.s[2])
