@@ -16,13 +16,21 @@ dropouts, and compare how far off each setup ends up.
         --detections sim/recording/camera_detections.csv --calib sim/recording/floor_calibration.json \\
         --recording sim/recording --truth sim/truth.csv --out results/sim
 
+    # blink lights (tools/blink/blink.py) and calib.py's headings / light offset:
+    python tools/fusion/replay.py ... --blink sim/recording/blink_detections.csv \
+        --calib-results sim/recording/calibration_results.csv --truth sim/truth.csv --out results/sim
+    (with --truth, camera_truth.csv beside it, if there, scores which robot each fix went to)
+
 Each setup ("configuration") is run over exactly the same recorded runs, so
 setups are compared run by run (paired), which removes run-to-run luck.
 Configurations come from --configs <file.json> (a list of settings, see
 engine.DEFAULT) or the built-in list below.
 
 Output in --out: results.csv (one row per run and setup), summary.csv, and
-end_error.svg (every run's end error per setup).
+end_error.svg (every run's end error per setup); with blink or motion
+identity also identity.csv (per setup and robot: how many fixes got their
+identity from blink, motion, both, combined, or position alone, and, with
+camera_truth.csv, how many went to the right robot).
 """
 import argparse
 import csv
@@ -52,6 +60,29 @@ BUILTIN = [
     dict(name="+ camera at 1 frame/s", sensors=["wheel_v", "wheel_w", "gyro", "camera"], cam_rate_hz=1.0),
     dict(name="+ camera, 200 ms late", sensors=["wheel_v", "wheel_w", "gyro", "camera"], cam_latency_s=0.2),
     dict(name="camera only", sensors=["camera"]),
+]
+# need --blink (and --detections for the ones with "camera")
+WWG = ["wheel_v", "wheel_w", "gyro"]
+BUILTIN_BLINK = [
+    dict(name="+ blink lights only", sensors=WWG + ["blink"], motion_identity=True, calib_heading=True),
+    dict(name="+ blink lights, heading from motion", sensors=WWG + ["blink"], motion_identity=True,
+         calib_heading=True, heading_from_motion=True),
+    dict(name="+ detector + blink", sensors=WWG + ["camera", "blink"], motion_identity=True, calib_heading=True),
+    dict(name="+ detector + blink, heading from motion", sensors=WWG + ["camera", "blink"], motion_identity=True,
+         calib_heading=True, heading_from_motion=True),
+    dict(name="+ detector + blink (factor graph)", sensors=WWG + ["camera", "blink"], motion_identity=True,
+         calib_heading=True, method="graph"),
+    dict(name="blink identity off (motion only)", sensors=WWG + ["camera", "blink"], motion_identity=True,
+         calib_heading=True, blink_identity=False),
+]
+# need --detections only
+BUILTIN_CAMERA_EXTRA = [
+    dict(name="+ camera, identity by motion", sensors=WWG + ["camera"], motion_identity=True, calib_heading=True),
+    # the case heading from motion is meant for: detector positions only, no detector heading, no blink
+    dict(name="+ detector positions only (no heading)", sensors=WWG + ["camera"], cam_heading=False,
+         calib_heading=True),
+    dict(name="+ detector positions only, heading from motion", sensors=WWG + ["camera"], cam_heading=False,
+         calib_heading=True, heading_from_motion=True),
 ]
 BASELINE = "wheels only"
 
@@ -90,21 +121,78 @@ def load_truth(path):
 def evaluate(run, traj, truth=None):
     t_eval = run.sync["end"][0] if "end" in run.sync else run.t_end
     out = dict(end_err_cm=float("nan"), end_head_err_deg=float("nan"), path_rmse_cm=float("nan"),
-               path_max_cm=float("nan"))
+               path_max_cm=float("nan"), head_rmse_deg=float("nan"))
     est = at(traj, t_eval)
     if est and run.tape_end:
         x, y, h = run.tape_end
         out["end_err_cm"] = math.hypot(est[0] - x, est[1] - y)
         out["end_head_err_deg"] = wrap(est[2] - h * D2R) / D2R
     if truth and run.run_id in truth:
-        errs = []
-        for t, x, y, _ in truth[run.run_id]:
+        errs, herrs = [], []
+        for t, x, y, h in truth[run.run_id]:
             if traj[0][0] <= t <= traj[-1][0]:
                 e = at(traj, t)
                 errs.append(math.hypot(e[0] - x, e[1] - y))
+                herrs.append(wrap(e[2] - h) / D2R)
         if errs:
             out["path_rmse_cm"] = math.sqrt(sum(e * e for e in errs) / len(errs))
             out["path_max_cm"] = max(errs)
+            out["head_rmse_deg"] = math.sqrt(sum(e * e for e in herrs) / len(herrs))
+    return out
+
+
+def load_camera_truth(path, H_px_to_floor, offset_s, parallax=None, dist=None):
+    """Simulator camera_truth.csv -> {frame: [(robot, x, y, heading_rad)]}: each
+    robot's true top centre moved down to the floor, as the fusion's sightings are."""
+    out = {}
+    with open(path, newline="") as f:
+        for r in csv.DictReader(f):
+            x, y = float(r["x_px"]), float(r["y_px"])
+            fx, fy = rn.floor_from_top(*rn.apply_h(H_px_to_floor, *rn.undistort_px(x, y, dist)), parallax)
+            h = rn.heading_img_to_floor(H_px_to_floor, x, y, float(r["heading_img_deg"]), dist) * D2R
+            out.setdefault(int(r["frame"]), []).append((r["robot"], fx, fy, h))
+    return out
+
+
+def identity_check(fix, robot, led, cam_truth, tol_cm=5.0):
+    """Which robot really was at this fix? 'right', 'wrong' (another robot was
+    nearest) or 'none' (no robot within tol_cm: a false alarm)."""
+    best, bd = None, None
+    for name, x, y, h in cam_truth.get(fix["frame"], []):
+        if fix["kind"] == "blink":
+            o = led.get(name, led[None])
+            x, y = x + math.cos(h) * o[0] - math.sin(h) * o[1], y + math.sin(h) * o[0] + math.cos(h) * o[1]
+        d = math.hypot(fix["x"] - x, fix["y"] - y)
+        if bd is None or d < bd:
+            best, bd = name, d
+    if best is None or bd > tol_cm:
+        return "none"
+    return "right" if best == robot else "wrong"
+
+
+ID_SOURCES = ("blink", "motion", "both", "combined", "position")
+
+
+def identity_table(results, names, has_id):
+    """Per setup and robot: fixes used, share by identity source, and share
+    that went to the right robot. Only for setups that used identity."""
+    out = []
+    for n in names:
+        rs = [r for r in results if r["config"] == n]
+        if not any(r["id_blink"] + r["id_motion"] + r["id_both"] + r["id_combined"] for r in rs):
+            continue
+        for robot in sorted({r["robot"] for r in rs}):
+            rr = [r for r in rs if r["robot"] == robot]
+            tot = sum(r["cam_used"] for r in rr)
+            row = dict(setup=n, robot=robot, fixes=tot)
+            for k in ID_SOURCES:
+                row[k] = f"{100 * sum(r['id_' + k] for r in rr) / tot:.1f}%" if tot else "-"
+            if has_id:
+                nt = sum(r["id_right"] + r["id_wrong"] + r["id_false"] for r in rr)
+                row["right robot"] = f"{100 * sum(r['id_right'] for r in rr) / nt:.2f}%" if nt else "-"
+                row["wrong robot"] = sum(r["id_wrong"] for r in rr)
+                row["no robot there"] = sum(r["id_false"] for r in rr)
+            out.append(row)
     return out
 
 
@@ -152,7 +240,11 @@ def main():
     ap.add_argument("--detections")
     ap.add_argument("--calib")
     ap.add_argument("--video-offset", type=float)
+    ap.add_argument("--blink", help="blink_detections.csv (tools/blink/blink.py): light sightings with names")
+    ap.add_argument("--calib-results", help="calibration_results.csv (tools/blink/calib.py): start-nudge "
+                    "headings and the light's offset on the robot")
     ap.add_argument("--truth", help="simulator truth.csv: also report errors along the whole path")
+    ap.add_argument("--camera-truth", help="simulator camera_truth.csv (default: beside --truth): score identity")
     ap.add_argument("--configs", help="JSON file: list of settings (default: the built-in list)")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
@@ -161,11 +253,10 @@ def main():
     runs = [r for r in runs if not r.excluded and r.tape_start]
     if not runs:
         sys.exit("No runs with tape start marks. Is --sheet right, and are run ids filled in?")
-    dets = None
-    if args.detections:
-        if not args.calib:
-            sys.exit("--detections needs --calib")
-        _, Hinv = rn.load_homography(args.calib)
+    dets, blink, crow, led, cam_truth = None, None, None, None, None
+    if args.detections or args.blink or args.calib_results:
+        if not args.calib and (args.detections or args.blink):
+            sys.exit("--detections / --blink need --calib")
         off = args.video_offset
         if off is None:
             vo = rn.video_offset(args.session, args.recording, fits) if args.recording else None
@@ -173,12 +264,36 @@ def main():
                 sys.exit("Couldn't line up video and robot clocks: give --recording (with flashes) or --video-offset")
             off = vo[0]
             print(f"video clock = laptop clock {off * 1000:+.0f} ms ({vo[2]} flashes)")
+    if args.detections or args.blink:
+        _, Hinv = rn.load_homography(args.calib)
         par = rn.load_parallax(args.calib)
+        dist = rn.load_distortion(args.calib)
         if par is None:
             print("note: calibration has no camera height; robot-top positions not corrected for height")
-        dets = rn.load_detections(args.detections, Hinv, off, parallax=par, dist=rn.load_distortion(args.calib))
+    if args.detections:
+        dets = rn.load_detections(args.detections, Hinv, off, parallax=par, dist=dist)
+    if args.blink:
+        blink = rn.load_blink(args.blink, Hinv, off, parallax=par, dist=dist)
+        names = sorted({n for b in blink for n in b["probs"]})
+        print(f"{len(blink)} blink light sightings (names: {', '.join(names) or 'none'})")
+        missing = sorted({r.robot for r in runs} - set(names))
+        if missing and "other" not in names:
+            print(f"warning: no blink name column for {', '.join(missing)}: their lights can't be named")
+    if args.calib_results:
+        crow = rn.load_calib_results(args.calib_results, off)
+        led, how = rn.led_offsets(crow)
+        print(f"{sum(1 for c in crow if c['heading'] is not None)} calibration headings; light offset from {how}: "
+              + ", ".join(f"{k or 'all'} {v[0]:.2f}/{v[1]:+.2f} cm" for k, v in sorted(led.items(), key=lambda kv: str(kv[0]))))
+    elif args.blink:
+        led, how = rn.led_offsets(None)
+        print(f"light offset from {how} (no --calib-results)")
+    ct_path = args.camera_truth or (os.path.join(os.path.dirname(os.path.abspath(args.truth)), "camera_truth.csv")
+                                    if args.truth else None)
+    if ct_path and os.path.exists(ct_path) and (dets or blink):
+        cam_truth = load_camera_truth(ct_path, Hinv, off, parallax=par, dist=dist)
     truth = load_truth(args.truth) if args.truth else None
-    configs = json.load(open(args.configs)) if args.configs else BUILTIN
+    configs = json.load(open(args.configs)) if args.configs else (
+        BUILTIN + (BUILTIN_CAMERA_EXTRA if dets else []) + (BUILTIN_BLINK if blink else []))
     wsign = eng.wheel_turn_signs(runs)
     for robot, sgn in sorted(wsign.items()):
         if sgn < 0:
@@ -195,8 +310,13 @@ def main():
         cfg = eng.config(**c)
         if "camera" in cfg["sensors"] and not dets:
             continue
+        if "blink" in cfg["sensors"] and not blink:
+            continue
         names.append(cfg["name"])
-        tracked, unknown = eng.run_engine(runs, dets, cfg, gyro_f)
+        tracked, unknown = eng.run_engine(runs, dets, cfg, gyro_f, blink=blink, calib_rows=crow, led_offsets=led)
+        led_used = led or {None: tuple(rn.LED_OFFSET_CM)}
+        if cfg["led_offset_cm"] != "auto":
+            led_used = {None: tuple(cfg["led_offset_cm"])}
         for run in runs:
             tr = tracked.get(run.run_id)
             if tr is None:
@@ -208,14 +328,26 @@ def main():
             else:
                 traj = tr.trajectory()
             ev = evaluate(run, traj, truth)
+            src = {k: tr.id_sources.get(k, 0) for k in ID_SOURCES}
+            chk = {"right": 0, "wrong": 0, "none": 0}
+            if cam_truth is not None:
+                for fx in tr.fixes:
+                    chk[identity_check(fx, run.robot, led_used, cam_truth)] += 1
+            n_chk = sum(chk.values())
             results.append(dict(config=cfg["name"], run_id=run.run_id, robot=run.robot, route=run.level,
-                                cam_used=tr.cam_used, cam_blocked=tr.cam_blocked, kidnaps=len(tr.kidnaps), **ev))
+                                cam_used=tr.cam_used, cam_blocked=tr.cam_blocked, kidnaps=len(tr.kidnaps), **ev,
+                                hdg_motion=tr.hdg_used["motion"], hdg_calib=tr.hdg_used["calib"],
+                                id_right=chk["right"] if cam_truth is not None else "",
+                                id_wrong=chk["wrong"] if cam_truth is not None else "",
+                                id_false=chk["none"] if cam_truth is not None else "",
+                                **{"id_" + k: v for k, v in src.items()}))
         if unknown.confirmed_ever:
             print(f"  [{cfg['name']}] {len(unknown.confirmed_ever)} unknown object(s) seen and kept apart from the robots")
 
     os.makedirs(args.out, exist_ok=True)
     cols = ["config", "run_id", "robot", "route", "end_err_cm", "end_head_err_deg", "path_rmse_cm", "path_max_cm",
-            "cam_used", "cam_blocked", "kidnaps"]
+            "head_rmse_deg", "cam_used", "cam_blocked", "kidnaps", "hdg_motion", "hdg_calib", "id_right", "id_wrong",
+            "id_false"] + ["id_" + k for k in ID_SOURCES]
     with open(os.path.join(args.out, "results.csv"), "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader()
@@ -224,8 +356,9 @@ def main():
 
     base = {r["run_id"]: r for r in results if r["config"] == BASELINE}
     has_truth = any(not math.isnan(r["path_rmse_cm"]) for r in results)
+    has_id = cam_truth is not None
     hdr = ["setup", "runs", "end error cm", "95% interval", "vs wheels only (paired)", "p"] + (
-        ["path RMSE cm"] if has_truth else [])
+        ["path RMSE cm", "heading RMSE deg"] if has_truth else []) + (["right robot"] if has_id else [])
     table, summ = [], []
     for n in names:
         rs = [r for r in results if r["config"] == n and not math.isnan(r["end_err_cm"])]
@@ -242,6 +375,11 @@ def main():
                f"{pv:.2g}" if not math.isnan(pv) else "-"]
         if has_truth:
             row.append(f"{st.mean(r['path_rmse_cm'] for r in rs if not math.isnan(r['path_rmse_cm'])):.2f}")
+            row.append(f"{st.mean(r['head_rmse_deg'] for r in rs if not math.isnan(r['head_rmse_deg'])):.2f}")
+        if has_id:
+            nr = sum(r["id_right"] for r in rs)
+            nt = nr + sum(r["id_wrong"] + r["id_false"] for r in rs)
+            row.append(f"{100 * nr / nt:.2f}%" if nt else "-")
         table.append(row)
         summ.append(dict(zip(hdr, row)))
     w = [max(len(str(x)) for x in col) for col in zip(hdr, *table)]
@@ -254,8 +392,25 @@ def main():
         dw = csv.DictWriter(f, fieldnames=hdr)
         dw.writeheader()
         dw.writerows(summ)
+    if has_id:
+        print("right robot: share of the camera fixes used that were really of the run's robot (camera_truth.csv:\n"
+              "nearest true robot within 5 cm; a fix with no robot that close counts as wrong).")
     dot_chart(results, names, os.path.join(args.out, "end_error.svg"))
-    print(f"\nwrote {args.out}/results.csv, summary.csv, end_error.svg")
+    wrote = ["results.csv", "summary.csv", "end_error.svg"]
+    id_rows = identity_table(results, names, has_id)
+    if id_rows:
+        with open(os.path.join(args.out, "identity.csv"), "w", newline="") as f:
+            dw = csv.DictWriter(f, fieldnames=list(id_rows[0].keys()))
+            dw.writeheader()
+            dw.writerows(id_rows)
+        wrote.append("identity.csv")
+        print("\nWhere each fix's identity came from (share of fixes used), per setup and robot:")
+        hd = list(id_rows[0].keys())
+        ww = [max(len(str(x)) for x in col) for col in zip(hd, *[[r[k] for k in hd] for r in id_rows])]
+        print("  ".join(h.ljust(ww[i]) for i, h in enumerate(hd)))
+        for r in id_rows:
+            print("  ".join(str(r[k]).ljust(ww[i]) for i, k in enumerate(hd)))
+    print(f"\nwrote {args.out}/" + ", ".join(wrote))
     return 0
 
 

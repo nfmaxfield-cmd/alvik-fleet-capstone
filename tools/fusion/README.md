@@ -5,11 +5,12 @@ sensor switched off or degraded, and compare the results against the tape.
 
 | File | What it does |
 | --- | --- |
-| `runs.py` | Run-file builder: puts each run's robot log, tape marks and camera sightings on the laptop's clock; can save one folder per run |
-| `ekf.py` | The Kalman filter for one robot: wheels, gyro, camera |
-| `engine.py` | Runs the filters for all robots, applies sensor dropouts and the tracking rules |
+| `runs.py` | Run-file builder: puts each run's robot log, tape marks, camera sightings and blink lights on the laptop's clock; can save one folder per run |
+| `ekf.py` | The Kalman filter for one robot: wheels, gyro, camera, blink light, heading fixes |
+| `engine.py` | Runs the filters for all robots, applies sensor dropouts, the tracking rules and the identity rules |
 | `graph.py` | Factor graph: re-solves a whole run so every reading fits together |
 | `replay.py` | Runs every sensor setup over the same runs and compares them |
+| `tests/` | Unit tests: light-offset model, identity combination, heading from motion (`python -m pytest tools/fusion/tests -q`, a few seconds) |
 
 ## Quick start
 
@@ -24,6 +25,31 @@ distance + gyro heading. With camera sightings (`--detections`, `--calib`,
 and `--recording` to line up the clocks by the light flashes) it adds the
 camera setups: filter, factor graph, frames lost, camera blocked, low frame
 rate, late frames, and camera only.
+
+With the blink lights (`--blink <recording>/blink_detections.csv` from
+tools/blink/blink.py, and `--calib-results <recording>/calibration_results.csv`
+from calib.py for the start-nudge headings and the light's offset) it adds:
+blink lights only, blink lights with heading from motion, detector + blink,
+detector + blink with heading from motion, detector + blink in the factor
+graph, and blink identity off (motion only). With detections it also adds:
+camera with identity by motion, and detector positions only (no detector
+heading, no blink) with heading from motion off / on, the case heading from
+motion is meant for. The start-nudge headings are used only by these new
+setups (`calib_heading`); the older setups ignore them, so their numbers
+stay comparable whether or not the file is given. Simulator runs: `--truth truth.csv` adds path and
+heading RMSE, and `camera_truth.csv` beside it (or `--camera-truth`) scores
+which robot each camera fix went to ("right robot" column, `identity.csv`).
+
+```
+python tools/fusion/replay.py --session sim/session --sheet sim/measurements.csv \
+    --detections sim/camera_detections.csv --calib sim/floor_calibration.json --recording sim/recording \
+    --blink sim/recording/blink_detections.csv --calib-results sim/recording/calibration_results.csv \
+    --truth sim/truth.csv --out results/sim
+```
+
+`runs.py` takes the same `--blink` and `--calib-results`: each run folder
+then also gets `blink.csv` (light floor positions with the name
+probabilities) and, in meta.json, `calib_headings` and `led_offset_cm`.
 
 Your own setups: write a JSON list of settings (any of `engine.DEFAULT`) and
 pass `--configs file.json`, e.g.
@@ -51,6 +77,82 @@ pass `--configs file.json`, e.g.
 Late camera frames are applied at the moment the photo was taken: the filter
 rewinds, applies the fix, and replays the wheel and gyro readings since.
 
+## Blink lights, identity and heading (engine.py, ekf.py)
+
+Switched on by the sensor `"blink"` and the settings `motion_identity`,
+`heading_from_motion`; setups without them run exactly as before (checked:
+every number in results.csv identical, 6-run and 36-run simulator sessions).
+
+**The light as a measurement.** A blink row is the light (midpoint of the two
+LEDs), not the robot centre. It sits a fixed offset ahead: (forward, left) =
+the median of calib.py's `led_fwd_cm` / `led_left_cm` for that robot (all
+robots' median if it has none; 2.75, 0 cm if there is no calibration_results.csv;
+`led_offset_cm` overrides). So the filter expects it at
+`position + R(heading) * offset`: one fix moves position and, a little,
+heading. Light positions get the same lens term and the same 4 cm height
+correction as the detector's robot-top point (`runs.load_blink`). Noise:
+`Noise.blink_xy` = 0.5 cm (a guess: blink.py itself is ~0.04 cm in
+simulation; the rest is calibration, height and offset error).
+
+**Who is it.** Every sighting gets a probability for each robot whose run
+is going, for "elsewhere" (a name not running now) and for "none" (not a
+robot). Two clues, combined by naive Bayes: multiplied and renormalised,
+which assumes they are independent given who it is, with a flat prior:
+
+- *blink*: blink.py's per-track probabilities (`p_<name>`, `p_none`). A robot
+  without its own column takes `p_other`. A detector sighting within 5 cm of
+  a blink light in the same frame takes that light's probabilities, and its
+  detector track keeps them between flashes with fading confidence (mixed
+  with "no idea" by exp(-seconds since that light / 5 s): still >= 0.9 after
+  a 0.6 s gap, gone about 1.5 s after the lights stop). The carried name is
+  dropped when the track comes within 6 cm of another object.
+- *motion*: each camera track (blink.py's tracks; detector sightings are
+  chained frame to frame here) is compared every 0.5 s with each robot's own
+  wheels + gyro: the track's displacement against the robot's dead-reckoned
+  displacement, turned to the floor by its heading estimate (for a light, plus
+  the light's swing as it turns), as a 2-D Gaussian likelihood (noise:
+  camera noise, 5% of the distance, heading uncertainty x distance). "None"
+  gets a broad likelihood (10 cm spread per window). Windows multiply, older
+  ones count 0.7x per window; a window where nothing moved 1.5 cm says
+  nothing; a track's record is dropped when another object comes within
+  6 cm (tracks can swap there).
+
+Rules:
+1. Blink alone gives a robot >= `blink_name_p` (0.9): the sighting may only go
+   to that robot, and only inside its possible area. Otherwise it is kept as
+   an unknown object carrying the name, so rule 5 can't give it to another
+   robot either. A confidently named sighting never goes to another robot.
+2. Blink x motion gives a robot >= 0.9 (but neither alone did, or motion did
+   alone): the position must agree too. Each robot's position likelihood is
+   multiplied in (outside its possible area = impossible, "none" = 1 / view
+   area); that robot must still have >= 0.9.
+3. Otherwise the normal tracking rules, among robots that clues x position
+   don't put under 5%.
+
+Each fix used records where its identity came from: **blink** (blink alone
+>= 0.9), **motion** (motion alone), **both** (each alone), **combined** (only
+together), **position** (normal rules). replay.py prints the share per setup
+and robot and writes `identity.csv` (for T7).
+
+**Heading from motion** (`heading_from_motion`). When a robot drives
+forward (both wheels > 3 cm/s, gyro turn < 10 deg/s for the whole second)
+and its camera fixes moved > 3 cm/s over that second, the direction they
+moved (light fixes turned back to the centre) is a heading fix at the end of
+the window, corrected by the gyro's turn since the window's middle. Noise
+sqrt(2) x position noise / distance moved + 1 deg, so it shrinks with speed.
+At most one per second per robot; one more than 4 sigma off is dropped.
+Off by default. In simulation it gained nothing when camera position fixes
+exist (the filter already turns positions into heading as the robot drives);
+it may help when only a detector without heading is available, which the
+"detector positions only" pair of setups measures. First measurement (6-run simulator
+session, detector at 30 frames/s): heading RMSE 0.66 deg off, 0.67 on, so no
+gain there either; a slower or noisier detector is still untested.
+
+**Start-nudge headings.** With `--calib-results`, each start nudge's
+`heading_floor_deg` becomes a heading fix (0.8 deg) at its time, matched by
+run id, in setups that opt in (`calib_heading`: on in the new built-in
+setups, off by default and in the older ones).
+
 ## Tested so far (generated data, not yet real runs)
 
 - Square route, 3 laps, wheels slipping 3% per turn, gyro bias 0.8 deg/s,
@@ -68,6 +170,40 @@ rewinds, applies the fix, and replays the wheel and gyro readings since.
   (factor graph; along the whole path 0.23 vs 0.15 cm); 0.19 cm with half the
   frames lost or 200 ms late, 0.42 cm at 1 frame/s. The p-values treat runs
   as independent and aren't corrected for comparing ten setups.
+
+- Blink lights, identity and heading (2026-10-18; simulator seed 7, full E1
+  sheet, 36 runs, 3 robots one at a time; blink.py + calib.py on its video;
+  `--calib-results` given; in this run every setup used the start-nudge
+headings, which the older setups no longer do by default: numbers in
+brackets are without them):
+
+  | setup | end error cm | path RMSE cm | heading RMSE deg | right robot |
+  | --- | --- | --- | --- | --- |
+  | wheel distance + gyro heading | 1.29 (1.73 without nudge headings) | 0.82 | 1.14 (1.60) | - |
+  | + camera (filter) | 0.12 | 0.22 | 0.77 (0.93) | 100% |
+  | + blink lights only | 0.20 | 0.22 | 0.52 | 100% |
+  | + detector + blink | 0.12 | 0.22 | 0.57 | 100% |
+  | blink identity off (motion only) | 0.12 | 0.22 | 0.57 | 100% |
+  | heading from motion on (any of the above) | same to 0.01 | same | same to 0.01 | 100% |
+
+  The light's offset (2.73 cm ahead) makes it a heading measurement: blink
+  lights cut heading error by about a third. The start-nudge headings help
+  most where there is no camera. Heading from motion fired about once a
+  second while driving but changed nothing: it is the same camera positions
+  the filter already turns into heading as the robot moves. Identity sources
+  (detector + blink, per robot): both 96%, blink alone 1.4-1.9%, position
+  2.5-2.7%; with names off, motion 96%. In this session only one robot runs at a time, so "right
+  robot" can't fail; see the next point.
+- Identity with 2-3 robots at once (runs from that session overlaid in time
+  and space, a scratch test, not in the repo): parallel squares 14 cm apart,
+  parallel straights, two straights crossing 12 cm apart, three L routes:
+  every setup put 100% of fixes on the right robot, including the position
+  rules alone, so at 11 cm or more apart position is enough. With the squares
+  on top of each other (physically impossible, 0 cm): position rules 99.47%
+  right, blink names 100% of light fixes, detector + blink names 99.76%
+  (detector sightings only get a name when a lit light is in the same frame).
+  Before track memory was dropped near other objects (see the rules),
+  identity by motion made that case worse (97.0%); now it never did.
 
 ## Camera height
 
@@ -90,6 +226,24 @@ calibration made without that run; `fit.used_runs` in a calibration file lists
 the runs it used.
 
 ## Known limits
+
+- Blink identity comes from blink.py run over the whole video: a track's
+  name probabilities use flashes that come later. Live, a robot would get its
+  name only after about 6 flashes.
+- Naive Bayes treats blink and motion as independent, and motion windows as
+  independent of each other (with forgetting and a +-30 log cap); both are
+  from the same camera track, so the combined probability is overconfident.
+- The light's noise (0.5 cm), the view area for "not a robot" (160 x 120 cm),
+  the motion windows and the heading-from-motion thresholds are chosen, not
+  fitted. Wheel speeds for heading from motion use the nominal 1.7 cm radius.
+- A robot re-found from a light alone (rule 5, heading unknown) is placed
+  at the light with offset-sized uncertainty (3.75 cm).
+- Rule 5 with no tape start gives a confirmed unknown object to the first
+  lost robot whose speed fits; a blink name stops a wrong pick only once the
+  unknown object carries a name. Not yet tested with robots started out of
+  order.
+- The factor graph takes light and heading fixes (`+ detector + blink
+  (factor graph)`), checked on 6 runs only.
 
 - Wheels + gyro together came out worse than gyro heading alone in
   simulation (3.8 vs 1.5 cm): the filter trusts the wheels' turn rate more

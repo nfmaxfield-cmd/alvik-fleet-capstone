@@ -22,10 +22,18 @@ Inputs (all but --session optional):
                 camera positions use the calibration made WITHOUT that run (so camera
                 vs tape / odometry comparisons aren't circular); runs not listed use --calib
   --video-offset  skip the flash search and use this offset (s, video minus laptop)
+  --blink       blink_detections.csv from tools/blink/blink.py: light positions
+                with per-robot name probabilities (needs --calib and the clock offset)
+  --calib-results  calibration_results.csv from tools/blink/calib.py: start-nudge
+                headings (per run) and the light's offset on the robot
 
 Output, per run: <out>/<run_id>/raw.csv (t + every sensor column),
 camera.csv (t, x_cm, y_cm, score, heading_deg), meta.json (robot, route,
 result, battery, tape start/end poses, sync flash times, clock fit quality).
+With --blink also blink.csv (t, frame, x_cm, y_cm: the LIGHT's floor point,
+not the robot centre; track, n_spots, robot, p_<name>..., p_none); with
+--calib-results meta.json also gets calib_headings ([t, heading_deg, event])
+and led_offset_cm ([forward, left]).
 Plus <out>/manifest.csv listing every run and what is missing.
 
 Clock conversions:
@@ -299,8 +307,76 @@ def load_detections(path, H_px_to_floor, offset_s, labels_ok=("confirmed", "corr
     return out
 
 
+LED_OFFSET_CM = (2.75, 0.0)   # light (LED midpoint) ahead of the robot centre, cm (forward, left):
+                              # the simulator's model; calib.py measures it (calibration_results.csv)
+
+
+def load_blink(path, H_px_to_floor, offset_s, parallax=None, dist=None, lit_only=True):
+    """blink_detections.csv (tools/blink/blink.py) as floor positions of the
+    LIGHT on the laptop clock. Same corrections as load_detections: lens term,
+    then homography, then the height correction (the LEDs are on the robot's
+    top, about 4 cm up, like the detector's robot-top point). Rows filled in
+    between flashes (lit 0, --interpolate) are left out unless lit_only=False.
+    Each row: t, frame, x, y, track, robot (name if blink.py named it, else ""),
+    probs {name: p}, p_none, n_spots, score."""
+    out = []
+    with open(path, newline="") as f:
+        rd = csv.DictReader(f)
+        names = [c[2:] for c in (rd.fieldnames or []) if c.startswith("p_") and c != "p_none"]
+        for r in rd:
+            if lit_only and fnum(r.get("lit"), 1.0) < 0.5:
+                continue
+            x, y, t = fnum(r.get("x_px")), fnum(r.get("y_px")), fnum(r.get("t_wall"))
+            if any(math.isnan(v) for v in (x, y, t)):
+                continue
+            fx, fy = floor_from_top(*apply_h(H_px_to_floor, *undistort_px(x, y, dist)), parallax)
+            probs = {n: fnum(r.get("p_" + n), 0.0) for n in names}
+            probs = {n: (0.0 if math.isnan(p) else p) for n, p in probs.items()}
+            pn = fnum(r.get("p_none"), 0.0)
+            out.append(dict(t=t - offset_s, frame=int(fnum(r.get("frame"), -1)), x=fx, y=fy,
+                            track=int(fnum(r.get("track"), -1)), robot=(r.get("robot") or "").strip(),
+                            probs=probs, p_none=0.0 if math.isnan(pn) else pn,
+                            n_spots=int(fnum(r.get("n_spots"), 0)), score=fnum(r.get("score"), 0.0)))
+    out.sort(key=lambda d: d["t"])
+    return out
+
+
+def load_calib_results(path, offset_s):
+    """calibration_results.csv (tools/blink/calib.py): one dict per roll with
+    run, robot, event, t (laptop clock: wheels start), heading (floor deg or
+    None), led (forward, left) cm or None, identity."""
+    out = []
+    with open(path, newline="") as f:
+        for r in csv.DictReader(f):
+            tv, h = fnum(r.get("t_video")), fnum(r.get("heading_floor_deg"))
+            lf, ll = fnum(r.get("led_fwd_cm")), fnum(r.get("led_left_cm"))
+            out.append(dict(run=(r.get("run") or "").strip(), robot=(r.get("robot_log") or "").strip(),
+                            event=(r.get("event") or "").strip(), identity=(r.get("identity") or "").strip(),
+                            t=None if math.isnan(tv) else tv - offset_s,
+                            heading=None if math.isnan(h) else h,
+                            led=None if (math.isnan(lf) or math.isnan(ll)) else (lf, ll)))
+    return out
+
+
+def led_offsets(calib_rows, default=LED_OFFSET_CM):
+    """Light offset per robot (median of its rolls' led_fwd_cm / led_left_cm),
+    the median over all robots under None, or `default` if no roll measured it.
+    Returns ({robot or None: (forward, left)}, where it came from)."""
+    by = defaultdict(list)
+    for r in calib_rows or []:
+        if r["led"] is not None and r["identity"].lower() != "disagree":
+            by[r["robot"]].append(r["led"])
+    allv = [v for vs in by.values() for v in vs]
+    if not allv:
+        return {None: tuple(default)}, f"setting ({default[0]:.2f}, {default[1]:.2f}) cm"
+    med = lambda vs: (st.median(v[0] for v in vs), st.median(v[1] for v in vs))
+    out = {robot: med(vs) for robot, vs in by.items()}
+    out[None] = med(allv)
+    return out, f"calibration_results.csv ({len(allv)} rolls)"
+
+
 # ---------------------------------------------------------------- write
-def write_runs(runs, detections, out, extra=None):
+def write_runs(runs, detections, out, extra=None, blink=None, calib_rows=None, led=None):
     os.makedirs(out, exist_ok=True)
     man = []
     for run in runs:
@@ -327,12 +403,31 @@ def write_runs(runs, detections, out, extra=None):
                         n_det += 1
                         w.writerow([f"{det['t']:.4f}", det["frame"], f"{det['x']:.2f}", f"{det['y']:.2f}",
                                     f"{det['score']:.3f}", "" if det["heading"] is None else f"{det['heading']:.1f}"])
+        if blink is not None:
+            b_run = blink.get(run.run_id, blink.get(None)) if isinstance(blink, dict) else blink
+            names = sorted({n for b in b_run for n in b["probs"]})
+            t0, t1 = run.t_start - 1.0, run.t_end + 1.0
+            with open(os.path.join(d, "blink.csv"), "w", newline="") as f:
+                w = csv.writer(f)
+                w.writerow(["t", "frame", "x_cm", "y_cm", "track", "n_spots", "robot"] + ["p_" + n for n in names]
+                           + ["p_none"])
+                for b in b_run:
+                    if t0 <= b["t"] <= t1:
+                        w.writerow([f"{b['t']:.4f}", b["frame"], f"{b['x']:.2f}", f"{b['y']:.2f}", b["track"],
+                                    b["n_spots"], b["robot"]] + [f"{b['probs'].get(n, 0.0):.3f}" for n in names]
+                                   + [f"{b['p_none']:.3f}"])
+        run_extra = dict(extra or {})
+        if calib_rows is not None:
+            run_extra["calib_headings"] = [[c["t"], c["heading"], c["event"]] for c in calib_rows
+                                           if c["run"] == run.run_id and c["t"] is not None and c["heading"] is not None]
+        if led is not None:
+            run_extra["led_offset_cm"] = list(led.get(run.robot, led[None]))
         meta = dict(run_id=run.run_id, robot=run.robot, experiment=run.experiment, level=run.level,
                     result=run.result, excluded=run.excluded, battery_start=run.battery_start,
                     battery_end=run.battery_end, t_start=run.t_start, t_end=run.t_end,
                     tape_start=run.tape_start, tape_end=run.tape_end, targets=run.targets,
                     sync=run.sync, clock=run.clock, params=run.params,
-                    raw_time_from=run.raw[0].get("t_from"), **(extra or {}))
+                    raw_time_from=run.raw[0].get("t_from"), **run_extra)
         with open(os.path.join(d, "meta.json"), "w") as f:
             json.dump(meta, f, indent=2, default=lambda o: None if isinstance(o, float) and math.isnan(o) else o)
         missing = [k for k, v in (("tape", run.tape_end), ("sync", run.sync.get("start")),
@@ -355,16 +450,18 @@ def main():
     ap.add_argument("--calib")
     ap.add_argument("--calib-per-run", help="floor_calibration_loro.csv: score each run with the calibration made without it")
     ap.add_argument("--video-offset", type=float)
+    ap.add_argument("--blink", help="blink_detections.csv (tools/blink/blink.py)")
+    ap.add_argument("--calib-results", help="calibration_results.csv (tools/blink/calib.py)")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
     runs, fits = load_runs(args.session, args.sheet)
     print(f"{len(runs)} runs in {args.session}")
     dets, extra = None, {}
-    if args.detections:
-        if not args.calib:
-            sys.exit("--detections needs --calib (floor_calibration.json)")
-        H, Hinv = load_homography(args.calib)
+    blink, crow, led = None, None, None
+    if args.detections or args.blink or args.calib_results:
+        if not args.calib and (args.detections or args.blink):
+            sys.exit("--detections / --blink need --calib (floor_calibration.json)")
         off = args.video_offset
         if off is None:
             if not args.recording:
@@ -375,6 +472,28 @@ def main():
             off, spread, n = vo
             print(f"video clock = laptop clock {off * 1000:+.0f} ms (from {n} flashes, spread {spread * 1000:.0f} ms)")
         extra = dict(video_offset_s=off)
+        if args.calib_results:
+            crow = load_calib_results(args.calib_results, off)
+            led, how = led_offsets(crow)
+            print(f"{len(crow)} calibration rolls; light offset from {how}")
+    if args.blink:
+        H, Hinv = load_homography(args.calib)
+        par = load_parallax(args.calib)
+        blink = load_blink(args.blink, Hinv, off, parallax=par, dist=load_distortion(args.calib))
+        print(f"{len(blink)} blink light sightings")
+        if args.calib_per_run:
+            per = {None: blink}
+            base = os.path.dirname(os.path.abspath(args.calib_per_run))
+            with open(args.calib_per_run, newline="") as f:
+                for r in csv.DictReader(f):
+                    if r.get("calibration"):
+                        c = os.path.join(base, r["calibration"])
+                        _, Hi = load_homography(c)
+                        per[r["run_id"]] = load_blink(args.blink, Hi, off, parallax=load_parallax(c),
+                                                      dist=load_distortion(c))
+            blink = per
+    if args.detections:
+        H, Hinv = load_homography(args.calib)
         par = load_parallax(args.calib)
         if par is None:
             print("note: calibration has no camera height; robot-top positions not corrected for height")
@@ -393,7 +512,7 @@ def main():
             print(f"{len(per) - 1} runs use their held-out calibration ({args.calib_per_run})")
             extra["calib_per_run"] = os.path.abspath(args.calib_per_run)
             dets = per
-    man = write_runs(runs, dets, args.out, extra)
+    man = write_runs(runs, dets, args.out, extra, blink=blink, calib_rows=crow, led=led)
     w = [max(len(str(r[i])) for r in man + [["run_id", "robot", "route", "result", "raw", "cam", "tape", "missing"]]) for i in range(8)]
     for r in [["run_id", "robot", "route", "result", "raw", "cam", "tape", "missing"]] + man:
         print("  " + "  ".join(str(c).ljust(w[i]) for i, c in enumerate(r)))

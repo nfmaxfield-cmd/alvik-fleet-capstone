@@ -19,6 +19,11 @@ Measurements:
     zupt      "zero velocity update": wheels say the robot is still, so v = w = 0
     cam_xy    camera position fix (cm), possibly late
     cam_th    camera heading, when the detector gives one
+    cam_light camera fix of the robot's top LIGHT (blink codes), which sits a
+              fixed offset (forward, left) from the centre: h = position +
+              R(th) offset, so it also says a little about heading
+    heading   a heading fix with its own noise (heading from motion, the
+              calibration rolls / start nudges)
 """
 import math
 
@@ -45,6 +50,8 @@ class Noise:
         self.zupt = 0.02           # cm/s and rad/s: how sure "still" is
         self.cam_xy = 0.8          # cm, camera position noise (replace with E4's result)
         self.cam_th = 8.0 * D2R    # rad, camera heading noise
+        self.blink_xy = 0.5        # cm, blink light position noise (blink.py: ~0.15 px = 0.04 cm; the rest
+                                   # is calibration, LED height and offset error; replace with a measurement)
         self.q_v = 40.0            # (cm/s)/sqrt(s): how fast speed can change
         self.q_w = 4.0             # (rad/s)/sqrt(s): how fast turn rate can change
         self.q_b = 0.01 * D2R      # (rad/s)/sqrt(s): gyro bias drift
@@ -157,6 +164,45 @@ class EKF:
         H = np.zeros((1, 6))
         H[0, 2] = 1
         self._update(np.array([th]), np.array([self.s[2]]), H, np.array([[self.n.cam_th ** 2]]), angle_rows=(0,))
+
+    def light_h(self, off, s=None):
+        """Where the light should be seen (floor cm) and its Jacobian (2x6) for a
+        light at `off` = (forward, left) cm from the robot centre."""
+        s = self.s if s is None else s
+        f, l = off
+        c, sn = math.cos(s[2]), math.sin(s[2])
+        h = np.array([s[0] + c * f - sn * l, s[1] + sn * f + c * l])
+        H = np.zeros((2, 6))
+        H[0, 0] = H[1, 1] = 1
+        H[0, 2] = -sn * f - c * l
+        H[1, 2] = c * f - sn * l
+        return h, H
+
+    def light_d2(self, xy, off, sigma, t=None):
+        """Squared Mahalanobis distance of a light fix from where the light should be."""
+        s, P = (self.s, self.P) if t is None else self.predicted(t)
+        h, H = self.light_h(off, s)
+        S = H @ P @ H.T + np.eye(2) * sigma ** 2
+        d = np.asarray(xy) - h
+        return float(d @ np.linalg.solve(S, d))
+
+    def cam_light(self, xy, off, sigma=None):
+        sigma = self.n.blink_xy if sigma is None else sigma
+        h, H = self.light_h(off)
+        d2 = self._update(np.asarray(xy, float), h, H, np.eye(2) * sigma ** 2)
+        self.last_cam = self.t
+        return d2
+
+    def heading(self, th, sigma):
+        """Heading fix th (rad) with noise sigma (rad). Returns its squared
+        Mahalanobis distance (before the update)."""
+        H = np.zeros((1, 6))
+        H[0, 2] = 1
+        return self._update(np.array([th]), np.array([self.s[2]]), H, np.array([[sigma ** 2]]), angle_rows=(0,))
+
+    def heading_d2(self, th):
+        y = wrap(th - self.s[2])
+        return y, self.P[2, 2]
 
     def lost(self, sigma_xy=100.0, sigma_th=math.pi):
         """The robot was picked up: we no longer know where it is."""

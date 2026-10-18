@@ -11,6 +11,9 @@ second by default) as unknowns and finds the path that best agrees with:
     less trusted, from the wheels
   - the gyro reading equals its bias whenever the wheels say the robot is still
   - camera fixes assigned to this robot by the filter's tracking rules
+  - blink light fixes (the light sits a fixed offset ahead of the centre, so
+    they pull on heading too) and heading fixes (heading from motion, start
+    nudges), when the filter used them
 
 Each agreement is a "factor"; each disagreement is weighted by how much that
 sensor is trusted. A robust (Huber) weighting stops a single wrong camera
@@ -41,6 +44,8 @@ def smooth(tracked, kf_hz=20.0, use_gyro=True, use_wheel_w=True, use_camera=True
     n = Noise(**tracked.cfg["noise"])
     raw = [e for e in tracked.events if e[2] == "raw"]
     cams = [e for e in tracked.events if e[2] == "cam"] if use_camera else []
+    lights = [e for e in tracked.events if e[2] == "blink"] if use_camera else []
+    hdgs = [e for e in tracked.events if e[2] == "hdg"]
     if len(raw) < 3:
         return []
     t0, t1 = raw[0][0], raw[-1][0]
@@ -93,6 +98,10 @@ def smooth(tracked, kf_hz=20.0, use_gyro=True, use_wheel_w=True, use_camera=True
         k = int(round((e[0] - t0) * kf_hz))
         if 0 <= k < K:
             cam_k.append((k, e[3]))
+    light_k = [(int(round((e[0] - t0) * kf_hz)), e[3]) for e in lights]
+    light_k = [(k, d) for k, d in light_k if 0 <= k < K]
+    hdg_k = [(int(round((e[0] - t0) * kf_hz)), e[3]) for e in hdgs]
+    hdg_k = [(k, d) for k, d in hdg_k if 0 <= k < K]
 
     def residuals(p):
         out = []
@@ -118,6 +127,12 @@ def smooth(tracked, kf_hz=20.0, use_gyro=True, use_wheel_w=True, use_camera=True
                     out.append((g / dt - b) / (n.g_base / math.sqrt(dt)))
         for k, det in cam_k:
             out += [(p[3 * k] - det["x"]) / n.cam_xy, (p[3 * k + 1] - det["y"]) / n.cam_xy]
+        for k, d in light_k:
+            c, s = math.cos(p[3 * k + 2]), math.sin(p[3 * k + 2])
+            f, l = d["off"]
+            out += [(p[3 * k] + c * f - s * l - d["x"]) / n.blink_xy, (p[3 * k + 1] + s * f + c * l - d["y"]) / n.blink_xy]
+        for k, d in hdg_k:
+            out.append(wrap(p[3 * k + 2] - d["th"]) / d["sigma"])
         return np.array(out)
 
     # which unknowns each residual touches (keeps the solver fast)
@@ -142,6 +157,13 @@ def smooth(tracked, kf_hz=20.0, use_gyro=True, use_wheel_w=True, use_camera=True
         J[r, 3 * k] = 1
         J[r + 1, 3 * k + 1] = 1
         r += 2
+    for k, _ in light_k:
+        J[r, 3 * k:3 * k + 3] = 1
+        J[r + 1, 3 * k:3 * k + 3] = 1
+        r += 2
+    for k, _ in hdg_k:
+        J[r, 3 * k + 2] = 1
+        r += 1
     # Plain least squares first (converges quickly from any reasonable guess),
     # then the robust weighting from there, so a few bad camera fixes can't
     # drag the path.
