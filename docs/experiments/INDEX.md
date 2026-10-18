@@ -12,6 +12,7 @@ proposal target of under 5 cm.
 | --- | --- | --- | --- | --- |
 | [E0](E00-measurement-check/) | 5 (Oct 12-18) | Measurement check (tape rig) | planned | |
 | [E1](E01-baseline-dataset/) | 5 (Oct 17-18) | Baseline data set: odometry-only accuracy, plus every sensor logged and filmed for fusion replay | planned | |
+| [E1b](E01b-low-battery/) | 5 (Oct 18) | Low battery: Right's E1 routes at low charge, paired with its full-charge E1 runs | planned | |
 | E2 | 6 (Oct 19-25) | Lab system baseline | planned | |
 | E3 | 7 (Oct 26-Nov 1) | Communication baseline | planned | |
 | E4 | 8 (Nov 2-8) | AprilTag precision, static | planned | |

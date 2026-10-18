@@ -114,6 +114,9 @@ def check_port():
         s.close()
 
 
+LOW_OK = set()   # robots allowed a low battery (--low-battery-ok), e.g. for E1b
+
+
 def check_robots(wanted, listen_s, outdir):
     print("\n4. Robots")
     from alvik_console import Link
@@ -160,7 +163,7 @@ def check_robots(wanted, listen_s, outdir):
             line = f"{n}: firmware {st['fw']}, battery {st['battery']}%, WiFi {st['dbm']} dBm, {st['state']}"
             if want_fw and st["fw"] != want_fw:
                 say(BAD, line, f"flash firmware {want_fw} (this repo's home_lab)")
-            elif st["battery"] < 40:
+            elif st["battery"] < 40 and n not in LOW_OK:
                 say(BAD, line, "charge it: a run on low battery is slower and turns differently")
             elif st["dbm"] < -78:
                 say(WARN, line, "weak WiFi: move the router or laptop closer, or expect lost packets")
@@ -189,7 +192,9 @@ def main():
     ap.add_argument("--listen", type=float, default=12, help="seconds to wait for robots")
     ap.add_argument("--no-weights", action="store_true", help="skip the weights download")
     ap.add_argument("--no-robots", action="store_true", help="skip the robot checks")
+    ap.add_argument("--low-battery-ok", default="", help="robots allowed a low battery, e.g. Right (for E1b)")
     a = ap.parse_args()
+    LOW_OK.update(r.strip() for r in a.low_battery_ok.split(",") if r.strip())
     have = check_python()
     if not a.no_weights:
         fetch_weights(have)

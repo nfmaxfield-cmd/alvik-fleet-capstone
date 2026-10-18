@@ -3,6 +3,7 @@
 
     python tools/make_run_order.py E1 --robots Left --reps 8 --seed 21
     python tools/make_run_order.py E0 --seed 5
+    python tools/make_run_order.py E1B --robots Right --reps 4 --seed 22
 
 Writes docs/experiments/<folder>/data/measurements.csv (refuses to overwrite
 a sheet that already has measurements, unless --force). Print it or open it
@@ -43,6 +44,9 @@ EXPERIMENTS = {
                        "square3": "set demo_route 3 / set square_cm 50 / set square_laps 3 / run demo"}[lv],
            lambda lv: (120.0, 0.0, 0.0) if lv == "straight120" else (0.0, 0.0, 0.0)),
 }
+# E1b: the same runs as E1 at low battery, for a paired comparison with the
+# same robot's E1 runs at full battery.
+EXPERIMENTS["E1B"] = ("E01b-low-battery",) + EXPERIMENTS["E1"][1:]
 
 COLS = ["order", "robot", "level", "commands", "run_id", "target_x_cm", "target_y_cm", "target_heading_deg",
         "xf0_cm", "yf0_cm", "xr0_cm", "yr0_cm", "xf_cm", "yf_cm", "xr_cm", "yr_cm", "battery_pct", "excluded", "note"]

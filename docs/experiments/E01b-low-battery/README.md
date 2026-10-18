@@ -1,0 +1,42 @@
+# E1b: Low battery (part of T1/T2)
+
+Status: planned    Week: 5 (Oct 18)    Run dates:
+
+## Question
+Do the robot's own sensors get less accurate when its battery is low?
+Right was at 17% on Oct 17, which gives a low-battery set without waiting.
+
+## Hypotheses
+- (a) At low battery, wheel-only end error is larger than at full battery on
+  the same robot and routes (slower, weaker motors slip more in turns).
+  H0: no difference.
+- (b) Gyro bias and noise at rest do not change with battery (the gyro has
+  its own regulated supply). H0: no difference.
+
+## Variables
+| Kind | Variable | Levels or units |
+| --- | --- | --- |
+| Independent | battery | low (start of this block, Right below 25%) vs full (Right's E1 runs after charging to 100%) |
+| Independent | route | same three as E1, 4 each |
+| Dependent | end position and heading error, wheels only and wheels + gyro | cm, deg, tape |
+| Dependent | gyro bias and noise in still periods; wheel speed vs command | deg/s; RAW |
+| Logged | battery every run (RUNINFO, RUNEND) and 50 times a second (RAW) | robot log |
+| Held constant | robot (Right), floor, routes, firmware 2026-10-17g | |
+
+## Procedure
+1. Tonight: switch Right **off** and do **not** charge it. Charge Left and Center.
+2. Morning, after T0: run this sheet first, with Right only:
+   `python tools/run_sheet.py docs/experiments/E01b-low-battery --robot Right --pi st1maxfini.local`
+   (preflight will flag Right's low battery; that's expected here).
+3. Stop the block if Right drops below 8% or switches off mid-run; mark that
+   run excluded with the reason. Fewer runs is fine; note how many.
+4. Charge Right to 100%, then run its rows of the E1 sheet as normal. Those
+   are the full-battery half of the comparison.
+
+## Analysis
+Paired by route: low vs full battery for the same robot. Welch's t-test per
+route on end error (wheels only, then wheels + gyro from the fusion replay).
+Battery is also a column on every E1 run, so the full E1 set gets a
+battery-vs-error scatter as a check.
+
+## Deviations
