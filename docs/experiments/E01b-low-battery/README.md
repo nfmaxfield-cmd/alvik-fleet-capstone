@@ -21,13 +21,15 @@ Right was at 17% on Oct 17, which gives a low-battery set without waiting.
 | Dependent | end position and heading error, wheels only and wheels + gyro | cm, deg, tape |
 | Dependent | gyro bias and noise in still periods; wheel speed vs command | deg/s; RAW |
 | Logged | battery every run (RUNINFO, RUNEND) and 50 times a second (RAW) | robot log |
-| Held constant | robot (Right), floor, routes, firmware 2026-10-17g | |
+| Held constant | robot (Right), floor, routes, firmware 2026-10-18a | |
 
 ## Procedure
 1. Tonight: switch Right **off** and do **not** charge it. Charge Left and Center.
-2. Morning, after T0: run this sheet first, with Right only:
-   `python tools/run_sheet.py docs/experiments/E01b-low-battery --robot Right --pi st1maxfini.local`
-   (preflight will flag Right's low battery; that's expected here).
+2. After T0, before E1: run this sheet first, with Right only. Mark the
+   start spots and start the camera as in E1's procedure (steps 1 and 2), then
+   on the laptop, in the repo folder:
+   `python tools/preflight.py --robots Right --pi st1maxfini.local --low-battery-ok Right`
+   `python tools/run_sheet.py docs/experiments/E01b-low-battery --pi st1maxfini.local --inches`
 3. Stop the block if Right drops below 8% or switches off mid-run; mark that
    run excluded with the reason. Fewer runs is fine; note how many.
 4. Charge Right to 100%, then run its rows of the E1 sheet as normal. Those

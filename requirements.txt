@@ -1,0 +1,6 @@
+# Laptop tools: python -m pip install -r requirements.txt
+numpy
+scipy
+opencv-python
+# Only for the tests: python -m pytest tools/tests
+pytest

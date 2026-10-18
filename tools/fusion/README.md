@@ -6,11 +6,12 @@ sensor switched off or degraded, and compare the results against the tape.
 | File | What it does |
 | --- | --- |
 | `runs.py` | Run-file builder: puts each run's robot log, tape marks, camera sightings and blink lights on the laptop's clock; can save one folder per run |
-| `ekf.py` | The Kalman filter for one robot: wheels, gyro, camera, blink light, heading fixes |
+| `ekf.py` | The Kalman filter for one robot: wheels, gyro, camera, blink light, heading fixes, landmark ranges |
 | `engine.py` | Runs the filters for all robots, applies sensor dropouts, the tracking rules and the identity rules |
 | `graph.py` | Factor graph: re-solves a whole run so every reading fits together |
+| `landmarks.py` | Landmark ranging: map faces, distance-sensor ray geometry, which zones can be used |
 | `replay.py` | Runs every sensor setup over the same runs and compares them |
-| `tests/` | Unit tests: light-offset model, identity combination, heading from motion (`python -m pytest tools/fusion/tests -q`, a few seconds) |
+| `tests/` | Unit tests: light-offset model, identity combination, heading from motion, landmark ranging (`python -m pytest tools/fusion/tests -q`, about 10 s) |
 
 ## Quick start
 
@@ -205,6 +206,87 @@ brackets are without them):
   Before track memory was dropped near other objects (see the rules),
   identity by motion made that case worse (97.0%); now it never did.
 
+- Landmark ranging (2026-10-18; tools/sim from branch follow-18b with a
+  `--map` option, 36-run E1 sessions, seeds 7 and 11, five boards / a
+  cinderblock 9-60 cm from the routes, plus an unmapped brick the fusion's map
+  doesn't have; default settings). Seed 7 (seed 11 in brackets):
+
+  | setup | end error cm | path RMSE cm | heading RMSE deg |
+  | --- | --- | --- | --- |
+  | wheels + gyro | 3.28 (3.83) | 2.06 (2.28) | 3.36 (3.77) |
+  | + landmark ranging | 1.00 (1.17) | 0.84 (0.90) | 1.35 (1.46) |
+  | + landmark ranging (factor graph) | 1.03 (1.36) | 0.63 (0.77) | 1.05 (1.17) |
+  | wheel distance + gyro heading | 1.43 (1.35) | 1.05 (1.03) | 1.56 (1.42) |
+  | ... + landmark ranging | 0.75 (0.85) | 0.63 (0.61) | 0.95 (0.95) |
+  | + camera (filter) | 0.31 (0.29) | 0.37 (0.39) | 1.12 (1.09) |
+  | + camera + landmark ranging | 0.39 (0.51) | 0.33 (0.35) | 1.15 (1.18) |
+  | + camera, blocked 5 s mid-run | 0.25 (0.23) | 0.47 (0.51) | 1.20 (1.21) |
+  | ... + landmark ranging | 0.30 (0.36) | 0.42 (0.43) | 1.22 (1.24) |
+  | + camera, blocked 20 s mid-run | 1.01 (1.14) | 0.96 (1.08) | 1.51 (1.66) |
+  | ... + landmark ranging | 0.91 (1.03) | 0.77 (0.84) | 1.36 (1.47) |
+
+  Zone readings: 39-41% used, 1.5% rejected by the gate (3.7% of those tied
+  to a face), the rest not tied to a face (12% none in range, 17% two faces
+  close in angle, 15% over 20 deg, 13% reading out of range). Of about 47,000
+  used readings, 1 disagreed with the true pose by more than 3 sigma: the
+  unmapped brick and the room walls were kept out. Without the camera it
+  roughly halves the path error; with the camera working it adds little to
+  the path and makes the end error slightly worse (0.31 -> 0.39 cm), so the
+  camera is still better than the model of the distance sensor. Every board
+  moved 1 cm (tape error): + landmark ranging 1.23 cm end, 1.05 cm path
+  (seed 7), still well under wheels + gyro.
+
+## Landmark ranging (landmarks.py, engine.py, ekf.py, graph.py)
+
+A board or block at a tape-measured spot gives the robot a position fix from
+its own front distance sensor. Give the landmarks with `--map` (replay.py and
+runs.py): a tools/fleet `map.json` or a `landmarks.csv`
+(docs/data-formats.md, "Landmarks"). This adds the setups `+ landmark
+ranging` (filter and factor graph), `wheel distance + gyro heading + landmark
+ranging`, and with camera sightings `+ camera + landmark ranging` (filter and
+factor graph), `+ camera, blocked 5 s mid-run + landmark ranging`, and a
+20 s block with and without it. "Camera blocked the whole run + landmark
+ranging" is `+ landmark ranging`. Your own setups: put `"tof"` in `sensors`.
+Without `--map` nothing changes (checked: every output file byte-identical on
+a 36-run simulator session).
+
+**The measurement.** Each new sensor frame (RAW repeats a frame until the
+next; `tof_new_frames_only`), for each of the five zones: the expected
+reading is the distance from the sensor (`tof_forward_cm` 4.75 minus
+`tof_recess_cm` 0.25 ahead of the centre) along the zone's direction
+(`tof_zone_deg` +22, +11, 0, -11, -22, left positive) to the first mapped face
+it hits. Noise 0.5 cm + 3% of the distance. A zone is used only if:
+
+1. the reading is between 2 and 120 cm (`tof_min_cm`, `tof_max_cm`), and so is
+   the prediction;
+2. rays 5.5 deg either side hit the same face first (`tof_assoc_deg`; else two
+   faces are close in angle: "ambiguous");
+3. the ray lands at least 2 cm + 2 sigma (how unsure the filter is of where it
+   lands) from the face's ends ("edge");
+4. it meets the face within 20 deg of square-on (`tof_max_incidence_deg`,
+   "grazing", see below);
+5. the reading is within the gate of the prediction (`tof_gate_chi2` 10.83:
+   1 dof, 99.9%) or it is rejected ("gated"): something unmapped is in front.
+
+No identity is needed: the map says which face the ray hits from the
+predicted pose. The factor graph re-uses the readings the filter used, tied
+to the same faces. replay.py writes `landmark_ranging.csv` and `tof_*`
+columns in results.csv: how many readings were used, gated, or not tied to a
+face (and why), and the mean residual.
+
+**Why 20 deg.** Where a zone's reading comes from inside its field matters
+for faces hit at an angle: one ray down the middle (`tof_zone_width_deg` 0,
+the default) or the nearest point within the zone's slice (> 0). In the
+simulator (nearest of 3 rays across 7.33 deg) the single-ray model reads
+0.2 sigma short on average, up to 0.5 sigma for the outer zones; with 60 deg
+allowed that small bias, repeated 15 times a second, made landmark ranging
+worse than none on the straight and L routes. Limiting to 20 deg keeps only
+readings where the models agree. Once the zone footprint is measured on the
+robot, set `tof_zone_width_deg` and raise the limit: in simulation, with the
+right width and 60 deg, path error drops a further 0.84 -> 0.47 cm.
+
+Simulator results: see "Tested so far".
+
 ## Camera height
 
 The floor calibration maps the floor plane to pixels, but the camera sees the
@@ -293,3 +375,13 @@ interval), since a setup can help on squares and not on straights.
   wrong one. E1 always has a tape start.
 - The factor graph here smooths a whole run after the fact. A live
   sliding-window version for the Pi comes with E6.
+- Landmark ranging: tested in simulation only, where the sensor model is
+  itself a guess (3 rays per zone, 15 frames/s, 0.5 cm + 1% noise). The five
+  zones and successive frames are treated as independent; a shared error
+  (sensor mounted a little turned, a board's position off) is counted many
+  times over. Zone directions, the sensor's offset, the noise and the zone
+  footprint (`tof_zone_width_deg`) are chosen, not measured. The filter has
+  no wheel-size state, so with wheels reading 5% long a lag of about 0.9 cm
+  stays while driving at a board (unit test). Circles in map.json are not
+  landmarks. The association check (+-5.5 deg) may be stricter than needed:
+  switched off, the seed 7 path error was 0.74 instead of 0.84 cm.

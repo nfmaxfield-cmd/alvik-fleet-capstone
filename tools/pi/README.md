@@ -12,8 +12,8 @@ To get updates later: `cd ~/alvik-fleet-capstone && git pull`
 ## Record
 
 ```
-cd ~/alvik-fleet-capstone/tools/pi
-python3 camrec.py --label E1
+cd ~/alvik-fleet-capstone
+python3 tools/pi/camrec.py --device 0 --fps 25 --label E1
 ```
 
 - Preview on the laptop: http://st1maxfini.local:8000

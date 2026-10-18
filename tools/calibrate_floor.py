@@ -27,8 +27,9 @@ No clicking (needs the console log folder --session, the runs' tape sheet
 --sheet and camera detections --detections; see floorcal_runs.py):
 
   --from-runs   each taped run's start and end pose while the robot sits still,
-                paired with its median detection. E01 runs all start at the
-                origin, so these points alone lie on a line: combine with clicks.
+                paired with its median detection. With only one or two start
+                spots (and straight runs) the points can lie near a line:
+                combine with clicks.
   --survey      the robots' own wheel distance + gyro heading paths while they
                 drive, hung from each run's tape start pose (the only tape
                 needed), paired with the camera track: for recalibrating after

@@ -46,6 +46,7 @@ tools/
   tape_results.py    tape measurements -> errors, stats, chart for a record
   check_session.py   after a session: sensor log, clocks and video line up?
   preflight.py       before a session: packages, detector weights, robot firmware and battery, Pi recorder
+  heading_check.py   tape start headings vs the camera's start-nudge headings (T0/T1 heading precision)
   run_sheet.py       guided experiment runs: commands, run ids, tape entry with checks
   commtest.py        WiFi delay, jitter and delivery per robot (experiment E3)
   pi/camrec.py       overhead camera recorder for the Raspberry Pi
