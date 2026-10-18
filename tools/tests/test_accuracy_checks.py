@@ -105,7 +105,7 @@ def test_missing_inputs_say_not_available(tmp_path, capsys):
     out = capsys.readouterr().out
     rows = list(csv.DictReader(open(t1 / "accuracy_checks.csv")))
     ids = {r["id"] for r in rows}
-    assert ids == {str(i) for i in range(1, 15)}
+    assert ids == {str(i) for i in range(1, 16)}
     for r in rows:
         if r["id"] not in ("13", "14"):
             assert r["verdict"] == ac.NOTYET and r["result"].startswith("not available yet (needs"), r
@@ -241,7 +241,10 @@ def test_simulated_session(sim, capsys):
     assert "3 route-matched pairs" in by[("13", "E1b vs T1 (Right)")]["result"]
     assert by[("13", "held-out split")]["verdict"] in (ac.PASS, ac.CHECK)
     assert (t1 / "data" / "split.csv").exists()
-    for cid in ("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12", "13", "14"):
+    # 15: the fusion's encoder still test catches most still rows and almost no moving ones
+    for rb in ("Left", "Right"):
+        assert by[("15", rb)]["verdict"] == ac.PASS, by[("15", rb)]["result"]
+    for cid in ("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12", "13", "14", "15"):
         assert any(r["id"] == cid and r["verdict"] != ac.NOTYET for r in rows), cid
     assert by[("11", "all runs")]["verdict"] == ac.NOTYET          # no calibration_results.csv here
 

@@ -30,7 +30,7 @@ progress Oct 18; **planned** = written here, not built yet.
 | A7 | WiFi losses come in bursts (the simulator assumes random single losses) | Lost sensor rows: longest run, gaps | No gap over 300 ms outside the library's moves | partly built |
 | A8 | Robot clock fit (each robot's clock vs the laptop's) | Fit residuals and drift per robot and power-on | Residuals under 10 ms | built |
 | A9 | The floor isn't level, or the gyro isn't vertical | Accelerometer tilt while still | Under 2° | building |
-| A10 | Rest noise is above the "standing still" threshold the fusion uses | Wheel and gyro noise while still | Below 0.2 rpm, 0.1 cm/s, 0.5°/s, or the threshold is changed to fit | building |
+| A10 | The fusion's "standing still" test misses still moments or fires while moving (it now uses the wheel angles: no change over 0.25 s; the old wheel-speed thresholds sat below the rest noise) | `accuracy_checks.py` check 15 on the T1 runs | At least 70% of still rows called still, at most 1% of moving rows | building |
 | A11 | Gyro bias changes as the robot warms up | Bias in each still period vs time since power-on | Under 0.2°/s change | building |
 | A12 | The "lifted" flag trips when the robot isn't lifted | Lifted readings during runs | None | building |
 | A13 | Front distance sensor frame rate and age differ from the assumed 15 per second, no delay | Changes per second in each zone | Measured value used | building |

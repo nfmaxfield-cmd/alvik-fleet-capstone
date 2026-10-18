@@ -37,8 +37,8 @@ def test_consider_states_keep_a_misplaced_board_from_hurting():
     cons = run_cfg(run, dets, mapped, sensors=CAMTOF, tof_consider=True, tof_face_sigma_cm=1.5)
     assert plain > 3 * cam
     assert end_err(cons, truth) < cam + 0.05
-    assert cons.ekf.N == 6 + 3                     # one face, range bias, mount turn
-    assert np.all(cons.ekf.s[6:] == 0.0)           # never estimated
+    assert cons.ekf.N == 8 + 3                     # (wheel-size states,) one face, range bias, mount turn
+    assert np.all(cons.ekf.s[8:] == 0.0)           # never estimated
     g = graph.smooth(cons)
     assert math.hypot(g[-1][1] - truth[-1][1], g[-1][2] - truth[-1][2]) < cam + 0.1
 

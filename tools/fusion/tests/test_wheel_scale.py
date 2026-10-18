@@ -12,15 +12,19 @@ from fusion_synth import straight_run, sightings
 from test_landmarks import drive, wall, end_err, WWG
 
 
-def test_off_by_default_and_unobservable_scale_never_moves():
-    """Wheels + gyro only: nothing measures position, so k and kw stay exactly at their start and the
-    path is the same as without the states (to rounding)."""
+def test_on_by_default_off_switch_and_unobservable_scale_never_moves():
+    """Wheel size is on by default and wheel_scale False switches it off. Wheels + gyro only: nothing
+    measures position, so k and kw stay exactly at their start and the path is the same as without the
+    states (to rounding)."""
+    assert eng.config()["wheel_scale"] is True
     for ws in (1.0, 1.05):
         run, truth = drive([wall(100.0)], wheel_scale=ws)
         for sens in (WWG, ["wheel_v", "wheel_w"], ["wheel_v", "gyro"]):
-            off = eng.run_engine([run], None, eng.config(sensors=sens))[0]["r1"]
-            on = eng.run_engine([run], None, eng.config(sensors=sens, wheel_scale=True, turn_scale=True))[0]["r1"]
-            assert off.ekf.N == 6 and on.ekf.N == 8
+            off = eng.run_engine([run], None, eng.config(sensors=sens, wheel_scale=False))[0]["r1"]
+            on = eng.run_engine([run], None, eng.config(sensors=sens, turn_scale=True))[0]["r1"]
+            dflt = eng.run_engine([run], None, eng.config(sensors=sens))[0]["r1"]
+            assert off.ekf.N == 6 and on.ekf.N == 8 and dflt.ekf.N == 8
+            assert dflt.ekf.s[6] == 1.0
             assert on.ekf.s[6] == 1.0 and on.ekf.s[7] == 1.0
             a, b = off.trajectory()[-1], on.trajectory()[-1]
             assert math.hypot(a[1] - b[1], a[2] - b[2]) < 1e-6
@@ -29,8 +33,8 @@ def test_off_by_default_and_unobservable_scale_never_moves():
 def test_landmarks_learn_the_wheel_scale_and_remove_the_lag():
     faces = [wall(100.0)]
     run, truth = drive(faces, wheel_scale=1.05)
-    plain = eng.run_engine([run], None, eng.config(sensors=WWG + ["tof"]), landmarks=faces)[0]["r1"]
-    sc = eng.run_engine([run], None, eng.config(sensors=WWG + ["tof"], wheel_scale=True), landmarks=faces)[0]["r1"]
+    plain = eng.run_engine([run], None, eng.config(sensors=WWG + ["tof"], wheel_scale=False), landmarks=faces)[0]["r1"]
+    sc = eng.run_engine([run], None, eng.config(sensors=WWG + ["tof"]), landmarks=faces)[0]["r1"]
     assert sc.ekf.s[6] == pytest.approx(1.05, abs=0.01)
     assert end_err(plain, truth) > 0.6                       # the lag the filter had without it
     assert end_err(sc, truth) < 0.25

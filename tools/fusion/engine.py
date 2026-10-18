@@ -184,7 +184,7 @@ DEFAULT = dict(
     tof_lag_inflate=False,    # widen the noise for frame-to-frame correlation: x sqrt((1 + r) / (1 - r)),
                               # r = the calibration's lag-1 correlation of the zone errors
     # --- wheel size (ekf.py states k, kw): learned from the position sensors, carried from run to run
-    wheel_scale=False,        # estimate the wheel distance scale (wheels read k x the true distance)
+    wheel_scale=True,         # estimate the wheel distance scale (wheels read k x the true distance); False = off
     wheel_scale_sigma=0.03,   # prior: wheel sizes / slip within about 3% of nominal
     wheel_scale_walk=0.0005,  # how fast it may drift, per sqrt(s) (0.5% over 100 s)
     turn_scale=False,         # estimate the wheel turn-rate scale too (wheel track, scrub in turns)

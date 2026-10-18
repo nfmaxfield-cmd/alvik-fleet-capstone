@@ -336,8 +336,8 @@ error whenever the camera is blocked or absent, and as a fallback it matches
 the camera on path and improves heading, but with the camera working it still
 costs 0.05 cm of end error on average (r7: 0.27 vs 0.27; r11: 0.35 vs 0.25),
 and the factor graph is better without it. The target "never worse than the
-camera alone" is NOT met for end error. Not shipped as default: the options
-are off and the plain setups are byte-identical to before. Recommended until
+camera alone" is NOT met for end error. Not shipped as default: the landmark
+options are off. Recommended until
 real data says otherwise: `"tof_consider": true, "tof_camera_gap_s": 1.0` with
 a calibration, in the filter (not the factor graph).
 
@@ -418,13 +418,14 @@ change below; end error vs tape / path RMSE, cm):
 | + landmark ranging | 1.09 / 0.86 | 1.07 / 0.85 | 1.22 / 1.14 | 1.08 / 0.87 | 1.37 / 1.45 | 1.12 / 0.83 |
 | + camera + landmark ranging | 0.38 / 0.32 | 0.38 / 0.31 | 0.70 / 0.59 | 0.44 / 0.34 | 0.99 / 0.80 | 0.42 / 0.30 |
 
-**Off by default**, because with exact wheels it costs a little (0.02-0.03
-cm of end error with the camera): the learned k wanders between 1.000 and
-1.012 depending on the route (squares pull it up), so it partly soaks up other
-model errors, probably the heading in turns. Tighter priors (1-1.5%) or no
-drift did not remove that. With wheels 3% or 5% off it more than halves the
-camera's end and path error. Turn it on (`"wheel_scale": true` in a setup)
-once T1 or the calibration runs show wheel-size errors of 1% or more.
+**On by default** (decided 2026-10-18: real wheels won't be exact). With
+wheels 3% or 5% off it more than halves the camera's end and path error; with
+exact wheels it costs a little (0.02-0.03 cm of end error with the camera):
+the learned k wanders between 1.000 and 1.012 depending on the route (squares
+pull it up), so it partly soaks up other model errors, probably the heading in
+turns. Tighter priors (1-1.5%) or no drift did not remove that. Without a
+position sensor (wheels, wheels + gyro) the path is the same as with it off.
+`"wheel_scale": false` in a setup switches it off.
 
 **Calibration runs** (firmware 2026-10-18b: 15 cm roll, 360 deg spins): give
 `--calib-results calibration_results.csv` and each robot's `wheel_scale`
@@ -574,4 +575,16 @@ interval), since a setup can help on squares and not on straights.
   camera error (floor calibration, video clock) goes into the calibration.
   Graph setups with `tof_consider` often hit the solver's step limit.
 - Wheel size: one scale per robot for both wheels; a left/right difference
-  (which curves the path) is not a state. Off by default (see Wheel size).
+  (which curves the path) is not a state. On by default (see Wheel size).
+
+## Same results as before?
+
+Every change on 2026-10-18 that alters results is a default on purpose:
+wheel size on, the encoder still test, and the settings read from the
+session's files (camera view area, start-nudge heading noise, frame rate,
+video clock). With `"wheel_scale": false, "still_mode": "speed"` in every
+setup, replay.py's outputs are byte-identical to the code before them (checked:
+every output file, 8 runs of a 36-run simulator session, with and without
+`--map`; the camera view area read from the floor calibration changed
+nothing there, and no calibration results or video_clock.json were given). The byte-identity statements elsewhere in this file were
+made before that day, on the defaults of the time.

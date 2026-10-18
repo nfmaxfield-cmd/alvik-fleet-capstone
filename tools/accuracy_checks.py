@@ -30,7 +30,8 @@ scale, 5 gyro bias/noise at rest (and at low battery), 6 wheels vs gyro on
 turns, 7 gyro vs wheel timing, 8 camera vs tape at still moments, 9 robot moved
 before its end marks, 10 error vs run order and battery, 11 blink identity,
 12 robot vs robot, 13 statistics rules (bootstrap, E1b paired, held-out
-split), 14 simulator preset for the real camera.
+split), 14 simulator preset for the real camera, 15 the fusion's "standing
+still" test at rest.
 
 --video-offset (s, video clock minus laptop clock) skips the slow search for
 the light flashes in the video.
@@ -1201,6 +1202,66 @@ def check_stats(tb, t1, low):
            f"{n} route-matched pairs", PASS if abs(m) <= h else CHECK, m, n)
 
 
+def check_still_test(tb, t1):
+    """15: the fusion's still test (fusion/engine.py StillTest: no wheel-angle change over 0.25 s) on the
+    T1 runs: of the rows in long still stretches (wheel angles unchanged for 0.5 s or more, after 0.2 s of
+    settling), how many it calls still; of the rows where a wheel turns (more than 2 deg per row), how many it
+    wrongly calls still."""
+    tb.define("15", "Fusion's still test at rest",
+              "at least 70% of the rows in still stretches called still, and at most 1% of the rows with the wheels "
+              "turning",
+              "The fusion tells the filter 'speed and turn are exactly 0' whenever it thinks the robot stands still, "
+              "which also pins down the gyro's bias. Too strict and it rarely helps (the old wheel-speed thresholds "
+              "passed only ~15% of still rows in simulation); too loose and it stops a moving robot.",
+              "Too few still rows: raise still_deg (engine.py, 0.75 deg) if the encoders jitter at rest. Moving rows "
+              "called still: lower still_deg or lengthen still_window_s (0.25 s).")
+    if t1 is None:
+        tb.notyet("15", "all robots", "the T1 folder")
+        return
+    import engine as eng
+    cfg = eng.config()
+    per = defaultdict(lambda: [0, 0, 0, 0])            # still rows, called still; moving rows, called still
+    for t, run in t1.trial_runs():
+        if run is None or not run.raw:
+            continue
+        rows = sorted(run.raw, key=lambda r: r["t"])
+        wl = [num(r.get("wl_deg")) for r in rows]
+        wr = [num(r.get("wr_deg")) for r in rows]
+        if any(v is None for v in wl + wr):
+            continue
+        test = eng.StillTest(cfg)
+        called = [test.step(r, eng.fnum(r.get("v_cms"))) for r in rows]
+        quiet = [False] + [abs(wl[i] - wl[i - 1]) < 0.5 and abs(wr[i] - wr[i - 1]) < 0.5 for i in range(1, len(rows))]
+        i = 0
+        acc = per[t["robot"]]
+        while i < len(rows):
+            if not quiet[i]:
+                if (i > 0 and (num(rows[i].get("lifted")) or 0.0) < 0.5
+                        and max(abs(wl[i] - wl[i - 1]), abs(wr[i] - wr[i - 1])) > 2.0):
+                    acc[2] += 1
+                    acc[3] += called[i]
+                i += 1
+                continue
+            j = i
+            while j < len(rows) and quiet[j]:
+                j += 1
+            seg = [k for k in range(i, j) if rows[k]["t"] >= rows[i]["t"] + 0.2]
+            if seg and rows[seg[-1]]["t"] - rows[seg[0]]["t"] >= 0.5:
+                acc[0] += len(seg)
+                acc[1] += sum(called[k] for k in seg)
+            i = j
+    if not per or not any(a[0] for a in per.values()):
+        tb.notyet("15", "all robots", "console logs with wheel angles (RAW wl_deg, wr_deg) and still periods")
+        return
+    for robot in sorted(per):
+        s, cs_, m, cm = per[robot]
+        if not s or not m:
+            continue
+        hit, false = 100 * cs_ / s, 100 * cm / m
+        tb.add("15", robot, f"{hit:.0f}% of {s} still rows called still; {false:.2f}% of {m} moving rows called still",
+               PASS if hit >= 70 and false <= 1.0 else CHECK, hit, s)
+
+
 def check_sim_preset(tb, cam_recs):
     tb.define("14", "Sim matches real camera",
               "tools/sim/configs/real_oct18.json loads in the simulator, and its frame rate and picture size match "
@@ -1318,6 +1379,7 @@ def main(argv=None):
     check_robots(tb, t1)
     check_stats(tb, t1, low)
     check_sim_preset(tb, recs)
+    check_still_test(tb, t1)
     for n in cam.notes:
         print("note: " + n)
     print_table(tb)

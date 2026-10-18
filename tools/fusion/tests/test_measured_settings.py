@@ -54,7 +54,8 @@ def test_wheel_radius_per_robot_and_scale_prior():
     assert eng.radius_of(cfg, "Left") == 1.65 and eng.radius_of(cfg, "Right") == 1.7
     assert eng.scale_prior(cfg, None, "Left")["k"] == pytest.approx(1.7 / 1.65)
     assert eng.scale_prior(cfg, None, "Right")["k"] == pytest.approx(1.0)
-    assert eng.scale_prior(eng.config(), None, "Left") is None              # off: no wheel-size states
+    assert eng.scale_prior(eng.config(), None, "Left")["sk"] == 0.03        # on by default
+    assert eng.scale_prior(eng.config(wheel_scale=False), None, "Left") is None   # off: no wheel-size states
 
 
 def test_noise_file(tmp_path):
