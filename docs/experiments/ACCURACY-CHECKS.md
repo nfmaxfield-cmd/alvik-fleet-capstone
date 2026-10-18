@@ -87,6 +87,7 @@ Procedure and sheet: [E00c-rig-measurements](E00c-rig-measurements/).
 | C12 | Light switch-on delay (the flash time is logged just before the light is told to switch on) | Next firmware logs the time before and after the switch-on call | Camera timing |
 | C14 | Gyro warm-up | Left still for 10 min from power-on, logging | Bias drift (A11) |
 | C15 | Room temperature | Thermometer reading at each session start | Warm-up and drift notes |
+| C17 | The robot can't tell where the plywood ends where no board borders it | Line sensors under the nose: on plywood, on tape, and 1 cm past an open edge (E0c edge rows) | Edge guard threshold for the next firmware |
 | C16 | Lifted flag | 60 s untouched (must not trip); lifted once (must stop the run) | A12 |
 
 ## D. In a later test
