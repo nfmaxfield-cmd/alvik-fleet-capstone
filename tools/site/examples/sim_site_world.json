@@ -1,0 +1,129 @@
+{
+ "format": "alvik-fleet-map",
+ "version": 1,
+ "notes": "Simulation world for the site setup (tools/site/sim_eval.py): the boards of the fusion's landmark test (tools/fusion/README.md, sessions r7/r11; D is a 40 x 19 cm cinderblock lying flat, E stands just past the x = 122 side). The brick is not a landmark (source camera: the planner avoids it, the fusion does not range it). Open sides x0 and y1 (no border board).",
+ "floor": {
+  "x_min": 0,
+  "x_max": 122,
+  "y_min": 0,
+  "y_max": 122
+ },
+ "boards": [
+  {
+   "name": "A",
+   "p1": [
+    100,
+    15
+   ],
+   "p2": [
+    100,
+    50
+   ],
+   "thickness_cm": 1.5
+  },
+  {
+   "name": "B",
+   "p1": [
+    20,
+    100
+   ],
+   "p2": [
+    100,
+    100
+   ],
+   "thickness_cm": 1.5
+  },
+  {
+   "name": "C",
+   "p1": [
+    15,
+    68
+   ],
+   "p2": [
+    15,
+    100
+   ],
+   "thickness_cm": 1.5
+  },
+  {
+   "name": "D",
+   "p1": [
+    25,
+    5.5
+   ],
+   "p2": [
+    65,
+    5.5
+   ],
+   "thickness_cm": 19
+  },
+  {
+   "name": "E",
+   "p1": [
+    125,
+    48
+   ],
+   "p2": [
+    125,
+    74
+   ],
+   "thickness_cm": 1.5
+  }
+ ],
+ "obstacles": [
+  {
+   "id": "brick",
+   "shape": "polygon",
+   "points": [
+    [
+     100,
+     70
+    ],
+    [
+     104,
+     70
+    ],
+    [
+     104,
+     78
+    ],
+    [
+     100,
+     78
+    ]
+   ],
+   "source": "camera",
+   "time": "2026-10-18T12:00:00"
+  }
+ ],
+ "robots": [
+  {
+   "name": "Left",
+   "start": [
+    40,
+    32,
+    90
+   ]
+  },
+  {
+   "name": "Center",
+   "start": [
+    61,
+    52,
+    90
+   ]
+  },
+  {
+   "name": "Right",
+   "start": [
+    82,
+    32,
+    90
+   ]
+  }
+ ],
+ "site_open_edges": [
+  "x0",
+  "y1"
+ ]
+}

@@ -561,6 +561,50 @@ WITHOUT that run, in `loro/<run_id>.json`, same format) and `residuals.csv`
 (every reading used: run, robot, zone, face, t, reading_cm, resid_nominal_cm,
 resid_calibrated_cm).
 
+## Locked site map (`<site>/map.json` + `landmarks.csv`, written by tools/site/setup.py)
+
+The floor as the site setup measured and checked it (tools/site/README.md).
+
+**map.json** is a Fleet map (above), readable by every tool that reads one,
+with the boards, user blocks and the floor's open sides moved to where the
+setup found them, plus a `"site"` block:
+
+| Field | Meaning |
+| --- | --- |
+| `format`, `version` | `"alvik-site-map"`; the map's version, 1, 2, ... (each lock of the same site folder adds 1) |
+| `locked`, `locked_at` | true; ISO 8601 time of the lock |
+| `map_hash` | Fleet map hash (above) of this map when locked. A reader treats the map as locked only if it still matches: editing the map in tools/fleet/app.py (which drops unknown blocks anyway) unlocks it |
+| `camera_calibration` | `path`, `hash` (sha256, 16 hex) and fit quality (`mode`, `rms_cm`, `loo_rms_cm`, `n_points`) of the floor_calibration.json the survey used. A new camera calibration means a new site setup |
+| `camera_frame_sigma_cm` | the camera calibration's own error, included in every sigma below |
+| `landmarks` | per landmark: `kind` (board / block), `move_cm` [dx, dy] and `turn_deg` from the clicked position, `stretch_cm` (board made this much longer), their sds (`sd_move_cm`, `sd_turn_deg`, `sd_stretch_cm`), `sigma_cm` / `sigma_in` (the largest sd of any of its points), `points`: each tape-measurable point (`left p1`, `left p2`, `right p1`, `right p2` = the floor corners of each long face, left/right of p1 -> p2; blocks: `corner N`) with `x_cm`, `y_cm`, `sigma_cm` (larger semi-axis) |
+| `edges` | per side `x0`, `x1`, `y0`, `y1`: `open`, `offset_cm` (outwards), `turn_deg`, `position_cm` (its x or y at the middle), `sigma_cm` (open sides) |
+| `audit` | rounds: `round`, `passed`, `points` (each: `point`, `why` = largest uncertainty / random check, `est` [x, y] cm, `sigma_cm`, `tape` [x, y] cm, `error_cm`, `allowed_cm` = max(0.3, 3 x hypot(sigma, 0.1)), `passed`). The map is written only after a passed round |
+| `fill_in` | points tape-measured before the audit because the robots left them less sure than 0.5 cm: `point`, `sigma_cm`, `tape` |
+| `robots` | each robot's front sensor as the survey measured it: `zone_offset_deg` (5), `range_bias_cm`, `range_scale` and their sds (as tof_calibration.json) |
+| `sensor` | `zone_width_deg` |
+| `survey` | what was driven (session folders, robots) |
+
+**landmarks.csv** (beside it): the faces as the fusion reads them
+(`name,x1_cm,y1_cm,x2_cm,y2_cm`, Landmarks above), plus `landmark`, `kind`,
+`source` (`site-setup`), `sigma_cm`, `sigma_in`, `map_version`, `locked_at`.
+Earlier files are kept as `map.json.bak`, `landmarks.csv.bak`.
+
+**tof_calibration.json** (beside it): the same landmarks and robots in the
+distance-sensor calibration format (above; `source` `site-setup`, `used_runs` =
+the survey's runs, none of them scored runs), so `replay.py --tof-cal` uses the
+locked landmarks with their sigma.
+
+**audit.csv**: one row per audited point: round, point, why, map_x_cm,
+map_y_cm, sigma_cm, tape_x_cm, tape_y_cm, error_cm, allowed_cm, passed.
+
+**site_state.json**: the setup's own progress (open sides, landmarks kept,
+session folders); not read by other tools.
+
+**site_changes.jsonl** (in a session folder, tools/site/change.py or
+`run_plan.py --site-map`): one JSON line per flagged landmark: `t`, `landmark`,
+`median_resid_cm` (reading minus map: + = further than the map), `threshold_cm`,
+`readings`, `seconds`, `robots`, `message`.
+
 ## Measured sensor noise (`replay.py --noise-file`)
 
 `replay.py --noise-file measured_noise.json` puts the noise measured on the

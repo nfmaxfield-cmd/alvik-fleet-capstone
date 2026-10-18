@@ -55,6 +55,8 @@ tools/
                      clicks, robot placements, or the runs themselves (survey)
   fleet/             multi-robot planner (map.json -> plan.json) and run_plan.py, which runs a plan on the robots
   sim/               simulated sessions (E1, survey) and simulated robots for run_plan.py --dry-run
+  site/              site setup: robots + camera + clicks learn where every board and open edge is,
+                     tape audit, locked map; change check ("landmark B may have moved")
 docs/
   home-experiments.md  how to run the home experiments
   experiments/         one record per experiment (E0-E8), index, template

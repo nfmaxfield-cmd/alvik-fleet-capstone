@@ -28,7 +28,8 @@ with priors that keep each setting near its nominal value unless the data say
 otherwise (zone direction 5 deg, bias 1 cm, scale 3%, board 2 cm and 3 deg).
 
 Calibration runs (firmware 2026-10-18b+, `--calib-results calibration_results.csv`
-from tools/blink/calib.py): during their two slow 360 deg spins (RAW steps 6 and 8)
+from tools/blink/calib.py): during their two slow spins (RAW steps 6 and 8 in 18b,
+4 and 6 from 18c's look-first run; found from the gyro, spin_steps())
 the front sensor sweeps the boards around it at every angle, the best data for
 zone directions and width. Their reference pose: position from the camera (the
 robot turns on the spot), heading from the gyro (x calib.py's gyro_scale, bias
@@ -98,7 +99,22 @@ def reference_paths(runs, dets, cfg_over=None, method="graph", gyro_f=None, sign
     return out
 
 
-SPIN_STEPS = {6, 8}
+SPIN_STEPS = {6, 8}          # firmware 2026-10-18b; 2026-10-18c (look first) spins in steps 4 and 6: see spin_steps()
+
+
+def spin_steps(run, min_turn_deg=300.0):
+    """The RAW steps of a calibration run in which the robot spins (turns at least min_turn_deg by the gyro):
+    steps 4 and 6 from firmware 2026-10-18c (look first), 6 and 8 before. Falls back to SPIN_STEPS."""
+    by = {}
+    prev = None
+    for r in run.raw:
+        st = int(eng.fnum(r.get("step"), -99))
+        t, gz = r.get("t"), eng.fnum(r.get("gz"))
+        if prev is not None and prev[0] == st and t is not None and prev[1] is not None:
+            by[st] = by.get(st, 0.0) + abs(gz) * (t - prev[1])
+        prev = (st, t)
+    out = {st for st, turned in by.items() if turned >= min_turn_deg}
+    return out or set(SPIN_STEPS)
 
 
 def spin_reference(run, dets, crow, gf, max_cm=8.0, win_s=0.3):
@@ -488,7 +504,7 @@ def main(argv=None):
             ref = spin_reference(r, dets, crow, gyro_f.get(r.robot, (D2R, ""))[0])
             if ref is not None:
                 refs[r.run_id] = ref
-                steps[r.run_id] = SPIN_STEPS
+                steps[r.run_id] = spin_steps(r)
                 n_ok += 1
         print(f"calibration runs: {n_ok} of {len(spins)} with a camera position and a measured start heading "
               "(their spins are used)")

@@ -386,6 +386,16 @@ replay.py scores a run only with a calibration made without it, and refuses
 otherwise. The spread of those fits (jackknife) is how sure each board and
 sensor setting is; the consider states use it. Files: docs/data-formats.md.
 `tof_use_cal` false makes a setup ignore the calibration.
+The calibration runs' spin steps are found from the gyro (`spin_steps`: RAW
+steps 4 and 6 from firmware 2026-10-18c's look-first run, 6 and 8 before;
+until 2026-10-18 the tool used 6 and 8 for every run, which with 18c meant the
+spin back and the turn to the roll heading).
+
+The site setup (tools/site) writes the locked landmarks and each robot's sensor
+model in this same format (`<site>/tof_calibration.json`, made from the survey's
+own runs, so none of the scored runs is in it): `replay.py --tof-cal
+<site>/tof_calibration.json --map <site>/landmarks.csv`. Simulation results with
+it: docs/experiments/E00d-site-setup.
 
 Simulator results: see "Tested so far".
 
