@@ -12,6 +12,7 @@ first two records keep their E00/E01 folder names.
 | Test | Week | Title | Status | Headline result |
 | --- | --- | --- | --- | --- |
 | [T0](E00-measurement-check/) | 5 (Oct 18) | Reference check (tape repeatability; also calibrates the camera) | planned | |
+| [E0b](E00b-nudge-check/) | 5 (Oct 18) | Start-roll check: 2 vs 5 cm roll (camera heading vs staying on the marks); also the tape's heading repeatability | planned | |
 | [T1](E01-baseline-dataset/) | 5-6 (Oct 18-19) | Baseline data set: 36 runs, every sensor logged and filmed | planned | |
 | [E1b](E01b-low-battery/) | 5 (Oct 18) | Low battery: Right's routes at low charge, paired with its full-charge T1 runs | planned | |
 | T2 | 6 | Each sensor's own errors (camera included) | planned | |

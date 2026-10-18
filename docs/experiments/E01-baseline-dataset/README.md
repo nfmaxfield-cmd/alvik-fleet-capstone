@@ -31,19 +31,18 @@ replaying it in software.
 | Held constant | surface, lighting, camera position, route settings | |
 
 ## Setup
-- Robots: Left, Center, Right. Firmware: 2026-10-17b or later (shown by `status`, logged with every run). Center's motor-board firmware updated to 1.1.1 on Oct 17.
+- Robots: Left, Center, Right. Firmware: 2026-10-18a or later (shown by `status`, logged with every run). Center's motor-board firmware updated to 1.1.1 on Oct 17.
 - Repo commit:
 - Surface:    Lighting:
 - Camera: height above floor ___ cm; area seen ___ x ___ cm; real frame rate ___ fps.
-- Clear floor: the L-path swings 30 cm to the robot's right and the square
-  50 cm to its left, so keep x -10..130 cm and y -40..60 cm clear and in the
-  camera's view.
+- Clear floor: every route stays on the 122 x 122 cm board from its own start
+  spot (the closest any route comes to an edge is the straight run's front,
+  about 7 cm from the far edge), so keep the whole board clear and in view.
 
 ## How position is measured
-1. Put a thin strip of tape on the robot's **front and rear faces**, on its
-   centerline (once).
+1. Nothing is stuck on the robots.
 2. To mark the robot: hold a small square flat on the floor, upright edge
-   against the front face at the tape strip, and pencil a dot on the floor.
+   against the middle of the front face, and pencil a dot on the floor.
    Same at the rear.
 3. Measure each dot's x and y from the taped axes, to 0.1 cm.
 4. Position = midpoint of the two dots; heading = direction from rear dot to
@@ -95,8 +94,9 @@ placement does not count as robot error.
 6. Afterwards: stop the recorders (Ctrl+C), copy the robot log folder into
    `data/logs/` and the recording into `data/video/` (video stays out of git).
 
-E1b (Right at low battery) runs first, with its own folder and commands:
-see `docs/experiments/E01b-low-battery/README.md`.
+Order on the day: E0b start-roll check (`docs/experiments/E00b-nudge-check/`,
+which decides 2 or 5 cm for the start roll), then E1b (Right at low battery,
+`docs/experiments/E01b-low-battery/README.md`), then these runs.
 
 Runs are grouped by robot (all of Left's, then Center's, then Right's) and
 shuffled within each robot (seed 21), so battery drain and floor wear don't

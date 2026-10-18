@@ -30,6 +30,8 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+NUDGE_CM = 2.0   # E1/E1b start roll; --nudge-cm changes it (E0b decides 2 or 5)
+
 # experiment -> (folder, levels, commands(level), target(level))
 # target = (x_cm ahead, y_cm to the left, heading_deg turned left) relative to
 # where the robot starts; None = not measured for that experiment.
@@ -41,15 +43,25 @@ EXPERIMENTS = {
     # Routes sized for the 122 x 122 cm plywood; each starts at its own spot
     # (robot centre, facing +x), chosen so the whole route stays on the board.
     "E1": ("E01-baseline-dataset", ["straight100", "L", "square3"],
-           lambda lv: {"straight100": "set straight_rpm 0 / set straight_cm 100 / run straight",
-                       "L": "set demo_route 1 / set demo_a_cm 30 / set demo_b_cm 30 / run demo",
-                       "square3": "set demo_route 3 / set square_cm 50 / set square_laps 3 / run demo"}[lv],
+           lambda lv: f"set start_nudge_cm {NUDGE_CM:g} / " + {
+               "straight100": "set straight_rpm 0 / set straight_cm 100 / run straight",
+               "L": "set demo_route 1 / set demo_a_cm 30 / set demo_b_cm 30 / run demo",
+               "square3": "set demo_route 3 / set square_cm 50 / set square_laps 3 / run demo"}[lv],
            lambda lv: (100.0, 0.0, 0.0) if lv == "straight100" else (0.0, 0.0, 0.0)),
 }
+# E0b nudge check: the start roll alone (forward and back, 2 or 5 cm), no
+# route. Tape marks before and after show how far the roll leaves the robot
+# off its marks; the camera's reading of the roll gives its heading, compared
+# with the tape heading at each roll size. straight_cm 0 at 1 rpm = no route.
+EXPERIMENTS["E0B"] = ("E00b-nudge-check", ["nudge2", "nudge5"],
+                      lambda lv: f"set start_nudge_cm {lv[5:]} / set straight_rpm 1 / set straight_cm 0 / run straight",
+                      lambda lv: (0.0, 0.0, 0.0))
 # Start spot per route: (x_cm, y_cm, heading_deg) of the robot centre on the floor.
 START = {"straight100": (10.0, 61.0, 0.0),   # ends near x = 110 (front face ~115 of 122)
          "L": (40.0, 80.0, 0.0),             # out 30, right turn, out 30 (to y = 50), then back
-         "square3": (35.0, 35.0, 0.0)}       # left turns: corners (85,35), (85,85), (35,85)
+         "square3": (35.0, 35.0, 0.0),       # left turns: corners (85,35), (85,85), (35,85)
+         "nudge2": (40.0, 80.0, 0.0),        # E0b: on the L start spot (already marked)
+         "nudge5": (40.0, 80.0, 0.0)}
 
 # E1b: the same runs as E1 at low battery, for a paired comparison with the
 # same robot's E1 runs at full battery.
@@ -72,7 +84,10 @@ def main():
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--out", help="output CSV (default: the experiment's data/measurements.csv)")
     ap.add_argument("--force", action="store_true", help="overwrite a sheet that already has measurements")
+    ap.add_argument("--nudge-cm", type=float, default=2.0, help="E1/E1b: start roll length, cm (default 2)")
     args = ap.parse_args()
+    global NUDGE_CM
+    NUDGE_CM = args.nudge_cm
 
     folder, levels, how, target = EXPERIMENTS[args.exp]
     robots = [r.strip() for r in args.robots.split(",") if r.strip()]
