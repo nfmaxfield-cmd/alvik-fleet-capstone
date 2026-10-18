@@ -102,6 +102,21 @@ def to_laptop(fit, ms):
 
 
 # ------------------------------------------------------------------ video
+def exposure_s(folder, dt_frame):
+    """Exposure time of each frame, from the recorder's meta.json when it knows
+    it (camrec.py writes exposure_ms when exposure is locked), else assume the
+    exposure fills the whole frame interval (typical indoors)."""
+    try:
+        with open(os.path.join(folder, "meta.json")) as f:
+            m = json.load(f)
+        e = m.get("exposure_ms")
+        if e:
+            return min(float(e) / 1000.0, dt_frame)
+    except (OSError, ValueError, TypeError):
+        pass
+    return dt_frame
+
+
 def video_flashes(folder, sync_ms_guess=300):
     """Find light flashes: a jump in brightness in a small spot, followed by
     the opposite jump about sync_ms later. Returns candidate "on" frames as
@@ -121,6 +136,8 @@ def video_flashes(folder, sync_ms_guess=300):
     fps = 30.0
     if len(frames) > 2 and frames[-1] > frames[0]:
         fps = (len(frames) - 1) / (frames[-1] - frames[0])
+    dt_frame = 1.0 / fps
+    expo = exposure_s(folder, dt_frame)
     span = sync_ms_guess / 1000 * fps                  # flash length in frames
     smin, smax = max(2, int(span) - 1), int(math.ceil(span)) + 1
     # A light flash: pixels that brighten at frame j, STAY bright for about the
@@ -182,9 +199,17 @@ def video_flashes(folder, sync_ms_guess=300):
         around = np.concatenate([v[max(0, j - w):lo], v[hi:j + w + 1]])
         bg = float(around.max()) if around.size else 0.0
         if v[j] >= 1.5 * bg:
-            t_on = frames[j + 1]
-            if j + 2 < len(frames):         # light came on partway through frame j + 1
-                t_on += (1.0 - scores[j][3]) * (frames[j + 2] - frames[j + 1])
+            # When did the light come on, on the video clock, in the same sense
+            # as any other frame's time? A frame stamped t was exposed over
+            # [t - L - E, t - L]; positions in it belong to its exposure. The
+            # light lit a fraction `lit` of the first lit frame's exposure, so it
+            # came on lit*E before that frame's exposure ended. A fully lit first
+            # frame means it came on somewhere in the dark gap before that
+            # exposure: take the middle of the gap.
+            lit = scores[j][3]
+            t_on = frames[j + 1] - lit * expo
+            if lit >= 0.98:
+                t_on -= max(0.0, dt_frame - expo) / 2
             found.append((t_on, j + 1, float(v[j]), bg))
     if os.environ.get("FLASH_DEBUG"):
         print("flash peaks kept:", len(found))

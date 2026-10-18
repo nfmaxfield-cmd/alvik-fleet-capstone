@@ -459,7 +459,7 @@ def record(cfg, folder, tracks, hands, boxes, t_start, t_end, events, rng, start
             w.writerow([f"{t_pi:.3f}", int(np.searchsorted(tw_all, t_pi, side="right")), text])
     with open(os.path.join(folder, "meta.json"), "w") as f:
         json.dump(dict(device="0", width=W, height=H, fps_requested=30, fps_reported=float(c.fps), host="sim-pi",
-                       start=start_iso, label="E1",
+                       start=start_iso, label="E1", exposure_ms=c.exposure_ms,
                        note="t_wall is when the Pi received the frame (SIMULATED recording)"), f, indent=2)
     with open(os.path.join(out_root, "floor_calibration.json"), "w") as f:
         json.dump(geom.calibration(), f, indent=2)

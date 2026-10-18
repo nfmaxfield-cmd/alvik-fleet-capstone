@@ -244,6 +244,19 @@ class Controls:
         return False
 
 
+def exposure_ms(controls):
+    """Exposure in ms when it is locked/manual (V4L2 exposure units are 100 us),
+    else None. check_session.py uses it to time the sync flashes precisely."""
+    try:
+        af = controls.get("after") or {}
+        if af.get("auto_exposure") in (AE_MANUAL, AE_MANUAL_OLD, 1) and af.get("exposure") not in (None, -1):
+            v = float(af["exposure"])
+            return v / 10.0 if v > 0 else None
+    except (AttributeError, TypeError, ValueError):
+        pass
+    return None
+
+
 def apply_controls(cap, device, exposure="lock", focus="lock", wb="lock", warmup_s=2.0, log=print,
                    run=subprocess.run, now=time.monotonic):
     """Exposure, focus and white balance: 'lock' = after a warm-up, freeze the camera's
@@ -399,7 +412,7 @@ def main():
             json.dump(dict(device=args.device, width=w, height=h, fps_requested=args.fps, fps_reported=real_fps,
                            host=socket.gethostname(), start=dt.datetime.now().isoformat(timespec="seconds"),
                            label=args.label, note="t_wall is when the Pi received the frame",
-                           camera_controls=controls), f, indent=2)
+                           camera_controls=controls, exposure_ms=exposure_ms(controls)), f, indent=2)
         print(f"Recording {w}x{h} to {folder}")
         print("Type a note and press Enter to mark a moment. Ctrl+C stops.")
 
