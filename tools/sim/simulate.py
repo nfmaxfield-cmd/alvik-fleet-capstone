@@ -161,6 +161,34 @@ def main(argv=None):
     carries = []          # (robot name, t0, t1)
     events = []           # (laptop time, text) typed into the recorder
     done = []
+    calib_runs = []
+    calibrated = set()
+
+    def calibrate(r, t_lift):
+        """run_sheet.py: robot put down in view, off the start mark; `calibrate`; wait for its RUNEND.
+        Returns the time the robot can be picked up again for the start mark."""
+        for _ in range(3):                     # run_sheet.py asks again if it didn't finish
+            a = s.calib_area_cm
+            cpose = (rng.uniform(a[0], a[1]), rng.uniform(a[2], a[3]), rng.uniform(-180, 180))
+            r.carry_to(cpose, t_lift, t_lift + s.carry_s)
+            carries.append((r.name, t_lift, t_lift + s.carry_s))
+            t_cmd = t_lift + s.carry_s + s.calib_wait_s
+            arrive = t_cmd + (cfg.net.oneway_base_ms + rng.expovariate(1 / cfg.net.oneway_exp_ms)) / 1000
+            r.idle_until(arrive + rng.uniform(0, 0.012))
+            start_true = (r.x, r.y, r.th)
+            run = r.run_experiment("calib")
+            t_end = r.t_at(r.ms)
+            run.update(order=None, robot=r.name, row=None, start_true=start_true, end_true=(r.x, r.y, r.th),
+                       t_start=r.t_at(run["ms_start"]), t_end=t_end, kidnapped=False)
+            calib_runs.append(run)
+            print(f"      {r.name:7s} {'calibration':12s} run {run['run']:8s} {run['result']:22s} "
+                  f"{run['t_end'] - run['t_start']:5.1f} s")
+            t_lift = t_end + s.after_calib_s
+            if run["result"] == "done":
+                events.append((t_end + 0.05, f"calibration {r.name} run {run['run']}"))
+                break
+        return t_lift
+
     for row in rows:
         r = robots[row["robot"]]
         order = int(row["order"])
@@ -169,6 +197,9 @@ def main(argv=None):
             prev.carry_to(s.parked_pose, t_lift, t_lift + s.carry_s)
             carries.append((prev.name, t_lift, t_lift + s.carry_s))
             t_lift += s.carry_s + 1.0
+        if r.name not in calibrated:
+            t_lift = calibrate(r, t_lift)
+            calibrated.add(r.name)
         sx, sy, sh = s.start_pose
         pose = (sx + rng.uniform(-s.placement_err_cm, s.placement_err_cm),
                 sy + rng.uniform(-s.placement_err_cm, s.placement_err_cm),
@@ -201,6 +232,11 @@ def main(argv=None):
                                  turn_deg=cfg.kidnap.turn_deg, mode=cfg.kidnap.mode)
         run = r.run_experiment(run_cmd[0].split()[1])
         r.kidnap_plan = None
+        if run is None:
+            print(f"  row {order}: the robot refused to start it (not calibrated), skipped")
+            cursor = r.t_at(r.ms) + s.after_run_s
+            prev = r
+            continue
         t_end = r.t_at(r.ms)
         run.update(order=order, robot=r.name, row=row, start_true=start_true, end_true=(r.x, r.y, r.th),
                    t_start=r.t_at(run["ms_start"]), t_end=t_end, kidnapped=kid)
@@ -227,7 +263,7 @@ def main(argv=None):
     with open(os.path.join(out, "truth.csv"), "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["t_laptop", "robot", "run", "x_cm", "y_cm", "heading_deg", "lifted"])
-        for run in done:
+        for run in sorted(done + calib_runs, key=lambda q: q["t_start"]):
             tr = tracks[run["robot"]]
             for t in np.arange(run["t_start"], run["t_end"], 0.02):
                 x, y, th, lifted = tr.pose(t)
@@ -307,18 +343,27 @@ def main(argv=None):
             wheel_radius_left_cm=r.rL, wheel_radius_right_cm=r.rR, wheel_track_cm=r.track,
             nominal_radius_cm=cfg.robot.wheel_radius_cm, nominal_track_cm=cfg.robot.wheel_track_cm,
             gyro_scale_err=r.gyro_scale, gyro_bias_dps_at_end=r.gyro_bias, packets_sent=r.packets_sent,
-            packets_lost=r.lost, kidnaps=r.kidnaps)
+            packets_lost=r.lost, kidnaps=r.kidnaps, blink_code=r.blink_code_for())
+    def run_info(run):
+        r = robots[run["robot"]]
+        return dict(order=run["order"], robot=run["robot"], run=run["run"], exp=run["exp"],
+                    level=run["row"]["level"] if run["row"] else "calibration", result=run["result"],
+                    t_start=run["t_start"], t_end=run["t_end"],
+                    start=[run["start_true"][0], run["start_true"][1], wrap180(math.degrees(run["start_true"][2]))],
+                    end=[run["end_true"][0], run["end_true"][1], wrap180(math.degrees(run["end_true"][2]))],
+                    turned_deg=math.degrees(run["end_true"][2] - run["start_true"][2]),
+                    sync=[dict(tag=tg, ms_on=a, ms_off=b) for tg, a, b in run["syncs"]],
+                    blink_code=run["blink_code"],
+                    blink_start=r.t_at(run["ms_blink"]) if run["ms_blink"] is not None else None)
     for run in done:
-        info["runs"].append(dict(order=run["order"], robot=run["robot"], run=run["run"], exp=run["exp"],
-                                 level=run["row"]["level"], result=run["result"], t_start=run["t_start"], t_end=run["t_end"],
-                                 start=[run["start_true"][0], run["start_true"][1], wrap180(math.degrees(run["start_true"][2]))],
-                                 end=[run["end_true"][0], run["end_true"][1], wrap180(math.degrees(run["end_true"][2]))],
-                                 turned_deg=math.degrees(run["end_true"][2] - run["start_true"][2]),
-                                 sync=[dict(tag=tg, ms_on=a, ms_off=b) for tg, a, b in run["syncs"]]))
+        info["runs"].append(run_info(run))
+    info["calib_runs"] = [run_info(run) for run in calib_runs]
     info["note"] = ("start/end are the TRUE axle-midpoint poses (x_cm, y_cm, heading_deg); turned_deg = true rotation "
                     "during the run, not wrapped. Robot clock: laptop_time = t_boot + robot_ms / 1000 / (1 + clock_drift_ppm "
                     "* 1e-6), so a positive clock_drift_ppm is a robot clock running FAST, which check_session.py "
-                    "reports the same way (\"N ppm fast\").")
+                    "reports the same way (\"N ppm fast\"). calib_runs: the calibration run before each robot's first sheet "
+                    "row (not on the sheet). blink_start: laptop time of blink::start(); 300 ms dark, then one 100 ms "
+                    "flash every (blink_code + 2) x 100 ms, counted from blink_start + 0.3 s.")
     from dataclasses import asdict
     info["config"] = asdict(cfg)
     with open(os.path.join(out, "sim_info.json"), "w") as f:

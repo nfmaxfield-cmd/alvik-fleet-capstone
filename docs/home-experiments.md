@@ -112,7 +112,7 @@ and straight runs then refuse to start until a robot has been calibrated since
 power-on (run_sheet.py does this for you).
 
 **During runs (firmware 2026-10-17e+):** both top lights blink the robot's
-code (short pulses: Left 1, Center 2, Right 3, every 1.8 s; firmware 2026-10-17g+) so the camera can find
+rhythm (one short flash every 0.3 s for Left, 0.4 s Center, 0.5 s Right; firmware 2026-10-18a+) so the camera can find
 and name it on any floor; `set blink_codes 0` turns it off. Turn, demo and
 straight runs also roll `start_nudge_cm` (2 cm) forward and back right after
 the start flash, so the camera sees which way the robot faces; `set

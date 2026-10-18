@@ -23,13 +23,13 @@ for the 38-minute video.
 | Path | What | Same as the real thing? |
 | --- | --- | --- |
 | `session/` | console log folder: raw, runinfo, param, runend, sync, clock, clock_sync, straight, demo_step, demo_end CSVs, session.json | Yes: written by `tools/alvik_console.py`'s own `Session` class, fed the simulated packets at their simulated arrival times |
-| `recording/` | `video.avi` (MJPG 640x480), `frames.csv`, `events.csv` (a "trial N" note before each run), `meta.json` | Yes, camrec.py's format |
+| `recording/` | `video.avi` (MJPG 640x480), `frames.csv`, `events.csv` (a "trial N" note before each run, and run_sheet.py's "calibration <robot> run <id>" after each calibration run), `meta.json` | Yes, camrec.py's format |
 | `measurements.csv` | the tape sheet with start and end marks and run_id filled in | Yes, same columns as the E1 sheet |
-| `truth.csv` | `t_laptop,robot,run,x_cm,y_cm,heading_deg,lifted`, 50 per second during every run | Simulation only |
-| `camera_truth.csv` | `frame,t_wall,robot,x_px,y_px,heading_img_deg`: where each robot's top centre really is in every frame | Simulation only |
+| `truth.csv` | `t_laptop,robot,run,x_cm,y_cm,heading_deg,lifted`, 50 per second during every run (calibration runs included) | Simulation only |
+| `camera_truth.csv` | `frame,t_wall,robot,x_px,y_px,heading_img_deg,led_on`: where each robot's top centre really is in every frame; `led_on` = 1 if either LED is lit (any colour) at the moment the frame is taken | Simulation only |
 | `camera_detections.csv` | `frame,t_wall,x_px,y_px,score`: a pretend detector: noisy, anonymous, with misses and false alarms (frames with nothing detected have no row) | Simulation only |
 | `floor_calibration.json` | the floor cm -> image px homography, plus the full camera model | Simulation only |
-| `sim_info.json` | each robot's true wheel sizes, track, gyro errors, clock drift; every run's true start and end pose; kidnap details; the whole config | Simulation only |
+| `sim_info.json` | each robot's true wheel sizes, track, gyro errors, clock drift, `blink_code`; every sheet run's (`runs`) and calibration run's (`calib_runs`) true start and end pose and `blink_start` (laptop time the blink cycle counts from); kidnap details; the whole config | Simulation only |
 | `console_output.txt` | what the console would have printed | |
 
 The simulation-only files sit beside `session/` and `recording/`, not in them, so
@@ -49,17 +49,51 @@ floor point below it (up to about 2 cm at the image edges).
 **Runs.** One sheet row = one run, in sheet order, using that row's robot and
 commands. The firmware's run sequence is copied step by step: RUNINFO, every
 PARAM (in params.h's order, read from the file), RAW logging starts, settle
-500 ms, start flash (150 ms dark, `sync_ms` white, 150 ms dark), the
-experiment, end flash, RUNEND. The straight run (`libraryMove`), the L route,
+500 ms, start flash (150 ms dark, `sync_ms` white, 150 ms dark), blink codes
+start, start nudge, the experiment, blink codes stop, end flash, RUNEND. The straight run (`libraryMove`), the L route,
 the square and the circle follow experiments.h. Library `move()` blocks 200 ms
 before it starts and the successful `is_target_reached()` takes 100 ms, so the
 RAW log has those gaps, as on the robot. RAW rows come from the same
 "at most one per period, no catching up" rule as rawlog.h, sampled from control
 loops that take 5-12 ms. The LED colours follow `showSelection()`: demo runs
-are white, straight runs cyan, idle shows the last experiment's colour on the
-left LED only. Between runs a hand picks the robot up and puts it back on the
+are white, straight runs cyan; a calibration run keeps the chosen experiment's
+colour; idle shows that colour on the left LED only. Between runs a hand picks the robot up and puts it back on the
 start, with a small placement error; robots that are not running are parked
 out of view.
+
+**Calibration run** (firmware 2026-10-17e). As run_sheet.py does, each robot
+gets one `calibrate` before its first sheet row: it is put down by hand
+somewhere in view off the start mark (`calib_area_cm`, any heading), `calibrate`
+is sent `calib_wait_s` later, and it runs as a logged run with experiment
+`calib`: RAW step 1 standing still `calib_blink_ms`, 2 `move(+n)` and 3 `move(-n)`
+(n = max(3, `start_nudge_cm`), 300 ms after each), 4 the compass wiggle
+(`calibrateYawSign(true)`: 300 ms at -20/+20 rpm, brake 300 ms, back 300 ms,
+brake 300 ms, logged throughout), 5 300 ms. Its RUNINFO has `yaw_sign` 0 (not
+checked yet); later runs have the sign it found. `after_calib_s` after its
+RUNEND the robot is carried to the start mark (the same hand carry as between
+runs). Turn, grid, demo and straight runs are refused before a calibration,
+as on the robot.
+
+**Start nudge.** Turn, demo and straight runs: right after the start flash,
+RAW step -1, `move(+start_nudge_cm)`, 200 ms, `move(-start_nudge_cm)`, 300 ms,
+then step 0 and the experiment (which zeroes odometry). Same slip model as
+every move.
+
+**Blink codes** (blink.h, 2026-10-18a rate codes). From the start flash to the
+end flash both LEDs blink white: dark for 300 ms after `blink::start()`, then
+one 100 ms flash every (n + 2) x 100 ms: Left 0.3 s, Center 0.4 s, Right
+0.5 s, others 0.6 s (`blink_code` 1-4 overrides). The lights only change
+when `rawlog::tick()` runs (every 5-14 ms in the control loops), go dark
+(`hold()`) right before each library `move()` and stay so through its 200 ms
+block (which drops a flash, or starts one late). Nothing darkens them before
+the successful `is_target_reached()`, which blocks 100 ms, so a flash lit then
+is stretched: the longest in 100 simulated runs was 211 ms, well short of the
+300 ms sync flash. Flash-to-flash period (true LED timeline, same runs):
+median exactly the code's period; 5th-95th percentile Left 291-345 ms,
+Center 391-410, Right 491-510, others 569-659. Single intervals spanning a
+move's block can be off by up to a period, so read identity from several
+flashes. (Firmware 2026-10-17e's 200 ms pulses were stretched to 302 ms and
+merged, and check_session.py missed 3 of 14 sync flashes.)
 
 **Where the errors come from.** Moves stop when the wheel *encoders* reach the
 distance, so along-track error comes from wheel radius error and slip, and a
@@ -148,17 +182,20 @@ robot, uniformly.
 | camera height / view | 115 cm / 160 cm across | 4 px per cm |
 | camera yaw / tilt | 1.0 / (0.8, -0.5) deg | |
 | placement error at start | +/-0.5 cm, +/-1 deg | |
+| calibration spot | x 20-50, y 20-45 cm, any heading | "in view, off the mark"; the operator's choice |
+| calibration pauses | 2 s put down -> `calibrate`, 2 s RUNEND -> picked up | run_sheet.py waits for Enter |
 | tape measuring noise | 0.15 cm sd per coordinate, rounded to 0.1 cm | gives ~1.3 deg heading noise per pose |
 | time between runs | 6 s (end marks) + 3 s (carry) + 8 s (start marks) + 1.5 s per command | real sessions are slower; only affects session length |
 
 ## What it does not simulate
 
 - Wheels spinning in the air when lifted with `safe_lift 0` (see Kidnap).
-- The `calibrateYawSign()` wiggle: it is assumed done (`calibrate`) before the
-  robot is placed, as the E1 procedure says.
+- A failed compass check (`yaw check failed`): the wiggle always turns enough here.
+- The robot rebooting mid-session (one calibration per robot).
 - Collisions, other robots in the ToF view, the box being seen by the ToF.
-- Line-following experiments (lap, grid) and the turn test: only `straight`
-  and `demo` runs are simulated.
+- Line-following experiments (lap, grid) and the turn test: only `straight`,
+  `demo` and `calib` runs are simulated (the start nudge code covers turn
+  runs, but no turn run is simulated).
 - Camera motion blur, auto-exposure changes, and the robot's own shadow
   under a lifted robot.
 - Lost non-RAW packets (headers, RUNEND) unless `burst_per_min` is turned on.

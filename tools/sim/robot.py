@@ -25,9 +25,13 @@ import random
 
 from config import firmware_raw_columns
 
-EXP_NAMES = ["stream", "turn", "lap", "grid", "demo", "straight"]
-# showSelection() colours, (r, g, b) on/off, per experiment index (home_lab.ino)
-EXP_COLORS = [(0, 0, 1), (0, 1, 0), (1, 1, 0), (1, 0, 1), (1, 1, 1), (0, 1, 1)]
+EXP_NAMES = ["stream", "turn", "lap", "grid", "demo", "straight", "calib"]
+EXP_CALIB = 6
+# showSelection() colours, (r, g, b) on/off, per experiment index (home_lab.ino);
+# calib (6) never becomes the selection (2026-10-17g), so its entry is unused
+EXP_COLORS = [(0, 0, 1), (0, 1, 0), (1, 1, 0), (1, 0, 1), (1, 1, 1), (0, 1, 1), (0, 0, 0)]
+BLINK_SLOT_MS = 100        # blink.h
+BLINK_LEAD_SLOTS = 3         # dark slots right after blink::start()
 OFF, WHITE = (0, 0, 0), (1, 1, 1)
 
 # printf format of each RAW column, copied from rawlog.h's tick()
@@ -148,6 +152,12 @@ class Robot:
         self.raw_period = 20
         self.raw_rows = 0
         self.step = 0
+        self.fw_yaw_sign = 0                       # gYawSign: 0 until a compass check since power-on
+        self.fw_odo_sign = 1                       # gOdoSign
+        self.blink_on = False                      # blink.h state
+        self.blink_code = 0
+        self.blink_lit = False
+        self.blink_t0 = 0
 
         # ---- records ----
         self.lines = []        # [robot_ms, text]  every line the robot sends (H/D/M)
@@ -347,8 +357,10 @@ class Robot:
 
     # ================================================= sensors
     def heading(self):
-        """Firmware heading(): IMU yaw with the sign that makes left turns positive."""
-        return wrap180(self.imu_m.yaw_sign * self.yaw_raw)
+        """Firmware heading(): IMU yaw times gYawSign (found by the compass check), so left turns
+        are positive. Before any check the firmware's sign is 0 and it refuses runs that turn; here
+        the true sign stands in, so the motion helpers also work on their own (unit tests)."""
+        return wrap180((self.fw_yaw_sign or self.imu_m.yaw_sign) * self.yaw_raw)
 
     def _tof_true(self, ang_deg):
         t = self.tof_m
@@ -448,7 +460,9 @@ class Robot:
         self.set_leds(c, c if running else OFF)
 
     def tick(self):
-        """rawlog::tick(): at most one RAW record per period, without bursting to catch up."""
+        """rawlog::tick(): at most one RAW record per period, without bursting to catch up.
+        blink::tick() runs first, on every call, so the blink lights only change here."""
+        self.blink_tick()
         if not self.raw_on:
             return
         now = self.millis()
@@ -477,6 +491,54 @@ class Robot:
         self.raw_period = int(1000.0 / min(hz, 100.0))
         self.send("H,RAW," + ",".join(self.raw_cols))
         self.raw_next = self.millis()
+
+    # ================================================= firmware: blink codes (blink.h)
+    def blink_code_for(self):
+        c = int(self.P("blink_code"))
+        if 1 <= c <= 4:
+            return c
+        return {"Left": 1, "Center": 2, "Right": 3}.get(self.name, 4)
+
+    def blink_set(self, v):
+        if v == self.blink_lit:
+            return
+        self.blink_lit = v
+        k = 1 if v else 0
+        self.set_leds((k, k, k), (k, k, k))
+
+    @staticmethod
+    def blink_slot_lit(s, n):
+        """Rate code (2026-10-18a): one 100 ms flash every (n + 2) slots."""
+        return s % (n + 2) == 0
+
+    def blink_start(self):
+        self.blink_on = self.P("blink_codes") > 0
+        if not self.blink_on:
+            return
+        self.blink_code = self.blink_code_for()
+        self.blink_t0 = self.millis()
+        self.blink_lit = True                      # force the first set() to send
+        self.blink_set(False)
+
+    def blink_tick(self):
+        if not self.blink_on:
+            return
+        slot = (self.millis() - self.blink_t0) // BLINK_SLOT_MS
+        if slot < BLINK_LEAD_SLOTS:                # 300 ms dark first, so the start flash stands alone
+            self.blink_set(False)
+            return
+        slot -= BLINK_LEAD_SLOTS
+        self.blink_set(self.blink_slot_lit(int(slot), self.blink_code))
+
+    def blink_hold(self):
+        if self.blink_on:
+            self.blink_set(False)
+
+    def blink_stop(self):
+        if not self.blink_on:
+            return
+        self.blink_set(False)
+        self.blink_on = False
 
     # ================================================= firmware: motion
     def loop_delay(self, d):
@@ -524,6 +586,36 @@ class Robot:
             self.tick()
             self.advance(5.3, busy=True)
 
+    def tick_wait(self, ms):
+        """motion.h tickWait(): logs (and blinks), no safety checks, no WiFi commands."""
+        self.log_wait(ms)
+
+    def calibrate_yaw_sign(self, force=False):
+        """motion.h calibrateYawSign(): a timed wiggle left, read the raw yaw change, wiggle back."""
+        if self.fw_yaw_sign != 0 and not force:
+            return True
+        self.send("M,checking compass direction: small wiggle left and back")
+        y0, o0 = self.yaw_raw, self.odo_th
+        self.set_wheels_speed(-20, 20)              # left wheel back, right forward = turn left
+        self.tick_wait(300)
+        self.brake()
+        self.tick_wait(300)
+        dy = wrap180(self.yaw_raw - y0)
+        d_odo = wrap180(self.odo_th - o0)
+        if abs(d_odo) >= 2.0:
+            self.fw_odo_sign = 1 if d_odo > 0 else -1
+        if abs(dy) < 2.0:
+            self.send("M,yaw check failed: heading moved only %.1f deg" % dy)
+            self.fail = "yaw check failed"
+            return False
+        self.fw_yaw_sign = 1 if dy > 0 else -1
+        self.send("M,yaw check ok: left turn moved raw yaw %.1f deg, sign %d" % (dy, self.fw_yaw_sign))
+        self.set_wheels_speed(20, -20)              # undo the nudge
+        self.tick_wait(300)
+        self.brake()
+        self.tick_wait(300)
+        return True
+
     def imu_turn_to(self, target):
         rng, m = self.rng, self.m
         self.turn_slip = min(0.2, max(0.0, rng.gauss(m.turn_slip_mean_pct, m.turn_slip_sd_pct) / 100))
@@ -558,6 +650,7 @@ class Robot:
         t0 = self.millis()
         limit = 3000 + abs(cm) * 400
         self.tick()
+        self.blink_hold()                                 # dark before the call that blocks
         self.advance(m.library_block_ms, busy=True)       # move() waits inside the library first
         r0 = m.wheel_radius_cm
         dist_deg = abs(cm) / (2 * math.pi * r0) * 360.0      # the library converts with the nominal radius
@@ -643,7 +736,7 @@ class Robot:
         self.send("D,RUNINFO,%s,%s,%s,%s,%d,%d,%d,%d,%s,%d,%d" % (self.run_id, EXP_NAMES[i], self.fw_version,
                                                                  self.cfg.session.motor_fw, self.millis(),
                                                                  int(self.battery), 0, self.wifi_dbm(), "SSLSE",
-                                                                 self.imu_m.yaw_sign, 1))
+                                                                 self.fw_yaw_sign, self.fw_odo_sign))
         self.send("H,PARAM,run,name,value")
         for name in self.param_order:
             self.send("D,PARAM,%s,%s,%.4f" % (self.run_id, name, self.params[name]))
@@ -668,6 +761,8 @@ class Robot:
             self.kidnap_at = self.ms + self.kidnap_plan["at_s"] * 1000
 
     def run_straight(self):
+        if not self.calibrate_yaw_sign():
+            return
         self.send("H,STRAIGHT,run,robot,result,cmd_cm,rpm,odo_x_cm,odo_y_cm,odo_theta_deg,imu_dyaw_deg,total_ms,battery")
         d, rpm = self.P("straight_cm"), self.P("straight_rpm")
         self.odo_x = self.odo_y = self.odo_th = 0.0             # reset_pose(0, 0, 0)
@@ -694,6 +789,8 @@ class Robot:
         if not (left or center or square):
             self.send("M,%s has no demo routine of its own. Pick one with: set demo_route 1 (L), 2 (circle) or 3 (square)" % self.name)
             self.fail = "no demo routine"
+            return
+        if not self.calibrate_yaw_sign():
             return
         self.send("H,DEMO_STEP,run,robot,step,x_cm,y_cm,theta_deg,ms")
         self.send("H,DEMO_END,run,robot,route,result,return_err_cm,heading_err_deg,total_ms,a_cm,b_cm,r_cm,battery")
@@ -748,13 +845,51 @@ class Robot:
         self.send("M,%s demo %s: back within %.1f cm of start (wheel odometry), heading off by %.1f deg. Measure with a ruler too."
                   % (self.name, "finished" if ok else "stopped", err, head_err))
 
+    def run_calib(self):
+        """runCalib() from home_lab.ino: RAW step 1 still and blinking, 2 forward, 3 back, 4 wiggle, 5 settle."""
+        self.send("M,%s calibration: blinking code %d, rolling forward and back, then a small wiggle"
+                  % (self.name, self.blink_code_for()))
+        n = max(3.0, self.P("start_nudge_cm"))
+        self.step = 1
+        if not self.wait_ms(int(self.P("calib_blink_ms"))):
+            return
+        self.step = 2
+        if not self.library_move(n) or not self.wait_ms(300):
+            return
+        self.step = 3
+        if not self.library_move(-n) or not self.wait_ms(300):
+            return
+        self.step = 4
+        if not self.calibrate_yaw_sign(True):
+            return
+        self.step = 5
+        if not self.wait_ms(300):
+            return
+        self.send("M,calibrated: now place the robot on its start mark")
+
+    def start_nudge(self, i):
+        """startNudge(): roll start_nudge_cm forward and back after the start flash (RAW step -1)."""
+        n = self.P("start_nudge_cm")
+        if n <= 0 or i not in (1, 4, 5):
+            return True
+        self.step = -1
+        ok = self.library_move(n) and self.wait_ms(200) and self.library_move(-n) and self.wait_ms(300)
+        self.step = 0
+        return ok
+
     def run_experiment(self, exp):
-        """runExperiment() from home_lab.ino. Returns a dict describing the run."""
+        """runExperiment() from home_lab.ino. Returns a dict describing the run, or None if the
+        firmware refused to start it (turn/grid/demo/straight before any compass check)."""
         i = EXP_NAMES.index(exp)
+        if i in (1, 3, 4, 5) and self.fw_yaw_sign == 0:       # needsYawSign(), started from the laptop
+            self.send("M,not calibrated since power-on: lift the robot off its mark, send calibrate, put it back, "
+                      "then start again (%s not started)" % exp)
+            return None
         self.run_n += 1
         self.run_id = "%04X-%d" % (self.boot_id, self.run_n)
         self.abort_reason = self.fail = ""
-        self.selected = i
+        if i != EXP_CALIB:
+            self.selected = i                  # a calibration keeps showing the chosen experiment
         self.syncs = []
         self.show_selection(True)
         self.send("M,run %s: %s starting" % (self.run_id, exp))
@@ -765,15 +900,22 @@ class Robot:
         self.wait_ms(self.P("settle_start_ms"))
         self.sync_flash("start")
         self.show_selection(True)
+        self.blink_start()                     # after the start flash, so the two can't be confused
+        ms_blink = self.ms if self.blink_on else None
+        if not self.abort_reason:
+            self.start_nudge(i)
         if not self.abort_reason:
             if exp == "straight":
                 self.run_straight()
             elif exp == "demo":
                 self.run_demo()
+            elif exp == "calib":
+                self.run_calib()
             else:
-                raise ValueError("the simulator runs only the straight and demo experiments, not " + exp)
+                raise ValueError("the simulator runs only the straight, demo and calib experiments, not " + exp)
         self.brake()
         self.kidnap_at = None
+        self.blink_stop()
         self.sync_flash("end")
         self.raw_on = False
         result = ("stopped:" + self.abort_reason) if self.abort_reason else \
@@ -790,6 +932,7 @@ class Robot:
         self.abort_reason = ""
         self.show_selection(False)
         run = dict(run=self.run_id, exp=exp, ms_start=ms_runinfo, ms_end=ms_end, result=result,
-                   battery=int(self.battery), syncs=list(self.syncs))
+                   battery=int(self.battery), syncs=list(self.syncs), ms_blink=ms_blink,
+                   blink_code=self.blink_code if ms_blink is not None else 0)
         self.runs.append(run)
         return run

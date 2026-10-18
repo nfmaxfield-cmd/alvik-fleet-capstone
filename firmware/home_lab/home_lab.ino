@@ -28,7 +28,7 @@
 Arduino_Alvik alvik;
 
 // Bump this whenever the firmware changes, so every logged run says which code it ran.
-#define FW_VERSION "2026-10-17g"
+#define FW_VERSION "2026-10-18a"
 
 uint16_t gBootId = 0;   // random each power-on; starts every run id
 
@@ -253,7 +253,7 @@ bool needsYawSign(int i) { return i == 1 || i == 3 || i == 4 || i == 5; }
 // 2 rolling forward and 3 back (which way it faces, from the camera),
 // 4 the compass wiggle (gyro sign, on the robot), 5 settling.
 void runCalib() {
-  net::logf("M,%s calibration: blinking %d pulses, rolling forward and back, then a small wiggle",
+  net::logf("M,%s calibration: blinking code %d, rolling forward and back, then a small wiggle",
             net::name, blink::codeFor(net::name));
   float n = fmaxf(3.0f, P("start_nudge_cm"));
   rawlog::step = 1;

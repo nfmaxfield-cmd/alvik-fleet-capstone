@@ -17,6 +17,7 @@ Clocks: a frame is TAKEN at true (laptop) time tc. The Pi stamps it when it
 arrives, about one frame later, on its own clock:
     t_wall = tc + capture delay + pi_clock_offset_s
 The LEDs' colour in a frame is their average over the exposure before tc.
+camera_truth.csv's led_on is the LEDs' true state at tc (1 = either one lit).
 """
 import bisect
 import csv
@@ -129,6 +130,12 @@ class RobotTrack:
         th = float(np.interp(t, self.t, self.th))
         i = max(0, int(np.searchsorted(self.t, t, side="right")) - 1)
         return x, y, th, bool(self.lift[i])
+
+    def led_lit(self, t):
+        """1 if either LED is lit (any colour) at time t, else 0."""
+        i = max(0, bisect.bisect_right(self.led_t, t) - 1)
+        l, r = self.led_c[i]
+        return 1 if (l.max() > 0 or r.max() > 0) else 0
 
     def led(self, t0, t1):
         """Average (left, right) LED colour (0..1 rgb) over [t0, t1]."""
@@ -372,7 +379,7 @@ def record(cfg, folder, tracks, hands, boxes, t_start, t_end, events, rng, start
     fw.writerow(["frame", "t_wall", "t_mono"])
     tf = open(os.path.join(out_root, "camera_truth.csv"), "w", newline="")
     tw = csv.writer(tf)
-    tw.writerow(["frame", "t_wall", "robot", "x_px", "y_px", "heading_img_deg"])
+    tw.writerow(["frame", "t_wall", "robot", "x_px", "y_px", "heading_img_deg", "led_on"])
     df = open(os.path.join(out_root, "camera_detections.csv"), "w", newline="")
     dw = csv.writer(df)
     dw.writerow(["frame", "t_wall", "x_px", "y_px", "score"])
@@ -407,7 +414,7 @@ def record(cfg, folder, tracks, hands, boxes, t_start, t_end, events, rng, start
                 if 0 <= u < W and 0 <= v < H:
                     u2, v2 = geom.project(bx + 5 * math.cos(th), by + 5 * math.sin(th), m.height_cm + z)
                     hd = math.degrees(math.atan2(-(float(v2) - v), float(u2) - u))
-                    tw.writerow([fi, f"{twall:.4f}", tr.name, f"{u:.2f}", f"{v:.2f}", f"{hd:.2f}"])
+                    tw.writerow([fi, f"{twall:.4f}", tr.name, f"{u:.2f}", f"{v:.2f}", f"{hd:.2f}", tr.led_lit(tc)])
                     seen.append((u, v))
             palms = []
             for h in hands:

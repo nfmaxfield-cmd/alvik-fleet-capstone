@@ -88,6 +88,57 @@ class RobotModelTests(unittest.TestCase):
         self.assertAlmostEqual(r.x, 30.0, delta=1e-6)
         self.assertAlmostEqual(robot.wrap180(r.heading() - h0), 45.0, delta=0.1)   # the gyro felt the rotation
 
+    def test_blink_pattern_from_name(self):
+        cfg = perfect_config()
+        for name, code in (("Left", 1), ("Center", 2), ("Right", 3), ("AL-3F2A", 4)):
+            r = robot.Robot(name, cfg, random.Random(0), config.firmware_params(), "t", 0.0, 0x1234, "ip")
+            self.assertEqual(r.blink_code_for(), code)
+            lit = [robot.Robot.blink_slot_lit(k, code) for k in range(24)]
+            self.assertEqual(lit[:code + 2], [True] + [False] * (code + 1))   # one flash per n + 2 slots
+            self.assertEqual(lit[code + 2:], lit[:24 - code - 2])
+            r.params["blink_code"] = 2
+            self.assertEqual(r.blink_code_for(), 2)
+
+    def test_blink_dark_during_library_block(self):
+        r = make_robot(perfect_config())
+        r.fw_yaw_sign = 1
+        r.blink_start()
+        r.wait_ms(305)                          # past the 300 ms lead: the first pulse is lit
+        self.assertEqual(r.leds[-1][1], (1, 1, 1))
+        k = len(r.leds)
+        t_call = r.ms
+        r.library_move(5)
+        # nothing but "dark" may be recorded between the call and the end of the 200 ms block
+        early = [(ms, left) for ms, left, _ in r.leds[k:] if ms < t_call + r.m.library_block_ms]
+        self.assertTrue(early)
+        self.assertEqual(early[-1][1], (0, 0, 0))
+
+    def test_pulse_never_stretched_into_sync_flash(self):
+        """The library's successful is_target_reached() blocks 100 ms with no hold() before it, so a
+        pulse lit then is stretched. Since 2026-10-17g flashes are 100 ms with at least 200 ms gaps,
+        so a stretched flash must stay well under the 300 ms sync flash and never reach the next one.
+        Ends a 2 cm move at every point of the blink period, for codes 1 and 4."""
+        cfg = perfect_config()
+        for code in (1, 4):
+            longest, rises = 0.0, []
+            for start_ms in range(0, 1800, 7):
+                r = make_robot(cfg, seed=start_ms)
+                r.fw_yaw_sign = 1
+                r.params["blink_code"] = code
+                r.blink_start()
+                r.wait_ms(2000 + start_ms)
+                k = len(r.leds)
+                r.library_move(2)
+                r.wait_ms(400)
+                on = None
+                for ms, left, _ in r.leds[k - 1:]:
+                    if max(left) > 0 and on is None:
+                        on = ms
+                    elif max(left) == 0 and on is not None:
+                        longest, on = max(longest, ms - on), None
+            self.assertLess(longest, 230.0, "code %d: longest blink pulse %.0f ms" % (code, longest))
+            self.assertGreater(longest, 150.0)                 # the stretch does happen
+
     def test_raw_columns_match_firmware(self):
         r = make_robot(perfect_config())
         r.run_id = "1234-1"
@@ -122,7 +173,93 @@ class CameraTests(unittest.TestCase):
         self.assertLess(float(vb), float(va))
 
 
-class SessionTests(unittest.TestCase):
+def runs_of(o):
+    with open(os.path.join(o, "sim_info.json")) as f:
+        info = json.load(f)
+    return info, info["runs"] + info["calib_runs"]
+
+
+def raw_by_run(o):
+    out = {}
+    with open(os.path.join(o, "session", "raw.csv"), newline="") as f:
+        for r in csv.DictReader(f):
+            out.setdefault(r["run"], []).append(r)
+    for v in out.values():
+        v.sort(key=lambda r: int(r["ms"]))     # a delayed packet can arrive after later ones
+    return out
+
+
+def raw_gaps(info, raw_rows, robot_name, min_ms=80):
+    """(t0, t1) laptop times of gaps in the RAW log: the robot was blocked inside the library
+    (200 ms in move(), 100 ms in the successful is_target_reached())."""
+    ms = [int(r["ms"]) for r in raw_rows]
+    return [(laptop_t(info, robot_name, a), laptop_t(info, robot_name, b)) for a, b in zip(ms, ms[1:]) if b - a >= min_ms]
+
+
+def laptop_t(info, robot_name, ms):
+    rb = info["robots"][robot_name]
+    return rb["t_boot"] + ms / 1000 / (1 + rb["clock_drift_ppm"] * 1e-6)
+
+
+class CalibAndNudgeChecks:
+    """Shared by the session test classes (needs self.o)."""
+
+    def test_calib_run_per_robot(self):
+        info, _ = runs_of(self.o)
+        with open(os.path.join(self.o, "session", "runinfo.csv"), newline="") as f:
+            ri = list(csv.DictReader(f))
+        raw = raw_by_run(self.o)
+        for name in info["robots"]:
+            mine = sorted((int(r["ms_start"]), r) for r in ri if r["robot"] == name)
+            exps = [r["experiment"] for _, r in mine]
+            self.assertEqual(exps[0], "calib", name)            # before the robot's first sheet row
+            self.assertEqual(exps.count("calib"), 1, name)      # once per power-on
+            self.assertEqual(mine[0][1]["yaw_sign"], "0")       # not checked yet when it starts
+            self.assertTrue(all(r["yaw_sign"] == "1" for _, r in mine[1:]))
+            steps = [int(r["step"]) for r in raw[mine[0][1]["run"]]]
+            first = [s for k, s in enumerate(steps) if k == 0 or s != steps[k - 1]]
+            self.assertEqual(first, [0, 1, 2, 3, 4, 5], name)
+        for c in info["calib_runs"]:
+            self.assertEqual(c["result"], "done")
+            # put down in view, off the start mark
+            self.assertGreater(math.hypot(c["start"][0], c["start"][1]), 15)
+
+    def test_start_nudge(self):
+        info, _ = runs_of(self.o)
+        raw = raw_by_run(self.o)
+        with open(os.path.join(self.o, "truth.csv"), newline="") as f:
+            truth = {}
+            for r in csv.DictReader(f):
+                truth.setdefault(r["run"], []).append((float(r["t_laptop"]), float(r["x_cm"]), float(r["y_cm"])))
+        n = config.firmware_params()
+        n = dict(n)["start_nudge_cm"]
+        for run in info["runs"]:
+            if run["exp"] not in ("demo", "straight", "turn"):
+                continue
+            rows = raw[run["run"]]
+            steps = [int(r["step"]) for r in rows]
+            self.assertIn(-1, steps, run["run"])
+            k0, k1 = steps.index(-1), len(steps) - 1 - steps[::-1].index(-1)
+            self.assertTrue(all(s == 0 for s in steps[:k0]))
+            self.assertTrue(all(s == -1 for s in steps[k0:k1 + 1]))     # one block, before the route
+            self.assertIn(steps[k1 + 1], (0, 1))      # demo's demoLog("start") counts 1 at once
+            # the robot's own odometry goes out n cm and back
+            xs = [float(r["x_cm"]) for r in rows[k0:k1 + 1]]
+            self.assertAlmostEqual(max(xs) - xs[0], n, delta=0.3)
+            self.assertLess(abs(xs[-1] - xs[0]), 0.3)
+            # and so does the truth
+            t0 = laptop_t(info, run["robot"], float(rows[k0]["ms"]))
+            t1 = laptop_t(info, run["robot"], float(rows[k1]["ms"]))
+            tr = [p for p in truth[run["run"]] if t0 - 0.05 <= p[0] <= t1 + 0.05]
+            x0, y0 = tr[0][1], tr[0][2]
+            h = math.radians(run["start"][2])
+            along = [(x - x0) * math.cos(h) + (y - y0) * math.sin(h) for _, x, y in tr]
+            self.assertAlmostEqual(max(along), n, delta=0.3)
+            self.assertLess(abs(along[-1]), 0.3)
+            self.assertLess(min(along), -0.0 + 0.3)
+
+
+class SessionTests(CalibAndNudgeChecks, unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.out = tempfile.mkdtemp(prefix="simtest_")
@@ -178,7 +315,8 @@ class SessionTests(unittest.TestCase):
                 float(r[k])
         self.assertIn("safe_lift 0", sheet[1]["commands"])   # the kidnapped run
         ends = {r["run"]: r for r in self.read("session", "runend.csv")}
-        self.assertEqual(set(ends), {r["run_id"] for r in sheet})
+        calib = {r["run"] for r in self.read("session", "runinfo.csv") if r["experiment"] == "calib"}
+        self.assertEqual(set(ends), {r["run_id"] for r in sheet} | calib)
 
     def test_truth_50hz_and_kidnap(self):
         truth = self.read("truth.csv")
@@ -222,6 +360,115 @@ class SessionTests(unittest.TestCase):
         cap.release()
         self.assertEqual(n, len(frames))
 
+
+class BlinkSessionTests(CalibAndNudgeChecks, unittest.TestCase):
+    """Three robots (codes 1, 2, 3), short runs, the camera at 30 frames a second."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.out = tempfile.mkdtemp(prefix="simblink_")
+        sheet = os.path.join(cls.out, "sheet.csv")
+        rows = [dict(order=1, robot="Left", level="straight30", commands="set straight_cm 30 / run straight"),
+                dict(order=2, robot="Center", level="L", commands="set demo_route 1 / set demo_a_cm 15 / "
+                                                                   "set demo_b_cm 10 / run demo"),
+                dict(order=3, robot="Right", level="straight30", commands="set straight_cm 30 / run straight"),
+                dict(order=4, robot="Left", level="straight30", commands="set straight_cm 30 / run straight")]
+        with open(sheet, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=simulate.SHEET_COLS)
+            w.writeheader()
+            for r in rows:
+                w.writerow(r)
+        cfgp = os.path.join(cls.out, "cfg.json")
+        with open(cfgp, "w") as f:
+            json.dump(dict(session=dict(after_run_s=2.0, before_run_s=2.0, carry_s=2.0, cmd_spacing_s=0.4,
+                                        calib_wait_s=1.0, after_calib_s=1.0),
+                           camera=dict(hands_per_min=0.0, boxes_per_10min=0.0)), f)
+        cls.o = os.path.join(cls.out, "o")
+        simulate.main(["--out", cls.o, "--sheet", sheet, "--seed", "5", "--video", "--fps", "30",
+                       "--config", cfgp])
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.out, ignore_errors=True)
+
+    def lit_series(self):
+        """Per run with blinking: (run info, [(t, led_on)]) from camera_truth, frame capture times
+        on the laptop clock, between blink start and the end flash."""
+        info, runs = runs_of(self.o)
+        c = info["config"]["camera"]
+        lag = c["pi_clock_offset_s"] + c["capture_delay_frames"] / c["fps"]   # t_wall - capture time, +- 2 ms
+        with open(os.path.join(self.o, "camera_truth.csv"), newline="") as f:
+            ct = list(csv.DictReader(f))
+        out = []
+        for run in runs:
+            if run["blink_start"] is None:
+                continue
+            end_on = [s["ms_on"] for s in run["sync"] if s["tag"] == "end"][0]
+            t_stop = laptop_t(info, run["robot"], end_on) - 0.15                  # blink::stop()
+            ser = [(float(r["t_wall"]) - lag, int(r["led_on"])) for r in ct if r["robot"] == run["robot"]]
+            ser = [(t, v) for t, v in ser if run["blink_start"] - 0.1 <= t < t_stop]   # dark before it
+            out.append((run, ser, t_stop))
+        return info, out
+
+    def test_sim_info_blink_code(self):
+        info, _ = runs_of(self.o)
+        self.assertEqual({n: r["blink_code"] for n, r in info["robots"].items()}, dict(Left=1, Center=2, Right=3))
+
+    def test_led_on_follows_code(self):
+        """Identity is the flash period, (code + 2) x 100 ms. From camera_truth: the time between
+        flash starts (rising edges of led_on) is one period (+-50 ms: 30 fps frames and tick
+        latency) whenever the robot was not blocked in the library between them; a block can
+        only drop flashes or start one late, never add one. The median period names the robot."""
+        info, series = self.lit_series()
+        raw = raw_by_run(self.o)
+        per_robot = {}
+        for run, ser, t_stop in series:
+            period = (run["blink_code"] + 2) * 0.1
+            gaps = raw_gaps(info, raw[run["run"]], run["robot"])
+            rise_t = [t1 for (t0, p), (t1, q) in zip(ser, ser[1:]) if q and not p]
+            self.assertGreaterEqual(len(rise_t), 5, run["run"])
+            self.assertGreater(rise_t[0] - run["blink_start"], 0.28)          # 300 ms dark first
+            for a, b in zip(rise_t, rise_t[1:]):
+                d = b - a
+                blocked = any(g0 < b and g1 > a - 0.12 for g0, g1 in gaps)   # a block just before a can start it late
+                if blocked:
+                    self.assertGreater(d, period - 0.11, (run["run"], d))
+                else:
+                    self.assertAlmostEqual(d, period, delta=0.05, msg=(run["run"], d))
+                    per_robot.setdefault(run["robot"], []).append(d)
+        for name, ds in per_robot.items():
+            code = info["robots"][name]["blink_code"]
+            self.assertAlmostEqual(sorted(ds)[len(ds) // 2], (code + 2) * 0.1, delta=0.02, msg=name)
+            self.assertGreater(len(ds), 10, name)
+
+    def test_no_pulse_as_long_as_sync_flash(self):
+        """Blink flashes are 100 ms (3 frames at 30 fps), up to ~215 ms when the library's 100 ms
+        reached wait stretches one; the sync flash is 300 ms (9-10 frames)."""
+        info, series = self.lit_series()
+        fps = info["config"]["camera"]["fps"]
+        sync_frames = round(dict(config.firmware_params())["sync_ms"] / 1000 * fps)
+        n_pulses, longest = 0, 0
+        for run, ser, _ in series:
+            n = 0
+            for t, v in ser:
+                if v:
+                    n += 1
+                    continue
+                if n:
+                    n_pulses += 1
+                    longest = max(longest, n)
+                n = 0
+        self.assertGreater(n_pulses, 30)
+        self.assertLessEqual(longest, round(0.23 * fps), longest)
+        self.assertLess(longest, sync_frames - 1)
+        # the sync flashes themselves are there, at full length
+        with open(os.path.join(self.o, "camera_truth.csv"), newline="") as f:
+            ct = [r for r in csv.DictReader(f) if r["robot"] == "Left"]
+        n, best = 0, 0
+        for r in ct:
+            n = n + 1 if r["led_on"] == "1" else 0
+            best = max(best, n)
+        self.assertGreaterEqual(best, sync_frames - 1)
 
 if __name__ == "__main__":
     unittest.main()

@@ -176,6 +176,11 @@ class SessionModel:
     carry_s: float = 3.0                  # picked up and put back on the start
     before_run_s: float = 8.0             # start marks measured
     cmd_spacing_s: float = 1.5            # between typed console commands
+    # calibration run (run_sheet.py sends `calibrate` once per robot per power-on, before its first row,
+    # with the robot in view but off the start mark): where it is put down, and the operator's pauses
+    calib_area_cm: List[float] = field(default_factory=lambda: [20.0, 50.0, 20.0, 45.0])   # x0, x1, y0, y1
+    calib_wait_s: float = 2.0             # put down -> Enter pressed -> `calibrate` sent
+    after_calib_s: float = 2.0            # RUNEND seen -> robot picked up to go to the start mark
     parked_pose: List[float] = field(default_factory=lambda: [-160.0, -60.0, 0.0])   # robots not running wait here, out of view
     video_lead_s: float = 5.0
     video_tail_s: float = 5.0
