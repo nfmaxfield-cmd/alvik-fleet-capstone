@@ -635,10 +635,11 @@ interval), since a setup can help on squares and not on straights.
 ## Same results as before?
 
 Every change on 2026-10-18 that alters results is a default on purpose:
-wheel size on, the encoder still test, and the settings read from the
-session's files (camera view area, start-nudge heading noise, frame rate,
-video clock). With `"wheel_scale": false, "still_mode": "speed"` in every
-setup, replay.py's outputs are byte-identical to the code before them (checked:
+wheel size on, the encoder still test, landmark ranging as a weighted camera
+fallback, and the settings read from the session's files (camera view area,
+start-nudge heading noise, frame rate, video clock). With `"wheel_scale":
+false, "still_mode": "speed", "tof_camera_gap_s": 0, "tof_weight": "none"` in
+every setup, replay.py's outputs are byte-identical to the code before them (checked:
 every output file, 8 runs of a 36-run simulator session, with and without
 `--map`; the camera view area read from the floor calibration changed
 nothing there, and no calibration results or video_clock.json were given). The byte-identity statements elsewhere in this file were
