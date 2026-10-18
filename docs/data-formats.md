@@ -84,12 +84,12 @@ Notes:
   | 3 | `move(-calib_roll_cm)`, then still `calib_still_ms` | the same measured the other way (heading spread, second wheel scale) |
   | 4 | compass wiggle (`calibrateYawSign(true)`, ~1.2 s) | gyro sign (RUNINFO yaw_sign of later runs) |
   | 5 | still `calib_still_ms` | gyro drift; the camera's picture before the spin |
-  | 6 | spin left `calib_spin_deg` (360) at `calib_spin_rpm` (15, ~34 deg/s, ~11 s), counted by the gyro; front stop off | gyro scale (camera rotation / gyro rotation), light offset (the lights circle the turning centre), front sensor sweep: `dL_cm..dR_cm` at `raw_hz` (50/s; the sensor itself updates ~15/s, so every frame is logged, ~2.3 deg apart) |
+  | 6 | spin left `calib_spin_deg` (720 = two turns) at `calib_spin_rpm` (15, ~34 deg/s, ~22 s), counted by the gyro; front stop off | gyro scale (camera rotation / gyro rotation), light offset (the lights circle the turning centre), front sensor sweep: `dL_cm..dR_cm` at `raw_hz` (50/s; the sensor itself updates ~15/s, so every frame is logged, ~2.3 deg apart) |
   | 7 | still `calib_still_ms` | picture between the spins; gyro drift |
   | 8 | spin right `calib_spin_deg` back | the same the other way (gyro drift cancels in the pair) |
   | 9 | still `calib_still_ms` (300 ms when `calib_spin_deg` is 0, which skips 5-8) | picture after; gyro drift |
 
-  About 38 s from RUNINFO to RUNEND with the defaults. Before 2026-10-18b:
+  About 60 s from RUNINFO to RUNEND with the defaults. Before 2026-10-18b:
   1 blinking still, 2 roll max(3, `start_nudge_cm`) forward, 3 back (300 ms
   pauses), 4 compass wiggle, 5 300 ms settling. In a `survey` run
   (2026-10-18b+): the leg number (1, 2, ...), legs + 1 = the drive back to the

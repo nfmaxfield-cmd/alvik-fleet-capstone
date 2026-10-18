@@ -176,7 +176,7 @@ CALIB_ROLL_CM = 15.0      # calib_roll_cm
 CALIB_STOP_CM = 7.0       # safe_front_cm: it stops if anything is this close in front, even at the end of the roll
 ROBOT_LEN_CM = 10.0       # the robot's own length (9.5 cm), rounded up
 SPIN_CIRCLE_CM = 25.0     # spin in place: corners sweep a ~13.5 cm circle; 25 cm leaves room for drift
-CALIB_S = 40              # how long it takes, about (37-38 s in the simulator)
+CALIB_S = 60              # how long it takes, about (about 60 s in the simulator with two turns each way)
 
 
 def calib_space_text():

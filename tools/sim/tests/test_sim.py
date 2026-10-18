@@ -219,14 +219,15 @@ class CalibAndNudgeChecks:
             steps = [int(r["step"]) for r in raw[mine[0][1]["run"]]]
             first = [s for k, s in enumerate(steps) if k == 0 or s != steps[k - 1]]
             self.assertEqual(first, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], name)
-            # the spins: about a full turn left (step 6), then back right (step 8), by the gyro;
+            # the spins: calib_spin_deg left (step 6), then back right (step 8), by the gyro;
             # the front distance zones are logged all the way round
             rows = raw[mine[0][1]["run"]]
+            spin = float(next(v for k, v in config.firmware_params() if k == "calib_spin_deg"))
             for st, sgn in ((6, 1), (8, -1)):
                 seg = [r for r in rows if int(r["step"]) == st]
                 yaw = [float(r["yaw_deg"]) for r in seg]
                 turned = sum(((b - a + 180) % 360) - 180 for a, b in zip(yaw, yaw[1:]))
-                self.assertAlmostEqual(sgn * turned, 359.0, delta=6.0, msg=(name, st))
+                self.assertAlmostEqual(sgn * turned, spin - 1.0, delta=6.0, msg=(name, st))
                 self.assertGreater(len(seg), 400, (name, st))          # ~11 s at 50 rows/s
                 self.assertTrue(all(r["dC_cm"] not in ("", None) for r in seg))
         for c in info["calib_runs"]:

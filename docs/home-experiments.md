@@ -104,12 +104,12 @@ speed control (`straight_rpm 0`) or both wheels at a set rpm.
 
 **Before any run you'll measure with a tape:** send `calibrate` first, with
 the robot in the camera's view but off its mark. This is a logged calibration
-run (about 40 s from firmware 2026-10-18b; about 10 s before): the robot
+run (about 60 s from firmware 2026-10-18b; about 10 s before): the robot
 stands still blinking its own light code (who is who), rolls `calib_roll_cm`
 (15 cm) forward and back (which way it faces, and how far its wheels really
 carry it, both seen by the camera), wiggles to check its compass direction,
-then spins slowly once around to the left and once back (`calib_spin_deg`
-360, `calib_spin_rpm` 15: the gyro's scale, where its lights sit relative to
+then spins slowly twice around to the left and twice back (`calib_spin_deg`
+720, `calib_spin_rpm` 15: the gyro's scale, where its lights sit relative to
 its turning centre, and a sweep of the front distance sensor across any
 boards in range), with `calib_still_ms` (1 s) still periods in between for
 the gyro's drift. It needs a clear 32 cm (12 5/8") lane ahead, counting its

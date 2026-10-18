@@ -75,7 +75,7 @@ still after each), 4 the compass wiggle (`calibrateYawSign(true)`: 300 ms at
 by the gyro heading, brake 1 deg early, front stop off; the same turn-scrub
 slip model as other in-place turns), 7 still, 8 `spinBy(-calib_spin_deg)`,
 9 still (`calib_still_ms` each; `calib_spin_deg` 0 skips 5-8 and step 9 is
-300 ms). About 38 s with the defaults.
+300 ms). About 60 s with the defaults.
 
 **RAW raw_n and SYNC ms_on_after** (2026-10-18b): RAW rows carry `raw_n`
 (rows sent before this one in the run), so lost rows show as jumps; SYNC

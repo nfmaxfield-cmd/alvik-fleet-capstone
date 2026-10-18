@@ -109,7 +109,7 @@ Param PARAMS[] = {
   {"blink_code",       0,   "0 = pattern from the name (Left 1, Center 2, Right 3, others 4 pulses), or 1..4"},
   {"calib_blink_ms", 3000,  "calibration run: how long to stand still blinking its code before moving"},
   {"calib_roll_cm",   15,   "calibration run: roll this far forward and back (camera: heading and wheel distance scale); needs this + 10 cm clear ahead"},
-  {"calib_spin_deg", 360,   "calibration run: spin in place this far left, then back right (gyro scale, light offset, front sensor sweep); 0 = skip"},
+  {"calib_spin_deg", 720,   "calibration run: spin in place this far left, then back right (gyro scale, light offset, front sensor sweep); 0 = skip"},
   {"calib_spin_rpm",  15,   "calibration run: wheel speed while spinning (15 = about 34 deg/s, 11 s a turn)"},
   {"calib_still_ms", 1000,  "calibration run: stand still this long after each roll and before/after each spin (gyro bias, camera pictures)"},
 
