@@ -433,12 +433,19 @@ def load_blink(path, H_px_to_floor, offset_s, parallax=None, dist=None, lit_only
 def load_calib_results(path, offset_s):
     """calibration_results.csv (tools/blink/calib.py): one dict per roll with
     run, robot, event, t (laptop clock: wheels start), heading (floor deg or
-    None), led (forward, left) cm or None, identity."""
+    None), led (forward, left) cm or None, identity. The light offset is the
+    one measured from the calibration spin (firmware 2026-10-18b+: relative to
+    the turning centre, the point the pose refers to) when calib.py rated it
+    ok, else the one from the robot-centre detections."""
     out = []
     with open(path, newline="") as f:
         for r in csv.DictReader(f):
             tv, h = fnum(r.get("t_video")), fnum(r.get("heading_floor_deg"))
             lf, ll = fnum(r.get("led_fwd_cm")), fnum(r.get("led_left_cm"))
+            if (r.get("led_offset_quality") or "").strip() == "ok":
+                sf, sl = fnum(r.get("spin_led_fwd_cm")), fnum(r.get("spin_led_left_cm"))
+                if not (math.isnan(sf) or math.isnan(sl)):
+                    lf, ll = sf, sl
             out.append(dict(run=(r.get("run") or "").strip(), robot=(r.get("robot_log") or "").strip(),
                             event=(r.get("event") or "").strip(), identity=(r.get("identity") or "").strip(),
                             t=None if math.isnan(tv) else tv - offset_s,

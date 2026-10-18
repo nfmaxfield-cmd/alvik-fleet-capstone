@@ -104,10 +104,19 @@ speed control (`straight_rpm 0`) or both wheels at a set rpm.
 
 **Before any run you'll measure with a tape:** send `calibrate` first, with
 the robot in the camera's view but off its mark. This is a logged calibration
-run (about 10 s): the robot stands still blinking its own light code (who is
-who), rolls a few cm forward and back (which way it faces, seen by the
-camera), then wiggles to check its compass direction. It doesn't end exactly
-where it started, so place the robot on its mark afterwards. Turn, grid, demo
+run (about 40 s from firmware 2026-10-18b; about 10 s before): the robot
+stands still blinking its own light code (who is who), rolls `calib_roll_cm`
+(15 cm) forward and back (which way it faces, and how far its wheels really
+carry it, both seen by the camera), wiggles to check its compass direction,
+then spins slowly once around to the left and once back (`calib_spin_deg`
+360, `calib_spin_rpm` 15: the gyro's scale, where its lights sit relative to
+its turning centre, and a sweep of the front distance sensor across any
+boards in range), with `calib_still_ms` (1 s) still periods in between for
+the gyro's drift. It needs a clear 32 cm (12 5/8") lane ahead, counting its
+own body (15 cm roll + 7 cm stop distance + 10 cm robot), and a 25 cm
+(9 13/16") circle around it. tools/blink/calib.py reads all of it from the
+video and the log (calibration_results.csv). It doesn't end exactly where it
+started, so place the robot on its mark afterwards. Turn, grid, demo
 and straight runs then refuse to start until a robot has been calibrated since
 power-on (run_sheet.py does this for you).
 

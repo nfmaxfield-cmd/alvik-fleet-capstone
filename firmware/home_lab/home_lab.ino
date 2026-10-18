@@ -226,16 +226,20 @@ void syncFlash(const char* tag) {
   alvik.left_led.set_color(0, 0, 0);
   alvik.right_led.set_color(0, 0, 0);
   logWait(150);
+  // ms_on: just before the calls that switch the lights on; ms_on_after: just
+  // after them (each set_color() goes over the serial link to the motor board,
+  // so the two differ by how long switching takes: the light-on delay)
   unsigned long on = millis();
   alvik.left_led.set_color(1, 1, 1);
   alvik.right_led.set_color(1, 1, 1);
+  unsigned long onAfter = millis();
   logWait((unsigned long)P("sync_ms"));
   alvik.left_led.set_color(0, 0, 0);
   alvik.right_led.set_color(0, 0, 0);
   unsigned long off = millis();
   logWait(150);
-  net::sendLine("H,SYNC,run,tag,ms_on,ms_off");
-  net::logf("D,SYNC,%s,%s,%lu,%lu", gRunId.c_str(), tag, on, off);
+  net::sendLine("H,SYNC,run,tag,ms_on,ms_off,ms_on_after");
+  net::logf("D,SYNC,%s,%s,%lu,%lu,%lu", gRunId.c_str(), tag, on, off, onAfter);
 }
 
 // One record describing the run before it starts: what ran, on what, in
@@ -262,24 +266,51 @@ void logRunInfo(int i) {
 bool needsYawSign(int i) { return i == 1 || (i >= 3 && i <= 7); }
 
 // Calibration run, once per power-on and whenever robots may have been mixed
-// up. Logged like any run (RUNINFO, RAW, flashes), so the camera recording
-// holds it too. RAW step: 1 standing still blinking its code (who is who),
-// 2 rolling forward and 3 back (which way it faces, from the camera),
-// 4 the compass wiggle (gyro sign, on the robot), 5 settling.
+// up. Logged like any run (RUNINFO, PARAM, RAW at raw_hz, flashes), so the
+// camera recording holds it too; tools/blink/calib.py reads it from the video
+// and the log. RAW step (what the camera / log measure in it):
+//   1  still, blinking its code, calib_blink_ms       who is who
+//   2  roll forward calib_roll_cm, still calib_still_ms   heading, wheel distance scale
+//   3  roll back, still calib_still_ms                 the same, the other way
+//   4  compass wiggle (calibrateYawSign(true))         gyro sign
+//   5  still calib_still_ms                            gyro bias; picture before the spin
+//   6  spin left calib_spin_deg at calib_spin_rpm      gyro scale, light offset from the
+//                                                      turning centre, front sensor sweep
+//   7  still calib_still_ms                            picture after the spin; gyro bias
+//   8  spin back right calib_spin_deg                  the same, the other way
+//   9  still calib_still_ms                            picture after; gyro bias
+// calib_spin_deg 0 skips 6-8 (step 9 is then 300 ms). The blink code runs
+// throughout (moves go dark before the library's blocking call, as elsewhere).
+// Defaults: about 38 s from RUNINFO to RUNEND; clear floor: a 32 cm lane (10 cm
+// robot + 15 cm roll + 7 cm safe_front_cm stop distance) and a 25 cm circle
+// for the spin. Firmware before 2026-10-18b: 1 still, 2 roll
+// max(3, start_nudge_cm) with 300 ms pauses, 3 back, 4 wiggle, 5 300 ms.
 void runCalib() {
-  net::logf("M,%s calibration: blinking code %d, rolling forward and back, then a small wiggle",
-            net::name, blink::codeFor(net::name));
-  float n = fmaxf(3.0f, P("start_nudge_cm"));
+  float n = fmaxf(3.0f, P("calib_roll_cm"));
+  float spin = P("calib_spin_deg");
+  unsigned long still = (unsigned long)fmaxf(300.0f, P("calib_still_ms"));
+  net::logf("M,%s calibration: blinking code %d, rolling %.0f cm forward and back, a small wiggle%s",
+            net::name, blink::codeFor(net::name), n, spin != 0 ? ", then a slow spin each way" : "");
   rawlog::step = 1;
   if (!waitMs((unsigned long)P("calib_blink_ms"))) return;
   rawlog::step = 2;
-  if (!libraryMove(n) || !waitMs(300)) return;
+  if (!libraryMove(n) || !waitMs(still)) return;
   rawlog::step = 3;
-  if (!libraryMove(-n) || !waitMs(300)) return;
+  if (!libraryMove(-n) || !waitMs(still)) return;
   rawlog::step = 4;
   if (!calibrateYawSign(true)) return;
-  rawlog::step = 5;
-  if (!waitMs(300)) return;
+  if (spin != 0) {
+    rawlog::step = 5;
+    if (!waitMs(still)) return;
+    rawlog::step = 6;
+    if (!spinBy(fabsf(spin), P("calib_spin_rpm"))) return;
+    rawlog::step = 7;
+    if (!waitMs(still)) return;
+    rawlog::step = 8;
+    if (!spinBy(-fabsf(spin), P("calib_spin_rpm"))) return;
+  }
+  rawlog::step = 9;
+  if (!waitMs(spin != 0 ? still : 300)) return;
   net::sendLine("M,calibrated: now place the robot on its start mark");
 }
 

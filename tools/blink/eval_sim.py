@@ -118,6 +118,17 @@ def main(argv=None):
                   f"({r['identity']}); heading {float(r['heading_floor_deg']):7.2f}, true {true_h if true_h is None else round(true_h, 2)} "
                   f"[{src}], error {e:+.2f} deg; moved {r['moved_cm']} cm; LED offset fwd {r['led_fwd_cm']} "
                   f"left {r['led_left_cm']} cm")
+            rb = info["robots"].get(r["robot_log"], {})
+            if r.get("wheel_scale"):
+                ws = (rb["wheel_radius_left_cm"] + rb["wheel_radius_right_cm"]) / 2 / rb["nominal_radius_cm"]
+                print(f"         wheel scale {r['wheel_scale']} (sim: mean wheel radius / nominal {ws:.4f}, "
+                      f"less ~0.2% slip) [{r['wheel_scale_quality']}]")
+            if r.get("gyro_scale"):
+                print(f"         gyro scale {r['gyro_scale']} (sim {1 / (1 + rb['gyro_scale_err']):.5f}) "
+                      f"[{r['gyro_scale_quality']}]")
+            if r.get("spin_led_fwd_cm"):
+                print(f"         light from turning centre: fwd {r['spin_led_fwd_cm']} left {r['spin_led_left_cm']} cm "
+                      f"(sim {led_fwd + m['axle_to_center_cm']:.2f}, 0) [{r['led_offset_quality']}]")
     if errs:
         a = np.abs(errs)
         print(f"CALIB  heading error vs truth.csv: {len(a)} events, mean |err| {a.mean():.2f} deg, max {a.max():.2f} deg")

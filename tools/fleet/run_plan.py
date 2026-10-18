@@ -903,8 +903,8 @@ def start_robots(coord, link, args, source):
     if args.calibrate:
         for n in names:
             link.send_name(n, "calibrate")
-        print("Calibrating (about 10 s each, all at once)...")
-        if not wait_for(lambda: all(getattr(coord.bots[n], "last_runend", (None,))[0] == "calib" for n in names), 40, coord):
+        print("Calibrating (about 40 s each, all at once: each needs a clear 32 cm lane ahead and a 25 cm circle)...")
+        if not wait_for(lambda: all(getattr(coord.bots[n], "last_runend", (None,))[0] == "calib" for n in names), 90, coord):
             print("  not every calibration run reported its end; carrying on")
         time.sleep(1.0)
         coord.drain()

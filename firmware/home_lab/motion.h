@@ -162,6 +162,40 @@ bool calibrateYawSign(bool force = false) {
   return true;
 }
 
+// Spin in place by `deg` (positive = left), counted by the gyro (heading()),
+// the wheels at `rpm` opposite ways, then brake. Needs the compass sign
+// (calibrateYawSign() first). Where it stops is not important (the camera and
+// the log both measure what really happened), so it simply brakes about a
+// degree early for the coast. The front distance check is off while it spins:
+// it does not move forward, and a board inside safe_front_cm would otherwise
+// stop it; so the RAW log carries the sensor's whole sweep across nearby boards.
+// Non-blocking motor calls only, so the blink code keeps going.
+bool spinBy(float deg, float rpm) {
+  if (deg == 0) return true;
+  if (gYawSign == 0) { gFail = "spin without a compass check"; return false; }
+  int dir = deg > 0 ? 1 : -1;
+  float target = fabsf(deg) - 1.0f;
+  float dps = fmaxf(fabsf(rpm), 1.0f) * 2.27f;   // nominal: rpm x 6 deg/s x wheel radius / half track (1.7 / 4.5 cm)
+  unsigned long limit = 3000 + (unsigned long)(fabsf(deg) / dps * 2000.0f);   // allows half speed
+  float saved = gFrontLimitCm;
+  gFrontLimitCm = 0;
+  float turned = 0, prev = heading();
+  unsigned long t0 = millis();
+  bool ok = true;
+  alvik.set_wheels_speed(-dir * fabsf(rpm), dir * fabsf(rpm));
+  while (turned < target) {
+    if (shouldAbort()) { ok = false; break; }
+    if (millis() - t0 > limit) { gFail = "spin timed out"; ok = false; break; }
+    float h = heading();
+    turned += dir * wrap180(h - prev);
+    prev = h;
+    delay(5);
+  }
+  alvik.brake();
+  gFrontLimitCm = saved;
+  return ok;
+}
+
 // ---------- turns ----------
 
 struct TurnResult {

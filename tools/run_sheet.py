@@ -170,6 +170,27 @@ def inches(text):
     return -v if neg else v
 
 
+# The calibration run's moves with the firmware defaults (params.h, 2026-10-18b): roll
+# calib_roll_cm forward and back, spin calib_spin_deg each way. Space it needs, cm.
+CALIB_ROLL_CM = 15.0      # calib_roll_cm
+CALIB_STOP_CM = 7.0       # safe_front_cm: it stops if anything is this close in front, even at the end of the roll
+ROBOT_LEN_CM = 10.0       # the robot's own length (9.5 cm), rounded up
+SPIN_CIRCLE_CM = 25.0     # spin in place: corners sweep a ~13.5 cm circle; 25 cm leaves room for drift
+CALIB_S = 40              # how long it takes, about (37-38 s in the simulator)
+
+
+def calib_space_text():
+    """The calibration prompt's space instructions, in cm and inches."""
+    ahead = CALIB_ROLL_CM + CALIB_STOP_CM
+    lane = ahead + ROBOT_LEN_CM
+    return (f"  It needs clear floor: a straight lane {lane:g} cm ({to_in(lane)}) long, about {SPIN_CIRCLE_CM:g} cm "
+            f"({to_in(SPIN_CIRCLE_CM)}) wide, starting at its back: its own {ROBOT_LEN_CM:g} cm "
+            f"({to_in(ROBOT_LEN_CM)}), the {CALIB_ROLL_CM:g} cm ({to_in(CALIB_ROLL_CM)}) roll, and "
+            f"{CALIB_STOP_CM:g} cm ({to_in(CALIB_STOP_CM)}) more, because it stops if anything is that close in "
+            f"front.\n  For the spin it also needs a circle {SPIN_CIRCLE_CM:g} cm ({to_in(SPIN_CIRCLE_CM)}) across "
+            f"around where it stands. Nothing else may move inside that space (hands, other robots).")
+
+
 def to_in(cm):
     """cm -> inches to the nearest 1/16, written like 15 3/4 (for messages)."""
     n = round(abs(cm) / 2.54 * 16)
@@ -381,13 +402,16 @@ def main():
                         ask("  Press Enter once it's on: ")
                 boot = watch.boots.get(robot)
                 if calibrated.get(robot) is None or (boot and calibrated[robot] != boot):
-                    print(f"  {robot} needs its calibration run (once per power-on, about 10 s): it blinks its "
-                          f"code, rolls a little forward and back, then wiggles.")
-                    ask("  Put it on the floor where the camera can see it, NOT on the mark, and press Enter: ")
+                    print(f"  {robot} needs its calibration run (once per power-on, about {CALIB_S} s): it blinks "
+                          f"its code, rolls {CALIB_ROLL_CM:g} cm ({to_in(CALIB_ROLL_CM)}) forward and back, wiggles, "
+                          f"then spins slowly once around to the left and once back to the right.")
+                    print(calib_space_text())
+                    ask("  Put it on the floor where the camera can see all of that space, NOT on the mark, facing "
+                        "along the clear lane, and press Enter: ")
                     before = watch.started.get(robot)
                     link.send_name(robot, "calibrate")
                     crun = watch.wait_start(robot, before, 8)
-                    cres = watch.wait_end(crun, 30) if crun else None
+                    cres = watch.wait_end(crun, CALIB_S + 50) if crun else None
                     if not cres or cres["result"] != "done":
                         why = cres["result"] if cres else "no answer"
                         print(f"  Calibration didn't finish ({why}). Check the robot has room, then try again.")

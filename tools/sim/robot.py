@@ -46,7 +46,7 @@ for _c in "gx gy gz".split():
     RAW_FORMATS[_c] = "%.3f"
 for _c in "dL_cm dCL_cm dC_cm dCR_cm dR_cm dtop_cm dbot_cm".split():
     RAW_FORMATS[_c] = "%.1f"
-for _c in "lineL lineC lineR battery charging lifted".split():
+for _c in "lineL lineC lineR battery charging lifted raw_n".split():
     RAW_FORMATS[_c] = "%d"
 
 
@@ -518,7 +518,7 @@ class Robot(FollowMixin):
                     yaw_deg=wrap180(self.yaw_raw),
                     dL_cm=d[0], dCL_cm=d[1], dC_cm=d[2], dCR_cm=d[3], dR_cm=d[4], dtop_cm=dtop, dbot_cm=dbot,
                     lineL=lL, lineC=lC, lineR=lR, battery=int(self.battery), charging=0,
-                    lifted=1 if self.lifted else 0)
+                    lifted=1 if self.lifted else 0, raw_n=self.raw_rows)
         return vals
 
     # ================================================= firmware: logging
@@ -768,6 +768,41 @@ class Robot(FollowMixin):
         self.advance(m.target_reached_ms, busy=True)      # the successful is_target_reached() waits
         return True
 
+    def spin_by(self, deg, rpm):
+        """motion.h spinBy(): spin in place by deg (left positive) counted by heading(), wheels at
+        rpm opposite ways, brake about 1 deg early; the front check is off while it spins."""
+        if deg == 0:
+            return True
+        if self.fw_yaw_sign == 0:
+            self.fail = "spin without a compass check"
+            return False
+        d = 1 if deg > 0 else -1
+        target = abs(deg) - 1.0
+        dps = max(abs(rpm), 1.0) * 2.27
+        limit = 3000 + abs(deg) / dps * 2000.0
+        saved = self.front_limit
+        self.front_limit = 0.0
+        self.turn_slip = min(0.2, max(0.0, self.rng.gauss(self.m.turn_slip_mean_pct, self.m.turn_slip_sd_pct) / 100))
+        turned, prev = 0.0, self.heading()
+        t0 = self.millis()
+        ok = True
+        self.set_wheels_speed(-d * abs(rpm), d * abs(rpm))
+        while turned < target:
+            if self.should_abort():
+                ok = False
+                break
+            if self.millis() - t0 > limit:
+                self.fail = "spin timed out"
+                ok = False
+                break
+            h = self.heading()
+            turned += d * wrap180(h - prev)
+            prev = h
+            self.loop_delay(5)
+        self.brake()
+        self.front_limit = saved
+        return ok
+
     def roll_straight(self, cm, rpm):
         x0, y0 = self.odo_x, self.odo_y
         t0 = self.millis()
@@ -818,8 +853,9 @@ class Robot(FollowMixin):
         self.set_leds(OFF, OFF)
         off = self.millis()
         self.log_wait(150)
-        self.send("H,SYNC,run,tag,ms_on,ms_off")
-        self.send("D,SYNC,%s,%s,%d,%d" % (self.run_id, tag, on, off))
+        self.send("H,SYNC,run,tag,ms_on,ms_off,ms_on_after")
+        # no light-switching delay is modelled: the lights change at ms_on, ms_on_after = ms_on
+        self.send("D,SYNC,%s,%s,%d,%d,%d" % (self.run_id, tag, on, off, on))
         self.syncs.append((tag, on, off))
 
     def wifi_dbm(self):
@@ -1004,24 +1040,42 @@ class Robot(FollowMixin):
                   % (self.name, "finished" if ok else "stopped", err, head_err))
 
     def run_calib(self):
-        """runCalib() from home_lab.ino: RAW step 1 still and blinking, 2 forward, 3 back, 4 wiggle, 5 settle."""
-        self.send("M,%s calibration: blinking code %d, rolling forward and back, then a small wiggle"
-                  % (self.name, self.blink_code_for()))
-        n = max(3.0, self.P("start_nudge_cm"))
+        """runCalib() from home_lab.ino (2026-10-18b): RAW step 1 still and blinking, 2 roll forward
+        calib_roll_cm + still, 3 back + still, 4 compass wiggle, 5 still, 6 spin left calib_spin_deg,
+        7 still, 8 spin back right, 9 still (calib_still_ms each; 6-8 skipped when calib_spin_deg is 0,
+        and step 9 is then 300 ms)."""
+        n = max(3.0, self.P("calib_roll_cm"))
+        spin = self.P("calib_spin_deg")
+        still = int(max(300.0, self.P("calib_still_ms")))
+        self.send("M,%s calibration: blinking code %d, rolling %.0f cm forward and back, a small wiggle%s"
+                  % (self.name, self.blink_code_for(), n, ", then a slow spin each way" if spin != 0 else ""))
         self.step = 1
         if not self.wait_ms(int(self.P("calib_blink_ms"))):
             return
         self.step = 2
-        if not self.library_move(n) or not self.wait_ms(300):
+        if not self.library_move(n) or not self.wait_ms(still):
             return
         self.step = 3
-        if not self.library_move(-n) or not self.wait_ms(300):
+        if not self.library_move(-n) or not self.wait_ms(still):
             return
         self.step = 4
         if not self.calibrate_yaw_sign(True):
             return
-        self.step = 5
-        if not self.wait_ms(300):
+        if spin != 0:
+            self.step = 5
+            if not self.wait_ms(still):
+                return
+            self.step = 6
+            if not self.spin_by(abs(spin), self.P("calib_spin_rpm")):
+                return
+            self.step = 7
+            if not self.wait_ms(still):
+                return
+            self.step = 8
+            if not self.spin_by(-abs(spin), self.P("calib_spin_rpm")):
+                return
+        self.step = 9
+        if not self.wait_ms(still if spin != 0 else 300):
             return
         self.send("M,calibrated: now place the robot on its start mark")
 

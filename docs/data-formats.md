@@ -17,11 +17,11 @@ then the robot's own columns:
 
 | File | Columns after robot,t_recv |
 | --- | --- |
-| raw.csv | run,ms,step,wl_deg,wr_deg,wl_rpm,wr_rpm,v_cms,w_dps,x_cm,y_cm,th_deg,ax,ay,az,gx,gy,gz,roll_deg,pitch_deg,yaw_deg,dL_cm,dCL_cm,dC_cm,dCR_cm,dR_cm,dtop_cm,dbot_cm,lineL,lineC,lineR,battery,charging,lifted |
+| raw.csv | run,ms,step,wl_deg,wr_deg,wl_rpm,wr_rpm,v_cms,w_dps,x_cm,y_cm,th_deg,ax,ay,az,gx,gy,gz,roll_deg,pitch_deg,yaw_deg,dL_cm,dCL_cm,dC_cm,dCR_cm,dR_cm,dtop_cm,dbot_cm,lineL,lineC,lineR,battery,charging,lifted,raw_n (raw_n from 2026-10-18b) |
 | runinfo.csv | run,experiment,fw_version,motor_fw,ms_start,battery,charging,wifi_dbm,route,yaw_sign,odo_sign (signs from the compass check, 0 = not checked; raw yaw_deg / th_deg times these = left-positive; from 2026-10-17d) |
 | param.csv | run,name,value |
 | runend.csv | run,result,ms_end,duration_ms,battery,wifi_dbm,raw_rows_sent,packets_sent |
-| sync.csv | run,tag,ms_on,ms_off (tag = start or end; light flash on/off, robot ms) |
+| sync.csv | run,tag,ms_on,ms_off,ms_on_after (tag = start or end; light flash on/off, robot ms; ms_on is taken just before the two set_color() calls that switch the lights on, ms_on_after (2026-10-18b+) just after them, so ms_on_after - ms_on is the switch-on call time) |
 | clock.csv | token,robot_ms,boot |
 | straight.csv | run,robot,result,cmd_cm,rpm,odo_x_cm,odo_y_cm,odo_theta_deg,imu_dyaw_deg,total_ms,battery (odo y and theta left-positive from 2026-10-17d; raw library sign before) |
 | demo_step.csv | run,robot,step,x_cm,y_cm,theta_deg,ms (y and theta left-positive from 2026-10-17d) |
@@ -42,11 +42,33 @@ Notes:
 - `ms` is the robot's millis() (ms since its power-on).
 - RAW `x_cm,y_cm,th_deg` are the robot's own wheel odometry, reset to 0 at the
   start of straight and demo runs. `step` counts completed route steps;
-  -1 = the start nudge (2026-10-17e+). In a `calib` run: 1 blinking still,
-  2 rolling forward, 3 back, 4 compass wiggle, 5 settling. In a `survey` run
+  -1 = the start nudge (2026-10-17e+). In a `calib` run (firmware
+  2026-10-18b+; tools/blink/calib.py reads each step):
+
+  | step | what the robot does | what it is for |
+  | --- | --- | --- |
+  | 1 | stands still blinking its code, `calib_blink_ms` (3 s) | who is who (blink code); gyro drift |
+  | 2 | `move(+calib_roll_cm)` (15 cm), then still `calib_still_ms` (1 s) | heading (direction of the roll on video, gyro-corrected for any curve), wheel distance scale (camera cm / odometry cm) |
+  | 3 | `move(-calib_roll_cm)`, then still `calib_still_ms` | the same measured the other way (heading spread, second wheel scale) |
+  | 4 | compass wiggle (`calibrateYawSign(true)`, ~1.2 s) | gyro sign (RUNINFO yaw_sign of later runs) |
+  | 5 | still `calib_still_ms` | gyro drift; the camera's picture before the spin |
+  | 6 | spin left `calib_spin_deg` (360) at `calib_spin_rpm` (15, ~34 deg/s, ~11 s), counted by the gyro; front stop off | gyro scale (camera rotation / gyro rotation), light offset (the lights circle the turning centre), front sensor sweep: `dL_cm..dR_cm` at `raw_hz` (50/s; the sensor itself updates ~15/s, so every frame is logged, ~2.3 deg apart) |
+  | 7 | still `calib_still_ms` | picture between the spins; gyro drift |
+  | 8 | spin right `calib_spin_deg` back | the same the other way (gyro drift cancels in the pair) |
+  | 9 | still `calib_still_ms` (300 ms when `calib_spin_deg` is 0, which skips 5-8) | picture after; gyro drift |
+
+  About 38 s from RUNINFO to RUNEND with the defaults. Before 2026-10-18b:
+  1 blinking still, 2 roll max(3, `start_nudge_cm`) forward, 3 back (300 ms
+  pauses), 4 compass wiggle, 5 300 ms settling. In a `survey` run
   (2026-10-18b+): the leg number (1, 2, ...), legs + 1 = the drive back to the
   start. In a `follow` run: the id of the step running (0 between steps).
 - RAW `lifted` (firmware 2026-10-17c+): 1 while the robot reports being picked up.
+- RAW `raw_n` (firmware 2026-10-18b+, last column): the row's number within the
+  run (0, 1, 2, ... = rows sent before it; RUNEND raw_rows_sent is the count).
+  A jump in raw_n is a row lost over WiFi; a gap in `ms` between consecutive
+  raw_n is a real pause on the robot (library move()/rotate() block ~200 ms).
+  Older logs have no raw_n column (everything reads columns by name, and the
+  console starts a new raw_2.csv when the header changes mid-session).
 - RAW `dL_cm, dCL_cm, dC_cm, dCR_cm, dR_cm`: the front distance sensor's five
   zones, left to right (the fusion takes them as +22, +11, 0, -11, -22 deg,
   left positive: `tof_zone_deg`, to be checked on hardware); `dtop_cm`,
@@ -222,6 +244,21 @@ centre_x_px,centre_y_px,led_fwd_px,led_left_px,led_fwd_cm,led_left_cm,note
 - `led_fwd_*`, `led_left_*`: the light's offset from the robot's centre in
   the robot's own frame (forward, left), px and cm; needs robot-centre
   detections (`--detections`). Column details: tools/blink/README.md.
+- Calib runs from firmware 2026-10-18b (blank for older runs and start nudges):
+  heading_chord_deg, heading_gyro_corr_deg, heading_back_deg, heading_spread_deg,
+  heading_quality, moved_back_cm, back_quality, wheel_cm, wheel_back_cm,
+  wheel_scale, wheel_scale_spread, wheel_scale_quality, gyro_bias_dps,
+  spin1_gyro_deg, spin1_cam_deg, spin2_gyro_deg, spin2_cam_deg, spin_match,
+  gyro_scale, gyro_scale_spread, gyro_scale_trace, gyro_scale_quality, spin_centre_x_px,
+  spin_centre_y_px, led_points, led_radius_cm, led_fit_rms_cm,
+  led_angle_sd_deg, spin_led_fwd_cm, spin_led_left_cm, led_offset_quality.
+  `heading_floor_deg` is then the heading the robot stood at before the roll
+  (forward and back roll combined); `wheel_scale` = camera cm / wheel
+  odometry cm (multiply odometry distances by it); `gyro_scale` = camera
+  degrees / gyro degrees (multiply gyro turns by it); `spin_led_*` = the
+  light's offset from the turning centre (the wheel-axle midpoint, the point
+  the robot's pose refers to). Each `*_quality` is `ok` or `check: <why>`.
+  Column details and thresholds: tools/blink/README.md.
 
 ## Fleet map (`map.json`, written by tools/fleet/app.py)
 

@@ -66,10 +66,20 @@ out of view.
 gets one `calibrate` before its first sheet row: it is put down by hand
 somewhere in view off the start mark (`calib_area_cm`, any heading), `calibrate`
 is sent `calib_wait_s` later, and it runs as a logged run with experiment
-`calib`: RAW step 1 standing still `calib_blink_ms`, 2 `move(+n)` and 3 `move(-n)`
-(n = max(3, `start_nudge_cm`), 300 ms after each), 4 the compass wiggle
-(`calibrateYawSign(true)`: 300 ms at -20/+20 rpm, brake 300 ms, back 300 ms,
-brake 300 ms, logged throughout), 5 300 ms. Its RUNINFO has `yaw_sign` 0 (not
+`calib` (firmware 2026-10-18b): RAW step 1 standing still `calib_blink_ms`,
+2 `move(+n)` and 3 `move(-n)` (n = max(3, `calib_roll_cm`), `calib_still_ms`
+still after each), 4 the compass wiggle (`calibrateYawSign(true)`: 300 ms at
+-20/+20 rpm, brake 300 ms, back 300 ms, brake 300 ms, logged throughout),
+5 still, 6 `spinBy(+calib_spin_deg)` (wheels at -/+`calib_spin_rpm`, counted
+by the gyro heading, brake 1 deg early, front stop off; the same turn-scrub
+slip model as other in-place turns), 7 still, 8 `spinBy(-calib_spin_deg)`,
+9 still (`calib_still_ms` each; `calib_spin_deg` 0 skips 5-8 and step 9 is
+300 ms). About 38 s with the defaults.
+
+**RAW raw_n and SYNC ms_on_after** (2026-10-18b): RAW rows carry `raw_n`
+(rows sent before this one in the run), so lost rows show as jumps; SYNC
+records carry `ms_on_after`, equal to `ms_on` here (the simulator does not
+model how long the light-switching calls take). Its RUNINFO has `yaw_sign` 0 (not
 checked yet); later runs have the sign it found. `after_calib_s` after its
 RUNEND the robot is carried to the start mark (the same hand carry as between
 runs). Turn, grid, demo and straight runs are refused before a calibration,

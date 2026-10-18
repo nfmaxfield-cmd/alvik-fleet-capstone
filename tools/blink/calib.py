@@ -17,8 +17,9 @@ Inputs:
                 (detector output, the simulator's camera_detections.csv, ...)
   --video-offset  video clock minus laptop clock, s (default: from the sync flashes)
 
-For every calib run (RAW step 2 = roll forward 3 cm) and every start nudge
-(RAW step -1 = roll forward 2 cm and back) it reports:
+For every calib run (RAW step 2 = roll forward calib_roll_cm, 15 cm; 3 cm
+before firmware 2026-10-18b) and every start nudge (RAW step -1 = roll
+forward 2 cm and back) it reports:
   - who: the robot named by the log (the robot whose RAW shows the roll at
     that moment) and the robot named by the blink code of the light that
     moved at that moment, and whether they agree
@@ -28,6 +29,15 @@ For every calib run (RAW step 2 = roll forward 3 cm) and every start nudge
     that best lines the two up; the floor does not move, the robot does)
   - LED offset: where the light (midpoint of the two LEDs) sits on the robot,
     forward and left of the robot's centre, in px and cm (needs --detections)
+and for a calib run of firmware 2026-10-18b or later (steps: docs/data-formats.md):
+  - heading from the forward AND back roll, each corrected for the roll's
+    curve (half the heading change the gyro saw during it), combined
+  - wheel distance scale: camera distance / wheel odometry distance
+  - gyro scale: the camera's rotation over each spin (the robot's picture in
+    the stills before and after, aligned by rotation) / the gyro's
+  - light offset from the turning centre: a circle through the light's
+    flashes during the spins, and where on it the light sits vs the heading
+Each with a quality column (ok / check: why).
 
 Output: calibration_results.csv (columns in README.md), plus a printed summary.
 """
@@ -54,7 +64,14 @@ OUT_COLS = ["run", "robot_log", "experiment", "event", "t_video", "robot_blink",
             "blink_p_log", "identity", "others_moving", "lights_moved", "onset_diff_ms", "heading_img_deg", "heading_floor_deg",
             "heading_method", "moved_px", "moved_cm", "commanded_cm", "motion_quality", "det_heading_floor_deg",
             "light_x_px", "light_y_px", "centre_x_px", "centre_y_px", "led_fwd_px", "led_left_px", "led_fwd_cm",
-            "led_left_cm", "note"]
+            "led_left_cm",
+            # calib runs from firmware 2026-10-18b on (long roll back and forth, spins); blank otherwise
+            "heading_chord_deg", "heading_gyro_corr_deg", "heading_back_deg", "heading_spread_deg", "heading_quality",
+            "moved_back_cm", "back_quality", "wheel_cm", "wheel_back_cm", "wheel_scale", "wheel_scale_spread",
+            "wheel_scale_quality", "gyro_bias_dps", "spin1_gyro_deg", "spin1_cam_deg", "spin2_gyro_deg", "spin2_cam_deg",
+            "spin_match", "gyro_scale", "gyro_scale_spread", "gyro_scale_trace", "gyro_scale_quality", "spin_centre_x_px", "spin_centre_y_px",
+            "led_points", "led_radius_cm", "led_fit_rms_cm", "led_angle_sd_deg", "spin_led_fwd_cm", "spin_led_left_cm",
+            "led_offset_quality", "note"]
 
 
 def fnum(x, default=float("nan")):
@@ -178,16 +195,18 @@ def phase_shift(A, B, rmin, rmax):
     return fx - r.shape[1] // 2, fy - c, (pk - med) / mad
 
 
-def measure_shift(ref, paus, x, y, half, e):
+def measure_shift(ref, paus, x, y, half, e, half1=None):
     """How far the robot near (x, y) moved between the still picture and the
     pause picture: (dx, dy, quality) or None. e = expected distance, px.
-    First pass: phase correlation of the same window in both pictures. Second
-    pass: windows moved by half the shift each way, so the robot sits in the
-    same place in both windows (a window that cuts the robot differently in the
-    two pictures pulls the answer by up to ~0.7 deg); the remaining small shift
-    is measured near zero."""
-    A, ax, ay = crop(ref, x, y, half)
-    B, bx, by = crop(paus, x, y, half)
+    First pass: phase correlation of the same window (half-size half1, big
+    enough to hold the robot at both ends of a long roll) in both pictures.
+    Second pass: windows moved by half the shift each way, so the robot sits in
+    the same place in both windows (a window that cuts the robot differently in
+    the two pictures pulls the answer by up to ~0.7 deg); the remaining small
+    shift is measured near zero."""
+    half1 = max(half, half1 or half)
+    A, ax, ay = crop(ref, x, y, half1)
+    B, bx, by = crop(paus, x, y, half1)
     if A is None or B is None or (ax, ay) != (bx, by):
         return None
     res = phase_shift(A, B, max(2.0, 0.4 * e), 1.8 * e + 2)
@@ -297,6 +316,221 @@ def moving_between(run, ta, tb):
     return len(vals) >= 2 and (max(vals) - min(vals)) > 3
 
 
+class Series:
+    """One run's RAW log as arrays on the laptop clock: wheel angles, own
+    odometry, the gyro's yaw unwrapped (raw sign) and the step number."""
+
+    def __init__(self, run):
+        rows = [r for r in run.raw if r.get("step") not in (None, "")]
+        g = lambda k: np.array([fnum(r.get(k)) for r in rows], float)
+        self.t = np.array([r["t"] for r in rows], float)
+        self.step = np.array([int(fnum(r["step"], 99)) for r in rows])
+        self.wl, self.wr = g("wl_deg"), g("wr_deg")
+        self.x, self.y = g("x_cm"), g("y_cm")
+        yaw = g("yaw_deg")
+        ok = ~np.isnan(yaw)
+        self.yaw = np.full(len(yaw), np.nan)
+        if ok.any():
+            self.yaw[ok] = np.degrees(np.unwrap(np.radians(yaw[ok])))
+        self.sign = self._yaw_sign()
+
+    def _yaw_sign(self):
+        """+1 / -1 so that sign * yaw grows on a left turn, from the log itself:
+        the yaw's changes against the wheels' (right minus left) changes. None
+        if the wheels hardly turned against each other."""
+        if len(self.t) < 3:
+            return None
+        dw = np.diff(self.wr - self.wl)
+        dy = np.diff(self.yaw)
+        m = ~np.isnan(dw) & ~np.isnan(dy) & (np.abs(dw) > 0.3) & (np.diff(self.t) < 0.2)
+        if np.abs(dw[m]).sum() < 60:          # under ~60 wheel degrees of turning: too little to tell
+            return None
+        c = float(np.sum(dw[m] * dy[m]))
+        return 1 if c > 0 else -1
+
+    def still(self, step, trim=0.1, min_s=0.15, tol=1.0):
+        """(t0, t1): the last stretch of RAW step `step` in which neither wheel moves by more
+        than tol degrees (the robot stands still), trim s cut from its start; None if too short."""
+        idx = np.nonzero(self.step == step)[0]
+        if not len(idx):
+            return None
+        last = idx[-1]
+        i = len(idx) - 1
+        while i > 0 and abs(self.wl[idx[i - 1]] - self.wl[last]) <= tol and abs(self.wr[idx[i - 1]] - self.wr[last]) <= tol:
+            i -= 1
+        t0, t1 = self.t[idx[i]] + trim, self.t[last]
+        return (t0, t1) if t1 - t0 >= min_s else None
+
+    def span(self, step):
+        idx = np.nonzero(self.step == step)[0]
+        return (self.t[idx[0]], self.t[idx[-1]]) if len(idx) else None
+
+    def at(self, arr, t0, t1):
+        m = (self.t >= t0) & (self.t <= t1) & ~np.isnan(arr)
+        return float(np.median(arr[m])) if m.any() else float("nan")
+
+    def heading_change(self, a, b):
+        """Gyro heading change (left positive, deg) from still span a to still span b."""
+        if self.sign is None or a is None or b is None:
+            return float("nan")
+        return self.sign * (self.at(self.yaw, *b) - self.at(self.yaw, *a))
+
+    def turned(self, a, b, bias):
+        """heading_change() with the gyro's still-standing drift (bias, deg/s) taken out."""
+        if a is None or b is None or math.isnan(bias):
+            return float("nan")
+        return self.heading_change(a, b) - bias * (0.5 * (b[0] + b[1]) - 0.5 * (a[0] + a[1]))
+
+    def odo_dist(self, a, b):
+        """Wheel odometry distance (the robot's own x_cm, y_cm) between still spans a and b."""
+        if a is None or b is None:
+            return float("nan")
+        d = math.hypot(self.at(self.x, *b) - self.at(self.x, *a), self.at(self.y, *b) - self.at(self.y, *a))
+        if d > 0.1:
+            return d
+        # no odometry in the log: mean wheel angle with the library's nominal 1.7 cm wheel radius
+        w = lambda s: (self.at(self.wl, *s) + self.at(self.wr, *s)) / 2
+        return abs(w(b) - w(a)) * math.pi / 180 * 1.7
+
+    def bias(self, spans):
+        """Gyro drift while standing still (deg/s, left positive): line fit over each still span
+        of at least 0.5 s, combined weighted by length. (value, total seconds used)."""
+        num = den = 0.0
+        if self.sign is None:
+            return float("nan"), 0.0
+        for s in spans:
+            if s is None or s[1] - s[0] < 0.5:
+                continue
+            m = (self.t >= s[0]) & (self.t <= s[1]) & ~np.isnan(self.yaw)
+            if m.sum() < 10:
+                continue
+            k = np.polyfit(self.t[m] - self.t[m].mean(), self.yaw[m], 1)[0]
+            w = s[1] - s[0]
+            num += self.sign * k * w
+            den += w
+        return (num / den, den) if den else (float("nan"), 0.0)
+
+    def yaw_at(self, t):
+        m = ~np.isnan(self.yaw)
+        return self.sign * np.interp(t, self.t[m], self.yaw[m]) if self.sign is not None and m.any() else np.nan
+
+
+def fit_circle(P):
+    """Least-squares circle through points P (n x 2): (cx, cy, r, rms residual)."""
+    x, y = P[:, 0], P[:, 1]
+    A = np.c_[2 * x, 2 * y, np.ones(len(x))]
+    b = x * x + y * y
+    (cx, cy, c), *_ = np.linalg.lstsq(A, b, rcond=None)
+    r = math.sqrt(max(c + cx * cx + cy * cy, 0.0))
+    for _ in range(10):                      # geometric refinement (Gauss-Newton)
+        d = np.hypot(x - cx, y - cy)
+        d = np.where(d < 1e-9, 1e-9, d)
+        J = np.c_[-(x - cx) / d, -(y - cy) / d, -np.ones(len(x))]
+        res = d - r
+        step, *_ = np.linalg.lstsq(J, -res, rcond=None)
+        cx, cy, r = cx + step[0], cy + step[1], r + step[2]
+        if np.abs(step).max() < 1e-7:
+            break
+    res = np.hypot(x - cx, y - cy) - r
+    return float(cx), float(cy), float(abs(r)), float(np.sqrt(np.mean(res * res)))
+
+
+def angular_span(angles_deg):
+    """How much of the circle the angles cover, deg (360 minus the largest gap)."""
+    a = np.sort(np.mod(np.asarray(angles_deg, float), 360.0))
+    if len(a) < 2:
+        return 0.0
+    gaps = np.diff(np.r_[a, a[0] + 360.0])
+    return float(360.0 - gaps.max())
+
+
+def robot_mask(A, E, pc, ppc, max_cm=8.0, thr=12.0, grow=0):
+    """The robot's outline in picture A (uint8 0/255): where A differs from the empty floor E
+    (the same spot with the robot away), inside max_cm of pc, cleaned up. None if too small."""
+    import cv2
+    d = cv2.GaussianBlur(np.abs(A - E), (0, 0), 1.5)
+    m = (d > thr).astype(np.uint8) * 255
+    disc = np.zeros(A.shape, np.uint8)
+    cv2.circle(disc, (int(round(pc[0])), int(round(pc[1]))), int(round(max_cm * ppc)), 255, -1)
+    m = cv2.bitwise_and(m, disc)
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    m = cv2.morphologyEx(cv2.morphologyEx(m, cv2.MORPH_OPEN, k), cv2.MORPH_CLOSE, k)
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(m)
+    if n < 2:
+        return None
+    big = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    m = np.where(lab == big, 255, 0).astype(np.uint8)
+    if grow > 0:      # take in a band of floor around the outline: the edges carry most of the rotation
+        m = cv2.dilate(m, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * grow + 1, 2 * grow + 1)))
+    elif grow < 0:
+        m = cv2.erode(m, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (-2 * grow + 1, -2 * grow + 1)))
+    return m if m.sum() / 255 >= (5 * ppc) ** 2 else None
+
+
+def rotation_between(A_img, B_img, cx, cy, ppc, init_deg, geo, mask_cm=4.6, half_cm=9.0, empty=None, grow_cm=1.0):
+    """Rotation of the robot (floor degrees, counter-clockwise positive, within +-180) from
+    picture A to picture B, both of it standing still, turning centre near image point
+    (cx, cy): ECC alignment (rotation + shift) of the robot, started from init_deg (and
+    +-4 deg). With `empty` (a picture of the same spot without the robot) the alignment
+    uses the robot's outline grown by grow_cm, so its edges are in (in the simulator:
+    0.20 deg rms per spin, against 0.31 for the outline alone and 0.27 for a 4.6 cm disc);
+    without, a disc of mask_cm (the inside of the top, which has few features).
+    Returns (deg, correlation 0..1, mask kind) or None."""
+    import cv2
+    half = int(round(half_cm * ppc))
+    A, ax, ay = crop(A_img, cx, cy, half)
+    B, bx, by = crop(B_img, cx, cy, half)
+    if A is None or B is None or (ax, ay) != (bx, by):
+        return None
+    pc = np.array([cx - ax, cy - ay])
+    mask, kind = None, "outline"
+    if empty is not None:
+        E, ex, ey = crop(empty, cx, cy, half)
+        if E is not None and (ex, ey) == (ax, ay):
+            mask = robot_mask(A, E, pc, ppc, grow=int(round(grow_cm * ppc)))
+    if mask is None:
+        kind = "disc"
+        mask = np.zeros(A.shape, np.uint8)
+        cv2.circle(mask, (int(round(pc[0])), int(round(pc[1]))), int(round(mask_cm * ppc)), 255, -1)
+    A = cv2.GaussianBlur(A, (0, 0), 1.0)
+    B = cv2.GaussianBlur(B, (0, 0), 1.0)
+    crit = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 300, 1e-7)
+    best = None
+    for d0 in (init_deg, init_deg - 4.0, init_deg + 4.0):
+        a = math.radians(d0)
+        R = np.array([[math.cos(a), math.sin(a)], [-math.sin(a), math.cos(a)]])   # floor CCW = image CW in (x, y-down)
+        W = np.zeros((2, 3), np.float32)
+        W[:, :2] = R
+        W[:, 2] = pc - R @ pc
+        try:
+            cc, W = cv2.findTransformECC(A, B, W, cv2.MOTION_EUCLIDEAN, crit, mask, 3)
+        except cv2.error:
+            continue
+        if best is None or cc > best[0]:
+            best = (float(cc), W.copy())
+    if best is None:
+        return None
+    cc, W = best
+    # floor angle of a short line through the centre, before and after (handles the camera's
+    # small tilt and the image's flipped y axis)
+    p1 = np.array([pc[0] - 15, pc[1]])
+    p2 = np.array([pc[0] + 15, pc[1]])
+    q1, q2 = W[:, :2] @ p1 + W[:, 2], W[:, :2] @ p2 + W[:, 2]
+    f = lambda p: geo.floor(p[0] + ax, p[1] + ay)
+    a0 = math.atan2(f(p2)[1] - f(p1)[1], f(p2)[0] - f(p1)[0])
+    a1 = math.atan2(f(q2)[1] - f(q1)[1], f(q2)[0] - f(q1)[0])
+    return wrap(math.degrees(a1 - a0)), cc, kind
+
+
+def wrap(a):
+    return (a + 180.0) % 360.0 - 180.0
+
+
+def circ_mean(deg):
+    a = np.radians(np.asarray(deg, float))
+    return math.degrees(math.atan2(np.mean(np.sin(a)), np.mean(np.cos(a))))
+
+
 # ------------------------------------------------------------------ main work
 def blink_tracks(rows):
     by = defaultdict(list)
@@ -307,7 +541,8 @@ def blink_tracks(rows):
     for k, v in by.items():
         v.sort(key=lambda r: r["t"])
         out[k] = dict(track=k, robot=v[0]["robot"], code=v[0]["code"], score=v[0]["score"], probs=v[0].get("probs", {}),
-                      t=np.array([r["t"] for r in v]), x=np.array([r["x"] for r in v]), y=np.array([r["y"] for r in v]))
+                      t=np.array([r["t"] for r in v]), x=np.array([r["x"] for r in v]), y=np.array([r["y"] for r in v]),
+                      n=np.array([r.get("n_spots", 2) for r in v]))
     return out
 
 
@@ -348,10 +583,13 @@ def centre_near(dets, t0, t1, x, y, rad):
     return float(np.median(dets[m, 1])), float(np.median(dets[m, 2])), int(m.sum())
 
 
-def analyse_event(run, ev, kind, cmd_cm, off, frames, tracks, dets, geo, all_runs, names):
-    """One forward roll: returns an output row (dict)."""
+def analyse_event(run, ev, kind, cmd_cm, off, frames, tracks, dets, geo, all_runs, names, S=None, still_ms=None):
+    """One forward roll (and, in a calib run from firmware 2026-10-18b on, the roll back and
+    the spins): returns an output row (dict)."""
     row = dict(run=run.run_id, robot_log=run.robot, experiment=run.experiment, event=kind, commanded_cm=cmd_cm)
     notes = []
+    S = S or Series(run)
+    nmed = 15 if (still_ms or 0) >= 600 else 9      # long stills: median of more frames
     if ev is None or ev.get("onset") is None:
         row["note"] = "no forward roll in the wheel log" if ev else f"no RAW step {'2' if kind == 'calib' else '-1'}"
         return row
@@ -393,8 +631,8 @@ def analyse_event(run, ev, kind, cmd_cm, off, frames, tracks, dets, geo, all_run
     if not cands:
         row["note"] = "no blinking light or start flash found near this moment"
         return row
-    ref, nref = frames.median(v(r0[0]), v(r0[1]), kind=0)
-    paus, npause = frames.median(v(p0), v(p1), kind=0)
+    ref, nref = frames.median(v(r0[0]), v(r0[1]), kind=0, max_n=nmed)
+    paus, npause = frames.median(v(p0), v(p1), kind=0, max_n=nmed)
     if ref is None or paus is None:
         row["note"] = "video frames missing for the still or the pause"
         return row
@@ -403,7 +641,7 @@ def analyse_event(run, ev, kind, cmd_cm, off, frames, tracks, dets, geo, all_run
         ppc = geo.px_per_cm(c["x"], c["y"])
         half = int(round(14 * ppc))
         e = cmd_cm * ppc
-        res = measure_shift(ref, paus, c["x"], c["y"], half, e)
+        res = measure_shift(ref, paus, c["x"], c["y"], half, e, half1=int(round(max(14.0, 12 + 0.8 * cmd_cm) * ppc)))
         if res is None:
             continue
         dx, dy, q = res
@@ -451,9 +689,73 @@ def analyse_event(run, ev, kind, cmd_cm, off, frames, tracks, dets, geo, all_run
     f0 = geo.floor(lx, ly)
     f1 = geo.floor(lx + dx, ly + dy)
     hf = math.degrees(math.atan2(f1[1] - f0[1], f1[0] - f0[0]))
-    row.update(heading_img_deg=round(hi, 2), heading_floor_deg=round(hf, 2), heading_method="video shift",
-               moved_px=round(c["mag"], 2), moved_cm=round(math.hypot(f1[0] - f0[0], f1[1] - f0[1]), 2),
-               motion_quality=round(c["q"], 1))
+    moved_cm = math.hypot(f1[0] - f0[0], f1[1] - f0[1])
+    row.update(heading_img_deg=round(hi, 2), heading_chord_deg=round(hf, 2), heading_method="video shift",
+               moved_px=round(c["mag"], 2), moved_cm=round(moved_cm, 2), motion_quality=round(c["q"], 1))
+    # The roll's direction is the robot's MEAN heading while rolling: a slightly curved roll
+    # (left and right wheels a little different) turns it by d_fwd, so the heading it stood
+    # at is the chord minus half of that turn, which the gyro measures.
+    still0, pause = (r0[0], r0[1]), (ev["p0"], ev["p1"])
+    # gyro drift while standing: from the stills of a calib run (the 3 s blink still, and from
+    # 2026-10-18b the stills after the rolls and around the spins); not for start nudges
+    bias = float("nan")
+    if kind == "calib":
+        bias, b_s = S.bias([still0, pause, S.still(3), S.still(5), S.still(7), S.still(9)])
+        if b_s < 1.5:
+            bias = float("nan")
+    d_fwd = S.turned(still0, pause, bias)
+    h_fwd = wrap(hf - d_fwd / 2) if not math.isnan(d_fwd) else hf
+    if not math.isnan(d_fwd):
+        row["heading_gyro_corr_deg"] = round(-d_fwd / 2, 3)
+        row["heading_method"] = "video shift + gyro"
+    est = [h_fwd]
+    odo_f = S.odo_dist(still0, pause)
+    if odo_f > 0.3:
+        row["wheel_cm"] = round(odo_f, 3)
+    # the roll back (calib runs, firmware 2026-10-18b+: step 3 ends with a still of calib_still_ms)
+    back = S.still(3) if kind == "calib" and still_ms else None
+    if back is not None:
+        after, n_after = frames.median(v(back[0]), v(back[1]), kind=0, max_n=nmed)
+        res = None
+        if after is not None:
+            res = measure_shift(paus, after, c["x"] + dx, c["y"] + dy, int(round(14 * c["ppc"])), cmd_cm * c["ppc"],
+                                half1=int(round(max(14.0, 12 + 0.8 * cmd_cm) * c["ppc"])))
+        if res is not None and res[2] >= 8 and (res[0] * dx + res[1] * dy) < 0:
+            bx, by, bq = res
+            g0, g1 = geo.floor(lx + dx, ly + dy), geo.floor(lx + dx + bx, ly + dy + by)
+            hb = math.degrees(math.atan2(g1[1] - g0[1], g1[0] - g0[0]))
+            back_cm = math.hypot(g1[0] - g0[0], g1[1] - g0[1])
+            d_back = S.turned(pause, back, bias)
+            if not math.isnan(d_back) and not math.isnan(d_fwd):
+                h_back = wrap(hb - 180.0 - d_back / 2 - d_fwd)
+            else:
+                h_back = wrap(hb - 180.0)
+            row.update(heading_back_deg=round(h_back, 2), moved_back_cm=round(back_cm, 2),
+                       back_quality=round(bq, 1))
+            est.append(h_back)
+            odo_b = S.odo_dist(pause, back)
+            if odo_b > 0.3:
+                row["wheel_back_cm"] = round(odo_b, 3)
+            if odo_f > 0.3 and odo_b > 0.3:
+                ws_f, ws_b = moved_cm / odo_f, back_cm / odo_b
+                row["wheel_scale"] = round((moved_cm + back_cm) / (odo_f + odo_b), 4)
+                row["wheel_scale_spread"] = round(ws_f - ws_b, 4)
+                okw = abs(ws_f - ws_b) <= 0.01 and 0.9 <= row["wheel_scale"] <= 1.1
+                row["wheel_scale_quality"] = "ok" if okw else (
+                    "check: forward and back differ by %.1f%%" % (100 * abs(ws_f - ws_b)) if abs(ws_f - ws_b) > 0.01
+                    else "check: far from 1")
+        else:
+            notes.append("roll back not measured on the video")
+    h0 = circ_mean(est)
+    row["heading_floor_deg"] = round(h0, 2)
+    if len(est) == 2:
+        sp = wrap(est[0] - est[1])
+        row["heading_spread_deg"] = round(sp, 2)
+        row["heading_quality"] = "ok" if abs(sp) <= 1.0 and c["q"] >= 8 else "check: forward and back rolls differ by %.1f deg" % sp
+    elif kind == "calib" and still_ms:
+        row["heading_quality"] = "check: forward roll only"
+    else:
+        row["heading_quality"] = "single roll" if cmd_cm < 10 else "ok"
     # light position while still: blink lights during the still, else the start flash
     L0 = None
     if c["src"] == "blink" and c["n_still"] >= 2:
@@ -490,8 +792,161 @@ def analyse_event(run, ev, kind, cmd_cm, off, frames, tracks, dets, geo, all_run
             row["led_left_cm"] = round(-ex * math.sin(h) + ey * math.cos(h), 2)
         else:
             notes.append("no robot-centre detections near the light while still")
+    if kind == "calib" and still_ms and L0 and S.span(6) is not None:
+        # the pause at the far end of the roll is a picture of the floor where the robot
+        # stood (and spins), with the robot 15 cm away: the spin pictures' background
+        empty = paus if cmd_cm >= 12 else None
+        analyse_spin(run, S, row, c, L0, h0, still0, bias, off, frames, tracks, dets, geo, nmed, notes, empty=empty)
     row["note"] = "; ".join(notes)
     return row
+
+
+def analyse_spin(run, S, row, c, L0, h0, still0, b, off, frames, tracks, dets, geo, nmed, notes, empty=None):
+    """Steps 5-9 of a calib run (2026-10-18b+): spin left, still, spin back right, still.
+    Gyro scale: the camera's rotation (whole-robot picture alignment between the stills)
+    against the gyro's (bias from the stills taken out). Light offset: the lights circle
+    the turning centre; the circle's centre and radius, and where on it the light sits
+    relative to the heading, give the light's (forward, left) offset from the turning centre."""
+    v = lambda t: t + off
+    s5, s7, s9 = S.still(5), S.still(7), S.still(9)
+    sp6, sp8 = S.span(6), S.span(8)
+    if None in (s5, s7, s9, sp6, sp8):
+        notes.append("spin steps incomplete in the log")
+        return
+    if S.sign is None:
+        notes.append("gyro direction not found in the log: spin not analysed")
+        return
+    if math.isnan(b):
+        b = 0.0
+    row["gyro_bias_dps"] = round(b, 4)
+    mid = lambda s: 0.5 * (s[0] + s[1])
+    g1 = S.heading_change(s5, s7) - b * (mid(s7) - mid(s5))
+    g2 = S.heading_change(s7, s9) - b * (mid(s9) - mid(s7))
+    row.update(spin1_gyro_deg=round(g1, 3), spin2_gyro_deg=round(g2, 3))
+    # ---- the lights' circle (blink flashes during the spins and the stills around them)
+    ppc = c["ppc"]
+    rest = None
+    pts = []
+    for T in tracks.values():
+        m = (T["t"] >= v(s5[0])) & (T["t"] <= v(s5[1]))
+        if m.any() and math.hypot(np.median(T["x"][m]) - L0[0], np.median(T["y"][m]) - L0[1]) <= 6 * ppc:
+            rest = (float(np.median(T["x"][m])), float(np.median(T["y"][m])))
+    near = rest or L0
+    for T in tracks.values():
+        m = (T["t"] >= v(sp6[0])) & (T["t"] <= v(sp8[1])) & (np.hypot(T["x"] - near[0], T["y"] - near[1]) <= 8 * ppc)
+        for k in np.nonzero(m)[0]:
+            pts.append((T["t"][k], T["x"][k], T["y"][k], T["n"][k]))
+    pts.sort()
+    centre_px = None
+    if len(pts) >= 8:
+        P = np.array([[p[1], p[2]] for p in pts])
+        F = np.array([geo.floor(p[1], p[2]) for p in pts])
+        cxp, cyp, rp, _ = fit_circle(P)
+        centre_px = (cxp, cyp)
+        tl = np.array([p[0] for p in pts]) - off
+        spin_of = np.where(tl <= sp6[1] + 0.3, 1, np.where(tl >= sp8[0] - 0.3, 2, 0))
+        fits = []
+        for k in (1, 2):
+            m = spin_of == k
+            if m.sum() >= 6:
+                cx, cy, r, rms = fit_circle(F[m])
+                ang = np.degrees(np.arctan2(F[m, 1] - cy, F[m, 0] - cx))
+                fits.append(dict(k=k, m=m, cx=cx, cy=cy, r=r, rms=rms, span=angular_span(ang)))
+        fits = [f for f in fits if f["span"] >= 180]
+        if fits:
+            row["spin_centre_x_px"], row["spin_centre_y_px"] = round(cxp, 2), round(cyp, 2)
+            row["led_points"] = int(sum(f["m"].sum() for f in fits))
+            row["led_radius_cm"] = round(float(np.mean([f["r"] for f in fits])), 3)
+            row["led_fit_rms_cm"] = round(float(np.sqrt(np.mean([f["rms"] ** 2 for f in fits]))), 3)
+            row["_fits"] = (fits, F, tl)
+    else:
+        notes.append(f"only {len(pts)} light flashes seen during the spins")
+    # ---- camera rotation: the robot's picture in the stills before, between and after the spins
+    if centre_px is None:
+        C0 = centre_near(dets, v(s5[0]), v(s5[1]), near[0], near[1], 10 * ppc) if dets is not None else None
+        if C0 is not None:
+            centre_px = C0[:2]
+            notes.append("spin centre from the robot-centre detections")
+        else:
+            a = math.radians(row.get("heading_img_deg", 0.0))
+            centre_px = (near[0] - 2.75 * ppc * math.cos(a), near[1] + 2.75 * ppc * math.sin(a))
+            notes.append("spin centre ASSUMED 2.75 cm behind the light")
+    imgs = [frames.median(v(s[0]), v(s[1]), kind=0, max_n=nmed)[0] for s in (s5, s7, s9)]
+    cams, ccs = [], []
+    for (A, B), g in zip(((imgs[0], imgs[1]), (imgs[1], imgs[2])), (g1, g2)):
+        if A is None or B is None:
+            cams.append(float("nan"))
+            continue
+        res = rotation_between(A, B, centre_px[0], centre_px[1], ppc, wrap(g), geo, empty=empty)
+        if res is None:
+            cams.append(float("nan"))
+            continue
+        d, cc, mk = res
+        if mk != "outline" and "disc" not in notes:
+            notes.append("spin pictures aligned inside a disc (no empty-floor picture of the spot): less precise")
+        cams.append(d + 360.0 * round((g - d) / 360.0))     # whole turns from the gyro
+        ccs.append(cc)
+    cam1, cam2 = cams
+    if not math.isnan(cam1):
+        row["spin1_cam_deg"] = round(cam1, 3)
+    if not math.isnan(cam2):
+        row["spin2_cam_deg"] = round(cam2, 3)
+    if ccs:
+        row["spin_match"] = round(min(ccs), 3)
+    gs = float("nan")
+    if not (math.isnan(cam1) or math.isnan(cam2)) and abs(g1 - g2) > 90:
+        gs = (cam1 - cam2) / (g1 - g2)
+        s1, s2 = cam1 / g1, cam2 / g2
+        row["gyro_scale"] = round(gs, 5)
+        row["gyro_scale_spread"] = round(s1 - s2, 5)
+        okg = abs(s1 - s2) <= 0.005 and 0.95 <= gs <= 1.05 and min(ccs) >= 0.8
+        row["gyro_scale_quality"] = "ok" if okg else "check: " + ", ".join(
+            q for q, bad in (("the two spins differ by %.2f%%" % (100 * abs(s1 - s2)), abs(s1 - s2) > 0.005),
+                             ("far from 1", not 0.95 <= gs <= 1.05),
+                             ("weak picture match %.2f" % min(ccs), min(ccs) < 0.8)) if bad)
+    elif not math.isnan(cam1) and abs(g1) > 90:
+        gs = cam1 / g1
+        row["gyro_scale"] = round(gs, 5)
+        row["gyro_scale_quality"] = "check: first spin only"
+    # ---- light offset from the turning centre, in the robot's frame
+    if "_fits" in row:
+        fits, F, tl = row.pop("_fits")
+        k_scale = gs if not math.isnan(gs) else 1.0
+        # heading at the still before the spin: the roll's heading plus what the gyro turned since
+        h5 = h0 + k_scale * (S.heading_change(still0, s5) - b * (mid(s5) - mid(still0)))
+        y5 = S.yaw_at(mid(s5))
+        phis = []
+        for f in fits:
+            idx = np.nonzero(f["m"])[0]
+            hd = h5 + k_scale * (S.yaw_at(tl[idx]) - y5 - b * (tl[idx] - mid(s5)))
+            ang = np.degrees(np.arctan2(F[idx, 1] - f["cy"], F[idx, 0] - f["cx"]))
+            phis.append(wrap(ang - hd))
+        # cross-check of the gyro scale: the light's angle around the centre against the
+        # gyro's, over each spin (slope of a line fit; a constant clock offset only shifts it)
+        slopes = []
+        for f in fits:
+            idx = np.nonzero(f["m"])[0]
+            if len(idx) >= 10:
+                th = np.degrees(np.unwrap(np.radians(np.degrees(np.arctan2(F[idx, 1] - f["cy"], F[idx, 0] - f["cx"])))))
+                ps = S.yaw_at(tl[idx]) - b * (tl[idx] - tl[idx][0])
+                if np.ptp(ps) > 180:
+                    slopes.append(float(np.polyfit(ps, th, 1)[0]))
+        if slopes:
+            gt = float(np.mean(slopes))
+            row["gyro_scale_trace"] = round(gt, 5)
+            if not math.isnan(gs) and abs(gt - gs) > 0.005 and row.get("gyro_scale_quality") == "ok":
+                row["gyro_scale_quality"] = "check: the light's trace says %.4f" % gt
+        allp = np.concatenate(phis)
+        phi = circ_mean(allp)
+        r = row["led_radius_cm"]
+        row["led_angle_sd_deg"] = round(float(np.sqrt(np.mean(np.array([wrap(p - phi) for p in allp]) ** 2))), 2)
+        row["spin_led_fwd_cm"] = round(r * math.cos(math.radians(phi)), 3)
+        row["spin_led_left_cm"] = round(r * math.sin(math.radians(phi)), 3)
+        okl = row["led_fit_rms_cm"] <= 0.3 and row["led_points"] >= 12 and 0.5 <= r <= 8
+        row["led_offset_quality"] = "ok" if okl else "check: " + ", ".join(
+            q for q, bad in (("circle fit rms %.2f cm" % row["led_fit_rms_cm"], row["led_fit_rms_cm"] > 0.3),
+                             ("only %d flashes" % row["led_points"], row["led_points"] < 12),
+                             ("radius %.1f cm" % r, not 0.5 <= r <= 8)) if bad)
 
 
 def motion_onset(frames, c, ref, t_log_v, t_pause_v):
@@ -571,7 +1026,15 @@ def main(argv=None):
         cmd = 2.0 if cmd != cmd else cmd
         if run.experiment == "calib":
             ev = motion_event(run, 2)
-            out.append(analyse_event(run, ev, "calib", max(3.0, cmd), off, frames, tracks, dets, geo, runs, names))
+            S = Series(run)
+            roll = run.params.get("calib_roll_cm", float("nan"))
+            if roll == roll:          # firmware 2026-10-18b+: the long roll, stills, spins
+                still = run.params.get("calib_still_ms", 1000.0)
+                out.append(analyse_event(run, ev, "calib", max(3.0, roll), off, frames, tracks, dets, geo, runs, names,
+                                         S=S, still_ms=still if still == still else 1000.0))
+            else:                     # older: a 3 cm roll (max(3, start_nudge_cm)), no spin
+                out.append(analyse_event(run, ev, "calib", max(3.0, cmd), off, frames, tracks, dets, geo, runs, names,
+                                         S=S))
         if any(fnum(r.get("step"), 99) == -1 for r in run.raw):
             ev = motion_event(run, -1)
             out.append(analyse_event(run, ev, "nudge", cmd, off, frames, tracks, dets, geo, runs, names))

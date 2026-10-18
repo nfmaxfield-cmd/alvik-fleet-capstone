@@ -372,12 +372,21 @@ def main():
         key = (r["robot"], r["run"])
         e = ends.get(key, {})
         rr = raw.get(key, [])
-        ms = sorted(fnum(x["ms"]) for x in rr)
+        rr = sorted(rr, key=lambda x: fnum(x["ms"]))
+        ms = [fnum(x["ms"]) for x in rr]
         sent = int(fnum(e.get("raw_rows_sent"), 0)) if e else 0
         got = len(rr)
         loss = 100 * (1 - got / sent) if sent else float("nan")
         rate = (len(ms) - 1) / ((ms[-1] - ms[0]) / 1000) if len(ms) > 2 and ms[-1] > ms[0] else float("nan")
         gap = max((b - a for a, b in zip(ms, ms[1:])), default=float("nan"))
+        rn = [fnum(x.get("raw_n")) for x in rr]
+        if rr and not any(v != v for v in rn):
+            # firmware 2026-10-18b+: raw_n numbers the rows, so lost rows and real pauses separate:
+            # the longest gap between CONSECUTIVE rows is a pause on the robot, not WiFi loss
+            lost_n = sum(max(0, int(b - a) - 1) for a, b in zip(rn, rn[1:]))
+            gap = max((b - a for a, b, p, q in zip(ms, ms[1:], rn, rn[1:]) if q - p == 1), default=float("nan"))
+            if lost_n:
+                problems.append(f"{key}: {lost_n} sensor rows lost in transit (raw_n jumps)")
         still = [fnum(x["az"]) for x in rr if x.get("step") == "0"][:20]   # before the robot moves
         az = st.mean(still) if still else float("nan")
         secs = fnum(e.get("duration_ms")) / 1000 if e else float("nan")
@@ -412,6 +421,10 @@ def main():
     syncs = rows(S, "sync")
     sync_ms = [fnum(r["value"]) for r in rows(S, "param") if r["name"] == "sync_ms"]
     sync_len = st.median(sync_ms) if sync_ms else 300.0
+    lag = [fnum(sy.get("ms_on_after")) - fnum(sy["ms_on"]) for sy in syncs if sy.get("ms_on_after") not in (None, "")]
+    if lag:   # firmware 2026-10-18b+: time spent inside the two set_color() calls that switch the flash on
+        print(f"\nSYNC  light switch-on calls took median {st.median(lag):.0f} ms, max {max(lag):.0f} ms "
+              f"({len(lag)} flashes; ms_on_after - ms_on)")
     for sy in syncs:
         if fit_for(fits, sy["robot"], sy["run"]) is None:
             problems.append(f"{sy['robot']} {sy['run']}: no clock checks for this boot, flash can't be placed in time")
