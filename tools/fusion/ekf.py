@@ -197,7 +197,7 @@ class EKF:
         return out
 
     # ---- measurement update ----
-    def _update(self, z, h, H, R, angle_rows=()):
+    def _update(self, z, h, H, R, angle_rows=(), freeze=()):
         y = np.atleast_1d(z - h)
         for i in angle_rows:
             y[i] = wrap(y[i])
@@ -205,6 +205,8 @@ class EKF:
         K = self.P @ H.T @ np.linalg.inv(S)
         if self.N > self.n_base:
             K[self.n_base:, :] = 0.0                # consider states: never estimated (Schmidt)
+        for i in freeze:                         # states this reading may not move (treated as consider)
+            K[i, :] = 0.0
         self.s = self.s + K @ y
         self.s[2] = wrap(self.s[2])
         I_KH = np.eye(self.N) - K @ H
@@ -305,7 +307,7 @@ class EKF:
         y = z - h
         return y * y / (float(H @ self.P @ H) + sigma * sigma)
 
-    def landmark_range(self, z, h, J, sigma):
+    def landmark_range(self, z, h, J, sigma, freeze=()):
         """Landmark ranging: the front distance sensor reads z where the map says
         h (landmarks.predict_zone gives h and J = dh/d(x, y, th)). Returns the
         squared Mahalanobis distance (before the update). J may also be a full
@@ -313,16 +315,16 @@ class EKF:
         H = np.zeros((1, self.N))
         J = np.asarray(J, float)
         H[0, :len(J)] = J
-        return self._update(np.array([z]), np.array([h]), H, np.array([[sigma * sigma]]))
+        return self._update(np.array([z]), np.array([h]), H, np.array([[sigma * sigma]]), freeze=freeze)
 
-    def landmark_ranges(self, z, h, Hrows, R):
+    def landmark_ranges(self, z, h, Hrows, R, freeze=()):
         """Several zone readings of one sensor frame in one update (their errors may be correlated:
         R full). Hrows: one row per reading (length <= N, padded with zeros)."""
         H = np.zeros((len(z), self.N))
         for i, r in enumerate(Hrows):
             r = np.asarray(r, float)
             H[i, :len(r)] = r
-        return self._update(np.asarray(z, float), np.asarray(h, float), H, np.asarray(R, float))
+        return self._update(np.asarray(z, float), np.asarray(h, float), H, np.asarray(R, float), freeze=freeze)
 
     def innov_var(self, Hrow, sigma):
         """Innovation variance of a reading with Jacobian row Hrow (length <= N) and noise sigma."""

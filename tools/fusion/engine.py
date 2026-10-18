@@ -174,6 +174,9 @@ DEFAULT = dict(
     tof_adapt=False,          # down-weight a zone whose readings of a face keep disagreeing the same way
     tof_adapt_n=20,           # ... averaged over about this many readings
     tof_every=1,              # use every n-th sensor frame (decimation; 1 = all)
+    tof_heading_with_camera=True,  # False: while the camera saw the robot in the last tof_cam_recent_s, landmark
+    tof_cam_recent_s=1.0,          # readings correct position only, not heading (the camera's track does that)
+    tof_yaw_sigma_min_deg=0.0,     # floor on the sensor-turn uncertainty a calibration gives
     tof_lag_inflate=False,    # widen the noise for frame-to-frame correlation: x sqrt((1 + r) / (1 - r)),
                               # r = the calibration's lag-1 correlation of the zone errors
     # --- wheel size (ekf.py states k, kw): learned from the position sensors, carried from run to run
@@ -364,7 +367,7 @@ class Tracked:
         if rb.get("bias_sigma_cm") is not None:
             c["tof_bias_sigma_cm"] = rb["bias_sigma_cm"]
         if rb.get("yaw_sigma_deg") is not None:
-            c["tof_yaw_sigma_deg"] = rb["yaw_sigma_deg"]
+            c["tof_yaw_sigma_deg"] = max(rb["yaw_sigma_deg"], c["tof_yaw_sigma_min_deg"])
         if cal.get("faces"):
             self.faces = cal["faces"]
             self.face_sig = {r["name"]: r["sigma_cm"] for r in cal.get("landmarks", []) if r.get("sigma_cm")}
@@ -388,7 +391,7 @@ class Tracked:
             return []
         c = self.tcfg
         if (self.tof_cal is not None or c["tof_consider"] or c["tof_joint"] or c["tof_adapt"] or c["tof_every"] > 1
-                or c["tof_lag_inflate"]):
+                or c["tof_lag_inflate"] or not c["tof_heading_with_camera"]):
             return self._tof2(t, zones)
         unknown = math.sqrt(max(k.P[0, 0], k.P[1, 1])) > cfg["tof_max_sigma_cm"]
         out = []
@@ -426,6 +429,8 @@ class Tracked:
             r = min(max(float(self.tof_cal["lag1_corr"]), 0.0), 0.9)
             lag = math.sqrt((1 + r) / (1 - r))
         out, joint = [], []
+        frz = (2,) if (not cfg["tof_heading_with_camera"] and k.t - k.last_cam < cfg["tof_cam_recent_s"]
+                       and self.cam_used) else ()
         for zi, (ang0, z) in enumerate(zip(cfg["tof_zone_deg"], zones)):
             if z is None or not cfg["tof_min_cm"] <= z <= cfg["tof_max_cm"]:
                 out.append(("bad_reading", None))
@@ -465,7 +470,7 @@ class Tracked:
             if cfg["tof_joint"]:
                 joint.append((z, h, row, sigma))
             else:
-                k.landmark_range(z, h, row, sigma)
+                k.landmark_range(z, h, row, sigma, freeze=frz)
             out.append(("used", dict(z=z, sigma=sigma, ang=info["ang"], a=(f.a[0], f.a[1]), n=(f.n[0], f.n[1]),
                                      resid=y, face=f.name, scale=self.rscale, bias=self.rbias)))
         if joint:
@@ -474,7 +479,7 @@ class Tracked:
             sg = np.array([j[3] for j in joint])
             R = np.outer(sg, sg) * rho
             np.fill_diagonal(R, sg * sg)
-            k.landmark_ranges([j[0] for j in joint], [j[1] for j in joint], [j[2] for j in joint], R)
+            k.landmark_ranges([j[0] for j in joint], [j[1] for j in joint], [j[2] for j in joint], R, freeze=frz)
         return out
 
     def tof_counts(self):

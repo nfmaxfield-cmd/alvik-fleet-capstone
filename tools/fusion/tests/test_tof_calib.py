@@ -187,3 +187,15 @@ def test_spin_reference_from_camera_and_gyro():
     true_th = 30.0 + 36.0 * (ref[i, 0] - 1001.0)
     assert ref[i, 3] / D2R == pytest.approx(true_th, abs=0.5)
     assert tc.spin_reference(run, dets, [], D2R) is None                     # no measured heading: not used
+
+
+def test_landmark_update_can_leave_heading_alone():
+    """tof_heading_with_camera False: while the camera is tracking, a range reading corrects position only."""
+    k = EKF(0.0, 0.0, 0.0, 0.0, sigma_xy=2.0, sigma_th=3 * D2R)
+    J = np.array([-1.0, -0.3, 8.0])                 # an oblique hit: the reading says something about heading too
+    k2 = EKF(0.0, 0.0, 0.0, 0.0, sigma_xy=2.0, sigma_th=3 * D2R)
+    k.landmark_range(38.0, 40.0, J, 0.5)
+    k2.landmark_range(38.0, 40.0, J, 0.5, freeze=(2,))
+    assert k.s[2] != 0.0 and k2.s[2] == 0.0
+    assert k2.s[0] > 0.5                            # position still corrected
+    assert k2.P[2, 2] == pytest.approx((3 * D2R) ** 2, rel=1e-6) or k2.P[2, 2] <= (3 * D2R) ** 2
