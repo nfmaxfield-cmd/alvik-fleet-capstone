@@ -31,7 +31,9 @@ def moved_sim(tmp_path_factory):
     cfg.write_text(json.dumps(c))
     out = d / "out"
     subprocess.run([sys.executable, os.path.join(TOOLS, "sim", "simulate.py"), "--out", str(out), "--video",
-                    "--seed", "5", "--max-runs", "4", "--fps", "10", "--config", str(cfg)], check=True,
+                    "--seed", "5", "--max-runs", "4", "--fps", "10", "--config", str(cfg),
+                    # a frozen copy of the T1 sheet: editing the real sheet mustn't change this test's data
+                    "--sheet", os.path.join(TOOLS, "tests", "data", "e01_sheet_oct18.csv")], check=True,
                    capture_output=True)
     # video clock offset ~ Pi clock offset + one frame of delivery; survey refines it (prior 0.1 s)
     return out, c["camera"]["pi_clock_offset_s"] + 1 / 10
