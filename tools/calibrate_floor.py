@@ -38,6 +38,16 @@ No clicking (needs the console log folder --session, the runs' tape sheet
     python tools/calibrate_floor.py <recording> --survey --session logs/<x> \
         --sheet <sheet> --detections <recording>/detections.csv --height-cm 140
 
+Any logged run works (E1 routes, demo, straight), but the robots also have a
+drive made for this (firmware 2026-10-18b+): put a robot on a pencil-marked
+spot near the middle of the view, note its front/rear marks in a sheet row,
+start the recording and send `run survey` (a square spiral out to about 1 m x
+1 m, then back to the start; docs/home-experiments.md "Survey drive"). Do 3-4
+from separately measured spots, then run this with --survey. The taped start
+heading is what limits a survey calibration (simulated: 2 surveys mean 0.8 to
+2.2 cm over the view depending on the tape errors, 4 surveys 0.6 cm, the 36 E1
+runs 0.2 cm), so more separately measured starts help most.
+
 Survey also uses each run's tape END marks (robot sitting still after the run)
 as absolute points when the sheet has them (--no-end-marks: start marks only).
 

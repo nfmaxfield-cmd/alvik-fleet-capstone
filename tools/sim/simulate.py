@@ -21,7 +21,10 @@ Writes, under --out:
   console_output.txt       what the console would have printed
 
 Runs follow the sheet: one row = one run, in sheet order, with that row's
-robot and commands. Robots take turns (one drives while the others are parked
+robot and commands (straight, demo and survey runs; a calibration run comes
+first for each robot). Optional sheet columns start_x_cm, start_y_cm,
+start_heading_deg put that row's start spot somewhere else than the session's
+start_pose (e.g. a survey started in the middle of the camera view). Robots take turns (one drives while the others are parked
 out of view). With --robots, only those robots' rows are used, and a listed
 robot that has no rows in the sheet gets a copy of the first robot's rows.
 
@@ -201,6 +204,9 @@ def main(argv=None):
             t_lift = calibrate(r, t_lift)
             calibrated.add(r.name)
         sx, sy, sh = s.start_pose
+        if (row.get("start_x_cm") or "").strip():          # sim-only sheet columns: this row's start spot
+            sx, sy = float(row["start_x_cm"]), float(row["start_y_cm"])
+            sh = float(row.get("start_heading_deg") or 0.0)
         pose = (sx + rng.uniform(-s.placement_err_cm, s.placement_err_cm),
                 sy + rng.uniform(-s.placement_err_cm, s.placement_err_cm),
                 sh + rng.uniform(-s.placement_err_deg, s.placement_err_deg))

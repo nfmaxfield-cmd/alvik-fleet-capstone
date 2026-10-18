@@ -37,7 +37,7 @@ import time
 
 LOG_PORT = 5005   # robot -> laptop
 CMD_PORT = 5006   # laptop -> robot
-MOVING = ("run lap", "run grid", "run demo", "run straight")   # experiments where robots drive around
+MOVING = ("run lap", "run grid", "run demo", "run straight", "run survey", "run follow")   # experiments where robots drive around
 QUIET = ("STREAM", "TRACE", "RAW", "CLOCK", "PARAM")   # saved but not printed (too many rows)
 CLOCK_EVERY_S = 10
 

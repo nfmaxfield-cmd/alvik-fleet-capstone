@@ -152,9 +152,14 @@ def test_approach_is_flagged_for_the_distance_sensor():
     ap = [s for s in plan["robots"]["Left"]["steps"] if s["type"] == "approach"]
     assert len(ap) == 1
     a = ap[0]
-    assert a["stop_at_front_cm"] == 1.0 and a["speed"] == plan["settings"]["approach_cms"]
+    assert a["gap_cm"] == 1.0 and a["speed"] == plan["settings"]["approach_cms"]
     assert math.dist(a["from"][:2], a["to"][:2]) == pytest.approx(15.0, abs=1e-6)
-    assert a["max_travel_cm"] > 15.0
+    # the front face starts 15 + 1 cm from the board: the cap stops it 0.5 cm short of touching
+    assert a["max_travel_cm"] == pytest.approx(15.0 + 1.0 - plan["settings"]["approach_margin_cm"])
+    # the wheels take over above the distance sensor's ~2 cm minimum range
+    assert a["handover_cm"] == plan["settings"]["handover_cm"] == 3.0
+    assert a["front_min_cm"] == pytest.approx(1.0, abs=0.05)       # the board, at the end
+    assert "stop_at_front_cm" not in a
     phases = [s["phase"] for s in plan["robots"]["Left"]["steps"]]
     i = phases.index("approach")
     assert phases[i - 1] == "align" and phases[i + 1] == "dwell" and phases[i + 2] == "backout"
@@ -375,7 +380,10 @@ def test_sim_docks_within_tolerance_and_never_collides(demo_plan):
         assert res["finished"] and not res["collision"]
         assert res["min_body_gap_cm"] >= 5.0
         assert res["dockings"] == 6 and res["docking_all_ok"]
-        assert res["dock_gap_error_cm_max"] <= 0.05      # ideal distance sensor
+        assert res["dock_gap_error_cm_max"] <= SP.DEFAULT_SIM["dock_tol_cm"]   # realistic distance sensor (default)
+    sim = SP.Sim(demo_map(), copy.deepcopy(demo_plan), dict(SP.DEFAULT_SIM, tof="ideal"), seed=1, verbose=False)
+    res = sim.run_sim()
+    assert res["dockings"] == 6 and res["dock_gap_error_cm_max"] <= 0.05     # a perfect sensor stops right at 1 cm
 
 
 def test_sim_brick_mid_run_replans():
@@ -442,3 +450,119 @@ def test_app_endpoints(tmp_path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+# ----------------------------------------------------------------------------
+# What the robots are sent (run_plan.py) and what they expect ahead
+# ----------------------------------------------------------------------------
+
+def test_front_min_for_every_forward_step(demo_plan):
+    """Turns and forward drives say what the front sensor should see at the least
+    (from the map), so planned passes near boards don't trip the 7 cm stop."""
+    for r in demo_plan["robots"].values():
+        for st in r["steps"]:
+            if st["type"] in ("turn", "park") or (st["type"] in ("drive", "approach") and not st.get("reverse")):
+                assert "front_min_cm" in st
+                if st["type"] == "drive" and st.get("front_clear_cm") is not None:
+                    assert st["front_min_cm"] == st["front_clear_cm"]
+            if st.get("reverse"):
+                assert "front_min_cm" not in st
+
+
+def test_step_commands_are_read_by_the_follower(demo_plan):
+    """Every step of the demo plan, as run_plan.py sends it, parses on the
+    (simulated) robot into what the plan says, and fits one UDP command (< 160 bytes)."""
+    import run_plan as RP
+    sys.path.insert(0, os.path.join(os.path.dirname(FLEET), "sim"))
+    import random as rnd
+    import config as SC
+    import robot as SR
+    rb = SR.Robot("Left", SC.load_config(), rnd.Random(1), SC.firmware_params(), "t", 0.0, 1, "ip")
+    rb.f_active = True
+    sent = 0
+    for n, r in demo_plan["robots"].items():
+        for st in r["steps"]:
+            sent += 1
+            text = RP.step_command(sent, st)
+            assert len(text) < 159
+            verb, _, rest = text.partition(" ")
+            rb.follow_command(verb, rest)
+            s = rb.f_q.pop()
+            assert s["id"] == sent
+            if st["type"] in ("turn", "park"):
+                assert s["type"] == "T" and s["h"] == pytest.approx(st["to"][2], abs=0.01)
+            elif st["type"] == "wait":
+                assert s["type"] == "W"
+                assert s["wait_ms"] == (round((st["t_end"] - st["t_start"]) * 1000) if st["phase"] == "dwell" else 0)
+            else:
+                assert s["type"] == ("A" if st["type"] == "approach" else "D")
+                assert [s["x0"], s["y0"], s["x1"], s["y1"]] == pytest.approx(st["from"][:2] + st["to"][:2], abs=0.01)
+                assert s["speed"] == pytest.approx(st["speed"])
+                if s["type"] == "D":
+                    assert s["rev"] == (1 if st.get("reverse") else 0)
+                else:
+                    assert (s["handover"], s["gap"], s["max_travel"]) == pytest.approx(
+                        (st["handover_cm"], st["gap_cm"], st["max_travel_cm"]), abs=0.01)
+            if st.get("front_min_cm") is not None:
+                assert s["fmin"] == pytest.approx(st["front_min_cm"], abs=0.01)
+    assert not any(line.startswith("D,STEP") and ",bad," in line for _, line in rb.lines)
+
+
+def test_sensor_obstacle_outline_skips_other_robots(demo_plan):
+    """An obstacle stop's outline comes from the zones that see something near the
+    nearest hit, and leaves out what is another robot."""
+    import run_plan as RP
+    co = RP.Coordinator.__new__(RP.Coordinator)
+    co.m = FM.normalize(demo_map())
+    co.n_sensor_obstacles = 1
+    co.bots = {n: RP.Bot(n) for n in ("Left", "Center", "Right")}
+    co.bots["Left"].pose = (20.0, 30.0, 0.0)
+    co.bots["Center"].pose = (200.0, 200.0, 0.0)
+    co.bots["Right"].pose = (200.0, 300.0, 0.0)
+    ob = co.sensor_obstacle(co.bots["Left"], (20.0, 30.0, 0.0), 9.0,
+                            "obstacle 9.0 cm ahead; zones 350.0 12.0 9.0 9.5 60.0")
+    pts = np.array(ob["points"])
+    assert ob["source"] == "distance_sensor"
+    assert pts[:, 0].min() == pytest.approx(20 + 4.5 + 9.0 - 1.0, abs=0.3)      # the centre hit, 1 cm bigger
+    assert pts[:, 0].max() < 20 + 4.5 + 12.0 + 6.0 + 2.0          # the 60 cm reading is something else
+    # the same hits, but another robot stands there: not an obstacle
+    co.bots["Center"].pose = (34.0, 30.0, 180.0)
+    assert co.sensor_obstacle(co.bots["Left"], (20.0, 30.0, 0.0), 9.0,
+                              "obstacle 9.0 cm ahead; zones 350.0 12.0 9.0 9.5 60.0") is None
+
+
+def test_obstacle_event_is_decide_then_replan(demo_plan):
+    """run_plan.py acts on obstacle_decide at once and plans with obstacle_replan:
+    together they are obstacle_event."""
+    states = P.states_at(demo_plan, 15.0)
+    ob = {"id": "b", "shape": "circle", "center": [61, 70], "radius": 5, "source": "camera", "time": "x"}
+    dec = P.obstacle_decide(demo_map(), demo_plan, states, [ob])
+    assert set(dec["keep"]) == set(demo_plan["robots"])
+    acts = {e["robot"]: e["action"] for e in dec["events"]}
+    for n, k in dec["keep"].items():
+        assert (k == 0) == (acts[n] in ("stopped", "holds", "done"))
+    new1, ev1 = P.obstacle_replan(dec)
+    new2, ev2 = P.obstacle_event(demo_map(), demo_plan, states, [ob])
+    assert [e["action"] for e in ev1] == [e["action"] for e in ev2]
+    for n in demo_plan["robots"]:
+        k = dec["keep"][n]
+        assert all(st.get("committed") for st in new1["robots"][n]["steps"][:k])
+
+
+@pytest.mark.skipif(not os.environ.get("FLEET_DRYRUN"), reason="about 90 s: set FLEET_DRYRUN=1 to run")
+def test_dry_run_end_to_end(tmp_path):
+    """run_plan.py against tools/sim/fleet_sim.py: three robots, the demo map, a brick
+    and a WiFi drop. Everyone finishes, nobody touches anything, every docking is close."""
+    import subprocess
+    out = tmp_path / "s"
+    r = subprocess.run([sys.executable, os.path.join(FLEET, "run_plan.py"), "--map", os.path.join(EX, "demo_map.json"),
+                        "--dry-run", "--brick", "auto@15", "--wifi-drop", "Center@25:3", "--session", str(out), "--yes"],
+                       capture_output=True, text=True, timeout=400)
+    s = json.load(open(out / "run_plan_summary.json"))
+    sim = s.get("simulator", {})
+    why = "%s\nsimulator: %s" % (r.stdout[-3000:], {k: v for k, v in sim.items() if k not in ("dockings", "events")})
+    assert s["result"] == "done", why
+    assert not sim["collision"], why
+    assert sim["min_body_gap_cm"] > 5.0, why
+    assert len(sim["dockings"]) == 6 and sim["dock_gap_error_cm_max"] < 0.4, why
+    assert not s["boards_not_visited"], why

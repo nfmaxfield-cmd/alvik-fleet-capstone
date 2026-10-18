@@ -77,10 +77,13 @@ class ImuModel:
 @dataclass
 class TofModel:
     zone_angles_deg: List[float] = field(default_factory=lambda: [22.0, 11.0, 0.0, -11.0, -22.0])  # L, CL, C, CR, R
+    zone_width_deg: float = 11.0          # each zone reports the nearest thing in its slice (3 rays across it)
     sensor_forward_cm: float = 4.5        # sensor sits this far ahead of the axle
     noise_cm: float = 0.5
     noise_pct: float = 1.0
     max_range_cm: float = 350.0           # reading when nothing is in range
+    min_range_cm: float = 2.0             # below this the reading is untrustworthy (here: any value under it)
+    hz: float = 15.0                      # new readings per second (held in between); 0 = fresh every call
     bottom_cm: float = 9.0                # "bottom" zones see the floor about this far ahead
     top_extra_pct: float = 3.0            # "top" zones look slightly up: a bit further than the centre zone
     # rectangular room walls the ToF rays hit, floor coordinates (cm)

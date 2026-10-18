@@ -66,6 +66,36 @@ Param PARAMS[] = {
   {"demo_speed_cms",   8,   "Center: speed around the circle, cm/s (max about 12)"},
   {"demo_circle_lead_deg", 3, "Center: stop the circle this many degrees early (it coasts)"},
 
+  // --- own pose (survey and follow): wheel distance + gyro heading, camera fixes blended in ---
+  {"drive_kct",        3,   "straight drives: degrees of steering per cm off the line"},
+  {"drive_max_corr",   8,   "straight drives: most steering away from the line's heading, degrees"},
+  {"drive_kh",         4,   "straight drives: turn rate (deg/s) per degree of heading error"},
+  {"drive_accel",     20,   "straight drives: speed-up and slow-down, cm/s per s"},
+  {"pose_q_cm",     0.01,   "own pose: position variance added per cm driven (cm^2/cm)"},
+  {"pose_q_deg",   0.003,   "own pose: heading variance added per degree turned (deg^2/deg)"},
+  {"pose_q_dps",   0.002,   "own pose: heading variance added per second (deg^2/s, gyro drift)"},
+  {"fix_max_age_ms", 1000,  "follow: ignore a camera fix older than this"},
+  {"fix_gate",         4,   "follow: ignore a fix further than this many standard deviations (and 3 cm) from the own pose"},
+
+  // --- survey drive (camera self-calibration) ---
+  {"survey_size_cm",  80,   "survey: legs 10,10,20,20,... cm; stops before a leg longer than this"},
+  {"survey_clear_cm", 10,   "survey: end a leg early if something is closer than this ahead, then drive back"},
+  {"survey_cms",      10,   "survey: driving speed, cm/s"},
+
+  // --- step follower (laptop sends steps from plan.json) ---
+  {"tof_recess_cm",  0.25,  "front distance sensor sits this far behind the front face (to be measured)"},
+  {"tof_min_cm",       2,   "front distance sensor: readings below this are not trusted"},
+  {"tof_ms",          66,   "approach: read the front distance sensor this often (it updates about 15 times a second)"},
+  {"tof_lag_ms",      33,   "approach: a reading is this old on average when read (half a frame; to be measured)"},
+  {"front_margin_cm",  2,   "follow: stop if the front reading is this much below what the map expects"},
+  {"front_confirm_ms", 100, "survey/follow: the front reading must stay too close this long (2 sensor frames) to stop"},
+  {"follow_look_cm",  12,   "follow: straight drives stop for anything in the robot's path closer than this (all 5 zones)"},
+  {"path_half_cm",  5.25,   "survey/follow: half the width of the robot's path checked ahead (half the body + 0.5 cm)"},
+  {"front_end_cm",     2,   "follow drives: check the path only as far as the step still goes, plus this"},
+  {"fuse_from_cm",    10,   "approach: average readings below this (reading + wheel distance = board position)"},
+  {"follow_log_hz",   10,   "follow: FOLLOW records per second"},
+  {"follow_quiet_ms", 1500, "follow: say so when nothing has come from the laptop for this long"},
+
   // --- sensor stream ---
   {"stream_hz",       20,   "sensor stream rate"},
 
@@ -74,7 +104,7 @@ Param PARAMS[] = {
   {"sync_flash",       1,   "1 = flash both lights white at the start and end of each run, for lining up video"},
   {"sync_ms",        300,   "how long each sync flash stays on, ms (at least 3 camera frames)"},
   {"settle_start_ms", 500,  "pause before the start flash so the robot is still"},
-  {"start_nudge_cm",   2,   "turn/demo/straight runs: roll this far forward and back after the start flash, so the camera sees which way the robot faces (0 = off)"},
+  {"start_nudge_cm",   2,   "turn/demo/straight/survey runs: roll this far forward and back after the start flash, so the camera sees which way the robot faces (0 = off)"},
   {"blink_codes",      1,   "1 = blink the robot's own light pattern during runs, so the camera can find and name it"},
   {"blink_code",       0,   "0 = pattern from the name (Left 1, Center 2, Right 3, others 4 pulses), or 1..4"},
   {"calib_blink_ms", 3000,  "calibration run: how long to stand still blinking its code before moving"},

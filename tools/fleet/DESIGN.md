@@ -2,8 +2,10 @@
 
 How the laptop-side planner (this folder) connects to the live system, the
 option of storing routes on the robots, and what docking 1 cm from a board
-needs. The robot-side waypoint follower and the live link are not written yet;
-section 1 is the interface they should meet.
+needs. Built since (2026-10-18b): the robot-side step follower (firmware
+`run follow`, follow.h / pose.h) and the laptop runner run_plan.py, tested
+end to end against simulated robots (tools/sim/fleet_sim.py; results in
+README.md). The protocol as built is in docs/data-formats.md, "Step follower".
 
 ## 1. The live loop
 
@@ -27,11 +29,12 @@ section 1 is the interface they should meet.
 2. **Plan.** The planner takes those poses as start spots and makes
    plan.json. Planning the demo floor takes 3-9 s; re-planning after an
    obstacle about 1 s (worst seen 2.5 s).
-3. **Steps out.** The coordinator (a small loop on the laptop, to be written
-   with the live link) sends each robot its next steps. A step is *released*
-   when every step in its `after` list has been reported done. It sends up to
-   2 released steps ahead, so a robot runs straight through consecutive drive
-   pieces without stopping.
+3. **Steps out.** The coordinator (run_plan.py) sends each robot its next
+   steps. A step is *released* when every step in its `after` list has been
+   reported done. It keeps up to 2 released steps queued beyond the one
+   running, so a robot runs straight through consecutive drive pieces without
+   stopping; each step goes only after the one before it was acked (lost
+   packets are resent, and must not overtake each other).
 4. **Robot follows.** The follower runs each step on its own sensors:
    - **turn**: gyro to the absolute heading;
    - **drive**: straight along the line from `from` to `to`, steering on its
@@ -48,18 +51,15 @@ section 1 is the interface they should meet.
 5. **Progress back.** The robot reports `started` and `done` per step (with its
    pose), plus `blocked`, `approach_done` and `approach_failed`.
 
-**Proposed messages** (JSON lines on the existing WiFi console link; field
-names as in plan.json):
-
-| Direction | Message | Fields |
-| --- | --- | --- |
-| laptop -> robot | `step` | plan_id, i, type, from, to, speed, reverse, turn_deg, stop_at_front_cm, max_travel_cm, front_clear_cm |
-| laptop -> robot | `fix` | t (robot ms, from clock sync), x, y, th_deg, sigma_cm |
-| laptop -> robot | `hold` | plan_id, after_step: finish that step, then stand still |
-| laptop -> robot | `stop` | stop now (any step) |
-| robot -> laptop | `started` / `done` | plan_id, i, ms, x, y, th (own estimate), front_cm |
-| robot -> laptop | `blocked` | plan_id, i, the 5 front zone readings, pose |
-| robot -> laptop | `approach_done` / `approach_failed` | plan_id, i, front_cm, travel_cm |
+**Messages as built** (plain text commands on the console's command port;
+the robot's answers are logged records; details in docs/data-formats.md,
+"Step follower"): `fs <id> T|D|A|W ...` (a step; ids go up per robot instead
+of plan_id + i, so a re-plan needs nothing on the robot), `fix <robot ms> x y
+th sigma`, `fpose`, `hold [id]` (finish up to that step, drop the rest),
+`halt` (stop now, stay in follow mode), `stop` (end the run). The robot
+answers with STEP records (queued/dup = ack, started, done, failed with the
+reason and, for an obstacle, the 5 front zone readings, dropped, held/halted)
+and a FOLLOW record 10 times a second (its pose, uncertainty, last done id).
 
 **Re-plan triggers** (all call `planner.obstacle_event`, which applies Nick's
 rules: stop the robots that would reach the obstacle within `stop_horizon_s`,
@@ -79,9 +79,11 @@ let the others carry on until the new plan is ready, then switch):
 Lateness alone does not need a re-plan: the "after" lists keep late robots
 safe. It only costs time, and the next re-plan picks that up.
 
-**If the WiFi drops:** a robot finishes the step it has and holds. Holding at
-a step boundary is always safe, because the other robots' steps wait for it
-through their "after" lists.
+**If the WiFi drops:** a robot finishes the steps it has buffered and holds.
+Holding at a step boundary is always safe, because the other robots' steps
+wait for it through their "after" lists. Simulated 3 s drop: the robot
+finished its buffered step about 1.9 s in, stood still about 1.4 s, and was
+moving again 0.3 s after the link came back (6 resends).
 
 ## 2. Routes stored on the robot instead?
 
@@ -119,7 +121,7 @@ same chip; ST quotes up to 350 cm and a 60 x 60 deg field of view). A 1 cm
 gap is below that, unless the sensor sits recessed at least 1 cm behind the
 robot's front face. So the approach fuses two sensors:
 
-1. **Approach** (pre-dock -> dock, 15 cm at 3 cm/s, facing the board). Above
+1. **Approach** (pre-dock -> dock, 15 cm at 3 cm/s, facing the board). Below
    about 10 cm, take the distance readings.
 2. **Fuse** each reading with how far the wheels have rolled:
    board position = reading + distance travelled. Average these (or run a
@@ -136,12 +138,20 @@ robot's front face. So the approach fuses two sensors:
 5. **Camera** keeps the sideways position honest (the sensor cannot see
    sideways error against a flat board).
 
-**Firmware to change:** `safe_front_cm` (7 cm in params.h) stops the robot
-when something is within 7 cm ahead. That would stop every approach. During
-an `approach` step it must be replaced by the step's own stop rule. During
-drives it should use the step's `front_clear_cm` (stop only if the reading
-is well below what the map predicts), so planned passes near boards do not
-trip it.
+**Front checks in the follower (done, 2026-10-18b):** `safe_front_cm` (7 cm)
+would stop every approach and many planned passes near boards. In a follow
+run each step sets its own check from plan.json's `front_min_cm` (what the map
+says the sensor should see at the least): turns use the centre zone below
+min(7, front_min - 2 cm); straight drives look at all five zones inside the
+robot's own path, out to 12 cm (an obstacle the robot's side would clip leaves
+the sensor's 60 deg view below about 8 cm, so the 7 cm centre check alone let
+a simulated robot drive into a brick), but only as far as the step still goes
+plus 2 cm: a robot waiting just beyond the end of the step is allowed there by
+the plan (5 cm apart), and looking past it made a simulated robot stop and
+re-plan in a loop; the approach does its own check (a
+reading 2 cm below what the board should give, twice in a row). A reading must
+stay too close for 100 ms (two sensor frames) before a step stops: single
+noisy readings tripped about 1 approach in 20 in simulation.
 
 **To measure before trusting 1 cm:**
 - the sensor's reading against a ruler at 0.5, 1, 2, 3, 5, 10 cm from a

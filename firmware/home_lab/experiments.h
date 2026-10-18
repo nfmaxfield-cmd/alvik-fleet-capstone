@@ -3,6 +3,7 @@
 #pragma once
 
 #include "motion.h"
+#include "pose.h"
 
 int gRun = 0;          // increases every time any experiment starts
 String gRunId = "";    // boot id + run number, e.g. "3F2A-4", unique across reboots
@@ -350,4 +351,105 @@ void runStraight() {
             d, rpm, x, y, th, dyaw, millis() - t0, alvik.get_battery_charge());
   net::logf("M,run %s: odometry says %.1f cm along, %.1f cm sideways. Now mark and measure the real end point.",
             gRunId.c_str(), x, y);
+}
+
+// ===================================================================
+// SURVEY: a square spiral outward from where the robot was put down, for the
+// camera's self-calibration (tools/calibrate_floor.py --survey pairs the
+// robot's own wheel + gyro path with the camera track). Legs of 10, 10, 20,
+// 20, 30, 30 ... cm with a 90 deg left turn before each new leg, until the
+// next leg would be longer than survey_size_cm. A leg ends early if the front
+// sensor sees something closer than survey_clear_cm (logged); the spiral then
+// stops. Finally it turns to face the start, drives straight back to it, and
+// turns to its starting heading, all on its own pose (pose.h).
+// Straight legs use driveLine() (gyro-held heading, steering back onto the
+// line) rather than the library's move(): move() holds the wheel positions,
+// so a left/right wheel size difference curves every leg; the gyro hold
+// keeps the legs straight, and the same code is what the step follower uses.
+// Turns are IMU turns (imuTurnTo), the most accurate in the turn test.
+// RAW step = leg number (1, 2, ...); legs + 1 = the drive back.
+// ===================================================================
+void surveyLeg(int leg, float cmd, float driven, const char* how) {
+  float dL, dCL, dC, dCR, dR;
+  alvik.get_distance(dL, dCL, dC, dCR, dR);
+  net::logf("D,SURVEY_LEG,%s,%d,%.0f,%.1f,%s,%.2f,%.2f,%.2f,%.1f,%lu", gRunId.c_str(), leg, cmd, driven, how,
+            pose::x, pose::y, pose::th(), dC, millis());
+}
+
+void runSurvey() {
+  if (!calibrateYawSign()) return;
+  net::sendLine("H,SURVEY_LEG,run,leg,cmd_cm,driven_cm,end,x_cm,y_cm,th_deg,front_cm,ms");
+  net::sendLine("H,SURVEY_END,run,result,legs,path_cm,return_cm,x_cm,y_cm,th_deg,total_ms,size_cm,battery");
+  float size = P("survey_size_cm"), v = P("survey_cms");
+  pose::start(true, 0, 0, 0);       // start frame: where it was put down, facing +x
+  gTickHook = pose::tick;
+  gFrontSoft = true;
+  gFrontLimitCm = fmaxf(P("survey_clear_cm"), P("safe_front_cm"));
+  gStepStop = "";
+  unsigned long t0 = millis();
+  float cx = 0, cy = 0, path = 0;
+  int legs = 0;
+  bool ok = true, blocked = false;
+  for (int k = 1;; k++) {
+    float L = 10.0f * ((k + 1) / 2);
+    if (L > size) break;
+    float h = 90.0f * (k - 1);
+    rawlog::step = k;
+    gFrontLimitCm = P("safe_front_cm");   // turning in place: only the usual centre stop (it may face what ended the last leg)
+    if (k > 1 && !turnToFloor(wrap180(h))) {
+      if (gStepStop.length()) { blocked = true; surveyLeg(k, L, 0, "obstacle"); }
+      else ok = false;
+      break;
+    }
+    float hx = cosf(h * pose::DEG2RAD), hy = sinf(h * pose::DEG2RAD);
+    float d0 = pose::dist;
+    gFrontLimitCm = fmaxf(P("survey_clear_cm"), P("safe_front_cm"));
+    gFrontPath = true;     // legs: anything in the robot's path, all five zones
+    int r = driveLine(cx, cy, cx + L * hx, cy + L * hy, wrap180(h), v, false);
+    gFrontPath = false;
+    float driven = pose::dist - d0;
+    path += fabsf(driven);
+    legs = k;
+    if (r == DRIVE_STEPSTOP) { blocked = true; surveyLeg(k, L, driven, "obstacle"); break; }
+    if (r != DRIVE_OK) { ok = false; surveyLeg(k, L, driven, r == DRIVE_ABORT ? "stopped" : "timeout"); break; }
+    surveyLeg(k, L, driven, "full");
+    cx += L * hx;
+    cy += L * hy;
+  }
+  gStepStop = "";
+  float back = 0;
+  if (ok && !gAbortReason.length()) {
+    // back to the start: face it, drive the distance, face the starting heading
+    rawlog::step = legs + 1;
+    float d = sqrtf(pose::x * pose::x + pose::y * pose::y);
+    if (d > 1.0f) {
+      float hb = atan2f(-pose::y, -pose::x) / pose::DEG2RAD;
+      float sx = pose::x, sy = pose::y;
+      gFrontLimitCm = P("safe_front_cm");
+      ok = turnToFloor(hb);
+      float d0 = pose::dist;
+      gFrontLimitCm = fmaxf(P("survey_clear_cm"), P("safe_front_cm"));
+      gFrontPath = true;
+      if (ok) ok = driveLine(sx, sy, 0, 0, hb, v, false) == DRIVE_OK;
+      gFrontPath = false;
+      back = pose::dist - d0;
+      path += fabsf(back);
+      if (!ok && gStepStop.length()) gFail = "blocked on the way back";
+    }
+    gStepStop = "";
+    gFrontLimitCm = P("safe_front_cm");
+    if (ok) ok = turnToFloor(0);
+  }
+  alvik.brake();
+  gTickHook = nullptr;
+  gFrontSoft = false;
+  gFrontLimitCm = -1;
+  gStepStop = "";
+  pose::stop();
+  String result = ok ? String(blocked ? "done:blocked" : "done")
+                : gAbortReason.length() ? String("aborted:") + gAbortReason : String("failed:") + gFail;
+  net::logf("D,SURVEY_END,%s,%s,%d,%.1f,%.1f,%.2f,%.2f,%.2f,%lu,%.0f,%d", gRunId.c_str(), result.c_str(), legs, path,
+            back, pose::x, pose::y, pose::th(), millis() - t0, size, alvik.get_battery_charge());
+  net::logf("M,%s survey %s: %d legs, %.0f cm driven, back within %.1f cm of the start (own pose)", net::name,
+            result.c_str(), legs, path, sqrtf(pose::x * pose::x + pose::y * pose::y));
 }

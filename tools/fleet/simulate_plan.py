@@ -11,9 +11,11 @@ What each simulated robot does (a stand-in for the robot-side follower):
     target heading;
   * drive: drives straight at the target point, steering on its pose
     estimate, until the estimate says it got there (reverse for backing out);
-  * approach: creeps forward until its front distance sensor reads
-    stop_at_front_cm (ideal sensor by default; --tof realistic adds the
-    sensor's rate, noise and a hand-over to the wheels for the last few cm);
+  * approach: creeps forward; the front distance sensor's readings (15 a
+    second, 0.2 cm noise) plus the wheel distance give the board's position,
+    averaged; below the step's handover_cm the wheels finish so the front face
+    stops gap_cm from the board, never travelling more than max_travel_cm
+    (--tof ideal: a perfect sensor that stops exactly at gap_cm, the old default);
   * wait: a dwell at a board lasts its time; other waits only wait for the
     step order rules ("after"), or with --gate time also for the clock.
 
@@ -28,8 +30,10 @@ and reports it. Then the obstacle rules run (planner.obstacle_event): robots
 that would reach it within the stop horizon stop at once, the others carry
 on, and everyone gets a new plan.
 
-Checks: every robot finishes; front face within 1 cm of the board at every
-dock (and not touching); the closest two bodies ever came; nothing hit.
+Checks: every robot finishes; front face within dock_tol_cm of gap_cm at
+every dock (and not touching); the closest two bodies ever came; nothing hit.
+The robot-side follower itself (firmware follow.h) is simulated in more
+detail by tools/sim/fleet_sim.py with tools/fleet/run_plan.py --dry-run.
 """
 import argparse
 import copy
@@ -71,14 +75,14 @@ DEFAULT_SIM = {
     "improve_after_s": 1.0,     # after a surprise: try a better plan this long after the new one starts (0 = off)
     "improve_budget_s": 6.0,    # time allowed for that try (robots keep going meanwhile)
     "brick_ahead_s": 3.0,       # --brick auto: put it about this many seconds of driving ahead of a robot
-    "tof": "ideal",             # ideal | realistic
+    "tof": "realistic",         # realistic (default: sensor rate, noise, wheels for the last cm) | ideal
     "tof_hz": 15.0,             # realistic: readings per second
     "tof_sigma_cm": 0.2,        # realistic: noise
-    "tof_handover_cm": 3.0,     # realistic: below this, finish on the wheels
+    "tof_handover_cm": 3.0,     # realistic: below this, finish on the wheels (the step's handover_cm wins)
     "tof_fuse_from_cm": 10.0,   # realistic: readings below this are averaged (with wheel travel)
     "wheel_err": 0.02,          # realistic: wheel distance error over the last few cm (fraction)
     "gate": "deps",             # deps | time | both
-    "dock_tol_cm": 0.25,        # a docking passes if the front face stops within this of stop_at_front_cm
+    "dock_tol_cm": 0.25,        # a docking passes if the front face stops within this of the step's gap_cm
     "timeout_s": 400.0,
 }
 
@@ -216,6 +220,12 @@ class Sim:
             r.run["tof_next"] = self.t
             r.run["tof_read"] = None
             r.run["wheel_left"] = None
+            if typ == "approach":
+                # firmware follow.h: the travel cap counts from the step's start point, so a robot
+                # that stopped a little short of the pre-dock may roll that much further
+                L = math.dist(st["from"][:2], st["to"][:2])
+                along = float(np.dot(np.array(st["to"][:2]) - r.belief()[:2], r.run["u"]))
+                r.run["cap"] = st.get("max_travel_cm", 20.0) - (L - along)
         else:  # wait
             if st["phase"] == "dwell" or self.sp["gate"] in ("time", "both"):
                 dur = st["t_end"] - st["t_start"]
@@ -328,7 +338,8 @@ class Sim:
                 return
             # approach: creep until the front sensor reads the stop distance
             polys = list(self.boards.values()) + ([self.brick] if self.brick is not None else [])
-            stop_at = st.get("stop_at_front_cm") or self.m["dock"]["gap_cm"]
+            stop_at = st.get("gap_cm") or self.m["dock"]["gap_cm"]
+            handover = st.get("handover_cm") or self.sp["tof_handover_cm"]
             ideal_d = None
             if self.sp["tof"] == "ideal":
                 ideal_d, _ = self.tof(r, polys)
@@ -349,11 +360,14 @@ class Sim:
                     r.run["tof_next"] = self.t + 1.0 / self.sp["tof_hz"]
                     if rd <= self.sp["tof_fuse_from_cm"]:
                         r.run.setdefault("board_at", []).append(rd + r.run["travel"])
-                    if rd <= self.sp["tof_handover_cm"]:
+                    if rd <= handover:
                         est = float(np.mean(r.run.get("board_at", [rd + r.run["travel"]])))
                         r.run["wheel_left"] = est - r.run["travel"] - stop_at
-            if r.run["travel"] > st.get("max_travel_cm", 20.0):
-                self.end_approach(r, st, failed=True)
+            cap = r.run.get("cap", st.get("max_travel_cm", 20.0))
+            if r.run["travel"] >= cap - 1e-9:
+                # the firmware stops at the cap (never closer than gap - margin) and carries on
+                r.run["capped"] = True
+                self.end_approach(r, st)
                 return
             # hold the board-facing heading; small sideways correction early on only
             dock = r.run["target"]
@@ -371,6 +385,8 @@ class Sim:
             if r.run["wheel_left"] is not None:
                 ds = min(ds, max(0.0, r.run["wheel_left"]))
                 r.run["wheel_left"] -= ds
+            ds = min(ds, max(0.0, cap - r.run["travel"]))      # travel counted on the wheels
+            if r.run["wheel_left"] is not None:
                 ds *= 1 + r.run.setdefault("wheel_scale", self.sp["wheel_err"] * r.rng.standard_normal())
             self.move(r, ds / dt if dt > 0 else 0.0, w, dt)
             r.run["travel"] += ds
@@ -398,10 +414,11 @@ class Sim:
         corners = self.body.corners([r.true])[0]
         body_gap = G.polygon_polygon_dist(corners, self.boards[st["board"]])
         self.docking.append({"robot": r.name, "board": st["board"], "t": round(self.t, 2),
-                             "front_gap_cm": round(gap, 3), "gap_error_cm": round(gap - st["stop_at_front_cm"], 3),
+                             "front_gap_cm": round(gap, 3), "gap_error_cm": round(gap - st["gap_cm"], 3),
                              "lateral_cm": round(lateral, 3), "heading_err_deg": round(herr, 2),
                              "closest_body_to_board_cm": round(body_gap, 3), "failed": failed,
-                             "ok": (not failed) and 0.0 < body_gap and abs(gap - st["stop_at_front_cm"]) <= self.sp["dock_tol_cm"]
+                             "travel_cap_reached": bool(r.run.get("capped")),
+                             "ok": (not failed) and 0.0 < body_gap and abs(gap - st["gap_cm"]) <= self.sp["dock_tol_cm"]
                              and abs(herr) <= 5.0})
         self.finish_step(r, self.s.drive_settle_s)
 
@@ -547,7 +564,8 @@ class Sim:
             # an improvement try: keep it only if everyone is done sooner
             old_end = self.plan_start + self.plan["summary"]["makespan_s"]
             new_end = self.t + newplan["summary"]["makespan_s"]
-            self.replans[-1]["kept"] = new_end < old_end - 1.0
+            # (a plan that leaves someone without a route only looks quicker)
+            self.replans[-1]["kept"] = new_end < old_end - 1.0 and not newplan.get("stranded")
             self.log("t=%.1f improvement try: done at %.1f s instead of %.1f s, %s"
                      % (self.t, new_end, old_end, "kept" if self.replans[-1]["kept"] else "not kept"))
             if not self.replans[-1]["kept"]:

@@ -3,7 +3,9 @@
 
   Experiments:  stream (sensor log), turn (turn accuracy/time),
                 lap (line-following lap timer), grid (stop vs drive-through),
-                demo (open-floor routes), straight (straight-line accuracy)
+                demo (open-floor routes), straight (straight-line accuracy),
+                survey (square spiral for the camera's self-calibration),
+                follow (runs the steps tools/fleet/run_plan.py sends; laptop only)
 
   Setup:
     1. Copy secrets.example.h to secrets.h in this folder and add your WiFi.
@@ -13,7 +15,7 @@
   Without the laptop, use the buttons:
     LEFT / RIGHT  choose an experiment (left LED color shows which)
                   blue = stream, green = turn, yellow = lap, purple = grid,
-                  white = demo, cyan = straight
+                  white = demo, cyan = straight, red = survey
     OK            start it        CANCEL  stop it
   Results are logged over WiFi either way (and to Serial if USB is plugged in).
 */
@@ -23,20 +25,25 @@
 #include "net.h"
 #include "motion.h"
 #include "experiments.h"
+#include "follow.h"
 #include "ota.h"
 
 Arduino_Alvik alvik;
 
 // Bump this whenever the firmware changes, so every logged run says which code it ran.
-#define FW_VERSION "2026-10-18a"
+#define FW_VERSION "2026-10-18b"
 
 uint16_t gBootId = 0;   // random each power-on; starts every run id
 
-// "calib" (index 6) is the calibration run, started with the calibrate
-// command only; the buttons cycle through the first N_EXP.
-const char* EXP_NAMES[] = {"stream", "turn", "lap", "grid", "demo", "straight", "calib"};
-const int N_EXP = 6;
-const int EXP_CALIB = 6;
+// The buttons cycle through the first N_EXP. "follow" (index 7) needs the
+// laptop, so it is started with `run follow` only; "calib" (index 8) is the
+// calibration run, started with the calibrate command only.
+const char* EXP_NAMES[] = {"stream", "turn", "lap", "grid", "demo", "straight", "survey", "follow", "calib"};
+const int N_EXP = 7;
+const int N_RUNNABLE = 8;   // `run <name>` accepts these
+const int EXP_SURVEY = 6;
+const int EXP_FOLLOW = 7;
+const int EXP_CALIB = 8;
 int gSelected = 1;
 int gPending = -1;   // experiment requested by the laptop, started from loop()
 
@@ -58,6 +65,7 @@ void showSelection(bool running) {
     case 3: r = 1; b = 1; break;       // grid: purple
     case 4: r = 1; g = 1; b = 1; break; // demo: white
     case 5: g = 1; b = 1; break;       // straight: cyan
+    case 6: r = 1; break;              // survey: red
   }
   alvik.left_led.set_color(r, g, b);
   if (running) alvik.right_led.set_color(r, g, b);
@@ -65,7 +73,8 @@ void showSelection(bool running) {
 }
 
 void printHelp() {
-  net::sendLine("M,commands: run stream|turn|lap|grid|demo|straight  stop  calibrate  clock  name <Left|Center|Right>  set <name> <value>  get <name>  params  route <SLRE...>  status  identify  help");
+  net::sendLine("M,commands: run stream|turn|lap|grid|demo|straight|survey|follow  stop  calibrate  clock  name <Left|Center|Right>  set <name> <value>  get <name>  params  route <SLRE...>  status  identify  help");
+  net::sendLine("M,during run follow: fs <id> <T|D|A|W> ...  fix <t_ms> <x> <y> <th> <sigma>  fpose <x> <y> <th>  hold [id]  halt  (tools/fleet/run_plan.py sends these)");
 }
 
 void printParams() {
@@ -77,7 +86,7 @@ void printParams() {
 }
 
 int expIndex(const String& name) {
-  for (int i = 0; i < N_EXP; i++) if (name.equalsIgnoreCase(EXP_NAMES[i])) return i;
+  for (int i = 0; i < N_RUNNABLE; i++) if (name.equalsIgnoreCase(EXP_NAMES[i])) return i;
   return -1;
 }
 
@@ -98,6 +107,11 @@ bool handleCommand(const String& raw, bool running) {
     return true;
   }
   if (verb == "help") { printHelp(); return false; }
+  if (verb == "fs" || verb == "fix" || verb == "fpose" || verb == "hold" || verb == "halt") {
+    if (running && follow::active) follow::command(verb, rest);
+    else if (verb == "fs") net::sendLine("M,not following: send run follow first");
+    return false;
+  }
   if (verb == "name") {
     if (running) { net::sendLine("M,busy: send stop first"); return false; }
     if (rest.length() > 10) { net::sendLine("M,names can be at most 10 characters"); return false; }
@@ -184,7 +198,7 @@ bool handleCommand(const String& raw, bool running) {
   if (verb == "run") {
     if (running) { net::sendLine("M,busy: send stop first"); return false; }
     int i = expIndex(rest);
-    if (i < 0) { net::sendLine("M,run what? stream, turn, lap, grid, demo or straight"); return false; }
+    if (i < 0) { net::sendLine("M,run what? stream, turn, lap, grid, demo, straight, survey or follow"); return false; }
     gSelected = i;
     gPending = i;
     return false;
@@ -245,7 +259,7 @@ void logRunInfo(int i) {
 // Experiments that turn need the compass direction checked once per power-on.
 // The check wiggles the robot, so it must never happen inside a measured run
 // (after the tape start marks were taken).
-bool needsYawSign(int i) { return i == 1 || i == 3 || i == 4 || i == 5; }
+bool needsYawSign(int i) { return i == 1 || (i >= 3 && i <= 7); }
 
 // Calibration run, once per power-on and whenever robots may have been mixed
 // up. Logged like any run (RUNINFO, RAW, flashes), so the camera recording
@@ -271,9 +285,10 @@ void runCalib() {
 
 // Start nudge: a short roll forward and back right after the start flash, so
 // the camera sees which way the robot faces. RAW step -1 while it happens.
+// Not in follow runs: the laptop gives the pose, and the robot stays on its spot.
 bool startNudge(int i) {
   float n = P("start_nudge_cm");
-  if (n <= 0 || !(i == 1 || i == 4 || i == 5)) return true;
+  if (n <= 0 || !(i == 1 || i == 4 || i == 5 || i == EXP_SURVEY)) return true;
   rawlog::step = -1;
   bool ok = libraryMove(n) && waitMs(200) && libraryMove(-n) && waitMs(300);
   rawlog::step = 0;
@@ -299,11 +314,14 @@ void runExperiment(int i, bool fromButton) {
   gRunId = id;
   gAbortReason = "";
   gFail = "";
-  if (i != EXP_CALIB) gSelected = i;   // keep showing the chosen experiment after a calibration
+  if (i != EXP_CALIB && i != EXP_FOLLOW) gSelected = i;   // calibration and follow keep showing the chosen experiment
   showSelection(true);
   net::logf("M,run %s: %s starting", gRunId.c_str(), EXP_NAMES[i]);
   bool logged = i != 0;   // the stream experiment is its own log
   unsigned long t0 = millis();
+  // follow: the robot stands on its start spot (which may face a board closer than
+  // safe_front_cm) until steps arrive; each step sets its own front check (follow.h)
+  if (i == EXP_FOLLOW) gFrontLimitCm = 0;
   if (logged) {
     logRunInfo(i);
     rawlog::start();
@@ -321,6 +339,8 @@ void runExperiment(int i, bool fromButton) {
     case 3: runGrid(); break;
     case 4: runDemo(); break;
     case 5: runStraight(); break;
+    case EXP_SURVEY: runSurvey(); break;
+    case EXP_FOLLOW: follow::run(); break;
     case EXP_CALIB: runCalib(); break;
   }
   alvik.brake();

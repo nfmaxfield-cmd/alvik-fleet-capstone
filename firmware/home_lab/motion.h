@@ -16,23 +16,71 @@ bool handleCommand(const String& cmd, bool running);
 String gAbortReason = "";
 String gFail = "";   // why a run failed without being stopped (a timeout, a failed check); shown in RUNEND
 
-// Call often inside every loop. True means stop the experiment.
+// Survey and follow only (both off otherwise, so the other experiments behave as before):
+// gTickHook runs on every shouldAbort() call (the own-pose tracker rides along like the RAW log);
+// gFrontLimitCm >= 0 replaces safe_front_cm for the current step (0 = no front check);
+// gFrontSoft: a front trip ends only the current step (gStepStop = "obstacle"), not the run;
+// gStepStop: why the current step must stop (obstacle, halted); the run goes on.
+void (*gTickHook)() = nullptr;
+float gFrontLimitCm = -1;
+bool gFrontSoft = false;
+String gStepStop = "";
+bool gFrontPath = false;  // straight drives: check all five zones inside the robot's path, not just the centre
+float gFrontEndBase = -1; // follow drives (>= 0): gFrontLimitCm = min(this, distance left in the step + front_end_cm)
+float gFrontTripCm = 0;   // the reading that tripped it
+unsigned long gFrontLowSince = 0;   // soft mode: when the reading first went below the limit (0 = it isn't)
+
+// Nearest thing ahead INSIDE the robot's own path: each of the five front
+// zones' reading taken at the zone's direction (ZONE_DEG, an assumption to be
+// checked: the 60 deg view split in five), kept if it falls within
+// path_half_cm of the robot's centre line; returns its distance straight
+// ahead of the sensor (0 = nothing in the path). Something the robot's side
+// would clip is only in view while it is still several cm ahead (at 4.5 cm to
+// the side it leaves the 30 deg half-view below about 8 cm), so the limit for
+// this check must look further ahead than the centre-only safe_front_cm.
+float frontInPath() {
+  static const float ZONE_DEG[5] = {22.0f, 11.0f, 0.0f, -11.0f, -22.0f};
+  float d[5];
+  alvik.get_distance(d[0], d[1], d[2], d[3], d[4]);
+  float half = P("path_half_cm"), best = 0;
+  for (int k = 0; k < 5; k++) {
+    if (d[k] <= 0) continue;
+    float a = ZONE_DEG[k] * 0.017453293f;
+    float lat = d[k] * sinf(a), fwd = d[k] * cosf(a);
+    if (fabsf(lat) <= half && (best == 0 || fwd < best)) best = fwd;
+  }
+  return best;
+}
+
+// Call often inside every loop. True means stop the experiment (or, with
+// gStepStop set, just the current step).
 bool shouldAbort() {
   rawlog::tick();   // full sensor log rides along with every motion loop
+  if (gTickHook) gTickHook();
   if (gAbortReason.length()) return true;
   if (alvik.get_touch_cancel()) { gAbortReason = "cancel button"; }
   else if (P("safe_lift") > 0 && alvik.get_lifted()) { gAbortReason = "robot lifted"; }
-  else {
-    float lim = P("safe_front_cm");
+  else if (!gStepStop.length()) {
+    float lim = gFrontLimitCm >= 0 ? gFrontLimitCm : P("safe_front_cm");
     if (lim > 0) {
       float dL, dCL, dC, dCR, dR;
       alvik.get_distance(dL, dCL, dC, dCR, dR);
-      if (dC > 0 && dC < lim) gAbortReason = "obstacle ahead";
+      if (gFrontPath) dC = frontInPath();
+      if (dC > 0 && dC < lim) {
+        if (!gFrontSoft) gAbortReason = "obstacle ahead";
+        else {
+          // soft mode (survey, follow): one noisy frame is not enough; it must stay too close
+          if (!gFrontLowSince) gFrontLowSince = millis() | 1;
+          if (millis() - gFrontLowSince >= (unsigned long)P("front_confirm_ms")) { gStepStop = "obstacle"; gFrontTripCm = dC; }
+        }
+      } else {
+        gFrontLowSince = 0;
+      }
     }
   }
   String cmd;
   if (net::poll(cmd) && handleCommand(cmd, true)) gAbortReason = "stop command";
-  if (gAbortReason.length()) {
+  if (gAbortReason.length() || gStepStop.length()) {
     alvik.brake();
     return true;
   }

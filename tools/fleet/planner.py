@@ -48,6 +48,8 @@ DEFAULT_SETTINGS = {
     "separation_cm": 5.0,       # closest two robot bodies may come
     "cruise_cms": 10.0,         # straight drives
     "approach_cms": 3.0,        # final approach pre-dock -> dock
+    "handover_cm": 3.0,         # approach: distance-sensor reading below which the wheels finish the approach
+    "approach_margin_cm": 0.5,  # approach: never travel more than (approach length + gap - this)
     "backout_cms": 5.0,         # reversing dock -> pre-dock
     "turn_dps": 60.0,           # average turn rate in place
     "turn_settle_s": 0.3,       # pause after each turn
@@ -1157,7 +1159,7 @@ def _deg(p):
     return FM.pose_out(p)
 
 
-def to_steps(sched, after, s, t0=0.0, committed=0, front_ray=None):
+def to_steps(sched, after, s, t0=0.0, committed=0, front_ray=None, gap_cm=1.0):
     out = []
     for i, (tk, p) in enumerate(sched):
         st = {"i": i, "type": p["type"], "phase": p["phase"], "from": _deg(p["from"]), "to": _deg(p["to"]),
@@ -1173,10 +1175,22 @@ def to_steps(sched, after, s, t0=0.0, committed=0, front_ray=None):
             st["speed"] = None
         if p["type"] == "drive" and not p["reverse"] and front_ray is not None:
             st["front_clear_cm"] = front_ray(p["to"])
+        if front_ray is not None and not p.get("reverse"):
+            if p["type"] in ("drive", "approach"):
+                # driving straight at a thing only brings it closer: the least is at the end
+                st["front_min_cm"] = front_ray(p["to"])
+            elif p["type"] in ("turn", "park"):
+                d = p["turn"] if p.get("turn") is not None else G.wrap(p["to"][2] - p["from"][2])
+                k = max(1, int(math.ceil(abs(math.degrees(d)) / 5.0)))
+                seen = [front_ray([p["from"][0], p["from"][1], p["from"][2] + d * j / k]) for j in range(k + 1)]
+                seen = [v for v in seen if v is not None]
+                st["front_min_cm"] = min(seen) if seen else None
         if p["type"] == "approach":
             L = math.dist(p["from"][:2], p["to"][:2])
-            st["stop_at_front_cm"] = None   # filled by make_plan from the map
-            st["max_travel_cm"] = round(L + 3.0, 2)
+            st["gap_cm"] = gap_cm
+            st["handover_cm"] = s.handover_cm
+            # the front face starts L + gap from the board: never roll that far (minus a margin)
+            st["max_travel_cm"] = round(L + gap_cm - s.approach_margin_cm, 2)
         if p["type"] == "drive" and p["phase"] == "backout":
             pass
         if i < committed:
@@ -1255,16 +1269,14 @@ def make_plan(m, jobs=None, over=None, t0_s=0.0, replan_of=None, events=None, t_
     after = dependencies(sc, body, s)
     robots = {}
     for j in jobs:
-        steps = to_steps(sc[j.name], after[j.name], s, committed=len(j.frozen), front_ray=front_ray)
+        steps = to_steps(sc[j.name], after[j.name], s, committed=len(j.frozen), front_ray=front_ray,
+                         gap_cm=m["dock"]["gap_cm"])
         if j.start_tick > 0:
             # nothing new starts before the new plan can be ready
             for st in steps[len(j.frozen):]:
                 if st["type"] != "wait":
                     st["not_before_s"] = round(j.start_tick * s.tick_s, 2)
                     break
-        for st in steps:
-            if st["type"] == "approach":
-                st["stop_at_front_cm"] = m["dock"]["gap_cm"]
         vo = info["visit_orders"][j.name]
         if j.name in info["stranded"]:
             # work it still has to do, kept for the next re-plan
@@ -1364,7 +1376,9 @@ def states_at(plan, t):
 
 def obstacle_event(m, plan, states, new_obstacles, over=None):
     """Something new is on the floor. Decide which robots stop at once and
-    which carry on, then plan the rest of everyone's tasks.
+    which carry on (obstacle_decide), then plan the rest of everyone's tasks
+    (obstacle_replan). A live coordinator calls the two halves itself, so it
+    can stop the imminent robots before the slower planning starts.
 
     states: robot -> {"pose": [x, y, rad], "step": index of the step under
     way (or next), "in_progress": bool, "dwell_left_s": float or None}, all
@@ -1380,6 +1394,15 @@ def obstacle_event(m, plan, states, new_obstacles, over=None):
       another one carrying on) holds earlier, or stops at once.
 
     Returns (new plan, events). New plan times count from the event."""
+    return obstacle_replan(obstacle_decide(m, plan, states, new_obstacles, over))
+
+
+def obstacle_decide(m, plan, states, new_obstacles, over=None):
+    """The quick half of obstacle_event: who stops at once, who carries on and
+    for how many steps. Returns a decision dict: "events" (per robot action
+    and reason), "keep" (robot -> number of its remaining steps it carries
+    on; 0 = stops or holds where it is), "first_step" (robot -> index in the
+    old plan of its first remaining step) and what obstacle_replan needs."""
     m = FM.normalize(m)
     m2 = copy.deepcopy(m)
     for o in new_obstacles:
@@ -1520,6 +1543,16 @@ def obstacle_event(m, plan, states, new_obstacles, over=None):
             changed = True
         if not changed:
             break
+    return {"m": m, "m2": m2, "plan": plan, "states": states, "s": s, "rest": rest, "keep": keep,
+            "events": events, "first_step": {n: states[n]["step"] for n in names}, "budget_ticks": budget_ticks}
+
+
+def obstacle_replan(dec):
+    """The slow half of obstacle_event: plan everyone's remaining work from the
+    decision (committed steps first). Returns (new plan, events)."""
+    m2, plan, states, s = dec["m2"], dec["plan"], dec["states"], dec["s"]
+    rest, keep, events, budget_ticks = dec["rest"], dec["keep"], dec["events"], dec["budget_ticks"]
+    names = list(plan["robots"])
     # 3. new jobs: committed steps, then the rest of the tasks from the hold pose
     jobs = []
     for n in names:

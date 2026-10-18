@@ -121,6 +121,68 @@ start_nudge_cm 0` turns it off.
 The measured experiments (E0, E1, ...) are set up in
 [experiments/INDEX.md](experiments/INDEX.md).
 
+## Survey drive: recalibrate a moved camera (firmware 2026-10-18b+)
+
+`run survey` drives a square spiral outward from where the robot stands: legs
+of 10, 10, 20, 20, 30, 30 ... cm with a left turn before each new leg, up to
+`survey_size_cm` (80: 16 legs, about 7.7 m, just under 2 minutes, covering
+about 1 m x 1 m around the start). It then turns to face the start, drives
+straight back to it and turns to its starting heading. A leg ends early if
+anything is within `survey_clear_cm` (10 cm) in the robot's path; the spiral
+stops there and it drives back. Light: red. Needs the calibration run
+(`calibrate`) since power-on, like turn, demo and straight runs. It is a logged
+run (RUNINFO, PARAM, RAW at 50 a second with step = leg number, sync flashes,
+blink codes, RUNEND) plus SURVEY_LEG and SURVEY_END records.
+
+Then the camera's floor calibration comes from the survey itself: the robot's
+own wheel + gyro path, hung from its taped start pose, paired with where the
+camera saw it.
+
+1. Pick a start spot near the middle of the floor the camera sees, with about
+   50 cm clear all round. Put the robot there and mark its front and rear on
+   the floor (pencil), as for E1. Record the marks in a sheet row (the E1
+   columns: order, robot, level `survey`, commands `run survey`, xf0..yr0).
+2. Start the camera recording, then `run survey` (one robot at a time).
+3. When it is back, mark its end pose (xf..yr) in the same row and its run id.
+4. Repeat from 2-3 other spots, each measured separately (see below).
+5. Calibrate:
+
+       python tools/calibrate_floor.py <recording> --survey --session logs/<x> \
+           --sheet <that sheet> --detections <recording>/detections.csv --height-cm <tape>
+
+run_sheet.py can run a survey row too, but it expects every start at the
+origin; started there, half the spiral lies at negative x.
+
+**How good (simulated, camera moved and turned 4 deg, 10 and 25 frames a
+second):** the error comes almost all from the taped start headings (two marks
+9.5 cm apart give about +/-1.3 deg), and the whole calibration turns with
+them. Over everything the camera sees: 2 surveys, mean 0.8 cm (max 1.7) in one
+session but 2.2 cm (max 4.6) in another, where both starts happened to be
+taped about 1.5 deg off the same way; 4 surveys from separate spots, mean
+0.6 cm (max 1.5); the 36 E1 runs, mean 0.2 cm (max 0.7) in both sessions.
+With the start-heading rotation removed, the 2-survey calibrations were mean
+0.17-0.37 cm: the spiral gets the shape right, the anchor sets the angle. So
+for now the survey is a quick check or rough recalibration (4 runs, about 8
+minutes), not a replacement for many taped runs.
+
+## Running a fleet plan on the robots (firmware 2026-10-18b+)
+
+`tools/fleet/run_plan.py` runs plan.json (tools/fleet/README.md): it starts a
+`follow` run on every robot, releases each robot's steps as the others report
+theirs done, passes camera fixes on, and re-plans when something new appears.
+
+1. Every robot: `calibrate` (once per power-on), then put it on its start spot
+   from map.json. Close the console (one program on the robots' port).
+2. `python tools/fleet/run_plan.py --map map.json --plan plan.json`
+   (`--calibrate` sends the calibrations for you; `--fixes udp` takes camera
+   poses from the live fusion when that runs).
+3. Ctrl+C stops every robot. The session folder has step.csv and follow.csv
+   (what each robot did and where it thought it was) and coordinator.jsonl.
+
+Try it first without robots: `python tools/fleet/run_plan.py --map
+tools/fleet/examples/demo_map.json --dry-run` (simulated robots on this laptop;
+add `--brick auto@15` or `--wifi-drop Center@20:3`).
+
 **Full sensor log.** Every experiment except `stream` now logs every sensor
 `raw_hz` times a second (default 50) to `raw.csv`, with a RUNINFO record before
 the run (firmware version, battery, WiFi signal), every setting (`param.csv`),
@@ -177,7 +239,7 @@ Commands go to the robot(s) chosen with `use` (default: all). `AL-3F2A: run
 turn` sends one command to one robot; the last 4 characters alone work too
 (`3F2A: run turn`). `stop` always stops every robot. Robot commands: `help`,
 `params`, `get <name>`, `set <name> <value>`, `route <letters>`,
-`run stream|turn|lap|grid|demo|straight`, `stop`, `status`, `identify`,
+`run stream|turn|lap|grid|demo|straight|survey|follow`, `stop`, `status`, `identify`,
 `calibrate`, `clock`, `name <Left|Center|Right>`. Console-only:
 `robots`, `use`, `stats`, `quit`.
 

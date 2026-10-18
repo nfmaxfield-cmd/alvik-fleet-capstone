@@ -13,6 +13,7 @@ otherwise). Stop with Ctrl+C.
 import argparse
 import json
 import os
+import socket
 import sys
 import threading
 import traceback
@@ -162,13 +163,24 @@ def make_handler(session):
     return Handler
 
 
+class LocalServer(ThreadingHTTPServer):
+    """On Windows, SO_REUSEADDR lets a second copy bind the same port silently (the
+    browser then talks to either copy): off there, and the port claimed exclusively."""
+    allow_reuse_address = os.name != "nt"
+    daemon_threads = True
+
+    def server_bind(self):
+        if os.name == "nt" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 def serve(session, port=8770):
     try:
-        server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(session))
-    except OSError:
-        raise SystemExit("Port %d is busy (is the page already open in another window?). "
-                         "Close that, or start with --port %d" % (port, port + 1))
-    server.daemon_threads = True
+        server = LocalServer(("127.0.0.1", port), make_handler(session))
+    except OSError as e:
+        raise SystemExit("Port %d is in use (%s): is the fleet page already running in another window? "
+                         "Close that, or start with --port %d" % (port, e.strerror or e, port + 1))
     return server, "http://127.0.0.1:%d/" % server.server_address[1]
 
 

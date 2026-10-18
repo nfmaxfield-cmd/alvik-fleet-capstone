@@ -26,6 +26,10 @@ then the robot's own columns:
 | straight.csv | run,robot,result,cmd_cm,rpm,odo_x_cm,odo_y_cm,odo_theta_deg,imu_dyaw_deg,total_ms,battery (odo y and theta left-positive from 2026-10-17d; raw library sign before) |
 | demo_step.csv | run,robot,step,x_cm,y_cm,theta_deg,ms (y and theta left-positive from 2026-10-17d) |
 | demo_end.csv | run,robot,route,result,return_err_cm,heading_err_deg,total_ms,a_cm,b_cm,r_cm,battery |
+| survey_leg.csv | run,leg,cmd_cm,driven_cm,end,x_cm,y_cm,th_deg,front_cm,ms: one row per leg of a `survey` run (2026-10-18b+); `end` full / obstacle (stopped early: something within survey_clear_cm in its path) / stopped / timeout; pose = the robot's own (wheels + gyro) in its start frame (0, 0, 0 where it was put down, x ahead, y left) |
+| survey_end.csv | run,result,legs,path_cm,return_cm,x_cm,y_cm,th_deg,total_ms,size_cm,battery: `result` done, done:blocked (a leg ended at an obstacle, then it drove back), failed:..., aborted:...; x,y,th = own pose at the end (0,0,0 = back exactly where it started, by its own reckoning) |
+| step.csv | `follow` runs: run,id,state,ms,x_cm,y_cm,th_deg,front_cm,info (see "Step follower" below) |
+| follow.csv | `follow` runs, follow_log_hz (10) a second: run,ms,step_id,state,queued,last_done,last_failed,x_cm,y_cm,th_deg,pos_sd_cm,th_sd_deg,fixes_used,fixes_rejected,front_cm,travel_cm,quiet_ms (see "Step follower") |
 
 Also in the folder:
 
@@ -39,7 +43,9 @@ Notes:
 - RAW `x_cm,y_cm,th_deg` are the robot's own wheel odometry, reset to 0 at the
   start of straight and demo runs. `step` counts completed route steps;
   -1 = the start nudge (2026-10-17e+). In a `calib` run: 1 blinking still,
-  2 rolling forward, 3 back, 4 compass wiggle, 5 settling.
+  2 rolling forward, 3 back, 4 compass wiggle, 5 settling. In a `survey` run
+  (2026-10-18b+): the leg number (1, 2, ...), legs + 1 = the drive back to the
+  start. In a `follow` run: the id of the step running (0 between steps).
 - RAW `lifted` (firmware 2026-10-17c+): 1 while the robot reports being picked up.
 - RAW gx..gz: gyro, deg/s; ax..az: accelerometer, g (to be confirmed on
   hardware: az about 1 at rest). yaw_deg: the IMU's fused yaw.
@@ -57,7 +63,12 @@ Notes:
   = what the camera reports once set, `stats_auto` / `stats_after` = brightness
   and sharpness of a few frames, `steps` = every set tried (OpenCV or v4l2-ctl)
   and whether it took, `warnings`, `v4l2_after` = `v4l2-ctl --list-ctrls` if
-  installed) and `camera_controls_end` (what the camera reports when recording
+  installed, `exposure_cap` = 10000/fps: a locked or brightness-matched exposure
+  never goes above it, `dynamic_framerate` = what happened to
+  exposure_dynamic_framerate (set to 0 with v4l2-ctl if offered), `fps_check` =
+  frame rate measured for ~2 s after setting a manual exposure: requested,
+  measured, frames, seconds, ok (false below 0.9 x requested; also copied to the
+  top level as `fps_check`)) and `camera_controls_end` (what the camera reports when recording
   stops). From 2026-10-18.
 
 ## Tape measurement sheet (`docs/experiments/<exp>/data/measurements.csv`)
@@ -69,6 +80,8 @@ xf0_cm,yf0_cm,xr0_cm,yr0_cm,xf_cm,yf_cm,xr_cm,yr_cm,battery_pct,excluded,note
   suffix = after (end). Position = midpoint, heading = rear -> front.
 - target_* are relative to the start pose (ahead, left, turned left).
 - `excluded`: 1, yes, y, x or true (any case) leaves the run out of every analysis.
+- Readers accept a UTF-8 byte-order mark (Excel's "CSV UTF-8" adds one);
+  the tools write plain UTF-8 without it.
 
 ## Floor calibration (`floor_calibration.json`, beside the recording)
 
@@ -91,11 +104,16 @@ xf0_cm,yf0_cm,xr0_cm,yr0_cm,xf_cm,yf_cm,xr_cm,yr_cm,battery_pct,excluded,note
   camera height).
 - `fit`: how it was made (tools/calibrate_floor.py): `mode` (points / survey),
   n_points, n_inliers, rms_cm, max_cm, loo_rms_cm (left-one-out), coverage of
-  `area_cm` (the floor bounds in tools/fleet/map.json if present, else
+  `area_cm` (the floor bounds of the fleet map: `--map`, else ./map.json
+  where tools/fleet/app.py saves it, else tools/fleet/map.json; else
   0..122 x 0..122 cm; `--area` overrides), warnings, per-point errors (`points`) or per-run survey results
   (`survey`), and `used_runs`: runs whose tape marks or odometry were used.
   Don't score those runs' camera positions with this file: use
-  `floor_calibration_loro.csv`.
+  `floor_calibration_loro.csv` (tools/fusion/replay.py and runs.py refuse
+  unless `--allow-in-sample`). Survey files also have `used_robots`: robots
+  whose wheel odometry went into the fit.
+- held-out files (`floor_calibration_loro/`) also have `held_out_runs` (and,
+  leave-one-robot-out, `held_out_robots`).
 
 Beside it, from tools/calibrate_floor.py:
 
@@ -103,17 +121,38 @@ Beside it, from tools/calibrate_floor.py:
   each {id, kind (floor / robot / run), u, v (px), x, y (cm), z (cm above the
   floor), frame, label, enabled, spot, group (run id), session}.
 - `survey_pairs.csv`: u,v,x_cm,y_cm,vx_cms,vy_cms,sigma_cm,run,t,frame,kind,
-  anchor_x_cm,anchor_y_cm,session (odometry path point, its velocity and
-  uncertainty, paired with a camera sighting; accumulates across sessions).
+  anchor_x_cm,anchor_y_cm,session,robot (odometry path point, its velocity and
+  uncertainty, paired with a camera sighting; accumulates across sessions;
+  `robot` from 2026-10-18, empty in older rows).
   `kind` is `odo` for a path point or `tape_end` for a run's tape end marks
   (used only in calibrations that score other runs; `--no-end-marks` = off).
 - `floor_calibration_loro.csv`: run_id,calibration,left_out,n_used,fit_rms_cm,
-  note, then held-out errors of that run (heldout_start_err_cm /
-  heldout_end_err_cm for run points, heldout_path_median_cm / _rms_cm and
-  heldout_end_mark_err_cm for survey):
+  note,holdout (run), then held-out errors of that run (heldout_start_err_cm /
+  heldout_end_err_cm for run points; heldout_<order>_<start|end>_err_cm for E00
+  placement spots, one per sheet row, so both passes at a spot are kept;
+  heldout_path_median_cm / _rms_cm and heldout_end_mark_err_cm for survey):
   which file in `floor_calibration_loro/` (made WITHOUT that run, or its fold)
   to score the run with.
+- `floor_calibration_loro_robot.csv` and `floor_calibration_loro_robot/`
+  (`--survey --holdout robot`): the same, one row per run, but each file is
+  made without ANY run of that run's robot (holdout = robot, left_out = the
+  robot). Use it like the per-run one (`--calib-per-run`).
 - `floor_calibration_check.jpg`: a frame with the fitted 10 cm grid drawn on it.
+
+## Fusion replay (`results/<name>/`, written by tools/fusion/replay.py)
+
+- `results.csv`: config,run_id,robot,route,end_err_cm,end_head_err_deg,
+  path_rmse_cm,path_max_cm,head_rmse_deg,cam_used,cam_blocked,kidnaps,
+  hdg_motion,hdg_calib,id_right,id_wrong,id_false,id_blink,id_motion,id_both,
+  id_combined,id_position,calib_file,calib_includes_run. The last two are filled
+  for setups that use the camera or blink lights: the calibration that converted
+  that run's sightings, and 1 if that calibration's fit.used_runs includes the
+  run (only possible with `--allow-in-sample`).
+- `summary.csv`: setup,route,runs,end error cm,95% interval,vs wheels only
+  (paired),p,p_holm[,path RMSE cm,heading RMSE deg][,right robot]. Rows with
+  route `all` pool every route (p_holm: p adjusted for comparing many setups at
+  once, Holm method); the other rows are one setup on one route (runs, mean end
+  error, interval only).
 
 ## Labels for the camera detector (`<recording>/labels/`)
 
@@ -258,7 +297,7 @@ Each step:
 | Field | Meaning |
 | --- | --- |
 | `i` | step number within this robot's list |
-| `type` | `turn` (in place), `drive` (straight), `approach` (slow straight to a board, stop on the distance sensor), `wait`, `park` (final turn in place at the park spot) |
+| `type` | `turn` (in place), `drive` (straight), `approach` (slow straight to a board: distance sensor, then wheels), `wait`, `park` (final turn in place at the park spot) |
 | `phase` | travel, align (turn to face a board), approach, dwell (docked, a wait), backout, escape (straight move out of a tight spot), wait, hold (waiting for the new plan), park |
 | `from`, `to` | poses at the start and end of the step, `[x, y, heading_deg]` |
 | `speed` | cm/s for drive/approach, deg/s for turn/park, null for wait |
@@ -267,9 +306,11 @@ Each step:
 | `t_start`, `t_end` | planned times; `move_s` = time spent moving (the rest is settling) |
 | `board`, `task` | board name (align/approach/dwell/backout) and task number |
 | `after` | `[[robot, step], ...]`: steps of other robots that must be reported done before this one starts |
-| `stop_at_front_cm` | approach only: stop when the front distance sensor reads this |
-| `max_travel_cm` | approach only: give up (and report) if it has driven this far without the reading |
-| `front_clear_cm` | forward drives: what the front distance sensor should read at the end of the step (nearest board/obstacle straight ahead; absent = nothing within 100 cm). A reading well below it means something new is in the way |
+| `gap_cm` | approach only: front face to board surface when docked (the map's `dock.gap_cm`) |
+| `handover_cm` | approach only: distance-sensor reading below which the wheels finish the approach (planner setting `handover_cm`, 3; the sensor's minimum range is about 2 cm) |
+| `max_travel_cm` | approach only: never roll further than this from the step's start point: approach length + `gap_cm` - `approach_margin_cm` (15 + 1 - 0.5 = 15.5 cm), so even a robot that never gets a reading stops short of the board. Until 2026-10-18 it was length + 3 cm (18 cm: past the board) with `stop_at_front_cm` 1.0 (below the sensor's range); plans that old are refused by run_plan.py |
+| `front_min_cm` | turns, forward drives and approaches: the smallest distance the front distance sensor (centre, from the front face) should see during the step, from the map (boards and obstacles; keep-outs and the floor edge are not walls); absent or null = nothing within 100 cm. The robot stops the step (failed:obstacle) below this minus `front_margin_cm`, so planned passes near boards don't trip the 7 cm stop |
+| `front_clear_cm` | forward drives: what the front distance sensor should read at the end of the step (nearest board/obstacle straight ahead; absent = nothing within 100 cm). For a straight drive this equals `front_min_cm` |
 | `not_before_s` | do not start before this time (first new step after an obstacle) |
 | `committed` | step carried on from the previous plan while the new one was computed |
 
@@ -278,3 +319,123 @@ swept areas come within the separation distance never run at the same time;
 whichever the plan has first must be finished before the other starts.
 A robot that obeys `after` cannot run into another robot, even when some run
 late. `t_start` alone does not give that (see tools/fleet/README.md).
+
+## Step follower (`run follow`, firmware 2026-10-18b+; laptop side tools/fleet/run_plan.py)
+
+The laptop releases each robot's plan.json steps as their `after` lists are
+done; the robot buffers up to 8, runs them in order on its own pose and reports
+back. Commands go to the robot's command port (UDP 5006) like any console
+command, one per packet, at most 159 characters; numbers in cm and degrees,
+floor frame (map.json). `-` means "none".
+
+Laptop -> robot (only while the follow run is going):
+
+| Command | Meaning |
+| --- | --- |
+| `fs <id> T <h> <fmin>` | turn in place to heading h (IMU turn) |
+| `fs <id> D <x0> <y0> <x1> <y1> <h> <cms> <rev> <fmin>` | straight drive along (x0,y0) -> (x1,y1) facing h, rev 1 = backwards; small heading corrections bring it back onto the line; it squares up first if more than 10 deg off h |
+| `fs <id> A <x0> <y0> <x1> <y1> <h> <cms> <handover> <gap> <max_travel> <fmin>` | approach a board (below) |
+| `fs <id> W <ms>` | wait (a dwell at a board; 0 = a step that only keeps the order) |
+| `fix <t_ms> <x> <y> <th> <sigma_cm> [<sigma_deg>]` | camera pose of the robot (turning centre) at ROBOT time t_ms; th `-` = position only |
+| `fpose <x> <y> <th> [<sigma_cm> <sigma_deg>]` | set the pose outright (no camera: the plan's start spot) |
+| `hold [<id>]` | finish the step running (and queued steps up to id), drop the rest; acked with STEP `held` (id = the given id or 0) |
+| `halt` | stop at once (the step running fails with `halted`), drop every queued step, stay in follow mode; acked with STEP `halted` (id 0) |
+| `stop` | stop at once and end the run (RUNEND), as for every experiment |
+
+Step ids are 1-65535 and must go up for each robot. A step whose id is not
+above every id the robot has seen is answered `dup` and not run again, so a
+resent step can't run twice; therefore the laptop sends a robot's next step
+only once the one before it was acked (`queued` or `dup`), and sends no step
+while a `hold`/`halt` is unacked. It resends an unacked step or control every
+0.3 s and keeps up to 2 steps beyond the one running (`--ahead`).
+
+`fmin` is the plan's `front_min_cm`. Front checks during the follow run
+(firmware motion.h / follow.h):
+- turns: centre zone below min(safe_front_cm, fmin + tof_recess_cm - front_margin_cm);
+- forward drives: anything inside the robot's path (all five zones, each taken
+  at its direction, kept if within path_half_cm of the centre line) closer than
+  min(max(follow_look_cm, safe_front_cm), fmin + tof_recess_cm - front_margin_cm,
+  distance still to go in this step + front_end_cm);
+- backwards drives and waits: none;
+- a reading must stay too close for front_confirm_ms (100 ms, about 2 sensor
+  frames) before the step stops; then the step fails (`obstacle ...`), the
+  queued steps are dropped, and the robot stands still in follow mode.
+Lift, the cancel button and `stop` end the run as in every experiment.
+
+**Approach** (A): drives along the line at `cms` (3 cm/s) holding heading h
+(sideways corrections only more than 3 cm from the dock). Every tof_ms (66 ms)
+it reads the centre zone: a reading below what the map expects (L + gap +
+recess - travel) minus front_margin_cm twice in a row fails the step
+(`obstacle`, something in front of the board); readings between tof_min_cm (2)
+and fuse_from_cm (10) are averaged as "reading + wheel travel when it was
+taken (travel - speed x tof_lag_ms)" = where the board is. At the first reading
+at or below `handover` (with 3 or more readings averaged) the wheels roll the
+rest so the reading would be gap + tof_recess_cm. If no readings come, it
+rolls to the planned dock (`wheels only` in the done record). It never rolls
+more than max_travel - (how far past the step's start point it already is, by
+its own pose).
+
+**Own pose** (pose.h): distance from the wheels (the library's odometry step
+along its own heading), heading from the gyro tied to the floor by an offset.
+A `fix` is blended in with a one-step Kalman gain var / (var + sigma^2) at the
+pose the robot had at t_ms (from a 1.28 s history every 40 ms; the history and
+current pose shift with it, rotated about that point for the heading part).
+Ignored (fixes_rejected): older than fix_max_age_ms (1000), more than 0.2 s in
+the future, older than the history, further than fix_gate standard deviations
+(4) and 3 cm from the own pose (heading: 4 sd and 5 deg). The first fix (or
+`fpose`) sets the pose; until then the robot runs no step (FOLLOW state
+`nopose`). Variances grow by pose_q_cm per cm driven, pose_q_deg per degree
+turned and pose_q_dps per second.
+
+Robot -> laptop, record STEP (step.csv): run,id,state,ms,x_cm,y_cm,th_deg,front_cm,info
+
+| state | when | info |
+| --- | --- | --- |
+| queued | step accepted into the buffer (the ack) | |
+| dup | id not above the highest seen: not run again (also an ack) | |
+| full | buffer (8) full: send again later | |
+| bad | could not read the step | why |
+| started / done | the step began / finished | done approach: "N readings; wheels from R cm", "wheels only: no distance readings" or "travel cap C cm reached; N readings" |
+| failed | the step stopped | `obstacle D cm ahead; zones L CL C CR R` (the five readings, for the obstacle's outline), `halted`, `turn timed out`, `drive timed out`, `approach timed out`, or the run's end reason (`robot lifted`, `stop command`, `cancel button`) |
+| dropped | a queued step was removed | `hold`, `halt`, `an earlier step failed`, `run ended` |
+| held / halted | ack of hold / halt | |
+
+x, y, th: the robot's own (fused) pose at that moment; front_cm: centre zone.
+
+Record FOLLOW (follow.csv), follow_log_hz a second: run, ms, step_id (running,
+0 = none), state (nopose, idle, turn, drive, approach, wait), queued (steps in
+the buffer), last_done, last_failed (ids), x_cm, y_cm, th_deg (own pose),
+pos_sd_cm, th_sd_deg (its uncertainty), fixes_used, fixes_rejected, front_cm,
+travel_cm (wheel travel in the current step), quiet_ms (since the last packet
+from the laptop). The laptop treats every id up to last_done as done (steps run
+in order), so a lost `done` record costs nothing. If the laptop goes quiet
+(follow_quiet_ms, 1.5 s) the robot finishes what it has buffered, then stands
+still and says so.
+
+**Position source** for run_plan.py `--fixes` (the live camera / fusion, the
+simulator, or a replay):
+- `udp[:PORT]` (default 5010): one JSON object per UDP packet:
+  `{"type": "fix", "robot": "Left", "t": <laptop Unix time the camera frame was taken>,
+  "x": cm, "y": cm, "th": deg (or null), "sigma": cm, "sigma_th": deg}` (the
+  robot's turning centre, floor frame), and
+  `{"type": "obstacle", "id": "...", "shape": "polygon", "points": [[x, y], ...]}`
+  (or `"shape": "circle", "center", "radius"`; `"source"`, default camera),
+  reported once per id. run_plan.py turns `t` into robot time with each robot's
+  clock offset (the lower envelope of laptop receive time - robot ms over the
+  last 30 s of its STEP/FOLLOW records) and forwards at most fix_hz (10) fixes
+  a second per robot.
+- `replay:FILE`: CSV t,robot,x_cm,y_cm,heading_deg[,sigma_cm]; t in seconds
+  from the start of the run, or laptop Unix time.
+
+Files run_plan.py writes in its session folder, besides the console's CSVs:
+`coordinator.jsonl` (one JSON object per line: t (laptop time), event =
+step_sent, step_resent, step_report, step_failed, control, control_resent,
+replan (t_run, source, cpu_s, budget_s, events, new_makespan_s, stranded,
+obstacle, states, old_plan, and kept for an improvement try), waiting (why a
+robot's next step is not sent), lost_task, runend, message), `plan_given.json`,
+`plan_0.json`, `plan_1.json`, ... (the plan in force after each re-plan), and
+`run_plan_summary.json` (result, duration_s, planned_makespan_s, resends,
+steps_sent, fixes_sent, fixes_used_rejected, replans, dockings_reported,
+boards_not_visited, sensor_obstacles; with --dry-run also `simulator`: the
+simulator's sim_report.json). With --dry-run the simulator's own files are in
+`sim/` (tools/sim/README.md).

@@ -24,12 +24,14 @@ import math
 import random
 
 from config import firmware_raw_columns
+from fw_follow import FollowMixin
 
-EXP_NAMES = ["stream", "turn", "lap", "grid", "demo", "straight", "calib"]
-EXP_CALIB = 6
+EXP_NAMES = ["stream", "turn", "lap", "grid", "demo", "straight", "survey", "follow", "calib"]
+EXP_SURVEY, EXP_FOLLOW, EXP_CALIB = 6, 7, 8
+N_RUNNABLE = 8            # `run <name>` accepts the first 8 (not calib)
 # showSelection() colours, (r, g, b) on/off, per experiment index (home_lab.ino);
-# calib (6) never becomes the selection (2026-10-17g), so its entry is unused
-EXP_COLORS = [(0, 0, 1), (0, 1, 0), (1, 1, 0), (1, 0, 1), (1, 1, 1), (0, 1, 1), (0, 0, 0)]
+# follow (7) and calib (8) never become the selection, so their entries are unused
+EXP_COLORS = [(0, 0, 1), (0, 1, 0), (1, 1, 0), (1, 0, 1), (1, 1, 1), (0, 1, 1), (1, 0, 0), (0, 0, 0), (0, 0, 0)]
 BLINK_SLOT_MS = 100        # blink.h
 BLINK_LEAD_SLOTS = 3         # dark slots right after blink::start()
 OFF, WHITE = (0, 0, 0), (1, 1, 1)
@@ -95,7 +97,28 @@ class Move:
         return self.d
 
 
-class Robot:
+def ray_polys(px, py, dx, dy, polys, best):
+    """Distance along the ray (px, py) + s (dx, dy) to the first polygon edge, if below best."""
+    for poly in polys:
+        n = len(poly)
+        for i in range(n):
+            ax, ay = poly[i]
+            bx, by = poly[(i + 1) % n]
+            ex, ey = bx - ax, by - ay
+            den = dx * (-ey) - dy * (-ex)
+            if abs(den) < 1e-12:
+                continue
+            rx, ry = ax - px, ay - py
+            s = (rx * (-ey) - ry * (-ex)) / den
+            if s <= 0 or s >= best:
+                continue
+            g = (dx * ry - dy * rx) / den
+            if 0.0 <= g <= 1.0:
+                best = s
+    return best
+
+
+class Robot(FollowMixin):
     def __init__(self, name, cfg, rng, params, fw_version, t_boot, boot_id, ip):
         self.name, self.cfg, self.rng = name, cfg, rng
         self.m, self.imu_m, self.tof_m, self.line_m = cfg.robot, cfg.imu, cfg.tof, cfg.line
@@ -140,6 +163,13 @@ class Robot:
         self.lift = None                          # dict while lifted
         self.kidnap_at = None
         self.kidnap_plan = None
+        # what the front distance sensor sees besides the room walls: polygons [[x, y], ...]
+        # (boards, obstacles), and a function giving the other robots' outlines (fleet_sim.py)
+        self.world_polys = []
+        self.others = None
+        self._tof_ms = -1e9
+        self._tof_vals = None
+        self._tof_phase = rng.uniform(0, 66.0)     # when the free-running sensor's frames fall
 
         # ---- firmware state ----
         self.run_n = 0
@@ -166,6 +196,8 @@ class Robot:
         self.traj = []         # (robot_ms, x, y, th_rad, lifted)
         self.runs = []         # one dict per run
         self.kidnaps = []
+        self.follow_init()
+        self.pending = -1                          # gPending: experiment asked for by a command
         self._record()
 
     # ================================================= clock
@@ -362,11 +394,32 @@ class Robot:
         the true sign stands in, so the motion helpers also work on their own (unit tests)."""
         return wrap180((self.fw_yaw_sign or self.imu_m.yaw_sign) * self.yaw_raw)
 
-    def _tof_true(self, ang_deg):
+    def settled_pose(self, ms, after_ms=300.0):
+        """True pose (x, y, th) after_ms after robot time ms, from the whole trajectory (analysis)."""
+        import bisect
+        t = ms + after_ms
+        k = bisect.bisect_left([p[0] for p in self.traj], t)
+        k = min(max(k, 0), len(self.traj) - 1)
+        return self.traj[k][1:4]
+
+    def pose_at_ms(self, ms):
+        """True pose (x, y, th) at robot time ms, from the recorded trajectory (recent past only)."""
+        tr = self.traj
+        if not tr or ms >= tr[-1][0]:
+            return self.x, self.y, self.th
+        for k in range(len(tr) - 1, max(0, len(tr) - 400), -1):
+            a, b = tr[k - 1], tr[k]
+            if a[0] <= ms:
+                f = (ms - a[0]) / (b[0] - a[0]) if b[0] > a[0] else 1.0
+                return a[1] + f * (b[1] - a[1]), a[2] + f * (b[2] - a[2]), a[3] + f * (b[3] - a[3])
+        return tr[max(0, len(tr) - 400)][1:4]
+
+    def _tof_true(self, ang_deg, others=None, pose=None):
         t = self.tof_m
-        a = self.th + math.radians(ang_deg)
-        px = self.x + t.sensor_forward_cm * math.cos(self.th)
-        py = self.y + t.sensor_forward_cm * math.sin(self.th)
+        x0, y0, th0 = pose if pose is not None else (self.x, self.y, self.th)
+        a = th0 + math.radians(ang_deg)
+        px = x0 + t.sensor_forward_cm * math.cos(th0)
+        py = y0 + t.sensor_forward_cm * math.sin(th0)
         dx, dy = math.cos(a), math.sin(a)
         best = float("inf")
         for wall, d, p in ((t.arena_x[0], dx, px), (t.arena_x[1], dx, px), (t.arena_y[0], dy, py), (t.arena_y[1], dy, py)):
@@ -374,17 +427,40 @@ class Robot:
                 s = (wall - p) / d
                 if s > 0:
                     best = min(best, s)
+        if self.world_polys:
+            best = ray_polys(px, py, dx, dy, self.world_polys, best)
+        if others:
+            best = ray_polys(px, py, dx, dy, others, best)
         return best
 
     def tof(self):
+        """get_distance(): the five front zones. The sensor delivers a new frame tof_hz times a
+        second (the reading is held in between); below min_range_cm it is untrustworthy (here:
+        any value under min_range_cm)."""
         t, rng = self.tof_m, self.rng
+        if t.hz > 0:
+            period = 1000.0 / t.hz
+            frame = math.floor((self.ms - self._tof_phase) / period) * period + self._tof_phase
+            if self._tof_vals is not None and frame <= self._tof_ms:
+                return self._tof_vals
+            self._tof_ms = frame
+            pose = self.pose_at_ms(frame)          # the sensor runs on its own: the newest frame was taken then
+        else:
+            self._tof_ms = self.ms
+            pose = None
+        others = self.others() if self.others else None
         out = []
+        w = t.zone_width_deg / 3.0
         for ang in t.zone_angles_deg:
-            d = self._tof_true(ang)
+            d = min(self._tof_true(ang + k * w, others, pose) for k in (-1, 0, 1)) if w > 0 else \
+                self._tof_true(ang, others, pose)
             if d >= t.max_range_cm:
                 out.append(t.max_range_cm)
+            elif d < t.min_range_cm:
+                out.append(rng.uniform(0.0, t.min_range_cm))
             else:
                 out.append(max(0.0, d + rng.gauss(0, t.noise_cm + d * t.noise_pct / 100)))
+        self._tof_vals = out
         return out
 
     def line_sensors(self):
@@ -451,6 +527,8 @@ class Robot:
 
     def send(self, text):
         self.lines.append([self.ms, text])
+        if self.radio is not None:
+            self.radio.transmit(self, text)
 
     def set_leds(self, left, right):
         self.leds.append((self.ms, left, right))
@@ -555,18 +633,35 @@ class Robot:
         self.cmdL = self.cmdR = 0.0
 
     def should_abort(self):
+        """motion.h shouldAbort(), with the survey/follow hooks (gTickHook, gFrontLimitCm,
+        gFrontSoft, gStepStop) and, in a live simulation, one WiFi command read per call."""
         self.tick()
+        if self.tick_hook:
+            self.tick_hook()
         if self.abort_reason:
             return True
         if self.P("safe_lift") > 0 and self.lifted:
             self.abort_reason = "robot lifted"
-        else:
-            lim = self.P("safe_front_cm")
+        elif not self.step_stop:
+            lim = self.front_limit if self.front_limit >= 0 else self.P("safe_front_cm")
             if lim > 0:
-                dc = self._tof_true(0.0)
+                dc = self.front_in_path() if self.front_path else self.tof()[2]
                 if 0 < dc < lim:
-                    self.abort_reason = "obstacle ahead"
-        if self.abort_reason:
+                    if not self.front_soft:
+                        self.abort_reason = "obstacle ahead"
+                    else:
+                        if not self.front_low_since:
+                            self.front_low_since = self.millis() | 1
+                        if self.millis() - self.front_low_since >= self.P("front_confirm_ms"):
+                            self.step_stop = "obstacle"
+                            self.front_trip = dc
+                else:
+                    self.front_low_since = 0
+        if self.radio is not None:
+            cmd = self.radio.poll(self)
+            if cmd and self.handle_command(cmd, True):
+                self.abort_reason = "stop command"
+        if self.abort_reason or self.step_stop:
             self.brake()
             return True
         return False
@@ -742,6 +837,69 @@ class Robot:
             self.send("D,PARAM,%s,%s,%.4f" % (self.run_id, name, self.params[name]))
             self.advance(2.3, busy=True)              # delay(2) between PARAM packets
 
+    def handle_command(self, raw, running):
+        """home_lab.ino handleCommand(), the commands the live simulation needs.
+        Returns True if it means "stop now"."""
+        cmd = raw.strip()
+        verb, _, rest = cmd.partition(" ")
+        verb, rest = verb.lower(), rest.strip()
+        self.last_rx = self.millis()
+        if verb == "stop":
+            if not running:
+                self.send("M,nothing running")
+            return True
+        if verb in ("fs", "fix", "fpose", "hold", "halt"):
+            if running and self.f_active:
+                self.follow_command(verb, rest)
+            elif verb == "fs":
+                self.send("M,not following: send run follow first")
+            return False
+        if verb == "clock":
+            now = self.millis()
+            self.send("H,CLOCK,token,robot_ms,boot")
+            self.send("D,CLOCK,%s,%d,%04X" % (rest, now, self.boot_id))
+            return False
+        if verb in ("ping", "status"):
+            self.send("M,status %s (firmware %s): %s, selected %s, battery %d%%, WiFi %d dBm" % (
+                self.name, self.fw_version, "running" if running else "idle", EXP_NAMES[self.selected],
+                int(self.battery), self.wifi_dbm()))
+            return False
+        if verb == "set":
+            parts = rest.split()
+            if len(parts) == 2 and parts[0] in self.params:
+                try:
+                    self.params[parts[0]] = float(parts[1])
+                    self.send("M,%s = %.3f" % (parts[0], self.params[parts[0]]))
+                except ValueError:
+                    self.send("M,'%s' is not a number" % parts[1])
+            else:
+                self.send("M,usage: set <name> <value>")
+            return False
+        if verb == "get":
+            if rest in self.params:
+                self.send("M,%s = %.3f" % (rest, self.params[rest]))
+            return False
+        if verb == "calibrate":
+            if running:
+                self.send("M,busy: send stop first")
+            else:
+                self.pending = EXP_CALIB
+            return False
+        if verb == "run":
+            if running:
+                self.send("M,busy: send stop first")
+                return False
+            names = [n.lower() for n in EXP_NAMES[:N_RUNNABLE]]
+            if rest.lower() not in names:
+                self.send("M,run what? stream, turn, lap, grid, demo, straight, survey or follow")
+                return False
+            self.pending = names.index(rest.lower())
+            return False
+        if verb == "help":
+            return False
+        self.send("M,unknown command '%s' (type help)" % cmd)
+        return False
+
     def receive_command(self, text):
         """A console command arrived (set ... only; `run` goes through run_experiment)."""
         parts = text.split()
@@ -870,7 +1028,7 @@ class Robot:
     def start_nudge(self, i):
         """startNudge(): roll start_nudge_cm forward and back after the start flash (RAW step -1)."""
         n = self.P("start_nudge_cm")
-        if n <= 0 or i not in (1, 4, 5):
+        if n <= 0 or i not in (1, 4, 5, EXP_SURVEY):
             return True
         self.step = -1
         ok = self.library_move(n) and self.wait_ms(200) and self.library_move(-n) and self.wait_ms(300)
@@ -881,20 +1039,22 @@ class Robot:
         """runExperiment() from home_lab.ino. Returns a dict describing the run, or None if the
         firmware refused to start it (turn/grid/demo/straight before any compass check)."""
         i = EXP_NAMES.index(exp)
-        if i in (1, 3, 4, 5) and self.fw_yaw_sign == 0:       # needsYawSign(), started from the laptop
+        if (i == 1 or 3 <= i <= 7) and self.fw_yaw_sign == 0:   # needsYawSign(), started from the laptop
             self.send("M,not calibrated since power-on: lift the robot off its mark, send calibrate, put it back, "
                       "then start again (%s not started)" % exp)
             return None
         self.run_n += 1
         self.run_id = "%04X-%d" % (self.boot_id, self.run_n)
         self.abort_reason = self.fail = ""
-        if i != EXP_CALIB:
-            self.selected = i                  # a calibration keeps showing the chosen experiment
+        if i not in (EXP_CALIB, EXP_FOLLOW):
+            self.selected = i                  # calibration and follow keep showing the chosen experiment
         self.syncs = []
         self.show_selection(True)
         self.send("M,run %s: %s starting" % (self.run_id, exp))
         t0 = self.millis()
         ms_runinfo = self.ms
+        if i == EXP_FOLLOW:
+            self.front_limit = 0.0             # follow: no centre stop while it waits on its start spot
         self.log_run_info(i)
         self.raw_start()
         self.wait_ms(self.P("settle_start_ms"))
@@ -911,8 +1071,12 @@ class Robot:
                 self.run_demo()
             elif exp == "calib":
                 self.run_calib()
+            elif exp == "survey":
+                self.run_survey()
+            elif exp == "follow":
+                self.run_follow()
             else:
-                raise ValueError("the simulator runs only the straight, demo and calib experiments, not " + exp)
+                raise ValueError("the simulator runs only the straight, demo, survey, follow and calib experiments, not " + exp)
         self.brake()
         self.kidnap_at = None
         self.blink_stop()

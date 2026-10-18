@@ -34,6 +34,8 @@ IPAddress laptop;
 bool haveLaptop = false;
 bool up = false;
 uint32_t seq = 0;
+unsigned long lastRx = 0;      // millis() when the last command arrived (follow: is the laptop still there?)
+unsigned long lastBegin = 0;   // millis() of the last WiFi.begin(): keepTrying() waits 20 s after it
 char name[12] = "AL-????";
 
 // Robot id: a saved name (e.g. "Left", set once with the console's
@@ -89,6 +91,7 @@ bool begin(unsigned long timeout_ms = 15000) {
   makeName();
   if (Serial) Serial.printf("This robot is %s (MAC %s)\n", name, WiFi.macAddress().c_str());
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  lastBegin = millis();   // so keepTrying()'s first retry doesn't cut off a slow join right away
   unsigned long t0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - t0 < timeout_ms) {
     delay(250);
@@ -116,7 +119,7 @@ void finishUp() {
 // a slow router or a weak signal at power-on no longer leaves the robot
 // offline until it is restarted.
 void keepTrying() {
-  static unsigned long lastCheck = 0, lastBegin = 0;
+  static unsigned long lastCheck = 0;
   if (up || millis() - lastCheck < 1000) return;
   lastCheck = millis();
   if (WiFi.status() == WL_CONNECTED) { finishUp(); return; }
@@ -144,6 +147,7 @@ bool poll(String& out) {
   if (n <= 0) return false;
   laptop = udp.remoteIP();
   haveLaptop = true;
+  lastRx = millis();
   char buf[160];
   int len = udp.read(buf, sizeof(buf) - 1);
   buf[len > 0 ? len : 0] = '\0';
