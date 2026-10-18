@@ -177,6 +177,8 @@ DEFAULT = dict(
     tof_heading_with_camera=True,  # False: while the camera saw the robot in the last tof_cam_recent_s, landmark
     tof_cam_recent_s=1.0,          # readings correct position only, not heading (the camera's track does that)
     tof_yaw_sigma_min_deg=0.0,     # floor on the sensor-turn uncertainty a calibration gives
+    tof_cal_systematic=True,       # widen each face's consider uncertainty by the calibration's systematic_cm
+                                   # (what it leaves per run, zone and face)
     tof_lag_inflate=False,    # widen the noise for frame-to-frame correlation: x sqrt((1 + r) / (1 - r)),
                               # r = the calibration's lag-1 correlation of the zone errors
     # --- wheel size (ekf.py states k, kw): learned from the position sensors, carried from run to run
@@ -370,7 +372,9 @@ class Tracked:
             c["tof_yaw_sigma_deg"] = max(rb["yaw_sigma_deg"], c["tof_yaw_sigma_min_deg"])
         if cal.get("faces"):
             self.faces = cal["faces"]
-            self.face_sig = {r["name"]: r["sigma_cm"] for r in cal.get("landmarks", []) if r.get("sigma_cm")}
+            sy = float(cal.get("systematic_cm") or 0.0) if c["tof_cal_systematic"] else 0.0
+            self.face_sig = {r["name"]: math.hypot(r["sigma_cm"], sy) for r in cal.get("landmarks", [])
+                             if r.get("sigma_cm")}
 
     def _cons_index(self, key, sigma):
         """Filter index of a consider state, added on first use (the same order on every replay)."""

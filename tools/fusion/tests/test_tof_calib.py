@@ -199,3 +199,18 @@ def test_landmark_update_can_leave_heading_alone():
     assert k.s[2] != 0.0 and k2.s[2] == 0.0
     assert k2.s[0] > 0.5                            # position still corrected
     assert k2.P[2, 2] == pytest.approx((3 * D2R) ** 2, rel=1e-6) or k2.P[2, 2] <= (3 * D2R) ** 2
+
+
+def test_systematic_leftover():
+    """A constant error per run x zone x face (sd 0.3 cm) on top of 0.3 cm noise: systematic() finds ~0.3."""
+    faces = lm.faces_from_map({"boards": [{"name": "A", "p1": [70, -40], "p2": [70, 40], "thickness_cm": 1.5}],
+                               "obstacles": []})
+    cfg = eng.config(tof_max_incidence_deg=45.0, tof_assoc_deg=0.0)
+    m0 = tc.Model({"face": np.zeros(1, int)}, ["L"], faces, cfg)
+    d = synth_data(m0.x0(), faces, ["L"], cfg, n=6000, seed=3)
+    rng = np.random.default_rng(5)
+    off = {}
+    for i, key in enumerate(zip(d["run"], d["zone"], d["face"])):
+        d["z"][i] += off.setdefault(key, rng.normal(0, 0.3))
+    m = tc.Model(d, ["L"], faces, cfg)
+    assert tc.systematic(m, m.x0()) == pytest.approx(0.3, abs=0.12)

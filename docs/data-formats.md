@@ -369,10 +369,14 @@ really are, learned from runs where the camera saw the robots. Read by
   noise_rel x distance.
 - `frame_corr`: how alike the errors of zones in the same frame are (0 = not at
   all, 1 = the same); `lag1_corr`: the same for one zone from one frame to the
-  next.
+  next. `systematic_cm`: what the calibration leaves that stays put for a whole
+  run (the spread of each run x zone x face's mean residual, noise taken out);
+  the fusion widens each face's uncertainty by it.
 - `robots`: per robot name, `zone_offset_deg` (5 numbers, dL..dR: the zone's
   real direction minus 22, 11, 0, -11, -22 deg; left positive), `range_bias_cm`
-  and `range_scale` (reading = scale x true distance + bias), `bias_sigma_cm` and
+  and `range_scale` (reading = scale x true distance + bias; the robots' average
+  bias is held at 0, since a bias they all share can't be told from the boards
+  being further), `bias_sigma_cm` and
   `yaw_sigma_deg` (how sure those are), `readings` (how many went in).
 - `boards`: per board, `dx_cm`, `dy_cm`, `turn_deg` (how far it moved from the
   map given) and `readings`.

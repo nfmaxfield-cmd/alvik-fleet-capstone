@@ -311,6 +311,26 @@ def noise_model(model, p, idx=None):
     return max(float(a), 0.1), max(float(b), 0.0)
 
 
+def systematic(model, p, min_n=15):
+    """What the calibration leaves: the spread (cm) of the mean residual of each run x zone x face (at least
+    min_n readings), with the noise's share taken out. A reading error that stays put for a whole run, which
+    the consider states then carry (each face's uncertainty is widened by it)."""
+    d = model.d
+    r = d["z"] - model.predict(p)
+    groups = {}
+    for i, key in enumerate(zip(d["run"], d["zone"], d["face"])):
+        groups.setdefault(key, []).append(r[i])
+    means, noise = [], []
+    for v in groups.values():
+        if len(v) >= min_n:
+            v = np.clip(np.array(v), -5, 5)
+            means.append(v.mean())
+            noise.append(v.var() / len(v))
+    if len(means) < 5:
+        return 0.0
+    return float(math.sqrt(max(np.var(means) - np.mean(noise), 0.0)))
+
+
 def correlations(model, p, sigma):
     """(within-frame correlation of zone errors, lag-1 correlation of a zone's errors frame to frame)."""
     d = model.d
@@ -340,7 +360,7 @@ def correlations(model, p, sigma):
 
 
 # ---------------------------------------------------------------- output
-def cal_dict(model, p, noise, corr, used_runs, faces_ref, sig=None):
+def cal_dict(model, p, noise, corr, used_runs, faces_ref, sig=None, syst=0.0):
     off, bias, scale, width, delay, g = model.unpack(p)
     a_f, n_f = model.faces_at(g)
     faces = []
@@ -367,7 +387,8 @@ def cal_dict(model, p, noise, corr, used_runs, faces_ref, sig=None):
             robots[name]["yaw_sigma_deg"] = round(sig["yaw_deg"].get(name, 1.0), 3)
     out = dict(format=lm.CAL_FORMAT, version=1, used_runs=sorted(used_runs), zone_width_deg=round(float(width), 3),
                delay_s=round(float(delay), 4), noise_cm=round(noise[0], 3), noise_rel=round(noise[1], 4),
-               frame_corr=round(corr[0], 3), lag1_corr=round(corr[1], 3), robots=robots, boards=boards,
+               frame_corr=round(corr[0], 3), lag1_corr=round(corr[1], 3), systematic_cm=round(syst, 3),
+               robots=robots, boards=boards,
                landmarks=faces, map_given=faces_ref)
     if sig:
         out["face_sigma_cm"] = round(max(sig["board_cm"].values()) if sig["board_cm"] else 1.0, 3)
@@ -488,6 +509,7 @@ def main(argv=None):
         noise = noise_model(model, p)
     sigma = noise[0] + noise[1] * np.abs(data["z"])
     corr = correlations(model, p, sigma)
+    syst = systematic(model, p)
     used = sorted(set(data["run"]))
     folds = {}
     if not args.no_loro:
@@ -497,7 +519,7 @@ def main(argv=None):
     sig = jackknife(model, folds, p) if folds else None
     faces_ref = os.path.abspath(args.map)
     os.makedirs(os.path.join(args.out, "loro"), exist_ok=True)
-    full = cal_dict(model, p, noise, corr, used, faces_ref, sig)
+    full = cal_dict(model, p, noise, corr, used, faces_ref, sig, syst)
     with open(os.path.join(args.out, "tof_calibration.json"), "w") as f:
         json.dump(full, f, indent=1)
     lm.write_csv([lm.Face(r["name"], (r["x1_cm"], r["y1_cm"]), (r["x2_cm"], r["y2_cm"])) for r in full["landmarks"]],
@@ -509,7 +531,8 @@ def main(argv=None):
             for rid, pf in folds.items():
                 fn = os.path.join("loro", f"{rid}.json")
                 with open(os.path.join(args.out, fn), "w") as g:
-                    json.dump(cal_dict(model, pf, noise, corr, [r for r in used if r != rid], faces_ref, sig), g, indent=1)
+                    json.dump(cal_dict(model, pf, noise, corr, [r for r in used if r != rid], faces_ref, sig, syst), g,
+                              indent=1)
                 w.writerow([rid, fn])
     h0 = model.predict(model.x0())
     h1 = model.predict(p)
@@ -526,7 +549,8 @@ def main(argv=None):
           f"calibrated mean {np.mean(r1):+.3f}, rms {rms(r1):.3f}")
     print(f"zone width {full['zone_width_deg']:.2f} deg, frame delay {1000 * full['delay_s']:.0f} ms, noise "
           f"{full['noise_cm']:.2f} cm + {100 * full['noise_rel']:.1f}% of the distance; errors alike within a frame "
-          f"{full['frame_corr']:+.2f}, frame to frame {full['lag1_corr']:+.2f}")
+          f"{full['frame_corr']:+.2f}, frame to frame {full['lag1_corr']:+.2f}; left over per run, zone and face "
+          f"{full['systematic_cm']:.2f} cm")
     for name, r in full["robots"].items():
         print(f"  {name}: zones turned {', '.join(f'{v:+.1f}' for v in r['zone_offset_deg'])} deg, range bias "
               f"{r['range_bias_cm']:+.2f} cm, scale {r['range_scale']:.4f} ({r['readings']} readings)")
