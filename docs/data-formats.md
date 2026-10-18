@@ -73,11 +73,12 @@ Notes:
 
 ## Tape measurement sheet (`docs/experiments/<exp>/data/measurements.csv`)
 
-order,robot,level,commands,run_id,target_x_cm,target_y_cm,target_heading_deg,
+order,robot,level,commands,run_id,start_x_cm,start_y_cm,start_heading_deg,target_x_cm,target_y_cm,target_heading_deg,
 xf0_cm,yf0_cm,xr0_cm,yr0_cm,xf_cm,yf_cm,xr_cm,yr_cm,battery_pct,excluded,note
 
 - xf/yf = front mark, xr/yr = rear mark, `0` = before the run (start), no
   suffix = after (end). Position = midpoint, heading = rear -> front.
+- start_* (optional): where to place the robot centre, floor cm, and its heading; run_sheet checks the measured start is within 5 cm. Missing = the origin.
 - target_* are relative to the start pose (ahead, left, turned left).
 - `excluded`: 1, yes, y, x or true (any case) leaves the run out of every analysis.
 - Readers accept a UTF-8 byte-order mark (Excel's "CSV UTF-8" adds one);

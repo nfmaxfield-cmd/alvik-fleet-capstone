@@ -137,15 +137,49 @@ def ask(prompt):
     return s
 
 
+INCHES = False   # --inches: tape entries are typed in inches and converted to cm
+
+
+def inches(text):
+    """'36 3/32', '36-3/32', '36.09', '3/8' -> inches as a float, or None."""
+    t = text.strip().replace('"', "").replace("in", "").strip()
+    t = t.replace("-", " ") if t.count("-") == 1 and not t.startswith("-") else t
+    total = 0.0
+    try:
+        for part in t.split():
+            if "/" in part:
+                a, b = part.split("/")
+                total += float(a) / float(b)
+            else:
+                total += float(part)
+        return total if t else None
+    except (ValueError, ZeroDivisionError):
+        return None
+
+
+def parse_marks(s):
+    """Four entries. In cm: spaces or commas between them. In inches (--inches):
+    commas between them, each like 36 3/32 (whole inches and a fraction)."""
+    if INCHES:
+        parts = [p for p in s.split(",") if p.strip()]
+        vals = [inches(p) for p in parts]
+        return [None if v is None else round(v * 2.54, 2) for v in vals]
+    return [num(p) for p in s.replace(",", " ").split()]
+
+
 def ask_marks(what, spacing, near=None, max_dist=None, heading_near=None):
-    """Ask for 'front_x front_y rear_x rear_y' and check it. Returns the 4 numbers."""
+    """Ask for 'front_x front_y rear_x rear_y' and check it. Returns the 4 numbers (cm)."""
     while True:
-        s = ask(f"  {what} marks, cm: front x, front y, rear x, rear y\n  > ")
-        parts = s.replace(",", " ").split()
-        vals = [num(p) for p in parts]
+        unit = 'inches, comma between each: front x, front y, rear x, rear y' if INCHES else \
+            "cm: front x, front y, rear x, rear y"
+        s = ask(f"  {what} marks, {unit}\n  > ")
+        vals = parse_marks(s)
         if len(vals) != 4 or None in vals:
-            print("    Need 4 numbers, e.g.  4.8 0.1 -4.7 0.0   (or q / s / x)")
+            print("    Need 4 entries, e.g.  " + ("36 3/32, 42 15/16, 39 27/32, 42 13/16" if INCHES
+                                                 else "4.8 0.1 -4.7 0.0") + "   (or q / s / x)")
             continue
+        if INCHES:
+            print("    = " + ", ".join(f"{v:.2f}" for v in vals) + " cm")
         x, y, h, d = pose(*vals)
         warn = []
         if spacing and abs(d - spacing) > 0.5:
@@ -251,9 +285,12 @@ def main():
     ap.add_argument("--pi", help="Pi hostname running camrec.py, to mark each run in the video (e.g. st1maxfini.local)")
     ap.add_argument("--robot", action="append", default=[], help="robot IP, if robots aren't found automatically")
     ap.add_argument("--outdir", help="log folder (default logs/<date-time>)")
+    ap.add_argument("--inches", action="store_true", help="type tape measurements in inches (e.g. 36 3/32); saved in cm")
     ap.add_argument("--spacing", type=float, help="distance between the front and rear marks, cm (default: learned from the first entry)")
     ap.add_argument("--run-timeout", type=float, default=180, help="give up waiting for a run to finish after this many seconds")
     args = ap.parse_args()
+    global INCHES
+    INCHES = args.inches
 
     sheet = os.path.join(args.experiment, "data", "measurements.csv")
     if not os.path.exists(sheet):
@@ -331,8 +368,14 @@ def main():
                     if pi:
                         pi.send(f"calibration {robot} run {crun}")
                     calibrated[robot] = watch.boots.get(robot, "?")
-                print(f"  Place {robot} at the origin, facing +x. Mark its front and rear, then measure.")
-                start = ask_marks("START", spacing, near=(0, 0), max_dist=5, heading_near=0)
+                sx, sy, sh = num(r.get("start_x_cm")), num(r.get("start_y_cm")), num(r.get("start_heading_deg"))
+                if sx is None or sy is None:
+                    sx, sy = 0.0, 0.0
+                sh = 0.0 if sh is None else sh
+                where = "the origin" if (sx, sy) == (0.0, 0.0) else f"x = {sx:g} cm, y = {sy:g} cm"
+                print(f"  Place {robot} with its centre at {where}, facing {'+x' if sh == 0 else f'{sh:g} deg'}. "
+                      f"Mark its front and rear, then measure.")
+                start = ask_marks("START", spacing, near=(sx, sy), max_dist=5, heading_near=sh)
                 xs, ys, hs, d = pose(*start)
                 if spacing is None:
                     spacing = round(d, 1)
