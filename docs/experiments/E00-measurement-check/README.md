@@ -49,6 +49,21 @@ position and 0.5 deg in heading (a tenth of the 5 cm target).
    at a spot left out together): score the camera on a row only with its
    spot's file from floor_calibration_loro.csv.
 
+## Setup as built (Oct 18)
+- Floor: plywood, origin (0, 0) at a factory-cut corner (bottom-right in the
+  overhead camera's picture); x runs up the picture, y to the left.
+- Board edges: along x, 48 1/8 in (122.24 cm) on the origin side and
+  48 1/16 in (122.08 cm) on the far side; along y, 48 in (121.92 cm) on both.
+  Corners for calibration: (0, 0), (122.24, 0), (0, 121.92), and the far
+  corner at about (122.08, 121.92) (assumes square corners; within ~1 mm).
+- Overhead camera (USB 2.0 "Vitade", /dev/video0): about 262 cm (103 in)
+  above the board, looking straight down; 640 x 480 at 25 fps (the camera's
+  own maximum at this size); about 3.4 px per cm; picture is black and white
+  (saturation 0). The point under the lens is estimated by the calibration
+  (no plumb line).
+- Second camera (EMEET SmartCam C950, /dev/video2): auto exposure, ~20 fps in
+  this light.
+
 ## Trials
 20 readings: 10 spots x 2 passes. Each pair's difference holds two
 measurement errors, so one reading's SD = SD(differences) / sqrt(2).
