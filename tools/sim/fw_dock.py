@@ -82,12 +82,20 @@ def funnel_half_width(m, x):
 
 
 def robot_outline(rb):
-    """The robot's outline with the bumper (body frame: x forward from the axle, y left), counter-clockwise."""
+    """The robot's outline with the nose bracket (body frame: x forward from the axle, y left), counter-clockwise.
+    The bracket (bumper_w_cm wide, bumper_len_cm from its face back to its arms' ends) is wider than the robot;
+    the outline must stay convex, so behind the arms it narrows in a straight line to the robot's rear corners
+    (slightly wider than the real robot there: on the safe side)."""
     m, dm = rb.m, rb.cfg.dock
     hw = m.width_cm / 2.0
+    bw = max(hw, dm.bumper_w_cm / 2.0)
     rear = m.length_cm / 2.0 - m.axle_to_center_cm
     fa, ch = dm.bump_ahead_cm, dm.chamfer_cm
-    return [(-rear, -hw), (fa - ch, -hw), (fa, -hw + ch), (fa, hw - ch), (fa - ch, hw), (-rear, hw)]
+    xa = max(-rear + 0.1, fa - dm.bumper_len_cm)          # the arms' back end
+    if bw <= hw + 1e-9:
+        return [(-rear, -hw), (fa - ch, -hw), (fa, -hw + ch), (fa, hw - ch), (fa - ch, hw), (-rear, hw)]
+    return [(-rear, -hw), (xa, -bw), (fa - ch, -bw), (fa, -bw + ch), (fa, bw - ch), (fa - ch, bw), (xa, bw),
+            (-rear, hw)]
 
 
 def body_points(rb):

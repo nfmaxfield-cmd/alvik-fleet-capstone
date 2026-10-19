@@ -61,7 +61,7 @@ DEFAULTS = dict(distances=(24.0, 14.0, 38.0), angles=(0.0, -18.0, 18.0), per_fac
                 dwell_s=2.0, sweep_deg=12.0, sweep_dwell_s=1.5, edge_fracs=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9), edge_in_cm=16.0,
                 edge_stop_cm=3.0, edge_cms=2.0, back_cm=14.0, corner_dists_cm=(16.0, 30.0), corner_sweep_deg=14.0,
                 corner_step_deg=2.0, corner_dwell_s=1.2, max_edge_points=5,
-                touch=False, touch_gap_cm=3.0, touch_bump_ahead_cm=6.09, touch_min_face_cm=10.0, touch_dwell_s=2.0)
+                touch=False, touch_gap_cm=3.0, touch_bump_ahead_cm=6.10, touch_min_face_cm=10.0, touch_dwell_s=2.0)
 LINE_FWD_CM = 3.5      # line sensors ahead of the turning centre (grid_center_cm)
 
 

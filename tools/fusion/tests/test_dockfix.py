@@ -82,7 +82,7 @@ def test_stripe_check_and_geometry_from_params():
     run, _ = run_with([], "dock")
     cfg = eng.config()
     a, half, gap = dockfix.geometry(run, cfg)
-    assert (a, half, gap) == (6.09, 3.91, 0.02)
+    assert (a, half, gap) == (6.09, 3.91, 0.02)          # the run's own PARAM values (run_with)
     expect = -6.09 - (cfg["dock_stripe_x0_cm"] - cfg["line_forward_cm"])
     rec = dict(stripe_c_cm="10.0", travel_cm=str(10.0 + expect + 0.1))
     assert dockfix.stripe_check(rec, run, cfg) == pytest.approx(0.1)
@@ -96,5 +96,5 @@ def test_map_home_dock_is_a_landmark_face():
     m = FM.normalize({"home_docks": [{"name": "h1", "x": 50, "y": 20, "heading": 90}]})
     faces = lm.faces_from_map(m)
     f = [x for x in faces if x.name == "dock h1 back"][0]
-    assert f.length == pytest.approx(9.6)
+    assert f.length == pytest.approx(FM.HOME_DOCK_DEFAULTS["pocket_w_cm"])   # the pocket fits the bracket
     assert (f.a[1] + f.b[1]) / 2 == pytest.approx(20.0)

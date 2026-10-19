@@ -3,7 +3,7 @@
 // docs/data-formats.md (DOCK, TOUCH). Test: docs/experiments/E00e-dock.
 //
 // HOME DOCK: a printed funnel fixed to the plywood narrows to a pocket 1 mm
-// wider than the robot, closed by a flat back wall. creep() drives both wheels
+// wider than the nose bracket, closed by a flat back wall. creep() drives both wheels
 // slowly forward (dock_rpm, front stop off); the funnel centres the robot
 // sideways. When one switch clicks, that side's wheel keeps pushing gently
 // (dock_press_rpm) and the other wheel pivots the robot in (dock_pivot_rpm)

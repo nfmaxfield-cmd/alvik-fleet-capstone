@@ -652,7 +652,7 @@ def test_going_home_plans_to_the_mouth_then_creeps_in():
         assert last["type"] == "home" and last["dock"] == d["name"]
         mouth = FM.pose_out(FM.home_mouth_pose(FM.normalize(m), d))
         assert steps[-2]["to"][:2] == pytest.approx(mouth[:2], abs=0.5)
-        assert last["max_travel_cm"] == pytest.approx(15.0 + 6.2 - 6.09 + 3.0, abs=0.6)
+        assert last["max_travel_cm"] == pytest.approx(15.0 + 6.2 - 6.10 + 3.0, abs=0.6)
         rb = SR.Robot("Left", SC.load_config(), rnd.Random(1), SC.firmware_params(), "t", 0.0, 1, "ip")
         rb.f_active = True
         text = RP.step_command(7, last)

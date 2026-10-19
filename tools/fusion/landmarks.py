@@ -83,7 +83,7 @@ def faces_from_map(m):
         h = math.radians(d["heading"])
         u, l = np.array([math.cos(h), math.sin(h)]), np.array([-math.sin(h), math.cos(h)])
         c = np.array([d["x"], d["y"]])
-        half = d.get("pocket_w_cm", 9.6) / 2.0
+        half = d.get("pocket_w_cm", 10.32) / 2.0       # map defaults: fleetmap.HOME_DOCK_DEFAULTS
         out.append(Face(f"dock {d['name']} back", c - half * l, c + half * l))
     for o in m["obstacles"]:
         if o["shape"] != "polygon" or o.get("source") != "user":

@@ -453,7 +453,8 @@ frame,t_wall,robot,x_px,y_px,heading_img_deg,code,score,track,kind,n_leds,off_fw
 
 Firmware parameters (lights.h, firmware 2026-10-19a; all off unless `lights_mode` is set):
 `lights_mode` 0 off / 1 L on GPIO pins / 2 Modulino Pixels; `lights_seq` 0..4 side-LED cycle (1111, 0111,
-0011, 0101, 0001; 160 ms slots); `lights_pin_c/_f/_s` GPIO numbers (-1 = not wired); `lights_strip_code`
+0011, 0101, 0001; 160 ms slots); `lights_pin_c/_f/_s` Nano pins, Arduino numbering (2026-10-19b defaults 19, 20, 24 =
+A2, A3, A7; -1 = not wired); `lights_strip_code`
 1..5 (0 = by name); `lights_strip_bri` 0..100; `lights_idle` 1 = on also between runs. Console command
 `lights`: shows the pattern for 10 s (idle only). The values go out with every run's PARAM records.
 
@@ -532,6 +533,8 @@ left, heading degrees, 0 = +x, counter-clockwise positive. Poses are
   centre (the point the fusion tracks). `bumper_cm` (default 0): a nose bumper
   (hardware/dock) sticking out this far in front of the front face, or
   `"fitted"` = the printed one (dock_params.py BUMPER_DEPTH_MM / 10, 1.34 cm).
+  `bumper_w_cm` (optional): its width, default the printed bracket's (BRACKET_W_MM / 10,
+  10.22 cm: its arms run down the robot's sides); the footprint is at least that wide.
   The planner's footprint (length, front) includes it; a board dock's `gap_cm`
   is then from the bumper; approach steps tell the robot gap + bumper (and
   handover + bumper), what its distance sensor on the shell measures.
@@ -557,7 +560,7 @@ left, heading degrees, 0 = +x, counter-clockwise positive. Poses are
   x, y = the middle of the back wall's INNER face (where the bumper touches),
   heading = the way a docked robot faces (into the wall). Optional sizes (cm,
   defaults = the printed part, hardware/dock/dock_params.py): `pocket_w_cm`
-  9.6, `pocket_depth_cm` 1.2, `funnel_len_cm` 5.0, `funnel_flare_cm` 3.2,
+  10.325 (it fits the nose bracket, 10.22 wide), `pocket_depth_cm` 1.2, `funnel_len_cm` 5.0, `funnel_flare_cm` 3.2,
   `wall_t_cm` 0.32, `back_depth_cm` 4.8, and `mouth_cm` 15 (a robot going home
   stops with its axle this far in front of the mouth, facing in, then creeps
   in: follow step K). The planner treats each dock's outline as an obstacle.
@@ -937,8 +940,9 @@ simulator's sim_report.json). With --dry-run the simulator's own files are in
 
 ## Home dock and touch probe (firmware 2026-10-19a+: dock.h, switches.h; hardware/dock)
 
-Two lever switches on a printed nose bumper (left: `sw_left_pin`, default D5;
-right: `sw_right_pin`, D6; INPUT_PULLUP, pressed = LOW) tell the robot when it
+Two lever switches on the printed nose bracket (left: `sw_left_pin`, default A0 = 17;
+right: `sw_right_pin`, A1 = 18, Arduino pin numbering; D5 / D6 before firmware
+2026-10-19b; INPUT_PULLUP, pressed = LOW) tell the robot when it
 touches something. OFF until `set sw_on 1`; with it off the `dock` and `touch`
 runs fail at once ("nose switches not configured") and RAW swL/swR read -1.
 The bumper's numbers are settings (PARAM records): `bump_ahead_cm` (wheel axle

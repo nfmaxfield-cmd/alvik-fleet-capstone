@@ -256,14 +256,18 @@ class DockModel:
     docks: List[List[float]] = field(default_factory=list)
     contact_boards: bool = False          # boards (world_polys) are solid for the robot's body too (touch probe)
     # the TRUE bumper and switches (the firmware's bump_ahead_cm / bump_half_cm / sw_gap_cm are its belief)
-    bump_ahead_cm: float = _dp("BUMP_AHEAD_MM", 6.09)       # wheel axle to the bumper's front face
-    bump_half_cm: float = _dp("SWITCH_LATERAL_MM", 3.91)    # each lever's contact, left/right of the centre line
+    bump_ahead_cm: float = _dp("BUMP_AHEAD_MM", 6.10)       # wheel axle to the bumper's front face
+    bump_half_cm: float = _dp("SWITCH_LATERAL_MM", 4.27)    # each lever's contact, left/right of the centre line
     sw_gap_cm: float = _dp("SW_GAP_MM", 0.02)               # face-to-wall gap when a lever clicks
     sw_hyst_cm: float = 0.02              # it lets go only this much further out (switch hysteresis)
     sw_bounce_ms: float = 1.5             # the raw reading chatters this long after each change
     chamfer_cm: float = _dp("CORNER_CHAMFER_MM", 0.3)
-    # the dock
-    pocket_w_cm: float = _dp("POCKET_W_MM", 9.6)
+    # the nose bracket is wider than the robot (an arm down each side to the side inserts): its width, and how far
+    # back from its face the arms (and their screw heads) reach; behind that the outline narrows to the robot
+    bumper_w_cm: float = _dp("BRACKET_W_MM", 10.22)
+    bumper_len_cm: float = _dp("BRACKET_LEN_MM", 3.8)
+    # the dock (its pocket fits the bracket)
+    pocket_w_cm: float = _dp("POCKET_W_MM", 10.32)
     pocket_depth_cm: float = _dp("POCKET_DEPTH_MM", 2.5)
     funnel_len_cm: float = _dp("FUNNEL_LEN_MM", 4.5)
     funnel_flare_cm: float = _dp("FUNNEL_FLARE_MM", 2.8)

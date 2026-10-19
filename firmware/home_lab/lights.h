@@ -6,7 +6,8 @@
 // tools/blink/README.md, "Light patterns").
 //
 // lights_mode 1: three LEDs in an L on the printed holder (hardware/dock),
-//   wired to three GPIO pins (lights_pin_c corner, _f front, _s side). Corner
+//   wired to three Nano pins (lights_pin_c corner A2, _f front A3, _s side A7;
+//   Arduino pin numbers 19, 20, 24, as switches.h explains). Corner
 //   and front are lit steadily; the side LED follows lights_seq, a 4-slot
 //   cycle of 160 ms slots: 0 = steady (1111), 1 = 0111, 2 = 0011, 3 = 0101,
 //   4 = 0001. Which holder variant (side arm length, left or right) a robot
@@ -99,7 +100,7 @@ void start() {
     pins[1] = (int)P("lights_pin_f");
     pins[2] = (int)P("lights_pin_s");
     if (pins[0] < 0 || pins[1] < 0 || pins[2] < 0) {
-      net::sendLine("M,lights: lights_mode 1 needs lights_pin_c, lights_pin_f and lights_pin_s (GPIO numbers)");
+      net::sendLine("M,lights: lights_mode 1 needs lights_pin_c, lights_pin_f and lights_pin_s (Arduino pin numbers: A2 = 19)");
       return;
     }
     seq = (int)P("lights_seq");

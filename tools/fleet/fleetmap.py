@@ -35,9 +35,8 @@ DEFAULT_MAP = {
     "home_docks": [],
 }
 
-def _bumper_fitted_cm():
-    """How far the printed nose bumper sticks out in front of the shell (hardware/dock/dock_params.py
-    BUMPER_DEPTH_MM / 10), 1.34 cm if that file can't be read."""
+def _dock_params():
+    """hardware/dock/dock_params.py (the printed dock and nose bracket), or None if it can't be read."""
     import importlib.util
     p = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "hardware", "dock",
                      "dock_params.py")
@@ -45,18 +44,30 @@ def _bumper_fitted_cm():
         spec = importlib.util.spec_from_file_location("dock_params", p)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        return round(mod.BUMPER_DEPTH_MM / 10.0, 3)
+        return mod
     except Exception:
-        return 1.34
+        return None
 
 
-BUMPER_FITTED_CM = _bumper_fitted_cm()
+_DP = _dock_params()
+
+
+def _dp_cm(name, default):
+    return round(getattr(_DP, name) / 10.0, 3) if _DP is not None and hasattr(_DP, name) else default
+
+
+# The printed nose bracket (hardware/dock): how far it sticks out in front of the shell (BUMPER_DEPTH_MM / 10),
+# and its width (BRACKET_W_MM / 10: its arms run down the robot's sides, so it is wider than the robot).
+BUMPER_FITTED_CM = _dp_cm("BUMPER_DEPTH_MM", 1.34)
+BUMPER_W_FITTED_CM = _dp_cm("BRACKET_W_MM", 10.22)
 
 # A home dock (hardware/dock): x, y = middle of its back wall's inner face, heading = the way a docked robot
 # faces. Its outline (cm, dock frame: X into the dock from the back wall, Y left) comes from these, the printed
-# part's numbers (hardware/dock/dock_params.py, mm there).
-HOME_DOCK_DEFAULTS = {"pocket_w_cm": 9.6, "pocket_depth_cm": 1.2, "funnel_len_cm": 5.0, "funnel_flare_cm": 3.2,
-                      "wall_t_cm": 0.32, "back_depth_cm": 4.8, "mouth_cm": 15.0}
+# part's numbers (hardware/dock/dock_params.py, mm there; the pocket fits the bracket).
+HOME_DOCK_DEFAULTS = {"pocket_w_cm": _dp_cm("POCKET_W_MM", 10.32), "pocket_depth_cm": _dp_cm("POCKET_DEPTH_MM", 1.2),
+                      "funnel_len_cm": _dp_cm("FUNNEL_LEN_MM", 5.0), "funnel_flare_cm": _dp_cm("FUNNEL_FLARE_MM", 3.2),
+                      "wall_t_cm": _dp_cm("WALL_T_MM", 0.32), "back_depth_cm": _dp_cm("BACK_BLOCK_DEPTH_MM", 4.8),
+                      "mouth_cm": 15.0}
 # mouth_cm: where a robot going home stops, facing in: its axle this far in front of the dock mouth
 
 OBSTACLE_SOURCES = ("camera", "distance_sensor", "edge_guard", "user")   # edge_guard: an open plywood edge
@@ -243,8 +254,12 @@ def map_hash(m):
 
 
 def body_of(m):
+    """The planner's footprint. A fitted nose bracket makes it longer (bumper_cm) and wider (bumper_w_cm, default
+    the printed bracket's width)."""
     r = m["robot"]
-    return G.Body(r["length_cm"], r["width_cm"], r["front_offset_cm"], r.get("bumper_cm", 0.0))
+    b = r.get("bumper_cm", 0.0)
+    bw = r.get("bumper_w_cm", BUMPER_W_FITTED_CM) if b else 0.0
+    return G.Body(r["length_cm"], r["width_cm"], r["front_offset_cm"], b, bw)
 
 
 # ----------------------------------------------------------------------------

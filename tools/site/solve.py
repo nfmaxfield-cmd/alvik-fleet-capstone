@@ -81,7 +81,7 @@ DEFAULTS = dict(
     prior_zone_deg=5.0, prior_bias_cm=1.0, prior_scale=0.03,
     edge_prior_cm=1.0, edge_prior_deg=1.0, edge_k0_cm=0.2, edge_k_sd_cm=0.5, edge_trip_sd_cm=0.15,
     tape_sd_cm=0.1,
-    bump_ahead_cm=6.09, bump_half_cm=3.91, sw_gap_cm=0.02,   # placeholders until measured (hardware/dock)
+    bump_ahead_cm=6.10, bump_half_cm=4.27, sw_gap_cm=0.02,   # hardware/dock/dock_params.py (sw_gap: E00e)
     touch_sd_cm=0.03, touch_rel=0.01, touch_max_cm=3.0,
     gate_first_cm=3.0, gate_sd=4.0,
     iterations=3, f_scale=2.0, max_nfev=80,

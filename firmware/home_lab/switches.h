@@ -1,17 +1,20 @@
-// Nose bumper switches (firmware 2026-10-19a+): two lever microswitches on a
-// printed bumper, one at each front corner (hardware/dock/README.md). They
+// Nose bumper switches (firmware 2026-10-19a+): two lever microswitches on the
+// printed nose bracket, one at each front corner (hardware/dock/README.md). They
 // tell the home dock run (dock.h) when the robot sits flush against the dock's
 // back wall, and make the robot a touch probe (`run touch`, follow step P).
 //
 // OFF by default (sw_on 0): nothing is read, the pins are left alone, RAW
 // swL/swR log -1, and the dock / touch runs refuse to start. Fit the bumper,
 // wire it, then `set sw_on 1` (and `set sw_left_pin` / `sw_right_pin` if not
-// D5 / D6).
+// A0 / A1).
 //
 // Wiring: each switch's C (common) pin to GND, its NO (normally open) pin to
-// the Nano ESP32 pin. The pin is an INPUT_PULLUP: it reads HIGH while the
-// lever is free and LOW while it is pressed. Pin numbers are the Arduino "D"
-// numbers (5 = D5) with the IDE's default pin numbering ("By Arduino pin").
+// the Nano ESP32 pin: A0 left, A1 right (2026-10-19b; D5 / D6 before), the
+// holes in the Nano's bottom-row breakout. GND from a Grove connector (a
+// Grove-to-jumper cable). The pin is an INPUT_PULLUP: it reads HIGH while the
+// lever is free and LOW while it is pressed. Pin numbers are the IDE's
+// default numbering ("By Arduino pin"): D0..D13 = 0..13, A0..A7 = 17..24.
+// The Alvik itself uses D2, D3, D4 (motor board), A4 / A5 (I2C) and A6.
 //
 // Debounce: a lever switch chatters for 1-5 ms when it closes. A change of the
 // raw reading counts only once it has read the same for sw_debounce_ms; the
@@ -22,6 +25,10 @@
 
 #include "Arduino_Alvik.h"
 #include "params.h"
+
+// Every pin number in params.h (switches, light pattern) is an Arduino pin number. With Tools > Pin Numbering >
+// "By GPIO number (legacy)" A0 would be GPIO 1 and 17 a different pin: stop the build instead.
+static_assert(A0 == 17 && A7 == 24, "Set Tools > Pin Numbering > 'By Arduino pin (default)': params.h pin numbers are Arduino pins (A0 = 17)");
 
 namespace sw {
 
