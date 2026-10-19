@@ -67,7 +67,7 @@ void resetNear() { nearNow = 0; }
 void addPoint(float rel, float z, float d) {
   for (float x = -ZONE_HALF; x <= ZONE_HALF + 0.01f; x += BIN) seen[binOf(rel + z + x)] = true;
   seen[binOf(rel + z + ZONE_HALF)] = true;
-  if (d <= 0) return;                      // no reading: nothing in range that way
+  if (d <= 0 || d < P("tof_min_cm")) return;   // no reading, or too close to trust: nothing counted that way
   float s = P("tof_ahead_cm");
   float zr = z * 0.017453293f;
   float x = s + d * cosf(zr), y = d * sinf(zr);

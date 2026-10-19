@@ -511,9 +511,10 @@ void runExperiment(int i, bool fromButton) {
   // safe_front_cm) until steps arrive; each step sets its own front check (follow.h).
   // calib: it may be put down facing a board; only its rolls check ahead (runCalib).
   if (i == EXP_FOLLOW || i == EXP_CALIB) gFrontLimitCm = 0;
-  edge::begin();   // the edge guard learns the plywood under the line sensors during the settle pause
+  if (!logged) edge::begin();
   if (logged) {
     logRunInfo(i);
+    edge::begin();   // after the ~0.3 s of PARAM records, so it learns the plywood during the settle pause
     rawlog::start();
     waitMs((unsigned long)P("settle_start_ms"));
     syncFlash("start");
