@@ -50,8 +50,10 @@ position and 0.5 deg in heading (a tenth of the 5 cm target).
    spot's file from floor_calibration_loro.csv.
 
 ## Setup as built (Oct 18)
-- Floor: plywood, origin (0, 0) at a factory-cut corner (bottom-right in the
-  overhead camera's picture); x runs up the picture, y to the left.
+- Floor: plywood, origin (0, 0) at a factory-cut corner: the top-right corner in
+  the overhead (Vitade) camera's picture, x running left along the top edge, y
+  down the picture (confirmed Oct 19 during the camera calibration; "bottom-right"
+  noted on Oct 18 was the other camera's view).
 - Board edges: along x, 48 1/8 in (122.24 cm) on the origin side and
   48 1/16 in (122.08 cm) on the far side; along y, 48 in (121.92 cm) on both.
   Corners for calibration: (0, 0), (122.24, 0), (0, 121.92), and the far
