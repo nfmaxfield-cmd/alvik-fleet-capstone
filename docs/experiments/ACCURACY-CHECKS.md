@@ -35,6 +35,7 @@ progress Oct 18; **planned** = written here, not built yet.
 | A12 | The "lifted" flag trips when the robot isn't lifted | Lifted readings during runs | None | building |
 | A13 | Front distance sensor frame rate and age differ from the assumed 15 per second, no delay | Changes per second in each zone | Measured value used | building |
 | A14 | Calibration run results per power-on: light position, heading, wheel and gyro scale | Next firmware's longer calibration run, read by `blink/calib.py` | Spread across power-ons under 0.3 cm and 0.5% | building (next firmware) |
+| A15 | The camera was bumped mid-session, seen on a spot that never moves (the home dock's printed check tile) | `check_session.py --dock-map --calib`: the tile's position in the image, every 2 s, against the first frame (ECC alignment) | Moved under 0.5 px | built (needs a dock in view) |
 
 ## B. From data already recorded (T0, E0b, T1)
 
@@ -91,6 +92,9 @@ Procedure and sheet: [E00c-rig-measurements](E00c-rig-measurements/).
 | C15 | Room temperature | Thermometer reading at each session start | Warm-up and drift notes |
 | C17 | The robot can't tell where the plywood ends where no board borders it | Line sensors under the nose: on plywood, on tape, and 1 cm past an open edge (E0c edge rows) | Edge guard threshold for the next firmware |
 | C16 | Lifted flag | 60 s untouched (must not trip); lifted once (must stop the run) | A12 |
+| C18 | The nose bumper's numbers (bump_ahead_cm, bump_half_cm, sw_gap_cm) and every robot size in hardware/dock/dock_params.py are placeholders | Measure before printing (hardware/dock/README.md); then E0e Part B (touches from 3, 6, 10 cm: sw_gap_cm and the wheel scale) | DOCK / TOUCH fixes in the fusion and the site setup |
+| C19 | The home dock's 0.5 mm / 0.3 deg promise (pocket play, seating, the switches' click point) comes from the simulator's guessed contact model | E0e Part A: 20 tape-measured dockings per robot | dock_sigma_cm / dock_sigma_deg in the fusion |
+| C20 | D5 / D6 may not be free on the Alvik's Nano ESP32 | Before wiring: check the Alvik's pin use; `run touch` with each lever pressed (hardware/dock/README.md) | the switches work at all |
 
 ## D. In a later test
 

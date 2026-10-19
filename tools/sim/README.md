@@ -285,3 +285,17 @@ robot, uniformly.
 - Camera motion blur, auto-exposure changes, and the robot's own shadow
   under a lifted robot.
 - Lost non-RAW packets (headers, RUNEND) unless `burst_per_min` is turned on.
+
+## Home dock and touch probe (fw_dock.py, firmware 2026-10-19a)
+
+`config.dock.docks` puts printed home docks on the floor (geometry from hardware/dock/dock_params.py; a fleet
+map's `home_docks` does this in fleet_sim.py). The robot's body (with the nose bumper) is then solid: a
+position-based contact model pushes it out of the dock's walls (rolling forward/back is easy, turning medium,
+sliding sideways on the tyres hard: `lat_mobility`, `turn_mobility`), its wheels slip and its encoders keep
+counting, as on the real robot. `contact_boards` makes the boards solid too (touch tests). The two nose switches
+click when the gap from their lever point to a solid is under `sw_gap_cm` (with hysteresis and 1.5 ms of
+chatter), debounced by a copy of switches.h; the dock's floor stripe reads like tape under the line sensors.
+`dock` and `touch` runs and follow steps K / P are copies of dock.h. Each docking redraws a small seat error
+(`seat_sd_cm`, `seat_sd_deg`: guesses). `python -m unittest tools/sim/tests/test_dock.py -v` (about 2 minutes):
+60 dockings, a crooked approach, a miss, the stripe, 20 touches, the follow step's pose reset.
+

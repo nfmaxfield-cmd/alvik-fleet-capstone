@@ -850,3 +850,146 @@ def flash_length_checks(rec, sync_video_times, sync_ms=300.0, max_blink_ms=220.0
         out.append(Result("blink_flash_length", "Blink flash length in the video", name, "SKIP", float("nan"), "ms",
                           "", "no blink flashes found (blinking off?)"))
     return out
+
+
+# ---------------------------------------------------------------- home dock check tile (hardware/dock)
+# Each home dock carries a printed black-and-white check tile on its back block (40 mm, 4 x 4 squares), fixed
+# to the plywood: a spot the overhead camera sees in every frame that never moves. If its position in the image
+# drifts, the camera (or the board) was bumped: every camera fix after that is off by the same amount.
+
+DOCK_TILE_CENTER_CM = 2.56      # tile centre ahead of the back wall's inner face (dock_params TILE_CENTER_X_MM)
+DOCK_TILE_HEIGHT_CM = 2.2       # on top of the dock's 22 mm walls (seen slightly further out than its floor point)
+
+
+def dock_tile_floor_points(map_path):
+    """[(dock name, x_cm, y_cm)]: each home dock's check-tile centre on the floor, from a fleet / locked site
+    map (home_docks)."""
+    with open(map_path) as f:
+        m = json.load(f)
+    out = []
+    for d in m.get("home_docks", []) or []:
+        h = math.radians(float(d["heading"]))
+        out.append((d.get("name", "dock"), float(d["x"]) + DOCK_TILE_CENTER_CM * math.cos(h),
+                    float(d["y"]) + DOCK_TILE_CENTER_CM * math.sin(h)))
+    return out
+
+
+def floor_to_px(H, x, y):
+    w = H[2][0] * x + H[2][1] * y + H[2][2]
+    return ((H[0][0] * x + H[0][1] * y + H[0][2]) / w, (H[1][0] * x + H[1][1] * y + H[1][2]) / w)
+
+
+class PatternWatch:
+    """Tracks a fixed image patch (the dock's check tile) frame after frame: its shift (px) from where it was
+    in the first frame, by ECC image alignment of a patch around it (translation only, sub-pixel: about
+    0.01 px on a clean synthetic tile), started from the last shift found. Usable live (tools/live: feed it
+    every n-th grey frame) and on a recording (dock_tile_checks)."""
+
+    def __init__(self, center_px, half_px=12, margin_px=6, alarm_px=0.75, confirm=3):
+        self.cx, self.cy = float(center_px[0]), float(center_px[1])
+        self.h, self.m = int(half_px), int(margin_px)
+        self.alarm_px, self.confirm = alarm_px, confirm
+        self.ref = None
+        self.last = (0.0, 0.0)
+        self.high = 0
+        self.history = []          # (t, dx, dy, match 0..1)
+
+    def _patch(self, gray, half):
+        import numpy as np
+        x0, y0 = int(round(self.cx)) - half, int(round(self.cy)) - half
+        H, W = gray.shape[:2]
+        if x0 < 0 or y0 < 0 or x0 + 2 * half > W or y0 + 2 * half > H:
+            return None
+        return np.ascontiguousarray(gray[y0:y0 + 2 * half, x0:x0 + 2 * half], dtype=np.float32)
+
+    def update(self, gray, t=0.0):
+        """One frame (grey, float or uint8). Returns (dx, dy, match, alarm) or None if out of view. match is
+        ECC's correlation (1 = the same picture); below 0.8 the tile was covered or moved too far to follow."""
+        import cv2
+        import numpy as np
+        if self.ref is None:
+            self.ref = self._patch(gray, self.h)
+            if self.ref is None:
+                return None
+            self.history.append((t, 0.0, 0.0, 1.0))
+            return 0.0, 0.0, 1.0, False
+        cur = self._patch(gray, self.h + self.m)
+        if cur is None:
+            return None
+        warp = np.array([[1, 0, self.m + self.last[0]], [0, 1, self.m + self.last[1]]], np.float32)
+        try:
+            cc, warp = cv2.findTransformECC(self.ref, cur, warp, cv2.MOTION_TRANSLATION,
+                                            (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 100, 1e-5), None, 3)
+        except cv2.error:
+            self.history.append((t, float("nan"), float("nan"), 0.0))
+            return float("nan"), float("nan"), 0.0, False
+        dx, dy = float(warp[0, 2]) - self.m, float(warp[1, 2]) - self.m
+        if cc >= 0.8:
+            self.last = (dx, dy)
+        self.history.append((t, dx, dy, float(cc)))
+        moved = cc >= 0.8 and math.hypot(dx, dy) > self.alarm_px
+        self.high = self.high + 1 if moved else 0
+        return dx, dy, float(cc), self.high >= self.confirm
+
+
+def dock_tile_checks(rec, map_path, calib_path, every_s=2.0, max_shift_px=0.5, px_per_cm=3.4, video=None):
+    """The check tile on every home dock (map home_docks) must stay where it was at the start of the recording:
+    its largest shift in px. A hand or a robot over the tile spoils a frame's match (low response): such frames
+    are left out."""
+    import cv2
+    import numpy as np
+    name = os.path.basename(os.path.normpath(rec))
+    try:
+        tiles = dock_tile_floor_points(map_path)
+        with open(calib_path) as f:
+            cal = json.load(f)
+        H = None
+        for k in ("H_floor_to_px", "homography_floor_cm_to_px", "H_floor_to_image", "H", "homography", "matrix",
+                  "floor_to_image"):
+            if cal.get(k) is not None:
+                H = cal[k]
+                break
+    except (OSError, ValueError, KeyError) as e:
+        return [Result("dock_tile", "Dock check tile didn't move", name, "SKIP", float("nan"), "px", "", str(e))]
+    if not tiles or H is None:
+        return [Result("dock_tile", "Dock check tile didn't move", name, "SKIP", float("nan"), "px", "",
+                       "no home_docks in the map" if not tiles else "no floor-to-pixel homography in the calibration")]
+    cap = cv2.VideoCapture(video or os.path.join(rec, "video.avi"))
+    n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = nominal_fps(rec) or 25.0
+    step = max(1, int(round(every_s * fps)))
+    watches = []
+    for dn, x, y in tiles:
+        u, v = floor_to_px(H, x, y)
+        half = max(8, int(round(3.0 * px_per_cm)))      # the 4 cm tile plus a margin
+        watches.append((dn, PatternWatch((u, v), half_px=half, margin_px=max(4, int(round(1.5 * px_per_cm))))))
+    f = 0
+    while n <= 0 or f < n:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, f)
+        ok, img = cap.read()
+        if not ok:
+            break
+        g = _gray(img)
+        for _, w in watches:
+            w.update(g, f / fps)
+        f += step
+    cap.release()
+    out = []
+    for dn, w in watches:
+        good = [(t, dx, dy) for t, dx, dy, r in w.history[1:] if r >= 0.8]
+        if not w.history:
+            out.append(Result("dock_tile", "Dock check tile didn't move", f"{name} dock {dn}", "SKIP", float("nan"),
+                              "px", "", "the tile is outside the picture (check the map's home dock and the calibration)"))
+            continue
+        if not good:
+            out.append(Result("dock_tile", "Dock check tile didn't move", f"{name} dock {dn}", "CHECK", float("nan"),
+                              "px", "", "no frame matched the first one (covered, or bumped a lot?)"))
+            continue
+        d = [math.hypot(dx, dy) for _, dx, dy in good]
+        i = int(np.argmax(d))
+        out.append(Result("dock_tile", "Dock check tile didn't move", f"{name} dock {dn}", grade(d[i], max_shift_px),
+                          d[i], "px", f"shift < {max_shift_px:g} px (~{max_shift_px / px_per_cm:.2f} cm)",
+                          f"largest shift {d[i]:.2f} px (~{d[i] / px_per_cm:.2f} cm) at {good[i][0] / 60:.1f} min, "
+                          f"{len(good)} of {len(w.history) - 1} sampled frames matched; a shift means the camera (or "
+                          "the dock) moved: camera fixes after it are off by about as much"))
+    return out

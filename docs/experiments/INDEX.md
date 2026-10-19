@@ -15,6 +15,7 @@ first two records keep their E00/E01 folder names.
 | [E0b](E00b-nudge-check/) | 5 (Oct 18) | Start-roll check: 2 vs 5 cm roll (camera heading vs staying on the marks); also the tape's heading repeatability | planned | |
 | [E0c](E00c-rig-measurements/) | 6 | Rig and robot measurements: robot sizes, board, camera plumb point, front sensor vs distance, gyro warm-up, lifted flag | planned | |
 | [E0d](E00d-site-setup/) | 7 | Site setup: robots + camera + clicks learn every landmark and open edge, tape audit, locked map; then every landmark tape-measured to score it | planned (simulation done) | Simulation: worst-point error per landmark, mean 1.54 cm clicked -> 0.69 robots only -> 0.27 cm locked (13 of 15 within 0.5 cm; 10-13 tape points); every first-setup audit (one point per landmark) passed. With the locked map the fusion's always-merge penalty (camera working) goes from +0.08 to 0 cm |
+| [E0e](E00e-dock/) | 7 | Home dock and touch probe: 20 dockings per robot (tape-measured spread), 20 touches of a board, the camera check tile | planned (simulation done) | Simulation: 60 of 60 docked; docked pose sd 0.05 mm along, 0.5 mm sideways (the pocket's play), 0.09 deg; touch from 3 cm within 0.5 mm |
 | [T1](E01-baseline-dataset/) | 5-6 (Oct 18-19) | Baseline data set: 36 runs, every sensor logged and filmed | planned | |
 | [E1b](E01b-low-battery/) | 5 (Oct 18) | Low battery: Right's routes at low charge, paired with its full-charge T1 runs | planned | |
 | T2 | 6 | Each sensor's own errors (camera included) | planned | |

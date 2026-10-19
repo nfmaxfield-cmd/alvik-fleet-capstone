@@ -53,6 +53,8 @@ def attach(runs_by_id, session, fits):
                 continue
             d = dict(r)
             d["t"] = cs.to_laptop(fit, ms)
+            ms0 = fnum(r.get("ms_start"))
+            d["t_start"] = cs.to_laptop(fit, ms0) if ms0 == ms0 and ms0 else None
             getattr(run, kind).append(d)
 
 

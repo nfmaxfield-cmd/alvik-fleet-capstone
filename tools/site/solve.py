@@ -21,6 +21,10 @@ Measurements (each a residual divided by its standard deviation)
                  along that zone's ray to the face it hits (sd: reading noise /
                  sqrt(frames/2), plus 0.15 cm that does not average away)
   edge guard     a trip: the leading line sensor is k cm past the edge (sd 0.15 cm)
+  touch probe    (optional survey step; firmware 2026-10-19a TOUCH records) the robot crept straight ahead from
+                 a station until a nose switch clicked: the lever's point (bump_ahead_cm + the wheel travel
+                 ahead of the station pose, bump_half_cm to that side) is sw_gap_cm from the face straight
+                 ahead (sd touch_sd_cm + touch_rel x travel: wheel distance over a few cm)
   user           clicks: each landmark's move and turn (from the click sd per end);
                  edges from the map (1 cm); tape measurements, once taken
   calibration    per robot: zone directions, bias and scale from the per-robot
@@ -77,6 +81,8 @@ DEFAULTS = dict(
     prior_zone_deg=5.0, prior_bias_cm=1.0, prior_scale=0.03,
     edge_prior_cm=1.0, edge_prior_deg=1.0, edge_k0_cm=0.2, edge_k_sd_cm=0.5, edge_trip_sd_cm=0.15,
     tape_sd_cm=0.1,
+    bump_ahead_cm=6.09, bump_half_cm=3.91, sw_gap_cm=0.02,   # placeholders until measured (hardware/dock)
+    touch_sd_cm=0.03, touch_rel=0.01, touch_max_cm=3.0,
     gate_first_cm=3.0, gate_sd=4.0,
     iterations=3, f_scale=2.0, max_nfev=80,
 )
@@ -85,7 +91,8 @@ DEFAULTS = dict(
 class Problem:
     """Everything the solver needs: landmarks, edges, stations with readings, links, priors."""
 
-    def __init__(self, landmarks, edges, stations, links, robots, opts=None, robot_priors=None, tape=None):
+    def __init__(self, landmarks, edges, stations, links, robots, opts=None, robot_priors=None, tape=None,
+                 touches=None):
         self.o = dict(DEFAULTS, **(opts or {}))
         self.L = list(landmarks)
         self.E = [e for e in edges if e.open]
@@ -126,7 +133,9 @@ class Problem:
         self.corners = []        # corner-bearing observations (see find_corners)
         self.obs = None
         self.trips = []          # (station index, edge index)
+        self.touches = []        # (station index, travel cm, lateral cm, face index): touch_assoc()
         self._edge_assoc()
+        self.touch_assoc(touches or [])
         self.gyro_sign = self._gyro_sign()
 
     # ------------------------------------------------------------ parameter vector
@@ -405,6 +414,39 @@ class Problem:
             if best:
                 self.trips.append((si, best[1]))
 
+    def touch_assoc(self, touches):
+        """touches: [(station index, travel cm, side L/R/LR)]. Each is tied to the face its lever's ray hits at
+        the stations' camera poses and the prior landmark positions (kept fixed through the solve)."""
+        o = self.o
+        for si, travel, side in touches:
+            lat = 0.0 if side == "LR" else o["bump_half_cm"] if side == "L" else -o["bump_half_cm"]
+            st = self.S[si]
+            th = (st.cam_th if st.cam_th is not None else getattr(st, "heading_guess", 0.0)) * D2R
+            u = np.array([math.cos(th), math.sin(th)])
+            left = np.array([-u[1], u[0]])
+            q = np.asarray(st.cam, float) + (o["bump_ahead_cm"] - 0.5) * u + lat * left   # lever at the station
+            hit = LM.nearest(q, u, self.faces)
+            if hit is None or abs(hit[0] - 0.5 - travel - o["sw_gap_cm"]) > o["touch_max_cm"]:
+                continue
+            self.touches.append((si, float(travel), lat, hit[1]))
+
+    def touch_residuals(self, g, X):
+        o = self.o
+        a_f, n_f = self.faces_at(g)
+        out = []
+        for si, travel, lat, fi in self.touches:
+            th = X[si, 2]
+            u = np.array([math.cos(th), math.sin(th)])
+            left = np.array([-u[1], u[0]])
+            q = X[si, :2] + (o["bump_ahead_cm"] + travel) * u + lat * left
+            den = float(u @ n_f[fi])
+            if abs(den) < 1e-6:
+                out.append(0.0)
+                continue
+            s = float((a_f[fi] - q) @ n_f[fi]) / den          # along the heading, lever point to the face
+            out.append((s - o["sw_gap_cm"]) / (o["touch_sd_cm"] + o["touch_rel"] * travel))
+        return out
+
     def _gyro_sign(self):
         num = sum(l[4] * self._odo_turn(l) for l in self.links)
         return -1.0 if num < 0 else 1.0
@@ -455,6 +497,8 @@ class Problem:
             tr.append((lead - k) / o["edge_trip_sd_cm"])
         if tr:
             out.append(np.array(tr))
+        if self.touches:
+            out.append(np.array(self.touch_residuals(g, X)))
         # priors: landmarks (clicks), robots, edges, k
         pr = []
         for gi, l in enumerate(self.L):
@@ -511,6 +555,8 @@ class Problem:
             rows += [S3(i) + S3(j)] * 3
         for si, ei in self.trips:
             rows.append(S3(si) + E2(ei) + [self.oK])
+        for si, _, _, fi in self.touches:
+            rows.append(G3(self.fg[fi]) + S3(si))
         for gi in range(len(self.L)):
             rows += [G3(gi)] * 4
         for ri in range(len(self.robots)):
@@ -632,9 +678,31 @@ def heading_guesses(sts):
             s.heading_guess = s.cam_th if s.cam_th is not None else 0.0
 
 
+def touches_from_runs(runs, sts):
+    """[(station index, travel cm, side)]: each TOUCH record ("touched") tied to the still station that ended
+    as its creep started (same robot, ended within 0.6 s before)."""
+    out = []
+    for run in runs:
+        for rec in getattr(run, "touch", []):
+            if (rec.get("result") or "").strip() != "touched" or rec.get("t_start") is None:
+                continue
+            try:
+                travel = float(rec["travel_cm"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            best = None
+            for i, s in enumerate(sts):
+                if s.robot == run.robot and rec["t_start"] - 0.6 <= s.t1 <= rec["t_start"] + 0.1:
+                    if best is None or s.t1 > sts[best].t1:
+                        best = i
+            if best is not None:
+                out.append((best, travel, (rec.get("side") or "").strip()))
+    return out
+
+
 def build(landmarks, edges, runs, sightings, robots, opts=None, robot_priors=None, tape=None, min_cam=5):
     """Stations and links from the logs, then the Problem."""
     sts = OB.stations(runs, sightings, min_cam=min_cam)
     heading_guesses(sts)
     links = OB.odometry_links(sts)
-    return Problem(landmarks, edges, sts, links, robots, opts, robot_priors, tape)
+    return Problem(landmarks, edges, sts, links, robots, opts, robot_priors, tape, touches_from_runs(runs, sts))

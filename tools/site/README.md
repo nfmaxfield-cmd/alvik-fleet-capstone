@@ -127,6 +127,15 @@ uncertainties, the audit, the camera calibration it was made with),
 `site/landmarks.csv`, `site/tof_calibration.json` (for the fusion) and
 `site/audit.csv`, and says `Locked: version N`.
 
+### Optional: touch every board (nose switches)
+
+With the nose bumper fitted to the robots (hardware/dock), add `--touch` to the setup command: each robot also
+creeps up to every board's long faces (two points each) until a nose switch clicks. Each touch says how far the
+face is from the still spot the robot started from, to about 0.3 mm plus the camera's error on that spot; it
+needs no range-bias calibration (the front sensor does). Home docks in the map (`home_docks`) are landmarks
+too (`dock <name>`, tape points = the back wall's two inner corners), so the locked map carries their surveyed
+pose.
+
 ### One landmark moved
 
 ```

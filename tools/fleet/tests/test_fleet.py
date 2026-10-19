@@ -608,3 +608,57 @@ def test_edge_stop_maps_a_no_go_strip_and_replans(demo_plan):
     new, events = P.obstacle_event(demo_map(), demo_plan, states, [dict(ob, points=[[150, 150], [190, 150],
                                                                                     [190, 175], [150, 175]])])
     assert new["robots"]
+
+
+# ----------------------------------------------------------------------------
+# Home docks (hardware/dock): going home = route to the mouth, then creep in (follow step K)
+# ----------------------------------------------------------------------------
+
+def home_map():
+    m = demo_map()
+    m["home_docks"] = [{"name": "h1", "x": 112.0, "y": 100.0, "heading": 0.0},
+                       {"name": "h2", "x": 10.0, "y": 100.0, "heading": 180.0}]
+    return m
+
+
+def test_home_dock_in_map_is_an_obstacle_with_a_mouth():
+    m = FM.normalize(home_map())
+    d = FM.home_dock(m, "h1")
+    w = FM.World(m)
+    names = [n for n, _ in w.polys]
+    assert "home dock h1" in names
+    mouth = FM.home_mouth_pose(m, d)
+    assert mouth[0] == pytest.approx(112.0 - 1.2 - 5.0 - 15.0)
+    assert mouth[1] == pytest.approx(100.0)
+    assert w.clearance(np.array(mouth[:2])) > 5.0          # the robot can stand there
+    with pytest.raises(FM.MapError):
+        FM.normalize({"home_docks": [{"name": "x", "x": 1}]})
+
+
+def test_going_home_plans_to_the_mouth_then_creeps_in():
+    import run_plan as RP
+    sys.path.insert(0, os.path.join(os.path.dirname(FLEET), "sim"))
+    import random as rnd
+    import config as SC
+    import robot as SR
+    m = home_map()
+    m2, assigned = P.with_home(m, {"Left": None, "Right": "h1"})
+    assert assigned["Right"]["name"] == "h1" and assigned["Left"]["name"] == "h2"   # nearest free one
+    plan = P.make_plan(m2)
+    P.append_home(plan, assigned)
+    for name, d in assigned.items():
+        steps = plan["robots"][name]["steps"]
+        last = steps[-1]
+        assert last["type"] == "home" and last["dock"] == d["name"]
+        mouth = FM.pose_out(FM.home_mouth_pose(FM.normalize(m), d))
+        assert steps[-2]["to"][:2] == pytest.approx(mouth[:2], abs=0.5)
+        assert last["max_travel_cm"] == pytest.approx(15.0 + 6.2 - 6.09 + 3.0, abs=0.6)
+        rb = SR.Robot("Left", SC.load_config(), rnd.Random(1), SC.firmware_params(), "t", 0.0, 1, "ip")
+        rb.f_active = True
+        text = RP.step_command(7, last)
+        verb, _, rest = text.partition(" ")
+        rb.follow_command(verb, rest)
+        s = rb.f_q.pop()
+        assert s["type"] == "K" and [s["x1"], s["y1"], s["h"]] == pytest.approx([d["x"], d["y"], d["heading"]])
+    P.append_home(plan, assigned)                              # idempotent (re-plans call it again)
+    assert sum(st["type"] == "home" for st in plan["robots"]["Left"]["steps"]) == 1

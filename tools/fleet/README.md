@@ -297,3 +297,12 @@ two robots share board A):
   covered.
 - **Planning time** is Python on this computer; check `replan_budget_s` on
   the laptop that will run it (the page shows how long each re-plan took).
+
+## Going home (home docks, 2026-10-19a)
+
+With home docks in the map (`home_docks`, docs/data-formats.md "Fleet map") and the robots' nose bumpers fitted
+(hardware/dock), `run_plan.py --home Left` (or `--home Left=h1`, or `--home all`) plans each named robot's
+route to a dock's mouth (the nearest free one unless named) after its tasks, then sends follow step K: it creeps
+in until both nose switches click, resets its own pose from the dock (about 0.5 mm, 0.3 deg) and stays there.
+It also sends `set sw_on 1`. The docks are obstacles for every route.
+
