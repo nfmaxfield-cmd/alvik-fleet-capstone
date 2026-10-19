@@ -16,7 +16,13 @@ What is drawn (640x480, overhead):
   (so the heading is visible). Heading is labelled.
 - sometimes a hand (cls hand): a skin-coloured palm with fingers coming in
   from the edge of the picture. No heading.
-- sometimes a round cup-like object (cls unknown). No heading.
+- unknown objects (cls unknown, no heading). Style "v2" (default): 0-3 per
+  recording, of mixed kinds (cup, box, open tote, long tool, soft bag, and
+  dark rounded boxes about the size of a robot but without LEDs or wheels),
+  any colour from near-black to near-white, some placed or taken away part
+  way through and some pushed slowly. Style "v1": at most one round cup per
+  recording, fixed for the whole recording (the older data; with only ~5
+  cups in 12 recordings the model could not learn what "unknown" covers).
 - about 10% empty frames (one cls none row)
 - a few rows left "pending" or "rejected" so the label filtering is exercised
 
@@ -121,7 +127,71 @@ def draw_cup(img, cx, cy, size, col):
     cv2.circle(img, (int(cx), int(cy)), int(size / 3), [c * 0.7 for c in col], -1, cv2.LINE_AA)
 
 
-def make_recording(folder, n_frames, rng, start_time):
+def unknown_colour(rng):
+    """Any colour: some near-black/grey (robot-like), some near-white, most random."""
+    u = rng.random()
+    if u < 0.25:
+        g = rng.uniform(20, 75)
+        return (np.full(3, g) + rng.uniform(-6, 6, 3)).tolist()
+    if u < 0.4:
+        g = rng.uniform(180, 245)
+        return (np.full(3, g) + rng.uniform(-15, 15, 3)).tolist()
+    return rng.uniform(30, 230, 3).tolist()
+
+
+def new_unknown(rng, n_frames):
+    """One unknown object for a v2 recording: kind, size, colour, when it is there, and drift."""
+    kind = ["cup", "box", "tote", "tool", "bag", "darkbox"][int(rng.choice(6, p=[0.2, 0.25, 0.15, 0.15, 0.15, 0.1]))]
+    col = unknown_colour(rng)
+    if kind == "darkbox":                       # robot-sized dark box: a hard "not a robot" example
+        col = (np.full(3, rng.uniform(20, 60)) + rng.uniform(-4, 4, 3)).tolist()
+    size = rng.uniform(26, 34) if kind == "darkbox" else rng.uniform(20, 60)
+    if rng.random() < 0.6 or n_frames < 60:
+        t0, t1 = 0, n_frames
+    else:                                        # put down / picked up part way through
+        t0 = int(rng.integers(0, n_frames - 30))
+        t1 = int(min(n_frames, t0 + rng.integers(30, n_frames + 1)))
+    drift = rng.uniform(-0.8, 0.8, 2) if rng.random() < 0.15 else np.zeros(2)
+    return dict(kind=kind, col=col, size=size, aspect=rng.uniform(0.5, 1.0), ang=rng.uniform(0, 180),
+                x=rng.uniform(50, W - 50), y=rng.uniform(50, H - 50), t0=t0, t1=t1, drift=drift,
+                seed=int(rng.integers(0, 2 ** 31)), id=50)
+
+
+def draw_unknown(img, u):
+    cx, cy, s, col = u["x"], u["y"], u["size"], u["col"]
+    dark = [c * 0.7 for c in col]
+    k = u["kind"]
+    # soft shadow, like the robots
+    over = img.copy()
+    cv2.circle(over, (int(cx + 2), int(cy + 2)), int(s / 2), (0, 0, 0), -1, cv2.LINE_AA)
+    img[:] = img * 0.8 + over * 0.2
+    if k == "cup":
+        draw_cup(img, cx, cy, s, col)
+    elif k in ("box", "tote", "darkbox"):
+        half_w = s / 2 * (1.0 if k == "darkbox" else u["aspect"])
+        rad = s * 0.25 if k == "darkbox" else s * 0.05
+        pts = rot(rounded_rect(s / 2, half_w, max(1.0, rad)), cx, cy, u["ang"]).astype(np.int32)
+        cv2.fillPoly(img, [pts], col, cv2.LINE_AA)
+        if k == "tote":                          # open box: darker inside, rim around
+            inner = rot(rounded_rect(s / 2 * 0.75, half_w * 0.7, 1.0), cx, cy, u["ang"]).astype(np.int32)
+            cv2.fillPoly(img, [inner], dark, cv2.LINE_AA)
+        elif k == "box":                         # tape strip across the lid
+            a = rot([(-s / 2, 0), (s / 2, 0)], cx, cy, u["ang"]).astype(np.int32)
+            cv2.line(img, tuple(a[0]), tuple(a[1]), dark, max(2, int(s * 0.1)), cv2.LINE_AA)
+    elif k == "tool":                            # long thin thing (bar, broom head, tool)
+        a = rot([(-s * 0.8, 0), (s * 0.8, 0)], cx, cy, u["ang"]).astype(np.int32)
+        cv2.line(img, tuple(a[0]), tuple(a[1]), col, max(4, int(s * 0.2)), cv2.LINE_AA)
+        cv2.circle(img, tuple(a[1]), max(3, int(s * 0.18)), dark, -1, cv2.LINE_AA)
+    else:                                        # bag: irregular soft blob
+        r = np.random.default_rng(u["seed"])
+        n = 9
+        pts = [(cx + s / 2 * r.uniform(0.7, 1.05) * math.cos(2 * math.pi * i / n),
+                cy + s / 2 * r.uniform(0.7, 1.05) * math.sin(2 * math.pi * i / n)) for i in range(n)]
+        cv2.fillPoly(img, [np.array(pts, np.int32)], col, cv2.LINE_AA)
+        cv2.circle(img, (int(cx), int(cy)), max(2, int(s * 0.12)), dark, -1, cv2.LINE_AA)
+
+
+def make_recording(folder, n_frames, rng, start_time, style="v2"):
     os.makedirs(os.path.join(folder, "frames"), exist_ok=True)
     floor = floor_texture(rng)
     n_robots = int(rng.integers(1, 4))
@@ -131,8 +201,14 @@ def make_recording(folder, n_frames, rng, start_time):
         robots.append(dict(x=rng.uniform(60, W - 60), y=rng.uniform(60, H - 60), h=rng.uniform(0, 360),
                            v=rng.uniform(1, 4), w=rng.uniform(-4, 4), size=rng.uniform(27, 33), id=i))
     hand_t = int(rng.integers(0, n_frames)) if rng.random() < 0.8 else -999
-    cup = dict(x=rng.uniform(60, W - 60), y=rng.uniform(60, H - 60), size=rng.uniform(25, 40),
-               col=rng.uniform(30, 230, 3).tolist()) if rng.random() < 0.5 else None
+    unknowns, cup = [], None
+    if style == "v1":
+        cup = dict(x=rng.uniform(60, W - 60), y=rng.uniform(60, H - 60), size=rng.uniform(25, 40),
+                   col=rng.uniform(30, 230, 3).tolist()) if rng.random() < 0.5 else None
+    else:
+        unknowns = [new_unknown(rng, n_frames) for _ in range(int(rng.choice(4, p=[0.2, 0.35, 0.3, 0.15])))]
+        for k, u in enumerate(unknowns):
+            u["id"] = 50 + k
     rows = []
     gain = rng.uniform(0.8, 1.2)
     for f in range(n_frames):
@@ -143,6 +219,12 @@ def make_recording(folder, n_frames, rng, start_time):
             if cup is not None:
                 draw_cup(img, cup["x"], cup["y"], cup["size"], cup["col"])
                 objs.append(dict(cls="unknown", x=cup["x"], y=cup["y"], h=None, obj=90))
+            for u in unknowns:
+                if u["t0"] <= f < u["t1"]:
+                    u["x"] = float(np.clip(u["x"] + u["drift"][0], 30, W - 30))
+                    u["y"] = float(np.clip(u["y"] + u["drift"][1], 30, H - 30))
+                    draw_unknown(img, u)
+                    objs.append(dict(cls="unknown", x=u["x"], y=u["y"], h=None, obj=u["id"]))
             for r in robots:
                 # drive: turn a little, move forward, bounce off the edges
                 r["h"] = (r["h"] + r["w"] + rng.normal(0, 2)) % 360
@@ -155,6 +237,10 @@ def make_recording(folder, n_frames, rng, start_time):
                     r["y"] = float(np.clip(r["y"], 31, H - 31))
                 draw_robot(img, r["x"], r["y"], r["h"], r["size"], shade)
                 objs.append(dict(cls="alvik", x=r["x"], y=r["y"], h=r["h"], obj=r["id"]))
+            if unknowns:
+                # an object a robot is driving over is mostly hidden: do not label it
+                objs = [o for o in objs if o["cls"] != "unknown" or not any(
+                    math.hypot(o["x"] - r["x"], o["y"] - r["y"]) < 20 for r in robots)]
             if abs(f - hand_t) < 15:
                 # a hand comes in from the right-hand side and leaves again
                 k = 1 - abs(f - hand_t) / 15
@@ -197,12 +283,14 @@ def main():
     ap.add_argument("--recordings", type=int, default=8)
     ap.add_argument("--frames", type=int, default=120, help="frames per recording")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--style", default="v2", choices=["v1", "v2"],
+                    help="v2 (default): many varied unknown objects; v1: the older data (at most one cup per recording)")
     a = ap.parse_args()
     rng = np.random.default_rng(a.seed)
     for i in range(a.recordings):
         name = f"20261001-{100000 + i * 1000}_synth{i}"
-        make_recording(os.path.join(a.out, name, "labels"), a.frames, rng, 1.79e9 + i * 3600)
-    print(f"Wrote {a.recordings} synthetic recordings x {a.frames} frames to {a.out}")
+        make_recording(os.path.join(a.out, name, "labels"), a.frames, rng, 1.79e9 + i * 3600, a.style)
+    print(f"Wrote {a.recordings} synthetic recordings x {a.frames} frames ({a.style}) to {a.out}")
 
 
 if __name__ == "__main__":

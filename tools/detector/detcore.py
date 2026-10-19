@@ -203,6 +203,19 @@ def human_checked(samples):
     return [s for s in samples if not s.get("auto")]
 
 
+def distinct_objects(samples):
+    """Number of different physical objects per class: (recording, obj id)
+    pairs, so one cup seen in 150 frames counts once. Rows without an obj id
+    count once per frame (unknown how many there are)."""
+    seen = {}
+    for s in samples:
+        for i, o in enumerate(s["objects"]):
+            oid = str(o.get("obj") or "").strip()
+            key = (s["recording"], oid) if oid else (s["recording"], s["frame"], i)
+            seen.setdefault(o["cls"], set()).add(key)
+    return {c: len(v) for c, v in seen.items()}
+
+
 def read_many(paths, classes=None, verbose=True):
     """Read every labels folder found under `paths`. Returns a list of samples."""
     out = []

@@ -109,7 +109,13 @@ python train.py --labels D:/recordings --out runs/v1
 finds every `labels.csv` below it). Useful options: `--epochs 60`,
 `--size 320x240`, `--in-ch 1` (greyscale), `--width 0.5 --depth 1` (smaller
 and faster), `--max-minutes 30`, `--seed 0 --deterministic` (repeatable),
-`--split runs/v1/split.json` (same split as an earlier run).
+`--split runs/v1/split.json` (same split as an earlier run),
+`--hue-p 0.5` (share of frames whose colours are turned round the colour
+wheel; 0 = off), `--select pooled|macro` (pick the best epoch by F1 over all
+objects, default, or by the average of the per-class F1s; in short tests
+they made no difference). `train_log.csv` has each class's validation F1 per
+epoch (`val_class_f1`), and the start of training prints how many
+*different* objects of each class train / val / test hold.
 
 Output in `runs/v1/`: `best.pt`, `last.pt`, `train_log.csv` (one row per
 epoch: losses, validation precision / recall / F1, centre error, heading
@@ -364,13 +370,15 @@ picture-level check after random augmentation), label filtering rules, split by
 recording, decoding and scoring maths, the homography inversion, export
 (PyTorch and ONNX Runtime agree), adding a class with `--init-from`, a short
 train -> export -> evaluate -> benchmark run on synthetic data, the
-baselines' interfaces, and that `ultralytics` stays out of the program (the
+baselines' interfaces, the synthetic data's unknown objects (v2) and that
+`--style v1` is unchanged, that the hue turn leaves grey alone, counting
+different objects, and that `ultralytics` stays out of the program (the
 YOLO training tests are skipped when `ultralytics` is not installed).
 
 ## Results so far (synthetic data only)
 
-No real labelled frames exist yet. Comparison run on 2026-10-18 with the
-current `make_synthetic.py` (12 recordings x 150 frames, seed 0; 8 train /
+No real labelled frames exist yet. Comparison run on 2026-10-18 with
+`make_synthetic.py --style v1` (then the only style; 12 recordings x 150 frames, seed 0; 8 train /
 2 val / 2 test recordings, one `split.json` for every detector). Test
 recordings, threshold 0.3, radius 8 px. Every detector got a budget of about
 40 minutes of training on one CPU thread (2-core machine), with its
@@ -400,10 +408,11 @@ What this shows, and does not:
   extra "alvik" detections in every column are a test cup called a robot
   (checked for our model: all 98 sit on a cup). YOLO's centres are 2-3x tighter (0.5-0.9 vs
   1.4 px mean), and YOLO-pose's heading matches ours.
-- Cups and hands: YOLO from COCO is clearly better. But the test recordings
+- Cups and hands: YOLO from COCO is better here. But the test recordings
   hold only **two** cups (38 hand frames), so these F1s rest on a
-  handful of objects; on the validation recordings our model scored cup F1
-  1.00. Treat both rows as anecdotes.
+  handful of objects. Our model's 0.02 does **not** mean it stopped
+  detecting cups: on 11 new cups it scores 0.69 (see "Why unknown objects
+  were missed" below).
 - Speed: our model is 6-7x faster at one thread (5 ms vs 31-39 ms per frame;
   3.4x against YOLO's network alone in ONNX Runtime). 4 threads is slower than
   1 for everyone here because the test machine has only 2 cores.
@@ -413,13 +422,96 @@ What this shows, and does not:
   no heading and no cups; ours 6x faster). Synthetic frames are clean and
   simple; none of this predicts the real camera.
 
-The earlier table here (our model 0.992 F1, cups 0.74) came from older
-synthetic data and a 2-thread run; it is not comparable with this one.
+The earlier table here (our model 0.992 F1, cups 0.74) came from the same
+synthetic data but a different split (its test recordings held one dark cup,
+like the training cups) and a 2-thread run; it is not comparable with this one.
+
+### Why unknown objects were missed (checked 2026-10-19)
+
+**Premise.** In the table above our model scored unknown F1 0.02 and called
+a test cup a robot ~100 times.
+
+**Cause: data, then evaluation.** In the v1 synthetic data a recording has
+at most one cup, the same cup in every frame, so the 12 recordings hold
+**5 cups** in all. This split put 2 in training (both dark grey-brown, close
+to a robot's colour), 1 in validation and 2 in test: a mid-green cup, which
+the model called a robot, and a light orange cup on a white floor, which
+nothing in training resembled, so no class fired at all. The old split had 4
+cups in training and a dark test cup, hence its 0.74. Two test objects make
+the F1 swing between 0 and 1. Ruled out by experiment: per-class
+thresholds (0.15-0.4 changed nothing: the cup's unknown score was below
+0.2 everywhere) and one-class-per-spot decoding (it removed the unknown
+peak, because the robot peak on the green cup was the stronger one; not
+adopted). Loss weighting was not the issue: with enough varied objects the
+same loss learns them.
+
+**Fix.**
+1. `make_synthetic.py` v2 (default): ~20 varied unknown objects in 12
+   recordings, including near-white ones and robot-sized dark boxes without
+   LEDs (see "Synthetic data"). `--style v1` still gives the old data exactly.
+2. Hue turn augmentation (`--hue-p 0.5`, default): colours turned round
+   the colour wheel in half the training frames; grey robots stay grey.
+3. `evaluate.py` reports `n_objects` (different objects, not frames) and
+   warns when a class has fewer than 10; `train.py` prints the same per split.
+
+**Before / after, same budget as the table** (33 min, 1 CPU thread,
+`--steps-per-epoch 40 --epochs 45`, seed 0; threshold 0.3, radius 8 px).
+"Cup bank" and "mixed bank" are 24 extra recordings each (60 frames, seed 7,
+`--style v1` and `v2`), never used in training, scored with `--all`.
+
+| | before (table above) | + hue turn, same data | + hue turn + v2 data |
+| --- | --- | --- | --- |
+| trained on | v1, split above | v1, split above | v2 (12 recordings, seed 0) |
+| **table's test recordings** (2 cups, 2 hands) | | | |
+| unknown F1 | 0.02 | 0.63 | 0.72 |
+| alvik P / R / F1 | 0.863 / 1.000 / 0.927 | 0.882 / 1.000 / 0.937 | 0.997 / 0.997 / 0.997 |
+| alvik centre mean / p95 | 1.4 / 2.8 px | 1.2 / 2.3 px | 1.4 / 2.7 px |
+| alvik heading median / p95 | 7.5 / 21 deg | 5.6 / 16 deg | 6.7 / 21 deg |
+| hand F1 | 0.27 | 0.36 | 0.42 |
+| **cup bank** (11 cups) unknown F1 / alvik F1 | 0.69 / 0.956 | 0.61 / 0.952 | 0.71 / 0.956 |
+| **mixed bank** (32 objects) unknown F1 / alvik F1 | 0.13 / 0.887 | 0.01 / 0.884 | 0.39 / 0.907 |
+
+The right-hand column is the one to use: cups stay as good, the green cup
+is no longer called a robot (alvik precision 0.86 -> 1.00 on those
+recordings), varied objects go from 0.13 to 0.39, and robots are no worse.
+The network is unchanged, so speed is unchanged. The YOLO and SSDlite
+columns above were not re-run on v2 data.
+
+Shorter runs (13 min each, same settings otherwise), to separate the parts
+(unknown F1 on mixed bank / cup bank, alvik F1 on mixed bank):
+
+| run | unknown, mixed | unknown, cups | alvik, mixed |
+| --- | --- | --- | --- |
+| v1 data, old code | 0.15 | 0.60 | 0.87 |
+| v1 data, hue turn | 0.18 | 0.64 | 0.89 |
+| v2 data, no hue turn | 0.22 | 0.56 | 0.89 |
+| v2 data, no hue turn, `--select macro` | 0.21 | 0.38 | 0.89 |
+| v2 data, hue turn (pooled or macro: same epoch picked) | 0.37 | 0.61 | 0.88 |
+
+Each row is one training run (seed 0); differences under ~0.05 are noise.
+
+**Still open.** Varied unknown objects reach only F1 0.39 (recall 0.28,
+precision 0.60); which kinds are missed was not broken down. Robot recall
+on the v2 test recordings is 0.95: the misses checked (in a 13-minute run)
+were a dark robot on a dark floor, scored just under 0.3, probably because
+robot-sized dark boxes in training make the model lean on the LEDs. Hands stay weak at an 8 px
+radius. All of this is synthetic; real recordings need many different
+unknown objects in their training recordings, and test recordings with
+10 or more of them, before any unknown F1 means much.
 
 ## Synthetic data
 
 `python make_synthetic.py --out /tmp/synth --recordings 12 --frames 150` draws
 fake overhead frames in the labels format (floor with tape grid, dark
-rounded-square robots with two front LEDs, hands, cups, empty frames, a few
-pending and rejected rows). It exists only to test the code; scores on it say
-nothing about the real camera.
+rounded-square robots with two front LEDs, hands, unknown objects, empty
+frames, a few pending and rejected rows). It exists only to test the code;
+scores on it say nothing about the real camera.
+
+Unknown objects (`--style v2`, the default since 2026-10-18): 0-3 per
+recording of mixed kinds (cups, boxes, open totes, long tools, soft bags, and
+robot-sized dark boxes with no LEDs or wheels), any colour from near-black to
+near-white, some put down or picked up part way through, some pushed slowly;
+an object a robot is driving over is left unlabelled. `--style v1` gives the
+older data exactly (at most one cup per recording, the same for all its
+frames: about 5 cups in 12 recordings, which is too few to learn "unknown"
+from; see "Why unknown objects were missed").

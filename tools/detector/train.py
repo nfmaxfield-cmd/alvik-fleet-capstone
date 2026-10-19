@@ -25,8 +25,15 @@ Losses (what training pushes down):
 
 Early stopping: after each epoch the model is run on the validation
 recordings and scored (mainly F1 at the match radius, see evaluate.py, with
-small penalties for centre and heading error). Training stops when that has
-not improved for --patience epochs; best.pt keeps the best.
+small penalties for centre and heading error). By default that F1 pools
+all objects (--select pooled), so robots, which outnumber everything else,
+dominate it; --select macro uses the average of the per-class F1s instead.
+In 13-minute tests on synthetic data the two picked the same or similar
+epochs; macro becomes worth trying once the validation recordings hold
+enough different unknown objects and hands for their F1 to be stable.
+train_log.csv shows every class's validation F1 per epoch either way.
+Training stops when that has not improved for --patience epochs; best.pt
+keeps the best.
 """
 import argparse
 import csv
@@ -125,7 +132,10 @@ def validate(model, loader, device, cfg, radius, score_thresh, w_hd=1.0):
             scorer.add(dets, s["objects"])
     model.train()
     rows = scorer.rows()
-    allrow = rows[-1] if rows else {}
+    allrow = dict(rows[-1]) if rows else {}
+    per_cls = [r for r in rows if r["cls"] != "all" and r["n_labels"] > 0]
+    allrow["macro_f1"] = float(np.mean([r["f1"] for r in per_cls])) if per_cls else allrow.get("f1", 0.0)
+    allrow["per_class_f1"] = {r["cls"]: round(float(r["f1"]), 3) for r in per_cls}
     return tot / max(n, 1), parts / max(n, 1), allrow
 
 
@@ -186,6 +196,10 @@ def main():
     ap.add_argument("--deterministic", action="store_true", help="repeatable results (a bit slower)")
     ap.add_argument("--no-augment", action="store_true")
     ap.add_argument("--no-rotate", action="store_true", help="augment without rotation")
+    ap.add_argument("--hue-p", type=float, default=0.5,
+                    help="share of training frames whose colours are turned round the colour wheel (0 = off)")
+    ap.add_argument("--select", default="pooled", choices=["pooled", "macro"],
+                    help="best epoch by F1 over all objects pooled (default) or by the average of per-class F1s")
     ap.add_argument("--radius", default="8", help="match radius in frame px for validation scores (e.g. 8,hand=25)")
     ap.add_argument("--score-thresh", type=float, default=0.3)
     ap.add_argument("--workers", type=int, default=-1, help="data loader processes (-1 = auto)")
@@ -246,11 +260,13 @@ def main():
     for name, part in (("train", tr), ("val", va), ("test", te)):
         recs = sorted({s["recording"] for s in part})
         n_obj = sum(len(s["objects"]) for s in part)
-        print(f"{name:5s}: {len(part):5d} frames, {n_obj:5d} objects, {len(recs)} recordings")
+        per = detcore.distinct_objects(part)
+        print(f"{name:5s}: {len(part):5d} frames, {n_obj:5d} labels, {len(recs)} recordings; different objects: "
+              + ", ".join(f"{c} {per.get(c, 0)}" for c in cfg["classes"]))
     if not tr or not va:
         sys.exit("Need frames in both train and val.")
 
-    aug = None if a.no_augment else AugmentConfig(rotate=not a.no_rotate)
+    aug = None if a.no_augment else AugmentConfig(rotate=not a.no_rotate, hue_p=a.hue_p)
     t0 = time.time()
     ds_tr = DetDataset(tr, cfg, augment=aug)
     ds_va = DetDataset(va, cfg, augment=None)
@@ -283,7 +299,7 @@ def main():
     log_path = os.path.join(a.out, "train_log.csv")
     cols = ["epoch", "seconds", "lr", "train_loss", "train_heat", "train_off", "train_heading", "val_loss",
             "val_heat", "val_off", "val_heading", "val_precision", "val_recall", "val_f1",
-            "val_centre_err_px", "val_heading_err_deg", "best"]
+            "val_centre_err_px", "val_heading_err_deg", "val_macro_f1", "val_class_f1", "best"]
     logf = open(log_path, "w", newline="")
     log = csv.DictWriter(logf, fieldnames=cols)
     log.writeheader()
@@ -307,7 +323,7 @@ def main():
             tp += np.array(parts) * len(x)
             n += len(x)
         vl, vp, vrow = validate(model, dl_va, device, cfg, a.radius, a.score_thresh, a.heading_weight)
-        f1 = vrow.get("f1", 0.0)
+        f1 = vrow.get("macro_f1" if a.select == "macro" else "f1", 0.0)
         err = vrow.get("centre_err_px_mean", float("nan"))
         herr = vrow.get("heading_err_deg_mean", float("nan"))
         # Score used to pick the best epoch: mostly F1; then smaller centre error
@@ -324,14 +340,17 @@ def main():
                    train_heading=round(tp[2] / n, 4), val_loss=round(vl, 4), val_heat=round(vp[0], 4),
                    val_off=round(vp[1], 4), val_heading=round(vp[2], 4),
                    val_precision=round(vrow.get("precision", 0), 4), val_recall=round(vrow.get("recall", 0), 4),
-                   val_f1=round(f1, 4), val_centre_err_px=round(err, 3),
+                   val_f1=round(vrow.get("f1", 0.0), 4), val_centre_err_px=round(err, 3),
+                   val_macro_f1=round(vrow.get("macro_f1", 0.0), 4),
+                   val_class_f1=" ".join(f"{k}={v}" for k, v in vrow.get("per_class_f1", {}).items()),
                    val_heading_err_deg=round(vrow.get("heading_err_deg_mean", float("nan")), 2),
                    best=int(improved))
         log.writerow(row)
         logf.flush()
         print(f"epoch {epoch:3d}  {row['seconds']:5.1f}s  loss {row['train_loss']:.3f}  val {row['val_loss']:.3f}  "
               f"P {row['val_precision']:.3f} R {row['val_recall']:.3f} F1 {row['val_f1']:.3f}  "
-              f"err {row['val_centre_err_px']:.2f}px  hd {row['val_heading_err_deg']:.1f}deg{'  *' if improved else ''}")
+              f"err {row['val_centre_err_px']:.2f}px  hd {row['val_heading_err_deg']:.1f}deg  "
+              f"[{row['val_class_f1']}]{'  *' if improved else ''}")
         if epoch - best_epoch >= a.patience:
             print(f"No improvement for {a.patience} epochs: stopping early.")
             break
