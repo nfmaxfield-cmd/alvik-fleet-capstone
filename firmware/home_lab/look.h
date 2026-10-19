@@ -117,7 +117,8 @@ float capAt(float h) {      // the laptop's cap for heading h, cm (-1 = none)
 // The roll that fits at heading h (cm; may be below calib_roll_min_cm or negative).
 float rollAt(float h) {
   if (!seenAround(h)) return -1;
-  float r = fminf(P("calib_roll_cm"), roomAt(h) - P("safe_front_cm") - P("calib_margin_cm"));
+  // bumper_cm: a nose bumper sticks out in front of the sensor's face, so it needs that much more room
+  float r = fminf(P("calib_roll_cm"), roomAt(h) - P("safe_front_cm") - P("calib_margin_cm") - P("bumper_cm"));
   float c = capAt(h);
   if (c >= 0) r = fminf(r, c);
   return r;

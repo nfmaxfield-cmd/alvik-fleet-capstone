@@ -177,7 +177,8 @@ def step_command(sid, st):
     if t == "approach":
         return "fs %d A %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %s" % (
             sid, st["from"][0], st["from"][1], st["to"][0], st["to"][1], st["to"][2], st["speed"],
-            st["handover_cm"], st["gap_cm"], st["max_travel_cm"], _f(st.get("front_min_cm")))
+            st["handover_cm"] + st.get("bumper_cm", 0.0), st["gap_cm"] + st.get("bumper_cm", 0.0), st["max_travel_cm"],
+            _f(st.get("front_min_cm")))
     if t == "wait":
         ms = int(round((st["t_end"] - st["t_start"]) * 1000)) if st["phase"] == "dwell" else 0
         return "fs %d W %d" % (sid, ms)
@@ -846,7 +847,7 @@ class Coordinator:
                 reads = []
         if len(reads) != 5:
             reads = [0, 0, front if front and front < 100 else 5.0, 0, 0]
-        sx, sy = x + (body.front - 0.25) * math.cos(th), y + (body.front - 0.25) * math.sin(th)
+        sx, sy = x + (body.sensor - 0.25) * math.cos(th), y + (body.sensor - 0.25) * math.sin(th)
         pts = []
         for a, d in zip(self.ZONE_DEG, reads):
             if not (0 < d < 40.0):
@@ -1170,6 +1171,10 @@ def main(argv=None):
     if homes:
         if args.plan:
             raise SystemExit("--home plans the route itself: leave out --plan")
+        if not m["robot"].get("bumper_cm"):
+            m["robot"]["bumper_cm"] = FM.BUMPER_FITTED_CM
+            print("--home: the robots wear the nose bumper: planning with it (%.2f cm in front of the shell); set "
+                  "robot.bumper_cm in the map to change it" % FM.BUMPER_FITTED_CM)
         m, assigned = P.with_home(m, homes)
         args.send = list(args.send) + ["set sw_on 1"]
     if args.plan:

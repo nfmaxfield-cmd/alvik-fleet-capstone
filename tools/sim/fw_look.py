@@ -109,7 +109,7 @@ class Look:
         if not self.seen_around(h):
             return -1.0
         P = self.rb.P
-        r = min(P("calib_roll_cm"), self.room_at(h) - P("safe_front_cm") - P("calib_margin_cm"))
+        r = min(P("calib_roll_cm"), self.room_at(h) - P("safe_front_cm") - P("calib_margin_cm") - P("bumper_cm"))
         c = self.cap_at(h)
         if c >= 0:
             r = min(r, c)
@@ -199,12 +199,13 @@ def calib_steps(rb, lk):
     if near_start > 0 and (nearest <= 0 or near_start < nearest):
         nearest = near_start
     spun = False
-    if spin != 0 and 0 < nearest < P("calib_spin_r_cm"):
+    spin_r = P("calib_spin_r_cm") + P("bumper_cm")          # a nose bumper's corners sweep further out
+    if spin != 0 and 0 < nearest < spin_r:
         rb.calib_spin = "skipped"
         rb.calib_no_room = True
         rb.send("M,%s: something is %.1f cm from its middle, inside the %.0f cm circle it needs to spin: no spin "
                 "(no gyro scale or light offset this time); it can only look straight ahead"
-                % (rb.name, nearest, 2 * P("calib_spin_r_cm")))
+                % (rb.name, nearest, 2 * spin_r))
     elif spin != 0:
         rb.step = 4
         if not rb.spin_by(abs(spin), P("calib_spin_rpm")):

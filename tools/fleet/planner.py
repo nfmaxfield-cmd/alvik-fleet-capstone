@@ -1159,7 +1159,7 @@ def _deg(p):
     return FM.pose_out(p)
 
 
-def to_steps(sched, after, s, t0=0.0, committed=0, front_ray=None, gap_cm=1.0):
+def to_steps(sched, after, s, t0=0.0, committed=0, front_ray=None, gap_cm=1.0, bumper_cm=0.0):
     out = []
     for i, (tk, p) in enumerate(sched):
         st = {"i": i, "type": p["type"], "phase": p["phase"], "from": _deg(p["from"]), "to": _deg(p["to"]),
@@ -1187,7 +1187,9 @@ def to_steps(sched, after, s, t0=0.0, committed=0, front_ray=None, gap_cm=1.0):
                 st["front_min_cm"] = min(seen) if seen else None
         if p["type"] == "approach":
             L = math.dist(p["from"][:2], p["to"][:2])
-            st["gap_cm"] = gap_cm
+            st["gap_cm"] = gap_cm                    # front of the robot (the bumper, if fitted) to the board
+            if bumper_cm:
+                st["bumper_cm"] = bumper_cm          # run_plan sends gap + bumper: the robot measures from its shell
             st["handover_cm"] = s.handover_cm
             # the front face starts L + gap from the board: never roll that far (minus a margin)
             st["max_travel_cm"] = round(L + gap_cm - s.approach_margin_cm, 2)
@@ -1214,7 +1216,7 @@ def _front_ray_fn(m, body, max_cm=100.0):
 
     def f(pose):
         u = np.array([math.cos(pose[2]), math.sin(pose[2])])
-        o = np.array(pose[:2]) + body.front * u
+        o = np.array(pose[:2]) + body.sensor * u        # from the shell's face: what the distance sensor reads
         best = max_cm
         for poly in polys:
             for i in range(len(poly)):
@@ -1270,7 +1272,7 @@ def make_plan(m, jobs=None, over=None, t0_s=0.0, replan_of=None, events=None, t_
     robots = {}
     for j in jobs:
         steps = to_steps(sc[j.name], after[j.name], s, committed=len(j.frozen), front_ray=front_ray,
-                         gap_cm=m["dock"]["gap_cm"])
+                         gap_cm=m["dock"]["gap_cm"], bumper_cm=m["robot"].get("bumper_cm", 0.0))
         if j.start_tick > 0:
             # nothing new starts before the new plan can be ready
             for st in steps[len(j.frozen):]:

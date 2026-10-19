@@ -138,6 +138,26 @@ class LookTests(unittest.TestCase):
             self.assertAlmostEqual(dist, 15.0, delta=0.5)
             self.assertLess(abs(abs(fw_look.wrap180(direction)) - 180), 25, direction)
 
+    def test_nose_bumper_needs_more_room(self):
+        """bumper_cm (a nose bumper sticks out in front of the sensor): the roll keeps that much more room,
+        and the spin needs that much more room around it."""
+        r = make_robot(1, [])
+        lk = fw_look.Look(r)
+        lk.reset()
+        for rel in range(-180, 180, 2):
+            lk.add_point(float(rel), 0.0, 20.0)           # something 20 cm ahead of the sensor all round
+        plain = lk.roll_at(0.0)
+        r.params["bumper_cm"] = 1.34
+        self.assertGreater(plain, 5.0)
+        self.assertAlmostEqual(lk.roll_at(0.0), plain - 1.34, delta=0.01)
+        # spin: a board the sweep sees ~8.9 cm from the turning centre: outside the plain 8 cm circle, inside
+        # 8 + 1.34 (the zones see a flat board ~1.5 cm nearer than straight ahead: the widest zones' slant rays)
+        near = [board(50.0 + 10.5, -30, 62.0, 30)]
+        r0, _ = self.run_calib(5, near)
+        self.assertNotEqual(look_record(r0)["spin"], "skipped")
+        r1, _ = self.run_calib(5, near, before=["set bumper_cm 1.34"])
+        self.assertEqual(look_record(r1)["spin"], "skipped")
+
     def test_boxed_in_on_three_sides_picks_the_open_side(self):
         for seed, open_side, polys, want in ((5, "left", [FRONT10, RIGHT12, BACK8], 90),
                                             (6, "right", [FRONT10, LEFT12, BACK8], -90),

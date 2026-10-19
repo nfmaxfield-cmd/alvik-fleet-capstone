@@ -502,7 +502,13 @@ left, heading degrees, 0 = +x, counter-clockwise positive. Poses are
 - `floor`: the plywood's edges. Robots keep their whole body (plus the safety
   margin) on it. The default is 4 ft x 4 ft; set the measured size.
 - `robot`: outer size and how far the front face is ahead of the turning
-  centre (the point the fusion tracks).
+  centre (the point the fusion tracks). `bumper_cm` (default 0): a nose bumper
+  (hardware/dock) sticking out this far in front of the front face, or
+  `"fitted"` = the printed one (dock_params.py BUMPER_DEPTH_MM / 10, 1.34 cm).
+  The planner's footprint (length, front) includes it; a board dock's `gap_cm`
+  is then from the bumper; approach steps tell the robot gap + bumper (and
+  handover + bumper), what its distance sensor on the shell measures.
+  `run_plan.py --home` sets it to the printed bumper if it is 0.
 - `dock.gap_cm`: front face to board surface when docked.
   `dock.predock_cm`: how far out the slow, straight final approach starts.
 - `boards`: the "machines". `p1`, `p2` are the two ends of the board's centre

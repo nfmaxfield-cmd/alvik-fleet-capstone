@@ -189,17 +189,23 @@ EDGE_CM = 25.0            # open plywood edge: roll (15) + half the robot (5) + 
 CALIB_S = 65              # how long it takes, about (62-65 s in the simulator with a roll, settle_end_ms included)
 
 
-def calib_space_text():
-    """The calibration prompt's space instructions, in cm and inches."""
-    lane = ROBOT_LEN_CM + CALIB_ROLL_CM + CALIB_STOP_CM + CALIB_MARGIN_CM
-    return (f"  It needs a clear circle {SPIN_CIRCLE_CM:g} cm ({to_in(SPIN_CIRCLE_CM)}) across around where it stands, "
+def calib_space_text(bumper_cm=0.0):
+    """The calibration prompt's space instructions, in cm and inches. bumper_cm: a nose bumper (hardware/dock)
+    makes the robot that much longer (firmware bumper_cm: its roll keeps that much more room, its spin circle
+    is that much wider each side)."""
+    rl = ROBOT_LEN_CM + bumper_cm
+    spin = SPIN_CIRCLE_CM + 2 * bumper_cm
+    lane = rl + CALIB_ROLL_CM + CALIB_STOP_CM + CALIB_MARGIN_CM + bumper_cm
+    least = rl + 5 + CALIB_STOP_CM + CALIB_MARGIN_CM + bumper_cm
+    edge = EDGE_CM + bumper_cm
+    return (f"  It needs a clear circle {spin:g} cm ({to_in(spin)}) across around where it stands, "
             f"to spin.\n"
             f"  It picks its own direction to roll: the one where its front sensor saw the most room. It rolls the "
             f"full {CALIB_ROLL_CM:g} cm when some direction has {lane:g} cm ({to_in(lane)}) of clear floor, counted "
-            f"from its back (its own {ROBOT_LEN_CM:g} cm, the roll, and {CALIB_STOP_CM + CALIB_MARGIN_CM:g} cm to spare); "
-            f"less room, a shorter roll; under {ROBOT_LEN_CM + 5 + CALIB_STOP_CM + CALIB_MARGIN_CM:g} cm "
-            f"({to_in(ROBOT_LEN_CM + 5 + CALIB_STOP_CM + CALIB_MARGIN_CM)}) every way, no roll.\n"
-            f"  Keep it at least {EDGE_CM:g} cm ({to_in(EDGE_CM)}) from any open plywood edge (an edge with no board "
+            f"from its back (its own {rl:g} cm{' with its bumper' if bumper_cm else ''}, the roll, and "
+            f"{CALIB_STOP_CM + CALIB_MARGIN_CM + bumper_cm:g} cm to spare); "
+            f"less room, a shorter roll; under {least:g} cm ({to_in(least)}) every way, no roll.\n"
+            f"  Keep it at least {edge:g} cm ({to_in(edge)}) from any open plywood edge (an edge with no board "
             f"along it): the front sensor can't see an edge, so open space past it looks like room.\n"
             f"  Nothing else may move inside that space (hands, other robots).")
 
@@ -411,6 +417,9 @@ def main():
     ap.add_argument("--inches", action="store_true", help="type tape measurements in inches (e.g. 36 3/32); saved in cm")
     ap.add_argument("--spacing", type=float, default=9.5,
                     help="distance between the front and rear marks, cm (T0 measured 9.52; 0 = learn from the first entry)")
+    ap.add_argument("--bumper-cm", type=float, default=0.0,
+                    help="the robots wear the nose bumper (hardware/dock): how far it sticks out, cm (1.34 for the "
+                         "printed one); the calibration space instructions add it. Also type set bumper_cm <n> on each robot")
     ap.add_argument("--run-timeout", type=float, default=180, help="give up waiting for a run to finish after this many seconds")
     args = ap.parse_args()
     global INCHES
@@ -499,7 +508,7 @@ def main():
                           f"its code, wiggles, spins slowly twice around to the left and back to the right while it "
                           f"looks around, then turns to where it saw the most room and rolls up to {CALIB_ROLL_CM:g} cm "
                           f"({to_in(CALIB_ROLL_CM)}) forward and back.")
-                    print(calib_space_text())
+                    print(calib_space_text(args.bumper_cm))
                     ask("  Put it on the floor where the camera can see all of that space, NOT on the mark, facing "
                         "any way, and press Enter: ")
                     before = watch.started.get(robot)

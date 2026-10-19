@@ -126,12 +126,16 @@ class Body:
     """Robot footprint in its own frame: x forward, y left.
 
     front: distance from the turning centre to the front face
-    length, width: outer size."""
+    length, width: outer size.
+    bumper: a nose bumper (hardware/dock) sticking out this far in front of the front face: the footprint
+    (length, front) includes it; `sensor` stays at the shell's face, where the front distance sensor is."""
 
-    def __init__(self, length=9.5, width=9.5, front=4.75):
-        self.length = float(length)
+    def __init__(self, length=9.5, width=9.5, front=4.75, bumper=0.0):
+        self.bumper = float(bumper)
+        self.length = float(length) + self.bumper
         self.width = float(width)
-        self.front = float(front)
+        self.front = float(front) + self.bumper
+        self.sensor = float(front)           # the shell's front face (the distance sensor's readings start here)
         self.back = self.length - self.front
         hw = self.width / 2.0
         self.local = np.array([[self.front, hw], [-self.back, hw], [-self.back, -hw], [self.front, -hw]])

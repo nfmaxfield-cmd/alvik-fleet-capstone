@@ -358,12 +358,13 @@ void calibSteps() {
   float nearest = look::nearNow;
   if (nearStart > 0 && (nearest <= 0 || nearStart < nearest)) nearest = nearStart;
   bool spun = false;
-  if (spin != 0 && nearest > 0 && nearest < P("calib_spin_r_cm")) {
+  float spinR = P("calib_spin_r_cm") + P("bumper_cm");   // a nose bumper's corners sweep further out
+  if (spin != 0 && nearest > 0 && nearest < spinR) {
     gCalibSpin = "skipped";
     gCalibNoRoom = true;
     net::logf("M,%s: something is %.1f cm from its middle, inside the %.0f cm circle it needs to spin: no spin "
               "(no gyro scale or light offset this time); it can only look straight ahead",
-              net::name, nearest, 2 * P("calib_spin_r_cm"));
+              net::name, nearest, 2 * spinR);
   } else if (spin != 0) {
     rawlog::step = 4;
     if (!spinBy(fabsf(spin), P("calib_spin_rpm"))) return;

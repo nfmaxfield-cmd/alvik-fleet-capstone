@@ -252,7 +252,7 @@ class Sim:
         """Front distance sensor: distance from the front face centre along the heading."""
         x, y, th = r.true
         u = np.array([math.cos(th), math.sin(th)])
-        o = np.array([x, y]) + self.body.front * u
+        o = np.array([x, y]) + self.body.sensor * u
         d, who = ray_hit(o, u, polys)
         return d, who
 
@@ -270,7 +270,7 @@ class Sim:
             lim = min(lim, st["front_clear_cm"] - 2.0)
         best = None
         for off in (-self.body.width / 2 + 0.5, 0.0, self.body.width / 2 - 0.5):
-            o = np.array([x, y]) + self.body.front * u + off * nrm
+            o = np.array([x, y]) + self.body.sensor * u + off * nrm
             d, who = ray_hit(o, u, [self.brick])
             if who is not None and d < lim:
                 if best is None or d < best[0]:
@@ -281,7 +281,7 @@ class Sim:
         """What the 5 front zones see of unexpected things: hit points
         across the sensor's field of view, given some depth."""
         x, y, th = r.true
-        o = np.array([x, y]) + self.body.front * np.array([math.cos(th), math.sin(th)])
+        o = np.array([x, y]) + self.body.sensor * np.array([math.cos(th), math.sin(th)])
         pts = []
         half = math.radians(self.sp["tof_fov_deg"]) / 2
         for a in np.linspace(-half, half, 21):

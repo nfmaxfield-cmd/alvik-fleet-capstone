@@ -72,7 +72,15 @@ starting `FAIL` names the number to fix in `dock_params.py`; `WARN` means a part
 The STL files are in `hardware/dock/stl/`, the pictures in `hardware/dock/preview/`.
 
 Then, in the robot console (`python tools/alvik_console.py`), type the three `set ...` lines it printed
-(they put the bumper's size into the robot), for each robot.
+(they put the bumper's size into the robot), for each robot, and once the bumper is on:
+
+```
+set bumper_cm 1.34
+```
+
+(how far the bumper sticks out in front of the shell, BUMPER_DEPTH_MM / 10: the calibration run then keeps that
+much more room when it rolls and spins). In the fleet map set `"robot": {"bumper_cm": "fitted"}` so routes
+allow for the longer robot, and give `run_sheet.py --bumper-cm 1.34` so its space instructions do.
 
 ## Print settings
 

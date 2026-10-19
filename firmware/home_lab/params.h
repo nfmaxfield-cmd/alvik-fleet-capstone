@@ -139,6 +139,7 @@ Param PARAMS[] = {
   {"sw_left_pin",      5,   "left nose switch: Nano ESP32 pin (5 = D5); switch between the pin and GND, pressed = LOW"},
   {"sw_right_pin",     6,   "right nose switch: Nano ESP32 pin (6 = D6)"},
   {"sw_debounce_ms",   4,   "a switch must read the same this long to count (lever switches chatter 1-5 ms)"},
+  {"bumper_cm",        0,   "nose bumper fitted: it sticks out this far in front of the shell, cm (1.34 = the printed one; 0 = none): the calibration's spin and roll keep this much more room"},
   {"bump_ahead_cm", 6.09,   "wheel axle (turning centre) to the bumper's front face, cm (PLACEHOLDER: measure)"},
   {"bump_half_cm",  3.91,  "each switch's lever touches this far left/right of the centre line, cm (PLACEHOLDER)"},
   {"sw_gap_cm",     0.02,   "the bumper face is still this far from what it touches when a lever clicks, cm (PLACEHOLDER: E00e)"},

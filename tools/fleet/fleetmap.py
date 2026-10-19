@@ -25,7 +25,7 @@ DEFAULT_MAP = {
     "version": VERSION,
     "units": "cm, degrees",
     "floor": {"x_min": 0.0, "x_max": 122.0, "y_min": 0.0, "y_max": 122.0},
-    "robot": {"length_cm": 9.5, "width_cm": 9.5, "front_offset_cm": 4.75},
+    "robot": {"length_cm": 9.5, "width_cm": 9.5, "front_offset_cm": 4.75, "bumper_cm": 0.0},
     "dock": {"gap_cm": 1.0, "predock_cm": 15.0},
     "boards": [],
     "keepouts": [],
@@ -34,6 +34,23 @@ DEFAULT_MAP = {
     "tasks": {},
     "home_docks": [],
 }
+
+def _bumper_fitted_cm():
+    """How far the printed nose bumper sticks out in front of the shell (hardware/dock/dock_params.py
+    BUMPER_DEPTH_MM / 10), 1.34 cm if that file can't be read."""
+    import importlib.util
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "hardware", "dock",
+                     "dock_params.py")
+    try:
+        spec = importlib.util.spec_from_file_location("dock_params", p)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return round(mod.BUMPER_DEPTH_MM / 10.0, 3)
+    except Exception:
+        return 1.34
+
+
+BUMPER_FITTED_CM = _bumper_fitted_cm()
 
 # A home dock (hardware/dock): x, y = middle of its back wall's inner face, heading = the way a docked robot
 # faces. Its outline (cm, dock frame: X into the dock from the back wall, Y left) comes from these, the printed
@@ -74,6 +91,8 @@ def normalize(m):
     out = copy.deepcopy(DEFAULT_MAP)
     for k in ("floor", "robot", "dock"):
         out[k].update(m.get(k) or {})
+    if str(out["robot"].get("bumper_cm")).lower() in ("fitted", "true", "yes"):
+        out["robot"]["bumper_cm"] = BUMPER_FITTED_CM       # the printed nose bumper (hardware/dock)
         for kk, vv in out[k].items():
             try:
                 out[k][kk] = float(vv)
@@ -225,7 +244,7 @@ def map_hash(m):
 
 def body_of(m):
     r = m["robot"]
-    return G.Body(r["length_cm"], r["width_cm"], r["front_offset_cm"])
+    return G.Body(r["length_cm"], r["width_cm"], r["front_offset_cm"], r.get("bumper_cm", 0.0))
 
 
 # ----------------------------------------------------------------------------
@@ -252,7 +271,7 @@ def dock_for(m, board):
         side = "left" if np.dot(centre - mid, n_left) >= 0 else "right"
     n = n_left if side == "left" else -n_left
     surface = mid + n * board["thickness_cm"] / 2
-    off = m["dock"]["gap_cm"] + m["robot"]["front_offset_cm"]
+    off = m["dock"]["gap_cm"] + m["robot"]["front_offset_cm"] + m["robot"].get("bumper_cm", 0.0)   # gap from the bumper
     d = surface + n * off
     p = d + n * m["dock"]["predock_cm"]
     heading = math.atan2(-n[1], -n[0])

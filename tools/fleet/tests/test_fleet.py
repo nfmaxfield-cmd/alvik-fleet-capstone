@@ -662,3 +662,27 @@ def test_going_home_plans_to_the_mouth_then_creeps_in():
         assert s["type"] == "K" and [s["x1"], s["y1"], s["h"]] == pytest.approx([d["x"], d["y"], d["heading"]])
     P.append_home(plan, assigned)                              # idempotent (re-plans call it again)
     assert sum(st["type"] == "home" for st in plan["robots"]["Left"]["steps"]) == 1
+
+
+def test_nose_bumper_lengthens_the_footprint_and_the_board_gap_stays():
+    import run_plan as RP
+    base = {"boards": [{"name": "A", "p1": [30, 2], "p2": [50, 2], "thickness_cm": 1.5}]}
+    m0 = FM.normalize(base)
+    m1 = FM.normalize(dict(base, robot={"bumper_cm": "fitted"}))
+    assert m1["robot"]["bumper_cm"] == pytest.approx(FM.BUMPER_FITTED_CM)
+    assert 1.0 < FM.BUMPER_FITTED_CM < 2.0                         # the printed bumper, from hardware/dock
+    b0, b1 = FM.body_of(m0), FM.body_of(m1)
+    assert b1.front == pytest.approx(b0.front + FM.BUMPER_FITTED_CM)
+    assert b1.length == pytest.approx(b0.length + FM.BUMPER_FITTED_CM)
+    assert b1.sensor == pytest.approx(b0.front)                   # the distance sensor stays on the shell
+    assert b1.r_turn > b0.r_turn
+    # docked: the bumper (not the shell) is gap_cm from the board, so the robot stands further out
+    d0, d1 = FM.docks(m0)["A"], FM.docks(m1)["A"]
+    assert d1["dock"][1] - d0["dock"][1] == pytest.approx(FM.BUMPER_FITTED_CM)
+    corners = b1.corners([d1["dock"]])[0]
+    assert G.polygon_polygon_dist(corners, G.segment_rect([30, 2], [50, 2], 1.5)) == pytest.approx(1.0, abs=1e-9)
+    # the approach step tells the robot the shell's gap (what its distance sensor measures)
+    st = {"type": "approach", "from": [40, 30, -90], "to": [40, 10, -90], "speed": 3.0, "handover_cm": 4.0,
+          "gap_cm": 1.0, "max_travel_cm": 20.0, "bumper_cm": 1.34}
+    parts = RP.step_command(1, st).split()
+    assert float(parts[10]) == pytest.approx(2.34) and float(parts[9]) == pytest.approx(5.34)
