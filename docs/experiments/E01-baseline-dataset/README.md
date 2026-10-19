@@ -85,6 +85,9 @@ placement does not count as robot error.
 4. On the laptop:
    `python tools/run_sheet.py docs/experiments/E01-baseline-dataset --pi st1maxfini.local --inches`
    (`--inches`: type tape readings as you read them, e.g. `36 3/32, 42 15/16, 39 27/32, 42 13/16`).
+   A reading taken from the far edge of the board instead of the axis: put `f`
+   in front of it (`f 12 3/16`); it's converted using the board's measured size
+   (x edges 48 1/8 and 48 1/16 in, y edges 48 in).
 5. It walks you through every run in order: the calibration run once per
    robot per power-on (robot in view, off its mark), placing the robot at the
    row's start spot, typing the start marks, starting the run, typing the end

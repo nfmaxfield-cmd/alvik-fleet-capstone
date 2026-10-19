@@ -218,14 +218,42 @@ def where(x, y):
     return f"({x:.1f}, {y:.1f}) cm" + (f" = ({to_in(x)}, {to_in(y)})" if INCHES else "")
 
 
+# The plywood as measured on Oct 18 (E00 README): x edges 48 1/8 in on the
+# origin side (y = 0) and 48 1/16 in on the far side, y edges 48 in. Used only
+# for readings taken from the FAR edges (an entry starting with "f").
+BOARD_X_AT_Y0_CM = 122.24
+BOARD_X_AT_YMAX_CM = 122.08
+BOARD_Y_CM = 121.92
+
+
+def far_x(y_cm):
+    """x of the far (x = max) edge at height y: the board is 1/16 in shorter along its far x edge."""
+    f = min(max(y_cm / BOARD_Y_CM, 0.0), 1.0)
+    return BOARD_X_AT_Y0_CM + f * (BOARD_X_AT_YMAX_CM - BOARD_X_AT_Y0_CM)
+
+
 def parse_marks(s):
-    """Four entries. In cm: spaces or commas between them. In inches (--inches):
-    commas between them, each like 36 3/32 (whole inches and a fraction)."""
+    """Four entries: front x, front y, rear x, rear y. In cm: spaces or commas
+    between them. In inches (--inches): commas between them, each like 36 3/32.
+    An entry starting with f was measured from the FAR edge of the board (the
+    edge opposite that axis) and is converted: x = board length - reading."""
     if INCHES:
         parts = [p for p in s.split(",") if p.strip()]
-        vals = [inches(p) for p in parts]
-        return [None if v is None else round(v * 2.54, 2) for v in vals]
-    return [num(p) for p in s.replace(",", " ").split()]
+        far = [p.strip().lower().startswith("f") for p in parts]
+        vals = [inches(p.strip()[1:] if f else p) for p, f in zip(parts, far)]
+        out = [None if v is None else round(v * 2.54, 2) for v in vals]
+    else:
+        parts = s.replace(",", " ").split()
+        far = [p.lower().startswith("f") for p in parts]
+        out = [num(p[1:] if f else p) for p, f in zip(parts, far)]
+    if len(out) == 4 and None not in out and any(far):
+        for i in (1, 3):                      # y first: the far x edge depends on y
+            if far[i]:
+                out[i] = round(BOARD_Y_CM - out[i], 2)
+        for i in (0, 2):
+            if far[i]:
+                out[i] = round(far_x(out[i + 1]) - out[i], 2)
+    return out
 
 
 def ask_marks(what, spacing, near=None, max_dist=None, heading_near=None, heading_tol=20, allow_later=False):
@@ -243,6 +271,7 @@ def ask_marks(what, spacing, near=None, max_dist=None, heading_near=None, headin
         if len(vals) != 4 or None in vals:
             print("    Need 4 entries, e.g.  " + ("36 3/32, 42 15/16, 39 27/32, 42 13/16" if INCHES
                                                  else "4.8 0.1 -4.7 0.0") + "   (or q / s / x)")
+            print("    Measured from the far edge instead of the axis? Put f in front of that entry, e.g. f 12 3/16")
             continue
         if INCHES:
             print("    = " + ", ".join(f"{v:.2f}" for v in vals) + " cm")
