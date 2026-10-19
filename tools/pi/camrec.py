@@ -22,7 +22,7 @@ http://st1maxfini.local:8000). The picture shows the frame rate and the
 recording time.
 
 Live link: http://<pi-hostname>.local:8000/live sends every frame (grey JPEG,
-quality 90; ?q=80 for less) with its frame number and t_wall (X-Frame, X-Time
+quality 95; ?q=80 for less, but 90 or less lost blink pairs in simulation) with its frame number and t_wall (X-Frame, X-Time
 headers) for tools/live/track_live.py --stream. It reuses the frame recorded
 here (no second camera open) and costs nothing while no one is connected.
 
@@ -105,7 +105,7 @@ class LiveFrames:
             return self.item
 
 
-def live_part(frame, n, t_wall, quality=90):
+def live_part(frame, n, t_wall, quality=95):
     """One multipart part of /live: grey JPEG, with the frame number and the Pi time in its headers."""
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
     ok, jpg = cv2.imencode(".jpg", gray, [cv2.IMWRITE_JPEG_QUALITY, int(quality)])
@@ -124,7 +124,7 @@ def make_handler(latest, live=None):
 
         def do_GET(self):
             if self.path.split("?")[0] == "/live" and live is not None:
-                q = 90
+                q = 95   # 90 lost blink pairs in simulation (LED-pattern work, Oct 19); 95 kept them
                 if "q=" in self.path:
                     try:
                         q = max(30, min(100, int(self.path.split("q=")[1].split("&")[0])))

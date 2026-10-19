@@ -129,7 +129,9 @@ def test_still_points_with_axis_clicks(moved_sim):
     # (5 here): no RANSAC (it would throw out a good spot), a warning, a rough but sane fit
     alone = cf.fit(pts, (cam.W, cam.H), 140.0, None, "off")
     assert alone["n_inliers"] == len(pts)
-    assert any("separate spots" in w for w in alone["warnings"]), alone["warnings"]
+    # still points alone sit on few spots: the fit must say so, as "few separate spots" or as
+    # "the points cover only N% of the area" (which one depends on how the spots fall in this run)
+    assert any("separate spots" in w or "cover only" in w for w in alone["warnings"]), alone["warnings"]
     assert floor_error(cf.to_calibration(alone), cam, z=4.0).mean() < 3.0
     with pytest.raises(cf.FitError):          # the square runs alone (one start spot, start = end): a point
         cf.fit([p for p in pts if p["x"] < 50 and p["y"] < 50], (cam.W, cam.H), 140.0, None, "off")
