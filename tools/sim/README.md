@@ -11,7 +11,8 @@ a ground truth that the real setup can never give.
     python tools/sim/simulate.py --write-config my.json        # every assumed number, to edit
     python tools/sim/simulate.py --out sim_out --config my.json
     python tools/sim/simulate.py --out sim_out --video --config tools/sim/configs/real_oct18.json   # the real Oct 18 camera
-    python -m unittest discover tools/sim/tests -v             # tests (about 10 s)
+    python -m unittest discover tools/sim/tests -v             # tests (about 30 s)
+    python tools/sim/fleet_sim.py --map tools/fleet/examples/demo_map.json   # live simulated robots (see below)
 
 Needs Python 3.8+, `numpy` and `opencv-python` (`pip install numpy opencv-python`).
 A 36-run session takes about 10 s without video and about 4.5 minutes with it
@@ -66,10 +67,28 @@ out of view.
 gets one `calibrate` before its first sheet row: it is put down by hand
 somewhere in view off the start mark (`calib_area_cm`, any heading), `calibrate`
 is sent `calib_wait_s` later, and it runs as a logged run with experiment
-`calib`: RAW step 1 standing still `calib_blink_ms`, 2 `move(+n)` and 3 `move(-n)`
-(n = max(3, `start_nudge_cm`), 300 ms after each), 4 the compass wiggle
+`calib` (firmware 2026-10-18c, fw_look.py, a copy of look.h and runCalib):
+RAW step 1 standing still `calib_blink_ms`, 2 the compass wiggle
 (`calibrateYawSign(true)`: 300 ms at -20/+20 rpm, brake 300 ms, back 300 ms,
-brake 300 ms, logged throughout), 5 300 ms. Its RUNINFO has `yaw_sign` 0 (not
+brake 300 ms, logged throughout), 3 still, 4 `spinBy(+calib_spin_deg)` (wheels
+at -/+`calib_spin_rpm`, counted by the gyro heading, brake 1 deg early, front
+stop off; the same turn-scrub slip model as other in-place turns), 5 still,
+6 `spinBy(-calib_spin_deg)`, 7 still, 8 an IMU turn to the roll heading it
+chose from the front sensor's sweep during the spins + still, 9 `move(+n)`
+and 10 `move(-n)` (n = the roll that fits there, up to `calib_roll_cm`),
+`calib_still_ms` still after each. The sweep sees `world_polys` (a `--map`'s
+boards, or boards a test places) and the room walls; tools/sim/tests/test_look.py
+puts boards around the robot. About 62-65 s with the defaults and a roll
+(the 1 s `settle_end_ms` at the end included); one CALIB_LOOK record per run
+(docs/data-formats.md), whose spin / roll / reason columns say what was
+skipped or cut short (RUNEND still `done`: the "limited" outcome, not a
+failure; with a board and `safe_edge` on, tests/test_edge.py has the edge
+guard stop the forward roll).
+
+**RAW raw_n and SYNC ms_on_after** (2026-10-18b): RAW rows carry `raw_n`
+(rows sent before this one in the run), so lost rows show as jumps; SYNC
+records carry `ms_on_after`, equal to `ms_on` here (the simulator does not
+model how long the light-switching calls take). Its RUNINFO has `yaw_sign` 0 (not
 checked yet); later runs have the sign it found. `after_calib_s` after its
 RUNEND the robot is carried to the start mark (the same hand carry as between
 runs). Turn, grid, demo and straight runs are refused before a calibration,
@@ -137,15 +156,35 @@ in each frame is the average over a 12 ms exposure. Detections: 1.5 px noise,
 3% missed (60% when a hand covers the robot), false alarms on hands, boxes and
 random clutter, and an optional `blind_region_px` where nothing is detected.
 
-**Start spots** (ported from branch follow-18b): optional sheet columns
-start_x_cm, start_y_cm, start_heading_deg give that row its own start spot.
+**Survey runs** (firmware 2026-10-18b, `run survey` in a sheet row): the
+square spiral and the drive back, copied from experiments.h runSurvey() (and
+pose.h's own pose and straight drives) in fw_follow.py. Optional sheet columns
+start_x_cm, start_y_cm, start_heading_deg give that row its own start spot
+(e.g. the middle of the camera view). SURVEY_LEG and SURVEY_END records as on
+the robot.
 
-**Front distance sensor** (ported from follow-18b). Free-running at `tof.hz`
-(15) frames a second: a reading is the newest frame, measured from where the
-robot was when the frame was taken (on average 33 ms old). Each of the five
-zones reports the nearest thing on 3 rays across its `zone_width_deg` (11 deg)
-slice. Below `min_range_cm` (2) the reading is any value under 2 cm. It sees
-the room walls plus boards and obstacles from `simulate.py --map map.json`.
+**Front distance sensor.** Free-running at `tof.hz` (15) frames a second: a
+reading is the newest frame, measured from where the robot was when the frame
+was taken (on average 33 ms old). Each of the five zones reports the nearest
+thing on 3 rays across its `zone_width_deg` (11 deg) slice. Below
+`min_range_cm` (2) the reading is any value under 2 cm. It sees the room walls,
+plus `Robot.world_polys` (boards and obstacles: `simulate.py --map map.json`,
+or set by fleet_sim.py) and the other robots (`Robot.others`). Before 2026-10-18b it was one fresh ray per zone
+on every call; RAW dC values now repeat between frames, as on the robot.
+
+**Plywood board and edge guard** (firmware 2026-10-18b, edge.h). Off unless
+`session.board_cm` ([x0, y0, x1, y1]) is set: then `session.open_edges`
+("x0", "x1", "y0", "y1": sides with no border board) and `board_thick_cm` (1.9)
+decide what the line sensors and the distance sensor's bottom zone see past an
+open side. Line sensors there read `line.past_edge_reading` (1000, noise 40),
+blended across the sensor's footprint; the bottom zone becomes geometric
+(`tof.sensor_height_cm` 2.6, `bottom_deg` 16.8, spans 5.6 x 45 deg, nearest of
+5 x 3 rays: 9.0 cm on plywood, about 15.8 cm once its whole floor patch is over
+the cement). All GUESSES until E0c (edge rows, sensor height, plywood
+thickness). Nothing falls off: tests check the wheel positions. The guard
+itself (`safe_edge` and the `edge_*` settings) is copied from edge.h, with its
+own random stream so switching it on doesn't change other draws;
+tests/test_edge.py covers stopping distance, tape, calibration and survey runs.
 
 **Known errors on purpose** (for testing the fusion's wheel-size and sensor
 calibration): `robot.radius_scale_err_pct_by_robot` ({"Left": -5}: Left's
@@ -154,6 +193,33 @@ wheels 5% smaller than nominal, so its odometry reads about 5% long) and
 `tof.zone_angle_err_deg_by_robot` ({"Left": [dL, dCL, dC, dCR, dR]} degrees,
 left positive) turns each zone, and `tof.range_err_by_robot` ({"Left": [bias
 cm, scale %]}) adds a range error. All empty by default.
+
+## Live fleet simulation (fleet_sim.py)
+
+Simulated robots that run the firmware's `follow` and `survey` code in real
+time on real UDP, so tools/fleet/run_plan.py (and tools/alvik_console.py) talk
+to them exactly as to the real robots. `run_plan.py --dry-run` starts it.
+
+- Robots listen on 127.0.0.2, 127.0.0.3, ... port 5006 (map order) and send to
+  127.0.0.1:5005; each robot's firmware loop (commands, `run follow`,
+  `calibrate`, `status`, `clock`, `set`) runs in its own thread, paced to the
+  wall clock. They start on their map start spots +/- `--start-noise` (0.5 cm,
+  1.5 deg), calibrated unless `--uncalibrated`.
+- The follower is fw_follow.py, a line-for-line copy of follow.h and pose.h:
+  step buffer, acks, own pose with camera fixes, straight drives, IMU turns,
+  the approach (readings + wheels), front checks, hold/halt, WiFi-quiet handling.
+- Camera fixes: true pose + noise (`--fix-sigma` 0.3 cm, `--fix-sigma-deg` 1),
+  `--fix-hz` 10 per robot, sent `--fix-delay` 0.1 s late as JSON to run_plan's
+  position-source port (docs/data-formats.md, "Step follower").
+- `--brick auto@T | x,y[,deg]@T`: a 20 x 9 cm brick appears T s after the first
+  step (auto: on a robot's planned path ~3 s ahead, away from everyone); the
+  front sensors see it at once, the camera reports it `--cam-delay` (0.5) s
+  later (999 = never: only the robots' sensors can find it).
+- `--wifi-drop NAME@T:DUR`: every packet to and from that robot is lost.
+- Writes `truth.csv` (20 a second), `sim_report.json` (each docking measured on
+  the true pose 0.3 s after the stop: front gap, sideways, heading; closest two
+  robots; closest any robot came to a board it was not docking at or to the
+  brick; contact; packets lost; the events) and `sim_log.txt`.
 
 ## Assumed numbers (replace with measurements)
 
@@ -185,9 +251,9 @@ robot, uniformly.
 | gyro noise | 0.07 deg/s per sample | |
 | yaw sign | +1 (left = positive raw yaw) | unknown on hardware; the firmware measures it |
 | accelerometer | noise 0.004 g (+0.01 g moving), bias 0.01 g sd | units g, az about 1 |
-| ToF zones | +22, +11, 0, -11, -22 deg, 4.5 cm ahead of axle | noise 0.5 cm + 1%, max 350 cm |
+| ToF zones | +22, +11, 0, -11, -22 deg, 4.5 cm ahead of axle (0.25 cm behind the 4.75 cm front face) | noise 0.5 cm + 1%, max 350 cm; 15 frames/s; 11 deg per zone; untrustworthy below 2 cm |
 | room walls (ToF) | x -80..220, y -120..140 cm | |
-| line sensors | 3.5 cm ahead, 1.2 cm apart; floor 150, tape 850 | tape axes 1.9 cm wide |
+| line sensors | 3.5 cm ahead, 1.2 cm apart; floor 150, tape 850, past an open edge 1000 | tape axes 1.9 cm wide |
 | battery | starts 90-100%, -3%/h idle, -20%/h moving | |
 | WiFi RAW loss | 0.5% | bursts off by default (`burst_per_min`) |
 | one-way delay | 1.5 ms + exponential 3 ms, 1% held 20-120 ms | |
@@ -211,7 +277,8 @@ robot, uniformly.
 - Wheels spinning in the air when lifted with `safe_lift 0` (see Kidnap).
 - A failed compass check (`yaw check failed`): the wiggle always turns enough here.
 - The robot rebooting mid-session (one calibration per robot).
-- Collisions, other robots in the ToF view, the box being seen by the ToF.
+- Collisions (robots pass through things; fleet_sim.py reports contact from the
+  true outlines), the camera's box being seen by the ToF.
 - Line-following experiments (lap, grid) and the turn test: only `straight`,
   `demo` and `calib` runs are simulated (the start nudge code covers turn
   runs, but no turn run is simulated).

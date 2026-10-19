@@ -236,8 +236,11 @@ class SpotFinder:
     def maps(self, img):
         """(core brightness, spot response) maps."""
         cv2 = self.cv2
-        b, g, r = cv2.split(img)
-        w = cv2.min(cv2.min(b, g), r)
+        if img.ndim == 2:            # grayscale (the live stream): already the darkest channel
+            w = img
+        else:
+            b, g, r = cv2.split(img)
+            w = cv2.min(cv2.min(b, g), r)
         core = cv2.blur(w.astype(np.float32), (3, 3))
         ring = cv2.dilate(core, self.ring, borderType=cv2.BORDER_REPLICATE)
         return core, core - ring
@@ -282,7 +285,8 @@ def sample(M, x, y, r=1):
 
 # ------------------------------------------------------------------ stage 2: on-segments
 class Segment:
-    __slots__ = ("fi", "t", "x", "y", "v", "c", "before", "after", "on", "off", "est", "kind", "id", "early", "u", "w")
+    __slots__ = ("fi", "t", "x", "y", "v", "c", "before", "after", "on", "off", "est", "kind", "id", "early", "u", "w",
+                 "done_t")
 
     def __init__(self, fi, t, x, y, v, c):
         self.fi, self.t, self.x, self.y, self.v, self.c = [fi], [t], [x], [y], [v], [c]
@@ -401,53 +405,63 @@ def finish_segment(s, cores, p, frame_t):
         s.kind = "long"
 
 
-def find_segments(video, frame_t, p, progress=None, max_frames=None):
-    """Stages 1-2 over the whole video. Returns (segments, n_frames_read)."""
-    import cv2
-    cap = cv2.VideoCapture(video)
-    if not cap.isOpened():
-        raise RuntimeError(f"cannot open {video}")
-    sf = SpotFinder(p)
-    cores = {}          # frame index -> core brightness map (last few frames)
-    active, done, waiting = [], [], []
-    fi = -1
-    n_t = len(frame_t)
-    while True:
-        ok, img = cap.read()
-        if not ok:
-            break
-        fi += 1
-        if fi >= n_t or (max_frames and fi >= max_frames):
-            fi -= 1
-            break
-        t = float(frame_t[fi])
-        core, R = sf.maps(img)
+class SegmentFinder:
+    """Stages 1-2 one frame at a time (find_segments over a whole video, and
+    tools/live while frames arrive). frame_t: the frame times so far, indexed
+    by frame number (a list that push() appends to when live=True, or the
+    whole recording's array)."""
+
+    def __init__(self, p, frame_t=None):
+        self.p = p
+        self.sf = SpotFinder(p)
+        self.live = frame_t is None
+        self.frame_t = [] if frame_t is None else frame_t
+        self.cores = {}          # frame index -> core brightness map (last few frames)
+        self.active, self.waiting = [], []
+        self.spots = []          # the last frame's spots (x, y, response)
+        self.core = None         # the last frame's core map
+
+    def push(self, fi, img, t=None):
+        """Add frame fi (its time t when live). Returns the segments that ended
+        and were finished (kind set) with this frame."""
+        p = self.p
+        if self.live:
+            assert fi == len(self.frame_t), "frames must come in order, numbered from 0"
+            self.frame_t.append(float(t))
+        t = float(self.frame_t[fi])
+        frame_t = self.frame_t
+        core, R = self.sf.maps(img)
+        self.core = core
+        cores = self.cores
         cores[fi] = core
         for k in [k for k in cores if k < fi - 4]:
             del cores[k]
+        done = []
         if not np.isfinite(t):
-            continue
+            self.spots = []
+            return done
         # segments that ended: finish once the two frames after them are in
         still = []
-        for s in waiting:
+        for s in self.waiting:
             if fi >= s.fi[-1] + 2:
                 finish_segment(s, cores, p, frame_t)
                 done.append(s)
             else:
                 still.append(s)
-        waiting = still
+        self.waiting = still
         keep = []
-        for s in active:
+        for s in self.active:
             if t - s.t[-1] > p.link_gap_s:
                 if fi >= s.fi[-1] + 2:
                     finish_segment(s, cores, p, frame_t)
                     done.append(s)
                 else:
-                    waiting.append(s)
+                    self.waiting.append(s)
             else:
                 keep.append(s)
-        active = keep
-        spots, _ = sf.spots(R)
+        active = self.active = keep
+        spots, _ = self.sf.spots(R)
+        self.spots = spots
         # where each segment's spot should be now: a new one anywhere within
         # reach; one seen twice or more, straight on from its last step (a
         # spot that jumps sideways is something else lighting up next to it,
@@ -474,7 +488,6 @@ def find_segments(video, frame_t, p, progress=None, max_frames=None):
             s.v.append(v)
             s.c.append(float(core[int(round(y)), int(round(x))]))
             matched.add(j)
-        Hh, Ww = core.shape
         for j, (x, y, v) in enumerate(spots):
             if j in matched:
                 continue
@@ -485,12 +498,41 @@ def find_segments(video, frame_t, p, progress=None, max_frames=None):
                 if k in cores:
                     s.early[k] = (cores[k][y0:yi + CROP + 1, x0:xi + CROP + 1].copy(), x0, y0)
             active.append(s)
+        return done
+
+    def flush(self):
+        """Finish every segment still open (end of the video)."""
+        out = []
+        for s in self.active + self.waiting:
+            finish_segment(s, self.cores, self.p, self.frame_t)
+            out.append(s)
+        self.active, self.waiting = [], []
+        return out
+
+
+def find_segments(video, frame_t, p, progress=None, max_frames=None):
+    """Stages 1-2 over the whole video. Returns (segments, n_frames_read)."""
+    import cv2
+    cap = cv2.VideoCapture(video)
+    if not cap.isOpened():
+        raise RuntimeError(f"cannot open {video}")
+    finder = SegmentFinder(p, frame_t)
+    done = []
+    fi = -1
+    n_t = len(frame_t)
+    while True:
+        ok, img = cap.read()
+        if not ok:
+            break
+        fi += 1
+        if fi >= n_t or (max_frames and fi >= max_frames):
+            fi -= 1
+            break
+        done += finder.push(fi, img)
         if progress and fi % 1500 == 0:
             progress(fi, n_t)
     cap.release()
-    for s in active + waiting:
-        finish_segment(s, cores, p, frame_t)
-        done.append(s)
+    done += finder.flush()
     done.sort(key=lambda s: s.a)
     for i, s in enumerate(done):
         s.id = i
@@ -724,11 +766,90 @@ def beat_cost(L, T, p):
     return None
 
 
+NEW_TRACK_COST = 3.0
+
+
+def join_cost(T, L, p):
+    """Cost of adding light L to track T (lower = better), or None if it can't be
+    that track's: too far for its speed, off its predicted path, off its beat."""
+    dt = L.a - T.last.b
+    if dt < 0.05:
+        return None
+    (x0, y0) = T.last.end_xy
+    (x1, y1) = L.start_xy
+    d = math.hypot(x1 - x0, y1 - y0)
+    if d > 6.0 + p.vmax_px * dt:
+        return None
+    v = T.velocity() if dt < 2.0 else None
+    if v is not None:
+        sp = math.hypot(*v)
+        if sp > p.vmax_px:
+            v = (v[0] * p.vmax_px / sp, v[1] * p.vmax_px / sp)
+        dp = min(math.hypot(x1 - (x0 + v[0] * dt), y1 - (y0 + v[1] * dt)), d)
+        # a robot can't jump: off its predicted path by at most what
+        # braking/accelerating (amax_cms2) or stopping could explain
+        if dp > 6.0 + 0.5 * p.amax_cms2 * p.px_per_cm * dt * dt + 0.6 * math.hypot(*v) * dt:
+            return None
+        c = dp / (6.0 + 0.35 * p.vmax_px * dt)
+    else:
+        c = d / (6.0 + 0.5 * p.vmax_px * dt)
+    g = beat_cost(L, T, p)
+    if g is None:
+        return None
+    c += g
+    # a robot shows two spots (its LEDs) and a lamp one: a light that
+    # doesn't match what the track has mostly shown is less likely its
+    recent = T.lights[-3:]
+    n_pair = sum(x.paired for x in recent)
+    if (not L.paired and 2 * n_pair > len(recent)) or (L.paired and 2 * n_pair < len(recent)):
+        c += 1.5
+    # prefer tracks that already flash like a robot's code
+    c += 1.0 * (1.0 - T.quality)
+    return c
+
+
+def assign_batch(tracks, batch, p, new_track):
+    """Add a batch of lights that started together (within 60 ms) to the open
+    tracks, or start new tracks (new_track() makes one and is told nothing
+    else). Returns [(light, track, new)] in batch order."""
+    NEW = NEW_TRACK_COST
+    cost = np.full((len(batch), len(tracks) + len(batch)), 1e6)
+    for bi, L in enumerate(batch):
+        cost[bi, len(tracks) + bi] = NEW
+        for ti, T in enumerate(tracks):
+            c = join_cost(T, L, p)
+            if c is not None:
+                cost[bi, ti] = c
+    if linear_sum_assignment is not None:
+        ri, ci = linear_sum_assignment(cost)
+    else:
+        ri, ci, used = [], [], set()
+        for bi in range(len(batch)):
+            for cj in np.argsort(cost[bi]):
+                if cj not in used:
+                    used.add(cj)
+                    ri.append(bi)
+                    ci.append(cj)
+                    break
+    out = []
+    n_old = len(tracks)
+    for bi, cj in zip(ri, ci):
+        L = batch[bi]
+        if cj < n_old and cost[bi, cj] < 1e5:
+            tracks[cj].add(L, p)
+            out.append((L, tracks[cj], False))
+        else:
+            T = new_track()
+            T.add(L, p)
+            tracks.append(T)
+            out.append((L, T, True))
+    return out
+
+
 def build_tracks(lights, p):
     tracks, closed = [], []
     lights = [L for L in lights if L.kind == "pulse"]
     i = 0
-    NEW = 3.0
     while i < len(lights):
         batch = [lights[i]]
         j = i + 1
@@ -741,63 +862,7 @@ def build_tracks(lights, p):
         for T in tracks:
             (closed if t_now - T.last.b > p.track_gap_s else alive).append(T)
         tracks = alive
-        cost = np.full((len(batch), len(tracks) + len(batch)), 1e6)
-        for bi, L in enumerate(batch):
-            cost[bi, len(tracks) + bi] = NEW
-            for ti, T in enumerate(tracks):
-                dt = L.a - T.last.b
-                if dt < 0.05:
-                    continue
-                (x0, y0) = T.last.end_xy
-                (x1, y1) = L.start_xy
-                d = math.hypot(x1 - x0, y1 - y0)
-                if d > 6.0 + p.vmax_px * dt:
-                    continue
-                v = T.velocity() if dt < 2.0 else None
-                if v is not None:
-                    sp = math.hypot(*v)
-                    if sp > p.vmax_px:
-                        v = (v[0] * p.vmax_px / sp, v[1] * p.vmax_px / sp)
-                    dp = min(math.hypot(x1 - (x0 + v[0] * dt), y1 - (y0 + v[1] * dt)), d)
-                    # a robot can't jump: off its predicted path by at most what
-                    # braking/accelerating (amax_cms2) or stopping could explain
-                    if dp > 6.0 + 0.5 * p.amax_cms2 * p.px_per_cm * dt * dt + 0.6 * math.hypot(*v) * dt:
-                        continue
-                    c = dp / (6.0 + 0.35 * p.vmax_px * dt)
-                else:
-                    c = d / (6.0 + 0.5 * p.vmax_px * dt)
-                g = beat_cost(L, T, p)
-                if g is None:
-                    continue
-                c += g
-                # a robot shows two spots (its LEDs) and a lamp one: a light that
-                # doesn't match what the track has mostly shown is less likely its
-                recent = T.lights[-3:]
-                n_pair = sum(x.paired for x in recent)
-                if (not L.paired and 2 * n_pair > len(recent)) or (L.paired and 2 * n_pair < len(recent)):
-                    c += 1.5
-                # prefer tracks that already flash like a robot's code
-                c += 1.0 * (1.0 - T.quality)
-                cost[bi, ti] = c
-        if linear_sum_assignment is not None:
-            ri, ci = linear_sum_assignment(cost)
-        else:
-            ri, ci, used = [], [], set()
-            for bi in range(len(batch)):
-                for cj in np.argsort(cost[bi]):
-                    if cj not in used:
-                        used.add(cj)
-                        ri.append(bi)
-                        ci.append(cj)
-                        break
-        for bi, cj in zip(ri, ci):
-            L = batch[bi]
-            if cj < len(tracks) and cost[bi, cj] < 1e5:
-                tracks[cj].add(L, p)
-            else:
-                T = Track(len(tracks) + len(closed) + 1000)
-                T.add(L, p)
-                tracks.append(T)
+        assign_batch(tracks, batch, p, lambda: Track(len(tracks) + len(closed) + 1000))
     allt = closed + tracks
     allt.sort(key=lambda T: T.lights[0].a)
     for n, T in enumerate(allt, 1):

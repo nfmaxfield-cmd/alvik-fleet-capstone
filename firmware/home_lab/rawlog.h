@@ -5,6 +5,10 @@
 // own clock (ms), so the laptop's clock-sync records and the light flashes
 // can line it up with the camera video afterwards. Logging rides on
 // shouldAbort(), which every motion loop already calls every 5-10 ms.
+// raw_n (firmware 2026-10-18b+, last column): this row's number in the run,
+// 0, 1, 2, ... with no gaps on the robot's side, so on the laptop a jump in
+// raw_n is a lost row and a gap in ms with consecutive raw_n is a real pause
+// (e.g. the ~200 ms the library blocks in move()).
 // IMU columns (ax..gz) are in the units the motor board reports; check with a
 // still, flat robot: az should read about 1 if accelerations are in g.
 #pragma once
@@ -27,7 +31,7 @@ int step = 0;               // route steps completed so far; matches the DEMO_ST
 void header() {
   net::sendLine("H,RAW,run,ms,step,wl_deg,wr_deg,wl_rpm,wr_rpm,v_cms,w_dps,x_cm,y_cm,th_deg,"
                 "ax,ay,az,gx,gy,gz,roll_deg,pitch_deg,yaw_deg,"
-                "dL_cm,dCL_cm,dC_cm,dCR_cm,dR_cm,dtop_cm,dbot_cm,lineL,lineC,lineR,battery,charging,lifted");
+                "dL_cm,dCL_cm,dC_cm,dCR_cm,dR_cm,dtop_cm,dbot_cm,lineL,lineC,lineR,battery,charging,lifted,raw_n");
 }
 
 void start() {
@@ -65,12 +69,13 @@ void tick() {
   alvik.get_line_sensors(lL, lC, lR);
   net::logf("D,RAW,%s,%lu,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,"
             "%.4f,%.4f,%.4f,%.3f,%.3f,%.3f,%.2f,%.2f,%.2f,"
-            "%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%d,%d,%d,%d,%d,%d",
+            "%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%d,%d,%d,%d,%d,%d,%lu",
             gRunId.c_str(), now, step, wl, wr, sl, sr, v, w, x, y, th,
             ax, ay, az, gx, gy, gz, roll, pitch, yaw,
             dL, dCL, dC, dCR, dR, alvik.get_distance_top(), alvik.get_distance_bottom(), lL, lC, lR,
             alvik.get_battery_charge(), alvik.is_battery_charging() ? 1 : 0,
-            alvik.get_lifted() ? 1 : 0);   // picked up: position must be re-found ("kidnapped robot")
+            alvik.get_lifted() ? 1 : 0,    // picked up: position must be re-found ("kidnapped robot")
+            rows);                         // raw_n: rows sent before this one
   rows++;
 }
 

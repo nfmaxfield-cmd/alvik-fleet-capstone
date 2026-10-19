@@ -104,12 +104,37 @@ speed control (`straight_rpm 0`) or both wheels at a set rpm.
 
 **Before any run you'll measure with a tape:** send `calibrate` first, with
 the robot in the camera's view but off its mark. This is a logged calibration
-run (about 10 s): the robot stands still blinking its own light code (who is
-who), rolls a few cm forward and back (which way it faces, seen by the
-camera), then wiggles to check its compass direction. It doesn't end exactly
-where it started, so place the robot on its mark afterwards. Turn, grid, demo
-and straight runs then refuse to start until a robot has been calibrated since
-power-on (run_sheet.py does this for you).
+run (about 65 s from firmware 2026-10-18c, 60 s in 2026-10-18b, 10 s before): the robot
+stands still blinking its own light code (who is who), wiggles to check its
+compass direction, then spins slowly twice around to the left and twice back
+(`calib_spin_deg` 720, `calib_spin_rpm` 15: the gyro's scale, where its lights
+sit relative to its turning centre, and a sweep of the front distance sensor
+all the way round). From firmware 2026-10-18c it uses that sweep to choose
+where to roll: it turns to the direction with room and rolls up to
+`calib_roll_cm` (15 cm) forward and back there (which way it faces, and how far
+its wheels really carry it, both seen by the camera), shorter if there is less
+room, not at all if no direction has room for `calib_roll_min_cm` (5 cm); the
+CALIB_LOOK record says what it chose. `calib_still_ms` (1 s) still periods
+come in between for the gyro's drift. It needs a 25 cm (9 13/16") circle
+around it to spin (it won't spin if something is within `calib_spin_r_cm`,
+8 cm, of its middle) and, for the full roll, 35 cm (13 3/4") of clear floor
+in some direction counted from its back (10 cm robot + 15 cm roll + 7 cm stop
+distance + 3 cm margin). Keep it 25 cm from any open plywood edge: the front
+sensor can't see an edge, so open space past it looks like room (the laptop
+can cap the roll per direction with `set calib_dir_limits`, for the camera
+map later; with the edge guard on, `safe_edge`, its forward roll stops at an
+open edge and it rolls back the way it came). If it finds no room to roll,
+or something sits inside its spin circle, it skips that part, and if the edge
+guard stops its roll it keeps the roll when it went at least 5 cm: either way
+the run still ends `done`. That is not a failure but a third outcome,
+"limited (no room)" or "limited (plywood edge)" (docs/data-formats.md,
+"Calibration outcomes").
+run_sheet.py then says what was kept and lets you press r to move it and redo,
+or Enter to continue. tools/blink/calib.py reads all of it from the video and the log
+(calibration_results.csv). It doesn't end exactly where it started, so place
+the robot on its mark afterwards. Turn, grid, demo and straight runs then
+refuse to start until a robot has been calibrated since power-on
+(run_sheet.py does this for you).
 
 **During runs (firmware 2026-10-17e+):** both top lights blink the robot's
 rhythm (one short flash every 0.3 s for Left, 0.4 s Center, 0.5 s Right; firmware 2026-10-18a+) so the camera can find
@@ -120,6 +145,68 @@ start_nudge_cm 0` turns it off.
 
 The measured experiments (E0, E1, ...) are set up in
 [experiments/INDEX.md](experiments/INDEX.md).
+
+## Survey drive: recalibrate a moved camera (firmware 2026-10-18b+)
+
+`run survey` drives a square spiral outward from where the robot stands: legs
+of 10, 10, 20, 20, 30, 30 ... cm with a left turn before each new leg, up to
+`survey_size_cm` (80: 16 legs, about 7.7 m, just under 2 minutes, covering
+about 1 m x 1 m around the start). It then turns to face the start, drives
+straight back to it and turns to its starting heading. A leg ends early if
+anything is within `survey_clear_cm` (10 cm) in the robot's path; the spiral
+stops there and it drives back. Light: red. Needs the calibration run
+(`calibrate`) since power-on, like turn, demo and straight runs. It is a logged
+run (RUNINFO, PARAM, RAW at 50 a second with step = leg number, sync flashes,
+blink codes, RUNEND) plus SURVEY_LEG and SURVEY_END records.
+
+Then the camera's floor calibration comes from the survey itself: the robot's
+own wheel + gyro path, hung from its taped start pose, paired with where the
+camera saw it.
+
+1. Pick a start spot near the middle of the floor the camera sees, with about
+   50 cm clear all round. Put the robot there and mark its front and rear on
+   the floor (pencil), as for E1. Record the marks in a sheet row (the E1
+   columns: order, robot, level `survey`, commands `run survey`, xf0..yr0).
+2. Start the camera recording, then `run survey` (one robot at a time).
+3. When it is back, mark its end pose (xf..yr) in the same row and its run id.
+4. Repeat from 2-3 other spots, each measured separately (see below).
+5. Calibrate:
+
+       python tools/calibrate_floor.py <recording> --survey --session logs/<x> \
+           --sheet <that sheet> --detections <recording>/detections.csv --height-cm <tape>
+
+run_sheet.py can run a survey row too, but it expects every start at the
+origin; started there, half the spiral lies at negative x.
+
+**How good (simulated, camera moved and turned 4 deg, 10 and 25 frames a
+second):** the error comes almost all from the taped start headings (two marks
+9.5 cm apart give about +/-1.3 deg), and the whole calibration turns with
+them. Over everything the camera sees: 2 surveys, mean 0.8 cm (max 1.7) in one
+session but 2.2 cm (max 4.6) in another, where both starts happened to be
+taped about 1.5 deg off the same way; 4 surveys from separate spots, mean
+0.6 cm (max 1.5); the 36 E1 runs, mean 0.2 cm (max 0.7) in both sessions.
+With the start-heading rotation removed, the 2-survey calibrations were mean
+0.17-0.37 cm: the spiral gets the shape right, the anchor sets the angle. So
+for now the survey is a quick check or rough recalibration (4 runs, about 8
+minutes), not a replacement for many taped runs.
+
+## Running a fleet plan on the robots (firmware 2026-10-18b+)
+
+`tools/fleet/run_plan.py` runs plan.json (tools/fleet/README.md): it starts a
+`follow` run on every robot, releases each robot's steps as the others report
+theirs done, passes camera fixes on, and re-plans when something new appears.
+
+1. Every robot: `calibrate` (once per power-on), then put it on its start spot
+   from map.json. Close the console (one program on the robots' port).
+2. `python tools/fleet/run_plan.py --map map.json --plan plan.json`
+   (`--calibrate` sends the calibrations for you; `--fixes udp` takes camera
+   poses from the live fusion when that runs).
+3. Ctrl+C stops every robot. The session folder has step.csv and follow.csv
+   (what each robot did and where it thought it was) and coordinator.jsonl.
+
+Try it first without robots: `python tools/fleet/run_plan.py --map
+tools/fleet/examples/demo_map.json --dry-run` (simulated robots on this laptop;
+add `--brick auto@15` or `--wifi-drop Center@20:3`).
 
 **Full sensor log.** Every experiment except `stream` now logs every sensor
 `raw_hz` times a second (default 50) to `raw.csv`, with a RUNINFO record before
@@ -138,6 +225,34 @@ piece of tape at each start point. Afterwards, measure how far each robot
 stopped from its mark: the robot's own report is wheel odometry and can't see
 slip. Distances and the circle size are settings (`demo_a_cm`, `demo_b_cm`,
 `demo_r_cm`, `demo_speed_cms`).
+
+## Plywood edge guard (firmware 2026-10-18b+, off until measured)
+
+Where the plywood has no border board, the front distance sensor can't see the
+small step down. The edge guard (`safe_edge`, firmware edge.h) can stop a
+robot driving forward at an open edge from either of two cues: the line
+sensors under the nose (`safe_edge 1`: their reading jumps when they pass the
+edge; the painter's tape must not look the same) or the distance sensor's
+bottom zone (`safe_edge 2`: it looks at the floor a few cm ahead, which drops
+to the cement past the edge), or both (`3`). It is **off** until the E0c edge
+rows are in: then `python tools/edge_check.py` says whether each cue separates
+the edge from plywood and tape and prints the `set` commands to try. Try them
+on one robot first, driving slowly at an open edge and across the tape. In the
+simulator (guessed readings) the line cue stops with about 3 cm of wheel still
+on the board, the bottom zone about 9 cm. A stop at an edge is not a failure:
+the run ends `limited:plywood edge`, run_sheet.py asks you to confirm and marks
+the row excluded with the note "limited: plywood edge", and the accuracy
+statistics leave it out and count it apart. Limits: backing up and turning in
+place are not guarded, and a robot meeting the edge at a shallow slant (under
+about 45 degrees) puts a wheel over it before the line sensors get there.
+Lap and grid runs on dark tape: dark tape may look like the edge to the line
+cue; use `safe_edge 2` or `0` for those. The calibration run is guarded only on
+its forward roll (the roll its look-around chose, which can't see an open
+edge): a trip there is not a failure; it rolls back the distance it covered
+and the run ends `done`, limited (plywood edge), keeping the roll if it went
+at least `calib_roll_min_cm` (5 cm). That roll back is not guarded, on
+purpose: it retraces the path the robot has just driven forward on the
+board, so it can only end where the roll started.
 
 ## Step 1: sensor explorer
 
@@ -177,7 +292,7 @@ Commands go to the robot(s) chosen with `use` (default: all). `AL-3F2A: run
 turn` sends one command to one robot; the last 4 characters alone work too
 (`3F2A: run turn`). `stop` always stops every robot. Robot commands: `help`,
 `params`, `get <name>`, `set <name> <value>`, `route <letters>`,
-`run stream|turn|lap|grid|demo|straight`, `stop`, `status`, `identify`,
+`run stream|turn|lap|grid|demo|straight|survey|follow`, `stop`, `status`, `identify`,
 `calibrate`, `clock`, `name <Left|Center|Right>`. Console-only:
 `robots`, `use`, `stats`, `quit`.
 
@@ -261,6 +376,10 @@ if it hangs.
   wheel slip changes both time and the odometry check.
 - Check the lifted and front-obstacle safety stops don't trip during normal
   runs. Set `safe_lift 0` or `safe_front_cm 0` if they do.
+- Edge guard, once tools/edge_check.py recommends settings: drive slowly at an
+  open edge (head-on and at 45 and 30 degrees), across the painter's tape, and
+  fast over plain plywood (the bottom zone tilts when the robot speeds up or
+  brakes); measure how much wheel is left on the board each time.
 
 ## Possible inaccuracies in what this relied on
 

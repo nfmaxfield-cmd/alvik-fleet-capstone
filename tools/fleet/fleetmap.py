@@ -34,7 +34,7 @@ DEFAULT_MAP = {
     "tasks": {},
 }
 
-OBSTACLE_SOURCES = ("camera", "distance_sensor", "user")
+OBSTACLE_SOURCES = ("camera", "distance_sensor", "edge_guard", "user")   # edge_guard: an open plywood edge
 
 
 class MapError(ValueError):

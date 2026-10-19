@@ -53,6 +53,73 @@ class Result:
         return [self.check, self.scope, self.status, v, self.unit, self.rule, self.detail]
 
 
+# A calibration run's outcome (docs/data-formats.md, "Calibration outcomes"): three states.
+CALIB_DONE = "done"          # everything it tries was done
+CALIB_LIMITED = "limited"    # RUNEND done, but it skipped or cut short the spin or the roll: no room, or a plywood edge
+CALIB_FAILED = "failed"      # RUNEND failed:... or stopped:..., or no RUNEND at all
+CALIB_LIMIT_REASONS = ("no room", "plywood edge")   # CALIB_LOOK reason parts ("; " between) that mean "limited"
+
+
+# Any run's RUNEND result (firmware 2026-10-18c+): "done", "limited:plywood edge" (the edge guard
+# refused to drive off the work area: not a failure, but the run did not finish its route, so accuracy
+# statistics leave it out), "stopped:<why>", "failed:<why>".
+RUN_LIMITED_PREFIX = "limited:"
+LIMITED_EDGE_NOTE = "limited: plywood edge"   # run_sheet.py's note on such a row (tape_results.is_limited)
+
+
+def run_outcome(result):
+    """CALIB_DONE / CALIB_LIMITED / CALIB_FAILED for any run's RUNEND result (None = no RUNEND)."""
+    r = (result or "").strip()
+    if r == "done":
+        return CALIB_DONE
+    if r.startswith(RUN_LIMITED_PREFIX):
+        return CALIB_LIMITED
+    return CALIB_FAILED
+
+
+def run_limit_reason(result):
+    """"plywood edge" for "limited:plywood edge", else ""."""
+    r = (result or "").strip()
+    return r[len(RUN_LIMITED_PREFIX):].strip() if r.startswith(RUN_LIMITED_PREFIX) else ""
+
+
+def calib_outcome(result, look=None):
+    """The outcome of a calibration run (CALIB_DONE / CALIB_LIMITED / CALIB_FAILED) from its RUNEND
+    result and its CALIB_LOOK record (a dict with the record's column names; None for firmware
+    before 2026-10-18c). Skipping the spin or the roll for lack of room, or the edge guard stopping
+    the roll at a plywood edge, is not a failure: the robot refused something it had no room for or
+    that was unsafe, so it is its own state, CALIB_LIMITED."""
+    if run_outcome(result) == CALIB_LIMITED:
+        return CALIB_LIMITED               # an edge-guard stop outside the forward roll (none expected)
+    if (result or "").strip() != "done":
+        return CALIB_FAILED
+    reasons = calib_limit_reasons(look)
+    if reasons:
+        return CALIB_LIMITED
+    return CALIB_DONE
+
+
+def calib_limit_reasons(look):
+    """The CALIB_LOOK reason as a list (e.g. ["no room", "plywood edge"]); [] = nothing limited."""
+    look = look or {}
+    reason = (look.get("reason") or "").strip()
+    if reason:
+        return [r.strip() for r in reason.split(";") if r.strip() in CALIB_LIMIT_REASONS]
+    if "reason" not in look and (look.get("result") or "").strip() in ("no_room", "no_room_after_turn"):
+        return ["no room"]                 # a CALIB_LOOK without the spin/roll/reason columns
+    return []
+
+
+def calib_outcome_text(result, look=None):
+    """calib_outcome() for people and calibration_results.csv: done, failed, or "limited (<reason>)",
+    e.g. "limited (no room)", "limited (plywood edge)", "limited (no room; plywood edge)"."""
+    oc = calib_outcome(result, look)
+    if oc != CALIB_LIMITED:
+        return oc
+    reasons = calib_limit_reasons(look) or [run_limit_reason(result)]
+    return "%s (%s)" % (oc, "; ".join(reasons))
+
+
 def grade(x, limit, fail_factor=2.0):
     """PASS below limit, CHECK below fail_factor x limit, else FAIL (nan: SKIP)."""
     if x is None or x != x:

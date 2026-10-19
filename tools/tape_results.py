@@ -24,6 +24,7 @@ import argparse
 import csv
 import glob
 import math
+import re
 import os
 import statistics as st
 import sys
@@ -82,6 +83,23 @@ def level_key(lv):
 
 
 # ---------------------------------------------------------------- trials
+def is_limited(r):
+    """A row whose run the edge guard stopped before an open plywood edge ("limited: plywood edge" in its
+    note, set by run_sheet.py): not a failure, but not a finished route either, so it is left out of the
+    statistics and counted apart (session_checks.is_limited_row)."""
+    note = re.sub(r"replaces order \S+ \([^)]*\)", "", (r.get("note") or "").lower())   # a replacement row is not
+    return "limited:" in note                                                            # limited itself
+
+
+def limited_trials(folder):
+    """The sheet rows left out as limited (plywood edge), measured or not."""
+    path = os.path.join(folder, "data", "measurements.csv")
+    if not os.path.exists(path):
+        return []
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        return [r for r in csv.DictReader(f) if is_limited(r)]
+
+
 def load_trials(folder):
     path = os.path.join(folder, "data", "measurements.csv")
     if not os.path.exists(path):
@@ -94,6 +112,8 @@ def load_trials(folder):
                 continue                       # not measured yet
             if (r.get("excluded") or "").strip().lower() in ("1", "yes", "y", "x", "true"):
                 continue
+            if is_limited(r):
+                continue                       # limited (plywood edge), measured anyway: limited_trials() counts it
             t = dict(r)
             t["x"], t["y"] = (xf + xr) / 2, (yf + yr) / 2
             t["heading"] = math.degrees(math.atan2(yf - yr, xf - xr))
@@ -298,6 +318,10 @@ def main():
     # summary per level (robots pooled; per robot when there are several)
     robots = sorted({t["robot"] for t in trials})
     print(f"\n{name}: {len(trials)} measured trials, robots: {', '.join(robots)}")
+    lim = limited_trials(args.folder)
+    if lim:
+        print(f"  {len(lim)} more limited (plywood edge: the edge guard stopped them before an open edge; not a "
+              f"failure, not a finished route) left out: " + ", ".join(f"{r.get('order')} {r.get('robot')}" for r in lim))
     for key, label, unit in metrics:
         rows = []
         groups = {}

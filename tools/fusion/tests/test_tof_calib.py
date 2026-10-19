@@ -305,3 +305,18 @@ def test_default_is_camera_fallback_at_half_weight():
     used = [i for e in b.events if e[2] == "tof" for o, i in e[3]["res"] if o == "used"]
     assert used and all(i["sigma"] == pytest.approx(math.sqrt(2) * lm.zone_sigma(i["z"], b.tcfg), rel=0.05)
                         for i in used[:20])
+
+def test_spin_steps_found_from_the_gyro():
+    """Firmware 2026-10-18c's look-first calibration spins in RAW steps 4 and 6 (18b: 6 and 8): the spin steps
+    are the ones in which the gyro turns 300 deg or more."""
+    import runs as rn
+    run = rn.Run("r", "Left")
+    t = 0.0
+    for step, rate, dur in ((1, 0.0, 1.0), (2, 30.0, 1.0), (3, 0.0, 1.0), (4, 34.0, 21.0), (5, 0.0, 1.0),
+                            (6, -34.0, 21.0), (7, 0.0, 1.0), (8, 40.0, 2.0), (9, 0.0, 3.0)):
+        for _ in range(int(dur * 50)):
+            run.raw.append({"t": t, "step": str(step), "gz": str(rate)})
+            t += 0.02
+    assert tc.spin_steps(run) == {4, 6}
+    empty = rn.Run("e", "Left")
+    assert tc.spin_steps(empty) == tc.SPIN_STEPS

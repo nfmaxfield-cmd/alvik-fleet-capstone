@@ -3,7 +3,9 @@
 
   Experiments:  stream (sensor log), turn (turn accuracy/time),
                 lap (line-following lap timer), grid (stop vs drive-through),
-                demo (open-floor routes), straight (straight-line accuracy)
+                demo (open-floor routes), straight (straight-line accuracy),
+                survey (square spiral for the camera's self-calibration),
+                follow (runs the steps tools/fleet/run_plan.py sends; laptop only)
 
   Setup:
     1. Copy secrets.example.h to secrets.h in this folder and add your WiFi.
@@ -13,7 +15,7 @@
   Without the laptop, use the buttons:
     LEFT / RIGHT  choose an experiment (left LED color shows which)
                   blue = stream, green = turn, yellow = lap, purple = grid,
-                  white = demo, cyan = straight
+                  white = demo, cyan = straight, red = survey
     OK            start it        CANCEL  stop it
   Results are logged over WiFi either way (and to Serial if USB is plugged in).
 */
@@ -23,20 +25,26 @@
 #include "net.h"
 #include "motion.h"
 #include "experiments.h"
+#include "follow.h"
+#include "look.h"
 #include "ota.h"
 
 Arduino_Alvik alvik;
 
 // Bump this whenever the firmware changes, so every logged run says which code it ran.
-#define FW_VERSION "2026-10-18a"
+#define FW_VERSION "2026-10-18c"
 
 uint16_t gBootId = 0;   // random each power-on; starts every run id
 
-// "calib" (index 6) is the calibration run, started with the calibrate
-// command only; the buttons cycle through the first N_EXP.
-const char* EXP_NAMES[] = {"stream", "turn", "lap", "grid", "demo", "straight", "calib"};
-const int N_EXP = 6;
-const int EXP_CALIB = 6;
+// The buttons cycle through the first N_EXP. "follow" (index 7) needs the
+// laptop, so it is started with `run follow` only; "calib" (index 8) is the
+// calibration run, started with the calibrate command only.
+const char* EXP_NAMES[] = {"stream", "turn", "lap", "grid", "demo", "straight", "survey", "follow", "calib"};
+const int N_EXP = 7;
+const int N_RUNNABLE = 8;   // `run <name>` accepts these
+const int EXP_SURVEY = 6;
+const int EXP_FOLLOW = 7;
+const int EXP_CALIB = 8;
 int gSelected = 1;
 int gPending = -1;   // experiment requested by the laptop, started from loop()
 
@@ -58,6 +66,7 @@ void showSelection(bool running) {
     case 3: r = 1; b = 1; break;       // grid: purple
     case 4: r = 1; g = 1; b = 1; break; // demo: white
     case 5: g = 1; b = 1; break;       // straight: cyan
+    case 6: r = 1; break;              // survey: red
   }
   alvik.left_led.set_color(r, g, b);
   if (running) alvik.right_led.set_color(r, g, b);
@@ -65,7 +74,9 @@ void showSelection(bool running) {
 }
 
 void printHelp() {
-  net::sendLine("M,commands: run stream|turn|lap|grid|demo|straight  stop  calibrate  clock  name <Left|Center|Right>  set <name> <value>  get <name>  params  route <SLRE...>  status  identify  help");
+  net::sendLine("M,commands: run stream|turn|lap|grid|demo|straight|survey|follow  stop  calibrate  clock  name <Left|Center|Right>  set <name> <value>  get <name>  params  route <SLRE...>  status  identify  help");
+  net::sendLine("M,during run follow: fs <id> <T|D|A|W> ...  fix <t_ms> <x> <y> <th> <sigma>  fpose <x> <y> <th>  hold [id]  halt  (tools/fleet/run_plan.py sends these)");
+  net::sendLine("M,before calibrate: set calib_dir_limits <deg> <cm> ... caps its roll per direction (deg from where it faces, left +; next calibration only; off = none)");
 }
 
 void printParams() {
@@ -77,7 +88,7 @@ void printParams() {
 }
 
 int expIndex(const String& name) {
-  for (int i = 0; i < N_EXP; i++) if (name.equalsIgnoreCase(EXP_NAMES[i])) return i;
+  for (int i = 0; i < N_RUNNABLE; i++) if (name.equalsIgnoreCase(EXP_NAMES[i])) return i;
   return -1;
 }
 
@@ -98,6 +109,11 @@ bool handleCommand(const String& raw, bool running) {
     return true;
   }
   if (verb == "help") { printHelp(); return false; }
+  if (verb == "fs" || verb == "fix" || verb == "fpose" || verb == "hold" || verb == "halt") {
+    if (running && follow::active) follow::command(verb, rest);
+    else if (verb == "fs") net::sendLine("M,not following: send run follow first");
+    return false;
+  }
   if (verb == "name") {
     if (running) { net::sendLine("M,busy: send stop first"); return false; }
     if (rest.length() > 10) { net::sendLine("M,names can be at most 10 characters"); return false; }
@@ -148,6 +164,7 @@ bool handleCommand(const String& raw, bool running) {
     return false;
   }
   if (verb == "get") {
+    if (rest.equalsIgnoreCase("calib_dir_limits")) { look::printLimits(); return false; }
     Param* p = findParam(rest);
     if (p) net::logf("M,%s = %.3f  (%s)", p->name, p->value, p->help);
     else   net::logf("M,no parameter called %s (type params)", rest.c_str());
@@ -155,6 +172,11 @@ bool handleCommand(const String& raw, bool running) {
   }
   if (verb == "set") {
     int sp2 = rest.indexOf(' ');
+    // caps on the calibration roll per heading, from the laptop (look.h); not a single number
+    if ((sp2 < 0 ? rest : rest.substring(0, sp2)).equalsIgnoreCase("calib_dir_limits")) {
+      look::setLimits(sp2 < 0 ? String("") : rest.substring(sp2 + 1));
+      return false;
+    }
     if (sp2 < 0) { net::sendLine("M,usage: set <name> <value>"); return false; }
     String name = rest.substring(0, sp2);
     String val = rest.substring(sp2 + 1);
@@ -184,7 +206,7 @@ bool handleCommand(const String& raw, bool running) {
   if (verb == "run") {
     if (running) { net::sendLine("M,busy: send stop first"); return false; }
     int i = expIndex(rest);
-    if (i < 0) { net::sendLine("M,run what? stream, turn, lap, grid, demo or straight"); return false; }
+    if (i < 0) { net::sendLine("M,run what? stream, turn, lap, grid, demo, straight, survey or follow"); return false; }
     gSelected = i;
     gPending = i;
     return false;
@@ -212,16 +234,20 @@ void syncFlash(const char* tag) {
   alvik.left_led.set_color(0, 0, 0);
   alvik.right_led.set_color(0, 0, 0);
   logWait(150);
+  // ms_on: just before the calls that switch the lights on; ms_on_after: just
+  // after them (each set_color() goes over the serial link to the motor board,
+  // so the two differ by how long switching takes: the light-on delay)
   unsigned long on = millis();
   alvik.left_led.set_color(1, 1, 1);
   alvik.right_led.set_color(1, 1, 1);
+  unsigned long onAfter = millis();
   logWait((unsigned long)P("sync_ms"));
   alvik.left_led.set_color(0, 0, 0);
   alvik.right_led.set_color(0, 0, 0);
   unsigned long off = millis();
   logWait(150);
-  net::sendLine("H,SYNC,run,tag,ms_on,ms_off");
-  net::logf("D,SYNC,%s,%s,%lu,%lu", gRunId.c_str(), tag, on, off);
+  net::sendLine("H,SYNC,run,tag,ms_on,ms_off,ms_on_after");
+  net::logf("D,SYNC,%s,%s,%lu,%lu,%lu", gRunId.c_str(), tag, on, off, onAfter);
 }
 
 // One record describing the run before it starts: what ran, on what, in
@@ -245,35 +271,212 @@ void logRunInfo(int i) {
 // Experiments that turn need the compass direction checked once per power-on.
 // The check wiggles the robot, so it must never happen inside a measured run
 // (after the tape start marks were taken).
-bool needsYawSign(int i) { return i == 1 || i == 3 || i == 4 || i == 5; }
+bool needsYawSign(int i) { return i == 1 || (i >= 3 && i <= 7); }
 
 // Calibration run, once per power-on and whenever robots may have been mixed
-// up. Logged like any run (RUNINFO, RAW, flashes), so the camera recording
-// holds it too. RAW step: 1 standing still blinking its code (who is who),
-// 2 rolling forward and 3 back (which way it faces, from the camera),
-// 4 the compass wiggle (gyro sign, on the robot), 5 settling.
-void runCalib() {
-  net::logf("M,%s calibration: blinking code %d, rolling forward and back, then a small wiggle",
-            net::name, blink::codeFor(net::name));
-  float n = fmaxf(3.0f, P("start_nudge_cm"));
+// up. Logged like any run (RUNINFO, PARAM, RAW at raw_hz, flashes), so the
+// camera recording holds it too; tools/blink/calib.py reads it from the video
+// and the log. It LOOKS before it rolls (look.h): the spins come first, the
+// front sensor's sweep during them shows where there is room, and the roll
+// goes that way. RAW step (what the camera / log measure in it):
+//   1  still, blinking its code, calib_blink_ms        who is who; front view
+//                                                      (anything inside its spin circle?)
+//   2  compass wiggle (calibrateYawSign(true))         gyro sign
+//   3  still calib_still_ms                            gyro bias; picture before the spin
+//   4  spin left calib_spin_deg at calib_spin_rpm      gyro scale, light offset from the
+//                                                      turning centre, front sensor sweep (look)
+//   5  still calib_still_ms                            picture between the spins; gyro bias
+//   6  spin back right calib_spin_deg                  the same, the other way
+//   7  still calib_still_ms                            picture after the spins; gyro bias
+//   8  turn to the roll heading (IMU turn; none if     heading before the roll (picture);
+//      it already faces it), still calib_still_ms      front view re-checked
+//   9  roll forward (up to calib_roll_cm), still       heading, wheel distance scale
+//  10  roll back the same, still                       the same, the other way
+// 4-7 are skipped when calib_spin_deg is 0 or something is within calib_spin_r_cm
+// of its turning centre at steps 1-3 (it then only knows the view straight
+// ahead); 9-10 are skipped when no heading has room for calib_roll_min_cm. One
+// CALIB_LOOK record (docs/data-formats.md), sent after the rolls, says what it
+// saw, chose and did; its spin / roll / reason columns say what was skipped or
+// cut short and why. A run that skips the spin or the roll for lack of room,
+// or whose forward roll the edge guard stops, is NOT a failure (the robot
+// refused something it had no room for or that was unsafe): RUNEND says done,
+// and the tools (session_checks.calib_outcome) count it as a third outcome,
+// "limited" (reason "no room" and/or "plywood edge"). The front stop is off
+// except during the rolls (standing and spinning in place it may face a
+// board). The blink code runs throughout (moves go dark before the library's
+// blocking call, as elsewhere). Defaults: about 62-65 s from RUNINFO to RUNEND
+// with the roll (the turn in step 8 takes 0-3 s; the 1 s settle_end_ms at the
+// end included); it needs a 25 cm circle to spin in and, in some direction,
+// 15 + 7 + 3 cm clear ahead of its front. With safe_edge on (edge.h), the
+// forward roll (step 9) stops at an open plywood edge, which the front sensor
+// cannot see: it then rolls back the distance it covered (step 10, retracing
+// its own path) and the run still ends done, limited (plywood edge); the roll
+// counts (roll "edge", roll_cm = the distance covered) if that distance is at
+// least calib_roll_min_cm, else it is skipped. The spins, the turn and the
+// roll back are not guarded; for the roll back that is by design: it retraces
+// the path just driven forward on the board, ending where the roll started. Firmware 2026-10-18b
+// rolled first, straight ahead (1 blink, 2 roll, 3 back, 4 wiggle, 5 still,
+// 6 spin, 7 still, 8 spin back, 9 still); before that: 1 still, 2 roll
+// max(3, start_nudge_cm) with 300 ms pauses, 3 back, 4 wiggle, 5 300 ms.
+// What the calibration skipped or cut short (CALIB_LOOK spin / roll / reason), for runCalib().
+const char* gCalibSpin = "done";   // done, skipped (something inside its spin circle), off (calib_spin_deg 0)
+const char* gCalibRoll = "full";   // full, short, edge (stopped at a plywood edge, kept), skipped
+bool gCalibNoRoom = false;         // spin or roll skipped for lack of room          } the "limited"
+bool gCalibEdge = false;           // the edge guard stopped the forward roll         } outcome
+
+const char* calibReason() {
+  return gCalibNoRoom && gCalibEdge ? "no room; plywood edge" : gCalibNoRoom ? "no room" : gCalibEdge ? "plywood edge" : "";
+}
+
+void calibSteps() {
+  float spin = P("calib_spin_deg");
+  gCalibSpin = spin != 0 ? "done" : "off";
+  gCalibRoll = "skipped";
+  gCalibNoRoom = gCalibEdge = false;
+  unsigned long still = (unsigned long)fmaxf(300.0f, P("calib_still_ms"));
+  net::logf("M,%s calibration: blinking code %d, a small wiggle%s, then a roll of up to %.0f cm forward and back "
+            "where it finds room", net::name, blink::codeFor(net::name), spin != 0 ? ", a slow spin each way" : "",
+            fmaxf(3.0f, P("calib_roll_cm")));
   rawlog::step = 1;
+  look::reset();
+  look::active = true;
   if (!waitMs((unsigned long)P("calib_blink_ms"))) return;
+  float nearStart = look::nearNow;
+  look::active = false;
   rawlog::step = 2;
-  if (!libraryMove(n) || !waitMs(300)) return;
-  rawlog::step = 3;
-  if (!libraryMove(-n) || !waitMs(300)) return;
-  rawlog::step = 4;
   if (!calibrateYawSign(true)) return;
-  rawlog::step = 5;
-  if (!waitMs(300)) return;
-  net::sendLine("M,calibrated: now place the robot on its start mark");
+  rawlog::step = 3;
+  look::reset();             // headings from here on are relative to this one
+  look::active = true;
+  if (!waitMs(still)) return;
+  float nearest = look::nearNow;
+  if (nearStart > 0 && (nearest <= 0 || nearStart < nearest)) nearest = nearStart;
+  bool spun = false;
+  if (spin != 0 && nearest > 0 && nearest < P("calib_spin_r_cm")) {
+    gCalibSpin = "skipped";
+    gCalibNoRoom = true;
+    net::logf("M,%s: something is %.1f cm from its middle, inside the %.0f cm circle it needs to spin: no spin "
+              "(no gyro scale or light offset this time); it can only look straight ahead",
+              net::name, nearest, 2 * P("calib_spin_r_cm"));
+  } else if (spin != 0) {
+    rawlog::step = 4;
+    if (!spinBy(fabsf(spin), P("calib_spin_rpm"))) return;
+    rawlog::step = 5;
+    if (!waitMs(still)) return;
+    rawlog::step = 6;
+    if (!spinBy(-fabsf(spin), P("calib_spin_rpm"))) return;
+    rawlog::step = 7;
+    if (!waitMs(still)) return;
+    spun = true;
+  }
+  look::active = false;
+  look::Choice c = look::choose();
+  float rollMin = fmaxf(1.0f, P("calib_roll_min_cm"));
+  bool roll = c.roll >= rollMin;
+  float target = wrap180(look::h0 + c.heading), turn = 0;
+  float live = 0, L = roll ? c.roll : 0;
+  const char* result = !roll ? "no_room" : c.full ? "roll" : "short";
+  // turn, look again, roll: every way out of it (an abort included) ends with the one CALIB_LOOK record
+  auto turnAndRoll = [&]() {
+    rawlog::step = 8;
+    if (roll) {
+      turn = wrap180(target - heading());
+      if (fabsf(turn) > P("turn_tol_deg") && !imuTurnTo(target).ok) return;
+    }
+    // still: the picture before the roll, and the live front view along the lane once more
+    unsigned long t0 = millis();
+    while (millis() - t0 < still) {
+      if (shouldAbort()) return;
+      float f = frontInPath();
+      if (f > 0 && (live == 0 || f < live)) live = f;
+      delay(5);
+    }
+    if (roll && live > 0) {
+      float fit = live - P("safe_front_cm") - P("calib_margin_cm");
+      if (fit < L) {
+        L = fit;
+        result = L >= rollMin ? "short" : "no_room_after_turn";
+        if (L < rollMin) L = 0;
+      }
+    }
+    gCalibRoll = L <= 0 ? "skipped" : !strcmp(result, "roll") ? "full" : "short";
+    if (L <= 0) {
+      gCalibNoRoom = true;
+      net::logf("M,%s: no room to roll (best direction %.0f deg from where it faced: %.0f cm clear ahead%s, a %.0f cm "
+                "roll needs %.0f): no heading or wheel scale this time. Give it 13 in (33 cm) of clear floor in some "
+                "direction and calibrate again for those.", net::name, c.heading, c.room,
+                c.cap >= 0 ? ", capped by the laptop" : "", rollMin, rollMin + P("safe_front_cm") + P("calib_margin_cm"));
+      return;
+    }
+    if (fabsf(c.heading) > 2) net::logf("M,%s: rolling %.1f cm towards %.0f deg (left positive) from where it faced",
+                                         net::name, L, c.heading);
+    gFrontLimitCm = -1;        // rolling: the usual front stop (safe_front_cm)
+    rawlog::step = 9;
+    float x0, y0;
+    poseXY(x0, y0);
+    if (!libraryMove(L)) {
+      if (strcmp(gAbortReason.c_str(), "plywood edge ahead")) return;
+      // The edge guard refused to roll on (the look-around can't see an open edge): not a failure.
+      // Settle, keep the roll if it went far enough, and roll back the way it came (retracing is safe).
+      gAbortReason = "";
+      gCalibEdge = true;
+      float planned = L;
+      gCalibRoll = "skipped";  // until it knows how far it went
+      result = "edge";
+      L = 0;
+      if (!waitMs(still)) return;
+      float went = distFrom(x0, y0);
+      bool keep = went >= rollMin;
+      net::logf("M,%s: stopped at a plywood edge after %.1f cm of a %.1f cm roll; %s", net::name, went, planned,
+                keep ? "keeping that roll, rolling back" : "too short to measure, rolling back");
+      gCalibRoll = keep ? "edge" : "skipped";
+      L = keep ? went : 0;
+      rawlog::step = 10;
+      if (went >= 0.5f && (!libraryMove(-went) || !waitMs(still))) return;
+      gFrontLimitCm = 0;
+      return;
+    }
+    if (!waitMs(still)) return;
+    rawlog::step = 10;
+    if (!libraryMove(-L) || !waitMs(still)) return;
+    gFrontLimitCm = 0;
+  };
+  turnAndRoll();
+  String caps = "";
+  for (int k = 0; k < look::nCap; k++) caps += String(k ? ";" : "") + String(look::capDeg[k], 0) + ":" + String(look::capCm[k], 1);
+  net::sendLine("H,CALIB_LOOK,run,spun,near_cm,heading_deg,turn_deg,room_cm,cap_cm,live_cm,roll_cm,result,room8,caps,"
+                "spin,roll,reason");
+  net::logf("D,CALIB_LOOK,%s,%d,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%s,%s,%s,%s,%s,%s", gRunId.c_str(), spun ? 1 : 0,
+            nearest, c.heading, turn, c.room, c.cap, live, L, result, look::roomSummary().c_str(), caps.c_str(),
+            gCalibSpin, gCalibRoll, calibReason());
+}
+
+void runCalib() {
+  void (*savedHook)() = gTickHook;
+  gFrontLimitCm = 0;
+  gTickHook = look::tickHook;
+  calibSteps();
+  look::active = false;
+  look::nCap = 0;            // the laptop's caps were for this placement only
+  gTickHook = savedHook;
+  gFrontLimitCm = -1;        // back to the usual front stop for the next run
+  if (gAbortReason.length() || gFail.length()) return;
+  if (gCalibNoRoom || gCalibEdge)   // not a failure: it did what the space allowed (RUNEND done; "limited")
+    net::logf("M,calibrated, limited (%s):%s%s the rest is kept. Now place the robot on its start mark", calibReason(),
+              !strcmp(gCalibSpin, "skipped") ? " no spin (something inside its spin circle);" : "",
+              gCalibEdge ? (!strcmp(gCalibRoll, "edge") ? " roll cut short at a plywood edge;"
+                                                       : " no roll (stopped at a plywood edge too soon);")
+                         : !strcmp(gCalibRoll, "skipped") ? " no roll (no room in any direction);" : "");
+  else
+    net::sendLine("M,calibrated: now place the robot on its start mark");
 }
 
 // Start nudge: a short roll forward and back right after the start flash, so
 // the camera sees which way the robot faces. RAW step -1 while it happens.
+// Not in follow runs: the laptop gives the pose, and the robot stays on its spot.
 bool startNudge(int i) {
   float n = P("start_nudge_cm");
-  if (n <= 0 || !(i == 1 || i == 4 || i == 5)) return true;
+  if (n <= 0 || !(i == 1 || i == 4 || i == 5 || i == EXP_SURVEY)) return true;
   rawlog::step = -1;
   bool ok = libraryMove(n) && waitMs(200) && libraryMove(-n) && waitMs(300);
   rawlog::step = 0;
@@ -299,11 +502,16 @@ void runExperiment(int i, bool fromButton) {
   gRunId = id;
   gAbortReason = "";
   gFail = "";
-  if (i != EXP_CALIB) gSelected = i;   // keep showing the chosen experiment after a calibration
+  if (i != EXP_CALIB && i != EXP_FOLLOW) gSelected = i;   // calibration and follow keep showing the chosen experiment
   showSelection(true);
   net::logf("M,run %s: %s starting", gRunId.c_str(), EXP_NAMES[i]);
   bool logged = i != 0;   // the stream experiment is its own log
   unsigned long t0 = millis();
+  // follow: the robot stands on its start spot (which may face a board closer than
+  // safe_front_cm) until steps arrive; each step sets its own front check (follow.h).
+  // calib: it may be put down facing a board; only its rolls check ahead (runCalib).
+  if (i == EXP_FOLLOW || i == EXP_CALIB) gFrontLimitCm = 0;
+  edge::begin();   // the edge guard learns the plywood under the line sensors during the settle pause
   if (logged) {
     logRunInfo(i);
     rawlog::start();
@@ -321,14 +529,22 @@ void runExperiment(int i, bool fromButton) {
     case 3: runGrid(); break;
     case 4: runDemo(); break;
     case 5: runStraight(); break;
+    case EXP_SURVEY: runSurvey(); break;
+    case EXP_FOLLOW: follow::run(); break;
     case EXP_CALIB: runCalib(); break;
   }
   alvik.brake();
+  bool edgeStop = !strcmp(gAbortReason.c_str(), "plywood edge ahead");
+  if (logged) tickWait((unsigned long)P("settle_end_ms"));   // at rest, still logging and blinking
+  edge::stop();
   blink::stop();
   if (logged) {
     syncFlash("end");   // runs to full length even after a stop (no safety checks inside)
     rawlog::stop();
-    String result = gAbortReason.length() ? String("stopped:") + gAbortReason
+    // The edge guard refusing to drive off the work area is not a failure: "limited:plywood edge"
+    // (the tools leave such runs out of accuracy statistics and count them separately).
+    String result = edgeStop             ? String("limited:plywood edge")
+                  : gAbortReason.length() ? String("stopped:") + gAbortReason
                   : gFail.length()        ? String("failed:") + gFail : String("done");
     net::sendLine("H,RUNEND,run,result,ms_end,duration_ms,battery,wifi_dbm,raw_rows_sent,packets_sent");
     net::logf("D,RUNEND,%s,%s,%lu,%lu,%d,%d,%lu,%lu", gRunId.c_str(),
@@ -336,7 +552,9 @@ void runExperiment(int i, bool fromButton) {
               millis(), millis() - t0, alvik.get_battery_charge(), (int)WiFi.RSSI(), rawlog::rows,
               (unsigned long)net::seq);
   }
-  if (gAbortReason.length()) net::logf("M,run %s: stopped (%s)", gRunId.c_str(), gAbortReason.c_str());
+  if (edgeStop) net::logf("M,run %s: limited: the edge guard stopped it before an open plywood edge (not a failure; "
+                          "left out of accuracy statistics)", gRunId.c_str());
+  else if (gAbortReason.length()) net::logf("M,run %s: stopped (%s)", gRunId.c_str(), gAbortReason.c_str());
   else                       net::logf("M,run %s: %s finished", gRunId.c_str(), EXP_NAMES[i]);
   gAbortReason = "";
   // Wait for the cancel button to be released so it doesn't stop the next run.

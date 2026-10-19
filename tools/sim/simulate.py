@@ -21,7 +21,7 @@ Writes, under --out:
   console_output.txt       what the console would have printed
 
 Runs follow the sheet: one row = one run, in sheet order, with that row's
-robot and commands (straight and demo runs; a calibration run comes
+robot and commands (straight, demo and survey runs; a calibration run comes
 first for each robot). Optional sheet columns start_x_cm, start_y_cm,
 start_heading_deg put that row's start spot somewhere else than the session's
 start_pose (e.g. a survey started in the middle of the camera view). Robots take turns (one drives while the others are parked
@@ -204,10 +204,12 @@ def main(argv=None):
             arrive = t_cmd + (cfg.net.oneway_base_ms + rng.expovariate(1 / cfg.net.oneway_exp_ms)) / 1000
             r.idle_until(arrive + rng.uniform(0, 0.012))
             start_true = (r.x, r.y, r.th)
+            for c in s.calib_commands:          # e.g. the laptop's roll caps (set calib_dir_limits ...)
+                r.receive_command(c)
             run = r.run_experiment("calib")
             t_end = r.t_at(r.ms)
             run.update(order=None, robot=r.name, row=None, start_true=start_true, end_true=(r.x, r.y, r.th),
-                       t_start=r.t_at(run["ms_start"]), t_end=t_end, kidnapped=False)
+                       t_start=r.t_at(run["ms_start"]), t_end=t_end, kidnapped=False, look=r.calib_look)
             calib_runs.append(run)
             print(f"      {r.name:7s} {'calibration':12s} run {run['run']:8s} {run['result']:22s} "
                   f"{run['t_end'] - run['t_start']:5.1f} s")
@@ -314,7 +316,11 @@ def main(argv=None):
             note = "simulated"
             if run["kidnapped"]:
                 note += "; robot picked up and moved mid-run (kidnap test)"
-            if run["result"] != "done":
+            if run["result"].startswith("limited:"):
+                # run_sheet.py, the user confirming: excluded, "limited: plywood edge" (not a failure)
+                row["excluded"] = "1"
+                note += "; limited: " + run["result"][len("limited:"):]
+            elif run["result"] != "done":
                 note += "; run ended: " + run["result"]
             row["note"] = note
             w.writerow(row)
@@ -388,12 +394,13 @@ def main(argv=None):
                     blink_start=r.t_at(run["ms_blink"]) if run["ms_blink"] is not None else None)
     for run in done:
         info["runs"].append(run_info(run))
-    info["calib_runs"] = [run_info(run) for run in calib_runs]
+    info["calib_runs"] = [dict(run_info(run), look=run.get("look")) for run in calib_runs]
     info["note"] = ("start/end are the TRUE axle-midpoint poses (x_cm, y_cm, heading_deg); turned_deg = true rotation "
                     "during the run, not wrapped. Robot clock: laptop_time = t_boot + robot_ms / 1000 / (1 + clock_drift_ppm "
                     "* 1e-6), so a positive clock_drift_ppm is a robot clock running FAST, which check_session.py "
                     "reports the same way (\"N ppm fast\"). calib_runs: the calibration run before each robot's first sheet "
-                    "row (not on the sheet). blink_start: laptop time of blink::start(); 300 ms dark, then one 100 ms "
+                    "row (not on the sheet); its `look`: what the look-around chose (CALIB_LOOK; h0 = the gyro heading the "
+                    "look's headings are relative to). blink_start: laptop time of blink::start(); 300 ms dark, then one 100 ms "
                     "flash every (blink_code + 2) x 100 ms, counted from blink_start + 0.3 s.")
     from dataclasses import asdict
     info["config"] = asdict(cfg)

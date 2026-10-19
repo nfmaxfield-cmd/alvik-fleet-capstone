@@ -94,7 +94,18 @@ class TofModel:
     # error per robot: {"Left": [bias_cm, scale_pct]}. Empty = perfect, as before.
     zone_angle_err_deg_by_robot: dict = field(default_factory=dict)
     range_err_by_robot: dict = field(default_factory=dict)
-    bottom_cm: float = 9.0                # "bottom" zones see the floor about this far ahead
+    bottom_cm: float = 9.0                # "bottom" zones see the floor about this far ahead (no board set)
+    # bottom zone geometry, used when session.board_cm is set (GUESSES; E0c rows edge_n15/10/5 and the
+    # sensor height measured by hand confirm or replace them): the sensor sits sensor_height_cm above the
+    # plywood; the zone looks bottom_deg below horizontal, spanning bottom_vspan_deg up/down and
+    # bottom_hspan_deg across; it reports the NEAREST thing any part of it sees (5 x 3 rays), so it reads
+    # the cement only once its whole floor patch is past an open edge. 2.6 cm / 16.8 deg gives 9.0 cm on
+    # plywood at the zone centre (about 8.3 cm nearest), its floor patch about 7-9 cm ahead of the sensor.
+    sensor_height_cm: float = 2.6
+    bottom_deg: float = 16.8
+    bottom_vspan_deg: float = 5.6
+    bottom_hspan_deg: float = 45.0
+    bottom_noise_cm: float = 0.3
     top_extra_pct: float = 3.0            # "top" zones look slightly up: a bit further than the centre zone
     # rectangular room walls the ToF rays hit, floor coordinates (cm)
     arena_x: List[float] = field(default_factory=lambda: [-80.0, 220.0])
@@ -110,6 +121,11 @@ class LineModel:
     tape_reading: float = 850.0
     tape_noise: float = 30.0
     footprint_cm: float = 0.6             # each sensor averages over this width
+    # past an open plywood edge (session.board_cm / open_edges): the sensor looks down at the cement
+    # one plywood thickness further away. GUESSES until the E0c edge rows: less light comes back from
+    # further away, so the reading is assumed to go UP (like dark tape), near the top of the range.
+    past_edge_reading: float = 1000.0
+    past_edge_noise: float = 40.0
 
 
 @dataclass
@@ -194,6 +210,8 @@ class SessionModel:
     calib_area_cm: List[float] = field(default_factory=lambda: [20.0, 50.0, 20.0, 45.0])   # x0, x1, y0, y1
     calib_wait_s: float = 2.0             # put down -> Enter pressed -> `calibrate` sent
     after_calib_s: float = 2.0            # RUNEND seen -> robot picked up to go to the start mark
+    calib_commands: List[str] = field(default_factory=list)   # console commands sent just before `calibrate`
+    #                                       (e.g. "set calib_dir_limits 0 2": the laptop's roll caps, firmware look.h)
     parked_pose: List[float] = field(default_factory=lambda: [-160.0, -60.0, 0.0])   # robots not running wait here, out of view
     video_lead_s: float = 5.0
     video_tail_s: float = 5.0
@@ -201,6 +219,12 @@ class SessionModel:
     motor_fw: str = "1.1.0"
     tape_lines: List[List[float]] = field(default_factory=lambda: [[-10.0, 0.0, 140.0, 0.0], [0.0, -40.0, 0.0, 60.0]])
     tape_width_cm: float = 1.9
+    # the plywood board under the robots: [x0, y0, x1, y1] floor cm (None = endless floor, as before), which
+    # of its sides have no border board ("x0" = the x = x0 side, "x1", "y0", "y1"), and the step down to the
+    # cement past an open side. Only the line sensors and the bottom zone use it (nothing falls off).
+    board_cm: Optional[List[float]] = None
+    open_edges: List[str] = field(default_factory=list)
+    board_thick_cm: float = 1.9
 
 
 @dataclass

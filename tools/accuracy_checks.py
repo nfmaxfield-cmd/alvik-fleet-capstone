@@ -215,9 +215,21 @@ class Experiment:
                 self.straight[r.get("run", "")] = r
             for r in cs.rows(s, "runinfo"):
                 self.runinfo[r.get("run", "")] = r
+        # runs the edge guard stopped before an open plywood edge ("limited:plywood edge"): not failures, but not
+        # finished routes either, so every statistic here leaves them out; counted apart (self.limited)
+        self.limited = tr.limited_trials(folder)
+        self.drop_limited()
         self.recordings = sorted(d for pat in ("video/*", "recording*", "recordings/*")
                                  for d in glob.glob(os.path.join(folder, "data", pat))
                                  if os.path.isdir(d) and any(os.path.isfile(os.path.join(d, n)) for n in REC_FILES))
+
+    def drop_limited(self):
+        """Move measured trials whose RUNEND says limited (row not marked by run_sheet.py) to self.limited."""
+        by_log = [t for t in self.trials
+                  if cs.sc.run_outcome(getattr(self.runs.get((t.get("run_id") or "").strip()), "result", "done"))
+                  == cs.sc.CALIB_LIMITED]
+        self.limited += by_log
+        self.trials = [t for t in self.trials if t not in by_log]
 
     def trial_runs(self):
         """[(trial, Run or None)] for every measured, not-excluded trial."""
@@ -1049,11 +1061,18 @@ def check_identity(tb, cam):
         return
     agree = sum(1 for c in rows if c["identity"].lower() == "agree")
     dis = sum(1 for c in rows if "disagree" in c["identity"].lower())
-    unread = len(rows) - agree - dis
+    # calibrations limited by lack of room (no roll to name): their own state, neither read nor unreadable
+    limited = sum(1 for c in rows if (c.get("outcome") or "").startswith(cs.sc.CALIB_LIMITED)
+                  and c["identity"].lower() != "agree"
+                  and "disagree" not in c["identity"].lower())
+    unread = len(rows) - agree - dis - limited
     lo, hi = wilson(dis, agree + dis)
-    verdict = FAIL if dis else (CHECK if unread > 0.2 * len(rows) else PASS)
+    verdict = FAIL if dis else (CHECK if unread > 0.2 * (len(rows) - limited) else PASS)
     tb.add("11", "all runs", f"{dis} wrong of {agree + dis} named rolls (error rate 95% interval {lo * 100:.0f}% to "
-           f"{hi * 100:.0f}%); {unread} not readable", verdict, dis / (agree + dis) if agree + dis else None, agree + dis)
+           f"{hi * 100:.0f}%); {unread} not readable"
+           + (f"; {limited} calibration(s) limited (no roll to name: no room or a plywood edge; not counted)"
+              if limited else ""),
+           verdict, dis / (agree + dis) if agree + dis else None, agree + dis)
 
 
 def check_robots(tb, t1):
@@ -1362,7 +1381,13 @@ def main(argv=None):
     os.makedirs(out_dir, exist_ok=True)
 
     print("Inputs: " + "; ".join(f"{role}: {e.folder} ({len(e.trials)} measured runs, {len(e.sessions)} log folders, "
-                                 f"{len(e.runs)} logged runs)" for role, e in exps.items()))
+                                 f"{len(e.runs)} logged runs"
+                                 + (f"; {len(e.limited)} limited (plywood edge) left out" if e.limited else "") + ")"
+                                 for role, e in exps.items()))
+    n_lim = sum(len(e.limited) for e in exps.values())
+    if n_lim:
+        print(f"note: {n_lim} run(s) limited (plywood edge): the edge guard stopped them before an open edge. Not a "
+              "failure, but not a finished route, so every check below leaves them out.")
     print(f"Recordings: {', '.join(recs) if recs else 'none'}")
 
     tb = Table()

@@ -5,6 +5,7 @@
 #include "params.h"
 #include "net.h"
 #include "rawlog.h"
+#include "edge.h"
 
 extern Arduino_Alvik alvik;
 
@@ -16,23 +17,77 @@ bool handleCommand(const String& cmd, bool running);
 String gAbortReason = "";
 String gFail = "";   // why a run failed without being stopped (a timeout, a failed check); shown in RUNEND
 
-// Call often inside every loop. True means stop the experiment.
+// Survey and follow only (both off otherwise, so the other experiments behave as before):
+// gTickHook runs on every shouldAbort() call (the own-pose tracker rides along like the RAW log);
+// gFrontLimitCm >= 0 replaces safe_front_cm for the current step (0 = no front check);
+// gFrontSoft: a front trip ends only the current step (gStepStop = "obstacle"), not the run;
+// gStepStop: why the current step must stop (obstacle, halted); the run goes on.
+void (*gTickHook)() = nullptr;
+float gFrontLimitCm = -1;
+bool gFrontSoft = false;
+bool gEdgeSoft = false;   // follow: an edge-guard trip ends only the current step (gStepStop = "edge"), not the
+                          // run: the robot holds and the laptop maps the edge and replans (run_plan.py)
+String gStepStop = "";
+bool gFrontPath = false;  // straight drives: check all five zones inside the robot's path, not just the centre
+float gFrontEndBase = -1; // follow drives (>= 0): gFrontLimitCm = min(this, distance left in the step + front_end_cm)
+float gFrontTripCm = 0;   // the reading that tripped it
+unsigned long gFrontLowSince = 0;   // soft mode: when the reading first went below the limit (0 = it isn't)
+
+// Nearest thing ahead INSIDE the robot's own path: each of the five front
+// zones' reading taken at the zone's direction (ZONE_DEG, an assumption to be
+// checked: the 60 deg view split in five), kept if it falls within
+// path_half_cm of the robot's centre line; returns its distance straight
+// ahead of the sensor (0 = nothing in the path). Something the robot's side
+// would clip is only in view while it is still several cm ahead (at 4.5 cm to
+// the side it leaves the 30 deg half-view below about 8 cm), so the limit for
+// this check must look further ahead than the centre-only safe_front_cm.
+float frontInPath() {
+  static const float ZONE_DEG[5] = {22.0f, 11.0f, 0.0f, -11.0f, -22.0f};
+  float d[5];
+  alvik.get_distance(d[0], d[1], d[2], d[3], d[4]);
+  float half = P("path_half_cm"), best = 0;
+  for (int k = 0; k < 5; k++) {
+    if (d[k] <= 0) continue;
+    float a = ZONE_DEG[k] * 0.017453293f;
+    float lat = d[k] * sinf(a), fwd = d[k] * cosf(a);
+    if (fabsf(lat) <= half && (best == 0 || fwd < best)) best = fwd;
+  }
+  return best;
+}
+
+// Call often inside every loop. True means stop the experiment (or, with
+// gStepStop set, just the current step).
 bool shouldAbort() {
   rawlog::tick();   // full sensor log rides along with every motion loop
+  if (gTickHook) gTickHook();
   if (gAbortReason.length()) return true;
   if (alvik.get_touch_cancel()) { gAbortReason = "cancel button"; }
   else if (P("safe_lift") > 0 && alvik.get_lifted()) { gAbortReason = "robot lifted"; }
-  else {
-    float lim = P("safe_front_cm");
+  // open plywood edge (edge.h; safe_edge 0 = off): forward driving only, backing up is blind;
+  // a hard stop in every experiment, follow steps and approaches included (gFrontLimitCm doesn't apply);
+  // not a failure: RUNEND says "limited:plywood edge" (runExperiment), the calibration rolls back (runCalib)
+  else if (edge::check()) { if (gEdgeSoft) gStepStop = "edge"; else gAbortReason = "plywood edge ahead"; }
+  else if (!gStepStop.length()) {
+    float lim = gFrontLimitCm >= 0 ? gFrontLimitCm : P("safe_front_cm");
     if (lim > 0) {
       float dL, dCL, dC, dCR, dR;
       alvik.get_distance(dL, dCL, dC, dCR, dR);
-      if (dC > 0 && dC < lim) gAbortReason = "obstacle ahead";
+      if (gFrontPath) dC = frontInPath();
+      if (dC > 0 && dC < lim) {
+        if (!gFrontSoft) gAbortReason = "obstacle ahead";
+        else {
+          // soft mode (survey, follow): one noisy frame is not enough; it must stay too close
+          if (!gFrontLowSince) gFrontLowSince = millis() | 1;
+          if (millis() - gFrontLowSince >= (unsigned long)P("front_confirm_ms")) { gStepStop = "obstacle"; gFrontTripCm = dC; }
+        }
+      } else {
+        gFrontLowSince = 0;
+      }
     }
   }
   String cmd;
   if (net::poll(cmd) && handleCommand(cmd, true)) gAbortReason = "stop command";
-  if (gAbortReason.length()) {
+  if (gAbortReason.length() || gStepStop.length()) {
     alvik.brake();
     return true;
   }
@@ -112,6 +167,40 @@ bool calibrateYawSign(bool force = false) {
   alvik.brake();
   tickWait(300);
   return true;
+}
+
+// Spin in place by `deg` (positive = left), counted by the gyro (heading()),
+// the wheels at `rpm` opposite ways, then brake. Needs the compass sign
+// (calibrateYawSign() first). Where it stops is not important (the camera and
+// the log both measure what really happened), so it simply brakes about a
+// degree early for the coast. The front distance check is off while it spins:
+// it does not move forward, and a board inside safe_front_cm would otherwise
+// stop it; so the RAW log carries the sensor's whole sweep across nearby boards.
+// Non-blocking motor calls only, so the blink code keeps going.
+bool spinBy(float deg, float rpm) {
+  if (deg == 0) return true;
+  if (gYawSign == 0) { gFail = "spin without a compass check"; return false; }
+  int dir = deg > 0 ? 1 : -1;
+  float target = fabsf(deg) - 1.0f;
+  float dps = fmaxf(fabsf(rpm), 1.0f) * 2.27f;   // nominal: rpm x 6 deg/s x wheel radius / half track (1.7 / 4.5 cm)
+  unsigned long limit = 3000 + (unsigned long)(fabsf(deg) / dps * 2000.0f);   // allows half speed
+  float saved = gFrontLimitCm;
+  gFrontLimitCm = 0;
+  float turned = 0, prev = heading();
+  unsigned long t0 = millis();
+  bool ok = true;
+  alvik.set_wheels_speed(-dir * fabsf(rpm), dir * fabsf(rpm));
+  while (turned < target) {
+    if (shouldAbort()) { ok = false; break; }
+    if (millis() - t0 > limit) { gFail = "spin timed out"; ok = false; break; }
+    float h = heading();
+    turned += dir * wrap180(h - prev);
+    prev = h;
+    delay(5);
+  }
+  alvik.brake();
+  gFrontLimitCm = saved;
+  return ok;
 }
 
 // ---------- turns ----------

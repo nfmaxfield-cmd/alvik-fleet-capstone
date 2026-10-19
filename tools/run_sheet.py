@@ -37,6 +37,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from alvik_console import Link  # noqa: E402
+import session_checks as sc  # noqa: E402
 
 NOTES_PORT = 5007
 
@@ -81,6 +82,7 @@ class RunWatcher:
         self.straight = {}   # run id -> robot's own end (x, y)
         self.boots = {}      # robot -> boot id seen in clock answers
         self.params = {}     # run id -> {param name: value} from its PARAM records
+        self.looks = {}      # run id -> its CALIB_LOOK record (calibration runs, firmware 2026-10-18c+)
         self.messages = []
 
     def __call__(self, name, kind, rtype, vals):
@@ -97,6 +99,10 @@ class RunWatcher:
                 self.straight[vals[0]] = (num(vals[5]), num(vals[6]))
             elif rtype == "CLOCK" and len(vals) >= 3:
                 self.boots[name] = vals[2]
+            elif rtype == "CALIB_LOOK" and len(vals) >= 10:
+                self.looks[vals[0]] = dict(heading=num(vals[3]), room=num(vals[5]), roll=num(vals[8]), result=vals[9])
+                if len(vals) >= 15:          # spin, roll, reason: what it skipped for lack of room
+                    self.looks[vals[0]].update(spin=vals[12], roll_step=vals[13], reason=vals[14])
             elif rtype == "PARAM" and len(vals) >= 3:
                 self.params.setdefault(vals[0], {})[vals[1]] = num(vals[2])
             self.cv.notify_all()
@@ -168,6 +174,33 @@ def inches(text):
             return None
         v = int(fa) / int(fb)
     return -v if neg else v
+
+
+# The calibration run's moves with the firmware defaults (params.h, 2026-10-18c): it spins
+# calib_spin_deg each way first, looking around with its front sensor, then turns to the
+# direction with the most room and rolls up to calib_roll_cm forward and back. Space it needs, cm.
+CALIB_ROLL_CM = 15.0      # calib_roll_cm
+CALIB_STOP_CM = 7.0       # safe_front_cm: it stops if anything is this close in front, even at the end of the roll
+CALIB_MARGIN_CM = 3.0     # calib_margin_cm: it plans to end the roll this much further from anything than that
+ROBOT_LEN_CM = 10.0       # the robot's own length (9.5 cm), rounded up
+SPIN_CIRCLE_CM = 25.0     # spin in place: corners sweep a ~13.5 cm circle; 25 cm leaves room for drift
+EDGE_CM = 25.0            # open plywood edge: roll (15) + half the robot (5) + 5 cm to spare
+CALIB_S = 65              # how long it takes, about (62-65 s in the simulator with a roll, settle_end_ms included)
+
+
+def calib_space_text():
+    """The calibration prompt's space instructions, in cm and inches."""
+    lane = ROBOT_LEN_CM + CALIB_ROLL_CM + CALIB_STOP_CM + CALIB_MARGIN_CM
+    return (f"  It needs a clear circle {SPIN_CIRCLE_CM:g} cm ({to_in(SPIN_CIRCLE_CM)}) across around where it stands, "
+            f"to spin.\n"
+            f"  It picks its own direction to roll: the one where its front sensor saw the most room. It rolls the "
+            f"full {CALIB_ROLL_CM:g} cm when some direction has {lane:g} cm ({to_in(lane)}) of clear floor, counted "
+            f"from its back (its own {ROBOT_LEN_CM:g} cm, the roll, and {CALIB_STOP_CM + CALIB_MARGIN_CM:g} cm to spare); "
+            f"less room, a shorter roll; under {ROBOT_LEN_CM + 5 + CALIB_STOP_CM + CALIB_MARGIN_CM:g} cm "
+            f"({to_in(ROBOT_LEN_CM + 5 + CALIB_STOP_CM + CALIB_MARGIN_CM)}) every way, no roll.\n"
+            f"  Keep it at least {EDGE_CM:g} cm ({to_in(EDGE_CM)}) from any open plywood edge (an edge with no board "
+            f"along it): the front sensor can't see an edge, so open space past it looks like room.\n"
+            f"  Nothing else may move inside that space (hands, other robots).")
 
 
 def to_in(cm):
@@ -252,6 +285,28 @@ def check_params(watch, run, cmds, wait_s=1.5):
     bad = [f"{k} is {got[k]:g}, not {v:g}" for k, v in wanted.items() if k in got and abs(got[k] - v) > 1e-3]
     unseen = [k for k in wanted if k not in got]
     return bad, unseen
+
+
+# Filled in by a run: a replacement row starts without them.
+RUN_FILLED_COLS = ("run_id", "xf0_cm", "yf0_cm", "xr0_cm", "yr0_cm", "xf_cm", "yf_cm", "xr_cm", "yr_cm",
+                   "battery_pct", "excluded", "note")
+
+
+def add_replacement(rows, i):
+    """A limited run (edge guard: limited:plywood edge) is left out of the statistics, so its level would
+    lose a run: append a copy of rows[i] (same robot, level, commands, targets) at the end of that robot's
+    block (the stretch of consecutive rows of the same robot that row i is in), with a new order number
+    and the note "replaces order N (limited: plywood edge)". Returns the new row."""
+    r = rows[i]
+    j = i
+    while j + 1 < len(rows) and rows[j + 1].get("robot") == r.get("robot"):
+        j += 1
+    orders = [int(float(x["order"])) for x in rows if str(x.get("order", "")).strip().lstrip("-").replace(".", "", 1).isdigit()]
+    new = {k: ("" if k in RUN_FILLED_COLS else v) for k, v in r.items()}
+    new["order"] = str(max(orders, default=0) + 1)
+    new["note"] = f"replaces order {r.get('order')} ({sc.LIMITED_EDGE_NOTE})"
+    rows.insert(j + 1, new)
+    return new
 
 
 def save_sheet(path, cols, rows, interactive=True):
@@ -381,18 +436,56 @@ def main():
                         ask("  Press Enter once it's on: ")
                 boot = watch.boots.get(robot)
                 if calibrated.get(robot) is None or (boot and calibrated[robot] != boot):
-                    print(f"  {robot} needs its calibration run (once per power-on, about 10 s): it blinks its "
-                          f"code, rolls a little forward and back, then wiggles.")
-                    ask("  Put it on the floor where the camera can see it, NOT on the mark, and press Enter: ")
+                    print(f"  {robot} needs its calibration run (once per power-on, about {CALIB_S} s): it blinks "
+                          f"its code, wiggles, spins slowly twice around to the left and back to the right while it "
+                          f"looks around, then turns to where it saw the most room and rolls up to {CALIB_ROLL_CM:g} cm "
+                          f"({to_in(CALIB_ROLL_CM)}) forward and back.")
+                    print(calib_space_text())
+                    ask("  Put it on the floor where the camera can see all of that space, NOT on the mark, facing "
+                        "any way, and press Enter: ")
                     before = watch.started.get(robot)
                     link.send_name(robot, "calibrate")
                     crun = watch.wait_start(robot, before, 8)
-                    cres = watch.wait_end(crun, 30) if crun else None
-                    if not cres or cres["result"] != "done":
+                    cres = watch.wait_end(crun, CALIB_S + 50) if crun else None
+                    look = watch.looks.get(crun)
+                    outcome = sc.calib_outcome(cres["result"] if cres else None, look)
+                    if outcome == sc.CALIB_FAILED:
                         why = cres["result"] if cres else "no answer"
                         print(f"  Calibration didn't finish ({why}). Check the robot has room, then try again.")
                         continue
-                    print(f"  Calibrated (run {crun}).")
+                    if outcome == sc.CALIB_LIMITED:
+                        # not a failure: it did what the space allowed; nothing is counted against it
+                        no_spin = look.get("spin") == "skipped"
+                        edge = look.get("result") == "edge"
+                        edge_kept = look.get("roll_step") == "edge"
+                        no_roll = look.get("roll_step") == "skipped" or ("roll_step" not in look and
+                                                                          (look["roll"] or 0) <= 0)
+                        if edge_kept:
+                            print(f"  Calibrated with a shorter roll: the edge guard stopped it at a plywood edge after "
+                                  f"{look['roll']:.1f} cm (the look-around can't see an open edge). That roll is kept"
+                                  + ("; no spin either (something inside its 25 cm circle)." if no_spin else "."))
+                        elif edge and no_roll:
+                            print("  Calibrated without the roll: the edge guard stopped it at a plywood edge too soon "
+                                  "to measure. " + ("Spin results are kept; " if not no_spin else "")
+                                  + "heading and wheel size come from the camera and later runs instead.")
+                        elif no_roll and not no_spin:
+                            print("  Calibrated without the roll: no room in any direction. Spin results are kept; "
+                                  "heading and wheel size come from the camera and later runs instead.")
+                        elif no_spin and not no_roll:
+                            print("  Calibrated without the spin: something is inside the 25 cm circle it needs. Roll "
+                                  "results are kept; gyro scale and light offset come from a later calibration instead.")
+                        else:
+                            print("  Calibrated without the spin or the roll: no room (something inside its 25 cm "
+                                  "circle, and no room to roll in any direction). Its blink code and compass check are "
+                                  "kept; heading, wheel size, gyro scale and light offset come from the camera, later "
+                                  "runs and a later calibration instead.")
+                        if ask("  Move it and press r to redo, or Enter to continue: ").lower() == "r":
+                            continue
+                        print(f"  Calibrated, {sc.calib_outcome_text(cres['result'], look)} (run {crun}).")
+                    else:
+                        if look and look["result"] == "short":
+                            print(f"  (It rolled {look['roll']:.1f} cm, not the full {CALIB_ROLL_CM:g}: not much room.)")
+                        print(f"  Calibrated (run {crun}).")
                     if pi:
                         pi.send(f"calibration {robot} run {crun}")
                     calibrated[robot] = watch.boots.get(robot, "?")
@@ -463,7 +556,30 @@ def main():
                 logf.flush()
                 r["run_id"] = run
                 r["battery_pct"] = res.get("battery", "")
-                if res["result"] != "done":
+                if sc.run_outcome(res["result"]) == sc.CALIB_LIMITED:
+                    # the edge guard refused to drive off the work area: not a localization failure, but the
+                    # run didn't finish its route, so accuracy statistics leave it out (counted apart)
+                    print("  The edge guard stopped it before an open plywood edge. That is not a failure, but the "
+                          "run didn't finish its route, so the accuracy statistics should leave it out. Unless you "
+                          "redo it now, a replacement run (same robot and level) is added at the end of this "
+                          f"robot's block, so {level} keeps its planned number of runs.")
+                    a = ask(f"  Press Enter to mark it excluded with the note \"{sc.LIMITED_EDGE_NOTE}\", r to redo "
+                            f"it, or m to measure it anyway: ").lower()
+                    if a == "r":
+                        r["run_id"] = ""
+                        continue
+                    rep = add_replacement(rows, i)
+                    print(f"  Added run {rep['order']} to replace it ({robot}, {level}).")
+                    if a != "m":
+                        r["excluded"] = "1"
+                        r["note"] = (r.get("note", "") + " " + sc.LIMITED_EDGE_NOTE).strip()
+                        save_sheet(sheet, cols, rows)
+                        print("  Excluded (limited: plywood edge) and saved.")
+                        i += 1
+                        continue
+                    # measured for the record: the note still keeps it out of the accuracy statistics
+                    r["note"] = (r.get("note", "") + " " + sc.LIMITED_EDGE_NOTE + " (measured anyway)").strip()
+                elif res["result"] != "done":
                     a = ask("  The run didn't finish normally. Measure it anyway (y), redo it (r) or exclude it (x)? ").lower()
                     if a == "r":
                         r["run_id"] = ""

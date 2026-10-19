@@ -441,6 +441,21 @@ replay.py scores a run only with a calibration made without it, and refuses
 otherwise. The spread of those fits (jackknife) is how sure each board and
 sensor setting is; the consider states use it. Files: docs/data-formats.md.
 `tof_use_cal` false makes a setup ignore the calibration.
+The calibration runs' spin steps are found from the gyro (`spin_steps`: RAW
+steps 4 and 6 from firmware 2026-10-18c's look-first run, 6 and 8 before;
+until 2026-10-18 the tool used 6 and 8 for every run, which with 18c meant the
+spin back and the turn to the roll heading).
+
+The site setup (tools/site) writes the locked landmarks and each robot's sensor
+model in this same format (`<site>/tof_calibration.json`, made from the survey's
+own runs, so none of the scored runs is in it): `replay.py --tof-cal
+<site>/tof_calibration.json --map <site>/landmarks.csv`. On r7/r11 (same setups
+as above, current code) the always-merge setup's end error with the camera
+working goes from 0.309 / 0.362 cm (1 cm map + tof_calib) to 0.221 / 0.288 cm
+with the locked site map (camera alone 0.270 / 0.249): no penalty on average
+(r7 gains 0.05 cm, r11 loses 0.04 cm), path RMSE better than the camera alone
+in both; no camera 0.62 / 0.70 -> 0.45 / 0.52 cm. Details:
+docs/experiments/E00d-site-setup.
 
 Simulator results: see "Tested so far".
 

@@ -24,12 +24,15 @@ import math
 import random
 
 from config import firmware_raw_columns
+from fw_follow import FollowMixin
+import fw_look
 
-EXP_NAMES = ["stream", "turn", "lap", "grid", "demo", "straight", "calib"]
-EXP_CALIB = 6
+EXP_NAMES = ["stream", "turn", "lap", "grid", "demo", "straight", "survey", "follow", "calib"]
+EXP_SURVEY, EXP_FOLLOW, EXP_CALIB = 6, 7, 8
+N_RUNNABLE = 8            # `run <name>` accepts the first 8 (not calib)
 # showSelection() colours, (r, g, b) on/off, per experiment index (home_lab.ino);
-# calib (6) never becomes the selection (2026-10-17g), so its entry is unused
-EXP_COLORS = [(0, 0, 1), (0, 1, 0), (1, 1, 0), (1, 0, 1), (1, 1, 1), (0, 1, 1), (0, 0, 0)]
+# follow (7) and calib (8) never become the selection, so their entries are unused
+EXP_COLORS = [(0, 0, 1), (0, 1, 0), (1, 1, 0), (1, 0, 1), (1, 1, 1), (0, 1, 1), (1, 0, 0), (0, 0, 0), (0, 0, 0)]
 BLINK_SLOT_MS = 100        # blink.h
 BLINK_LEAD_SLOTS = 3         # dark slots right after blink::start()
 OFF, WHITE = (0, 0, 0), (1, 1, 1)
@@ -44,7 +47,7 @@ for _c in "gx gy gz".split():
     RAW_FORMATS[_c] = "%.3f"
 for _c in "dL_cm dCL_cm dC_cm dCR_cm dR_cm dtop_cm dbot_cm".split():
     RAW_FORMATS[_c] = "%.1f"
-for _c in "lineL lineC lineR battery charging lifted".split():
+for _c in "lineL lineC lineR battery charging lifted raw_n".split():
     RAW_FORMATS[_c] = "%d"
 
 
@@ -116,7 +119,7 @@ def ray_polys(px, py, dx, dy, polys, best):
     return best
 
 
-class Robot:
+class Robot(FollowMixin):
     def __init__(self, name, cfg, rng, params, fw_version, t_boot, boot_id, ip):
         self.name, self.cfg, self.rng = name, cfg, rng
         self.m, self.imu_m, self.tof_m, self.line_m = cfg.robot, cfg.imu, cfg.tof, cfg.line
@@ -174,6 +177,10 @@ class Robot:
         self._tof_ms = -1e9
         self._tof_vals = None
         self._tof_phase = rng.uniform(0, 66.0)     # when the free-running sensor's frames fall
+        self._tof_bot = None                       # bottom zone, per frame (only with a board: session.board_cm)
+        # the edge guard's own sensor noise, so switching it on does not shift every other random draw
+        self.edge_rng = random.Random(boot_id * 7919 + sum(map(ord, name)))
+        self.edge_init()
 
         # ---- firmware state ----
         self.run_n = 0
@@ -200,6 +207,10 @@ class Robot:
         self.traj = []         # (robot_ms, x, y, th_rad, lifted)
         self.runs = []         # one dict per run
         self.kidnaps = []
+        self.follow_init()
+        self.look = fw_look.Look(self)             # look.h: the calibration run's look-around
+        self.calib_look = None                     # what the last calibration run chose (CALIB_LOOK)
+        self.pending = -1                          # gPending: experiment asked for by a command
         self._record()
 
     # ================================================= clock
@@ -466,10 +477,58 @@ class Robot:
             else:
                 out.append(max(0.0, d * (1 + scale / 100) + bias + rng.gauss(0, t.noise_cm + d * t.noise_pct / 100)))
         self._tof_vals = out
+        if self.cfg.session.board_cm:
+            fr = pose if pose is not None else (self.x, self.y, self.th)
+            self._tof_bot = max(0.0, rng.gauss(self.bottom_true(fr), t.bottom_noise_cm))
         return out
 
-    def line_sensors(self):
-        lm, rng = self.line_m, self.rng
+    def tof_top(self):
+        """get_distance_top(): the top zone looks slightly up, a bit further than the centre zone."""
+        return min(self.tof_m.max_range_cm, self.tof()[2] * (1 + self.tof_m.top_extra_pct / 100))
+
+    # ---- the plywood board (session.board_cm) ----
+    def past_open_edge(self, px, py):
+        """How far (cm) the floor point (px, py) is past the nearest OPEN side of the board
+        (negative: still on the board, or only past a bordered side). -inf without a board."""
+        s = self.cfg.session
+        if not s.board_cm:
+            return float("-inf")
+        x0, y0, x1, y1 = s.board_cm
+        out = {"x0": x0 - px, "x1": px - x1, "y0": y0 - py, "y1": py - y1}
+        return max((out[k] for k in s.open_edges if k in out), default=float("-inf"))
+
+    def bottom_true(self, pose):
+        """The distance sensor's bottom zone, from the geometry in TofModel (guesses): the nearest hit of
+        5 x 3 rays: the plywood, the cement past an open edge (one board thickness lower), or a board
+        (world_polys) standing in the way."""
+        t, s = self.tof_m, self.cfg.session
+        x0, y0, th0 = pose
+        px = x0 + t.sensor_forward_cm * math.cos(th0)
+        py = y0 + t.sensor_forward_cm * math.sin(th0)
+        H, T = t.sensor_height_cm, s.board_thick_cm
+        best = float("inf")
+        for vi in (-0.5, 0.0, 0.5):
+            e = math.radians(t.bottom_deg + vi * t.bottom_vspan_deg)
+            for hj in (-0.5, -0.25, 0.0, 0.25, 0.5):
+                a = th0 + math.radians(hj * t.bottom_hspan_deg)
+                dx, dy = math.cos(a), math.sin(a)
+                g = H / math.tan(e)                         # horizontal distance to the plywood's surface
+                if self.past_open_edge(px + g * dx, py + g * dy) > 0:
+                    g = (H + T) / math.tan(e)               # past an open edge: down to the cement
+                if self.world_polys:
+                    g = min(g, ray_polys(px, py, dx, dy, self.world_polys, g))
+                best = min(best, g / math.cos(e))
+        return best
+
+    def bottom(self, rng=None):
+        """get_distance_bottom() (with a board: held per sensor frame like the other zones)."""
+        if self.cfg.session.board_cm:
+            self.tof()
+            return self._tof_bot
+        return max(0.0, (rng or self.rng).gauss(self.tof_m.bottom_cm, 0.3))
+
+    def line_sensors(self, rng=None):
+        lm, rng = self.line_m, rng or self.rng
         if self.lifted:
             return [int(max(0, rng.gauss(20, 5))) for _ in range(3)]
         s = self.cfg.session
@@ -488,6 +547,11 @@ class Robot:
                 cover = max(cover, min(1.0, max(0.0, (half + lm.footprint_cm / 2 - dist) / lm.footprint_cm)))
             val = lm.floor_reading + (lm.tape_reading - lm.floor_reading) * cover
             noise = lm.floor_noise + (lm.tape_noise - lm.floor_noise) * cover
+            if s.board_cm:                                          # past an open edge: the cement below
+                o = self.past_open_edge(px, py)
+                ce = min(1.0, max(0.0, (o + lm.footprint_cm / 2) / lm.footprint_cm))
+                val += (lm.past_edge_reading - val) * ce
+                noise += (lm.past_edge_noise - noise) * ce
             out.append(int(max(0, rng.gauss(val, noise))))
         return out
 
@@ -514,7 +578,7 @@ class Robot:
         pitch = -math.degrees(self.acc_bias[0]) + rng.gauss(0, tn)
         d = self.tof()
         dtop = min(self.tof_m.max_range_cm, d[2] * (1 + self.tof_m.top_extra_pct / 100))
-        dbot = max(0.0, rng.gauss(self.tof_m.bottom_cm, 0.3))
+        dbot = self._tof_bot if self.cfg.session.board_cm else max(0.0, rng.gauss(self.tof_m.bottom_cm, 0.3))
         lL, lC, lR = self.line_sensors()
         vals = dict(run=self.run_id, ms=now, step=self.step, wl_deg=self.encL, wr_deg=self.encR,
                     wl_rpm=wl_rpm, wr_rpm=wr_rpm, v_cms=v_cms, w_dps=w_dps,
@@ -523,7 +587,7 @@ class Robot:
                     yaw_deg=wrap180(self.yaw_raw),
                     dL_cm=d[0], dCL_cm=d[1], dC_cm=d[2], dCR_cm=d[3], dR_cm=d[4], dtop_cm=dtop, dbot_cm=dbot,
                     lineL=lL, lineC=lC, lineR=lR, battery=int(self.battery), charging=0,
-                    lifted=1 if self.lifted else 0)
+                    lifted=1 if self.lifted else 0, raw_n=self.raw_rows)
         return vals
 
     # ================================================= firmware: logging
@@ -532,6 +596,8 @@ class Robot:
 
     def send(self, text):
         self.lines.append([self.ms, text])
+        if self.radio is not None:
+            self.radio.transmit(self, text)
 
     def set_leds(self, left, right):
         self.leds.append((self.ms, left, right))
@@ -636,20 +702,149 @@ class Robot:
         self.cmdL = self.cmdR = 0.0
 
     def should_abort(self):
+        """motion.h shouldAbort(), with the survey/follow hooks (gTickHook, gFrontLimitCm,
+        gFrontSoft, gStepStop) and, in a live simulation, one WiFi command read per call."""
         self.tick()
+        if self.tick_hook:
+            self.tick_hook()
         if self.abort_reason:
             return True
         if self.P("safe_lift") > 0 and self.lifted:
             self.abort_reason = "robot lifted"
-        else:
-            lim = self.P("safe_front_cm")
+        elif self.edge_check():
+            if getattr(self, "edge_soft", False):
+                self.step_stop = "edge"           # follow: only the step stops (motion.h gEdgeSoft)
+            else:
+                self.abort_reason = "plywood edge ahead"
+        elif not self.step_stop:
+            lim = self.front_limit if self.front_limit >= 0 else self.P("safe_front_cm")
             if lim > 0:
-                dc = self.tof()[2]                 # the robot's own (held, noisy) centre-zone reading
+                dc = self.front_in_path() if self.front_path else self.tof()[2]
                 if 0 < dc < lim:
-                    self.abort_reason = "obstacle ahead"
-        if self.abort_reason:
+                    if not self.front_soft:
+                        self.abort_reason = "obstacle ahead"
+                    else:
+                        if not self.front_low_since:
+                            self.front_low_since = self.millis() | 1
+                        if self.millis() - self.front_low_since >= self.P("front_confirm_ms"):
+                            self.step_stop = "obstacle"
+                            self.front_trip = dc
+                else:
+                    self.front_low_since = 0
+        if self.radio is not None:
+            cmd = self.radio.poll(self)
+            if cmd and self.handle_command(cmd, True):
+                self.abort_reason = "stop command"
+        if self.abort_reason or self.step_stop:
             self.brake()
             return True
+        return False
+
+    # ================================================= firmware: plywood edge guard (edge.h)
+    EDGE_NL = 40
+
+    def edge_init(self):
+        self.edge_learning = self.edge_ready = False
+        self.edge_buf = [[], [], []]
+        self.edge_base = [0.0, 0.0, 0.0]
+        self.edge_t0 = 0
+        self.edge_count = 0
+        self.edge_bot_since = 0
+        self.edge_braking = False                  # tripped: quiet until the wheels are still
+        self.edge_trips = []                       # (robot ms, cue, true pose) for tests
+
+    def edge_record(self, ev, l, c, r, dbot, info):
+        self.send("H,EDGE,run,ms,event,lineL,lineC,lineR,baseL,baseC,baseR,dbot_cm,info")
+        b = self.edge_base
+        self.send("D,EDGE,%s,%d,%s,%d,%d,%d,%.0f,%.0f,%.0f,%.1f,%s" % (self.run_id, self.millis(), ev, l, c, r,
+                                                                     b[0], b[1], b[2], dbot, info))
+
+    def edge_begin(self):
+        trips = getattr(self, "edge_trips", [])
+        self.edge_init()
+        self.edge_trips = trips
+        self.edge_learning = self.P("safe_edge") > 0
+        self.edge_t0 = self.millis()
+
+    def edge_stop(self):
+        self.edge_learning = self.edge_ready = False
+
+    def _edge_finish(self, l, c, r):
+        self.edge_learning = False
+        n = len(self.edge_buf[0])
+        if n < 5:
+            self.edge_record("nobase", l, c, r, self.bottom(self.edge_rng), "too few still readings")
+            return
+        thr = self.P("lf_line_thr")
+        base, tape = [], []
+        for k in range(3):
+            v = sorted(self.edge_buf[k])
+            base.append(v[n // 2] if n % 2 else 0.5 * (v[n // 2 - 1] + v[n // 2]))
+            tape.append(base[k] > thr)
+        ok = [b for b, t in zip(base, tape) if not t]
+        if not ok:
+            self.edge_record("nobase", l, c, r, self.bottom(self.edge_rng), "all three sensors on tape")
+            return
+        self.edge_base = [sum(ok) / len(ok) if t else b for b, t in zip(base, tape)]
+        self.edge_ready = True
+        self.edge_record("base", l, c, r, self.bottom(self.edge_rng), "a sensor on tape took the others' level" if len(ok) < 3 else "")
+
+    def _edge_past(self, v, k):
+        d, dr = v - self.edge_base[k], self.P("edge_dir")
+        s = d if dr > 0 else -d if dr < 0 else abs(d)
+        mx = self.P("edge_max")
+        return s >= self.P("edge_thr") and (mx <= 0 or s <= mx)
+
+    def edge_check(self):
+        """edge.h check(): True = stop, the nose is at an open plywood edge."""
+        mode = int(self.P("safe_edge"))
+        if mode <= 0:
+            return False
+        nm, er = self.m.wheel_speed_noise_rpm, self.edge_rng
+        sl, sr = self.wL / 6 + er.gauss(0, nm), self.wR / 6 + er.gauss(0, nm)
+        mn = self.P("edge_min_rpm")
+        still = abs(sl) < mn and abs(sr) < mn
+        forward = 0.5 * (sl + sr) > mn
+        L, C, R = self.line_sensors(er)
+        if self.edge_learning:
+            if still and len(self.edge_buf[0]) < self.EDGE_NL:
+                for k, v in enumerate((L, C, R)):
+                    self.edge_buf[k].append(v)
+            n = len(self.edge_buf[0])
+            if n >= self.EDGE_NL or (self.millis() - self.edge_t0 >= self.P("edge_learn_ms") and n >= 5) or forward:
+                self._edge_finish(L, C, R)
+        if self.edge_braking:
+            if still:
+                self.edge_braking = False
+            else:
+                return False
+        if not forward:
+            self.edge_count = 0
+            self.edge_bot_since = 0
+            return False
+        if (mode & 1) and self.edge_ready:
+            if any(self._edge_past(v, k) for k, v in enumerate((L, C, R))):
+                self.edge_count += 1
+            else:
+                self.edge_count = 0
+            if self.edge_count >= max(1, int(self.P("edge_n"))):
+                self.edge_record("trip", L, C, R, self.bottom(er), "line sensors")
+                self.edge_trips.append((self.ms, "line", (self.x, self.y, self.th)))
+                self.edge_braking, self.edge_count, self.edge_last_cue = True, 0, "line"
+                return True
+        lim = self.P("edge_bot_cm")
+        if (mode & 2) and lim > 0:
+            d = self.bottom(er)
+            if d > lim:
+                if not self.edge_bot_since:
+                    self.edge_bot_since = self.millis() | 1
+                if self.millis() - self.edge_bot_since >= self.P("edge_bot_ms"):
+                    self.edge_record("trip", L, C, R, d, "bottom zone")
+                    self.edge_trips.append((self.ms, "bottom", (self.x, self.y, self.th)))
+                    self.edge_braking, self.edge_bot_since, self.edge_last_cue = True, 0, "bottom"
+                    return True
+            else:
+                self.edge_bot_since = 0
         return False
 
     def wait_ms(self, ms):
@@ -754,6 +949,41 @@ class Robot:
         self.advance(m.target_reached_ms, busy=True)      # the successful is_target_reached() waits
         return True
 
+    def spin_by(self, deg, rpm):
+        """motion.h spinBy(): spin in place by deg (left positive) counted by heading(), wheels at
+        rpm opposite ways, brake about 1 deg early; the front check is off while it spins."""
+        if deg == 0:
+            return True
+        if self.fw_yaw_sign == 0:
+            self.fail = "spin without a compass check"
+            return False
+        d = 1 if deg > 0 else -1
+        target = abs(deg) - 1.0
+        dps = max(abs(rpm), 1.0) * 2.27
+        limit = 3000 + abs(deg) / dps * 2000.0
+        saved = self.front_limit
+        self.front_limit = 0.0
+        self.turn_slip = min(0.2, max(0.0, self.rng.gauss(self.m.turn_slip_mean_pct, self.m.turn_slip_sd_pct) / 100))
+        turned, prev = 0.0, self.heading()
+        t0 = self.millis()
+        ok = True
+        self.set_wheels_speed(-d * abs(rpm), d * abs(rpm))
+        while turned < target:
+            if self.should_abort():
+                ok = False
+                break
+            if self.millis() - t0 > limit:
+                self.fail = "spin timed out"
+                ok = False
+                break
+            h = self.heading()
+            turned += d * wrap180(h - prev)
+            prev = h
+            self.loop_delay(5)
+        self.brake()
+        self.front_limit = saved
+        return ok
+
     def roll_straight(self, cm, rpm):
         x0, y0 = self.odo_x, self.odo_y
         t0 = self.millis()
@@ -804,8 +1034,9 @@ class Robot:
         self.set_leds(OFF, OFF)
         off = self.millis()
         self.log_wait(150)
-        self.send("H,SYNC,run,tag,ms_on,ms_off")
-        self.send("D,SYNC,%s,%s,%d,%d" % (self.run_id, tag, on, off))
+        self.send("H,SYNC,run,tag,ms_on,ms_off,ms_on_after")
+        # no light-switching delay is modelled: the lights change at ms_on, ms_on_after = ms_on
+        self.send("D,SYNC,%s,%s,%d,%d,%d" % (self.run_id, tag, on, off, on))
         self.syncs.append((tag, on, off))
 
     def wifi_dbm(self):
@@ -823,10 +1054,80 @@ class Robot:
             self.send("D,PARAM,%s,%s,%.4f" % (self.run_id, name, self.params[name]))
             self.advance(2.3, busy=True)              # delay(2) between PARAM packets
 
+    def handle_command(self, raw, running):
+        """home_lab.ino handleCommand(), the commands the live simulation needs.
+        Returns True if it means "stop now"."""
+        cmd = raw.strip()
+        verb, _, rest = cmd.partition(" ")
+        verb, rest = verb.lower(), rest.strip()
+        self.last_rx = self.millis()
+        if verb == "stop":
+            if not running:
+                self.send("M,nothing running")
+            return True
+        if verb in ("fs", "fix", "fpose", "hold", "halt"):
+            if running and self.f_active:
+                self.follow_command(verb, rest)
+            elif verb == "fs":
+                self.send("M,not following: send run follow first")
+            return False
+        if verb == "clock":
+            now = self.millis()
+            self.send("H,CLOCK,token,robot_ms,boot")
+            self.send("D,CLOCK,%s,%d,%04X" % (rest, now, self.boot_id))
+            return False
+        if verb in ("ping", "status"):
+            self.send("M,status %s (firmware %s): %s, selected %s, battery %d%%, WiFi %d dBm" % (
+                self.name, self.fw_version, "running" if running else "idle", EXP_NAMES[self.selected],
+                int(self.battery), self.wifi_dbm()))
+            return False
+        if verb == "set":
+            parts = rest.split()
+            if parts and parts[0].lower() == "calib_dir_limits":
+                self.look.set_limits(rest[len(parts[0]):])
+                return False
+            if len(parts) == 2 and parts[0] in self.params:
+                try:
+                    self.params[parts[0]] = float(parts[1])
+                    self.send("M,%s = %.3f" % (parts[0], self.params[parts[0]]))
+                except ValueError:
+                    self.send("M,'%s' is not a number" % parts[1])
+            else:
+                self.send("M,usage: set <name> <value>")
+            return False
+        if verb == "get":
+            if rest.lower() == "calib_dir_limits":
+                self.send("M,calib_dir_limits" + ("".join(" %.0f:%.1f" % c for c in self.look.caps) or " off"))
+            elif rest in self.params:
+                self.send("M,%s = %.3f" % (rest, self.params[rest]))
+            return False
+        if verb == "calibrate":
+            if running:
+                self.send("M,busy: send stop first")
+            else:
+                self.pending = EXP_CALIB
+            return False
+        if verb == "run":
+            if running:
+                self.send("M,busy: send stop first")
+                return False
+            names = [n.lower() for n in EXP_NAMES[:N_RUNNABLE]]
+            if rest.lower() not in names:
+                self.send("M,run what? stream, turn, lap, grid, demo, straight, survey or follow")
+                return False
+            self.pending = names.index(rest.lower())
+            return False
+        if verb == "help":
+            return False
+        self.send("M,unknown command '%s' (type help)" % cmd)
+        return False
+
     def receive_command(self, text):
         """A console command arrived (set ... only; `run` goes through run_experiment)."""
         parts = text.split()
-        if parts[0] == "set" and len(parts) == 3 and parts[1] in self.params:
+        if parts[0] == "set" and len(parts) >= 2 and parts[1].lower() == "calib_dir_limits":
+            self.look.set_limits(" ".join(parts[2:]))
+        elif parts[0] == "set" and len(parts) == 3 and parts[1] in self.params:
             self.params[parts[1]] = float(parts[2])
             self.send("M,%s = %.3f" % (parts[1], float(parts[2])))
         else:
@@ -927,31 +1228,16 @@ class Robot:
                   % (self.name, "finished" if ok else "stopped", err, head_err))
 
     def run_calib(self):
-        """runCalib() from home_lab.ino: RAW step 1 still and blinking, 2 forward, 3 back, 4 wiggle, 5 settle."""
-        self.send("M,%s calibration: blinking code %d, rolling forward and back, then a small wiggle"
-                  % (self.name, self.blink_code_for()))
-        n = max(3.0, self.P("start_nudge_cm"))
-        self.step = 1
-        if not self.wait_ms(int(self.P("calib_blink_ms"))):
-            return
-        self.step = 2
-        if not self.library_move(n) or not self.wait_ms(300):
-            return
-        self.step = 3
-        if not self.library_move(-n) or not self.wait_ms(300):
-            return
-        self.step = 4
-        if not self.calibrate_yaw_sign(True):
-            return
-        self.step = 5
-        if not self.wait_ms(300):
-            return
-        self.send("M,calibrated: now place the robot on its start mark")
+        """runCalib() from home_lab.ino (2026-10-18c): look first, then roll where there is room.
+        RAW step 1 still and blinking, 2 compass wiggle, 3 still, 4 spin left calib_spin_deg, 5 still,
+        6 spin back right, 7 still, 8 turn to the roll heading + still, 9 roll forward + still, 10 back +
+        still (fw_look.py, a copy of look.h and calibSteps())."""
+        fw_look.run_calib(self)
 
     def start_nudge(self, i):
         """startNudge(): roll start_nudge_cm forward and back after the start flash (RAW step -1)."""
         n = self.P("start_nudge_cm")
-        if n <= 0 or i not in (1, 4, 5):
+        if n <= 0 or i not in (1, 4, 5, EXP_SURVEY):
             return True
         self.step = -1
         ok = self.library_move(n) and self.wait_ms(200) and self.library_move(-n) and self.wait_ms(300)
@@ -962,20 +1248,24 @@ class Robot:
         """runExperiment() from home_lab.ino. Returns a dict describing the run, or None if the
         firmware refused to start it (turn/grid/demo/straight before any compass check)."""
         i = EXP_NAMES.index(exp)
-        if i in (1, 3, 4, 5) and self.fw_yaw_sign == 0:       # needsYawSign(), started from the laptop
+        if (i == 1 or 3 <= i <= 7) and self.fw_yaw_sign == 0:   # needsYawSign(), started from the laptop
             self.send("M,not calibrated since power-on: lift the robot off its mark, send calibrate, put it back, "
                       "then start again (%s not started)" % exp)
             return None
         self.run_n += 1
         self.run_id = "%04X-%d" % (self.boot_id, self.run_n)
         self.abort_reason = self.fail = ""
-        if i != EXP_CALIB:
-            self.selected = i                  # a calibration keeps showing the chosen experiment
+        if i not in (EXP_CALIB, EXP_FOLLOW):
+            self.selected = i                  # calibration and follow keep showing the chosen experiment
         self.syncs = []
         self.show_selection(True)
         self.send("M,run %s: %s starting" % (self.run_id, exp))
         t0 = self.millis()
         ms_runinfo = self.ms
+        if i in (EXP_FOLLOW, EXP_CALIB):
+            self.front_limit = 0.0             # follow: no centre stop while it waits on its start spot;
+            #                                    calib: it may face a board, only its rolls check ahead
+        self.edge_begin()                      # edge guard learns the plywood during the settle pause
         self.log_run_info(i)
         self.raw_start()
         self.wait_ms(self.P("settle_start_ms"))
@@ -992,21 +1282,31 @@ class Robot:
                 self.run_demo()
             elif exp == "calib":
                 self.run_calib()
+            elif exp == "survey":
+                self.run_survey()
+            elif exp == "follow":
+                self.run_follow()
             else:
-                raise ValueError("the simulator runs only the straight, demo and calib experiments, not " + exp)
+                raise ValueError("the simulator runs only the straight, demo, survey, follow and calib experiments, not " + exp)
         self.brake()
+        self.tick_wait(self.P("settle_end_ms"))   # firmware: still at the end, logging and blinking
+        self.edge_stop()
         self.kidnap_at = None
         self.blink_stop()
         self.sync_flash("end")
         self.raw_on = False
-        result = ("stopped:" + self.abort_reason) if self.abort_reason else \
+        edge_stop = self.abort_reason == "plywood edge ahead"
+        result = "limited:plywood edge" if edge_stop else ("stopped:" + self.abort_reason) if self.abort_reason else \
                  ("failed:" + self.fail) if self.fail else "done"
         self.send("H,RUNEND,run,result,ms_end,duration_ms,battery,wifi_dbm,raw_rows_sent,packets_sent")
         # packets_sent (net::seq) is only known once clock answers are merged in: filled later
         self.send("D,RUNEND,%s,%s,%d,%d,%d,%d,%d,{SEQ}" % (self.run_id, result, self.millis(), self.millis() - t0,
                                                          int(self.battery), self.wifi_dbm(), self.raw_rows))
         ms_end = self.ms
-        if self.abort_reason:
+        if edge_stop:
+            self.send("M,run %s: limited: the edge guard stopped it before an open plywood edge (not a failure; "
+                      "left out of accuracy statistics)" % self.run_id)
+        elif self.abort_reason:
             self.send("M,run %s: stopped (%s)" % (self.run_id, self.abort_reason))
         else:
             self.send("M,run %s: %s finished" % (self.run_id, exp))

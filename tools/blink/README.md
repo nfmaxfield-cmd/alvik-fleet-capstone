@@ -6,7 +6,10 @@ Two programs for the overhead recording:
   each one, and reads its blink code to say which robot it is.
 - **calib.py** uses that, the robots' own logs and the video to work out,
   for every calibration run and every start nudge: which robot it was,
-  which way it faced, and where its lights sit on it.
+  which way it faced, and where its lights sit on it; from a calibration
+  run of firmware 2026-10-18b or later also how far its wheels really carry
+  it (wheel distance scale), how its gyro's degrees compare with real ones
+  (gyro scale), and the light's offset from its turning centre.
 
 Needs Python 3.9+ with `numpy` and `opencv-python` (`scipy` is used if
 installed). No internet connection needed.
@@ -108,8 +111,25 @@ All columns from `code` on are per track (the same on every row of a track).
 
 ## calibration_results.csv
 
-One row per forward roll: RAW step 2 of each `calib` run (3 cm), and RAW
-step -1 of each turn/demo/straight run (the start nudge, `start_nudge_cm`).
+One row per forward roll: the forward roll of each `calib` run (RAW step 9
+from firmware 2026-10-18c, which spins first and rolls up to `calib_roll_cm`
+where it found room, the length in its CALIB_LOOK record; RAW step 2 before:
+15 cm in 2026-10-18b, 3 cm earlier), and RAW step -1 of each
+turn/demo/straight run (the start nudge, `start_nudge_cm`). A calib row of
+firmware 2026-10-18b or later also covers the roll back and the two spins
+(columns after `led_left_cm`; blank for older runs and for nudges). A
+2026-10-18c run that found no room to roll still gets a row: identity from
+its blink code only, the spins' gyro scale and the light's circle radius (no
+heading, so no offset direction); what it could not measure is blank with
+quality `skipped: no room`, and its `outcome` is `limited (no room)`, not a
+failure (a run that skipped the spin likewise). A roll the edge guard stopped
+at a plywood edge is kept if it covered at least `calib_roll_min_cm`
+(commanded_cm = the distance covered, a note says so), else it is blank with
+quality `skipped: plywood edge`; outcome `limited (plywood edge)`. `outcome`
+is `done`, `limited (<reason>)` or `failed` for every 2026-10-18c+ calib row,
+and the summary counts the three. The calib run's steps (by firmware) are listed in
+docs/data-formats.md ("Calibration outcomes" for the three states) and in
+calib.py's STEPS_*.
 
 | Column | Meaning |
 | --- | --- |
@@ -123,7 +143,7 @@ step -1 of each turn/demo/straight run (the start nudge, `start_nudge_cm`).
 | lights_moved | how many lights near that moment moved by about the commanded distance |
 | onset_diff_ms | when the picture around the light started to change minus when the log says the wheels started (video clock); used to pick the right light when several moved |
 | heading_img_deg | direction of the forward roll in the image: 0 = image right, counter-clockwise on screen positive (as in labels.csv) |
-| heading_floor_deg | the same on the floor: 0 = +x, counter-clockwise (left) positive |
+| heading_floor_deg | which way the robot faced, standing still before the roll, on the floor: 0 = +x, counter-clockwise (left) positive. Older calib runs and nudges: the forward roll's direction. Calib runs 2026-10-18b+: the forward and back rolls' estimates combined (circular mean), each corrected for any curve in the roll (see heading_gyro_corr_deg) |
 | heading_method | `video shift`: measured by lining up the picture around the robot just before the roll with the picture during the pause at its far end |
 | moved_px, moved_cm | how far it moved (compare with commanded_cm: a big difference means something else moved) |
 | commanded_cm | the roll the firmware commanded |
@@ -133,7 +153,34 @@ step -1 of each turn/demo/straight run (the start nudge, `start_nudge_cm`).
 | centre_x_px, centre_y_px | the robot centre from --detections while still |
 | led_fwd_px, led_left_px | the light's offset from the robot centre in the robot's own frame, image pixels (forward along the heading, left = 90 deg counter-clockwise on screen) |
 | led_fwd_cm, led_left_cm | the same in cm on the floor (both points corrected for being on the robot's top, 4 cm up, if the calibration file gives the camera height) |
+| heading_chord_deg | the forward roll's direction on the floor, uncorrected (calib runs 2026-10-18b+) |
+| heading_gyro_corr_deg | correction added to the chord: minus half the heading change the gyro saw during the roll (drift taken out). A roll that curves (left and right wheels slightly different) goes in the robot's average heading over the roll, not its starting one |
+| heading_back_deg | the starting heading worked out from the roll back instead (its direction + 180, less half its own turn and the forward roll's turn) |
+| heading_spread_deg | forward estimate minus back estimate |
+| heading_quality | `ok` (spread within 1 deg), `check: ...`; `single roll` for short nudges |
+| moved_back_cm, back_quality | the roll back: distance on the floor, and its picture-match peak (as motion_quality) |
+| wheel_cm, wheel_back_cm | the same rolls by the robot's own wheel odometry (RAW x_cm, y_cm) |
+| wheel_scale | camera distance / wheel distance, both rolls together: multiply wheel odometry by it. Depends on the floor calibration's scale being right |
+| wheel_scale_spread, wheel_scale_quality | forward ratio minus back ratio; `ok` if they agree within 1% and the scale is within 0.9-1.1 |
+| gyro_bias_dps | the gyro's drift while standing still (left positive), from the stills (blink still, after each roll, around the spins) |
+| spin1_gyro_deg, spin2_gyro_deg | each spin by the gyro (RAW yaw_deg, signed left positive from the log itself, drift taken out), still to still |
+| spin1_cam_deg, spin2_cam_deg | each spin by the camera: the robot's picture in the still before and after aligned by rotation and shift (OpenCV ECC over the robot's outline plus 1 cm, found by comparing with the picture of the empty spot during the forward roll's pause; a 4.6 cm disc if there is none); whole turns taken from the gyro |
+| spin_match | the weaker of the two alignments' correlation (0-1) |
+| gyro_scale | camera degrees / gyro degrees over both spins (multiply gyro turns by it); the two spins turn opposite ways, so leftover drift cancels |
+| gyro_scale_spread | spin 1 ratio minus spin 2 ratio |
+| gyro_scale_trace | cross-check: slope of the light's angle around the turning centre against the gyro's angle, during the spins (less precise in the simulator: 0.14% rms against 0.09%) |
+| gyro_scale_quality | `ok` if the spins agree within 0.5%, the scale is within 0.95-1.05, spin_match is at least 0.8 and the trace agrees within 0.5% |
+| spin_centre_x_px, spin_centre_y_px | the turning centre in the image (circle through the light's flashes, at the lights' height) |
+| led_points, led_radius_cm, led_fit_rms_cm | light flashes seen during the spins, the circle's radius on the floor and the points' rms distance from it (a circle is fitted to each spin separately) |
+| led_angle_sd_deg | spread of where on the circle the light sat relative to the heading (heading from the roll plus the gyro, scaled by gyro_scale) |
+| spin_led_fwd_cm, spin_led_left_cm | the light's offset from the TURNING CENTRE (the wheel-axle midpoint, which the robot's pose refers to), forward and left. tools/fusion uses these when led_offset_quality is ok, else led_fwd_cm / led_left_cm |
+| led_offset_quality | `ok` if the fit rms is at most 0.3 cm, at least 12 flashes, radius 0.5-8 cm |
+| look_result, look_heading_deg, look_room_cm | calib runs 2026-10-18c+: what the look-around chose (CALIB_LOOK result, heading_deg relative to where it faced, room_cm); `commanded_cm` is the roll it made |
 | note | anything worth checking |
+
+The quality limits (1 deg, 1%, 0.5%, 0.8, 0.3 cm, 12 flashes) are chosen
+from the simulator's spread, not derived; check them against the first real
+calibration runs.
 
 The LED offset is what lets a later single flash give a robot's heading:
 the robot centre is the light minus this offset turned to the heading.
@@ -159,6 +206,40 @@ the robot centre is the light minus this offset turned to the heading.
   rows off any robot; identity agreed on 39/39 rolls; heading error mean
   0.45 deg, max 1.33 deg; LED offset 2.73 / 0.00 cm.
 
+## Accuracy of the calibration run (measured 2026-10-18, firmware 2026-10-18b)
+
+Simulator, 17 calibration runs (seeds 11-15 with Left, Center and Right,
+plus seeds 7 and 21), each against the simulator's truth:
+
+| | 15 cm roll + spins (new) | 3 cm roll (old run, old calib.py; 15 runs) |
+| --- | --- | --- |
+| heading error, rms / max | 0.08 / 0.17 deg | 0.38 / 0.67 deg |
+| wheel distance scale error, rms / max | 0.14 / 0.39 % (true scales 0.990-1.008) | not measured |
+| gyro scale error, rms / max | 0.05 / 0.11 % (true 0.9955-1.0049) | not measured |
+| light offset from turning centre, error | forward +0.01 cm (max 0.03), left max 0.02 cm | (2.75 cm assumed) |
+
+Without the gyro's curve correction (forward chord alone) the heading
+error was 0.19 deg rms: the correction and the second (back) roll each help.
+All quality columns were `ok` on all 17. The simulator's robot is plain
+(top plate, LEDs, sensor window); a real robot top has more detail, which
+should make the spin pictures align better, but its lighting, shadows and
+reflections are not simulated.
+
+Firmware 2026-10-18c (looks around first, spins before the roll), same
+simulator, Center only, against 2026-10-18b on the same seeds (21-30):
+
+| | 2026-10-18b (roll first) | 18c, open floor (rolls straight ahead) | 18c, turned ~180 deg before the roll (laptop cap ahead) |
+| --- | --- | --- | --- |
+| heading error, rms / max | 0.09 / 0.21 deg | 0.09 / 0.16 deg | 0.12 / 0.24 deg |
+| wheel scale error, rms / max | 0.41 / 0.81 % | 0.27 / 0.55 % | 0.31 / 0.54 % |
+| gyro scale error, rms / max | 0.025 / 0.043 % | 0.020 / 0.037 % | 0.019 / 0.034 % |
+| light offset error, forward / left max | 0.02 / 0.02 cm | 0.02 / 0.03 cm | 0.02 / 0.03 cm |
+
+All quality columns `ok` on all 30. Boxed in with no room to roll (one run,
+tests/test_calib_spin.py): gyro scale within 0.4 % (disc mask), light radius
+within 0.1 cm; no heading, wheel scale or offset direction (quality
+`skipped: no room`, outcome `limited (no room)`).
+
 ## Limits
 
 - A robot is named after about 6 flashes (Left 1.5 s, other 3 s) of a
@@ -177,12 +258,21 @@ the robot centre is the light minus this offset turned to the heading.
   before the roll and the 200-300 ms pause at its far end in the video, and
   no other object moving within ~14 cm of the robot then.
 - Heading comes from the roll's direction, so it assumes the robot rolls
-  straight ahead (no sideways slip).
+  straight ahead (no sideways slip). The curve correction assumes the roll
+  turns evenly along its length (half the gyro's turn at the middle).
+- Calibration run (2026-10-18b+): the spin analysis needs the forward roll's
+  pause picture as the empty floor under the robot (roll at least 12 cm; a
+  shorter roll from 2026-10-18c, or none, falls back to a disc-shaped mask:
+  less precise gyro scale),
+  blinking lights during the spins (blink_codes 1) for the light offset, and
+  nothing else moving within ~8 cm of the robot. wheel_scale is only as good
+  as the floor calibration's scale (a 0.5% scale error there is a 0.5% error
+  here).
 
 ## Checks
 
 ```
-python -m pytest tools/blink/tests -q            # about 1 minute
+python -m pytest tools/blink/tests -q            # about 3-6 minutes
 python tools/blink/tests/synthworld.py out --scenario clutter   # look at a test video
 python tools/sim/simulate.py --out sim_out --video --seed 7 --max-runs 6
 python tools/blink/eval_sim.py sim_out           # decode accuracy, position and heading errors vs the simulator's truth
@@ -195,4 +285,5 @@ python tools/blink/eval_sim.py sim_out           # decode accuracy, position and
 | `eval_sim.py` | scores both against a simulator run |
 | `tests/synthworld.py` | synthetic recordings (and console logs) with known truth |
 | `tests/score.py` | compares blink rows with a truth file |
-| `tests/test_blink.py`, `tests/test_calib.py` | the tests |
+| `tests/test_blink.py`, `tests/test_calib.py` | the tests (test_calib.py: synthetic, pre-2026-10-18b 3 cm calibration runs) |
+| `tests/test_calib_spin.py` | a simulated calibration run (current firmware: look first, spins, then the roll; simulator + video, about 2 minutes): heading, wheel scale, gyro scale, light offset vs truth; plus a run boxed in by boards (no roll: spin results only) |

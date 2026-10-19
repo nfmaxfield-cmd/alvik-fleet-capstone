@@ -66,6 +66,8 @@ progress Oct 18; **planned** = written here, not built yet.
 | B24 | Heading from motion assumes no side slip | Heading from motion vs tape at the end of straight runs | Within its stated noise | planned (T2) |
 | B25 | Filter noise settings are inconsistent with real errors | Normalised errors (NIS) on the scoring half | Within the 95% band | planned (T3) |
 | B26 | Front distance sensor model (directions, width, noise, delay) and board positions | Front sensor calibrated against the camera, board positions refined, then checked on held-out runs | Distance sensor never worsens the camera-on result | building |
+| B27 | The site map (board, block and open-edge positions) is wrong: clicks off, a board moved, the map's uncertainty understated | Site setup ([E0d](E00d-site-setup/)): robots survey every landmark, joint fit; tape audit of the least-sure points + 1 random before locking; afterwards every landmark point tape-measured | Audit: each point within max(0.3 cm, 3 sigma); E0d: 90% of points within 0.5 cm, normalised errors consistent with the stated sigma | built (simulation) |
+| B28 | A landmark moves after the map was locked | Change check on every run (`tools/site/change.py`, `run_plan.py --site-map`): a landmark whose front-sensor readings keep disagreeing is flagged | No flag on unmoved landmarks over T1; a board moved 1 cm on purpose is flagged | built (simulation) |
 
 ## C. Measured once by hand (E0c, about 75 minutes)
 

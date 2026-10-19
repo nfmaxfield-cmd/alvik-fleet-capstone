@@ -261,3 +261,87 @@ def test_real_camera_preset_loads(tmp_path):
     subprocess.run([sys.executable, os.path.join(TOOLS, "sim", "simulate.py"), "--config", ac.SIM_PRESET,
                     "--write-config", str(out)], check=True, capture_output=True)
     assert json.load(open(out))["camera"]["fps"] == 25.0
+
+
+def test_identity_counts_no_room_calibrations_separately():
+    """A calibration that skipped its roll for lack of room has no roll to name: it is its own state
+    ("limited (no room)"), not an unreadable run, so it can't turn the check into CHECK."""
+    def row(identity, outcome=""):
+        return dict(identity=identity, outcome=outcome)
+    cam = SimpleNamespace(calib_rows=[row("agree"), row("agree"), row("agree"),
+                                      row("blink code only (no roll)", "limited (no room)"),
+                                      row("blink code only (no roll)", "limited (no room)")])
+    tb = ac.Table()
+    ac.check_identity(tb, cam)
+    r = [x for x in tb.rows if x["id"] == "11"][-1]
+    assert r["verdict"] == ac.PASS, r
+    assert "0 not readable" in r["result"] and "2 calibration(s) limited" in r["result"]
+    # the same rows without the outcome column (older calib.py output) still count as not readable
+    cam.calib_rows = [row("agree"), row("agree"), row("agree"), row("blink code only (no roll)"),
+                      row("blink code only (no roll)")]
+    tb = ac.Table()
+    ac.check_identity(tb, cam)
+    assert [x for x in tb.rows if x["id"] == "11"][-1]["verdict"] == ac.CHECK
+
+
+def test_run_sheet_reads_the_calib_look_skip_columns():
+    import run_sheet as rs
+    import session_checks as sc
+    w = rs.RunWatcher()
+    vals = "AF76-1,0,7.2,0.0,0.0,2.1,-1.0,0.0,0.0,no_room,2.1;-1.0;-1.0;-1.0;-1.0;-1.0;-1.0;-1.0,,skipped,skipped,no room"
+    w("Left", "D", "CALIB_LOOK", vals.split(","))
+    look = w.looks["AF76-1"]
+    assert (look["spin"], look["roll_step"], look["reason"]) == ("skipped", "skipped", "no room")
+    assert sc.calib_outcome("done", look) == sc.CALIB_LIMITED
+    assert sc.calib_outcome_text("done", look) == "limited (no room)"
+    assert sc.calib_outcome("failed:spin timed out", look) == sc.CALIB_FAILED
+
+
+def test_limited_runs_are_left_out_and_counted(tmp_path):
+    """Runs the edge guard stopped before an open plywood edge ("limited: plywood edge", set by run_sheet.py):
+    left out of every statistic, counted apart; one whose log says limited but whose row wasn't marked too."""
+    import session_checks as sc
+    assert sc.run_outcome("done") == sc.CALIB_DONE
+    assert sc.run_outcome("limited:plywood edge") == sc.CALIB_LIMITED
+    assert sc.run_limit_reason("limited:plywood edge") == "plywood edge"
+    assert sc.run_outcome("stopped:cancel button") == sc.CALIB_FAILED and sc.run_outcome(None) == sc.CALIB_FAILED
+    assert sc.calib_outcome_text("limited:plywood edge", None) == "limited (plywood edge)"
+    d = tmp_path / "E01" / "data"
+    d.mkdir(parents=True)
+    cols = ["order", "robot", "level", "run_id", "target_x_cm", "target_y_cm", "target_heading_deg",
+            "xf_cm", "yf_cm", "xr_cm", "yr_cm", "excluded", "note"]
+    marks = dict(xf_cm="34.75", yf_cm="0", xr_cm="25.25", yr_cm="0")
+    rows = [dict(order=1, robot="Left", level="straight30", run_id="A-1", target_x_cm=30, target_y_cm=0,
+                 target_heading_deg=0, **marks),
+            dict(order=2, robot="Left", level="straight30", run_id="A-2", excluded="1", note="limited: plywood edge"),
+            dict(order=3, robot="Left", level="straight30", run_id="A-3", target_x_cm=30, target_y_cm=0,
+                 target_heading_deg=0, note="limited: plywood edge (measured anyway)", **marks),
+            dict(order=4, robot="Left", level="straight30", run_id="A-4", excluded="1", note="slipped")]
+    with open(d / "measurements.csv", "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=cols)
+        w.writeheader()
+        w.writerows(rows)
+    trials = tr.load_trials(str(tmp_path / "E01"))
+    assert [t["order"] for t in trials] == ["1"]
+    assert [r["order"] for r in tr.limited_trials(str(tmp_path / "E01"))] == ["2", "3"]
+    e = ac.Experiment(str(tmp_path / "E01"), "t1")
+    assert len(e.trials) == 1 and len(e.limited) == 2
+    # a measured, unmarked row whose RUNEND says limited is left out too
+    e.runs["A-1"] = SimpleNamespace(result="limited:plywood edge")
+    e.drop_limited()
+    assert e.trials == [] and len(e.limited) == 3
+
+
+def test_run_sheet_adds_a_replacement_for_a_limited_run():
+    import run_sheet as rs
+    rows = [dict(order="1", robot="Left", level="L", commands="run demo", run_id="A-1", xf_cm="1", note="x"),
+            dict(order="2", robot="Left", level="sq", commands="run demo", run_id="", note=""),
+            dict(order="3", robot="Right", level="L", commands="run demo", run_id="", note=""),
+            dict(order="4", robot="Left", level="L", commands="run demo", run_id="", note="")]
+    new = rs.add_replacement(rows, 0)
+    assert [r["order"] for r in rows] == ["1", "2", "5", "3", "4"]       # end of Left's first block
+    assert new["robot"] == "Left" and new["level"] == "L" and new["commands"] == "run demo"
+    assert new["run_id"] == "" and new["xf_cm"] == ""
+    assert new["note"] == "replaces order 1 (limited: plywood edge)"
+    assert not tr.is_limited(new) and tr.is_limited(dict(note="limited: plywood edge"))
+    assert tr.is_limited(dict(note="replaces order 1 (limited: plywood edge) limited: plywood edge"))
