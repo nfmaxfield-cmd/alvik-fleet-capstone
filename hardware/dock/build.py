@@ -97,7 +97,9 @@ def tile_solid():
                 continue
             sq = (c.Workplane("XY").workplane(offset=D.TILE_T_MM)
                   .center(-D.TILE_MM / 2 + (i + 0.5) * s, -D.TILE_MM / 2 + (j + 0.5) * s)
-                  .box(s, s, D.TILE_RAISE_MM, centered=(True, True, False)))
+                  .box(s - D.TILE_SQUARE_GAP_MM, s - D.TILE_SQUARE_GAP_MM, D.TILE_RAISE_MM,
+                       centered=(True, True, False)))   # a hair smaller: squares that touch only at a
+                                                          # corner make a non-manifold STL (slicer errors)
             base = base.union(sq)
     return base
 

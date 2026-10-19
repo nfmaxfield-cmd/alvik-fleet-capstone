@@ -152,6 +152,7 @@ TILE_MM = 40.0                 # camera check tile: square side ...
 TILE_SQUARES = 4               # ... in TILE_SQUARES x TILE_SQUARES squares (10 mm each)
 TILE_T_MM = 1.2                # tile thickness; the dark squares stand TILE_RAISE_MM proud of it
 TILE_RAISE_MM = 0.6
+TILE_SQUARE_GAP_MM = 0.3       # raised squares 0.3 mm smaller than their cell, so diagonal squares don't touch
 TILE_RECESS_CLEAR_MM = 0.4     # recess is this much larger than the tile (each way)
 STRIPE_X0_MM = -52.0           # floor stripe: its far edge (the one a robot coming in reaches first) ...
 STRIPE_X1_MM = -44.0           # ... and its near edge, dock X
