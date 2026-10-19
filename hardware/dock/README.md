@@ -20,6 +20,31 @@ Firmware: `firmware/home_lab/switches.h`, `dock.h` (2026-10-19a; pins A0 / A1 fr
 | `stl/led_holder.stl` | three 5 mm LEDs in an L |
 | `preview/nose_bracket_fit.png` | the bracket on the robot: side, top and front views |
 | `preview/docked.png` | a docked robot and bracket in the dock, from above |
+| `stl/dock_v2.stl` | **dock version 2** (`build_v2.py`): the same funnel for parking, plus a pair of measuring posts molded into each of its three closed sides; no floor stripe |
+| `preview/dock_v2_layout.png` | version 2 from above with a robot parked and one at each post station |
+
+## Dock version 2: park in the funnel, measure at the posts
+
+Version 1's funnel pushes a crooked robot straight before its switches touch, so it parks precisely but
+erases the robot's own error on the way in. Version 2 (`python hardware/dock/build_v2.py`) keeps the funnel
+for parking and adds three measuring stations on the outside: on the back and on each side, two narrow posts
+whose tips sit exactly one switch spacing apart (85.45 mm), square to the robot's approach, 10 mm proud of
+everything else on that side.
+
+- `run posts`: the robot creeps straight at a station; each lever clicks on its post. The travel at the first
+  click gives the distance; the gyro's turn from the first click to the second gives the angle it came in at;
+  a lever that misses its post (more than about 4.9 mm off sideways) says which way it is off. Two stations
+  facing 90 degrees apart (the back and a side) give a full position.
+- `run dock` (parking) now also logs the funnel's twist (`funnel_deg`, `twist_at_cm`): the approach angle
+  the funnel erased is still recorded, from the gyro.
+- **The posts are molded into the dock, not added on.** Their spacing and squareness come from the print (to
+  a fraction of a millimetre) and can't drift or be knocked loose; the dock's position, which the camera
+  watches through its check tile, carries the posts' positions with it; and there is no extra fixture to place,
+  glue or keep aligned. One print, screwed down, gives a parking spot and three measuring stations.
+- The head is 100 mm long (a whole station fits along each side) and is screwed down through four countersunk
+  holes (#6 x 1 1/4 in wood screws); the funnel's two tabs sit part-way along its walls. 172 x 174 x 22 mm,
+  prints flat without supports. No floor stripe: robots stay on the plywood.
+- Each station needs about 25 cm of clear floor in front of it.
 
 ## Where the robot's numbers come from
 

@@ -375,7 +375,7 @@ class DockMixin:
         P = self.P
         r = dict(ok=False, why="", ms_start=0, ms_first=0, ms_both=0, ms_press=[0, 0], travel=0.0,
                  travel_at=[NONE, NONE], first=-1, pivot=0.0, stripe=[NONE, NONE, NONE], x=0.0, y=0.0, th=0.0,
-                 x0=0.0, y0=0.0, th0=0.0, front0=0.0)
+                 x0=0.0, y0=0.0, th0=0.0, front0=0.0, funnel=0.0, twist_at=NONE)
         self.redraw_seat()                       # simulation only: this docking's wall imperfection
         if not self.sw_on:
             r["why"] = "nose switches not configured (sw_on 0)"
@@ -389,7 +389,8 @@ class DockMixin:
         saved = self.front_limit
         self.front_limit = 0.0
         level = [0.0, 0.0, 0.0]
-        if dock_mode:
+        stripe_on = dock_mode and P("stripe_on") > 0.5     # dock version 1's stripe; version 2 has none
+        if stripe_on:
             buf = [[], [], []]
             t0 = self.millis()
             while len(buf[0]) < 24 and self.millis() - t0 < 300:
@@ -412,6 +413,7 @@ class DockMixin:
         limit = 5000 + max_cm / max(0.2, creep * 0.178) * 2000.0
         r["ms_start"] = self.millis()
         h_first = 0.0
+        h_start, twist_deg = self.heading(), P("dock_twist_deg")
         ok = False
         sn = [0, 0, 0]
         while True:
@@ -424,7 +426,9 @@ class DockMixin:
                 if self.sw_first[k] and r["travel_at"][k] == NONE:
                     r["travel_at"][k] = travel
                     r["ms_press"][k] = self.sw_first[k]
-            if dock_mode:
+            if r["first"] < 0 and r["twist_at"] == NONE and abs(wrap180(self.heading() - h_start)) > twist_deg:
+                r["twist_at"] = travel
+            if stripe_on:
                 vals = self.line_sensors()
                 for k in range(3):
                     if r["stripe"][k] != NONE:
@@ -442,6 +446,7 @@ class DockMixin:
                 r["first"] = 0 if L else 1
                 r["ms_first"] = now
                 h_first = self.heading()
+                r["funnel"] = wrap180(h_first - h_start)
                 if not dock_mode:
                     self.brake()
                     r["ms_both"] = self.sw_press_ms[r["first"]]
@@ -516,17 +521,18 @@ class DockMixin:
     def dock_header(self):
         self.send("H,DOCK,run,ms_start,ms_first,ms_left,ms_right,ms_both,first,result,travel_cm,travel_left_cm,"
                   "travel_right_cm,pivot_deg,stripe_l_cm,stripe_c_cm,stripe_r_cm,frame,x0_cm,y0_cm,th0_deg,x_cm,y_cm,"
-                  "th_deg,still_ms,drift_dps,gz_mean,drift_used,n")
+                  "th_deg,still_ms,drift_dps,gz_mean,drift_used,n,funnel_deg,twist_at_cm")
 
     def dock_record(self, r, still, drift, gz, used, n):
         p = self.pose
         self.send("D,DOCK,%s,%d,%d,%d,%d,%d,%s,%s,%.3f,%.3f,%.3f,%.2f,%.3f,%.3f,%.3f,%s,%.2f,%.2f,%.2f,%.2f,%.2f,"
-                  "%.2f,%d,%.4f,%.4f,%d,%d" % (
+                  "%.2f,%d,%.4f,%.4f,%d,%d,%.2f,%.3f" % (
                       self.run_id, r["ms_start"], r["ms_first"], r["ms_press"][0], r["ms_press"][1], r["ms_both"],
                       "L" if r["first"] == 0 else "R" if r["first"] == 1 else "-",
                       "docked" if r["ok"] else r["why"], r["travel"], r["travel_at"][0], r["travel_at"][1], r["pivot"],
                       r["stripe"][0], r["stripe"][1], r["stripe"][2], "floor" if (p.on and p.known) else "odo",
-                      r["x0"], r["y0"], r["th0"], r["x"], r["y"], r["th"], still, drift, gz, used, n))
+                      r["x0"], r["y0"], r["th0"], r["x"], r["y"], r["th"], still, drift, gz, used, n,
+                      r.get("funnel", 0.0), r.get("twist_at", NONE)))
 
     def touch_header(self):
         self.send("H,TOUCH,run,ms_start,ms_click,side,result,travel_cm,travel_left_cm,travel_right_cm,frame,x0_cm,"

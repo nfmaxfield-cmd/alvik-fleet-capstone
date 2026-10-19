@@ -164,6 +164,11 @@ Param PARAMS[] = {
   {"dock_n",           1,   "dock run: dockings per run (each after backing out dock_back_cm; 0 back-out = 1 docking)"},
   {"stripe_thr",     300,   "dock stripe: a line sensor this far from its level at the start of the creep is on the stripe"},
   {"stripe_dir",       1,   "dock stripe: +1 = readings go up on it (dark), -1 = down, 0 = either way"},
+  {"dock_twist_deg", 0.5,   "dock: a heading change this big before the first click means the funnel has started turning the robot (twist_at_cm)"},
+  {"stripe_on",        0,   "dock: 1 = learn and log the floor stripe (dock version 1 only; version 2 has none)"},
+  {"posts_n",          1,   "posts run: measurements per run (back off posts_back_cm after each)"},
+  {"posts_back_cm",    6,   "posts run: back off this far after each measurement"},
+  {"posts_pivot_max_deg", 8, "posts: a lever that has not clicked after the robot has pivoted this far has missed its post"},
   {"touch_back_cm",    2,   "touch run: back off this far after each click"},
   {"touch_n",          1,   "touch run: touches per run (back off touch_back_cm, wait, creep again)"},
 };

@@ -34,23 +34,24 @@
 Arduino_Alvik alvik;
 
 // Bump this whenever the firmware changes, so every logged run says which code it ran.
-#define FW_VERSION "2026-10-19b"
+#define FW_VERSION "2026-10-20a"
 
 uint16_t gBootId = 0;   // random each power-on; starts every run id
 
 // The buttons cycle through the first N_EXP. "follow" (index 7) needs the
 // laptop, so it is started with `run follow` only; "calib" (index 8) is the
 // calibration run, started with the calibrate command only; "dock" (9) and
-// "touch" (10) need the nose switches (sw_on 1) and are started with `run`.
+// "touch" (10) and "posts" (11) need the nose switches (sw_on 1) and are started with `run`.
 const char* EXP_NAMES[] = {"stream", "turn", "lap", "grid", "demo", "straight", "survey", "follow", "calib", "dock",
-                           "touch"};
+                           "touch", "posts"};
 const int N_EXP = 7;
-const int N_NAMES = 11;
+const int N_NAMES = 12;
 const int EXP_SURVEY = 6;
 const int EXP_FOLLOW = 7;
 const int EXP_CALIB = 8;
 const int EXP_DOCK = 9;
 const int EXP_TOUCH = 10;
+const int EXP_POSTS = 11;
 int gSelected = 1;
 int gPending = -1;   // experiment requested by the laptop, started from loop()
 
@@ -533,7 +534,7 @@ void runExperiment(int i, bool fromButton) {
   // safe_front_cm) until steps arrive; each step sets its own front check (follow.h).
   // calib: it may be put down facing a board; only its rolls check ahead (runCalib).
   // dock / touch: put down facing the dock or board, which may be closer than safe_front_cm.
-  if (i == EXP_FOLLOW || i == EXP_CALIB || i == EXP_DOCK || i == EXP_TOUCH) gFrontLimitCm = 0;
+  if (i == EXP_FOLLOW || i == EXP_CALIB || i == EXP_DOCK || i == EXP_TOUCH || i == EXP_POSTS) gFrontLimitCm = 0;
   sw::configure();   // nose switches (switches.h): picks up `set sw_on 1` and pin changes
   if (!logged) edge::begin();
   if (logged) {
@@ -560,9 +561,10 @@ void runExperiment(int i, bool fromButton) {
     case EXP_CALIB: runCalib(); break;
     case EXP_DOCK: runDock(); break;
     case EXP_TOUCH: runTouch(); break;
+    case EXP_POSTS: runPosts(); break;
   }
   alvik.brake();
-  if (i == EXP_DOCK || i == EXP_TOUCH) gFrontLimitCm = -1;   // they ran with the front stop off
+  if (i == EXP_DOCK || i == EXP_TOUCH || i == EXP_POSTS) gFrontLimitCm = -1;   // they ran with the front stop off
   bool edgeStop = !strcmp(gAbortReason.c_str(), "plywood edge ahead");
   if (logged) tickWait((unsigned long)P("settle_end_ms"));   // at rest, still logging and blinking
   edge::stop();

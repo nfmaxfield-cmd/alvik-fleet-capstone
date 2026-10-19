@@ -34,6 +34,21 @@
 // at the lever's position (bump_ahead_cm ahead of the axle, bump_half_cm to the
 // side). Wheel distance over a few cm is good to about 0.1 mm.
 //
+// POST STATION (`run posts`, firmware 2026-10-20a, dock version 2): two narrow posts one switch spacing
+// apart, on the dock's outside. Creep straight (no funnel); at the first click that side presses and the
+// other pivots in, as in the dock, until the other lever clicks on its post. The travel at the first click
+// gives the distance to the station; the gyro's turn from the first click to the second (a few degrees: the
+// gyro's scale error barely matters there) gives the angle the robot came in at. A lever that misses its
+// post (the robot is off sideways by more than about the lever's half length) never clicks: the pivot passes
+// posts_pivot_max_deg, and the result names the side that missed.
+//
+// FUNNEL TWIST (dock mode, 2026-10-20a): both wheels creep at the same speed until the first click, so any
+// heading change before it is the funnel pushing the robot straight (funnel_deg); the pivot to both clicks
+// (pivot_deg) finishes the job. Their sum, the whole turn from the start to seated, is how crooked the robot
+// came in, with the opposite sign; the travel where the turning began (twist_at_cm) says how far into the
+// funnel it first touched a wall. So the parking dock reports the robot's approach error although it erases
+// it (simulation: within about 1 deg of the true approach angle at 8 deg).
+//
 // Both refuse to start unless sw_on is 1 (failed: "nose switches not
 // configured"), and refuse if a switch is already pressed (stuck or wiring).
 #pragma once
@@ -54,7 +69,9 @@ struct Result {
   float travel = 0;                                     // wheel distance from the creep's start at the end, cm
   float travelAt[2] = {NONE, NONE};                     // ... when each switch first closed (raw), cm
   int first = -1;                                       // 0 left, 1 right
-  float pivotDeg = 0;                                   // heading change from the first click to both (dock)
+  float pivotDeg = 0;                                   // heading change from the first click to both (dock, posts)
+  float funnelDeg = 0;                                  // heading change from the start to the first click (dock: the funnel's twist)
+  float twistAt = NONE;                                 // travel when that change first passed dock_twist_deg, cm
   float stripe[3] = {NONE, NONE, NONE};                 // travel when each line sensor (L, C, R) first read the stripe
   float x = 0, y = 0, th = 0;                           // own pose when it ended (follow pose, else library odometry)
   float x0 = 0, y0 = 0, th0 = 0;                        // ... at the creep's start
@@ -99,13 +116,15 @@ bool learnStripe(float level[3]) {
 
 // Creep in. dockMode: until both switches (with the pivot and the seat push); otherwise (touch) until either.
 // Returns false on a stop / failure (r.why, gFail or gAbortReason say why).
-bool creep(bool dockMode, Result& r, float maxCm = -1) {
+// posts: the post station (pivot to both clicks like the dock, but no stripe, no seat push, and a pivot limit).
+bool creep(bool dockMode, Result& r, float maxCm = -1, bool posts = false) {
   if (!ready(r)) { gFail = r.why; return false; }
   float saved = gFrontLimitCm;
   gFrontLimitCm = 0;                       // it is meant to touch what is ahead
   float level[3] = {0, 0, 0};
-  if (dockMode && !learnStripe(level)) { gFrontLimitCm = saved; return false; }
-  edge::lineOff = dockMode;                // the stripe is not an edge
+  bool stripe = dockMode && !posts && P("stripe_on") > 0.5f;
+  if (stripe && !learnStripe(level)) { gFrontLimitCm = saved; return false; }
+  edge::lineOff = dockMode && !posts;    // a version 1 dock's stripe is not an edge (logged or not)
   float lx0, ly0, lth;
   alvik.get_pose(lx0, ly0, lth);
   ownPose(r.x0, r.y0, r.th0);
@@ -120,7 +139,7 @@ bool creep(bool dockMode, Result& r, float maxCm = -1) {
   unsigned long pivotMs = (unsigned long)P("dock_pivot_ms");
   unsigned long limit = 5000 + (unsigned long)(maxCm / fmaxf(0.2f, creepRpm * 0.178f) * 2000.0f);   // rpm -> cm/s
   r.msStart = millis();
-  float hFirst = 0;
+  float hFirst = 0, hStart = heading(), twistDeg = P("dock_twist_deg"), pivotMax = P("posts_pivot_max_deg");
   bool ok = false;
   int stripeN[3] = {0, 0, 0};
   while (true) {
@@ -132,7 +151,8 @@ bool creep(bool dockMode, Result& r, float maxCm = -1) {
     r.travel = travel;
     for (int k = 0; k < 2; k++)
       if (sw::firstEdge[k] && r.travelAt[k] == NONE) { r.travelAt[k] = travel; r.msPress[k] = sw::firstEdge[k]; }
-    if (dockMode) {
+    if (r.first < 0 && r.twistAt == NONE && fabsf(wrap180(heading() - hStart)) > twistDeg) r.twistAt = travel;
+    if (stripe) {
       int L, C, R;
       alvik.get_line_sensors(L, C, R);
       int v[3] = {L, C, R};
@@ -147,12 +167,17 @@ bool creep(bool dockMode, Result& r, float maxCm = -1) {
       r.first = L ? 0 : 1;
       r.msFirst = now;
       hFirst = heading();
+      r.funnelDeg = wrap180(hFirst - hStart);
       if (!dockMode) { alvik.brake(); r.msBoth = sw::pressMs[r.first]; ok = true; break; }
     }
     if (dockMode && L && R) { alvik.brake(); r.msBoth = now; ok = true; break; }
     if (travel > maxCm) { snprintf(r.why, sizeof(r.why), "no click within %.0f cm", maxCm); break; }
     if (r.first >= 0 && now - r.msFirst > pivotMs) {
       snprintf(r.why, sizeof(r.why), "%s switch never clicked", r.first == 0 ? "right" : "left");
+      break;
+    }
+    if (posts && r.first >= 0 && fabsf(wrap180(heading() - hFirst)) > pivotMax) {
+      snprintf(r.why, sizeof(r.why), "miss %s", r.first == 0 ? "right" : "left");   // that lever passed its post
       break;
     }
     if (now - r.msStart > limit) { snprintf(r.why, sizeof(r.why), "creep timed out (stalled?)"); break; }
@@ -162,8 +187,8 @@ bool creep(bool dockMode, Result& r, float maxCm = -1) {
     delay(5);
   }
   alvik.brake();
-  if (ok && dockMode) {
-    r.pivotDeg = wrap180(heading() - hFirst);
+  if (r.first >= 0 && dockMode) r.pivotDeg = wrap180(heading() - hFirst);
+  if (ok && dockMode && !posts) {
     // seat: both wheels push gently so the face lies flush, then let go
     unsigned long t0 = millis();
     alvik.set_wheels_speed(press, press);
@@ -212,16 +237,16 @@ bool holdStill(float& drift, float& gzMean, unsigned long& stillMs) {
 void dockHeader() {
   net::sendLine("H,DOCK,run,ms_start,ms_first,ms_left,ms_right,ms_both,first,result,travel_cm,travel_left_cm,"
                 "travel_right_cm,pivot_deg,stripe_l_cm,stripe_c_cm,stripe_r_cm,frame,x0_cm,y0_cm,th0_deg,x_cm,y_cm,"
-                "th_deg,still_ms,drift_dps,gz_mean,drift_used,n");
+                "th_deg,still_ms,drift_dps,gz_mean,drift_used,n,funnel_deg,twist_at_cm");
 }
 
 void dockRecord(const Result& r, unsigned long stillMs, float drift, float gz, int used, int n) {
   net::logf("D,DOCK,%s,%lu,%lu,%lu,%lu,%lu,%s,%s,%.3f,%.3f,%.3f,%.2f,%.3f,%.3f,%.3f,%s,%.2f,%.2f,%.2f,%.2f,%.2f,"
-            "%.2f,%lu,%.4f,%.4f,%d,%d",
+            "%.2f,%lu,%.4f,%.4f,%d,%d,%.2f,%.3f",
             gRunId.c_str(), r.msStart, r.msFirst, r.msPress[0], r.msPress[1], r.msBoth,
             r.first == 0 ? "L" : r.first == 1 ? "R" : "-", r.ok ? "docked" : r.why, r.travel, r.travelAt[0],
             r.travelAt[1], r.pivotDeg, r.stripe[0], r.stripe[1], r.stripe[2], (pose::on && pose::known) ? "floor" : "odo",
-            r.x0, r.y0, r.th0, r.x, r.y, r.th, stillMs, drift, gz, used, n);
+            r.x0, r.y0, r.th0, r.x, r.y, r.th, stillMs, drift, gz, used, n, r.funnelDeg, r.twistAt);
 }
 
 void touchHeader() {
@@ -235,6 +260,22 @@ void touchRecord(const Result& r, int n) {
             r.msStart, r.msBoth, side, r.ok ? "touched" : r.why, r.first >= 0 ? r.travelAt[r.first] : r.travel,
             r.travelAt[0], r.travelAt[1], (pose::on && pose::known) ? "floor" : "odo", r.x0, r.y0, r.th0, r.x, r.y,
             r.th, r.front0, n);
+}
+
+void postsHeader() {
+  net::sendLine("H,POSTS,run,ms_start,ms_first,ms_left,ms_right,first,result,travel_first_cm,travel_left_cm,"
+                "travel_right_cm,pivot_deg,approach_deg,frame,x0_cm,y0_cm,th0_deg,x_cm,y_cm,th_deg,front0_cm,n");
+}
+
+// result: "both" (each lever clicked on its post), "miss left"/"miss right" (that lever passed beside its post),
+// or why it stopped. pivot_deg: the gyro's turn from the first click to the second = the angle it came in at
+// (sign: + = it turned left to bring the right lever on). approach_deg: heading change before the first click.
+void postsRecord(const Result& r, int n) {
+  net::logf("D,POSTS,%s,%lu,%lu,%lu,%lu,%s,%s,%.3f,%.3f,%.3f,%.2f,%.2f,%s,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.1f,%d",
+            gRunId.c_str(), r.msStart, r.msFirst, r.msPress[0], r.msPress[1],
+            r.first == 0 ? "L" : r.first == 1 ? "R" : "-", r.ok ? "both" : r.why,
+            r.first >= 0 ? r.travelAt[r.first] : r.travel, r.travelAt[0], r.travelAt[1], r.pivotDeg, r.funnelDeg,
+            (pose::on && pose::known) ? "floor" : "odo", r.x0, r.y0, r.th0, r.x, r.y, r.th, r.front0, n);
 }
 
 // Dock, measure the drift, and (follow mode) reset the own pose from the dock's pose. wallX/wallY: the middle
@@ -300,4 +341,29 @@ void runTouch() {
     if (!waitMs(300)) return;
     if (back > 0 && !(libraryMove(-back) && waitMs(500))) return;
   }
+}
+
+// ===================================================================
+// POSTS run (`run posts`): put the robot 5-25 cm in front of a post
+// station on dock version 2, roughly facing it. posts_n measurements,
+// backing off posts_back_cm after each. A miss is a result, not a failure:
+// the run backs off and carries on.
+// ===================================================================
+void runPosts() {
+  dock::postsHeader();
+  int n = (int)fmaxf(1.0f, P("posts_n"));
+  float back = P("posts_back_cm");
+  gFrontLimitCm = 0;                        // the whole run faces the station (runExperiment restores it)
+  for (int i = 1; i <= n; i++) {
+    rawlog::step = i;
+    dock::Result r;
+    bool ok = dock::creep(true, r, -1, true);
+    dock::postsRecord(r, i);
+    bool miss = !ok && strncmp(r.why, "miss", 4) == 0;
+    if (!ok && !miss) return;
+    if (miss) { gFail = ""; }
+    if (!waitMs(300)) return;
+    if (back > 0 && !(libraryMove(-back) && waitMs(500))) return;
+  }
+  net::logf("M,%s posts: %d measurement%s done", net::name, n, n == 1 ? "" : "s");
 }

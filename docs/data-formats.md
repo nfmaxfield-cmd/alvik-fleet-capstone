@@ -974,6 +974,13 @@ from where the creep started.
 | gz_mean | mean raw gyro z over that time (motor board units) |
 | drift_used | 1 = a follow step took the drift off its own heading (|drift| <= dock_drift_max_dps and a compass check) |
 | n | docking number within a `dock` run (1..dock_n), or the follow step id |
+| funnel_deg | (2026-10-20a+) gyro heading change from the creep's start to the first click: the funnel turning the robot straight (both wheels drive the same until then) |
+| twist_at_cm | (2026-10-20a+) wheel travel when that change first passed dock_twist_deg (-1 = never): how far in the robot first met a funnel wall |
+
+The approach angle the robot came in at is -(funnel_deg + pivot_deg), the
+whole turn from the start to seated (simulation: within about 1 deg at 8 deg).
+From 2026-10-20a the stripe columns are -1 unless `stripe_on 1` (dock version 1
+only; version 2 has no stripe).
 
 `touch.csv` (one row per touch):
 
@@ -988,6 +995,25 @@ from where the creep started.
 | frame, x0_cm, y0_cm, th0_deg, x_cm, y_cm, th_deg | own pose at the start / after braking (as DOCK) |
 | front0_cm | front distance sensor (centre zone) at the start: with travel_cm it is a distance-sensor check (reading = travel + bump_ahead + sw_gap - tof_ahead_cm) |
 | n | touch number within a `touch` run (1..touch_n), or the follow step id |
+
+`posts.csv` (one row per post-station measurement, `run posts`, 2026-10-20a+, dock version 2):
+
+| Column | Meaning |
+| --- | --- |
+| run, ms_start | run id; the creep started |
+| ms_first | the first switch clicked (debounced) |
+| ms_left, ms_right | each switch's first raw closing (0 = never) |
+| first | L or R: which lever met its post first |
+| result | `both` (each lever clicked on its post), `miss left` / `miss right` (that lever passed beside its post: the robot is off sideways by more than about the lever's half length, ~4.9 mm, towards the side that clicked), or why it stopped (as for DOCK) |
+| travel_first_cm | wheel travel at the first click: with the station's place in the map, the distance along |
+| travel_left_cm, travel_right_cm | per switch (-1 = never) |
+| pivot_deg | gyro turn from the first click to the second: the angle the robot came in at, opposite sign (a few degrees, where the gyro's scale error barely matters) |
+| approach_deg | heading change before the first click (should be ~0: nothing turns the robot before it touches) |
+| frame, x0_cm ... th_deg, front0_cm, n | as TOUCH |
+
+Two stations facing 90 degrees apart (dock version 2: the back and either side)
+give a full position. A `miss` is a result, not a failure: the run backs off
+posts_back_cm and carries on.
 
 What the touched face's position is: the lever's point, `bump_ahead_cm` ahead
 of the axle and `bump_half_cm` to that side, plus `sw_gap_cm` along the

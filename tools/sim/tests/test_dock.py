@@ -120,7 +120,7 @@ class DockTests(unittest.TestCase):
     def test_stripe_reading_matches_the_geometry(self):
         """The centre line sensor reaches the stripe's far edge stripe_x0 + (axle-to-sensor) before the axle's
         docked position: travel from the stripe to the docking is fixed by the dock."""
-        r = make(sw_on=1, dock_back_cm=0, dock_still_ms=300, safe_edge=1, edge_dir=1, edge_thr=400)
+        r = make(sw_on=1, stripe_on=1, dock_back_cm=0, dock_still_ms=300, safe_edge=1, edge_dir=1, edge_thr=400)   # dock version 1 (stripe)
         place_before_dock(r, 3.0, 0.0, 0.0)
         self.assertEqual(r.run_experiment("dock")["result"], "done")       # the edge guard took no notice
         d = records(r, "DOCK")[0]
@@ -128,6 +128,22 @@ class DockTests(unittest.TestCase):
         expect = (-dm.bump_ahead_cm) - (dm.stripe_x0_cm - lm.sensor_forward_cm)   # axle travel stripe -> docked
         got = float(d["travel_cm"]) - float(d["stripe_c_cm"])
         self.assertAlmostEqual(got, expect, delta=0.15)
+
+    def test_funnel_twist_reports_the_approach_angle(self):
+        """A robot that comes in crooked is turned straight by the funnel and the final pivot; the gyro's whole turn
+        from the start to seated (funnel_deg + pivot_deg) is that approach angle with the opposite sign, and the
+        funnel began turning it part-way in (twist_at_cm > 0). A straight approach shows almost none."""
+        for th, lat in ((8.0, 0.0), (-8.0, 0.0), (0.0, 0.0)):
+            r = make(sw_on=1, dock_back_cm=0, dock_still_ms=300)
+            place_before_dock(r, 3.0, lat, th)
+            self.assertEqual(r.run_experiment("dock")["result"], "done")
+            d = records(r, "DOCK")[0]
+            f = float(d["funnel_deg"]) + float(d["pivot_deg"])
+            if th == 0.0:
+                self.assertLess(abs(f), 1.5, d)
+            else:
+                self.assertAlmostEqual(f, -th, delta=1.5, msg=str(d))
+                self.assertGreater(float(d["twist_at_cm"]), 0.0, d)
 
     def test_touch_gives_the_board_distance(self):
         """Touch a board 20 times from 3 cm: the travel at the click + the bumper geometry = the board's
