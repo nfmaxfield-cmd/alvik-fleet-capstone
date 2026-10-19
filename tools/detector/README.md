@@ -369,23 +369,52 @@ YOLO training tests are skipped when `ultralytics` is not installed).
 
 ## Results so far (synthetic data only)
 
-No real labelled frames existed yet, so the pipeline was tested on 12
-synthetic recordings x 150 frames (8 train / 2 val / 2 test recordings),
-trained on a 2-core shared CPU for 40 minutes (600 steps, stopped by the time
-limit while still improving). Test recordings, threshold 0.3, radius 8 px:
+No real labelled frames exist yet. Comparison run on 2026-10-18 with the
+current `make_synthetic.py` (12 recordings x 150 frames, seed 0; 8 train /
+2 val / 2 test recordings, one `split.json` for every detector). Test
+recordings, threshold 0.3, radius 8 px. Every detector got a budget of about
+40 minutes of training on one CPU thread (2-core machine), with its
+learning-rate schedule fitted to that budget; the best epoch on the
+validation recordings was kept. Times are `benchmark.py` on a test frame,
+nothing else running.
 
-| | our model (ONNX) | our model (INT8 ONNX) | SSDlite baseline (random start) |
-| --- | --- | --- | --- |
-| alvik precision / recall / F1 | 0.986 / 0.998 / 0.992 | 0.973 / 1.000 / 0.986 | 0.921 / 0.997 / 0.957 |
-| alvik centre error, mean / p95 | 1.5 / 4.4 px | 1.6 / 4.5 px | 2.3 / 4.1 px |
-| alvik heading error, median / p95 | 8.6 / 26 deg (0.6% flipped) | 8.8 / 26 deg | none (no heading) |
-| unknown (cups) F1 | 0.74 | 0.66 | 0.23 |
-| time per frame, 320x240, 1 thread | 4.0 ms | 3.7 ms | 37 ms (PyTorch) |
+| | our model (ONNX) | our model (INT8) | SSDlite (random start) | YOLO11n (random start) | YOLO11n (COCO start) | YOLO11n-pose (COCO start) |
+| --- | --- | --- | --- | --- | --- | --- |
+| training: minutes / frames seen | 33 / 28.8k | (same) | 35 / 6.9k * | 40 / 25k | 40 / 21k | 40 / 23k |
+| alvik precision / recall / F1 | 0.863 / 1.000 / 0.927 | 0.841 / 1.000 / 0.914 | 0.858 / 0.976 / 0.913 | 0.837 / 0.998 / 0.911 | 0.866 / 1.000 / 0.928 | 0.862 / 1.000 / 0.926 |
+| alvik centre error, mean / p95 | 1.4 / 2.8 px | 1.4 / 2.8 px | 1.7 / 3.5 px | 0.9 / 1.7 px | 0.7 / 1.4 px | 0.5 / 1.1 px |
+| alvik heading error, median / p95 | 7.5 / 21 deg (0.2% flipped) | 7.9 / 21 deg | none | none | none | 6.7 / 19 deg (0% flipped) |
+| unknown (cups) F1 | 0.02 | 0.02 | 0.50 | 0.00 | 0.63 | 0.65 |
+| hand F1 | 0.27 | 0.26 | 0.00 | 0.54 | 0.91 | 0.91 |
+| ms per frame, 320x240, 1 thread | 5.3 | 4.7 | 39 (PyTorch) | 33 (PyTorch) | 31 (PyTorch; network alone in ONNX Runtime 18) | 35 (PyTorch) |
+| ms per frame, 4 threads | 20 | 21 | 74 | 46 | 49 | 51 |
 
-Hands: the test recordings happened to contain none; on the validation
-recordings hand F1 was 0.13 at 8 px and 0.50 at 20 px (only ~100 training
-examples; a hand's centre is vague). These numbers only show the code works
-and learns; they say nothing about the real camera.
+\* SSDlite shared the CPU with another training run and is about 2x slower
+per frame, so it saw far fewer frames in its time. The torchvision COCO
+weights (download.pytorch.org) were blocked here, so SSDlite had to start
+from random; YOLO's COCO weights (GitHub) downloaded fine.
+
+What this shows, and does not:
+
+- Robots: all six find every robot and score alvik F1 0.91-0.93; the ~100
+  extra "alvik" detections in every column are a test cup called a robot
+  (checked for our model: all 98 sit on a cup). YOLO's centres are 2-3x tighter (0.5-0.9 vs
+  1.4 px mean), and YOLO-pose's heading matches ours.
+- Cups and hands: YOLO from COCO is clearly better. But the test recordings
+  hold only **two** cups (38 hand frames), so these F1s rest on a
+  handful of objects; on the validation recordings our model scored cup F1
+  1.00. Treat both rows as anecdotes.
+- Speed: our model is 6-7x faster at one thread (5 ms vs 31-39 ms per frame;
+  3.4x against YOLO's network alone in ONNX Runtime). 4 threads is slower than
+  1 for everyone here because the test machine has only 2 cores.
+- Fairness: the COCO-start YOLO columns had pretrained help that our model
+  and SSDlite did not; the fair "same start" comparison is our model vs
+  YOLO11n random start (similar accuracy on robots, YOLO tighter centres but
+  no heading and no cups; ours 6x faster). Synthetic frames are clean and
+  simple; none of this predicts the real camera.
+
+The earlier table here (our model 0.992 F1, cups 0.74) came from older
+synthetic data and a 2-thread run; it is not comparable with this one.
 
 ## Synthetic data
 
