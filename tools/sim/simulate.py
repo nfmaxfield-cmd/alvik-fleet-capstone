@@ -112,6 +112,26 @@ def map_polys(path):
 
 
 # ------------------------------------------------------------------ main
+def set_lights(rb, lc):
+    """cfg.lights -> what this robot wears and how its firmware is set: l3 = holder variant (hardware) and
+    lights_seq (firmware); strip = lights_strip_code. Robots missing from cfg.lights.names use the default
+    table (tools/lights/patterns.py), or the firmware's own choice (strip: by name)."""
+    import camera as CAM                            # puts tools/lights on the path
+    LP = CAM.LP
+    names = lc.names or (LP.DEFAULT_L3_NAMES if lc.mode == "l3" else LP.DEFAULT_STRIP_NAMES)
+    code = names.get(rb.name)
+    if lc.mode == "l3":
+        rb.params["lights_mode"] = 1.0
+        g, q = LP.L3Family.parse(code) if code else ("S0L", "1111")
+        rb.holder = g
+        rb.params["lights_seq"] = float(LP.SEQS.index(q))
+    elif lc.mode == "strip":
+        rb.params["lights_mode"] = 2.0
+        rb.params["lights_strip_code"] = float(LP.StripFamily.parse(code)) if code else 0.0
+    else:
+        raise ValueError("lights.mode must be off, l3 or strip")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", help="output folder")
@@ -171,6 +191,8 @@ def main(argv=None):
         boots.add(boot)
         t_boot = start_unix - rng.uniform(*cfg.net.boot_before_s)
         rb = Robot(name, cfg, random.Random(rng.random()), params0, fw, t_boot, boot, f"192.168.1.{40 + len(robots)}")
+        if cfg.lights.mode != "off":
+            set_lights(rb, cfg.lights)
         rb.t_hello = start_unix + rng.uniform(0.3, 1.5)
         rb.idle_until(rb.t_hello)
         rb.send("M,hello from %s at %s (type help in the console)" % (name, rb.ip))

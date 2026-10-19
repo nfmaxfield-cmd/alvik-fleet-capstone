@@ -199,6 +199,9 @@ class Robot(FollowMixin):
         self.blink_code = 0
         self.blink_lit = False
         self.blink_t0 = 0
+        self.lights_on = False                     # lights.h state
+        self.holder = None                         # l3 holder variant this robot wears ("S1L"; simulate.py sets it)
+        self.light_events = []                     # (robot_ms, on, code): what the camera draws (camera.RobotTrack)
 
         # ---- records ----
         self.lines = []        # [robot_ms, text]  every line the robot sends (H/D/M)
@@ -686,6 +689,39 @@ class Robot(FollowMixin):
             return
         self.blink_set(False)
         self.blink_on = False
+
+    # ================================================= firmware: light pattern (lights.h)
+    LIGHT_SEQS = ("1111", "0111", "0011", "0101", "0001")
+
+    def lights_code(self):
+        mode = int(self.P("lights_mode"))
+        if mode == 1:
+            q = int(self.P("lights_seq"))
+            q = self.LIGHT_SEQS[q] if 0 <= q < len(self.LIGHT_SEQS) else "1111"
+            return (self.holder or "S0L") + ("" if q == "1111" else "/" + q)
+        if mode == 2:
+            c = int(self.P("lights_strip_code"))
+            if not 1 <= c <= 5:
+                c = {"Left": 1, "Center": 2, "Right": 3}.get(self.name, 4)
+            return str(c)
+        return None
+
+    def lights_start(self):
+        """lights::start(): the side-LED cycle counts from here (lights.h updates it on tick(); the
+        simulator draws it from the clock: a blocking call that would hold the side LED is not modelled)."""
+        if self.lights_on:
+            return
+        code = self.lights_code()
+        if code is None:
+            return
+        self.lights_on = True
+        self.light_events.append((self.ms, True, code))
+
+    def lights_stop(self):
+        if not self.lights_on or self.P("lights_idle") > 0:
+            return
+        self.lights_on = False
+        self.light_events.append((self.ms, False, None))
 
     # ================================================= firmware: motion
     def loop_delay(self, d):
@@ -1272,6 +1308,7 @@ class Robot(FollowMixin):
         self.sync_flash("start")
         self.show_selection(True)
         self.blink_start()                     # after the start flash, so the two can't be confused
+        self.lights_start()
         ms_blink = self.ms if self.blink_on else None
         if not self.abort_reason:
             self.start_nudge(i)
@@ -1293,6 +1330,7 @@ class Robot(FollowMixin):
         self.edge_stop()
         self.kidnap_at = None
         self.blink_stop()
+        self.lights_stop()
         self.sync_flash("end")
         self.raw_on = False
         edge_stop = self.abort_reason == "plywood edge ahead"

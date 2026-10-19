@@ -32,7 +32,7 @@
 Arduino_Alvik alvik;
 
 // Bump this whenever the firmware changes, so every logged run says which code it ran.
-#define FW_VERSION "2026-10-18c"
+#define FW_VERSION "2026-10-18d"
 
 uint16_t gBootId = 0;   // random each power-on; starts every run id
 
@@ -74,7 +74,7 @@ void showSelection(bool running) {
 }
 
 void printHelp() {
-  net::sendLine("M,commands: run stream|turn|lap|grid|demo|straight|survey|follow  stop  calibrate  clock  name <Left|Center|Right>  set <name> <value>  get <name>  params  route <SLRE...>  status  identify  help");
+  net::sendLine("M,commands: run stream|turn|lap|grid|demo|straight|survey|follow  stop  calibrate  clock  name <Left|Center|Right>  set <name> <value>  get <name>  params  route <SLRE...>  status  identify  lights  help");
   net::sendLine("M,during run follow: fs <id> <T|D|A|W> ...  fix <t_ms> <x> <y> <th> <sigma>  fpose <x> <y> <th>  hold [id]  halt  (tools/fleet/run_plan.py sends these)");
   net::sendLine("M,before calibrate: set calib_dir_limits <deg> <cm> ... caps its roll per direction (deg from where it faces, left +; next calibration only; off = none)");
 }
@@ -137,6 +137,21 @@ bool handleCommand(const String& raw, bool running) {
     }
     showSelection(running);
     net::logf("M,%s: that was me", net::name);
+    return false;
+  }
+  if (verb == "lights") {
+    // Show the light pattern for 10 s standing still (lights_mode must be set), e.g. to check
+    // it on the camera (docs/experiments/ACCURACY-CHECKS.md). Blocks: never during a run.
+    if (running) { net::sendLine("M,busy: send stop first"); return false; }
+    if ((int)P("lights_mode") == 0) { net::sendLine("M,lights: set lights_mode 1 (L on GPIO pins) or 2 (Modulino Pixels) first"); return false; }
+    bool was = lights::on;
+    lights::start();
+    if (!lights::on) return false;
+    net::logf("M,%s: showing the light pattern for 10 s", net::name);
+    unsigned long t = millis();
+    while (millis() - t < 10000) { lights::tick(); delay(10); }
+    if (!was) lights::stop(true);
+    net::sendLine("M,lights: done");
     return false;
   }
   if (verb == "params") {
@@ -520,6 +535,7 @@ void runExperiment(int i, bool fromButton) {
     syncFlash("start");
     showSelection(true);
     blink::start();   // after the start flash, so the two can't be confused
+    lights::start();  // light pattern (lights_mode; off by default)
     if (!gAbortReason.length()) startNudge(i);
   }
   // A stop during the settle pause skips the experiment itself.
@@ -539,6 +555,7 @@ void runExperiment(int i, bool fromButton) {
   if (logged) tickWait((unsigned long)P("settle_end_ms"));   // at rest, still logging and blinking
   edge::stop();
   blink::stop();
+  lights::stop();
   if (logged) {
     syncFlash("end");   // runs to full length even after a stop (no safety checks inside)
     rawlog::stop();
@@ -585,6 +602,7 @@ void setup() {
   net::logf("M,home_lab %s ready, battery %d%%", FW_VERSION, alvik.get_battery_charge());
   printHelp();
   showSelection(false);
+  lights::begin();    // lights_idle 1: pattern on from power-on
 }
 
 // Called by the WiFi updater (ota.h) at the start and end of an update.

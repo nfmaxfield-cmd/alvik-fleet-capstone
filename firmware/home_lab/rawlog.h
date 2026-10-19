@@ -17,6 +17,7 @@
 #include "params.h"
 #include "net.h"
 #include "blink.h"
+#include "lights.h"
 
 extern Arduino_Alvik alvik;
 extern String gRunId;
@@ -50,6 +51,7 @@ void stop() { on = false; }
 // Call as often as you like; sends at most one record per period.
 void tick() {
   blink::tick();   // blink codes ride on the same frequent calls
+  lights::tick();  // and so does the light pattern's side-LED cycle
   if (!on) return;
   unsigned long now = millis();
   if ((long)(now - next) < 0) return;
