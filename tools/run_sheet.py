@@ -7,7 +7,8 @@ at a time, and does the bookkeeping.
 
 For each row of data/measurements.csv still missing its tape readings, it:
   1. tells you which robot and route, and asks for the START marks
-     (front x y, rear x y, in cm), checking them for typos;
+     (front x y, rear x y, in cm), checking them for typos; press Enter
+     instead to measure them after the run (the dots stay on the floor);
   2. sends that row's commands to the robot, notes the run id and, with --pi,
      marks the moment in the camera recording;
   3. waits for the run to finish (or for you to press Ctrl+C to stop the robot);
@@ -227,12 +228,17 @@ def parse_marks(s):
     return [num(p) for p in s.replace(",", " ").split()]
 
 
-def ask_marks(what, spacing, near=None, max_dist=None, heading_near=None, heading_tol=20):
-    """Ask for 'front_x front_y rear_x rear_y' and check it. Returns the 4 numbers (cm)."""
+def ask_marks(what, spacing, near=None, max_dist=None, heading_near=None, heading_tol=20, allow_later=False):
+    """Ask for 'front_x front_y rear_x rear_y' and check it. Returns the 4 numbers (cm),
+    or None if allow_later and the user pressed Enter (measure after the run)."""
     while True:
         unit = 'inches, comma between each: front x, front y, rear x, rear y' if INCHES else \
             "cm: front x, front y, rear x, rear y"
-        s = ask(f"  {what} marks, {unit}\n  > ")
+        later = "\n  (or just press Enter to measure them after the run)" if allow_later else ""
+        s = ask(f"  {what} marks, {unit}{later}\n  > ")
+        if allow_later and not s.strip():
+            print("    OK: measure these start marks after the run. Leave the dots on the floor.")
+            return None
         vals = parse_marks(s)
         if len(vals) != 4 or None in vals:
             print("    Need 4 entries, e.g.  " + ("36 3/32, 42 15/16, 39 27/32, 42 13/16" if INCHES
@@ -497,11 +503,15 @@ def main():
                     f"x = {sx:g} cm, y = {sy:g} cm" + (f" (x = {to_in(sx)}, y = {to_in(sy)})" if INCHES else ""))
                 print(f"  Place {robot} with its centre at {spot}, facing {'+x' if sh == 0 else f'{sh:g} deg'}. "
                       f"Mark its front and rear, then measure.")
-                start = ask_marks("START", spacing, near=(sx, sy), max_dist=5, heading_near=sh, heading_tol=5)
-                xs, ys, hs, d = pose(*start)
-                if spacing is None:
-                    spacing = round(d, 1)
-                    print(f"    (front-to-rear mark distance taken as {spacing} cm for the checks)")
+                start = ask_marks("START", spacing, near=(sx, sy), max_dist=5, heading_near=sh, heading_tol=5,
+                                  allow_later=True)
+                if start is None:            # measured after the run: use the planned spot until then
+                    xs, ys, hs = sx, sy, sh
+                else:
+                    xs, ys, hs, d = pose(*start)
+                    if spacing is None:
+                        spacing = round(d, 1)
+                        print(f"    (front-to-rear mark distance taken as {spacing} cm for the checks)")
                 cmds = [c.strip() for c in r["commands"].split("/") if c.strip()]
                 ask(f"  Ready to send: {' / '.join(cmds)}  - press Enter to start: ")
                 before = watch.started.get(robot)
@@ -597,6 +607,12 @@ def main():
                 logf.flush()
                 if pi:
                     pi.send(f"trial {r['order']} run {run} final marks typed")
+                if start is None:
+                    print("  Now the START marks you made before the run (lift the robot away first if it's in the way).")
+                    start = ask_marks("START", spacing, near=(sx, sy), max_dist=5, heading_near=sh, heading_tol=5)
+                    xs, ys, hs, _ = pose(*start)
+                    c, s = math.cos(math.radians(hs)), math.sin(math.radians(hs))
+                    ex, ey = xs + c * tx - s * ty, ys + s * tx + c * ty
                 for k, v in zip(("xf0_cm", "yf0_cm", "xr0_cm", "yr0_cm"), start):
                     r[k] = f"{v:g}"
                 for k, v in zip(("xf_cm", "yf_cm", "xr_cm", "yr_cm"), end):
