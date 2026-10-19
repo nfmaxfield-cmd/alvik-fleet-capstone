@@ -29,6 +29,9 @@ for _p in (HERE, TOOLS, os.path.join(TOOLS, "fusion")):
 import landmarks as LM  # noqa: E402
 
 STILL_V, STILL_W, STILL_MIN_S, SETTLE_S = 0.3, 2.0, 0.8, 0.25
+STILL_MEDIAN_N = 5     # still/moving flag is median-filtered over this many RAW rows (~0.1 s): a lone wheel-speed
+                       # noise sample past STILL_W no longer splits a stand (it used to cut the stand before a
+                       # touch creep short, so the touch found no station); real motion edges are kept in place
 
 
 def fnum(v, default=float("nan")):
@@ -57,10 +60,13 @@ class Station:
 
 def still_spans(raw):
     """[(i0, i1)] index ranges of RAW rows where the robot stands still long enough."""
+    flag = [abs(fnum(r.get("v_cms"), 0.0)) < STILL_V and abs(fnum(r.get("w_dps"), 0.0)) < STILL_W
+            and fnum(r.get("lifted"), 0.0) < 0.5 for r in raw]
+    h = STILL_MEDIAN_N // 2
     out, start = [], None
     for i, r in enumerate(raw):
-        still = abs(fnum(r.get("v_cms"), 0.0)) < STILL_V and abs(fnum(r.get("w_dps"), 0.0)) < STILL_W \
-            and fnum(r.get("lifted"), 0.0) < 0.5
+        win = flag[max(0, i - h):i + h + 1]
+        still = 2 * sum(win) > len(win) if len(win) > 1 else flag[i]   # median of the window (a tie: moving)
         if still and start is None:
             start = i
         if (not still or i == len(raw) - 1) and start is not None:
