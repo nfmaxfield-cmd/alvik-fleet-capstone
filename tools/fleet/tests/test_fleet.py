@@ -586,6 +586,11 @@ def test_edge_stop_maps_a_no_go_strip_and_replans(demo_plan):
     ob2 = co.edge_boundary(co.bots["Left"], (50.0, 20.0, 90.0), "plywood edge at 50.0 20.0 90.0 bottom")
     assert np.array(ob2["points"])[:, 1].min() == pytest.approx(28.0, abs=0.01)
     FM.normalize(dict(demo_map(), obstacles=[ob]))                         # a valid map obstacle
+    # near a side of the plywood the map knows: square to that side, not to the (15 deg off) heading
+    ob3 = co.edge_boundary(co.bots["Left"], (0, 0, 0), "plywood edge at 60.0 115.0 75.0 line")
+    p3 = np.array(ob3["points"])
+    assert np.ptp(p3[:2, 1]) == pytest.approx(0.0, abs=1e-6)              # the strip's near side runs along x
+    assert p3[:, 1].min() == pytest.approx(115.0 + 3.5 * math.sin(math.radians(75.0)), abs=0.01)
     # on_failed: logged, said, handed to the re-planner as an obstacle caused by that robot
     got = {}
     co.steps = lambda n: [{"type": "D"}]

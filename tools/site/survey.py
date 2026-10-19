@@ -23,11 +23,15 @@ to 90 %, where the robot fits): drive to a spot 16 cm inside the edge, face
 straight out, and creep out at 2 cm/s with the edge guard on (line sensors).
 The line sensors pass the edge, the guard stops the robot and ends the run:
 that moment is a position reference for the edge. The drive itself ends with
-the robot centre 0.5 cm inside the clicked edge (line sensors 3 cm past it,
-nose about 4 cm over it) if the guard never trips: the guard must have passed
-its E0c check (tools/edge_check.py) before this is run. The next approach
-starts with a run of its own that backs the robot 14 cm straight in (backing
-up is blind to the edge; and the guard learns the plywood at the start of each
+the robot centre 3 cm inside the clicked edge (never closer): the line sensors,
+3.5 cm ahead of the axle, are then 0.5 cm past the clicked edge, so the guard
+trips on its own before the planned stop whenever the real edge is no more than
+0.5 cm further out than the click; otherwise the approach ends without a
+reading (sim_eval.py counts them). The guard must have passed its E0c check
+(tools/edge_check.py). In follow mode (firmware 2026-10-18c) a trip stops only
+the step: the robot holds and run_plan.py maps the edge as a no-go strip. The
+next approach backs the robot 14 cm in first, in a run of its own, when it ended
+within 10 cm of the edge (the guard learns the plywood at the start of each
 run, so a run that starts with the line sensors over the cement has no guard).
 
 Routes between spots come from the fleet planner (tools/fleet/planner.py) with
@@ -55,7 +59,7 @@ import planner as P  # noqa: E402
 
 DEFAULTS = dict(distances=(24.0, 14.0, 38.0), angles=(0.0, -18.0, 18.0), per_face=4, min_face_cm=6.0,
                 dwell_s=2.0, sweep_deg=12.0, sweep_dwell_s=1.5, edge_fracs=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9), edge_in_cm=16.0,
-                edge_stop_cm=0.5, edge_cms=2.0, back_cm=14.0, corner_dists_cm=(16.0, 30.0), corner_sweep_deg=14.0,
+                edge_stop_cm=3.0, edge_cms=2.0, back_cm=14.0, corner_dists_cm=(16.0, 30.0), corner_sweep_deg=14.0,
                 corner_step_deg=2.0, corner_dwell_s=1.2, max_edge_points=5)
 LINE_FWD_CM = 3.5      # line sensors ahead of the turning centre (grid_center_cm)
 
@@ -350,6 +354,13 @@ def plan_edge(m, robot, start, target, opts=None, back_first=False):
     pre = steps[-1]["to"] if steps else cur
     steps.append(_step("drive", pre, [target["end"][0], target["end"][1], pre[2]], "edge_out", speed=o["edge_cms"]))
     return retime(steps)
+
+
+def near_open_edge(pose, edges, within_cm=10.0):
+    """Is the robot centre within `within_cm` of an open edge (so a run starting here could begin with the line
+    sensors over the cement)?"""
+    p = np.asarray(pose[:2], float)
+    return any(e.open and float(np.dot(e.mid - p, e.n)) < within_cm for e in edges)
 
 
 def plan_back(start, opts=None):

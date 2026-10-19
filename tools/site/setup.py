@@ -231,6 +231,18 @@ def run_real_survey(ask, m, plans, args, site):
     ask.say("Start the camera recording on the Pi now (python3 camrec.py --label site) and leave it running "
             "until the survey is done.")
     ask.enter("Recording started?")
+    if args.fixes == "auto":
+        args.fixes = "udp" if (args.dry_run or live_feed_running(args.live_port)) else "none"
+    if args.fixes.startswith("udp"):
+        ask.say("Live camera fixes found (tools/live/track_live.py): each robot drives the whole survey in one go.")
+    else:
+        if not args.segment_spots:
+            args.segment_spots = 6
+        ask.say("No live camera feed found. Better: in a second Terminal window on the laptop start\n"
+                "  python tools/live/track_live.py --stream <pi name>.local:8000 --calib <folder>/floor_calibration.json\n"
+                "and run this again. Carrying on without it: the robots drive on their own wheels and gyro, in short "
+                f"runs of {args.segment_spots} spots, and you put each robot back on its mark between runs.")
+    E = SM.edges_from_map(m, getattr(args, "open_edges", []) or [])
     sessions = []
     for rn, pl in plans.items():
         ask.say(f"\nRobot {rn}: take the other robots off the board. Put {rn} on its start spot "
@@ -249,7 +261,7 @@ def run_real_survey(ask, m, plans, args, site):
             # (its last FOLLOW record), backs off in a run of its own (the guard learns the plywood at the start
             # of each run), then plans the next approach from there
             for k, tg in enumerate(pl["edges"]):
-                if k:
+                if k and SV.near_open_edge(here, E):
                     back = SV.plan_back(here)
                     sm = SV.survey_map(m, rn, others_parked=False)
                     sm["robots"][0]["start"] = list(here)
@@ -263,13 +275,62 @@ def run_real_survey(ask, m, plans, args, site):
                               send=["set safe_edge 1"], allow_off=True)
                 sessions.append(f)
                 here = last_pose(f, rn, steps[-1]["to"])
-            back = SV.plan_back(here)
+            back = SV.plan_back(here) if SV.near_open_edge(here, E) else []
             sm = SV.survey_map(m, rn, others_parked=False)
             sm["robots"][0]["start"] = list(here)
-            sessions.append(_run_plan(sm, SV.plan_file(sm, rn, back, here), site, f"{rn}_back_last", args,
-                                      send=["set safe_edge 0"], allow_off=True))
+            if back:
+                sessions.append(_run_plan(sm, SV.plan_file(sm, rn, back, here), site, f"{rn}_back_last", args,
+                                          send=["set safe_edge 0"], allow_off=True))
+            else:
+                ask.say(f"  (afterwards, switch {rn}'s edge guard back off: in the console, set safe_edge 0)")
     ask.enter("Survey done. Stop the camera recording.")
     return sessions
+
+
+def live_feed_running(port=5010, wait_s=3.0):
+    """Is tools/live/track_live.py sending camera fixes to run_plan's port? Listens for wait_s (and lets go of the
+    port again before run_plan.py needs it)."""
+    import socket
+    import time
+    sk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sk.bind(("0.0.0.0", port))
+    except OSError:
+        return False            # something already holds the port (a run_plan.py): not ours to read
+    sk.settimeout(0.3)
+    t0 = time.time()
+    try:
+        while time.time() - t0 < wait_s:
+            try:
+                data, _ = sk.recvfrom(65536)
+            except socket.timeout:
+                continue
+            try:
+                if json.loads(data.decode("utf-8", "replace")).get("type") == "fix":
+                    return True
+            except ValueError:
+                continue
+        return False
+    finally:
+        sk.close()
+
+
+def sightings_from_live(paths, robots):
+    """Camera sightings from track_live.py logs (messages.jsonl: the fixes it sent, on the laptop clock)."""
+    sight = {r: [] for r in robots}
+    for p in paths:
+        with open(p) as f:
+            for line in f:
+                try:
+                    m = json.loads(line)
+                except ValueError:
+                    continue
+                if m.get("type") == "fix" and m.get("robot") in sight:
+                    sight[m["robot"]].append((float(m["t"]), float(m["x"]), float(m["y"]),
+                                              float(m["th"]) if m.get("th") is not None else None))
+    for v in sight.values():
+        v.sort()
+    return sight
 
 
 def PL_OPTS(args):
@@ -336,6 +397,8 @@ def collect_real(sessions, detections, calib, recording, robots, video_offset=No
                     e["t"] = CS.to_laptop(fit, float(e["ms"])) if fit else float(e.get("t_recv") or 0)
                     run.edge.append(e)
             runs.append(run)
+    if detections is None:
+        return runs, None
     vc = RN.video_clock(sessions[0], recording, fits0, video_offset)
     if vc is None:
         raise SystemExit("Could not line up the video and robot clocks: give --video-offset or a recording with "
@@ -474,13 +537,18 @@ def main(argv=None):
     ap.add_argument("--tof-cal", help="tof_calibration.json from the per-robot calibration runs (zone directions)")
     ap.add_argument("--bench", help="JSON {robot: {bias_cm, bias_sd_cm, scale, scale_sd}} from E0c's C9 rows")
     ap.add_argument("--click-sd", type=float, default=1.0, help="how far a click may be off, cm (default 1)")
-    ap.add_argument("--fixes", default="none", help="run_plan.py position source: none (default) or udp[:PORT]")
+    ap.add_argument("--fixes", default="auto", help="run_plan.py position source: auto (default: udp if "
+                    "tools/live/track_live.py is sending fixes, else none), udp[:PORT] or none")
+    ap.add_argument("--live-port", type=int, default=5010, help="where the live feed sends its fixes")
+    ap.add_argument("--live-log", action="append", default=[],
+                    help="track_live.py's messages.jsonl of the survey (repeatable): its fixes are the camera sightings "
+                         "for the solve (no detector run needed)")
     ap.add_argument("--segment-spots", type=int, default=0,
-                    help="spots per run; without live camera fixes keep runs short (e.g. 6) and put the robot back "
-                         "on its spot between them")
+                    help="spots per run (default: all with live camera fixes, 6 without; then you put the robot "
+                         "back on its spot between runs)")
     ap.add_argument("--audit-every-landmark", action="store_true",
-                    help="audit the least-sure point of EVERY landmark and edge (plus one random), not just the 2 "
-                         "least sure: about 1.5 minutes of tape work per landmark, catches a single bad landmark")
+                    help="on a refresh too, audit one point of EVERY landmark and open edge (the first site setup "
+                         "always does; a refresh audits the 2 least sure + 1 random)")
     ap.add_argument("--refresh", help="landmark name(s), comma-separated: survey only these again")
     ap.add_argument("--dry-run", action="store_true", help="real-robot steps against simulated robots in real time "
                                                           "(run_plan.py --dry-run)")
@@ -502,6 +570,7 @@ def main(argv=None):
     m, keep, open_edges = landmarks_step(ask, json.load(open(map_path)), state, args.recording, args.calib,
                                          args.detections)
     state.update(open_edges=open_edges, landmarks=keep)
+    args.open_edges = open_edges
     save_state(args.site, state)
     with open(os.path.join(args.site, "map_clicked.json"), "w") as f:    # the map before the survey (E0d scores it)
         json.dump(FM.normalize(m), f, indent=1)
@@ -516,12 +585,17 @@ def main(argv=None):
         plans = plan_survey(ask, m, robots, open_edges, {}, args.site, only=only)
         state[key] = run_real_survey(ask, m, plans, args, args.site)
         save_state(args.site, state)
-    if not (args.detections and args.calib):
-        ask.say("\nNext: run the detector on the survey recording, then run this again with --detections and "
-                "--calib (and --recording) to solve, check and lock the map.")
+    if not ((args.detections and args.calib) or args.live_log):
+        ask.say("\nNext: run this again with --live-log <track_live log folder>/messages.jsonl (the live feed's "
+                "fixes), or run the detector on the survey recording and give --detections, --calib and --recording, "
+                "to solve, check and lock the map.")
         return 0
     ask.step(5, "solve")
-    runs, sight = collect_real(state[key], args.detections, args.calib, args.recording, robots, args.video_offset)
+    if args.live_log:
+        runs, _ = collect_real(state[key], None, None, None, robots, None)
+        sight = sightings_from_live(args.live_log, robots)
+    else:
+        runs, sight = collect_real(state[key], args.detections, args.calib, args.recording, robots, args.video_offset)
     cal = json.load(open(args.tof_cal)) if args.tof_cal else None
     bench = json.load(open(args.bench)) if args.bench else None
     pri = PL.robot_priors_from_cal(cal, bench)
@@ -543,7 +617,10 @@ def main(argv=None):
                              prior_sigma_by_landmark=prior_by)
     res = solve_fn([])
     show_estimate(ask, res.est)
-    final, rounds, fill, tape, _ = tape_and_audit(ask, solve_fn, res, n_worst=99 if args.audit_every_landmark else 2)
+    # the first site setup confirms every landmark and open edge by tape; a refresh: 2 least sure + 1 random
+    first = SM.read_lock(map_path)[1] is None
+    final, rounds, fill, tape, _ = tape_and_audit(ask, solve_fn, res,
+                                                  n_worst=99 if (first or args.audit_every_landmark) else 2)
     lock(ask, args.site, m, final, rounds, fill, camera, dict(sessions=state[key], robots=robots, refresh=only), runs)
     return 0
 
@@ -601,7 +678,7 @@ def run_sim(ask, args, state):
         PL.run_sim_survey(site, user, robots, [], log=ask.say, do_edges=False, only_landmarks=bad)
         runs[:] = [run for r in robots for run in site.runs(r) if run.experiment == "follow"]
     final, rounds, fill, tape, _ = tape_and_audit(ask, solve_fn, res, simulate_tape=sim_tape, resurvey=resurvey,
-                                                  seed=args.seed)
+                                                  seed=args.seed, n_worst=99)      # a first setup: every landmark
     errs = PL.map_errors(final.est, world)
     ask.say("\n(Simulation only) true error of the locked map: " + ", ".join(f"{k} {v:.2f} cm" for k, v in errs.items()))
     lock(ask, args.site, user, final, rounds, fill, camera, dict(simulated=True, seed=args.seed, robots=robots), runs)

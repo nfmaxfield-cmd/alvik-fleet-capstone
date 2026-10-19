@@ -17,8 +17,9 @@ sighting and a fixed calibration error field (--cam-sys rms cm). Then:
       at 0) refines the boards
   (c) site setup: the survey (every robot: view spots, corner sweeps, edge
       approaches), the joint solve with (b)'s sensor directions and the bench
-      range priors (E0c C9), then the tape audit (2 largest-uncertainty points +
-      1 random); a failed audit re-surveys the failing landmarks and merges the
+      range priors (E0c C9), tape fill-in of points the robots left less sure
+      than 0.5 cm, then the tape audit (a first setup: one point of every
+      landmark and open edge, each its least sure); a failed audit re-surveys the failing landmarks and merges the
       tape readings; once passed, the audit readings are merged too (c+tape)
   (c0) as (c) without the bench range priors
 
@@ -260,7 +261,8 @@ def run_audit(seed, res, user, runs, site, robots, pri, true, args, log, max_rou
         log(f"  fill-in by tape (sd above {SM.TARGET_SD_CM} cm): " + ", ".join(f"{f['point']} ({f['sigma_cm']:.2f})" for f in fill))
     for k in range(max_rounds):
         pts = cur.est.points()
-        pick = SM.pick_audit(pts, seed=seed * 100 + k, exclude=used)
+        # the first site setup confirms one point of every landmark and open edge (a refresh: 2 least sure + 1)
+        pick = SM.pick_audit(pts, n_worst=99 if k == 0 else 2, seed=seed * 100 + k, exclude=used)
         rec = []
         for p in pick:
             meas = measure(p)

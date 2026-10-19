@@ -56,7 +56,7 @@ a time; the Pi's commands in the Pi's Terminal (RealVNC).
    tools/site/README.md "Step by step", A to D:
 
    ```
-   python tools/site/setup.py --site site --map site/map.json --calib <recording>/floor_calibration.json --recording <recording> --bench bench.json --segment-spots 6 --audit-every-landmark
+   python tools/site/setup.py --site site --map site/map.json --calib <recording>/floor_calibration.json --recording <recording> --bench bench.json
    ```
 
 4. Detector on the survey recording, clock check:
@@ -70,7 +70,7 @@ a time; the Pi's commands in the Pi's Terminal (RealVNC).
 5. Site setup, steps 5-8 (solve, tape fill-in, audit, lock):
 
    ```
-   python tools/site/setup.py --site site --map site/map.json --calib <recording>/floor_calibration.json --recording <survey recording> --detections <survey recording>/detections.csv --bench bench.json --audit-every-landmark
+   python tools/site/setup.py --site site --map site/map.json --calib <recording>/floor_calibration.json --live-log logs/<date-time>-live/messages.jsonl --bench bench.json
    ```
 
    Write down the tape readings it asks for as you type them (also in
@@ -119,49 +119,49 @@ a time; the Pi's commands in the Pi's Terminal (RealVNC).
 
 ## Results (simulation, 2026-10-18)
 
-`python tools/site/sim_eval.py --out results/site_eval --seeds 1 2 3 --fusion-files`:
-the floor of the fusion's landmark test (tools/site/examples/sim_site_world.json:
+`python tools/site/sim_eval.py --out results/site_eval --seeds 1 2 3`: the
+floor of the fusion's landmark test (tools/site/examples/sim_site_world.json:
 four boards and a 19 cm cinderblock, one board just past the x = 122 side, an
 unmapped brick; open sides x0 and y1), each robot's front sensor with the
 r7/r11 errors (zones turned 0.4-3.3 deg, range bias -0.3 to +0.4 cm, scale
-+-1%), wheels 3% off, clicks 1 cm off per board end (x and y each), the camera
-0.3 cm and 3 deg per sighting with a 0.15 cm rms calibration error over the
-floor (an assumption), live camera fixes 10 a second. Error per landmark: its
-worst tape point (both ends of both long faces); 3 seeds x 5 landmarks:
++-1%), wheels 3% off, clicks 1 cm off per board end and per floor side (x and y
+each), the camera 0.3 cm and 3 deg per sighting with a 0.15 cm rms calibration
+error over the floor (an assumption), live camera fixes 10 a second, edge
+approaches stopping 3 cm inside the clicked edge, the first-setup audit (one
+point per landmark and open edge). Error per landmark: its worst tape point
+(both ends of both long faces); 3 seeds x 5 landmarks, cm:
 
-| Map | mean | median | worst | landmarks within 0.5 cm | open edges, mean / worst |
+| Map | mean | median | worst | within 0.5 cm | open edges, mean / worst |
 | --- | --- | --- | --- | --- | --- |
 | (a) clicks only | 1.54 | 1.03 | 3.46 | 0 / 15 | 0.47 / 1.01 |
 | (b) clicks + per-robot calibration runs (tof_calib.py on the spins) | 1.49 | 1.18 | 3.42 | 1 / 15 | 0.47 / 1.01 |
-| (c) site setup, robots only, with bench range priors | 0.82 | 0.34 | 3.32 | 10 / 15 | 0.34 / 0.70 |
-| (c) same without bench range priors | 0.58 | 0.37 | 2.58 | 10 / 15 | 0.34 / 0.70 |
-| (c) + tape fill-in (what the audit checks) | 0.31 | 0.31 | 0.46 | 15 / 15 | 0.22 / 0.27 |
-| (c) locked (audit readings merged too) | 0.30 | 0.31 | 0.42 | 15 / 15 | 0.11 / 0.17 |
+| (c) site setup, robots only | 0.69 | 0.56 | 2.23 | 7 / 15 | 0.58 / 1.00 |
+| (c) + tape fill-in (what the audit checks) | 0.34 | 0.32 | 0.66 | 13 / 15 | 0.15 / 0.26 |
+| (c) locked (audit readings merged too) | 0.27 | 0.25 | 0.79 | 13 / 15 | 0.14 / 0.23 |
 
 The robots-only worst cases are board ends with something right behind them
-(B's ends next to C and the brick, C's end against B, E standing past the
-plywood): no corner bearing there, so the end stays where the click put it, and
-the map says so (sd about 1 cm: 2 or 3 such ends per seed). Those are exactly
-the points step 6 asks to tape (3-5 points per seed). Bench range priors made
-no clear difference here (the r7/r11 range biases are small and boards are
-seen from many spots, by three robots, with corner sweeps); their worth is on
-boards seen from one side only.
+(no corner bearing there: the end stays where the click put it, and the map
+says so, sd about 1 cm) and open edges where the guard did not trip. Step 6
+tapes those (3-6 points per seed). Every audit (7 points a seed) passed.
+Merging the audit readings made one landmark worse (seed 2, A: 0.30 -> 0.79
+cm): a tape reading is in the tape's frame, the robots' readings in the
+camera's; see "Possible inaccuracies".
+
+Edge readings with the robot centre never planned closer than 3 cm inside the
+clicked edge: 23 of 48 approaches tripped the guard (seed 1: 15/15, seed 2:
+1/15, seed 3: 6/18); with the earlier 0.5 cm stop 41 of 51 did. The guard trips
+only where the real edge is within 0.5 cm outside the click.
 
 Sensor model from the survey (seed 1, camera error 0): zone directions within
 0.4 deg of the truth, range bias within 0.06 cm, scale within 0.2%, zone width
 6.9-7.3 deg (true: the simulator's outer rays 7.33 deg apart).
 
-Honesty: worst-point error / the landmark's stated sd, locked map, 15
-landmarks: 0.5-2.1 (median 1.6) for the worst of 4 points each; every audit
-(9 points) passed.
-
 Effort per seed: 14 clicks (2 per board, 2 per open side), 7 yes/no answers,
-1 open-sides answer, 6-8 tape points (fill-in + audit), 3 robot placements:
-about 14-17 minutes of user time (10 s a click, 90 s a tape point, 30 s a
-robot). Robot time: 3 minutes of calibration runs, 44-46 minutes of survey (the
-three robots one after another: about 39 spots each, a third of them corner
-sweeps, and 5-6 edge approaches; 13-15 of 15-18 approaches stopped by the edge
-guard, the others ended at the drive's end inside the edge).
+1 open-sides answer, 10-13 tape points (fill-in + one audit point per landmark
+and edge), 3 robot placements: about 20-24 minutes of user time (10 s a click,
+90 s a tape point, 30 s a robot). Robot time: 3 minutes of calibration runs,
+39-46 minutes of survey (the three robots one after another, about 39 spots
+each, a third of them corner sweeps, and 5-6 edge approaches).
 
 ### Fusion with the locked map
 
@@ -204,3 +204,26 @@ better than with the 1 cm map.
 ## Conclusion
 
 ## Deviations
+
+## New tests that may now be necessary
+- Corner sweeps on the real sensor: one board end swept from 16 and 30 cm,
+  bearing vs tape (the simulator's zones have sharp edges; the real ones may not).
+- Edge approaches on the real board with the 3 cm stop: how often the guard
+  trips, and the trip distance past the edge (sets `edge_k0_cm`).
+- The live feed during a full survey: fix rate and latency per robot while one
+  robot surveys (tools/live/eval_live.py).
+- The change check over a whole T1 session with nothing moved (false flags).
+
+## Possible inaccuracies
+- Camera calibration error 0.15 cm rms (chosen, not measured): the floor of
+  every point's accuracy; B1/B2 give the real value.
+- Tape readings are merged with sd 0.1 cm in the tape's frame while every other
+  reading is in the camera's: where the two frames differ by more, a tape point
+  pulls the board's other points off (seed 2, A). Next: give tape points
+  sd = hypot(0.1, camera calibration error) and re-run sim_eval.
+- Trip distance past the edge prior 0.2 +- 0.5 cm, bench range priors (0.15 cm),
+  per-reading noise 0.5 cm + 1%, and 0.15 cm that does not average away: chosen.
+- Click error 1 cm per board end and floor side, 90 s per tape point, 10 s per
+  click: assumptions behind the effort numbers.
+- The simulator's zone model (nearest of 3 rays, 15 frames/s) and edge-guard
+  model are guesses until E0c.

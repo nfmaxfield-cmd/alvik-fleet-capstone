@@ -68,28 +68,40 @@ press Enter (or `none`).
 **C. Step 3, plan.** It prints, per robot, how many spots and edge approaches it
 will do and about how long. Nothing to do.
 
-**D. Step 4, survey.** It asks you to start the camera recording on the Pi.
+**D. Step 4, survey.** Before this step, start the camera and the live feed.
 In the **Pi's Terminal** (over RealVNC):
 
 ```
 python3 camrec.py --label site
 ```
 
-Back on the laptop, press Enter. For each robot it says which one to put on its
-start spot and to take the others **off the board**. Do that, press Enter. The
-robot drives its plan (`run_plan.py` prints what it does). Without live camera
-fixes (`--fixes none`, the default), use `--segment-spots 6`: the robot comes
-back to its start spot every 6 spots, and you put it back exactly on its mark
-when it asks. At the end it asks you to stop the camera recording (press Ctrl+C
-in the Pi's Terminal).
-
-**E. Detector and clocks.** Run the detector on the recording and line up the
-clocks (as for any recorded run: docs/experiments/INDEX.md, "Workflow"), then
-start the setup again with the detections:
+In a **second Terminal window on the laptop**:
 
 ```
-python tools/site/setup.py --site site --map site/map.json --calib <recording>/floor_calibration.json --recording <recording> --detections <recording>/detections.csv --bench bench.json
+python tools/live/track_live.py --stream <pi name>.local:8000 --calib <recording>/floor_calibration.json
 ```
+
+You should see it print fixes per robot every few seconds. Leave both running.
+Back in the first window press Enter. The setup listens for the live feed for
+3 s: found, each robot drives its whole plan in one go with camera fixes. Not
+found, it says so and falls back to short runs of 6 spots on the robots' own
+wheels and gyro, and you put the robot back exactly on its mark between runs.
+For each robot it says which one to put on its start spot and to take the
+others **off the board**. Do that, press Enter. The robot drives its plan
+(`run_plan.py` prints what it does). At the end, stop both (Ctrl+C in each
+window).
+
+**E. Camera sightings.** Start the setup again, giving it the live feed's log
+(track_live.py prints its log folder when it starts; default `logs/<date-time>-live/`):
+
+```
+python tools/site/setup.py --site site --map site/map.json --calib <recording>/floor_calibration.json --live-log logs/<date-time>-live/messages.jsonl --bench bench.json
+```
+
+(Without the live feed: run the detector on the recording and line up the
+clocks as for any recorded run, docs/experiments/INDEX.md "Workflow", and give
+`--recording <recording> --detections <recording>/detections.csv` instead of
+`--live-log`.)
 
 Answer the questions as before. When it asks "A survey was already driven ...
 Use it?", press Enter (yes): it does not drive again, it uses the runs it saved.
@@ -102,13 +114,13 @@ than 0.5 cm: for example a board end with another board right behind it) are
 listed one at a time. Measure each with the tape from the axes' origin and type
 `x, y` in inches, like `36 3/32, 12 1/2`, then Enter. (Or in cm: `91.6, 31.7 cm`.)
 
-**H. Step 7, audit.** Two or three points the program picks (the least sure
-ones, and one at random): measure them the same way. It prints PASS or FAIL for
+**H. Step 7, audit.** The first site setup asks for one point of **every**
+landmark and every open edge (each one's least sure point), so every landmark
+is confirmed by tape before the map locks. A later `--refresh` asks for the two
+least sure points and one at random (`--audit-every-landmark` makes a refresh
+check every landmark too). Measure them the same way. It prints PASS or FAIL for
 each. On a FAIL, it measures the failing landmarks again with the robots and
 uses your readings too; then it picks new points.
-
-To check every landmark instead of the two least sure (recommended the first
-time, about 1.5 minutes of tape work per landmark), add `--audit-every-landmark`.
 
 **I. Step 8, lock.** On a PASS it writes `site/map.json` (version, date,
 uncertainties, the audit, the camera calibration it was made with),
@@ -148,9 +160,10 @@ board's end lies in that direction (give or take half the zone's width). Ranging
 a long face only says where the face is across it; the corner sweeps say where
 the board's ends are. Two distances separate the corner from the zone's width.
 For every open edge, up to 5 spots along it: the robot faces out and creeps at
-2 cm/s with the edge guard on (`set safe_edge 1`); the guard stops it and ends
-the run; the next run backs it 14 cm in (a run of its own: the guard learns
-the plywood at the start of each run). Routes between spots come from the fleet
+2 cm/s with the edge guard on (`set safe_edge 1`) to 3 cm inside the clicked
+edge; the guard stops it (the step, in follow mode); when it ended within 10 cm
+of the edge, a run of its own backs it 14 cm in (the guard learns the plywood
+at the start of each run). Routes between spots come from the fleet
 planner, so the plans run on `run_plan.py` and the firmware follower unchanged.
 
 **Solve (solve.py).** One robust least-squares fit (factor graph) of: each
@@ -203,10 +216,13 @@ Consider a site setup refresh for that area` and writes
   board) give no corner: their uncertainty stays at the click's, and step 6
   asks for a tape reading.
 - **Without live camera fixes** the robots drive on their own pose between the
-  start spot and the spots; keep runs short (`--segment-spots`).
-- **The edge approach** relies on the edge guard: the drive ends with the robot
-  centre 0.5 cm inside the clicked edge (line sensors 3 cm past it). If the
-  guard failed and the click was 1 cm too far out, the robot's wheels would
-  reach the edge. The guard must pass its E0c check first.
+  start spot and the spots; runs are kept short (`--segment-spots`, 6).
+- **The edge approach** never plans the robot centre closer than 3 cm inside
+  the clicked edge: the line sensors (3.5 cm ahead of the axle) then reach
+  0.5 cm past the click, so the guard only trips where the real edge is within
+  0.5 cm outside the click. In simulation (1 cm clicks) 23 of 48 approaches
+  tripped (41 of 51 with the earlier 0.5 cm stop); the edges then come mostly
+  from the tape points of step 6. In follow mode a trip only stops the step; the
+  robot holds and run_plan.py maps the edge as a no-go strip.
 - Simulation only so far (docs/experiments/E00d-site-setup has the plan for the
   real floor).

@@ -214,8 +214,9 @@ else), but the run did not finish its route. So:
 - Follow runs (fleet) don't end at an edge: the guard stops only the step
   (STEP failed `plywood edge at X Y TH CUE`, "Step follower"), the robot holds,
   and tools/fleet/run_plan.py adds the edge to the map as a no-go strip
-  (obstacle source `edge_guard`: a rectangle square to the robot's heading,
-  starting 3.5 cm ahead of the axle for the line cue or 8 cm for the bottom
+  (obstacle source `edge_guard`: a rectangle square to the map's floor side
+  the robot drove at, when that side is within 40 deg of square on and 12 cm of
+  the trip, else square to the robot's heading; starting 3.5 cm ahead of the axle for the line cue or 8 cm for the bottom
   zone, 40 cm either side, 25 cm deep: assumptions until hardware trips
   confirm them), logs it (`edge_boundary` in its log) and re-plans the
   affected robots; the others carry on. A follow run from older firmware that
