@@ -289,7 +289,8 @@ robot, uniformly.
 ## Home dock and touch probe (fw_dock.py, firmware 2026-10-19a)
 
 `config.dock.docks` puts printed home docks on the floor (geometry from hardware/dock/dock_params.py; a fleet
-map's `home_docks` does this in fleet_sim.py). The robot's body (with the nose bumper) is then solid: a
+map's `home_docks` does this in fleet_sim.py). The robot's body (with the nose bracket: `bumper_w_cm` wide,
+its arms reaching `bumper_len_cm` back from its face; the pocket fits the bracket) is then solid: a
 position-based contact model pushes it out of the dock's walls (rolling forward/back is easy, turning medium,
 sliding sideways on the tyres hard: `lat_mobility`, `turn_mobility`), its wheels slip and its encoders keep
 counting, as on the real robot. `contact_boards` makes the boards solid too (touch tests). The two nose switches

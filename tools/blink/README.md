@@ -346,8 +346,8 @@ gives all three robots a one-frame name and works down to 2.6 px/cm.
 
 **Hardware per robot** (printed L): the holder (hardware/dock `stl/led_holder.stl`; Center's mirrored),
 3 x 5 mm bright white LEDs, each driven from 5 V through a small NPN transistor or logic MOSFET from a
-GPIO pin with a series resistor (a 3.3 V pin alone gives a white LED only a few mA), 3 free GPIO pins
-(`lights_pin_c/_f/_s`), a matte black holder (the white top next to an LED hides it). Strip: a Modulino
+GPIO pin with a series resistor (a 3.3 V pin alone gives a white LED only a few mA), 3 free Nano pins
+(`lights_pin_c/_f/_s`, default A2 / A3 / A7 in the Nano's bottom-row breakout holes), a matte black holder (the white top next to an LED hides it). Strip: a Modulino
 Pixels on the Qwiic port and the Arduino_Modulino library (without it lights_mode 2 only says so).
 
 **Assumptions** (each with the next step if wrong):

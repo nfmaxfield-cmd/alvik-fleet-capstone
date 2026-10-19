@@ -1311,7 +1311,7 @@ def make_plan(m, jobs=None, over=None, t0_s=0.0, replan_of=None, events=None, t_
 # Going home: route to a home dock's mouth, then creep in (firmware follow step K, dock.h)
 # ----------------------------------------------------------------------------
 
-BUMP_AHEAD_CM = 6.09      # placeholder, hardware/dock/dock_params.py; only for where the plan draws the docked robot
+BUMP_AHEAD_CM = 6.10      # hardware/dock/dock_params.py BUMP_AHEAD_MM / 10; only for where the plan draws the docked robot
 
 
 def assign_homes(m, homes):

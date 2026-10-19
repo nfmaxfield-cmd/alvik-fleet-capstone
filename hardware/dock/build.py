@@ -1,13 +1,15 @@
-"""Build the home dock, the nose bumper, the camera check tile and the LED holder from dock_params.py:
+"""Build the home dock, the nose bracket (bumper), the camera check tile and the LED holder from dock_params.py:
 STL files to print, a PNG preview of each, and a printability report.
 
     pip install cadquery matplotlib numpy      (cadquery 2.4+; on Linux add --break-system-packages if pip asks)
     python hardware/dock/build.py               (writes hardware/dock/stl/ and hardware/dock/preview/)
+    python hardware/dock/build.py --ref alvik_reference_design.step   (also checks against Arduino's CAD model)
 
-Every number comes from dock_params.py; change it there and run this again. It prints the three console lines
-that put the bumper's numbers into the firmware, and FAILS (exit 1) if a part does not fit the bed, a wall is
-thinner than MIN_WALL_MM, the bumper would cover the distance sensor, or the pocket is too deep for a
-crooked robot to reach the back wall.
+Every number comes from dock_params.py; change it there and run this again. It prints the console lines that
+put the bracket's numbers into the firmware, and FAILS (exit 1) if a part does not fit the bed, a wall is
+thinner than MIN_WALL_MM, the bracket would cover the distance sensor, hit a tyre or need a screw longer than the
+insert takes, the pocket is too deep for a crooked bracket to reach the back wall, or anything behind the pocket
+(arms, screw heads, robot) comes closer to a dock wall than the pocket's own play.
 
 Print orientation: each STL is exported already lying on the bed the way that needs the least support (of five
 tries); the report says which way and how much overhang is left. The PNG previews show the part as drawn
@@ -100,64 +102,72 @@ def tile_solid():
     return base
 
 
-# ============================================================================= the nose bumper
-def bumper_solid(mode):
-    """Nose bumper in robot coordinates: X forward from the robot's front face, Y left, Z up from the floor.
-    mode "m3": screws through the back plate into the robot's front M3 holes; "technic": side arms with
-    Technic pin holes."""
+# ============================================================================= the nose bracket
+def robot_envelope(length=200.0):
+    """The robot's shell as far as the bracket cares (robot frame): the side walls leaning out 1.1 deg, the front
+    face at X = 0, from the floor to the top. Cut from the bracket blank, it leaves the U's inside."""
     c = cq()
-    W = D.ROBOT_WIDTH_MM
+    z0, z1 = 0.0, D.ROBOT_TOP_Z_MM + 10
+    a, b = D.side_half_w(z0) + D.ARM_CLEAR_MM, D.side_half_w(z1) + D.ARM_CLEAR_MM
+    sec = c.Workplane("YZ").polyline([(-a, z0), (a, z0), (b, z1), (-b, z1)]).close().extrude(length)
+    return sec.translate((-length, 0, 0))
+
+
+def bracket_solid():
+    """Nose bracket in robot coordinates: X forward from the robot's front face, Y left, Z up from the floor.
+    A bar across the front carrying the two switches, an arm back along each side to the front pair of M3
+    inserts."""
+    c = cq()
+    yo = D.ARM_OUTER_Y_MM
     z0, z1 = D.BUMPER_Z0_MM, D.BUMPER_Z1_MM
     Hh = z1 - z0
     depth = D.FACE_X_MM
+    xb = D.ARM_BACK_X_MM
+    xi = D.SIDE_INSERT_X_MM
+    zt = D.ARM_TOP_Z_MM
+    # the bar, full bracket width
     body = (c.Workplane("XY").workplane(offset=z0).center(depth / 2, 0)
-            .box(depth, W, Hh, centered=(True, True, False)))
-    # chamfer the two front vertical corner edges
+            .box(depth, 2 * yo, Hh, centered=(True, True, False)))
     body = body.edges("|Z and >X").chamfer(D.CORNER_CHAMFER_MM)
-    # switch pockets: open to the front and the top, a shelf below
+    # the arms: a side profile (X, Z), low at the front, rising to the screws, extruded across Y; the robot's
+    # envelope is cut out of it below
+    rise_x = xi + D.ARM_BOSS_R_MM + 4.0          # the top edge is full height from here back
+    prof = [(depth - D.CORNER_CHAMFER_MM, z0), (xb, z0), (xb, zt), (rise_x, zt), (0.0, z1), (depth - D.CORNER_CHAMFER_MM, z1)]
+    inner = D.side_half_w(z0) - 1.0
     for sg in (1, -1):
-        yo = sg * D.SWITCH_Y_OUTER_MM
-        yi = sg * (D.SWITCH_Y_OUTER_MM - D.SWITCH_L_MM - 0.4)
-        y0, y1 = min(yo, yi), max(yo, yi)
-        # body pocket (switch body + 0.2 mm clearance), terminals behind it, lever slot in front
+        arm = c.Workplane("XZ").polyline(prof).close().extrude(-(yo - inner))   # XZ normal is -Y: extrude -d = +Y
+        arm = arm.translate((0, inner, 0)) if sg > 0 else arm.mirror("XZ").translate((0, -inner, 0))
+        body = body.union(arm)
+    body = body.cut(robot_envelope())
+    # switch pockets: open to the front and the top, a shelf below (the terminals behind the body are open to
+    # the top too: the wires go straight up from there)
+    for sg in (1, -1):
+        so = sg * D.SWITCH_Y_OUTER_MM
+        si = sg * (D.SWITCH_Y_OUTER_MM - D.SWITCH_L_MM - 0.4)
+        y0, y1 = min(so, si), max(so, si)
         pocket = (c.Workplane("XY").workplane(offset=z0 + D.SHELF_T_MM)
                   .center(D.BACKPLATE_T_MM + (depth - D.BACKPLATE_T_MM) / 2 + 0.5, (y0 + y1) / 2)
                   .box(depth - D.BACKPLATE_T_MM + 1.0, (y1 - y0) + 0.4, Hh, centered=(True, True, False)))
         body = body.cut(pocket)
-        # screw holes through the shelf, M2 self-tapping into the plastic (pilot 1.8) - the switch's own holes
-        # take the screw; ASSUMED hole layout (dock_params)
+        # M2 self-tapping pilot holes (1.8) through the shelf, under the switch's own holes (ASSUMED layout)
         ym = sg * D.SWITCH_LATERAL_MM
         for dy in (-D.SWITCH_HOLE_SPACING_MM / 2, D.SWITCH_HOLE_SPACING_MM / 2):
             hole = (c.Workplane("XY").workplane(offset=z0 - 1).center(D.SWITCH_BACK_X_MM + D.SWITCH_HOLE_X_MM, ym + dy)
                     .circle(0.9).extrude(D.SHELF_T_MM + 2))
             body = body.cut(hole)
-        # wire channel through the back plate's top edge, behind the terminals
-        ch = (c.Workplane("XY").workplane(offset=z1 - 3).center(D.BACKPLATE_T_MM / 2, ym)
-              .box(D.BACKPLATE_T_MM + 1, 4, 4, centered=(True, True, False)))
-        body = body.cut(ch)
-    if mode == "m3":
-        top = max(z1, max(z for _, z in D.FRONT_M3_HOLES_MM) + D.M3_HEAD_DIA_MM / 2 + 1.5)
-        for (y, z) in D.FRONT_M3_HOLES_MM:
-            if z + D.M3_HEAD_DIA_MM / 2 + 1.5 > z1:          # a tab up the robot's face beside the ToF window
-                tab = (c.Workplane("XY").workplane(offset=z1 - 1).center(D.BACKPLATE_T_MM / 2, y)
-                       .box(D.BACKPLATE_T_MM, D.M3_HEAD_DIA_MM + 3, top - z1 + 1, centered=(True, True, False)))
-                body = body.union(tab)
-            hole = cyl(D.M3_CLEAR_DIA_MM / 2, D.BACKPLATE_T_MM + 2, (-1, y, z), (1, 0, 0))
-            cb = cyl(D.M3_HEAD_DIA_MM / 2 + 0.2, depth, (D.BACKPLATE_T_MM, y, z), (1, 0, 0))
-            body = body.cut(hole).cut(cb)
-    else:
-        # a strap per Technic hole: up the front face (in front of it, beside the distance sensor), then back
-        # over the top to the hole; a 4.85 mm hole for a friction pin
-        t = D.BACKPLATE_T_MM
-        top = D.ROBOT_TOP_Z_MM
-        for (x, y) in D.TECHNIC_HOLES_MM:
-            up = (c.Workplane("XY").workplane(offset=z1 - 1).center(t / 2, y)
-                  .box(t, D.STRAP_W_MM, top + t - z1 + 1, centered=(True, True, False)))
-            over = (c.Workplane("XY").workplane(offset=top).center((t - x - 6) / 2, y)
-                    .box(t + x + 6, D.STRAP_W_MM, t, centered=(True, True, False)))
-            body = body.union(up).union(over)
-            body = body.cut(cyl(D.TECHNIC_PIN_HOLE_DIA_MM / 2, t + 2, (-x, y, top - 1), (0, 0, 1)))
+        # M3 clearance holes through the arm, at the inserts
+        for zi in D.SIDE_INSERT_Z_MM:
+            body = body.cut(cyl(D.M3_CLEAR_DIA_MM / 2, 12, (xi, sg * (yo + 1), zi), (0, -sg, 0)))
     return body
+
+
+def screw_heads(sg):
+    """The two M3 heads on one side (sg = +1 left, -1 right), as solids standing out of the arm (robot frame)."""
+    s = None
+    for zi in D.SIDE_INSERT_Z_MM:
+        h = cyl(D.M3_HEAD_DIA_MM / 2, D.M3_HEAD_H_MM, (D.SIDE_INSERT_X_MM, sg * D.ARM_OUTER_Y_MM, zi), (0, sg, 0))
+        s = h if s is None else s.union(h)
+    return s
 
 
 def led_holder_solid():
@@ -225,6 +235,23 @@ def bbox(shape):
     return (b.xmin, b.ymin, b.zmin, b.xmax, b.ymax, b.zmax)
 
 
+def docked_outline(step=0.5):
+    """[(robot X, half width, what)] along the robot with its bracket, seen from above (screw heads included)."""
+    out = []
+    x = D.FACE_X_MM
+    xi, r = D.SIDE_INSERT_X_MM, D.M3_HEAD_DIA_MM / 2
+    while x > -(D.ROBOT_LENGTH_MM + 1):
+        if x >= D.ARM_BACK_X_MM:
+            hw, what = D.ARM_OUTER_Y_MM, "bracket" if x >= 0 else "bracket arm"
+            if abs(x - xi) <= r:
+                hw, what = D.ARM_OUTER_Y_MM + D.M3_HEAD_H_MM, "arm's screw heads"
+        else:
+            hw, what = D.ROBOT_WIDTH_MM / 2, "robot's side"
+        out.append((x, hw, what))
+        x -= step
+    return out
+
+
 def checks(parts):
     """Printability and fit checks. Returns (ok, lines)."""
     lines, ok = [], True
@@ -240,37 +267,58 @@ def checks(parts):
         w, l = x1 - x0, y1 - y0
         fits = (w <= bx and l <= by) or (w <= by and l <= bx)
         rule(fits, "%s: %.1f x %.1f x %.1f mm, bed %.0f x %.0f" % (name, w, l, z1 - z0, bx, by))
-    thin = [("dock walls", D.WALL_T_MM), ("bumper back plate", D.BACKPLATE_T_MM), ("switch shelf", D.SHELF_T_MM),
-            ("bumper outer rib", D.FACE_RIB_MM), ("screw tabs", D.TAB_T_MM), ("LED plate", D.LED_PLATE_T_MM)]
+    arm_min = D.ARM_OUTER_Y_MM - D.side_half_w(D.ARM_TOP_Z_MM) - D.ARM_CLEAR_MM
+    thin = [("dock walls", D.WALL_T_MM), ("bracket back plate", D.BACKPLATE_T_MM), ("switch shelf", D.SHELF_T_MM),
+            ("bracket outer rib", D.FACE_RIB_MM), ("bracket arms (thinnest, at the top)", arm_min),
+            ("screw tabs", D.TAB_T_MM), ("LED plate", D.LED_PLATE_T_MM)]
     for what, t in thin:
         rule(t >= D.MIN_WALL_MM, "%s %.1f mm thick (>= %.1f)" % (what, t, D.MIN_WALL_MM))
     rule(D.TILE_T_MM >= 1.0, "check tile %.1f mm thick (thin by design; it lies in its recess)" % D.TILE_T_MM)
-    # distance sensor: the bumper top must stay below its window, and below its lowest ray out to the face
+    # distance sensor: the bar must stay below its window, and below its lowest ray out to the bracket's face
     rule(D.BUMPER_Z1_MM <= D.TOF_WINDOW_BOTTOM_Z_MM - 2.0,
-         "bumper top %.1f mm is 2 mm or more below the distance sensor window (%.1f mm)"
+         "bracket bar top %.1f mm is 2 mm or more below the distance sensor (%.1f mm)"
          % (D.BUMPER_Z1_MM, D.TOF_WINDOW_BOTTOM_Z_MM))
     ray_z = D.TOF_CENTER_Z_MM - (D.FACE_X_MM + D.TOF_RECESS_MM) * math.tan(math.radians(D.TOF_LOW_RAY_DEG))
     rule(D.BUMPER_Z1_MM + 1.0 <= ray_z, "the sensor's lowest ray (%.1f deg down, assumed) passes %.1f mm above the "
-         "bumper's front edge (1 mm or more)" % (D.TOF_LOW_RAY_DEG, ray_z - D.BUMPER_Z1_MM))
-    rule(D.BUMPER_Z0_MM >= D.STRIPE_T_MM + 3, "bumper bottom %.1f mm clears the floor stripe" % D.BUMPER_Z0_MM)
-    rule(D.WALL_H_MM >= D.BUMPER_Z1_MM + 2, "dock walls (%.0f mm) stand above the bumper top" % D.WALL_H_MM)
-    # the robot must reach the back wall at any angle: diagonal through the pocket depth
-    lim = math.sqrt(D.POCKET_W_MM ** 2 - D.ROBOT_WIDTH_MM ** 2)
-    rule(D.POCKET_DEPTH_MM <= 0.9 * lim, "pocket depth %.1f mm <= 90%% of %.1f mm (a crooked robot still reaches "
+         "bar's front edge (1 mm or more)" % (D.TOF_LOW_RAY_DEG, ray_z - D.BUMPER_Z1_MM))
+    rule(D.BUMPER_Z0_MM >= D.STRIPE_T_MM + 3, "bar bottom %.1f mm clears the floor stripe" % D.BUMPER_Z0_MM)
+    bear = min(D.BAND_TOP_Z_MM, D.BUMPER_Z1_MM) - max(D.BUMPER_Z0_MM, D.FRONT_FACE_BOTTOM_Z_MM)
+    rule(bear >= 5.0, "the bar's back bears on %.1f mm of the white band (5 or more): a push goes into the shell" % bear)
+    rule(D.WALL_H_MM >= D.BUMPER_Z1_MM + 2, "dock walls (%.0f mm) stand above the bar top" % D.WALL_H_MM)
+    # the arms and screws
+    rule(D.ARM_TOP_Z_MM <= D.ROBOT_TOP_Z_MM - 0.5, "arms end %.1f mm below the robot's top" %
+         (D.ROBOT_TOP_Z_MM - D.ARM_TOP_Z_MM))
+    rule(D.ARM_BACK_X_MM - D.WHEEL_FRONT_X_MM >= 3.0, "arms end %.1f mm in front of the tyres (3 or more)"
+         % (D.ARM_BACK_X_MM - D.WHEEL_FRONT_X_MM))
+    for zi in D.SIDE_INSERT_Z_MM:
+        t = D.ARM_OUTER_Y_MM - D.side_half_w(zi) - D.ARM_CLEAR_MM
+        into = D.M3_SCREW_LEN_MM - t - D.ARM_CLEAR_MM
+        rule(3.0 <= into <= D.SIDE_INSERT_DEPTH_MM - 0.3 and D.M3_SCREW_LEN_MM <= D.M3_SCREW_MAX_MM,
+             "M3 x %.0f at %.1f mm: %.1f mm of arm, %.1f mm into the insert (3 to %.1f; Arduino's limit M3 x %.0f)"
+             % (D.M3_SCREW_LEN_MM, zi, t, into, D.SIDE_INSERT_DEPTH_MM - 0.3, D.M3_SCREW_MAX_MM))
+    # the bracket must reach the back wall at any angle: diagonal through the pocket depth
+    lim = math.sqrt(D.POCKET_W_MM ** 2 - D.BRACKET_W_MM ** 2)
+    rule(D.POCKET_DEPTH_MM <= 0.9 * lim, "pocket depth %.1f mm <= 90%% of %.1f mm (a crooked bracket still reaches "
          "the back wall)" % (D.POCKET_DEPTH_MM, lim))
     lev = D.LEVER_PRESSED_MM < D.FACE_ABOVE_BODY_MM < D.LEVER_OPERATE_MM
-    rule(lev, "bumper face sits between the lever's operate (%.1f) and end-of-travel (%.1f) positions: clicked, "
+    rule(lev, "bracket face sits between the lever's operate (%.1f) and end-of-travel (%.1f) positions: clicked, "
          "never crushed" % (D.LEVER_OPERATE_MM, D.LEVER_PRESSED_MM))
     rule(D.SWITCH_Y_OUTER_MM - D.SWITCH_L_MM > 3.0, "the two switch pockets leave a centre section")
-    for name in ("nose_bumper_m3", "nose_bumper_technic"):
-        x0, y0, z0, x1, y1, z1 = bbox(parts[name])
-        rule(y1 - y0 <= D.ROBOT_WIDTH_MM + 0.01, "%s is no wider than the robot (%.1f mm): it fits the pocket"
-             % (name, y1 - y0))
-    straps = [abs(y) - D.STRAP_W_MM / 2 for _, y in D.TECHNIC_HOLES_MM]
-    rule(min(straps) >= D.TOF_WINDOW_HALF_WIDTH_MM + 3, "Technic straps pass %.1f mm or more beside the sensor "
-         "window" % (min(straps) - D.TOF_WINDOW_HALF_WIDTH_MM))
-    for _, y in D.TECHNIC_HOLES_MM:
-        rule(abs(y) + D.STRAP_W_MM / 2 <= D.ROBOT_WIDTH_MM / 2, "strap at y %.0f stays within the robot's width" % y)
+    x0, y0, z0, x1, y1, z1 = bbox(parts["nose_bracket"])
+    rule(y1 - y0 <= D.BRACKET_W_MM + 0.01, "nose bracket is %.1f mm wide (BRACKET_W_MM %.1f): the pocket (%.1f) fits it"
+         % (y1 - y0, D.BRACKET_W_MM, D.POCKET_W_MM))
+    # docked straight: everything behind the pocket (arms, screw heads, the robot) clears the funnel walls by at
+    # least the pocket's own play
+    worst = None
+    for xr, hw, what in docked_outline():
+        xd = xr - D.FACE_X_MM
+        if xd < D.MOUTH_X_MM:
+            continue
+        room = D.funnel_half_w(xd) - hw
+        if worst is None or room < worst[0]:
+            worst = (room, xd, what)
+    rule(worst[0] >= D.POCKET_CLEAR_MM / 2 - 1e-6, "docked, the closest thing to a dock wall is the %s at dock X "
+         "%.1f: %.2f mm clear (>= %.2f)" % (worst[2], worst[1], worst[0], D.POCKET_CLEAR_MM / 2))
     ang = math.degrees(math.atan2(D.FUNNEL_FLARE_MM, D.FUNNEL_LEN_MM))
     rule(ang <= 40, "funnel walls %.0f deg off the axis (vertical walls: no overhang)" % ang)
     return ok, lines
@@ -328,21 +376,168 @@ def preview(name, shape, path, plan_z=None):
     plt.close(fig)
 
 
-def main():
+def fit_preview(bracket, path):
+    """How the bracket sits on the robot: side, top and front views with the robot's outline (from
+    dock_params.py) drawn in grey."""
+    import numpy as np
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Circle, Polygon, Rectangle
+    grey, blue, red = "#9aa3ab", "#2f5d8a", "#c0392b"
+    fig, axs = plt.subplots(1, 3, figsize=(15, 5.4), dpi=110, gridspec_kw={"width_ratios": [1.25, 1.25, 1.0]})
+    L, top, fx = D.ROBOT_LENGTH_MM, D.ROBOT_TOP_Z_MM, D.FACE_X_MM
+    xi, zs = D.SIDE_INSERT_X_MM, D.SIDE_INSERT_Z_MM
+
+    def section(plane, at):
+        # outline of the bracket cut by a plane, as point lists
+        c = cq()
+        big = 400
+        slab = {"XY": c.Solid.makeBox(big, big, 0.02, c.Vector(-big / 2, -big / 2, at)),
+                "XZ": c.Solid.makeBox(big, 0.02, big, c.Vector(-big / 2, at, -big / 2)),
+                "YZ": c.Solid.makeBox(0.02, big, big, c.Vector(at, -big / 2, -big / 2))}[plane]
+        cut = bracket.val().intersect(slab)
+        verts, tris = cut.tessellate(0.1, 0.2)
+        return np.array([(v.x, v.y, v.z) for v in verts]), tris
+
+    def fill(ax, plane, at, i, j, color=blue):
+        V, T = section(plane, at)
+        for t in T:
+            ax.add_patch(Polygon(V[list(t)][:, [i, j]], closed=True, fc=color, ec=color, lw=0.3))
+
+    # side view: robot outline, recess band, insert holes, wheel; the bracket cut through the arm
+    ax = axs[0]
+    ax.add_patch(Rectangle((-L, D.FRONT_FACE_BOTTOM_Z_MM), L, top - D.FRONT_FACE_BOTTOM_Z_MM, fc="#eef1f3", ec=grey))
+    ax.add_patch(Circle((-D.AXLE_TO_FRONT_MM, D.WHEEL_R_MM), D.WHEEL_R_MM, fc="#555", ec="#333", alpha=0.5))
+    fill(ax, "XZ", D.ARM_OUTER_Y_MM - 1.0, 0, 2)
+    for z in zs:
+        ax.add_patch(Circle((xi, z), 1.5, fc="#b8860b", ec="k", lw=0.5))
+        ax.add_patch(Circle((xi - 56.0, z), 1.5, fc="#b8860b", ec="k", lw=0.5))
+    ax.add_patch(Circle((xi, 22.7), 2.4, fc="w", ec="k", lw=0.5))
+    ax.axhline(0, color="k", lw=0.8)
+    ax.set_title("from the left side: arm on the front inserts (gold)", fontsize=10)
+    ax.set_xlim(-L - 3, fx + 6)
+    ax.set_ylim(-2, top + 6)
+    ax.set_xlabel("mm forward of the front face")
+    ax.set_ylabel("mm above the floor")
+    # top view: the bracket cut at the bar, around the robot's outline
+    ax = axs[1]
+    hw = D.ROBOT_WIDTH_MM / 2
+    ax.add_patch(Rectangle((-L, -hw), L, 2 * hw, fc="#eef1f3", ec=grey))
+    for sg in (1, -1):
+        ax.add_patch(Rectangle((-D.AXLE_TO_FRONT_MM - D.WHEEL_R_MM, sg * hw - (8 if sg > 0 else 0)), 2 * D.WHEEL_R_MM,
+                               8, fc="#555", alpha=0.5))
+    fill(ax, "XY", D.BUMPER_Z0_MM + D.SHELF_T_MM + 2.5, 0, 1)
+    fill(ax, "XY", zs[0], 0, 1, color="#5b86b0")
+    for sg in (1, -1):
+        y = sg * (D.SWITCH_Y_OUTER_MM - D.SWITCH_L_MM / 2)
+        ax.add_patch(Rectangle((D.SWITCH_BACK_X_MM, y - D.SWITCH_L_MM / 2), D.SWITCH_H_MM, D.SWITCH_L_MM,
+                               fc=red, alpha=0.6))
+    ax.set_title("from above: switches (red) at the front corners", fontsize=10)
+    ax.set_xlim(-L - 3, fx + 6)
+    ax.set_ylim(-D.ARM_OUTER_Y_MM - 6, D.ARM_OUTER_Y_MM + 6)
+    ax.set_xlabel("mm forward of the front face")
+    ax.set_ylabel("mm left of the centre line")
+    # front view: the bar under the recess and the distance sensor
+    ax = axs[2]
+    ax.add_patch(Rectangle((-hw, D.FRONT_FACE_BOTTOM_Z_MM), 2 * hw, top - D.FRONT_FACE_BOTTOM_Z_MM, fc="#eef1f3",
+                           ec=grey))
+    rec_hw = hw - 12.3
+    ax.add_patch(Rectangle((-rec_hw, D.BAND_TOP_Z_MM), 2 * rec_hw, top - D.BAND_TOP_Z_MM, fc="#dde3e7", ec=grey))
+    ax.add_patch(Rectangle((-D.TOF_WINDOW_HALF_WIDTH_MM, D.TOF_WINDOW_BOTTOM_Z_MM), 2 * D.TOF_WINDOW_HALF_WIDTH_MM,
+                           2 * (D.TOF_CENTER_Z_MM - D.TOF_WINDOW_BOTTOM_Z_MM), fc="k"))
+    fill(ax, "YZ", 1.0, 1, 2)
+    ax.axhline(0, color="k", lw=0.8)
+    ax.set_title("from the front: bar on the white band", fontsize=10)
+    ax.set_xlim(-D.ARM_OUTER_Y_MM - 4, D.ARM_OUTER_Y_MM + 4)
+    ax.set_ylim(-2, top + 6)
+    ax.set_xlabel("mm left of the centre line")
+    for a in axs:
+        a.set_aspect("equal")
+        a.grid(True, lw=0.3)
+    fig.text(0.5, 0.02, "The blue bracket wraps the robot's nose (grey): its bar sits on the plain band under the "
+             "sensor recess, and an arm on each side is screwed into the two front brass inserts.",
+             ha="center", fontsize=10)
+    fig.tight_layout(rect=(0, 0.05, 1, 1))
+    fig.savefig(path)
+    plt.close(fig)
+
+
+def docked_preview(dock, path):
+    """The dock from above with a robot and its bracket docked straight, cut at the bar's height."""
+    import numpy as np
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Polygon
+    fig, ax = plt.subplots(figsize=(7.5, 7), dpi=110)
+    c = cq()
+    big = 600
+    cut = dock.val().intersect(c.Solid.makeBox(big, big, 0.02, c.Vector(-big / 2, -big / 2, 10.0)))
+    verts, tris = cut.tessellate(0.1, 0.2)
+    V = np.array([(v.x, v.y) for v in verts])
+    for t in tris:
+        ax.add_patch(Polygon(V[list(t)], closed=True, fc="#333", ec="#333", lw=0.3))
+    up, lo = [], []
+    for xr, hw, what in docked_outline(0.25):
+        up.append((xr - D.FACE_X_MM, hw))
+        lo.append((xr - D.FACE_X_MM, -hw))
+    ax.add_patch(Polygon(up + lo[::-1], closed=True, fc="#2f5d8a", alpha=0.35, ec="#2f5d8a"))
+    xa = D.DOCKED_AXLE_X_MM
+    ax.plot([xa], [0], "k+", ms=12)
+    ax.set_aspect("equal")
+    ax.grid(True, lw=0.3)
+    ax.set_xlim(D.MOUTH_X_MM - 45, D.BACK_BLOCK_DEPTH_MM + 5)
+    ax.set_xlabel("mm into the dock from the back wall's inner face")
+    ax.set_ylabel("mm left of the dock's axis")
+    ax.set_title("docked: pocket %.1f mm for a %.1f mm bracket, %.0f mm deep" % (D.POCKET_W_MM, D.BRACKET_W_MM,
+                                                                                  D.POCKET_DEPTH_MM), fontsize=10)
+    fig.text(0.5, 0.02, "The dock's walls (black) cut at 10 mm height, with a docked robot and bracket (blue): only "
+             "the bracket's bar is in the narrow pocket; the arms and screw heads sit where the funnel has opened.",
+             ha="center", fontsize=9, wrap=True)
+    fig.tight_layout(rect=(0, 0.05, 1, 1))
+    fig.savefig(path)
+    plt.close(fig)
+
+
+def ref_check(path, bracket):
+    """Interference between the bracket and Arduino's reference model (alvik_reference_design.step, in
+    AKX00066-step.zip): the model is moved into the robot frame (front face at X = 0, floor at Z = 0)."""
+    c = cq()
+    ref = c.importers.importStep(path)
+    ref = ref.rotate((0, 0, 0), (0, 0, 1), -90).translate((-D.AXLE_TO_FRONT_MM, 0, 10.1))
+    inter = bracket.val().intersect(ref.val())
+    vol = inter.Volume() if inter is not None else 0.0
+    b = ref.val().BoundingBox()
+    return vol, (b.xmin, b.xmax, b.ymin, b.ymax, b.zmin, b.zmax)
+
+
+def main(argv=None):
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--ref", help="Arduino's alvik_reference_design.step (from AKX00066-step.zip): also check the "
+                                  "bracket does not run into the reference model")
+    a = ap.parse_args(argv)
     c = cq()
     os.makedirs(STL, exist_ok=True)
     os.makedirs(PNG, exist_ok=True)
     dock, _ = dock_solid()
+    bracket = bracket_solid()
     parts = {
         "dock": dock,
-        "nose_bumper_m3": bumper_solid("m3"),
-        "nose_bumper_technic": bumper_solid("technic"),
+        "nose_bracket": bracket,
         "check_tile": tile_solid(),
         "led_holder": led_holder_solid(),
     }
     ok, lines = checks(parts)
-    cuts = {"dock": 0.3, "nose_bumper_m3": D.BUMPER_Z0_MM + D.SHELF_T_MM + 2, "nose_bumper_technic":
-            D.BUMPER_Z0_MM + D.SHELF_T_MM + 2, "check_tile": D.TILE_T_MM + 0.3, "led_holder": 1.0}
+    if a.ref:
+        vol, bb = ref_check(a.ref, bracket)
+        good = vol <= 5.0
+        ok = ok and good
+        lines.append(("ok   " if good else "FAIL ") + "bracket overlaps Arduino's reference model by %.2f mm^3 (5 or "
+                     "less: the drafted face rounding); model spans X %.1f..%.1f, Y %.1f..%.1f, Z %.1f..%.1f" % ((vol,) + bb))
+    cuts = {"dock": 0.3, "nose_bracket": D.BUMPER_Z0_MM + D.SHELF_T_MM + 2, "check_tile": D.TILE_T_MM + 0.3,
+            "led_holder": 1.0}
     for name, shape in parts.items():
         bed, how, over = best_orientation(shape)
         # small round holes lying sideways bridge fine; flag only real overhangs
@@ -350,9 +545,11 @@ def main():
                      % (name, how, over, D.MAX_OVERHANG_DEG, "" if over <= 40 else " (needs support there)"))
         c.exporters.export(bed, os.path.join(STL, name + ".stl"), tolerance=0.05, angularTolerance=0.1)
         preview(name, shape, os.path.join(PNG, name + ".png"), cuts.get(name))
+    fit_preview(bracket, os.path.join(PNG, "nose_bracket_fit.png"))
+    docked_preview(dock, os.path.join(PNG, "docked.png"))
     print("\n".join(lines))
     print("\nwrote %s/*.stl and %s/*.png" % (STL, PNG))
-    print("\nconsole lines for the firmware (after measuring and rebuilding):")
+    print("\nconsole lines for the firmware (each robot, once the bracket is on):")
     for l in D.firmware_lines():
         print("  " + l)
     if not ok:

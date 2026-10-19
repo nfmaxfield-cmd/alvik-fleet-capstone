@@ -128,12 +128,14 @@ class Body:
     front: distance from the turning centre to the front face
     length, width: outer size.
     bumper: a nose bumper (hardware/dock) sticking out this far in front of the front face: the footprint
-    (length, front) includes it; `sensor` stays at the shell's face, where the front distance sensor is."""
+    (length, front) includes it; `sensor` stays at the shell's face, where the front distance sensor is.
+    bumper_w: the bumper's width (the printed bracket's arms run down the robot's sides): the footprint is at least
+    this wide (a rectangle: a little wider than the robot behind the arms too, on the safe side)."""
 
-    def __init__(self, length=9.5, width=9.5, front=4.75, bumper=0.0):
+    def __init__(self, length=9.5, width=9.5, front=4.75, bumper=0.0, bumper_w=0.0):
         self.bumper = float(bumper)
         self.length = float(length) + self.bumper
-        self.width = float(width)
+        self.width = max(float(width), float(bumper_w) if self.bumper else 0.0)
         self.front = float(front) + self.bumper
         self.sensor = float(front)           # the shell's front face (the distance sensor's readings start here)
         self.back = self.length - self.front

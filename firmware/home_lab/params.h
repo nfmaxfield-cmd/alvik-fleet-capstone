@@ -112,9 +112,9 @@ Param PARAMS[] = {
   // --- light pattern on top for the camera (lights.h; tools/lights). OFF unless lights_mode is set ---
   {"lights_mode",      0,   "top light pattern: 0 = off, 1 = three LEDs in an L on GPIO pins (holder), 2 = Modulino Pixels strip (Qwiic)"},
   {"lights_seq",       0,   "L pattern: side LED cycle (160 ms slots) 0 = steady, 1 = 0111, 2 = 0011, 3 = 0101, 4 = 0001; differ for robots with the same holder"},
-  {"lights_pin_c",    -1,   "L pattern: GPIO of the corner LED (-1 = not wired)"},
-  {"lights_pin_f",    -1,   "L pattern: GPIO of the front LED (-1 = not wired)"},
-  {"lights_pin_s",    -1,   "L pattern: GPIO of the side LED (-1 = not wired)"},
+  {"lights_pin_c",    19,   "L pattern: Nano pin of the corner LED (19 = A2; pin numbers as for sw_left_pin; -1 = not wired)"},
+  {"lights_pin_f",    20,   "L pattern: Nano pin of the front LED (20 = A3)"},
+  {"lights_pin_s",    24,   "L pattern: Nano pin of the side LED (24 = A7)"},
   {"lights_strip_code", 0,  "strip: code 1..5 (0 = from the name: Left 1, Center 2, Right 3, any other name 4)"},
   {"lights_strip_bri", 10,  "strip: brightness 0..100 (low: a saturated LED blooms over its dark neighbours)"},
   {"lights_idle",      0,   "1 = pattern on from power-on, also between runs; 0 = only during runs (like the blink code)"},
@@ -142,16 +142,16 @@ Param PARAMS[] = {
   {"edge_bot_ms",    100,   "bottom-zone cue: ...for this long (2 sensor frames)"},
 
   // --- nose bumper switches, home dock, touch probe (switches.h, dock.h): OFF until the bumper is fitted ---
-  // The bumper numbers (bump_*, sw_gap_cm) are PLACEHOLDERS until measured (hardware/dock/README.md);
-  // keep them equal to hardware/dock/dock_params.py.
+  // The bracket numbers (bump_*, bumper_cm) come from hardware/dock/dock_params.py (Arduino's CAD model of the
+  // Alvik + the printed bracket); keep them equal to it. sw_gap_cm is still ASSUMED until E00e.
   {"sw_on",            0,   "nose bumper switches fitted and wired: 0 = no (dock/touch refuse to run, RAW swL/swR = -1), 1 = yes"},
-  {"sw_left_pin",      5,   "left nose switch: Nano ESP32 pin (5 = D5); switch between the pin and GND, pressed = LOW"},
-  {"sw_right_pin",     6,   "right nose switch: Nano ESP32 pin (6 = D6)"},
+  {"sw_left_pin",     17,   "left nose switch: Nano ESP32 pin, IDE numbering 'By Arduino pin' (17 = A0; D5 = 5, A1..A7 = 18..24); switch between the pin and GND, pressed = LOW"},
+  {"sw_right_pin",    18,   "right nose switch: Nano ESP32 pin (18 = A1)"},
   {"sw_debounce_ms",   4,   "a switch must read the same this long to count (lever switches chatter 1-5 ms)"},
-  {"bumper_cm",        0,   "nose bumper fitted: it sticks out this far in front of the shell, cm (1.34 = the printed one; 0 = none): the calibration's spin and roll keep this much more room"},
-  {"bump_ahead_cm", 6.09,   "wheel axle (turning centre) to the bumper's front face, cm (PLACEHOLDER: measure)"},
-  {"bump_half_cm",  3.91,  "each switch's lever touches this far left/right of the centre line, cm (PLACEHOLDER)"},
-  {"sw_gap_cm",     0.02,   "the bumper face is still this far from what it touches when a lever clicks, cm (PLACEHOLDER: E00e)"},
+  {"bumper_cm",        0,   "nose bracket fitted: it sticks out this far in front of the shell, cm (1.34 = the printed one; 0 = none): the calibration's spin and roll keep this much more room"},
+  {"bump_ahead_cm", 6.10,   "wheel axle (turning centre) to the bracket's front face, cm (dock_params.py BUMP_AHEAD_MM / 10)"},
+  {"bump_half_cm",  4.27,   "each switch's lever touches this far left/right of the centre line, cm (dock_params.py SWITCH_LATERAL_MM / 10)"},
+  {"sw_gap_cm",     0.02,   "the bracket face is still this far from what it touches when a lever clicks, cm (ASSUMED lever travel: E00e)"},
   {"dock_rpm",         6,   "dock/touch: creeping speed, wheel rpm (6 = about 1.1 cm/s)"},
   {"dock_press_rpm",   2,   "dock: the clicked side's wheel keeps pushing this gently while the other side pivots in"},
   {"dock_pivot_rpm",   5,   "dock: the other wheel's speed while it pivots"},

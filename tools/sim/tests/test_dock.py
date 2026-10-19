@@ -3,7 +3,7 @@
     python -m unittest tools/sim/tests/test_dock.py -v        (about 2-3 minutes: 60 dockings)
 
 The contact model and the switch numbers are GUESSES (config.py DockModel, fw_dock.py); the dock and bumper
-geometry is hardware/dock/dock_params.py, whose robot numbers are placeholders until measured. These tests
+geometry is hardware/dock/dock_params.py (robot numbers from Arduino's CAD model of the Alvik). These tests
 check the firmware logic and what the geometry promises, not the real robot.
 """
 import math
@@ -190,6 +190,34 @@ class DockTests(unittest.TestCase):
         self.assertAlmostEqual(r.pose.x, DOCK[0] - r.P("bump_ahead_cm"), delta=0.05)
         self.assertAlmostEqual(x, DOCK[0] - r.cfg.dock.bump_ahead_cm, delta=0.03)
         self.assertAlmostEqual(r.pose.y, y, delta=0.06)
+
+
+
+class TestGeometryAgrees(unittest.TestCase):
+    """The bracket and dock numbers are written in several places; they must all be dock_params.py's."""
+
+    def test_firmware_fusion_fleet_and_site_defaults_match_dock_params(self):
+        dm = config.load_config().dock
+        fw = dict(config.firmware_params())
+        repo = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+        for k in ("bump_ahead_cm", "bump_half_cm", "sw_gap_cm"):
+            self.assertAlmostEqual(fw[k], getattr(dm, k), delta=0.006, msg="params.h " + k)
+        for sub in ("fusion", "fleet", "site"):
+            sys.path.append(os.path.join(repo, "tools", sub))
+        import engine
+        import fleetmap
+        import planner
+        import solve
+        for k in ("bump_ahead_cm", "bump_half_cm", "sw_gap_cm"):
+            self.assertAlmostEqual(engine.DEFAULT[k], getattr(dm, k), delta=0.006, msg="fusion engine " + k)
+            self.assertAlmostEqual(solve.DEFAULTS[k], getattr(dm, k), delta=0.006, msg="site solve " + k)
+        self.assertAlmostEqual(planner.BUMP_AHEAD_CM, dm.bump_ahead_cm, delta=0.006)
+        self.assertAlmostEqual(fleetmap.HOME_DOCK_DEFAULTS["pocket_w_cm"], dm.pocket_w_cm, delta=0.006)
+        self.assertAlmostEqual(fleetmap.HOME_DOCK_DEFAULTS["pocket_depth_cm"], dm.pocket_depth_cm, delta=0.006)
+        self.assertAlmostEqual(fleetmap.BUMPER_W_FITTED_CM, dm.bumper_w_cm, delta=0.006)
+        # the pocket fits the bracket with the pocket's play, and the bracket is wider than the robot
+        self.assertAlmostEqual(dm.pocket_w_cm - dm.bumper_w_cm, 0.1, delta=0.001)
+        self.assertGreater(dm.bumper_w_cm, 9.6)
 
 
 if __name__ == "__main__":

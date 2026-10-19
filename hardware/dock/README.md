@@ -1,56 +1,61 @@
-# Home dock, nose bumper, check tile and LED holder (3D printed)
+# Home dock, nose bracket, check tile and LED holder (3D printed)
 
 A printed **dock** fixed to the plywood gives a robot a near-exact position fix: the robot creeps in, a funnel
-centres it, and two lever switches on a printed **nose bumper** tell it when it sits flush against the dock's
-back wall. The same switches make the robot a **touch probe** (it can feel where a board is). A printed
+centres it, and two lever switches on a printed **nose bracket** (the bumper) tell it when it sits flush against
+the dock's back wall. The same switches make the robot a **touch probe** (it can feel where a board is). A printed
 **check tile** on top of the dock gives the overhead camera a spot that never moves (a bumped camera shows up at
 once), a dark **floor stripe** at the dock's mouth gives the line sensors a second reading of where the robot
 is, and an **LED holder** carries three LEDs in an L for identity and heading.
 
-Firmware: `firmware/home_lab/switches.h`, `dock.h` (2026-10-19a). Simulator: `tools/sim/fw_dock.py`.
-Records: `docs/data-formats.md`, "Home dock and touch probe". Test: `docs/experiments/E00e-dock/`.
+Firmware: `firmware/home_lab/switches.h`, `dock.h` (2026-10-19a; pins A0 / A1 from 2026-10-19b). Simulator:
+`tools/sim/fw_dock.py`. Records: `docs/data-formats.md`, "Home dock and touch probe". Test: `docs/experiments/E00e-dock/`.
 
 | File | What |
 | --- | --- |
-| `dock_params.py` | **every dimension** (mm). The robot's numbers are PLACEHOLDERS: measure them first |
+| `dock_params.py` | **every dimension** (mm), each robot number marked SOURCED (Arduino's files, with the link), MEASURED or ASSUMED |
 | `build.py` | makes the parts from it: `stl/*.stl` (already lying the right way on the bed), `preview/*.png`, and a printability / fit report |
 | `stl/dock.stl` | the dock: funnel, pocket, back wall, check-tile recess, floor stripe, 4 screw tabs |
-| `stl/nose_bumper_m3.stl` | the nose bumper, held by two M3 screws in the robot's front face |
-| `stl/nose_bumper_technic.stl` | the same bumper held by two straps over the top to LEGO Technic pins (needs support under the straps: prefer the M3 one if the robot has front holes) |
+| `stl/nose_bracket.stl` | the nose bracket: a bar across the robot's nose with the two switches, an arm down each side screwed into the robot's front side inserts |
 | `stl/check_tile.stl` | 40 mm camera check tile, 4 x 4 squares |
 | `stl/led_holder.stl` | three 5 mm LEDs in an L |
+| `preview/nose_bracket_fit.png` | the bracket on the robot: side, top and front views |
+| `preview/docked.png` | a docked robot and bracket in the dock, from above |
 
-## What to measure before printing
+## Where the robot's numbers come from
 
-Everything below goes into `dock_params.py` (in mm). Use calipers if you have them; otherwise a ruler read to
-half a millimetre. Then rebuild (next section). Do the first four before anything else: they decide whether the
-robot fits the dock at all.
+The Alvik's front face has no screw holes; its **sides** have four brass M3 inserts each (two near the front, two
+near the back, a LEGO Technic hole between each pair). The numbers come from Arduino's own files (links in
+`dock_params.py`): the tech specs (96 x 95 x 37 mm), the datasheet (M3 inserts, screws no longer than M3 x 10), and
+Arduino's CAD model of the shell (`AKX00066-step.zip`), measured in cadquery. With that model downloaded,
+`python hardware/dock/build.py --ref alvik_reference_design.step` also checks that the bracket does not run into it.
 
-1. **ROBOT_WIDTH_MM**: the widest point of the robot's front half, wheels included. Close the caliper jaws
-   on the outside of both wheels (or the shell, whichever sticks out more). The dock's pocket is made 1 mm
-   wider than this, so an error of 0.5 mm here either jams the robot or loses the dock's accuracy.
-2. **AXLE_TO_FRONT_MM**: from the middle of a wheel's hub (the axle) to the flat front face, along the floor.
-   Lay the robot on its side, put a ruler along it.
-3. **TOF_WINDOW_BOTTOM_Z_MM** and **TOF_CENTER_Z_MM**: height above the table of the bottom edge and of the
-   middle of the dark window on the front (the distance sensor). The bumper must stay below it.
-4. **FRONT_FACE_BOTTOM_Z_MM**: height of the front face's lowest edge above the table.
-5. **FRONT_M3_HOLES_MM** (M3 bumper): for each threaded hole on the front face, its sideways distance from
-   the centre line (left positive) and its height above the table. If there are no such holes, use the Technic
-   bumper.
-6. **ROBOT_TOP_Z_MM** and **TECHNIC_HOLES_MM** (Technic bumper only): the height of the flat top near the
-   front, and for one Technic hole on each side of the top: how far back from the front face, and how far
-   left (+) or right (-) of the centre line.
-7. **TOF_RECESS_MM**: how far the sensor's lens sits behind the front face (look from the side).
-8. **The switches** (when they arrive): body length / thickness / height, the two mounting holes' diameter,
-   spacing and how far they are from the terminal side, and the lever positions: lever free, where it clicks
-   (press it slowly against a ruler edge and listen), and fully pressed. Pololu #1528 (13.5 mm lever) is
-   12.8 x 5.8 x 6.5 mm per Pololu's page; the hole and lever numbers in the file are ASSUMED typical values.
-   Note: Pololu **#1404 is a different, bigger switch** (20 x 6.4 x 10.2 mm roller lever); it does not fit this
-   bumper.
-9. **ROBOT_LENGTH_MM**: front face to rear face (used by the simulator only).
+## Check before printing (tape measure, 2 minutes)
 
-Also check: **BED_MM** (your printer's bed) and **LED_POS_MM** / **LED_MOUNT_TECHNIC_MM** if you use the LED
-holder.
+The CAD model is Arduino's design, not your robot. Check these on one robot; if one is off by more than 1/32 in,
+tell whoever keeps `dock_params.py` (the number to change is in brackets):
+
+| Check | Expect |
+| --- | --- |
+| Width across the top edge of the shell (or across both tyres) | 3 25/32 in (96 mm) [ROBOT_WIDTH_MM] |
+| The two brass inserts in the FRONT column on one side: centre to centre | 5/8 in (16 mm) |
+| Lower front insert's centre above the table | 37/64 in, just under 5/8 (14.7 mm) [SIDE_INSERT_Z_MM] |
+| Front column's centre behind the front face's top edge | 25/32 in, just over 3/4 (20 mm) [SIDE_INSERT_X_MM] |
+| Top of the plain white band (bottom of the dark recess's rim) above the table | 15/32 in (11.7 mm) [BAND_TOP_Z_MM] |
+| Bottom of the front face above the table | 11/64 in, about 3/16 (4.2 mm) [FRONT_FACE_BOTTOM_Z_MM] |
+
+Also, when the switches arrive: body 12.8 x 5.8 x 6.5 mm (Pololu #1528, 13.5 mm lever), the two mounting holes'
+spacing (6.5 mm assumed) and where the lever clicks (press it slowly against a ruler edge and listen). Pololu
+**#1404 is a different, bigger switch** (20 x 6.4 x 10.2 mm roller lever); it does not fit.
+
+## What to buy (per robot)
+
+| Part | How many | Notes |
+| --- | --- | --- |
+| Pololu #1528 mini lever switch (13.5 mm lever) | 2 | |
+| **M3 x 8 mm screws**, button head (ISO 7380) or pan head, stainless | 4 | 3 mm of arm + 5 mm into the insert. Not longer than 8 (Arduino's limit is 10; the insert's hole is 5.6 deep). The 5 mm screws in the Alvik box are too short |
+| M2 x 8 self-tapping screws (or #2 x 5/16 in) | 4 | switch to bracket |
+| Grove-to-female-jumper cable | 1 | GND from the Alvik's Grove connector |
+| Hook-up wire, 26-28 AWG, with female jumper ends (or solder to the Nano's holes) | 4 | switch to Nano |
 
 ## Build the files
 
@@ -67,47 +72,50 @@ pip install cadquery matplotlib numpy
 python hardware/dock/build.py
 ```
 
-You should see one line per check, each starting `ok`, then three lines that start with `set ...`. A line
+You should see one line per check, each starting `ok`, then four lines that start with `set ...`. A line
 starting `FAIL` names the number to fix in `dock_params.py`; `WARN` means a part needs support material there.
 The STL files are in `hardware/dock/stl/`, the pictures in `hardware/dock/preview/`.
 
-Then, in the robot console (`python tools/alvik_console.py`), type the three `set ...` lines it printed
-(they put the bumper's size into the robot), for each robot, and once the bumper is on:
-
-```
-set bumper_cm 1.34
-```
-
-(how far the bumper sticks out in front of the shell, BUMPER_DEPTH_MM / 10: the calibration run then keeps that
-much more room when it rolls and spins). In the fleet map set `"robot": {"bumper_cm": "fitted"}` so routes
-allow for the longer robot, and give `run_sheet.py --bumper-cm 1.34` so its space instructions do. `python tools/preflight.py --map <map.json>` checks that each robot's setting matches the map's.
+Then, in the robot console (`python tools/alvik_console.py`), once the bracket is on, type the four `set ...`
+lines it printed, for each robot (now: `set bump_ahead_cm 6.10`, `set bump_half_cm 4.27`, `set sw_gap_cm 0.020`,
+`set bumper_cm 1.34`; the first three are already the firmware's defaults from 2026-10-19b). `bumper_cm` is how
+far the bracket sticks out in front of the shell: the calibration run then keeps that much more room when it
+rolls and spins. In the fleet map set `"robot": {"bumper_cm": "fitted"}` so routes allow for the longer and
+wider robot, and give `run_sheet.py --bumper-cm 1.34` so its space instructions do. `python tools/preflight.py
+--map <map.json>` checks that each robot's setting matches the map's.
 
 ## Print settings
 
-PLA, 0.4 mm nozzle, 0.2 mm layers, 4 perimeters (walls), 20% infill, no supports (except the Technic bumper).
+PLA, 0.4 mm nozzle, 0.2 mm layers, 4 perimeters (walls), 20% infill, no supports.
 Each STL already lies the way that needs no support; do not rotate it in the slicer.
 
 | Part | Colour | Notes |
 | --- | --- | --- |
 | dock | **black** | the floor stripe is part of the dock: black reads like tape to the line sensors. Brim on (the long thin walls) |
-| nose bumper | any | prints on its back (the face that touches the robot) |
+| nose bracket | any | prints standing as it sits on the robot (bar and arms on the bed); the four screw holes bridge without support |
 | check tile | white, then black | it is 1.2 mm of base and 0.6 mm raised squares: add a filament change (pause, M600) at layer height 1.2 mm; the squares print black on a white tile. Or print it white and colour the raised squares with a black marker |
 | LED holder | any | |
 
 ## Wiring (each robot)
 
-Two switches, three wires each pin out; use two of them. With the switch's terminals facing you:
+The Nano ESP32 on top of the robot has a row of breakout holes along its bottom edge: D13, 3.3V, B0, A0-A7,
+VBUS, B1, VIN. The switches use **A0 and A1**; the LED holder (if used) **A2, A3, A7**. The Alvik itself uses D2,
+D3, D4, A4, A5 and A6: leave those alone. GND comes from one of the Alvik's Grove connectors at the back through a
+Grove-to-jumper cable (its **black** wire is GND).
+
+Each switch has three pins; use two. With the switch's terminals facing you:
 
 | Switch pin | Goes to |
 | --- | --- |
-| C (common, usually the pin at the hinge end) | **GND** on the Nano ESP32 |
-| NO (normally open) | **D5** for the LEFT switch, **D6** for the RIGHT switch |
+| C (common, usually the pin at the hinge end) | **GND** (both switches' C wires join the Grove cable's black wire) |
+| NO (normally open) | **A0** for the LEFT switch, **A1** for the RIGHT switch |
 | NC (normally closed) | nothing |
 
 (Left and right as the robot sees them: standing behind the robot, looking where it looks.) The pins are set
-as INPUT_PULLUP: free = HIGH, pressed = LOW. **Check first** that D5 and D6 are free on your Alvik (nothing
-else plugged into them; the Alvik's own connectors may use some Nano pins). If not, wire to free pins and type
-`set sw_left_pin <n>` / `set sw_right_pin <n>` in the console (n = the D number).
+as INPUT_PULLUP: free = HIGH, pressed = LOW. The firmware's pin numbers are the Arduino IDE's default
+numbering, **Tools > Pin Numbering > "By Arduino pin (default)"** (A0 = 17, A1 = 18): with the other setting the
+upload stops with an error saying so. To use other pins type `set sw_left_pin <n>` / `set sw_right_pin <n>`
+(D5 = 5, A0..A7 = 17..24).
 
 Then check each switch. In the robot console (`python tools/alvik_console.py`), type one line at a time:
 
@@ -128,13 +136,17 @@ switch is not wired (or is on another pin). Afterwards: `set dock_max_cm 40`.
 
 ## Assembly
 
-1. Push each switch into its pocket, lever to the front, terminals to the back; screw it down with two M2 x 8
-   self-tapping screws through its holes into the shelf.
-2. Solder 2 wires to each switch (C and NO), run them up through the notch behind it, to the Nano's pins.
-3. Fix the bumper to the robot: two M3 x 8 screws (M3 version), or two Technic friction pins (Technic version).
-   The bumper's back must sit flat on the front face; its bottom about 6 mm above the floor.
-4. Press each lever with a fingernail: it must click before the lever reaches the bumper face, and the bumper
-   face must stop a flat wall before the lever bottoms out (`build.py` checks this from the lever numbers).
+1. Push each switch into its pocket at a front corner of the bracket, lever to the front, terminals to the back;
+   screw it down with two M2 x 8 self-tapping screws through its holes into the shelf.
+2. Solder 2 wires to each switch (C and NO). The pocket is open on top behind the switch: run the wires straight
+   up there, up the flat white strip at that corner of the robot's front face (outside the dark recess: never
+   across the recess, where the distance sensor looks out), over the top edge to the Nano.
+3. Slide the bracket onto the robot's nose from the front: the bar goes on the plain white band below the dark
+   recess, an arm along each side. Put an M3 x 8 screw through each of the four arm holes into the brass inserts
+   behind them and tighten gently (snug, not hard: the inserts are in plastic). The bar's back must sit flat on
+   the white band, its bottom about 5 mm (3/16 in) above the table.
+4. Press each lever with a fingernail: it must click before the lever reaches the bracket's face, and the face
+   must stop a flat wall before the lever bottoms out (`build.py` checks this from the lever numbers).
 5. Dock: put it on the plywood where robots can reach its mouth from the front, with at least 25 cm clear in
    front of the mouth. Screw it down through the four tabs (3.5 mm wood screws, countersunk). Measure where it
    is (next section).
@@ -152,8 +164,12 @@ board (it is a landmark `dock h1` there) and the locked map carries the measured
 ## How it works (in short)
 
 The robot creeps in at about 1 cm/s with both wheels equal and the front stop off. The funnel walls turn and
-push it towards the middle; the pocket at the end is only 12 mm deep, so a robot reaches the back wall at any
-angle (sqrt(96^2 - 95^2) = 13.8 mm is the most that still lets a crooked 95 mm robot touch the back wall). When
+push it towards the middle. The pocket at the end fits the **bracket** (102.2 mm wide, the pocket 103.2), not the
+bare robot: the bracket's arms make it 6 mm wider than the robot, and a printed part's width is exact where the
+shell leans and the tyres squash. The pocket is only 12 mm deep, so the bracket reaches the back wall at any
+angle (sqrt(103.2^2 - 102.2^2) = 14.3 mm is the most that still lets a crooked bracket touch it); only the
+bar is ever in the pocket, and behind it the funnel has opened enough to clear the arms and screw heads by at
+least the pocket's 0.5 mm (`build.py` checks it; `preview/docked.png` shows it). When
 one switch clicks, that side keeps pushing gently and the other side pivots in until the second switch clicks;
 both push a moment longer (the face seats flush), then it stops: square to the wall, centred to the pocket's
 0.5 mm play. In the simulator, 60 dockings from hand-placed starts (1-8 cm before the mouth, up to 1 cm to the
