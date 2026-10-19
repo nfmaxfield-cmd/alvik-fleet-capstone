@@ -20,6 +20,12 @@ Augmentations (training only), chosen for an overhead fixed camera:
 - small zoom (default +/-10%) and shift: camera height / framing changes
 - brightness, contrast, colour balance, gamma, blur, sensor noise and JPEG
   re-compression: lighting and webcam changes between sessions
+- hue turn (half the frames): every colour is turned round the colour wheel
+  by a random amount. Grey things (the robots, most floors) stay as they
+  are; a green box becomes a red or blue one. Unknown objects and gloved
+  hands can be any colour, and a handful of labelled ones would otherwise
+  teach "unknown = the colours I happened to see" (that is what made the
+  model call an unseen green cup a robot).
 
 Splitting is done in detcore (whole recordings, never single frames).
 """
@@ -38,8 +44,9 @@ class AugmentConfig:
     """How strong the random changes are. Set rotate=False etc. to switch off."""
 
     def __init__(self, rotate=True, flip=True, scale=0.10, shift=0.08, photometric=True,
-                 blur_p=0.3, noise_std=6.0, jpeg_p=0.3):
+                 blur_p=0.3, noise_std=6.0, jpeg_p=0.3, hue_p=0.5):
         self.rotate, self.flip, self.scale, self.shift = rotate, flip, scale, shift
+        self.hue_p = hue_p
         self.photometric, self.blur_p, self.noise_std, self.jpeg_p = photometric, blur_p, noise_std, jpeg_p
 
 
@@ -120,6 +127,10 @@ class DetDataset(Dataset):
         a = self.aug
         if not a.photometric:
             return img
+        if a.hue_p and random.random() < a.hue_p:
+            hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+            hsv[:, :, 0] = ((hsv[:, :, 0].astype(np.int16) + random.randint(0, 179)) % 180).astype(np.uint8)
+            img = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
         f = img.astype(np.float32)
         contrast = random.uniform(0.7, 1.3)
         bright = random.uniform(-30, 30)

@@ -64,3 +64,11 @@ def test_split_roundtrip(tmp_path):
     p = os.path.join(tmp_path, "split.json")
     detcore.save_split(a, p)
     assert detcore.load_split(p) == a
+
+
+def test_distinct_objects_counts_objects_not_frames():
+    import detcore
+    s = [dict(recording="r1", frame=f, objects=[dict(cls="unknown", obj="90"), dict(cls="alvik", obj="0"),
+                                                dict(cls="alvik", obj="1")]) for f in range(5)]
+    s.append(dict(recording="r2", frame=0, objects=[dict(cls="unknown", obj="90"), dict(cls="hand", obj="")]))
+    assert detcore.distinct_objects(s) == {"unknown": 2, "alvik": 2, "hand": 1}

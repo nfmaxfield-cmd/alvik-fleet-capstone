@@ -21,6 +21,8 @@ How a prediction is matched: within each frame and class, predictions are
 taken from most to least confident, and each claims the nearest unclaimed
 label within --radius px (default 8 px, about a quarter of a robot; per class
 with e.g. --radius 8,hand=25, since a hand's "centre" is much vaguer).
+- n_objects: how many different objects (label obj ids per recording) the
+  scores rest on; one cup in 150 frames is 150 labels but 1 object
 - precision: share of predictions that matched a label (few false alarms = high)
 - recall: share of labels that were found (few misses = high)
 - F1: one number combining both, 2PR/(P+R)
@@ -47,10 +49,10 @@ import cv2
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import detcore  # noqa: E402
 
-COLS = ["detector", "cls", "n_labels", "n_preds", "precision", "recall", "f1", "centre_err_px_mean",
+COLS = ["detector", "cls", "n_objects", "n_labels", "n_preds", "precision", "recall", "f1", "centre_err_px_mean",
         "centre_err_px_p95", "centre_err_cm_mean", "centre_err_cm_p95", "n_heading", "heading_given_pct", "heading_err_deg_mean",
         "heading_err_deg_median", "heading_err_deg_p95", "heading_flipped_pct", "ms_per_frame"]
-SHOW = ["detector", "cls", "n_labels", "n_preds", "precision", "recall", "f1", "centre_err_px_mean",
+SHOW = ["detector", "cls", "n_objects", "n_labels", "n_preds", "precision", "recall", "f1", "centre_err_px_mean",
         "centre_err_px_p95", "centre_err_cm_mean", "heading_given_pct", "heading_err_deg_mean", "heading_err_deg_median",
         "heading_err_deg_p95",
         "heading_flipped_pct", "ms_per_frame"]
@@ -142,6 +144,13 @@ def main():
         sys.exit("No frames to score.")
     recs = sorted({s["recording"] for s in samples})
     print(f"Scoring {len(samples)} frames from {len(recs)} recording(s): {', '.join(recs)}")
+    n_obj = detcore.distinct_objects(samples)
+    few = {c: n for c, n in n_obj.items() if n < 10}
+    if few:
+        # a class's F1 here rests on these few objects: one object missed in all its frames moves it a lot
+        print("NOTE: few different objects to score on (n_objects): "
+              + ", ".join(f"{c} {n}" for c, n in sorted(few.items()))
+              + ". Their F1 says little; score on more recordings (--all on extra ones) before comparing.")
     homs = {}
     for d in sorted({s["label_dir"] for s in samples}):
         h = detcore.find_homography_for(d, a.calibration)
@@ -178,7 +187,8 @@ def main():
                                         f"{d['score']:.3f}"])
                 saved = True
         for r in score(samples, preds, classes, a.radius, thresh, homs):
-            r.update(detector=name, ms_per_frame=ms)
+            n = sum(n_obj.values()) if r["cls"] == "all" else n_obj.get(r["cls"], 0)
+            r.update(detector=name, ms_per_frame=ms, n_objects=n)
             all_rows.append(r)
         if a.sweep:
             for t in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]:
