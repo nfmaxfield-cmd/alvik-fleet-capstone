@@ -118,14 +118,15 @@ def load_trials(folder):
             t["x"], t["y"] = (xf + xr) / 2, (yf + yr) / 2
             t["heading"] = math.degrees(math.atan2(yf - yr, xf - xr))
             # Where the run really started: measured start marks if filled in,
-            # otherwise the origin facing +x (the intended placement).
+            # otherwise the row's planned start spot (start_x/y_cm, start_heading_deg; the origin
+            # facing +x on older sheets without them).
             s4 = [num(r.get(k)) for k in ("xf0_cm", "yf0_cm", "xr0_cm", "yr0_cm")]
             if None not in s4:
                 sx, sy = (s4[0] + s4[2]) / 2, (s4[1] + s4[3]) / 2
                 sh = math.degrees(math.atan2(s4[1] - s4[3], s4[0] - s4[2]))
                 t["start_measured"] = 1
             else:
-                sx = sy = sh = 0.0
+                sx, sy, sh = (num(r.get(k)) or 0.0 for k in ("start_x_cm", "start_y_cm", "start_heading_deg"))
                 t["start_measured"] = 0
             t["start_x"], t["start_y"], t["start_heading"] = sx, sy, sh
             # Targets are relative to the start: target_x_cm ahead, target_y_cm to the left,

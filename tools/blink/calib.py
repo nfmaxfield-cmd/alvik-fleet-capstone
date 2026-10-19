@@ -1149,13 +1149,19 @@ def main(argv=None):
             roll = run.params.get("calib_roll_cm", float("nan"))
             still = run.params.get("calib_still_ms", 1000.0)
             still = still if still == still else 1000.0
-            if "calib_roll_min_cm" in run.params:     # 2026-10-18c+: spins first, then a roll where there is room
+            max_step = max((int(fnum(r.get("step"), 0)) for r in run.raw if r.get("step") not in (None, "")),
+                           default=0)
+            # 2026-10-18c+: spins first, then a roll where there is room. Any one sign is enough, so a lost
+            # PARAM packet can't make it read the run with the older step numbers.
+            if ("calib_roll_min_cm" in run.params or run.run_id in looks or max_step >= 10
+                    or str(getattr(run, "fw_version", "") or "") >= "2026-10-18c"):
                 look = looks.get(run.run_id)
                 ev = motion_event(run, STEPS_LOOK["fwd"])
                 out.append(mark_outcome(analyse_event(run, ev, "calib", look_roll_cm(run, S, look), off, frames, tracks,
                                                       dets, geo, runs, names, S=S, still_ms=still, steps=STEPS_LOOK,
                                                       look=look or {}), run, look))
-            elif roll == roll:          # firmware 2026-10-18b: the long roll, stills, spins
+            elif roll == roll or max_step >= 6:   # firmware 2026-10-18b: the long roll, stills, spins
+                roll = roll if roll == roll else 15.0
                 ev = motion_event(run, 2)
                 out.append(analyse_event(run, ev, "calib", max(3.0, roll), off, frames, tracks, dets, geo, runs, names,
                                          S=S, still_ms=still, steps=STEPS_18B))

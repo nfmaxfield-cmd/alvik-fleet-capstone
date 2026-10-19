@@ -1285,8 +1285,8 @@ class Robot(FollowMixin, DockMixin):
             self.front_limit = 0.0             # follow: no centre stop while it waits on its start spot;
             #                                    calib: it may face a board, only its rolls check ahead
         self.sw_configure()                    # nose switches (switches.h)
-        self.edge_begin()                      # edge guard learns the plywood during the settle pause
         self.log_run_info(i)
+        self.edge_begin()                      # after the PARAM records: learns the plywood during the settle pause
         self.raw_start()
         self.wait_ms(self.P("settle_start_ms"))
         self.sync_flash("start")

@@ -243,7 +243,13 @@ def parse_marks(s):
         vals = [inches(p.strip()[1:] if f else p) for p, f in zip(parts, far)]
         out = [None if v is None else round(v * 2.54, 2) for v in vals]
     else:
-        parts = s.replace(",", " ").split()
+        raw = s.replace(",", " ").split()
+        parts = []
+        for p in raw:                         # "f 12.3" (a lone f) belongs to the next number
+            if parts and parts[-1].lower() == "f":
+                parts[-1] = "f" + p
+            else:
+                parts.append(p)
         far = [p.lower().startswith("f") for p in parts]
         out = [num(p[1:] if f else p) for p, f in zip(parts, far)]
     if len(out) == 4 and None not in out and any(far):
@@ -418,9 +424,14 @@ def main():
         cols = reader.fieldnames
         rows = list(reader)
 
+    END_K, START_K = ("xf_cm", "yf_cm", "xr_cm", "yr_cm"), ("xf0_cm", "yf0_cm", "xr0_cm", "yr0_cm")
+
+    def filled(r, keys):
+        return all((r.get(k) or "").strip() for k in keys)
+
     def done(r):
-        return (r.get("excluded") or "").strip().lower() in ("1", "yes", "y", "x", "true") or all(
-            (r.get(k) or "").strip() for k in ("xf_cm", "yf_cm", "xr_cm", "yr_cm"))
+        return (r.get("excluded") or "").strip().lower() in ("1", "yes", "y", "x", "true") or (
+            filled(r, END_K) and filled(r, START_K))
     todo = [r for r in rows if not done(r)]
     print(f"{len(rows)} runs on the sheet, {len(rows) - len(todo)} done, {len(todo)} to go.")
     if not todo:
@@ -465,6 +476,19 @@ def main():
             n_done = sum(1 for x in rows if done(x))
             print(f"\n=== Run {r['order']} ({n_done + 1} of {len(rows)}): {robot}, {level} ===")
             try:
+                if filled(r, END_K) and not filled(r, START_K):
+                    # an earlier session saved the END marks but stopped before the START marks were typed
+                    sx0, sy0, sh0 = (num(r.get("start_x_cm")) or 0.0, num(r.get("start_y_cm")) or 0.0,
+                                     num(r.get("start_heading_deg")) or 0.0)
+                    print(f"  Run {r.get('run_id', '')} is done and its END marks are saved; only its START marks "
+                          f"are missing. Measure the start dots you made before that run.")
+                    st = ask_marks("START", spacing, near=(sx0, sy0), max_dist=5, heading_near=sh0, heading_tol=5)
+                    for k, v in zip(START_K, st):
+                        r[k] = f"{v:g}"
+                    save_sheet(sheet, cols, rows)
+                    print("  Saved.")
+                    i += 1
+                    continue
                 if robot not in link.robots():
                     print(f"  {robot} isn't connected. Switch it on (s = skip for now).")
                     while robot not in link.robots():
@@ -637,7 +661,13 @@ def main():
                 if pi:
                     pi.send(f"trial {r['order']} run {run} final marks typed")
                 if start is None:
-                    print("  Now the START marks you made before the run (lift the robot away first if it's in the way).")
+                    # save what's typed so far: a q / s / x at the next prompt must not lose the END marks
+                    r["run_id"] = run
+                    for k, v in zip(END_K, end):
+                        r[k] = f"{v:g}"
+                    save_sheet(sheet, cols, rows)
+                    print("  END marks saved. Now the START marks you made before the run "
+                          "(lift the robot away first if it's in the way).")
                     start = ask_marks("START", spacing, near=(sx, sy), max_dist=5, heading_near=sh, heading_tol=5)
                     xs, ys, hs, _ = pose(*start)
                     c, s = math.cos(math.radians(hs)), math.sin(math.radians(hs))

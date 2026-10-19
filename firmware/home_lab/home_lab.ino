@@ -519,9 +519,10 @@ void runExperiment(int i, bool fromButton) {
   // dock / touch: put down facing the dock or board, which may be closer than safe_front_cm.
   if (i == EXP_FOLLOW || i == EXP_CALIB || i == EXP_DOCK || i == EXP_TOUCH) gFrontLimitCm = 0;
   sw::configure();   // nose switches (switches.h): picks up `set sw_on 1` and pin changes
-  edge::begin();   // the edge guard learns the plywood under the line sensors during the settle pause
+  if (!logged) edge::begin();
   if (logged) {
     logRunInfo(i);
+    edge::begin();   // after the ~0.3 s of PARAM records, so it learns the plywood during the settle pause
     rawlog::start();
     waitMs((unsigned long)P("settle_start_ms"));
     syncFlash("start");

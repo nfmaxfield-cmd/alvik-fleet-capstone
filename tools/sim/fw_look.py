@@ -54,7 +54,7 @@ class Look:
             self.seen[bin_of(rel + z + x)] = True
             x += BIN
         self.seen[bin_of(rel + z + ZONE_HALF)] = True
-        if d <= 0:
+        if d <= 0 or d < self.rb.P("tof_min_cm"):
             return
         s = self.rb.P("tof_ahead_cm")
         zr = z * DEG2RAD
