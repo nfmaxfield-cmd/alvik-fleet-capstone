@@ -1,0 +1,435 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<<
+/Type /Pages
+/Count 1
+/Kids [ 4 0 R ]
+>>
+endobj
+2 0 obj
+<<
+/Producer (pypdf)
+>>
+endobj
+3 0 obj
+<<
+/Type /Catalog
+/Pages 1 0 R
+>>
+endobj
+4 0 obj
+<<
+/Contents 5 0 R
+/MediaBox [ 0 0 612 792 ]
+/Resources <<
+/Font 6 0 R
+/ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
+>>
+/Rotate 0
+/Trans <<
+>>
+/Type /Page
+/Parent 1 0 R
+>>
+endobj
+5 0 obj
+<<
+/Length 7786
+>>
+stream
+1 0 0 1 0 0 cm  BT /F1 12 Tf 14.4 TL ET
+q
+1 0 0 1 49.2 724.4 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 4 Tm /F2 18 Tf 22 TL 46.263 0 Td (3D print job: Alvik robot capstone \(Nick\)) Tj T* -46.263 0 Td ET
+Q
+Q
+q
+1 0 0 1 49.2 705.9 cm
+q
+BT 1 0 0 1 0 3 Tm 12.5 TL /F2 9.5 Tf 0 0 0 rg (Print 2 of every file.) Tj /F1 9.5 Tf ( 7 STL files, 14 parts. All PLA, 0.4 mm nozzle, 0.2 mm layers, ) Tj /F2 9.5 Tf (no supports) Tj /F1 9.5 Tf (.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 49.2 699.9 cm
+Q
+q
+1 0 0 1 49.2 669.9 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 5 Tm /F2 13 Tf 18 TL (Settings that matter for size) Tj T* ET
+Q
+Q
+q
+1 0 0 1 49.2 638.9 cm
+q
+BT 1 0 0 1 0 15.5 Tm -0.103136 Tw 12.5 TL /F1 9.5 Tf 0 0 0 rg (1. ) Tj /F2 9.5 Tf (Units are millimetres. Import at 100% scale.) Tj /F1 9.5 Tf ( Check the slicer shows the sizes in the table below. If a part shows about) Tj T* 0 Tw (25 times too big or too small, it was imported in inches: re-import as mm.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 49.2 620.4 cm
+q
+BT 1 0 0 1 0 3 Tm 12.5 TL /F1 9.5 Tf 0 0 0 rg (2. ) Tj /F2 9.5 Tf (Don't rotate the parts.) Tj /F1 9.5 Tf ( Each file already lies on the bed the way it needs, with no supports.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 49.2 589.4 cm
+q
+BT 1 0 0 1 0 15.5 Tm 12.5 TL /F1 9.5 Tf 0 0 0 rg (3. ) Tj /F2 9.5 Tf (Leave XY size compensation \(horizontal expansion\) at 0) Tj /F1 9.5 Tf (, the default. The nose bracket screws into the robot and) Tj T* (the dock's pocket fits that bracket with only 0.5 mm of play, so the sizes must come out as drawn.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 49.2 558.4 cm
+q
+BT 1 0 0 1 0 15.5 Tm 12.5 TL /F1 9.5 Tf 0 0 0 rg (4. ) Tj /F2 9.5 Tf (The dock is 196 mm long.) Tj /F1 9.5 Tf ( With its brim it needs a bed at least about 210 mm in one direction \(fine on a Prusa) Tj T* (MK3/MK4, Bambu X1/P1/A1, Ender 3; it will NOT fit an A1 mini or other 180 mm beds\).) Tj T* ET
+Q
+Q
+q
+1 0 0 1 49.2 554.4 cm
+Q
+q
+1 0 0 1 49.2 524.4 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 5 Tm /F2 13 Tf 18 TL (Parts) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.4 302 cm
+q
+.909804 .909804 .909804 rg
+n 0 218.4 511.2 -26.4 re f*
+0 0 0 rg
+BT /F2 8.5 Tf 10.2 TL ET
+BT 1 0 0 1 6 206.9 Tm (File) Tj T* ET
+BT 1 0 0 1 88.8 206.9 Tm (Qty) Tj T* ET
+BT 1 0 0 1 117.6 206.9 Tm (Size as it lies) Tj T* ET
+BT 1 0 0 1 117.6 196.7 Tm (X x Y x Z mm) Tj T* ET
+BT 1 0 0 1 200.4 206.9 Tm (Colour) Tj T* ET
+BT 1 0 0 1 272.4 206.9 Tm (Settings) Tj T* ET
+BT 1 0 0 1 459.6 206.9 Tm (PLA each) Tj T* ET
+BT 1 0 0 1 459.6 196.7 Tm (\(about\)) Tj T* ET
+BT /F1 8.5 Tf 12 TL ET
+q
+1 0 0 1 6 178.5 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 2 Tm /F1 8.5 Tf 10.5 TL (dock.stl) Tj T* ET
+Q
+Q
+BT 1 0 0 1 88.8 180.5 Tm (2) Tj T* ET
+q
+1 0 0 1 117.6 178.5 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 2 Tm /F1 8.5 Tf 10.5 TL (110 x 196 x 22) Tj T* ET
+Q
+Q
+q
+1 0 0 1 200.4 178.5 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 2 Tm /F1 8.5 Tf 10.5 TL (Black) Tj T* ET
+Q
+Q
+q
+1 0 0 1 272.4 178.5 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 2 Tm /F1 8.5 Tf 10.5 TL (4 walls, 20% infill, brim on) Tj T* ET
+Q
+Q
+BT 1 0 0 1 459.6 180.5 Tm (60 g) Tj T* ET
+q
+1 0 0 1 6 160.5 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 2 Tm /F1 8.5 Tf 10.5 TL (nose_bracket.stl) Tj T* ET
+Q
+Q
+BT 1 0 0 1 88.8 162.5 Tm (2) Tj T* ET
+q
+1 0 0 1 117.6 160.5 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 2 Tm /F1 8.5 Tf 10.5 TL (38 x 102 x 31) Tj T* ET
+Q
+Q
+q
+1 0 0 1 200.4 160.5 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 2 Tm /F1 8.5 Tf 10.5 TL (Any) Tj T* ET
+Q
+Q
+q
+1 0 0 1 272.4 160.5 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 2 Tm /F1 8.5 Tf 10.5 TL (4 walls, 20% infill \(it is screwed on\)) Tj T* ET
+Q
+Q
+BT 1 0 0 1 459.6 162.5 Tm (15 g) Tj T* ET
+q
+1 0 0 1 6 142.5 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 2 Tm /F1 8.5 Tf 10.5 TL (check_tile.stl) Tj T* ET
+Q
+Q
+BT 1 0 0 1 88.8 144.5 Tm (2) Tj T* ET
+q
+1 0 0 1 117.6 142.5 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 2 Tm /F1 8.5 Tf 10.5 TL (40 x 40 x 1.8) Tj T* ET
+Q
+Q
+q
+1 0 0 1 200.4 132 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 12.5 Tm /F1 8.5 Tf 10.5 TL (White, then) Tj T* (black) Tj T* ET
+Q
+Q
+q
+1 0 0 1 272.4 111 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 33.5 Tm /F1 8.5 Tf 10.5 TL (Filament change \(pause / M600\) at 1.2 mm) Tj T* (height so the raised squares print black. No) Tj T* (colour change? Print white; the squares get) Tj T* (coloured with a marker.) Tj T* ET
+Q
+Q
+BT 1 0 0 1 459.6 144.5 Tm (3 g) Tj T* ET
+q
+1 0 0 1 6 94.5 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 2 Tm /F1 8.5 Tf 10.5 TL (extruder.stl) Tj T* ET
+Q
+Q
+BT 1 0 0 1 88.8 96.5 Tm (2) Tj T* ET
+q
+1 0 0 1 117.6 94.5 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 2 Tm /F1 8.5 Tf 10.5 TL (162 x 40 x 75) Tj T* ET
+Q
+Q
+q
+1 0 0 1 200.4 84 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 12.5 Tm /F1 8.5 Tf 10.5 TL (Any except) Tj T* (white) Tj T* ET
+Q
+Q
+q
+1 0 0 1 272.4 94.5 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 2 Tm /F1 8.5 Tf 10.5 TL (2-3 walls, 5-10% infill \(lightning if available\)) Tj T* ET
+Q
+Q
+BT 1 0 0 1 459.6 96.5 Tm (70-100 g) Tj T* ET
+q
+1 0 0 1 6 67.5 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 2 Tm /F1 8.5 Tf 10.5 TL (strander.stl) Tj T* ET
+Q
+Q
+BT 1 0 0 1 88.8 69.5 Tm (2) Tj T* ET
+q
+1 0 0 1 117.6 67.5 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 2 Tm /F1 8.5 Tf 10.5 TL (150 x 56 x 56) Tj T* ET
+Q
+Q
+q
+1 0 0 1 200.4 57 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 12.5 Tm /F1 8.5 Tf 10.5 TL (Any except) Tj T* (white) Tj T* ET
+Q
+Q
+q
+1 0 0 1 272.4 67.5 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 2 Tm /F1 8.5 Tf 10.5 TL (2-3 walls, 5-10% infill) Tj T* ET
+Q
+Q
+BT 1 0 0 1 459.6 69.5 Tm (75-110 g) Tj T* ET
+q
+1 0 0 1 6 40.5 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 2 Tm /F1 8.5 Tf 10.5 TL (takeup_reel.stl) Tj T* ET
+Q
+Q
+BT 1 0 0 1 88.8 42.5 Tm (2) Tj T* ET
+q
+1 0 0 1 117.6 40.5 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 2 Tm /F1 8.5 Tf 10.5 TL (100 x 64 x 68) Tj T* ET
+Q
+Q
+q
+1 0 0 1 200.4 30 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 12.5 Tm /F1 8.5 Tf 10.5 TL (Any except) Tj T* (white) Tj T* ET
+Q
+Q
+q
+1 0 0 1 272.4 40.5 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 2 Tm /F1 8.5 Tf 10.5 TL (2-3 walls, 5-10% infill) Tj T* ET
+Q
+Q
+BT 1 0 0 1 459.6 42.5 Tm (55-85 g) Tj T* ET
+q
+1 0 0 1 6 13.5 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 2 Tm /F1 8.5 Tf 10.5 TL (test_bay.stl) Tj T* ET
+Q
+Q
+BT 1 0 0 1 88.8 15.5 Tm (2) Tj T* ET
+q
+1 0 0 1 117.6 13.5 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 2 Tm /F1 8.5 Tf 10.5 TL (140 x 140 x 60) Tj T* ET
+Q
+Q
+q
+1 0 0 1 200.4 3 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 12.5 Tm /F1 8.5 Tf 10.5 TL (Any except) Tj T* (white) Tj T* ET
+Q
+Q
+q
+1 0 0 1 272.4 13.5 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 2 Tm /F1 8.5 Tf 10.5 TL (2-3 walls, 5-10% infill) Tj T* ET
+Q
+Q
+BT 1 0 0 1 459.6 15.5 Tm (100-160 g) Tj T* ET
+q
+1 J
+1 j
+.501961 .501961 .501961 RG
+.4 w
+n 0 218.4 m 511.2 218.4 l S
+n 0 0 m 511.2 0 l S
+n 0 0 m 0 218.4 l S
+n 511.2 0 m 511.2 218.4 l S
+n 0 192 m 511.2 192 l S
+n 0 174 m 511.2 174 l S
+n 0 156 m 511.2 156 l S
+n 0 108 m 511.2 108 l S
+n 0 81 m 511.2 81 l S
+n 0 54 m 511.2 54 l S
+n 0 27 m 511.2 27 l S
+n 82.8 0 m 82.8 218.4 l S
+n 111.6 0 m 111.6 218.4 l S
+n 194.4 0 m 194.4 218.4 l S
+n 266.4 0 m 266.4 218.4 l S
+n 453.6 0 m 453.6 218.4 l S
+Q
+Q
+Q
+q
+1 0 0 1 49.2 296 cm
+Q
+q
+1 0 0 1 49.2 265 cm
+q
+BT 1 0 0 1 0 15.5 Tm 12.5 TL /F2 9.5 Tf 0 0 0 rg (Total:) Tj /F1 9.5 Tf ( about 1 kg of PLA for all 14 parts; the four machine models are most of it. Print the dock, nose brackets and check) Tj T* (tiles first \(about 150 g in all\); the machines can follow.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 49.2 234 cm
+q
+BT 1 0 0 1 0 15.5 Tm 12.5 TL /F2 9.5 Tf 0 0 0 rg (Why "any colour except white":) Tj /F1 9.5 Tf ( the overhead camera finds the robots partly by their white tops, so the machine models) Tj T* (must not be white. A dark or strong colour \(grey, blue, red\) is best.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 49.2 228 cm
+Q
+q
+1 0 0 1 49.2 198 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 5 Tm /F2 13 Tf 18 TL (For Nick \(not the print tech\)) Tj T* ET
+Q
+Q
+q
+1 0 0 1 49.2 171 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 12.5 Tm /F1 8.5 Tf 10.5 TL (Parts to buy for the nose brackets, per robot: 2 Pololu #1528 mini lever switches, 4 M3 x 8 mm button-head screws, 4 M2 x 8 mm) Tj T* (self-tapping screws, 1 Grove-to-female-jumper cable, 4 short jumper wires.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 49.2 154.5 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 2 Tm /F1 8.5 Tf 10.5 TL (Not in this batch: the LED holder \(being redesigned next week\).) Tj T* ET
+Q
+Q
+ 
+
+endstream
+endobj
+6 0 obj
+<<
+/F1 7 0 R
+/F2 8 0 R
+>>
+endobj
+7 0 obj
+<<
+/BaseFont /Helvetica
+/Encoding /WinAnsiEncoding
+/Name /F1
+/Subtype /Type1
+/Type /Font
+>>
+endobj
+8 0 obj
+<<
+/BaseFont /Helvetica-Bold
+/Encoding /WinAnsiEncoding
+/Name /F2
+/Subtype /Type1
+/Type /Font
+>>
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000015 00000 n 
+0000000074 00000 n 
+0000000113 00000 n 
+0000000162 00000 n 
+0000000351 00000 n 
+0000008189 00000 n 
+0000008230 00000 n 
+0000008337 00000 n 
+trailer
+<<
+/Size 9
+/Root 3 0 R
+/Info 2 0 R
+>>
+startxref
+8449
+%%EOF
