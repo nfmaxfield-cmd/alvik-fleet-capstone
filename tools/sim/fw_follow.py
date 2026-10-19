@@ -55,6 +55,7 @@ class PoseTracker:
         self.last_ms = 0
         self.last_lx = self.last_ly = self.last_th = 0.0
         self.q_cm = self.q_deg = self.q_dps = 0.0
+        self.drift_dps = 0.0     # gyro heading drift measured while docked (dock.h): taken off th() as time passes
 
     def lib_pose(self):
         rb = self.rb
@@ -77,6 +78,7 @@ class PoseTracker:
         self.last_th = self.th()
         self.var = self.var_th = 0.0
         self.dist = 0.0
+        self.drift_dps = 0.0
         self.known = known
         self.fixes_used = self.fixes_rejected = 0
         self.hist = []
@@ -104,13 +106,15 @@ class PoseTracker:
         dx, dy = lx - self.last_lx, ly - self.last_ly
         self.last_lx, self.last_ly = lx, ly
         ds = dx * math.cos(lth * DEG2RAD) + dy * math.sin(lth * DEG2RAD)
+        now = self.rb.millis()
+        if self.drift_dps:
+            self.th_off = wrap180(self.th_off - self.drift_dps * (now - self.last_ms) / 1000.0)
         h = self.th()
         dh = wrap180(h - self.last_th)
         mid = (self.last_th + 0.5 * dh) * DEG2RAD
         self.x += ds * math.cos(mid)
         self.y += ds * math.sin(mid)
         self.dist += ds
-        now = self.rb.millis()
         self.var += self.q_cm * abs(ds)
         self.var_th += self.q_deg * abs(dh) + self.q_dps * (now - self.last_ms) / 1000.0
         self.last_th = h
@@ -227,6 +231,7 @@ class FollowMixin:
         self.f_info = ""
         self.last_rx = 0
         self.dock_log = []           # simulation only: true pose at the end of every approach
+        self.f_dock_hdr = self.f_touch_hdr = False
         self.survey_legs = []
 
     # ------------------------------------------------------------- pose.h drives
@@ -499,6 +504,14 @@ class FollowMixin:
                 s["wait_ms"] = int(tok[2])
             except ValueError:
                 ok = False
+        elif typ == "K" and n >= 7:
+            for k, key in enumerate(("x1", "y1", "h", "max_travel", "back")):
+                s[key] = num(tok[2 + k])
+            ok = not any(isnan(s[k]) for k in ("x1", "y1", "h", "max_travel", "back"))
+        elif typ == "P" and n >= 5:
+            for k, key in enumerate(("h", "max_travel", "back")):
+                s[key] = num(tok[2 + k])
+            ok = not any(isnan(s[k]) for k in ("h", "max_travel", "back"))
         else:
             ok = False
         if not ok:
@@ -621,6 +634,8 @@ class FollowMixin:
         if t == "W":
             self.front_limit = 0.0
             return self.wait_ms(s.get("wait_ms", 0))
+        if t in ("K", "P"):
+            return self.run_dock_step(s)          # fw_dock.py (dock.h)
         self.fail = "unknown step type"
         return False
 
@@ -633,6 +648,7 @@ class FollowMixin:
                   "fixes_used,fixes_rejected,front_cm,travel_cm,quiet_ms")
         self.f_q = []
         self.f_max_id = self.f_cur = self.f_last_done = self.f_last_failed = 0
+        self.f_dock_hdr = self.f_touch_hdr = False
         self.f_state = "idle"
         self.f_travel = 0.0
         self.f_quiet_said = False
@@ -665,7 +681,8 @@ class FollowMixin:
             s = self.f_q.pop(0)
             self.f_cur = s["id"]
             self.step = s["id"]
-            self.f_state = {"T": "turn", "D": "drive", "A": "approach", "W": "wait"}.get(s["type"], "?")
+            self.f_state = {"T": "turn", "D": "drive", "A": "approach", "W": "wait", "K": "dock",
+                            "P": "touch"}.get(s["type"], "?")
             self.f_travel = 0.0
             self.step_stop = ""
             self.fail = ""

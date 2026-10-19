@@ -59,7 +59,8 @@ def rot(v, phi):
 
 # ---------------------------------------------------------------- landmarks and edges
 class Landmark:
-    """One rigid landmark. kind: board (from map.json boards) or block (polygon obstacle with source user).
+    """One rigid landmark. kind: board (from map.json boards), block (polygon obstacle with source user) or dock
+    (a home dock, map.json home_docks: its back wall's inner face; tape points = that face's two ends).
     faces: list of landmarks.Face at the prior (given) position. anchors: named floor points a person can
     tape-measure (a board's foot corners, a block's corners)."""
 
@@ -95,6 +96,10 @@ class Landmark:
         if self.kind == "board":
             s["p1"] = [round(float(v), 3) for v in self.move(self.shape["p1"], g)]
             s["p2"] = [round(float(v), 3) for v in self.move(self.shape["p2"], g)]
+        elif self.kind == "dock":
+            c = self.move([self.shape["x"], self.shape["y"]], g)
+            s["x"], s["y"] = round(float(c[0]), 3), round(float(c[1]), 3)
+            s["heading"] = round(float(self.shape["heading"] + g[2]), 3)
         else:
             s["points"] = [[round(float(v), 3) for v in p] for p in self.move(self.shape["points"], g)]
         return s
@@ -128,6 +133,14 @@ def landmarks_from_map(m, prior_sigma_cm=1.0, include=None):
             continue
         faces = LM.faces_from_map({"boards": [b], "obstacles": []})
         out.append(Landmark(b["name"], "board", faces, board_anchors(b), dict(b), prior_sigma_cm))
+    for d in m.get("home_docks", []):
+        name = "dock " + d["name"]
+        if include is not None and name not in include:
+            continue
+        faces = [f for f in LM.faces_from_map({"boards": [], "obstacles": [], "home_docks": [d]})]
+        f = faces[0]
+        out.append(Landmark(name, "dock", faces, {"back wall end 1": f.a, "back wall end 2": f.b}, dict(d),
+                            prior_sigma_cm))
     for o in m["obstacles"]:
         if o["shape"] != "polygon" or o.get("source") != "user":
             continue
@@ -279,6 +292,15 @@ def locked_map(base_map, est, version, audit, camera, survey, notes="", robots=N
             o.update(est.landmarks[o["id"]].moved_shape(est.g[o["id"]]))
         obstacles.append(o)
     m["boards"], m["obstacles"] = boards, obstacles
+    docks = []
+    for d in m.get("home_docks", []):
+        nm = "dock " + d["name"]
+        if nm in est.landmarks:
+            d = dict(d)
+            d.update(est.landmarks[nm].moved_shape(est.g[nm]))
+        docks.append(d)
+    if docks:
+        m["home_docks"] = docks
     fl = dict(m["floor"])
     for side, x in est.edges.items():
         if not x.open:

@@ -69,6 +69,8 @@ def run_sim_survey(site, user_map, robots, edges, opts=None, log=print, max_spot
         spots = views_for(m, rn, L, o)
         if o.get("corners", True):
             spots += SV.corner_viewpoints(SV.survey_map(m, rn, others_parked=False), L, opts=o)
+        if o.get("touch"):
+            spots += SV.touch_viewpoints(SV.survey_map(m, rn, others_parked=False), L, o)
         spots = SV.order_greedy(start, spots)
         if max_spots:
             spots = spots[:max_spots]

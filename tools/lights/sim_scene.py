@@ -109,6 +109,32 @@ class Scene:
             yield fi, tc, img, truth
 
 
+def write(scene, folder):
+    """The scene as a camrec.py-style recording (video.avi MJPG, frames.csv, meta.json,
+    floor_calibration.json) plus truth.csv (frame, t_wall, robot, x_cm, y_cm, th_deg). t_wall = capture time."""
+    import csv
+    os.makedirs(folder, exist_ok=True)
+    c = scene.cfg.camera
+    vw = cv2.VideoWriter(os.path.join(folder, "video.avi"), cv2.VideoWriter_fourcc(*"MJPG"), c.fps, (c.width, c.height))
+    with open(os.path.join(folder, "frames.csv"), "w", newline="") as ff, \
+            open(os.path.join(folder, "truth.csv"), "w", newline="") as tf:
+        fw, tw = csv.writer(ff), csv.writer(tf)
+        fw.writerow(["frame", "t_wall", "t_mono"])
+        tw.writerow(["frame", "t_wall", "robot", "x_cm", "y_cm", "th_deg"])
+        for fi, tc, img, truth in scene.frames():
+            vw.write(cv2.cvtColor(img, cv2.COLOR_GRAY2BGR))
+            fw.writerow([fi, "%.4f" % tc, "%.4f" % tc])
+            for n, (x, y, th) in truth.items():
+                tw.writerow([fi, "%.4f" % tc, n, "%.3f" % x, "%.3f" % y, "%.2f" % math.degrees(th)])
+    vw.release()
+    with open(os.path.join(folder, "meta.json"), "w") as f:
+        json.dump(dict(device="lights-scene", width=c.width, height=c.height, fps_reported=c.fps,
+                       exposure_ms=c.exposure_ms, label="synthetic"), f)
+    with open(os.path.join(folder, "floor_calibration.json"), "w") as f:
+        json.dump(scene.geom.calibration(), f)
+    return folder
+
+
 def run(scene, names=None, params=None, with_blink=True):
     """Lights tracker (and the blink live tracker) over the scene's frames. Returns a score dict."""
     import floormap as FMAP
@@ -196,6 +222,11 @@ def summary(res):
 
 
 # ---------------------------------------------------------------- scenes
+def _codes(mode, kw, dock, wide, strip):
+    c = strip if mode == "strip" else (wide if len(kw.get("family", {}).get("side_cm", (0,))) >= 3 else dock)
+    return dict(zip(("Left", "Center"), c))
+
+
 def scene_pass(mode="l3", scale=3.4, seed=0, codes=None, seconds=8.0, **kw):
     """Two robots driving towards each other in neighbouring lanes (passing 12 cm apart), turning, blinking."""
     a = SW.Robot("Left", 30, 50, 0, code=1, t_end=seconds + 1)
@@ -209,7 +240,7 @@ def scene_pass(mode="l3", scale=3.4, seed=0, codes=None, seconds=8.0, **kw):
     b.drive(3.0, 15)
     b.drive(seconds, 0, -90)
     b.add_blink(0.3, seconds + 1, phase=0.41)
-    codes = codes or ({"Left": "S0L", "Center": "S2L"} if mode == "l3" else {"Left": "1", "Center": "3"})
+    codes = codes or _codes(mode, kw, ("S0L", "S0R"), ("S0L", "S2L"), ("1", "3"))
     return Scene([a, b], codes, mode=mode, scale=scale, seconds=seconds, seed=seed, **kw)
 
 
@@ -225,7 +256,7 @@ def scene_close(mode="l3", scale=3.4, seed=0, codes=None, seconds=6.0, **kw):
     b.drive(2.5, 12)
     b.drive(seconds, 0, -60)
     b.add_blink(0.3, seconds + 1, phase=0.35)
-    codes = codes or ({"Left": "S1L", "Center": "S1R"} if mode == "l3" else {"Left": "2", "Center": "4"})
+    codes = codes or _codes(mode, kw, ("S0R", "S0L"), ("S1L", "S1R"), ("2", "4"))
     return Scene([a, b], codes, mode=mode, scale=scale, seconds=seconds, seed=seed, **kw)
 
 
@@ -234,11 +265,32 @@ def scene_single(mode="l3", scale=3.4, seed=0, code=None, seconds=5.0, x=61.0, y
     a.drive(0.5, 0)
     a.drive(seconds, 8, 40)
     a.add_blink(0.3, seconds + 1, phase=0.3)
-    return Scene([a], {"Left": code or ("S1L" if mode == "l3" else "2")}, mode=mode, scale=scale, seconds=seconds,
-                 seed=seed, **kw)
+    return Scene([a], {"Left": code or _codes(mode, kw, ("S0L",), ("S1L",), ("2",))["Left"]}, mode=mode, scale=scale,
+                 seconds=seconds, seed=seed, **kw)
 
 
-SCENES = dict(passing=scene_pass, close=scene_close, single=scene_single)
+def scene_three(mode="l3", scale=3.4, seed=0, codes=None, seconds=8.0, **kw):
+    """Three robots with the default name table (printed holder: Left S0L, Center S0R, Right S0L/0011 - Left
+    and Right differ only by the side-LED sequence), Right passing 12 cm from Left."""
+    a = SW.Robot("Left", 30, 40, 0, code=1, t_end=seconds + 1)
+    a.drive(0.3, 0)
+    a.drive(seconds, 10, 15)
+    a.add_blink(0.3, seconds + 1, phase=0.3)
+    b = SW.Robot("Center", 90, 90, -90, code=2, t_end=seconds + 1)
+    b.drive(0.5, 0)
+    b.drive(seconds, 0, 50)
+    b.add_blink(0.3, seconds + 1, phase=0.37)
+    c = SW.Robot("Right", 100, 52, 180, code=3, t_end=seconds + 1)
+    c.drive(0.3, 0)
+    c.drive(4.0, 14)
+    c.drive(seconds, 0, -70)
+    c.add_blink(0.3, seconds + 1, phase=0.45)
+    fam = PT.family(mode, **kw.get("family", {}))
+    codes = codes or PT.parse_names("", fam)
+    return Scene([a, b, c], codes, mode=mode, scale=scale, seconds=seconds, seed=seed, **kw)
+
+
+SCENES = dict(passing=scene_pass, close=scene_close, single=scene_single, three=scene_three)
 
 
 def main(argv=None):
@@ -249,8 +301,11 @@ def main(argv=None):
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--seconds", type=float)
     ap.add_argument("--no-blink", action="store_true", help="robots' own blink LEDs dark (and no blink comparison)")
+    ap.add_argument("--wide", action="store_true", help="l3: the longer L (patterns.WIDE_L3) instead of the printed holder")
     args = ap.parse_args(argv)
     kw = dict(mode=args.mode, scale=args.scale, seed=args.seed, blink=not args.no_blink)
+    if args.wide:
+        kw["family"] = dict(PT.WIDE_L3)
     if args.seconds:
         kw["seconds"] = args.seconds
     sc = SCENES[args.scene](**kw)

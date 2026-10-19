@@ -118,7 +118,7 @@ def set_lights(rb, lc):
     table (tools/lights/patterns.py), or the firmware's own choice (strip: by name)."""
     import camera as CAM                            # puts tools/lights on the path
     LP = CAM.LP
-    names = lc.names or (LP.DEFAULT_L3_NAMES if lc.mode == "l3" else LP.DEFAULT_STRIP_NAMES)
+    names = lc.names or LP.parse_names("", LP.family(lc.mode, **lc.family))
     code = names.get(rb.name)
     if lc.mode == "l3":
         rb.params["lights_mode"] = 1.0

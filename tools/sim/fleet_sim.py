@@ -176,6 +176,8 @@ class FleetSim:
                 a = np.linspace(0, 2 * np.pi, 16, endpoint=False)
                 c, r = o["center"], o["radius"]
                 self.static_polys.append([[c[0] + r * math.cos(t), c[1] + r * math.sin(t)] for t in a])
+        if self.m.get("home_docks"):          # home docks (hardware/dock): solid, with their floor stripe
+            self.cfg.dock.docks = [[d["x"], d["y"], d["heading"]] for d in self.m["home_docks"]]
         params = config.firmware_params()
         fw = config.firmware_version()
         now = time.time()

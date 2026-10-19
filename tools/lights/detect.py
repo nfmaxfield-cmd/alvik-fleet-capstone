@@ -68,6 +68,7 @@ class Params:
     vmax_cms: float = 40.0       # ...plus half the top speed x the time since it was last seen
     turn_gate_deg: float = 25.0  # ...and within this of its predicted heading (+ max_turn_dps x time)
     max_turn_dps: float = 200.0
+    pair_max_gap_s: float = 0.25 # 2-LED sightings only join a track seen within this
     min_sep_cm: float = 8.0      # robots can't overlap: a new track this close to a robot seen now is not a robot
     track_gap_s: float = 1.0
     swap_cm: float = 12.0        # two tracks this close forget their identity evidence
@@ -81,6 +82,7 @@ class Params:
     # strip
     strip_noise: float = 8.0     # profile noise, grey levels (+ 5% of the fitted brightness)
     strip_none_bic: float = 1.0  # weight of the free fit's parameter penalty
+    l3_min_gap_px: float = 4.3  # nearest two L LEDs closer than this in the picture: too merged to read (off)
     strip_min_pitch_px: float = 2.8   # LED pitch in the picture below this: the strip can't be read (decoder off)
     strip_v_min: float = 240.0   # strip LEDs: the same brightness floor (set lights_strip_bri so a lit LED just saturates)
 
@@ -156,6 +158,10 @@ class Detector:
             self.geoms = fam.codes()
             self._strip_models()
         self.note = ""
+        if fam.kind == "l3" and min(min(fam.side_cm), fam.arm_cm) * self.ppc < self.p.l3_min_gap_px:
+            self.note = ("L LEDs only %.1f px apart in this picture (need %.1f): too merged to read reliably "
+                         "(heading can come out reversed), pattern decoding is off"
+                         % (min(min(fam.side_cm), fam.arm_cm) * self.ppc, self.p.l3_min_gap_px))
         if fam.kind == "strip" and self.pitch_px < self.p.strip_min_pitch_px:
             self.note = ("strip LEDs %.1f px apart in this picture (need %.1f): the code can't be read at this scale, "
                          "strip decoding is off" % (self.pitch_px, self.p.strip_min_pitch_px))
@@ -234,6 +240,8 @@ class Detector:
 
     def l3(self, S):
         fam, p = self.fam, self.p
+        if self.note:
+            return [], list(S)
         n = len(S)
         P = np.array([s["xy"] for s in S]) if n else np.zeros((0, 2))
         cands = []
@@ -645,6 +653,8 @@ class Tracker:
                 continue
             px, py, pth = T.predict(t)
             dt = max(0.0, t - T.t)
+            if dt > p.pair_max_gap_s:
+                continue                   # two LEDs only follow a track seen moments ago
             gate = 1.0 + 0.5 * p.vmax_cms * dt
             tmpl = fam.leds(T.geom)
             pred = to_world(pth, np.array([px, py]), tmpl)
@@ -662,6 +672,8 @@ class Tracker:
             dt_ = math.hypot(*(tmpl[ks[1]] - tmpl[ks[0]]))
             if abs(dl - dt_) > 4 * self.det.sigma_of(rest[got[ks[0]][1]]) + 0.15:
                 continue
+            if any(rest[got[k][1]]["merged"] for k in ks):
+                continue                   # a spot split from a merged blob: too unsure to follow on
             key = tuple(sorted(got[k][1] for k in ks))
             claims.setdefault(key, []).append((T, ks, O))
         for key, who in claims.items():
@@ -679,7 +691,8 @@ class Tracker:
                 sx, sy = to_world(th, c, fam.leds(T.geom)[2:3])[0]
                 u, v = self.fmap.to_px(sx, sy)
                 val = self._top_at(u, v)
-                if val is not None and val < 0.5 * p.t_top:
+                lit = min(rest[i]["peak"] for i in key)             # how bright its lit LEDs are now
+                if val is not None and val < 0.35 * lit:            # (an unlit LED's lens still shows a little)
                     T.bits.append((t, 0))
             rows.append((T, dict(kind="pair", spots=[], idx=key, geom=T.geom, th=th, c=c, ambiguous=False, lls=None)))
         return rows

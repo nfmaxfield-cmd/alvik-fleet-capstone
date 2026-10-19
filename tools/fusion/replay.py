@@ -103,6 +103,11 @@ BUILTIN_BLINK = [
     dict(name="blink identity off (motion only)", sensors=WWG + ["camera", "blink"], motion_identity=True,
          calib_heading=True, blink_identity=False),
 ]
+# need --lights (tools/lights/lights.py: the optional light-pattern identity source)
+BUILTIN_LIGHTS = [
+    dict(name="+ light patterns only", sensors=WWG + ["lights"], motion_identity=True, calib_heading=True),
+    dict(name="+ blink + light patterns", sensors=WWG + ["blink", "lights"], motion_identity=True, calib_heading=True),
+]
 # need --detections only
 BUILTIN_CAMERA_EXTRA = [
     dict(name="+ camera, identity by motion", sensors=WWG + ["camera"], motion_identity=True, calib_heading=True),
@@ -214,7 +219,7 @@ def identity_check(fix, robot, led, cam_truth, tol_cm=5.0):
     return "right" if best == robot else "wrong"
 
 
-ID_SOURCES = ("blink", "motion", "both", "combined", "position")
+ID_SOURCES = ("blink", "lights", "motion", "both", "combined", "position")
 
 
 def identity_table(results, names, has_id):
@@ -223,7 +228,7 @@ def identity_table(results, names, has_id):
     out = []
     for n in names:
         rs = [r for r in results if r["config"] == n]
-        if not any(r["id_blink"] + r["id_motion"] + r["id_both"] + r["id_combined"] for r in rs):
+        if not any(r["id_blink"] + r["id_lights"] + r["id_motion"] + r["id_both"] + r["id_combined"] for r in rs):
             continue
         for robot in sorted({r["robot"] for r in rs}):
             rr = [r for r in rs if r["robot"] == robot]
@@ -392,6 +397,8 @@ def main():
                     help="score runs with a calibration made from them anyway (circular; marked in results.csv)")
     ap.add_argument("--video-offset", type=float)
     ap.add_argument("--blink", help="blink_detections.csv (tools/blink/blink.py): light sightings with names")
+    ap.add_argument("--lights", help="lights_detections.csv (tools/lights/lights.py): light-pattern sightings with "
+                                     "names and heading (sensor 'lights')")
     ap.add_argument("--calib-results", help="calibration_results.csv (tools/blink/calib.py): start-nudge "
                     "headings and the light's offset on the robot")
     ap.add_argument("--truth", help="simulator truth.csv: also report errors along the whole path")
@@ -440,9 +447,9 @@ def main():
     if not runs:
         sys.exit("No runs with tape start marks. Is --sheet right, and are run ids filled in?")
     blink_names, crow, led = None, None, None
-    use_cam = bool(args.detections or args.blink)
+    use_cam = bool(args.detections or args.blink or args.lights)
     if not args.calib and use_cam:
-        sys.exit("--detections / --blink need --calib")
+        sys.exit("--detections / --blink / --lights need --calib")
     # ---- which calibration converts each run's camera sightings (circularity check)
     calib_of, infos, groups = {}, {}, {}
     if use_cam:
@@ -479,7 +486,7 @@ def main():
         if len(groups) > 1:
             print(f"{len(groups)} calibrations: each run's camera sightings converted with its own "
                   f"({args.calib_per_run})")
-    if args.detections or args.blink or args.calib_results:
+    if args.detections or args.blink or args.lights or args.calib_results:
         vc = rn.video_clock(args.session, args.recording, fits, args.video_offset)
         if vc is None:
             sys.exit("Couldn't line up video and robot clocks: give --recording (with flashes) or --video-offset")
@@ -513,15 +520,17 @@ def main():
             t0, t1 = min(r.t_start for r in mine) - 5.0, max(r.t_end for r in mine) + 5.0
             sub = [r for r in by_t if r.t_end >= t0 and r.t_start <= t1]
             lo, hi = min(r.t_start for r in sub) - 1.0, max(r.t_end for r in sub) + 1.0
-        u = dict(score=set(rids), runs=sub, calib=p, dets=None, blink=None, cam_truth=None)
+        u = dict(score=set(rids), runs=sub, calib=p, dets=None, blink=None, lights=None, cam_truth=None)
         if args.detections:
             u["dets"] = [d for d in rn.load_detections(args.detections, Hinv, off, parallax=par, dist=dist)
                          if lo <= d["t"] <= hi]
         if args.blink:
             u["blink"] = [b for b in rn.load_blink(args.blink, Hinv, off, parallax=par, dist=dist) if lo <= b["t"] <= hi]
             blink_names = sorted({n for b in u["blink"] for n in b["probs"]}) if blink_names is None else blink_names
-        if ct_ok and (u["dets"] or u["blink"]):
-            frames = [d["frame"] for d in (u["dets"] or []) + (u["blink"] or [])]
+        if args.lights:
+            u["lights"] = [b for b in rn.load_lights(args.lights, Hinv, off, calib_path=p, dist=dist) if lo <= b["t"] <= hi]
+        if ct_ok and (u["dets"] or u["blink"] or u["lights"]):
+            frames = [d["frame"] for d in (u["dets"] or []) + (u["blink"] or []) + (u["lights"] or [])]
             f0, f1 = min(frames), max(frames)
             u["cam_truth"] = {k: v for k, v in load_camera_truth(ct_path, Hinv, off, parallax=par, dist=dist).items()
                               if f0 <= k <= f1}
@@ -530,6 +539,9 @@ def main():
         print("note: calibration has no camera height; robot-top positions not corrected for height")
     dets = any(u["dets"] for u in units)
     blink = any(u["blink"] for u in units)
+    lights = any(u["lights"] for u in units)
+    if args.lights:
+        print(f"{sum(len(u['lights']) for u in units)} light-pattern sightings")
     if args.detections:
         print(f"{sum(len(u['dets']) for u in units)} camera detections")
     if args.blink:
@@ -540,6 +552,11 @@ def main():
     has_ct = any(u["cam_truth"] is not None for u in units)
     truth = load_truth(args.truth) if args.truth else None
     faces = lm.load(args.map) if args.map else None
+    if args.map and not args.map.lower().endswith(".csv"):
+        walls = [[d["x"], d["y"], d["heading"]] for d in lm._fleetmap().load(args.map).get("home_docks", [])]
+        if walls:
+            extra_cfg["dock_poses"] = walls      # DOCK records become full pose fixes (dockfix.py)
+            print(f"home docks: {len(walls)} from {args.map}")
     tof_cal = None
     if args.tof_cal or args.tof_cal_per_run:
         default = lm.load_cal(args.tof_cal) if args.tof_cal else None
@@ -568,6 +585,7 @@ def main():
             print("warning: the map has no boards (or user-measured polygon obstacles): landmark setups skipped")
     configs = json.load(open(args.configs)) if args.configs else (
         BUILTIN + (BUILTIN_CAMERA_EXTRA if dets else []) + (BUILTIN_BLINK if blink else [])
+        + ([c for c in BUILTIN_LIGHTS if blink or "blink" not in c["sensors"]] if lights else [])
         + (BUILTIN_TOF + (BUILTIN_TOF_CAMERA if dets else []) if faces else []))
     half_of = None
     if args.tof_gate:
@@ -607,10 +625,12 @@ def main():
             cfg["clutter_cm2"] = view_area
         if cfg["vmax"] == "auto":
             cfg["vmax"] = vmax           # from all runs, also when a group of them is replayed alone
-        cam_cfg = "camera" in cfg["sensors"] or "blink" in cfg["sensors"]
+        cam_cfg = "camera" in cfg["sensors"] or "blink" in cfg["sensors"] or "lights" in cfg["sensors"]
         if "camera" in cfg["sensors"] and not dets:
             continue
         if "blink" in cfg["sensors"] and not blink:
+            continue
+        if "lights" in cfg["sensors"] and not lights:
             continue
         if "tof" in cfg["sensors"] and not faces:
             continue
@@ -619,11 +639,12 @@ def main():
         if cfg["led_offset_cm"] != "auto":
             led_used = {None: tuple(cfg["led_offset_cm"])}
         todo = units if cam_cfg else [dict(score={r.run_id for r in runs}, runs=runs, calib=None, dets=None,
-                                           blink=None, cam_truth=None)]
+                                           blink=None, lights=None, cam_truth=None)]
         n_unknown = 0
         for u in todo:
             tracked, unknown = eng.run_engine(u["runs"], u["dets"], cfg, gyro_f, blink=u["blink"], calib_rows=crow,
-                                              led_offsets=led, signs=signs, landmarks=faces, tof_cal=tof_cal)
+                                              led_offsets=led, signs=signs, landmarks=faces, tof_cal=tof_cal,
+                                              lights=u.get("lights"))
             n_unknown += len(unknown.confirmed_ever)
             cam_truth = u["cam_truth"]
             for run in runs:

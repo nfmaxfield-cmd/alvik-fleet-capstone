@@ -381,3 +381,58 @@ def test_check_session_without_video_reports_skips(tmp_path, capsys):
     with open(os.path.join(s, "session_checks.csv"), newline="") as f:
         got = {r["check"]: r for r in csv.DictReader(f)}
     assert got["camera_moved"]["status"] == "SKIP" and got["video_clock_drift"]["status"] == "SKIP"
+
+
+# ------------------------------------------------------------------ home dock check tile (hardware/dock)
+def tile_view(shift=(0.0, 0.0), center=(150.24, 140.0), seed=3):
+    """The floor with a 4 x 4 check tile (16 px across: 4 px/cm) drawn finely, then moved by `shift` px."""
+    rng = np.random.default_rng(seed)
+    pad = 16 * SS
+    h, w = H * SS + 2 * pad, W * SS + 2 * pad
+    big = cv2.GaussianBlur(rng.normal(0, 1, (h, w)).astype(np.float32), (0, 0), 6 * SS) * 25 + 130
+    sq = 4 * SS
+    x0, y0 = pad + (center[0] - 8) * SS, pad + (center[1] - 8) * SS
+    for i in range(4):
+        for j in range(4):
+            c = 20 if (i + j) % 2 == 0 else 235
+            cv2.rectangle(big, (int(x0 + i * sq), int(y0 + j * sq)), (int(x0 + (i + 1) * sq) - 1, int(y0 + (j + 1) * sq) - 1),
+                          c, -1)
+    M = np.float32([[1, 0, shift[0] * SS], [0, 1, shift[1] * SS]])
+    big = cv2.warpAffine(big, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+    return cv2.resize(big[pad:pad + H * SS, pad:pad + W * SS], (W, H), interpolation=cv2.INTER_AREA)
+
+
+def write_tile_recording(folder, shift_after_s=None, shift=(0.0, 0.0), seconds=8.0):
+    os.makedirs(folder, exist_ok=True)
+    a, b = tile_view(), tile_view(shift)
+    rng = np.random.default_rng(5)
+    vw = cv2.VideoWriter(os.path.join(folder, "video.avi"), cv2.VideoWriter_fourcc(*"MJPG"), FPS, (W, H))
+    for k in range(int(seconds * FPS)):
+        img = b if shift_after_s is not None and k / FPS >= shift_after_s else a
+        vw.write(cv2.cvtColor(np.clip(img + rng.normal(0, 2, img.shape), 0, 255).astype(np.uint8), cv2.COLOR_GRAY2BGR))
+    vw.release()
+    with open(os.path.join(folder, "meta.json"), "w") as f:
+        json.dump(dict(fps_requested=25, fps_reported=25.0), f)
+    mp = os.path.join(folder, "map.json")
+    with open(mp, "w") as f:
+        json.dump({"home_docks": [{"name": "h1", "x": 30.0 - sc.DOCK_TILE_CENTER_CM + 2.56, "y": 30.0, "heading": 0}]}, f)
+    cp = os.path.join(folder, "floor_calibration.json")
+    with open(cp, "w") as f:
+        json.dump({"H_floor_to_px": [[4, 0, 20], [0, 4, 20], [0, 0, 1]]}, f)
+    return folder, mp, cp
+
+
+def test_dock_tile_still_passes_and_a_bump_is_caught(tmp_path):
+    rec, mp, cp = write_tile_recording(str(tmp_path / "still"))
+    r = sc.dock_tile_checks(rec, mp, cp, every_s=1.0, px_per_cm=4.0)
+    assert len(r) == 1 and r[0].status == "PASS" and r[0].value < 0.2, r[0]
+    rec, mp, cp = write_tile_recording(str(tmp_path / "bumped"), shift_after_s=4.0, shift=(1.2, -0.6))
+    r = sc.dock_tile_checks(rec, mp, cp, every_s=1.0, px_per_cm=4.0)
+    assert r[0].status in ("CHECK", "FAIL") and abs(r[0].value - math.hypot(1.2, 0.6)) < 0.3, r[0]
+
+
+def test_dock_tile_skips_without_docks(tmp_path):
+    rec, mp, cp = write_tile_recording(str(tmp_path / "x"), seconds=1.0)
+    with open(mp, "w") as f:
+        json.dump({}, f)
+    assert sc.dock_tile_checks(rec, mp, cp)[0].status == "SKIP"

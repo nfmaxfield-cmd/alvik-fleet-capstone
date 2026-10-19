@@ -52,6 +52,7 @@ int hHead = 0, hCount = 0;         // hist[hHead - 1] is the newest
 unsigned long hLast = 0, lastMs = 0;
 float lastLx = 0, lastLy = 0, lastTh = 0;
 float qCm = 0.01f, qDeg = 0.003f, qDps = 0.002f;
+float driftDps = 0;                // gyro heading drift measured while docked (dock.h); taken off th() as time passes
 
 float th() { return wrap180(heading() + thOff); }
 
@@ -72,6 +73,7 @@ void start(bool isKnown, float x0 = 0, float y0 = 0, float th0 = 0) {
   thOff = wrap180(th0 - heading());
   lastTh = th();
   var = 0; varTh = 0; dist = 0;
+  driftDps = 0;
   known = isKnown;
   fixesUsed = fixesRejected = 0;
   hCount = hHead = 0;
@@ -102,13 +104,14 @@ void tick() {
   float dx = lx - lastLx, dy = ly - lastLy;
   lastLx = lx; lastLy = ly;
   float ds = dx * cosf(lth * DEG2RAD) + dy * sinf(lth * DEG2RAD);   // along the library's own heading
+  unsigned long now = millis();
+  if (driftDps != 0) thOff = wrap180(thOff - driftDps * (now - lastMs) / 1000.0f);   // docked drift measurement
   float h = th();
   float dh = wrap180(h - lastTh);
   float mid = (lastTh + 0.5f * dh) * DEG2RAD;
   x += ds * cosf(mid);
   y += ds * sinf(mid);
   dist += ds;
-  unsigned long now = millis();
   var += qCm * fabsf(ds);
   varTh += qDeg * fabsf(dh) + qDps * (now - lastMs) / 1000.0f;
   lastTh = h;

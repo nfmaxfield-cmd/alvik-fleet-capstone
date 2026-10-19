@@ -60,7 +60,8 @@ import planner as P  # noqa: E402
 DEFAULTS = dict(distances=(24.0, 14.0, 38.0), angles=(0.0, -18.0, 18.0), per_face=4, min_face_cm=6.0,
                 dwell_s=2.0, sweep_deg=12.0, sweep_dwell_s=1.5, edge_fracs=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9), edge_in_cm=16.0,
                 edge_stop_cm=3.0, edge_cms=2.0, back_cm=14.0, corner_dists_cm=(16.0, 30.0), corner_sweep_deg=14.0,
-                corner_step_deg=2.0, corner_dwell_s=1.2, max_edge_points=5)
+                corner_step_deg=2.0, corner_dwell_s=1.2, max_edge_points=5,
+                touch=False, touch_gap_cm=3.0, touch_bump_ahead_cm=6.09, touch_min_face_cm=10.0, touch_dwell_s=2.0)
 LINE_FWD_CM = 3.5      # line sensors ahead of the turning centre (grid_center_cm)
 
 
@@ -173,6 +174,8 @@ def retime(steps, s=None):
             dur = st["t_end"] - st["t_start"]
         elif st["type"] in ("turn", "park"):
             dur = abs(st.get("turn_deg", 0.0)) / s.turn_dps + s.turn_settle_s
+        elif st["type"] in ("touch", "home"):
+            dur = st["t_end"] - st["t_start"]
         else:
             dur = math.dist(st["from"][:2], st["to"][:2]) / max(st["speed"] or s.cruise_cms, 0.1) + s.drive_settle_s
         st["t_start"], st["t_end"] = round(t, 2), round(t + dur, 2)
@@ -193,6 +196,44 @@ def view_steps(pose, front_ray, o, task):
         out.append(_step("wait", nxt, nxt, "dwell", dur_s=o["sweep_dwell_s"], task=task))
         cur = nxt
     return out
+
+
+def touch_viewpoints(m, landmarks, opts=None, grid=None):
+    """The optional touch probe survey step (nose switches, firmware dock.h): spots square to each long face
+    of every board, with the bumper touch_gap_cm from it: a quarter and three quarters along it (two points
+    fix the face's turn too), or its middle if it is shorter than 20 cm. Returns a list of dict(landmark, face,
+    pose [x, y, deg], kind "touch")."""
+    o = dict(DEFAULTS, **(opts or {}))
+    grid = grid or _grid(m)[0]
+    out = []
+    for l in landmarks:
+        if l.kind != "board":
+            continue
+        for f in l.faces:
+            if f.length < o["touch_min_face_cm"]:
+                continue
+            for fr in ((0.25, 0.75) if f.length >= 20.0 else (0.5,)):
+                q = f.a + fr * f.length * f.u
+                for side in (1.0, -1.0):
+                    n = side * f.n
+                    c = q + (o["touch_bump_ahead_cm"] + o["touch_gap_cm"]) * n
+                    if not grid.turnable(c):
+                        continue
+                    h = math.degrees(math.atan2(-n[1], -n[0]))
+                    out.append(dict(landmark=l.name, face=f.name, pose=[float(c[0]), float(c[1]), h], kind="touch",
+                                    frac=fr))
+                    break
+    return out
+
+
+def touch_steps(pose, o, task):
+    """Dwell (a camera station), then creep until a nose switch clicks and back off to the spot (follow step P
+    with its own back-off), then dwell again."""
+    st = _step("touch", pose, pose, "touch", dur_s=8.0, task=task)
+    st["max_travel_cm"] = round(o["touch_gap_cm"] + 2.0, 2)
+    st["back_cm"] = round(o["touch_gap_cm"], 2)
+    return [_step("wait", pose, pose, "dwell", dur_s=o["touch_dwell_s"], task=task), st,
+            _step("wait", pose, pose, "dwell", dur_s=1.0, task=task)]
 
 
 def plan_views(m, robot, start, spots, opts=None, t_limit_s=30.0, home=None):
@@ -219,6 +260,8 @@ def plan_views(m, robot, start, spots, opts=None, t_limit_s=30.0, home=None):
             if kk == k:
                 if spots[task].get("kind") == "corner":
                     out += corner_steps(st["to"], fr, o, task)
+                elif spots[task].get("kind") == "touch":
+                    out += touch_steps(st["to"], o, task)
                 else:
                     out += view_steps(st["to"], fr, o, task)
                 kept.append(dict(spots[task], task=task))

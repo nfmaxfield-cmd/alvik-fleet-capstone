@@ -1305,6 +1305,85 @@ def make_plan(m, jobs=None, over=None, t0_s=0.0, replan_of=None, events=None, t_
     return plan
 
 
+# ----------------------------------------------------------------------------
+# Going home: route to a home dock's mouth, then creep in (firmware follow step K, dock.h)
+# ----------------------------------------------------------------------------
+
+BUMP_AHEAD_CM = 6.09      # placeholder, hardware/dock/dock_params.py; only for where the plan draws the docked robot
+
+
+def assign_homes(m, homes):
+    """homes: {robot: dock name or None}. None = the nearest dock no other robot got. Returns {robot: dock}."""
+    m = FM.normalize(m)
+    docks = {d["name"]: d for d in m.get("home_docks", [])}
+    if not docks:
+        raise PlanError("the map has no home_docks")
+    out, taken = {}, set()
+    for r, d in homes.items():
+        if d is not None:
+            if d not in docks:
+                raise PlanError("no home dock called %r" % d)
+            if d in taken:
+                raise PlanError("two robots sent to home dock %r" % d)
+            out[r] = docks[d]
+            taken.add(d)
+    starts = {r["name"]: r["start"] for r in m["robots"]}
+    for r, d in homes.items():
+        if d is None:
+            free = [x for n, x in docks.items() if n not in taken]
+            if not free:
+                raise PlanError("more robots going home than free home docks")
+            st = starts.get(r, [0.0, 0.0])
+            best = min(free, key=lambda x: math.dist(st[:2], (x["x"], x["y"])))
+            out[r] = best
+            taken.add(best["name"])
+    return out
+
+
+def with_home(m, homes):
+    """A copy of the map where each robot in homes parks at its dock's mouth (so the planner routes it there)."""
+    m2 = FM.normalize(m)
+    a = assign_homes(m2, homes)
+    for r in m2["robots"]:
+        if r["name"] in a:
+            r["park"] = FM.pose_out(FM.home_mouth_pose(m2, a[r["name"]]))
+            t = m2["tasks"].setdefault(r["name"], {"visit": [], "any_order": False, "park": True})
+            t["park"] = True
+    return m2, a
+
+
+def home_step(d, frm, t0, max_extra_cm=3.0, back_cm=0.0, bump_ahead_cm=BUMP_AHEAD_CM):
+    """The creep-in step (run_plan sends it as follow step K): from the mouth pose `frm` ([x, y, deg])."""
+    to = FM.pose_out(FM.home_docked_pose(d, bump_ahead_cm))
+    L = math.dist(frm[:2], to[:2])
+    dur = L / 1.0 + 6.0                   # ~1 cm/s creep, pivot, seat, standing still for the gyro
+    return {"i": 0, "type": "home", "phase": "home", "from": list(frm), "to": to, "t_start": t0,
+            "t_end": round(t0 + dur, 2), "move_s": round(dur, 3), "board": None, "task": None, "after": [],
+            "speed": 1.0, "dock": d["name"], "wall": [d["x"], d["y"], d["heading"]],
+            "max_travel_cm": round(L + max_extra_cm, 2), "back_cm": back_cm}
+
+
+def append_home(plan, assigned):
+    """Add the creep-in step after each going-home robot's last planned step (its stop at the mouth)."""
+    for r, d in assigned.items():
+        rob = plan["robots"].get(r)
+        if rob is None:
+            continue
+        steps = rob["steps"]
+        if steps and steps[-1]["type"] == "home":
+            continue
+        frm = steps[-1]["to"] if steps else rob["start"]
+        t0 = steps[-1]["t_end"] if steps else 0.0
+        st = home_step(d, frm, t0)
+        st["i"] = len(steps)
+        steps.append(st)
+        rob["finish_s"] = st["t_end"]
+    fin = [r["finish_s"] for r in plan["robots"].values()]
+    plan.setdefault("summary", {})["makespan_s"] = max(fin) if fin else 0.0
+    plan["plan_id"] = plan_id(plan)
+    return plan
+
+
 def plan_id(plan):
     import hashlib
     body = {k: plan[k] for k in ("map_hash", "robots", "t0_s")}

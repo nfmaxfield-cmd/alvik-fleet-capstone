@@ -17,7 +17,7 @@ then the robot's own columns:
 
 | File | Columns after robot,t_recv |
 | --- | --- |
-| raw.csv | run,ms,step,wl_deg,wr_deg,wl_rpm,wr_rpm,v_cms,w_dps,x_cm,y_cm,th_deg,ax,ay,az,gx,gy,gz,roll_deg,pitch_deg,yaw_deg,dL_cm,dCL_cm,dC_cm,dCR_cm,dR_cm,dtop_cm,dbot_cm,lineL,lineC,lineR,battery,charging,lifted,raw_n (raw_n from 2026-10-18b) |
+| raw.csv | run,ms,step,wl_deg,wr_deg,wl_rpm,wr_rpm,v_cms,w_dps,x_cm,y_cm,th_deg,ax,ay,az,gx,gy,gz,roll_deg,pitch_deg,yaw_deg,dL_cm,dCL_cm,dC_cm,dCR_cm,dR_cm,dtop_cm,dbot_cm,lineL,lineC,lineR,battery,charging,lifted,swL,swR,raw_n (raw_n from 2026-10-18b; swL, swR from 2026-10-19a, before raw_n) |
 | runinfo.csv | run,experiment,fw_version,motor_fw,ms_start,battery,charging,wifi_dbm,route,yaw_sign,odo_sign (signs from the compass check, 0 = not checked; raw yaw_deg / th_deg times these = left-positive; from 2026-10-17d) |
 | param.csv | run,name,value |
 | runend.csv | run,result,ms_end,duration_ms,battery,wifi_dbm,raw_rows_sent,packets_sent |
@@ -31,6 +31,8 @@ then the robot's own columns:
 | calib_look.csv | `calib` runs (2026-10-18c+), one row: run,spun,near_cm,heading_deg,turn_deg,room_cm,cap_cm,live_cm,roll_cm,result,room8,caps,spin,roll,reason: what the look-around saw and chose, what it did, and what it skipped or cut short and why (sent after the rolls; see "Calibration look-around" and "Calibration outcomes" below) |
 | step.csv | `follow` runs: run,id,state,ms,x_cm,y_cm,th_deg,front_cm,info (see "Step follower" below) |
 | edge.csv | plywood edge guard (firmware 2026-10-18b+, only with `safe_edge` on; edge.h): run,ms,event,lineL,lineC,lineR,baseL,baseC,baseR,dbot_cm,info. `event` base = the line sensors' plywood level learned at the start of the run (base* = each sensor's level; info says when a sensor on tape took the others' level), nobase = it could not be learned (info: all three on tape, or the robot moved too soon): the line cue is off for that run, trip = the guard stopped the robot (info: line sensors / bottom zone; RUNEND says limited:plywood edge, not a failure: "Run outcomes" below; in a calibration's forward roll it rolls back and ends done, limited (plywood edge)). After a trip the guard stays quiet until the wheels are still. line* and dbot_cm are the readings at that moment. Settings: safe_edge (0 off, 1 line sensors, 2 bottom zone, 3 both), edge_dir, edge_thr, edge_max, edge_n, edge_learn_ms, edge_min_rpm, edge_bot_cm, edge_bot_ms (params.h help; tools/edge_check.py recommends them from the E0c edge rows) |
+| dock.csv | home dock (firmware 2026-10-19a+, dock.h; `dock` runs and follow step K), one row per docking: see "Home dock and touch probe" below |
+| touch.csv | touch probe (2026-10-19a+; `touch` runs and follow step P), one row per touch: see "Home dock and touch probe" below |
 | follow.csv | `follow` runs, follow_log_hz (10) a second: run,ms,step_id,state,queued,last_done,last_failed,x_cm,y_cm,th_deg,pos_sd_cm,th_sd_deg,fixes_used,fixes_rejected,front_cm,travel_cm,quiet_ms (see "Step follower") |
 
 Also in the folder:
@@ -58,6 +60,7 @@ Also in the folder:
   | camera_settings | recording | settings changed | none changed between camera_controls.after and camera_controls_end |
   | camera_moved | recording | largest shift of the image centre, px | < 0.5 px and turn < 0.1 deg (first 2 s against 3 moments between and the last 2 s; image registration on the parts that don't move) |
   | lighting | recording | largest brightness change of the static floor, % | < 10% (sampled every 2 s) |
+  | dock_tile | recording, dock | largest shift of a home dock's check tile from where it was in the first frame, px | < 0.5 px (~0.15 cm). Only with `check_session.py --dock-map map.json --calib floor_calibration.json`; the tile's place comes from the map's home_docks and the calibration; sampled every 2 s by ECC alignment of a patch around it (session_checks.PatternWatch, usable live too); frames where it is covered (match < 0.8) are left out. A shift means the camera or the dock moved |
   | sync_flash_length | recording | largest error of a sync flash's length, ms | within 15 ms + (frame interval - exposure) of sync_ms |
   | blink_flash_length | recording | longest blink flash, ms | every one < 220 ms (CHECK if <= 1% are longer) |
   | tilt | robot | worst accelerometer tilt at rest, deg | < 2 deg (floor tilt + sensor mounting, not separable) |
@@ -120,6 +123,11 @@ Notes:
 - RAW `lifted` (firmware 2026-10-17c+): 1 while the robot reports being picked up.
 - RAW `raw_n` (firmware 2026-10-18b+, last column): the row's number within the
   run (0, 1, 2, ... = rows sent before it; RUNEND raw_rows_sent is the count).
+- RAW `swL`, `swR` (firmware 2026-10-19a+, just before raw_n, which stays last):
+  the nose bumper's left and right switch, debounced (switches.h): 1 pressed,
+  0 free, -1 switches not configured (`sw_on` 0, the default). Column order:
+  ..., lifted, swL, swR, raw_n. Every tool reads RAW by column name, so files
+  without them still load.
 - From 2026-10-18b every logged run ends with `settle_end_ms` (1000) standing
   still, logging and blinking, before the end flash: a clean end pose for the
   camera and the end-marks check, and a still period for the gyro bias.
@@ -422,6 +430,33 @@ frame,t_wall,robot,x_px,y_px,code,score,track,lit,n_spots,period_s,shared,p_Left
 - `track` id; `n_spots` 2 = both LEDs seen, 1 = one (moved to the pair
   midpoint), 0 = interpolated.
 
+## Light-pattern detections (`<recording>/lights_detections.csv`, written by tools/lights/lights.py)
+
+Optional second identity source (robots' top LED patterns; design: tools/blink/README.md "Light patterns").
+Written by `python tools/lights/lights.py <recording>` or `blink.py --lights l3|strip`.
+
+frame,t_wall,robot,x_px,y_px,heading_img_deg,code,score,track,kind,n_leds,off_fwd_cm,off_left_cm,led_height_cm,p_Left,p_Center,p_Right,p_none,source
+
+- One row per frame per pattern track seen in that frame (all three L LEDs, two of them following a
+  known track, or a strip).
+- `robot`: the name, only when sure (posterior >= `--name-p` 0.9, enough seen, and no other track
+  elsewhere carries or may carry that name); else empty. `code` its pattern code (`S0L`, `S0L/0011`;
+  strip `1`..`5`), `score` the best name's probability.
+- `x_px,y_px`: the pattern's LED centre (mean of its LEDs), image pixels, `led_height_cm` above the floor.
+  `off_fwd_cm,off_left_cm`: that point in the robot frame from the turning centre (patterns.py geometry).
+- `heading_img_deg`: which way the robot faces, 0 = image right, counter-clockwise on screen (as labels.csv).
+- `p_<name>`: probability per listed name; `p_none`: not a listed pattern (another code or not a robot).
+- `kind`: `full` (whole pattern) / `pair` (two of the L's LEDs on a known track); `n_leds`; `track` id;
+  `source` = `lights`.
+- tools/fusion: sensor `lights` (`replay.py --lights`), identity source name `lights` (`id_lights` in
+  results.csv), heading fixes counted in `hdg_used["lights"]`.
+
+Firmware parameters (lights.h, firmware 2026-10-19a; all off unless `lights_mode` is set):
+`lights_mode` 0 off / 1 L on GPIO pins / 2 Modulino Pixels; `lights_seq` 0..4 side-LED cycle (1111, 0111,
+0011, 0101, 0001; 160 ms slots); `lights_pin_c/_f/_s` GPIO numbers (-1 = not wired); `lights_strip_code`
+1..5 (0 = by name); `lights_strip_bri` 0..100; `lights_idle` 1 = on also between runs. Console command
+`lights`: shows the pattern for 10 s (idle only). The values go out with every run's PARAM records.
+
 ## Calibration results (`<recording>/calibration_results.csv`, written by tools/blink/calib.py)
 
 run,robot_log,experiment,event,t_video,robot_blink,blink_code,blink_score,blink_p_log,identity,
@@ -511,6 +546,19 @@ left, heading degrees, 0 = +x, counter-clockwise positive. Poses are
   or polygon (`points`); `source` camera | distance_sensor | edge_guard (an open plywood edge a follow step stopped at) | user; `time`
   when seen (ISO 8601). Optional `note`.
 - `robots`: start and park poses (park defaults to start).
+- `home_docks` (optional, 2026-10-19a): printed home docks fixed to the plywood
+  (hardware/dock). Each `{"name": "h1", "x": 112, "y": 100, "heading": 0}`:
+  x, y = the middle of the back wall's INNER face (where the bumper touches),
+  heading = the way a docked robot faces (into the wall). Optional sizes (cm,
+  defaults = the printed part, hardware/dock/dock_params.py): `pocket_w_cm`
+  9.6, `pocket_depth_cm` 1.2, `funnel_len_cm` 5.0, `funnel_flare_cm` 3.2,
+  `wall_t_cm` 0.32, `back_depth_cm` 4.8, and `mouth_cm` 15 (a robot going home
+  stops with its axle this far in front of the mouth, facing in, then creeps
+  in: follow step K). The planner treats each dock's outline as an obstacle.
+  The fusion (replay.py --map) takes them as `dock_poses` (DOCK records = pose
+  fixes) and the back wall's inner face as a landmark face; a site setup makes
+  each one a landmark (`dock <name>`, tape points = the inner face's two ends)
+  and the locked map carries the measured x, y, heading.
 - `tasks` (optional): per robot, boards (by name) or `{"goto": [x, y]}` /
   `{"goto": [x, y, heading]}` points, in order; `any_order` lets the planner
   pick the order that finishes everyone soonest; `park` (default true) ends
@@ -747,6 +795,8 @@ Laptop -> robot (only while the follow run is going):
 | `fs <id> D <x0> <y0> <x1> <y1> <h> <cms> <rev> <fmin>` | straight drive along (x0,y0) -> (x1,y1) facing h, rev 1 = backwards; small heading corrections bring it back onto the line; it squares up first if more than 10 deg off h |
 | `fs <id> A <x0> <y0> <x1> <y1> <h> <cms> <handover> <gap> <max_travel> <fmin>` | approach a board (below) |
 | `fs <id> W <ms>` | wait (a dwell at a board; 0 = a step that only keeps the order) |
+| `fs <id> K <wall_x> <wall_y> <h> <max_travel> <back>` | home dock (2026-10-19a+, needs `sw_on 1`): square up to h if more than 3 deg off, creep in until both nose switches click (dock.h), set its own pose to the dock's (wall point minus bump_ahead_cm along h; sd 0.05 cm, 0.3 deg), stand still dock_still_ms (gyro drift, taken off its heading from then on), back out `back` cm (0 = stay). A DOCK record; done info `docked; pivot <deg>; stripe <cm>`. plan.json step type `home` (fields dock, wall, max_travel_cm, back_cm), added by `run_plan.py --home` |
+| `fs <id> P <h> <max_travel> <back>` | touch probe (2026-10-19a+, needs `sw_on 1`): square up to h, creep until a nose switch clicks, back off `back` cm. A TOUCH record; done info `touch <L|R> <travel cm>`. plan.json step type `touch` (site survey `--touch`) |
 | `fix <t_ms> <x> <y> <th> <sigma_cm> [<sigma_deg>]` | camera pose of the robot (turning centre) at ROBOT time t_ms; th `-` = position only |
 | `fpose <x> <y> <th> [<sigma_cm> <sigma_deg>]` | set the pose outright (no camera: the plan's start spot) |
 | `hold [<id>]` | finish the step running (and queued steps up to id), drop the rest; acked with STEP `held` (id = the given id or 0) |
@@ -844,7 +894,9 @@ rhythm; a fix is sent only at 0.9 or more and when no other light may carry
 the same name), `path` (`fast`: from the frame itself, the flash was due
 there; `late`: once the flash had ended and passed blink.py's checks), `t_pi`
 (the frame's Pi t_wall), `frame` (frame number since track_live.py started),
-`track`. `th` is always given (from the line between the two LEDs);
+`track`. With `--lights l3|strip` (off by default) it also sends light-pattern fixes, marked
+`"src": "lights"`, `"path": "lights"` (`th` from the pattern, `sigma` 0.5 cm, `sigma_th` 2 deg); unsure
+patterns are `sighting`s with `"src": "lights"`. `th` is always given (from the line between the two LEDs);
 `sigma` 0.5 cm, `sigma_th` about 1.5 deg. With `--sightings` it also sends
 `{"type": "sighting", "t_pi", "t", "x", "y" (light midpoint, cm), "track",
 "best" (likeliest name), "probs" {name: p}, "p_none", "why" (why no fix:
@@ -876,3 +928,61 @@ steps_sent, fixes_sent, fixes_used_rejected, replans, dockings_reported,
 boards_not_visited, sensor_obstacles; with --dry-run also `simulator`: the
 simulator's sim_report.json). With --dry-run the simulator's own files are in
 `sim/` (tools/sim/README.md).
+
+## Home dock and touch probe (firmware 2026-10-19a+: dock.h, switches.h; hardware/dock)
+
+Two lever switches on a printed nose bumper (left: `sw_left_pin`, default D5;
+right: `sw_right_pin`, D6; INPUT_PULLUP, pressed = LOW) tell the robot when it
+touches something. OFF until `set sw_on 1`; with it off the `dock` and `touch`
+runs fail at once ("nose switches not configured") and RAW swL/swR read -1.
+The bumper's numbers are settings (PARAM records): `bump_ahead_cm` (wheel axle
+to the bumper face), `bump_half_cm` (each lever's contact, left/right of the
+centre line), `sw_gap_cm` (face still this far from what it touches when a
+lever clicks). Times are robot ms; distances wheel travel (library odometry)
+from where the creep started.
+
+`dock.csv` (one row per docking):
+
+| Column | Meaning |
+| --- | --- |
+| run | run id |
+| ms_start | the creep started (after learning the line sensors' floor level standing still, ~150 ms) |
+| ms_first | the first switch clicked (debounced) |
+| ms_left, ms_right | each switch's FIRST raw closing (before debouncing; 0 = never) |
+| ms_both | both clicked: the robot is flush (the time the fusion applies the pose fix at) |
+| first | L or R: which clicked first (the robot then pivoted the other side in) |
+| result | `docked`, or why not: `no click within <n> cm`, `<side> switch never clicked`, `lost contact after seating ...`, `nose switches not configured (sw_on 0)`, `<side> switch pressed before the start`, `creep timed out (stalled?)` |
+| travel_cm | wheel travel at the end (wheels slip while the funnel turns the robot, so this can exceed the geometric distance) |
+| travel_left_cm, travel_right_cm | wheel travel at each switch's first closing (-1 = never) |
+| pivot_deg | gyro heading change from the first click to both (0 without a compass check) |
+| stripe_l_cm, stripe_c_cm, stripe_r_cm | wheel travel when each line sensor first read the dock's floor stripe (2 readings in a row stripe_thr past its level in stripe_dir; -1 = not seen). The dock fixes the distance from the stripe's far edge to the docked axle: (travel_cm - stripe_c_cm) should be the same every docking (dockfix.stripe_check: a wheel-size / stripe check) |
+| frame | `floor` (follow: the own pose in the map frame) or `odo` (a `dock` run: library odometry, its own start frame) |
+| x0_cm, y0_cm, th0_deg | own pose at the creep's start |
+| x_cm, y_cm, th_deg | own pose when docked, BEFORE a follow step K resets it to the dock's |
+| still_ms | how long it stood still docked (dock_still_ms) |
+| drift_dps | the gyro heading's drift over that time, deg/s (left positive; 0 without a compass check) |
+| gz_mean | mean raw gyro z over that time (motor board units) |
+| drift_used | 1 = a follow step took the drift off its own heading (|drift| <= dock_drift_max_dps and a compass check) |
+| n | docking number within a `dock` run (1..dock_n), or the follow step id |
+
+`touch.csv` (one row per touch):
+
+| Column | Meaning |
+| --- | --- |
+| run, ms_start | run id; the creep started |
+| ms_click | the clicking switch's first raw closing |
+| side | L, R, or LR (both pressed when it stopped) |
+| result | `touched`, or why not (as for DOCK) |
+| travel_cm | wheel travel at the click (from where the creep started) |
+| travel_left_cm, travel_right_cm | per switch (-1 = never) |
+| frame, x0_cm, y0_cm, th0_deg, x_cm, y_cm, th_deg | own pose at the start / after braking (as DOCK) |
+| front0_cm | front distance sensor (centre zone) at the start: with travel_cm it is a distance-sensor check (reading = travel + bump_ahead + sw_gap - tof_ahead_cm) |
+| n | touch number within a `touch` run (1..touch_n), or the follow step id |
+
+What the touched face's position is: the lever's point, `bump_ahead_cm` ahead
+of the axle and `bump_half_cm` to that side, plus `sw_gap_cm` along the
+heading. The fusion (tools/fusion/dockfix.py) uses DOCK as a full pose fix
+(dock_poses from the map) and TOUCH as a range to the nearest mapped face; the
+site setup (`setup.py --touch`) ties each TOUCH to the still station it started
+from.
+

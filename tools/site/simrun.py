@@ -259,7 +259,7 @@ class SimSite:
         """Run objects (tools/fusion/runs.py) with RAW rows on the laptop clock, plus EDGE rows per run."""
         rb = self.robots[name]
         out, cols = {}, None
-        edge_cols = None
+        edge_cols = touch_cols = None
         for ms, line in rb.lines:
             p = line.split(",")
             if line.startswith("H,RAW,"):
@@ -272,6 +272,14 @@ class SimSite:
                     run.edge = []
                 r["t"] = rb.t_at(float(r["ms"]))
                 run.raw.append(r)
+            elif line.startswith("H,TOUCH,"):
+                touch_cols = p[2:]
+            elif line.startswith("D,TOUCH,") and touch_cols:
+                r = dict(zip(touch_cols, p[2:]))
+                r["t"] = rb.t_at(float(r["ms_click"]))
+                r["t_start"] = rb.t_at(float(r["ms_start"]))
+                if r["run"] in out:
+                    out[r["run"]].touch.append(r)
             elif line.startswith("H,EDGE,"):
                 edge_cols = p[2:]
             elif line.startswith("D,EDGE,") and edge_cols:

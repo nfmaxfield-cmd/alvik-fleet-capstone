@@ -10,6 +10,9 @@ Two kinds (tools/blink/README.md "Light patterns" has the design note):
          sets the geometry: side arm length (one of side_cm levels) and side
          (L/R) -> 6 holder variants with the default 3 levels, each readable
          in ONE frame, heading included (the L is not mirror-symmetric).
+         Default geometry: the printed holder (hardware/dock: 24 mm arm, 14 mm
+         side, one length -> 2 variants, L and its mirror R); WIDE_L3 is the
+         longer L with 3 lengths (6 variants).
          On top of that the firmware can switch the SIDE LED on and off in a
          4-slot cycle (slot_s each): sequence 1111 (steady) / 0111 / 0011 /
          0101 / 0001 -> x5 codes, read over one cycle or more (0.64 s).
@@ -33,18 +36,32 @@ SEQS = ("1111", "0111", "0011", "0101", "0001")   # side-LED cycles (necklaces o
 
 STRIP_CODES = {1: "11000001", 2: "11010001", 3: "11001001", 4: "11000101", 5: "11010101"}
 
-DEFAULT_L3_NAMES = {"Left": "S0L", "Center": "S1L", "Right": "S2L"}
+# a longer L with three side-arm lengths (print LED_POS_MM = (0,0), (50,0), (0, 20|30|40) mm): 6 holder
+# variants, every robot named from one frame at the real camera (tools/blink/README.md compares the two)
+WIDE_L3 = dict(arm_cm=5.0, side_cm=(2.0, 3.0, 4.0), corner_cm=(-3.5, 0.0), height_cm=6.0)
+
+
+def default_l3_names(fam):
+    """Three variants if the family has them (one frame each); with the printed holder (one side-arm length):
+    Left the holder as printed, Center a mirrored print, Right as printed with side-LED sequence 0011."""
+    if len(fam.side_cm) >= 3:
+        return {"Left": "S0L", "Center": "S1L", "Right": "S2L"}
+    return {"Left": "S0L", "Center": "S0R", "Right": "S0L/0011"}
+
+
+DEFAULT_L3_NAMES = {"Left": "S0L", "Center": "S0R", "Right": "S0L/0011"}
 DEFAULT_STRIP_NAMES = {"Left": "1", "Center": "2", "Right": "3"}
 
 
 @dataclass
 class L3Family:
-    arm_cm: float = 5.0                      # corner -> front LED (along the robot's forward axis)
-    side_cm: tuple = (2.0, 3.0, 4.0)         # corner -> side LED, one level per holder variant
-    corner_cm: tuple = (-3.5, 0.0)           # corner LED in the robot frame (forward, left), from the turning centre:
-    #                                          the front LED (1.5, 0) stays 2.8 cm from the robot's own top LEDs
-    #                                          (2.75, +-2.55), so the blink code still reads and they can't form an L
-    height_cm: float = 6.0                   # LED tops above the floor (robot top 4 cm + holder)
+    # default: the printed holder, hardware/dock/dock_params.py LED_POS_MM (corner, 24 mm forward, 14 mm left)
+    arm_cm: float = 2.4                      # corner -> front LED (along the robot's forward axis)
+    side_cm: tuple = (1.4,)                  # corner -> side LED, one level per holder variant
+    corner_cm: tuple = (-1.5, -0.7)          # corner LED in the robot frame (forward, left), from the turning
+    #                                          centre: ASSUMED placement (the L's middle over the robot's middle);
+    #                                          measure it on the robot (ACCURACY-CHECKS.md) and set it here
+    height_cm: float = 5.0                   # LED tops above the floor (robot top 4 cm + 3 mm plate + LED)
     slot_s: float = 0.16                     # sequence slot (4 camera frames at 25 fps)
     kind: str = "l3"
 
@@ -141,7 +158,7 @@ def parse_names(s, fam):
     """'Left=S0L,Center=S1L/0011' -> {name: code} (checked against the family);
     empty -> the default table."""
     if not s:
-        return dict(DEFAULT_L3_NAMES if fam.kind == "l3" else DEFAULT_STRIP_NAMES)
+        return default_l3_names(fam) if fam.kind == "l3" else dict(DEFAULT_STRIP_NAMES)
     out = {}
     for part in s.split(","):
         if not part.strip():

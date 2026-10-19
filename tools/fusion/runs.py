@@ -95,6 +95,8 @@ class Run:
         self.excluded = False
         self.params = {}
         self.clock = {}
+        self.dock = []           # DOCK records (dockfix.py), each with "t" (laptop s)
+        self.touch = []          # TOUCH records
 
     @property
     def t_start(self):
@@ -136,6 +138,8 @@ def load_runs(session, sheet=None):
         fit = cs.fit_for(fits, run.robot, r["run"])
         if fit:
             run.sync[r["tag"]] = (cs.to_laptop(fit, fnum(r["ms_on"])), cs.to_laptop(fit, fnum(r["ms_off"])))
+    import dockfix
+    dockfix.attach(runs, session, fits)
     for run in runs.values():
         run.raw.sort(key=lambda r: r["t"])
         fit = cs.fit_for(fits, run.robot, run.run_id)
@@ -477,6 +481,41 @@ def load_blink(path, H_px_to_floor, offset_s, parallax=None, dist=None, lit_only
                             track=int(fnum(r.get("track"), -1)), robot=(r.get("robot") or "").strip(),
                             probs=probs, p_none=0.0 if math.isnan(pn) else pn,
                             n_spots=int(fnum(r.get("n_spots"), 0)), score=fnum(r.get("score"), 0.0)))
+    out.sort(key=lambda d: d["t"])
+    return out
+
+
+def load_lights(path, H_px_to_floor, offset_s, calib_path=None, dist=None):
+    """lights_detections.csv (tools/lights/lights.py) as floor positions of the
+    pattern's LED centre on the laptop clock, like load_blink. The parallax is
+    worked out for the LEDs' own height (led_height_cm column) from calib_path.
+    Each row: t, frame, x, y, track, robot, probs {name: p}, p_none, heading
+    (floor, radians), off (forward, left) = the LED centre in the robot frame,
+    kind (full / pair / strip)."""
+    out = []
+    par_of = {}
+    with open(path, newline="") as f:
+        rd = csv.DictReader(f)
+        names = [c[2:] for c in (rd.fieldnames or []) if c.startswith("p_") and c != "p_none"]
+        for r in rd:
+            x, y, t = fnum(r.get("x_px")), fnum(r.get("y_px")), fnum(r.get("t_wall"))
+            if any(math.isnan(v) for v in (x, y, t)):
+                continue
+            h = fnum(r.get("led_height_cm"), ALVIK_TOP_CM)
+            h = ALVIK_TOP_CM if math.isnan(h) else h
+            if h not in par_of:
+                par_of[h] = load_parallax(calib_path, obj_height_cm=h) if calib_path else None
+            fx, fy = floor_from_top(*apply_h(H_px_to_floor, *undistort_px(x, y, dist)), par_of[h])
+            hd = fnum(r.get("heading_img_deg"))
+            probs = {n: fnum(r.get("p_" + n), 0.0) for n in names}
+            probs = {n: (0.0 if math.isnan(p) else p) for n, p in probs.items()}
+            pn = fnum(r.get("p_none"), 0.0)
+            out.append(dict(t=to_laptop(offset_s, t), frame=int(fnum(r.get("frame"), -1)), x=fx, y=fy,
+                            track=int(fnum(r.get("track"), -1)), robot=(r.get("robot") or "").strip(),
+                            probs=probs, p_none=0.0 if math.isnan(pn) else pn,
+                            heading=None if math.isnan(hd) else math.radians(heading_img_to_floor(H_px_to_floor, x, y, hd, dist)),
+                            off=(fnum(r.get("off_fwd_cm"), 0.0), fnum(r.get("off_left_cm"), 0.0)),
+                            kind=(r.get("kind") or "").strip(), score=fnum(r.get("score"), 0.0)))
     out.sort(key=lambda d: d["t"])
     return out
 

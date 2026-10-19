@@ -11,6 +11,7 @@ sensor switched off or degraded, and compare the results against the tape.
 | `graph.py` | Factor graph: re-solves a whole run so every reading fits together |
 | `landmarks.py` | Landmark ranging: map faces, distance-sensor ray geometry, which zones can be used |
 | `replay.py` | Runs every sensor setup over the same runs and compares them |
+| `dockfix.py` | Home dock and touch probe (firmware 2026-10-19a): a DOCK record is a full pose fix at the dock's pose (map `home_docks`, via `--map`), a TOUCH record a range to the nearest mapped face; nothing changes without such records |
 | `tof_calib.py` | Distance-sensor calibration: each robot's zone directions and range error, and refined board positions, from runs the camera saw |
 | `tests/` | Unit tests: light-offset model, identity combination, heading from motion, landmark ranging, wheel size, calibration, settings read from the session (`python -m pytest tools/fusion/tests -q`, about 1 minute) |
 

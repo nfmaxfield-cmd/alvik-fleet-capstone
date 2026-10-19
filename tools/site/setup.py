@@ -211,6 +211,8 @@ def plan_survey(ask, m, robots, open_edges, opts, site, only=None):
         start = next(r["start"] for r in m["robots"] if r["name"] == rn)
         spots = PL.views_for(m, rn, L, opts)
         spots += SV.corner_viewpoints(SV.survey_map(m, rn, others_parked=False), L, opts=opts)
+        if opts.get("touch"):            # optional: touch each board face with the nose switches
+            spots += SV.touch_viewpoints(SV.survey_map(m, rn, others_parked=False), L, opts)
         spots = SV.order_greedy(start, spots)
         edges = SV.edge_targets(SV.survey_map(m, rn, others_parked=False), E, opts) if not only else []
         plans[rn] = dict(start=start, spots=spots, edges=edges)
@@ -250,7 +252,8 @@ def run_real_survey(ask, m, plans, args, site):
         ask.enter(f"{rn} on its spot, the others off the board?")
         for k, seg in enumerate(SV.split_spots(pl["spots"], args.segment_spots)):
             plan, kept, sm = SV.plan_views(m, rn, pl["start"], seg, PL_OPTS(args))
-            sessions.append(_run_plan(sm, plan, site, f"{rn}_views{k}", args))
+            sessions.append(_run_plan(sm, plan, site, f"{rn}_views{k}", args,
+                                      send=["set sw_on 1"] if getattr(args, "touch", False) else ()))
             if args.segment_spots and k < len(SV.split_spots(pl["spots"], args.segment_spots)) - 1 and args.fixes == "none":
                 ask.enter(f"{rn} is back at its start spot. If it is more than a finger's width off the mark, "
                           "put it back exactly on it.")
@@ -334,8 +337,8 @@ def sightings_from_live(paths, robots):
 
 
 def PL_OPTS(args):
-    """Survey options (tools/site/survey.py DEFAULTS); none are exposed on the command line yet."""
-    return {}
+    """Survey options (tools/site/survey.py DEFAULTS) from the command line: --touch."""
+    return {"touch": True} if getattr(args, "touch", False) else {}
 
 
 def last_pose(folder, robot, default):
@@ -549,6 +552,9 @@ def main(argv=None):
     ap.add_argument("--audit-every-landmark", action="store_true",
                     help="on a refresh too, audit one point of EVERY landmark and open edge (the first site setup "
                          "always does; a refresh audits the 2 least sure + 1 random)")
+    ap.add_argument("--touch", action="store_true",
+                    help="optional survey step: each robot also touches every board face (two points per face) with "
+                         "its nose bumper switches (hardware/dock; firmware sw_on 1). Needs the bumper fitted.")
     ap.add_argument("--refresh", help="landmark name(s), comma-separated: survey only these again")
     ap.add_argument("--dry-run", action="store_true", help="real-robot steps against simulated robots in real time "
                                                           "(run_plan.py --dry-run)")
@@ -582,7 +588,7 @@ def main(argv=None):
             "Use it (no new driving)?"):
         pass
     else:
-        plans = plan_survey(ask, m, robots, open_edges, {}, args.site, only=only)
+        plans = plan_survey(ask, m, robots, open_edges, PL_OPTS(args), args.site, only=only)
         state[key] = run_real_survey(ask, m, plans, args, args.site)
         save_state(args.site, state)
     if not ((args.detections and args.calib) or args.live_log):

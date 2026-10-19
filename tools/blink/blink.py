@@ -1047,6 +1047,12 @@ def main(argv=None):
     ap.add_argument("--vmax-cms", type=float, default=40.0, help="fastest robot speed to allow (cm/s)")
     ap.add_argument("--min-name-p", type=float, default=0.6, help="name a track only above this probability")
     ap.add_argument("--max-frames", type=int, help="only the first N frames (quick look)")
+    ap.add_argument("--lights", choices=("off", "l3", "strip"), default="off",
+                    help="also read the robots' light patterns (tools/lights; optional second identity source): "
+                         "writes lights_detections.csv beside blink_detections.csv")
+    ap.add_argument("--lights-names", help="light pattern names, e.g. Left=S0L,Center=S0R,Right=S0L/0011 "
+                                           "(default: tools/lights/patterns.py's table)")
+    ap.add_argument("--lights-wide", action="store_true", help="l3: the longer L (patterns.WIDE_L3)")
     args = ap.parse_args(argv)
     names = parse_names(args.names)
     if args.session:
@@ -1080,7 +1086,23 @@ def main(argv=None):
     print(summary(tracks, segs, lights, p, float(frame_t[0]) if len(frame_t) else 0.0))
     print("  (times in s from the first frame; shared = other flashing on the track's spot, per flash)")
     print(f"wrote {len(rows)} rows to {out}")
+    if args.lights != "off":
+        lights_pass(args, out)
     return 0
+
+
+def lights_pass(args, blink_out):
+    """The light-pattern pass (tools/lights/lights.py), its CSV beside blink_detections.csv."""
+    lp = os.path.join(TOOLS, "lights")
+    if lp not in sys.path:
+        sys.path.insert(0, lp)
+    import lights as LI
+    import patterns as PT
+    fam = LI.make_family(args.lights, args.lights_wide)
+    lnames = PT.parse_names(args.lights_names, fam)
+    out = os.path.join(os.path.dirname(os.path.abspath(blink_out)), "lights_detections.csv")
+    n, tr = LI.analyse(args.recording, fam, lnames, args.calib, out=out, max_frames=args.max_frames)
+    print(f"light patterns ({args.lights}, names {lnames}): {n} rows ({tr.stats['named_rows']} named) to {out}")
 
 
 if __name__ == "__main__":

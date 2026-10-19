@@ -25,14 +25,16 @@ import random
 
 from config import firmware_raw_columns
 from fw_follow import FollowMixin
+from fw_dock import DockMixin, resolve_contacts
 import fw_look
 
-EXP_NAMES = ["stream", "turn", "lap", "grid", "demo", "straight", "survey", "follow", "calib"]
-EXP_SURVEY, EXP_FOLLOW, EXP_CALIB = 6, 7, 8
-N_RUNNABLE = 8            # `run <name>` accepts the first 8 (not calib)
+EXP_NAMES = ["stream", "turn", "lap", "grid", "demo", "straight", "survey", "follow", "calib", "dock", "touch"]
+EXP_SURVEY, EXP_FOLLOW, EXP_CALIB, EXP_DOCK, EXP_TOUCH = 6, 7, 8, 9, 10
+RUNNABLE = [n for n in EXP_NAMES if n != "calib"]   # `run <name>` accepts all but calib
 # showSelection() colours, (r, g, b) on/off, per experiment index (home_lab.ino);
 # follow (7) and calib (8) never become the selection, so their entries are unused
-EXP_COLORS = [(0, 0, 1), (0, 1, 0), (1, 1, 0), (1, 0, 1), (1, 1, 1), (0, 1, 1), (1, 0, 0), (0, 0, 0), (0, 0, 0)]
+EXP_COLORS = [(0, 0, 1), (0, 1, 0), (1, 1, 0), (1, 0, 1), (1, 1, 1), (0, 1, 1), (1, 0, 0), (0, 0, 0), (0, 0, 0),
+              (0, 0, 0), (0, 0, 0)]
 BLINK_SLOT_MS = 100        # blink.h
 BLINK_LEAD_SLOTS = 3         # dark slots right after blink::start()
 OFF, WHITE = (0, 0, 0), (1, 1, 1)
@@ -47,7 +49,7 @@ for _c in "gx gy gz".split():
     RAW_FORMATS[_c] = "%.3f"
 for _c in "dL_cm dCL_cm dC_cm dCR_cm dR_cm dtop_cm dbot_cm".split():
     RAW_FORMATS[_c] = "%.1f"
-for _c in "lineL lineC lineR battery charging lifted raw_n".split():
+for _c in "lineL lineC lineR battery charging lifted swL swR raw_n".split():
     RAW_FORMATS[_c] = "%d"
 
 
@@ -119,7 +121,7 @@ def ray_polys(px, py, dx, dy, polys, best):
     return best
 
 
-class Robot(FollowMixin):
+class Robot(FollowMixin, DockMixin):
     def __init__(self, name, cfg, rng, params, fw_version, t_boot, boot_id, ip):
         self.name, self.cfg, self.rng = name, cfg, rng
         self.m, self.imu_m, self.tof_m, self.line_m = cfg.robot, cfg.imu, cfg.tof, cfg.line
@@ -181,6 +183,9 @@ class Robot(FollowMixin):
         # the edge guard's own sensor noise, so switching it on does not shift every other random draw
         self.edge_rng = random.Random(boot_id * 7919 + sum(map(ord, name)))
         self.edge_init()
+        # the nose switches' chatter has its own random stream too (fw_dock.py)
+        self.sw_rng = random.Random(boot_id * 104729 + sum(map(ord, name)))
+        self.dock_init()
 
         # ---- firmware state ----
         self.run_n = 0
@@ -320,9 +325,15 @@ class Robot(FollowMixin):
             sR = math.radians(dR) * self.rR * (1 - sr - extra)
             ds = (sL + sR) / 2
             dth = (sR - sL) / self.track
+            x_before, y_before = self.x, self.y
             self.x += ds * math.cos(self.th + dth / 2)
             self.y += ds * math.sin(self.th + dth / 2)
             self.th += dth
+            if self.dock_polys or self.cfg.dock.contact_boards:       # docks / touch: the body is solid
+                if self._solids_from != (len(self.world_polys), self.cfg.dock.contact_boards):
+                    self.update_solids()
+                if resolve_contacts(self):                            # pushed back: the wheels slipped
+                    ds = (self.x - x_before) * math.cos(self.th) + (self.y - y_before) * math.sin(self.th)
         else:
             ds = 0.0
         rate = (self.th - th0) / h                         # rad/s, true
@@ -445,6 +456,8 @@ class Robot(FollowMixin):
                     best = min(best, s)
         if self.world_polys:
             best = ray_polys(px, py, dx, dy, self.world_polys, best)
+        if self.dock_polys and self.cfg.dock.dock_tof:
+            best = ray_polys(px, py, dx, dy, self.dock_polys, best)
         if others:
             best = ray_polys(px, py, dx, dy, others, best)
         return best
@@ -550,6 +563,12 @@ class Robot(FollowMixin):
                 cover = max(cover, min(1.0, max(0.0, (half + lm.footprint_cm / 2 - dist) / lm.footprint_cm)))
             val = lm.floor_reading + (lm.tape_reading - lm.floor_reading) * cover
             noise = lm.floor_noise + (lm.tape_noise - lm.floor_noise) * cover
+            if self.dock_list:                                      # a dock's dark floor stripe
+                sc = self.stripe_cover(px, py, lm.footprint_cm)
+                if sc > 0:
+                    dm = self.cfg.dock
+                    val += (dm.stripe_reading - val) * sc
+                    noise += (dm.stripe_noise - noise) * sc
             if s.board_cm:                                          # past an open edge: the cement below
                 o = self.past_open_edge(px, py)
                 ce = min(1.0, max(0.0, (o + lm.footprint_cm / 2) / lm.footprint_cm))
@@ -590,7 +609,7 @@ class Robot(FollowMixin):
                     yaw_deg=wrap180(self.yaw_raw),
                     dL_cm=d[0], dCL_cm=d[1], dC_cm=d[2], dCR_cm=d[3], dR_cm=d[4], dtop_cm=dtop, dbot_cm=dbot,
                     lineL=lL, lineC=lC, lineR=lR, battery=int(self.battery), charging=0,
-                    lifted=1 if self.lifted else 0, raw_n=self.raw_rows)
+                    lifted=1 if self.lifted else 0, swL=self.sw_col(0), swR=self.sw_col(1), raw_n=self.raw_rows)
         return vals
 
     # ================================================= firmware: logging
@@ -613,6 +632,7 @@ class Robot(FollowMixin):
         """rawlog::tick(): at most one RAW record per period, without bursting to catch up.
         blink::tick() runs first, on every call, so the blink lights only change here."""
         self.blink_tick()
+        self.sw_tick()                            # switches.h rides on rawlog::tick() too
         if not self.raw_on:
             return
         now = self.millis()
@@ -858,7 +878,7 @@ class Robot(FollowMixin):
             self.edge_count = 0
             self.edge_bot_since = 0
             return False
-        if (mode & 1) and self.edge_ready:
+        if (mode & 1) and self.edge_ready and not self.edge_line_off:
             if any(self._edge_past(v, k) for k, v in enumerate((L, C, R))):
                 self.edge_count += 1
             else:
@@ -1147,11 +1167,10 @@ class Robot(FollowMixin):
             if running:
                 self.send("M,busy: send stop first")
                 return False
-            names = [n.lower() for n in EXP_NAMES[:N_RUNNABLE]]
-            if rest.lower() not in names:
-                self.send("M,run what? stream, turn, lap, grid, demo, straight, survey or follow")
+            if rest.lower() not in RUNNABLE:
+                self.send("M,run what? stream, turn, lap, grid, demo, straight, survey, follow, dock or touch")
                 return False
-            self.pending = names.index(rest.lower())
+            self.pending = EXP_NAMES.index(rest.lower())
             return False
         if verb == "help":
             return False
@@ -1298,9 +1317,10 @@ class Robot(FollowMixin):
         self.send("M,run %s: %s starting" % (self.run_id, exp))
         t0 = self.millis()
         ms_runinfo = self.ms
-        if i in (EXP_FOLLOW, EXP_CALIB):
+        if i in (EXP_FOLLOW, EXP_CALIB, EXP_DOCK, EXP_TOUCH):
             self.front_limit = 0.0             # follow: no centre stop while it waits on its start spot;
             #                                    calib: it may face a board, only its rolls check ahead
+        self.sw_configure()                    # nose switches (switches.h)
         self.log_run_info(i)
         self.edge_begin()                      # after the PARAM records: learns the plywood during the settle pause
         self.raw_start()
@@ -1323,9 +1343,16 @@ class Robot(FollowMixin):
                 self.run_survey()
             elif exp == "follow":
                 self.run_follow()
+            elif exp == "dock":
+                self.run_dock()
+            elif exp == "touch":
+                self.run_touch()
             else:
-                raise ValueError("the simulator runs only the straight, demo, survey, follow and calib experiments, not " + exp)
+                raise ValueError("the simulator runs only the straight, demo, survey, follow, calib, dock and touch "
+                                 "experiments, not " + exp)
         self.brake()
+        if exp in ("dock", "touch"):
+            self.front_limit = -1.0            # they ran with the front stop off
         self.tick_wait(self.P("settle_end_ms"))   # firmware: still at the end, logging and blinking
         self.edge_stop()
         self.kidnap_at = None

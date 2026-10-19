@@ -48,7 +48,10 @@ rules above run exactly as before)
   apply, except that robots the clues (x position) put under id_exclude_p are
   not candidates. A camera track's motion record is forgotten whenever another
   object comes within 6 cm of it (tracks can swap there).
-  Each fix records where its identity came from: blink, motion, both (each
+  Light patterns (sensor "lights", tools/lights) are a second light source handled exactly like the blink
+  lights (own camera tracks, same thresholds), source name "lights"; each also gives a heading fix
+  (lights_heading, sigma lights_heading_sigma_deg).
+  Each fix records where its identity came from: blink, lights, motion, both (each
   clue alone was enough), combined (only together) or position (normal rules).
 
 Heading from motion (heading_from_motion): when a robot drives forward (both
@@ -81,6 +84,7 @@ import numpy as np
 
 from ekf import EKF, Noise, D2R, wrap
 import landmarks as lm
+import dockfix
 
 DEFAULT = dict(
     name="wheels+gyro+camera",
@@ -112,8 +116,13 @@ DEFAULT = dict(
     motion_none_cm=10.0,      # spread of a non-robot object's displacement per window (cm)
     motion_decay=0.7,         # older windows count this much less per window (a track can switch objects)
     id_exclude_p=0.05,        # robots below this probability are not candidates under the normal rules
-    det_blink_link_cm=5.0,    # a detector sighting this close to a blink light shares its name probabilities
+    det_blink_link_cm=5.0,    # a detector sighting this close to a blink light (or light pattern) shares its names
     name_carry_s=5.0,         # ...and its track keeps them, fading with this time constant (0.6 s -> still 0.9)
+    # --- light patterns (sensor "lights": tools/lights/lights.py's lights_detections.csv; a second identity
+    #     source, used like the blink lights: same blink_name_p, same rules; source name "lights")
+    lights_identity=True,     # use the pattern's name probabilities; False = anonymous positions
+    lights_heading=True,      # the pattern's heading as a heading fix
+    lights_heading_sigma_deg=2.0,   # its noise (chosen: simulated p95 1-2.5 deg with the printed holder)
     clutter_cm2="auto",       # position likelihood of "not this robot" = 1 / this area (the camera's view, cm^2);
                               # auto: the floor area the calibration file's image covers (replay.py), else 19200
                               # (the simulator's 160 x 120 cm view)
@@ -197,6 +206,23 @@ DEFAULT = dict(
     turn_scale_sigma=0.05,
     turn_scale_walk=0.001,
     scale_carry=True,         # a robot's next run starts from what its previous run learned (online: past only)
+    # --- home dock and touch probe (dockfix.py; DOCK / TOUCH records, firmware 2026-10-19a+). Nothing changes
+    # without such records.
+    dock_fix=True,            # DOCK records = full pose fixes, TOUCH records = ranges to mapped faces
+    dock_poses=[],            # [[x_cm, y_cm, heading_deg], ...]: each home dock's back wall middle and the way a
+                              # docked robot faces (map.json home_docks; replay.py --map fills it)
+    dock_sigma_cm=0.05,       # how exactly a docked robot sits (pocket play, seating): GUESS until E00e
+    dock_sigma_deg=0.3,
+    dock_max_cm=10.0,         # a dock further than this from the estimate is not the one it docked at
+    bump_ahead_cm=6.09,       # bumper geometry when the run's PARAM records lack it (placeholders: dock_params.py)
+    bump_half_cm=3.91,
+    sw_gap_cm=0.02,
+    dock_stripe_x0_cm=-5.2,   # the dock's floor stripe, far edge, dock X (hardware/dock/dock_params.py)
+    line_forward_cm=3.5,      # line sensors ahead of the tracked point
+    touch_faces=None,         # faces a touch may hit (landmarks.Face list); None = the landmark map (--map)
+    touch_sigma_cm=0.05,      # one touch: wheel distance over a few cm + the switch's repeatability: GUESS
+    touch_max_cm=3.0,         # use a touch only if the map has a face within this of the lever
+    touch_gate_chi2=16.0,
 )
 
 
@@ -305,10 +331,10 @@ class Tracked:
         self.odo = []         # (t, X, Y, TH, vl_cms, vr_cms, turn_rad_s, lifted): own wheels+gyro only
         self.fixes = []       # dict(t, frame, kind, x, y, source) for every camera fix used
         self.id_sources = {}  # source -> count
-        self.hdg_used = {"motion": 0, "calib": 0}
+        self.hdg_used = {"motion": 0, "calib": 0, "lights": 0}
         self.hdg_rejected = 0
         self.last_hfm = -1e9
-        self.fix_hist = {"det": deque(), "blink": deque()}   # (t, x, y) of assigned fixes, for heading from motion
+        self.fix_hist = {"det": deque(), "blink": deque(), "lights": deque()}   # (t, x, y) of assigned fixes, for heading from motion
         self.led = (0.0, 0.0)
         self._odo_v, self._odo_lifted = 0.0, False
         self.faces = None     # landmark faces (landmarks.Face) for landmark ranging
@@ -359,6 +385,10 @@ class Tracked:
             k.lost()
         elif kind == "reset":
             k.reset_position(d["x"], d["y"], d.get("sigma", 1.0))
+        elif kind == "dock":
+            dockfix.apply_dock(self, d, self.cfg)
+        elif kind == "touch":
+            dockfix.apply_touch(self, d, self.cfg)
 
     def set_tof_cal(self, cal):
         """Put a distance-sensor calibration (landmarks.load_cal) into this run's settings."""
@@ -444,7 +474,7 @@ class Tracked:
         self.tof_n += 1
         if cfg["tof_every"] > 1 and (self.tof_n - 1) % cfg["tof_every"]:
             return []
-        has_cam = "camera" in cfg["sensors"] or "blink" in cfg["sensors"]
+        has_cam = "camera" in cfg["sensors"] or "blink" in cfg["sensors"] or "lights" in cfg["sensors"]
         gap = cfg["tof_camera_gap_s"] if cfg["tof_camera_gap_s"] > 0 else 1.0
         cam_now = has_cam and k.t - k.last_cam < gap                 # (last_cam starts at the run's start)
         learn = cam_now and cfg["tof_learn_map"] and cfg["tof_consider"]
@@ -979,12 +1009,13 @@ def zone_reading(v):
 
 
 def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, led_offsets=None, signs=None,
-               landmarks=None, tof_cal=None):
+               landmarks=None, tof_cal=None, lights=None):
     """Process all runs (and camera sightings) together, in the order the
     information would have reached the robots. Returns robot run_id -> Tracked,
     and the unknown-object tracker.
 
     blink: runs.load_blink rows (used if "blink" is in the sensors);
+    lights: runs.load_lights rows (used if "lights" is in the sensors);
     calib_rows: runs.load_calib_results rows (start-nudge headings);
     led_offsets: {robot or None: (forward, left) cm} (runs.led_offsets);
     signs: (wheel_turn_signs, wheel_fwd_signs) worked out from a larger set of
@@ -1005,7 +1036,8 @@ def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, 
     fsign = signs[1] if signs else wheel_fwd_signs(runs)
     use_cam = "camera" in cfg["sensors"] and detections
     use_blink = bool("blink" in cfg["sensors"] and blink)
-    ident = use_blink or cfg["motion_identity"]
+    use_lights = bool("lights" in cfg["sensors"] and lights)
+    ident = use_blink or use_lights or cfg["motion_identity"]
     use_tof = "tof" in cfg["sensors"] and bool(landmarks)
     if cfg["led_offset_cm"] == "auto":
         led = dict(led_offsets) if led_offsets else {None: (2.75, 0.0)}
@@ -1039,9 +1071,12 @@ def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, 
             if c["run"] in idx and c["t"] is not None and c["heading"] is not None:
                 events.append((c["t"], 2, ("hdg", idx[c["run"]], dict(
                     th=wrap(c["heading"] * D2R), sigma=nudge_sigma(cfg, c.get("moved_px")), src="calib"))))
+    events += [(t, o, p) for t, o, p in dockfix.events(runs, cfg)]   # home dock / touch probe records
     sights = list(detections) if use_cam else []
     if use_blink:
         sights += [dict(b, kind="blink") for b in blink]
+    if use_lights:
+        sights += [dict(b, kind="lights") for b in lights]
     if sights:
         frames = {}
         for det in sights:
@@ -1107,10 +1142,18 @@ def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, 
                 tr.add((arrival, order, "hdg", d))
                 tr.hdg_used["calib"] += 1
             continue
+        if payload[0] in ("dock", "touch"):
+            _, ri, d = payload
+            tr = tracked.get(runs[ri].run_id)
+            if tr is not None:
+                if tr.faces is None and landmarks:
+                    tr.faces = landmarks     # a touch needs the map even in setups without "tof"
+                tr.add((arrival, order, payload[0], d))
+            continue
         _, t_cap, dets = payload
         active = [tr for tr in tracked.values() if tr.t0 - 0.2 <= t_cap <= tr.t1 + 0.3]
         if ident:
-            _identity_frame(t_cap, order, dets, active, cfg, unknown, ctracks, use_blink)
+            _identity_frame(t_cap, order, dets, active, cfg, unknown, ctracks, use_blink, use_lights)
             continue
         pairs = []
         for di, det in enumerate(dets):
@@ -1156,6 +1199,8 @@ def _refind(ut, active, t_cap, order, det, unknown):
                 x, y, sig = det["x"], det["y"], 1.0
                 if det.get("kind") == "blink":       # light -> centre needs the heading, which is lost: the
                     sig += math.hypot(*tr.led)       # centre is somewhere within the offset of the light
+                elif det.get("kind") == "lights":
+                    sig += math.hypot(*det["off"])
                 tr.add((t_cap, order, "reset", dict(x=x, y=y, sigma=sig)))
                 tr.lost_state = False
                 unknown.tracks.remove(ut)
@@ -1167,6 +1212,12 @@ def _use_fix(tr, t_cap, order, det, kind, source, cfg):
     then try heading from motion."""
     if kind == "blink":
         tr.add((t_cap, order, "blink", dict(x=det["x"], y=det["y"], off=tr.led)))
+    elif kind == "lights":                      # the pattern's LED centre: a light fix with the pattern's offset
+        tr.add((t_cap, order, "blink", dict(x=det["x"], y=det["y"], off=tuple(det["off"]))))
+        if cfg["lights_heading"] and det.get("heading") is not None:
+            tr.add((t_cap, order + 0.25, "hdg", dict(th=wrap(det["heading"]), sigma=cfg["lights_heading_sigma_deg"] * D2R,
+                                                      src="lights")))
+            tr.hdg_used["lights"] += 1
     else:
         tr.add((t_cap, order, "cam", det))
     tr.cam_used += 1
@@ -1176,7 +1227,7 @@ def _use_fix(tr, t_cap, order, det, kind, source, cfg):
     hist.append((t_cap, det["x"], det["y"]))
     while hist and t_cap - hist[0][0] > 2 * cfg["hfm_window_s"] + 0.5:
         hist.popleft()
-    if cfg["heading_from_motion"]:
+    if cfg["heading_from_motion"] and kind != "lights":    # (a light pattern gives heading itself)
         _heading_from_motion(tr, t_cap, order, kind, cfg)
 
 
@@ -1227,12 +1278,13 @@ def _motion_update(ct, kind, active, t, cfg):
     if dt < 0.5 * W:
         return
     d = (b[1] - a[1], b[2] - a[2])
-    sig_m = active[0].noise.blink_xy if (kind == "blink" and active) else (active[0].noise.cam_xy if active else 0.8)
+    lightish = kind in ("blink", "lights")
+    sig_m = active[0].noise.blink_xy if (lightish and active) else (active[0].noise.cam_xy if active else 0.8)
     preds = {}
     for tr in active:
         if tr.lost_state:
             continue
-        D = tr.own_displacement(a[0], b[0], tr.led if kind == "blink" else (0.0, 0.0))
+        D = tr.own_displacement(a[0], b[0], tr.led if kind == "blink" else (ct.get("off") or (0.0, 0.0)))
         if D is not None:
             preds[tr.run.robot] = (tr, D)
     moved = max([math.hypot(*d)] + [math.hypot(*D) for _, D in preds.values()])
@@ -1269,7 +1321,7 @@ def _motion_dist(ct, hyps):
     return normalise({h: math.exp(v - m) for h, v in ll.items()})
 
 
-def _decide(pb, pm, gates, hyps, cfg):
+def _decide(pb, pm, gates, hyps, cfg, clue="blink"):
     """Who may take this sighting. pb / pm: blink / motion distributions over
     hyps (or None); gates: robot -> (d2, log position likelihood, Tracked) for
     the robots whose possible area it is in.
@@ -1287,11 +1339,13 @@ def _decide(pb, pm, gates, hyps, cfg):
     if pb:
         b = max(pb, key=pb.get)
         if pb[b] >= tau:
-            src = "both" if (pm and pm[b] >= tau) else "blink"
+            src = "both" if (pm and pm[b] >= tau) else clue
             if b in gates:
                 return True, {b: gates[b]}, src, b
             return True, {}, src, b
     post, best, source = combine_identity(pb, pm, tau)
+    if source == "blink":
+        source = clue
     if not post:
         return False, gates, None, None
     lz = -math.log(clutter_area(cfg))
@@ -1306,34 +1360,40 @@ def _decide(pb, pm, gates, hyps, cfg):
     return False, {r: g for r, g in gates.items() if pp.get(r, 0.0) >= cfg["id_exclude_p"]}, None, None
 
 
-def _identity_frame(t_cap, order, dets, active, cfg, unknown, ctracks, use_blink):
-    """One camera frame with the identity rules (module docstring)."""
+def _identity_frame(t_cap, order, dets, active, cfg, unknown, ctracks, use_blink, use_lights=False):
+    """One camera frame with the identity rules (module docstring). Blink lights and light patterns
+    ("lights") are handled alike, each with its own camera tracks and source name."""
     tau = cfg["blink_name_p"]
     running = [tr.run.robot for tr in active]
-    blinks = [i for i, d in enumerate(dets) if d.get("kind") == "blink"]
-    plain = [i for i, d in enumerate(dets) if d.get("kind") != "blink"]
+    LIGHT = ("blink", "lights")
+    blinks = [i for i, d in enumerate(dets) if d.get("kind") in LIGHT]
+    plain = [i for i, d in enumerate(dets) if d.get("kind") not in LIGHT]
     keys = [None] * len(dets)
     for i in blinks:
-        keys[i] = ("b", dets[i]["track"])
+        keys[i] = ("b" if dets[i]["kind"] == "blink" else "l", dets[i]["track"])
     for i, k in zip(plain, ctracks.det_keys(t_cap, [(dets[i]["x"], dets[i]["y"]) for i in plain])):
         keys[i] = k
+    use = {"blink": use_blink and cfg["blink_identity"], "lights": use_lights and cfg["lights_identity"]}
     info = []
     for i, det in enumerate(dets):
-        kind = "blink" if det.get("kind") == "blink" else "det"
+        kind = det["kind"] if det.get("kind") in LIGHT else "det"
         ct = ctracks.get(keys[i])
         ctracks.push(ct, t_cap, det["x"], det["y"])
-        if kind == "blink":
+        if kind in LIGHT:
             ct["probs"], ct["p_none"] = det["probs"], det["p_none"]
-            if any(j != i and math.hypot(det["x"] - dets[j]["x"], det["y"] - dets[j]["y"]) < 6.0 for j in blinks):
-                CamTracks.forget(ct)                       # two lights this close: blink.py's tracks may swap
-        elif blinks and cfg["det_blink_link_cm"] > 0:      # a detector sighting at a blink light shares its name
+            ct["off"] = tuple(det["off"]) if kind == "lights" else None
+            if any(j != i and dets[j]["kind"] == kind and math.hypot(det["x"] - dets[j]["x"], det["y"] - dets[j]["y"]) < 6.0
+                   for j in blinks):
+                CamTracks.forget(ct)                       # two lights this close: their tracks may swap
+        elif blinks and cfg["det_blink_link_cm"] > 0:      # a detector sighting at a light shares its name
             ds = sorted((math.hypot(det["x"] - dets[j]["x"], det["y"] - dets[j]["y"]), j) for j in blinks)
             if ds[0][0] <= cfg["det_blink_link_cm"] and (len(ds) == 1 or ds[1][0] > 1.5 * ds[0][0]):
                 ct["link"], ct["link_t"] = keys[ds[0][1]], t_cap
         if cfg["motion_identity"]:
             _motion_update(ct, kind, active, t_cap, cfg)
-        src_ct = ct if kind == "blink" else ctracks.tracks.get(ct["link"]) if ct["link"] else None
-        has_names = bool(use_blink and cfg["blink_identity"] and src_ct and src_ct["probs"])
+        src_ct = ct if kind in LIGHT else ctracks.tracks.get(ct["link"]) if ct["link"] else None
+        clue = "lights" if (src_ct is not None and src_ct["key"][0] == "l") else "blink"
+        has_names = bool(use[clue] and src_ct and src_ct["probs"])
         hyps = running + ["none"] + (["elsewhere"] if has_names else [])
         pb = blink_dist(hyps, src_ct["probs"], src_ct["p_none"]) if has_names else None
         if pb and kind == "det":                           # carried name: confidence fades since the last light
@@ -1343,10 +1403,11 @@ def _identity_frame(t_cap, order, dets, active, cfg, unknown, ctracks, use_blink
         gates = {}
         for tr in active:
             if not tr.lost_state:
-                g = tr.gate(t_cap, (det["x"], det["y"]), tr.led if kind == "blink" else None)
+                off = tr.led if kind == "blink" else tuple(det["off"]) if kind == "lights" else None
+                g = tr.gate(t_cap, (det["x"], det["y"]), off)
                 if g is not None:
                     gates[tr.run.robot] = (g[0], g[1], tr)
-        info.append(_decide(pb, pm, gates, hyps, cfg) + (kind,))
+        info.append(_decide(pb, pm, gates, hyps, cfg, clue) + (kind,))
 
     named, anon = [], []
     for i, det in enumerate(dets):

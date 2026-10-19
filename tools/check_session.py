@@ -370,6 +370,9 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("session", help="console session folder, e.g. logs/20261018-101500")
     ap.add_argument("--video", nargs="*", default=[], help="camrec.py recording folder(s) from the same session")
+    ap.add_argument("--dock-map", help="map.json with home_docks: check each dock's camera check tile stayed put "
+                                       "in the video (needs --calib)")
+    ap.add_argument("--calib", help="floor_calibration.json (for --dock-map)")
     ap.add_argument("--quick", action="store_true", help="skip the flash-length check (reads the whole video "
                                                           "a second time)")
     ap.add_argument("--px-per-cm", type=float, default=3.4, help="camera pixels per floor cm, for the camera-move "
@@ -551,6 +554,8 @@ def main(argv=None):
         results += sc.frame_timing_checks(vf)
         results += sc.camera_settings_check(vf)
         results += sc.camera_still_and_light_checks(vf, px_per_cm=args.px_per_cm)
+        if args.dock_map and args.calib:
+            results += sc.dock_tile_checks(vf, args.dock_map, args.calib, px_per_cm=args.px_per_cm)
     if args.video:
         spans = []
         for vf in args.video:

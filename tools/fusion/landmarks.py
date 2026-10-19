@@ -78,6 +78,13 @@ def faces_from_map(m):
         nm = b["name"]
         out += [Face(f"{nm} left", c[0], c[1]), Face(f"{nm} end p2", c[1], c[2]),
                 Face(f"{nm} right", c[2], c[3]), Face(f"{nm} end p1", c[3], c[0])]
+    for d in m.get("home_docks", []):
+        # a home dock's back wall (its inner face, pocket wide): touch probes and the distance sensor see it
+        h = math.radians(d["heading"])
+        u, l = np.array([math.cos(h), math.sin(h)]), np.array([-math.sin(h), math.cos(h)])
+        c = np.array([d["x"], d["y"]])
+        half = d.get("pocket_w_cm", 9.6) / 2.0
+        out.append(Face(f"dock {d['name']} back", c - half * l, c + half * l))
     for o in m["obstacles"]:
         if o["shape"] != "polygon" or o.get("source") != "user":
             continue
