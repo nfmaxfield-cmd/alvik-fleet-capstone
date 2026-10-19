@@ -32,7 +32,15 @@ DEFAULT_MAP = {
     "obstacles": [],
     "robots": [],
     "tasks": {},
+    "home_docks": [],
 }
+
+# A home dock (hardware/dock): x, y = middle of its back wall's inner face, heading = the way a docked robot
+# faces. Its outline (cm, dock frame: X into the dock from the back wall, Y left) comes from these, the printed
+# part's numbers (hardware/dock/dock_params.py, mm there).
+HOME_DOCK_DEFAULTS = {"pocket_w_cm": 9.6, "pocket_depth_cm": 1.2, "funnel_len_cm": 5.0, "funnel_flare_cm": 3.2,
+                      "wall_t_cm": 0.32, "back_depth_cm": 4.8, "mouth_cm": 15.0}
+# mouth_cm: where a robot going home stops, facing in: its axle this far in front of the dock mouth
 
 OBSTACLE_SOURCES = ("camera", "distance_sensor", "edge_guard", "user")   # edge_guard: an open plywood edge
 
@@ -105,6 +113,26 @@ def normalize(m):
 
     for i, o in enumerate(m.get("obstacles") or []):
         out["obstacles"].append(_norm_obstacle(o, i))
+
+    dnames = set()
+    for i, d in enumerate(m.get("home_docks") or []):
+        nm = str(d.get("name") or "home%d" % (i + 1))
+        if nm in dnames:
+            raise MapError("two home docks are called %r" % nm)
+        dnames.add(nm)
+        try:
+            dd = {"name": nm, "x": float(d["x"]), "y": float(d["y"]), "heading": float(d["heading"])}
+        except (KeyError, TypeError, ValueError):
+            raise MapError("home dock %s needs numbers x, y (middle of its back wall's inner face, cm) and heading "
+                           "(the way a docked robot faces, deg)" % nm)
+        for k, dv in HOME_DOCK_DEFAULTS.items():
+            try:
+                dd[k] = float(d.get(k, dv))
+            except (TypeError, ValueError):
+                raise MapError("home dock %s %s must be a number" % (nm, k))
+        if "sigma_cm" in d:
+            dd["sigma_cm"] = float(d["sigma_cm"])
+        out["home_docks"].append(dd)
 
     rnames = set()
     for i, r in enumerate(m.get("robots") or []):
@@ -236,6 +264,49 @@ def docks(m):
     return {b["name"]: dock_for(m, b) for b in m["boards"]}
 
 
+# ----------------------------------------------------------------------------
+# Home docks (hardware/dock): a printed funnel the robot creeps into until both nose switches click
+# ----------------------------------------------------------------------------
+
+def _dock_frame(d):
+    h = math.radians(d["heading"])
+    c, s = math.cos(h), math.sin(h)
+    return lambda px, py: [d["x"] + c * px - s * py, d["y"] + s * px + c * py]
+
+
+def home_dock_outline(d):
+    """The dock's footprint on the floor (polygon, cm): back block, pocket and funnel walls, mouth closed."""
+    f = _dock_frame(d)
+    hw = d["pocket_w_cm"] / 2 + d["wall_t_cm"]
+    xm = -(d["pocket_depth_cm"] + d["funnel_len_cm"])
+    hm = hw + d["funnel_flare_cm"]
+    xp = -d["pocket_depth_cm"]
+    pts = [(d["back_depth_cm"], -hw), (d["back_depth_cm"], hw), (xp, hw), (xm, hm), (xm, -hm), (xp, -hw)]
+    return np.array([f(x, y) for x, y in pts], float)
+
+
+def home_mouth_pose(m, d):
+    """Where a robot going home stops before creeping in: [x, y, rad], axle mouth_cm in front of the mouth,
+    facing into the dock."""
+    f = _dock_frame(d)
+    x = -(d["pocket_depth_cm"] + d["funnel_len_cm"]) - d["mouth_cm"]
+    p = f(x, 0.0)
+    return [p[0], p[1], math.radians(d["heading"])]
+
+
+def home_docked_pose(d, bump_ahead_cm):
+    """Robot pose [x, y, rad] when flush in the dock (axle bump_ahead_cm behind the back wall's inner face)."""
+    p = _dock_frame(d)(-bump_ahead_cm, 0.0)
+    return [p[0], p[1], math.radians(d["heading"])]
+
+
+def home_dock(m, name):
+    for d in m.get("home_docks", []):
+        if d["name"] == name:
+            return d
+    raise MapError("no home dock called %r" % name)
+
+
 def pose_out(p):
     """Pose for files: [x, y, heading_deg] rounded."""
     return [round(float(p[0]), 2), round(float(p[1]), 2), round(math.degrees(G.wrap(float(p[2]))), 2)]
@@ -269,6 +340,8 @@ class World:
             self.polys.append(("keep-out " + k["name"], np.array(k["polygon"], float)))
         for o in m["obstacles"]:
             self._add_obstacle(o)
+        for d in m.get("home_docks", []):
+            self.polys.append(("home dock " + d["name"], home_dock_outline(d)))
         for o in extra:
             self._add_obstacle(o)
 

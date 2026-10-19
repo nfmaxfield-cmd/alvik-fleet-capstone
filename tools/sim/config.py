@@ -227,6 +227,63 @@ class SessionModel:
     board_thick_cm: float = 1.9
 
 
+def _dock_params():
+    """hardware/dock/dock_params.py (the printed dock and bumper), or None if it is missing."""
+    import importlib.util
+    path = os.path.join(REPO, "hardware", "dock", "dock_params.py")
+    if not os.path.exists(path):
+        return None
+    spec = importlib.util.spec_from_file_location("dock_params", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_DP = _dock_params()
+
+
+def _dp(name, default):
+    return round(getattr(_DP, name) / 10.0, 4) if _DP is not None and hasattr(_DP, name) else default
+
+
+@dataclass
+class DockModel:
+    """Home docks, the nose bumper and its two switches (firmware dock.h, switches.h). The geometry defaults
+    come from hardware/dock/dock_params.py (mm there, cm here), so the simulated dock is the printed one.
+    With no docks and contact_boards False nothing here changes the simulation."""
+    # each dock: [x_cm, y_cm, heading_deg]: the middle of its back wall's inner face, and the way a docked robot
+    # faces (into the wall)
+    docks: List[List[float]] = field(default_factory=list)
+    contact_boards: bool = False          # boards (world_polys) are solid for the robot's body too (touch probe)
+    # the TRUE bumper and switches (the firmware's bump_ahead_cm / bump_half_cm / sw_gap_cm are its belief)
+    bump_ahead_cm: float = _dp("BUMP_AHEAD_MM", 6.09)       # wheel axle to the bumper's front face
+    bump_half_cm: float = _dp("SWITCH_LATERAL_MM", 3.91)    # each lever's contact, left/right of the centre line
+    sw_gap_cm: float = _dp("SW_GAP_MM", 0.02)               # face-to-wall gap when a lever clicks
+    sw_hyst_cm: float = 0.02              # it lets go only this much further out (switch hysteresis)
+    sw_bounce_ms: float = 1.5             # the raw reading chatters this long after each change
+    chamfer_cm: float = _dp("CORNER_CHAMFER_MM", 0.3)
+    # the dock
+    pocket_w_cm: float = _dp("POCKET_W_MM", 9.6)
+    pocket_depth_cm: float = _dp("POCKET_DEPTH_MM", 2.5)
+    funnel_len_cm: float = _dp("FUNNEL_LEN_MM", 4.5)
+    funnel_flare_cm: float = _dp("FUNNEL_FLARE_MM", 2.8)
+    wall_t_cm: float = _dp("WALL_T_MM", 0.32)
+    back_depth_cm: float = _dp("BACK_BLOCK_DEPTH_MM", 4.8)
+    stripe_x0_cm: float = _dp("STRIPE_X0_MM", -5.2)         # floor stripe, dock X (far edge, near edge)
+    stripe_x1_cm: float = _dp("STRIPE_X1_MM", -4.4)
+    stripe_reading: float = 850.0         # GUESS: black PLA reads like black tape
+    stripe_noise: float = 30.0
+    dock_tof: bool = True                 # the front distance sensor sees the dock's walls
+    # how the body moves when something pushes it (position-based contact): rolling forward/back is easy (1),
+    # sliding sideways on the tyres is hard, turning in between (per cm^2 of lever arm)
+    lat_mobility: float = 0.12
+    turn_mobility: float = 0.05
+    # GUESSES: what makes one docking differ from the next besides the pocket's 1 mm play: dust and print
+    # ripples on the back wall / bumper face, the wall flexing. Drawn again at the start of every creep.
+    seat_sd_cm: float = 0.005             # back wall's effective position along the axis
+    seat_sd_deg: float = 0.1              # ... and its effective tilt
+
+
 @dataclass
 class SimConfig:
     robot: RobotModel = field(default_factory=RobotModel)
@@ -238,6 +295,7 @@ class SimConfig:
     detector: DetectorModel = field(default_factory=DetectorModel)
     kidnap: KidnapModel = field(default_factory=KidnapModel)
     session: SessionModel = field(default_factory=SessionModel)
+    dock: DockModel = field(default_factory=DockModel)
 
 
 def _merge(obj, data, path=""):

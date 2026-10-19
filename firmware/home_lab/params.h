@@ -131,6 +131,31 @@ Param PARAMS[] = {
   {"edge_min_rpm",     2,   "edge guard: active only while the wheels average more than this forward (rpm)"},
   {"edge_bot_cm",     13,   "bottom-zone cue: the floor ahead has dropped away when the bottom zone reads more than this (placeholder)"},
   {"edge_bot_ms",    100,   "bottom-zone cue: ...for this long (2 sensor frames)"},
+
+  // --- nose bumper switches, home dock, touch probe (switches.h, dock.h): OFF until the bumper is fitted ---
+  // The bumper numbers (bump_*, sw_gap_cm) are PLACEHOLDERS until measured (hardware/dock/README.md);
+  // keep them equal to hardware/dock/dock_params.py.
+  {"sw_on",            0,   "nose bumper switches fitted and wired: 0 = no (dock/touch refuse to run, RAW swL/swR = -1), 1 = yes"},
+  {"sw_left_pin",      5,   "left nose switch: Nano ESP32 pin (5 = D5); switch between the pin and GND, pressed = LOW"},
+  {"sw_right_pin",     6,   "right nose switch: Nano ESP32 pin (6 = D6)"},
+  {"sw_debounce_ms",   4,   "a switch must read the same this long to count (lever switches chatter 1-5 ms)"},
+  {"bump_ahead_cm", 6.09,   "wheel axle (turning centre) to the bumper's front face, cm (PLACEHOLDER: measure)"},
+  {"bump_half_cm",  3.91,  "each switch's lever touches this far left/right of the centre line, cm (PLACEHOLDER)"},
+  {"sw_gap_cm",     0.02,   "the bumper face is still this far from what it touches when a lever clicks, cm (PLACEHOLDER: E00e)"},
+  {"dock_rpm",         6,   "dock/touch: creeping speed, wheel rpm (6 = about 1.1 cm/s)"},
+  {"dock_press_rpm",   2,   "dock: the clicked side's wheel keeps pushing this gently while the other side pivots in"},
+  {"dock_pivot_rpm",   5,   "dock: the other wheel's speed while it pivots"},
+  {"dock_seat_ms",   250,   "dock: after both click, both wheels push at dock_press_rpm this long so the face sits flush"},
+  {"dock_max_cm",     40,   "dock/touch: give up if no switch clicks within this much wheel travel (wheels slip while the funnel turns the robot)"},
+  {"dock_pivot_ms", 6000,   "dock: give up if the second switch has not clicked this long after the first"},
+  {"dock_still_ms", 3000,   "dock: stand still, docked, this long (gyro drift at a known heading)"},
+  {"dock_drift_max_dps", 0.5, "dock: a heading drift above this while docked is not used (something moved it)"},
+  {"dock_back_cm",     8,   "dock run: back out this far at the end (0 = stay docked, e.g. to tape-measure it)"},
+  {"dock_n",           1,   "dock run: dockings per run (each after backing out dock_back_cm; 0 back-out = 1 docking)"},
+  {"stripe_thr",     300,   "dock stripe: a line sensor this far from its level at the start of the creep is on the stripe"},
+  {"stripe_dir",       1,   "dock stripe: +1 = readings go up on it (dark), -1 = down, 0 = either way"},
+  {"touch_back_cm",    2,   "touch run: back off this far after each click"},
+  {"touch_n",          1,   "touch run: touches per run (back off touch_back_cm, wait, creep again)"},
 };
 
 const int N_PARAMS = sizeof(PARAMS) / sizeof(PARAMS[0]);

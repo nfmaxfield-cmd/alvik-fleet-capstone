@@ -540,6 +540,11 @@ def main():
     has_ct = any(u["cam_truth"] is not None for u in units)
     truth = load_truth(args.truth) if args.truth else None
     faces = lm.load(args.map) if args.map else None
+    if args.map and not args.map.lower().endswith(".csv"):
+        walls = [[d["x"], d["y"], d["heading"]] for d in lm._fleetmap().load(args.map).get("home_docks", [])]
+        if walls:
+            extra_cfg["dock_poses"] = walls      # DOCK records become full pose fixes (dockfix.py)
+            print(f"home docks: {len(walls)} from {args.map}")
     tof_cal = None
     if args.tof_cal or args.tof_cal_per_run:
         default = lm.load_cal(args.tof_cal) if args.tof_cal else None

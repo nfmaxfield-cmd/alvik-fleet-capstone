@@ -95,6 +95,8 @@ class Run:
         self.excluded = False
         self.params = {}
         self.clock = {}
+        self.dock = []           # DOCK records (dockfix.py), each with "t" (laptop s)
+        self.touch = []          # TOUCH records
 
     @property
     def t_start(self):
@@ -136,6 +138,8 @@ def load_runs(session, sheet=None):
         fit = cs.fit_for(fits, run.robot, r["run"])
         if fit:
             run.sync[r["tag"]] = (cs.to_laptop(fit, fnum(r["ms_on"])), cs.to_laptop(fit, fnum(r["ms_off"])))
+    import dockfix
+    dockfix.attach(runs, session, fits)
     for run in runs.values():
         run.raw.sort(key=lambda r: r["t"])
         fit = cs.fit_for(fits, run.robot, run.run_id)

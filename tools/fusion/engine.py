@@ -81,6 +81,7 @@ import numpy as np
 
 from ekf import EKF, Noise, D2R, wrap
 import landmarks as lm
+import dockfix
 
 DEFAULT = dict(
     name="wheels+gyro+camera",
@@ -197,6 +198,23 @@ DEFAULT = dict(
     turn_scale_sigma=0.05,
     turn_scale_walk=0.001,
     scale_carry=True,         # a robot's next run starts from what its previous run learned (online: past only)
+    # --- home dock and touch probe (dockfix.py; DOCK / TOUCH records, firmware 2026-10-19a+). Nothing changes
+    # without such records.
+    dock_fix=True,            # DOCK records = full pose fixes, TOUCH records = ranges to mapped faces
+    dock_poses=[],            # [[x_cm, y_cm, heading_deg], ...]: each home dock's back wall middle and the way a
+                              # docked robot faces (map.json home_docks; replay.py --map fills it)
+    dock_sigma_cm=0.05,       # how exactly a docked robot sits (pocket play, seating): GUESS until E00e
+    dock_sigma_deg=0.3,
+    dock_max_cm=10.0,         # a dock further than this from the estimate is not the one it docked at
+    bump_ahead_cm=6.09,       # bumper geometry when the run's PARAM records lack it (placeholders: dock_params.py)
+    bump_half_cm=3.91,
+    sw_gap_cm=0.02,
+    dock_stripe_x0_cm=-5.2,   # the dock's floor stripe, far edge, dock X (hardware/dock/dock_params.py)
+    line_forward_cm=3.5,      # line sensors ahead of the tracked point
+    touch_faces=None,         # faces a touch may hit (landmarks.Face list); None = the landmark map (--map)
+    touch_sigma_cm=0.05,      # one touch: wheel distance over a few cm + the switch's repeatability: GUESS
+    touch_max_cm=3.0,         # use a touch only if the map has a face within this of the lever
+    touch_gate_chi2=16.0,
 )
 
 
@@ -359,6 +377,10 @@ class Tracked:
             k.lost()
         elif kind == "reset":
             k.reset_position(d["x"], d["y"], d.get("sigma", 1.0))
+        elif kind == "dock":
+            dockfix.apply_dock(self, d, self.cfg)
+        elif kind == "touch":
+            dockfix.apply_touch(self, d, self.cfg)
 
     def set_tof_cal(self, cal):
         """Put a distance-sensor calibration (landmarks.load_cal) into this run's settings."""
@@ -1039,6 +1061,7 @@ def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, 
             if c["run"] in idx and c["t"] is not None and c["heading"] is not None:
                 events.append((c["t"], 2, ("hdg", idx[c["run"]], dict(
                     th=wrap(c["heading"] * D2R), sigma=nudge_sigma(cfg, c.get("moved_px")), src="calib"))))
+    events += [(t, o, p) for t, o, p in dockfix.events(runs, cfg)]   # home dock / touch probe records
     sights = list(detections) if use_cam else []
     if use_blink:
         sights += [dict(b, kind="blink") for b in blink]
@@ -1106,6 +1129,14 @@ def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, 
             if tr is not None:
                 tr.add((arrival, order, "hdg", d))
                 tr.hdg_used["calib"] += 1
+            continue
+        if payload[0] in ("dock", "touch"):
+            _, ri, d = payload
+            tr = tracked.get(runs[ri].run_id)
+            if tr is not None:
+                if tr.faces is None and landmarks:
+                    tr.faces = landmarks     # a touch needs the map even in setups without "tof"
+                tr.add((arrival, order, payload[0], d))
             continue
         _, t_cap, dets = payload
         active = [tr for tr in tracked.values() if tr.t0 - 0.2 <= t_cap <= tr.t1 + 0.3]

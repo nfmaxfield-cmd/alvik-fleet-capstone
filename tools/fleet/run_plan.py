@@ -181,6 +181,11 @@ def step_command(sid, st):
     if t == "wait":
         ms = int(round((st["t_end"] - st["t_start"]) * 1000)) if st["phase"] == "dwell" else 0
         return "fs %d W %d" % (sid, ms)
+    if t == "home":      # creep into a home dock until both nose switches click (firmware dock.h)
+        w = st["wall"]
+        return "fs %d K %.2f %.2f %.2f %.2f %.2f" % (sid, w[0], w[1], w[2], st["max_travel_cm"], st.get("back_cm", 0.0))
+    if t == "touch":     # creep until a nose switch clicks (touch probe)
+        return "fs %d P %.2f %.2f %.2f" % (sid, st["to"][2], st["max_travel_cm"], st.get("back_cm", 0.0))
     raise ValueError("unknown step type %r" % t)
 
 
@@ -255,6 +260,7 @@ class Coordinator:
         self.abort = None
         self.dockings = []
         self.change = None           # tools/site/change.py: does a landmark disagree with the locked site map?
+        self.homes = getattr(args, "homes", None) or {}   # robot -> home dock (--home): creep in at the end
         if getattr(args, "site_map", None):
             sys.path.insert(0, os.path.join(TOOLS, "site"))
             import change as SITE_CHANGE
@@ -398,6 +404,10 @@ class Coordinator:
                 st["t_done"] = t
                 st["info"] = info
                 stp = self.steps(b.name)[i]
+                if stp["type"] == "home":
+                    self.say("%s is home in dock %s (%s)" % (b.name, stp.get("dock"), info))
+                    self.dockings.append(dict(robot=b.name, home=stp.get("dock"), info=info,
+                                              t=round(t - self.t_run, 2), own_pose=[x, y, th]))
                 if stp["type"] == "approach":
                     self.say("%s docked at %s (%s)" % (b.name, stp.get("board"), info))
                     self.dockings.append(dict(robot=b.name, board=stp.get("board"), info=info, t=round(t - self.t_run, 2),
@@ -528,6 +538,8 @@ class Coordinator:
     def _install(self, plan, keep, first, old):
         """Make `plan` the current one. Steps it carries on from the old plan (the
         first keep[r] steps, old indices first[r]...) keep their robot step ids."""
+        if getattr(self, "homes", None):
+            P.append_home(plan, self.homes)    # re-plans end at the dock's mouth too: creep in after
         self.plan = plan
         for n in self.names:
             b = self.bots[n]
@@ -1134,6 +1146,10 @@ def main(argv=None):
     ap.add_argument("--send", action="append", default=[], metavar="COMMAND",
                     help="console command for every robot before its follow run starts, e.g. \"set safe_edge 1\" "
                          "(repeatable)")
+    ap.add_argument("--home", action="append", default=[], metavar="ROBOT[=DOCK]",
+                    help="send ROBOT home: plan its route to a home dock's mouth (map home_docks; nearest free one "
+                         "unless =DOCK), then it creeps in until both nose switches click (firmware dock.h). "
+                         "Repeatable; 'all' = every robot. Also sends 'set sw_on 1'.")
     ap.add_argument("--site-map", help="locked site map (tools/site/setup.py): warn when the robots' front sensors "
                                        "keep disagreeing with a landmark on it (tools/site/change.py)")
     g = ap.add_argument_group("dry run against the simulator (tools/sim/fleet_sim.py)")
@@ -1145,6 +1161,17 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     m = FM.load(args.map)
+    homes = {}
+    for h in args.home:
+        r, _, d = h.partition("=")
+        for name in ([x["name"] for x in m["robots"]] if r == "all" else [r]):
+            homes[name] = d or None
+    assigned = {}
+    if homes:
+        if args.plan:
+            raise SystemExit("--home plans the route itself: leave out --plan")
+        m, assigned = P.with_home(m, homes)
+        args.send = list(args.send) + ["set sw_on 1"]
     if args.plan:
         with open(args.plan, encoding="utf-8") as f:
             plan = json.load(f)
@@ -1160,6 +1187,10 @@ def main(argv=None):
                 raise SystemExit("plan.json is from before 2026-10-18b (approach steps without handover_cm): plan again.")
     outdir = args.session or os.path.join("logs", dt.datetime.now().strftime("%Y%m%d-%H%M%S") + ("-dryrun" if args.dry_run else "-plan"))
     os.makedirs(outdir, exist_ok=True)
+    if assigned:
+        P.append_home(plan, assigned)
+        for r, d in assigned.items():
+            print("%s goes home to dock %s" % (r, d["name"]))
     plan_path = os.path.join(outdir, "plan_given.json")
     P.save_plan(plan, plan_path)
 
@@ -1186,6 +1217,7 @@ def main(argv=None):
     source = make_source(fixes)
     link = AC.Link(outdir, robot_ips)
     link.session.quiet = True
+    args.homes = assigned
     coord = Coordinator(args, m, plan, link, source, outdir)
     coord.first_plan_id = plan.get("plan_id")
     coord.first_makespan = plan["summary"]["makespan_s"]

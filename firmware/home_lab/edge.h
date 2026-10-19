@@ -68,6 +68,8 @@ unsigned long botSince = 0;        // when dbot first went above edge_bot_cm (0 
 const char* lastCue = "";          // the cue of the last trip: "line" or "bottom" (follow.h reports it)
 bool braking = false;              // tripped: quiet until the wheels are still (the stop is under way;
                                    // a caller that carries on, the calibration's roll, isn't stopped twice)
+bool lineOff = false;              // the line cue is off while this is set: the dock creep (dock.h) crosses the
+                                   // dock's dark floor stripe on purpose; the bottom-zone cue stays on
 
 void record(const char* ev, int l, int c, int r, float dbot, const char* info) {
   net::sendLine("H,EDGE,run,ms,event,lineL,lineC,lineR,baseL,baseC,baseR,dbot_cm,info");
@@ -83,6 +85,7 @@ void begin() {
   lineCount = 0;
   botSince = 0;
   braking = false;
+  lineOff = false;
   base[0] = base[1] = base[2] = 0;
   t0 = millis();
 }
@@ -118,13 +121,17 @@ void finishLearning(int l, int c, int r) {
   record("base", l, c, r, alvik.get_distance_bottom(), ok < 3 ? "a sensor on tape took the others' level" : "");
 }
 
-// Has this line sensor's reading moved past the edge level?
-bool pastEdge(int v, int k) {
-  float d = v - base[k], dir = P("edge_dir");
+// Has a line sensor reading v moved from its learned level by at least thr in direction dir
+// (+1 up, -1 down, 0 either way) and by no more than mx (0 = no limit)? Shared with the dock
+// stripe (dock.h), which learns its own level the same way.
+bool moved(float v, float level, float dir, float thr, float mx) {
+  float d = v - level;
   float s = dir > 0 ? d : dir < 0 ? -d : fabsf(d);
-  float mx = P("edge_max");
-  return s >= P("edge_thr") && (mx <= 0 || s <= mx);
+  return s >= thr && (mx <= 0 || s <= mx);
 }
+
+// Has this line sensor's reading moved past the edge level?
+bool pastEdge(int v, int k) { return moved(v, base[k], P("edge_dir"), P("edge_thr"), P("edge_max")); }
 
 // Called by shouldAbort() on every call. True = stop: the nose is at an open edge.
 bool check() {
@@ -147,7 +154,7 @@ bool check() {
     else return false;
   }
   if (!forward) { lineCount = 0; botSince = 0; return false; }
-  if ((mode & 1) && ready) {
+  if ((mode & 1) && ready && !lineOff) {
     if (pastEdge(L, 0) || pastEdge(C, 1) || pastEdge(R, 2)) lineCount++;
     else lineCount = 0;
     if (lineCount >= (int)fmaxf(1.0f, P("edge_n"))) {

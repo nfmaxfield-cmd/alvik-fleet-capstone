@@ -8,6 +8,12 @@
 //   fs <id> D <x0> <y0> <x1> <y1> <h> <cms> <rev> <fmin>     straight drive (rev 1 = backwards)
 //   fs <id> A <x0> <y0> <x1> <y1> <h> <cms> <handover> <gap> <max_travel> <fmin>   approach a board
 //   fs <id> W <ms>                                           wait (a dwell; 0 = just keep the order)
+//   fs <id> K <wall_x> <wall_y> <h> <max_travel> <back>      home dock (dock.h): creep in facing h until both
+//                                                            nose switches click; own pose reset from the dock
+//                                                            (wall_x, wall_y: middle of the back wall's inner face);
+//                                                            stand still dock_still_ms; back out <back> cm (0 = stay)
+//   fs <id> P <h> <max_travel> <back>                        touch probe (dock.h): creep facing h until a nose
+//                                                            switch clicks (TOUCH record), back off <back> cm
 //   fix <t_ms> <x> <y> <th|-> <sigma_cm> [<sigma_deg>]       camera pose at robot time t_ms
 //   fpose <x> <y> <th> [<sigma_cm> <sigma_deg>]              set the pose outright
 //   hold [<id>]   finish the current step (or up to step id), drop the rest
@@ -32,6 +38,7 @@
 #pragma once
 
 #include "pose.h"
+#include "dock.h"
 
 extern String gRunId;
 
@@ -57,6 +64,7 @@ float travel = 0;
 unsigned long nextLog = 0, period = 100;
 bool quietSaid = false;
 char info[64] = "";
+bool dockHeaderSent = false, touchHeaderSent = false;
 
 float readFront() {
   float dL, dCL, dC, dCR, dR;
@@ -171,6 +179,12 @@ void command(const String& verb, const String& rest) {
     }
   } else if (s.type == 'W' && n >= 3) {
     s.waitMs = strtoul(tok[2], nullptr, 10);
+  } else if (s.type == 'K' && n >= 7) {
+    s.x1 = num(tok[2]); s.y1 = num(tok[3]); s.h = num(tok[4]); s.maxTravel = num(tok[5]); s.handover = num(tok[6]);
+    ok = !(isNaN(s.x1) || isNaN(s.y1) || isNaN(s.h) || isNaN(s.maxTravel) || isNaN(s.handover));
+  } else if (s.type == 'P' && n >= 5) {
+    s.h = num(tok[2]); s.maxTravel = num(tok[3]); s.handover = num(tok[4]);
+    ok = !(isNaN(s.h) || isNaN(s.maxTravel) || isNaN(s.handover));
   } else {
     ok = false;
   }
@@ -297,13 +311,41 @@ bool runStep(const Step& s) {
       gFrontLimitCm = 0;
       return waitMs(s.waitMs);
     }
+    case 'K':
+    case 'P': {
+      // dock / touch: it is meant to touch what is ahead; square up first if it is off the heading
+      gFrontLimitCm = 0;
+      if (fabsf(wrap180(s.h - pose::th())) > 3.0f && !turnToFloor(s.h)) return false;
+      dock::Result r;
+      bool ok;
+      if (s.type == 'K') {
+        if (!dockHeaderSent) { dock::dockHeader(); dockHeaderSent = true; }
+        ok = dock::dockOnce(s.id, s.x1, s.y1, s.h, r, s.maxTravel);
+      } else {
+        if (!touchHeaderSent) { dock::touchHeader(); touchHeaderSent = true; }
+        ok = dock::creep(false, r, s.maxTravel);
+        dock::touchRecord(r, s.id);
+      }
+      travel = r.travel;
+      if (!ok) return false;
+      if (s.type == 'K') snprintf(info, sizeof(info), "docked; pivot %.1f deg; stripe %.2f cm", r.pivotDeg, r.stripe[1]);
+      else snprintf(info, sizeof(info), "touch %s %.3f cm", r.first == 0 ? "L" : "R", r.travelAt[r.first]);
+      if (s.handover > 0) {
+        if (!waitMs(300)) return false;
+        float ux = cosf(s.h * pose::DEG2RAD), uy = sinf(s.h * pose::DEG2RAD);
+        int d = driveLine(pose::x, pose::y, pose::x - s.handover * ux, pose::y - s.handover * uy, s.h, 3.0f, true);
+        if (d != DRIVE_OK) return false;
+      }
+      return true;
+    }
   }
   gFail = "unknown step type";
   return false;
 }
 
 const char* stateName(char t) {
-  return t == 'T' ? "turn" : t == 'D' ? "drive" : t == 'A' ? "approach" : t == 'W' ? "wait" : "?";
+  return t == 'T' ? "turn" : t == 'D' ? "drive" : t == 'A' ? "approach" : t == 'W' ? "wait" : t == 'K' ? "dock"
+       : t == 'P' ? "touch" : "?";
 }
 
 void run() {
@@ -313,6 +355,7 @@ void run() {
                 "fixes_used,fixes_rejected,front_cm,travel_cm,quiet_ms");
   qHead = qLen = 0;
   maxId = curId = lastDone = lastFailed = 0;
+  dockHeaderSent = touchHeaderSent = false;
   state = "idle";
   travel = 0;
   quietSaid = false;
