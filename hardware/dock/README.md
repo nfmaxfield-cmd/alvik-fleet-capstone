@@ -80,7 +80,7 @@ set bumper_cm 1.34
 
 (how far the bumper sticks out in front of the shell, BUMPER_DEPTH_MM / 10: the calibration run then keeps that
 much more room when it rolls and spins). In the fleet map set `"robot": {"bumper_cm": "fitted"}` so routes
-allow for the longer robot, and give `run_sheet.py --bumper-cm 1.34` so its space instructions do.
+allow for the longer robot, and give `run_sheet.py --bumper-cm 1.34` so its space instructions do. `python tools/preflight.py --map <map.json>` checks that each robot's setting matches the map's.
 
 ## Print settings
 

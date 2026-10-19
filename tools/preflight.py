@@ -117,13 +117,15 @@ def check_port():
 LOW_OK = set()   # robots allowed a low battery (--low-battery-ok), e.g. for E1b
 
 
-def check_robots(wanted, listen_s, outdir):
+def check_robots(wanted, listen_s, outdir, map_bumper=None):
     print("\n4. Robots")
     from alvik_console import Link
     want_fw = repo_fw_version()
     status = {}
     lock = threading.Lock()
     pat = re.compile(r"status (\S+) \(firmware ([^)]+)\): (\w+), selected .*?, battery (\d+)%, WiFi (-?\d+) dBm")
+    bpat = re.compile(r"bumper_cm = (-?[\d.]+)")
+    bumper = {}
 
     def listener(name, kind, rtype, vals):
         if kind == "M":
@@ -132,6 +134,10 @@ def check_robots(wanted, listen_s, outdir):
                 with lock:
                     status[name] = dict(fw=m.group(2), state=m.group(3), battery=int(m.group(4)),
                                         dbm=int(m.group(5)))
+            b = bpat.search(vals if isinstance(vals, str) else ",".join(vals))
+            if b:
+                with lock:
+                    bumper[name] = float(b.group(1))
 
     link = Link(outdir)
     link.session.quiet = True
@@ -149,6 +155,9 @@ def check_robots(wanted, listen_s, outdir):
             with lock:
                 if set(link.robots()) <= set(status):
                     break
+        if map_bumper is not None:
+            link.send_all("get bumper_cm")
+            time.sleep(1.5)
         names = sorted(set(link.robots()) | set(wanted or []))
         if not names:
             say(BAD, "no robots heard", "switch them on; check they are on the same WiFi as this laptop")
@@ -169,6 +178,9 @@ def check_robots(wanted, listen_s, outdir):
                 say(WARN, line, "weak WiFi: move the router or laptop closer, or expect lost packets")
             else:
                 say(OK, line)
+            if map_bumper is not None and n in bumper and abs(bumper[n] - map_bumper) > 0.05:
+                say(BAD, f"{n}: nose bumper set to {bumper[n]:g} cm on the robot, {map_bumper:g} cm in the map",
+                    f"make them match: on the robot 'set bumper_cm {map_bumper:g}', or fix the map's robot.bumper_cm")
     finally:
         link.close()
 
@@ -192,6 +204,7 @@ def main():
     ap.add_argument("--listen", type=float, default=12, help="seconds to wait for robots")
     ap.add_argument("--no-weights", action="store_true", help="skip the weights download")
     ap.add_argument("--no-robots", action="store_true", help="skip the robot checks")
+    ap.add_argument("--map", help="fleet map.json: also check each robot's bumper_cm matches the map's")
     ap.add_argument("--low-battery-ok", default="", help="robots allowed a low battery, e.g. Right (for E1b)")
     a = ap.parse_args()
     LOW_OK.update(r.strip() for r in a.low_battery_ok.split(",") if r.strip())
@@ -201,7 +214,12 @@ def main():
     port_free = check_port()
     if not a.no_robots and port_free:
         outdir = os.path.join("logs", "preflight-" + time.strftime("%Y%m%d-%H%M%S"))
-        check_robots([r.strip() for r in a.robots.split(",")] if a.robots else [], a.listen, outdir)
+        mb = None
+        if a.map:
+            sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "fleet"))
+            import fleetmap
+            mb = float(fleetmap.load(a.map)["robot"].get("bumper_cm", 0.0))
+        check_robots([r.strip() for r in a.robots.split(",")] if a.robots else [], a.listen, outdir, mb)
     if a.pi:
         check_pi(a.pi)
     print("\nRESULT")
