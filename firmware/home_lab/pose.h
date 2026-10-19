@@ -8,7 +8,8 @@
 //     the library's own heading (so it doesn't depend on which way the wheel
 //     encoders or the library's y axis count, only on forward being +x);
 //   - heading comes from the gyro: heading() + thOff, where thOff ties the
-//     IMU's zero to the floor.
+//     IMU's zero to the floor. Both use the robot's stored corrections
+//     (corr.h: wheel_scale, gyro_scale, gyro_drift_dps).
 // Between camera fixes, errors grow; each pose keeps a variance var (cm^2 per
 // axis) and varTh (deg^2) that grow with distance driven, degrees turned and
 // time (pose_q_cm, pose_q_deg, pose_q_dps).
@@ -103,7 +104,8 @@ void tick() {
   libPose(lx, ly, lth);
   float dx = lx - lastLx, dy = ly - lastLy;
   lastLx = lx; lastLy = ly;
-  float ds = dx * cosf(lth * DEG2RAD) + dy * sinf(lth * DEG2RAD);   // along the library's own heading
+  float ds = (dx * cosf(lth * DEG2RAD) + dy * sinf(lth * DEG2RAD))   // along the library's own heading,
+             * P("wheel_scale");                                      // in real cm (corr.h)
   unsigned long now = millis();
   if (driftDps != 0) thOff = wrap180(thOff - driftDps * (now - lastMs) / 1000.0f);   // docked drift measurement
   float h = th();

@@ -123,7 +123,35 @@ float rawYaw() {
   return yaw;
 }
 
-float heading() { return wrap180(gYawSign * rawYaw()); }
+// Corrected heading (corr.h): the library's yaw, unwrapped, times gyro_scale, minus gyro_drift_dps x time.
+//   gyro_scale: real turning / what the gyro counts (1.075 = the gyro misses 7.5% of every turn)
+//   gyro_drift_dps: how fast the gyro's heading creeps while the robot stands still (deg/s, left +)
+// Both are 1 and 0 out of the box (`corr reset`). yawTrack() runs on every heading() call and every pass
+// of loop(), so the unwrapping never misses half a turn (a robot turned by hand while idle included).
+float gYawRawAcc = 0;          // library yaw since power-on, unwrapped, raw sign (deg)
+float gYawDriftAcc = 0;        // gyro_drift_dps integrated since power-on (deg, left +)
+float gYawPrevRaw = 0;
+unsigned long gYawPrevMs = 0;
+bool gYawInit = false;
+
+void yawTrack() {
+  float r = rawYaw();
+  unsigned long now = millis();
+  if (!gYawInit) { gYawPrevRaw = r; gYawPrevMs = now; gYawInit = true; return; }
+  gYawRawAcc += wrap180(r - gYawPrevRaw);
+  gYawDriftAcc += P("gyro_drift_dps") * (now - gYawPrevMs) / 1000.0f;
+  gYawPrevRaw = r;
+  gYawPrevMs = now;
+}
+
+// The gyro's own heading, left-positive, with only the sign applied (no scale or drift correction):
+// for measuring the corrections themselves (runGyro).
+float rawHeadingAcc() { yawTrack(); return gYawSign * gYawRawAcc; }
+
+float heading() {
+  yawTrack();
+  return wrap180(gYawSign * P("gyro_scale") * gYawRawAcc - gYawDriftAcc);
+}
 
 // Heading from wheel odometry (get_pose theta), same left-positive convention.
 int gOdoSign = 1;
@@ -269,12 +297,13 @@ TurnResult libraryTurn(float delta) {
 // Drive straight `cm` (negative = backward) with the library's closed-loop
 // move(). Non-blocking for the same reason as libraryTurn: the blocking
 // version never returns for moves of about -50 cm or more.
+// cm is real floor distance: the library is asked for cm / wheel_scale (corr.h).
 bool libraryMove(float cm) {
   unsigned long t0 = millis();
   unsigned long limit = 3000 + (unsigned long)(fabsf(cm) * 400);   // generous: ~2.5 cm/s minimum
   rawlog::tick();   // move() blocks ~200 ms inside the library: log right before it
   blink::hold();
-  alvik.move(cm, CM, false);
+  alvik.move(cm / P("wheel_scale"), CM, false);   // wheel_scale (corr.h): real cm per wheel-counted cm
   while (!alvik.is_target_reached()) {
     if (shouldAbort()) return false;
     if (millis() - t0 > limit) {
@@ -356,6 +385,7 @@ float distFrom(float x0, float y0) {
 bool rollStraight(float cm, float rpm) {
   float x0, y0;
   poseXY(x0, y0);
+  cm /= P("wheel_scale");   // the library's odometry counts real cm / wheel_scale (corr.h)
   unsigned long t0 = millis();
   alvik.set_wheels_speed(rpm, rpm);
   while (distFrom(x0, y0) < cm) {

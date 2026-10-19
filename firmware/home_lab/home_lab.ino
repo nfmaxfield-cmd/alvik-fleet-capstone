@@ -25,6 +25,7 @@
 #include "params.h"
 #include "net.h"
 #include "motion.h"
+#include "corr.h"
 #include "experiments.h"
 #include "dock.h"
 #include "follow.h"
@@ -34,24 +35,26 @@
 Arduino_Alvik alvik;
 
 // Bump this whenever the firmware changes, so every logged run says which code it ran.
-#define FW_VERSION "2026-10-20a"
+#define FW_VERSION "2026-10-20b"
 
 uint16_t gBootId = 0;   // random each power-on; starts every run id
 
 // The buttons cycle through the first N_EXP. "follow" (index 7) needs the
 // laptop, so it is started with `run follow` only; "calib" (index 8) is the
 // calibration run, started with the calibrate command only; "dock" (9) and
-// "touch" (10) and "posts" (11) need the nose switches (sw_on 1) and are started with `run`.
+// "touch" (10) and "posts" (11) need the nose switches (sw_on 1) and are started with `run`;
+// "gyro" (12) stands still measuring the gyro's drift (corr.h), started with `run gyro`.
 const char* EXP_NAMES[] = {"stream", "turn", "lap", "grid", "demo", "straight", "survey", "follow", "calib", "dock",
-                           "touch", "posts"};
+                           "touch", "posts", "gyro"};
 const int N_EXP = 7;
-const int N_NAMES = 12;
+const int N_NAMES = 13;
 const int EXP_SURVEY = 6;
 const int EXP_FOLLOW = 7;
 const int EXP_CALIB = 8;
 const int EXP_DOCK = 9;
 const int EXP_TOUCH = 10;
 const int EXP_POSTS = 11;
+const int EXP_GYRO = 12;
 int gSelected = 1;
 int gPending = -1;   // experiment requested by the laptop, started from loop()
 
@@ -81,7 +84,7 @@ void showSelection(bool running) {
 }
 
 void printHelp() {
-  net::sendLine("M,commands: run stream|turn|lap|grid|demo|straight|survey|follow|dock|touch  stop  calibrate  clock  name <Left|Center|Right>  set <name> <value>  get <name>  params  route <SLRE...>  status  identify  lights  help");
+  net::sendLine("M,commands: run stream|turn|lap|grid|demo|straight|survey|follow|dock|touch|posts|gyro  stop  corr [reset|tape|save <name> <value>]  calibrate  clock  name <Left|Center|Right>  set <name> <value>  get <name>  params  route <SLRE...>  status  identify  lights  help");
   net::sendLine("M,during run follow: fs <id> <T|D|A|W> ...  fix <t_ms> <x> <y> <th> <sigma>  fpose <x> <y> <th>  hold [id]  halt  (tools/fleet/run_plan.py sends these)");
   net::sendLine("M,before calibrate: set calib_dir_limits <deg> <cm> ... caps its roll per direction (deg from where it faces, left +; next calibration only; off = none)");
 }
@@ -205,6 +208,7 @@ bool handleCommand(const String& raw, bool running) {
     val.trim();
     Param* p = findParam(name);
     if (!p) { net::logf("M,no parameter called %s (type params)", name.c_str()); return false; }
+    if (corr::isCorr(name)) net::sendLine("M,(until power-off only: corr save keeps it)");
     char* end = nullptr;
     float v = strtof(val.c_str(), &end);
     if (end == val.c_str()) { net::logf("M,'%s' is not a number", val.c_str()); return false; }
@@ -212,6 +216,7 @@ bool handleCommand(const String& raw, bool running) {
     net::logf("M,%s = %.3f", p->name, v);
     return false;
   }
+  if (verb == "corr") { corr::command(rest, running); return false; }
   if (verb == "route") {
     rest.toUpperCase();
     for (unsigned i = 0; i < rest.length(); i++) {
@@ -228,7 +233,7 @@ bool handleCommand(const String& raw, bool running) {
   if (verb == "run") {
     if (running) { net::sendLine("M,busy: send stop first"); return false; }
     int i = expIndex(rest);
-    if (i < 0) { net::sendLine("M,run what? stream, turn, lap, grid, demo, straight, survey, follow, dock or touch"); return false; }
+    if (i < 0) { net::sendLine("M,run what? stream, turn, lap, grid, demo, straight, survey, follow, dock, touch, posts or gyro"); return false; }
     gSelected = i;
     gPending = i;
     return false;
@@ -293,7 +298,7 @@ void logRunInfo(int i) {
 // Experiments that turn need the compass direction checked once per power-on.
 // The check wiggles the robot, so it must never happen inside a measured run
 // (after the tape start marks were taken).
-bool needsYawSign(int i) { return i == 1 || (i >= 3 && i <= 7); }
+bool needsYawSign(int i) { return i == 1 || (i >= 3 && i <= 7) || i == EXP_GYRO; }
 
 // Calibration run, once per power-on and whenever robots may have been mixed
 // up. Logged like any run (RUNINFO, PARAM, RAW at raw_hz, flashes), so the
@@ -562,6 +567,7 @@ void runExperiment(int i, bool fromButton) {
     case EXP_DOCK: runDock(); break;
     case EXP_TOUCH: runTouch(); break;
     case EXP_POSTS: runPosts(); break;
+    case EXP_GYRO: runGyro(); break;
   }
   alvik.brake();
   if (i == EXP_DOCK || i == EXP_TOUCH || i == EXP_POSTS) gFrontLimitCm = -1;   // they ran with the front stop off
@@ -615,6 +621,7 @@ void setup() {
     net::sendLine("M,WARNING: robot firmware doesn't match the Alvik library; run the library's firmware updater example. Color readings may be off.");
   }
   net::logf("M,home_lab %s ready, battery %d%%", FW_VERSION, alvik.get_battery_charge());
+  corr::load();       // this robot's saved corrections (gyro_scale, gyro_drift_dps, wheel_scale)
   printHelp();
   showSelection(false);
   lights::begin();    // lights_idle 1: pattern on from power-on
@@ -632,6 +639,7 @@ void otaFinished(bool ok) {
 }
 
 void loop() {
+  yawTrack();         // keeps the corrected heading's turn count while idle (motion.h)
   net::keepTrying();  // joins WiFi later if it failed at startup
   if (net::up && !ota::tried) ota::begin();
   ota::handle();      // WiFi firmware updates, only while idle

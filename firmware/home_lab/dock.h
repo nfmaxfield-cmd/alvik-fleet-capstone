@@ -293,7 +293,7 @@ bool dockOnce(int n, float wallX, float wallY, float h, Result& r, float maxCm =
     ok = holdStill(drift, gz, stillMs);
     if (ok && gYawSign != 0 && fabsf(drift) <= P("dock_drift_max_dps")) {
       used = 1;
-      if (pose::on) pose::driftDps = drift;    // heading() is the gyro's own (uncorrected): this is its whole drift
+      if (pose::on) pose::driftDps = drift;    // what is left after gyro_drift_dps (corr.h): heading() already takes that off
       if (pose::on && !isNaN(h)) pose::set(pose::x, pose::y, h, 0.05f, 0.3f);   // still docked: heading = h exactly
     }
   }

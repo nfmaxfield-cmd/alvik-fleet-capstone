@@ -1022,3 +1022,39 @@ heading. The fusion (tools/fusion/dockfix.py) uses DOCK as a full pose fix
 site setup (`setup.py --touch`) ties each TOUCH to the still station it started
 from.
 
+
+## Per-robot corrections (firmware 2026-10-20b+: corr.h)
+
+Three numbers each robot keeps in its own storage (they survive power-off) and applies to every run:
+
+| name | meaning | out of the box |
+|---|---|---|
+| gyro_scale | real turning / what the gyro counts (same meaning as calib.py's gyro_scale) | 1 |
+| gyro_drift_dps | how fast the gyro's heading creeps while standing still, deg/s, left + | 0 |
+| wheel_scale | real cm per wheel-counted cm (same meaning as calib.py's wheel_scale) | 1 |
+
+heading() = gyro_scale x the library's yaw (unwrapped) - gyro_drift_dps x time; libraryMove() and
+rollStraight() ask the library for cm / wheel_scale; the own pose (pose.h) counts wheel distance x
+wheel_scale. RAW records stay raw library values. Commands: `corr` (show), `corr reset` (out of the box:
+a self-calibration test starts here), `corr tape` (wheel_scale from the T1 straights: Left 0.976, Center
+0.981, Right 0.9785, their average), `corr save <name> <value>` (limits: scales 0.8-1.25, drift +-3).
+`set` on these lasts until power-off only. Every run's PARAM records carry the values in use.
+
+CORR record, one per change:
+
+| column | meaning |
+|---|---|
+| ms | robot clock |
+| name | gyro_scale, gyro_drift_dps or wheel_scale |
+| old, new | the value before and after |
+| source | `reset`, `tape`, `save` (later: `dock`) |
+
+GYRO record (`run gyro`: stands still gyro_check_s, default 30 s, after the compass check):
+
+| column | meaning |
+|---|---|
+| secs | how long it stood still |
+| raw_change_deg, raw_drift_dps | the gyro's own heading change and rate, no corrections: the number for `corr save gyro_drift_dps` |
+| corrected_change_deg | the same with the saved corrections (near 0 once drift is saved) |
+| gyro_scale, gyro_drift_dps | the corrections in use |
+| battery | % |
