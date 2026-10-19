@@ -149,6 +149,13 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(pick[2]["why"], "random check")
         self.assertNotIn(pick[2]["landmark"], ("A", "B"))
 
+    def test_first_setup_audits_every_landmark(self):
+        pts = self.points() + [dict(key="edge x0: 50%", landmark="edge x0", anchor=0.5, xy=np.zeros(2), sigma=0.2,
+                                    kind="edge", cov=None)]
+        pick = SM.pick_audit(pts, n_worst=99, seed=3)
+        self.assertEqual(sorted(p["landmark"] for p in pick), ["A", "B", "C", "D", "E", "edge x0"])
+        self.assertIn("A: p1", [p["key"] for p in pick])            # each landmark's least sure point
+
     def test_exclude_points_used_as_data(self):
         pick = SM.pick_audit(self.points(), seed=1, exclude={"A: p1"})
         self.assertNotIn("A: p1", [p["key"] for p in pick])
@@ -280,7 +287,8 @@ class SimulatedSurveyTests(unittest.TestCase):
         import sim_eval as SE
         world = json.load(open(SE.WORLD))
         tm = FM.normalize(world)
-        user = PL.clicked_map(world, 1.0, seed=2)
+        user = PL.clicked_map(world, 1.0, seed=2, edge_sigma_cm=0.0)   # the edge clicked right: the guard must trip
+                                                                       # before the planned stop 3 cm inside it
         site = SR.SimSite(tm, SE.sim_config(None), seed=2, board_cm=[0, 0, 122, 122], open_edges=["x0"])
         E = SM.edges_from_map(FM.normalize(user), ["x0"])
         opts = dict(max_edge_points=1)
@@ -291,7 +299,7 @@ class SimulatedSurveyTests(unittest.TestCase):
         res = PL.solve_site(user, ["x0"], runs, site.sightings, ["Left"])
         self.assertGreater(res.summary()["stations"], 8)
         self.assertEqual(res.summary()["edge_trips"], 1)
-        # the tripped edge comes out within 0.6 cm of the truth (the click was 1 cm)
+        # one trip keeps the edge near the truth (the edge's prior is 1 cm)
         err = PL.map_errors(res.est, world)["edge x0"]
         self.assertLess(err, 0.6)
         # without the camera's heading (the detector often has none): the start headings come from the gyro and

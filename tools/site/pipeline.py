@@ -100,7 +100,7 @@ def run_sim_survey(site, user_map, robots, edges, opts=None, log=print, max_spot
         at_edge = False
         for tg in targets:
             here = site.seen_pose(rn)
-            if at_edge:
+            if at_edge and SV.near_open_edge(here, edges):
                 # back off the edge in a run of its own: the edge guard learns the plywood at the start of each
                 # run, so the next approach must start with the line sensors on the plywood
                 site.follow(rn, here, SV.plan_back(here, o))
@@ -113,13 +113,14 @@ def run_sim_survey(site, user_map, robots, edges, opts=None, log=print, max_spot
                 continue
             run, failed, _ = site.follow(rn, here, steps, settings=EDGE_SETTINGS)
             res = run["result"] if run else "?"
-            tripped = "plywood edge" in res
+            # follow mode (firmware 2026-10-18c): the guard stops the step ("plywood edge at ..."), the robot
+            # holds; older firmware ended the run ("plywood edge ahead" / "limited:plywood edge")
+            tripped = "plywood edge" in res or bool(failed and str(failed[1]).startswith("plywood edge"))
             trips[rn].append(dict(side=tg["side"], frac=tg["frac"], tripped=tripped, result=res))
-            at_edge = tripped or "edge_out" in str(failed)
             at_edge = True
         if at_edge:
             here = site.seen_pose(rn)
-            site.follow(rn, here, SV.plan_back(here, o) + [], settings=EDGE_OFF)
+            site.follow(rn, here, SV.plan_back(here, o) if SV.near_open_edge(here, edges) else [], settings=EDGE_OFF)
             here = site.seen_pose(rn)
             try:
                 site.follow(rn, here, SV.plan_return(m, rn, here, start))

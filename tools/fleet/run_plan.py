@@ -768,13 +768,14 @@ class Coordinator:
     # the edge; the bottom zone's floor patch is ~7-9 cm ahead of the sensor (4.5 cm ahead), so the edge is
     # somewhere between the front face and ~12 cm: 8 cm is used, erring near.
     EDGE_AHEAD_CM = {"line": 3.5, "bottom": 8.0, "": 3.5}
-    EDGE_STRIP_HALF_CM = 40.0   # the strip runs this far either side of the trip point, ASSUMED square to the heading
+    EDGE_STRIP_HALF_CM = 40.0   # the strip runs this far either side of the trip point
     EDGE_STRIP_DEPTH_CM = 25.0  # and this far past the edge (off the board: nothing to plan there anyway)
 
     def edge_boundary(self, b, pose, info=""):
         """The no-go strip for an open plywood edge from a follow step stopped by the edge guard (STEP failed
-        "plywood edge at <x> <y> <th> <line|bottom>"): a rectangle starting at the edge, square to the robot's
-        heading, EDGE_STRIP_HALF_CM either side, EDGE_STRIP_DEPTH_CM deep. pose: the STEP record's pose
+        "plywood edge at <x> <y> <th> <line|bottom>"): a rectangle starting at the edge, square to the map's floor
+        side the robot drove at when that side is near (edge_side), else to the robot's heading, EDGE_STRIP_HALF_CM
+        either side, EDGE_STRIP_DEPTH_CM deep. pose: the STEP record's pose
         (used if the info has none)."""
         x, y, thd, cue = pose[0], pose[1], pose[2], ""
         parts = info.split()
@@ -786,14 +787,35 @@ class Coordinator:
             pass
         th = math.radians(thd)
         u = (math.cos(th), math.sin(th))
-        n = (-u[1], u[0])
         a = self.EDGE_AHEAD_CM.get(cue, 3.5)
         h, dep = self.EDGE_STRIP_HALF_CM, self.EDGE_STRIP_DEPTH_CM
         ex, ey = x + a * u[0], y + a * u[1]
+        # the plywood's outline is known (the map's floor): square the strip to the side the robot was driving at
+        # (within 40 deg of square on and 12 cm of where the map has that side), not to the heading, which is
+        # rarely exactly square to the edge
+        side = self.edge_side(ex, ey, u)
+        if side is not None:
+            u = side
+        n = (-u[1], u[0])
         pts = [(ex + s * h * n[0] + t * u[0], ey + s * h * n[1] + t * u[1]) for s, t in ((-1, 0), (1, 0), (1, dep), (-1, dep))]
         return {"id": "edge-by-%s-%d" % (b.name, self.n_sensor_obstacles), "shape": "polygon",
                 "points": [[round(px, 2), round(py, 2)] for px, py in pts], "source": "edge_guard",
                 "cue": cue or "?", "time": FM.now_iso()}
+
+    EDGE_SNAP_DEG = 40.0
+    EDGE_SNAP_CM = 12.0
+
+    def edge_side(self, ex, ey, u):
+        """Outward normal of the map's floor side the robot was driving at, or None."""
+        f = self.m["floor"]
+        best = None
+        for nrm, d in (((-1.0, 0.0), ex - f["x_min"]), ((1.0, 0.0), f["x_max"] - ex),
+                       ((0.0, -1.0), ey - f["y_min"]), ((0.0, 1.0), f["y_max"] - ey)):
+            c = u[0] * nrm[0] + u[1] * nrm[1]
+            if c >= math.cos(math.radians(self.EDGE_SNAP_DEG)) and abs(d) <= self.EDGE_SNAP_CM:
+                if best is None or abs(d) < best[0]:
+                    best = (abs(d), nrm)
+        return best[1] if best else None
 
     def sensor_obstacle(self, b, pose, front, info=""):
         """The obstacle's outline from the front zones that see something (STEP
