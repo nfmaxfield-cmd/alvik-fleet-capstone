@@ -183,7 +183,7 @@ def default_area(map_path=None):
     return a if a else list(DEFAULT_AREA)
 
 
-ROBOT_TOP_CM = 4.0
+ROBOT_TOP_CM = 3.7   # measured Oct 19: 1 15/32 in at the front, 1 7/16 at the back
 RANSAC_PX = 6.0           # a click this far (px) from the fit counts as an outlier (about 1.5 cm)
 MIN_RANSAC_POINTS = 6     # fewer points (or separate spots) than this: no RANSAC (a bad click can't be told apart)
 SPOT_TOL_CM = 3.0         # points closer than this count as one spot (tape repeat of the same mark)

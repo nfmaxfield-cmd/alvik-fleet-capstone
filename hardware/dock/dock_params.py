@@ -27,8 +27,8 @@ The simulator (tools/sim/config.py DockModel) reads this file, so the simulated 
 """
 
 # =============================================================================== the robot (MEASURE ALL)
-ROBOT_WIDTH_MM = 95.0          # MEASURE: widest point of the robot's front half, wheels included (calipers)
-ROBOT_LENGTH_MM = 95.0         # MEASURE: front face to rear face
+ROBOT_WIDTH_MM = 95.25         # MEASURED Oct 19: 3 3/4 in (confirm it includes the wheels). Widest point of the robot's front half, wheels included (calipers)
+ROBOT_LENGTH_MM = 95.25        # MEASURED Oct 19: 3 3/4 in. Front face to rear face
 AXLE_TO_FRONT_MM = 47.5        # MEASURE: wheel axle (middle of a wheel's hub) to the front face, along the floor
 FRONT_FACE_BOTTOM_Z_MM = 6.0   # MEASURE: height of the front face's lowest edge above the floor
 TOF_WINDOW_BOTTOM_Z_MM = 21.0  # MEASURE: height of the bottom edge of the front distance sensor's dark window
@@ -44,7 +44,7 @@ TOF_LOW_RAY_DEG = 22.5         # ASSUMED: the sensor's lowest ray, below horizon
 FRONT_M3_HOLES_MM = [(-14.0, 12.0), (14.0, 12.0)]   # MEASURE: (Y lateral, Z height) of each M3 hole on the front
 M3_CLEAR_DIA_MM = 3.4          # M3 clearance hole
 M3_HEAD_DIA_MM = 6.0           # counterbore for an M3 cap/pan head
-ROBOT_TOP_Z_MM = 42.0          # MEASURE: height of the robot's flat top above the floor (near the front)
+ROBOT_TOP_Z_MM = 37.3          # MEASURED Oct 19: 1 15/32 in at the front (1 7/16 at the back). Height of the robot's flat top above the floor (near the front)
 TECHNIC_HOLES_MM = [(12.0, 36.0), (12.0, -36.0)]    # MEASURE: (distance back from the front face, Y lateral) of
                                                     # Technic holes on the robot's TOP, one per strap (8 mm pitch)
 STRAP_W_MM = 7.0               # width of each strap (Y); must stay outside the sensor window's half width

@@ -181,7 +181,7 @@ def load_homography(path):
     return H, invert3(H)
 
 
-ALVIK_TOP_CM = 4.0   # the camera sees the robot's top, about 4 cm above the floor
+ALVIK_TOP_CM = 3.7   # the camera sees the robot's top: 3.65-3.73 cm above the floor (measured Oct 19)
 
 
 def load_parallax(path, obj_height_cm=None):

@@ -130,7 +130,7 @@ def clusters(dets, radius=5.0):
     return out
 
 
-def still_points(runs, dets, offset, robot_top_cm=4.0, led_offset_cm=None, log=print):
+def still_points(runs, dets, offset, robot_top_cm=3.7, led_offset_cm=None, log=print):
     """One point per still window of every tape-measured run: the tape pose (cm)
     paired with the robot's median detection (px). Returns (points, notes)."""
     points, notes = [], []
@@ -263,7 +263,7 @@ def survey_pairs(runs, dets, offset, paths, axle_to_centre_cm=0.0, led_offset_cm
     return out
 
 
-def end_mark_pairs(runs, dets, offset, robot_top_cm=4.0, led_offset_cm=None, session=""):
+def end_mark_pairs(runs, dets, offset, robot_top_cm=3.7, led_offset_cm=None, session=""):
     """Survey pairs from the runs' tape END marks (robot sitting still after the
     run, median detection): absolute floor points (kind 'tape_end'), not moved by
     the start-pose / clock refinement. Grouped by run like the path pairs, so in
@@ -354,7 +354,7 @@ def _lm(fun, p0, iters=30):
     return p, r
 
 
-def fit_survey(pairs, size, height_cm=None, nadir=None, f_px=None, k1_mode="off", area=None, robot_top_cm=4.0,
+def fit_survey(pairs, size, height_cm=None, nadir=None, f_px=None, k1_mode="off", area=None, robot_top_cm=3.7,
                ransac_cm=3.0, reject_sigma=3.5, refine=True, exclude_runs=()):
     """Fit the floor <-> image mapping to survey pairs. Returns a result dict like
     calibrate_floor.fit (points summarised per run under 'survey').
