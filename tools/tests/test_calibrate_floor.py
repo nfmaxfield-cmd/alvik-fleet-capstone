@@ -165,7 +165,11 @@ def test_view_polygon_contains_what_the_camera_sees():
 def test_sheet_spots_e00_format(tmp_path):
     src = os.path.join(os.path.dirname(cf.__file__), "..", "docs", "experiments", "E00-measurement-check", "data",
                        "measurements.csv")
-    rows = list(csv.DictReader(open(src)))
+    rows = list(csv.DictReader(open(src, encoding="utf-8-sig")))
+    for r in rows:   # the real sheet now holds Oct 18's marks: start from a blank copy of its format
+        for k in ("xf0_cm", "yf0_cm", "xr0_cm", "yr0_cm", "xf_cm", "yf_cm", "xr_cm", "yr_cm", "excluded"):
+            if k in r:
+                r[k] = ""
     rows[0].update(xf_cm="15.0", yf_cm="20.0", xr_cm="5.0", yr_cm="20.0")
     rows[1].update(xf_cm="50", yf_cm="10", xr_cm="50", yr_cm="0", excluded="x")
     p = tmp_path / "m.csv"
