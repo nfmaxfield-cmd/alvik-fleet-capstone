@@ -28,7 +28,7 @@ extern Arduino_Alvik alvik;
 namespace look {
 
 const int NB = 120;               // directions, 3 degrees apart; bin 0 = straight ahead
-const float BIN = 3.0f;
+const float LOOK_BIN = 3.0f;
 const float ZONE_HALF = 5.5f;     // each of the five front zones covers about 11 degrees
 const float SEEN_HALF = 24.0f;    // a heading counts only if every direction this close to it was seen
 const float NOTHING = 999.0f;     // room when nothing at all was seen in the lane
@@ -51,7 +51,7 @@ int nCap = 0;
 int binOf(float rel) {
   float a = fmodf(rel, 360.0f);
   if (a < 0) a += 360.0f;
-  return ((int)floorf(a / BIN + 0.5f)) % NB;
+  return ((int)floorf(a / LOOK_BIN + 0.5f)) % NB;
 }
 
 void reset() {
@@ -65,7 +65,7 @@ void resetNear() { nearNow = 0; }
 // One reading d (cm ahead of the sensor, along zone direction z deg) with the robot at
 // relative heading rel.
 void addPoint(float rel, float z, float d) {
-  for (float x = -ZONE_HALF; x <= ZONE_HALF + 0.01f; x += BIN) seen[binOf(rel + z + x)] = true;
+  for (float x = -ZONE_HALF; x <= ZONE_HALF + 0.01f; x += LOOK_BIN) seen[binOf(rel + z + x)] = true;
   seen[binOf(rel + z + ZONE_HALF)] = true;
   if (d <= 0 || d < P("tof_min_cm")) return;   // no reading, or too close to trust: nothing counted that way
   float s = P("tof_ahead_cm");
@@ -95,7 +95,7 @@ float roomAt(float h) {
   float half = P("path_half_cm"), s = P("tof_ahead_cm"), best = NOTHING;
   for (int b = 0; b < NB; b++) {
     if (minR[b] <= 0) continue;
-    float a = (b * BIN - h) * 0.017453293f;
+    float a = (b * LOOK_BIN - h) * 0.017453293f;
     float fwd = minR[b] * cosf(a), lat = minR[b] * sinf(a);
     if (fwd > 0 && fabsf(lat) <= half && fwd - s < best) best = fwd - s;
   }
@@ -103,7 +103,7 @@ float roomAt(float h) {
 }
 
 bool seenAround(float h) {
-  for (float x = -SEEN_HALF; x <= SEEN_HALF + 0.01f; x += BIN) if (!seen[binOf(h + x)]) return false;
+  for (float x = -SEEN_HALF; x <= SEEN_HALF + 0.01f; x += LOOK_BIN) if (!seen[binOf(h + x)]) return false;
   return true;
 }
 
@@ -133,7 +133,7 @@ Choice choose() {
   float want = P("calib_roll_cm");
   static bool full[NB];
   int nFull = 0;
-  for (int b = 0; b < NB; b++) { full[b] = rollAt(b * BIN) >= want - 0.01f; if (full[b]) nFull++; }
+  for (int b = 0; b < NB; b++) { full[b] = rollAt(b * LOOK_BIN) >= want - 0.01f; if (full[b]) nFull++; }
   float h = 0;
   bool isFull = nFull > 0;
   if (nFull > 0 && nFull < NB) {
@@ -142,14 +142,14 @@ Choice choose() {
       if (!full[b] || full[(b + NB - 1) % NB]) continue;     // b starts a stretch
       int len = 0;
       while (len < NB && full[(b + len) % NB]) len++;
-      float mid = wrap180((b + (len - 1) / 2.0f) * BIN);
+      float mid = wrap180((b + (len - 1) / 2.0f) * LOOK_BIN);
       if (len > bestLen || (len == bestLen && fabsf(mid) < fabsf(bestMid))) { bestLen = len; bestMid = mid; }
     }
     h = bestMid;
   } else if (nFull == 0) {
     float best = -1e9;
     for (int b = 0; b < NB; b++) {
-      float hb = wrap180(b * BIN), r = rollAt(hb);
+      float hb = wrap180(b * LOOK_BIN), r = rollAt(hb);
       if (r > best + 0.01f || (fabsf(r - best) <= 0.01f && fabsf(hb) < fabsf(h))) { best = r; h = hb; }
     }
   }
