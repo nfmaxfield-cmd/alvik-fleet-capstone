@@ -344,8 +344,9 @@ void runTouch() {
 }
 
 // ===================================================================
-// POSTS run (`run posts`): put the robot 5-25 cm in front of a post
-// station on dock version 2, roughly facing it. posts_n measurements,
+// POSTS run (`run posts`): put the robot 2-8 cm in front of a post
+// station on dock version 2, roughly facing it (posts_max_cm of creep:
+// if neither lever clicks by then, both posts met the bracket's face). posts_n measurements,
 // backing off posts_back_cm after each. A miss is a result, not a failure:
 // the run backs off and carries on.
 // ===================================================================
@@ -357,7 +358,10 @@ void runPosts() {
   for (int i = 1; i <= n; i++) {
     rawlog::step = i;
     dock::Result r;
-    bool ok = dock::creep(true, r, -1, true);
+    bool ok = dock::creep(true, r, P("posts_max_cm"), true);
+    // neither lever clicked within posts_max_cm: both posts met the bracket's face beside the levers (off
+    // sideways by more than the window both ways at once is impossible, so: off by more than a lever's length)
+    if (!ok && r.first < 0 && strncmp(r.why, "no click", 8) == 0) snprintf(r.why, sizeof(r.why), "miss both");
     dock::postsRecord(r, i);
     bool miss = !ok && strncmp(r.why, "miss", 4) == 0;
     if (!ok && !miss) return;

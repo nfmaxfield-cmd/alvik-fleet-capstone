@@ -1004,7 +1004,7 @@ only; version 2 has no stripe).
 | ms_first | the first switch clicked (debounced) |
 | ms_left, ms_right | each switch's first raw closing (0 = never) |
 | first | L or R: which lever met its post first |
-| result | `both` (each lever clicked on its post), `miss left` / `miss right` (that lever passed beside its post: the robot is off sideways by more than about the lever's half length, ~4.9 mm, towards the side that clicked), or why it stopped (as for DOCK) |
+| result | `both` (each lever clicked on its post), `miss both` (no click within posts_max_cm: both posts met the bracket's face beside the levers), `miss left` / `miss right` (that lever passed beside its post: the robot is off sideways by more than about the lever's half length, ~4.9 mm, towards the side that clicked), or why it stopped (as for DOCK) |
 | travel_first_cm | wheel travel at the first click: with the station's place in the map, the distance along |
 | travel_left_cm, travel_right_cm | per switch (-1 = never) |
 | pivot_deg | gyro turn from the first click to the second: the angle the robot came in at, opposite sign (a few degrees, where the gyro's scale error barely matters) |

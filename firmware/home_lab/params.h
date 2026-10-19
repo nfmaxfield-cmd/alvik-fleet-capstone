@@ -168,6 +168,7 @@ Param PARAMS[] = {
   {"stripe_on",        0,   "dock: 1 = learn and log the floor stripe (dock version 1 only; version 2 has none)"},
   {"posts_n",          1,   "posts run: measurements per run (back off posts_back_cm after each)"},
   {"posts_back_cm",    6,   "posts run: back off this far after each measurement"},
+  {"posts_max_cm",    12,   "posts run: give up after this much creep with no click (miss both: start 2-8 cm from the posts)"},
   {"posts_pivot_max_deg", 8, "posts: a lever that has not clicked after the robot has pivoted this far has missed its post"},
   {"touch_back_cm",    2,   "touch run: back off this far after each click"},
   {"touch_n",          1,   "touch run: touches per run (back off touch_back_cm, wait, creep again)"},
