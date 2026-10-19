@@ -285,6 +285,20 @@ class DockModel:
 
 
 @dataclass
+class LightsModel:
+    # light pattern on each robot's top (tools/lights/patterns.py, firmware lights.h). "off" = not drawn and
+    # the firmware's lights_mode stays 0 (as before). "l3": three LEDs in an L on a black holder; "strip":
+    # an 8-LED Modulino Pixels row. The pattern is lit while a run is going (like the blink code).
+    mode: str = "off"
+    names: dict = field(default_factory=dict)   # robot -> code ("S1L", "S1L/0011"; strip "1".."5"); {} = default table
+    family: dict = field(default_factory=dict)  # patterns.L3Family / StripFamily overrides (arm_cm, side_cm, pitch_cm...)
+    brightness: float = 450.0             # peak grey level a lit LED adds (above 255: the core saturates; ASSUMED)
+    blur_px: float = 0.7                  # optics + motion blur, px (sd), on top of the LED's own size
+    led_d_cm: float = 0.5                 # LED lens diameter (5 mm LEDs; the strip's LC8822-2020: 0.2)
+    holder_grey: float = 35.0             # black printed holder under the l3 LEDs / the strip's board, dark (0 = not drawn)
+
+
+@dataclass
 class SimConfig:
     robot: RobotModel = field(default_factory=RobotModel)
     imu: ImuModel = field(default_factory=ImuModel)
@@ -296,6 +310,7 @@ class SimConfig:
     kidnap: KidnapModel = field(default_factory=KidnapModel)
     session: SessionModel = field(default_factory=SessionModel)
     dock: DockModel = field(default_factory=DockModel)
+    lights: LightsModel = field(default_factory=LightsModel)
 
 
 def _merge(obj, data, path=""):

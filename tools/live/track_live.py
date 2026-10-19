@@ -24,6 +24,13 @@ A fix is sent only when the light's name is sure (see tools/live/livecore.py);
 lights that aren't sure are logged as "sighting" (sent too with --sightings;
 run_plan ignores them).
 
+Light patterns (--lights l3|strip; off by default): the robots' top LED
+patterns (tools/lights) as a second identity source, readable from one frame.
+Their fixes carry "src": "lights" and "path": "lights"; a pattern fix goes out
+only when its name is sure AND no other pattern track or blink track elsewhere
+carries (or may carry) that name; the blink tracker likewise holds back a
+name a pattern elsewhere carries.
+
 Clock: t = Pi t_wall + (laptop - Pi clock offset) - --capture-delay-ms. The
 offset is measured continuously from the stream itself (see sources.py); the
 capture delay (picture taken -> Pi stamps it) is one frame unless measured
@@ -96,6 +103,36 @@ class Sender:
             self.sock.close()
 
 
+def make_lights(args, calib_path):
+    """The light-pattern tracker (tools/lights), or None (--lights off)."""
+    if getattr(args, "lights", "off") == "off":
+        return None
+    lp = os.path.join(TOOLS, "lights")
+    if lp not in sys.path:
+        sys.path.insert(0, lp)
+    import lights as LI
+    import patterns as PT
+    import detect as LD
+    fam = LI.make_family(args.lights, args.lights_wide, args.lights_family)
+    names = PT.parse_names(args.lights_names, fam)
+    return LI.make_tracker(fam, calib_path, names, LD.Params(name_p=args.name_p))
+
+
+def lights_messages(rows, lt):
+    out = []
+    for r in rows:
+        if r["robot"]:
+            out.append(dict(type="fix", robot=r["robot"], t_pi=round(r["t"], 4), x=round(r["x_cm"], 2),
+                            y=round(r["y_cm"], 2), th=round(r["heading_floor_deg"], 2), sigma=0.5, sigma_th=2.0,
+                            id_p=round(r["score"], 4), path="lights", src="lights", frame=r["frame"],
+                            track="L%d" % r["track"]))
+        else:
+            out.append(dict(type="sighting", src="lights", t_pi=round(r["t"], 4), x=round(r["x_cm"], 2),
+                            y=round(r["y_cm"], 2), track="L%d" % r["track"], best=r["best"], probs=r["probs"],
+                            p_none=r["p_none"], why=r["why"], frame=r["frame"]))
+    return out
+
+
 def make_tracker(args, calib_path):
     fmap = FMAP.FloorMap(calib_path, led_height_cm=args.led_height_cm)
     names = B.parse_names(args.names)
@@ -123,6 +160,10 @@ def run(args, source, sender, log_dir, out=print):
     tracker, fmap = make_tracker(args, calib)
     if fmap.note:
         out("note: " + fmap.note)
+    lights = make_lights(args, calib)
+    if lights is not None:
+        out("light patterns: %s, names %s%s" % (lights.fam.kind, lights.names,
+                                                ("; " + lights.det.note) if lights.det.note else ""))
     out("floor calibration %s; %.2f px per cm; names %s" % (calib, tracker.p.px_per_cm, tracker.p.names))
     obst = OB.make(args.obstacles)
     os.makedirs(log_dir, exist_ok=True)
@@ -159,6 +200,14 @@ def run(args, source, sender, log_dir, out=print):
             arrived.pop(fr.index - 200, None)
             t0 = time.perf_counter()
             msgs = tracker.push(fr.img, fr.t_pi)
+            if lights is not None:
+                # each source holds back a name the other one sees somewhere else
+                lights.external = [(c, *fmap.to_floor(*o.last.end_xy)) for o in tracker.tracks
+                                   if fr.t_pi - o.last.b <= tracker.p.track_gap_s for c in [tracker._claim(o, fr.t_pi)] if c]
+                lrows = lights.step(fr.img, fr.t_pi, fr.index)
+                msgs += lights_messages(lrows, lights)
+                tracker.external = [(T.name or lights._claim(T, fr.t_pi), *lights.fmap.to_px(T.x, T.y))
+                                    for T in lights.tracks if T.name or lights._claim(T, fr.t_pi)]
             for o in obst.update(fr.t_pi, fr.img, tracker) if obst else []:
                 msgs.append(o)
             proc_ms.append((time.perf_counter() - t0) * 1000.0)
@@ -176,7 +225,7 @@ def run(args, source, sender, log_dir, out=print):
                 if m["type"] == "fix":
                     r = per_robot[m["robot"]]
                     r["fixes"] += 1
-                    r[m["path"]] += 1
+                    r[m["path"]] = r.get(m["path"], 0) + 1
                     r["first"] = m["t"] if r["first"] is None else r["first"]
                     r["last"] = m["t"]
                     r["id_p_min"] = min(r["id_p_min"], m["id_p"])
@@ -211,6 +260,7 @@ def summary(tracker, per_robot, proc_ms, ages, elapsed, gaps):
     for n, r in per_robot.items():
         span = (r["last"] - r["first"]) if r["first"] is not None else 0.0
         robots[n] = dict(fixes=r["fixes"], fast=r["fast"], late=r["late"], span_s=round(span, 1),
+                         **({"lights": r["lights"]} if "lights" in r else {}),
                          fixes_per_s=round(r["fixes"] / span, 2) if span > 0 else None, id_p_min=r["id_p_min"])
     return dict(frames=tracker.stats["frames"], elapsed_s=round(elapsed, 1), frames_missing=gaps,
                 processing_ms=dict(median=pct(proc_ms, 50), p95=pct(proc_ms, 95), max=pct(proc_ms, 100)),
@@ -240,6 +290,13 @@ def main(argv=None):
     ap.add_argument("--sightings", action="store_true", help="also send lights that aren't sure (type sighting)")
     ap.add_argument("--no-fast", action="store_true", help="only send fixes once each flash has ended")
     ap.add_argument("--obstacles", default="none", help="obstacle finder (obstacles.py; only 'none' so far)")
+    ap.add_argument("--lights", choices=("off", "l3", "strip"), default="off",
+                    help="also name robots by their top light pattern (tools/lights): l3 = the L holder, strip = "
+                         "Modulino Pixels (default off)")
+    ap.add_argument("--lights-names", help="pattern codes, e.g. Left=S0L,Center=S0R,Right=S0L/0011 (default: "
+                                           "tools/lights/patterns.py's table)")
+    ap.add_argument("--lights-wide", action="store_true", help="l3: the longer L (patterns.WIDE_L3)")
+    ap.add_argument("--lights-family", help="pattern geometry overrides as JSON (patterns.py field names)")
     ap.add_argument("--log", help="log folder (default logs/<date-time>-live)")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args(argv)

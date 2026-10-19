@@ -25,10 +25,16 @@ import json
 import math
 import os
 import queue
+import sys
 import threading
 
 import cv2
 import numpy as np
+
+_LIGHTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lights")
+if _LIGHTS not in sys.path:
+    sys.path.insert(0, _LIGHTS)
+import patterns as LP  # noqa: E402  (tools/lights/patterns.py)
 
 
 # ------------------------------------------------------------------ geometry
@@ -123,6 +129,25 @@ class RobotTrack:
         self.model = model
         self.led_t = [robot.t_at(ms) for ms, _, _ in robot.leds]
         self.led_c = [(np.array(l, float), np.array(r, float)) for _, l, r in robot.leds]
+        # light pattern (lights.h): (laptop time, on, code) changes; the side-LED sequence counts from `on`
+        self.pat = [(robot.t_at(ms), on, code) for ms, on, code in getattr(robot, "light_events", [])]
+        self.pat_t = [p[0] for p in self.pat]
+
+    def pattern(self, fam, t0, t1, n=4):
+        """(code, per-LED level 0..1 averaged over [t0, t1]) or None when the pattern is off."""
+        if not self.pat:
+            return None
+        acc, code = None, None
+        for k in range(n):
+            t = t0 + (t1 - t0) * (k + 0.5) / n
+            i = bisect.bisect_right(self.pat_t, t) - 1
+            if i < 0 or not self.pat[i][1]:
+                continue
+            ts, _, c = self.pat[i]
+            lit = np.array(fam.lit(c, t - ts), float)
+            acc = lit / n if acc is None else acc + lit / n
+            code = c
+        return None if acc is None else (code, acc)
 
     def pose(self, t):
         x = float(np.interp(t, self.t, self.x))
@@ -293,6 +318,47 @@ class Renderer:
                 cv2.circle(img, p, int(0.75 * scale * 16), bezel, -1, cv2.LINE_AA, 4)   # dark bezel
             cv2.circle(img, p, int(0.45 * scale * 16), tuple(float(a) for a in core), -1, cv2.LINE_AA, 4)
 
+    def draw_lights(self, img, fam, code, levels, x, y, th, z_lift=0.0):
+        """The light pattern: a black holder (l3) or dark board (strip) and each LED as a bright spot,
+        its glow a Gaussian (the LED's own size plus blur) added on top, so a
+        bright LED saturates in the middle; an unlit LED is a dim lens."""
+        L = self.cfg.lights
+        g = self.g
+        pts = fam.leds(code)
+        z = fam.height_cm + z_lift
+        X, Y = self._to_floor(pts, x, y, th)
+        u, v = g.project(X, Y, z)
+        scale = g.f / (g.Hc - z)                                   # px per cm at the LEDs
+        if fam.kind == "strip" and L.holder_grey > 0:                # the Modulino board (41 x 25 mm), dark
+            cx, cy = fam.centre_cm
+            PX, PY = self._to_floor(rect(cx - 2.05, cx + 2.05, cy - 1.27, cy + 1.27), x, y, th)
+            _poly(img, g.project(PX, PY, z - 0.1), (L.holder_grey,) * 3)
+        if fam.kind == "l3" and L.holder_grey > 0:
+            for k in (1, 2):                                       # two arms, 1.2 cm wide
+                a, b = pts[0], pts[k]
+                d = (b - a) / max(np.hypot(*(b - a)), 1e-9)
+                n = np.array([-d[1], d[0]]) * 0.6
+                poly = np.array([a - 0.6 * d + n, b + 0.6 * d + n, b + 0.6 * d - n, a - 0.6 * d - n])
+                PX, PY = self._to_floor(poly, x, y, th)
+                _poly(img, g.project(PX, PY, z - 0.1), (L.holder_grey,) * 3)
+        sig = math.hypot(0.5 * L.led_d_cm * scale / 1.5, L.blur_px)
+        r = int(math.ceil(4 * sig)) + 1
+        H, W = img.shape[:2]
+        for uk, vk, lv in zip(np.atleast_1d(u), np.atleast_1d(v), levels):
+            uk, vk = float(uk), float(vk)
+            ui, vi = int(round(uk)), int(round(vk))
+            x0, x1, y0, y1 = max(0, ui - r), min(W, ui + r + 1), max(0, vi - r), min(H, vi + r + 1)
+            if x0 >= x1 or y0 >= y1:
+                continue
+            if lv < 0.02:
+                cv2.circle(img, (int(uk * 16), int(vk * 16)), max(1, int(0.5 * L.led_d_cm * scale * 16)), (85, 85, 88),
+                           -1, cv2.LINE_AA, 4)
+                continue
+            yy, xx = np.mgrid[y0:y1, x0:x1]
+            add = L.brightness * lv * np.exp(-0.5 * ((xx - uk) ** 2 + (yy - vk) ** 2) / (sig * sig))
+            patch = img[y0:y1, x0:x1].astype(np.float32) + add[:, :, None]
+            img[y0:y1, x0:x1] = np.clip(patch, 0, 255).astype(np.uint8)
+
     def draw_hand(self, img, hand, t):
         g = self.g
         px, py, pz = hand.palm(t)
@@ -387,6 +453,7 @@ def record(cfg, folder, tracks, hands, boxes, t_start, t_end, events, rng, start
     t_mono0 = tw_all[0] if len(tw_all) else 0.0
     exp = c.exposure_ms / 1000
     W, H = c.width, c.height
+    fam = LP.family(cfg.lights.mode, **cfg.lights.family) if cfg.lights.mode != "off" else None
 
     def in_blind(u, v):
         return blind is not None and blind[0] <= u <= blind[2] and blind[1] <= v <= blind[3]
@@ -411,6 +478,9 @@ def record(cfg, folder, tracks, hands, boxes, t_start, t_end, events, rng, start
                 if -60 < u < W + 60 and -60 < v < H + 60:
                     ledL, ledR = tr.led(tc - exp, tc)
                     rend.draw_robot(img, x, y, th, z, ledL, ledR)
+                    pat = tr.pattern(fam, tc - exp, tc) if fam is not None else None
+                    if pat is not None:
+                        rend.draw_lights(img, fam, pat[0], pat[1], x, y, th, z)
                 if 0 <= u < W and 0 <= v < H:
                     u2, v2 = geom.project(bx + 5 * math.cos(th), by + 5 * math.sin(th), m.height_cm + z)
                     hd = math.degrees(math.atan2(-(float(v2) - v), float(u2) - u))

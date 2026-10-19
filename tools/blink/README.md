@@ -287,3 +287,88 @@ python tools/blink/eval_sim.py sim_out           # decode accuracy, position and
 | `tests/score.py` | compares blink rows with a truth file |
 | `tests/test_blink.py`, `tests/test_calib.py` | the tests (test_calib.py: synthetic, pre-2026-10-18b 3 cm calibration runs) |
 | `tests/test_calib_spin.py` | a simulated calibration run (current firmware: look first, spins, then the roll; simulator + video, about 2 minutes): heading, wheel scale, gyro scale, light offset vs truth; plus a run boxed in by boards (no roll: spin results only) |
+
+## Light patterns (optional second identity source, tools/lights)
+
+**Premise.** The blink code needs 1.8-6 s of rhythm before a robot has a name. Bright LEDs in a fixed
+shape on top of each robot can be read from ONE picture, heading included; blinking can still be layered
+on top for more names. Motion tracking keeps names between sightings, so the pattern matters for naming
+and recovery, not precision. Off unless asked for (`blink.py --lights l3`, `lights.py`,
+`track_live.py --lights l3`, fusion sensor `lights`; firmware `lights_mode`, default 0).
+
+**Patterns** (tools/lights/patterns.py):
+
+| | printed L (default) | wide L | Modulino Pixels strip |
+| --- | --- | --- | --- |
+| LEDs | 3 x 5 mm white: corner, front 24 mm ahead, side 14 mm left (hardware/dock LED holder) | front 50 mm, side 20 / 30 / 40 mm | 8 in a row (pitch ~4.5 mm, assumed), LED 0 front |
+| names from one frame | 2 (the holder and its mirror print: S0L, S0R) | 6 (3 lengths x left/right) | 5 static codes |
+| with the side-LED cycle (0.64 s) | 10 | 30 | - |
+| heading | unique (the L isn't symmetric) | unique | unique (start pair vs single stop LED) |
+| smallest gap at the real camera (3.5 px/cm at the LEDs) | 4.8 px | 7 px | 1.6 px: unreadable |
+| decoder turns itself off below | 4.3 px (3.0 px/cm floor) | same (2.1 px/cm) | 2.8 px pitch (6.2 px/cm) |
+
+Default names: Left S0L, Center S0R (mirror-printed holder), Right S0L/0011 (same holder as Left, side LED
+dark 2 slots of 4). With any sequence in the table, every robot waits one cycle (a robot with an unlisted
+code could look alike).
+
+**How it reads them** (detect.py): saturated small spots (top-hat >= 40, brightness >= 240), merged blobs
+split along their long axis, spots to floor cm at the LEDs' height, every triple fitted to every variant
+(rigid fit, chi2 <= 16); a triple sharing a spot with another acceptable one is dropped (the robot's own
+blink LEDs next to the pattern can form a second L); a whole robot must be in the picture; a new track may
+not sit within 8 cm of a robot seen now. Tracks add each frame's variant probabilities (2% chance a frame
+is wrong) and, with sequences, match the side LED's on/off to each cycle. A name is given at p >= 0.9 and
+only if no other pattern or blink track elsewhere carries it. Two tracks within 12 cm keep only the
+current frame's evidence.
+
+**Data** (simulated: the simulator's renderer, real camera preset, grey JPEG 95, sensor noise, robots' own
+blink LEDs flashing, bright specks and a flickering lamp; 3 seeds each; `python tools/lights/eval_sim.py`):
+
+| pattern | scene | px/cm | named after, s (median / max) | blink code named after, s | wrong name | > 3 cm off | heading err p95 / max, deg | frames with a named row |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| printed L | 2 passing 12 cm apart | 3.4 | 0.02 / 0.14 | 2.44 / 2.86 | 0 | 0 | 1.2 / 2.9 | 98% |
+| printed L | 2 side by side, 1 cm gap | 3.4 | 0.08 / 0.22 | 2.66 / 3.58 | 0 | 0 | 1.0 / 2.6 | 83% |
+| printed L | 3 robots (one by sequence) | 3.4 | 0.70 / 1.02 | 3.58 / 5.98 (1 never) | 0 | 0 | 1.6 / 5.0 | 71% |
+| printed L | 2 passing | 2.6 | never (decoder off) | - | 0 | 0 | - | 0% |
+| printed L | 2 passing | 5.0 | 0.02 / 0.02 | - | 0 | 0 | 1.5 / 3.0 | 100% |
+| wide L | 3 robots | 3.4 | 0.02 / 0.06 | 2.42 / 5.98 (2 never) | 0 | 0 | 1.0 / 2.4 | 92% |
+| wide L | 2 passing | 2.6 | 1.70 / 3.10 | - | 0 | 0 | 2.3 / 3.9 | 49% |
+| strip | 2 passing | 3.4 | never (decoder off) | 2.86 / 3.94 | 0 | 0 | - | 0% |
+| strip | 2 side by side | 8.0 | 0.12 / 0.22 | - | 0 | 0 | 1.2 / 1.7 | 72% |
+
+"Named after" counts from the moment the lights come on (0.02 s = the first frame); position error of
+named rows p95 0.25 cm. One LED covered for 2 s after naming: the track goes on with the other two
+(tests). The live link spends about 6 ms more per frame with patterns on (10 ms median in total).
+
+**Conclusion.** In simulation the printed L names every robot from its first frame (sequence-coded
+robots in under 1.1 s), 1.8-5 s sooner than the blink code, never wrongly. The strip cannot be read
+by this camera (its LEDs are 1.6 px apart); it needs about 6 px/cm (camera at about 125 cm). The wide L
+gives all three robots a one-frame name and works down to 2.6 px/cm.
+
+**Hardware per robot** (printed L): the holder (hardware/dock `stl/led_holder.stl`; Center's mirrored),
+3 x 5 mm bright white LEDs, each driven from 5 V through a small NPN transistor or logic MOSFET from a
+GPIO pin with a series resistor (a 3.3 V pin alone gives a white LED only a few mA), 3 free GPIO pins
+(`lights_pin_c/_f/_s`), a matte black holder (the white top next to an LED hides it). Strip: a Modulino
+Pixels on the Qwiic port and the Arduino_Modulino library (without it lights_mode 2 only says so).
+
+**Assumptions** (each with the next step if wrong):
+- The holder's place on the robot (`corner_cm` -1.5, -0.7: the L's middle over the robot's middle) and
+  LED height 5 cm. Wrong: positions shift by the error; measure with ACCURACY-CHECKS C21, set patterns.py.
+- Real LEDs look like the simulated ones (saturated core, ~1 px glow). If they bloom more, the 14 mm arm
+  merges: then the wide L, or dimmer LEDs.
+- Modulino pitch 4.5 mm (the datasheet gives the 41 mm board only). Measure; the decoder uses it.
+- The side LED's cycle runs from the robot's clock and pauses in blocking library calls (as the blink
+  code does); the simulator doesn't model the pauses. Wrong: sequence names come later, not wrongly.
+
+**Next.** Print the holders (one mirrored), wire one robot, run C21; if the L reads, decide whether
+Right gets a sequence or a third holder variant (wide L).
+
+**New tests that may now be needed:** C21 on hardware (above); a T7-style crossing of three real robots
+with patterns on; a static L-shaped trio of bright spots on the floor (a look-alike pattern is named in one
+frame; motion identity in the fusion is the guard); the live link's CPU on the laptop with patterns on;
+blink pairing on the grey JPEG at quality 90 (in these scenes blink pairing failed at 90 and worked at 95).
+
+**Possible inaccuracies in what this relied on:** LED brightness 450 grey levels and blur 0.7 px
+(chosen); the holder placement and LED height (assumed); the 2% per-frame error rate, 0.9 name
+threshold, chi2 16 and the 4.3 px / 2.8 px cut-offs (chosen, tuned on these scenes); the strip pitch
+(assumed); robots drawn without hands over them; one camera height (scales made by changing the field of
+view, not the perspective).

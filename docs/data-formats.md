@@ -430,6 +430,33 @@ frame,t_wall,robot,x_px,y_px,code,score,track,lit,n_spots,period_s,shared,p_Left
 - `track` id; `n_spots` 2 = both LEDs seen, 1 = one (moved to the pair
   midpoint), 0 = interpolated.
 
+## Light-pattern detections (`<recording>/lights_detections.csv`, written by tools/lights/lights.py)
+
+Optional second identity source (robots' top LED patterns; design: tools/blink/README.md "Light patterns").
+Written by `python tools/lights/lights.py <recording>` or `blink.py --lights l3|strip`.
+
+frame,t_wall,robot,x_px,y_px,heading_img_deg,code,score,track,kind,n_leds,off_fwd_cm,off_left_cm,led_height_cm,p_Left,p_Center,p_Right,p_none,source
+
+- One row per frame per pattern track seen in that frame (all three L LEDs, two of them following a
+  known track, or a strip).
+- `robot`: the name, only when sure (posterior >= `--name-p` 0.9, enough seen, and no other track
+  elsewhere carries or may carry that name); else empty. `code` its pattern code (`S0L`, `S0L/0011`;
+  strip `1`..`5`), `score` the best name's probability.
+- `x_px,y_px`: the pattern's LED centre (mean of its LEDs), image pixels, `led_height_cm` above the floor.
+  `off_fwd_cm,off_left_cm`: that point in the robot frame from the turning centre (patterns.py geometry).
+- `heading_img_deg`: which way the robot faces, 0 = image right, counter-clockwise on screen (as labels.csv).
+- `p_<name>`: probability per listed name; `p_none`: not a listed pattern (another code or not a robot).
+- `kind`: `full` (whole pattern) / `pair` (two of the L's LEDs on a known track); `n_leds`; `track` id;
+  `source` = `lights`.
+- tools/fusion: sensor `lights` (`replay.py --lights`), identity source name `lights` (`id_lights` in
+  results.csv), heading fixes counted in `hdg_used["lights"]`.
+
+Firmware parameters (lights.h, firmware 2026-10-19a; all off unless `lights_mode` is set):
+`lights_mode` 0 off / 1 L on GPIO pins / 2 Modulino Pixels; `lights_seq` 0..4 side-LED cycle (1111, 0111,
+0011, 0101, 0001; 160 ms slots); `lights_pin_c/_f/_s` GPIO numbers (-1 = not wired); `lights_strip_code`
+1..5 (0 = by name); `lights_strip_bri` 0..100; `lights_idle` 1 = on also between runs. Console command
+`lights`: shows the pattern for 10 s (idle only). The values go out with every run's PARAM records.
+
 ## Calibration results (`<recording>/calibration_results.csv`, written by tools/blink/calib.py)
 
 run,robot_log,experiment,event,t_video,robot_blink,blink_code,blink_score,blink_p_log,identity,
@@ -873,7 +900,9 @@ rhythm; a fix is sent only at 0.9 or more and when no other light may carry
 the same name), `path` (`fast`: from the frame itself, the flash was due
 there; `late`: once the flash had ended and passed blink.py's checks), `t_pi`
 (the frame's Pi t_wall), `frame` (frame number since track_live.py started),
-`track`. `th` is always given (from the line between the two LEDs);
+`track`. With `--lights l3|strip` (off by default) it also sends light-pattern fixes, marked
+`"src": "lights"`, `"path": "lights"` (`th` from the pattern, `sigma` 0.5 cm, `sigma_th` 2 deg); unsure
+patterns are `sighting`s with `"src": "lights"`. `th` is always given (from the line between the two LEDs);
 `sigma` 0.5 cm, `sigma_th` about 1.5 deg. With `--sightings` it also sends
 `{"type": "sighting", "t_pi", "t", "x", "y" (light midpoint, cm), "track",
 "best" (likeliest name), "probs" {name: p}, "p_none", "why" (why no fix:

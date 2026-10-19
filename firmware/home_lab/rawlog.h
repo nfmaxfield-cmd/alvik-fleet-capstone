@@ -22,6 +22,7 @@
 #include "net.h"
 #include "blink.h"
 #include "switches.h"
+#include "lights.h"
 
 extern Arduino_Alvik alvik;
 extern String gRunId;
@@ -56,6 +57,7 @@ void stop() { on = false; }
 void tick() {
   blink::tick();   // blink codes ride on the same frequent calls
   sw::tick();      // so do the nose switches (switches.h; nothing while sw_on is 0)
+  lights::tick();  // and so does the light pattern's side-LED cycle
   if (!on) return;
   unsigned long now = millis();
   if ((long)(now - next) < 0) return;

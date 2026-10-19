@@ -140,6 +140,7 @@ class LiveTracker:
         self.n_tracks = 0
         self.frames = {}         # frame index -> picture (gray), the last few
         self.fi = -1
+        self.external = []       # (name, x_px, y_px): names another source (track_live --lights) gives now
         self.stats = dict(frames=0, fixes=0, fast=0, late=0, sightings=0, contested=0, fast_unconfirmed=0,
                           unresolved=0, sep_reject=0, flips=0)
 
@@ -323,6 +324,9 @@ class LiveTracker:
             if math.hypot(x1 - x0, y1 - y0) <= 6.0 * self.p.px_per_cm:
                 continue
             if self._claim(o, t) == T.name:
+                return True
+        for n, x1, y1 in self.external:      # another identity source (light patterns) naming it elsewhere
+            if n == T.name and math.hypot(x1 - x0, y1 - y0) > 6.0 * self.p.px_per_cm:
                 return True
         return False
 
