@@ -40,3 +40,5 @@ The studio should not say "Alvik" until the project is about Alviks. Places it s
 - Adding a two-camera session opens (and runs the motion pass on) the first camera only; the
   second camera's pass should start when you first switch to it (to confirm on roam1). Consider running both in the background, so the
   second is ready when you get there.
+- No way to say "I can't tell which way it faces": the tracker sometimes marks a heading as
+  known (solid arrow), and Enter saved it. Added the **U** key (facing unknown) 2026-10-20.

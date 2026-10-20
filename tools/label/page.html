@@ -162,6 +162,7 @@
       <kbd>click</kbd><span>Select an object; drag to move it</span>
       <kbd>H</kbd><span>then click: set heading of the selected object (or drag its arrow tip, or Shift+drag)</span>
       <kbd>F</kbd><span>Flip heading 180&deg;</span>
+      <kbd>U</kbd><span>Facing unknown (clears the arrow)</span>
       <kbd>Del</kbd><span>Reject selected guess (again: bring it back)</span>
       <kbd>N</kbd><span>New object at the mouse (or double-click)</span>
       <kbd>1-9</kbd><span id="keycls">Object type</span>
@@ -629,6 +630,12 @@ window.addEventListener("keydown", async (ev) => {
       if (!sel) { toast("Click an object first."); break; }
       const hd = headingOf(sel); if (!hd) { toast("No heading to flip: press H to set one."); break; }
       await change(() => { sel.heading_deg = (hd.h + 180) % 360; sel.heading_known = true; sel.heading_guess = null; markCorrected(sel); });
+      break;
+    }
+    case "u": case "U": {
+      if (!sel) { toast("Click an object first."); break; }
+      await change(() => { sel.heading_deg = null; sel.heading_known = false; sel.heading_guess = null; markCorrected(sel); });
+      toast("Facing: unknown (saved as unknown; the model won't learn a direction from this one).");
       break;
     }
     case "e": case "E": await markEmpty(); break;
