@@ -155,3 +155,23 @@ motion pass, the frame picker and the model all spend effort on the room around 
   reaching in); frames are picked for what happens inside; scores count inside only; faster.
 - Alvik shortcut: the floor calibration's tape marks already give the board outline.
 - Generic: the other team draws their table or the arm's reach.
+
+## Claude's ideas (2026-10-20, not yet agreed with Nick)
+
+1. Fix tracks, not frames: a timeline with one lane per object across the recording; breaks,
+   jumps and swaps are marked; one fix corrects every frame of that stretch.
+2. Labels from outside data: robot logs (wheels + gyro, on the shared clock) placed into the
+   camera picture give thousands of draft labels with facing; the person only checks.
+3. "Use it" tool for the trained model: run it on a live camera or a new recording and save
+   positions to CSV, with no studio needed (what the other team actually needs day to day).
+4. Magnifier and picture controls: zoom around the mouse, brightness/contrast toggle.
+5. Consistency flags: a confirmed label that jumps between nearby frames, or disagrees with the
+   other camera (crosscam.disagreements exists), goes to the top of the list.
+6. More data from the same labels: paste labelled objects onto empty-board frames (copy-paste
+   augmentation), so every label is seen in many places and lightings.
+7. Report by situation: accuracy split into robots alone / close together / near a hand / at
+   the edge / standing still, so the next recording targets the weak one.
+8. Labelling-time record: seconds per frame and fixes per frame over time; shows each model
+   saving work (a strong number for the report).
+9. Share a project as one file (labels, settings, models), for handing over or a second
+   labeller.
