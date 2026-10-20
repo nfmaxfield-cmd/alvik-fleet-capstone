@@ -650,6 +650,8 @@ class CamRec:
         self.pixfmt = None
         self.gaps = self.missed = 0
         self.low_windows = []
+        self.steady_fps = None       # what the camera really delivers, learnt from its first seconds
+        self._intervals = []
         self.stopped = None
         self.t_first = self.t_last = None
 
@@ -664,8 +666,13 @@ class CamRec:
         return True
 
     def expected_fps(self):
+        """The rate to hold the camera to: what it says it does, or, once learnt, what it
+        steadily delivers if that's lower (two cameras on one Pi: 30 asked, 25 delivered,
+        with no frame lost). Lost frames are counted from gaps, so a slow camera that
+        never skips is not a false alarm."""
         f = self.fps_real
-        return f if f and 0 < f < 1000 else self.fps_requested
+        f = f if f and 0 < f < 1000 else self.fps_requested
+        return min(f, self.steady_fps) if self.steady_fps else f
 
     def serve(self):
         if not self.port:
@@ -746,6 +753,16 @@ class CamRec:
                 if gap > 1.5 * dt_nom:
                     self.gaps += 1
                     self.missed += max(1, int(round(gap / dt_nom)) - 1)
+                # learn the steady rate from the typical frame interval of the first 3 s
+                if self.steady_fps is None and gap > 0:
+                    self._intervals.append(gap)
+                    if t_mono - (self.t_first or t_mono) >= 3.0 and len(self._intervals) >= 20:
+                        med = sorted(self._intervals)[len(self._intervals) // 2]
+                        self.steady_fps = round(1.0 / med, 1)
+                        if self.steady_fps < 0.9 * (self.fps_real or self.fps_requested):
+                            self.log(f"({self.tag}the camera delivers a steady {self.steady_fps:g} fps "
+                                     f"({self.fps_real:g} asked); that is its real rate, not lost frames)")
+                        dt_nom = 1.0 / self.expected_fps()
             last_ts, last_cam = t_mono, (cam_ms if cam_ms > 0 else None)
             if self.t_first is None:
                 self.t_first = t_mono
@@ -790,7 +807,7 @@ class CamRec:
         span = (self.t_last - self.t_first) if self.t_first is not None and self.t_last is not None else 0.0
         measured = (self.n - 1) / span if self.n > 1 and span > 0 else None
         exp = self.expected_fps()
-        return dict(expected_fps=exp, measured_fps=None if measured is None else round(measured, 2),
+        return dict(expected_fps=exp, steady_fps=self.steady_fps, measured_fps=None if measured is None else round(measured, 2),
                     frames=self.n, gaps=self.gaps, missed_estimate=self.missed,
                     missed_pct=round(100.0 * self.missed / max(1, self.n + self.missed), 2),
                     low_rate_windows=self.low_windows,
