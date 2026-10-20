@@ -77,7 +77,7 @@ spacing (6.5 mm assumed) and where the lever clicks (press it slowly against a r
 | Part | How many | Notes |
 | --- | --- | --- |
 | Pololu #1528 mini lever switch (13.5 mm lever) | 2 | |
-| **M3 x 8 mm screws**, button head (ISO 7380) or pan head, stainless | 4 | 3 mm of arm + 5 mm into the insert. Not longer than 8 (Arduino's limit is 10; the insert's hole is 5.6 deep). The 5 mm screws in the Alvik box are too short |
+| **M3 x 8 mm screws**, button head (ISO 7380) or pan head, stainless | 8 (one-piece attachment) | 3.3-4.1 mm of arm or leg (the side wall tapers), so 3.9-4.8 mm (8-9 turns) into the brass insert, whose hole is 5.6 deep. M3 x 10 would bottom out at the upper front pair. The 5 mm screws in the Alvik box are too short. Check on the first robot: about 8 turns of grip, and the head pulls the part flat |
 | M2 x 8 self-tapping screws (or #2 x 5/16 in) | 4 | switch to bracket |
 | Grove-to-female-jumper cable | 1 | GND from the Alvik's Grove connector |
 | Hook-up wire, 26-28 AWG, with female jumper ends (or solder to the Nano's holes) | 4 | switch to Nano |
