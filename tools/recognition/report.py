@@ -146,7 +146,8 @@ def html_report(proj):
             "it varies" if c.get("height_varies") else _num(c.get("height_cm"))))
     out.append("</table>")
     out.append("<h2>How the scores are kept honest</h2><ul>"
-               "<li>Labelled frames are cut into time blocks (%s s). Each block goes wholly to training, to picking the "
+               "<li>Labelled frames are cut into time blocks (%s s; shorter blocks only when the recordings are too "
+               "short for 30 s blocks to give every part some frames). Each block goes wholly to training, to picking the "
                "best training round, or to scoring; frames within 1 s of a block edge are left out.</li>"
                "<li>A block's part depends only on its time, so adding labels never moves a scoring block into training, "
                "and the two cameras' views of one moment always land in the same part.</li>"
@@ -156,7 +157,7 @@ def html_report(proj):
                "tracker, with no confirmations.</li>"
                "<li>Found = share of labelled objects the model reported within 8 px (about a quarter of an object). "
                "Right = share of the model's reports that matched a label. F1 combines the two: 2 × found × right / (found + right).</li>"
-               "</ul>" % _num(proj.data.get("settings", {}).get("block_s", 30), 0))
+               "</ul>" % _num(_block_s(proj), 0))
     out.append("</body></html>")
     return "".join(out)
 
@@ -173,12 +174,28 @@ def _dur(s):
     return "%.1f h" % (s / 3600.0)
 
 
-def _model_name(m):
-    return {"none": "No model (motion + tracking)", "unknown": "Not known (estimated frames)"}.get(m, "Model " + m)
+def _block_s(proj):
+    """The block length the last training used (models/curve.json), else the project's setting."""
+    try:
+        with open(os.path.join(proj.folder, "models", "curve.json"), encoding="utf-8") as f:
+            v = json.load(f).get("test", {}).get("block_s")
+        if v:
+            return v
+    except (OSError, ValueError):
+        pass
+    return proj.data.get("settings", {}).get("block_s", 30)
+
+
+def _model_name(m, guesses=""):
+    name = {"none": "No model (motion + tracking)", "unknown": "Not known"}.get(m, "Model " + m)
+    if guesses and "+camera" in guesses:
+        name += " + the other camera"
+    return name
 
 
 def time_saved_html(proj, summary=None):
-    """The time-saving section: seconds per frame and frames accepted without looking, by model."""
+    """The time-saving section: seconds per frame by guess source (measured frames only; the
+    estimated ones in their own rows), and frames accepted without looking as a count."""
     e = _html.escape
     sm = summary or timesaved.summary(proj)
     t, rows = sm["totals"], sm["by_model"]
@@ -187,44 +204,53 @@ def time_saved_html(proj, summary=None):
         out.append("<p>No frames finished yet.</p>")
         return "".join(out)
     lead = []
-    base = next((r for r in rows if r["model"] == "none"), None)
-    best = [r for r in rows if r["model"] not in ("none", "unknown") and r["seconds_per_frame"] is not None and r["frames"]]
-    if base and base["seconds_per_frame"] is not None and best:
+    meas = [r for r in rows if r.get("measured", True)]
+    base = next((r for r in meas if r["model"] == "none" and r["seconds_per_frame"] is not None), None)
+    best = [r for r in meas if r["model"] not in ("none", "unknown") and r["seconds_per_frame"] is not None and r["frames"]]
+    if base and best:
         last = best[-1]
-        lead.append("With no model a frame took %s; with model %s it took %s (%d%% accepted unchanged)."
+        lead.append("Measured: with no model a frame took %s; with model %s it took %s (%d%% accepted unchanged)."
                     % (_dur(base["seconds_per_frame"]), e(last["model"]), _dur(last["seconds_per_frame"]),
                        round(100 * (last["accepted_unchanged"] or 0))))
     n = t["frames_by_person"]
     lead.append("%d frame%s checked by a person (%s in all)." % (n, " was" if n == 1 else "s were", _dur(t["seconds_by_person"])))
     if t["auto"] or t["same"]:
-        lead.append("%d more %s accepted without looking and %d for having the same picture as a frame a person "
-                    "accepted." % (t["auto"], "was" if t["auto"] == 1 else "were", t["same"]))
-    if t["saved_by_accepting_s"]:
-        lead.append("At %s per frame%s, that is about %s not spent." % (
-            _dur(t["baseline_seconds_per_frame"]), " (measured with no model)" if t["baseline_measured"] else "",
-            _dur(t["saved_by_accepting_s"])))
+        lead.append("%d more %s accepted without a person looking, and %d for having the same picture as a frame a "
+                    "person accepted. These are not counted as time saved." % (t["auto"], "was" if t["auto"] == 1 else "were",
+                                                                                t["same"]))
+        if t.get("estimate_if_checked_s"):
+            lead.append("Estimate only: checking them at the measured no-model pace (%s a frame) would have taken about "
+                        "%s; they were the easier frames, so the true figure is likely lower."
+                        % (_dur(t["baseline_seconds_per_frame"]), _dur(t["estimate_if_checked_s"])))
     out.append("<p class='lead'>%s</p>" % " ".join(lead))
-    mx = max([r["seconds_per_frame"] or 0 for r in rows] + [1])
-    # bars only when there is a real comparison (three or more guess sources with a time)
-    bars = sum(1 for r in rows if r["seconds_per_frame"] is not None) >= 3
-    out.append("<table><tr><th>Guesses from</th><th>Frames checked by a person</th><th>Seconds per frame</th>"
+    out.append("<p class='muted'>The page shows the hardest frames first (the least sure guesses), so later frames "
+               "are usually easier. Seconds per frame before and after a model are only a fair comparison on similar "
+               "frames: a drop is partly the model and partly easier frames.</p>")
+    mx = max([r["seconds_per_frame"] or 0 for r in meas] + [1])
+    # bars only when there is a real comparison (three or more measured guess sources with a time)
+    bars = sum(1 for r in meas if r["seconds_per_frame"] is not None) >= 3
+    out.append("<table><tr><th>Guesses from</th><th>Timing</th><th>Frames checked by a person</th><th>Seconds per frame</th>"
                "<th>Accepted unchanged</th><th>Changes per frame</th><th>Accepted without looking</th>"
-               "<th>Same picture</th><th>Estimated</th></tr>")
-    for r in rows:
+               "<th>Same picture</th></tr>")
+    for r in sorted(rows, key=lambda r: not r.get("measured", True)):
+        measured = r.get("measured", True)
         bar = ""
-        if bars and r["seconds_per_frame"] is not None:
+        if bars and measured and r["seconds_per_frame"] is not None:
             bar = ("<span style='display:inline-block;height:9px;background:#2b7bbb;margin-left:8px;vertical-align:0;"
                    "width:%dpx'></span>" % max(2, round(90 * r["seconds_per_frame"] / mx)))
-        out.append("<tr><td>%s</td><td>%d</td><td>%s%s</td><td>%s</td><td>%s</td><td>%d</td><td>%d</td><td>%s</td></tr>" % (
-            e(_model_name(r["model"])), r["frames"], _num(r["seconds_per_frame"]), bar, _pct(r["accepted_unchanged"]),
-            _num(r["edits_per_frame"]), r["auto"], r["same"], r["estimated"] or "–"))
+        out.append("<tr><td>%s</td><td>%s</td><td>%d</td><td>%s%s</td><td>%s</td><td>%s</td><td>%d</td><td>%d</td></tr>" % (
+            e(_model_name(r["model"], r.get("guesses") or "")), "measured" if measured else "estimated",
+            r["frames"], _num(r["seconds_per_frame"]), bar, _pct(r["accepted_unchanged"]),
+            _num(r["edits_per_frame"]), r["auto"], r["same"]))
     out.append("</table>")
-    out.append("<p class='muted'>%sSeconds count the time the frame was on screen, with "
-               "pauses over %d s counted as %d s and at most %d s per frame. Frames finished before this record existed "
-               "are estimated from their save times (the gap to the previous saved frame, at most %d s) and counted "
-               "under \"Estimated\"; which model was in use then is not known after the first model was trained.</p>"
-               % ("Each bar is the average seconds a person spent on one frame with those guesses: shorter means the "
-                  "guesses needed less fixing. " if bars else "", timesaved.timing.IDLE_S, timesaved.timing.IDLE_S, timesaved.timing.CAP_S, timesaved.timing.CAP_S))
+    out.append("<p class='muted'>%sMeasured seconds count the time the frame was on screen, with "
+               "pauses over %d s counted as %d s and at most %d s per frame. Rows marked estimated are frames finished "
+               "before this record existed, estimated from their save times (the gap to the previous saved frame; a gap "
+               "over %d s is a break and gets the usual gap instead); they are never mixed into the measured rows, and "
+               "which model was in use then is not known after the first model was trained.</p>"
+               % ("Each bar is the average seconds a person spent on one frame with those guesses (measured rows only): "
+                  "shorter means the guesses needed less fixing. " if bars else "", timesaved.timing.IDLE_S,
+                  timesaved.timing.IDLE_S, timesaved.timing.CAP_S, timesaved.timing.CAP_S))
     extra = []
     if t.get("setup_seconds") is not None:
         extra.append("project setup %s" % _dur(t["setup_seconds"]))

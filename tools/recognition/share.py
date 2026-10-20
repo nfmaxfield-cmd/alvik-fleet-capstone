@@ -109,7 +109,45 @@ def _write_file(zf, full, arc, tick, compress=True):
         return False
 
 
-def export_project(project, out_path, with_video=False, progress=None):
+PAIR = ("labels.csv", "review.json")     # written together by the labelling page: copied as one snapshot
+
+
+def read_pair(label_dir, lock=None, tries=50):
+    """labels.csv and review.json of one recording as they were at one moment: {name: bytes}.
+    With lock (the open recording's save lock), read while holding it; otherwise read both until
+    neither file changed during the read and a moment after (a save writes labels.csv, then
+    review.json)."""
+    paths = [os.path.join(label_dir, n) for n in PAIR]
+
+    def sig():
+        return [(_sig(p) if os.path.exists(p) else None) for p in paths]
+
+    def read():
+        out = {}
+        for n, p in zip(PAIR, paths):
+            try:
+                with open(p, "rb") as f:
+                    out[n] = f.read()
+            except FileNotFoundError:
+                pass
+        return out
+    if lock is not None:
+        with lock:
+            return read()
+    got = None
+    for _ in range(tries):
+        before = sig()
+        got = read()
+        import time
+        time.sleep(0.05)
+        if sig() == before:
+            return got
+    return got
+
+
+def export_project(project, out_path, with_video=False, progress=None, lock_for=None):
+    """lock_for(recording id) -> the save lock of that recording if it is open for labelling
+    (or None): its labels.csv and review.json are copied while holding it."""
     proj = _as_project(project)
     out_path = os.path.abspath(out_path)
     if os.path.isdir(out_path):
@@ -127,6 +165,13 @@ def export_project(project, out_path, with_video=False, progress=None):
 
     files = [(p, a) for p, a in _walk(proj.folder, skip={os.path.abspath(out_path)})
              if a != "project.json"]
+    # labels.csv + review.json of each recording: one consistent snapshot of the pair
+    pairs = {}
+    for d in sorted({a.rsplit("/", 1)[0] for _, a in files if a.startswith("labels/") and a.rsplit("/", 1)[-1] in PAIR}):
+        rid = d.split("/", 1)[1] if "/" in d else d
+        lock = lock_for(rid) if lock_for else None
+        for n, data in read_pair(os.path.join(proj.folder, *d.split("/")), lock).items():
+            pairs[d + "/" + n] = data
     recs, vid_files, warnings = [], [], []
     for r in pdata.get("recordings", []):
         e = dict(id=r["id"], name=r.get("name"), camera=r.get("camera"), session=r.get("session"),
@@ -172,6 +217,14 @@ def export_project(project, out_path, with_video=False, progress=None):
             zf.writestr("project/project.json", pj_bytes)
             tick(len(pj_bytes))
             for full, arc in files:
+                if arc in pairs:
+                    import time
+                    zi = zipfile.ZipInfo("project/" + arc, date_time=time.localtime()[:6])
+                    zi.external_attr = 0o644 << 16
+                    zi.compress_type = zipfile.ZIP_DEFLATED
+                    zf.writestr(zi, pairs[arc])
+                    tick(len(pairs[arc]))
+                    continue
                 if not _write_file(zf, full, "project/" + arc, tick):
                     pass
             for full, arc in vid_files:
@@ -246,7 +299,10 @@ def relink(project, rid, new_path):
     """Point one recording at a folder the person picked (the recording folder, with video.avi)."""
     proj = _as_project(project)
     rec = proj.rec(rid)
-    new_path = os.path.abspath(os.path.expanduser(str(new_path).strip().strip('"')))
+    new_path = str(new_path or "").strip().strip('"').strip()
+    if not new_path:
+        raise ShareError("Type or paste where the recording is now first (the box is empty).")
+    new_path = os.path.abspath(os.path.expanduser(new_path))
     if not os.path.exists(os.path.join(new_path, "video.avi")):
         raise ShareError("There is no video.avi in %s. Pick the recording's own folder." % new_path)
     rec["path"] = new_path
@@ -257,6 +313,9 @@ def relink(project, rid, new_path):
 def relink_from_folder(project, folder):
     """Search `folder` for every missing recording (by session/recording folder name, then camera folder)."""
     proj = _as_project(project)
+    folder = str(folder or "").strip().strip('"').strip()
+    if not folder:
+        raise ShareError("Type or paste the folder to search first (the box is empty).")
     if not os.path.isdir(folder):
         raise ShareError("The folder %s does not exist." % folder)
     idx = _index_videos(folder)

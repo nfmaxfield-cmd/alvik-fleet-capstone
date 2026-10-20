@@ -97,9 +97,11 @@ def outcome_of(objects, changed):
 
 def estimate_from_review(review, unsure_frames=(), recorded=(), first_model_time=None):
     """Records for finished frames of a review.json that have no line in the record.
-    Time per frame: the gap since the previous saved frame (any frame), capped at CAP_S; the first
-    one gets the median of the others. Model: "none" if saved before the first model existed,
-    else "unknown". Every record says estimated=True."""
+    Time per frame: the gap since the previous saved frame (any frame); a gap longer than CAP_S is
+    a break, not work, so that frame gets the median of the other gaps (as does the first one).
+    Model: "none" if saved before the first model existed, else "unknown". Every record says
+    estimated=True. Frames changed only by Investigate's "change all" (how change_all) were not
+    checked one by one: they count like auto-accepted frames (no time)."""
     frames = review.get("frames") or {}
     recorded = set(int(f) for f in recorded)
     unsure = set(int(f) for f in unsure_frames)
@@ -107,26 +109,31 @@ def estimate_from_review(review, unsure_frames=(), recorded=(), first_model_time
     person = []
     for fs, st in frames.items():
         t = _parse(st.get("updated"))
-        if st.get("state") == "reviewed" and t is not None:
+        if st.get("state") == "reviewed" and st.get("how") != "change_all" and t is not None:
             person.append((t, int(fs), st))
     person.sort()
     gaps = {}
     for k, (t, f, st) in enumerate(person):
         if k:
-            gaps[f] = min(CAP_S, max(0.0, (t - person[k - 1][0]).total_seconds()))
-    fill = statistics.median(gaps.values()) if gaps else None
+            g = max(0.0, (t - person[k - 1][0]).total_seconds())
+            gaps[f] = g if g <= CAP_S else None          # None: a break
+    work = [g for g in gaps.values() if g is not None]
+    fill = statistics.median(work) if work else None
     out = []
     for t, f, st in person:
         if f in recorded:
             continue
-        g = gaps.get(f, fill)
+        g = gaps.get(f)
+        if g is None:
+            g = fill
         model = "none" if (first_model is None or t < first_model) else "unknown"
         out.append(dict(frame=f, shown=None, saved=st.get("updated"), active_s=None if g is None else round(g, 1),
                         edits=None, outcome="unsure" if f in unsure else ("corrected" if st.get("changed") else "accepted"),
                         how=st.get("how") or "user", guesses=None, model=model, objects=None, estimated=True))
     for fs, st in frames.items():
         f = int(fs)
-        if st.get("state") == "auto" and f not in recorded:
+        bulk = st.get("state") == "reviewed" and st.get("how") == "change_all"
+        if (st.get("state") == "auto" or bulk) and f not in recorded:
             t = _parse(st.get("updated"))
             model = "none" if (first_model is None or (t is not None and t < first_model)) else "unknown"
             out.append(dict(frame=f, shown=None, saved=st.get("updated"), active_s=0.0, edits=0,
@@ -159,28 +166,35 @@ def _median(xs):
     return round(statistics.median(xs), 1) if xs else None
 
 
+def _model_order(m):
+    if m == "none":
+        return (0, 0)
+    if m.startswith("v") and m[1:].isdigit():
+        return (1, int(m[1:]))
+    return (2, 0)
+
+
 def summarize(frames, setup_seconds=None, install_seconds=None):
     """frames: list of per-frame dicts (CSV_COLUMNS; active_s = all the time spent on it).
-    Returns totals and one row per model version, for the Time saved panel and the report."""
+    Returns totals and one row per guess source: model version and kind of guesses (motion,
+    model, either "+camera"), measured frames and estimated frames in separate rows, so models are
+    compared only on measured frames. Frames accepted without a person looking (auto, same
+    picture) are counted, never credited as time saved; estimate_if_checked_s says what checking
+    them would have cost at the measured no-model pace (an estimate: they are the easier frames)."""
     groups = {}
     for r in frames:
         if r["outcome"] == "undone":
             continue
-        groups.setdefault(r.get("model") or "unknown", []).append(r)
-
-    def order(m):
-        if m == "none":
-            return (0, 0)
-        if m.startswith("v") and m[1:].isdigit():
-            return (1, int(m[1:]))
-        return (2, 0)
+        key = (r.get("model") or "unknown", r.get("guesses") or "", bool(r.get("estimated")))
+        groups.setdefault(key, []).append(r)
     rows = []
-    for m in sorted(groups, key=order):
-        rs = groups[m]
+    for key in sorted(groups, key=lambda k: (k[2], _model_order(k[0]), k[0], k[1])):
+        m, guesses, est = key
+        rs = groups[key]
         person = [r for r in rs if r["outcome"] in PERSON]
         timed = [r for r in person if r.get("active_s") is not None]
         exact = [r for r in person if not r.get("estimated")]
-        rows.append(dict(model=m, frames=len(person),
+        rows.append(dict(model=m, guesses=guesses, measured=not est, frames=len(person),
                          seconds_per_frame=_mean(r["active_s"] for r in timed),
                          median_seconds=_median(r["active_s"] for r in timed),
                          accepted_unchanged=round(sum(1 for r in person if r["outcome"] == "accepted") / len(person), 3)
@@ -193,21 +207,27 @@ def summarize(frames, setup_seconds=None, install_seconds=None):
                          seconds=round(sum(float(r["active_s"] or 0) for r in timed), 1)))
     person_all = [r for r in frames if r["outcome"] in PERSON]
     timed_all = [r for r in person_all if r.get("active_s") is not None]
-    base = next((r for r in rows if r["model"] == "none" and r["seconds_per_frame"] is not None and r["frames"] >= 5), None)
-    per_frame_base = base["seconds_per_frame"] if base else _mean(r["active_s"] for r in timed_all)
+    measured = [r for r in timed_all if not r.get("estimated")]
+    estimated = [r for r in timed_all if r.get("estimated")]
+    bases = [r for r in rows if r["measured"] and r["model"] == "none" and r["seconds_per_frame"] is not None
+             and r["frames"] >= 5]
+    base = max(bases, key=lambda r: r["frames"]) if bases else None
     auto = sum(1 for r in frames if r["outcome"] == "auto")
     same = sum(1 for r in frames if r["outcome"] == "same")
-    saved_auto = round((auto + same) * per_frame_base, 0) if per_frame_base else None
     saved_models = 0.0
     if base:
         for r in rows:
-            if r["model"] not in ("none", "unknown") and r["seconds_per_frame"] is not None:
+            if r["measured"] and r["model"] not in ("none", "unknown") and r["seconds_per_frame"] is not None:
                 saved_models += (base["seconds_per_frame"] - r["seconds_per_frame"]) * r["frames"]
     totals = dict(frames_by_person=len(person_all), seconds_by_person=round(sum(float(r["active_s"] or 0) for r in timed_all), 1),
-                  seconds_per_frame=_mean(r["active_s"] for r in timed_all), auto=auto, same=same,
+                  measured_frames=len(measured), seconds_per_frame=_mean(r["active_s"] for r in measured),
+                  estimated_frames=len(estimated), estimated_seconds_per_frame=_mean(r["active_s"] for r in estimated),
+                  auto=auto, same=same,
                   estimated=sum(1 for r in frames if r.get("estimated")),
-                  baseline_seconds_per_frame=per_frame_base, baseline_measured=bool(base),
-                  saved_by_accepting_s=saved_auto, saved_by_models_s=round(saved_models, 0) if base else None,
+                  baseline_seconds_per_frame=base["seconds_per_frame"] if base else None, baseline_measured=bool(base),
+                  saved_by_accepting_s=None,
+                  estimate_if_checked_s=round((auto + same) * base["seconds_per_frame"], 0) if base and (auto + same) else None,
+                  saved_by_models_s=round(saved_models, 0) if base else None,
                   setup_seconds=setup_seconds, install_seconds=install_seconds)
     return dict(totals=totals, by_model=rows)
 
@@ -221,7 +241,7 @@ def frames_csv(frames):
     return buf.getvalue()
 
 
-SUMMARY_COLUMNS = ["model", "frames", "seconds_per_frame", "median_seconds", "accepted_unchanged", "edits_per_frame",
+SUMMARY_COLUMNS = ["model", "guesses", "measured", "frames", "seconds_per_frame", "median_seconds", "accepted_unchanged", "edits_per_frame",
                    "unsure", "auto", "same", "estimated", "seconds"]
 
 

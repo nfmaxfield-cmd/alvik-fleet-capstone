@@ -350,3 +350,45 @@ def test_bat_file_exists_and_calls_the_tool():
     text = open(bat).read()
     assert "use_model.py" in text and "%*" in text and "Maxfield IRL Tracking" in text and "pause" in text
     assert "alvik" not in text.lower() and "in real life" not in text.lower()
+
+
+# -------------------------------------------------------------------------------------------- fix round A
+def test_table_is_saved_safely_with_rows_kept_as_they_come(recording, tmp_path):
+    out = str(tmp_path / "safe.csv")
+    said = []
+    src = um.open_source(recording)
+    n = um.run(src, _pipe(recording), out, max_frames=30, say=said.append)
+    src.close()
+    assert n == len(_read(out)) > 0
+    assert not os.path.exists(um.partial_path(out))                      # the finished table replaced it
+    assert [f for f in os.listdir(tmp_path) if f.endswith(".tmp")] == []
+    assert any(" of 30 " in s for s in said) and not any(" of 180 " in s for s in said)   # --max-frames is the total
+
+
+def test_a_failed_save_says_so_and_keeps_the_rows(recording, tmp_path):
+    out = str(tmp_path / "busy.csv")
+    os.makedirs(out)                                                      # can't be replaced by a file
+    src = um.open_source(recording)
+    with pytest.raises(um.SaveError) as e:
+        um.run(src, _pipe(recording), out, max_frames=20, say=lambda *_: None)
+    src.close()
+    assert "could not be saved" in str(e.value) and um.partial_path(out) in str(e.value)
+    assert len(_read(um.partial_path(out))) > 0                           # the rows as they came are kept
+    # through the command: the console says it plainly and the run ends with an error code
+    said = []
+    a = um.build_parser().parse_args([recording, "--out", out, "--max-frames", "5", "--no-page"])
+    assert um._run_main(a, recording, detector=StubDetector(recording), say=said.append) == 1
+    assert any(s.startswith("Not saved:") for s in said)
+
+
+def test_default_name_is_new_every_run_and_zero_rows_are_explained(recording, tmp_path):
+    src = um.open_source(recording)
+    p1 = um.default_out(None, src, "v3", recording)
+    src.close()
+    assert p1.endswith("_v3.csv") and "_20" in os.path.basename(p1)       # a time stamp: never overwrites
+    said = []
+    out = str(tmp_path / "empty.csv")
+    a = um.build_parser().parse_args([recording, "--out", out, "--max-frames", "5", "--no-page"])
+    assert um._run_main(a, recording, detector=lambda img: [], say=said.append) == 0
+    text = " ".join(said)
+    assert "found no objects" in text and "--min-score" in text and "train the model longer" in text

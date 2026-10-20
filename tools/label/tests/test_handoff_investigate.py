@@ -49,7 +49,8 @@ def test_scan_background_and_something_put_down(still):
     times = rec.times
     seen = []
     bg = investigate.scan(rec.video, rec.n, times, 50, 50, 12, 100, progress=lambda d, t: seen.append((d, t)), size=(320, 240))
-    assert bg["kind"] == "background" and "same through the whole recording" in bg["headline"]
+    assert bg["kind"] == "background" and "never changes in this recording" in bg["headline"]
+    assert "stayed still" in bg["detail"] and "second camera" in bg["detail"]          # never claims background for sure
     assert seen and seen[-1][0] == seen[-1][1]                             # the progress bar reaches the end
     assert len(bg["thumbs"]) == 40 and bg["background"].startswith("data:image/jpeg;base64,")
     assert bg["clips"] == [] and bg["runs"] == []
@@ -237,7 +238,8 @@ def test_estimate_for_frames_saved_before_the_record():
     assert set(est) == {1, 2, 3, 4, 5}
     assert all(e["estimated"] for e in est.values())
     assert est[2]["active_s"] == 12.0 and est[2]["outcome"] == "corrected" and est[2]["model"] == "none"
-    assert est[3]["active_s"] == timing.CAP_S and est[3]["outcome"] == "unsure" and est[3]["model"] == "unknown"
+    # a gap longer than CAP_S is a break, not work: that frame gets the usual gap (here the only other one, 12 s)
+    assert est[3]["active_s"] == 12.0 and est[3]["outcome"] == "unsure" and est[3]["model"] == "unknown"
     assert est[1]["active_s"] is not None                                   # the first: the median of the others
     assert est[4]["outcome"] == "auto" and est[5]["outcome"] == "same" and est[4]["active_s"] == 0.0
 
@@ -251,15 +253,20 @@ def test_summary_by_model():
               [fr("unknown", "accepted", 8, None, True)] + [fr("v1", "undone", 50)])
     sm = timing.summarize(frames, setup_seconds=40, install_seconds=300)
     by = {r["model"]: r for r in sm["by_model"]}
-    assert [r["model"] for r in sm["by_model"]] == ["none", "v1", "unknown"]
+    assert [(r["model"], r["measured"]) for r in sm["by_model"]] == [("none", True), ("v1", True), ("unknown", False)]
     assert by["none"]["seconds_per_frame"] == 22.0 and by["none"]["accepted_unchanged"] == 0.4
     assert by["v1"]["seconds_per_frame"] == 7.0 and by["v1"]["accepted_unchanged"] == 0.8
     assert by["v1"]["auto"] == 20 and by["v1"]["same"] == 5 and by["unknown"]["estimated"] == 1
     t = sm["totals"]
-    assert t["baseline_measured"] and t["saved_by_accepting_s"] == 25 * 22.0
+    # frames accepted without looking are counted, never credited as time saved; the "if checked" figure is
+    # a separate, labelled estimate
+    assert t["baseline_measured"] and t["saved_by_accepting_s"] is None and t["estimate_if_checked_s"] == 25 * 22.0
+    assert t["auto"] == 20 and t["same"] == 5
     assert t["saved_by_models_s"] == (22.0 - 7.0) * 10 and t["setup_seconds"] == 40 and t["install_seconds"] == 300
+    assert t["seconds_per_frame"] == round((6 * 30 + 4 * 10 + 8 * 5 + 2 * 15) / 20, 1)    # measured frames only
+    assert t["estimated_seconds_per_frame"] == 8.0
     csv_text = timing.summary_csv(sm)
-    assert csv_text.startswith(",".join(timing.SUMMARY_COLUMNS)) and "saved_by_accepting_s" in csv_text
+    assert csv_text.startswith(",".join(timing.SUMMARY_COLUMNS)) and "estimate_if_checked_s" in csv_text
     lines = list(csv.reader(timing.frames_csv(frames).splitlines()))
     assert lines[0] == timing.CSV_COLUMNS and len(lines) == len(frames) + 1
 

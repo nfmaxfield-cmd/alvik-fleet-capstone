@@ -9,7 +9,7 @@ samples: the spot on the background picture). From that it gives
   - a line of how much the spot changed over time,
   - the biggest changes as short clips (a few frames each),
   - the spot on the background picture,
-  - a verdict in plain words: part of the background / something that moves (and where it
+  - a verdict in plain words: never changes (background, or an object that stayed still) / something that moves (and where it
     went) / something put down or passing over (with the moments to jump to).
 
 Nothing here knows what the objects are; it works for any object type.
@@ -292,16 +292,18 @@ def scan(video, n_frames, times, x, y, r, frame_now=None, guesses=None, progress
                                             "usually looks like this."))
     elif not now_changed and frac < 0.02:
         kind = "background"
-        headline = "This spot looks the same through the whole recording."
-        detail = ("It is most likely part of the background (a mark, a stain, a fixture), or something that never "
-                  "moved. A label here is probably not an object you want. \"Ignore this spot\" leaves guesses here "
-                  "out from now on.")
+        headline = "This spot never changes in this recording."
+        detail = ("It is either part of the background (a mark, a stain, a fixture) or an object that stayed still the "
+                  "whole time: a picture alone can't tell these apart. To find out, look at this spot in the second "
+                  "camera, or in a recording of the empty area with nothing on it. Only if it is part of the background, "
+                  "\"Ignore this spot\" leaves guesses here out from now on.")
     elif not now_changed:
         kind = "background_visited"
         headline = "On this frame the spot looks as it usually does (%d%% of the recording)." % pct_usual
         detail = ("Something different was there %d time%s (listed below): an object passing over or stopping. "
-                  "What is here on this frame is most likely part of the background. Ignoring this spot would "
-                  "also leave out the objects that pass over it." % (len(runs), "" if len(runs) == 1 else "s"))
+                  "What is here on this frame looks as it usually does: either part of the background, or an object "
+                  "that stays here most of the time. Ignoring this spot would also leave out the objects that pass over "
+                  "it." % (len(runs), "" if len(runs) == 1 else "s"))
     else:
         kind = "appears"
         if sb - sa >= 2.0:

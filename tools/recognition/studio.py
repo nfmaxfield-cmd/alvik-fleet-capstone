@@ -75,6 +75,10 @@ class Studio:
         self.loading = None
         self.lock = threading.RLock()
         self.trainer = trainmod.Trainer(proj, log=log)
+        stuck = trainmod.mark_interrupted(proj)       # left "training" by a studio that was closed mid-training
+        if stuck:
+            log("Model %s was still marked as training when the studio last closed: marked as stopped (interrupted)."
+                % ", ".join(stuck))
         self.cross_note = None
         self.background = background     # run the other cameras' motion pass in the background
         self.bg = None                   # what the background pass is doing (shown in the top bar)
@@ -209,12 +213,21 @@ class Studio:
         mine = proj.camera_model_path(rec.get("camera"))
         if not mine or not os.path.exists(mine):
             return None
-        cam_b = cameras.CameraModel.load(mine)
         # t_wall: the Pi's clock, shared by every camera on it (t_mono is shared too within one
         # two-camera session, but not between separately started recordings)
-        times_b = crosscam.load_frame_times(os.path.join(rec["path"], "frames.csv"))
+        mine_times = os.path.join(rec["path"], "frames.csv")
+        if not os.path.exists(mine_times):
+            self.cross_note = "No help from the other camera: this recording has no frame times (frames.csv)."
+            return None
+        try:
+            cam_b = cameras.CameraModel.load(mine)
+            times_b = crosscam.load_frame_times(mine_times)
+        except Exception as e:          # the recording still opens, without the other camera's help
+            self.cross_note = "No help from the other camera: its setup could not be read (%s)." % e
+            self.log("Cross-camera: " + self.cross_note)
+            return None
         b_meta = _meta(rec["path"])
-        out, n = {}, 0
+        out, n, skipped = {}, 0, []
         for other in proj.recordings():
             if other["id"] == rec["id"] or other.get("session") != rec["session"]:
                 continue
@@ -224,15 +237,31 @@ class Studio:
             objs = _confirmed_objects(proj.labels_dir(other["id"]))
             if not objs:
                 continue
-            cam_a = cameras.CameraModel.load(path_a)
-            g = crosscam.cross_guesses(objs, cam_a, cam_b, crosscam.load_frame_times(os.path.join(other["path"], "frames.csv")), times_b,
-                                       (b_meta.get("width", 640), b_meta.get("height", 480)), proj.class_heights(),
-                                       skip_classes=tuple(proj.varies_classes()))
+            other_times = os.path.join(other["path"], "frames.csv")
+            if not os.path.exists(other_times):
+                # the other camera's recording is not on this computer (not copied, or not located yet)
+                skipped.append(other.get("camera") or other.get("name") or other["id"])
+                continue
+            try:
+                cam_a = cameras.CameraModel.load(path_a)
+                g = crosscam.cross_guesses(objs, cam_a, cam_b, crosscam.load_frame_times(other_times), times_b,
+                                           (b_meta.get("width", 640), b_meta.get("height", 480)), proj.class_heights(),
+                                           skip_classes=tuple(proj.varies_classes()))
+            except Exception as e:
+                skipped.append(other.get("camera") or other.get("name") or other["id"])
+                self.log("Cross-camera: %s skipped (%s)" % (other["id"], e))
+                continue
             for f, ds in g.items():
                 out.setdefault(f, []).extend(ds)
                 n += len(ds)
+        notes = []
         if n:
-            self.cross_note = "%d guesses from the other camera" % n
+            notes.append("%d guesses from the other camera" % n)
+        if skipped:
+            notes.append("no help from the %s camera: its recording was not found on this computer"
+                         % ", ".join(sorted(set(skipped))))
+        if notes:
+            self.cross_note = "; ".join(notes)
             self.log("Cross-camera: " + self.cross_note)
         return out or None
 
@@ -300,6 +329,7 @@ class Studio:
                              missing=not os.path.exists(os.path.join(r["path"], "video.avi"))))
         models = [dict(id=m["id"], status=m["status"], n_train_frames=m.get("n_train_frames", 0),
                        metrics=m.get("metrics", {}), created=m.get("created"), error=m.get("error"),
+                       warning=m.get("warning"), interrupted=bool(m.get("interrupted")),
                        compatible=m.get("classes") == proj.class_names()) for m in proj.models()]
         models = [m for m in models if m["status"] != "ready" or m["compatible"]] + \
                  [m for m in models if m["status"] == "ready" and not m["compatible"]]
@@ -372,11 +402,22 @@ class Studio:
             raise ValueError("Say where to save the file.")
 
         def run(progress):
-            res = share.export_project(self.proj, os.path.expanduser(path), with_video=bool(with_video), progress=progress)
+            res = share.export_project(self.proj, os.path.expanduser(path), with_video=bool(with_video), progress=progress,
+                                       lock_for=self._save_lock_for)
             m = res["manifest"]
             return dict(path=res["path"], mb=round(res["bytes"] / 1e6, 1), recordings=len(m["recordings"]),
                         models=m["contents"]["models"], with_video=m["with_video"], warnings=m["warnings"])
         return self._share_job("Saving the project as one file", run)
+
+    def _save_lock_for(self, rid):
+        """The save lock of a recording open for labelling (its labels.csv and review.json are
+        written together under it), or None."""
+        s = self.session
+        cur = self.proj.data.get("current", {})
+        if s is not None and cur.get("rec") == rid and \
+                os.path.normcase(s.labels_dir) == os.path.normcase(self.proj.labels_dir(rid)):
+            return s.lock
+        return None
 
     def import_file(self, file, dest, recordings=None):
         import share
@@ -406,6 +447,7 @@ class Studio:
         with self.lock:
             self.proj = proj
             self.trainer = trainmod.Trainer(proj, log=self.log)
+            trainmod.mark_interrupted(proj)
             self.session = None
             self.cross_note = None
         cur = proj.data.get("current", {})
@@ -427,6 +469,12 @@ class Studio:
     def relink(self, rid=None, path=None, folder=None):
         """Locate a missing recording: its own folder (rid + path), or a folder to search for all of them."""
         import share
+        if folder is not None and not str(folder).strip().strip('"'):
+            raise ValueError("Type or paste the folder to search first (the box is empty).")
+        if rid and path is not None and not str(path).strip().strip('"'):
+            raise ValueError("Type or paste where the recording is now first (the box is empty).")
+        if not folder and not (rid and path):
+            raise ValueError("Type or paste where the recording is now first (the box is empty).")
         if folder:
             found, still = share.relink_from_folder(self.proj, os.path.expanduser(folder.strip().strip('"')))
             return dict(found=found, missing=still, notes=share.describe_missing(still))
@@ -556,8 +604,9 @@ def make_routes(studio):
             h._send(200, res)
         elif path == "/api/studio/train":
             mid = studio.trainer.start(float(b.get("minutes") or 20))
-            studio.proj.data["settings"]["train_minutes"] = float(b.get("minutes") or 20)
-            studio.proj.save()
+            with studio.proj.lock:
+                studio.proj.data["settings"]["train_minutes"] = float(b.get("minutes") or 20)
+                studio.proj.save()
             h._send(200, dict(model=mid))
         elif path == "/api/studio/classes":
             studio.proj.set_classes(b.get("classes") or [])
@@ -585,6 +634,8 @@ def make_routes(studio):
             reopened = studio.reopen(only_camera=key)
             h._send(200, dict(ok=True, reopened=reopened))
         elif path == "/api/studio/add":
+            if not str(b.get("path") or "").strip().strip('"'):
+                raise ValueError("Type or paste the recording folder first (the box is empty).")
             added = studio.proj.add_recording(b.get("path", ""), b.get("camera") or None)
             if added and studio.session is None and not studio.loading:
                 studio.open(added[0], "none")

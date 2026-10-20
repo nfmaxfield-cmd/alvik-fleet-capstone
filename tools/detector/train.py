@@ -33,7 +33,9 @@ epochs; macro becomes worth trying once the validation recordings hold
 enough different unknown objects and hands for their F1 to be stable.
 train_log.csv shows every class's validation F1 per epoch either way.
 Training stops when that has not improved for --patience epochs; best.pt
-keeps the best.
+keeps the best. Until the model finds anything at all (validation F1 still 0), F1
+cannot tell epochs apart, so the best epoch is the one with the lowest validation
+loss and training never stops early; it also never stops early before --min-epochs.
 """
 import argparse
 import csv
@@ -186,6 +188,7 @@ def main():
                     help="front: find the robot's front point (default); sincos: regress sin/cos of heading")
     ap.add_argument("--weight-decay", type=float, default=1e-4)
     ap.add_argument("--patience", type=int, default=12, help="early stop after this many epochs without improvement")
+    ap.add_argument("--min-epochs", type=int, default=0, help="never stop early before this many epochs")
     ap.add_argument("--max-minutes", type=float, default=0, help="stop after this long (0 = no limit)")
     ap.add_argument("--val-frac", type=float, default=0.15)
     ap.add_argument("--test-frac", type=float, default=0.15)
@@ -304,7 +307,7 @@ def main():
     log = csv.DictWriter(logf, fieldnames=cols)
     log.writeheader()
 
-    best, best_epoch, t_start = -1.0, -1, time.time()
+    best, best_epoch, t_start = (-1, -1.0), -1, time.time()
     for epoch in range(1, a.epochs + 1):
         te0 = time.time()
         model.train()
@@ -329,9 +332,12 @@ def main():
         # Score used to pick the best epoch: mostly F1; then smaller centre error
         # (1 px = 0.01 F1) and smaller heading error (10 deg = 0.01 F1).
         score = f1 - 0.01 * (err if err == err else 10.0) - 0.001 * (herr if herr == herr else 180.0)
-        improved = score > best
+        # while nothing is found (F1 0) every epoch scores the same on F1: rank those by validation
+        # loss instead; any epoch that finds something beats every epoch that finds nothing
+        key = (1, score) if f1 > 0 else (0, -vl)
+        improved = key > best
         if improved:
-            best, best_epoch = score, epoch
+            best, best_epoch = key, epoch
             torch.save(dict(model=model.state_dict(), config=cfg, epoch=epoch, val=vrow),
                        os.path.join(a.out, "best.pt"))
         torch.save(dict(model=model.state_dict(), config=cfg, epoch=epoch, val=vrow), os.path.join(a.out, "last.pt"))
@@ -351,14 +357,14 @@ def main():
               f"P {row['val_precision']:.3f} R {row['val_recall']:.3f} F1 {row['val_f1']:.3f}  "
               f"err {row['val_centre_err_px']:.2f}px  hd {row['val_heading_err_deg']:.1f}deg  "
               f"[{row['val_class_f1']}]{'  *' if improved else ''}")
-        if epoch - best_epoch >= a.patience:
+        if best[0] == 1 and epoch >= a.min_epochs and epoch - best_epoch >= a.patience:
             print(f"No improvement for {a.patience} epochs: stopping early.")
             break
         if a.max_minutes and (time.time() - t_start) / 60 > a.max_minutes:
             print(f"Time limit of {a.max_minutes} min reached.")
             break
     logf.close()
-    print(f"Best epoch {best_epoch} (val score {best:.4f}). Saved {os.path.join(a.out, 'best.pt')}, "
+    print(f"Best epoch {best_epoch} (val score {best[1]:.4f}{'' if best[0] else ', found nothing yet: lowest val loss'}). Saved {os.path.join(a.out, 'best.pt')}, "
           f"total {(time.time() - t_start) / 60:.1f} min")
 
 

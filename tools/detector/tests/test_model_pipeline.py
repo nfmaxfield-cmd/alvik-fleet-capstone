@@ -127,3 +127,19 @@ def test_baseline_one_step_and_interface(tiny_synth, tmp_path):
     assert isinstance(dets, list)
     for d in dets:
         assert d["heading_deg"] is None and set(d) == {"cls", "x", "y", "heading_deg", "score"}
+
+
+def test_no_early_stop_while_nothing_is_found(tiny_synth, tmp_path):
+    """While validation F1 is 0, F1 can't tell rounds apart: the best round is picked by validation
+    loss and training does not stop early (patience 1 would otherwise stop after round 2)."""
+    run = str(tmp_path / "run0")
+    out = subprocess.run([sys.executable, os.path.join(DET_DIR, "train.py"), "--labels", tiny_synth, "--out", run,
+                          "--epochs", "3", "--steps-per-epoch", "1", "--batch", "2", "--workers", "0", "--patience", "1",
+                          "--min-epochs", "3", "--score-thresh", "0.99", "--deterministic"],
+                         check=True, capture_output=True, text=True)
+    with open(os.path.join(run, "train_log.csv")) as f:
+        log = list(csv.DictReader(f))
+    assert len(log) == 3 and all(float(r["val_f1"]) == 0 for r in log)
+    best = [r for r in log if r["best"] == "1"]
+    assert best and min(float(r["val_loss"]) for r in best) == min(float(r["val_loss"]) for r in log)
+    assert "found nothing yet" in out.stdout and "stopping early" not in out.stdout

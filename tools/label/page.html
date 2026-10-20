@@ -370,7 +370,7 @@ async function init() {
   }
   S.imgCache.clear();
   setClasses(S.info.classes || CLASSES);
-  $("src").textContent = S.info.recording + " · guesses: " + S.info.guess_source + " · object size " + S.info.robot_px.toFixed(0) + " px";
+  $("src").textContent = S.info.recording + " · " + (S.info.guess_label || ("guesses: " + S.info.guess_source)) + " · object size " + S.info.robot_px.toFixed(0) + " px";
   $("paths").textContent = "Saved to " + S.info.labels_path;
   const pos = S.info.position || {};
   S.mode = pos.mode || "next";
@@ -702,7 +702,7 @@ async function change(fn) {
   pushUndo(); fn(); draw(); renderSide(); countEdit();
   await save(editState(), editHow());
 }
-function editHow() { return S.frame.how && S.frame.how !== "auto" && S.frame.how !== "same" ? S.frame.how : (S.mode === "spot" ? "spot" : "user"); }
+function editHow() { return S.frame.how && S.frame.how !== "auto" && S.frame.how !== "same" && S.frame.how !== "change_all" ? S.frame.how : (S.mode === "spot" ? "spot" : "user"); }
 async function accept() {
   if (!S.frame || S.busy) return;
   pushUndo();
@@ -1104,7 +1104,7 @@ function fmtN(v, d) { return v == null || isNaN(v) ? "-" : (+v).toFixed(d == nul
 async function studioState() { try { return await api("/api/studio/state"); } catch (e) { return null; } }
 function modelLabel(m) {
   const sc = m.metrics && m.metrics.f1 != null ? " · F1 " + fmtPct(m.metrics.f1) : "";
-  return m.id + " (" + m.n_train_frames + " frames" + sc + ")";
+  return m.id + " (" + m.n_train_frames + " frames" + sc + ")" + (m.warning ? " · finds nothing yet: label more or train longer" : "");
 }
 function renderStudio(s) {
   ST.state = s;
@@ -1446,7 +1446,7 @@ function renderInvestigate() {
   const studio = ST.on && ST.state && ST.state.camera;
   let acts = "";
   if (res.kind === "background" || res.kind === "background_visited") {
-    acts += studio ? '<button class="sbtn primary" id="invignore">Ignore this spot</button><span class="muted">Leaves out every guess inside the dashed circle from now on (it is added to the work area\'s ignore spots; your labels are kept).</span>'
+    acts += studio ? '<button class="sbtn" id="invignore">Ignore this spot</button><span class="muted">Only if you are sure it is part of the background, not an object that stayed still: leaves out every guess inside the dashed circle from now on (it is added to the work area\'s ignore spots; your labels are kept).</span>'
       : '<span class="muted">"Ignore this spot" is part of the studio (start.py); it isn\'t available here.</span>';
   }
   (res.moves || []).forEach((m) => {
@@ -1559,7 +1559,8 @@ async function undoBulk(u) {
     setStats(j.stats);
     const f = S.frame ? S.frame.frame : null;
     await loadQueue(); const i = S.queue.findIndex((q) => q.f === f); await showFrame(Math.max(0, i));
-    toast("Undone: the labels on " + j.undone + " frame" + (j.undone > 1 ? "s" : "") + " are back as they were.");
+    toast("Undone: the labels on " + j.undone + " frame" + (j.undone === 1 ? "" : "s") + " are back as they were." +
+      (j.kept && j.kept.length ? " " + j.kept.length + " frame" + (j.kept.length === 1 ? " you changed since was" : "s you changed since were") + " kept as you left " + (j.kept.length === 1 ? "it." : "them.") : ""));
   } catch (e) { toast(e.message, true); }
 }
 $("invbtn").addEventListener("click", invButton);

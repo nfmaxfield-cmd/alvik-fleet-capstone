@@ -16,7 +16,9 @@ import datetime as dt
 import json
 import os
 import re
+import threading
 import time
+import uuid
 
 VERSION = 1
 
@@ -61,24 +63,61 @@ def slug(s):
 
 
 def write_json(path, data):
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=1)
-        f.flush()
-        os.fsync(f.fileno())
-    for _ in range(10):
+    """Write a JSON file so that a crash or a second writer never leaves half a file: every
+    write goes to its own temporary file, which is then swapped in. On Windows the swap fails
+    for a moment while another program has the file open, so it retries briefly."""
+    text = data if isinstance(data, str) else _dumps(data)
+    tmp = "%s.%s.tmp" % (path, uuid.uuid4().hex[:12])
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        for _ in range(15):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:
+                time.sleep(0.2)
+        raise PermissionError("%s is open in another program; close it and try again" % path)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
+def _dumps(data):
+    """json.dumps that copes with another thread adding a key meanwhile (it tries again)."""
+    for k in range(20):
         try:
-            os.replace(tmp, path)
-            return
-        except PermissionError:
-            time.sleep(0.2)
-    raise PermissionError("%s is open in another program; close it and try again" % path)
+            return json.dumps(data, indent=1)
+        except RuntimeError:          # "dictionary changed size during iteration"
+            if k == 19:
+                raise
+            time.sleep(0.005)
+
+
+# One lock per project.json path, shared by every Project object of that folder: the studio's
+# routes and the trainer thread save the same file.
+_LOCKS = {}
+_LOCKS_GUARD = threading.Lock()
+
+
+def _lock_for(path):
+    key = os.path.normcase(os.path.abspath(path))
+    with _LOCKS_GUARD:
+        if key not in _LOCKS:
+            _LOCKS[key] = threading.RLock()
+        return _LOCKS[key]
 
 
 class Project:
     def __init__(self, folder, create_name=None):
         self.folder = os.path.abspath(folder)
         self.path = os.path.join(self.folder, "project.json")
+        self.lock = _lock_for(self.path)     # hold it to change project.json from more than one thread
         if os.path.exists(self.path):
             with open(self.path, encoding="utf-8") as f:
                 self.data = json.load(f)
@@ -95,8 +134,9 @@ class Project:
 
     # --- basics ---------------------------------------------------------------------------
     def save(self):
-        self.data["updated"] = now_iso()
-        write_json(self.path, self.data)
+        with self.lock:
+            self.data["updated"] = now_iso()
+            write_json(self.path, _dumps(self.data))
 
     @property
     def name(self):
@@ -253,7 +293,10 @@ class Project:
     def add_recording(self, path, camera=None):
         """Add a recording folder (with video.avi), or a two-camera session folder
         (with session.json and one recording folder per camera). Returns the added ids."""
-        path = os.path.abspath(os.path.expanduser(path.strip().strip('"')))
+        path = (path or "").strip().strip('"').strip()
+        if not path:
+            raise ValueError("Type or paste the recording folder first (the box is empty).")
+        path = os.path.abspath(os.path.expanduser(path))
         if not os.path.isdir(path):
             raise ValueError("Not a folder: %s" % path)
         sess_file = os.path.join(path, "session.json")

@@ -63,6 +63,9 @@ CLASSES = ["alvik", "hand", "unknown", "machine"]
 # and scoring until it is resolved.
 STATUSES = ["pending", "confirmed", "corrected", "rejected", "unsure"]
 SAME_PICTURE_S = 10.0      # same-picture frames are looked for this far either side of an accepted frame
+# ... and each accepted object's own patch, at full size, must differ by less than this mean grey level
+# (after removing the patch's average): a robot that turned or shifted a little in place is not "the same"
+PATCH_LEVEL = 2.5
 
 
 def _mem_status(st):
@@ -83,7 +86,7 @@ def write_atomic(path, text):
     """Write a file so that a crash never leaves half a file: write a temporary
     file, then swap it in. On Windows the swap fails while the file is open in
     another program (Excel), so it retries for a moment, then raises."""
-    tmp = path + ".tmp"
+    tmp = "%s.%d-%d.tmp" % (path, os.getpid(), threading.get_ident())    # its own name per writer
     with open(tmp, "w", newline="", encoding="utf-8") as f:
         f.write(text)
         f.flush()
@@ -94,6 +97,10 @@ def write_atomic(path, text):
             return
         except PermissionError:
             time.sleep(0.2)
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
     raise PermissionError("%s is open in another program (Excel?). Close it; your work is kept "
                           "and will be saved with the next change." % os.path.basename(path))
 
@@ -396,6 +403,8 @@ class Session:
         self.guess_kind = ("model" if model else "motion") + ("+camera" if extra_dets else "")
         self.inv = None          # the running or last Investigate scan
         self.bulk_undo = {}      # Investigate's "change all": token -> the frames as they were
+        self._was_auto = {}      # frame -> how it was auto-accepted, while a person has it open (for undo)
+        self.lost_on_load = []
 
         self._load_review()
         self.robot_px = robot_px
@@ -514,9 +523,15 @@ class Session:
             with open(self.labels_path, newline="") as f:
                 for r in csv.DictReader(f):
                     rows_by_frame.setdefault(int(r["frame"]), []).append(r)
+        lost = []
         for fs, st in states.items():
             f = int(fs)
             objs, empty = [], False
+            if st.get("state", "reviewed") in ("reviewed", "auto") and not rows_by_frame.get(f) and not st.get("empty"):
+                # review.json says finished, but labels.csv holds nothing for it (no objects, and no
+                # "none" row that an empty frame gets): its labels were lost, so it is labelled again
+                lost.append(f)
+                continue
             for r in rows_by_frame.get(f, []):
                 if r["cls"] == "none":
                     empty = True
@@ -528,7 +543,13 @@ class Session:
                                  score=float(r["score"]) if r["score"] else None))
             self.frames[f] = dict(state=st.get("state", "reviewed"), how=st.get("how", "user"), objects=objs,
                                   auto_conf=st.get("auto_conf"), changed=st.get("changed", False),
-                                  updated=st.get("updated"), empty=empty, same_as=st.get("same_as"))
+                                  updated=st.get("updated"), empty=empty or (not objs and bool(st.get("empty"))),
+                                  same_as=st.get("same_as"), changed_all=st.get("changed_all"))
+        if lost:
+            self.log("%d frame%s saved as finished had no rows in labels.csv (frame %s); %s back to be labelled."
+                     % (len(lost), "" if len(lost) == 1 else "s", ", ".join(str(f) for f in sorted(lost)[:20]),
+                        "it is" if len(lost) == 1 else "they are"))
+        self.lost_on_load = sorted(lost)
         # Frames with user rows in labels.csv that review.json does not know (it was lost).
         for f, rows in rows_by_frame.items():
             if f not in self.frames and any(r["status"] != "pending" for r in rows):
@@ -620,6 +641,11 @@ class Session:
                             heading_known=hk, heading_guess=hg,
                             source=r["source"], status="pending", score=r["score"], close=bool(r.get("close"))))
         return out
+
+    def guess_label(self):
+        """Where the guesses come from, in plain words, for the page's header."""
+        src = ("model %s" % self.model_id) if self.model else "motion (no model)"
+        return "Guesses from " + src + (" and the other camera" if self.extra_dets else "")
 
     def frame_state(self, f):
         st = self.frames.get(f)
@@ -781,11 +807,21 @@ class Session:
                               for o in objs)
                 auto_conf = old["auto_conf"] if old and old.get("auto_conf") is not None else self.conf_of(f)
                 empty = state == "reviewed" and not any(o["status"] != "rejected" for o in objs)
+                same_as = None
                 if state == "auto":          # undo back to an auto-accepted frame
-                    how, changed = "auto", False
+                    # a same-picture frame goes back to being one (not a plain auto-accepted frame)
+                    was = self._was_auto.get(f)
+                    if how == "same" and was and was.get("how") == "same":
+                        same_as = was.get("same_as")
+                    else:
+                        how = "auto"
+                    changed = False
                     empty = not any(o["status"] != "rejected" for o in objs)
+                elif old is not None and old["state"] == "auto":
+                    self._was_auto[f] = dict(how=old.get("how"), same_as=old.get("same_as"))
                 self.frames[f] = dict(state=state, how=how or (old or {}).get("how") or "user", objects=objs,
-                                      auto_conf=auto_conf, changed=changed, updated=now_iso(), empty=empty)
+                                      auto_conf=auto_conf, changed=changed, updated=now_iso(), empty=empty,
+                                      same_as=same_as)
                 new_anchor = objs if state != "auto" else None
             updated = 0
             if new_anchor != old_anchor:
@@ -852,8 +888,42 @@ class Session:
                 continue
             if _match_objects(objs, self.guess_objects(g), tol) is None:
                 continue
+            if not self._patches_same(f, g, objs):
+                continue
             out.append(g)
         return out
+
+    def _grey(self, f):
+        """The saved picture of frame f, full size, grey and lightly blurred (None if missing)."""
+        import numpy as np
+        import cv2
+        path = os.path.join(self.frames_dir, "%06d.jpg" % f)
+        if not os.path.exists(path):
+            return None
+        img = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            return None
+        return cv2.GaussianBlur(img.astype(np.float32), (3, 3), 0)
+
+    def _patches_same(self, f, g, objs, level=PATCH_LEVEL):
+        """Each accepted object's patch (about one object across) looks the same at full size in
+        both frames: the small whole-picture test misses an object that turned in place."""
+        if not objs:
+            return True
+        a, b = self._grey(f), self._grey(g)
+        if a is None or b is None or a.shape != b.shape:
+            return False
+        h, w = a.shape
+        half = max(6, int(round(0.75 * float(self.robot_px))))
+        for o in objs:
+            x, y = int(round(o["x"])), int(round(o["y"]))
+            x0, x1, y0, y1 = max(0, x - half), min(w, x + half + 1), max(0, y - half), min(h, y + half + 1)
+            if x1 - x0 < 3 or y1 - y0 < 3:
+                continue
+            pa, pb = a[y0:y1, x0:x1], b[y0:y1, x0:x1]
+            if float(abs((pa - pa.mean()) - (pb - pb.mean())).mean()) >= level:
+                return False
+        return True
 
     def accept_same_picture(self, f):
         """Accept the same-picture frames of a frame the person just accepted (state auto,
@@ -868,11 +938,12 @@ class Session:
             pairs = _match_objects(acc, guesses, tol)
             objs = []
             for o, gg in pairs:
-                known = bool(o.get("heading_known")) and o.get("heading_deg") is not None
-                objs.append(dict(obj=o["obj"], cls=o["cls"], x=gg["x"], y=gg["y"],
-                                 heading_deg=o["heading_deg"] if known else None, heading_known=known,
-                                 heading_guess=None, source=gg["source"] if gg["source"] in SOURCES else "track",
-                                 status="confirmed", score=gg.get("score")))
+                # the person's own position on the accepted frame (the picture is the same); the
+                # heading is left unknown: the same picture does not prove the same heading
+                objs.append(dict(obj=o["obj"], cls=o["cls"], x=o["x"], y=o["y"],
+                                 heading_deg=None, heading_known=False,
+                                 heading_guess=None, source=o["source"] if o.get("source") in SOURCES else "track",
+                                 status="confirmed", score=o.get("score")))
             self.frames[g] = dict(state="auto", how="same", objects=objs, auto_conf=self.conf_of(g),
                                   changed=False, updated=now_iso(), empty=not objs, same_as=f)
             self._record(g, "same", how="same", n_objects=len(objs))
@@ -935,7 +1006,10 @@ class Session:
         """Take back the frames accepted by "Accept remaining high-confidence frames" (not the
         same-picture ones, which a person's accept vouches for)."""
         with self.lock:
-            fs = [f for f, st in self.frames.items() if st["state"] == "auto" and st.get("how") != "same"]
+            # only frames still exactly as the auto-accept left them: never same-picture frames (a
+            # person's accept vouches for them) or frames a person changed since (e.g. with change all)
+            fs = [f for f, st in self.frames.items() if st["state"] == "auto" and st.get("how") == "auto"
+                  and not st.get("changed")]
             for f in fs:
                 del self.frames[f]
                 self._record(f, "undone")
@@ -1093,7 +1167,14 @@ class Session:
                     n += 1
                 if touched:
                     st["changed"] = True
-                    st["updated"] = now_iso()
+                    # its own time: "updated" stays the frame's last save by a person (the time-saving
+                    # estimates read the gaps between those)
+                    st["changed_all"] = now_iso()
+                    if st["state"] == "auto":
+                        # a person changed it: it is no longer a guess accepted without looking, so
+                        # "Undo auto-accept" leaves it alone
+                        st["state"], st["how"] = "reviewed", "change_all"
+                        st.pop("same_as", None)
                     if st["state"] in ("reviewed", "auto"):
                         st["empty"] = not any(o["status"] != "rejected" for o in st["objects"])
                     if st["state"] in ("edited", "reviewed"):
@@ -1102,7 +1183,7 @@ class Session:
             if before:
                 self._bulk_n = getattr(self, "_bulk_n", 0) + 1
                 token = "c%d" % self._bulk_n
-                self.bulk_undo[token] = before
+                self.bulk_undo[token] = (before, {f: json.dumps(self.frames[f], sort_keys=True) for f in before})
             updated = self.retrack(first) if first is not None else 0
             self.save()
             return dict(changed=n, frames=sorted(before), token=token, updated=updated, stats=self.stats())
@@ -1110,18 +1191,26 @@ class Session:
     def undo_change(self, token):
         """Put the frames of one "change all" back as they were."""
         with self.lock:
-            before = self.bulk_undo.pop(token, None)
-            if not before:
+            got = self.bulk_undo.pop(token, None)
+            if not got:
                 raise ValueError("nothing to undo for that change (the studio was restarted?)")
-            first = None
+            before, after = got
+            first, done, kept = None, [], []
             for fs, st in before.items():
                 f = int(fs)
+                now = self.frames.get(f)
+                if now is None or json.dumps(now, sort_keys=True) != after.get(f):
+                    kept.append(f)          # changed again since: keep the newer work
+                    continue
+                if now["state"] in ("edited", "reviewed"):     # it was a label the tracker followed
+                    first = f if first is None else min(first, f)
                 self.frames[f] = st
+                done.append(f)
                 if st["state"] in ("edited", "reviewed"):
                     first = f if first is None else min(first, f)
             updated = self.retrack(first) if first is not None else 0
             self.save()
-            return dict(undone=len(before), frames=sorted(int(f) for f in before), updated=updated, stats=self.stats())
+            return dict(undone=len(done), frames=sorted(done), kept=sorted(kept), updated=updated, stats=self.stats())
 
     def set_position(self, mode, f):
         with self.lock:
@@ -1168,6 +1257,8 @@ class Session:
                      "edited = changed but Enter not pressed yet; auto = accepted without looking because the "
                      "guesses were high-confidence (how: auto), or because the picture was the same as a frame "
                      "a person accepted (how: same, same_as = that frame); their rows in labels.csv say auto. "
+                     "how change_all = changed by Investigate's \"change all\" (changed_all = when). "
+                     "empty = finished with nothing in it. "
                      "Pending rows in labels.csv are guesses nobody has checked; unsure rows are objects the "
                      "person could not identify yet (their frames are kept out of training and scoring).")
         write_atomic(self.review_path, json.dumps(r, indent=1))
@@ -1194,6 +1285,10 @@ def _review_entry(st):
     e = dict(state=st["state"], how=st["how"], changed=st["changed"], auto_conf=st["auto_conf"], updated=st["updated"])
     if st.get("same_as") is not None:
         e["same_as"] = st["same_as"]
+    if st.get("empty") and st["state"] in ("reviewed", "auto"):
+        e["empty"] = True              # finished with nothing in it (labels.csv has its "none" row)
+    if st.get("changed_all"):
+        e["changed_all"] = st["changed_all"]     # when Investigate's "change all" last changed it
     return e
 
 
@@ -1253,16 +1348,23 @@ def make_handler(session, extra_get=None, extra_post=None):
                 traceback.print_exc()
                 self._send(500, dict(error="%s: %s" % (type(e).__name__, e)))
 
+        def _local_host(self):
+            """The Host header names this computer (stops a web page on another site reaching the
+            labels through a DNS trick)."""
+            return (self.headers.get("Host") or "").split(":")[0] in ("127.0.0.1", "localhost")
+
         def do_GET(self):
+            if not self._local_host():
+                self._send(403, dict(error="refused: open the page at http://127.0.0.1"))
+                return
             self._guard(self._get)
 
         def do_POST(self):
             # Only this page may change labels: a web page open in another tab
             # cannot send JSON to 127.0.0.1 without the browser asking us first
             # (which we never allow), and the Host check stops DNS tricks.
-            host = (self.headers.get("Host") or "").split(":")[0]
             ctype = self.headers.get("Content-Type") or ""
-            if host not in ("127.0.0.1", "localhost") or not ctype.startswith("application/json"):
+            if not self._local_host() or not ctype.startswith("application/json"):
                 self._send(403, dict(error="refused: changes must come from the labelling page"))
                 return
             self._guard(self._post)
@@ -1285,6 +1387,7 @@ def make_handler(session, extra_get=None, extra_post=None):
                     self._send(200, dict(recording=s.rec.name, folder=s.rec.folder, n_frames=s.rec.n,
                                          fps=s.rec.fps, width=s.rec.width, height=s.rec.height,
                                          robot_px=s.robot_px, classes=s.classes, guess_source=s.source_name,
+                                         guess_label=s.guess_label(),
                                          position=s.review.get("position"), stats=s.stats(),
                                          labels_path=s.labels_path, area=s.area_view()))
             elif u.path == "/api/queue":

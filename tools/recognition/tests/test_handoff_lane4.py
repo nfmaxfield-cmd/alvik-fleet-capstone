@@ -118,12 +118,19 @@ def test_time_saved_of_a_project_with_estimates_and_report(tmp_path):
     f20 = next(f for f in frames if f["frame"] == 20)
     assert f20["outcome"] == "accepted" and f20["active_s"] == 7.0         # all the time spent on it
     sm = timesaved.summary(proj)
-    by = {r["model"]: r for r in sm["by_model"]}
-    assert by["none"]["frames"] == 7 and by["v1"]["frames"] == 5 and by["v1"]["accepted_unchanged"] == 1.0
+    # measured and estimated frames are separate rows (models are compared only on measured frames)
+    meas = {(r["model"], r["guesses"]): r for r in sm["by_model"] if r["measured"]}
+    est_rows = [r for r in sm["by_model"] if not r["measured"]]
+    assert meas[("none", "motion")]["frames"] == 5 and meas[("none", "motion")]["seconds_per_frame"] == 20.0
+    assert sum(r["frames"] for r in est_rows if r["model"] == "none") == 2
+    assert sum(r["frames"] for (m, g), r in meas.items() if m == "v1") == 5
+    assert meas[("v1", "model")]["accepted_unchanged"] == 1.0
+    assert sm["totals"]["seconds_per_frame"] == round((5 * 20.0 + 4 * 4.0 + 7.0) / 10, 1)   # measured only
     assert sm["totals"]["install_seconds"] == 312.4 and sm["totals"]["setup_seconds"] == 25
     assert sm["totals"]["estimated"] == 3 and sm["totals"]["auto"] == 1
     html = report.html(proj)
-    assert "Time saved" in html and "Accepted unchanged" in html and "Estimated" in html
+    assert "Time saved" in html and "Accepted unchanged" in html and "estimated" in html
+    assert "hardest frames first" in html and "not counted as time saved" in html
     assert "first install 5 min" in html and "project setup 25 s" in html
     low = html.lower()
     assert "alvik" not in low and " robot" not in low
@@ -132,7 +139,7 @@ def test_time_saved_of_a_project_with_estimates_and_report(tmp_path):
     out = subprocess.run([sys.executable, os.path.join(REC, "timesaved.py"), proj.folder], capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
     with open(os.path.join(proj.folder, "stats", "time-saved-summary.csv")) as f:
-        assert f.readline().startswith("model,frames,seconds_per_frame")
+        assert f.readline().startswith("model,guesses,measured,frames,seconds_per_frame")
 
 
 def test_report_without_any_frames_says_so(tmp_path):

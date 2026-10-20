@@ -725,7 +725,15 @@ class LiveView:
                 except (BrokenPipeError, ConnectionError):
                     pass
 
+            def _local(self):
+                ok = (self.headers.get("Host") or "").split(":")[0] in ("127.0.0.1", "localhost")
+                if not ok:
+                    self._send(403, b"refused: open the page at http://127.0.0.1", "text/plain")
+                return ok
+
             def do_GET(self):
+                if not self._local():
+                    return
                 path, _, qs = self.path.partition("?")
                 if path == "/":
                     page = PAGE.replace("__LEGEND__", json.dumps(LEGEND))
@@ -738,6 +746,8 @@ class LiveView:
                     self._send(404, b"not found", "text/plain")
 
             def do_POST(self):
+                if not self._local():
+                    return
                 if self.path.split("?")[0] == "/stop":
                     view.stop_event.set()
                     self._send(200, b"{}", "application/json")
@@ -797,25 +807,54 @@ def _nice_time(s):
     return "%d min %02d s" % (s // 60, s % 60)
 
 
+class SaveError(UserError):
+    """The table could not be saved (the message says where the rows so far are)."""
+
+
+def partial_path(out_path):
+    """Rows are written here as they come, so a run that stops early still leaves them."""
+    root, ext = os.path.splitext(out_path)
+    return root + ".partial" + (ext or ".csv")
+
+
+def _replace(src, dst):
+    """Swap a finished file in; on Windows another program (Excel) may hold the target for a moment."""
+    for _ in range(15):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            time.sleep(0.2)
+    os.replace(src, dst)
+
+
 def run(source, pipe, out_path, view=None, seconds=0, max_frames=0, say=print, stop=None, quiet_progress=False):
     """Watch the source and write the table. Returns the number of rows written.
-    Recordings and video files: the table is written at the end (so the first frames of each object
-    are filled in). Cameras: every row is written as it happens."""
+    Every row is written as it happens to <name>.partial.csv. At the end the table is written to a
+    temporary file and renamed to out_path: for recordings and video files the finished table (the
+    first frames of each object filled in), for cameras the rows as they happened. If the run stops
+    early or the save fails, the rows so far stay in the .partial.csv file (SaveError says so)."""
     stop = stop or (view.stop_event if view else threading.Event())
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     cols = pipe.columns
     live = bool(source.live)
-    fh = None
-    writer = None
+    part = partial_path(out_path)
+    try:
+        fh = open(part, "w", newline="", encoding="utf-8")
+    except OSError as e:
+        raise SaveError("The table can't be saved at %s (%s). Pick another place with --out." % (out_path, e))
+    writer = csv.writer(fh)
+    writer.writerow(cols)
     n_rows = 0
-    if live:
-        fh = open(out_path, "w", newline="", encoding="utf-8")
-        writer = csv.writer(fh)
-        writer.writerow(cols)
+    n_live = 0
     t_start = time.time()
     stamps = []
     last_say = 0.0
     frames = 0
+    total = source.n if not live else None
+    if max_frames:
+        total = min(total, max_frames) if total else max_frames
+    finished = False
     try:
         while not stop.is_set():
             if max_frames and frames >= max_frames:
@@ -836,36 +875,57 @@ def run(source, pipe, out_path, view=None, seconds=0, max_frames=0, say=print, s
                 stamps.pop(0)
             fps = (len(stamps) - 1) / (stamps[-1] - stamps[0]) if len(stamps) > 1 and stamps[-1] > stamps[0] else 0.0
             left = ""
-            total = source.n if not live else None
             if total and fps > 0:
-                left = _nice_time(max(0, total - f - 1) / fps)
-            if live:
-                for o in objs:
-                    writer.writerow(csv_line(o, cols))
-                    n_rows += 1
-                if frames % 20 == 0:
-                    fh.flush()
+                left = _nice_time(max(0, total - frames) / fps)
+            for o in objs:
+                writer.writerow(csv_line(o, cols))
+                n_live += 1
+            if frames % 20 == 0:
+                fh.flush()
             if view is not None:
                 view.publish(f, img, objs, fps, total, left)
             if not quiet_progress and now - last_say >= 0.5:
                 last_say = now
                 if total:
                     say("  frame %d of %d (%d%%), %.1f frames a second, about %s left"
-                        % (f + 1, total, 100 * (f + 1) // total, fps, left or "?"))
+                        % (frames, total, min(100, 100 * frames // total), fps, left or "?"))
                 else:
                     say("  %d frames so far, %.1f frames a second, %d objects in the last picture" % (frames, fps, len(objs)))
-        if not live:
-            rows = pipe.finished_rows()
-            with open(out_path, "w", newline="", encoding="utf-8") as fh2:
-                w2 = csv.writer(fh2)
-                w2.writerow(cols)
-                for rec in rows:
-                    w2.writerow(csv_line(rec, cols))
-            n_rows = len(rows)
+        finished = True
     finally:
-        if fh is not None:
-            fh.close()
+        fh.close()
+        if not finished and n_live:
+            say("Stopped early: the %d rows so far are in %s" % (n_live, part))
+    try:
+        if live:
+            _replace(part, out_path)
+            n_rows = n_live
+        else:
+            rows = pipe.finished_rows()
+            tmp = "%s.%d.tmp" % (out_path, os.getpid())
+            try:
+                with open(tmp, "w", newline="", encoding="utf-8") as fh2:
+                    w2 = csv.writer(fh2)
+                    w2.writerow(cols)
+                    for rec in rows:
+                        w2.writerow(csv_line(rec, cols))
+                _replace(tmp, out_path)
+            finally:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            n_rows = len(rows)
+            os.remove(part)
+    except OSError as e:
+        raise SaveError("The table could not be saved to %s (%s). Is it open in another program, such as Excel? "
+                        "The rows as they came are kept in %s." % (out_path, e, part))
     return n_rows
+
+
+def explain_empty(min_score):
+    """Why a run can end with no rows, in plain words."""
+    return ("The model found no objects it was sure enough about (its minimum score is %s). Try a lower --min-score "
+            "(for example 0.2), or label more frames and train the model longer, then run it again."
+            % ("the model's own setting, usually 0.3" if min_score is None else "%.2f" % min_score))
 
 
 # --------------------------------------------------------------------------------------------
@@ -1028,7 +1088,8 @@ def default_out(proj, source, model_id, spec):
     if source.live:
         base = "live-%s" % stamp
     else:
-        base = re.sub(r"[^A-Za-z0-9_.-]+", "-", (source.label or "run")).strip("-.") or "run"
+        # a new name every run: an earlier table is never overwritten
+        base = (re.sub(r"[^A-Za-z0-9_.-]+", "-", (source.label or "run")).strip("-.") or "run") + "_" + stamp
     if model_id:
         base += "_" + model_id
     folder = os.path.join(proj.folder, "tracks") if proj is not None else os.getcwd()
@@ -1123,16 +1184,27 @@ def _run_main(a, spec, detector=None, say=print):
         if source.live:
             say("Press the Stop button on the page (or Ctrl+C here) to finish.")
         t0 = time.time()
+        end_msg = None
         try:
             n = run(source, pipe, out, view, a.seconds, a.max_frames, say)
+            end_msg = "Finished. The table is saved in %s" % out
+            if n == 0:
+                end_msg += ". It has no rows: " + explain_empty(a.min_score)
+        except SaveError as e:
+            end_msg = "Not saved: %s" % e
+            say("")
+            say(end_msg)
+            return 1
         finally:
             if view is not None:
-                view.finish("Finished. The table is saved in %s" % out)
+                view.finish(end_msg or "Stopped before the end; nothing more was saved.")
                 time.sleep(1.2)
                 view.close()
         dt = time.time() - t0
         say("")
         say("Done: %d rows for %d objects in %s. Saved: %s" % (n, len(pipe.tk.summary()), _nice_time(dt), out))
+        if n == 0:
+            say(explain_empty(a.min_score))
         return 0
     finally:
         source.close()
