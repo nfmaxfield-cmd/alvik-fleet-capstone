@@ -113,3 +113,12 @@ built-in assumptions.
 | Robots can't jump; max speed ~3 robot sizes/s | Per-type motion limits in Object types (max speed; can it be carried by hand; can it sit still for a long time) |
 | Robot logs confirm a split branch | "Outside data": any log of positions or events on the shared clock (a robot arm's controller log, a conveyor's encoder) can vote on branches |
 | Still robots on a fixed board | Appearance chain works for any still object; the per-type "can sit still" setting decides how long a still track is kept |
+
+## First start: set up with the person, not for them (Nick, 2026-10-20)
+
+- Before the first frame, a short setup that the person confirms or edits: what objects are
+  tracked (with the ready-made "Alvik robots" set as one choice), their keys (1 alvik, 2 hand,
+  3 unknown ...), colours, whether each has a front. Nothing judged until this is confirmed.
+- A first-time tour of the screen: what each tab and button does, which ones are safe to try,
+  and which change saved work (Accept remaining high-confidence frames, Reset this frame,
+  Train new model). Can be reopened from a "?" button.
