@@ -156,7 +156,7 @@ motion pass, the frame picker and the model all spend effort on the room around 
 - Alvik shortcut: the floor calibration's tape marks already give the board outline.
 - Generic: the other team draws their table or the arm's reach.
 
-## Claude's ideas (2026-10-20, not yet agreed with Nick)
+## Claude's ideas (2026-10-20; Nick's answers below)
 
 1. Fix tracks, not frames: a timeline with one lane per object across the recording; breaks,
    jumps and swaps are marked; one fix corrects every frame of that stretch.
@@ -175,3 +175,29 @@ motion pass, the frame picker and the model all spend effort on the room around 
    saving work (a strong number for the report).
 9. Share a project as one file (labels, settings, models), for handing over or a second
    labeller.
+
+Nick's answers (2026-10-20): yes to 1, 2, 3, 4, 5, 6, 8, 9. 7 only if it proves itself (below).
+- 3, live use: start every live run with a roll call (the studio shows what it sees, the
+  person confirms or fixes once; Alviks can identify themselves by blinking), then show a
+  confidence per object all the time (green / amber / red, "last confirmed 2 min ago"), and
+  ask for a fresh confirmation when it drops. Generic: the person does the roll call.
+- 5: plus a one-key full-screen mode.
+- 7: pasted objects can carry wrong shadows, seams or impossible spots. Only paste onto the
+  work area of the same camera, never score on pasted frames, and keep it only if the score on
+  real held-out frames goes up (train with and without; the report shows both).
+- 9 and 8: track every time saving for the final report to the professor: seconds and fixes
+  per frame, frames auto-accepted, labels from outside data vs by hand, per model version;
+  also setup and install times. Each saved frame already stores its save time, so today's
+  labelling can be counted.
+
+## Lab changes that make training easier (to discuss)
+
+- Aim the overhead camera so the board fills the picture (now about half): more pixels per
+  robot for free.
+- Every session: robot logs on and synced (already), an empty-board shot at the start and end,
+  robots started on taped spots (exact first labels).
+- The light attachment: identity and facing visible in every frame. Until then, a printed
+  high-contrast arrow on each robot's top gives facing in a still frame (keep it on for good:
+  the model learns it).
+- Planned variety per session, aimed at the report's weak situations (close pairs, hands,
+  edges, still robots, a lamp switched on and off).
