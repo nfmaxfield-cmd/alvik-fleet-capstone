@@ -219,3 +219,11 @@ light's position (robot frame, cm) and its index on the chain, for the camera so
 Print: black, 0.20 mm layers, top face down as exported (the pockets' floors bridge 11 mm at most), no supports.
 The plate covers the robot's top buttons and its own two top lights: runs start from the laptop, and the ID
 lights replace the blink code (firmware for the pixel chain: to do).
+
+## One-piece attachment: `build_attachment.py`
+
+The nose bracket and the light plate as one printed part (`stl/attachment.stl`): two front legs rise from the
+bracket's arms to the plate, so the plate stands on four legs and switches, lights and robot are fixed to each
+other by the print. All eight side inserts are used (M3 x 8, four per side: the arms on the front pair, the back
+legs on the back pair). It slides straight down over the robot from above. Print upside down (plate's top face
+on the bed) with supports on (tree supports if offered): ~1450 mm^2 under the switch bar and the arms needs them.
