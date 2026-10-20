@@ -194,8 +194,21 @@ Nick's answers (2026-10-20): yes to 1, 2, 3, 4, 5, 6, 8, 9. 7 only if it proves 
 
 - Aim the overhead camera so the board fills the picture (now about half): more pixels per
   robot for free.
-- Every session: robot logs on and synced (already), an empty-board shot at the start and end,
-  robots started on taped spots (exact first labels).
+- Every session: robot logs on and synced (already), and an empty-board shot at the start and end.
+- The dock is the session's anchor (rewritten 2026-10-20, replaces "taped spots"):
+  - Start and end every session parked in the docks. A parked robot's position, facing and
+    identity are known exactly, so the first and last labels of every track are free and exact.
+  - The robot's log starts at the dock, so its heading zero is the dock's known direction:
+    that is what lets the logs be placed into the picture (draft labels with facing, idea 2).
+  - Visits mid-session (parking, or a `run posts` touch at a post station) are automatic
+    check-ins: the chain gets a fresh, exact confirmation without the person, and the log's
+    drift is measured and corrected at the same moment.
+  - The end-of-session return error is a free accuracy number for both the logs and the camera.
+  - The check tile on each dock never moves: the camera checks it every frame, so a bumped
+    camera is caught at once (live confidence drops; labels after the bump are flagged).
+  - Generic form: "home positions": any fixture where an object's position is known exactly
+    (a robot arm's home pose, a parts tray, a fixture on a conveyor). Marked in setup; every
+    visit is a free confirmation.
 - The light attachment: identity and facing visible in every frame. Until then, a printed
   high-contrast arrow on each robot's top gives facing in a still frame (keep it on for good:
   the model learns it).
