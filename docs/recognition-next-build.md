@@ -53,8 +53,8 @@ The studio should not say "Alvik" until the project is about Alviks. Places it s
 - Short looping clip (about 1 s either side) on hover or a key, for judging what's happening:
   useful for hand vs robot, objects being placed, and motion. Note: motion direction is not
   facing (robots reverse and spin in place).
-- Tracker headings show as solid and were saved as known when Enter was pressed: they should
-  show dashed (a guess) unless the person sets them.
+- Tracker headings showed as solid and were saved as known when Enter was pressed. Fixed 2026-10-20:
+  motion headings now show dashed (a guess) and save as unknown unless the person sets them.
 
 ## Chained guesses for still objects (Nick, 2026-10-20)
 

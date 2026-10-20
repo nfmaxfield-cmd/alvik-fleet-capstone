@@ -480,8 +480,13 @@ class Session:
     def guess_objects(self, f):
         out = []
         for r in self.guesses.get(f, []):
-            out.append(dict(obj=r["obj"], cls=r["cls"], x=r["x"], y=r["y"], heading_deg=r["heading_deg"],
-                            heading_known=r["heading_known"], heading_guess=r["heading_guess"],
+            hd, hk, hg = r["heading_deg"], r["heading_known"], r["heading_guess"]
+            if hk and r["source"] in ("motion", "track"):
+                # a heading worked out from motion is only a guess (robots reverse and spin):
+                # shown dashed, saved as unknown unless the person sets it
+                hd, hk, hg = None, False, (hd if hg is None else hg)
+            out.append(dict(obj=r["obj"], cls=r["cls"], x=r["x"], y=r["y"], heading_deg=hd,
+                            heading_known=hk, heading_guess=hg,
                             source=r["source"], status="pending", score=r["score"], close=bool(r.get("close"))))
         return out
 
