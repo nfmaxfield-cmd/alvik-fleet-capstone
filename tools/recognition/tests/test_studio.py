@@ -210,9 +210,12 @@ def test_web_routes(tmp_path, synth_rec):
 
 
 @pytest.mark.skipif(os.environ.get("RECOGNITION_TRAIN") != "1", reason="slow: set RECOGNITION_TRAIN=1")
-def test_train_and_score(tmp_path, synth_rec):
+def test_train_and_score(tmp_path):
+    synth_rec = str(tmp_path / "rec60")
+    subprocess.run([sys.executable, os.path.join(TOOLS, "label", "tests", "synth.py"), synth_rec, "--seconds", "60"],
+                   check=True, capture_output=True)
     proj = projmod.Project(str(tmp_path / "p"), create_name="Train")
-    proj.data["settings"]["block_s"] = 4
+    proj.data["settings"]["block_s"] = 10
     proj.save()
     rid = proj.add_recording(synth_rec, "overhead")[0]
     st = studiomod.Studio(proj, log=lambda *a: None)
@@ -231,7 +234,7 @@ def test_train_and_score(tmp_path, synth_rec):
     mid = st.trainer.start(minutes=1.0)
     while st.trainer.busy():
         time.sleep(3)
-    assert st.trainer.job["status"] == "done", st.trainer.job
+    assert st.trainer.job["status"] == "done", st.trainer.job["message"]
     c = st.curve()
     assert {p["model"] for p in c["points"]} == {"none", mid}
     assert c["test"]["frames"] > 0
