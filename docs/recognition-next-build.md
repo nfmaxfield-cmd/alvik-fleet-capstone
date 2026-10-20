@@ -55,3 +55,33 @@ The studio should not say "Alvik" until the project is about Alviks. Places it s
   facing (robots reverse and spin in place).
 - Tracker headings show as solid and were saved as known when Enter was pressed: they should
   show dashed (a guess) unless the person sets them.
+
+## Chained guesses for still objects (Nick, 2026-10-20)
+
+Problem seen: Center sat still in the corner all session and was never guessed. Guesses come
+only from motion; a robot the person adds is carried forward at its spot, but fades and is
+dropped after 45 s with no motion (tracker max_absence_s), and picked frames are usually
+further apart than that.
+
+Nick's idea: chain frame to frame. A confirmation informs the next frame, that frame the next,
+and so on: neighbouring frames look almost identical, so each step is safe, where comparing
+frame 1 with frame 100 directly may not be.
+
+- Add an appearance link to the tracker: compare the small patch around each object with the
+  previous frame's patch. A still object stays found for as long as its patch matches.
+- Keep drift low automatically: (1) if nothing moved there, the position stays fixed (no
+  drift at all for still objects); (2) check each step against the previous frame and against
+  the patch the person confirmed; if they disagree, lower the confidence; (3) break the chain
+  when something moves over the object (a hand), and ask for a look; (4) confidence falls
+  with chain length.
+- How often a person should confirm: measure, don't pick. Run the chain from one confirmed
+  frame to the next confirmed frame of the same object and record the error against the
+  chain length; the tolerance (about a quarter of a robot) sets the length. Then ask for a
+  fresh confirmation when the chain's confidence drops, rather than every N frames.
+
+## Frame picking (to discuss with Nick; likely kept)
+
+Current rules (select_frames.py): about one frame per second, skipping near-duplicates; extra
+frames when an object appears, disappears, two objects are close, or a guess scores low; the
+first and last frame. "Most useful next" orders them least-confident first.
+Gap seen: a still object is never detected, so it never makes a frame "interesting" either.
