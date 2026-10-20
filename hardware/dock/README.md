@@ -210,8 +210,10 @@ parts screw into the robot's own inserts, so lights, switches and robot are fixe
 rather than one: a single part would need support under the switch bar.
 
 It holds 13 SK6812 RGBW single-pixel boards (10 mm round, ASSUMED: measure one and change `PIXEL_DIA_MM`):
-5 at the front in a plus and 2 at the back (directional: big blob = front), 6 ID lights 14 mm apart across the
-middle. Wire channels join them in data order from the cable hole; `stl/light_plate_layout.json` has every
+5 in a row across the front and 2 at the back (directional: bright bar = front), 6 ID lights in a zigzag across
+the middle (17 mm between neighbours). Power: the 5 V pin of a servo connector (the robot's boost converter);
+data: a Nano pin (3.3 V logic, at the edge of what 5 V pixels accept: check the first pixel, add a level shifter
+if it misreads). Wire channels join them in data order from the cable hole; `stl/light_plate_layout.json` has every
 light's position (robot frame, cm) and its index on the chain, for the camera software and the firmware.
 
 Print: black, 0.20 mm layers, top face down as exported (the pockets' floors bridge 11 mm at most), no supports.

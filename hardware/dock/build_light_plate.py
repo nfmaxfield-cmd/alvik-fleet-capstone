@@ -7,9 +7,11 @@ so the lights, the switches and the robot are fixed to each other; two parts bec
 support under the switch bar, and the bracket is already printed.
 
 Lights: SK6812 RGBW single-pixel boards (round, ~10 mm, pads on the LED side), chained on one data line.
-  - 5 at the front in a plus (directional: one large bright blob on camera = the front)
+  - 5 at the front in a row across (directional: a bright bar on camera = the front; the bar's line is a
+    second heading cue)
   - 2 at the back side by side (directional: a small blob = the back)
-  - 6 in a row across the middle, 14 mm apart (ID: each on or off; codes that survive one missed light)
+  - 6 across the middle in a zigzag, 17 mm between neighbours (ID: each on or off; codes that survive one
+    missed light)
 The pixel boards sit in shallow pockets on the top face; wire channels join them in chain order, starting at
 the cable hole (the wires to the robot's board go down through it).
 
@@ -35,7 +37,7 @@ PIXEL_PITCH_MM = 11.0          # cluster spacing: boards nearly touching (one bl
 ID_PITCH_MM = 14.0             # ID lights: at least 13 mm apart (4.4 px on this camera) so they don't merge
 PLATE_T_MM = 4.0
 PLATE_UNDER_Z_MM = 59.0        # plate underside above the floor (Andrew's plate: ~59; robot top 37.2)
-PLATE_X_MM = (-51.0, 58.0)     # back and front edge (robot X)
+PLATE_X_MM = (-51.0, 55.0)     # back and front edge (robot X)
 LEG_T_MM = 3.5
 LEG_W_MM = 10.0
 LEG_CLEAR_MM = 0.15
@@ -46,14 +48,17 @@ CHANNEL_W_MM = 2.6             # three thin wires side by side
 CHANNEL_D_MM = 1.6
 CABLE_HOLE_MM = 7.0
 
-FRONT = [(40.0, 0.0), (40.0 - PIXEL_PITCH_MM, 0.0), (40.0, -PIXEL_PITCH_MM), (40.0 + PIXEL_PITCH_MM, 0.0),
-         (40.0, PIXEL_PITCH_MM)]
+FRONT_X = 46.0                 # front bar: 5 in a row across the front (a bar on camera: its line and its
+FRONT = [(FRONT_X, k * PIXEL_PITCH_MM) for k in (2, 1, 0, -1, -2)]   # centre both give the heading)
 REAR = [(-40.0, -PIXEL_PITCH_MM / 2), (-40.0, PIXEL_PITCH_MM / 2)]
 ID_X = 4.0
-IDS = [(ID_X, y) for y in (35.0, 21.0, 7.0, -7.0, -21.0, -35.0)]
+ID_ZIG_MM = 5.0                # zigzag: neighbours 17 mm apart, and each light differs from its neighbours in
+                               # both directions, so one or two lit lights are placed without doubt
+IDS = [(ID_X + (ID_ZIG_MM if i % 2 == 0 else -ID_ZIG_MM), y)
+       for i, y in enumerate((35.0, 21.0, 7.0, -7.0, -21.0, -35.0))]
 CABLE = (-28.0, 0.0)
 # chain (data) order: cable -> rear pair -> ID row -> front cluster
-CHAIN = REAR + IDS + [FRONT[1], FRONT[2], FRONT[3], FRONT[4], FRONT[0]]
+CHAIN = REAR + IDS + list(reversed(FRONT))
 ROLE = ["rear"] * 2 + ["id%d" % i for i in range(6)] + ["front"] * 5
 
 
@@ -176,7 +181,7 @@ def plan_png(path):
     ax.set_ylim(-yo - 8, yo + 8)
     ax.set_xlabel("mm, forward from the wheel axle")
     ax.set_ylabel("mm, left")
-    ax.set_title("Light plate from above: blue = directional (5 front, 2 back), red = ID;\n"
+    ax.set_title("Light plate from above: blue = directional (5 across the front, 2 back), red = ID (zigzag);\n"
                  "numbers = data order along the chain (yellow = wire channels)", fontsize=9)
     fig.tight_layout()
     fig.savefig(path)
