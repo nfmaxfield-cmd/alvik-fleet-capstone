@@ -1,0 +1,84 @@
+{
+ "chain": [
+  {
+   "index": 0,
+   "role": "rear",
+   "x_cm": -4.0,
+   "y_cm": -0.55
+  },
+  {
+   "index": 1,
+   "role": "rear",
+   "x_cm": -4.0,
+   "y_cm": 0.55
+  },
+  {
+   "index": 2,
+   "role": "id0",
+   "x_cm": 0.4,
+   "y_cm": 3.5
+  },
+  {
+   "index": 3,
+   "role": "id1",
+   "x_cm": 0.4,
+   "y_cm": 2.1
+  },
+  {
+   "index": 4,
+   "role": "id2",
+   "x_cm": 0.4,
+   "y_cm": 0.7
+  },
+  {
+   "index": 5,
+   "role": "id3",
+   "x_cm": 0.4,
+   "y_cm": -0.7
+  },
+  {
+   "index": 6,
+   "role": "id4",
+   "x_cm": 0.4,
+   "y_cm": -2.1
+  },
+  {
+   "index": 7,
+   "role": "id5",
+   "x_cm": 0.4,
+   "y_cm": -3.5
+  },
+  {
+   "index": 8,
+   "role": "front",
+   "x_cm": 2.9,
+   "y_cm": 0.0
+  },
+  {
+   "index": 9,
+   "role": "front",
+   "x_cm": 4.0,
+   "y_cm": -1.1
+  },
+  {
+   "index": 10,
+   "role": "front",
+   "x_cm": 5.1,
+   "y_cm": 0.0
+  },
+  {
+   "index": 11,
+   "role": "front",
+   "x_cm": 4.0,
+   "y_cm": 1.1
+  },
+  {
+   "index": 12,
+   "role": "front",
+   "x_cm": 4.0,
+   "y_cm": 0.0
+  }
+ ],
+ "height_cm": 6.36,
+ "note": "x forward from the wheel axle (turning centre), y left; chain index = data order"
+}

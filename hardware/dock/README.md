@@ -201,3 +201,19 @@ both push a moment longer (the face seats flush), then it stops: square to the w
 side and 8 deg turned) all docked, with the true pose spread about 0.05 mm along the axis, 0.5 mm sideways
 (the pocket's play) and 0.1 deg; that spread depends on the simulator's guessed contact model and is what
 E00e measures for real.
+
+## Light plate (camera lights): `build_light_plate.py`
+
+A plate about 22 mm above the robot's top (the height Andrew Muszynski's AprilTag plate used), on two legs
+screwed to the **back** pair of side inserts with M3 x 8 screws; the nose bracket keeps the front pair. Both
+parts screw into the robot's own inserts, so lights, switches and robot are fixed to each other. Two parts
+rather than one: a single part would need support under the switch bar.
+
+It holds 13 SK6812 RGBW single-pixel boards (10 mm round, ASSUMED: measure one and change `PIXEL_DIA_MM`):
+5 at the front in a plus and 2 at the back (directional: big blob = front), 6 ID lights 14 mm apart across the
+middle. Wire channels join them in data order from the cable hole; `stl/light_plate_layout.json` has every
+light's position (robot frame, cm) and its index on the chain, for the camera software and the firmware.
+
+Print: black, 0.20 mm layers, top face down as exported (the pockets' floors bridge 11 mm at most), no supports.
+The plate covers the robot's top buttons and its own two top lights: runs start from the laptop, and the ID
+lights replace the blink code (firmware for the pixel chain: to do).
