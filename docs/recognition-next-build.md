@@ -99,3 +99,17 @@ rarely keeps looking alike (and moving plausibly), so the wrong branch dies out.
   (no jumps); later, agrees with the robot's own log.
 - A split that never resolves (two identical Alviks crossing: they look the same forever) is
   exactly the frame to show the person: it should go to the top of "Most useful next".
+
+## Making it work for any project (Nick, 2026-10-20: standing rule)
+
+Every Alvik-specific idea gets written down with its generic form too. The studio should take
+knowledge about the objects as optional plug-ins that a project can switch on, never as
+built-in assumptions.
+
+| Alvik-specific | Generic form |
+| --- | --- |
+| ID lights tell Left / Center / Right apart | "Identity mark": an optional per-type way to tell individuals apart (lights, colour, a printed tag, a shape). Without one, identity comes from motion continuity only, and unresolved crossings go to the person |
+| Facing from robot logs and front/rear lights | "Facing source": optional per type (a log file on the shared clock, a visible front mark, or none). Types without a front have no facing at all (already: has_front) |
+| Robots can't jump; max speed ~3 robot sizes/s | Per-type motion limits in Object types (max speed; can it be carried by hand; can it sit still for a long time) |
+| Robot logs confirm a split branch | "Outside data": any log of positions or events on the shared clock (a robot arm's controller log, a conveyor's encoder) can vote on branches |
+| Still robots on a fixed board | Appearance chain works for any still object; the per-type "can sit still" setting decides how long a still track is kept |
