@@ -122,3 +122,16 @@ built-in assumptions.
 - A first-time tour of the screen: what each tab and button does, which ones are safe to try,
   and which change saved work (Accept remaining high-confidence frames, Reset this frame,
   Train new model). Can be reopened from a "?" button.
+
+## Object height: allow "it varies" (Nick, 2026-10-20)
+
+Height is only used to pass a label from one camera to the other (where the labelled point
+sits above the floor). Hands get a fixed 10 cm and unknown objects 0 cm, both trusted to
++/- 0.5 cm: wrong for anything whose height changes (a hand) or differs per object (a cup vs a
+box), so those guesses in the second camera would land in the wrong place with too much
+confidence.
+- Add an "it varies" choice (the default for hand and unknown). Such types are not passed
+  between cameras, or are passed only as a low-confidence hint; the person places them.
+- Generic form: the same choice for any type (a part lifted by a robot arm varies).
+- Rename the column in plain words: "Height of the marked point above the floor (for the
+  second camera)".
