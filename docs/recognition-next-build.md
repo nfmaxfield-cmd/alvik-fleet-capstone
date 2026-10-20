@@ -42,3 +42,16 @@ The studio should not say "Alvik" until the project is about Alviks. Places it s
   second is ready when you get there.
 - No way to say "I can't tell which way it faces": the tracker sometimes marks a heading as
   known (solid arrow), and Enter saved it. Added the **U** key (facing unknown) 2026-10-20.
+
+## Direction (facing) labels (Nick, 2026-10-20)
+
+- A still frame often can't show which way a robot faces (grey picture, ~30 px robots, a
+  roughly square body). Hand-set direction only where it is plainly visible.
+- Proposal: facing comes from sources that know it, not from a person guessing:
+  the robots' own logs (each robot records its heading; match its track on the shared clock),
+  and later the light attachment (5 front, 2 rear lights: visible in one frame).
+- Short looping clip (about 1 s either side) on hover or a key, for judging what's happening:
+  useful for hand vs robot, objects being placed, and motion. Note: motion direction is not
+  facing (robots reverse and spin in place).
+- Tracker headings show as solid and were saved as known when Enter was pressed: they should
+  show dashed (a guess) unless the person sets them.
