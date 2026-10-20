@@ -87,6 +87,10 @@ def build_dataset(proj, out_dir, block_s=30.0, guard_s=1.0, fps_default=25.0):
             rows = list(reader)
         times = _times(r["path"]) or []
         t0 = next((t for t in times if t is not None), 0.0)
+        # a frame holding an object marked unsure is left out of training, picking and scoring
+        # until the person resolves it
+        unsure = {row["frame"] for row in rows if (row.get("status") or "").strip() == "unsure"}
+        rows = [row for row in rows if row["frame"] not in unsure]
         by_block = {}
         for row in rows:
             fr = int(row["frame"])

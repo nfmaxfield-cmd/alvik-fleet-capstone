@@ -112,8 +112,11 @@ def _calib_cm(cam):
 
 def cross_guesses(objects_a_by_frame, cam_a, cam_b, times_a, times_b, size_b=None, class_heights=None,
                   default_height_cm=4.0, score_scale=1.0, min_score=None, max_dt=None, offset_s=0.0,
-                  speed_cm_s=SPEED_CM_S, margin_px=0.0, lead_cm=3.0):
+                  speed_cm_s=SPEED_CM_S, margin_px=0.0, lead_cm=3.0, skip_classes=()):
     """Camera A's confirmed labels -> guesses in camera B's frames.
+
+    skip_classes: types whose height varies (a hand, a lifted part): their spot in B can't be
+    worked out, so they are not passed on (the person places them).
 
     Returns {frame_b: [dict(cls, x, y, heading_deg, score, source='camera', from_frame, from_obj,
     heading_known, dt_s, sigma_cm)]}. Uses objects with status confirmed/corrected; with
@@ -140,7 +143,7 @@ def cross_guesses(objects_a_by_frame, cam_a, cam_b, times_a, times_b, size_b=Non
         guesses = []
         for o in _objects(objects_a_by_frame[fa]):
             st, cls = o.get("status"), o.get("cls")
-            if cls in (None, "none") or st == "rejected":
+            if cls in (None, "none") or cls in skip_classes or st in ("rejected", "unsure"):
                 continue
             src_score = 1.0
             if st not in CONFIRMED:
@@ -173,11 +176,11 @@ def cross_guesses(objects_a_by_frame, cam_a, cam_b, times_a, times_b, size_b=Non
 
 # ---------------------------------------------------------------- disagreements
 def _reviewed(v, statuses):
-    """Labelled objects of a frame, or None if the frame is not fully reviewed (has pending objects)."""
+    """Labelled objects of a frame, or None if the frame is not fully reviewed (has pending or unsure objects)."""
     objs = _objects(v)
     if isinstance(v, dict) and v.get("state") not in (None, "reviewed", "auto", "edited"):
         return None
-    if any(o.get("status") == "pending" for o in objs):
+    if any(o.get("status") in ("pending", "unsure") for o in objs):
         return None
     return [o for o in objs if o.get("status") in statuses and o.get("cls") not in (None, "none")]
 
@@ -196,7 +199,7 @@ def _greedy(da, db, cost):
 
 def disagreements(labels_a_by_frame, labels_b_by_frame, cam_a, cam_b, times_a, times_b, class_heights=None,
                   tol_cm=2.0, default_height_cm=4.0, match_cm=15.0, max_dt=None, offset_s=0.0, margin_px=10.0,
-                  statuses=LABELLED):
+                  statuses=LABELLED, skip_classes=()):
     """Both cameras' labels compared on the floor, for every B frame with an A frame near in time
     where both frames are reviewed (no pending objects). Returns a list of dicts
     {frame_a, frame_b, obj_a, obj_b, cls, cls_b, dist_cm, dt_s, floor_a, floor_b, kind}:
@@ -206,7 +209,8 @@ def disagreements(labels_a_by_frame, labels_b_by_frame, cam_a, cam_b, times_a, t
       'missing_in_a' likewise for a B object.
     Each label is placed on the plane at its class height (class_heights, else default_height_cm).
     Compares confirmed / corrected / auto labels by default (statuses=...), so auto-accepted
-    labels that the other camera contradicts show up too."""
+    labels that the other camera contradicts show up too. Types in skip_classes (height varies)
+    are left out of the comparison."""
     pairs = match_frames(times_a, times_b, max_dt, offset_s, return_dt=True)
     out = []
 
@@ -225,6 +229,8 @@ def disagreements(labels_a_by_frame, labels_b_by_frame, cam_a, cam_b, times_a, t
         lb = _reviewed(labels_b_by_frame[fb], statuses)
         if la is None or lb is None:
             continue
+        la = [o for o in la if o["cls"] not in skip_classes]
+        lb = [o for o in lb if o["cls"] not in skip_classes]
         pa, pb = place(cam_a, la), place(cam_b, lb)
 
         def dist(i, j):

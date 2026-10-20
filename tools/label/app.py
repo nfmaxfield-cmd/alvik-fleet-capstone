@@ -27,6 +27,7 @@ What it does, in order:
 Only numpy and opencv-python are needed. Stop with Ctrl+C.
 """
 import argparse
+import collections
 import csv
 import datetime as dt
 import importlib.util
@@ -49,9 +50,18 @@ if HERE not in sys.path:
 import motion          # noqa: E402
 import tracker         # noqa: E402
 import select_frames   # noqa: E402
+import workarea        # noqa: E402
 
+BRAND = "Maxfield IRL Tracking"
+TAGLINE = "Identify. Recognize. Label."
+
+# Object types when this labelling app runs on its own (the recognition studio passes the
+# project's own types instead).
 CLASSES = ["alvik", "hand", "unknown", "machine"]
-STATUSES = ["pending", "confirmed", "corrected", "rejected"]
+# unsure: the person can't tell what it is yet; frames holding one are kept out of training
+# and scoring until it is resolved.
+STATUSES = ["pending", "confirmed", "corrected", "rejected", "unsure"]
+SAME_PICTURE_S = 10.0      # same-picture frames are looked for this far either side of an accepted frame
 
 
 def _mem_status(st):
@@ -85,6 +95,37 @@ def write_atomic(path, text):
             time.sleep(0.2)
     raise PermissionError("%s is open in another program (Excel?). Close it; your work is kept "
                           "and will be saved with the next change." % os.path.basename(path))
+
+
+class RateClock:
+    """Time left for a long job, from the recent rate (the last `window` seconds), not from
+    the start: the first frames of a video are often quicker or slower than the rest."""
+
+    def __init__(self, window=30.0):
+        self.window = window
+        self.samples = collections.deque()
+
+    def update(self, done, total, now=None):
+        """Note progress; returns the seconds left, or None while there is too little to go on."""
+        now = time.time() if now is None else now
+        self.samples.append((now, done))
+        while len(self.samples) > 2 and now - self.samples[1][0] >= self.window:
+            self.samples.popleft()
+        t0, d0 = self.samples[0]
+        if now - t0 < 2.0 or done <= d0 or not total:
+            return None
+        return max(0.0, (total - done) * (now - t0) / (done - d0))
+
+
+def fmt_left(s):
+    """Seconds left in plain words."""
+    if s is None:
+        return ""
+    if s < 60:
+        return "about %d s left" % max(1, int(round(s / 5.0) * 5) or 1)
+    if s < 3600:
+        return "about %d min left" % int(round(s / 60.0))
+    return "about %.1f h left" % (s / 3600.0)
 
 
 def wilson(k, n, z=1.96):
@@ -188,6 +229,68 @@ def load_detections(path, n):
     return dets
 
 
+def motion_cache_key(rec, robot_px=None):
+    st = os.stat(rec.video)
+    return dict(kind="motion", version=CACHE_VERSION, video=[st.st_size, int(st.st_mtime)], robot_px=robot_px, n=rec.n)
+
+
+def has_motion_cache(rec, cache_dir, robot_px=None):
+    info_path = os.path.join(cache_dir, "motion_info.json")
+    if not (os.path.exists(info_path) and os.path.exists(os.path.join(cache_dir, "motion_detections.csv"))):
+        return False
+    try:
+        with open(info_path) as f:
+            return json.load(f).get("key") == motion_cache_key(rec, robot_px)
+    except ValueError:
+        return False
+
+
+def motion_guesses(rec, cache_dir, robot_px=None, progress=None, log=print):
+    """The motion finder's guesses for every frame of a Recording, from the cache in cache_dir
+    or worked out (the first time; slow) and cached. Returns (guesses per frame, object size px).
+    progress(done, total): optional."""
+    os.makedirs(cache_dir, exist_ok=True)
+    key = motion_cache_key(rec, robot_px)
+    info_path = os.path.join(cache_dir, "motion_info.json")
+    det_path = os.path.join(cache_dir, "motion_detections.csv")
+    if has_motion_cache(rec, cache_dir, robot_px):
+        with open(info_path) as f:
+            info = json.load(f)
+        log("Using saved motion guesses from labels/cache/.")
+        return load_detections(det_path, rec.n), (robot_px or info["robot_px"])
+    log("Finding moving objects in the recording (first time only) ...")
+    dets, minfo = motion.detect_recording(rec.video, fps=rec.fps, robot_px=robot_px, times=rec.times,
+                                          n_frames=rec.n, progress=progress)
+    dets.extend([[] for _ in range(rec.n - len(dets))])
+    info = dict(key=key, robot_px=minfo["robot_px"], robot_px_source=minfo["robot_px_source"])
+    log("Object size: %.1f px (%s)" % (minfo["robot_px"], minfo["robot_px_source"]))
+    save_detections(det_path, dets)
+    write_atomic(info_path, json.dumps(info, indent=1))
+    return dets, minfo["robot_px"]
+
+
+def map_classes(dets, class_map, classes):
+    """Rename guesses' types with class_map (e.g. the motion finder's names -> the project's);
+    a type the project doesn't have becomes "unknown" if it has that, else the guess is dropped."""
+    out = []
+    for ds in dets:
+        if ds is None:
+            out.append(None)
+            continue
+        keep = []
+        for d in ds:
+            c = (class_map or {}).get(d["cls"], d["cls"])
+            if c not in classes:
+                if "unknown" not in classes:
+                    continue
+                c = "unknown"
+            if c != d["cls"]:
+                d = dict(d, cls=c)
+            keep.append(d)
+        out.append(keep)
+    return out
+
+
 def load_model(module_path, weights, classes=None):
     """Import a detector module from a file and load its weights.
     Returns a function frame -> list of guesses. A class the project does not
@@ -250,17 +353,27 @@ def run_model_over(video, n, run, step=1, progress=None):
 
 class Session:
     def __init__(self, folder, model=None, weights=None, model_step=1, robot_px=None, reselect=False,
-                 low_threshold=0.6, log=print, classes=None, labels_dir=None, extra_dets=None, progress=None):
+                 low_threshold=0.6, log=print, classes=None, labels_dir=None, extra_dets=None, progress=None,
+                 class_map=None, loose_classes=None, front_classes=None, area=None):
         """classes: the object types this project labels (default CLASSES).
         labels_dir: where labels, frames and cached guesses go (default <recording>/labels;
         the recognition studio keeps them in its project folder instead).
         extra_dets: optional dict frame -> list of extra guesses (e.g. from another camera,
         source "camera"), merged with this recording's own guesses before tracking.
-        progress: optional callback(what, done, total) for long steps."""
+        progress: optional callback(what, done, total) for long steps (total 0: amount unknown).
+        class_map: the motion finder's guess names -> this project's types (motion guesses only).
+        loose_classes / front_classes: types the tracker lets move fast and end soon / types
+        that have a front (defaults: the tracker's own).
+        area: the camera's work area (a project.json cameras[...] entry, see workarea.py):
+        guesses outside it or in an ignore spot are dropped before tracking."""
         self.log = log
         self.classes = list(classes or CLASSES)
         self.progress_cb = progress
         self.extra_dets = extra_dets or {}
+        self.class_map = class_map
+        self.area_settings = dict(area) if area else None
+        self.dropped_by_area = 0
+        self._thumbs = {}
         self.rec = Recording(folder)
         self.labels_dir = os.path.abspath(labels_dir) if labels_dir else os.path.join(self.rec.folder, "labels")
         self.frames_dir = os.path.join(self.labels_dir, "frames")
@@ -279,32 +392,50 @@ class Session:
         self._load_review()
         self.robot_px = robot_px
         self.dets, self.source_name = self._guesses_per_frame()
+        if not self.model:
+            self.dets = map_classes(self.dets, self.class_map, self.classes)
         if self.extra_dets:
             for f, ds in self.extra_dets.items():
                 if 0 <= f < len(self.dets) and ds:
                     if self.dets[f] is None:
                         self.dets[f] = []
                     self.dets[f] = list(self.dets[f]) + [dict(d) for d in ds]
+        # the work area: applied to the guesses as they are built (cached guesses are not redone)
+        self.area = workarea.Area.from_settings(self.area_settings, default_margin=float(self.robot_px))
+        self.dets, self.dropped_by_area = workarea.filter_guesses(self.dets, self.area)
+        if self.dropped_by_area:
+            self.log("Work area: left out %d guesses outside it or in ignore spots." % self.dropped_by_area)
+        params = tracker.TrackerParams()
+        if loose_classes is not None:
+            params.loose_classes = tuple(loose_classes)
+        if front_classes is not None:
+            params.front_classes = tuple(front_classes)
         self.run = tracker.TrackRun(self.dets, self.rec.times, self.robot_px,
-                                    (self.rec.width, self.rec.height),
+                                    (self.rec.width, self.rec.height), params=params,
                                     det_source="model" if model else "motion")
         self._load_labels()
-        self.log("Following the guesses from frame to frame ...")
+        self._stage("Following the guesses from frame to frame ...")
         self.guesses, self.summary = self.run.run(self._anchors(), self._reserved_ids())
         self._select(reselect)
         self._update_conf()
         self.save()
 
     # --- guesses ---------------------------------------------------------------
+    def _stage(self, text):
+        """A step whose length isn't known: say what is happening."""
+        self.log(text)
+        if self.progress_cb:
+            self.progress_cb(text, 0, 0)
+
     def _progress(self, what):
-        start = time.time()
+        clock = RateClock()
 
         def cb(done, total):
             if self.progress_cb:
                 self.progress_cb(what, done, total)
-            el = time.time() - start
-            left = "" if done < 300 else " (about %.0f s left)" % (el / done * (total - done))
-            print("  %s: %d / %d frames%s    " % (what, done, total, left), end="\r", flush=True)
+            left = fmt_left(clock.update(done, total))
+            print("  %s: %d / %d frames%s    " % (what, done, total, (" (%s)" % left) if left else ""),
+                  end="\r", flush=True)
             if done >= total:
                 print()
         return cb
@@ -323,10 +454,9 @@ class Session:
             source_name = "model: %s (%s)" % (os.path.basename(self.model),
                                               os.path.basename(self.weights) if self.weights else "no weights")
         else:
-            key = dict(kind="motion", version=CACHE_VERSION, video=[st.st_size, int(st.st_mtime)],
-                       robot_px=self.robot_px, n=rec.n)
-            name = "motion"
-            source_name = "motion"
+            dets, self.robot_px = motion_guesses(rec, self.cache_dir, self.robot_px, self._progress("motion"),
+                                                 self.log)
+            return dets, "motion"
         info_path = os.path.join(self.cache_dir, name + "_info.json")
         det_path = os.path.join(self.cache_dir, name + "_detections.csv")
         if os.path.exists(info_path) and os.path.exists(det_path):
@@ -337,21 +467,12 @@ class Session:
                 if not self.robot_px:
                     self.robot_px = info["robot_px"]
                 return load_detections(det_path, rec.n), source_name
-        if self.model:
-            if not self.robot_px:
-                self.robot_px = self._robot_size()
-            self.log("Running the model on the recording (every %d. frame) ..." % self.model_step)
-            run = load_model(self.model, self.weights, self.classes)
-            dets = run_model_over(rec.video, rec.n, run, self.model_step, self._progress("model"))
-            info = dict(key=key, robot_px=self.robot_px)
-        else:
-            self.log("Finding moving objects in the recording (first time only) ...")
-            dets, minfo = motion.detect_recording(rec.video, fps=rec.fps, robot_px=self.robot_px, times=rec.times,
-                                                  n_frames=rec.n, progress=self._progress("motion"))
-            dets.extend([[] for _ in range(rec.n - len(dets))])
-            self.robot_px = minfo["robot_px"]
-            info = dict(key=key, robot_px=self.robot_px, robot_px_source=minfo["robot_px_source"])
-            self.log("Robot size: %.1f px (%s)" % (self.robot_px, minfo["robot_px_source"]))
+        if not self.robot_px:
+            self.robot_px = self._robot_size()
+        self.log("Running the model on the recording (every %d. frame) ..." % self.model_step)
+        run = load_model(self.model, self.weights, self.classes)
+        dets = run_model_over(rec.video, rec.n, run, self.model_step, self._progress("model"))
+        info = dict(key=key, robot_px=self.robot_px)
         save_detections(det_path, dets)
         write_atomic(info_path, json.dumps(info, indent=1))
         return dets, source_name
@@ -399,7 +520,7 @@ class Session:
                                  score=float(r["score"]) if r["score"] else None))
             self.frames[f] = dict(state=st.get("state", "reviewed"), how=st.get("how", "user"), objects=objs,
                                   auto_conf=st.get("auto_conf"), changed=st.get("changed", False),
-                                  updated=st.get("updated"), empty=empty)
+                                  updated=st.get("updated"), empty=empty, same_as=st.get("same_as"))
         # Frames with user rows in labels.csv that review.json does not know (it was lost).
         for f, rows in rows_by_frame.items():
             if f not in self.frames and any(r["status"] != "pending" for r in rows):
@@ -438,14 +559,16 @@ class Session:
         if sel and not reselect:
             self.selected = sorted(int(f) for f in sel)
             self.reasons = {int(k): v for k, v in self.review.get("reasons", {}).items()}
+            if any(not os.path.exists(os.path.join(self.frames_dir, "%06d.jpg" % f)) for f in self.selected):
+                self._stage("Saving the pictures of the picked frames ...")
             n = select_frames.extract(self.rec.video, self.selected, self.frames_dir)
             if n:
                 self.log("Re-extracted %d missing frame pictures." % n)
             return
-        self.log("Picking frames to label ...")
+        self._stage("Picking frames to label ...")
         cands = select_frames.candidates(self.guesses, self.rec.n, self.rec.times, low_score=self.low_threshold)
         kept, why = select_frames.pick(self.rec.video, cands, self.guesses, self.rec.times, self.frames_dir,
-                                       keep=set(self.frames))
+                                       keep=set(self.frames), progress=self._progress("pick"))
         self.selected = kept
         self.reasons = why
         mins = max(self.rec.times[-1], 1e-9) / 60.0
@@ -519,9 +642,21 @@ class Session:
             frames = [f for f in self.selected if self.conf_of(f) < self.low_threshold]
         elif mode == "spot":
             frames = sorted(self.review.get("spot_check", {}).get("sample", []))
+        elif mode == "unsure":
+            frames = self.unsure_frames()
         else:
             frames = list(self.selected)
         return [dict(f=f, state=self.frame_state(f), conf=self.conf_of(f)) for f in frames]
+
+    def area_view(self):
+        """The work area as the page draws it (margin_px: the margin actually used)."""
+        a = self.area
+        return dict(work_area=[list(p) for p in a.polygon] if a.polygon else None, margin_px=a.margin,
+                    ignore_spots=[list(s) for s in a.spots], dropped=self.dropped_by_area)
+
+    def unsure_frames(self):
+        """Frames holding an object marked unsure (kept out of training until resolved)."""
+        return sorted(f for f, st in self.frames.items() if any(o["status"] == "unsure" for o in st["objects"]))
 
     def stats(self):
         sel = self.selected
@@ -533,6 +668,8 @@ class Session:
                     auto=states.count("auto"), pending=states.count("pending"), low=len(low),
                     low_left=sum(1 for f in low if self.frame_state(f) in ("pending", "edited")),
                     high_pending=len(high_pending), spot=spot, low_threshold=self.low_threshold,
+                    unsure=len(self.unsure_frames()),
+                    same=sum(1 for st in self.frames.values() if st["state"] == "auto" and st.get("how") == "same"),
                     save_error=self.save_error)
 
     # --- spot check ---------------------------------------------------------------
@@ -562,7 +699,7 @@ class Session:
                     n_obj += 1
                 else:
                     n_obj += 1
-                    n_obj_changed += o["status"] in ("corrected", "rejected")
+                    n_obj_changed += o["status"] in ("corrected", "rejected", "unsure")
         lo, hi = wilson(len(agree), len(checked))
         return dict(sample=len(sample), checked=len(checked), agree=len(agree),
                     agreement=round(len(agree) / len(checked), 3) if checked else None,
@@ -631,7 +768,8 @@ class Session:
                 new_anchor = None
             else:
                 objs = self._clean_objects(objects)
-                changed = any(o["status"] in ("corrected", "rejected") or o["source"] == "user" for o in objs)
+                changed = any(o["status"] in ("corrected", "rejected", "unsure") or o["source"] == "user"
+                              for o in objs)
                 auto_conf = old["auto_conf"] if old and old.get("auto_conf") is not None else self.conf_of(f)
                 empty = state == "reviewed" and not any(o["status"] != "rejected" for o in objs)
                 if state == "auto":          # undo back to an auto-accepted frame
@@ -648,8 +786,94 @@ class Session:
                     self.dirty_from = f if self.dirty_from is None else min(self.dirty_from, f)
                 else:
                     updated = self.retrack(f)
+            same = []
+            if state == "reviewed" and (old is None or old["state"] != "reviewed") and (how or "user") == "user":
+                same = self.accept_same_picture(f)
             self.save()
-            return dict(frame=self.frame_view(f), updated=updated, stats=self.stats())
+            return dict(frame=self.frame_view(f), updated=updated, stats=self.stats(), same=same)
+
+    # --- same-picture frames ----------------------------------------------------------
+    def _thumb(self, f):
+        """The small grey picture select_frames compares, from the saved JPEG (None if missing)."""
+        if f in self._thumbs:
+            return self._thumbs[f]
+        import numpy as np
+        import cv2
+        th = None
+        path = os.path.join(self.frames_dir, "%06d.jpg" % f)
+        if os.path.exists(path):
+            img = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if img is not None:
+                th = select_frames._thumb(img)
+        if len(self._thumbs) > 2000:
+            self._thumbs.clear()
+        self._thumbs[f] = th
+        return th
+
+    def same_picture_frames(self, f, window_s=SAME_PICTURE_S, level=None):
+        """Picked frames nobody has looked at, within window_s of frame f, whose picture is
+        near-identical to f's (the test select_frames uses) and whose guesses sit where f's
+        accepted objects are (same count, same type, each within a small distance)."""
+        import numpy as np
+        level = select_frames.DUP_LEVEL if level is None else level
+        st = self.frames.get(f)
+        if not st:
+            return []
+        objs = [o for o in st["objects"] if o["status"] != "rejected"]
+        if any(o["status"] == "unsure" for o in objs):
+            return []
+        th = self._thumb(f)
+        if th is None:
+            return []
+        t = self.rec.times[f]
+        tol = max(2.0, 0.15 * float(self.robot_px))
+        out = []
+        for g in self.selected:
+            if g == f or abs(self.rec.times[g] - t) > window_s or self.frame_state(g) != "pending":
+                continue
+            gth = self._thumb(g)
+            if gth is None or float(np.abs(gth - th).mean()) >= level:
+                continue
+            if _match_objects(objs, self.guess_objects(g), tol) is None:
+                continue
+            out.append(g)
+        return out
+
+    def accept_same_picture(self, f):
+        """Accept the same-picture frames of a frame the person just accepted (state auto,
+        how "same"), with the accepted frame's objects. Returns the frames accepted."""
+        frames = self.same_picture_frames(f)
+        if not frames:
+            return []
+        acc = [o for o in self.frames[f]["objects"] if o["status"] != "rejected"]
+        tol = max(2.0, 0.15 * float(self.robot_px))
+        for g in frames:
+            guesses = self.guess_objects(g)
+            pairs = _match_objects(acc, guesses, tol)
+            objs = []
+            for o, gg in pairs:
+                known = bool(o.get("heading_known")) and o.get("heading_deg") is not None
+                objs.append(dict(obj=o["obj"], cls=o["cls"], x=gg["x"], y=gg["y"],
+                                 heading_deg=o["heading_deg"] if known else None, heading_known=known,
+                                 heading_guess=None, source=gg["source"] if gg["source"] in SOURCES else "track",
+                                 status="confirmed", score=gg.get("score")))
+            self.frames[g] = dict(state="auto", how="same", objects=objs, auto_conf=self.conf_of(g),
+                                  changed=False, updated=now_iso(), empty=not objs, same_as=f)
+        self.log("Also accepted %d frames with the same picture as frame %d." % (len(frames), f))
+        return frames
+
+    def undo_same(self, frames):
+        """Take back same-picture frames (only frames accepted that way)."""
+        with self.lock:
+            n = 0
+            for g in frames:
+                st = self.frames.get(int(g))
+                if st and st["state"] == "auto" and st.get("how") == "same":
+                    del self.frames[int(g)]
+                    n += 1
+            if n:
+                self.save()
+            return n
 
     def retrack(self, f):
         """Redo the tracking from frame f on. Returns how many selected,
@@ -689,8 +913,10 @@ class Session:
             return n
 
     def undo_auto(self):
+        """Take back the frames accepted by "Accept remaining high-confidence frames" (not the
+        same-picture ones, which a person's accept vouches for)."""
         with self.lock:
-            fs = [f for f, st in self.frames.items() if st["state"] == "auto"]
+            fs = [f for f, st in self.frames.items() if st["state"] == "auto" and st.get("how") != "same"]
             for f in fs:
                 del self.frames[f]
             self.save()
@@ -735,14 +961,14 @@ class Session:
                  robot_px=round(float(self.robot_px), 2), n_frames=self.rec.n,
                  selected=self.selected, reasons={str(f): v for f, v in sorted(self.reasons.items()) if f in sel},
                  settings=dict(low_threshold=self.low_threshold), updated=now_iso())
-        r["frames"] = {str(f): dict(state=st["state"], how=st["how"], changed=st["changed"],
-                                    auto_conf=st["auto_conf"], updated=st["updated"])
-                       for f, st in sorted(self.frames.items())}
+        r["frames"] = {str(f): _review_entry(st) for f, st in sorted(self.frames.items())}
         r["summary"] = {k: v for k, v in self.stats().items() if k != "save_error"}
         r["help"] = ("frames: state reviewed = checked by a person (how: user, or spot = in the spot check); "
                      "edited = changed but Enter not pressed yet; auto = accepted without looking because the "
-                     "guesses were high-confidence (their rows in labels.csv say auto). Pending rows in "
-                     "labels.csv are guesses nobody has checked.")
+                     "guesses were high-confidence (how: auto), or because the picture was the same as a frame "
+                     "a person accepted (how: same, same_as = that frame); their rows in labels.csv say auto. "
+                     "Pending rows in labels.csv are guesses nobody has checked; unsure rows are objects the "
+                     "person could not identify yet (their frames are kept out of training and scoring).")
         write_atomic(self.review_path, json.dumps(r, indent=1))
 
     def save(self):
@@ -762,6 +988,32 @@ class Session:
 # ----------------------------------------------------------------------------
 # Web server
 # ----------------------------------------------------------------------------
+
+def _review_entry(st):
+    e = dict(state=st["state"], how=st["how"], changed=st["changed"], auto_conf=st["auto_conf"], updated=st["updated"])
+    if st.get("same_as") is not None:
+        e["same_as"] = st["same_as"]
+    return e
+
+
+def _match_objects(objs, guesses, tol):
+    """Pair each object with a guess of the same type within tol px (nearest first). Returns the
+    pairs, or None unless every object and every guess is paired."""
+    if len(objs) != len(guesses):
+        return None
+    cand = sorted((math.hypot(o["x"] - g["x"], o["y"] - g["y"]), i, j)
+                  for i, o in enumerate(objs) for j, g in enumerate(guesses) if o["cls"] == g["cls"])
+    ui, uj, pairs = set(), set(), []
+    for d, i, j in cand:
+        if d > tol:
+            break
+        if i in ui or j in uj:
+            continue
+        ui.add(i)
+        uj.add(j)
+        pairs.append((objs[i], guesses[j]))
+    return pairs if len(pairs) == len(objs) else None
+
 
 def make_handler(session, extra_get=None, extra_post=None):
     """session: a Session, or a function returning the current one (the recognition
@@ -833,7 +1085,7 @@ def make_handler(session, extra_get=None, extra_post=None):
                                          fps=s.rec.fps, width=s.rec.width, height=s.rec.height,
                                          robot_px=s.robot_px, classes=s.classes, guess_source=s.source_name,
                                          position=s.review.get("position"), stats=s.stats(),
-                                         labels_path=s.labels_path))
+                                         labels_path=s.labels_path, area=s.area_view()))
             elif u.path == "/api/queue":
                 mode = q.get("mode", ["all"])[0]
                 with s.lock:
@@ -878,6 +1130,9 @@ def make_handler(session, extra_get=None, extra_post=None):
                 self._send(200, dict(accepted=n, stats=s.stats()))
             elif u.path == "/api/auto_undo":
                 n = s.undo_auto()
+                self._send(200, dict(undone=n, stats=s.stats()))
+            elif u.path == "/api/undo_same":
+                n = s.undo_same(b.get("frames") or [])
                 self._send(200, dict(undone=n, stats=s.stats()))
             elif u.path == "/api/spot/draw":
                 with s.lock:

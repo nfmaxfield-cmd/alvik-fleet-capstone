@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Recognition studio: label, train and compare object detectors in one window.
+"""Maxfield IRL Tracking (Identify. Recognize. Label.): the recognition studio.
+Label, train and compare object detectors in one window.
 
     python tools/recognition/studio.py <project folder>                 open (or create) a project
     python tools/recognition/studio.py <project folder> --add <recording or session folder> [--camera overhead]
@@ -16,8 +17,11 @@ studio bar on top:
 - Train new model: trains on every confirmed frame, in the background, while you keep
   labelling. Every model is scored on the same held-back frames (trainer.py).
 - Models & learning curve: how the guesses improve as confirmed frames grow.
-- Object types: name, has a front (heading), size, height above the floor.
+- Object types: name, has a front (heading), size, height above the floor (or "it varies").
 - Add recording: a recording folder, or a two-camera session folder.
+- Work area: per camera, the part of the picture to look in, plus ignore spots.
+
+A new project first asks for its name and object types (setup), then shows a short tour.
 
 With two cameras calibrated (cameras/<name>.json, see CROSSCAM.md), labels confirmed in
 one camera become ready-made guesses in the other camera's frames (source "camera").
@@ -50,7 +54,7 @@ INFER = os.path.join(DETECTOR, "infer.py")
 
 
 class Studio:
-    def __init__(self, proj, log=print):
+    def __init__(self, proj, log=print, background=True):
         self.proj = proj
         self.log = log
         self.session = None
@@ -58,10 +62,21 @@ class Studio:
         self.lock = threading.RLock()
         self.trainer = trainmod.Trainer(proj, log=log)
         self.cross_note = None
+        self.background = background     # run the other cameras' motion pass in the background
+        self.bg = None                   # what the background pass is doing (shown in the top bar)
+        self.bg_thread = None
+        self.pending_reopen = False      # settings changed while opening: open again when done
 
     # --- opening a recording with a guess source ------------------------------------------
     def current(self):
-        return None if self.loading else self.session
+        return None if (self.loading or self.pending_reopen) else self.session
+
+    def loading_view(self):
+        if self.loading:
+            return self.loading
+        if self.pending_reopen:
+            return dict(what="Applying your changes ...", done=0, total=0, left_s=None, left="")
+        return None
 
     def open(self, rid, model="none", wait=False):
         proj = self.proj
@@ -82,31 +97,80 @@ class Studio:
         with self.lock:
             if self.loading:
                 raise ValueError("still opening the last one; wait a moment")
-            self.loading = dict(what="Opening %s ..." % rec["name"], done=0, total=0)
+            self.loading = dict(what="Opening %s ..." % rec["name"], done=0, total=0, left_s=None)
             self.session = None
         t = threading.Thread(target=self._open, args=(rid, model or "none", weights), daemon=True)
         t.start()
         if wait:
             t.join()
 
+    def reopen(self, only_camera=None):
+        """Open the current recording again (after object types or the work area changed), with
+        the current model if it still fits the object types. Returns True if it is reopening."""
+        proj = self.proj
+        cur = proj.data.get("current", {})
+        if not cur.get("rec"):
+            return False
+        try:
+            rec = proj.rec(cur["rec"])
+        except KeyError:
+            return False
+        if only_camera is not None and proj.camera_key(rec) != only_camera:
+            return False
+        model = cur.get("model", "none")
+        if model != "none":
+            try:
+                if proj.model(model).get("classes") != proj.class_names():
+                    model = "none"
+            except KeyError:
+                model = "none"
+        with self.lock:
+            busy = self.loading is not None
+            if busy:
+                # still opening: open again as soon as that is done (with the new settings)
+                self.pending_reopen = True
+
+        def later():
+            while self.loading is not None:
+                time.sleep(0.2)
+            try:
+                self.open(cur["rec"], model)
+            finally:
+                self.pending_reopen = False
+        if busy:
+            threading.Thread(target=later, daemon=True).start()
+        else:
+            self.open(cur["rec"], model)
+        return True
+
     def _open(self, rid, model, weights):
         proj = self.proj
         rec = proj.rec(rid)
+        clock = dict(what=None, clock=None)
 
         def progress(what, done, total):
-            names = {"motion": "Finding moving objects (first time only)", "model": "Running model %s" % model}
-            self.loading.update(what=names.get(what, what), done=done, total=total)
+            names = {"motion": "Finding moving objects (first time only)", "model": "Running model %s" % model,
+                     "pick": "Picking frames to label"}
+            what = names.get(what, what)
+            if clock["what"] != what:
+                clock.update(what=what, clock=labelapp.RateClock())
+            left = clock["clock"].update(done, total) if total else None
+            self.loading = dict(what=what, done=done, total=total, left_s=left, left=labelapp.fmt_left(left))
 
         try:
+            self._wait_background(rid)
             extra = self._cross_camera_guesses(rec)
             s = labelapp.Session(rec["path"], model=INFER if weights else None, weights=weights,
                                  classes=proj.class_names(), labels_dir=proj.labels_dir(rid), extra_dets=extra,
-                                 progress=progress, log=self.log)
+                                 progress=progress, log=self.log, class_map=proj.motion_class_map(),
+                                 loose_classes=proj.loose_classes(), front_classes=proj.heading_classes(),
+                                 area=proj.camera_settings(proj.camera_key(rec)))
             with self.lock:
                 self.session = s
                 proj.data["current"] = dict(rec=rid, model=model)
                 proj.save()
                 self.loading = None
+            self._start_background(rid)
         except Exception as e:
             traceback.print_exc()
             with self.lock:
@@ -146,7 +210,8 @@ class Studio:
                 continue
             cam_a = cameras.CameraModel.load(path_a)
             g = crosscam.cross_guesses(objs, cam_a, cam_b, crosscam.load_frame_times(os.path.join(other["path"], "frames.csv")), times_b,
-                                       (b_meta.get("width", 640), b_meta.get("height", 480)), proj.class_heights())
+                                       (b_meta.get("width", 640), b_meta.get("height", 480)), proj.class_heights(),
+                                       skip_classes=tuple(proj.varies_classes()))
             for f, ds in g.items():
                 out.setdefault(f, []).extend(ds)
                 n += len(ds)
@@ -154,6 +219,58 @@ class Studio:
             self.cross_note = "%d guesses from the other camera" % n
             self.log("Cross-camera: " + self.cross_note)
         return out or None
+
+    # --- the other cameras' motion pass, in the background ------------------------------------
+    def _start_background(self, rid):
+        """After a recording of a two-camera session opens, find the moving objects in the
+        session's other cameras in the background, so switching to them is quick."""
+        if not self.background or (self.bg_thread and self.bg_thread.is_alive()):
+            return
+        rec = self.proj.rec(rid)
+        if not rec.get("session"):
+            return
+        todo = []
+        for other in self.proj.recordings():
+            if other["id"] == rid or other.get("session") != rec["session"]:
+                continue
+            if not os.path.exists(os.path.join(other["path"], "video.avi")):
+                continue
+            try:
+                r = labelapp.Recording(other["path"])
+            except (SystemExit, Exception):
+                continue
+            if not labelapp.has_motion_cache(r, os.path.join(self.proj.labels_dir(other["id"]), "cache")):
+                todo.append((other, r))
+        if not todo:
+            return
+        self.bg_thread = threading.Thread(target=self._background, args=(todo,), daemon=True)
+        self.bg_thread.start()
+
+    def _background(self, todo):
+        for other, r in todo:
+            clock = labelapp.RateClock()
+            name = "%s%s" % (other["name"], " [%s]" % other["camera"] if other.get("camera") else "")
+            self.bg = dict(rid=other["id"], what="Getting %s ready: finding moving objects" % name, done=0,
+                           total=r.n, left_s=None, left="")
+
+            def progress(done, total, bg=self.bg, clock=clock):
+                left = clock.update(done, total)
+                bg.update(done=done, total=total, left_s=left, left=labelapp.fmt_left(left))
+            try:
+                labelapp.motion_guesses(r, os.path.join(self.proj.labels_dir(other["id"]), "cache"), None, progress,
+                                        log=lambda *a: None)
+                self.log("Background: %s is ready." % name)
+            except Exception as e:      # the normal open will try again (and show the problem)
+                self.log("Background pass for %s stopped: %s" % (name, e))
+        self.bg = None
+
+    def _wait_background(self, rid):
+        """Opening a recording whose background pass is running: wait for it, showing its progress."""
+        while self.bg_thread and self.bg_thread.is_alive() and self.bg and self.bg.get("rid") == rid:
+            b = dict(self.bg)
+            self.loading = dict(what="Finding moving objects (first time only)", done=b.get("done", 0),
+                                total=b.get("total", 0), left_s=b.get("left_s"), left=b.get("left", ""))
+            time.sleep(0.3)
 
     # --- state for the page -----------------------------------------------------------------
     def state(self):
@@ -171,10 +288,20 @@ class Studio:
         models = [m for m in models if m["status"] != "ready" or m["compatible"]] + \
                  [m for m in models if m["status"] == "ready" and not m["compatible"]]
         job = self.trainer.job
-        return dict(project=dict(name=proj.name, folder=proj.folder), recordings=recs, models=models,
-                    current=proj.data.get("current", {}), classes=proj.class_view(), job=job,
-                    loading=self.loading, settings=proj.data.get("settings", {}), labelled_total=total,
-                    cross_note=self.cross_note)
+        cur = proj.data.get("current", {})
+        camera = None
+        if cur.get("rec"):
+            try:
+                rec = proj.rec(cur["rec"])
+                key = proj.camera_key(rec)
+                camera = dict(key=key, name=rec.get("camera") or "", settings=proj.camera_settings(key))
+            except KeyError:
+                pass
+        return dict(brand=dict(name=labelapp.BRAND, tagline=labelapp.TAGLINE),
+                    project=dict(name=proj.name, folder=proj.folder), recordings=recs, models=models,
+                    current=cur, classes=proj.class_view(), job=job,
+                    loading=self.loading_view(), settings=proj.data.get("settings", {}), labelled_total=total,
+                    cross_note=self.cross_note, setup=proj.setup_view(), camera=camera, background=self.bg)
 
     def curve(self):
         p = os.path.join(self.proj.folder, "models", "curve.json")
@@ -247,16 +374,29 @@ def make_routes(studio):
             h._send(200, dict(model=mid))
         elif path == "/api/studio/classes":
             studio.proj.set_classes(b.get("classes") or [])
-            cur = studio.proj.data.get("current", {})
-            model = cur.get("model", "none")
-            if model != "none":
-                try:
-                    if studio.proj.model(model).get("classes") != studio.proj.class_names():
-                        model = "none"
-                except KeyError:
-                    model = "none"
-            studio.open(cur.get("rec"), model, wait=True)
+            studio.reopen()
             h._send(200, dict(ok=True))
+        elif path == "/api/studio/setup":
+            before = studio.proj.class_names()
+            studio.proj.finish_setup(b.get("name"), b.get("classes"), b.get("seconds"))
+            if studio.proj.class_names() != before:
+                studio.reopen()
+            h._send(200, dict(ok=True))
+        elif path == "/api/studio/whats_new":
+            changed = studio.proj.finish_whats_new(bool(b.get("set_varies")))
+            h._send(200, dict(ok=True, changed=changed))
+        elif path == "/api/studio/workarea":
+            key = b.get("camera") or "default"
+            if b.get("skip"):
+                c = studio.proj.camera_settings(key)
+                studio.proj.set_camera_settings(key, c["work_area"], c["margin_px"], c["ignore_spots"],
+                                                c["image_size"], asked=True)
+                h._send(200, dict(ok=True, reopened=False))
+                return True
+            studio.proj.set_camera_settings(key, b.get("work_area"), b.get("margin_px"), b.get("ignore_spots"),
+                                            b.get("image_size"), asked=True)
+            reopened = studio.reopen(only_camera=key)
+            h._send(200, dict(ok=True, reopened=reopened))
         elif path == "/api/studio/add":
             added = studio.proj.add_recording(b.get("path", ""), b.get("camera") or None)
             if added and studio.session is None and not studio.loading:
@@ -280,6 +420,8 @@ def main():
     ap.add_argument("--no-browser", action="store_true")
     a = ap.parse_args()
 
+    if not os.environ.get("MXIRL_BANNER_SHOWN"):
+        print("\n%s\n%s\n" % (labelapp.BRAND, labelapp.TAGLINE))
     proj = projmod.Project(a.project, create_name=a.name or os.path.basename(os.path.abspath(a.project)))
     if a.relink:
         print("Found %d moved recordings." % proj.relink(a.relink))
@@ -297,7 +439,7 @@ def main():
             studio.open(cur["rec"], "none")
     get, post = make_routes(studio)
     server, url = labelapp.serve(studio.current, a.port, extra_get=get, extra_post=post)
-    print("\nProject: %s  (%s)" % (proj.name, proj.folder))
+    print("\n%s is running. Project: %s  (%s)" % (labelapp.BRAND, proj.name, proj.folder))
     print("%d recording(s), %d model(s). Open %s  (Ctrl+C stops; everything is already saved)"
           % (len(proj.recordings()), len(proj.models()), url))
     if not proj.recordings():

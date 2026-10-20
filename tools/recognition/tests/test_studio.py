@@ -81,9 +81,10 @@ def test_object_types_rules(tmp_path):
     with pytest.raises(ValueError):
         proj.set_classes([dict(name="bad name!")])
     proj.set_classes([dict(name="alvik", has_front=True, height_cm=4), dict(name="cube", height_cm=2.5)])
-    assert proj.class_names() == ["alvik", "cube"] and proj.heading_classes() == ["alvik"]
+    # the catch-all "unknown" is always kept (added at the end)
+    assert proj.class_names() == ["alvik", "cube", "unknown"] and proj.heading_classes() == ["alvik"]
     assert proj.class_heights()["cube"] == 2.5
-    assert [c["locked"] for c in proj.class_view()] == [True, False]
+    assert [c["locked"] for c in proj.class_view()] == [True, False, False]
 
 
 def test_split_is_by_time_block_and_stable(tmp_path):
@@ -169,6 +170,13 @@ def synth_rec(tmp_path_factory):
     return str(d / "rec")
 
 
+def wait_open(st, timeout=120):
+    t0 = time.time()
+    while st.loading is not None and time.time() - t0 < timeout:
+        time.sleep(0.1)
+    assert st.session is not None, st.loading
+
+
 def test_web_routes(tmp_path, synth_rec):
     proj = projmod.Project(str(tmp_path / "p"), create_name="Web")
     rid = proj.add_recording(synth_rec, "overhead")[0]
@@ -184,17 +192,18 @@ def test_web_routes(tmp_path, synth_rec):
         s = json.loads(body)
         assert code == 200 and s["project"]["name"] == "Web" and s["recordings"][0]["id"] == rid
         code, body = _get(url + "api/info")
-        assert json.loads(body)["classes"] == ["alvik", "hand", "unknown", "machine"]
+        assert json.loads(body)["classes"] == ["unknown"]          # a new project: only the catch-all until setup
         code, body = _get(url + "api/queue?mode=next")
         q = json.loads(body)["frames"]
         confs = [x["conf"] for x in q if x["state"] == "pending"]
         assert confs == sorted(confs)                     # least confident first
         code, body = _get(url + "report")
-        assert code == 200 and b"recognition report" in body
-        # a new object type: saved, and the page's classes follow
-        code, j = _post(url + "api/studio/classes", dict(classes=s["classes"] + [dict(name="cube", height_cm=2)]))
+        assert code == 200 and b"Maxfield IRL Tracking" in body
+        # a new object type: saved, and the page's classes follow (the recording opens again)
+        code, j = _post(url + "api/studio/classes", dict(classes=[dict(name="cube", height_cm=2)] + s["classes"]))
+        wait_open(st)
         code, body = _get(url + "api/info")
-        assert json.loads(body)["classes"][-1] == "cube"
+        assert json.loads(body)["classes"] == ["cube", "unknown"]
         # a label with the new type is accepted
         f = q[0]["f"]
         code, j = _post(url + "api/frame", dict(frame=f, state="reviewed", how="user",
@@ -215,6 +224,7 @@ def test_train_and_score(tmp_path):
     subprocess.run([sys.executable, os.path.join(TOOLS, "label", "tests", "synth.py"), synth_rec, "--seconds", "60"],
                    check=True, capture_output=True)
     proj = projmod.Project(str(tmp_path / "p"), create_name="Train")
+    proj.finish_setup(classes=projmod.PRESETS[0]["classes"])      # the ready-made robot set
     proj.data["settings"]["block_s"] = 10
     proj.save()
     rid = proj.add_recording(synth_rec, "overhead")[0]

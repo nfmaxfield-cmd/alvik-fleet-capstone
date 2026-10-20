@@ -20,14 +20,35 @@ import time
 
 VERSION = 1
 
-# Default object types for the Alvik lab. height_cm: where the labelled point sits above
-# the floor (the robot's top for an Alvik), used to share labels between cameras.
-DEFAULT_CLASSES = [
-    dict(name="alvik", has_front=True, size_px=None, height_cm=4.0),
-    dict(name="hand", has_front=False, size_px=None, height_cm=10.0),
-    dict(name="unknown", has_front=False, size_px=None, height_cm=0.0),
-    dict(name="machine", has_front=True, size_px=None, height_cm=0.0),
+# Object type fields: name, has_front (the model learns a heading), size_px (None = measured),
+# height_cm (where the labelled point sits above the floor: used only to pass labels to the
+# second camera), height_varies (True: the height is not fixed, so the type is not passed
+# between cameras), note (where to mark it, shown to the person). Older projects lack the
+# last two; they read as False and "".
+CATCH_ALL = "unknown"          # always kept: anything that is none of the other types
+CATCH_ALL_TYPE = dict(name=CATCH_ALL, has_front=False, size_px=None, height_cm=0.0, height_varies=True,
+                      note="anything else, or not sure what it is")
+
+# A new project starts with only the catch-all type; the first-start setup asks for the rest.
+DEFAULT_CLASSES = [dict(CATCH_ALL_TYPE)]
+
+# Ready-made sets of object types offered by the first-start setup.
+PRESETS = [
+    dict(id="alvik", title="Alvik robots", classes=[
+        dict(name="alvik", has_front=True, size_px=None, height_cm=4.0, height_varies=False,
+             note="the robot: mark the middle of its top"),
+        dict(name="person", has_front=False, size_px=None, height_cm=0.0, height_varies=True,
+             note="hands, arms, sometimes feet: mark the end reaching in"),
+        dict(CATCH_ALL_TYPE),
+    ]),
 ]
+
+# Names the motion finder (tools/label/motion.py) gives its guesses, mapped to a project's types
+# by motion_class_map(): an object-sized blob, a big blob reaching in from the edge, other.
+REACHING_NAMES = ("hand", "person")
+
+# Bumped when the "what's new" screen for existing projects changes.
+WHATS_NEW_VERSION = 1
 
 
 def now_iso():
@@ -93,6 +114,128 @@ class Project:
 
     def class_heights(self):
         return {c["name"]: float(c.get("height_cm") or 0.0) for c in self.classes}
+
+    def varies_classes(self):
+        """Types whose height is not fixed: never passed between cameras."""
+        return [c["name"] for c in self.classes if c.get("height_varies")]
+
+    def motion_class_map(self):
+        """The motion finder's guess names -> this project's types. Its object-sized blobs go to
+        the one plain type (or "alvik" in projects that have it), big blobs reaching in from the
+        edge to the hand/person type, everything else to the catch-all."""
+        names = self.class_names()
+        catch = CATCH_ALL if CATCH_ALL in names else None
+        reaching = next((n for n in REACHING_NAMES if n in names), None)
+        if reaching is None:
+            reaching = next((c["name"] for c in self.classes if c.get("height_varies") and c["name"] != CATCH_ALL), None)
+        plain = [n for n in names if n not in (CATCH_ALL, reaching)]
+        obj = "alvik" if "alvik" in names else (plain[0] if len(plain) == 1 else catch)
+        out = {"alvik": obj or catch, "hand": reaching or catch, "unknown": catch,
+               "machine": "machine" if "machine" in names else catch}
+        return {k: v for k, v in out.items() if v}
+
+    def loose_classes(self):
+        """Types the tracker lets move fast and end soon (hands, the catch-all, and anything
+        whose height varies)."""
+        return sorted(set(n for n in self.class_names() if n in REACHING_NAMES or n == CATCH_ALL)
+                      | set(self.varies_classes()))
+
+    # --- first start ---------------------------------------------------------------------------
+    def has_labels(self):
+        """True when any frame of any recording has been finished by a person or accepted."""
+        for r in self.recordings():
+            p = os.path.join(self.labels_dir(r["id"]), "review.json")
+            if os.path.exists(p):
+                try:
+                    with open(p, encoding="utf-8") as f:
+                        if json.load(f).get("frames"):
+                            return True
+                except ValueError:
+                    continue
+        return False
+
+    def setup_view(self):
+        """What the page shows before labelling: the setup screen (a project that was never set
+        up and has no labels), or a one-time "what's new" (older projects that have labels)."""
+        st = self.data.setdefault("settings", {})
+        done = bool(st.get("setup_done"))
+        labelled = False if done else self.has_labels()
+        need_setup = not done and not labelled
+        seen = int(st.get("whats_new_seen") or 0)
+        whats_new = not need_setup and seen < WHATS_NEW_VERSION
+        offer_varies = [c["name"] for c in self.classes
+                        if c["name"] in ("hand", CATCH_ALL) and not c.get("height_varies")] if whats_new else []
+        return dict(need_setup=need_setup, whats_new=whats_new, offer_varies=offer_varies,
+                    presets=PRESETS, catch_all=CATCH_ALL_TYPE)
+
+    def finish_setup(self, name=None, classes=None, seconds=None):
+        """Save the first-start setup: project name and object types (the catch-all is added
+        if missing)."""
+        if name is not None:
+            name = str(name).strip()
+            if not name:
+                raise ValueError("the project needs a name")
+            self.data["name"] = name[:80]
+        if classes is not None:
+            self.set_classes(classes, save=False)
+        st = self.data.setdefault("settings", {})
+        st["setup_done"] = True
+        st["whats_new_seen"] = WHATS_NEW_VERSION
+        if seconds is not None:
+            st["setup_seconds"] = round(float(seconds), 1)
+        st["setup_finished"] = now_iso()
+        self.save()
+
+    def finish_whats_new(self, set_varies=False):
+        """An older project confirmed the what's-new screen; with set_varies, hand and unknown
+        become "height varies"."""
+        changed = []
+        if set_varies:
+            for c in self.classes:
+                if c["name"] in ("hand", CATCH_ALL) and not c.get("height_varies"):
+                    c["height_varies"] = True
+                    changed.append(c["name"])
+        st = self.data.setdefault("settings", {})
+        st["setup_done"] = True
+        st["whats_new_seen"] = WHATS_NEW_VERSION
+        self.save()
+        return changed
+
+    # --- work area per camera --------------------------------------------------------------------
+    @staticmethod
+    def camera_key(rec):
+        """Work areas are kept per camera: by the recording's camera name, or "default" for
+        recordings added without one."""
+        return (rec.get("camera") or "").strip() or "default"
+
+    def camera_settings(self, key):
+        """project.json cameras[key]: work_area (corner points in image px, or None = whole
+        picture), margin_px (None = one object size), ignore_spots ([x, y, r] in px), asked
+        (the person has been offered to mark it)."""
+        c = (self.data.get("cameras") or {}).get(key) or {}
+        return dict(work_area=c.get("work_area"), margin_px=c.get("margin_px"),
+                    ignore_spots=list(c.get("ignore_spots") or []), asked=bool(c.get("asked")),
+                    image_size=c.get("image_size"))
+
+    def set_camera_settings(self, key, work_area=None, margin_px=None, ignore_spots=None, image_size=None,
+                            asked=True):
+        poly = None
+        if work_area:
+            poly = [[round(float(x), 1), round(float(y), 1)] for x, y in work_area]
+            if len(poly) < 3:
+                raise ValueError("a work area needs at least 3 corners")
+        spots = []
+        for s in ignore_spots or []:
+            x, y, r = (float(v) for v in s)
+            if r <= 0:
+                raise ValueError("an ignore spot needs a size")
+            spots.append([round(x, 1), round(y, 1), round(r, 1)])
+        m = None if margin_px in (None, "") else max(0.0, float(margin_px))
+        cams = self.data.setdefault("cameras", {})
+        cams[key] = dict(cams.get(key) or {}, work_area=poly, margin_px=m, ignore_spots=spots, asked=bool(asked),
+                         image_size=list(image_size) if image_size else None, updated=now_iso())
+        self.save()
+        return self.camera_settings(key)
 
     # --- recordings -------------------------------------------------------------------------
     def recordings(self):
@@ -184,17 +327,25 @@ class Project:
         used.discard("none")
         return used
 
-    def set_classes(self, classes):
+    def set_classes(self, classes, save=True):
+        """Replace the object types. The catch-all type ("unknown") is always kept: it is added
+        at the end when missing."""
+        classes = [dict(c) for c in classes]
         names = [str(c.get("name", "")).strip() for c in classes]
-        if not names or any(not n for n in names):
+        if any(not n for n in names):
             raise ValueError("every object type needs a name")
+        if CATCH_ALL not in names:
+            classes.append(dict(CATCH_ALL_TYPE))
+            names.append(CATCH_ALL)
         if len(set(names)) != len(names):
             raise ValueError("two object types have the same name")
         if len(names) > 9:
-            raise ValueError("at most 9 object types (keys 1-9)")
+            raise ValueError("at most 9 object types (keys 1-9), including \"%s\"" % CATCH_ALL)
         for n in names:
             if not re.match(r"^[A-Za-z0-9_-]{1,32}$", n):
                 raise ValueError("object type %r: use letters, digits, - and _ only" % n)
+            if n.lower() == "none":
+                raise ValueError("\"none\" can't be a type name (it marks an empty frame in labels.csv)")
         missing = self.used_classes() - set(names)
         if missing:
             raise ValueError("these types are used in confirmed labels and can't be removed or renamed: %s"
@@ -202,14 +353,19 @@ class Project:
         out = []
         for c in classes:
             size = c.get("size_px")
+            varies = bool(c.get("height_varies"))
             out.append(dict(name=str(c["name"]).strip(), has_front=bool(c.get("has_front")),
-                            size_px=float(size) if size else None, height_cm=float(c.get("height_cm") or 0.0)))
+                            size_px=float(size) if size else None,
+                            height_cm=float(c.get("height_cm") or 0.0),
+                            height_varies=varies, note=str(c.get("note") or "").strip()[:120]))
         self.data["classes"] = out
-        self.save()
+        if save:
+            self.save()
 
     def class_view(self):
         used = self.used_classes()
-        return [dict(c, locked=c["name"] in used) for c in self.classes]
+        return [dict(c, locked=c["name"] in used, height_varies=bool(c.get("height_varies")),
+                     note=c.get("note") or "", catch_all=c["name"] == CATCH_ALL) for c in self.classes]
 
     # --- models -------------------------------------------------------------------------------
     def models(self):

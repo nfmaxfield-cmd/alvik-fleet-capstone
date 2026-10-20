@@ -1,4 +1,4 @@
-"""The project's accuracy report: one self-contained HTML page.
+"""The project's accuracy report (Maxfield IRL Tracking): one self-contained HTML page.
 
     python tools/recognition/report.py <project folder>        writes <project>/report.html
 
@@ -16,6 +16,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import project as projmod  # noqa: E402
+
+BRAND = "Maxfield IRL Tracking"
+TAGLINE = "Identify. Recognize. Label."
 
 
 def _pct(v):
@@ -75,13 +78,16 @@ def html_report(proj):
     base = next((p for p in pts if p["model"] == "none"), None)
     e = _html.escape
     out = ["<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>",
-           "<title>%s – recognition report</title>" % e(proj.name),
+           "<title>%s – %s report</title>" % (e(proj.name), BRAND),
            "<style>body{font:15px/1.5 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;max-width:860px;margin:32px auto;"
            "padding:0 16px;color:#1b1d21;background:#fff}h1{font-size:24px;margin-bottom:4px}h2{font-size:18px;margin-top:28px}"
            "table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;padding:5px 8px;border-bottom:1px solid #e3e3e3}"
            "th{color:#555;font-weight:600}.muted{color:#666;font-size:13px}.key span{margin-right:14px;font-size:13px}"
-           ".lead{font-size:16px}</style></head><body>"]
-    out.append("<h1>%s: recognition report</h1>" % e(proj.name))
+           ".lead{font-size:16px}.brand{font-size:13px;color:#555;letter-spacing:.02em;margin:0}"
+           ".brand b{color:#1b1d21;font-size:15px;letter-spacing:0}.brand span{display:block;font-size:11px;color:#777}"
+           "</style></head><body>"]
+    out.append("<p class='brand'><b>%s</b><span>%s</span></p>" % (BRAND, TAGLINE))
+    out.append("<h1>%s: accuracy report</h1>" % e(proj.name))
     out.append("<p class='muted'>Updated %s · %s</p>" % (e(curve.get("updated", "–")), e(proj.folder)))
     if best and base:
         out.append("<p class='lead'>The best model, <b>%s</b>, trained on %d confirmed frames, finds <b>%s</b> of the objects "
@@ -121,7 +127,7 @@ def html_report(proj):
                                % (e(r["cls"]), _num(r["n_objects"], 0), _num(r["n_labels"], 0),
                                   _pct(_flt(r["recall"])), _pct(_flt(r["precision"])), _num(r["centre_err_px_mean"]),
                                   _num(r["heading_err_deg_median"])))
-            out.append("</table><p class='muted'>Objects: different physical objects behind the labels (one robot seen in "
+            out.append("</table><p class='muted'>Objects: different physical objects behind the labels (one object seen in "
                        "100 frames counts once). A type with few objects has an unreliable score.</p>")
 
     out.append("<h2>Data</h2><table><tr><th>Recording</th><th>Camera</th><th>Frames confirmed</th></tr>")
@@ -129,21 +135,23 @@ def html_report(proj):
         out.append("<tr><td>%s</td><td>%s</td><td>%d</td></tr>" % (e(r["name"]), e(r.get("camera") or "–"),
                                                                    _done(proj.labels_dir(r["id"]))))
     out.append("</table>")
-    out.append("<h2>Object types</h2><table><tr><th>Type</th><th>Has a front</th><th>Size (px)</th><th>Height (cm)</th></tr>")
+    out.append("<h2>Object types</h2><table><tr><th>Type</th><th>Has a front</th><th>Size (px)</th>"
+               "<th>Height of the marked point above the floor (cm, for the second camera)</th></tr>")
     for c in proj.classes:
         out.append("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
             e(c["name"]), "yes" if c.get("has_front") else "no", _num(c.get("size_px"), 0) if c.get("size_px") else "measured",
-            _num(c.get("height_cm"))))
+            "it varies" if c.get("height_varies") else _num(c.get("height_cm"))))
     out.append("</table>")
     out.append("<h2>How the scores are kept honest</h2><ul>"
                "<li>Labelled frames are cut into time blocks (%s s). Each block goes wholly to training, to picking the "
                "best training round, or to scoring; frames within 1 s of a block edge are left out.</li>"
                "<li>A block's part depends only on its time, so adding labels never moves a scoring block into training, "
                "and the two cameras' views of one moment always land in the same part.</li>"
-               "<li>Only frames a person checked are scored; frames accepted without looking are not.</li>"
+               "<li>Only frames a person checked are scored; frames accepted without looking are not. Frames holding "
+               "an object marked unsure are left out of training and scoring until it is resolved.</li>"
                "<li>“No model” is what the labelling page shows before any training: motion guesses followed by the "
                "tracker, with no confirmations.</li>"
-               "<li>Found = share of labelled objects the model reported within 8 px (about a quarter of a robot). "
+               "<li>Found = share of labelled objects the model reported within 8 px (about a quarter of an object). "
                "Right = share of the model's reports that matched a label. F1 combines the two: 2 × found × right / (found + right).</li>"
                "</ul>" % _num(proj.data.get("settings", {}).get("block_s", 30), 0))
     out.append("</body></html>")

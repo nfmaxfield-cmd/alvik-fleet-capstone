@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One command to install what the recognition studio needs and start it.
+"""Maxfield IRL Tracking: one command to install what the studio needs and start it.
 
     python tools/recognition/start.py                        uses the project folder "recognition-project" in your Documents
     python tools/recognition/start.py <project folder>       uses (or creates) that project
@@ -56,12 +56,19 @@ def default_project():
     return os.path.join(docs if os.path.isdir(docs) else os.path.expanduser("~"), "recognition-project")
 
 
+BRAND = "Maxfield IRL Tracking"
+TAGLINE = "Identify. Recognize. Label."
+
+
 def main():
+    print("%s\n%s\n" % (BRAND, TAGLINE))
+    os.environ["MXIRL_BANNER_SHOWN"] = "1"
     if sys.version_info < (3, 9):
         sys.exit("Python 3.9 or newer is needed (this is %d.%d). Install it from python.org." % sys.version_info[:2])
     todo = missing()
     if todo:
-        print("First start: some packages are missing (%s)." % ", ".join(p for _, p, _ in todo))
+        print("First start: installing what %s needs (%s). This takes a few minutes, once."
+              % (BRAND, ", ".join(p for _, p, _ in todo)))
         try:
             install(todo)
         except subprocess.CalledProcessError as e:

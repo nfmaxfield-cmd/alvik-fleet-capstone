@@ -12,9 +12,11 @@ What gets picked, in plain words:
       close      two objects are close together (mix-ups happen here)
       low        a guess has a low score
   - the first and last frame.
-A regular once-a-second frame is skipped when it is a near-duplicate of the
-last picked frame (picture almost the same and every object within a couple
-of pixels of where it was), unless nothing has been picked for max_gap_s.
+Any picked frame except the first and last (and frames already labelled) is
+skipped when it is a near-duplicate of the last picked frame (picture almost
+the same and every object within a couple of pixels of where it was), unless
+nothing has been picked for max_gap_s. So two objects parked side by side
+don't give a stack of the same picture every half second.
 Picked frames are written as labels/frames/<frame:06d>.jpg.
 
     python tools/label/select_frames.py <recording folder>   # dry run: prints what it would pick
@@ -27,6 +29,8 @@ import sys
 
 import numpy as np
 import cv2
+
+DUP_LEVEL = 1.5     # mean grey-level difference of the small pictures below which two frames look the same
 
 
 def candidates(rows_by_frame, n_frames, times, every_s=1.0, low_score=0.6, close_every_s=0.5):
@@ -107,14 +111,14 @@ def _same_objects(a, b, px=2.0):
     return all(oa == ob and math.hypot(xa - xb, ya - yb) <= px for (oa, xa, ya), (ob, xb, yb) in zip(pa, pb))
 
 
-def pick(video_path, reasons, rows_by_frame, times, out_dir=None, max_gap_s=10.0, dup_level=1.5,
+def pick(video_path, reasons, rows_by_frame, times, out_dir=None, max_gap_s=10.0, dup_level=DUP_LEVEL,
          merge_frames=3, keep=(), quality=95, progress=None):
     """Go through the video once, decide which candidate frames to keep, and
     (if out_dir is given) write each kept frame as <frame:06d>.jpg.
     keep: frames that must be kept (e.g. already reviewed).
     Returns (kept frames sorted, {frame: sorted reasons})."""
     keep = set(keep)
-    events = sorted(f for f, rs in reasons.items() if rs - {"regular"} or f in keep)
+    events = sorted({f for f, rs in reasons.items() if rs - {"regular"}} | keep)
     # Event frames within merge_frames of each other: keep the first, merge reasons.
     merged = {}
     last = None
@@ -137,8 +141,8 @@ def pick(video_path, reasons, rows_by_frame, times, out_dir=None, max_gap_s=10.0
             ok, img = cap.retrieve()
             if ok:
                 th = _thumb(img)
-                is_event = f in merged
-                take = is_event
+                rs = merged.get(f, set()) | reasons.get(f, set())
+                take = f in keep or bool(rs & {"start", "end"})
                 if not take:
                     dup = (last_thumb is not None and float(np.abs(th - last_thumb).mean()) < dup_level
                            and _same_objects(rows_by_frame.get(f, []), rows_by_frame.get(last_f, [])))
@@ -155,6 +159,8 @@ def pick(video_path, reasons, rows_by_frame, times, out_dir=None, max_gap_s=10.0
             progress(f, top + 1)
         f += 1
     cap.release()
+    if progress:
+        progress(top + 1, top + 1)
     return kept, out_reasons
 
 

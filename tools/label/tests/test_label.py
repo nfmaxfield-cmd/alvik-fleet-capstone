@@ -25,8 +25,14 @@ import motion          # noqa: E402
 import tracker         # noqa: E402
 import select_frames   # noqa: E402
 import app             # noqa: E402
-import synth           # noqa: E402
 import evaluate        # noqa: E402
+
+# tools/recognition/tests has a synth.py too: load this folder's one by its path, so both
+# suites can run in one pytest call
+import importlib.util  # noqa: E402
+_spec = importlib.util.spec_from_file_location("label_synth", os.path.join(HERE, "synth.py"))
+synth = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(synth)
 
 
 # ----------------------------------------------------------------------------

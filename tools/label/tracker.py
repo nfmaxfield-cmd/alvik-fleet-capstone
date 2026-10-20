@@ -60,6 +60,8 @@ class TrackerParams:
         self.no_new_near = 0.6        # robot sizes: no new track this close to a confirmed one
         self.close_factor = 1.3       # robot sizes: two tracks this close are "close" (lower score)
         self.class_penalty = 0.3      # added cost for pairing a detection with a track of another class
+        self.loose_classes = ("hand", "unknown")   # types that move fast, change shape and end soon
+        self.front_classes = ("alvik", "machine")  # types with a front (they get a heading)
         for k, v in kw.items():
             if not hasattr(self, k):
                 raise TypeError("unknown setting: %s" % k)
@@ -190,7 +192,7 @@ class Tracker:
     def _gate(self, tr, t):
         """How far (px) a detection may be from where the track should be."""
         dt = max(0.0, t - tr.t_last)
-        if tr.cls in ("hand", "unknown"):
+        if tr.cls in self.p.loose_classes:
             # Hands move fast and change shape: wide gate (they end soon anyway).
             return self.p.hand_speed * self.r * min(dt, 1.0) + 2.0 * self.p.margin * self.r
         gate = self.p.max_speed * self.r * dt + self.p.margin * self.r
@@ -259,7 +261,7 @@ class Tracker:
                 # A track seen for less than a second that then vanishes was
                 # probably noise (a robot needs far longer to blend into the floor).
                 young = tr.t_last - tr.t_first < 1.0 and not tr.user_seen
-                short = tr.cls in ("hand", "unknown") or at_edge or young
+                short = tr.cls in self.p.loose_classes or at_edge or young
                 limit = self.p.short_absence_s if short else self.p.max_absence_s
                 if absent > limit:
                     if limit == self.p.short_absence_s:
@@ -299,7 +301,7 @@ class Tracker:
             score, source = 1.0, "user"
         elif tr.matched_now:
             score = 0.6 * tr.last_det_score + 0.4 * min(1.0, tr.hits / (2.0 * p.confirm_n))
-            if tr.cls == "alvik" and tr.h_status == "guess":
+            if tr.cls in self.p.front_classes and tr.h_status == "guess":
                 score *= 0.75
             if tr.est.first_motion:
                 score *= 0.9
@@ -311,8 +313,8 @@ class Tracker:
             source = "track"
         if not tr.confirmed:
             score *= 0.8            # shown only if the track is confirmed later
-        heading_known = tr.h_status == "known" and tr.heading is not None and tr.cls in ("alvik", "machine")
-        guess = tr.heading if (tr.h_status == "guess" and tr.cls in ("alvik", "machine")) else None
+        heading_known = tr.h_status == "known" and tr.heading is not None and tr.cls in p.front_classes
+        guess = tr.heading if (tr.h_status == "guess" and tr.cls in p.front_classes) else None
         return dict(frame=f, obj=tr.id, cls=tr.cls, x=round(tr.x, 1), y=round(tr.y, 1),
                     heading_deg=round(tr.heading, 1) if heading_known else None,
                     heading_known=bool(heading_known),
