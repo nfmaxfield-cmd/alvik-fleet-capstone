@@ -220,7 +220,7 @@ Nick's answers (2026-10-20): yes to 1, 2, 3, 4, 5, 6, 8, 9. 7 only if it proves 
 - Planned variety per session, aimed at the report's weak situations (close pairs, hands,
   edges, still robots, a lamp switched on and off).
 
-## "Investigate this" (Nick, 2026-10-20)
+## "Investigate this" (Nick, 2026-10-20; all points agreed for the next build)
 
 Seen: a small dark mark on the board that may be a robot or a stain; labelled as an Alvik on
 several frames before doubt set in.
@@ -238,3 +238,18 @@ several frames before doubt set in.
 - An "unsure" mark (key ?): saves the object as unsure, kept out of training until resolved,
   and listed in its own queue. Never force a guess.
 - Generic: works for any object type; no Alvik knowledge needed.
+
+## Optional AI helper, for projects allowed online (Nick, 2026-10-20; to design)
+
+Off by default; the studio stays fully offline without it. A project switches it on with the
+company's own AI access (API key), from any provider.
+- Good at judgment calls on a few frames: "robot or stain?" on an investigated spot; naming
+  unknown objects (cup, box, tool); a second check on a sample of confirmed labels (catches
+  mistakes); first draft labels for a brand-new object type before any model exists; setting
+  up a project from a sentence ("we track printed cubes and cylinders on a table").
+- Not for every frame or exact positions: general AI is slow and costs per picture, and is
+  weak at pinpointing 30-pixel objects in a grey frame. The trained model stays the workhorse.
+- Its answers are suggestions (source "ai"), never confirmed without a person; every call is
+  logged (what was sent, cost, answer); a visible indicator when anything leaves the computer;
+  only the crop or frame needed is sent.
+- Counted in the time-saving stats (frames where the AI's suggestion was accepted).
