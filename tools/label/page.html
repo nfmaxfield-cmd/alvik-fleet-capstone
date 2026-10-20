@@ -820,7 +820,8 @@ $("sadd").addEventListener("click", () => {
     '<div class="actions"><button class="sbtn" onclick="closeModal()">Cancel</button><button class="sbtn primary" id="ago">Add</button></div>');
   $("ago").onclick = async () => {
     try { const j = await api("/api/studio/add", { path: $("apath").value.trim(), camera: $("acam").value.trim() }); closeModal();
-      toast(j.added + " recording(s) added."); renderStudio(await studioState()); }
+      toast(j.added + " recording(s) added."); const s = await studioState(); renderStudio(s);
+      if (s && s.loading) { await waitLoaded(); await init(); } }
     catch (e) { toast(e.message, true); }
   };
 });
