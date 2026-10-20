@@ -85,6 +85,11 @@ Current rules (select_frames.py): about one frame per second, skipping near-dupl
 frames when an object appears, disappears, two objects are close, or a guess scores low; the
 first and last frame. "Most useful next" orders them least-confident first.
 Gap seen: a still object is never detected, so it never makes a frame "interesting" either.
+Gap seen (Nick, 2026-10-20): runs of near-identical frames. The near-duplicate skip only applies
+to the once-a-second frames; "close" frames are taken every 0.5 s while two objects are close,
+so robots parked side by side give a stack of the same picture. Skip near-duplicates for every
+rule, and once a frame is confirmed, accept its unchanged neighbours with it (or show them as
+one item: "5 frames, same picture").
 
 ## Split the chain when it's unsure (Nick, 2026-10-20)
 
