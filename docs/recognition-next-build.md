@@ -135,3 +135,11 @@ confidence.
 - Generic form: the same choice for any type (a part lifted by a robot arm varies).
 - Rename the column in plain words: "Height of the marked point above the floor (for the
   second camera)".
+
+## Long or odd-shaped things (Nick, 2026-10-20)
+
+- "hand" really means a person: hands, arms, sometimes feet. Rename it in the generic version
+  (e.g. "person"), and say in the setup where to mark it (the end reaching in).
+- Labels are one point per object with a fixed-size circle, so an arm reaching across the
+  board can only be marked at one spot. Fine for robots; for long objects (arms, tools, a
+  robot arm's links) consider an optional box or outline per type.
