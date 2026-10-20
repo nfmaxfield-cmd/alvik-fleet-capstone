@@ -143,3 +143,15 @@ confidence.
 - Labels are one point per object with a fixed-size circle, so an arm reaching across the
   board can only be marked at one spot. Fine for robots; for long objects (arms, tools, a
   robot arm's links) consider an optional box or outline per type.
+
+## Work area per camera (Nick, 2026-10-20)
+
+The process should start by marking where to look. Today the whole picture is searched: the
+motion pass, the frame picker and the model all spend effort on the room around the board.
+- Setup step per camera: draw the work area on the first frame (click its corners), with a
+  margin band around it, plus optional "ignore" spots inside (a reflection, a blinking light
+  on a shelf).
+- Uses: motion and the model only report things inside the area (or the margin, for hands
+  reaching in); frames are picked for what happens inside; scores count inside only; faster.
+- Alvik shortcut: the floor calibration's tape marks already give the board outline.
+- Generic: the other team draws their table or the arm's reach.
