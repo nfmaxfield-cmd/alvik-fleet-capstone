@@ -219,3 +219,22 @@ Nick's answers (2026-10-20): yes to 1, 2, 3, 4, 5, 6, 8, 9. 7 only if it proves 
   the model learns it).
 - Planned variety per session, aimed at the report's weak situations (close pairs, hands,
   edges, still robots, a lamp switched on and off).
+
+## "Investigate this" (Nick, 2026-10-20)
+
+Seen: a small dark mark on the board that may be a robot or a stain; labelled as an Alvik on
+several frames before doubt set in.
+- Circle a spot, press a key: the studio looks at that spot across the whole recording and
+  shows (1) a strip of thumbnails of the spot over time, (2) a line of how much the spot
+  changed over time, with its biggest changes as short clips, (3) the spot on an empty-board
+  frame (or the motion pass's background picture).
+- Verdicts it can offer: never changes and is on the empty board -> part of the background:
+  "ignore this spot" (feeds the rejected-spot list / ignore zones); moves -> show where it
+  went; appears and leaves -> an object that was put down.
+- Every label already made at that spot, listed with a "change all" button (fix past mistakes
+  in one go).
+- Second camera as a referee (once calibrated): a robot stands up 4 cm, so it shows in the
+  side view at the matching spot; a stain doesn't.
+- An "unsure" mark (key ?): saves the object as unsure, kept out of training until resolved,
+  and listed in its own queue. Never force a guess.
+- Generic: works for any object type; no Alvik knowledge needed.
