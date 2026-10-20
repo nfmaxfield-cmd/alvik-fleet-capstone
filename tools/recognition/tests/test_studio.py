@@ -196,7 +196,10 @@ def test_web_routes(tmp_path, synth_rec):
         code, body = _get(url + "api/queue?mode=next")
         q = json.loads(body)["frames"]
         confs = [x["conf"] for x in q if x["state"] == "pending"]
-        assert confs == sorted(confs)                     # least confident first
+        # least confident first; among guesses about as uncertain (within app.Session.SPREAD_BAND) the
+        # order may take frames from each part of the training split in turn
+        band = studiomod.labelapp.Session.SPREAD_BAND
+        assert all(c <= min(confs[i:]) + band + 1e-9 for i, c in enumerate(confs))
         code, body = _get(url + "report")
         assert code == 200 and b"Maxfield IRL Tracking" in body
         # a new object type: saved, and the page's classes follow (the recording opens again)

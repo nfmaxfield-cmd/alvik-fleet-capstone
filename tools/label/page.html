@@ -14,7 +14,7 @@
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
     font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   body { display: grid; grid-template-rows: auto auto auto 1fr; overflow: hidden; }
-  header { display: flex; align-items: center; gap: 14px; padding: 8px 14px; background: var(--panel);
+  header { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--panel);
     border-bottom: 1px solid var(--line); flex-wrap: wrap; }
   .brand { display: flex; flex-direction: column; line-height: 1.1; white-space: nowrap; }
   .brand .bname { font-size: 15px; font-weight: 650; letter-spacing: .01em; }
@@ -22,25 +22,28 @@
   header .src { color: var(--dim); font-size: 12px; }
   .tabs { display: flex; gap: 4px; flex-wrap: wrap; }
   .tabs button { background: var(--panel2); color: var(--dim); border: 1px solid var(--line); border-radius: 6px;
-    padding: 5px 10px; cursor: pointer; font: inherit; }
+    padding: 5px 9px; cursor: pointer; font: inherit; white-space: nowrap; }
   .tabs button.on { color: var(--text); border-color: var(--accent); background: #233041; }
-  .progress { flex: 1; min-width: 180px; display: flex; align-items: center; gap: 10px; }
+  .progress { flex: 1; min-width: 160px; display: flex; align-items: center; gap: 8px; }
   .bar { flex: 1; height: 10px; background: var(--panel2); border-radius: 5px; overflow: hidden; display: flex; }
   .bar span { height: 100%; }
-  .bar .rev { background: var(--ok); } .bar .auto { background: #2a7f5d; } .bar .edit { background: var(--warn); }
+  .bar .rev { background: var(--ok); } .bar .uns { background: #8a92a0; } .bar .auto { background: #2a7f5d; } .bar .edit { background: var(--warn); }
   .progress .txt { color: var(--dim); font-size: 12px; white-space: nowrap; }
   .hbtn { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px;
     cursor: pointer; font: inherit; font-size: 13px; }
   .hbtn:hover { border-color: var(--accent); }
   .hbtn.round { width: 28px; height: 28px; padding: 0; border-radius: 50%; font-weight: 700; }
-  main { display: grid; grid-template-columns: 1fr 330px; min-height: 0; }
+  main { display: grid; grid-template-columns: 1fr 330px; min-height: 0; position: relative; }
   #stage { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 10px; gap: 8px; }
   #wrap { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
   canvas#view { background: #000; border-radius: 4px; cursor: default; }
   canvas#view.hmode, canvas#view.wamode { cursor: crosshair; }
   canvas#view.mag { cursor: none; }
   canvas#strip { width: 100%; height: 18px; cursor: pointer; border-radius: 3px; background: var(--panel2); }
-  .framebar { display: flex; gap: 12px; align-items: baseline; color: var(--dim); font-size: 13px; flex-wrap: wrap; }
+  /* one line always: a long "picked for" never pushes the picture down (full text in the tooltip) */
+  .framebar { display: flex; gap: 12px; align-items: baseline; color: var(--dim); font-size: 13px; flex-wrap: nowrap; white-space: nowrap; min-width: 0; }
+  .framebar > span { flex-shrink: 0; }
+  .framebar > #freasons, .framebar > #src { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .framebar b { color: var(--text); font-weight: 600; }
   .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; background: var(--panel2);
     border: 1px solid var(--line); color: var(--text); }
@@ -89,6 +92,15 @@
     cursor: pointer; font: inherit; text-decoration: none; }
   .sbtn:hover { border-color: var(--accent); } .sbtn.primary { border-color: var(--accent); background: #233041; }
   .sbtn:disabled { opacity: .45; cursor: default; }
+  .studiobar select { max-width: 250px; }
+  .studiobar select#smodel { max-width: 300px; }
+  #sproj { max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* less frequent studio buttons, under "More" so the bar stays one line */
+  .morewrap { position: relative; display: inline-block; }
+  .smenu { display: none; position: absolute; top: 100%; right: 0; margin-top: 4px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 6px; z-index: 12; flex-direction: column; gap: 4px; min-width: 210px; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
+  .smenu.on { display: flex; }
+  .smenu .sbtn { text-align: left; }
   #jobtxt, #bgtxt { color: var(--dim); font-size: 12px; }
   #jobtxt.busy, #bgtxt.busy { color: var(--accent); }
   .shade { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: center; justify-content: center; z-index: 10; }
@@ -117,10 +129,16 @@
   #loading .lb span { display: block; height: 100%; background: var(--accent); width: 0; transition: width .3s; }
   #loading .lb.indet span { width: 30% !important; position: absolute; animation: slide 1.3s ease-in-out infinite; }
   @keyframes slide { from { left: -30%; } to { left: 100%; } }
-  #wabar { display: none; background: var(--panel); border: 1px solid var(--accent); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+  /* the work-area editor lies over the side panel: the picture keeps its place and stays fully visible */
+  #wabar { display: none; position: absolute; top: 0; right: 0; bottom: 0; width: 330px; z-index: 6; overflow-y: auto;
+    background: var(--panel); border-left: 2px solid var(--accent); padding: 12px; font-size: 13px; }
   #wabar.on { display: block; }
-  #wabar .row { margin-top: 6px; }
+  #wabar h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 14px 0 6px; }
+  #wabar .row { margin-top: 8px; }
   #wabar .row input { width: 70px; }
+  #wabar .stack { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+  #wabar .stack .sbtn { text-align: left; padding: 7px 10px; }
+  #wahelp { display: block; margin-top: 8px; color: var(--text); font-size: 13px; }
   #wabar .seg button { background: var(--panel2); color: var(--dim); border: 1px solid var(--line); padding: 3px 9px; cursor: pointer; font: inherit; }
   #wabar .seg button:first-child { border-radius: 6px 0 0 6px; } #wabar .seg button:last-child { border-radius: 0 6px 6px 0; }
   #wabar .seg button.on { color: var(--text); border-color: var(--accent); background: #233041; }
@@ -135,8 +153,9 @@
   #tour .badge { display: inline-block; font-size: 11.5px; padding: 1px 8px; border-radius: 10px; margin-bottom: 8px; }
   #tour .badge.safe { background: #1f3a2e; color: #8fe8bf; border: 1px solid #2a6b4f; }
   #tour .badge.changes { background: #3d2f1a; color: #ffcf8a; border: 1px solid #7a5520; }
-  #tour .nav { display: flex; gap: 8px; align-items: center; }
-  #tour .nav .count { color: var(--dim); font-size: 12px; flex: 1; }
+  #tour .nav { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  #tour .nav .count { color: var(--dim); font-size: 12px; flex: 1; white-space: nowrap; }
+  #tour .nav .sbtn { white-space: nowrap; }
   /* investigate */
   .modal.wide { width: min(1080px, 96vw); }
   .verdict { background: var(--panel2); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 10px 12px; margin: 6px 0 10px; }
@@ -167,24 +186,30 @@
   #loadstop.on { display: inline-block; }
   .okbox { background: #1f2a24; border: 1px solid #2a4d3c; border-radius: 8px; padding: 8px 10px; }
   .warnbox { background: #3d2f1a; border: 1px solid #7a5520; border-radius: 8px; padding: 8px 10px; color: #ffe2b8; }
+  .framebar .src { color: var(--dim); font-size: 12px; }
+  .parts { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-size: 12.5px; }
+  .parts b { font-weight: 600; text-align: right; }
+  .parts .zero { color: var(--warn); }
+  .modal td .xbtn { font-size: 13px; }
+  .hidecol { display: none; }
   @media (max-width: 900px) { main { grid-template-columns: 1fr; } aside { border-left: 0; border-top: 1px solid var(--line); } }
 </style>
 </head>
 <body>
 <header>
   <div class="brand" id="brand"><span class="bname">Maxfield IRL Tracking</span><span class="btag">Identify. Recognize. Label.</span></div>
-  <span class="src" id="src"></span>
   <div class="tabs" id="tabs">
-    <button data-mode="next" title="Frames not finished yet, the least confident guesses first: your time goes where it helps most">Most useful next <span id="n-next"></span></button>
-    <button data-mode="all" title="Every picked frame, in time order">All picked frames <span id="n-all"></span></button>
+    <button data-mode="next" title="Frames not finished yet, the least confident guesses first: your time goes where it helps most. In the studio it also takes frames from each part of the training split in turn, so every part gets some early">Most useful next <span id="n-next"></span></button>
+    <button data-mode="all" title="Every picked frame, in time order">All picked <span id="n-all"></span></button>
     <button data-mode="low" title="Frames whose guesses the computer is least sure about">Low confidence <span id="n-low"></span></button>
     <button data-mode="spot" title="A random sample of the high-confidence frames: check them to see how often the guesses are right">Spot check <span id="n-spot"></span></button>
     <button data-mode="unsure" title="Frames with an object you marked unsure (?): kept out of training until you decide">Unsure <span id="n-unsure"></span></button>
   </div>
   <div class="progress" id="progress">
-    <div class="bar" id="bar"><span class="rev"></span><span class="auto"></span><span class="edit"></span></div>
+    <div class="bar" id="bar" title="Green: reviewed by you. Grey: holds an object marked unsure. Dark green: accepted without looking. Orange: changed but not finished."><span class="rev"></span><span class="uns"></span><span class="auto"></span><span class="edit"></span></div>
     <span class="txt" id="progtxt"></span>
   </div>
+  <button class="hbtn" id="keysbtn" title="Every key, in one list (K)">Keys</button>
   <button class="hbtn" id="fullbtn" title="Full screen (V); Esc leaves it">Full screen</button>
   <button class="hbtn round" id="helpbtn" title="Show the tour of the screen again">?</button>
 </header>
@@ -193,13 +218,16 @@
   <label for="srec">Recording</label><select id="srec"></select>
   <label for="smodel">Guesses from</label><select id="smodel"></select>
   <button class="sbtn primary" id="strain" title="Train a new model on every frame confirmed so far, in the background">Train new model</button>
-  <button class="sbtn" id="smodels">Models &amp; learning curve</button>
-  <button class="sbtn" id="sclasses">Object types</button>
+  <button class="sbtn" id="smodels" title="How much better each model is, and the list of models">Learning curve</button>
   <button class="sbtn" id="sadd">Add recording</button>
   <button class="sbtn" id="swork" title="Mark the part of the picture to look in (W)">Work area</button>
-  <button class="sbtn" id="stime" title="How long labelling takes, and how much each model saves">Time saved</button>
-  <button class="sbtn" id="sshare" title="Save the whole project as one file, to hand over or keep">Share project</button>
-  <button class="sbtn" id="sopen" title="Open a project file (.mxirl) someone gave you">Open shared project</button>
+  <span class="morewrap"><button class="sbtn" id="smore" aria-haspopup="true" title="Object types, time saved, sharing the project">More &#9662;</button>
+    <span class="smenu" id="smenu">
+      <button class="sbtn" id="sclasses">Object types</button>
+      <button class="sbtn" id="stime" title="How long labelling takes, and how much each model saves">Time saved</button>
+      <button class="sbtn" id="sshare" title="Save the whole project as one file, to hand over or keep">Share project</button>
+      <button class="sbtn" id="sopen" title="Open a project file (.mxirl) someone gave you">Open shared project</button>
+    </span></span>
   <span id="jobtxt"></span>
   <span id="bgtxt"></span>
 </div>
@@ -214,26 +242,26 @@
       <span id="freasons"></span>
       <span id="fview"></span>
       <span style="flex:1"></span>
+      <span class="src" id="src"></span>
       <span id="fpos"></span>
-    </div>
-    <div id="wabar">
-      <div class="row" style="margin-top:0">
-        <b>Work area<span id="wacam"></span></b>
-        <span class="seg"><button id="wa-corners" class="on">Corners</button><button id="wa-spots">Ignore spots</button></span>
-        <span class="muted" id="wahelp"></span>
-      </div>
-      <div class="row">
-        <label for="wamargin">Margin around it (px)</label><input id="wamargin" type="number" min="0" step="1">
-        <span class="muted" id="wamarginhint"></span>
-        <span style="flex:1"></span>
-        <button class="sbtn" id="wa-whole" title="Look in the whole picture (ignore spots are kept)">Use the whole picture</button>
-        <button class="sbtn" id="wa-cancel">Cancel (Esc)</button>
-        <button class="sbtn primary" id="wa-save">Save (Enter)</button>
-      </div>
     </div>
     <div id="wrap"><canvas id="view" width="640" height="480"></canvas></div>
     <canvas id="strip" title="Frames in this list: click to jump. Green = reviewed, dark green = auto-accepted, orange = changed but not finished, grey = not looked at."></canvas>
   </section>
+  <div id="wabar">
+    <b style="font-size:15px">Work area<span id="wacam"></span></b>
+    <div class="row"><span class="seg"><button id="wa-corners" class="on">Corners</button><button id="wa-spots">Ignore spots</button></span></div>
+    <span id="wahelp"></span>
+    <h2>Margin</h2>
+    <div class="row"><label for="wamargin">Margin around it (px)</label><input id="wamargin" type="number" min="0" step="1"></div>
+    <div class="muted" id="wamarginhint" style="margin-top:4px"></div>
+    <div class="stack">
+      <button class="sbtn primary" id="wa-save">Save (Enter)</button>
+      <button class="sbtn" id="wa-whole" title="Look in the whole picture (ignore spots are kept)">Use the whole picture</button>
+      <button class="sbtn" id="wa-cancel">Cancel (Esc)</button>
+    </div>
+    <p class="muted">Guesses outside the area and its margin, and inside ignore spots, are left out. Your labels are kept.</p>
+  </div>
   <aside>
     <h2>Objects on this frame</h2>
     <div class="objs" id="objs"></div>
@@ -246,6 +274,12 @@
       <h2>Spot check</h2>
       <div class="spot" id="spottxt"></div>
       <button class="btn" id="spotdraw">Draw a new random sample</button>
+    </div>
+
+    <div id="partsbox" style="display:none">
+      <h2>Confirmed frames by part</h2>
+      <div class="parts" id="partstxt"></div>
+      <div class="muted" id="partsnote" style="margin-top:4px"></div>
     </div>
 
     <div id="highbox">
@@ -274,6 +308,7 @@
       <kbd>I</kbd><span>Change the selected object's number</span>
       <kbd>G</kbd><span>Go to a frame number</span>
       <kbd>M</kbd><span>Magnifier: 3x lens around the mouse (again: off)</span>
+      <kbd>K</kbd><span>This list of keys, in a window</span>
       <kbd>B</kbd><span>Picture: normal / brighter / high contrast (only how it is shown)</span>
       <kbd>V</kbd><span>Full screen (Esc leaves it)</span>
       <kbd>W</kbd><span>Work area: mark the part of the picture to look in</span>
@@ -370,7 +405,9 @@ async function init() {
   }
   S.imgCache.clear();
   setClasses(S.info.classes || CLASSES);
-  $("src").textContent = S.info.recording + " · " + (S.info.guess_label || ("guesses: " + S.info.guess_source)) + " · object size " + S.info.robot_px.toFixed(0) + " px";
+  // in the studio the bar above already says the recording and where the guesses come from
+  $("src").textContent = (ST.on ? "" : (S.info.guess_label || ("guesses: " + S.info.guess_source)) + " · ") + "object size " + S.info.robot_px.toFixed(0) + " px";
+  $("src").title = S.info.recording + " · " + (S.info.guess_label || S.info.guess_source) + " · object size " + S.info.robot_px.toFixed(0) + " px (how big one object is in the picture)";
   $("paths").textContent = "Saved to " + S.info.labels_path;
   const pos = S.info.position || {};
   S.mode = pos.mode || "next";
@@ -401,6 +438,7 @@ async function showFrame(i) {
   try { fr = await api("/api/frame?f=" + f); } catch (e) { toast(e.message, true); return; }
   if (S.queue[S.idx].f !== f) return;          // user moved on meanwhile
   S.frame = fr; S.sel = -1; S.hmode = false; S.drag = null;
+  if (S.mode === "unsure") S.sel = fr.objects.findIndex((o) => o.status === "unsure");   // the object to decide on
   startTiming(f);
   S.img = await getImage(f);
   fit(); draw(); renderSide(); drawStrip();
@@ -596,17 +634,31 @@ function renderView() {
   if (S.mag) bits.push("magnifier on");
   $("fview").innerHTML = bits.length ? '<span class="pill view">' + esc(bits.join(" · ")) + "</span>" : "";
 }
+// why a frame was picked, in plain words
+const REASONS = { start: "start of the recording", end: "end of the recording", appear: "something appears",
+  disappear: "something leaves", close: "objects close together", low: "an unsure guess" };
+function reasonText(rs) { return (rs || []).filter((r) => r !== "regular").map((r) => REASONS[r] || r).join(", "); }
 function renderSide() {
   renderView();
   const fr = S.frame;
-  if (!fr) { $("objs").innerHTML = ""; return; }
+  if (!fr) {
+    // an empty list: clear the frame's header too, so nothing from the last frame stays
+    $("fno").textContent = "-"; $("ftime").textContent = ""; $("fstate").textContent = ""; $("fstate").className = "pill";
+    $("fstate").style.display = "none"; $("fconf").textContent = ""; $("freasons").textContent = "";
+    $("fpos").textContent = S.info ? "0 in list" : "";
+    $("objs").innerHTML = S.info ? '<div class="muted">' + (S.mode === "unsure" ? "No unsure objects left: nothing waits for a decision. Pick another list above." : "No frames in this list. Pick another list above.") + "</div>" : "";
+    return;
+  }
+  $("fstate").style.display = "";
   $("fno").textContent = fr.frame;
   $("ftime").textContent = fr.time_s.toFixed(1) + " s";
   const st = $("fstate");
   st.textContent = fr.state === "auto" ? (fr.how === "same" ? "accepted: same picture" : "auto-accepted") : fr.state === "edited" ? "changed, not finished" : fr.state;
   st.className = "pill " + fr.state;
   $("fconf").textContent = "confidence " + fr.conf.toFixed(2);
-  $("freasons").textContent = (fr.reasons || []).filter((r) => r !== "regular").join(", ") + (fr.in_spot ? "  [spot check]" : "");
+  const why = reasonText(fr.reasons);
+  $("freasons").textContent = (why ? "picked for: " + why : "") + (fr.in_spot ? "  [spot check]" : "");
+  $("freasons").title = (why ? "Picked for: " + why + ". " : "") + "Why this frame was picked for labelling (besides about one frame per second)";
   $("fpos").textContent = (S.idx + 1) + " / " + S.queue.length + " in list";
   const box = $("objs"); box.innerHTML = "";
   if (!fr.objects.length) {
@@ -631,11 +683,14 @@ function setStats(st) {
   $("n-spot").textContent = st.spot.sample ? "(" + st.spot.checked + "/" + st.spot.sample + ")" : "";
   $("n-unsure").textContent = "(" + (st.unsure || 0) + ")";
   const q = S.queue, n = Math.max(1, q.length);
-  const c = (s) => q.filter((x) => x.state === s).length;
-  const rev = c("reviewed"), au = c("auto"), ed = c("edited");
+  // frames holding an unsure object are counted on their own: they are not finished until you decide
+  const c = (s) => q.filter((x) => x.state === s && !x.unsure).length;
+  const rev = c("reviewed"), au = c("auto"), ed = c("edited"), un = q.filter((x) => x.unsure).length;
   const spans = $("bar").children;
-  spans[0].style.width = (100 * rev / n) + "%"; spans[1].style.width = (100 * au / n) + "%"; spans[2].style.width = (100 * ed / n) + "%";
-  $("progtxt").textContent = rev + " reviewed" + (au ? " · " + au + " auto" : "") + " · " + (q.length - rev - au) + " left of " + q.length;
+  spans[0].style.width = (100 * rev / n) + "%"; spans[1].style.width = (100 * un / n) + "%";
+  spans[2].style.width = (100 * au / n) + "%"; spans[3].style.width = (100 * ed / n) + "%";
+  $("progtxt").textContent = rev + " reviewed" + (un ? " · " + un + " unsure" : "") + (au ? " · " + au + " auto" : "") + " · " + (q.length - rev - au - un) + " left";
+  $("progtxt").title = "Of the " + q.length + " frames in this list";
   $("thr").value = st.low_threshold;
   $("hightxt").textContent = st.high_pending + " high-confidence frames not looked at; " + (st.auto - (st.same || 0)) + " auto-accepted" +
     (st.same ? ", " + st.same + " accepted for having the same picture as a frame you accepted." : ".");
@@ -646,11 +701,31 @@ function setStats(st) {
   if (!sp.sample) t = "No sample yet. It takes a random 10% of the high-confidence frames nobody has looked at.";
   else if (!sp.checked) t = "Sample of " + sp.sample + " frames (from " + sp.pool + "). Check each one: Enter if every guess is right, otherwise fix it.";
   else t = "<b>" + sp.agree + " of " + sp.checked + "</b> checked frames needed no correction (" + Math.round(100 * sp.agreement) +
-    "%, 95% range " + Math.round(100 * sp.range95[0]) + "–" + Math.round(100 * sp.range95[1]) + "%). Objects: " +
-    (sp.objects - sp.objects_changed) + " of " + sp.objects + " right. " + (sp.sample - sp.checked) + " left to check.";
+    "%). " + spotRange(sp) + " Objects: " + (sp.objects - sp.objects_changed) + " of " + sp.objects + " right. " + (sp.sample - sp.checked) + " left to check.";
   $("spottxt").innerHTML = t;
+  renderParts(st.parts);
   const se = $("saveerr");
   se.style.display = st.save_error ? "block" : "none"; se.textContent = st.save_error ? "Not saved: " + st.save_error : "";
+}
+
+// the spot check's likely range (a 95% interval), said in plain words
+function spotRange(sp) {
+  return "From " + sp.checked + " checked frame" + (sp.checked === 1 ? "" : "s") + ", the share that is right among all the high-confidence frames is very likely between " +
+    Math.round(100 * sp.range95[0]) + "% and " + Math.round(100 * sp.range95[1]) + "% (checking more frames narrows this).";
+}
+// finished frames of this recording per part of the training split (studio only)
+function renderParts(p) {
+  const box = $("partsbox");
+  if (!p) { box.style.display = "none"; return; }
+  box.style.display = "";
+  const row = (name, v, tip) => '<span title="' + esc(tip) + '">' + name + '</span><b class="' + (v ? "" : "zero") + '">' + v + "</b>";
+  $("partstxt").innerHTML = row("for learning", p.train, "The model learns from these.") +
+    row("for picking the best training round", p.val, "Used to choose the best moment of training.") +
+    row("held back for scoring", p.test, "Never trained on: every model is scored on these.") +
+    (p.edge ? row("at piece edges (not used)", p.edge, "Too close to the edge of a time piece: left out so neighbouring, near-identical frames never end up in two parts.") : "");
+  const miss = [p.train < 10 ? "learning (needs 10)" : null, !p.val ? "picking" : null, !p.test ? "scoring" : null].filter(Boolean);
+  $("partsnote").textContent = "This recording only. Training cuts the recordings into time pieces and uses each piece for one job, to keep the scores honest. " +
+    (miss.length ? "Still short of frames for " + miss.join(", ") + ": Most useful next takes frames from each part in turn." : "Every part has frames.");
 }
 
 // ---------------------------------------------------------------- changes
@@ -684,7 +759,9 @@ async function save(state, how, timingInfo) {
     if (S.frame && S.frame.frame === fr.frame) {
       const sel = S.sel; S.frame = j.frame; S.sel = Math.min(sel, S.frame.objects.length - 1);
     }
-    const q = S.queue.find((x) => x.f === fr.frame); if (q) { q.state = j.frame.state; q.conf = j.frame.conf; }
+    const q = S.queue.find((x) => x.f === fr.frame);
+    if (q) { q.state = j.frame.state; q.conf = j.frame.conf; q.unsure = j.frame.objects.some((o) => o.status === "unsure"); }
+    if (S.mode === "unsure" && q && !q.unsure) S.queueStale = true;    // decided: it leaves the Unsure list
     (j.same || []).forEach((g) => { const qq = S.queue.find((x) => x.f === g); if (qq) qq.state = "auto"; });
     setStats(j.stats);
     if (j.updated) {
@@ -725,7 +802,7 @@ async function markEmpty() {
   const j = await save("reviewed", S.mode === "spot" ? "spot" : "user", finishTiming());
   if (j && j.same && j.same.length) {
     entry.also = j.same;
-    toast("Also marked " + j.same.length + " frame" + (j.same.length > 1 ? "s" : "") + " with the same (empty) picture (Z undoes)");
+    toast("Also marked " + j.same.length + " frame" + (j.same.length > 1 ? "s" : "") + " empty too: they show the same picture (Z undoes)");
   }
   await goNextToDo(j && j.same && j.same.length);
 }
@@ -865,6 +942,13 @@ document.addEventListener("fullscreenchange", () => {
   setTimeout(() => { if (S.info) { fit(); draw(); drawStrip(); } }, 60);
 });
 $("fullbtn").addEventListener("click", toggleFull);
+// every key in one window (the same list is at the bottom of the side panel)
+function showKeys() {
+  modal("<h3>Keys</h3>" + '<div class="keys">' + $("keys").innerHTML + "</div>" +
+    '<p class="muted">The same list is at the bottom of the side panel. K or the Keys button opens this window.</p>' +
+    '<div class="actions"><button class="sbtn primary" onclick="closeModal()">Close (Esc)</button></div>');
+}
+$("keysbtn").addEventListener("click", showKeys);
 
 // ---------------------------------------------------------------- unsure
 async function toggleUnsure(sel) {
@@ -896,7 +980,6 @@ function startWorkArea() {
   $("wamarginhint").textContent = "blank = one object size (" + Math.round(S.info.robot_px) + " px): room for things reaching in";
   S.sel = -1; S.hmode = false;
   $("wabar").classList.add("on");
-  fit();
   waMode("corners");
   if (S.wa.done) $("wahelp").textContent = "The current area is shown. Click on the picture to start new corners, or switch to Ignore spots.";
   draw();
@@ -908,7 +991,7 @@ function waMode(m) {
     ? "Click the corners of the area to watch (at least 3). Backspace removes the last corner. Enter saves, Esc cancels."
     : "Click a spot to ignore (a reflection, a blinking light); drag to set its size. Click an ignore spot again to remove it.";
 }
-function endWorkArea() { S.wa = null; $("wabar").classList.remove("on"); fit(); draw(); }
+function endWorkArea() { S.wa = null; $("wabar").classList.remove("on"); draw(); }
 function waMouseDown(p) {
   const w = S.wa;
   if (w.mode === "corners") {
@@ -1032,6 +1115,7 @@ window.addEventListener("keydown", async (ev) => {
       break;
     }
     case "m": case "M": toggleMag(); break;
+    case "k": case "K": showKeys(); break;
     case "b": case "B": cyclePicture(); break;
     case "w": case "W": startWorkArea(); break;
     case "q": case "Q": investigate(invTarget()); break;
@@ -1066,6 +1150,7 @@ document.querySelectorAll("#tabs button").forEach((b) => b.addEventListener("cli
   const cur = S.frame ? S.frame.frame : null;
   await loadQueue();
   if (S.mode === "unsure" && !S.queue.length) toast("No unsure objects. Press ? on an object you can't identify.");
+  if (!S.queue.length) { S.frame = null; draw(); renderSide(); drawStrip(); b.blur(); return; }
   let i = S.queue.findIndex((q) => q.f === cur);
   if (i < 0) i = Math.max(0, firstToDo(0));
   await showFrame(i);
@@ -1078,8 +1163,7 @@ $("spotdraw").addEventListener("click", async () => {
 $("autoacc").addEventListener("click", async () => {
   const st = S.stats, sp = st.spot;
   let msg = "Accept the guesses on " + st.high_pending + " high-confidence frames without looking at them?\n\n";
-  msg += sp.checked ? "Spot check so far: " + sp.agree + " of " + sp.checked + " frames were right (" + Math.round(100 * sp.agreement) + "%, 95% range " +
-    Math.round(100 * sp.range95[0]) + "-" + Math.round(100 * sp.range95[1]) + "%)." : "There is no spot check yet, so their accuracy is unknown. Do the spot check first?";
+  msg += sp.checked ? "Spot check so far: " + sp.agree + " of " + sp.checked + " frames were right (" + Math.round(100 * sp.agreement) + "%). " + spotRange(sp) : "There is no spot check yet, so their accuracy is unknown. Do the spot check first?";
   if (!confirm(msg)) return;
   try { const j = await withBusy("Accepting the high-confidence frames ...", () => api("/api/auto_accept", {})); toast(j.accepted + " frames accepted."); await loadQueue(); await showFrame(S.idx); } catch (e) { toast(e.message, true); }
 });
@@ -1119,8 +1203,10 @@ function renderStudio(s) {
   });
   rs.value = s.current.rec || "";
   const ms = $("smodel"); ms.innerHTML = "";
-  const none = document.createElement("option"); none.value = "none"; none.textContent = "No model (motion + tracking: starting from scratch)"; ms.appendChild(none);
-  s.models.filter((m) => m.status === "ready").forEach((m) => {
+  const none = document.createElement("option"); none.value = "none"; none.textContent = "No model (motion and tracking only)"; ms.appendChild(none);
+  // models that find nothing yet are hidden unless "Show failed models" is ticked (Learning curve)
+  const showFailed = !!(s.settings && s.settings.show_failed_models);
+  s.models.filter((m) => m.status === "ready" && (showFailed || !m.failed || m.id === s.current.model)).forEach((m) => {
     const o = document.createElement("option"); o.value = m.id; o.textContent = "Model " + modelLabel(m); ms.appendChild(o);
   });
   ms.value = s.current.model || "none";
@@ -1141,7 +1227,7 @@ async function waitLoaded(first) {
       const s = await studioState();
       const l = s && s.loading;
       if (!l) break;
-      showLoading(l.what, l.done, l.total, l.left);
+      showLoading(l.what, l.done, l.total, l.left, "frames");
       if (l.error) { showLoading("Could not open it: " + l.error, 0, 0, "The studio keeps running; pick another recording or fix the problem and try again."); await sleep(4000); break; }
       await sleep(500);
     }
@@ -1159,16 +1245,24 @@ async function studioOpen(rec, model) {
   await init();
   await offerWorkArea();
 }
-function modal(html, locked) { $("modal").classList.remove("wide"); $("modal").innerHTML = html; $("shade").classList.add("on"); TOUR.lockedModal = !!locked; }
+function modal(html, locked) { closeMenu(); $("modal").classList.remove("wide"); $("modal").innerHTML = html; $("modal").scrollTop = 0; $("shade").classList.add("on"); TOUR.lockedModal = !!locked; }
+// the "More" menu of the studio bar
+function closeMenu() { const m = $("smenu"); if (m) m.classList.remove("on"); }
+$("smore").addEventListener("click", (ev) => { ev.stopPropagation(); $("smenu").classList.toggle("on"); });
+$("smenu").addEventListener("click", () => closeMenu());
+document.addEventListener("mousedown", (ev) => { if (!ev.target.closest || !ev.target.closest(".morewrap")) closeMenu(); });
 function closeModal() { $("shade").classList.remove("on"); TOUR.lockedModal = false; }
 $("shade").addEventListener("click", (e) => { if (e.target === $("shade") && !TOUR.lockedModal) { if ($("modal").classList.contains("wide")) closeInvestigate(); else closeModal(); } });
 $("srec").addEventListener("change", () => studioOpen($("srec").value, $("smodel").value));
 $("smodel").addEventListener("change", () => studioOpen($("srec").value, $("smodel").value));
 $("strain").addEventListener("click", () => {
   const s = ST.state;
+  const pp = S.stats && S.stats.parts;
   modal('<h3>Train a new model</h3><p>Trains on every frame confirmed so far, in all recordings (' + s.labelled_total + ' frames). ' +
     'Frames from the held-back test part are never trained on; every model is scored on them, so models can be compared fairly. ' +
     'Frames holding an object marked unsure are left out until you decide.</p>' +
+    (pp ? '<p class="muted">In this recording: ' + pp.train + " confirmed frames for learning, " + pp.val + " for picking the best training round, " + pp.test + " held back for scoring" +
+      (pp.edge ? " (" + pp.edge + " at piece edges are not used)" : "") + ". Training needs at least 10 for learning and 1 in each of the others, over all recordings.</p>" : "") +
     '<div class="row">Train for at most <input id="tmin" type="number" min="2" max="240" value="' + (s.settings.train_minutes || 20) + '"> minutes</div>' +
     '<p class="muted">You can keep labelling while it trains. When it finishes, it appears in "Guesses from". Your labels are not changed.</p>' +
     '<div class="actions"><button class="sbtn" onclick="closeModal()">Cancel</button><button class="sbtn primary" id="tgo">Start training</button></div>');
@@ -1178,58 +1272,103 @@ $("strain").addEventListener("click", () => {
   };
 });
 function curveSvg(pts) {
+  // one place per model version, oldest to newest (no model first), each labelled with the frames it trained on:
+  // two models trained on the same frames stand side by side instead of on top of each other
+  pts = pts.filter((p) => p.f1 != null || p.recall != null);
   if (!pts.length) return '<p class="muted">No models scored yet.</p>';
-  const W = 640, H = 260, L = 48, R = 16, T = 16, B = 40;
-  const xs = pts.map((p) => p.n_train_frames), xmax = Math.max(10, ...xs);
-  const X = (v) => L + (W - L - R) * v / xmax, Y = (v) => T + (H - T - B) * (1 - v);
+  const W = 640, H = 278, L = 48, R = 16, T = 16, B = 58, n = pts.length;
+  const X = (i) => L + (W - L - R) * (i + 0.5) / n, Y = (v) => T + (H - T - B) * (1 - v);
   let g = "";
   for (const v of [0, 0.25, 0.5, 0.75, 1]) g += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(v) + '" y2="' + Y(v) + '" stroke="#31363f"/><text x="' + (L - 6) + '" y="' + (Y(v) + 4) + '" fill="#9aa1ab" font-size="11" text-anchor="end">' + Math.round(v * 100) + '%</text>';
+  pts.forEach((p, i) => {
+    g += '<text x="' + X(i) + '" y="' + (H - B + 16) + '" fill="' + (p.failed ? "#ffb347" : "#e7e9ec") + '" font-size="11.5" text-anchor="middle">' + esc(p.model === "none" ? "no model" : p.model) + "</text>" +
+      '<text x="' + X(i) + '" y="' + (H - B + 30) + '" fill="#9aa1ab" font-size="10.5" text-anchor="middle">' + p.n_train_frames + " frames</text>";
+  });
   const line = (key, col) => {
-    const ps = pts.filter((p) => p[key] != null);
+    const ps = pts.map((p, i) => [p, i]).filter((a) => a[0][key] != null);
     if (!ps.length) return "";
-    let s = '<polyline fill="none" stroke="' + col + '" stroke-width="2" points="' + ps.map((p) => X(p.n_train_frames) + "," + Y(p[key])).join(" ") + '"/>';
-    ps.forEach((p) => { s += '<circle cx="' + X(p.n_train_frames) + '" cy="' + Y(p[key]) + '" r="4" fill="' + col + '"><title>' + esc(p.label) + ": " + Math.round(100 * p[key]) + "%</title></circle>"; });
+    let s = '<polyline fill="none" stroke="' + col + '" stroke-width="2" points="' + ps.map((a) => X(a[1]) + "," + Y(a[0][key])).join(" ") + '"/>';
+    ps.forEach((a) => { s += '<circle cx="' + X(a[1]) + '" cy="' + Y(a[0][key]) + '" r="4" fill="' + col + '"><title>' + esc(a[0].label) + ": " + Math.round(100 * a[0][key]) + "%</title></circle>"; });
     return s;
   };
-  return '<svg viewBox="0 0 ' + W + " " + H + '" width="100%" role="img" aria-label="Learning curve">' + g +
+  return '<svg viewBox="0 0 ' + W + " " + H + '" width="100%" style="max-width:760px;display:block" role="img" aria-label="Learning curve">' + g +
     line("recall", "#3ddc97") + line("precision", "#4fc3f7") + line("f1", "#ffffff") +
-    '<text x="' + ((L + W - R) / 2) + '" y="' + (H - 8) + '" fill="#9aa1ab" font-size="12" text-anchor="middle">confirmed frames the model trained on</text></svg>' +
-    '<div class="legend"><span><i style="background:#fff"></i>F1 (overall)</span><span><i style="background:#3ddc97"></i>found (recall)</span><span><i style="background:#4fc3f7"></i>right when it says so (precision)</span></div>';
+    '<text x="' + ((L + W - R) / 2) + '" y="' + (H - 6) + '" fill="#9aa1ab" font-size="12" text-anchor="middle">model versions, oldest to newest (under each: the confirmed frames it trained on)</text></svg>' +
+    '<div class="legend"><span><i style="background:#fff"></i>F1 (overall)</span><span><i style="background:#3ddc97"></i>found (recall)</span><span><i style="background:#4fc3f7"></i>right when it says so (precision)</span></div>' +
+    '<p class="muted" style="margin:4px 0 0">Each point is one model version scored on the same held-back frames; a line that climbs from left to right means your labelling is paying off.</p>';
 }
-$("smodels").addEventListener("click", async () => {
+function modelStatus(m) {
+  if (m.status === "training") return "training now";
+  if (m.status === "failed") return (m.interrupted ? "stopped: " : "failed: ") + (m.error || "");
+  if (m.warning) return "saved, but finds nothing yet: " + m.warning;
+  if (m.status === "ready") return "ready" + (m.metrics && m.metrics.f1 != null ? " · F1 " + fmtPct(m.metrics.f1) : "");
+  return m.status;
+}
+async function showModels() {
   let c;
   try { c = await withBusy("Reading the scores ...", () => api("/api/studio/curve")); } catch (e) { toast(e.message, true); return; }
-  const rows = c.points.map((p) => "<tr><td>" + esc(p.label) + "</td><td>" + p.n_train_frames + "</td><td>" + fmtPct(p.recall) + "</td><td>" + fmtPct(p.precision) +
+  const showFailed = !!(ST.state && ST.state.settings && ST.state.settings.show_failed_models);
+  const nFailed = c.models.filter((m) => m.failed).length;
+  const pts = c.points.filter((p) => showFailed || !p.failed);
+  const rows = pts.map((p) => "<tr><td>" + esc(p.label) + (p.failed ? ' <span class="muted">(finds nothing yet)</span>' : "") + "</td><td>" + p.n_train_frames + "</td><td>" + fmtPct(p.recall) + "</td><td>" + fmtPct(p.precision) +
     "</td><td>" + fmtPct(p.f1) + "</td><td>" + fmtN(p.centre_err_px) + "</td><td>" + fmtN(p.heading_err_deg) + "</td><td>" + fmtN(p.ms_per_frame) + "</td></tr>").join("");
+  const ms = c.models.slice().reverse().filter((m) => showFailed || !m.failed);
+  const mrows = ms.map((m) => "<tr><td><b>" + esc(m.id) + "</b>" + (m.current ? ' <span class="muted">(giving the guesses)</span>' : "") + "</td><td>" + (m.n_train_frames || "-") + "</td><td>" + esc((m.created || "").replace("T", " ")) +
+    '</td><td style="max-width:440px">' + esc(modelStatus(m)) + "</td><td>" + (m.failed && m.status !== "training" ? '<button class="sbtn mdel" data-m="' + esc(m.id) + '">Delete</button>' : "") + "</td></tr>").join("");
   modal("<h3>How the guesses improve as you confirm frames</h3>" +
-    '<p class="muted">Every model, and the starting point with no model, scored on the same ' + c.test.frames + " held-back frames (" + esc(c.test.note) + ").</p>" +
-    curveSvg(c.points) +
+    '<p class="muted">Every model, and the starting point with no model, scored on the same ' + c.test.frames + " held-back frames" + (c.test.note ? " (" + esc(c.test.note) + ")" : "") + ".</p>" +
+    (c.caution ? '<div class="warnbox"><b>Caution:</b> ' + esc(c.caution) + "</div>" : "") +
+    curveSvg(pts) +
     "<table><tr><th>Guesses from</th><th>Trained on</th><th>Found</th><th>Right</th><th>F1</th><th>Centre off (px)</th><th>Heading off (deg)</th><th>ms/frame</th></tr>" + rows + "</table>" +
+    "<h4>Models</h4>" + (mrows ? "<table><tr><th>Model</th><th>Trained on</th><th>Made</th><th>State</th><th></th></tr>" + mrows + "</table>" : '<p class="muted">No model trained yet.</p>') +
+    '<div class="row"><label><input type="checkbox" id="mshowfailed"' + (showFailed ? " checked" : "") + "> Show failed models (" + nFailed + ")</label>" +
+    '<span class="muted">Failed models, and models saved but finding nothing yet, are hidden here and in "Guesses from". They are never shared unless you ask.</span></div>' +
     '<div class="actions"><a class="sbtn" href="/report" target="_blank">Open the full report</a><button class="sbtn" onclick="closeModal()">Close</button></div>');
-});
+  $("modal").classList.add("wide");
+  $("mshowfailed").onchange = async () => {
+    try { await api("/api/studio/show_failed", { on: $("mshowfailed").checked }); const st = await studioState(); if (st) renderStudio(st); } catch (e) { toast(e.message, true); }
+    showModels();
+  };
+  $("modal").querySelectorAll(".mdel").forEach((b) => b.onclick = async () => {
+    const id = b.dataset.m;
+    if (!confirm("Delete model " + id + "? Its folder and its point on the learning curve are removed. Your labels are not touched. This can't be undone.")) return;
+    try {
+      const j = await withBusy("Deleting model " + id + " ...", () => api("/api/studio/delete_model", { model: id }));
+      toast("Model " + id + " deleted.");
+      if (j.reopened) { closeModal(); await waitLoaded("Model " + id + " was giving the guesses: switching to no model ..."); const st = await studioState(); if (st) renderStudio(st); await init(); return; }
+      const st = await studioState(); if (st) renderStudio(st);
+    } catch (e) { toast(e.message, true); }
+    showModels();
+  });
+}
+$("smodels").addEventListener("click", showModels);
 
 // ---- object types table (setup screen and the Object types button)
 const HEIGHT_TITLE = "Height of the marked point above the floor (cm, for the second camera)";
+// the height only matters with two cameras: hidden (kept as it is) until the project has a second camera
+function showHeight() { return !!(ST.state && ST.state.n_cameras >= 2); }
 function typeRow(c, i, editable) {
+  const hc = showHeight() ? "" : ' class="hidecol"';
   const dis = editable ? "" : " disabled";
   const lockName = !editable || c.locked || c.catch_all;
   const del = editable && !c.locked && !c.catch_all ? '<button class="xbtn" title="Remove this type" onclick="this.closest(\'tr\').remove(); renumberTypes()">&times;</button>' : "";
   return '<tr data-catch="' + (c.catch_all ? 1 : 0) + '"><td class="tkey">' + (i + 1) + '</td><td><span class="swatch tsw" style="background:' + PALETTE[i % PALETTE.length] + '"></span></td>' +
-    '<td><input class="cname" style="width:110px" value="' + esc(c.name) + '"' + (lockName ? " disabled" : "") + (c.locked ? ' title="Used in labels: can\'t be renamed"' : "") + '></td>' +
+    '<td><input class="cname" style="width:130px" value="' + esc(c.name) + '"' + (lockName ? " disabled" : "") + (c.locked ? ' title="Used in labels: can\'t be renamed"' : ' placeholder="type a name"') + '></td>' +
     '<td><input class="cfront" type="checkbox"' + (c.has_front ? " checked" : "") + dis + '></td>' +
-    '<td><input class="csize" type="number" min="0" step="1" style="width:76px" value="' + (c.size_px || "") + '" placeholder="measured"' + dis + '></td>' +
-    '<td><input class="cheight" type="number" min="0" step="0.5" style="width:70px" value="' + (c.height_varies || c.height_cm == null ? "" : c.height_cm) + '"' + (c.height_varies ? " disabled" : "") + dis + '>' +
+    '<td><input class="csize" type="number" min="0" step="1" style="width:110px" value="' + (c.size_px || "") + '" placeholder="measured" title="Blank: measured from the video"' + dis + '></td>' +
+    "<td" + hc + '><input class="cheight" type="number" min="0" step="0.5" style="width:80px" value="' + (c.height_varies || c.height_cm == null ? "" : c.height_cm) + '" placeholder="not known" title="Blank: not known; then this type is not passed to the second camera"' + (c.height_varies ? " disabled" : "") + dis + '>' +
     ' <label class="muted"><input class="cvaries" type="checkbox"' + (c.height_varies ? " checked" : "") + dis + ' onchange="this.closest(\'tr\').querySelector(\'.cheight\').disabled = this.checked"> it varies</label></td>' +
-    '<td><input class="cnote" style="width:190px" value="' + esc(c.note || "") + '" placeholder="where to mark it"' + dis + '></td><td>' + del + "</td></tr>";
+    '<td><input class="cnote" style="width:100%;min-width:260px" value="' + esc(c.note || "") + '" placeholder="where to mark it, e.g. the middle of its top"' + dis + '></td><td>' + del + "</td></tr>";
 }
 function typesTable(classes, editable) {
   const cs = classes.slice();
   // the catch-all is always kept, and always last
   const ci = cs.findIndex((c) => c.catch_all || c.name === "unknown");
   if (ci >= 0) { const c = cs.splice(ci, 1)[0]; c.catch_all = true; cs.push(c); }
-  return '<table id="ctab"><tr><th>Key</th><th>Colour</th><th>Name</th><th>Has a front</th><th>Size (px)</th><th>' + HEIGHT_TITLE +
+  return '<table id="ctab"><tr><th>Key</th><th>Colour</th><th>Name</th><th>Has a front</th><th>Size (px)</th><th' + (showHeight() ? "" : ' class="hidecol"') + ">" + HEIGHT_TITLE +
     '</th><th>Note</th><th></th></tr>' + cs.map((c, i) => typeRow(c, i, editable)).join("") + "</table>" +
-    (editable ? '<button class="sbtn" id="cadd">Add a type</button> <span class="muted">Up to 9 types (keys 1-9). "unknown" is always kept, for anything else.</span>' : "");
+    (editable ? '<button class="sbtn" id="cadd">Add a type</button> <span class="muted">Up to 9 types (keys 1-9). "unknown" is always kept, for anything else.</span>' : "") +
+    (showHeight() ? "" : '<p class="muted">The height above the floor is only used to pass labels between two cameras, so it is hidden while this project has one camera.</p>');
 }
 function renumberTypes() {
   [...$("ctab").querySelectorAll("tr")].slice(1).forEach((tr, i) => {
@@ -1241,57 +1380,124 @@ function wireTypesTable() {
   if (add) add.onclick = () => {
     const rows = [...$("ctab").querySelectorAll("tr")];
     const last = rows[rows.length - 1];
-    const tmp = document.createElement("tbody"); tmp.innerHTML = typeRow({ name: "", has_front: false, size_px: null, height_cm: 0, height_varies: false, note: "" }, rows.length - 1, true);
+    const tmp = document.createElement("tbody"); tmp.innerHTML = typeRow({ name: "", has_front: false, size_px: null, height_cm: null, height_varies: false, note: "" }, rows.length - 1, true);
     const tr = tmp.querySelector("tr");
     if (last && last.dataset.catch === "1") last.parentNode.insertBefore(tr, last); else $("ctab").appendChild(tr);
     renumberTypes(); tr.querySelector(".cname").focus();
   };
 }
 function readTypes() {
-  return [...$("ctab").querySelectorAll("tr")].slice(1).map((tr) => ({
-    name: tr.querySelector(".cname").value.trim(), has_front: tr.querySelector(".cfront").checked,
-    size_px: parseFloat(tr.querySelector(".csize").value) || null, height_cm: parseFloat(tr.querySelector(".cheight").value) || 0,
-    height_varies: tr.querySelector(".cvaries").checked, note: tr.querySelector(".cnote").value.trim(),
-  })).filter((c) => c.name);
+  // a row without a name is never dropped silently: say which one, so it can be named or removed
+  const rows = [...$("ctab").querySelectorAll("tr")].slice(1);
+  const blank = rows.map((tr, i) => tr.querySelector(".cname").value.trim() ? null : i + 1).filter((k) => k);
+  if (blank.length) throw new Error("The type with key " + blank.join(" and ") + " has no name: type a name, or remove the row with \u00d7.");
+  return rows.map((tr) => {
+    const h = tr.querySelector(".cheight").value.trim();
+    return { name: tr.querySelector(".cname").value.trim(), has_front: tr.querySelector(".cfront").checked,
+      size_px: parseFloat(tr.querySelector(".csize").value) || null, height_cm: h === "" || isNaN(parseFloat(h)) ? null : parseFloat(h),
+      height_varies: tr.querySelector(".cvaries").checked, note: tr.querySelector(".cnote").value.trim() };
+  });
+}
+// a plain message with an OK button (waits until it is closed)
+function infoModal(title, html) {
+  return new Promise((resolve) => {
+    modal("<h3>" + esc(title) + "</h3>" + html + '<div class="actions"><button class="sbtn primary" id="infook">OK</button></div>');
+    $("infook").onclick = () => { closeModal(); resolve(); };
+  });
 }
 $("sclasses").addEventListener("click", () => {
   const s = ST.state;
   modal("<h3>Object types</h3>" +
     '<p class="muted">Keys 1-9 pick a type in this order; each key has its colour. Types already used in labels can\'t be renamed or removed (add a new one instead). ' +
     "\"Has a front\" makes the model learn which way it faces. Size in pixels sets how big the model's target is (blank = measured from the video). " +
-    "The height is only used to pass a label to the second camera; tick \"it varies\" when it isn't fixed (a hand, a lifted part): such types are not passed between cameras.</p>" +
+    (showHeight() ? "The height is only used to pass a label to the second camera; tick \"it varies\" when it isn't fixed (a hand, a lifted part), or leave it blank when you don't know it: such types are not passed between cameras. " : "") +
+    "With two or more types of object, the guesses before a model is trained show objects as \"unknown\" (they can't tell your types apart): you give each its type with 1-9.</p>" +
     typesTable(s.classes, true) +
-    '<div class="actions"><button class="sbtn" onclick="closeModal()">Cancel</button><button class="sbtn primary" id="csave">Save</button></div>');
+    '<div class="actions"><span class="muted" id="cmsg"></span><button class="sbtn" onclick="closeModal()">Cancel</button><button class="sbtn primary" id="csave">Save</button></div>');
+  $("modal").classList.add("wide");
   wireTypesTable();
   $("csave").onclick = async () => {
+    let types;
+    try { types = readTypes(); } catch (e) { $("cmsg").textContent = e.message; return; }
     try {
-      await withBusy("Saving the object types ...", () => api("/api/studio/classes", { classes: readTypes() }));
+      const j = await withBusy("Saving the object types ...", () => api("/api/studio/classes", { classes: types }));
       closeModal(); await waitLoaded("Saving the object types: opening the recording again ...");
       const st = await studioState(); renderStudio(st); await init(); toast("Object types saved.");
-    } catch (e) { toast(e.message, true); }
+      if (j.note) await infoModal("About the guesses", "<p>" + esc(j.note) + "</p>");
+    } catch (e) { $("shade").classList.contains("on") && $("cmsg") ? $("cmsg").textContent = e.message : toast(e.message, true); }
   };
 });
 $("sadd").addEventListener("click", () => {
-  modal("<h3>Add a recording</h3><p>Paste the folder of a recording (the one with video.avi, frames.csv and meta.json), or of a two-camera session " +
-    "(the one with session.json: both cameras are added). On Windows: open the folder in File Explorer, click the address bar, copy, and paste here.</p>" +
-    '<input id="apath" style="width:100%" placeholder="C:\\Users\\you\\Desktop\\recordings\\20261020-201500_E1">' +
+  modal("<h3>Add a recording</h3><p>Paste one of these:</p><ul>" +
+    "<li>a <b>video file</b> from a phone or a webcam app (mp4, mov, avi ...): it is made into a recording folder next to the video, with a progress bar. The video itself is not changed.</li>" +
+    "<li>a <b>recording folder</b> from the Pi (the one with video.avi, frames.csv and meta.json)</li>" +
+    "<li>a <b>two-camera session folder</b> (the one with session.json: both cameras are added)</li></ul>" +
+    '<input id="apath" style="width:100%" placeholder="for example C:\\Users\\you\\Videos\\table-test.mp4">' +
     '<div class="row" style="margin-top:8px">Camera name (optional) <input id="acam" style="width:140px" placeholder="overhead"></div>' +
+    '<p class="muted">Windows: for a video file, hold Shift, right-click the file in File Explorer, choose "Copy as path", and paste here. For a folder, open it in File Explorer, click the address bar, copy, and paste. ' +
+    "Good videos: the camera stays still (on a stand or propped up), a few minutes or more, with the objects moving around.</p>" +
     '<div class="actions"><button class="sbtn" onclick="closeModal()">Cancel</button><button class="sbtn primary" id="ago">Add</button></div>');
   $("ago").onclick = async () => {
-    try { const j = await withBusy("Adding the recording ...", () => api("/api/studio/add", { path: $("apath").value.trim(), camera: $("acam").value.trim() })); closeModal();
-      toast(j.added + " recording(s) added."); const s = await studioState(); renderStudio(s);
-      if (s && s.loading) { await waitLoaded(); await init(); await offerWorkArea(); } pollStudio(); }
-    catch (e) { toast(e.message, true); }
+    let j;
+    try { j = await withBusy("Adding the recording ...", () => api("/api/studio/add", { path: $("apath").value.trim(), camera: $("acam").value.trim() })); }
+    catch (e) { toast(e.message, true); return; }
+    closeModal();
+    if (j.converting) { await waitConvert(); return; }
+    toast(j.added ? j.added + " recording" + (j.added === 1 ? "" : "s") + " added." : "Nothing new: that recording is already in the project.");
+    await afterAdd();
   };
 });
+async function afterAdd() {
+  const s = await studioState(); if (s) renderStudio(s);
+  if (s && s.loading) { await waitLoaded(); await init(); await offerWorkArea(); }
+  pollStudio();
+}
+// a video file being made into a recording folder: progress, Stop, then what came out
+async function waitConvert() {
+  S.waiting = true;
+  let j = null;
+  const stop = () => api("/api/studio/convert/stop", {}).catch(() => {});
+  try {
+    for (;;) {
+      const s = await studioState();
+      j = s && s.convert;
+      if (!j || j.status !== "running") break;
+      showLoading(j.what + " ...", j.done, j.total, j.left, "frames", stop);
+      await sleep(400);
+    }
+  } finally { S.waiting = false; hideLoading(); }
+  api("/api/studio/convert/clear", {}).catch(() => {});
+  if (!j) return;
+  if (j.status === "stopped") { toast("Stopped: no recording was made from the video."); return; }
+  if (j.status === "failed") { toast("The video could not be made into a recording: " + j.error, true); return; }
+  const r = j.result;
+  const size = r.size[0] + " x " + r.size[1] + " pixels" + (r.scaled_from ? " (made smaller from " + r.scaled_from[0] + " x " + r.scaled_from[1] + " so labelling stays quick)" : "");
+  await infoModal(r.added ? "Recording added" : "Already in the project",
+    '<div class="okbox">' + (r.reused ? "This video was made into a recording before: " : "The recording folder: ") + "<b>" + esc(r.folder) + "</b></div>" +
+    "<p>" + (r.frames || 0) + " frames, " + Math.round(r.seconds || 0) + " s, " + esc(size) + ". " +
+    (r.added ? "It is added to the project; the first time it opens, the studio finds the moving objects in it." : "It was already in the project, so nothing new was added.") + "</p>" +
+    (r.notes && r.notes.length ? '<div class="warnbox">' + r.notes.map(esc).join("<br>") + "</div>" : ""));
+  await afterAdd();
+  if (!S.info) await init();
+}
 $("swork").addEventListener("click", startWorkArea);
+// training ended: say so in a box that stays until it is read (a toast is gone too soon for this)
+async function trainingFinished(job) {
+  if ($("shade").classList.contains("on") || $("tour").classList.contains("on")) { toast(job.message, job.status === "failed"); return; }
+  const ok = job.status !== "failed";
+  modal("<h3>" + (ok ? (job.warning ? "Training finished: the model finds nothing yet" : "Training finished") : "Training stopped") + "</h3>" +
+    '<div class="' + (ok && !job.warning ? "okbox" : "warnbox") + '">' + esc(job.message) + "</div>" +
+    '<div class="actions"><button class="sbtn" onclick="closeModal()">Close</button><button class="sbtn primary" id="tfcurve">Learning curve</button></div>');
+  $("tfcurve").onclick = () => showModels();
+}
 function pollStudio() {
   clearInterval(ST.polling);
   ST.polling = setInterval(async () => {
     const s = await studioState(); if (!s) return;
     const was = ST.state && ST.state.job && ST.state.job.status === "running";
     renderStudio(s);
-    if (was && s.job && s.job.status !== "running") toast(s.job.message, s.job.status === "failed");
+    if (S.info) setClasses(S.info.classes || CLASSES);
+    if (was && s.job && s.job.status !== "running") trainingFinished(s.job);
     if (!(s.job && s.job.status === "running") && !s.background) { clearInterval(ST.polling); ST.polling = null; }
   }, 2000);
 }
@@ -1311,7 +1517,8 @@ function setupScreen(s) {
       '<div class="row"><label for="pname"><b>Project name</b></label> <input id="pname" style="width:280px" value="' + esc(s.project.name) + '"></div>' +
       "<p style=\"margin-bottom:4px\"><b>What do you want to track?</b></p><div class=\"choice\" id=\"tchoice\">" + cards + "</div>" +
       '<div id="ttable" class="muted">Pick one of the choices above to see its object types.</div>' +
-      '<p class="muted">Each type gets a key (1-9) and a colour. Mark each object at one point (see Note). "unknown" is always kept, for anything that is none of the others or that you can\'t name yet.</p>' +
+      '<p class="muted">Each type gets a key (1-9) and a colour. Mark each object at one point (see Note). "unknown" is always kept, for anything that is none of the others or that you can\'t name yet. ' +
+      'Every row needs a name (remove an empty row with \u00d7).</p>' +
       '<div class="actions"><span class="muted" id="setupmsg"></span><button class="sbtn primary" id="setupgo" disabled>Save and show me around</button></div>', true);
     $("tchoice").querySelectorAll("label").forEach((lab) => lab.addEventListener("click", () => {
       choice = lab.dataset.k;
@@ -1324,9 +1531,13 @@ function setupScreen(s) {
     $("setupgo").onclick = async () => {
       const name = $("pname").value.trim();
       if (!name) { $("setupmsg").textContent = "The project needs a name."; return; }
+      let types;
+      try { types = readTypes(); } catch (e) { $("setupmsg").textContent = e.message; return; }
       try {
-        await withBusy("Saving the setup ...", () => api("/api/studio/setup", { name: name, classes: readTypes(), seconds: (Date.now() - t0) / 1000 }));
-        closeModal(); resolve(true);
+        const j = await withBusy("Saving the setup ...", () => api("/api/studio/setup", { name: name, classes: types, seconds: (Date.now() - t0) / 1000 }));
+        closeModal();
+        if (j.note) await infoModal("About the guesses", "<p>" + esc(j.note) + "</p>");
+        resolve(true);
       } catch (e) { $("setupmsg").textContent = e.message; }
     };
   });
@@ -1361,7 +1572,7 @@ async function offerWorkArea() {
   if (!ST.on || !s || !s.camera || s.camera.settings.asked || !S.info || !S.frame) return;
   const cam = s.camera.name ? " (camera " + esc(s.camera.name) + ")" : "";
   modal("<h3>Mark the work area" + cam + "?</h3>" +
-    "<p>Click the corners of the part of the picture where the objects are (a table, a board, a robot arm's reach). " +
+    "<p>Click the corners of the part of the picture where your objects are: the table or area they stay in. " +
     "Guesses outside it and its margin are left out, so the room around it no longer gets in the way. You can add spots to ignore inside it too " +
     "(a reflection, a blinking light).</p><p class=\"muted\">Skip it to look in the whole picture. You can mark it any time with the Work area button (W).</p>" +
     '<div class="actions"><button class="sbtn" id="wask">Not now (use the whole picture)</button><button class="sbtn primary" id="wamark">Mark it now</button></div>', true);
@@ -1420,7 +1631,7 @@ async function investigate(t) {
   renderInvestigate();
 }
 function invChart(res) {
-  const L = res.line, W = 900, H = 150, l = 34, r = 10, tp = 10, b = 26;
+  const L = res.line, W = 900, H = 150, l = 58, r = 10, tp = 10, b = 26;
   if (!L.times.length) return "";
   const tmax = Math.max(L.times[L.times.length - 1], 1e-6), ymax = Math.max(res.threshold * 1.6, ...L.change, 1);
   const X = (t) => l + (W - l - r) * t / tmax, Y = (v) => tp + (H - tp - b) * (1 - v / ymax);
@@ -1430,8 +1641,9 @@ function invChart(res) {
   g += '<polyline fill="none" stroke="#6cb6ff" stroke-width="1.6" points="' + L.times.map((t, i) => X(t).toFixed(1) + "," + Y(L.change[i]).toFixed(1)).join(" ") + '"/>';
   const k = L.frames.indexOf(res.frame);
   if (k >= 0) g += '<line x1="' + X(L.times[k]) + '" x2="' + X(L.times[k]) + '" y1="' + tp + '" y2="' + (H - b) + '" stroke="#fff" stroke-width="1.5"/><text x="' + (X(L.times[k]) + 4) + '" y="' + (tp + 10) + '" fill="#fff" font-size="11">this frame</text>';
-  for (let i = 0; i <= 4; i++) { const t = tmax * i / 4; g += '<text x="' + X(t) + '" y="' + (H - 8) + '" fill="#9aa1ab" font-size="11" text-anchor="middle">' + t.toFixed(0) + ' s</text>'; }
-  g += '<text x="' + (l - 6) + '" y="' + (Y(0) + 4) + '" fill="#9aa1ab" font-size="11" text-anchor="end">same</text>';
+  for (let i = 0; i <= 4; i++) { const t = tmax * i / 4; g += '<text x="' + X(t) + '" y="' + (H - 8) + '" fill="#9aa1ab" font-size="11" text-anchor="' + (i === 0 ? "start" : i === 4 ? "end" : "middle") + '">' + t.toFixed(0) + ' s</text>'; }
+  g += '<text x="' + (l - 6) + '" y="' + (Y(0) + 4) + '" fill="#9aa1ab" font-size="11" text-anchor="end">usual</text>';
+  g += '<text x="' + (l - 6) + '" y="' + (tp + 9) + '" fill="#9aa1ab" font-size="11" text-anchor="end">differs</text>';
   return '<svg id="invchart" viewBox="0 0 ' + W + " " + H + '" width="100%" style="cursor:pointer" role="img" aria-label="How much the spot changed over time">' + g + "</svg>";
 }
 function invPic(title, src, res, wide) {
@@ -1461,7 +1673,7 @@ function renderInvestigate() {
   const clips = res.clips.map((c, i) => '<div class="clip" data-f="' + c.frame_from + '" title="Click to go there"><img data-clip="' + i + '" src="' + c.pictures[0] + '" alt="">' + fmtT(c.time_s) + ": " + esc(c.what) + "</div>").join("");
   modal('<h3>Investigate: the spot at ' + Math.round(res.x) + ", " + Math.round(res.y) + " (frame " + res.frame + ")</h3>" +
     '<div class="verdict ' + res.kind + '"><b>' + esc(res.headline) + "</b>" + esc(res.detail) + (acts ? '<div class="acts">' + acts + "</div>" : "") + "</div>" +
-    '<div class="invrow">' + invPic("This frame", res.now_picture, res) + invPic("How it usually looks (the background: the middle value of every picture)", res.background, res) +
+    '<div class="invrow">' + invPic("This frame", res.now_picture, res) + invPic("How it usually looks (the usual picture, made from the whole recording)", res.background, res) +
     (ST.on ? '<div class="invpic" id="invref"><div class="muted">Second camera: looking ...</div></div>' : "") + "</div>" +
     "<h4>How much the spot changed</h4>" + invChart(res) +
     '<div class="invsub">The blue line is how different the spot looks from usual, over the whole recording; above the dashed line counts as something there (shaded). Click the line to go to that moment.</div>' +
@@ -1476,7 +1688,7 @@ function renderInvestigate() {
   const ch = $("invchart");
   if (ch) ch.onclick = (ev) => {
     const b = ch.getBoundingClientRect(), L = res.line, tmax = L.times[L.times.length - 1] || 1;
-    const t = ((ev.clientX - b.left) / b.width * 900 - 34) / (900 - 44) * tmax;
+    const t = ((ev.clientX - b.left) / b.width * 900 - 58) / (900 - 68) * tmax;
     let best = 0; L.times.forEach((tt, i) => { if (Math.abs(tt - t) < Math.abs(L.times[best] - t)) best = i; });
     jumpTo(L.frames[best]);
   };
@@ -1524,6 +1736,18 @@ async function changeAll(items, action, cls) {
   const what = action === "type" ? "changed to " + cls : action === "reject" ? "rejected" : "marked unsure";
   toast(j.changed + " label" + (j.changed > 1 ? "s" : "") + " on " + j.frames.length + " frame" + (j.frames.length > 1 ? "s" : "") + " " + what + " (Z takes it back)" + (j.updated ? "; guesses updated on " + j.updated + " later frames" : "") + ".");
   try { const v = await api("/api/investigate"); INV.last.labels = v.labels; renderInvLabels(v.labels); } catch (e) { /* the list refreshes next time */ }
+  await refreshCurrent();
+}
+// the list and the frame on screen again from the app (after a change made elsewhere, e.g. Investigate's change all)
+async function refreshCurrent() {
+  if (!S.info) return;
+  const f = S.frame ? S.frame.frame : null;
+  try {
+    await loadQueue();
+    const i = S.queue.findIndex((q) => q.f === f);
+    if (i >= 0) { S.idx = i; const fr = await api("/api/frame?f=" + f); const sel = S.sel; S.frame = fr; S.sel = Math.min(sel, fr.objects.length - 1); }
+    draw(); renderSide(); drawStrip();
+  } catch (e) { /* shown next time the frame changes */ }
 }
 async function closeInvestigate() {
   clearInterval(INV.clipTimer);
@@ -1630,14 +1854,16 @@ async function waitShare(first) {
 $("sshare").addEventListener("click", () => {
   const s = ST.state;
   const def = joinPath(s.documents || "", slugName(s.project.name) + ".mxirl");
-  modal("<h3>Share project</h3><p>Saves the whole project as one file: object types, labels, the picked frames, every model and its scores, " +
+  const nFailed = (s.models || []).filter((m) => m.failed).length;
+  modal("<h3>Share project</h3><p>Saves the whole project as one file: object types, labels, the picked frames, every working model and its scores, " +
     "work areas, camera calibrations and the time-saving record. Give the file to another person; they open it with <b>Open shared project</b>.</p>" +
     '<div class="row"><label for="shpath"><b>Save as</b></label></div><input id="shpath" style="width:100%" value="' + esc(def) + '">' +
     '<p><label><input type="checkbox" id="shvid"> Also put the recordings\' videos in the file (large; leave it off when the other person already has the recordings)</label></p>' +
+    (nFailed ? '<p><label><input type="checkbox" id="shfailed"> Also put in the ' + nFailed + " model" + (nFailed === 1 ? " that failed or finds" : "s that failed or find") + " nothing yet (left out unless you tick this)</label></p>" : "") +
     '<p class="muted">Nothing in the project is changed. You can keep labelling while it saves.</p>' +
     '<div class="actions"><button class="sbtn" onclick="closeModal()">Cancel</button><button class="sbtn primary" id="shgo">Save the file</button></div>');
   $("shgo").onclick = async () => {
-    try { await api("/api/studio/share/export", { path: $("shpath").value, with_video: $("shvid").checked }); }
+    try { await api("/api/studio/share/export", { path: $("shpath").value, with_video: $("shvid").checked, include_failed: !!($("shfailed") && $("shfailed").checked) }); }
     catch (e) { toast(e.message, true); return; }
     closeModal();
     const j = await waitShare();
@@ -1648,6 +1874,7 @@ $("sshare").addEventListener("click", () => {
     modal("<h3>Project saved as one file</h3><div class=\"okbox\"><b>" + esc(r.path) + "</b> (" + r.mb + " MB)</div>" +
       "<p>It holds " + r.recordings + " recording" + (r.recordings === 1 ? "" : "s") + " (" + (r.with_video ? "videos included" : "listed by name; the videos themselves are not in it") + ") and " +
       r.models + " model" + (r.models === 1 ? "" : "s") + ". Whoever gets it opens it with <b>Open shared project</b>" + (r.with_video ? "." : " and points it to their copy of the recordings.") + "</p>" +
+      (r.left_out && r.left_out.length ? '<p class="muted">Left out: model' + (r.left_out.length === 1 ? " " : "s ") + r.left_out.map(esc).join(", ") + " (failed, or finding nothing yet).</p>" : "") +
       (r.warnings.length ? '<div class="warnbox">' + r.warnings.map(esc).join("<br>") + "</div>" : "") +
       '<div class="actions"><button class="sbtn primary" onclick="closeModal()">Done</button></div>');
   };
@@ -1699,7 +1926,8 @@ async function afterOpen(s) {
 function locateRecording(m) {
   return new Promise((resolve) => {
     modal("<h3>Recording not found: locate it</h3>" +
-      "<p>The recording <b>" + esc(m.name || m.id) + "</b>" + (m.camera ? " (camera " + esc(m.camera) + ")" : "") + " isn't where the project says: <span class=\"muted\">" + esc(m.path) + "</span>. " +
+      "<p>The video of <b>" + esc(m.name || m.id) + "</b>" + (m.camera ? " (camera " + esc(m.camera) + ")" : "") + " isn't where the project says it is" +
+      (m.path ? ": <span class=\"muted\">" + esc(m.path) + "</span>" : "") + ". " +
       "Its labels are safe in the project; only the video is needed again.</p>" +
       '<div class="row"><label for="lcpath"><b>Its folder now</b> (the one with video.avi in it)</label></div><input id="lcpath" style="width:100%">' +
       '<div class="actions" style="justify-content:flex-start"><button class="sbtn primary" id="lcgo">Use this folder</button></div>' +
@@ -1729,16 +1957,17 @@ const TOUR = { steps: [], i: 0, lockedModal: false, done: null };
 const TOUR_STEPS = [
   { sel: "#brand", title: "Welcome", text: "A short tour of the screen: what each part does, which ones are safe to try, and which change saved work. Arrow keys or the buttons move through it; Esc ends it." },
   { sel: "#view", title: "The picture", kind: "changes", text: "Circles are the computer's guesses. Drag one to move it, N adds an object, Del rejects a guess, ? marks one you can't identify. Press Enter when every guess on the frame is right. Your labels are saved with every change; Z undoes." },
-  { sel: "#tabs button[data-mode=next]", title: "Most useful next", kind: "safe", text: "The frames not finished yet, least confident guesses first: your time goes where it helps most. Switching lists never changes labels." },
+  { sel: "#tabs button[data-mode=next]", title: "Most useful next", kind: "safe", text: "The frames not finished yet, least confident guesses first: your time goes where it helps most. It also takes frames from each part of the training split in turn (learning, picking, scoring), so a model can be trained early. Switching lists never changes labels." },
   { sel: "#tabs button[data-mode=all]", title: "All picked frames", kind: "safe", text: "Every frame picked for labelling, in time order." },
   { sel: "#tabs button[data-mode=low]", title: "Low confidence", kind: "safe", text: "Only the frames whose guesses are below the confidence level set on the right." },
   { sel: "#tabs button[data-mode=spot]", title: "Spot check", kind: "safe", text: "A random sample of the high-confidence frames. Checking them tells you how often the guesses are right, before you accept the rest without looking." },
   { sel: "#tabs button[data-mode=unsure]", title: "Unsure", kind: "safe", text: "Frames with an object you marked unsure (?). They are kept out of training until you decide: give it a type (1-9), reject it (Del), or press ? again." },
-  { sel: "#progress", title: "Progress", kind: "safe", text: "Green: frames you reviewed. Dark green: accepted without looking. Orange: changed but not finished." },
+  { sel: "#progress", title: "Progress", kind: "safe", text: "Green: frames you reviewed. Grey: frames holding an object marked unsure (not finished until you decide). Dark green: accepted without looking. Orange: changed but not finished." },
   { sel: "#srec", title: "Recording", kind: "safe", text: "Switch between recordings (and cameras). Each keeps its own labels." },
   { sel: "#smodel", title: "Guesses from", kind: "safe", text: "Where the guesses come from: motion and tracking only, or a trained model. Your labels never change when you switch; only the unconfirmed guesses do." },
   { sel: "#strain", title: "Train new model", kind: "changes", text: "Adds a new model to the project, trained on every confirmed frame, in the background (takes a while). Your labels are not touched; every older model is kept." },
-  { sel: "#smodels", title: "Models & learning curve", kind: "safe", text: "How much better each model is, scored on frames it never trained on. Opens the full report too." },
+  { sel: "#smodels", title: "Learning curve", kind: "safe", text: "How much better each model is, scored on frames it never trained on, and the list of models (failed ones can be shown and deleted there). Opens the full report too." },
+  { sel: "#smore", title: "More", kind: "safe", text: "Object types, Time saved, Share project and Open shared project: the next steps show each." },
   { sel: "#sclasses", title: "Object types", kind: "changes", text: "The types you label, their keys and colours, whether they have a front, and their height for the second camera. Saving changes the project's settings." },
   { sel: "#sadd", title: "Add recording", kind: "changes", text: "Adds a recording folder, or a two-camera session, to the project. Nothing is copied: the video stays where it is." },
   { sel: "#swork", title: "Work area", kind: "changes", text: "Mark the part of the picture to look in (and spots to ignore). Guesses outside it are left out; your labels are kept." },
@@ -1750,24 +1979,34 @@ const TOUR_STEPS = [
   { sel: "#tlbtn", title: "Track timeline", kind: "safe", text: "One lane per object the guesses followed, across the whole recording, with breaks and jumps marked: a quick way to find where the following went wrong. Click a moment to go there." },
   { sel: "#autoacc", title: "Accept remaining high-confidence frames", kind: "changes", text: "Accepts the guesses on every high-confidence frame nobody has looked at, without looking. Do the spot check first. Undo auto-accept takes them back." },
   { sel: "#reset", title: "Reset this frame to the guesses", kind: "changes", text: "Throws away your changes on this frame and shows the guesses again (Z brings your changes back)." },
-  { sel: "#keys", title: "Keys", kind: "safe", text: "Every key, in one list. The ones worth learning first: Enter, N, Del, the number keys, ? and Z." },
+  { sel: "#keysbtn", title: "Keys", kind: "safe", text: "Every key, in one list (K opens it too). The ones worth learning first: Enter, N, Del, the number keys, ? and Z." },
   { sel: "#fullbtn", title: "Full screen", kind: "safe", text: "More room for the picture (V does the same; Esc leaves it)." },
   { sel: "#helpbtn", title: "This tour", kind: "safe", text: "The ? button shows this tour again any time. (The ? key on the keyboard marks an object unsure.)" },
 ];
-function visible(el) { if (!el) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && el.offsetParent !== null; }
-function startTour() {
+// the short tour: the parts needed to start labelling; its last card offers the full tour
+const TOUR_SHORT = ["#brand", "#view", "#tabs button[data-mode=next]", "#progress", "#smodel", "#strain", "#invbtn", "#keysbtn"];
+function visible(el) {
+  if (!el) return false;
+  if (el.closest && el.closest("#smenu")) return visible($("smore"));      // in the More menu: shown by opening it
+  const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && el.offsetParent !== null;
+}
+function startTour(full) {
   if (S.wa) endWorkArea();
   closeModal();
-  TOUR.steps = TOUR_STEPS.filter((st) => visible(document.querySelector(st.sel)));
+  TOUR.full = !!full;
+  TOUR.steps = TOUR_STEPS.filter((st) => (full || TOUR_SHORT.includes(st.sel)) && visible(document.querySelector(st.sel)));
+  if (!full && TOUR.steps.length) TOUR.steps[0] = Object.assign({}, TOUR.steps[0], { text: "A short tour of " + TOUR.steps.length + " steps: the parts you need to start. Its last step can show the full tour of every button. Arrow keys or the buttons move through it; Esc ends it." });
   TOUR.i = 0;
   $("tour").classList.add("on");
   tourShow();
+  if (TOUR.done) { const prev = TOUR.done; TOUR.done = null; prev(); }     // a tour already open: it ends here
   return new Promise((resolve) => { TOUR.done = resolve; });
 }
-function tourEnd() { $("tour").classList.remove("on"); if (TOUR.done) { const d = TOUR.done; TOUR.done = null; d(); } }
+function tourEnd() { closeMenu(); $("tour").classList.remove("on"); if (TOUR.done) { const d = TOUR.done; TOUR.done = null; d(); } }
 function tourShow() {
   const st = TOUR.steps[TOUR.i]; if (!st) { tourEnd(); return; }
   const el = document.querySelector(st.sel);
+  $("smenu").classList.toggle("on", !!el.closest("#smenu"));          // open the More menu for its buttons
   const r = el.getBoundingClientRect(), pad = 6;
   const hole = $("tourhole");
   hole.style.left = (r.left - pad) + "px"; hole.style.top = (r.top - pad) + "px";
@@ -1779,6 +2018,7 @@ function tourShow() {
     '<div class="nav"><span class="count">' + (TOUR.i + 1) + " of " + TOUR.steps.length + "</span>" +
     (TOUR.i ? '<button class="sbtn" id="tback">Back</button>' : "") +
     (last ? "" : '<button class="sbtn" id="tskip">End tour</button>') +
+    (last && !TOUR.full ? '<button class="sbtn" id="tfull">Show the full tour</button>' : "") +
     '<button class="sbtn primary" id="tnext">' + (last ? "Start labelling" : "Next") + "</button></div>";
   // place the card below the element, or above it, or beside it, inside the window
   const cw = card.offsetWidth, ch = card.offsetHeight, W = window.innerWidth, H = window.innerHeight;
@@ -1789,6 +2029,8 @@ function tourShow() {
   $("tnext").onclick = () => { TOUR.i++; tourShow(); };
   if ($("tback")) $("tback").onclick = () => { TOUR.i--; tourShow(); };
   if ($("tskip")) $("tskip").onclick = tourEnd;
+  if ($("tfull")) $("tfull").onclick = () => { TOUR.full = true;
+    TOUR.steps = TOUR_STEPS.filter((x) => visible(document.querySelector(x.sel))); TOUR.i = 0; tourShow(); };
 }
 function tourKey(ev) {
   ev.preventDefault();
@@ -1796,7 +2038,7 @@ function tourKey(ev) {
   else if (ev.key === "ArrowRight" || ev.key === "Enter") { TOUR.i++; tourShow(); }
   else if (ev.key === "ArrowLeft" && TOUR.i > 0) { TOUR.i--; tourShow(); }
 }
-$("helpbtn").addEventListener("click", () => startTour());
+$("helpbtn").addEventListener("click", () => startTour(false));
 
 async function boot() {
   let s = await studioState(), tour = false;
@@ -1807,6 +2049,7 @@ async function boot() {
     else if (s.setup && s.setup.whats_new) { await whatsNewScreen(s); tour = true; }
     s = await studioState() || s; renderStudio(s);
     if (s.loading) await waitLoaded();
+    if (s.convert && s.convert.status === "running") await waitConvert();     // the page was reloaded while a video was being made into a recording
     if ((s.job && s.job.status === "running") || s.background) pollStudio();
     const miss = s.current && s.current.rec ? (s.missing || []).find((m) => m.id === s.current.rec) : null;
     if (miss) { if (tour) await startTour(); await locateRecording(miss); return; }

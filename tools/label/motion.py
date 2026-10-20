@@ -596,8 +596,9 @@ def count_frames(video_path):
     return n
 
 
-def read_frames_at(video_path, wanted):
-    """Decode only the wanted frame numbers (in one pass). Returns {frame: image}."""
+def read_frames_at(video_path, wanted, progress=None):
+    """Decode only the wanted frame numbers (in one pass). Returns {frame: image}.
+    progress(done, total): optional, frames gone through so far (about every 30)."""
     wanted = set(int(f) for f in wanted)
     out = {}
     cap = cv2.VideoCapture(video_path)
@@ -608,18 +609,23 @@ def read_frames_at(video_path, wanted):
             if ok:
                 out[f] = img
         f += 1
+        if progress and f % 30 == 0:
+            progress(f, last + 1)
     cap.release()
+    if progress:
+        progress(last + 1, last + 1)
     return out
 
 
-def estimate_robot_size(video_path, n_frames=None, params=None):
+def estimate_robot_size(video_path, n_frames=None, params=None, progress=None):
     """Robot size in pixels from ~40 frames spread over the recording,
-    compared with an overall background. None if too few robot-like blobs."""
+    compared with an overall background. None if too few robot-like blobs.
+    progress(done, total): optional, frames read so far."""
     p = params or Params()
     n = n_frames or count_frames(video_path)
     bg_idx = np.linspace(0, n - 1, 31).astype(int)
     look_idx = np.linspace(0, n - 1, 41).astype(int)
-    imgs = read_frames_at(video_path, set(bg_idx) | set(look_idx))
+    imgs = read_frames_at(video_path, set(bg_idx) | set(look_idx), progress=progress)
     stack = [imgs[i] for i in bg_idx if i in imgs]
     if len(stack) < 3:
         return None
@@ -631,7 +637,8 @@ def estimate_robot_size(video_path, n_frames=None, params=None):
     return estimate_robot_px(raw)
 
 
-def detect_recording(video_path, fps=None, robot_px=None, times=None, progress=None, n_frames=None, **settings):
+def detect_recording(video_path, fps=None, robot_px=None, times=None, progress=None, n_frames=None,
+                     size_progress=None, **settings):
     """Run the motion detector over a whole recording.
 
     The background for each frame is the median of frames sampled from about
@@ -640,7 +647,8 @@ def detect_recording(video_path, fps=None, robot_px=None, times=None, progress=N
     ahead, collecting background samples, one detecting.
 
     times: optional list of frame times in seconds (from frames.csv) used for
-    headings; default frame/fps. progress(done, total): optional callback.
+    headings; default frame/fps. progress(done, total): optional callback (about every
+    30 frames). size_progress(done, total): optional, while the object size is measured.
     n_frames: number of frames if known (saves a counting pass).
     Returns (detections by frame: list of lists, info dict).
     """
@@ -660,7 +668,7 @@ def detect_recording(video_path, fps=None, robot_px=None, times=None, progress=N
     if robot_px:
         size_source = "given"
     else:
-        est = estimate_robot_size(video_path, n, p)
+        est = estimate_robot_size(video_path, n, p, progress=size_progress)
         robot_px = est if est else p.default_robot_px
         size_source = "estimated" if est else "default"
     rest = p.as_dict()
@@ -701,7 +709,7 @@ def detect_recording(video_path, fps=None, robot_px=None, times=None, progress=N
             break
         t = times[f] if times is not None and f < len(times) else f / fps
         out.append(det.detect(frame, background=bg, t=t))
-        if progress and (f % 300 == 0 or f == n - 1):
+        if progress and (f % 30 == 0 or f == n - 1):
             progress(f + 1, n)
     ahead.release()
     reader.release()

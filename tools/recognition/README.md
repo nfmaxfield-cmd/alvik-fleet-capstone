@@ -15,26 +15,69 @@ The steps below assume no programming experience.
    On Windows, tick **"Add python.exe to PATH"** on the first screen of the installer.
 2. **This folder.** Get the project folder (the one holding `start-recognition.bat` and
    `tools`) onto your computer: unzip it, or `git clone` it.
-3. **Start it.** On Windows, double-click **`start-recognition.bat`** in that folder.
-   A black window titled *Maxfield IRL Tracking* opens. On Mac or Linux, open a terminal in
-   that folder and type:
+3. **Start it.**
+   - **Windows:** double-click **`start-recognition.bat`** in that folder. A black window titled
+     *Maxfield IRL Tracking* opens. If it says *"Python not found: install it from python.org and
+     tick 'Add python.exe to PATH'"*, do step 1 again with that box ticked, then double-click the
+     file again. (It looks for Python as `py -3` first, then as `python`.)
+   - **Mac or Linux:** open a terminal in that folder. Make a separate Python environment once
+     (many Linux systems refuse to install packages into the system's own Python):
 
-   ```
-   python3 tools/recognition/start.py
-   ```
+     ```
+     python3 -m venv ~/mxirl-venv
+     ```
 
-The first start installs what it needs (numpy, OpenCV, ONNX Runtime and PyTorch; a few
-minutes, PyTorch is the large one). You see each step in the black window. When it is done,
-the studio opens in your web browser. Later starts skip the install and open in seconds.
+     Then, every time you start the studio:
+
+     ```
+     source ~/mxirl-venv/bin/activate
+     python tools/recognition/start.py
+     ```
+
+**The first start installs what the studio needs** (numpy, OpenCV, ONNX Runtime and PyTorch).
+Plan for **about 10 to 15 minutes** and **over 1 GB of downloads** on Windows (PyTorch is most of
+it). It needs the internet this once; afterwards everything works offline. You see each step in
+the black window. When it is done, the studio opens in your web browser. Later starts skip the
+install and open in seconds.
 
 Keep the black window open while you work: it is the studio. Closing it (or Ctrl+C in it)
 stops the studio; your work is already saved.
 
-Your work goes in the project folder **`Documents\recognition-project`**. To keep separate
-projects, give a folder name after the command (or drag a folder onto the `.bat` file):
+**If the browser does not open by itself,** open your browser and go to
+**http://127.0.0.1:8765** (the black window shows this address too). **If the black window says
+"Port 8765 is busy",** the studio is already running in another black window: use that one, or
+close it and start again.
+
+**Windows notes**
+
+- *"Windows protected your PC"* (SmartScreen) can appear the first time you double-click the
+  `.bat` file: click **More info**, then **Run anyway**. The file is plain text: right-click it and
+  choose **Edit** to see the few lines it runs.
+- **OneDrive:** if your Documents folder is synced by OneDrive, the project folder is synced too.
+  That works, but projects grow large (pictures, models) and OneDrive can hold a file for a
+  moment while it uploads (the studio waits and tries again). To keep a project out of OneDrive,
+  give it a folder outside it (see below), for example `C:\mxirl\my-project`.
+
+**Where your work goes.** Without anything else, the project folder is `recognition-project` in
+your Documents folder:
+
+| System | Project folder |
+| --- | --- |
+| Windows | `C:\Users\<you>\Documents\recognition-project` |
+| Mac | `/Users/<you>/Documents/recognition-project` |
+| Linux | `~/Documents/recognition-project` (or `~/recognition-project` when there is no Documents folder) |
+
+To keep separate projects, give a folder after the command, or (Windows) drag a folder onto
+`start-recognition.bat`. Windows example:
 
 ```
 python tools/recognition/start.py D:\projects\conveyor-parts
+```
+
+Mac or Linux example:
+
+```
+python tools/recognition/start.py ~/projects/conveyor-parts
 ```
 
 ## 2. Recordings
@@ -43,6 +86,41 @@ A recording is a folder holding `video.avi`, `frames.csv` (one row per frame: `f
 `t_mono`, `t_wall`) and `meta.json` (`width`, `height`, `fps_reported`). The camera recorder in
 `tools/pi` writes exactly this; `tools/pi/README.md` explains how to record. A two-camera
 session is a folder with `session.json` and one recording folder per camera.
+
+**Recordings of a few minutes or more work best.** To keep the scores honest, training cuts the
+recordings into time pieces (30 seconds each when there is enough footage) and uses each piece
+for one job only: learning, picking the best training round, or scoring. A recording of under
+two minutes gives too few pieces: the studio then makes the pieces shorter (down to 3 seconds),
+which works, but neighbouring pieces look alike, so the scores flatter the model a little.
+
+### Making a recording without the Pi
+
+Any phone or webcam app will do. **Add recording** accepts an ordinary video file (mp4, mov,
+avi, mkv ...): the studio makes it into a recording folder, with a progress bar, and adds it.
+
+1. **Keep the camera still.** Put the phone or webcam on a stand, or prop it up, looking at the
+   table or area your objects are on. The studio finds objects by what moves against a still
+   background, so a camera held in the hand doesn't work.
+2. **Record a few minutes or more** (see above for why), with the objects moving around and
+   sometimes standing still, the way they do when you use them.
+3. **Spread your labels across the recording** later: frames from different minutes teach the
+   model more than many neighbouring frames, and every time piece needs some (the studio's
+   *Most useful next* list helps with this, see 4).
+4. Copy the video file to the computer, press **Add recording** and paste where the file is.
+   Windows: hold Shift, right-click the file in File Explorer, choose **Copy as path**, and paste.
+
+The recording folder is made next to the video file and named after it (`table-test.mp4` gives
+the folder `table-test`); when that place can't be written, it goes in the project folder's
+`recordings` folder. The video file itself is not changed. Each frame keeps its time from the
+video. Large videos (for example a phone's 1920 x 1080) are made smaller, at most 960 pixels
+wide, so finding the moving objects and labelling stay quick; this uses about 1 MB of disk per
+second of video. Adding the same video file again reuses the folder made the first time.
+
+From the command line (any system):
+
+```
+python tools/recognition/videofile.py <video file>
+```
 
 ## 3. First start: set up the project
 
@@ -53,41 +131,75 @@ A new project asks three things before you judge any frame:
   "Alvik robots" set is: alvik (has a front, marked point 4 cm above the floor), person
   (hands, arms, sometimes feet; height varies) and unknown. For anything else, pick
   **My own list** and name your objects, for example `cube`, `cylinder`, `gripper`.
-- **For each object type:** its key (1-9) and colour (set by its place in the list),
-  whether it **has a front** (then the model learns which way it faces), its **size** in
-  pixels (leave blank: it is measured from the video), the **height of the marked point
-  above the floor** (only used to pass labels to a second camera; tick **it varies** when
-  it isn't fixed, like a hand or a lifted part) and a **note** saying where to mark it.
+- **For each object type:** a **name** (every row needs one: remove an empty row with ×), its
+  key (1-9) and colour (set by its place in the list), whether it **has a front** (then the model
+  learns which way it faces), its **size** in pixels (leave blank: it is measured from the video)
+  and a **note** saying where to mark it. Once the project has a second camera, a column for the
+  **height of the marked point above the floor** appears: it is only used to pass labels between
+  the two cameras. Tick **it varies** when it isn't fixed (a hand, a lifted part); leave it blank
+  when you don't know it. Either way, that type is not passed between cameras.
 
 `unknown` is always kept, last: use it for anything that is none of the others, or that you
-can't name yet. All of this can be changed later with **Object types**; a type already used
+can't name yet. All of this can be changed later with **Object types** (top bar, under **More**); a type already used
 in labels can't be renamed or removed.
 
-After the setup a short **tour** points at every part of the screen. It says which buttons
-are safe to try and which change saved work. The **?** button at the top right shows it
-again any time.
+**Two or more types of object and no model yet:** before a model is trained, the guesses come
+from motion, which can tell "an object" from "something reaching in" but not which of your types
+an object is. So with two or more types (say `cube` and `cylinder`), the guesses show every object
+as `unknown`, and you give each its type with the number keys. The studio says so when you save
+such a list. Once a model is trained on your labels, its guesses use your types.
+
+After the setup a **short tour** (8 steps) points at the parts you need to start. Its last step
+offers **Show the full tour**, which goes through every button and says which are safe to try
+and which change saved work. The **?** button at the top right shows the tour again any time.
 
 ## 4. The loop
 
-1. **Add recording** (top bar): paste a recording folder, or a two-camera session folder
-   (both cameras are added). On Windows: open the folder in File Explorer, click the address
-   bar, copy, and paste. The first time, the studio finds the moving objects in the whole
-   video; a progress bar shows how far it is and about how long is left.
+1. **Add recording** (top bar): paste a video file (see 2, "Making a recording without the
+   Pi"), a recording folder, or a two-camera session folder (both cameras are added). On
+   Windows, for a folder: open it in File Explorer, click the address bar, copy, and paste. The
+   first time a recording opens, the studio measures how big the objects are and finds the moving
+   objects in the whole video; a progress bar shows how far it is and about how long is left.
 2. **Mark the work area** when it asks (see 8), or skip it.
 3. **Label.** The computer guesses every object. Press **Enter** when the guesses on a frame
    are right, or drag, add (**N**) and reject (**Del**) until they are. **Most useful next**
-   shows the frames the guesses are least sure about first. Every fix is passed forward, so
-   the frames after it get better guesses too.
+   shows the frames the guesses are least sure about first, and takes them from each part of
+   the training split in turn (learning, picking the best round, scoring; see "How the scores
+   stay honest"), so every part gets frames early. **Confirmed frames by part** on the right
+   shows how many each part has in this recording. Every fix is passed forward, so the frames
+   after it get better guesses too. The line above the picture says why a frame was picked
+   (for example "objects close together", "something appears").
 4. **Train new model.** Trains on every confirmed frame, in the background, while you keep
-   labelling.
+   labelling. The top bar says how far it is in plain words ("round 4 of about 30, about 6 min
+   left"). It needs at least 10 confirmed frames for learning and 1 in each of the other two
+   parts; if it hasn't got them, it says how many each part has and what to do. When it is done, a
+   box says how well the new model does. If the model was saved but **finds nothing yet**, the
+   box says so ("not enough labels or training time yet: label more frames, spread over the
+   recording, or train longer"); such a model is hidden from the lists (see 6) and the next
+   model does not start from it.
 5. **Guesses from:** pick the new model. Its guesses replace the motion guesses on every frame
    nobody has confirmed yet, so the next frames need fewer fixes. Repeat from 3.
-6. **Models & learning curve** shows how much better each model is, scored on frames it never
-   trained on. **Open the full report** gives the same as a page to keep or send.
+6. **Learning curve** shows how much better each model is, scored on frames it never
+   trained on. The curve has one place per model version, oldest to newest, with the number of
+   confirmed frames it trained on written under it. When the scores rest on few held-back frames
+   (under 30) or few different objects (under 5), a **Caution** box says so: treat them as a
+   rough sign until you have labelled more. **Open the full report** gives the same as a page to
+   keep or send. Below the curve is the list of every model.
+
+   **Failed models** (training stopped, or the model finds nothing yet) are hidden from this
+   window and from **Guesses from**. Tick **Show failed models** to see them; each has a
+   **Delete** button (it asks first; your labels are not touched). Share project leaves them
+   out unless you ask (see 11).
 
 **When the guesses are good:** use **Spot check** to check a random sample of the
 high-confidence frames, then **Accept remaining high-confidence frames** to accept the rest
-without looking. **Undo auto-accept** takes them back.
+without looking. The spot check says how many of the checked frames needed no correction, and
+the range the true share very likely lies in (from only 10 checked frames, that range is wide;
+checking more narrows it). **Undo auto-accept** takes them back.
+
+**The progress bar** (top): green, frames you reviewed; grey, frames holding an object marked
+unsure (not finished until you decide); dark green, accepted without looking; orange, changed
+but not finished.
 
 **Same picture:** when you accept a frame, the picked frames within 10 seconds that show the
 same picture (and whose guesses sit where your accepted objects are) are accepted with it. A
@@ -112,6 +224,7 @@ message says how many; **Z** takes them back together with your accept.
 | I | Change the selected object's number |
 | G | Go to a frame number |
 | M | Magnifier: a 3x lens around the mouse (again: off) |
+| K | The list of keys, in a window |
 | B | Picture: normal / brighter / high contrast (only how it is shown) |
 | V | Full screen (also the button; Esc leaves it) |
 | W | Work area (see 8) |
@@ -119,7 +232,8 @@ message says how many; **Z** takes them back together with your accept.
 | Z | Undo (also Ctrl+Z) |
 | Esc | Cancel / deselect |
 
-The same list is in the side panel of the studio.
+The same list is in the side panel of the studio, and the **Keys** button (top right, or **K**)
+shows it in a window.
 
 A dashed arrow is only a heading guess (the object turning, or maybe reversing): it is saved as
 unknown unless you set it with H, a drag or F.
@@ -146,9 +260,12 @@ circle about one object wide) across the whole recording; a progress bar shows h
 (**Stop** or Esc ends it). Looking changes nothing. Then it shows:
 
 - **What it found**, in plain words:
-  - *Looks the same through the whole recording*: most likely part of the background, or
-    something that never moved. Button **Ignore this spot** adds the circle to the camera's
-    ignore spots (8): guesses inside it are left out from now on. Your labels are kept.
+  - *Never changes in this recording*: either part of the background (a mark, a stain, a
+    fixture) or an object that stayed put the whole time. The recording alone can't tell
+    which: check it in a recording of the empty area, or with the second camera (below).
+    Only if it is part of the background, press **Ignore this spot**: it adds the circle to the
+    camera's ignore spots (8), and guesses inside it are left out from now on (also when a real
+    object later stands there). Your labels are kept.
   - *Looks as it usually does on this frame*, with the moments something different was there
     (objects passing over).
   - *Something is here that moves*: the guesses followed it on or off the spot. Buttons jump
@@ -156,10 +273,11 @@ circle about one object wide) across the whole recording; a progress bar shows h
   - *Something is here for a while and isn't there the rest of the time*: something put down
     and taken away, or (if only briefly) passing over, like a hand. Buttons jump to the
     moments it appeared and left.
-- **This frame** and **how it usually looks** (the background: for every pixel, the middle
-  value of all the pictures), side by side, with the circle drawn.
-- **A line of how much the spot changed** over the recording. Above the dashed line counts as
-  "something there" (shaded). Click the line to go to that moment.
+- **This frame** and **how it usually looks** (the usual picture, made from the whole
+  recording, so that anything passing through is left out), side by side, with the circle drawn.
+- **A line of how much the spot changed** over the recording, from "usual" at the bottom to
+  "differs" at the top. Above the dashed line counts as "something there" (shaded). Click the
+  line to go to that moment.
 - **The biggest changes** as short clips that play over and over.
 - **The spot over time**: about 40 small pictures; an orange edge means it looks different from
   usual. Click one to go there.
@@ -186,7 +304,8 @@ It works the same for every object type: nothing in it knows what your objects a
 Each camera can have a work area: the part of the picture where the objects are (your table,
 board or conveyor). Guesses outside it are left out, so the room around it no longer gets in
 the way. The first time a camera is opened, the studio offers to mark it; **Work area** (or
-**W**) changes it any time.
+**W**) changes it any time. While you mark it, its buttons take the place of the side panel, so
+the picture stays where it is and fully visible.
 
 - **Corners:** click the corners of the area on the picture, then **Enter** (or Save).
   Backspace removes the last corner, Esc cancels.
@@ -214,15 +333,23 @@ the background (its progress shows in the top bar), so switching cameras is quic
 ## 10. Time saved
 
 The studio keeps a record of how long labelling takes, for your own planning and for a final
-report. Press **Time saved** in the top bar:
+report. Press **More**, then **Time saved**, in the top bar:
 
 - **Seconds per frame** a person spent, and the share of frames **accepted unchanged**, for each
   guess source (no model, model v1, v2, ...): this is how much each model saves you.
 - **Changes per frame** (moves, adds, rejects, type changes before the frame was finished).
 - Frames **accepted without looking** (Accept remaining high-confidence frames) and for having
-  the **same picture** as a frame you accepted, and the time that saved (at the seconds per frame
-  measured with no model).
+  the **same picture** as a frame you accepted, and roughly the time that saved (at the seconds
+  per frame measured with no model; these are the easier frames, so it is an upper estimate).
 - **Getting started:** how long the project setup took, and the first install.
+
+Models are compared only on **measured** frames. The summary table has one row per guess source
+and kind of time; its columns are `model` (no model, v1, v2 ...), `guesses` (motion or model,
+"+camera" when the second camera helped), `measured` (True: timed on the page; False: estimated,
+see below), `frames`, `seconds_per_frame`, `median_seconds`, `accepted_unchanged`,
+`edits_per_frame`, `unsure`, `auto`, `same`, `estimated` and `seconds`, followed by the totals.
+The frames are shown hardest first: the guesses a person checks are the least sure ones, so the
+seconds per frame are higher than an average frame would take.
 
 How the seconds are counted: from when the frame is shown until you finish it (Enter or E),
 with any pause longer than 20 seconds counted as 20 seconds, and at most 120 seconds per frame.
@@ -237,13 +364,15 @@ for a spreadsheet. The same summary is in the full report. From the command line
 
 ## 11. Share a project
 
-**Share project** (top bar) saves the whole project as one file, `<name>.mxirl`: object types,
-labels, the picked frames, every model and its scores, work areas, camera calibrations and the
-time record. Recording videos are left out unless you tick the box (they are large; leave it
-off when the other person already has the recordings). A progress bar shows how far it is, and
-nothing in your project is changed. You can keep labelling meanwhile.
+**Share project** (top bar, under **More**) saves the whole project as one file, `<name>.mxirl`: object types,
+labels, the picked frames, every working model and its scores, work areas, camera calibrations
+and the time record. Recording videos are left out unless you tick the box (they are large;
+leave it off when the other person already has the recordings). **Failed models** (and models
+that find nothing yet) are left out too, unless you tick **Also put in the failed models**. A
+progress bar shows how far it is, and nothing in your project is changed. You can keep
+labelling meanwhile.
 
-**Open shared project** opens such a file: give the file, a new (empty) folder for the
+**Open shared project** (also under **More**) opens such a file: give the file, a new (empty) folder for the
 project, and, if you have them, the folder where your copy of the recordings is (they are
 found by their folder names). It then says how many recordings were found and offers to switch
 to the new project. The project you had open is not changed.
@@ -252,11 +381,13 @@ to the new project. The project you had open is not changed.
 computer, a moved folder), picking it shows this screen instead of an error: paste the
 recording's own folder (the one with `video.avi`), or a folder to search for every missing
 recording. The labels are safe in the project the whole time; only the video is needed again.
+Once located, it opens without redoing the slow first pass over the video (the saved guesses are
+kept as long as it is the same video: same size, number of frames and length).
 
 From the command line:
 
 ```
-python tools/recognition/share.py export <project folder> <file.mxirl> [--with-video]
+python tools/recognition/share.py export <project folder> <file.mxirl> [--with-video] [--with-failed-models]
 python tools/recognition/share.py import <file.mxirl> <new folder> [--recordings <folder to search>]
 ```
 
@@ -275,20 +406,34 @@ camera a page opens in your web browser showing the picture, every object with a
 colour (green: sure; amber: fairly sure, new or briefly out of sight; red: check it by eye) and
 the frames per second; **Stop** on that page ends it.
 
-The table goes in the project's `tracks` folder. One row per object per frame: `frame`,
+The table goes in the project's `tracks` folder, with a new name every run (what was watched,
+the date and time, and the model, for example `table-test_20261020-143005_v3.csv`), so an earlier
+table is never overwritten. While it runs, the rows are written as they come to a file ending in
+`.partial.csv`; at the end that becomes the table. If it is stopped early or something goes
+wrong, the rows so far are still in the `.partial.csv` file, and the window says so.
+
+If the table ends up with **no rows**, the model found no objects it was sure enough about: the
+window says so. Try a lower minimum score (`--min-score 0.2`), or label more frames and train the
+model longer, then run it again. A model the studio marks as "finds nothing yet" will give no rows.
+
+One row per object per frame: `frame`,
 `t_wall` (the recorder's clock), `obj` (its steady number), `cls` (type), `x_px`, `y_px`,
 `heading_deg` (for types with a front), `score`, then `x_cm`, `y_cm` (position on the floor,
 only when the camera is calibrated, see 9) and `source` (`model`: found in that frame;
 `track`: carried along from where it was last seen). It uses the camera's work area and ignore
 spots, like the studio.
 
-On Mac or Linux, or to skip the questions:
+On Mac or Linux (in the environment from section 1), or to skip the questions:
 
 ```
-python3 tools/recognition/use_model.py <recording folder, video file, camera number or address> --project <project folder>
+python tools/recognition/use_model.py <recording folder, video file, camera number or address> --project <project folder>
 ```
 
-`--help` lists the rest (`--model v3`, `--out file.csv`, `--seconds 60`, `--every 2`, `--page`).
+`--help` lists the rest: `--model v3`, `--out file.csv`, `--every 2` (every 2nd frame only),
+`--page` (the live page), `--max-frames 500` (stop after 500 frames: for part of a recording) and
+`--seconds 60`. **`--seconds` counts clock time while it runs, not seconds of video:** a recording
+is usually gone through faster or slower than it plays, so `--seconds 60` stops after one minute
+of running, wherever it has got to. It is meant for live cameras.
 
 ## 13. Starting over
 
@@ -310,6 +455,7 @@ python3 tools/recognition/use_model.py <recording folder, video file, camera num
   cameras/<name>.json     camera calibrations (two cameras)
   stats/<recording>.jsonl the time record: one line per finished frame (see 10)
   stats/install.json      how long the first install took
+  recordings/             recordings made from video files, when the video's own folder can't be written (see 2)
   tracks/                 tables written by track-with-model.bat (see 12)
   report.html             the accuracy report, when written with report.py
 ```
@@ -333,9 +479,14 @@ python tools/recognition/studio.py <project folder> --relink <folder the recordi
 
 ## How the scores stay honest
 
-- Frames are split by **time blocks** (30 s), never frame by frame: neighbouring frames are
-  near-copies. A block goes wholly to training, to picking the best training round, or to
-  scoring, and frames within 1 s of a block edge are left out.
+- Frames are split by **time blocks**, never frame by frame: neighbouring frames are
+  near-copies. A block goes wholly to training (learning), to picking the best training round,
+  or to scoring, and frames close to a block edge (1 s; less for short blocks) are left out.
+- **The block length is chosen automatically** from how much footage the project has: 30 s
+  when there is enough, shorter (20, 15, 10, 6, 4 or 3 s) when the recordings are too short to
+  give every part some blocks. Once a model is trained, the length stays the same as long as it
+  still fits, so frames never move between parts. This is why recordings of a few minutes or
+  more work best (section 2).
 - A block's part depends only on its time, so new labels never move a scoring block into
   training, and both cameras' views of one moment land in the same part.
 - Only frames a person checked are scored; frames holding an unsure object are left out.
@@ -354,6 +505,7 @@ python tools/recognition/studio.py <project folder> --relink <folder the recordi
 | `referee.py` | Investigate's second-camera view of a spot |
 | `share.py` | a project as one `.mxirl` file (export, import, finding recordings again) |
 | `use_model.py` | use a trained model without the studio (`track-with-model.bat`) |
+| `videofile.py` | an ordinary video file made into a recording folder (Add recording) |
 | `cameras.py`, `crosscam.py` | camera models and label sharing between cameras (CROSSCAM.md) |
 
 The labelling page is `tools/label/page.html` (with `tools/label/app.py`, `tracker.py`,
@@ -363,7 +515,7 @@ The labelling page is `tools/label/page.html` (with `tools/label/app.py`, `track
 Tests:
 
 ```
-python -m pytest tools/recognition/tests tools/label/tests
+python -m pytest tools/recognition/tests tools/label/tests tools/detector/tests
 ```
 
 Add `RECOGNITION_TRAIN=1` (PowerShell: `$env:RECOGNITION_TRAIN=1`) to include the few-minute

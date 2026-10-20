@@ -393,6 +393,7 @@ def test_investigate_time_saved_and_share_in_a_browser(tmp_path, synth10):
             page.keyboard.press("Escape")
             assert not page.is_visible("#tlsvg")
             # Time saved panel
+            page.click("#smore")                  # under "More" in the studio bar
             page.click("#stime")
             page.wait_for_selector(".tsaved")
             assert "Time saved" in page.inner_text(".tsaved")
@@ -400,22 +401,27 @@ def test_investigate_time_saved_and_share_in_a_browser(tmp_path, synth10):
                 page.screenshot(path=os.path.join(SHOTS, "time-saved.png"))
             page.keyboard.press("Escape")
             # Share project dialog (filled in, then cancelled) and Open shared project
+            page.click("#smore")                  # under "More" in the studio bar
             page.click("#sshare")
             assert page.input_value("#shpath").endswith("Browser4.mxirl")
             if SHOTS:
                 page.screenshot(path=os.path.join(SHOTS, "share.png"))
             page.keyboard.press("Escape")
+            page.click("#smore")                  # under "More" in the studio bar
             page.click("#sopen")
             page.fill("#opfile", "/somewhere/their-project.mxirl")
             assert page.input_value("#opdest").endswith("their-project")
             page.keyboard.press("Escape")
-            # the tour knows the new parts
+            # the tour knows the new parts (the full tour: the ? button shows the short one, whose last step offers it)
             page.click("#helpbtn")
             seen = set()
-            for _ in range(40):
+            for _ in range(60):
                 if not page.is_visible("#tour.on"):
                     break
                 seen.add(page.inner_text("#tourcard h4"))
+                if page.is_visible("#tfull"):
+                    page.click("#tfull")
+                    continue
                 page.keyboard.press("ArrowRight")
             assert {"Investigate a spot (Q)", "Track timeline", "Time saved", "Share project", "Open shared project"} <= seen
             browser.close()

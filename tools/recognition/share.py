@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Maxfield IRL Tracking: a whole project as one file (.mxirl).
 
-    python tools/recognition/share.py export <project folder> <file or folder> [--with-video]
+    python tools/recognition/share.py export <project folder> <file or folder> [--with-video] [--with-failed-models]
     python tools/recognition/share.py import <file> <new folder> [--recordings <folder to search>]
 
 A .mxirl file is a zip: manifest.json, and every file of the project under project/.
@@ -145,9 +145,12 @@ def read_pair(label_dir, lock=None, tries=50):
     return got
 
 
-def export_project(project, out_path, with_video=False, progress=None, lock_for=None):
+def export_project(project, out_path, with_video=False, progress=None, lock_for=None, include_failed=False):
     """lock_for(recording id) -> the save lock of that recording if it is open for labelling
-    (or None): its labels.csv and review.json are copied while holding it."""
+    (or None): its labels.csv and review.json are copied while holding it.
+    include_failed: also put in models that failed or find nothing yet (left out by default:
+    their entries, folders and learning-curve points). Recordings made from video files inside
+    the project folder (recordings/) count as recordings: their videos go in only with_video."""
     proj = _as_project(project)
     out_path = os.path.abspath(out_path)
     if os.path.isdir(out_path):
@@ -162,9 +165,26 @@ def export_project(project, out_path, with_video=False, progress=None, lock_for=
     with open(proj.path, "rb") as f:
         pj_bytes = f.read()
     pdata = json.loads(pj_bytes.decode("utf-8"))
+    left_out = [] if include_failed else [m["id"] for m in pdata.get("models", []) if projmod.Project.model_failed(m)]
+    replaced = {}
+    if left_out:
+        pdata["models"] = [m for m in pdata.get("models", []) if m["id"] not in left_out]
+        if (pdata.get("current") or {}).get("model") in left_out:
+            pdata["current"]["model"] = "none"
+        pj_bytes = json.dumps(pdata, indent=1).encode("utf-8")
+        cp = os.path.join(proj.folder, "models", "curve.json")
+        if os.path.exists(cp):
+            try:
+                with open(cp, encoding="utf-8") as f:
+                    curve = json.load(f)
+                curve["points"] = [p for p in curve.get("points", []) if p.get("model") not in left_out]
+                replaced["models/curve.json"] = json.dumps(curve, indent=1).encode("utf-8")
+            except (OSError, ValueError):
+                pass
 
     files = [(p, a) for p, a in _walk(proj.folder, skip={os.path.abspath(out_path)})
-             if a != "project.json"]
+             if a != "project.json" and not a.startswith("recordings/")
+             and not any(a.startswith("models/%s/" % mid) for mid in left_out)]
     # labels.csv + review.json of each recording: one consistent snapshot of the pair
     pairs = {}
     for d in sorted({a.rsplit("/", 1)[0] for _, a in files if a.startswith("labels/") and a.rsplit("/", 1)[-1] in PAIR}):
@@ -208,7 +228,7 @@ def export_project(project, out_path, with_video=False, progress=None, lock_for=
                   video_files=len(vid_files))
     manifest = dict(format=FORMAT, format_version=FORMAT_VERSION, software=SOFTWARE,
                     project_name=pdata.get("name", proj.name), created=_now(), with_video=bool(with_video),
-                    contents=inside, recordings=recs, warnings=warnings)
+                    contents=inside, recordings=recs, warnings=warnings, left_out_models=left_out)
 
     tmp = out_path + ".part"
     try:
@@ -217,6 +237,10 @@ def export_project(project, out_path, with_video=False, progress=None, lock_for=
             zf.writestr("project/project.json", pj_bytes)
             tick(len(pj_bytes))
             for full, arc in files:
+                if arc in replaced:
+                    zf.writestr("project/" + arc, replaced[arc])
+                    tick(len(replaced[arc]))
+                    continue
                 if arc in pairs:
                     import time
                     zi = zipfile.ZipInfo("project/" + arc, date_time=time.localtime()[:6])
@@ -431,6 +455,8 @@ def main(argv=None):
     e.add_argument("project")
     e.add_argument("file")
     e.add_argument("--with-video", action="store_true", help="also put the recordings' videos in the file (large)")
+    e.add_argument("--with-failed-models", action="store_true",
+                   help="also put in models that failed or find nothing yet (left out by default)")
     i = sub.add_parser("import", help="a .mxirl file -> a new project folder")
     i.add_argument("file")
     i.add_argument("dest")
@@ -439,7 +465,8 @@ def main(argv=None):
     try:
         if a.cmd == "export":
             print("Saving the project as one file...")
-            res = export_project(a.project, a.file, with_video=a.with_video, progress=_Bar())
+            res = export_project(a.project, a.file, with_video=a.with_video, progress=_Bar(),
+                                 include_failed=a.with_failed_models)
             m = res["manifest"]
             print("Done: %s (%.1f MB)" % (res["path"], res["bytes"] / 1e6))
             print("It holds the project '%s': %d recording(s) listed, %d model(s), videos %s."
@@ -447,6 +474,9 @@ def main(argv=None):
                      "included" if m["with_video"] else "not included (use --with-video to include them)"))
             for w in m["warnings"]:
                 print(w)
+            if m.get("left_out_models"):
+                print("Left out: model%s %s (failed, or finds nothing yet; --with-failed-models puts them in)."
+                      % ("" if len(m["left_out_models"]) == 1 else "s", ", ".join(m["left_out_models"])))
         else:
             print("Opening the project file...")
             res = import_project(a.file, a.dest, a.recordings, progress=_Bar())

@@ -107,6 +107,28 @@ def choose_block_s(proj):
     return float(choices[-1])
 
 
+def part_function(proj, rec, block_s=None):
+    """frame number -> the part its block goes to ("train", "val", "test"), or None for a frame
+    so close to a block edge that it is left out, exactly as build_dataset() cuts it. Used to
+    spread "Most useful next" over the parts and to count confirmed frames per part."""
+    block_s = float(block_s or choose_block_s(proj))
+    guard = guard_for(block_s)
+    times = _times(rec["path"]) or []
+    sess = rec.get("session") or rec["id"]
+    cache = {}
+
+    def part(fr, fps_default=25.0):
+        t = times[fr] if fr < len(times) and times[fr] is not None else fr / fps_default
+        b = int(t // block_s)
+        if min(t - b * block_s, (b + 1) * block_s - t) < guard:
+            return None
+        if b not in cache:
+            cache[b] = _part("%s|%d" % (sess, b))[0]
+        return cache[b]
+    part.block_s = block_s
+    return part
+
+
 def guard_for(block_s):
     """Frames this close to a block edge are left out (1 s; less for short blocks)."""
     return min(1.0, block_s / 6.0)
@@ -295,10 +317,7 @@ def motion_predictions(proj, info, assign, path):
 def finds_objects(m):
     """False for a model that found nothing when it was scored (marked with a warning, or an
     older model whose scores say it found no objects): a new model must not start from it."""
-    if m.get("warning"):
-        return False
-    rec = (m.get("metrics") or {}).get("recall")
-    return not (rec is not None and rec <= 0) and not (m.get("val_f1") is not None and m["val_f1"] <= 0)
+    return not projmod.Project.model_failed(dict(m, status="ready"))
 
 
 class Trainer:
@@ -417,7 +436,7 @@ class Trainer:
                          init_from=os.path.relpath(prev, proj.folder) if prev else None, val_f1=val_f1)
             proj.save()
         self._say("Model %s: scoring every model on the held-back frames ..." % mid)
-        self.score_all(data, assign, info, logf, python, block_s=block_s)
+        curve = self.score_all(data, assign, info, logf, python, block_s=block_s)
         m = proj.model(mid)
         sc = m.get("metrics", {})
         nothing = (val_f1 is not None and val_f1 <= 0) or not sc.get("recall")
@@ -430,7 +449,11 @@ class Trainer:
         else:
             msg = ("Model %s is ready: it finds %s of the objects on frames it never saw, and %s of what it marks "
                    "is right. Pick it in \"Guesses from\"." % (mid, _pct(sc.get("recall")), _pct(sc.get("precision"))))
-        self.job.update(status="done", finished=time.time(), message=msg, warning=NOTHING_FOUND if nothing else None)
+        caution = curve.get("caution") if curve else None
+        if caution and not nothing:
+            msg += " Caution: " + caution
+        self.job.update(status="done", finished=time.time(), message=msg, warning=NOTHING_FOUND if nothing else None,
+                        caution=caution)
         self.log(msg)
 
     def _measured_size(self, cls):
@@ -534,17 +557,54 @@ class Trainer:
                 with proj.lock:
                     proj.model(mid)["metrics"] = {k: pt[k] for k in ("precision", "recall", "f1", "centre_err_px",
                                                                  "heading_err_deg", "ms_per_frame")}
-        pts.sort(key=lambda p: (p["n_train_frames"], p["model"]))
+        # in the order the models were made (no model first): two models trained on the same frames
+        # stand side by side instead of on top of each other
+        pts.sort(key=lambda p: version_order(p["model"]))
         if block_s is None:
             block_s = float(proj.data["settings"].get("block_s", 30))
         curve = dict(updated=projmod.now_iso(), points=pts,
                      test=dict(frames=test_frames, blocks=sum(1 for v in assign.values() if v == "test"),
                                block_s=block_s,
-                               note="%d time blocks of %.0f s held back; never trained on"
-                                    % (sum(1 for v in assign.values() if v == "test"), block_s)))
+                               note="%d time block%s of %.0f s held back; never trained on"
+                                    % (sum(1 for v in assign.values() if v == "test"),
+                                       "" if sum(1 for v in assign.values() if v == "test") == 1 else "s", block_s)))
+        curve["caution"] = score_caution(curve)
         projmod.write_json(os.path.join(proj.folder, "models", "curve.json"), curve)
         proj.save()
         return curve
+
+
+def version_order(mid):
+    """Sort key: "none" first, then v1, v2, ... by number, then anything else by name."""
+    if mid == "none":
+        return (0, 0, "")
+    m = re.match(r"^v(\d+)$", str(mid))
+    return (1, int(m.group(1)), "") if m else (2, 0, str(mid))
+
+
+# Below these, the learning-curve scores say little (one frame more or less moves them a lot)
+FEW_TEST_FRAMES = 30
+FEW_TEST_OBJECTS = 5
+
+
+def score_caution(curve):
+    """A plain warning when the scores rest on few held-back frames or few different objects, else None."""
+    t = curve.get("test") or {}
+    frames = int(t.get("frames") or 0)
+    objs = [p.get("n_objects") for p in curve.get("points", []) if p.get("n_objects") is not None]
+    n_obj = int(max(objs)) if objs else None
+    if not curve.get("points"):
+        return None
+    bits = []
+    if frames < FEW_TEST_FRAMES:
+        bits.append("only %d held-back frame%s" % (frames, "" if frames == 1 else "s"))
+    if n_obj is not None and n_obj < FEW_TEST_OBJECTS:
+        bits.append("only %d different object%s" % (n_obj, "" if n_obj == 1 else "s"))
+    if not bits:
+        return None
+    return ("These scores rest on %s, so one frame more or less can move them a lot. Treat them as a rough sign, "
+            "not a measurement: confirm more frames spread over the whole recording (and more recordings), then "
+            "train again." % " and ".join(bits))
 
 
 EPOCH_RE = re.compile(r"^epoch\s+(\d+)\s+([\d.]+)s.*?\bR\s+([\d.na]+)\s+F1\s+([\d.na]+)(.*)$")

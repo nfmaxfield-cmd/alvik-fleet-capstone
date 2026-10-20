@@ -16,9 +16,11 @@ studio bar on top:
   you switch; only the unconfirmed guesses do.
 - Train new model: trains on every confirmed frame, in the background, while you keep
   labelling. Every model is scored on the same held-back frames (trainer.py).
-- Models & learning curve: how the guesses improve as confirmed frames grow.
+- Learning curve: how the guesses improve as confirmed frames grow, and the list of models
+  (failed ones hidden unless asked for; they can be deleted).
 - Object types: name, has a front (heading), size, height above the floor (or "it varies").
-- Add recording: a recording folder, or a two-camera session folder.
+- Add recording: a recording folder, a two-camera session folder, or an ordinary video file
+  (mp4, mov, avi ... from a phone or webcam app: made into a recording folder, videofile.py).
 - Work area: per camera, the part of the picture to look in, plus ignore spots.
 - Investigate (key Q on the page): one spot across the whole recording; "Ignore this spot", and
   the second camera as a referee when both cameras are calibrated.
@@ -85,6 +87,7 @@ class Studio:
         self.bg_thread = None
         self.pending_reopen = False      # settings changed while opening: open again when done
         self.share = None                # Share project / Open shared project: what it is doing
+        self.convert = None              # Add recording with a video file: making it into a recording
 
     # --- opening a recording with a guess source ------------------------------------------
     def current(self):
@@ -169,7 +172,8 @@ class Studio:
 
         def progress(what, done, total):
             names = {"motion": "Finding moving objects (first time only)", "model": "Running model %s" % model,
-                     "pick": "Picking frames to label"}
+                     "pick": "Picking frames to label",
+                     "size": "Measuring how big the objects are (first time only)"}
             what = names.get(what, what)
             if clock["what"] != what:
                 clock.update(what=what, clock=labelapp.RateClock())
@@ -179,12 +183,17 @@ class Studio:
         try:
             self._wait_background(rid)
             extra = self._cross_camera_guesses(rec)
+            try:
+                part_of = trainmod.part_function(proj, rec)
+            except Exception as e:      # the recording still opens; "Most useful next" is just not spread
+                self.log("Could not work out the training parts: %s" % e)
+                part_of = None
             s = labelapp.Session(rec["path"], model=INFER if weights else None, weights=weights,
                                  classes=proj.class_names(), labels_dir=proj.labels_dir(rid), extra_dets=extra,
                                  progress=progress, log=self.log, class_map=proj.motion_class_map(),
                                  loose_classes=proj.loose_classes(), front_classes=proj.heading_classes(),
                                  area=proj.camera_settings(proj.camera_key(rec)),
-                                 stats_path=timesaved.stats_path(proj, rid), model_id=model)
+                                 stats_path=timesaved.stats_path(proj, rid), model_id=model, part_of=part_of)
             with self.lock:
                 self.session = s
                 proj.data["current"] = dict(rec=rid, model=model)
@@ -246,7 +255,7 @@ class Studio:
                 cam_a = cameras.CameraModel.load(path_a)
                 g = crosscam.cross_guesses(objs, cam_a, cam_b, crosscam.load_frame_times(other_times), times_b,
                                            (b_meta.get("width", 640), b_meta.get("height", 480)), proj.class_heights(),
-                                           skip_classes=tuple(proj.varies_classes()))
+                                           skip_classes=tuple(proj.varies_classes() + proj.no_height_classes()))
             except Exception as e:
                 skipped.append(other.get("camera") or other.get("name") or other["id"])
                 self.log("Cross-camera: %s skipped (%s)" % (other["id"], e))
@@ -325,11 +334,12 @@ class Studio:
         for r in proj.recordings():
             n = _done_frames(proj.labels_dir(r["id"]))
             total += n
-            recs.append(dict(id=r["id"], name=r["name"], camera=r.get("camera", ""), labelled=n,
+            recs.append(dict(id=r["id"], name=r["name"], camera=r.get("camera", ""), labelled=n, path=r["path"],
                              missing=not os.path.exists(os.path.join(r["path"], "video.avi"))))
         models = [dict(id=m["id"], status=m["status"], n_train_frames=m.get("n_train_frames", 0),
                        metrics=m.get("metrics", {}), created=m.get("created"), error=m.get("error"),
                        warning=m.get("warning"), interrupted=bool(m.get("interrupted")),
+                       failed=projmod.Project.model_failed(m),
                        compatible=m.get("classes") == proj.class_names()) for m in proj.models()]
         models = [m for m in models if m["status"] != "ready" or m["compatible"]] + \
                  [m for m in models if m["status"] == "ready" and not m["compatible"]]
@@ -349,7 +359,7 @@ class Studio:
                     loading=self.loading_view(), settings=proj.data.get("settings", {}), labelled_total=total,
                     cross_note=self.cross_note, setup=proj.setup_view(), camera=camera, background=self.bg,
                     share=self.share_view(), missing=[r for r in recs if r["missing"]],
-                    documents=_documents())
+                    documents=_documents(), n_cameras=proj.n_cameras(), convert=self.convert_view())
 
     # --- investigate: ignore spot, second camera ------------------------------------------------
     def ignore_spot(self, camera, x, y, r):
@@ -395,7 +405,7 @@ class Studio:
         threading.Thread(target=work, daemon=True).start()
         return job
 
-    def export(self, path, with_video=False):
+    def export(self, path, with_video=False, include_failed=False):
         import share
         path = (path or "").strip().strip('"')
         if not path:
@@ -403,10 +413,11 @@ class Studio:
 
         def run(progress):
             res = share.export_project(self.proj, os.path.expanduser(path), with_video=bool(with_video), progress=progress,
-                                       lock_for=self._save_lock_for)
+                                       lock_for=self._save_lock_for, include_failed=bool(include_failed))
             m = res["manifest"]
             return dict(path=res["path"], mb=round(res["bytes"] / 1e6, 1), recordings=len(m["recordings"]),
-                        models=m["contents"]["models"], with_video=m["with_video"], warnings=m["warnings"])
+                        models=m["contents"]["models"], with_video=m["with_video"], warnings=m["warnings"],
+                        left_out=m.get("left_out_models", []))
         return self._share_job("Saving the project as one file", run)
 
     def _save_lock_for(self, rid):
@@ -424,8 +435,10 @@ class Studio:
         file = os.path.expanduser((file or "").strip().strip('"'))
         dest = os.path.expanduser((dest or "").strip().strip('"'))
         recordings = os.path.expanduser((recordings or "").strip().strip('"')) or None
-        if not file or not os.path.isfile(file):
-            raise ValueError("There is no file at %s." % (file or "(empty)"))
+        if not file:
+            raise ValueError("Type or paste the project file first (the box is empty).")
+        if not os.path.isfile(file):
+            raise ValueError("There is no file at %s." % file)
         if not dest:
             raise ValueError("Say which new folder the project should go in.")
         share.read_manifest(file)          # a plain message right away if it isn't a project file
@@ -483,11 +496,120 @@ class Studio:
                     notes=share.describe_missing(share.missing_recordings(self.proj)))
 
     def curve(self):
+        """models/curve.json for the page: points in model order (no model first), each marked
+        failed (finds nothing yet) or not, and a plain caution when the scores rest on little."""
         p = os.path.join(self.proj.folder, "models", "curve.json")
         if not os.path.exists(p):
-            return dict(points=[], test=dict(frames=0, note="no model trained yet"))
-        with open(p) as f:
-            return json.load(f)
+            c = dict(points=[], test=dict(frames=0, note="no model trained yet"))
+        else:
+            with open(p) as f:
+                c = json.load(f)
+        failed = {m["id"] for m in self.proj.models() if projmod.Project.model_failed(m)}
+        have = {m["id"] for m in self.proj.models()}
+        c["points"] = sorted([dict(pt, failed=pt.get("model") in failed) for pt in c.get("points", [])
+                              if pt.get("model") == "none" or pt.get("model") in have],
+                             key=lambda pt: trainmod.version_order(pt.get("model")))
+        c["caution"] = trainmod.score_caution(c)
+        t = c.get("test") or {}
+        bs = t.get("block_s")
+        if not bs:                                         # older files: the length is only in the note
+            import re
+            m = re.search(r"of (\d+(?:\.\d+)?) s", t.get("note") or "")
+            bs = float(m.group(1)) if m else None
+        if t.get("blocks") and bs:                         # the note in plain words (older files said "1 time blocks")
+            t["note"] = "%d time block%s of %.0f s held back; never trained on" % (
+                t["blocks"], "" if t["blocks"] == 1 else "s", bs)
+        c["models"] = [dict(id=m["id"], status=m["status"], failed=projmod.Project.model_failed(m),
+                            n_train_frames=m.get("n_train_frames", 0), created=m.get("created"),
+                            error=m.get("error"), warning=m.get("warning"), metrics=m.get("metrics", {}),
+                            interrupted=bool(m.get("interrupted")),
+                            current=self.proj.data.get("current", {}).get("model") == m["id"])
+                       for m in self.proj.models()]
+        return c
+
+    def delete_model(self, mid):
+        """Delete a failed or empty model (the page asks first). If it is the one giving the
+        guesses, the recording is opened again with no model."""
+        if self.trainer.busy() and self.trainer.job.get("model") == mid:
+            raise ValueError("model %s is still training" % mid)
+        was_current = self.proj.data.get("current", {}).get("model") == mid
+        self.proj.delete_model(mid)
+        if was_current:
+            self.reopen()
+        return was_current
+
+    # --- a video file made into a recording ----------------------------------------------------
+    def convert_view(self):
+        return {k: v for k, v in self.convert.items() if k != "stop"} if self.convert else None
+
+    def add(self, path, camera=None):
+        """Add recording: a recording or session folder (added at once), or a video file (made
+        into a recording folder in the background; see convert_view). Returns dict(added, ids) or
+        dict(converting=True)."""
+        import videofile
+        path = (path or "").strip().strip('"').strip()
+        if not path:
+            raise ValueError("Type or paste the recording folder or video file first (the box is empty).")
+        full = os.path.abspath(os.path.expanduser(path))
+        if os.path.isfile(full):
+            if not videofile.is_video_file(full):
+                raise ValueError("%s is not a video file this studio knows (%s), nor a recording folder."
+                                 % (os.path.basename(full), ", ".join(e[1:] for e in videofile.VIDEO_EXTS)))
+            self._convert(full, camera)
+            return dict(converting=True)
+        added = self.proj.add_recording(full, camera)
+        if added and self.session is None and not self.loading:
+            self.open(added[0], "none")
+        return dict(added=len(added), ids=added)
+
+    def _convert(self, video, camera=None):
+        import videofile
+        if self.convert and self.convert.get("status") == "running":
+            raise ValueError("still making the last video file into a recording; wait a moment")
+        clock = labelapp.RateClock(window=10.0)
+        job = dict(status="running", what="Making a recording from %s" % os.path.basename(video), done=0, total=0,
+                   left="", result=None, error=None, stop=False)
+        self.convert = job
+
+        def progress(done, total):
+            job.update(done=done, total=total, left=labelapp.fmt_left(clock.update(done, total)))
+
+        def work():
+            try:
+                res = videofile.convert(video, os.path.join(self.proj.folder, "recordings"), progress=progress,
+                                        stop=lambda: job["stop"])
+                ids = self.proj.add_recording(res["folder"], camera)
+                res.update(ids=ids, added=len(ids))
+                if ids and self.session is None and not self.loading:
+                    self.open(ids[0], "none")
+                job.update(result=res, status="done")
+            except InterruptedError:
+                job.update(status="stopped")
+            except Exception as e:
+                if not isinstance(e, ValueError):
+                    traceback.print_exc()
+                job.update(status="failed", error=str(e))
+        threading.Thread(target=work, daemon=True).start()
+        return job
+
+
+_NO_BEFORE = object()
+
+
+def _unknown_note(before, proj):
+    """Plain words for when the guesses with no model show objects as "unknown": the motion finder
+    can only tell "an object" from "something reaching in", so with two or more plain types it can't
+    say which type an object is. before: proj.motion_object_type() before the change (_NO_BEFORE:
+    just say it when it applies)."""
+    after = proj.motion_object_type()
+    plain = [c["name"] for c in proj.classes if c["name"] != projmod.CATCH_ALL and not c.get("height_varies")]
+    if after != projmod.CATCH_ALL or len(plain) < 2:
+        return None
+    if before is not _NO_BEFORE and before == after:
+        return None
+    return ("With %d object types (%s), the guesses before any model is trained can't tell which type an object "
+            "is, so they show it as \"%s\". Give each object its type with the number keys (1-9); once a model "
+            "is trained on your labels, its guesses use your types." % (len(plain), ", ".join(plain), projmod.CATCH_ALL))
 
 
 def _documents():
@@ -587,7 +709,7 @@ def make_routes(studio):
         elif path == "/api/studio/referee":
             h._send(200, studio.referee(b.get("frame", 0), b["x"], b["y"], b.get("cls")))
         elif path == "/api/studio/share/export":
-            studio.export(b.get("path"), b.get("with_video"))
+            studio.export(b.get("path"), b.get("with_video"), b.get("include_failed"))
             h._send(200, dict(ok=True, share=studio.share_view()))
         elif path == "/api/studio/share/import":
             studio.import_file(b.get("file"), b.get("dest"), b.get("recordings"))
@@ -609,15 +731,16 @@ def make_routes(studio):
                 studio.proj.save()
             h._send(200, dict(model=mid))
         elif path == "/api/studio/classes":
+            before = studio.proj.motion_object_type()
             studio.proj.set_classes(b.get("classes") or [])
             studio.reopen()
-            h._send(200, dict(ok=True))
+            h._send(200, dict(ok=True, note=_unknown_note(before, studio.proj)))
         elif path == "/api/studio/setup":
             before = studio.proj.class_names()
             studio.proj.finish_setup(b.get("name"), b.get("classes"), b.get("seconds"))
             if studio.proj.class_names() != before:
                 studio.reopen()
-            h._send(200, dict(ok=True))
+            h._send(200, dict(ok=True, note=_unknown_note(_NO_BEFORE, studio.proj)))
         elif path == "/api/studio/whats_new":
             changed = studio.proj.finish_whats_new(bool(b.get("set_varies")))
             h._send(200, dict(ok=True, changed=changed))
@@ -634,12 +757,23 @@ def make_routes(studio):
             reopened = studio.reopen(only_camera=key)
             h._send(200, dict(ok=True, reopened=reopened))
         elif path == "/api/studio/add":
-            if not str(b.get("path") or "").strip().strip('"'):
-                raise ValueError("Type or paste the recording folder first (the box is empty).")
-            added = studio.proj.add_recording(b.get("path", ""), b.get("camera") or None)
-            if added and studio.session is None and not studio.loading:
-                studio.open(added[0], "none")
-            h._send(200, dict(added=len(added), ids=added))
+            h._send(200, studio.add(b.get("path", ""), b.get("camera") or None))
+        elif path == "/api/studio/convert/stop":
+            if studio.convert and studio.convert.get("status") == "running":
+                studio.convert["stop"] = True
+            h._send(200, dict(ok=True))
+        elif path == "/api/studio/convert/clear":
+            if studio.convert and studio.convert.get("status") != "running":
+                studio.convert = None
+            h._send(200, dict(ok=True))
+        elif path == "/api/studio/delete_model":
+            reopened = studio.delete_model(str(b.get("model") or ""))
+            h._send(200, dict(ok=True, reopened=reopened))
+        elif path == "/api/studio/show_failed":
+            with studio.proj.lock:
+                studio.proj.data.setdefault("settings", {})["show_failed_models"] = bool(b.get("on"))
+                studio.proj.save()
+            h._send(200, dict(ok=True))
         else:
             return False
         return True
@@ -651,7 +785,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("project", help="project folder (created if it doesn't exist)")
     ap.add_argument("--name", help="project name, when creating it")
-    ap.add_argument("--add", nargs="+", metavar="FOLDER", help="add recording (or two-camera session) folders, then open")
+    ap.add_argument("--add", nargs="+", metavar="FOLDER", help="add recording (or two-camera session) folders, or video "
+                    "files, then open")
     ap.add_argument("--camera", help="camera name for --add of a single recording (e.g. overhead)")
     ap.add_argument("--relink", metavar="FOLDER", help="find moved recordings under this folder")
     ap.add_argument("--port", type=int, default=8765)
@@ -664,6 +799,17 @@ def main():
     if a.relink:
         print("Found %d moved recordings." % proj.relink(a.relink))
     for folder in a.add or []:
+        if os.path.isfile(os.path.expanduser(folder)):
+            import videofile
+            print("Making a recording from the video file %s ..." % folder)
+            try:
+                res = videofile.convert(folder, os.path.join(proj.folder, "recordings"),
+                                        progress=lambda d, t: print("  %d / %d frames" % (d, t), end="\r", flush=True))
+            except ValueError as e:
+                print("\n%s" % e)
+                continue
+            print("\n%s" % "\n".join(["Recording folder: " + res["folder"]] + res["notes"]))
+            folder = res["folder"]
         ids = proj.add_recording(folder, a.camera)
         print("Added %d recording(s) from %s" % (len(ids), folder))
     if os.environ.get("MXIRL_INSTALL_SECONDS"):

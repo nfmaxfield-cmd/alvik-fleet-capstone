@@ -25,7 +25,8 @@ Useful options
     --out file.csv        where to save the table (default: in the project's "tracks" folder)
     --page                also show the live picture in your web browser (on by default for
                           cameras); --no-page turns it off
-    --seconds 60          stop after this long;  --max-frames 500 stops after that many frames
+    --seconds 60          stop after running this long (clock time, not video time)
+    --max-frames 500      stop after that many frames (for part of a recording)
     --every 2             look at every 2nd frame only (faster; the objects are carried along)
     --robot-px 30         object size in pixels, if the project does not know it
 
@@ -1074,7 +1075,9 @@ def build_parser():
     ap.add_argument("--no-page", dest="page", action="store_false", help="do not show the live page")
     ap.add_argument("--no-browser", action="store_true", help="start the page but do not open the browser")
     ap.add_argument("--port", type=int, default=0, help="port for the live page (default: any free one)")
-    ap.add_argument("--seconds", type=float, default=0, help="stop after this many seconds")
+    ap.add_argument("--seconds", type=float, default=0,
+                    help="stop after it has run this many seconds (clock time while it runs, not seconds of video; "
+                         "for part of a recording use --max-frames)")
     ap.add_argument("--max-frames", type=int, default=0, help="stop after this many frames")
     ap.add_argument("--every", type=int, default=1, help="look at every n-th frame only")
     ap.add_argument("--robot-px", type=float, help="object size in pixels")

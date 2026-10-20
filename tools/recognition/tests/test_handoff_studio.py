@@ -388,11 +388,18 @@ def test_first_start_in_a_browser(tmp_path, synth10):
             assert page.input_value("#ctab tr:nth-child(2) .cname") == "alvik"
             page.click("#setupgo")
             page.wait_for_selector("#tour.on", timeout=60000)
-            steps = 0
-            while page.is_visible("#tour.on") and steps < 40:
+            # a short tour first (8 steps); its last step offers the full tour of every button
+            steps, full = 0, 0
+            while page.is_visible("#tour.on") and steps + full < 60:
+                if page.is_visible("#tfull"):
+                    assert 6 <= steps <= 9
+                    page.click("#tfull")
+                    full = 1
+                    steps = 0
+                    continue
                 page.keyboard.press("ArrowRight")
                 steps += 1
-            assert steps >= 18
+            assert full and steps >= 18
             page.wait_for_selector("#wask", timeout=30000)
             page.click("#wask")
             page.wait_for_timeout(500)

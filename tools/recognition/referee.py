@@ -51,7 +51,7 @@ def look(proj, rec, frame, x, y, cls=None):
     cam_b = cameras.CameraModel.load(path_b)
     types = {c["name"]: c for c in proj.classes}
     c = types.get(cls) or {}
-    varies = bool(c.get("height_varies")) or not c
+    varies = bool(c.get("height_varies")) or not c or c.get("height_cm") is None    # blank height: floor spot only
     z = 0.0 if varies else float(c.get("height_cm") or 0.0)
     fx, fy = cam_a.to_floor(float(x), float(y), z)
     if not (np.isfinite(fx) and np.isfinite(fy)):

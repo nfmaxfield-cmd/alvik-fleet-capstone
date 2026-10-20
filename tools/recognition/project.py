@@ -153,11 +153,21 @@ class Project:
         return [c["name"] for c in self.classes if c.get("has_front")]
 
     def class_heights(self):
+        """Height of each type's marked point above the floor (cm). A type whose height was left
+        blank reads as 0 here; it is never passed between cameras (see no_height_classes)."""
         return {c["name"]: float(c.get("height_cm") or 0.0) for c in self.classes}
 
     def varies_classes(self):
         """Types whose height is not fixed: never passed between cameras."""
         return [c["name"] for c in self.classes if c.get("height_varies")]
+
+    def no_height_classes(self):
+        """Types whose height was left blank (not known): not passed between cameras either."""
+        return [c["name"] for c in self.classes if not c.get("height_varies") and c.get("height_cm") is None]
+
+    def n_cameras(self):
+        """How many cameras the project's recordings come from (by camera name)."""
+        return len({self.camera_key(r) for r in self.recordings()})
 
     def motion_class_map(self):
         """The motion finder's guess names -> this project's types. Its object-sized blobs go to
@@ -173,6 +183,11 @@ class Project:
         out = {"alvik": obj or catch, "hand": reaching or catch, "unknown": catch,
                "machine": "machine" if "machine" in names else catch}
         return {k: v for k, v in out.items() if v}
+
+    def motion_object_type(self):
+        """The type the motion finder's object-sized guesses get (the catch-all when the project has
+        several plain types: motion alone can't tell them apart)."""
+        return self.motion_class_map().get("alvik")
 
     def loose_classes(self):
         """Types the tracker lets move fast and end soon (hands, the catch-all, and anything
@@ -297,8 +312,11 @@ class Project:
         if not path:
             raise ValueError("Type or paste the recording folder first (the box is empty).")
         path = os.path.abspath(os.path.expanduser(path))
+        if os.path.isfile(path):
+            raise ValueError("That is a file, not a recording folder: %s. A video file (mp4, mov, avi ...) is "
+                             "made into a recording by the studio's Add recording." % path)
         if not os.path.isdir(path):
-            raise ValueError("Not a folder: %s" % path)
+            raise ValueError("There is no folder at %s." % path)
         sess_file = os.path.join(path, "session.json")
         found = []
         if os.path.exists(sess_file):
@@ -397,9 +415,14 @@ class Project:
         for c in classes:
             size = c.get("size_px")
             varies = bool(c.get("height_varies"))
+            h = c.get("height_cm")
+            # blank height: not known (None), not "on the floor"; such a type isn't passed between cameras
+            h = None if h is None or (isinstance(h, str) and not h.strip()) else float(h)
+            if h is not None and h < 0:
+                raise ValueError("object type %r: the height can't be below the floor" % c["name"])
             out.append(dict(name=str(c["name"]).strip(), has_front=bool(c.get("has_front")),
                             size_px=float(size) if size else None,
-                            height_cm=float(c.get("height_cm") or 0.0),
+                            height_cm=0.0 if varies and h is None else h,
                             height_varies=varies, note=str(c.get("note") or "").strip()[:120]))
         self.data["classes"] = out
         if save:
@@ -424,8 +447,55 @@ class Project:
         return os.path.join(self.folder, "models", mid)
 
     def new_model_id(self):
-        n = 1 + max([0] + [int(m["id"][1:]) for m in self.models() if re.match(r"^v\d+$", m["id"])])
+        """v1, v2, ...: a deleted model's number is never given out again (the time record and
+        the learning curve name models by it)."""
+        used = [int(m["id"][1:]) for m in self.models() if re.match(r"^v\d+$", m["id"])]
+        n = 1 + max([0, int(self.data.get("settings", {}).get("last_model_n") or 0)] + used)
+        self.data.setdefault("settings", {})["last_model_n"] = n
         return "v%d" % n
+
+    @staticmethod
+    def model_failed(m):
+        """A model that failed or was stopped, or one that was saved but finds nothing yet (marked
+        with a warning, or, for models trained before that warning existed, scored as finding no
+        objects at all)."""
+        if m.get("status") == "failed" or m.get("warning"):
+            return True
+        if m.get("status") != "ready":
+            return False
+        rec = (m.get("metrics") or {}).get("recall")
+        return (rec is not None and rec <= 0) or (m.get("val_f1") is not None and m["val_f1"] <= 0)
+
+    def delete_model(self, mid):
+        """Remove a failed or empty model: its folder, its entry, its point on the learning curve."""
+        import shutil
+        with self.lock:
+            m = self.model(mid)
+            if m.get("status") == "training":
+                raise ValueError("model %s is still training" % mid)
+            if not self.model_failed(m):
+                raise ValueError("model %s works; only failed models and models that find nothing can be deleted" % mid)
+            n = int(mid[1:]) if re.match(r"^v\d+$", mid) else 0
+            st = self.data.setdefault("settings", {})
+            st["last_model_n"] = max(int(st.get("last_model_n") or 0), n)
+            self.data["models"] = [x for x in self.models() if x["id"] != mid]
+            if self.data.get("current", {}).get("model") == mid:
+                self.data["current"]["model"] = "none"
+            self.save()
+            cp = os.path.join(self.folder, "models", "curve.json")
+            if os.path.exists(cp):
+                try:
+                    with open(cp, encoding="utf-8") as f:
+                        curve = json.load(f)
+                    pts = [p for p in curve.get("points", []) if p.get("model") != mid]
+                    if len(pts) != len(curve.get("points", [])):
+                        curve["points"] = pts
+                        write_json(cp, curve)
+                except (OSError, ValueError):
+                    pass
+        d = self.model_dir(mid)
+        if os.path.isdir(d):
+            shutil.rmtree(d, ignore_errors=True)
 
     # --- cameras --------------------------------------------------------------------------------
     def camera_model_path(self, camera):

@@ -237,9 +237,32 @@ def load_detections(path, n):
     return dets
 
 
-def motion_cache_key(rec, robot_px=None):
+def video_signature(rec):
+    """What identifies a recording's video for the caches: its size, frame count and length. Not
+    its folder or file time, so a recording copied or moved elsewhere (and located again) keeps
+    its saved guesses instead of redoing the slow first pass."""
     st = os.stat(rec.video)
-    return dict(kind="motion", version=CACHE_VERSION, video=[st.st_size, int(st.st_mtime)], robot_px=robot_px, n=rec.n)
+    dur = (rec.times[-1] - rec.times[0]) if rec.times else 0.0
+    return dict(size=st.st_size, frames=rec.n, seconds=round(dur, 2))
+
+
+def same_video(stored, sig):
+    """stored: a cache key's "video" entry: the signature above, or (caches written before it)
+    [size, file time], which matches on the size (the frame count is checked separately)."""
+    if isinstance(stored, dict):
+        return stored == sig
+    return isinstance(stored, list) and len(stored) == 2 and stored[0] == sig["size"]
+
+
+def same_key(stored, key):
+    """Two cache keys match: everything equal, the video compared with same_video()."""
+    if not isinstance(stored, dict) or set(stored) != set(key):
+        return False
+    return all(same_video(stored[k], key[k]) if k == "video" else stored[k] == key[k] for k in key)
+
+
+def motion_cache_key(rec, robot_px=None):
+    return dict(kind="motion", version=CACHE_VERSION, video=video_signature(rec), robot_px=robot_px, n=rec.n)
 
 
 def has_motion_cache(rec, cache_dir, robot_px=None):
@@ -248,15 +271,16 @@ def has_motion_cache(rec, cache_dir, robot_px=None):
         return False
     try:
         with open(info_path) as f:
-            return json.load(f).get("key") == motion_cache_key(rec, robot_px)
+            return same_key(json.load(f).get("key"), motion_cache_key(rec, robot_px))
     except ValueError:
         return False
 
 
-def motion_guesses(rec, cache_dir, robot_px=None, progress=None, log=print):
+def motion_guesses(rec, cache_dir, robot_px=None, progress=None, log=print, size_progress=None):
     """The motion finder's guesses for every frame of a Recording, from the cache in cache_dir
     or worked out (the first time; slow) and cached. Returns (guesses per frame, object size px).
-    progress(done, total): optional."""
+    progress(done, total): optional. size_progress(done, total): optional, while it first measures
+    how big the objects are (a few seconds on a long recording)."""
     os.makedirs(cache_dir, exist_ok=True)
     key = motion_cache_key(rec, robot_px)
     info_path = os.path.join(cache_dir, "motion_info.json")
@@ -268,7 +292,7 @@ def motion_guesses(rec, cache_dir, robot_px=None, progress=None, log=print):
         return load_detections(det_path, rec.n), (robot_px or info["robot_px"])
     log("Finding moving objects in the recording (first time only) ...")
     dets, minfo = motion.detect_recording(rec.video, fps=rec.fps, robot_px=robot_px, times=rec.times,
-                                          n_frames=rec.n, progress=progress)
+                                          n_frames=rec.n, progress=progress, size_progress=size_progress)
     dets.extend([[] for _ in range(rec.n - len(dets))])
     info = dict(key=key, robot_px=minfo["robot_px"], robot_px_source=minfo["robot_px_source"])
     log("Object size: %.1f px (%s)" % (minfo["robot_px"], minfo["robot_px_source"]))
@@ -349,9 +373,11 @@ def run_model_over(video, n, run, step=1, progress=None):
         if not ok:
             dets.extend([None] * (n - len(dets)))
             break
-        if progress and f % 300 == 0:
+        if progress and f % 30 == 0:
             progress(f + 1, n)
     cap.release()
+    if progress:
+        progress(n, n)
     return dets
 
 
@@ -362,7 +388,8 @@ def run_model_over(video, n, run, step=1, progress=None):
 class Session:
     def __init__(self, folder, model=None, weights=None, model_step=1, robot_px=None, reselect=False,
                  low_threshold=0.6, log=print, classes=None, labels_dir=None, extra_dets=None, progress=None,
-                 class_map=None, loose_classes=None, front_classes=None, area=None, stats_path=None, model_id=None):
+                 class_map=None, loose_classes=None, front_classes=None, area=None, stats_path=None, model_id=None,
+                 part_of=None):
         """classes: the object types this project labels (default CLASSES).
         labels_dir: where labels, frames and cached guesses go (default <recording>/labels;
         the recognition studio keeps them in its project folder instead).
@@ -375,7 +402,11 @@ class Session:
         area: the camera's work area (a project.json cameras[...] entry, see workarea.py):
         guesses outside it or in an ignore spot are dropped before tracking.
         stats_path: the time-saving record (timing.py; default labels/stats.jsonl).
-        model_id: the name of the guess source in that record ("none" = motion only)."""
+        model_id: the name of the guess source in that record ("none" = motion only).
+        part_of: optional function frame -> "train", "val", "test" (the part of the training split
+        the frame's time block goes to) or None (left out, at a block edge): "Most useful next"
+        then spreads the first frames over the three parts, and the counts per part are shown."""
+        self.part_of = part_of
         self.log = log
         self.classes = list(classes or CLASSES)
         self.progress_cb = progress
@@ -463,7 +494,7 @@ class Session:
         if self.model:
             mst = os.stat(self.model)
             wst = os.stat(self.weights) if self.weights and os.path.exists(self.weights) else None
-            key = dict(kind="model", version=CACHE_VERSION, video=[st.st_size, int(st.st_mtime)],
+            key = dict(kind="model", version=CACHE_VERSION, video=video_signature(rec),
                        module=os.path.abspath(self.model), module_mtime=int(mst.st_mtime),
                        weights=os.path.abspath(self.weights) if self.weights else None,
                        weights_mtime=int(wst.st_mtime) if wst else None, step=self.model_step, n=rec.n)
@@ -472,14 +503,14 @@ class Session:
                                               os.path.basename(self.weights) if self.weights else "no weights")
         else:
             dets, self.robot_px = motion_guesses(rec, self.cache_dir, self.robot_px, self._progress("motion"),
-                                                 self.log)
+                                                 self.log, size_progress=self._progress("size"))
             return dets, "motion"
         info_path = os.path.join(self.cache_dir, name + "_info.json")
         det_path = os.path.join(self.cache_dir, name + "_detections.csv")
         if os.path.exists(info_path) and os.path.exists(det_path):
             with open(info_path) as f:
                 info = json.load(f)
-            if info.get("key") == key:
+            if same_key(info.get("key"), key):
                 self.log("Using saved %s guesses from labels/cache/." % name)
                 if not self.robot_px:
                     self.robot_px = info["robot_px"]
@@ -670,6 +701,8 @@ class Session:
             # (ties: earliest first). Finished frames follow, so the list still shows them.
             todo = [f for f in self.selected if self.frame_state(f) in ("pending", "edited")]
             todo.sort(key=lambda f: (self.conf_of(f), f))
+            if self.part_of:
+                todo = self._spread(todo)
             done = [f for f in self.selected if f not in set(todo)]
             frames = todo + done
         elif mode == "low":
@@ -680,7 +713,56 @@ class Session:
             frames = self.unsure_frames()
         else:
             frames = list(self.selected)
-        return [dict(f=f, state=self.frame_state(f), conf=self.conf_of(f)) for f in frames]
+        uns = set(self.unsure_frames())
+        return [dict(f=f, state=self.frame_state(f), conf=self.conf_of(f), unsure=f in uns) for f in frames]
+
+    # the training split's parts, and the share of the footage each gets (trainer.py)
+    PARTS = ("train", "val", "test")
+    PART_SHARE = dict(train=0.65, val=0.15, test=0.2)
+    SPREAD_BAND = 0.1      # guesses this close in confidence count as equally useful
+
+    def _part(self, f):
+        try:
+            return self.part_of(f)
+        except Exception:          # never stops the labelling: the frame just isn't spread
+            return "train"
+
+    def part_counts(self):
+        """Finished frames (by a person, or accepted) per part of the training split, not counting
+        frames with an unsure object; "edge": frames at a block edge, which training leaves out."""
+        if not self.part_of:
+            return None
+        out = dict(train=0, val=0, test=0, edge=0)
+        for f, st in self.frames.items():
+            if st["state"] not in ("reviewed", "auto") or any(o["status"] == "unsure" for o in st["objects"]):
+                continue
+            out[self._part(f) or "edge"] += 1
+        return out
+
+    def _spread(self, todo):
+        """Reorder frames (least confident first) so that the first ones are spread over the training
+        split's parts: among frames about as uncertain as the most uncertain one left (within
+        SPREAD_BAND), take one from the part with the fewest finished frames for its share. A frame at
+        a block edge (training leaves it out) comes only once nothing else is about as uncertain."""
+        counts = self.part_counts() or {}
+        lanes = {p: collections.deque() for p in self.PARTS}
+        edge = collections.deque()
+        for f in todo:                       # todo is sorted by (confidence, frame)
+            p = self._part(f)
+            (lanes[p] if p in lanes else edge).append(f)
+        out = []
+        while any(lanes.values()) or edge:
+            heads = [self.conf_of(q[0]) for q in lanes.values() if q] + ([self.conf_of(edge[0])] if edge else [])
+            low = min(heads)
+            ok = [p for p in self.PARTS if lanes[p] and self.conf_of(lanes[p][0]) <= low + self.SPREAD_BAND]
+            if not ok:                       # the edge frame is clearly the most uncertain one left
+                out.append(edge.popleft())
+                continue
+            p = min(ok, key=lambda p: (counts.get(p, 0) / self.PART_SHARE[p], self.conf_of(lanes[p][0]),
+                                       lanes[p][0]))
+            out.append(lanes[p].popleft())
+            counts[p] = counts.get(p, 0) + 1
+        return out
 
     def area_view(self):
         """The work area as the page draws it (margin_px: the margin actually used)."""
@@ -702,7 +784,7 @@ class Session:
                     auto=states.count("auto"), pending=states.count("pending"), low=len(low),
                     low_left=sum(1 for f in low if self.frame_state(f) in ("pending", "edited")),
                     high_pending=len(high_pending), spot=spot, low_threshold=self.low_threshold,
-                    unsure=len(self.unsure_frames()),
+                    unsure=len(self.unsure_frames()), parts=self.part_counts(),
                     same=sum(1 for st in self.frames.values() if st["state"] == "auto" and st.get("how") == "same"),
                     save_error=self.save_error)
 
@@ -1252,7 +1334,7 @@ class Session:
                  selected=self.selected, reasons={str(f): v for f, v in sorted(self.reasons.items()) if f in sel},
                  settings=dict(low_threshold=self.low_threshold), updated=now_iso())
         r["frames"] = {str(f): _review_entry(st) for f, st in sorted(self.frames.items())}
-        r["summary"] = {k: v for k, v in self.stats().items() if k != "save_error"}
+        r["summary"] = {k: v for k, v in self.stats().items() if k not in ("save_error", "parts")}
         r["help"] = ("frames: state reviewed = checked by a person (how: user, or spot = in the spot check); "
                      "edited = changed but Enter not pressed yet; auto = accepted without looking because the "
                      "guesses were high-confidence (how: auto), or because the picture was the same as a frame "

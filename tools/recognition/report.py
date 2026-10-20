@@ -35,14 +35,18 @@ def _num(v, d=1):
 
 
 def _curve_svg(points):
-    pts = [p for p in points if p.get("f1") is not None]
+    """The learning curve: one place per model version, oldest to newest (no model first), each
+    labelled with the confirmed frames it trained on. Two models trained on the same frames sit
+    side by side, not on top of each other."""
+    import trainer
+    pts = sorted([p for p in points if p.get("f1") is not None], key=lambda p: trainer.version_order(p["model"]))
     if not pts:
         return "<p>No model has been scored yet.</p>"
-    W, H, L, R, T, B = 680, 280, 52, 20, 20, 46
-    xmax = max([10] + [p["n_train_frames"] for p in pts])
+    W, H, L, R, T, B = 680, 296, 52, 20, 20, 62
+    n = len(pts)
 
-    def X(v):
-        return L + (W - L - R) * v / xmax
+    def X(i):
+        return L + (W - L - R) * (i + 0.5) / n
 
     def Y(v):
         return T + (H - T - B) * (1 - v)
@@ -51,27 +55,32 @@ def _curve_svg(points):
         s.append('<line x1="%d" x2="%d" y1="%.1f" y2="%.1f" stroke="#ddd"/>' % (L, W - R, Y(v), Y(v)))
         s.append('<text x="%d" y="%.1f" font-size="11" fill="#666" text-anchor="end">%d%%</text>' % (L - 6, Y(v) + 4, v * 100))
     for key, col in (("recall", "#2e9d6d"), ("precision", "#2b7bbb"), ("f1", "#111")):
-        ps = [p for p in pts if p.get(key) is not None]
+        ps = [(i, p) for i, p in enumerate(pts) if p.get(key) is not None]
         s.append('<polyline fill="none" stroke="%s" stroke-width="2" points="%s"/>'
-                 % (col, " ".join("%.1f,%.1f" % (X(p["n_train_frames"]), Y(p[key])) for p in ps)))
-        for p in ps:
+                 % (col, " ".join("%.1f,%.1f" % (X(i), Y(p[key])) for i, p in ps)))
+        for i, p in ps:
             s.append('<circle cx="%.1f" cy="%.1f" r="4" fill="%s"><title>%s: %s</title></circle>'
-                     % (X(p["n_train_frames"]), Y(p[key]), col, _html.escape(p["label"]), _pct(p[key])))
-    for p in pts:
+                     % (X(i), Y(p[key]), col, _html.escape(p["label"]), _pct(p[key])))
+    for i, p in enumerate(pts):
         s.append('<text x="%.1f" y="%.1f" font-size="11" fill="#444" text-anchor="middle">%s</text>'
-                 % (X(p["n_train_frames"]), H - B + 16, _html.escape("none" if p["model"] == "none" else p["model"])))
-    s.append('<text x="%.1f" y="%d" font-size="12" fill="#666" text-anchor="middle">confirmed frames the model trained on</text>'
-             % ((L + W - R) / 2, H - 8))
+                 % (X(i), H - B + 16, _html.escape("no model" if p["model"] == "none" else p["model"])))
+        s.append('<text x="%.1f" y="%.1f" font-size="10.5" fill="#777" text-anchor="middle">%d frames</text>'
+                 % (X(i), H - B + 30, p["n_train_frames"]))
+    s.append('<text x="%.1f" y="%d" font-size="12" fill="#666" text-anchor="middle">model versions, oldest to newest '
+             '(under each: the confirmed frames it trained on)</text>' % ((L + W - R) / 2, H - 8))
     s.append("</svg>")
     s.append('<p class="key"><span style="color:#111">&#9632; F1 (overall)</span> <span style="color:#2e9d6d">&#9632; '
              'found (recall)</span> <span style="color:#2b7bbb">&#9632; right when it says so (precision)</span></p>')
+    s.append('<p class="muted">Each point is one model version scored on the same held-back frames; higher is better, and '
+             'a line that climbs from left to right means the labelling is paying off.</p>')
     return "".join(s)
 
 
 def html_report(proj):
     curve_p = os.path.join(proj.folder, "models", "curve.json")
     curve = json.load(open(curve_p)) if os.path.exists(curve_p) else dict(points=[], test={})
-    pts = curve.get("points", [])
+    import trainer
+    pts = sorted(curve.get("points", []), key=lambda p: trainer.version_order(p.get("model")))
     best = None
     for p in pts:
         if p["model"] != "none" and p.get("f1") is not None and (best is None or p["f1"] > best["f1"]):
@@ -86,6 +95,7 @@ def html_report(proj):
            "th{color:#555;font-weight:600}.muted{color:#666;font-size:13px}.key span{margin-right:14px;font-size:13px}"
            ".lead{font-size:16px}.brand{font-size:13px;color:#555;letter-spacing:.02em;margin:0}"
            ".brand b{color:#1b1d21;font-size:15px;letter-spacing:0}.brand span{display:block;font-size:11px;color:#777}"
+           ".caution{background:#fff4e0;border:1px solid #e8c48a;border-radius:6px;padding:8px 10px}"
            "</style></head><body>"]
     out.append("<p class='brand'><b>%s</b><span>%s</span></p>" % (BRAND, TAGLINE))
     out.append("<h1>%s: accuracy report</h1>" % e(proj.name))
@@ -104,8 +114,13 @@ def html_report(proj):
 
     out.append("<h2>Learning curve</h2>")
     out.append(_curve_svg(pts))
-    out.append("<p class='muted'>Every model, and the starting point with no model, scored on the same held-back frames "
-               "(%s).</p>" % e(curve.get("test", {}).get("note", "")))
+    note = curve.get("test", {}).get("note", "")
+    out.append("<p class='muted'>Every model, and the starting point with no model, scored on the same held-back frames%s.</p>"
+               % ((" (%s)" % e(note)) if note else ""))
+    import trainer
+    caution = trainer.score_caution(curve)
+    if caution:
+        out.append("<p class='caution'><b>Caution:</b> %s</p>" % e(caution))
     out.append("<table><tr><th>Guesses from</th><th>Trained on (frames)</th><th>Found</th><th>Right</th><th>F1</th>"
                "<th>Centre off (px)</th><th>Heading off, median (deg)</th><th>ms per frame</th></tr>")
     for p in pts:
