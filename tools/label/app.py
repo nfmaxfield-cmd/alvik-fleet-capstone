@@ -58,7 +58,7 @@ def _mem_status(st):
     """labels.csv writes "auto" for rows of auto-accepted frames; in memory
     they are confirmed rows of a frame whose state is auto."""
     return "confirmed" if st == "auto" else st
-SOURCES = ["motion", "track", "model", "user", "log"]
+SOURCES = ["motion", "track", "model", "user", "log", "camera"]
 LABEL_COLUMNS = ["frame", "t_wall", "obj", "cls", "x_px", "y_px", "heading_deg", "heading_known",
                  "source", "status", "score"]
 CACHE_VERSION = 1
@@ -188,9 +188,11 @@ def load_detections(path, n):
     return dets
 
 
-def load_model(module_path, weights):
+def load_model(module_path, weights, classes=None):
     """Import a detector module from a file and load its weights.
-    Returns a function frame -> list of guesses."""
+    Returns a function frame -> list of guesses. A class the project does not
+    know becomes "unknown" if the project has that class, else it is dropped."""
+    classes = classes or CLASSES
     module_path = os.path.abspath(module_path)
     if not os.path.exists(module_path):
         raise SystemExit("--model file not found: " + module_path)
@@ -210,7 +212,9 @@ def load_model(module_path, weights):
         out = []
         for d in mod.predict(model, frame) or []:
             cls = str(d.get("cls", "unknown"))
-            if cls not in CLASSES:
+            if cls not in classes:
+                if "unknown" not in classes:
+                    continue
                 cls = "unknown"
             h = d.get("heading_deg")
             out.append(dict(cls=cls, x=float(d["x"]), y=float(d["y"]),
@@ -246,10 +250,19 @@ def run_model_over(video, n, run, step=1, progress=None):
 
 class Session:
     def __init__(self, folder, model=None, weights=None, model_step=1, robot_px=None, reselect=False,
-                 low_threshold=0.6, log=print):
+                 low_threshold=0.6, log=print, classes=None, labels_dir=None, extra_dets=None, progress=None):
+        """classes: the object types this project labels (default CLASSES).
+        labels_dir: where labels, frames and cached guesses go (default <recording>/labels;
+        the recognition studio keeps them in its project folder instead).
+        extra_dets: optional dict frame -> list of extra guesses (e.g. from another camera,
+        source "camera"), merged with this recording's own guesses before tracking.
+        progress: optional callback(what, done, total) for long steps."""
         self.log = log
+        self.classes = list(classes or CLASSES)
+        self.progress_cb = progress
+        self.extra_dets = extra_dets or {}
         self.rec = Recording(folder)
-        self.labels_dir = os.path.join(self.rec.folder, "labels")
+        self.labels_dir = os.path.abspath(labels_dir) if labels_dir else os.path.join(self.rec.folder, "labels")
         self.frames_dir = os.path.join(self.labels_dir, "frames")
         self.cache_dir = os.path.join(self.labels_dir, "cache")
         self.labels_path = os.path.join(self.labels_dir, "labels.csv")
@@ -266,6 +279,12 @@ class Session:
         self._load_review()
         self.robot_px = robot_px
         self.dets, self.source_name = self._guesses_per_frame()
+        if self.extra_dets:
+            for f, ds in self.extra_dets.items():
+                if 0 <= f < len(self.dets) and ds:
+                    if self.dets[f] is None:
+                        self.dets[f] = []
+                    self.dets[f] = list(self.dets[f]) + [dict(d) for d in ds]
         self.run = tracker.TrackRun(self.dets, self.rec.times, self.robot_px,
                                     (self.rec.width, self.rec.height),
                                     det_source="model" if model else "motion")
@@ -281,6 +300,8 @@ class Session:
         start = time.time()
 
         def cb(done, total):
+            if self.progress_cb:
+                self.progress_cb(what, done, total)
             el = time.time() - start
             left = "" if done < 300 else " (about %.0f s left)" % (el / done * (total - done))
             print("  %s: %d / %d frames%s    " % (what, done, total, left), end="\r", flush=True)
@@ -320,7 +341,7 @@ class Session:
             if not self.robot_px:
                 self.robot_px = self._robot_size()
             self.log("Running the model on the recording (every %d. frame) ..." % self.model_step)
-            run = load_model(self.model, self.weights)
+            run = load_model(self.model, self.weights, self.classes)
             dets = run_model_over(rec.video, rec.n, run, self.model_step, self._progress("model"))
             info = dict(key=key, robot_px=self.robot_px)
         else:
@@ -482,7 +503,14 @@ class Session:
                     next_obj_id=self.next_obj_id())
 
     def queue(self, mode):
-        if mode == "low":
+        if mode == "next":
+            # most useful first: frames nobody has finished, least confident guesses first
+            # (ties: earliest first). Finished frames follow, so the list still shows them.
+            todo = [f for f in self.selected if self.frame_state(f) in ("pending", "edited")]
+            todo.sort(key=lambda f: (self.conf_of(f), f))
+            done = [f for f in self.selected if f not in set(todo)]
+            frames = todo + done
+        elif mode == "low":
             frames = [f for f in self.selected if self.conf_of(f) < self.low_threshold]
         elif mode == "spot":
             frames = sorted(self.review.get("spot_check", {}).get("sample", []))
@@ -543,7 +571,7 @@ class Session:
         seen = set()
         for o in objects:
             cls = o.get("cls")
-            if cls not in CLASSES:
+            if cls not in self.classes:
                 raise ValueError("unknown class %r" % cls)
             status = o.get("status", "corrected")
             if status not in STATUSES:
@@ -730,8 +758,13 @@ class Session:
 # Web server
 # ----------------------------------------------------------------------------
 
-def make_handler(session):
+def make_handler(session, extra_get=None, extra_post=None):
+    """session: a Session, or a function returning the current one (the recognition
+    studio switches recordings and models while the server runs; it returns None
+    while a new one is loading). extra_get / extra_post: optional functions
+    (handler, path, query_or_body) -> True if they answered the request."""
     page_path = os.path.join(HERE, "page.html")
+    current = session if callable(session) else (lambda: session)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -779,15 +812,21 @@ def make_handler(session):
         def _get(self):
             u = urlparse(self.path)
             q = parse_qs(u.query)
-            s = session
             if u.path in ("/", "/index.html"):
                 with open(page_path, "rb") as f:
                     self._send(200, f.read(), "text/html; charset=utf-8")
-            elif u.path == "/api/info":
+                return
+            if extra_get and extra_get(self, u.path, q):
+                return
+            s = current()
+            if s is None:
+                self._send(503, dict(error="loading", loading=True))
+                return
+            if u.path == "/api/info":
                 with s.lock:
                     self._send(200, dict(recording=s.rec.name, folder=s.rec.folder, n_frames=s.rec.n,
                                          fps=s.rec.fps, width=s.rec.width, height=s.rec.height,
-                                         robot_px=s.robot_px, classes=CLASSES, guess_source=s.source_name,
+                                         robot_px=s.robot_px, classes=s.classes, guess_source=s.source_name,
                                          position=s.review.get("position"), stats=s.stats(),
                                          labels_path=s.labels_path))
             elif u.path == "/api/queue":
@@ -818,7 +857,12 @@ def make_handler(session):
         def _post(self):
             u = urlparse(self.path)
             b = self._body()
-            s = session
+            if extra_post and extra_post(self, u.path, b):
+                return
+            s = current()
+            if s is None:
+                self._send(503, dict(error="loading", loading=True))
+                return
             if u.path == "/api/frame":
                 self._send(200, s.save_frame(b["frame"], b.get("objects", []), b.get("state", "edited"), b.get("how")))
             elif u.path == "/api/position":
@@ -843,9 +887,9 @@ def make_handler(session):
     return Handler
 
 
-def serve(session, port=8765, open_browser=True):
+def serve(session, port=8765, open_browser=True, extra_get=None, extra_post=None):
     try:
-        server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(session))
+        server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(session, extra_get, extra_post))
     except OSError:
         raise SystemExit("Port %d is busy (is the app already open in another window?). "
                          "Close that, or start with --port %d" % (port, port + 1))

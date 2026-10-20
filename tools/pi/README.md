@@ -31,6 +31,83 @@ python3 tools/pi/camrec.py --device 0 --fps 25 --label E1
   `trial 5 run 3F2A-7 start`. Notes land in `events.csv` with the frame number.
 - Ctrl+C stops and saves to `~/recordings/<date-time>_<label>/`.
 
+## Two cameras
+
+Both webcams plug into the Pi. One command records both at once into one
+folder, with times on the same clock, so a frame from the overhead camera can
+be matched to the side camera's frame taken at the same moment.
+
+**1. Find the cameras' numbers.** In the SSH window to the Pi, type:
+
+```
+cd ~/alvik-fleet-capstone
+```
+
+then:
+
+```
+python3 tools/pi/camrec.py --list
+```
+
+and press Enter. After a few seconds you see one line per number, for example
+
+    USE ->  0  Vitade AF                    sends pictures, 640x480, MJPG
+            1  Vitade AF                    opens but sends no picture (the information-only half of a webcam: normal)
+    USE ->  2  USB Camera                   sends pictures, 640x480, MJPG
+            3  USB Camera                   opens but sends no picture ...
+
+The two numbers marked `USE ->` are your cameras (each webcam shows up twice;
+only one of its two numbers sends pictures). The last line suggests the
+command to use. To tell which is which, unplug one and run `--list` again.
+
+**2. Record both.** Put the overhead camera's number first:
+
+```
+python3 tools/pi/camrec.py --device 0,2 --names overhead,side --fps 25 --label E1
+```
+
+You should see, after about 5 seconds of setting up (both cameras at once):
+
+- a `Camera: exposure ...` line for each, starting `cam0 (overhead):` and `cam1 (side):`
+- `cam0 (overhead): Preview: http://st1maxfini.local:8000` and `cam1 (side): Preview: http://st1maxfini.local:8001`
+- `recording 640x480 to /home/.../recordings/<date-time>_E1/cam0` (and `cam1`)
+- `Type a note and press Enter to mark a moment. Ctrl+C stops.`
+
+Open both preview addresses in the laptop's browser to check the pictures.
+Notes you type (and notes from run_sheet.py) go into both cameras' events.csv.
+Ctrl+C stops both and saves; the last line is `Session saved: ...`.
+
+**What is saved:** `~/recordings/<date-time>_E1/` holds `cam0/` (overhead) and
+`cam1/` (side), each exactly like a one-camera recording folder (video.avi,
+frames.csv, events.csv, meta.json: open either one in the label tool or
+check_session.py), and `session.json`, which says which camera is in which
+folder, its device number, role and preview port. `t_mono` in both
+frames.csv files counts from the same start on the Pi's clock: frames from
+the two cameras with the same t_mono were received at the same moment.
+
+**Live link for the second camera:** `track_live.py --stream st1maxfini.local:8001`
+(the first camera stays on 8000, as before).
+
+**Warnings start with `!`.** Watch for:
+
+- `! cam1 (side): only 18.3 fps over the last 5 s (25 expected): frames are being lost`
+  The USB bus or the Pi can't keep up. Move one camera to another USB port
+  (try a few combinations; not through a USB hub), or lower `--fps`. Also printed at the end with how many frames were
+  lost, and saved in meta.json (`frame_check`).
+- `! ... the camera sends YUYV, not MJPG` The camera ignored the request for
+  compressed video; two uncompressed 640x480 cameras don't fit on one USB bus.
+- `Camera 2 opened but sent no picture` with two cameras: usually the USB bus
+  is full. Try another port, as above.
+- `! LOW DISK SPACE` before starting: the card has less than about 2 GB per
+  camera per 10 minutes. Copy old recordings to the laptop and delete them
+  from the Pi first. While recording, one more warning comes at 1 GB free,
+  and at 0.3 GB the recording stops and saves by itself (a completely full
+  card leaves a broken video.avi).
+
+`--pixfmt YUYV` asks for uncompressed video instead (one camera only, if MJPG
+misbehaves). `--exposure`, `--focus` and `--wb` apply to both cameras; by
+default each camera locks its own automatic values.
+
 ## Exposure, focus and white balance (locked by default)
 
 The webcam's automatic exposure, white balance and autofocus change the

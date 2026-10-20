@@ -7,6 +7,20 @@ frame and a live preview in your laptop's browser.
     python3 camrec.py --no-record          # preview only, for aiming the camera
     python3 camrec.py --exposure 150 --focus 0     # fixed values instead of locking the auto ones
     python3 camrec.py --no-lock            # leave auto exposure / focus / white balance running
+    python3 camrec.py --list               # which camera numbers this Pi has
+    python3 camrec.py --device 0,2 --names overhead,side --label E1    # two cameras at once
+
+Two cameras: one session folder ~/recordings/<date-time>_<label>/ with cam0/,
+cam1/ (each a normal recording folder, as below) and session.json (devices,
+roles, ports). Both cameras run as threads of this one process: their t_mono
+is the same clock (time.monotonic() minus one shared t0), so frames from the
+two cameras can be matched by t_mono directly. Threads, not processes: the heavy
+work (USB read, JPEG decode/encode) runs inside OpenCV, which lets other
+threads run meanwhile, so two threads use two of the Pi's cores; one process
+also means one notes listener and one clock. Camera i's preview and /live are
+on port 8000 + i. The cameras are asked for MJPG (--pixfmt): raw YUYV from two
+640x480 webcams overflows a USB 2 bus. Lines starting with '!' are warnings:
+too few frames per second, lost frames, low disk space.
 
 Exposure, focus and white balance are LOCKED by default: after a 2 s warm-up
 the camera's own automatic values are read and frozen (exposure capped at one
@@ -180,11 +194,25 @@ def make_handler(latest, live=None):
     return Handler
 
 
-def open_camera(device, width, height, fps, buffers=4):
+def fourcc_str(v):
+    """OpenCV's CAP_PROP_FOURCC number as text ('MJPG', 'YUYV'), or None."""
+    try:
+        v = int(v)
+    except (TypeError, ValueError):
+        return None
+    if v <= 0:
+        return None
+    s = "".join(chr((v >> 8 * i) & 0xFF) for i in range(4))
+    return s if s.isprintable() and s.strip() else None
+
+
+def open_camera(device, width, height, fps, buffers=4, pixfmt="MJPG", fail=sys.exit):
     src = int(device) if str(device).isdigit() else device
     cap = cv2.VideoCapture(src, cv2.CAP_V4L2) if isinstance(src, int) else cv2.VideoCapture(src)
     if isinstance(src, int):
-        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))   # the webcam's 30 fps mode
+        # MJPG = the webcam's 30 fps mode, and ~10x less USB traffic than raw YUYV
+        # (640x480 YUYV at 30 fps is ~18 MB/s: two of those don't fit on one USB 2 bus)
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*pixfmt))
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
         cap.set(cv2.CAP_PROP_FPS, fps)
@@ -196,7 +224,7 @@ def open_camera(device, width, height, fps, buffers=4):
         if buffers:
             cap.set(cv2.CAP_PROP_BUFFERSIZE, buffers)
     if not cap.isOpened():
-        sys.exit(f"Could not open camera {device}. Check it with: v4l2-ctl --list-devices")
+        return fail(f"Could not open camera {device}. Find the right number with: python3 tools/pi/camrec.py --list")
     return cap
 
 
@@ -504,16 +532,532 @@ def control_arg(s):
         raise argparse.ArgumentTypeError("a number, 'auto' or 'lock'")
 
 
-def main():
+# ------------------------------------------------------------------ finding cameras
+def list_cameras(run=subprocess.run, devices=None, opener=None, log=print, seconds=2.0):
+    """Print the cameras the Pi sees and which /dev/videoN numbers deliver pictures.
+    Each USB webcam usually makes two numbers (e.g. 0 and 1): one sends the
+    picture, the other only information. Returns [(number, name, delivers, detail)]."""
+    if shutil.which("v4l2-ctl") or run is not subprocess.run:
+        try:
+            out = run(["v4l2-ctl", "--list-devices"], capture_output=True, text=True, timeout=5).stdout
+            if out.strip():
+                log("What v4l2-ctl --list-devices says (camera name, then its /dev/video numbers):")
+                log("  " + out.strip().replace("\n", "\n  "))
+                log("")
+        except (OSError, subprocess.SubprocessError):
+            pass
+    if devices is None:
+        devices = sorted(int(m.group(1)) for m in (re.fullmatch(r"video(\d+)", n) for n in os.listdir("/dev"))
+                         if m) if os.path.isdir("/dev") else []
+    if not devices:
+        log("No cameras found (nothing called /dev/video*). Is the webcam plugged in? Try another USB port.")
+        return []
+    if opener is None:
+        def opener(n):
+            return open_camera(str(n), 640, 480, 30, 4, fail=lambda msg: None)
+    log("Trying each number (a few seconds each)...")
+    found = []
+    for n in devices:
+        name = ""
+        try:
+            with open(f"/sys/class/video4linux/video{n}/name") as f:
+                name = f.read().strip()
+        except OSError:
+            pass
+        cap = opener(n)
+        delivers, detail = False, "could not open (in use by camrec.py already, or not a camera)"
+        if cap is not None:
+            t0, frame = time.monotonic(), None
+            while time.monotonic() - t0 < seconds:
+                ok, f = cap.read()
+                if ok and f is not None:
+                    frame = f
+                    break
+            if frame is not None:
+                delivers = True
+                fmt = fourcc_str(cap.get(cv2.CAP_PROP_FOURCC)) or "?"
+                detail = f"sends pictures, {frame.shape[1]}x{frame.shape[0]}, {fmt}"
+            else:
+                detail = "opens but sends no picture (the information-only half of a webcam: normal)"
+            try:
+                cap.release()
+            except Exception:
+                pass
+        found.append((n, name, delivers, detail))
+        log(f"  {'USE ->' if delivers else '      '} {n:>2}  {name or '(no name)':<28} {detail}")
+    good = [str(n) for n, _, d, _ in found if d]
+    log("")
+    if len(good) >= 2:
+        log(f"Cameras that send pictures: {', '.join(good)}. Two cameras: "
+            f"python3 tools/pi/camrec.py --device {good[0]},{good[1]} --names overhead,side --label E1")
+    elif good:
+        log(f"Only one camera sends pictures: {good[0]}. If two are plugged in, try another USB port and run --list again.")
+    else:
+        log("No camera sent a picture. If camrec.py is running, stop it first (Ctrl+C), then run --list again.")
+    return found
+
+
+# ------------------------------------------------------------------ disk space
+DISK_GB_PER_CAM_10MIN = 2.0   # Motion-JPEG 640x480 at 30 fps is about 1-2 MB/s per camera (~0.6-1.2 GB per
+                              # 10 min); 2 GB leaves headroom. Not measured on the Pi: check a real folder's size.
+DISK_WARN_GB = 1.0            # during recording: one loud warning below this
+DISK_STOP_GB = 0.3            # during recording: stop and save cleanly below this (a full card corrupts video.avi)
+
+
+def free_gb(path):
+    p = os.path.abspath(path)
+    while not os.path.exists(p):
+        p = os.path.dirname(p)
+    return shutil.disk_usage(p).free / 1e9
+
+
+def disk_precheck(out, n_cams, seconds=0, log=print, free=None):
+    """Before starting: warn (lines starting with '!') if the card has less than
+    DISK_GB_PER_CAM_10MIN per camera per 10 minutes planned (10 minutes when no
+    --seconds is given). Returns (free GB, GB wanted, minutes that fit)."""
+    free = free_gb(out) if free is None else free
+    minutes = seconds / 60.0 if seconds else 10.0
+    want = DISK_GB_PER_CAM_10MIN * n_cams * minutes / 10.0
+    fit = free / (DISK_GB_PER_CAM_10MIN * n_cams / 10.0)
+    if free < want:
+        log(f"! LOW DISK SPACE: {free:.1f} GB free in {out}; {n_cams} camera(s) for {minutes:.0f} min "
+            f"need about {want:.1f} GB. Roughly {fit:.0f} min fit.")
+        log("! Copy old recordings to the laptop and delete them from the Pi (README: Copy recordings).")
+    else:
+        log(f"Disk: {free:.1f} GB free, enough for about {fit:.0f} min with {n_cams} camera(s).")
+    return free, want, fit
+
+
+# ------------------------------------------------------------------ one camera's recording
+class CamRec:
+    """One camera: its video.avi, frames.csv, events.csv and meta.json, its own
+    preview / live web server, and frame-rate and lost-frame checks. `cap` is an
+    OpenCV capture, or anything with read(), get(prop) and release() (tests use a
+    fake one)."""
+
+    WINDOW_S = 5.0          # frame rate checked over this long
+    WARN_EVERY_S = 20.0     # at most one frame-rate warning this often
+
+    def __init__(self, cap, device, index=0, name="", port=0, fps_requested=30, replay=False, log=print, tag=""):
+        self.cap, self.device, self.index, self.name = cap, str(device), index, name
+        self.port, self.fps_requested, self.replay, self.log, self.tag = port, fps_requested, replay, log, tag
+        self.latest, self.live = Latest(), LiveFrames()
+        self.lock = threading.Lock()
+        self.n = 0
+        self.folder = self.writer = self.ff = self.fcsv = self.ef = self.ecsv = None
+        self.w = self.h = None
+        self.fps_real = fps_requested
+        self.pixfmt = None
+        self.gaps = self.missed = 0
+        self.low_windows = []
+        self.stopped = None
+        self.t_first = self.t_last = None
+
+    def first_frame(self):
+        """Read one frame (not recorded: it was stamped late) for the picture size."""
+        ok, frame = self.cap.read()
+        if not ok or frame is None:
+            return False
+        self.h, self.w = frame.shape[:2]
+        self.fps_real = self.cap.get(cv2.CAP_PROP_FPS) or self.fps_requested
+        self.pixfmt = fourcc_str(self.cap.get(cv2.CAP_PROP_FOURCC))
+        return True
+
+    def expected_fps(self):
+        f = self.fps_real
+        return f if f and 0 < f < 1000 else self.fps_requested
+
+    def serve(self):
+        if not self.port:
+            return None
+        server = ThreadingHTTPServer(("", self.port), make_handler(self.latest, self.live))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.server = server
+        return server
+
+    def open_outputs(self, folder, meta):
+        self.folder = folder
+        os.makedirs(folder, exist_ok=True)
+        self.writer = cv2.VideoWriter(os.path.join(folder, "video.avi"), cv2.VideoWriter_fourcc(*"MJPG"),
+                                      self.fps_real, (self.w, self.h))
+        self.ff = open(os.path.join(folder, "frames.csv"), "w", newline="")
+        self.fcsv = csv.writer(self.ff)
+        self.fcsv.writerow(["frame", "t_wall", "t_mono", "cam_ms"])
+        self.ef = open(os.path.join(folder, "events.csv"), "w", newline="")
+        self.ecsv = csv.writer(self.ef)
+        self.ecsv.writerow(["t_wall", "frame", "text"])
+        with open(os.path.join(folder, "meta.json"), "w") as f:
+            json.dump(meta, f, indent=2)
+
+    def mark(self, text, t_wall):
+        """A note into events.csv, against this camera's current frame number."""
+        if self.ecsv is None:
+            return self.n
+        with self.lock:
+            n = self.n
+            self.ecsv.writerow([f"{t_wall:.3f}", n, text])
+            self.ef.flush()
+        return n
+
+    def flush_buffers(self, seconds):
+        """Read and drop frames for `seconds`: frames that waited in the driver
+        while the other camera was being set up would be stamped late."""
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < seconds:
+            ok, _ = self.cap.read()
+            if not ok:
+                break
+
+    def loop(self, t0, stop, seconds=0):
+        """Record until stop is set, the camera stops, or t_mono reaches `seconds`.
+        t_mono = time.monotonic() - t0: with the same t0 every camera is on one clock."""
+        shown_fps, n_fps, t_fps = 0.0, 0, time.monotonic()
+        win_n, win_t, last_warn = 0, time.monotonic(), -1e9
+        last_ts = last_cam = None
+        dt_nom = 1.0 / self.expected_fps()
+        recording = self.writer is not None
+        while not stop.is_set():
+            ok, frame = self.cap.read()
+            if not ok:
+                self.stopped = "camera stopped sending pictures"
+                self.log(f"{self.tag}Camera stopped sending pictures." if not self.tag else
+                         f"! {self.tag}camera stopped sending pictures (the other camera keeps recording)")
+                break
+            t_wall, t_mono = time.time(), time.monotonic() - t0
+            cam_ms = self.cap.get(cv2.CAP_PROP_POS_MSEC)   # driver's own capture time, if it gives one
+            try:
+                cam_ms = float(cam_ms)
+            except (TypeError, ValueError):
+                cam_ms = -1.0
+            if recording:
+                self.writer.write(frame)
+                with self.lock:
+                    self.fcsv.writerow([self.n, f"{t_wall:.4f}", f"{t_mono:.4f}", f"{cam_ms:.1f}"])
+            if self.live.clients:
+                self.live.put(frame, self.n, t_wall)   # same number and time as frames.csv
+            # lost frames: a gap of more than 1.5 frame times (camera's own timestamps when it gives them)
+            if not self.replay:
+                if cam_ms > 0 and last_cam is not None and cam_ms > last_cam:
+                    gap = (cam_ms - last_cam) / 1000.0
+                elif last_ts is not None:
+                    gap = t_mono - last_ts
+                else:
+                    gap = 0.0
+                if gap > 1.5 * dt_nom:
+                    self.gaps += 1
+                    self.missed += max(1, int(round(gap / dt_nom)) - 1)
+            last_ts, last_cam = t_mono, (cam_ms if cam_ms > 0 else None)
+            if self.t_first is None:
+                self.t_first = t_mono
+            self.t_last = t_mono
+            with self.lock:
+                self.n += 1
+            n_fps += 1
+            win_n += 1
+            now = time.monotonic()
+            if now - t_fps >= 1.0:
+                shown_fps = n_fps / (now - t_fps)
+                n_fps, t_fps = 0, now
+                if recording:
+                    with self.lock:
+                        self.ff.flush()
+            if now - win_t >= self.WINDOW_S:
+                rate = win_n / (now - win_t)
+                if not self.replay and rate < 0.9 * self.expected_fps():
+                    self.low_windows.append([round(t_mono, 1), round(rate, 1)])
+                    if now - last_warn >= self.WARN_EVERY_S:
+                        last_warn = now
+                        self.log(f"! {self.tag}only {rate:.1f} fps over the last {now - win_t:.0f} s "
+                                 f"({self.expected_fps():g} expected): frames are being lost. Try: the cameras on "
+                                 f"different USB ports, --pixfmt MJPG, a lower --fps, or check `top`.")
+                win_n, win_t = 0, now
+            if self.port and self.n % 2 == 0:   # preview at half rate to save CPU
+                view = frame.copy()
+                tag = f"{shown_fps:4.1f} fps  {'REC ' + time.strftime('%M:%S', time.gmtime(t_mono)) if recording else 'preview'}"
+                if self.name:
+                    tag = f"{self.name}  " + tag
+                cv2.putText(view, tag, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                ok2, jpg = cv2.imencode(".jpg", view, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                if ok2:
+                    self.latest.put(jpg.tobytes())
+            if seconds and t_mono >= seconds:
+                break
+            if self.replay:
+                time.sleep(1.0 / self.fps_real)   # replaying a file: keep real time
+
+    def frame_check(self):
+        """Frame rate and lost frames over the whole recording (meta.json frame_check)."""
+        span = (self.t_last - self.t_first) if self.t_first is not None and self.t_last is not None else 0.0
+        measured = (self.n - 1) / span if self.n > 1 and span > 0 else None
+        exp = self.expected_fps()
+        return dict(expected_fps=exp, measured_fps=None if measured is None else round(measured, 2),
+                    frames=self.n, gaps=self.gaps, missed_estimate=self.missed,
+                    missed_pct=round(100.0 * self.missed / max(1, self.n + self.missed), 2),
+                    low_rate_windows=self.low_windows,
+                    ok=(measured is None or measured >= 0.9 * exp) and self.missed <= 0.01 * max(1, self.n))
+
+    def close(self, t0):
+        """Save: the end camera controls and the frame check into meta.json, release."""
+        fc = self.frame_check()
+        if self.folder:
+            try:
+                mp = os.path.join(self.folder, "meta.json")
+                with open(mp) as f:
+                    meta = json.load(f)
+                if self.device.isdigit():   # what the camera reports at the end: did anything drift?
+                    meta["camera_controls_end"] = read_controls(self.cap)
+                meta["frame_check"] = fc
+                with open(mp, "w") as f:
+                    json.dump(meta, f, indent=2)
+            except Exception as e:
+                self.log(f"({self.tag}couldn't add the end values to meta.json: {e})")
+        try:
+            self.cap.release()
+        except Exception:
+            pass
+        if self.writer is not None:
+            self.writer.release()
+            with self.lock:
+                self.ff.close()
+                self.ef.close()
+            secs = time.monotonic() - t0
+            self.log(f"\n{self.tag}Saved {self.n} frames ({secs:.0f} s, {self.n / max(secs, 1e-9):.1f} fps) to {self.folder}")
+            if not self.replay and not fc["ok"]:
+                self.log(f"! {self.tag}{fc['measured_fps']} fps recorded ({fc['expected_fps']:g} expected), "
+                         f"about {fc['missed_estimate']} frames lost ({fc['missed_pct']}%)")
+        return fc
+
+
+# ------------------------------------------------------------------ a session: one or more cameras
+def run_session(caps, devices, names=None, out="~/recordings", label="", seconds=0, fps=30, port=8000,
+                notes_port=5007, record=True, replays=None, controls=None, stdin_notes=True, log=print,
+                stop=None, flush_s=0.5, disk_check_s=10.0, extra_meta=None):
+    """Record one or more open cameras. One camera: ~/recordings/<date-time>_<label>/
+    as always. Several: that folder holds cam0/, cam1/, ... (each a normal recording
+    folder) and session.json. Cameras run as threads of this one process, so t_mono
+    (time.monotonic() - one shared t0) and t_wall (time.time()) are the same clocks
+    for all of them. Camera i's preview / live stream is on port + i.
+    Returns (folder or None, [CamRec])."""
+    n = len(caps)
+    multi = n > 1
+    names = list(names or [])
+    names += [""] * (n - len(names))
+    replays = replays or [not str(d).isdigit() for d in devices]
+    controls = controls or [{} for _ in caps]
+    extra_meta = extra_meta or [{} for _ in caps]
+    stop = stop or threading.Event()
+    out = os.path.expanduser(out)
+    host = socket.gethostname()
+    cams = []
+    for i, (cap, dev) in enumerate(zip(caps, devices)):
+        tag = f"cam{i}{' (' + names[i] + ')' if names[i] else ''}: " if multi else ""
+        c = CamRec(cap, dev, i, names[i], (port + i) if port else 0, fps, replays[i], log, tag)
+        if not c.first_frame():
+            for cc in cams:
+                cc.cap.release()
+            cap.release()
+            msg = f"Camera {dev} opened but sent no picture."
+            if multi:
+                msg += (" With two cameras this is often the USB bus being full: put the cameras on different USB "
+                        "ports (not through a hub; try a few combinations), or try a lower --fps.")
+            sys.exit(msg)
+        if multi and str(dev).isdigit() and c.pixfmt and c.pixfmt != "MJPG":
+            log(f"! {tag}the camera sends {c.pixfmt}, not MJPG: uncompressed video from two cameras can overflow "
+                f"the USB bus (lost frames). Use --pixfmt MJPG if this camera offers it (--list shows the format).")
+        if str(dev).isdigit() and c.fps_real and c.fps_real < 0.9 * fps:
+            log(f"! {tag}the camera says it runs at {c.fps_real:g} fps, {fps} asked")
+        cams.append(c)
+
+    for c in cams:
+        if c.serve():
+            log(f"{c.tag}Preview: http://{host}.local:{c.port}   "
+                f"(live link for tools/live/track_live.py: --stream {host}.local:{c.port})")
+
+    t0 = time.monotonic()
+    t0_wall = time.time()
+    folder = None
+    if record:
+        stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+        folder = os.path.join(out, stamp + (f"_{label}" if label else ""))
+        os.makedirs(folder, exist_ok=True)
+        for i, c in enumerate(cams):
+            meta = dict(device=c.device, width=c.w, height=c.h, fps_requested=fps, fps_reported=c.fps_real,
+                        host=host, start=dt.datetime.now().isoformat(timespec="seconds"),
+                        label=label, note="t_wall is when the Pi received the frame",
+                        camera_controls=controls[i], exposure_ms=exposure_ms(controls[i]),
+                        fps_check=controls[i].get("fps_check"))
+            meta["pixel_format"] = c.pixfmt
+            if multi:
+                meta.update(session=os.path.basename(folder), camera_index=i, role=c.name or None,
+                            t0_monotonic=round(t0, 6), t0_wall=round(t0_wall, 4),
+                            clock="t_mono = seconds on the Pi's monotonic clock since t0_monotonic, the same t0 "
+                                  "for every camera in this session (one process): t_mono can be compared "
+                                  "across cameras directly. t_wall is the Pi's system clock, also shared.")
+            meta.update(extra_meta[i])
+            c.open_outputs(os.path.join(folder, f"cam{i}") if multi else folder, meta)
+            if multi:
+                log(f"{c.tag}recording {c.w}x{c.h} to {c.folder}")
+        if multi:
+            write_session(folder, cams, label, host, t0, t0_wall, port)
+        else:
+            log(f"Recording {cams[0].w}x{cams[0].h} to {folder}")
+        log("Type a note and press Enter to mark a moment. Ctrl+C stops.")
+        start_notes(cams, stdin_notes, notes_port, log)
+        if disk_check_s:
+            threading.Thread(target=watch_disk, args=(out, stop, disk_check_s, log, cams), daemon=True).start()
+
+    threads = []
+    try:
+        if not multi:
+            cams[0].loop(t0, stop, seconds)
+        else:
+            def run(c):
+                try:
+                    if flush_s and not c.replay:     # a file would just be read ahead
+                        c.flush_buffers(flush_s)
+                    c.loop(t0, stop, seconds)
+                except Exception as e:      # one camera failing must not lose the other's recording
+                    c.stopped = f"error: {e}"
+                    log(f"! {c.tag}stopped with an error: {e}")
+            threads = [threading.Thread(target=run, args=(c,), daemon=True) for c in cams]
+            for t in threads:
+                t.start()
+            while any(t.is_alive() for t in threads):
+                for t in threads:
+                    t.join(0.5)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        stop.set()
+        if multi:
+            for t in threads:
+                t.join(5.0)
+        for c in cams:
+            c.close(t0)
+        if record and multi:
+            write_session(folder, cams, label, host, t0, t0_wall, port, end=True)
+            log(f"\nSession saved: {folder}")
+    return folder, cams
+
+
+def write_session(folder, cams, label, host, t0, t0_wall, port, end=False):
+    """session.json: which camera is in which subfolder, and the shared clock."""
+    s = dict(
+        session=os.path.basename(folder), label=label, host=host,
+        start=dt.datetime.fromtimestamp(t0_wall).isoformat(timespec="seconds"),
+        clock=dict(t_mono_shared=True, t0_monotonic=round(t0, 6), t0_wall=round(t0_wall, 4),
+                   note="Every camera's frames.csv t_mono is time.monotonic() - t0_monotonic on this Pi (the "
+                        "cameras run as threads of one camrec.py process), so t_mono values from different "
+                        "cameras are on one clock and can be compared directly. t_wall is the Pi system clock "
+                        "(also shared). Both are when the Pi received the frame: each camera's own delay "
+                        "before that is not included and may differ between cameras."),
+        capture="threads in one process",
+        cameras=[])
+    for c in cams:
+        e = dict(index=c.index, folder=f"cam{c.index}", device=c.device, role=c.name or None,
+                 port=c.port or None, width=c.w, height=c.h, fps_reported=c.fps_real, pixel_format=c.pixfmt)
+        if end:
+            e.update(frames=c.n, frame_check=c.frame_check(), stopped=c.stopped)
+        s["cameras"].append(e)
+    if end:
+        s["end"] = dt.datetime.now().isoformat(timespec="seconds")
+    tmp = os.path.join(folder, "session.json.tmp")
+    with open(tmp, "w") as f:
+        json.dump(s, f, indent=2)
+    os.replace(tmp, os.path.join(folder, "session.json"))
+
+
+def start_notes(cams, stdin_notes, notes_port, log=print):
+    """Notes typed here, or sent by tools/run_sheet.py over UDP, go into every
+    camera's events.csv against that camera's own frame number."""
+    def mark_all(text, src=""):
+        t = time.time()
+        frames = [c.mark(text, t) for c in cams]
+        where = (f"frame {frames[0]}" if len(cams) == 1 else
+                 "frames " + ", ".join(f"cam{c.index} {f}" for c, f in zip(cams, frames)))
+        log(f"  marked at {where}{src}: {text}")
+
+    def notes():
+        for line in sys.stdin:
+            text = line.strip()
+            if text:
+                mark_all(text)
+
+    def net_notes():
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.bind(("", notes_port))
+        except OSError as e:
+            log(f"(network notes off: {e})")
+            return
+        while True:
+            data, addr = sock.recvfrom(512)
+            text = data.decode("utf-8", "replace").strip()
+            if not text:
+                continue
+            mark_all(text, f" (from {addr[0]})")
+            try:
+                sock.sendto(b"ok " + data[:200], addr)   # receipt, so the sender knows the Pi heard it
+            except OSError:
+                pass
+    if stdin_notes:
+        threading.Thread(target=notes, daemon=True).start()
+    if notes_port:
+        threading.Thread(target=net_notes, daemon=True).start()
+
+
+def watch_disk(out, stop, every_s, log=print, cams=(), free=None):
+    """While recording: one loud warning below DISK_WARN_GB free; below
+    DISK_STOP_GB stop and save cleanly (a full card leaves a broken video.avi)."""
+    free = free or free_gb
+    warned = False
+    while not stop.wait(every_s):
+        try:
+            gb = free(out)
+        except OSError:
+            continue
+        if gb < DISK_STOP_GB:
+            log(f"\n! DISK ALMOST FULL ({gb:.2f} GB free): stopping and saving now.")
+            for c in cams:
+                c.stopped = c.stopped or "disk almost full"
+            stop.set()
+            return
+        if gb < DISK_WARN_GB and not warned:
+            warned = True
+            log(f"\n! LOW DISK SPACE: {gb:.2f} GB free. Recording stops by itself at {DISK_STOP_GB} GB.")
+
+
+def tag_line(ln, tag):
+    """Put 'cam0 (overhead): ' into a log line, keeping a warning's '!' first."""
+    s = ln.strip()
+    if not s or set(s) == {"!"}:
+        return ln
+    if s.startswith("!"):
+        return "  ! " + tag + s[1:].lstrip()
+    return tag + ln
+
+
+def list_arg(s):
+    return [x.strip() for x in str(s).split(",") if x.strip()]
+
+
+def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--device", default="0", help="camera number (0 = /dev/video0) or a video file to replay")
+    ap.add_argument("--device", default="0", help="camera number (0 = /dev/video0) or a video file to replay; "
+                                                  "two cameras: 0,2 (see --list)")
+    ap.add_argument("--names", type=list_arg, default=[], help="roles of the cameras, same order as --device, "
+                                                               "e.g. overhead,side (saved in session.json)")
+    ap.add_argument("--list", action="store_true", help="show the cameras this Pi sees and which numbers send pictures")
     ap.add_argument("--width", type=int, default=640)
     ap.add_argument("--height", type=int, default=480)
     ap.add_argument("--fps", type=int, default=30)
+    ap.add_argument("--pixfmt", default="MJPG", type=str.upper,
+                    help="pixel format asked of the camera: MJPG (default, compressed: two cameras fit on USB) or YUYV")
     ap.add_argument("--buffers", type=int, default=4, help="driver frame buffers (1 can halve the frame rate)")
     ap.add_argument("--label", default="", help="added to the folder name, e.g. E1")
     ap.add_argument("--out", default=os.path.expanduser("~/recordings"))
-    ap.add_argument("--port", type=int, default=8000, help="preview web page port (0 = no preview)")
+    ap.add_argument("--port", type=int, default=8000, help="preview web page port (0 = no preview); "
+                                                           "the second camera uses the next port (8001)")
     ap.add_argument("--no-record", action="store_true", help="preview only")
     ap.add_argument("--seconds", type=float, default=0, help="stop after this long (0 = until Ctrl+C)")
     ap.add_argument("--notes-port", type=int, default=5007, help="UDP port for notes sent by run_sheet.py (0 = off)")
@@ -523,140 +1067,58 @@ def main():
     ap.add_argument("--lock", dest="lock", action="store_true", default=True,
                     help="(default) after a 2 s warm-up, freeze the automatic exposure, focus and white balance")
     ap.add_argument("--no-lock", dest="lock", action="store_false", help="leave the camera's automatics alone")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
-    cap = open_camera(args.device, args.width, args.height, args.fps, args.buffers)
-    dflt = "lock" if args.lock else None
-    controls = apply_controls(cap, args.device, args.exposure if args.exposure is not None else dflt,
-                              args.focus if args.focus is not None else dflt,
-                              args.wb if args.wb is not None else dflt, fps=args.fps)
-    ok, frame = cap.read()
-    if not ok:
-        sys.exit("The camera opened but sent no picture.")
-    h, w = frame.shape[:2]
-    real_fps = cap.get(cv2.CAP_PROP_FPS) or args.fps
-
-    latest = Latest()
-    live = LiveFrames()
-    if args.port:
-        server = ThreadingHTTPServer(("", args.port), make_handler(latest, live))
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-        print(f"Preview: http://{socket.gethostname()}.local:{args.port}   "
-              f"(live link for tools/live/track_live.py: --stream {socket.gethostname()}.local:{args.port})")
-
-    folder = writer = fcsv = ecsv = None
-    lock = threading.Lock()
-    state = {"frame": 0, "t0": time.monotonic()}
+    if args.list:
+        list_cameras()
+        return
+    devices = list_arg(args.device) or ["0"]
+    if len(set(devices)) != len(devices):
+        sys.exit(f"The same camera is listed twice in --device {args.device}.")
+    if args.names and len(args.names) != len(devices):
+        sys.exit(f"--names has {len(args.names)} name(s) but --device has {len(devices)} camera(s).")
+    multi = len(devices) > 1
     if not args.no_record:
-        stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-        folder = os.path.join(args.out, stamp + (f"_{args.label}" if args.label else ""))
-        os.makedirs(folder, exist_ok=True)
-        writer = cv2.VideoWriter(os.path.join(folder, "video.avi"), cv2.VideoWriter_fourcc(*"MJPG"), real_fps, (w, h))
-        ff = open(os.path.join(folder, "frames.csv"), "w", newline="")
-        fcsv = csv.writer(ff)
-        fcsv.writerow(["frame", "t_wall", "t_mono", "cam_ms"])
-        ef = open(os.path.join(folder, "events.csv"), "w", newline="")
-        ecsv = csv.writer(ef)
-        ecsv.writerow(["t_wall", "frame", "text"])
-        with open(os.path.join(folder, "meta.json"), "w") as f:
-            json.dump(dict(device=args.device, width=w, height=h, fps_requested=args.fps, fps_reported=real_fps,
-                           host=socket.gethostname(), start=dt.datetime.now().isoformat(timespec="seconds"),
-                           label=args.label, note="t_wall is when the Pi received the frame",
-                           camera_controls=controls, exposure_ms=exposure_ms(controls),
-                           fps_check=controls.get("fps_check")), f, indent=2)
-        print(f"Recording {w}x{h} to {folder}")
-        print("Type a note and press Enter to mark a moment. Ctrl+C stops.")
+        disk_precheck(args.out, len(devices), args.seconds)
 
-        def notes():
-            for line in sys.stdin:
-                text = line.strip()
-                if not text:
-                    continue
-                with lock:
-                    ecsv.writerow([f"{time.time():.3f}", state["frame"], text])
-                    ef.flush()
-                print(f"  marked at frame {state['frame']}: {text}")
-        threading.Thread(target=notes, daemon=True).start()
+    caps = []
+    for d in devices:
+        def fail(msg, caps=caps):
+            for c in caps:
+                c.release()
+            sys.exit(msg)
+        caps.append(open_camera(d, args.width, args.height, args.fps, args.buffers, args.pixfmt, fail))
+    dflt = "lock" if args.lock else None
+    ctl = dict(exposure=args.exposure if args.exposure is not None else dflt,
+               focus=args.focus if args.focus is not None else dflt,
+               wb=args.wb if args.wb is not None else dflt)
+    controls = [None] * len(caps)
+    if not multi:
+        controls[0] = apply_controls(caps[0], devices[0], ctl["exposure"], ctl["focus"], ctl["wb"], fps=args.fps)
+    else:
+        # both cameras' warm-up and frame-rate check at the same time (each ~4 s), each with its own values
+        print_lock = threading.Lock()
 
-        def net_notes():
-            """Notes sent by tools/run_sheet.py on the laptop, one UDP packet each."""
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        def setup(i):
+            tag = f"cam{i}{' (' + args.names[i] + ')' if args.names else ''}: "
+
+            def log(s):
+                with print_lock:
+                    print("\n".join(tag_line(ln, tag) for ln in str(s).split("\n")))
             try:
-                sock.bind(("", args.notes_port))
-            except OSError as e:
-                print(f"(network notes off: {e})")
-                return
-            while True:
-                data, addr = sock.recvfrom(512)
-                text = data.decode("utf-8", "replace").strip()
-                if not text:
-                    continue
-                with lock:
-                    ecsv.writerow([f"{time.time():.3f}", state["frame"], text])
-                    ef.flush()
-                print(f"  marked at frame {state['frame']} (from {addr[0]}): {text}")
-                try:
-                    sock.sendto(b"ok " + data[:200], addr)   # receipt, so the sender knows the Pi heard it
-                except OSError:
-                    pass
-        if args.notes_port:
-            threading.Thread(target=net_notes, daemon=True).start()
-
-    shown_fps, n_fps, t_fps = 0.0, 0, time.monotonic()
-    try:
-        while True:
-            # (the frame read during setup is not recorded: it was stamped late)
-            ok, frame = cap.read()
-            if not ok:
-                print("Camera stopped sending pictures.")
-                break
-            t_wall, t_mono = time.time(), time.monotonic() - state["t0"]
-            cam_ms = cap.get(cv2.CAP_PROP_POS_MSEC)   # driver's own capture time, if it gives one
-            if writer is not None:
-                writer.write(frame)
-                with lock:
-                    fcsv.writerow([state["frame"], f"{t_wall:.4f}", f"{t_mono:.4f}", f"{cam_ms:.1f}"])
-            if live.clients:
-                live.put(frame, state["frame"], t_wall)   # same number and time as frames.csv
-            state["frame"] += 1
-            n_fps += 1
-            if time.monotonic() - t_fps >= 1.0:
-                shown_fps = n_fps / (time.monotonic() - t_fps)
-                n_fps, t_fps = 0, time.monotonic()
-                if writer is not None:
-                    ff.flush()
-            if args.port and state["frame"] % 2 == 0:   # preview at half rate to save CPU
-                view = frame.copy()
-                tag = f"{shown_fps:4.1f} fps  {'REC ' + time.strftime('%M:%S', time.gmtime(t_mono)) if writer is not None else 'preview'}"
-                cv2.putText(view, tag, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-                ok2, jpg = cv2.imencode(".jpg", view, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                if ok2:
-                    latest.put(jpg.tobytes())
-            if args.seconds and t_mono >= args.seconds:
-                break
-            if not str(args.device).isdigit():
-                time.sleep(1.0 / real_fps)   # replaying a file: keep real time
-    except KeyboardInterrupt:
-        pass
-    finally:
-        if folder and str(args.device).isdigit():
-            try:   # what the camera reports at the end: did anything drift?
-                mp = os.path.join(folder, "meta.json")
-                with open(mp) as f:
-                    meta = json.load(f)
-                meta["camera_controls_end"] = read_controls(cap)
-                with open(mp, "w") as f:
-                    json.dump(meta, f, indent=2)
+                controls[i] = apply_controls(caps[i], devices[i], ctl["exposure"], ctl["focus"], ctl["wb"],
+                                             fps=args.fps, log=log)
             except Exception as e:
-                print(f"(couldn't add the end control values to meta.json: {e})")
-        cap.release()
-        if writer is not None:
-            writer.release()
-            with lock:
-                ff.close()
-                ef.close()
-            secs = time.monotonic() - state["t0"]
-            print(f"\nSaved {state['frame']} frames ({secs:.0f} s, {state['frame'] / max(secs, 1e-9):.1f} fps) to {folder}")
+                controls[i] = dict(error=str(e))
+                log(f"! could not set the camera controls: {e}")
+        ts = [threading.Thread(target=setup, args=(i,)) for i in range(len(caps))]
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join()
+    run_session(caps, devices, names=args.names, out=args.out, label=args.label, seconds=args.seconds,
+                fps=args.fps, port=args.port, notes_port=args.notes_port, record=not args.no_record,
+                controls=controls)
 
 
 if __name__ == "__main__":
