@@ -23,6 +23,13 @@ The studio should not say "Alvik" until the project is about Alviks. Places it s
   palette by position instead.
 - README opens "Built for the Alvik robots".
 
+## Never a silent screen (Nick)
+
+- Whenever the studio is working (opening, finding moving objects, training, switching
+  models, saving), the page shows it: what it is doing, a progress bar, and a time left that
+  is honest. Never a black or frozen picture with no sign of life. Check every wait, not only
+  Add recording.
+
 ## Found while using it (Claude)
 
 - After **Add recording** the page stayed blank instead of showing the progress bar
