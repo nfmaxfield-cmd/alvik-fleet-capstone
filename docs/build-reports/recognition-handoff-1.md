@@ -22,11 +22,11 @@ for every check to run and for the build to finish even past 90% of the weekly u
 | 1-2. Test suites, new tests per feature | 213 passed, 1 skipped (slow training test; passed when run on its own) |
 | 3. Generic wording | A test fails the build if "Alvik" shows outside the Alvik set; "in real life" appears nowhere |
 | 4. Browser click-through | 2 blockers (Train crashed on a save race; the no-model baseline scored 0% for non-Alvik projects) and 6 should-fix items: all fixed |
-| 5. Clean install | About 14 minutes and several GB on a slow Linux link; launchers now find Python on Windows (`py -3`, then `python`); README gives real figures; fully offline after install |
+| 5. Clean install | 14 minutes (863 s) and 5.7 GB on Linux, measured by the check (PyTorch fell back to its large GPU build there; Windows uses the smaller CPU build: the README's 10-15 minutes and over 1 GB are estimates); launchers now find Python on Windows (`py -3`, then `python`); README gives real figures; fully offline after install |
 | 6. An old project opens unchanged | Passed at every stage: no label lost, moved, retyped or restatused |
 | 7. Newcomer (a student with 3D-printed shapes) | Got stuck on training (it stopped after one round and saved a model that found nothing) and on making a recording without the Pi: both fixed (training no longer stops while it finds nothing; any video file can be added) |
 | 8. Code review | 8 findings, 2 that could put wrong labels into a project (same-picture accept copied a heading onto turned robots; undo auto-accept could delete change-all fixes): all fixed and re-tested with the reviewer's scripts |
-| 9. Verifier | This report checked against the repository (below) |
+| 9. Verifier | Every claim checked against the repository: none wrong; the install figures were unrecorded, now stated with their source; suites re-run in a fresh clone: 213 passed, 1 skipped |
 
 **Conclusion.** The handoff version is complete and checked. A real training run through the studio
 on a synthetic 5-minute recording with 40 spread-out labels found every object on held-back frames
