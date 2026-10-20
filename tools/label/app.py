@@ -51,6 +51,7 @@ import motion          # noqa: E402
 import tracker         # noqa: E402
 import select_frames   # noqa: E402
 import workarea        # noqa: E402
+import timing          # noqa: E402
 
 BRAND = "Maxfield IRL Tracking"
 TAGLINE = "Identify. Recognize. Label."
@@ -354,7 +355,7 @@ def run_model_over(video, n, run, step=1, progress=None):
 class Session:
     def __init__(self, folder, model=None, weights=None, model_step=1, robot_px=None, reselect=False,
                  low_threshold=0.6, log=print, classes=None, labels_dir=None, extra_dets=None, progress=None,
-                 class_map=None, loose_classes=None, front_classes=None, area=None):
+                 class_map=None, loose_classes=None, front_classes=None, area=None, stats_path=None, model_id=None):
         """classes: the object types this project labels (default CLASSES).
         labels_dir: where labels, frames and cached guesses go (default <recording>/labels;
         the recognition studio keeps them in its project folder instead).
@@ -365,7 +366,9 @@ class Session:
         loose_classes / front_classes: types the tracker lets move fast and end soon / types
         that have a front (defaults: the tracker's own).
         area: the camera's work area (a project.json cameras[...] entry, see workarea.py):
-        guesses outside it or in an ignore spot are dropped before tracking."""
+        guesses outside it or in an ignore spot are dropped before tracking.
+        stats_path: the time-saving record (timing.py; default labels/stats.jsonl).
+        model_id: the name of the guess source in that record ("none" = motion only)."""
         self.log = log
         self.classes = list(classes or CLASSES)
         self.progress_cb = progress
@@ -388,6 +391,11 @@ class Session:
         self.frames = {}        # frame -> dict(state, how, objects, auto_conf, changed, updated)
         self.review = {}
         self.dirty_from = None  # earliest frame whose anchor was added without re-tracking yet
+        self.stats_path = stats_path or os.path.join(self.labels_dir, "stats.jsonl")
+        self.model_id = model_id or ("none" if not model else os.path.splitext(os.path.basename(weights or model))[0])
+        self.guess_kind = ("model" if model else "motion") + ("+camera" if extra_dets else "")
+        self.inv = None          # the running or last Investigate scan
+        self.bulk_undo = {}      # Investigate's "change all": token -> the frames as they were
 
         self._load_review()
         self.robot_px = robot_px
@@ -753,8 +761,9 @@ class Session:
                 return False
         return True
 
-    def save_frame(self, f, objects, state, how=None):
-        """The page sends the whole frame after every change."""
+    def save_frame(self, f, objects, state, how=None, timing_info=None):
+        """The page sends the whole frame after every change. timing_info: sent with a frame the
+        person finishes (shown, active_s, edits) for the time-saving record."""
         with self.lock:
             f = int(f)
             if f not in self.frames and f not in set(self.selected):
@@ -786,6 +795,13 @@ class Session:
                     self.dirty_from = f if self.dirty_from is None else min(self.dirty_from, f)
                 else:
                     updated = self.retrack(f)
+            if state == "reviewed" and timing_info is not None:
+                st = self.frames[f]
+                shown, active, edits = timing.clean_timing(timing_info)
+                self._record(f, timing.outcome_of(st["objects"], st["changed"]), active, edits, shown, st["how"],
+                             sum(1 for o in st["objects"] if o["status"] != "rejected"))
+            elif old is not None and old["state"] in ("reviewed", "auto") and state not in ("reviewed", "auto"):
+                self._record(f, "undone")
             same = []
             if state == "reviewed" and (old is None or old["state"] != "reviewed") and (how or "user") == "user":
                 same = self.accept_same_picture(f)
@@ -859,6 +875,7 @@ class Session:
                                  status="confirmed", score=gg.get("score")))
             self.frames[g] = dict(state="auto", how="same", objects=objs, auto_conf=self.conf_of(g),
                                   changed=False, updated=now_iso(), empty=not objs, same_as=f)
+            self._record(g, "same", how="same", n_objects=len(objs))
         self.log("Also accepted %d frames with the same picture as frame %d." % (len(frames), f))
         return frames
 
@@ -870,6 +887,7 @@ class Session:
                 st = self.frames.get(int(g))
                 if st and st["state"] == "auto" and st.get("how") == "same":
                     del self.frames[int(g)]
+                    self._record(int(g), "undone")
                     n += 1
             if n:
                 self.save()
@@ -908,6 +926,7 @@ class Session:
                     objs.append(o)
                 self.frames[f] = dict(state="auto", how="auto", objects=objs, auto_conf=self.conf_of(f),
                                       changed=False, updated=now_iso(), empty=not objs)
+                self._record(f, "auto", how="auto", n_objects=len(objs))
                 n += 1
             self.save()
             return n
@@ -919,8 +938,190 @@ class Session:
             fs = [f for f, st in self.frames.items() if st["state"] == "auto" and st.get("how") != "same"]
             for f in fs:
                 del self.frames[f]
+                self._record(f, "undone")
             self.save()
             return len(fs)
+
+    # --- track timeline ---------------------------------------------------------------------
+    def track_timeline(self, max_objects=80):
+        """One lane per followed object across the recording: when it was followed (segments),
+        where the following broke off for over a second (breaks), where it jumped further than an
+        object can move between neighbouring frames (jumps), and the frames with a label."""
+        with self.lock:
+            by_obj = {}
+            for f, rs in self.guesses.items():
+                for r in rs:
+                    by_obj.setdefault(r["obj"], []).append((f, r["x"], r["y"], r["cls"]))
+            labelled = {}
+            for f, st in self.frames.items():
+                for o in st["objects"]:
+                    if o["status"] != "rejected":
+                        labelled.setdefault(o["obj"], set()).add(f)
+            gap = max(2, int(round(self.rec.fps)))
+            jump_px = 1.5 * float(self.robot_px)
+            out = []
+            for obj, rs in by_obj.items():
+                rs.sort()
+                segs, breaks, jumps = [], [], []
+                a = prev = rs[0]
+                for cur in rs[1:]:
+                    df = cur[0] - prev[0]
+                    if df > gap:
+                        segs.append([a[0], prev[0]])
+                        breaks.append(prev[0])
+                        a = cur
+                    elif math.hypot(cur[1] - prev[1], cur[2] - prev[2]) > jump_px * max(1, df) ** 0.5:
+                        jumps.append(cur[0])
+                    prev = cur
+                segs.append([a[0], prev[0]])
+                kinds = collections.Counter(r[3] for r in rs)
+                out.append(dict(obj=obj, cls=kinds.most_common(1)[0][0], first=rs[0][0], last=rs[-1][0], frames=len(rs),
+                                segments=segs, breaks=breaks, jumps=jumps[:200],
+                                labelled=sorted(labelled.get(obj, ()))))
+            out.sort(key=lambda o: -o["frames"])
+            hidden = max(0, len(out) - max_objects)
+            out = sorted(out[:max_objects], key=lambda o: (o["first"], o["obj"]))
+            return dict(n_frames=self.rec.n, duration_s=round(self.rec.times[-1] - self.rec.times[0], 2),
+                        objects=out, hidden=hidden, picked=self.selected)
+
+    # --- time-saving record ---------------------------------------------------------------
+    def _record(self, f, outcome, active_s=0.0, edits=0, shown=None, how=None, n_objects=None):
+        """One line in the time-saving record (timing.py). Never stops the labelling."""
+        try:
+            timing.append(self.stats_path, dict(frame=int(f), shown=shown, saved=now_iso(), active_s=active_s,
+                                                edits=edits, outcome=outcome, how=how, guesses=self.guess_kind,
+                                                model=self.model_id, objects=n_objects))
+        except OSError as e:
+            self.log("Time record not written: %s" % e)
+
+    # --- investigate a spot -----------------------------------------------------------------
+    def spot_radius(self):
+        """About one object: the circle Investigate looks at, and the size of an ignore spot."""
+        return round(max(6.0, 0.7 * float(self.robot_px)), 1)
+
+    def start_investigate(self, frame, x, y, r=None):
+        """Scan the spot across the recording in the background (investigate.py)."""
+        import investigate
+        r = float(r) if r else self.spot_radius()
+        x, y, frame = float(x), float(y), int(frame)
+        if not (0 <= x <= self.rec.width and 0 <= y <= self.rec.height):
+            raise ValueError("the spot is outside the picture")
+        with self.lock:
+            if self.inv and self.inv["status"] == "running":
+                self.inv["stop"] = True
+            job = dict(status="running", frame=frame, x=x, y=y, r=r, done=0, total=0, left="", result=None,
+                       error=None, stop=False, started=time.time())
+            self.inv = job
+        clock = RateClock(window=10.0)
+
+        def progress(done, total):
+            job.update(done=done, total=total, left=fmt_left(clock.update(done, total)))
+
+        def work():
+            try:
+                res = investigate.scan(self.rec.video, self.rec.n, self.rec.times, x, y, r, frame, self.guesses,
+                                       progress=progress, stop=lambda: job["stop"],
+                                       size=(self.rec.width, self.rec.height))
+                job.update(result=res, status="done")
+            except InterruptedError:
+                job.update(status="stopped")
+            except Exception as e:      # shown in the page in plain words
+                traceback.print_exc()
+                job.update(status="failed", error=str(e))
+        threading.Thread(target=work, daemon=True).start()
+        return self.investigate_view()
+
+    def investigate_view(self):
+        j = self.inv
+        if not j:
+            return dict(status="none")
+        out = {k: v for k, v in j.items() if k not in ("stop", "started")}
+        out["labels"] = self.labels_at(j["x"], j["y"], j["r"])
+        out["spot_radius"] = j["r"]
+        return out
+
+    def labels_at(self, x, y, r):
+        """Every label already made at the spot: objects within r of (x, y) on frames a person or
+        the auto-accept finished. Newest first is not needed: in frame order."""
+        out = []
+        t0 = self.rec.times[0]
+        for f in sorted(self.frames):
+            st = self.frames[f]
+            for o in st["objects"]:
+                if math.hypot(o["x"] - x, o["y"] - y) <= r:
+                    out.append(dict(frame=f, obj=o["obj"], cls=o["cls"], status=o["status"], state=st["state"],
+                                    how=st.get("how"), time_s=round(self.rec.times[f] - t0, 2),
+                                    x=o["x"], y=o["y"]))
+        return out
+
+    def change_at(self, items, action, cls=None):
+        """Investigate's "change all": items = [{frame, obj}, ...]; action "type" (to cls),
+        "reject" or "unsure". One undo step: returns a token for undo_change()."""
+        if action not in ("type", "reject", "unsure"):
+            raise ValueError("unknown change %r" % action)
+        if action == "type" and cls not in self.classes:
+            raise ValueError("unknown object type %r" % cls)
+        with self.lock:
+            want = {}
+            for it in items or []:
+                want.setdefault(int(it["frame"]), set()).add(int(it["obj"]))
+            before, n, first = {}, 0, None
+            for f, objs in sorted(want.items()):
+                st = self.frames.get(f)
+                if not st:
+                    continue
+                touched = False
+                for o in st["objects"]:
+                    if o["obj"] not in objs:
+                        continue
+                    if action == "type":
+                        if o["status"] == "rejected" or o["cls"] == cls and o["status"] not in ("unsure",):
+                            continue
+                        new = dict(cls=cls, status="corrected")
+                    elif action == "reject":
+                        if o["status"] == "rejected":
+                            continue
+                        new = dict(status="rejected")
+                    else:
+                        if o["status"] == "unsure":
+                            continue
+                        new = dict(status="unsure")
+                    if f not in before:
+                        before[f] = json.loads(json.dumps(st))
+                    o.update(new)
+                    touched = True
+                    n += 1
+                if touched:
+                    st["changed"] = True
+                    st["updated"] = now_iso()
+                    if st["state"] in ("reviewed", "auto"):
+                        st["empty"] = not any(o["status"] != "rejected" for o in st["objects"])
+                    if st["state"] in ("edited", "reviewed"):
+                        first = f if first is None else min(first, f)
+            token = None
+            if before:
+                self._bulk_n = getattr(self, "_bulk_n", 0) + 1
+                token = "c%d" % self._bulk_n
+                self.bulk_undo[token] = before
+            updated = self.retrack(first) if first is not None else 0
+            self.save()
+            return dict(changed=n, frames=sorted(before), token=token, updated=updated, stats=self.stats())
+
+    def undo_change(self, token):
+        """Put the frames of one "change all" back as they were."""
+        with self.lock:
+            before = self.bulk_undo.pop(token, None)
+            if not before:
+                raise ValueError("nothing to undo for that change (the studio was restarted?)")
+            first = None
+            for fs, st in before.items():
+                f = int(fs)
+                self.frames[f] = st
+                if st["state"] in ("edited", "reviewed"):
+                    first = f if first is None else min(first, f)
+            updated = self.retrack(first) if first is not None else 0
+            self.save()
+            return dict(undone=len(before), frames=sorted(int(f) for f in before), updated=updated, stats=self.stats())
 
     def set_position(self, mode, f):
         with self.lock:
@@ -1090,6 +1291,11 @@ def make_handler(session, extra_get=None, extra_post=None):
                 mode = q.get("mode", ["all"])[0]
                 with s.lock:
                     self._send(200, dict(mode=mode, frames=s.queue(mode), stats=s.stats()))
+            elif u.path == "/api/tracks":
+                self._send(200, s.track_timeline())
+            elif u.path == "/api/investigate":
+                with s.lock:
+                    self._send(200, s.investigate_view())
             elif u.path == "/api/frame":
                 f = int(q["f"][0])
                 with s.lock:
@@ -1121,7 +1327,18 @@ def make_handler(session, extra_get=None, extra_post=None):
                 self._send(503, dict(error="loading", loading=True))
                 return
             if u.path == "/api/frame":
-                self._send(200, s.save_frame(b["frame"], b.get("objects", []), b.get("state", "edited"), b.get("how")))
+                self._send(200, s.save_frame(b["frame"], b.get("objects", []), b.get("state", "edited"), b.get("how"),
+                                             b.get("timing")))
+            elif u.path == "/api/investigate":
+                self._send(200, s.start_investigate(b["frame"], b["x"], b["y"], b.get("r")))
+            elif u.path == "/api/investigate/stop":
+                if s.inv:
+                    s.inv["stop"] = True
+                self._send(200, dict(ok=True))
+            elif u.path == "/api/investigate/change":
+                self._send(200, s.change_at(b.get("items") or [], b.get("action"), b.get("cls")))
+            elif u.path == "/api/investigate/undo":
+                self._send(200, s.undo_change(b.get("token")))
             elif u.path == "/api/position":
                 s.set_position(b.get("mode", "all"), b.get("frame", 0))
                 self._send(200, dict(ok=True))

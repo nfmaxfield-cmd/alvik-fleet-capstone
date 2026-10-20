@@ -122,41 +122,34 @@ def confidence_colour(score, seen, age_frames):
 # Work area and ignore spots
 # --------------------------------------------------------------------------------------------
 
-class Area:
-    """Drops guesses outside the work area (plus a margin) or inside an ignore spot.
+def _workarea():
+    import workarea
+    return workarea
+
+
+class Area(_workarea().Area):
+    """Drops guesses outside the work area (plus a margin) or inside an ignore spot: the studio's
+    own rule (tools/label/workarea.py), so the same guesses are kept here as in the studio.
     polygon: list of [x, y] image px (None or fewer than 3 points = the whole picture).
     spots: list of [x, y, r]."""
 
     def __init__(self, polygon=None, margin_px=0.0, spots=None):
-        pts = [(float(p[0]), float(p[1])) for p in (polygon or [])]
-        self.polygon = pts if len(pts) >= 3 else None
-        self.margin = float(margin_px or 0.0)
-        self.spots = [tuple(float(v) for v in s[:3]) for s in (spots or []) if len(s) >= 3]
-        if self.polygon:
-            import numpy as np
-            self._poly = np.array(self.polygon, np.float32).reshape(-1, 1, 2)
-
-    @property
-    def active(self):
-        return bool(self.polygon or self.spots)
+        super().__init__(polygon, float(margin_px or 0.0), [s[:3] for s in (spots or []) if len(s) >= 3],
+                         default_margin=0.0)
 
     def keep(self, x, y):
-        for sx, sy, sr in self.spots:
-            if math.hypot(x - sx, y - sy) <= sr:
-                return False
-        if self.polygon:
-            import cv2
-            if cv2.pointPolygonTest(self._poly, (float(x), float(y)), True) < -self.margin:
-                return False
-        return True
+        return self.keeps(float(x), float(y))
 
     def filter(self, dets):
         return [d for d in dets if self.keep(d["x"], d["y"])]
 
     @classmethod
     def from_project(cls, proj, camera, default_margin_px):
+        """The camera's work area as the studio stores it: project.json cameras[<camera name>], or
+        cameras["default"] for recordings added without a camera name."""
+        key = proj.camera_key(dict(camera=camera or ""))
         cams = proj.data.get("cameras") or {}
-        cfg = cams.get(camera or "") or {}
+        cfg = cams.get(key) or {}
         margin = cfg.get("margin_px")
         return cls(cfg.get("work_area"), default_margin_px if margin is None else margin, cfg.get("ignore_spots"))
 
@@ -240,7 +233,7 @@ def pick_camera_name(proj, source_path, given):
         c = recording_camera(proj, source_path)
         if c is not None:
             return c
-    names = [n for n in (proj.data.get("cameras") or {})]
+    names = [n for n in (proj.data.get("cameras") or {}) if n != "default"]   # "default": no camera name
     for r in proj.recordings():
         if r.get("camera") and r["camera"] not in names:
             names.append(r["camera"])
@@ -579,7 +572,8 @@ def heights_for(proj):
     """Height above the floor of each type's marked point; types whose height varies use the floor."""
     out = {}
     for c in proj.classes:
-        out[c["name"]] = 0.0 if c.get("varies") else float(c.get("height_cm") or 0.0)
+        varies = c.get("height_varies", c.get("varies"))
+        out[c["name"]] = 0.0 if varies else float(c.get("height_cm") or 0.0)
     return out
 
 

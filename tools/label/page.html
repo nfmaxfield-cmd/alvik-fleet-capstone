@@ -137,6 +137,36 @@
   #tour .badge.changes { background: #3d2f1a; color: #ffcf8a; border: 1px solid #7a5520; }
   #tour .nav { display: flex; gap: 8px; align-items: center; }
   #tour .nav .count { color: var(--dim); font-size: 12px; flex: 1; }
+  /* investigate */
+  .modal.wide { width: min(1080px, 96vw); }
+  .verdict { background: var(--panel2); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 10px 12px; margin: 6px 0 10px; }
+  .verdict.background, .verdict.background_visited { border-left-color: var(--warn); }
+  .verdict.moves { border-left-color: var(--ok); }
+  .verdict b { display: block; font-size: 14.5px; margin-bottom: 4px; }
+  .verdict .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; align-items: center; }
+  .invrow { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-start; }
+  .invpic { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--dim); max-width: 300px; }
+  .invpic .frame { position: relative; width: 144px; height: 144px; border-radius: 6px; overflow: hidden; background: #000; }
+  .invpic .frame.wide { width: 258px; height: 258px; }
+  .invpic img { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+  .ring { position: absolute; border: 1.5px dashed rgba(108,182,255,.95); border-radius: 50%; pointer-events: none; }
+  .thumbs { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+  .thumb { position: relative; width: 64px; cursor: pointer; font-size: 10.5px; color: var(--dim); text-align: center; }
+  .thumb img { width: 64px; height: 64px; border-radius: 4px; border: 2px solid transparent; display: block; }
+  .thumb.chg img { border-color: var(--warn); }
+  .thumb.now img { border-color: #fff; }
+  .clips { display: flex; gap: 10px; flex-wrap: wrap; }
+  .clip { width: 120px; font-size: 11.5px; color: var(--dim); cursor: pointer; }
+  .clip img { width: 120px; height: 120px; border-radius: 6px; display: block; background: #000; }
+  .invsub { color: var(--dim); font-size: 12px; margin: 2px 0 8px; }
+  .modal h4 { margin: 14px 0 4px; font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--dim); }
+  .jump { background: none; border: 1px solid var(--line); color: var(--accent); border-radius: 5px; padding: 1px 7px; cursor: pointer; font: inherit; font-size: 12px; }
+  .jump:hover { border-color: var(--accent); }
+  #invlabels td input[type=checkbox] { width: auto; }
+  #loadstop { display: none; margin-top: 6px; }
+  #loadstop.on { display: inline-block; }
+  .okbox { background: #1f2a24; border: 1px solid #2a4d3c; border-radius: 8px; padding: 8px 10px; }
+  .warnbox { background: #3d2f1a; border: 1px solid #7a5520; border-radius: 8px; padding: 8px 10px; color: #ffe2b8; }
   @media (max-width: 900px) { main { grid-template-columns: 1fr; } aside { border-left: 0; border-top: 1px solid var(--line); } }
 </style>
 </head>
@@ -167,6 +197,9 @@
   <button class="sbtn" id="sclasses">Object types</button>
   <button class="sbtn" id="sadd">Add recording</button>
   <button class="sbtn" id="swork" title="Mark the part of the picture to look in (W)">Work area</button>
+  <button class="sbtn" id="stime" title="How long labelling takes, and how much each model saves">Time saved</button>
+  <button class="sbtn" id="sshare" title="Save the whole project as one file, to hand over or keep">Share project</button>
+  <button class="sbtn" id="sopen" title="Open a project file (.mxirl) someone gave you">Open shared project</button>
   <span id="jobtxt"></span>
   <span id="bgtxt"></span>
 </div>
@@ -205,6 +238,9 @@
     <h2>Objects on this frame</h2>
     <div class="objs" id="objs"></div>
     <div class="legend" id="legend" style="margin-top:8px"></div>
+    <button class="btn" id="invbtn" title="Look at one spot across the whole recording: is it an object, or part of the background? (Q)">Investigate a spot (Q)</button>
+    <button class="btn" id="invlast" style="display:none">Back to the last investigation</button>
+    <button class="btn" id="tlbtn" title="One lane per object across the whole recording: breaks and jumps marked">Track timeline</button>
 
     <div id="spotbox" style="display:none">
       <h2>Spot check</h2>
@@ -241,6 +277,7 @@
       <kbd>B</kbd><span>Picture: normal / brighter / high contrast (only how it is shown)</span>
       <kbd>V</kbd><span>Full screen (Esc leaves it)</span>
       <kbd>W</kbd><span>Work area: mark the part of the picture to look in</span>
+      <kbd>Q</kbd><span>Investigate the object (or spot) under the mouse across the whole recording: is it an object, or part of the background? Fix every label made there at once</span>
       <kbd>Z</kbd><span>Undo (also Ctrl+Z)</span>
       <kbd>Esc</kbd><span>Cancel / deselect</span>
     </div>
@@ -249,7 +286,7 @@
   </aside>
 </main>
 <div id="toast"></div>
-<div id="loading"><div id="loadtxt">Loading ...</div><div class="lb" id="loadlb"><span id="loadbar"></span></div><div class="muted" id="loadsub"></div></div>
+<div id="loading"><div id="loadtxt">Loading ...</div><div class="lb" id="loadlb"><span id="loadbar"></span></div><div class="muted" id="loadsub"></div><button class="sbtn" id="loadstop">Stop</button></div>
 <div class="shade" id="shade"><div class="modal" id="modal"></div></div>
 <div id="tour"><div class="hole" id="tourhole"></div><div class="card" id="tourcard"></div></div>
 
@@ -289,7 +326,7 @@ async function api(path, body) {
   const r = await fetch(path, opt);
   let j;
   try { j = await r.json(); } catch (e) { j = { error: "The app did not answer properly (" + r.status + ")" }; }
-  if (!r.ok || j.error) throw new Error(j.error || r.statusText);
+  if (!r.ok || j.error) { const e = new Error(j.error || r.statusText); e.data = j; e.status = r.status; throw e; }
   return j;
 }
 function toast(msg, err) {
@@ -300,15 +337,19 @@ function toast(msg, err) {
 
 // ---------------------------------------------------------------- never a silent screen
 // Anything that may take longer than ~0.3 s shows what is happening.
-function showLoading(what, done, total, left) {
+function showLoading(what, done, total, left, unit, onStop) {
   $("loading").classList.add("on");
   $("loadtxt").textContent = what;
   const known = total > 0;
   $("loadlb").classList.toggle("indet", !known);
   $("loadbar").style.width = known ? Math.round(100 * done / total) + "%" : "30%";
-  $("loadsub").textContent = known ? done + " / " + total + (left ? " · " + left : "") : (left || "");
+  const amt = unit === "MB" ? (done / 1e6).toFixed(1) + " of " + (total / 1e6).toFixed(1) + " MB" : done + " / " + total + (unit ? " " + unit : "");
+  $("loadsub").textContent = known ? amt + (left ? " · " + left : "") : (left || "");
+  const st = $("loadstop");
+  st.classList.toggle("on", !!onStop);
+  st.onclick = onStop || null;
 }
-function hideLoading() { $("loading").classList.remove("on"); }
+function hideLoading() { $("loading").classList.remove("on"); $("loadstop").classList.remove("on"); }
 async function withBusy(what, fn) {
   const t = setTimeout(() => showLoading(what, 0, 0), 300);
   try { return await fn(); } finally { clearTimeout(t); if (!S.waiting) hideLoading(); }
@@ -360,6 +401,7 @@ async function showFrame(i) {
   try { fr = await api("/api/frame?f=" + f); } catch (e) { toast(e.message, true); return; }
   if (S.queue[S.idx].f !== f) return;          // user moved on meanwhile
   S.frame = fr; S.sel = -1; S.hmode = false; S.drag = null;
+  startTiming(f);
   S.img = await getImage(f);
   fit(); draw(); renderSide(); drawStrip();
   for (const k of [1, 2]) if (S.queue[i + k]) getImage(S.queue[i + k].f);   // preload
@@ -613,11 +655,27 @@ function setStats(st) {
 
 // ---------------------------------------------------------------- changes
 function clone(x) { return JSON.parse(JSON.stringify(x)); }
+// ---- time-saving record: how long a person spends on each frame they finish (pauses over 20 s count as 20 s, at most 120 s)
+const IDLE_MS = 20000, CAP_S = 120;
+function localIso(d) { const p = (n) => String(n).padStart(2, "0"); return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + "T" + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds()); }
+function startTiming(f) { if (!S.timing || S.timing.f !== f) S.timing = { f: f, shown: localIso(new Date()), active: 0, last: Date.now(), edits: 0 }; }
+function bumpActive() { const t = S.timing; if (!t) return; const now = Date.now(); t.active += Math.min(now - t.last, IDLE_MS); t.last = now; }
+function countEdit() { if (S.timing && S.frame && S.timing.f === S.frame.frame) S.timing.edits++; }
+function finishTiming() {
+  const t = S.timing; if (!t || !S.frame || t.f !== S.frame.frame) return null;
+  bumpActive();
+  const out = { shown: t.shown, active_s: Math.min(CAP_S, Math.round(t.active / 100) / 10), edits: t.edits };
+  S.timing = null;
+  return out;
+}
+["keydown", "mousedown", "wheel"].forEach((ev) => window.addEventListener(ev, bumpActive, true));
+window.addEventListener("mousemove", () => { if (S.timing && Date.now() - S.timing.last > 1000) bumpActive(); }, true);
 function pushUndo() { S.undo.push({ f: S.frame.frame, objects: clone(S.frame.objects), state: S.frame.state, how: S.frame.how, sel: S.sel }); if (S.undo.length > 200) S.undo.shift(); }
 function markCorrected(o) { if (o.status === "pending" || o.status === "confirmed") o.status = "corrected"; }
-async function save(state, how) {
+async function save(state, how, timingInfo) {
   const fr = S.frame;
   const body = { frame: fr.frame, objects: fr.objects, state: state, how: how || fr.how || null };
+  if (timingInfo) body.timing = timingInfo;
   S.busy = true;
   const slow = setTimeout(() => toast("Updating the guesses after this frame\u2026"), 400);
   let j = null;
@@ -641,7 +699,7 @@ async function save(state, how) {
 function editState() { return S.frame.state === "reviewed" ? "reviewed" : "edited"; }
 async function change(fn) {
   if (!S.frame || S.busy) return;
-  pushUndo(); fn(); draw(); renderSide();
+  pushUndo(); fn(); draw(); renderSide(); countEdit();
   await save(editState(), editHow());
 }
 function editHow() { return S.frame.how && S.frame.how !== "auto" && S.frame.how !== "same" ? S.frame.how : (S.mode === "spot" ? "spot" : "user"); }
@@ -650,7 +708,7 @@ async function accept() {
   pushUndo();
   const entry = S.undo[S.undo.length - 1];
   for (const o of S.frame.objects) if (o.status === "pending") o.status = "confirmed";
-  const j = await save("reviewed", editHow());
+  const j = await save("reviewed", editHow(), finishTiming());
   if (j && j.same && j.same.length) {
     entry.also = j.same;
     toast("Also accepted " + j.same.length + " frame" + (j.same.length > 1 ? "s" : "") + " with the same picture (Z undoes)");
@@ -663,7 +721,8 @@ async function markEmpty() {
   const entry = S.undo[S.undo.length - 1];
   S.frame.objects = S.frame.objects.filter((o) => o.source !== "user");
   for (const o of S.frame.objects) o.status = "rejected";
-  const j = await save("reviewed", S.mode === "spot" ? "spot" : "user");
+  countEdit();
+  const j = await save("reviewed", S.mode === "spot" ? "spot" : "user", finishTiming());
   if (j && j.same && j.same.length) {
     entry.also = j.same;
     toast("Also marked " + j.same.length + " frame" + (j.same.length > 1 ? "s" : "") + " with the same (empty) picture (Z undoes)");
@@ -686,6 +745,7 @@ async function goNextToDo(quiet) {
 async function undo() {
   const u = S.undo.pop();
   if (!u) { toast("Nothing to undo."); return; }
+  if (u.kind === "bulk") { await undoBulk(u); return; }
   if (!S.frame || S.frame.frame !== u.f) {
     let i = S.queue.findIndex((q) => q.f === u.f);
     if (i < 0) { await loadQueue(); i = S.queue.findIndex((q) => q.f === u.f); }
@@ -734,6 +794,8 @@ view.addEventListener("mousedown", (ev) => {
   if (!S.frame || S.busy) return;
   const p = imgPos(ev);
   if (S.wa) { waMouseDown(p); return; }
+  if (INV.picking) { INV.picking = false; view.classList.remove("hmode"); const i = hit(p); const o = i >= 0 ? S.frame.objects[i] : null;
+    investigate(o ? { x: o.x, y: o.y, cls: o.cls } : { x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10, cls: null }); return; }
   if (S.hmode && S.sel >= 0) {
     S.hmode = false;
     const i = S.sel; change(() => setHeading(S.frame.objects[i], p.x, p.y));
@@ -778,6 +840,7 @@ window.addEventListener("mouseup", () => {
   const o = S.frame.objects[d.i];
   if (d.kind === "move") { o.x = Math.round(o.x * 10) / 10; o.y = Math.round(o.y * 10) / 10; markCorrected(o); }
   S.undo.push({ f: S.frame.frame, objects: d.before, state: S.frame.state, how: S.frame.how, sel: d.i });
+  countEdit();
   renderSide();
   save(editState(), editHow());
 });
@@ -908,9 +971,12 @@ $("wamargin").addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev
 document.addEventListener("click", (ev) => { const b = ev.target.closest && ev.target.closest("button"); if (b) b.blur(); });
 window.addEventListener("keydown", async (ev) => {
   if ($("tour").classList.contains("on")) { tourKey(ev); return; }
-  if (ev.target && (ev.target.tagName === "INPUT" || ev.target.tagName === "TEXTAREA" || ev.target.tagName === "SELECT")) return;
-  if ($("shade").classList.contains("on")) { if (ev.key === "Escape" && !TOUR.lockedModal) closeModal(); return; }
-  if ($("loading").classList.contains("on")) return;
+  if (ev.target && (ev.target.tagName === "INPUT" || ev.target.tagName === "TEXTAREA" || ev.target.tagName === "SELECT")) {
+    if (ev.key === "Escape" && $("shade").classList.contains("on") && !TOUR.lockedModal) { ev.target.blur(); if ($("modal").classList.contains("wide")) closeInvestigate(); else closeModal(); }
+    return;
+  }
+  if ($("shade").classList.contains("on")) { if (ev.key === "Escape" && !TOUR.lockedModal) { if ($("modal").classList.contains("wide")) closeInvestigate(); else closeModal(); } return; }
+  if ($("loading").classList.contains("on")) { if (ev.key === "Escape" && $("loadstop").classList.contains("on")) $("loadstop").click(); return; }
   if (ev.target && ev.target.tagName === "BUTTON") ev.target.blur();
   if (S.wa) { waKey(ev); return; }
   const k = ev.key;
@@ -968,12 +1034,13 @@ window.addEventListener("keydown", async (ev) => {
     case "m": case "M": toggleMag(); break;
     case "b": case "B": cyclePicture(); break;
     case "w": case "W": startWorkArea(); break;
+    case "q": case "Q": investigate(invTarget()); break;
     case "e": case "E": await markEmpty(); break;
     case "Tab":
       ev.preventDefault();
       if (S.frame.objects.length) { S.sel = (S.sel + (ev.shiftKey ? -1 + S.frame.objects.length : 1)) % S.frame.objects.length; draw(); renderSide(); }
       break;
-    case "Escape": S.hmode = false; S.sel = -1; draw(); renderSide(); break;
+    case "Escape": S.hmode = false; S.sel = -1; if (INV.picking) { INV.picking = false; toast("Never mind."); } draw(); renderSide(); break;
     case "i": case "I": {
       if (!sel) { toast("Click an object first."); break; }
       const v = prompt("New number for object #" + sel.obj + " (it keeps this number in the frames after):", sel.obj);
@@ -1082,15 +1149,19 @@ async function waitLoaded(first) {
 }
 async function studioOpen(rec, model) {
   showLoading("Opening ...", 0, 0);
-  try { await api("/api/studio/open", { rec: rec, model: model }); } catch (e) { hideLoading(); toast(e.message, true); return; }
+  try { await api("/api/studio/open", { rec: rec, model: model }); } catch (e) {
+    hideLoading();
+    if (e.data && e.data.missing) { await locateRecording(e.data.missing); return; }
+    toast(e.message, true); return;
+  }
   await waitLoaded(model && model !== "none" ? "Switching the guesses to model " + model + " ..." : "Opening ...");
   const s = await studioState(); if (s) renderStudio(s);
   await init();
   await offerWorkArea();
 }
-function modal(html, locked) { $("modal").innerHTML = html; $("shade").classList.add("on"); TOUR.lockedModal = !!locked; }
+function modal(html, locked) { $("modal").classList.remove("wide"); $("modal").innerHTML = html; $("shade").classList.add("on"); TOUR.lockedModal = !!locked; }
 function closeModal() { $("shade").classList.remove("on"); TOUR.lockedModal = false; }
-$("shade").addEventListener("click", (e) => { if (e.target === $("shade") && !TOUR.lockedModal) closeModal(); });
+$("shade").addEventListener("click", (e) => { if (e.target === $("shade") && !TOUR.lockedModal) { if ($("modal").classList.contains("wide")) closeInvestigate(); else closeModal(); } });
 $("srec").addEventListener("change", () => studioOpen($("srec").value, $("smodel").value));
 $("smodel").addEventListener("change", () => studioOpen($("srec").value, $("smodel").value));
 $("strain").addEventListener("click", () => {
@@ -1304,6 +1375,353 @@ async function offerWorkArea() {
   });
 }
 
+// ---------------------------------------------------------------- investigate a spot (Q)
+// Looks at one spot across the whole recording: is it an object, or part of the background?
+const INV = { last: null, picking: false, cls: null, dirty: false, clipTimer: null };
+function invTarget() {
+  // the object under the mouse, else the selected object, else the spot under the mouse
+  if (!S.frame) return null;
+  const i = S.mouse ? hit(S.mouse) : -1;
+  const o = i >= 0 ? S.frame.objects[i] : (S.sel >= 0 ? S.frame.objects[S.sel] : null);
+  if (o) return { x: o.x, y: o.y, cls: o.cls };
+  if (S.mouse) return { x: Math.round(S.mouse.x * 10) / 10, y: Math.round(S.mouse.y * 10) / 10, cls: null };
+  return null;
+}
+function invButton() {
+  if (!S.frame) { toast("Open a recording first."); return; }
+  const o = S.sel >= 0 ? S.frame.objects[S.sel] : null;
+  if (o) { investigate({ x: o.x, y: o.y, cls: o.cls }); return; }
+  INV.picking = true; view.classList.add("hmode");
+  toast("Click the spot on the picture to investigate (Esc: never mind).");
+}
+async function investigate(t) {
+  if (!S.frame || !t) { toast("Point at an object or spot on the picture, then press Q."); return; }
+  INV.cls = t.cls; INV.dirty = false;
+  const frame = S.frame.frame;
+  let stopped = false;
+  const stop = () => { stopped = true; api("/api/investigate/stop", {}).catch(() => {}); };
+  S.waiting = true;
+  showLoading("Looking at this spot across the whole recording ...", 0, 0, "", "", stop);
+  let j;
+  try {
+    j = await api("/api/investigate", { frame: frame, x: t.x, y: t.y });
+    for (;;) {
+      if (j.status !== "running") break;
+      showLoading("Looking at this spot across the whole recording ...", j.done, j.total, j.left, "frames read", stop);
+      await sleep(300);
+      j = await api("/api/investigate");
+    }
+  } catch (e) { S.waiting = false; hideLoading(); toast(e.message, true); return; }
+  S.waiting = false; hideLoading();
+  if (stopped || j.status === "stopped") { toast("Investigate stopped."); return; }
+  if (j.status === "failed") { toast("Investigate could not finish: " + j.error, true); return; }
+  INV.last = Object.assign(j, { cls: t.cls });
+  $("invlast").style.display = "";
+  renderInvestigate();
+}
+function invChart(res) {
+  const L = res.line, W = 900, H = 150, l = 34, r = 10, tp = 10, b = 26;
+  if (!L.times.length) return "";
+  const tmax = Math.max(L.times[L.times.length - 1], 1e-6), ymax = Math.max(res.threshold * 1.6, ...L.change, 1);
+  const X = (t) => l + (W - l - r) * t / tmax, Y = (v) => tp + (H - tp - b) * (1 - v / ymax);
+  let g = "";
+  (res.runs || []).forEach((rn) => { g += '<rect x="' + X(rn.time_s) + '" y="' + tp + '" width="' + Math.max(2, X(rn.time_to_s) - X(rn.time_s)) + '" height="' + (H - tp - b) + '" fill="rgba(255,179,71,.13)"/>'; });
+  g += '<line x1="' + l + '" x2="' + (W - r) + '" y1="' + Y(res.threshold) + '" y2="' + Y(res.threshold) + '" stroke="#ffb347" stroke-dasharray="5 4"/>';
+  g += '<polyline fill="none" stroke="#6cb6ff" stroke-width="1.6" points="' + L.times.map((t, i) => X(t).toFixed(1) + "," + Y(L.change[i]).toFixed(1)).join(" ") + '"/>';
+  const k = L.frames.indexOf(res.frame);
+  if (k >= 0) g += '<line x1="' + X(L.times[k]) + '" x2="' + X(L.times[k]) + '" y1="' + tp + '" y2="' + (H - b) + '" stroke="#fff" stroke-width="1.5"/><text x="' + (X(L.times[k]) + 4) + '" y="' + (tp + 10) + '" fill="#fff" font-size="11">this frame</text>';
+  for (let i = 0; i <= 4; i++) { const t = tmax * i / 4; g += '<text x="' + X(t) + '" y="' + (H - 8) + '" fill="#9aa1ab" font-size="11" text-anchor="middle">' + t.toFixed(0) + ' s</text>'; }
+  g += '<text x="' + (l - 6) + '" y="' + (Y(0) + 4) + '" fill="#9aa1ab" font-size="11" text-anchor="end">same</text>';
+  return '<svg id="invchart" viewBox="0 0 ' + W + " " + H + '" width="100%" style="cursor:pointer" role="img" aria-label="How much the spot changed over time">' + g + "</svg>";
+}
+function invPic(title, src, res, wide) {
+  if (!src) return "";
+  const box = wide ? 258 : 144, k = box / (2 * res.crop_half + 1), d = 2 * res.r * k;
+  return '<div class="invpic"><div class="frame' + (wide ? " wide" : "") + '"><img src="' + src + '" alt=""><span class="ring" style="width:' + d + "px;height:" + d + "px;left:" + (box / 2 - d / 2) + "px;top:" + (box / 2 - d / 2) + 'px"></span></div>' + esc(title) + "</div>";
+}
+function fmtT(t) { return t.toFixed(1) + " s"; }
+function renderInvestigate() {
+  const j = INV.last, res = j.result;
+  clearInterval(INV.clipTimer);
+  const studio = ST.on && ST.state && ST.state.camera;
+  let acts = "";
+  if (res.kind === "background" || res.kind === "background_visited") {
+    acts += studio ? '<button class="sbtn primary" id="invignore">Ignore this spot</button><span class="muted">Leaves out every guess inside the dashed circle from now on (it is added to the work area\'s ignore spots; your labels are kept).</span>'
+      : '<span class="muted">"Ignore this spot" is part of the studio (start.py); it isn\'t available here.</span>';
+  }
+  (res.moves || []).forEach((m) => {
+    if (m.came_from) acts += '<button class="jump" data-f="' + m.came_from.frame + '">Came from ' + Math.round(m.came_from.x) + ", " + Math.round(m.came_from.y) + " at " + fmtT(m.came_from.time_s) + "</button>";
+    if (m.went_to) acts += '<button class="jump" data-f="' + m.went_to.frame + '">Went to ' + Math.round(m.went_to.x) + ", " + Math.round(m.went_to.y) + " at " + fmtT(m.went_to.time_s) + "</button>";
+  });
+  if (res.kind === "appears" && res.stretch) {
+    acts += '<button class="jump" data-f="' + res.stretch.frame_from + '">Appears (' + fmtT(res.stretch.time_s) + ')</button><button class="jump" data-f="' + res.stretch.frame_to + '">Last seen (' + fmtT(res.stretch.time_to_s) + ")</button>";
+  }
+  const runs = (res.runs || []).slice(0, 12).map((rn) => '<li>' + fmtT(rn.time_s) + (rn.time_to_s > rn.time_s ? " to " + fmtT(rn.time_to_s) : "") + ": something different here <button class=\"jump\" data-f=\"" + rn.frame_from + "\">Jump</button></li>").join("");
+  const thumbs = res.thumbs.map((t) => '<div class="thumb' + (t.changed ? " chg" : "") + (t.frame === res.frame ? " now" : "") + '" data-f="' + t.frame + '" title="Frame ' + t.frame + ': click to go there"><img src="' + t.picture + '" alt="">' + t.time_s.toFixed(0) + " s</div>").join("");
+  const clips = res.clips.map((c, i) => '<div class="clip" data-f="' + c.frame_from + '" title="Click to go there"><img data-clip="' + i + '" src="' + c.pictures[0] + '" alt="">' + fmtT(c.time_s) + ": " + esc(c.what) + "</div>").join("");
+  modal('<h3>Investigate: the spot at ' + Math.round(res.x) + ", " + Math.round(res.y) + " (frame " + res.frame + ")</h3>" +
+    '<div class="verdict ' + res.kind + '"><b>' + esc(res.headline) + "</b>" + esc(res.detail) + (acts ? '<div class="acts">' + acts + "</div>" : "") + "</div>" +
+    '<div class="invrow">' + invPic("This frame", res.now_picture, res) + invPic("How it usually looks (the background: the middle value of every picture)", res.background, res) +
+    (ST.on ? '<div class="invpic" id="invref"><div class="muted">Second camera: looking ...</div></div>' : "") + "</div>" +
+    "<h4>How much the spot changed</h4>" + invChart(res) +
+    '<div class="invsub">The blue line is how different the spot looks from usual, over the whole recording; above the dashed line counts as something there (shaded). Click the line to go to that moment.</div>' +
+    (runs ? '<h4>Moments something different was here (' + res.n_runs + ")</h4><ul>" + runs + "</ul>" : "") +
+    (clips ? "<h4>The biggest changes</h4><div class=\"clips\">" + clips + '</div><div class="invsub">Each clip plays the frames around one change, over and over.</div>' : "") +
+    "<h4>The spot over time</h4><div class=\"thumbs\">" + thumbs + '</div><div class="invsub">The spot at ' + res.thumbs.length + " moments spread over the recording; an orange edge means it looks different from usual, white is this frame. Click one to go there.</div>" +
+    '<h4>Labels already made at this spot</h4><div id="invlabels"></div>' +
+    '<div class="actions"><button class="sbtn" id="invclose">Close (Esc)</button></div>');
+  $("modal").classList.add("wide");
+  $("invclose").onclick = closeInvestigate;
+  $("modal").querySelectorAll("[data-f]").forEach((el) => { el.onclick = () => jumpTo(+el.dataset.f); });
+  const ch = $("invchart");
+  if (ch) ch.onclick = (ev) => {
+    const b = ch.getBoundingClientRect(), L = res.line, tmax = L.times[L.times.length - 1] || 1;
+    const t = ((ev.clientX - b.left) / b.width * 900 - 34) / (900 - 44) * tmax;
+    let best = 0; L.times.forEach((tt, i) => { if (Math.abs(tt - t) < Math.abs(L.times[best] - t)) best = i; });
+    jumpTo(L.frames[best]);
+  };
+  if ($("invignore")) $("invignore").onclick = ignoreSpot;
+  let tick = 0;
+  INV.clipTimer = setInterval(() => {
+    tick++;
+    $("modal").querySelectorAll("img[data-clip]").forEach((im) => { const c = res.clips[+im.dataset.clip]; im.src = c.pictures[tick % c.pictures.length]; });
+  }, 160);
+  renderInvLabels(j.labels || []);
+  if (ST.on) loadReferee(res);
+}
+async function loadReferee(res) {
+  let r;
+  try { r = await api("/api/studio/referee", { frame: res.frame, x: res.x, y: res.y, cls: INV.cls }); }
+  catch (e) { r = { available: false, reason: e.message }; }
+  const box = $("invref"); if (!box) return;
+  if (!r.available) { box.innerHTML = '<div class="muted" style="max-width:260px"><b>Second camera</b><br>' + esc(r.reason) + "</div>"; return; }
+  box.innerHTML = '<div class="frame wide"><img src="' + r.picture + '" alt=""></div><span style="max-width:258px">' + esc(r.text) + "</span>";
+}
+function renderInvLabels(labels) {
+  const box = $("invlabels"); if (!box) return;
+  if (!labels.length) { box.innerHTML = '<p class="muted">No labels made at this spot yet (only guesses).</p>'; return; }
+  const rows = labels.map((l, i) => '<tr><td><input type="checkbox" class="invck" data-i="' + i + '" checked></td><td><button class="jump" data-f="' + l.frame + '">' + l.frame + "</button></td><td>" + fmtT(l.time_s) +
+    '</td><td><span class="swatch" style="background:' + colorOf(l.cls) + '"></span> ' + esc(l.cls) + "</td><td>" + esc(l.status === "confirmed" && l.state === "auto" ? (l.how === "same" ? "same picture" : "auto") : l.status) + "</td><td>#" + l.obj + "</td></tr>").join("");
+  box.innerHTML = '<table><tr><th></th><th>Frame</th><th>Time</th><th>Type</th><th>Status</th><th>Object</th></tr>' + rows + "</table>" +
+    '<div class="row"><span>For the ticked labels:</span> <select id="invcls">' + CLASSES.map((c, i) => '<option value="' + esc(c) + '">' + (i + 1) + " " + esc(c) + "</option>").join("") + "</select>" +
+    '<button class="sbtn" id="invtype">Change all to this type</button><button class="sbtn" id="invreject">Reject all</button><button class="sbtn" id="invunsure">Mark all unsure</button>' +
+    '<span class="muted">One step: Z takes it back.</span></div>';
+  box.querySelectorAll("[data-f]").forEach((el) => { el.onclick = () => jumpTo(+el.dataset.f); });
+  const pick = () => [...box.querySelectorAll(".invck")].filter((c) => c.checked).map((c) => labels[+c.dataset.i]).map((l) => ({ frame: l.frame, obj: l.obj }));
+  $("invtype").onclick = () => changeAll(pick(), "type", $("invcls").value);
+  $("invreject").onclick = () => changeAll(pick(), "reject");
+  $("invunsure").onclick = () => changeAll(pick(), "unsure");
+}
+async function changeAll(items, action, cls) {
+  if (!items.length) { toast("Tick at least one label."); return; }
+  let j;
+  try { j = await withBusy("Changing the labels at this spot ...", () => api("/api/investigate/change", { items: items, action: action, cls: cls })); }
+  catch (e) { toast(e.message, true); return; }
+  if (!j.changed) { toast("Nothing to change: they already are."); return; }
+  S.undo.push({ kind: "bulk", token: j.token, frames: j.frames });
+  INV.dirty = true;
+  setStats(j.stats);
+  const what = action === "type" ? "changed to " + cls : action === "reject" ? "rejected" : "marked unsure";
+  toast(j.changed + " label" + (j.changed > 1 ? "s" : "") + " on " + j.frames.length + " frame" + (j.frames.length > 1 ? "s" : "") + " " + what + " (Z takes it back)" + (j.updated ? "; guesses updated on " + j.updated + " later frames" : "") + ".");
+  try { const v = await api("/api/investigate"); INV.last.labels = v.labels; renderInvLabels(v.labels); } catch (e) { /* the list refreshes next time */ }
+}
+async function closeInvestigate() {
+  clearInterval(INV.clipTimer);
+  $("modal").classList.remove("wide");
+  closeModal();
+  if (INV.dirty) { INV.dirty = false; const f = S.frame ? S.frame.frame : null; await loadQueue(); let i = S.queue.findIndex((q) => q.f === f); await showFrame(Math.max(0, i)); }
+}
+async function jumpTo(f) {
+  await closeInvestigate();
+  if (!S.queue.length || !S.queue.some((q) => q.f === f)) {
+    if (S.mode !== "all") { S.mode = "all"; await loadQueue(); }
+  }
+  if (!S.queue.length) return;
+  let best = 0;
+  S.queue.forEach((q, i) => { if (Math.abs(q.f - f) < Math.abs(S.queue[best].f - f)) best = i; });
+  await showFrame(best);
+  const got = S.queue[best].f;
+  toast(got === f ? "Frame " + f + ". \"Back to the last investigation\" (right) returns to it." :
+    "Frame " + f + " wasn't picked for labelling; showing the nearest picked frame, " + got + ". \"Back to the last investigation\" returns to it.");
+}
+async function ignoreSpot() {
+  const res = INV.last.result, cam = ST.state.camera;
+  await closeInvestigate();
+  try {
+    const j = await withBusy("Saving the ignore spot ...", () => api("/api/studio/ignore_spot", { camera: cam.key, x: res.x, y: res.y, r: res.r }));
+    toast("Ignore spot added: guesses inside it are left out. Your labels are kept; Work area (W) shows or removes it.");
+    if (j.reopened) { await waitLoaded("Applying the ignore spot: following the guesses again ..."); const s = await studioState(); if (s) renderStudio(s); await init(); }
+  } catch (e) { toast(e.message, true); }
+}
+async function undoBulk(u) {
+  try {
+    const j = await withBusy("Taking back the change ...", () => api("/api/investigate/undo", { token: u.token }));
+    setStats(j.stats);
+    const f = S.frame ? S.frame.frame : null;
+    await loadQueue(); const i = S.queue.findIndex((q) => q.f === f); await showFrame(Math.max(0, i));
+    toast("Undone: the labels on " + j.undone + " frame" + (j.undone > 1 ? "s" : "") + " are back as they were.");
+  } catch (e) { toast(e.message, true); }
+}
+$("invbtn").addEventListener("click", invButton);
+$("invlast").addEventListener("click", async () => {
+  if (!INV.last) return;
+  try { const v = await api("/api/investigate"); if (v.status === "done") INV.last.labels = v.labels; } catch (e) { /* show what we have */ }
+  renderInvestigate();
+});
+
+// ---------------------------------------------------------------- track timeline
+// One lane per followed object across the recording: breaks and jumps marked, click to go there.
+async function showTimeline() {
+  if (!S.info) { toast("Open a recording first."); return; }
+  let j;
+  try { j = await withBusy("Laying out the tracks ...", () => api("/api/tracks")); } catch (e) { toast(e.message, true); return; }
+  const W = 1000, L = 110, R = 10, row = 18, top = 22, n = Math.max(1, j.n_frames - 1);
+  const X = (f) => L + (W - L - R) * f / n, H = top + row * j.objects.length + 24;
+  let g = "";
+  for (let i = 0; i <= 5; i++) { const f = n * i / 5; g += '<line x1="' + X(f) + '" x2="' + X(f) + '" y1="' + (top - 4) + '" y2="' + (H - 20) + '" stroke="#31363f"/><text x="' + X(f) + '" y="' + (H - 6) + '" fill="#9aa1ab" font-size="11" text-anchor="middle">' + (j.duration_s * i / 5).toFixed(0) + " s</text>"; }
+  if (S.frame) g += '<line x1="' + X(S.frame.frame) + '" x2="' + X(S.frame.frame) + '" y1="' + (top - 8) + '" y2="' + (H - 20) + '" stroke="#fff" stroke-width="1.5"/><text x="' + (X(S.frame.frame) + 3) + '" y="' + (top - 10) + '" fill="#fff" font-size="10">this frame</text>';
+  j.objects.forEach((o, k) => {
+    const y = top + k * row, col = colorOf(o.cls);
+    g += '<text x="' + (L - 6) + '" y="' + (y + 12) + '" fill="' + col + '" font-size="11" text-anchor="end">#' + o.obj + " " + esc(o.cls) + "</text>";
+    o.segments.forEach((s) => { g += '<rect x="' + X(s[0]) + '" y="' + (y + 4) + '" width="' + Math.max(1.5, X(s[1]) - X(s[0])) + '" height="9" rx="2" fill="' + col + '" opacity=".75"/>'; });
+    o.breaks.forEach((f) => { g += '<line x1="' + X(f) + '" x2="' + X(f) + '" y1="' + (y + 1) + '" y2="' + (y + 16) + '" stroke="#9aa1ab" stroke-width="1.5"/>'; });
+    o.jumps.forEach((f) => { g += '<path d="M' + X(f) + " " + (y + 2) + " l4 6 l-8 0 z\" fill=\"#ff6b6b\"><title>jump at frame " + f + "</title></path>"; });
+    o.labelled.forEach((f) => { g += '<circle cx="' + X(f) + '" cy="' + (y + 8.5) + '" r="2.2" fill="#fff"/>'; });
+  });
+  modal("<h3>Track timeline</h3>" +
+    (j.objects.length ? '<svg id="tlsvg" viewBox="0 0 ' + W + " " + H + '" width="100%" style="cursor:pointer" role="img" aria-label="Track timeline">' + g + "</svg>" +
+      '<div class="invsub">Each lane is one object the guesses followed, over the whole recording: a coloured bar while it was followed, a grey tick where the following broke off, a red mark where it jumped further than an object moves, a white dot where a frame has its label. Click anywhere to go to the nearest picked frame at that moment.</div>' +
+      (j.hidden ? '<p class="muted">' + j.hidden + " short tracks are not shown.</p>" : "")
+      : '<p class="muted">No object has been followed in this recording yet.</p>') +
+    '<div class="actions"><button class="sbtn" onclick="closeModal()">Close (Esc)</button></div>');
+  $("modal").classList.add("wide");
+  const sv = $("tlsvg");
+  if (sv) sv.onclick = (ev) => { const b = sv.getBoundingClientRect(); const x = (ev.clientX - b.left) / b.width * W; jumpTo(Math.max(0, Math.min(n, Math.round((x - L) / (W - L - R) * n)))); };
+}
+$("tlbtn").addEventListener("click", showTimeline);
+
+// ---------------------------------------------------------------- time saved
+$("stime").addEventListener("click", async () => {
+  let j;
+  try { j = await withBusy("Adding up the time ...", () => api("/api/studio/timesaved_html")); } catch (e) { toast(e.message, true); return; }
+  modal('<div class="tsaved">' + j.html + "</div>" +
+    '<div class="actions"><a class="sbtn" href="/api/studio/timesaved.csv?what=frames" download>Download every frame (CSV)</a>' +
+    '<a class="sbtn" href="/api/studio/timesaved.csv?what=summary" download>Download the summary (CSV)</a>' +
+    '<a class="sbtn" href="/report" target="_blank">Open the full report</a><button class="sbtn" onclick="closeModal()">Close</button></div>');
+});
+
+// ---------------------------------------------------------------- share a project / open a shared one
+function joinPath(dir, name) { const sep = dir.includes("\\") ? "\\" : "/"; return dir.replace(/[\\/]+$/, "") + sep + name; }
+function slugName(s) { return (s || "project").replace(/[^A-Za-z0-9_.-]+/g, "-").replace(/^[-.]+|[-.]+$/g, "") || "project"; }
+async function waitShare(first) {
+  S.waiting = true;
+  try {
+    for (;;) {
+      const s = await studioState();
+      const j = s && s.share;
+      if (!j) return null;
+      if (j.status !== "running") return j;
+      showLoading(j.what + " ...", j.done, j.total, j.left, "MB");
+      await sleep(400);
+    }
+  } finally { S.waiting = false; hideLoading(); }
+}
+$("sshare").addEventListener("click", () => {
+  const s = ST.state;
+  const def = joinPath(s.documents || "", slugName(s.project.name) + ".mxirl");
+  modal("<h3>Share project</h3><p>Saves the whole project as one file: object types, labels, the picked frames, every model and its scores, " +
+    "work areas, camera calibrations and the time-saving record. Give the file to another person; they open it with <b>Open shared project</b>.</p>" +
+    '<div class="row"><label for="shpath"><b>Save as</b></label></div><input id="shpath" style="width:100%" value="' + esc(def) + '">' +
+    '<p><label><input type="checkbox" id="shvid"> Also put the recordings\' videos in the file (large; leave it off when the other person already has the recordings)</label></p>' +
+    '<p class="muted">Nothing in the project is changed. You can keep labelling while it saves.</p>' +
+    '<div class="actions"><button class="sbtn" onclick="closeModal()">Cancel</button><button class="sbtn primary" id="shgo">Save the file</button></div>');
+  $("shgo").onclick = async () => {
+    try { await api("/api/studio/share/export", { path: $("shpath").value, with_video: $("shvid").checked }); }
+    catch (e) { toast(e.message, true); return; }
+    closeModal();
+    const j = await waitShare();
+    api("/api/studio/share/clear", {}).catch(() => {});
+    if (!j) return;
+    if (j.status === "failed") { toast("The file was not saved: " + j.error, true); return; }
+    const r = j.result;
+    modal("<h3>Project saved as one file</h3><div class=\"okbox\"><b>" + esc(r.path) + "</b> (" + r.mb + " MB)</div>" +
+      "<p>It holds " + r.recordings + " recording" + (r.recordings === 1 ? "" : "s") + " (" + (r.with_video ? "videos included" : "listed by name; the videos themselves are not in it") + ") and " +
+      r.models + " model" + (r.models === 1 ? "" : "s") + ". Whoever gets it opens it with <b>Open shared project</b>" + (r.with_video ? "." : " and points it to their copy of the recordings.") + "</p>" +
+      (r.warnings.length ? '<div class="warnbox">' + r.warnings.map(esc).join("<br>") + "</div>" : "") +
+      '<div class="actions"><button class="sbtn primary" onclick="closeModal()">Done</button></div>');
+  };
+});
+$("sopen").addEventListener("click", () => {
+  const s = ST.state;
+  modal("<h3>Open shared project</h3><p>Opens a project file (<b>.mxirl</b>) someone gave you. It is unpacked into a new folder; the project open now is not changed.</p>" +
+    '<div class="row"><label for="opfile"><b>The file</b></label></div><input id="opfile" style="width:100%" placeholder="' + esc(joinPath(s.documents || "", "their-project.mxirl")) + '">' +
+    '<div class="row" style="margin-top:8px"><label for="opdest"><b>New folder for the project</b></label></div><input id="opdest" style="width:100%">' +
+    '<div class="row" style="margin-top:8px"><label for="oprec"><b>Where your copy of the recordings is</b> (optional)</label></div><input id="oprec" style="width:100%" placeholder="a folder to search: recordings are found by their folder names">' +
+    '<p class="muted">On Windows: find the file in File Explorer, hold Shift and right-click it, choose "Copy as path", and paste it here.</p>' +
+    '<div class="actions"><button class="sbtn" onclick="closeModal()">Cancel</button><button class="sbtn primary" id="opgo">Open it</button></div>');
+  const sug = () => { const f = $("opfile").value.trim().replace(/^"|"$/g, ""); const base = f.split(/[\\/]/).pop().replace(/\.mxirl$/i, ""); if (base && !$("opdest").dataset.touched) $("opdest").value = joinPath(s.documents || "", slugName(base)); };
+  $("opfile").addEventListener("input", sug);
+  $("opdest").addEventListener("input", () => { $("opdest").dataset.touched = "1"; });
+  $("opgo").onclick = async () => {
+    try { await api("/api/studio/share/import", { file: $("opfile").value, dest: $("opdest").value, recordings: $("oprec").value }); }
+    catch (e) { toast(e.message, true); return; }
+    closeModal();
+    const j = await waitShare();
+    api("/api/studio/share/clear", {}).catch(() => {});
+    if (!j) return;
+    if (j.status === "failed") { toast("Not opened: " + j.error, true); return; }
+    const r = j.result;
+    modal("<h3>Project file opened</h3><div class=\"okbox\">The project <b>" + esc(r.name || "") + "</b> is now in <b>" + esc(r.dest) + "</b>.</div>" +
+      "<p>Recordings found: <b>" + r.found + " of " + r.recordings + "</b>." + (r.missing.length ? " The project still opens; when you pick a missing recording, the studio asks where it is." : "") + "</p>" +
+      (r.notes.length ? '<div class="warnbox">' + r.notes.map(esc).join("<br>") + "</div>" : "") +
+      '<div class="actions"><button class="sbtn" onclick="closeModal()">Stay in this project</button><button class="sbtn primary" id="opswitch">Switch to it now</button></div>');
+    $("opswitch").onclick = () => switchProject(r.dest);
+  };
+});
+async function switchProject(folder) {
+  closeModal();
+  try { await withBusy("Opening the project ...", () => api("/api/studio/switch", { folder: folder })); } catch (e) { toast(e.message, true); return; }
+  S.undo = []; INV.last = null; $("invlast").style.display = "none";
+  let s = await studioState();
+  if (s && s.loading) await waitLoaded("Opening the project ...");
+  s = await studioState(); if (s) renderStudio(s);
+  await afterOpen(s);
+}
+async function afterOpen(s) {
+  // the current recording may be missing (a shared project on another computer): ask where it is
+  const miss = s && s.current && s.current.rec ? (s.missing || []).find((m) => m.id === s.current.rec) : null;
+  if (miss) { S.info = null; S.frame = null; draw(); await locateRecording(miss); return; }
+  await init();
+}
+
+// ---------------------------------------------------------------- recording not found: locate it
+function locateRecording(m) {
+  return new Promise((resolve) => {
+    modal("<h3>Recording not found: locate it</h3>" +
+      "<p>The recording <b>" + esc(m.name || m.id) + "</b>" + (m.camera ? " (camera " + esc(m.camera) + ")" : "") + " isn't where the project says: <span class=\"muted\">" + esc(m.path) + "</span>. " +
+      "Its labels are safe in the project; only the video is needed again.</p>" +
+      '<div class="row"><label for="lcpath"><b>Its folder now</b> (the one with video.avi in it)</label></div><input id="lcpath" style="width:100%">' +
+      '<div class="actions" style="justify-content:flex-start"><button class="sbtn primary" id="lcgo">Use this folder</button></div>' +
+      '<div class="row" style="margin-top:10px"><label for="lcdir"><b>Or search a folder</b> for every missing recording (found by their folder names)</label></div><input id="lcdir" style="width:100%">' +
+      '<div class="actions" style="justify-content:flex-start"><button class="sbtn" id="lcsearch">Search</button></div>' +
+      '<p class="muted">On Windows: open the folder in File Explorer, click the address bar, copy, and paste here.</p><p class="muted" id="lcmsg"></p>' +
+      '<div class="actions"><button class="sbtn" id="lcno">Not now</button></div>', true);
+    const done = async (j) => {
+      const still = (j.missing || []).find((x) => x.id === m.id);
+      if (still) { $("lcmsg").textContent = "Still not found. " + (j.found && j.found.length ? j.found.length + " other recording(s) were found." : ""); return; }
+      closeModal(); toast("Found it" + (j.found && j.found.length > 1 ? " (and " + (j.found.length - 1) + " more)" : "") + ".");
+      const s = await studioState(); if (s) renderStudio(s);
+      resolve(true);
+      await studioOpen(m.id, (s && s.current && s.current.model) || "none");
+    };
+    $("lcgo").onclick = async () => { try { done(await api("/api/studio/relink", { rec: m.id, path: $("lcpath").value })); } catch (e) { $("lcmsg").textContent = e.message; } };
+    $("lcsearch").onclick = async () => {
+      try { done(await withBusy("Searching for the recordings ...", () => api("/api/studio/relink", { folder: $("lcdir").value }))); } catch (e) { $("lcmsg").textContent = e.message; }
+    };
+    $("lcno").onclick = () => { closeModal(); toast("Pick another recording above, or locate this one later by picking it again."); resolve(false); };
+  });
+}
+
 // ---------------------------------------------------------------- the tour
 // Steps point at a part of the screen; "safe" ones can be tried freely, "changes" ones change saved work.
 const TOUR = { steps: [], i: 0, lockedModal: false, done: null };
@@ -1323,7 +1741,12 @@ const TOUR_STEPS = [
   { sel: "#sclasses", title: "Object types", kind: "changes", text: "The types you label, their keys and colours, whether they have a front, and their height for the second camera. Saving changes the project's settings." },
   { sel: "#sadd", title: "Add recording", kind: "changes", text: "Adds a recording folder, or a two-camera session, to the project. Nothing is copied: the video stays where it is." },
   { sel: "#swork", title: "Work area", kind: "changes", text: "Mark the part of the picture to look in (and spots to ignore). Guesses outside it are left out; your labels are kept." },
+  { sel: "#stime", title: "Time saved", kind: "safe", text: "How long a frame takes with each model, how many frames were accepted without looking, and the time that saved. Download it as a table for a report." },
+  { sel: "#sshare", title: "Share project", kind: "safe", text: "Saves the whole project as one file to hand to someone else (or keep). Your project is not changed." },
+  { sel: "#sopen", title: "Open shared project", kind: "safe", text: "Opens a project file someone gave you, in a new folder. The project open now is not changed; you choose whether to switch to the new one." },
   { sel: "#objs", title: "Objects on this frame", kind: "safe", text: "Every object on the frame with its number, type, heading and status. Click one to select it." },
+  { sel: "#invbtn", title: "Investigate a spot (Q)", kind: "safe", text: "Not sure whether something is an object or a mark on the background? Point at it and press Q: the studio looks at that spot over the whole recording and says what it found. Looking changes nothing; its \"change all\" and \"Ignore this spot\" buttons do (Z undoes a change all)." },
+  { sel: "#tlbtn", title: "Track timeline", kind: "safe", text: "One lane per object the guesses followed, across the whole recording, with breaks and jumps marked: a quick way to find where the following went wrong. Click a moment to go there." },
   { sel: "#autoacc", title: "Accept remaining high-confidence frames", kind: "changes", text: "Accepts the guesses on every high-confidence frame nobody has looked at, without looking. Do the spot check first. Undo auto-accept takes them back." },
   { sel: "#reset", title: "Reset this frame to the guesses", kind: "changes", text: "Throws away your changes on this frame and shows the guesses again (Z brings your changes back)." },
   { sel: "#keys", title: "Keys", kind: "safe", text: "Every key, in one list. The ones worth learning first: Enter, N, Del, the number keys, ? and Z." },
@@ -1384,6 +1807,8 @@ async function boot() {
     s = await studioState() || s; renderStudio(s);
     if (s.loading) await waitLoaded();
     if ((s.job && s.job.status === "running") || s.background) pollStudio();
+    const miss = s.current && s.current.rec ? (s.missing || []).find((m) => m.id === s.current.rec) : null;
+    if (miss) { if (tour) await startTour(); await locateRecording(miss); return; }
   }
   await init();
   if (tour) await startTour();

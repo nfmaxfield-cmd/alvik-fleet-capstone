@@ -16,6 +16,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import project as projmod  # noqa: E402
+import timesaved  # noqa: E402
 
 BRAND = "Maxfield IRL Tracking"
 TAGLINE = "Identify. Recognize. Label."
@@ -130,6 +131,8 @@ def html_report(proj):
             out.append("</table><p class='muted'>Objects: different physical objects behind the labels (one object seen in "
                        "100 frames counts once). A type with few objects has an unreliable score.</p>")
 
+    out.append(time_saved_html(proj))
+
     out.append("<h2>Data</h2><table><tr><th>Recording</th><th>Camera</th><th>Frames confirmed</th></tr>")
     for r in proj.recordings():
         out.append("<tr><td>%s</td><td>%s</td><td>%d</td></tr>" % (e(r["name"]), e(r.get("camera") or "–"),
@@ -155,6 +158,82 @@ def html_report(proj):
                "Right = share of the model's reports that matched a label. F1 combines the two: 2 × found × right / (found + right).</li>"
                "</ul>" % _num(proj.data.get("settings", {}).get("block_s", 30), 0))
     out.append("</body></html>")
+    return "".join(out)
+
+
+def _dur(s):
+    """Seconds in plain words."""
+    if s is None:
+        return "–"
+    s = float(s)
+    if s < 90:
+        return "%d s" % round(s)
+    if s < 5400:
+        return "%d min" % round(s / 60.0)
+    return "%.1f h" % (s / 3600.0)
+
+
+def _model_name(m):
+    return {"none": "No model (motion + tracking)", "unknown": "Not known (estimated frames)"}.get(m, "Model " + m)
+
+
+def time_saved_html(proj, summary=None):
+    """The time-saving section: seconds per frame and frames accepted without looking, by model."""
+    e = _html.escape
+    sm = summary or timesaved.summary(proj)
+    t, rows = sm["totals"], sm["by_model"]
+    out = ["<h2>Time saved</h2>"]
+    if not rows:
+        out.append("<p>No frames finished yet.</p>")
+        return "".join(out)
+    lead = []
+    base = next((r for r in rows if r["model"] == "none"), None)
+    best = [r for r in rows if r["model"] not in ("none", "unknown") and r["seconds_per_frame"] is not None and r["frames"]]
+    if base and base["seconds_per_frame"] is not None and best:
+        last = best[-1]
+        lead.append("With no model a frame took %s; with model %s it took %s (%d%% accepted unchanged)."
+                    % (_dur(base["seconds_per_frame"]), e(last["model"]), _dur(last["seconds_per_frame"]),
+                       round(100 * (last["accepted_unchanged"] or 0))))
+    n = t["frames_by_person"]
+    lead.append("%d frame%s checked by a person (%s in all)." % (n, " was" if n == 1 else "s were", _dur(t["seconds_by_person"])))
+    if t["auto"] or t["same"]:
+        lead.append("%d more %s accepted without looking and %d for having the same picture as a frame a person "
+                    "accepted." % (t["auto"], "was" if t["auto"] == 1 else "were", t["same"]))
+    if t["saved_by_accepting_s"]:
+        lead.append("At %s per frame%s, that is about %s not spent." % (
+            _dur(t["baseline_seconds_per_frame"]), " (measured with no model)" if t["baseline_measured"] else "",
+            _dur(t["saved_by_accepting_s"])))
+    out.append("<p class='lead'>%s</p>" % " ".join(lead))
+    mx = max([r["seconds_per_frame"] or 0 for r in rows] + [1])
+    # bars only when there is a real comparison (three or more guess sources with a time)
+    bars = sum(1 for r in rows if r["seconds_per_frame"] is not None) >= 3
+    out.append("<table><tr><th>Guesses from</th><th>Frames checked by a person</th><th>Seconds per frame</th>"
+               "<th>Accepted unchanged</th><th>Changes per frame</th><th>Accepted without looking</th>"
+               "<th>Same picture</th><th>Estimated</th></tr>")
+    for r in rows:
+        bar = ""
+        if bars and r["seconds_per_frame"] is not None:
+            bar = ("<span style='display:inline-block;height:9px;background:#2b7bbb;margin-left:8px;vertical-align:0;"
+                   "width:%dpx'></span>" % max(2, round(90 * r["seconds_per_frame"] / mx)))
+        out.append("<tr><td>%s</td><td>%d</td><td>%s%s</td><td>%s</td><td>%s</td><td>%d</td><td>%d</td><td>%s</td></tr>" % (
+            e(_model_name(r["model"])), r["frames"], _num(r["seconds_per_frame"]), bar, _pct(r["accepted_unchanged"]),
+            _num(r["edits_per_frame"]), r["auto"], r["same"], r["estimated"] or "–"))
+    out.append("</table>")
+    out.append("<p class='muted'>%sSeconds count the time the frame was on screen, with "
+               "pauses over %d s counted as %d s and at most %d s per frame. Frames finished before this record existed "
+               "are estimated from their save times (the gap to the previous saved frame, at most %d s) and counted "
+               "under \"Estimated\"; which model was in use then is not known after the first model was trained.</p>"
+               % ("Each bar is the average seconds a person spent on one frame with those guesses: shorter means the "
+                  "guesses needed less fixing. " if bars else "", timesaved.timing.IDLE_S, timesaved.timing.IDLE_S, timesaved.timing.CAP_S, timesaved.timing.CAP_S))
+    extra = []
+    if t.get("setup_seconds") is not None:
+        extra.append("project setup %s" % _dur(t["setup_seconds"]))
+    if t.get("install_seconds") is not None:
+        extra.append("first install %s" % _dur(t["install_seconds"]))
+    if extra:
+        out.append("<p class='muted'>Getting started: %s.</p>" % ", ".join(extra))
+    out.append("<p class='muted'>The numbers behind this table: the studio's Time saved panel (CSV), or "
+               "<code>python tools/recognition/timesaved.py &lt;project folder&gt;</code>.</p>")
     return "".join(out)
 
 

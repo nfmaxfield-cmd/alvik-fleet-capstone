@@ -233,7 +233,7 @@ def test_project_run_uses_its_model_and_work_area(recording, tmp_path):
     torch.save(dict(model=CentreNet(cfg).state_dict(), config=cfg), pt)
     export.export(pt, os.path.join(d, "model.onnx"))
     proj.data["models"].append(dict(id="v1", status="ready", onnx="models/v1/model.onnx", metrics={}))
-    proj.data["cameras"][""] = dict(work_area=[[0, 0], [640, 0], [640, 480], [0, 480]], margin_px=0, ignore_spots=[[5, 5, 3]])
+    proj.data["cameras"]["default"] = dict(work_area=[[0, 0], [640, 0], [640, 480], [0, 480]], margin_px=0, ignore_spots=[[5, 5, 3]])
     proj.save()
     code = um.main([rid, "--project", proj.folder, "--max-frames", "8", "--no-page", "--min-score", "0.0"])
     assert code == 0

@@ -14,6 +14,7 @@ import importlib
 import os
 import subprocess
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -69,6 +70,7 @@ def main():
     if todo:
         print("First start: installing what %s needs (%s). This takes a few minutes, once."
               % (BRAND, ", ".join(p for _, p, _ in todo)))
+        t0 = time.time()
         try:
             install(todo)
         except subprocess.CalledProcessError as e:
@@ -76,7 +78,9 @@ def main():
         still = missing()
         if still:
             sys.exit("Still missing after installing: %s" % ", ".join(p for _, p, _ in still))
-        print("All packages installed.\n")
+        took = time.time() - t0
+        os.environ["MXIRL_INSTALL_SECONDS"] = "%.1f" % took     # kept in the project's time-saving stats
+        print("All packages installed (%.0f s).\n" % took)
     args = sys.argv[1:]
     if not args or args[0].startswith("-"):
         args = [default_project()] + args

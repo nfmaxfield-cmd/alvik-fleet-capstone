@@ -20,6 +20,10 @@ studio bar on top:
 - Object types: name, has a front (heading), size, height above the floor (or "it varies").
 - Add recording: a recording folder, or a two-camera session folder.
 - Work area: per camera, the part of the picture to look in, plus ignore spots.
+- Investigate (key Q on the page): one spot across the whole recording; "Ignore this spot", and
+  the second camera as a referee when both cameras are calibrated.
+- Time saved: seconds per frame and frames accepted without looking, by model version (CSV too).
+- Share project / Open shared project: the whole project as one .mxirl file (share.py).
 
 A new project first asks for its name and object types (setup), then shows a short tour.
 
@@ -49,6 +53,16 @@ for p in (HERE, LABEL, DETECTOR):
 import app as labelapp   # noqa: E402
 import project as projmod  # noqa: E402
 import trainer as trainmod  # noqa: E402
+import timesaved  # noqa: E402
+import timing  # noqa: E402
+
+
+class RecordingMissing(ValueError):
+    """The recording's folder (video.avi) isn't where the project says: the page offers to locate it."""
+
+    def __init__(self, rec):
+        self.rec = rec
+        ValueError.__init__(self, "Recording not found: %s. It was at %s" % (rec.get("name") or rec["id"], rec["path"]))
 
 INFER = os.path.join(DETECTOR, "infer.py")
 
@@ -66,6 +80,7 @@ class Studio:
         self.bg = None                   # what the background pass is doing (shown in the top bar)
         self.bg_thread = None
         self.pending_reopen = False      # settings changed while opening: open again when done
+        self.share = None                # Share project / Open shared project: what it is doing
 
     # --- opening a recording with a guess source ------------------------------------------
     def current(self):
@@ -84,7 +99,7 @@ class Studio:
             raise ValueError("add a recording first")
         rec = proj.rec(rid)
         if not os.path.exists(os.path.join(rec["path"], "video.avi")):
-            raise ValueError("can't find the recording %s (moved? use --relink)" % rec["path"])
+            raise RecordingMissing(rec)
         weights = None
         if model and model != "none":
             m = proj.model(model)
@@ -164,7 +179,8 @@ class Studio:
                                  classes=proj.class_names(), labels_dir=proj.labels_dir(rid), extra_dets=extra,
                                  progress=progress, log=self.log, class_map=proj.motion_class_map(),
                                  loose_classes=proj.loose_classes(), front_classes=proj.heading_classes(),
-                                 area=proj.camera_settings(proj.camera_key(rec)))
+                                 area=proj.camera_settings(proj.camera_key(rec)),
+                                 stats_path=timesaved.stats_path(proj, rid), model_id=model)
             with self.lock:
                 self.session = s
                 proj.data["current"] = dict(rec=rid, model=model)
@@ -301,7 +317,122 @@ class Studio:
                     project=dict(name=proj.name, folder=proj.folder), recordings=recs, models=models,
                     current=cur, classes=proj.class_view(), job=job,
                     loading=self.loading_view(), settings=proj.data.get("settings", {}), labelled_total=total,
-                    cross_note=self.cross_note, setup=proj.setup_view(), camera=camera, background=self.bg)
+                    cross_note=self.cross_note, setup=proj.setup_view(), camera=camera, background=self.bg,
+                    share=self.share_view(), missing=[r for r in recs if r["missing"]],
+                    documents=_documents())
+
+    # --- investigate: ignore spot, second camera ------------------------------------------------
+    def ignore_spot(self, camera, x, y, r):
+        """Add an ignore spot to the camera's work area, then open the recording again with it."""
+        key = camera or "default"
+        c = self.proj.camera_settings(key)
+        spots = list(c["ignore_spots"]) + [[float(x), float(y), float(r)]]
+        self.proj.set_camera_settings(key, c["work_area"], c["margin_px"], spots, c["image_size"], asked=c["asked"])
+        return self.reopen(only_camera=key)
+
+    def referee(self, frame, x, y, cls):
+        import referee
+        cur = self.proj.data.get("current", {})
+        if not cur.get("rec"):
+            return dict(available=False, reason="No recording open.")
+        try:
+            return referee.look(self.proj, self.proj.rec(cur["rec"]), int(frame), float(x), float(y), cls)
+        except Exception as e:          # the rest of Investigate keeps working
+            traceback.print_exc()
+            return dict(available=False, reason="The second camera could not be used: %s" % e)
+
+    # --- share / open a project file ----------------------------------------------------------
+    def share_view(self):
+        return dict(self.share) if self.share else None
+
+    def _share_job(self, what, fn):
+        if self.share and self.share.get("status") == "running":
+            raise ValueError("still busy with the last project file; wait a moment")
+        clock = labelapp.RateClock(window=10.0)
+        job = dict(status="running", what=what, done=0, total=0, left="", result=None, error=None)
+        self.share = job
+
+        def progress(done, total):
+            job.update(done=done, total=total, left=labelapp.fmt_left(clock.update(done, total)))
+
+        def work():
+            try:
+                job.update(result=fn(progress), status="done")
+            except Exception as e:
+                if not isinstance(e, ValueError):
+                    traceback.print_exc()
+                job.update(status="failed", error=str(e))
+        threading.Thread(target=work, daemon=True).start()
+        return job
+
+    def export(self, path, with_video=False):
+        import share
+        path = (path or "").strip().strip('"')
+        if not path:
+            raise ValueError("Say where to save the file.")
+
+        def run(progress):
+            res = share.export_project(self.proj, os.path.expanduser(path), with_video=bool(with_video), progress=progress)
+            m = res["manifest"]
+            return dict(path=res["path"], mb=round(res["bytes"] / 1e6, 1), recordings=len(m["recordings"]),
+                        models=m["contents"]["models"], with_video=m["with_video"], warnings=m["warnings"])
+        return self._share_job("Saving the project as one file", run)
+
+    def import_file(self, file, dest, recordings=None):
+        import share
+        file = os.path.expanduser((file or "").strip().strip('"'))
+        dest = os.path.expanduser((dest or "").strip().strip('"'))
+        recordings = os.path.expanduser((recordings or "").strip().strip('"')) or None
+        if not file or not os.path.isfile(file):
+            raise ValueError("There is no file at %s." % (file or "(empty)"))
+        if not dest:
+            raise ValueError("Say which new folder the project should go in.")
+        share.read_manifest(file)          # a plain message right away if it isn't a project file
+
+        def run(progress):
+            res = share.import_project(file, dest, recordings, progress=progress)
+            return dict(dest=res["dest"], name=res["manifest"].get("project_name"), recordings=res["recordings"],
+                        found=res["found"], notes=res["notes"],
+                        missing=[dict(m, id=m["id"]) for m in res["missing"]])
+        return self._share_job("Opening the project file", run)
+
+    def switch_project(self, folder):
+        """Open another project folder in this studio (after Open shared project)."""
+        if self.trainer.busy():
+            raise ValueError("A model is still training in this project; wait until it is done.")
+        if self.loading:
+            raise ValueError("still opening the last one; wait a moment")
+        proj = projmod.Project(os.path.expanduser(folder))
+        with self.lock:
+            self.proj = proj
+            self.trainer = trainmod.Trainer(proj, log=self.log)
+            self.session = None
+            self.cross_note = None
+        cur = proj.data.get("current", {})
+        opened = False
+        if cur.get("rec"):
+            try:
+                self.open(cur["rec"], cur.get("model", "none"))
+                opened = True
+            except RecordingMissing:
+                pass
+            except (ValueError, KeyError):
+                try:
+                    self.open(cur["rec"], "none")
+                    opened = True
+                except (ValueError, KeyError):
+                    pass
+        return opened
+
+    def relink(self, rid=None, path=None, folder=None):
+        """Locate a missing recording: its own folder (rid + path), or a folder to search for all of them."""
+        import share
+        if folder:
+            found, still = share.relink_from_folder(self.proj, os.path.expanduser(folder.strip().strip('"')))
+            return dict(found=found, missing=still, notes=share.describe_missing(still))
+        rec = share.relink(self.proj, rid, path)
+        return dict(found=[rec["id"]], missing=share.missing_recordings(self.proj),
+                    notes=share.describe_missing(share.missing_recordings(self.proj)))
 
     def curve(self):
         p = os.path.join(self.proj.folder, "models", "curve.json")
@@ -309,6 +440,23 @@ class Studio:
             return dict(points=[], test=dict(frames=0, note="no model trained yet"))
         with open(p) as f:
             return json.load(f)
+
+
+def _documents():
+    """Where to suggest saving a project file: the Documents folder (or the home folder)."""
+    docs = os.path.join(os.path.expanduser("~"), "Documents")
+    return docs if os.path.isdir(docs) else os.path.expanduser("~")
+
+
+def _download(h, data, name, ctype="text/csv; charset=utf-8"):
+    body = data.encode("utf-8")
+    h.send_response(200)
+    h.send_header("Content-Type", ctype)
+    h.send_header("Content-Length", str(len(body)))
+    h.send_header("Content-Disposition", 'attachment; filename="%s"' % name)
+    h.send_header("Cache-Control", "no-store")
+    h.end_headers()
+    h.wfile.write(body)
 
 
 def _meta(folder):
@@ -359,14 +507,53 @@ def make_routes(studio):
         elif path == "/report":
             import report
             h._send(200, report.html(studio.proj), "text/html; charset=utf-8")
+        elif path == "/api/studio/timesaved":
+            h._send(200, timesaved.summary(studio.proj))
+        elif path == "/api/studio/timesaved_html":
+            import report
+            sm = timesaved.summary(studio.proj)
+            h._send(200, dict(html=report.time_saved_html(studio.proj, sm), summary=sm))
+        elif path == "/api/studio/timesaved.csv":
+            what = (q.get("what") or ["frames"])[0]
+            slug = projmod.slug(studio.proj.name)
+            if what == "summary":
+                _download(h, timing.summary_csv(timesaved.summary(studio.proj)), "%s-time-saved-summary.csv" % slug)
+            else:
+                _download(h, timing.frames_csv(timesaved.project_frames(studio.proj)), "%s-time-saved-frames.csv" % slug)
         else:
             return False
         return True
 
     def post(h, path, b):
         if path == "/api/studio/open":
-            studio.open(b.get("rec"), b.get("model", "none"))
+            try:
+                studio.open(b.get("rec"), b.get("model", "none"))
+            except RecordingMissing as e:
+                h._send(409, dict(error=str(e), missing=dict(id=e.rec["id"], name=e.rec.get("name"),
+                                                             camera=e.rec.get("camera"), path=e.rec["path"])))
+                return True
             h._send(200, dict(ok=True))
+        elif path == "/api/studio/ignore_spot":
+            reopened = studio.ignore_spot(b.get("camera"), b["x"], b["y"], b["r"])
+            h._send(200, dict(ok=True, reopened=reopened))
+        elif path == "/api/studio/referee":
+            h._send(200, studio.referee(b.get("frame", 0), b["x"], b["y"], b.get("cls")))
+        elif path == "/api/studio/share/export":
+            studio.export(b.get("path"), b.get("with_video"))
+            h._send(200, dict(ok=True, share=studio.share_view()))
+        elif path == "/api/studio/share/import":
+            studio.import_file(b.get("file"), b.get("dest"), b.get("recordings"))
+            h._send(200, dict(ok=True, share=studio.share_view()))
+        elif path == "/api/studio/share/clear":
+            if studio.share and studio.share.get("status") != "running":
+                studio.share = None
+            h._send(200, dict(ok=True))
+        elif path == "/api/studio/switch":
+            opened = studio.switch_project(b.get("folder") or "")
+            h._send(200, dict(ok=True, opened=opened))
+        elif path == "/api/studio/relink":
+            res = studio.relink(b.get("rec"), b.get("path"), b.get("folder"))
+            h._send(200, res)
         elif path == "/api/studio/train":
             mid = studio.trainer.start(float(b.get("minutes") or 20))
             studio.proj.data["settings"]["train_minutes"] = float(b.get("minutes") or 20)
@@ -428,15 +615,25 @@ def main():
     for folder in a.add or []:
         ids = proj.add_recording(folder, a.camera)
         print("Added %d recording(s) from %s" % (len(ids), folder))
+    if os.environ.get("MXIRL_INSTALL_SECONDS"):
+        try:
+            timesaved.record_install(proj, float(os.environ["MXIRL_INSTALL_SECONDS"]))
+        except (OSError, ValueError):
+            pass
     studio = Studio(proj)
     cur = proj.data.get("current", {})
     if cur.get("rec"):
         model = cur.get("model", "none")
         try:
             studio.open(cur["rec"], model)
+        except RecordingMissing as e:
+            print("%s. The page will ask where it is now." % e)
         except (ValueError, KeyError) as e:
             print("Opening %s with no model (%s)" % (cur["rec"], e))
-            studio.open(cur["rec"], "none")
+            try:
+                studio.open(cur["rec"], "none")
+            except (ValueError, KeyError) as e2:
+                print("Could not open it: %s" % e2)
     get, post = make_routes(studio)
     server, url = labelapp.serve(studio.current, a.port, extra_get=get, extra_post=post)
     print("\n%s is running. Project: %s  (%s)" % (labelapp.BRAND, proj.name, proj.folder))
