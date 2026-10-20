@@ -85,3 +85,17 @@ Current rules (select_frames.py): about one frame per second, skipping near-dupl
 frames when an object appears, disappears, two objects are close, or a guess scores low; the
 first and last frame. "Most useful next" orders them least-confident first.
 Gap seen: a still object is never detected, so it never makes a frame "interesting" either.
+
+## Split the chain when it's unsure (Nick, 2026-10-20)
+
+When the chain finds two candidates that look alike, don't pick one: follow both branches,
+and compare each branch further down with the confirmed path from before the split. A lookalike
+rarely keeps looking alike (and moving plausibly), so the wrong branch dies out.
+(Known as multiple hypothesis tracking, Reid 1979.)
+
+- Cap the branches (keep the best few, drop the weakest), or they multiply.
+- Decide a split only after a short window (about 1-2 s), then keep the winner.
+- Evidence for each branch: looks like the confirmed patch; moves in a way a robot can
+  (no jumps); later, agrees with the robot's own log.
+- A split that never resolves (two identical Alviks crossing: they look the same forever) is
+  exactly the frame to show the person: it should go to the top of "Most useful next".
