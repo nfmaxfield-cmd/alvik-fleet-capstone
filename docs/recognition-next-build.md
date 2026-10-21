@@ -275,3 +275,28 @@ easy to press the wrong thing because it isn't too clear what means what."
 - One undo for every action, ignore-spot included (today: Z undoes change all; an ignore spot is
   removed in Work area, W).
 - Presentation: a short scripted demo of Q (stain vs robot, then change all).
+
+## Rejections inform, never blanket-ignore (Nick, 2026-10-20)
+
+Nick: no scenario needs an area eliminated for the whole recording; a rejection should apply to that
+frame, and what it teaches should strongly inform later decisions at that spot.
+- Replace "Ignore this spot" (permanent, every frame) with: reject in this frame, and remember what
+  the empty spot looks like there. Later guesses at that spot that look like the remembered empty
+  patch are pushed down hard; something that looks different there (a robot driving over the stain)
+  is still found. Generalises the tracker's existing "rejected spots" rule (which only hides a new
+  track until it moves away).
+- Rejected guesses are kept as "this is not an object" examples for training (hard negatives).
+- Generic: works for any stain, reflection or mark. Truly permanent exclusions stay possible only
+  through the work area (outside the area), which is where a shelf light or a reflection belongs.
+
+## Standing rule: assume nobody reads first (Nick, 2026-10-20)
+
+"We need to assume that people are lazy and not going to look for info or instructions before they
+start trying to use the program."
+- Every action announces what it just did in a short message that fades by itself (no X): what
+  changed, where, and how to take it back. Examples: a Jump in Investigate: "Jumped to frame 6150
+  (4:12). Investigation closed: press Back (or Q) to return to it." Z: "Undid: moved #71 on frame
+  9310 back to where it was."
+- Nothing that changes saved work happens without saying so; nothing closes or moves the person
+  elsewhere silently.
+- Every Investigate jump keeps a one-click way back to the investigation.
