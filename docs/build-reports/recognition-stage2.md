@@ -39,7 +39,7 @@ re-tested; re-track after a save now holds the studio 0.16 s (was 5.6 s; measure
 3. Nick's AI key for a real test; personalisation for the other team once they answer.
 
 **Cost.** Subagent tokens about 4.0M (lanes 2.0M, integration 0.5M, checks 1.0M, fix rounds 1.0M),
-plus the main session's. Meter before: 72% (Nick, 20:45 ET). After: to be read by Nick.
+plus the main session's. Meter before: 72% (Nick, 20:45 ET); after: 80% (Nick, 05:35 ET Oct 21): 8 points for ~4.0M subagent tokens plus the main session (about 0.5M a point, as in the handoff build).
 
 ## New tests that may now be needed
 - All of the above on roam1 and Nick's labels (the tracker's ~20 chosen numbers; check-in interval).
