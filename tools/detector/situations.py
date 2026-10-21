@@ -25,7 +25,7 @@ import numpy as np
 
 import detcore
 
-SITUATIONS = [("alone", "Object alone"), ("close", "Close together"), ("person", "Near a person"),
+SITUATIONS = [("alone", "On its own"), ("close", "Close together"), ("person", "Near a person"),
               ("edge", "At the edge of the work area or picture"), ("still", "Standing still")]
 NAMES = dict(SITUATIONS)
 CLOSE_SIZES = 1.5

@@ -455,11 +455,29 @@ first in "Most useful next".
 
 **Positions file** (`positions.csv`, outside data from any machine that knows where things are):
 `t,name,x,y[,heading][,frame][,still]`, one row per object per moment. `t`: seconds on the shared
-clock (the recording's `t_wall`; or give an offset); `x, y`: cm on the floor in the floor
-calibration's axes; `heading`: degrees, 0 = +x, counter-clockwise (blank: not known); `frame`:
-`floor` (default: positions already on the floor) or `own` (dead reckoning from the object's own start:
-lined up like a robot log); `still`: 1 while not moving. Placing it in the picture needs the camera's
-floor calibration (`cameras/<camera>.json`, CROSSCAM.md).
+clock (the recording's `t_wall`, seconds since 1 January 1970 as in its `frames.csv`; a recording made
+from a video file has `t_wall` estimated from the file's time; or give an offset, typed or found from a
+moment in the studio); `x, y`: cm on the floor in the floor calibration's axes; `heading`: degrees,
+0 = +x, counter-clockwise (blank: not known); `frame`: `floor` (default: positions already on the floor)
+or `own` (dead reckoning from the object's own start: lined up like a robot log); `still`: 1 while not
+moving. Placing it in the picture needs the camera's floor calibration (`cameras/<camera>.json`, made in
+the studio: More, Floor calibration), unless the positions are given in **picture pixels** (the studio's
+"My positions are in picture pixels"; `outside.json` then has `"units": "px"`): x to the right, y down from
+the picture's top-left corner, heading 0 = to the right, counter-clockwise as seen on screen; only
+`floor` rows.
+
+`labels/<recording>/outside.json`: `{"path", "plugin", "offset_s", "added"[, "units": "px"]}` (no `units`:
+cm on the floor). `outside_drafts.json.before`: the guesses from before the last "Line up again" (Z puts
+them back).
+
+**Camera file made in the studio** (`cameras/<camera>.json`, the Floor calibration screen,
+tools/recognition/floorcal.py): a camera model file (`K`, `dist`, `rvec`, `tvec`, `image_size`, `fit`, as
+cameras.py writes) plus `mirror_y: true` when the person's floor y runs the other way round (the pose is
+then for (x, -y, z); readers flip y in and out, absent = false) and `studio_calibration`: `{"spec"` (the
+clicks: `mode` rectangle | points, `corners_px` + `width_cm` + `length_cm`, or `points_px` + `points_cm`,
+optional `height_cm`), `"err_cm", "max_err_cm", "mirrored", "points"` (per click: px, cm, err_cm, and
+loo_cm for measured points), `"made"}`. Home positions may have `group` (made together by a preset: a
+tray's slots, a dock's places).
 
 **AI helper files** (only when it is used; never put in a shared `.mxirl` file):
 - `<project>/ai_settings.json`: `{"enabled", "provider" (anthropic | openai_compatible | stand_in),

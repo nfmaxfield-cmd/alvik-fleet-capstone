@@ -193,8 +193,9 @@ and which change saved work. The **?** button at the top right shows the tour ag
    scores and the verdict in words. The top bar says how far it is in plain words ("round 4 of about 30, about 6 min
    left"). It needs at least 10 confirmed frames for learning and 1 in each of the other two
    parts, and the two smaller parts need frames a person looked at (auto-accepted frames are only
-   used for learning); if it hasn't got them, it says how many each part has and what to do, before
-   anything starts. When it is done, a
+   used for learning). The window counts them first, part by part, the way training will, and the
+   Start button stays off until there are enough; it says what to do. **Z** right after starting stops
+   it (the stopped model is hidden with the failed ones). When it is done, a
    box says how well the new model does. If the model was saved but **finds nothing yet**, the
    box says so, with the numbers it knows: how many frames and minutes it learned from, and what a
    model of this project that does find objects needed (or that no model here has yet); such a model is hidden from the lists (see 6) and the next
@@ -395,7 +396,7 @@ change. The slow first pass over the video is not repeated.
 ## 9. Two cameras
 
 Record both cameras at once (`tools/pi/README.md`, "Two cameras"), add the session folder, and
-calibrate each camera to the floor once (`CROSSCAM.md`). A label confirmed in one camera then
+calibrate each camera to the floor once (**More**, then **Floor calibration**, section 15). A label confirmed in one camera then
 appears as a ready-made guess (source `camera`) in the other camera's frame from the same
 moment. Types whose height varies are not passed between cameras: their spot in the other
 picture can't be worked out, so you place them yourself.
@@ -492,7 +493,7 @@ model longer, then run it again. A model the studio marks as "finds nothing yet"
 One row per object per frame: `frame`,
 `t_wall` (the recorder's clock), `obj` (its steady number), `cls` (type), `x_px`, `y_px`,
 `heading_deg` (for types with a front), `score`, then `x_cm`, `y_cm` (position on the floor,
-only when the camera is calibrated, see 9) and `source` (`model`: found in that frame;
+only when the camera is calibrated, see 15) and `source` (`model`: found in that frame;
 `track`: carried along from where it was last seen). It uses the camera's work area and ignore
 spots, like the studio.
 
@@ -513,9 +514,11 @@ first steady picture with what the model sees, each object numbered. **Looks rig
 fix it first (drag, delete, add, type and **name** each object). Named objects keep their names in
 the table (columns `name` and `confirmed`). While it runs, each object shows green, amber or red and
 when it was last confirmed; when one's score stays low for a few seconds the page asks you to confirm
-just that one (the others carry on). `--outside <kind>:<folder or file>` (for example a folder of
-robot logs, or `csv:` and a positions file) lets the outside data suggest each object's name at the
-roll call; it needs the camera's floor calibration, and the window says when it can't be used.
+just that one (the others carry on). `--outside <kind>:<folder or file>` (a positions log: `csv:` and a
+positions file from a robot arm's or a conveyor's controller, or `alvik:` and a folder of Alvik robots'
+logs) lets the positions log suggest each object's name at the roll call; it needs the camera's floor
+calibration (15), and the window says when it can't be used. Its messages appear in a strip under the
+picture, never over it.
 
 ## 13. Starting over
 
@@ -534,7 +537,7 @@ roll call; it needs the camera's floor calibration, and the window says when it 
   labels/<recording>/     labels.csv, review.json, frames/ (the picked frames as pictures), cache/
   models/<vN>/            model.onnx, run/ (training), train.log, eval_*.csv
   models/curve.json       every model scored on the same held-back frames
-  cameras/<name>.json     camera (floor) calibrations: two cameras, robot logs, home presets
+  cameras/<name>.json     camera (floor) calibrations (Floor calibration, 15): two cameras, positions logs, the dock preset
   ai_settings.json        the AI helper's switch and service (no key); never shared
   ai_log.jsonl            every AI call and your answers; never shared
   stats/<recording>.jsonl the time record: one line per finished frame (see 10)
@@ -544,7 +547,7 @@ roll call; it needs the camera's floor calibration, and the window says when it 
   report.html             the accuracy report, when written with report.py
 ```
 
-- `labels/<recording>/` may also hold `outside.json` and `outside_drafts.json` (robot logs, 15) and
+- `labels/<recording>/` may also hold `outside.json`, `outside_drafts.json` and `outside_drafts.json.before` (positions log, 15) and
   `checkins.json` (How often should I check?, 4).
 - `labels.csv` has one row per object per picked frame: frame, time, object number, type,
   position (px), heading, and a status: `confirmed` / `corrected` (a person checked it),
@@ -564,36 +567,90 @@ and the recordings, then
 python tools/recognition/studio.py <project folder> --relink <folder the recordings are in now>
 ```
 
-## 15. Robot logs and other outside data
+## 15. Floor calibration, positions logs and other outside data
 
-**More**, then **Robot logs / outside data**, for the recording that is open. Outside data is
-anything that knows where the objects are, on the same clock as the recording: a robot's own log
-(its wheels and gyro), a machine's controller, or a **positions file** (a CSV with t, name, x, y and
-optionally heading; see docs/data-formats.md). Paste its folder or file, pick the kind (or let the
-studio find out) and press **Use it**. The studio then:
+### Floor calibration
+
+**More**, then **Floor calibration**, for the camera of the recording that is open: which pixel is which
+spot on the floor. A positions log on the floor, the dock preset and the second camera need it. It takes
+a minute:
+
+1. Lay something rectangular of known size flat on the floor where the objects go: a sheet of paper
+   (A4 is 29.7 x 21 cm), a board, a mat, or four tape marks. The bigger, the better.
+2. On the picture, click its 4 corners **in order around it** (corner 1 anywhere, then the next corner
+   along one side, then the opposite corner, then the last one). Drag a corner to move it; Backspace
+   removes the last click.
+3. Type its **width** (corner 1 to corner 2) and **length** (corner 1 to corner 4) in cm.
+4. **Check the fit**: the panel says the fit error in cm, and a blue grid is drawn on the floor in the
+   picture (every 5, 10 or 20 cm, with orange arrows for floor x and y). The grid should lie flat along
+   the floor's own lines and edges; if it leans or bends away from them, a corner or a number is off.
+5. **Save** (Enter). **Z** puts back the calibration from before (or none).
+
+Floor x and y are in cm from corner 1: x along the first side (corner 1 to 2), y along the second (corner 1
+to 4). A positions file uses the same x and y. Clicking the corners the other way round is fine: the
+mirror image is found by itself.
+
+**Measured points** (the other tab) is the careful way: mark 6 to 30 spots on the floor, spread over the
+area, measure each one's x and y in cm from a corner of your choice, click each spot and type its x and
+y. Each point's error is shown (how far it is from where the others put it), so a mis-click or a
+mistyped number stands out. The optional **lens height** (a tape from the lens straight down to the
+floor) places things above the floor, like the top of a robot, better; without it, a camera looking
+straight down gets a guessed height, and the panel says so.
+
+It is saved in the project as `cameras/<camera>.json` (the camera is "default" for recordings added
+without a camera name); `use_model.py`, the second camera and the positions log all read it from there.
+
+### Positions log / outside data
+
+**More**, then **Positions log / outside data**, for the recording that is open. Outside data is
+anything that knows where the objects are, on the same clock as the recording: a robot arm's or a
+conveyor's controller, a robot's own log (its wheels and gyro), or a **positions file** (a CSV with t,
+name, x, y and optionally heading; see docs/data-formats.md). Paste its folder or file, pick the kind (or
+let the studio find out) and press **Use it**. The studio then:
 
 - matches each object in the data to an object on video by how they moved (the **roll call**): the
   name shows next to the object's number on the picture and in the list on the right;
 - lines the data up on the floor at every home visit (16), at every label you made of it, and on a
-  stretch where it drove forward on video, correcting the robot's own drift each time;
-- makes a guess for every frame (source `log`; the line above the picture says "and robot logs"),
-  so an object the data knows is found even while it stands still;
+  stretch where it moved forward on video, correcting a robot's own drift each time;
+- makes a guess for every frame (source `log`; the line above the picture says where the guesses come
+  from), so an object the data knows is found even while it stands still;
 - helps decide which lookalike is which after two of them crossed.
 
-It needs the camera's **floor calibration** (which pixel is which spot on the floor). Without one the
-window says so and what to do (`CROSSCAM.md`). **Line up again** uses the labels and home visits you
-made since. **Stop using it** (or **Z**) takes the guesses away again; your labels are never changed.
+**Which clock:** `t` is in seconds on the recording's own clock, `t_wall`: seconds since 1 January 1970,
+the same numbers as the `t_wall` column of the recording's `frames.csv` (the window shows where this
+recording starts and ends). A recording made from a video file has its clock **estimated from the file's
+time** (the moment the file was saved, taken as the end of the recording), so it can be off by seconds.
+To fix an offset: type it in the **time offset** box, or use **Line up by a moment**: go to a frame where
+you know the data's time (a start, a stop, a clap), type that time (as written in the data, or seconds
+after the data's first sample) and press the button. A robot log without a clock file gets its offset
+worked out from how the objects moved, and the window says by how much. **Z** puts the offset before back.
+
+Positions **on the floor** (x, y in cm) need the camera's floor calibration (above); without one the
+window says so and has a button that opens it. Positions **already in picture pixels** (x to the right,
+y down from the top-left corner) need none: tick **My positions are in picture pixels**.
+
+**Line up again** uses the labels and home visits you made since (**Z** puts back the guesses from before).
+**Stop using it** (or **Z** right after Use it) takes the guesses away again; your labels are never changed.
 
 ## 16. Home positions
 
 A home position is a spot where an object's place (and facing) is known exactly: a dock, a parking
-spot, a tray. Press **Work area** (or **W**), then **Home positions**: **Add a home position**, click
-its spot, then click where it faces (Enter: no facing), name it and say whether it stays a while or
-is touch-and-go. A **preset** places a ready-made one from two clicks, for example a dock (the window says
-where to click; it needs the floor calibration). **×** removes one; **Save home positions** keeps the list (**Z** puts the old one back).
+spot, a tray. Press **Work area** (or **W**), then **Home positions**, and pick what to add:
+
+- **A fixed spot**: one click on its middle (no facing: the object can sit there any way round);
+- **A spot with a facing**: its middle, then where it faces (shown only when an object type has a
+  front);
+- **A tray or fixture with slots**: its 4 corners in order, then how many rows and columns of slots;
+  every slot becomes a home position, kept together as one item in the list;
+- **Alvik dock** (projects with Alvik robots): two clicks (the window says where); it needs the floor
+  calibration (15) and gives the parked place and the three stops by its posts, as one item.
+
+Name it, say whether the object stays a while or only stops briefly, and which type sits there (a type
+without a front never gets a facing). **×** removes an item (a whole tray or dock at once); **Save home
+positions** keeps the list (**Z** puts the old one back).
 
 An object sitting still at a home position is a free confirmation: its guesses snap to the exact
-place and facing, and robot logs are lined up again there. The panel says how many visits it found.
+place and facing, and a positions log is lined up again there. The panel says how many visits it found.
 
 ## 17. AI helper
 
@@ -622,7 +679,7 @@ down) are kept, and **Time saved** counts them per task with the cost so far.
 
 ## 18. Smarter following
 
-- An object that stops is followed **by its look**: while nothing moves at its place, its position
+- An object that stops is kept track of **by how it looks**: while nothing moves at its place, its position
   is held exactly; something passing over it (a hand) marks the frames for a look.
 - When two lookalikes come together and part, both readings are kept until it is clear which is
   which. If it stays unclear, those frames come first in **Most useful next**, with the reason above
@@ -660,7 +717,8 @@ down) are kept, and **Time saved** counts them per task with the cost so far.
 | `referee.py` | Investigate's second-camera view of a spot |
 | `share.py` | a project as one `.mxirl` file (export, import, finding recordings again) |
 | `use_model.py` | use a trained model without the studio (`track-with-model.bat`) |
-| `outside.py`, `robotlogs.py`, `homes.py` | outside data (robot logs, positions files), a robot-log plug-in, home positions |
+| `outside.py`, `robotlogs.py`, `homes.py` | outside data (positions logs, positions files), the plug-in for Alvik robots' logs, home positions |
+| `floorcal.py` | the studio's Floor calibration screen: a rectangle or measured points, fitted with cameras.py (mirrored axes found), saved as cameras/<camera>.json |
 | `outsidelink.py` | the studio's glue for outside data and home positions |
 | `ai_helper.py` | the optional AI helper |
 | `videofile.py` | an ordinary video file made into a recording folder (Add recording) |

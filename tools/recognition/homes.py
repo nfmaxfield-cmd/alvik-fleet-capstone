@@ -58,7 +58,7 @@ def make_home(name, camera, x, y, facing_deg=None, radius=12.0, kind="park", own
              kind=kind, owner=owner or None, cls=cls or None,
              still_s=float(still_s) if still_s is not None else DEFAULT_STILL_S[kind],
              sd_px=float(sd_px), sd_deg=float(sd_deg))
-    for k in ("x_cm", "y_cm", "heading", "note", "preset"):
+    for k in ("x_cm", "y_cm", "heading", "note", "preset", "group"):
         if k in extra and extra[k] is not None:
             h[k] = extra[k]
     return h
@@ -370,7 +370,7 @@ def alvik_dock_homes_floor(name, camera_name, camera, wall_x_cm, wall_y_cm, head
             out.append(home_from_floor("%s %s station" % (name, sname), camera_name, camera, fx, fy,
                                        (heading + sh) % 360.0, robot_height_cm, 1.5, kind="station", cls="alvik",
                                        sd_px=1.0, sd_deg=2.0, preset="alvik_dock_v%d" % version,
-                                       note="post station: touch-and-go; sideways within about 0.5 cm"))
+                                       note="a stop by a post: the robot only touches it briefly; sideways within about 0.5 cm"))
     return out
 
 

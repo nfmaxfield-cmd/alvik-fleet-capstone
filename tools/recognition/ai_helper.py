@@ -449,7 +449,8 @@ class StandInAdapter(Adapter):
                 diff = float(np.abs(pics[0] - b).mean())
             verdict = "object" if diff > 12 else ("background" if diff < 5 else "unsure")
             out = dict(verdict=verdict, confidence=round(min(0.95, 0.5 + abs(diff - 8) / 40), 2),
-                       reason="The spot differs from the usual picture by %.0f grey levels." % diff)
+                       reason="The spot is %.0f brightness step%s (of 255) different from how it usually looks." % (
+                           diff, "" if round(diff) == 1 else "s"))
         elif t == "name_object":
             out = dict(name="object", confidence=0.5, reason="Stand-in: a real service would name it.")
         elif t == "second_check":

@@ -213,7 +213,7 @@ def test_outside_data_without_floor_calibration_says_what_is_needed(tmp_path, sy
     proj, st, rid, server, url = studio_on(tmp_path, synth10)
     try:
         d = _get(url + "api/studio/outside")
-        assert d["floor"]["ok"] is False and "CROSSCAM.md" in d["floor"]["text"] and "cameras/overhead.json" in d["floor"]["text"]
+        assert d["floor"]["ok"] is False and "Floor calibration" in d["floor"]["text"] and "camera overhead" in d["floor"]["text"]
         assert {p["id"] for p in d["plugins"]} >= {"alvik", "csv"}
         code, j = _post_err(url + "api/studio/outside/set", dict(path=str(tmp_path)))
         assert code == 400 and "floor calibration" in j["error"] and "Nothing was changed" in j["error"]
@@ -460,7 +460,7 @@ def test_train_copy_paste_choice_and_learning_curve_extras(tmp_path, synth10, mo
 # =============================================================================== 6/7. docs
 def test_docs_cover_the_new_parts():
     readme = open(os.path.join(REC, "README.md"), encoding="utf-8").read()
-    for words in ("Robot logs", "Home positions", "AI helper", "roll call", "By situation", "Copy-paste", "Reject here",
+    for words in ("Positions log", "Floor calibration", "Home positions", "AI helper", "roll call", "By situation", "Copy-paste", "Reject here",
                   "Shift+Z", "How often should I check"):
         assert words in readme, words
     assert "in real life" not in readme.lower()
@@ -668,14 +668,14 @@ def test_click_through_every_new_part(tmp_path, roam, monkeypatch):
             titles = []
             for _ in range(60):
                 titles.append(page.text_content("#tourcard h4"))
-                if titles[-1] == "Robot logs / outside data":
+                if titles[-1] == "Positions log / outside data":
                     _shot(page, "14-tour-robot-logs")
                 box = page.evaluate("(() => { const b = document.getElementById('tourcard').getBoundingClientRect(); return [b.top, b.bottom]; })()")
                 assert box[0] >= 0 and box[1] <= 900, (titles[-1], box)          # every card is on the screen
                 if not page.is_visible("#tnext") or page.text_content("#tnext") == "Start labelling":
                     break
                 page.keyboard.press("ArrowRight")
-            assert {"Robot logs / outside data", "AI helper", "AI helper is on", "AI helper buttons"} <= set(titles), titles
+            assert {"Positions log / outside data", "Floor calibration", "AI helper", "AI helper is on", "AI helper buttons"} <= set(titles), titles
             page.keyboard.press("Escape")
             assert not errors, errors
 

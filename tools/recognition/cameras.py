@@ -75,7 +75,7 @@ def _apply_h(H, xy):
 
 # ---------------------------------------------------------------- the model
 class CameraModel:
-    def __init__(self, K, dist, rvec, tvec, image_size, fit=None, name=None):
+    def __init__(self, K, dist, rvec, tvec, image_size, fit=None, name=None, mirror_y=False):
         self.K = np.asarray(K, float).reshape(3, 3)
         self.dist = _dist5(dist)
         self.rvec = np.asarray(rvec, float).reshape(3)
@@ -83,40 +83,57 @@ class CameraModel:
         self.image_size = (int(image_size[0]), int(image_size[1]))
         self.fit = fit or {}
         self.name = name
+        # mirror_y: the person's floor axes are mirrored against a camera above the floor (y runs the other
+        # way round from x than a right-handed floor with z up): the pose is kept in the y-flipped frame and
+        # every floor point is flipped on the way in and out, so callers always use the person's x, y
+        self.mirror_y = bool(mirror_y)
 
-    # -- geometry
+    # -- geometry (internally in the pose's frame: the person's floor with y flipped when mirror_y)
+    def _in(self, p):
+        if not self.mirror_y:
+            return p
+        p = np.array(p, float, copy=True)
+        p[..., 1] *= -1.0
+        return p
+
     @property
     def R(self):
         return cv2.Rodrigues(self.rvec)[0]
 
     @property
+    def _center_int(self):
+        return -self.R.T @ self.tvec
+
+    @property
     def center(self):
         """Lens position in the floor frame (cm; z = height above the floor)."""
-        return -self.R.T @ self.tvec
+        return self._in(self._center_int)
 
     @property
     def f(self):
         return 0.5 * (self.K[0, 0] + self.K[1, 1])
 
+    def _depth_int(self, p):
+        return (p @ self.R.T + self.tvec)[:, 2]
+
     def depth(self, xyz):
         p = np.asarray(xyz, float).reshape(-1, 3)
-        return (p @ self.R.T + self.tvec)[:, 2]
+        return self._depth_int(self._in(p))
 
     def project(self, xyz):
         """Floor-frame point(s) (x, y, z cm) -> pixel (u, v). One point -> two floats;
         (n, 3) -> two arrays. Points behind the camera give nan."""
         p = np.asarray(xyz, float)
         single = p.ndim == 1
-        p = p.reshape(-1, 3)
+        p = self._in(p.reshape(-1, 3))
         uv, _ = cv2.projectPoints(p.reshape(-1, 1, 3), self.rvec, self.tvec, self.K, self.dist)
         uv = uv.reshape(-1, 2)
-        uv[self.depth(p) <= 1e-9] = np.nan
+        uv[self._depth_int(p) <= 1e-9] = np.nan
         if single:
             return float(uv[0, 0]), float(uv[0, 1])
         return uv[:, 0], uv[:, 1]
 
-    def rays(self, u, v):
-        """Unit ray directions (floor frame) through pixel(s); (n, 3)."""
+    def _rays_int(self, u, v):
         uv = np.column_stack([np.ravel(u), np.ravel(v)]).astype(np.float64)
         if np.any(self.dist):
             crit = (cv2.TERM_CRITERIA_COUNT | cv2.TERM_CRITERIA_EPS, 100, 1e-12)
@@ -126,17 +143,23 @@ class CameraModel:
         d = np.column_stack([n, np.ones(len(n))]) @ self.R      # R.T @ [xn, yn, 1] for each row
         return d / np.linalg.norm(d, axis=1, keepdims=True)
 
+    def rays(self, u, v):
+        """Unit ray directions (floor frame) through pixel(s); (n, 3)."""
+        return self._in(self._rays_int(u, v))
+
     def to_floor(self, u, v, z=0.0):
         """Pixel(s) -> (x, y) cm where the ray meets the horizontal plane z cm up.
         nan if the ray does not reach that plane in front of the camera."""
         single = np.ndim(u) == 0
-        d = self.rays(u, v)
-        C = self.center
+        d = self._rays_int(u, v)
+        C = self._center_int
         z = np.broadcast_to(np.asarray(z, float), (len(d),))
         with np.errstate(divide="ignore", invalid="ignore"):
             s = (z - C[2]) / d[:, 2]
         s[~(s > 0)] = np.nan
         x, y = C[0] + s * d[:, 0], C[1] + s * d[:, 1]
+        if self.mirror_y:
+            y = -y
         if single:
             return float(x[0]), float(y[0])
         return x, y
@@ -159,7 +182,7 @@ class CameraModel:
         C = self.center
         axis = self.R.T @ np.array([0.0, 0.0, 1.0])
         tilt = math.degrees(math.acos(max(-1.0, min(1.0, -axis[2]))))
-        right = self.R.T @ np.array([1.0, 0.0, 0.0])
+        right = self._in(self.R.T @ np.array([1.0, 0.0, 0.0]))
         look = self.to_floor(self.K[0, 2], self.K[1, 2], 0.0)
         return dict(camera_position_cm=[round(float(c), 2) for c in C], tilt_from_vertical_deg=round(tilt, 2),
                     image_right_floor_deg=round(math.degrees(math.atan2(right[1], right[0])), 2),
@@ -190,11 +213,12 @@ class CameraModel:
         return dict(
             model="pinhole",
             note=("Floor frame: x, y cm on the floor (tape-sheet axes), z cm up. p_cam = R(rvec) p + tvec "
-                  "(OpenCV); pixel = cv2.projectPoints(p, rvec, tvec, K, dist). Written by "
-                  "tools/recognition/cameras.py."),
+                  "(OpenCV); pixel = cv2.projectPoints(p, rvec, tvec, K, dist); with mirror_y true, p = (x, -y, z) "
+                  "first. Written by tools/recognition/cameras.py."),
             name=self.name, image_size=list(self.image_size), K=self.K.tolist(), dist=self.dist.tolist(),
             rvec=self.rvec.tolist(), tvec=self.tvec.tolist(), **self.pose_summary(),
-            fit=self.fit, created=dt.datetime.now().isoformat(timespec="seconds"))
+            fit=self.fit, created=dt.datetime.now().isoformat(timespec="seconds"),
+            **({"mirror_y": True} if self.mirror_y else {}))
 
     def save(self, path):
         with open(path, "w") as f:
@@ -202,7 +226,8 @@ class CameraModel:
 
     @classmethod
     def from_dict(cls, d):
-        return cls(d["K"], d.get("dist"), d["rvec"], d["tvec"], d["image_size"], fit=d.get("fit"), name=d.get("name"))
+        return cls(d["K"], d.get("dist"), d["rvec"], d["tvec"], d["image_size"], fit=d.get("fit"), name=d.get("name"),
+                   mirror_y=bool(d.get("mirror_y")))
 
     @classmethod
     def load(cls, path):
@@ -212,12 +237,15 @@ class CameraModel:
     # -- fitting
     @classmethod
     def from_points(cls, img_pts, floor_pts, image_size, K=None, dist=None, floor_z=None, height_cm=None,
-                    nadir_cm=None, height_sd_cm=1.0, nadir_sd_cm=2.0, k1="auto", name=None):
+                    nadir_cm=None, height_sd_cm=1.0, nadir_sd_cm=2.0, k1="auto", name=None, mirror=False):
         """Fit from >= 6 clicked points. img_pts (n, 2) px; floor_pts (n, 2) cm (or (n, 3) with z);
         floor_z: per-point height (cm, default 0). K / dist: fixed intrinsics if known.
         height_cm / nadir_cm: tape-measured lens height and plumb-line floor point (optional priors).
         k1: 'auto' (keep a radial term only if it improves the left-one-out error), 'fit', 'off'
-        (ignored when dist is given). fit info: rms_px, loo_rms_cm, per-point errors, warnings."""
+        (ignored when dist is given). fit info: rms_px, loo_rms_cm, per-point errors, warnings.
+        mirror: False (the floor's x, y, z-up are right-handed as given), True (y runs the other way:
+        the model keeps mirror_y), or 'auto': fit both and keep the one with the camera above the
+        floor and the smaller pixel error (fit["mirror"] says which, and why)."""
         img = np.asarray(img_pts, float).reshape(-1, 2)
         fp = np.asarray(floor_pts, float)
         if fp.ndim == 2 and fp.shape[1] == 3:
@@ -226,6 +254,33 @@ class CameraModel:
             fp = fp.reshape(-1, 2)
             z = np.zeros(len(fp)) if floor_z is None else np.broadcast_to(np.asarray(floor_z, float), (len(fp),))
             obj = np.column_stack([fp, z])
+        if mirror == "auto":
+            tries, err = [], None
+            for m in (False, True):
+                try:
+                    tries.append(cls.from_points(img, obj, image_size, K=K, dist=dist, height_cm=height_cm,
+                                                 nadir_cm=nadir_cm, height_sd_cm=height_sd_cm, nadir_sd_cm=nadir_sd_cm,
+                                                 k1=k1, name=name, mirror=m))
+                except CalibrationError as e:
+                    err = e
+            if not tries:
+                raise err
+            above = [t for t in tries if t.center[2] > 0]
+            pool = above or tries
+            best = min(pool, key=lambda t: t.fit["rms_px"])
+            other = [t for t in tries if t is not best]
+            one_way = len(above) == 1 and (len(tries) == 2 or err is not None)
+            best.fit["mirror"] = dict(
+                used=bool(best.mirror_y), tried_both=True,
+                other_rms_px=other[0].fit["rms_px"] if other else None,
+                other_failed=str(err) if err is not None and not other else None,
+                why=("only this way round puts the camera above the floor" if one_way else "the smaller pixel error"))
+            return best
+        if mirror:
+            obj = obj.copy()
+            obj[:, 1] *= -1.0
+            if nadir_cm is not None:
+                nadir_cm = [float(nadir_cm[0]), -float(nadir_cm[1])]
         n = len(img)
         if n != len(obj):
             raise CalibrationError(f"{n} image points but {len(obj)} floor points")
@@ -299,9 +354,11 @@ class CameraModel:
             f_source=f_source, f_rel_sd=round(float(sd_post), 4), f_rel_sd_points_only=round(float(sd_data), 4),
             height_prior_cm=height_cm, nadir_prior_cm=None if nadir_cm is None else list(map(float, nadir_cm)),
             k1=k1_info, warnings=warnings,
-            points=[dict(u=float(img[i, 0]), v=float(img[i, 1]), x=float(obj[i, 0]), y=float(obj[i, 1]),
+            points=[dict(u=float(img[i, 0]), v=float(img[i, 1]), x=float(obj[i, 0]),
+                         y=float(-obj[i, 1] if mirror else obj[i, 1]),
                          z=float(obj[i, 2]), err_px=round(float(err_px[i]), 3), loo_cm=round(float(loo[i]), 3))
                     for i in range(n)])
+        model.mirror_y = bool(mirror)
         return model
 
     @classmethod

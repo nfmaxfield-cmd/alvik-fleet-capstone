@@ -2031,6 +2031,9 @@ def make_handler(session, extra_get=None, extra_post=None):
                 mode = q.get("mode", ["all"])[0]
                 with s.lock:
                     self._send(200, dict(mode=mode, frames=s.queue(mode), stats=s.stats()))
+            elif u.path == "/api/tracking":
+                # cheap: is a re-track still running in the background (the page's "following again" note)
+                self._send(200, dict(tracking=s.tracking_view()))
             elif u.path == "/api/tracks":
                 self._send(200, s.track_timeline())
             elif u.path == "/api/investigate":

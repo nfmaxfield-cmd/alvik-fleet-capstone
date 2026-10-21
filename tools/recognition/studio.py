@@ -29,9 +29,13 @@ studio bar on top:
   remembers the empty spot; the second camera as a referee when both cameras are calibrated.
 - Time saved: seconds per frame and frames accepted without looking, by model version (CSV too), and the
   AI helper's suggestions taken and turned down.
-- Robot logs / outside data (More): a log folder or positions file for a recording, read by a plug-in
-  (outsidelink.py, outside.py); its guesses join the others (source "log"), name the objects (roll call)
-  and help the tracker decide which lookalike is which. Needs the camera's floor calibration.
+- Positions log / outside data (More): a log folder or positions file for a recording (a robot arm's or a
+  conveyor's controller, a robot's own log), read by a plug-in (outsidelink.py, outside.py); its guesses
+  join the others (source "log"), name the objects (roll call) and help the tracker decide which lookalike
+  is which. Floor positions need the camera's floor calibration; picture-pixel positions don't. Its clock,
+  a time offset, and Line up by a moment are in the same window.
+- Floor calibration (More): click 4 corners of a rectangle of known size (or 6-30 measured points) on the
+  picture; the fit error and a grid on the floor are shown; saved as cameras/<camera>.json (floorcal.py).
 - Home positions (in Work area): spots where an object's place and facing are known exactly (presets
   place one from two clicks); a visit is a free confirmation.
 - AI helper (More): optional, off by default; settings, cost estimate, and its suggestions (ai_helper.py).
@@ -39,7 +43,7 @@ studio bar on top:
 
 A new project first asks for its name and object types (setup), then shows a short tour.
 
-With two cameras calibrated (cameras/<name>.json, see CROSSCAM.md), labels confirmed in
+With two cameras calibrated (More, Floor calibration: cameras/<name>.json), labels confirmed in
 one camera become ready-made guesses in the other camera's frames (source "camera").
 
 Only this computer can reach the page (127.0.0.1). Ctrl+C stops; everything is saved.
@@ -383,10 +387,12 @@ class Studio:
                 rec = proj.rec(cur["rec"])
                 key = proj.camera_key(rec)
                 ses = self.session
+                import floorcal
                 camera = dict(key=key, name=rec.get("camera") or "", settings=proj.camera_settings(key),
                               homes=homesmod.homes_of(proj.data, key),
                               visits=((ses.refined or {}).get("visits") if ses is not None and not self.loading else None),
-                              floor=bool(outsidelink.floor_camera(proj, rec)[0] is not None))
+                              floor=bool(outsidelink.floor_camera(proj, rec)[0] is not None),
+                              floorcal=floorcal.summary(proj, key))
             except KeyError:
                 pass
         return dict(brand=dict(name=labelapp.BRAND, tagline=labelapp.TAGLINE),
@@ -397,7 +403,14 @@ class Studio:
                     share=self.share_view(), missing=[r for r in recs if r["missing"]],
                     documents=_documents(), n_cameras=proj.n_cameras(), convert=self.convert_view(),
                     ai=self.ai_status(), outside=self.outside_view(), motion_usual=self.motion_usual(),
-                    home_presets=outsidelink.HOME_PRESETS)
+                    home_presets=self.home_presets(),
+                    work_area_asked={proj.camera_key(r): bool(proj.camera_settings(proj.camera_key(r)).get("asked"))
+                                     for r in proj.recordings()})
+
+    def home_presets(self):
+        """The home-position presets for this project (outsidelink.presets_for: the generic ones, and a plug-in's
+        own only when the project has its object type)."""
+        return outsidelink.presets_for(self.proj.class_names())
 
     # --- per-type motion: what "usual" means for each type ------------------------------------
     def motion_usual(self):
@@ -560,11 +573,16 @@ class Studio:
             rec = proj.rec(v["rec"])
             cam, path = outsidelink.floor_camera(proj, rec)
             v["floor"] = dict(path=path, ok=cam is not None, text=None if cam is not None else outsidelink.no_floor_text(proj, rec),
-                              looked=outsidelink.floor_paths(proj, rec))
+                              looked=outsidelink.floor_paths(proj, rec), camera=proj.camera_key(rec))
             v["has_clock"] = os.path.exists(os.path.join(rec["path"], "frames.csv"))
+            v["clock"] = outsidelink.clock_info(rec)
+            st = v.get("settings") or {}
+            v["units"] = st.get("units") or "cm"
+            v["offset_s"] = float(st.get("offset_s") or 0.0)
+            v["time_words"] = outsidelink.time_words((v.get("info") or {}).get("plugin") or st.get("plugin"))
         return v
 
-    def outside_set(self, path, plugin=None, offset_s=0.0):
+    def outside_set(self, path, plugin=None, offset_s=0.0, units="cm"):
         proj = self.proj
         cur = proj.data.get("current", {})
         if not cur.get("rec"):
@@ -573,15 +591,87 @@ class Studio:
         path = (path or "").strip().strip('"')
         if not path:
             raise ValueError("Type or paste the log folder or file first (the box is empty).")
-        if outsidelink.floor_camera(proj, rec)[0] is None:
+        units = "px" if units == "px" else "cm"
+        try:
+            offset_s = float(offset_s or 0.0)
+        except (TypeError, ValueError):
+            raise ValueError("The time offset must be a number of seconds (or blank). Nothing was changed.")
+        if units == "cm" and outsidelink.floor_camera(proj, rec)[0] is None:
             raise ValueError(outsidelink.no_floor_text(proj, rec))
-        data = outsidelink.read_data(proj, rec, path, plugin, offset_s)      # a plain message now if it can't be read
+        data = outsidelink.read_data(proj, rec, path, plugin, offset_s, units)   # a plain message now if it can't be read
         if not data.streams:
             raise ValueError("Nothing in %s could be placed (%s). Nothing was changed." % (path, data.summary()))
         before = outsidelink.read_settings(proj, rec["id"])
-        outsidelink.save_settings(proj, rec["id"], path, plugin or data.plugin, offset_s)
+        outsidelink.save_settings(proj, rec["id"], path, plugin or data.plugin, offset_s, units)
         self.outside_build()
-        return dict(before=before, plugin=data.plugin, names=data.names(), notes=data.notes, summary=data.summary())
+        return dict(before=before, plugin=data.plugin, names=data.names(), notes=data.notes, summary=data.summary(),
+                    units=units, offset_s=offset_s)
+
+    def outside_offset(self, offset_s=None, frame=None, log_time=None, kind="file"):
+        """Set the outside data's time offset (seconds added to its times), typed, or found from a moment: the
+        person picked a frame and typed the data's time there. Lines up again. Returns dict(before, offset_s,
+        text)."""
+        proj = self.proj
+        cur = proj.data.get("current", {})
+        if not cur.get("rec"):
+            raise ValueError("Open a recording first.")
+        rec = proj.rec(cur["rec"])
+        st = outsidelink.read_settings(proj, rec["id"])
+        if not st:
+            raise ValueError("No outside data is in use for this recording yet: add it first (Use it). Nothing was changed.")
+        if frame is not None:
+            off, text = outsidelink.offset_from_moment(proj, rec, st, int(frame), log_time, kind or "file")
+        else:
+            try:
+                off = float(offset_s or 0.0)
+            except (TypeError, ValueError):
+                raise ValueError("The time offset must be a number of seconds. Nothing was changed.")
+            text = "The data's times are moved by %+.2f s." % off
+        before = float(st.get("offset_s") or 0.0)
+        outsidelink.save_settings(proj, rec["id"], st["path"], st.get("plugin"), off, st.get("units") or "cm")
+        try:
+            self.outside_build()
+        except ValueError:
+            outsidelink.save_settings(proj, rec["id"], st["path"], st.get("plugin"), before, st.get("units") or "cm")
+            raise
+        return dict(before=before, offset_s=off, text=text)
+
+    def outside_swap(self):
+        """Undo / redo of Line up again: the guesses made the time before come back; the recording opens again."""
+        proj = self.proj
+        cur = proj.data.get("current", {})
+        if not cur.get("rec"):
+            raise ValueError("Open a recording first.")
+        info = outsidelink.swap_drafts(proj, cur["rec"])
+        self.outside_job = None
+        self.reopen()
+        return info
+
+    # --- floor calibration (More, Floor calibration) ---------------------------------------------
+    def floorcal_view(self, key=None):
+        import floorcal
+        proj = self.proj
+        cur = proj.data.get("current", {})
+        rec = proj.rec(cur["rec"]) if cur.get("rec") else None
+        key = key or (proj.camera_key(rec) if rec else "default")
+        out = dict(camera=key, current=floorcal.summary(proj, key), path=floorcal.path_for(proj, key))
+        if rec is not None:
+            cam, path = outsidelink.floor_camera(proj, rec)
+            out["in_use"] = path if cam is not None else None
+        return out
+
+    def floorcal_save(self, key, spec, image_size):
+        import floorcal
+        res, before = floorcal.save(self.proj, key, spec, image_size)
+        reopened = self.reopen(only_camera=key) if self.proj.n_cameras() >= 2 else False
+        return dict(result=floorcal.public(res), before=before, reopened=reopened, path=floorcal.path_for(self.proj, key))
+
+    def floorcal_put(self, key, data):
+        import floorcal
+        before = floorcal.put(self.proj, key, data)
+        reopened = self.reopen(only_camera=key) if self.proj.n_cameras() >= 2 else False
+        return dict(before=before, reopened=reopened, summary=floorcal.summary(self.proj, key),
+                    in_use=self.floorcal_view(key).get("in_use"))
 
     def outside_build(self):
         """Line the outside data up again (with the labels made since), in the background. The recording is
@@ -650,23 +740,33 @@ class Studio:
         reopened = self.reopen(only_camera=key)
         return dict(homes=stored, before=before, reopened=reopened)
 
-    def dock_preset(self, key, name, wall, mouth, owner=None, version=2, stations=True, preset=None):
-        """A preset's home positions from two clicks (not saved: the page adds them to its list); the
-        presets are listed in outsidelink.HOME_PRESETS."""
-        import homes as homesmod
-        pr = outsidelink.home_preset(preset or outsidelink.HOME_PRESETS[0]["id"])
+    def dock_preset(self, key, name, wall=None, mouth=None, owner=None, version=2, stations=True, preset=None,
+                    corners=None, rows=None, cols=None, facing=False, cls=None):
+        """A preset's home positions from its clicks (not saved: the page adds them to its list); the
+        presets are listed in outsidelink.HOME_PRESETS (the one-spot presets are made on the page)."""
+        pr = outsidelink.home_preset(preset or next(p["id"] for p in outsidelink.HOME_PRESETS if p.get("needs_floor")))
         proj = self.proj
         cur = proj.data.get("current", {})
         rec = proj.rec(cur["rec"]) if cur.get("rec") else None
         if rec is None or proj.camera_key(rec) != key:
             raise ValueError("Open a recording of this camera first.")
+        name = (name or "").strip() or pr["name"]
+        owner = (owner or "").strip() or None
+        if pr["id"] == "tray":
+            ses = self.session
+            return outsidelink.preset_homes("tray", name, key, None, None, None, owner=owner, corners=corners, rows=rows,
+                                            cols=cols, facing=facing, cls=(cls or None),
+                                            robot_px=float(getattr(ses, "robot_px", 30.0) or 30.0) if ses else 30.0)
+        if not pr.get("needs_floor"):
+            raise ValueError("The %s preset is made on the page itself." % pr["title"])
         cam, _ = outsidelink.floor_camera(proj, rec)
         if cam is None:
             raise ValueError("The %s preset needs this camera's floor calibration (to know how high it stands in the "
-                             "picture). %s" % (pr["title"], outsidelink.no_floor_text(proj, rec).split(". ", 1)[1]))
-        name = (name or "").strip() or pr["name"]
+                             "picture). Make one with More, then Floor calibration (a minute: 4 corners of a sheet of "
+                             "paper or a board on the floor). Nothing was changed; the other presets work without it."
+                             % pr["title"])
         return outsidelink.preset_homes(pr["id"], name, key, cam, [float(v) for v in wall], [float(v) for v in mouth],
-                                        owner=(owner or "").strip() or None, version=int(version), stations=bool(stations))
+                                        owner=owner, version=int(version), stations=bool(stations))
 
     # --- investigate: second camera ----------------------------------------------------------------
     # (Investigate's old "Ignore this spot", which left a spot out of every frame, is gone: a rejection
@@ -878,6 +978,44 @@ class Studio:
         if added and self.session is None and not self.loading:
             self.open(added[0], "none")
         return dict(added=len(added), ids=added)
+
+    def remove_recordings(self, ids, open_rec=None):
+        """Undo of Add recording: take recordings out of the project's list again. Only recordings with no
+        finished frame (nothing of the person's work is lost); their folders, and the project's labels folder
+        for them, stay on disk. If one is open, open_rec (or another recording) is opened instead.
+        Returns dict(removed, kept (with reasons), reopened)."""
+        proj = self.proj
+        removed, kept = [], []
+        with proj.lock:
+            for rid in ids:
+                try:
+                    rec = proj.rec(rid)
+                except KeyError:
+                    continue
+                n = _done_frames(proj.labels_dir(rid))
+                if n:
+                    kept.append(dict(id=rid, name=rec.get("name"), why="%d finished frame%s" % (n, "" if n == 1 else "s")))
+                    continue
+                proj.data["recordings"] = [r for r in proj.recordings() if r["id"] != rid]
+                removed.append(dict(id=rid, name=rec.get("name"), path=rec["path"], camera=rec.get("camera") or ""))
+            cur = proj.data.setdefault("current", {})
+            was_open = cur.get("rec") in {r["id"] for r in removed}
+            if was_open:
+                left = [r["id"] for r in proj.recordings()]
+                cur["rec"] = open_rec if open_rec in left else (left[0] if left else None)
+            proj.save()
+        reopened = False
+        if was_open:
+            if callable(getattr(self.session, "close", None)):
+                self.session.close()
+            self.session = None
+            if cur.get("rec"):
+                try:
+                    self.open(cur["rec"], cur.get("model", "none"))
+                    reopened = True
+                except (ValueError, KeyError):
+                    pass
+        return dict(removed=removed, kept=kept, reopened=reopened)
 
     def _convert(self, video, camera=None):
         import videofile
@@ -1096,6 +1234,8 @@ def make_routes(studio):
             h._send(200, studio.ai_view())
         elif path == "/api/studio/outside":
             h._send(200, studio.outside_details())
+        elif path == "/api/studio/floorcal":
+            h._send(200, studio.floorcal_view((q.get("camera") or [None])[0]))
         elif path == "/api/studio/timesaved.csv":
             what = (q.get("what") or ["frames"])[0]
             slug = projmod.slug(studio.proj.name)
@@ -1161,9 +1301,10 @@ def make_routes(studio):
             h._send(200, trainmod.precheck(studio.proj))
         elif path == "/api/studio/classes":
             before = studio.proj.motion_object_type()
+            old_types = [dict(c) for c in studio.proj.classes]
             studio.proj.set_classes(b.get("classes") or [])
             studio.reopen()
-            h._send(200, dict(ok=True, note=_unknown_note(before, studio.proj)))
+            h._send(200, dict(ok=True, note=_unknown_note(before, studio.proj), before=old_types))
         elif path == "/api/studio/setup":
             before = studio.proj.class_names()
             studio.proj.finish_setup(b.get("name"), b.get("classes"), b.get("seconds"))
@@ -1215,7 +1356,24 @@ def make_routes(studio):
                                             item=b.get("item"))
             h._send(200, dict(ok=True, recorded=len(ids)))
         elif path == "/api/studio/outside/set":
-            h._send(200, studio.outside_set(b.get("path"), b.get("plugin") or None, b.get("offset_s") or 0.0))
+            h._send(200, studio.outside_set(b.get("path"), b.get("plugin") or None, b.get("offset_s") or 0.0,
+                                            b.get("units") or "cm"))
+        elif path == "/api/studio/outside/offset":
+            h._send(200, studio.outside_offset(b.get("offset_s"), b.get("frame"), b.get("log_time"), b.get("kind") or "file"))
+        elif path == "/api/studio/outside/swap":
+            h._send(200, dict(info=studio.outside_swap()))
+        elif path == "/api/studio/floorcal/check":
+            import floorcal
+            h._send(200, floorcal.public(floorcal.fit(b.get("spec") or {}, b.get("image_size") or [640, 480])))
+        elif path == "/api/studio/floorcal/save":
+            h._send(200, studio.floorcal_save(b.get("camera") or "default", b.get("spec") or {},
+                                              b.get("image_size") or [640, 480]))
+        elif path == "/api/studio/floorcal/put":
+            h._send(200, studio.floorcal_put(b.get("camera") or "default", b.get("data")))
+        elif path == "/api/studio/train/stop":
+            h._send(200, dict(stopped=studio.trainer.stop(b.get("model"))))
+        elif path == "/api/studio/remove_recordings":
+            h._send(200, studio.remove_recordings(b.get("ids") or [], b.get("open")))
         elif path == "/api/studio/outside/rebuild":
             studio.outside_build()
             h._send(200, dict(ok=True))
@@ -1230,9 +1388,10 @@ def make_routes(studio):
         elif path == "/api/studio/homes":
             h._send(200, studio.set_homes(b.get("camera") or "default", b.get("homes") or []))
         elif path == "/api/studio/homes/dock":
-            h._send(200, dict(homes=studio.dock_preset(b.get("camera") or "default", b.get("name"), b["wall"], b["mouth"],
-                                                       b.get("owner"), b.get("version") or 2, b.get("stations", True),
-                                                       b.get("preset"))))
+            h._send(200, dict(homes=studio.dock_preset(b.get("camera") or "default", b.get("name"), b.get("wall"),
+                                                       b.get("mouth"), b.get("owner"), b.get("version") or 2,
+                                                       b.get("stations", True), b.get("preset"), b.get("corners"),
+                                                       b.get("rows"), b.get("cols"), bool(b.get("facing")), b.get("cls"))))
         elif path == "/api/studio/show_failed":
             with studio.proj.lock:
                 studio.proj.data.setdefault("settings", {})["show_failed_models"] = bool(b.get("on"))

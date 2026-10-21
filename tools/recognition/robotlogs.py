@@ -251,6 +251,7 @@ def read_alvik_logs(folder, recording=None, laptop_to_wall=None, names=None, use
     if not fits:
         notes.append("no clock_sync.csv: robot clocks set from the arrival times (a few ms less exact)")
     to_wall, _, found = laptop_to_wall_clock(recording, laptop_to_wall)
+    base_clock = to_wall
     offset_s = float(offset_s or 0.0)
     if offset_s:
         to_wall = LinearClock(to_wall.a + offset_s, to_wall.b, "%s; then %+.2f s" % (to_wall.text, offset_s))
@@ -273,7 +274,8 @@ def read_alvik_logs(folder, recording=None, laptop_to_wall=None, names=None, use
         events += ev
     events += _events(folder, fits, to_wall, rename, by_robot)
     events.sort(key=lambda e: e["t"])
-    return OutsideData("alvik", streams, events, notes, clock_text, folder, clock_known=bool(found or offset_s))
+    return OutsideData("alvik", streams, events, notes, clock_text, folder, clock_known=bool(found or offset_s),
+                       to_wall=base_clock, time_words="the laptop's time in raw.csv (the t_recv column, seconds)")
 
 
 def _robot_clock(name, boot, rows, fits, rename):

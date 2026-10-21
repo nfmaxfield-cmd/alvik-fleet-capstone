@@ -133,7 +133,8 @@ def cross_guesses(objects_a_by_frame, cam_a, cam_b, times_a, times_b, size_b=Non
     100 ms away while a robot may be driving at 20 cm/s scores ~0.8."""
     size_b = tuple(size_b) if size_b is not None else cam_b.image_size
     if size_b != tuple(cam_b.image_size):
-        cam_b = CameraModel(cam_b.K, cam_b.dist, cam_b.rvec, cam_b.tvec, size_b, fit=cam_b.fit, name=cam_b.name)
+        cam_b = CameraModel(cam_b.K, cam_b.dist, cam_b.rvec, cam_b.tvec, size_b, fit=cam_b.fit, name=cam_b.name,
+                            mirror_y=getattr(cam_b, "mirror_y", False))
     pairs = match_frames(times_a, times_b, max_dt, offset_s, return_dt=True)
     calib = math.hypot(_calib_cm(cam_a), _calib_cm(cam_b))
     out = {}

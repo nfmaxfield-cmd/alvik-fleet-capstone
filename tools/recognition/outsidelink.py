@@ -26,11 +26,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 SETTINGS_FILE = "outside.json"
 DRAFTS_FILE = "outside_drafts.json"
+BEFORE = ".before"           # outside_drafts.json as it was before the last Line up (swap_drafts puts it back)
 HOME_SCORE = 0.97            # a guess from a home visit: the place and facing are known exactly
-NO_FLOOR = ("Outside data needs this camera's floor calibration (which pixel is which spot on the floor), and "
-            "there is none yet. Make one as in tools/recognition/CROSSCAM.md: click about 8-30 floor points whose "
-            "positions you measured (cm), fit the camera with cameras.py, and save it in the project as "
-            "cameras/%s.json. Then come back here. Nothing was changed.")
+NO_FLOOR = ("This needs the floor calibration of camera %s (which pixel is which spot on the floor), and there is "
+            "none yet. Make one with More, then Floor calibration: click the 4 corners of something rectangular "
+            "of known size lying on the floor (a sheet of paper, a board) and type its width and length. It takes "
+            "a minute. Then come back here. Nothing was changed. (If your positions are already in picture pixels, "
+            "no calibration is needed: tick \"My positions are in picture pixels\" instead.)")
+UNITS = ("cm", "px")
 
 
 def _write(path, data):
@@ -63,8 +66,56 @@ def floor_paths(proj, rec):
     return keep
 
 
-def floor_camera(proj, rec):
+class PixelMap:
+    """"Floor" = the picture itself, for positions given in picture pixels (x right, y down from the top-left
+    corner; no floor calibration needed). Heights are ignored; one pixel counts as one unit."""
+
+    def __init__(self, image_size=None):
+        self.image_size = tuple(image_size) if image_size else None
+
+    def project(self, xyz):
+        import numpy as np
+        p = np.asarray(xyz, float)
+        if p.ndim == 1:
+            return float(p[0]), float(p[1])
+        p = p.reshape(-1, p.shape[-1])
+        return p[:, 0].copy(), p[:, 1].copy()
+
+    def to_floor(self, u, v, z=0.0):
+        import numpy as np
+        if np.ndim(u) == 0:
+            return float(u), float(v)
+        return np.asarray(u, float).copy(), np.asarray(v, float).copy()
+
+    def in_image(self, u, v, margin=0.0):
+        import numpy as np
+        u, v = np.asarray(u, float), np.asarray(v, float)
+        ok = np.isfinite(u) & np.isfinite(v)
+        if self.image_size:
+            W, H = self.image_size
+            ok &= (u >= -0.5 + margin) & (u <= W - 0.5 - margin) & (v >= -0.5 + margin) & (v <= H - 0.5 - margin)
+        return ok
+
+    def px_per_cm(self, x, y, z=0.0):
+        return 1.0
+
+
+def image_size_of(rec, session=None):
+    s = getattr(session, "rec", None)
+    if s is not None and getattr(s, "width", None):
+        return (int(s.width), int(s.height))
+    m = _read(os.path.join(rec["path"], "meta.json"), {}) or {}
+    if m.get("width") and m.get("height"):
+        return (int(m["width"]), int(m["height"]))
+    return None
+
+
+def floor_camera(proj, rec, settings=None, session=None):
+    """The recording's floor map: a PixelMap when its outside data says its positions are in picture
+    pixels (settings units "px"), else the floor calibration (camera model, path) or (None, None)."""
     import outside
+    if settings and settings.get("units") == "px":
+        return PixelMap(image_size_of(rec, session)), "picture pixels (no floor calibration needed)"
     for p in floor_paths(proj, rec):
         if os.path.exists(p):
             try:
@@ -75,8 +126,60 @@ def floor_camera(proj, rec):
 
 
 def no_floor_text(proj, rec):
-    import project as projmod
-    return NO_FLOOR % projmod.slug(proj.camera_key(rec))
+    return NO_FLOOR % proj.camera_key(rec)
+
+
+def clock_info(rec):
+    """The recording's own clock, for the page: first and last t_wall (seconds), whether it was estimated
+    (a video file: from the file's time), and plain words saying which clock a positions file uses."""
+    times = _frame_times(rec)
+    meta = _read(os.path.join(rec["path"], "meta.json"), {}) or {}
+    estimated = meta.get("device") == "video file" or "video file" in str(meta.get("made_by") or "")
+    if not times:
+        return dict(ok=False, estimated=estimated, text=(
+            "This recording has no frames.csv, so it has no clock to line outside data up with."))
+    fs = sorted(times)
+    t0, t1 = times[fs[0]], times[fs[-1]]
+    import datetime as dtm
+    when = dtm.datetime.fromtimestamp(t0).strftime("%Y-%m-%d %H:%M:%S")
+    text = ("Times are on this recording's clock: t_wall in seconds (seconds since 1 January 1970, as the t_wall column "
+            "of the recording's frames.csv). This recording runs from %.2f to %.2f (%s, %.0f s long). A positions "
+            "file's t column must be on the same clock." % (t0, t1, when, t1 - t0))
+    if estimated:
+        text += (" This recording was made from a video file, so its clock was estimated from the file's time (the "
+                 "moment the file was saved, taken as the end of the recording): it can be off by seconds. If the "
+                 "guesses run ahead of or behind the objects, use Line up by a moment below.")
+    return dict(ok=True, t_first=round(t0, 3), t_last=round(t1, 3), start=when, seconds=round(t1 - t0, 2),
+                estimated=estimated, text=text, n_frames=len(fs))
+
+
+def offset_from_moment(proj, rec, settings, frame, log_time, kind="file"):
+    """The time offset that makes the data's moment log_time line up with frame: the person picked a frame
+    on video where they know the data's time. kind "file": log_time as written in the data (its own time
+    column); "from_start": seconds after the data's first sample. Returns (offset_s, plain words)."""
+    times = _frame_times(rec)
+    if int(frame) not in times:
+        raise ValueError("Frame %s has no time in this recording's frames.csv. Nothing was changed." % frame)
+    t_frame = times[int(frame)]
+    try:
+        lt = float(log_time)
+    except (TypeError, ValueError):
+        raise ValueError("Type the data's time at this frame as a number of seconds (%r is not). Nothing was "
+                         "changed." % (log_time,))
+    data0 = read_data(proj, rec, settings["path"], settings.get("plugin"), 0.0)
+    if not data0.streams:
+        raise ValueError("The outside data holds no positions. Nothing was changed.")
+    starts = [s.t[0] for s in data0.streams.values() if len(s)]
+    if kind == "from_start":
+        t_data = min(starts) + lt
+        how = "%.2f s after the data's first sample" % lt
+    else:
+        conv = getattr(data0, "to_wall", None)
+        t_data = float(conv(lt)) if callable(conv) else lt
+        how = "the data's time %s" % ("%.3f" % lt).rstrip("0").rstrip(".")
+    off = t_frame - t_data
+    words = ("Frame %d (t_wall %.2f) is %s, so the data's times are moved by %+.2f s." % (int(frame), t_frame, how, off))
+    return round(off, 3), words
 
 
 # =============================================================================== settings per recording
@@ -85,9 +188,18 @@ def plugin_list():
     return [dict(id=i, title=t, description=d) for i, t, d in outside.plugins()]
 
 
+TIME_WORDS = {"csv": "the t column of the positions file (seconds)",
+              "alvik": "the laptop's time in raw.csv (the t_recv column, seconds)"}
+
+
+def time_words(plugin_id):
+    """Which of the data's own times a person types for Line up by a moment."""
+    return TIME_WORDS.get(plugin_id, "the time as written in the data (seconds)")
+
+
 def plugin_words(plugin_id):
     """What the guesses are called on the page ("Guesses from motion and robot logs")."""
-    return {"alvik": "robot logs", "csv": "the positions file"}.get(plugin_id, "outside data")
+    return {"alvik": "robot logs", "csv": "the positions file"}.get(plugin_id, "the positions log")
 
 
 def settings_path(proj, rid):
@@ -98,10 +210,16 @@ def read_settings(proj, rid):
     return _read(settings_path(proj, rid))
 
 
-def save_settings(proj, rid, path, plugin=None, offset_s=0.0):
+def save_settings(proj, rid, path, plugin=None, offset_s=0.0, units="cm"):
+    """units: "cm" (floor positions, through the floor calibration) or "px" (positions already in picture
+    pixels). Older files have no units: they mean cm."""
     os.makedirs(proj.labels_dir(rid), exist_ok=True)
+    if units not in UNITS:
+        raise ValueError("units must be cm or px")
     s = dict(path=os.path.abspath(os.path.expanduser(path)), plugin=plugin or None, offset_s=float(offset_s or 0.0),
              added=time.strftime("%Y-%m-%dT%H:%M:%S"))
+    if units == "px":
+        s["units"] = "px"
     _write(settings_path(proj, rid), s)
     return s
 
@@ -128,8 +246,10 @@ def restore_settings(proj, rid):
     return back
 
 
-def read_data(proj, rec, path, plugin=None, offset_s=0.0):
-    """Read the outside data with its plug-in (plain ValueError when it can't)."""
+def read_data(proj, rec, path, plugin=None, offset_s=0.0, units="cm"):
+    """Read the outside data with its plug-in (plain ValueError when it can't). units "px": the positions
+    are picture pixels (x right, y down; headings as on the labelling page: 0 = right, counter-clockwise on
+    screen); only positions on the floor itself (not a robot's own path) can be given that way."""
     import outside
     path = os.path.abspath(os.path.expanduser((path or "").strip().strip('"')))
     if not os.path.exists(path):
@@ -138,7 +258,17 @@ def read_data(proj, rec, path, plugin=None, offset_s=0.0):
     if offset_s:
         opts["offset_s"] = float(offset_s)
     try:
-        return outside.read_outside(path, plugin or None, **opts)
+        data = outside.read_outside(path, plugin or None, **opts)
+        if units == "px":
+            own = [n for n, st in data.streams.items() if st.frame != "floor"]
+            if own:
+                raise ValueError("Positions in picture pixels must be where each object is in the picture; %s %s its "
+                                 "own path from where it started (like a robot's wheels), which needs the floor "
+                                 "calibration. Untick \"My positions are in picture pixels\"" % (
+                                     ", ".join(own[:3]), "is" if len(own) == 1 else "are"))
+            for st in data.streams.values():
+                st.heading = -st.heading            # picture convention (counter-clockwise on screen, y down)
+        return data
     except KeyError as e:
         raise ValueError("No such kind of outside data: %s. Nothing was changed." % e)
     except TypeError as e:          # a plug-in that does not take one of the settings (e.g. the offset)
@@ -176,7 +306,11 @@ def build(proj, rec, session, say=print):
     st = read_settings(proj, rec["id"])
     if not st:
         raise ValueError("No outside data is set for this recording.")
-    cam, cam_path = floor_camera(proj, rec)
+    units = st.get("units") or "cm"
+    if units == "px":
+        cam, cam_path = PixelMap(image_size_of(rec, session)), "picture pixels (no floor calibration needed)"
+    else:
+        cam, cam_path = floor_camera(proj, rec)
     if cam is None:
         raise ValueError(no_floor_text(proj, rec))
     times = _frame_times(rec)
@@ -185,7 +319,7 @@ def build(proj, rec, session, say=print):
                          "up with its frames. Recordings from the Pi have it; a video file made into a recording does "
                          "not. Nothing was changed.")
     say("Reading the outside data ...")
-    data = read_data(proj, rec, st["path"], st.get("plugin"), st.get("offset_s"))
+    data = read_data(proj, rec, st["path"], st.get("plugin"), st.get("offset_s"), units)
     if not data.streams:
         raise ValueError("The outside data holds no positions (%s). Nothing was changed." % data.summary())
     heights = proj.class_heights()
@@ -235,7 +369,7 @@ def build(proj, rec, session, say=print):
         clock_found = find_offset(data, tracks_cm, names)
         if clock_found and clock_found["offset_s"] is not None:
             data = read_data(proj, rec, st["path"], st.get("plugin"),
-                             float(st.get("offset_s") or 0.0) + clock_found["offset_s"])
+                             float(st.get("offset_s") or 0.0) + clock_found["offset_s"], units)
             names, _detail = outside.match_names(data.streams, tracks_cm)
     obj_of = {n: o for o, n in names.items()}
 
@@ -290,8 +424,13 @@ def build(proj, rec, session, say=print):
     out = dict(made=time.strftime("%Y-%m-%dT%H:%M:%S"), plugin=data.plugin, path=st["path"], camera_file=cam_path,
                names={str(o): nm for o, nm in names.items()}, summary=summary,
                notes=list(data.notes) + ([clock_found["text"]] if clock_found else []),
-               clock=data.clock, clock_found=clock_found, n=n, labelled_frames=len(labelled), frames=compact)
-    _write(os.path.join(proj.labels_dir(rec["id"]), DRAFTS_FILE), out)
+               clock=data.clock, clock_found=clock_found, n=n, labelled_frames=len(labelled), frames=compact,
+               units=units, offset_s=float(st.get("offset_s") or 0.0))
+    dp = os.path.join(proj.labels_dir(rec["id"]), DRAFTS_FILE)
+    if os.path.exists(dp):              # the guesses made last time: "Line up again" can be taken back (Z)
+        import shutil
+        shutil.copyfile(dp, dp + BEFORE)
+    _write(dp, out)
     return {k: v for k, v in out.items() if k != "frames"}
 
 
@@ -328,6 +467,21 @@ def find_offset(data, tracks_cm, names, min_corr=0.5):
                 ", agreeing within %.2f s" % spread if len(got) > 1 else "", off))
     return dict(offset_s=round(off, 3), used=len(got), tried=len(names), corr=round(float(np.mean([g[1] for g in got])), 3),
                 spread_s=round(spread, 3), text=text)
+
+
+def swap_drafts(proj, rid):
+    """Undo / redo of "Line up again": swap outside_drafts.json with the guesses made the time before.
+    Returns the summary now in use, or raises ValueError when there is nothing to swap with."""
+    dp = os.path.join(proj.labels_dir(rid), DRAFTS_FILE)
+    bp = dp + BEFORE
+    if not (os.path.exists(dp) and os.path.exists(bp)):
+        raise ValueError("The guesses from before the last Line up are not kept any more (the outside data was "
+                         "stopped or used anew since). Nothing was changed.")
+    tmp = dp + ".swap"
+    os.replace(dp, tmp)
+    os.replace(bp, dp)
+    os.replace(tmp, bp)
+    return drafts_info(proj, rid)
 
 
 def drafts_info(proj, rid):
@@ -388,12 +542,48 @@ def split_voter(frames, robot_px):
 
 
 # =============================================================================== home positions
-# Ready-made home positions from two clicks (the page shows these words; homes.py does the geometry).
-HOME_PRESETS = [dict(id="alvik_dock", title="Alvik dock", name="Dock", owner_label="Robot that docks here",
-                     owner_title="The robot's name in its log; blank: whichever robot sits there",
-                     click1="Click the middle of the back wall's top inner edge (where a docked robot's nose touches).",
-                     click2="Now click the middle of the funnel's mouth (the open end).",
-                     added="the parked place and the dock's post stations")]
+# Ready-made home positions (the page shows these words; homes.py does the geometry). Generic ones first; the
+# Alvik dock is the Alvik plug-in's (shown when the project has an "alvik" type). clicks: what to click, in order
+# (the page asks for each); needs_floor: needs the camera's floor calibration; facing: "ask" (a click for it),
+# "none", or "option" (a tick box: the objects face along the first side).
+HOME_PRESETS = [
+    dict(id="spot", title="A fixed spot", name="Spot", kind="generic", needs_floor=False, facing="none",
+         clicks=["Click the middle of the spot where the object sits when it is home."],
+         added="one home position, no facing (the object can sit there any way round)",
+         description="One click: a parking place, a mark on the floor, a fixture's seat."),
+    dict(id="spot_facing", title="A spot with a facing", name="Home", kind="generic", needs_floor=False, facing="ask",
+         clicks=["Click the middle of the spot where the object sits when it is home.",
+                 "Now click where it faces when it is home."],
+         added="one home position with its facing",
+         description="Two clicks: where it sits, then the way it faces (only for object types with a front)."),
+    dict(id="tray", title="A tray or fixture with slots", name="Tray", kind="generic", needs_floor=False,
+         facing="option", clicks=["Click corner 1 of the tray (any corner).", "Click corner 2: the next corner along one side.",
+                                  "Click corner 3: the corner opposite corner 1.", "Click corner 4: the last corner."],
+         added="one home position per slot, kept together as one item",
+         description="Four corners, then how many rows and columns of slots: every slot becomes a home position."),
+    dict(id="alvik_dock", title="Alvik dock", name="Dock", kind="alvik", for_whom="Alvik robots", needs_type="alvik",
+         needs_floor=True,
+         facing="fixed",
+         owner_label="Robot that docks here",
+         owner_title="The robot's name in its log; blank: whichever robot sits there",
+         clicks=["Click the middle of the back wall's top inner edge (where a docked robot's nose touches).",
+                 "Now click the middle of the funnel's mouth (the open end)."],
+         click1="Click the middle of the back wall's top inner edge (where a docked robot's nose touches).",
+         click2="Now click the middle of the funnel's mouth (the open end).",
+         added="the parked place and the three spots by its posts where a robot stops briefly",
+         description="Two clicks on the Alvik robot's dock: its parked place and the stops by its posts."),
+]
+for _p in HOME_PRESETS:
+    _p.setdefault("owner_label", "Belongs to")
+    _p.setdefault("owner_title", "The object that lives here, by the name its positions log uses. Blank: whoever sits there.")
+TRAY_MAX_SLOTS = 48
+
+
+def presets_for(class_names):
+    """The presets a project is offered: the generic ones, and a plug-in's own (needs_type) only when the project
+    has that object type."""
+    names = set(class_names or ())
+    return [p for p in HOME_PRESETS if not p.get("needs_type") or p["needs_type"] in names]
 
 
 def home_preset(preset_id):
@@ -403,12 +593,61 @@ def home_preset(preset_id):
     raise ValueError("No home-position preset %r." % preset_id)
 
 
-def preset_homes(preset_id, name, camera_key, cam, click1, click2, owner=None, version=2, stations=True):
-    """A preset's home positions from its two clicks (homes.py does the geometry)."""
+def tray_homes(name, camera_key, corners, rows, cols, robot_px=30.0, facing=False, owner=None, cls=None):
+    """A tray or fixture with rows x cols slots from its 4 corners (picture px, in order around): one home
+    per slot at the slot's middle (exact for a flat tray seen by any camera), kept together as one group.
+    facing True: every slot's object faces along the first side (corner 1 to corner 2)."""
+    import numpy as np
+    import cv2
+    import homes as homesmod
+    rows, cols = int(rows), int(cols)
+    if rows < 1 or cols < 1:
+        raise ValueError("A tray needs at least 1 row and 1 column of slots.")
+    if rows * cols > TRAY_MAX_SLOTS:
+        raise ValueError("At most %d slots in one tray (%d x %d = %d): make two trays." % (TRAY_MAX_SLOTS, rows, cols,
+                                                                                          rows * cols))
+    q = np.asarray(corners, float).reshape(-1, 2)
+    if len(q) != 4:
+        raise ValueError("Click the tray's 4 corners first.")
+    sq = np.array([[0, 0], [1, 0], [1, 1], [0, 1]], np.float32)
+    Hm = cv2.getPerspectiveTransform(sq, q.astype(np.float32))
+
+    def at(a, b):
+        p = Hm @ np.array([a, b, 1.0])
+        return p[:2] / p[2]
+    out = []
+    letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    for i in range(rows):
+        for j in range(cols):
+            a, b = (j + 0.5) / cols, (i + 0.5) / rows
+            c = at(a, b)
+            cell = min(np.linalg.norm(at(a + 0.5 / cols, b) - at(a - 0.5 / cols, b)),
+                       np.linalg.norm(at(a, b + 0.5 / rows) - at(a, b - 0.5 / rows)))
+            r = max(4.0, min(0.35 * cell, 0.6 * float(robot_px or 30.0)))
+            f = None
+            if facing:
+                d = at(a + 0.1 / cols, b) - c
+                f = math.degrees(math.atan2(-d[1], d[0])) % 360.0
+            slot = ("%s%d" % (letters[i % 26], j + 1)) if rows > 1 else str(j + 1)
+            out.append(homesmod.make_home("%s %s" % (name, slot), camera_key, c[0], c[1], f, r, kind="park",
+                                          owner=owner, cls=cls, preset="tray", group=name))
+    return out
+
+
+def preset_homes(preset_id, name, camera_key, cam, click1, click2, owner=None, version=2, stations=True, **kw):
+    """A preset's home positions from its clicks (homes.py does the geometry). Alvik dock: click1 = the back
+    wall, click2 = the mouth; tray: kw corners, rows, cols, facing, robot_px."""
     import homes as homesmod
     if preset_id == "alvik_dock":
-        return homesmod.alvik_dock_homes(name, camera_key, cam, click1, click2, owner=owner, version=version,
-                                         stations=stations)
+        out = homesmod.alvik_dock_homes(name, camera_key, cam, click1, click2, owner=owner, version=version,
+                                        stations=stations)
+        for h in out:
+            h["group"] = name
+        return out
+    if preset_id == "tray":
+        return tray_homes(name, camera_key, kw.get("corners"), kw.get("rows") or 1, kw.get("cols") or 1,
+                          robot_px=kw.get("robot_px") or 30.0, facing=bool(kw.get("facing")), owner=owner,
+                          cls=kw.get("cls"))
     raise ValueError("No home-position preset %r." % preset_id)
 
 

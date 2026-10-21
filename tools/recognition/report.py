@@ -184,7 +184,8 @@ def html_report(proj):
 
 SITUATION_WORDS = (
     "Alone: no other labelled object within 1.5 object sizes. Close together: another object within 1.5 sizes. "
-    "Near a person: a person label (a hand, an arm) within 1.5 sizes. At the edge: within 1 size of the picture's "
+    "Near a person (only in projects with a type for people): a person label (a hand, an arm) within 1.5 sizes. "
+    "At the edge: within 1 size of the picture's "
     "border or of the work area's border, or outside it. Standing still: the same object did not move over the "
     "last 2 seconds of labelled frames (counted only where labelled frames cover those 2 seconds).")
 
@@ -198,6 +199,9 @@ def _situation_rows(proj):
         return None
 
 
+# each situation's name in the table (the newest words, also for older situations.json files)
+SITUATION_NAMES = dict(alone="On its own", close="Close together", person="Near a person",
+                       edge="At the edge of the work area or picture", still="Standing still", all="All labels")
 # each situation as words that fit "The model does worst with ..."
 SITUATION_PHRASES = dict(alone="objects on their own", close="objects close together", person="objects near a person",
                          edge="objects at the edge of the work area or picture", still="objects standing still")
@@ -215,6 +219,9 @@ def situations_html(proj, best):
     base = {r["situation"]: r for r in data["models"].get("none", [])}
     out = ["<h2>By situation (model %s)</h2>" % e(best["model"])]
     shown = [r for r in rows if r["situation"] != "all"]
+    import trainer as trainmod
+    if not trainmod.person_types(proj):          # no type of person in this project: the group can't happen
+        shown = [r for r in shown if r["situation"] != "person"]
     ok = [r for r in shown if r["n_labels"] and not r["few"] and r["found"] is not None]
     if ok:
         w = min(ok, key=lambda r: r["found"])
@@ -226,6 +233,7 @@ def situations_html(proj, best):
     out.append("<table><tr><th>Situation</th><th>Labels</th><th>Different objects</th><th>Found</th>"
                "<th>Found with no model</th><th>Centre off (px)</th><th>Heading off, median (deg)</th><th></th></tr>")
     for r in shown + [x for x in rows if x["situation"] == "all"]:
+        r = dict(r, name=SITUATION_NAMES.get(r["situation"], r["name"]))       # older files keep older words
         b = base.get(r["situation"])
         note = ("Too few to trust: under %d labels or %d different objects" % (situations.MIN_LABELS, situations.MIN_OBJECTS)
                 if r["few"] and r["n_labels"] else ("None in the held-back frames" if not r["n_labels"] else ""))
@@ -256,8 +264,8 @@ def training_extras_html(proj):
     cp = m.get("copy_paste")
     if cp and cp.get("compared"):
         a, b = cp["without"], cp["with"]
-        out.append("<li><b>Copy-paste (objects you labelled pasted onto other learning frames):</b> %s</li>" % e(cp["text"]))
-        rows = ("<table><tr><th>Trained</th><th>Found</th><th>Right</th><th>F1</th><th>Centre off (px)</th></tr>"
+        out.append("<li><b>Copy-paste (objects you labelled pasted onto other learning frames):</b> %s</li>" % e(cp["text"].replace("(F1 ", "(overall score ")))
+        rows = ("<table><tr><th>Trained</th><th>Found</th><th>Right</th><th>Overall</th><th>Centre off (px)</th></tr>"
                 "<tr><td>Without copy-paste%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
                 "<tr><td>With copy-paste%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr></table>"
                 % (" (kept)" if not cp["used"] else "", _pct(a.get("recall")), _pct(a.get("precision")), _pct(a.get("f1")),
@@ -266,7 +274,7 @@ def training_extras_html(proj):
         if cp.get("decided_on") == "validation":
             t = cp.get("test") or {}
             how = ("Both scored on the same frames used for picking the best training round (that is where the choice "
-                   "is made); only the kept one was then scored on the held-back frames: found %s, right %s, F1 %s. "
+                   "is made); only the kept one was then scored on the held-back frames: found %s, right %s, overall %s. "
                    "Each was trained for up to %s minutes." % (_pct(t.get("recall")), _pct(t.get("precision")),
                                                               _pct(t.get("f1")), _num(cp.get("minutes_each"), 0)))
         else:       # models compared before this was changed: both were scored on the held-back frames
@@ -274,7 +282,7 @@ def training_extras_html(proj):
                    % (_num(b.get("n_labels"), 0), _num(cp.get("minutes_each"), 0)))
         out.append("<li style='list-style:none'>%s<span class='muted'>%s</span></li>" % (rows, how))
     elif cp:
-        out.append("<li>%s</li>" % e(cp["text"]))
+        out.append("<li>%s</li>" % e(cp["text"].replace("(F1 ", "(overall score ")))
     if not out:
         return ""
     return "<h2>What training used</h2><ul>%s</ul>" % "".join(out)
@@ -308,6 +316,8 @@ def _model_name(m, guesses=""):
     name = {"none": "No model (motion + tracking)", "unknown": "Not known"}.get(m, "Model " + m)
     if guesses and "+camera" in guesses:
         name += " + the other camera"
+    if guesses and "+log" in guesses:
+        name += " + a positions log"
     return name
 
 

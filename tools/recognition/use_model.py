@@ -33,9 +33,11 @@ Useful options
     --no-roll-call        do not
     --ask-below 0.5       ask for a fresh confirmation of an object whose score stays below this ...
     --ask-after 3         ... for this many seconds
-    --outside plugin:path optional outside data (positions and headings on the shared clock) that
-                          can name the objects at the roll call: alvik:<robot log folder> or
-                          csv:<positions.csv> (outside.py; needs the camera's floor calibration)
+    --outside plugin:path optional positions log (a robot arm's or conveyor's controller, a robot's
+                          own log, any file of positions and headings on the shared clock) that can
+                          name the objects at the roll call: csv:<positions.csv>, or alvik:<Alvik
+                          robot log folder> (outside.py; needs the camera's floor calibration, made
+                          in the studio: More, then Floor calibration)
 
 Roll call: at the start the page shows the first steady picture with what the model sees, each
 object numbered. One click on "Looks right" confirms; or fix it first (drag a circle, delete one,
@@ -835,8 +837,9 @@ PAGE = """<!doctype html>
   header .tag { color:var(--dim); font-size:11px; letter-spacing:.04em; }
   header .src { color:var(--dim); font-size:12px; margin-left:auto; }
   main { display:grid; grid-template-columns:1fr 340px; min-height:0; }
-  #stage { padding:10px; display:flex; align-items:center; justify-content:center; min-width:0; min-height:0; position:relative; }
-  canvas { background:#000; border-radius:4px; max-width:100%; max-height:100%; }
+  #stage { padding:10px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px;
+    min-width:0; min-height:0; position:relative; }
+  canvas { background:#000; border-radius:4px; max-width:100%; max-height:calc(100% - 78px); }
   aside { background:var(--panel); border-left:1px solid var(--line); overflow-y:auto; padding:12px; }
   aside h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); margin:16px 0 6px; }
   aside h2:first-child { margin-top:0; }
@@ -865,7 +868,10 @@ PAGE = """<!doctype html>
   .panel.ask { border-color:var(--red); }
   .panel p { margin:0 0 6px; } .panel .btns { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
   .rollrow { display:grid; grid-template-columns:22px 1fr 1fr auto; gap:4px; align-items:center; margin-bottom:5px; }
-  #toasts { position:fixed; left:14px; bottom:14px; display:flex; flex-direction:column; gap:6px; max-width:480px; z-index:5; }
+  /* messages have their own strip under the picture: they never cover it (the newest two; all are in the list) */
+  #toasts { flex:0 0 70px; width:100%; display:flex; flex-direction:column; justify-content:flex-end; gap:4px;
+    overflow:hidden; font-size:13px; }
+  #toasts .toast { padding:5px 10px; }
   .toast { background:#243447; border:1px solid var(--accent); border-radius:8px; padding:8px 12px; transition:opacity 1.2s;
     box-shadow:0 2px 8px #0008; }
   .toast.fade { opacity:0; }
@@ -874,7 +880,7 @@ PAGE = """<!doctype html>
 </style></head><body>
 <header><h1>Maxfield IRL Tracking</h1><span class="tag">Identify. Recognize. Label.</span><span class="src" id="src"></span></header>
 <main>
-  <div id="stage"><canvas id="view" width="640" height="480"></canvas></div>
+  <div id="stage"><canvas id="view" width="640" height="480"></canvas><div id="toasts"></div></div>
   <aside>
     <div id="rollbox" class="panel roll" style="display:none">
       <p><b>Roll call.</b> This is what the model sees, each object numbered. Keep the objects where they are until you press the green button.</p>
@@ -899,7 +905,6 @@ PAGE = """<!doctype html>
     <div id="msg"></div>
   </aside>
 </main>
-<div id="toasts"></div>
 <script>
 const COL = {green:"#3ddc97", amber:"#ffb347", red:"#ff6b6b"};
 const legend = __LEGEND__;
@@ -920,6 +925,7 @@ function say(text, undo) {
   const t = document.createElement("div"); t.className = "toast"; t.textContent = text;
   if (undo) { const b = document.createElement("button"); b.textContent = "Undo"; b.onclick = () => { undo(); t.remove(); }; t.appendChild(b); }
   $("toasts").appendChild(t);
+  while ($("toasts").children.length > 2) $("toasts").removeChild($("toasts").firstChild);
   setTimeout(() => t.classList.add("fade"), 9000); setTimeout(() => t.remove(), 10500);
   const li = document.createElement("li"); li.textContent = text; const f = $("feed");
   if (f.firstChild && f.firstChild.textContent === "Nothing yet.") f.innerHTML = "";
@@ -1415,7 +1421,8 @@ def load_outside(spec, say=print, proj=None, pipe=None, recording=None):
     cam = getattr(pipe, "cam", None)
     if cam is None:
         say("Outside data (%s) is NOT used: it needs the floor calibration of camera \"%s\" (which pixel is which "
-            "spot on the floor), and there is none. Carrying on without it; name the objects by hand at the roll call."
+            "spot on the floor), and there is none (make one in the studio: More, then Floor calibration). Carrying on "
+            "without it; name the objects by hand at the roll call."
             % (spec, getattr(pipe, "camera_key", None) or "default"))
         return None
     plugin, path = _split_spec(spec)
@@ -1960,7 +1967,8 @@ def build_parser():
                     help="ask for a fresh confirmation of an object whose score stays below this (0 to 1)")
     ap.add_argument("--ask-after", type=float, default=ASK_AFTER_S,
                     help="... for this many seconds")
-    ap.add_argument("--outside", help="outside data to help name the objects at the roll call, as plugin:path")
+    ap.add_argument("--outside", help="a positions log (robot arm, conveyor, robot ...) to help name the objects at "
+                    "the roll call, as plugin:path (csv:<positions.csv>, alvik:<Alvik robot log folder>)")
     return ap
 
 

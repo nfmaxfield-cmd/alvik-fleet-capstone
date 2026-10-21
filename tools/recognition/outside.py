@@ -171,8 +171,13 @@ class Stream:
 class OutsideData:
     """What a plug-in returns: streams by name, events, plain-words notes, how the clock was set."""
 
-    def __init__(self, plugin="", streams=None, events=None, notes=None, clock="", folder=None, clock_known=True):
+    def __init__(self, plugin="", streams=None, events=None, notes=None, clock="", folder=None, clock_known=True,
+                 to_wall=None, time_words=""):
         self.plugin = plugin
+        # the data's own time (as written in its files) -> t_wall, before any offset: lets a person line the
+        # data up by a moment ("at this frame the data says 12.5 s"); time_words names that time in plain words
+        self.to_wall = to_wall
+        self.time_words = time_words
         self.clock_known = bool(clock_known)    # False: the plug-in had no way to tie its clock to the video's
         self.streams = dict(streams or {})
         self.events = list(events or [])     # dicts: t (t_wall), kind, name, ... (plug-in specific extras)
@@ -333,7 +338,8 @@ class GenericCSV(Plugin):
                 streams[name] = stream_from_own_xy(name, t, [r[1] for r in rs], [r[2] for r in rs], h, still=still)
         notes = ["%d rows could not be read and were skipped" % bad] if bad else []
         return OutsideData(self.id, streams, [], notes, "times as given%s" % (
-            " %+.3f s" % offset_s if offset_s else ""), folder)
+            " %+.3f s" % offset_s if offset_s else ""), folder, to_wall=lambda t: t,
+            time_words="the t column of the positions file (seconds)")
 
 
 def _num(v):

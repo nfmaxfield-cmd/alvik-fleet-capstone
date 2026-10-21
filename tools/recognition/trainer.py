@@ -458,6 +458,11 @@ def finds_objects(m):
     return not projmod.Project.model_failed(dict(m, status="ready"))
 
 
+STOPPED_BY_PERSON = ("you stopped it (Z on the page, right after starting it). Your labels are unchanged; the stopped "
+                     "model is hidden with the failed ones (Learning curve, Show failed models, can delete it). Train "
+                     "new model starts a new one.")
+
+
 class Trainer:
     """One training job at a time, in a background thread; the studio polls .job."""
 
@@ -467,15 +472,36 @@ class Trainer:
         self.job = None
         self.lock = threading.Lock()
         self.proc = None
+        self.stopping = False
 
     def busy(self):
         return bool(self.job and self.job["status"] == "running")
+
+    def stop(self, mid=None):
+        """Stop the training that is running (the page's Z after Train new model). The model is kept, marked
+        stopped (hidden with the failed ones; Learning curve can delete it). Returns True if one was running."""
+        job = self.job
+        if not self.busy() or (mid and job.get("model") != mid):
+            return False
+        self.stopping = True
+        p = self.proc
+        if p is not None:
+            try:
+                p.kill()
+            except OSError:
+                pass
+        return True
+
+    def _check_stop(self):
+        if getattr(self, "stopping", False):
+            raise RuntimeError(STOPPED_BY_PERSON)
 
     def start(self, minutes=20.0, python=sys.executable):
         with self.lock:
             if self.busy():
                 raise ValueError("a model is already training")
             mid = self.proj.new_model_id()
+            self.stopping = False
             self.job = dict(kind="train", model=mid, status="running", started=time.time(),
                             message="Training model %s: preparing the frames ..." % mid)
         t = threading.Thread(target=self._run, args=(mid, float(minutes), python), daemon=True)
@@ -512,11 +538,15 @@ class Trainer:
                 import traceback
                 if logf:
                     traceback.print_exc(file=logf)
+            if getattr(self, "stopping", False):
+                msg = STOPPED_BY_PERSON
             try:
                 if entry is not None:
                     with proj.lock:
                         entry["status"] = "failed"
                         entry["error"] = msg
+                        if getattr(self, "stopping", False):
+                            entry["interrupted"] = True
                         proj.save()
             except Exception as e2:         # even saving failed: still end the job
                 self.log("Could not save the failed model entry: %s" % e2)
@@ -654,7 +684,7 @@ class Trainer:
         self._say("Model %s: scoring the kept model (%s copy-paste) on the held-back frames ..." % (mid, win))
         cp["test"] = self._score_variant(data, split, onnx, os.path.join(mdir, "compare", "eval_%s.csv" % win),
                                          logf, python)
-        cp["text"] += (" The kept model, scored once on the held-back frames: finds %s, right %s (F1 %s)." % (
+        cp["text"] += (" The kept model, scored once on the held-back frames: finds %s, right %s (overall score %s)." % (
             _pct(cp["test"].get("recall")), _pct(cp["test"].get("precision")), _pct(cp["test"].get("f1"))))
         if os.path.exists(run):
             shutil.rmtree(run)
@@ -716,6 +746,7 @@ class Trainer:
     def _call(self, cmd, logf, timeout, progress=None):
         """Run a step, writing its output to train.log. progress: dict(mid, epochs, minutes) for
         training, turned into a plain status line."""
+        self._check_stop()
         logf.write("\n$ %s\n" % " ".join(cmd))
         logf.flush()
         self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
@@ -739,6 +770,7 @@ class Trainer:
                 tail.pop(0)
         rc = self.proc.wait()
         self.proc = None
+        self._check_stop()
         if rc != 0:
             raise RuntimeError(step_failed_text(os.path.basename(cmd[1]), tail))
 
@@ -879,7 +911,7 @@ def decide_paste(without, with_, on="test"):
     gain = f1 - f0
     used = gain >= PASTE_MIN_GAIN
     where = " on the frames used for choosing" if on == "validation" else ""
-    both = ("With copy-paste the model finds %s of the objects%s and is right %s (F1 %s); without it, %s and %s (F1 %s)"
+    both = ("With copy-paste the model finds %s of the objects%s and is right %s (overall score %s); without it, %s and %s (overall %s)"
             % (_pct(with_.get("recall")), where, _pct(with_.get("precision")), _pct(f1),
                _pct(without.get("recall")), _pct(without.get("precision")), _pct(f0)))
     if used:

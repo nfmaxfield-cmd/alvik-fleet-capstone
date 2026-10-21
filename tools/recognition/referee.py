@@ -3,7 +3,7 @@ the same moment.
 
 An object standing up shows in the other camera at the matching spot; a flat mark on the floor
 (a stain, a reflection) looks flat there, or doesn't show at all. Needs both cameras of a
-two-camera session calibrated to the floor (cameras/<name>.json, CROSSCAM.md); otherwise it says
+two-camera session calibrated to the floor (cameras/<name>.json, made with More, Floor calibration); otherwise it says
 so in plain words and the rest of Investigate works as before.
 
     look(project, recording entry, frame, x, y, cls) -> dict(available, reason | picture, text, ...)
@@ -39,11 +39,12 @@ def look(proj, rec, frame, x, y, cls=None):
     mine = proj.camera_model_path(rec.get("camera"))
     if not mine or not os.path.exists(mine):
         return _unavailable("This camera isn't calibrated to the floor yet, so the other camera can't be matched "
-                            "to this spot (see Two cameras in the manual).")
+                            "to this spot. Make its floor calibration with More, then Floor calibration (a minute: 4 corners of "
+                            "a sheet of paper or a board on the floor).")
     other, path_b = _other_camera(proj, rec)
     if other is None:
-        return _unavailable("The other camera of this session isn't calibrated to the floor yet (see Two cameras in "
-                            "the manual).")
+        return _unavailable("The other camera of this session isn't calibrated to the floor yet: open one of its "
+                            "recordings and use More, then Floor calibration.")
     video_b = os.path.join(other["path"], "video.avi")
     if not os.path.exists(video_b):
         return _unavailable("The other camera's recording can't be found (%s)." % other["path"])
