@@ -49,3 +49,22 @@ and a rank test, effect size), a chart of each condition's spread with one plain
 a lean report (premise, data, conclusion, what's next, two sweeps).
 Then: an end-to-end dry run of the whole session in the simulator, a code review, fixes, and the
 step-by-step session guide for Nick (every window and tab named, one command per box).
+
+## Contract between F (firmware) and L (laptop runner) — both lanes build to this; F documents the
+final details in docs/data-formats.md "E02" and may extend it, but not change these names.
+Commands (console text, as existing commands):
+- `corr reset` / `corr` / `set gyro_scale v`, `set gyro_drift_dps v`, `set wheel_scale v` (existing,
+  2026-10-20b corr.h): U = reset; C/KC = the learned values set before the run.
+- `run find` : find itself against the x-axis board then the y-axis board (board sides and their
+  floor positions from params: `set e02_xboard_side`, `set e02_yboard_side` and the camera-measured
+  board lines `set e02_xboard_cm`, `set e02_yboard_cm`); ends with its pose reset from the bumps and a
+  FIND record.
+- `run e02` with `set e02_route 1|2|3` (straight 100 / L 30-30 / square), `set e02_mode 0|1`
+  (0 = own sensors, 1 = camera-steered: drives only `go` legs the laptop sends), far-point pause
+  `e02_pause_ms` 1000; returns to its start; E02 record with believed poses at start, far, end.
+- `fix x y th t_wall` : a camera position fix (KC: blended into the pose; K: replaces it).
+- `go d_cm` / `turn deg` : single legs for camera-steered mode.
+- Records: BUMP (per bump: board, believed pose at contact, jolt, delay_ms, overshoot_cm),
+  FIND (result, pose before/after), E02 (route, mode, poses start/far/end believed, timing), plus
+  the existing raw rows, sync flash at run start (existing sync.csv).
+Safety: the existing edge guard stays on in every mode; a stop command always works.
