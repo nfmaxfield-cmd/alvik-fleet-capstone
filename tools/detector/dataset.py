@@ -53,8 +53,16 @@ class AugmentConfig:
 class DetDataset(Dataset):
     """samples: list from detcore.read_many. cfg: model config (model.default_config)."""
 
-    def __init__(self, samples, cfg, augment=None, cache=True, with_maps=True):
+    NEG_BOOST = 3.0     # a rejected spot counts this much more than an ordinary background cell
+    NEG_RADIUS = 0.35   # the spot's size, in object sizes (a bit more than the object's own blob core)
+
+    def __init__(self, samples, cfg, augment=None, cache=True, with_maps=True, use_negatives=True, paste=None):
+        """use_negatives: spots of rejected guesses ("not an object here") are taught as background
+        and count extra; frames that hold only such spots (sample["neg_only"]) are learned from
+        only around them. Pass False for validation/test data. paste: a paste.PasteConfig to add
+        copy-paste augmentation (training data only; needs augment and cache)."""
         self.samples = samples
+        self.use_negatives = use_negatives
         self.cfg = cfg
         self.aug = augment          # an AugmentConfig, or None for no augmentation
         self.with_maps = with_maps  # False: return only image + objects (for the baseline)
@@ -69,6 +77,12 @@ class DetDataset(Dataset):
             # frame at 320x240). Done before DataLoader workers start so they share it.
             for i in range(len(samples)):
                 self._cache[i] = self._load(i)
+        self.paste = None
+        if paste is not None:
+            if not cache or augment is None:
+                raise ValueError("copy-paste needs augment and cache (training data only)")
+            from paste import PasteBank
+            self.paste = PasteBank(self, paste)
 
     def __len__(self):
         return len(self.samples)
@@ -89,20 +103,28 @@ class DetDataset(Dataset):
         s = self.samples[i]
         # objects in input-pixel coordinates (same half-pixel convention as cv2.resize)
         objs = detcore.transform_objects(s["objects"], detcore.resize_matrix(sx, sy))
+        negs = []
+        if self.use_negatives and s.get("negatives"):
+            negs = detcore.transform_objects([dict(o, heading=None) for o in s["negatives"]],
+                                             detcore.resize_matrix(sx, sy))
         img = small
         if self.aug is not None:
-            img, objs = self._geometric(img, objs)
+            if self.paste is not None:
+                img, objs = self.paste.apply(i, img, objs, negs)
+            img, objs, negs = self._geometric(img, objs, negs)
             img = self._photometric(img)
         objs = [o for o in objs if 0 <= o["x"] < self.in_w and 0 <= o["y"] < self.in_h]
+        negs = [o for o in negs if 0 <= o["x"] < self.in_w and 0 <= o["y"] < self.in_h]
         x = torch.from_numpy(detcore.normalize(detcore.to_channels(img, self.cfg["in_ch"])))
         item = dict(image=x, objects=objs, index=i, scale=(sx, sy))
         if self.with_maps:
             item.update(self._targets(objs, (sx + sy) / 2))
+            item.update(self._neg_targets(negs, (sx + sy) / 2, bool(s.get("neg_only")), item))
         return item
 
     # -- augmentation -----------------------------------------------------
 
-    def _geometric(self, img, objs):
+    def _geometric(self, img, objs, negs=()):
         a = self.aug
         cx, cy = self.in_w / 2, self.in_h / 2
         ang = random.uniform(0, 360) if a.rotate else 0.0
@@ -116,12 +138,12 @@ class DetDataset(Dataset):
             M[0, 2] += random.uniform(-a.shift, a.shift) * self.in_w
             M[1, 2] += random.uniform(-a.shift, a.shift) * self.in_h
         if ang == 0 and k == 1 and M[0, 0] == 1 and M[0, 2] == 0 and M[1, 2] == 0:
-            return img, objs
+            return img, objs, negs
         # fill the uncovered corners with the floor's typical colour, not black
         fill = tuple(float(v) for v in np.median(img.reshape(-1, 3), axis=0))
         out = cv2.warpAffine(img, M, (self.in_w, self.in_h), flags=cv2.INTER_LINEAR,
                              borderMode=cv2.BORDER_CONSTANT, borderValue=fill)
-        return out, detcore.transform_objects(objs, M)
+        return out, detcore.transform_objects(objs, M), detcore.transform_objects(list(negs), M)
 
     def _photometric(self, img):
         a = self.aug
@@ -197,6 +219,26 @@ class DetDataset(Dataset):
         else:
             out.update(hd=torch.from_numpy(hd), hd_w=torch.from_numpy(hd_w))
         return out
+
+    def _neg_targets(self, negs, scale, neg_only, item):
+        """negw: how much each background cell counts in the heatmap loss. 1 everywhere, NEG_BOOST
+        around each rejected spot ("not an object here"). A neg_only frame (its objects are not all
+        labelled) counts ONLY around its rejected spots: elsewhere 0, and its front-point map is left
+        out outside them too."""
+        oh, ow = self.in_h // self.stride, self.in_w // self.stride
+        yy, xx = np.mgrid[0:oh, 0:ow].astype(np.float32)
+        w = np.zeros((oh, ow), np.float32) if neg_only else np.ones((oh, ow), np.float32)
+        spot = np.zeros((oh, ow), bool)
+        sizes = self.cfg.get("obj_size_px", detcore.DEFAULT_OBJ_SIZE_PX)
+        for n in negs:
+            # the spot's size: that of the type that was rejected, else a typical object
+            size = sizes.get(n.get("cls"), float(np.median(list(sizes.values())))) * scale
+            r = max(1.5, self.NEG_RADIUS * size / self.stride)
+            spot |= ((xx - n["x"] / self.stride) ** 2 + (yy - n["y"] / self.stride) ** 2) <= r * r
+        w[spot] = self.NEG_BOOST
+        if neg_only and "fmask" in item:
+            item["fmask"] = torch.from_numpy(spot.astype(np.float32))[None]
+        return dict(negw=torch.from_numpy(w)[None])
 
     def _front_targets(self, objs, scale, xx, yy):
         """Front-point mode: a small blob on each robot's front point (a spot

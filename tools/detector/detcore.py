@@ -122,12 +122,19 @@ def recording_name(label_dir):
     return os.path.basename(label_dir)
 
 
+def _float_or_none_safe(s):
+    try:
+        return _float_or_none(s)
+    except ValueError:
+        return None
+
+
 def _float_or_none(s):
     s = (s or "").strip()
     return float(s) if s else None
 
 
-def read_labels(label_dir, classes=None, verbose=True):
+def read_labels(label_dir, classes=None, verbose=True, neg_only=False):
     """Read one labels folder and return a list of samples (one per usable frame):
 
         dict(recording, label_dir, frame, image, objects=[dict(cls, x, y, heading, obj)])
@@ -142,6 +149,11 @@ def read_labels(label_dir, classes=None, verbose=True):
     - a cls `none` row marks a confirmed empty frame (no objects)
     - heading is used only when heading_known == 1
     - classes not in `classes` are skipped with a warning
+    - every sample carries `negatives`: the spots of its rejected rows ("not an object here"),
+      for training only. With neg_only=True, a frame that would be skipped (all its rows are
+      rejected, or the rest is still pending) is returned too when it has such spots, marked
+      neg_only=True with no objects: it may be trained on only around those spots, never scored
+      or used to pick the best round (its other objects are not all labelled).
     """
     classes = classes or DEFAULT_CLASSES
     path = os.path.join(label_dir, "labels.csv")
@@ -156,12 +168,24 @@ def read_labels(label_dir, classes=None, verbose=True):
 
     samples, skipped_pending, missing_img, unknown_cls = [], 0, 0, set()
     rec = recording_name(label_dir)
+    n_neg_only = 0
     for fr in sorted(rows_by_frame):
         rows = [r for r in rows_by_frame[fr] if (r.get("status") or "").strip() != "rejected"]
-        if not rows:
-            continue
-        if any((r.get("status") or "").strip() not in GOOD_STATUS for r in rows):
-            skipped_pending += 1
+        negs = []
+        for r in rows_by_frame[fr]:
+            if (r.get("status") or "").strip() == "rejected":
+                nx, ny = _float_or_none_safe(r.get("x_px")), _float_or_none_safe(r.get("y_px"))
+                if nx is not None and ny is not None:
+                    negs.append(dict(x=nx, y=ny, cls=(r.get("cls") or "").strip()))
+        pending = bool(rows) and any((r.get("status") or "").strip() not in GOOD_STATUS for r in rows)
+        if not rows or pending:
+            img = os.path.join(label_dir, "frames", f"{fr:06d}.jpg")
+            if neg_only and negs and os.path.isfile(img):
+                samples.append(dict(recording=rec, label_dir=label_dir, frame=fr, image=img,
+                                    objects=[], auto=False, negatives=negs, neg_only=True))
+                n_neg_only += 1
+            elif pending:
+                skipped_pending += 1
             continue
         objects = []
         for r in rows:
@@ -182,7 +206,8 @@ def read_labels(label_dir, classes=None, verbose=True):
             missing_img += 1
             continue
         auto = any((r.get("status") or "").strip() == "auto" for r in rows)
-        samples.append(dict(recording=rec, label_dir=label_dir, frame=fr, image=img, objects=objects, auto=auto))
+        samples.append(dict(recording=rec, label_dir=label_dir, frame=fr, image=img, objects=objects, auto=auto,
+                            negatives=negs, neg_only=False))
 
     if verbose and (skipped_pending or missing_img or unknown_cls):
         msg = f"{rec}: {len(samples)} frames used"
@@ -193,6 +218,8 @@ def read_labels(label_dir, classes=None, verbose=True):
         if unknown_cls:
             msg += f", ignored unknown classes {sorted(unknown_cls)}"
         print(msg)
+    if verbose and n_neg_only:
+        print(f"{rec}: {n_neg_only} more frame(s) usable only as 'not an object here' examples")
     return samples
 
 
@@ -216,11 +243,11 @@ def distinct_objects(samples):
     return {c: len(v) for c, v in seen.items()}
 
 
-def read_many(paths, classes=None, verbose=True):
+def read_many(paths, classes=None, verbose=True, neg_only=False):
     """Read every labels folder found under `paths`. Returns a list of samples."""
     out = []
     for d in find_label_dirs(paths):
-        out.extend(read_labels(d, classes, verbose))
+        out.extend(read_labels(d, classes, verbose, neg_only))
     return out
 
 

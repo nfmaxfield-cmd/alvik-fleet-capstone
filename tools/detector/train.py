@@ -53,6 +53,7 @@ from torch.utils.data import DataLoader
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import detcore  # noqa: E402
 from dataset import AugmentConfig, DetDataset, collate  # noqa: E402
+from paste import PasteConfig  # noqa: E402
 from model import CentreNet, check_size, count_params, default_config, describe, parse_size  # noqa: E402
 
 
@@ -73,16 +74,20 @@ def seed_worker(worker_id):
     random.seed(s)
 
 
-def focal_loss(logits, target, mask=None):
+def focal_loss(logits, target, mask=None, neg_w=None):
     """CenterNet focal loss. target is 1 at centres, a Gaussian falling off
     around them, 0 elsewhere. Averaged over the number of objects. mask
     (optional, 0/1): cells to leave out (e.g. around a robot whose heading
-    was not labelled, where we do not know where its front is)."""
+    was not labelled, where we do not know where its front is). neg_w
+    (optional, same cells): how much each background cell counts; more than 1
+    around a spot a person rejected ("not an object here"), 0 where nothing is known."""
     p = torch.sigmoid(logits)
     pos = target.eq(1).float()
     neg = 1.0 - pos
     if mask is not None:
         pos, neg = pos * mask, neg * mask
+    if neg_w is not None:
+        neg = neg * neg_w
     log_p = F.logsigmoid(logits)
     log_1mp = F.logsigmoid(-logits)
     pos_loss = (log_p * (1 - p) ** 2 * pos).sum()
@@ -100,10 +105,11 @@ def masked_l1(pred, target, weight):
 def compute_loss(outputs, batch, w_off=1.0, w_hd=1.0):
     """Total loss and its three parts (heatmap, offset, heading)."""
     heat, off, hd = outputs
-    l_heat = focal_loss(heat, batch["heat"])
+    negw = batch.get("negw")           # absent in older batches: every cell counts once
+    l_heat = focal_loss(heat, batch["heat"], neg_w=negw)
     l_off = masked_l1(off, batch["off"], batch["off_w"])
     if "fheat" in batch:      # front-point mode: find the front, and its exact spot
-        l_hd = focal_loss(hd[:, :1], batch["fheat"], batch["fmask"]) + masked_l1(hd[:, 1:], batch["foff"], batch["foff_w"])
+        l_hd = focal_loss(hd[:, :1], batch["fheat"], batch["fmask"], neg_w=negw) + masked_l1(hd[:, 1:], batch["foff"], batch["foff_w"])
     else:                     # sin/cos mode
         l_hd = masked_l1(hd, batch["hd"], batch["hd_w"])
     return l_heat + w_off * l_off + w_hd * l_hd, (l_heat.item(), l_off.item(), l_hd.item())
@@ -209,6 +215,14 @@ def main():
     ap.add_argument("--threads", type=int, default=0, help="CPU threads for PyTorch (0 = default)")
     ap.add_argument("--device", default="auto", help="auto, cpu or cuda")
     ap.add_argument("--init-from", help="start from an earlier best.pt (e.g. after adding a class)")
+    ap.add_argument("--no-hard-negatives", action="store_true",
+                    help="ignore the spots of rejected guesses (by default they are taught as 'not an object here')")
+    ap.add_argument("--neg-boost", type=float, default=None,
+                    help="how much more a rejected spot counts than ordinary background (default 3)")
+    ap.add_argument("--paste", action="store_true",
+                    help="copy-paste augmentation: labelled objects pasted onto other TRAINING frames (see paste.py)")
+    ap.add_argument("--paste-p", type=float, default=0.5, help="share of training pictures that get objects pasted")
+    ap.add_argument("--paste-areas", help="JSON {recording: [[x, y], ...]}: the work area to paste inside, per recording")
     ap.add_argument("--steps-per-epoch", type=int, default=0,
                     help="0 = one pass over the training frames; otherwise this many batches per epoch")
     a = ap.parse_args()
@@ -239,7 +253,15 @@ def main():
             cfg["obj_size_px"][c] = 30.0
 
     # ---- data and split (whole recordings only) ----
-    samples = detcore.read_many(a.labels, cfg["classes"])
+    all_samples = detcore.read_many(a.labels, cfg["classes"], neg_only=not a.no_hard_negatives)
+    # frames that hold only 'not an object here' spots join training only; they take no part in the split
+    samples = [s for s in all_samples if not s.get("neg_only")]
+    neg_frames = [s for s in all_samples if s.get("neg_only")]
+    if a.no_hard_negatives:
+        for s in all_samples:
+            s["negatives"] = []
+    if a.neg_boost is not None:
+        DetDataset.NEG_BOOST = a.neg_boost
     if a.split:
         assign = detcore.load_split(a.split)
         missing = sorted({s["recording"] for s in samples} - set(assign))
@@ -252,6 +274,7 @@ def main():
                                     a.val.split(",") if a.val else None, a.test.split(",") if a.test else None)
     detcore.save_split(assign, os.path.join(a.out, "split.json"))
     tr, va = detcore.select(samples, assign, "train"), detcore.select(samples, assign, "val")
+    tr += detcore.select(neg_frames, assign, "train")
     te = detcore.select(samples, assign, "test")
     # Validation picks the best epoch, so it is scored only on frames a person
     # checked; training may use auto-accepted frames too.
@@ -266,13 +289,34 @@ def main():
         per = detcore.distinct_objects(part)
         print(f"{name:5s}: {len(part):5d} frames, {n_obj:5d} labels, {len(recs)} recordings; different objects: "
               + ", ".join(f"{c} {per.get(c, 0)}" for c in cfg["classes"]))
-    if not tr or not va:
+    if not [s for s in tr if not s.get("neg_only")] or not va:
         sys.exit("Need frames in both train and val.")
+    n_negs = sum(len(s.get("negatives", [])) for s in tr)
+    if n_negs:
+        print(f"hard negatives: {n_negs} rejected spots in {sum(1 for s in tr if s.get('negatives'))} training frames "
+              f"({len([s for s in tr if s.get('neg_only')])} of them frames used only for that)")
 
     aug = None if a.no_augment else AugmentConfig(rotate=not a.no_rotate, hue_p=a.hue_p)
     t0 = time.time()
-    ds_tr = DetDataset(tr, cfg, augment=aug)
-    ds_va = DetDataset(va, cfg, augment=None)
+    pcfg = None
+    if a.paste and aug is not None:
+        areas = {}
+        if a.paste_areas:
+            with open(a.paste_areas) as f:
+                areas = json.load(f)
+        pcfg = PasteConfig(p=a.paste_p, areas=areas, seed=a.seed)
+        # honest scoring: only training frames are ever cut from or pasted onto
+        assert all(assign.get(s["recording"]) == "train" for s in tr), "copy-paste must see training frames only"
+    ds_tr = DetDataset(tr, cfg, augment=aug, paste=pcfg)
+    ds_va = DetDataset(va, cfg, augment=None, use_negatives=False)
+    if ds_tr.paste is not None:
+        summ = ds_tr.paste.summary()
+        summ.pop("train_frames")
+        summ.pop("targets")
+        with open(os.path.join(a.out, "paste_report.json"), "w") as f:
+            json.dump(summ, f, indent=1)
+        print(f"copy-paste: {summ['crops']} cut-outs ({summ['with_difference_mask']} outlined from the background "
+              f"difference, {summ['with_circle']} with a soft circle), from {len(summ['sources'])} training frames")
     print(f"Loaded and shrank {len(tr) + len(va)} frames in {time.time() - t0:.0f} s")
     workers = a.workers if a.workers >= 0 else (0 if os.name == "nt" else min(4, os.cpu_count() or 1))
     g = torch.Generator()

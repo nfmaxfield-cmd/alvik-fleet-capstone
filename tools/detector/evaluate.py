@@ -34,6 +34,13 @@ with e.g. --radius 8,hand=25, since a hand's "centre" is much vaguer).
 - cm errors: if a floor_calibration.json (3x3 matrix floor cm -> image px)
   is next to the recording or given with --calibration
 
+Accuracy by situation (alone / close together / near a person / at the edge / standing still):
+    --situations tags.json --situations-out by_situation.csv
+tags.json is {"tags": {recording: {"frame|type|x|y": ["close", "edge", ...]}}} (situations.py;
+the studio's trainer writes it for the held-back frames). The CSV has one row per detector and
+situation: labels, different objects, found, centre and heading error, and a "few" flag for groups
+too small to trust.
+
 Writes a CSV (--out) and prints a table.
 """
 import argparse
@@ -120,6 +127,8 @@ def main():
     ap.add_argument("--calibration", help="floor_calibration.json for recordings that lack their own")
     ap.add_argument("--include-auto", action="store_true",
                     help="also score frames the labelling tool auto-accepted (default: only frames a person checked)")
+    ap.add_argument("--situations", help="tags.json from situations.py: also score by situation")
+    ap.add_argument("--situations-out", default="situations.csv")
     ap.add_argument("--out", default="eval.csv")
     ap.add_argument("--save-predictions", help="write all predictions to this CSV (first non-csv model)")
     a = ap.parse_args()
@@ -159,7 +168,13 @@ def main():
     if homs:
         print(f"cm errors from floor calibration for {len(homs)} recording(s)")
 
-    all_rows, sweep_rows = [], []
+    all_rows, sweep_rows, sit_rows = [], [], []
+    sit_tags = None
+    if a.situations:
+        import json
+        import situations
+        with open(a.situations) as f:
+            sit_tags = json.load(f)["tags"]
     saved = False
     for spec in a.model:
         kind, _, path = spec.partition(":")      # infer:C:/runs/best.onnx also works
@@ -190,6 +205,9 @@ def main():
             n = sum(n_obj.values()) if r["cls"] == "all" else n_obj.get(r["cls"], 0)
             r.update(detector=name, ms_per_frame=ms, n_objects=n)
             all_rows.append(r)
+        if sit_tags is not None:
+            for r in situations.score(samples, preds, sit_tags, classes, a.radius, thresh):
+                sit_rows.append(dict(r, detector=name))
         if a.sweep:
             for t in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]:
                 for r in score(samples, preds, classes, a.radius, t, homs):
@@ -204,6 +222,11 @@ def main():
         print("\nScore threshold sweep:")
         print(detcore.format_table(sweep_rows, ["detector", "thresh", "cls", "precision", "recall", "f1"]))
     detcore.write_csv(all_rows, a.out, COLS)
+    if sit_tags is not None:
+        detcore.write_csv(sit_rows, a.situations_out,
+                          ["detector", "situation", "name", "n_labels", "n_objects", "tp", "found",
+                           "centre_err_px_mean", "heading_err_deg_median", "few"])
+        print(f"Wrote {a.situations_out}")
     print(f"\nWrote {a.out}")
 
 

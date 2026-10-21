@@ -146,6 +146,9 @@ def html_report(proj):
             out.append("</table><p class='muted'>Objects: different physical objects behind the labels (one object seen in "
                        "100 frames counts once). A type with few objects has an unreliable score.</p>")
 
+    out.append(situations_html(proj, best))
+    out.append(training_extras_html(proj))
+
     out.append(time_saved_html(proj))
 
     out.append("<h2>Data</h2><table><tr><th>Recording</th><th>Camera</th><th>Frames confirmed</th></tr>")
@@ -168,6 +171,8 @@ def html_report(proj):
                "and the two cameras' views of one moment always land in the same part.</li>"
                "<li>Only frames a person checked are scored; frames accepted without looking are not. Frames holding "
                "an object marked unsure are left out of training and scoring until it is resolved.</li>"
+               "<li>Guesses a person rejected are taught as “not an object here”, and copy-paste adds objects only to "
+               "frames used for learning: never to the frames used to pick the best round or to score.</li>"
                "<li>“No model” is what the labelling page shows before any training: motion guesses followed by the "
                "tracker, with no confirmations.</li>"
                "<li>Found = share of labelled objects the model reported within 8 px (about a quarter of an object). "
@@ -175,6 +180,91 @@ def html_report(proj):
                "</ul>" % _num(_block_s(proj), 0))
     out.append("</body></html>")
     return "".join(out)
+
+
+SITUATION_WORDS = (
+    "Alone: no other labelled object within 1.5 object sizes. Close together: another object within 1.5 sizes. "
+    "Near a person: a person label (a hand, an arm) within 1.5 sizes. At the edge: within 1 size of the picture's "
+    "border or of the work area's border, or outside it. Standing still: the same object did not move over the "
+    "last 2 seconds of labelled frames (counted only where labelled frames cover those 2 seconds).")
+
+
+def _situation_rows(proj):
+    p = os.path.join(proj.folder, "models", "situations.json")
+    try:
+        with open(p, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def situations_html(proj, best):
+    """Accuracy by situation for the best model (and, beside it, the start with no model), on the
+    held-back frames. Groups that rest on few labels are marked."""
+    data = _situation_rows(proj)
+    if not data or not best or best["model"] not in data.get("models", {}):
+        return ""
+    import situations
+    e = _html.escape
+    rows = data["models"][best["model"]]
+    base = {r["situation"]: r for r in data["models"].get("none", [])}
+    out = ["<h2>By situation (model %s)</h2>" % e(best["model"])]
+    shown = [r for r in rows if r["situation"] != "all"]
+    ok = [r for r in shown if r["n_labels"] and not r["few"] and r["found"] is not None]
+    if ok:
+        w = min(ok, key=lambda r: r["found"])
+        out.append("<p class='lead'>The model finds the fewest where objects are <b>%s</b>: %s of %d labels.</p>"
+                   % (e(w["name"].lower()), _pct(w["found"]), w["n_labels"]))
+    else:
+        out.append("<p class='lead'>No situation has enough labels yet (%d labels and %d different objects needed) to "
+                   "say where the model is weakest.</p>" % (situations.MIN_LABELS, situations.MIN_OBJECTS))
+    out.append("<table><tr><th>Situation</th><th>Labels</th><th>Different objects</th><th>Found</th>"
+               "<th>Found with no model</th><th>Centre off (px)</th><th>Heading off, median (deg)</th><th></th></tr>")
+    for r in shown + [x for x in rows if x["situation"] == "all"]:
+        b = base.get(r["situation"])
+        note = ("Too few to trust: under %d labels or %d different objects" % (situations.MIN_LABELS, situations.MIN_OBJECTS)
+                if r["few"] and r["n_labels"] else ("None in the held-back frames" if not r["n_labels"] else ""))
+        out.append("<tr><td>%s</td><td>%d</td><td>%d</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td class='muted'>%s</td></tr>"
+                   % (e(r["name"]), r["n_labels"], r["n_objects"], _pct(r["found"]) if r["n_labels"] else "–",
+                      _pct(b["found"]) if b and b["n_labels"] else "–", _num(r["centre_err_px"]), _num(r["heading_err_deg"]),
+                      e(note)))
+    out.append("</table><p class='muted'>Found = share of labelled objects in that situation that the model reported within "
+               "8 px. One object can be in several groups (for example close together and at the edge), so the groups "
+               "do not add up to all labels. %s</p>" % e(SITUATION_WORDS))
+    return "".join(out)
+
+
+def training_extras_html(proj):
+    """What the newest ready model's training used: rejected guesses as 'not an object' examples, and the
+    copy-paste comparison (both scores, and which is better)."""
+    e = _html.escape
+    ready = sorted([m for m in proj.models() if m.get("status") == "ready"], key=lambda m: m["created"])
+    if not ready:
+        return ""
+    m = ready[-1]
+    out = []
+    hn = m.get("hard_negatives")
+    if hn and hn.get("spots"):
+        out.append("<li>Model %s learned from <b>%d guesses you rejected</b>, in %d frames, as “not an object here”%s.</li>"
+                   % (e(m["id"]), hn["spots"], hn["frames"],
+                      (" (%d of those frames were used only for that)" % hn["frames_only"]) if hn.get("frames_only") else ""))
+    cp = m.get("copy_paste")
+    if cp and cp.get("compared"):
+        a, b = cp["without"], cp["with"]
+        out.append("<li><b>Copy-paste (objects you labelled pasted onto other learning frames):</b> %s</li>" % e(cp["text"]))
+        rows = ("<table><tr><th>Trained</th><th>Found</th><th>Right</th><th>F1</th><th>Centre off (px)</th></tr>"
+                "<tr><td>Without copy-paste%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
+                "<tr><td>With copy-paste%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr></table>"
+                % (" (kept)" if not cp["used"] else "", _pct(a.get("recall")), _pct(a.get("precision")), _pct(a.get("f1")),
+                   _num(a.get("centre_err_px")), " (kept)" if cp["used"] else "", _pct(b.get("recall")),
+                   _pct(b.get("precision")), _pct(b.get("f1")), _num(b.get("centre_err_px"))))
+        out.append("<li style='list-style:none'>%s<span class='muted'>Both scored on the same %s held-back labels; each was "
+                   "trained for up to %s minutes.</span></li>" % (rows, _num(b.get("n_labels"), 0), _num(cp.get("minutes_each"), 0)))
+    elif cp:
+        out.append("<li>%s</li>" % e(cp["text"]))
+    if not out:
+        return ""
+    return "<h2>What training used</h2><ul>%s</ul>" % "".join(out)
 
 
 def _dur(s):
