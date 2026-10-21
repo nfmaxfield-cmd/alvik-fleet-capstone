@@ -371,6 +371,10 @@ def build(proj, rec, session, say=print):
             data = read_data(proj, rec, st["path"], st.get("plugin"),
                              float(st.get("offset_s") or 0.0) + clock_found["offset_s"], units)
             names, _detail = outside.match_names(data.streams, tracks_cm)
+    # every followed object that is clearly one of the streams (a person's labels give the same object new
+    # numbers over a long recording, and each of those labels should line the data up); each name's main
+    # object is the one seen matching longest, so a short stretch can't take the name at the next Line up
+    names, all_names = name_objects(data.streams, tracks_cm, names)
     obj_of = {n: o for o, n in names.items()}
 
     # anchors: home visits and "at home" events, the person's labels, a forward stretch seen on video
@@ -387,7 +391,7 @@ def build(proj, rec, session, say=print):
         add(homesmod.anchors_from_visits(visits, hl, cam, obj_names=names, height_cm=z, outside=data))
         add(homesmod.events_to_anchors(data.events, hl, cam, height_cm=z))
     labelled = {f: v for f, v in frames.items() if v["state"] in ("edited", "reviewed")}
-    add(outside.anchors_from_labels(labelled, times, cam, names, heights))
+    add(outside.anchors_from_labels(labelled, times, cam, all_names, heights))
     for n, s in data.streams.items():
         if s.frame == "own" and n in obj_of and obj_of[n] in tracks_cm:
             add({n: outside.heading_anchor_from_motion(s, tracks_cm[obj_of[n]])})
@@ -422,7 +426,7 @@ def build(proj, rec, session, say=print):
         summary.append(dict(name=nme, cls=cls_of[nme], obj=obj_of.get(nme), anchors=kinds, frames=placed.get(nme, 0),
                             text=al.describe()))
     out = dict(made=time.strftime("%Y-%m-%dT%H:%M:%S"), plugin=data.plugin, path=st["path"], camera_file=cam_path,
-               names={str(o): nm for o, nm in names.items()}, summary=summary,
+               names={str(o): nm for o, nm in all_names.items()}, summary=summary,
                notes=list(data.notes) + ([clock_found["text"]] if clock_found else []),
                clock=data.clock, clock_found=clock_found, n=n, labelled_frames=len(labelled), frames=compact,
                units=units, offset_s=float(st.get("offset_s") or 0.0))
@@ -432,6 +436,48 @@ def build(proj, rec, session, say=print):
         shutil.copyfile(dp, dp + BEFORE)
     _write(dp, out)
     return {k: v for k, v in out.items() if k != "frames"}
+
+
+def name_objects(streams, tracks_cm, primary, clear=0.6, max_cost=3.0, min_travel_cm=10.0, max_overlap=0.2):
+    """Names for the followed objects. Returns (main, every): every = {obj: name} for each object whose speed
+    over time clearly matches one stream (mean speed difference under max_cost cm/s and under `clear` x the
+    next stream's; an object that barely moved looks like every stream at rest and is left out), never two
+    objects with one name on video at the same time (the one seen matching longer wins); main = {obj: name}
+    with one object per name, the one seen matching longest. `primary` (outside.match_names: one object per
+    name, by lowest cost alone, so a short stretch can win) is used for a name nothing clearly matched."""
+    import numpy as np
+    import outside
+    span = {o: (float(tr[0, 0]), float(tr[-1, 0])) for o, tr in tracks_cm.items() if len(tr)}
+    cand = []
+    for obj, tr in tracks_cm.items():
+        if len(tr) < 2 or float(np.sum(np.hypot(np.diff(tr[:, 1]), np.diff(tr[:, 2])))) < min_travel_cm:
+            continue
+        _, det = outside.match_names(streams, {obj: tr})
+        costs = sorted((c, n) for (_, n), c in det.items())
+        if not costs or costs[0][0] >= max_cost:
+            continue
+        if len(costs) > 1 and costs[0][0] >= clear * costs[1][0]:
+            continue
+        name = costs[0][1]
+        st = streams[name]
+        cover = max(0.0, min(span[obj][1], float(st.t[-1])) - max(span[obj][0], float(st.t[0])))
+        cand.append((-cover, costs[0][0], obj, name))
+
+    def overlap(a, b):
+        (a0, a1), (b0, b1) = span[a], span[b]
+        return min(a1, b1) - max(a0, b0) > max_overlap * max(1e-6, min(a1 - a0, b1 - b0))
+    every, main = {}, {}
+    for _, _, obj, name in sorted(cand):
+        if not any(nm == name and overlap(obj, o) for o, nm in every.items()):
+            every[obj] = name
+            if name not in main.values():
+                main[obj] = name
+    for obj, name in primary.items():
+        if name not in main.values() and obj not in every and obj in span and \
+                not any(nm == name and overlap(obj, o) for o, nm in every.items()):
+            main[obj] = name
+            every[obj] = name
+    return main, every
 
 
 def find_offset(data, tracks_cm, names, min_corr=0.5):

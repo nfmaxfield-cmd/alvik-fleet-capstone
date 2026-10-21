@@ -216,3 +216,15 @@ def test_a_closed_session_never_takes_a_background_result(tmp_path, still):
         s.close()                       # the studio opens the recording again
     time.sleep(1.0)
     assert s.guesses == before and s.tracking_view() is None
+
+
+def test_checkins_measure_the_objects_not_the_hands():
+    # roam1: hands labelled 1 s apart had moved on, so "how often should I check?" said 0 s for robots
+    times = [f / 10.0 for f in range(200)]
+    dets = [[det(100.0, 120.0), det(200.0 + 3 * f, 300.0, cls="hand")] for f in range(200)]
+    anchors = {f: [dict(obj=1, cls="box", x=100.0, y=120.0, status="confirmed"),
+                   dict(obj=2, cls="hand", x=200.0 + 3 * f + (40.0 if f % 20 else 0.0), y=300.0, status="corrected")]
+               for f in range(0, 200, 10)}
+    res = tracker.measure_checkins(dets, times, 30.0, anchors)
+    assert {p["obj"] for p in res["pairs"]} == {1} and res["skipped_loose"] == 19
+    assert res["suggested_every_s"] is not None and res["suggested_every_s"] > 0

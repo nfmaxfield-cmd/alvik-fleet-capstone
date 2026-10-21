@@ -1364,6 +1364,8 @@ def measure_checkins(dets_by_frame, times, robot_px, anchors, img_size=(640, 480
     one as a label, and compare where each object is guessed on the second with where the person put it.
 
     anchors: {frame: [user objects]} (as for run_tracker). tolerance: allowed error in robot sizes.
+    Objects of the loose types (params.loose_classes: hands, unknown things) are not measured (counted in
+    skipped_loose): they come and go between labels, and the answer is about the objects being followed.
     Returns dict(
       pairs=[dict(obj, from_frame, to_frame, gap_s, gap_frames, chain_len, found, error_px, error_r,
                   within, other_id)],      other_id: the guess there had another number (a mix-up)
@@ -1377,6 +1379,7 @@ def measure_checkins(dets_by_frame, times, robot_px, anchors, img_size=(640, 480
     fs = sorted(f for f, objs in anchors.items() if any(o.get("status") != "rejected" for o in objs))
     look = appearance.Looker(frames, r, p.patch_size) if (frames is not None and appearance is not None) else None
     pairs = []
+    skipped = 0
     todo = list(zip(fs, fs[1:]))
     for k, (fa, fb) in enumerate(todo):
         if progress is not None:
@@ -1388,6 +1391,11 @@ def measure_checkins(dets_by_frame, times, robot_px, anchors, img_size=(640, 480
         by_id = {row["obj"]: row for row in rows_b}
         for o in anchors[fb]:
             if o.get("status") == "rejected" or o.get("cls") == "none":
+                continue
+            if o.get("cls") in p.loose_classes:
+                # hands and other loose things move on long before the next label: counting them would make
+                # the answer "check every 0 s" (seen on real footage); the question is about the objects
+                skipped += 1
                 continue
             if not any(int(a["obj"]) == int(o["obj"]) for a in anchors[fa] if a.get("status") != "rejected"):
                 continue
@@ -1441,7 +1449,8 @@ def measure_checkins(dets_by_frame, times, robot_px, anchors, img_size=(640, 480
                    far=sum(1 for q in first if q["found"] and not q["within"] and q["other_id"] is None),
                    close=sum(1 for q in first if q["within"]))
     return dict(pairs=pairs, by_length=bins, suggested_every_s=suggested, tolerance_r=tolerance,
-                fine_every_s=round(fine, 1) if fine is not None else None, why_short=why)
+                fine_every_s=round(fine, 1) if fine is not None else None, why_short=why,
+                skipped_loose=skipped)
 
 
 def main():

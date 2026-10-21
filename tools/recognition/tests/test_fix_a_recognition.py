@@ -449,3 +449,29 @@ def test_no_model_row_is_scored_on_finding_objects_when_motion_cant_tell_types(t
     proj2.set_classes([dict(name="alvik", has_front=True, size_px=30.0)])
     assert not trainer.motion_untyped(proj2)
 
+
+
+# =============================================================================== real footage (roam1): names stay put
+def _speed_stream(name, phase, t):
+    v = np.where(np.sin(t / 7.0 + phase) > 0.3, 10.0, 0.0)
+    dist = np.concatenate([[0.0], np.cumsum(v[1:] * np.diff(t))])
+    return O.Stream(name, t, dist=dist, heading=np.zeros(len(t))), dist
+
+
+def test_line_up_names_every_object_of_a_stream_and_keeps_the_longest_as_its_main_one():
+    # roam1: the person's labels gave each robot several numbers, and each Line up handed a name to whichever
+    # number matched best by a hair (often a short stretch), so the labels stopped lining the data up
+    t = np.arange(0.0, 200.0, 0.08)
+    left, dl = _speed_stream("Left", 0.0, t)
+    right, dr = _speed_stream("Right", 2.0, t)
+    streams = {"Left": left, "Right": right}
+
+    def track(dist, t0, t1, y=0.0):
+        m = (t >= t0) & (t <= t1)
+        return np.column_stack([t[m], dist[m], np.full(m.sum(), y)])
+    tracks = {1: track(dl, 0, 120), 2: track(dl, 125, 160), 3: track(dl, 50, 60), 4: track(dr, 0, 200, 50.0),
+              5: np.column_stack([t, np.full(len(t), 30.0), np.full(len(t), 80.0)])}       # 5: parked all along
+    primary = {3: "Left", 4: "Right"}            # what the one-per-name match can pick: a short stretch
+    main, every = outsidelink.name_objects(streams, tracks, primary)
+    assert main == {1: "Left", 4: "Right"}
+    assert every == {1: "Left", 2: "Left", 4: "Right"}       # 3 is on video with 1 at the same time; 5 never moved
