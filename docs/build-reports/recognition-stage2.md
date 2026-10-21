@@ -10,7 +10,7 @@ built and tested on synthetic recordings and flagged where real footage must con
 | Part | What a person gets |
 |---|---|
 | Smarter tracking | Objects followed by how they look when they stop moving: a robot parked all session stays found on every frame with no drift; a hand passing over breaks the chain and flags the frame; lookalikes that cross are told apart by how they moved and looked, or flagged for the person; per-type speed and "can stay still" settings; "How often should I check?" measured from your labels |
-| Rejections inform | "Reject here" replaces "Ignore this spot": rejects in that frame, remembers what the empty spot looks like, keeps finding anything that looks different there; rejected guesses teach the model "not an object" (a synthetic stain: 8 false finds to 0) |
+| Rejections inform | "Reject here" replaces the "Ignore this spot" button (old ignore spots stay listed and removable in Work area): rejects in that frame, remembers what the empty spot looks like, keeps finding anything that looks different there; rejected guesses teach the model "not an object" (a synthetic stain: 8 false finds to 0, measured by the training lane; the test asserts a drop of at least 4x) |
 | Every action announced | Each action says what changed, where, and how to take it back; Shift+Z redo; a test fails the build if a message lacks the take-back part |
 | Investigate | Three separated parts (what we found / look around / change things), every change previewed with its reach and confirmed; Q returns after a jump; clip key C |
 | Positions logs (robot logs, any outside data) | Draft guesses with facing from a log on the recording's clock, re-aligned at every confirmation and home visit; clock offset found automatically or "line up by a moment" |
@@ -20,14 +20,14 @@ built and tested on synthetic recordings and flagged where real footage must con
 | Training | Hard negatives; copy-paste with an honest compare (decided on validation, scored on test once); report by situation; a pre-check that refuses with counts instead of failing |
 | Live use | Roll call at the start, per-object confidence and "last confirmed", a prompt to re-confirm one object, names in the CSV |
 
-**Checks:** suites 404 passed, 2 skipped (slow training tests, each passed on its own), plus 93 in
+**Checks:** (verifier: every claim checked against the repository; corrections applied.) suites 404 passed, 2 skipped (slow tests that need RECOGNITION_TRAIN=1; the training lanes ran them separately and they passed), plus 93 in
 tools/tests; old projects from both earlier versions open with every saved label unchanged through
 every new feature (two fixtures); a browser click-through and a newcomer test (a 3D-printed-shapes
 team) found 1 blocker (floor calibration needed programming) and 17 should-fix items; a code review
 found 8 (home visits trusted any still object; hard negatives could land on real robots; compare chose
 on test frames; a clock-offset crash; an unlocked background read; AI key exposure through an
 imported project file; saves blocking ~5 s while re-tracking; AI counting). All fixed in two rounds and
-re-tested; re-track after a save now holds the studio 0.16 s (was 5.6 s).
+re-tested; re-track after a save now holds the studio 0.16 s (was 5.6 s; measured by fix round A's bench on a 24,000-frame recording, not stored in the repo).
 
 **Conclusion.** Stage 2 is built and checked on synthetic data. What it most needs now is roam1.
 
