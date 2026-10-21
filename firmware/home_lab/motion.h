@@ -123,13 +123,18 @@ float rawYaw() {
   return yaw;
 }
 
-// Corrected heading (corr.h): the library's yaw, unwrapped, times gyro_scale, minus gyro_drift_dps x time.
+// Corrected heading (corr.h): every step of the library's yaw (unwrapped) times gyro_scale, minus
+// gyro_drift_dps x time, added up as it happens.
 //   gyro_scale: real turning / what the gyro counts (1.075 = the gyro misses 7.5% of every turn)
 //   gyro_drift_dps: how fast the gyro's heading creeps while the robot stands still (deg/s, left +)
 // Both are 1 and 0 out of the box (`corr reset`). yawTrack() runs on every heading() call and every pass
 // of loop(), so the unwrapping never misses half a turn (a robot turned by hand while idle included).
+// Firmware 2026-10-21a: added up step by step (2026-10-20b multiplied the whole yaw since power-on by
+// gyro_scale), so a new gyro_scale counts from then on and the heading does not jump when it changes: E02 sets
+// learnt corrections between a find and a route, and the own pose must keep its heading across that.
 float gYawRawAcc = 0;          // library yaw since power-on, unwrapped, raw sign (deg)
 float gYawDriftAcc = 0;        // gyro_drift_dps integrated since power-on (deg, left +)
+float gYawCorrAcc = 0;         // the corrected heading, added up (deg, left +, kept within +/-180)
 float gYawPrevRaw = 0;
 unsigned long gYawPrevMs = 0;
 bool gYawInit = false;
@@ -138,8 +143,10 @@ void yawTrack() {
   float r = rawYaw();
   unsigned long now = millis();
   if (!gYawInit) { gYawPrevRaw = r; gYawPrevMs = now; gYawInit = true; return; }
-  gYawRawAcc += wrap180(r - gYawPrevRaw);
-  gYawDriftAcc += P("gyro_drift_dps") * (now - gYawPrevMs) / 1000.0f;
+  float d = wrap180(r - gYawPrevRaw), drift = P("gyro_drift_dps") * (now - gYawPrevMs) / 1000.0f;
+  gYawRawAcc += d;
+  gYawDriftAcc += drift;
+  gYawCorrAcc = wrap180(gYawCorrAcc + gYawSign * P("gyro_scale") * d - drift);   // kept within +/-180: full precision
   gYawPrevRaw = r;
   gYawPrevMs = now;
 }
@@ -150,7 +157,7 @@ float rawHeadingAcc() { yawTrack(); return gYawSign * gYawRawAcc; }
 
 float heading() {
   yawTrack();
-  return wrap180(gYawSign * P("gyro_scale") * gYawRawAcc - gYawDriftAcc);
+  return gYawCorrAcc;
 }
 
 // Heading from wheel odometry (get_pose theta), same left-positive convention.

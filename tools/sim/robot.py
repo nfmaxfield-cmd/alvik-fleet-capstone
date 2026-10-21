@@ -26,15 +26,19 @@ import random
 from config import firmware_raw_columns
 from fw_follow import FollowMixin
 from fw_dock import DockMixin, resolve_contacts
+from fw_e02 import E02Mixin
 import fw_look
 
-EXP_NAMES = ["stream", "turn", "lap", "grid", "demo", "straight", "survey", "follow", "calib", "dock", "touch"]
+EXP_NAMES = ["stream", "turn", "lap", "grid", "demo", "straight", "survey", "follow", "calib", "dock", "touch",
+             "posts", "gyro", "find", "e02"]
 EXP_SURVEY, EXP_FOLLOW, EXP_CALIB, EXP_DOCK, EXP_TOUCH = 6, 7, 8, 9, 10
-RUNNABLE = [n for n in EXP_NAMES if n != "calib"]   # `run <name>` accepts all but calib
+EXP_POSTS, EXP_GYRO, EXP_FIND, EXP_E02 = 11, 12, 13, 14
+NOT_SIMULATED = ("posts", "gyro")                   # firmware runs the simulator does not copy
+RUNNABLE = [n for n in EXP_NAMES if n != "calib" and n not in NOT_SIMULATED]   # `run <name>` accepts all but calib
 # showSelection() colours, (r, g, b) on/off, per experiment index (home_lab.ino);
 # follow (7) and calib (8) never become the selection, so their entries are unused
 EXP_COLORS = [(0, 0, 1), (0, 1, 0), (1, 1, 0), (1, 0, 1), (1, 1, 1), (0, 1, 1), (1, 0, 0), (0, 0, 0), (0, 0, 0),
-              (0, 0, 0), (0, 0, 0)]
+              (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0)]
 BLINK_SLOT_MS = 100        # blink.h
 BLINK_LEAD_SLOTS = 3         # dark slots right after blink::start()
 OFF, WHITE = (0, 0, 0), (1, 1, 1)
@@ -121,7 +125,7 @@ def ray_polys(px, py, dx, dy, polys, best):
     return best
 
 
-class Robot(FollowMixin, DockMixin):
+class Robot(FollowMixin, DockMixin, E02Mixin):
     def __init__(self, name, cfg, rng, params, fw_version, t_boot, boot_id, ip):
         self.name, self.cfg, self.rng = name, cfg, rng
         self.m, self.imu_m, self.tof_m, self.line_m = cfg.robot, cfg.imu, cfg.tof, cfg.line
@@ -168,6 +172,12 @@ class Robot(FollowMixin, DockMixin):
         self.encL = self.encR = 0.0               # last encoder readings (quantized)
         self.odo_x = self.odo_y = self.odo_th = 0.0   # odometry; th in degrees, not wrapped
         self.yaw_raw = rng.uniform(-180, 180)     # IMU fused yaw (its own zero)
+        self.corr_on = False                      # corrections (gyro_scale / gyro_drift_dps) ever used: heading()
+        self.yaw_corr = 0.0                       # ... is then motion.h gYawCorrAcc, added up step by step
+        self.wheel_free = [1.0, 1.0]              # E02 contact model: share of the commanded speed a blocked wheel keeps
+        self.seam_jolts = []                      # (robot ms, g) floor-seam jolts on the accelerometer (session.seams)
+        self.seam_dip_until = -1e9
+        self.seam_side = None
         self.lifted = False
         self.lift = None                          # dict while lifted
         self.kidnap_at = None
@@ -183,6 +193,7 @@ class Robot(FollowMixin, DockMixin):
         # the edge guard's own sensor noise, so switching it on does not shift every other random draw
         self.edge_rng = random.Random(boot_id * 7919 + sum(map(ord, name)))
         self.edge_init()
+        self.e02_init()
         # the nose switches' chatter has its own random stream too (fw_dock.py)
         self.sw_rng = random.Random(boot_id * 104729 + sum(map(ord, name)))
         self.dock_init()
@@ -293,8 +304,12 @@ class Robot(FollowMixin, DockMixin):
         else:
             tauL = m.brake_tau_s if self.cmdL == 0 else m.motor_tau_s
             tauR = m.brake_tau_s if self.cmdR == 0 else m.motor_tau_s
-            self.wL += (self.cmdL - self.wL) * (1 - math.exp(-h / tauL))
-            self.wR += (self.cmdR - self.wR) * (1 - math.exp(-h / tauR))
+            tgtL, tgtR = self.cmdL * self.wheel_free[0], self.cmdR * self.wheel_free[1]
+            if self.ms < self.seam_dip_until:                  # a wheel climbing a floor seam's lip
+                f = self.cfg.session.seam_dip_frac
+                tgtL, tgtR = tgtL * f, tgtR * f
+            self.wL += (tgtL - self.wL) * (1 - math.exp(-h / tauL))
+            self.wR += (tgtR - self.wR) * (1 - math.exp(-h / tauR))
             if self.cmdL == 0 and abs(self.wL) < 0.05:
                 self.wL = 0.0
             if self.cmdR == 0 and abs(self.wR) < 0.05:
@@ -334,8 +349,13 @@ class Robot(FollowMixin, DockMixin):
                     self.update_solids()
                 if resolve_contacts(self):                            # pushed back: the wheels slipped
                     ds = (self.x - x_before) * math.cos(self.th) + (self.y - y_before) * math.sin(self.th)
+                    self._wheel_block(sL, sR, x_before, y_before, th0)
+                elif self.wheel_free != [1.0, 1.0]:
+                    self.wheel_free = [1.0, 1.0]
         else:
             ds = 0.0
+        if self.cfg.session.seams and not self.lifted:
+            self._seam_check()
         rate = (self.th - th0) / h                         # rad/s, true
         v = 0.0 if self.lifted else ds / h
         # forward acceleration, smoothed a little (as the accelerometer's own filter does)
@@ -361,14 +381,66 @@ class Robot(FollowMixin, DockMixin):
         # ---- gyro: bias wanders, scale error, noise integrated into the fused yaw ----
         self.gyro_bias += im.gyro_bias_walk_dps_per_rt_s * math.sqrt(h) * rng.gauss(0, 1)
         arw = im.yaw_arw_deg_per_rt_s * (5 if self.lifted else 1)
-        self.yaw_raw += im.yaw_sign * (math.degrees(rate) * (1 + self.gyro_scale) + self.gyro_bias) * h \
+        dyaw = im.yaw_sign * (math.degrees(rate) * (1 + self.gyro_scale) + self.gyro_bias) * h \
             + arw * math.sqrt(h) * rng.gauss(0, 1)
+        gs, gd = self.params.get("gyro_scale", 1.0), self.params.get("gyro_drift_dps", 0.0)
+        if not self.corr_on and (gs != 1.0 or gd):
+            self.corr_on = True                   # from here on heading() is the corrected sum (continuous)
+            self.yaw_corr = wrap180((self.fw_yaw_sign or im.yaw_sign) * self.yaw_raw)
+        self.yaw_raw += dyaw
+        if self.corr_on:                          # motion.h yawTrack(): each step x gyro_scale, minus drift
+            self.yaw_corr = wrap180(self.yaw_corr + (self.fw_yaw_sign or im.yaw_sign) * gs * dyaw - gd * h)
         if self.yaw_raw > 180 or self.yaw_raw <= -180:
             self.yaw_raw = wrap180(self.yaw_raw)
 
         moving = abs(self.wL) + abs(self.wR) > 1
         self.battery -= (m.battery_moving_pct_per_h if moving else m.battery_idle_pct_per_h) * h / 3600
         self.ms += h * 1000
+
+    def _wheel_block(self, sL, sR, x0, y0, th0):
+        """E02 contact model (cfg.dock.wall_stall_frac < 1): a wheel whose ground point the contact held back
+        keeps only part of its commanded speed (the motor stalls; its tyre slips the rest), next steps."""
+        frac = self.cfg.dock.wall_stall_frac
+        if frac >= 1.0:
+            return
+        half = self.track / 2
+        out = []
+        for lat, s in ((half, sL), (-half, sR)):
+            # the wheel's ground point: where it went (contact included) along the robot's heading
+            bx0, by0 = x0 - lat * math.sin(th0), y0 + lat * math.cos(th0)
+            bx1, by1 = self.x - lat * math.sin(self.th), self.y + lat * math.cos(self.th)
+            act = (bx1 - bx0) * math.cos(self.th) + (by1 - by0) * math.sin(self.th)
+            r = 1.0 if abs(s) < 1e-9 else max(0.0, min(1.0, act / s))
+            out.append(frac + (1.0 - frac) * r)
+        self.wheel_free = out
+
+    def _seam_check(self):
+        """Floor seams (cfg.session.seams): crossing one with the axle gives the accelerometer a jolt and the
+        wheels a short dip (a lip between two boards)."""
+        s = self.cfg.session
+        side = []
+        for x0, y0, x1, y1 in s.seams:
+            side.append((self.x - x0) * (y1 - y0) - (self.y - y0) * (x1 - x0) > 0)
+        if self.seam_side is not None and side != self.seam_side:
+            self.seam_jolts.append((self.ms, s.seam_jolt_g * self.rng.choice((-1.0, 1.0))))
+            self.seam_dip_until = self.ms + s.seam_dip_ms
+        self.seam_side = side
+
+    def accel_x(self, rng=None):
+        """get_imu() ax: forward acceleration (g), mounting offset, noise (more while the wheels turn), and any
+        floor-seam jolt (decays over ~15 ms). The sign is the simulator's (+ = speeding up): the firmware's bump
+        detector uses only the size."""
+        rng = rng or self.rng
+        im = self.imu_m
+        moving = abs(self.wL) + abs(self.wR) > 1
+        an = im.accel_noise_g + (im.accel_vibration_g if moving else 0) + (0.05 if self.lifted else 0)
+        j = sum(g * math.exp(-(self.ms - t) / 15.0) for t, g in self.seam_jolts[-3:] if 0 <= self.ms - t < 100)
+        return self.a_fwd / 981.0 + self.acc_bias[0] + rng.gauss(0, an) + j
+
+    def wheels_speed(self):
+        """get_wheels_speed(): measured rpm, with noise."""
+        n = self.m.wheel_speed_noise_rpm
+        return self.wL / 6 + self.rng.gauss(0, n), self.wR / 6 + self.rng.gauss(0, n)
 
     # ---- picking the robot up (carried by hand, or kidnapped mid-run) ----
     def start_lift(self, x1, y1, th1_rad, dur_ms, reason):
@@ -419,6 +491,8 @@ class Robot(FollowMixin, DockMixin):
         """Firmware heading(): IMU yaw times gYawSign (found by the compass check), so left turns
         are positive. Before any check the firmware's sign is 0 and it refuses runs that turn; here
         the true sign stands in, so the motion helpers also work on their own (unit tests)."""
+        if self.corr_on:                          # corrections in use (corr.h): motion.h's added-up heading
+            return self.yaw_corr
         return wrap180((self.fw_yaw_sign or self.imu_m.yaw_sign) * self.yaw_raw)
 
     def settled_pose(self, ms, after_ms=300.0):
@@ -985,6 +1059,7 @@ class Robot(FollowMixin, DockMixin):
         self.blink_hold()                                 # dark before the call that blocks
         self.advance(m.library_block_ms, busy=True)       # move() waits inside the library first
         r0 = m.wheel_radius_cm
+        cm = cm / self.P("wheel_scale")                       # motion.h: the library is asked for cm / wheel_scale
         dist_deg = abs(cm) / (2 * math.pi * r0) * 360.0      # the library converts with the nominal radius
         vmax = m.move_speed_cms / (2 * math.pi * r0) * 360.0
         acc = m.move_accel_cms2 / (2 * math.pi * r0) * 360.0
@@ -1121,6 +1196,15 @@ class Robot(FollowMixin, DockMixin):
             if not running:
                 self.send("M,nothing running")
             return True
+        if verb == "fix" and not (running and self.f_active):
+            self.e_fix_command(rest, running)        # E02 camera fix (e02.h)
+            return False
+        if verb in ("go", "turn", "mark"):
+            self.e_leg_command(verb, rest, running)
+            return False
+        if verb == "e02":                            # e02 start|far|end = mark
+            self.e_leg_command("mark", rest, running)
+            return False
         if verb in ("fs", "fix", "fpose", "hold", "halt"):
             if running and self.f_active:
                 self.follow_command(verb, rest)
@@ -1168,7 +1252,7 @@ class Robot(FollowMixin, DockMixin):
                 self.send("M,busy: send stop first")
                 return False
             if rest.lower() not in RUNNABLE:
-                self.send("M,run what? stream, turn, lap, grid, demo, straight, survey, follow, dock or touch")
+                self.send("M,run what? stream, turn, lap, grid, demo, straight, survey, follow, dock, touch, find or e02")
                 return False
             self.pending = EXP_NAMES.index(rest.lower())
             return False
@@ -1303,7 +1387,7 @@ class Robot(FollowMixin, DockMixin):
         """runExperiment() from home_lab.ino. Returns a dict describing the run, or None if the
         firmware refused to start it (turn/grid/demo/straight before any compass check)."""
         i = EXP_NAMES.index(exp)
-        if (i == 1 or 3 <= i <= 7) and self.fw_yaw_sign == 0:   # needsYawSign(), started from the laptop
+        if (i == 1 or 3 <= i <= 7 or i in (EXP_GYRO, EXP_FIND, EXP_E02)) and self.fw_yaw_sign == 0:   # needsYawSign()
             self.send("M,not calibrated since power-on: lift the robot off its mark, send calibrate, put it back, "
                       "then start again (%s not started)" % exp)
             return None
@@ -1317,7 +1401,7 @@ class Robot(FollowMixin, DockMixin):
         self.send("M,run %s: %s starting" % (self.run_id, exp))
         t0 = self.millis()
         ms_runinfo = self.ms
-        if i in (EXP_FOLLOW, EXP_CALIB, EXP_DOCK, EXP_TOUCH):
+        if i in (EXP_FOLLOW, EXP_CALIB, EXP_DOCK, EXP_TOUCH, EXP_FIND, EXP_E02):
             self.front_limit = 0.0             # follow: no centre stop while it waits on its start spot;
             #                                    calib: it may face a board, only its rolls check ahead
         self.sw_configure()                    # nose switches (switches.h)
@@ -1347,11 +1431,15 @@ class Robot(FollowMixin, DockMixin):
                 self.run_dock()
             elif exp == "touch":
                 self.run_touch()
+            elif exp == "find":
+                self.run_find()
+            elif exp == "e02":
+                self.run_e02()
             else:
-                raise ValueError("the simulator runs only the straight, demo, survey, follow, calib, dock and touch "
-                                 "experiments, not " + exp)
+                raise ValueError("the simulator runs only the straight, demo, survey, follow, calib, dock, touch, find "
+                                 "and e02 experiments, not " + exp)
         self.brake()
-        if exp in ("dock", "touch"):
+        if exp in ("dock", "touch", "find", "e02"):
             self.front_limit = -1.0            # they ran with the front stop off
         self.tick_wait(self.P("settle_end_ms"))   # firmware: still at the end, logging and blinking
         self.edge_stop()

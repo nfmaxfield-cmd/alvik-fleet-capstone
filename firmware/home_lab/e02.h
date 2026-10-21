@@ -1,0 +1,909 @@
+// E02 accuracy experiment (firmware 2026-10-21a). Plan: docs/build-plans/accuracy-experiment-E02.md.
+// Records and commands: docs/data-formats.md "E02". Simulator copy: tools/sim/fw_e02.py.
+//
+// BUMP DETECTION (no switches). The robot creeps into a board at bump_creep_cms, holding its gyro heading.
+// Two cues:
+//   - stall: the wheels' measured speed (get_wheels_speed) falls below bump_stall_frac of what was commanded;
+//   - jolt: the accelerometer's driving-axis reading (ax) jumps more than bump_jolt_g from its running level.
+// A bump = a stall that lasts bump_stall_ms and began within bump_jolt_win_ms after a jolt, OR a stall that
+// lasts bump_stall_only_ms with no jolt. A jolt alone (a floor seam, vibration) is only counted (BUMP seams);
+// a short slow-down (a seam's lip) never lasts long enough. Real numbers behind the defaults
+// (roam1 logs, 2026-10-19/20): creep vibration on ax has sd ~0.05 g and 1 sample in 100 beyond ~0.13 g, so a
+// jolt alone can never be trusted; ax is the driving axis (it tracks speeding up / slowing down; its sign is
+// not used here, only the size). The moment of contact = the jolt (when there was one), else the stall's
+// start; the believed pose there comes from the pose history. A stall while the front sensor sees something
+// clearly further away (bump_far_cm .. 100 cm) is not a board: the find fails instead of trusting it.
+//
+// PUSH-TO-SQUARE. After the bump both wheels push at push_rpm (gentle) for push_min_ms .. push_ms; the board
+// turns the robot until its whole front face lies on it. Done when the heading changes less than
+// push_still_deg in 250 ms. Then the heading is the board's (facing it), exactly.
+//
+// FIND (`run find`). 0 (pose known: send a camera fix first) drive to the staging point e02_find_stage_cm from
+// both faces, so neither approach is long. 1 face the x board, drive near it (the front sensor stops this drive
+// early if the board is nearer than the pose says), creep, bump, check the bump is not much sooner than the
+// pose says the board is (e02_find_tol_cm + e02_find_tol_pct of the distance dead-reckoned since the pose was
+// last set: something in the way; a later bump can only be the board), square; the pose's distance from the board
+// and its heading are now known exactly. 2 back off e02_find_back_cm, turn to face the y board, creep, bump,
+// square. The two board headings are known, so the gyro's turn between the two squarings gives its scale for
+// that stretch (turn_k = board-to-board angle / gyro turn); the path between the bumps is re-traced with it,
+// so a gyro that under-reads turns does not push the position sideways. The pose is reset: distance from
+// the y board and heading from bump 2, distance from the x board from bump 1 plus the re-traced path. 3 back
+// off again. Pose unknown before (first find after power-on, no camera fix): the robot takes it that it faces
+// the x board, and creeps up to e02_find_max_cm. RAW step: 0 staging, 1 turn + drive near the x board, 2 creep, 3 square,
+// 4 back off, 5 turn + drive near the y board, 6 creep, 7 square, 8 back off.
+//
+// ROUTES (`run e02`). Waypoints in the frame of the start pose (x ahead, y left), each reached by turning to
+// face it and driving straight at it on the own pose (driveLine: gyro heading, wheel distance, corrections
+// from corr.h). 1 straight: (L, 0) far, back to (0, 0). 2 L: (a, 0), (a, t*a) far, back (a, 0), (0, 0).
+// 3 square: (s, 0), (s, t*s) far, (0, t*s), (0, 0). t = +1 (left) / -1 (right): towards the plywood's middle
+// (away from the x board) unless e02_l_turn / e02_square_turn says. Then it turns to the start heading. It
+// stands still e02_pause_ms at the far point. Mode 1 (camera-steered): it drives only what the laptop sends
+// (go / turn), and the laptop says where the start, far point and end are (mark start / far / end, or
+// e02 start / far / end). go / turn also work with no run going (idle legs: parking, finding a robot in the
+// picture, bringing a lost one back), one at a time, from loop(), with the same checks.
+//
+// CAMERA FIX (`fix x y th t_wall`; th "-" = position only). Used only when the wheels have been still for
+// e02_fix_still_ms (so the camera picture shows where it is now, whatever the WiFi delay). During an e02 run
+// the blend, plainly: the new pose = old + e02_fix_k x (camera - old), heading the same way (the shorter way
+// round): e02_fix_k (0.5 = halfway) for KC (mode 0); in a camera-steered run (mode 1, K) a fix replaces the
+// pose. While idle (no run) a fix replaces the pose too: it says where the robot is now (the laptop sends one
+// before every find). A robot with no pose takes the fix as it is.
+//
+// SAFETY. The edge guard (edge.h) stays on in every mode (forward driving; backing up is blind: the backward
+// moves here retrace the path just driven forward, or are at most e02_back_max_cm). A stop command always
+// works (every loop calls shouldAbort()). The wheels never travel more than transit + route + e02_margin_cm in
+// a run (find: 2 x e02_find_max_cm + 2 x back off + 20 cm + the staging drive + the drives towards the boards).
+#pragma once
+
+#include "pose.h"
+
+extern String gRunId;
+
+namespace e02 {
+
+const float NONE = -1.0f;
+const float UNSET = -999.0f;
+
+bool active = false;          // a find or e02 run is going (fix / go / turn / mark are for it)
+bool finding = false;         // the find: no fixes now (the bumps are the fix)
+bool mode1 = false;           // e02 run, camera-steered
+float travelCap = 0;          // > 0: stop the run once the wheels have travelled this far, cm
+float travelAbs = 0;          // wheel travel (forward and back) since the run started, cm
+float lastDist = 0;
+unsigned long lastMoveMs = 0; // the wheels last turned (measured), robot ms
+float sinceSet = 0;           // wheel travel since the pose was last set (a camera fix, a find), cm
+int fixesUsed = 0, fixesRejected = 0;
+
+// path between the two bumps of a find: wheel steps and the gyro's heading change since square 1
+const int NPATH = 200;
+float pathDs[NPATH], pathRel[NPATH];
+int nPath = 0;
+bool pathOn = false;
+float pathG0 = 0, segDs = 0, segRelW = 0;
+
+void pathPush() {
+  if (segDs == 0) return;
+  float rel = segRelW / fabsf(segDs);
+  if (nPath < NPATH) { pathDs[nPath] = segDs; pathRel[nPath] = rel; nPath++; }
+  else { pathRel[NPATH - 1] = (pathRel[NPATH - 1] * fabsf(pathDs[NPATH - 1]) + rel * fabsf(segDs)) /
+                              (fabsf(pathDs[NPATH - 1]) + fabsf(segDs)); pathDs[NPATH - 1] += segDs; }
+  segDs = segRelW = 0;
+}
+
+void tickHook() {
+  pose::tick();
+  float ds = pose::dist - lastDist;
+  lastDist = pose::dist;
+  travelAbs += fabsf(ds);
+  sinceSet += fabsf(ds);
+  if (pathOn && ds != 0) {
+    segDs += ds;
+    segRelW += wrap180(heading() - pathG0) * fabsf(ds);
+    if (fabsf(segDs) >= 0.5f) pathPush();
+  }
+  float sl, sr;
+  alvik.get_wheels_speed(sl, sr);
+  if (fabsf(sl) + fabsf(sr) > 4.0f || fabsf(ds) > 0.05f) lastMoveMs = millis();   // turning or rolling (not noise)
+  if (travelCap > 0 && travelAbs > travelCap && !gAbortReason.length())
+    gAbortReason = "drove further than the route allows";
+}
+
+// Tracking on for a run: keep the pose if one is known (a find, a fix), else start one.
+void begin() {
+  if (pose::known) pose::resume();
+  else pose::start(false);
+  lastDist = 0;
+  travelAbs = 0;
+  travelCap = 0;
+  lastMoveMs = 0;               // runs start from standing still
+  fixesUsed = fixesRejected = 0;
+  pathOn = false;
+  gTickHook = tickHook;
+  active = true;
+}
+
+void end() {
+  alvik.brake();
+  pathOn = false;
+  active = finding = mode1 = false;
+  travelCap = 0;
+  gTickHook = nullptr;
+  gFrontSoft = false;
+  gEdgeSoft = false;
+  gFrontLimitCm = -1;
+  gFrontPath = false;
+  gFrontEndBase = -1;
+  gStepStop = "";
+  pose::stop();             // the pose itself is kept for the next run (pose::resume)
+}
+
+float faceCm() {
+  float f = P("e02_face_cm");
+  if (f > 0) return f;
+  return P("bumper_cm") > 0 ? P("bump_ahead_cm") : P("tof_ahead_cm") + P("tof_recess_cm");
+}
+
+// A board's face as a line: n = unit vector from the robot towards the board, c = n . (any point on the face).
+// A robot square against it has its axle at n . a = c - faceCm(), heading = toward.
+struct Board { float nx, ny, c, toward; const char* name; };
+
+Board board(bool xb) {
+  Board b;
+  float side = P(xb ? "e02_xboard_side" : "e02_yboard_side") > 0 ? 1.0f : -1.0f;   // 0 or -1 = low end, 1 = high end
+  float pos = P(xb ? "e02_xboard_cm" : "e02_yboard_cm");
+  float a = P(xb ? "e02_xboard_deg" : "e02_yboard_deg") * pose::DEG2RAD;
+  if (xb) { b.nx = -sinf(a) * side; b.ny = cosf(a) * side; b.c = b.ny * pos; }
+  else    { b.nx = cosf(a) * side;  b.ny = sinf(a) * side; b.c = b.nx * pos; }
+  b.toward = atan2f(b.ny, b.nx) / pose::DEG2RAD;
+  b.name = xb ? "x" : "y";
+  return b;
+}
+
+// How far the axle still has to go along n to sit square against the board (own pose).
+float toGo(const Board& b) { return b.c - faceCm() - (b.nx * pose::x + b.ny * pose::y); }
+
+// ------------------------------------------------------------------ records
+void bumpHeader() {
+  net::sendLine("H,BUMP,run,ms,n,board,result,cue,ms_start,ms_contact,ms_detect,delay_ms,jolt_g,stall_frac,x_cm,y_cm,"
+                "th_deg,travel_cm,overshoot_cm,front_cm,jolts_ignored,square_deg,push_ms,squared");
+}
+
+struct Bump {
+  int n = 0;
+  const char* board = "x";
+  bool ok = false;
+  char why[72] = "";
+  const char* cue = "-";            // jolt+stall, stall
+  unsigned long msStart = 0, msContact = 0, msDetect = 0;
+  float jolt = 0, stallFrac = 0;    // biggest jolt around the contact (g); measured / commanded wheel speed at detection
+  float x = 0, y = 0, th = 0;       // believed pose at the contact (before any reset)
+  float travel = 0;                 // creep travel to the contact, cm (wheels)
+  float overshoot = 0;              // wheel travel from the contact until the wheels stood still, cm
+  float front = 0;                  // front sensor centre zone at detection, cm
+  int seams = 0;                    // jolts with no stall after them (seams, vibration): ignored
+  float squareDeg = 0;              // heading change while pushing square (the approach angle, opposite sign)
+  unsigned long pushMs = 0;
+  bool squared = false;
+};
+
+void bumpRecord(const Bump& b) {
+  net::logf("D,BUMP,%s,%lu,%d,%s,%s,%s,%lu,%lu,%lu,%ld,%.3f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.1f,%d,%.2f,%lu,%d",
+            gRunId.c_str(), b.msDetect ? b.msDetect : millis(), b.n, b.board, b.ok ? "bump" : b.why, b.cue, b.msStart, b.msContact, b.msDetect,
+            b.msDetect ? (long)(b.msDetect - b.msContact) : -1L, b.jolt, b.stallFrac, b.x, b.y, b.th, b.travel,
+            b.overshoot, b.front, b.seams, b.squareDeg, b.pushMs, b.squared ? 1 : 0);
+}
+
+// ------------------------------------------------------------------ bump and square
+// Creep along floor heading h until a bump (true), or a stop / failure (false: b.why, gAbortReason).
+bool creep(float h, float maxCm, Bump& b) {
+  float v = P("bump_creep_cms"), kh = P("drive_kh");
+  float joltThr = P("bump_jolt_g"), frac = P("bump_stall_frac"), farCm = P("bump_far_cm");
+  unsigned long stallMs = (unsigned long)P("bump_stall_ms"), stallOnly = (unsigned long)P("bump_stall_only_ms");
+  unsigned long win = (unsigned long)P("bump_jolt_win_ms"), spin = (unsigned long)P("bump_spinup_ms");
+  const float cmdRpm = v * 60.0f / (2.0f * 3.14159265f * 1.7f);   // setDrive(): cm/s -> wheel rpm
+  float saved = gFrontLimitCm;
+  gFrontLimitCm = 0;                       // it is meant to touch what is ahead
+  float d0 = pose::dist;
+  float base = 0, peak = 0, lastJoltG = 0, distJolt = 0, distStall = 0;
+  bool haveBase = false;
+  unsigned long t0 = millis(), lastJolt = 0, stallSince = 0;
+  unsigned long limit = 4000 + (unsigned long)(maxCm / fmaxf(v, 0.5f) * 1500.0f);
+  b.msStart = t0;
+  bool ok = false;
+  while (true) {
+    if (shouldAbort()) break;
+    unsigned long now = millis();
+    float travel = pose::dist - d0;
+    float ax, ay, az, gx, gy, gz;
+    alvik.get_imu(ax, ay, az, gx, gy, gz);
+    if (!haveBase) { base = ax; haveBase = true; }
+    float dev = fabsf(ax - base);
+    bool armed = now - t0 >= spin;
+    if (!armed || dev < joltThr) base += (ax - base) * 0.05f;   // running level (~20 calls); a jolt does not move it
+    else if (armed) {
+      if (!lastJolt || now - lastJolt > win) { lastJoltG = 0; distJolt = travel; if (!stallSince) b.seams++; }
+      lastJolt = now | 1;
+      lastJoltG = fmaxf(lastJoltG, dev);
+    }
+    if (stallSince) peak = fmaxf(peak, dev);
+    float sl, sr;
+    alvik.get_wheels_speed(sl, sr);
+    float meas = 0.5f * (sl + sr);
+    bool stalled = armed && meas < frac * cmdRpm;
+    if (stalled && !stallSince) { stallSince = now | 1; distStall = travel; peak = dev; }
+    if (!stalled) stallSince = 0;
+    if (stallSince) {
+      unsigned long s = now - stallSince;
+      bool jolted = lastJolt && (long)(lastJolt + win - stallSince) >= 0;   // a jolt at most win before the stall
+      if ((jolted && s >= stallMs) || s >= stallOnly) {
+        alvik.brake();
+        b.msDetect = now;
+        b.cue = jolted ? "jolt+stall" : "stall";
+        b.msContact = jolted && (long)(lastJolt - stallSince) < 0 ? lastJolt : stallSince;
+        b.travel = jolted && (long)(lastJolt - stallSince) < 0 ? distJolt : distStall;
+        b.jolt = jolted ? fmaxf(peak, lastJoltG) : peak;
+        b.stallFrac = meas / cmdRpm;
+        if (jolted && b.seams > 0) b.seams--;              // that jolt was the bump, not a seam
+        float d[5];
+        alvik.get_distance(d[0], d[1], d[2], d[3], d[4]);
+        b.front = d[2];
+        if (!pose::at(b.msContact, b.x, b.y, b.th)) { b.x = pose::x; b.y = pose::y; b.th = pose::th(); }
+        if (b.front > farCm && b.front < 100.0f) {
+          snprintf(b.why, sizeof(b.why), "stalled with something %.0f cm ahead: not at a board", b.front);
+          break;
+        }
+        ok = true;
+        break;
+      }
+    }
+    if (travel > maxCm) { snprintf(b.why, sizeof(b.why), "no bump within %.0f cm", maxCm); break; }
+    if (now - t0 > limit) { snprintf(b.why, sizeof(b.why), "creep timed out"); break; }
+    float herr = wrap180(h - pose::th());
+    setDrive(v, constrain(kh * herr, -20.0f, 20.0f));
+    delay(5);
+  }
+  alvik.brake();
+  // overshoot: wheel travel from the contact until the wheels stand still (at most 400 ms)
+  unsigned long ts = millis();
+  while (millis() - ts < 400) {
+    if (shouldAbort()) { ok = false; break; }
+    float sl, sr;
+    alvik.get_wheels_speed(sl, sr);
+    if (millis() - ts > 60 && fabsf(sl) < 0.5f && fabsf(sr) < 0.5f) break;
+    delay(5);
+  }
+  if (b.msDetect) b.overshoot = (pose::dist - d0) - b.travel;
+  gFrontLimitCm = saved;
+  b.ok = ok;
+  return ok;
+}
+
+// Push gently so the whole front face lies on the board. False on a stop, or if it never settled.
+bool square(Bump& b) {
+  float rpm = P("push_rpm"), still = P("push_still_deg");
+  unsigned long maxMs = (unsigned long)P("push_ms"), minMs = (unsigned long)P("push_min_ms");
+  float saved = gFrontLimitCm;
+  gFrontLimitCm = 0;
+  float h0 = heading(), hRef = h0;
+  unsigned long t0 = millis(), tRef = t0;
+  bool settled = false, ok = true;
+  alvik.set_wheels_speed(rpm, rpm);
+  while (true) {
+    if (shouldAbort()) { ok = false; break; }
+    unsigned long now = millis();
+    if (now - tRef >= 250) {
+      float h = heading();
+      if (now - t0 >= minMs && fabsf(wrap180(h - hRef)) <= still) { settled = true; break; }
+      hRef = h;
+      tRef = now;
+    }
+    if (now - t0 >= maxMs) break;
+    delay(5);
+  }
+  alvik.brake();
+  b.pushMs = millis() - t0;
+  if (ok && !waitMs(250)) ok = false;       // let go of the push before reading the heading
+  gFrontLimitCm = saved;
+  b.squareDeg = wrap180(heading() - h0);
+  b.squared = settled;
+  if (ok && !settled) {
+    snprintf(b.why, sizeof(b.why), "still turning after %lu ms of pushing: not square", b.pushMs);
+    b.ok = false;
+    gFail = b.why;
+    return false;
+  }
+  return ok;
+}
+
+// Drive straight along floor heading h for cm (negative = backwards, heading kept), on the own pose.
+bool straight(float h, float cm, float cms) {
+  float ux = cosf(h * pose::DEG2RAD), uy = sinf(h * pose::DEG2RAD);
+  return driveLine(pose::x, pose::y, pose::x + cm * ux, pose::y + cm * uy, h, cms, cm < 0) == DRIVE_OK;
+}
+
+// Turn to face (wx, wy) and drive straight to it on the own pose. Front stop while driving forward: the usual
+// safe_front_cm, but only for what is within the rest of the leg + front_end_cm (as follow drives), so a leg
+// that ends facing a board (the return to a start spot near the y board) is not stopped by it; none while
+// turning in place (it may face the board it just backed away from). pause: legPause() after the turn and the
+// drive (routes).
+bool legPause();
+bool driveTo(float wx, float wy, bool pause) {
+  float dx = wx - pose::x, dy = wy - pose::y;
+  if (sqrtf(dx * dx + dy * dy) < 1.0f) return true;
+  float hb = atan2f(dy, dx) / pose::DEG2RAD;
+  gFrontLimitCm = 0;
+  if (!turnToFloor(hb) || (pause && !legPause())) return false;
+  dx = wx - pose::x; dy = wy - pose::y;               // a camera fix during the pause may have moved the pose
+  float hb2 = atan2f(dy, dx) / pose::DEG2RAD;
+  if (fabsf(wrap180(hb2 - hb)) > 2.0f && !turnToFloor(hb2)) return false;
+  gFrontEndBase = P("safe_front_cm");
+  gFrontLimitCm = gFrontEndBase;
+  int r = driveLine(pose::x, pose::y, wx, wy, hb2, P("e02_cms"), false);
+  gFrontEndBase = -1;
+  gFrontLimitCm = 0;
+  return r == DRIVE_OK && (!pause || legPause());
+}
+
+// ------------------------------------------------------------------ find
+struct FindRec {
+  const char* result = "failed";
+  char why[96] = "";
+  int knownBefore = 0;
+  float bx = 0, by = 0, bth = 0;          // believed pose before the find
+  float b2x = 0, b2y = 0, b2th = 0;       // believed pose squared on the y board, just before the reset
+  float rx = 0, ry = 0, rth = 0;          // the reset pose (squared on the y board)
+  float ax = 0, ay = 0, ath = 0;          // pose at the end (after backing off)
+  float corr1 = 0, corr1Deg = 0;          // what bump 1 changed: distance from the x board, heading
+  float corr2 = 0, corr2Deg = 0;          // bump 2: distance from the y board, heading
+  float turnK = 1;                        // board-to-board angle / gyro turn between the squarings
+  float shift = 0;                        // how far re-tracing the path with turn_k moved the position, cm
+};
+
+void findRecord(const FindRec& f, unsigned long ms) {
+  net::sendLine("H,FIND,run,result,known_before,before_x,before_y,before_th,bump2_x,bump2_y,bump2_th,reset_x,"
+                "reset_y,reset_th,after_x,after_y,after_th,corr1_cm,corr1_deg,corr2_cm,corr2_deg,turn_k,retrace_cm,"
+                "face_cm,ms_total,battery");
+  String res = String(f.result);
+  if (f.why[0]) res += String(": ") + String(f.why);
+  net::logf("D,FIND,%s,%s,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.4f,"
+            "%.2f,%.2f,%lu,%d", gRunId.c_str(), res.c_str(), f.knownBefore, f.bx, f.by, f.bth, f.b2x, f.b2y, f.b2th,
+            f.rx, f.ry, f.rth, f.ax, f.ay, f.ath, f.corr1, f.corr1Deg, f.corr2, f.corr2Deg, f.turnK, f.shift,
+            faceCm(), ms, alvik.get_battery_charge());
+}
+
+
+// One board: turn to face it, drive near it (pose known), creep, bump, check the bump is where the board should
+// be (pose known), square. Sends the BUMP record. Returns false with f.why set on any failure.
+bool oneBoard(const Board& bd, int n, bool known, FindRec& f, Bump& b) {
+  b.n = n;
+  b.board = bd.name;
+  rawlog::step = n == 1 ? 1 : 5;
+  gFrontLimitCm = 0;                         // the board is ahead (it may be inside safe_front_cm)
+  if (!turnToFloor(bd.toward)) {
+    snprintf(f.why, sizeof(f.why), "turn to the %s board %s", bd.name, gAbortReason.length() ? "stopped" : "failed");
+    return false;
+  }
+  float maxCm = P("e02_find_max_cm");
+  // how far the own pose may be off by now: dead reckoning since the pose was last set drifts
+  float slack = P("e02_find_tol_pct") / 100.0f * sinceSet;
+  if (known) {
+    float expect = toGo(bd);
+    float margin = P("e02_find_margin_cm") + slack;
+    maxCm = fminf(maxCm, fmaxf(0.0f, expect) + margin);
+    float pre = fminf(expect - P("e02_find_slow_cm"), P("e02_transit_max_cm"));
+    if (pre > 2.0f) {
+      travelCap += pre;
+      // the front sensor ends it early if the board is nearer than the pose says (soft: then it creeps from there)
+      gFrontLimitCm = 0.5f * P("e02_find_slow_cm");
+      gFrontSoft = true;
+      bool ok = straight(bd.toward, pre, P("e02_cms"));
+      gFrontSoft = false;
+      gFrontLimitCm = 0;
+      gFrontLowSince = 0;
+      if (!ok && gStepStop == "obstacle") { ok = true; gStepStop = ""; }
+      if (!ok) {
+        snprintf(f.why, sizeof(f.why), "drive towards the %s board stopped (%s)", bd.name,
+                 gAbortReason.length() ? gAbortReason.c_str() : gFail.c_str());
+        return false;
+      }
+      maxCm = fminf(P("e02_find_max_cm"), P("e02_find_slow_cm") + margin);   // the creep's own cap
+    }
+  }
+  rawlog::step = n == 1 ? 2 : 6;
+  bool ok = creep(bd.toward, fmaxf(maxCm, 1.0f), b);
+  if (ok && known) {
+    // where the bump was against where the own pose said the board would be
+    // sooner: something in the way (another robot?); later can only be the board (nothing stands beyond it)
+    float off = bd.c - faceCm() - (bd.nx * b.x + bd.ny * b.y);
+    if (off > P("e02_find_tol_cm") + slack) {
+      snprintf(b.why, sizeof(b.why), "bump %.1f cm sooner than the %s board should be", off, bd.name);
+      b.ok = ok = false;
+    }
+  }
+  if (!ok) {
+    bumpRecord(b);
+    if (gAbortReason == "plywood edge ahead")
+      snprintf(f.why, sizeof(f.why), "edge guard tripped before the %s board (an open plywood edge, not a board)", bd.name);
+    else if (gAbortReason.length()) snprintf(f.why, sizeof(f.why), "stopped (%s)", gAbortReason.c_str());
+    else snprintf(f.why, sizeof(f.why), "%s board: %s", bd.name, b.why);
+    return false;
+  }
+  rawlog::step = n == 1 ? 3 : 7;
+  bool sq = square(b);
+  bumpRecord(b);
+  if (!sq) {
+    if (gAbortReason.length()) snprintf(f.why, sizeof(f.why), "stopped (%s)", gAbortReason.c_str());
+    else snprintf(f.why, sizeof(f.why), "%s board: %s", bd.name, b.why);
+    return false;
+  }
+  return true;
+}
+
+void runFind() {
+  unsigned long t0 = millis();
+  bumpHeader();
+  FindRec f;
+  bool known = pose::known;
+  f.knownBefore = known ? 1 : 0;
+  Board bx = board(true), by = board(false);
+  float face = faceCm(), back = P("e02_find_back_cm");
+  begin();
+  finding = true;
+  if (!known) {
+    pose::start(true, 0, 0, bx.toward);      // no pose: take it that it faces the x board (FIND known_before 0)
+    net::logf("M,%s find: position unknown (no find or camera fix since power-on): assuming it faces the x board",
+              net::name);
+  }
+  f.bx = pose::x; f.by = pose::y; f.bth = pose::th();
+  travelCap = 2 * P("e02_find_max_cm") + 2 * back + 20;
+  bool ok = false, reset1 = false;
+  do {
+    // pose known: first to the staging point e02_find_stage_cm from both faces, near the corner, so neither
+    // approach is long (a long drive along the x board with a gyro a few degrees off would rub it)
+    float stage = P("e02_find_stage_cm");
+    float det = bx.nx * by.ny - bx.ny * by.nx;
+    if (known && stage > 0 && fabsf(det) > 0.5f) {
+      float c1 = bx.c - stage, c2 = by.c - stage;
+      float sx = (c1 * by.ny - bx.ny * c2) / det, sy = (bx.nx * c2 - c1 * by.nx) / det;
+      float d = sqrtf((sx - pose::x) * (sx - pose::x) + (sy - pose::y) * (sy - pose::y));
+      travelCap += d;                          // at most the board's diagonal: always worth it
+      rawlog::step = 0;
+      if (!driveTo(sx, sy, false)) { snprintf(f.why, sizeof(f.why), "drive to the staging point stopped"); break; }
+    }
+    Bump b1;
+    if (!oneBoard(bx, 1, known, f, b1)) break;
+    // bump 1: the distance from the x board and the heading are now exact
+    float off1 = toGo(bx);
+    f.corr1 = off1;
+    f.corr1Deg = wrap180(bx.toward - pose::th());
+    pose::set(pose::x + off1 * bx.nx, pose::y + off1 * bx.ny, bx.toward, 0.05f, 0.3f);
+    reset1 = true;
+    // the distance from the x board and the heading are exact now; the position along it is not: keep the slack
+    float a1x = pose::x, a1y = pose::y;
+    pathG0 = heading();
+    nPath = 0;
+    segDs = segRelW = 0;
+    pathOn = true;
+    rawlog::step = 4;
+    gFrontLimitCm = 0;
+    if (!straight(bx.toward, -back, 3.0f)) { snprintf(f.why, sizeof(f.why), "backing off the x board stopped"); break; }
+    Bump b2;
+    if (!oneBoard(by, 2, known, f, b2)) break;
+    pathPush();
+    pathOn = false;
+    // the gyro's turn between the two squarings against the boards' own angle: its scale on this stretch
+    float rel2 = wrap180(heading() - pathG0);
+    float trueTurn = wrap180(by.toward - bx.toward);
+    float k = 1;
+    if (fabsf(rel2) > 30.0f && fabsf(trueTurn) > 30.0f) {
+      k = trueTurn / rel2;
+      if (k < 0.8f || k > 1.25f) {
+        snprintf(f.why, sizeof(f.why), "the gyro turned %.1f deg between the boards but they are %.1f deg apart "
+                 "(board sides or angles set wrong?)", rel2, trueTurn);
+        break;
+      }
+    }
+    f.turnK = k;
+    // re-trace the path from square 1 with that scale
+    float px = a1x, py = a1y;
+    for (int i = 0; i < nPath; i++) {
+      float th = (bx.toward + k * pathRel[i]) * pose::DEG2RAD;
+      px += pathDs[i] * cosf(th);
+      py += pathDs[i] * sinf(th);
+    }
+    f.b2x = pose::x; f.b2y = pose::y; f.b2th = pose::th();
+    f.shift = sqrtf((px - pose::x) * (px - pose::x) + (py - pose::y) * (py - pose::y));
+    f.corr2 = by.c - face - (by.nx * pose::x + by.ny * pose::y);
+    f.corr2Deg = wrap180(by.toward - pose::th());
+    float off2 = by.c - face - (by.nx * px + by.ny * py);
+    pose::set(px + off2 * by.nx, py + off2 * by.ny, by.toward, 0.05f, 0.3f);
+    sinceSet = 0;
+    f.rx = pose::x; f.ry = pose::y; f.rth = pose::th();
+    rawlog::step = 8;
+    gFrontLimitCm = 0;
+    if (!straight(by.toward, -back, 3.0f)) { snprintf(f.why, sizeof(f.why), "backing off the y board stopped"); break; }
+    ok = true;
+  } while (false);
+  pathOn = false;
+  f.ax = pose::x; f.ay = pose::y; f.ath = pose::th();
+  if (ok) f.result = "ok";
+  else {
+    if (!known) pose::known = false;    // it never learnt both coordinates
+    if (!gAbortReason.length() && !gFail.length()) gFail = f.why;
+    (void)reset1;
+  }
+  findRecord(f, millis() - t0);
+  if (ok) net::logf("M,%s find: at %.1f, %.1f facing %.1f deg (corrections %.1f cm / %.1f deg and %.1f cm / %.1f deg; "
+                    "turn_k %.3f)", net::name, pose::x, pose::y, pose::th(), f.corr1, f.corr1Deg, f.corr2, f.corr2Deg,
+                    f.turnK);
+  else net::logf("M,%s find failed: %s", net::name, f.why);
+  end();
+}
+
+// ------------------------------------------------------------------ routes
+struct Pt { float x, y; };
+struct Mark { bool set = false; float x = 0, y = 0, th = 0; unsigned long ms = 0; };
+Mark mStart, mFar, mEnd;
+
+// Which way the L / square turns: param +1 left, -1 right, 0 = towards the plywood's middle, i.e. the side
+// away from the x board as seen from the start heading.
+float turnSign(const char* param) {
+  float v = P(param);
+  if (v > 0) return 1.0f;
+  if (v < 0) return -1.0f;
+  Board bx = board(true);
+  float h = mStart.th * pose::DEG2RAD;
+  return (-sinf(h) * bx.nx + cosf(h) * bx.ny) > 0 ? -1.0f : 1.0f;   // left points at the x board: turn right
+}
+
+// Waypoints in the start frame (x ahead, y left); far = index of the far point. Returns the count.
+int waypoints(int route, Pt* w, int& far) {
+  if (route == 1) {
+    float L = P("e02_straight_cm");
+    w[0] = {L, 0}; w[1] = {0, 0}; far = 0; return 2;
+  }
+  if (route == 2) {
+    float a = P("e02_l_cm"), t = turnSign("e02_l_turn");
+    w[0] = {a, 0}; w[1] = {a, t * a}; w[2] = {a, 0}; w[3] = {0, 0}; far = 1; return 4;
+  }
+  float s = P("e02_square_cm"), t = turnSign("e02_square_turn");
+  w[0] = {s, 0}; w[1] = {s, t * s}; w[2] = {0, t * s}; w[3] = {0, 0}; far = 1; return 4;
+}
+
+float routeLen(int route) {
+  if (route == 1) return 2 * P("e02_straight_cm");
+  if (route == 2) return 4 * P("e02_l_cm");
+  return 4 * P("e02_square_cm");
+}
+
+void mark(Mark& m) { m.set = true; m.x = pose::x; m.y = pose::y; m.th = pose::th(); m.ms = millis(); }
+
+void e02Header() {
+  net::sendLine("H,E02,run,route,mode,result,fix_k,start_x,start_y,start_th,far_goal_x,far_goal_y,far_x,far_y,far_th,"
+                "end_x,end_y,end_th,ms_start,ms_far,ms_end,path_cm,legs,fixes_used,fixes_rejected,gyro_scale,"
+                "gyro_drift_dps,wheel_scale,battery");
+}
+
+void e02Record(int route, int mode, const String& result, int legs) {
+  Pt w[4];
+  int far = 0;
+  waypoints(route >= 1 && route <= 3 ? route : 1, w, far);
+  float c = cosf(mStart.th * pose::DEG2RAD), s = sinf(mStart.th * pose::DEG2RAD);
+  float gx = mStart.x + c * w[far].x - s * w[far].y, gy = mStart.y + s * w[far].x + c * w[far].y;
+  net::logf("D,E02,%s,%d,%d,%s,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%lu,%lu,%lu,%.1f,%d,%d,"
+            "%d,%.4f,%.4f,%.4f,%d", gRunId.c_str(), route, mode, result.c_str(), P("e02_fix_k"), mStart.x, mStart.y,
+            mStart.th, gx, gy, mFar.x, mFar.y, mFar.th, mEnd.x, mEnd.y, mEnd.th, mStart.ms, mFar.ms, mEnd.ms,
+            travelAbs, legs, fixesUsed, fixesRejected, P("gyro_scale"), P("gyro_drift_dps"), P("wheel_scale"),
+            alvik.get_battery_charge());
+}
+
+// Stand still e02_leg_pause_ms (camera fixes arrive and are used while it stands).
+bool legPause() {
+  unsigned long ms = (unsigned long)P("e02_leg_pause_ms");
+  return ms == 0 || waitMs(ms);
+}
+
+// A route leg: driveTo() with the KC pauses.
+bool legTo(float wx, float wy) { return driveTo(wx, wy, true); }
+
+// At the far point and the end: if the pose (camera fixes during the pause included: KC) says it is more than
+// e02_redo_cm off, drive there once more. Without fixes the pose is on the spot and nothing happens.
+bool redo(float wx, float wy) {
+  float r = P("e02_redo_cm"), dx = wx - pose::x, dy = wy - pose::y;
+  if (r <= 0 || sqrtf(dx * dx + dy * dy) <= fmaxf(r, 1.0f)) return true;
+  return legTo(wx, wy);
+}
+
+bool turnTo(float h) {
+  gFrontLimitCm = 0;
+  return turnToFloor(h) && legPause();
+}
+
+// ------------------------------------------------------------------ camera-steered legs (mode 1)
+struct Leg { char kind; float arg; long id; };   // g go cm, t turn deg, m mark (0 start, 1 far, 2 end)
+const int NQ = 4;
+Leg q[NQ];
+int qHead = 0, qLen = 0;
+long lastId = 0;
+bool endMarked = false;
+
+// Idle legs: `go` / `turn` with no run going (the laptop parks a robot, finds it in the picture, brings a lost
+// one back). One at a time, run from loop() (idleTick): the edge guard learns the plywood first, then the leg
+// runs with the same checks as in mode 1 (soft front stop and edge guard, length limits, stop), and a LEG
+// record (run "-"). The pose is kept if it is known.
+bool idleLeg = false;           // an idle leg is running
+bool idlePending = false;
+Leg idleQ = {'g', 0, 0};
+
+void legHeader() { net::sendLine("H,LEG,run,id,kind,value,result,ms,x_cm,y_cm,th_deg,info"); }
+
+const char* kindName(char k) { return k == 'g' ? "go" : k == 't' ? "turn" : "mark"; }
+
+void legRecord(long id, char kind, float arg, const char* state, const char* info) {
+  net::logf("D,LEG,%s,%ld,%s,%.2f,%s,%lu,%.2f,%.2f,%.2f,%s", active && !idleLeg ? gRunId.c_str() : "-", id, kindName(kind), arg,
+            state, millis(), pose::x, pose::y, pose::th(), info);
+}
+
+// go <cm> [id] | turn <deg> [id] | mark start|far|end [id]  (from handleCommand; `e02 start|far|end` = mark)
+void legCommand(const String& verb, const String& rest, bool running) {
+  char buf[96];
+  snprintf(buf, sizeof(buf), "%s", rest.c_str());
+  char* tok[4];
+  int n = 0;
+  for (char* t = strtok(buf, " "); t && n < 4; t = strtok(nullptr, " ")) tok[n++] = t;
+  char kind = verb == "go" ? 'g' : verb == "turn" ? 't' : 'm';
+  float arg = 0;
+  long id = n > 1 ? atol(tok[1]) : 0;
+  bool idle = !running && kind != 'm';
+  if (!idle && (!running || !active || !mode1 || idleLeg)) {
+    legHeader();
+    legRecord(id, kind, arg, "refused", idleLeg ? "a leg is running" : kind == 'm' ? "marks are for a camera-steered e02 run"
+                                                 : "busy: not in a camera-steered e02 run");
+    return;
+  }
+  if (idle) legHeader();
+  bool good = n >= 1;
+  if (good && kind == 'm') {
+    if (!strcasecmp(tok[0], "start")) arg = 0;
+    else if (!strcasecmp(tok[0], "far")) arg = 1;
+    else if (!strcasecmp(tok[0], "end")) arg = 2;
+    else good = false;
+  } else if (good) {
+    char* e = nullptr;
+    arg = strtof(tok[0], &e);
+    good = e != tok[0];
+  }
+  if (!good) { legRecord(id, kind, arg, "refused", "could not read it (go <cm> | turn <deg> | mark start|far|end)"); return; }
+  if (kind == 'g' && (arg > P("e02_go_max_cm") || arg < -P("e02_back_max_cm"))) {
+    legRecord(id, kind, arg, "refused", "too long (e02_go_max_cm / e02_back_max_cm)");
+    return;
+  }
+  if (kind == 't' && fabsf(arg) > 180.0f) { legRecord(id, kind, arg, "refused", "turns are -180 to 180 deg"); return; }
+  if (id > 0 && id <= lastId) { legRecord(id, kind, arg, "dup", ""); return; }
+  if (idle) {
+    if (idlePending) { legRecord(id, kind, arg, "refused", "a leg is waiting"); return; }
+    if (id > 0) lastId = id;
+    idleQ = {kind, arg, id};
+    idlePending = true;
+    legRecord(id, kind, arg, "queued", "");
+    return;
+  }
+  if (qLen >= NQ) { legRecord(id, kind, arg, "refused", "queue full"); return; }
+  if (id > 0) lastId = id;
+  q[(qHead + qLen) % NQ] = {kind, arg, id};
+  qLen++;
+  legRecord(id, kind, arg, "queued", "");
+}
+
+bool runLeg(const Leg& L, char* info, size_t n) {
+  info[0] = 0;
+  if (L.kind == 'g') {
+    gFrontEndBase = L.arg > 0 ? P("safe_front_cm") : -1;
+    gFrontLimitCm = L.arg > 0 ? P("safe_front_cm") : 0;
+    bool ok = straight(pose::th(), L.arg, P("e02_cms"));
+    gFrontEndBase = -1;
+    gFrontLimitCm = 0;
+    return ok;
+  }
+  if (L.kind == 't') {
+    gFrontLimitCm = 0;
+    return turnToFloor(wrap180(pose::th() + L.arg));
+  }
+  int m = (int)L.arg;
+  if (m == 0) mark(mStart);
+  else if (m == 1) { mark(mFar); if (!waitMs((unsigned long)P("e02_pause_ms"))) return false; }
+  else { mark(mEnd); endMarked = true; }
+  snprintf(info, n, "%s", m == 0 ? "start" : m == 1 ? "far" : "end");
+  return true;
+}
+
+// Called from loop(): run a waiting idle leg.
+void idleTick() {
+  if (!idlePending) return;
+  idlePending = false;
+  Leg L = idleQ;
+  gAbortReason = "";
+  gFail = "";
+  gStepStop = "";
+  begin();
+  idleLeg = true;
+  gFrontSoft = true;
+  gEdgeSoft = true;
+  travelCap = fabsf(L.arg) + 10.0f;
+  edge::begin();
+  legRecord(L.id, L.kind, L.arg, "started", "");
+  bool good = waitMs((unsigned long)P("edge_learn_ms") + 50);   // still: the edge guard learns the plywood
+  char info[48] = "";
+  if (good) good = runLeg(L, info, sizeof(info));
+  alvik.brake();
+  if (gAbortReason.length()) legRecord(L.id, L.kind, L.arg, "failed", gAbortReason.c_str());
+  else if (good) legRecord(L.id, L.kind, L.arg, "done", info);
+  else {
+    char why[96];
+    if (gStepStop == "edge") snprintf(why, sizeof(why), "plywood edge (%s)", edge::lastCue);
+    else snprintf(why, sizeof(why), "%s", gStepStop.length() ? gStepStop.c_str() : gFail.length() ? gFail.c_str() : "failed");
+    legRecord(L.id, L.kind, L.arg, "failed", why);
+  }
+  edge::stop();
+  idleLeg = false;
+  end();
+  gAbortReason = "";
+  gFail = "";
+}
+
+// ------------------------------------------------------------------ camera fix
+// fix <x> <y> <th|-> <t_wall>   (t_wall: the laptop's clock at the camera picture, logged as given)
+void fixCommand(const String& rest, bool running) {
+  char buf[128];
+  snprintf(buf, sizeof(buf), "%s", rest.c_str());
+  char* tok[5];
+  int n = 0;
+  for (char* t = strtok(buf, " "); t && n < 5; t = strtok(nullptr, " ")) tok[n++] = t;
+  net::sendLine("H,FIX,run,ms,t_wall,cam_x,cam_y,cam_th,k,result,before_x,before_y,before_th,after_x,after_y,after_th");
+  if (n < 4) { net::sendLine("M,usage: fix <x> <y> <heading|-> <t_wall>"); return; }
+  float x = strtof(tok[0], nullptr), y = strtof(tok[1], nullptr);
+  float th = strcmp(tok[2], "-") ? strtof(tok[2], nullptr) : NAN;
+  float k = !running || mode1 ? 1.0f : constrain(P("e02_fix_k"), 0.0f, 1.0f);   // idle, K (mode 1): replace; KC: blend
+  float bx = pose::x, by = pose::y, bth = pose::known ? pose::th() : NAN;
+  const char* result;
+  if (running && !active) result = "rejected:another run is going";
+  else if (finding) result = "rejected:finding (the boards set the pose)";
+  else if (running && millis() - lastMoveMs < (unsigned long)P("e02_fix_still_ms")) result = "rejected:moving";
+  else if (!pose::known) {
+    if (isNaN(th)) result = "rejected:the first fix needs a heading";
+    else { pose::set(x, y, th, 0.5f, 1.0f); result = "set"; }
+  } else {
+    float nth = isNaN(th) ? pose::th() : wrap180(pose::th() + k * wrap180(th - pose::th()));
+    pose::set(pose::x + k * (x - pose::x), pose::y + k * (y - pose::y), nth, 0.5f, 1.0f);
+    result = k >= 1.0f ? "replaced" : "blended";
+  }
+  bool used = strncmp(result, "rejected", 8) != 0;
+  if (used) fixesUsed++; else fixesRejected++;
+  if (used && (k >= 1.0f || !strcmp(result, "set"))) sinceSet = 0;   // a replacing fix: the pose is the camera's
+  net::logf("D,FIX,%s,%lu,%s,%.2f,%.2f,%.2f,%.2f,%s,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f", running ? gRunId.c_str() : "-",
+            millis(), tok[3], x, y, th, k, result, bx, by, bth, pose::x, pose::y, pose::known ? pose::th() : NAN);
+}
+
+// ------------------------------------------------------------------ the run
+void runE02() {
+  e02Header();
+  int route = (int)P("e02_route");
+  int mode = P("e02_mode") >= 0.5f ? 1 : 0;
+  mStart = Mark(); mFar = Mark(); mEnd = Mark();
+  if (route < 1 || route > 3) {
+    gFail = "e02_route must be 1, 2 or 3";
+    e02Record(route, mode, String("failed:") + gFail, 0);
+    return;
+  }
+  if (!pose::known) {
+    gFail = "position unknown: run find first (or send a camera fix)";
+    e02Record(route, mode, String("failed:") + gFail, 0);
+    return;
+  }
+  begin();
+  mode1 = mode == 1;
+  gFrontLimitCm = 0;
+  int legs = 0;
+  bool ok = false;
+  if (!mode1) {
+    do {
+      float sx = P("e02_start_x"), sy = P("e02_start_y");
+      travelCap = P("e02_transit_max_cm") + 10.0f;
+      if (sx != UNSET && sy != UNSET) {
+        float d = sqrtf((sx - pose::x) * (sx - pose::x) + (sy - pose::y) * (sy - pose::y));
+        if (d > P("e02_transit_max_cm")) {
+          char why[96];
+          snprintf(why, sizeof(why), "start spot %.0f cm away (more than e02_transit_max_cm)", d);
+          gFail = why;
+          break;
+        }
+        rawlog::step = 0;
+        if (!legTo(sx, sy)) break;
+      }
+      float hs = P("e02_route_deg");
+      if (hs == UNSET) hs = wrap180(board(false).toward + 180.0f);   // away from the y board
+      if (!turnTo(hs)) break;
+      travelCap = travelAbs + routeLen(route) + P("e02_margin_cm");
+      mark(mStart);
+      Pt w[4];
+      int far = 0, nw = waypoints(route, w, far);
+      float c = cosf(mStart.th * pose::DEG2RAD), s = sinf(mStart.th * pose::DEG2RAD);
+      bool good = true;
+      for (int i = 0; i < nw && good; i++) {
+        rawlog::step = i + 1;
+        float wx = mStart.x + c * w[i].x - s * w[i].y, wy = mStart.y + s * w[i].x + c * w[i].y;
+        good = legTo(wx, wy);
+        if (good && (i == far || i == nw - 1)) good = redo(wx, wy);
+        legs++;
+        if (good && i == far) { mark(mFar); good = waitMs((unsigned long)P("e02_pause_ms")); }
+      }
+      if (!good) break;
+      rawlog::step = nw + 1;
+      if (!turnTo(mStart.th)) break;
+      mark(mEnd);
+      ok = true;
+    } while (false);
+  } else {
+    // camera-steered: only what the laptop sends
+    legHeader();
+    qHead = qLen = 0;
+    lastId = 0;
+    endMarked = false;
+    gFrontSoft = true;                       // an obstacle or an open edge stops the leg, not the run
+    gEdgeSoft = true;
+    travelCap = routeLen(route) + P("e02_transit_max_cm") + P("e02_margin_cm");
+    mark(mStart);                             // until the laptop sends mark start
+    net::logf("M,%s e02: camera-steered, waiting for go / turn / mark", net::name);
+    while (true) {
+      if (shouldAbort()) {
+        if (gAbortReason.length()) break;
+        gStepStop = "";
+      }
+      if (millis() - net::lastRx > (unsigned long)P("e02_quiet_ms") && !qLen) {
+        char why[64];
+        snprintf(why, sizeof(why), "nothing from the laptop for %.0f s", P("e02_quiet_ms") / 1000.0f);
+        gFail = why;
+        break;
+      }
+      if (!qLen) { delay(5); continue; }
+      Leg L = q[qHead];
+      qHead = (qHead + 1) % NQ;
+      qLen--;
+      legs++;
+      rawlog::step = legs;
+      gStepStop = "";
+      gFail = "";
+      legRecord(L.id, L.kind, L.arg, "started", "");
+      char info[48];
+      bool good = runLeg(L, info, sizeof(info));
+      alvik.brake();
+      if (gAbortReason.length()) { legRecord(L.id, L.kind, L.arg, "failed", gAbortReason.c_str()); break; }
+      if (good) legRecord(L.id, L.kind, L.arg, "done", info);
+      else {
+        char why[96];
+        if (gStepStop == "edge") snprintf(why, sizeof(why), "plywood edge (%s)", edge::lastCue);
+        else snprintf(why, sizeof(why), "%s", gStepStop.length() ? gStepStop.c_str() : gFail.length() ? gFail.c_str() : "failed");
+        legRecord(L.id, L.kind, L.arg, "failed", why);
+        gStepStop = "";
+        gFail = "";
+      }
+      if (endMarked) { ok = true; break; }
+    }
+    if (!mEnd.set) mark(mEnd);
+  }
+  if (!ok && !mEnd.set) mark(mEnd);
+  String result = ok ? String("done")
+                : gAbortReason == "plywood edge ahead" ? String("limited:plywood edge")
+                : gAbortReason.length() ? String("stopped:") + gAbortReason
+                : String("failed:") + (gFail.length() ? gFail : String("?"));
+  e02Record(route, mode, result, legs);
+  float ex = mEnd.x - mStart.x, ey = mEnd.y - mStart.y;
+  net::logf("M,%s e02 route %d %s: by its own reckoning it ended %.1f cm from its start, heading %.1f deg off",
+            net::name, route, ok ? "done" : result.c_str(), sqrtf(ex * ex + ey * ey), wrap180(mEnd.th - mStart.th));
+  end();
+}
+
+}  // namespace e02
+
+void runFind() { e02::runFind(); }
+void runE02() { e02::runE02(); }

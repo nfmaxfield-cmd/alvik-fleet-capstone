@@ -86,6 +86,23 @@ void start(bool isKnown, float x0 = 0, float y0 = 0, float th0 = 0) {
 
 void stop() { on = false; }
 
+// Tracking on again WITHOUT forgetting the pose (E02, e02.h: the pose a `run find` set carries into the next
+// run; the robot stood still in between, and heading() kept counting turns while idle). Fresh history,
+// variances and counters; x, y, thOff and known are kept.
+void resume() {
+  float lth;
+  libPose(lastLx, lastLy, lth);
+  lastTh = th();
+  dist = 0;
+  driftDps = 0;
+  fixesUsed = fixesRejected = 0;
+  hCount = hHead = 0;
+  lastMs = millis();
+  qCm = P("pose_q_cm"); qDeg = P("pose_q_deg"); qDps = P("pose_q_dps");
+  push(lastMs);
+  on = true;
+}
+
 // Set the pose outright (laptop "fpose", or the first fix).
 void set(float nx, float ny, float nth, float sig, float sigTh) {
   x = nx; y = ny;

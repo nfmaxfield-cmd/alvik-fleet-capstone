@@ -6,7 +6,9 @@
                 demo (open-floor routes), straight (straight-line accuracy),
                 survey (square spiral for the camera's self-calibration),
                 follow (runs the steps tools/fleet/run_plan.py sends; laptop only),
-                dock (home dock with the nose switches), touch (touch probe; dock.h)
+                dock (home dock with the nose switches), touch (touch probe; dock.h),
+                find, e02 (E02 accuracy experiment: find itself against two boards by bumping,
+                drive a route and back; e02.h)
 
   Setup:
     1. Copy secrets.example.h to secrets.h in this folder and add your WiFi.
@@ -30,12 +32,13 @@
 #include "dock.h"
 #include "follow.h"
 #include "look.h"
+#include "e02.h"
 #include "ota.h"
 
 Arduino_Alvik alvik;
 
 // Bump this whenever the firmware changes, so every logged run says which code it ran.
-#define FW_VERSION "2026-10-20b"
+#define FW_VERSION "2026-10-21a"
 
 uint16_t gBootId = 0;   // random each power-on; starts every run id
 
@@ -43,11 +46,12 @@ uint16_t gBootId = 0;   // random each power-on; starts every run id
 // laptop, so it is started with `run follow` only; "calib" (index 8) is the
 // calibration run, started with the calibrate command only; "dock" (9) and
 // "touch" (10) and "posts" (11) need the nose switches (sw_on 1) and are started with `run`;
-// "gyro" (12) stands still measuring the gyro's drift (corr.h), started with `run gyro`.
+// "gyro" (12) stands still measuring the gyro's drift (corr.h), started with `run gyro`;
+// "find" (13) and "e02" (14) are the E02 accuracy experiment (e02.h), started with `run find` / `run e02`.
 const char* EXP_NAMES[] = {"stream", "turn", "lap", "grid", "demo", "straight", "survey", "follow", "calib", "dock",
-                           "touch", "posts", "gyro"};
+                           "touch", "posts", "gyro", "find", "e02"};
 const int N_EXP = 7;
-const int N_NAMES = 13;
+const int N_NAMES = 15;
 const int EXP_SURVEY = 6;
 const int EXP_FOLLOW = 7;
 const int EXP_CALIB = 8;
@@ -55,6 +59,8 @@ const int EXP_DOCK = 9;
 const int EXP_TOUCH = 10;
 const int EXP_POSTS = 11;
 const int EXP_GYRO = 12;
+const int EXP_FIND = 13;
+const int EXP_E02 = 14;
 int gSelected = 1;
 int gPending = -1;   // experiment requested by the laptop, started from loop()
 
@@ -84,8 +90,9 @@ void showSelection(bool running) {
 }
 
 void printHelp() {
-  net::sendLine("M,commands: run stream|turn|lap|grid|demo|straight|survey|follow|dock|touch|posts|gyro  stop  corr [reset|tape|save <name> <value>]  calibrate  clock  name <Left|Center|Right>  set <name> <value>  get <name>  params  route <SLRE...>  status  identify  lights  help");
+  net::sendLine("M,commands: run stream|turn|lap|grid|demo|straight|survey|follow|dock|touch|posts|gyro|find|e02  stop  corr [reset|tape|save <name> <value>]  calibrate  clock  name <Left|Center|Right>  set <name> <value>  get <name>  params  route <SLRE...>  status  identify  lights  help");
   net::sendLine("M,during run follow: fs <id> <T|D|A|W> ...  fix <t_ms> <x> <y> <th> <sigma>  fpose <x> <y> <th>  hold [id]  halt  (tools/fleet/run_plan.py sends these)");
+  net::sendLine("M,E02: fix <x> <y> <heading|-> <t_wall> (camera fix: idle or K replaces, KC blends e02_fix_k)  go <cm> [id]  turn <deg> [id] (idle, or in run e02 with e02_mode 1)  mark|e02 start|far|end [id]");
   net::sendLine("M,before calibrate: set calib_dir_limits <deg> <cm> ... caps its roll per direction (deg from where it faces, left +; next calibration only; off = none)");
 }
 
@@ -119,6 +126,10 @@ bool handleCommand(const String& raw, bool running) {
     return true;
   }
   if (verb == "help") { printHelp(); return false; }
+  // E02 (e02.h): a camera fix (any time but during a follow run), camera-steered legs
+  if (verb == "fix" && !(running && follow::active)) { e02::fixCommand(rest, running); return false; }
+  if (verb == "go" || verb == "turn" || verb == "mark") { e02::legCommand(verb, rest, running); return false; }
+  if (verb == "e02") { e02::legCommand("mark", rest, running); return false; }   // e02 start|far|end = mark
   if (verb == "fs" || verb == "fix" || verb == "fpose" || verb == "hold" || verb == "halt") {
     if (running && follow::active) follow::command(verb, rest);
     else if (verb == "fs") net::sendLine("M,not following: send run follow first");
@@ -233,7 +244,7 @@ bool handleCommand(const String& raw, bool running) {
   if (verb == "run") {
     if (running) { net::sendLine("M,busy: send stop first"); return false; }
     int i = expIndex(rest);
-    if (i < 0) { net::sendLine("M,run what? stream, turn, lap, grid, demo, straight, survey, follow, dock, touch, posts or gyro"); return false; }
+    if (i < 0) { net::sendLine("M,run what? stream, turn, lap, grid, demo, straight, survey, follow, dock, touch, posts, gyro, find or e02"); return false; }
     gSelected = i;
     gPending = i;
     return false;
@@ -298,7 +309,7 @@ void logRunInfo(int i) {
 // Experiments that turn need the compass direction checked once per power-on.
 // The check wiggles the robot, so it must never happen inside a measured run
 // (after the tape start marks were taken).
-bool needsYawSign(int i) { return i == 1 || (i >= 3 && i <= 7) || i == EXP_GYRO; }
+bool needsYawSign(int i) { return i == 1 || (i >= 3 && i <= 7) || i == EXP_GYRO || i == EXP_FIND || i == EXP_E02; }
 
 // Calibration run, once per power-on and whenever robots may have been mixed
 // up. Logged like any run (RUNINFO, PARAM, RAW at raw_hz, flashes), so the
@@ -539,7 +550,9 @@ void runExperiment(int i, bool fromButton) {
   // safe_front_cm) until steps arrive; each step sets its own front check (follow.h).
   // calib: it may be put down facing a board; only its rolls check ahead (runCalib).
   // dock / touch: put down facing the dock or board, which may be closer than safe_front_cm.
-  if (i == EXP_FOLLOW || i == EXP_CALIB || i == EXP_DOCK || i == EXP_TOUCH || i == EXP_POSTS) gFrontLimitCm = 0;
+  // find / e02: it may stand facing a board it just backed away from; their drives set their own front check.
+  if (i == EXP_FOLLOW || i == EXP_CALIB || i == EXP_DOCK || i == EXP_TOUCH || i == EXP_POSTS || i == EXP_FIND ||
+      i == EXP_E02) gFrontLimitCm = 0;
   sw::configure();   // nose switches (switches.h): picks up `set sw_on 1` and pin changes
   if (!logged) edge::begin();
   if (logged) {
@@ -568,9 +581,11 @@ void runExperiment(int i, bool fromButton) {
     case EXP_TOUCH: runTouch(); break;
     case EXP_POSTS: runPosts(); break;
     case EXP_GYRO: runGyro(); break;
+    case EXP_FIND: runFind(); break;
+    case EXP_E02: runE02(); break;
   }
   alvik.brake();
-  if (i == EXP_DOCK || i == EXP_TOUCH || i == EXP_POSTS) gFrontLimitCm = -1;   // they ran with the front stop off
+  if (i == EXP_DOCK || i == EXP_TOUCH || i == EXP_POSTS || i == EXP_FIND || i == EXP_E02) gFrontLimitCm = -1;   // they ran with the front stop off
   bool edgeStop = !strcmp(gAbortReason.c_str(), "plywood edge ahead");
   if (logged) tickWait((unsigned long)P("settle_end_ms"));   // at rest, still logging and blinking
   edge::stop();
@@ -646,6 +661,8 @@ void loop() {
   net::heartbeat();
   String cmd;
   if (net::poll(cmd)) handleCommand(cmd, false);
+
+  e02::idleTick();    // an idle go / turn from the laptop (e02.h)
 
   if (gPending >= 0) {
     int i = gPending;
