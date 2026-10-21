@@ -253,3 +253,11 @@ company's own AI access (API key), from any provider.
   logged (what was sent, cost, answer); a visible indicator when anything leaves the computer;
   only the crop or frame needed is sent.
 - Counted in the time-saving stats (frames where the AI's suggestion was accepted).
+
+## Personalised for the other team (Nick, 2026-10-20; waiting on their answers)
+
+Ask them first (questions sent via Nick). Likely candidates, depending on answers: positions in the
+robot arm's own coordinates (camera-to-arm calibration by touching known points: their "dock");
+draft labels from the arm's controller log (the arm knows where its gripper is, and where it put each
+part: our data-merging principle); orientation for symmetric shapes (a cube's angle repeats every
+90 degrees); the arm itself as an object type that hides parts; a live output their arm code can read.
