@@ -261,3 +261,17 @@ robot arm's own coordinates (camera-to-arm calibration by touching known points:
 draft labels from the arm's controller log (the arm knows where its gripper is, and where it put each
 part: our data-merging principle); orientation for symmetric shapes (a cube's angle repeats every
 90 degrees); the arm itself as an object type that hides parts; a live output their arm code can read.
+
+## Investigate: clearer actions (Nick, 2026-10-20, after using it on roam1)
+
+Nick: "The Q feature is amazing, that needs to be featured when we give a presentation. But it's
+easy to press the wrong thing because it isn't too clear what means what."
+- Group the window into three plainly separated parts: what we found (read only) / look around
+  (jump buttons: change nothing) / change things (change all, reject all, unsure all, ignore this
+  spot), the last in its own box with a warning colour.
+- Every action button says its reach in its own label: "Ignore this spot in every frame of this
+  camera", "Reject all 12 labels at this spot (frames 812-4410)"; show a short preview of what will
+  change and ask to confirm before anything that changes saved work.
+- One undo for every action, ignore-spot included (today: Z undoes change all; an ignore spot is
+  removed in Work area, W).
+- Presentation: a short scripted demo of Q (stain vs robot, then change all).
