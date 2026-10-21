@@ -34,7 +34,8 @@ Useful options
     --ask-below 0.5       ask for a fresh confirmation of an object whose score stays below this ...
     --ask-after 3         ... for this many seconds
     --outside plugin:path optional outside data (positions and headings on the shared clock) that
-                          can name the objects at the roll call (needs outside.py; see load_outside)
+                          can name the objects at the roll call: alvik:<robot log folder> or
+                          csv:<positions.csv> (outside.py; needs the camera's floor calibration)
 
 Roll call: at the start the page shows the first steady picture with what the model sees, each
 object numbered. One click on "Looks right" confirms; or fix it first (drag a circle, delete one,
@@ -694,7 +695,7 @@ class Pipeline:
 
     # --- applying what the person did on the page ----------------------------------------------
     _KEEP = ("x", "y", "vx", "vy", "f_last", "t_last", "miss_run", "last_score", "last_det_score", "user_seen",
-             "cls_locked", "confirmed", "hits")
+             "cls_locked", "confirmed", "hits", "pos_hist", "hist", "conf_f")
 
     def _apply_commands(self, rows, by_id, f, t):
         with self._lock:
@@ -708,21 +709,8 @@ class Pipeline:
                     continue
                 prev = dict(st=dict(self.state[oid]) if oid in self.state else None,
                             tr={a: getattr(tr, a) for a in self._KEEP if hasattr(tr, a)})
-                if c.get("x") is not None and c.get("y") is not None:
-                    tr.x, tr.y = float(c["x"]), float(c["y"])
-                    for a in ("vx", "vy"):
-                        if hasattr(tr, a):
-                            setattr(tr, a, 0.0)
-                    try:
-                        tr.est.reset_history(t, tr.x, tr.y)
-                        import collections
-                        tr.pos_hist = collections.deque([(t, tr.x, tr.y)])
-                    except AttributeError:
-                        pass
-                # what the tracker itself does for a person's label (Tracker._apply_anchor)
-                tr.f_last, tr.t_last, tr.miss_run = f, t, 0
-                tr.last_score = tr.last_det_score = 1.0
-                tr.user_seen = tr.confirmed = True
+                # what the tracker itself does for a person's label, for this one object
+                self.tk.confirm(tr, f, t, c.get("x"), c.get("y"))
                 self.state[oid] = dict(t_conf=t, f_conf=f, low_since=None, asked=False)
                 self.last_seen[oid] = t
                 self._asked_said.discard(oid)
@@ -1354,31 +1342,80 @@ def clean_roll(objs, classes):
 # Roll call: what the model sees at the start, confirmed or fixed by the person once
 # --------------------------------------------------------------------------------------------
 
-def load_outside(spec, say=print):
-    """Optional outside data (positions and headings on the shared clock), given as --outside plugin:path.
-    TODO(outside.py): tools/recognition/outside.py is being built in parallel. When it exists, this is
-    the one place to call its loader. What this file expects back is any object with
-        drafts(t_wall_text) -> [dict(x, y, heading_deg, name, cls), ...]   (draft positions in picture px)
-    and uses it only to suggest names (and headings) for the objects found at the roll call.
-    Until then a missing module is said in plain words and the run goes on without it."""
+def _split_spec(spec):
+    """"plugin:path" -> (plugin, path); a plain path (also C:\\... on Windows) -> (None, path)."""
+    import outside
+    ids = [p[0] for p in outside.plugins()]
+    if ":" in spec:
+        head, rest = spec.split(":", 1)
+        if head in ids:
+            return head, rest
+    return None, spec
+
+
+class OutsideDrafts:
+    """Outside data lined up on the floor, for the roll call: drafts(t_wall text) -> where each named
+    object is in the picture at that moment (outside.draft_labels at one time)."""
+
+    def __init__(self, aligners, camera, cls_of, heights, plugin=""):
+        self.aligners, self.camera, self.cls_of, self.heights, self.plugin = aligners, camera, cls_of, heights, plugin
+
+    def drafts(self, t_wall_text):
+        import outside
+        try:
+            t = float(t_wall_text)
+        except (TypeError, ValueError):
+            return []
+        d = outside.draft_labels(self.aligners, {0: t}, self.camera, cls_of=self.cls_of, class_heights=self.heights,
+                                 plugin=self.plugin)
+        return [dict(x=o["x"], y=o["y"], heading_deg=o["heading_deg"], name=o["name"], cls=o["cls"]) for o in d.get(0, [])]
+
+
+def load_outside(spec, say=print, proj=None, pipe=None, recording=None):
+    """Optional outside data (positions and headings on the shared clock), given as --outside plugin:path
+    (or just a path: the plug-in that recognises it is used). It is read with outside.py, lined up on the
+    floor with the project's home positions (the log's own "I am home" events) and used only to suggest
+    names (and headings) for the objects found at the roll call. Needs the camera's floor calibration; a
+    stream that is not lined up yet (a robot's own dead reckoning with no home event) names nothing.
+    Returns an OutsideDrafts or None (said in plain words); a file that can't be read is a UserError."""
     if not spec:
         return None
     try:
         import outside
+        import homes as homesmod
     except ImportError:
-        say("Outside data (%s) was asked for, but the outside-data part is not installed yet. "
+        say("Outside data (%s) was asked for, but the outside-data part (outside.py) is missing. "
             "Carrying on without it; the objects can still be named by hand at the roll call." % spec)
         return None
-    loader = getattr(outside, "load_plugin", None) or getattr(outside, "load", None)
-    if loader is None:
-        say("Outside data (%s) was asked for, but outside.py has no loader this tool knows yet. "
-            "Carrying on without it." % spec)
+    cam = getattr(pipe, "cam", None)
+    if cam is None:
+        say("Outside data (%s) needs the camera's floor calibration in the project (see CROSSCAM.md), and there is "
+            "none for this camera. Carrying on without it; name the objects by hand at the roll call." % spec)
         return None
+    plugin, path = _split_spec(spec)
     try:
-        return loader(spec)
+        data = outside.read_outside(os.path.expanduser(path), plugin, recording=recording)
     except Exception as e:
-        raise UserError("The outside data %s could not be read (%s). Check the plug-in name and the file, "
+        raise UserError("The outside data %s could not be read (%s). Check the plug-in name and the folder or file, "
                         "or leave --outside out." % (spec, e))
+    heights = dict(getattr(pipe, "heights", {}) or {})
+    classes = list(getattr(pipe, "classes", None) or [])
+    cls_of = {n: (st.cls if (st.cls in classes or not classes) else (classes[0] if classes else "unknown"))
+              for n, st in data.streams.items()}
+    anchors = {}
+    if proj is not None:
+        key = getattr(pipe, "camera_key", None) or "default"
+        hl = homesmod.homes_of(proj.data, key)
+        if hl and data.streams:
+            z = heights.get(next(iter(cls_of.values())), 0.0)
+            for n, lst in homesmod.events_to_anchors(data.events, hl, cam, height_cm=z).items():
+                anchors.setdefault(n, []).extend(lst)
+    als = outside.align(data, anchors)
+    lined = [n for n, st in data.streams.items() if st.frame == "floor" or anchors.get(n)]
+    say("Outside data: %s. %s" % (data.summary(), ("Lined up on the floor: %s." % ", ".join(sorted(lined))) if lined else
+        "Nothing is lined up on the floor yet (a robot's own log needs a home position event), so it names nothing; "
+        "name the objects by hand at the roll call."))
+    return OutsideDrafts(als, cam, cls_of, heights, data.plugin)
 
 
 def draft_objects(dets, pipe=None, t_wall=""):
@@ -1934,8 +1971,10 @@ def make_pipeline(a, source, say=print, detector=None):
         if a.robot_px:
             robot = a.robot_px
         say("Model file: %s" % onnx)
-    return Pipeline(detector, robot, (640, 480), area, cam, heights, classes, heading, a.every,
-                    ask_below=getattr(a, "ask_below", ASK_BELOW), ask_after_s=getattr(a, "ask_after", ASK_AFTER_S)), proj, model_id
+    pipe = Pipeline(detector, robot, (640, 480), area, cam, heights, classes, heading, a.every,
+                    ask_below=getattr(a, "ask_below", ASK_BELOW), ask_after_s=getattr(a, "ask_after", ASK_AFTER_S))
+    pipe.camera_key = (cam_name or "").strip() or "default"
+    return pipe, proj, model_id
 
 
 def main(argv=None):
@@ -1970,7 +2009,8 @@ def _run_main(a, spec, detector=None, say=print, ask=input):
         show = a.page if a.page is not None else bool(source.live)
         roll = a.roll_call if a.roll_call is not None else bool(source.live and show)
         pipe.check = True if roll else pipe.check
-        pipe.outside = load_outside(getattr(a, "outside", None), say)
+        pipe.outside = load_outside(getattr(a, "outside", None), say, proj=proj, pipe=pipe,
+                                    recording=source.folder if source.kind == "recording" else None)
         view = None
         if show:
             view = LiveView(a.port, source.label, classes=pipe.classes, pipe=pipe)

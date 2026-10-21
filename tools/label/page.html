@@ -211,6 +211,16 @@
   #invpreview { display: none; margin-top: 10px; background: #1c1f24; border: 1px solid #7a5520; border-radius: 8px; padding: 8px 10px; }
   #invpreview.on { display: block; }
   #invpreview table { margin: 6px 0; }
+  /* AI helper: its indicator in the top bar, and every suggestion marked AI */
+  .aiind { display: none; background: #2a2340; color: #d9c8ff; border: 1px solid #6b55a8; border-radius: 10px; padding: 2px 9px; font-size: 12px; cursor: pointer; }
+  .aiind.on { display: inline-block; }
+  .aitag { display: inline-block; background: #2a2340; color: #d9c8ff; border: 1px solid #6b55a8; border-radius: 4px; padding: 0 5px; font-size: 11px; font-weight: 600; margin-right: 4px; }
+  .aibox { background: #201b30; border: 1px solid #6b55a8; border-radius: 8px; padding: 8px 10px; margin: 6px 0; }
+  .aibox .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+  /* home positions in the work-area editor */
+  #wahomes .home { display: grid; grid-template-columns: 1fr auto; gap: 4px; padding: 4px 6px; background: var(--panel2); border-radius: 6px; margin: 4px 0; font-size: 12.5px; }
+  #wahomes input, #wahomes select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 2px 5px; font: inherit; }
+  .settable td input[type=text], .settable td input[type=password], .settable td select { width: 100%; }
   @media (max-width: 900px) { main { grid-template-columns: 1fr; } aside { border-left: 0; border-top: 1px solid var(--line); } }
 </style>
 </head>
@@ -246,7 +256,10 @@
       <button class="sbtn" id="stime" title="How long labelling takes, and how much each model saves">Time saved</button>
       <button class="sbtn" id="sshare" title="Save the whole project as one file, to hand over or keep">Share project</button>
       <button class="sbtn" id="sopen" title="Open a project file (.mxirl) someone gave you">Open shared project</button>
+      <button class="sbtn" id="soutside" title="Robot logs, or any file of positions on the same clock: guesses that name each object">Robot logs / outside data</button>
+      <button class="sbtn" id="sai" title="Optional: an AI service that can look at small pictures and suggest answers (off unless you switch it on)">AI helper</button>
     </span></span>
+  <span class="aiind" id="aiind" title="The AI helper is on: click for its settings"></span>
   <span id="jobtxt"></span>
   <span id="bgtxt"></span>
 </div>
@@ -270,8 +283,9 @@
   </section>
   <div id="wabar">
     <b style="font-size:15px">Work area<span id="wacam"></span></b>
-    <div class="row"><span class="seg"><button id="wa-corners" class="on">Corners</button><button id="wa-spots" title="Ignore spots made by an older version: click one to remove it">Old ignore spots</button></span></div>
+    <div class="row"><span class="seg"><button id="wa-corners" class="on">Corners</button><button id="wa-homes" title="Spots where an object's place and facing are known exactly (a dock, a tray): a visit is a free confirmation">Home positions</button><button id="wa-spots" title="Ignore spots made by an older version: click one to remove it">Old ignore spots</button></span></div>
     <span id="wahelp"></span>
+    <div id="wahomes" style="display:none"></div>
     <h2>Margin</h2>
     <div class="row"><label for="wamargin">Margin around it (px)</label><input id="wamargin" type="number" min="0" step="1"></div>
     <div class="muted" id="wamarginhint" style="margin-top:4px"></div>
@@ -289,6 +303,13 @@
     <button class="btn" id="invbtn" title="Look at one spot across the whole recording: is it an object, or part of the background? (Q)">Investigate a spot (Q)</button>
     <button class="btn" id="invlast" style="display:none">Back to the last investigation</button>
     <button class="btn" id="tlbtn" title="One lane per object across the whole recording: breaks and jumps marked">Track timeline</button>
+    <div id="aibox" style="display:none">
+      <h2>AI helper <span class="aitag">AI</span></h2>
+      <button class="btn" id="ainame" title="Send a small picture of the selected object to the AI service and get a name suggestion">Name this object</button>
+      <button class="btn" id="aicheck" title="Send small pictures of a few confirmed labels; the AI points out any it thinks are wrong">Second check of a sample</button>
+      <button class="btn" id="aidraft" title="Send this frame; the AI suggests rough places for one object type">Draft labels for a type</button>
+      <div class="muted">Suggestions only, marked AI: nothing changes until you take one. Only small pictures are sent.</div>
+    </div>
 
     <div id="spotbox" style="display:none">
       <h2>Spot check</h2>
@@ -547,6 +568,7 @@ function drawArea(lw) {
     const k = s[2] * 0.5; ctx.beginPath(); ctx.moveTo(s[0] - k, s[1] - k); ctx.lineTo(s[0] + k, s[1] + k); ctx.moveTo(s[0] + k, s[1] - k); ctx.lineTo(s[0] - k, s[1] + k); ctx.stroke();
     ctx.restore();
   });
+  if (S.wa && S.wa.homes) drawHomes(lw);
   if (S.wa && !S.wa.done) {
     // corners being placed
     const pts = S.wa.pts;
@@ -560,6 +582,30 @@ function drawArea(lw) {
     pts.forEach((p, i) => { ctx.beginPath(); ctx.arc(p[0], p[1], (i === 0 ? 5 : 3.5) * lw, 0, 2 * Math.PI); ctx.fill(); });
     ctx.restore();
   }
+}
+function drawHomes(lw) {
+  // home positions: a ring of its size, a line for its facing, its name; the one being placed follows the mouse
+  const list = S.wa.homes.slice();
+  const p = S.wa.place;
+  if (p && p.x != null) list.push({ name: p.name || "new", x: p.x, y: p.y, radius: Math.max(6, S.info.robot_px * 0.4), facing_deg: p.facing_deg, kind: "park", _new: true });
+  list.forEach((h) => {
+    ctx.save(); ctx.strokeStyle = h._new ? "#ffb347" : "#7ee0e0"; ctx.fillStyle = ctx.strokeStyle; ctx.lineWidth = 1.8 * lw;
+    if (h.kind === "station") ctx.setLineDash([3 * lw, 3 * lw]);
+    ctx.beginPath(); ctx.arc(h.x, h.y, h.radius, 0, 2 * Math.PI); ctx.stroke(); ctx.setLineDash([]);
+    let f = h.facing_deg;
+    if (h._new && f == null && p.step === "facing" && S.mouse) f = (Math.atan2(-(S.mouse.y - h.y), S.mouse.x - h.x) * 180 / Math.PI + 360) % 360;
+    if (f != null) {
+      const a = f * Math.PI / 180, L = Math.max(h.radius * 1.6, S.info.robot_px * 0.8);
+      ctx.beginPath(); ctx.moveTo(h.x, h.y); ctx.lineTo(h.x + L * Math.cos(a), h.y - L * Math.sin(a)); ctx.stroke();
+    }
+    ctx.beginPath(); ctx.arc(h.x, h.y, 2.5 * lw, 0, 2 * Math.PI); ctx.fill();
+    ctx.font = 11 * lw + "px system-ui, sans-serif"; ctx.fillText(h.name, h.x + h.radius + 3 * lw, h.y - 3 * lw);
+    ctx.restore();
+  });
+  const d = S.wa.dock;
+  if (d && d.wall) { ctx.save(); ctx.fillStyle = "#ffb347"; ctx.beginPath(); ctx.arc(d.wall[0], d.wall[1], 4 * lw, 0, 2 * Math.PI); ctx.fill();
+    if (S.mouse) { ctx.strokeStyle = "#ffb347"; ctx.lineWidth = 1.5 * lw; ctx.setLineDash([4 * lw, 3 * lw]); ctx.beginPath(); ctx.moveTo(d.wall[0], d.wall[1]); ctx.lineTo(S.mouse.x, S.mouse.y); ctx.stroke(); }
+    ctx.restore(); }
 }
 function draw() {
   const s = S.scale * S.dpr;
@@ -615,8 +661,9 @@ function draw() {
     }
     if (rej) { ctx.strokeStyle = col; ctx.lineWidth = 2 * lw; const k = r * 0.6;
       ctx.beginPath(); ctx.moveTo(o.x - k, o.y - k); ctx.lineTo(o.x + k, o.y + k); ctx.moveTo(o.x + k, o.y - k); ctx.lineTo(o.x - k, o.y + k); ctx.stroke(); }
-    // label
-    const txt = "#" + o.obj + " " + o.cls + " · " + statusText(o);
+    // label (with the outside data's name for it, when there is one: the roll call)
+    const nm = S.frame.names && S.frame.names[o.obj];
+    const txt = "#" + o.obj + " " + o.cls + (nm ? " " + nm : "") + " · " + statusText(o);
     ctx.font = 12 * lw + "px system-ui, sans-serif";
     const tw = ctx.measureText(txt).width, th = 15 * lw;
     let lx = o.x + r * 0.8, ly = o.y - r - 4 * lw;
@@ -626,6 +673,16 @@ function draw() {
     ctx.fillStyle = sel ? "#fff" : col; ctx.fillText(txt, lx + 4 * lw, ly);
     ctx.restore();
   });
+  // the AI helper's draft labels on this frame: dashed purple, marked AI, until each is taken or turned down
+  if (S.aiDrafts && S.aiDrafts.frame === S.frame.frame) {
+    S.aiDrafts.items.forEach((d, k) => {
+      if (d.done) return;
+      ctx.save(); ctx.strokeStyle = "#b99cff"; ctx.lineWidth = 2 * lw; ctx.setLineDash([3 * lw, 3 * lw]);
+      ctx.beginPath(); ctx.arc(d.x, d.y, r, 0, 2 * Math.PI); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = "#b99cff"; ctx.font = "bold " + 11 * lw + "px system-ui, sans-serif";
+      ctx.fillText("AI " + (k + 1) + "?", d.x - r * 0.6, d.y + 4 * lw); ctx.restore();
+    });
+  }
   // heading-setting line
   if (S.hmode && S.sel >= 0 && S.mouse) {
     const o = S.frame.objects[S.sel];
@@ -711,7 +768,8 @@ function renderSide() {
     d.className = "obj" + (i === S.sel ? " sel" : "") + (o.status === "rejected" ? " rejected" : "") + (o.status === "unsure" ? " unsure" : "");
     const hd = headingOf(o);
     const htxt = hd ? (hd.solid ? Math.round(hd.h) + "°" : "~" + Math.round(hd.h) + "°?") : "no heading";
-    d.innerHTML = '<span class="sw" style="background:' + colorOf(o.cls) + '"></span><span>#' + o.obj + " " + esc(o.cls) +
+    const nm = fr.names && fr.names[o.obj];
+    d.innerHTML = '<span class="sw" style="background:' + colorOf(o.cls) + '"></span><span>#' + o.obj + " " + esc(o.cls) + (nm ? " <b>" + esc(nm) + "</b>" : "") + (o.source === "ai" ? ' <span class="aitag">AI</span>' : "") +
       ' <span class="st">' + htxt + "</span></span><span class=\"st\">" + esc(statusText(o)) + "</span>";
     d.onclick = () => { S.sel = i; draw(); renderSide(); };
     box.appendChild(d);
@@ -911,6 +969,8 @@ async function applyEntry(u, isRedo) {
   if (u.kind === "bulk") return applyBulk(u, verb, again);
   if (u.kind === "auto") return applyAuto(u, verb, again);
   if (u.kind === "workarea") return applyWorkArea(u, verb, again);
+  if (u.kind === "homes") return applyHomes(u, verb, again);
+  if (u.kind === "outside") return applyOutside(u, verb, again);
   let moved = false;
   if (!S.frame || S.frame.frame !== u.f) {
     let i = S.queue.findIndex((q) => q.f === u.f);
@@ -1146,7 +1206,8 @@ function startWorkArea() {
   if (!ST.on || !ST.state || !ST.state.camera) { toast("The work area is part of the studio (start.py); it isn't available here."); return; }
   const cam = ST.state.camera, a = S.info.area || {};
   S.wa = { cam: cam.key, pts: (a.work_area || []).map((p) => [p[0], p[1]]), done: !!a.work_area, spots: (a.ignore_spots || []).map((s) => s.slice()),
-    mode: "corners", spotDrag: null };
+    mode: "corners", spotDrag: null, homes: clone(cam.homes || []), homesBefore: clone(cam.homes || []), place: null, dock: null, homesDirty: false,
+    visits: cam.visits || null, floor: !!cam.floor };
   if (!a.work_area) S.wa.done = false;
   $("wacam").textContent = cam.name ? " for camera " + cam.name : "";
   $("wamargin").value = cam.settings.margin_px == null ? "" : cam.settings.margin_px;
@@ -1164,7 +1225,15 @@ function startWorkArea() {
 }
 function waMode(m) {
   S.wa.mode = m;
-  $("wa-corners").classList.toggle("on", m === "corners"); $("wa-spots").classList.toggle("on", m === "spots");
+  S.wa.place = null; S.wa.dock = null;
+  $("wa-corners").classList.toggle("on", m === "corners"); $("wa-spots").classList.toggle("on", m === "spots"); $("wa-homes").classList.toggle("on", m === "homes");
+  $("wahomes").style.display = m === "homes" ? "" : "none";
+  // the area's own buttons and margin are hidden while home positions are edited (they have their own Save)
+  const hide = m === "homes" ? "none" : "";
+  $("wa-save").style.display = $("wa-whole").style.display = $("wamarginhint").style.display = hide;
+  $("wamargin").closest(".row").style.display = hide;
+  const mh = $("wamargin").closest(".row").previousElementSibling; if (mh && mh.tagName === "H2") mh.style.display = hide;
+  if (m === "homes") { renderHomes(); draw(); return; }
   $("wahelp").textContent = m === "corners"
     ? "Click the corners of the area to watch (at least 3). Backspace removes the last corner. Enter saves, Esc cancels."
     : "Ignore spots made by an older version (red circles): guesses inside them are left out. Click one to remove it (Enter saves, Esc keeps them all). New ignore spots are not made any more: to reject a guess, use Reject here in Investigate (Q); to leave something out for good, draw the work area so it is outside.";
@@ -1172,6 +1241,7 @@ function waMode(m) {
 function endWorkArea() { S.wa = null; $("wabar").classList.remove("on"); draw(); }
 function waMouseDown(p) {
   const w = S.wa;
+  if (w.mode === "homes") { homesClick(p); draw(); return; }
   if (w.mode === "corners") {
     if (w.done) { w.pts = []; w.done = false; }
     w.pts.push([Math.round(p.x * 10) / 10, Math.round(p.y * 10) / 10]);
@@ -1231,6 +1301,12 @@ async function applyWorkArea(u, verb, again) {
 }
 function waKey(ev) {
   const k = ev.key;
+  if (S.wa.mode === "homes") {
+    if (k === "Enter") { ev.preventDefault(); if (S.wa.place && S.wa.place.step === "facing") { S.wa.place.step = "details"; S.wa.place.facing_deg = null; renderHomes(); draw(); } else if (!S.wa.place && !S.wa.dock) saveHomes(); return; }
+    if (k === "Escape") { ev.preventDefault(); if (S.wa.place || S.wa.dock) { S.wa.place = null; S.wa.dock = null; renderHomes(); draw(); toast("Stopped placing it: nothing was added."); return; }
+      const dirty = S.wa.homesDirty; endWorkArea(); toast(dirty ? "Work area editor closed: the home positions you changed were not saved, so nothing was changed. W opens it again." : "Work area editor closed: nothing was changed. W opens it again."); return; }
+    return;
+  }
   if (k === "Enter") { ev.preventDefault(); saveWorkArea(false); }
   else if (k === "Escape" || k === "w" || k === "W") { ev.preventDefault(); endWorkArea(); toast("Work area editor closed: nothing was changed. W opens it again."); }
   else if (k === "Backspace" || k === "Delete") {
@@ -1242,6 +1318,106 @@ function waKey(ev) {
 }
 $("wa-corners").addEventListener("click", () => waMode("corners"));
 $("wa-spots").addEventListener("click", () => waMode("spots"));
+$("wa-homes").addEventListener("click", () => waMode("homes"));
+// ---- home positions (in the work-area editor): spots where an object's place and facing are known exactly
+function homeWords(h) {
+  return (h.kind === "station" ? "touch-and-go" : "stays a while") + (h.facing_deg != null ? ", facing " + Math.round(h.facing_deg) + "\u00b0" : ", no facing") + (h.owner ? ", home of " + h.owner : "");
+}
+function renderHomes() {
+  const w = S.wa, box = $("wahomes");
+  const list = w.homes.map((h, i) => '<div class="home"><span><b>' + esc(h.name) + '</b><br><span class="muted">' + esc(homeWords(h)) + (h.preset ? " · preset" : "") + '</span></span><button class="xbtn" data-i="' + i + '" title="Remove (not saved until you press Save home positions)">&times;</button></div>').join("");
+  const vis = w.visits;
+  let form = "";
+  if (w.place && w.place.step === "details") {
+    form = '<div class="aibox" style="background:#1f2a2a;border-color:#2f6b6b"><b>New home position</b>' +
+      '<div class="row">Name <input id="hname" style="width:150px" value="' + esc(w.place.name || "Home " + (w.homes.length + 1)) + '"></div>' +
+      '<div class="row"><select id="hkind"><option value="park">stays a while (a dock, a parking spot)</option><option value="station">touch-and-go (a measuring spot)</option></select></div>' +
+      '<div class="row">Belongs to <input id="hown" style="width:150px" placeholder="optional" title="The object that lives here, by the name its outside data uses (for example a robot\'s name in its log). Blank: whoever sits there."></div>' +
+      '<div class="muted">' + (w.place.facing_deg != null ? "Facing " + Math.round(w.place.facing_deg) + "\u00b0." : "No facing (a tray or a spot where the object can face any way).") + "</div>" +
+      '<div class="acts"><button class="sbtn primary" id="hadd">Add it to the list</button><button class="sbtn" id="hcancel">Cancel</button></div></div>';
+  } else if (w.dock) {
+    const pr = w.dock.preset;
+    form = '<div class="aibox" style="background:#1f2a2a;border-color:#2f6b6b"><b>Preset: ' + esc(pr.title) + "</b>" +
+      '<div class="row">Name <input id="dname" style="width:150px" value="' + esc(w.dock.name || pr.name + " " + (w.homes.filter((h) => h.preset).length + 1)) + '"></div>' +
+      '<div class="row">' + esc(pr.owner_label) + ' <input id="down" style="width:150px" placeholder="optional" title="' + esc(pr.owner_title) + '"></div>' +
+      '<div class="muted">' + esc(w.dock.wall ? pr.click2 : pr.click1) + " Esc: never mind.</div></div>";
+  }
+  box.innerHTML = "<h2>Home positions</h2>" +
+    '<p class="muted" style="margin-top:0">Spots where an object\'s place (and facing) is known exactly: a dock, a parking spot, a tray. An object sitting still there is a free confirmation: its guesses snap to the exact place and facing there, and robot logs are lined up again on every visit.</p>' +
+    (list || '<p class="muted">None yet.</p>') +
+    (vis ? '<p class="muted">Visits found in this recording: <b>' + vis.length + "</b>" + (vis.length ? " (" + vis.slice(0, 4).map((v) => esc(v.home) + ", frames " + v.frame_start + "-" + v.frame_end).join("; ") + (vis.length > 4 ? "; ..." : "") + ")" : "") + ".</p>" : "") +
+    form +
+    '<div class="stack"><button class="sbtn" id="hnew">Add a home position (click its spot, then where it faces)</button>' +
+    ((ST.state && ST.state.home_presets) || []).map((p, i) => '<button class="sbtn hpre" data-i="' + i + '" title="Two clicks (needs this camera\'s floor calibration)">Preset: ' + esc(p.title) + "</button>").join("") +
+    '<button class="sbtn primary" id="hsave"' + (w.homesDirty ? "" : " disabled") + ">Save home positions (Enter)</button></div>" +
+    '<p class="muted">' + (w.homesDirty ? "Changed, not saved yet: Save keeps it, Esc leaves it as it was." : "Z takes back a saved change.") + "</p>";
+  $("wahelp").textContent = w.place ? (w.place.step === "spot" ? "Click the spot where the object sits when it is home (its middle)." : w.place.step === "facing" ? "Now click where it faces when it is home (Enter: it has no facing)." : "Name it, then Add it to the list.") :
+    w.dock ? "" : "Home positions of this camera. Nothing here changes labels; saving follows the guesses again with the visits.";
+  box.querySelectorAll(".xbtn").forEach((b) => b.onclick = () => { const h = w.homes.splice(+b.dataset.i, 1)[0]; w.homesDirty = true; renderHomes(); draw();
+    toast("Home position " + h.name + " removed from the list (not saved yet): Save home positions keeps it that way, Esc leaves everything as it was."); });
+  $("hnew").onclick = () => { w.dock = null; w.place = { step: "spot" }; renderHomes(); };
+  box.querySelectorAll(".hpre").forEach((b) => b.onclick = () => {
+    const pr = ST.state.home_presets[+b.dataset.i];
+    if (!w.floor) { toast("The " + pr.title + " preset needs this camera's floor calibration (to know how high it stands in the picture). Make one as in tools/recognition/CROSSCAM.md. Nothing was changed; Add a home position works without it.", true); return; }
+    w.place = null; w.dock = { preset: pr }; renderHomes(); });
+  $("hsave").onclick = () => saveHomes();
+  if ($("hadd")) {
+    $("hadd").onclick = () => {
+      const name = $("hname").value.trim();
+      if (!name) { toast("Give the home position a name first.", true); return; }
+      if (w.homes.some((h) => h.name === name)) { toast("There is already a home position called " + name + ": pick another name.", true); return; }
+      const h = { name: name, x: Math.round(w.place.x * 10) / 10, y: Math.round(w.place.y * 10) / 10, facing_deg: w.place.facing_deg, radius: Math.round(Math.max(6, S.info.robot_px * 0.4) * 10) / 10,
+        kind: $("hkind").value, owner: $("hown").value.trim() || null };
+      w.homes.push(h); w.place = null; w.homesDirty = true; renderHomes(); draw();
+      toast("Home position " + name + " added to the list (not saved yet): Save home positions keeps it, \u00d7 removes it.");
+    };
+    $("hcancel").onclick = () => { w.place = null; renderHomes(); draw(); toast("Not added: nothing changed."); };
+  }
+}
+async function homesClick(p) {
+  const w = S.wa;
+  if (w.place && w.place.step === "spot") { w.place.x = p.x; w.place.y = p.y; w.place.step = "facing"; renderHomes(); return; }
+  if (w.place && w.place.step === "facing") { w.place.facing_deg = Math.round((Math.atan2(-(p.y - w.place.y), p.x - w.place.x) * 180 / Math.PI + 360) % 360 * 10) / 10; w.place.step = "details"; renderHomes(); return; }
+  if (w.dock) {
+    if (!w.dock.wall) { w.dock.wall = [Math.round(p.x * 10) / 10, Math.round(p.y * 10) / 10]; w.dock.name = $("dname").value; w.dock.owner = $("down").value; renderHomes(); return; }
+    const name = ($("dname") ? $("dname").value : w.dock.name || "").trim() || w.dock.preset.name, owner = ($("down") ? $("down").value : w.dock.owner || "").trim();
+    let j;
+    const pr = w.dock.preset;
+    try { j = await withBusy("Working out the home positions ...", () => api("/api/studio/homes/dock", { camera: w.cam, name: name, owner: owner, wall: w.dock.wall, mouth: [p.x, p.y], preset: pr.id })); }
+    catch (e) { toast(e.message, true); w.dock = null; renderHomes(); draw(); return; }
+    const clash = j.homes.filter((h) => w.homes.some((x) => x.name === h.name));
+    if (clash.length) { toast("There is already a home position called " + clash[0].name + ": pick another name. Nothing was added.", true); w.dock = null; renderHomes(); draw(); return; }
+    w.homes.push(...j.homes); w.dock = null; w.homesDirty = true; renderHomes(); draw();
+    toast(pr.title + " " + name + " added to the list as " + plural(j.homes.length, "home position") + " (" + pr.added + "), not saved yet: Save home positions keeps them, \u00d7 removes one.");
+    return;
+  }
+  toast("Press Add a home position (right) first, then click its spot. Nothing was changed.");
+}
+async function saveHomes() {
+  const w = S.wa;
+  if (!w.homesDirty) { toast("No change to save: the home positions are as they were."); return; }
+  const before = w.homesBefore, after = clone(w.homes), cam = w.cam;
+  endWorkArea();
+  try {
+    await putHomes(cam, after, "Saving the home positions, and following the guesses again with the visits ...");
+    pushEntry({ kind: "homes", cam: cam, to: before, desc: "the home positions change" });
+    toast("Home positions saved (" + plural(after.length, "home position") + "): visits now count as free confirmations. Your labels are kept. Z puts the old list back.");
+  } catch (e) { toast(e.message, true); }
+}
+async function putHomes(cam, homes, what) {
+  const j = await withBusy(what, () => api("/api/studio/homes", { camera: cam, homes: homes }));
+  if (j.reopened) { await waitLoaded(what); const s = await studioState(); if (s) renderStudio(s); await init(); }
+  else { const s = await studioState(); if (s) renderStudio(s); }
+  return j;
+}
+async function applyHomes(u, verb, again) {
+  const c = ST.state && ST.state.camera;
+  if (!c || c.key !== u.cam) { toast("Those home positions belong to another camera: open one of its recordings to " + (verb === "Redid: " ? "redo" : "undo") + " it. Nothing was changed.", true); return null; }
+  const now = clone(c.homes || []);
+  try { await putHomes(u.cam, u.to, "Putting the home positions back ..."); } catch (e) { toast(e.message, true); return null; }
+  toast(verb + u.desc + ": " + plural(u.to.length, "home position") + " now (" + (u.to.map((h) => h.name).join(", ") || "none") + "). Your labels are kept." + again);
+  return { kind: "homes", cam: u.cam, to: now, desc: u.desc, rec: u.rec };
+}
 $("wa-cancel").addEventListener("click", () => { endWorkArea(); toast("Work area editor closed: nothing was changed. W opens it again."); });
 $("wa-save").addEventListener("click", () => saveWorkArea(false));
 $("wa-whole").addEventListener("click", () => saveWorkArea(true));
@@ -1479,6 +1655,14 @@ function renderStudio(s) {
   $("bgtxt").className = b ? "busy" : "";
   $("bgtxt").textContent = b ? b.what + (b.total ? ": " + Math.round(100 * b.done / b.total) + "%" : " ...") + (b.left ? " · " + b.left : "") : "";
   if (s.classes && S.info) setClasses(S.info.classes || CLASSES);
+  // the AI helper: a visible indicator whenever it is on, and its buttons on the right
+  const ai = s.ai || {};
+  $("aiind").classList.toggle("on", !!ai.on);
+  $("aiind").textContent = ai.on ? (ai.sends_data ? "AI on \u00b7 " + (ai.provider_title || "") : "AI on \u00b7 stand-in") : "";
+  $("aiind").title = (ai.indicator || "") + ". Click for its settings.";
+  $("aibox").style.display = ai.on ? "" : "none";
+  const oj = s.outside && s.outside.job;
+  if (oj && oj.status === "running") { $("bgtxt").className = "busy"; $("bgtxt").textContent = "Outside data: " + oj.what; }
 }
 async function waitLoaded(first) {
   S.waiting = true;
@@ -1533,11 +1717,17 @@ $("strain").addEventListener("click", () => {
     (pp ? '<p class="muted">In this recording: ' + pp.train + " confirmed frames for learning, " + pp.val + " for picking the best training round, " + pp.test + " held back for scoring" +
       (pp.edge ? " (" + pp.edge + " at piece edges are not used)" : "") + ". Training needs at least 10 for learning and 1 in each of the others, over all recordings.</p>" : "") +
     '<div class="row">Train for at most <input id="tmin" type="number" min="2" max="240" value="' + (s.settings.train_minutes || 20) + '"> minutes</div>' +
-    '<p class="muted">You can keep labelling while it trains. When it finishes, it appears in "Guesses from". Your labels are not changed.</p>' +
+    '<p style="margin:10px 0 2px"><b>Copy-paste</b> <span class="muted">(objects you labelled are pasted onto other learning frames, so the model sees more of them)</span></p>' +
+    '<div class="choice" id="tcp">' + [["off", "Off", "Train as usual."], ["compare", "Compare", "Train twice, with and without it (each gets half the time), and keep whichever scores better on the held-back frames."], ["on", "On", "Always use it, without comparing."]]
+      .map((o) => '<label data-v="' + o[0] + '"' + ((s.settings.copy_paste || "off") === o[0] || (o[0] === "on" && s.settings.copy_paste === true) ? ' class="on"' : "") + '><input type="radio" name="tcp"' + ((s.settings.copy_paste || "off") === o[0] ? " checked" : "") + "> <b>" + o[1] + '</b><span class="muted">' + o[2] + "</span></label>").join("") + "</div>" +
+    '<p class="muted">You can keep labelling while it trains. When it finishes, it appears in "Guesses from". Your labels are not changed. Rejected guesses are used as "not an object here" examples.</p>' +
     '<div class="actions"><button class="sbtn" onclick="closeModal()">Cancel</button><button class="sbtn primary" id="tgo">Start training</button></div>');
+  $("tcp").querySelectorAll("label").forEach((lab) => lab.addEventListener("click", () => { $("tcp").querySelectorAll("label").forEach((l) => l.classList.toggle("on", l === lab)); lab.querySelector("input").checked = true; }));
   $("tgo").onclick = async () => {
-    try { const j = await withBusy("Starting the training ...", () => api("/api/studio/train", { minutes: parseFloat($("tmin").value) })); closeModal();
-      toast("Training " + (j.model ? "model " + j.model + " " : "") + "started in the background (the bar at the top shows how far). Keep labelling. Your labels are not changed; when it is done, the new model is offered in Guesses from, and nothing switches by itself."); pollStudio(); }
+    const on = $("tcp").querySelector("label.on"), cp = on ? on.dataset.v : "off";
+    try { const j = await withBusy("Starting the training ...", () => api("/api/studio/train", { minutes: parseFloat($("tmin").value), copy_paste: cp })); closeModal();
+      toast("Training " + (j.model ? "model " + j.model + " " : "") + "started in the background (the bar at the top shows how far)" + (cp === "compare" ? ", once with and once without copy-paste" : cp === "on" ? ", with copy-paste" : "") + ". Keep labelling. Your labels are not changed; when it is done, the new model is offered in Guesses from, and nothing switches by itself." +
+        (j.copy_paste_before !== j.copy_paste ? " Copy-paste is now " + j.copy_paste + " for the next models too (was " + j.copy_paste_before + "); this window changes it back." : "")); pollStudio(); }
     catch (e) { toast(e.message, true); }
   };
 });
@@ -1584,17 +1774,20 @@ async function showModels() {
     "</td><td>" + fmtPct(p.f1) + "</td><td>" + fmtN(p.centre_err_px) + "</td><td>" + fmtN(p.heading_err_deg) + "</td><td>" + fmtN(p.ms_per_frame) + "</td></tr>").join("");
   const ms = c.models.slice().reverse().filter((m) => showFailed || !m.failed);
   const mrows = ms.map((m) => "<tr><td><b>" + esc(m.id) + "</b>" + (m.current ? ' <span class="muted">(giving the guesses)</span>' : "") + "</td><td>" + (m.n_train_frames || "-") + "</td><td>" + esc((m.created || "").replace("T", " ")) +
-    '</td><td style="max-width:440px">' + esc(modelStatus(m)) + "</td><td>" + (m.failed && m.status !== "training" ? '<button class="sbtn mdel" data-m="' + esc(m.id) + '">Delete</button>' : "") + "</td></tr>").join("");
+    '</td><td style="max-width:440px">' + esc(modelStatus(m)) + '</td><td style="max-width:360px" class="muted">' + trainingUsed(m) + "</td><td>" + (m.failed && m.status !== "training" ? '<button class="sbtn mdel" data-m="' + esc(m.id) + '">Delete</button>' : "") + "</td></tr>").join("");
   modal("<h3>How the guesses improve as you confirm frames</h3>" +
     '<p class="muted">Every model, and the starting point with no model, scored on the same ' + c.test.frames + " held-back frames" + (c.test.note ? " (" + esc(c.test.note) + ")" : "") + ".</p>" +
     (c.caution ? '<div class="warnbox"><b>Caution:</b> ' + esc(c.caution) + "</div>" : "") +
     curveSvg(pts) +
     "<table><tr><th>Guesses from</th><th>Trained on</th><th>Found</th><th>Right</th><th>F1</th><th>Centre off (px)</th><th>Heading off (deg)</th><th>ms/frame</th></tr>" + rows + "</table>" +
-    "<h4>Models</h4>" + (mrows ? "<table><tr><th>Model</th><th>Trained on</th><th>Made</th><th>State</th><th></th></tr>" + mrows + "</table>" : '<p class="muted">No model trained yet.</p>') +
+    "<h4>Models</h4>" + (mrows ? "<table><tr><th>Model</th><th>Trained on</th><th>Made</th><th>State</th><th>What training used</th><th></th></tr>" + mrows + "</table>" : '<p class="muted">No model trained yet.</p>') +
+    (c.situations_html ? '<div class="sit">' + c.situations_html.replace(/<h2>/g, "<h4>").replace(/<\/h2>/g, "</h4>") + "</div>" : "") +
+    '<h4>How often should I check?</h4><div id="ckbox" class="muted">Looking ...</div>' +
     '<div class="row"><label><input type="checkbox" id="mshowfailed"' + (showFailed ? " checked" : "") + "> Show failed models (" + nFailed + ")</label>" +
     '<span class="muted">Failed models, and models saved but finding nothing yet, are hidden here and in "Guesses from". They are never shared unless you ask.</span></div>' +
     '<div class="actions"><a class="sbtn" href="/report" target="_blank">Open the full report</a><button class="sbtn" onclick="closeModal()">Close</button></div>');
   $("modal").classList.add("wide");
+  renderCheckins();
   $("mshowfailed").onchange = async () => {
     try { await api("/api/studio/show_failed", { on: $("mshowfailed").checked }); const st = await studioState(); if (st) renderStudio(st);
       toast($("mshowfailed").checked ? "Failed models are now shown here and in Guesses from. Untick the box to hide them again." : "Failed models are hidden again. Tick the box to show them."); } catch (e) { toast(e.message, true); }
@@ -1613,6 +1806,38 @@ async function showModels() {
   });
 }
 $("smodels").addEventListener("click", showModels);
+// what training used, in plain words: rejected guesses as "not an object" examples, and the copy-paste comparison
+function trainingUsed(m) {
+  const out = [], hn = m.hard_negatives, cp = m.copy_paste;
+  if (hn && hn.spots) out.push(plural(hn.spots, "guess", "guesses") + " you rejected, as \u201cnot an object here\u201d (in " + plural(hn.frames, "frame") + ")");
+  if (cp) out.push(cp.compared === false || cp.mode === "on" ? "copy-paste on (not compared)" : (cp.text || ""));
+  return esc(out.join("; "));
+}
+// "How often should I check?": how far the guesses drift between your labels, measured on this recording
+async function renderCheckins(start) {
+  const box = $("ckbox"); if (!box) return;
+  if (!S.info) { box.textContent = "Open a recording first."; return; }
+  let v;
+  try { v = start ? await api("/api/checkins", {}) : await api("/api/checkins"); } catch (e) { box.innerHTML = esc(e.message); return; }
+  if (v.status === "running") {
+    box.innerHTML = "Measuring on your labels: " + (v.total ? v.done + " of " + v.total + " stretches between labels" : "starting") + (v.left ? " · " + esc(v.left) : "") + " ... (you can close this window; it carries on)";
+    setTimeout(() => renderCheckins(false), 800); return;
+  }
+  const btn = '<button class="sbtn" id="ckgo">' + (v.status === "done" ? "Measure again" : "Measure it on my labels") + "</button>";
+  if (v.status === "failed") { box.innerHTML = '<div class="warnbox">The measurement stopped: ' + esc(v.error) + "</div>" + btn; }
+  else if (v.status !== "done") {
+    box.innerHTML = "<p>The guesses follow each object from one of your labels to the next. The longer since the last label, the further they can drift. This measures it on this recording: for each object it starts from one of your labels and compares where the guesses put it at your next label.</p>" + btn;
+  } else {
+    const r = v.result, rows = (r.by_length || []).map((b) => "<tr><td>" + (b.up_to_s != null ? "up to " + b.up_to_s + " s" : "longer") + "</td><td>" + b.n + "</td><td>" + fmtPct(b.within) + "</td><td>" + (b.median_r == null ? "-" : fmtN(b.median_r, 2)) + "</td></tr>").join("");
+    const sug = r.suggested_every_s;
+    box.innerHTML = '<p style="color:var(--text)">' + (r.no_limit ? "However long it was since your last label, " + fmtPct(0.95) + " or more of the guesses were within a quarter of an object of where you put it: the guesses hold well here." : sug == null ? "Not enough pairs of labels of the same object yet to say. Label the same objects on more frames, then measure again." :
+      sug === 0 ? "Even shortly after a label, fewer than " + fmtPct(0.95) + " of the guesses were close: check every object often." :
+      "Check each object at least every <b>" + sug + " s</b>: up to then, " + fmtPct(0.95) + " or more of the guesses were within a quarter of an object of where you put it.") + "</p>" +
+      (rows ? "<table><tr><th>Time since your last label of it</th><th>Times</th><th>Close (within a quarter object)</th><th>Typical miss (object sizes)</th></tr>" + rows + "</table>" : "") +
+      '<p class="muted">Measured ' + esc((r.measured || "").replace("T", " ")) + " on " + plural(r.labelled_frames || 0, "labelled frame") + " of this recording. " + btn + "</p>";
+  }
+  $("ckgo").onclick = async () => { await renderCheckins(true); toast("Measuring how far the guesses drift between your labels, in the background. Nothing is changed."); };
+}
 
 // ---- object types table (setup screen and the Object types button)
 const HEIGHT_TITLE = "Height of the marked point above the floor (cm, for the second camera)";
@@ -1629,7 +1854,17 @@ function typeRow(c, i, editable) {
     '<td><input class="csize" type="number" min="0" step="1" style="width:110px" value="' + (c.size_px || "") + '" placeholder="measured" title="Blank: measured from the video"' + dis + '></td>' +
     "<td" + hc + '><input class="cheight" type="number" min="0" step="0.5" style="width:80px" value="' + (c.height_varies || c.height_cm == null ? "" : c.height_cm) + '" placeholder="not known" title="Blank: not known; then this type is not passed to the second camera"' + (c.height_varies ? " disabled" : "") + dis + '>' +
     ' <label class="muted"><input class="cvaries" type="checkbox"' + (c.height_varies ? " checked" : "") + dis + ' onchange="this.closest(\'tr\').querySelector(\'.cheight\').disabled = this.checked"> it varies</label></td>' +
-    '<td><input class="cnote" style="width:100%;min-width:260px" value="' + esc(c.note || "") + '" placeholder="where to mark it, e.g. the middle of its top"' + dis + '></td><td>' + del + "</td></tr>";
+    '<td><input class="cnote" style="width:100%;min-width:200px" value="' + esc(c.note || "") + '" placeholder="where to mark it, e.g. the middle of its top"' + dis + '></td>' + motionCells(c, dis) + '<td>' + del + "</td></tr>";
+}
+// how each type moves, for the tracker: blank / "usual" keeps the usual setting for that kind of type
+function motionCells(c, dis) {
+  const u = (ST.state && ST.state.motion_usual && ST.state.motion_usual[c.name]) || null;
+  const yn = (v) => v ? "yes" : "no";
+  const sel = (cls, v, title) => '<select class="' + cls + '"' + dis + ' title="' + title + '"><option value="">usual' + (u ? " (" + yn(u[cls === "ccarry" ? "can_be_carried" : "can_sit_still"]) + ")" : "") + "</option>" +
+    '<option value="yes"' + (v === true ? " selected" : "") + '>yes</option><option value="no"' + (v === false ? " selected" : "") + ">no</option></select>";
+  return '<td><input class="cspeed" type="number" min="0.1" step="0.5" style="width:90px" value="' + (c.max_speed || "") + '" placeholder="usual' + (u ? " (" + u.max_speed + ")" : "") + '" title="Fastest it moves, in object sizes per second. Blank: the usual for this kind of type (3 for objects, 15 for hands and things reaching in). The guesses never follow one object further than this between frames."' + dis + "></td>" +
+    "<td>" + sel("ccarry", c.can_be_carried, "Can someone pick it up and put it down elsewhere? Yes: when it is lost, the guesses look for it further away (at hand speed).") + "</td>" +
+    "<td>" + sel("cstill", c.can_sit_still, "Can it stay put for a long time? Yes: while it stands still, the guesses keep following it by its look instead of dropping it.") + "</td>";
 }
 function typesTable(classes, editable) {
   const cs = classes.slice();
@@ -1637,9 +1872,10 @@ function typesTable(classes, editable) {
   const ci = cs.findIndex((c) => c.catch_all || c.name === "unknown");
   if (ci >= 0) { const c = cs.splice(ci, 1)[0]; c.catch_all = true; cs.push(c); }
   return '<table id="ctab"><tr><th>Key</th><th>Colour</th><th>Name</th><th>Has a front</th><th>Size (px)</th><th' + (showHeight() ? "" : ' class="hidecol"') + ">" + HEIGHT_TITLE +
-    '</th><th>Note</th><th></th></tr>' + cs.map((c, i) => typeRow(c, i, editable)).join("") + "</table>" +
+    '</th><th>Note</th><th title="Fastest it moves, in object sizes per second">Fastest (sizes/s)</th><th>Can be carried</th><th>Can stay still</th><th></th></tr>' + cs.map((c, i) => typeRow(c, i, editable)).join("") + "</table>" +
     (editable ? '<button class="sbtn" id="cadd">Add a type</button> <span class="muted">Up to 9 types (keys 1-9). "unknown" is always kept, for anything else.</span>' : "") +
-    (showHeight() ? "" : '<p class="muted">The height above the floor is only used to pass labels between two cameras, so it is hidden while this project has one camera.</p>');
+    (showHeight() ? "" : '<p class="muted">The height above the floor is only used to pass labels between two cameras, so it is hidden while this project has one camera.</p>') +
+    '<p class="muted">The last three columns say how each type moves, so the guesses follow it better: leave them at "usual" unless the guesses lose an object or jump to the wrong one.</p>';
 }
 function renumberTypes() {
   [...$("ctab").querySelectorAll("tr")].slice(1).forEach((tr, i) => {
@@ -1666,7 +1902,10 @@ function readTypes() {
     const h = tr.querySelector(".cheight").value.trim();
     return { name: tr.querySelector(".cname").value.trim(), has_front: tr.querySelector(".cfront").checked,
       size_px: parseFloat(tr.querySelector(".csize").value) || null, height_cm: h === "" || isNaN(parseFloat(h)) ? null : parseFloat(h),
-      height_varies: tr.querySelector(".cvaries").checked, note: tr.querySelector(".cnote").value.trim() };
+      height_varies: tr.querySelector(".cvaries").checked, note: tr.querySelector(".cnote").value.trim(),
+      max_speed: parseFloat(tr.querySelector(".cspeed").value) || null,
+      can_be_carried: { yes: true, no: false }[tr.querySelector(".ccarry").value] ?? null,
+      can_sit_still: { yes: true, no: false }[tr.querySelector(".cstill").value] ?? null };
   });
 }
 // a plain message with an OK button (waits until it is closed)
@@ -1676,14 +1915,18 @@ function infoModal(title, html) {
     $("infook").onclick = () => { closeModal(); resolve(); };
   });
 }
-$("sclasses").addEventListener("click", () => {
+$("sclasses").addEventListener("click", () => openTypes());
+// the Object types window; extra: names to add as new rows (from the AI helper), for the person to look over and save
+function openTypes(extra) {
   const s = ST.state;
-  modal("<h3>Object types</h3>" +
+  const list = s.classes.slice();
+  (extra || []).forEach((n) => { if (!list.some((c) => c.name === n)) list.splice(Math.max(0, list.length - 1), 0, { name: n, has_front: false, size_px: null, height_cm: null, height_varies: false, note: "", ai: true }); });
+  modal("<h3>Object types</h3>" + (extra && extra.length ? '<div class="aibox"><span class="aitag">AI</span> Added from the AI\'s suggestion: <b>' + extra.map(esc).join(", ") + "</b>. Look it over; nothing is changed until you press Save (Cancel leaves the types as they were).</div>" : "") +
     '<p class="muted">Keys 1-9 pick a type in this order; each key has its colour. Types already used in labels can\'t be renamed or removed (add a new one instead). ' +
     "\"Has a front\" makes the model learn which way it faces. Size in pixels sets how big the model's target is (blank = measured from the video). " +
     (showHeight() ? "The height is only used to pass a label to the second camera; tick \"it varies\" when it isn't fixed (a hand, a lifted part), or leave it blank when you don't know it: such types are not passed between cameras. " : "") +
     "With two or more types of object, the guesses before a model is trained show objects as \"unknown\" (they can't tell your types apart): you give each its type with 1-9.</p>" +
-    typesTable(s.classes, true) +
+    typesTable(list, true) +
     '<div class="actions"><span class="muted" id="cmsg"></span><button class="sbtn" onclick="closeModal()">Cancel</button><button class="sbtn primary" id="csave">Save</button></div>');
   $("modal").classList.add("wide");
   wireTypesTable();
@@ -1698,7 +1941,7 @@ $("sclasses").addEventListener("click", () => {
       if (j.note) await infoModal("About the guesses", "<p>" + esc(j.note) + "</p>");
     } catch (e) { $("shade").classList.contains("on") && $("cmsg") ? $("cmsg").textContent = e.message : toast(e.message, true); }
   };
-});
+}
 $("sadd").addEventListener("click", () => {
   modal("<h3>Add a recording</h3><p>Paste one of these:</p><ul>" +
     "<li>a <b>video file</b> from a phone or a webcam app (mp4, mov, avi ...): it is made into a recording folder next to the video, with a progress bar. The video itself is not changed.</li>" +
@@ -1783,7 +2026,9 @@ function setupScreen(s) {
     let choice = null;
     const cards = presets.map((p, k) => '<label data-k="p' + k + '"><input type="radio" name="tset"> <b>' + esc(p.title) + "</b>" +
       '<span class="muted">Ready-made: ' + p.classes.map((c) => esc(c.name)).join(", ") + "</span></label>").join("") +
-      '<label data-k="own"><input type="radio" name="tset"> <b>My own list</b><span class="muted">Name the objects you track; you can change them later.</span></label>';
+      '<label data-k="own"><input type="radio" name="tset"> <b>My own list</b><span class="muted">Name the objects you track; you can change them later.</span></label>' +
+      '<label data-k="ai"><input type="radio" name="tset"> <b>Describe what you track in a sentence</b><span class="muted">The optional AI helper suggests the object types; you look them over before saving.</span></label>';
+    let aiCall = null;
     modal('<h3>Welcome to Maxfield IRL Tracking</h3><div class="welcome">Identify. Recognize. Label.</div>' +
       "<p>Before judging any frame, set up this project. All of it can be changed later under <b>Object types</b>.</p>" +
       '<div class="row"><label for="pname"><b>Project name</b></label> <input id="pname" style="width:280px" value="' + esc(s.project.name) + '"></div>' +
@@ -1792,14 +2037,42 @@ function setupScreen(s) {
       '<p class="muted">Each type gets a key (1-9) and a colour. Mark each object at one point (see Note). "unknown" is always kept, for anything that is none of the others or that you can\'t name yet. ' +
       'Every row needs a name (remove an empty row with \u00d7).</p>' +
       '<div class="actions"><span class="muted" id="setupmsg"></span><button class="sbtn primary" id="setupgo" disabled>Save and show me around</button></div>', true);
+    $("modal").classList.add("wide");          // the type table has the motion columns too
     $("tchoice").querySelectorAll("label").forEach((lab) => lab.addEventListener("click", () => {
       choice = lab.dataset.k;
       $("tchoice").querySelectorAll("label").forEach((l) => l.classList.toggle("on", l === lab));
       lab.querySelector("input").checked = true;
+      if (choice === "ai") { $("ttable").className = ""; setupSentence(); $("setupgo").disabled = true; return; }
       const list = choice === "own" ? own : presets[+choice.slice(1)].classes.map((c) => Object.assign({}, c, { catch_all: c.name === "unknown" }));
       $("ttable").className = ""; $("ttable").innerHTML = typesTable(list, true); wireTypesTable();
       $("setupgo").disabled = false;
     }));
+    // "Describe what you track in a sentence": the AI helper suggests the types (it is switched on here if it is off)
+    async function setupSentence() {
+      let v = null;
+      try { v = await api("/api/studio/ai"); } catch (e) { /* shown below */ }
+      const on = v && v.status.on;
+      $("ttable").innerHTML = '<div class="aibox"><div class="row"><input id="tsent" style="width:100%" placeholder="for example: We track three small robots and people\'s hands on a white board."></div>' +
+        (on ? "" : '<p class="muted" style="margin:6px 0">The AI helper is off in this project. To use it, choose your company\'s AI service and paste its key (kept on this computer only, never in the project); only your sentence is sent.</p>' + (v ? aiFields(v, "su") : "")) +
+        '<div class="acts"><button class="sbtn primary" id="tsask">' + (on ? "Ask the AI" : "Switch the AI helper on and ask") + '</button><span class="muted" id="tsmsg"></span></div></div>';
+      if (!on && v) wireAiFields(v, "su");
+      $("tsask").onclick = async () => {
+        const sent = $("tsent").value.trim();
+        if (!sent) { $("tsmsg").textContent = "Write one sentence first."; return; }
+        if (!on) {
+          try { await api("/api/studio/ai/settings", Object.assign(aiBody("su"), { enabled: true })); await refreshStudio(); }
+          catch (e) { $("tsmsg").textContent = e.message; return; }
+          toast("AI helper switched on for this project (the indicator at the top shows it). More, AI helper switches it off.");
+        }
+        const r = await aiAsk("setup_from_sentence", { sentence: sent }, "Asking for the object types");
+        if (!r) return;
+        aiCall = r.call_id;
+        const list = r.classes.map((c) => Object.assign({}, c)).concat([Object.assign({}, su.catch_all, { catch_all: true })]);
+        $("ttable").innerHTML = '<div class="aibox"><span class="aitag">AI</span> Suggested from your sentence. Look them over: rename, remove or add rows as you like. Nothing is saved until you press the button below.</div>' + typesTable(list, true);
+        wireTypesTable();
+        $("setupgo").disabled = false;
+      };
+    }
     $("setupgo").onclick = async () => {
       const name = $("pname").value.trim();
       if (!name) { $("setupmsg").textContent = "The project needs a name."; return; }
@@ -1807,6 +2080,7 @@ function setupScreen(s) {
       try { types = readTypes(); } catch (e) { $("setupmsg").textContent = e.message; return; }
       try {
         const j = await withBusy("Saving the setup ...", () => api("/api/studio/setup", { name: name, classes: types, seconds: (Date.now() - t0) / 1000 }));
+        if (aiCall) aiDecide(aiCall, choice === "ai", choice === "ai" ? "saved " + types.map((c) => c.name).join(", ") : "chose another list");
         closeModal();
         if (j.note) await infoModal("About the guesses", "<p>" + esc(j.note) + "</p>");
         resolve(true);
@@ -1828,6 +2102,11 @@ function whatsNewScreen(s) {
       "<li><b>Magnifier</b> (<kbd>M</kbd>), <b>picture brightness</b> (<kbd>B</kbd>), <b>full screen</b> (<kbd>V</kbd>).</li>" +
       "<li>Object types can have a height that <b>varies</b>: those are not passed between cameras.</li>" +
       "<li>New recordings get fewer near-identical frames to label.</li>" +
+      "<li><b>Smarter following</b>: an object that stops is followed by its look, so it is not lost while it stands still; two lookalikes that cross are sorted out, or put first in Most useful next. Each object type can say how fast it moves (Object types).</li>" +
+      "<li><b>Robot logs / outside data</b> (More): a robot's own log, or a file of positions, becomes guesses that name each object.</li>" +
+      "<li><b>Home positions</b> (Work area, <kbd>W</kbd>): a dock or parking spot; a visit is a free confirmation. Ready-made presets place one from two clicks.</li>" +
+      "<li><b>AI helper</b> (More): optional and off unless you switch it on; suggestions only, marked AI.</li>" +
+      "<li><b>Train new model</b> can compare training with and without copy-paste; <b>Learning curve</b> shows the model by situation and how often to check each object.</li>" +
       "<li>The <b>?</b> button at the top right shows the tour of the screen again.</li></ul>" +
       (offer.length ? '<p><label><input type="checkbox" id="wnvaries" checked> Set the height of <b>' + offer.map(esc).join("</b> and <b>") +
         "</b> to \"it varies\" (recommended: their height isn't fixed, so they won't be passed to the second camera at a wrong height).</label></p>" : "") +
@@ -1952,6 +2231,7 @@ function renderInvestigate() {
     '<div class="verdict ' + res.kind + '"><b>' + esc(res.headline) + "</b>" + esc(res.detail) + "</div>" +
     '<div class="invrow">' + invPic("This frame", res.now_picture, res) + invPic("How it usually looks (the usual picture, made from the whole recording)", res.background, res) +
     (ST.on ? '<div class="invpic" id="invref"><div class="muted">Second camera: looking ...</div></div>' : "") + "</div>" +
+    (aiOn() ? '<div class="reach"><button class="sbtn" id="invai"><span class="aitag">AI</span> Ask the AI: object or background?</button><span class="muted">Sends the spot now, how it usually looks and up to 4 moments it looked different (small pictures). Changes nothing.</span></div><div id="invaians"></div>' : "") +
     '<p class="invsub">Labels already made at this spot: ' + (labels.length ? plural(labels.length, "label") + " on " + plural(lf.length, "frame") + " (" + frameSpan(lf) + "), listed in part 3." : "none yet (only guesses).") + "</p></section>" +
     '<section class="invpart look" id="invlook"><h4 class="parth">2. Look around <span class="muted">· these only take you to a frame and change nothing. Q brings you back here.</span></h4>' +
     (jumps ? '<div class="verdict" style="border-left-color:var(--accent)"><div class="acts" style="margin-top:0">' + jumps + "</div></div>" : "") +
@@ -1976,6 +2256,15 @@ function renderInvestigate() {
     jumpTo(L.frames[best], "inv");
   };
   $("invhere").onclick = rejectHerePreview;
+  if ($("invai")) $("invai").onclick = async () => {
+    const r = await aiAsk("object_or_background", {}, "Asking about the spot");
+    if (!r || !$("invaians")) return;
+    const words = { object: "an object is there", background: "only background (a mark, a stain, a reflection)", unsure: "it can't tell" };
+    $("invaians").innerHTML = '<div class="aibox"><span class="aitag">AI</span> <b>' + esc(words[r.verdict] || r.verdict) + "</b> <span class=\"muted\">(" + confWords(r.confidence) + ")</span><br>" + esc(r.reason || "") +
+      '<div class="acts"><button class="sbtn" id="invaiyes">That fits</button><button class="sbtn" id="invaino">I don\'t think so</button><span class="muted">Only noted: to act on it, use part 3 (Reject here) or mark the object unsure.</span></div></div>';
+    const done = (ok) => { aiDecide(r.call_id, ok); $("invaians").querySelector(".acts").innerHTML = '<span class="muted">' + (ok ? "Noted: it fits." : "Noted: turned down.") + " Nothing was changed.</span>"; toast("Your answer to the AI's suggestion is noted; nothing was changed."); };
+    $("invaiyes").onclick = () => done(true); $("invaino").onclick = () => done(false);
+  };
   let tick = 0;
   INV.clipTimer = setInterval(() => {
     tick++;
@@ -2205,6 +2494,265 @@ $("stime").addEventListener("click", async () => {
     '<a class="sbtn" href="/report" target="_blank">Open the full report</a><button class="sbtn" onclick="closeModal()">Close</button></div>');
 });
 
+// ---------------------------------------------------------------- robot logs / outside data
+async function showOutside() {
+  let v;
+  try { v = await withBusy("Looking at this recording's outside data ...", () => api("/api/studio/outside")); } catch (e) { toast(e.message, true); return; }
+  if (!v.rec) { toast("Open a recording first: outside data belongs to one recording."); return; }
+  const fl = v.floor || {}, st = v.settings, info = v.info;
+  const plugins = v.plugins || [];
+  const opts = '<option value="">Find out from the folder</option>' + plugins.map((p) => '<option value="' + esc(p.id) + '"' + (st && st.plugin === p.id ? " selected" : "") + ">" + esc(p.title) + "</option>").join("");
+  let cur = "";
+  if (st) {
+    const rows = (info && info.summary || []).map((x) => "<tr><td><b>" + esc(x.name) + "</b></td><td>" + (x.obj != null ? "#" + x.obj : '<span class="muted">not matched yet</span>') + "</td><td>" + esc(x.cls) +
+      "</td><td>" + (Object.entries(x.anchors || {}).map((a) => a[1] + " " + ({ home: "home visits", label: "your labels", motion: "forward stretch seen", start: "start at home" }[a[0]] || a[0])).join(", ") || '<span class="muted">none yet</span>') +
+      "</td><td>" + x.frames + "</td></tr>").join("");
+    cur = '<div class="okbox"><b>In use for this recording:</b> ' + esc(st.path) + (info ? " (" + esc(info.plugin_title || info.plugin) + ")" : "") + "</div>" +
+      (info ? "<p>Lined up " + esc((info.made || "").replace("T", " ")) + ", using " + plural(info.labelled_frames || 0, "labelled frame") + ": " + plural(info.n || 0, "guess", "guesses") + " in all.</p>" +
+        (rows ? "<table><tr><th>In the data</th><th>Object on video (roll call)</th><th>Type</th><th>Lined up with</th><th>Frames it is placed on</th></tr>" + rows + "</table>" : "") +
+        '<p class="muted">An object is placed only where the data is lined up well enough; with nothing to line it up with (no home visit, no label of it), a robot\'s own log can\'t be placed yet: label it on one frame where it is driving forward, or mark its dock under Work area, Home positions, then Line up again.</p>' +
+        ((info.notes || []).length ? '<div class="warnbox">' + info.notes.map(esc).join("<br>") + "</div>" : "")
+        : '<p class="muted">Not lined up yet' + (v.job && v.job.status === "failed" ? ": " + esc(v.job.error) : "") + ".</p>") +
+      '<div class="actions" style="justify-content:flex-start"><button class="sbtn primary" id="olineup" title="Uses every label made since, and every home visit">Line up again</button>' +
+      '<button class="sbtn" id="ostop">Stop using it</button></div>';
+  }
+  modal("<h3>Robot logs / outside data</h3>" +
+    "<p>Positions, headings or events that come from somewhere other than the camera, on the same clock as this recording: a robot's own log, a machine's controller, a file of positions. " +
+    "They become guesses in the picture (source <b>log</b>), they name each object (the roll call: the name shows next to its number), and when two lookalikes cross they help decide which is which. Your labels are never changed.</p>" +
+    '<p class="muted">Recording: <b>' + esc(recName(v.rec)) + "</b>. The guesses from the data join the other guesses (the line above the picture then says \"and robot logs\"); the tracker follows them like any other, so an object the data knows is found even while it stands still.</p>" +
+    (fl.ok ? "" : '<div class="warnbox">' + esc(fl.text || "This camera has no floor calibration.") + (fl.looked ? '<br><span class="muted">Looked for: ' + fl.looked.map(esc).join(", ") + "</span>" : "") + "</div>") +
+    (v.has_clock === false ? '<div class="warnbox">This recording has no frames.csv with the shared clock (t_wall), so outside data can\'t be lined up with its frames. Recordings from the Pi have it; a video file made into a recording does not.</div>' : "") +
+    cur +
+    "<h4>" + (st ? "Use other data instead" : "Add outside data") + "</h4>" +
+    '<div class="row"><label for="okind">Kind of data</label><select id="okind">' + opts + "</select></div>" +
+    '<div class="muted" id="okinddesc"></div>' +
+    '<div class="row" style="margin-top:8px"><label for="opath"><b>The log folder or file</b></label></div><input id="opath" style="width:100%" placeholder="for example C:\\Users\\you\\Documents\\sessions\\20261021-roam1" value="' + esc(st ? st.path : "") + '">' +
+    '<p class="muted">Windows: open the folder in File Explorer, click the address bar, copy, and paste here (for a file: hold Shift, right-click it, Copy as path). A positions file is a CSV with the columns t, name, x, y and optionally heading (t on the recording\'s clock, x and y in cm on the floor).</p>' +
+    '<div class="actions"><button class="sbtn" onclick="closeModal()">Close</button><button class="sbtn primary" id="ogo"' + (fl.ok && v.has_clock !== false ? "" : " disabled") + ">Use it</button></div>");
+  $("modal").classList.add("wide");
+  const desc = () => { const p = plugins.find((x) => x.id === $("okind").value); $("okinddesc").textContent = p ? p.description : "The studio tries each kind it knows and uses the first one that recognises the folder or file."; };
+  $("okind").onchange = desc; desc();
+  $("ogo").onclick = async () => {
+    let j;
+    try { j = await withBusy("Reading the outside data ...", () => api("/api/studio/outside/set", { path: $("opath").value, plugin: $("okind").value })); } catch (e) { toast(e.message, true); return; }
+    closeModal();
+    const res = await waitOutside();
+    if (!res) return;
+    pushEntry({ kind: "outside", op: "clear", desc: "using the outside data " + j.names.join(", ") });
+    toast("Outside data in use for this recording (" + plural(j.names.length, "object") + ": " + j.names.join(", ") + "); " + outsideWords(res) + " Your labels are unchanged. Z stops using it.");
+  };
+  if ($("olineup")) $("olineup").onclick = async () => {
+    try { await api("/api/studio/outside/rebuild", {}); } catch (e) { toast(e.message, true); return; }
+    closeModal();
+    const res = await waitOutside();
+    if (res) toast("Lined up again with your newest labels and home visits; " + outsideWords(res) + " Your labels are unchanged. Only the unconfirmed guesses changed; Line up again any time.");
+  };
+  if ($("ostop")) $("ostop").onclick = async () => {
+    try { await withBusy("Stopping the outside data ...", () => api("/api/studio/outside/clear", {})); } catch (e) { toast(e.message, true); return; }
+    closeModal();
+    await afterReopen("Following the guesses again without the outside data ...");
+    pushEntry({ kind: "outside", op: "restore", desc: "stopping the outside data" });
+    toast("Outside data no longer used for this recording; its files are kept. Your labels are unchanged. Z uses it again.");
+  };
+}
+function outsideWords(r) {
+  const placed = (r.summary || []).filter((x) => x.frames > 0);
+  return placed.length ? plural(r.n || 0, "guess", "guesses") + " from it (" + placed.map((x) => x.name + (x.obj != null ? " = #" + x.obj : "")).join(", ") + ")."
+    : "nothing could be placed yet: label each object once while it drives, or mark its home position, then Line up again (More, Robot logs).";
+}
+async function afterReopen(what) {
+  const s = await studioState(); if (s) renderStudio(s);
+  if (s && s.loading) { await waitLoaded(what); const s2 = await studioState(); if (s2) renderStudio(s2); }
+  await init();
+}
+// the outside data being read and lined up, then the recording opening with its guesses
+async function waitOutside() {
+  S.waiting = true;
+  let j = null;
+  try {
+    for (;;) {
+      const s = await studioState();
+      j = s && s.outside && s.outside.job;
+      if (!j || j.status !== "running") break;
+      showLoading("Outside data: " + j.what, 0, 0);
+      await sleep(400);
+    }
+  } finally { S.waiting = false; hideLoading(); }
+  api("/api/studio/outside/done", {}).catch(() => {});
+  if (!j) return null;
+  if (j.status === "failed") { toast("The outside data was not used: " + j.error, true); await afterReopen("Opening ..."); return null; }
+  await afterReopen("Following the guesses again with the outside data ...");
+  return j.result;
+}
+async function applyOutside(u, verb, again) {
+  try { await withBusy(u.op === "clear" ? "Stopping the outside data ..." : "Using the outside data again ...", () => api("/api/studio/outside/clear", { restore: u.op === "restore" })); }
+  catch (e) { toast(e.message, true); return null; }
+  await afterReopen("Following the guesses again ...");
+  toast(verb + u.desc + ": the outside data is " + (u.op === "clear" ? "no longer used (its files are kept)" : "used again") + ". Your labels are unchanged." + again);
+  return { kind: "outside", op: u.op === "clear" ? "restore" : "clear", desc: u.desc, rec: u.rec };
+}
+$("soutside").addEventListener("click", showOutside);
+
+// ---------------------------------------------------------------- AI helper
+// Optional, off by default. Its key is kept on this computer only (never in the project or a shared file).
+// Every answer is a suggestion marked AI; nothing changes until you take one, and then it is your change (Z).
+function aiOn() { return !!(ST.state && ST.state.ai && ST.state.ai.on); }
+function aiFields(v, prefix) {
+  const st = v.settings, prov = st.provider;
+  const def = (v.defaults || {})[prov] || "";
+  return '<table class="settable"><tr><td style="width:170px">Service</td><td><select id="' + prefix + 'prov">' + v.providers.map((p) => '<option value="' + p.id + '"' + (p.id === prov ? " selected" : "") + ">" + esc(p.title) + "</option>").join("") + "</select></td></tr>" +
+    '<tr><td>Model</td><td><input type="text" id="' + prefix + 'model" value="' + esc(st.model || "") + '" placeholder="' + esc(def ? "blank: " + def : "the model name your service uses") + '"></td></tr>' +
+    '<tr id="' + prefix + 'urlrow"' + (prov === "openai_compatible" ? "" : ' style="display:none"') + '><td>Web address</td><td><input type="text" id="' + prefix + 'url" value="' + esc(st.base_url || "") + '" placeholder="the service\'s address, ending in /chat/completions or /v1"></td></tr>' +
+    '<tr><td>Key</td><td><input type="password" id="' + prefix + 'key" autocomplete="off" placeholder="' + (v.keys[prov] ? "saved on this computer (type a new one to replace it)" : "paste your company's key here") + '"></td></tr></table>';
+}
+function wireAiFields(v, prefix) {
+  $(prefix + "prov").onchange = () => {
+    const p = $(prefix + "prov").value;
+    $(prefix + "urlrow").style.display = p === "openai_compatible" ? "" : "none";
+    $(prefix + "model").placeholder = (v.defaults || {})[p] ? "blank: " + v.defaults[p] : (p === "stand_in" ? "not needed" : "the model name your service uses");
+    $(prefix + "key").placeholder = p === "stand_in" ? "not needed (sends nothing)" : v.keys[p] ? "saved on this computer (type a new one to replace it)" : "paste your company's key here";
+  };
+}
+function aiBody(prefix) {
+  return { provider: $(prefix + "prov").value, model: $(prefix + "model").value, base_url: $(prefix + "url").value, key: $(prefix + "key").value };
+}
+async function showAiSettings() {
+  let v;
+  try { v = await withBusy("Reading the AI helper's settings ...", () => api("/api/studio/ai")); } catch (e) { toast(e.message, true); return; }
+  const st = v.status, c = v.counts || { tasks: [] };
+  let est = "";
+  for (const t of ["object_or_background", "name_object", "second_check", "draft_labels", "setup_from_sentence"]) {
+    try {
+      const e = await api("/api/studio/ai/estimate", { task: t, frame: S.frame ? S.frame.frame : 0, x: S.info ? S.info.width / 2 : 0, y: S.info ? S.info.height / 2 : 0, n: 8,
+        type: CLASSES[0], sentence: "We track two kinds of parts on a table." });
+      est += "<tr><td>" + esc(AI_WORDS[t]) + "</td><td>" + e.n_images + " small picture" + (e.n_images === 1 ? "" : "s") + " (" + Math.round(e.image_bytes / 1000) + " kB)</td><td>" +
+        (e.cost_usd_max == null ? '<span class="muted">price not known for this model</span>' : "at most about $" + e.cost_usd_max.toFixed(4)) + "</td></tr>";
+    } catch (err) { est += "<tr><td>" + esc(AI_WORDS[t]) + '</td><td colspan="2" class="muted">' + esc(err.message) + "</td></tr>"; }
+  }
+  const asked = c.tasks.reduce((a, t) => a + t.asked, 0), taken = c.tasks.reduce((a, t) => a + t.taken, 0), down = c.tasks.reduce((a, t) => a + t.turned_down, 0);
+  modal("<h3>AI helper</h3>" +
+    "<p>Optional. An AI service your company already uses can look at <b>small pictures</b> from your recordings and suggest answers: is a spot an object or background, what an unknown object is, a second look at a sample of your labels, rough labels for a new type, and the object types from one sentence. " +
+    "Every answer is a suggestion marked <span class=\"aitag\">AI</span>; nothing changes until you take it. The studio works fully without it.</p>" +
+    '<p><label><input type="checkbox" id="aion"' + (st.on ? " checked" : "") + "> <b>Use the AI helper in this project</b></label></p>" +
+    aiFields(v, "ai") +
+    '<p class="muted">The key is kept on this computer only (in ' + esc(v.user_folder) + "), never in the project or in a shared project file. Only the small pictures a task needs are sent, and only when you press its button; every call is written to ai_log.jsonl in the project (also never shared).</p>" +
+    (v.keys[st.provider] ? '<p><button class="sbtn" id="aiforget">Forget the saved key for ' + esc(st.provider_title) + "</button></p>" : "") +
+    "<h4>About what one question costs</h4><table><tr><th>Task</th><th>Sends</th><th>Cost</th></tr>" + est + "</table>" +
+    '<p class="muted">A guess from the service\'s usual prices, for the most the answer can be; your service\'s bill is what counts.</p>' +
+    "<h4>So far in this project</h4><p>" + (asked ? plural(asked, "question") + " asked; " + taken + " suggestion" + (taken === 1 ? "" : "s") + " taken, " + down + " turned down; about $" + (c.cost_usd || 0).toFixed(3) + "." : "Nothing asked yet.") + " Time saved (More) shows the same per task.</p>" +
+    '<div class="actions"><span class="muted" id="aimsg"></span><button class="sbtn" onclick="closeModal()">Cancel</button><button class="sbtn primary" id="aisave">Save</button></div>');
+  $("modal").classList.add("wide");
+  wireAiFields(v, "ai");
+  if ($("aiforget")) $("aiforget").onclick = async () => {
+    if (!confirm("Forget the saved key for " + st.provider_title + " on this computer? You would paste it again to use the helper.")) return;
+    try { await api("/api/studio/ai/settings", { clear_key: true }); closeModal(); toast("The saved key for " + st.provider_title + " is forgotten on this computer. Paste it again under More, AI helper to use it; this can't be undone with Z."); refreshStudio(); } catch (e) { toast(e.message, true); }
+  };
+  $("aisave").onclick = async () => {
+    const b = Object.assign(aiBody("ai"), { enabled: $("aion").checked });
+    let j;
+    try { j = await withBusy("Saving the AI helper's settings ...", () => api("/api/studio/ai/settings", b)); } catch (e) { $("aimsg").textContent = e.message; return; }
+    closeModal(); await refreshStudio();
+    const was = j.before.enabled, now = j.status.on;
+    toast((now ? (was ? "AI helper settings saved" : "AI helper switched on for this project") + " (" + j.status.provider_title + (j.status.key_set ? "" : ", no key yet: paste one to use it") + "). The indicator at the top shows it is on. More, AI helper switches it off again."
+      : (was ? "AI helper switched off for this project: nothing is sent. More, AI helper switches it on again." : "Saved; the AI helper stays off. Tick the box to use it.")) + (j.key_changed ? " The key is kept on this computer only." : ""));
+  };
+}
+const AI_WORDS = { object_or_background: "Object or background?", name_object: "Name this object", second_check: "Second check of 8 labels", draft_labels: "Draft labels for a type", setup_from_sentence: "Set up from a sentence" };
+async function refreshStudio() { const s = await studioState(); if (s) renderStudio(s); }
+$("sai").addEventListener("click", showAiSettings);
+$("aiind").addEventListener("click", showAiSettings);
+async function aiAsk(task, body, what) {
+  if (!aiOn() && task !== "setup_from_sentence") { toast("The AI helper is off in this project: More, AI helper switches it on. Nothing was sent.", true); return null; }
+  try { return await withBusy(what + " (asking the AI service) ...", () => api("/api/studio/ai/ask", Object.assign({ task: task }, body))); }
+  catch (e) { toast((e.data && e.data.kind ? "The AI helper could not answer: " : "") + e.message, true); return null; }
+}
+function aiDecide(ids, accepted, note) { ids = [].concat(ids).filter((x) => x); if (ids.length) api("/api/studio/ai/decision", { call_ids: ids, accepted: accepted, note: note || "" }).catch(() => {}); }
+function confWords(c) { return c >= 0.8 ? "fairly sure" : c >= 0.55 ? "somewhat sure" : "not sure"; }
+// Name this object (the selected one)
+$("ainame").addEventListener("click", async () => {
+  const o = S.frame && S.sel >= 0 ? S.frame.objects[S.sel] : null;
+  if (!o) { toast("Click an object first, then Name this object. Nothing was sent."); return; }
+  const r = await aiAsk("name_object", { frame: S.frame.frame, x: o.x, y: o.y }, "Naming " + objWords(o));
+  if (!r) return;
+  const match = r.matches_existing_type;
+  modal('<h3><span class="aitag">AI</span> A name for ' + esc(objWords(o)) + "</h3>" +
+    '<div class="aibox"><b>' + esc(r.name) + "</b> <span class=\"muted\">(" + confWords(r.confidence) + ")</span><br>" + esc(r.reason || "") + "</div>" +
+    (match ? "<p>That is one of your types. Taking it makes " + esc(objWords(o)) + " a <b>" + esc(match) + "</b> on frame " + S.frame.frame + " (Z takes it back).</p>"
+      : "<p>That is not one of your types yet. Taking it opens Object types with <b>" + esc(r.name) + "</b> added as a new type for you to look over and save; nothing changes until you save.</p>") +
+    '<div class="actions"><button class="sbtn" id="aino">Turn it down</button><button class="sbtn primary" id="aiyes">' + (match ? "Make it a " + esc(match) : "Add it as a type") + "</button></div>");
+  $("aino").onclick = () => { aiDecide(r.call_id, false); closeModal(); toast("Suggestion turned down: nothing changed (noted in the AI helper's record)."); };
+  $("aiyes").onclick = async () => {
+    aiDecide(r.call_id, true, match ? "type " + match : "new type " + r.name);
+    closeModal();
+    if (match) { const old = o.cls; await change(() => { o.cls = match; if (o.status === "unsure") o.status = "corrected"; markCorrected(o); }, "made #" + o.obj + " a " + match + " (was " + old + "; the AI's suggestion)"); }
+    else openTypes([r.name]);
+  };
+});
+// Second check of a sample of confirmed labels
+$("aicheck").addEventListener("click", async () => {
+  if (!S.info) { toast("Open a recording first."); return; }
+  modal('<h3><span class="aitag">AI</span> Second check of a sample</h3><p>Sends small pictures of a random sample of the labels confirmed in this recording; the AI lists any it thinks are wrong. It changes nothing: you look at each one it names.</p>' +
+    '<div class="row">How many labels <select id="ain"><option>8</option><option selected>16</option><option>24</option><option>48</option></select> <span class="muted" id="aicost"></span></div>' +
+    '<div class="actions"><button class="sbtn" onclick="closeModal()">Cancel</button><button class="sbtn primary" id="aigo">Send them</button></div>');
+  const cost = async () => { try { const e = await api("/api/studio/ai/estimate", { task: "second_check", n: +$("ain").value }); $("aicost").textContent = e.cost_usd_max == null ? "" : "at most about $" + (e.cost_usd_max * Math.ceil(+$("ain").value / 8)).toFixed(3); } catch (e) { $("aicost").textContent = e.message; } };
+  $("ain").onchange = cost; cost();
+  $("aigo").onclick = async () => {
+    const n = +$("ain").value; closeModal();
+    const r = await aiAsk("second_check", { n: n }, "Checking " + n + " labels");
+    if (!r) return;
+    const sus = r.suspects || [];
+    modal('<h3><span class="aitag">AI</span> Second check: ' + (sus.length ? plural(sus.length, "label") + " it doubts, of " + r.checked : "no doubts about the " + r.checked + " labels it checked") + "</h3>" +
+      (sus.length ? "<table><tr><th>Frame</th><th>Object</th><th>Your label</th><th>The AI thinks</th><th>Why</th><th></th></tr>" + sus.map((x, i) => "<tr><td>" + x.frame + "</td><td>#" + x.obj + "</td><td>" + esc(x.label) + "</td><td><b>" + esc(x.should_be) + "</b> (" + confWords(x.confidence) + ")</td><td>" + esc(x.reason) +
+        '</td><td><button class="jump" data-i="' + i + '">Look</button> <button class="jump" data-no="' + i + '">It is right</button></td></tr>').join("") + "</table>" +
+        '<p class="muted">Look takes you to the frame with the object selected: press ? to mark it unsure, a number key to change its type, or leave it. "It is right" keeps your label. Either answer is noted.</p>' : "<p>Nothing to look at. Noted in the AI helper's record.</p>") +
+      '<div class="actions"><button class="sbtn" id="aiclose">Close</button></div>');
+    $("modal").classList.add("wide");
+    if (!sus.length) aiDecide(r.calls, true, "no suspects");
+    $("aiclose").onclick = () => closeModal();
+    $("modal").querySelectorAll("[data-no]").forEach((b) => b.onclick = () => { const x = sus[+b.dataset.no]; aiDecide(r.calls, false, "kept " + x.id); b.closest("tr").style.opacity = 0.45; b.disabled = true; toast("Kept your label on frame " + x.frame + " (#" + x.obj + "): nothing changed."); });
+    $("modal").querySelectorAll("[data-i]").forEach((b) => b.onclick = async () => {
+      const x = sus[+b.dataset.i]; aiDecide(r.calls, true, "looked at " + x.id);
+      await jumpTo(x.frame, "timeline");
+      const k = S.frame ? S.frame.objects.findIndex((o) => o.obj === x.obj) : -1;
+      if (k >= 0) { S.sel = k; draw(); renderSide(); }
+      toast("On frame " + S.frame.frame + " with #" + x.obj + " selected: the AI thinks it is " + x.should_be + " (" + x.reason + "). Press ? to mark it unsure, or a number key to change its type; Z takes either back. Nothing was changed yet.");
+    });
+  };
+});
+// Draft labels for a type, on this frame
+$("aidraft").addEventListener("click", () => {
+  if (!S.frame) { toast("Open a recording first."); return; }
+  modal('<h3><span class="aitag">AI</span> Draft labels for a type</h3><p>Sends this frame (made smaller) and asks for rough places of one object type. They show as dashed purple circles marked AI; you add the right ones (each becomes your label, Z takes it back) and drop the rest.</p>' +
+    '<div class="row">Type <select id="aitype">' + CLASSES.map((c) => '<option value="' + esc(c) + '">' + esc(c) + "</option>").join("") + '</select></div>' +
+    '<div class="row" style="margin-top:6px">What it looks like <input id="aidesc" style="width:360px" placeholder="optional, for example: a small red cube"></div>' +
+    '<div class="actions"><button class="sbtn" onclick="closeModal()">Cancel</button><button class="sbtn primary" id="aigo">Send this frame</button></div>');
+  $("aigo").onclick = async () => {
+    const t = $("aitype").value, d = $("aidesc").value; closeModal();
+    const r = await aiAsk("draft_labels", { frame: S.frame.frame, type: t, description: d }, "Asking for " + t + " on frame " + S.frame.frame);
+    if (!r) return;
+    S.aiDrafts = { frame: S.frame.frame, cls: t, call_id: r.call_id, items: r.labels.map((l) => Object.assign({}, l)) };
+    draw(); showAiDrafts();
+  };
+});
+function showAiDrafts() {
+  const d = S.aiDrafts; if (!d) return;
+  const left = d.items.filter((x) => !x.done);
+  modal('<h3><span class="aitag">AI</span> ' + plural(d.items.length, "rough place") + " for " + esc(d.cls) + " on frame " + d.frame + "</h3>" +
+    (d.items.length ? "<table><tr><th></th><th>Where</th><th>How sure</th><th></th></tr>" + d.items.map((x, i) => "<tr" + (x.done ? ' style="opacity:.45"' : "") + "><td>AI " + (i + 1) + "</td><td>" + Math.round(x.x) + ", " + Math.round(x.y) + "</td><td>" + confWords(x.confidence) +
+      "</td><td>" + (x.done ? esc(x.done) : '<button class="jump" data-add="' + i + '">Add it</button>') + "</td></tr>").join("") + "</table>" : "<p>It found none.</p>") +
+    '<p class="muted">The places are rough: after adding one, drag it onto the middle of the object. The dashed purple circles stay on the picture until you add or drop them.</p>' +
+    '<div class="actions"><button class="sbtn" id="aidrop">' + (left.length ? "Drop the rest" : "Close") + '</button>' + (left.length > 1 ? '<button class="sbtn primary" id="aiall">Add all ' + left.length + "</button>" : "") + "</div>");
+  const add = async (idx) => {
+    const x = d.items[idx]; x.done = "added";
+    await change(() => { S.frame.objects.push({ obj: null, cls: d.cls, x: Math.round(x.x * 10) / 10, y: Math.round(x.y * 10) / 10, heading_deg: null, heading_known: false, heading_guess: null, source: "ai", status: "corrected", score: null }); S.sel = S.frame.objects.length - 1; },
+      (j) => "added the AI's " + d.cls + " at " + Math.round(x.x) + ", " + Math.round(x.y) + " as your label", "Z (or Del) takes it back.");
+  };
+  $("modal").querySelectorAll("[data-add]").forEach((b) => b.onclick = async () => { closeModal(); if (S.frame.frame !== d.frame) { toast("Go back to frame " + d.frame + " to add it (G).", true); return; } await add(+b.dataset.add); aiDecide(d.call_id, true); showAiDrafts(); });
+  if ($("aiall")) $("aiall").onclick = async () => { closeModal(); for (let i = 0; i < d.items.length; i++) if (!d.items[i].done) await add(i); aiDecide(d.call_id, true, "all"); S.aiDrafts = null; draw(); };
+  $("aidrop").onclick = () => { closeModal(); const n = d.items.filter((x) => !x.done).length; if (n && !d.items.some((x) => x.done === "added")) aiDecide(d.call_id, false); S.aiDrafts = null; draw();
+    toast(n ? plural(n, "AI suggestion") + " dropped: nothing changed." : "Done with the AI's suggestions."); };
+}
+
 // ---------------------------------------------------------------- share a project / open a shared one
 function joinPath(dir, name) { const sep = dir.includes("\\") ? "\\" : "/"; return dir.replace(/[\\/]+$/, "") + sep + name; }
 function slugName(s) { return (s || "project").replace(/[^A-Za-z0-9_.-]+/g, "-").replace(/^[-.]+|[-.]+$/g, "") || "project"; }
@@ -2336,18 +2884,22 @@ const TOUR_STEPS = [
   { sel: "#progress", title: "Progress", kind: "safe", text: "Green: frames you reviewed. Grey: frames holding an object marked unsure (not finished until you decide). Dark green: accepted without looking. Orange: changed but not finished." },
   { sel: "#srec", title: "Recording", kind: "safe", text: "Switch between recordings (and cameras). Each keeps its own labels." },
   { sel: "#smodel", title: "Guesses from", kind: "safe", text: "Where the guesses come from: motion and tracking only, or a trained model. Your labels never change when you switch; only the unconfirmed guesses do." },
-  { sel: "#strain", title: "Train new model", kind: "changes", text: "Adds a new model to the project, trained on every confirmed frame, in the background (takes a while). Your labels are not touched; every older model is kept." },
-  { sel: "#smodels", title: "Learning curve", kind: "safe", text: "How much better each model is, scored on frames it never trained on, and the list of models (failed ones can be shown and deleted there). Opens the full report too." },
+  { sel: "#strain", title: "Train new model", kind: "changes", text: "Adds a new model to the project, trained on every confirmed frame, in the background (takes a while). Its window offers copy-paste: off, on, or compare (train both ways and keep the better). Your labels are not touched; every older model is kept." },
+  { sel: "#smodels", title: "Learning curve", kind: "safe", text: "How much better each model is, scored on frames it never trained on, and the list of models with what each training used (failed ones can be shown and deleted there). Below: where the model does worst (by situation: alone, close together, near a person, at the edge, standing still), and How often should I check?, measured on your labels. Opens the full report too." },
   { sel: "#smore", title: "More", kind: "safe", text: "Object types, Time saved, Share project and Open shared project: the next steps show each." },
   { sel: "#sclasses", title: "Object types", kind: "changes", text: "The types you label, their keys and colours, whether they have a front, and their height for the second camera. Saving changes the project's settings." },
   { sel: "#sadd", title: "Add recording", kind: "changes", text: "Adds a recording folder, or a two-camera session, to the project. Nothing is copied: the video stays where it is." },
-  { sel: "#swork", title: "Work area", kind: "changes", text: "Mark the part of the picture to look in. Guesses outside it are left out; your labels are kept. Ignore spots from an older version are shown there and can be removed. Z takes a saved change back." },
+  { sel: "#swork", title: "Work area", kind: "changes", text: "Mark the part of the picture to look in. Guesses outside it are left out; your labels are kept. Its Home positions part marks a dock or parking spot (click its spot, then where it faces, or use a preset): a visit is a free confirmation. Ignore spots from an older version are shown there and can be removed. Z takes a saved change back." },
   { sel: "#stime", title: "Time saved", kind: "safe", text: "How long a frame takes with each model, how many frames were accepted without looking, and the time that saved. Download it as a table for a report." },
   { sel: "#sshare", title: "Share project", kind: "safe", text: "Saves the whole project as one file to hand to someone else (or keep). Your project is not changed." },
   { sel: "#sopen", title: "Open shared project", kind: "safe", text: "Opens a project file someone gave you, in a new folder. The project open now is not changed; you choose whether to switch to the new one." },
+  { sel: "#soutside", title: "Robot logs / outside data", kind: "changes", text: "A robot's own log, or a file of positions on the same clock, for this recording: it becomes guesses (source log) that name each object, and helps tell lookalikes apart. Needs the camera's floor calibration; the window says how to make one. Your labels are never changed; Z or Stop using it takes it back." },
+  { sel: "#sai", title: "AI helper", kind: "safe", text: "Optional, off unless you switch it on: an AI service your company uses can look at small pictures and suggest answers (object or background, a name, a second check, rough labels). Every suggestion is marked AI and changes nothing until you take it. Its key stays on this computer." },
+  { sel: "#aiind", title: "AI helper is on", kind: "safe", text: "Shown whenever the AI helper is on in this project, with the service small pictures can go to. Click it for the settings (and to switch it off)." },
   { sel: "#objs", title: "Objects on this frame", kind: "safe", text: "Every object on the frame with its number, type, heading and status. Click one to select it." },
   { sel: "#invbtn", title: "Investigate a spot (Q)", kind: "safe", text: "Not sure whether something is an object or a mark on the background? Point at it and press Q: the studio looks at that spot over the whole recording. Its window has three parts kept apart: what it found (read only), look around (jumps to frames that change nothing; Q brings you back), and change things (an orange box: each button says how many labels it changes, shows them and asks first; Z takes it back). Reject here rejects a guess on that frame only and teaches the tracker what the empty spot looks like." },
   { sel: "#tlbtn", title: "Track timeline", kind: "safe", text: "One lane per object the guesses followed, across the whole recording, with breaks and jumps marked: a quick way to find where the following went wrong. Click a moment to go there." },
+  { sel: "#aibox", title: "AI helper buttons", kind: "safe", text: "Name this object (the selected one), Second check of a sample of your labels, Draft labels for a type on this frame. Each sends only small pictures and only when pressed; each answer is a suggestion marked AI." },
   { sel: "#autoacc", title: "Accept remaining high-confidence frames", kind: "changes", text: "Accepts the guesses on every high-confidence frame nobody has looked at, without looking. Do the spot check first. Z or Undo auto-accept takes them back." },
   { sel: "#reset", title: "Reset this frame to the guesses", kind: "changes", text: "Throws away your changes on this frame and shows the guesses again (Z brings your changes back)." },
   { sel: "#keysbtn", title: "Keys", kind: "safe", text: "Every key, in one list (K opens it too). The ones worth learning first: Enter, N, Del, the number keys, ?, Z and Shift+Z, and C for a short clip." },
@@ -2378,6 +2930,7 @@ function tourShow() {
   const st = TOUR.steps[TOUR.i]; if (!st) { tourEnd(); return; }
   const el = document.querySelector(st.sel);
   $("smenu").classList.toggle("on", !!el.closest("#smenu"));          // open the More menu for its buttons
+  if (el.closest("aside")) el.scrollIntoView({ block: "nearest" });     // the side panel scrolls: bring it into view
   const r = el.getBoundingClientRect(), pad = 6;
   const hole = $("tourhole");
   hole.style.left = (r.left - pad) + "px"; hole.style.top = (r.top - pad) + "px";

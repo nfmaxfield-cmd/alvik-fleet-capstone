@@ -119,7 +119,9 @@ def forget_rejected_spot(session, spot):
     except Exception as e:
         session.log("The tracker could not forget the rejected spot: %s" % e)
         return False
-SOURCES = ["motion", "track", "model", "user", "log", "camera"]
+# where a label or guess came from: motion finder, tracker, trained model, a person, outside data such as a
+# robot's log ("log"), the other camera ("camera"), a home position visit ("home"), the AI helper ("ai")
+SOURCES = ["motion", "track", "model", "user", "log", "camera", "home", "ai"]
 LABEL_COLUMNS = ["frame", "t_wall", "obj", "cls", "x_px", "y_px", "heading_deg", "heading_known",
                  "source", "status", "score"]
 CACHE_VERSION = 1
@@ -436,7 +438,7 @@ class Session:
     def __init__(self, folder, model=None, weights=None, model_step=1, robot_px=None, reselect=False,
                  low_threshold=0.6, log=print, classes=None, labels_dir=None, extra_dets=None, progress=None,
                  class_map=None, loose_classes=None, front_classes=None, area=None, stats_path=None, model_id=None,
-                 part_of=None):
+                 part_of=None, look=True, type_settings=None, outside=None, refine=None):
         """classes: the object types this project labels (default CLASSES).
         labels_dir: where labels, frames and cached guesses go (default <recording>/labels;
         the recognition studio keeps them in its project folder instead).
@@ -483,6 +485,9 @@ class Session:
         self.bulk_undo = {}      # Investigate's "change all": token -> the frames as they were
         self._was_auto = {}      # frame -> how it was auto-accepted, while a person has it open (for undo)
         self.lost_on_load = []
+        self.outside = dict(outside) if outside else None
+        self.refined = None      # what refine() added (home visits), for the page
+        self.checkins = None     # the "How often should I check?" measurement while it runs
 
         self._load_review()
         self.robot_px = robot_px
@@ -500,22 +505,179 @@ class Session:
         self.dets, self.dropped_by_area = workarea.filter_guesses(self.dets, self.area)
         if self.dropped_by_area:
             self.log("Work area: left out %d guesses outside it or in ignore spots." % self.dropped_by_area)
-        params = tracker.TrackerParams()
+        self.n_outside = self._merge_outside()
+        if self.n_outside:
+            self.guess_kind += "+log"
+        params = tracker.TrackerParams.from_types(type_settings)
         if loose_classes is not None:
             params.loose_classes = tuple(loose_classes)
         if front_classes is not None:
             params.front_classes = tuple(front_classes)
+        self.params = params
+        self.det_source = "model" if model else "motion"
+        self.look = bool(look)
+        self.frames_src = self._pictures() if self.look else None
         self.run = tracker.TrackRun(self.dets, self.rec.times, self.robot_px,
                                     (self.rec.width, self.rec.height), params=params,
-                                    det_source="model" if model else "motion")
+                                    det_source=self.det_source, frames=self.frames_src)
+        if self.outside and self.n_outside:
+            vote = self.outside.get("split_vote")
+            if vote is None and callable(self.outside.get("make_vote")):
+                vote = self.outside["make_vote"](float(self.robot_px))
+            self.run.split_vote = vote
         for spot in self.review.get("rejected_spots", []):      # what "Reject here" taught it before
             remember_rejected_spot(self, spot)
         self._load_labels()
         self._stage("Following the guesses from frame to frame ...")
         self.guesses, self.summary = self.run.run(self._anchors(), self._reserved_ids())
+        if refine is not None:
+            self._refine(refine)
         self._select(reselect)
         self._update_conf()
         self.save()
+
+    # --- stage 2: pictures for the tracker, outside data, home visits, check-ins ------------------
+    def _pictures(self):
+        """The recording's pictures for the appearance chain (None if they can't be read: the tracker
+        then works from the guesses alone, as before)."""
+        try:
+            import appearance
+            return appearance.VideoFrames(self.rec.video, float(self.robot_px), n=self.rec.n)
+        except Exception as e:          # never stops the labelling
+            self.log("Following objects by their look is off for this recording: %s" % e)
+            return None
+
+    def _merge_outside(self):
+        """Add the outside data's draft labels to the guesses (they are followed like any other guess)."""
+        if not self.outside:
+            return 0
+        n = 0
+        for f, ds in (self.outside.get("drafts") or {}).items():
+            f = int(f)
+            if not (0 <= f < len(self.dets)) or not ds:
+                continue
+            add = []
+            for d in ds:
+                if d.get("cls") not in self.classes:
+                    continue
+                add.append(dict(x=float(d["x"]), y=float(d["y"]), cls=d["cls"], score=float(d.get("score") or 0.5),
+                                heading_deg=d.get("heading_deg") if d.get("heading_known") else None,
+                                source=d.get("source") or "log", name=d.get("name")))
+            if add:
+                self.dets[f] = list(self.dets[f] or []) + add
+                n += len(add)
+        if n:
+            self.log("Outside data: %d guesses from %s added." % (n, self.outside.get("label") or "outside data"))
+        return n
+
+    def _refine(self, refine):
+        """Home visits (or anything else refine() finds after the first tracking): add its guesses and
+        follow the guesses again from the first frame they touch."""
+        try:
+            out = refine(self)
+        except Exception as e:          # never stops the labelling
+            traceback.print_exc()
+            self.log("Home positions were not used this time: %s" % e)
+            return
+        if not out:
+            return
+        added = []
+        for f, ds in (out.get("dets") or {}).items():
+            f = int(f)
+            if 0 <= f < len(self.dets) and ds:
+                have = list(self.dets[f] or [])
+                for d in ds:
+                    # replace_px: the guess replaces other guesses this close (a home visit is exact)
+                    rp = d.get("replace_px")
+                    if rp:
+                        have = [e for e in have if math.hypot(e["x"] - d["x"], e["y"] - d["y"]) > rp]
+                self.dets[f] = have + [{k: v for k, v in d.items() if k != "replace_px"} for d in ds]
+                added.append(f)
+        self.refined = {k: v for k, v in out.items() if k != "dets"}
+        if added:
+            self._stage("Following the guesses again with the home visits ...")
+            self.guesses, self.summary = self.run.run(self._anchors(), self._reserved_ids(), from_frame=min(added))
+        if out.get("note"):
+            self.log(out["note"])
+
+    def names_at(self, f):
+        """{obj: name} on frame f: the outside data's name of the draft nearest each guess (roll call)."""
+        if not self.outside:
+            return {}
+        ds = [d for d in (self.outside.get("drafts") or {}).get(f, []) if d.get("name")]
+        if not ds:
+            return {}
+        rows = self.frames[f]["objects"] if f in self.frames else self.guesses.get(f, [])
+        out, lim = {}, 0.75 * float(self.robot_px)
+        for o in rows:
+            best = min(ds, key=lambda d: math.hypot(d["x"] - o["x"], d["y"] - o["y"]))
+            if math.hypot(best["x"] - o["x"], best["y"] - o["y"]) <= lim:
+                out[o["obj"]] = best["name"]
+        return out
+
+    def start_checkins(self):
+        """"How often should I check?": replay the tracking between the person's labels (in the
+        background) and measure how far the guesses drifted (tracker.measure_checkins). Saved as
+        labels/checkins.json."""
+        with self.lock:
+            if self.checkins and self.checkins.get("status") == "running":
+                return self.checkins_view()
+            anchors = self._anchors()
+            n = sum(1 for objs in anchors.values() if any(o["status"] != "rejected" for o in objs))
+            if n < 2:
+                raise ValueError("Needs at least 2 labelled frames in this recording; it has %d. Label a few more "
+                                 "frames first (nothing was changed)." % n)
+            job = dict(status="running", done=0, total=0, left="", result=None, error=None)
+            self.checkins = job
+        clock = RateClock(window=10.0)
+
+        def progress(done, total):
+            job.update(done=done, total=total, left=fmt_left(clock.update(done, total)))
+
+        def work():
+            frames = None
+            try:
+                frames = self._pictures() if self.look else None
+                res = tracker.measure_checkins(self.dets, self.rec.times, self.robot_px, anchors,
+                                               (self.rec.width, self.rec.height), params=self.params,
+                                               det_source=self.det_source, frames=frames, progress=progress)
+                res = dict(res, measured=now_iso(), labelled_frames=n, fps=self.rec.fps)
+                res.pop("pairs", None)
+                # JSON has no "infinity": the last time bin is "longer", and no limit is said in words
+                for b in res.get("by_length") or []:
+                    if b["up_to_s"] == float("inf"):
+                        b["up_to_s"] = None
+                if res.get("suggested_every_s") == float("inf"):
+                    res["suggested_every_s"], res["no_limit"] = None, True
+                write_atomic(os.path.join(self.labels_dir, "checkins.json"), json.dumps(res, indent=1))
+                job.update(status="done", result=res)
+            except Exception as e:
+                traceback.print_exc()
+                job.update(status="failed", error=str(e))
+            finally:
+                if frames is not None:
+                    try:
+                        frames.close()
+                    except Exception:
+                        pass
+        threading.Thread(target=work, daemon=True).start()
+        return self.checkins_view()
+
+    def checkins_view(self):
+        """The running measurement, or the last saved one (labels/checkins.json), or nothing."""
+        j = self.checkins
+        if j and j["status"] == "running":
+            return dict(j)
+        if j and j["status"] == "failed":
+            return dict(j)
+        p = os.path.join(self.labels_dir, "checkins.json")
+        if os.path.exists(p):
+            try:
+                with open(p) as f:
+                    return dict(status="done", result=json.load(f))
+            except ValueError:
+                pass
+        return dict(status="none")
 
     # --- guesses ---------------------------------------------------------------
     def _stage(self, text):
@@ -725,7 +887,9 @@ class Session:
     def guess_label(self):
         """Where the guesses come from, in plain words, for the page's header."""
         src = ("model %s" % self.model_id) if self.model else "motion (no model)"
-        return "Guesses from " + src + (" and the other camera" if self.extra_dets else "")
+        out = (self.outside or {}).get("label") if getattr(self, "n_outside", 0) else None
+        return "Guesses from " + src + (" and the other camera" if self.extra_dets else "") + \
+            (" and %s" % out if out else "")
 
     def frame_state(self, f):
         st = self.frames.get(f)
@@ -742,7 +906,7 @@ class Session:
                     time_s=round(self.rec.times[f] - self.rec.times[0], 3), state=self.frame_state(f),
                     how=st["how"] if st else None, objects=objects, conf=self.conf_of(f),
                     reasons=self.reasons.get(f, []), in_spot=f in spot, empty=bool(st and st.get("empty")),
-                    next_obj_id=self.next_obj_id(),
+                    next_obj_id=self.next_obj_id(), names={str(k): v for k, v in self.names_at(f).items()},
                     flags=[dict(key=k, text=FLAG_TEXT.get(k, OTHER_FLAG_TEXT)) for k in self.frame_flags(f)])
 
     def frame_flags(self, f):
@@ -1727,6 +1891,8 @@ def make_handler(session, extra_get=None, extra_post=None):
                     self._send(200, s.frame_view(f))
             elif u.path == "/api/clip":
                 self._send(200, s.clip(int(q["f"][0])))
+            elif u.path == "/api/checkins":
+                self._send(200, s.checkins_view())
             elif u.path.startswith("/img/"):
                 name = os.path.basename(u.path)
                 path = os.path.join(s.frames_dir, name)
@@ -1768,6 +1934,8 @@ def make_handler(session, extra_get=None, extra_post=None):
                 self._send(200, s.reject_here(b["frame"], b["x"], b["y"], b.get("r"), bool(b.get("preview"))))
             elif u.path == "/api/investigate/undo":
                 self._send(200, s.undo_change(b.get("token")))
+            elif u.path == "/api/checkins":
+                self._send(200, s.start_checkins())
             elif u.path == "/api/position":
                 s.set_position(b.get("mode", "all"), b.get("frame", 0))
                 self._send(200, dict(ok=True))
@@ -1815,11 +1983,13 @@ def main():
     ap.add_argument("--reselect", action="store_true",
                     help="pick the frames to label again (frames already labelled are kept)")
     ap.add_argument("--no-browser", action="store_true", help="do not open the browser")
+    ap.add_argument("--no-look", action="store_true",
+                    help="follow objects by the guesses only, not also by their look (quicker first start)")
     args = ap.parse_args()
     if args.weights and not args.model:
         ap.error("--weights needs --model")
     session = Session(args.recording, model=args.model, weights=args.weights, model_step=args.model_step,
-                      robot_px=args.robot_px, reselect=args.reselect)
+                      robot_px=args.robot_px, reselect=args.reselect, look=not args.no_look)
     server, url = serve(session, args.port)
     st = session.stats()
     print("\nLabels: %s" % session.labels_path)

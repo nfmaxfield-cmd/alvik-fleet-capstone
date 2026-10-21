@@ -139,6 +139,16 @@ A new project asks three things before you judge any frame:
   the two cameras. Tick **it varies** when it isn't fixed (a hand, a lifted part); leave it blank
   when you don't know it. Either way, that type is not passed between cameras.
 
+**Describe what you track in a sentence** is a third choice: the optional AI helper (17) reads
+your sentence and suggests the object types, marked AI. You look them over and change them before
+saving; nothing is saved until you press the button. If the helper is off, the choice lets you
+switch it on there (your company's AI service and its key).
+
+**How each type moves** (the last three columns, Object types): the fastest it moves (object sizes
+per second), whether it **can be carried** (picked up and put down elsewhere) and whether it **can
+stay still** for a long time. Leave them at "usual" unless the guesses lose an object or jump to the
+wrong one; "usual" is 3 sizes per second for objects, 15 for hands and things reaching in.
+
 `unknown` is always kept, last: use it for anything that is none of the others, or that you
 can't name yet. All of this can be changed later with **Object types** (top bar, under **More**); a type already used
 in labels can't be renamed or removed.
@@ -175,7 +185,11 @@ and which change saved work. The **?** button at the top right shows the tour ag
    after it get better guesses too. The line above the picture says why a frame was picked
    (for example "objects close together", "something appears").
 4. **Train new model.** Trains on every confirmed frame, in the background, while you keep
-   labelling. The top bar says how far it is in plain words ("round 4 of about 30, about 6 min
+   labelling. Guesses you rejected are used as "not an object here" examples. **Copy-paste** (in the
+   same window) pastes objects you labelled onto other learning frames, so the model sees more of
+   them: *Off*, *On*, or *Compare*, which trains twice (with and without, half the time each) and
+   keeps whichever scores better on the held-back frames; Learning curve then shows both scores and
+   the verdict in words. The top bar says how far it is in plain words ("round 4 of about 30, about 6 min
    left"). It needs at least 10 confirmed frames for learning and 1 in each of the other two
    parts; if it hasn't got them, it says how many each part has and what to do. When it is done, a
    box says how well the new model does. If the model was saved but **finds nothing yet**, the
@@ -189,7 +203,13 @@ and which change saved work. The **?** button at the top right shows the tour ag
    confirmed frames it trained on written under it. When the scores rest on few held-back frames
    (under 30) or few different objects (under 5), a **Caution** box says so: treat them as a
    rough sign until you have labelled more. **Open the full report** gives the same as a page to
-   keep or send. Below the curve is the list of every model.
+   keep or send. Below the curve is the list of every model, with what each training used (how many
+   rejected guesses, and the copy-paste verdict). **By situation** shows where the best model does
+   worst: objects alone, close together, near a person, at the edge, standing still (a group with
+   few labels is marked "too few to trust"). **How often should I check?** measures, on your own
+   labels in this recording, how far the guesses drift the longer it has been since you last
+   labelled an object, and says how often to check each one (**Measure it on my labels**; it runs in
+   the background and changes nothing).
 
    **Failed models** (training stopped, or the model finds nothing yet) are hidden from this
    window and from **Guesses from**. Tick **Show failed models** to see them; each has a
@@ -253,9 +273,10 @@ Moving does not show which way something faces (it may be reversing or turning o
 **Every action says what it did.** A short message at the bottom (it fades by itself) says what
 changed, where, and the key or button that takes it back, for example *Undid: moved #71 to 212,
 140 on frame 9310; it is back as it was. Shift+Z puts it back.* Z takes back changes to labels,
-Investigate's changes, accepting frames without looking, and work-area changes; Shift+Z puts each
-back again (until you make a new change). A few things can't be taken back, and their message
-says so (deleting a failed model, drawing a new spot-check sample).
+Investigate's changes, accepting frames without looking, work-area and home-position changes, and
+using or stopping outside data (15); Shift+Z puts each back again (until you make a new change). A
+few things can't be taken back, and their message says so (deleting a failed model, drawing a new
+spot-check sample, forgetting the AI helper's saved key).
 
 ## 6. Unsure
 
@@ -291,6 +312,9 @@ it is clear which buttons change anything:
     and taken away, or (if only briefly) passing over, like a hand.
 - **This frame** and **how it usually looks** (the usual picture, made from the whole
   recording, so that anything passing through is left out), side by side, with the circle drawn.
+- **Ask the AI: object or background?** (only when the AI helper is on, see 17): sends the spot
+  now, how it usually looks and up to 4 moments it looked different, as small pictures. Its answer is
+  marked AI; **That fits** / **I don't think so** only notes your answer. To act on it, use part 3.
 - **The second camera as a referee**, when the recording is part of a two-camera session and
   both cameras are calibrated (9): the other camera's picture at the same moment, with a circle
   where the object would be (its type's height above the floor; the floor spot if its height
@@ -359,6 +383,7 @@ the picture stays where it is and fully visible.
   ignore spots are not made any more (see 7, "Reject here"); to leave something out for good,
   draw the area so it is outside.
 - **Use the whole picture** removes the area (old ignore spots stay).
+- **Home positions:** spots where an object's place and facing are known exactly (see 16).
 - **Z** puts the previous work area back after you saved a change; **Shift+Z** puts yours back.
 
 Changing the work area keeps every label; only the guesses on frames nobody has confirmed
@@ -480,6 +505,15 @@ python tools/recognition/use_model.py <recording folder, video file, camera numb
 is usually gone through faster or slower than it plays, so `--seconds 60` stops after one minute
 of running, wherever it has got to. It is meant for live cameras.
 
+**Roll call** (with the live page, on by default for a camera): at the start the page shows the
+first steady picture with what the model sees, each object numbered. **Looks right** confirms it, or
+fix it first (drag, delete, add, type and **name** each object). Named objects keep their names in
+the table (columns `name` and `confirmed`). While it runs, each object shows green, amber or red and
+when it was last confirmed; when one's score stays low for a few seconds the page asks you to confirm
+just that one (the others carry on). `--outside <kind>:<folder or file>` (for example a folder of
+robot logs, or `csv:` and a positions file) lets the outside data suggest each object's name at the
+roll call; it needs the camera's floor calibration, and the window says when it can't be used.
+
 ## 13. Starting over
 
 - **One frame:** **Reset this frame to the guesses** (Z brings your changes back).
@@ -497,7 +531,9 @@ of running, wherever it has got to. It is meant for live cameras.
   labels/<recording>/     labels.csv, review.json, frames/ (the picked frames as pictures), cache/
   models/<vN>/            model.onnx, run/ (training), train.log, eval_*.csv
   models/curve.json       every model scored on the same held-back frames
-  cameras/<name>.json     camera calibrations (two cameras)
+  cameras/<name>.json     camera (floor) calibrations: two cameras, robot logs, home presets
+  ai_settings.json        the AI helper's switch and service (no key); never shared
+  ai_log.jsonl            every AI call and your answers; never shared
   stats/<recording>.jsonl the time record: one line per finished frame (see 10)
   stats/install.json      how long the first install took
   recordings/             recordings made from video files, when the video's own folder can't be written (see 2)
@@ -505,6 +541,8 @@ of running, wherever it has got to. It is meant for live cameras.
   report.html             the accuracy report, when written with report.py
 ```
 
+- `labels/<recording>/` may also hold `outside.json` and `outside_drafts.json` (robot logs, 15) and
+  `checkins.json` (How often should I check?, 4).
 - `labels.csv` has one row per object per picked frame: frame, time, object number, type,
   position (px), heading, and a status: `confirmed` / `corrected` (a person checked it),
   `auto` (accepted without looking), `unsure`, `rejected`, or `pending` (a guess nobody has
@@ -522,6 +560,69 @@ and the recordings, then
 ```
 python tools/recognition/studio.py <project folder> --relink <folder the recordings are in now>
 ```
+
+## 15. Robot logs and other outside data
+
+**More**, then **Robot logs / outside data**, for the recording that is open. Outside data is
+anything that knows where the objects are, on the same clock as the recording: a robot's own log
+(its wheels and gyro), a machine's controller, or a **positions file** (a CSV with t, name, x, y and
+optionally heading; see docs/data-formats.md). Paste its folder or file, pick the kind (or let the
+studio find out) and press **Use it**. The studio then:
+
+- matches each object in the data to an object on video by how they moved (the **roll call**): the
+  name shows next to the object's number on the picture and in the list on the right;
+- lines the data up on the floor at every home visit (16), at every label you made of it, and on a
+  stretch where it drove forward on video, correcting the robot's own drift each time;
+- makes a guess for every frame (source `log`; the line above the picture says "and robot logs"),
+  so an object the data knows is found even while it stands still;
+- helps decide which lookalike is which after two of them crossed.
+
+It needs the camera's **floor calibration** (which pixel is which spot on the floor). Without one the
+window says so and what to do (`CROSSCAM.md`). **Line up again** uses the labels and home visits you
+made since. **Stop using it** (or **Z**) takes the guesses away again; your labels are never changed.
+
+## 16. Home positions
+
+A home position is a spot where an object's place (and facing) is known exactly: a dock, a parking
+spot, a tray. Press **Work area** (or **W**), then **Home positions**: **Add a home position**, click
+its spot, then click where it faces (Enter: no facing), name it and say whether it stays a while or
+is touch-and-go. A **preset** places a ready-made one from two clicks, for example a dock (the window says
+where to click; it needs the floor calibration). **×** removes one; **Save home positions** keeps the list (**Z** puts the old one back).
+
+An object sitting still at a home position is a free confirmation: its guesses snap to the exact
+place and facing, and robot logs are lined up again there. The panel says how many visits it found.
+
+## 17. AI helper
+
+Optional and off unless you switch it on (**More**, then **AI helper**): an AI service your company
+already uses looks at **small pictures** and suggests answers. Choose the service, paste its key (kept
+on this computer only, never in the project or a shared file), tick **Use the AI helper**, and Save.
+The window shows about what one question costs. While it is on, a purple **AI on** tag at the top says
+where pictures can go (click it for the settings).
+
+- **Ask the AI: object or background?** in Investigate (7).
+- **Name this object** (right side, for the selected object): a type you have is one click (**Z**
+  takes it back); a new name opens Object types with it added, for you to save.
+- **Second check of a sample**: small pictures of 8-48 confirmed labels; it lists any it doubts.
+  **Look** takes you there with the object selected; you decide.
+- **Draft labels for a type**: rough places on this frame, as dashed purple circles; **Add it** makes
+  one your label (then drag it onto the middle).
+- **Describe what you track in a sentence** in the setup (3).
+
+Every answer is marked **AI** and changes nothing until you take it. Your answers (taken, turned
+down) are kept, and **Time saved** counts them per task with the cost so far.
+
+## 18. Smarter following
+
+- An object that stops is followed **by its look**: while nothing moves at its place, its position
+  is held exactly; something passing over it (a hand) marks the frames for a look.
+- When two lookalikes come together and part, both readings are kept until it is clear which is
+  which. If it stays unclear, those frames come first in **Most useful next**, with the reason above
+  the picture ("two lookalikes crossed here: which is which?").
+- **Reject here** (7) teaches the tracker what an empty spot looks like; **Z** / **Shift+Z** undo and
+  redo every change (5); **C** plays a short clip around the frame (5).
+- How fast each type moves comes from Object types (3); **How often should I check?** is in
+  Learning curve (4).
 
 ## How the scores stay honest
 
@@ -551,6 +652,9 @@ python tools/recognition/studio.py <project folder> --relink <folder the recordi
 | `referee.py` | Investigate's second-camera view of a spot |
 | `share.py` | a project as one `.mxirl` file (export, import, finding recordings again) |
 | `use_model.py` | use a trained model without the studio (`track-with-model.bat`) |
+| `outside.py`, `robotlogs.py`, `homes.py` | outside data (robot logs, positions files), a robot-log plug-in, home positions |
+| `outsidelink.py` | the studio's glue for outside data and home positions |
+| `ai_helper.py` | the optional AI helper |
 | `videofile.py` | an ordinary video file made into a recording folder (Add recording) |
 | `cameras.py`, `crosscam.py` | camera models and label sharing between cameras (CROSSCAM.md) |
 

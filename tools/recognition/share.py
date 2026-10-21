@@ -7,6 +7,7 @@
 A .mxirl file is a zip: manifest.json, and every file of the project under project/.
 Recording videos are left out unless --with-video (they are large); the manifest still lists
 each recording with its original path and name, so a copy on another computer can be found again.
+The AI helper's settings and log (ai_settings.json, ai_log.jsonl) are never put in.
 
 For the studio:
     export_project(project_or_folder, out_path, with_video=False, progress=None) -> dict
@@ -110,6 +111,9 @@ def _write_file(zf, full, arc, tick, compress=True):
 
 
 PAIR = ("labels.csv", "review.json")     # written together by the labelling page: copied as one snapshot
+# never put in a shared file: this computer's AI helper settings and its log of what was sent (ai_helper.py).
+# The AI key itself is never in the project folder at all (it is in the user's own settings folder).
+PRIVATE = ("ai_settings.json", "ai_log.jsonl")
 
 
 def read_pair(label_dir, lock=None, tries=50):
@@ -183,7 +187,7 @@ def export_project(project, out_path, with_video=False, progress=None, lock_for=
                 pass
 
     files = [(p, a) for p, a in _walk(proj.folder, skip={os.path.abspath(out_path)})
-             if a != "project.json" and not a.startswith("recordings/")
+             if a != "project.json" and not a.startswith("recordings/") and a not in PRIVATE
              and not any(a.startswith("models/%s/" % mid) for mid in left_out)]
     # labels.csv + review.json of each recording: one consistent snapshot of the pair
     pairs = {}

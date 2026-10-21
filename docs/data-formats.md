@@ -395,13 +395,81 @@ Beside it, from tools/calibrate_floor.py:
   - `heading_deg`: image-frame heading, 0 = image +x (right), counter-clockwise
     positive as seen on screen (i.e. towards image -y); blank if unknown
   - `heading_known`: 1 if heading is given
-  - `source`: motion | track | model | user | log
-  - `status`: pending | confirmed | corrected | rejected | auto (accepted by the labelling tool as high-confidence, without a person looking; trained on, but filterable)
+  - `source`: motion | track | model | user | log | camera | home | ai (`log`: outside data such as a
+    robot's own log or a positions file; `camera`: passed over from the other camera; `home`: a visit
+    to a home position; `ai`: added from the AI helper's suggestion and then taken by a person, so its
+    status is that person's)
+  - `status`: pending | confirmed | corrected | rejected | unsure | auto (accepted by the labelling tool as high-confidence, without a person looking; trained on, but filterable)
   - `score`: confidence 0..1 of the automatic guess (blank for user)
   - A frame with no objects that the user confirmed empty has one row with
     cls `none` (so empty frames count as reviewed negatives).
 - `frames/<frame:06d>.jpg`: the frames chosen for labelling, extracted from video.avi
-- `review.json`: which frames were selected and reviewed
+- `review.json`: which frames were selected and reviewed; `rejected_spots` lists the spots where
+  **Reject here** was used: `{"frame", "x", "y", "r", "saved"}` (pixels; the tracker remembers what the
+  empty spot looked like from that frame on). Its `help` key explains the rest in words.
+
+## Recognition project folder (`tools/recognition`, the studio)
+
+Only the parts added in stage 2 are listed here; everything older keeps its meaning, and every new
+key is optional (an older project opens unchanged).
+
+`project.json`:
+- `classes[]` may hold how each type moves, for the tracker (missing or `null` = the usual for that
+  kind of type): `max_speed` (object sizes per second; usual 3, or 15 for hands and things reaching
+  in), `can_be_carried` (true/false: when lost, it is looked for further away, at hand speed),
+  `can_sit_still` (true/false: while still, it keeps being followed by its look).
+- `cameras.<camera>.homes`: the camera's home positions, a list of
+  `{"name", "camera", "x", "y", "facing_deg", "radius", "kind", "owner", "cls", "still_s", "sd_px", "sd_deg"}`
+  (image px in that camera; `facing_deg` in the labels' heading convention, or null for a spot with no
+  facing; `kind` park = stays a while, station = touch-and-go; `owner` = the object that lives there,
+  by its name in the outside data, or null). Presets add `preset`, and `x_cm`, `y_cm`, `heading` when
+  placed from floor values. A visit (an object still inside `radius` for `still_s`) is a free
+  confirmation (guesses with source `home`).
+- `settings.copy_paste`: `off` (default), `compare` (train with and without, keep the better) or `on`.
+- `models[]` entries may have `hard_negatives` `{"spots", "frames", "frames_only"}` (rejected guesses
+  used as "not an object here" examples) and `copy_paste` `{"mode", "compared", "used", "winner",
+  "without", "with", "f1_gain", "minutes_each", "text"}` (`text` is the verdict in words).
+
+`models/situations.json`: accuracy on the held-back frames by situation, per model:
+`{"models": {"<model or none>": [{"situation", "name", "n_labels", "n_objects", "found",
+"centre_err_px", "heading_err_deg", "few"}]}}` (situations: alone, close, person, edge, still, all).
+
+`labels/<recording>/`, beside labels.csv and review.json:
+- `outside.json`: the recording's outside data: `{"path", "plugin", "offset_s", "added"}` (`plugin`
+  `alvik` = a console session folder of robot logs, `csv` = a positions file; blank = found from the
+  folder). **Stop using it** renames it (and the next file) to `*.off`; using it again renames them back.
+- `outside_drafts.json`: the guesses made from it the last time it was lined up: `{"made", "plugin",
+  "path", "camera_file", "names": {obj: name}, "summary": [{"name", "cls", "obj", "anchors": {kind: n},
+  "frames", "text"}], "notes", "clock", "n", "labelled_frames", "frames": {frame: [[name, cls, x, y,
+  heading or null, heading_known 0/1, score, sd_px], ...]}}` (x, y image px). Made again by **Line up
+  again**.
+- `checkins.json`: the last "How often should I check?" measurement: `{"by_length": [{"up_to_s" (null:
+  longer), "n", "found", "within", "median_r", "p90_r"}], "suggested_every_s", "no_limit",
+  "tolerance_r", "measured", "labelled_frames", "fps"}` (errors in object sizes; within = inside
+  `tolerance_r` of the person's label).
+
+The tracker's per-frame flags (`chain_broken`, `split_unresolved`, `confirm_due`, and `chain_len`,
+`still`, `appearance_score`, `since_confirmed`, `split_id`, `rejected_spot`) are worked out each time a
+recording opens and are not saved; the page shows them above the picture and puts flagged frames
+first in "Most useful next".
+
+**Positions file** (`positions.csv`, outside data from any machine that knows where things are):
+`t,name,x,y[,heading][,frame][,still]`, one row per object per moment. `t`: seconds on the shared
+clock (the recording's `t_wall`; or give an offset); `x, y`: cm on the floor in the floor
+calibration's axes; `heading`: degrees, 0 = +x, counter-clockwise (blank: not known); `frame`:
+`floor` (default: positions already on the floor) or `own` (dead reckoning from the object's own start:
+lined up like a robot log); `still`: 1 while not moving. Placing it in the picture needs the camera's
+floor calibration (`cameras/<camera>.json`, CROSSCAM.md).
+
+**AI helper files** (only when it is used; never put in a shared `.mxirl` file):
+- `<project>/ai_settings.json`: `{"enabled", "provider" (anthropic | openai_compatible | stand_in),
+  "model", "base_url", "price_in", "price_out", "max_images"}`. No key.
+- `<project>/ai_log.jsonl`: one line per call `{"event": "call", "id", "time", "task", "provider",
+  "model", "sent" (sizes only), "sent_to_service", "tokens_in", "tokens_out", "cost_usd", "answer",
+  "seconds"}` or failed call (`error`, `kind`), and one line per answer of the person
+  `{"event": "decision", "id", "time", "accepted", "note"}`.
+- The key: `ai.json` in the user's own settings folder (`~/.maxfield-irl`, or `MAXFIELD_IRL_HOME`),
+  readable only by its owner; never in a project.
 
 ## Detector interface (tools/detector)
 

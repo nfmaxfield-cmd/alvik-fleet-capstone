@@ -345,8 +345,13 @@ class Tracker:
     dicts with frame, x, y, r; each one counts from its frame on."""
 
     def __init__(self, robot_px, img_size=(640, 480), params=None, motion_params=None,
-                 reserved_ids=(), det_source="motion", frames=None, spots=None, looker=None):
+                 reserved_ids=(), det_source="motion", frames=None, spots=None, looker=None, split_vote=None):
         self.p = params or TrackerParams()
+        # optional outside opinion on split branches (e.g. robot logs, tools/recognition/outsidelink.py):
+        # split_vote(f_before, idents {id: (x, y) just before they came together}, paths {id: [(frame, x, y)
+        # after they came apart]}) -> {(ident id, path id): extra cost >= 0} or None. Added to the reading's
+        # cost, so a reading the outside data contradicts loses.
+        self.split_vote = split_vote
         self.mp = motion_params or MotionParams()
         self.r = float(robot_px)
         self.w, self.h = img_size
@@ -365,6 +370,37 @@ class Tracker:
         self.splits = []               # decided splits
         self.next_split = 1
         self._spot_sim = {}
+
+    # --- a person's confirmation of one object, between frames (live use) ------------------------
+    def confirm(self, tr, f, t, x=None, y=None):
+        """A person says object tr (a Track or its number) is right here on frame f (at x, y when given,
+        else where it is): the same as a label for this one object (_apply_anchor) without touching the
+        others. The track becomes confirmed with full confidence, its motion history restarts from the
+        place, and the appearance chain restarts from the patch there. Returns the track (None: no such
+        object is being followed)."""
+        if not isinstance(tr, Track):
+            tr = next((k for k in self.tracks if k.id == int(tr)), None)
+            if tr is None:
+                return None
+        if x is not None and y is not None:
+            tr.x, tr.y = float(x), float(y)
+            tr.vx = tr.vy = 0.0
+        tr.est.reset_history(t, tr.x, tr.y)
+        tr.pos_hist = collections.deque([(t, tr.x, tr.y)])
+        tr.hist = collections.deque([(t, tr.x, tr.y)])
+        tr.f_last, tr.t_last, tr.miss_run = f, t, 0
+        tr.last_score = tr.last_det_score = 1.0
+        tr.user_seen = tr.confirmed = True
+        tr.hits = max(tr.hits, self.p.confirm_n)
+        tr.conf_f = f
+        tr.chain_state, tr.chain_len, tr.chain_w, tr.held, tr.broken_t = None, 0, 0.0, False, None
+        tr.app_score, tr.chain_tried = None, False
+        if self.look is not None:
+            ref = self.look.patch(f, tr.x, tr.y)
+            if ref is not None and appearance.patch_std(ref) >= appearance.FLAT_STD:
+                tr.ref, tr.ref_user, tr.tpl = ref, True, ref
+        self.reserved.add(int(tr.id))
+        return tr
 
     # --- ids ---------------------------------------------------------------
     def _new_id(self):
@@ -910,9 +946,13 @@ class Tracker:
         elif len(mem) >= 2 and g["t_sep"] is not None and not g["crowded"]:
             g["w"] = self._continuity(g, mem)
             rec["continuity"] = round(g["w"], 3)
+            extra = self._outside_costs(g, mem, f)
+            if extra:
+                rec["outside"] = True
             hyps = []
             for perm in itertools.permutations(range(len(mem))):
-                c = sum(self._hyp_cost(g, mem[i], mem[perm[i]], t) for i in range(len(mem)))
+                c = sum(self._hyp_cost(g, mem[i], mem[perm[i]], t) + extra.get((mem[i].id, mem[perm[i]].id), 0.0)
+                        for i in range(len(mem)))
                 hyps.append((c, perm))
             hyps.sort(key=lambda h: h[0])
             hyps = hyps[:p.split_cap]               # readings kept
@@ -932,6 +972,21 @@ class Tracker:
             # the frames just after they came apart: where a person can tell them apart
             self._flag_unresolved(mem, g["f_sep"] if g["f_sep"] is not None else g["f0"], f, sid)
         self.splits.append(rec)
+
+    def _outside_costs(self, g, mem, f):
+        """Extra cost per (identity, path) from the optional split_vote hook ({} without one, or when it
+        has nothing to say). Never stops the tracking."""
+        if self.split_vote is None:
+            return {}
+        idents = {m.id: (g["pre"][m.id][1], g["pre"][m.id][2]) for m in mem}
+        # each path after they came apart (while together, the places say little about who is who)
+        f1 = g["f_sep"] if g.get("f_sep") is not None else g["f0"]
+        paths = {m.id: [(r["frame"], r["x"], r["y"]) for r in m.rows if f1 <= r["frame"] <= f] for m in mem}
+        try:
+            out = self.split_vote(max(0, g["f0"] - 1), idents, paths) or {}
+        except Exception:
+            return {}
+        return {k: max(0.0, float(v)) for k, v in out.items() if v is not None}
 
     def _permute(self, mem, perm, f0):
         """Identity i takes the path of mem[perm[i]] from frame f0 on."""
@@ -1126,6 +1181,7 @@ class TrackRun:
         self.snap_every = snap_every
         self.snaps = {}
         self.frames = frames
+        self.split_vote = None         # optional outside opinion on split branches (see Tracker)
         self.spots = []                # rejected spots from outside: dicts frame, x, y, r
         self.splits = []
         self.max_id = 0
@@ -1170,7 +1226,7 @@ class TrackRun:
         anchors = anchors or {}
         robot_px, img_size, params, motion_params = self.args
         tk = Tracker(robot_px, img_size, params, motion_params, reserved_ids, self.det_source,
-                     spots=self.spots, looker=self.looker)
+                     spots=self.spots, looker=self.looker, split_vote=self.split_vote)
         start = 0
         usable = [k for k in self.snaps if k <= from_frame]
         if usable:
@@ -1252,7 +1308,7 @@ CHECKIN_BINS_S = (2.0, 10.0, 30.0, 120.0, 600.0, float("inf"))
 
 
 def measure_checkins(dets_by_frame, times, robot_px, anchors, img_size=(640, 480), params=None,
-                     motion_params=None, det_source="motion", frames=None, tolerance=0.25, share=0.95):
+                     motion_params=None, det_source="motion", frames=None, tolerance=0.25, share=0.95, progress=None):
     """Replay the tracking from each labelled frame to the next labelled frame, with only the first
     one as a label, and compare where each object is guessed on the second with where the person put it.
 
@@ -1270,7 +1326,10 @@ def measure_checkins(dets_by_frame, times, robot_px, anchors, img_size=(640, 480
     fs = sorted(f for f, objs in anchors.items() if any(o.get("status") != "rejected" for o in objs))
     look = appearance.Looker(frames, r, p.patch_size) if (frames is not None and appearance is not None) else None
     pairs = []
-    for fa, fb in zip(fs, fs[1:]):
+    todo = list(zip(fs, fs[1:]))
+    for k, (fa, fb) in enumerate(todo):
+        if progress is not None:
+            progress(k, len(todo))
         tk = Tracker(r, img_size, p, motion_params, det_source=det_source, looker=look)
         rows_b = []
         for f in range(fa, fb + 1):
@@ -1293,6 +1352,8 @@ def measure_checkins(dets_by_frame, times, robot_px, anchors, img_size=(640, 480
                               found=row is not None, error_px=round(err, 2) if err is not None else None,
                               error_r=round(err / r, 3) if err is not None else None,
                               within=bool(err is not None and err <= tolerance * r), other_id=other))
+    if progress is not None:
+        progress(len(todo), len(todo))
     bins = []
     lo = 0.0
     for hi in CHECKIN_BINS_S:

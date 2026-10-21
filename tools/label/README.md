@@ -98,7 +98,9 @@ python tools/label/app.py <recording> --model tools/detector/detector.py --weigh
 Add `--model-step 3` to run a slow model on every 3rd frame only (the tracker
 fills in between). Other options: `--port 8766` if 8765 is busy, `--robot-px 32`
 to give the robot size in pixels instead of measuring it, `--reselect` to pick
-the frames again (frames already labelled are kept), and `--no-browser`.
+the frames again (frames already labelled are kept), `--no-browser`, and `--no-look`
+(follow objects by the guesses only, not also by their look: a quicker first start, but an
+object that stops for a long time may be lost).
 
 ## The pieces
 

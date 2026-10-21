@@ -27,6 +27,11 @@ VERSION = 1
 # second camera), height_varies (True: the height is not fixed, so the type is not passed
 # between cameras), note (where to mark it, shown to the person). Older projects lack the
 # last two; they read as False and "".
+# How each type moves, for the tracker (tools/label/tracker.py TrackerParams.from_types); each is
+# optional (missing or None: the usual setting for that kind of type): max_speed (object sizes per
+# second), can_be_carried (can jump to another place in someone's hand), can_sit_still (can stay put
+# for a long time: the tracker keeps following it by its look).
+MOTION_KEYS = ("max_speed", "can_be_carried", "can_sit_still")
 CATCH_ALL = "unknown"          # always kept: anything that is none of the other types
 CATCH_ALL_TYPE = dict(name=CATCH_ALL, has_front=False, size_px=None, height_cm=0.0, height_varies=True,
                       note="anything else, or not sure what it is")
@@ -49,8 +54,9 @@ PRESETS = [
 # by motion_class_map(): an object-sized blob, a big blob reaching in from the edge, other.
 REACHING_NAMES = ("hand", "person")
 
-# Bumped when the "what's new" screen for existing projects changes.
-WHATS_NEW_VERSION = 1
+# Bumped when the "what's new" screen for existing projects changes (2: robot logs, home positions,
+# AI helper, copy-paste, by situation, smarter tracking).
+WHATS_NEW_VERSION = 2
 
 
 def now_iso():
@@ -218,8 +224,9 @@ class Project:
         need_setup = not done and not labelled
         seen = int(st.get("whats_new_seen") or 0)
         whats_new = not need_setup and seen < WHATS_NEW_VERSION
+        # the "it varies" offer came with the first what's-new screen: made once only
         offer_varies = [c["name"] for c in self.classes
-                        if c["name"] in ("hand", CATCH_ALL) and not c.get("height_varies")] if whats_new else []
+                        if c["name"] in ("hand", CATCH_ALL) and not c.get("height_varies")] if whats_new and seen < 1 else []
         return dict(need_setup=need_setup, whats_new=whats_new, offer_varies=offer_varies,
                     presets=PRESETS, catch_all=CATCH_ALL_TYPE)
 
@@ -420,13 +427,30 @@ class Project:
             h = None if h is None or (isinstance(h, str) and not h.strip()) else float(h)
             if h is not None and h < 0:
                 raise ValueError("object type %r: the height can't be below the floor" % c["name"])
-            out.append(dict(name=str(c["name"]).strip(), has_front=bool(c.get("has_front")),
-                            size_px=float(size) if size else None,
-                            height_cm=0.0 if varies and h is None else h,
-                            height_varies=varies, note=str(c.get("note") or "").strip()[:120]))
+            entry = dict(name=str(c["name"]).strip(), has_front=bool(c.get("has_front")),
+                         size_px=float(size) if size else None,
+                         height_cm=0.0 if varies and h is None else h,
+                         height_varies=varies, note=str(c.get("note") or "").strip()[:120])
+            sp = c.get("max_speed")
+            if sp not in (None, ""):
+                sp = float(sp)
+                if not sp > 0:
+                    raise ValueError("object type %r: the fastest speed must be above 0 (or blank for the usual)" % c["name"])
+                entry["max_speed"] = sp
+            for k in ("can_be_carried", "can_sit_still"):
+                v = c.get(k)
+                if isinstance(v, str):
+                    v = {"yes": True, "true": True, "no": False, "false": False}.get(v.strip().lower())
+                if v is not None:
+                    entry[k] = bool(v)
+            out.append(entry)
         self.data["classes"] = out
         if save:
             self.save()
+
+    def type_settings(self):
+        """The object types with their motion settings, for the tracker (TrackerParams.from_types)."""
+        return [dict(name=c["name"], **{k: c.get(k) for k in MOTION_KEYS}) for c in self.classes]
 
     def class_view(self):
         used = self.used_classes()

@@ -27,7 +27,14 @@ studio bar on top:
 - Investigate (key Q on the page): one spot across the whole recording, in three parts (what it
   found / look around / change things); "Reject here" rejects the guess on that frame and the tracker
   remembers the empty spot; the second camera as a referee when both cameras are calibrated.
-- Time saved: seconds per frame and frames accepted without looking, by model version (CSV too).
+- Time saved: seconds per frame and frames accepted without looking, by model version (CSV too), and the
+  AI helper's suggestions taken and turned down.
+- Robot logs / outside data (More): a log folder or positions file for a recording, read by a plug-in
+  (outsidelink.py, outside.py); its guesses join the others (source "log"), name the objects (roll call)
+  and help the tracker decide which lookalike is which. Needs the camera's floor calibration.
+- Home positions (in Work area): spots where an object's place and facing are known exactly (presets
+  place one from two clicks); a visit is a free confirmation.
+- AI helper (More): optional, off by default; settings, cost estimate, and its suggestions (ai_helper.py).
 - Share project / Open shared project: the whole project as one .mxirl file (share.py).
 
 A new project first asks for its name and object types (setup), then shows a short tour.
@@ -60,6 +67,15 @@ import project as projmod  # noqa: E402
 import trainer as trainmod  # noqa: E402
 import timesaved  # noqa: E402
 import timing  # noqa: E402
+import outsidelink  # noqa: E402
+
+
+class AIAskError(ValueError):
+    """The AI helper could not answer: plain words for the person, and what kind of problem (ai_helper.AIError)."""
+
+    def __init__(self, message, kind):
+        ValueError.__init__(self, message)
+        self.kind = kind
 
 
 class RecordingMissing(ValueError):
@@ -91,6 +107,7 @@ class Studio:
         self.pending_reopen = False      # settings changed while opening: open again when done
         self.share = None                # Share project / Open shared project: what it is doing
         self.convert = None              # Add recording with a video file: making it into a recording
+        self.outside_job = None          # outside data being read and lined up
 
     # --- opening a recording with a guess source ------------------------------------------
     def current(self):
@@ -191,12 +208,21 @@ class Studio:
             except Exception as e:      # the recording still opens; "Most useful next" is just not spread
                 self.log("Could not work out the training parts: %s" % e)
                 part_of = None
+            key = proj.camera_key(rec)
+            try:
+                outside = outsidelink.load_drafts(proj, rid)
+            except Exception as e:          # the recording still opens, without the outside data
+                self.log("The outside data's guesses could not be read: %s" % e)
+                outside = None
+            import homes as homesmod
             s = labelapp.Session(rec["path"], model=INFER if weights else None, weights=weights,
                                  classes=proj.class_names(), labels_dir=proj.labels_dir(rid), extra_dets=extra,
                                  progress=progress, log=self.log, class_map=proj.motion_class_map(),
                                  loose_classes=proj.loose_classes(), front_classes=proj.heading_classes(),
-                                 area=proj.camera_settings(proj.camera_key(rec)),
-                                 stats_path=timesaved.stats_path(proj, rid), model_id=model, part_of=part_of)
+                                 area=proj.camera_settings(key),
+                                 stats_path=timesaved.stats_path(proj, rid), model_id=model, part_of=part_of,
+                                 type_settings=proj.type_settings(), outside=outside,
+                                 refine=outsidelink.home_refiner(homesmod.homes_of(proj.data, key), key))
             with self.lock:
                 self.session = s
                 proj.data["current"] = dict(rec=rid, model=model)
@@ -351,9 +377,14 @@ class Studio:
         camera = None
         if cur.get("rec"):
             try:
+                import homes as homesmod
                 rec = proj.rec(cur["rec"])
                 key = proj.camera_key(rec)
-                camera = dict(key=key, name=rec.get("camera") or "", settings=proj.camera_settings(key))
+                ses = self.session
+                camera = dict(key=key, name=rec.get("camera") or "", settings=proj.camera_settings(key),
+                              homes=homesmod.homes_of(proj.data, key),
+                              visits=((ses.refined or {}).get("visits") if ses is not None and not self.loading else None),
+                              floor=bool(outsidelink.floor_camera(proj, rec)[0] is not None))
             except KeyError:
                 pass
         return dict(brand=dict(name=labelapp.BRAND, tagline=labelapp.TAGLINE),
@@ -362,7 +393,262 @@ class Studio:
                     loading=self.loading_view(), settings=proj.data.get("settings", {}), labelled_total=total,
                     cross_note=self.cross_note, setup=proj.setup_view(), camera=camera, background=self.bg,
                     share=self.share_view(), missing=[r for r in recs if r["missing"]],
-                    documents=_documents(), n_cameras=proj.n_cameras(), convert=self.convert_view())
+                    documents=_documents(), n_cameras=proj.n_cameras(), convert=self.convert_view(),
+                    ai=self.ai_status(), outside=self.outside_view(), motion_usual=self.motion_usual(),
+                    home_presets=outsidelink.HOME_PRESETS)
+
+    # --- per-type motion: what "usual" means for each type ------------------------------------
+    def motion_usual(self):
+        import tracker
+        p = tracker.TrackerParams()
+        p.loose_classes = tuple(self.proj.loose_classes())
+        return {n: p.type_defaults(n) for n in self.proj.class_names()}
+
+    # --- AI helper ------------------------------------------------------------------------------
+    def ai(self):
+        import ai_helper
+        return ai_helper.AIHelper(self.proj.folder)
+
+    def ai_status(self):
+        try:
+            return self.ai().status()
+        except Exception as e:          # never stops the page
+            return dict(on=False, indicator="AI helper: settings could not be read (%s)" % e, calls=0)
+
+    def ai_view(self):
+        import ai_helper
+        h = self.ai()
+        st = h.status()
+        log = h.read_log()
+        calls = [e for e in log if not e.get("error")]
+        return dict(status=st, settings={k: v for k, v in h.settings().items()},
+                    providers=[dict(id=p, title=ai_helper.PROVIDER_TITLES[p]) for p in ai_helper.PROVIDERS],
+                    keys={p: bool(h.keys.get(p)) for p in ai_helper.PROVIDERS},
+                    counts=ai_counts(log), defaults=dict(anthropic=ai_helper.DEFAULT_ANTHROPIC_MODEL,
+                                                         openai_compatible=ai_helper.DEFAULT_OPENAI_MODEL),
+                    n_calls=len(calls), user_folder=ai_helper.user_dir())
+
+    def ai_settings(self, b):
+        """Change the AI helper's settings (and key). Returns (status before, status after)."""
+        import ai_helper
+        h = self.ai()
+        before = h.settings()
+        ch = {k: b[k] for k in ("enabled", "provider", "model", "base_url") if k in b}
+        if "enabled" in ch:
+            ch["enabled"] = bool(ch["enabled"])
+        for k in ("model", "base_url"):
+            if k in ch:
+                ch[k] = str(ch[k] or "").strip()
+        try:
+            h.configure(**ch)
+            if b.get("clear_key"):
+                h.keys.clear(h.settings()["provider"])
+            elif (b.get("key") or "").strip():
+                h.set_key(b["key"].strip())
+        except ai_helper.AIError as e:
+            raise ValueError(str(e))
+        return dict(before={k: before.get(k) for k in ("enabled", "provider", "model", "base_url")}, status=h.status(),
+                    key_changed=bool(b.get("clear_key") or (b.get("key") or "").strip()))
+
+    def _ai_inputs(self, task, b):
+        """The pictures and words for a task, from what is open (never more than the task needs)."""
+        import numpy as np
+        s = self.session
+        known = self.proj.class_names()
+        if task == "setup_from_sentence":
+            return dict(sentence=b.get("sentence") or "")
+        if s is None:
+            raise ValueError("Open a recording first.")
+        half = max(16, int(round(1.2 * float(s.robot_px))))
+        if task == "object_or_background":
+            j = s.inv
+            if not j or j.get("status") != "done" or not j.get("result"):
+                raise ValueError("Investigate a spot first (Q): the AI is shown the spot now and how it usually looks.")
+            res = j["result"]
+            now = _decode_data_url(res.get("now_picture"))
+            usual = _decode_data_url(res.get("background"))
+            if now is None or usual is None:
+                raise ValueError("This investigation has no usual picture of the spot to compare with.")
+            strip = [_decode_data_url(t["picture"]) for t in (res.get("thumbs") or []) if t.get("changed")][:4]
+            return dict(now=now, usual=usual, strip=[c for c in strip if c is not None], known_types=known)
+        if task == "name_object":
+            img = _frame_picture(s, b["frame"])
+            return dict(crop=_crop(img, float(b["x"]), float(b["y"]), half), known_types=known)
+        if task == "second_check":
+            n = max(1, min(48, int(b.get("n") or 8)))
+            pool = []
+            for f, st in s.frames.items():
+                if st["state"] != "reviewed":
+                    continue
+                for o in st["objects"]:
+                    if o["status"] in ("confirmed", "corrected"):
+                        pool.append((f, o))
+            if not pool:
+                raise ValueError("No frame in this recording is confirmed yet: confirm some frames first.")
+            rng = np.random.default_rng(int(b.get("seed") or 0) or None)
+            pick = [pool[i] for i in sorted(rng.choice(len(pool), size=min(n, len(pool)), replace=False))]
+            items, cache = [], {}
+            for f, o in pick:
+                if f not in cache:
+                    cache[f] = _frame_picture(s, f)
+                items.append(dict(id="%d:%d" % (f, o["obj"]), label=o["cls"], crop=_crop(cache[f], o["x"], o["y"], half),
+                                  frame=f, obj=o["obj"]))
+            return dict(items=items, known_types=known)
+        if task == "draft_labels":
+            t = (b.get("type") or "").strip()
+            if t not in known:
+                raise ValueError("Pick one of this project's object types first.")
+            return dict(frame=_frame_picture(s, b["frame"]), type_name=t, description=b.get("description") or "")
+        raise ValueError("Unknown AI task %s." % task)
+
+    def ai_estimate(self, task, b):
+        import ai_helper
+        try:
+            kw = self._ai_inputs(task, b)
+            if task == "second_check":
+                kw = dict(items=[{k: v for k, v in it.items() if k in ("id", "label", "crop")} for it in kw["items"]],
+                          known_types=kw["known_types"])
+            return self.ai().estimate_cost(task, **kw)
+        except ai_helper.AIError as e:
+            raise ValueError(str(e))
+
+    def ai_ask(self, task, b):
+        """Ask the AI helper; every answer is a suggestion marked AI (nothing changes until the person takes it)."""
+        import ai_helper
+        h = self.ai()
+        kw = self._ai_inputs(task, b)
+        try:
+            if task == "second_check":
+                where = {it["id"]: (it["frame"], it["obj"], it["label"]) for it in kw["items"]}
+                items = [{k: v for k, v in it.items() if k in ("id", "label", "crop")} for it in kw["items"]]
+                res = h.second_check(items, known_types=kw["known_types"])
+                for sp in res["suspects"]:
+                    f, o, lab = where.get(sp["id"], (None, None, None))
+                    sp.update(frame=f, obj=o, label=lab)
+                res["sample"] = [dict(id=i, frame=v[0], obj=v[1], label=v[2]) for i, v in where.items()]
+                return res
+            return getattr(h, task)(**kw)
+        except ai_helper.AIError as e:
+            raise AIAskError(str(e), e.kind)
+
+    # --- outside data (robot logs, a positions file) --------------------------------------------
+    def outside_view(self):
+        proj = self.proj
+        cur = proj.data.get("current", {})
+        out = dict(job=dict(self.outside_job) if self.outside_job else None)
+        if not cur.get("rec"):
+            return out
+        try:
+            rec = proj.rec(cur["rec"])
+        except KeyError:
+            return out
+        out.update(rec=rec["id"], settings=outsidelink.read_settings(proj, rec["id"]),
+                   info=outsidelink.drafts_info(proj, rec["id"]))
+        return out
+
+    def outside_details(self):
+        """For the Robot logs / outside data window."""
+        proj = self.proj
+        v = self.outside_view()
+        v["plugins"] = outsidelink.plugin_list()
+        if v.get("info"):
+            v["info"]["plugin_title"] = next((p["title"] for p in v["plugins"] if p["id"] == v["info"].get("plugin")),
+                                             v["info"].get("plugin"))
+        if v.get("rec"):
+            rec = proj.rec(v["rec"])
+            cam, path = outsidelink.floor_camera(proj, rec)
+            v["floor"] = dict(path=path, ok=cam is not None, text=None if cam is not None else outsidelink.no_floor_text(proj, rec),
+                              looked=outsidelink.floor_paths(proj, rec))
+            v["has_clock"] = os.path.exists(os.path.join(rec["path"], "frames.csv"))
+        return v
+
+    def outside_set(self, path, plugin=None, offset_s=0.0):
+        proj = self.proj
+        cur = proj.data.get("current", {})
+        if not cur.get("rec"):
+            raise ValueError("Open a recording first: outside data belongs to one recording.")
+        rec = proj.rec(cur["rec"])
+        path = (path or "").strip().strip('"')
+        if not path:
+            raise ValueError("Type or paste the log folder or file first (the box is empty).")
+        if outsidelink.floor_camera(proj, rec)[0] is None:
+            raise ValueError(outsidelink.no_floor_text(proj, rec))
+        data = outsidelink.read_data(proj, rec, path, plugin, offset_s)      # a plain message now if it can't be read
+        if not data.streams:
+            raise ValueError("Nothing in %s could be placed (%s). Nothing was changed." % (path, data.summary()))
+        before = outsidelink.read_settings(proj, rec["id"])
+        outsidelink.save_settings(proj, rec["id"], path, plugin or data.plugin, offset_s)
+        self.outside_build()
+        return dict(before=before, plugin=data.plugin, names=data.names(), notes=data.notes, summary=data.summary())
+
+    def outside_build(self):
+        """Line the outside data up again (with the labels made since) and open the recording with its guesses."""
+        proj = self.proj
+        cur = proj.data.get("current", {})
+        s = self.session
+        if s is None or self.loading:
+            raise ValueError("The recording is still opening; wait a moment.")
+        if self.outside_job and self.outside_job.get("status") == "running":
+            raise ValueError("Still lining up the outside data; wait a moment.")
+        rec = proj.rec(cur["rec"])
+        job = dict(status="running", what="Reading the outside data ...", result=None, error=None)
+        self.outside_job = job
+
+        def say(t):
+            job["what"] = t
+            self.log("Outside data: " + t)
+
+        def work():
+            try:
+                res = outsidelink.build(proj, rec, s, say)
+                job["what"] = "Opening the recording with the new guesses ..."
+                self.reopen()                  # starts opening (loading is set) before the page hears "done"
+                job.update(result=res, status="done", what="Done")
+            except Exception as e:
+                if not isinstance(e, ValueError):
+                    traceback.print_exc()
+                job.update(status="failed", error=str(e))
+        threading.Thread(target=work, daemon=True).start()
+        return job
+
+    def outside_clear(self, restore=False):
+        proj = self.proj
+        cur = proj.data.get("current", {})
+        if not cur.get("rec"):
+            raise ValueError("Open a recording first.")
+        moved = (outsidelink.restore_settings if restore else outsidelink.clear_settings)(proj, cur["rec"])
+        self.outside_job = None
+        if moved:
+            self.reopen()
+        return moved
+
+    # --- home positions ---------------------------------------------------------------------------
+    def set_homes(self, key, homes):
+        import homes as homesmod
+        with self.proj.lock:
+            before = homesmod.homes_of(self.proj.data, key)
+            stored = homesmod.set_homes(self.proj.data, key, homes or [])
+            self.proj.save()
+        reopened = self.reopen(only_camera=key)
+        return dict(homes=stored, before=before, reopened=reopened)
+
+    def dock_preset(self, key, name, wall, mouth, owner=None, version=2, stations=True, preset=None):
+        """A preset's home positions from two clicks (not saved: the page adds them to its list); the
+        presets are listed in outsidelink.HOME_PRESETS."""
+        import homes as homesmod
+        pr = outsidelink.home_preset(preset or outsidelink.HOME_PRESETS[0]["id"])
+        proj = self.proj
+        cur = proj.data.get("current", {})
+        rec = proj.rec(cur["rec"]) if cur.get("rec") else None
+        if rec is None or proj.camera_key(rec) != key:
+            raise ValueError("Open a recording of this camera first.")
+        cam, _ = outsidelink.floor_camera(proj, rec)
+        if cam is None:
+            raise ValueError("The %s preset needs this camera's floor calibration (to know how high it stands in the "
+                             "picture). %s" % (pr["title"], outsidelink.no_floor_text(proj, rec).split(". ", 1)[1]))
+        name = (name or "").strip() or pr["name"]
+        return outsidelink.preset_homes(pr["id"], name, key, cam, [float(v) for v in wall], [float(v) for v in mouth],
+                                        owner=(owner or "").strip() or None, version=int(version), stations=bool(stations))
 
     # --- investigate: second camera ----------------------------------------------------------------
     # (Investigate's old "Ignore this spot", which left a spot out of every frame, is gone: a rejection
@@ -520,8 +806,22 @@ class Studio:
                             n_train_frames=m.get("n_train_frames", 0), created=m.get("created"),
                             error=m.get("error"), warning=m.get("warning"), metrics=m.get("metrics", {}),
                             interrupted=bool(m.get("interrupted")),
-                            current=self.proj.data.get("current", {}).get("model") == m["id"])
+                            current=self.proj.data.get("current", {}).get("model") == m["id"],
+                            copy_paste=m.get("copy_paste"), hard_negatives=m.get("hard_negatives"))
                        for m in self.proj.models()]
+        # by situation (the best model, beside no model) and what training used, as in the full report
+        try:
+            import report
+            best = None
+            for pt in c["points"]:
+                if pt.get("model") != "none" and pt.get("f1") is not None and not pt.get("failed") and \
+                        (best is None or pt["f1"] > best["f1"]):
+                    best = pt
+            c["situations_html"] = report.situations_html(self.proj, best) if best else ""
+        except Exception as e:            # the rest of the window still shows
+            self.log("By situation could not be shown: %s" % e)
+            c["situations_html"] = ""
+        c["copy_paste"] = trainmod.paste_mode(self.proj)
         return c
 
     def delete_model(self, mid):
@@ -591,6 +891,82 @@ class Studio:
 
 
 _NO_BEFORE = object()
+
+
+# --- AI helper: what it was asked, and the person's answers ---------------------------------------------
+AI_TASK_WORDS = dict(object_or_background="object or background?", name_object="name an object",
+                     second_check="second check of labels", draft_labels="draft labels for a type",
+                     setup_from_sentence="set up from a sentence")
+
+
+def ai_counts(log):
+    """Suggestions per task: asked, taken (accepted), turned down, not answered, and the cost so far."""
+    out, cost = {}, 0.0
+    for e in log:
+        if e.get("error"):
+            continue
+        t = out.setdefault(e.get("task", "?"), dict(task=e.get("task"), words=AI_TASK_WORDS.get(e.get("task"), e.get("task")),
+                                                     asked=0, taken=0, turned_down=0, open=0))
+        t["asked"] += 1
+        a = e.get("accepted")
+        t["taken" if a is True else "turned_down" if a is False else "open"] += 1
+        cost += float(e.get("cost_usd") or 0.0)
+    return dict(tasks=list(out.values()), cost_usd=round(cost, 4))
+
+
+def ai_time_saved_html(counts):
+    import html as _html
+    rows = counts.get("tasks") or []
+    if not rows:
+        return ("<h2>AI helper</h2><p class='muted'>The AI helper has not been asked anything in this project (it is off "
+                "unless you switch it on under More, AI helper).</p>")
+    out = ["<h2>AI helper</h2><p class='muted'>Every suggestion it made, and what you did with it. A suggestion only "
+           "changes a label when you take it, and then it is your label (Z takes it back).</p>",
+           "<table><tr><th>Asked to</th><th>Times</th><th>Taken</th><th>Turned down</th><th>Not answered</th></tr>"]
+    for r in rows:
+        out.append("<tr><td>%s</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td></tr>"
+                   % (_html.escape(r["words"] or ""), r["asked"], r["taken"], r["turned_down"], r["open"]))
+    out.append("</table><p class='muted'>Cost so far, as the service's prices were guessed: about $%.3f.</p>"
+               % counts.get("cost_usd", 0.0))
+    return "".join(out)
+
+
+def _decode_data_url(u):
+    """A picture sent to the page as data:image/jpeg;base64,... back into an image (None if empty)."""
+    import base64
+    import numpy as np
+    import cv2
+    if not u or "," not in u:
+        return None
+    b = base64.b64decode(u.split(",", 1)[1])
+    return cv2.imdecode(np.frombuffer(b, np.uint8), cv2.IMREAD_COLOR)
+
+
+def _frame_picture(session, f):
+    """Frame f's picture: the saved picked frame, else read from the video."""
+    import numpy as np
+    import cv2
+    p = os.path.join(session.frames_dir, "%06d.jpg" % int(f))
+    if os.path.exists(p):
+        img = cv2.imdecode(np.fromfile(p, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if img is not None:
+            return img
+    cap = cv2.VideoCapture(session.rec.video)
+    try:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(f))
+        ok, img = cap.read()
+    finally:
+        cap.release()
+    if not ok:
+        raise ValueError("frame %d could not be read from the video" % int(f))
+    return img
+
+
+def _crop(img, x, y, half):
+    h, w = img.shape[:2]
+    x0, x1 = max(0, int(round(x - half))), min(w, int(round(x + half)) + 1)
+    y0, y1 = max(0, int(round(y - half))), min(h, int(round(y + half)) + 1)
+    return img[y0:y1, x0:x1].copy()
 
 
 def _unknown_note(before, proj):
@@ -679,7 +1055,16 @@ def make_routes(studio):
         elif path == "/api/studio/timesaved_html":
             import report
             sm = timesaved.summary(studio.proj)
-            h._send(200, dict(html=report.time_saved_html(studio.proj, sm), summary=sm))
+            try:
+                counts = ai_counts(studio.ai().read_log())
+            except Exception:
+                counts = dict(tasks=[], cost_usd=0.0)
+            h._send(200, dict(html=report.time_saved_html(studio.proj, sm) + ai_time_saved_html(counts), summary=sm,
+                              ai=counts))
+        elif path == "/api/studio/ai":
+            h._send(200, studio.ai_view())
+        elif path == "/api/studio/outside":
+            h._send(200, studio.outside_details())
         elif path == "/api/studio/timesaved.csv":
             what = (q.get("what") or ["frames"])[0]
             slug = projmod.slug(studio.proj.name)
@@ -719,11 +1104,19 @@ def make_routes(studio):
             res = studio.relink(b.get("rec"), b.get("path"), b.get("folder"))
             h._send(200, res)
         elif path == "/api/studio/train":
+            cp = b.get("copy_paste")
+            if cp is not None and cp not in ("off", "compare", "on"):
+                raise ValueError("copy-paste must be off, compare or on")
+            with studio.proj.lock:
+                before_cp = trainmod.paste_mode(studio.proj)
+                if cp is not None:
+                    studio.proj.data.setdefault("settings", {})["copy_paste"] = cp
+                studio.proj.save()
             mid = studio.trainer.start(float(b.get("minutes") or 20))
             with studio.proj.lock:
                 studio.proj.data["settings"]["train_minutes"] = float(b.get("minutes") or 20)
                 studio.proj.save()
-            h._send(200, dict(model=mid))
+            h._send(200, dict(model=mid, copy_paste=trainmod.paste_mode(studio.proj), copy_paste_before=before_cp))
         elif path == "/api/studio/classes":
             before = studio.proj.motion_object_type()
             studio.proj.set_classes(b.get("classes") or [])
@@ -763,6 +1156,37 @@ def make_routes(studio):
         elif path == "/api/studio/delete_model":
             reopened = studio.delete_model(str(b.get("model") or ""))
             h._send(200, dict(ok=True, reopened=reopened))
+        elif path == "/api/studio/ai/settings":
+            h._send(200, studio.ai_settings(b))
+        elif path == "/api/studio/ai/estimate":
+            h._send(200, studio.ai_estimate(str(b.get("task") or ""), b))
+        elif path == "/api/studio/ai/ask":
+            try:
+                h._send(200, studio.ai_ask(str(b.get("task") or ""), b))
+            except AIAskError as e:
+                h._send(400, dict(error=str(e), kind=e.kind))
+        elif path == "/api/studio/ai/decision":
+            ids = b.get("call_ids") or ([b["call_id"]] if b.get("call_id") else [])
+            for cid in ids:
+                studio.ai().record_decision(str(cid), bool(b.get("accepted")), b.get("note") or "")
+            h._send(200, dict(ok=True, recorded=len(ids)))
+        elif path == "/api/studio/outside/set":
+            h._send(200, studio.outside_set(b.get("path"), b.get("plugin") or None, b.get("offset_s") or 0.0))
+        elif path == "/api/studio/outside/rebuild":
+            studio.outside_build()
+            h._send(200, dict(ok=True))
+        elif path == "/api/studio/outside/clear":
+            h._send(200, dict(moved=studio.outside_clear(bool(b.get("restore")))))
+        elif path == "/api/studio/outside/done":
+            if studio.outside_job and studio.outside_job.get("status") != "running":
+                studio.outside_job = None
+            h._send(200, dict(ok=True))
+        elif path == "/api/studio/homes":
+            h._send(200, studio.set_homes(b.get("camera") or "default", b.get("homes") or []))
+        elif path == "/api/studio/homes/dock":
+            h._send(200, dict(homes=studio.dock_preset(b.get("camera") or "default", b.get("name"), b["wall"], b["mouth"],
+                                                       b.get("owner"), b.get("version") or 2, b.get("stations", True),
+                                                       b.get("preset"))))
         elif path == "/api/studio/show_failed":
             with studio.proj.lock:
                 studio.proj.data.setdefault("settings", {})["show_failed_models"] = bool(b.get("on"))
