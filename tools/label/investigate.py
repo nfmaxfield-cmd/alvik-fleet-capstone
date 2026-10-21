@@ -296,14 +296,15 @@ def scan(video, n_frames, times, x, y, r, frame_now=None, guesses=None, progress
         detail = ("It is either part of the background (a mark, a stain, a fixture) or an object that stayed still the "
                   "whole time: a picture alone can't tell these apart. To find out, look at this spot in the second "
                   "camera, or in a recording of the empty area with nothing on it. Only if it is part of the background, "
-                  "\"Ignore this spot\" leaves guesses here out from now on.")
+                  "Reject here rejects the guess on this frame and teaches the tracker what the empty spot looks like; "
+                  "something that later stands on it is still found.")
     elif not now_changed:
         kind = "background_visited"
         headline = "On this frame the spot looks as it usually does (%d%% of the recording)." % pct_usual
         detail = ("Something different was there %d time%s (listed below): an object passing over or stopping. "
                   "What is here on this frame looks as it usually does: either part of the background, or an object "
-                  "that stays here most of the time. Ignoring this spot would also leave out the objects that pass over "
-                  "it." % (len(runs), "" if len(runs) == 1 else "s"))
+                  "that stays here most of the time. Reject here rejects a guess on this frame only; the objects that pass "
+                  "over the spot are still found." % (len(runs), "" if len(runs) == 1 else "s"))
     else:
         kind = "appears"
         if sb - sa >= 2.0:

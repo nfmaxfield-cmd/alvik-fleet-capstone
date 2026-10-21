@@ -21,9 +21,12 @@ studio bar on top:
 - Object types: name, has a front (heading), size, height above the floor (or "it varies").
 - Add recording: a recording folder, a two-camera session folder, or an ordinary video file
   (mp4, mov, avi ... from a phone or webcam app: made into a recording folder, videofile.py).
-- Work area: per camera, the part of the picture to look in, plus ignore spots.
-- Investigate (key Q on the page): one spot across the whole recording; "Ignore this spot", and
-  the second camera as a referee when both cameras are calibrated.
+- Work area: per camera, the part of the picture to look in. Ignore spots made by older versions
+  keep working and are shown there, where they can be removed; new ones are not made (a rejection
+  applies to one frame and teaches the tracker instead: "Reject here").
+- Investigate (key Q on the page): one spot across the whole recording, in three parts (what it
+  found / look around / change things); "Reject here" rejects the guess on that frame and the tracker
+  remembers the empty spot; the second camera as a referee when both cameras are calibrated.
 - Time saved: seconds per frame and frames accepted without looking, by model version (CSV too).
 - Share project / Open shared project: the whole project as one .mxirl file (share.py).
 
@@ -361,15 +364,9 @@ class Studio:
                     share=self.share_view(), missing=[r for r in recs if r["missing"]],
                     documents=_documents(), n_cameras=proj.n_cameras(), convert=self.convert_view())
 
-    # --- investigate: ignore spot, second camera ------------------------------------------------
-    def ignore_spot(self, camera, x, y, r):
-        """Add an ignore spot to the camera's work area, then open the recording again with it."""
-        key = camera or "default"
-        c = self.proj.camera_settings(key)
-        spots = list(c["ignore_spots"]) + [[float(x), float(y), float(r)]]
-        self.proj.set_camera_settings(key, c["work_area"], c["margin_px"], spots, c["image_size"], asked=c["asked"])
-        return self.reopen(only_camera=key)
-
+    # --- investigate: second camera ----------------------------------------------------------------
+    # (Investigate's old "Ignore this spot", which left a spot out of every frame, is gone: a rejection
+    # now applies to one frame and teaches the tracker, app.Session.reject_here.)
     def referee(self, frame, x, y, cls):
         import referee
         cur = self.proj.data.get("current", {})
@@ -703,9 +700,6 @@ def make_routes(studio):
                                                              camera=e.rec.get("camera"), path=e.rec["path"])))
                 return True
             h._send(200, dict(ok=True))
-        elif path == "/api/studio/ignore_spot":
-            reopened = studio.ignore_spot(b.get("camera"), b["x"], b["y"], b["r"])
-            h._send(200, dict(ok=True, reopened=reopened))
         elif path == "/api/studio/referee":
             h._send(200, studio.referee(b.get("frame", 0), b["x"], b["y"], b.get("cls")))
         elif path == "/api/studio/share/export":

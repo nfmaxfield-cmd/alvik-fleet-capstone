@@ -196,7 +196,9 @@ def test_referee_shows_the_other_camera_at_the_same_moment(tmp_path, synth10):
 
 
 # ---------------------------------------------------------------- studio routes
-def test_ignore_spot_route_adds_to_the_work_area_and_retracks(tmp_path, synth10):
+def test_old_ignore_spots_kept_and_the_ignore_spot_route_is_gone(tmp_path, synth10):
+    """Stage 2: "Ignore this spot" is gone (a rejection applies to one frame: Reject here); ignore
+    spots saved before keep working."""
     proj, rid = ready_project(str(tmp_path / "p"), synth10)
     proj.set_camera_settings("overhead", [[0, 0], [640, 0], [640, 480], [0, 480]], 12, [[5, 5, 4]], [640, 480])
     st = studiomod.Studio(proj, log=lambda *a: None, background=False)
@@ -204,14 +206,11 @@ def test_ignore_spot_route_adds_to_the_work_area_and_retracks(tmp_path, synth10)
     server, url = serve(st)
     try:
         g = next(g for gs in st.session.guesses.values() for g in gs)
-        r = _post(url + "api/studio/ignore_spot", dict(camera="overhead", x=g["x"], y=g["y"], r=15))
-        assert r["reopened"]
-        wait_open(st)
+        assert _post(url + "api/studio/ignore_spot", dict(camera="overhead", x=g["x"], y=g["y"], r=15))["http"] == 404
         c = proj.camera_settings("overhead")
-        assert c["ignore_spots"] == [[5.0, 5.0, 4.0], [round(g["x"], 1), round(g["y"], 1), 15.0]]
-        assert c["work_area"] and c["margin_px"] == 12                       # the rest is kept
+        assert c["ignore_spots"] == [[5.0, 5.0, 4.0]] and c["work_area"] and c["margin_px"] == 12
         info = _get(url + "api/info")
-        assert len(info["area"]["ignore_spots"]) == 2 and info["area"]["dropped"] > 0
+        assert info["area"]["ignore_spots"] == [[5.0, 5.0, 4.0]]
         # investigate through the page's routes
         f = st.session.selected[2]
         _post(url + "api/investigate", dict(frame=f, x=100, y=100))
@@ -380,6 +379,8 @@ def test_investigate_time_saved_and_share_in_a_browser(tmp_path, synth10):
             page.click("#invlast")
             page.wait_for_selector("#invtype", timeout=30000)
             page.click("#invunsure")
+            page.wait_for_selector("#invpreview.on", timeout=30000)        # stage 2: a preview first, then confirm
+            page.click("#invyes")
             page.wait_for_function("S.stats && S.stats.unsure >= 1", timeout=30000)
             page.keyboard.press("Escape")
             page.wait_for_timeout(300)

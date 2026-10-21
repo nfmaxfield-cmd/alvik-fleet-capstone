@@ -72,6 +72,53 @@ def _mem_status(st):
     """labels.csv writes "auto" for rows of auto-accepted frames; in memory
     they are confirmed rows of a frame whose state is auto."""
     return "confirmed" if st == "auto" else st
+
+
+# Frames the tracker asks a person to look at, most urgent first, with the reason shown on the
+# frame in plain words. "Most useful next" puts frames with any of these before everything else.
+FLAG_TEXT = collections.OrderedDict([
+    ("split_unresolved", "two lookalikes crossed here: which is which?"),
+    ("chain_broken", "something passed over an object that was being followed: is it still there, and the same one?"),
+    ("confirm_due", "this object has been followed a long way since it was last confirmed: is the guess still right?"),
+])
+OTHER_FLAG_TEXT = "the tracker asks for a look here"
+CLIP_SECONDS = 1.0         # the clip on key C: this long before and after the frame
+CLIP_MAX_FRAMES = 31       # ... at most this many pictures (spread evenly; the frame itself always in)
+CLIP_WIDTH = 640           # ... made smaller than this width
+
+
+# ---------------------------------------------------------------- hooks for the tracker (lane T)
+# The tracker (tracker.py) will learn from a rejected spot: it keeps what the empty spot looks like
+# there, scores later guesses that look like it down hard, and still finds something that looks
+# different. Until that is wired in, the page's "Reject here" still rejects the guess on its frame
+# and the spot is kept in review.json ("rejected_spots"), so nothing is lost.
+def remember_rejected_spot(session, spot):
+    """Tell the tracker to remember an empty spot. spot: dict(frame, x, y, r, saved).
+    Returns True when the tracker took it (then the guesses are followed again from that frame).
+    TODO(integration, lane T): match the name and arguments of the tracker's rejected-spot API."""
+    fn = getattr(session.run, "remember_rejected", None)
+    if not callable(fn):
+        return False
+    try:
+        fn(frame=int(spot["frame"]), x=float(spot["x"]), y=float(spot["y"]), r=float(spot["r"]))
+        return True
+    except Exception as e:          # never stops the labelling
+        session.log("The tracker could not take the rejected spot: %s" % e)
+        return False
+
+
+def forget_rejected_spot(session, spot):
+    """Undo of remember_rejected_spot (Z after Reject here).
+    TODO(integration, lane T): match the tracker's API."""
+    fn = getattr(session.run, "forget_rejected", None)
+    if not callable(fn):
+        return False
+    try:
+        fn(frame=int(spot["frame"]), x=float(spot["x"]), y=float(spot["y"]), r=float(spot["r"]))
+        return True
+    except Exception as e:
+        session.log("The tracker could not forget the rejected spot: %s" % e)
+        return False
 SOURCES = ["motion", "track", "model", "user", "log", "camera"]
 LABEL_COLUMNS = ["frame", "t_wall", "obj", "cls", "x_px", "y_px", "heading_deg", "heading_known",
                  "source", "status", "score"]
@@ -461,6 +508,8 @@ class Session:
         self.run = tracker.TrackRun(self.dets, self.rec.times, self.robot_px,
                                     (self.rec.width, self.rec.height), params=params,
                                     det_source="model" if model else "motion")
+        for spot in self.review.get("rejected_spots", []):      # what "Reject here" taught it before
+            remember_rejected_spot(self, spot)
         self._load_labels()
         self._stage("Following the guesses from frame to frame ...")
         self.guesses, self.summary = self.run.run(self._anchors(), self._reserved_ids())
@@ -693,16 +742,48 @@ class Session:
                     time_s=round(self.rec.times[f] - self.rec.times[0], 3), state=self.frame_state(f),
                     how=st["how"] if st else None, objects=objects, conf=self.conf_of(f),
                     reasons=self.reasons.get(f, []), in_spot=f in spot, empty=bool(st and st.get("empty")),
-                    next_obj_id=self.next_obj_id())
+                    next_obj_id=self.next_obj_id(),
+                    flags=[dict(key=k, text=FLAG_TEXT.get(k, OTHER_FLAG_TEXT)) for k in self.frame_flags(f)])
+
+    def frame_flags(self, f):
+        """What the tracker asks a person to look at on frame f, most urgent first (FLAG_TEXT order,
+        then any other flag). HOOK (lane T): read from the tracker's output rows (a row with
+        split_unresolved / chain_broken set), and from TrackRun.frame_flags(f) if the tracker has it."""
+        found = set()
+        for r in self.guesses.get(f, []):
+            for k in FLAG_TEXT:
+                if r.get(k):
+                    found.add(k)
+            for k in r.get("flags") or ():
+                found.add(str(k))
+        fn = getattr(self.run, "frame_flags", None)
+        if callable(fn):
+            try:
+                found.update(str(k) for k in (fn(f) or ()))
+            except Exception:           # never stops the list
+                pass
+        return [k for k in FLAG_TEXT if k in found] + sorted(k for k in found if k not in FLAG_TEXT)
+
+    def _flag_rank(self, f):
+        """0 for the most urgent flag, ...; None for a frame without flags."""
+        fl = self.frame_flags(f)
+        if not fl:
+            return None
+        keys = list(FLAG_TEXT)
+        return keys.index(fl[0]) if fl[0] in keys else len(keys)
 
     def queue(self, mode):
         if mode == "next":
-            # most useful first: frames nobody has finished, least confident guesses first
+            # most useful first: frames the tracker asks a person to look at (two lookalikes it can't
+            # tell apart, a broken chain), then frames nobody has finished, least confident guesses first
             # (ties: earliest first). Finished frames follow, so the list still shows them.
             todo = [f for f in self.selected if self.frame_state(f) in ("pending", "edited")]
-            todo.sort(key=lambda f: (self.conf_of(f), f))
+            ranks = {f: self._flag_rank(f) for f in todo}
+            flagged = sorted((f for f in todo if ranks[f] is not None), key=lambda f: (ranks[f], self.conf_of(f), f))
+            todo = sorted((f for f in todo if ranks[f] is None), key=lambda f: (self.conf_of(f), f))
             if self.part_of:
                 todo = self._spread(todo)
+            todo = flagged + todo
             done = [f for f in self.selected if f not in set(todo)]
             frames = todo + done
         elif mode == "low":
@@ -714,7 +795,18 @@ class Session:
         else:
             frames = list(self.selected)
         uns = set(self.unsure_frames())
-        return [dict(f=f, state=self.frame_state(f), conf=self.conf_of(f), unsure=f in uns) for f in frames]
+        out = []
+        for f in frames:
+            q = dict(f=f, state=self.frame_state(f), conf=self.conf_of(f), unsure=f in uns)
+            fl = self.frame_flags(f)
+            if fl:
+                q["flag"] = fl[0]
+            out.append(q)
+        return out
+
+    def flagged_left(self):
+        """Picked frames not finished yet that the tracker asks a person to look at."""
+        return sum(1 for f in self.selected if self.frame_state(f) in ("pending", "edited") and self.frame_flags(f))
 
     # the training split's parts, and the share of the footage each gets (trainer.py)
     PARTS = ("train", "val", "test")
@@ -784,7 +876,7 @@ class Session:
                     auto=states.count("auto"), pending=states.count("pending"), low=len(low),
                     low_left=sum(1 for f in low if self.frame_state(f) in ("pending", "edited")),
                     high_pending=len(high_pending), spot=spot, low_threshold=self.low_threshold,
-                    unsure=len(self.unsure_frames()), parts=self.part_counts(),
+                    unsure=len(self.unsure_frames()), parts=self.part_counts(), flagged_left=self.flagged_left(),
                     same=sum(1 for st in self.frames.values() if st["state"] == "auto" and st.get("how") == "same"),
                     save_error=self.save_error)
 
@@ -1064,11 +1156,25 @@ class Session:
         return n
 
     def auto_accept(self):
-        """Accept the guesses on every high-confidence frame nobody has looked at."""
+        """Accept the guesses on every high-confidence frame nobody has looked at. Returns how many."""
+        return len(self.auto_accept_frames())
+
+    def undo_auto(self):
+        """Take back every frame accepted by "Accept remaining high-confidence frames". Returns how many."""
+        return len(self.undo_auto_frames())
+
+    def auto_accept_frames(self, frames=None):
+        """Accept the guesses on every high-confidence frame nobody has looked at. frames: only these
+        (Shift+Z on the page puts back frames Z took back; still only frames nobody has looked at).
+        Returns the frames accepted."""
         with self.lock:
             n = 0
+            done = []
+            only = None if frames is None else {int(f) for f in frames}
             for f in self.selected:
-                if self.frame_state(f) != "pending" or self.conf_of(f) < self.low_threshold:
+                if self.frame_state(f) != "pending":
+                    continue
+                if only is None and self.conf_of(f) < self.low_threshold or only is not None and f not in only:
                     continue
                 objs = []
                 for o in self.guess_objects(f):
@@ -1081,22 +1187,25 @@ class Session:
                                       changed=False, updated=now_iso(), empty=not objs)
                 self._record(f, "auto", how="auto", n_objects=len(objs))
                 n += 1
+                done.append(f)
             self.save()
-            return n
+            return done
 
-    def undo_auto(self):
+    def undo_auto_frames(self, frames=None):
         """Take back the frames accepted by "Accept remaining high-confidence frames" (not the
-        same-picture ones, which a person's accept vouches for)."""
+        same-picture ones, which a person's accept vouches for). frames: only these (Z on the page
+        takes back one accept). Returns the frames taken back."""
         with self.lock:
+            only = None if frames is None else {int(f) for f in frames}
             # only frames still exactly as the auto-accept left them: never same-picture frames (a
             # person's accept vouches for them) or frames a person changed since (e.g. with change all)
             fs = [f for f, st in self.frames.items() if st["state"] == "auto" and st.get("how") == "auto"
-                  and not st.get("changed")]
+                  and not st.get("changed") and (only is None or f in only)]
             for f in fs:
                 del self.frames[f]
                 self._record(f, "undone")
             self.save()
-            return len(fs)
+            return sorted(fs)
 
     # --- track timeline ---------------------------------------------------------------------
     def track_timeline(self, max_objects=80):
@@ -1210,89 +1319,218 @@ class Session:
                                     x=o["x"], y=o["y"]))
         return out
 
-    def change_at(self, items, action, cls=None):
+    def _plan_change(self, items, action, cls):
+        """What "change all" would do: [(frame, object, new values), ...], in frame order."""
+        want = {}
+        for it in items or []:
+            want.setdefault(int(it["frame"]), set()).add(int(it["obj"]))
+        plan = []
+        for f, objs in sorted(want.items()):
+            st = self.frames.get(f)
+            if not st:
+                continue
+            for o in st["objects"]:
+                if o["obj"] not in objs:
+                    continue
+                if action == "type":
+                    if o["status"] == "rejected" or o["cls"] == cls and o["status"] not in ("unsure",):
+                        continue
+                    new = dict(cls=cls, status="corrected")
+                elif action == "reject":
+                    if o["status"] == "rejected":
+                        continue
+                    new = dict(status="rejected")
+                else:
+                    if o["status"] == "unsure":
+                        continue
+                    new = dict(status="unsure")
+                plan.append((f, o, new))
+        return plan
+
+    @staticmethod
+    def _preview_rows(plan, limit=200):
+        return [dict(frame=f, obj=o["obj"], cls=o["cls"], status=o["status"], new_cls=new.get("cls", o["cls"]),
+                     new_status=new["status"]) for f, o, new in plan[:limit]]
+
+    def _touched(self, st):
+        """A frame a person just changed from Investigate (change all, Reject here)."""
+        st["changed"] = True
+        # its own time: "updated" stays the frame's last save by a person (the time-saving
+        # estimates read the gaps between those)
+        st["changed_all"] = now_iso()
+        if st["state"] == "auto":
+            # a person changed it: it is no longer a guess accepted without looking, so
+            # "Undo auto-accept" leaves it alone
+            st["state"], st["how"] = "reviewed", "change_all"
+            st.pop("same_as", None)
+        if st["state"] in ("reviewed", "auto"):
+            st["empty"] = not any(o["status"] != "rejected" for o in st["objects"])
+
+    def _keep_for_undo(self, before, spots=None):
+        """One undo step for the page's Z: the frames as they were (None: the frame had no entry) and
+        as they are now; spots: dict(remove=[...], add=[...]) of rejected spots that undoing changes.
+        Returns its token."""
+        self._bulk_n = getattr(self, "_bulk_n", 0) + 1
+        token = "c%d" % self._bulk_n
+        self.bulk_undo[token] = dict(before=before, after={f: json.dumps(self.frames.get(f), sort_keys=True) for f in before},
+                                     spots=spots or dict(remove=[], add=[]))
+        return token
+
+    def change_at(self, items, action, cls=None, preview=False):
         """Investigate's "change all": items = [{frame, obj}, ...]; action "type" (to cls),
-        "reject" or "unsure". One undo step: returns a token for undo_change()."""
+        "reject" or "unsure". One undo step: returns a token for undo_change().
+        preview: change nothing, say what would change (changed, frames, items)."""
         if action not in ("type", "reject", "unsure"):
             raise ValueError("unknown change %r" % action)
         if action == "type" and cls not in self.classes:
             raise ValueError("unknown object type %r" % cls)
         with self.lock:
-            want = {}
-            for it in items or []:
-                want.setdefault(int(it["frame"]), set()).add(int(it["obj"]))
+            plan = self._plan_change(items, action, cls)
+            if preview:
+                return dict(preview=True, changed=len(plan), frames=sorted({f for f, _, _ in plan}),
+                            items=self._preview_rows(plan))
             before, n, first = {}, 0, None
-            for f, objs in sorted(want.items()):
-                st = self.frames.get(f)
-                if not st:
-                    continue
-                touched = False
-                for o in st["objects"]:
-                    if o["obj"] not in objs:
-                        continue
-                    if action == "type":
-                        if o["status"] == "rejected" or o["cls"] == cls and o["status"] not in ("unsure",):
-                            continue
-                        new = dict(cls=cls, status="corrected")
-                    elif action == "reject":
-                        if o["status"] == "rejected":
-                            continue
-                        new = dict(status="rejected")
-                    else:
-                        if o["status"] == "unsure":
-                            continue
-                        new = dict(status="unsure")
-                    if f not in before:
-                        before[f] = json.loads(json.dumps(st))
-                    o.update(new)
-                    touched = True
-                    n += 1
-                if touched:
-                    st["changed"] = True
-                    # its own time: "updated" stays the frame's last save by a person (the time-saving
-                    # estimates read the gaps between those)
-                    st["changed_all"] = now_iso()
-                    if st["state"] == "auto":
-                        # a person changed it: it is no longer a guess accepted without looking, so
-                        # "Undo auto-accept" leaves it alone
-                        st["state"], st["how"] = "reviewed", "change_all"
-                        st.pop("same_as", None)
-                    if st["state"] in ("reviewed", "auto"):
-                        st["empty"] = not any(o["status"] != "rejected" for o in st["objects"])
-                    if st["state"] in ("edited", "reviewed"):
-                        first = f if first is None else min(first, f)
-            token = None
-            if before:
-                self._bulk_n = getattr(self, "_bulk_n", 0) + 1
-                token = "c%d" % self._bulk_n
-                self.bulk_undo[token] = (before, {f: json.dumps(self.frames[f], sort_keys=True) for f in before})
+            for f, o, new in plan:
+                st = self.frames[f]
+                if f not in before:
+                    before[f] = json.loads(json.dumps(st))
+                o.update(new)
+                n += 1
+            for f in before:
+                st = self.frames[f]
+                self._touched(st)
+                if st["state"] in ("edited", "reviewed"):
+                    first = f if first is None else min(first, f)
+            token = self._keep_for_undo(before) if before else None
             updated = self.retrack(first) if first is not None else 0
             self.save()
             return dict(changed=n, frames=sorted(before), token=token, updated=updated, stats=self.stats())
 
     def undo_change(self, token):
-        """Put the frames of one "change all" back as they were."""
+        """Put the frames of one "change all" (or Reject here) back as they were. Returns, with the
+        counts, a new token that puts them back again (the page's Shift+Z)."""
         with self.lock:
             got = self.bulk_undo.pop(token, None)
             if not got:
                 raise ValueError("nothing to undo for that change (the studio was restarted?)")
-            before, after = got
-            first, done, kept = None, [], []
+            if isinstance(got, tuple):                       # an older form: (before, after)
+                got = dict(before=got[0], after=got[1], spots=dict(remove=[], add=[]))
+            before, after = got["before"], got["after"]
+            first, done, kept, back = None, [], [], {}
             for fs, st in before.items():
                 f = int(fs)
                 now = self.frames.get(f)
-                if now is None or json.dumps(now, sort_keys=True) != after.get(f):
+                if json.dumps(now, sort_keys=True) != after.get(f):
                     kept.append(f)          # changed again since: keep the newer work
                     continue
-                if now["state"] in ("edited", "reviewed"):     # it was a label the tracker followed
+                back[f] = json.loads(json.dumps(now))
+                if now is not None and now["state"] in ("edited", "reviewed"):     # it was a label the tracker followed
                     first = f if first is None else min(first, f)
-                self.frames[f] = st
+                if st is None:
+                    self.frames.pop(f, None)
+                else:
+                    self.frames[f] = st
                 done.append(f)
-                if st["state"] in ("edited", "reviewed"):
+                if st is not None and st["state"] in ("edited", "reviewed"):
                     first = f if first is None else min(first, f)
+            spots = got.get("spots") or {}
+            told = False
+            for sp in spots.get("remove", []):
+                if sp in self.review.get("rejected_spots", []):
+                    self.review["rejected_spots"].remove(sp)
+                told = forget_rejected_spot(self, sp) or told
+            for sp in spots.get("add", []):
+                self.review.setdefault("rejected_spots", []).append(sp)
+                told = remember_rejected_spot(self, sp) or told
+            if told:          # the tracker's memory changed: follow the guesses again from the spot's frame
+                f0 = min(sp["frame"] for sp in spots.get("remove", []) + spots.get("add", []))
+                first = f0 if first is None else min(first, f0)
+            token2 = self._keep_for_undo(back, dict(remove=spots.get("add", []), add=spots.get("remove", []))) \
+                if (back or spots.get("remove") or spots.get("add")) else None
             updated = self.retrack(first) if first is not None else 0
             self.save()
-            return dict(undone=len(done), frames=sorted(done), kept=sorted(kept), updated=updated, stats=self.stats())
+            return dict(undone=len(done), frames=sorted(done), kept=sorted(kept), updated=updated, stats=self.stats(),
+                        token=token2)
+
+    # --- Reject here: one frame, and the tracker remembers the empty spot -------------------------
+    def rejected_spots(self):
+        return list(self.review.get("rejected_spots", []))
+
+    def reject_here(self, frame, x, y, r=None, preview=False):
+        """Investigate's "Reject here": reject the guesses at the spot (within r of x, y) on this one
+        frame, and remember the empty spot so the tracker scores later guesses that look like it down
+        hard (remember_rejected_spot). Never leaves the spot out of other frames. Objects a person
+        added there are kept (Del removes them). One undo step (token for undo_change)."""
+        f, x, y = int(frame), float(x), float(y)
+        r = float(r) if r else self.spot_radius()
+        with self.lock:
+            st = self.frames.get(f)
+            if st is None and f not in set(self.selected):
+                raise ValueError("frame %d is not one of the frames picked for labelling" % f)
+            objs = st["objects"] if st else self.guess_objects(f)
+            near = [o for o in objs if o["status"] != "rejected" and math.hypot(o["x"] - x, o["y"] - y) <= r]
+            hit = [o for o in near if o.get("source") != "user"]
+            yours = [o["obj"] for o in near if o.get("source") == "user"]
+            if preview:
+                return dict(preview=True, frame=f, x=x, y=y, r=r, yours=yours,
+                            items=[dict(frame=f, obj=o["obj"], cls=o["cls"], status=o["status"], new_cls=o["cls"],
+                                        new_status="rejected") for o in hit])
+            before = {f: json.loads(json.dumps(st)) if st else None}
+            if hit:
+                if st is None:
+                    # a frame nobody has touched: it becomes "changed, not finished", like Del on a guess
+                    clean = self._clean_objects([{k: v for k, v in o.items() if k != "close"} for o in objs])
+                    st = dict(state="edited", how="user", objects=clean, auto_conf=self.conf_of(f), changed=True,
+                              updated=now_iso(), empty=False)
+                    self.frames[f] = st
+                ids = {o["obj"] for o in hit}
+                for o in st["objects"]:
+                    if o["obj"] in ids and o.get("source") != "user" and o["status"] != "rejected":
+                        o["status"] = "rejected"
+                self._touched(st)
+            spot = dict(frame=f, x=round(x, 1), y=round(y, 1), r=round(r, 1), saved=now_iso())
+            self.review.setdefault("rejected_spots", []).append(spot)
+            told = remember_rejected_spot(self, spot)
+            token = self._keep_for_undo(before if hit else {}, dict(remove=[spot], add=[]))
+            updated = 0
+            if (hit and self.frames[f]["state"] in ("edited", "reviewed")) or told:
+                updated = self.retrack(f)
+            self.save()
+            return dict(frame=f, rejected=sorted(o["obj"] for o in hit), yours=yours, token=token, spot=spot,
+                        tracker_told=told, updated=updated, stats=self.stats())
+
+    # --- a short clip around a frame (key C) -------------------------------------------------------
+    def clip(self, f, seconds=CLIP_SECONDS, max_frames=CLIP_MAX_FRAMES, width=CLIP_WIDTH):
+        """The video about `seconds` before and after frame f, as pictures to play over and over at
+        their own pace: dict(frame, frames=[dict(frame, dt, picture)], interval_ms, before_s, after_s)."""
+        import bisect
+        import cv2
+        import investigate
+        f = int(f)
+        if not 0 <= f < self.rec.n:
+            raise ValueError("there is no frame %d in this recording" % f)
+        t = self.rec.times
+        lo = bisect.bisect_left(t, t[f] - seconds)
+        hi = max(f, bisect.bisect_right(t, t[f] + seconds) - 1)
+        want = list(range(lo, hi + 1))
+        if len(want) > max_frames:
+            pick = {int(round(lo + k * (hi - lo) / (max_frames - 1))) for k in range(max_frames)} | {f}
+            want = sorted(pick)
+        pics = {}
+
+        def keep(g, img):
+            h, w = img.shape[:2]
+            if w > width:
+                img = cv2.resize(img, (width, int(round(h * width / w))), interpolation=cv2.INTER_AREA)
+            pics[g] = investigate._jpeg(img, 78)
+        investigate.read_frames(self.rec.video, want, keep)
+        got = [g for g in want if g in pics]
+        if not got:
+            raise ValueError("the video around frame %d could not be read" % f)
+        span = (t[got[-1]] - t[got[0]]) if len(got) > 1 else 0.0
+        return dict(frame=f, frames=[dict(frame=g, dt=round(t[g] - t[f], 2), picture=pics[g]) for g in got],
+                    interval_ms=int(round(1000 * span / (len(got) - 1))) if len(got) > 1 else 100,
+                    before_s=round(t[f] - t[got[0]], 2), after_s=round(t[got[-1]] - t[f], 2))
 
     def set_position(self, mode, f):
         with self.lock:
@@ -1334,12 +1572,14 @@ class Session:
                  selected=self.selected, reasons={str(f): v for f, v in sorted(self.reasons.items()) if f in sel},
                  settings=dict(low_threshold=self.low_threshold), updated=now_iso())
         r["frames"] = {str(f): _review_entry(st) for f, st in sorted(self.frames.items())}
-        r["summary"] = {k: v for k, v in self.stats().items() if k not in ("save_error", "parts")}
+        r["summary"] = {k: v for k, v in self.stats().items() if k not in ("save_error", "parts", "flagged_left")}
         r["help"] = ("frames: state reviewed = checked by a person (how: user, or spot = in the spot check); "
                      "edited = changed but Enter not pressed yet; auto = accepted without looking because the "
                      "guesses were high-confidence (how: auto), or because the picture was the same as a frame "
                      "a person accepted (how: same, same_as = that frame); their rows in labels.csv say auto. "
-                     "how change_all = changed by Investigate's \"change all\" (changed_all = when). "
+                     "how change_all = changed from Investigate (\"change all\", or Reject here; changed_all = when). "
+                     "rejected_spots = spots where a guess was rejected with Reject here (frame, x, y, r): the "
+                     "tracker scores later guesses that look like the empty spot down; other frames are not changed. "
                      "empty = finished with nothing in it. "
                      "Pending rows in labels.csv are guesses nobody has checked; unsure rows are objects the "
                      "person could not identify yet (their frames are kept out of training and scoring).")
@@ -1485,6 +1725,8 @@ def make_handler(session, extra_get=None, extra_post=None):
                 f = int(q["f"][0])
                 with s.lock:
                     self._send(200, s.frame_view(f))
+            elif u.path == "/api/clip":
+                self._send(200, s.clip(int(q["f"][0])))
             elif u.path.startswith("/img/"):
                 name = os.path.basename(u.path)
                 path = os.path.join(s.frames_dir, name)
@@ -1521,18 +1763,20 @@ def make_handler(session, extra_get=None, extra_post=None):
                     s.inv["stop"] = True
                 self._send(200, dict(ok=True))
             elif u.path == "/api/investigate/change":
-                self._send(200, s.change_at(b.get("items") or [], b.get("action"), b.get("cls")))
+                self._send(200, s.change_at(b.get("items") or [], b.get("action"), b.get("cls"), bool(b.get("preview"))))
+            elif u.path == "/api/investigate/reject_here":
+                self._send(200, s.reject_here(b["frame"], b["x"], b["y"], b.get("r"), bool(b.get("preview"))))
             elif u.path == "/api/investigate/undo":
                 self._send(200, s.undo_change(b.get("token")))
             elif u.path == "/api/position":
                 s.set_position(b.get("mode", "all"), b.get("frame", 0))
                 self._send(200, dict(ok=True))
             elif u.path == "/api/auto_accept":
-                n = s.auto_accept()
-                self._send(200, dict(accepted=n, stats=s.stats()))
+                fs = s.auto_accept_frames(b.get("frames"))
+                self._send(200, dict(accepted=len(fs), frames=fs, stats=s.stats()))
             elif u.path == "/api/auto_undo":
-                n = s.undo_auto()
-                self._send(200, dict(undone=n, stats=s.stats()))
+                fs = s.undo_auto_frames(b.get("frames"))
+                self._send(200, dict(undone=len(fs), frames=fs, stats=s.stats()))
             elif u.path == "/api/undo_same":
                 n = s.undo_same(b.get("frames") or [])
                 self._send(200, dict(undone=n, stats=s.stats()))

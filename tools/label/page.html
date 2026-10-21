@@ -76,7 +76,7 @@
     border-radius: 4px; padding: 3px 5px; font: inherit; }
   #toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); background: #2b3340; color: var(--text);
     padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line); opacity: 0; transition: opacity .2s;
-    pointer-events: none; max-width: 70vw; z-index: 30; }
+    pointer-events: none; max-width: min(760px, 86vw); z-index: 30; transition: opacity .6s; }
   #toast.show { opacity: 1; } #toast.err { background: #4a2326; border-color: var(--bad); }
   #saveerr { display: none; background: #4a2326; color: #ffd7d7; padding: 6px 14px; font-size: 13px; }
   .legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--dim); }
@@ -192,6 +192,25 @@
   .parts .zero { color: var(--warn); }
   .modal td .xbtn { font-size: 13px; }
   .hidecol { display: none; }
+  /* the tracker asks for a look at this frame */
+  .flagnote { display: none; background: #3d2f1a; border: 1px solid #7a5520; color: #ffe2b8; border-radius: 6px; padding: 4px 10px; font-size: 13px; }
+  .flagnote.on { display: block; }
+  #n-next .first { color: var(--warn); }
+  /* investigate: three parts, kept apart */
+  .invpart { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px 12px; margin: 12px 0; }
+  .invpart > h4.parth { margin: 0 0 6px; font-size: 13.5px; letter-spacing: .03em; text-transform: none; color: var(--text); }
+  .invpart > h4.parth .muted { font-weight: 400; }
+  .invpart.found { background: #181b20; }
+  .invpart.look { background: #17202a; border-color: #2a4560; }
+  .invpart.change { background: #2b2216; border: 2px solid #b07a2a; }
+  .invpart.change > h4.parth { color: #ffcf8a; }
+  .invpart.change .sbtn.danger { border-color: #b07a2a; background: #3d2f1a; color: #ffe2b8; }
+  .invpart.change .sbtn.danger:hover { border-color: var(--warn); }
+  .reach { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin: 6px 0; }
+  .reach .muted { flex: 1; min-width: 240px; }
+  #invpreview { display: none; margin-top: 10px; background: #1c1f24; border: 1px solid #7a5520; border-radius: 8px; padding: 8px 10px; }
+  #invpreview.on { display: block; }
+  #invpreview table { margin: 6px 0; }
   @media (max-width: 900px) { main { grid-template-columns: 1fr; } aside { border-left: 0; border-top: 1px solid var(--line); } }
 </style>
 </head>
@@ -199,7 +218,7 @@
 <header>
   <div class="brand" id="brand"><span class="bname">Maxfield IRL Tracking</span><span class="btag">Identify. Recognize. Label.</span></div>
   <div class="tabs" id="tabs">
-    <button data-mode="next" title="Frames not finished yet, the least confident guesses first: your time goes where it helps most. In the studio it also takes frames from each part of the training split in turn, so every part gets some early">Most useful next <span id="n-next"></span></button>
+    <button data-mode="next" title="Frames not finished yet: first the ones the tracker asks you to look at (two lookalikes it can't tell apart, something passing over an object it was following), then the least confident guesses: your time goes where it helps most. In the studio it also takes frames from each part of the training split in turn, so every part gets some early">Most useful next <span id="n-next"></span></button>
     <button data-mode="all" title="Every picked frame, in time order">All picked <span id="n-all"></span></button>
     <button data-mode="low" title="Frames whose guesses the computer is least sure about">Low confidence <span id="n-low"></span></button>
     <button data-mode="spot" title="A random sample of the high-confidence frames: check them to see how often the guesses are right">Spot check <span id="n-spot"></span></button>
@@ -245,12 +264,13 @@
       <span class="src" id="src"></span>
       <span id="fpos"></span>
     </div>
+    <div class="flagnote" id="flagnote"></div>
     <div id="wrap"><canvas id="view" width="640" height="480"></canvas></div>
-    <canvas id="strip" title="Frames in this list: click to jump. Green = reviewed, dark green = auto-accepted, orange = changed but not finished, grey = not looked at."></canvas>
+    <canvas id="strip" title="Frames in this list: click to jump. Green = reviewed, dark green = auto-accepted, orange = changed but not finished, grey = not looked at. A red edge on top: the tracker asks you to look at that frame."></canvas>
   </section>
   <div id="wabar">
     <b style="font-size:15px">Work area<span id="wacam"></span></b>
-    <div class="row"><span class="seg"><button id="wa-corners" class="on">Corners</button><button id="wa-spots">Ignore spots</button></span></div>
+    <div class="row"><span class="seg"><button id="wa-corners" class="on">Corners</button><button id="wa-spots" title="Ignore spots made by an older version: click one to remove it">Old ignore spots</button></span></div>
     <span id="wahelp"></span>
     <h2>Margin</h2>
     <div class="row"><label for="wamargin">Margin around it (px)</label><input id="wamargin" type="number" min="0" step="1"></div>
@@ -260,7 +280,7 @@
       <button class="sbtn" id="wa-whole" title="Look in the whole picture (ignore spots are kept)">Use the whole picture</button>
       <button class="sbtn" id="wa-cancel">Cancel (Esc)</button>
     </div>
-    <p class="muted">Guesses outside the area and its margin, and inside ignore spots, are left out. Your labels are kept.</p>
+    <p class="muted">Guesses outside the area and its margin are left out (and inside old ignore spots, until you remove them). Your labels are kept. Z takes a saved change back.</p>
   </div>
   <aside>
     <h2>Objects on this frame</h2>
@@ -312,10 +332,13 @@
       <kbd>B</kbd><span>Picture: normal / brighter / high contrast (only how it is shown)</span>
       <kbd>V</kbd><span>Full screen (Esc leaves it)</span>
       <kbd>W</kbd><span>Work area: mark the part of the picture to look in</span>
-      <kbd>Q</kbd><span>Investigate the object (or spot) under the mouse across the whole recording: is it an object, or part of the background? Fix every label made there at once</span>
-      <kbd>Z</kbd><span>Undo (also Ctrl+Z)</span>
+      <kbd>C</kbd><span>Short clip: about 1 s before and after this frame, over and over, to see what is happening (C again or Esc stops; changes nothing)</span>
+      <kbd>Q</kbd><span>Investigate the object (or spot) under the mouse across the whole recording: is it an object, or part of the background? Fix every label made there at once. After jumping to a frame from an investigation, Q goes back to it (Shift+Q: investigate the spot under the mouse instead)</span>
+      <kbd>Z</kbd><span>Undo the last change (also Ctrl+Z); a message says what it took back</span>
+      <kbd>Shift+Z</kbd><span>Redo: put back what Z took back (also Ctrl+Y)</span>
       <kbd>Esc</kbd><span>Cancel / deselect</span>
     </div>
+    <p class="muted">Every change shows a short message at the bottom: what changed, where, and the key that takes it back. It fades by itself.</p>
     <p class="muted">A dashed arrow is only a heading guess (the object turning, or maybe reversing). It is saved as unknown unless you set it with H, drag, or F. A dashed grey circle with a ? is an object marked unsure.</p>
     <p class="muted" id="paths"></p>
   </aside>
@@ -343,7 +366,7 @@ function setClasses(list) {
 function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 const S = {
   info: null, mode: "all", queue: [], idx: 0, frame: null, sel: -1, img: null, scale: 1, dpr: 1,
-  mouse: null, drag: null, hmode: false, undo: [], busy: false, stats: null, lastCls: null, imgCache: new Map(),
+  mouse: null, drag: null, hmode: false, undo: [], redo: [], busy: false, stats: null, lastCls: null, imgCache: new Map(),
   mag: false, pic: 0, wa: null,
 };
 const PICTURE = [{ name: "normal", filter: "none" }, { name: "brighter", filter: "brightness(1.6)" },
@@ -364,11 +387,20 @@ async function api(path, body) {
   if (!r.ok || j.error) { const e = new Error(j.error || r.statusText); e.data = j; e.status = r.status; throw e; }
   return j;
 }
+// A short message at the bottom that fades by itself (no X). Every action says what changed, where,
+// and the exact key or button that takes it back. Longer messages stay longer, so they can be read.
 function toast(msg, err) {
   const t = $("toast");
   t.textContent = msg; t.className = "show" + (err ? " err" : "");
-  clearTimeout(toast.timer); toast.timer = setTimeout(() => t.className = "", err ? 5000 : 2600);
+  const ms = Math.min(11000, Math.max(err ? 5000 : 3000, 62 * msg.length));
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => t.className = "", ms);
 }
+function plural(n, one, many) { return n + " " + (n === 1 ? one : (many || one + "s")); }
+// a time in the recording as m:ss
+function fmtClock(t) { t = Math.max(0, t || 0); const m = Math.floor(t / 60), sec = Math.floor(t - 60 * m); return m + ":" + String(sec).padStart(2, "0"); }
+// a list of frame numbers in short words: "frame 812", "frames 812-4410"
+function frameSpan(fs) { if (!fs || !fs.length) return "no frames"; const a = Math.min(...fs), b = Math.max(...fs); return a === b ? "frame " + a : "frames " + a + "-" + b; }
+function updatedNote(j) { return j && j.updated ? " Guesses updated on " + plural(j.updated, "later frame") + "." : ""; }
 
 // ---------------------------------------------------------------- never a silent screen
 // Anything that may take longer than ~0.3 s shows what is happening.
@@ -432,6 +464,7 @@ function firstToDo(from) {
 async function showFrame(i) {
   if (!S.queue.length) { S.frame = null; draw(); renderSide(); drawStrip(); return; }
   i = Math.max(0, Math.min(S.queue.length - 1, i));
+  if (CLIP.on) stopClip(false);
   S.idx = i;
   const f = S.queue[i].f;
   let fr;
@@ -534,7 +567,10 @@ function draw() {
   ctx.clearRect(0, 0, view.width, view.height);
   if (!S.frame || !S.info) { ctx.fillStyle = "#888"; ctx.font = 16 * S.dpr + "px system-ui"; ctx.fillText(S.info ? "No frames in this list." : "No recording open yet.", 20 * S.dpr, 40 * S.dpr); return; }
   ctx.setTransform(s, 0, 0, s, 0, 0);
-  if (S.img) { ctx.filter = PICTURE[S.pic].filter; ctx.drawImage(S.img, 0, 0, S.info.width, S.info.height); ctx.filter = "none"; }
+  const clipPic = CLIP.on ? CLIP.imgs[CLIP.i] : null;
+  const pic = clipPic || S.img;
+  if (pic) { ctx.filter = PICTURE[S.pic].filter; ctx.drawImage(pic, 0, 0, S.info.width, S.info.height); ctx.filter = "none"; }
+  if (CLIP.on && CLIP.frames[CLIP.i].dt !== 0) { drawClipBar(); return; }     // the labels belong to this frame only
   // Label coordinates put pixel centres on whole numbers (OpenCV style), but
   // pixel i covers [i, i+1) on the canvas: shift overlays half a pixel.
   ctx.setTransform(s, 0, 0, s, 0.5 * s, 0.5 * s);
@@ -597,6 +633,7 @@ function draw() {
     ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.lineTo(S.mouse.x, S.mouse.y); ctx.stroke(); ctx.setLineDash([]);
   }
   if (S.mag && S.mouse) drawLens();
+  if (CLIP.on) drawClipBar();
   view.classList.toggle("hmode", S.hmode);
   view.classList.toggle("wamode", !!S.wa);
   view.classList.toggle("mag", S.mag && !!S.mouse);
@@ -625,7 +662,8 @@ function drawStrip() {
   const n = S.queue.length; if (!n) return;
   const cw = w / n;
   const col = { reviewed: "#3ddc97", auto: "#2a7f5d", edited: "#ffb347", pending: "#4a515c" };
-  S.queue.forEach((q, i) => { sctx.fillStyle = col[q.state] || "#4a515c"; sctx.fillRect(i * cw, 3, Math.max(1, cw - (cw > 3 ? 1 : 0)), h - 6); });
+  S.queue.forEach((q, i) => { sctx.fillStyle = col[q.state] || "#4a515c"; sctx.fillRect(i * cw, 3, Math.max(1, cw - (cw > 3 ? 1 : 0)), h - 6);
+    if (q.flag && (q.state === "pending" || q.state === "edited")) { sctx.fillStyle = "#ff6b6b"; sctx.fillRect(i * cw, 0, Math.max(1, cw - (cw > 3 ? 1 : 0)), 3); } });
   sctx.fillStyle = "#fff"; sctx.fillRect(Math.min(w - 2, S.idx * cw + cw / 2 - 1), 0, 2, h);
 }
 function renderView() {
@@ -646,10 +684,14 @@ function renderSide() {
     $("fno").textContent = "-"; $("ftime").textContent = ""; $("fstate").textContent = ""; $("fstate").className = "pill";
     $("fstate").style.display = "none"; $("fconf").textContent = ""; $("freasons").textContent = "";
     $("fpos").textContent = S.info ? "0 in list" : "";
+    $("flagnote").classList.remove("on");
     $("objs").innerHTML = S.info ? '<div class="muted">' + (S.mode === "unsure" ? "No unsure objects left: nothing waits for a decision. Pick another list above." : "No frames in this list. Pick another list above.") + "</div>" : "";
     return;
   }
   $("fstate").style.display = "";
+  const fl = fr.flags || [];
+  $("flagnote").classList.toggle("on", fl.length > 0);
+  $("flagnote").textContent = fl.length ? "Look closely: " + fl.map((x) => x.text).join("; ") : "";
   $("fno").textContent = fr.frame;
   $("ftime").textContent = fr.time_s.toFixed(1) + " s";
   const st = $("fstate");
@@ -678,7 +720,7 @@ function renderSide() {
 function setStats(st) {
   S.stats = st;
   $("n-all").textContent = "(" + st.selected + ")";
-  $("n-next").textContent = "(" + (st.pending + st.edited) + " to do)";
+  $("n-next").innerHTML = "(" + (st.pending + st.edited) + " to do" + (st.flagged_left ? ' \u00b7 <span class="first" title="Frames the tracker asks you to look at come first">' + st.flagged_left + " to look at first</span>" : "") + ")";
   $("n-low").textContent = "(" + st.low_left + " left)";
   $("n-spot").textContent = st.spot.sample ? "(" + st.spot.checked + "/" + st.spot.sample + ")" : "";
   $("n-unsure").textContent = "(" + (st.unsure || 0) + ")";
@@ -745,14 +787,23 @@ function finishTiming() {
 }
 ["keydown", "mousedown", "wheel"].forEach((ev) => window.addEventListener(ev, bumpActive, true));
 window.addEventListener("mousemove", () => { if (S.timing && Date.now() - S.timing.last > 1000) bumpActive(); }, true);
-function pushUndo() { S.undo.push({ f: S.frame.frame, objects: clone(S.frame.objects), state: S.frame.state, how: S.frame.how, sel: S.sel }); if (S.undo.length > 200) S.undo.shift(); }
+// ---- undo (Z) and redo (Shift+Z). An entry is what applying it puts back; applying one gives the entry that reverses it.
+// kinds: frame (default: a frame's objects), bulk (Investigate's change all / Reject here, kept by the app), auto (frames
+// accepted without looking), workarea (a camera's work area). Every entry carries a short description for the messages.
+function pushEntry(e) {
+  e.rec = S.info ? S.info.recording : null;
+  S.undo.push(e); if (S.undo.length > 200) S.undo.shift();
+  S.redo = [];                                   // a new change: what Z took back earlier can't be put back any more
+  return e;
+}
+function pushUndo(desc) { return pushEntry({ f: S.frame.frame, objects: clone(S.frame.objects), state: S.frame.state, how: S.frame.how, sel: S.sel, desc: desc || "a change" }); }
 function markCorrected(o) { if (o.status === "pending" || o.status === "confirmed") o.status = "corrected"; }
 async function save(state, how, timingInfo) {
   const fr = S.frame;
   const body = { frame: fr.frame, objects: fr.objects, state: state, how: how || fr.how || null };
   if (timingInfo) body.timing = timingInfo;
   S.busy = true;
-  const slow = setTimeout(() => toast("Updating the guesses after this frame\u2026"), 400);
+  const slow = setTimeout(() => toast("Saving, and updating the guesses after this frame…"), 400);
   let j = null;
   try {
     j = await api("/api/frame", body);
@@ -764,49 +815,66 @@ async function save(state, how, timingInfo) {
     if (S.mode === "unsure" && q && !q.unsure) S.queueStale = true;    // decided: it leaves the Unsure list
     (j.same || []).forEach((g) => { const qq = S.queue.find((x) => x.f === g); if (qq) qq.state = "auto"; });
     setStats(j.stats);
-    if (j.updated) {
-      toast("Guesses updated on " + j.updated + " later frame" + (j.updated > 1 ? "s" : ""));
-      if (S.mode === "low") S.queueStale = true;   // which frames are low-confidence may have changed
-    }
-  } catch (e) { toast("Not saved: " + e.message, true); }
+    if (j.updated && S.mode === "low") S.queueStale = true;   // which frames are low-confidence may have changed
+  } catch (e) { toast("Not saved: " + e.message + ". Your change is still on the screen; make it again or press Z.", true); }
   finally { clearTimeout(slow); S.busy = false; }
   draw(); renderSide(); drawStrip();
   return j;
 }
 function editState() { return S.frame.state === "reviewed" ? "reviewed" : "edited"; }
-async function change(fn) {
-  if (!S.frame || S.busy) return;
-  pushUndo(); fn(); draw(); renderSide(); countEdit();
-  await save(editState(), editHow());
+// one change on this frame: fn changes S.frame.objects; desc says what it did in a few words ("moved #71"), or is a
+// function of the app's answer (for a new object's number); back: the key that takes it back (Z unless said)
+async function change(fn, desc, back) {
+  if (!S.frame || S.busy) return null;
+  const entry = pushUndo(typeof desc === "string" ? desc : "a change");
+  fn(); draw(); renderSide(); countEdit();
+  const f = S.frame.frame;
+  const j = await save(editState(), editHow());
+  if (j) {
+    const text = typeof desc === "function" ? desc(j) : desc;
+    entry.desc = text;
+    toast(cap(text) + " on frame " + f + ". " + (back || "Z takes it back.") + updatedNote(j));
+  }
+  return j;
 }
+function cap(t) { return t ? t.charAt(0).toUpperCase() + t.slice(1) : t; }
 function editHow() { return S.frame.how && S.frame.how !== "auto" && S.frame.how !== "same" && S.frame.how !== "change_all" ? S.frame.how : (S.mode === "spot" ? "spot" : "user"); }
+function objWords(o) { return "#" + o.obj + " (" + o.cls + ")"; }
 async function accept() {
   if (!S.frame || S.busy) return;
-  pushUndo();
-  const entry = S.undo[S.undo.length - 1];
+  const f = S.frame.frame;
+  const entry = pushUndo("the accept");
   for (const o of S.frame.objects) if (o.status === "pending") o.status = "confirmed";
+  const n = S.frame.objects.filter((o) => o.status !== "rejected").length;
   const j = await save("reviewed", editHow(), finishTiming());
-  if (j && j.same && j.same.length) {
+  if (!j) return;
+  let msg = "Accepted frame " + f + " (" + (n ? plural(n, "object") : "nothing on it") + ").";
+  if (j.same && j.same.length) {
     entry.also = j.same;
-    toast("Also accepted " + j.same.length + " frame" + (j.same.length > 1 ? "s" : "") + " with the same picture (Z undoes)");
+    msg += " Also accepted " + plural(j.same.length, "frame") + " with the same picture (" + frameSpan(j.same) + ").";
   }
-  await goNextToDo(j && j.same && j.same.length);
+  const where = await goNextToDo();
+  toast(msg + updatedNote(j) + " " + where + " Z takes the accept back" + (j.same && j.same.length ? ", with the same-picture frames" : "") + " (and goes back to frame " + f + ").");
 }
 async function markEmpty() {
   if (!S.frame || S.busy) return;
-  pushUndo();
-  const entry = S.undo[S.undo.length - 1];
+  const f = S.frame.frame;
+  const entry = pushUndo("marking it empty");
   S.frame.objects = S.frame.objects.filter((o) => o.source !== "user");
   for (const o of S.frame.objects) o.status = "rejected";
   countEdit();
   const j = await save("reviewed", S.mode === "spot" ? "spot" : "user", finishTiming());
-  if (j && j.same && j.same.length) {
+  if (!j) return;
+  let msg = "Marked frame " + f + " empty (nothing on it).";
+  if (j.same && j.same.length) {
     entry.also = j.same;
-    toast("Also marked " + j.same.length + " frame" + (j.same.length > 1 ? "s" : "") + " empty too: they show the same picture (Z undoes)");
+    msg += " Also marked " + plural(j.same.length, "frame") + " empty: they show the same picture (" + frameSpan(j.same) + ").";
   }
-  await goNextToDo(j && j.same && j.same.length);
+  const where = await goNextToDo();
+  toast(msg + updatedNote(j) + " " + where + " Z takes it back (and goes back to frame " + f + ").");
 }
-async function goNextToDo(quiet) {
+// go to the next frame to do; returns where it went, in words
+async function goNextToDo() {
   if (S.queueStale) {
     const cur = S.frame ? S.frame.frame : -1;
     S.queueStale = false;
@@ -815,39 +883,96 @@ async function goNextToDo(quiet) {
     S.idx = k < 0 ? S.queue.length - 1 : (S.queue[k].f === cur ? k : k - 1);
   }
   const i = firstToDo(S.idx + 1);
-  if (i < 0) { if (!quiet) toast("Every frame in this list is done."); return; }
-  if (i <= S.idx && !quiet) toast("Back to the first unfinished frame.");
+  if (i < 0) return "Every frame in this list is done; you stay here.";
+  const wrapped = i <= S.idx;
   await showFrame(i);
+  return (wrapped ? "Back to the first unfinished frame in this list: frame " : "Now on frame ") + S.frame.frame + ", the next to do.";
 }
+// ---- Z and Shift+Z
 async function undo() {
   const u = S.undo.pop();
-  if (!u) { toast("Nothing to undo."); return; }
-  if (u.kind === "bulk") { await undoBulk(u); return; }
+  if (!u) { toast("Nothing to undo: Z takes back changes made since this page was opened, and there are none left."); return; }
+  const r = await applyEntry(u, false);
+  if (r) S.redo.push(r); else S.undo.push(u);
+}
+async function redo() {
+  const u = S.redo.pop();
+  if (!u) { toast("Nothing to redo: Shift+Z only puts back what Z took back (and only until you make a new change)."); return; }
+  const r = await applyEntry(u, true);
+  if (r) S.undo.push(r); else S.redo.push(u);
+}
+// puts entry u into effect; returns the entry that reverses it (or null if it could not be applied)
+async function applyEntry(u, isRedo) {
+  const verb = isRedo ? "Redid: " : "Undid: ", again = isRedo ? " Z takes it back again." : " Shift+Z puts it back.";
+  if (u.rec && S.info && u.rec !== S.info.recording) {
+    toast("That change was made in recording " + u.rec + ": open it with the Recording box (top) to " + (isRedo ? "redo" : "undo") + " it.", true);
+    return null;
+  }
+  if (u.kind === "bulk") return applyBulk(u, verb, again);
+  if (u.kind === "auto") return applyAuto(u, verb, again);
+  if (u.kind === "workarea") return applyWorkArea(u, verb, again);
+  let moved = false;
   if (!S.frame || S.frame.frame !== u.f) {
     let i = S.queue.findIndex((q) => q.f === u.f);
-    if (i < 0) { await loadQueue(); i = S.queue.findIndex((q) => q.f === u.f); }
-    if (i >= 0) await showFrame(i);
+    if (i < 0) { S.mode = "all"; await loadQueue(); i = S.queue.findIndex((q) => q.f === u.f); }
+    if (i >= 0) { await showFrame(i); moved = true; }
   }
-  if (!S.frame || S.frame.frame !== u.f) { toast("Cannot go back to frame " + u.f, true); return; }
-  S.frame.objects = u.objects; S.frame.how = u.how; S.sel = u.sel;
-  await save(u.state, u.how);
+  if (!S.frame || S.frame.frame !== u.f) { toast("Cannot go back to frame " + u.f + ": it is no longer one of the picked frames. Nothing was changed.", true); return null; }
+  const rev = { f: u.f, objects: clone(S.frame.objects), state: S.frame.state, how: S.frame.how, sel: S.sel, desc: u.desc, rec: u.rec };
+  let undoneSame = 0;
   if (u.also && u.also.length) {
     try {
       const j = await api("/api/undo_same", { frames: u.also });
+      undoneSame = j.undone;
       u.also.forEach((g) => { const q = S.queue.find((x) => x.f === g); if (q) q.state = "pending"; });
-      setStats(j.stats); drawStrip();
-      toast("Undone (frame " + u.f + " and " + j.undone + " same-picture frame" + (j.undone === 1 ? "" : "s") + ")");
+      setStats(j.stats);
     } catch (e) { toast(e.message, true); }
-    return;
   }
-  toast("Undone (frame " + u.f + ")");
+  S.frame.objects = u.objects; S.frame.how = u.how; S.sel = u.sel;
+  const j = await save(u.state, u.how);
+  if (!j) return null;
+  if (j.same && j.same.length) rev.also = j.same;
+  drawStrip();
+  toast(verb + u.desc + " on frame " + u.f + (moved ? " (you are now on that frame)" : "") + "; it is " + (isRedo ? "done again" : "back as it was") + "." +
+    (undoneSame ? " " + plural(undoneSame, "same-picture frame is", "same-picture frames are") + " unchecked guesses again." : "") +
+    (j.same && j.same.length ? " " + plural(j.same.length, "same-picture frame was", "same-picture frames were") + " accepted with it again." : "") +
+    updatedNote(j) + again);
+  return rev;
+}
+async function applyBulk(u, verb, again) {
+  let j;
+  try { j = await withBusy("Putting the labels back ...", () => api("/api/investigate/undo", { token: u.token })); }
+  catch (e) { toast(e.message, true); return null; }
+  setStats(j.stats);
+  INV.dirty = true;
+  await refreshCurrent();
+  if (INV.last && $("modal").dataset.inv === "1" && $("shade").classList.contains("on")) { try { const v = await api("/api/investigate"); INV.last.labels = v.labels; renderInvLabels(v.labels); renderRejectHere(); } catch (e) { /* next time */ } }
+  toast(verb + u.desc + ": " + plural(j.undone, "frame") + (j.frames.length ? " (" + frameSpan(j.frames) + ")" : "") + " " + (j.undone === 1 ? "is" : "are") + " as before." +
+    (j.kept && j.kept.length ? " " + plural(j.kept.length, "frame you changed since was", "frames you changed since were") + " kept as you left " + (j.kept.length === 1 ? "it" : "them") + " (" + frameSpan(j.kept) + ")." : "") +
+    updatedNote(j) + (j.token ? again : ""));
+  return j.token ? { kind: "bulk", token: j.token, frames: j.frames, desc: u.desc, rec: u.rec } : null;
+}
+async function applyAuto(u, verb, again) {
+  // op "unaccept": the frames become unchecked guesses again; "accept": they are accepted without looking again
+  let j;
+  try {
+    j = u.op === "unaccept" ? await withBusy("Taking back the auto-accepted frames ...", () => api("/api/auto_undo", { frames: u.frames }))
+      : await withBusy("Accepting the frames again ...", () => api("/api/auto_accept", { frames: u.frames }));
+  } catch (e) { toast(e.message, true); return null; }
+  const fs = j.frames || [];
+  await loadQueue(); await showFrame(S.idx);
+  toast(verb + u.desc + ": " + plural(fs.length, "frame") + (fs.length ? " (" + frameSpan(fs) + ")" : "") + " " +
+    (u.op === "unaccept" ? (fs.length === 1 ? "is an unchecked guess" : "are unchecked guesses") + " again." : (fs.length === 1 ? "is" : "are") + " accepted without looking again.") + again);
+  return { kind: "auto", op: u.op === "unaccept" ? "accept" : "unaccept", frames: fs, desc: u.desc, rec: u.rec };
 }
 function addAt(x, y) {
+  const cls = S.lastCls;
   change(() => {
-    S.frame.objects.push({ obj: null, cls: S.lastCls, x: x, y: y, heading_deg: null, heading_known: false,
+    S.frame.objects.push({ obj: null, cls: cls, x: x, y: y, heading_deg: null, heading_known: false,
       heading_guess: null, source: "user", status: "corrected", score: null });
     S.sel = S.frame.objects.length - 1;
-  });
+  }, (j) => { const o = S.frame.objects[S.sel]; return "added " + (o ? objWords(o) : "an object (" + cls + ")") + " at " + Math.round(x) + ", " + Math.round(y); },
+  "Z (or Del) takes it back.");
 }
 function setHeading(o, px, py) {
   const h = (Math.atan2(-(py - o.y), px - o.x) * 180 / Math.PI + 360) % 360;
@@ -869,13 +994,15 @@ function hit(p) {
 view.addEventListener("contextmenu", (e) => e.preventDefault());
 view.addEventListener("mousedown", (ev) => {
   if (!S.frame || S.busy) return;
+  if (CLIP.on) { stopClip(true); return; }           // a click on a playing clip only stops it
   const p = imgPos(ev);
   if (S.wa) { waMouseDown(p); return; }
   if (INV.picking) { INV.picking = false; view.classList.remove("hmode"); const i = hit(p); const o = i >= 0 ? S.frame.objects[i] : null;
     investigate(o ? { x: o.x, y: o.y, cls: o.cls } : { x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10, cls: null }); return; }
   if (S.hmode && S.sel >= 0) {
     S.hmode = false;
-    const i = S.sel; change(() => setHeading(S.frame.objects[i], p.x, p.y));
+    const i = S.sel, o = S.frame.objects[i];
+    change(() => setHeading(o, p.x, p.y), () => "set the facing of " + objWords(o) + " to " + Math.round(o.heading_deg) + "\u00b0");
     return;
   }
   // arrow tip of the selected object: drag to turn it
@@ -910,27 +1037,33 @@ window.addEventListener("mousemove", (ev) => {
     draw();
   } else if (S.hmode || S.mag) draw();
 });
-window.addEventListener("mouseup", () => {
+window.addEventListener("mouseup", async () => {
   if (S.wa) { waMouseUp(); return; }
   const d = S.drag; S.drag = null;
   if (!d || !d.moved) return;
   const o = S.frame.objects[d.i];
   if (d.kind === "move") { o.x = Math.round(o.x * 10) / 10; o.y = Math.round(o.y * 10) / 10; markCorrected(o); }
-  S.undo.push({ f: S.frame.frame, objects: d.before, state: S.frame.state, how: S.frame.how, sel: d.i });
+  const desc = d.kind === "move" ? "moved " + objWords(o) + " to " + Math.round(o.x) + ", " + Math.round(o.y)
+    : "set the facing of " + objWords(o) + " to " + Math.round(o.heading_deg) + "\u00b0";
+  const f = S.frame.frame;
+  pushEntry({ f: f, objects: d.before, state: S.frame.state, how: S.frame.how, sel: d.i, desc: desc });
   countEdit();
   renderSide();
-  save(editState(), editHow());
+  const j = await save(editState(), editHow());
+  if (j) toast(cap(desc) + " on frame " + f + ". Z takes it back." + updatedNote(j));
 });
 view.addEventListener("mouseleave", () => { if (S.mag) { S.mouse = null; draw(); } });
-view.addEventListener("dblclick", (ev) => { if (S.wa) return; const p = imgPos(ev); if (hit(p) < 0) addAt(p.x, p.y); });
-strip.addEventListener("click", (ev) => {
+view.addEventListener("dblclick", (ev) => { if (S.wa || CLIP.on) return; const p = imgPos(ev); if (hit(p) < 0) addAt(p.x, p.y); });
+strip.addEventListener("click", async (ev) => {
   const b = strip.getBoundingClientRect();
-  showFrame(Math.floor((ev.clientX - b.left) / b.width * S.queue.length));
+  const from = S.frame ? S.frame.frame : null;
+  await showFrame(Math.floor((ev.clientX - b.left) / b.width * S.queue.length));
+  if (S.frame && from !== null && S.frame.frame !== from) toast("Went to frame " + S.frame.frame + " (" + fmtClock(S.frame.time_s) + "), from frame " + from + ". Nothing was changed; G and " + from + " takes you back.");
 });
 
 // ---------------------------------------------------------------- picture tools: magnifier, brightness, full screen
-function toggleMag() { S.mag = !S.mag; draw(); renderView(); toast(S.mag ? "Magnifier on: a 3x lens follows the mouse (M again: off)." : "Magnifier off."); }
-function cyclePicture() { S.pic = (S.pic + 1) % PICTURE.length; draw(); renderView(); toast("Picture: " + PICTURE[S.pic].name + " (only how it is shown; B again: next)."); }
+function toggleMag() { S.mag = !S.mag; draw(); renderView(); toast(S.mag ? "Magnifier on: a 3x lens follows the mouse over the picture. Only how it is shown; M again turns it off." : "Magnifier off. M turns it on again."); }
+function cyclePicture() { S.pic = (S.pic + 1) % PICTURE.length; draw(); renderView(); toast("Picture shown " + PICTURE[S.pic].name + " (only how it is shown; nothing is saved). B again: " + PICTURE[(S.pic + 1) % PICTURE.length].name + "."); }
 function toggleFull() {
   if (document.fullscreenElement) { document.exitFullscreen().catch(() => {}); return; }
   const el = document.documentElement;
@@ -950,14 +1083,55 @@ function showKeys() {
 }
 $("keysbtn").addEventListener("click", showKeys);
 
+// ---------------------------------------------------------------- short clip (C): about 1 s before and after this frame, over and over
+const CLIP = { on: false, f: null, frames: [], imgs: [], i: 0, timer: null, cache: new Map() };
+function loadPicture(src) { return new Promise((res) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = src; }); }
+async function toggleClip() {
+  if (CLIP.on) { stopClip(true); return; }
+  if (!S.frame || !S.info) return;
+  const f = S.frame.frame, key = S.info.recording + "|" + f;
+  let j = CLIP.cache.get(key);
+  if (!j) {
+    try { j = await withBusy("Reading the video around frame " + f + " ...", () => api("/api/clip?f=" + f)); }
+    catch (e) { toast("The clip could not be read: " + e.message + ". Nothing was changed.", true); return; }
+    CLIP.cache.set(key, j);
+    if (CLIP.cache.size > 6) CLIP.cache.delete(CLIP.cache.keys().next().value);
+  }
+  const imgs = await Promise.all(j.frames.map((x) => loadPicture(x.picture)));
+  if (!S.frame || S.frame.frame !== f) return;                 // moved on meanwhile
+  const ok = j.frames.map((x, k) => [x, imgs[k]]).filter((a) => a[1]);
+  if (!ok.length) { toast("The clip could not be shown. Nothing was changed.", true); return; }
+  Object.assign(CLIP, { on: true, f: f, frames: ok.map((a) => a[0]), imgs: ok.map((a) => a[1]), i: 0 });
+  clearInterval(CLIP.timer);
+  CLIP.timer = setInterval(() => { CLIP.i = (CLIP.i + 1) % CLIP.imgs.length; draw(); }, Math.max(40, j.interval_ms || 100));
+  draw();
+  toast("Playing the video from " + j.before_s.toFixed(1) + " s before to " + j.after_s.toFixed(1) + " s after frame " + f + ", over and over, at its own speed. Only shown: nothing is changed. C again or Esc stops it.");
+}
+function stopClip(say) {
+  clearInterval(CLIP.timer); CLIP.timer = null;
+  const f = CLIP.f; CLIP.on = false; CLIP.frames = []; CLIP.imgs = [];
+  draw();
+  if (say) toast("Clip stopped: back to frame " + f + " with its labels. C plays it again.");
+}
+function drawClipBar() {
+  // in screen pixels: what is playing, and where in the clip
+  const d = S.dpr, W = view.width, fr = CLIP.frames[CLIP.i], n = CLIP.frames.length;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = "rgba(10,12,15,0.8)"; ctx.fillRect(0, 0, W, 26 * d);
+  ctx.fillStyle = fr.dt === 0 ? "#ffb347" : "#e7e9ec"; ctx.font = 13 * d + "px system-ui, sans-serif"; ctx.textBaseline = "middle";
+  const t = fr.dt === 0 ? "frame " + CLIP.f + " (this frame, with its labels)" : (fr.dt > 0 ? "+" : "\u2212") + Math.abs(fr.dt).toFixed(1) + " s";
+  ctx.fillText("Clip: " + t + "   \u00b7   C or Esc stops", 10 * d, 13 * d);
+  ctx.fillStyle = "#6cb6ff"; ctx.fillRect(0, 24 * d, W * (CLIP.i + 1) / n, 2 * d);
+  ctx.textBaseline = "alphabetic";
+}
+
 // ---------------------------------------------------------------- unsure
 async function toggleUnsure(sel) {
   if (sel.status === "unsure") {
-    await change(() => { sel.status = sel.source === "user" ? "corrected" : "confirmed"; });
-    toast("No longer unsure.");
+    await change(() => { sel.status = sel.source === "user" ? "corrected" : "confirmed"; }, "took the unsure mark off " + objWords(sel), "? again or Z puts it back.");
   } else {
-    await change(() => { sel.status = "unsure"; });
-    toast("Marked unsure: this frame stays out of training until you decide (1-9 gives it a type, ? again takes it back, Del rejects it).");
+    await change(() => { sel.status = "unsure"; }, "marked " + objWords(sel) + " unsure: this frame stays out of training until you decide (1-9 gives it a type, Del rejects it)",
+      "? again or Z takes it back.");
   }
 }
 
@@ -978,8 +1152,12 @@ function startWorkArea() {
   $("wamargin").value = cam.settings.margin_px == null ? "" : cam.settings.margin_px;
   $("wamargin").placeholder = Math.round(S.info.robot_px);
   $("wamarginhint").textContent = "blank = one object size (" + Math.round(S.info.robot_px) + " px): room for things reaching in";
+  S.wa.before = { work_area: a.work_area || null, margin_px: cam.settings.margin_px == null ? null : cam.settings.margin_px, ignore_spots: (a.ignore_spots || []).map((x) => x.slice()) };
   S.sel = -1; S.hmode = false;
   $("wabar").classList.add("on");
+  // ignore spots from older versions: shown and removable; new ones are not made (a rejection applies to one frame)
+  $("wa-spots").style.display = S.wa.spots.length ? "" : "none";
+  $("wa-spots").textContent = "Old ignore spots (" + S.wa.spots.length + ")";
   waMode("corners");
   if (S.wa.done) $("wahelp").textContent = "The current area is shown. Click on the picture to start new corners, or switch to Ignore spots.";
   draw();
@@ -989,7 +1167,7 @@ function waMode(m) {
   $("wa-corners").classList.toggle("on", m === "corners"); $("wa-spots").classList.toggle("on", m === "spots");
   $("wahelp").textContent = m === "corners"
     ? "Click the corners of the area to watch (at least 3). Backspace removes the last corner. Enter saves, Esc cancels."
-    : "Click a spot to ignore (a reflection, a blinking light); drag to set its size. Click an ignore spot again to remove it.";
+    : "Ignore spots made by an older version (red circles): guesses inside them are left out. Click one to remove it (Enter saves, Esc keeps them all). New ignore spots are not made any more: to reject a guess, use Reject here in Investigate (Q); to leave something out for good, draw the work area so it is outside.";
 }
 function endWorkArea() { S.wa = null; $("wabar").classList.remove("on"); draw(); }
 function waMouseDown(p) {
@@ -1000,9 +1178,8 @@ function waMouseDown(p) {
     $("wahelp").textContent = w.pts.length < 3 ? "Corner " + w.pts.length + " placed: keep clicking the corners (at least 3)." : w.pts.length + " corners. Enter saves; Backspace removes the last corner.";
   } else {
     const k = w.spots.findIndex((s) => Math.hypot(s[0] - p.x, s[1] - p.y) <= s[2]);
-    if (k >= 0) { w.spots.splice(k, 1); toast("Ignore spot removed."); }
-    else w.spotDrag = { x: p.x, y: p.y, r: Math.max(4, S.info.robot_px * 0.6) };
-    if (w.spotDrag) w.spots.push([w.spotDrag.x, w.spotDrag.y, w.spotDrag.r]);
+    if (k >= 0) { const sp = w.spots.splice(k, 1)[0]; toast("Ignore spot at " + Math.round(sp[0]) + ", " + Math.round(sp[1]) + " removed from the editor (not saved yet): Enter saves, Esc cancels and keeps it."); }
+    else toast("No old ignore spot there: nothing changed. New ignore spots are not made any more; use Reject here in Investigate (Q) to reject a guess on its frame.");
   }
   draw();
 }
@@ -1024,26 +1201,48 @@ async function saveWorkArea(whole) {
   const m = $("wamargin").value.trim();
   const body = { camera: w.cam, work_area: poly, margin_px: m === "" ? null : parseFloat(m), ignore_spots: w.spots,
     image_size: [S.info.width, S.info.height] };
+  const before = w.before, removed = (before.ignore_spots || []).length - w.spots.length;
   endWorkArea();
+  const after = { work_area: poly, margin_px: body.margin_px, ignore_spots: w.spots };
   try {
-    const j = await withBusy("Saving the work area ...", () => api("/api/studio/workarea", body));
-    toast(poly ? "Work area saved: guesses outside it are left out." : "Saved: the whole picture is looked at.");
-    if (j.reopened) { await waitLoaded("Applying the work area: following the guesses again ..."); const s = await studioState(); if (s) renderStudio(s); await init(); }
+    await putWorkArea(w.cam, after, "Saving the work area ...");
+    const camName = ST.state && ST.state.camera && ST.state.camera.name ? " for camera " + ST.state.camera.name : "";
+    pushEntry({ kind: "workarea", cam: w.cam, to: before, desc: "the work area change" + camName });
+    toast((poly ? "Work area saved" + camName + ": guesses outside it and its margin are left out" : "Saved" + camName + ": the whole picture is looked at") +
+      (removed > 0 ? "; " + plural(removed, "old ignore spot") + " removed" : "") + ". Your labels are kept. Z puts the old one back.");
   } catch (e) { toast(e.message, true); }
+}
+// save a camera's work area and open the recording again with it (when it is the one open)
+async function putWorkArea(cam, a, what) {
+  const j = await withBusy(what, () => api("/api/studio/workarea", { camera: cam, work_area: a.work_area, margin_px: a.margin_px, ignore_spots: a.ignore_spots || [],
+    image_size: [S.info.width, S.info.height] }));
+  if (j.reopened) { await waitLoaded("Applying the work area: following the guesses again ..."); const s = await studioState(); if (s) renderStudio(s); await init(); }
+  else { const s = await studioState(); if (s) renderStudio(s); }
+  return j;
+}
+async function applyWorkArea(u, verb, again) {
+  const s = ST.state, c = s && s.camera;
+  const now = c && c.key === u.cam ? { work_area: c.settings.work_area || null, margin_px: c.settings.margin_px == null ? null : c.settings.margin_px, ignore_spots: (c.settings.ignore_spots || []).map((x) => x.slice()) } : null;
+  if (!now) { toast("That work area belongs to another camera: open one of its recordings to " + (verb === "Redid: " ? "redo" : "undo") + " it. Nothing was changed.", true); return null; }
+  try { await putWorkArea(u.cam, u.to, "Putting the work area back ..."); } catch (e) { toast(e.message, true); return null; }
+  toast(verb + u.desc + ": the work area is " + (verb === "Redid: " ? "as you saved it" : "as it was before") + " (" + (u.to.work_area ? plural(u.to.work_area.length, "corner") : "the whole picture") +
+    (u.to.ignore_spots && u.to.ignore_spots.length ? ", " + plural(u.to.ignore_spots.length, "old ignore spot") : "") + "). Your labels are kept." + again);
+  return { kind: "workarea", cam: u.cam, to: now, desc: u.desc, rec: u.rec };
 }
 function waKey(ev) {
   const k = ev.key;
   if (k === "Enter") { ev.preventDefault(); saveWorkArea(false); }
-  else if (k === "Escape" || k === "w" || k === "W") { ev.preventDefault(); endWorkArea(); toast("Work area not changed."); }
+  else if (k === "Escape" || k === "w" || k === "W") { ev.preventDefault(); endWorkArea(); toast("Work area editor closed: nothing was changed. W opens it again."); }
   else if (k === "Backspace" || k === "Delete") {
     ev.preventDefault();
-    if (S.wa.mode === "corners" && !S.wa.done) S.wa.pts.pop(); else if (S.wa.mode === "spots") S.wa.spots.pop();
+    if (S.wa.mode === "corners" && !S.wa.done) { S.wa.pts.pop(); $("wahelp").textContent = S.wa.pts.length + " corner" + (S.wa.pts.length === 1 ? "" : "s") + " left (not saved yet): keep clicking corners, Enter saves, Esc cancels."; }
+    else if (S.wa.mode === "spots" && S.wa.spots.length) { S.wa.spots.pop(); toast("Last old ignore spot removed from the editor (not saved yet): Enter saves, Esc cancels and keeps it."); }
     draw();
   }
 }
 $("wa-corners").addEventListener("click", () => waMode("corners"));
 $("wa-spots").addEventListener("click", () => waMode("spots"));
-$("wa-cancel").addEventListener("click", () => { endWorkArea(); toast("Work area not changed."); });
+$("wa-cancel").addEventListener("click", () => { endWorkArea(); toast("Work area editor closed: nothing was changed. W opens it again."); });
 $("wa-save").addEventListener("click", () => saveWorkArea(false));
 $("wa-whole").addEventListener("click", () => saveWorkArea(true));
 $("wamargin").addEventListener("input", () => draw());
@@ -1055,32 +1254,46 @@ document.addEventListener("click", (ev) => { const b = ev.target.closest && ev.t
 window.addEventListener("keydown", async (ev) => {
   if ($("tour").classList.contains("on")) { tourKey(ev); return; }
   if (ev.target && (ev.target.tagName === "INPUT" || ev.target.tagName === "TEXTAREA" || ev.target.tagName === "SELECT")) {
-    if (ev.key === "Escape" && $("shade").classList.contains("on") && !TOUR.lockedModal) { ev.target.blur(); if ($("modal").classList.contains("wide")) closeInvestigate(); else closeModal(); }
+    if (ev.key === "Escape" && $("shade").classList.contains("on") && !TOUR.lockedModal) { ev.target.blur(); if ($("modal").dataset.inv === "1") closeInvestigate(); else closeModal(); }
     return;
   }
-  if ($("shade").classList.contains("on")) { if (ev.key === "Escape" && !TOUR.lockedModal) { if ($("modal").classList.contains("wide")) closeInvestigate(); else closeModal(); } return; }
+  if ($("shade").classList.contains("on")) { if (ev.key === "Escape" && !TOUR.lockedModal) { if ($("modal").dataset.inv === "1") closeInvestigate(); else closeModal(); } return; }
   if ($("loading").classList.contains("on")) { if (ev.key === "Escape" && $("loadstop").classList.contains("on")) $("loadstop").click(); return; }
   if (ev.target && ev.target.tagName === "BUTTON") ev.target.blur();
   if (S.wa) { waKey(ev); return; }
   const k = ev.key;
+  if (CLIP.on) {
+    // the clip: C or Esc stops it; any other key stops it and then does its own job
+    if (k === "c" || k === "C" || k === "Escape") { ev.preventDefault(); stopClip(true); return; }
+    stopClip(false);
+  }
   if ((k === "v" || k === "V") && !ev.ctrlKey && !ev.metaKey && !ev.altKey) { ev.preventDefault(); toggleFull(); return; }
   if (!S.frame && !["ArrowLeft", "ArrowRight"].includes(k)) return;
   const sel = S.sel >= 0 ? S.frame.objects[S.sel] : null;
-  if ((k === "z" || k === "Z") && !ev.altKey) { ev.preventDefault(); await undo(); return; }
+  if ((k === "z" || k === "Z") && !ev.altKey) { ev.preventDefault(); if (S.busy) return; if (ev.shiftKey) await redo(); else await undo(); return; }
+  if ((k === "y" || k === "Y") && (ev.ctrlKey || ev.metaKey) && !ev.altKey) { ev.preventDefault(); if (!S.busy) await redo(); return; }
   if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
   if (S.busy && k !== "Escape") { ev.preventDefault(); return; }
   switch (k) {
     case "Enter": ev.preventDefault(); await accept(); break;
-    case "ArrowRight": ev.preventDefault(); await showFrame(S.idx + (ev.shiftKey ? 10 : 1)); break;
-    case "ArrowLeft": ev.preventDefault(); await showFrame(S.idx - (ev.shiftKey ? 10 : 1)); break;
+    case "ArrowRight": case "ArrowLeft": {
+      ev.preventDefault();
+      const step = (k === "ArrowRight" ? 1 : -1) * (ev.shiftKey ? 10 : 1);
+      const want = S.idx + step;
+      if (want < 0 && S.idx === 0) { toast("Already at the first frame of this list (frame " + S.frame.frame + ")."); break; }
+      if (want > S.queue.length - 1 && S.idx === S.queue.length - 1) { toast("Already at the last frame of this list (frame " + S.frame.frame + ")."); break; }
+      await showFrame(want); break;
+    }
     case "Delete": case "Backspace":
       ev.preventDefault();
-      if (!sel) { toast("Click an object first."); break; }
-      await change(() => {
-        if (sel.source === "user" && sel.status !== "rejected") { S.frame.objects.splice(S.sel, 1); S.sel = -1; }
-        else if (sel.status === "rejected") sel.status = sel._was || "corrected";
-        else { sel._was = sel.status; sel.status = "rejected"; }
-      });
+      if (!sel) { toast("Click an object first, then Del rejects it. Nothing was changed."); break; }
+      if (sel.source === "user" && sel.status !== "rejected") {
+        await change(() => { S.frame.objects.splice(S.sel, 1); S.sel = -1; }, "removed " + objWords(sel) + " (you had added it)", "Z puts it back.");
+      } else if (sel.status === "rejected") {
+        await change(() => { sel.status = sel._was || "corrected"; }, "brought back " + objWords(sel), "Del or Z rejects it again.");
+      } else {
+        await change(() => { sel._was = sel.status; sel.status = "rejected"; }, "rejected " + objWords(sel) + " (this frame only)", "Del again or Z brings it back.");
+      }
       break;
     case "n": case "N": {
       const p = S.mouse || { x: S.info.width / 2, y: S.info.height / 2 };
@@ -1088,95 +1301,143 @@ window.addEventListener("keydown", async (ev) => {
     }
     case "1": case "2": case "3": case "4": case "5": case "6": case "7": case "8": case "9": {
       const cls = CLASSES[+k - 1];
-      if (!cls) { toast("There is no object type " + k + "."); break; }
+      if (!cls) { toast("There is no object type " + k + " (the types are 1-" + CLASSES.length + "). Nothing was changed."); break; }
+      const was = S.lastCls;
       S.lastCls = cls;
-      if (!sel) { toast("New objects will be " + cls + ". Click an object to change its type."); break; }
-      await change(() => { sel.cls = cls; if (sel.status === "unsure") sel.status = "corrected"; markCorrected(sel); }); break;
+      if (!sel) { toast("New objects (N) will be " + cls + (was && was !== cls ? " (were " + was + ")" : "") + ". No label changed; click an object first to change its type."); break; }
+      const old = sel.cls;
+      await change(() => { sel.cls = cls; if (sel.status === "unsure") sel.status = "corrected"; markCorrected(sel); },
+        old === cls ? "confirmed #" + sel.obj + " as " + cls : "made #" + sel.obj + " a " + cls + " (was " + old + ")"); break;
     }
     case "?": {
       ev.preventDefault();
       let o = sel;
-      if (!o) { const i = S.mouse ? hit(S.mouse) : -1; if (i < 0) { toast("Click an object first (or point at it), then press ?."); break; } S.sel = i; o = S.frame.objects[i]; }
+      if (!o) { const i = S.mouse ? hit(S.mouse) : -1; if (i < 0) { toast("Click an object first (or point at it), then press ?. Nothing was changed."); break; } S.sel = i; o = S.frame.objects[i]; }
       await toggleUnsure(o); break;
     }
     case "h": case "H":
-      if (!sel) { const i = S.mouse ? hit(S.mouse) : -1; if (i < 0) { toast("Click an object first."); break; } S.sel = i; }
-      S.hmode = true; draw(); renderSide(); toast("Click where it is facing."); break;
+      if (!sel) { const i = S.mouse ? hit(S.mouse) : -1; if (i < 0) { toast("Click an object first, then H. Nothing was changed."); break; } S.sel = i; }
+      S.hmode = true; draw(); renderSide(); toast("Click where it is facing (Esc: never mind)."); break;
     case "f": case "F": {
-      if (!sel) { toast("Click an object first."); break; }
-      const hd = headingOf(sel); if (!hd) { toast("No heading to flip: press H to set one."); break; }
-      await change(() => { sel.heading_deg = (hd.h + 180) % 360; sel.heading_known = true; sel.heading_guess = null; markCorrected(sel); });
+      if (!sel) { toast("Click an object first, then F. Nothing was changed."); break; }
+      const hd = headingOf(sel); if (!hd) { toast("No heading to flip on " + objWords(sel) + ": press H to set one. Nothing was changed."); break; }
+      await change(() => { sel.heading_deg = (hd.h + 180) % 360; sel.heading_known = true; sel.heading_guess = null; markCorrected(sel); },
+        "turned the facing of " + objWords(sel) + " around (now " + Math.round((hd.h + 180) % 360) + "°)", "F again or Z turns it back.");
       break;
     }
     case "u": case "U": {
-      if (!sel) { toast("Click an object first."); break; }
-      await change(() => { sel.heading_deg = null; sel.heading_known = false; sel.heading_guess = null; markCorrected(sel); });
-      toast("Facing: unknown (saved as unknown; the model won't learn a direction from this one).");
+      if (!sel) { toast("Click an object first, then U. Nothing was changed."); break; }
+      await change(() => { sel.heading_deg = null; sel.heading_known = false; sel.heading_guess = null; markCorrected(sel); },
+        "set the facing of " + objWords(sel) + " to unknown (the model won't learn a direction from this one)");
       break;
     }
     case "m": case "M": toggleMag(); break;
     case "k": case "K": showKeys(); break;
     case "b": case "B": cyclePicture(); break;
     case "w": case "W": startWorkArea(); break;
-    case "q": case "Q": investigate(invTarget()); break;
+    case "c": case "C": toggleClip(); break;
+    case "q": case "Q":
+      if (!ev.shiftKey && INV.back) { await backToInvestigation(); break; }
+      investigate(invTarget()); break;
     case "e": case "E": await markEmpty(); break;
     case "Tab":
       ev.preventDefault();
       if (S.frame.objects.length) { S.sel = (S.sel + (ev.shiftKey ? -1 + S.frame.objects.length : 1)) % S.frame.objects.length; draw(); renderSide(); }
       break;
-    case "Escape": S.hmode = false; S.sel = -1; if (INV.picking) { INV.picking = false; toast("Never mind."); } draw(); renderSide(); break;
+    case "Escape": S.hmode = false; S.sel = -1; if (INV.picking) { INV.picking = false; toast("Never mind: nothing was investigated or changed."); } draw(); renderSide(); break;
     case "i": case "I": {
-      if (!sel) { toast("Click an object first."); break; }
+      if (!sel) { toast("Click an object first, then I. Nothing was changed."); break; }
       const v = prompt("New number for object #" + sel.obj + " (it keeps this number in the frames after):", sel.obj);
-      if (v === null || !/^\d+$/.test(v.trim())) break;
-      await change(() => { sel.obj = parseInt(v, 10); markCorrected(sel); }); break;
+      if (v === null) { toast("Number not changed."); break; }
+      if (!/^\d+$/.test(v.trim())) { toast("\"" + v + "\" is not a whole number: the number was not changed.", true); break; }
+      const old = sel.obj, nv = parseInt(v, 10);
+      await change(() => { sel.obj = nv; markCorrected(sel); }, "renumbered #" + old + " to #" + nv + " (it keeps #" + nv + " in the frames after)"); break;
     }
     case "g": case "G": {
       const v = prompt("Go to frame number:"); if (v === null) break;
-      const f = parseInt(v, 10); let best = 0;
+      const f = parseInt(v, 10);
+      if (isNaN(f)) { toast("\"" + v + "\" is not a frame number: you stay on frame " + S.frame.frame + ".", true); break; }
+      const from = S.frame.frame; let best = 0;
       S.queue.forEach((q, i) => { if (Math.abs(q.f - f) < Math.abs(S.queue[best].f - f)) best = i; });
-      await showFrame(best); break;
+      await showFrame(best);
+      const got = S.frame.frame;
+      toast((got === f ? "Went to frame " + f : "Frame " + f + " isn't in this list; went to the nearest one, frame " + got) + " (" + fmtClock(S.frame.time_s) + "), from frame " + from + ". Nothing was changed; G and " + from + " takes you back.");
+      break;
     }
   }
 });
 
 // ---------------------------------------------------------------- buttons
+const LIST_NAMES = { next: "Most useful next", all: "All picked", low: "Low confidence", spot: "Spot check", unsure: "Unsure" };
 document.querySelectorAll("#tabs button").forEach((b) => b.addEventListener("click", async () => {
   if (!S.info) return;
+  const was = S.mode;
   S.mode = b.dataset.mode;                       // undo history is kept across lists
+  let drew = null;
   if (S.mode === "spot" && !(S.stats && S.stats.spot.sample)) {
-    try { await withBusy("Drawing a random sample ...", () => api("/api/spot/draw", {})); } catch (e) { toast(e.message, true); }
+    try { drew = await withBusy("Drawing a random sample ...", () => api("/api/spot/draw", {})); } catch (e) { toast(e.message, true); }
   }
   const cur = S.frame ? S.frame.frame : null;
   await loadQueue();
-  if (S.mode === "unsure" && !S.queue.length) toast("No unsure objects. Press ? on an object you can't identify.");
-  if (!S.queue.length) { S.frame = null; draw(); renderSide(); drawStrip(); b.blur(); return; }
+  const back = was !== S.mode ? " " + LIST_NAMES[was] + " (top) takes you back." : "";
+  if (!S.queue.length) {
+    S.frame = null; draw(); renderSide(); drawStrip(); b.blur();
+    toast((S.mode === "unsure" ? "No unsure objects: press ? on an object you can't identify to list it here." : "The list " + LIST_NAMES[S.mode] + " is empty.") + " Nothing was changed." + back);
+    return;
+  }
   let i = S.queue.findIndex((q) => q.f === cur);
   if (i < 0) i = Math.max(0, firstToDo(0));
   await showFrame(i);
   b.blur();
+  if (was !== S.mode || drew) toast("Now in the list " + LIST_NAMES[S.mode] + " (" + plural(S.queue.length, "frame") + "), on frame " + S.frame.frame + "." +
+    (drew ? " Drew a random sample of " + plural(drew.sample.length, "high-confidence frame") + " to check; nothing else changed." : " Your labels are unchanged.") + back);
 }));
 $("spotdraw").addEventListener("click", async () => {
-  if (!confirm("Draw a new random sample? Frames already checked keep their labels.")) return;
-  try { await withBusy("Drawing a random sample ...", () => api("/api/spot/draw", {})); await loadQueue(); await showFrame(Math.max(0, firstToDo(0))); } catch (e) { toast(e.message, true); }
+  if (!confirm("Draw a new random sample? The current sample is replaced (it can't be brought back); frames already checked keep their labels.")) { toast("No new sample drawn: nothing changed."); return; }
+  try {
+    const j = await withBusy("Drawing a random sample ...", () => api("/api/spot/draw", {}));
+    await loadQueue(); await showFrame(Math.max(0, firstToDo(0)));
+    toast("New Spot check sample: " + plural(j.sample.length, "frame") + ", in the list Spot check. The old sample is replaced and can't be brought back; every label is unchanged.");
+  } catch (e) { toast(e.message, true); }
 });
 $("autoacc").addEventListener("click", async () => {
   const st = S.stats, sp = st.spot;
   let msg = "Accept the guesses on " + st.high_pending + " high-confidence frames without looking at them?\n\n";
   msg += sp.checked ? "Spot check so far: " + sp.agree + " of " + sp.checked + " frames were right (" + Math.round(100 * sp.agreement) + "%). " + spotRange(sp) : "There is no spot check yet, so their accuracy is unknown. Do the spot check first?";
-  if (!confirm(msg)) return;
-  try { const j = await withBusy("Accepting the high-confidence frames ...", () => api("/api/auto_accept", {})); toast(j.accepted + " frames accepted."); await loadQueue(); await showFrame(S.idx); } catch (e) { toast(e.message, true); }
+  msg += "\n\nZ (or Undo auto-accept) takes them back.";
+  if (!confirm(msg)) { toast("Nothing accepted: no frame changed."); return; }
+  try {
+    const j = await withBusy("Accepting the high-confidence frames ...", () => api("/api/auto_accept", {}));
+    if (j.frames && j.frames.length) pushEntry({ kind: "auto", op: "unaccept", frames: j.frames, desc: "accepting " + plural(j.frames.length, "high-confidence frame") + " without looking" });
+    await loadQueue(); await showFrame(S.idx);
+    toast("Accepted the guesses on " + plural(j.accepted, "high-confidence frame") + " without looking" + (j.frames && j.frames.length ? " (" + frameSpan(j.frames) + ", dark green in the bar)" : "") + ". Z or Undo auto-accept (right) takes them back.");
+  } catch (e) { toast(e.message, true); }
 });
 $("autoundo").addEventListener("click", async () => {
-  if (!confirm("Take back every auto-accepted frame (they become unchecked guesses again)? Frames accepted for having the same picture as one you accepted stay (Z takes those back).")) return;
-  try { const j = await withBusy("Taking back the auto-accepted frames ...", () => api("/api/auto_undo", {})); toast(j.undone + " frames are guesses again."); await loadQueue(); await showFrame(S.idx); } catch (e) { toast(e.message, true); }
+  if (!confirm("Take back every auto-accepted frame (they become unchecked guesses again)? Frames accepted for having the same picture as one you accepted stay (Z takes those back).")) { toast("Nothing taken back: no frame changed."); return; }
+  try {
+    const j = await withBusy("Taking back the auto-accepted frames ...", () => api("/api/auto_undo", {}));
+    if (j.frames && j.frames.length) pushEntry({ kind: "auto", op: "accept", frames: j.frames, desc: "taking back " + plural(j.frames.length, "auto-accepted frame") });
+    await loadQueue(); await showFrame(S.idx);
+    toast(plural(j.undone, "auto-accepted frame is an unchecked guess", "auto-accepted frames are unchecked guesses") + " again" + (j.frames && j.frames.length ? " (" + frameSpan(j.frames) + ")" : "") + "." + (j.undone ? " Z accepts them again." : ""));
+  } catch (e) { toast(e.message, true); }
 });
 $("reset").addEventListener("click", async () => {
-  if (!S.frame) return;
-  pushUndo(); await save("pending"); await showFrame(S.idx);
+  if (!S.frame || S.busy) return;
+  const f = S.frame.frame;
+  if (S.frame.state === "pending") { toast("Frame " + f + " already shows the guesses: nothing changed."); return; }
+  pushUndo("the reset to the guesses");
+  const j = await save("pending");
+  await showFrame(S.idx);
+  if (j) toast("Frame " + f + " is back to the guesses: your changes on it are set aside." + updatedNote(j) + " Z brings them back.");
 });
 $("thr").addEventListener("change", async () => {
-  try { const j = await api("/api/settings", { low_threshold: parseFloat($("thr").value) }); setStats(j.stats); if (S.mode === "low") { await loadQueue(); await showFrame(Math.max(0, firstToDo(0))); } } catch (e) { toast(e.message, true); }
+  const old = S.stats ? S.stats.low_threshold : null;
+  try {
+    const j = await api("/api/settings", { low_threshold: parseFloat($("thr").value) }); setStats(j.stats);
+    if (S.mode === "low") { await loadQueue(); await showFrame(Math.max(0, firstToDo(0))); }
+    toast("Low confidence is now below " + j.stats.low_threshold + (old != null ? " (was " + old + ")" : "") + ": " + plural(j.stats.low, "picked frame") + " count as low confidence. No label changed; type " + old + " in the box to go back.");
+  } catch (e) { toast(e.message, true); }
   $("thr").blur();
 });
 window.addEventListener("resize", () => { if (S.info) { fit(); draw(); drawStrip(); } if ($("tour").classList.contains("on")) tourShow(); });
@@ -1233,26 +1494,34 @@ async function waitLoaded(first) {
     }
   } finally { S.waiting = false; hideLoading(); }
 }
+function recName(id) { const r = ST.state && (ST.state.recordings || []).find((x) => x.id === id); return r ? r.name + (r.camera ? " [" + r.camera + "]" : "") : id; }
+function modelName(m) { return !m || m === "none" ? "no model (motion and tracking only)" : "model " + m; }
 async function studioOpen(rec, model) {
+  const was = ST.state && ST.state.current ? Object.assign({}, ST.state.current) : {};
   showLoading("Opening ...", 0, 0);
   try { await api("/api/studio/open", { rec: rec, model: model }); } catch (e) {
     hideLoading();
     if (e.data && e.data.missing) { await locateRecording(e.data.missing); return; }
-    toast(e.message, true); return;
+    toast(e.message + ". You stay where you were; nothing was changed.", true);
+    if (ST.state) renderStudio(ST.state);          // the boxes show what is open again
+    return;
   }
   await waitLoaded(model && model !== "none" ? "Switching the guesses to model " + model + " ..." : "Opening ...");
   const s = await studioState(); if (s) renderStudio(s);
   await init();
+  const now = s && s.current ? s.current : { rec: rec, model: model };
+  if (was.rec && was.rec !== now.rec) toast("Now on recording " + recName(now.rec) + ", guesses from " + modelName(now.model) + ". Each recording keeps its own labels; the Recording box (top) switches back to " + recName(was.rec) + ".");
+  else if (was.rec && (was.model || "none") !== (now.model || "none")) toast("Guesses now from " + modelName(now.model) + " (were from " + modelName(was.model) + "). Your labels are unchanged; only unconfirmed guesses changed. Guesses from (top) switches back.");
   await offerWorkArea();
 }
-function modal(html, locked) { closeMenu(); $("modal").classList.remove("wide"); $("modal").innerHTML = html; $("modal").scrollTop = 0; $("shade").classList.add("on"); TOUR.lockedModal = !!locked; }
+function modal(html, locked) { closeMenu(); $("modal").classList.remove("wide"); $("modal").dataset.inv = ""; $("modal").innerHTML = html; $("modal").scrollTop = 0; $("shade").classList.add("on"); TOUR.lockedModal = !!locked; }
 // the "More" menu of the studio bar
 function closeMenu() { const m = $("smenu"); if (m) m.classList.remove("on"); }
 $("smore").addEventListener("click", (ev) => { ev.stopPropagation(); $("smenu").classList.toggle("on"); });
 $("smenu").addEventListener("click", () => closeMenu());
 document.addEventListener("mousedown", (ev) => { if (!ev.target.closest || !ev.target.closest(".morewrap")) closeMenu(); });
 function closeModal() { $("shade").classList.remove("on"); TOUR.lockedModal = false; }
-$("shade").addEventListener("click", (e) => { if (e.target === $("shade") && !TOUR.lockedModal) { if ($("modal").classList.contains("wide")) closeInvestigate(); else closeModal(); } });
+$("shade").addEventListener("click", (e) => { if (e.target === $("shade") && !TOUR.lockedModal) { if ($("modal").dataset.inv === "1") closeInvestigate(); else closeModal(); } });
 $("srec").addEventListener("change", () => studioOpen($("srec").value, $("smodel").value));
 $("smodel").addEventListener("change", () => studioOpen($("srec").value, $("smodel").value));
 $("strain").addEventListener("click", () => {
@@ -1267,7 +1536,8 @@ $("strain").addEventListener("click", () => {
     '<p class="muted">You can keep labelling while it trains. When it finishes, it appears in "Guesses from". Your labels are not changed.</p>' +
     '<div class="actions"><button class="sbtn" onclick="closeModal()">Cancel</button><button class="sbtn primary" id="tgo">Start training</button></div>');
   $("tgo").onclick = async () => {
-    try { await withBusy("Starting the training ...", () => api("/api/studio/train", { minutes: parseFloat($("tmin").value) })); closeModal(); toast("Training started."); pollStudio(); }
+    try { const j = await withBusy("Starting the training ...", () => api("/api/studio/train", { minutes: parseFloat($("tmin").value) })); closeModal();
+      toast("Training " + (j.model ? "model " + j.model + " " : "") + "started in the background (the bar at the top shows how far). Keep labelling. Your labels are not changed; when it is done, the new model is offered in Guesses from, and nothing switches by itself."); pollStudio(); }
     catch (e) { toast(e.message, true); }
   };
 });
@@ -1326,7 +1596,8 @@ async function showModels() {
     '<div class="actions"><a class="sbtn" href="/report" target="_blank">Open the full report</a><button class="sbtn" onclick="closeModal()">Close</button></div>');
   $("modal").classList.add("wide");
   $("mshowfailed").onchange = async () => {
-    try { await api("/api/studio/show_failed", { on: $("mshowfailed").checked }); const st = await studioState(); if (st) renderStudio(st); } catch (e) { toast(e.message, true); }
+    try { await api("/api/studio/show_failed", { on: $("mshowfailed").checked }); const st = await studioState(); if (st) renderStudio(st);
+      toast($("mshowfailed").checked ? "Failed models are now shown here and in Guesses from. Untick the box to hide them again." : "Failed models are hidden again. Tick the box to show them."); } catch (e) { toast(e.message, true); }
     showModels();
   };
   $("modal").querySelectorAll(".mdel").forEach((b) => b.onclick = async () => {
@@ -1334,7 +1605,7 @@ async function showModels() {
     if (!confirm("Delete model " + id + "? Its folder and its point on the learning curve are removed. Your labels are not touched. This can't be undone.")) return;
     try {
       const j = await withBusy("Deleting model " + id + " ...", () => api("/api/studio/delete_model", { model: id }));
-      toast("Model " + id + " deleted.");
+      toast("Model " + id + " deleted from the project (this can't be taken back, as the question said). Your labels are untouched.");
       if (j.reopened) { closeModal(); await waitLoaded("Model " + id + " was giving the guesses: switching to no model ..."); const st = await studioState(); if (st) renderStudio(st); await init(); return; }
       const st = await studioState(); if (st) renderStudio(st);
     } catch (e) { toast(e.message, true); }
@@ -1422,7 +1693,8 @@ $("sclasses").addEventListener("click", () => {
     try {
       const j = await withBusy("Saving the object types ...", () => api("/api/studio/classes", { classes: types }));
       closeModal(); await waitLoaded("Saving the object types: opening the recording again ...");
-      const st = await studioState(); renderStudio(st); await init(); toast("Object types saved.");
+      const st = await studioState(); renderStudio(st); await init();
+      toast("Object types saved: " + types.map((c, i) => (i + 1) + " " + c.name).join(", ") + ". Labels already made keep their types. Object types (under More) changes them again.");
       if (j.note) await infoModal("About the guesses", "<p>" + esc(j.note) + "</p>");
     } catch (e) { $("shade").classList.contains("on") && $("cmsg") ? $("cmsg").textContent = e.message : toast(e.message, true); }
   };
@@ -1443,7 +1715,7 @@ $("sadd").addEventListener("click", () => {
     catch (e) { toast(e.message, true); return; }
     closeModal();
     if (j.converting) { await waitConvert(); return; }
-    toast(j.added ? j.added + " recording" + (j.added === 1 ? "" : "s") + " added." : "Nothing new: that recording is already in the project.");
+    toast(j.added ? plural(j.added, "recording") + " added to the project (listed in the Recording box at the top). Nothing was copied or changed; the page can't remove a recording yet." : "Nothing new: that recording is already in the project. Nothing was changed.");
     await afterAdd();
   };
 });
@@ -1468,7 +1740,7 @@ async function waitConvert() {
   } finally { S.waiting = false; hideLoading(); }
   api("/api/studio/convert/clear", {}).catch(() => {});
   if (!j) return;
-  if (j.status === "stopped") { toast("Stopped: no recording was made from the video."); return; }
+  if (j.status === "stopped") { toast("Stopped: no recording was made from the video, and the project is unchanged."); return; }
   if (j.status === "failed") { toast("The video could not be made into a recording: " + j.error, true); return; }
   const r = j.result;
   const size = r.size[0] + " x " + r.size[1] + " pixels" + (r.scaled_from ? " (made smaller from " + r.scaled_from[0] + " x " + r.scaled_from[1] + " so labelling stays quick)" : "");
@@ -1483,7 +1755,7 @@ async function waitConvert() {
 $("swork").addEventListener("click", startWorkArea);
 // training ended: say so in a box that stays until it is read (a toast is gone too soon for this)
 async function trainingFinished(job) {
-  if ($("shade").classList.contains("on") || $("tour").classList.contains("on")) { toast(job.message, job.status === "failed"); return; }
+  if ($("shade").classList.contains("on") || $("tour").classList.contains("on")) { toast(job.message + " Your labels are unchanged; Learning curve shows the new model, and Guesses from switches to it.", job.status === "failed"); return; }
   const ok = job.status !== "failed";
   modal("<h3>" + (ok ? (job.warning ? "Training finished: the model finds nothing yet" : "Training finished") : "Training stopped") + "</h3>" +
     '<div class="' + (ok && !job.warning ? "okbox" : "warnbox") + '">' + esc(job.message) + "</div>" +
@@ -1549,7 +1821,10 @@ function whatsNewScreen(s) {
       "<p>Your labels and settings are unchanged. New in this version:</p><ul>" +
       "<li><b>Unsure</b> (<kbd>?</kbd>): mark an object you can't identify. Its frame is kept out of training until you decide; the <b>Unsure</b> tab lists them.</li>" +
       "<li><b>Same picture</b>: when you accept a frame, the picked frames within 10 s with the same picture and the same objects are accepted with it (<kbd>Z</kbd> takes them back).</li>" +
-      "<li><b>Work area</b> (<kbd>W</kbd>): mark the part of the picture to look in, plus spots to ignore. Guesses outside it are left out.</li>" +
+      "<li><b>Work area</b> (<kbd>W</kbd>): mark the part of the picture to look in. Guesses outside it are left out.</li>" +
+      "<li><b>A message for every action</b>: what changed, where, and the key that takes it back. <kbd>Z</kbd> undoes, <kbd>Shift+Z</kbd> redoes.</li>" +
+      "<li><b>Investigate</b> (<kbd>Q</kbd>) in three parts kept apart; after a jump, <kbd>Q</kbd> goes back to it. <b>Reject here</b> replaces \"Ignore this spot\": a rejection applies to one frame and teaches the tracker. Older ignore spots keep working; Work area shows them, and removes them.</li>" +
+      "<li><b>Clip</b> (<kbd>C</kbd>): about a second before and after the frame, over and over.</li>" +
       "<li><b>Magnifier</b> (<kbd>M</kbd>), <b>picture brightness</b> (<kbd>B</kbd>), <b>full screen</b> (<kbd>V</kbd>).</li>" +
       "<li>Object types can have a height that <b>varies</b>: those are not passed between cameras.</li>" +
       "<li>New recordings get fewer near-identical frames to label.</li>" +
@@ -1561,7 +1836,7 @@ function whatsNewScreen(s) {
       try {
         const j = await withBusy("Saving ...", () => api("/api/studio/whats_new", { set_varies: !!($("wnvaries") && $("wnvaries").checked) }));
         closeModal();
-        if (j.changed && j.changed.length) toast("Height set to \"it varies\" for " + j.changed.join(" and ") + ".");
+        if (j.changed && j.changed.length) toast("Height set to \"it varies\" for " + j.changed.join(" and ") + ". Object types (under More) changes it back.");
         resolve(true);
       } catch (e) { toast(e.message, true); }
     };
@@ -1580,7 +1855,8 @@ async function offerWorkArea() {
     $("wamark").onclick = () => { closeModal(); startWorkArea(); resolve(); };
     $("wask").onclick = async () => {
       closeModal();
-      try { await api("/api/studio/workarea", { camera: s.camera.key, skip: true }); const st = await studioState(); if (st) renderStudio(st); } catch (e) { toast(e.message, true); }
+      try { await api("/api/studio/workarea", { camera: s.camera.key, skip: true }); const st = await studioState(); if (st) renderStudio(st);
+        toast("The whole picture is looked at. Nothing was changed; the Work area button (W) marks an area any time."); } catch (e) { toast(e.message, true); }
       resolve();
     };
   });
@@ -1588,7 +1864,8 @@ async function offerWorkArea() {
 
 // ---------------------------------------------------------------- investigate a spot (Q)
 // Looks at one spot across the whole recording: is it an object, or part of the background?
-const INV = { last: null, picking: false, cls: null, dirty: false, clipTimer: null };
+// back: set after a jump from an investigation ({frame}: where you were): Q then returns to it
+const INV = { last: null, picking: false, cls: null, dirty: false, clipTimer: null, back: null, pending: null };
 function invTarget() {
   // the object under the mouse, else the selected object, else the spot under the mouse
   if (!S.frame) return null;
@@ -1603,11 +1880,11 @@ function invButton() {
   const o = S.sel >= 0 ? S.frame.objects[S.sel] : null;
   if (o) { investigate({ x: o.x, y: o.y, cls: o.cls }); return; }
   INV.picking = true; view.classList.add("hmode");
-  toast("Click the spot on the picture to investigate (Esc: never mind).");
+  toast("Click the spot on the picture to investigate (Esc: never mind). Looking changes nothing.");
 }
 async function investigate(t) {
   if (!S.frame || !t) { toast("Point at an object or spot on the picture, then press Q."); return; }
-  INV.cls = t.cls; INV.dirty = false;
+  INV.cls = t.cls; INV.dirty = false; INV.back = null;
   const frame = S.frame.frame;
   let stopped = false;
   const stop = () => { stopped = true; api("/api/investigate/stop", {}).catch(() => {}); };
@@ -1624,7 +1901,7 @@ async function investigate(t) {
     }
   } catch (e) { S.waiting = false; hideLoading(); toast(e.message, true); return; }
   S.waiting = false; hideLoading();
-  if (stopped || j.status === "stopped") { toast("Investigate stopped."); return; }
+  if (stopped || j.status === "stopped") { toast("Investigate stopped: nothing was looked at to the end, and nothing was changed."); return; }
   if (j.status === "failed") { toast("Investigate could not finish: " + j.error, true); return; }
   INV.last = Object.assign(j, { cls: t.cls });
   $("invlast").style.display = "";
@@ -1655,51 +1932,168 @@ function fmtT(t) { return t.toFixed(1) + " s"; }
 function renderInvestigate() {
   const j = INV.last, res = j.result;
   clearInterval(INV.clipTimer);
-  const studio = ST.on && ST.state && ST.state.camera;
-  let acts = "";
-  if (res.kind === "background" || res.kind === "background_visited") {
-    acts += studio ? '<button class="sbtn" id="invignore">Ignore this spot</button><span class="muted">Only if you are sure it is part of the background, not an object that stayed still: leaves out every guess inside the dashed circle from now on (it is added to the work area\'s ignore spots; your labels are kept).</span>'
-      : '<span class="muted">"Ignore this spot" is part of the studio (start.py); it isn\'t available here.</span>';
-  }
+  INV.pending = null;
+  // 2. look around: every button here only takes you to a frame
+  let jumps = "";
   (res.moves || []).forEach((m) => {
-    if (m.came_from) acts += '<button class="jump" data-f="' + m.came_from.frame + '">Came from ' + Math.round(m.came_from.x) + ", " + Math.round(m.came_from.y) + " at " + fmtT(m.came_from.time_s) + "</button>";
-    if (m.went_to) acts += '<button class="jump" data-f="' + m.went_to.frame + '">Went to ' + Math.round(m.went_to.x) + ", " + Math.round(m.went_to.y) + " at " + fmtT(m.went_to.time_s) + "</button>";
+    if (m.came_from) jumps += '<button class="jump" data-f="' + m.came_from.frame + '">Came from ' + Math.round(m.came_from.x) + ", " + Math.round(m.came_from.y) + " at " + fmtT(m.came_from.time_s) + "</button>";
+    if (m.went_to) jumps += '<button class="jump" data-f="' + m.went_to.frame + '">Went to ' + Math.round(m.went_to.x) + ", " + Math.round(m.went_to.y) + " at " + fmtT(m.went_to.time_s) + "</button>";
   });
   if (res.kind === "appears" && res.stretch) {
-    acts += '<button class="jump" data-f="' + res.stretch.frame_from + '">Appears (' + fmtT(res.stretch.time_s) + ')</button><button class="jump" data-f="' + res.stretch.frame_to + '">Last seen (' + fmtT(res.stretch.time_to_s) + ")</button>";
+    jumps += '<button class="jump" data-f="' + res.stretch.frame_from + '">Appears (' + fmtT(res.stretch.time_s) + ')</button><button class="jump" data-f="' + res.stretch.frame_to + '">Last seen (' + fmtT(res.stretch.time_to_s) + ")</button>";
   }
-  const runs = (res.runs || []).slice(0, 12).map((rn) => '<li>' + fmtT(rn.time_s) + (rn.time_to_s > rn.time_s ? " to " + fmtT(rn.time_to_s) : "") + ": something different here <button class=\"jump\" data-f=\"" + rn.frame_from + "\">Jump</button></li>").join("");
+  const runs = (res.runs || []).slice(0, 12).map((rn) => '<li>' + fmtT(rn.time_s) + (rn.time_to_s > rn.time_s ? " to " + fmtT(rn.time_to_s) : "") + ": something different here <button class=\"jump\" data-f=\"" + rn.frame_from + "\">Jump to " + rn.frame_from + "</button></li>").join("");
   const thumbs = res.thumbs.map((t) => '<div class="thumb' + (t.changed ? " chg" : "") + (t.frame === res.frame ? " now" : "") + '" data-f="' + t.frame + '" title="Frame ' + t.frame + ': click to go there"><img src="' + t.picture + '" alt="">' + t.time_s.toFixed(0) + " s</div>").join("");
   const clips = res.clips.map((c, i) => '<div class="clip" data-f="' + c.frame_from + '" title="Click to go there"><img data-clip="' + i + '" src="' + c.pictures[0] + '" alt="">' + fmtT(c.time_s) + ": " + esc(c.what) + "</div>").join("");
+  const labels = j.labels || [];
+  const lf = [...new Set(labels.map((l) => l.frame))];
   modal('<h3>Investigate: the spot at ' + Math.round(res.x) + ", " + Math.round(res.y) + " (frame " + res.frame + ")</h3>" +
-    '<div class="verdict ' + res.kind + '"><b>' + esc(res.headline) + "</b>" + esc(res.detail) + (acts ? '<div class="acts">' + acts + "</div>" : "") + "</div>" +
+    '<section class="invpart found" id="invfound"><h4 class="parth">1. What we found <span class="muted">· read only: nothing here changes anything</span></h4>' +
+    '<div class="verdict ' + res.kind + '"><b>' + esc(res.headline) + "</b>" + esc(res.detail) + "</div>" +
     '<div class="invrow">' + invPic("This frame", res.now_picture, res) + invPic("How it usually looks (the usual picture, made from the whole recording)", res.background, res) +
     (ST.on ? '<div class="invpic" id="invref"><div class="muted">Second camera: looking ...</div></div>' : "") + "</div>" +
+    '<p class="invsub">Labels already made at this spot: ' + (labels.length ? plural(labels.length, "label") + " on " + plural(lf.length, "frame") + " (" + frameSpan(lf) + "), listed in part 3." : "none yet (only guesses).") + "</p></section>" +
+    '<section class="invpart look" id="invlook"><h4 class="parth">2. Look around <span class="muted">· these only take you to a frame and change nothing. Q brings you back here.</span></h4>' +
+    (jumps ? '<div class="verdict" style="border-left-color:var(--accent)"><div class="acts" style="margin-top:0">' + jumps + "</div></div>" : "") +
     "<h4>How much the spot changed</h4>" + invChart(res) +
     '<div class="invsub">The blue line is how different the spot looks from usual, over the whole recording; above the dashed line counts as something there (shaded). Click the line to go to that moment.</div>' +
     (runs ? '<h4>Moments something different was here (' + res.n_runs + ")</h4><ul>" + runs + "</ul>" : "") +
-    (clips ? "<h4>The biggest changes</h4><div class=\"clips\">" + clips + '</div><div class="invsub">Each clip plays the frames around one change, over and over.</div>' : "") +
-    "<h4>The spot over time</h4><div class=\"thumbs\">" + thumbs + '</div><div class="invsub">The spot at ' + res.thumbs.length + " moments spread over the recording; an orange edge means it looks different from usual, white is this frame. Click one to go there.</div>" +
+    (clips ? "<h4>The biggest changes</h4><div class=\"clips\">" + clips + '</div><div class="invsub">Each clip plays the frames around one change, over and over. Click one to go there.</div>' : "") +
+    "<h4>The spot over time</h4><div class=\"thumbs\">" + thumbs + '</div><div class="invsub">The spot at ' + res.thumbs.length + " moments spread over the recording; an orange edge means it looks different from usual, white is this frame. Click one to go there.</div></section>" +
+    '<section class="invpart change" id="invchange"><h4 class="parth">3. Change things <span class="muted">· these change saved labels. Each button says how far it reaches, shows what will change and asks first; Z takes it back.</span></h4>' +
+    '<div class="reach"><button class="sbtn danger" id="invhere">Reject here</button><span class="muted" id="invheretxt">Looking at frame ' + res.frame + " ...</span></div>" +
     '<h4>Labels already made at this spot</h4><div id="invlabels"></div>' +
+    '<div id="invpreview"></div></section>' +
     '<div class="actions"><button class="sbtn" id="invclose">Close (Esc)</button></div>');
-  $("modal").classList.add("wide");
-  $("invclose").onclick = closeInvestigate;
-  $("modal").querySelectorAll("[data-f]").forEach((el) => { el.onclick = () => jumpTo(+el.dataset.f); });
+  $("modal").classList.add("wide"); $("modal").dataset.inv = "1";
+  $("invclose").onclick = () => closeInvestigate();
+  $("invlook").querySelectorAll("[data-f]").forEach((el) => { el.onclick = () => jumpTo(+el.dataset.f, "inv"); });
   const ch = $("invchart");
   if (ch) ch.onclick = (ev) => {
     const b = ch.getBoundingClientRect(), L = res.line, tmax = L.times[L.times.length - 1] || 1;
     const t = ((ev.clientX - b.left) / b.width * 900 - 58) / (900 - 68) * tmax;
     let best = 0; L.times.forEach((tt, i) => { if (Math.abs(tt - t) < Math.abs(L.times[best] - t)) best = i; });
-    jumpTo(L.frames[best]);
+    jumpTo(L.frames[best], "inv");
   };
-  if ($("invignore")) $("invignore").onclick = ignoreSpot;
+  $("invhere").onclick = rejectHerePreview;
   let tick = 0;
   INV.clipTimer = setInterval(() => {
     tick++;
     $("modal").querySelectorAll("img[data-clip]").forEach((im) => { const c = res.clips[+im.dataset.clip]; im.src = c.pictures[tick % c.pictures.length]; });
   }, 160);
-  renderInvLabels(j.labels || []);
+  renderInvLabels(labels);
+  renderRejectHere();
   if (ST.on) loadReferee(res);
+}
+// "Reject here": what it reaches on the investigated frame (guesses inside the circle; your own objects are kept)
+async function hereObjects() {
+  const res = INV.last.result;
+  let objs;
+  if (S.frame && S.frame.frame === res.frame) objs = S.frame.objects;
+  else { try { objs = (await api("/api/frame?f=" + res.frame)).objects; } catch (e) { objs = []; } }
+  const near = objs.filter((o) => o.status !== "rejected" && Math.hypot(o.x - res.x, o.y - res.y) <= res.r);
+  return { hit: near.filter((o) => o.source !== "user"), yours: near.filter((o) => o.source === "user") };
+}
+async function renderRejectHere() {
+  const res = INV.last.result, h = await hereObjects();
+  const txt = $("invheretxt"); if (!txt) return;
+  $("invhere").textContent = h.hit.length ? "Reject here: " + (h.hit.length === 1 ? "guess " + objWords(h.hit[0]) : plural(h.hit.length, "guess", "guesses")) + " on frame " + res.frame + " only"
+    : "Reject here: nothing guessed on frame " + res.frame + "; remember the empty spot";
+  txt.textContent = "Changes frame " + res.frame + " only, never the other frames. The tracker remembers what the empty spot looks like: later guesses here that look like it are pushed down hard; something that looks different (an object passing over) is still found." +
+    (h.yours.length ? " Your own object" + (h.yours.length === 1 ? " " + objWords(h.yours[0]) + " is" : "s are") + " kept (Del removes it)." : "");
+}
+function renderInvLabels(labels) {
+  const box = $("invlabels"); if (!box) return;
+  if (!labels.length) { box.innerHTML = '<p class="muted">No labels made at this spot yet (only guesses): nothing for these buttons to change.</p>'; return; }
+  const rows = labels.map((l, i) => '<tr><td><input type="checkbox" class="invck" data-i="' + i + '" checked></td><td><button class="jump" data-f="' + l.frame + '">' + l.frame + "</button></td><td>" + fmtT(l.time_s) +
+    '</td><td><span class="swatch" style="background:' + colorOf(l.cls) + '"></span> ' + esc(l.cls) + "</td><td>" + esc(l.status === "confirmed" && l.state === "auto" ? (l.how === "same" ? "same picture" : "auto") : l.status) + "</td><td>#" + l.obj + "</td></tr>").join("");
+  box.innerHTML = '<table><tr><th></th><th>Frame <span class="muted">(click: go there)</span></th><th>Time</th><th>Type</th><th>Status</th><th>Object</th></tr>' + rows + "</table>" +
+    '<div class="muted">Untick any label you want to leave alone. Each button below changes only the ticked labels it names.</div>' +
+    '<div class="reach"><select id="invcls">' + CLASSES.map((c, i) => '<option value="' + esc(c) + '">' + (i + 1) + " " + esc(c) + "</option>").join("") + "</select>" +
+    '<button class="sbtn danger" id="invtype"></button></div>' +
+    '<div class="reach"><button class="sbtn danger" id="invreject"></button></div>' +
+    '<div class="reach"><button class="sbtn danger" id="invunsure"></button></div>';
+  box.querySelectorAll("[data-f]").forEach((el) => { el.onclick = () => jumpTo(+el.dataset.f, "inv"); });
+  const pick = () => [...box.querySelectorAll(".invck")].filter((c) => c.checked).map((c) => labels[+c.dataset.i]);
+  const reach = () => {
+    const t = pick(), cls = $("invcls").value;
+    const would = { type: t.filter((l) => l.status !== "rejected" && (l.cls !== cls || l.status === "unsure")),
+      reject: t.filter((l) => l.status !== "rejected"), unsure: t.filter((l) => l.status !== "unsure") };
+    const span = (ls) => " (" + frameSpan([...new Set(ls.map((l) => l.frame))]) + ")";
+    const set = (id, ls, words, none) => { const b = $(id); b.textContent = ls.length ? words(ls.length) + span(ls) : none; b.disabled = !ls.length; };
+    set("invtype", would.type, (n) => "Change " + plural(n, "label") + " to " + cls, "Change to " + cls + ": nothing to change");
+    set("invreject", would.reject, (n) => n === labels.length && n > 1 ? "Reject all " + n + " labels at this spot" : "Reject " + plural(n, "label") + " at this spot", "Reject: nothing to change");
+    set("invunsure", would.unsure, (n) => n === labels.length && n > 1 ? "Mark all " + n + " labels unsure" : "Mark " + plural(n, "label") + " unsure", "Mark unsure: nothing to change");
+  };
+  box.querySelectorAll(".invck").forEach((c) => c.addEventListener("change", reach));
+  $("invcls").addEventListener("change", reach);
+  reach();
+  const items = () => pick().map((l) => ({ frame: l.frame, obj: l.obj }));
+  $("invtype").onclick = () => changeAllPreview(items(), "type", $("invcls").value);
+  $("invreject").onclick = () => changeAllPreview(items(), "reject");
+  $("invunsure").onclick = () => changeAllPreview(items(), "unsure");
+}
+// preview + confirm, inside the warning box, before anything changes saved work
+function showPreview(title, rows, more, note, onYes) {
+  const p = $("invpreview"); if (!p) return;
+  const tr = rows.map((r) => "<tr><td>" + r.frame + "</td><td>#" + r.obj + "</td><td>" + esc(r.cls) + (r.new_cls !== r.cls ? " → <b>" + esc(r.new_cls) + "</b>" : "") +
+    "</td><td>" + esc(r.status) + (r.new_status !== r.status ? " → <b>" + esc(r.new_status) + "</b>" : "") + "</td></tr>").join("");
+  p.innerHTML = "<b>" + esc(title) + "</b>" + (tr ? "<table><tr><th>Frame</th><th>Object</th><th>Type</th><th>Status</th></tr>" + tr + "</table>" : "") +
+    (more ? '<div class="muted">... and ' + plural(more, "more label") + ".</div>" : "") + (note ? '<p class="muted">' + esc(note) + "</p>" : "") +
+    '<div class="actions"><button class="sbtn" id="invno">Cancel: change nothing</button><button class="sbtn danger" id="invyes">Yes, change it</button></div>';
+  p.classList.add("on");
+  p.scrollIntoView({ block: "nearest" });
+  $("invno").onclick = () => { p.classList.remove("on"); p.innerHTML = ""; toast("Cancelled: nothing was changed."); };
+  $("invyes").onclick = () => { p.classList.remove("on"); p.innerHTML = ""; onYes(); };
+}
+const CHANGE_WORDS = { type: (cls) => "changed to " + cls, reject: () => "rejected", unsure: () => "marked unsure" };
+async function changeAllPreview(items, action, cls) {
+  if (!items.length) { toast("Tick at least one label first. Nothing was changed."); return; }
+  let p;
+  try { p = await api("/api/investigate/change", { items: items, action: action, cls: cls, preview: true }); } catch (e) { toast(e.message, true); return; }
+  if (!p.changed) { toast("Nothing to change: the ticked labels already are " + CHANGE_WORDS[action](cls) + "."); return; }
+  const shown = p.items.slice(0, 8);
+  showPreview("This changes " + plural(p.changed, "label") + " on " + plural(p.frames.length, "frame") + " (" + frameSpan(p.frames) + "): " + CHANGE_WORDS[action](cls) + ".",
+    shown, p.changed - shown.length, "Other frames and labels are not touched. One step: Z takes all of it back.", () => changeAll(items, action, cls));
+}
+async function changeAll(items, action, cls) {
+  let j;
+  try { j = await withBusy("Changing the labels at this spot ...", () => api("/api/investigate/change", { items: items, action: action, cls: cls })); }
+  catch (e) { toast(e.message, true); return; }
+  if (!j.changed) { toast("Nothing to change: they already are " + CHANGE_WORDS[action](cls) + "."); return; }
+  const res = INV.last.result, where = "at the spot (" + Math.round(res.x) + ", " + Math.round(res.y) + ")";
+  const desc = CHANGE_WORDS[action](cls).replace(/^(\w+)/, "$1 " + plural(j.changed, "label")) + " " + where;
+  pushEntry({ kind: "bulk", token: j.token, frames: j.frames, desc: desc });
+  INV.dirty = true;
+  setStats(j.stats);
+  toast(cap(desc) + " on " + plural(j.frames.length, "frame") + " (" + frameSpan(j.frames) + ")." + updatedNote(j) + " Z takes it back.");
+  try { const v = await api("/api/investigate"); INV.last.labels = v.labels; renderInvLabels(v.labels); } catch (e) { /* the list refreshes next time */ }
+  renderRejectHere();
+  await refreshCurrent();
+}
+async function rejectHerePreview() {
+  const res = INV.last.result;
+  let p;
+  try { p = await api("/api/investigate/reject_here", { frame: res.frame, x: res.x, y: res.y, r: res.r, preview: true }); } catch (e) { toast(e.message, true); return; }
+  showPreview(p.items.length ? "This rejects " + plural(p.items.length, "guess", "guesses") + " on frame " + res.frame + " only, and the tracker remembers the empty spot." :
+    "Nothing is guessed at this spot on frame " + res.frame + ": no label changes. The tracker remembers the empty spot.", p.items, 0,
+    "Every other frame keeps its labels and guesses as they are; later guesses here that look like the empty spot are pushed down. Z takes it back.", rejectHere);
+}
+async function rejectHere() {
+  const res = INV.last.result;
+  let j;
+  try { j = await withBusy("Rejecting the guess here ...", () => api("/api/investigate/reject_here", { frame: res.frame, x: res.x, y: res.y, r: res.r })); }
+  catch (e) { toast(e.message, true); return; }
+  const where = "at the spot (" + Math.round(res.x) + ", " + Math.round(res.y) + ")";
+  const desc = (j.rejected.length ? "rejected " + (j.rejected.length === 1 ? "guess #" + j.rejected[0] : plural(j.rejected.length, "guess", "guesses")) + " " + where : "remembered the empty spot " + where);
+  pushEntry({ kind: "bulk", token: j.token, frames: j.rejected.length ? [j.frame] : [], desc: desc + " (frame " + j.frame + ")" });
+  INV.dirty = true;
+  setStats(j.stats);
+  toast(cap(desc) + " on frame " + j.frame + " only" + (j.rejected.length ? "; the empty spot is remembered" : "") + ": later guesses there that look like it are pushed down, something that looks different is still found." +
+    (j.yours.length ? " Your own object #" + j.yours.join(", #") + " there is kept (Del removes it)." : "") + updatedNote(j) + " Z takes it back.");
+  renderRejectHere();
+  try { const v = await api("/api/investigate"); INV.last.labels = v.labels; renderInvLabels(v.labels); } catch (e) { /* next time */ }
+  await refreshCurrent();
 }
 async function loadReferee(res) {
   let r;
@@ -1708,35 +2102,6 @@ async function loadReferee(res) {
   const box = $("invref"); if (!box) return;
   if (!r.available) { box.innerHTML = '<div class="muted" style="max-width:260px"><b>Second camera</b><br>' + esc(r.reason) + "</div>"; return; }
   box.innerHTML = '<div class="frame wide"><img src="' + r.picture + '" alt=""></div><span style="max-width:258px">' + esc(r.text) + "</span>";
-}
-function renderInvLabels(labels) {
-  const box = $("invlabels"); if (!box) return;
-  if (!labels.length) { box.innerHTML = '<p class="muted">No labels made at this spot yet (only guesses).</p>'; return; }
-  const rows = labels.map((l, i) => '<tr><td><input type="checkbox" class="invck" data-i="' + i + '" checked></td><td><button class="jump" data-f="' + l.frame + '">' + l.frame + "</button></td><td>" + fmtT(l.time_s) +
-    '</td><td><span class="swatch" style="background:' + colorOf(l.cls) + '"></span> ' + esc(l.cls) + "</td><td>" + esc(l.status === "confirmed" && l.state === "auto" ? (l.how === "same" ? "same picture" : "auto") : l.status) + "</td><td>#" + l.obj + "</td></tr>").join("");
-  box.innerHTML = '<table><tr><th></th><th>Frame</th><th>Time</th><th>Type</th><th>Status</th><th>Object</th></tr>' + rows + "</table>" +
-    '<div class="row"><span>For the ticked labels:</span> <select id="invcls">' + CLASSES.map((c, i) => '<option value="' + esc(c) + '">' + (i + 1) + " " + esc(c) + "</option>").join("") + "</select>" +
-    '<button class="sbtn" id="invtype">Change all to this type</button><button class="sbtn" id="invreject">Reject all</button><button class="sbtn" id="invunsure">Mark all unsure</button>' +
-    '<span class="muted">One step: Z takes it back.</span></div>';
-  box.querySelectorAll("[data-f]").forEach((el) => { el.onclick = () => jumpTo(+el.dataset.f); });
-  const pick = () => [...box.querySelectorAll(".invck")].filter((c) => c.checked).map((c) => labels[+c.dataset.i]).map((l) => ({ frame: l.frame, obj: l.obj }));
-  $("invtype").onclick = () => changeAll(pick(), "type", $("invcls").value);
-  $("invreject").onclick = () => changeAll(pick(), "reject");
-  $("invunsure").onclick = () => changeAll(pick(), "unsure");
-}
-async function changeAll(items, action, cls) {
-  if (!items.length) { toast("Tick at least one label."); return; }
-  let j;
-  try { j = await withBusy("Changing the labels at this spot ...", () => api("/api/investigate/change", { items: items, action: action, cls: cls })); }
-  catch (e) { toast(e.message, true); return; }
-  if (!j.changed) { toast("Nothing to change: they already are."); return; }
-  S.undo.push({ kind: "bulk", token: j.token, frames: j.frames });
-  INV.dirty = true;
-  setStats(j.stats);
-  const what = action === "type" ? "changed to " + cls : action === "reject" ? "rejected" : "marked unsure";
-  toast(j.changed + " label" + (j.changed > 1 ? "s" : "") + " on " + j.frames.length + " frame" + (j.frames.length > 1 ? "s" : "") + " " + what + " (Z takes it back)" + (j.updated ? "; guesses updated on " + j.updated + " later frames" : "") + ".");
-  try { const v = await api("/api/investigate"); INV.last.labels = v.labels; renderInvLabels(v.labels); } catch (e) { /* the list refreshes next time */ }
-  await refreshCurrent();
 }
 // the list and the frame on screen again from the app (after a change made elsewhere, e.g. Investigate's change all)
 async function refreshCurrent() {
@@ -1749,47 +2114,52 @@ async function refreshCurrent() {
     draw(); renderSide(); drawStrip();
   } catch (e) { /* shown next time the frame changes */ }
 }
-async function closeInvestigate() {
+// close the investigation window. quiet: closed by a jump (the jump says so)
+async function closeInvestigate(quiet) {
   clearInterval(INV.clipTimer);
-  $("modal").classList.remove("wide");
+  $("modal").classList.remove("wide"); $("modal").dataset.inv = "";
   closeModal();
+  if (!quiet) { INV.back = null; toast("Investigation closed: closing changes nothing. \"Back to the last investigation\" (right) opens it again; Q now investigates the spot under the mouse."); }
   if (INV.dirty) { INV.dirty = false; const f = S.frame ? S.frame.frame : null; await loadQueue(); let i = S.queue.findIndex((q) => q.f === f); await showFrame(Math.max(0, i)); }
 }
-async function jumpTo(f) {
-  await closeInvestigate();
+// go to frame f (or the nearest picked one). from "inv": from an investigation (Q returns to it); "timeline": from the track timeline
+async function jumpTo(f, from) {
+  const origin = S.frame ? S.frame.frame : null, wasMode = S.mode;
+  await closeInvestigate(true);
+  if (from !== "inv" && $("shade").classList.contains("on")) closeModal();
   if (!S.queue.length || !S.queue.some((q) => q.f === f)) {
     if (S.mode !== "all") { S.mode = "all"; await loadQueue(); }
   }
-  if (!S.queue.length) return;
+  if (!S.queue.length) { toast("There are no picked frames to go to. Nothing was changed.", true); return; }
   let best = 0;
   S.queue.forEach((q, i) => { if (Math.abs(q.f - f) < Math.abs(S.queue[best].f - f)) best = i; });
   await showFrame(best);
   const got = S.queue[best].f;
-  toast(got === f ? "Frame " + f + ". \"Back to the last investigation\" (right) returns to it." :
-    "Frame " + f + " wasn't picked for labelling; showing the nearest picked frame, " + got + ". \"Back to the last investigation\" returns to it.");
+  const went = "Jumped to frame " + got + " (" + fmtClock(S.frame.time_s) + ")" + (got === f ? "" : ", the nearest picked frame to " + f + " (that one wasn't picked for labelling)") +
+    (wasMode !== S.mode ? ", in the list All picked" : "") + ". Nothing was changed.";
+  if (from === "inv") {
+    INV.back = { frame: origin, mode: wasMode };
+    toast(went + " Investigation closed: press Q to go back to it" + (origin !== null && origin !== got ? " (and to frame " + origin + ")" : "") + ".");
+  } else toast(went + (origin !== null && origin !== got ? " G and " + origin + " takes you back." : ""));
 }
-async function ignoreSpot() {
-  const res = INV.last.result, cam = ST.state.camera;
-  await closeInvestigate();
-  try {
-    const j = await withBusy("Saving the ignore spot ...", () => api("/api/studio/ignore_spot", { camera: cam.key, x: res.x, y: res.y, r: res.r }));
-    toast("Ignore spot added: guesses inside it are left out. Your labels are kept; Work area (W) shows or removes it.");
-    if (j.reopened) { await waitLoaded("Applying the ignore spot: following the guesses again ..."); const s = await studioState(); if (s) renderStudio(s); await init(); }
-  } catch (e) { toast(e.message, true); }
-}
-async function undoBulk(u) {
-  try {
-    const j = await withBusy("Taking back the change ...", () => api("/api/investigate/undo", { token: u.token }));
-    setStats(j.stats);
-    const f = S.frame ? S.frame.frame : null;
-    await loadQueue(); const i = S.queue.findIndex((q) => q.f === f); await showFrame(Math.max(0, i));
-    toast("Undone: the labels on " + j.undone + " frame" + (j.undone === 1 ? "" : "s") + " are back as they were." +
-      (j.kept && j.kept.length ? " " + j.kept.length + " frame" + (j.kept.length === 1 ? " you changed since was" : "s you changed since were") + " kept as you left " + (j.kept.length === 1 ? "it." : "them.") : ""));
-  } catch (e) { toast(e.message, true); }
+// Q after a jump: back to the frame you were on, and the investigation window
+async function backToInvestigation() {
+  const b = INV.back; INV.back = null;
+  if (!INV.last) return;
+  if (b && b.frame !== null && (!S.frame || S.frame.frame !== b.frame)) {
+    if (b.mode && b.mode !== S.mode) { S.mode = b.mode; await loadQueue(); }
+    let i = S.queue.findIndex((q) => q.f === b.frame);
+    if (i < 0 && S.mode !== "all") { S.mode = "all"; await loadQueue(); i = S.queue.findIndex((q) => q.f === b.frame); }
+    if (i >= 0) await showFrame(i);
+  }
+  try { const v = await api("/api/investigate"); if (v.status === "done") INV.last.labels = v.labels; } catch (e) { /* show what we have */ }
+  renderInvestigate();
+  toast("Back to the investigation of the spot at " + Math.round(INV.last.result.x) + ", " + Math.round(INV.last.result.y) + (S.frame ? ", on frame " + S.frame.frame : "") + ". Nothing was changed.");
 }
 $("invbtn").addEventListener("click", invButton);
 $("invlast").addEventListener("click", async () => {
   if (!INV.last) return;
+  if (INV.back) { await backToInvestigation(); return; }        // after a jump: back to where you were, too
   try { const v = await api("/api/investigate"); if (v.status === "done") INV.last.labels = v.labels; } catch (e) { /* show what we have */ }
   renderInvestigate();
 });
@@ -1821,7 +2191,7 @@ async function showTimeline() {
     '<div class="actions"><button class="sbtn" onclick="closeModal()">Close (Esc)</button></div>');
   $("modal").classList.add("wide");
   const sv = $("tlsvg");
-  if (sv) sv.onclick = (ev) => { const b = sv.getBoundingClientRect(); const x = (ev.clientX - b.left) / b.width * W; jumpTo(Math.max(0, Math.min(n, Math.round((x - L) / (W - L - R) * n)))); };
+  if (sv) sv.onclick = (ev) => { const b = sv.getBoundingClientRect(); const x = (ev.clientX - b.left) / b.width * W; jumpTo(Math.max(0, Math.min(n, Math.round((x - L) / (W - L - R) * n))), "timeline"); };
 }
 $("tlbtn").addEventListener("click", showTimeline);
 
@@ -1909,11 +2279,12 @@ $("sopen").addEventListener("click", () => {
 async function switchProject(folder) {
   closeModal();
   try { await withBusy("Opening the project ...", () => api("/api/studio/switch", { folder: folder })); } catch (e) { toast(e.message, true); return; }
-  S.undo = []; INV.last = null; $("invlast").style.display = "none";
+  S.undo = []; S.redo = []; INV.last = null; INV.back = null; $("invlast").style.display = "none";
   let s = await studioState();
   if (s && s.loading) await waitLoaded("Opening the project ...");
   s = await studioState(); if (s) renderStudio(s);
   await afterOpen(s);
+  if (s) toast("Now in the project " + s.project.name + " (" + s.project.folder + "). The project you were in is unchanged; start the studio with its folder to go back to it.");
 }
 async function afterOpen(s) {
   // the current recording may be missing (a shared project on another computer): ask where it is
@@ -1938,7 +2309,7 @@ function locateRecording(m) {
     const done = async (j) => {
       const still = (j.missing || []).find((x) => x.id === m.id);
       if (still) { $("lcmsg").textContent = "Still not found. " + (j.found && j.found.length ? j.found.length + " other recording(s) were found." : ""); return; }
-      closeModal(); toast("Found it" + (j.found && j.found.length > 1 ? " (and " + (j.found.length - 1) + " more)" : "") + ".");
+      closeModal(); toast("Found it" + (j.found && j.found.length > 1 ? " (and " + (j.found.length - 1) + " more)" : "") + ": the project now looks for it in the folder you gave. Its labels are unchanged; pick it again to point it somewhere else.");
       const s = await studioState(); if (s) renderStudio(s);
       resolve(true);
       await studioOpen(m.id, (s && s.current && s.current.model) || "none");
@@ -1947,7 +2318,7 @@ function locateRecording(m) {
     $("lcsearch").onclick = async () => {
       try { done(await withBusy("Searching for the recordings ...", () => api("/api/studio/relink", { folder: $("lcdir").value }))); } catch (e) { $("lcmsg").textContent = e.message; }
     };
-    $("lcno").onclick = () => { closeModal(); toast("Pick another recording above, or locate this one later by picking it again."); resolve(false); };
+    $("lcno").onclick = () => { closeModal(); toast("Not located: nothing changed. Pick another recording above, or locate this one later by picking it again."); resolve(false); };
   });
 }
 
@@ -1956,8 +2327,8 @@ function locateRecording(m) {
 const TOUR = { steps: [], i: 0, lockedModal: false, done: null };
 const TOUR_STEPS = [
   { sel: "#brand", title: "Welcome", text: "A short tour of the screen: what each part does, which ones are safe to try, and which change saved work. Arrow keys or the buttons move through it; Esc ends it." },
-  { sel: "#view", title: "The picture", kind: "changes", text: "Circles are the computer's guesses. Drag one to move it, N adds an object, Del rejects a guess, ? marks one you can't identify. Press Enter when every guess on the frame is right. Your labels are saved with every change; Z undoes." },
-  { sel: "#tabs button[data-mode=next]", title: "Most useful next", kind: "safe", text: "The frames not finished yet, least confident guesses first: your time goes where it helps most. It also takes frames from each part of the training split in turn (learning, picking, scoring), so a model can be trained early. Switching lists never changes labels." },
+  { sel: "#view", title: "The picture", kind: "changes", text: "Circles are the computer's guesses. Drag one to move it, N adds an object, Del rejects a guess, ? marks one you can't identify. Press Enter when every guess on the frame is right. Your labels are saved with every change, and a short message at the bottom says what changed and how to take it back: Z undoes, Shift+Z redoes. C plays a short clip around the frame when a still picture isn't enough." },
+  { sel: "#tabs button[data-mode=next]", title: "Most useful next", kind: "safe", text: "The frames not finished yet: first the ones the tracker asks you to look at (two lookalikes it can't tell apart; the reason shows above the picture), then the least confident guesses: your time goes where it helps most. It also takes frames from each part of the training split in turn (learning, picking, scoring), so a model can be trained early. Switching lists never changes labels." },
   { sel: "#tabs button[data-mode=all]", title: "All picked frames", kind: "safe", text: "Every frame picked for labelling, in time order." },
   { sel: "#tabs button[data-mode=low]", title: "Low confidence", kind: "safe", text: "Only the frames whose guesses are below the confidence level set on the right." },
   { sel: "#tabs button[data-mode=spot]", title: "Spot check", kind: "safe", text: "A random sample of the high-confidence frames. Checking them tells you how often the guesses are right, before you accept the rest without looking." },
@@ -1970,16 +2341,16 @@ const TOUR_STEPS = [
   { sel: "#smore", title: "More", kind: "safe", text: "Object types, Time saved, Share project and Open shared project: the next steps show each." },
   { sel: "#sclasses", title: "Object types", kind: "changes", text: "The types you label, their keys and colours, whether they have a front, and their height for the second camera. Saving changes the project's settings." },
   { sel: "#sadd", title: "Add recording", kind: "changes", text: "Adds a recording folder, or a two-camera session, to the project. Nothing is copied: the video stays where it is." },
-  { sel: "#swork", title: "Work area", kind: "changes", text: "Mark the part of the picture to look in (and spots to ignore). Guesses outside it are left out; your labels are kept." },
+  { sel: "#swork", title: "Work area", kind: "changes", text: "Mark the part of the picture to look in. Guesses outside it are left out; your labels are kept. Ignore spots from an older version are shown there and can be removed. Z takes a saved change back." },
   { sel: "#stime", title: "Time saved", kind: "safe", text: "How long a frame takes with each model, how many frames were accepted without looking, and the time that saved. Download it as a table for a report." },
   { sel: "#sshare", title: "Share project", kind: "safe", text: "Saves the whole project as one file to hand to someone else (or keep). Your project is not changed." },
   { sel: "#sopen", title: "Open shared project", kind: "safe", text: "Opens a project file someone gave you, in a new folder. The project open now is not changed; you choose whether to switch to the new one." },
   { sel: "#objs", title: "Objects on this frame", kind: "safe", text: "Every object on the frame with its number, type, heading and status. Click one to select it." },
-  { sel: "#invbtn", title: "Investigate a spot (Q)", kind: "safe", text: "Not sure whether something is an object or a mark on the background? Point at it and press Q: the studio looks at that spot over the whole recording and says what it found. Looking changes nothing; its \"change all\" and \"Ignore this spot\" buttons do (Z undoes a change all)." },
+  { sel: "#invbtn", title: "Investigate a spot (Q)", kind: "safe", text: "Not sure whether something is an object or a mark on the background? Point at it and press Q: the studio looks at that spot over the whole recording. Its window has three parts kept apart: what it found (read only), look around (jumps to frames that change nothing; Q brings you back), and change things (an orange box: each button says how many labels it changes, shows them and asks first; Z takes it back). Reject here rejects a guess on that frame only and teaches the tracker what the empty spot looks like." },
   { sel: "#tlbtn", title: "Track timeline", kind: "safe", text: "One lane per object the guesses followed, across the whole recording, with breaks and jumps marked: a quick way to find where the following went wrong. Click a moment to go there." },
-  { sel: "#autoacc", title: "Accept remaining high-confidence frames", kind: "changes", text: "Accepts the guesses on every high-confidence frame nobody has looked at, without looking. Do the spot check first. Undo auto-accept takes them back." },
+  { sel: "#autoacc", title: "Accept remaining high-confidence frames", kind: "changes", text: "Accepts the guesses on every high-confidence frame nobody has looked at, without looking. Do the spot check first. Z or Undo auto-accept takes them back." },
   { sel: "#reset", title: "Reset this frame to the guesses", kind: "changes", text: "Throws away your changes on this frame and shows the guesses again (Z brings your changes back)." },
-  { sel: "#keysbtn", title: "Keys", kind: "safe", text: "Every key, in one list (K opens it too). The ones worth learning first: Enter, N, Del, the number keys, ? and Z." },
+  { sel: "#keysbtn", title: "Keys", kind: "safe", text: "Every key, in one list (K opens it too). The ones worth learning first: Enter, N, Del, the number keys, ?, Z and Shift+Z, and C for a short clip." },
   { sel: "#fullbtn", title: "Full screen", kind: "safe", text: "More room for the picture (V does the same; Esc leaves it)." },
   { sel: "#helpbtn", title: "This tour", kind: "safe", text: "The ? button shows this tour again any time. (The ? key on the keyboard marks an object unsure.)" },
 ];

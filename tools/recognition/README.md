@@ -162,8 +162,13 @@ and which change saved work. The **?** button at the top right shows the tour ag
    objects in the whole video; a progress bar shows how far it is and about how long is left.
 2. **Mark the work area** when it asks (see 8), or skip it.
 3. **Label.** The computer guesses every object. Press **Enter** when the guesses on a frame
-   are right, or drag, add (**N**) and reject (**Del**) until they are. **Most useful next**
-   shows the frames the guesses are least sure about first, and takes them from each part of
+   are right, or drag, add (**N**) and reject (**Del**) until they are. Every action shows a short
+   message at the bottom that fades by itself: what changed, where (the frame, the object), and
+   the exact key or button that takes it back. **Z** undoes the last change, **Shift+Z** puts back
+   what Z took back. **Most useful next** shows first the frames the tracker asks you to look at
+   (for example two lookalikes crossed and it can't tell which is which: the reason is written
+   above the picture, and the tab counts them as "to look at first"), then the frames the guesses
+   are least sure about, and takes them from each part of
    the training split in turn (learning, picking the best round, scoring; see "How the scores
    stay honest"), so every part gets frames early. **Confirmed frames by part** on the right
    shows how many each part has in this recording. Every fix is passed forward, so the frames
@@ -228,8 +233,10 @@ message says how many; **Z** takes them back together with your accept.
 | B | Picture: normal / brighter / high contrast (only how it is shown) |
 | V | Full screen (also the button; Esc leaves it) |
 | W | Work area (see 8) |
-| Q | Investigate the object or spot under the mouse (see 7) |
-| Z | Undo (also Ctrl+Z) |
+| C | Short clip: about 1 s before and after this frame, over and over (C again or Esc stops; changes nothing) |
+| Q | Investigate the object or spot under the mouse (see 7); after jumping to a frame from an investigation, Q goes back to it (Shift+Q: investigate the spot under the mouse instead) |
+| Z | Undo the last change (also Ctrl+Z) |
+| Shift+Z | Redo: put back what Z took back (also Ctrl+Y) |
 | Esc | Cancel / deselect |
 
 The same list is in the side panel of the studio, and the **Keys** button (top right, or **K**)
@@ -237,6 +244,18 @@ shows it in a window.
 
 A dashed arrow is only a heading guess (the object turning, or maybe reversing): it is saved as
 unknown unless you set it with H, a drag or F.
+
+**C** helps when a still picture can't tell you what is happening (a hand or an object, something
+being put down, which way it moves): it plays the video from about a second before to a second
+after the frame, at its own speed, over and over. The labels are drawn only on the frame itself.
+Moving does not show which way something faces (it may be reversing or turning on the spot).
+
+**Every action says what it did.** A short message at the bottom (it fades by itself) says what
+changed, where, and the key or button that takes it back, for example *Undid: moved #71 to 212,
+140 on frame 9310; it is back as it was. Shift+Z puts it back.* Z takes back changes to labels,
+Investigate's changes, accepting frames without looking, and work-area changes; Shift+Z puts each
+back again (until you make a new change). A few things can't be taken back, and their message
+says so (deleting a failed model, drawing a new spot-check sample).
 
 ## 6. Unsure
 
@@ -257,47 +276,71 @@ For the hard question "is this an object, or part of the background (a stain, a 
 reflection)?". Point at an object or a spot on the picture and press **Q** (or select an
 object and press **Investigate a spot** on the right). The studio looks at that spot (a
 circle about one object wide) across the whole recording; a progress bar shows how far it is
-(**Stop** or Esc ends it). Looking changes nothing. Then it shows:
+(**Stop** or Esc ends it). Looking changes nothing. The window has three parts, kept apart so
+it is clear which buttons change anything:
 
-- **What it found**, in plain words:
+**1. What we found** (read only: nothing here changes anything)
+- **The verdict**, in plain words:
   - *Never changes in this recording*: either part of the background (a mark, a stain, a
     fixture) or an object that stayed put the whole time. The recording alone can't tell
     which: check it in a recording of the empty area, or with the second camera (below).
-    Only if it is part of the background, press **Ignore this spot**: it adds the circle to the
-    camera's ignore spots (8), and guesses inside it are left out from now on (also when a real
-    object later stands there). Your labels are kept.
   - *Looks as it usually does on this frame*, with the moments something different was there
     (objects passing over).
-  - *Something is here that moves*: the guesses followed it on or off the spot. Buttons jump
-    to where it came from and where it went.
+  - *Something is here that moves*: the guesses followed it on or off the spot.
   - *Something is here for a while and isn't there the rest of the time*: something put down
-    and taken away, or (if only briefly) passing over, like a hand. Buttons jump to the
-    moments it appeared and left.
+    and taken away, or (if only briefly) passing over, like a hand.
 - **This frame** and **how it usually looks** (the usual picture, made from the whole
   recording, so that anything passing through is left out), side by side, with the circle drawn.
-- **A line of how much the spot changed** over the recording, from "usual" at the bottom to
-  "differs" at the top. Above the dashed line counts as "something there" (shaded). Click the
-  line to go to that moment.
-- **The biggest changes** as short clips that play over and over.
-- **The spot over time**: about 40 small pictures; an orange edge means it looks different from
-  usual. Click one to go there.
-- **Labels already made at this spot**, every frame with its type and status. Untick any you
-  want to leave alone, then **Change all to this type**, **Reject all** or **Mark all unsure**.
-  It is one step: **Z** takes the whole change back.
 - **The second camera as a referee**, when the recording is part of a two-camera session and
   both cameras are calibrated (9): the other camera's picture at the same moment, with a circle
   where the object would be (its type's height above the floor; the floor spot if its height
   varies). Something standing up shows there; a flat mark doesn't. Without calibrations the
   studio says so and everything else works the same.
+- How many labels were already made at the spot, and on which frames.
+
+**2. Look around** (these only take you to a frame; nothing is changed)
+- Buttons to where it came from and where it went, or when it appeared and left.
+- **A line of how much the spot changed** over the recording, from "usual" at the bottom to
+  "differs" at the top. Above the dashed line counts as "something there" (shaded). Click the
+  line to go to that moment.
+- **The moments something different was here**, each with a Jump button.
+- **The biggest changes** as short clips that play over and over.
+- **The spot over time**: about 40 small pictures; an orange edge means it looks different from
+  usual. Click one to go there.
+
+Every jump says where it took you (*Jumped to frame 6150 (4:12). Investigation closed: press Q
+to go back to it.*). **Q** then brings back the investigation and the frame you were on; after
+that, or once you close the window yourself, Q investigates the spot under the mouse again
+(**Shift+Q** always does). **Back to the last investigation** on the right opens it too.
+
+**3. Change things** (an orange box: these change saved labels). Every button says how far it
+reaches in its own words, shows what will change, and asks before it changes anything; **Z**
+takes it back in one step.
+- **Reject here** rejects the guess at the spot on this frame only ("Reject here: guess #7 on
+  frame 812 only"), and the tracker remembers what the empty spot looks like: later guesses there
+  that look like it are pushed down hard, while something that looks different (an object driving
+  over the stain) is still found. No other frame is changed. An object you added yourself at the
+  spot is kept (Del removes it). Use it on a stain or a reflection the guesses keep finding.
+- **Labels already made at this spot**: every frame with its type and status (click a frame
+  number to go there). Untick any you want to leave alone; the buttons then say exactly what
+  they reach, for example **Reject all 12 labels at this spot (frames 812-4410)**, **Change 5
+  labels to box (frames 812-990)** or **Mark 3 labels unsure (frames 812-830)**. A preview lists
+  the changes (frame, object, type, status) with **Cancel** and **Yes, change it**.
+
+Earlier versions had an **Ignore this spot** button that left a spot out of every frame. It is
+gone: a rejection now applies to one frame and informs later guesses, so something real standing
+on that spot later is still found. Ignore spots made with it keep working, and Work area (8) shows
+them and removes them. To leave something out for good (a shelf light, a reflection off to the
+side), draw the work area so it is outside.
 
 **Track timeline** (right side) shows every object the guesses followed as one lane across the
 whole recording: a bar while it was followed, a grey tick where the following broke off, a red
 mark where it jumped further than an object can move, a white dot where a frame has its label.
 Click a moment to go there: a quick way to find where the following went wrong.
 
-Going to a frame from Investigate shows the nearest picked frame (if that exact frame wasn't
-picked for labelling); **Back to the last investigation** on the right returns to the results.
-It works the same for every object type: nothing in it knows what your objects are.
+Going to a frame from Investigate or the timeline shows the nearest picked frame (if that exact
+frame wasn't picked for labelling), and the message says so. Investigate works the same for every
+object type: nothing in it knows what your objects are.
 
 ## 8. Work area
 
@@ -311,10 +354,12 @@ the picture stays where it is and fully visible.
   Backspace removes the last corner, Esc cancels.
 - **Margin:** a band around the area where guesses are still kept, for things reaching in
   (a hand). Blank means one object size.
-- **Ignore spots:** switch to *Ignore spots* and click a spot to ignore (a reflection, a
-  blinking light); drag to set its size. Click it again to remove it.
-  **Investigate** (7) adds one with its **Ignore this spot** button.
-- **Use the whole picture** removes the area (ignore spots stay).
+- **Old ignore spots:** ignore spots made by an earlier version (red circles) keep working:
+  guesses inside them are left out. Switch to *Old ignore spots* and click one to remove it. New
+  ignore spots are not made any more (see 7, "Reject here"); to leave something out for good,
+  draw the area so it is outside.
+- **Use the whole picture** removes the area (old ignore spots stay).
+- **Z** puts the previous work area back after you saved a change; **Shift+Z** puts yours back.
 
 Changing the work area keeps every label; only the guesses on frames nobody has confirmed
 change. The slow first pass over the video is not repeated.
@@ -465,9 +510,10 @@ of running, wherever it has got to. It is meant for live cameras.
   `auto` (accepted without looking), `unsure`, `rejected`, or `pending` (a guess nobody has
   checked). A frame marked empty has one row with type `none`.
 - `review.json` says how each frame was finished (by a person, by the spot check, auto, or
-  for having the same picture as a frame a person accepted).
+  for having the same picture as a frame a person accepted), and lists under `rejected_spots`
+  the spots where **Reject here** was used (frame, x, y, radius), which the tracker remembers.
 - `project.json` keeps each camera's work area under `cameras`: `work_area` (corner points in
-  pixels), `margin_px`, `ignore_spots` (x, y, radius in pixels).
+  pixels), `margin_px`, `ignore_spots` (x, y, radius in pixels; made by earlier versions).
 - The recordings themselves stay where they are (they are large).
 
 **Moving a project to another computer:** use **Share project** (11), or copy the project folder

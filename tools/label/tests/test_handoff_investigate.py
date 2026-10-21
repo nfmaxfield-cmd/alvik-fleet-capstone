@@ -295,7 +295,7 @@ def test_page_has_investigate_key_and_buttons():
         assert 'id="%s"' % i in PAGE, i
     sels = re.findall(r'\{ sel: "([^"]+)", title: "([^"]+)"', PAGE)
     assert {"#invbtn", "#stime", "#sshare", "#sopen"} <= {s for s, _ in sels}
-    for word in ("Ignore this spot", "Change all to this type", "Reject all", "Mark all unsure",
+    for word in ("Reject here", "\"Change \" + plural(n, \"label\") + \" to \"", "\"Reject all \"", "\"Mark all \"",
                  "Recording not found: locate it", "Share project", "Open shared project", "Time saved"):
         assert word in PAGE, word
     assert "alvik" not in PAGE.lower()
