@@ -90,6 +90,20 @@ class PoseTracker:
     def stop(self):
         self.on = False
 
+    def resume(self):
+        """pose.h resume() (E02): tracking on again without forgetting x, y, th_off, known."""
+        P = self.rb.P
+        self.last_lx, self.last_ly, _ = self.lib_pose()
+        self.last_th = self.th()
+        self.dist = 0.0
+        self.drift_dps = 0.0
+        self.fixes_used = self.fixes_rejected = 0
+        self.hist = []
+        self.last_ms = self.rb.millis()
+        self.q_cm, self.q_deg, self.q_dps = P("pose_q_cm"), P("pose_q_deg"), P("pose_q_dps")
+        self.push(self.last_ms)
+        self.on = True
+
     def set(self, nx, ny, nth, sig, sig_th):
         self.x, self.y = nx, ny
         self.th_off = wrap180(nth - self.rb.heading())
@@ -105,7 +119,7 @@ class PoseTracker:
         lx, ly, lth = self.lib_pose()
         dx, dy = lx - self.last_lx, ly - self.last_ly
         self.last_lx, self.last_ly = lx, ly
-        ds = dx * math.cos(lth * DEG2RAD) + dy * math.sin(lth * DEG2RAD)
+        ds = (dx * math.cos(lth * DEG2RAD) + dy * math.sin(lth * DEG2RAD)) * self.rb.P("wheel_scale")   # real cm (corr.h)
         now = self.rb.millis()
         if self.drift_dps:
             self.th_off = wrap180(self.th_off - self.drift_dps * (now - self.last_ms) / 1000.0)

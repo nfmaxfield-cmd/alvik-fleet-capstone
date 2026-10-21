@@ -300,3 +300,18 @@ chatter), debounced by a copy of switches.h; the dock's floor stripe reads like 
 (`seat_sd_cm`, `seat_sd_deg`: guesses). `python -m unittest tools/sim/tests/test_dock.py -v` (about 2 minutes):
 60 dockings, a crooked approach, a miss, the stripe, 20 touches, the follow step's pose reset.
 
+
+## E02: find yourself by bumping, routes, camera fixes (fw_e02.py, firmware 2026-10-21a)
+
+A copy of e02.h: `find` (bump detection from the accelerometer's jolt and the wheels' stall, no switches;
+push-to-square; both boards; the gyro's scale between them re-traces the path), `e02` (the three routes
+out and back, own sensors or camera-steered legs), `fix`, `go`, `turn`, `mark`. What the simulator adds for it:
+`dock.wall_stall_frac` (a wheel the contact holds back keeps this share of its commanded speed; 1.0, the
+default, keeps the old slip-only model the dock tests use), `session.seams` (lines where crossing jolts the
+accelerometer and dips the wheels), `robot.accel_x()` / `wheels_speed()` (what get_imu / get_wheels_speed
+return), and heading() / the own pose applying gyro_scale, gyro_drift_dps and wheel_scale (motion.h,
+added up step by step). All these numbers are guesses until a real robot has bumped a real board.
+`python -m pytest tools/sim/tests/test_e02.py -v` (about 30 s): bumps in creep vibration, seams, crooked
+approaches, slipping wheels, a stall away from a board, finds within 1 cm, routes U vs C, KC fixes, a
+camera-steered square, leg checks and the travel cap, stop, fixes, parity with the firmware's parameters
+and record columns.

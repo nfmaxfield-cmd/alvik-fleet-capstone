@@ -225,6 +225,13 @@ class SessionModel:
     board_cm: Optional[List[float]] = None
     open_edges: List[str] = field(default_factory=list)
     board_thick_cm: float = 1.9
+    # floor seams (E02): lines [x0, y0, x1, y1] where two plywood sheets meet. Crossing one with the axle jolts
+    # the accelerometer (seam_jolt_g, random sign, ~15 ms) and slows the wheels to seam_dip_frac for seam_dip_ms.
+    # GUESSES (no real seam has been measured): a false-bump test, not a model of the real floor.
+    seams: List[List[float]] = field(default_factory=list)
+    seam_jolt_g: float = 0.4
+    seam_dip_ms: float = 50.0
+    seam_dip_frac: float = 0.5
 
 
 def _dock_params():
@@ -286,6 +293,10 @@ class DockModel:
     # ripples on the back wall / bumper face, the wall flexing. Drawn again at the start of every creep.
     seat_sd_cm: float = 0.005             # back wall's effective position along the axis
     seat_sd_deg: float = 0.1              # ... and its effective tilt
+    # E02 bump detection: a wheel held back by a solid keeps only this share of its commanded speed (the motor
+    # stalls, the tyre slips the rest). 1.0 = the wheels keep turning at full speed and only slip (the model the
+    # dock tests were built on); E02 tests use less. GUESS: the real Alvik pushing a board has not been measured.
+    wall_stall_frac: float = 1.0
 
 
 @dataclass
