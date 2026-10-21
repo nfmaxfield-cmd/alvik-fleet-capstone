@@ -41,7 +41,7 @@ on a synthetic 5-minute recording with 40 spread-out labels found every object o
 
 **Cost.** Subagent tokens about 2.8M (polish 0.35M, use-it 0.16M, share 0.09M, investigate and stats
 0.37M, checks 0.94M, fix rounds 0.78M, fixture 0.09M), plus the main session's (not counted). Meter
-before: 66% (Nick, 13:55 ET). After: to be read by Nick.
+before: 66% (Nick, 13:55 ET); after: 72% (Nick, 20:45 ET), 6 points, with labelling chat in between.
 
 ## New tests that may now be needed
 - Windows: double-click both launchers on a clean Windows machine (not possible here), including a

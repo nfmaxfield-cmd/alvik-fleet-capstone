@@ -295,8 +295,10 @@ frame, and what it teaches should strongly inform later decisions at that spot.
 start trying to use the program."
 - Every action announces what it just did in a short message that fades by itself (no X): what
   changed, where, and how to take it back. Examples: a Jump in Investigate: "Jumped to frame 6150
-  (4:12). Investigation closed: press Back (or Q) to return to it." Z: "Undid: moved #71 on frame
-  9310 back to where it was."
+  (4:12). Investigation closed: press Q to go back to it." Z: "Undid: moved #71 on frame 9310
+  back to where it was. Shift+Z puts it back." (Needs a redo: Shift+Z.)
+- Check every message against the rule before shipping: each one must say what changed, where, and
+  the exact key or button that takes it back (Nick caught an example missing the last part).
 - Nothing that changes saved work happens without saying so; nothing closes or moves the person
   elsewhere silently.
 - Every Investigate jump keeps a one-click way back to the investigation.
