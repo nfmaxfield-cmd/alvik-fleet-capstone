@@ -2,6 +2,7 @@
 title Maxfield IRL Tracking
 rem Double-click to follow objects in a recording or a live camera with a trained model.
 rem With nothing typed after it, it asks plain questions (which project, which recording or camera).
+rem For a live camera it starts with a roll call on the page: confirm what it sees once, or fix it, then it follows the objects.
 rem The first time, it installs the few Python packages it needs.
 rem Finds Python: first "py -3" (the Python launcher), then "python". Python 3.9 or newer is needed.
 set "MXPY="
