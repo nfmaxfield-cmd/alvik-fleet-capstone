@@ -196,7 +196,7 @@ def test_report_shows_situations_and_both_copy_paste_scores(tmp_path):
     html = report.html_report(proj)
     assert "By situation (model v1)" in html and "Close together" in html and "Near a person" in html
     assert "Too few to trust" in html                       # the 12-label group is flagged
-    assert "finds the fewest where objects are <b>close together</b>" in html        # 60%: the weakest group with enough labels
+    assert "does worst with <b>objects close together</b>" in html        # 60%: the weakest group with enough labels
     assert "What training used" in html and "14 guesses you rejected" in html
     assert "Without copy-paste (kept)" in html and "With copy-paste</td>" in html and "worse here" in html
 
@@ -222,15 +222,19 @@ def test_compare_mode_trains_both_and_keeps_the_better(tmp_path, with_f1, winner
             for f in ("best.pt", "last.pt"):
                 with open(os.path.join(out, f), "w") as fh:
                     fh.write("with" if "--paste" in cmd else "without")
+            v = with_f1 if "--paste" in cmd else 0.8         # the choice is made on these (validation) scores
             with open(os.path.join(out, "train_log.csv"), "w") as fh:
-                fh.write("epoch,val_f1\n1,0.5\n")
+                fh.write("epoch,val_precision,val_recall,val_f1\n1,0.3,0.3,0.3\n2,%s,%s,%s\n" % (v, v, v))
         else:                                           # export.py: the onnx records which training made it
             with open(out, "w") as fh:
                 fh.write(open(cmd[2]).read())
     tr._call = fake_call
-    tr._score_variant = lambda data, split, onnx, out, logf, python: (
-        dict(precision=with_f1, recall=with_f1, f1=with_f1, centre_err_px=2.0, n_labels=50.0, n_objects=6.0)
-        if open(onnx).read() == "with" else dict(precision=0.8, recall=0.8, f1=0.8, centre_err_px=2.0, n_labels=50.0, n_objects=6.0))
+    scored = []
+
+    def score_variant(data, split, onnx, out, logf, python):      # held-back (test) scores: never decide
+        scored.append(open(onnx).read())
+        return dict(precision=0.1, recall=0.1, f1=0.1, centre_err_px=2.0, n_labels=50.0, n_objects=6.0)
+    tr._score_variant = score_variant
     cmd = ["python", "train.py", "--labels", "d", "--out", run, "--max-minutes", "3.0", "--init-from", "prev.pt"]
     cp = tr._train_compare("v1", 3.0, "python", {}, mdir, None, cmd, run, str(tmp_path / "areas.json"), "d", "s.json")
     trains = [c for c, _ in calls if c[1].endswith("train.py")]
@@ -241,6 +245,8 @@ def test_compare_mode_trains_both_and_keeps_the_better(tmp_path, with_f1, winner
     assert cp["winner"] == winner and cp["used"] == (winner == "with") and cp["compared"]
     assert open(os.path.join(run, "best.pt")).read() == winner                       # the better model is the one kept
     assert cp["without"]["f1"] == 0.8 and cp["with"]["f1"] == with_f1
+    assert scored == [winner] and cp["test"]["f1"] == 0.1 and cp["decided_on"] == "validation"   # test scored once
+    assert "frames used for choosing" in cp["text"] and "scored once on the held-back frames" in cp["text"]
     assert cp["text"].count("%") >= 6 and ("so this model uses it" in cp["text"]) == (winner == "with")
     left = [f for k in ("with", "without") for f in os.listdir(os.path.join(mdir, "compare", k))]
     assert "best.pt" not in left and "model.onnx" not in left and "train_log.csv" in left

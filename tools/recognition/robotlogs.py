@@ -201,9 +201,12 @@ class AlvikLogs(Plugin):
         return read_alvik_logs(folder, **options)
 
 
-def read_alvik_logs(folder, recording=None, laptop_to_wall=None, names=None, use_gyro=True):
+def read_alvik_logs(folder, recording=None, laptop_to_wall=None, names=None, use_gyro=True, offset_s=0.0, **_ignored):
     """Read a console session folder -> OutsideData (see the module docstring). names {log name:
-    name to use} renames robots (e.g. AL-3F2A -> Left) after reading."""
+    name to use} renames robots (e.g. AL-3F2A -> Left) after reading. offset_s: seconds added on top
+    of the clock found (the person's correction, or one estimated from speed; t_wall = log time +
+    offset_s). OutsideData.clock_known is False when there was no video_clock.json, no laptop_to_wall
+    and no offset: the caller may then estimate one (outside.estimate_time_offset)."""
     notes = []
     raw, files, skipped = read_rows(folder, "raw")
     if not files:
@@ -248,7 +251,10 @@ def read_alvik_logs(folder, recording=None, laptop_to_wall=None, names=None, use
     if not fits:
         notes.append("no clock_sync.csv: robot clocks set from the arrival times (a few ms less exact)")
     to_wall, _, found = laptop_to_wall_clock(recording, laptop_to_wall)
-    if not found:
+    offset_s = float(offset_s or 0.0)
+    if offset_s:
+        to_wall = LinearClock(to_wall.a + offset_s, to_wall.b, "%s; then %+.2f s" % (to_wall.text, offset_s))
+    elif not found:
         notes.append(to_wall.text)
     clock_text = to_wall.text
 
@@ -267,7 +273,7 @@ def read_alvik_logs(folder, recording=None, laptop_to_wall=None, names=None, use
         events += ev
     events += _events(folder, fits, to_wall, rename, by_robot)
     events.sort(key=lambda e: e["t"])
-    return OutsideData("alvik", streams, events, notes, clock_text, folder)
+    return OutsideData("alvik", streams, events, notes, clock_text, folder, clock_known=bool(found or offset_s))
 
 
 def _robot_clock(name, boot, rows, fits, rename):

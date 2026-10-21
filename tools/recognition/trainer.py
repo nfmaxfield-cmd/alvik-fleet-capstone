@@ -44,8 +44,65 @@ BLOCK_CHOICES = (30, 20, 15, 10, 6, 4, 3)   # block lengths (s) tried, longest f
 MIN_BLOCKS = 12          # the footage must hold at least this many blocks, so every part gets some
 EPOCHS = 60              # training rounds at most (the time limit may stop it sooner)
 MIN_EPOCHS = 15          # never stop early before this many rounds
+TRAIN_FAILED_NO_MODEL = ("training ended without saving a model (it may have been stopped, or the computer ran "
+                         "short of memory or disk space). Your labels are safe and nothing else was changed. Free some "
+                         "disk space, close other programs, and press Train new model to try again.")
+STEP_WORDS = {"train.py": "Learning", "export.py": "Saving the model file", "evaluate.py": "Scoring the models"}
+
+
+def step_failed_text(script, tail):
+    """A training step that stopped with an error, in plain words with what to do (never 'see the log')."""
+    text = "".join(tail)
+    step = STEP_WORDS.get(script, "A training step")
+    if "Need frames in both train and val" in text:
+        why = ("there were no frames a person checked for picking the best training round (auto-accepted frames are "
+               "not used for that). Look at and confirm a few frames from other minutes of the recording, then train again.")
+    elif "No frames to score" in text:
+        why = ("there were no frames a person checked held back for scoring. Look at and confirm a few frames from "
+               "other minutes of the recording, then train again.")
+    elif "out of memory" in text.lower() or "MemoryError" in text:
+        why = "the computer ran out of memory. Close other programs and press Train new model again."
+    elif "No space left" in text:
+        why = "the disk is full. Free some space and press Train new model again."
+    elif "No module named" in text:
+        mod = text.split("No module named", 1)[1].strip().split()[0].strip("'\"") if "No module named" in text else ""
+        why = ("a part the studio needs is not installed on this computer (Python package %s). Run the studio's "
+               "setup again (README, Install), then press Train new model." % mod)
+    else:
+        last = next((ln.strip() for ln in reversed(tail) if ln.strip()), "")
+        why = ("it stopped with a problem the studio did not expect%s. Your labels are safe and nothing else was "
+               "changed. Press Train new model to try again; if it stops the same way, send this message to whoever "
+               "looks after the studio." % ((' ("%s")' % last[:160]) if last else ""))
+    return "%s stopped: %s" % (step, why)
+
+
 NOTHING_FOUND = ("Not enough labels or training time yet: label more frames (spread over the recording) "
                  "or train longer.")
+
+
+def nothing_found_text(proj, entry):
+    """Why a model finds nothing yet, with the numbers that are known: what it learned from (frames, the
+    different objects in them, minutes), and what a model of this project that does find objects needed.
+    Honest when there is no such model: then nobody knows the number for this project yet."""
+    n = int(entry.get("n_train_frames") or (entry.get("split_counts") or {}).get("train") or 0)
+    mins = entry.get("train_minutes") or entry.get("minutes")
+    out = "It learned from %d frame%s%s." % (n, "" if n == 1 else "s",
+                                            " for about %d minute%s" % (round(mins), "" if round(mins) == 1 else "s")
+                                            if mins else "")
+    good = [m for m in proj.models() if m.get("id") != entry.get("id") and m.get("status") == "ready"
+            and not projmod.Project.model_failed(m)]
+    if good:
+        g = min(good, key=lambda m: (m.get("n_train_frames") or 0))
+        gm = g.get("train_minutes") or g.get("minutes")
+        out += (" In this project, model %s found objects after learning from %d frames%s, so label at least that "
+                "many (spread over the recording) and train at least as long, then train again." % (
+                    g["id"], g.get("n_train_frames") or 0,
+                    " for about %d minutes" % round(gm) if gm else ""))
+    else:
+        out += (" No model in this project has found objects yet, so how many frames are enough here is not known "
+                "yet. Label more frames spread over the recording (twice as many, %d, is a fair next step) and train "
+                "longer (%d minutes or more), then train again." % (max(2 * n, 20), max(20, 2 * round(mins or 10))))
+    return out
 
 
 def _part(key):
@@ -150,15 +207,30 @@ def mark_interrupted(proj):
     return stuck
 
 
-def split_message(counts, blocks, block_s):
-    """Why there is not enough to train on yet, in plain words."""
-    return ("Not enough confirmed frames in each part yet. To keep the scores honest, the recordings are cut into "
-            "%d-second pieces and each piece is used for one job only. Now: %d frames for learning (in %d pieces), "
-            "%d for picking the best training round (%d), %d held back for scoring (%d). Training needs at least "
-            "10 for learning and at least 1 in each of the other two. Confirm frames spread over more of the "
-            "recording (frames from different minutes, not neighbouring frames), then train again."
-            % (round(block_s), counts["train"], blocks.get("train", 0), counts["val"], blocks.get("val", 0),
-               counts["test"], blocks.get("test", 0)))
+def split_message(counts, blocks, block_s, checked=None):
+    """Why there is not enough to train on yet, in plain words (nothing was started or changed)."""
+    checked = checked if checked is not None else counts
+
+    def part(p, words):
+        auto = counts[p] - checked.get(p, counts[p])
+        return "%d %s (in %d piece%s%s)" % (counts[p], words, blocks.get(p, 0), "" if blocks.get(p, 0) == 1 else "s",
+                                           ", %d of them auto-accepted" % auto if auto else "")
+    short = []
+    if counts["train"] < 10:
+        short.append("%d more for learning" % (10 - counts["train"]))
+    if checked.get("val", 0) < 1:
+        short.append("one you checked yourself for picking the best round")
+    if checked.get("test", 0) < 1:
+        short.append("one you checked yourself held back for scoring")
+    auto_note = (" Auto-accepted frames help learning but are never used for picking or scoring, so a person "
+                 "must look at some frames of those parts." if any(counts[p] > checked.get(p, 0) for p in ("val", "test"))
+                 else "")
+    return ("Not enough finished frames in each part yet, so training did not start (nothing was changed). To keep "
+            "the scores honest, the recordings are cut into %d-second pieces and each piece is used for one job only. "
+            "Now: %s, %s, %s. Still needed: %s.%s What to do: in \"Most useful next\", confirm frames spread over more "
+            "of the recording (frames from different minutes, not neighbouring frames), then train again."
+            % (round(block_s), part("train", "frames for learning"), part("val", "for picking the best training round"),
+               part("test", "held back for scoring"), "; ".join(short) or "nothing", auto_note))
 
 
 def _link(src, dst):
@@ -245,25 +317,75 @@ def build_dataset(proj, out_dir, block_s=30.0, guard_s=1.0, fps_default=25.0):
     return assign, info
 
 
-def count_frames(label_root, classes, assign, blocks=None):
-    """Frames per part; with blocks={}, also fills in how many blocks of each part hold frames."""
+def count_frames(label_root, classes, assign, blocks=None, checked=None):
+    """Frames per part; with blocks={}, also fills in how many blocks of each part hold frames; with
+    checked={}, how many of each part's frames a person looked at (not auto-accepted: only those are
+    used to pick the best round and to score)."""
     import detcore
     samples = detcore.read_many([label_root], classes, verbose=False) if os.listdir(label_root) else []
     out = dict(train=0, val=0, test=0)
+    chk = dict(train=0, val=0, test=0)
     used = {}
     for s in samples:
         p = assign.get(s["recording"])
         if p:
             out[p] += 1
+            if not s.get("auto"):
+                chk[p] += 1
             used.setdefault(p, set()).add(s["recording"])
     if blocks is not None:
         blocks.update({p: len(v) for p, v in used.items()})
+    if checked is not None:
+        checked.update(chk)
     return out, samples
+
+
+def ready_to_train(counts, checked):
+    """Enough for a training run: 10 frames to learn from, and at least one frame a person checked both
+    for picking the best round and for scoring."""
+    return counts["train"] >= 10 and checked.get("val", 0) >= 1 and checked.get("test", 0) >= 1
+
+
+def precheck(proj):
+    """Before a training run starts: are there enough finished frames in each part? Cuts the recordings
+    into pieces as training will (hard links, quick) and counts. Returns dict(ok, counts, checked, blocks,
+    block_s, text): text says, in plain words, what is missing and what to do."""
+    import tempfile
+    block_s = choose_block_s(proj)
+    os.makedirs(os.path.join(proj.folder, "models"), exist_ok=True)
+    tmp = tempfile.mkdtemp(prefix="_precheck_", dir=os.path.join(proj.folder, "models"))
+    try:
+        data = os.path.join(tmp, "data")
+        assign, info = build_dataset(proj, data, block_s, guard_s=guard_for(block_s))
+        blocks, checked = {}, {}
+        counts, _ = count_frames(data, proj.class_names(), assign, blocks, checked)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    ok = ready_to_train(counts, checked)
+    return dict(ok=ok, counts=counts, checked=checked, blocks=blocks, block_s=block_s,
+                text=part_counts_text(counts, checked) if ok else split_message(counts, blocks, block_s, checked))
+
+
+def part_counts_text(counts, checked):
+    """'Frames: 120 for learning (30 auto-accepted), 20 for picking the best round, 25 held back for scoring.'"""
+    def one(p, words):
+        auto = counts[p] - checked.get(p, counts[p])
+        return "%d %s%s" % (counts[p], words, (" (%d of them auto-accepted)" % auto) if auto else "")
+    return "Frames: %s, %s, %s." % (one("train", "for learning"), one("val", "for picking the best training round"),
+                                    one("test", "held back for scoring"))
+
+
+def motion_untyped(proj):
+    """True when the motion finder can't give this project's types (several plain types: its object-sized
+    guesses all get the catch-all type): the 'no model' row is then scored on finding objects, not types."""
+    return proj.motion_object_type() == projmod.CATCH_ALL and any(
+        n != projmod.CATCH_ALL for n in proj.class_names())
 
 
 def motion_predictions(proj, info, assign, path):
     """Predictions CSV of the raw motion guesses on every test block (the 'no model' row)."""
     import app as labelapp
+    untyped = motion_untyped(proj)
     by_rec = {}
     for name, i in info.items():
         if assign.get(name) == "test":
@@ -277,10 +399,16 @@ def motion_predictions(proj, info, assign, path):
             if not os.path.exists(det_path):
                 continue
             frames_of = {}
+            labels_at = {}
             for b in blocks:
                 with open(os.path.join(os.path.dirname(path), "data", b, "labels.csv"), newline="") as lf:
                     for row in csv.DictReader(lf):
                         frames_of[int(row["frame"])] = b
+                        try:
+                            labels_at.setdefault(int(row["frame"]), []).append(
+                                (row["cls"], float(row["x_px"]), float(row["y_px"])))
+                        except (KeyError, TypeError, ValueError):
+                            pass
             # what the labelling tool shows with no model and no confirmations: motion
             # guesses followed by the tracker (no anchors, so nothing a person did leaks in)
             import tracker
@@ -306,9 +434,19 @@ def motion_predictions(proj, info, assign, path):
             params.front_classes = tuple(proj.heading_classes())
             guesses, _ = tracker.TrackRun(dets, rec.times, robot_px or 30.0, (rec.width, rec.height), params=params,
                                           det_source="motion").run({}, set())
+            catch = projmod.CATCH_ALL
             for fr, b in frames_of.items():
                 for d in guesses.get(fr, []):
-                    w.writerow([b, fr, d["cls"], "%.2f" % d["x"], "%.2f" % d["y"],
+                    cls = d["cls"]
+                    if untyped and cls == catch:
+                        # motion can't tell this project's types apart (its guesses are all the catch-all
+                        # type, retyped by the person on the page): the starting point is scored on finding
+                        # each object, whatever its type, so it takes the type of the label it sits on
+                        near = [lb for lb in labels_at.get(fr, ()) if math.hypot(lb[1] - d["x"], lb[2] - d["y"])
+                                <= float(robot_px or 30.0)]
+                        if near:
+                            cls = min(near, key=lambda lb: math.hypot(lb[1] - d["x"], lb[2] - d["y"]))[0]
+                    w.writerow([b, fr, cls, "%.2f" % d["x"], "%.2f" % d["y"],
                                 "" if d.get("heading_deg") is None else "%.1f" % d["heading_deg"], "%.3f" % d["score"]])
                     n += 1
     return n
@@ -366,9 +504,10 @@ class Trainer:
             self._train(mid, minutes, python, entry, mdir, logf)
         except BaseException as e:      # keep the studio running; show the problem in plain words
             plain = isinstance(e, (RuntimeError, ValueError)) and not isinstance(e, NotImplementedError)
-            msg = str(e) if plain else ("an unexpected problem (%s: %s). The details are in models/%s/train.log. "
-                                        "Your labels are safe; press Train new model to try again."
-                                        % (type(e).__name__, e, mid))
+            msg = str(e) if plain else ("a problem the studio did not expect (%s: %s). Your labels are safe and "
+                                        "nothing else was changed. Press Train new model to try again; if it stops "
+                                        "the same way, send this message and the project's models/%s folder to whoever "
+                                        "looks after the studio." % (type(e).__name__, e, mid))
             if not plain:
                 import traceback
                 if logf:
@@ -398,11 +537,12 @@ class Trainer:
         block_s = choose_block_s(proj)
         entry["block_s"] = block_s
         assign, info = build_dataset(proj, data, block_s, guard_s=guard_for(block_s))
-        blocks = {}
-        counts, _ = count_frames(data, proj.class_names(), assign, blocks)
+        blocks, checked = {}, {}
+        counts, _ = count_frames(data, proj.class_names(), assign, blocks, checked)
         entry["split_counts"] = counts
-        if counts["train"] < 10 or counts["val"] == 0 or counts["test"] == 0:
-            raise RuntimeError(split_message(counts, blocks, block_s))
+        entry["split_checked"] = checked
+        if not ready_to_train(counts, checked):
+            raise RuntimeError(split_message(counts, blocks, block_s, checked))
         split = os.path.join(mdir, "split.json")
         with open(split, "w") as f:
             json.dump({"by_recording": assign}, f, indent=1, sort_keys=True)
@@ -433,6 +573,7 @@ class Trainer:
                   "at most %.0f min ..." % (mid, counts["train"], counts["val"], counts["test"],
                                             "; %d rejected guesses used as 'not an object' examples" % negs["spots"]
                                             if negs["spots"] else "", minutes))
+        t_train = time.time()
         if mode == "compare":
             cp = self._train_compare(mid, minutes, python, entry, mdir, logf, cmd, run, paste_areas, data, split)
         else:
@@ -443,11 +584,12 @@ class Trainer:
             cp = None if mode == "off" else dict(mode="on", used=True, compared=False, text=(
                 "Copy-paste was on for this model but was not compared with a model trained without it, so it is "
                 "not known whether it helps. Set copy-paste to \"compare\" to find out."))
+        entry["train_minutes"] = round((time.time() - t_train) / 60.0, 1)
         if cp:
             entry["copy_paste"] = cp
         best = os.path.join(run, "best.pt")
         if not os.path.exists(best):
-            raise RuntimeError("training finished without a saved model (see %s)" % os.path.join(mdir, "train.log"))
+            raise RuntimeError(TRAIN_FAILED_NO_MODEL)
         val_f1 = best_val_f1(os.path.join(run, "train_log.csv"))
         self._say("Model %s: exporting ..." % mid)
         onnx = os.path.join(mdir, "model.onnx")
@@ -462,11 +604,12 @@ class Trainer:
         sc = m.get("metrics", {})
         nothing = (val_f1 is not None and val_f1 <= 0) or not sc.get("recall")
         if nothing:
+            why = nothing_found_text(proj, m)
             with proj.lock:
-                m["warning"] = NOTHING_FOUND
+                m["warning"] = why
                 proj.save()
             msg = ("Model %s is saved, but it does not find the objects yet. %s It is marked with a warning, and "
-                   "the next model will not start from it." % (mid, NOTHING_FOUND))
+                   "the next model will not start from it." % (mid, why))
         else:
             msg = ("Model %s is ready: it finds %s of the objects on frames it never saw, and %s of what it marks "
                    "is right. Pick it in \"Guesses from\"." % (mid, _pct(sc.get("recall")), _pct(sc.get("precision"))))
@@ -475,14 +618,16 @@ class Trainer:
         caution = curve.get("caution") if curve else None
         if caution and not nothing:
             msg += " Caution: " + caution
-        self.job.update(status="done", finished=time.time(), message=msg, warning=NOTHING_FOUND if nothing else None,
+        self.job.update(status="done", finished=time.time(), message=msg, warning=m.get("warning") if nothing else None,
                         caution=caution)
         self.log(msg)
 
     def _train_compare(self, mid, minutes, python, entry, mdir, logf, cmd, run, paste_areas, data, split):
-        """Train twice on the same frames, without and with copy-paste (each gets half of the time),
-        score both on the held-back frames, keep the better one as this model. The copy-paste model
-        wins only if it is clearly better (F1 at least PASTE_MIN_GAIN higher). Both scores are kept."""
+        """Train twice on the same frames, without and with copy-paste (each gets half of the time), and
+        decide on the frames used to pick the best round (validation), never on the held-back test frames:
+        the copy-paste model wins only if it is clearly better there (F1 at least PASTE_MIN_GAIN higher).
+        Only the kept model is then scored on the held-back frames, once (cp["test"]); a choice made by
+        looking at the test score would make that score too rosy."""
         half = max(1.0, minutes / 2.0)
         scores = {}
         dirs = {}
@@ -498,16 +643,19 @@ class Trainer:
                 tag="(%s copy-paste, %d of 2) " % (key, k + 1)))
             best = os.path.join(out, "best.pt")
             if not os.path.exists(best):
-                raise RuntimeError("training finished without a saved model (see train.log)")
-            onnx = os.path.join(out, "model.onnx")
-            self._call([python, os.path.join(DETECTOR, "export.py"), best, "--out", onnx], logf, 600)
-            self._say("Model %s: scoring the model trained %s copy-paste ..." % (mid, key))
-            scores[key] = self._score_variant(data, split, onnx, os.path.join(mdir, "compare", "eval_%s.csv" % key),
-                                              logf, python)
-            scores[key]["val_f1"] = best_val_f1(os.path.join(out, "train_log.csv"))
-        cp = decide_paste(scores["without"], scores["with"])
-        cp.update(mode="compare", compared=True, minutes_each=half)
+                raise RuntimeError(TRAIN_FAILED_NO_MODEL)
+            scores[key] = best_val_row(os.path.join(out, "train_log.csv"))
+        cp = decide_paste(scores["without"], scores["with"], on="validation")
+        cp.update(mode="compare", compared=True, minutes_each=half, decided_on="validation")
         win = "with" if cp["used"] else "without"
+        onnx = os.path.join(dirs[win], "model.onnx")
+        self._call([python, os.path.join(DETECTOR, "export.py"), os.path.join(dirs[win], "best.pt"), "--out", onnx],
+                   logf, 600)
+        self._say("Model %s: scoring the kept model (%s copy-paste) on the held-back frames ..." % (mid, win))
+        cp["test"] = self._score_variant(data, split, onnx, os.path.join(mdir, "compare", "eval_%s.csv" % win),
+                                         logf, python)
+        cp["text"] += (" The kept model, scored once on the held-back frames: finds %s, right %s (F1 %s)." % (
+            _pct(cp["test"].get("recall")), _pct(cp["test"].get("precision")), _pct(cp["test"].get("f1"))))
         if os.path.exists(run):
             shutil.rmtree(run)
         shutil.copytree(dirs[win], run)
@@ -574,6 +722,7 @@ class Trainer:
                                      cwd=DETECTOR)
         t0 = time.time()
         watch = TrainProgress(progress["epochs"], progress["minutes"], t0) if progress else None
+        tail = []
         for line in self.proc.stdout:
             logf.write(line)
             logf.flush()
@@ -582,11 +731,16 @@ class Trainer:
                                                                     watch.text(time.time()))
             if time.time() - t0 > timeout:
                 self.proc.kill()
-                raise RuntimeError("took too long; stopped")
+                raise RuntimeError("%s took longer than allowed and was stopped. Your labels are safe; press Train new "
+                                   "model to try again (a shorter time also works)." % STEP_WORDS.get(
+                                       os.path.basename(cmd[1]), "A training step"))
+            tail.append(line)
+            if len(tail) > 60:
+                tail.pop(0)
         rc = self.proc.wait()
         self.proc = None
         if rc != 0:
-            raise RuntimeError("%s exited with an error (see train.log)" % os.path.basename(cmd[1]))
+            raise RuntimeError(step_failed_text(os.path.basename(cmd[1]), tail))
 
     def score_all(self, data, assign, info, logf, python=sys.executable, block_s=None):
         """Score 'no model' and every ready model on the current test blocks; write models/curve.json."""
@@ -645,7 +799,8 @@ class Trainer:
         for r in rows:
             mid = r["model"]
             n = 0 if mid == "none" else proj.model(mid).get("n_train_frames", 0)
-            pt = dict(model=mid, label="No model (motion)" if mid == "none" else "Model " + mid, n_train_frames=n,
+            none_label = "No model (motion; types not judged)" if motion_untyped(proj) else "No model (motion)"
+            pt = dict(model=mid, label=none_label if mid == "none" else "Model " + mid, n_train_frames=n,
                       precision=_f(r.get("precision")), recall=_f(r.get("recall")), f1=_f(r.get("f1")),
                       centre_err_px=_f(r.get("centre_err_px_mean")), heading_err_deg=_f(r.get("heading_err_deg_median")),
                       ms_per_frame=_f(r.get("ms_per_frame")), n_labels=_f(r.get("n_labels")),
@@ -717,13 +872,15 @@ def write_paste_areas(proj, info, path):
     return out
 
 
-def decide_paste(without, with_):
-    """Plain verdict on copy-paste from two scores on the same held-back frames."""
+def decide_paste(without, with_, on="test"):
+    """Plain verdict on copy-paste from two scores on the same frames: on="validation" (the frames used to
+    pick the best round: what the choice is made on) or "test" (held-back frames)."""
     f0, f1 = without.get("f1") or 0.0, with_.get("f1") or 0.0
     gain = f1 - f0
     used = gain >= PASTE_MIN_GAIN
-    both = ("With copy-paste the model finds %s of the objects and is right %s (F1 %s); without it, %s and %s (F1 %s)"
-            % (_pct(with_.get("recall")), _pct(with_.get("precision")), _pct(f1),
+    where = " on the frames used for choosing" if on == "validation" else ""
+    both = ("With copy-paste the model finds %s of the objects%s and is right %s (F1 %s); without it, %s and %s (F1 %s)"
+            % (_pct(with_.get("recall")), where, _pct(with_.get("precision")), _pct(f1),
                _pct(without.get("recall")), _pct(without.get("precision")), _pct(f0)))
     if used:
         verdict = "Copy-paste is better, so this model uses it."
@@ -877,6 +1034,21 @@ def _left(s):
     if s < 60:
         return "under a minute left"
     return "about %d min left" % int(round(s / 60.0))
+
+
+def best_val_row(log_csv):
+    """The round train.py kept (best F1 on the frames used to pick the best round): precision, recall, f1,
+    centre_err_px on those frames (all None when the log can't be read)."""
+    try:
+        with open(log_csv, newline="") as f:
+            rows = [r for r in csv.DictReader(f) if _f(r.get("val_f1")) is not None]
+    except OSError:
+        rows = []
+    if not rows:
+        return dict(precision=None, recall=None, f1=0.0, centre_err_px=None, n_labels=None)
+    r = max(rows, key=lambda r: _f(r.get("val_f1")))
+    return dict(precision=_f(r.get("val_precision")), recall=_f(r.get("val_recall")), f1=_f(r.get("val_f1")),
+                centre_err_px=_f(r.get("val_centre_err_px")), n_labels=None)
 
 
 def best_val_f1(log_csv):

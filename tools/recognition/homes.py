@@ -129,18 +129,29 @@ def tracks_from_labels(objects_by_frame, frame_times, statuses=None):
     return out
 
 
-def find_visits(homes, tracks, still_px=DEFAULT_STILL_PX, camera=None):
+def visitor_name(obj, obj_names=None):
+    """The name of a followed object: obj_names[obj] (the roll call), or obj itself when it is a name."""
+    if obj_names and obj in obj_names and obj_names[obj]:
+        return obj_names[obj]
+    return obj if isinstance(obj, str) else None
+
+
+def find_visits(homes, tracks, still_px=DEFAULT_STILL_PX, camera=None, obj_names=None):
     """Visits: an object inside a home's radius and still (within still_px of where the stay
     started) for at least the home's still_s. tracks {obj: [(frame, t, x, y)]} in the home's camera
-    (pass camera= to keep only that camera's homes). Returns a list of dicts: home, obj, frame_start,
-    frame_end, t_start, t_end, x, y (mean place), still_s, off_px (distance from the home's centre)."""
+    (pass camera= to keep only that camera's homes). obj_names {obj: name} (the roll call): a home
+    with an owner then counts only visits by an object of that name (or of no known name: the caller
+    checks those). Returns a list of dicts: home, obj, frame_start, frame_end, t_start, t_end, x, y
+    (mean place), still_s, off_px (distance from the home's centre), name (the visitor's known name or
+    None)."""
     out = []
     for h in homes:
         if camera is not None and h.get("camera") != camera:
             continue
         need = float(h.get("still_s") or DEFAULT_STILL_S.get(h.get("kind"), 2.0))
         for obj, rows in tracks.items():
-            if h.get("owner") and isinstance(obj, str) and obj != h["owner"]:
+            vname = visitor_name(obj, obj_names)
+            if h.get("owner") and vname is not None and vname != h["owner"]:
                 continue
             run = []
 
@@ -148,7 +159,7 @@ def find_visits(homes, tracks, still_px=DEFAULT_STILL_PX, camera=None):
                 if len(run) >= 2 and run[-1][1] - run[0][1] >= need:
                     xs, ys = [r[2] for r in run], [r[3] for r in run]
                     mx, my = float(np.mean(xs)), float(np.mean(ys))
-                    out.append(dict(home=h["name"], obj=obj, frame_start=run[0][0], frame_end=run[-1][0],
+                    out.append(dict(home=h["name"], obj=obj, name=vname, frame_start=run[0][0], frame_end=run[-1][0],
                                     t_start=run[0][1], t_end=run[-1][1], x=mx, y=my,
                                     still_s=run[-1][1] - run[0][1], off_px=math.hypot(mx - h["x"], my - h["y"])))
 
@@ -186,14 +197,25 @@ def confirmations(visits, homes, frame_times=None):
 def anchors_from_visits(visits, homes, camera, obj_names=None, height_cm=0.0, outside=None, settings_sd_cm=None):
     """Visits -> {name: [Anchor]} for outside-data alignment: two full-pose anchors per visit (start
     and end of the stay: the object sat still at the home). The name is the home's owner, else
-    obj_names[obj], else (with outside=OutsideData) the one stream standing still then."""
+    obj_names[obj], else (with outside=OutsideData) the one stream standing still then.
+    A home's owner is never taken on trust: a visitor the roll call names differently is left out,
+    and a visitor of no known name counts for the owner only when the owner's own stream stood still
+    then (with outside=; without it the caller vouches for the visitor)."""
     by = {h["name"]: h for h in homes}
     out = {}
     for v in visits:
         h = by.get(v["home"])
         if h is None:
             continue
-        name = h.get("owner") or (obj_names or {}).get(v["obj"])
+        known = visitor_name(v["obj"], obj_names)
+        if h.get("owner"):
+            if known is not None and known != h["owner"]:
+                continue
+            if known is None and outside is not None and not stream_still(outside, h["owner"], v["t_start"], v["t_end"]):
+                continue
+            name = h["owner"]
+        else:
+            name = known
         if name is None and outside is not None:
             name = still_stream_at(outside, v["t_start"], v["t_end"])
         if name is None:
@@ -207,25 +229,40 @@ def anchors_from_visits(visits, homes, camera, obj_names=None, height_cm=0.0, ou
     return out
 
 
+def _still_score(st, t0, t1):
+    """How still one stream stood over [t0, t1] (0..1), or None when its rows can't tell."""
+    if not len(st):
+        return None
+    m = (st.t >= t0) & (st.t <= t1)
+    if m.sum() == 0:
+        i = np.searchsorted(st.t, t0) - 1
+        j = np.searchsorted(st.t, t1)
+        if i < 0 or j >= len(st):
+            return None
+        moved = st.frame == "own" and (abs(st.dist[j] - st.dist[i]) >= 0.5 or
+                                       abs(st.heading[j] - st.heading[i]) >= 2.0)
+        return 0.0 if moved else 1.0
+    return float(st.still[m].mean())
+
+
+def stream_still(outside, name, t0, t1, need=0.6):
+    """Did the stream called name stand still over [t0, t1]?"""
+    st = (outside.streams or {}).get(name)
+    if st is None:
+        return False
+    sc = _still_score(st, t0, t1)
+    return sc is not None and sc >= need
+
+
 def still_stream_at(outside, t0, t1):
     """The stream that clearly stood still over [t0, t1] (the most still samples, at least 60 %, and
     30 points ahead of every other; a stream with no rows then counts as still if it neither drove
     nor turned between the rows either side: a robot logs only while it runs). None if unclear."""
     score = {}
     for name, st in outside.streams.items():
-        if not len(st):
-            continue
-        m = (st.t >= t0) & (st.t <= t1)
-        if m.sum() == 0:
-            i = np.searchsorted(st.t, t0) - 1
-            j = np.searchsorted(st.t, t1)
-            if i < 0 or j >= len(st):
-                continue
-            moved = st.frame == "own" and (abs(st.dist[j] - st.dist[i]) >= 0.5 or
-                                           abs(st.heading[j] - st.heading[i]) >= 2.0)
-            score[name] = 0.0 if moved else 1.0
-        else:
-            score[name] = float(st.still[m].mean())
+        sc = _still_score(st, t0, t1)
+        if sc is not None:
+            score[name] = sc
     if not score:
         return None
     ranked = sorted(score.items(), key=lambda kv: -kv[1])

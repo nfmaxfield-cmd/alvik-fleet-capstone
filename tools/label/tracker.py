@@ -268,7 +268,19 @@ class Track:
         dt = min(max(0.0, t - self.t_last), 0.2)
         return self.x + self.vx * dt, self.y + self.vy * dt
 
+    def _leave_home(self):
+        """A home position's facing holds only while the object sits there: once anything else
+        places it (a guess, the chain, nothing at all), the facing carries on as a guess until its
+        own motion shows it again."""
+        if self.det_source == "home":
+            if self.heading is not None:
+                self.est.set_facing(self.heading, known=False)
+                self.h_status = "guess"
+            self.det_source = "track"
+
     def update(self, det, f, t, src):
+        if src != "home":
+            self._leave_home()
         self.x, self.y = float(det["x"]), float(det["y"])
         self.pos_hist.append((t, self.x, self.y))
         while len(self.pos_hist) > 2 and t - self.pos_hist[0][0] > 0.25:
@@ -302,6 +314,7 @@ class Track:
 
     def chain_move(self, f, t, x, y):
         """The appearance chain moved it (no detection)."""
+        self._leave_home()
         self.x, self.y = float(x), float(y)
         self.pos_hist.append((t, self.x, self.y))
         while len(self.pos_hist) > 2 and t - self.pos_hist[0][0] > 0.25:
@@ -313,6 +326,7 @@ class Track:
 
     def coast(self, f, t, looked=True):
         """No detection this frame: stay put, keep the last heading."""
+        self._leave_home()
         if looked:
             self.miss_run += 1
         self.vx *= 0.5
@@ -1220,11 +1234,18 @@ class TrackRun:
         self.snaps = {k: v for k, v in self.snaps.items() if k <= f}
 
     # --------------------------------------------------------------------------------------------
-    def run(self, anchors=None, reserved_ids=(), from_frame=0):
+    def run(self, anchors=None, reserved_ids=(), from_frame=0, until=None, cancel=None):
         """Track from from_frame on (earlier frames are reused). Returns
-        (rows by frame, track summary)."""
+        (rows by frame, track summary).
+
+        until: a window only: stop before frame `until` and change nothing kept here (the snapshots
+        and the last full run stay as they were); the rows returned are right up to `until` (the
+        caller keeps its older rows after it until a full run is done).
+        cancel: optional callable, asked every 50 frames: True stops the run, which then returns
+        (None, None) and keeps nothing (used for runs in the background that a newer change replaced)."""
         anchors = anchors or {}
         robot_px, img_size, params, motion_params = self.args
+        window = until is not None and until < len(self.dets)
         tk = Tracker(robot_px, img_size, params, motion_params, reserved_ids, self.det_source,
                      spots=self.spots, looker=self.looker, split_vote=self.split_vote)
         start = 0
@@ -1233,11 +1254,22 @@ class TrackRun:
             start = max(usable)
             tk.restore(self.snaps[start])
             tk.reserved |= set(int(i) for i in reserved_ids)
-        self.snaps = {k: v for k, v in self.snaps.items() if k <= start}
-        for f in range(start, len(self.dets)):
-            if f % self.snap_every == 0 and f not in self.snaps:
-                self.snaps[f] = tk.snapshot()
+        snaps = {k: v for k, v in self.snaps.items() if k <= start}
+        end = min(len(self.dets), int(until)) if window else len(self.dets)
+        for f in range(start, end):
+            if cancel is not None and f % 50 == 0 and cancel():
+                return None, None
+            if f % self.snap_every == 0 and f not in snaps:
+                snaps[f] = tk.snapshot()
             tk.step(f, self.times[f], self.dets[f], anchors.get(f))
+        if window:
+            # numbers handed out in the window are not given again before the full run is back
+            self.max_id = max(self.max_id, tk.next_id - 1)
+            rows = tk.all_rows()
+            for f in rows:
+                rows[f].sort(key=lambda r: r["obj"])
+            return {f: r for f, r in rows.items() if f < end}, tk.summary()
+        self.snaps = snaps
         if len(self.dets):
             tk.finish(len(self.dets) - 1, self.times[len(self.dets) - 1])
         rows = tk.all_rows()
@@ -1248,6 +1280,25 @@ class TrackRun:
         self._rows = rows
         self._flags = None
         return dict(rows), tk.summary()
+
+    def clone(self):
+        """A copy to run in the background (its own snapshots and results; the detections, times and
+        pictures are shared and only read). adopt() takes its results back."""
+        c = copy.copy(self)
+        c.snaps = dict(self.snaps)
+        c.spots = [dict(sp) for sp in self.spots]
+        c.splits = list(self.splits)
+        c._rows = dict(self._rows)
+        c._flags = None
+        return c
+
+    def adopt(self, other):
+        """Take the results of a run made on a clone()."""
+        self.snaps = other.snaps
+        self._rows = other._rows
+        self.splits = list(other.splits)
+        self.max_id = other.max_id
+        self._flags = None
 
     def frame_flags(self, f):
         """Flag names on frame f, from the last run (most urgent first)."""
@@ -1373,7 +1424,24 @@ def measure_checkins(dets_by_frame, times, robot_px, anchors, img_size=(640, 480
             if suggested is None:
                 suggested = 0.0
             break
-    return dict(pairs=pairs, by_length=bins, suggested_every_s=suggested, tolerance_r=tolerance)
+    # finer than the bins: the longest gap up to which (counting every pair with a gap that long or
+    # shorter, at least 5 of them) at least `share` were close; and, when not even the shortest gaps
+    # are, what went wrong with them, in counts
+    fine, why = None, None
+    srt = sorted(pairs, key=lambda q: q["gap_s"])
+    ok_n = 0
+    for i, q in enumerate(srt, 1):
+        ok_n += q["within"]
+        if i >= 5 and ok_n / i >= share:
+            fine = q["gap_s"]
+    if fine is None and len(srt) >= 5:
+        first = srt[:max(5, len(srt) // 4)]
+        why = dict(n=len(first), up_to_s=first[-1]["gap_s"], lost=sum(1 for q in first if not q["found"]),
+                   mixed=sum(1 for q in first if q["found"] and not q["within"] and q["other_id"] is not None),
+                   far=sum(1 for q in first if q["found"] and not q["within"] and q["other_id"] is None),
+                   close=sum(1 for q in first if q["within"]))
+    return dict(pairs=pairs, by_length=bins, suggested_every_s=suggested, tolerance_r=tolerance,
+                fine_every_s=round(fine, 1) if fine is not None else None, why_short=why)
 
 
 def main():

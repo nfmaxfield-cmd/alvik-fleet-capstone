@@ -277,7 +277,9 @@ def test_stand_in_needs_no_key_and_is_deterministic(tmp_path, home):
     assert h.read_log()[0]["sent_to_service"] is False
     items = [dict(id="i%d" % i, label="cup", crop=pic(40)) for i in range(20)]
     r1, r2 = h.second_check(items), h.second_check(items)
-    assert r1["suspects"] == r2["suspects"] and r1["checked"] == 20
+    strip = lambda r: [{k: v for k, v in x.items() if k != "call_id"} for x in r["suspects"]]   # noqa: E731
+    assert strip(r1) == strip(r2) and r1["checked"] == 20
+    assert all(x["call_id"] in r1["calls"] for x in r1["suspects"])          # each suspect knows its call
     s = h.setup_from_sentence("we track printed cubes and cylinders on a table")
     assert [c["name"] for c in s["classes"]] == ["cube", "cylinder"]
     d = h.draft_labels(np.zeros((480, 640, 3), np.uint8), "cube")

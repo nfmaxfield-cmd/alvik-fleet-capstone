@@ -20,6 +20,7 @@ Frames are fetched lazily and only where an object needs them; the crops are kep
 budget) so following the guesses again after a label is saved does not decode the video again.
 """
 import collections
+import threading
 import math
 
 import numpy as np
@@ -56,6 +57,7 @@ class Frames:
         self.cached_bytes = 0
         self._last = (None, None)        # (frame, picture): the last decoded frame
         self.stats = collections.Counter()
+        self._lock = threading.RLock()   # a following run in the background may read at the same time
 
     # --- for subclasses -------------------------------------------------------------------
     def _decode(self, f):
@@ -64,6 +66,10 @@ class Frames:
 
     # --------------------------------------------------------------------------------------
     def frame(self, f):
+        with self._lock:
+            return self._frame(f)
+
+    def _frame(self, f):
         if self._last[0] == f:
             return self._last[1]
         if f < 0 or f >= self.n:
@@ -74,6 +80,10 @@ class Frames:
         return img
 
     def window(self, f, x0, y0, x1, y1):
+        with self._lock:
+            return self._window(f, x0, y0, x1, y1)
+
+    def _window(self, f, x0, y0, x1, y1):
         x0, y0, x1, y1 = int(x0), int(y0), int(x1), int(y1)
         g = self.GRID
         bx0 = max(0, (x0 // g) * g)

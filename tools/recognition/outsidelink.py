@@ -141,6 +141,9 @@ def read_data(proj, rec, path, plugin=None, offset_s=0.0):
         return outside.read_outside(path, plugin or None, **opts)
     except KeyError as e:
         raise ValueError("No such kind of outside data: %s. Nothing was changed." % e)
+    except TypeError as e:          # a plug-in that does not take one of the settings (e.g. the offset)
+        raise ValueError("This kind of outside data can't use one of the settings given (%s). Clear the time "
+                         "offset box, or pick the kind of data by hand. Nothing was changed." % e)
     except ValueError as e:
         raise ValueError("%s. Pick the kind of data by hand, or check the folder. Nothing was changed." % e)
 
@@ -191,10 +194,23 @@ def build(proj, rec, session, say=print):
 
     # the followed objects on the floor (the person's labels win over the guesses on their frames)
     say("Matching the outside data to the objects on video (roll call) ...")
+    # a copy under the session's lock: the person may be labelling while this runs (after any re-track
+    # still running in the background has finished, so the guesses are whole)
+    if hasattr(session, "wait_settled"):
+        session.wait_settled(120)
+    lock = getattr(session, "lock", None)
+    if lock is not None:
+        lock.acquire()
+    try:
+        guesses = {f: [dict(r) for r in rs] for f, rs in session.guesses.items()}
+        frames = {f: dict(stt, objects=[dict(o) for o in stt["objects"]]) for f, stt in session.frames.items()}
+    finally:
+        if lock is not None:
+            lock.release()
     rows = {}
-    for f, rs in session.guesses.items():
-        rows[f] = [r for r in rs]
-    for f, stt in session.frames.items():
+    for f, rs in guesses.items():
+        rows[f] = rs
+    for f, stt in frames.items():
         if stt["state"] in ("edited", "reviewed"):
             rows[f] = [o for o in stt["objects"] if o["status"] != "rejected"]
     tracks_px = {}
@@ -211,6 +227,16 @@ def build(proj, rec, session, say=print):
         z = heights.get(pts[0][3], 0.0)
         tracks_cm[obj] = outside.track_floor([(p[0], p[1], p[2]) for p in pts], cam, z)
     names, _detail = outside.match_names(data.streams, tracks_cm) if tracks_cm else ({}, {})
+    clock_found = None
+    if not getattr(data, "clock_known", True) and names:
+        # nothing ties the data's clock to the video's: work the offset out from how fast each matched
+        # object moved on video and in the data (it does not need the floor alignment)
+        say("Working out the outside data's clock from how fast each object moved ...")
+        clock_found = find_offset(data, tracks_cm, names)
+        if clock_found and clock_found["offset_s"] is not None:
+            data = read_data(proj, rec, st["path"], st.get("plugin"),
+                             float(st.get("offset_s") or 0.0) + clock_found["offset_s"])
+            names, _detail = outside.match_names(data.streams, tracks_cm)
     obj_of = {n: o for o, n in names.items()}
 
     # anchors: home visits and "at home" events, the person's labels, a forward stretch seen on video
@@ -222,11 +248,11 @@ def build(proj, rec, session, say=print):
             anchors.setdefault(n, []).extend(lst)
     if hl:
         tr_home = homesmod.tracks_from_labels(rows, times)
-        visits = homesmod.find_visits(hl, tr_home, camera=key)
+        visits = homesmod.find_visits(hl, tr_home, camera=key, obj_names=names)
         z = heights.get(next(iter(cls_of.values())), 0.0)      # the streams' type (one height for the homes)
         add(homesmod.anchors_from_visits(visits, hl, cam, obj_names=names, height_cm=z, outside=data))
         add(homesmod.events_to_anchors(data.events, hl, cam, height_cm=z))
-    labelled = {f: v for f, v in session.frames.items() if v["state"] in ("edited", "reviewed")}
+    labelled = {f: v for f, v in frames.items() if v["state"] in ("edited", "reviewed")}
     add(outside.anchors_from_labels(labelled, times, cam, names, heights))
     for n, s in data.streams.items():
         if s.frame == "own" and n in obj_of and obj_of[n] in tracks_cm:
@@ -262,10 +288,46 @@ def build(proj, rec, session, say=print):
         summary.append(dict(name=nme, cls=cls_of[nme], obj=obj_of.get(nme), anchors=kinds, frames=placed.get(nme, 0),
                             text=al.describe()))
     out = dict(made=time.strftime("%Y-%m-%dT%H:%M:%S"), plugin=data.plugin, path=st["path"], camera_file=cam_path,
-               names={str(o): nm for o, nm in names.items()}, summary=summary, notes=list(data.notes),
-               clock=data.clock, n=n, labelled_frames=len(labelled), frames=compact)
+               names={str(o): nm for o, nm in names.items()}, summary=summary,
+               notes=list(data.notes) + ([clock_found["text"]] if clock_found else []),
+               clock=data.clock, clock_found=clock_found, n=n, labelled_frames=len(labelled), frames=compact)
     _write(os.path.join(proj.labels_dir(rec["id"]), DRAFTS_FILE), out)
     return {k: v for k, v in out.items() if k != "frames"}
+
+
+def find_offset(data, tracks_cm, names, min_corr=0.5):
+    """The outside data's clock offset from speed over time (outside.estimate_time_offset) for every
+    stream matched to a followed object; the median of the clear ones. Returns dict(offset_s, used,
+    tried, corr, text) with plain words; offset_s None when no stream gave a clear answer."""
+    import numpy as np
+    import outside
+    got = []
+    for obj, name in names.items():
+        stv = data.streams.get(name)
+        tr = tracks_cm.get(obj)
+        if stv is None or tr is None:
+            continue
+        off, c = outside.estimate_time_offset(stv, tr)
+        if off is not None and c >= min_corr:
+            got.append((off, c, name))
+    if not got:
+        return dict(offset_s=None, used=0, tried=len(names), corr=None,
+                    text=("The outside data's clock is not tied to the video's (no clock file came with it), and how "
+                          "the objects moved did not show a clear time difference either, so the times were used as "
+                          "they are. If the guesses run ahead of or behind the objects, type the difference in the "
+                          "time offset box and press Line up again."))
+    offs = sorted(g[0] for g in got)
+    off = float(np.median(offs))
+    spread = (offs[-1] - offs[0]) if len(offs) > 1 else 0.0
+    way = "behind" if off > 0 else "ahead of"
+    text = ("The outside data's clock is not tied to the video's (no clock file came with it), so it was worked "
+            "out from how fast each object moved on video and in the data: the data runs %.2f s %s the video "
+            "(from %d of %d object%s%s). Its times were moved by %+.2f s. To set it yourself instead, type the "
+            "difference in the time offset box and press Line up again." % (
+                abs(off), way, len(got), len(names), "" if len(names) == 1 else "s",
+                ", agreeing within %.2f s" % spread if len(got) > 1 else "", off))
+    return dict(offset_s=round(off, 3), used=len(got), tried=len(names), corr=round(float(np.mean([g[1] for g in got])), 3),
+                spread_s=round(spread, 3), text=text)
 
 
 def drafts_info(proj, rid):
@@ -352,34 +414,64 @@ def preset_homes(preset_id, name, camera_key, cam, click1, click2, owner=None, v
 
 def home_refiner(home_list, camera_key):
     """The Session's `refine` argument: an object sitting still at a home position is a free confirmation
-    there (exact place and facing). Returns None when there are no homes."""
+    there (exact place and facing). Returns None when there are no homes.
+
+    A visit counts only when the visitor fits the home: of the home's object type (when the project has
+    that type), and, for a home with an owner, not named otherwise by the roll call (the outside data's
+    names). The guesses it makes replace only guesses of that type at the spot (never other objects),
+    its facing holds only while the object sits there, and they are never accepted without a person
+    looking (Session.auto_accept_frames leaves frames with a home guess alone)."""
     hl = [h for h in home_list or [] if (h.get("camera") or "default") == camera_key]
     if not hl:
         return None
 
     def refine(session):
+        import collections
         import homes as homesmod
         times = {f: session.rec.times[f] for f in range(session.rec.n)}
         tracks = homesmod.tracks_from_labels(session.guesses, times)
         visits = homesmod.find_visits(hl, tracks, camera=camera_key)
         by = {h["name"]: h for h in hl}
-        dets, out = {}, []
+        dets, out, skipped = {}, [], []
         for v in visits:
             h = by[v["home"]]
-            cls = h.get("cls") if h.get("cls") in session.classes else None
-            if cls is None:
-                row = next((r for r in session.guesses.get(v["frame_start"], []) if r["obj"] == v["obj"]), None)
-                cls = row["cls"] if row else None
+            span = range(v["frame_start"], v["frame_end"] + 1)
+            step = max(1, len(span) // 12)
+            rows = [r for f in span[::step] for r in session.guesses.get(f, []) if r["obj"] == v["obj"]]
+            seen_cls = collections.Counter(r["cls"] for r in rows).most_common(1)
+            seen_cls = seen_cls[0][0] if seen_cls else None
+            if h.get("cls") in session.classes:
+                if seen_cls != h["cls"]:
+                    skipped.append("%s: the object sitting there (%s) is not a %s" % (h["name"], seen_cls or "unknown", h["cls"]))
+                    continue
+                cls = h["cls"]
+            else:
+                cls = seen_cls
             if cls is None:
                 continue
-            for f in range(v["frame_start"], v["frame_end"] + 1):
+            name = None
+            names = collections.Counter()
+            for f in span[::step]:
+                nm = session.names_at(f).get(v["obj"])
+                if nm:
+                    names[nm] += 1
+            if names:
+                name = names.most_common(1)[0][0]
+            if h.get("owner") and name is not None and name != h["owner"]:
+                skipped.append("%s: the object sitting there is %s, not %s" % (h["name"], name, h["owner"]))
+                continue
+            for f in span:
                 dets.setdefault(f, []).append(dict(x=h["x"], y=h["y"], cls=cls, score=HOME_SCORE, source="home",
                                                    heading_deg=h.get("facing_deg"), replace_px=float(h["radius"]),
-                                                   name=h.get("owner")))
+                                                   name=name))
             out.append(dict(home=h["name"], obj=v["obj"], frame_start=v["frame_start"], frame_end=v["frame_end"],
-                            seconds=round(v["still_s"], 1)))
-        note = ("Home positions: %d visit%s found, each a free confirmation of the visitor's place%s." % (
-            len(out), "" if len(out) == 1 else "s", " and facing" if any(h.get("facing_deg") is not None for h in hl) else "")
-            if out else "Home positions: no visit found in this recording yet.")
-        return dict(dets=dets, visits=out, note=note)
+                            seconds=round(v["still_s"], 1), name=name))
+        note = ("Home positions: %d visit%s found, each a free guess of the visitor's place%s (shown for you to "
+                "check; never accepted without you)." % (
+                    len(out), "" if len(out) == 1 else "s",
+                    " and facing while it sits there" if any(h.get("facing_deg") is not None for h in hl) else "")
+                if out else "Home positions: no visit found in this recording yet.")
+        if skipped:
+            note += " Not used: %s." % "; ".join(skipped[:3]) + (" and %d more" % (len(skipped) - 3) if len(skipped) > 3 else "")
+        return dict(dets=dets, visits=out, skipped=skipped, note=note)
     return refine

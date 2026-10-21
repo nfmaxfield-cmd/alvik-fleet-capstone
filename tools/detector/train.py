@@ -253,7 +253,8 @@ def main():
             cfg["obj_size_px"][c] = 30.0
 
     # ---- data and split (whole recordings only) ----
-    all_samples = detcore.read_many(a.labels, cfg["classes"], neg_only=not a.no_hard_negatives)
+    all_samples = detcore.read_many(a.labels, cfg["classes"], neg_only=not a.no_hard_negatives,
+                                    sizes=cfg["obj_size_px"])
     # frames that hold only 'not an object here' spots join training only; they take no part in the split
     samples = [s for s in all_samples if not s.get("neg_only")]
     neg_frames = [s for s in all_samples if s.get("neg_only")]

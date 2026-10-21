@@ -6,8 +6,11 @@ company's own AI access (an API key from any supported service). Every answer is
 
 Where things live
     <user settings folder>/ai.json     the key(s). Default folder ~/.maxfield-irl (or the folder named
-                                       by the MAXFIELD_IRL_HOME variable). Owner-only permissions.
-                                       Never inside a project, never in a shared file.
+                                       by the MAXFIELD_IRL_HOME variable). On Mac and Linux the file is
+                                       made readable by its owner only (chmod 600). On Windows that has
+                                       no effect: the file is protected only by the Windows user profile
+                                       it sits in (other ordinary accounts can't open it; an administrator
+                                       of the computer can). Never inside a project, never in a shared file.
     <project>/ai_settings.json         this project's switch, service, model name, web address.
                                        No key in it. (Leave it, and ai_log.jsonl, out of shared files.)
     <project>/ai_log.jsonl             one line per call: time, task, what was sent (sizes only, not the
@@ -211,10 +214,38 @@ def http_post(url, headers, payload, timeout=TIMEOUT_S):
         return status, {}
 
 
+def check_base_url(url):
+    """The web address for an AI service, checked: empty (the service's usual address), https://..., or
+    http:// only to this computer itself (localhost, 127.0.0.1, ::1: a company proxy running locally).
+    Returns it cleaned; raises AIError with plain words otherwise (a key must never travel unencrypted
+    or to an address someone slipped into a shared project)."""
+    from urllib.parse import urlsplit
+    url = str(url or "").strip()
+    if not url:
+        return ""
+    try:
+        u = urlsplit(url)
+    except ValueError:
+        u = None
+    if u is None or u.scheme not in ("http", "https") or not u.hostname:
+        raise AIError("The web address \"%s\" is not one the AI helper can use: it must start with https:// "
+                      "(for example https://api.example.com/v1). Nothing was sent." % url[:120], "settings")
+    if u.scheme == "http" and u.hostname not in ("localhost", "127.0.0.1", "::1"):
+        raise AIError("The web address \"%s\" starts with http://, so your key would travel unencrypted. Use the "
+                      "https:// address of the service (http:// is allowed only for this computer itself, "
+                      "localhost). Nothing was sent." % url[:120], "settings")
+    return url.rstrip("/")
+
+
 def sdk_post(url, headers, payload, timeout=TIMEOUT_S):
-    """Same contract as http_post, through the official `anthropic` package (used when it is installed)."""
+    """Same contract as http_post, through the official `anthropic` package (used when it is installed).
+    A web address other than Anthropic's own (a company gateway) is passed on to the package."""
     import anthropic
-    client = anthropic.Anthropic(api_key=headers.get("x-api-key"), timeout=timeout, max_retries=0)
+    kw = {}
+    if url and url != ANTHROPIC_URL:
+        base = url[:-len("/v1/messages")] if url.endswith("/v1/messages") else url
+        kw["base_url"] = base
+    client = anthropic.Anthropic(api_key=headers.get("x-api-key"), timeout=timeout, max_retries=0, **kw)
     try:
         resp = client.messages.create(**payload)
         return 200, json.loads(resp.model_dump_json())
@@ -265,6 +296,24 @@ def explain_status(status, body, model=""):
     if status >= 500:
         return AIError("The AI service is having trouble right now. Try again later.", "server")
     return AIError("The AI service could not use the request%s." % ((" (" + d + ")") if d else ""), "request")
+
+
+def anthropic_url(base_url):
+    """The messages address from what a person typed: a base (https://gw.example.com), one ending in /v1,
+    or the full address ending in /v1/messages (each works; nothing is doubled)."""
+    b = base_url.rstrip("/")
+    if b.endswith("/v1/messages"):
+        return b
+    if b.endswith("/v1"):
+        return b + "/messages"
+    return b + "/v1/messages"
+
+
+def openai_url(base_url):
+    """The chat-completions address from a base ending in /v1 (or anything else) or the full address
+    ending in /chat/completions (never doubled)."""
+    b = base_url.rstrip("/")
+    return b if b.endswith("/chat/completions") else b + "/chat/completions"
 
 
 class Adapter:
@@ -320,7 +369,7 @@ class AnthropicAdapter(Adapter):
     def __init__(self, model="", key="", base_url="", post=None, **kw):
         super().__init__(model or DEFAULT_ANTHROPIC_MODEL, key, base_url, post or default_anthropic_post(), **kw)
         if base_url:
-            self.url = base_url.rstrip("/") + "/v1/messages"
+            self.url = anthropic_url(base_url)
 
     def headers(self):
         return {"x-api-key": self.key, "anthropic-version": ANTHROPIC_VERSION}
@@ -349,7 +398,7 @@ class OpenAICompatAdapter(Adapter):
 
     def __init__(self, model="", key="", base_url="", post=None, **kw):
         super().__init__(model or DEFAULT_OPENAI_MODEL, key, base_url or "https://api.openai.com/v1", post, **kw)
-        self.url = self.base_url.rstrip("/") + "/chat/completions"
+        self.url = openai_url(self.base_url)
 
     def headers(self):
         return {"Authorization": "Bearer " + self.key}
@@ -579,6 +628,7 @@ class AIHelper:
             s[k] = v
         if s["provider"] not in PROVIDERS:
             raise AIError("Unknown AI service \"%s\"." % s["provider"], "settings")
+        s["base_url"] = check_base_url(s.get("base_url"))
         os.makedirs(self.folder, exist_ok=True)
         tmp = self.settings_path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
@@ -608,7 +658,9 @@ class AIHelper:
     def _adapter(self):
         s = self.settings()
         cls = ADAPTERS[s["provider"]]
-        return cls(model=s["model"], key=self.keys.get(s["provider"]), base_url=s["base_url"], post=self._post,
+        # checked again here: a settings file written by hand (or by an older version) can't send the key elsewhere
+        base = check_base_url(s["base_url"]) if s["provider"] != "stand_in" else s["base_url"]
+        return cls(model=s["model"], key=self.keys.get(s["provider"]), base_url=base, post=self._post,
                    sleep=self._sleep)
 
     def _require_on(self):
@@ -721,7 +773,7 @@ class AIHelper:
         out = dict(suspects=[], checked=0, calls=[], source="ai")
         for i in range(0, len(items), batch):
             r = self.run("second_check", items=items[i:i + batch], known_types=list(known_types))
-            out["suspects"] += r["suspects"]
+            out["suspects"] += [dict(x, call_id=r["call_id"]) for x in r["suspects"]]
             out["checked"] += r["checked"]
             out["calls"].append(r["call_id"])
         return out
@@ -741,10 +793,15 @@ class AIHelper:
             with open(self.log_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry) + "\n")
 
-    def record_decision(self, call_id, accepted, note=""):
-        """Call when the person accepts or rejects a suggestion (accepted True/False)."""
-        self._log(dict(event="decision", id=call_id, time=time.strftime("%Y-%m-%dT%H:%M:%S"), accepted=bool(accepted),
-                       note=_short(note, 120)))
+    def record_decision(self, call_id, accepted, note="", item=None):
+        """Call when the person accepts or rejects a suggestion (accepted True/False). item: one suggestion
+        of a call that made several (a second check's suspect): each is counted on its own. accepted None:
+        the call suggested nothing to take or turn down (a second check with no doubts)."""
+        e = dict(event="decision", id=call_id, time=time.strftime("%Y-%m-%dT%H:%M:%S"),
+                 accepted=None if accepted is None else bool(accepted), note=_short(note, 120))
+        if item is not None:
+            e["item"] = str(item)
+        self._log(e)
 
     def read_log(self, limit=None):
         """Calls, newest last, each with `accepted` filled from later decision lines (None = not decided)."""
@@ -760,7 +817,13 @@ class AIHelper:
                         calls[e["id"]] = e
                         order.append(e["id"])
                     elif e.get("event") == "decision" and e.get("id") in calls:
-                        calls[e["id"]]["accepted"] = e.get("accepted")
+                        c = calls[e["id"]]
+                        if e.get("item") is not None:
+                            c.setdefault("items", {})[e["item"]] = e.get("accepted")
+                        elif e.get("accepted") is None:
+                            c["nothing"] = True
+                        else:
+                            c["accepted"] = e.get("accepted")
         except OSError:
             pass
         out = [calls[i] for i in order]
@@ -771,4 +834,10 @@ class AIHelper:
 
     def accepted_count(self):
         """For the time-saving stats: suggestions the person accepted."""
-        return sum(1 for e in self.read_log() if e.get("accepted") is True)
+        n = 0
+        for e in self.read_log():
+            if e.get("items"):
+                n += sum(1 for v in e["items"].values() if v is True)
+            elif e.get("accepted") is True:
+                n += 1
+        return n

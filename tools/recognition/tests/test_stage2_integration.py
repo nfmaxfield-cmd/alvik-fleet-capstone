@@ -262,6 +262,8 @@ def test_robot_logs_become_named_guesses_and_home_visits_confirm(tmp_path, roam)
         while (st.outside_job or {}).get("status") == "running" and time.time() - t0 < 300:
             time.sleep(0.2)
         assert st.outside_job["status"] == "done", st.outside_job
+        assert st.outside_job["applied"] is False and st.session.n_outside == 0     # never reopens by itself
+        assert _post(url + "api/studio/outside/apply", {})["reopened"]
         time.sleep(0.5)
         wait_open(st)
         s = st.session
@@ -413,8 +415,15 @@ def test_shared_project_file_leaves_out_the_ai_files(tmp_path, monkeypatch):
 def test_train_copy_paste_choice_and_learning_curve_extras(tmp_path, synth10, monkeypatch):
     proj, st, rid, server, url = studio_on(tmp_path, synth10)
     try:
+        import trainer as trainmod
+        # not enough checked frames yet: refused with the counts, the copy-paste choice kept as it was
+        code, j = _post_err(url + "api/studio/train", dict(minutes=5, copy_paste="compare"))
+        assert code == 400 and "training did not start" in j["error"]
+        assert projmod.Project(proj.folder).data["settings"].get("copy_paste", "off") == "off"
         monkeypatch.setattr(st.trainer, "start", lambda minutes: "v1")
+        monkeypatch.setattr(trainmod, "precheck", lambda p: dict(ok=True, text="Frames: enough."))
         r = _post(url + "api/studio/train", dict(minutes=5, copy_paste="compare"))
+        r.pop("precheck")
         assert r == dict(model="v1", copy_paste="compare", copy_paste_before="off")
         assert projmod.Project(proj.folder).data["settings"]["copy_paste"] == "compare"
         code, j = _post_err(url + "api/studio/train", dict(minutes=5, copy_paste="maybe"))
@@ -520,7 +529,7 @@ def test_click_through_every_new_part(tmp_path, roam, monkeypatch):
             # --- Train new model: the copy-paste choice (cancelled)
             page.click("#strain")
             page.wait_for_selector("#tcp")
-            assert "keep whichever scores better" in page.text_content("#tcp")
+            assert "keep whichever does better" in page.text_content("#tcp")
             _shot(page, "02-train-copy-paste")
             page.click("#modal .actions button:has-text(\"Cancel\")")
 

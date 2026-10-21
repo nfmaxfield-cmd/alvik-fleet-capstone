@@ -132,7 +132,8 @@ def test_undo_change_all_keeps_a_later_edit(tmp_path, still):
     s = open_with_frames(d, [10, 20, 30])
     obj = [dict(obj=1, cls="box", x=50, y=50, status="corrected", source="user")]
     s.save_frame(20, obj, "reviewed", "spot")
-    s.save_frame(30, [dict(obj=2, cls="box", x=52, y=50, status="corrected", source="user")], "reviewed", "spot")
+    # (another object, elsewhere: one labelled at frame 20's spot would keep number 1, a still object)
+    s.save_frame(30, [dict(obj=2, cls="box", x=152, y=50, status="corrected", source="user")], "reviewed", "spot")
     tok = s.change_at([dict(frame=20, obj=1), dict(frame=30, obj=2)], "unsure")["token"]
     s.save_frame(20, [dict(obj=1, cls="box", x=99, y=99, status="corrected", source="user")], "reviewed", "spot")
     res = s.undo_change(tok)

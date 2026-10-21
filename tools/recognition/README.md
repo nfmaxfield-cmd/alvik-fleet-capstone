@@ -188,13 +188,16 @@ and which change saved work. The **?** button at the top right shows the tour ag
    labelling. Guesses you rejected are used as "not an object here" examples. **Copy-paste** (in the
    same window) pastes objects you labelled onto other learning frames, so the model sees more of
    them: *Off*, *On*, or *Compare*, which trains twice (with and without, half the time each) and
-   keeps whichever scores better on the held-back frames; Learning curve then shows both scores and
-   the verdict in words. The top bar says how far it is in plain words ("round 4 of about 30, about 6 min
+   keeps whichever does better on the frames used for picking the best round (only the kept one is
+   then scored on the held-back frames, so that score stays honest); Learning curve then shows both
+   scores and the verdict in words. The top bar says how far it is in plain words ("round 4 of about 30, about 6 min
    left"). It needs at least 10 confirmed frames for learning and 1 in each of the other two
-   parts; if it hasn't got them, it says how many each part has and what to do. When it is done, a
+   parts, and the two smaller parts need frames a person looked at (auto-accepted frames are only
+   used for learning); if it hasn't got them, it says how many each part has and what to do, before
+   anything starts. When it is done, a
    box says how well the new model does. If the model was saved but **finds nothing yet**, the
-   box says so ("not enough labels or training time yet: label more frames, spread over the
-   recording, or train longer"); such a model is hidden from the lists (see 6) and the next
+   box says so, with the numbers it knows: how many frames and minutes it learned from, and what a
+   model of this project that does find objects needed (or that no model here has yet); such a model is hidden from the lists (see 6) and the next
    model does not start from it.
 5. **Guesses from:** pick the new model. Its guesses replace the motion guesses on every frame
    nobody has confirmed yet, so the next frames need fewer fixes. Repeat from 3.
@@ -597,6 +600,11 @@ place and facing, and robot logs are lined up again there. The panel says how ma
 Optional and off unless you switch it on (**More**, then **AI helper**): an AI service your company
 already uses looks at **small pictures** and suggests answers. Choose the service, paste its key (kept
 on this computer only, never in the project or a shared file), tick **Use the AI helper**, and Save.
+The key is kept in your own settings folder (`.maxfield-irl` in your home folder). On Mac and Linux
+only your account can read that file; on Windows it is protected by your Windows user profile (other
+ordinary accounts on the computer can't open it, but an administrator can). A web address for the
+service must start with `https://` (`http://` only for `localhost`). A shared project never brings
+its own AI settings: they are left out when you open it, so the helper starts off there.
 The window shows about what one question costs. While it is on, a purple **AI on** tag at the top says
 where pictures can go (click it for the settings).
 

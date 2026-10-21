@@ -198,6 +198,11 @@ def _situation_rows(proj):
         return None
 
 
+# each situation as words that fit "The model does worst with ..."
+SITUATION_PHRASES = dict(alone="objects on their own", close="objects close together", person="objects near a person",
+                         edge="objects at the edge of the work area or picture", still="objects standing still")
+
+
 def situations_html(proj, best):
     """Accuracy by situation for the best model (and, beside it, the start with no model), on the
     held-back frames. Groups that rest on few labels are marked."""
@@ -213,8 +218,8 @@ def situations_html(proj, best):
     ok = [r for r in shown if r["n_labels"] and not r["few"] and r["found"] is not None]
     if ok:
         w = min(ok, key=lambda r: r["found"])
-        out.append("<p class='lead'>The model finds the fewest where objects are <b>%s</b>: %s of %d labels.</p>"
-                   % (e(w["name"].lower()), _pct(w["found"]), w["n_labels"]))
+        out.append("<p class='lead'>The model does worst with <b>%s</b>: it finds %s of %d such labels.</p>"
+                   % (e(SITUATION_PHRASES.get(w["situation"], w["name"].lower())), _pct(w["found"]), w["n_labels"]))
     else:
         out.append("<p class='lead'>No situation has enough labels yet (%d labels and %d different objects needed) to "
                    "say where the model is weakest.</p>" % (situations.MIN_LABELS, situations.MIN_OBJECTS))
@@ -258,8 +263,16 @@ def training_extras_html(proj):
                 % (" (kept)" if not cp["used"] else "", _pct(a.get("recall")), _pct(a.get("precision")), _pct(a.get("f1")),
                    _num(a.get("centre_err_px")), " (kept)" if cp["used"] else "", _pct(b.get("recall")),
                    _pct(b.get("precision")), _pct(b.get("f1")), _num(b.get("centre_err_px"))))
-        out.append("<li style='list-style:none'>%s<span class='muted'>Both scored on the same %s held-back labels; each was "
-                   "trained for up to %s minutes.</span></li>" % (rows, _num(b.get("n_labels"), 0), _num(cp.get("minutes_each"), 0)))
+        if cp.get("decided_on") == "validation":
+            t = cp.get("test") or {}
+            how = ("Both scored on the same frames used for picking the best training round (that is where the choice "
+                   "is made); only the kept one was then scored on the held-back frames: found %s, right %s, F1 %s. "
+                   "Each was trained for up to %s minutes." % (_pct(t.get("recall")), _pct(t.get("precision")),
+                                                              _pct(t.get("f1")), _num(cp.get("minutes_each"), 0)))
+        else:       # models compared before this was changed: both were scored on the held-back frames
+            how = ("Both scored on the same %s held-back labels; each was trained for up to %s minutes."
+                   % (_num(b.get("n_labels"), 0), _num(cp.get("minutes_each"), 0)))
+        out.append("<li style='list-style:none'>%s<span class='muted'>%s</span></li>" % (rows, how))
     elif cp:
         out.append("<li>%s</li>" % e(cp["text"]))
     if not out:

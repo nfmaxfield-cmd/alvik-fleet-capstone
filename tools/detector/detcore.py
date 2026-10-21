@@ -134,7 +134,29 @@ def _float_or_none(s):
     return float(s) if s else None
 
 
-def read_labels(label_dir, classes=None, verbose=True, neg_only=False):
+NEG_CLEAR = 0.5     # a rejected spot closer than this many object sizes to a real (or unchecked) object is not used
+
+
+def _neg_clear_of(negs, rows, sizes):
+    """Rejected spots that are clear of every non-rejected row of the frame (confirmed, corrected, or
+    still pending): a rejected guess sitting on a real object (a duplicate, a guess a little off) must
+    not teach "nothing here" on that object. Returns (kept, dropped count)."""
+    sizes = sizes or DEFAULT_OBJ_SIZE_PX
+    real = []
+    for r in rows:
+        x, y = _float_or_none_safe(r.get("x_px")), _float_or_none_safe(r.get("y_px"))
+        if x is not None and y is not None:
+            real.append((x, y, float(sizes.get((r.get("cls") or "").strip(), 30.0))))
+    keep = []
+    for n in negs:
+        lim_n = float(sizes.get(n.get("cls") or "", 30.0))
+        if any(math.hypot(n["x"] - x, n["y"] - y) < NEG_CLEAR * max(sz, lim_n) for x, y, sz in real):
+            continue
+        keep.append(n)
+    return keep, len(negs) - len(keep)
+
+
+def read_labels(label_dir, classes=None, verbose=True, neg_only=False, sizes=None):
     """Read one labels folder and return a list of samples (one per usable frame):
 
         dict(recording, label_dir, frame, image, objects=[dict(cls, x, y, heading, obj)])
@@ -154,6 +176,9 @@ def read_labels(label_dir, classes=None, verbose=True, neg_only=False):
       rejected, or the rest is still pending) is returned too when it has such spots, marked
       neg_only=True with no objects: it may be trained on only around those spots, never scored
       or used to pick the best round (its other objects are not all labelled).
+    - a rejected spot within half an object size (sizes {cls: px}, default DEFAULT_OBJ_SIZE_PX) of any
+      row that is not rejected (a real object, or one still unchecked) is not used: it would teach
+      "nothing here" on top of a real object.
     """
     classes = classes or DEFAULT_CLASSES
     path = os.path.join(label_dir, "labels.csv")
@@ -169,6 +194,7 @@ def read_labels(label_dir, classes=None, verbose=True, neg_only=False):
     samples, skipped_pending, missing_img, unknown_cls = [], 0, 0, set()
     rec = recording_name(label_dir)
     n_neg_only = 0
+    n_neg_dropped = 0
     for fr in sorted(rows_by_frame):
         rows = [r for r in rows_by_frame[fr] if (r.get("status") or "").strip() != "rejected"]
         negs = []
@@ -177,6 +203,8 @@ def read_labels(label_dir, classes=None, verbose=True, neg_only=False):
                 nx, ny = _float_or_none_safe(r.get("x_px")), _float_or_none_safe(r.get("y_px"))
                 if nx is not None and ny is not None:
                     negs.append(dict(x=nx, y=ny, cls=(r.get("cls") or "").strip()))
+        negs, _dropped = _neg_clear_of(negs, rows, sizes)
+        n_neg_dropped += _dropped
         pending = bool(rows) and any((r.get("status") or "").strip() not in GOOD_STATUS for r in rows)
         if not rows or pending:
             img = os.path.join(label_dir, "frames", f"{fr:06d}.jpg")
@@ -220,6 +248,8 @@ def read_labels(label_dir, classes=None, verbose=True, neg_only=False):
         print(msg)
     if verbose and n_neg_only:
         print(f"{rec}: {n_neg_only} more frame(s) usable only as 'not an object here' examples")
+    if verbose and n_neg_dropped:
+        print(f"{rec}: {n_neg_dropped} rejected spot(s) not used as 'not an object here': they sit on a real object")
     return samples
 
 
@@ -243,11 +273,11 @@ def distinct_objects(samples):
     return {c: len(v) for c, v in seen.items()}
 
 
-def read_many(paths, classes=None, verbose=True, neg_only=False):
+def read_many(paths, classes=None, verbose=True, neg_only=False, sizes=None):
     """Read every labels folder found under `paths`. Returns a list of samples."""
     out = []
     for d in find_label_dirs(paths):
-        out.extend(read_labels(d, classes, verbose, neg_only))
+        out.extend(read_labels(d, classes, verbose, neg_only, sizes))
     return out
 
 
@@ -417,7 +447,26 @@ def decode(heat, offset, heading, cfg, scale_xy, score_thresh=0.3, max_objects=5
                         h = vec_to_heading(co / sx, -s / sy)
             dets.append(dict(cls=name, x=px, y=py, heading_deg=h, score=float(heat[c, yy, xx])))
     dets.sort(key=lambda d: -d["score"])
+    dets = one_per_place(dets, sizes)
     return dets[:max_objects]
+
+
+SAME_PLACE = 0.5      # two guesses closer than this many object sizes (the smaller type's) are one object
+
+
+def one_per_place(dets, sizes=None, frac=SAME_PLACE):
+    """One object per place, whatever its type: of guesses closer together than frac times the smaller
+    of their two types' sizes, only the highest-scoring is kept (a model often marks one object under
+    two types when it is not sure which). dets sorted or not; returns them highest score first."""
+    sizes = sizes or DEFAULT_OBJ_SIZE_PX
+    keep = []
+    for d in sorted(dets, key=lambda d: -float(d.get("score", 0.0))):
+        sd = float(sizes.get(d.get("cls"), 30.0))
+        if any(math.hypot(d["x"] - k["x"], d["y"] - k["y"]) < frac * min(sd, float(sizes.get(k.get("cls"), 30.0)))
+               for k in keep):
+            continue
+        keep.append(d)
+    return keep
 
 
 # --------------------------------------------------------------------------

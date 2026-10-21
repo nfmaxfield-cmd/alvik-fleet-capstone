@@ -1718,13 +1718,15 @@ $("strain").addEventListener("click", () => {
       (pp.edge ? " (" + pp.edge + " at piece edges are not used)" : "") + ". Training needs at least 10 for learning and 1 in each of the others, over all recordings.</p>" : "") +
     '<div class="row">Train for at most <input id="tmin" type="number" min="2" max="240" value="' + (s.settings.train_minutes || 20) + '"> minutes</div>' +
     '<p style="margin:10px 0 2px"><b>Copy-paste</b> <span class="muted">(objects you labelled are pasted onto other learning frames, so the model sees more of them)</span></p>' +
-    '<div class="choice" id="tcp">' + [["off", "Off", "Train as usual."], ["compare", "Compare", "Train twice, with and without it (each gets half the time), and keep whichever scores better on the held-back frames."], ["on", "On", "Always use it, without comparing."]]
-      .map((o) => '<label data-v="' + o[0] + '"' + ((s.settings.copy_paste || "off") === o[0] || (o[0] === "on" && s.settings.copy_paste === true) ? ' class="on"' : "") + '><input type="radio" name="tcp"' + ((s.settings.copy_paste || "off") === o[0] ? " checked" : "") + "> <b>" + o[1] + '</b><span class="muted">' + o[2] + "</span></label>").join("") + "</div>" +
+    '<div class="choice" id="tcp">' + [["off", "Off", "Train as usual."], ["compare", "Compare", "Train twice, with and without it (each gets half the time), and keep whichever does better on the frames used for picking the best round; only the kept one is then scored on the held-back frames."], ["on", "On", "Always use it, without comparing."]]
+      .map((o) => { const cur = s.settings.copy_paste === true ? "on" : (s.settings.copy_paste || "off"); return '<label data-v="' + o[0] + '"' + (cur === o[0] ? ' class="on"' : "") + '><input type="radio" name="tcp" value="' + o[0] + '"' + (cur === o[0] ? " checked" : "") + "> <b>" + o[1] + '</b><span class="muted">' + o[2] + "</span></label>"; }).join("") + "</div>" +
     '<p class="muted">You can keep labelling while it trains. When it finishes, it appears in "Guesses from". Your labels are not changed. Rejected guesses are used as "not an object here" examples.</p>' +
     '<div class="actions"><button class="sbtn" onclick="closeModal()">Cancel</button><button class="sbtn primary" id="tgo">Start training</button></div>');
-  $("tcp").querySelectorAll("label").forEach((lab) => lab.addEventListener("click", () => { $("tcp").querySelectorAll("label").forEach((l) => l.classList.toggle("on", l === lab)); lab.querySelector("input").checked = true; }));
+  // the checked radio is the choice (each has its own value); the highlight follows it
+  const tcpSync = () => $("tcp").querySelectorAll("label").forEach((l) => l.classList.toggle("on", l.querySelector("input").checked));
+  $("tcp").querySelectorAll("input").forEach((inp) => inp.addEventListener("change", tcpSync));
   $("tgo").onclick = async () => {
-    const on = $("tcp").querySelector("label.on"), cp = on ? on.dataset.v : "off";
+    const picked = $("tcp").querySelector("input[name=tcp]:checked"), cp = picked ? picked.value : "off";
     try { const j = await withBusy("Starting the training ...", () => api("/api/studio/train", { minutes: parseFloat($("tmin").value), copy_paste: cp })); closeModal();
       toast("Training " + (j.model ? "model " + j.model + " " : "") + "started in the background (the bar at the top shows how far)" + (cp === "compare" ? ", once with and once without copy-paste" : cp === "on" ? ", with copy-paste" : "") + ". Keep labelling. Your labels are not changed; when it is done, the new model is offered in Guesses from, and nothing switches by itself." +
         (j.copy_paste_before !== j.copy_paste ? " Copy-paste is now " + j.copy_paste + " for the next models too (was " + j.copy_paste_before + "); this window changes it back." : "")); pollStudio(); }
@@ -1820,7 +1822,7 @@ async function renderCheckins(start) {
   let v;
   try { v = start ? await api("/api/checkins", {}) : await api("/api/checkins"); } catch (e) { box.innerHTML = esc(e.message); return; }
   if (v.status === "running") {
-    box.innerHTML = "Measuring on your labels: " + (v.total ? v.done + " of " + v.total + " stretches between labels" : "starting") + (v.left ? " · " + esc(v.left) : "") + " ... (you can close this window; it carries on)";
+    box.innerHTML = (v.again ? "Your labels changed since the last measurement (" + v.labelled_then + " labelled frames then, " + v.labelled_now + " now), so it is measured again. " : "") + "Measuring on your labels: " + (v.total ? v.done + " of " + v.total + " stretches between labels" : "starting") + (v.left ? " · " + esc(v.left) : "") + " ... (you can close this window; it carries on)";
     setTimeout(() => renderCheckins(false), 800); return;
   }
   const btn = '<button class="sbtn" id="ckgo">' + (v.status === "done" ? "Measure again" : "Measure it on my labels") + "</button>";
@@ -1831,7 +1833,9 @@ async function renderCheckins(start) {
     const r = v.result, rows = (r.by_length || []).map((b) => "<tr><td>" + (b.up_to_s != null ? "up to " + b.up_to_s + " s" : "longer") + "</td><td>" + b.n + "</td><td>" + fmtPct(b.within) + "</td><td>" + (b.median_r == null ? "-" : fmtN(b.median_r, 2)) + "</td></tr>").join("");
     const sug = r.suggested_every_s;
     box.innerHTML = '<p style="color:var(--text)">' + (r.no_limit ? "However long it was since your last label, " + fmtPct(0.95) + " or more of the guesses were within a quarter of an object of where you put it: the guesses hold well here." : sug == null ? "Not enough pairs of labels of the same object yet to say. Label the same objects on more frames, then measure again." :
-      sug === 0 ? "Even shortly after a label, fewer than " + fmtPct(0.95) + " of the guesses were close: check every object often." :
+      sug === 0 ? (r.fine_every_s ? "Check each object at least every <b>" + r.fine_every_s + " s</b>: up to then, " + fmtPct(0.95) + " or more of the guesses were within a quarter of an object of where you put it (after that, fewer were)." :
+        r.why_short ? "Even " + r.why_short.up_to_s + " s or less after a label, fewer than " + fmtPct(0.95) + " of the guesses were close, so no safe interval can be given here: of " + r.why_short.n + " such checks, " + r.why_short.close + " were close, " + r.why_short.far + " were further off" + (r.why_short.mixed ? ", " + r.why_short.mixed + " had swapped numbers with a neighbour" : "") + (r.why_short.lost ? ", and " + r.why_short.lost + " were lost (no guess at all)" : "") + ". Look at each object every time you label a frame." :
+        "Even shortly after a label, fewer than " + fmtPct(0.95) + " of the guesses were close, and there are too few pairs of labels (under 5) to say more. Label the same objects on more frames, then measure again.") :
       "Check each object at least every <b>" + sug + " s</b>: up to then, " + fmtPct(0.95) + " or more of the guesses were within a quarter of an object of where you put it.") + "</p>" +
       (rows ? "<table><tr><th>Time since your last label of it</th><th>Times</th><th>Close (within a quarter object)</th><th>Typical miss (object sizes)</th></tr>" + rows + "</table>" : "") +
       '<p class="muted">Measured ' + esc((r.measured || "").replace("T", " ")) + " on " + plural(r.labelled_frames || 0, "labelled frame") + " of this recording. " + btn + "</p>";
@@ -2578,10 +2582,12 @@ async function waitOutside() {
       await sleep(400);
     }
   } finally { S.waiting = false; hideLoading(); }
-  api("/api/studio/outside/done", {}).catch(() => {});
   if (!j) return null;
-  if (j.status === "failed") { toast("The outside data was not used: " + j.error, true); await afterReopen("Opening ..."); return null; }
-  await afterReopen("Following the guesses again with the outside data ...");
+  if (j.status === "failed") { api("/api/studio/outside/done", {}).catch(() => {}); toast("The outside data was not used: " + j.error, true); await afterReopen("Opening ..."); return null; }
+  // the recording opens again with the new guesses only now, while this page shows it (never by itself)
+  try { await api("/api/studio/outside/apply", {}); } catch (e) { toast(e.message, true); }
+  api("/api/studio/outside/done", {}).catch(() => {});
+  await afterReopen("Opening the recording again with the outside data's new guesses (your labels are saved) ...");
   return j.result;
 }
 async function applyOutside(u, verb, again) {
@@ -2666,7 +2672,7 @@ async function aiAsk(task, body, what) {
   try { return await withBusy(what + " (asking the AI service) ...", () => api("/api/studio/ai/ask", Object.assign({ task: task }, body))); }
   catch (e) { toast((e.data && e.data.kind ? "The AI helper could not answer: " : "") + e.message, true); return null; }
 }
-function aiDecide(ids, accepted, note) { ids = [].concat(ids).filter((x) => x); if (ids.length) api("/api/studio/ai/decision", { call_ids: ids, accepted: accepted, note: note || "" }).catch(() => {}); }
+function aiDecide(ids, accepted, note, item) { ids = [].concat(ids).filter((x) => x); if (ids.length) api("/api/studio/ai/decision", Object.assign({ call_ids: ids, accepted: accepted, note: note || "" }, item != null ? { item: String(item) } : {})).catch(() => {}); }
 function confWords(c) { return c >= 0.8 ? "fairly sure" : c >= 0.55 ? "somewhat sure" : "not sure"; }
 // Name this object (the selected one)
 $("ainame").addEventListener("click", async () => {
@@ -2707,11 +2713,11 @@ $("aicheck").addEventListener("click", async () => {
         '<p class="muted">Look takes you to the frame with the object selected: press ? to mark it unsure, a number key to change its type, or leave it. "It is right" keeps your label. Either answer is noted.</p>' : "<p>Nothing to look at. Noted in the AI helper's record.</p>") +
       '<div class="actions"><button class="sbtn" id="aiclose">Close</button></div>');
     $("modal").classList.add("wide");
-    if (!sus.length) aiDecide(r.calls, true, "no suspects");
+    if (!sus.length) aiDecide(r.calls, null, "no suspects");
     $("aiclose").onclick = () => closeModal();
-    $("modal").querySelectorAll("[data-no]").forEach((b) => b.onclick = () => { const x = sus[+b.dataset.no]; aiDecide(r.calls, false, "kept " + x.id); b.closest("tr").style.opacity = 0.45; b.disabled = true; toast("Kept your label on frame " + x.frame + " (#" + x.obj + "): nothing changed."); });
+    $("modal").querySelectorAll("[data-no]").forEach((b) => b.onclick = () => { const x = sus[+b.dataset.no]; aiDecide(x.call_id || r.calls, false, "kept " + x.id, x.id); b.closest("tr").style.opacity = 0.45; b.disabled = true; toast("Kept your label on frame " + x.frame + " (#" + x.obj + "): nothing changed."); });
     $("modal").querySelectorAll("[data-i]").forEach((b) => b.onclick = async () => {
-      const x = sus[+b.dataset.i]; aiDecide(r.calls, true, "looked at " + x.id);
+      const x = sus[+b.dataset.i]; aiDecide(x.call_id || r.calls, true, "looked at " + x.id, x.id);
       await jumpTo(x.frame, "timeline");
       const k = S.frame ? S.frame.objects.findIndex((o) => o.obj === x.obj) : -1;
       if (k >= 0) { S.sel = k; draw(); renderSide(); }

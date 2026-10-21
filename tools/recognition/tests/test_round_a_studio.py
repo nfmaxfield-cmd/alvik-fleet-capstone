@@ -114,7 +114,7 @@ def test_a_crash_in_the_trainer_thread_marks_the_job_failed(tmp_path, monkeypatc
     monkeypatch.setattr(trainer, "build_dataset", boom)
     mid = tr.start(minutes=1)
     _wait_job(tr)
-    assert tr.job["status"] == "failed" and "unexpected problem" in tr.job["message"]
+    assert tr.job["status"] == "failed" and "did not expect" in tr.job["message"]
     assert "Your labels are safe" in tr.job["message"] and "TypeError" in tr.job["message"]
     assert p.model(mid)["status"] == "failed"
     # even when saving the project fails at the very start, the job never stays "running"
@@ -137,12 +137,18 @@ def test_train_route_and_trainer_save_at_the_same_time(tmp_path):
             self.code, self.body = code, body
     for _ in range(5):
         h = H()
-        post(h, "/api/studio/train", dict(minutes=3))
-        _wait_job(st.trainer)
-        assert st.trainer.job["status"] == "failed"                 # no labels: a plain message
-        assert "Not enough confirmed frames" in st.trainer.job["message"]
+        with pytest.raises(ValueError) as e:                         # no labels: refused before anything starts
+            post(h, "/api/studio/train", dict(minutes=3))
+        assert "training did not start (nothing was changed)" in str(e.value)
     saved = json.load(open(p.path))
-    assert saved["settings"]["train_minutes"] == 3.0 and [m["status"] for m in saved["models"]] == ["failed"] * 5
+    assert saved["models"] == [] and st.trainer.job is None
+    # the trainer thread itself still checks, and ends failed with the same plain words
+    for _ in range(3):
+        st.trainer.start(3)
+        _wait_job(st.trainer)
+        assert st.trainer.job["status"] == "failed" and "Not enough finished frames" in st.trainer.job["message"]
+    saved = json.load(open(p.path))
+    assert [m["status"] for m in saved["models"]] == ["failed"] * 3
 
 
 # ---------------------------------------------------------------- the split

@@ -488,6 +488,10 @@ class Session:
         self.outside = dict(outside) if outside else None
         self.refined = None      # what refine() added (home visits), for the page
         self.checkins = None     # the "How often should I check?" measurement while it runs
+        self._track_gen = 0      # bumped by every re-track: a background run that is not the newest is dropped
+        self._bg_from = None     # a re-track from this frame is still running in the background
+        self._settled = threading.Event()
+        self._settled.set()
 
         self._load_review()
         self.robot_px = robot_px
@@ -587,10 +591,12 @@ class Session:
             if 0 <= f < len(self.dets) and ds:
                 have = list(self.dets[f] or [])
                 for d in ds:
-                    # replace_px: the guess replaces other guesses this close (a home visit is exact)
+                    # replace_px: the guess replaces other guesses of its type this close (a home visit is
+                    # exact); guesses of other types there (a hand reaching in) are kept
                     rp = d.get("replace_px")
                     if rp:
-                        have = [e for e in have if math.hypot(e["x"] - d["x"], e["y"] - d["y"]) > rp]
+                        have = [e for e in have if e.get("cls") != d.get("cls") or
+                                math.hypot(e["x"] - d["x"], e["y"] - d["y"]) > rp]
                 self.dets[f] = have + [{k: v for k, v in d.items() if k != "replace_px"} for d in ds]
                 added.append(f)
         self.refined = {k: v for k, v in out.items() if k != "dets"}
@@ -663,8 +669,14 @@ class Session:
         threading.Thread(target=work, daemon=True).start()
         return self.checkins_view()
 
-    def checkins_view(self):
-        """The running measurement, or the last saved one (labels/checkins.json), or nothing."""
+    def _labelled_count(self):
+        return sum(1 for st in self.frames.values() if st["state"] in ("edited", "reviewed")
+                   and any(o["status"] != "rejected" for o in st["objects"]))
+
+    def checkins_view(self, restart_if_stale=False):
+        """The running measurement, or the last saved one (labels/checkins.json), or nothing. A saved one
+        made on fewer (or other) labels than there are now is marked stale (labelled_then, labelled_now);
+        with restart_if_stale it is measured again at once (in the background)."""
         j = self.checkins
         if j and j["status"] == "running":
             return dict(j)
@@ -674,9 +686,21 @@ class Session:
         if os.path.exists(p):
             try:
                 with open(p) as f:
-                    return dict(status="done", result=json.load(f))
+                    res = json.load(f)
             except ValueError:
-                pass
+                res = None
+            if res is not None:
+                now_n = self._labelled_count()
+                then_n = res.get("labelled_frames")
+                if then_n is not None and then_n != now_n:
+                    if restart_if_stale and now_n >= 2:
+                        try:
+                            v = self.start_checkins()
+                            return dict(v, again=True, labelled_then=then_n, labelled_now=now_n)
+                        except ValueError:
+                            pass
+                    return dict(status="done", result=res, stale=True, labelled_then=then_n, labelled_now=now_n)
+                return dict(status="done", result=res)
         return dict(status="none")
 
     # --- guesses ---------------------------------------------------------------
@@ -864,6 +888,10 @@ class Session:
     def _update_conf(self):
         self.conf = {f: self._guess_conf(f) for f in self.selected}
 
+    def has_home_guess(self, f):
+        """A home visit's guess is on frame f (shown for a person to check, never accepted unseen)."""
+        return any(r.get("source") == "home" for r in self.guesses.get(f, ()))
+
     def conf_of(self, f):
         st = self.frames.get(f)
         if st and st.get("auto_conf") is not None:
@@ -1034,7 +1062,8 @@ class Session:
         sel = self.selected
         states = [self.frame_state(f) for f in sel]
         low = [f for f in sel if self.conf_of(f) < self.low_threshold]
-        high_pending = [f for f in sel if self.frame_state(f) == "pending" and self.conf_of(f) >= self.low_threshold]
+        high_pending = [f for f in sel if self.frame_state(f) == "pending" and self.conf_of(f) >= self.low_threshold
+                        and not self.has_home_guess(f)]
         spot = self.spot_result()
         return dict(selected=len(sel), reviewed=states.count("reviewed"), edited=states.count("edited"),
                     auto=states.count("auto"), pending=states.count("pending"), low=len(low),
@@ -1042,12 +1071,13 @@ class Session:
                     high_pending=len(high_pending), spot=spot, low_threshold=self.low_threshold,
                     unsure=len(self.unsure_frames()), parts=self.part_counts(), flagged_left=self.flagged_left(),
                     same=sum(1 for st in self.frames.values() if st["state"] == "auto" and st.get("how") == "same"),
-                    save_error=self.save_error)
+                    save_error=self.save_error, tracking=self.tracking_view())
 
     # --- spot check ---------------------------------------------------------------
     def draw_spot(self, fraction=0.1, min_n=10, seed=None):
         """Random sample of the high-confidence frames nobody has looked at
         (not yet reviewed, or auto-accepted)."""
+        self.settle()
         pool = [f for f in self.selected
                 if self.frame_state(f) in ("pending", "auto") and self.conf_of(f) >= self.low_threshold]
         n = min(len(pool), max(min_n, int(math.ceil(fraction * len(pool)))))
@@ -1114,6 +1144,44 @@ class Session:
                             score=None if (source == "user" or score is None) else round(float(score), 3)))
         return out
 
+    def _keep_numbers(self, f, objs):
+        """An object labelled where an object of the same type was labelled before, at the same spot
+        (within half an object size), keeps that object's number: a still object the guesses lost (or
+        picked up again under a new number) is the same object, not a new one each time it is labelled.
+        Only fresh numbers (on no other labelled frame) are changed, never to a number used on this
+        frame, and not when the older number was followed away from the spot in between (another
+        object of that type may have taken its place)."""
+        if not objs:
+            return objs
+        here_guess = {r["obj"]: r for r in self.guesses.get(f, [])}
+        labelled = {g: st for g, st in self.frames.items() if g != f and st["state"] in ("edited", "reviewed")}
+        if not labelled:
+            return objs
+        used_elsewhere = {o["obj"] for st in labelled.values() for o in st["objects"]}
+        taken = {o["obj"] for o in objs}
+        lim = 0.5 * float(self.robot_px)
+        order = sorted(labelled, key=lambda g: (abs(g - f), g > f))
+        for o in objs:
+            if o["status"] == "rejected" or o["obj"] in used_elsewhere:
+                continue
+            for g in order:
+                hit = next((p for p in labelled[g]["objects"] if p["status"] != "rejected" and p["cls"] == o["cls"]
+                            and math.hypot(p["x"] - o["x"], p["y"] - o["y"]) <= lim), None)
+                if hit is None:
+                    continue
+                old = hit["obj"]
+                elsewhere = here_guess.get(old)
+                lo, hi = (g, f) if g < f else (f, g)
+                left = any(math.hypot(r["x"] - o["x"], r["y"] - o["y"]) > lim
+                           for h in range(lo + 1, hi) for r in self.guesses.get(h, ()) if r["obj"] == old)
+                if old not in taken and not left and (
+                        elsewhere is None or math.hypot(elsewhere["x"] - o["x"], elsewhere["y"] - o["y"]) <= lim):
+                    taken.discard(o["obj"])
+                    o["obj"] = old
+                    taken.add(old)
+                break
+        return objs
+
     def _same_as_guesses(self, f, objects):
         g = {r["obj"]: r for r in self.guesses.get(f, [])}
         if len(objects) != len(g):
@@ -1140,7 +1208,7 @@ class Session:
                 self.frames.pop(f, None)
                 new_anchor = None
             else:
-                objs = self._clean_objects(objects)
+                objs = self._keep_numbers(f, self._clean_objects(objects))
                 changed = any(o["status"] in ("corrected", "rejected", "unsure") or o["source"] == "user"
                               for o in objs)
                 auto_conf = old["auto_conf"] if old and old.get("auto_conf") is not None else self.conf_of(f)
@@ -1302,13 +1370,40 @@ class Session:
                 self.save()
             return n
 
+    # Following the guesses again after a change: a short window right away (what the person looks at
+    # next), the rest of a long recording in the background, so a save never holds the session for
+    # seconds. A newer change replaces a background run that has not finished.
+    SYNC_FRAMES = 750           # frames followed again right away (30 s at 25 frames/s)
+    background_retrack = True
+
     def retrack(self, f):
         """Redo the tracking from frame f on. Returns how many selected,
-        not yet labelled frames got different guesses."""
+        not yet labelled frames got different guesses (in the part followed again right away)."""
         start = f if self.dirty_from is None else min(f, self.dirty_from)
+        if self._bg_from is not None:
+            start = min(start, self._bg_from)
         before = {g: [(r["obj"], r["x"], r["y"], r["cls"]) for r in self.guesses.get(g, [])]
                   for g in self.selected if g > start and self.frame_state(g) == "pending"}
-        self.guesses, self.summary = self.run.run(self._anchors(), self._reserved_ids(), from_frame=start)
+        anchors = {g: [dict(o) for o in objs] for g, objs in self._anchors().items()}
+        reserved = self._reserved_ids()
+        self._track_gen += 1
+        gen = self._track_gen
+        if not self.background_retrack or self.rec.n - start <= 2 * self.SYNC_FRAMES:
+            self.guesses, self.summary = self.run.run(anchors, reserved, from_frame=start)
+            self._bg_from = None
+            self._settled.set()
+        else:
+            until = start + self.SYNC_FRAMES
+            rows, _summ = self.run.run(anchors, reserved, from_frame=start, until=until)
+            merged = {g: r for g, r in rows.items() if g < until}
+            for g, r in self.guesses.items():
+                if g >= until:
+                    merged[g] = r
+            self.guesses = merged
+            self._bg_from = start
+            self._settled.clear()
+            clone = self.run.clone()
+            threading.Thread(target=self._bg_track, args=(gen, clone, anchors, reserved, start), daemon=True).start()
         self.dirty_from = None
         self._update_conf()
         n = 0
@@ -1318,6 +1413,57 @@ class Session:
                                            for a, b in zip(sorted(old), sorted(new))):
                 n += 1
         return n
+
+    def _bg_track(self, gen, clone, anchors, reserved, start):
+        """The rest of a re-track, in the background (see retrack). Kept only if no newer change came."""
+        try:
+            rows, summ = clone.run(anchors, reserved, from_frame=start, cancel=lambda: self._track_gen != gen)
+        except Exception as e:          # never stops the labelling: the next change (or settle) runs it again
+            traceback.print_exc()
+            self.log("Following the guesses again in the background stopped: %s" % e)
+            return
+        if rows is None:
+            return
+        with self.lock:
+            if self._track_gen != gen or getattr(self, "closed", False):
+                return
+            self.run.adopt(clone)
+            self.guesses, self.summary = rows, summ
+            self._bg_from = None
+            self._update_conf()
+            self.save()
+            self._settled.set()
+
+    def close(self):
+        """This session is being replaced (the recording opens again, or another one): a re-track still
+        running in the background is dropped, so it can never write this session's files afterwards."""
+        with self.lock:
+            self._track_gen += 1
+            self._bg_from = None
+            self.closed = True
+            self._settled.set()
+
+    def settle(self):
+        """Finish a background re-track now (for bulk actions that need every frame's guesses up to
+        date: accept the rest, spot check, Investigate). Call with or without the lock."""
+        with self.lock:
+            if self._bg_from is None:
+                return False
+            start = self._bg_from
+            self._track_gen += 1
+            self.guesses, self.summary = self.run.run(self._anchors(), self._reserved_ids(), from_frame=start)
+            self._bg_from = None
+            self._update_conf()
+            self._settled.set()
+            return True
+
+    def wait_settled(self, timeout=None):
+        """Wait (without holding the lock) until no re-track runs in the background. True if none."""
+        return self._settled.wait(timeout)
+
+    def tracking_view(self):
+        """For the page: the guesses after this frame are still being followed again (or None)."""
+        return None if self._bg_from is None else dict(from_frame=self._bg_from)
 
     def auto_accept(self):
         """Accept the guesses on every high-confidence frame nobody has looked at. Returns how many."""
@@ -1332,6 +1478,7 @@ class Session:
         (Shift+Z on the page puts back frames Z took back; still only frames nobody has looked at).
         Returns the frames accepted."""
         with self.lock:
+            self.settle()
             n = 0
             done = []
             only = None if frames is None else {int(f) for f in frames}
@@ -1340,8 +1487,11 @@ class Session:
                     continue
                 if only is None and self.conf_of(f) < self.low_threshold or only is not None and f not in only:
                     continue
+                gobjs = self.guess_objects(f)
+                if self.has_home_guess(f):
+                    continue        # a home visit's guess is shown for a person to check, never accepted unseen
                 objs = []
-                for o in self.guess_objects(f):
+                for o in gobjs:
                     o["status"] = "confirmed"
                     o.pop("close", None)
                     if not o["heading_known"]:
@@ -1438,6 +1588,7 @@ class Session:
         with self.lock:
             if self.inv and self.inv["status"] == "running":
                 self.inv["stop"] = True
+            self.settle()
             job = dict(status="running", frame=frame, x=x, y=y, r=r, done=0, total=0, left="", result=None,
                        error=None, stop=False, started=time.time())
             self.inv = job
@@ -1892,7 +2043,7 @@ def make_handler(session, extra_get=None, extra_post=None):
             elif u.path == "/api/clip":
                 self._send(200, s.clip(int(q["f"][0])))
             elif u.path == "/api/checkins":
-                self._send(200, s.checkins_view())
+                self._send(200, s.checkins_view(restart_if_stale=True))
             elif u.path.startswith("/img/"):
                 name = os.path.basename(u.path)
                 path = os.path.join(s.frames_dir, name)

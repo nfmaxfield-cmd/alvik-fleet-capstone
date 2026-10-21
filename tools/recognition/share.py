@@ -114,6 +114,15 @@ PAIR = ("labels.csv", "review.json")     # written together by the labelling pag
 # never put in a shared file: this computer's AI helper settings and its log of what was sent (ai_helper.py).
 # The AI key itself is never in the project folder at all (it is in the user's own settings folder).
 PRIVATE = ("ai_settings.json", "ai_log.jsonl")
+# never taken from a shared file either: this computer's AI settings decide where pictures and the key go,
+# so a project someone sends must not bring its own (nor a key file, nor their temporary copies)
+PRIVATE_ON_IMPORT = PRIVATE + ("ai.json",)
+
+
+def is_private(rel):
+    """A file (path inside the project) that belongs to one computer and is never shared or taken in."""
+    base = rel.replace("\\", "/").rsplit("/", 1)[-1]
+    return any(base == n or base.startswith(n + ".") for n in PRIVATE_ON_IMPORT)
 
 
 def read_pair(label_dir, lock=None, tries=50):
@@ -187,7 +196,7 @@ def export_project(project, out_path, with_video=False, progress=None, lock_for=
                 pass
 
     files = [(p, a) for p, a in _walk(proj.folder, skip={os.path.abspath(out_path)})
-             if a != "project.json" and not a.startswith("recordings/") and a not in PRIVATE
+             if a != "project.json" and not a.startswith("recordings/") and a not in PRIVATE and not is_private(a)
              and not any(a.startswith("models/%s/" % mid) for mid in left_out)]
     # labels.csv + review.json of each recording: one consistent snapshot of the pair
     pairs = {}
@@ -380,6 +389,7 @@ def import_project(file, dest, recordings_dir=None, progress=None):
         created = False
     else:
         created = True
+    dropped = []
     with zipfile.ZipFile(file) as zf:
         items = []
         for zi in zf.infolist():
@@ -393,6 +403,9 @@ def import_project(file, dest, recordings_dir=None, progress=None):
             target = os.path.abspath(os.path.join(dest, safe[len("project/"):]))
             if not target.startswith(dest + os.sep):
                 raise ShareError("This file is damaged or unsafe (%r). Nothing was imported." % zi.filename)
+            if is_private(safe[len("project/"):]):
+                dropped.append(safe[len("project/"):])
+                continue
             items.append((zi, target))
         if not any(t == os.path.join(dest, "project.json") for _, t in items):
             raise ShareError("This file has no project in it.")
@@ -435,8 +448,12 @@ def import_project(file, dest, recordings_dir=None, progress=None):
         relink_from_folder(proj, recordings_dir)
     miss = missing_recordings(proj)
     n = len(proj.recordings())
+    notes = describe_missing(miss)
+    if dropped:
+        notes = list(notes) + ["Left out of the import: %s (AI helper settings belong to each computer; this "
+                               "project starts with the AI helper off here)." % ", ".join(sorted(dropped))]
     return dict(project=proj, dest=dest, manifest=manifest, recordings=n, found=n - len(miss),
-                missing=miss, notes=describe_missing(miss))
+                missing=miss, notes=notes, dropped=sorted(dropped))
 
 
 # --- command line ----------------------------------------------------------------------------------

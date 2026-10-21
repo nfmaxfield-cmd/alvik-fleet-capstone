@@ -262,17 +262,29 @@ def pick_camera_name(proj, source_path, given):
     return names[0] if len(names) == 1 else ""
 
 
-def load_camera_model(proj, camera):
-    """Floor calibration of a project camera (cameras.CameraModel) or None."""
-    p = proj.camera_model_path(camera)
-    if not p or not os.path.exists(p):
-        return None
+def camera_model_paths(proj, camera, folder=None):
+    """Where a camera's floor calibration may be, in order (as the studio looks): the project's
+    cameras/<camera name>.json, cameras/default.json for a recording without a camera name, then a
+    camera.json or floor_calibration.json in the recording folder."""
+    key = (camera or "").strip() or "default"
+    out = [proj.camera_model_path(key)]
+    if folder:
+        out += [os.path.join(folder, "camera.json"), os.path.join(folder, "floor_calibration.json")]
+    return [p for p in out if p]
+
+
+def load_camera_model(proj, camera, folder=None, say=print):
+    """Floor calibration of a project camera (cameras.CameraModel) or None. A recording without a camera
+    name uses the "default" camera, as in the studio."""
     import cameras
-    try:
-        return cameras.CameraModel.load(p)
-    except Exception as e:
-        print("The floor calibration of camera %s could not be read (%s); positions are given in pixels only." % (camera, e))
-        return None
+    for p in camera_model_paths(proj, camera, folder):
+        if not os.path.exists(p):
+            continue
+        try:
+            return cameras.CameraModel.load(p)
+        except Exception as e:
+            say("The floor calibration %s could not be read (%s); trying the next place." % (p, e))
+    return None
 
 
 def robot_size(proj, override=None):
@@ -707,8 +719,12 @@ class Pipeline:
                 if tr is None:
                     self._note("Object #%d is not being followed any more, so there was nothing to confirm." % oid)
                     continue
+                # the whole track as it was (every field but its rows), so undo puts all of it back
+                snap = tr.clone(with_rows=False)
                 prev = dict(st=dict(self.state[oid]) if oid in self.state else None,
-                            tr={a: getattr(tr, a) for a in self._KEEP if hasattr(tr, a)})
+                            tr={a: v for a, v in vars(snap).items() if a != "rows"},
+                            last_seen=self.last_seen.get(oid), asked_said=oid in self._asked_said,
+                            reserved=int(oid) in self.tk.reserved)
                 # what the tracker itself does for a person's label, for this one object
                 self.tk.confirm(tr, f, t, c.get("x"), c.get("y"))
                 self.state[oid] = dict(t_conf=t, f_conf=f, low_since=None, asked=False)
@@ -742,6 +758,14 @@ class Pipeline:
                     else:
                         prev["st"]["asked"] = bool(prev["st"].get("asked"))
                         self.state[oid] = prev["st"]
+                    if prev.get("last_seen") is None:
+                        self.last_seen.pop(oid, None)
+                    else:
+                        self.last_seen[oid] = prev["last_seen"]
+                    if prev.get("asked_said"):
+                        self._asked_said.add(oid)
+                    if prev.get("reserved") is False:
+                        self.tk.reserved.discard(int(oid))
                 else:
                     tr = prev["tr"]
                     if tr in self.tk.finished:
@@ -1365,7 +1389,8 @@ class OutsideDrafts:
         try:
             t = float(t_wall_text)
         except (TypeError, ValueError):
-            return []
+            raise ValueError("this picture has no time on the shared clock (a video file or a camera without "
+                             "frames.csv), so the outside data can't say who is where")
         d = outside.draft_labels(self.aligners, {0: t}, self.camera, cls_of=self.cls_of, class_heights=self.heights,
                                  plugin=self.plugin)
         return [dict(x=o["x"], y=o["y"], heading_deg=o["heading_deg"], name=o["name"], cls=o["cls"]) for o in d.get(0, [])]
@@ -1389,8 +1414,9 @@ def load_outside(spec, say=print, proj=None, pipe=None, recording=None):
         return None
     cam = getattr(pipe, "cam", None)
     if cam is None:
-        say("Outside data (%s) needs the camera's floor calibration in the project (see CROSSCAM.md), and there is "
-            "none for this camera. Carrying on without it; name the objects by hand at the roll call." % spec)
+        say("Outside data (%s) is NOT used: it needs the floor calibration of camera \"%s\" (which pixel is which "
+            "spot on the floor), and there is none. Carrying on without it; name the objects by hand at the roll call."
+            % (spec, getattr(pipe, "camera_key", None) or "default"))
         return None
     plugin, path = _split_spec(spec)
     try:
@@ -1403,18 +1429,30 @@ def load_outside(spec, say=print, proj=None, pipe=None, recording=None):
     cls_of = {n: (st.cls if (st.cls in classes or not classes) else (classes[0] if classes else "unknown"))
               for n, st in data.streams.items()}
     anchors = {}
-    if proj is not None:
-        key = getattr(pipe, "camera_key", None) or "default"
-        hl = homesmod.homes_of(proj.data, key)
-        if hl and data.streams:
-            z = heights.get(next(iter(cls_of.values())), 0.0)
-            for n, lst in homesmod.events_to_anchors(data.events, hl, cam, height_cm=z).items():
-                anchors.setdefault(n, []).extend(lst)
+    key = getattr(pipe, "camera_key", None) or "default"
+    hl = homesmod.homes_of(proj.data, key) if proj is not None else []
+    if hl and data.streams:
+        z = heights.get(next(iter(cls_of.values())), 0.0)
+        for n, lst in homesmod.events_to_anchors(data.events, hl, cam, height_cm=z).items():
+            anchors.setdefault(n, []).extend(lst)
     als = outside.align(data, anchors)
     lined = [n for n, st in data.streams.items() if st.frame == "floor" or anchors.get(n)]
-    say("Outside data: %s. %s" % (data.summary(), ("Lined up on the floor: %s." % ", ".join(sorted(lined))) if lined else
-        "Nothing is lined up on the floor yet (a robot's own log needs a home position event), so it names nothing; "
-        "name the objects by hand at the roll call."))
+    not_lined = sorted(n for n in data.streams if n not in lined)
+    if not data.streams:
+        why = "It holds no positions, so it names nothing."
+    elif not_lined:
+        reason = ("there are no home positions for camera \"%s\" in the project" % key if not hl else
+                  "its log has no \"at home\" event at one of this camera's home positions")
+        why = ("%s: its own log (in its own start frame) can't be placed on the floor because %s, so it names "
+               "nothing here; name %s by hand at the roll call." % (", ".join(not_lined), reason,
+                                                                   "it" if len(not_lined) == 1 else "them"))
+    else:
+        why = ""
+    if not getattr(data, "clock_known", True):
+        why += (" Its clock is not tied to the video's (no clock file), so its times were used as they are; "
+                "a name can land on the wrong object if the clocks differ by more than a moment.")
+    say("Outside data: %s. %s%s" % (data.summary(), ("Lined up on the floor: %s. " % ", ".join(sorted(lined))) if lined
+                                     else "", why.strip()))
     return OutsideDrafts(als, cam, cls_of, heights, data.plugin)
 
 
@@ -1429,8 +1467,11 @@ def draft_objects(dets, pipe=None, t_wall=""):
     if out is not None and objs:
         try:
             drafts = list(out.drafts(t_wall) or [])
-        except Exception:
+        except Exception as e:
             drafts = []
+            note = getattr(pipe, "_note", None)
+            if callable(note):
+                note("The outside data could not suggest names this time (%s); name the objects by hand." % e)
         apply_outside(objs, drafts, pipe.robot_px)
     return objs
 
@@ -1740,6 +1781,11 @@ def run(source, pipe, out_path, view=None, seconds=0, max_frames=0, say=print, s
                     os.remove(tmp)
             n_rows = len(rows)
             os.remove(part)
+            n_no = sum(1 for r in rows if r.get("confirmed") == "no")
+            if n_no:
+                say("%d of the %d rows say confirmed = no: on those frames the object's score had stayed low (lost, "
+                    "hidden or doubtful) and no person had confirmed it again yet. Their positions are the "
+                    "tracker's best guess; check them before relying on them." % (n_no, n_rows))
     except OSError as e:
         raise SaveError("The table could not be saved to %s (%s). Is it open in another program, such as Excel? "
                         "The rows as they came are kept in %s." % (out_path, e, part))
@@ -1956,7 +2002,7 @@ def make_pipeline(a, source, say=print, detector=None):
         robot = robot_size(proj, a.robot_px)
         cam_name = pick_camera_name(proj, source.folder if source.kind in ("recording", "video") else None, a.camera_name)
         area = Area.from_project(proj, cam_name, robot)
-        cam = load_camera_model(proj, cam_name)
+        cam = load_camera_model(proj, cam_name, source.folder if source.kind == "recording" else None, say)
         heights = heights_for(proj)
         classes = proj.class_names()
         heading = proj.heading_classes()
@@ -1966,7 +2012,9 @@ def make_pipeline(a, source, say=print, detector=None):
         say("Work area: %s" % ("set (guesses outside it are ignored)" if area.polygon else "the whole picture")
             + ("; %d ignored spot(s)" % len(area.spots) if area.spots else ""))
         say("Positions on the floor (cm): %s" % ("yes" if cam is not None else
-                                                "no (no floor calibration for this camera in the project)"))
+                                                "no (no floor calibration for camera \"%s\": looked for %s)" % (
+                                                    (cam_name or "").strip() or "default", ", ".join(
+                                                        camera_model_paths(proj, cam_name, source.folder if source.kind == "recording" else None)))))
     else:
         if a.robot_px:
             robot = a.robot_px

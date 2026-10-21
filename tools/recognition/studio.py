@@ -140,6 +140,8 @@ class Studio:
             if self.loading:
                 raise ValueError("still opening the last one; wait a moment")
             self.loading = dict(what="Opening %s ..." % rec["name"], done=0, total=0, left_s=None)
+            if callable(getattr(self.session, "close", None)):
+                self.session.close()       # a re-track of the old one still running is dropped
             self.session = None
         t = threading.Thread(target=self._open, args=(rid, model or "none", weights), daemon=True)
         t.start()
@@ -582,7 +584,9 @@ class Studio:
         return dict(before=before, plugin=data.plugin, names=data.names(), notes=data.notes, summary=data.summary())
 
     def outside_build(self):
-        """Line the outside data up again (with the labels made since) and open the recording with its guesses."""
+        """Line the outside data up again (with the labels made since), in the background. The recording is
+        not opened again by this: the page asks for that (outside_apply) once the person sees it is done,
+        so nothing reopens under someone's hands; until then the new guesses wait in outside_drafts.json."""
         proj = self.proj
         cur = proj.data.get("current", {})
         s = self.session
@@ -601,15 +605,29 @@ class Studio:
         def work():
             try:
                 res = outsidelink.build(proj, rec, s, say)
-                job["what"] = "Opening the recording with the new guesses ..."
-                self.reopen()                  # starts opening (loading is set) before the page hears "done"
-                job.update(result=res, status="done", what="Done")
+                job.update(result=res, status="done", applied=False, rec=rec["id"],
+                           what="Ready: the new guesses are used once the recording opens again")
             except Exception as e:
                 if not isinstance(e, ValueError):
                     traceback.print_exc()
                 job.update(status="failed", error=str(e))
         threading.Thread(target=work, daemon=True).start()
         return job
+
+    def outside_apply(self):
+        """Open the recording again with the guesses the last Line up made (the page asks, and says so).
+        Returns True if it is reopening."""
+        job = self.outside_job
+        if not job or job.get("status") != "done":
+            raise ValueError("There are no new outside-data guesses waiting. Nothing was changed.")
+        if job.get("applied"):
+            return False
+        cur = self.proj.data.get("current", {})
+        if job.get("rec") and cur.get("rec") != job["rec"]:
+            job["applied"] = True        # another recording is open now: its guesses are used when it opens
+            return False
+        job["applied"] = True
+        return self.reopen()
 
     def outside_clear(self, restore=False):
         proj = self.proj
@@ -744,6 +762,8 @@ class Studio:
             self.proj = proj
             self.trainer = trainmod.Trainer(proj, log=self.log)
             trainmod.mark_interrupted(proj)
+            if callable(getattr(self.session, "close", None)):
+                self.session.close()
             self.session = None
             self.cross_note = None
         cur = proj.data.get("current", {})
@@ -900,16 +920,25 @@ AI_TASK_WORDS = dict(object_or_background="object or background?", name_object="
 
 
 def ai_counts(log):
-    """Suggestions per task: asked, taken (accepted), turned down, not answered, and the cost so far."""
+    """Per task: times asked, suggestions taken and turned down (a second check counts each label it
+    doubted on its own), times with no answer from the person yet, times it suggested nothing (a second
+    check with no doubts: nothing to take), and the cost so far."""
     out, cost = {}, 0.0
     for e in log:
         if e.get("error"):
             continue
         t = out.setdefault(e.get("task", "?"), dict(task=e.get("task"), words=AI_TASK_WORDS.get(e.get("task"), e.get("task")),
-                                                     asked=0, taken=0, turned_down=0, open=0))
+                                                     asked=0, taken=0, turned_down=0, open=0, nothing=0))
         t["asked"] += 1
-        a = e.get("accepted")
-        t["taken" if a is True else "turned_down" if a is False else "open"] += 1
+        items = e.get("items") or {}
+        if items:
+            t["taken"] += sum(1 for v in items.values() if v is True)
+            t["turned_down"] += sum(1 for v in items.values() if v is False)
+        elif e.get("nothing"):
+            t["nothing"] += 1
+        else:
+            a = e.get("accepted")
+            t["taken" if a is True else "turned_down" if a is False else "open"] += 1
         cost += float(e.get("cost_usd") or 0.0)
     return dict(tasks=list(out.values()), cost_usd=round(cost, 4))
 
@@ -922,10 +951,12 @@ def ai_time_saved_html(counts):
                 "unless you switch it on under More, AI helper).</p>")
     out = ["<h2>AI helper</h2><p class='muted'>Every suggestion it made, and what you did with it. A suggestion only "
            "changes a label when you take it, and then it is your label (Z takes it back).</p>",
-           "<table><tr><th>Asked to</th><th>Times</th><th>Taken</th><th>Turned down</th><th>Not answered</th></tr>"]
+           "<table><tr><th>Asked to</th><th>Times</th><th>Taken</th><th>Turned down</th><th>Not answered</th>"
+           "<th>Nothing suggested</th></tr>"]
     for r in rows:
-        out.append("<tr><td>%s</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td></tr>"
-                   % (_html.escape(r["words"] or ""), r["asked"], r["taken"], r["turned_down"], r["open"]))
+        out.append("<tr><td>%s</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td></tr>"
+                   % (_html.escape(r["words"] or ""), r["asked"], r["taken"], r["turned_down"], r["open"],
+                      r.get("nothing", 0)))
     out.append("</table><p class='muted'>Cost so far, as the service's prices were guessed: about $%.3f.</p>"
                % counts.get("cost_usd", 0.0))
     return "".join(out)
@@ -1112,11 +1143,22 @@ def make_routes(studio):
                 if cp is not None:
                     studio.proj.data.setdefault("settings", {})["copy_paste"] = cp
                 studio.proj.save()
+            if studio.trainer.busy():
+                raise ValueError("A model is already training (the bar at the top shows how far). Nothing was changed.")
+            pre = trainmod.precheck(studio.proj)
+            if not pre["ok"]:
+                with studio.proj.lock:          # the copy-paste choice is kept as it was
+                    studio.proj.data.setdefault("settings", {})["copy_paste"] = before_cp
+                    studio.proj.save()
+                raise ValueError(pre["text"])
             mid = studio.trainer.start(float(b.get("minutes") or 20))
             with studio.proj.lock:
                 studio.proj.data["settings"]["train_minutes"] = float(b.get("minutes") or 20)
                 studio.proj.save()
-            h._send(200, dict(model=mid, copy_paste=trainmod.paste_mode(studio.proj), copy_paste_before=before_cp))
+            h._send(200, dict(model=mid, copy_paste=trainmod.paste_mode(studio.proj), copy_paste_before=before_cp,
+                              precheck=pre))
+        elif path == "/api/studio/train/precheck":
+            h._send(200, trainmod.precheck(studio.proj))
         elif path == "/api/studio/classes":
             before = studio.proj.motion_object_type()
             studio.proj.set_classes(b.get("classes") or [])
@@ -1167,14 +1209,18 @@ def make_routes(studio):
                 h._send(400, dict(error=str(e), kind=e.kind))
         elif path == "/api/studio/ai/decision":
             ids = b.get("call_ids") or ([b["call_id"]] if b.get("call_id") else [])
+            acc = b.get("accepted")
             for cid in ids:
-                studio.ai().record_decision(str(cid), bool(b.get("accepted")), b.get("note") or "")
+                studio.ai().record_decision(str(cid), None if acc is None else bool(acc), b.get("note") or "",
+                                            item=b.get("item"))
             h._send(200, dict(ok=True, recorded=len(ids)))
         elif path == "/api/studio/outside/set":
             h._send(200, studio.outside_set(b.get("path"), b.get("plugin") or None, b.get("offset_s") or 0.0))
         elif path == "/api/studio/outside/rebuild":
             studio.outside_build()
             h._send(200, dict(ok=True))
+        elif path == "/api/studio/outside/apply":
+            h._send(200, dict(ok=True, reopened=studio.outside_apply()))
         elif path == "/api/studio/outside/clear":
             h._send(200, dict(moved=studio.outside_clear(bool(b.get("restore")))))
         elif path == "/api/studio/outside/done":

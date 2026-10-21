@@ -171,8 +171,9 @@ class Stream:
 class OutsideData:
     """What a plug-in returns: streams by name, events, plain-words notes, how the clock was set."""
 
-    def __init__(self, plugin="", streams=None, events=None, notes=None, clock="", folder=None):
+    def __init__(self, plugin="", streams=None, events=None, notes=None, clock="", folder=None, clock_known=True):
         self.plugin = plugin
+        self.clock_known = bool(clock_known)    # False: the plug-in had no way to tie its clock to the video's
         self.streams = dict(streams or {})
         self.events = list(events or [])     # dicts: t (t_wall), kind, name, ... (plug-in specific extras)
         self.notes = list(notes or [])
