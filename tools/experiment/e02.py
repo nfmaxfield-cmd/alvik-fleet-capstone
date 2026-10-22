@@ -124,6 +124,7 @@ FRONT_CHECK_CM = 6.0      # ... and says so when the sensor and the map differ b
 EXPECT_TURN_CM = 7.0       # a robot turning on its spot stays within this of where it stood (camera's view)
 EXPECT_GO_EXTRA_CM = 8.0   # ... a drive of d cm within d + this
 HEADING_CLEAR_CM = 20.0   # the heading drive (10 cm) only with at least this much room in front
+ID_UNKNOWN_SCALE = 1.7    # a robot found by a turn on its spot: its floor is unknown this many robot widths round
 AUTO_TRIES = 3            # a lost or stuck robot tries this many times on its own before Nick is called
 BACK_OFF_CM = 8.0         # a leg stopped by its front sensor backs this far before turning away (2026-10-22 loop)
 EDGE_TURN_CM = 9.0        # no turn on the spot closer than this to an open edge (the wheels reach it first)
@@ -805,7 +806,7 @@ class Runner:
         if p is None:
             return None
         self.fresh_id[robot] = True
-        self.tracker.robot_at(p[0], p[1])
+        self.tracker.robot_at(p[0], p[1], scale=ID_UNKNOWN_SCALE)
         self.tracker.follow(robot, p[0], p[1])
         self.history.clear()
         self.tracker.hold(HOLD_CM)
@@ -1373,7 +1374,7 @@ class Runner:
                         h = self.heads.get(robot, [None, False])
                         if h[0] is not None and h[1]:
                             # just found itself against the boards: its heading is exact, no drive needed
-                            self.tracker.robot_at(p[0], p[1])
+                            self.tracker.robot_at(p[0], p[1], scale=ID_UNKNOWN_SCALE)
                             self.tracker.follow(robot, p[0], p[1])
                             self.history.clear()
                             self.tracker.hold(HOLD_CM)
@@ -2056,7 +2057,7 @@ class Runner:
         """A robot found by identify(): follow it from p and measure its heading by a short drive (forward;
         blocked: a quarter turn and again). Returns its position or None."""
         self.fresh_id[robot] = True
-        self.tracker.robot_at(p[0], p[1])
+        self.tracker.robot_at(p[0], p[1], scale=ID_UNKNOWN_SCALE)
         self.tracker.follow(robot, p[0], p[1])
         self.history.clear()
         self.tracker.hold(HOLD_CM)

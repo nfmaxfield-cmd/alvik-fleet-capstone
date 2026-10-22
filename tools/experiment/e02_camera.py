@@ -318,6 +318,7 @@ class MotionTracker:
     HELD_MEDIAN_N = 15          # a held robot's position: the mean of this many of its latest real positions
     HOLD_TRUST_S = 4.0          # a held robot counts as seen at its spot for at most this long without its outline
     WALL_CM = 3.0               # a robot centre may be this far past its wall limit (the picture's board lines are 1-2 cm short)
+    MOVING_MIN = 0.15           # share of an outline changing frame to frame for it to count as moving
     COVER_SCALE = 1.35          # the followed robot's floor is never learned within this many robot widths of it
     COVER_MOVING = 1.25          # ... and while it moves
     GATE_GROW_S = 0.6           # a lost robot's search circle grows with time for at most this long
@@ -541,7 +542,13 @@ class MotionTracker:
                 others = [q for r, q in self.protect.items() if r != self.active]
                 ok = [c for c in cands if c["shape"]
                       and not any(math.hypot(c["x"] - q[0], c["y"] - q[1]) < self.OTHER_CM for q in others)]
-                for c in self._merge(ok):
+                merged = self._merge(ok)
+                if hint and hint[3] != float("inf") and any(c["moving"] >= self.MOVING_MIN for c in merged):
+                    # it is being driven: something that moves beats something that stands still (2026-10-22
+                    # evening: a ghost of Left left in the floor memory where it had stood, at distance 0, kept
+                    # winning over the real Left driving away, 10 cm off: "moved 0 cm", "lost")
+                    merged = [c for c in merged if c["moving"] >= self.MOVING_MIN]
+                for c in merged:
                     d = math.hypot(c["x"] - px, c["y"] - py)
                     if d > gate_cm:
                         continue
@@ -672,12 +679,13 @@ class MotionTracker:
         filled = cv2.inpaint(src, (self.known == 0).astype(np.uint8) * 255, 5, cv2.INPAINT_TELEA)
         self.bg[self.known == 0] = filled[self.known == 0].astype(np.float32)
 
-    def robot_at(self, x, y):
+    def robot_at(self, x, y, scale=1.2):
         """A robot stands at (x, y) on what the floor memory thinks is floor (it was there when the picture was
-        taken, or put down since): its floor becomes unknown until it leaves."""
+        taken, or put down since): its floor becomes unknown until it leaves. scale: radius in robot widths (larger
+        when (x, y) came from a turn on its spot, a few cm uncertain: else its edge stays in the floor as a ghost)."""
         with self.lock:
             if self.bg is not None:
-                self._unknown_at(x, y)
+                self._unknown_at(x, y, scale)
 
     def refresh_spot(self, x, y, scale=1.0):
         """Copy the current frame into the floor around a spot (nothing stands there now)."""
