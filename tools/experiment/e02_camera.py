@@ -315,6 +315,7 @@ class MotionTracker:
     MOTION_THR = 9.0            # grey levels of frame-to-frame change that count as motion
     UNKNOWN_EXTRA = 14.0        # extra threshold on floor that was filled in, not seen
     ABSORB_S = 25.0             # something new standing still this long, where no robot is, becomes floor
+    HELD_MEDIAN_N = 15          # a held robot's position: the mean of this many of its latest real positions
     HOLD_TRUST_S = 4.0          # a held robot counts as seen at its spot for at most this long without its outline
     WALL_CM = 3.0               # a robot centre may be this far past its wall limit (the picture's board lines are 1-2 cm short)
     COVER_SCALE = 1.35          # the followed robot's floor is never learned within this many robot widths of it
@@ -360,6 +361,7 @@ class MotionTracker:
         self.moved_by_hand = 0                  # times a held robot was found moved (it is then "lost")
         self.hand_moved = set()                 # robots found moved while held (the runner clears one when it is back)
         self.last_real = 0.0                    # when the followed robot's outline was last really seen
+        self.held_hist = deque(maxlen=self.HELD_MEDIAN_N)   # its real positions since it was told to stand still
 
     # --- geometry --------------------------------------------------------------------------------
     def _px(self, x, y):
@@ -548,6 +550,7 @@ class MotionTracker:
                     score = d - 3.0 * c["moving"]
                     if best is None or score < best[0]:
                         best = (score, c["x"], c["y"])
+                held_now = self.hint is not None and self.hint[3] == float("inf")
                 if best is not None:
                     self.last_real = t
                 if best is None and self.hold_ref is not None and not self.disturbed and \
@@ -558,7 +561,15 @@ class MotionTracker:
                     # held still and the picture where it stands has not changed since it stopped: it is still
                     # there, even when its outline against the floor memory is not robot-shaped just now (by a
                     # board's edge, or with a ghost of itself in the floor: 2026-10-22 footage 10:40:11-16)
-                    best = (0.0, self.hint[0], self.hint[1])
+                    best = (0.0, self.pos[1], self.pos[2], "held")
+                elif best is not None and held_now:
+                    # held still: report the mean of its recent real positions (two outline centres alternating: a
+                    # median would still jump between them) (2026-10-22 evening, live: a held
+                    # robot's position flipped 2-4 cm frame to frame between the held spot and its outline's
+                    # centre, so the runner's still check, which wants 1 cm, never saw it stand still)
+                    self.held_hist.append((best[1], best[2]))
+                    best = (best[0], float(np.mean([q[0] for q in self.held_hist])),
+                            float(np.mean([q[1] for q in self.held_hist])))
                 if best is not None:
                     self.pos = (t, best[1], best[2])
                     self.protect[self.active] = (best[1], best[2])
@@ -692,6 +703,7 @@ class MotionTracker:
         (a hand reaching in next to it, or a robot bumped into it, can't pull the tracker away). Only when the
         camera saw it just now: a hold round an old position could never find it again."""
         with self.lock:
+            self.held_hist.clear()
             if self.pos is not None and self.frame_t is not None and self.frame_t - self.last_seen < 0.5:
                 self.hint = (self.pos[1], self.pos[2], radius_cm, float("inf"))
                 m = self._disk_mask(self.frame.shape, [(self.pos[1], self.pos[2])], 1.1) > 0
