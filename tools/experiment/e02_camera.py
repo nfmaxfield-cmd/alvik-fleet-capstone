@@ -373,10 +373,11 @@ class MotionTracker:
         return m
 
     def _covered(self, shape):
-        pts = list(self.protect.values())
-        if self.active is not None and self.pos is not None:
-            pts.append((self.pos[1], self.pos[2]))
+        pts = [q for r, q in self.protect.items() if r != self.active]
         m = self._disk_mask(shape, pts, 1.25)
+        if self.active is not None and self.pos is not None:
+            # the followed robot: just its body (and halo), so the floor it has just uncovered is learned at once
+            m |= self._disk_mask(shape, [(self.pos[1], self.pos[2])], 1.0)
         if self.active is not None and self.pos is not None and self.frame_t is not None and \
                 self.frame_t - self.last_seen > 0.3:
             # lost for a moment: don't learn anything near where it may be now
@@ -597,7 +598,7 @@ class MotionTracker:
             return self.pos
 
 
-def locate_change(cam, before, after, board_rect=None, margin_cm=8.0, near=None, z_cm=ROBOT_TOP_CM, min_frac=0.12):
+def locate_change(cam, before, after, board_rect=None, margin_cm=8.0, near=None, z_cm=ROBOT_TOP_CM, min_frac=0.4):
     """Where did something robot-sized change between two sets of frames (grey, nothing else moving)? For finding
     a robot by a short turn on its spot: the corners of its body move, its spot stays put, so the change sits on
     the robot and nowhere else (no empty spot left behind, unlike a drive). Medians of each set (noise), the whole
@@ -623,7 +624,7 @@ def locate_change(cam, before, after, board_rect=None, margin_cm=8.0, near=None,
     for i in range(1, n):
         ar = int(stats[i, cv2.CC_STAT_AREA])
         w, h = stats[i, cv2.CC_STAT_WIDTH], stats[i, cv2.CC_STAT_HEIGHT]
-        if ar < min_frac * area0 or ar > 3.0 * area0 or max(w, h) > 2.4 * rpx:
+        if ar < 0.1 * area0 or ar > 4.5 * area0 or max(w, h) > 2.6 * rpx:
             continue
         u, v = cents[i]
         x, y = cam.to_floor(u, v, z_cm)
@@ -637,8 +638,22 @@ def locate_change(cam, before, after, board_rect=None, margin_cm=8.0, near=None,
         if near is not None and math.hypot(x - near[0], y - near[1]) > near[2]:
             continue
         out.append(dict(x=float(x), y=float(y), area=ar, strength=float(ad[lab == i].mean()), u=float(u), v=float(v)))
-    out.sort(key=lambda c: -c["area"] * c["strength"])
-    return out
+    # the corners of one turning body can show as separate pieces: pieces closer than a robot's size are one
+    merged = []
+    for c in sorted(out, key=lambda c: -c["area"] * c["strength"]):
+        for m in merged:
+            if math.hypot(c["x"] - m["x"], c["y"] - m["y"]) < 1.3 * ROBOT_CM:
+                tot = m["area"] + c["area"]
+                for k in ("x", "y", "u", "v"):
+                    m[k] = (m[k] * m["area"] + c[k] * c["area"]) / tot
+                m["strength"] = (m["strength"] * m["area"] + c["strength"] * c["area"]) / tot
+                m["area"] = tot
+                break
+        else:
+            merged.append(dict(c))
+    merged = [m for m in merged if m["area"] >= min_frac * area0]
+    merged.sort(key=lambda c: -c["area"] * c["strength"])
+    return merged
 
 
 class History:

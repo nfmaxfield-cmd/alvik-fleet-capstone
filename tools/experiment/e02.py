@@ -82,6 +82,7 @@ import e02_plan as PL  # noqa: E402
 import e02_steer as ST  # noqa: E402
 import e02_fit as FIT  # noqa: E402
 import e02_camera as CAM  # noqa: E402
+import e02_map as MAP  # noqa: E402
 
 PAUSE_MS = 1000
 FIX_HZ = 3.0
@@ -90,6 +91,11 @@ LEG_PAUSE_MS = 700        # e02_leg_pause_ms in every mode-0 run: still long eno
 TRANSIT_MAX_CM = 140      # e02_transit_max_cm: park spots are up to ~110 cm from the find's staging point
 BACK_MAX_CM = 9.5         # firmware e02_back_max_cm is 10: backwards legs are split into pieces this long
 TURN_DPS_GUESS = 45.0
+ID_TURN_DEG = 40.0        # identify: turn this much on the spot and back (2026-10-22)
+HOLD_CM = 6.0             # between legs the followed robot stands still: the camera only accepts it this near
+CHECK_CM, CHECK_FRAC = 5.0, 0.35   # camera vs wheels: a go leg's distances may differ by this much...
+ID_EXTRA_CM = 5.0                  # ...plus this on the first leg after a turn on the spot (its centre is rougher)
+PARK_LEG_CM = 60.0        # parking: long legs on the robot's own wheels and gyro, the camera checks in between
 FIND_TIMEOUT_S = 150
 E02_TIMEOUT_S = {0: 150, 1: 400}
 BATTERY_WARN, BATTERY_STOP = 40, 15
@@ -258,6 +264,10 @@ class Runner:
         self.watch_quit = threading.Event()
         self.moves = {}               # robot -> dict(run ("-" = idle legs), why): it is taking legs now
         self.leg_ids = {}
+        self.last_lid = {}            # robot -> id of the last leg sent
+        self.disagree = defaultdict(int)  # robot -> camera / wheels disagreements in a row
+        self.fresh_id = {}            # robot -> True: its position came from identify() and it has not driven since
+        self.watch_edge_cm = None     # the watchdog's open-edge distance (None: PL.WATCH_EDGE_CM; mapping: 0)
         self.link = self.listener = self.watch = self.pi = None
         self.feed = self.tracker = self.history = self.cam = self.board = None
 
@@ -368,6 +378,8 @@ class Runner:
         on) gets its calibration first, then one more try. Returns the run id or None."""
         before = self.watch.started.get(robot)
         t0 = time.time()
+        if self.tracker is not None and self.tracker.active == robot:
+            self.tracker.clear_expect()          # a run drives it: the camera must follow it anywhere
         self.send(robot, cmd)
         run = self.watch.wait_start(robot, before, 8)
         if run:
@@ -412,6 +424,8 @@ class Runner:
 
     def fix_now(self, robot, heading=None):
         """Tell the robot where the camera sees it (`fix x y th t_wall`; while idle it replaces its pose)."""
+        if self.tracker is None or self.tracker.active != robot:
+            return None                  # the camera follows another robot (or none): no position for this one
         p = self.settle(min_s=0.3)
         if p is None:
             return None
@@ -463,11 +477,18 @@ class Runner:
         if m is None:
             return "refused", "not moving"
         lid = self.next_id(robot)
+        self.last_lid[robot] = lid
+        following = self.tracker is not None and self.tracker.active == robot
+        if following:
+            self.tracker.clear_expect()          # it may move now
         for attempt in range(2):
             t_s = time.time()
             self.send(robot, "%s %d" % (text, lid))
             stop = (lambda: self.watch.ended.get(m["run"]) is not None) if m["run"] != "-" else None
             res = self.listener.wait_leg(robot, m["run"], lid, t_s - 0.05, timeout, stop=stop)
+            if res and following and res.get("state") in ("done", "failed", "dup"):
+                time.sleep(0.3)                  # it has stopped: from now on it can't be anywhere else
+                self.tracker.hold(HOLD_CM)
             if res:
                 if res.get("state") == "refused" and "running" in (res.get("info") or "") and attempt == 0:
                     time.sleep(1.0)              # an idle leg still finishing: once more
@@ -540,23 +561,126 @@ class Runner:
                 break
         time.sleep(0.25)
         p1 = self.settle(t_from=time.time() - 0.6, min_s=0.3, timeout=2.0)
+        if kind == "go" and p0 is not None and len(pieces) == 1:
+            bad = self.cross_check(robot, p0, p1)
+            if bad:
+                words = "camera and wheels disagree (%s)" % bad
+                p1 = self.refind(robot, bad)
         return p0, p1, words
+
+    def wheels_moved(self, robot, lid):
+        """How far the robot's own wheels and gyro say it moved during leg lid (its LEG records' poses from
+        'started' to the final one), or None."""
+        a = b = None
+        with self.listener.cv:
+            for t, n, rec in self.listener.recs["LEG"]:
+                if n != robot or rec.get("id") != str(lid):
+                    continue
+                st_ = rec.get("state") or rec.get("result")
+                xy = (num(rec.get("x_cm")), num(rec.get("y_cm")))
+                if None in xy:
+                    continue
+                if st_ == "started":
+                    a = xy
+                elif st_ in ("done", "failed"):
+                    b = xy
+        if a is None or b is None:
+            return None
+        return math.hypot(b[0] - a[0], b[1] - a[1])
+
+    def cross_check(self, robot, p0, p1):
+        """The camera against the wheels (Nick, 2026-10-21): after a go leg, did the camera see it move about as
+        far as its wheels say? Returns plain words of the disagreement, or ''. Agreement resets the count."""
+        w = self.wheels_moved(robot, self.last_lid.get(robot))
+        if w is None:
+            return ""
+        if p1 is None:
+            return "the camera lost it while its wheels say it moved %.0f cm" % w
+        c = math.hypot(p1[0] - p0[0], p1[1] - p0[1])
+        extra = ID_EXTRA_CM if self.fresh_id.pop(robot, False) else 0.0   # p0 came from a turn on the spot
+        if abs(c - w) > max(CHECK_CM, CHECK_FRAC * w) + extra:
+            return "the camera saw it move %.0f cm, its wheels say %.0f cm" % (c, w)
+        self.disagree[robot] = 0
+        return ""
+
+    def refind(self, robot, why):
+        """The camera and the wheels disagree: stop, and find it again by a turn on its spot (nothing else turns
+        just then). Returns its position, or None (then the caller gives up and, twice in a row, Nick is called)."""
+        self.disagree[robot] += 1
+        self.say("    %s: %s: finding it again by a short turn on its spot" % (robot, why))
+        self.st.setdefault("disagreements", []).append([round(time.time(), 1), robot, why, self.order])
+        self.send(robot, "stop")
+        time.sleep(0.5)
+        last = self.tracker.where()
+        near = (last[1], last[2], 60.0) if last else None
+        p = self.identify(robot, near=near) or self.identify(robot)
+        if p is None:
+            return None
+        self.fresh_id[robot] = True
+        self.tracker.robot_at(p[0], p[1])
+        self.history.clear()
+        self.tracker.follow(robot, p[0], p[1])
+        self.tracker.hold(HOLD_CM)
+        self.heads[robot] = [self.heads.get(robot, [None])[0], False]
+        return self.settle(min_s=0.3)
 
     def mark_leg(self, robot, which, timeout=8.0):
         state, info = self.send_leg(robot, "mark %s" % which, timeout + PAUSE_MS / 1000.0)
         return state
 
-    def drive_to(self, robot, target, final_heading=None, run=None, max_legs=40, arrive_cm=ST.ARRIVE_CM):
-        """Camera-steered to target (x, y) by single legs, then optionally turned to final_heading.
-        Returns (ok, words)."""
+    def safe_path(self, robot, p, target):
+        """Waypoints from p to target that keep clear of every other robot the runner knows of (parked, or found
+        and not parked yet: 2026-10-21 Center was steered straight into Right, not found yet). One detour point
+        beside the first robot in the way, on the side with room on the board."""
+        others = [tuple(q[:2]) for n, q in self.st["positions"].items() if n != robot and q]
+        dx, dy = target[0] - p[0], target[1] - p[1]
+        L = math.hypot(dx, dy)
+        if L < 1e-6:
+            return [target]
+        ux, uy = dx / L, dy / L
+        worst = None
+        for o in others:
+            t = max(0.0, min(L, (o[0] - p[0]) * ux + (o[1] - p[1]) * uy))
+            d = math.hypot(p[0] + ux * t - o[0], p[1] + uy * t - o[1])
+            if d < PL.PARK_CLEAR_CM + 4.0 and (worst is None or t < worst[0]):
+                worst = (t, o)
+        if worst is None:
+            return [target]
+        o = worst[1]
+        best = None
+        for side in (1.0, -1.0):
+            for off in (30.0, 40.0):
+                q = (o[0] - uy * side * off, o[1] + ux * side * off)
+                if not self.board.on_board(q[0], q[1], margin=15.0):
+                    continue
+                clear = min([math.hypot(q[0] - r[0], q[1] - r[1]) for r in others] or [99.0])
+                if clear < PL.PARK_CLEAR_CM + 4.0:
+                    continue
+                cost = math.hypot(q[0] - p[0], q[1] - p[1]) + math.hypot(target[0] - q[0], target[1] - q[1])
+                if best is None or cost < best[0]:
+                    best = (cost, q)
+        return [best[1], target] if best else [target]
+
+    def drive_to(self, robot, target, final_heading=None, run=None, max_legs=40, arrive_cm=ST.ARRIVE_CM,
+                 max_leg=ST.MAX_LEG_CM, avoid=True):
+        """To target (x, y) by single legs, each driven on the robot's own wheels and gyro, the camera picking the
+        next leg and checked against the wheels after each; then optionally turned to final_heading. avoid: go
+        round the other robots the runner knows of. Returns (ok, words)."""
         h = self.heads.get(robot, [None, False])
-        steer = ST.Steer([target], heading=h[0], measured=h[1], final_heading=final_heading, max_legs=max_legs,
-                         arrive_cm=arrive_cm)
+        p = self.settle(min_s=0.3, timeout=2.0)
+        wps = self.safe_path(robot, p, target) if (avoid and p is not None) else [target]
+        if len(wps) > 1:
+            self.say("    %s: going round another robot (via %.0f, %.0f)" % (robot, wps[0][0], wps[0][1]), quiet=True)
+        steer = ST.Steer(wps, heading=h[0], measured=h[1], final_heading=final_heading, max_legs=max_legs,
+                         arrive_cm=arrive_cm, max_leg=max_leg)
         stuck = 0
         while True:
             p = self.settle(min_s=0.3, timeout=2.0)
             if p is None:
-                return False, "the camera can't see it"
+                p = self.refind(robot, "the camera can't see it")
+                if p is None:
+                    return False, "the camera can't see it, and a turn on its spot did not show it"
+                steer.heading, steer.measured = None, False
             if not self.board.on_board(p[0], p[1]):
                 return False, "the camera sees it off the board at (%.0f, %.0f) cm" % p
             cmd = steer.next(p)
@@ -570,6 +694,12 @@ class Runner:
                 self.heads[robot] = [steer.heading, steer.measured]
                 return True, ""
             p0, p1, res = self.leg(robot, cmd, run=run)
+            if res.startswith("camera and wheels"):
+                if p1 is None or self.disagree[robot] >= 2:
+                    return False, res
+                steer.heading, steer.measured = None, False   # found again by a turn: heading unknown
+                steer.legs += 1
+                continue
             if p0 is None or p1 is None:
                 return False, "the camera lost it"
             if res.startswith("watchdog"):
@@ -606,63 +736,53 @@ class Runner:
                 stuck = 0
 
     # --- finding a robot with the camera ------------------------------------------------------------
-    def acquire(self, robot, step_cm=12.0):
-        """Find robot in the picture by a short drive (see e02_camera's docstring). Returns (x, y) or None."""
-        self.tracker.forget(robot)
-        self.tracker.idle()
-        if not self.begin_moves(robot, "finding it"):
-            return None
-        self.tracker.frozen = True             # nothing fades into the background until it is found
-        try:
-            return self._acquire(robot, step_cm)
-        finally:
-            self.tracker.frozen = False
+    def board_rect(self):
+        b = self.board or PL.Board()
+        return (b.x0, b.y0, b.x1, b.y1)
 
-    def _acquire(self, robot, step_cm):
-        before = self.tracker.blobs()
-
-        def new(bl):
-            return [b for b in bl if all(math.hypot(b[3] - o[3], b[4] - o[4]) > 3.0 for o in before)]
-        for sign in (1.0, -1.0):
-            first = None
-            m = self.moves.get(robot)
-            if m is None:
-                return None
-            dist = sign * (step_cm if sign > 0 else 5.5)       # backwards: blind, unknown spot: 5.5 + 4 < 10 cm
-            lid = self.next_id(robot)
-            t_s = time.time()
-            self.send(robot, "go %.1f %d" % (dist, lid))
-            end = t_s + abs(dist) / DRIVE_CMS_GUESS * 2.5 + 4.0
-            while time.time() < end:
-                nb = new(self.tracker.blobs())
-                if nb and first is None:
-                    first = (sum(b[3] for b in nb) / len(nb), sum(b[4] for b in nb) / len(nb))
-                if self.listener.leg_final(robot, m["run"], lid):
-                    break
-                time.sleep(0.07)
-            time.sleep(0.8)
-            nb = new(self.tracker.blobs())
-            if first is None or not nb:
+    def identify(self, robot, near=None, angle=ID_TURN_DEG):
+        """Where is `robot`? It turns a little on its spot and back (2026-10-21: a short DRIVE left its old spot
+        behind, which the camera could take for the robot; a turn leaves nothing behind) and the camera looks for
+        the one robot-sized change. Only this robot moves meanwhile. near = (x, y, radius cm) to look only there.
+        Returns (x, y) or None. Its heading is not known after this (a body seen from above looks alike turned)."""
+        self.mark("e02 identify %s" % robot)
+        others = [tuple(q[:2]) for n, q in self.st["positions"].items() if n != robot and q]
+        if self.tracker is not None and self.tracker.active == robot:
+            self.tracker.idle()
+        if robot not in self.moves:          # inside a camera-steered run (K) its legs stay in that run
+            self.moves[robot] = dict(run="-", why="identify")
+        for ang in (angle, -angle):
+            before = self.feed.wait_frames(8, timeout=5)
+            state, info = self.send_leg(robot, "turn %.1f" % ang, ang / TURN_DPS_GUESS * 2.5 + 6.0)
+            time.sleep(0.6)
+            after = self.feed.wait_frames(8, timeout=5)
+            self.send_leg(robot, "turn %.1f" % -ang, ang / TURN_DPS_GUESS * 2.5 + 6.0)
+            time.sleep(0.4)
+            if state not in ("done", "dup") or len(before) < 3 or len(after) < 3:
+                self.say("    (%s did not turn: %s %s)" % (robot, state, info), quiet=True)
                 continue
-            if len(nb) == 1:
-                # moved too little to leave its own spot, or merged: go a bit further the same way
-                lid = self.next_id(robot)
-                self.send(robot, "go %.1f %d" % (8.0 if sign > 0 else -4.0, lid))
-                self.listener.wait_leg(robot, m["run"], lid, time.time() - 0.05, 8.0 / DRIVE_CMS_GUESS + 4.0)
-                time.sleep(0.8)
-                nb = new(self.tracker.blobs())
-                if len(nb) < 2:
-                    continue
-            nb.sort(key=lambda b: math.hypot(b[3] - first[0], b[4] - first[1]))
-            ghost, rob = nb[0], nb[-1]
-            self.tracker.refresh_spot(ghost[3], ghost[4])
-            self.tracker.follow(robot, rob[3], rob[4])
-            hd = ST.bearing((ghost[3], ghost[4]), (rob[3], rob[4]))
-            self.heads[robot] = [hd if sign > 0 else ST.wrap180(hd + 180), True]
-            time.sleep(0.5)
-            p = self.settle(min_s=0.3)
-            return p
+            cands = CAM.locate_change(self.cam, before, after, board_rect=self.board_rect(), near=near)
+            cands = [c for c in cands if all(math.hypot(c["x"] - o[0], c["y"] - o[1]) > 6.0 for o in others)]
+            self.st.setdefault("identify", []).append([round(time.time(), 1), robot, ang,
+                                                       [[round(c["x"], 1), round(c["y"], 1), c["area"],
+                                                         round(c["strength"], 1)] for c in cands[:4]]])
+            if not cands:
+                continue
+            if len(cands) > 1 and cands[1]["area"] * cands[1]["strength"] > 0.5 * cands[0]["area"] * cands[0]["strength"]:
+                self.say("    (two places changed when %s turned: looking again)" % robot, quiet=True)
+                continue
+            return (cands[0]["x"], cands[0]["y"])
         return None
+
+    def acquire(self, robot, step_cm=10.0, near=None):
+        """Find robot in the picture: identify it by a turn on its spot, then a short drive (forward; blocked:
+        a quarter turn and again) gives its heading. Returns (x, y) or None."""
+        p = self.identify(robot, near=near)
+        self.moves.pop(robot, None)
+        if p is None:
+            return None
+        self.st["positions"][robot] = [p[0], p[1], None]
+        return self.acquire_heading(robot, p)
 
     def activate(self, robot):
         """Follow `robot` from where it was last parked (the tracker keeps every parked robot visible)."""
@@ -673,7 +793,9 @@ class Runner:
             return True
         if sp is None:
             return False
+        self.history.clear()
         self.tracker.follow(robot, sp[0], sp[1])
+        self.tracker.hold(HOLD_CM)
         if robot not in self.heads:
             self.heads[robot] = [sp[2], False]
         time.sleep(0.3)
@@ -697,12 +819,12 @@ class Runner:
         if esc is not None:
             # near an open edge (a route that ended off course): first straight in from it, then on as usual
             self.say("    %s is %.0f cm from an open edge: moving it in first" % (robot, self.board.edge_room(*p)[0]))
-            ok, why = self.drive_to(robot, esc, arrive_cm=4.0)
+            ok, why = self.drive_to(robot, esc, arrive_cm=4.0, max_leg=PARK_LEG_CM)
             if not ok:
                 return ok, why
         if math.hypot(p[0] - px, p[1] - py) > 4.0:
             if math.hypot(p[0] - sx, p[1] - sy) > 3.0:
-                ok, why = self.drive_to(robot, (sx, sy), arrive_cm=2.0)
+                ok, why = self.drive_to(robot, (sx, sy), arrive_cm=2.0, max_leg=PARK_LEG_CM)
                 if not ok:
                     return ok, why
             h = self.heads.get(robot, [None, False])
@@ -724,7 +846,7 @@ class Runner:
                     self.heads[robot] = [st_.heading, st_.measured]
                     if ST.leg_stuck(("go", along), p0, p1):
                         return False, "it did not move back into its spot"
-        ok, why = self.drive_to(robot, (px, py), final_heading=ph, arrive_cm=3.0)
+        ok, why = self.drive_to(robot, (px, py), final_heading=ph, arrive_cm=3.0, avoid=False)
         self.end_moves(robot)
         if ok:
             p = self.settle(min_s=0.3)
@@ -733,25 +855,24 @@ class Runner:
             self.st.save()
         return ok, why
 
-    def help_from_nick(self, robot, problem):
-        """Stuck or off the board: exact steps, then find it again. Returns True when it is back."""
-        i = self.park_index(robot)
-        side_of = lambda x, y: CAM.picture_side(self.cam, x, y)      # noqa: E731
-        where = self.board.park_words(i, side_of) + " (its park spot)"
-        facing = "the middle of the board"
+    def help_from_nick(self, robot, problem, park=True):
+        """Stuck, lost or off the board: exact steps for Nick, then the runner finds it again by a turn on its
+        spot and parks it itself. Returns True when it is back (and parked, unless park=False: then only found)."""
+        where = ("anywhere on the open part of the board, at least 30 cm (1 ft) from the other robots, the boards "
+                 "and the edges")
+        facing = "open board"
         self.mark("e02 help %s: %s" % (robot, problem))
         self.st.setdefault("help_calls", []).append([round(time.time(), 1), robot, problem])
         self.st.save()
         print("\n" + "!" * 78)
         for line in ST.nick_instructions(robot, problem, where, facing):
             self.say(line)
+        self.say("   (You don't need to put it on any particular spot: it finds its own way there.)")
         print("!" * 78)
         self.send(robot, "stop")
         self.send(robot, "identify")
         if self.a.auto:
-            self.say("(automatic mode: nobody to help; %s's remaining runs are put aside)" % robot)
-            self.unavailable.add(robot)
-            return False
+            pass
         wait_s = self.a.help_wait_min * 60.0
         self.say("(If nobody answers within %.0f minutes, %s is put aside and the others carry on; --resume later "
                  "runs what it missed.)" % (self.a.help_wait_min, robot))
@@ -772,21 +893,29 @@ class Runner:
                 self.unavailable.add(robot)
                 return False
             time.sleep(1.0)
-            # A fresh picture of the board first: the robot was put down by hand after the last one, so the
-            # spot it drives off would not show as changed (2026-10-21, Center at setup).
-            self.say("Taking a fresh picture of the board (keep hands out of it) ...")
-            frames = self.feed.wait_frames(10, timeout=8)
-            if frames:
-                self.tracker.set_background(frames)
-            p = self.acquire(robot)
-            if p:
-                ok, why = self.park(robot)
-                if ok:
-                    return True
-                self.say("It moved, but parking failed: %s" % why)
-            else:
-                self.say("The camera could not find %s after a short drive. Check it is on the board, switched "
-                         "on, with its front facing that board, then press Enter again." % robot)
+            self.st["positions"].pop(robot, None)
+            self.disagree[robot] = 0
+            self.say("Taking a fresh picture of the board (keep hands out of it), then %s turns a little on its "
+                     "spot ..." % robot)
+            self.fresh_floor()
+            p = self.identify(robot)
+            self.moves.pop(robot, None)
+            if p is None:
+                self.say("The camera did not see %s turn. Check it is on the board and switched on (its side light "
+                         "on), then press Enter again." % robot)
+                continue
+            self.st["positions"][robot] = [p[0], p[1], None]
+            self.say("  Found %s at (%.1f, %.1f) cm." % (robot, p[0], p[1]))
+            if not park:
+                return True
+            if self.acquire_heading(robot, p) is None:
+                self.say("It turned, but the camera lost it when it drove. Press Enter to try again.")
+                continue
+            self.set_corrections(robot, self.move_corrections(robot))
+            ok, why = self.park(robot)
+            if ok:
+                return True
+            self.say("It moved, but parking failed: %s. Put it somewhere open again and press Enter." % why)
 
     # --- checks -----------------------------------------------------------------------------------
     def wait_robots(self, names, timeout=40):
@@ -812,10 +941,14 @@ class Runner:
         self.say("=== Setup checks ===")
         # 1. Pi recorder
         ok1, w1, size, fps = CAM.check_stream(a.pi, a.overhead_port)
-        ok2, w2, _, _ = CAM.check_stream(a.pi, a.side_port)
+        if a.no_side:
+            ok2, w2 = True, "not used this session (--no-side)"
+        else:
+            ok2, w2, _, _ = CAM.check_stream(a.pi, a.side_port)
         notes = CAM.notes_answer(a.pi)
         self.say("Overhead camera (%s:%d): %s" % (a.pi, a.overhead_port, "OK, " + w1 if ok1 else "PROBLEM: " + w1))
-        self.say("Side camera (%s:%d): %s" % (a.pi, a.side_port, "OK, " + w2 if ok2 else "PROBLEM: " + w2))
+        self.say("Side camera (%s:%d): %s" % (a.pi, a.side_port, ("OK, " if not a.no_side else "") + w2 if ok2
+                                                 else "PROBLEM: " + w2))
         self.say("Pi recorder hears notes: %s" % ("OK" if notes else "PROBLEM: no answer on port 5007"))
         setup["pi"] = dict(overhead=ok1, side=ok2, notes=notes, fps=round(fps, 1))
         if not ok1:
@@ -1009,33 +1142,225 @@ class Runner:
         self.safety_settings([n for n in names if n not in self.unavailable])
         self.say("Compass check (`calibrate`, needed once after switching on; spin and roll off: it only wiggles) ...")
         self.calibrate([n for n in names if n not in self.unavailable])
-        # one fresh background, then each robot found by a short drive and parked
-        self.say("Taking a picture of the board with nothing moving ...")
-        frames = self.feed.wait_frames(10, timeout=8)
-        self.tracker.set_background(frames)
-        for n in names:
-            if n in self.unavailable:
-                continue
-            self.active = n
-            self.phase = "finding"
-            self.say("Finding %s in the picture (it drives about 12 cm forward) ..." % n)
-            p = self.acquire(n)
-            if p is None:
-                self.say("The camera did not see %s move." % n)
-                if not self.help_from_nick(n, "the camera did not see it move when asked to"):
-                    continue
-                p = self.settle()
-            self.say("  %s seen at (%.1f, %.1f) cm, facing %.0f deg" % (n, p[0], p[1], self.heads[n][0]))
-            self.set_corrections(n, self.move_corrections(n))
-            ok, why = self.park(n)
-            if not ok:
-                if not self.help_from_nick(n, why):
-                    continue
-            p = self.settle()
-            self.say("  %s parked at (%.1f, %.1f) cm" % (n, p[0], p[1]))
+        # every robot found first by a short turn on its spot (nothing leaves its spot, so nothing is mistaken for
+        # a robot), THEN parked, each going round the others (2026-10-22, after the first real session)
+        self.find_all([n for n in names if n not in self.unavailable])
+        self.park_all([n for n in names if n not in self.unavailable])
         self.active = None
         CAM.draw_check(self.feed.last_img, self.cam, os.path.join(self.dir, "check_robots.png"), self.board,
                        robots={n: tuple(self.st["positions"][n][:2]) for n in names if n in self.st["positions"]})
+
+    def find_all(self, names):
+        """Identify every robot (a turn on its spot), then a fresh floor memory with all of them known."""
+        self.phase = "finding"
+        self.say("Finding the robots: each turns a little on its spot and back (about 6 s each) ...")
+        for n in names:
+            self.st["positions"].pop(n, None)
+        for n in names:
+            p = self.identify(n)
+            self.moves.pop(n, None)
+            if p is None:
+                self.say("  The camera did not see %s turn." % n)
+                if not self.help_from_nick(n, "the camera did not see it turn when asked to", park=False):
+                    continue
+                continue
+            self.st["positions"][n] = [p[0], p[1], None]
+            self.say("  %s is at (%.1f, %.1f) cm" % (n, p[0], p[1]))
+        self.st.save()
+        self.fresh_floor()
+
+    def fresh_floor(self):
+        """A new floor memory from a few still pictures; every robot the runner knows of is marked on it."""
+        frames = self.feed.wait_frames(10, timeout=8)
+        known = {n: tuple(q[:2]) for n, q in self.st["positions"].items() if q}
+        self.tracker.idle()
+        self.tracker.protect.clear()
+        self.tracker.set_background(frames, robots=list(known.values()))
+        for n, q in known.items():
+            self.tracker.park(n, q[0], q[1])
+
+    def park_all(self, names):
+        """Heading and parking, robot by robot, in an order where nobody's park spot is taken by another robot.
+        A robot standing on someone else's spot when all spots are taken goes to the middle of the board first."""
+        todo = [n for n in names if n in self.st["positions"] and n not in self.unavailable]
+        while todo:
+            def blocked(n):
+                px, py, _ = self.board.park(self.park_index(n))
+                return [m for m in todo if m != n and
+                        math.hypot(self.st["positions"][m][0] - px, self.st["positions"][m][1] - py) < PL.PARK_CLEAR_CM + 6]
+            free = [n for n in todo if not blocked(n)]
+            n = free[0] if free else todo[0]
+            self.active = n
+            self.phase = "finding"
+            q = self.st["positions"][n]
+            p = self.acquire_heading(n, (q[0], q[1]))
+            if p is None:
+                if not self.help_from_nick(n, "the camera lost it while measuring which way it faces"):
+                    todo.remove(n)
+                    continue
+            elif not free:
+                mid = ((self.board.x0 + self.board.x1) / 2, (self.board.y0 + self.board.y1) / 2)
+                self.say("  Every park spot has another robot on it: moving %s to the middle of the board first." % n)
+                ok, why = self.drive_to(n, mid, max_leg=PARK_LEG_CM)
+                self.end_moves(n)
+                p = self.settle(min_s=0.3)
+                if p:
+                    self.st["positions"][n] = [p[0], p[1], self.heads.get(n, [None])[0]]
+                    self.tracker.park(n, p[0], p[1])
+                continue
+            self.set_corrections(n, self.move_corrections(n))
+            ok, why = self.park(n)
+            if not ok and not self.help_from_nick(n, why):
+                todo.remove(n)
+                continue
+            p = self.settle()
+            if p:
+                self.say("  %s parked at (%.1f, %.1f) cm" % (n, p[0], p[1]))
+            todo.remove(n)
+        self.st.save()
+
+    def acquire_heading(self, robot, p):
+        """A robot found by identify(): follow it from p and measure its heading by a short drive (forward;
+        blocked: a quarter turn and again). Returns its position or None."""
+        self.fresh_id[robot] = True
+        self.tracker.robot_at(p[0], p[1])
+        self.history.clear()
+        self.tracker.follow(robot, p[0], p[1])
+        self.tracker.hold(HOLD_CM)
+        self.heads[robot] = [None, False]
+        self.moves.pop(robot, None)
+        if not self.begin_moves(robot, "finding its heading"):
+            return None
+        for attempt in range(3):
+            p0, p1, words = self.leg(robot, ("go", 10.0))
+            if p0 and p1 and math.hypot(p1[0] - p0[0], p1[1] - p0[1]) >= ST.MIN_HEADING_CM:
+                self.heads[robot] = [ST.bearing(p0, p1), True]
+                self.say("  %s faces %.0f deg" % (robot, self.heads[robot][0]))
+                return p1
+            if "disagree" in words and self.disagree[robot] >= 2:
+                return None
+            self.leg(robot, ("turn", 90.0))
+        return None
+
+    def map_board(self, robot, n_rays=16):
+        """Robot perimeter mapping (e02_map.py): from the middle of the board, rays out in n_rays directions; each
+        ends where the robot's own sensors stop it (front stop at a board, edge guard at an open edge); then
+        straight back. The camera only watches (its watchdog lets it reach the edge itself: that is what is
+        measured; it still stops a robot whose centre would cross the edge). Returns the sides found, or None."""
+        st = self.st
+        if not self.activate(robot):
+            self.say("Mapping: the camera can't see %s at its spot; no mapping this time." % robot)
+            return None
+        self.say("=== Mapping: %s feels out the board (%d rays from the middle; about %d minutes) ===" % (
+            robot, n_rays, max(1, round(n_rays * 22 / 60))))
+        self.mark("e02 map start %s" % robot)
+        self.phase = "mapping"
+        self.order = "map"
+        self.set_corrections(robot, self.move_corrections(robot))
+        mid = ((self.board.x0 + self.board.x1) / 2, (self.board.y0 + self.board.y1) / 2)
+        ok, why = self.drive_to(robot, mid, max_leg=PARK_LEG_CM, arrive_cm=4.0)
+        if not ok:
+            self.say("Mapping: could not get %s to the middle (%s); no mapping this time." % (robot, why))
+            self.park(robot)
+            return None
+        rays = []
+        self.watch_edge_cm = 0.0
+        try:
+            for k, h in enumerate(MAP.ray_headings(n_rays)):
+                p = self.settle(min_s=0.3)
+                if p is None:
+                    break
+                if math.hypot(p[0] - mid[0], p[1] - mid[1]) > 8.0:
+                    ok, why = self.drive_to(robot, mid, max_leg=PARK_LEG_CM, arrive_cm=4.0)
+                    if not ok:
+                        self.say("  could not get back to the middle (%s): mapping ends here" % why)
+                        break
+                hd = self.heads.get(robot, [None])[0]
+                if hd is None:
+                    self.leg(robot, ("go", 5.0))
+                    hd = self.heads.get(robot, [None])[0]
+                    if hd is None:
+                        break
+                turn = ST.wrap180(h - hd)
+                if abs(turn) >= ST.MIN_TURN_DEG:
+                    self.leg(robot, ("turn", turn))
+                self.heads[robot] = [h, False]
+                self.fix_now(robot, h)
+                p0, p1, words = self.leg(robot, ("go", MAP.RAY_CM))
+                lid = self.last_lid.get(robot)
+                fin = self.listener.leg_final(robot, "-", lid) or {}
+                kind = MAP.stop_kind(fin.get("state"), fin.get("info"))
+                rx, ry, rth = num(fin.get("x_cm")), num(fin.get("y_cm")), num(fin.get("th_deg"))
+                ray = dict(k=k, heading=round(h, 1), state=fin.get("state"), info=fin.get("info"), kind=kind,
+                           words=words, cam_start=p0, cam_end=p1,
+                           robot_end=[rx, ry, rth] if rx is not None else None)
+                if p0 and p1 and math.hypot(p1[0] - p0[0], p1[1] - p0[1]) >= ST.MIN_HEADING_CM:
+                    self.heads[robot] = [ST.bearing(p0, p1), True]
+                if kind and rx is not None:
+                    ray["point"] = MAP.contact_point(rx, ry, rth, kind)
+                    if p1:
+                        ray["point_cam"] = MAP.contact_point(p1[0], p1[1], self.heads[robot][0] or rth, kind)
+                rays.append(ray)
+                self.say("  ray %2d, %4.0f deg: %s%s" % (k + 1, h, {"edge": "open edge", "board": "board"}.get(kind, "nothing met (%s)" % (words or fin.get("state"))),
+                                                       (" at (%.1f, %.1f) cm" % tuple(ray["point"])) if ray.get("point") else ""))
+                # straight back: turn round, then forward (the guards look ahead; backing up is blind)
+                back = math.hypot(p1[0] - p0[0], p1[1] - p0[1]) if (p0 and p1) else None
+                self.leg(robot, ("turn", 180.0))
+                if self.heads.get(robot, [None])[0] is not None:
+                    self.heads[robot] = [ST.wrap180(self.heads[robot][0] + 180.0), False]
+                if back and back > 2.0:
+                    self.leg(robot, ("go", back))
+        finally:
+            self.watch_edge_cm = None
+        others = [tuple(q[:2]) for n, q in st["positions"].items() if n != robot and q]
+        pts = [(r["point"][0], r["point"][1], r["kind"]) for r in rays if r.get("point")]
+        sides = MAP.fit_sides(pts, self.board, others=others)
+        for line in MAP.summary_words(sides, self.board):
+            self.say(line)
+        # the blocked boards: felt vs the picture
+        felt = {}
+        for key, sd in sides.items():
+            if sd["kind"] != "board":
+                continue
+            if sd["axis"] == "y":
+                felt["x"] = sd["value"]          # the x-board is the line y = const
+            else:
+                felt["y"] = sd["value"]
+        img_lines = st["setup"].get("board_lines_image", {})
+        for which, v in felt.items():
+            pic = img_lines.get(which, {}).get("value")
+            if pic is not None:
+                self.say("  %s-board: felt at %.1f cm, the picture says %.1f cm (%+.1f cm)" % (which, v, pic, v - pic))
+        st["setup"]["map"] = dict(robot=robot, rays=rays, sides=sides, felt_boards=felt, t=round(time.time(), 1))
+        st.save()
+        MAP.save(os.path.join(self.dir, "map.json"), robot, rays, sides, self.board)
+        try:
+            self.draw_map(rays, sides)
+        except Exception as e:
+            self.say("  (map picture failed: %s)" % e, quiet=True)
+        self.mark("e02 map end %s" % robot)
+        ok, why = self.park(robot)
+        if not ok:
+            self.help_from_nick(robot, why)
+        return sides
+
+    def draw_map(self, rays, sides):
+        import cv2
+        img = self.feed.last_img
+        if img is None:
+            return
+        v = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        for r in rays:
+            p0, pt = r.get("cam_start"), r.get("point")
+            if p0 and pt:
+                a = self.cam.project((p0[0], p0[1], 0.0))
+                b = self.cam.project((pt[0], pt[1], 0.0))
+                col = (0, 0, 255) if r["kind"] == "edge" else (255, 160, 0)
+                cv2.line(v, (int(a[0]), int(a[1])), (int(b[0]), int(b[1])), col, 1)
+                cv2.circle(v, (int(b[0]), int(b[1])), 3, col, -1)
+        path = os.path.join(self.dir, "check_map.png")
+        cv2.imwrite(path, v)
+        self.say("  The map, drawn on the camera picture: %s (red: open edges, blue: boards)" % path)
 
     def safety_settings(self, names):
         """The edge guard on and the bare body (no nose bracket fitted), sent and read back with `get`. A robot
@@ -1211,7 +1536,7 @@ class Runner:
                 if len(smp) < 3 or time.time() - smp[-1][0] > 1.0:
                     continue
                 parked = {n: tuple(q[:2]) for n, q in self.st["positions"].items() if n != robot and q}
-                why = ST.hazard(smp, self.board, parked)
+                why = ST.hazard(smp, self.board, parked, edge_cm=self.watch_edge_cm)
                 if not why or time.time() - last.get(robot, 0) < 2.0:
                     continue
                 last[robot] = time.time()
@@ -1610,9 +1935,11 @@ class Runner:
         self.say("  Parking %s failed: %s" % (robot, words))
         p = self.pos(robot)
         if p is None:
-            # look for it with a short drive near where it was
-            self.say("  Looking for %s with a short drive ..." % robot)
-            q = self.acquire(robot, step_cm=8.0)
+            # look for it by a turn on its spot, near where it was last seen
+            self.say("  Looking for %s by a short turn on its spot ..." % robot)
+            last = self.tracker.where() or (None, *(self.st["positions"].get(robot) or [None, None])[:2])
+            near = (last[1], last[2], 60.0) if last and last[1] is not None else None
+            q = self.acquire(robot, step_cm=8.0, near=near)
             if q:
                 ok, words = self.park(robot)
                 if ok:
@@ -1961,6 +2288,11 @@ def main(argv=None):
     ap.add_argument("--pi", default="st1maxfini.local", help="the Pi recorder's address")
     ap.add_argument("--overhead-port", type=int, default=8000)
     ap.add_argument("--side-port", type=int, default=8001)
+    ap.add_argument("--no-side", action="store_true", help="no side camera this session: don't check or ask about it")
+    ap.add_argument("--map", action="store_true", help="after setup, one robot maps the board by touch (about 6 min)")
+    ap.add_argument("--map-only", action="store_true", help="setup and the mapping only, then stop")
+    ap.add_argument("--map-rays", type=int, default=16)
+    ap.add_argument("--map-robot", default="", help="which robot maps (default: the first)")
     ap.add_argument("--calib", help="floor calibration file (default: the studio project's cameras/overhead.json)")
     ap.add_argument("--project", help="the studio project folder (default Documents\\recognition-project)")
     ap.add_argument("--make-calibration", action="store_true", help="make one from the board corners even if one exists")
@@ -2084,6 +2416,12 @@ def launch(a, state, sdir, sim):
         run.feed = feed
         run.setup()
         run.robots_ready()
+        if (a.map or a.map_only) and not state["setup"].get("map"):
+            names = [n for n in state["robots"] if n not in run.unavailable]
+            if names:
+                run.map_board(a.map_robot if a.map_robot in names else names[0], n_rays=a.map_rays)
+        if a.map_only:
+            raise SystemExit("Mapping done (--map-only): no runs this time.")
         if not a.skip_find_check and not state["setup"].get("find_check"):
             run.find_check()
         if not a.skip_naming and not state.get("naming_check"):

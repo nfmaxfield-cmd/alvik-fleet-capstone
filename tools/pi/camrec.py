@@ -790,7 +790,7 @@ class CamRec:
                 win_n, win_t = 0, now
             if self.port and self.n % 2 == 0:   # preview at half rate to save CPU
                 view = frame.copy()
-                tag = f"{shown_fps:4.1f} fps  {'REC ' + time.strftime('%M:%S', time.gmtime(t_mono)) if recording else 'preview'}"
+                tag = f"{shown_fps:4.1f} fps  {'REC ' + time.strftime('%H:%M:%S' if t_mono >= 3600 else '%M:%S', time.gmtime(t_mono)) if recording else 'preview'}"
                 if self.name:
                     tag = f"{self.name}  " + tag
                 cv2.putText(view, tag, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
