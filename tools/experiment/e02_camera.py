@@ -764,6 +764,17 @@ class Feed(threading.Thread):
                     seen = self.frames
         return out
 
+    def collect(self, seconds):
+        """Every frame for the next `seconds`: (grey pictures, their laptop times)."""
+        got = []
+        hook = lambda img, t: got.append((img, t))      # noqa: E731
+        self.hooks.append(hook)
+        try:
+            time.sleep(seconds)
+        finally:
+            self.hooks.remove(hook)
+        return [g[0] for g in got], [g[1] for g in got]
+
     def close(self):
         self.stopped = True
         try:
@@ -819,3 +830,61 @@ def notes_answer(host, port=5007, text="e02 check", timeout=0.5):
     finally:
         s.close()
     return False
+
+
+def locate_flash(cam, frames, times, board_rect=None, margin_cm=8.0, near=None, z_cm=ROBOT_TOP_CM,
+                 freqs=(1.7, 1.8, 1.9, 2.0, 2.1, 2.2, 2.3)):
+    """Where is a robot flashing its lights (`identify`: both LEDs white, 250 ms on / 250 ms off for 3 s, i.e.
+    2 Hz)? For a third try when a turn on the spot showed nothing (2026-10-22, Nick: "does it flash its lights
+    to find it?"). Per pixel, how strongly its brightness swings at about 2 Hz; the auto exposure and the
+    picture's noise don't swing at that rate, an LED does. Found on the real footage at both help calls where the
+    robot was in view (22:38:05 and 22:48:13). frames: grey pictures over >= 2.5 s, times: their times (s).
+    Returns dict(x, y, strength, ratio) or None."""
+    if len(frames) < 16:
+        return None
+    ts = np.asarray(times, float)
+    ts = ts - ts[0]
+    if ts[-1] < 2.0:
+        return None
+    fr = np.stack([f.astype(np.float32) for f in frames])
+    fr -= fr.mean(axis=0)
+    best = None
+    for f in freqs:
+        c = np.cos(2 * np.pi * f * ts)[:, None, None]
+        s = np.sin(2 * np.pi * f * ts)[:, None, None]
+        p = np.hypot((fr * c).mean(axis=0), (fr * s).mean(axis=0))
+        best = p if best is None else np.maximum(best, p)
+    ratio = best / (fr.std(axis=0) + 1e-3)
+    score = best * (ratio > 0.3)
+    h, w = score.shape
+    # only on the board area (or near the point given)
+    vv, uu = np.mgrid[0:h:4, 0:w:4]
+    mask = np.zeros_like(score, dtype=bool)
+    xs, ys = cam.to_floor(uu.ravel().astype(float), vv.ravel().astype(float), z_cm)
+    ok = np.isfinite(xs) & np.isfinite(ys)
+    if board_rect is not None:
+        x0, y0, x1, y1 = board_rect
+        ok &= (xs >= min(x0, x1) - margin_cm) & (xs <= max(x0, x1) + margin_cm)
+        ok &= (ys >= min(y0, y1) - margin_cm) & (ys <= max(y0, y1) + margin_cm)
+    if near is not None:
+        ok &= np.hypot(xs - near[0], ys - near[1]) <= near[2]
+    sub = np.zeros(vv.shape, bool).ravel()
+    sub[ok] = True
+    mask[0:h:4, 0:w:4] = sub.reshape(vv.shape)
+    mask = cv2.dilate(mask.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
+    sc = np.where(mask, score, 0.0)
+    peak = float(sc.max())
+    if peak < 18.0:            # real LEDs: 25-31 grey levels of 2 Hz swing; other things on the footage: up to 15
+        return None
+    vals = sc[mask]
+    if peak < 2.5 * float(np.percentile(vals, 99.5)):
+        return None                       # many pixels swing alike: not one robot's lights
+    v0, u0 = np.unravel_index(int(np.argmax(sc)), sc.shape)
+    if ratio[v0, u0] < 0.42:   # real LEDs: over half its swing at 2 Hz; other things: about a third
+        return None
+    rpx = ROBOT_CM * cam.px_per_cm(*cam.to_floor(float(u0), float(v0), z_cm), z_cm)
+    yy, xx = np.nonzero(sc > 0.5 * peak)
+    keep = np.hypot(xx - u0, yy - v0) <= 1.3 * rpx
+    u, v = float(np.average(xx[keep], weights=sc[yy[keep], xx[keep]])), float(np.average(yy[keep], weights=sc[yy[keep], xx[keep]]))
+    x, y = cam.to_floor(u, v, z_cm)
+    return dict(x=float(x), y=float(y), strength=round(peak, 1), ratio=round(float(ratio[v0, u0]), 2), u=u, v=v)

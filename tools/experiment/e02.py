@@ -827,6 +827,17 @@ class Runner:
                 self.say("    (two places changed when %s turned: looking again)" % robot, quiet=True)
                 continue
             return (cands[0]["x"], cands[0]["y"])
+        # third try: its lights (2026-10-22). `identify` flashes both LEDs white at 2 Hz for 3 s; the camera
+        # looks for the one spot swinging at that rate.
+        if self.feed is not None and hasattr(self.feed, "collect"):
+            self.send(robot, "identify")
+            imgs, ts = self.feed.collect(3.6)
+            f = CAM.locate_flash(self.cam, imgs, ts, board_rect=self.board_rect(), near=near)
+            self.st.setdefault("identify", []).append([round(time.time(), 1), robot, "flash",
+                                                       [round(f["x"], 1), round(f["y"], 1), f["strength"]] if f else None])
+            if f and all(math.hypot(f["x"] - o[0], f["y"] - o[1]) > 6.0 for o in others):
+                self.say("    (found %s by its lights)" % robot)
+                return (f["x"], f["y"])
         return None
 
     def acquire(self, robot, step_cm=10.0, near=None):

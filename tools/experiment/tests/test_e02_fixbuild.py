@@ -215,3 +215,25 @@ def test_a_parked_robot_does_not_capture_the_tracker(cam_setup):
         s = tr.push(sc.render(), t)
         p = tr.where()
         assert math.hypot(p[1] - mover.x, p[2] - mover.y) < 4.0, (k, p)
+
+
+def test_a_robot_is_found_by_its_flashing_lights_and_noise_is_not(cam_setup):
+    import e02_camera as CAM
+    w, sc, cam, _ = cam_setup
+    r = FakeRobot(70.0, 40.0, 0.0)
+    w.robots[:] = [r, FakeRobot(30.0, 90.0, 0.0)]
+    base = sc.render()
+    rng = np.random.default_rng(2)
+    u, v = cam.project((72.0, 40.0, 3.7))
+    imgs, ts = [], []
+    for k in range(45):                       # 15 frames a second, 3 s; the LEDs on for 250 ms, off for 250 ms
+        t = k / 15.0
+        img = np.clip(base.astype(np.float32) + rng.normal(0, 4, base.shape), 0, 255).astype(np.uint8)
+        if int(t / 0.25) % 2 == 0:
+            cv2.circle(img, (int(u), int(v)), 2, 255, -1)
+        imgs.append(img)
+        ts.append(t)
+    f = CAM.locate_flash(cam, imgs, ts, board_rect=(0.0, 0.0, 122.15, 121.9))
+    assert f is not None and math.hypot(f["x"] - 72.0, f["y"] - 40.0) < 3.0, f
+    still = [np.clip(base.astype(np.float32) + rng.normal(0, 4, base.shape), 0, 255).astype(np.uint8) for _ in ts]
+    assert CAM.locate_flash(cam, still, ts, board_rect=(0.0, 0.0, 122.15, 121.9)) is None
