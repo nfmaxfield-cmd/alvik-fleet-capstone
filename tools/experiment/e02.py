@@ -1240,6 +1240,16 @@ class Runner:
         of the map, or a stop for something in front where the map is clear, is a hit: the camera looks for the
         lost robot's turn there; if the camera can't see that spot either, the hit itself is the best place known.
         The searcher parks again after. Returns (x, y) or None (nothing found: then the session stops)."""
+        # its last place is not where it is: the searcher's paths must not go round it there (dry run 17:11: every
+        # lookout and the searcher's own parking found "no clear way" round that stale place)
+        stale = self.st["positions"].pop(lost, None)
+        try:
+            return self._search(lost)
+        finally:
+            if stale is not None and lost not in self.st["positions"]:
+                self.st["positions"][lost] = stale
+
+    def _search(self, lost):
         for searcher in [n for n in self.st["robots"] if n != lost and n not in self.unavailable]:
             if not self.st["positions"].get(searcher) or not self.activate(searcher):
                 continue
