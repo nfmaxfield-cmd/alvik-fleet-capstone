@@ -61,3 +61,17 @@ the work area and the robots; then the program calibrates everything itself, cam
 version of tonight's E02 session. 16 Docks and lights included if still in use by then. 17 Sometime in
 December. 18 Three robots now, a fleet next semester: build for any number. 19 "Live lab" mode of
 Maxfield IRL Tracking.
+
+## More answers (2026-10-21, 21:14)
+- Absolute scale: solved with the Alvik anchors (docks); other known references (robot size) confirm
+  and strengthen the estimate.
+- Live demo: yes, show the visual model improving live too; think of live displays that captivate the
+  audience; a second screen can run alongside the first.
+- Recorded-demo script: not yet; keep running notes and questions (docs/presentation-notes.md).
+- Look: it should feel like a commercial product.
+
+Second-screen ideas (Claude, to discuss): the model's guesses drawn over the live picture getting
+tighter round by round; a "labels made for free" counter ticking up with a small mosaic of the frames;
+each sensor's trust as a live meter that shifts when the camera and wheels disagree; uncertainty
+ellipses shrinking as calibration settles; the learning curve climbing as each training round finishes;
+a per-robot "how sure am I" card.
