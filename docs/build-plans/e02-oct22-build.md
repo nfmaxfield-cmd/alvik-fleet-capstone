@@ -46,8 +46,11 @@ logic more generic for other equipment and sensors.
       robot does a find to rescue itself; second camera (after the overhead tracker is solid); colour sensor (low)
 - [x] Generic: outline for discussion, docs/build-plans/generic-platform-outline.md
 - [x] The lost robot finds itself against the boards (rescue find): no firmware change needed (the firmware keeps
-      its own pose between camera fixes; `run find` without a fix uses it). Only when last seen 25+ cm in from the
-      open edges and not moved by hand. Simulator: E02_SIM_HIDE="Left:110:170" hides a robot from the camera.
+      its own pose between camera fixes; `run find` without a fix uses it). Only when last seen 15+ cm in from the
+      open edges (park spots are 17+) and not moved by hand. Dry run with Left hidden from the camera for 140 s
+      (E02_SIM_HIDE="Left:110:250"): 3 retries, Center's and Right's sweeps (one false hit at the y-board, checked
+      by the camera and dropped), then Left found itself and was found again, no help call. With 60 s hidden: back
+      on the 2nd retry. (The simulator never names robots in the naming check, before this build too.) Simulator: E02_SIM_HIDE="Left:110:170" hides a robot from the camera.
 - [x] Today's footage as a regression test (tests/test_e02_realclips.py::test_tracker_on_oct22_footage)
 
 ## Before the next session
