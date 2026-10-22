@@ -115,6 +115,7 @@ FRONT_TOL_CM = 8.0        # ... and how far a reading may be from that before it
 FRONT_STEER_FACTOR = 1.5  # a disagreement this many tolerances, with a measured heading, makes the runner find it again
 FRONT_LEARN_MIN = 8       # --front-learn: readings before the learned offset and tolerance are used
 FRONT_LEARN_MIN_TOL = 3.0
+FRONT_MIN_COS = 0.7       # the front-sensor check only counts boards met within 45 deg of head-on
 FRONT_CHECK_RANGE_CM = 50.0  # the front-sensor check only counts things nearer than this
 FRONT_CHECK_CM = 6.0      # ... and says so when the sensor and the map differ by more
 EXPECT_TURN_CM = 7.0       # a robot turning on its spot stays within this of where it stood (camera's view)
@@ -593,7 +594,7 @@ class Runner:
                 w.writerow(["t", "robot", "leg", "value", "x_cm", "y_cm", "heading_deg", "heading_measured",
                             "front_cm", "expected_cm", "what"])
             w.writerow(row)
-        if ahead is not None and ahead[0] <= FRONT_CHECK_RANGE_CM:
+        if ahead is not None and ahead[0] <= FRONT_CHECK_RANGE_CM and self.square_on(ahead):
             off, tol = self.front_limits()
             miss = front - off - ahead[0]
             if h[1]:
@@ -630,7 +631,7 @@ class Runner:
             d = (v - p[0]) / ux if axis == "x" and abs(ux) > 1e-6 else ((v - p[1]) / uy if axis == "y" and abs(uy) > 1e-6
                                                                       else -1)
             if d > 0 and (best is None or d < best[0]):
-                best = (d, what)
+                best = (d, what, abs(ux) if axis == "x" else abs(uy))     # cos of the angle to the board's normal
         for n, q in self.st["positions"].items():
             if n == robot or not q:
                 continue
@@ -640,10 +641,16 @@ class Runner:
             if t > 0 and off < PL.ROBOT_HALF_CM:
                 d = t - math.sqrt(max(0.0, PL.ROBOT_HALF_CM ** 2 - off ** 2))
                 if best is None or d < best[0]:
-                    best = (d, n)
+                    best = (d, n, 1.0)
         if best is None:
             return None
-        return best[0] - PL.ROBOT_HALF_CM, best[1]
+        return best[0] - PL.ROBOT_HALF_CM, best[1], best[2]
+
+    @staticmethod
+    def square_on(ahead):
+        """Is the thing ahead met steeply enough for the front sensor to read it? (dry run 15:35: at 19 deg to a
+        board the sensor read 92 cm where the board was 42 cm away; its zones see past a board met that flat)"""
+        return ahead is not None and (len(ahead) < 3 or ahead[2] >= FRONT_MIN_COS)
 
     def expect_leg(self, text, timeout):
         """Where the followed robot can be during this leg (2026-10-22: during a turn on its spot the tracker was
@@ -1415,7 +1422,7 @@ class Runner:
                 if pose and m and float(m.group(1)) > 0:
                     ahead = self.ahead_cm(robot, pose[:2], pose[2])
                     off, tol = self.front_limits()
-                    if ahead and ahead[0] <= FRONT_CHECK_RANGE_CM and \
+                    if ahead and ahead[0] <= FRONT_CHECK_RANGE_CM and self.square_on(ahead) and \
                             abs(float(m.group(1)) - off - ahead[0]) > FRONT_STEER_FACTOR * tol:
                         return False, "its front sensor reads %.0f cm where its own pose puts %s at %.0f cm" % (
                             float(m.group(1)), ahead[1], ahead[0])
