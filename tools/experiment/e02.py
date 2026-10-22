@@ -772,6 +772,12 @@ class Runner:
                 self.unavailable.add(robot)
                 return False
             time.sleep(1.0)
+            # A fresh picture of the board first: the robot was put down by hand after the last one, so the
+            # spot it drives off would not show as changed (2026-10-21, Center at setup).
+            self.say("Taking a fresh picture of the board (keep hands out of it) ...")
+            frames = self.feed.wait_frames(10, timeout=8)
+            if frames:
+                self.tracker.set_background(frames)
             p = self.acquire(robot)
             if p:
                 ok, why = self.park(robot)

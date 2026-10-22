@@ -285,7 +285,9 @@ class Board:
     def park_words(self, i, side_of):
         """Plain words for where park spot i is: side_of(x, y) -> 'top' / 'left' ... of the camera picture."""
         u, v = PARK_UV[i % len(PARK_UV)]
-        ex, ey = self.uv(0.0, v), self.uv(u, 0.0)
+        # name each board by a point well along it, not near the shared corner (near the corner both read
+        # "top"; 2026-10-21)
+        ex, ey = self.uv(0.0, 60.0), self.uv(60.0, 0.0)
         return ("about %.0f cm (%.0f in) from the blocked board on the %s of the camera picture and %.0f cm (%.0f in) "
                 "from the blocked board on the %s" % (u, u / 2.54, side_of(*ex), v, v / 2.54, side_of(*ey)))
 
