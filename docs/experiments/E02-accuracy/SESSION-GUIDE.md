@@ -10,7 +10,9 @@ parks them itself (going round the others), and checks the camera against the ro
 New: the robots feel out the board first (mapping), which also measures the edge guard for the first time.
 
 ## Before you start (at the board)
-1. Charge all three robots fully. The firmware is the same as last time (2026-10-21b): no upload needed.
+1. Charge all three robots fully. **New firmware 2026-10-22b: upload it to all three first** (GitHub Desktop: Fetch,
+   Pull; Arduino IDE: `firmware/home_lab/home_lab.ino`; Tools > Port > each robot under Network ports, Upload, the
+   password. If an upload says "not connected", pick the port again and retry). The runner refuses older firmware.
 2. Boards on the **top** and **left** edges of the overhead picture, cement blocks behind them. The other two
    edges stay open. Nothing else on the plywood.
 3. Robots switched on, anywhere on the open part of the board, at least 30 cm (1 ft) from each other, the boards
@@ -33,7 +35,7 @@ Leave this tab alone until the end.
 
 ## 3. Start the runner (LAPTOP tab)
 ```
-python tools\experiment\e02.py --pi st1maxfini.local --hours 1.75 --no-side --map --robot 192.168.1.250 --robot 192.168.1.252 --robot 192.168.1.253
+python tools\experiment\e02.py --pi st1maxfini.local --hours 1.5 --no-side --map --robot 192.168.1.250 --robot 192.168.1.252 --robot 192.168.1.253
 ```
 Answers: **y** (the green outline sits on the board), **left** (the x-board), **top** (the y-board).
 Then it works on its own. To see what it thinks, open **http://localhost:8090** in a browser on the laptop

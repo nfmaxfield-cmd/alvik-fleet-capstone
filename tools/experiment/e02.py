@@ -98,6 +98,10 @@ CHECK_CM, CHECK_FRAC = 5.0, 0.35   # camera vs wheels: a go leg's distances may 
 ID_EXTRA_CM = 5.0                  # ...plus this on the first leg after a turn on the spot (its centre is rougher)
 PARK_LEG_CM = 60.0        # parking: long legs on the robot's own wheels and gyro, the camera checks in between
 STALE_S = 1.5             # a camera position older than this is not used to steer
+SWEEP_STEP_DEG = 30.0     # a finder robot turns in these steps, reading its front sensor after each
+SWEEP_RANGE_CM = 70.0     # ... a reading nearer than this
+SWEEP_GAP_CM = 8.0        # ... and this much shorter than the map says is something not on the map
+SWEEP_NEAR_CM = 25.0      # the camera then looks for the lost robot's turn within this of it
 FRONT_CHECK_RANGE_CM = 50.0  # the front-sensor check only counts things nearer than this
 FRONT_CHECK_CM = 6.0      # ... and says so when the sensor and the map differ by more
 EXPECT_TURN_CM = 7.0       # a robot turning on its spot stays within this of where it stood (camera's view)
@@ -559,8 +563,9 @@ class Runner:
         if not m or p is None or h[0] is None or self.board is None:
             return None
         front = float(m.group(1))
-        ahead = self.ahead_cm(robot, p, h[0])
-        row = [round(time.time(), 2), robot, kind, round(val, 1), round(p[0], 1), round(p[1], 1), round(h[0], 1),
+        hd = ST.wrap180(h[0] + val) if kind == "turn" else h[0]      # heads[] holds the heading before the leg
+        ahead = self.ahead_cm(robot, p, hd)
+        row = [round(time.time(), 2), robot, kind, round(val, 1), round(p[0], 1), round(p[1], 1), round(hd, 1),
                int(bool(h[1])), front, "" if ahead is None else round(ahead[0], 1), "" if ahead is None else ahead[1]]
         path = os.path.join(self.dir, "front_checks.csv")
         new = not os.path.exists(path)
@@ -844,6 +849,8 @@ class Runner:
             if cmd[0] == "turn" and abs(cmd[1]) < ST.MIN_TURN_DEG:
                 self.heads[robot] = [steer.heading, steer.measured]
                 return True, ""
+            if steer.heading is not None:
+                self.heads[robot] = [steer.heading, steer.measured]     # the front-sensor check reads it
             p0, p1, res = self.leg(robot, cmd, run=run)
             if res.startswith("camera and wheels"):
                 if p1 is None or self.disagree[robot] >= 2:
@@ -1083,6 +1090,52 @@ class Runner:
         ok, why = self.park(robot)
         return ok, why
 
+    def sweep_for(self, lost):
+        """Nick, 2026-10-22: a robot that knows where it is looks for the lost one with its front sensor. It turns
+        on its spot in SWEEP_STEP_DEG steps (each turn leg reports the front sensor: firmware 2026-10-22b); a reading
+        well short of what the map says is ahead (a board, or a robot we know of) is something not on the map: the
+        lost robot. The camera then looks for its turn there only. Returns (x, y) or None."""
+        for finder in self.st["robots"]:
+            if finder == lost or finder in self.unavailable:
+                continue
+            q = self.st["positions"].get(finder)
+            h = self.heads.get(finder, [None])[0]
+            if h is None and q and len(q) > 2:
+                h = q[2]
+            if not q or h is None or self.board.edge_room(q[0], q[1])[0] < EDGE_TURN_CM + 3:
+                continue
+            self.say("  %s looks round for %s with its front sensor ..." % (finder, lost))
+            self.mark("e02 sweep %s for %s" % (finder, lost))
+            if not self.begin_moves(finder, "looking for " + lost):
+                continue
+            hits = []
+            heading = h
+            for k in range(int(round(360.0 / SWEEP_STEP_DEG))):
+                state, info = self.send_leg(finder, "turn %.1f" % SWEEP_STEP_DEG, SWEEP_STEP_DEG / TURN_DPS_GUESS * 2.5 + 6.0)
+                heading = ST.wrap180(heading + SWEEP_STEP_DEG)
+                m = re.search(r"front=([0-9.]+)", info or "")
+                if state not in ("done", "dup") or not m:
+                    continue
+                front = float(m.group(1))
+                saved = self.st["positions"].pop(lost, None)
+                ahead = self.ahead_cm(finder, q[:2], heading)
+                if saved is not None:
+                    self.st["positions"][lost] = saved
+                if front < SWEEP_RANGE_CM and (ahead is None or front < ahead[0] - SWEEP_GAP_CM):
+                    d = front + 2 * PL.ROBOT_HALF_CM
+                    hits.append((front, q[0] + d * math.cos(math.radians(heading)),
+                                 q[1] + d * math.sin(math.radians(heading))))
+            self.heads[finder] = [heading, self.heads.get(finder, [None, False])[1]]
+            self.moves.pop(finder, None)
+            for _, x, y in sorted(hits):
+                if not self.board.on_board(x, y):
+                    continue
+                self.say("  %s sees something not on the map at about (%.0f, %.0f) cm: is it %s?" % (finder, x, y, lost))
+                p = self.identify(lost, near=(x, y, SWEEP_NEAR_CM))
+                if p is not None:
+                    return p
+        return None
+
     def help_from_nick(self, robot, problem, park=True):
         """Stuck, lost or off the board: first AUTO_TRIES tries on its own (2026-10-22: pressing Enter with no
         hands, i.e. just finding it again, worked nearly every time); then exact steps for Nick, then the runner
@@ -1101,6 +1154,19 @@ class Runner:
                 if why == "atedge":
                     problem = "it is at (or over) an open edge, and which way it faces is not known"
                     break
+                if why == "noturn" and k == AUTO_TRIES - 1 and self.tracker is not None:
+                    p = self.sweep_for(robot)
+                    if p is not None:
+                        self.st["positions"][robot] = [p[0], p[1], None]
+                        self.say("  Found %s at (%.1f, %.1f) cm with another robot's help." % (robot, p[0], p[1]))
+                        if not park:
+                            return True
+                        if not (self.board.edge_room(p[0], p[1])[0] < EDGE_TURN_CM + 3) and \
+                                self.acquire_heading(robot, p) is not None:
+                            self.set_corrections(robot, self.move_corrections(robot))
+                            ok, why = self.park(robot)
+                            if ok:
+                                return True
                 if why not in ("noturn", "noheading"):
                     problem = why
         where = ("anywhere on the open part of the board, at least 30 cm (1 ft) from the other robots, the boards "

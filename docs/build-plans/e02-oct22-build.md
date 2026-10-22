@@ -38,6 +38,8 @@ logic more generic for other equipment and sensors.
 - [x] Front sensor as a free check (Nick): firmware 2026-10-22b adds "front=<cm>" to every finished leg; the runner
       compares it with the map (boards, other robots) and writes front_checks.csv. Recorded only, for now: one
       session's numbers set the limits before it steers anything
+- [x] Finder sweep (Nick): when the camera can't see a lost robot turn after the retries, a parked robot turns in
+      30-deg steps reading its front sensor; a reading 8+ cm short of the map is checked by the camera there
 - [ ] Nick's ideas: robot-to-robot check (front_checks.csv already lists another robot ahead); finder robot sweep; the lost
       robot does a find to rescue itself; second camera (after the overhead tracker is solid); colour sensor (low)
 - [x] Generic: outline for discussion, docs/build-plans/generic-platform-outline.md
