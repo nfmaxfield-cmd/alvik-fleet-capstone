@@ -109,3 +109,19 @@ def test_tracker_area_stops_at_the_walls():
     assert tr.on_area(60.0, -5.0)                      # an open edge: margin allowed
     assert not tr.on_area(60.0, 114.66 + tr.WALL_CM + 0.5)
     assert not tr.on_area(-47.0, 112.0)                # where the hands were followed, 10:57
+
+
+def test_no_method_is_defined_twice():
+    """2026-10-22: a new recover() was silently replaced by an older method of the same name further down the class,
+    and a help call looped forever. Every class in the runner's modules defines each method once."""
+    import ast
+    import os
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for fn in sorted(os.listdir(here)):
+        if not (fn.startswith("e02") and fn.endswith(".py")):
+            continue
+        tree = ast.parse(open(os.path.join(here, fn)).read())
+        for cls in [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]:
+            names = [f.name for f in cls.body if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))]
+            dup = sorted({n for n in names if names.count(n) > 1})
+            assert not dup, (fn, cls.name, dup)
