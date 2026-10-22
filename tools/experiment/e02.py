@@ -98,6 +98,7 @@ CHECK_CM, CHECK_FRAC = 5.0, 0.35   # camera vs wheels: a go leg's distances may 
 ID_EXTRA_CM = 5.0                  # ...plus this on the first leg after a turn on the spot (its centre is rougher)
 PARK_LEG_CM = 60.0        # parking: long legs on the robot's own wheels and gyro, the camera checks in between
 STALE_S = 1.5             # a camera position older than this is not used to steer
+BLOCKS_FIND_CM = 35.0     # a robot put aside this near the find's staging point blocks every find
 RESCUE_EDGE_CM = 15.0     # a lost robot finds itself against the boards only if last seen this far in from the open edges (park spots: 17+)
 SWEEP_STEP_DEG = 30.0     # a finder robot turns in these steps, reading its front sensor after each
 SWEEP_RANGE_CM = 70.0     # ... a reading nearer than this
@@ -1222,6 +1223,13 @@ class Runner:
                             ok, why = self.park(robot)
                             if ok:
                                 return True
+                        # found but not parked (dry run 13:15: lost during its first turn in the corner): it is
+                        # in view now, so one more ordinary try before Nick
+                        self.say("  %s: one more try now that it is in view ..." % robot)
+                        ok, why2 = self.retry_find(robot, park)
+                        if ok:
+                            self.say("  %s is back without help." % robot)
+                            return True
                 if why not in ("noturn", "noheading"):
                     problem = why
         where = ("anywhere on the open part of the board, at least 30 cm (1 ft) from the other robots, the boards "
@@ -1299,6 +1307,13 @@ class Runner:
             self.tracker.park(robot, p[0], p[1])
         self.say("  %s stays where it is, at about (%.0f, %.0f) cm; the others go round it." % (robot, p[0], p[1]))
         self.st.save()
+        fx, fy = self.board.find_stage()
+        if math.hypot(p[0] - fx, p[1] - fy) < BLOCKS_FIND_CM:
+            # dry run 13:15: a robot put aside by the blocked corner, where every find drives: every run after it
+            # failed its find. Better to stop and say so than to fail run after run.
+            raise SystemExit("%s is put aside at about (%.0f, %.0f) cm, in the corner every robot's find drives to, "
+                             "so no run can start. Take %s off the board, then start again with --resume." % (
+                                 robot, p[0], p[1], robot))
 
     # --- checks -----------------------------------------------------------------------------------
     def wait_robots(self, names, timeout=40):

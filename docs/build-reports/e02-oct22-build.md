@@ -89,3 +89,11 @@ going until the usage runs out, then make the logic more generic. Plan and check
    capped search circle): intended, noted.
 7. The move-in point near the corner of the two open edges: now clear of both.
 
+After the review fixes, the hidden-robot dry run was run twice more. Once, Left was found by its own find but lost
+by the camera during its first 177° turn in the corner and could not be parked; it was then put aside right where
+every find drives, and every run after it failed its find. Two more changes: after a rescue that can't park, one
+more ordinary try while it is in view; and a robot put aside within 35 cm of the find's staging point now stops the
+session with plain words ("take it off the board, then --resume") instead of failing run after run. Run again: Left
+found itself, parked, 2 runs done, no help call. Why the camera lost the turning robot in the corner that once is
+not known yet (to check on the next real footage).
+
