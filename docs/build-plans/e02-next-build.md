@@ -13,3 +13,11 @@
   open middle only when it is free, a looser "taken" test for the backing-in point, and a test with the robots in
   the three corners Nick used (simulator --dry-start).
 - The Pi recorder's disk warning overestimates 4x (says 2.0 GB per 10 min; real is about 0.4 GB): fix the estimate.
+- (2026-10-22 08:20) **The live picture reaches the laptop at only about 2 frames a second** (setup: "5 pictures in
+  2.4 s"; last night the same). Everything was tested on the 25 fps recording. At 2 fps the flash finder can't work
+  (the lights blink at 2 Hz: the samples alias) and tracking is far coarser. Find where the rate drops (Pi preview
+  encoding, WiFi, the laptop's reader), measure it during the session, and either raise it or make the finder use a
+  slower blink (needs the non-blocking light command Nick approved) / do the flash finding on the Pi.
+- (2026-10-22 08:19) **Left lost twice in the bottom-left corner** (the left board's shadow): found again by the turn
+  at (40.5, 102.7), lost again backing into its park spot (17, 108). Move that park spot out of the shadow, or make the
+  tracker cope with low contrast there (per-area thresholds from the floor memory's noise).
