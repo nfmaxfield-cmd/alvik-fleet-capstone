@@ -607,7 +607,7 @@ class Runner:
             if abs(miss) > tol:
                 self.say("    %s: front sensor %.0f cm, the camera and map say %s at %.0f cm" % (
                     robot, front, ahead[1], ahead[0]), quiet=not (h[1] and abs(miss) > FRONT_STEER_FACTOR * tol))
-                if h[1] and abs(miss) > FRONT_STEER_FACTOR * tol:
+                if h[1] and abs(miss) > FRONT_STEER_FACTOR * tol and not getattr(self.a, "no_front_steer", False):
                     # a measured heading, and the sensor far from the map: the camera position is suspect
                     self.front_bad[robot] = "the front sensor reads %.0f cm, the map says %s at %.0f cm" % (
                         front, ahead[1], ahead[0] + off)
@@ -3738,6 +3738,9 @@ def main(argv=None):
     ap.add_argument("--side-port", type=int, default=8001)
     ap.add_argument("--stream-q", type=int, default=0, help="JPEG quality of the live camera stream (0 = the Pi's "
                                                               "default, 95; e.g. 70 for more pictures a second)")
+    ap.add_argument("--no-front-steer", action="store_true",
+                    help="the front sensor is only logged, never makes the runner find a robot again (if its first "
+                         "real readings turn out noisy)")
     ap.add_argument("--front-learn", action="store_true",
                     help="learn the front sensor's offset and spread against the map in this session (from scratch); "
                          "off: the values from data (FRONT_OFFSET_CM, FRONT_TOL_CM)")
