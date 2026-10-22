@@ -72,6 +72,46 @@ class Recording:
         return cv2.cvtColor(f, cv2.COLOR_BGR2GRAY) if ok else None
 
 
+class MjpgPiece:
+    """Frames of a piece of an MJPG .avi cut by bytes (a recording split for upload, e.g. release
+    e02-session-oct22's video.part-ab): each frame is a '00dc' chunk holding one JPEG, so a piece without the file's
+    header can still be read. first_frame = the full recording's frame number of the piece's first whole frame
+    (the recording's frame count minus the frames in the piece, for the last piece)."""
+
+    def __init__(self, path, frames_csv, first_frame=None):
+        import mmap
+        self.f = open(path, "rb")
+        self.m = mmap.mmap(self.f.fileno(), 0, access=mmap.ACCESS_READ)
+        self.idx = []
+        i = 0
+        while True:
+            j = self.m.find(b"00dc", i)
+            if j < 0:
+                break
+            n = int.from_bytes(self.m[j + 4:j + 8], "little")
+            if 0 < n < 2_000_000 and self.m[j + 8:j + 10] == b"\xff\xd8" and j + 8 + n <= len(self.m):
+                self.idx.append((j + 8, n))
+                i = j + 8 + n
+            else:
+                i = j + 4
+        self.ts = [float(r["t_wall"]) for r in csv.DictReader(open(frames_csv))]
+        self.n = len(self.idx)
+        self.first = len(self.ts) - self.n if first_frame is None else first_frame
+        self.day = dt.datetime.fromtimestamp(self.ts[0], TZ).date()
+
+    def index(self, t):
+        return max(0, min(self.n - 1, bisect.bisect_left(self.ts, t) - self.first))
+
+    def t_frame(self, i):
+        return self.ts[i + self.first]
+
+    def read(self, i):
+        if not 0 <= i < self.n:
+            return None
+        o, n = self.idx[i]
+        return cv2.imdecode(np.frombuffer(self.m[o:o + n], np.uint8), cv2.IMREAD_GRAYSCALE)
+
+
 def load_old_track(path):
     out = []
     if path and os.path.exists(path):

@@ -74,3 +74,59 @@ def test_tracker_on_real_footage(name):
     share = len(seen) / max(1, len(samples))
     gshare = sum(1 for v in gold.values() if v) / max(1, len(gold))
     assert share >= gshare - 0.05, (name, share, gshare)
+
+
+OCT22 = json.load(open(os.path.join(DATA, "oct22_left.json")))
+
+
+def test_tracker_on_oct22_footage():
+    """2026-10-22 10:39:58-10:40:55: Left driven in the corner by the x-board, Right parked 30 cm away. This
+    morning the tracker took Right for Left during a 167-deg turn (10:40:03) and then lost Left against the board.
+    Replayed the way the runner drives the tracker now: the board and its walls, the other robots parked, each leg
+    telling it where Left can be (turn: 7 cm, drive d: d + 8 cm), held still between legs.
+    Pass: never within 1.1 robot widths of Right's spot; never more than 3.5 cm past the x-board's wall limit; seen
+    in at least 70% of the frames (75% when this test was written; 20% for the tracker of this morning)."""
+    import e02_camera as CAM
+    import e02_plan as PL
+    import e02_replay as R
+    m = OCT22
+    video = os.path.join(CLIPS, "oct22_video.part-ab")
+    frames = os.path.join(CLIPS, "oct22_frames.csv")
+    if not (os.path.exists(video) and os.path.exists(frames)):
+        pytest.skip("Oct 22 footage not here (python tools/experiment/get_clips.py)")
+    rec = R.MjpgPiece(video, frames, m["first_frame"])
+    cam = CAM.load_camera(os.path.join(os.path.dirname(HERE), "data", "overhead_floorcal_roam1.json"))
+    bd = PL.Board.from_dict(m["board"])
+    tr = CAM.MotionTracker(cam, ((bd.x0 + bd.x1) / 2, (bd.y0 + bd.y1) / 2), board_rect=(bd.x0, bd.y0, bd.x1, bd.y1))
+    wall_y = bd.xboard_cm + bd.uy * PL.ROBOT_HALF_CM
+    tr.set_area((bd.x0, bd.y0, bd.x1, bd.y1), walls=[("y", wall_y), ("x", bd.yboard_cm + bd.ux * PL.ROBOT_HALF_CM)])
+    i0, i1 = rec.index(m["start_t"]), rec.index(m["end_t"])
+    at, others = tuple(m["at"]), [tuple(o) for o in m["others"]]
+    tr.set_background([rec.read(i) for i in range(i0 - 12, i0)], robots=[at] + others)
+    for k, o in enumerate(others):
+        tr.park("o%d" % k, *o)
+    tr.follow(m["robot"], at[0], at[1], t=rec.t_frame(i0))
+    tr.hold(6.0)
+    held, seen, n = True, [], 0
+    for i in range(i0, i1 + 1):
+        t = rec.t_frame(i)
+        cur = [g for g in m["legs"] if g[0] - 0.1 <= t <= g[1] + 0.3]
+        if cur and held:
+            p = tr.where()
+            tr.clear_expect()
+            if p:
+                tr.hint = (p[1], p[2], 7.0 if cur[0][2] == "turn" else cur[0][3] + 8.0, t + 30)
+            held = False
+        elif not cur and not held:
+            tr.hold(6.0)
+            held = True
+        s = tr.push(rec.read(i), t)
+        n += 1
+        if s is not None:
+            seen.append(s)
+    right = others[1]
+    for t, x, y in seen:
+        assert math.hypot(x - right[0], y - right[1]) >= CAM.MotionTracker.OTHER_CM, ("took Right", t, x, y)
+        past = (y - wall_y) if bd.uy < 0 else (wall_y - y)       # how far past the wall limit, outwards
+        assert past <= 3.5, ("past the wall", t, x, y)
+    assert len(seen) / n >= 0.70, len(seen) / n
