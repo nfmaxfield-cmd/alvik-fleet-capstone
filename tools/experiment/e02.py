@@ -98,6 +98,7 @@ CHECK_CM, CHECK_FRAC = 5.0, 0.35   # camera vs wheels: a go leg's distances may 
 ID_EXTRA_CM = 5.0                  # ...plus this on the first leg after a turn on the spot (its centre is rougher)
 PARK_LEG_CM = 60.0        # parking: long legs on the robot's own wheels and gyro, the camera checks in between
 STALE_S = 1.5             # a camera position older than this is not used to steer
+BLIND_CLEAR_CM = 35.0     # ... leaving the corner: first to this far from both boards
 BLIND_PIECE_CM = 15.0     # driving blind (own wheels and gyro): drives no longer than this
 BLIND_EDGE_CM = 15.0      # ... never to a point nearer an open edge than this
 BLIND_RETRACE_LEGS = 6    # ... retracing: its last this many drives
@@ -1195,7 +1196,7 @@ class Runner:
                     return p
         return None
 
-    def rescue_find(self, robot):
+    def rescue_find(self, robot, need_camera=True):
         """Nick, 2026-10-22: a robot the camera can't find finds itself, against the two boards. Its own pose (the
         last camera fix plus the legs since, wheels and gyro) is good enough to drive to the find's staging point;
         the find's own checks keep it safe (the front stop; a bump much sooner than the pose says fails it; the
@@ -1230,7 +1231,10 @@ class Runner:
         self.say("  %s found itself at (%.1f, %.1f) cm; the camera looks there ..." % (robot, ax, ay))
         self.st["positions"][robot] = [ax, ay, None]      # where it is, even if the camera can't see it there
         self.fresh_floor()
-        return self.identify(robot, near=(ax, ay, SWEEP_NEAR_CM))
+        p = self.identify(robot, near=(ax, ay, SWEEP_NEAR_CM))
+        if p is None and not need_camera:
+            return (ax, ay)                # its find's end pose is exact: good enough to drive it out from
+        return p
 
     def help_from_nick(self, robot, problem, park=True):
         """Stuck, lost or off the board: first AUTO_TRIES tries on its own (2026-10-22: pressing Enter with no
@@ -1429,7 +1433,13 @@ class Runner:
         t_start = time.time()
         try:
             px, py, _ = self.board.park(self.park_index(robot))     # its own park spot: out of every route's way
-            wps = self.safe_path(robot, pose[:2], (px, py))
+            # first straight away from both boards (dry run 14:51: driving along the board from the corner, its
+            # front stop saw the board and stopped it), then round the robots to its spot
+            out = self.board.uv(BLIND_CLEAR_CM, BLIND_CLEAR_CM)
+            first = [out] if (self.board.edge_room(pose[0], pose[1])[1] < BLIND_CLEAR_CM and
+                              math.hypot(out[0] - pose[0], out[1] - pose[1]) > 3.0) else []
+            rest = self.safe_path(robot, first[0] if first else pose[:2], (px, py))
+            wps = first + rest if rest is not None else None
             ok, words = (self.drive_blind(robot, wps) if wps is not None else
                          (False, "no clear way round the other robots"))     # never straight through them
             if not ok:
@@ -1493,7 +1503,7 @@ class Runner:
             # then the finder sweep and its own find; stop only if all of that fails.
             self.say("  %s is in the corner every find drives to: moving it out ..." % robot)
             q2 = None
-            for step in (None, self.sweep_for, self.rescue_find):
+            for step in (None, self.sweep_for, lambda r: self.rescue_find(r, need_camera=False)):
                 # each step that only finds it (the sweep) or puts it in the corner (its own find, which leaves an
                 # exact pose) is followed by a drive out (review 2026-10-22)
                 if step is not None:
@@ -1503,7 +1513,7 @@ class Runner:
                     if math.hypot(found[0] - fx, found[1] - fy) >= BLOCKS_FIND_CM:
                         q2 = found
                         break
-                    if step is self.sweep_for:
+                    if step == self.sweep_for:      # (bound methods: equal, never identical)
                         # its position is known now (heading not): tell it, then drive out on its gyro's heading
                         self.send(robot, "fix %.2f %.2f - %.3f" % (found[0], found[1], time.time()))
                         time.sleep(0.2)
