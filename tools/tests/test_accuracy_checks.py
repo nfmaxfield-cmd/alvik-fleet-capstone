@@ -258,7 +258,7 @@ def test_real_camera_preset_loads(tmp_path):
     cfg = config.load_config(ac.SIM_PRESET)
     c = cfg.camera
     assert (c.width, c.height, c.fps, c.height_cm) == (640, 480, 25.0, 262.0)
-    assert abs(c.width / c.floor_width_cm - 3.4) < 0.05
+    assert abs(c.width / c.floor_width_cm - 2.34) < 0.05   # real footage scale (2026-10-21; was 3.4, an estimate)
     out = tmp_path / "full.json"
     subprocess.run([sys.executable, os.path.join(TOOLS, "sim", "simulate.py"), "--config", ac.SIM_PRESET,
                     "--write-config", str(out)], check=True, capture_output=True)
