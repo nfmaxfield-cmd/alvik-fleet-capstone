@@ -8,14 +8,19 @@ port. e02.py --dry-run starts this for you; it can also run on its own:
 The robots are the firmware lane's simulator model (tools/sim/robot.py with fw_e02.py, a copy of
 firmware/home_lab/e02.h), run in real time exactly as tools/sim/fleet_sim.py runs them: so the dry run
 talks to the same E02 logic as the real robots (run find, run e02 in both modes, fix, go / turn / mark
-legs, BUMP / FIND / E02 / LEG / FIX records). Their gyros count 91.5-94.5% of every turn (the real ones
-about 93%) and each has its own wheel size and gyro creep: the errors the self-calibration has to find.
-They start just switched on (they need `calibrate`), near their park spots, roughly facing the x-board.
+legs, BUMP / FIND / E02 / LEG / FIX records). Real-robot imperfections (2026-10-21b defaults, from the real
+footage and logs): gyros count 91.5-94.5% of every turn (real: 1.069-1.075 measured, i.e. ~93%); gyro creep
+drawn with sd --drift-sd 0.15 deg/s (real Center: 0.23); wheel radius +-3% (real 0.979) and --slip 1% tyre slip
+(more while speeding up); camera: sensor noise --cam-noise 6 grey levels, JPEG 80 (--cam-jitter shakes the whole picture: off by
+default, the real mount is rigid and a shaking background breaks the motion tracker) (real moving-robot tracking: median ~1 px, p90 ~4-5 px); an occasional missed bump
+(--miss-bump 0.03: the find runs on and fails safely; --miss-jolt 0.10: found by the stall alone, later).
+The floor reads like the real plywood to the line sensors (52, sd 4; past the edge: the simulator's guess).
+They start just switched on (they need `calibrate`), near their park spots, roughly facing the middle.
 
 What runs:
   robots   127.0.0.2, .3, .4 ... port 5006 (map order), log lines to 127.0.0.1:5005, "name|seq|line"
   camera   http://127.0.0.1:8000/live (overhead, rendered with tools/sim/camera.py's Renderer and a
-           real-footage-like camera: 262 cm up, 2.34 px/cm, origin at the bottom-right of the picture)
+           real-footage-like camera: 2.34 px/cm (height a placeholder), origin at the bottom-right of the picture)
            and :8001/live (the "side" camera: the same picture, it only has to answer)
   notes    UDP 127.0.0.1:5007, answers "ok <text>" and writes notes.csv
 Writes --out: truth.csv (true poses 20 a second), notes.csv, sim_info.json (each robot's true gyro
@@ -74,6 +79,15 @@ class World:
         cfg = config.load_config(None)
         cfg.dock.contact_boards = True
         cfg.dock.wall_stall_frac = 0.15
+        cfg.dock.miss_bump_prob = args.miss_bump
+        cfg.dock.miss_jolt_prob = args.miss_jolt
+        cfg.imu.gyro_bias_dps = args.drift_sd
+        cfg.imu.accel_vibration_g = 0.05                 # measured while creeping (roam1)
+        cfg.robot.radius_scale_err_pct = 3.0
+        cfg.robot.move_slip_mean_pct = args.slip
+        cfg.robot.move_slip_sd_pct = 0.3 * args.slip
+        cfg.robot.accel_slip_pct_per_g = 4.0
+        cfg.line.floor_reading, cfg.line.floor_noise = 52.0, 4.0     # real plywood (roam1 RAW lineL/C/R)
         cfg.session.board_cm = [bd.x0, bd.y0, bd.x1, bd.y1]
         cfg.session.open_edges = ["x1" if bd.yboard_side == 0 else "x0", "y1" if bd.xboard_side == 0 else "y0"]
         self.cfg = cfg
@@ -166,12 +180,15 @@ class SimCamera:
         c.tilt_deg = [args.tilt, -0.6 * args.tilt]
         c.yaw_deg = -90.0 + args.yaw
         c.center_floor_cm = [61.0, 61.0]
-        c.noise_sd = 2.5
+        c.noise_sd = getattr(args, "cam_noise", 2.5)          # (a bare Namespace, as the tests make: the old clean camera)
+        self.jitter = getattr(args, "cam_jitter", 0.0)
+        self.jpeg = getattr(args, "jpeg", 92)
         cfg.session.tape_lines = []
         self.cfg = cfg
         self.geom = SC.CameraGeometry(c)
         rng = np.random.default_rng(args.seed)
         self.R = SC.Renderer(cfg, self.geom, rng)
+        self.rng_j = np.random.default_rng(args.seed + 99)
         self.bg = self.make_background(rng)
         self.fps = args.fps
         self.pi_offset = args.pi_offset
@@ -239,7 +256,12 @@ class SimCamera:
             col = (lv, lv, lv)
             self.R.draw_robot(img, x, y, math.radians(th), 0.0, col, col)
         self.R.add_noise(img)
-        return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        if self.jitter > 0:                      # the camera mount shakes a little every frame
+            dx, dy = (float(v) for v in self.rng_j.normal(0, self.jitter, 2))
+            g = cv2.warpAffine(g, np.float32([[1, 0, dx], [0, 1, dy]]), (g.shape[1], g.shape[0]),
+                               flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        return g
 
     def loop(self):
         period = 1.0 / self.fps
@@ -254,7 +276,7 @@ class SimCamera:
                 nxt = now + period
             tc = time.time()
             g = self.render()
-            ok, jpg = cv2.imencode(".jpg", g, [cv2.IMWRITE_JPEG_QUALITY, 92])
+            ok, jpg = cv2.imencode(".jpg", g, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg])
             if not ok:
                 continue
             with self.cond:
@@ -326,7 +348,14 @@ def main(argv=None):
     ap.add_argument("--board-inset", type=float, default=0.6, help="boards' inner faces this far inside the plywood edge")
     ap.add_argument("--pi-offset", type=float, default=3.3, help="the Pi's clock minus the laptop's, s")
     ap.add_argument("--port", type=int, default=8000)
-    ap.add_argument("--max-s", type=float, default=7200)
+    ap.add_argument("--max-s", type=float, default=4 * 3600)
+    ap.add_argument("--drift-sd", type=float, default=0.15, help="gyro creep per robot, sd, deg/s")
+    ap.add_argument("--slip", type=float, default=1.0, help="tyre slip while driving, %%")
+    ap.add_argument("--cam-noise", type=float, default=6.0, help="camera sensor noise, grey levels (sd)")
+    ap.add_argument("--cam-jitter", type=float, default=0.0, help="whole picture shake per frame, px (sd)")
+    ap.add_argument("--jpeg", type=int, default=80)
+    ap.add_argument("--miss-bump", type=float, default=0.03, help="chance a bump is missed altogether (the find fails)")
+    ap.add_argument("--miss-jolt", type=float, default=0.10, help="chance a bump's jolt is missed (found by the stall)")
     a = ap.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)
     world = World(a)

@@ -19,8 +19,12 @@ Plan: docs/build-plans/accuracy-experiment-E02.md. What it does, in order:
      (K: the laptop steers it leg by leg; KC: camera fixes 3 a second), the camera measures start, far
      point and end, marks go into both camera videos, then it is parked again by camera. After each U run
      the corrections are re-learned (gyro scale, drift, wheels) and the latest are used for C and KC.
-  5. A robot more than 15 cm off: flagged, driven back by camera, the session carries on. Nick is called
-     only when a robot is stuck or off the board, with exact steps.
+  5. Every robot is parked again by camera after its run. A run that NEEDED RECOVERY (the camera lost it, it
+     left the board, a safety stop cut its route short, or it ended more than 40 cm from its start) is noted
+     as such (runs.csv `recovery`), never as an outlier: outliers are the analysis's statistical call within a
+     condition. A camera watchdog stops any robot heading for an open edge or a parked robot. Nick is called
+     only when a robot is stuck or off the board, with exact steps; with nobody answering for --help-wait-min
+     that robot is put aside and the others carry on.
 Everything is saved after every step (e02_state.json), so after a crash `--resume` carries on: an
 interrupted run is redone.
 
@@ -29,17 +33,24 @@ start / far / end, errors, flags, corrections used), track.csv (the moving robot
 fits.csv (every self-calibration), e02_log.txt (everything the console said), naming_check.json,
 setup.json, robot logs in robot-logs-<n>/ (the console's CSVs: raw, bump, find, e02, leg ...).
 
-PROTOCOL: firmware 2026-10-21a (docs/data-formats.md "E02", firmware/home_lab/e02.h). What this runner sends:
+PROTOCOL: firmware 2026-10-21b (docs/data-formats.md "E02", firmware/home_lab/e02.h); the runner refuses other
+firmware. What this runner sends:
+  set safe_edge 1, edge_dir 0, edge_thr 150, edge_n 3, bumper_cm 0, e02_face_cm 0  (SAFETY: at setup, checked by
+      `get`, and with every find / route, checked in its PARAM records; the firmware refuses to drive without
+      the edge guard)
   calibrate (once after power-on; calib_spin_deg 0, calib_roll_cm 0: only the compass wiggle)
-  set gyro_scale / gyro_drift_dps / wheel_scale  (U, K: 1, 0, 1; C, KC: learned; finds and moves: the latest
-      learned, else the priors). `set`, not `corr reset`: same values, no rewrite of the saved corrections
+  set gyro_scale / gyro_drift_dps / wheel_scale  (finds, transits and moves: the latest learned, else the priors;
+      K: 1, 0, 1) and e02_route_gyro_scale / _gyro_drift_dps / _wheel_scale (U: 1, 0, 1; C, KC: learned): the
+      firmware switches to these at the route's start, so only the route runs on the condition's corrections. `set`, not `corr reset`: same values, no rewrite of the saved corrections
   set e02_xboard_side / e02_yboard_side (-1 | +1), e02_xboard_cm / e02_yboard_cm (camera-measured faces),
       e02_start_x / e02_start_y (route start spot), e02_route_deg (straight: along the diagonal; L, square:
       away from the y-board), e02_l_turn (towards the middle), e02_leg_pause_ms 700 (all mode-0 runs: KC
-      fixes are only used while still), e02_transit_max_cm 140, bumper_cm 0 (no nose bracket yet),
+      fixes are only used while still), e02_transit_max_cm 140,
       e02_pause_ms 1000, e02_route, e02_mode
-  fix x y th|- t_wall   before every find and every set of idle legs (replaces the pose); KC: 4 a second
-      during the route, heading only when the camera just saw a straight stretch and RAW yaw says no turn since
+  fix x y th|- t_wall   before every find, every set of idle legs and every backwards leg (replaces the pose; it
+      also resets the firmware's blind-backing allowance); KC: up to 3 a second while it stands still, from
+      pictures taken after it stopped, heading only when the camera just saw a straight stretch and RAW yaw
+      says no turn since
   run find; run e02; go d id / turn deg id (idle legs, and mode 1 legs in K); mark start|far|end id (K)
   Records read by column name: RUNINFO, RUNEND, PARAM, RAW (ms, x_cm, y_cm, yaw_deg, th_deg), FIND (result,
   after_th), BUMP (board, ms_contact), E02 (start_x/y, far_goal_x/y, end_x/y, ms_start, ms_far,
@@ -82,6 +93,15 @@ TURN_DPS_GUESS = 45.0
 FIND_TIMEOUT_S = 150
 E02_TIMEOUT_S = {0: 150, 1: 400}
 BATTERY_WARN, BATTERY_STOP = 40, 15
+EXPECTED_FW = "2026-10-21b"
+# The edge guard (line sensors) and the bare body. safe_edge is not saved on the robot: set after every power-on.
+# edge_thr 150 is CHOSEN, not measured at a real open edge: plywood reads 37-84 (roam1 RAW, ~70 000 rows), so a
+# change of 150 is far outside its noise; what the sensors read past the edge has not been logged yet. The camera
+# watchdog is the second, independent guard.
+SAFETY_SETTINGS = (("safe_edge", 1.0), ("edge_dir", 0.0), ("edge_thr", 150.0), ("edge_n", 3.0), ("bumper_cm", 0.0),
+                   ("e02_face_cm", 0.0))
+SAFETY_CMDS = ["set %s %g" % kv for kv in SAFETY_SETTINGS]
+DEFAULT_CALIB = os.path.join(HERE, "data", "overhead_floorcal_roam1.json")   # roam1 board corners, camera unmoved
 
 
 def num(v):
@@ -193,6 +213,21 @@ class Listener:
                 return self.leg_final(robot, run, lid)
         return None
 
+    def got_params(self, robot, since):
+        """{name: value} from `get` answers ("M,name = value ...") since a time."""
+        out = {}
+        with self.cv:
+            for t, n, m in self.msgs:
+                if n != robot or t < since or " = " not in m:
+                    continue
+                k, _, rest = m.partition(" = ")
+                k = k.strip().split(",")[-1].strip()
+                try:
+                    out[k] = float(rest.split()[0])
+                except (ValueError, IndexError):
+                    pass
+        return out
+
     def said(self, robot, since, words):
         with self.cv:
             return [m for t, n, m in self.msgs if n == robot and t >= since and any(w in m.lower() for w in words)]
@@ -217,7 +252,10 @@ class Runner:
         self.unavailable = set()
         self.last_result = ""
         self.kc_stop = threading.Event()
+        self.marks_unconfirmed = 0
         self.watchdog_fired = False
+        self.watch_stop = None
+        self.watch_quit = threading.Event()
         self.moves = {}               # robot -> dict(run ("-" = idle legs), why): it is taking legs now
         self.leg_ids = {}
         self.link = self.listener = self.watch = self.pi = None
@@ -231,9 +269,42 @@ class Runner:
         self.logf.write(line + "\n")
         self.logf.flush()
 
+    def planned_schedule(self):
+        """The schedule this session will run (the same one before setup, to show, and when it starts)."""
+        a = self.a
+        nb = a.blocks or PL.blocks_for_time(a.hours, a.run_s, a.find_s, PL.SETUP_S, len(self.st["robots"]))
+        sched = PL.make_schedule(self.st["robots"], nb, self.st["seed"])
+        if a.routes != "1,2,3":
+            keep = {int(v) for v in a.routes.split(",")}
+            sched = [r for r in sched if r["route"] in keep]
+            for i, r in enumerate(sched):
+                r["order"] = i + 1
+        return sched
+
+    def recorder_ok(self):
+        """The Pi recorder at a block start (or after 3 unconfirmed marks): the overhead stream and the notes link
+        must answer. If not: pause, tell Nick, check again every 30 s until both answer (no runs without the
+        video that measures them)."""
+        a = self.a
+        while True:
+            ok1, w1, _, _ = CAM.check_stream(a.pi, a.overhead_port)
+            notes = CAM.notes_answer(a.pi)
+            if ok1 and notes:
+                self.marks_unconfirmed = 0
+                return True
+            self.say("PAUSED: the Pi recorder is not answering (overhead camera: %s; notes: %s). Check the Pi's SSH "
+                     "window: if camrec.py stopped, start it again with the same command as at the start. This "
+                     "checks again every 30 s and carries on by itself." % ("OK" if ok1 else w1,
+                                                                         "OK" if notes else "no answer"))
+            self.st.setdefault("recorder_pauses", []).append([round(time.time(), 1), ok1, notes])
+            self.st.save()
+            print("\a", end="", flush=True)
+            time.sleep(30.0)
+
     def mark(self, text):
         """A note in both camera videos (camrec.py writes it to each camera's events.csv)."""
         ok = self.pi.send(text) if self.pi else False
+        self.marks_unconfirmed = 0 if ok else self.marks_unconfirmed + 1
         self.say("  [video mark] %s%s" % (text, "" if ok else "  (the Pi didn't confirm it)"), quiet=ok)
         self.st.setdefault("notes", []).append([round(time.time(), 3), text, bool(ok)])
 
@@ -245,6 +316,23 @@ class Runner:
             return input(prompt).strip()
         except EOFError:
             return default
+
+    def ask_timeout(self, prompt, timeout_s):
+        """input() that gives up after timeout_s (None): an unattended session must never wait for ever."""
+        if self.a.auto:
+            return None
+        box = []
+        th = threading.Thread(target=lambda: box.append(self._input(prompt)), daemon=True)
+        th.start()
+        th.join(timeout_s)
+        return box[0] if box else None
+
+    @staticmethod
+    def _input(prompt):
+        try:
+            return input(prompt).strip()
+        except EOFError:
+            return ""
 
     def send(self, robot, cmd):
         self.link.send_name(robot, cmd)
@@ -305,7 +393,7 @@ class Runner:
         self.mark("e02 calibrate %s" % ",".join(robots))
         for r in robots:
             self.end_moves(r)
-            for c in ("set calib_spin_deg 0", "set calib_roll_cm 0", "set calib_roll_min_cm 99"):
+            for c in ["set calib_spin_deg 0", "set calib_roll_cm 0", "set calib_roll_min_cm 99"] + SAFETY_CMDS:
                 self.send(r, c)
                 time.sleep(0.05)
         runs = {}
@@ -332,33 +420,18 @@ class Runner:
         time.sleep(0.15)
         return p
 
-    def begin_moves(self, robot, why="moving", in_run=False):
+    def begin_moves(self, robot, why="moving"):
         """Camera-steered moves that are not measurements (parking, finding a robot, putting it back) are idle
-        legs: `go` / `turn` with no run going (firmware 2026-10-21a). A camera fix first, so its own pose is
-        sane (the firmware's edge guard and find use it). in_run: carry them in a camera-steered `run e02`
-        (mode 1) instead: needed when the robot faces a board closely, because an idle leg's start (the edge
-        guard's still learning time) is stopped by the front sensor even for a turn (seen in the simulator,
-        firmware 2026-10-21a). Such runs are listed in transit_runs.csv: not measurements."""
+        legs: `go` / `turn` with no run going (firmware 2026-10-21b: a board close in front no longer fails them,
+        so the 2026-10-21a workaround of carrying them inside a camera-steered `run e02` is gone; idle legs are
+        the safer of the two: each has its own travel cap of the leg + 10 cm, against the route + 140 cm + 30 cm
+        of a run, and they leave no fake e02 runs in the logs). A camera fix first, so its own pose is sane."""
         if robot in self.moves:
             return True
         self.set_corrections(robot, self.move_corrections(robot))
         h = self.heads.get(robot, [None])[0]
         self.fix_now(robot, h if h is not None else self.board.face_xboard)
-        if not in_run:
-            self.moves[robot] = dict(run="-", why=why)
-            return True
-        for c in ("set e02_mode 1", "set e02_route 1"):
-            self.send(robot, c)
-            time.sleep(0.05)
-        t0 = time.time()
-        run = self.start_run(robot, "run e02")
-        if not run:
-            return False
-        self.wait_mode1(robot, t0)
-        self.moves[robot] = dict(run=run, why=why)
-        self.st.setdefault("transit_runs", []).append([run, robot, why, round(time.time(), 1), self.order])
-        write_csv(os.path.join(self.dir, "transit_runs.csv"), ["run", "robot", "why", "t", "during_order"],
-                  [dict(zip(["run", "robot", "why", "t", "during_order"], x)) for x in self.st["transit_runs"]])
+        self.moves[robot] = dict(run="-", why=why)
         return True
 
     def wait_mode1(self, robot, t0, timeout=8.0):
@@ -405,8 +478,30 @@ class Runner:
                 return "refused", "its camera-steered run ended (%s)" % self.watch.ended[m["run"]]["result"]
         return "lost", "no answer"
 
+    def room_behind(self, robot, p, back_cm):
+        """Backing up is blind (no edge guard, no front sensor): is there room behind for back_cm, by the camera?
+        Returns plain words of what is in the way, or ''. Unknown heading: assume the worst way it could face."""
+        h = self.heads.get(robot, [None])[0]
+        if p is None:
+            return "the camera can't see it"
+        heads = [h] if h is not None else list(range(0, 360, 30))
+        parked = {n: tuple(q[:2]) for n, q in self.st["positions"].items() if n != robot and q}
+        for hh in heads:
+            ux, uy = math.cos(math.radians(hh)), math.sin(math.radians(hh))
+            for f in (0.5, 1.0):
+                cx, cy = p[0] - ux * back_cm * f, p[1] - uy * back_cm * f
+                rx, ry = cx - ux * PL.ROBOT_HALF_CM, cy - uy * PL.ROBOT_HALF_CM
+                if not self.board.on_board(rx, ry, margin=2.0):
+                    return "an open edge behind it"
+                for n, q in parked.items():
+                    if math.hypot(cx - q[0], cy - q[1]) < PL.WATCH_ROBOT_CM:
+                        return "%s parked behind it" % n
+        return ""
+
     def leg(self, robot, cmd, run=None):
-        """One go / turn leg (a backwards go longer than e02_back_max_cm goes in pieces). Returns (p0, p1, words)."""
+        """One go / turn leg. A backwards go goes in pieces of at most BACK_MAX_CM; before each the camera checks
+        the room behind it and a camera fix is sent (the firmware allows e02_back_max_cm of blind backing per
+        fix). Returns (p0, p1, words)."""
         kind, val = ("go" if cmd[0] == "probe" else cmd[0]), float(cmd[1])
         p0 = self.settle(min_s=0.3, timeout=1.5)
         pieces = [val]
@@ -414,10 +509,18 @@ class Runner:
             n = int(math.ceil(-val / BACK_MAX_CM))
             pieces = [val / n] * n
         words = ""
+        self.watch_stop = None
         for v in pieces:
+            if kind == "go" and v < 0:
+                pb = self.settle(min_s=0.3, timeout=1.5)
+                bad = self.room_behind(robot, pb, -v)
+                if bad:
+                    words = "refused (no room to back up: %s)" % bad
+                    break
+                self.fix_now(robot)
             for attempt in range(2):
                 if robot not in self.moves and not self.begin_moves(robot):
-                    return p0, p0, "could not start a camera-steered run"
+                    return p0, p0, "could not start camera-steered moves"
                 est = abs(v) / DRIVE_CMS_GUESS + 1.0 if kind == "go" else abs(v) / TURN_DPS_GUESS + 1.0
                 state, info = self.send_leg(robot, "%s %.2f" % (kind, v), 2.5 * est + 6.0)
                 words = state + ((" (" + info + ")") if info else "")
@@ -426,12 +529,12 @@ class Runner:
                 if state == "refused" and "busy" in info and attempt == 0:
                     time.sleep(1.5)               # its run is still starting (settle pause, start flash)
                     continue
-                if state == "failed" and "obstacle" in info and self.moves.get(robot, {}).get("run") == "-" \
-                        and attempt == 0:
-                    # idle legs can't start with a board close in front: carry on inside a mode-1 run
-                    why = self.moves.pop(robot)["why"]
-                    if self.begin_moves(robot, why, in_run=True):
-                        continue
+                if state == "refused" and "backing blind" in info and attempt == 0:
+                    self.fix_now(robot)           # the fix did not arrive: once more
+                    continue
+                break
+            if self.watch_stop:
+                words = "watchdog (%s)" % self.watch_stop
                 break
             if state not in ("done", "dup"):
                 break
@@ -469,6 +572,14 @@ class Runner:
             p0, p1, res = self.leg(robot, cmd, run=run)
             if p0 is None or p1 is None:
                 return False, "the camera lost it"
+            if res.startswith("watchdog"):
+                self.heads[robot] = [steer.heading, False]
+                watch_stops = getattr(self, "_watch_count", 0) + 1
+                self._watch_count = watch_stops
+                if watch_stops >= 2:
+                    self._watch_count = 0
+                    return False, "the camera watchdog stopped it twice: " + res
+                continue
             if res.startswith("refused") or res.startswith("could not"):
                 return False, "it refused the leg: " + res
             steer.after(cmd, p0, p1)
@@ -517,7 +628,7 @@ class Runner:
             m = self.moves.get(robot)
             if m is None:
                 return None
-            dist = sign * (step_cm if sign > 0 else BACK_MAX_CM)
+            dist = sign * (step_cm if sign > 0 else 5.5)       # backwards: blind, unknown spot: 5.5 + 4 < 10 cm
             lid = self.next_id(robot)
             t_s = time.time()
             self.send(robot, "go %.1f %d" % (dist, lid))
@@ -536,7 +647,7 @@ class Runner:
             if len(nb) == 1:
                 # moved too little to leave its own spot, or merged: go a bit further the same way
                 lid = self.next_id(robot)
-                self.send(robot, "go %.1f %d" % (sign * 8.0, lid))
+                self.send(robot, "go %.1f %d" % (8.0 if sign > 0 else -4.0, lid))
                 self.listener.wait_leg(robot, m["run"], lid, time.time() - 0.05, 8.0 / DRIVE_CMS_GUESS + 4.0)
                 time.sleep(0.8)
                 nb = new(self.tracker.blobs())
@@ -582,6 +693,13 @@ class Runner:
         if p is None:
             return False, "the camera can't see it"
         self.phase = "parking"
+        esc = self.board.escape_point(p[0], p[1])
+        if esc is not None:
+            # near an open edge (a route that ended off course): first straight in from it, then on as usual
+            self.say("    %s is %.0f cm from an open edge: moving it in first" % (robot, self.board.edge_room(*p)[0]))
+            ok, why = self.drive_to(robot, esc, arrive_cm=4.0)
+            if not ok:
+                return ok, why
         if math.hypot(p[0] - px, p[1] - py) > 4.0:
             if math.hypot(p[0] - sx, p[1] - sy) > 3.0:
                 ok, why = self.drive_to(robot, (sx, sy), arrive_cm=2.0)
@@ -618,11 +736,9 @@ class Runner:
     def help_from_nick(self, robot, problem):
         """Stuck or off the board: exact steps, then find it again. Returns True when it is back."""
         i = self.park_index(robot)
-        px, py, _ = self.board.park(i)
-        side = CAM.picture_side(self.cam, self.board.corner[0] + self.board.ux * 60, self.board.xboard_cm)
-        where = "about %.0f cm (%.0f in) in from the open edge that is opposite the board on the %s of the camera " \
-                "picture, roughly where it was parked before" % (PL.PARK_EDGE_CM, PL.PARK_EDGE_CM / 2.54, side)
-        facing = "the blocked board with the cement blocks on the %s of the camera picture" % side
+        side_of = lambda x, y: CAM.picture_side(self.cam, x, y)      # noqa: E731
+        where = self.board.park_words(i, side_of) + " (its park spot)"
+        facing = "the middle of the board"
         self.mark("e02 help %s: %s" % (robot, problem))
         self.st.setdefault("help_calls", []).append([round(time.time(), 1), robot, problem])
         self.st.save()
@@ -636,8 +752,19 @@ class Runner:
             self.say("(automatic mode: nobody to help; %s's remaining runs are put aside)" % robot)
             self.unavailable.add(robot)
             return False
+        wait_s = self.a.help_wait_min * 60.0
+        self.say("(If nobody answers within %.0f minutes, %s is put aside and the others carry on; --resume later "
+                 "runs what it missed.)" % (self.a.help_wait_min, robot))
         while True:
-            ans = self.ask("Press Enter when it is back on the board (f = flash it again, skip = put it aside): ", "")
+            print("\a", end="", flush=True)
+            ans = self.ask_timeout("Press Enter when it is back on the board (f = flash it again, skip = put it "
+                                   "aside): ", wait_s)
+            if ans is None:
+                self.say("Nobody answered in %.0f minutes: %s's remaining runs are put aside; carrying on with the "
+                         "others." % (self.a.help_wait_min, robot))
+                self.mark("e02 help timeout %s" % robot)
+                self.unavailable.add(robot)
+                return False
             if ans.lower() == "f":
                 self.send(robot, "identify")
                 continue
@@ -699,7 +826,17 @@ class Runner:
         img = frames[-1]
         cal = st.get("calibration")
         if not cal or not os.path.exists(cal):
-            cal = CAM.find_calibration(a.calib, a.project, self.dir) if not a.make_calibration else None
+            cal = None
+            if not a.make_calibration:
+                cal = CAM.find_calibration(a.calib, a.project, self.dir)
+                if cal is None and os.path.exists(DEFAULT_CALIB):
+                    self.say("No floor calibration in the studio project: using the one made from roam1's board corners "
+                             "(%s; the overhead camera has not moved since)." % DEFAULT_CALIB)
+                    cal = DEFAULT_CALIB
+            if cal and not self.confirm_calibration(cal, img):
+                self.say("The board outline does not line up with this calibration (%s)." % cal)
+                cal = None
+                a.make_calibration = True
         if cal:
             self.say("Floor calibration: %s" % cal)
         else:
@@ -743,6 +880,27 @@ class Runner:
                      "head into the x-board. The square runs are left out of this session's plan.")
             st["setup"]["square_left_out"] = True
         st.save()
+
+    def confirm_calibration(self, cal, img):
+        """The plain check: the board's outline (from the calibration) drawn over the live picture, on screen;
+        Nick says whether it lines up (y/n). Unattended (--auto) or no screen: the picture is saved and taken as
+        right. Returns True to use it."""
+        cam = CAM.load_camera(cal)
+        path = os.path.join(self.dir, "check_calibration.png")
+        CAM.draw_check(img, cam, path, PL.Board())
+        self.st["setup"]["calibration_check"] = path
+        if self.a.auto:
+            self.say("Calibration check picture: %s (automatic mode: taken as lining up)" % path)
+            return True
+        shown = CAM.show_picture(path, "E02: does the green outline sit on the board's edges?")
+        self.say("%s the camera picture with the board's outline in green from the floor calibration%s." % (
+            "On screen now:" if shown else "Open", "" if shown else " (" + path + ")"))
+        ans = self.ask("Does the green outline sit on the plywood board's 4 edges (within about a finger's width)? "
+                       "Type y or n and press Enter: ", "y").lower()
+        CAM.close_picture()
+        ok = ans.startswith("y")
+        self.st["setup"]["calibration_confirmed"] = dict(file=cal, answer=ans)
+        return ok
 
     def make_tracker(self):
         if self.tracker is None:
@@ -835,6 +993,14 @@ class Runner:
                 self.unavailable.add(n)
                 self.say("  %s is too flat to run: its runs are put aside." % n)
         self.st["setup"]["batteries"] = bats
+        old = [n for n in names if self.listener.firmware.get(n) not in (EXPECTED_FW, None)]
+        if old:
+            raise SystemExit("%s run%s firmware %s; this session needs %s (it refuses to drive without the edge guard "
+                             "and limits blind backing). Upload firmware/home_lab to each robot (Arduino IDE: open "
+                             "home_lab.ino, pick the robot's port, press Upload), then start this again." % (
+                                 ", ".join(old), "s" if len(old) == 1 else "", "/".join(sorted(
+                                     {self.listener.firmware.get(n) for n in old})), EXPECTED_FW))
+        self.safety_settings([n for n in names if n not in self.unavailable])
         self.say("Compass check (`calibrate`, needed once after switching on; spin and roll off: it only wiggles) ...")
         self.calibrate([n for n in names if n not in self.unavailable])
         # one fresh background, then each robot found by a short drive and parked
@@ -865,6 +1031,32 @@ class Runner:
         CAM.draw_check(self.feed.last_img, self.cam, os.path.join(self.dir, "check_robots.png"), self.board,
                        robots={n: tuple(self.st["positions"][n][:2]) for n in names if n in self.st["positions"]})
 
+    def safety_settings(self, names):
+        """The edge guard on and the bare body (no nose bracket fitted), sent and read back with `get`. A robot
+        that does not confirm them gets them again; still not: the session refuses to start."""
+        for attempt in range(3):
+            todo = []
+            for n in names:
+                t0 = time.time()
+                for c in SAFETY_CMDS:
+                    self.send(n, c)
+                    time.sleep(0.05)
+                for k, _ in SAFETY_SETTINGS:
+                    self.send(n, "get %s" % k)
+                    time.sleep(0.05)
+                time.sleep(1.0)
+                got = self.listener.got_params(n, t0)
+                bad = [k for k, v in SAFETY_SETTINGS if got.get(k) is None or abs(got[k] - v) > 1e-3]
+                if bad:
+                    todo.append((n, bad))
+            if not todo:
+                self.say("Edge guard on and no nose bracket set on %s (read back)." % ", ".join(names))
+                self.st["setup"]["safety_settings"] = dict(SAFETY_SETTINGS)
+                return
+            names = [n for n, _ in todo]
+        raise SystemExit("These robots did not confirm the edge guard settings: %s. Check they are switched on and "
+                         "on the WiFi, then start this again." % "; ".join("%s (%s)" % (n, ", ".join(b)) for n, b in todo))
+
     # --- the find check (setup) --------------------------------------------------------------------
     def board_params(self):
         """The board settings every find and route needs (firmware sides are -1 / +1), the route start spot
@@ -878,7 +1070,7 @@ class Runner:
                 "set e02_xboard_cm %.2f" % b.xboard_cm, "set e02_yboard_cm %.2f" % b.yboard_cm,
                 "set e02_pause_ms %d" % PAUSE_MS, "set e02_start_x %.2f" % sx, "set e02_start_y %.2f" % sy,
                 "set e02_l_turn %d" % (1 if b.turn_sign > 0 else -1), "set e02_leg_pause_ms %d" % LEG_PAUSE_MS,
-                "set e02_transit_max_cm %d" % TRANSIT_MAX_CM, "set bumper_cm 0"]
+                "set e02_transit_max_cm %d" % TRANSIT_MAX_CM] + SAFETY_CMDS
 
     def find_check(self):
         """One `run find` per robot before the session: does it work, and where does the camera see each
@@ -939,11 +1131,12 @@ class Runner:
         t0 = time.time()
         self.phase = "find"
         self.fix_now(robot)
+        self.watchdog_fired = False
+        self.watch_stop = None
         self.mark("e02 %s %s find start" % (order, robot))
         run = self.start_run(robot, "run find")
         if not run:
             return dict(ok=False, words="did not start `run find`", run=None, t0=t0, t1=time.time())
-        self.watchdog_fired = False
         end = self.watch.wait_end(run, FIND_TIMEOUT_S, poll=lambda: self.watchdog(robot))
         t1 = time.time()
         if end is None:
@@ -991,22 +1184,41 @@ class Runner:
         self.mark("e02 %s %s find end %s" % (order, robot, end["result"]))
         return out
 
-    def watchdog(self, robot):
-        """While a robot drives on its own: stop it (once) if the camera sees it reach an open edge (the
-        blocked sides stop it by themselves)."""
-        p = self.pos(robot, fresh_s=2.0)
-        if p is None or self.watchdog_fired:
-            return self.watchdog_fired
-        open_d, _ = self.board.edge_room(p[1], p[2])
-        past = any((a == "x" and (p[1] - v) * self.board.ux > 0) or (a == "y" and (p[2] - v) * self.board.uy > 0)
-                   for a, v in self.board.open_edges())
-        if open_d < PL.ROBOT_HALF_CM - 1.0 or past:
-            self.watchdog_fired = True
-            self.send(robot, "stop")
-            self.say("  STOPPED %s: the camera sees it at the board's open edge (%.1f, %.1f)" % (robot, p[1], p[2]))
-            self.mark("e02 watchdog stop %s" % robot)
-            return True
-        return False
+    def watchdog(self, robot=None):
+        """For wait_end polls: has the camera watchdog stopped the robot in this run?"""
+        return self.watchdog_fired
+
+    def watchdog_loop(self):
+        """The camera watchdog, all session, 10 times a second, for whichever robot the camera follows (finds,
+        routes, K legs, parking, idle legs alike): a robot whose centre is, or within 0.3 s will be, closer than
+        WATCH_EDGE_CM to an open edge or WATCH_ROBOT_CM to a parked robot, while moving towards it, gets `stop`
+        (three times, 0.2 s apart: a lost WiFi packet must not matter). Moving away is always allowed, so it can be
+        brought back. The firmware's edge guard and front stop are the first line; this is the second."""
+        last = {}
+        while not self.watch_quit.is_set():
+            time.sleep(0.1)
+            try:
+                robot = self.tracker.active if self.tracker is not None else None
+                if not robot or self.board is None:
+                    continue
+                smp = self.history.since(time.time() - 0.6)
+                if len(smp) < 3 or time.time() - smp[-1][0] > 1.0:
+                    continue
+                parked = {n: tuple(q[:2]) for n, q in self.st["positions"].items() if n != robot and q}
+                why = ST.hazard(smp, self.board, parked)
+                if not why or time.time() - last.get(robot, 0) < 2.0:
+                    continue
+                last[robot] = time.time()
+                for _ in range(3):
+                    self.send(robot, "stop")
+                    time.sleep(0.2)
+                self.watchdog_fired = True
+                self.watch_stop = why
+                self.st.setdefault("watchdog_stops", []).append([round(time.time(), 1), robot, why, self.order])
+                self.say("  STOPPED %s (camera watchdog): %s" % (robot, why))
+                self.mark("e02 watchdog stop %s" % robot)
+            except Exception as e:          # the watchdog must never die
+                self.say("  (watchdog: %s)" % e, quiet=True)
 
     # --- the naming check ---------------------------------------------------------------------------
     def naming_check(self):
@@ -1166,10 +1378,24 @@ class Runner:
                 return
         if not fnd["ok"]:
             self.say("  Find failed: %s" % fnd["words"])
+            r.setdefault("notes", []).append("find failed: " + fnd["words"])
+            if r.get("find_redos", 0) < 1:
+                # a missed bump or a nudged robot: park it and do this run again later in its block (once)
+                r["find_redos"] = r.get("find_redos", 0) + 1
+                r["status"] = "pending"
+                st.save()
+                self.say("  This run is done again later in its block.")
+                self.set_corrections(robot, self.move_corrections(robot))
+                if not self.recover(robot, "find failed"):
+                    self.say("  %s could not be parked; its remaining runs are put aside." % robot)
+                self.active = None
+                return
             r.setdefault("flags", []).append("find_failed")
             self.finish_failed(r, robot, "find failed: " + fnd["words"])
             return
-        # 2. the condition's corrections
+        # 2. the condition's corrections. Mode 0 (U, C, KC): the transit to the start spot and the start turn run on
+        # the find's corrections; the firmware switches to the condition's at the route's start (e02_route_*), so
+        # the route alone is what is measured. K: factory values, set now (the laptop steers it all the way).
         source = "factory"
         if cond in ("C", "KC"):
             vals = self.fitted(robot)
@@ -1180,11 +1406,24 @@ class Runner:
                 r.setdefault("flags", []).append("prior_corrections")
             else:
                 source = "learned"
-            cmds = self.set_corrections(robot, vals)
-            r["corr"] = vals
         else:
-            cmds = self.set_corrections(robot, None)
-            r["corr"] = dict(gyro_scale=1.0, gyro_drift_dps=0.0, wheel_scale=1.0)
+            vals = dict(gyro_scale=1.0, gyro_drift_dps=0.0, wheel_scale=1.0)
+        r["corr"] = vals
+        if mode == 0:
+            cmds = ["set e02_route_gyro_scale %.4f" % vals["gyro_scale"],
+                    "set e02_route_gyro_drift_dps %.4f" % vals["gyro_drift_dps"],
+                    "set e02_route_wheel_scale %.4f" % vals["wheel_scale"]]
+            for c in cmds:
+                self.send(robot, c)
+                time.sleep(0.05)
+            cmds = cmds + fcmds
+        else:
+            cmds = self.set_corrections(robot, vals) + ["set e02_route_gyro_scale -999",
+                                                         "set e02_route_gyro_drift_dps -999",
+                                                         "set e02_route_wheel_scale -999"]
+            for c in cmds[3:]:
+                self.send(robot, c)
+                time.sleep(0.05)
         r["corr_source"] = source
         time.sleep(0.3)
         # 3. the route
@@ -1212,6 +1451,8 @@ class Runner:
             return
         prm = self.watch.params.get(run, {})
         k_info = None
+        self.watchdog_fired = False
+        self.watch_stop = None
         if cond == "KC":
             self.kc_stop.clear()
             th = threading.Thread(target=self.kc_fixes, args=(robot, r, run), daemon=True)
@@ -1220,7 +1461,6 @@ class Runner:
             k_info = self.k_drive(robot, run, route, prm, nominal)
             end = self.watch.wait_end(run, 15) or dict(result="no end record")
         else:
-            self.watchdog_fired = False
             end = self.watch.wait_end(run, E02_TIMEOUT_S[0], poll=lambda: self.watchdog(robot))
             if end is None:
                 self.send(robot, "stop")
@@ -1296,8 +1536,11 @@ class Runner:
         if k_info:
             r["legs"] = k_info["legs"]
         on_board = endp is not None and self.board.on_board(endp[0], endp[1], margin=-1.0)
-        verdict, why = ST.judge_run(far_err, end_err, on_board=on_board, seen=endp is not None, lost_cm=self.a.lost_cm)
-        r["verdict"] = verdict
+        verdict, why = ST.judge_run(far_err, end_err, on_board=on_board, seen=endp is not None,
+                                    recover_cm=self.a.recover_cm,
+                                    runend="watchdog stop" if self.watchdog_fired else end["result"])
+        r["recovery"] = verdict
+        r["verdict"] = verdict or "ok"
         if end["result"] != "done":
             r.setdefault("flags", []).append("runend:" + end["result"])
         self.last_result = "%s %s %s: far point %s, back at start %s%s" % (
@@ -1305,10 +1548,10 @@ class Runner:
             "%.1f cm off" % end_err if end_err is not None else "not seen",
             " (robot thought %.1f cm)" % bel if bel is not None else "")
         self.say("  Result: " + self.last_result)
-        if verdict != "ok":
-            r.setdefault("flags", []).append("outlier:" + verdict)
-            self.say("  Flagged as an outlier: %s." % why)
-            self.mark("e02 %s outlier %s" % (tag, verdict))
+        if verdict:
+            r.setdefault("flags", []).append("recovery:" + verdict)
+            self.say("  Needed recovery: %s (noted; kept in the data, not an outlier)." % why)
+            self.mark("e02 %s recovery %s" % (tag, verdict))
         # 4. learn (U runs)
         if cond == "U":           # any U run, finished or stopped: the raw gyro and wheel counts are still true
             try:
@@ -1316,6 +1559,8 @@ class Runner:
             except Exception as e:      # a fit problem must never stop the session
                 self.say("  (self-calibration skipped this run: %s)" % e)
         # 5. park (this also drives a lost robot back)
+        for c in ("set e02_route_gyro_scale -999", "set e02_route_gyro_drift_dps -999", "set e02_route_wheel_scale -999"):
+            self.send(robot, c)
         self.set_corrections(robot, self.move_corrections(robot))
         r["status"] = "done"
         r["t_end"] = round(time.time(), 2)
@@ -1326,7 +1571,7 @@ class Runner:
             self.unavailable.add(robot)
         st.save()
         self.write_runs()
-        if not self.recover(robot, why if verdict != "ok" else None):
+        if not self.recover(robot, why if verdict else None):
             self.say("  %s could not be parked; its remaining runs are put aside." % robot)
         self.active = None
 
@@ -1447,24 +1692,18 @@ class Runner:
         n = nh = 0
         period = 1.0 / self.a.fix_hz
         while not self.kc_stop.wait(period):
-            p = self.pos(robot, fresh_s=0.5)
-            if p is None:
-                continue
-            th = "-"
             recent = self.history.since(time.time() - 3.0)
-            sp = CAM.still_position(recent, min_s=0.3) if recent else None
-            if sp:
-                # the last straight stretch before standing still
-                moving = [q for q in recent if math.hypot(q[1] - sp[0], q[2] - sp[1]) > 0.8]
-                if moving:
-                    t_stop = moving[-1][0]
-                    seg = [q for q in recent if t_stop - 1.0 <= q[0] <= t_stop]
-                    h = ST.heading_from_track(seg, min_cm=3.0, max_rms_cm=0.4)
-                    turned = self.gyro_turn_since(run, t_stop)
-                    if h is not None and turned is not None and abs(turned) < 2.0:
-                        th = "%.1f" % ST.wrap180(h + turned)
-                        nh += 1
-            self.send(robot, "fix %.2f %.2f %s %.3f" % (p[1], p[2], th, p[0]))
+            fx = kc_fix_from(recent)
+            if fx is None:
+                continue                          # moving, or not still long enough: no picture of where it is now
+            x, y, t_pic, t_stop, seg = fx
+            th = "-"
+            h = ST.heading_from_track(seg, min_cm=3.0, max_rms_cm=0.4) if seg else None
+            turned = self.gyro_turn_since(run, t_stop) if h is not None else None
+            if h is not None and turned is not None and abs(turned) < 2.0:
+                th = "%.1f" % ST.wrap180(h + turned)
+                nh += 1
+            self.send(robot, "fix %.2f %.2f %s %.3f" % (x, y, th, t_pic))
             n += 1
         r["fixes_sent"] = n
         r["fixes_with_heading"] = nh
@@ -1485,7 +1724,7 @@ class Runner:
         return sign * d
 
     # --- files ------------------------------------------------------------------------------------
-    RUN_COLS = ["order", "block", "robot", "cond", "route", "status", "verdict", "flags", "find_run", "e02_run",
+    RUN_COLS = ["order", "block", "robot", "cond", "route", "status", "recovery", "flags", "find_run", "e02_run",
                 "find_result", "e02_result", "t_start", "t_end", "cam_start_x", "cam_start_y", "cam_far_x", "cam_far_y",
                 "cam_end_x", "cam_end_y", "intended_far_x", "intended_far_y", "far_err_cm", "end_err_cm",
                 "robot_thought_end_cm", "corr_source", "gyro_scale", "gyro_drift_dps", "wheel_scale", "battery",
@@ -1500,7 +1739,7 @@ class Runner:
                 v = r.get(k)
                 return v[i] if v else ""
             rows.append(dict(order=r["order"], block=r["block"], robot=r["robot"], cond=r["cond"], route=r["route"],
-                             status=r["status"], verdict=r.get("verdict", ""), flags=" ".join(r.get("flags", [])),
+                             status=r["status"], recovery=r.get("recovery", ""), flags=" ".join(r.get("flags", [])),
                              find_run=r.get("find_run") or "", e02_run=r.get("e02_run") or "",
                              find_result=r.get("find_result") or "", e02_result=r.get("e02_result") or "",
                              t_start=r.get("t_start", ""), t_end=r.get("t_end", ""),
@@ -1536,12 +1775,12 @@ class Runner:
                 continue
             rows.append(dict(run_id=r.get("e02_run") or "", robot=r["robot"], condition=r["cond"], route=r["route"],
                              block=r["block"], robot_run=r.get("e02_run") or "", find_run=r.get("find_run") or "",
-                             order=r["order"], lost=1 if r.get("verdict") not in (None, "ok") else 0,
+                             order=r["order"], recovery=r.get("recovery") or "",
                              t_find=pi(r.get("t_find_l")), t_start=pi(r.get("t_start_l") or r.get("t_e02_l")),
                              t_far=pi(r.get("t_far_l")), t_end=pi(r.get("t_end_l")), status=r["status"],
                              flags=" ".join(r.get("flags", []))))
         write_csv(os.path.join(self.dir, "e02_runs.csv"), ["run_id", "robot", "condition", "route", "block", "robot_run",
-                                                          "find_run", "order", "lost", "t_find", "t_start", "t_far",
+                                                          "find_run", "order", "recovery", "t_find", "t_start", "t_far",
                                                           "t_end", "status", "flags"], rows)
 
     def write_fits(self):
@@ -1567,21 +1806,15 @@ class Runner:
     def session(self):
         st = self.st
         if not st["schedule"]:
-            nb = self.a.blocks or PL.blocks_for(self.a.hours, self.a.run_s, len(st["robots"]))
-            sched = PL.make_schedule(st["robots"], nb, st["seed"])
-            if self.a.routes != "1,2,3":
-                keep = {int(v) for v in self.a.routes.split(",")}
-                sched = [r for r in sched if r["route"] in keep]
-                for i, r in enumerate(sched):
-                    r["order"] = i + 1
+            sched = self.planned_schedule()
             if st["setup"].get("square_left_out"):
                 sched = [r for r in sched if r["route"] != 3]
                 for i, r in enumerate(sched):
                     r["order"] = i + 1
             st["schedule"] = sched
             st.save()
-            self.say("Schedule: %d runs (block 0: %d U runs, then %d blocks), about %s at %.0f s a run." % (
-                len(sched), sum(1 for r in sched if r["block"] == 0), nb, hms(len(sched) * self.a.run_s), self.a.run_s))
+            for line in PL.plan_words(sched, self.a.run_s, self.a.find_s, 0):
+                self.say(line)
         self.write_runs()
         st["t_session_start"] = time.time()
         self.mark("e02 session start")
@@ -1604,7 +1837,10 @@ class Runner:
                         break
                 cur_block = r["block"]
                 self.say("--- Block %d ---" % cur_block)
+                self.recorder_ok()
                 self.boards_still()
+            elif self.marks_unconfirmed >= 3:
+                self.recorder_ok()
             self.do_run(r)
             n_this += 1
         done = [r for r in st["schedule"] if r["status"] == "done"]
@@ -1623,6 +1859,29 @@ class Runner:
             self.say("  %s: %s" % (robot, FIT.describe(self.fitted(robot))))
         st["elapsed_before"] = st.get("elapsed_before", 0) + time.time() - st["t_session_start"]
         st.save()
+
+
+def kc_fix_from(samples, after_stop_s=0.1, min_still_s=0.3, moved_cm=0.8):
+    """A KC camera fix only from pictures taken after the robot stopped: (x, y, t of the newest picture, t_stop,
+    the stretch before the stop) or None. t_stop = the last picture that was more than moved_cm from where it
+    stands now; the position = the median of the pictures from t_stop + after_stop_s on, at least min_still_s of
+    them (so the firmware's own still check, e02_fix_still_ms, and the picture agree)."""
+    if not samples:
+        return None
+    sp = CAM.still_position(samples, min_s=min_still_s)
+    if sp is None:
+        return None
+    moving = [q for q in samples if math.hypot(q[1] - sp[0], q[2] - sp[1]) > moved_cm]
+    t_stop = moving[-1][0] if moving else samples[0][0]
+    if not moving and samples[-1][0] - samples[0][0] < 2.5:
+        return None                               # it may have stopped just before this window: not sure when
+    still = [q for q in samples if q[0] >= t_stop + after_stop_s]
+    if len(still) < 3 or still[-1][0] - still[0][0] < min_still_s:
+        return None
+    x = float(np.median([q[1] for q in still]))
+    y = float(np.median([q[2] for q in still]))
+    seg = [q for q in samples if t_stop - 1.0 <= q[0] <= t_stop] if moving else []
+    return x, y, still[-1][0], t_stop, seg
 
 
 def _r(v):
@@ -1706,12 +1965,17 @@ def main(argv=None):
     ap.add_argument("--robots", default="Left,Center,Right")
     ap.add_argument("--robot", action="append", default=[], help="robot IP, if robots aren't found automatically")
     ap.add_argument("--hours", type=float, default=2.0)
-    ap.add_argument("--run-s", type=float, default=110.0, help="time a run takes, for the plan (s)")
+    ap.add_argument("--run-s", type=float, default=PL.RUN_S, help="time a route run with its parking takes, for the "
+                                                                   "plan (s; measured ~70)")
+    ap.add_argument("--find-s", type=float, default=PL.FIND_S, help="time a find takes, for the plan (s)")
+    ap.add_argument("--help-wait-min", type=float, default=10.0, help="how long to wait for Nick before putting a "
+                                                                       "robot aside (minutes)")
     ap.add_argument("--blocks", type=int, help="regular blocks after the all-U block (default: what fits in --hours)")
     ap.add_argument("--routes", default="1,2,3", help="only these routes (testing)")
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--fix-hz", type=float, default=FIX_HZ)
-    ap.add_argument("--lost-cm", type=float, default=ST.LOST_CM)
+    ap.add_argument("--recover-cm", "--lost-cm", dest="recover_cm", type=float, default=ST.RECOVER_CM,
+                    help="a run that ends this far from its start spot needed recovery (noted, not an outlier)")
     ap.add_argument("--naming-s", type=int, default=120)
     ap.add_argument("--skip-naming", action="store_true")
     ap.add_argument("--skip-find-check", action="store_true")
@@ -1801,6 +2065,10 @@ def launch(a, state, sdir, sim):
     run.pi = run_sheet.PiNotes(a.pi)
     hist = CAM.History()
     run.history = hist
+    if not state["schedule"]:
+        for line in PL.plan_words(run.planned_schedule(), a.run_s, a.find_s):
+            run.say(line)
+    threading.Thread(target=run.watchdog_loop, daemon=True).start()
     code = 0
     feed = None
     try:
@@ -1822,6 +2090,7 @@ def launch(a, state, sdir, sim):
         run.say(str(e))
         code = 1
     finally:
+        run.watch_quit.set()
         try:
             link.close()
         except Exception:
@@ -1910,7 +2179,15 @@ def dry_run_report(sdir):
                 track_err_p95_cm=round(float(np.percentile(e, 95)), 2) if errs else None,
                 runs_done=sum(1 for r in sched if r["status"] == "done"),
                 runs_failed=sum(1 for r in sched if r["status"] == "failed"),
+                runs_per_condition={c: len(by[c]) for c in by},
                 end_err_mean_cm={c: round(float(np.mean([v[0] for v in by[c]])), 2) for c in by},
+                end_err_sd_cm={c: round(float(np.std([v[0] for v in by[c]], ddof=1)), 2) if len(by[c]) > 1 else None
+                               for c in by},
+                recoveries={k: sum(1 for r in sched if r.get("recovery") == k)
+                            for k in {r.get("recovery") for r in sched if r.get("recovery")}},
+                watchdog_stops=len(state.get("watchdog_stops") or []),
+                help_calls=len(state.get("help_calls") or []),
+                find_failures=sum(1 for r in sched if "find_failed" in (r.get("flags") or [])),
                 far_err_mean_cm={c: round(float(np.mean([v[1] for v in by[c] if v[1] is not None])), 2) for c in by},
                 board_true=info["board"], board_used=state.get("board"))
     rep = dict(summary=summ, fits=fits)

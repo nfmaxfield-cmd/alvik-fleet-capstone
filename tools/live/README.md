@@ -69,8 +69,8 @@ measured with capture_delay.py).
 
 ## Measured (simulated; not yet on hardware)
 
-Simulated E1 sessions with the real Oct 18 camera (`tools/sim/configs/real_oct18.json`:
-262 cm up, 3.45 px/cm, 25 fps), replayed through track_live.py; errors
+Simulated E1 sessions with the Oct 18 camera as `tools/sim/configs/real_oct18.json` then had it
+(262 cm up, 3.45 px/cm, 25 fps; corrected 2026-10-21: the camera now gives 2.34 px/cm and its height was never measured), replayed through track_live.py; errors
 against the simulator's truth (the turning centre):
 
 | session | robot | fixes | wrong name | position error rms / max, cm | heading error p95 / max, deg | fixes a second while blinking | blinking seconds with a fix |

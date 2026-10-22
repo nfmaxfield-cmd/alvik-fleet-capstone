@@ -297,6 +297,13 @@ class DockModel:
     # stalls, the tyre slips the rest). 1.0 = the wheels keep turning at full speed and only slip (the model the
     # dock tests were built on); E02 tests use less. GUESS: the real Alvik pushing a board has not been measured.
     wall_stall_frac: float = 1.0
+    # an occasional MISSED bump (dry runs, e02_sim.py --miss-bump): per contact with a board, the chance that the
+    # wheels keep slipping round (keeping miss_slip_frac of their speed, so no stall is seen) and the jolt is lost,
+    # so the creep runs on to its limit and the find fails safely; and the chance that only the jolt is lost
+    # (detected by the stall alone, later). 0 = never (the tests).
+    miss_bump_prob: float = 0.0
+    miss_jolt_prob: float = 0.0
+    miss_slip_frac: float = 0.75
 
 
 @dataclass

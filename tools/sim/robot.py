@@ -175,6 +175,9 @@ class Robot(FollowMixin, DockMixin, E02Mixin):
         self.corr_on = False                      # corrections (gyro_scale / gyro_drift_dps) ever used: heading()
         self.yaw_corr = 0.0                       # ... is then motion.h gYawCorrAcc, added up step by step
         self.wheel_free = [1.0, 1.0]              # E02 contact model: share of the commanded speed a blocked wheel keeps
+        self.contact_on = False                   # touching a solid now (a contact episode)
+        self.contact_miss = ""                    # this episode's bump is missed: "" / "all" (no stall, no jolt) / "jolt"
+        self.miss_rng = random.Random(boot_id * 15485863 + sum(map(ord, name)))
         self.seam_jolts = []                      # (robot ms, g) floor-seam jolts on the accelerometer (session.seams)
         self.seam_dip_until = -1e9
         self.seam_side = None
@@ -348,10 +351,17 @@ class Robot(FollowMixin, DockMixin, E02Mixin):
                 if self._solids_from != (len(self.world_polys), self.cfg.dock.contact_boards):
                     self.update_solids()
                 if resolve_contacts(self):                            # pushed back: the wheels slipped
+                    if not self.contact_on:
+                        self.contact_on = True
+                        dm, u = self.cfg.dock, self.miss_rng.random()
+                        self.contact_miss = "all" if u < dm.miss_bump_prob else \
+                            "jolt" if u < dm.miss_bump_prob + dm.miss_jolt_prob else ""
                     ds = (self.x - x_before) * math.cos(self.th) + (self.y - y_before) * math.sin(self.th)
                     self._wheel_block(sL, sR, x_before, y_before, th0)
-                elif self.wheel_free != [1.0, 1.0]:
-                    self.wheel_free = [1.0, 1.0]
+                else:
+                    self.contact_on = False
+                    if self.wheel_free != [1.0, 1.0]:
+                        self.wheel_free = [1.0, 1.0]
         else:
             ds = 0.0
         if self.cfg.session.seams and not self.lifted:
@@ -401,6 +411,8 @@ class Robot(FollowMixin, DockMixin, E02Mixin):
         """E02 contact model (cfg.dock.wall_stall_frac < 1): a wheel whose ground point the contact held back
         keeps only part of its commanded speed (the motor stalls; its tyre slips the rest), next steps."""
         frac = self.cfg.dock.wall_stall_frac
+        if self.contact_miss == "all":
+            frac = self.cfg.dock.miss_slip_frac          # missed: the tyres slip round, no stall is seen
         if frac >= 1.0:
             return
         half = self.track / 2
@@ -435,7 +447,10 @@ class Robot(FollowMixin, DockMixin, E02Mixin):
         moving = abs(self.wL) + abs(self.wR) > 1
         an = im.accel_noise_g + (im.accel_vibration_g if moving else 0) + (0.05 if self.lifted else 0)
         j = sum(g * math.exp(-(self.ms - t) / 15.0) for t, g in self.seam_jolts[-3:] if 0 <= self.ms - t < 100)
-        return self.a_fwd / 981.0 + self.acc_bias[0] + rng.gauss(0, an) + j
+        a = self.a_fwd / 981.0
+        if self.contact_on and self.contact_miss:
+            a *= 0.2                                     # missed: the board's knock does not reach the accelerometer
+        return a + self.acc_bias[0] + rng.gauss(0, an) + j
 
     def wheels_speed(self):
         """get_wheels_speed(): measured rpm, with noise."""

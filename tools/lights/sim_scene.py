@@ -3,8 +3,8 @@
 tools/blink/README.md ("Light patterns"). Draws with the simulator's own
 renderer (tools/sim/camera.py: floor, robot bodies, their blinking top LEDs,
 the pattern, sensor noise) and the real camera preset
-(tools/sim/configs/real_oct18.json: 262 cm up, 640 x 480, 25 fps; a
-different scale is a different floor width in view). Robots move with
+(tools/sim/configs/real_oct18.json: 640 x 480, 25 fps, 2.34 px/cm; its height is a
+placeholder, never measured; a different scale is a different floor width in view). Robots move with
 tools/blink/tests/synthworld.py's Robot (commands, blink-code timeline).
 Each frame goes through JPEG (as the Pi's stream does).
 

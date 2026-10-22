@@ -12,7 +12,9 @@ readers accept is in ALIASES below, so a renamed column is a one-line change):
                 clock_sync.csv (robot clock). More than one folder allowed.
   --runs        the runner's run list: one row per run with run_id, robot, condition (U/C/K/KC), route
                 (1/2/3 or straight/L/square), block, robot_run (the robot's own run number, joins the
-                records), lost (1 = the runner flagged the run as lost) and t_find, t_start, t_far, t_end
+                records), recovery (the runner's note that the run needed recovery: unseen, off_board,
+                safety_stop, far_off; empty = no; an old `lost` column is read as recovery "lost"; it is a NOTE,
+                never an outlier flag) and t_find, t_start, t_far, t_end
                 (camera clock). Missing times are read from marks in events.csv, e.g. "E02 run 7 start".
                 Without --runs, runs are built from the marks alone (condition etc. then blank).
   --calib       camera model json (tools/recognition/cameras.py) or floor_calibration.json.
@@ -75,7 +77,7 @@ ALIASES = dict(
     block=["block"],
     turn_sign=["turn_sign"],
     robot_run=["robot_run", "log_run", "run_no"],
-    lost=["lost", "outlier", "flag_lost"],
+    recovery=["recovery", "needed_recovery", "lost", "flag_lost"],
     t_find=["t_find", "t_find_start", "find_t0"],
     t_start=["t_start", "t_route_start", "t_route"],
     t_far=["t_far"],
@@ -180,6 +182,34 @@ def compare(a, b):
     except ValueError:
         pass
     return r
+
+
+def strat_perm(a, sa, b, sb, n_perm=4000, seed=1):
+    """Permutation test of condition A vs B that respects the design: the condition labels are shuffled only
+    among runs of the same stratum (robot x route), so differences between robots and routes cannot make a
+    condition look better. Statistic: the mean over strata holding both conditions of (mean A - mean B).
+    Returns (difference, two-sided p, strata used); nan when no stratum holds both."""
+    a = [(v, k) for v, k in zip(a, sa) if np.isfinite(v)]
+    b = [(v, k) for v, k in zip(b, sb) if np.isfinite(v)]
+    keys = sorted({k for _, k in a} & {k for _, k in b}, key=str)
+    if not keys:
+        return float("nan"), float("nan"), 0
+    groups = []
+    for k in keys:
+        va = np.array([v for v, kk in a if kk == k])
+        vb = np.array([v for v, kk in b if kk == k])
+        groups.append((np.concatenate([va, vb]), len(va)))
+
+    obs = float(np.mean([g[:na].mean() - g[na:].mean() for g, na in groups]))
+    rng = np.random.default_rng(seed)
+    tot = np.zeros(n_perm)
+    for g, na in groups:
+        idx = np.argsort(rng.random((n_perm, len(g))), axis=1)        # one shuffle of this stratum per row
+        sh = g[idx]
+        tot += sh[:, :na].mean(axis=1) - sh[:, na:].mean(axis=1)
+    sim = tot / len(groups)
+    hits = int(np.sum(np.abs(sim) >= abs(obs) - 1e-12))
+    return obs, (hits + 1) / (n_perm + 1), len(keys)
 
 
 def holm(ps):
@@ -320,7 +350,7 @@ def parse_marks(events):
 
 
 def load_runs(runs_path, marks, vc=None):
-    """The run list as dicts: run_id, robot, condition, route, block, robot_run, lost, t_* (camera clock)."""
+    """The run list as dicts: run_id, robot, condition, route, block, robot_run, recovery, t_* (camera clock)."""
     rows = read_csv(runs_path) if runs_path else []
     runs = []
     if not rows:
@@ -330,7 +360,12 @@ def load_runs(runs_path, marks, vc=None):
         d["run_id"] = str(d["run_id"] if d["run_id"] is not None else i + 1)
         d["condition"] = canon_cond(d["condition"])
         d["route"] = canon_route(d["route"])
-        d["lost"] = str(d["lost"] or "0").strip().lower() in ("1", "true", "yes", "y")
+        rec = str(d["recovery"] or "").strip()
+        if rec.lower() in ("0", "false", "no", "n", "ok", "none"):
+            rec = ""
+        elif rec.lower() in ("1", "true", "yes", "y"):
+            rec = "lost"                                  # an old run list's lost flag
+        d["recovery"] = rec
         mk = marks.get(d["run_id"], {})
         for k in ("t_find", "t_start", "t_far", "t_end"):
             v = nanf(pick(r, ALIASES[k]))
@@ -578,7 +613,7 @@ def contact_frames(t, xy, head_deg, v_min=1.5):
 
 # =============================================================================== per-run measurement
 class Settings:
-    def __init__(self, cam=None, bg=None, centre_offset_cm=0.0, bump_frame="own", routes=None, robot_px=23.0,
+    def __init__(self, cam=None, bg=None, centre_offset_cm=0.0, bump_frame="auto", routes=None, robot_px=23.0,
                  lead_s=1.0, tail_s=2.0, still_tol_cm=0.6, still_s=0.5):
         self.cam, self.bg, self.centre_offset_cm, self.bump_frame = cam, bg, centre_offset_cm, bump_frame
         self.routes = dict(ROUTES, **(routes or {}))
@@ -621,7 +656,7 @@ def measure_run(video, run, logs, S):
     route = run["route"]
     t_start, t_end = run["t_start"], run["t_end"]
     row = dict(run_id=run["run_id"], robot=robot, condition=run["condition"], route=route, block=run.get("block"),
-               robot_run=rr, lost=int(run["lost"]))
+               robot_run=rr, recovery=run.get("recovery", ""))
     if not (np.isfinite(t_start) and np.isfinite(t_end)):
         row["flags"] = "no start/end time"
         return row, [], []
@@ -746,8 +781,8 @@ def measure_run(video, run, logs, S):
     for k in ("abs_far_err_cm", "abs_far_err_deg", "abs_end_err_cm", "abs_end_err_deg"):
         row.setdefault(k, float("nan"))
     row["loss_note"] = ""
-    if run["lost"]:
-        flags.append("runner: lost")
+    if run.get("recovery"):
+        flags.append("needed recovery: %s" % run["recovery"])
     if not (np.isfinite(row["end_err_cm"])):
         flags.append("no end error")
     row["flags"] = "; ".join(flags)
@@ -795,7 +830,14 @@ def measure_run(video, run, logs, S):
             if np.isfinite(cp[0]):
                 br.update(cam_x=cp[0], cam_y=cp[1], cam_th=cp[2], contact_frame=idx[c], t_contact=float(t[c]))
             bf = bp
-            if S.bump_frame == "own" and np.all(np.isfinite(bp)):
+            frame = S.bump_frame
+            if frame == "auto":
+                # a find that started from a camera fix (known_before 1) works in floor coordinates; one with no
+                # pose before started its own frame where it was put down
+                kb = nanf(pick(find, ["known_before"])) if find is not None else float("nan")
+                frame = "floor" if kb == 1 else "own"
+            br["bump_frame"] = frame
+            if frame == "own" and np.all(np.isfinite(bp)):
                 # the robot's own frame starts where the find began: where the camera saw it then
                 bf = compose(_find_origin(fl) or ms, bp)
             if np.all(np.isfinite(bf)) and np.isfinite(cp[0]):
@@ -836,13 +878,15 @@ PRIMARY = ["end_err_cm", "end_head_abs_deg"]
 
 
 def flag_runs(rows):
-    """Add outlier_<metric> flags: the runner's lost flag, or beyond Tukey fences within the condition."""
+    """Add outlier_<metric> flags: beyond the Tukey fences (1.5 x IQR) within the same condition AND route (the
+    routes' errors differ by design: pooled, every run of the longest route would look like an outlier). Purely
+    statistical: a run the runner had to drive back (recovery) is not flagged for that."""
     for m, _ in METRICS:
-        for c in {r["condition"] for r in rows}:
-            grp = [r for r in rows if r["condition"] == c]
+        for key in {(r["condition"], r["route"]) for r in rows}:
+            grp = [r for r in rows if (r["condition"], r["route"]) == key]
             fl = iqr_outliers([r.get(m, float("nan")) for r in grp])
             for r, f in zip(grp, fl):
-                r["outlier_" + m] = int(bool(f) or bool(r["lost"]))
+                r["outlier_" + m] = int(bool(f))
     return rows
 
 
@@ -860,6 +904,11 @@ def values(rows, metric, cond, trimmed):
             and not (trimmed and r.get("outlier_" + metric))]
 
 
+def strata(rows, metric, cond, trimmed):
+    return [(r.get("robot") or "", r.get("route") or "") for r in rows if r["condition"] == cond
+            and np.isfinite(nanf(r.get(metric))) and not (trimmed and r.get("outlier_" + metric))]
+
+
 def summarise(rows):
     summ, comps = [], []
     for scope, rs in scopes(rows):
@@ -875,10 +924,18 @@ def summarise(rows):
                     for b in CONDITIONS[i + 1:]:
                         va, vb = values(rs, m, a, trimmed), values(rs, m, b, trimmed)
                         if len(va) >= 2 and len(vb) >= 2:
-                            pair.append(dict(scope=scope, metric=m, set=st, cond_a=a, cond_b=b, **compare(va, vb)))
-                hp, hm = holm([p["welch_p"] for p in pair]), holm([p["mwu_p"] for p in pair])
-                for p, a, b in zip(pair, hp, hm):
-                    p["welch_p_holm"], p["mwu_p_holm"] = a, b
+                            d = dict(scope=scope, metric=m, set=st, cond_a=a, cond_b=b, **compare(va, vb))
+                            if m in PRIMARY:
+                                d["perm_diff"], d["perm_p"], d["perm_strata"] = strat_perm(
+                                    va, strata(rs, m, a, trimmed), vb, strata(rs, m, b, trimmed))
+                            else:
+                                d["perm_diff"], d["perm_p"], d["perm_strata"] = float("nan"), float("nan"), 0
+                            pair.append(d)
+                # Holm family: the (up to) six condition pairs of one metric, in one scope, with or without outliers
+                hp, hm, hq = holm([p["welch_p"] for p in pair]), holm([p["mwu_p"] for p in pair]), \
+                    holm([p["perm_p"] for p in pair])
+                for p, a, b, q in zip(pair, hp, hm, hq):
+                    p["welch_p_holm"], p["mwu_p_holm"], p["perm_p_holm"] = a, b, q
                 comps.extend(pair)
     return summ, comps
 
@@ -997,33 +1054,44 @@ def write_report(path, rows, bumps, summ, comps, charts, notes, args_text=""):
           "what the camera saw and what was intended. Four conditions: U uncalibrated, C calibrated on-board "
           "sensors (corrections learned during the session from U runs, so the first block is U-heavy), K camera "
           "steering only, KC camera plus calibrated sensors. Question: do the conditions differ, and by how much.", ""]
+    rec = [r for r in rows if r.get("recovery")]
+    kinds = sorted({r["recovery"] for r in rec})
     L += ["## Data", "",
-          "%d runs (%s); %d flagged as outliers on end position error (%d by the runner as lost, the rest by the "
-          "1.5 x IQR rule within a condition). Runs with a missing measurement are in runs.csv with a note and "
-          "left out of the statistic they lack." % (
-              len(rows), ", ".join("%s %d" % (c, n_by[c]) for c in CONDITIONS), n_out,
-              sum(1 for r in rows if r["lost"])), ""]
-    for i, (m, lab) in enumerate([x for x in METRICS if x[0] in PRIMARY]):
-        L += ["**%s**" % lab, "",
-              "| Condition | n | mean | 95% CI of mean | SD | 95% CI of SD | median | mean without outliers (n) |",
-              "|---|---|---|---|---|---|---|---|"]
-        for c in CONDITIONS:
-            d = find_row_for(summ, "all", m, c)
-            if not d:
+          "%d runs (%s). %d needed recovery afterwards (%s): the runner drove them back by camera; they stay in every "
+          "statistic. %d are statistical outliers on end position error (beyond 1.5 x IQR within the same condition "
+          "and route); every table gives the mean with and without them. Runs with a missing measurement are in "
+          "runs.csv with a note and left out of the statistic they lack. The routes differ in length and turns, so "
+          "each route is reported on its own (pooled numbers: summary.csv, scope all)." % (
+              len(rows), ", ".join("%s %d" % (c, n_by[c]) for c in CONDITIONS), len(rec),
+              ", ".join("%s %d" % (k, sum(1 for r in rec if r["recovery"] == k)) for k in kinds) or "none",
+              n_out), ""]
+    route_scopes = [s for s in dict.fromkeys(x["scope"] for x in summ) if s.startswith("route=")] or ["all"]
+    first = True
+    for m, lab in [x for x in METRICS if x[0] in PRIMARY]:
+        for sc in route_scopes:
+            if not any(find_row_for(summ, sc, m, c) for c in CONDITIONS):
                 continue
-            t = find_row_for(summ, "all", m, c, "without outliers")
-            L.append("| %s | %d | %s | %s to %s | %s | %s to %s | %s | %s (%d) |" % (
-                c, d["n"], f(d["mean"]), f(d["ci_lo"]), f(d["ci_hi"]), f(d["sd"]), f(d["sd_lo"]), f(d["sd_hi"]),
-                f(d["median"]), f(t["mean"]) if t else "-", t["n"] if t else 0))
-        L.append("")
-        if i == 0:
-            L += ["<sub>95% CI of the mean: the range that would contain the true mean in 95 of 100 repeats of "
-                  "this experiment, from the t distribution (mean +/- t x SD / sqrt(n)). The CI of the SD is a "
-                  "bootstrap: the runs are re-drawn with replacement 4000 times, the SD taken each time, and the "
-                  "middle 95% kept; with few runs it is wide and slightly low-biased.</sub>", ""]
+            L += ["**%s, %s**" % (lab, sc.replace("route=", "route ") if sc != "all" else "all routes"), "",
+                  "| Condition | n | mean | 95% CI of mean | SD | 95% CI of SD | median | mean without outliers (n) |",
+                  "|---|---|---|---|---|---|---|---|"]
+            for c in CONDITIONS:
+                d = find_row_for(summ, sc, m, c)
+                if not d:
+                    continue
+                t = find_row_for(summ, sc, m, c, "without outliers")
+                L.append("| %s | %d | %s | %s to %s | %s | %s to %s | %s | %s (%d) |" % (
+                    c, d["n"], f(d["mean"]), f(d["ci_lo"]), f(d["ci_hi"]), f(d["sd"]), f(d["sd_lo"]), f(d["sd_hi"]),
+                    f(d["median"]), f(t["mean"]) if t else "-", t["n"] if t else 0))
+            L.append("")
+            if first:
+                L += ["<sub>95% CI of the mean: the range that would contain the true mean in 95 of 100 repeats of "
+                      "this experiment, from the t distribution (mean +/- t x SD / sqrt(n)). The CI of the SD is a "
+                      "bootstrap: the runs are re-drawn with replacement 4000 times, the SD taken each time, and the "
+                      "middle 95% kept; with few runs it is wide and slightly low-biased.</sub>", ""]
+                first = False
     if charts.get("end_err_cm"):
         L += ["![End position error by condition](%s)" % charts["end_err_cm"], "",
-              "*Each dot is one run's end position error (shapes mark the route, hollow dots are flagged "
+              "*Each dot is one run's end position error (shapes mark the route, hollow dots are statistical "
               "outliers); the diamond and bar are the condition's mean with its 95% confidence range.*", ""]
     if charts.get("end_head_abs_deg"):
         L += ["![End heading error by condition](%s)" % charts["end_head_abs_deg"], "",
@@ -1032,28 +1100,45 @@ def write_report(path, rows, bumps, summ, comps, charts, notes, args_text=""):
     L += ["### Are the differences real", ""]
     shown = False
     for m, lab in [x for x in METRICS if x[0] in PRIMARY]:
-        sel = [c for c in comps if c["scope"] == "all" and c["metric"] == m and c["set"] == "all runs"]
-        if not sel:
-            continue
-        L += ["**%s**" % lab, "",
-              "| A vs B | mean A - B (95% CI) | Welch p (Holm) | Cohen's d | Mann-Whitney p (Holm) | rank-biserial | spread differs, p |",
-              "|---|---|---|---|---|---|---|"]
-        for c in sel:
-            L.append("| %s vs %s | %s (%s to %s) | %s (%s) | %s | %s (%s) | %s | %s |" % (
-                c["cond_a"], c["cond_b"], f(c["mean_diff"]), f(c["diff_lo"]), f(c["diff_hi"]), p_txt(c["welch_p"]),
-                p_txt(c["welch_p_holm"]), f(c["cohen_d"]), p_txt(c["mwu_p"]), p_txt(c["mwu_p_holm"]),
-                f(c["rank_biserial"]), p_txt(c["bf_p"])))
-        L.append("")
-        shown = True
+        for sc in route_scopes:
+            sel = [c for c in comps if c["scope"] == sc and c["metric"] == m and c["set"] == "all runs"]
+            if not sel:
+                continue
+            L += ["**%s, %s**" % (lab, sc.replace("route=", "route ") if sc != "all" else "all routes"), "",
+                  "| A vs B | mean A - B (95% CI) | permutation p (Holm) | Welch p (Holm) | Mann-Whitney p (Holm) | "
+                  "Cohen's d | spread differs, p |",
+                  "|---|---|---|---|---|---|---|"]
+            for c in sel:
+                L.append("| %s vs %s | %s (%s to %s) | %s (%s) | %s (%s) | %s (%s) | %s | %s |" % (
+                    c["cond_a"], c["cond_b"], f(c["mean_diff"]), f(c["diff_lo"]), f(c["diff_hi"]),
+                    p_txt(c.get("perm_p", float("nan"))), p_txt(c.get("perm_p_holm", float("nan"))),
+                    p_txt(c["welch_p"]), p_txt(c["welch_p_holm"]), p_txt(c["mwu_p"]), p_txt(c["mwu_p_holm"]),
+                    f(c["cohen_d"]), p_txt(c["bf_p"])))
+            L.append("")
+            shown = True
     if shown:
-        L += ["<sub>Welch's t-test: the difference in means divided by its standard error, without assuming equal "
-              "spreads; p is the chance of a difference this large if the true means were equal. Mann-Whitney U: "
-              "ranks all runs together and asks whether one condition's runs sit higher; it does not need a bell "
-              "curve. Holm: p values corrected for the six pairs compared at once. Cohen's d: the mean difference in "
-              "units of the pooled SD (0.2 small, 0.5 medium, 0.8 large). Rank-biserial: the share of run pairs where A is "
-              "larger minus the share where B is (+1 all A larger, 0 none, -1 all B larger). Brown-Forsythe "
-              "(Levene on distances from the median): tests whether the spreads differ; p is the chance of "
-              "spreads this different if they were equal.</sub>", ""]
+        L += ["<sub>Permutation p (the primary test): the condition labels are shuffled 4000 times, but only among "
+              "runs of the same robot on the same route, and the difference in means is taken each time; p is the "
+              "share of shuffles with a difference at least as large as the real one. It respects that the same "
+              "robots and routes recur. Welch's t-test: (secondary) the difference in means divided by its standard "
+              "error, without assuming equal spreads; it treats every run as independent. Mann-Whitney U "
+              "(secondary): ranks all runs together and asks whether one condition's runs sit higher; it does not "
+              "need a bell curve. Holm: each p corrected for the six condition pairs compared within one table (one "
+              "measure, one route); tables are not corrected against each other. Cohen's d: the mean difference in "
+              "units of the pooled SD (0.2 small, 0.5 medium, 0.8 large). Brown-Forsythe (Levene on distances from "
+              "the median): tests whether the spreads differ; p is the chance of spreads this different if they "
+              "were equal.</sub>", ""]
+    rob = [s for s in dict.fromkeys(x["scope"] for x in summ) if s.startswith("robot=")]
+    if rob:
+        L += ["Per robot (end position error, mean cm, all routes; secondary):", "",
+              "| Robot | " + " | ".join(CONDITIONS) + " |", "|---|" + "---|" * len(CONDITIONS)]
+        for sc in rob:
+            cells = []
+            for c in CONDITIONS:
+                d = find_row_for(summ, sc, "end_err_cm", c)
+                cells.append("%s (%d)" % (f(d["mean"]), d["n"]) if d else "-")
+            L.append("| %s | %s |" % (sc[6:], " | ".join(cells)))
+        L.append("")
     if charts.get("bump"):
         L += ["![Bump: believed against camera](%s)" % charts["bump"], "",
               "*Each dot is one bump: where the camera saw the robot at contact against where the robot believed it was; "
@@ -1070,7 +1155,8 @@ def write_report(path, rows, bumps, summ, comps, charts, notes, args_text=""):
     L += ["", "## What's next", ""]
     L += next_lines(rows, n_by, comps)
     L += ["", "## Two sweeps", "", "**New tests that may now be needed**", ""]
-    L += ["- Per-robot analysis if the conditions are not balanced across robots (the tests here pool robots and routes).",
+    L += ["- A mixed model (robot and block as random effects) to cross-check the permutation test once there are "
+          "enough blocks.",
           "- A check that the learned C/KC corrections moved the right way (gyro scale, drift, wheel scale before and "
           "after learning, against what the camera-measured U runs say).",
           "- A repeat of a few runs with a tape measure at the far point and end, to test the camera's own error "
@@ -1089,12 +1175,14 @@ def write_report(path, rows, bumps, summ, comps, charts, notes, args_text=""):
           "accurate to a few degrees at about 23 px per robot, and wrong by 90 or 180 deg if the hint was wrong.",
           "- Camera calibration error (earlier fit about 0.9 cm RMS) is not separated from the robot's error; start-relative "
           "errors cancel most of it, absolute ones do not.",
-          "- Bump believed poses are assumed to be in the robot's own frame from where it was put down; if the "
-          "firmware reset the pose between the two bumps, the second bump's comparison is off by that reset.",
+          "- Bump believed poses are taken as floor coordinates when the find started from a camera fix (FIND "
+          "known_before 1), else as the robot's own frame from where it was put down; a find whose record lacks "
+          "known_before is read the second way.",
           "- Contact frame = where the robot stops advancing, at 25 fps (40 ms steps, about 0.2 cm at a gentle approach); "
           "the thresholds (1.5 cm/s, plateau tolerance 0.35 cm) are chosen, not derived.",
-          "- Outliers by the 1.5 x IQR fence and the runner's lost flag are chosen rules; runs are treated as "
-          "independent although the same robot, route and battery recur.",
+          "- Outliers by the 1.5 x IQR fence within condition and route are a chosen rule; with 5-8 runs per cell "
+          "the fences are rough. The permutation test respects robot and route; Welch and Mann-Whitney treat runs "
+          "as independent although the same robot, battery and learned corrections recur.",
           "- Log column names (BUMP, FIND, E02) and mark texts are as agreed in the build plan, not yet read from "
           "real files; the readers accept the aliases in ALIASES."]
     nm = sum(1 for r in rows if "found by motion" in r.get("flags", ""))
@@ -1114,36 +1202,40 @@ def write_report(path, rows, bumps, summ, comps, charts, notes, args_text=""):
 
 def conclusion_lines(rows, summ, comps):
     out = []
+    route_scopes = [s for s in dict.fromkeys(x["scope"] for x in summ) if s.startswith("route=")] or ["all"]
     for m, lab in [x for x in METRICS if x[0] in PRIMARY]:
-        ds = [(find_row_for(summ, "all", m, c), c) for c in CONDITIONS]
-        ds = [(d, c) for d, c in ds if d and d["n"] >= 2]
-        if len(ds) < 2:
-            out.append("- %s: fewer than two conditions have two or more runs; no comparison yet." % lab)
-            continue
-        ds.sort(key=lambda x: x[0]["mean"])
-        best, worst = ds[0], ds[-1]
-        s = "- %s: lowest mean %s %s (n=%d), highest %s %s (n=%d)." % (
-            lab, best[1], f(best[0]["mean"]), best[0]["n"], worst[1], f(worst[0]["mean"]), worst[0]["n"])
-        sig = [c for c in comps if c["scope"] == "all" and c["metric"] == m and c["set"] == "all runs"
-               and np.isfinite(c["welch_p_holm"]) and c["welch_p_holm"] < 0.05]
-        if sig:
-            s += " Differences with Holm-adjusted Welch p < 0.05: " + ", ".join(
-                "%s vs %s (%s, d=%s)" % (c["cond_a"], c["cond_b"], f(c["mean_diff"]), f(c["cohen_d"])) for c in sig) + "."
-        else:
-            s += " No pair differs at Holm-adjusted p < 0.05."
-        out.append(s)
-        flip = []
-        for c in comps:
-            if c["scope"] == "all" and c["metric"] == m and c["set"] == "all runs":
-                t = next((x for x in comps if x["scope"] == "all" and x["metric"] == m and x["set"] == "without outliers"
+        any_route = False
+        for sc in route_scopes:
+            ds = [(find_row_for(summ, sc, m, c), c) for c in CONDITIONS]
+            ds = [(d, c) for d, c in ds if d and d["n"] >= 2]
+            if len(ds) < 2:
+                continue
+            any_route = True
+            ds.sort(key=lambda x: x[0]["mean"])
+            best, worst = ds[0], ds[-1]
+            where = sc.replace("route=", "route ") if sc != "all" else "all routes"
+            s = "- %s, %s: lowest mean %s %s (n=%d), highest %s %s (n=%d)." % (
+                lab, where, best[1], f(best[0]["mean"]), best[0]["n"], worst[1], f(worst[0]["mean"]), worst[0]["n"])
+            pairs = [c for c in comps if c["scope"] == sc and c["metric"] == m and c["set"] == "all runs"]
+            sig = [c for c in pairs if np.isfinite(c.get("perm_p_holm", float("nan"))) and c["perm_p_holm"] < 0.05]
+            if sig:
+                s += " Differences with Holm-adjusted permutation p < 0.05: " + ", ".join(
+                    "%s vs %s (%s, d=%s)" % (c["cond_a"], c["cond_b"], f(c["mean_diff"]), f(c["cohen_d"])) for c in sig) + "."
+            else:
+                s += " No pair differs at Holm-adjusted permutation p < 0.05."
+            out.append(s)
+            flip = []
+            for c in pairs:
+                t = next((x for x in comps if x["scope"] == sc and x["metric"] == m and x["set"] == "without outliers"
                           and (x["cond_a"], x["cond_b"]) == (c["cond_a"], c["cond_b"])), None)
-                if t and (c["welch_p_holm"] < 0.05) != (t["welch_p_holm"] < 0.05):
+                if t and (c.get("perm_p_holm", 1) < 0.05) != (t.get("perm_p_holm", 1) < 0.05):
                     flip.append("%s vs %s" % (c["cond_a"], c["cond_b"]))
-        if flip:
-            out.append("  - Taking the flagged outliers out changes the verdict (Holm-adjusted Welch p against 0.05) "
-                       "for: %s. Look at those runs before relying on either." % ", ".join(flip))
+            if flip:
+                out.append("  - Taking the statistical outliers out changes the verdict for: %s. Look at those runs "
+                           "before relying on either." % ", ".join(flip))
+        if not any_route:
+            out.append("- %s: fewer than two conditions have two or more runs; no comparison yet." % lab)
     return out
-
 
 def next_lines(rows, n_by, comps):
     out = []
@@ -1161,7 +1253,7 @@ def next_lines(rows, n_by, comps):
 
 
 # =============================================================================== main
-def analyse(recording, logs, runs, calib, out, background=None, bump_frame="own", centre_offset_cm=0.0,
+def analyse(recording, logs, runs, calib, out, background=None, bump_frame="auto", centre_offset_cm=0.0,
             routes=None, robot_px=23.0, only=None, quiet=False):
     """Everything in one call: returns dict(rows, bumps, summary, comparisons, charts)."""
     import cv2
@@ -1227,7 +1319,9 @@ def main(argv=None):
     ap.add_argument("--calib", help="camera model json or floor_calibration.json")
     ap.add_argument("--out", required=True)
     ap.add_argument("--background", help="picture of the empty board (optional)")
-    ap.add_argument("--bump-frame", choices=("own", "floor"), default="own")
+    ap.add_argument("--bump-frame", choices=("auto", "own", "floor"), default="auto",
+                    help="frame of the BUMP believed poses: auto = floor when the find started from a camera fix "
+                         "(FIND known_before 1), else the robot's own frame from where it was put down")
     ap.add_argument("--centre-offset-cm", type=float, default=0.0, help="blob centre ahead of the axle, cm")
     ap.add_argument("--routes-json", help='{"L": [dx, dy, dth], ...} far-point offsets overriding the defaults')
     ap.add_argument("--robot-px", type=float, default=23.0, help="robot short side in px when there is no calibration")

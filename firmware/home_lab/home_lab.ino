@@ -38,7 +38,7 @@
 Arduino_Alvik alvik;
 
 // Bump this whenever the firmware changes, so every logged run says which code it ran.
-#define FW_VERSION "2026-10-21a"
+#define FW_VERSION "2026-10-21b"
 
 uint16_t gBootId = 0;   // random each power-on; starts every run id
 

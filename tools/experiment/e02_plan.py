@@ -35,11 +35,22 @@ ROBOT_HALF_CM = 4.75          # half the Alvik's 9.5 cm length
 FIND_BACKOFF_CM = 8.0         # firmware e02_find_back_cm: `run find` backs off this far from each board
 OPEN_EDGE_MIN_CM = 15.0       # every route keeps the robot's front this far from the open edges
 FACE_CM = 4.75                # axle to the face that touches a board, no nose bracket (bracket: 6.10)
-TURN_ROOM_CM = 4.5            # start spot: this much more than the face from the y-board, so the robot can turn
-                              # there (a 9.5 cm square's corners sweep 6.7 cm round its centre)
-PARK_EDGE_CM = 18.0           # park spots this far (centre) inside the open edge opposite the x-board
-PARK_STAGE_CM = 30.0          # staging point this far before the park spot (towards the routes)
-PARK_XS = (25.0, 61.0, 97.0)  # park spots along x, from the y-board, one per robot
+START_CLEAR_CM = 28.0         # route start spot: its centre this far from both blocked boards' faces (2026-10-21b; was
+                              # 9 / 13 cm). An uncalibrated return ends ~15-25 cm off by design (gyro 7% short): from
+                              # here it no longer runs into a board, so U runs are not cut short by the front stop;
+                              # the diagonal straight's far point stays 22 cm (centre) from the open edges
+FIND_STAGE_CM = 25.0          # firmware e02_find_stage_cm: the find starts from this far off both faces
+# Park spots, in board words: (u, v) = cm in from the y-board's face and from the x-board's face (centre). In the
+# two corners off the routes' diagonal (2026-10-21b; they were along the open edge, 20 cm from the end of the
+# diagonal straight). Checked in tools/experiment/tests (the simulator's robot driving every route uncalibrated,
+# gyro 5.5-8.5% short, drift +-0.3 deg/s): no route comes within PARK_CLEAR_CM of a parked robot's centre.
+PARK_UV = ((103.0, 14.0), (12.0, 102.0), (105.0, 45.0))
+PARK_STAGE_CM = 20.0          # staging point this far in front of the park spot; it backs the rest of the way in
+PARK_CLEAR_CM = 18.0          # nothing a robot drives may come nearer a parked robot's centre than this (two bodies
+                              # touch at 9.5-13.4 cm centre to centre)
+WATCH_EDGE_CM = 9.0           # camera watchdog: stop a robot whose centre is (about to be, 0.3 s ahead) this close to an
+                              # open edge (its front 4 cm short of it; the firmware edge guard stops it 3.5 cm from it)
+WATCH_ROBOT_CM = 15.0         # ... or to a parked robot's centre, while moving towards it
 SQUARE_CM = 50.0
 STRAIGHT_CM = 100.0
 L_CM = 30.0
@@ -67,6 +78,38 @@ def blocks_for(hours, run_s, n_robots=3):
     """How many regular blocks fit in `hours` after the warm-up block (at least 1)."""
     total = hours * 3600.0 / max(run_s, 1.0)
     return max(1, int(round((total - len(ROUTES) * n_robots) / (len(CONDITIONS) * len(ROUTES)))))
+
+
+RUN_S = 70.0          # measured (dry runs and the 2026-10-21 timing): one route run with its parking, s
+FIND_S = 30.0         # plus its find (about 27 s measured), s
+SETUP_S = 600.0       # setup checks, finding and parking the robots, the find check, the 2-minute naming check
+
+
+def blocks_for_time(hours, run_s=RUN_S, find_s=FIND_S, setup_s=SETUP_S, n_robots=3, slack_s=300.0):
+    """The most regular blocks (after the all-U block) whose whole session (setup + runs at run_s + find_s each)
+    stays within hours (+ slack_s); at least 1."""
+    per = run_s + find_s
+    nb = 1
+    while setup_s + (len(ROUTES) * n_robots + (nb + 1) * len(CONDITIONS) * len(ROUTES)) * per <= hours * 3600 + slack_s:
+        nb += 1
+    return nb
+
+
+def plan_words(schedule, run_s=RUN_S, find_s=FIND_S, setup_s=SETUP_S):
+    """Plain lines: runs per condition (and per route), and the time it should take."""
+    per = run_s + find_s
+    n = len(schedule)
+    lines = ["Plan: %d runs (block 0: %d U runs to learn the corrections from, then %d blocks of 12)." % (
+        n, sum(1 for r in schedule if r["block"] == 0), len({r["block"] for r in schedule}) - 1)]
+    for c in CONDITIONS:
+        rs = [r for r in schedule if r["cond"] == c]
+        if rs:
+            lines.append("  %-2s %-27s %3d runs (straight %d, L %d, square %d)" % (
+                c, COND_WORDS[c], len(rs), *(sum(1 for r in rs if r["route"] == k) for k in ROUTES)))
+    tot = setup_s + n * per
+    lines.append("Time: about %d:%02d in all (setup about %d min, then %.0f s a run: %.0f s route and parking + %.0f s "
+                 "find)." % (tot // 3600, (tot % 3600) // 60, setup_s // 60, per, run_s, find_s))
+    return lines
 
 
 def make_schedule(robots, n_blocks, seed):
@@ -102,7 +145,7 @@ def next_run(schedule, has_fit, unavailable=()):
     if not pend:
         return None
     block = pend[0]["block"]
-    in_block = [r for r in pend if r["block"] == block]
+    in_block = sorted([r for r in pend if r["block"] == block], key=lambda r: r.get("find_redos", 0))   # redos last
     for r in in_block:
         if r["cond"] in ("C", "KC") and not has_fit(r["robot"]):
             continue
@@ -182,13 +225,20 @@ class Board:
         """Heading that faces the x-board (how a robot waits before `run find`)."""
         return -90.0 if self.uy > 0 else 90.0
 
+    def uv(self, u, v):
+        """Floor point u cm in from the y-board's face and v cm in from the x-board's face."""
+        return (self.yboard_cm + self.ux * u, self.xboard_cm + self.uy * v)
+
     def nominal_start(self):
-        """The route start spot (sent as e02_start_x / e02_start_y): as close to the y-board as still lets the
-        robot turn (so the 100 cm straight keeps the most room before the open edge), and the find's back-off
-        from the x-board. Heading: away from the y-board."""
-        cx, cy = self.corner
-        return (cx + self.ux * (self.face_cm + TURN_ROOM_CM), cy + self.uy * (self.face_cm + FIND_BACKOFF_CM),
-                self.start_heading)
+        """The route start spot (sent as e02_start_x / e02_start_y): START_CLEAR_CM from both boards (an
+        uncalibrated return does not reach them; the 100 cm diagonal straight still ends 20+ cm off the open
+        edges). Heading: away from the y-board."""
+        x, y = self.uv(START_CLEAR_CM, START_CLEAR_CM)
+        return (x, y, self.start_heading)
+
+    def find_stage(self):
+        """Where `run find` starts from (firmware e02_find_stage_cm from both faces; the axle)."""
+        return self.uv(FIND_STAGE_CM, FIND_STAGE_CM)
 
     def open_edges(self):
         """The two edges without a board: [('x', value) | ('y', value)] (x = value or y = value lines)."""
@@ -200,19 +250,44 @@ class Board:
         board_d = min(abs(y - self.xboard_cm), abs(x - self.yboard_cm))
         return open_d, board_d
 
+    def escape_point(self, x, y, near_cm=20.0, to_cm=28.0):
+        """A point straight in from the nearest open edge (to_cm from it) when (x, y) is within near_cm of it, else
+        None: where a robot left near an edge goes first, so the way to its spot never runs along the edge."""
+        best = None
+        for a, v in self.open_edges():
+            d = abs((x if a == "x" else y) - v)
+            if d < near_cm and (best is None or d < best[0]):
+                best = (d, a, v)
+        if best is None:
+            return None
+        d, a, v = best
+        lo = min(self.x0, self.x1) if a == "x" else min(self.y0, self.y1)
+        inward = 1.0 if abs(v - lo) < 1e-6 else -1.0
+        return (v + inward * to_cm, y) if a == "x" else (x, v + inward * to_cm)
+
     def on_board(self, x, y, margin=0.0):
         return (min(self.x0, self.x1) + margin <= x <= max(self.x0, self.x1) - margin and
                 min(self.y0, self.y1) + margin <= y <= max(self.y0, self.y1) - margin)
 
     def park(self, i):
-        """(x, y, heading) of park spot i: along the open edge opposite the x-board, facing the x-board."""
-        y = (self.y1 - PARK_EDGE_CM) if self.uy > 0 else (self.y0 + PARK_EDGE_CM)
-        x = self.yboard_cm + self.ux * PARK_XS[i % len(PARK_XS)]
-        return (x, y, self.face_xboard)
+        """(x, y, heading) of park spot i (PARK_UV), facing the find's staging point (its next drive)."""
+        u, v = PARK_UV[i % len(PARK_UV)]
+        x, y = self.uv(u, v)
+        sx, sy = self.find_stage()
+        return (x, y, math.degrees(math.atan2(sy - y, sx - x)))
 
     def stage(self, i):
-        x, y, _ = self.park(i)
-        return (x, y - self.uy * PARK_STAGE_CM)
+        """The point PARK_STAGE_CM in front of park spot i: the robot gets there, turns to the spot's heading and
+        backs into the spot (so it faces the open board, never an edge, when it next drives forward)."""
+        x, y, h = self.park(i)
+        return (x + PARK_STAGE_CM * math.cos(math.radians(h)), y + PARK_STAGE_CM * math.sin(math.radians(h)))
+
+    def park_words(self, i, side_of):
+        """Plain words for where park spot i is: side_of(x, y) -> 'top' / 'left' ... of the camera picture."""
+        u, v = PARK_UV[i % len(PARK_UV)]
+        ex, ey = self.uv(0.0, v), self.uv(u, 0.0)
+        return ("about %.0f cm (%.0f in) from the blocked board on the %s of the camera picture and %.0f cm (%.0f in) "
+                "from the blocked board on the %s" % (u, u / 2.54, side_of(*ex), v, v / 2.54, side_of(*ey)))
 
     # routes ----------------------------------------------------------------------------------------
     def route_local(self, route):

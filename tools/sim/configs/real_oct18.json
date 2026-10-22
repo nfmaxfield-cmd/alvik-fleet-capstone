@@ -1,12 +1,12 @@
 {
-  "_comment": "The real T0/T1 setup as built on Oct 18 (docs/experiments/E00-measurement-check/README.md, 'Setup as built'). Use: python tools/sim/simulate.py --config tools/sim/configs/real_oct18.json --out <dir>. Only the settings listed here differ from the defaults (simulate.py --write-config shows them all). Not modelled: the black-and-white picture (the simulator has no grayscale setting; the real camera has saturation 0).",
+  "_comment": "The real overhead camera (set up Oct 18; pixel scale re-measured on the roam1 footage, 2026-10-21) (docs/experiments/E00-measurement-check/README.md, 'Setup as built'). Use: python tools/sim/simulate.py --config tools/sim/configs/real_oct18.json --out <dir>. Only the settings listed here differ from the defaults (simulate.py --write-config shows them all). Not modelled: the black-and-white picture (the simulator has no grayscale setting; the real camera has saturation 0).",
   "camera": {
-    "_comment": "Overhead USB camera: about 262 cm (103 in) above the board, looking straight down, 640 x 480 at 25 fps, about 3.4 px per cm (640 px / 3.4 = 188 cm of floor across the picture). Floor origin (0, 0) at the bottom-right of the picture, x up the picture, y to the left: yaw -90. Lens point straight down over the board's middle (not measured: no plumb line), level, no lens term (the calibration fits one if needed). No boxes: the simulator puts them at y 62-68 cm, which is on this board.",
+    "_comment": "Overhead USB camera, 640 x 480 at 25 fps, looking about straight down (roam1's floor calibration: 8.8 deg off vertical). Pixel scale MEASURED on the roam1 footage (2026-10-21, board corners): 2.19-2.52 px/cm across the board, mean 2.34 -> floor_width_cm = 640 / 2.34 = 273.5 cm across the picture. (This file said 3.4 px/cm / 188 cm until 2026-10-21b: wrong for the camera as it is now.) Lens HEIGHT UNKNOWN: never measured; the corners cannot pin it down (the calibration assumed 262). height_cm below is a placeholder the simulator needs: with the pixel scale fixed it only changes perspective (where robot tops 4 cm up land: under 2%). Do not use it as a measurement. Floor origin (0, 0) at the bottom-right of the picture, x up the picture, y to the left: yaw -90. No boxes.",
     "width": 640,
     "height": 480,
     "fps": 25.0,
     "height_cm": 262.0,
-    "floor_width_cm": 188.2,
+    "floor_width_cm": 273.5,
     "center_floor_cm": [
       61.0,
       61.0

@@ -81,15 +81,29 @@ def funnel_half_width(m, x):
     return None
 
 
-def robot_outline(rb):
-    """The robot's outline with the nose bracket (body frame: x forward from the axle, y left), counter-clockwise.
-    The bracket (bumper_w_cm wide, bumper_len_cm from its face back to its arms' ends) is wider than the robot;
-    the outline must stay convex, so behind the arms it narrows in a straight line to the robot's rear corners
-    (slightly wider than the real robot there: on the safe side)."""
+def bracket_fitted(rb):
+    """Is the nose bracket on? It follows the robot's own settings, as the real robots are set up: bumper_cm > 0
+    (the bracket's stick-out) or sw_on (its switches, which only exist on the bracket). Firmware default: both 0,
+    no bracket (Oct 2026: the switches have not arrived, the robots run bare)."""
+    P = getattr(rb, "params", None) or {}
+    return P.get("bumper_cm", 0.0) > 0 or P.get("sw_on", 0.0) > 0
+
+
+def robot_outline(rb, bracket=None):
+    """The robot's outline (body frame: x forward from the axle, y left), counter-clockwise. With the nose bracket
+    (bracket_fitted): its face bump_ahead_cm ahead of the axle; the bracket (bumper_w_cm wide, bumper_len_cm from
+    its face back to its arms' ends) is wider than the robot; the outline must stay convex, so behind the arms it
+    narrows in a straight line to the robot's rear corners (slightly wider than the real robot there: on the safe
+    side). Without it: the bare 9.5 x 9.5 cm body (front face length/2 ahead of the body centre)."""
     m, dm = rb.m, rb.cfg.dock
+    if bracket is None:
+        bracket = bracket_fitted(rb)
     hw = m.width_cm / 2.0
-    bw = max(hw, dm.bumper_w_cm / 2.0)
     rear = m.length_cm / 2.0 - m.axle_to_center_cm
+    if not bracket:
+        fa, ch = m.length_cm / 2.0 + m.axle_to_center_cm, dm.chamfer_cm
+        return [(-rear, -hw), (fa - ch, -hw), (fa, -hw + ch), (fa, hw - ch), (fa - ch, hw), (-rear, hw)]
+    bw = max(hw, dm.bumper_w_cm / 2.0)
     fa, ch = dm.bump_ahead_cm, dm.chamfer_cm
     xa = max(-rear + 0.1, fa - dm.bumper_len_cm)          # the arms' back end
     if bw <= hw + 1e-9:
@@ -165,6 +179,7 @@ def resolve_contacts(rb):
     solids = rb.solids
     if not solids:
         return False
+    rb.contact_refresh()
     reach = rb.contact_reach
     near = []
     for poly, (cx, cy, r), bb, ed in solids:
@@ -223,10 +238,7 @@ class DockMixin:
         for d in self.dock_list:
             polys += dock_solids(d, dm)
         self.dock_polys = polys
-        self.contact_outline = robot_outline(self)
-        self.contact_pts = body_points(self)
-        self.contact_out_edges = edges_of(self.contact_outline)
-        self.contact_reach = max(math.hypot(x, y) for x, y in self.contact_outline) + 0.5
+        self.contact_refresh()
         self._solids_from = None
         self.update_solids()
         # switches.h
@@ -241,6 +253,17 @@ class DockMixin:
         self.edge_line_off = False
         self.docks_done = []                     # simulation only: true pose at every docking / touch
         self.touches = []
+
+    def contact_refresh(self):
+        """(Re)build the contact body when the bracket setting changed (`set bumper_cm` / `set sw_on`)."""
+        b = bracket_fitted(self)
+        if getattr(self, "_contact_bracket", None) == b:
+            return
+        self._contact_bracket = b
+        self.contact_outline = robot_outline(self, b)
+        self.contact_pts = body_points(self)
+        self.contact_out_edges = edges_of(self.contact_outline)
+        self.contact_reach = max(math.hypot(x, y) for x, y in self.contact_outline) + 0.5
 
     def redraw_seat(self):
         dm = self.cfg.dock

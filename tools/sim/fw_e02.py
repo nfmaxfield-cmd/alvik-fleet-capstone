@@ -1,4 +1,4 @@
-"""E02 in the simulator: a copy of firmware/home_lab/e02.h (bump detection without switches, push-to-square,
+"""E02 in the simulator: a copy of firmware/home_lab/e02.h (2026-10-21b) (bump detection without switches, push-to-square,
 `run find`, `run e02`, camera fixes, camera-steered legs), step for step, mixed into robot.Robot.
 
 What the simulator adds for it (robot.py, config.py): the boards are solids for the body (dock.contact_boards,
@@ -74,6 +74,7 @@ class E02Mixin:
         self.e_last_dist = 0.0
         self.e_last_move = 0
         self.e_since_set = 0.0                 # wheel travel since the pose was last set (fix, find)
+        self.e_back_since = 0.0                # backwards go legs since the last camera fix or find (blind: capped)
         self.e_fixes_used = self.e_fixes_rejected = 0
         self.e_path = []                       # [(ds, rel)] between the two bumps of a find
         self.e_path_on = False
@@ -166,6 +167,10 @@ class E02Mixin:
 
     def to_go(self, b):
         return b.c - self.face_cm() - (b.nx * self.pose.x + b.ny * self.pose.y)
+
+    def e_edge_off(self):
+        """e02.h edgeOff(): the edge guard must be on before anything here drives. '' = fine."""
+        return "" if self.P("safe_edge") > 0 else "edge guard off (safe_edge 0): set safe_edge 1 (or 2 / 3) first"
 
     # ------------------------------------------------------------------ records
     def bump_header(self):
@@ -391,6 +396,13 @@ class E02Mixin:
         f.known_before = 1 if known else 0
         bx, by = self.e_board(True), self.e_board(False)
         face, back = self.face_cm(), P("e02_find_back_cm")
+        if self.e_edge_off():
+            f.why = self.e_edge_off()
+            self.fail = f.why
+            self.find_record(f, 0)
+            self.e_finds.append((f, (self.x, self.y, self.th)))
+            self.send("M,%s find refused: %s" % (self.name, f.why))
+            return
         self.e_begin()
         self.e_finding = True
         if not known:
@@ -456,6 +468,7 @@ class E02Mixin:
             off2 = by.c - face - (by.nx * px + by.ny * py)
             pose.set(px + off2 * by.nx, py + off2 * by.ny, by.toward, 0.05, 0.3)
             self.e_since_set = 0.0
+            self.e_back_since = 0.0
             f.rx, f.ry, f.rth = pose.x, pose.y, pose.th()
             self.e_reset_true = (self.x, self.y, self.th)          # simulation only: true pose at the reset
             self.step = 8
@@ -573,6 +586,14 @@ class E02Mixin:
             return True
         return self.e_leg_to(wx, wy)
 
+    def e_route_corrections(self):
+        """e02.h routeCorrections(): the condition's corrections from the route's start on (-999 = keep)."""
+        for src, dst in (("e02_route_gyro_scale", "gyro_scale"), ("e02_route_gyro_drift_dps", "gyro_drift_dps"),
+                         ("e02_route_wheel_scale", "wheel_scale")):
+            v = self.P(src)
+            if v != UNSET:
+                self.params[dst] = v
+
     def e_turn_to(self, h):
         self.front_limit = 0.0
         return self.turn_to_floor(h) and self.e_leg_pause()
@@ -581,10 +602,10 @@ class E02Mixin:
     def leg_header(self):
         self.send("H,LEG,run,id,kind,value,result,ms,x_cm,y_cm,th_deg,info")
 
-    def leg_record(self, lid, kind, arg, state, info):
+    def leg_record(self, lid, kind, value, result, info):
         p = self.pose
         self.send("D,LEG,%s,%d,%s,%.2f,%s,%d,%.2f,%.2f,%.2f,%s" % (
-            self.run_id if (self.e_active and not self.e_idle_leg) else "-", lid, {"g": "go", "t": "turn"}.get(kind, "mark"), arg, state,
+            self.run_id if (self.e_active and not self.e_idle_leg) else "-", lid, {"g": "go", "t": "turn"}.get(kind, "mark"), value, result,
             self.millis(), p.x, p.y, p.th(), info))
 
     def e_leg_command(self, verb, rest, running):
@@ -623,6 +644,12 @@ class E02Mixin:
         if kind == "t" and abs(arg) > 180.0:
             self.leg_record(lid, kind, arg, "refused", "turns are -180 to 180 deg")
             return
+        if kind == "g" and self.e_edge_off():
+            self.leg_record(lid, kind, arg, "refused", self.e_edge_off())
+            return
+        if kind == "g" and arg < 0 and self.e_back_since - arg > self.P("e02_back_max_cm") + 0.05:
+            self.leg_record(lid, kind, arg, "refused", "backing blind: more than e02_back_max_cm since the last camera fix")
+            return
         if lid > 0 and lid <= self.e_last_id:
             self.leg_record(lid, kind, arg, "dup", "")
             return
@@ -644,8 +671,11 @@ class E02Mixin:
         p = self.pose
         if kind == "g":
             self.front_end_base = self.P("safe_front_cm") if arg > 0 else -1.0
-            self.front_limit = self.P("safe_front_cm") if arg > 0 else 0.0
+            self.front_limit = min(self.P("safe_front_cm"), arg + self.P("front_end_cm")) if arg > 0 else 0.0
+            d0 = p.dist
             ok = self.e_straight(p.th(), arg, self.P("e02_cms"))
+            if arg < 0:
+                self.e_back_since += abs(p.dist - d0)
             self.front_end_base = -1.0
             self.front_limit = 0.0
             return ok, ""
@@ -675,6 +705,7 @@ class E02Mixin:
         self.e_cap = abs(arg) + 10.0
         self.edge_begin()
         self.leg_record(lid, kind, arg, "started", "")
+        self.front_limit = 0.0          # standing still: nothing to stop; the leg sets its own front check
         good = self.wait_ms(self.P("edge_learn_ms") + 50)
         info = ""
         if good:
@@ -709,7 +740,7 @@ class E02Mixin:
                 return 0.0
         x, y = num(tok[0]), num(tok[1])
         th = float("nan") if tok[2] == "-" else num(tok[2])
-        k = 1.0 if (not running or self.e_mode1) else max(0.0, min(1.0, self.P("e02_fix_k")))   # idle, K: replace
+        k = 1.0 if (not running or self.e_mode1 or self.e_idle_leg) else max(0.0, min(1.0, self.P("e02_fix_k")))
         bx, by, bth = p.x, p.y, (p.th() if p.known else float("nan"))
         if running and not self.e_active:
             result = "rejected:another run is going"
@@ -733,6 +764,7 @@ class E02Mixin:
             self.e_fixes_used += 1
             if k >= 1.0 or result == "set":
                 self.e_since_set = 0.0
+                self.e_back_since = 0.0
         self.send("D,FIX,%s,%d,%s,%.2f,%.2f,%.2f,%.2f,%s,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f" % (
             self.run_id if running else "-", self.millis(), tok[3], x, y, th, k, result, bx, by, bth, p.x, p.y,
             p.th() if p.known else float("nan")))
@@ -746,6 +778,10 @@ class E02Mixin:
         self.e_start, self.e_far, self.e_end = Mark(), Mark(), Mark()
         if route < 1 or route > 3:
             self.fail = "e02_route must be 1, 2 or 3"
+            self.e02_record(route, mode, "failed:" + self.fail, 0)
+            return
+        if self.e_edge_off():
+            self.fail = self.e_edge_off()
             self.e02_record(route, mode, "failed:" + self.fail, 0)
             return
         if not p.known:
@@ -774,6 +810,7 @@ class E02Mixin:
                     hs = wrap180(self.e_board(False).toward + 180.0)
                 if not self.e_turn_to(hs):
                     break
+                self.e_route_corrections()
                 self.e_cap = self.e_travel + self.e_route_len(route) + P("e02_margin_cm")
                 self.e_mark(self.e_start)
                 w, far = self.e_waypoints(route)

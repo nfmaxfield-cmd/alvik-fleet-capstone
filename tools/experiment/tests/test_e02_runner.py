@@ -55,6 +55,19 @@ def test_blocks_for_two_hours():
     assert PL.blocks_for(0.1, 110.0) == 1
 
 
+def test_time_plan_keeps_about_two_hours_and_lists_runs_per_condition():
+    nb = PL.blocks_for_time(2.0)                                  # 70 s run + 30 s find, 10 min setup
+    s = PL.make_schedule(["Left", "Center", "Right"], nb, seed=1)
+    total = PL.SETUP_S + len(s) * (PL.RUN_S + PL.FIND_S)
+    assert 1.75 * 3600 <= total <= 2.0 * 3600 + 300
+    lines = PL.plan_words(s)
+    assert lines[0].startswith("Plan: %d runs" % len(s))
+    for c in PL.CONDITIONS:
+        n = sum(1 for r in s if r["cond"] == c)
+        assert any(ln.strip().startswith(c + " ") and "%d runs" % n in ln for ln in lines), (c, lines)
+    assert "about 2:0" in lines[-1] or "about 1:5" in lines[-1]
+
+
 def test_next_run_waits_for_a_fit_then_falls_back_to_priors():
     s = [dict(order=1, block=1, robot="Left", cond="C", route=1, status="pending"),
          dict(order=2, block=1, robot="Right", cond="U", route=1, status="pending")]
@@ -63,6 +76,9 @@ def test_next_run_waits_for_a_fit_then_falls_back_to_priors():
     assert PL.next_run(s, lambda r: False)["order"] == 1            # only C left: runs (on priors)
     assert PL.next_run(s, lambda r: True)["order"] == 1
     assert PL.next_run(s, lambda r: True, unavailable={"Left"}) is None
+    s = [dict(order=1, block=1, robot="Left", cond="U", route=1, status="pending", find_redos=1),
+         dict(order=2, block=1, robot="Right", cond="U", route=2, status="pending")]
+    assert PL.next_run(s, lambda r: True)["order"] == 2            # a run whose find failed waits to the block's end
 
 
 # =============================================================================== geometry
@@ -73,15 +89,24 @@ def test_routes_and_parks_stay_on_the_board_for_every_board_corner(xs, ys):
         ok, open_room, board_room = bd.route_fits(r)
         assert ok and open_room >= 15, (xs, ys, r, open_room, board_room)
     sx, sy, sh = bd.nominal_start()
-    for i in range(3):
-        px, py, ph = bd.park(i)
-        assert bd.on_board(px, py, margin=10)
-        # every park spot is well clear of every route
+    fx, fy = bd.find_stage()
+    spots = [bd.park(i) for i in range(3)]
+    for i, (px, py, ph) in enumerate(spots):
+        assert bd.on_board(px, py, margin=12)
+        assert bd.on_board(*bd.stage(i), margin=12)
+        # every park spot is well clear of every route (nominal; the worst-case drift is checked in the simulator)
         for r in PL.ROUTES:
             out, back = bd.route_floor(r, (sx, sy))
             assert PL.dist_to_path((px, py), [(sx, sy)] + out + back) > 25, (xs, ys, i, r)
-        # parked robots face the x-board
-        assert abs(PL.wrap180(ph - math.degrees(math.atan2(-bd.uy, 0)))) < 1e-6
+        # parked robots face the find's staging point (their next drive), so they never face an edge
+        assert abs(PL.wrap180(ph - math.degrees(math.atan2(fy - py, fx - px)))) < 1e-6
+        # the other robots' drives from their spots to the find (and the parking drive back) keep clear of it
+        for j in range(3):
+            if j != i:
+                qx, qy, _ = spots[j]
+                path = [(qx, qy), bd.stage(j), (fx, fy)]
+                assert PL.dist_to_path((px, py), path) > PL.PARK_CLEAR_CM, (xs, ys, i, j)
+                assert PL.dist_to_path((px, py), [(sx, sy), bd.stage(j), (qx, qy)]) > PL.PARK_CLEAR_CM
 
 
 def test_far_corner_layout_start_spot_and_routes():
@@ -89,13 +114,14 @@ def test_far_corner_layout_start_spot_and_routes():
     bd = PL.Board(xboard_side=1, yboard_side=1, xboard_cm=121.3, yboard_cm=121.55)
     sx, sy, sh = bd.nominal_start()
     assert sh == 180.0 and bd.turn_sign == 1.0 and bd.firmware_sides() == (1, 1)
-    assert sx == pytest.approx(121.55 - 4.75 - PL.TURN_ROOM_CM) and sy == pytest.approx(121.3 - 4.75 - 8.0)
+    assert sx == pytest.approx(121.55 - PL.START_CLEAR_CM) and sy == pytest.approx(121.3 - PL.START_CLEAR_CM)
     assert bd.route_heading(1) == pytest.approx(-135.0)  # the straight runs along the diagonal
     out, back = bd.route_floor(1, (sx, sy))
     assert min(out[-1]) - 4.75 > 15.0                    # its far front stays 15+ cm off both open edges
     assert all(bd.route_fits(r)[0] for r in PL.ROUTES)
-    px, py, ph = bd.park(0)
-    assert py < 25 and ph == 90.0                        # parked along the open y = 0 edge, facing the x-board
+    for i in range(3):                                    # parked off the diagonal, never near its far end
+        px, py, ph = bd.park(i)
+        assert PL.dist_to_path((px, py), [(sx, sy), out[-1]]) > 35
 
 
 def test_route_far_points():
@@ -169,17 +195,167 @@ def test_heading_from_track():
     assert ST.heading_from_track(pts[:5]) is None                # too short
 
 
-def test_lost_and_stuck_decisions():
-    assert ST.judge_run(3.0, 2.0)[0] == "ok"
-    v, why = ST.judge_run(18.0, 2.0)
-    assert v == "lost" and "far point" in why
+def test_recovery_and_stuck_decisions():
+    assert ST.judge_run(3.0, 2.0)[0] == ""
+    assert ST.judge_run(18.0, 22.0)[0] == ""              # a U run drifting ~20 cm by design: no recovery, no flag
+    v, why = ST.judge_run(30.0, 45.0)
+    assert v == "far_off" and "45 cm" in why
     assert ST.judge_run(2.0, 2.0, seen=False)[0] == "unseen"
     assert ST.judge_run(2.0, 2.0, on_board=False)[0] == "off_board"
+    assert ST.judge_run(5.0, 9.0, runend="stopped:obstacle ahead")[0] == "safety_stop"
+    assert ST.judge_run(5.0, 9.0, runend="limited:plywood edge")[0] == "safety_stop"
+    assert ST.judge_run(5.0, 9.0, runend="watchdog stop")[0] == "safety_stop"
     assert ST.leg_stuck(("go", 10.0), (0, 0), (1.0, 0))
     assert not ST.leg_stuck(("go", 10.0), (0, 0), (9.0, 0))
     assert not ST.leg_stuck(("turn", 90.0), (0, 0), (0, 0))
     lines = ST.nick_instructions("Center", "it is stuck", "near its spot", "the board")
     assert lines[0].startswith("Center needs your help") and any("press Enter" in ln for ln in lines)
+
+
+def _track(x0, y0, vx, vy, n=10, dt=0.05):
+    return [(100.0 + k * dt, x0 + vx * k * dt, y0 + vy * k * dt) for k in range(n)]
+
+
+def test_camera_watchdog_stops_only_what_heads_for_a_hazard():
+    bd = PL.Board(xboard_side=1, yboard_side=1, xboard_cm=121.3, yboard_cm=121.55)   # open edges x = 0, y = 0
+    assert ST.hazard(_track(40, 60, -8, 0), bd, {}) is None                           # far from the edge
+    assert "open edge" in ST.hazard(_track(13, 60, -8, 0), bd, {})                    # 13 cm off, closing at 8 cm/s
+    assert ST.hazard(_track(9, 60, 8, 0), bd, {}) is None                             # inside the zone, leaving it
+    assert ST.hazard(_track(9, 60, 0, 0), bd, {}) is None                             # standing still
+    assert "past the open edge" in ST.hazard(_track(-2, 60, -5, 0), bd, {})
+    assert "backing" not in (ST.hazard(_track(13, 60, -8, 0), bd, {}) or "")
+    parked = {"Right": (60.0, 40.0)}
+    assert "Right" in ST.hazard(_track(60, 58, 0, -8), bd, parked)                   # heading for a parked robot
+    assert ST.hazard(_track(60, 52, 0, 8), bd, parked) is None                        # driving away from it
+
+
+def test_a_robot_left_near_an_open_edge_is_first_moved_straight_in():
+    bd = PL.Board(xboard_side=1, yboard_side=1, xboard_cm=121.3, yboard_cm=121.55)   # open edges x = 0, y = 0
+    assert bd.escape_point(60, 60) is None
+    assert bd.escape_point(11, 45) == pytest.approx((28.0, 45.0))
+    assert bd.escape_point(50, 6) == pytest.approx((50.0, 28.0))
+
+
+def test_kc_fixes_only_from_pictures_after_the_stop():
+    import e02 as E
+    moving = [(k * 0.04, 10 + k * 0.4, 20.0) for k in range(50)]
+    assert E.kc_fix_from(moving) is None
+    stop_t = moving[-1][0]
+    still = moving + [(stop_t + 0.04 * (k + 1), moving[-1][1] + 0.05 * (k % 2), 20.0) for k in range(5)]
+    assert E.kc_fix_from(still) is None                                               # 0.2 s still: not yet
+    still += [(still[-1][0] + 0.04 * (k + 1), moving[-1][1], 20.0) for k in range(15)]
+    x, y, t_pic, t_stop, seg = E.kc_fix_from(still)
+    assert x == pytest.approx(moving[-1][1], abs=0.1) and t_stop == pytest.approx(stop_t, abs=0.1)
+    assert t_stop + 0.1 >= stop_t                          # only pictures taken after it really stopped
+    assert t_pic == still[-1][0] and len(seg) >= 10
+
+
+def test_runner_safety_settings_go_with_every_find_and_route():
+    import e02 as E
+    assert ("safe_edge", 1.0) in E.SAFETY_SETTINGS and ("bumper_cm", 0.0) in E.SAFETY_SETTINGS
+    r = E.Runner.__new__(E.Runner)
+    r.board = PL.Board(xboard_side=1, yboard_side=1)
+    cmds = r.board_params()
+    for c in E.SAFETY_CMDS:
+        assert c in cmds
+    assert E.EXPECTED_FW == "2026-10-21b"
+
+
+def test_default_floor_calibration_is_roam1s_and_lines_up_with_its_corners():
+    import e02 as E
+    import e02_camera as CAM
+    cam = CAM.load_camera(E.DEFAULT_CALIB)
+    corners = {(0.0, 0.0): (387.7, 337.6), (122.15, 0.0): (430.4, 62.0), (122.15, 121.9): (141.1, 6.9),
+               (0.0, 121.9): (111.9, 298.9)}
+    for (x, y), (u, v) in corners.items():
+        pu, pv = cam.project((x, y, 0.0))
+        assert math.hypot(pu - u, pv - v) < 4.0, ((x, y), (pu, pv))
+    # 2.34 px/cm across the board's middle, as measured on the footage
+    a, b = cam.project((61.0, 40.0, 0.0)), cam.project((61.0, 80.0, 0.0))
+    assert 2.15 < math.hypot(a[0] - b[0], a[1] - b[1]) / 40.0 < 2.55
+
+
+def _sim_robot(seed, g_under, bias, bd):
+    import config
+    import robot
+    cfg = config.load_config()
+    cfg.dock.contact_boards = True
+    cfg.dock.wall_stall_frac = 0.15
+    cfg.session.board_cm = [bd.x0, bd.y0, bd.x1, bd.y1]
+    cfg.session.open_edges = ["x0", "y0"]
+    r = robot.Robot("Left", cfg, random.Random(seed), config.firmware_params(), "test", 0.0, 0x2000 + seed, "ip")
+    xb, yb = bd.xboard_cm, bd.yboard_cm
+    def ccw(poly):          # the contact model wants the corners counter-clockwise
+        a = sum(p[0] * q[1] - q[0] * p[1] for p, q in zip(poly, poly[1:] + poly[:1]))
+        return poly if a > 0 else poly[::-1]
+    r.world_polys = [ccw([[bd.x0 - 5, xb], [bd.x1 + 5, xb], [bd.x1 + 5, xb + 3], [bd.x0 - 5, xb + 3]]),
+                     ccw([[yb, bd.y0 - 5], [yb + 3, bd.y0 - 5], [yb + 3, bd.y1 + 5], [yb, bd.y1 + 5]])]
+    r.update_solids()
+    r.idle_until(10.0)
+    r.fw_yaw_sign = 1
+    r.gyro_scale = g_under
+    r.gyro_bias = bias
+    r.params.update(start_nudge_cm=0, settle_start_ms=200, settle_end_ms=200)
+    return r
+
+
+@pytest.mark.parametrize("g_under,bias", [(-0.085, 0.3), (-0.085, -0.3), (-0.055, 0.3), (-0.055, -0.3), (-0.07, 0.0)])
+def test_worst_case_uncalibrated_routes_never_reach_a_parked_robot(g_under, bias):
+    """The simulator's robot (firmware e02.h copy) as in a U run of the session: from a park spot, `run find` on the
+    prior corrections, then `run e02` (transit and start turn on those, the route itself UNCALIBRATED: gyro 5.5-8.5%
+    short, creep +-0.3 deg/s, factory values from the start mark), Nick's layout. Its true path keeps PARK_CLEAR_CM
+    from every other parked robot's centre and WATCH_EDGE_CM + 2 from the open edges, and every route finishes
+    (no board, front stop or edge cuts it short)."""
+    import e02 as E
+    bd = PL.Board(xboard_side=1, yboard_side=1, xboard_cm=121.3, yboard_cm=121.55)
+    worst, worst_edge = 99.0, 99.0
+    for route in PL.ROUTES:
+        i = route % 3
+        others = [bd.park(j)[:2] for j in range(3) if j != i]
+        r = _sim_robot(31 + route, g_under, bias, bd)
+        for c in E.Runner.board_params(type("R", (), {"board": bd})()):
+            k, v = c.split()[1:]
+            r.params[k] = float(v)
+        r.params.update(e02_route=route, e02_mode=0, e02_route_deg=bd.route_heading(route), gyro_scale=1.075,
+                        gyro_drift_dps=0.0, wheel_scale=0.979, e02_route_gyro_scale=1.0, e02_route_gyro_drift_dps=0.0,
+                        e02_route_wheel_scale=1.0)
+        px, py, ph = bd.park(i)
+        r.x, r.y, r.th = px, py, math.radians(ph)
+        r.pose.set(px, py, ph, 0.5, 1.0)
+        r.traj.clear()
+        r.run_experiment("find")
+        f = [ln for _, ln in r.lines if ln.startswith("D,FIND,")][-1]
+        assert ",ok," in f, f
+        r.run_experiment("e02")
+        rec = [ln for _, ln in r.lines if ln.startswith("D,E02,")][-1]
+        assert ",done," in rec, (route, rec)
+        for _, x, y, th, _l in r.traj:
+            worst_edge = min(worst_edge, min(abs(x - v) if a == "x" else abs(y - v) for a, v in bd.open_edges()))
+            for qx, qy in others:
+                worst = min(worst, math.hypot(x - qx, y - qy))
+    assert worst > PL.PARK_CLEAR_CM, worst
+    assert worst_edge > PL.WATCH_EDGE_CM + 2.0, worst_edge
+
+
+def test_finds_from_every_park_spot_pass_clear_of_the_other_parked_robots():
+    bd = PL.Board(xboard_side=1, yboard_side=1, xboard_cm=121.3, yboard_cm=121.55)
+    import e02 as E
+    for i in range(3):
+        r = _sim_robot(41 + i, -0.085, 0.3, bd)
+        for c in E.Runner.board_params(type("R", (), {"board": bd})()):
+            k, v = c.split()[1:]
+            r.params[k] = float(v)
+        px, py, ph = bd.park(i)
+        r.x, r.y, r.th = px, py, math.radians(ph)
+        r.pose.set(px, py, ph, 0.5, 1.0)
+        r.traj.clear()
+        r.run_experiment("find")
+        f = [ln for _, ln in r.lines if ln.startswith("D,FIND,")][-1]
+        assert ",ok," in f, f
+        for j in range(3):
+            if j != i:
+                qx, qy, _ = bd.park(j)
+                assert min(math.hypot(x - qx, y - qy) for _, x, y, _t, _l in r.traj) > PL.PARK_CLEAR_CM, (i, j)
 
 
 # =============================================================================== self-calibration
@@ -202,6 +378,14 @@ def test_fit_recovers_gyro_scale_drift_and_wheels(g, b, w):
     assert v["gyro_scale"] == pytest.approx(g, abs=0.01)
     assert v["gyro_drift_dps"] == pytest.approx(g * b, abs=0.15)
     assert v["wheel_scale"] == pytest.approx(w, abs=0.006)
+
+
+def test_fit_drift_check_can_refuse():
+    """The 'not pinned down' check on the drift must be tighter than the drift's prior SD, or it never refuses."""
+    assert FIT.MAX_SE["gyro_drift_dps"] < FIT.PRIOR_SD["gyro_drift_dps"]
+    obs = observations(1.075, 0.2, 0.978, routes=(2,))
+    res = FIT.fit_robot(obs[:3], prior_sd=dict(gyro_drift_dps=2.0))      # 2 turns, no useful prior: not pinned
+    assert not res["gyro_ok"] and "not pinned down" in " ".join(res["reasons"])
 
 
 def test_fit_ignores_a_bad_stretch():

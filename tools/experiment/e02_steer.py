@@ -13,6 +13,8 @@ from how it moved. So:
 """
 import math
 
+import numpy as np
+
 MIN_HEADING_CM = 3.0     # a go leg at least this long gives a measured heading
 MAX_LEG_CM = 25.0        # longest single go leg
 SHORT_LEG_CM = 10.0      # longest go leg right after a turn (heading not yet measured)
@@ -24,7 +26,8 @@ SMALL_TURN_DEG = 15.0    # a turn up to this keeps the heading "measured" (the g
 REVERSE_CM = 5.0         # a target behind the robot and this close: back up instead of turning round
 PROBE_CM = 4.0           # forward roll that measures the heading before the final turn
 MIN_TURN_DEG = 1.0       # turns smaller than this are not sent (the robot can't do them well)
-LOST_CM = 15.0           # camera end / far point this far from where it should be: flagged, driven back
+RECOVER_CM = 40.0        # camera end this far from its start spot: too far off to trust the drive back (needs recovery)
+LOST_CM = RECOVER_CM     # old name (2026-10-21a flagged runs "lost" at 15 cm: most U runs, by design)
 STUCK_FRACTION = 0.3     # a leg that moved less than this share of what was asked: stuck
 
 
@@ -180,19 +183,69 @@ def leg_stuck(cmd, p0, p1):
     return moved < STUCK_FRACTION * abs(cmd[1])
 
 
-def judge_run(far_err_cm, end_err_cm, on_board=True, seen=True, lost_cm=LOST_CM):
-    """What happened to a run, from the camera: 'ok', 'lost' (far or end more than lost_cm off: flagged
-    as an outlier, driven back by camera, the session carries on), 'unseen' (the camera lost the robot),
-    'off_board'. Returns (verdict, plain-words reason)."""
+SAFETY_STOPS = ("obstacle", "plywood edge", "watchdog", "drove further", "stop command")
+
+
+def judge_run(far_err_cm, end_err_cm, on_board=True, seen=True, recover_cm=RECOVER_CM, runend="done", lost_cm=None):
+    """Did the run need a RECOVERY (not the same as an outlier: outliers are decided statistically within a
+    condition by the analysis; every run is parked by camera afterwards anyway, which flags nothing)?
+    Recovery = the robot was too far off to safely carry on by itself, or headed for a board, an open edge or a
+    parked robot: 'unseen' (the camera lost it), 'off_board', 'safety_stop' (a front stop, the edge guard, the
+    camera watchdog or the travel cap ended the route early: the run did not finish), 'far_off' (it ended more
+    than recover_cm from its start spot). Returns (recovery or '', plain words)."""
+    if lost_cm is not None:
+        recover_cm = lost_cm
     if not seen:
         return "unseen", "the camera lost sight of it"
     if not on_board:
         return "off_board", "the camera sees it off the board"
-    worst = max(v for v in (far_err_cm, end_err_cm, 0.0) if v is not None)
-    if worst > lost_cm:
-        which = "far point" if (far_err_cm or 0) >= (end_err_cm or 0) else "end"
-        return "lost", "its %s was %.0f cm from where it should be (more than %.0f cm)" % (which, worst, lost_cm)
-    return "ok", ""
+    low = (runend or "done").lower()
+    if low != "done" and any(w in low for w in SAFETY_STOPS):
+        return "safety_stop", "a safety stop ended its route early (%s)" % runend
+    if end_err_cm is not None and end_err_cm > recover_cm:
+        return "far_off", "it ended %.0f cm from its start spot (more than %.0f cm)" % (end_err_cm, recover_cm)
+    return "", ""
+
+
+def hazard(samples, board, parked, horizon_s=0.3, edge_cm=None, robot_cm=None):
+    """Camera watchdog: is the moving robot (samples [(t, x, y), ...], newest last) at, or within horizon_s of,
+    an open edge (centre nearer than edge_cm) or a parked robot (centre nearer than robot_cm), while moving
+    towards it? parked: {name: (x, y)} (not the mover). Moving away from a hazard is always allowed (so it can be
+    brought back). Returns plain words or None."""
+    import e02_plan as PL
+    edge_cm = PL.WATCH_EDGE_CM if edge_cm is None else edge_cm
+    robot_cm = PL.WATCH_ROBOT_CM if robot_cm is None else robot_cm
+    if not samples:
+        return None
+    win = [q for q in samples if q[0] >= samples[-1][0] - 0.5]
+    if len(win) < 6 or win[-1][0] - win[0][0] < 0.3:
+        return None
+    # medians of the first and last few pictures: one stray camera position must not look like a dash
+    k = max(2, len(win) // 4)
+    t0, t1 = float(np.median([q[0] for q in win[:k]])), float(np.median([q[0] for q in win[-k:]]))
+    x0, y0 = float(np.median([q[1] for q in win[:k]])), float(np.median([q[2] for q in win[:k]]))
+    x, y = float(np.median([q[1] for q in win[-k:]])), float(np.median([q[2] for q in win[-k:]]))
+    vx, vy = (x - x0) / max(t1 - t0, 1e-3), (y - y0) / max(t1 - t0, 1e-3)
+    sp = math.hypot(vx, vy)
+    if sp > 30.0:                                # faster than any robot drives: a tracking jump, not a robot
+        return None
+    if sp < 1.0:                                 # standing still (camera noise): nothing is closing in
+        vx = vy = 0.0
+    px, py = x + vx * horizon_s, y + vy * horizon_s
+    for a, v in board.open_edges():
+        lo = min(board.x0, board.x1) if a == "x" else min(board.y0, board.y1)
+        sgn = 1.0 if abs(v - lo) < 1e-6 else -1.0            # inward distance: + on the board, - past the edge
+        d0 = sgn * ((x if a == "x" else y) - v)
+        d1 = sgn * ((px if a == "x" else py) - v)
+        if d1 < edge_cm and d1 < d0 - 0.5:          # closing at 1.7+ cm/s, not just drifting along it
+            return ("%.0f cm from the open edge and heading for it" % d0) if d0 >= 0 else \
+                ("%.0f cm past the open edge and still going" % -d0)
+    for n, (qx, qy) in (parked or {}).items():
+        d0 = math.hypot(x - qx, y - qy)
+        d1 = math.hypot(px - qx, py - qy)
+        if d1 < robot_cm and d1 < d0 - 0.5:
+            return "%.0f cm from parked %s and heading for it" % (d0, n)
+    return None
 
 
 def nick_instructions(robot, problem, where_words, facing_words):

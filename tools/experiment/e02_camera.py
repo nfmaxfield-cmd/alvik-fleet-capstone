@@ -199,6 +199,38 @@ def draw_check(img, cam, path, board=None, corners=None, robots=None):
     return path
 
 
+_SHOWN = {"win": None}
+
+
+def show_picture(path, title):
+    """Put a picture on screen for Nick, without blocking: Windows opens it in the Photos viewer; elsewhere an
+    OpenCV window. Returns False if there is no screen to show it on (the caller then names the file)."""
+    try:
+        if sys.platform.startswith("win"):
+            os.startfile(path)            # noqa: the default picture viewer
+            return True
+        img = cv2.imread(path)
+        if img is None or not (os.environ.get("DISPLAY") or sys.platform == "darwin"):
+            return False
+        cv2.namedWindow(title, cv2.WINDOW_NORMAL)
+        cv2.imshow(title, img)
+        cv2.waitKey(300)
+        _SHOWN["win"] = title
+        return True
+    except Exception:
+        return False
+
+
+def close_picture():
+    if _SHOWN["win"]:
+        try:
+            cv2.destroyWindow(_SHOWN["win"])
+            cv2.waitKey(1)
+        except Exception:
+            pass
+        _SHOWN["win"] = None
+
+
 def picture_side(cam, x, y):
     """Which side of the picture a floor point is nearest: 'top', 'bottom', 'left', 'right'."""
     u, v = cam.project((x, y, 0.0))

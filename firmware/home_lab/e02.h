@@ -1,4 +1,4 @@
-// E02 accuracy experiment (firmware 2026-10-21a). Plan: docs/build-plans/accuracy-experiment-E02.md.
+// E02 accuracy experiment (firmware 2026-10-21b). Plan: docs/build-plans/accuracy-experiment-E02.md.
 // Records and commands: docs/data-formats.md "E02". Simulator copy: tools/sim/fw_e02.py.
 //
 // BUMP DETECTION (no switches). The robot creeps into a board at bump_creep_cms, holding its gyro heading.
@@ -50,7 +50,10 @@
 // before every find). A robot with no pose takes the fix as it is.
 //
 // SAFETY. The edge guard (edge.h) stays on in every mode (forward driving; backing up is blind: the backward
-// moves here retrace the path just driven forward, or are at most e02_back_max_cm). A stop command always
+// moves here retrace the path just driven forward, or are at most e02_back_max_cm). Find, e02 runs and go legs
+// refuse to start while safe_edge is 0 (2026-10-21b: the guard was found off for a whole session's plan).
+// Blind backing: go legs backwards add up (backSince); more than e02_back_max_cm in all since the last camera fix
+// or find is refused, so the laptop must look (camera) and send a fix between pieces. A stop command always
 // works (every loop calls shouldAbort()). The wheels never travel more than transit + route + e02_margin_cm in
 // a run (find: 2 x e02_find_max_cm + 2 x back off + 20 cm + the staging drive + the drives towards the boards).
 #pragma once
@@ -72,6 +75,7 @@ float travelAbs = 0;          // wheel travel (forward and back) since the run s
 float lastDist = 0;
 unsigned long lastMoveMs = 0; // the wheels last turned (measured), robot ms
 float sinceSet = 0;           // wheel travel since the pose was last set (a camera fix, a find), cm
+float backSince = 0;          // backwards go legs since the last camera fix or find, cm (blind: capped)
 int fixesUsed = 0, fixesRejected = 0;
 
 // path between the two bumps of a find: wheel steps and the gyro's heading change since square 1
@@ -161,6 +165,11 @@ Board board(bool xb) {
 
 // How far the axle still has to go along n to sit square against the board (own pose).
 float toGo(const Board& b) { return b.c - faceCm() - (b.nx * pose::x + b.ny * pose::y); }
+
+// The edge guard must be on before anything here drives (find, e02, go legs). Empty = fine.
+const char* edgeOff() {
+  return P("safe_edge") > 0 ? "" : "edge guard off (safe_edge 0): set safe_edge 1 (or 2 / 3) first";
+}
 
 // ------------------------------------------------------------------ records
 void bumpHeader() {
@@ -447,6 +456,13 @@ void runFind() {
   f.knownBefore = known ? 1 : 0;
   Board bx = board(true), by = board(false);
   float face = faceCm(), back = P("e02_find_back_cm");
+  if (edgeOff()[0]) {
+    snprintf(f.why, sizeof(f.why), "%s", edgeOff());
+    gFail = f.why;
+    findRecord(f, 0);
+    net::logf("M,%s find refused: %s", net::name, f.why);
+    return;
+  }
   begin();
   finding = true;
   if (!known) {
@@ -518,6 +534,7 @@ void runFind() {
     float off2 = by.c - face - (by.nx * px + by.ny * py);
     pose::set(px + off2 * by.nx, py + off2 * by.ny, by.toward, 0.05f, 0.3f);
     sinceSet = 0;
+    backSince = 0;
     f.rx = pose::x; f.ry = pose::y; f.rth = pose::th();
     rawlog::step = 8;
     gFrontLimitCm = 0;
@@ -619,6 +636,21 @@ bool turnTo(float h) {
   return turnToFloor(h) && legPause();
 }
 
+// The condition's corrections for the route itself (2026-10-21b): the laptop runs the find, the transit to the start
+// spot and the turn to the start heading on its best corrections, and asks for the condition's (U: 1, 0, 1) from the
+// route's start on, so an uncalibrated start turn does not aim the whole route off (what the camera measures starts
+// at the start mark). The heading does not jump when gyro_scale changes (motion.h).
+void routeCorrections() {
+  static const char* names[3][2] = {{"e02_route_gyro_scale", "gyro_scale"}, {"e02_route_gyro_drift_dps", "gyro_drift_dps"},
+                                    {"e02_route_wheel_scale", "wheel_scale"}};
+  for (int k = 0; k < 3; k++) {
+    float v = P(names[k][0]);
+    if (v == UNSET) continue;
+    Param* p = findParam(names[k][1]);
+    if (p) p->value = v;
+  }
+}
+
 // ------------------------------------------------------------------ camera-steered legs (mode 1)
 struct Leg { char kind; float arg; long id; };   // g go cm, t turn deg, m mark (0 start, 1 far, 2 end)
 const int NQ = 4;
@@ -639,9 +671,10 @@ void legHeader() { net::sendLine("H,LEG,run,id,kind,value,result,ms,x_cm,y_cm,th
 
 const char* kindName(char k) { return k == 'g' ? "go" : k == 't' ? "turn" : "mark"; }
 
-void legRecord(long id, char kind, float arg, const char* state, const char* info) {
-  net::logf("D,LEG,%s,%ld,%s,%.2f,%s,%lu,%.2f,%.2f,%.2f,%s", active && !idleLeg ? gRunId.c_str() : "-", id, kindName(kind), arg,
-            state, millis(), pose::x, pose::y, pose::th(), info);
+// columns as legHeader(): value = cm / deg / mark number, result = queued, started, done, failed, refused, dup
+void legRecord(long id, char kind, float value, const char* result, const char* info) {
+  net::logf("D,LEG,%s,%ld,%s,%.2f,%s,%lu,%.2f,%.2f,%.2f,%s", active && !idleLeg ? gRunId.c_str() : "-", id, kindName(kind), value,
+            result, millis(), pose::x, pose::y, pose::th(), info);
 }
 
 // go <cm> [id] | turn <deg> [id] | mark start|far|end [id]  (from handleCommand; `e02 start|far|end` = mark)
@@ -679,6 +712,11 @@ void legCommand(const String& verb, const String& rest, bool running) {
     return;
   }
   if (kind == 't' && fabsf(arg) > 180.0f) { legRecord(id, kind, arg, "refused", "turns are -180 to 180 deg"); return; }
+  if (kind == 'g' && edgeOff()[0]) { legRecord(id, kind, arg, "refused", edgeOff()); return; }
+  if (kind == 'g' && arg < 0 && backSince - arg > P("e02_back_max_cm") + 0.05f) {
+    legRecord(id, kind, arg, "refused", "backing blind: more than e02_back_max_cm since the last camera fix");
+    return;
+  }
   if (id > 0 && id <= lastId) { legRecord(id, kind, arg, "dup", ""); return; }
   if (idle) {
     if (idlePending) { legRecord(id, kind, arg, "refused", "a leg is waiting"); return; }
@@ -698,9 +736,15 @@ void legCommand(const String& verb, const String& rest, bool running) {
 bool runLeg(const Leg& L, char* info, size_t n) {
   info[0] = 0;
   if (L.kind == 'g') {
+    // forward: front stop only for what lies within the rest of the leg + front_end_cm (at most safe_front_cm),
+    // so a leg may approach a board it knows of (ending a few cm short of it) and is still stopped by anything
+    // nearer than the leg's end; backwards: no front check (blind; capped by backSince)
+    float fe = P("front_end_cm");
     gFrontEndBase = L.arg > 0 ? P("safe_front_cm") : -1;
-    gFrontLimitCm = L.arg > 0 ? P("safe_front_cm") : 0;
+    gFrontLimitCm = L.arg > 0 ? fminf(P("safe_front_cm"), L.arg + fe) : 0;
+    float d0 = pose::dist;
     bool ok = straight(pose::th(), L.arg, P("e02_cms"));
+    if (L.arg < 0) backSince += fabsf(pose::dist - d0);
     gFrontEndBase = -1;
     gFrontLimitCm = 0;
     return ok;
@@ -732,6 +776,7 @@ void idleTick() {
   travelCap = fabsf(L.arg) + 10.0f;
   edge::begin();
   legRecord(L.id, L.kind, L.arg, "started", "");
+  gFrontLimitCm = 0;     // standing still: nothing to stop (a board close in front is fine); runLeg sets the leg's own
   bool good = waitMs((unsigned long)P("edge_learn_ms") + 50);   // still: the edge guard learns the plywood
   char info[48] = "";
   if (good) good = runLeg(L, info, sizeof(info));
@@ -763,7 +808,8 @@ void fixCommand(const String& rest, bool running) {
   if (n < 4) { net::sendLine("M,usage: fix <x> <y> <heading|-> <t_wall>"); return; }
   float x = strtof(tok[0], nullptr), y = strtof(tok[1], nullptr);
   float th = strcmp(tok[2], "-") ? strtof(tok[2], nullptr) : NAN;
-  float k = !running || mode1 ? 1.0f : constrain(P("e02_fix_k"), 0.0f, 1.0f);   // idle, K (mode 1): replace; KC: blend
+  // idle (or during an idle leg), K (mode 1): replace; KC: blend
+  float k = !running || mode1 || idleLeg ? 1.0f : constrain(P("e02_fix_k"), 0.0f, 1.0f);
   float bx = pose::x, by = pose::y, bth = pose::known ? pose::th() : NAN;
   const char* result;
   if (running && !active) result = "rejected:another run is going";
@@ -779,7 +825,7 @@ void fixCommand(const String& rest, bool running) {
   }
   bool used = strncmp(result, "rejected", 8) != 0;
   if (used) fixesUsed++; else fixesRejected++;
-  if (used && (k >= 1.0f || !strcmp(result, "set"))) sinceSet = 0;   // a replacing fix: the pose is the camera's
+  if (used && (k >= 1.0f || !strcmp(result, "set"))) { sinceSet = 0; backSince = 0; }   // a replacing fix: the camera's pose
   net::logf("D,FIX,%s,%lu,%s,%.2f,%.2f,%.2f,%.2f,%s,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f", running ? gRunId.c_str() : "-",
             millis(), tok[3], x, y, th, k, result, bx, by, bth, pose::x, pose::y, pose::known ? pose::th() : NAN);
 }
@@ -792,6 +838,11 @@ void runE02() {
   mStart = Mark(); mFar = Mark(); mEnd = Mark();
   if (route < 1 || route > 3) {
     gFail = "e02_route must be 1, 2 or 3";
+    e02Record(route, mode, String("failed:") + gFail, 0);
+    return;
+  }
+  if (edgeOff()[0]) {
+    gFail = edgeOff();
     e02Record(route, mode, String("failed:") + gFail, 0);
     return;
   }
@@ -823,6 +874,7 @@ void runE02() {
       float hs = P("e02_route_deg");
       if (hs == UNSET) hs = wrap180(board(false).toward + 180.0f);   // away from the y board
       if (!turnTo(hs)) break;
+      routeCorrections();                     // the condition's corrections from here (transit: the find's)
       travelCap = travelAbs + routeLen(route) + P("e02_margin_cm");
       mark(mStart);
       Pt w[4];

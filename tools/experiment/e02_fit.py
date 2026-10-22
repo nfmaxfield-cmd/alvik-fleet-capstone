@@ -29,7 +29,10 @@ SIGMA_DEG = 1.5         # camera direction noise per stretch (assumed)
 SIGMA_CM = 0.5          # camera length noise per stretch (assumed)
 MIN_TURNS = 2           # stretches either side of a turn of 30 deg or more, at least this many
 MIN_COUNTED_CM = 40.0   # total straight driving needed for the wheel scale
-MAX_SE = dict(gyro_scale=0.03, gyro_drift_dps=0.6, wheel_scale=0.02)
+# How well a number must be pinned down before it is used. The drift's must be below its prior SD (0.5), or the
+# check could never refuse anything (2026-10-21b: it was 0.6). 0.3 is chosen: about 2 turns' worth of data;
+# with a measured drift (naming check, prior SD 0.1) the measurement itself pins it.
+MAX_SE = dict(gyro_scale=0.03, gyro_drift_dps=0.3, wheel_scale=0.02)
 MAX_RMS_DEG = 4.0
 MAX_RMS_CM = 1.5
 

@@ -33,7 +33,7 @@ then the robot's own columns:
 | edge.csv | plywood edge guard (firmware 2026-10-18b+, only with `safe_edge` on; edge.h): run,ms,event,lineL,lineC,lineR,baseL,baseC,baseR,dbot_cm,info. `event` base = the line sensors' plywood level learned at the start of the run (base* = each sensor's level; info says when a sensor on tape took the others' level), nobase = it could not be learned (info: all three on tape, or the robot moved too soon): the line cue is off for that run, trip = the guard stopped the robot (info: line sensors / bottom zone; RUNEND says limited:plywood edge, not a failure: "Run outcomes" below; in a calibration's forward roll it rolls back and ends done, limited (plywood edge)). After a trip the guard stays quiet until the wheels are still. line* and dbot_cm are the readings at that moment. Settings: safe_edge (0 off, 1 line sensors, 2 bottom zone, 3 both), edge_dir, edge_thr, edge_max, edge_n, edge_learn_ms, edge_min_rpm, edge_bot_cm, edge_bot_ms (params.h help; tools/edge_check.py recommends them from the E0c edge rows) |
 | dock.csv | home dock (firmware 2026-10-19a+, dock.h; `dock` runs and follow step K), one row per docking: see "Home dock and touch probe" below |
 | touch.csv | touch probe (2026-10-19a+; `touch` runs and follow step P), one row per touch: see "Home dock and touch probe" below |
-| bump.csv, find.csv, e02.csv, leg.csv, fix.csv | E02 accuracy experiment (firmware 2026-10-21a, e02.h): see "E02" at the end |
+| bump.csv, find.csv, e02.csv, leg.csv, fix.csv | E02 accuracy experiment (firmware 2026-10-21b, e02.h): see "E02" at the end (each record's exact header line is given there) |
 | follow.csv | `follow` runs, follow_log_hz (10) a second: run,ms,step_id,state,queued,last_done,last_failed,x_cm,y_cm,th_deg,pos_sd_cm,th_sd_deg,fixes_used,fixes_rejected,front_cm,travel_cm,quiet_ms (see "Step follower") |
 
 Also in the folder:
@@ -1149,7 +1149,7 @@ GYRO record (`run gyro`: stands still gyro_check_s, default 30 s, after the comp
 | battery | % |
 
 
-## E02 (firmware 2026-10-21a: e02.h)
+## E02 (firmware 2026-10-21b: e02.h)
 
 The accuracy experiment's robot side (plan: docs/build-plans/accuracy-experiment-E02.md, which also holds
 the contract with the laptop runner). Simulator copy: tools/sim/fw_e02.py; tests: tools/sim/tests/test_e02.py.
@@ -1177,14 +1177,16 @@ belief (wheel distance x wheel_scale, gyro heading x gyro_scale - drift): its ax
    of travel or rubs the x board (simulator: 3 of 20 such finds failed, safely). After a route without
    corrections its own pose is 10-25 cm off, so the fix matters then too.
 4. Corrections: U = `corr reset`; C / KC = `set gyro_scale v`, `set gyro_drift_dps v`, `set wheel_scale v`
-   (learnt values; they may be set between a find and a route: the heading does not jump).
+   (learnt values; they may be set between a find and a route: the heading does not jump). The E02 runner
+   (2026-10-21b) keeps its best corrections for the find and transit and sends the condition's as
+   `e02_route_*` (applied at the route's start).
 
 ### Commands
 
 | command | what it does |
 |---|---|
 | `run find` | Find itself: (pose known) drive to the staging point `e02_find_stage_cm` from both faces; face the x board, drive at `e02_cms` to `e02_find_slow_cm` short of where it believes the board is, creep at `bump_creep_cms` until a bump (at most `e02_find_slow_cm` + `e02_find_margin_cm`, or `e02_find_max_cm` with no pose), push square, reset its distance from the board and its heading; back off `e02_find_back_cm`; the same against the y board; then the position along each board too; back off again. FIND record; one BUMP record per board. |
-| `run e02` | One route (`e02_route` 1 straight `e02_straight_cm` 100, 2 L `e02_l_cm` 30 / turn / `e02_l_cm`, 3 square `e02_square_cm` 50, one lap, far point = the opposite corner; the L's and the square's turns go towards the plywood's middle, away from the x board, unless `e02_l_turn` / `e02_square_turn` is -1 right or +1 left), forwards only, out to the far point, stand `e02_pause_ms`, back to the start, turn to the start heading. Mode 0 (`e02_mode 0`): on its own pose; first to `e02_start_x`, `e02_start_y` if set (at most `e02_transit_max_cm` away), then turns to `e02_route_deg` (-999 = away from the y board). Mode 1: drives only the legs the laptop sends. E02 record. Needs a pose (a find or a fix). |
+| `run e02` | One route (`e02_route` 1 straight `e02_straight_cm` 100, 2 L `e02_l_cm` 30 / turn / `e02_l_cm`, 3 square `e02_square_cm` 50, one lap, far point = the opposite corner; the L's and the square's turns go towards the plywood's middle, away from the x board, unless `e02_l_turn` / `e02_square_turn` is -1 right or +1 left), forwards only, out to the far point, stand `e02_pause_ms`, back to the start, turn to the start heading. Mode 0 (`e02_mode 0`): on its own pose; first to `e02_start_x`, `e02_start_y` if set (at most `e02_transit_max_cm` away), then turns to `e02_route_deg` (-999 = away from the y board); then (2026-10-21b) switches `gyro_scale` / `gyro_drift_dps` / `wheel_scale` to `e02_route_gyro_scale` / `e02_route_gyro_drift_dps` / `e02_route_wheel_scale` (-999 = keep), so the transit and start turn run on the laptop's best corrections and only the route on the condition's (U: 1, 0, 1). Mode 1: drives only the legs the laptop sends. E02 record. Needs a pose (a find or a fix). |
 | `fix x y th t_wall` | A camera fix: the camera's pose of the robot (th `-` = position only); `t_wall` = the laptop's clock at the camera picture, logged as given. Used only while the wheels have been still `e02_fix_still_ms` (the picture shows where it is now, whatever the WiFi delay), any time except during a find or another kind of run (during `run follow`, `fix` keeps its follow meaning). It REPLACES the pose while idle (send one before every find) and in a camera-steered run (mode 1, K). In a mode 0 run (KC) it is blended: new pose = old + `e02_fix_k` x (camera - old), heading the same way, the shorter way round (`e02_fix_k` 0.5 = halfway; with `e02_leg_pause_ms` > 0 the robot stands still after every turn and straight so fixes can be used, and at the far point and the end drives once more if the fixed pose is more than `e02_redo_cm` off). No pose yet: the fix sets it (needs a heading). FIX record. |
 | `go d [id]` | Drive d cm straight along its current heading (negative: backwards, at most `e02_back_max_cm` 10; at most `e02_go_max_cm` 110). In a mode 1 run: a leg of the route. With no run going: an idle leg (parking, finding a robot in the picture, bringing a lost one back): the edge guard learns the plywood first (`edge_learn_ms` standing still), then the same checks as mode 1; LEG run `-`; one at a time. |
 | `turn deg [id]` | Turn in place by deg (left +, -180..180), counted by its gyro from its current heading. Mode 1 run or idle, as `go`. |
@@ -1197,15 +1199,21 @@ last one's `done`. Mode 1 ends "failed" after `e02_quiet_ms` with nothing from t
 
 ### Safety in every mode
 
+- 2026-10-21b: `run find`, `run e02` and every `go` leg REFUSE to start while `safe_edge` is 0 (FIND / E02
+  result "edge guard off (safe_edge 0) ...", LEG `refused`); `turn` legs (in place) still work. `safe_edge` is not
+  saved: set it after every power-on (the E02 runner sets and checks it).
 - The plywood edge guard (`safe_edge`, edge.h) stays on whenever it drives forward: in a find or a mode 0
   route a trip ends the run (RUNEND `limited:plywood edge`; FIND says "edge guard tripped before the x
   board"); in mode 1 it ends the leg (LEG failed "plywood edge (line|bottom)") and the laptop decides.
-  Backing up is blind: the find's back-offs retrace the path just driven forward; mode 1 limits them to
-  `e02_back_max_cm`.
-- Front stop: off during the find's approach and creep (it is meant to touch the board) and while
-  turning in place; on route drives and forward go legs `safe_front_cm`, for what is within the rest of the
-  leg + `front_end_cm` only (so a leg that ends facing a board is not stopped by it); mode 1: a trip ends the
-  leg (failed "obstacle"), mode 0 the run.
+  Backing up is blind: the find's back-offs retrace the path just driven forward; backwards `go` legs (idle and
+  mode 1) may add up to at most `e02_back_max_cm` in all since the last replacing camera fix or find (2026-10-21b;
+  more is refused "backing blind: ..."), so the laptop must look with the camera and send a fix between pieces.
+- Front stop: off during the find's approach and creep (it is meant to touch the board), while turning in
+  place, while an idle leg stands still learning the plywood (2026-10-21b: a board close in front used to fail
+  even a turn there "obstacle"), and on backwards legs; on route drives and forward go legs `safe_front_cm`, for
+  what is within the rest of the leg + `front_end_cm` only (so a leg may approach a board it knows of and end
+  a few cm short of it); mode 1 and idle legs: a trip ends the leg (failed "obstacle"), mode 0 the run.
+- A camera fix during an idle leg replaces the pose, as one while idle (2026-10-21a blended it).
 - Travel cap: the run stops ("stopped:drove further than the route allows") once the wheels have covered
   more than: find 2 x `e02_find_max_cm` + 2 x `e02_find_back_cm` + 20 + the staging drive + the drives towards
   each board (each at most `e02_transit_max_cm`); route mode 0 the
@@ -1248,7 +1256,7 @@ sides or angles set wrong?").
 
 ### Records
 
-BUMP (`bump.csv`), one per board touched:
+BUMP (`bump.csv`), one per board touched: header `H,BUMP,run,ms,n,board,result,cue,ms_start,ms_contact,ms_detect,delay_ms,jolt_g,stall_frac,x_cm,y_cm,th_deg,travel_cm,overshoot_cm,front_cm,jolts_ignored,square_deg,push_ms,squared`
 
 | column | meaning |
 |---|---|
@@ -1268,7 +1276,7 @@ BUMP (`bump.csv`), one per board touched:
 | square_deg | gyro heading change while pushing square (about the approach angle, opposite sign) |
 | push_ms, squared | how long it pushed; 1 = settled square |
 
-FIND (`find.csv`), one per `run find`:
+FIND (`find.csv`), one per `run find`: header `H,FIND,run,result,known_before,before_x,before_y,before_th,bump2_x,bump2_y,bump2_th,reset_x,reset_y,reset_th,after_x,after_y,after_th,corr1_cm,corr1_deg,corr2_cm,corr2_deg,turn_k,retrace_cm,face_cm,ms_total,battery`
 
 | column | meaning |
 |---|---|
@@ -1284,7 +1292,7 @@ FIND (`find.csv`), one per `run find`:
 | face_cm | axle to touching face used |
 | ms_total, battery | |
 
-E02 (`e02.csv`), one per `run e02`:
+E02 (`e02.csv`), one per `run e02`: header `H,E02,run,route,mode,result,fix_k,start_x,start_y,start_th,far_goal_x,far_goal_y,far_x,far_y,far_th,end_x,end_y,end_th,ms_start,ms_far,ms_end,path_cm,legs,fixes_used,fixes_rejected,gyro_scale,gyro_drift_dps,wheel_scale,battery`
 
 | column | meaning |
 |---|---|
@@ -1301,13 +1309,13 @@ E02 (`e02.csv`), one per `run e02`:
 | gyro_scale, gyro_drift_dps, wheel_scale | corrections in use (U: 1, 0, 1) |
 | battery | % |
 
-LEG (`leg.csv`): run (`-` for an idle leg or a refusal outside a run), id, kind (go / turn / mark), value
+LEG (`leg.csv`), header `H,LEG,run,id,kind,value,result,ms,x_cm,y_cm,th_deg,info`: run (`-` for an idle leg or a refusal outside a run), id, kind (go / turn / mark), value
 (cm, deg; mark: 0 start, 1 far, 2 end), result (`queued`, `started`, `done`, `failed`, `refused`, `dup`), ms,
 x_cm, y_cm, th_deg (believed pose then), info (why refused / failed: obstacle, plywood edge (line|bottom),
 turn timed out, stop command ...; done marks: start / far / end). Every leg ends with a `done` or `failed`
 row (or `refused` / `dup` at once).
 
-FIX (`fix.csv`): run (`-` when idle), ms, t_wall (as sent), cam_x, cam_y, cam_th (nan = position only), k,
+FIX (`fix.csv`), header `H,FIX,run,ms,t_wall,cam_x,cam_y,cam_th,k,result,before_x,before_y,before_th,after_x,after_y,after_th`: run (`-` when idle), ms, t_wall (as sent), cam_x, cam_y, cam_th (nan = position only), k,
 result (`set`, `blended`, `replaced`, `rejected:moving`, `rejected:finding (the boards set the pose)`,
 `rejected:another run is going`, `rejected:the first fix needs a heading`), before_x/y/th, after_x/y/th.
 
@@ -1317,14 +1325,14 @@ the final turn. Mode 1: the leg count.
 
 ### Room on the plywood (check before the session)
 
-After a find the robot stands about `e02_find_back_cm` + face (8 + 6.1 = 14 cm) from each board. A mode 0
-route starts there unless `e02_start_x` / `e02_start_y` say otherwise, heading away from the y board. The
-straight route then ends with its axle about 114 cm from the y board and its face about 120 cm from it, 2 cm
-short of a 122 cm sheet's open opposite edge (with the far-corner layout: the origin side, x = 0): the line
-sensors (3.5 cm ahead of the axle) stay on the plywood, but the distance sensor's bottom zone looks about 7-9
-cm past the sensor and will see the cement, so with `safe_edge` 2 or 3 the straight run will end
-`limited:plywood edge`. Use `safe_edge 1` (line sensors only) for the straight, or start it nearer the y
-board (`e02_start_x` about 8-10 cm from the y board's face: 112-114 with the y board at 122).
+After a find the robot stands about `e02_find_back_cm` + face (8 + 4.75 cm without the bracket) from each board.
+The E02 runner (2026-10-21b) sends `e02_start_x` / `e02_start_y` 28 cm from both boards' faces: an uncalibrated
+return ends 15-25 cm off by design and from there does not run into a board; the 100 cm straight runs along the
+diagonal and its far point stays 20+ cm (front) from the open edges. Parked robots wait in the two corners off
+that diagonal (tools/experiment/e02_plan.py PARK_UV); tools/experiment/tests checks in the simulator that no
+uncalibrated route (gyro 5.5-8.5% short, creep +-0.3 deg/s) or find comes within 18 cm of a parked robot's centre.
+The edge guard: `safe_edge 1` (line sensors), `edge_dir 0`, `edge_thr 150` (chosen: plywood reads 37-84 on the
+real robots; nobody has logged what they read past the edge yet).
 
 ### Timing (simulator)
 

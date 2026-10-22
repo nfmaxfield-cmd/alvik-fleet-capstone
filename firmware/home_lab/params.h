@@ -180,7 +180,7 @@ Param PARAMS[] = {
   {"touch_back_cm",    2,   "touch run: back off this far after each click"},
   {"touch_n",          1,   "touch run: touches per run (back off touch_back_cm, wait, creep again)"},
 
-  // --- E02 accuracy experiment (e02.h, firmware 2026-10-21a; docs/data-formats.md "E02") ---
+  // --- E02 accuracy experiment (e02.h, firmware 2026-10-21a/b; docs/data-formats.md "E02") ---
   // Boards, floor frame (the camera's): the x board runs along x (a line y = e02_xboard_cm), the y board along y
   // (x = e02_yboard_cm); side = which side of the robot the board is on (-1: lower y / lower x, +1: higher).
   {"e02_xboard_side",  0,   "E02: the x board (along x) is at the low-y end (0 or -1) or the high-y end (1) of the plywood"},
@@ -209,6 +209,9 @@ Param PARAMS[] = {
   {"e02_start_x",   -999,   "E02 mode 0: drive to this floor x before the route (-999 = start where it is)"},
   {"e02_start_y",   -999,   "E02 mode 0: ... and this floor y"},
   {"e02_route_deg", -999,   "E02 mode 0: floor heading the route starts along, deg (-999 = away from the y board)"},
+  {"e02_route_gyro_scale", -999, "E02 mode 0: at the route's start (after the transit and the start turn) switch gyro_scale to this (-999 = keep): the condition's corrections cover the route only"},
+  {"e02_route_gyro_drift_dps", -999, "E02 mode 0: ... and gyro_drift_dps to this (-999 = keep)"},
+  {"e02_route_wheel_scale", -999, "E02 mode 0: ... and wheel_scale to this (-999 = keep)"},
   {"e02_transit_max_cm", 90, "E02: refuse a drive to the start spot longer than this; mode 1: transit allowance in the travel cap"},
   {"e02_margin_cm",   30,   "E02: stop the run if the wheels travel more than transit + route + this"},
   {"e02_leg_pause_ms", 0,   "E02 mode 0: stand still this long after every turn and straight (camera fixes arrive while still; KC)"},

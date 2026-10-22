@@ -97,7 +97,8 @@ def test_two_robots_same_code_are_held_back(tmp_path):
 
 def test_floormap_matches_simulator_camera(tmp_path):
     """Pixels of a point 4 cm up -> the floor point below it, for the real Oct 18
-    camera set-up (simulator geometry), within 0.02 cm."""
+    camera set-up (simulator geometry), within 0.1 cm (0.02 cm at the old, wrong 3.4 px/cm: the wider view at the
+    measured 2.34 px/cm gives a 0.1% parallax difference at the board's corners)."""
     import config as SCFG
     import camera as SCAM
     cfg = SCFG.load_config(os.path.join(TOOLS, "sim", "configs", "real_oct18.json"))
@@ -105,13 +106,13 @@ def test_floormap_matches_simulator_camera(tmp_path):
     path = tmp_path / "floor_calibration.json"
     path.write_text(json.dumps(g.calibration()))
     fm = FMAP.FloorMap(str(path))
-    assert 3.3 < fm.px_per_cm() < 3.6
+    assert 2.2 < fm.px_per_cm() < 2.5          # 2.34 px/cm measured on the roam1 footage (2026-10-21)
     for x, y in ((10, 10), (61, 61), (110, 20), (5, 115)):
         u, v = g.project(x, y, 4.0)
         fx, fy = fm.to_floor(float(u), float(v))
-        assert math.hypot(fx - x, fy - y) < 0.02
+        assert math.hypot(fx - x, fy - y) < 0.1
         u2, v2 = fm.to_px(x, y)
-        assert math.hypot(u2 - float(u), v2 - float(v)) < 0.01
+        assert math.hypot(u2 - float(u), v2 - float(v)) < 0.25
 
 
 def test_clock_envelope_takes_the_fastest_trip():

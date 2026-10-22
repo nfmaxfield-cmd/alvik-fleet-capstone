@@ -40,7 +40,7 @@ def make(name="Left", seed=0, stall=0.15, vib=0.05, seams=(), boards=(XBOARD, YB
     r.idle_until(10.0)
     r.fw_yaw_sign = 1                       # compass already checked
     r.gyro_scale = GYRO_UNDER
-    r.params.update(start_nudge_cm=0, bumper_cm=1.34, e02_xboard_cm=0, e02_yboard_cm=0, e02_xboard_side=0,
+    r.params.update(start_nudge_cm=0, bumper_cm=1.34, safe_edge=1, e02_xboard_cm=0, e02_yboard_cm=0, e02_xboard_side=0,
                     e02_yboard_side=0, settle_start_ms=200, settle_end_ms=200)
     r.params.update(params)
     return r
@@ -747,6 +747,139 @@ class ParityTests(unittest.TestCase):
             return out
         self.assertEqual(headers(fw), headers(sim))
         self.assertEqual(set(headers(fw)), {"BUMP", "FIND", "E02", "LEG", "FIX"})
+
+
+class FixRound21bTests(unittest.TestCase):
+    """Firmware 2026-10-21b: idle legs next to a board, the edge guard required, blind backing capped, the bare body
+    (no nose bracket) in the contact model."""
+
+    def test_idle_turn_and_go_next_to_a_board(self):
+        """A robot squared on a board (front 2 cm off it, well inside safe_front_cm) can turn in place, back off,
+        and roll up to it again: the front sensor never fails these idle legs. A go that would drive into the board
+        is still stopped (soft: the leg fails "obstacle", nothing hits)."""
+        r = make(seed=21, bumper_cm=0)
+        face = r.face_cm()
+        place(r, 50.0, face + 2.0, -90.0)                      # x board along y = 0, facing it
+        r.handle_command("fix 50 %.2f -90 1.0" % (face + 2.0), False)
+        r.handle_command("turn 45 1", False)
+        self.assertEqual(records(r, "LEG")[-1]["result"], "done", records(r, "LEG")[-1])
+        r.handle_command("turn -45 2", False)
+        self.assertEqual(records(r, "LEG")[-1]["result"], "done")
+        r.handle_command("go -6 3", False)
+        self.assertEqual(records(r, "LEG")[-1]["result"], "done")
+        r.handle_command("go 4 4", False)                       # back towards it, ends 4 cm off: allowed
+        self.assertEqual(records(r, "LEG")[-1]["result"], "done", records(r, "LEG")[-1])
+        y_before = r.y
+        r.handle_command("go 10 5", False)                      # would end inside the board
+        last = records(r, "LEG")[-1]
+        self.assertEqual(last["result"], "failed")
+        self.assertIn("obstacle", last["info"])
+        self.assertGreater(r.y - face, 0.3)                     # stopped short, never touched
+        self.assertLess(y_before - r.y, 4.0)
+
+    def test_everything_that_drives_refuses_with_the_edge_guard_off(self):
+        r = make(seed=22, safe_edge=0)
+        place(r, 60.0, 60.0, 0.0)
+        r.handle_command("fix 60 60 0 1.0", False)
+        r.handle_command("go 10 1", False)
+        last = records(r, "LEG")[-1]
+        self.assertEqual(last["result"], "refused")
+        self.assertIn("safe_edge", last["info"])
+        self.assertAlmostEqual(r.x, 60.0, delta=0.01)
+        r.run_experiment("find")
+        self.assertIn("safe_edge", records(r, "FIND")[-1]["result"])
+        self.assertAlmostEqual(r.x, 60.0, delta=0.01)
+        r.params["e02_route"] = 1
+        r.run_experiment("e02")
+        self.assertIn("safe_edge", records(r, "E02")[-1]["result"])
+        self.assertAlmostEqual(r.x, 60.0, delta=0.01)
+        r.handle_command("turn 30 2", False)                     # turning in place stays allowed
+        self.assertEqual(records(r, "LEG")[-1]["result"], "done")
+
+    def test_blind_backing_is_capped_until_a_camera_fix(self):
+        r = make(seed=23)
+        place(r, 60.0, 60.0, 0.0)
+        r.handle_command("fix 60 60 0 1.0", False)
+        r.handle_command("go -6 1", False)
+        self.assertEqual(records(r, "LEG")[-1]["result"], "done")
+        r.handle_command("go -6 2", False)                       # 12 cm blind in all: refused
+        last = records(r, "LEG")[-1]
+        self.assertEqual(last["result"], "refused")
+        self.assertIn("backing blind", last["info"])
+        r.handle_command("go 3 3", False)                        # forward legs do not reset it ...
+        r.handle_command("go -6 4", False)
+        self.assertEqual(records(r, "LEG")[-1]["result"], "refused")
+        r.handle_command("fix %.2f %.2f 0 2.0" % (r.x, r.y), False)   # ... a camera fix does
+        r.handle_command("go -6 5", False)
+        self.assertEqual(records(r, "LEG")[-1]["result"], "done")
+
+    def test_a_fix_during_an_idle_leg_replaces(self):
+        r = make(seed=24)
+        place(r, 60.0, 60.0, 0.0)
+        r.handle_command("fix 60 60 0 1.0", False)
+        r.e_begin()
+        r.e_idle_leg = True
+        r.handle_command("fix 70 60 0 1.5", True)
+        fx = records(r, "FIX")[-1]
+        self.assertEqual(fx["result"], "replaced")
+        self.assertAlmostEqual(r.pose.x, 70.0, delta=0.01)
+        r.e_idle_leg = False
+        r.e_end_run()
+
+    def test_contact_body_follows_bumper_cm(self):
+        """No bracket fitted (bumper_cm 0, the firmware default and the robots in Oct 2026): the bare body touches the
+        board, face 4.75 cm ahead of the axle, and the find's reset agrees; with bumper_cm 1.34 the bracket (6.10)."""
+        for bumper, face in ((0.0, 4.75), (1.34, 6.10)):
+            r = make(seed=25, bumper_cm=bumper)
+            self.assertAlmostEqual(r.face_cm(), face, delta=0.01)
+            place(r, 45.0, 35.0, -90.0)
+            r.pose.set(45.0, 35.0, -90.0, 0.5, 1.0)
+            run = r.run_experiment("find")
+            self.assertEqual(run["result"], "done", records(r, "FIND"))
+            b = r.e_bumps[0]
+            tx, ty, tth = b.true_square
+            self.assertAlmostEqual(ty, face, delta=0.35, msg=(bumper, ty))     # axle this far from the x board
+            tx, ty, tth = r.e_reset_true
+            f = records(r, "FIND")[-1]
+            self.assertLess(math.hypot(float(f["reset_x"]) - tx, float(f["reset_y"]) - ty), 1.0, (bumper, f))
+
+
+class MissedBumpTests(unittest.TestCase):
+    """The dry run's occasional missed bump (config dock.miss_bump_prob / miss_jolt_prob): a find that misses the
+    bump altogether fails safely; one that only misses the jolt still finds the board, by the stall."""
+
+    def test_missed_bump_fails_the_find_safely(self):
+        r = make(seed=26)
+        r.cfg.dock.miss_bump_prob = 1.0
+        place(r, 45.0, 35.0, -90.0)
+        r.pose.set(45.0, 35.0, -90.0, 0.5, 1.0)
+        r.run_experiment("find")
+        f = records(r, "FIND")[-1]
+        self.assertTrue(f["result"].startswith("failed"), f)
+        self.assertIn("no bump", f["result"])
+        self.assertGreater(r.y, 0.0)                         # never through the board
+
+    def test_missed_jolt_is_found_by_the_stall(self):
+        r = make(seed=27)
+        r.cfg.dock.miss_jolt_prob = 1.0
+        place(r, 45.0, 35.0, -90.0)
+        r.pose.set(45.0, 35.0, -90.0, 0.5, 1.0)
+        run = r.run_experiment("find")
+        self.assertEqual(run["result"], "done", records(r, "FIND"))
+        self.assertTrue(all(b["result"] == "bump" for b in records(r, "BUMP")))
+
+
+class DocsTests(unittest.TestCase):
+    def test_docs_list_the_same_record_columns_as_the_firmware(self):
+        """docs/data-formats.md "E02" gives each record's header line (H,BUMP,...): exactly the firmware's."""
+        repo = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+        fw = open(os.path.join(repo, "firmware", "home_lab", "e02.h")).read()
+        doc = open(os.path.join(repo, "docs", "data-formats.md")).read()
+        doc = doc[doc.index("## E02"):]
+        heads = {m.group(1): re.sub(r'"\s*"', "", m.group(2))
+                 for m in re.finditer(r'"H,(BUMP|FIND|E02|LEG|FIX),((?:[^"]|"\s*")*)"', fw)}
+        documented = dict(re.findall(r"`H,(BUMP|FIND|E02|LEG|FIX),([^`]+)`", doc))
+        self.assertEqual(documented, heads)
 
 
 if __name__ == "__main__":

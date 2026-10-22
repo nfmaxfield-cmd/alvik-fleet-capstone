@@ -108,10 +108,41 @@ def test_outliers_are_flagged_and_the_tables_show_with_and_without():
     a = next(s for s in summ if s["scope"] == "all" and s["metric"] == "end_err_cm" and s["condition"] == "U" and s["set"] == "all runs")
     b = next(s for s in summ if s["scope"] == "all" and s["metric"] == "end_err_cm" and s["condition"] == "U" and s["set"] == "without outliers")
     assert a["mean"] > b["mean"] + 2 and b["n"] < a["n"] and b["mean"] < 4
-    lost = es.fake_runs(rng, 6, {"U": dict(end_cm=(3.0, 0.5), end_deg=(0, 3))})
-    lost[2]["lost"] = True                                # the runner's own flag counts even when the number looks normal
-    ea.flag_runs(lost)
-    assert lost[2]["outlier_end_err_cm"] == 1
+    rec = es.fake_runs(rng, 6, {"U": dict(end_cm=(3.0, 0.5), end_deg=(0, 3))})
+    rec[2]["recovery"] = "far_off"                       # driven back by the runner: a note, never an outlier by itself
+    ea.flag_runs(rec)
+    assert rec[2]["outlier_end_err_cm"] == 0
+
+
+def test_outliers_are_decided_within_condition_and_route():
+    """The long straight's errors are larger by design: pooled with the L and the square they would all look like
+    outliers; within its own route none is."""
+    rng = np.random.default_rng(5)
+    rows = es.fake_runs(rng, 15, {"U": dict(end_cm=(3.0, 0.5), end_deg=(0, 3))})
+    for r in rows:
+        if r["route"] == "straight":
+            r["end_err_cm"] += 15.0
+    ea.flag_runs(rows)
+    assert sum(r["outlier_end_err_cm"] for r in rows) <= 1
+
+
+def test_the_permutation_test_respects_robots():
+    """A robot effect, not a condition effect: Left is 5 cm worse whatever the condition, and runs more of A. Welch
+    sees a difference between A and B; the permutation within robot x route does not."""
+    rng = np.random.default_rng(8)
+    a, sa, b, sb = [], [], [], []
+    for rb, na, nb in (("Left", 8, 2), ("Right", 2, 8)):
+        for _ in range(na):
+            a.append(3.0 + (5.0 if rb == "Left" else 0.0) + rng.normal(0, 0.5))
+            sa.append((rb, "straight"))
+        for _ in range(nb):
+            b.append(3.0 + (5.0 if rb == "Left" else 0.0) + rng.normal(0, 0.5))
+            sb.append((rb, "straight"))
+    assert ea.compare(a, b)["welch_p"] < 0.05
+    d, p, k = ea.strat_perm(a, sa, b, sb)
+    assert k == 2 and abs(d) < 1.0 and p > 0.05
+    b2 = [v - 2.0 for v in b]                             # a real condition effect is found
+    assert ea.strat_perm(a, sa, b2, sb)[1] < 0.01
 
 
 def test_scopes_split_by_route_and_robot():
@@ -228,7 +259,7 @@ def test_per_run_poses_and_errors_match_the_truth(session):
     assert set(rows) == {"1", "2", "3", "4"}
     for sp in SPECS:
         r, tr = rows[sp["run_id"]], sess["truth"][sp["run_id"]]
-        assert not r["flags"].replace("runner: lost", "").strip(), r["flags"]
+        assert not r["flags"].replace("needed recovery: lost", "").strip(), r["flags"]
         for nm in ("start", "far", "end"):
             tp = tr[nm]
             assert math.hypot(r[nm + "_x"] - tp[0], r[nm + "_y"] - tp[1]) < 0.25
@@ -293,10 +324,11 @@ def test_outputs_exist_and_the_report_follows_the_house_rules(session):
     assert "Welch's t-test:" not in text                  # one run per condition: no test shown, so no fine print for it
 
 
-def test_a_lost_run_is_flagged_and_kept_in_the_files(session):
+def test_a_run_that_needed_recovery_is_noted_kept_and_not_an_outlier(session):
     _, res, _ = session
     r3 = next(r for r in res["rows"] if r["run_id"] == "3")
-    assert r3["lost"] == 1 and "runner: lost" in r3["flags"] and r3["outlier_end_err_cm"] == 1
+    assert r3["recovery"] == "lost" and "needed recovery" in r3["flags"] and r3["outlier_end_err_cm"] == 0
+    assert math.isfinite(r3["end_err_cm"])
 
 
 def test_charts_only_when_there_is_a_spread_to_show(tmp_path):
