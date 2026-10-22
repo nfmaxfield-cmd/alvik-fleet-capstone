@@ -864,14 +864,61 @@ class Feed(threading.Thread):
         self.stopped = False
         self.err = None
         self.hooks = []              # functions(img, t) called for every frame (the naming check)
+        self.newest_only = source is None   # live: always the newest frame (a replay or test source: every one)
+        self.pending = None
+        self.reader_done = False
+        self.skipped = 0             # frames dropped because the tracker was busy (newest_only)
+        self.lag = 0.0
         self.on_sample = None        # function((t, x, y)) for every position of the followed robot
 
-    def run(self):
+    def _read(self):
+        """Reader thread: takes every frame off the stream as it arrives (so nothing piles up in the network
+        buffer) and keeps only the newest for the tracker. 2026-10-22 evening: the tracker on the laptop could not
+        keep up with 25 frames a second, so frames queued and the runner was looking at pictures seconds old: a
+        robot that had just driven 10 cm "had not moved" (old pictures) or was "lost" (no fresh ones), while the
+        live view showed it plainly."""
         try:
             for fr in self.src:
                 if self.stopped:
                     break
                 self.clock.add(fr.t_arrived, fr.t_pi)
+                with self.cond:
+                    if self.pending is not None:
+                        self.skipped += 1
+                    self.pending = fr
+                    self.cond.notify_all()
+        except Exception as e:
+            self.err = e
+        finally:
+            with self.cond:
+                self.reader_done = True
+                self.cond.notify_all()
+
+    def _frames(self):
+        """The newest frame each time the tracker is ready for one."""
+        reader = threading.Thread(target=self._read, daemon=True)
+        reader.start()
+        while not self.stopped:
+            with self.cond:
+                while self.pending is None and not self.reader_done and not self.stopped:
+                    self.cond.wait(0.5)
+                if self.pending is None:
+                    if self.reader_done:
+                        if self.err:
+                            raise self.err
+                        return
+                    continue
+                fr, self.pending = self.pending, None
+            self.lag = max(0.0, time.time() - fr.t_arrived)
+            yield fr
+
+    def run(self):
+        try:
+            for fr in (self._frames() if self.newest_only else self.src):
+                if self.stopped:
+                    break
+                if not self.newest_only:
+                    self.clock.add(fr.t_arrived, fr.t_pi)
                 t = fr.t_pi + self.clock.offset - self.cap
                 for h in list(self.hooks):
                     h(fr.img, t)
