@@ -30,7 +30,7 @@ wheels disagree -> stop, re-find by a turn on the spot, call Nick only after two
 - [x] E. Small fixes: help wording, --no-side, Pi timer past 59 min
 - [x] F. Simulator dry run + tests for all of the above
 - [x] G. Robot perimeter mapping (laptop-driven rays, edge guard + front stop; map vs camera outline)
-- [ ] H. Review, report with the two sweeps, TIME.md row
+- [x] H. Review, report with the two sweeps, TIME.md row
 
 ### Results so far
 - A/B (00:50): replay on the footage (tools/experiment/e02_replay.py). Left's parking 22:37:23-56: old and new both

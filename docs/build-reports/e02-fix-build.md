@@ -1,4 +1,4 @@
-# Build report: E02 fixes + robot mapping (2026-10-21 23:50 to 2026-10-22)
+# Build report: E02 fixes + robot mapping (2026-10-21 23:50 to 2026-10-22 01:48)
 
 **Premise.** The first real E02 session never got past setup. The camera tracker followed the wrong thing (the
 spot a robot had just left, a hand, things past the board's edge), and camera-steered parking drove Center into
@@ -100,3 +100,7 @@ real basement agrees is the morning's first 20 minutes, which Nick watches.
 4. The statistics report pipeline dry-run end to end on simulator sessions, so the morning's data turns into
    the report the same hour.
 5. Lights on the moving robot (firmware), when there is a reason to upload firmware anyway.
+
+**Cost.** 1 h 58 of build time (estimated 5-8 h; TIME.md in the game repo); one review agent (~150k tokens).
+Stopped here rather than building the ideas above, to leave usage for the morning session's help and analysis
+before the 3 PM reset.
