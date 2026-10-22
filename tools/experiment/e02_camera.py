@@ -293,81 +293,185 @@ def measure_board_line(img, cam, board, which, n_profiles=17, inside_cm=12.0, ou
 
 # =============================================================================== the tracker
 class MotionTracker:
-    """Finds and follows the one moving robot in grey frames. Thread-safe (one lock)."""
+    """Finds and follows the one moving robot in grey frames, against a FLOOR MEMORY (Nick, 2026-10-21): what
+    the floor looks like at every spot, kept fresh wherever the camera sees it with no robot on it. Thread-safe.
 
-    def __init__(self, cam, board_center=(61.0, 61.0), thr=22.0, alpha=0.03, z_cm=ROBOT_TOP_CM, max_speed_cms=40.0):
+    Why (the first real session, 2026-10-21): the old tracker compared every frame with one picture taken at the
+    start, patched only where a robot drove away; robots put down by hand, a hand in the picture or the spot a
+    robot had just left all looked like robots, and it followed them. Now:
+      - floor memory: pixels no known robot covers and that have stood still for STABLE_FRAMES are copied into
+        the floor (new floor at once, small drift slowly); under a known robot the floor is UNKNOWN until it
+        leaves: filled in from the floor around it (inpaint) and only trusted with a higher threshold, so the
+        spot a robot leaves never looks like a robot, and the robot never vanishes into the floor;
+      - a robot-shape check: size and squareness of the outline (a hand, a long smear, a lighting patch fail);
+      - the board area: nothing further than margin_cm outside the board is a robot (the levels, the shelf);
+      - motion: the frame-to-frame change says which outline is moving now;
+      - a whole-picture brightness shift (the camera's auto exposure) is taken out before comparing;
+      - gating: the followed robot's next position must be near its last one (speed limit) and near where the
+        runner expects it (expect(): from the leg the robot was told to drive), so it can't jump to something else.
+    Positions are the outline's centre on the plane of the robot's top (ROBOT_TOP_CM)."""
+
+    STABLE_FRAMES = 12          # a pixel this many frames without change (~0.5 s) can be learned as floor
+    MOTION_THR = 9.0            # grey levels of frame-to-frame change that count as motion
+    UNKNOWN_EXTRA = 14.0        # extra threshold on floor that was filled in, not seen
+    ABSORB_S = 25.0             # something new standing still this long, where no robot is, becomes floor
+
+    def __init__(self, cam, board_center=(61.0, 61.0), thr=16.0, alpha=0.02, z_cm=ROBOT_TOP_CM, max_speed_cms=40.0,
+                 board_rect=None, margin_cm=8.0):
         self.cam = cam
         self.z = z_cm
         self.rpx = ROBOT_CM * cam.px_per_cm(board_center[0], board_center[1], z_cm)
         self.area = self.rpx ** 2
+        self.thr_min = thr
         self.thr = thr
         self.alpha = alpha
         self.vmax = max_speed_cms
+        self.board_rect = board_rect            # (x0, y0, x1, y1) cm, or None: anywhere
+        self.margin = margin_cm
         self.bg = None
-        self.protect = {}           # robot -> (x, y) floor cm: never faded into the background
-        self.active = None          # robot being followed
-        self.pos = None             # (t, x, y) its latest camera position
+        self.known = None                       # uint8: 1 = floor seen, 0 = filled in (under a robot at the start)
+        self.stable = None                      # int16: frames without change
+        self.still_new = None                   # float32: seconds a pixel has differed from the floor while still
+        self.prev = None
+        self.protect = {}                       # robot -> (x, y) floor cm: covered, never learned as floor
+        self.active = None
+        self.pos = None
+        self.hint = None                        # (x, y, radius cm, until t): where the runner expects the robot
         self.last_seen = 0.0
         self.misses = 0
         self.lock = threading.Lock()
-        self.frozen = False         # True: the background is not updated (while finding a robot by a short drive)
-        self.frame = None           # latest blurred frame (float32)
+        self.frozen = False
+        self.frame = None
         self.frame_t = None
+        self.offset = 0.0
         self.k_open = np.ones((3, 3), np.uint8)
-        self.k_close = np.ones((5, 5), np.uint8)
+        self.k_close = np.ones((7, 7), np.uint8)
+        self.last_cands = []
+        self.n = 0
 
+    # --- geometry --------------------------------------------------------------------------------
     def _px(self, x, y):
         return self.cam.project((x, y, self.z))
 
     def _floor(self, u, v):
         return self.cam.to_floor(u, v, self.z)
 
-    def _protect_mask(self, shape):
+    def on_area(self, x, y):
+        if self.board_rect is None:
+            return True
+        x0, y0, x1, y1 = self.board_rect
+        m = self.margin
+        return min(x0, x1) - m <= x <= max(x0, x1) + m and min(y0, y1) - m <= y <= max(y0, y1) + m
+
+    def _disk_mask(self, shape, pts, r_scale):
         m = np.zeros(shape, np.uint8)
-        r = int(round(0.95 * self.rpx))
-        for x, y in self.protect.values():
+        r = int(round(r_scale * self.rpx))
+        for x, y in pts:
             u, v = self._px(x, y)
             if np.isfinite(u) and np.isfinite(v):
-                cv2.circle(m, (int(round(u)), int(round(v))), r, 255, -1)
+                cv2.circle(m, (int(round(u)), int(round(v))), r, 1, -1)
         return m
 
-    def blobs(self, g=None):
-        """Robot-sized things that differ from the background: [(u, v, area, x, y)]."""
+    def _covered(self, shape):
+        pts = list(self.protect.values())
+        if self.active is not None and self.pos is not None:
+            pts.append((self.pos[1], self.pos[2]))
+        m = self._disk_mask(shape, pts, 1.25)
+        if self.active is not None and self.pos is not None and self.frame_t is not None and \
+                self.frame_t - self.last_seen > 0.3:
+            # lost for a moment: don't learn anything near where it may be now
+            m |= self._disk_mask(shape, [(self.pos[1], self.pos[2])], 1.25 + self.vmax * min(3.0, self.frame_t - self.last_seen) / ROBOT_CM)
+        return m
+
+    # --- what differs from the floor --------------------------------------------------------------
+    def _diff(self, g):
+        d = np.abs(g - self.offset - self.bg)
+        lim = np.where(self.known > 0, self.thr, self.thr + self.UNKNOWN_EXTRA).astype(np.float32)
+        return d, (d > lim).astype(np.uint8) * 255
+
+    def _shape_ok(self, area, w, h):
+        a, r = self.area, self.rpx
+        lo, hi = sorted((w, h))
+        return (0.3 * a <= area <= 2.6 * a and hi <= 2.0 * r and lo >= 0.4 * r and hi / max(lo, 1.0) <= 2.3
+                and area / max(w * h, 1.0) >= 0.3)
+
+    def candidates(self, g=None, motion=None):
+        """Every outline that differs from the floor: dicts u, v, area, x, y, shape (robot-shaped and on the
+        board area), moving (share of it moving now)."""
         g = self.frame if g is None else g
         if g is None or self.bg is None:
             return []
-        diff = cv2.absdiff(g, self.bg)
-        mask = (diff > self.thr).astype(np.uint8) * 255
+        _, mask = self._diff(g)
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.k_open)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self.k_close)
-        n, _, stats, cents = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        n, lab, stats, cents = cv2.connectedComponentsWithStats(mask, connectivity=8)
         out = []
         for i in range(1, n):
-            a = stats[i, cv2.CC_STAT_AREA]
-            if 0.3 * self.area <= a <= 3.5 * self.area:
-                u, v = cents[i]
-                x, y = self._floor(u, v)
-                out.append((float(u), float(v), int(a), float(x), float(y)))
+            a = int(stats[i, cv2.CC_STAT_AREA])
+            if a < 0.15 * self.area:
+                continue
+            w, h = stats[i, cv2.CC_STAT_WIDTH], stats[i, cv2.CC_STAT_HEIGHT]
+            u, v = cents[i]
+            x, y = self._floor(u, v)
+            if not (np.isfinite(x) and np.isfinite(y)):
+                continue
+            ys, xs = np.nonzero(lab[stats[i, 1]:stats[i, 1] + h, stats[i, 0]:stats[i, 0] + w] == i)
+            if len(xs) >= 5:
+                (_, _), (rw, rh), _ = cv2.minAreaRect(np.column_stack([xs, ys]).astype(np.float32))
+            else:
+                rw, rh = w, h
+            mv = 0.0
+            if motion is not None:
+                sub = motion[stats[i, 1]:stats[i, 1] + h, stats[i, 0]:stats[i, 0] + w]
+                mv = float((sub[ys, xs] > 0).mean()) if len(xs) else 0.0
+            out.append(dict(u=float(u), v=float(v), area=a, x=float(x), y=float(y), moving=mv,
+                            shape=bool(self._shape_ok(a, rw, rh) and self.on_area(x, y))))
         return out
 
+    def blobs(self, g=None):
+        """Robot-shaped things on the board area that differ from the floor: [(u, v, area, x, y)]."""
+        with self.lock:
+            return [(c["u"], c["v"], c["area"], c["x"], c["y"]) for c in self.candidates(g) if c["shape"]]
+
+    # --- every frame -------------------------------------------------------------------------------
     def push(self, img, t):
         """One frame (grey uint8) taken at laptop time t. Returns the active robot's (t, x, y) or None."""
         g = cv2.GaussianBlur(img, (3, 3), 0).astype(np.float32)
         with self.lock:
+            self.n += 1
+            dt_frame = (t - self.frame_t) if self.frame_t is not None else 0.04
             self.frame, self.frame_t = g, t
             if self.bg is None:
-                self.bg = g.copy()
+                self._init_floor([g])
+                self.prev = g
                 return None
+            if self.prev is None or self.prev.shape != g.shape:
+                self.prev = g
+            motion = (np.abs(g - self.prev) > self.MOTION_THR).astype(np.uint8)
+            self.prev = g
+            self.stable = np.where(motion > 0, 0, np.minimum(self.stable + 1, 30000)).astype(np.int16)
+            if self.n % 5 == 0:
+                self._update_offset(g)
             out = None
             if self.active is not None and self.pos is not None:
+                cands = self.candidates(g, motion)
+                self.last_cands = cands
                 _, px, py = self.pos
                 dt_ = max(0.0, t - self.pos[0])
                 gate_cm = ROBOT_CM * 0.9 + self.vmax * min(dt_, 1.0)
+                hint = self.hint if (self.hint and t <= self.hint[3]) else None
                 best = None
-                for u, v, a, x, y in self.blobs(g):
-                    d = math.hypot(x - px, y - py)
-                    if d <= gate_cm and (best is None or d < best[0]):
-                        best = (d, x, y)
+                for c in cands:
+                    if not c["shape"]:
+                        continue
+                    d = math.hypot(c["x"] - px, c["y"] - py)
+                    if d > gate_cm:
+                        continue
+                    if hint and math.hypot(c["x"] - hint[0], c["y"] - hint[1]) > hint[2]:
+                        continue
+                    score = d - 3.0 * c["moving"]
+                    if best is None or score < best[0]:
+                        best = (score, c["x"], c["y"])
                 if best is not None:
                     self.pos = (t, best[1], best[2])
                     self.protect[self.active] = (best[1], best[2])
@@ -376,57 +480,165 @@ class MotionTracker:
                     out = self.pos
                 else:
                     self.misses += 1
-            if self.frozen:
-                return out
-            keep = self._protect_mask(g.shape)
-            cv2.accumulateWeighted(g, self.bg, self.alpha, mask=cv2.bitwise_not(keep))
+            if not self.frozen:
+                self._learn(g, dt_frame)
             return out
 
+    def _init_floor(self, gs):
+        self.bg = np.median(np.stack(gs), axis=0).astype(np.float32) if len(gs) > 1 else gs[0].copy()
+        self.known = np.ones(self.bg.shape, np.uint8)
+        self.stable = np.zeros(self.bg.shape, np.int16)
+        self.still_new = np.zeros(self.bg.shape, np.float32)
+        self.offset = 0.0
+
+    def _update_offset(self, g):
+        """The camera's auto exposure shifts the whole picture: the median change over the seen floor."""
+        k = (self.known[::4, ::4] > 0)
+        if k.sum() < 100:
+            return
+        d = (g[::4, ::4] - self.bg[::4, ::4])[k]
+        self.offset = float(np.median(d))
+        mad = float(np.median(np.abs(d - self.offset)))
+        self.thr = max(self.thr_min, 5.0 * 1.4826 * mad)
+
+    def _learn(self, g, dt_frame):
+        cov = self._covered(g.shape)
+        ok = (cov == 0) & (self.stable >= self.STABLE_FRAMES)
+        gc = g - self.offset
+        d = np.abs(gc - self.bg)
+        new_floor = ok & (self.known == 0)                       # a robot has left: its floor, seen at last
+        self.bg[new_floor] = gc[new_floor]
+        self.known[new_floor] = 1
+        same = ok & (self.known > 0) & (d <= self.thr)
+        if same.any():
+            self.bg[same] += self.alpha * (gc[same] - self.bg[same])
+        changed = ok & (self.known > 0) & (d > self.thr)
+        self.still_new[changed] += dt_frame
+        self.still_new[~changed] = 0.0
+        absorb = self.still_new > self.ABSORB_S
+        if absorb.any():
+            self.bg[absorb] = gc[absorb]
+            self.still_new[absorb] = 0.0
+
     # --- control ------------------------------------------------------------------------------
-    def set_background(self, frames):
-        """A fresh background from a few frames (median), while nothing moves."""
+    def set_background(self, frames, robots=None):
+        """A fresh floor memory from a few frames (median) while nothing moves. robots: floor positions of
+        robots standing in them (their floor is filled in from around them until they leave)."""
         fs = [cv2.GaussianBlur(f, (3, 3), 0).astype(np.float32) for f in frames]
         with self.lock:
-            self.bg = np.median(np.stack(fs), axis=0).astype(np.float32)
+            self._init_floor(fs)
+            for x, y in (robots or []):
+                self._unknown_at(x, y)
+
+    def _unknown_at(self, x, y, scale=1.2):
+        m = self._disk_mask(self.bg.shape, [(x, y)], scale)
+        self.known[m > 0] = 0
+        src = np.clip(self.bg, 0, 255).astype(np.uint8)
+        filled = cv2.inpaint(src, (self.known == 0).astype(np.uint8) * 255, 5, cv2.INPAINT_TELEA)
+        self.bg[self.known == 0] = filled[self.known == 0].astype(np.float32)
+
+    def robot_at(self, x, y):
+        """A robot stands at (x, y) on what the floor memory thinks is floor (it was there when the picture was
+        taken, or put down since): its floor becomes unknown until it leaves."""
+        with self.lock:
+            if self.bg is not None:
+                self._unknown_at(x, y)
 
     def refresh_spot(self, x, y, scale=1.0):
-        """Copy the current frame into the background around a floor spot (a robot just left it)."""
+        """Copy the current frame into the floor around a spot (nothing stands there now)."""
         with self.lock:
             if self.frame is None or self.bg is None:
                 return
-            m = np.zeros(self.bg.shape, np.uint8)
-            u, v = self._px(x, y)
-            cv2.circle(m, (int(round(u)), int(round(v))), int(round(0.85 * self.rpx * scale)), 255, -1)
-            self.bg[m > 0] = self.frame[m > 0]
+            m = self._disk_mask(self.bg.shape, [(x, y)], 0.85 * scale) > 0
+            self.bg[m] = self.frame[m] - self.offset
+            self.known[m] = 1
+
+    def expect(self, x, y, radius_cm, for_s=10.0):
+        """The runner expects the followed robot within radius_cm of (x, y) for the next for_s seconds."""
+        with self.lock:
+            self.hint = (x, y, radius_cm, time.time() + for_s)
+
+    def clear_expect(self):
+        with self.lock:
+            self.hint = None
+
+    def hold(self, radius_cm=6.0):
+        """The followed robot has been told to stand still: only accept it within radius_cm of where it is now
+        (a hand reaching in next to it, or a robot bumped into it, can't pull the tracker away)."""
+        with self.lock:
+            if self.pos is not None:
+                self.hint = (self.pos[1], self.pos[2], radius_cm, float("inf"))
 
     def follow(self, robot, x, y, t=None):
-        """Follow `robot`, now at (x, y)."""
         with self.lock:
             self.active = robot
             self.pos = (time.time() if t is None else t, x, y)
             self.protect[robot] = (x, y)
             self.last_seen = self.pos[0]
             self.misses = 0
+            self.hint = None
 
     def park(self, robot, x, y):
-        """A robot stays put at (x, y) (kept out of the background)."""
         with self.lock:
             self.protect[robot] = (x, y)
 
     def idle(self):
-        """Follow nobody for now (parked robots stay protected)."""
         with self.lock:
-            self.active, self.pos = None, None
+            self.active, self.pos, self.hint = None, None, None
 
     def forget(self, robot):
         with self.lock:
             self.protect.pop(robot, None)
             if self.active == robot:
-                self.active, self.pos = None, None
+                self.active, self.pos, self.hint = None, None, None
 
     def where(self):
         with self.lock:
             return self.pos
+
+
+def locate_change(cam, before, after, board_rect=None, margin_cm=8.0, near=None, z_cm=ROBOT_TOP_CM, min_frac=0.12):
+    """Where did something robot-sized change between two sets of frames (grey, nothing else moving)? For finding
+    a robot by a short turn on its spot: the corners of its body move, its spot stays put, so the change sits on
+    the robot and nowhere else (no empty spot left behind, unlike a drive). Medians of each set (noise), the whole
+    picture's brightness shift taken out. near: (x, y, radius cm) to look only there. Returns a list of dicts
+    (x, y, area, strength) best first; [] if nothing robot-sized changed."""
+    b = np.median(np.stack([cv2.GaussianBlur(f, (3, 3), 0).astype(np.float32) for f in before]), axis=0)
+    a = np.median(np.stack([cv2.GaussianBlur(f, (3, 3), 0).astype(np.float32) for f in after]), axis=0)
+    d = a - b
+    d -= float(np.median(d[::4, ::4]))
+    ad = np.abs(d)
+    mad = float(np.median(ad[::4, ::4]))
+    thr = max(12.0, 6.0 * 1.4826 * mad)
+    mask = (ad > thr).astype(np.uint8) * 255
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
+    cx = cy = 61.0
+    if board_rect is not None:
+        cx, cy = (board_rect[0] + board_rect[2]) / 2, (board_rect[1] + board_rect[3]) / 2
+    rpx = ROBOT_CM * cam.px_per_cm(cx, cy, z_cm)
+    area0 = rpx ** 2
+    n, lab, stats, cents = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    out = []
+    for i in range(1, n):
+        ar = int(stats[i, cv2.CC_STAT_AREA])
+        w, h = stats[i, cv2.CC_STAT_WIDTH], stats[i, cv2.CC_STAT_HEIGHT]
+        if ar < min_frac * area0 or ar > 3.0 * area0 or max(w, h) > 2.4 * rpx:
+            continue
+        u, v = cents[i]
+        x, y = cam.to_floor(u, v, z_cm)
+        if not (np.isfinite(x) and np.isfinite(y)):
+            continue
+        if board_rect is not None:
+            x0, y0, x1, y1 = board_rect
+            if not (min(x0, x1) - margin_cm <= x <= max(x0, x1) + margin_cm and
+                    min(y0, y1) - margin_cm <= y <= max(y0, y1) + margin_cm):
+                continue
+        if near is not None and math.hypot(x - near[0], y - near[1]) > near[2]:
+            continue
+        out.append(dict(x=float(x), y=float(y), area=ar, strength=float(ad[lab == i].mean()), u=float(u), v=float(v)))
+    out.sort(key=lambda c: -c["area"] * c["strength"])
+    return out
 
 
 class History:
