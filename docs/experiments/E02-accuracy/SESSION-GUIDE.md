@@ -22,12 +22,21 @@ New: the robots feel out the board first (mapping), which also measures the edge
 **GitHub Desktop:** Fetch origin, then Pull origin.
 
 ## 2. Start the recording (PI tab)
+If the PI tab's line already starts with `st1maxfini@st1maxfini`, you are on the Pi: skip the ssh line.
 ```
 ssh st1maxfini@st1maxfini.local
 ```
 ```
 cd ~/alvik-fleet-capstone && git pull
 ```
+Free the space of the 2026-10-22 morning recording (it is on GitHub, release e02-session-oct22):
+```
+rm -r ~/recordings/20261022-094915_E02
+```
+```
+df -h ~
+```
+**Avail** should be about 6 GB (1.5 hours of video needs about 4.5 GB).
 ```
 python3 tools/pi/camrec.py --device 0 --names overhead --fps 25 --label E02 --no-lock
 ```
