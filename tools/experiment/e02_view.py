@@ -11,6 +11,7 @@ drive anything.
     started by e02.py (--view-port, default 8090; 0 = off); open http://localhost:8090 on the laptop
 """
 import json
+import math
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -36,6 +37,7 @@ h1{font-size:18px;margin:0 0 8px}
 <div><span class="k">Run:</span> <span id="order">-</span></div>
 <p class="k">Green ring: the robot being followed (dashed circle: it should stand still there). Yellow dots: things
 that look like a robot. Grey dots: other changes (a hand, a shadow). Labels: robots the runner knows of.</p>
+<p id="note" class="k"></p>
 <pre id="log"></pre></div></main>
 <script>
 let busy=false;
@@ -44,6 +46,7 @@ function tick(){
     im.onerror=()=>{busy=false};im.src='/frame.jpg?t='+Date.now();}
   fetch('/status.json').then(r=>r.json()).then(s=>{
     for(const k of ['phase','active','order'])document.getElementById(k).textContent=s[k]||'-';
+    document.getElementById('note').textContent=s.note||'';
     document.getElementById('log').textContent=(s.log||[]).join('\\n');}).catch(()=>{});
 }
 setInterval(tick,400);
@@ -76,18 +79,21 @@ class LiveView:
                 path = self.path.split("?")[0]
                 try:
                     if path == "/":
-                        body, ctype = PAGE.encode(), "text/html; charset=utf-8"
+                        body, ctype = view.page("main").encode(), "text/html; charset=utf-8"
                     elif path == "/frame.jpg":
                         body, ctype = view.frame_jpg(), "image/jpeg"
                     elif path == "/lab":
-                        body, ctype = LAB_PAGE.encode(), "text/html; charset=utf-8"
+                        body, ctype = view.page("lab").encode(), "text/html; charset=utf-8"
                     elif path == "/lab.json":
                         body, ctype = json.dumps(view.lab_state()).encode(), "application/json"
                     elif path == "/status.json":
                         body, ctype = json.dumps(view.status()).encode(), "application/json"
                     else:
-                        self.send_error(404)
-                        return
+                        extra = view.extra_get(self.path)
+                        if extra is None:
+                            self.send_error(404)
+                            return
+                        body, ctype = extra
                 except Exception as e:          # never break the session over a picture
                     body, ctype = ("view error: %s" % e).encode(), "text/plain"
                 self.send_response(200)
@@ -108,6 +114,14 @@ class LiveView:
         if self.srv:
             self.srv.shutdown()
 
+    # hooks for e02_replay_view.py (the live view serves the pages as they are and nothing else)
+    def page(self, name):
+        return PAGE if name == "main" else LAB_PAGE
+
+    def extra_get(self, path):
+        """Another GET path: (body bytes, content type), or None for a 404."""
+        return None
+
     def lab_state(self):
         import e02_live as LIVE
         r = self.r
@@ -122,10 +136,16 @@ class LiveView:
         tr = r.tracker
         with self.lock:
             log = list(self.lines)
+        note = BRICKS_NOTE if getattr(r, "bricks_view", None) else ""
         return dict(phase=getattr(r, "phase", ""), order=getattr(r, "order", ""),
-                    active=(tr.active if tr is not None and tr.active else ""), log=log, t=time.time())
+                    active=(tr.active if tr is not None and tr.active else ""), log=log, t=time.time(), note=note)
 
     def frame_jpg(self):
+        ok, buf = cv2.imencode(".jpg", self.frame_bgr(), [cv2.IMWRITE_JPEG_QUALITY, 80])
+        return buf.tobytes()
+
+    def frame_bgr(self):
+        """The picture with the runner's view drawn on it (BGR)."""
         r = self.r
         img = r.feed.last_img if r.feed is not None else None
         if img is None:
@@ -168,6 +188,9 @@ class LiveView:
                         k = cam.px_per_cm(fs["x"], fs["y"], 3.7)
                         ax = (max(1, int(fs["sd_major_cm"] * k)), max(1, int(fs["sd_minor_cm"] * k)))
                         cv2.ellipse(v, p, ax, -fs["angle_deg"], 0, 360, (255, 0, 255), 1)
+            bv = getattr(r, "bricks_view", None)
+            if bv:
+                draw_bricks(v, cam, bv)
             m = (r.st.get("setup") or {}).get("map") or {}
             for ray in m.get("rays", []):
                 s0, pt = ray.get("cam_start"), ray.get("point")
@@ -175,8 +198,61 @@ class LiveView:
                     a, b = px(s0[0], s0[1]), px(pt[0], pt[1])
                     if a and b:
                         cv2.line(v, a, b, (0, 0, 255) if ray.get("kind") == "edge" else (255, 160, 0), 1)
-        ok, buf = cv2.imencode(".jpg", v, [cv2.IMWRITE_JPEG_QUALITY, 80])
-        return buf.tobytes()
+        return v
+
+
+BRICKS_NOTE = ("Brick demo: red outlines = the bricks the camera found; dashed red = the room kept round them; blue "
+               "line = the planned path (white dot: start, white ring: goal); orange = crossing 1 (wheels and gyro "
+               "only); green = crossing 2 (with camera fixes).")
+
+
+def draw_bricks(v, cam, bv):
+    """The brick demo on a BGR picture (in place): bricks' outlines, the planned path, start and goal, and each
+    crossing's camera track. bv: dict(bricks [dict(outline)], room_cm, path [(x, y)], start, goal,
+    tracks {1: [(x, y)], 2: [...]})."""
+    def px(x, y):
+        u, w = cam.project((x, y, 0.0))
+        return (int(round(u)), int(round(w))) if np.isfinite(u) and np.isfinite(w) else None
+    for b in bv.get("bricks") or []:
+        pts = [px(*q) for q in b.get("outline") or []]
+        pts = [q for q in pts if q]
+        if len(pts) >= 3:
+            cv2.polylines(v, [np.array(pts, np.int32)], True, (40, 40, 230), 2, cv2.LINE_AA)
+        room = bv.get("room_cm")
+        if room and b.get("outline"):
+            # the room kept round the brick: its outline pushed out by room_cm (drawn dashed)
+            o = np.array(b["outline"], float)
+            c = o.mean(axis=0)
+            ring = []
+            for k in range(0, 360, 12):
+                d = np.array([math.cos(math.radians(k)), math.sin(math.radians(k))])
+                ext = float(np.max((o - c) @ d))
+                q = px(*(c + d * (ext + room)))
+                if q:
+                    ring.append(q)
+            for a, b2 in list(zip(ring, ring[1:] + ring[:1]))[::2]:
+                cv2.line(v, a, b2, (60, 60, 200), 1, cv2.LINE_AA)
+    cols = {1: (0, 140, 255), 2: (80, 220, 80), "1": (0, 140, 255), "2": (80, 220, 80)}
+    for k, tr in (bv.get("tracks") or {}).items():
+        pts = [px(*q[-2:]) for q in tr]
+        pts = [q for q in pts if q]
+        if len(pts) >= 2:
+            cv2.polylines(v, [np.array(pts, np.int32)], False, cols.get(k, (200, 200, 200)), 2, cv2.LINE_AA)
+    path = [px(*q) for q in bv.get("path") or []]
+    path = [q for q in path if q]
+    if len(path) >= 2:
+        cv2.polylines(v, [np.array(path, np.int32)], False, (255, 160, 40), 2, cv2.LINE_AA)
+        for q in path[1:-1]:
+            cv2.circle(v, q, 3, (255, 160, 40), -1)
+    if bv.get("start"):
+        q = px(*bv["start"])
+        if q:
+            cv2.circle(v, q, 4, (255, 255, 255), -1)
+    if bv.get("goal"):
+        q = px(*bv["goal"])
+        if q:
+            cv2.circle(v, q, 7, (255, 255, 255), 2)
+    return v
 
 
 LAB_PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Live lab</title>
