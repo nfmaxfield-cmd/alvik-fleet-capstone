@@ -29,8 +29,8 @@ logic more generic for other equipment and sensors.
       line sensors off the plywood at the start = no forward drive that run (simulator mirrored)
 - [x] 1-3: tracker: search circle grows for at most 0.6 s (was 1 s) at 30 cm/s (was 40); another robot's zone
       1.1 robot widths (was 0.8); pieces within 0.8 robot widths merged; a held robot's floor never learned within
-      1.35 robot widths; each leg tells the tracker where the robot can be (turn: 7 cm; drive d: d + 8 cm)
-- [ ] Left by the x-board (footage 10:40:18-10:41) is still unseen most of the time: its outline joins the board's
+      1.35 robot widths (1.25 while it moves); a held robot whose spot looks unchanged counts as seen; each leg tells the tracker where the robot can be (turn: 7 cm; drive d: d + 8 cm)
+- [ ] Left by the x-board (footage 10:40:30-10:41) is still unseen most of the time (replay of 10:39:58-10:40:55: seen 60% of frames, was 20%): its outline joins the board's
       edge and fails the shape check. Next: a shape check that allows for a board beside it.
 - [ ] 9 (the bad find check), 8
 - [ ] Nick's ideas: front-sensor board check while driving; robot-to-robot check; finder robot sweep; the lost

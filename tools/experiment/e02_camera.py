@@ -316,6 +316,7 @@ class MotionTracker:
     UNKNOWN_EXTRA = 14.0        # extra threshold on floor that was filled in, not seen
     ABSORB_S = 25.0             # something new standing still this long, where no robot is, becomes floor
     COVER_SCALE = 1.35          # the followed robot's floor is never learned within this many robot widths of it
+    COVER_MOVING = 1.25          # ... and while it moves
     GATE_GROW_S = 0.6           # a lost robot's search circle grows with time for at most this long
     OTHER_CM = 1.1 * ROBOT_CM   # an outline this near another robot's last place is that robot (two touching: 9.5-13)
     MERGE_CM = 0.8 * ROBOT_CM   # robot-shaped outlines this near each other are one robot
@@ -389,7 +390,7 @@ class MotionTracker:
             # (only while it is held still: moving, its pixels never stand still long enough to be learned, and
             # the floor it uncovers must be learned at once; real clip hand_near_center)
             held = self.hint is not None and self.hint[3] == float("inf")
-            m |= self._disk_mask(shape, [(self.pos[1], self.pos[2])], self.COVER_SCALE if held else 1.0)
+            m |= self._disk_mask(shape, [(self.pos[1], self.pos[2])], self.COVER_SCALE if held else self.COVER_MOVING)
         if self.active is not None and self.pos is not None and self.frame_t is not None and \
                 self.frame_t - self.last_seen > 0.3:
             # lost for a moment: don't learn anything near where it may be now
@@ -491,6 +492,12 @@ class MotionTracker:
                     score = d - 3.0 * c["moving"]
                     if best is None or score < best[0]:
                         best = (score, c["x"], c["y"])
+                if best is None and self.hold_ref is not None and not self.disturbed and \
+                        self.hint is not None and self.hint[3] == float("inf"):
+                    # held still and the picture where it stands has not changed since it stopped: it is still
+                    # there, even when its outline against the floor memory is not robot-shaped just now (by a
+                    # board's edge, or with a ghost of itself in the floor: 2026-10-22 footage 10:40:11-16)
+                    best = (0.0, self.hint[0], self.hint[1])
                 if best is not None:
                     self.pos = (t, best[1], best[2])
                     self.protect[self.active] = (best[1], best[2])
