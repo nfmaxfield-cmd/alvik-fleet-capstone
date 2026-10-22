@@ -98,6 +98,7 @@ CHECK_CM, CHECK_FRAC = 5.0, 0.35   # camera vs wheels: a go leg's distances may 
 ID_EXTRA_CM = 5.0                  # ...plus this on the first leg after a turn on the spot (its centre is rougher)
 PARK_LEG_CM = 60.0        # parking: long legs on the robot's own wheels and gyro, the camera checks in between
 STALE_S = 1.5             # a camera position older than this is not used to steer
+ASIDE_PARK_CM = 15.0      # a robot put aside further than this from its park spot is driven there (own pose)
 BLIND_CLEAR_CM = 35.0     # ... leaving the corner: first to this far from both boards
 BLIND_PIECE_CM = 15.0     # driving blind (own wheels and gyro): drives no longer than this
 BLIND_EDGE_CM = 15.0      # ... never to a point nearer an open edge than this
@@ -1497,7 +1498,22 @@ class Runner:
         self.say("  %s stays where it is, at about (%.0f, %.0f) cm; the others go round it." % (robot, p[0], p[1]))
         self.st.save()
         fx, fy = self.board.find_stage()
-        if math.hypot(p[0] - fx, p[1] - fy) < BLOCKS_FIND_CM:
+        kx, ky, _ = self.board.park(self.park_index(robot))
+        in_corner = math.hypot(p[0] - fx, p[1] - fy) < BLOCKS_FIND_CM
+        if not in_corner and math.hypot(p[0] - kx, p[1] - ky) > ASIDE_PARK_CM:
+            # put aside out on the board (dry run 15:01: at (73, 62), where the routes run; the next run's watchdog
+            # stopped it): drive it to its own spot on its own pose; if that fails it stays where it is
+            self.say("  %s is put aside out on the board, where the routes run: moving it to its spot ..." % robot)
+            q = self.drive_out(robot)
+            if q is not None:
+                self.st["positions"][robot] = [q[0], q[1], None]
+                if self.tracker is not None:
+                    self.tracker.robot_at(q[0], q[1])
+                    self.tracker.park(robot, q[0], q[1])
+                self.say("  %s stays at about (%.0f, %.0f) cm; the others go round it." % (robot, q[0], q[1]))
+                self.st.save()
+            return
+        if in_corner:
             # dry run 13:15: a robot put aside by the blocked corner, where every find drives: every run after it
             # failed its find. Nick (2026-10-22): drive it out blind first (its own pose, landmarks, retracing),
             # then the finder sweep and its own find; stop only if all of that fails.
