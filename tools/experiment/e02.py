@@ -312,6 +312,7 @@ class Runner:
         self.feed = self.tracker = self.history = self.cam = self.board = None
         self.front_seen = {}                 # "all" -> [front reading - map distance]
         self.front_bad = {}                  # robot -> words: the last leg's front reading disagreed with the map
+        self.fix_t = {}                      # robot -> when the camera last told it where it is
         self.lost_place = set()              # robots that moved unseen with no trusted pose since (a failed own find)
 
     # --- talking ----------------------------------------------------------------------------------
@@ -503,6 +504,7 @@ class Runner:
             return None
         h = heading if heading is not None else self.heads.get(robot, [None])[0]
         self.send(robot, "fix %.2f %.2f %s %.3f" % (p[0], p[1], "-" if h is None else "%.1f" % h, time.time()))
+        self.fix_t[robot] = time.time()
         time.sleep(0.15)
         return p
 
@@ -1439,6 +1441,12 @@ class Runner:
     def own_pose(self, robot, since=0.0):
         """The robot's own position (x, y, heading) from its last finished leg: wheels and gyro since the last
         camera fix or find, in the board's frame. None if it has not reported one."""
+        last_find = self.listener.latest("FIND", robot)
+        if last_find and (last_find[1].get("result") or "") != "ok" and \
+                self.fix_t.get(robot, 0.0) < last_find[0]:
+            # its last find failed and no camera fix since: every pose it reports after it is untrusted too (dry
+            # run 16:52: a turn on its spot after the failed find gave a pose at the board's line)
+            return None
         r = self.listener.latest("LEG", robot, since)
         f = self.listener.latest("FIND", robot, since)
         if f and (not r or f[0] >= r[0]):
@@ -1631,6 +1639,7 @@ class Runner:
                     if step == self.sweep_for:      # (bound methods: equal, never identical)
                         # its position is known now (heading not): tell it, then drive out on its gyro's heading
                         self.send(robot, "fix %.2f %.2f - %.3f" % (found[0], found[1], time.time()))
+                        self.fix_t[robot] = time.time()
                         time.sleep(0.2)
                 q = self.drive_out(robot)
                 if q is not None and math.hypot(q[0] - fx, q[1] - fy) >= BLOCKS_FIND_CM:
