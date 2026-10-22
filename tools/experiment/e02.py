@@ -2886,6 +2886,12 @@ class Runner:
         ok = end["result"] == "done" and (fr is None or result == "ok")
         out = dict(ok=ok, run=run, t0=t0, t1=t1, result=result, runend=end["result"],
                    words="found itself" if ok else "find did not finish (%s, %s)" % (result, end["result"]))
+        if ok:
+            self.lost_place.discard(robot)
+        elif self.pos(robot, fresh_s=2.0) is None:
+            # a failed find the camera did not see the end of: the robot is somewhere it drove unseen (dry run
+            # 16:41: its setup find ended at an open edge while hidden; the runner kept its old place)
+            self.lost_place.add(robot)
         # where the camera saw it touch each board
         lines = {}
         raw = self.listener.raw.get(run) or []
