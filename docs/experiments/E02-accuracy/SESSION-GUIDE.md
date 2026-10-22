@@ -51,6 +51,9 @@ in the LAPTOP tab (everything is saved; `run-e02.bat` offers to carry on). After
 if it needs you, it says exactly what to do, and after a wait it puts that robot aside and carries on.
 
 ## 6. The end
+**Start copying the footage straight away** (Nick, 2026-10-21): it takes 10+ minutes, so it runs while the
+next steps are discussed. Claude gives the copy and upload steps first, before anything else.
+
 The runner says when it's done. Then in the PI tab press **Ctrl + C** to stop the recording, and copy
 the recording and the logs as before (or upload them to a GitHub release); the analysis runs from them.
 
