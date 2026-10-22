@@ -59,6 +59,12 @@ be stitched); that sensor noise is steady enough to put in a profile (it changed
 What each session or build showed about what is specific to the Alvik and this board, and what would carry over.
 Newest first.
 
+### 2026-10-22 afternoon (no session; simulator)
+- **Carries over:** driving a robot on its own dead-reckoned pose when no camera sees it, with landmark checks from
+  any range sensor against the map; a recovery ladder that ends in "get it out of the way", not just "find it".
+- **Specific:** the find corner as the one place a stuck robot blocks everything (a site profile item: "areas that
+  must stay clear"); Alvik LEG records carry the robot's own pose (a robot-profile item: "reports its own pose").
+
 ### 2026-10-22 (session 3 and the build after it)
 - **Specific to the Alvik:** the line sensors read tape and "off the plywood" alike (firmware 22b now treats all
   three high at the start as no floor); the tyres slip at ~96% speed against a board, so a bump is felt by touch,

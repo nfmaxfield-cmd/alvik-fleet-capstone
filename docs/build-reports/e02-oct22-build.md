@@ -97,3 +97,24 @@ session with plain words ("take it off the board, then --resume") instead of fai
 found itself, parked, 2 runs done, no help call. Why the camera lost the turning robot in the corner that once is
 not known yet (to check on the next real footage).
 
+## Appendix: afternoon additions (Nick, 14:22: "begin building all that")
+- **Front sensor, from data for now:** offset FRONT_OFFSET_CM 0 and tolerance FRONT_TOL_CM 8 cm (no real readings
+  yet; the next session's report prints the values to put in). A disagreement of 1.5 tolerances with a measured
+  heading makes the runner find the robot again. `--front-learn` (off) learns them in the session instead.
+  **Note (Nick): switch to `--front-learn` once the from-scratch setup can stand on it.**
+- **Drive out blind:** a robot put aside in the find corner, or out on the board away from its spot, drives to its
+  spot on its own wheels and gyro: first straight away from both boards, then round the other robots; short drives,
+  the front stop and edge guard on, and its front sensor checked against the boards and robots its own pose says are
+  ahead (landmarks). If that fails it retraces its drives since its last find. Then the finder sweep, then its own
+  find, each followed by a drive out; the session stops only if all of that fails in the find corner.
+- **Second review (14:40), 7 findings, all fixed:** two of three park spots failed the blind-drive edge check (it
+  checked the board sides too); the sweep and the robot's own find never moved it out of the corner; with no clear
+  path it drove straight through other robots; retracing could undo its own blind drives back into the corner;
+  stale front-sensor flags made needless re-finds; an untrusted pose (failed find, power cycle) was used; small
+  bookkeeping (unreached waypoint, the moves list).
+- **Dry runs with Left hidden from the camera** found three more, fixed: the runner kept a robot at its stale park
+  spot after it had driven itself into the corner; a failed find's end pose put Left at (99, 162), off the board;
+  a robot put aside in the middle of the board stopped the next run (its watchdog). Each fix was re-run.
+- **Analysis:** report.md gains "Setup and recovery" (front sensor against the map with suggested settings; retries,
+  sweeps, own finds, drive-outs and help calls per robot). **Second-camera plan:** docs/build-plans/second-camera-plan.md.
+
