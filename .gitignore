@@ -36,3 +36,4 @@ Thumbs.db
 # Trained models: large, rebuilt by tools/detector/train.py
 *.pt
 *.onnx
+tools/experiment/data/clips/

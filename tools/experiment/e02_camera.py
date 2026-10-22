@@ -348,6 +348,9 @@ class MotionTracker:
         self.k_close = np.ones((7, 7), np.uint8)
         self.last_cands = []
         self.n = 0
+        self.hold_ref = None                    # (mask, picture there) when the robot was told to stand still
+        self.disturbed = False                  # something moved over a robot that should stand still
+        self.moved_by_hand = 0                  # times a held robot was found moved (it is then "lost")
 
     # --- geometry --------------------------------------------------------------------------------
     def _px(self, x, y):
@@ -454,6 +457,8 @@ class MotionTracker:
             if self.n % 5 == 0:
                 self._update_offset(g)
             out = None
+            if self.hold_ref is not None and self.active is not None and self.pos is not None:
+                self._check_held(g, motion)
             if self.active is not None and self.pos is not None:
                 cands = self.candidates(g, motion)
                 self.last_cands = cands
@@ -487,6 +492,24 @@ class MotionTracker:
             if not self.frozen:
                 self._learn(g, dt_frame)
             return out
+
+    def _check_held(self, g, motion):
+        """A robot told to stand still: is the picture where it stands still the same as when it stopped? If it
+        stays different (and nothing is moving there any more) for STABLE_FRAMES, it was picked up or pushed: it is
+        lost (the runner finds it again by a turn or its lights) instead of the tracker holding on to the empty
+        spot (2026-10-22, real footage 22:44:43: Nick lifted Center). The picture's overall brightness shift is
+        taken out first."""
+        m, ref, off0 = self.hold_ref
+        diff = float(np.mean(np.abs((g[m] - self.offset) - (ref - off0))))
+        if diff > 12.0 and float(motion[m].mean()) < 0.08:
+            self.disturbed = (self.disturbed or 0) + 1
+        else:
+            self.disturbed = 0
+        if self.disturbed >= self.STABLE_FRAMES:
+            self.moved_by_hand += 1
+            self.protect.pop(self.active, None)
+            self.pos, self.hint, self.hold_ref = None, None, None
+            self.disturbed = 0
 
     def _init_floor(self, gs):
         self.bg = np.median(np.stack(gs), axis=0).astype(np.float32) if len(gs) > 1 else gs[0].copy()
@@ -565,6 +588,7 @@ class MotionTracker:
     def clear_expect(self):
         with self.lock:
             self.hint = None
+            self.hold_ref = None
 
     def hold(self, radius_cm=6.0):
         """The followed robot has been told to stand still: only accept it within radius_cm of where it is now
@@ -573,8 +597,12 @@ class MotionTracker:
         with self.lock:
             if self.pos is not None and self.frame_t is not None and self.frame_t - self.last_seen < 0.5:
                 self.hint = (self.pos[1], self.pos[2], radius_cm, float("inf"))
+                m = self._disk_mask(self.frame.shape, [(self.pos[1], self.pos[2])], 1.1) > 0
+                self.hold_ref = (m, self.frame[m].copy(), self.offset)
+                self.disturbed = 0
             else:
                 self.hint = None
+                self.hold_ref = None
 
     def clear_protect(self):
         with self.lock:
