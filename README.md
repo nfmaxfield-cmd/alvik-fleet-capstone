@@ -15,6 +15,10 @@ implementation:
 Andrew's code is not copied here. It will only be added with his permission, since
 his repos carry no license.
 
+## Time tracking
+Every task expected to run over 10 minutes: estimate + questions to Nick first, and a row in `TIME.md` in the
+tower-defense-rpg repo (beside its `USAGE.md`), the one time record for all of Nick's projects.
+
 ## Goal
 
 How much does adding sensors improve an Alvik's locational accuracy? A series
