@@ -168,3 +168,9 @@ def test_mapping_fits_each_side_and_leaves_out_parked_robots():
     assert sides["x=122.15"]["value"] == pytest.approx(122.4, abs=0.6)
     assert sides["y=0"]["kind"] == "edge" and sides["x=0"]["kind"] == "edge"
     assert sides["y=121.9"]["n"] == 5
+
+
+def test_rays_towards_a_parked_robot_are_skipped():
+    assert MAP.ray_blocked((61.0, 61.0), 135.0, [("Right", (20.0, 100.0))]) == "Right"
+    assert MAP.ray_blocked((61.0, 61.0), -45.0, [("Right", (20.0, 100.0))]) == ""
+    assert MAP.ray_blocked((61.0, 61.0), 0.0, [("Center", (110.0, 75.0))]) == "Center"

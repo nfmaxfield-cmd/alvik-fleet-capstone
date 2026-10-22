@@ -111,7 +111,15 @@ class World:
             rb = FS.LiveRobot(n, cfg, random.Random(rng.random()), params, fw, now - rng.uniform(60, 600),
                               rng.randrange(0x1000, 0x10000), ip)
             rb.idle_until(now)
-            px, py, ph = bd.park(k)
+            if args.start == "swapped":         # each on the next one's park spot (all spots taken: 2026-10-21)
+                px, py, ph = bd.park((k + 1) % len(names))
+            elif args.start == "scatter":       # anywhere open, as Nick puts them down now
+                while True:
+                    px, py, ph = rng.uniform(30, 92), rng.uniform(30, 92), rng.uniform(-180, 180)
+                    if all(math.hypot(px - o.x, py - o.y) > 30 for o in self.robots):
+                        break
+            else:
+                px, py, ph = bd.park(k)
             rb.x, rb.y = px + rng.uniform(-6, 6), py + rng.uniform(-4, 4)
             rb.th = math.radians(ph + rng.uniform(-15, 15))
             rb._record()
@@ -339,6 +347,8 @@ def main(argv=None):
     ap.add_argument("--out", default="e02_sim_out")
     ap.add_argument("--robots", default="Left,Center,Right")
     ap.add_argument("--seed", type=int, default=2)
+    ap.add_argument("--start", default="parks", choices=["parks", "swapped", "scatter"],
+                    help="where the robots stand at the start: near their park spots, each on another's, or anywhere")
     ap.add_argument("--fps", type=float, default=15.0)
     ap.add_argument("--px-per-cm", type=float, default=2.34, help="camera scale on the floor (real footage: 2.34)")
     ap.add_argument("--tilt", type=float, default=3.0, help="camera tilt from straight down, deg")

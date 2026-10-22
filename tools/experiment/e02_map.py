@@ -29,6 +29,21 @@ def ray_headings(n=16, offset_deg=11.25):
     return [((offset_deg + 360.0 * k / n + 180.0) % 360.0) - 180.0 for k in range(n)]
 
 
+def ray_blocked(start, heading_deg, others, clear_cm=22.0, length_cm=RAY_CM):
+    """Name of the first robot standing within clear_cm of the ray (it would stop the ray, or the camera watchdog
+    would), or ''. others: [(name, (x, y))]."""
+    ux, uy = math.cos(math.radians(heading_deg)), math.sin(math.radians(heading_deg))
+    best = None
+    for n, (x, y) in others:
+        t = (x - start[0]) * ux + (y - start[1]) * uy
+        if t < 0 or t > length_cm:
+            continue
+        d = abs(-(x - start[0]) * uy + (y - start[1]) * ux)
+        if d < clear_cm and (best is None or t < best[0]):
+            best = (t, n)
+    return best[1] if best else ""
+
+
 def stop_kind(leg_state, info):
     """What ended a ray leg: 'edge', 'board' (front stop) or None (done: nothing met, or something else)."""
     text = (info or "").lower()

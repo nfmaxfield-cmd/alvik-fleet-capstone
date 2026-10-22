@@ -1266,7 +1266,13 @@ class Runner:
         rays = []
         self.watch_edge_cm = 0.0
         try:
+            others = [(n, tuple(q[:2])) for n, q in st["positions"].items() if n != robot and q]
             for k, h in enumerate(MAP.ray_headings(n_rays)):
+                blocker = MAP.ray_blocked(mid, h, others)
+                if blocker:
+                    self.say("  ray %2d, %4.0f deg: skipped (%s is parked that way)" % (k + 1, h, blocker))
+                    rays.append(dict(k=k, heading=round(h, 1), skipped=blocker, kind=None))
+                    continue
                 p = self.settle(min_s=0.3)
                 if p is None:
                     break
@@ -2293,6 +2299,8 @@ def main(argv=None):
     ap.add_argument("--map-only", action="store_true", help="setup and the mapping only, then stop")
     ap.add_argument("--map-rays", type=int, default=16)
     ap.add_argument("--map-robot", default="", help="which robot maps (default: the first)")
+    ap.add_argument("--dry-start", default="parks", choices=["parks", "swapped", "scatter"],
+                    help="dry run: where the simulated robots stand at the start")
     ap.add_argument("--calib", help="floor calibration file (default: the studio project's cameras/overhead.json)")
     ap.add_argument("--project", help="the studio project folder (default Documents\\recognition-project)")
     ap.add_argument("--make-calibration", action="store_true", help="make one from the board corners even if one exists")
@@ -2463,7 +2471,8 @@ def start_sim(state, sdir):
     sides = (state["setup"].get("args") or {}).get("board_sides") or "1,1"
     sim = subprocess.Popen([sys.executable, os.path.join(HERE, "e02_sim.py"), "--out", simdir,
                             "--xboard-side", sides.split(",")[0], "--yboard-side", sides.split(",")[1],
-                            "--robots", ",".join(state["robots"]), "--seed", str(state["seed"] % 1000 + 1)],
+                            "--robots", ",".join(state["robots"]), "--seed", str(state["seed"] % 1000 + 1),
+                            "--start", (state["setup"].get("args") or {}).get("dry_start") or "parks"],
                            stdout=open(os.path.join(simdir, "sim_stdout.txt"), "a"), stderr=subprocess.STDOUT)
     t0 = time.time()
     while time.time() - t0 < 40 and not os.path.exists(os.path.join(simdir, "sim_info.json")):
