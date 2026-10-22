@@ -427,7 +427,8 @@ def build(proj, rec, session, say=print):
                             text=al.describe()))
     out = dict(made=time.strftime("%Y-%m-%dT%H:%M:%S"), plugin=data.plugin, path=st["path"], camera_file=cam_path,
                names={str(o): nm for o, nm in all_names.items()}, summary=summary,
-               notes=list(data.notes) + ([clock_found["text"]] if clock_found else []),
+               notes=list(data.notes) + ([clock_found["text"]] if clock_found else []) +
+               [al.calib_note for _, al in sorted(als.items()) if getattr(al, "calib_note", None)],
                clock=data.clock, clock_found=clock_found, n=n, labelled_frames=len(labelled), frames=compact,
                units=units, offset_s=float(st.get("offset_s") or 0.0))
     dp = os.path.join(proj.labels_dir(rec["id"]), DRAFTS_FILE)

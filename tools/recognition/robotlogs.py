@@ -28,7 +28,10 @@ yaw_sign, continuous over the whole boot; odometry th_deg when there is no yaw).
 are not placed and start a new segment (the robot was carried: its position must be found again).
 
 Alvik knowledge used here (and only here): heading sign columns, run resets, the gyro under-reporting
-turns by ~7.5 % (docs/session-notes/2026-10-19.md: prior gyro scale 1.08), the T1 wheel scale ~0.979.
+turns by ~7 % (prior gyro scale 1.07: measured on real footage as camera turn / gyro turn, 1.069 Left and
+1.075 Right, docs/session-notes/2026-10-21-real-footage.md; 1.08 on Oct 19), the T1 wheel scale ~0.979.
+These are used as they are; the aligner fits its own only when the labels clearly do better with them
+(outside.Aligner.fit_calibration).
 """
 import csv
 import glob
@@ -50,7 +53,7 @@ RESET_TURN_DEG = 3.0          # a heading jump this big across a run boundary is
 NEW_SEGMENT_GAP_S = 30.0      # no rows for this long: it may have been moved by hand meanwhile
 STILL_CM = 0.1                # less than this driven over STILL_WINDOW_S counts as still
 STILL_WINDOW_S = 0.5
-ALVIK_PRIORS = dict(g=1.08, g_sd=0.04, d=0.0, d_sd=0.4, s=0.979, s_sd=0.02)
+ALVIK_PRIORS = dict(g=1.07, g_sd=0.03, d=0.0, d_sd=0.4, s=0.979, s_sd=0.02, **{"from": "measured on Alviks"})
 
 
 def _f(v, default=math.nan):
@@ -402,9 +405,9 @@ def _robot_stream(name, rows, signs, fits, to_wall, corr, use_gyro, folder, rena
     still = (np.abs(b - a) < STILL_CM) & (np.abs(hb - ha) < 0.5)
     priors = dict(ALVIK_PRIORS)
     if corr.get("gyro_scale") and abs(corr["gyro_scale"] - 1.0) > 1e-6:
-        priors.update(g=corr["gyro_scale"], g_sd=0.02)
+        priors.update(g=corr["gyro_scale"], g_sd=0.02, **{"from": "the robot's param.csv"})
     if corr.get("wheel_scale") and abs(corr["wheel_scale"] - 1.0) > 1e-6:
-        priors.update(s=corr["wheel_scale"], s_sd=0.01)
+        priors.update(s=corr["wheel_scale"], s_sd=0.01, **{"from": "the robot's param.csv"})
     if not sign_known:
         notes.append("%s: heading sign not checked on some runs (no compass check): fitted from the anchors" % name)
     if "arrival times" in used_clock:

@@ -617,10 +617,101 @@ def read_frames_at(video_path, wanted, progress=None):
     return out
 
 
+SIZE_METHOD = 2             # 2: measure_object_sizes (Oct 22); 1: compact blobs only (failed on real footage)
+SIZE_STRONG_FRAC = 0.45      # size: a blob's pixels count when they differ by this x its strong (90th pct) change
+SIZE_MAX_ASPECT = 1.5        # size: a robot's outline is about square (motion blur stretches it a little)
+SIZE_MIN_FILL = 0.25         # size: at least this share of the outline's inside differs (else it is speckle)
+SIZE_MIN_PX = 8.0            # size: smaller outlines are specks, not objects
+SIZE_MIN_PLACES = 4          # size: needs objects seen at this many different places
+
+
+def measure_object_sizes(frame, bg, p):
+    """Outline sizes of the objects in one frame against an empty-floor picture, for measuring the
+    object size. Returns dicts x, y, side (px: the short side of the smallest rectangle around the
+    object), size (sqrt of the outline's area), fill, aspect.
+
+    Made for real footage, where find_blobs' area is not the object's size: a grey robot on a pale
+    board differs from the floor mostly along its dark edges, so its blob is a ring or a U with the
+    middle missing (area too small, solidity too low); and the board around a robot is often a little
+    lighter than in the background (a light halo, mostly on one side), which joins the blob and makes
+    it bigger. So, per blob (pieces of one broken outline grouped): keep only the pixels that differ
+    strongly for THAT blob, and only on the side (darker or lighter than the floor) that carries most of
+    the change (a halo is weak, and on the other side), take the outline around all of them (it closes
+    the ring), and measure its short side (blur on one side lengthens the long side only)."""
+    h, w = frame.shape[:2]
+    d_bg = diff_image(frame, bg)
+    g = _gain(frame, bg).astype(np.float32)
+    darker = (cv2.transform(bg, np.diag(g)).astype(np.float32) - frame.astype(np.float32)).mean(axis=2) > 0
+    thr = _threshold(d_bg, p)
+    fg = (d_bg > thr).astype(np.uint8)
+    fg = cv2.morphologyEx(fg, cv2.MORPH_OPEN, _K3)
+    fg = cv2.morphologyEx(fg, cv2.MORPH_CLOSE, _K5)
+    # pieces of one object's broken outline are measured together (the grouping margin itself is not
+    # measured: only pixels that differ count)
+    group = cv2.dilate(fg, _K5, iterations=2)
+    contours, _ = cv2.findContours(group, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    out = []
+    for c in contours:
+        x, y, bw, bh = cv2.boundingRect(c)
+        if x <= 1 or y <= 1 or x + bw >= w - 1 or y + bh >= h - 1:
+            continue                      # cut off by the picture's edge: not its whole size
+        x0, y0, x1, y1 = x, y, x + bw, y + bh
+        region = np.zeros((y1 - y0, x1 - x0), np.uint8)
+        cv2.drawContours(region, [c - [x0, y0]], -1, 1, -1)
+        inside = (region > 0) & (fg[y0:y1, x0:x1] > 0)
+        if inside.sum() < 0.5 * SIZE_MIN_PX * SIZE_MIN_PX:
+            continue
+        d = d_bg[y0:y1, x0:x1]
+        strong = max(thr, SIZE_STRONG_FRAC * float(np.percentile(d[inside], 90)))
+        m = (d > strong) & inside
+        # the outline is the side of the change that carries most of it (darker than the floor for a dark
+        # robot; a halo is the other side, lighter)
+        dk = darker[y0:y1, x0:x1]
+        m &= dk if float(d[m & dk].sum()) >= float(d[m & ~dk].sum()) else ~dk
+        m = m.astype(np.uint8)
+        n, lab, st, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
+        keep = np.isin(lab, [k for k in range(1, n) if st[k, cv2.CC_STAT_AREA] >= 6])
+        ys, xs = np.nonzero(keep)
+        if len(xs) < 20:
+            continue
+        hull = cv2.convexHull(np.column_stack([xs, ys]).astype(np.int32))
+        hull_area = cv2.contourArea(hull) + 0.5 * cv2.arcLength(hull, True) + 1.0   # in whole pixels
+        (cx, cy), (rw, rh), _ = cv2.minAreaRect(hull)
+        side, long_ = min(rw, rh) + 1.0, max(rw, rh) + 1.0
+        out.append(dict(x=float(cx + x0), y=float(cy + y0), side=float(side), size=math.sqrt(hull_area),
+                        fill=len(xs) / hull_area, aspect=long_ / side))
+    return out
+
+
+def object_size_from_measurements(meas, min_places=SIZE_MIN_PLACES):
+    """The object size (px) from measure_object_sizes() of frames spread over a recording, or None.
+
+    Each place counts once (a robot parked for minutes, or a thing that is always there, is one vote,
+    not one per frame), as the median side measured there; the answer is the median over places, after
+    leaving out places far from a first median (specks, two robots touching)."""
+    ok = [m for m in meas if m["aspect"] < SIZE_MAX_ASPECT and m["fill"] > SIZE_MIN_FILL and m["side"] >= SIZE_MIN_PX]
+    places = []
+    for m in ok:
+        for pl in places:
+            if math.hypot(pl["x"] - m["x"], pl["y"] - m["y"]) < 0.5 * max(m["side"], pl["side0"]):
+                pl["v"].append(m["side"])
+                break
+        else:
+            places.append(dict(x=m["x"], y=m["y"], side0=m["side"], v=[m["side"]]))
+    if len(places) < min_places:
+        return None
+    sides = [float(np.median(pl["v"])) for pl in places]
+    first = float(np.median(sides))
+    near = [s for s in sides if 0.65 * first <= s <= 1.5 * first]
+    if len(near) < min_places:
+        return None
+    return float(np.median(near))
+
+
 def estimate_robot_size(video_path, n_frames=None, params=None, progress=None):
     """Robot size in pixels from ~40 frames spread over the recording,
-    compared with an overall background. None if too few robot-like blobs.
-    progress(done, total): optional, frames read so far."""
+    compared with an overall background (measure_object_sizes: works on grey, low-contrast real
+    footage too). None if too few objects were seen. progress(done, total): optional, frames read so far."""
     p = params or Params()
     n = n_frames or count_frames(video_path)
     bg_idx = np.linspace(0, n - 1, 31).astype(int)
@@ -630,11 +721,13 @@ def estimate_robot_size(video_path, n_frames=None, params=None, progress=None):
     if len(stack) < 3:
         return None
     bg_all = np.median(np.stack(stack), axis=0).astype(np.uint8)
-    raw = []
+    meas, raw = [], []
     for i in look_idx:
         if i in imgs:
+            meas.extend(measure_object_sizes(imgs[i], bg_all, p))
             raw.extend(find_blobs(imgs[i], bg_all, None, p.default_robot_px, p)[1])
-    return estimate_robot_px(raw)
+    est = object_size_from_measurements(meas)
+    return est if est is not None else estimate_robot_px(raw)
 
 
 def detect_recording(video_path, fps=None, robot_px=None, times=None, progress=None, n_frames=None,

@@ -309,3 +309,7 @@ edge: at the bottom-left corner lit plywood is visible outside the green line (a
 Next build: find edges on the lit plywood side (brightness step from plywood to anything darker,
 shadow-aware), cross-check with the robots' bump positions against the boards (physical truth), and
 let the person drag a corner to fix it in place in the outline check.
+
+- (2026-10-22) Tracker ID switch on the synthetic crowd recording when the measured object size is 30.9-31.5 px (none at 30,
+  30.5, 30.8, 31.6, 32): a sensitive spot in the tracker's matching. test_accuracy_crowd is marked "expected to fail" until
+  it is fixed in the tracker (not by tuning the size).

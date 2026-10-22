@@ -29,8 +29,13 @@ least-squares rotation + translation from ALL anchors of that stretch of log, ea
 how much the dead reckoning can have drifted between the anchor and t (time, distance driven,
 angle turned). So an anchor dominates near itself (the pose is re-aligned at every confirmation
 and every home visit, and drift is corrected there), and between two anchors the answer is a
-blend of both. With enough anchors, fit_calibration() also fits g, d and s (least squares with
-a robust loss, priors from the plug-in), after which the drift allowances shrink.
+blend of both. The known corrections (the plug-in's priors: for an Alvik the gyro and wheel scales
+measured on real footage) are used as they are by default; fit_calibration() replaces them with
+g, d and s fitted to the anchors (least squares with a robust loss, the priors as soft limits) only
+when the anchors are many and spread over enough driving and turning, the fitted numbers stay within
+3 sd of the priors, and the fit predicts the anchors left out in turn better than the priors do (on
+roam1, Oct 21, a free fit gave gyro 1.29 where 1.07 is measured, and placed the labels worse).
+After a kept fit the drift allowances shrink.
 
 Confidence falls with the position uncertainty: score = exp(-0.5 (sd_cm / ref_cm)^2), ref_cm
 about a quarter of a robot (2.5 cm by default).
@@ -502,6 +507,8 @@ class Aligner:
         self.priors = pri
         self.anchors = []
         self.calib = dict(g=pri["g"], d=pri["d"], s=pri["s"], fitted=False, rms_cm=None, n=0)
+        self.calib_note = None      # fit_calibration(): what it did with the corrections, in plain words
+        self.calib_refused = None   # fit_calibration(): a fit it did not use, and why
         self.notes = []
         self.allow_scale = 1.0     # tune_allowances() sets it from the person's labels
         self._path = None
@@ -675,26 +682,90 @@ class Aligner:
         return out
 
     # -- calibration fit
-    def fit_calibration(self, min_pos=3, min_span_cm=20.0):
-        """Fit gyro scale g, drift d and wheel scale s from the anchors (least squares, robust
-        loss, priors). Kept only when the anchors pin it down and the numbers are plausible;
-        returns the calib dict (fitted True/False) and adds a plain-words note."""
+    def _known_words(self):
+        pr = self.priors
+        return "gyro x%.3f, %swheels x%.3f%s" % (
+            abs(pr["g"]), ("drift %+.2f deg/s, " % pr["d"]) if abs(pr["d"]) > 1e-9 else "", pr["s"],
+            (" (" + pr["from"] + ")") if pr.get("from") else "")
+
+    def _keep_known(self, why, sign=None):
+        """Back to the known corrections (the priors), with a note in the studio's words: what (nothing
+        changed, or only the heading's sign), where, why. sign: the heading's sign found by a fit, when it
+        was not checked (the known gyro scale is used with it)."""
+        pr = self.priors
+        g = pr["g"] if sign is None else math.copysign(abs(pr["g"]), sign)
+        self.calib.update(g=g, d=pr["d"], s=pr["s"], fitted=False, rms_cm=None, n=0)
+        self._path = None
+        if sign is not None and (g < 0) != (pr["g"] < 0):
+            tail = (" The heading's sign was not checked in the log, and the fit to the anchors shows it is turned "
+                    "the other way, so that is used (with the known gyro scale); Z (Undo) brings back the guesses "
+                    "from before this Line up.")
+        else:
+            tail = " Nothing to undo: these were the starting values."
+        self.calib_note = ("%s: the log's turn and distance corrections stay at the known values (%s): %s.%s" % (
+            self.stream.name, self._known_words(), why, tail))
+        self.notes.append(self.calib_note)
+        return self.calib
+
+    def _loo_median(self, g, d, s, fitted, block_s=5.0):
+        """Median leave-out error (cm) of the position anchors with these corrections, and how many: each
+        anchor is predicted from the anchors more than block_s away from it (one home visit gives several
+        anchors seconds apart, and they would predict each other whatever the corrections)."""
+        keep_calib, keep = dict(self.calib), list(self.anchors)
+        self.calib.update(g=g, d=d, s=s, fitted=fitted)
+        self._path = None
+        errs = []
+        try:
+            for a in keep:
+                if not a.has_pos:
+                    continue
+                self.anchors = [b for b in keep if abs(b.t - a.t) > block_s]
+                p = self.pose_at(np.array([a.t]))
+                if p["ok"][0]:
+                    errs.append(math.hypot(p["x"][0] - a.x, p["y"][0] - a.y))
+        finally:
+            self.anchors = keep
+            self.calib = keep_calib
+            self._path = None
+        return (float(np.median(errs)) if errs else math.nan), len(errs)
+
+    def fit_calibration(self, min_pos=6, min_span_cm=100.0, min_turn_deg=360.0, band_sd=3.0, min_gain=0.05,
+                        min_loo=5):
+        """Fit gyro scale g, drift d and wheel scale s from the anchors (least squares, robust loss,
+        priors). The known corrections (the priors) stay unless the fit has enough evidence (min_pos
+        position anchors over min_span_cm of driving and min_turn_deg of turning), its numbers are
+        within band_sd sd of the priors, and it lowers the median leave-out error of the anchors (each
+        predicted without those within 5 s; at least min_loo predictable) by at least min_gain (a
+        fraction). Two exact full poses (home visits) also count as enough evidence, for a fit within the
+        band that cannot be checked by leaving out. When the heading's sign was not checked
+        (stream.sign_known False) a wrong sign is far worse than any scale, so the fit runs on as few as 3
+        anchors over 20 cm, and its sign is kept even when its numbers are not. Returns the calib dict
+        (fitted True/False); the plain-words result is self.calib_note (also added to self.notes)."""
         from scipy.optimize import least_squares
         st = self.stream
         if st.frame != "own" or not len(st):
             return self.calib
         used = [(a, ta) for a in self.anchors for ta in [self._anchor_time(a)] if ta is not None]
         pos = [(a, ta) for a, ta in used if a.has_pos]
+        # exact full poses (a home visit, a start at home: position AND heading, to a few mm) pin the turn and
+        # the drift directly: two of them are enough evidence for a fit held within the known range
+        exact = sum(1 for a, _ in pos if a.heading is not None and a.sd_cm <= 1.0 and a.sd_deg <= 2.0)
+        few_ok = exact >= 2 or not st.sign_known
+        if few_ok:
+            min_pos, min_span_cm, min_turn_deg = min(min_pos, 3), min(min_span_cm, 20.0), 0.0
+        need = ("fitting them needs %d labels or home visits over %.0f cm of driving and %.0f degrees of turning"
+                % (min_pos, min_span_cm, min_turn_deg))
         if len(pos) < min_pos:
-            self.notes.append("calibration not fitted: %d position anchors (needs %d)" % (len(pos), min_pos))
-            return self.calib
+            return self._keep_known("%s; there are %d" % (need, len(pos)))
         ta_all = np.array([ta for _, ta in used])
         seg_all, _ = self._seg_at(ta_all)
         segs = sorted(set(seg_all.tolist()))
-        Cpos = np.interp([ta for _, ta in pos], st.t, st.path_abs)
-        if Cpos.max() - Cpos.min() < min_span_cm:
-            self.notes.append("calibration not fitted: anchors cover only %.0f cm of driving" % (Cpos.max() - Cpos.min()))
-            return self.calib
+        tpos = [ta for _, ta in pos]
+        Cpos = np.interp(tpos, st.t, st.path_abs)
+        Tpos = np.interp(tpos, st.t, st.turn_abs)
+        if Cpos.max() - Cpos.min() < min_span_cm or Tpos.max() - Tpos.min() < min_turn_deg:
+            return self._keep_known("%s; they cover %.0f cm and %.0f degrees" % (
+                need, Cpos.max() - Cpos.min(), Tpos.max() - Tpos.min()))
         pr = self.priors
         si = {s: k for k, s in enumerate(segs)}
         is_pos = np.array([a.has_pos for a, _ in used])
@@ -754,22 +825,48 @@ class Aligner:
             if best is None or r.cost < best.cost:
                 best = r
         if best is None:
-            self.calib.update(g=pr["g"], d=pr["d"], s=pr["s"], fitted=False)
-            self._path = None
-            return self.calib
-        g, d, s = best.x[:3]
-        plausible = 0.7 <= abs(g) <= 1.4 and abs(d) <= 3.0 and 0.8 <= s <= 1.25
-        if not plausible:
-            self.notes.append("calibration fit gave implausible numbers (gyro x%.3f, drift %.2f deg/s, wheels x%.3f); "
-                              "not used" % (g, d, s))
-            self.calib.update(g=pr["g"], d=pr["d"], s=pr["s"], fitted=False)
-            self._path = None
-            return self.calib
+            return self._keep_known("the fit to the anchors did not work out")
+        g, d, s = (float(v) for v in best.x[:3])
+        got = "gyro x%.3f, drift %+.2f deg/s, wheels x%.3f" % (g, d, s)
+        lo_g, hi_g = abs(pr["g"]) - band_sd * pr["g_sd"], abs(pr["g"]) + band_sd * pr["g_sd"]
+        lo_d, hi_d = pr["d"] - band_sd * pr["d_sd"], pr["d"] + band_sd * pr["d_sd"]
+        lo_s, hi_s = pr["s"] - band_sd * pr["s_sd"], pr["s"] + band_sd * pr["s_sd"]
+        if not (lo_g <= abs(g) <= hi_g and lo_d <= d <= hi_d and lo_s <= s <= hi_s
+                and 0.7 <= abs(g) <= 1.4 and abs(d) <= 3.0 and 0.8 <= s <= 1.25):
+            self.calib_refused = dict(g=g, d=d, s=s, why="outside")
+            return self._keep_known(sign=None if st.sign_known else g, why=
+                "a fit to the %d anchors gave %s, outside what this robot can plausibly be (gyro %.2f to %.2f, "
+                "drift %+.2f to %+.2f deg/s, wheels %.3f to %.3f), so it was not used" % (
+                    len(pos), got, lo_g, hi_g, lo_d, hi_d, lo_s, hi_s))
+        # the fit must place the anchors left out in turn better than the known values (with the sign the
+        # fit found, when the sign was not checked)
+        g_known = math.copysign(abs(pr["g"]), g)
+        e_known, n_known = self._loo_median(g_known, pr["d"], pr["s"], False)
+        e_fit, n_fit = self._loo_median(g, d, s, False)      # same allowances: only the corrections differ
+        checked = min(n_fit, n_known) >= min_loo and math.isfinite(e_known) and math.isfinite(e_fit)
+        if not checked and not few_ok:
+            self.calib_refused = dict(g=g, d=d, s=s, why="few")
+            return self._keep_known(sign=None if st.sign_known else g, why=
+                "a fit to the %d anchors gave %s, but only %d of them can be checked by leaving each out in turn "
+                "(needs %d), so it was not used" % (len(pos), got, min(n_fit, n_known), min_loo))
+        if checked and not e_fit <= (1.0 - min_gain) * e_known:
+            self.calib_refused = dict(g=g, d=d, s=s, why="loo", loo_known_cm=e_known, loo_fit_cm=e_fit)
+            return self._keep_known(sign=None if st.sign_known else g, why=
+                "a fit to the %d anchors gave %s, but it placed each anchor left out in turn (with those within 5 s) "
+                "no better than the known values (median %.1f cm against %.1f cm), so it was not used" % (len(pos), got, e_fit, e_known))
         rms = self._fit_rms(best.x, ta_all, sk, is_pos, px, py)
-        self.calib.update(g=float(g), d=float(d), s=float(s), fitted=True, rms_cm=rms, n=len(used))
+        self.calib.update(g=g, d=d, s=s, fitted=True, rms_cm=rms, n=len(used), loo_known_cm=e_known, loo_fit_cm=e_fit)
         self._path = None
-        self.notes.append("calibration fitted from %d anchors: gyro x%.3f, drift %+.2f deg/s, wheels x%.3f "
-                          "(one-fit misfit %.1f cm)" % (len(used), g, d, s, rms))
+        better = ("; it places each anchor left out in turn within %.1f cm (median) against %.1f cm with the known "
+                  "values" % (e_fit, e_known)) if checked else (
+            "; too few anchors to check it by leaving each out in turn, so it is used only because %s and it stays "
+            "within the known range" % ("the home visits pin it down" if exact >= 2 else
+                                        "the heading's sign was not checked in the log"))
+        self.calib_note = ("%s: the log's turn and distance corrections changed from the known values (%s) to %s, "
+                           "fitted to %d anchors (one-fit misfit %.1f cm)%s. Only the guesses from the log change; Z "
+                           "(Undo) brings back the guesses from before this Line up." % (
+                               self.stream.name, self._known_words(), got, len(used), rms, better))
+        self.notes.append(self.calib_note)
         return self.calib
 
     def _fit_rms(self, p, ta_all, sk, is_pos, px, py):
@@ -790,7 +887,9 @@ class Aligner:
         s = "%s: %d anchors (%s)" % (self.stream.name, len(self.anchors),
                                      ", ".join("%d %s" % (v, k) for k, v in sorted(kinds.items())) or "none")
         if c["fitted"]:
-            s += "; corrections gyro x%.3f, drift %+.2f deg/s, wheels x%.3f" % (c["g"], c["d"], c["s"])
+            s += "; corrections gyro x%.3f, drift %+.2f deg/s, wheels x%.3f (fitted)" % (c["g"], c["d"], c["s"])
+        elif self.stream.frame == "own":
+            s += "; known corrections %s" % self._known_words()
         return s
 
 

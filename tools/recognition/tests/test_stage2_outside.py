@@ -186,7 +186,50 @@ def test_fit_recovers_gyro_scale_drift_and_wheel_scale():
     assert c["g"] == pytest.approx(1 / 0.925, rel=0.02)
     assert c["d"] == pytest.approx(0.3 / 0.925, abs=0.08)
     assert c["s"] == pytest.approx(0.98, abs=0.02)
-    assert "calibration fitted" in al.notes[-1]
+    assert "changed from the known values" in al.calib_note and "Z (Undo)" in al.calib_note
+
+
+ALVIK = dict(g=1.07, g_sd=0.03, d=0.0, d_sd=0.4, s=0.979, s_sd=0.02)
+
+
+def test_fit_outside_the_known_band_is_refused_and_the_known_corrections_kept():
+    """roam1 (Oct 21): the free fit gave gyro 1.29 where 1.07 is measured. A gyro that really needs 1.30
+    (or labels that pull the fit there) must not replace the known value without a person deciding."""
+    st, tr = own_path(seconds=120, g_true=1 / 1.30, drift=0.0, wheel=0.979)
+    st.priors.update(ALVIK)
+    al = O.Aligner(st).add(*labels_every(st, tr, 8.0))
+    c = al.fit_calibration()
+    assert not c["fitted"] and c["g"] == pytest.approx(1.07) and c["s"] == pytest.approx(0.979) and c["d"] == 0.0
+    assert al.calib_refused["why"] == "outside" and al.calib_refused["g"] > 1.2
+    assert "stay at the known values" in al.calib_note and "not used" in al.calib_note
+    assert "known corrections gyro x1.070" in al.describe()
+
+
+def test_fit_that_does_not_place_left_out_labels_better_is_refused():
+    """The known values are right: a fit can only match them, so they are kept."""
+    st, tr = own_path(seconds=120, g_true=1 / 1.07, drift=0.0, wheel=0.979)
+    st.priors.update(ALVIK)
+    al = O.Aligner(st).add(*labels_every(st, tr, 8.0))
+    c = al.fit_calibration()
+    assert not c["fitted"] and c["g"] == pytest.approx(1.07)
+    assert al.calib_refused["why"] == "loo" and "no better" in al.calib_note
+
+
+def test_fit_within_the_band_that_helps_is_used():
+    st, tr = own_path(seconds=120, g_true=1 / 1.12, drift=0.3, wheel=0.979)
+    st.priors.update(ALVIK)
+    al = O.Aligner(st).add(*labels_every(st, tr, 8.0))
+    c = al.fit_calibration()
+    assert c["fitted"] and c["g"] == pytest.approx(1.12, rel=0.02)
+    assert c["loo_fit_cm"] < c["loo_known_cm"]
+
+
+def test_fit_needs_turning_as_well_as_labels():
+    st, tr = own_path(seconds=120)
+    labels = labels_every(st, tr, 8.0)
+    al = O.Aligner(st).add(*labels)
+    c = al.fit_calibration(min_turn_deg=1e6)
+    assert not c["fitted"] and "degrees of turning" in al.calib_note
 
 
 def test_fit_finds_a_flipped_heading_sign_when_it_was_not_checked():
@@ -370,7 +413,7 @@ def test_reads_every_robot_with_clock_and_signs(sess):
     assert not [n for n in data.notes if "damaged" in n]
     for name, st in data.streams.items():
         assert st.sign_known and st.cls == "alvik"
-        assert st.priors["g"] == pytest.approx(1.08)        # gyro_scale 1 in param.csv = out of the box: Alvik prior
+        assert st.priors["g"] == pytest.approx(1.07)        # gyro_scale 1 in param.csv = out of the box: Alvik prior
         tr = sess["truth"][name]
         # times on the Pi clock: the stream's speed lines up with the truth's with no leftover offset
         track = np.column_stack([tr["t"][::3], tr["x"][::3], tr["y"][::3]])

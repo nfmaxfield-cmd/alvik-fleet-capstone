@@ -320,9 +320,16 @@ def has_motion_cache(rec, cache_dir, robot_px=None):
         return False
     try:
         with open(info_path) as f:
-            return same_key(json.load(f).get("key"), motion_cache_key(rec, robot_px))
+            info = json.load(f)
+        return same_key(info.get("key"), motion_cache_key(rec, robot_px)) and not size_failed_before(info)
     except ValueError:
         return False
+
+
+def size_failed_before(info):
+    """A motion cache whose object size could not be measured (the 30 px stand-in was used) by an older way
+    of measuring it: worth one more try with the current one (motion.SIZE_METHOD; Oct 21: real footage)."""
+    return info.get("robot_px_source") == "default" and int(info.get("size_method") or 1) < motion.SIZE_METHOD
 
 
 def motion_guesses(rec, cache_dir, robot_px=None, progress=None, log=print, size_progress=None):
@@ -339,11 +346,19 @@ def motion_guesses(rec, cache_dir, robot_px=None, progress=None, log=print, size
             info = json.load(f)
         log("Using saved motion guesses from labels/cache/.")
         return load_detections(det_path, rec.n), (robot_px or info["robot_px"])
+    try:
+        with open(info_path) as f:
+            if size_failed_before(json.load(f)):
+                log("The saved motion guesses used a stand-in object size (it could not be measured then); "
+                    "measuring it again and finding the moving objects again (labels/cache/; your labels are unchanged).")
+    except (OSError, ValueError):
+        pass
     log("Finding moving objects in the recording (first time only) ...")
     dets, minfo = motion.detect_recording(rec.video, fps=rec.fps, robot_px=robot_px, times=rec.times,
                                           n_frames=rec.n, progress=progress, size_progress=size_progress)
     dets.extend([[] for _ in range(rec.n - len(dets))])
-    info = dict(key=key, robot_px=minfo["robot_px"], robot_px_source=minfo["robot_px_source"])
+    info = dict(key=key, robot_px=minfo["robot_px"], robot_px_source=minfo["robot_px_source"],
+                size_method=motion.SIZE_METHOD)
     log("Object size: %.1f px (%s)" % (minfo["robot_px"], minfo["robot_px_source"]))
     save_detections(det_path, dets)
     write_atomic(info_path, json.dumps(info, indent=1))
