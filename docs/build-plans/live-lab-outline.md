@@ -44,3 +44,20 @@ university. Must be smooth, polished and easy to understand.
 A live fusion filter + engine service; B the screen (live view, panels); C modes incl. replay;
 D the studio link; E remote access + security; F presentation polish, rehearsals, failure drills.
 Each with a simulated end-to-end run, then a real one.
+
+## Nick's answers (2026-10-21)
+1 Both: some presentations only watch, some have someone controlling. 2 Runs on Nick's laptop for now.
+3 Control access is part of the design; Sodhi says Nick may want to monetise this software: keep a
+running list (docs/monetization-ideas.md). 4 Controlled from Nick's laptop, remotely; nobody at home.
+5 Nothing scheduled; plan for ~10 minutes. 6 Probably a TV. 7 Headline: it calibrates itself, and
+accurate labelling and tracking need minimal user interaction. 8 A script for Nick; captions additive to
+his words or able to stand alone. 9 "Weights" = how much the filter trusts each sensor; show the
+calibration corrections too. 10 Same as his manuals: conclusions up front with a small note of what
+backs them; supporting data in appendices (an engineering view one click away). 11 A person designates
+the work area and the robots; then the program calibrates everything itself, camera included.
+12 Two presentations: a live one that trains live; a recorded demo with the script and captions.
+13 Yes: no models and no calibrations at the start (the name "from scratch" isn't required).
+14 Internet looked fine during setup. 15 Scripted: whatever makes sense; live training demo: a condensed
+version of tonight's E02 session. 16 Docks and lights included if still in use by then. 17 Sometime in
+December. 18 Three robots now, a fleet next semester: build for any number. 19 "Live lab" mode of
+Maxfield IRL Tracking.
