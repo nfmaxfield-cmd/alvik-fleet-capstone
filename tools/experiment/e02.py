@@ -139,6 +139,7 @@ class Listener:
         self.battery = {}                     # robot -> (t, %)
         self.firmware = {}
         self.msgs = []                        # (t, robot, text)
+        self.lab = None                       # e02_live.LiveLab, fed every RAW row
 
     def __call__(self, name, kind, rtype, vals):
         t = time.time()
@@ -160,6 +161,11 @@ class Listener:
             elif kind == "D":
                 cols = self.s.headers.get(rtype)
                 rec = dict(zip(cols, vals)) if cols and len(cols) == len(vals) else {}
+                if rtype == "RAW" and rec and self.lab is not None:
+                    try:
+                        self.lab.on_raw(name, rec, t)
+                    except Exception:                 # the live lab is a display: never break the listener
+                        pass
                 if rtype == "RAW" and rec:
                     run = rec.get("run")
                     lst = self.raw[run]
@@ -356,6 +362,11 @@ class Runner:
 
     # --- camera -----------------------------------------------------------------------------------
     def on_sample(self, s):
+        if getattr(self, "lab", None) is not None and self.tracker is not None and self.tracker.active:
+            try:
+                self.lab.on_camera(self.tracker.active, s[0], s[1], s[2])
+            except Exception:
+                pass
         if self.tracker is not None and self.tracker.active:
             self.trackw.writerow(["%.3f" % s[0], self.tracker.active, "%.2f" % s[1], "%.2f" % s[2], self.order, self.phase])
 
@@ -1584,6 +1595,39 @@ class Runner:
         self.st["board"] = self.board.to_dict()
         self.st["setup"]["find_check"] = dict(robots=res, lines=summary)
         self.st.save()
+        self.correct_map(summary)
+
+    def correct_map(self, lines):
+        """Mapping's board points assume where the front stop halts a robot (MAP.TOF_AHEAD_CM + SAFE_FRONT_CM ahead
+        of the axle); the find check's bumps measure the boards directly. Their difference is the real stopping
+        distance: the map's board points are moved by it and fitted again (2026-10-22)."""
+        m = self.st["setup"].get("map")
+        if not m or not lines:
+            return
+        offs = [m["felt_boards"][w] - lines[w]["touch"] for w in ("x", "y")
+                if w in (m.get("felt_boards") or {}) and w in lines]
+        if not offs:
+            return
+        off = float(np.mean(offs))
+        # felt beyond the boards means the robot stops nearer the board than assumed: move the points back
+        for r in m["rays"]:
+            if r.get("kind") == "board" and r.get("point") and r.get("robot_end"):
+                th = math.radians(r["robot_end"][2])
+                r["point"] = [r["point"][0] - off * math.cos(th), r["point"][1] - off * math.sin(th)]
+        pts = [(r["point"][0], r["point"][1], r["kind"]) for r in m["rays"] if r.get("point")]
+        others = [tuple(q[:2]) for n, q in self.st["positions"].items() if n != m["robot"] and q]
+        m["sides"] = MAP.fit_sides(pts, self.board, others=others)
+        m["board_offset_cm"] = round(off, 2)
+        m["felt_boards_corrected"] = {}
+        for sd in m["sides"].values():
+            if sd["kind"] == "board":
+                m["felt_boards_corrected"]["x" if sd["axis"] == "y" else "y"] = sd["value"]
+        self.say("  Mapping vs the bumps: the front stop halts a robot %.1f cm %s a board than assumed; the map's "
+                 "board points are moved by that (%s)." % (abs(off), "nearer" if off > 0 else "farther from",
+                                                          ", ".join("%s-board %.1f cm" % kv for kv in
+                                                                    sorted(m["felt_boards_corrected"].items()))))
+        self.st.save()
+        MAP.save(os.path.join(self.dir, "map.json"), m["robot"], m["rays"], m["sides"], self.board)
 
     def do_find(self, robot, order):
         """A camera fix (the firmware wants one before every find), then `run find`, and the camera's view of
@@ -2535,6 +2579,13 @@ def launch(a, state, sdir, sim):
     link.session.listeners += [run.watch, run.listener]
     run.pi = run_sheet.PiNotes(a.pi)
     run.view = None
+    try:
+        import e02_live
+        run.lab = e02_live.LiveLab()
+        run.listener.lab = run.lab
+    except Exception as e:
+        run.lab = None
+        run.say("(live lab not started: %s)" % e, quiet=True)
     if a.view_port:
         try:
             import e02_view
