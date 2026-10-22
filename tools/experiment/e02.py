@@ -105,6 +105,9 @@ BLIND_EDGE_CM = 15.0      # ... never to a point nearer an open edge than this
 BLIND_RETRACE_LEGS = 6    # ... retracing: its last this many drives
 BLOCKS_FIND_CM = 35.0     # a robot put aside this near the find's staging point blocks every find
 RESCUE_EDGE_CM = 15.0     # a lost robot finds itself against the boards only if last seen this far in from the open edges (park spots: 17+)
+SEARCH_LOOKOUTS = ((40.0, 40.0), (85.0, 40.0), (85.0, 85.0), (40.0, 85.0))   # (cm from the y-board, cm from the x-board)
+SEARCH_CLEAR_CM = 25.0    # a lookout this near a robot we know of is skipped
+SEARCH_STOP_AHEAD_CM = 4.0  # a searcher stopped by something in front: it is about this far ahead of its face
 SWEEP_STEP_DEG = 30.0     # a finder robot turns in these steps, reading its front sensor after each
 SWEEP_RANGE_CM = 70.0     # ... a reading nearer than this
 SWEEP_GAP_CM = 8.0        # ... and this much shorter than the map says is something not on the map
@@ -1158,11 +1161,39 @@ class Runner:
         ok, why = self.park(robot)
         return ok, why
 
+    def sweep_hits(self, finder, q, h, lost):
+        """The finder turns once round on its spot at q (heading h) in SWEEP_STEP_DEG steps, reading its front
+        sensor after each (firmware 2026-10-22b reports it with every turn leg). A reading well short of what the
+        map says is ahead (boards, robots we know of; not the lost one) is something not on the map. Returns
+        ([(reading, x, y)], heading after the turn) ."""
+        hits = []
+        heading = h
+        if not self.begin_moves(finder, "looking for " + lost):
+            return hits, heading
+        for k in range(int(round(360.0 / SWEEP_STEP_DEG))):
+            state, info = self.send_leg(finder, "turn %.1f" % SWEEP_STEP_DEG, SWEEP_STEP_DEG / TURN_DPS_GUESS * 2.5 + 6.0)
+            heading = ST.wrap180(heading + SWEEP_STEP_DEG)
+            m = re.search(r"front=([0-9.]+)", info or "")
+            if state not in ("done", "dup") or not m:
+                continue
+            front = float(m.group(1))
+            if front <= 0:
+                continue                      # no reading (nothing in range)
+            saved = self.st["positions"].pop(lost, None)
+            ahead = self.ahead_cm(finder, q[:2], heading)
+            if saved is not None:
+                self.st["positions"][lost] = saved
+            if front < SWEEP_RANGE_CM and (ahead is None or front < ahead[0] - SWEEP_GAP_CM):
+                d = front + 2 * PL.ROBOT_HALF_CM
+                x, y = q[0] + d * math.cos(math.radians(heading)), q[1] + d * math.sin(math.radians(heading))
+                if self.board.on_board(x, y):
+                    hits.append((front, x, y))
+        return sorted(hits), heading
+
     def sweep_for(self, lost):
-        """Nick, 2026-10-22: a robot that knows where it is looks for the lost one with its front sensor. It turns
-        on its spot in SWEEP_STEP_DEG steps (each turn leg reports the front sensor: firmware 2026-10-22b); a reading
-        well short of what the map says is ahead (a board, or a robot we know of) is something not on the map: the
-        lost robot. The camera then looks for its turn there only. Returns (x, y) or None."""
+        """Nick, 2026-10-22: a robot that knows where it is looks for the lost one with its front sensor, from where
+        it is parked (sweep_hits); the camera then looks for the lost robot's turn there only. Returns (x, y) or
+        None."""
         for finder in self.st["robots"]:
             if finder == lost or finder in self.unavailable:
                 continue
@@ -1174,36 +1205,87 @@ class Runner:
                 continue
             self.say("  %s looks round for %s with its front sensor ..." % (finder, lost))
             self.mark("e02 sweep %s for %s" % (finder, lost))
-            if not self.begin_moves(finder, "looking for " + lost):
-                continue
-            hits = []
-            heading = h
-            for k in range(int(round(360.0 / SWEEP_STEP_DEG))):
-                state, info = self.send_leg(finder, "turn %.1f" % SWEEP_STEP_DEG, SWEEP_STEP_DEG / TURN_DPS_GUESS * 2.5 + 6.0)
-                heading = ST.wrap180(heading + SWEEP_STEP_DEG)
-                m = re.search(r"front=([0-9.]+)", info or "")
-                if state not in ("done", "dup") or not m:
-                    continue
-                front = float(m.group(1))
-                if front <= 0:
-                    continue                      # no reading (nothing in range)
-                saved = self.st["positions"].pop(lost, None)
-                ahead = self.ahead_cm(finder, q[:2], heading)
-                if saved is not None:
-                    self.st["positions"][lost] = saved
-                if front < SWEEP_RANGE_CM and (ahead is None or front < ahead[0] - SWEEP_GAP_CM):
-                    d = front + 2 * PL.ROBOT_HALF_CM
-                    hits.append((front, q[0] + d * math.cos(math.radians(heading)),
-                                 q[1] + d * math.sin(math.radians(heading))))
+            hits, heading = self.sweep_hits(finder, q, h, lost)
             self.heads[finder] = [heading, self.heads.get(finder, [None, False])[1]]
             self.moves.pop(finder, None)
-            for _, x, y in sorted(hits):
-                if not self.board.on_board(x, y):
-                    continue
+            for _, x, y in hits:
                 self.say("  %s sees something not on the map at about (%.0f, %.0f) cm: is it %s?" % (finder, x, y, lost))
                 p = self.identify(lost, near=(x, y, SWEEP_NEAR_CM))
                 if p is not None:
                     return p
+        return None
+
+    def lookouts(self, searcher, lost):
+        """Lookout points for a search, nearest first from the searcher: SEARCH_LOOKOUTS (cm in from the two
+        boards, so every one is well away from the open edges), skipping any too near a robot we know of."""
+        p = self.st["positions"].get(searcher)
+        pts = [self.board.uv(u, v) for u, v in SEARCH_LOOKOUTS]
+        others = [tuple(q[:2]) for n, q in self.st["positions"].items() if n not in (searcher, lost) and q]
+        pts = [q for q in pts if all(math.hypot(q[0] - o[0], q[1] - o[1]) >= SEARCH_CLEAR_CM for o in others)]
+        out, cur = [], (p[0], p[1]) if p else self.board.find_stage()
+        while pts:
+            nxt = min(pts, key=lambda q: math.hypot(q[0] - cur[0], q[1] - cur[1]))
+            out.append(nxt)
+            pts.remove(nxt)
+            cur = nxt
+        return out
+
+    def search_for(self, lost):
+        """Nick, 2026-10-22: nobody knows where the lost robot is (the camera can't see it and its own find failed).
+        Another robot searches for it: first its own find against the two boards (its position exact before it
+        starts), then to each lookout point (camera-steered: it is in view; its front-sensor checks against the
+        boards re-confirm its position on the way), sweeping its front sensor once round at each. A reading short
+        of the map, or a stop for something in front where the map is clear, is a hit: the camera looks for the
+        lost robot's turn there; if the camera can't see that spot either, the hit itself is the best place known.
+        The searcher parks again after. Returns (x, y) or None (nothing found: then the session stops)."""
+        for searcher in [n for n in self.st["robots"] if n != lost and n not in self.unavailable]:
+            if not self.st["positions"].get(searcher) or not self.activate(searcher):
+                continue
+            self.say("  %s searches the board for %s ..." % (searcher, lost))
+            self.mark("e02 search %s for %s" % (searcher, lost))
+            self.set_corrections(searcher, self.move_corrections(searcher))
+            for c in self.board_params():
+                self.send(searcher, c)
+                time.sleep(0.05)
+            out = self.do_find(searcher, "search")
+            if not out.get("ok"):
+                self.say("  %s: %s" % (searcher, out.get("words")))
+                self.park(searcher)
+                continue
+            best = None
+            for lp in self.lookouts(searcher, lost):
+                ok, why = self.drive_to(searcher, lp, max_leg=PARK_LEG_CM, arrive_cm=6.0)
+                p = self.settle(min_s=0.3)
+                h = self.heads.get(searcher, [None])[0]
+                if not ok and "blocking" in why and p is not None and h is not None:
+                    # stopped by something in front where the map is clear: a hit just ahead of it
+                    d = SEARCH_STOP_AHEAD_CM + 2 * PL.ROBOT_HALF_CM
+                    hits = [(SEARCH_STOP_AHEAD_CM, p[0] + d * math.cos(math.radians(h)),
+                             p[1] + d * math.sin(math.radians(h)))]
+                elif ok and p is not None and h is not None:
+                    hits, heading = self.sweep_hits(searcher, p, h, lost)
+                    self.heads[searcher] = [heading, self.heads.get(searcher, [None, False])[1]]
+                    self.moves.pop(searcher, None)
+                else:
+                    continue
+                for _, x, y in hits:
+                    self.say("  %s: something not on the map at about (%.0f, %.0f) cm: is it %s?" % (
+                        searcher, x, y, lost))
+                    found = self.identify(lost, near=(x, y, SWEEP_NEAR_CM))
+                    if found is not None:
+                        self.park(searcher)
+                        return found
+                    best = best or (x, y)
+                if best is not None:
+                    break                      # something is there; the camera can't see it: take it as the place
+            ok, why = self.park(searcher)
+            if not ok:
+                self.help_from_nick(searcher, why)
+            if best is not None:
+                self.say("  The camera can't see %s, but %s's sensor found something at about (%.0f, %.0f) cm: "
+                         "taking that as its place." % (lost, searcher, best[0], best[1]))
+                return best
+            return None                        # one full search is enough: the board has been looked over
         return None
 
     def rescue_find(self, robot, need_camera=True):
@@ -1499,7 +1581,11 @@ class Runner:
             p = (own[0], own[1]) if own else (None if robot in self.lost_place else guess)
         if p is None:
             # (also: it moved unseen after its last known place, e.g. a failed find of its own: dry run 15:15, the
-            # runner kept it at its park spot while it stood in Center's way)
+            # runner kept it at its park spot while it stood in Center's way). Nick: search for it first.
+            p = self.search_for(robot)
+            if p is not None:
+                self.lost_place.discard(robot)
+        if p is None:
             raise SystemExit("%s is somewhere on the board but the camera can't find it, so the other robots could "
                              "drive into it. Take %s off the board (or put it anywhere open), then start again." % (
                                  robot, robot))

@@ -170,3 +170,72 @@ def test_drive_blind_stops_when_landmarks_disagree():
     r.send_leg = send_leg
     ok, words = r.drive_blind("Left", [(60.0, 100.0)])
     assert not ok and "front sensor" in words
+
+
+def _search_runner():
+    import e02 as E
+    import types
+    r = E.Runner.__new__(E.Runner)
+    r.board = _board()
+    r.a = types.SimpleNamespace(front_learn=False)
+    r.st = {"robots": ["Left", "Center", "Right"],
+            "positions": {"Center": [110.0, 17.0, 90.0], "Right": [17.0, 76.0, 0.0], "Left": [19.0, 108.0, None]}}
+    r.unavailable = set()
+    r.heads = {}
+    r.moves = {}
+    r.say = r.mark = r.send = lambda *a, **k: None
+    r.activate = lambda n: True
+    r.set_corrections = lambda *a, **k: None
+    r.move_corrections = lambda n: None
+    r.board_params = lambda: []
+    r.do_find = lambda n, order: {"ok": True}
+    r.parked = []
+    r.park = lambda n: (r.parked.append(n), (True, ""))[1]
+    r.help_from_nick = lambda *a, **k: True
+    return r, E
+
+
+def test_lookouts_skip_robots_and_go_nearest_first():
+    r, E = _search_runner()
+    pts = r.lookouts("Center", "Left")
+    assert len(pts) >= 3
+    for q in pts:
+        assert r.board.edge_room(q[0], q[1])[0] >= 30.0           # all well in from the open edges
+        for n in ("Right",):
+            o = r.st["positions"][n]
+            assert math.hypot(q[0] - o[0], q[1] - o[1]) >= E.SEARCH_CLEAR_CM
+
+
+def test_search_finds_the_lost_robot_and_parks_the_searcher():
+    """Nick, 2026-10-22: rather than stop, another robot searches: its own find, lookouts, a sweep at each."""
+    r, E = _search_runner()
+    lost_at = (60.0, 60.0)
+    where = {"p": (110.0, 17.0)}
+
+    def drive_to(n, lp, **k):
+        where["p"] = lp
+        r.heads[n] = [0.0, True]
+        return True, ""
+    r.drive_to = drive_to
+    r.settle = lambda **k: where["p"]
+
+    def sweep_hits(n, q, h, lost):
+        if math.hypot(q[0] - lost_at[0], q[1] - lost_at[1]) < 70:
+            return [(20.0, lost_at[0] + 1.0, lost_at[1])], h
+        return [], h
+    r.sweep_hits = sweep_hits
+    r.identify = lambda robot, near=None: (near[0], near[1]) if near and math.hypot(
+        near[0] - lost_at[0], near[1] - lost_at[1]) < 5 else None
+    p = r.search_for("Left")
+    assert p is not None and math.hypot(p[0] - lost_at[0], p[1] - lost_at[1]) < 3
+    assert r.parked == ["Center"]
+
+
+def test_search_takes_a_blocked_drive_as_a_hit():
+    r, E = _search_runner()
+    r.drive_to = lambda n, lp, **k: (r.heads.__setitem__(n, [90.0, True]), (False, "something keeps blocking its way"))[1]
+    r.settle = lambda **k: (60.0, 40.0)
+    r.sweep_hits = lambda *a: ([], 0.0)
+    r.identify = lambda robot, near=None: None              # the camera can't see it there either
+    p = r.search_for("Left")
+    assert p is not None and abs(p[0] - 60.0) < 1 and p[1] > 50.0  # just ahead of the stopped searcher
