@@ -121,4 +121,8 @@ not known yet (to check on the next real footage).
   an unknown place; the runner kept it at its park spot while it stood in Center's way (the front stops prevented a
   collision). Now: after a failed own find with the camera blind, its place counts as unknown, and if nothing finds
   it, the session stops and asks for Nick rather than drive the others round a guess.
+- **Last check (15:48):** Left hidden from the camera for 13 minutes, stuck in the find corner after its own find:
+  it drove out on its own wheels and gyro to its spot (the camera never saw it), and Center and Right ran their
+  runs. One more fix on the way: the front-sensor landmark check only counts boards met within 45 deg of head-on
+  (at 19 deg the simulated sensor read 92 cm for a board 42 cm away, which stopped the drive out).
 
