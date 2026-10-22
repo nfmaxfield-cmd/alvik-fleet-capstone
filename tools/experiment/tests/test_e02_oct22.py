@@ -46,3 +46,17 @@ def test_away_turn_points_to_the_middle():
     ang = r.away_turn((20.0, 100.0), 90.0)       # facing +y (towards the x-board); the middle is at +x
     h = 90.0 + ang
     assert math.cos(math.radians(h)) > 0.5, ang
+
+
+def test_ahead_by_the_map():
+    """The front-sensor check's expectation: the nearest board line or robot straight ahead, from the front face."""
+    import e02 as E
+    r = E.Runner.__new__(E.Runner)
+    r.board = _board()
+    r.st = {"positions": {"Center": [60.0, 50.0, None]}}
+    d, what = r.ahead_cm("Left", (60.0, 100.0), 90.0)          # facing +y: the x-board at 119.4
+    assert what == "the x-board" and abs(d - (119.4 - 100.0 - PL.ROBOT_HALF_CM)) < 1e-6
+    d, what = r.ahead_cm("Left", (60.0, 20.0), 90.0)           # Center 30 cm ahead, in the way
+    assert what == "Center" and abs(d - (30.0 - 2 * PL.ROBOT_HALF_CM)) < 1e-6
+    d, what = r.ahead_cm("Left", (60.0, 60.0), 0.0)            # facing +x: the y-board at 123.4
+    assert what == "the y-board"

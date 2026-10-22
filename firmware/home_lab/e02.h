@@ -711,6 +711,16 @@ void legRecord(long id, char kind, float value, const char* result, const char* 
             result, millis(), pose::x, pose::y, pose::th(), info);
 }
 
+// A finished leg's info gets the front sensor's middle zone (cm) standing still: " front=<cm>" (2026-10-22b). The
+// laptop compares it with where the camera and the map put the board or robot ahead: a free check of the position
+// whenever the robot stops facing something (Nick, 2026-10-22).
+void addFront(char* info, size_t n) {
+  float d[5];
+  alvik.get_distance(d[0], d[1], d[2], d[3], d[4]);
+  size_t k = strlen(info);
+  if (k + 14 < n) snprintf(info + k, n - k, "%sfront=%.1f", k ? " " : "", d[2]);
+}
+
 // go <cm> [id] | turn <deg> [id] | mark start|far|end [id]  (from handleCommand; `e02 start|far|end` = mark)
 void legCommand(const String& verb, const String& rest, bool running) {
   char buf[96];
@@ -816,7 +826,7 @@ void idleTick() {
   if (good) good = runLeg(L, info, sizeof(info));
   alvik.brake();
   if (gAbortReason.length()) legRecord(L.id, L.kind, L.arg, "failed", gAbortReason.c_str());
-  else if (good) legRecord(L.id, L.kind, L.arg, "done", info);
+  else if (good) { addFront(info, sizeof(info)); legRecord(L.id, L.kind, L.arg, "done", info); }
   else {
     char why[96];
     if (gStepStop == "edge") snprintf(why, sizeof(why), "plywood edge (%s)", edge::lastCue);
@@ -960,11 +970,11 @@ void runE02() {
       gStepStop = "";
       gFail = "";
       legRecord(L.id, L.kind, L.arg, "started", "");
-      char info[48];
+      char info[48] = "";
       bool good = runLeg(L, info, sizeof(info));
       alvik.brake();
       if (gAbortReason.length()) { legRecord(L.id, L.kind, L.arg, "failed", gAbortReason.c_str()); break; }
-      if (good) legRecord(L.id, L.kind, L.arg, "done", info);
+      if (good) { addFront(info, sizeof(info)); legRecord(L.id, L.kind, L.arg, "done", info); }
       else {
         char why[96];
         if (gStepStop == "edge") snprintf(why, sizeof(why), "plywood edge (%s)", edge::lastCue);

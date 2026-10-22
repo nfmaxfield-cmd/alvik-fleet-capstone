@@ -631,6 +631,11 @@ class E02Mixin:
     def leg_header(self):
         self.send("H,LEG,run,id,kind,value,result,ms,x_cm,y_cm,th_deg,info")
 
+    def add_front(self, info):
+        """e02.h addFront() (2026-10-22b): the front sensor's middle zone standing still, after a finished leg."""
+        d = self.tof()
+        return (info + " " if info else "") + "front=%.1f" % d[2]
+
     def leg_record(self, lid, kind, value, result, info):
         p = self.pose
         self.send("D,LEG,%s,%d,%s,%.2f,%s,%d,%.2f,%.2f,%.2f,%s" % (
@@ -743,7 +748,7 @@ class E02Mixin:
         if self.abort_reason:
             self.leg_record(lid, kind, arg, "failed", self.abort_reason)
         elif good:
-            self.leg_record(lid, kind, arg, "done", info)
+            self.leg_record(lid, kind, arg, "done", self.add_front(info))
         else:
             why = ("plywood edge (%s)" % getattr(self, "edge_last_cue", "")) if self.step_stop == "edge" else \
                 (self.step_stop or self.fail or "failed")
@@ -899,7 +904,7 @@ class E02Mixin:
                     self.leg_record(lid, kind, arg, "failed", self.abort_reason)
                     break
                 if good:
-                    self.leg_record(lid, kind, arg, "done", info)
+                    self.leg_record(lid, kind, arg, "done", self.add_front(info))
                 else:
                     if self.step_stop == "edge":
                         why = "plywood edge (%s)" % getattr(self, "edge_last_cue", "")

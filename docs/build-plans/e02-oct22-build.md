@@ -32,10 +32,18 @@ logic more generic for other equipment and sensors.
       1.35 robot widths (1.25 while it moves); a held robot whose spot looks unchanged counts as seen; each leg tells the tracker where the robot can be (turn: 7 cm; drive d: d + 8 cm)
 - [ ] Left by the x-board (footage 10:40:30-10:41) is still unseen most of the time (replay of 10:39:58-10:40:55: seen 60% of frames, was 20%): its outline joins the board's
       edge and fails the shape check. Next: a shape check that allows for a board beside it.
-- [ ] 9 (the bad find check), 8
-- [ ] Nick's ideas: front-sensor board check while driving; robot-to-robot check; finder robot sweep; the lost
+- [x] 9 explained: the firmware's own finds agree (bump points 121.5 / 124.1 cm on the y-board); the "touched at
+      74.8 cm" came from camera positions at the bump moments, while the camera followed the wrong robot (1)
+- [x] 8 explained: Right's parking after its help call did not finish, so it was not at its spot to be named
+- [x] Front sensor as a free check (Nick): firmware 2026-10-22b adds "front=<cm>" to every finished leg; the runner
+      compares it with the map (boards, other robots) and writes front_checks.csv. Recorded only, for now: one
+      session's numbers set the limits before it steers anything
+- [ ] Nick's ideas: robot-to-robot check (front_checks.csv already lists another robot ahead); finder robot sweep; the lost
       robot does a find to rescue itself; second camera (after the overhead tracker is solid); colour sensor (low)
-- [ ] Generic: the same logic for other equipment and sensors
+- [x] Generic: outline for discussion, docs/build-plans/generic-platform-outline.md
+- [ ] The lost robot finds itself against the boards (self-rescue find): not built. The firmware's find wants a
+      camera fix first, and a lost robot's own pose may be far off; needs a firmware "find from my own pose" mode
+      and a simulator test with a robot pushed by hand. Next build.
 
 ## Before the next session
 Nick uploads firmware 2026-10-22b to all three robots (same steps as this morning: Tools > Port, each robot).

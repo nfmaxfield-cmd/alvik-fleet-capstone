@@ -64,6 +64,7 @@ import json
 import math
 import os
 import subprocess
+import re
 import sys
 import threading
 import time
@@ -97,6 +98,8 @@ CHECK_CM, CHECK_FRAC = 5.0, 0.35   # camera vs wheels: a go leg's distances may 
 ID_EXTRA_CM = 5.0                  # ...plus this on the first leg after a turn on the spot (its centre is rougher)
 PARK_LEG_CM = 60.0        # parking: long legs on the robot's own wheels and gyro, the camera checks in between
 STALE_S = 1.5             # a camera position older than this is not used to steer
+FRONT_CHECK_RANGE_CM = 50.0  # the front-sensor check only counts things nearer than this
+FRONT_CHECK_CM = 6.0      # ... and says so when the sensor and the map differ by more
 EXPECT_TURN_CM = 7.0       # a robot turning on its spot stays within this of where it stood (camera's view)
 EXPECT_GO_EXTRA_CM = 8.0   # ... a drive of d cm within d + this
 AUTO_TRIES = 3            # a lost or stuck robot tries this many times on its own before Nick is called
@@ -545,6 +548,58 @@ class Runner:
                 return "refused", "its camera-steered run ended (%s)" % self.watch.ended[m["run"]]["result"]
         return "lost", "no answer"
 
+    def front_check(self, robot, p, words, kind, val):
+        """Nick, 2026-10-22: the front sensor as a free check of the position. After every finished leg the firmware
+        (2026-10-22b) reports the front sensor's middle zone ("front=<cm>"); here it is compared with what the camera
+        position, the heading and the map say is ahead (a board line, or another robot), and written to
+        front_checks.csv. Only recorded for now (the numbers from a session decide the limits before it steers
+        anything); a large disagreement is said quietly."""
+        m = re.search(r"front=([0-9.]+)", words or "")
+        h = self.heads.get(robot, [None, False])
+        if not m or p is None or h[0] is None or self.board is None:
+            return None
+        front = float(m.group(1))
+        ahead = self.ahead_cm(robot, p, h[0])
+        row = [round(time.time(), 2), robot, kind, round(val, 1), round(p[0], 1), round(p[1], 1), round(h[0], 1),
+               int(bool(h[1])), front, "" if ahead is None else round(ahead[0], 1), "" if ahead is None else ahead[1]]
+        path = os.path.join(self.dir, "front_checks.csv")
+        new = not os.path.exists(path)
+        with open(path, "a", newline="") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(["t", "robot", "leg", "value", "x_cm", "y_cm", "heading_deg", "heading_measured",
+                            "front_cm", "expected_cm", "what"])
+            w.writerow(row)
+        if ahead is not None and ahead[0] <= FRONT_CHECK_RANGE_CM and abs(front - ahead[0]) > FRONT_CHECK_CM:
+            self.say("    %s: front sensor %.0f cm, the camera and map say %s at %.0f cm" % (
+                robot, front, ahead[1], ahead[0]), quiet=True)
+        return front, ahead
+
+    def ahead_cm(self, robot, p, heading):
+        """Distance from the robot's front face to the first thing straight ahead, by the map: (cm, what) or None.
+        Boards are lines; other robots are discs of PL.ROBOT_HALF_CM."""
+        b = self.board
+        ux, uy = math.cos(math.radians(heading)), math.sin(math.radians(heading))
+        best = None
+        for what, axis, v in (("the y-board", "x", b.yboard_cm), ("the x-board", "y", b.xboard_cm)):
+            d = (v - p[0]) / ux if axis == "x" and abs(ux) > 1e-6 else ((v - p[1]) / uy if axis == "y" and abs(uy) > 1e-6
+                                                                      else -1)
+            if d > 0 and (best is None or d < best[0]):
+                best = (d, what)
+        for n, q in self.st["positions"].items():
+            if n == robot or not q:
+                continue
+            ox, oy = q[0] - p[0], q[1] - p[1]
+            t = ox * ux + oy * uy
+            off = abs(-ox * uy + oy * ux)
+            if t > 0 and off < PL.ROBOT_HALF_CM:
+                d = t - math.sqrt(max(0.0, PL.ROBOT_HALF_CM ** 2 - off ** 2))
+                if best is None or d < best[0]:
+                    best = (d, n)
+        if best is None:
+            return None
+        return best[0] - PL.ROBOT_HALF_CM, best[1]
+
     def expect_leg(self, text, timeout):
         """Where the followed robot can be during this leg (2026-10-22: during a turn on its spot the tracker was
         free to take another robot 34 cm away): a turn keeps it within EXPECT_TURN_CM of where it stands; a drive
@@ -628,6 +683,7 @@ class Runner:
         time.sleep(0.25)
         self.main_lid[robot] = self.last_lid.get(robot)
         p1 = self.settle(t_from=time.time() - 0.6, min_s=0.3, timeout=2.0)
+        self.front_check(robot, p1, words, kind, val)
         if kind == "go" and p0 is not None and len(pieces) == 1:
             bad = self.cross_check(robot, p0, p1)
             if bad:
