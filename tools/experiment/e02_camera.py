@@ -315,8 +315,12 @@ class MotionTracker:
     MOTION_THR = 9.0            # grey levels of frame-to-frame change that count as motion
     UNKNOWN_EXTRA = 14.0        # extra threshold on floor that was filled in, not seen
     ABSORB_S = 25.0             # something new standing still this long, where no robot is, becomes floor
+    COVER_SCALE = 1.35          # the followed robot's floor is never learned within this many robot widths of it
+    GATE_GROW_S = 0.6           # a lost robot's search circle grows with time for at most this long
+    OTHER_CM = 1.1 * ROBOT_CM   # an outline this near another robot's last place is that robot (two touching: 9.5-13)
+    MERGE_CM = 0.8 * ROBOT_CM   # robot-shaped outlines this near each other are one robot
 
-    def __init__(self, cam, board_center=(61.0, 61.0), thr=16.0, alpha=0.02, z_cm=ROBOT_TOP_CM, max_speed_cms=40.0,
+    def __init__(self, cam, board_center=(61.0, 61.0), thr=16.0, alpha=0.02, z_cm=ROBOT_TOP_CM, max_speed_cms=30.0,
                  board_rect=None, margin_cm=8.0):
         self.cam = cam
         self.z = z_cm
@@ -379,8 +383,13 @@ class MotionTracker:
         pts = [q for r, q in self.protect.items() if r != self.active]
         m = self._disk_mask(shape, pts, 1.25)
         if self.active is not None and self.pos is not None:
-            # the followed robot: just its body (and halo), so the floor it has just uncovered is learned at once
-            m |= self._disk_mask(shape, [(self.pos[1], self.pos[2])], 1.0)
+            # the followed robot: its body, its halo and the error of its position (2026-10-22: with 1.0 robot
+            # width, a position a few cm off let a standing robot's edge be learned as floor, bit by bit; its
+            # outline then broke into pieces and it was lost)
+            # (only while it is held still: moving, its pixels never stand still long enough to be learned, and
+            # the floor it uncovers must be learned at once; real clip hand_near_center)
+            held = self.hint is not None and self.hint[3] == float("inf")
+            m |= self._disk_mask(shape, [(self.pos[1], self.pos[2])], self.COVER_SCALE if held else 1.0)
         if self.active is not None and self.pos is not None and self.frame_t is not None and \
                 self.frame_t - self.last_seen > 0.3:
             # lost for a moment: don't learn anything near where it may be now
@@ -464,15 +473,16 @@ class MotionTracker:
                 self.last_cands = cands
                 _, px, py = self.pos
                 dt_ = max(0.0, t - self.pos[0])
-                gate_cm = ROBOT_CM * 0.9 + self.vmax * min(dt_, 1.0)
+                # 2026-10-22 session: lost for a moment during a turn, the gate grew to 50 cm and the tracker took
+                # Right, 34 cm away, for Left (then "the camera saw it move 0 cm"). The gate now grows for at
+                # most GATE_GROW_S, and another robot is anything within OTHER_CM of where it was last placed.
+                gate_cm = ROBOT_CM * 0.9 + self.vmax * min(dt_, self.GATE_GROW_S)
                 hint = self.hint if (self.hint and t <= self.hint[3]) else None
                 best = None
                 others = [q for r, q in self.protect.items() if r != self.active]
-                for c in cands:
-                    if not c["shape"]:
-                        continue
-                    if any(math.hypot(c["x"] - q[0], c["y"] - q[1]) < 0.8 * ROBOT_CM for q in others):
-                        continue                 # that is another robot standing still
+                ok = [c for c in cands if c["shape"]
+                      and not any(math.hypot(c["x"] - q[0], c["y"] - q[1]) < self.OTHER_CM for q in others)]
+                for c in self._merge(ok):
                     d = math.hypot(c["x"] - px, c["y"] - py)
                     if d > gate_cm:
                         continue
@@ -492,6 +502,24 @@ class MotionTracker:
             if not self.frozen:
                 self._learn(g, dt_frame)
             return out
+
+    def _merge(self, cands):
+        """Pieces of one robot (its body and the glare of its lights, or two halves split by a shadow line) as
+        one: robot-shaped outlines nearer each other than MERGE_CM become their area-weighted centre. 2026-10-22:
+        the followed robot's position flipped 1.5-4 cm between two such pieces, frame after frame."""
+        out = []
+        for c in sorted(cands, key=lambda c: -c["area"]):
+            for o in out:
+                if math.hypot(c["x"] - o["x"], c["y"] - o["y"]) < self.MERGE_CM:
+                    a = o["area"] + c["area"]
+                    o["x"] = (o["x"] * o["area"] + c["x"] * c["area"]) / a
+                    o["y"] = (o["y"] * o["area"] + c["y"] * c["area"]) / a
+                    o["moving"] = max(o["moving"], c["moving"])
+                    o["area"] = a
+                    break
+            else:
+                out.append(dict(c))
+        return out
 
     def _check_held(self, g, motion):
         """A robot told to stand still: is the picture where it stands still the same as when it stopped? If it

@@ -97,11 +97,15 @@ CHECK_CM, CHECK_FRAC = 5.0, 0.35   # camera vs wheels: a go leg's distances may 
 ID_EXTRA_CM = 5.0                  # ...plus this on the first leg after a turn on the spot (its centre is rougher)
 PARK_LEG_CM = 60.0        # parking: long legs on the robot's own wheels and gyro, the camera checks in between
 STALE_S = 1.5             # a camera position older than this is not used to steer
+EXPECT_TURN_CM = 7.0       # a robot turning on its spot stays within this of where it stood (camera's view)
+EXPECT_GO_EXTRA_CM = 8.0   # ... a drive of d cm within d + this
+AUTO_TRIES = 3            # a lost or stuck robot tries this many times on its own before Nick is called
+BACK_OFF_CM = 8.0         # a leg stopped by its front sensor backs this far before turning away (2026-10-22 loop)
 EDGE_TURN_CM = 9.0        # no turn on the spot closer than this to an open edge (the wheels reach it first)
 FIND_TIMEOUT_S = 150
 E02_TIMEOUT_S = {0: 150, 1: 400}
 BATTERY_WARN, BATTERY_STOP = 40, 15
-EXPECTED_FW = "2026-10-22a"
+EXPECTED_FW = "2026-10-22b"
 # The edge guard (line sensors) and the bare body. safe_edge is not saved on the robot: set after every power-on.
 # edge_thr 150 is CHOSEN, not measured at a real open edge: plywood reads 37-84 (roam1 RAW, ~70 000 rows), so a
 # change of 150 is far outside its noise; what the sensors read past the edge has not been logged yet. The camera
@@ -522,6 +526,7 @@ class Runner:
         following = self.tracker is not None and self.tracker.active == robot
         if following:
             self.tracker.clear_expect()          # it may move now
+            self.expect_leg(text, timeout)
         for attempt in range(2):
             t_s = time.time()
             self.send(robot, "%s %d" % (text, lid))
@@ -539,6 +544,26 @@ class Runner:
                 self.moves.pop(robot, None)
                 return "refused", "its camera-steered run ended (%s)" % self.watch.ended[m["run"]]["result"]
         return "lost", "no answer"
+
+    def expect_leg(self, text, timeout):
+        """Where the followed robot can be during this leg (2026-10-22: during a turn on its spot the tracker was
+        free to take another robot 34 cm away): a turn keeps it within EXPECT_TURN_CM of where it stands; a drive
+        of d cm within d + EXPECT_GO_EXTRA_CM. A camera-steered run (no tracker.where()) is left free."""
+        p = self.tracker.where()
+        if p is None:
+            return
+        parts = text.split()
+        try:
+            verb, val = parts[0], abs(float(parts[1]))
+        except (IndexError, ValueError):
+            return
+        if verb == "turn":
+            r = EXPECT_TURN_CM
+        elif verb in ("go", "probe"):
+            r = val + EXPECT_GO_EXTRA_CM
+        else:
+            return
+        self.tracker.expect(p[1], p[2], r, for_s=timeout + 3.0)
 
     def room_behind(self, robot, p, back_cm):
         """Backing up is blind (no edge guard, no front sensor): is there room behind for back_cm, by the camera?
@@ -743,6 +768,7 @@ class Runner:
         steer = ST.Steer(wps, heading=h[0], measured=h[1], final_heading=final_heading, max_legs=max_legs,
                          arrive_cm=arrive_cm, max_leg=max_leg)
         stuck = 0
+        blocked = 0
         while True:
             p = self.settle(min_s=0.3, timeout=2.0)
             if p is None:
@@ -783,14 +809,21 @@ class Runner:
             steer.after(cmd, p0, p1)
             if "obstacle" in res and cmd[0] in ("go", "probe") and cmd[1] > 0:
                 # its front stop saw something (a board, another robot): the heading guess was wrong or the way
-                # is blocked. Turn away a quarter turn and plan again from there.
-                self.say("    %s: something in front (%s): turning away" % (robot, res))
-                self.leg(robot, ("turn", 90.0))
-                steer.after(("turn", 90.0), p1, p1)
-                stuck += 1
-                if stuck >= 4:
+                # is blocked. Back off first (2026-10-22: turning on the spot against a board, then planning straight
+                # back into it, looped 13 times), then a quarter turn towards the board's middle, and plan again.
+                # Counted on its own: the turn legs in between used to reset the count, so it never gave up.
+                blocked += 1
+                self.say("    %s: something in front (%s): backing off and turning away (%d)" % (robot, res, blocked))
+                if blocked >= 3:
                     self.heads[robot] = [steer.heading, steer.measured]
                     return False, "something keeps blocking its way"
+                pb0, pb1, _ = self.leg(robot, ("go", -BACK_OFF_CM), run=run)
+                if pb1 is not None:
+                    steer.after(("go", -BACK_OFF_CM), pb0 if pb0 is not None else p1, pb1)
+                    p1 = pb1
+                ang = self.away_turn(p1, steer.heading)
+                self.leg(robot, ("turn", ang))
+                steer.after(("turn", ang), p1, p1)
                 continue
             if ST.leg_stuck(cmd, p0, p1):
                 stuck += 1
@@ -802,6 +835,21 @@ class Runner:
                     self.leg(robot, ("go", -5.0), run=run)
             else:
                 stuck = 0
+
+    def away_turn(self, p, heading):
+        """A quarter turn, to whichever side points more towards the board's middle (a fixed +90 could turn it
+        along a board or towards an open edge). +90 when the heading or position is not known."""
+        if p is None or heading is None:
+            return 90.0
+        b = self.board
+        cx, cy = (b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0
+        want = math.degrees(math.atan2(cy - p[1], cx - p[0]))
+        best = None
+        for a in (90.0, -90.0):
+            e = abs(ST.wrap180(want - (heading + a)))
+            if best is None or e < best[0]:
+                best = (e, a)
+        return best[1]
 
     # --- finding a robot with the camera ------------------------------------------------------------
     def board_rect(self):
@@ -951,9 +999,54 @@ class Runner:
             self.st.save()
         return ok, why
 
+    def recover(self, robot, park=True):
+        """One try at getting a robot back with nobody's hands: a fresh picture of the floor, a turn on its spot,
+        which way it faces, then parking. Returns (ok, words)."""
+        time.sleep(1.0)
+        old_pos = self.st["positions"].pop(robot, None)
+        self.disagree[robot] = 0
+        self.fresh_floor()
+        p = self.identify(robot)
+        self.moves.pop(robot, None)
+        if p is None:
+            if old_pos:
+                self.st["positions"][robot] = old_pos
+            return False, "noturn"
+        self.st["positions"][robot] = [p[0], p[1], None]
+        self.say("  Found %s at (%.1f, %.1f) cm." % (robot, p[0], p[1]))
+        if not park:
+            return True, ""
+        if not self.board.on_board(p[0], p[1]) or self.board.edge_room(p[0], p[1])[0] < EDGE_TURN_CM + 3:
+            # 2026-10-22 10:23: Center found 3.5 cm off the board, then its heading drive and "moving it in first"
+            # took it over the edge (it fell): its edge guard had learned the plywood level with a sensor already
+            # over the edge. Its heading is unknown here, so no drive at all: Nick.
+            return False, "atedge"
+        if self.acquire_heading(robot, p) is None:
+            return False, "noheading"
+        self.set_corrections(robot, self.move_corrections(robot))
+        ok, why = self.park(robot)
+        return ok, why
+
     def help_from_nick(self, robot, problem, park=True):
-        """Stuck, lost or off the board: exact steps for Nick, then the runner finds it again by a turn on its
-        spot and parks it itself. Returns True when it is back (and parked, unless park=False: then only found)."""
+        """Stuck, lost or off the board: first AUTO_TRIES tries on its own (2026-10-22: pressing Enter with no
+        hands, i.e. just finding it again, worked nearly every time); then exact steps for Nick, then the runner
+        finds it again by a turn on its spot and parks it itself. Returns True when it is back (and parked, unless
+        park=False: then only found)."""
+        if "off the board" not in problem:
+            for k in range(AUTO_TRIES):
+                self.say("  %s: %s. Trying again on its own (%d of %d) ..." % (robot, problem, k + 1, AUTO_TRIES))
+                self.mark("e02 auto-retry %s %d: %s" % (robot, k + 1, problem))
+                self.st.setdefault("auto_retries", []).append([round(time.time(), 1), robot, problem])
+                self.send(robot, "stop")
+                ok, why = self.recover(robot, park)
+                if ok:
+                    self.say("  %s is back without help." % robot)
+                    return True
+                if why == "atedge":
+                    problem = "it is at (or over) an open edge, and which way it faces is not known"
+                    break
+                if why not in ("noturn", "noheading"):
+                    problem = why
         where = ("anywhere on the open part of the board, at least 30 cm (1 ft) from the other robots, the boards "
                  "and the edges")
         facing = "open board"
@@ -992,32 +1085,20 @@ class Runner:
             if ans.lower() == "f":
                 self.send(robot, "identify")
                 continue
-            time.sleep(1.0)
-            old_pos = self.st["positions"].pop(robot, None)
-            self.disagree[robot] = 0
             self.say("Taking a fresh picture of the board (keep hands out of it), then %s turns a little on its "
                      "spot ..." % robot)
-            self.fresh_floor()
-            p = self.identify(robot)
-            self.moves.pop(robot, None)
-            if p is None:
-                if old_pos:
-                    self.st["positions"][robot] = old_pos
-                self.say("The camera did not see %s turn. Check it is on the board and switched on (its side light "
-                         "on), then press Enter again." % robot)
-                continue
-            self.st["positions"][robot] = [p[0], p[1], None]
-            self.say("  Found %s at (%.1f, %.1f) cm." % (robot, p[0], p[1]))
-            if not park:
-                return True
-            if self.acquire_heading(robot, p) is None:
-                self.say("It turned, but the camera lost it when it drove. Press Enter to try again.")
-                continue
-            self.set_corrections(robot, self.move_corrections(robot))
-            ok, why = self.park(robot)
+            ok, why = self.recover(robot, park)
             if ok:
                 return True
-            self.say("It moved, but parking failed: %s. Put it somewhere open again and press Enter." % why)
+            if why == "noturn":
+                self.say("The camera did not see %s turn. Check it is on the board and switched on (its side light "
+                         "on), then press Enter again." % robot)
+            elif why == "atedge":
+                self.say("The camera sees it at (or over) an open edge. Move it well in from the edge, then press Enter.")
+            elif why == "noheading":
+                self.say("It turned, but the camera lost it when it drove. Press Enter to try again.")
+            else:
+                self.say("It moved, but parking failed: %s. Put it somewhere open again and press Enter." % why)
 
     def keep_on_map(self, robot):
         """A robot put aside stays on the board as an obstacle the others go round: try once more to find where it

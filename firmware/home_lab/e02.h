@@ -1,4 +1,4 @@
-// E02 accuracy experiment (firmware 2026-10-21b). Plan: docs/build-plans/accuracy-experiment-E02.md.
+// E02 accuracy experiment (firmware 2026-10-22b). Plan: docs/build-plans/accuracy-experiment-E02.md.
 // Records and commands: docs/data-formats.md "E02". Simulator copy: tools/sim/fw_e02.py.
 //
 // BUMP DETECTION (no switches). The robot creeps into a board at bump_creep_cms, holding its gyro heading.

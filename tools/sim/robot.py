@@ -911,6 +911,7 @@ class Robot(FollowMixin, DockMixin, E02Mixin):
         self.edge_init()
         self.edge_trips = trips
         self.edge_learning = self.P("safe_edge") > 0
+        self.edge_no_floor = False
         self.edge_t0 = self.millis()
 
     def edge_stop(self):
@@ -930,7 +931,9 @@ class Robot(FollowMixin, DockMixin, E02Mixin):
             tape.append(base[k] > thr)
         ok = [b for b, t in zip(base, tape) if not t]
         if not ok:
-            self.edge_record("nobase", l, c, r, self.bottom(self.edge_rng), "all three sensors on tape")
+            self.edge_no_floor = True          # firmware 2026-10-22b: no forward drive this run
+            self.edge_record("nobase", l, c, r, self.bottom(self.edge_rng),
+                             "all three sensors off the plywood: no forward drive")
             return
         self.edge_base = [sum(ok) / len(ok) if t else b for b, t in zip(base, tape)]
         self.edge_ready = True
@@ -969,6 +972,11 @@ class Robot(FollowMixin, DockMixin, E02Mixin):
             self.edge_count = 0
             self.edge_bot_since = 0
             return False
+        if (mode & 1) and getattr(self, "edge_no_floor", False) and not self.edge_line_off:
+            self.edge_record("trip", L, C, R, self.bottom(er), "no plywood under the line sensors at the start")
+            self.edge_trips.append((self.ms, "line", (self.x, self.y, self.th)))
+            self.edge_braking, self.edge_last_cue = True, "line"
+            return True
         if (mode & 1) and self.edge_ready and not self.edge_line_off:
             if any(self._edge_past(v, k) for k, v in enumerate((L, C, R))):
                 self.edge_count += 1

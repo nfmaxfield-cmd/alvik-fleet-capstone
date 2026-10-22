@@ -258,7 +258,7 @@ def test_runner_safety_settings_go_with_every_find_and_route():
     cmds = r.board_params()
     for c in E.SAFETY_CMDS:
         assert c in cmds
-    assert E.EXPECTED_FW == "2026-10-22a"
+    assert E.EXPECTED_FW == "2026-10-22b"
 
 
 def test_default_floor_calibration_is_roam1s_and_lines_up_with_its_corners():

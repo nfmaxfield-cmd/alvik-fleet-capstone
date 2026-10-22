@@ -61,6 +61,7 @@ int buf[3][NL];
 int nLearn = 0;
 bool learning = false;             // collecting the plywood level
 bool ready = false;                // line cue armed for this run
+bool noFloor = false;              // all three line sensors off the plywood when learning (2026-10-22b): no forward drive
 float base[3] = {0, 0, 0};
 unsigned long t0 = 0;
 int lineCount = 0;                 // consecutive checks with a line sensor past the edge
@@ -86,6 +87,7 @@ void begin() {
   botSince = 0;
   braking = false;
   lineOff = false;
+  noFloor = false;
   base[0] = base[1] = base[2] = 0;
   t0 = millis();
 }
@@ -115,7 +117,14 @@ void finishLearning(int l, int c, int r) {
     tape[k] = base[k] > thr;                // started with this sensor on (dark) tape
     if (!tape[k]) { sum += base[k]; ok++; }
   }
-  if (!ok) { record("nobase", l, c, r, alvik.get_distance_bottom(), "all three sensors on tape"); return; }
+  if (!ok) {
+    // 2026-10-22 10:23: Center learned with all three sensors over the open edge (they read like tape), so the
+    // line cue was off and it drove off the board. The board has no tape: all three "on tape" means no plywood
+    // under the nose. Forward driving is refused for this run (backing up and turning are not guarded anyway).
+    noFloor = true;
+    record("nobase", l, c, r, alvik.get_distance_bottom(), "all three sensors off the plywood: no forward drive");
+    return;
+  }
   for (int k = 0; k < 3; k++) if (tape[k]) base[k] = sum / ok;
   ready = true;
   record("base", l, c, r, alvik.get_distance_bottom(), ok < 3 ? "a sensor on tape took the others' level" : "");
@@ -154,6 +163,12 @@ bool check() {
     else return false;
   }
   if (!forward) { lineCount = 0; botSince = 0; return false; }
+  if ((mode & 1) && noFloor && !lineOff) {
+    record("trip", L, C, R, alvik.get_distance_bottom(), "no plywood under the line sensors at the start");
+    lastCue = "line";
+    braking = true;
+    return true;
+  }
   if ((mode & 1) && ready && !lineOff) {
     if (pastEdge(L, 0) || pastEdge(C, 1) || pastEdge(R, 2)) lineCount++;
     else lineCount = 0;

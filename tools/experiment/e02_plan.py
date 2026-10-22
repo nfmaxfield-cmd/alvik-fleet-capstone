@@ -45,6 +45,8 @@ FIND_STAGE_CM = 25.0          # firmware e02_find_stage_cm: the find starts from
 # diagonal straight). Checked in tools/experiment/tests (the simulator's robot driving every route uncalibrated,
 # gyro 5.5-8.5% short, drift +-0.3 deg/s): no route comes within PARK_CLEAR_CM of a parked robot's centre.
 PARK_UV = ((103.0, 14.0), (12.0, 102.0), (105.0, 45.0))
+ESCAPE_NEAR_CM = 14.0         # a robot's centre nearer an open edge than this goes straight in first (park spots are 17+)
+ESCAPE_BOARD_CM = 25.0        # ... to a point at least this far from both board lines
 PARK_STAGE_CM = 20.0          # staging point this far in front of the park spot; it backs the rest of the way in
 PARK_CLEAR_CM = 18.0          # nothing a robot drives may come nearer a parked robot's centre than this (two bodies
                               # touch at 9.5-13.4 cm centre to centre)
@@ -250,9 +252,12 @@ class Board:
         board_d = min(abs(y - self.xboard_cm), abs(x - self.yboard_cm))
         return open_d, board_d
 
-    def escape_point(self, x, y, near_cm=20.0, to_cm=28.0):
+    def escape_point(self, x, y, near_cm=ESCAPE_NEAR_CM, to_cm=28.0, board_room_cm=ESCAPE_BOARD_CM):
         """A point straight in from the nearest open edge (to_cm from it) when (x, y) is within near_cm of it, else
-        None: where a robot left near an edge goes first, so the way to its spot never runs along the edge."""
+        None: where a robot left near an edge goes first, so the way to its spot never runs along the edge.
+        2026-10-22: near_cm was 20, and every park spot is 17-20 cm from an open edge, so every robot leaving its
+        spot was "moved in first"; and in the corner by a board the point came out 1.4 cm from the board's line
+        (Left drove into the board and looped). Now the point also keeps board_room_cm from both board lines."""
         best = None
         for a, v in self.open_edges():
             d = abs((x if a == "x" else y) - v)
@@ -263,7 +268,15 @@ class Board:
         d, a, v = best
         lo = min(self.x0, self.x1) if a == "x" else min(self.y0, self.y1)
         inward = 1.0 if abs(v - lo) < 1e-6 else -1.0
-        return (v + inward * to_cm, y) if a == "x" else (x, v + inward * to_cm)
+        q = [v + inward * to_cm, y] if a == "x" else [x, v + inward * to_cm]
+        # keep clear of the board lines (the other coordinate, along the edge)
+        if a == "x":
+            if abs(q[1] - self.xboard_cm) < board_room_cm:
+                q[1] = self.xboard_cm + (board_room_cm if self.uy > 0 else -board_room_cm)
+        else:
+            if abs(q[0] - self.yboard_cm) < board_room_cm:
+                q[0] = self.yboard_cm + (board_room_cm if self.ux > 0 else -board_room_cm)
+        return tuple(q)
 
     def on_board(self, x, y, margin=0.0):
         return (min(self.x0, self.x1) + margin <= x <= max(self.x0, self.x1) - margin and
