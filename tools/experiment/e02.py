@@ -1225,6 +1225,7 @@ class Runner:
         if ax is None or ay is None:
             return None
         self.say("  %s found itself at (%.1f, %.1f) cm; the camera looks there ..." % (robot, ax, ay))
+        self.st["positions"][robot] = [ax, ay, None]      # where it is, even if the camera can't see it there
         self.fresh_floor()
         return self.identify(robot, near=(ax, ay, SWEEP_NEAR_CM))
 
@@ -1338,6 +1339,11 @@ class Runner:
         """The robot's own position (x, y, heading) from its last finished leg: wheels and gyro since the last
         camera fix or find, in the board's frame. None if it has not reported one."""
         r = self.listener.latest("LEG", robot, since)
+        f = self.listener.latest("FIND", robot, since)
+        if f and (not r or f[0] >= r[0]):       # a find after its last leg: the find's end pose (exact)
+            x, y, th = num(f[1].get("after_x")), num(f[1].get("after_y")), num(f[1].get("after_th"))
+            if None not in (x, y, th) and (x, y) != (0.0, 0.0):
+                return (x, y, th)
         if not r:
             return None
         x, y, th = num(r[1].get("x_cm")), num(r[1].get("y_cm")), num(r[1].get("th_deg"))
@@ -1444,7 +1450,10 @@ class Runner:
         p = self.identify(robot, near=(guess[0], guess[1], 60.0) if guess else None)
         self.moves.pop(robot, None)
         if p is None:
-            p = guess
+            # the camera can't see it: its own pose from its last leg, if that is newer than the camera's last
+            # sighting (dry run 14:31: it had found itself in the find corner, the runner still had its park spot)
+            own = self.own_pose(robot, since=(last[0] if last else 0.0))
+            p = (own[0], own[1]) if own else guess
         if p is None:
             raise SystemExit("%s is somewhere on the board but the camera can't find it, so the other robots could "
                              "drive into it. Take %s off the board (or put it anywhere open), then start again." % (
