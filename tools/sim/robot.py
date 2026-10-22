@@ -578,7 +578,9 @@ class Robot(FollowMixin, DockMixin, E02Mixin):
             if d >= t.max_range_cm:
                 out.append(t.max_range_cm)
             elif d < t.min_range_cm:
-                out.append(rng.uniform(0.0, t.min_range_cm))
+                # very near: the real sensor still reads small, steady values (2026-10-22, Left pressed on the
+                # board: 0.2-0.8 cm for 9 s), not noise across 0..2 cm
+                out.append(max(0.0, d + rng.gauss(0.3, 0.2)))
             else:
                 out.append(max(0.0, d * (1 + scale / 100) + bias + rng.gauss(0, t.noise_cm + d * t.noise_pct / 100)))
         self._tof_vals = out

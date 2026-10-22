@@ -89,7 +89,19 @@ def add_identify(rb, R):
     orig = rb.handle_command
 
     def handle(raw, running):
-        if raw.strip().split(" ")[0].lower() != "identify":
+        verb = raw.strip().split(" ")[0].lower()
+        if verb == "led":                       # firmware 2026-10-22a: steady colour for ms, not blocking
+            rb.last_rx = rb.millis()
+            if running:
+                rb.send("M,busy: send stop first")
+                return False
+            parts = (raw.split() + ["1", "1", "1", "2000"])[1:5]
+            on = any(int(float(v)) for v in parts[:3])
+            rb.set_leds(R.WHITE if on else R.OFF, R.WHITE if on else R.OFF)
+            threading.Timer(max(0.05, float(parts[3]) / 1000.0), lambda: rb.set_leds(R.OFF, R.OFF)).start()
+            rb.send("M,%s: led for %s ms" % (rb.name, parts[3]))
+            return False
+        if verb != "identify":
             return orig(raw, running)
         rb.last_rx = rb.millis()
         if running:
@@ -124,7 +136,7 @@ class World:
         self.board = bd
         cfg = config.load_config(None)
         cfg.dock.contact_boards = True
-        cfg.dock.wall_stall_frac = 0.15
+        cfg.dock.wall_stall_frac = args.wall_stall   # real (2026-10-22): the tyres slip at ~96% of speed
         cfg.dock.miss_bump_prob = args.miss_bump
         cfg.dock.miss_jolt_prob = args.miss_jolt
         cfg.imu.gyro_bias_dps = args.drift_sd
@@ -163,6 +175,8 @@ class World:
             rb.idle_until(now)
             if args.start == "swapped":         # each on the next one's park spot (all spots taken: 2026-10-21)
                 px, py, ph = bd.park((k + 1) % len(names))
+            elif args.start == "corners":       # Nick's 2026-10-22 08:09 layout (camera frame): it dead-locked parking
+                px, py, ph = [(87.1, 27.8, 125.0), (35.2, 86.1, -50.0), (88.2, 87.3, 45.0)][k % 3]
             elif args.start == "scatter":       # anywhere open, as Nick puts them down now
                 while True:
                     px, py, ph = rng.uniform(30, 92), rng.uniform(30, 92), rng.uniform(-180, 180)
@@ -505,8 +519,9 @@ def main(argv=None):
     ap.add_argument("--out", default="e02_sim_out")
     ap.add_argument("--robots", default="Left,Center,Right")
     ap.add_argument("--seed", type=int, default=2)
-    ap.add_argument("--start", default="parks", choices=["parks", "swapped", "scatter"],
-                    help="where the robots stand at the start: near their park spots, each on another's, or anywhere")
+    ap.add_argument("--start", default="parks", choices=["parks", "swapped", "scatter", "corners"],
+                    help="where the robots stand at the start: near their park spots, each on another's, anywhere, or "
+                         "Nick's 2026-10-22 corners layout")
     ap.add_argument("--fps", type=float, default=15.0)
     ap.add_argument("--px-per-cm", type=float, default=2.34, help="camera scale on the floor (real footage: 2.34)")
     ap.add_argument("--tilt", type=float, default=3.0, help="camera tilt from straight down, deg")
@@ -522,6 +537,9 @@ def main(argv=None):
     ap.add_argument("--cam-noise", type=float, default=6.0, help="camera sensor noise, grey levels (sd)")
     ap.add_argument("--cam-jitter", type=float, default=0.0, help="whole picture shake per frame, px (sd)")
     ap.add_argument("--jpeg", type=int, default=80)
+    ap.add_argument("--wall-stall", type=float, default=0.96,
+                    help="share of its speed a wheel keeps when pushing a board (real Left, 2026-10-22: ~0.96: the tyres "
+                         "slip, no stall; the firmware's touch cue finds the bump)")
     ap.add_argument("--miss-bump", type=float, default=0.03, help="chance a bump is missed altogether (the find fails)")
     ap.add_argument("--miss-jolt", type=float, default=0.10, help="chance a bump's jolt is missed (found by the stall)")
     ap.add_argument("--bricks", default="", help="brick demo: 'x,y,length,width[,deg];...' cm, put on the board while "

@@ -6,7 +6,11 @@
 //   - stall: the wheels' measured speed (get_wheels_speed) falls below bump_stall_frac of what was commanded;
 //   - jolt: the accelerometer's driving-axis reading (ax) jumps more than bump_jolt_g from its running level.
 // A bump = a stall that lasts bump_stall_ms and began within bump_jolt_win_ms after a jolt, OR a stall that
-// lasts bump_stall_only_ms with no jolt. A jolt alone (a floor seam, vibration) is only counted (BUMP seams);
+// lasts bump_stall_only_ms with no jolt, OR (2026-10-22a) TOUCH: the front distance sensor's centre zones read at
+// most bump_touch_cm for bump_touch_ms (the robot's face is on the board). Why the touch cue: on the real board
+// (2026-10-22, Left's find) the tyres slipped on the plywood at full speed for 9 s after contact, so the wheels
+// never "stalled", and the creep's contact jolt was 0.146 g, just under bump_jolt_g; the front sensor read 12 cm
+// falling to 0.2-0.8 cm and stayed there. A jolt alone (a floor seam, vibration) is only counted (BUMP seams);
 // a short slow-down (a seam's lip) never lasts long enough. Real numbers behind the defaults
 // (roam1 logs, 2026-10-19/20): creep vibration on ax has sd ~0.05 g and 1 sample in 100 beyond ~0.13 g, so a
 // jolt alone can never be trusted; ax is the driving axis (it tracks speeding up / slowing down; its sign is
@@ -209,6 +213,10 @@ bool creep(float h, float maxCm, Bump& b) {
   float joltThr = P("bump_jolt_g"), frac = P("bump_stall_frac"), farCm = P("bump_far_cm");
   unsigned long stallMs = (unsigned long)P("bump_stall_ms"), stallOnly = (unsigned long)P("bump_stall_only_ms");
   unsigned long win = (unsigned long)P("bump_jolt_win_ms"), spin = (unsigned long)P("bump_spinup_ms");
+  float touchCm = P("bump_touch_cm");
+  unsigned long touchMs = (unsigned long)P("bump_touch_ms");
+  unsigned long touchSince = 0;
+  float distTouch = 0;
   const float cmdRpm = v * 60.0f / (2.0f * 3.14159265f * 1.7f);   // setDrive(): cm/s -> wheel rpm
   float saved = gFrontLimitCm;
   gFrontLimitCm = 0;                       // it is meant to touch what is ahead
@@ -241,6 +249,32 @@ bool creep(float h, float maxCm, Bump& b) {
     bool stalled = armed && meas < frac * cmdRpm;
     if (stalled && !stallSince) { stallSince = now | 1; distStall = travel; peak = dev; }
     if (!stalled) stallSince = 0;
+    // touch: the front sensor's three middle zones; the nearest of them at most touchCm (face on the board)
+    if (touchCm > 0) {
+      float dd[5];
+      alvik.get_distance(dd[0], dd[1], dd[2], dd[3], dd[4]);
+      float near = fminf(dd[1], fminf(dd[2], dd[3]));
+      if (near <= touchCm) {
+        if (!touchSince) { touchSince = now | 1; distTouch = travel; }
+        if (now - touchSince >= touchMs) {
+          alvik.brake();
+          b.msDetect = now;
+          b.cue = "touch";
+          bool jolted = lastJolt && (long)(lastJolt + win - touchSince) >= 0 && (long)(touchSince + win - lastJolt) >= 0;
+          b.msContact = jolted && (long)(lastJolt - touchSince) < 0 ? lastJolt : touchSince;
+          b.travel = jolted && (long)(lastJolt - touchSince) < 0 ? distJolt : distTouch;
+          b.jolt = jolted ? lastJoltG : 0;
+          b.stallFrac = meas / cmdRpm;
+          if (jolted && b.seams > 0) b.seams--;
+          b.front = near;
+          if (!pose::at(b.msContact, b.x, b.y, b.th)) { b.x = pose::x; b.y = pose::y; b.th = pose::th(); }
+          ok = true;
+          break;
+        }
+      } else {
+        touchSince = 0;
+      }
+    }
     if (stallSince) {
       unsigned long s = now - stallSince;
       bool jolted = lastJolt && (long)(lastJolt + win - stallSince) >= 0;   // a jolt at most win before the stall

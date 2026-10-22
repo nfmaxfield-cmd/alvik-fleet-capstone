@@ -916,3 +916,56 @@ def locate_flash(cam, frames, times, board_rect=None, margin_cm=8.0, near=None, 
     u, v = float(np.average(xx[keep], weights=sc[yy[keep], xx[keep]])), float(np.average(yy[keep], weights=sc[yy[keep], xx[keep]]))
     x, y = cam.to_floor(u, v, z_cm)
     return dict(x=float(x), y=float(y), strength=round(peak, 1), ratio=round(float(ratio[v0, u0]), 2), u=u, v=v)
+
+
+def locate_light(cam, before, during, board_rect=None, margin_cm=8.0, near=None, z_cm=ROBOT_TOP_CM, stat="median"):
+    """Where did a robot's lights come on (firmware 2026-10-22a `led 1 1 1 <ms>`: both LEDs steady white)? Works at
+    any frame rate, even the ~2 pictures a second the laptop gets (2026-10-22: the 2 Hz `identify` flash can't be
+    seen at that rate). Small bright spots that got brighter between the two sets of pictures (medians; stat="max"
+    for footage of a blinking light), grouped within a robot's size; the strongest group, if it clearly beats the
+    next. Returns dict(x, y, strength, n_spots) or None."""
+    b = np.median(np.stack([f.astype(np.float32) for f in before]), axis=0)
+    st = np.stack([f.astype(np.float32) for f in during])
+    a = st.max(axis=0) if stat == "max" else np.median(st, axis=0)
+    d = a - b
+    d -= float(np.median(d[::4, ::4]))
+    mad = float(np.median(np.abs(d[::4, ::4])))
+    thr = max(30.0, 8.0 * 1.4826 * mad)
+    mask = (d > thr).astype(np.uint8)
+    n, lab, stats, cents = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    cx = cy = 61.0
+    if board_rect is not None:
+        cx, cy = (board_rect[0] + board_rect[2]) / 2, (board_rect[1] + board_rect[3]) / 2
+    rpx = ROBOT_CM * cam.px_per_cm(cx, cy, z_cm)
+    spots = []
+    for i in range(1, n):
+        ar = int(stats[i, cv2.CC_STAT_AREA])
+        if ar < 2 or ar > 0.6 * rpx * rpx:
+            continue
+        u, v = cents[i]
+        x, y = cam.to_floor(u, v, z_cm)
+        if not (np.isfinite(x) and np.isfinite(y)):
+            continue
+        if board_rect is not None:
+            x0, y0, x1, y1 = board_rect
+            if not (min(x0, x1) - margin_cm <= x <= max(x0, x1) + margin_cm and
+                    min(y0, y1) - margin_cm <= y <= max(y0, y1) + margin_cm):
+                continue
+        if near is not None and math.hypot(x - near[0], y - near[1]) > near[2]:
+            continue
+        spots.append([float(x), float(y), float(d[lab == i].sum())])
+    groups = []
+    for x, y, s in sorted(spots, key=lambda q: -q[2]):
+        for g in groups:
+            if math.hypot(x - g["x"], y - g["y"]) < 1.3 * ROBOT_CM:
+                tot = g["strength"] + s
+                g["x"] = (g["x"] * g["strength"] + x * s) / tot
+                g["y"] = (g["y"] * g["strength"] + y * s) / tot
+                g["strength"], g["n_spots"] = tot, g["n_spots"] + 1
+                break
+        else:
+            groups.append(dict(x=x, y=y, strength=s, n_spots=1))
+    groups.sort(key=lambda g: -g["strength"])
+    if not groups or (len(groups) > 1 and groups[1]["strength"] > 0.4 * groups[0]["strength"]):
+        return None
+    return groups[0]

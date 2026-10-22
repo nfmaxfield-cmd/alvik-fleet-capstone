@@ -38,7 +38,7 @@
 Arduino_Alvik alvik;
 
 // Bump this whenever the firmware changes, so every logged run says which code it ran.
-#define FW_VERSION "2026-10-21b"
+#define FW_VERSION "2026-10-22a"
 
 uint16_t gBootId = 0;   // random each power-on; starts every run id
 
@@ -72,6 +72,8 @@ float P(const char* name) {
   }
   return p->value;
 }
+
+unsigned long gLedUntil = 0;   // `led`: when the laptop's colour ends (0 = none)
 
 void showSelection(bool running) {
   bool r = 0, g = 0, b = 0;
@@ -145,6 +147,20 @@ bool handleCommand(const String& raw, bool running) {
     String old = String(net::name);
     net::saveName(rest);   // empty name = back to the MAC-based one
     net::logf("M,%s is now called %s (kept after power-off)", old.c_str(), net::name);
+    return false;
+  }
+  if (verb == "led") {
+    // led <r> <g> <b> [ms]: both LEDs this colour (0/1 each) for ms (default 2000), then back to normal. Does
+    // not block (2026-10-22a): the laptop finds a robot by a steady light at any camera frame rate, and the
+    // dance flashes on its beat. Ignored during a run (its own lights are part of the data).
+    if (running) { net::sendLine("M,busy: send stop first"); return false; }
+    int r = 1, g = 1, bl = 1;
+    long ms = 2000;
+    sscanf(raw.c_str(), "%*s %d %d %d %ld", &r, &g, &bl, &ms);
+    alvik.left_led.set_color(r ? 1 : 0, g ? 1 : 0, bl ? 1 : 0);
+    alvik.right_led.set_color(r ? 1 : 0, g ? 1 : 0, bl ? 1 : 0);
+    gLedUntil = millis() + (unsigned long)constrain(ms, 50L, 20000L);
+    net::logf("M,%s: led %d %d %d for %ld ms", net::name, r, g, bl, ms);
     return false;
   }
   if (verb == "identify") {
@@ -654,6 +670,7 @@ void otaFinished(bool ok) {
 }
 
 void loop() {
+  if (gLedUntil && (long)(millis() - gLedUntil) >= 0) { gLedUntil = 0; showSelection(false); }   // `led` ends
   yawTrack();         // keeps the corrected heading's turn count while idle (motion.h)
   net::keepTrying();  // joins WiFi later if it failed at startup
   if (net::up && !ota::tried) ota::begin();

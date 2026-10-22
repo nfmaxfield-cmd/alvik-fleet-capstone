@@ -233,6 +233,31 @@ class FindTests(unittest.TestCase):
             self.assertEqual(len([s for s in records(r, "SYNC") if s["tag"] == "start"]), 1)   # sync flash
         print("\nfind: worst reset position error %.2f cm over 8 finds" % worst)
 
+    def test_find_with_slipping_tyres_bumps_by_touch(self):
+        """The real board (2026-10-22, Left): pressed against the board the tyres slip at ~96% of their speed, so the
+        wheels never stall; the front sensor reads 0.2-0.8 cm. Bare body (no nose bracket), as on the real robots:
+        the touch cue finds both bumps. Accuracy: most finds land within 1.5 cm and 1 deg; with slipping tyres the
+        push-to-square sometimes can't turn the robot square (seed 301: 7 deg off, judged "squared" because the
+        heading stopped changing) -- an open item for the real board (docs/build-plans/e02-next-build.md)."""
+        rng = random.Random(11)
+        good = 0
+        for k in range(6):
+            r = make(seed=300 + k, stall=0.96, bumper_cm=0)
+            x, y, th = rng.uniform(25, 60), rng.uniform(20, 45), -90.0 + rng.uniform(-10, 10)
+            place(r, x, y, th)
+            r.pose.set(x + rng.uniform(-2, 2), y + rng.uniform(-2, 2), th + rng.uniform(-3, 3), 0.5, 1.0)
+            run = r.run_experiment("find")
+            self.assertEqual(run["result"], "done", (k, records(r, "FIND"), records(r, "BUMP")))
+            bumps = records(r, "BUMP")
+            self.assertEqual(len(bumps), 2)
+            self.assertTrue(all(b["cue"] == "touch" for b in bumps), bumps)
+            f = records(r, "FIND")[0]
+            tx, ty, tth = r.e_reset_true
+            if math.hypot(float(f["reset_x"]) - tx, float(f["reset_y"]) - ty) < 1.5 and \
+                    abs(ang(float(f["reset_th"]) - math.degrees(tth))) < 1.0:
+                good += 1
+        self.assertGreaterEqual(good, 5)
+
     def test_find_without_the_retrace_would_be_off(self):
         """turn_k matters: with the gyro under-reading 7% the robot drives to the y board 6-7 degrees crooked,
         so the plain own pose drifts sideways; retrace_cm says how much the re-trace moved it (> 1 cm here)."""

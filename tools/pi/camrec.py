@@ -598,8 +598,7 @@ def list_cameras(run=subprocess.run, devices=None, opener=None, log=print, secon
 
 
 # ------------------------------------------------------------------ disk space
-DISK_GB_PER_CAM_10MIN = 2.0   # Motion-JPEG 640x480 at 30 fps is about 1-2 MB/s per camera (~0.6-1.2 GB per
-                              # 10 min); 2 GB leaves headroom. Not measured on the Pi: check a real folder's size.
+DISK_GB_PER_CAM_10MIN = 0.5   # measured 2026-10-21/22: 2.9 GB for 63 min, 69 MB for 104 s at 25 fps (~0.45 GB per 10 min); was 2.0
 DISK_WARN_GB = 1.0            # during recording: one loud warning below this
 DISK_STOP_GB = 0.3            # during recording: stop and save cleanly below this (a full card corrupts video.avi)
 

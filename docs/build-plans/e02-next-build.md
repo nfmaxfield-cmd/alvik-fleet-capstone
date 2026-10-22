@@ -21,3 +21,10 @@
 - (2026-10-22 08:19) **Left lost twice in the bottom-left corner** (the left board's shadow): found again by the turn
   at (40.5, 102.7), lost again backing into its park spot (17, 108). Move that park spot out of the shadow, or make the
   tracker cope with low contrast there (per-area thresholds from the floor memory's noise).
+- (2026-10-22 09:10) Firmware 2026-10-22a adds the TOUCH bump cue (front sensor at most 1.5 cm for 150 ms) because
+  the real tyres slip at ~96% speed against a board (no stall). In the simulator with that slip, push-to-square
+  sometimes can't turn the robot square (1 find in 6 came out 7 deg off, judged "squared" because the heading
+  stopped changing). Watch the real finds' square_deg / reset heading; if it happens, check squareness from the
+  camera's back-off heading and redo the find, or push harder / longer.
+- Park spots: moving Left's spot out of the left board's shadow broke the route clearance checks (routes pass
+  near); needs a joint re-plan of park spots and routes, not a nudge.

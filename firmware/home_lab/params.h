@@ -228,6 +228,8 @@ Param PARAMS[] = {
   {"bump_jolt_g",   0.15,   "bump: a jolt = the accelerometer's driving-axis reading this far (g) from its running level (real creep vibration: sd ~0.05 g, 1-in-100 ~0.13 g)"},
   {"bump_jolt_win_ms", 120, "bump: a jolt counts for a stall starting up to this long after it"},
   {"bump_spinup_ms",  400,  "bump: no stall or jolt checks this long after the creep starts (wheels speeding up)"},
+  {"bump_touch_cm",  1.5,   "bump: the front sensor's middle zones at most this far = the face is on the board (real, 2026-10-22: 0.2-0.8 cm pressed; 0 = cue off)"},
+  {"bump_touch_ms",  150,   "bump: ... for this long (the sensor gives ~15 readings a second)"},
   {"bump_far_cm",     15,   "bump: a stall while the front sensor sees something further than this (and under 100 cm) is not a board: the find fails"},
   {"push_rpm",         8,   "push-to-square: both wheels push this gently after a bump"},
   {"push_ms",       1500,   "push-to-square: at most this long"},

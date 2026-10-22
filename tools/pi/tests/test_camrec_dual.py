@@ -240,10 +240,10 @@ def test_one_camera_layout_unchanged(tmp_path):
 
 def test_disk_precheck_warns(tmp_path):
     lines = []
-    camrec.disk_precheck(str(tmp_path), 2, 0, log=lines.append, free=3.0)    # 2 cams x 10 min want 4 GB
-    assert lines[0].startswith("! LOW DISK SPACE") and "8 min fit" in lines[0]
+    camrec.disk_precheck(str(tmp_path), 2, 0, log=lines.append, free=0.6)    # 2 cams x 10 min want 1 GB (0.5 each)
+    assert lines[0].startswith("! LOW DISK SPACE") and "6 min fit" in lines[0]
     lines = []
-    camrec.disk_precheck(str(tmp_path), 1, 0, log=lines.append, free=3.0)
+    camrec.disk_precheck(str(tmp_path), 1, 0, log=lines.append, free=0.6)
     assert not lines[0].startswith("!")
 
 

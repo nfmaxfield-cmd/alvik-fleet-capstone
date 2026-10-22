@@ -33,7 +33,7 @@ start / far / end, errors, flags, corrections used), track.csv (the moving robot
 fits.csv (every self-calibration), e02_log.txt (everything the console said), naming_check.json,
 setup.json, robot logs in robot-logs-<n>/ (the console's CSVs: raw, bump, find, e02, leg ...).
 
-PROTOCOL: firmware 2026-10-21b (docs/data-formats.md "E02", firmware/home_lab/e02.h); the runner refuses other
+PROTOCOL: firmware 2026-10-22a (docs/data-formats.md "E02", firmware/home_lab/e02.h); the runner refuses other
 firmware. What this runner sends:
   set safe_edge 1, edge_dir 0, edge_thr 150, edge_n 3, bumper_cm 0, e02_face_cm 0  (SAFETY: at setup, checked by
       `get`, and with every find / route, checked in its PARAM records; the firmware refuses to drive without
@@ -101,7 +101,7 @@ EDGE_TURN_CM = 9.0        # no turn on the spot closer than this to an open edge
 FIND_TIMEOUT_S = 150
 E02_TIMEOUT_S = {0: 150, 1: 400}
 BATTERY_WARN, BATTERY_STOP = 40, 15
-EXPECTED_FW = "2026-10-21b"
+EXPECTED_FW = "2026-10-22a"
 # The edge guard (line sensors) and the bare body. safe_edge is not saved on the robot: set after every power-on.
 # edge_thr 150 is CHOSEN, not measured at a real open edge: plywood reads 37-84 (roam1 RAW, ~70 000 rows), so a
 # change of 150 is far outside its noise; what the sensors read past the edge has not been logged yet. The camera
@@ -840,8 +840,22 @@ class Runner:
                 self.say("    (two places changed when %s turned: looking again)" % robot, quiet=True)
                 continue
             return (cands[0]["x"], cands[0]["y"])
-        # third try: its lights (2026-10-22). `identify` flashes both LEDs white at 2 Hz for 3 s; the camera
-        # looks for the one spot swinging at that rate.
+        # third try: its lights, steady (firmware 2026-10-22a `led`): pictures before and while they are on; the one
+        # spot that got brighter. Works at the ~2 pictures a second the laptop gets (the 2 Hz flash below does not).
+        if self.feed is not None and hasattr(self.feed, "collect"):
+            before, _ = self.feed.collect(1.2)
+            self.send(robot, "led 1 1 1 2500")
+            time.sleep(0.5)
+            during, _ = self.feed.collect(1.6)
+            if len(before) >= 1 and len(during) >= 1:
+                f = CAM.locate_light(self.cam, before, during, board_rect=self.board_rect(), near=near)
+                self.st.setdefault("identify", []).append([round(time.time(), 1), robot, "light",
+                                                           [round(f["x"], 1), round(f["y"], 1), round(f["strength"])]
+                                                           if f else None, len(before), len(during)])
+                if f and all(math.hypot(f["x"] - o[0], f["y"] - o[1]) > 6.0 for o in others):
+                    self.say("    (found %s by its lights)" % robot)
+                    return (f["x"], f["y"])
+        # fourth try: the 2 Hz flash (`identify`), for a fast picture stream
         if self.feed is not None and hasattr(self.feed, "collect"):
             self.send(robot, "identify")
             imgs, ts = self.feed.collect(3.6)
@@ -1299,11 +1313,38 @@ class Runner:
                                  "the board, 30 cm apart, and start again." % ", ".join(todo))
             def blocked(n):
                 i = self.park_index(n)
-                spots = [self.board.park(i)[:2], self.board.stage(i)]          # its spot and the point it backs in from
-                return [m for m in todo if m != n and any(
-                    math.hypot(self.st["positions"][m][0] - q[0], self.st["positions"][m][1] - q[1]) < PL.PARK_CLEAR_CM + 6
-                    for q in spots)]
-            free = [n for n in todo if not blocked(n)]
+                px_, py_ = self.board.park(i)[:2]
+                sx_, sy_ = self.board.stage(i)
+                # another robot on its spot, or right on the point it backs in from (2026-10-22: a looser test for
+                # the backing-in point; 24 cm round both dead-locked robots put down 30 cm from the walls)
+                return [m for m in todo if m != n and (
+                    math.hypot(self.st["positions"][m][0] - px_, self.st["positions"][m][1] - py_) < PL.PARK_CLEAR_CM + 6
+                    or math.hypot(self.st["positions"][m][0] - sx_, self.st["positions"][m][1] - sy_) < PL.PARK_CLEAR_CM)]
+            def path_ok(n):
+                q0 = self.st["positions"][n]
+                return self.safe_path(n, (q0[0], q0[1]), self.board.stage(self.park_index(n))) is not None
+
+            def obstructs(m):
+                # how many other robots' ways (to their backing-in point, and their spots) m stands in
+                qm = self.st["positions"][m]
+                k = 0
+                for n2 in todo:
+                    if n2 == m:
+                        continue
+                    a = self.st["positions"][n2]
+                    for b in (self.board.stage(self.park_index(n2)), self.board.park(self.park_index(n2))[:2]):
+                        dx, dy = b[0] - a[0], b[1] - a[1]
+                        L = math.hypot(dx, dy) or 1e-6
+                        t = max(0.0, min(L, ((qm[0] - a[0]) * dx + (qm[1] - a[1]) * dy) / L))
+                        if math.hypot(a[0] + dx / L * t - qm[0], a[1] + dy / L * t - qm[1]) < PL.PARK_CLEAR_CM + 4:
+                            k += 1
+                return k
+            # park first a robot whose spot is free AND whose way there is clear (2026-10-22: checking only the
+            # spot dead-locked three robots put down in the corners); none: the one most in the others' way moves
+            # to a free holding spot first
+            free = [n for n in todo if not blocked(n) and path_ok(n)]
+            if not free:
+                todo.sort(key=lambda m: -obstructs(m))
             n = free[0] if free else todo[0]
             self.active = n
             self.phase = "finding"
@@ -1314,8 +1355,9 @@ class Runner:
                     todo.remove(n)
                     continue
             elif not free:
-                mid = ((self.board.x0 + self.board.x1) / 2, (self.board.y0 + self.board.y1) / 2)
-                self.say("  Every park spot has another robot on it: moving %s to the middle of the board first." % n)
+                mid = self.holding_spot(n)
+                self.say("  Every park spot has another robot near it: moving %s out of the way first, to (%.0f, %.0f) cm."
+                         % (n, mid[0], mid[1]))
                 ok, why = self.drive_to(n, mid, max_leg=PARK_LEG_CM)
                 self.end_moves(n)
                 if not ok:
@@ -1349,6 +1391,25 @@ class Runner:
                 self.say("  %s parked at (%.1f, %.1f) cm" % (n, p[0], p[1]))
             todo.remove(n)
         self.st.save()
+
+    def holding_spot(self, robot):
+        """Where a robot can wait out of everyone's way while the others park (2026-10-22: robots put down in three
+        corners dead-locked; the middle was used without checking it was free): the point on the board furthest
+        from every other robot, every park spot and every backing-in point, and well in from the edges."""
+        others = [tuple(q[:2]) for n, q in self.st["positions"].items() if n != robot and q]
+        spots = []
+        for i in range(len(self.st["robots"])):
+            spots.append(tuple(self.board.park(i)[:2]))
+            spots.append(tuple(self.board.stage(i)))
+        best = None
+        for x in np.arange(self.board.x0 + 25, self.board.x1 - 24, 4.0):
+            for y in np.arange(self.board.y0 + 25, self.board.y1 - 24, 4.0):
+                d_r = min([math.hypot(x - o[0], y - o[1]) for o in others] or [99.0])
+                d_s = min([math.hypot(x - q[0], y - q[1]) for q in spots] or [99.0])
+                score = min(d_r, 1.5 * d_s)
+                if best is None or score > best[0]:
+                    best = (score, (float(x), float(y)))
+        return best[1]
 
     def acquire_heading(self, robot, p):
         """A robot found by identify(): follow it from p and measure its heading by a short drive (forward;
@@ -3045,7 +3106,7 @@ def main(argv=None):
     ap.add_argument("--view-port", type=int, default=8090, help="live view in a browser: http://localhost:<port> (0 = off)")
     ap.add_argument("--map-rays", type=int, default=16)
     ap.add_argument("--map-robot", default="", help="which robot maps (default: the first)")
-    ap.add_argument("--dry-start", default="parks", choices=["parks", "swapped", "scatter"],
+    ap.add_argument("--dry-start", default="parks", choices=["parks", "swapped", "scatter", "corners"],
                     help="dry run: where the simulated robots stand at the start")
     ap.add_argument("--calib", help="floor calibration file (default: the studio project's cameras/overhead.json)")
     ap.add_argument("--project", help="the studio project folder (default Documents\\recognition-project)")

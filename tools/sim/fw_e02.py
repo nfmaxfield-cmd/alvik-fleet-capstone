@@ -1,4 +1,4 @@
-"""E02 in the simulator: a copy of firmware/home_lab/e02.h (2026-10-21b) (bump detection without switches, push-to-square,
+"""E02 in the simulator: a copy of firmware/home_lab/e02.h (2026-10-22a) (bump detection without switches, push-to-square,
 `run find`, `run e02`, camera fixes, camera-steered legs), step for step, mixed into robot.Robot.
 
 What the simulator adds for it (robot.py, config.py): the boards are solids for the body (dock.contact_boards,
@@ -191,6 +191,8 @@ class E02Mixin:
         jolt_thr, frac, far_cm = P("bump_jolt_g"), P("bump_stall_frac"), P("bump_far_cm")
         stall_ms, stall_only = int(P("bump_stall_ms")), int(P("bump_stall_only_ms"))
         win, spin = int(P("bump_jolt_win_ms")), int(P("bump_spinup_ms"))
+        touch_cm, touch_ms = P("bump_touch_cm"), int(P("bump_touch_ms"))
+        touch_since, dist_touch = 0, 0.0
         cmd_rpm = v * 60.0 / (2.0 * math.pi * 1.7)
         saved = self.front_limit
         self.front_limit = 0.0
@@ -231,6 +233,33 @@ class E02Mixin:
                 stall_since, dist_stall, peak = now | 1, travel, dev
             if not stalled:
                 stall_since = 0
+            # touch (firmware 2026-10-22a): the front sensor's middle zones at most touch_cm for touch_ms
+            if touch_cm > 0:
+                dd = self.tof()
+                near = min(dd[1], dd[2], dd[3])
+                if near <= touch_cm:
+                    if not touch_since:
+                        touch_since, dist_touch = now | 1, travel
+                    if now - touch_since >= touch_ms:
+                        self.brake()
+                        b.ms_detect = now
+                        b.cue = "touch"
+                        jolted = bool(last_jolt) and last_jolt + win - touch_since >= 0 and touch_since + win - last_jolt >= 0
+                        early = jolted and last_jolt - touch_since < 0
+                        b.ms_contact = last_jolt if early else touch_since
+                        b.travel = dist_jolt if early else dist_touch
+                        b.jolt = last_jolt_g if jolted else 0.0
+                        b.stall_frac = meas / cmd_rpm
+                        if jolted and b.seams > 0:
+                            b.seams -= 1
+                        b.front = near
+                        b.true_contact = (self.x, self.y, self.th)
+                        at = pose.at(b.ms_contact)
+                        b.x, b.y, b.th = at if at is not None else (pose.x, pose.y, pose.th())
+                        ok = True
+                        break
+                else:
+                    touch_since = 0
             if stall_since:
                 s = now - stall_since
                 jolted = bool(last_jolt) and last_jolt + win - stall_since >= 0
