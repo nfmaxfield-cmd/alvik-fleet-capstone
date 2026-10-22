@@ -302,3 +302,10 @@ start trying to use the program."
 - Nothing that changes saved work happens without saying so; nothing closes or moves the person
   elsewhere silently.
 - Every Investigate jump keeps a one-click way back to the investigation.
+
+## Board edge vs shadow (Nick, 2026-10-21, E02 setup)
+The roam1-based calibration's left (+y board) line sits on the board's shadow, not the plywood's
+edge: at the bottom-left corner lit plywood is visible outside the green line (a few px, ~1-3 cm).
+Next build: find edges on the lit plywood side (brightness step from plywood to anything darker,
+shadow-aware), cross-check with the robots' bump positions against the boards (physical truth), and
+let the person drag a corner to fix it in place in the outline check.
