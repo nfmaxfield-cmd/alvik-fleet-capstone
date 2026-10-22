@@ -1168,9 +1168,15 @@ class Runner:
             time.sleep(0.05)
         if self.tracker is not None and self.tracker.active == robot:
             self.tracker.idle()            # do_find must not send a fix from a lost track
-        out = self.do_find(robot, "rescue")
-        if not out.get("ok"):
+        for attempt in range(2):
+            out = self.do_find(robot, "rescue")
+            if out.get("ok"):
+                break
             self.say("  %s: %s" % (robot, out.get("words")))
+            if "stop" in (out.get("words") or ""):
+                return None                # stopped (watchdog or a stop): don't push on blind
+            # (a find that failed squaring up, or found no board in reach, is worth one more try: dry run 13:40)
+        else:
             return None
         fr = self.listener.latest("FIND", robot, out["t0"])
         ax, ay = (num(fr[1].get("after_x")), num(fr[1].get("after_y"))) if fr else (None, None)
