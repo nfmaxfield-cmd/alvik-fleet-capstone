@@ -1,11 +1,18 @@
-"""The brick demo (Nick, 2026-10-22): after calibration and mapping, Nick puts bricks anywhere on the open board;
-the camera spots "what has changed" (the bricks), plans a path round them, and a robot crosses the board:
-  crossing 1: wheels + gyro only, with the corrections learned in calibration (dead reckoning). The camera plans the
-              path from where the bricks are, then only watches and measures;
-  crossing 2: the same path, with camera fixes between legs (the camera picks each next leg from where it sees the
+"""The brick demo (Nick, 2026-10-22): after the E02 session, Nick puts bricks (or any objects to hand: a shoe, a
+pen, a cable, a mug) anywhere on the open board; the camera spots "what has changed" (the objects), plans a path
+round them, and a robot crosses the board three times on the same path (the crossing ladder):
+  crossing 1: factory settings, no corrections (gyro_scale 1, drift 0, wheel_scale 1: the U condition's values),
+              wheels + gyro only;
+  crossing 2: wheels + gyro only, with the corrections learned in calibration (dead reckoning). The camera plans the
+              path from where the objects are, then only watches and measures;
+  crossing 3: the same path, with camera fixes between legs (the camera picks each next leg from where it sees the
               robot, and tells the robot where it is).
+Tight-gap mode (Nick: "once we have achieved precision, we should show it off"): the room kept round the objects
+comes from the robot's own measured precision in this session (gap_precision), and the path goes straight through
+the narrowest gap between two objects that the robot can safely make.
 The robots' bump, cliff and distance sensors are not used for steering; the firmware's edge guard and front stop
-stay on for safety, and a crossing they stop counts as failed.
+stay on for safety (and the camera watchdog also guards the objects: object_hazard); a crossing they stop counts
+as failed.
 
 Pure functions (the driving is in e02.py, Runner.brick_demo). Unit-tested in tests/test_e02_bricks.py.
 
@@ -41,6 +48,26 @@ MAX_BENDS = 3                            # a path with more bends than this trad
 SIDE_CM = 8.0                            # crossing ends: this far inside the clear area from each side
 ROBOT_TOP_CM = 3.7                       # the camera sees a robot's top (e02_camera.ROBOT_TOP_CM)
 ROBOT_CM = 9.5
+# odd objects (Nick, 2026-10-22: "any random object in the moment")
+MIN_SPECK_PX = 8                         # changed-pixel blobs smaller than this are camera noise (kept: thin lines)
+EDGE_RIM_CM = 4.0                        # a change lying wholly this close to the board's outline is the outline
+                                         # flickering (or something off the board), not an object on it
+THIN_CM = 7.0                            # an object no wider than this as the camera measures it (its rim makes a 1 cm
+                                         # pen about 5.5 cm wide in the simulator) is "thin": a pen, a cable
+TOO_MUCH_SHARE = 0.35                    # more of the board than this changed: the light changed or the camera moved
+THR_RAISED = 2.0                         # ... or the change threshold had to rise this many times over the floor's own
+                                         # (the whole picture differs a little: a light change hides faint objects)
+# tight gap (Nick, 2026-10-22): clearance = robot half-width + GAP_K x the 95th percentile of the method's measured
+# position errors (this session's camera-measured far-point and end errors, per robot and condition)
+GAP_K = 1.0                              # chosen: the 95th percentile of whole-route errors already over-states the
+                                         # sideways error partway along a ~1 m crossing
+MIN_RUNS_P95 = 3                         # fewer runs than this (this robot): all robots' runs of that condition;
+                                         # fewer than this overall: no data, MARGIN_CM
+METHOD_COND = {"factory": "U", "calibrated": "C", "camera": "KC"}
+METHOD_WORDS = {"factory": "factory settings, wheels and gyro only", "calibrated": "its calibration, wheels and gyro only",
+                "camera": "its calibration, with camera fixes"}
+LADDER = ("factory", "calibrated", "camera")   # the crossing ladder, run in this order
+GUARD_CM = ROBOT_HALF_CM + 0.3           # camera watchdog: a centre this close to an object (and closing) is stopped
 
 
 def wrap180(a):
@@ -89,10 +116,13 @@ def board_mask(cam, shape, rect, z_cm=0.0):
     return m
 
 
-def change_mask(frames, floor, ignore=None):
+def change_mask(frames, floor, ignore=None, min_px=MIN_SPECK_PX, signed=False):
     """Pixels (uint8 0 / 255) where the median of `frames` (grey) differs from the floor memory `floor` (a
-    floor_snapshot), the picture's overall brightness shift (auto exposure) taken out. ignore: uint8 mask of pixels
-    to leave out (robots)."""
+    floor_snapshot), the picture's overall brightness shift (auto exposure) taken out. Darker and brighter both
+    count. ignore: uint8 mask of pixels to leave out (robots). Noise is taken out by blob size (under min_px
+    pixels), not by an opening: an opening would erase a pen or a cable, 1-2 px wide at 2.3 px/cm.
+    signed=True: returns (mask, d, thr) with d the brightness change (float, + brighter than the floor) and thr the
+    threshold used (it rises with the picture's own spread: a light change raises it, and objects can be missed)."""
     g = np.median(np.stack([cv2.GaussianBlur(f, (3, 3), 0).astype(np.float32) for f in frames]), axis=0)
     bg, known = floor["bg"], floor["known"]
     keep = known > 0
@@ -108,9 +138,15 @@ def change_mask(frames, floor, ignore=None):
     mask = (ad > lim).astype(np.uint8) * 255
     if ignore is not None:
         mask[ignore > 0] = 0
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    if min_px > 1:
+        n, lab, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        small = np.zeros(n, bool)
+        small[1:] = stats[1:, cv2.CC_STAT_AREA] < min_px
+        mask[small[lab]] = 0
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
-    return mask
+    if ignore is not None:
+        mask[ignore > 0] = 0
+    return (mask, d - off, thr) if signed else mask
 
 
 def moving_share(frames_a, frames_b, region=None, thr=20.0):
@@ -183,9 +219,10 @@ def occupancy(cam, mask, grid, dilate_px=2, min_area_cm2=MIN_BRICK_CM2):
     return occ
 
 
-def bricks_from(occ, grid):
+def bricks_from(occ, grid, describe=None):
     """The separate bricks (connected pieces of occupied cells): [dict(x, y, length_cm, width_cm, angle_deg,
-    area_cm2, outline [[x, y] ...])], biggest first. Two bricks touching come out as one piece."""
+    area_cm2, outline [[x, y] ...], kind)], biggest first. Two bricks touching come out as one piece.
+    describe: optional f(cells bool array) -> dict of more fields (find_bricks: how it looks to the camera)."""
     n, lab, stats, cents = cv2.connectedComponentsWithStats(occ.astype(np.uint8), connectivity=8)
     out = []
     for k in range(1, n):
@@ -204,21 +241,74 @@ def bricks_from(occ, grid):
         if w < h:
             ang += 90.0
         x, y = grid.xy(cents[k][1], cents[k][0])
-        out.append(dict(x=round(x, 1), y=round(y, 1), length_cm=round(L * grid.cell, 1), width_cm=round(W * grid.cell, 1),
-                        angle_deg=round(wrap180(ang), 1), area_cm2=round(float(stats[k, cv2.CC_STAT_AREA]) * grid.cell ** 2, 1),
-                        outline=outline))
+        Lc, Wc = L * grid.cell, W * grid.cell
+        kind = "small" if Lc < 8.0 else ("long and thin" if (Wc <= THIN_CM and Lc >= 2.5 * Wc) else
+                                         ("thin" if Wc <= THIN_CM else ""))
+        b = dict(x=round(x, 1), y=round(y, 1), length_cm=round(Lc, 1), width_cm=round(Wc, 1),
+                 angle_deg=round(wrap180(ang), 1), area_cm2=round(float(stats[k, cv2.CC_STAT_AREA]) * grid.cell ** 2, 1),
+                 outline=outline, kind=kind)
+        if describe is not None:
+            b.update(describe(cells > 0))
+        out.append(b)
     out.sort(key=lambda b: -b["area_cm2"])
     return out
 
 
-def find_bricks(cam, frames, floor, board_rect, robots=(), cell_cm=1.0):
-    """Everything that changed since `floor` (a floor_snapshot), away from the robots, as floor cells.
-    robots: [(x, y)] where robots stand. Returns dict(occ, grid, bricks, mask)."""
+def find_bricks(cam, frames, floor, board_rect, robots=(), cell_cm=1.0, min_area_cm2=MIN_BRICK_CM2):
+    """Everything that changed since `floor` (a floor_snapshot), away from the robots, as floor cells: any object
+    (dark or bright; thin like a pen or a cable; tall, which the camera sees leaning away from it: the whole lean is
+    kept clear, so a tall object takes more room than its base). Left out, and counted for the message: pieces
+    smaller than min_area_cm2 (specks) and changes lying wholly along the board's outline (EDGE_RIM_CM).
+    robots: [(x, y)] where robots stand. Returns dict(occ, grid, bricks, mask, specks, rim, changed_share,
+    too_much)."""
     ign = robot_mask(cam, frames[0].shape, robots)
-    mask = change_mask(frames, floor, ignore=ign)
+    mask, sd, thr = change_mask(frames, floor, ignore=ign, min_px=1, signed=True)
+    # specks: blobs in the picture under MIN_SPECK_PX (about 1 cm across or less) on the board; 1-2 px: camera noise
+    on_board = board_mask(cam, mask.shape, board_rect) > 0
+    nb, lab_px, st_px, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    small = np.zeros(nb, bool)
+    small[1:] = st_px[1:, cv2.CC_STAT_AREA] < MIN_SPECK_PX
+    n_specks = int(sum(1 for k in range(1, nb) if small[k] and st_px[k, cv2.CC_STAT_AREA] >= 3 and
+                       on_board[min(max(int(st_px[k, cv2.CC_STAT_TOP]), 0), mask.shape[0] - 1),
+                                min(max(int(st_px[k, cv2.CC_STAT_LEFT]), 0), mask.shape[1] - 1)]))
+    mask[small[lab_px]] = 0
     grid = Grid(board_rect, cell_cm)
-    occ = occupancy(cam, mask, grid)
-    return dict(occ=occ, grid=grid, bricks=bricks_from(occ, grid), mask=mask)
+    raw = occupancy(cam, mask, grid, min_area_cm2=0.0)
+    X, Y = grid.centres()
+    gx1, gy1 = grid.x0 + grid.nx * grid.cell, grid.y0 + grid.ny * grid.cell
+    edge_d = np.minimum(np.minimum(X - grid.x0, gx1 - X), np.minimum(Y - grid.y0, gy1 - Y))
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(raw.astype(np.uint8), connectivity=8)
+    occ = np.zeros(grid.shape, bool)
+    specks, rim = [None] * n_specks, 0
+    for k in range(1, n):
+        cells = lab == k
+        area = float(stats[k, cv2.CC_STAT_AREA]) * grid.cell ** 2
+        if float(edge_d[cells].max()) <= EDGE_RIM_CM:
+            rim += 1
+            continue
+        if area < min_area_cm2:
+            specks.append(round(area, 1))
+            continue
+        occ |= cells
+    pts = np.column_stack([X.ravel(), Y.ravel(), np.zeros(X.size)])
+    u, v = cam.project(pts)
+    u, v = u.reshape(grid.shape), v.reshape(grid.shape)
+
+    def describe(cells):
+        uu, vv = u[cells], v[cells]
+        ok = np.isfinite(uu) & np.isfinite(vv)
+        ui = np.clip(np.round(uu[ok]).astype(int), 0, mask.shape[1] - 1)
+        vi = np.clip(np.round(vv[ok]).astype(int), 0, mask.shape[0] - 1)
+        hit = mask[vi, ui] > 0
+        if not hit.any():
+            return dict(shade="")
+        s = float(np.median(sd[vi[hit], ui[hit]]))
+        return dict(shade="brighter" if s > 0 else "darker", contrast=round(abs(s), 1))
+    share = float(raw.mean()) if raw.size else 0.0
+    thr_up = thr / max(floor.get("thr", 16.0), 1.0)
+    return dict(occ=occ, grid=grid, bricks=bricks_from(occ, grid, describe=describe), mask=mask, specks=specks,
+                rim=rim, changed_share=round(share, 3), thr_raised=round(thr_up, 2),
+                too_much=share > TOO_MUCH_SHARE or thr_up > THR_RAISED, min_area_cm2=min_area_cm2)
 
 
 # =============================================================================== where the robot may go
@@ -231,13 +321,15 @@ def brick_distance(occ, grid):
 
 
 def free_space(occ, grid, board, others=(), margin_cm=MARGIN_CM, open_cm=OPEN_EDGE_CLEAR_CM, board_cm=BOARD_CLEAR_CM,
-               robot_cm=ROBOT_CLEAR_CM):
+               robot_cm=ROBOT_CLEAR_CM, r_cm=None):
     """Where the robot's centre may go. board: an e02_plan.Board (open edges, board faces). others: [(x, y)] the
-    other robots. Returns dict(grid, occ, dist (cm to a brick), free (bool), soft (bool: not touching anything: the
-    robot may start or end a move there even if it is not free), r_cm (the room kept from a brick))."""
+    other robots. r_cm: the room kept from a brick (centre to the nearest brick cell's centre); default
+    ROBOT_REACH_CM + margin_cm (room to turn on the spot anywhere); tight-gap mode passes less (gap_space).
+    Returns dict(grid, occ, dist (cm to a brick), free (bool), soft (bool: not touching anything: the robot may
+    start or end a move there even if it is not free), r_cm)."""
     X, Y = grid.centres()
     dist = brick_distance(occ, grid)
-    r = ROBOT_REACH_CM + margin_cm
+    r = ROBOT_REACH_CM + margin_cm if r_cm is None else float(r_cm)
     free = dist > r
     soft = dist > ROBOT_HALF_CM + 1.5
     for a, v in board.open_edges():
@@ -488,6 +580,272 @@ def choose_crossing(occ, grid, board, robots, prefer_blocked=True):
     return None
 
 
+# =============================================================================== tight gap: room from precision
+def gap_precision(rows, robot, method, k=GAP_K, min_runs=MIN_RUNS_P95):
+    """How much room a robot needs round an object when it drives by `method` (LADDER: factory / calibrated /
+    camera), from this session's camera-measured errors: rows = the schedule's runs (dict robot, cond, status,
+    far_err_cm, end_err_cm); the method's condition (METHOD_COND), finished runs, both the far-point and the end
+    error of each. This robot's runs if it has min_runs, else all robots' runs of that condition, else none (then
+    the planner's chosen MARGIN_CM). clearance_cm = ROBOT_HALF_CM + k x p95; gap_cm = 2 x clearance_cm: the
+    narrowest gap (between the objects as the camera sees them) it can safely drive straight through.
+    Returns dict(method, cond, runs, n, p95_cm, k, margin_cm, clearance_cm, gap_cm, source)."""
+    cond = METHOD_COND[method]
+
+    def errs(rs):
+        vals, n = [], 0
+        for r in rs:
+            if r.get("cond") != cond or r.get("status") != "done":
+                continue
+            got = [float(r[key]) for key in ("far_err_cm", "end_err_cm")
+                   if isinstance(r.get(key), (int, float)) and math.isfinite(float(r[key]))]
+            if got:
+                vals += got
+                n += 1
+        return vals, n
+    vals, runs = errs([r for r in rows or [] if r.get("robot") == robot])
+    source = "this robot's %d %s runs" % (runs, cond)
+    if runs < min_runs:
+        vals, runs = errs(rows or [])
+        source = "all robots' %d %s runs (this robot has too few)" % (runs, cond)
+    if runs < min_runs:
+        vals, runs = [], 0
+        source = "no measured runs: the planner's chosen %.1f cm" % MARGIN_CM
+    p95 = float(np.percentile(vals, 95)) if vals else None
+    margin = k * p95 if p95 is not None else MARGIN_CM
+    clear = ROBOT_HALF_CM + margin
+    return dict(method=method, cond=cond, runs=runs, n=len(vals), p95_cm=round(p95, 2) if p95 is not None else None,
+                k=k, margin_cm=round(margin, 2), clearance_cm=round(clear, 2), gap_cm=round(2.0 * clear, 1),
+                source=source)
+
+
+def precision_words(robot, precs):
+    """precs: {method: gap_precision(...)}. Plain words: the narrowest gap per method."""
+    cam = precs.get("camera")
+    lines = []
+    if cam:
+        lines.append("  The narrowest gap %s can safely make with its calibration is %.0f cm (%.1f in), with camera "
+                     "fixes." % (robot, math.ceil(cam["gap_cm"]), cam["gap_cm"] / 2.54))
+    for m in LADDER:
+        p = precs.get(m)
+        if not p:
+            continue
+        how = ("its body (%.1f cm each side) + %.1f x the 95th-percentile error %.1f cm" % (ROBOT_HALF_CM, p["k"], p["p95_cm"])
+               if p["p95_cm"] is not None else "its body (%.1f cm each side) + %.1f cm (%s)" % (
+                   ROBOT_HALF_CM, p["margin_cm"], p["source"]))
+        lines.append("    %-40s gap %4.1f cm = 2 x (%s%s)" % (METHOD_WORDS[m] + ":", p["gap_cm"], how,
+                                                            ("; from " + p["source"]) if p["p95_cm"] is not None else ""))
+    return lines
+
+
+def find_gaps(occ, grid, bricks=None, max_cm=40.0, max_pts=1500):
+    """The gaps between pairs of objects (connected pieces of occ), narrowest first: [dict(width_cm (edge to edge,
+    as the camera sees them), mid (x, y), normal (unit vector across the gap: the way through), pa, pb (the closest
+    points), objects (a, b: 1-based numbers in `bricks`, by nearest centre, or None))]. A pair whose closest
+    line runs through a third object is not a gap."""
+    n, lab = cv2.connectedComponents(occ.astype(np.uint8), connectivity=8)
+    comps = []
+    for k in range(1, n):
+        cnts, _ = cv2.findContours((lab == k).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        p = np.vstack([c.reshape(-1, 2) for c in cnts]).astype(float)
+        if len(p) > max_pts:
+            p = p[np.linspace(0, len(p) - 1, max_pts).astype(int)]
+        xy = np.column_stack([grid.x0 + (p[:, 0] + 0.5) * grid.cell, grid.y0 + (p[:, 1] + 0.5) * grid.cell])
+        comps.append((k, xy))
+
+    def number(xy):
+        if not bricks:
+            return None
+        c = xy.mean(axis=0)
+        return 1 + int(np.argmin([math.hypot(b["x"] - c[0], b["y"] - c[1]) for b in bricks]))
+    dist = brick_distance(occ, grid)
+    out = []
+    for a in range(len(comps)):
+        for b in range(a + 1, len(comps)):
+            A, B = comps[a][1], comps[b][1]
+            D = np.hypot(A[:, None, 0] - B[None, :, 0], A[:, None, 1] - B[None, :, 1])
+            m = np.unravel_index(int(np.argmin(D)), D.shape)
+            w = float(D[m]) - grid.cell
+            if w > max_cm or w <= 0:
+                continue
+            pa, pb = A[m[0]], B[m[1]]
+            # a third object between them: not a gap of these two
+            between = False
+            for t in np.linspace(0.0, 1.0, max(3, int(D[m] / (0.5 * grid.cell)))):
+                x, y = pa + t * (pb - pa)
+                j, i = grid.cell_of(x, y)
+                if occ[j, i] and lab[j, i] not in (comps[a][0], comps[b][0]):
+                    between = True
+                    break
+            mid = (pa + pb) / 2.0
+            if between or 2.0 * float(grid.at(dist, *mid)) - grid.cell < w - 1.5:
+                continue                            # something else is in the gap: it is not this wide
+            ax = (pb - pa) / max(float(D[m]), 1e-6)
+            out.append(dict(width_cm=round(w, 1), mid=(round(float((pa[0] + pb[0]) / 2), 2), round(float((pa[1] + pb[1]) / 2), 2)),
+                            normal=(round(float(-ax[1]), 4), round(float(ax[0]), 4)), pa=tuple(round(float(v), 1) for v in pa),
+                            pb=tuple(round(float(v), 1) for v in pb), objects=(number(A), number(B))))
+    out.sort(key=lambda g: g["width_cm"])
+    return out
+
+
+def gap_space(occ, grid, board, others, clearance_cm):
+    """free_space for driving straight through a tight gap: the centre clearance_cm from every object's edge (half
+    a cell more to the nearest object cell's centre)."""
+    return free_space(occ, grid, board, others=others, r_cm=clearance_cm + 0.5 * grid.cell)
+
+
+def gap_crossing(gap, sp_tight, sp_turn, lengths=(30.0, 25.0, 35.0, 20.0, 40.0), angles=(0.0, 8.0, -8.0, 15.0, -15.0)):
+    """Start / goal pairs for a straight drive through `gap`: both ends where the robot can turn on the spot
+    (free in sp_turn), the straight line between them keeping sp_tight's room (through the gap). Both ways.
+    Returns [(start, goal)] in order of preference (straight across before slanted; then the nearest ends)."""
+    out = []
+    mx, my = gap["mid"]
+    for a in angles:
+        for L in lengths:
+            c, s_ = math.cos(math.radians(a)), math.sin(math.radians(a))
+            nx, ny = gap["normal"][0] * c - gap["normal"][1] * s_, gap["normal"][0] * s_ + gap["normal"][1] * c
+            for sg in (1.0, -1.0):
+                s = (round(mx - sg * L * nx, 2), round(my - sg * L * ny, 2))
+                g = (round(mx + sg * L * nx, 2), round(my + sg * L * ny, 2))
+                grid = sp_turn["grid"]
+                if not (grid.inside(*s) and grid.inside(*g)):
+                    continue
+                if not (grid.at(sp_turn["free"], *s) and grid.at(sp_turn["free"], *g)):
+                    continue
+                if not _segment_ok(sp_tight, sp_tight["free"], s, g, sp_tight["r_cm"]):
+                    continue
+                out.append((s, g, (a, L)))
+    return out
+
+
+def choose_gap_crossing(occ, grid, board, robots, gap, clearance):
+    """The tight-gap crossing through `gap` (find_gaps): of the robots whose needed clearance (clearance: {name:
+    clearance_cm}) fits the gap, the most precise one that can get to a start; ties: the shortest way there.
+    Returns a choose_crossing-like dict (with gap, space = the tight space, space_turn) or None."""
+    best = None
+    for name in sorted(robots, key=lambda n: clearance.get(n, 1e9)):
+        cl = clearance.get(name)
+        if cl is None or gap["width_cm"] + 1e-6 < 2.0 * cl:
+            continue
+        others = [p for n, p in robots.items() if n != name]
+        sp_turn = free_space(occ, grid, board, others=others)
+        sp_t = gap_space(occ, grid, board, others, cl)
+        mine = None
+        for s, g, how in gap_crossing(gap, sp_t, sp_turn):
+            if mine is not None and how != mine:
+                break                               # the most preferred (angle, length) it can reach: either way
+            appr = plan_path(sp_turn, robots[name], s, escape_cm=25.0)
+            if not appr["ok"]:
+                continue
+            mine = how
+            pts = [s, g]
+            path = dict(ok=True, points=pts, length_cm=round(math.hypot(g[0] - s[0], g[1] - s[1]), 1),
+                        min_room_cm=round(min_room(sp_t, pts), 1), why="")
+            key = (cl, abs(how[0]), appr["length_cm"])
+            if best is None or key < best[0]:
+                best = (key, dict(robot=name, start=s, goal=g, path=path, approach=appr, gap=gap, clearance_cm=cl,
+                                  words="straight through the %.0f cm gap" % gap["width_cm"], straight_blocked_cm=0.0,
+                                  space=sp_t, space_turn=sp_turn))
+        if best is not None and best[0][0] < cl:
+            break                                   # a more precise robot already has a crossing
+    return best[1] if best else None
+
+
+def corridor_space(sp_turn, sp_tight, points, half_width_cm=3.0):
+    """Where the robot may go on the way to and from a tight-gap crossing: everywhere it can turn on the spot
+    (sp_turn), plus the strip within half_width_cm of the crossing's straight line where sp_tight allows it (so it
+    can come back through the gap the way it went, camera-steered, instead of finding no way round)."""
+    grid = sp_turn["grid"]
+    X, Y = grid.centres()
+    strip = np.zeros(grid.shape, bool)
+    for a, b in zip(points, points[1:]):
+        ax, ay = b[0] - a[0], b[1] - a[1]
+        L2 = max(ax * ax + ay * ay, 1e-9)
+        t = np.clip(((X - a[0]) * ax + (Y - a[1]) * ay) / L2, 0.0, 1.0)
+        strip |= np.hypot(X - (a[0] + t * ax), Y - (a[1] + t * ay)) <= half_width_cm
+    return dict(sp_turn, free=sp_turn["free"] | (sp_tight["free"] & strip),
+                soft=sp_turn["soft"] | (sp_tight["free"] & strip))
+
+
+def gap_words(gaps, need_cm, robot=None):
+    """The gaps found, numbered, each with whether the robot can safely make it (need_cm: its gap_cm)."""
+    if not gaps:
+        return ["  The camera sees no gap between two objects (under 40 cm wide)."]
+    lines = ["  Gaps between the objects (edge to edge, as the camera sees them):"]
+    for k, g in enumerate(gaps, 1):
+        a, b = g["objects"]
+        between = (" between objects %d and %d" % (a, b)) if a and b else ""
+        ok = g["width_cm"] + 1e-6 >= need_cm
+        lines.append("    %d. %.1f cm (%.1f in)%s: %s" % (k, g["width_cm"], g["width_cm"] / 2.54, between,
+                                                      ("safe for %s" % robot if robot else "safe") if ok else
+                                                      "too narrow (needs %.1f cm)" % need_cm))
+    return lines
+
+
+def object_hazard(samples, space, guard_cm=GUARD_CM, horizon_s=0.3):
+    """Camera watchdog for the objects (as e02_steer.hazard does for edges and robots): is the moving robot's
+    centre (samples [(t, x, y)], newest last) at, or within horizon_s of, guard_cm of an object's edge while
+    closing on it? Moving away is always allowed. Returns plain words or None."""
+    if space is None or not space["occ"].any() or not samples:
+        return None
+    win = [q for q in samples if q[0] >= samples[-1][0] - 0.5]
+    if len(win) < 6 or win[-1][0] - win[0][0] < 0.3:
+        return None
+    k = max(2, len(win) // 4)
+    t0, t1 = float(np.median([q[0] for q in win[:k]])), float(np.median([q[0] for q in win[-k:]]))
+    x0, y0 = float(np.median([q[1] for q in win[:k]])), float(np.median([q[2] for q in win[:k]]))
+    x, y = float(np.median([q[1] for q in win[-k:]])), float(np.median([q[2] for q in win[-k:]]))
+    vx, vy = (x - x0) / max(t1 - t0, 1e-3), (y - y0) / max(t1 - t0, 1e-3)
+    sp = math.hypot(vx, vy)
+    if sp > 30.0:
+        return None
+    if sp < 1.0:
+        vx = vy = 0.0
+    grid = space["grid"]
+    px, py = x + vx * horizon_s, y + vy * horizon_s
+    if not (grid.inside(x, y) and grid.inside(px, py)):
+        return None
+    d0 = float(grid.at(space["dist"], x, y)) - 0.5 * grid.cell
+    d1 = float(grid.at(space["dist"], px, py)) - 0.5 * grid.cell
+    if d1 < guard_cm and d1 < d0 - 0.2:
+        return "its centre %.1f cm from an object and closing (its side about %.1f cm)" % (d0, max(0.0, d0 - ROBOT_HALF_CM))
+    return None
+
+
+def back_off_cm(space, p, heading, want_cm=12.0, step_cm=1.0, need_cm=None):
+    """How far the robot at p facing `heading` can back straight up without its centre coming nearer an object than
+    need_cm (default ROBOT_HALF_CM + 0.5), up to want_cm: the distance that gets it furthest from the objects."""
+    need = ROBOT_HALF_CM + 0.5 if need_cm is None else need_cm
+    grid = space["grid"]
+    ux, uy = math.cos(math.radians(heading)), math.sin(math.radians(heading))
+    best, best_d = 0.0, -1.0
+    d = 0.0
+    while d <= want_cm + 1e-6:
+        x, y = p[0] - ux * d, p[1] - uy * d
+        if not grid.inside(x, y):
+            break
+        dd = float(grid.at(space["dist"], x, y)) - 0.5 * grid.cell
+        if dd < need and d > 0:
+            break
+        if dd >= best_d:
+            best, best_d = d, dd
+        d += step_cm
+    return best
+
+
+def ladder_words(crossings):
+    """The crossing ladder side by side: distance from the goal, closest approach, legs, how it ended."""
+    lines = ["  %-44s %10s %15s %5s  %s" % ("Crossing", "from goal", "closest (side)", "legs", "result"),
+             "  " + "-" * 92]
+    for c in crossings:
+        ca = c.get("closest") or {}
+        lines.append("  %-44s %10s %15s %5s  %s" % (
+            "%d. %s" % (c["n"], c["how"]),
+            ("%.1f cm" % c["end_err_cm"]) if c.get("end_err_cm") is not None else "not seen",
+            ("%.1f cm" % max(0.0, ca["body_cm"])) if ca else "-",
+            c.get("legs_done", 0), ("FAILED: " + c["failed"]) if c.get("failed") else "finished"))
+    return lines
+
+
 # =============================================================================== measuring and words
 def closest_approach(space, track):
     """Closest the robot's centre came to a brick over a camera track [(t, x, y)] (or [(x, y)]): dict(centre_cm,
@@ -510,12 +868,36 @@ def closest_approach(space, track):
     return dict(centre_cm=round(c, 1), body_cm=round(c - ROBOT_HALF_CM, 1), at=best[1])
 
 
-def brick_words(bricks):
+def brick_words(bricks, found=None):
+    """What the camera found, in plain words; found (find_bricks' result): also what it left out and warnings."""
+    found = found or {}
+    lines = []
+    if found.get("too_much"):
+        lines.append("  WARNING: the board looks different all over from the picture taken before: the light changed "
+                     "or the camera moved? Objects may be missed or made up. Put the lights back as they were (or "
+                     "take the objects off and start the demo again).")
     if not bricks:
-        return ["  The camera found no bricks on the board."]
-    lines = ["  The camera found %d brick%s:" % (len(bricks), "" if len(bricks) == 1 else "s")]
+        lines.append("  The camera found no objects on the board.")
+    else:
+        lines.append("  The camera found %d object%s:" % (len(bricks), "" if len(bricks) == 1 else "s"))
     for k, b in enumerate(bricks, 1):
-        lines.append("    %d. at (%.0f, %.0f) cm, about %.0f x %.0f cm" % (k, b["x"], b["y"], b["length_cm"], b["width_cm"]))
+        extra = [w for w in ((b.get("shade") or "") and "%s than the floor" % b["shade"],
+                             {"long and thin": "long and thin (a pen or a cable?)", "thin": "thin",
+                              "small": "small"}.get(b.get("kind") or "", "")) if w]
+        lines.append("    %d. at (%.0f, %.0f) cm, about %.0f x %.0f cm%s" % (k, b["x"], b["y"], b["length_cm"],
+                                                                         b["width_cm"],
+                                                                         (", " + ", ".join(extra)) if extra else ""))
+    sp = found.get("specks") or []
+    if sp:
+        lines.append("    Left out: %d speck%s smaller than about 1 cm (0.4 in) across: dust, a crumb or camera noise. "
+                     "Anything bigger counts as an object." % (len(sp), "" if len(sp) == 1 else "s"))
+    if found.get("rim"):
+        lines.append("    Left out: %d change%s right along the board's outline (not on the open board)."
+                     % (found["rim"], "" if found["rim"] == 1 else "s"))
+    if "bricks" in found:
+        lines.append("    (Sizes include a rim: the camera sees a tall object's top leaning away from it, and the robot "
+                     "keeps clear of all of that. An object the same shade as the floor can be missed, and nothing "
+                     "within about 15 cm of a robot is seen.)")
     return lines
 
 
@@ -524,12 +906,17 @@ def plan_words(ch):
     turns = max(0, len(p["points"]) - 2)
     return ["  Plan: %s drives %s, from (%.0f, %.0f) to (%.0f, %.0f) cm." % (ch["robot"], ch["words"], ch["start"][0],
                                                                          ch["start"][1], ch["goal"][0], ch["goal"][1]),
-            "  The path is %.0f cm long with %d bend%s; its centre stays at least %.0f cm from every brick (the robot's "
-            "side about %.0f cm)." % (p["length_cm"], turns, "" if turns == 1 else "s", p["min_room_cm"],
-                                      p["min_room_cm"] - ROBOT_HALF_CM),
-            ("  A straight line would have run %.0f cm through the bricks' space, so it has to go round them."
+            "  The path is %.0f cm long with %d bend%s; its centre stays at least %.0f cm from every object (the "
+            "robot's side about %.0f cm)." % (p["length_cm"], turns, "" if turns == 1 else "s", p["min_room_cm"],
+                                              p["min_room_cm"] - ROBOT_HALF_CM),
+            ("  It drives straight through the %.1f cm gap%s: the room kept is %.1f cm from its centre to each object "
+             "(its body's half-width %.2f cm + its measured error), so its sides pass about %.1f cm from them." % (
+                 ch["gap"]["width_cm"], (" between objects %d and %d" % tuple(ch["gap"]["objects"]))
+                 if all(ch["gap"]["objects"]) else "", ch["clearance_cm"], ROBOT_HALF_CM,
+                 ch["gap"]["width_cm"] / 2.0 - ROBOT_HALF_CM)) if ch.get("gap") else
+            ("  A straight line would have run %.0f cm through the objects' space, so it has to go round them."
              % ch["straight_blocked_cm"]) if ch["straight_blocked_cm"] > 0 else
-            "  (The straight line is clear of the bricks: no crossing had bricks in its way.)"]
+            "  (The straight line is clear of the objects: no crossing had objects in its way.)"]
 
 
 def crossing_words(c):
@@ -542,7 +929,7 @@ def crossing_words(c):
         if c.get("robot_thought_cm") is not None else "")]
     ca = c.get("closest")
     if ca:
-        lines.append("    Closest to a brick: its centre %.1f cm away (its side about %.1f cm)%s." % (
+        lines.append("    Closest to an object: its centre %.1f cm away (its side about %.1f cm)%s." % (
             ca["centre_cm"], max(0.0, ca["body_cm"]), "  TOUCHED or nearly" if ca["body_cm"] < 0.5 else ""))
     if c.get("failed"):
         lines.append("    It did NOT finish: %s (counted as a failed crossing)." % c["failed"])
