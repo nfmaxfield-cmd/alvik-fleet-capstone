@@ -404,7 +404,7 @@ class Runner:
         if f.is_alive():
             return True
         self.say("  (the camera feed stopped: %s; starting it again)" % (f.err or "no reason given"))
-        nf = CAM.Feed("%s:%d" % (self.a.pi, self.a.overhead_port), self.tracker, self.history,
+        nf = CAM.Feed(stream_url(self.a), self.tracker, self.history,
                       log=lambda m: self.say("  (camera: %s)" % m))
         nf.on_sample = f.on_sample
         nf.hooks = f.hooks
@@ -2988,6 +2988,13 @@ class Runner:
         st.save()
 
 
+def stream_url(a):
+    """The overhead camera's live stream; --stream-q lowers its JPEG quality (fewer bytes over WiFi, more pictures a
+    second: 2026-10-22, the laptop got only ~2 a second at the default quality 95)."""
+    q = getattr(a, "stream_q", 0)
+    return "%s:%d/live%s" % (a.pi, a.overhead_port, ("?q=%d" % q) if q else "")
+
+
 def kc_fix_from(samples, after_stop_s=0.1, min_still_s=0.3, moved_cm=0.8):
     """A KC camera fix only from pictures taken after the robot stopped: (x, y, t of the newest picture, t_stop,
     the stretch before the stop) or None. t_stop = the last picture that was more than moved_cm from where it
@@ -3082,6 +3089,8 @@ def main(argv=None):
     ap.add_argument("--pi", default="st1maxfini.local", help="the Pi recorder's address")
     ap.add_argument("--overhead-port", type=int, default=8000)
     ap.add_argument("--side-port", type=int, default=8001)
+    ap.add_argument("--stream-q", type=int, default=0, help="JPEG quality of the live camera stream (0 = the Pi's "
+                                                              "default, 95; e.g. 70 for more pictures a second)")
     ap.add_argument("--no-side", action="store_true", help="no side camera this session: don't check or ask about it")
     ap.add_argument("--map", action="store_true", help="after setup, one robot maps the board by touch (about 6 min)")
     ap.add_argument("--map-only", action="store_true", help="setup and the mapping only, then stop")
@@ -3241,7 +3250,7 @@ def launch(a, state, sdir, sim):
     code = 0
     feed = None
     try:
-        feed = CAM.Feed("%s:%d" % (a.pi, a.overhead_port), None, hist, log=lambda m: run.say("  (camera: %s)" % m))
+        feed = CAM.Feed(stream_url(a), None, hist, log=lambda m: run.say("  (camera: %s)" % m))
         feed.on_sample = run.on_sample
         feed.start()
         run.feed = feed
