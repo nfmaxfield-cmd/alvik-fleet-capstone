@@ -624,7 +624,7 @@ def locate_change(cam, before, after, board_rect=None, margin_cm=8.0, near=None,
     for i in range(1, n):
         ar = int(stats[i, cv2.CC_STAT_AREA])
         w, h = stats[i, cv2.CC_STAT_WIDTH], stats[i, cv2.CC_STAT_HEIGHT]
-        if ar < 0.1 * area0 or ar > 4.5 * area0 or max(w, h) > 2.6 * rpx:
+        if ar < 0.1 * area0 or ar > 6.0 * area0 or max(w, h) > 3.6 * rpx:
             continue
         u, v = cents[i]
         x, y = cam.to_floor(u, v, z_cm)

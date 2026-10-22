@@ -25,11 +25,11 @@ wheels disagree -> stop, re-find by a turn on the spot, call Nick only after two
 - [x] A. Tracker: floor memory, board-area limit, robot-shape check, motion check, vacated-spot refresh,
       change-locator for identification
 - [x] B. Replay harness on the real footage + hand-checked positions; old vs new tracker
-- [ ] C. Runner setup: identify all in place, then heading, then park in a safe order around known robots
-- [ ] D. Moves on the robot's own sensors with the camera cross-check; re-find on disagreement
-- [ ] E. Small fixes: help wording, --no-side, Pi timer past 59 min
-- [ ] F. Simulator dry run + tests for all of the above
-- [ ] G. Robot perimeter mapping (laptop-driven rays, edge guard + front stop; map vs camera outline)
+- [x] C. Runner setup: identify all in place, then heading, then park in a safe order around known robots
+- [x] D. Moves on the robot's own sensors with the camera cross-check; re-find on disagreement
+- [x] E. Small fixes: help wording, --no-side, Pi timer past 59 min
+- [x] F. Simulator dry run + tests for all of the above
+- [x] G. Robot perimeter mapping (laptop-driven rays, edge guard + front stop; map vs camera outline)
 - [ ] H. Review, report with the two sweeps, TIME.md row
 
 ### Results so far
