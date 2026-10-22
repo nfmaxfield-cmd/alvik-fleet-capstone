@@ -83,6 +83,28 @@ def brick_corners(b):
 
 
 # =============================================================================== the robots (firmware model)
+def add_identify(rb, R):
+    """home_lab.ino's `identify` (the simulator's firmware model has none): both LEDs white 250 ms on / 250 ms off,
+    6 times, blocking the robot for those 3 s; refused during a run. The dance flashes the lights with it (2026-10-22)."""
+    orig = rb.handle_command
+
+    def handle(raw, running):
+        if raw.strip().split(" ")[0].lower() != "identify":
+            return orig(raw, running)
+        rb.last_rx = rb.millis()
+        if running:
+            rb.send("M,busy: send stop first")
+            return False
+        for _ in range(6):
+            rb.set_leds(R.WHITE, R.WHITE)
+            rb.advance(250)
+            rb.set_leds(R.OFF, R.OFF)
+            rb.advance(250)
+        rb.send("M,%s: that was me" % rb.name)
+        return False
+    rb.handle_command = handle
+
+
 class World:
     """The simulated robots: tools/sim/robot.py (with the firmware lane's fw_e02.py: run find, run e02, fix,
     legs, marks) running in real time on real UDP, as tools/sim/fleet_sim.py runs them, on a 122 x 122 cm
@@ -157,6 +179,7 @@ class World:
             rb.update_solids()
             rb.radio = FS.Radio(self, n, ip, self.laptop)
             rb.others = (lambda me: (lambda: [self.outline(o) for o in self.robots if o is not me]))(rb)
+            add_identify(rb, R)
             self.robots.append(rb)
         import fleetmap as FM
         self._body = FM.body_of(FM.normalize(dict(format="alvik-fleet-map", version=1, floor=dict(

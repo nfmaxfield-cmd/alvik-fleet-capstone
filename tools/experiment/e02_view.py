@@ -201,9 +201,9 @@ class LiveView:
         return v
 
 
-BRICKS_NOTE = ("Brick demo: red outlines = the bricks the camera found; dashed red = the room kept round them; blue "
-               "line = the planned path (white dot: start, white ring: goal); orange = crossing 1 (wheels and gyro "
-               "only); green = crossing 2 (with camera fixes).")
+BRICKS_NOTE = ("Brick demo: red outlines = the objects the camera found; dashed red = the room kept round them; blue "
+               "line = the planned path (white dot: start, white ring: goal); magenta = crossing 1 (factory settings); "
+               "orange = crossing 2 (its calibration, wheels and gyro only); green = crossing 3 (with camera fixes).")
 
 
 def draw_bricks(v, cam, bv):
@@ -232,7 +232,8 @@ def draw_bricks(v, cam, bv):
                     ring.append(q)
             for a, b2 in list(zip(ring, ring[1:] + ring[:1]))[::2]:
                 cv2.line(v, a, b2, (60, 60, 200), 1, cv2.LINE_AA)
-    cols = {1: (0, 140, 255), 2: (80, 220, 80), "1": (0, 140, 255), "2": (80, 220, 80)}
+    cols = {1: (255, 60, 255), 2: (0, 140, 255), 3: (80, 220, 80), "1": (255, 60, 255), "2": (0, 140, 255),
+            "3": (80, 220, 80)}           # the ladder: factory, calibrated, camera fixes
     for k, tr in (bv.get("tracks") or {}).items():
         pts = [px(*q[-2:]) for q in tr]
         pts = [q for q in pts if q]
