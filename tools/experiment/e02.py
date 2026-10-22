@@ -821,6 +821,9 @@ class Runner:
             self.moves[robot] = dict(run="-", why="identify")
         for ang in (angle, -angle):
             before = self.feed.wait_frames(8, timeout=5)
+            # lights on while it turns (2026-10-22, Nick): two changes in one place, the body's corners and the
+            # lights; in a shadow, where the corners barely show, the lights carry it (firmware 2026-10-22a `led`)
+            self.send(robot, "led 1 1 1 %d" % int((abs(ang) / TURN_DPS_GUESS * 2.5 + 4.0) * 1000))
             state, info = self.send_leg(robot, "turn %.1f" % ang, abs(ang) / TURN_DPS_GUESS * 2.5 + 6.0)
             time.sleep(0.6)
             after = self.feed.wait_frames(8, timeout=5)
