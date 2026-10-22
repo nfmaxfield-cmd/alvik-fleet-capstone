@@ -123,6 +123,7 @@ FRONT_CHECK_RANGE_CM = 50.0  # the front-sensor check only counts things nearer 
 FRONT_CHECK_CM = 6.0      # ... and says so when the sensor and the map differ by more
 EXPECT_TURN_CM = 7.0       # a robot turning on its spot stays within this of where it stood (camera's view)
 EXPECT_GO_EXTRA_CM = 8.0   # ... a drive of d cm within d + this
+HEADING_CLEAR_CM = 20.0   # the heading drive (10 cm) only with at least this much room in front
 AUTO_TRIES = 3            # a lost or stuck robot tries this many times on its own before Nick is called
 BACK_OFF_CM = 8.0         # a leg stopped by its front sensor backs this far before turning away (2026-10-22 loop)
 EDGE_TURN_CM = 9.0        # no turn on the spot closer than this to an open edge (the wheels reach it first)
@@ -2063,7 +2064,15 @@ class Runner:
         self.moves.pop(robot, None)
         if not self.begin_moves(robot, "finding its heading"):
             return None
-        for attempt in range(3):
+        for attempt in range(4):
+            # look before driving (2026-10-22 evening: Left, put down against the left board facing it, drove its
+            # heading leg into the board; the wheels spun "10 cm", it stayed put, and its outline merged with the
+            # board's dark edge, three times over): with something close ahead, a quarter turn first
+            f = self.front_now(robot)
+            if f is not None and f < HEADING_CLEAR_CM:
+                self.say("    %s: something %.0f cm in front; turning before its heading drive" % (robot, f), quiet=True)
+                self.leg(robot, ("turn", 90.0))
+                continue
             p0, p1, words = self.leg(robot, ("go", 10.0))
             if p0 and p1 and math.hypot(p1[0] - p0[0], p1[1] - p0[1]) >= ST.MIN_HEADING_CM:
                 self.heads[robot] = [ST.bearing(p0, p1), True]
@@ -2073,6 +2082,15 @@ class Runner:
                 return None
             self.leg(robot, ("turn", 90.0))
         return None
+
+    def front_now(self, robot):
+        """The front sensor's reading now (cm), by a tiny turn leg (firmware 2026-10-22b reports front= with every
+        finished leg); None if there is no reading."""
+        state, info = self.send_leg(robot, "turn 2.0", 6.0)
+        m = re.search(r"front=([0-9.]+)", info or "")
+        if state not in ("done", "dup") or not m or float(m.group(1)) <= 0:
+            return None
+        return float(m.group(1))
 
     def map_board(self, robot, n_rays=16):
         """Robot perimeter mapping (e02_map.py): from the middle of the board, rays out in n_rays directions; each
