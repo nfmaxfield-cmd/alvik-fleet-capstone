@@ -54,3 +54,22 @@ the recovery ladder with lights unavailable.
 **Possible inaccuracies this relies on:** that every robot can report its own leg results (some AGVs only take
 velocity commands); that one overhead camera's floor plane holds for a bigger site (several cameras would need to
 be stitched); that sensor noise is steady enough to put in a profile (it changed with light and battery here).
+
+## Running notes (Nick, 2026-10-22: "keep good notes and update after every run")
+What each session or build showed about what is specific to the Alvik and this board, and what would carry over.
+Newest first.
+
+### 2026-10-22 (session 3 and the build after it)
+- **Specific to the Alvik:** the line sensors read tape and "off the plywood" alike (firmware 22b now treats all
+  three high at the start as no floor); the tyres slip at ~96% speed against a board, so a bump is felt by touch,
+  not stall; the front sensor's middle zone is reported per leg (`front=`); the robot keeps its own pose between
+  camera fixes, so a find works with the camera blind.
+- **Specific to this board and camera:** the picture's board lines sit 1-2 cm short of the real faces (WALL_CM 3);
+  the corner where both boards meet is where finds end and where robots are hardest to see; one overhead camera.
+- **Carries over (now general code):** a recovery ladder (retry, finder sweep, own find, drive out blind on its own
+  pose with landmark checks, retrace, then a person); a tracker that knows the site's walls and never takes another
+  robot for the one it follows; every move telling the tracker where the robot can be; a sensor checked against the
+  map (front sensor now, any range sensor later) with its offset and tolerance either from data or learned in the
+  session (`--front-learn`).
+- **For the profiles later:** robot size, turn and drive speeds, command words, record names (LEG, FIND, EDGE), the
+  `front=` field; site walls, open edges, park spots, the find corner; sensor offset/tolerance pairs.
