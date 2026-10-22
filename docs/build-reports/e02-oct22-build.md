@@ -117,4 +117,8 @@ not known yet (to check on the next real footage).
   a robot put aside in the middle of the board stopped the next run (its watchdog). Each fix was re-run.
 - **Analysis:** report.md gains "Setup and recovery" (front sensor against the map with suggested settings; retries,
   sweeps, own finds, drive-outs and help calls per robot). **Second-camera plan:** docs/build-plans/second-camera-plan.md.
+- **Limit found (dry run 15:15):** a robot hidden from the camera for many minutes whose own find also failed has
+  an unknown place; the runner kept it at its park spot while it stood in Center's way (the front stops prevented a
+  collision). Now: after a failed own find with the camera blind, its place counts as unknown, and if nothing finds
+  it, the session stops and asks for Nick rather than drive the others round a guess.
 

@@ -308,6 +308,7 @@ class Runner:
         self.feed = self.tracker = self.history = self.cam = self.board = None
         self.front_seen = {}                 # "all" -> [front reading - map distance]
         self.front_bad = {}                  # robot -> words: the last leg's front reading disagreed with the map
+        self.lost_place = set()              # robots that moved unseen with no trusted pose since (a failed own find)
 
     # --- talking ----------------------------------------------------------------------------------
     def say(self, msg, quiet=False):
@@ -1136,6 +1137,7 @@ class Runner:
         self.say("  Found %s at (%.1f, %.1f) cm." % (robot, p[0], p[1]))
         if self.tracker is not None:
             self.tracker.hand_moved.discard(robot)
+        self.lost_place.discard(robot)
         if not park:
             return True, ""
         if not self.board.on_board(p[0], p[1]) or self.board.edge_room(p[0], p[1])[0] < EDGE_TURN_CM + 3:
@@ -1218,7 +1220,9 @@ class Runner:
         for attempt in range(2):
             out = self.do_find(robot, "rescue")
             if out.get("ok"):
+                self.lost_place.discard(robot)
                 break
+            self.lost_place.add(robot)       # it drove somewhere the camera did not see: its place is unknown now
             self.say("  %s: %s" % (robot, out.get("words")))
             if "stop" in (out.get("words") or ""):
                 return None                # stopped (watchdog or a stop): don't push on blind
@@ -1485,8 +1489,10 @@ class Runner:
             own = None
             if self.tracker is None or robot not in self.tracker.hand_moved:
                 own = self.own_pose(robot, since=(last[0] if last else 0.0))
-            p = (own[0], own[1]) if own else guess
+            p = (own[0], own[1]) if own else (None if robot in self.lost_place else guess)
         if p is None:
+            # (also: it moved unseen after its last known place, e.g. a failed find of its own: dry run 15:15, the
+            # runner kept it at its park spot while it stood in Center's way)
             raise SystemExit("%s is somewhere on the board but the camera can't find it, so the other robots could "
                              "drive into it. Take %s off the board (or put it anywhere open), then start again." % (
                                  robot, robot))
