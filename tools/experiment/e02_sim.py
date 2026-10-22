@@ -16,6 +16,10 @@ default, the real mount is rigid and a shaking background breaks the motion trac
 (--miss-bump 0.03: the find runs on and fails safely; --miss-jolt 0.10: found by the stall alone, later).
 The floor reads like the real plywood to the line sensors (52, sd 4; past the edge: the simulator's guess).
 They start just switched on (they need `calibrate`), near their park spots, roughly facing the middle.
+Bricks (the brick demo, --bricks "x,y,length,width[,deg];..."): boxes --brick-height cm tall, centred at (x, y),
+put on the board while the file <out>/BRICKS_ON exists (e02.py makes it when it asks Nick to put the bricks down,
+and removes it when it asks him to take them off): drawn in the camera picture, solid for the robots' bodies and
+seen by their front distance sensor.
 
 What runs:
   robots   127.0.0.2, .3, .4 ... port 5006 (map order), log lines to 127.0.0.1:5005, "name|seq|line"
@@ -56,6 +60,26 @@ HALF = PL.ROBOT_HALF_CM
 
 def wrap180(a):
     return (a + 180.0) % 360.0 - 180.0
+
+
+def parse_bricks(spec):
+    """'x,y,length,width[,deg];...' (cm, deg; centre and size along / across its long side) -> [dict]."""
+    out = []
+    for part in (spec or "").split(";"):
+        v = [float(t) for t in part.replace(" ", "").split(",") if t != ""]
+        if not v:
+            continue
+        if len(v) not in (4, 5):
+            raise ValueError("a brick is x,y,length,width[,deg]: %r" % part)
+        out.append(dict(x=v[0], y=v[1], length=v[2], width=v[3], deg=v[4] if len(v) == 5 else 0.0))
+    return out
+
+
+def brick_corners(b):
+    """A brick's 4 floor corners [[x, y] ...]."""
+    c, s_ = math.cos(math.radians(b["deg"])), math.sin(math.radians(b["deg"]))
+    hl, hw = b["length"] / 2.0, b["width"] / 2.0
+    return [[b["x"] + c * u - s_ * v, b["y"] + s_ * u + c * v] for u, v in ((hl, hw), (-hl, hw), (-hl, -hw), (hl, -hw))]
 
 
 # =============================================================================== the robots (firmware model)
@@ -100,6 +124,10 @@ class World:
             a = sum(p_[0] * q[1] - q[0] * p_[1] for p_, q in zip(poly, poly[1:] + poly[:1]))
             return poly if a > 0 else poly[::-1]
         self.polys = [ccw(xpoly), ccw(ypoly)]
+        self.brick_specs = parse_bricks(getattr(args, "bricks", "") or "")
+        self.brick_polys = [ccw(brick_corners(b)) for b in self.brick_specs]
+        self.brick_h = float(getattr(args, "brick_height", 6.0))
+        self.bricks_on = False
         params = config.firmware_params()
         fw = config.firmware_version()
         rng = random.Random(args.seed)
@@ -134,6 +162,17 @@ class World:
         self._body = FM.body_of(FM.normalize(dict(format="alvik-fleet-map", version=1, floor=dict(
             x_min=bd.x0, x_max=bd.x1, y_min=bd.y0, y_max=bd.y1), robots=[], tasks={})))
         self.R = R
+
+    def set_bricks(self, on):
+        """Bricks on the board (solid for every robot's body and its front distance sensor) or off."""
+        on = bool(on) and bool(self.brick_polys)
+        if on == self.bricks_on:
+            return False
+        for rb in self.robots:
+            polys = [list(p_) for p_ in self.polys] + ([list(p_) for p_ in self.brick_polys] if on else [])
+            rb.world_polys = polys                  # one assignment: the robot's own thread sees old or new, never half
+        self.bricks_on = on
+        return True
 
     # what fleet_sim.Radio and LiveRobot.firmware_loop expect of the simulation
     def dropped(self, name, t):
@@ -198,6 +237,8 @@ class SimCamera:
         self.R = SC.Renderer(cfg, self.geom, rng)
         self.rng_j = np.random.default_rng(args.seed + 99)
         self.bg = self.make_background(rng)
+        self.bg_plain = self.bg
+        self.bricks_drawn = False
         self.fps = args.fps
         self.pi_offset = args.pi_offset
         self.latest = None          # (jpeg bytes, frame number, t_wall)
@@ -244,6 +285,30 @@ class SimCamera:
         img = np.clip(img.astype(np.float32) * self.R.gain[:, :, None], 0, 255).astype(np.uint8)
         return img
 
+    def draw_bricks(self, img, polys, height_cm):
+        """Boxes height_cm tall on the floor polygons: the sides the camera sees (darker), then the top."""
+        g = self.geom
+        out = img.copy()
+        for p_ in polys:
+            for k in range(len(p_)):
+                a, b = p_[k], p_[(k + 1) % len(p_)]
+                pts = [(a[0], a[1], 0.0), (b[0], b[1], 0.0), (b[0], b[1], height_cm), (a[0], a[1], height_cm)]
+                u, v = g.project(np.array([q[0] for q in pts]), np.array([q[1] for q in pts]), np.array([q[2] for q in pts]))
+                cv2.fillPoly(out, [np.round(np.stack([u, v], 1) * 16).astype(np.int32)], (55, 62, 118),
+                             lineType=cv2.LINE_AA, shift=4)
+            u, v = g.project(np.array([q[0] for q in p_]), np.array([q[1] for q in p_]), np.full(len(p_), height_cm))
+            cv2.fillPoly(out, [np.round(np.stack([u, v], 1) * 16).astype(np.int32)], (72, 86, 150),
+                         lineType=cv2.LINE_AA, shift=4)
+        return out
+
+    def sync_bricks(self):
+        """The picture follows the world's bricks (on / off)."""
+        on = bool(getattr(self.w, "bricks_on", False))
+        if on == self.bricks_drawn:
+            return
+        self.bg = self.draw_bricks(self.bg_plain, self.w.brick_polys, self.w.brick_h) if on else self.bg_plain
+        self.bricks_drawn = on
+
     def true_camera_model(self, path):
         """The true camera as a studio camera file (what a perfect floor calibration would give)."""
         from cameras import CameraModel
@@ -259,6 +324,7 @@ class SimCamera:
         return path
 
     def render(self):
+        self.sync_bricks()
         img = self.bg.copy()
         for r in self.w.robots:
             x, y, th, lv = self.w.view(r)
@@ -403,6 +469,14 @@ def notes_loop(world, path, port, rec=None):
     s.close()
 
 
+def bricks_loop(world, flag):
+    """Bricks on the board while the flag file exists (e02.py makes and removes it)."""
+    while not world.stop.is_set():
+        if world.set_bricks(os.path.exists(flag)):
+            print("e02_sim: bricks %s" % ("on the board" if world.bricks_on else "taken off"), flush=True)
+        time.sleep(0.2)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", default="e02_sim_out")
@@ -427,6 +501,9 @@ def main(argv=None):
     ap.add_argument("--jpeg", type=int, default=80)
     ap.add_argument("--miss-bump", type=float, default=0.03, help="chance a bump is missed altogether (the find fails)")
     ap.add_argument("--miss-jolt", type=float, default=0.10, help="chance a bump's jolt is missed (found by the stall)")
+    ap.add_argument("--bricks", default="", help="brick demo: 'x,y,length,width[,deg];...' cm, put on the board while "
+                                                  "<out>/BRICKS_ON exists")
+    ap.add_argument("--brick-height", type=float, default=6.0, help="the bricks' height, cm")
     ap.add_argument("--record", action="store_true",
                     help="also save the overhead picture as a camrec.py recording in <out>/recording (cam0/video.avi, "
                          "frames.csv, events.csv): what e02_analysis.py reads. Also on with E02_SIM_RECORD=1")
@@ -447,6 +524,7 @@ def main(argv=None):
                             "lower)",
                        board=world.board.to_dict(),
                        model="tools/sim/robot.py + fw_e02.py (the firmware lane's E02 model), real time",
+                       bricks=[dict(b, corners=brick_corners(b), height_cm=world.brick_h) for b in world.brick_specs],
                        robots={r.name: dict(g_true=1.0 / (1.0 + r.gyro_scale), raw_drift_dps=r.gyro_bias,
                                             gyro_drift_dps=r.gyro_bias / (1.0 + r.gyro_scale),
                                             w_true=0.5 * (r.rL + r.rR) / r.m.wheel_radius_cm, ip=r.ip,
@@ -456,6 +534,8 @@ def main(argv=None):
                threading.Thread(target=world.truth_loop, args=(os.path.join(a.out, "truth.csv"),), daemon=True),
                threading.Thread(target=notes_loop, args=(world, os.path.join(a.out, "notes.csv"), NOTES_PORT, rec),
                                 daemon=True)]
+    if world.brick_polys:
+        threads.append(threading.Thread(target=bricks_loop, args=(world, os.path.join(a.out, "BRICKS_ON")), daemon=True))
     servers = []
     for port in (a.port, a.port + 1):
         srv = ThreadingHTTPServer(("127.0.0.1", port), cam.handler())

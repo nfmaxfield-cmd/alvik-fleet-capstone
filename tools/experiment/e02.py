@@ -278,6 +278,7 @@ class Runner:
         self.disagree = defaultdict(int)  # robot -> camera / wheels disagreements in a row
         self.fresh_id = {}            # robot -> True: its position came from identify() and it has not driven since
         self.watch_edge_cm = None     # the watchdog's open-edge distance (None: PL.WATCH_EDGE_CM; mapping: 0)
+        self.bricks_view = None       # the brick demo's drawing on the live view (bricks, path, tracks), or None
         self.link = self.listener = self.watch = self.pi = None
         self.feed = self.tracker = self.history = self.cam = self.board = None
 
@@ -1503,6 +1504,365 @@ class Runner:
         cv2.imwrite(path, v)
         self.say("  The map, drawn on the camera picture: %s (red: open edges, blue: boards)" % path)
 
+    # --- the brick demo (Nick, 2026-10-22; e02_bricks.py) ---------------------------------------------
+    def brick_demo(self):
+        """Nick puts bricks on the board; the camera finds what changed, plans a path round them, and one robot
+        crosses: (1) on its wheels and gyro with the learned corrections, the camera only watching; (2) the same
+        path with camera fixes between legs. Then the bricks come off and it parks. The edge guard and front stop
+        stay on: a crossing they stop is recorded as failed. Returns the result dict, or None."""
+        import e02_bricks as BR
+        st = self.st
+        names = [n for n in st["robots"] if n not in self.unavailable and st["positions"].get(n)]
+        if not names:
+            self.say("Brick demo: no robot is parked on the board, so there is nothing to show.")
+            return None
+        print("")
+        self.say("=== Brick demo: a robot finds its way round bricks you put down ===")
+        self.phase, self.order, self.active = "bricks", "bricks", None
+        self.say("Taking a picture of the board as it is now (keep your hands out of the picture) ...")
+        self.fresh_floor()
+        time.sleep(0.5)
+        floor = BR.floor_snapshot(self.tracker)
+        if floor is None:
+            self.say("Brick demo: the camera has no picture of the floor yet; no demo this time.")
+            return None
+        flag = os.path.join(self.dir, "sim", "BRICKS_ON")
+        if self.a.dry_run:
+            open(flag, "w").close()                 # the simulator puts the bricks down now
+            time.sleep(1.0)
+        self.mark("e02 bricks place")
+        ch = found = None
+        while True:
+            print("\n" + "-" * 78)
+            self.say("Now put the bricks down:")
+            self.say("1. Put the bricks anywhere on the open part of the board, lying flat: at least 30 cm (1 ft) from "
+                     "every robot and at least 20 cm (8 in) from the open edges.")
+            self.say("2. Leave at least one gap about 25 cm (10 in) wide between them, so a robot can get through.")
+            self.say("3. Don't touch or move the robots.")
+            self.say("4. Step back so your hands and your shadow are out of the camera picture.")
+            print("-" * 78)
+            self.ask("5. Then press Enter here: ", "")
+            frames = self.still_frames()
+            robots = {n: tuple(st["positions"][n][:2]) for n in names}
+            found = BR.find_bricks(self.cam, frames, floor, self.board_rect(), robots=list(robots.values()))
+            for line in BR.brick_words(found["bricks"]):
+                self.say(line)
+            if not found["bricks"] and not self.a.auto:
+                ans = self.ask("Check the bricks are inside the board's outline on the live view, then press Enter to "
+                               "look again (or type go and press Enter to cross with no bricks): ", "")
+                if ans.lower() != "go":
+                    continue
+            ch = BR.choose_crossing(found["occ"], found["grid"], self.board, robots)
+            if ch is None:
+                self.say("  There is no way across: the bricks leave no gap a robot can get through (it needs about "
+                         "25 cm, 10 in), or they are too close to the robots.")
+                if self.a.auto:
+                    self._bricks_off(flag)
+                    return None
+                self.say("  Move one brick to open a gap, step back, and press Enter.")
+                continue
+            for line in BR.plan_words(ch):
+                self.say(line)
+            self.bricks_view = dict(bricks=found["bricks"], room_cm=round(ch["space"]["r_cm"], 1),
+                                    path=list(ch["path"]["points"]), start=ch["start"], goal=ch["goal"], tracks={})
+            pic = self.save_bricks_picture()
+            self.say("  The plan is drawn on the live view%s: red outlines are the bricks, the blue line is the path, "
+                     "the white dot the start and the white ring the goal%s." % (
+                         " (http://localhost:%d)" % self.a.view_port if self.a.view_port else "",
+                         (" (also saved as %s)" % pic) if pic else ""))
+            ans = self.ask("Press Enter to start the two crossings (or type r and press Enter to move the bricks and "
+                           "look again): ", "")
+            if ans.lower().startswith("r"):
+                self.bricks_view = None
+                continue
+            break
+        self.mark("e02 bricks found %d" % len(found["bricks"]))
+        self.fresh_floor()                 # the bricks are part of the floor now: the tracker follows only the robot
+        robot = ch["robot"]
+        corr = self.move_corrections(robot)
+        source = "learned from the camera in this session's calibration runs" if self.fitted(robot) else \
+            "the starting guesses (this session has no calibration runs yet%s)" % (
+                "; the gyro creep measured in the naming check" if ((st.get("naming_check") or {}).get(
+                    "gyro_raw_drift_dps") or {}).get(robot) is not None else "")
+        self.say("  %s crosses. Its corrections: %s (%s)." % (robot, FIT.describe(corr), source))
+        out = dict(t=round(time.time(), 1), robot=robot, bricks=found["bricks"], start=ch["start"], goal=ch["goal"],
+                   path=ch["path"], approach=ch["approach"]["points"], words=ch["words"],
+                   straight_blocked_cm=ch["straight_blocked_cm"], corrections=corr, corrections_source=source,
+                   room_cm=round(ch["space"]["r_cm"], 1), settings=dict(margin_cm=BR.MARGIN_CM,
+                                                                        open_edge_cm=BR.OPEN_EDGE_CLEAR_CM,
+                                                                        board_cm=BR.BOARD_CLEAR_CM,
+                                                                        robot_cm=BR.ROBOT_CLEAR_CM),
+                   crossings=[])
+        others = [tuple(q[:2]) for n, q in st["positions"].items() if n != robot and q]
+        space = BR.free_space(found["occ"], found["grid"], self.board, others=others)
+        try:
+            if not self.activate(robot):
+                self.say("  The camera can't see %s at its spot: no crossings this time." % robot)
+                return self._bricks_end(robot, out, flag, space)
+            self.set_corrections(robot, corr)
+            first = ST.bearing(ch["path"]["points"][0], ch["path"]["points"][1])
+            for n in (1, 2):
+                self.say("  Getting %s to the start (the camera steers this part; it is not measured) ..." % robot)
+                ok, why = self.bricks_to(robot, space, ch["start"], final_heading=first)
+                if not ok:
+                    self.say("  %s could not get to the start: %s." % (robot, why))
+                    if not self.help_from_nick(robot, "it could not get to the brick demo's start: " + why, park=False):
+                        break
+                    self.activate(robot)
+                    ok, why = self.bricks_to(robot, space, ch["start"], final_heading=first)
+                    if not ok:
+                        self.say("  Still no way to the start (%s): the demo stops here." % why)
+                        break
+                c = self.brick_crossing(robot, ch, space, n)
+                out["crossings"].append(c)
+                for line in BR.crossing_words(c):
+                    self.say(line)
+                BR.save(os.path.join(self.dir, "bricks.json"), out)
+        finally:
+            self.end_moves(robot)
+        return self._bricks_end(robot, out, flag, space)
+
+    def still_frames(self, tries=6):
+        """Pictures of the board once nothing moves in it any more (Nick's hands gone)."""
+        import e02_bricks as BR
+        region = None
+        a = b = []
+        for k in range(tries):
+            time.sleep(1.0)
+            a = self.feed.wait_frames(6, timeout=5)
+            time.sleep(0.8)
+            b = self.feed.wait_frames(6, timeout=5)
+            if len(a) < 3 or len(b) < 3:
+                continue
+            if region is None:
+                region = BR.board_mask(self.cam, a[0].shape, self.board_rect()) > 0
+            share = BR.moving_share(a, b, region=region)
+            if share < 0.004:
+                return a + b
+            self.say("  Something is still moving in the picture (a hand or a shadow?): please step back from the "
+                     "board. Looking again ...")
+        return a + b
+
+    def save_bricks_picture(self):
+        try:
+            import cv2
+            import e02_view
+            img = self.feed.last_img
+            if img is None or not getattr(self, "bricks_view", None):
+                return None
+            v = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR) if img.ndim == 2 else img.copy()
+            e02_view.draw_bricks(v, self.cam, self.bricks_view)
+            path = os.path.join(self.dir, "check_bricks.png")
+            cv2.imwrite(path, v)
+            return path
+        except Exception as e:                # a picture must never stop the demo
+            self.say("  (brick picture not saved: %s)" % e, quiet=True)
+            return None
+
+    def bricks_to(self, robot, space, target, final_heading=None):
+        """Camera-steered (not measured) to target along a path round the bricks and the other robots. Returns
+        (ok, words)."""
+        import e02_bricks as BR
+        p = self.settle(min_s=0.3)
+        if p is None:
+            p = self.refind(robot, "the camera can't see it")
+            if p is None:
+                return False, "the camera can't see it"
+        plan = BR.plan_path(space, p, target, escape_cm=25.0)
+        if not plan["ok"]:
+            return False, plan["why"]
+        pts = plan["points"][1:]
+        for k, w in enumerate(pts):
+            last = k == len(pts) - 1
+            ok, why = self.drive_to(robot, w, final_heading=final_heading if last else None,
+                                    arrive_cm=2.0 if last else 3.0, max_leg=40.0, avoid=False)
+            if not ok:
+                return False, why
+        return True, ""
+
+    @staticmethod
+    def crossing_stop(words, p1):
+        """Plain words of what ended a crossing leg early, or '' (it ran)."""
+        low = (words or "").lower()
+        if low.startswith("done") or low.startswith("dup"):
+            return ""
+        if "obstacle" in low:
+            return "its front stop saw something just ahead and stopped it (%s)" % words
+        if "edge" in low:
+            return "its edge guard stopped it at an open edge (%s)" % words
+        if low.startswith("watchdog"):
+            return "the camera watchdog stopped it (%s)" % words
+        if low.startswith("camera and wheels"):
+            return "" if p1 is not None else "the camera lost it (%s)" % words
+        return "a leg did not run as asked (%s)" % words
+
+    def brick_crossing(self, robot, ch, space, n):
+        """One crossing from where the robot stands now (at the start, facing along the path) to the goal.
+        n = 1: the legs are worked out once, from the camera's start position and heading, and driven on the
+        robot's own wheels and gyro (with the learned corrections); the camera only watches. n = 2: after every leg
+        the camera picks the next one from where it sees the robot and tells the robot where it is (a fix)."""
+        import e02_bricks as BR
+        how = "wheels and gyro only, with its corrections" if n == 1 else \
+            "the same path, with camera fixes between legs"
+        c = dict(n=n, how=how, failed="", legs_done=0, legs=[])
+        p = self.settle(min_s=0.5)
+        h, measured = self.heads.get(robot, [None, False])
+        if p is None or h is None:
+            c["failed"] = "the camera did not see where it starts, or which way it faces"
+            return c
+        self.fix_now(robot, h)
+        goal = tuple(ch["goal"])
+        pts = [tuple(p)] + [tuple(q) for q in ch["path"]["points"][1:]]
+        c.update(start_cam=[round(p[0], 2), round(p[1], 2)], start_heading=round(h, 1), heading_measured=bool(measured))
+        self.say("  --- Crossing %d: %s ---" % (n, how))
+        self.say("  %s" % ("The camera only watches and measures now: the robot drives the planned legs on its own "
+                           "wheels and gyro." if n == 1 else "After every leg the camera says where the robot really "
+                                                             "is, and the next leg is worked out from there."))
+        self.mark("e02 bricks crossing %d start %s" % (n, robot))
+        t0 = t_last = time.time()
+        track = []
+        self.bricks_view.setdefault("tracks", {})[n] = track
+
+        def keep_track():
+            nonlocal t_last
+            now = time.time()
+            track.extend((round(q[1], 2), round(q[2], 2)) for q in self.history.since(t_last, now))
+            t_last = now
+
+        def say_leg(k, total, cmd):
+            if cmd[0] == "turn":
+                w = "turn %.0f deg %s" % (abs(cmd[1]), "left" if cmd[1] > 0 else "right")
+            else:
+                w = "drive %.0f cm %s" % (abs(cmd[1]), "forward" if cmd[1] >= 0 else "back")
+            self.say("    leg %d%s: %s" % (k, (" of %d" % total) if total else "", w))
+        if n == 1:
+            legs = BR.legs_from(p, h, pts)
+            c["planned_legs"] = [lg["cmd"] for lg in legs]
+            for k, lg in enumerate(legs, 1):
+                say_leg(k, len(legs), lg["cmd"])
+                p0, p1, words = self.leg(robot, lg["cmd"])
+                keep_track()
+                c["legs"].append(dict(cmd=lg["cmd"], result=words, cam_end=p1))
+                why = self.crossing_stop(words, p1)
+                if why:
+                    c["failed"] = why
+                    break
+                c["legs_done"] += 1
+        else:
+            steer = ST.Steer(pts[1:], heading=h, measured=bool(measured), arrive_cm=2.0, max_leg=30.0, max_legs=40)
+            k = 0
+            while True:
+                q = self.settle(min_s=0.3, timeout=2.0)
+                if q is None:
+                    c["failed"] = "the camera lost it"
+                    break
+                cmd = steer.next(q)
+                if cmd[0] == "done" or (cmd[0] == "turn" and abs(cmd[1]) < ST.MIN_TURN_DEG):
+                    break
+                if cmd[0] == "gave_up":
+                    c["failed"] = "it did not reach the goal in %d legs" % steer.max_legs
+                    break
+                k += 1
+                say_leg(k, 0, cmd)
+                p0, p1, words = self.leg(robot, cmd)
+                keep_track()
+                c["legs"].append(dict(cmd=cmd, result=words, cam_end=p1))
+                why = self.crossing_stop(words, p1)
+                if why:
+                    c["failed"] = why
+                    break
+                c["legs_done"] += 1
+                if words.lower().startswith("camera and wheels"):
+                    steer.heading, steer.measured = None, False       # found again by a turn: heading unknown
+                    steer.legs += 1
+                    continue
+                if p0 is None or p1 is None:
+                    c["failed"] = "the camera lost it"
+                    break
+                steer.after(cmd, p0, p1)
+                self.heads[robot] = [steer.heading, steer.measured]
+                self.fix_now(robot, steer.heading if steer.measured else None)    # the camera fix
+        time.sleep(0.3)
+        endp = self.settle(t_from=time.time() - 0.8, min_s=0.5)
+        keep_track()
+        c["seconds"] = round(time.time() - t0, 1)
+        self.mark("e02 bricks crossing %d end %s" % (n, "failed" if c["failed"] else "done"))
+        if endp is not None:
+            c["cam_end"] = [round(endp[0], 2), round(endp[1], 2)]
+            c["end_err_cm"] = round(math.hypot(endp[0] - goal[0], endp[1] - goal[1]), 2)
+        fin = self.listener.leg_final(robot, "-", self.main_lid.get(robot)) or {}
+        bx, by = num(fin.get("x_cm")), num(fin.get("y_cm"))
+        if bx is not None and by is not None:
+            c["robot_end"] = [round(bx, 2), round(by, 2)]
+            c["robot_thought_cm"] = round(math.hypot(bx - goal[0], by - goal[1]), 2)
+        c["closest"] = BR.closest_approach(space, track)
+        c["track"] = track
+        return c
+
+    def _bricks_off(self, flag):
+        if self.a.dry_run and os.path.exists(flag):
+            os.remove(flag)                          # the simulator takes the bricks off
+            time.sleep(1.0)
+
+    def _bricks_end(self, robot, out, flag, space):
+        """Bricks off (Nick), a fresh floor memory, the robot parked; bricks.json and the plain summary."""
+        import e02_bricks as BR
+        p = self.settle(min_s=0.3)
+        if p is not None:
+            self.st["positions"][robot] = [p[0], p[1], self.heads.get(robot, [None])[0]]
+        print("\n" + "-" * 78)
+        self.say("The crossings are over. Take the bricks off the board now (don't move the robots), step back so "
+                 "your hands are out of the picture, and press Enter: %s then parks itself." % robot)
+        print("-" * 78)
+        if self.a.auto:
+            ans = ""
+            self._bricks_off(flag)
+        else:
+            ans = self.ask_timeout("Press Enter when the bricks are off (or type k and press Enter to leave them: it "
+                                   "then goes round them to its spot): ", self.a.help_wait_min * 60.0)
+        kept = ans is None or ans.lower().startswith("k")
+        self.mark("e02 bricks %s" % ("kept" if kept else "off"))
+        self.bricks_view = None
+        if not kept:
+            time.sleep(1.0)
+            self.fresh_floor()
+        if self.activate(robot):
+            if kept:
+                i = self.park_index(robot)
+                ok, why = self.bricks_to(robot, space, self.board.stage(i))
+                if not ok:
+                    self.say("  It could not find a way round the bricks to its spot (%s)." % why)
+            self.set_corrections(robot, self.move_corrections(robot))
+            ok, why = self.park(robot)
+        else:
+            ok, why = False, "the camera can't see it"
+        if not ok:
+            self.help_from_nick(robot, why)
+        out["bricks_taken_off"] = not kept
+        summary = []
+        for c in out["crossings"]:
+            summary.append(dict(n=c["n"], how=c["how"], end_err_cm=c.get("end_err_cm"),
+                                robot_thought_cm=c.get("robot_thought_cm"), failed=c.get("failed") or "",
+                                closest_centre_cm=(c.get("closest") or {}).get("centre_cm"),
+                                closest_side_cm=(c.get("closest") or {}).get("body_cm"), legs=c.get("legs_done"),
+                                seconds=c.get("seconds")))
+        out["summary"] = summary
+        BR.save(os.path.join(self.dir, "bricks.json"), out)
+        self.st["bricks_demo"] = dict(t=out["t"], robot=robot, n_bricks=len(out["bricks"]), crossings=summary)
+        self.st.save()
+        print("")
+        self.say("=== Brick demo: what happened ===")
+        for line in BR.brick_words(out["bricks"]):
+            self.say(line)
+        for c in out["crossings"]:
+            for line in BR.crossing_words(c):
+                self.say(line)
+        if len(summary) == 2 and None not in (summary[0]["end_err_cm"], summary[1]["end_err_cm"]):
+            a_, b_ = summary[0]["end_err_cm"], summary[1]["end_err_cm"]
+            self.say("  With camera fixes it ended %.1f cm from the goal, against %.1f cm on its own wheels and gyro." % (b_, a_))
+        self.say("  Saved: %s" % os.path.join(self.dir, "bricks.json"))
+        return out
+
     def safety_settings(self, names):
         """The edge guard on and the bare body (no nose bracket fitted), sent and read back with `get`. A robot
         that does not confirm them gets them again; still not: the session refuses to start."""
@@ -2465,6 +2825,13 @@ def main(argv=None):
     ap.add_argument("--no-side", action="store_true", help="no side camera this session: don't check or ask about it")
     ap.add_argument("--map", action="store_true", help="after setup, one robot maps the board by touch (about 6 min)")
     ap.add_argument("--map-only", action="store_true", help="setup and the mapping only, then stop")
+    ap.add_argument("--bricks", action="store_true", help="after the session: the brick demo (you put bricks down, a "
+                                                         "robot crosses round them twice: wheels and gyro only, then "
+                                                         "with camera fixes)")
+    ap.add_argument("--bricks-only", action="store_true", help="setup (and the naming check: the gyro creep), then the "
+                                                              "brick demo only")
+    ap.add_argument("--dry-bricks", default="", help="dry run: the bricks the simulator puts down when asked, "
+                                                     "'x,y,length,width[,deg];...' cm")
     ap.add_argument("--view-port", type=int, default=8090, help="live view in a browser: http://localhost:<port> (0 = off)")
     ap.add_argument("--map-rays", type=int, default=16)
     ap.add_argument("--map-robot", default="", help="which robot maps (default: the first)")
@@ -2596,7 +2963,7 @@ def launch(a, state, sdir, sim):
             run.view = None
     hist = CAM.History()
     run.history = hist
-    if not state["schedule"]:
+    if not state["schedule"] and not getattr(a, "bricks_only", False):
         for line in PL.plan_words(run.planned_schedule(), a.run_s, a.find_s):
             run.say(line)
     threading.Thread(target=run.watchdog_loop, daemon=True).start()
@@ -2615,11 +2982,18 @@ def launch(a, state, sdir, sim):
                 run.map_board(a.map_robot if a.map_robot in names else names[0], n_rays=a.map_rays)
         if a.map_only:
             raise SystemExit("Mapping done (--map-only): no runs this time.")
-        if not a.skip_find_check and not state["setup"].get("find_check"):
-            run.find_check()
-        if not a.skip_naming and not state.get("naming_check"):
-            run.naming_check()
-        run.session()
+        if getattr(a, "bricks_only", False):
+            if not a.skip_naming and not state.get("naming_check"):
+                run.naming_check()
+            run.brick_demo()
+        else:
+            if not a.skip_find_check and not state["setup"].get("find_check"):
+                run.find_check()
+            if not a.skip_naming and not state.get("naming_check"):
+                run.naming_check()
+            run.session()
+            if getattr(a, "bricks", False):
+                run.brick_demo()
     except KeyboardInterrupt:
         run.say("Stopped by Ctrl+C: every robot is stopped. Start again with --resume to carry on.")
         code = 1
@@ -2650,14 +3024,16 @@ def launch(a, state, sdir, sim):
 def start_sim(state, sdir):
     simdir = os.path.join(sdir, "sim")
     os.makedirs(simdir, exist_ok=True)
-    for f in ("STOP", "sim_info.json"):
+    for f in ("STOP", "sim_info.json", "BRICKS_ON"):
         if os.path.exists(os.path.join(simdir, f)):
             os.remove(os.path.join(simdir, f))
     sides = (state["setup"].get("args") or {}).get("board_sides") or "1,1"
     sim = subprocess.Popen([sys.executable, os.path.join(HERE, "e02_sim.py"), "--out", simdir,
                             "--xboard-side", sides.split(",")[0], "--yboard-side", sides.split(",")[1],
                             "--robots", ",".join(state["robots"]), "--seed", str(state["seed"] % 1000 + 1),
-                            "--start", (state["setup"].get("args") or {}).get("dry_start") or "parks"],
+                            "--start", (state["setup"].get("args") or {}).get("dry_start") or "parks"]
+                           + (["--bricks", (state["setup"].get("args") or {}).get("dry_bricks")]
+                              if (state["setup"].get("args") or {}).get("dry_bricks") else []),
                            stdout=open(os.path.join(simdir, "sim_stdout.txt"), "a"), stderr=subprocess.STDOUT)
     t0 = time.time()
     while time.time() - t0 < 40 and not os.path.exists(os.path.join(simdir, "sim_info.json")):
