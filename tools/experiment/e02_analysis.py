@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """E02 analysis (lane A): how far do the Alviks end from where they meant to be, per condition.
 
+After a session (the one command; docs/experiments/E02-accuracy/SESSION-GUIDE.md "After the session"):
+
+    python tools/experiment/e02_analysis.py --session logs/e02-<date-time> --recording <the Pi's recording folder>
+
+  reads everything from the runner's session folder (session_inputs()) and writes <session>/analysis/. A dry run
+  recorded with E02_SIM_RECORD=1 needs no --recording (its sim/recording is found). Or, input by input:
+
     python tools/experiment/e02_analysis.py --recording ~/recordings/<overhead> --logs logs/<session> \\
         --runs e02_runs.csv --calib cameras/default.json --out docs/experiments/E02/results
 
@@ -76,7 +83,10 @@ ALIASES = dict(
     route=["route", "e02_route"],
     block=["block"],
     turn_sign=["turn_sign"],
-    robot_run=["robot_run", "log_run", "run_no"],
+    robot_run=["robot_run", "log_run", "run_no", "e02_run"],
+    find_run=["find_run"],
+    order=["order"],
+    status=["status"],
     recovery=["recovery", "needed_recovery", "lost", "flag_lost"],
     t_find=["t_find", "t_find_start", "find_t0"],
     t_start=["t_start", "t_route_start", "t_route"],
@@ -114,6 +124,22 @@ def circ_median(angles_deg):
     return float(ref + np.median(wrap180(a - ref)))
 
 
+def quarter_median(angles_deg):
+    """Median of headings known only up to a quarter turn (a near-square body): each is brought within 45 deg of
+    their four-fold circular mean before the median, so frames resolved to different sides do not mix; the result
+    lies within 45 deg of the angle most frames had (the caller resolves the quarter)."""
+    a = np.asarray([x for x in angles_deg if np.isfinite(x)], float)
+    if not len(a):
+        return float("nan")
+    ref = math.degrees(math.atan2(np.mean(np.sin(np.radians(4 * a))), np.mean(np.cos(np.radians(4 * a))))) / 4.0
+    near = ref + (a - ref + 45.0) % 90.0 - 45.0                      # each within 45 deg of ref
+    med = float(np.median(near))
+    # keep the quarter most frames were resolved to
+    shift = 90.0 * np.round(wrap180(a - near) / 90.0)
+    vals, counts = np.unique(np.round(shift).astype(int) % 360, return_counts=True)
+    return float(wrap180(med + vals[np.argmax(counts)]))
+
+
 def nanf(v):
     try:
         f = float(v)
@@ -138,7 +164,7 @@ def describe(x, boot=4000, seed=1):
         out["sd"] = sd
         half = float(stats.t.ppf(0.975, n - 1)) * sd / math.sqrt(n)
         out["ci_lo"], out["ci_hi"] = out["mean"] - half, out["mean"] + half
-    if n >= 3 and boot > 0:
+    if n >= 5 and boot > 0:       # fewer runs: re-drawing them gives no useful range for the SD
         rng = np.random.default_rng(seed)
         idx = rng.integers(0, n, size=(boot, n))
         sds = x[idx].std(axis=1, ddof=1)
@@ -310,9 +336,12 @@ class Logs:
         rows = self._rows("bump", robot, run)
         return sorted(rows, key=lambda r: nanf(pick(r, ["ms", "t_recv"], 0)))
 
-    def robot_offset(self, robot):
-        """laptop time = robot_ms / 1000 + offset (median of the lowest-round-trip clock checks), or None."""
+    def robot_offset(self, robot, boot=None):
+        """laptop time = robot_ms / 1000 + offset (median of the lowest-round-trip clock checks), or None. boot: the
+        robot's boot id (the run id's prefix, e.g. 7ABD of 7ABD-4): a robot switched off and on restarts its clock."""
         rows = [r for r in self.clock if str(pick(r, ["robot"], "")) == str(robot)]
+        if boot and any(str(pick(r, ["boot"], "")) == str(boot) for r in rows):
+            rows = [r for r in rows if str(pick(r, ["boot"], "")) == str(boot)]
         pts = [(nanf(pick(r, ["rtt_ms"], 1e9)), nanf(pick(r, ["offset_s"]))) for r in rows]
         pts = sorted(p for p in pts if np.isfinite(p[1]))[:5]
         return float(np.median([p[1] for p in pts])) if pts else None
@@ -335,12 +364,48 @@ def laptop_to_video(t, vc):
     return t + off
 
 
+RUNNER_FIND = re.compile(r"^\s*e02\s+(\d+)\s+(\S+)\s+find\s+(start|end)\b", re.I)
+RUNNER_TAG = re.compile(r"^\s*e02\s+(\d+)/\d+\s+(\S+)\s+(\S+)\s+r(\d)\b.*?\b(find|route)\s+(start|end)\b", re.I)
+RUNNER_ROUTE = re.compile(r"^\s*e02\s+\d+/\d+\s+(\S+)\s+\S+\s+r\d\s+route\s+(start|end)\b", re.I)
+
+
 def parse_marks(events):
-    """events.csv rows -> {run_id: {t_find|t_start|t_far|t_end: t_wall}} from texts like 'E02 run 7 start'."""
+    """events.csv rows -> {run_id: {t_find|t_start|t_far|t_end: t_wall}} from texts like 'E02 run 7 start', plus the
+    runner's own marks (tools/experiment/e02.py), which carry no run id:
+      'e02 <k>/<n> <robot> <cond> r<route> [<robot>] find start|end', '... route start|end'   -> key 'tag:<k>/<robot>'
+      'e02 <order> <robot> find start|end' (older runner)                                      -> key 'order:<order>'
+    A route mark without its own find belongs to that robot's last find. Tagged runs also carry robot, condition and
+    route (keys 'robot', 'condition', 'route'), so load_runs can match them to run-list rows in session order."""
     out = {}
+    last_find = {}
     for r in events:
         text = str(r.get("text", ""))
-        m = re.search(r"run[\s_:#-]*([A-Za-z0-9]+)", text, re.I)
+        t = nanf(r.get("t_wall"))
+        mt = RUNNER_TAG.match(text)
+        if mt:
+            k, rb, cond, route, ph, se = mt.groups()
+            key = "tag:%s/%s" % (k, rb)
+            d = out.setdefault(key, dict(robot=rb, condition=canon_cond(cond), route=canon_route(route), seq=len(out)))
+            if ph.lower() == "find":
+                last_find[rb] = key
+                if se.lower() == "start":
+                    d["t_find"] = t
+            else:
+                d["t_start" if se.lower() == "start" else "t_end"] = t
+            continue
+        mf = RUNNER_FIND.match(text)
+        if mf:
+            last_find[mf.group(2)] = "order:" + mf.group(1)
+            if mf.group(3).lower() == "start":
+                out.setdefault("order:" + mf.group(1), {})["t_find"] = t
+            continue
+        mr = RUNNER_ROUTE.match(text)
+        if mr:
+            o = last_find.get(mr.group(1))
+            if o is not None:
+                out.setdefault(o, {})["t_start" if mr.group(2).lower() == "start" else "t_end"] = t
+            continue
+        m = re.search(r"\brun[\s_:#-]*([A-Za-z0-9]+)", text, re.I)
         ph = re.search(r"\b(find|start|route|far|end)\b", text, re.I)
         if not (m and ph):
             continue
@@ -352,12 +417,17 @@ def parse_marks(events):
 def load_runs(runs_path, marks, vc=None):
     """The run list as dicts: run_id, robot, condition, route, block, robot_run, recovery, t_* (camera clock)."""
     rows = read_csv(runs_path) if runs_path else []
-    runs = []
+    runs, used = [], set()
     if not rows:
-        rows = [dict(run_id=k) for k in sorted(marks, key=lambda s: (len(s), s))]
+        rows = [dict(run_id=k) for k in sorted(marks, key=lambda s: (len(s), s)) if ":" not in k]
+        rows += [dict({x: v for x, v in marks[k].items() if x != "seq"}, run_id=k[4:].replace("/", "-"))
+                 for k in sorted(marks, key=lambda k: marks[k].get("seq", 0)) if k.startswith("tag:")]
+    rows = sorted(rows, key=lambda r: nanf(pick(r, ["order"], 0)) if pick(r, ["order"]) is not None else 0)
     for i, r in enumerate(rows):
         d = {k: pick(r, ALIASES[k]) for k in ALIASES if not k.startswith("t_")}
-        d["run_id"] = str(d["run_id"] if d["run_id"] is not None else i + 1)
+        if d["run_id"] is None:     # e.g. a failed run the robot never started: the runner's order number
+            d["run_id"] = ("o%s" % d["order"]) if d.get("order") is not None else str(i + 1)
+        d["run_id"] = str(d["run_id"])
         d["condition"] = canon_cond(d["condition"])
         d["route"] = canon_route(d["route"])
         rec = str(d["recovery"] or "").strip()
@@ -366,12 +436,23 @@ def load_runs(runs_path, marks, vc=None):
         elif rec.lower() in ("1", "true", "yes", "y"):
             rec = "lost"                                  # an old run list's lost flag
         d["recovery"] = rec
-        mk = marks.get(d["run_id"], {})
+        mk = dict(marks.get("order:%s" % d.get("order"), {}), **marks.get(d["run_id"], {}))
+        if not mk:
+            for key in sorted((k for k in marks if k.startswith("tag:") and k not in used),
+                              key=lambda k: marks[k]["seq"]):
+                m = marks[key]
+                if (m["robot"], m["condition"], m["route"]) == (d["robot"], d["condition"], d["route"]):
+                    used.add(key)
+                    mk = {k: v for k, v in m.items() if k.startswith("t_")}
+                    break
+        d["time_source"] = ""
         for k in ("t_find", "t_start", "t_far", "t_end"):
             v = nanf(pick(r, ALIASES[k]))
             if not np.isfinite(v):
                 lap = nanf(pick(r, [n + "_laptop" for n in ALIASES[k]]))
                 v = laptop_to_video(lap, vc) if np.isfinite(lap) else mk.get(k, float("nan"))
+                if np.isfinite(v) and not np.isfinite(lap):
+                    d["time_source"] = "video marks"
             d[k] = v
         runs.append(d)
     return runs
@@ -392,15 +473,33 @@ def load_camera(path):
 class Video:
     """Frames by number; row i of frames.csv is frame i of video.avi. Gray images."""
 
-    def __init__(self, folder, video=None):
+    def __init__(self, folder, video=None, fix_dir=None):
         import cv2
         self.cv2 = cv2
         self.folder = folder
         fr = read_csv(os.path.join(folder, "frames.csv"))
         self.t = np.array([nanf(r["t_wall"]) for r in fr], float)
-        self.cap = cv2.VideoCapture(video or os.path.join(folder, "video.avi"))
+        path = video or os.path.join(folder, "video.avi")
+        self.cap = cv2.VideoCapture(path)
         if not self.cap.isOpened():
             raise SystemExit("Could not open the video in %s" % folder)
+        if int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT)) <= 0 and len(self.t):
+            # no index (the recorder did not stop cleanly, or is still running): jumping to a frame lands on the wrong
+            # picture. ffmpeg rewrites it with an index without re-encoding.
+            self.cap.release()
+            import shutil
+            import subprocess
+            fixed = os.path.join(fix_dir or folder, "video_indexed.avi")
+            if not os.path.exists(fixed):
+                if not shutil.which("ffmpeg"):
+                    raise SystemExit("The video in %s has no index (the recording was not stopped with Ctrl+C), so "
+                                     "frames cannot be found by number. Fix it with:\n  ffmpeg -i \"%s\" -c copy \"%s\"\n"
+                                     "then run this again." % (folder, path, fixed))
+                os.makedirs(os.path.dirname(fixed), exist_ok=True)
+                print("The video has no index: writing one (%s) ..." % fixed, flush=True)
+                subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", path, "-c", "copy", fixed], check=True)
+            self.cap = cv2.VideoCapture(fixed)
+            self.reindexed = fixed
         self.n = min(len(self.t), int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT)) or len(self.t))
         self._next = 0
         ev = os.path.join(folder, "events.csv")
@@ -446,7 +545,15 @@ def measure_pose(gray, hint_uv, hint_ang, size_px, bg=None, min_contrast=10.0):
         top = float(np.percentile(diff, 99.5))
         if top < 1.5 * min_contrast:
             return None
-        mask = (diff > max(min_contrast, 0.5 * top)).astype(np.uint8)
+        if bg is not None:
+            # against a picture of the empty scene: everything clearly above the picture noise is robot (its pale top
+            # differs from the floor far less than its dark wheels do; half the strongest difference would cut the
+            # top in and out of the blob from frame to frame)
+            noise = 1.4826 * float(np.median(np.abs(diff - np.median(diff))))
+            mask = (diff > max(min_contrast, 4.0 * noise, 0.2 * top)).astype(np.uint8)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+        else:
+            mask = (diff > max(min_contrast, 0.5 * top)).astype(np.uint8)
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
         n, lab, st, cen = cv2.connectedComponentsWithStats(mask)
         best, bd = None, 1e18
@@ -468,7 +575,10 @@ def measure_pose(gray, hint_uv, hint_ang, size_px, bg=None, min_contrast=10.0):
     mu, mv, comp, area, diff, top, u0, v0 = res
     # sub-pixel centre: the blob weighted by how much each pixel differs from the floor
     near = cv2.dilate(comp.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
-    w = np.where(near, np.clip(diff - 0.15 * top, 0, None), 0.0)
+    if bg is not None:          # the silhouette's centre: contrast weights would pull it towards the dark wheels
+        w = comp.astype(np.float64)
+    else:
+        w = np.where(near, np.clip(diff - 0.15 * top, 0, None), 0.0)
     if w.sum() > 0:
         gy, gx = np.mgrid[0:diff.shape[0], 0:diff.shape[1]]
         mu, mv = float((w * gx).sum() / w.sum()) + u0, float((w * gy).sum() / w.sum()) + v0
@@ -514,6 +624,8 @@ def track(video, cam, i_anchor, i_lo, i_hi, hint_uv, hint_ang, size_px, bg=None,
         while (i <= stop) if step > 0 else (i >= stop):
             g = video.gray(i)
             m = measure_pose(g, uv, ang, size_px, bg) if g is not None else None
+            if m is not None and math.hypot(m["u"] - uv[0], m["v"] - uv[1]) > 0.5 * size_px * (miss + 1):
+                m = None        # a jump no robot makes in a frame (the board's edge or a parked robot): not it
             if m is not None:
                 uv, ang, miss = (m["u"], m["v"]), m["ang"], 0
             else:
@@ -566,6 +678,20 @@ def _smooth(x, k=3):
         return x
     pad = np.pad(x, k // 2, mode="edge")
     return np.array([np.median(pad[i:i + k]) for i in range(len(x))])
+
+
+def _smooth_xy(xy, k=5):
+    """Running median of each column over k frames, ignoring missing frames (a frame stays missing if it was)."""
+    xy = np.asarray(xy, float)
+    n, h = len(xy), k // 2
+    out = np.full_like(xy, np.nan)
+    for i in range(n):
+        if not np.all(np.isfinite(xy[i])):
+            continue
+        w = xy[max(0, i - h):i + h + 1]
+        w = w[np.all(np.isfinite(w), axis=1)]
+        out[i] = np.median(w, axis=0)
+    return out
 
 
 def contact_frames(t, xy, head_deg, v_min=1.5):
@@ -631,7 +757,7 @@ def _med_pose(frames, idxs, cam, off):
     if not ms:
         return _nan3(), _nan3(), 0
     u, v = np.median([m["u"] for m in ms]), np.median([m["v"] for m in ms])
-    a = circ_median([m["ang"] for m in ms])
+    a = quarter_median([m["ang"] for m in ms])
     fp = floor_pose(cam, dict(u=u, v=v, ang=a), off)
     return fp, (float(u), float(v), a), len(ms)
 
@@ -648,23 +774,43 @@ def measure_run(video, run, logs, S):
     cam, off = S.cam, S.centre_offset_cm
     flags = []
     robot, rr = run["robot"], run.get("robot_run")
+    fr = run.get("find_run") or rr          # the runner's find is a run of its own (FIND and BUMP rows carry its id)
     e02 = logs.e02_row(robot, rr) if rr is not None else None
-    find = logs.find_row(robot, rr) if rr is not None else None
+    find = logs.find_row(robot, fr) if fr is not None else None
     bel = {st: stage_pose(e02, st) for st in ("start", "far", "end")}
     if bel["start"] is None and find is not None:
         bel["start"] = stage_pose(find, "after")
     route = run["route"]
+    vc = getattr(S, "vc", None)
+    if e02 is not None and vc and (run.get("time_source") or not np.isfinite(run["t_start"])):
+        # times from video marks are when the laptop sent them (the route mark comes before the robot's drive to its
+        # start spot): the robot's own E02 moments, on the camera clock, are better
+        clk = logs.robot_offset(robot, str(rr).split("-")[0] if "-" in str(rr) else None)
+        if clk is not None:
+            run = dict(run)
+            for k in ("start", "far", "end"):
+                ms = nanf(pick(e02, ["ms_" + k]))
+                if np.isfinite(ms):
+                    run["t_" + k] = laptop_to_video(ms / 1000.0 + clk, vc)
+            flags.append("times from the robot's E02 record")
     t_start, t_end = run["t_start"], run["t_end"]
     row = dict(run_id=run["run_id"], robot=robot, condition=run["condition"], route=route, block=run.get("block"),
-               robot_run=rr, recovery=run.get("recovery", ""))
+               robot_run=rr, find_run=run.get("find_run") or "", status=run.get("status") or "",
+               recovery=run.get("recovery", ""))
     if not (np.isfinite(t_start) and np.isfinite(t_end)):
         row["flags"] = "no start/end time"
         return row, [], []
     t_find = run["t_find"] if np.isfinite(run["t_find"]) else t_start - 30.0
-    bumps = logs.bump_rows(robot, rr) if rr is not None else []
+    bumps = logs.bump_rows(robot, fr) if fr is not None else []
     t_lo = (t_find - 0.5) if bumps else (t_start - S.lead_s)
     i_lo, i_hi = video.index_at(t_lo), video.index_at(t_end + S.tail_s)
     i_anchor = video.index_at(t_start - 0.3)
+    if S.bg is None and getattr(S, "run_background", True):
+        # this run's empty scene: the median of pictures spread over the run, so the moving robot drops out while
+        # the boards and the parked robots stay in (the robot is then what differs from it, even against a board)
+        S_bg = run_background(video, i_lo, i_hi)
+        if S_bg is not None:
+            S = _with_bg(S, S_bg)
 
     # where to start looking: the run list's park spot, the believed start, else where something moves
     hint_uv, hint_ang, hint_xy = None, None, None
@@ -691,6 +837,23 @@ def measure_run(video, run, logs, S):
         row["flags"] = "robot not found at start"
         return row, [], []
     frames = track(video, cam, i_anchor, i_lo, i_hi, (first["u"], first["v"]), first["ang"], size, S.bg)
+    # the find, tracked forward from where the robot stood when it began (FIND before_x/y/th, floor frame when the
+    # find started from a camera fix): tracking backwards from the start can lose it in the drive to the start spot
+    bb = stage_pose(find, "before") if find is not None else None
+    if bumps and bb is not None and cam is not None and nanf(pick(find, ["known_before"])) == 1 and \
+            sum(1 for i in range(i_lo, i_anchor) if frames.get(i)) < 0.8 * (i_anchor - i_lo):
+        import cameras
+        u, v = cam.project((bb[0], bb[1], TOP_CM))
+        if np.isfinite(u) and cam.in_image(u, v):
+            i_f = video.index_at(t_find + 0.1)
+            g = video.gray(i_f)
+            m0 = measure_pose(g, (u, v), cameras.floor_heading_to_image(cam, bb[0], bb[1], TOP_CM, bb[2]), size,
+                              S.bg) if g is not None else None
+            if m0 is not None:
+                more = track(video, cam, i_f, i_lo, i_anchor, (m0["u"], m0["v"]), m0["ang"], size, S.bg)
+                for i, m in more.items():
+                    if m is not None and not frames.get(i):
+                        frames[i] = m
     idx = sorted(frames)
     t = video.t[idx]
     uv = np.array([[frames[i]["u"], frames[i]["v"]] if frames[i] else [np.nan, np.nan] for i in idx])
@@ -699,7 +862,9 @@ def measure_run(video, run, logs, S):
         np.full((len(idx), 3), np.nan)
     xy = fl[:, :2] if cam else uv
     tol = S.still_tol_cm if cam else S.still_tol_cm * 2.3
-    segs = still_segments(t, xy, tol, S.still_s)
+    # still stretches on a 5-frame running median: a standing robot's blob edge can flicker between two outlines
+    # (the measured centre then hops ~1 cm frame to frame); the stage poses are still medians of the raw frames
+    segs = still_segments(t, _smooth_xy(xy, 5), tol, S.still_s)
     trk = [dict(run_id=run["run_id"], frame=idx[k], t_wall=round(float(t[k]), 4), u_px=uv[k, 0], v_px=uv[k, 1],
                 ang_px_deg=ang[k], x_cm=fl[k, 0], y_cm=fl[k, 1], th_deg=fl[k, 2]) for k in range(len(idx))]
     pos = {i: k for k, i in enumerate(idx)}
@@ -714,6 +879,11 @@ def measure_run(video, run, logs, S):
                 key=lambda s: t[s[1]] - t[s[0]], default=None)
     after = [s for s in segs if s_seg is None or s[0] > s_seg[1]]
     e_seg = after[-1] if after else None
+    # the end: the still stretch the robot was in at its own end moment (it may be driven off to park within the
+    # tail), else the last one
+    at_end = [s for s in after if t[s[0]] <= t_end + 0.5 and t[s[1]] >= t_end - 0.2]
+    if at_end:
+        e_seg = max(at_end, key=lambda s: min(t[s[1]], t_end + 1.5) - max(t[s[0]], t_end - 0.5))
     mid = [s for s in after if s is not e_seg and t[s[1]] - t[s[0]] >= 0.6]
     f_seg = None
     if mid:
@@ -722,12 +892,35 @@ def measure_run(video, run, logs, S):
         elif s_seg is not None:
             p0 = np.nanmedian(xy[s_seg[0]:s_seg[1] + 1], axis=0)
             f_seg = max(mid, key=lambda s: np.hypot(*(np.nanmedian(xy[s[0]:s[1] + 1], axis=0) - p0)))
+    if os.environ.get("E02_DEBUG"):
+        print("  segs rel t_start:", [(round(t[a] - t_start, 2), round(t[b] - t_start, 2)) for a, b in segs],
+              "t_far %.2f t_end %.2f" % (run["t_far"] - t_start, t_end - t_start), "track %.2f..%.2f, %d/%d found" % (
+                  t[0] - t_start, t[-1] - t_start, sum(1 for i in idx if frames[i]), len(idx)))
     for nm, sg in (("start", s_seg), ("far", f_seg), ("end", e_seg)):
         if sg is None:
             flags.append("no still stretch for %s" % nm)
     P = {}
     for nm, sg in (("start", s_seg), ("far", f_seg), ("end", e_seg)):
         P[nm] = seg_pose(sg) if sg else (_nan3(), _nan3(), 0)
+    # headings: the body is nearly square, so each picture gives the heading only up to a quarter turn. Resolve it
+    # with the robot's own record: its believed start heading (floor frame after a find from a camera fix) and its
+    # believed turn since the start (never a quarter turn off: a U gyro is ~7% off)
+    head_note = ""
+    if cam is not None and bel["start"] is not None and np.isfinite(P["start"][0][2]):
+        hs = bel["start"][2] if (find is not None and nanf(pick(find, ["known_before"])) == 1) else P["start"][0][2]
+        new_th = {"start": snap90(P["start"][0][2], hs)}
+        for nm in ("far", "end"):
+            if bel[nm] is not None and np.isfinite(P[nm][0][2]):
+                new_th[nm] = snap90(P[nm][0][2], new_th["start"] + float(wrap180(bel[nm][2] - bel["start"][2])))
+        img_sign = _image_turn_sign(cam, P["start"][0])
+        for nm, th in new_th.items():
+            fp, px, n = P[nm]
+            d = float(wrap180(th - fp[2]))
+            if abs(d) > 1e-6:
+                head_note = "heading resolved by the robot's record"
+            P[nm] = ((fp[0], fp[1], th), (px[0], px[1], float(wrap180(px[2] + img_sign * d))), n)
+    if head_note:
+        flags.append(head_note)
     ms, mf, me = P["start"][0], P["far"][0], P["end"][0]
     rel = S.routes.get(route)
     if rel is not None and rel[1] != 0:
@@ -736,10 +929,21 @@ def measure_run(video, run, logs, S):
             sg = float(np.sign(relative(mf, ms)[1]))
         sg = sg if np.isfinite(sg) and sg != 0 else 1.0
         rel = (rel[0], sg * rel[1], sg * rel[2])
+    row["far_intent_from"] = "route table" if rel is not None else ""
     if e02 is not None:
         g = [nanf(pick(e02, ["far_goal_%s" % a, "far_goal_%s_cm" % a, "far_goal_%s_deg" % a])) for a in ("x", "y", "th")]
         if all(np.isfinite(g)):
             rel = tuple(g)
+            row["far_intent_from"] = "E02 far_goal (relative)"
+        elif np.all(np.isfinite(g[:2])) and bel["start"] is not None:
+            # firmware 2026-10-21b: far_goal_x/y is the far point the robot aimed for, in the same floor frame as
+            # its believed start: the intended offset in the start's own frame, exact for this run (turn side too)
+            ga, gl, _ = relative((g[0], g[1], 0.0), bel["start"])
+            dth = rel[2] if rel is not None else 0.0
+            if rel is not None and rel[1] != 0 and gl != 0:
+                dth = math.copysign(abs(rel[2]), gl)
+            rel = (ga, gl, dth)
+            row["far_intent_from"] = "E02 far_goal"
     int_far = compose(ms, rel) if rel is not None and np.all(np.isfinite(ms)) else _nan3()
     int_end = ms
     row.update(dict(
@@ -795,7 +999,7 @@ def measure_run(video, run, logs, S):
         events = contact_frames(t[kk], xy[kk], np.where(np.isfinite(fl[kk, 2]), fl[kk, 2], 0.0) if cam else
                                 -ang[kk]) if len(kk) else []
         pending = list(events)
-        clk = logs.robot_offset(robot)
+        clk = logs.robot_offset(robot, str(fr).split("-")[0] if "-" in str(fr) else None)
         vc = getattr(S, "vc", None)
         for bi, b in enumerate(bumps):
             t_rec = nanf(pick(b, ["t_wall"]))
@@ -852,6 +1056,43 @@ def measure_run(video, run, logs, S):
                 br["cam_delay_ms"] = float(1000.0 * (t_rec - t[c]))
             brows.append(br)
     return row, brows, trk
+
+
+def run_background(video, i_lo, i_hi, n=41):
+    """Per-pixel median of n pictures spread evenly over frames i_lo..i_hi, or None if too few could be read."""
+    gs = []
+    for i in np.linspace(i_lo, i_hi, n).astype(int):
+        g = video.gray(int(i))
+        if g is not None:
+            gs.append(g)
+    if len(gs) < 9:
+        return None
+    return np.median(np.stack(gs), axis=0).astype(np.uint8)
+
+
+def _with_bg(S, bg):
+    import copy
+    S2 = copy.copy(S)
+    S2.bg = bg
+    return S2
+
+
+def snap90(th, hint):
+    """th moved by whole quarter turns to lie within 45 deg of hint (deg)."""
+    if not (np.isfinite(th) and np.isfinite(hint)):
+        return th
+    return float(wrap180(th + 90.0 * round(float(wrap180(hint - th)) / 90.0)))
+
+
+def _image_turn_sign(cam, pose):
+    """+1 if a left (counter-clockwise) turn on the floor is counter-clockwise in the picture, else -1."""
+    import cameras
+    try:
+        a = cameras.floor_heading_to_image(cam, pose[0], pose[1], TOP_CM, pose[2])
+        b = cameras.floor_heading_to_image(cam, pose[0], pose[1], TOP_CM, pose[2] + 10.0)
+        return 1.0 if float(wrap180(b - a)) > 0 else -1.0
+    except Exception:
+        return 1.0
 
 
 def _find_origin(fl):
@@ -1042,6 +1283,20 @@ def find_row_for(summ, scope, metric, cond, setname="all runs"):
     return None
 
 
+TESTS_FINE_PRINT = [
+    "<sub>Permutation p (the primary test): the condition labels are shuffled 4000 times, but only among "
+    "runs of the same robot on the same route, and the difference in means is taken each time; p is the "
+    "share of shuffles with a difference at least as large as the real one. It respects that the same "
+    "robots and routes recur. Welch's t-test: (secondary) the difference in means divided by its standard "
+    "error, without assuming equal spreads; it treats every run as independent. Mann-Whitney U "
+    "(secondary): ranks all runs together and asks whether one condition's runs sit higher; it does not "
+    "need a bell curve. Holm: each p corrected for the six condition pairs compared within one table (one "
+    "measure, one route); tables are not corrected against each other. Cohen's d: the mean difference in "
+    "units of the pooled SD (0.2 small, 0.5 medium, 0.8 large). Brown-Forsythe (Levene on distances from "
+    "the median): tests whether the spreads differ; p is the chance of spreads this different if they "
+    "were equal.</sub>", ""]
+
+
 def write_report(path, rows, bumps, summ, comps, charts, notes, args_text=""):
     L = []
     n_by = {c: sum(1 for r in rows if r["condition"] == c) for c in CONDITIONS}
@@ -1057,14 +1312,23 @@ def write_report(path, rows, bumps, summ, comps, charts, notes, args_text=""):
     rec = [r for r in rows if r.get("recovery")]
     kinds = sorted({r["recovery"] for r in rec})
     L += ["## Data", "",
-          "%d runs (%s). %d needed recovery afterwards (%s): the runner drove them back by camera; they stay in every "
-          "statistic. %d are statistical outliers on end position error (beyond 1.5 x IQR within the same condition "
+          "%d runs (%s). %s %d are statistical outliers on end position error (beyond 1.5 x IQR within the same condition "
           "and route); every table gives the mean with and without them. Runs with a missing measurement are in "
           "runs.csv with a note and left out of the statistic they lack. The routes differ in length and turns, so "
           "each route is reported on its own (pooled numbers: summary.csv, scope all)." % (
-              len(rows), ", ".join("%s %d" % (c, n_by[c]) for c in CONDITIONS), len(rec),
-              ", ".join("%s %d" % (k, sum(1 for r in rec if r["recovery"] == k)) for k in kinds) or "none",
+              len(rows), ", ".join("%s %d" % (c, n_by[c]) for c in CONDITIONS),
+              ("%d needed recovery afterwards (%s): the runner drove them back by camera; they stay in every statistic."
+               % (len(rec), ", ".join("%s %d" % (k, sum(1 for r in rec if r["recovery"] == k)) for k in kinds)))
+              if rec else "None needed recovery.",
               n_out), ""]
+    n_meas = sum(1 for r in rows if np.isfinite(nanf(r.get("end_err_cm"))))
+    if n_meas < len(rows):
+        L += ["%d of %d runs have a camera-measured end error; the other %d (failed before or during the route, or not "
+              "found in the video) are listed in runs.csv with the reason in the flags column." % (
+                  n_meas, len(rows), len(rows) - n_meas), ""]
+    L += ["<sub>1.5 x IQR (Tukey's fences): the IQR is the spread of the middle half of the runs (75th minus 25th "
+          "percentile); a run more than 1.5 IQR below the 25th or above the 75th percentile of its condition and route is "
+          "called an outlier. Fewer than 4 runs in a group: none are called.</sub>", ""]
     route_scopes = [s for s in dict.fromkeys(x["scope"] for x in summ) if s.startswith("route=")] or ["all"]
     first = True
     for m, lab in [x for x in METRICS if x[0] in PRIMARY]:
@@ -1115,19 +1379,11 @@ def write_report(path, rows, bumps, summ, comps, charts, notes, args_text=""):
                     p_txt(c["welch_p"]), p_txt(c["welch_p_holm"]), p_txt(c["mwu_p"]), p_txt(c["mwu_p_holm"]),
                     f(c["cohen_d"]), p_txt(c["bf_p"])))
             L.append("")
+            if not shown:       # fine print right under the first table that uses these statistics
+                L += TESTS_FINE_PRINT
             shown = True
-    if shown:
-        L += ["<sub>Permutation p (the primary test): the condition labels are shuffled 4000 times, but only among "
-              "runs of the same robot on the same route, and the difference in means is taken each time; p is the "
-              "share of shuffles with a difference at least as large as the real one. It respects that the same "
-              "robots and routes recur. Welch's t-test: (secondary) the difference in means divided by its standard "
-              "error, without assuming equal spreads; it treats every run as independent. Mann-Whitney U "
-              "(secondary): ranks all runs together and asks whether one condition's runs sit higher; it does not "
-              "need a bell curve. Holm: each p corrected for the six condition pairs compared within one table (one "
-              "measure, one route); tables are not corrected against each other. Cohen's d: the mean difference in "
-              "units of the pooled SD (0.2 small, 0.5 medium, 0.8 large). Brown-Forsythe (Levene on distances from "
-              "the median): tests whether the spreads differ; p is the chance of spreads this different if they "
-              "were equal.</sub>", ""]
+    if not shown:
+        L += ["No test yet: a comparison needs at least two conditions with two or more runs each on the same route.", ""]
     rob = [s for s in dict.fromkeys(x["scope"] for x in summ) if s.startswith("robot=")]
     if rob:
         L += ["Per robot (end position error, mean cm, all routes; secondary):", "",
@@ -1166,13 +1422,19 @@ def write_report(path, rows, bumps, summ, comps, charts, notes, args_text=""):
           "- Order effects: error against run number within a robot (battery, floor wear), since conditions were "
           "shuffled in blocks rather than fully randomised."]
     L += ["", "**Possible inaccuracies in what this relied on**", ""]
-    L += ["- Route sizes for the far point (L 30+30 turning left; square side 30, far point at the second corner) "
-          "are assumed, and the turn side is read from where the camera saw the far point (a far point more than half a route "
-          "length off would be misread); a different real route makes every far error wrong (end error is unaffected).",
+    n_goal = sum(1 for r in rows if r.get("far_intent_from") == "E02 far_goal")
+    n_tab = sum(1 for r in rows if r.get("far_intent_from") == "route table")
+    L += ["- Intended far point: %d run(s) use the far point the robot itself aimed for (E02 far_goal, in its believed "
+          "start's frame), %d use the route table (straight 100; L 30 then 30 sideways; square side 50, far point at the "
+          "second corner), with the turn side read from where the camera saw the far point (a far point more than half "
+          "a route length off would be misread). End error does not depend on either." % (n_goal, n_tab),
           "- The robot's centre is taken as the middle of its blob, with the robot top 4 cm above the floor and no "
           "offset to the axle (--centre-offset-cm 0): a few mm of bias that cancels in return errors but not in far errors.",
-          "- Heading comes from the blob's rectangle, resolved to the side nearest the previous heading: "
-          "accurate to a few degrees at about 23 px per robot, and wrong by 90 or 180 deg if the hint was wrong.",
+          "- Heading comes from the directions of the blob's edges, known only up to a quarter turn; the quarter is taken "
+          "from the robot's own record (believed start heading after the find, believed turn since). In the simulator "
+          "dry run this was within 4 deg of the truth; a believed turn more than 45 deg off would be misread by 90.",
+          "- The camera's picture of the empty scene is the median of 41 pictures spread over each run (the moving robot "
+          "drops out); a robot that stood still for most of its run would vanish into it (flagged: not found).",
           "- Camera calibration error (earlier fit about 0.9 cm RMS) is not separated from the robot's error; start-relative "
           "errors cancel most of it, absolute ones do not.",
           "- Bump believed poses are taken as floor coordinates when the find started from a camera fix (FIND "
@@ -1183,8 +1445,11 @@ def write_report(path, rows, bumps, summ, comps, charts, notes, args_text=""):
           "- Outliers by the 1.5 x IQR fence within condition and route are a chosen rule; with 5-8 runs per cell "
           "the fences are rough. The permutation test respects robot and route; Welch and Mann-Whitney treat runs "
           "as independent although the same robot, battery and learned corrections recur.",
-          "- Log column names (BUMP, FIND, E02) and mark texts are as agreed in the build plan, not yet read from "
-          "real files; the readers accept the aliases in ALIASES."]
+          "- Log column names (BUMP, FIND, E02), the run list and the mark texts were checked end to end against the "
+          "runner's simulator dry run (the firmware lane's model of the robots), not yet against a real session's files; "
+          "the readers accept the aliases in ALIASES.",
+          "- Camera times come from the runner's laptop-to-Pi clock offset (measured on the live picture) plus a fixed "
+          "capture delay; an offset error of a few tenths of a second moves the start/far/end windows by that much."]
     nm = sum(1 for r in rows if "found by motion" in r.get("flags", ""))
     nfl = sum(1 for r in rows if r.get("believed_in_floor_frame") == 0)
     if nm:
@@ -1253,17 +1518,106 @@ def next_lines(rows, n_by, comps):
 
 
 # =============================================================================== main
+def resolve_recording(path):
+    """The overhead camera's folder (the one with frames.csv) from: that folder itself, a camrec.py two-camera session
+    folder (session.json: the camera whose role is overhead, else cam0), or a folder holding one of those."""
+    if not path:
+        return None
+    if os.path.exists(os.path.join(path, "frames.csv")):
+        return path
+    sj = os.path.join(path, "session.json")
+    if os.path.exists(sj):
+        try:
+            cams = json.load(open(sj)).get("cameras") or []
+        except ValueError:
+            cams = []
+        for c in sorted(cams, key=lambda c: (str(c.get("role") or "") != "overhead", c.get("index", 0))):
+            p = os.path.join(path, c.get("folder") or "cam%d" % c.get("index", 0))
+            if os.path.exists(os.path.join(p, "frames.csv")):
+                return p
+    for sub in ("cam0", "recording"):
+        p = resolve_recording(os.path.join(path, sub)) if os.path.isdir(os.path.join(path, sub)) else None
+        if p:
+            return p
+    subs = sorted(d for d in (os.path.join(path, x) for x in os.listdir(path)) if os.path.isdir(d)) \
+        if os.path.isdir(path) else []
+    for d in subs:
+        if os.path.exists(os.path.join(d, "frames.csv")) or os.path.exists(os.path.join(d, "session.json")):
+            return resolve_recording(d)
+    return None
+
+
+def session_inputs(session, recording=None, calib=None):
+    """Everything the analysis needs, from the runner's session folder (logs/e02-<date-time>[-dryrun]/):
+    e02_runs.csv (times on the camera's clock), robot-logs-*/ (BUMP, FIND, E02, clock checks), the floor calibration
+    the runner used (e02_state.json, else cameras/overhead.json in the folder, else the simulator's true camera),
+    the laptop-to-Pi clock offset (e02_state.json setup.pi_offset_s: Pi time = laptop time - pi_offset_s), and the
+    overhead recording (--recording, else <session>/recording or a dry run's sim/recording)."""
+    import glob
+    if not os.path.isdir(session):
+        raise SystemExit("No session folder %s" % session)
+    st = {}
+    sp = os.path.join(session, "e02_state.json")
+    if os.path.exists(sp):
+        with open(sp) as f:
+            st = json.load(f)
+    runs = os.path.join(session, "e02_runs.csv")
+    if not os.path.exists(runs):
+        raise SystemExit("%s has no e02_runs.csv (the runner writes it after every run)." % session)
+    logs = sorted(glob.glob(os.path.join(session, "robot-logs-*")), key=lambda p: (len(p), p))
+    rec = resolve_recording(recording) if recording else None
+    if recording and rec is None:
+        raise SystemExit("No overhead recording (frames.csv + video.avi) in %s" % recording)
+    if rec is None:
+        for c in (os.path.join(session, "recording"), os.path.join(session, "sim", "recording")):
+            rec = resolve_recording(c) if os.path.isdir(c) else None
+            if rec:
+                break
+    if rec is None:
+        raise SystemExit("Where is the overhead recording? Copy the Pi's recording folder (~/recordings/<date-time>_E02) "
+                         "into %s as a folder named recording, or give --recording <folder>." % session)
+    cal = calib
+    if not cal:
+        cands = [st.get("calibration") or "", os.path.join(session, "cameras", "overhead.json"),
+                 os.path.join(session, "sim", "camera_model.json")]
+        if st.get("calibration"):        # a laptop path moved with the folder: same name inside the session
+            cands.append(os.path.join(session, "cameras", os.path.basename(st["calibration"].replace("\\", "/"))))
+        cal = next((c for c in cands if c and os.path.exists(c)), None)
+    if not cal:
+        raise SystemExit("No floor calibration found (e02_state.json says %r). Give --calib <the camera json the runner "
+                         "used, e.g. the studio's cameras/overhead.json>." % st.get("calibration"))
+    po = (st.get("setup") or {}).get("pi_offset_s")
+    vc = dict(offset_s=-float(po), source="e02_state.json setup.pi_offset_s") if po is not None else None
+    return dict(recording=rec, logs=logs, runs=runs, calib=cal, vc=vc, out=os.path.join(session, "analysis"))
+
+
+def check_coverage(video, runlist):
+    """Notes when the run times fall outside the recording (wrong recording, or the clock offset is off)."""
+    if not len(video.t):
+        return ["The recording has no frames."]
+    lo, hi = float(np.nanmin(video.t[:video.n])), float(np.nanmax(video.t[:video.n]))
+    ts = [r["t_start"] for r in runlist if np.isfinite(r["t_start"])]
+    out = [t for t in ts if t < lo or t > hi]
+    if ts and len(out) == len(ts):
+        raise SystemExit("None of the %d runs' times fall inside this recording (%.0f to %.0f s on the camera clock; runs "
+                         "%.0f to %.0f): wrong recording, or the clock offset is wrong." % (len(ts), lo, hi, min(ts), max(ts)))
+    return ["%d of %d runs fall outside the recording's time span and could not be measured." % (len(out), len(ts))] \
+        if out else []
+
+
 def analyse(recording, logs, runs, calib, out, background=None, bump_frame="auto", centre_offset_cm=0.0,
-            routes=None, robot_px=23.0, only=None, quiet=False):
-    """Everything in one call: returns dict(rows, bumps, summary, comparisons, charts)."""
+            routes=None, robot_px=23.0, only=None, quiet=False, vc=None):
+    """Everything in one call: returns dict(rows, bumps, summary, comparisons, charts). vc: the clock mapping used
+    when the recording has no video_clock.json (session_inputs makes one from the runner's Pi clock offset)."""
     import cv2
     cam = load_camera(calib) if calib else None
-    video = Video(recording)
-    vc = video_clock(recording)
+    video = Video(recording, fix_dir=out)
+    vc = video_clock(recording) or vc
     marks = parse_marks(video.events)
     runlist = load_runs(runs, marks, vc)
     if only:
         runlist = [r for r in runlist if r["run_id"] in set(only)]
+    cover_notes = check_coverage(video, runlist)
     lg = Logs(logs if isinstance(logs, (list, tuple)) else ([logs] if logs else []))
     bg = cv2.imread(background, 0) if background else None
     S = Settings(cam, bg, centre_offset_cm, bump_frame, routes, robot_px)
@@ -1302,22 +1656,34 @@ def analyse(recording, logs, runs, calib, out, background=None, bump_frame="auto
     p = bump_chart(bumps, os.path.join(out, "charts", "bump_believed_vs_camera.png"))
     if p:
         charts["bump"] = os.path.join("charts", "bump_believed_vs_camera.png")
-    notes = []
+    notes = list(cover_notes)
+    if getattr(video, "reindexed", None):
+        notes.append("The recording's video had no index (not stopped cleanly); a copy with an index was made "
+                     "(%s) without re-encoding. Frames past the last complete one are missing." % video.reindexed)
+    nmk = sum(1 for r in runlist if r.get("time_source"))
+    if nmk:
+        notes.append("%d run(s) took some of their times from the video marks (the run list had none); a mark is the "
+                     "moment the laptop sent it, up to a few tenths of a second off the robot's own moment." % nmk)
     if cam is None:
         notes.append("No camera calibration was given: only the picture-only return-to-start measure is valid.")
     if not vc:
-        notes.append("No video_clock.json: robot times were not mapped to the camera clock (bump delays from the camera are blank).")
+        notes.append("No laptop-to-camera clock offset (no video_clock.json, no pi_offset_s): robot times were not mapped "
+                     "to the camera clock, so bumps were matched by order, not time.")
     write_report(os.path.join(out, "report.md"), rows, bumps, summ, comps, charts, notes)
     return dict(rows=rows, bumps=bumps, summary=summ, comparisons=comps, charts=charts)
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--recording", required=True, help="overhead camera folder (video.avi, frames.csv, events.csv)")
+    ap.add_argument("--session", help="the runner's session folder logs/e02-<date-time>: reads e02_runs.csv, "
+                                      "robot-logs-*, the calibration and clock offset from it; --recording defaults to "
+                                      "<session>/recording, --out to <session>/analysis")
+    ap.add_argument("--recording", help="overhead camera folder (video.avi, frames.csv, events.csv), or the Pi's "
+                                        "two-camera recording folder (the overhead one is picked)")
     ap.add_argument("--logs", nargs="*", default=[], help="console session folder(s) with bump.csv, find.csv, e02.csv")
     ap.add_argument("--runs", help="the runner's run list (csv)")
     ap.add_argument("--calib", help="camera model json or floor_calibration.json")
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out")
     ap.add_argument("--background", help="picture of the empty board (optional)")
     ap.add_argument("--bump-frame", choices=("auto", "own", "floor"), default="auto",
                     help="frame of the BUMP believed poses: auto = floor when the find started from a camera fix "
@@ -1328,8 +1694,22 @@ def main(argv=None):
     ap.add_argument("--only", nargs="*", help="run ids to analyse")
     a = ap.parse_args(argv)
     routes = json.load(open(a.routes_json)) if a.routes_json else None
+    vc = None
+    if a.session:
+        si = session_inputs(a.session, a.recording, a.calib)
+        a.recording, a.calib = si["recording"], si["calib"]
+        a.logs = a.logs or si["logs"]
+        a.runs = a.runs or si["runs"]
+        a.out = a.out or si["out"]
+        vc = si["vc"]
+        print("session %s\n  recording %s\n  calibration %s\n  robot logs %s\n  writing to %s" % (
+            a.session, a.recording, a.calib, ", ".join(os.path.basename(p) for p in a.logs) or "none", a.out))
+    else:
+        a.recording = resolve_recording(a.recording) or a.recording
+    if not a.recording or not a.out:
+        ap.error("give --session <logs/e02-...>, or --recording and --out")
     res = analyse(a.recording, a.logs, a.runs, a.calib, a.out, a.background, a.bump_frame, a.centre_offset_cm, routes,
-                  a.robot_px, a.only)
+                  a.robot_px, a.only, vc=vc)
     print("wrote %s" % os.path.join(a.out, "report.md"))
     return res
 

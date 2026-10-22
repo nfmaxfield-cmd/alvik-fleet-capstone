@@ -58,3 +58,20 @@ next steps are discussed. Claude gives the copy and upload steps first, before a
 1. PI tab: **Ctrl + C** stops the recording.
 2. Copy the recording and the laptop's `logs\e02-...` folder to a GitHub release (steps as for e02-setup-oct21);
    if the video is over 2 GB, cut it first with `ffmpeg -ss <seconds> -i video.avi -c copy part.avi`.
+
+## After the session: the statistics
+Where the files must be: the runner's session folder `logs\e02-<date-time>` (made by the runner, untouched), and
+inside it a folder named **recording** holding the Pi's whole recording folder's contents (from
+`~/recordings/<date-time>_E02`: `cam0\video.avi`, `cam0\frames.csv`, `cam0\events.csv`, `session.json`).
+
+LAPTOP tab (or Claude, on the downloaded copy), with your session folder's name in place of `e02-20261022-093000`:
+```
+python tools\experiment\e02_analysis.py --session logs\e02-20261022-093000
+```
+You should see one line per run (`run 7ABD-4 Left U square end 3.21 cm ...`), then `wrote ...\analysis\report.md`.
+It takes about 1 minute per 10 runs. If the recording is somewhere else, add `--recording <that folder>`.
+
+It writes `logs\e02-<date-time>\analysis\`: **report.md** (premise, data, conclusion, what's next, the two sweeps),
+**charts\** (each condition's spread), **summary.csv** (mean, SD, 95% ranges per condition, route and robot),
+comparisons.csv (the tests), runs.csv (every run's measurements and notes), bumps.csv, tracks\ (the robot's
+position in every frame of each run). Run it again any time; it overwrites the analysis folder.

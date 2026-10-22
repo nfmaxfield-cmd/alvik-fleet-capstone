@@ -201,6 +201,7 @@ class SimCamera:
         self.fps = args.fps
         self.pi_offset = args.pi_offset
         self.latest = None          # (jpeg bytes, frame number, t_wall)
+        self.rec = None             # SimRecorder when recording (--record)
         self.cond = threading.Condition()
         self.n = 0
 
@@ -291,6 +292,8 @@ class SimCamera:
                 self.n += 1
                 self.latest = (jpg.tobytes(), self.n, tc + 0.04 + self.pi_offset)
                 self.cond.notify_all()
+            if self.rec is not None:
+                self.rec.frame(g, tc + 0.04 + self.pi_offset)
 
     def handler(self):
         cam = self
@@ -324,7 +327,61 @@ class SimCamera:
         return H
 
 
-def notes_loop(world, path, port):
+class SimRecorder:
+    """Optional (--record, or E02_SIM_RECORD=1 in the environment, so e02.py --dry-run needs no change): the
+    overhead picture saved as tools/pi/camrec.py saves a two-camera session: <folder>/session.json and
+    <folder>/cam0/ with video.avi (MJPG), frames.csv (frame, t_wall, t_mono, cam_ms; row i = frame i),
+    events.csv (t_wall, frame, text: every note heard on the notes port) and meta.json. t_wall is the simulated
+    Pi's clock (laptop + --pi-offset, + the 40 ms capture delay for frames), as on /live."""
+
+    def __init__(self, folder, size, fps, pi_offset):
+        self.folder = os.path.join(folder, "cam0")
+        os.makedirs(self.folder, exist_ok=True)
+        self.lock = threading.Lock()
+        self.n = 0
+        self.t0 = time.monotonic()
+        self.pi_offset = pi_offset
+        self.vw = cv2.VideoWriter(os.path.join(self.folder, "video.avi"), cv2.VideoWriter_fourcc(*"MJPG"), fps, size)
+        try:
+            self.vw.set(cv2.VIDEOWRITER_PROP_QUALITY, 80)
+        except Exception:
+            pass
+        self.ff = open(os.path.join(self.folder, "frames.csv"), "w", newline="")
+        self.fw = csv.writer(self.ff)
+        self.fw.writerow(["frame", "t_wall", "t_mono", "cam_ms"])
+        self.ef = open(os.path.join(self.folder, "events.csv"), "w", newline="")
+        self.ew = csv.writer(self.ef)
+        self.ew.writerow(["t_wall", "frame", "text"])
+        meta = dict(device="simulator", width=size[0], height=size[1], fps_requested=fps, host="e02_sim",
+                    role="overhead", camera_index=0, note="t_wall is the simulated Pi's clock")
+        with open(os.path.join(self.folder, "meta.json"), "w") as f:
+            json.dump(meta, f, indent=2)
+        with open(os.path.join(folder, "session.json"), "w") as f:
+            json.dump(dict(session=os.path.basename(folder), label="E02-sim", host="e02_sim",
+                           cameras=[dict(index=0, folder="cam0", role="overhead", width=size[0], height=size[1])]),
+                      f, indent=2)
+
+    def frame(self, gray, t_wall):
+        with self.lock:
+            self.vw.write(cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR))
+            self.fw.writerow([self.n, "%.4f" % t_wall, "%.4f" % (time.monotonic() - self.t0), ""])
+            self.n += 1
+            if self.n % 50 == 0:
+                self.ff.flush()
+
+    def mark(self, text, t_laptop):
+        with self.lock:
+            self.ew.writerow(["%.3f" % (t_laptop + self.pi_offset), self.n, text])
+            self.ef.flush()
+
+    def close(self):
+        with self.lock:
+            self.vw.release()
+            self.ff.close()
+            self.ef.close()
+
+
+def notes_loop(world, path, port, rec=None):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind(("127.0.0.1", port))
     s.settimeout(0.3)
@@ -336,8 +393,12 @@ def notes_loop(world, path, port):
                 data, addr = s.recvfrom(1024)
             except socket.timeout:
                 continue
-            w.writerow(["%.3f" % time.time(), data.decode("utf-8", "replace")])
+            t = time.time()
+            text = data.decode("utf-8", "replace")
+            w.writerow(["%.3f" % t, text])
             f.flush()
+            if rec is not None:
+                rec.mark(text, t)
             s.sendto(b"ok " + data[:200], addr)
     s.close()
 
@@ -366,12 +427,20 @@ def main(argv=None):
     ap.add_argument("--jpeg", type=int, default=80)
     ap.add_argument("--miss-bump", type=float, default=0.03, help="chance a bump is missed altogether (the find fails)")
     ap.add_argument("--miss-jolt", type=float, default=0.10, help="chance a bump's jolt is missed (found by the stall)")
+    ap.add_argument("--record", action="store_true",
+                    help="also save the overhead picture as a camrec.py recording in <out>/recording (cam0/video.avi, "
+                         "frames.csv, events.csv): what e02_analysis.py reads. Also on with E02_SIM_RECORD=1")
     a = ap.parse_args(argv)
+    a.record = a.record or os.environ.get("E02_SIM_RECORD", "") not in ("", "0")
     os.makedirs(a.out, exist_ok=True)
     world = World(a)
     world.start()
     cam = SimCamera(world, a)
     cam.true_camera_model(os.path.join(a.out, "camera_model.json"))
+    rec = None
+    if a.record:
+        rec = SimRecorder(os.path.join(a.out, "recording"), (cam.geom.W, cam.geom.H), a.fps, a.pi_offset)
+        cam.rec = rec
     with open(os.path.join(a.out, "sim_info.json"), "w") as f:
         json.dump(dict(note="the self-calibration should find gyro_scale ~ g_true, gyro_drift_dps ~ gyro_drift_dps, "
                             "wheel_scale ~ w_true (wheel radius only: the wheels' slip makes the real number a little "
@@ -385,7 +454,8 @@ def main(argv=None):
                   f, indent=1)
     threads = [threading.Thread(target=cam.loop, daemon=True),
                threading.Thread(target=world.truth_loop, args=(os.path.join(a.out, "truth.csv"),), daemon=True),
-               threading.Thread(target=notes_loop, args=(world, os.path.join(a.out, "notes.csv"), NOTES_PORT), daemon=True)]
+               threading.Thread(target=notes_loop, args=(world, os.path.join(a.out, "notes.csv"), NOTES_PORT, rec),
+                                daemon=True)]
     servers = []
     for port in (a.port, a.port + 1):
         srv = ThreadingHTTPServer(("127.0.0.1", port), cam.handler())
@@ -406,6 +476,8 @@ def main(argv=None):
     for s in servers:
         s.shutdown()
     time.sleep(0.5)
+    if rec is not None:
+        rec.close()
     return 0
 
 

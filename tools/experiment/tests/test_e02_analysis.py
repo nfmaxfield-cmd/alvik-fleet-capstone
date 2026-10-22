@@ -384,3 +384,36 @@ def test_command_line_runs_one_run_and_writes_the_report(session, tmp_path):
     assert os.path.exists(os.path.join(out, "report.md"))
     rows = list(csv.DictReader(open(os.path.join(out, "runs.csv"))))
     assert [r["run_id"] for r in rows] == ["2"]
+
+
+# ------------------------------------------------------------------ the runner's real files (2026-10-22 pipeline check)
+def test_the_runners_own_marks_are_matched_to_its_run_list(tmp_path):
+    ev = [dict(t_wall="100", text="e02 1/33 Left U r2 Left find start"), dict(t_wall="128", text="e02 1/33 Left U r2 Left find end done"),
+          dict(t_wall="129", text="e02 1/33 Left U r2 route start"), dict(t_wall="169", text="e02 1/33 Left U r2 route end done"),
+          dict(t_wall="200", text="e02 7 Right find start"), dict(t_wall="230", text="e02 2/33 Right C r1 route start")]
+    m = ea.parse_marks(ev)
+    assert m["tag:1/Left"]["t_find"] == 100 and m["tag:1/Left"]["t_start"] == 129 and m["tag:1/Left"]["t_end"] == 169
+    assert m["order:7"]["t_find"] == 200
+    p = tmp_path / "runs.csv"
+    p.write_text("run_id,robot,condition,route,order,find_run,t_find,t_start,t_end\n7ABD-4,Left,U,2,1,7ABD-3,,,\n,Right,C,1,2,,,,\n")
+    runs = ea.load_runs(str(p), m)
+    assert runs[0]["t_start"] == 129 and runs[0]["find_run"] == "7ABD-3" and runs[0]["time_source"] == "video marks"
+    assert runs[1]["run_id"] == "2"            # a run the robot never started (no e02 run id): the runner's order
+
+
+def test_quarter_median_does_not_mix_sides_and_snap_takes_the_records_quarter():
+    a = [10.0, 11.0, 100.5, 9.5, -79.0, 10.5]                         # one body, frames resolved to different sides
+    q = ea.quarter_median(a)
+    assert abs(ea.wrap180(q - 10.5) % 90) < 1.0 or abs(ea.wrap180(q - 10.5) % 90 - 90) < 1.0
+    assert ea.snap90(q, 95.0) == pytest.approx(100.5, abs=1.0) and ea.snap90(q, -170.0) == pytest.approx(-169.5, abs=1.0)
+
+
+def test_the_overhead_camera_is_found_in_a_two_camera_recording(tmp_path):
+    for i, role in ((0, "side"), (1, "overhead")):
+        d = tmp_path / "rec" / ("cam%d" % i)
+        d.mkdir(parents=True)
+        (d / "frames.csv").write_text("frame,t_wall\n")
+    (tmp_path / "rec" / "session.json").write_text('{"cameras": [{"index": 0, "folder": "cam0", "role": "side"}, '
+                                                    '{"index": 1, "folder": "cam1", "role": "overhead"}]}')
+    assert ea.resolve_recording(str(tmp_path / "rec")).endswith("cam1")
+    assert ea.resolve_recording(str(tmp_path)).endswith("cam1")       # the copied folder one level up
