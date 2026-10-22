@@ -1335,6 +1335,7 @@ class Runner:
         if not st.get("board"):
             self.find_boards(img)
         self.board = PL.Board.from_dict(st["board"])
+        self.tracker_area()
         sx, sy, sh = self.board.nominal_start()
         self.say("Route start spot: (%.1f, %.1f) cm, near the blocked corner" % (sx, sy))
         for r in PL.ROUTES:
@@ -1368,6 +1369,16 @@ class Runner:
         ok = ans.startswith("y")
         self.st["setup"]["calibration_confirmed"] = dict(file=cal, answer=ans)
         return ok
+
+    def tracker_area(self):
+        """The tracker's board area and walls (the board faces, robot-centre side: a centre is half a body in from
+        the face), from the board found in the picture."""
+        if self.tracker is None or self.board is None:
+            return
+        b = self.board
+        self.tracker.set_area((b.x0, b.y0, b.x1, b.y1),
+                              walls=[("y", b.xboard_cm + b.uy * PL.ROBOT_HALF_CM),
+                                     ("x", b.yboard_cm + b.ux * PL.ROBOT_HALF_CM)])
 
     def make_tracker(self):
         if self.tracker is None:
@@ -2408,6 +2419,7 @@ class Runner:
                 else:
                     self.board.yboard_cm = med
         self.st["board"] = self.board.to_dict()
+        self.tracker_area()
         self.st["setup"]["find_check"] = dict(robots=res, lines=summary)
         self.st.save()
         self.correct_map(summary)

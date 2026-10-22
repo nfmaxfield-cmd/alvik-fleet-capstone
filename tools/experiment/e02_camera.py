@@ -315,6 +315,7 @@ class MotionTracker:
     MOTION_THR = 9.0            # grey levels of frame-to-frame change that count as motion
     UNKNOWN_EXTRA = 14.0        # extra threshold on floor that was filled in, not seen
     ABSORB_S = 25.0             # something new standing still this long, where no robot is, becomes floor
+    WALL_CM = 3.0               # a robot centre may be this far past its wall limit (the picture's board lines are 1-2 cm short)
     COVER_SCALE = 1.35          # the followed robot's floor is never learned within this many robot widths of it
     COVER_MOVING = 1.25          # ... and while it moves
     GATE_GROW_S = 0.6           # a lost robot's search circle grows with time for at most this long
@@ -364,12 +365,61 @@ class MotionTracker:
     def _floor(self, u, v):
         return self.cam.to_floor(u, v, self.z)
 
+    def _area_lims(self):
+        """(xlo, xhi, ylo, yhi) floor cm a robot's centre can be in: the board plus margin_cm at open edges, and
+        only up to WALL_CM past a wall's face (set_area)."""
+        x0, y0, x1, y1 = self.board_rect
+        m = self.margin
+        lims = [min(x0, x1) - m, max(x0, x1) + m, min(y0, y1) - m, max(y0, y1) + m]
+        for axis, v in getattr(self, "walls", None) or []:
+            i = 0 if axis == "x" else 2
+            if abs(v - lims[i]) < abs(v - lims[i + 1]):
+                lims[i] = max(lims[i], v - self.WALL_CM)
+            else:
+                lims[i + 1] = min(lims[i + 1], v + self.WALL_CM)
+        return lims
+
+    def set_area(self, board_rect, walls=()):
+        """The board (x0, y0, x1, y1) cm and its walls [("x", x of the face) | ("y", y of the face)] (2026-10-22:
+        the live runner's tracker had no board area at all, so it followed Nick's hands 47 cm off the board; and a
+        robot pressed against a board joined the board's edge in one outline). Pixels beyond a wall's face, or far
+        off the board, are left out before outlines are made."""
+        with self.lock:
+            self.board_rect = tuple(board_rect)
+            self.walls = list(walls)
+            self.cut = None
+
+    def _cut_mask(self, shape):
+        if self.board_rect is None:
+            return None
+        if getattr(self, "cut", None) is None or self.cut.shape != shape:
+            xlo, xhi, ylo, yhi = self._area_lims()
+            # the outline of a robot's top must fit: half a body more than its centre's limits
+            hb = 0.5 * ROBOT_CM
+            pts = []
+            n = 12
+            for k in range(n):                               # sample the edges (the lens bends straight lines)
+                pts.append((xlo - hb + (xhi - xlo + 2 * hb) * k / n, ylo - hb))
+            for k in range(n):
+                pts.append((xhi + hb, ylo - hb + (yhi - ylo + 2 * hb) * k / n))
+            for k in range(n):
+                pts.append((xhi + hb - (xhi - xlo + 2 * hb) * k / n, yhi + hb))
+            for k in range(n):
+                pts.append((xlo - hb, yhi + hb - (yhi - ylo + 2 * hb) * k / n))
+            px = [self._px(x, y) for x, y in pts]
+            m = np.zeros(shape, np.uint8)
+            if all(np.isfinite(u) and np.isfinite(v) for u, v in px):
+                cv2.fillPoly(m, [np.array([[int(round(u)), int(round(v))] for u, v in px], np.int32)], 255)
+            else:
+                m[:] = 255
+            self.cut = m
+        return self.cut
+
     def on_area(self, x, y):
         if self.board_rect is None:
             return True
-        x0, y0, x1, y1 = self.board_rect
-        m = self.margin
-        return min(x0, x1) - m <= x <= max(x0, x1) + m and min(y0, y1) - m <= y <= max(y0, y1) + m
+        xlo, xhi, ylo, yhi = self._area_lims()
+        return xlo <= x <= xhi and ylo <= y <= yhi
 
     def _disk_mask(self, shape, pts, r_scale):
         m = np.zeros(shape, np.uint8)
@@ -416,6 +466,9 @@ class MotionTracker:
         if g is None or self.bg is None:
             return []
         _, mask = self._diff(g)
+        cut = self._cut_mask(mask.shape) if getattr(self, "walls", None) else None
+        if cut is not None:
+            mask &= cut
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.k_open)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self.k_close)
         n, lab, stats, cents = cv2.connectedComponentsWithStats(mask, connectivity=8)

@@ -30,7 +30,9 @@ logic more generic for other equipment and sensors.
 - [x] 1-3: tracker: search circle grows for at most 0.6 s (was 1 s) at 30 cm/s (was 40); another robot's zone
       1.1 robot widths (was 0.8); pieces within 0.8 robot widths merged; a held robot's floor never learned within
       1.35 robot widths (1.25 while it moves); a held robot whose spot looks unchanged counts as seen; each leg tells the tracker where the robot can be (turn: 7 cm; drive d: d + 8 cm)
-- [ ] Left by the x-board (footage 10:40:30-10:41) is still unseen most of the time (replay of 10:39:58-10:40:55: seen 60% of frames, was 20%): its outline joins the board's
+- [x] Live tracker had no board area at all (it followed hands at x = -47 cm): the runner now gives it the board and
+      its walls; pixels beyond a wall are cut before outlines are made, so a robot against a board is not joined to
+      the board's edge (replay of Left 10:39:58-10:40:55: seen 75% of frames, was 20% this morning): its outline joins the board's
       edge and fails the shape check. Next: a shape check that allows for a board beside it.
 - [x] 9 explained: the firmware's own finds agree (bump points 121.5 / 124.1 cm on the y-board); the "touched at
       74.8 cm" came from camera positions at the bump moments, while the camera followed the wrong robot (1)

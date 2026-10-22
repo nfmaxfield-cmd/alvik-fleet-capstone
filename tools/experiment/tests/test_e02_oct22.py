@@ -95,3 +95,17 @@ def test_finder_sweep_points_at_the_lost_robot():
     p = r.sweep_for("Left")
     assert p is not None
     assert math.hypot(p[0] - lost_at[0], p[1] - lost_at[1]) < 3.0, p
+
+
+def test_tracker_area_stops_at_the_walls():
+    """The live tracker now has the board area (it had none: it followed hands 47 cm off the board) and stops a
+    robot's centre a little past its wall limit."""
+    tr = CAM.MotionTracker.__new__(CAM.MotionTracker)
+    import threading
+    tr.lock = threading.Lock()
+    tr.margin = 8.0
+    tr.set_area((0.0, 0.0, 122.15, 121.9), walls=[("y", 114.66), ("x", 118.68)])
+    assert tr.on_area(60.0, 60.0)
+    assert tr.on_area(60.0, -5.0)                      # an open edge: margin allowed
+    assert not tr.on_area(60.0, 114.66 + tr.WALL_CM + 0.5)
+    assert not tr.on_area(-47.0, 112.0)                # where the hands were followed, 10:57
