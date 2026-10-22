@@ -269,6 +269,15 @@ class Board:
         lo = min(self.x0, self.x1) if a == "x" else min(self.y0, self.y1)
         inward = 1.0 if abs(v - lo) < 1e-6 else -1.0
         q = [v + inward * to_cm, y] if a == "x" else [x, v + inward * to_cm]
+        # ... and from the other open edge too (the corner where the two open edges meet; review 2026-10-22)
+        for a2, v2 in self.open_edges():
+            if a2 == a:
+                continue
+            k = 0 if a2 == "x" else 1
+            lo2 = min(self.x0, self.x1) if a2 == "x" else min(self.y0, self.y1)
+            in2 = 1.0 if abs(v2 - lo2) < 1e-6 else -1.0
+            if (q[k] - v2) * in2 < to_cm:
+                q[k] = v2 + in2 * to_cm
         # keep clear of the board lines (the other coordinate, along the edge)
         if a == "x":
             if abs(q[1] - self.xboard_cm) < board_room_cm:

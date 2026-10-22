@@ -315,6 +315,7 @@ class MotionTracker:
     MOTION_THR = 9.0            # grey levels of frame-to-frame change that count as motion
     UNKNOWN_EXTRA = 14.0        # extra threshold on floor that was filled in, not seen
     ABSORB_S = 25.0             # something new standing still this long, where no robot is, becomes floor
+    HOLD_TRUST_S = 4.0          # a held robot counts as seen at its spot for at most this long without its outline
     WALL_CM = 3.0               # a robot centre may be this far past its wall limit (the picture's board lines are 1-2 cm short)
     COVER_SCALE = 1.35          # the followed robot's floor is never learned within this many robot widths of it
     COVER_MOVING = 1.25          # ... and while it moves
@@ -357,6 +358,8 @@ class MotionTracker:
         self.hold_ref = None                    # (mask, picture there) when the robot was told to stand still
         self.disturbed = False                  # something moved over a robot that should stand still
         self.moved_by_hand = 0                  # times a held robot was found moved (it is then "lost")
+        self.hand_moved = set()                 # robots found moved while held (the runner clears one when it is back)
+        self.last_real = 0.0                    # when the followed robot's outline was last really seen
 
     # --- geometry --------------------------------------------------------------------------------
     def _px(self, x, y):
@@ -545,8 +548,13 @@ class MotionTracker:
                     score = d - 3.0 * c["moving"]
                     if best is None or score < best[0]:
                         best = (score, c["x"], c["y"])
+                if best is not None:
+                    self.last_real = t
                 if best is None and self.hold_ref is not None and not self.disturbed and \
-                        self.hint is not None and self.hint[3] == float("inf"):
+                        self.hint is not None and self.hint[3] == float("inf") and \
+                        t - self.last_real <= self.HOLD_TRUST_S:
+                    # (only for HOLD_TRUST_S after its outline was last really seen: a hold set on a wrong spot
+                    # must go stale so the runner finds the robot again; review 2026-10-22)
                     # held still and the picture where it stands has not changed since it stopped: it is still
                     # there, even when its outline against the floor memory is not robot-shaped just now (by a
                     # board's edge, or with a ghost of itself in the floor: 2026-10-22 footage 10:40:11-16)
@@ -595,6 +603,7 @@ class MotionTracker:
             self.disturbed = 0
         if self.disturbed >= self.STABLE_FRAMES:
             self.moved_by_hand += 1
+            self.hand_moved.add(self.active)
             self.protect.pop(self.active, None)
             self.pos, self.hint, self.hold_ref = None, None, None
             self.disturbed = 0
@@ -700,6 +709,7 @@ class MotionTracker:
         with self.lock:
             self.active = robot
             self.pos = (time.time() if t is None else t, x, y)
+            self.last_real = self.pos[0]
             self.protect[robot] = (x, y)
             self.last_seen = self.pos[0]
             self.misses = 0

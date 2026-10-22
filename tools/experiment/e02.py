@@ -564,6 +564,8 @@ class Runner:
         if not m or p is None or h[0] is None or self.board is None:
             return None
         front = float(m.group(1))
+        if front <= 0:
+            return None                           # no reading (nothing in range)
         hd = ST.wrap180(h[0] + val) if kind == "turn" else h[0]      # heads[] holds the heading before the leg
         ahead = self.ahead_cm(robot, p, hd)
         row = [round(time.time(), 2), robot, kind, round(val, 1), round(p[0], 1), round(p[1], 1), round(hd, 1),
@@ -1066,6 +1068,12 @@ class Runner:
     def retry_find(self, robot, park=True):
         """One try at getting a robot back with nobody's hands: a fresh picture of the floor, a turn on its spot,
         which way it faces, then parking. Returns (ok, words)."""
+        last = self.tracker.where() if (self.tracker is not None and self.tracker.active == robot) else None
+        q = (last[1], last[2]) if last else tuple((self.st["positions"].get(robot) or [None, None])[:2])
+        if q[0] is not None and (not self.board.on_board(q[0], q[1]) or
+                                 self.board.edge_room(q[0], q[1])[0] < EDGE_TURN_CM + 3):
+            # review 2026-10-22: a turn on the spot this near an open edge could put a wheel over it
+            return False, "atedge"
         time.sleep(1.0)
         old_pos = self.st["positions"].pop(robot, None)
         self.disagree[robot] = 0
@@ -1078,6 +1086,8 @@ class Runner:
             return False, "noturn"
         self.st["positions"][robot] = [p[0], p[1], None]
         self.say("  Found %s at (%.1f, %.1f) cm." % (robot, p[0], p[1]))
+        if self.tracker is not None:
+            self.tracker.hand_moved.discard(robot)
         if not park:
             return True, ""
         if not self.board.on_board(p[0], p[1]) or self.board.edge_room(p[0], p[1])[0] < EDGE_TURN_CM + 3:
@@ -1118,6 +1128,8 @@ class Runner:
                 if state not in ("done", "dup") or not m:
                     continue
                 front = float(m.group(1))
+                if front <= 0:
+                    continue                      # no reading (nothing in range)
                 saved = self.st["positions"].pop(lost, None)
                 ahead = self.ahead_cm(finder, q[:2], heading)
                 if saved is not None:
@@ -1147,8 +1159,8 @@ class Runner:
         q = self.st["positions"].get(robot)
         if not q or self.board.edge_room(q[0], q[1])[0] < RESCUE_EDGE_CM:
             return None
-        if self.tracker is not None and self.tracker.moved_by_hand and self.tracker.active == robot:
-            return None
+        if self.tracker is not None and robot in self.tracker.hand_moved:
+            return None                    # lifted or pushed while held: its own pose is wrong
         self.say("  %s finds itself against the boards (the camera can't see it) ..." % robot)
         for c in self.board_params():
             self.send(robot, c)
@@ -1172,7 +1184,8 @@ class Runner:
         hands, i.e. just finding it again, worked nearly every time); then exact steps for Nick, then the runner
         finds it again by a turn on its spot and parks it itself. Returns True when it is back (and parked, unless
         park=False: then only found)."""
-        if "off the board" not in problem:
+        if park and "off the board" not in problem:
+            # (park=False: the caller goes on from where the robot stands, e.g. jammed on a brick: Nick moves it)
             for k in range(AUTO_TRIES):
                 self.say("  %s: %s. Trying again on its own (%d of %d) ..." % (robot, problem, k + 1, AUTO_TRIES))
                 self.mark("e02 auto-retry %s %d: %s" % (robot, k + 1, problem))

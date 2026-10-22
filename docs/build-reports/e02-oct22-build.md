@@ -74,3 +74,18 @@ going until the usage runs out, then make the logic more generic. Plan and check
   halts robots 4.5 cm nearer than assumed, so a steady offset of that size is expected in `front_checks.csv`.
 - The replay's "seen 75%" counts pictures where the tracker reported a position, not whether that position was
   right. It was checked by eye against the strip of frames for 10:40:00-10:40:20 only.
+
+## Appendix: independent review (a separate reviewer, 13:10) and what was done
+1. A retry turned a robot on its spot before checking whether it sat at an open edge: fixed (checked first, then
+   Nick).
+2. The brick demo's back-off took "found again" as "free to go on" with the robot still on the brick: retries now
+   only run when the robot is to be parked; otherwise Nick, as before.
+3. The rescue find's "moved by hand" check never applied (and counted for the whole session): now per robot, and
+   cleared once it is found again.
+4. A front reading of 0 (nothing in range) counted as a hit in the sweep and the front check: ignored now.
+5. The held-robot fallback could keep a wrong spot fresh forever: now only for 4 s after the robot's outline was
+   last really seen.
+6. A robot that ends up 27+ cm from where the tracker last saw it is only found again by a turn on its spot (the
+   capped search circle): intended, noted.
+7. The move-in point near the corner of the two open edges: now clear of both.
+

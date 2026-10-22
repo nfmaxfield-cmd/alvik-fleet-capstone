@@ -125,3 +125,12 @@ def test_no_method_is_defined_twice():
             names = [f.name for f in cls.body if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))]
             dup = sorted({n for n in names if names.count(n) > 1})
             assert not dup, (fn, cls.name, dup)
+
+
+def test_move_in_point_keeps_clear_of_both_open_edges():
+    """Review 2026-10-22: in the corner where the two open edges meet, the point was moved in from one only."""
+    b = _board()
+    q = b.escape_point(5.0, 5.0)
+    assert q is not None
+    for a, v in b.open_edges():
+        assert abs((q[0] if a == "x" else q[1]) - v) >= 27.9, (q, a, v)
