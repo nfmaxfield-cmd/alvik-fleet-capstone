@@ -889,6 +889,7 @@ class Runner:
                 return True, ""
             if steer.heading is not None:
                 self.heads[robot] = [steer.heading, steer.measured]     # the front-sensor check reads it
+            self.front_bad.pop(robot, None)
             p0, p1, res = self.leg(robot, cmd, run=run)
             fb = self.front_bad.pop(robot, None)
             if fb and p1 is not None and not res.startswith("camera and wheels"):
@@ -926,6 +927,7 @@ class Runner:
                 if blocked >= 3:
                     self.heads[robot] = [steer.heading, steer.measured]
                     return False, "something keeps blocking its way"
+                self.heads[robot] = [steer.heading, False]   # the heading guess may be what was wrong
                 pb0, pb1, _ = self.leg(robot, ("go", -BACK_OFF_CM), run=run)
                 if pb1 is not None:
                     steer.after(("go", -BACK_OFF_CM), pb0 if pb0 is not None else p1, pb1)
@@ -933,6 +935,7 @@ class Runner:
                 ang = self.away_turn(p1, steer.heading)
                 self.leg(robot, ("turn", ang))
                 steer.after(("turn", ang), p1, p1)
+                self.front_bad.pop(robot, None)
                 continue
             if ST.leg_stuck(cmd, p0, p1):
                 stuck += 1
@@ -1340,22 +1343,30 @@ class Runner:
         camera fix or find, in the board's frame. None if it has not reported one."""
         r = self.listener.latest("LEG", robot, since)
         f = self.listener.latest("FIND", robot, since)
-        if f and (not r or f[0] >= r[0]):       # a find after its last leg: the find's end pose (exact)
+        if f and (not r or f[0] >= r[0]):
+            # a find after its last leg: a finished find's end pose is exact; a failed one's is not to be trusted
+            # (it may have started from no pose at all; review 2026-10-22: a dry run kept Left at (99, 162))
+            if (f[1].get("result") or "") != "ok":
+                return None
             x, y, th = num(f[1].get("after_x")), num(f[1].get("after_y")), num(f[1].get("after_th"))
-            if None not in (x, y, th) and (x, y) != (0.0, 0.0):
-                return (x, y, th)
-        if not r:
+        elif r:
+            x, y, th = num(r[1].get("x_cm")), num(r[1].get("y_cm")), num(r[1].get("th_deg"))
+        else:
             return None
-        x, y, th = num(r[1].get("x_cm")), num(r[1].get("y_cm")), num(r[1].get("th_deg"))
-        return None if None in (x, y, th) else (x, y, th)
+        if None in (x, y, th) or not self.board.on_board(x, y, margin=-5.0):
+            return None                     # off the board: not a pose it can have (unknown pose, power cycle)
+        return (x, y, th)
 
-    def own_path(self, robot, n=BLIND_RETRACE_LEGS):
-        """Where the robot's own pose was at the end of each of its last n finished drives (newest last)."""
+    def own_path(self, robot, until, n=BLIND_RETRACE_LEGS):
+        """Where the robot's own pose was at the end of each of its last n finished drives before `until` (the start
+        of the blind drive: not the blind pieces themselves) and after its last find (newest last)."""
         out = []
+        f = self.listener.latest("FIND", robot)
+        after = f[0] if f else 0.0
         with self.listener.cv:
             for t, nm, rec in self.listener.recs["LEG"]:
                 st_ = rec.get("state") or rec.get("result")
-                if nm == robot and st_ == "done" and rec.get("kind") == "go":
+                if nm == robot and st_ == "done" and rec.get("kind") == "go" and after <= t < until:
                     x, y = num(rec.get("x_cm")), num(rec.get("y_cm"))
                     if x is not None and y is not None:
                         out.append((x, y))
@@ -1369,15 +1380,17 @@ class Runner:
         if not self.begin_moves(robot, "driving blind"):
             return False, "could not start its moves"
         for wp in waypoints:
+            if not self.board.on_board(wp[0], wp[1]) or self.board.edge_room(wp[0], wp[1])[0] < BLIND_EDGE_CM:
+                return False, "the way out runs near an open edge"
+            reached = False
             for _ in range(20):
                 pose = self.own_pose(robot)
                 if pose is None:
                     return False, "it has not said where it thinks it is"
                 d = math.hypot(wp[0] - pose[0], wp[1] - pose[1])
                 if d < 3.0:
+                    reached = True
                     break
-                if not self.board.on_board(wp[0], wp[1], margin=BLIND_EDGE_CM):
-                    return False, "the way out runs near an open edge"
                 turn = ST.wrap180(math.degrees(math.atan2(wp[1] - pose[1], wp[0] - pose[0])) - pose[2])
                 if abs(turn) > ST.MIN_TURN_DEG:
                     state, info = self.send_leg(robot, "turn %.1f" % turn, abs(turn) / TURN_DPS_GUESS * 2.5 + 6.0)
@@ -1397,6 +1410,8 @@ class Runner:
                             abs(float(m.group(1)) - off - ahead[0]) > FRONT_STEER_FACTOR * tol:
                         return False, "its front sensor reads %.0f cm where its own pose puts %s at %.0f cm" % (
                             float(m.group(1)), ahead[1], ahead[0])
+            if not reached:
+                return False, "it did not reach (%.0f, %.0f) cm" % tuple(wp)
         return True, ""
 
     def drive_out(self, robot):
@@ -1411,24 +1426,28 @@ class Runner:
             return None                    # moved by hand: its own pose is wrong
         self.say("  %s drives out on its own wheels and gyro (the camera can't follow it there) ..." % robot)
         self.mark("e02 drive out %s" % robot)
-        px, py, _ = self.board.park(self.park_index(robot))     # its own park spot: out of every route's way
-        wps = self.safe_path(robot, pose[:2], (px, py)) or [(px, py)]
-        ok, words = self.drive_blind(robot, wps)
-        if not ok:
-            self.say("  %s: %s; retracing its last drives instead ..." % (robot, words))
-            back = list(reversed(self.own_path(robot)))
-            pose2 = self.own_pose(robot)
-            back = [q for q in back if pose2 is None or math.hypot(q[0] - pose2[0], q[1] - pose2[1]) > 3.0]
-            if not back:
-                return None
-            ok, words = self.drive_blind(robot, back)
+        t_start = time.time()
+        try:
+            px, py, _ = self.board.park(self.park_index(robot))     # its own park spot: out of every route's way
+            wps = self.safe_path(robot, pose[:2], (px, py))
+            ok, words = (self.drive_blind(robot, wps) if wps is not None else
+                         (False, "no clear way round the other robots"))     # never straight through them
             if not ok:
-                self.say("  %s: %s" % (robot, words))
-                return None
-        self.moves.pop(robot, None)
-        pose = self.own_pose(robot)
-        self.fresh_floor()
-        p = self.identify(robot, near=(pose[0], pose[1], SWEEP_NEAR_CM)) if pose else None
+                self.say("  %s: %s; retracing its last drives instead ..." % (robot, words))
+                back = list(reversed(self.own_path(robot, until=t_start)))
+                pose2 = self.own_pose(robot)
+                back = [q for q in back if pose2 is None or math.hypot(q[0] - pose2[0], q[1] - pose2[1]) > 3.0]
+                if not back:
+                    return None
+                ok, words = self.drive_blind(robot, back)
+                if not ok:
+                    self.say("  %s: %s" % (robot, words))
+                    return None
+            pose = self.own_pose(robot)
+            self.fresh_floor()
+            p = self.identify(robot, near=(pose[0], pose[1], SWEEP_NEAR_CM)) if pose else None
+        finally:
+            self.moves.pop(robot, None)
         if p is not None:
             self.say("  %s is in view again at (%.1f, %.1f) cm." % (robot, p[0], p[1]))
             return p
@@ -1452,7 +1471,9 @@ class Runner:
         if p is None:
             # the camera can't see it: its own pose from its last leg, if that is newer than the camera's last
             # sighting (dry run 14:31: it had found itself in the find corner, the runner still had its park spot)
-            own = self.own_pose(robot, since=(last[0] if last else 0.0))
+            own = None
+            if self.tracker is None or robot not in self.tracker.hand_moved:
+                own = self.own_pose(robot, since=(last[0] if last else 0.0))
             p = (own[0], own[1]) if own else guess
         if p is None:
             raise SystemExit("%s is somewhere on the board but the camera can't find it, so the other robots could "
@@ -1471,8 +1492,26 @@ class Runner:
             # failed its find. Nick (2026-10-22): drive it out blind first (its own pose, landmarks, retracing),
             # then the finder sweep and its own find; stop only if all of that fails.
             self.say("  %s is in the corner every find drives to: moving it out ..." % robot)
-            q2 = self.drive_out(robot) or self.sweep_for(robot) or self.rescue_find(robot)
-            if q2 is not None and math.hypot(q2[0] - fx, q2[1] - fy) >= BLOCKS_FIND_CM:
+            q2 = None
+            for step in (None, self.sweep_for, self.rescue_find):
+                # each step that only finds it (the sweep) or puts it in the corner (its own find, which leaves an
+                # exact pose) is followed by a drive out (review 2026-10-22)
+                if step is not None:
+                    found = step(robot)
+                    if found is None:
+                        continue
+                    if math.hypot(found[0] - fx, found[1] - fy) >= BLOCKS_FIND_CM:
+                        q2 = found
+                        break
+                    if step is self.sweep_for:
+                        # its position is known now (heading not): tell it, then drive out on its gyro's heading
+                        self.send(robot, "fix %.2f %.2f - %.3f" % (found[0], found[1], time.time()))
+                        time.sleep(0.2)
+                q = self.drive_out(robot)
+                if q is not None and math.hypot(q[0] - fx, q[1] - fy) >= BLOCKS_FIND_CM:
+                    q2 = q
+                    break
+            if q2 is not None:
                 self.st["positions"][robot] = [q2[0], q2[1], None]
                 if self.tracker is not None:
                     self.tracker.robot_at(q2[0], q2[1])

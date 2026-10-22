@@ -30,7 +30,9 @@ readers accept is in ALIASES below, so a renamed column is a one-line change):
 
 Outputs (in --out): runs.csv (one row per run), tracks/<run_id>.csv (the robot's measured pose in every
 frame of the run), bumps.csv, summary.csv (mean, SD, CI per condition x route x robot, with and without
-outliers), comparisons.csv (Welch, Mann-Whitney, Brown-Forsythe, effect sizes), charts/*.png, report.md.
+outliers), comparisons.csv (Welch, Mann-Whitney, Brown-Forsythe, effect sizes), charts/*.png, report.md; with --session
+also front_sensor.csv (the front sensor after each leg against the map, from the runner's front_checks.csv) and
+recovery.csv (auto-retries, sweeps, rescue finds, drive-outs, help calls per robot): setup_recovery().
 
 What is measured, in plain words
   * Pose = centre of the robot's blob in the picture (pixels), turned into floor cm by the calibration
@@ -1297,7 +1299,8 @@ TESTS_FINE_PRINT = [
     "were equal.</sub>", ""]
 
 
-def write_report(path, rows, bumps, summ, comps, charts, notes, args_text=""):
+def write_report(path, rows, bumps, summ, comps, charts, notes, args_text="", setup=None):
+    """setup: setup_recovery()'s result (its lines close the Data section), or None."""
     L = []
     n_by = {c: sum(1 for r in rows if r["condition"] == c) for c in CONDITIONS}
     n_out = sum(1 for r in rows if r.get("outlier_end_err_cm"))
@@ -1406,9 +1409,12 @@ def write_report(path, rows, bumps, summ, comps, charts, notes, args_text=""):
               "median %s); detection delay reported by the robot median %s ms." % (
                   len(bs), len(bumps), f(d["mean"]), f(d["sd"]), f(d["median"]),
                   f(float(np.nanmedian([b["delay_ms"] for b in bs])), 0)), ""]
+    if setup:
+        L += setup["lines"]
     L += ["## Conclusion", ""]
     L += conclusion_lines(rows, summ, comps)
     L += ["", "## What's next", ""]
+    L += (setup or {}).get("next", [])
     L += next_lines(rows, n_by, comps)
     L += ["", "## Two sweeps", "", "**New tests that may now be needed**", ""]
     L += ["- A mixed model (robot and block as random effects) to cross-check the permutation test once there are "
@@ -1457,7 +1463,7 @@ def write_report(path, rows, bumps, summ, comps, charts, notes, args_text=""):
     if nfl:
         L.append("- %d run(s): the believed start is more than 20 cm or 30 deg from the camera's, so the believed "
                  "poses are probably not in the floor frame and the absolute (abs_*) errors are blank." % nfl)
-    for n in notes:
+    for n in list(notes) + (setup or {}).get("notes", []):
         L.append("- " + n)
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     with open(path, "w") as fh:
@@ -1515,6 +1521,170 @@ def next_lines(rows, n_by, comps):
         out.append("- %d run(s) carry a note in runs.csv (flags column): open the track file and the video at those times." % nf)
     out.append("- Re-run this script after each batch of runs: python tools/experiment/e02_analysis.py with the same arguments.")
     return out
+
+
+# =============================================================================== setup and recovery (runner records)
+# The runner's own records of setup and recovery (tools/experiment/e02.py, 2026-10-22): front_checks.csv (the front
+# sensor after each leg against what the map says is ahead) and e02_state.json auto_retries / help_calls /
+# disagreements, plus its video marks. Older sessions have none of these: every reader returns empty.
+FRONT_RANGE_CM = 50.0       # only things the map puts this near count (e02.py FRONT_CHECK_RANGE_CM)
+FRONT_WITHIN_CM = 8.0       # share of readings this close to the map (e02.py FRONT_TOL_CM today)
+FRONT_MIN_N = 8             # fewer readings: no suggested values (e02.py FRONT_LEARN_MIN)
+FRONT_MIN_TOL_CM = 3.0      # suggested tolerance = 3 x spread, at least this (e02.py front_limits(), --front-learn)
+HELP_WINDOW_S = 120.0       # an auto-retry with no help call for that robot this soon after it avoided one
+MARK_RETRY = re.compile(r"^\s*e02\s+auto-retry\s+(\S+)\s+(\d+)\b", re.I)
+MARK_SWEEP = re.compile(r"^\s*e02\s+sweep\s+(\S+)\s+for\s+(\S+)", re.I)
+MARK_RESCUE = re.compile(r"^\s*e02\s+rescue\s+(\S+)\s+find\s+start\b", re.I)
+MARK_DRIVE_OUT = re.compile(r"^\s*e02\s+drive\s+out\s+(\S+)", re.I)
+MARK_HELP = re.compile(r"^\s*e02\s+help\s+([^\s:]+):", re.I)
+RECOVERY_COLS = ["robot", "auto_retries", "retry_episodes", "help_calls_avoided", "sweeps", "rescue_finds",
+                 "drive_outs", "help_calls", "disagreements"]
+
+
+def front_sensor(session):
+    """front_checks.csv rows with diff_cm (front - expected) and used (heading measured, map distance <= 50 cm), and
+    the summary of the used ones: n, median, spread (MAD x 1.4826), share within 8 cm, suggested offset/tolerance."""
+    path = os.path.join(session, "front_checks.csv") if session else ""
+    rows = read_csv(path) if path and os.path.exists(path) else []
+    diffs = []
+    for r in rows:
+        fr, ex = nanf(r.get("front_cm")), nanf(r.get("expected_cm"))
+        hm = str(r.get("heading_measured", "")).strip() in ("1", "1.0", "True", "true")
+        ok = hm and np.isfinite(fr) and np.isfinite(ex) and ex <= FRONT_RANGE_CM
+        r["diff_cm"] = round(fr - ex, 2) if np.isfinite(fr) and np.isfinite(ex) else ""
+        r["used"] = int(ok)
+        if ok:
+            diffs.append(fr - ex)
+    s = dict(n_rows=len(rows), n=len(diffs), median=float("nan"), spread=float("nan"), within=float("nan"),
+             offset=None, tol=None)
+    if diffs:
+        d = np.array(diffs, float)
+        s["median"] = float(np.median(d))
+        s["spread"] = float(np.median(np.abs(d - s["median"]))) * 1.4826
+        s["within"] = float(np.mean(np.abs(d) <= FRONT_WITHIN_CM))
+        if len(d) >= FRONT_MIN_N:
+            s["offset"] = round(s["median"], 1)
+            s["tol"] = round(max(FRONT_MIN_TOL_CM, 3.0 * s["spread"]), 1)
+    return rows, s
+
+
+def _state(session):
+    sp = os.path.join(session, "e02_state.json") if session else ""
+    if not sp or not os.path.exists(sp):
+        return {}
+    try:
+        with open(sp) as fh:
+            return json.load(fh)
+    except ValueError:
+        return {}
+
+
+def recovery(session, events=None):
+    """Per robot: auto-retries, finder sweeps (counted for the robot looked for), rescue finds (attempts), drive-outs,
+    help calls, camera/wheels disagreements, and help calls avoided. Auto-retries and help calls come from
+    e02_state.json (laptop clock) when it has them, else both from the video marks (camera clock): never mixed.
+    Retries of one robot are one episode until a help call or a gap over 2 min; an episode avoided a help call when
+    no help call for that robot follows its last retry within 2 min. events: events.csv rows (t_wall, text); without
+    them the state's own copy of the marks (notes) is read."""
+    st = _state(session)
+    if events is None:
+        events = [dict(t_wall=n[0], text=n[1]) for n in (st.get("notes") or []) if len(n) >= 2]
+    marks = dict(retry=[], sweep=[], rescue=[], drive_out=[], help=[])
+    for e in events:
+        text, t = str(e.get("text", "")), nanf(e.get("t_wall"))
+        for key, rx, grp in (("retry", MARK_RETRY, 1), ("sweep", MARK_SWEEP, 2), ("rescue", MARK_RESCUE, 1),
+                             ("drive_out", MARK_DRIVE_OUT, 1), ("help", MARK_HELP, 1)):
+            m = rx.match(text)
+            if m:
+                marks[key].append((t, m.group(grp)))
+                break
+    if "auto_retries" in st or "help_calls" in st:
+        retries = [(nanf(x[0]), str(x[1])) for x in st.get("auto_retries") or [] if len(x) >= 2]
+        helps = [(nanf(x[0]), str(x[1])) for x in st.get("help_calls") or [] if len(x) >= 2]
+        source = "e02_state.json"
+    else:
+        retries, helps, source = marks["retry"], marks["help"], "video marks"
+    disagree = [str(x[1]) for x in st.get("disagreements") or [] if len(x) >= 2]
+    robots = sorted({r for _, r in retries + helps + marks["sweep"] + marks["rescue"] + marks["drive_out"]}
+                    | set(disagree), key=lambda r: (len(r), r))
+    out = []
+    for rb in robots:
+        rt = sorted(t for t, r in retries if r == rb)
+        hp = sorted(t for t, r in helps if r == rb)
+        episodes = []
+        for t in rt:
+            if episodes and t - episodes[-1][-1] <= HELP_WINDOW_S and \
+                    not any(episodes[-1][-1] < h <= t for h in hp):
+                episodes[-1].append(t)
+            else:
+                episodes.append([t])
+        avoided = sum(1 for ep in episodes if not any(ep[-1] <= h <= ep[-1] + HELP_WINDOW_S for h in hp))
+        out.append(dict(robot=rb, auto_retries=len(rt), retry_episodes=len(episodes), help_calls_avoided=avoided,
+                        sweeps=sum(1 for _, r in marks["sweep"] if r == rb),
+                        rescue_finds=sum(1 for _, r in marks["rescue"] if r == rb),
+                        drive_outs=sum(1 for _, r in marks["drive_out"] if r == rb),
+                        help_calls=len(hp), disagreements=disagree.count(rb)))
+    if out:
+        tot = dict(robot="all")
+        for c in RECOVERY_COLS[1:]:
+            tot[c] = sum(r[c] for r in out)
+        out.append(tot)
+    return out, source
+
+
+def setup_recovery(session, out, events=None):
+    """Writes front_sensor.csv and recovery.csv in out (when there is anything to write) and returns
+    dict(lines=report lines for the "Setup and recovery" part of Data, notes=for the inaccuracies sweep, next=for
+    What's next, front=summary, recovery=per-robot rows)."""
+    fr_rows, fs = front_sensor(session)
+    rec, source = recovery(session, events)
+    if fr_rows:
+        write_csv(os.path.join(out, "front_sensor.csv"), fr_rows,
+                  ["t", "robot", "leg", "value", "x_cm", "y_cm", "heading_deg", "heading_measured", "front_cm",
+                   "expected_cm", "what", "diff_cm", "used"])
+    if rec:
+        write_csv(os.path.join(out, "recovery.csv"), rec, RECOVERY_COLS)
+    L, notes, nxt = ["### Setup and recovery", ""], [], []
+    if not fr_rows:
+        L += ["Front sensor: no front_checks.csv in this session (the runner records it from 2026-10-22).", ""]
+    elif not fs["n"]:
+        L += ["Front sensor: %d readings, none with a camera-measured heading and the map's distance within %.0f cm." % (
+            fs["n_rows"], FRONT_RANGE_CM), ""]
+    else:
+        L += ["Front sensor against the map (%d of %d readings: heading measured by the camera, map distance within "
+              "%.0f cm): the sensor reads %s cm %s than the map (median), spread %s cm, %.0f%% within %.0f cm. "
+              "Per reading: front_sensor.csv." % (
+                  fs["n"], fs["n_rows"], FRONT_RANGE_CM, f(abs(fs["median"]), 1),
+                  "more" if fs["median"] >= 0 else "less", f(fs["spread"], 1), 100 * fs["within"], FRONT_WITHIN_CM), "",
+              "<sub>Spread: the median distance of the readings from their median, x 1.4826 (MAD x 1.4826), which "
+              "equals the SD for bell-shaped data but is not pulled by a few wild readings.</sub>", ""]
+        if fs["offset"] is not None:
+            L += ["Suggested for e02.py: **FRONT_OFFSET_CM = %.1f**, **FRONT_TOL_CM = %.1f** (offset = the median; "
+                  "tolerance = 3 x spread, at least %.0f cm: the rule --front-learn uses)." % (
+                      fs["offset"], fs["tol"], FRONT_MIN_TOL_CM), ""]
+            nxt.append("- Set FRONT_OFFSET_CM = %.1f and FRONT_TOL_CM = %.1f in tools/experiment/e02.py (from %d front "
+                       "sensor readings), if this was a real session." % (fs["offset"], fs["tol"], fs["n"]))
+        else:
+            L += ["Too few readings (%d; %d needed) to suggest FRONT_OFFSET_CM / FRONT_TOL_CM." % (fs["n"], FRONT_MIN_N), ""]
+        notes.append("Front sensor vs map: the map distance comes from the camera's position and heading, so camera "
+                     "error is inside the spread; the offset and tolerance suggested are a chosen rule (median, 3 x "
+                     "spread), not derived from a miss-rate target.")
+    if not rec:
+        L += ["Recovery: none recorded (no auto-retries, sweeps, rescue finds, drive-outs or help calls).", ""]
+    else:
+        L += ["Recovery per robot (auto-retries and help calls from %s; recovery.csv):" % source, "",
+              "| Robot | auto-retries (episodes) | help calls avoided | sweeps for it | rescue finds | drive-outs | "
+              "help calls |", "|---|---|---|---|---|---|---|"]
+        for r in rec:
+            L.append("| %s | %d (%d) | %d | %d | %d | %d | %d |" % (
+                r["robot"], r["auto_retries"], r["retry_episodes"], r["help_calls_avoided"], r["sweeps"],
+                r["rescue_finds"], r["drive_outs"], r["help_calls"]))
+        L += ["", "A help call is avoided when a robot's retries end with no help call for it within 2 minutes.", ""]
+        notes.append("Help calls avoided: retries of one robot within 2 minutes of each other are one episode, and "
+                     "an episode counts as avoided when no help call for that robot follows within 2 minutes; a "
+                     "session that ended (or the robot put aside) in that window would also count. Sweeps are counted "
+                     "for the robot looked for, rescue finds per attempt (up to 2 per rescue).")
+    return dict(lines=L, notes=notes, next=nxt, front=fs, recovery=rec)
 
 
 # =============================================================================== main
@@ -1606,9 +1776,10 @@ def check_coverage(video, runlist):
 
 
 def analyse(recording, logs, runs, calib, out, background=None, bump_frame="auto", centre_offset_cm=0.0,
-            routes=None, robot_px=23.0, only=None, quiet=False, vc=None):
-    """Everything in one call: returns dict(rows, bumps, summary, comparisons, charts). vc: the clock mapping used
-    when the recording has no video_clock.json (session_inputs makes one from the runner's Pi clock offset)."""
+            routes=None, robot_px=23.0, only=None, quiet=False, vc=None, session=None):
+    """Everything in one call: returns dict(rows, bumps, summary, comparisons, charts, setup). vc: the clock mapping used
+    when the recording has no video_clock.json (session_inputs makes one from the runner's Pi clock offset). session:
+    the runner's session folder, for its setup and recovery records (setup_recovery())."""
     import cv2
     cam = load_camera(calib) if calib else None
     video = Video(recording, fix_dir=out)
@@ -1669,8 +1840,9 @@ def analyse(recording, logs, runs, calib, out, background=None, bump_frame="auto
     if not vc:
         notes.append("No laptop-to-camera clock offset (no video_clock.json, no pi_offset_s): robot times were not mapped "
                      "to the camera clock, so bumps were matched by order, not time.")
-    write_report(os.path.join(out, "report.md"), rows, bumps, summ, comps, charts, notes)
-    return dict(rows=rows, bumps=bumps, summary=summ, comparisons=comps, charts=charts)
+    setup = setup_recovery(session, out, video.events or None) if session else None
+    write_report(os.path.join(out, "report.md"), rows, bumps, summ, comps, charts, notes, setup=setup)
+    return dict(rows=rows, bumps=bumps, summary=summ, comparisons=comps, charts=charts, setup=setup)
 
 
 def main(argv=None):
@@ -1709,7 +1881,7 @@ def main(argv=None):
     if not a.recording or not a.out:
         ap.error("give --session <logs/e02-...>, or --recording and --out")
     res = analyse(a.recording, a.logs, a.runs, a.calib, a.out, a.background, a.bump_frame, a.centre_offset_cm, routes,
-                  a.robot_px, a.only, vc=vc)
+                  a.robot_px, a.only, vc=vc, session=a.session)
     print("wrote %s" % os.path.join(a.out, "report.md"))
     return res
 
