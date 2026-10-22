@@ -39,6 +39,25 @@ and in the simulator.
   sending one to the middle first, 0 help calls. Robots scattered + mapping + find check + 4 runs: 0 help calls.
 - Tests: 83 passed (9 new for this build), plus the slow dry runs above.
 
+**Review and what it changed.** An independent code review (a separate agent that had not seen the work)
+found 7 problems the tests didn't cover, all fixed and tested:
+1. Mapping turned the robot round right at an open edge; a turn on the spot is not edge-guarded and a wheel
+   would have gone over. It now backs off 7 cm first, and a re-find near an open edge backs off (or asks Nick).
+2. A robot put aside (nobody answered) disappeared from the runner's map, so the others could drive into it. It
+   now stays on the map where it was last found; in setup, with a robot nowhere to be found, it stops instead.
+3. A crash in the camera thread would have frozen every position silently. The camera feed is now restarted.
+4. Parking could loop for ever when every spot was taken and the drive to the middle failed. Now capped.
+5. The tracker could take a parked robot for the moving one when they touched, or hold on to an old position.
+6. A ray's result could be read from the wrong leg after a re-find.
+7. Paths only went round the first robot in the way. Now every piece is checked, up to two detours, and "no
+   clear way" waits for the others to park first.
+After the fixes: 85 tests pass (11 new); the scattered-start dry run that showed problem 7 (Center waited behind
+Right) now parks all three and maps with 0 help calls.
+
+**New: live view.** While the runner works, http://localhost:8090 on the laptop shows the camera picture with
+what it thinks: each robot's name, the robot it follows, things that look like robots (yellow) and other changes
+(grey), the mapping rays, and its last lines. Read-only.
+
 **Conclusion.** The setup problems from the first session are fixed in replay and in simulation; whether the
 real basement agrees is the morning's first 20 minutes, which Nick watches.
 
@@ -69,3 +88,15 @@ real basement agrees is the morning's first 20 minutes, which Nick watches.
 - Lights on the moving robot (agreed item 4) were not done: the new tracker didn't need them, and they need a
   firmware upload to all three robots (the Right robot didn't rejoin the WiFi after the last one). Kept for the
   Live lab.
+
+## Ideas to build next (ranked by what helps E02 and the December demo most)
+1. A live view for the runner: the camera picture in a browser with where it thinks each robot is, the floor
+   memory, and each camera / wheels check as it happens. Makes the first 20 minutes easy to watch, and is the
+   first screen of the Live lab.
+2. A real-footage regression test: a 30-second clip from tonight (the hand at 22:44:42) kept as a GitHub release
+   asset, replayed by the tests whenever the tracker changes.
+3. Mapping corrects its own board offset from the find check's bumps (the front stop's real stopping distance),
+   so the touch map and the bumps agree.
+4. The statistics report pipeline dry-run end to end on simulator sessions, so the morning's data turns into
+   the report the same hour.
+5. Lights on the moving robot (firmware), when there is a reason to upload firmware anyway.

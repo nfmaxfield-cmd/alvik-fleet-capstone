@@ -257,5 +257,6 @@ def nick_instructions(robot, problem, where_words, facing_words):
         "2. Pick it up and put it down flat on the board %s, with its front (the end with the dark sensor "
         "window) facing %s." % (where_words, facing_words),
         "3. Step back so your hands are out of the picture, then come back to this window and press Enter.",
-        "   (If it is broken or flat, type skip and press Enter instead: its remaining runs are put aside.)",
+        "   (If it is broken or flat, take it off the board, type skip and press Enter: its remaining runs are put "
+        "aside.)",
     ]

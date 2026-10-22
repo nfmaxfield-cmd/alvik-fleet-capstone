@@ -96,6 +96,8 @@ HOLD_CM = 6.0             # between legs the followed robot stands still: the ca
 CHECK_CM, CHECK_FRAC = 5.0, 0.35   # camera vs wheels: a go leg's distances may differ by this much...
 ID_EXTRA_CM = 5.0                  # ...plus this on the first leg after a turn on the spot (its centre is rougher)
 PARK_LEG_CM = 60.0        # parking: long legs on the robot's own wheels and gyro, the camera checks in between
+STALE_S = 1.5             # a camera position older than this is not used to steer
+EDGE_TURN_CM = 9.0        # no turn on the spot closer than this to an open edge (the wheels reach it first)
 FIND_TIMEOUT_S = 150
 E02_TIMEOUT_S = {0: 150, 1: 400}
 BATTERY_WARN, BATTERY_STOP = 40, 15
@@ -265,6 +267,8 @@ class Runner:
         self.moves = {}               # robot -> dict(run ("-" = idle legs), why): it is taking legs now
         self.leg_ids = {}
         self.last_lid = {}            # robot -> id of the last leg sent
+        self.main_lid = {}            # robot -> id of the last leg() asked for (not a refind's turns)
+        self.watch_count = defaultdict(int)  # robot -> watchdog stops in the current drive
         self.disagree = defaultdict(int)  # robot -> camera / wheels disagreements in a row
         self.fresh_id = {}            # robot -> True: its position came from identify() and it has not driven since
         self.watch_edge_cm = None     # the watchdog's open-edge distance (None: PL.WATCH_EDGE_CM; mapping: 0)
@@ -276,6 +280,8 @@ class Runner:
         line = "[%s] %s" % (dt.datetime.now().strftime("%H:%M:%S"), msg)
         if not quiet:
             print(line, flush=True)
+            if getattr(self, "view", None) is not None:
+                self.view.log(line)
         self.logf.write(line + "\n")
         self.logf.flush()
 
@@ -362,7 +368,9 @@ class Runner:
         return p
 
     def settle(self, t_from=None, min_s=0.4, timeout=3.0):
-        """The active robot's position once it stands still (median of min_s), or its latest one."""
+        """The active robot's position once it stands still (median of min_s), or its latest one if the camera saw
+        it in the last STALE_S. None if the camera has not seen it lately (the caller finds it again)."""
+        self.camera_alive()
         end = time.time() + timeout
         while time.time() < end:
             sp = CAM.still_position(self.history.since(max(t_from or 0, time.time() - 2.0)), min_s=min_s)
@@ -370,7 +378,27 @@ class Runner:
                 return sp
             time.sleep(0.1)
         p = self.tracker.where()
-        return (p[1], p[2]) if p else None
+        if p is None or self.tracker.last_seen < time.time() - STALE_S:
+            return None
+        return (p[1], p[2])
+
+    def camera_alive(self):
+        """The camera feed thread must be running: if it died (an error in a frame), start a new one (review
+        2026-10-22: a dead feed froze every position without anyone noticing)."""
+        f = self.feed
+        if f is None or self.a is None or getattr(self.a, "dry_run_feed_ok", False):
+            return True
+        if f.is_alive():
+            return True
+        self.say("  (the camera feed stopped: %s; starting it again)" % (f.err or "no reason given"))
+        nf = CAM.Feed("%s:%d" % (self.a.pi, self.a.overhead_port), self.tracker, self.history,
+                      log=lambda m: self.say("  (camera: %s)" % m))
+        nf.on_sample = f.on_sample
+        nf.hooks = f.hooks
+        nf.start()
+        self.feed = nf
+        nf.wait_frames(3, timeout=8)
+        return False
 
     # --- runs and camera-steered moves -------------------------------------------------------------
     def start_run(self, robot, cmd="run e02", retry=True):
@@ -560,6 +588,7 @@ class Runner:
             if state not in ("done", "dup"):
                 break
         time.sleep(0.25)
+        self.main_lid[robot] = self.last_lid.get(robot)
         p1 = self.settle(t_from=time.time() - 0.6, min_s=0.3, timeout=2.0)
         if kind == "go" and p0 is not None and len(pieces) == 1:
             bad = self.cross_check(robot, p0, p1)
@@ -613,13 +642,20 @@ class Runner:
         time.sleep(0.5)
         last = self.tracker.where()
         near = (last[1], last[2], 60.0) if last else None
+        if last and self.board.edge_room(last[1], last[2])[0] < EDGE_TURN_CM:
+            # a turn on the spot this near an open edge could put a wheel over it: back away first, if it is
+            # known which way it faces; otherwise Nick
+            h = self.heads.get(robot, [None])[0]
+            if h is None:
+                return None
+            self.leg(robot, ("go", -6.0))
         p = self.identify(robot, near=near) or self.identify(robot)
         if p is None:
             return None
         self.fresh_id[robot] = True
         self.tracker.robot_at(p[0], p[1])
-        self.history.clear()
         self.tracker.follow(robot, p[0], p[1])
+        self.history.clear()
         self.tracker.hold(HOLD_CM)
         self.heads[robot] = [self.heads.get(robot, [None])[0], False]
         return self.settle(min_s=0.3)
@@ -628,38 +664,55 @@ class Runner:
         state, info = self.send_leg(robot, "mark %s" % which, timeout + PAUSE_MS / 1000.0)
         return state
 
-    def safe_path(self, robot, p, target):
+    def safe_path(self, robot, p, target, depth=0):
         """Waypoints from p to target that keep clear of every other robot the runner knows of (parked, or found
-        and not parked yet: 2026-10-21 Center was steered straight into Right, not found yet). One detour point
-        beside the first robot in the way, on the side with room on the board."""
+        and not parked yet: 2026-10-21 Center was steered straight into Right, not found yet). Detour points
+        beside the robots in the way, on the side with room on the board; every piece checked; up to 2 detours.
+        None if there is no clear way."""
         others = [tuple(q[:2]) for n, q in self.st["positions"].items() if n != robot and q]
-        dx, dy = target[0] - p[0], target[1] - p[1]
-        L = math.hypot(dx, dy)
-        if L < 1e-6:
+        clear_cm = PL.PARK_CLEAR_CM + 4.0
+
+        def first_block(a, b):
+            dx, dy = b[0] - a[0], b[1] - a[1]
+            L = math.hypot(dx, dy)
+            if L < 1e-6:
+                return None
+            ux, uy = dx / L, dy / L
+            worst = None
+            for o in others:
+                # a robot already near the start or the end: only a piece that comes nearer to it than that is
+                # blocked (leaving a neighbour, or arriving at a spot beside one, is allowed)
+                near = min(math.hypot(a[0] - o[0], a[1] - o[1]), math.hypot(b[0] - o[0], b[1] - o[1])) - 0.5
+                lim = min(clear_cm, near)
+                t = max(0.0, min(L, (o[0] - a[0]) * ux + (o[1] - a[1]) * uy))
+                d = math.hypot(a[0] + ux * t - o[0], a[1] + uy * t - o[1])
+                if d < lim and (worst is None or t < worst[0]):
+                    worst = (t, o, ux, uy)
+            return worst
+
+        blk = first_block(p, target)
+        if blk is None:
             return [target]
-        ux, uy = dx / L, dy / L
-        worst = None
-        for o in others:
-            t = max(0.0, min(L, (o[0] - p[0]) * ux + (o[1] - p[1]) * uy))
-            d = math.hypot(p[0] + ux * t - o[0], p[1] + uy * t - o[1])
-            if d < PL.PARK_CLEAR_CM + 4.0 and (worst is None or t < worst[0]):
-                worst = (t, o)
-        if worst is None:
-            return [target]
-        o = worst[1]
+        if depth >= 2:
+            return None
+        _, o, ux, uy = blk
         best = None
         for side in (1.0, -1.0):
             for off in (30.0, 40.0):
                 q = (o[0] - uy * side * off, o[1] + ux * side * off)
                 if not self.board.on_board(q[0], q[1], margin=15.0):
                     continue
-                clear = min([math.hypot(q[0] - r[0], q[1] - r[1]) for r in others] or [99.0])
-                if clear < PL.PARK_CLEAR_CM + 4.0:
+                if min([math.hypot(q[0] - r[0], q[1] - r[1]) for r in others] or [99.0]) < clear_cm:
+                    continue
+                if first_block(p, q) is not None:
+                    continue
+                rest = self.safe_path(robot, q, target, depth + 1)
+                if rest is None:
                     continue
                 cost = math.hypot(q[0] - p[0], q[1] - p[1]) + math.hypot(target[0] - q[0], target[1] - q[1])
                 if best is None or cost < best[0]:
-                    best = (cost, q)
-        return [best[1], target] if best else [target]
+                    best = (cost, [q] + rest)
+        return best[1] if best else None
 
     def drive_to(self, robot, target, final_heading=None, run=None, max_legs=40, arrive_cm=ST.ARRIVE_CM,
                  max_leg=ST.MAX_LEG_CM, avoid=True):
@@ -667,8 +720,11 @@ class Runner:
         next leg and checked against the wheels after each; then optionally turned to final_heading. avoid: go
         round the other robots the runner knows of. Returns (ok, words)."""
         h = self.heads.get(robot, [None, False])
+        self.watch_count[robot] = 0
         p = self.settle(min_s=0.3, timeout=2.0)
         wps = self.safe_path(robot, p, target) if (avoid and p is not None) else [target]
+        if wps is None:
+            return False, "no clear way round the other robots"
         if len(wps) > 1:
             self.say("    %s: going round another robot (via %.0f, %.0f)" % (robot, wps[0][0], wps[0][1]), quiet=True)
         steer = ST.Steer(wps, heading=h[0], measured=h[1], final_heading=final_heading, max_legs=max_legs,
@@ -704,10 +760,9 @@ class Runner:
                 return False, "the camera lost it"
             if res.startswith("watchdog"):
                 self.heads[robot] = [steer.heading, False]
-                watch_stops = getattr(self, "_watch_count", 0) + 1
-                self._watch_count = watch_stops
-                if watch_stops >= 2:
-                    self._watch_count = 0
+                self.watch_count[robot] += 1
+                if self.watch_count[robot] >= 2:
+                    self.watch_count[robot] = 0
                     return False, "the camera watchdog stopped it twice: " + res
                 continue
             if res.startswith("refused") or res.startswith("could not"):
@@ -753,10 +808,10 @@ class Runner:
             self.moves[robot] = dict(run="-", why="identify")
         for ang in (angle, -angle):
             before = self.feed.wait_frames(8, timeout=5)
-            state, info = self.send_leg(robot, "turn %.1f" % ang, ang / TURN_DPS_GUESS * 2.5 + 6.0)
+            state, info = self.send_leg(robot, "turn %.1f" % ang, abs(ang) / TURN_DPS_GUESS * 2.5 + 6.0)
             time.sleep(0.6)
             after = self.feed.wait_frames(8, timeout=5)
-            self.send_leg(robot, "turn %.1f" % -ang, ang / TURN_DPS_GUESS * 2.5 + 6.0)
+            self.send_leg(robot, "turn %.1f" % -ang, abs(ang) / TURN_DPS_GUESS * 2.5 + 6.0)
             time.sleep(0.4)
             if state not in ("done", "dup") or len(before) < 3 or len(after) < 3:
                 self.say("    (%s did not turn: %s %s)" % (robot, state, info), quiet=True)
@@ -793,8 +848,8 @@ class Runner:
             return True
         if sp is None:
             return False
-        self.history.clear()
         self.tracker.follow(robot, sp[0], sp[1])
+        self.history.clear()
         self.tracker.hold(HOLD_CM)
         if robot not in self.heads:
             self.heads[robot] = [sp[2], False]
@@ -880,20 +935,24 @@ class Runner:
             print("\a", end="", flush=True)
             ans = self.ask_timeout("Press Enter when it is back on the board (f = flash it again, skip = put it "
                                    "aside): ", wait_s)
-            if ans is None:
-                self.say("Nobody answered in %.0f minutes: %s's remaining runs are put aside; carrying on with the "
-                         "others." % (self.a.help_wait_min, robot))
-                self.mark("e02 help timeout %s" % robot)
+            if ans is None or ans.lower() == "skip":
+                self.mark("e02 help %s %s" % ("timeout" if ans is None else "skip", robot))
                 self.unavailable.add(robot)
+                if ans is None:
+                    self.say("Nobody answered in %.0f minutes: %s's remaining runs are put aside." % (
+                        self.a.help_wait_min, robot))
+                    self.keep_on_map(robot)
+                else:                          # Nick took it off the board
+                    self.st["positions"].pop(robot, None)
+                    if self.tracker is not None:
+                        self.tracker.forget(robot)
+                    self.st.save()
                 return False
             if ans.lower() == "f":
                 self.send(robot, "identify")
                 continue
-            if ans.lower() == "skip":
-                self.unavailable.add(robot)
-                return False
             time.sleep(1.0)
-            self.st["positions"].pop(robot, None)
+            old_pos = self.st["positions"].pop(robot, None)
             self.disagree[robot] = 0
             self.say("Taking a fresh picture of the board (keep hands out of it), then %s turns a little on its "
                      "spot ..." % robot)
@@ -901,6 +960,8 @@ class Runner:
             p = self.identify(robot)
             self.moves.pop(robot, None)
             if p is None:
+                if old_pos:
+                    self.st["positions"][robot] = old_pos
                 self.say("The camera did not see %s turn. Check it is on the board and switched on (its side light "
                          "on), then press Enter again." % robot)
                 continue
@@ -916,6 +977,29 @@ class Runner:
             if ok:
                 return True
             self.say("It moved, but parking failed: %s. Put it somewhere open again and press Enter." % why)
+
+    def keep_on_map(self, robot):
+        """A robot put aside stays on the board as an obstacle the others go round: try once more to find where it
+        is (a turn on its spot, no Nick); if that fails, keep the last place it was seen. During setup nobody knows
+        where it is at all: the session stops rather than drive the others blind (review 2026-10-22)."""
+        last = self.tracker.where() if (self.tracker and self.tracker.active == robot) else None
+        q = self.st["positions"].get(robot)
+        guess = (last[1], last[2]) if last else (tuple(q[:2]) if q else None)
+        p = self.identify(robot, near=(guess[0], guess[1], 60.0) if guess else None)
+        self.moves.pop(robot, None)
+        if p is None:
+            p = guess
+        if p is None:
+            raise SystemExit("%s is somewhere on the board but the camera can't find it, so the other robots could "
+                             "drive into it. Take %s off the board (or put it anywhere open), then start again." % (
+                                 robot, robot))
+        self.st["positions"][robot] = [p[0], p[1], None]
+        if self.tracker is not None:
+            if self.tracker.active == robot:
+                self.tracker.idle()
+            self.tracker.park(robot, p[0], p[1])
+        self.say("  %s stays where it is, at about (%.0f, %.0f) cm; the others go round it." % (robot, p[0], p[1]))
+        self.st.save()
 
     # --- checks -----------------------------------------------------------------------------------
     def wait_robots(self, names, timeout=40):
@@ -1161,8 +1245,7 @@ class Runner:
             self.moves.pop(n, None)
             if p is None:
                 self.say("  The camera did not see %s turn." % n)
-                if not self.help_from_nick(n, "the camera did not see it turn when asked to", park=False):
-                    continue
+                self.help_from_nick(n, "the camera did not see it turn when asked to", park=False)
                 continue
             self.st["positions"][n] = [p[0], p[1], None]
             self.say("  %s is at (%.1f, %.1f) cm" % (n, p[0], p[1]))
@@ -1174,7 +1257,7 @@ class Runner:
         frames = self.feed.wait_frames(10, timeout=8)
         known = {n: tuple(q[:2]) for n, q in self.st["positions"].items() if q}
         self.tracker.idle()
-        self.tracker.protect.clear()
+        self.tracker.clear_protect()
         self.tracker.set_background(frames, robots=list(known.values()))
         for n, q in known.items():
             self.tracker.park(n, q[0], q[1])
@@ -1183,11 +1266,19 @@ class Runner:
         """Heading and parking, robot by robot, in an order where nobody's park spot is taken by another robot.
         A robot standing on someone else's spot when all spots are taken goes to the middle of the board first."""
         todo = [n for n in names if n in self.st["positions"] and n not in self.unavailable]
+        deferred = defaultdict(int)
+        passes = 0
         while todo:
+            passes += 1
+            if passes > 3 * len(names) + 2:
+                raise SystemExit("Parking went round in circles (%s still not parked). Put the robots anywhere open on "
+                                 "the board, 30 cm apart, and start again." % ", ".join(todo))
             def blocked(n):
-                px, py, _ = self.board.park(self.park_index(n))
-                return [m for m in todo if m != n and
-                        math.hypot(self.st["positions"][m][0] - px, self.st["positions"][m][1] - py) < PL.PARK_CLEAR_CM + 6]
+                i = self.park_index(n)
+                spots = [self.board.park(i)[:2], self.board.stage(i)]          # its spot and the point it backs in from
+                return [m for m in todo if m != n and any(
+                    math.hypot(self.st["positions"][m][0] - q[0], self.st["positions"][m][1] - q[1]) < PL.PARK_CLEAR_CM + 6
+                    for q in spots)]
             free = [n for n in todo if not blocked(n)]
             n = free[0] if free else todo[0]
             self.active = n
@@ -1203,6 +1294,10 @@ class Runner:
                 self.say("  Every park spot has another robot on it: moving %s to the middle of the board first." % n)
                 ok, why = self.drive_to(n, mid, max_leg=PARK_LEG_CM)
                 self.end_moves(n)
+                if not ok:
+                    if not self.help_from_nick(n, why):
+                        todo.remove(n)
+                    continue
                 p = self.settle(min_s=0.3)
                 if p:
                     self.st["positions"][n] = [p[0], p[1], self.heads.get(n, [None])[0]]
@@ -1210,6 +1305,18 @@ class Runner:
                 continue
             self.set_corrections(n, self.move_corrections(n))
             ok, why = self.park(n)
+            if not ok and "no clear way" in why and deferred[n] < 2 and len(todo) > 1:
+                # another robot not parked yet is in the way: park the others first, then try again
+                deferred[n] += 1
+                self.end_moves(n)
+                p = self.settle(min_s=0.3)
+                if p:
+                    self.st["positions"][n] = [p[0], p[1], self.heads.get(n, [None])[0]]
+                    self.tracker.park(n, p[0], p[1])
+                self.say("  %s waits: another robot is in its way; parking the others first." % n)
+                todo.remove(n)
+                todo.append(n)
+                continue
             if not ok and not self.help_from_nick(n, why):
                 todo.remove(n)
                 continue
@@ -1224,8 +1331,8 @@ class Runner:
         blocked: a quarter turn and again). Returns its position or None."""
         self.fresh_id[robot] = True
         self.tracker.robot_at(p[0], p[1])
-        self.history.clear()
         self.tracker.follow(robot, p[0], p[1])
+        self.history.clear()
         self.tracker.hold(HOLD_CM)
         self.heads[robot] = [None, False]
         self.moves.pop(robot, None)
@@ -1293,7 +1400,7 @@ class Runner:
                 self.heads[robot] = [h, False]
                 self.fix_now(robot, h)
                 p0, p1, words = self.leg(robot, ("go", MAP.RAY_CM))
-                lid = self.last_lid.get(robot)
+                lid = self.main_lid.get(robot)
                 fin = self.listener.leg_final(robot, "-", lid) or {}
                 kind = MAP.stop_kind(fin.get("state"), fin.get("info"))
                 rx, ry, rth = num(fin.get("x_cm")), num(fin.get("y_cm")), num(fin.get("th_deg"))
@@ -1305,12 +1412,18 @@ class Runner:
                 if kind and rx is not None:
                     ray["point"] = MAP.contact_point(rx, ry, rth, kind)
                     if p1:
-                        ray["point_cam"] = MAP.contact_point(p1[0], p1[1], self.heads[robot][0] or rth, kind)
+                        hh = self.heads[robot][0]
+                        ray["point_cam"] = MAP.contact_point(p1[0], p1[1], rth if hh is None else hh, kind)
                 rays.append(ray)
                 self.say("  ray %2d, %4.0f deg: %s%s" % (k + 1, h, {"edge": "open edge", "board": "board"}.get(kind, "nothing met (%s)" % (words or fin.get("state"))),
                                                        (" at (%.1f, %.1f) cm" % tuple(ray["point"])) if ray.get("point") else ""))
-                # straight back: turn round, then forward (the guards look ahead; backing up is blind)
+                # straight back: off the edge first (a turn on the spot puts a wheel over an edge it is this close
+                # to: firmware edge.h), then turn round and forward (the guards look ahead; backing up is blind)
                 back = math.hypot(p1[0] - p0[0], p1[1] - p0[1]) if (p0 and p1) else None
+                q = p1 or p0
+                if kind == "edge" or (q and self.board.edge_room(q[0], q[1])[0] < EDGE_TURN_CM + 3):
+                    self.leg(robot, ("go", -7.0))
+                    back = (back - 7.0) if back else None
                 self.leg(robot, ("turn", 180.0))
                 if self.heads.get(robot, [None])[0] is not None:
                     self.heads[robot] = [ST.wrap180(self.heads[robot][0] + 180.0), False]
@@ -2297,6 +2410,7 @@ def main(argv=None):
     ap.add_argument("--no-side", action="store_true", help="no side camera this session: don't check or ask about it")
     ap.add_argument("--map", action="store_true", help="after setup, one robot maps the board by touch (about 6 min)")
     ap.add_argument("--map-only", action="store_true", help="setup and the mapping only, then stop")
+    ap.add_argument("--view-port", type=int, default=8090, help="live view in a browser: http://localhost:<port> (0 = off)")
     ap.add_argument("--map-rays", type=int, default=16)
     ap.add_argument("--map-robot", default="", help="which robot maps (default: the first)")
     ap.add_argument("--dry-start", default="parks", choices=["parks", "swapped", "scatter"],
@@ -2409,6 +2523,15 @@ def launch(a, state, sdir, sim):
     run.watch = run_sheet.RunWatcher()
     link.session.listeners += [run.watch, run.listener]
     run.pi = run_sheet.PiNotes(a.pi)
+    run.view = None
+    if a.view_port:
+        try:
+            import e02_view
+            run.view = e02_view.LiveView(run, a.view_port)
+            run.say(run.view.start())
+        except Exception as e:          # the view is a convenience: never stop a session over it
+            run.say("(live view not started: %s)" % e)
+            run.view = None
     hist = CAM.History()
     run.history = hist
     if not state["schedule"]:

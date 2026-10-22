@@ -462,9 +462,12 @@ class MotionTracker:
                 gate_cm = ROBOT_CM * 0.9 + self.vmax * min(dt_, 1.0)
                 hint = self.hint if (self.hint and t <= self.hint[3]) else None
                 best = None
+                others = [q for r, q in self.protect.items() if r != self.active]
                 for c in cands:
                     if not c["shape"]:
                         continue
+                    if any(math.hypot(c["x"] - q[0], c["y"] - q[1]) < 0.8 * ROBOT_CM for q in others):
+                        continue                 # that is another robot standing still
                     d = math.hypot(c["x"] - px, c["y"] - py)
                     if d > gate_cm:
                         continue
@@ -565,10 +568,17 @@ class MotionTracker:
 
     def hold(self, radius_cm=6.0):
         """The followed robot has been told to stand still: only accept it within radius_cm of where it is now
-        (a hand reaching in next to it, or a robot bumped into it, can't pull the tracker away)."""
+        (a hand reaching in next to it, or a robot bumped into it, can't pull the tracker away). Only when the
+        camera saw it just now: a hold round an old position could never find it again."""
         with self.lock:
-            if self.pos is not None:
+            if self.pos is not None and self.frame_t is not None and self.frame_t - self.last_seen < 0.5:
                 self.hint = (self.pos[1], self.pos[2], radius_cm, float("inf"))
+            else:
+                self.hint = None
+
+    def clear_protect(self):
+        with self.lock:
+            self.protect.clear()
 
     def follow(self, robot, x, y, t=None):
         with self.lock:

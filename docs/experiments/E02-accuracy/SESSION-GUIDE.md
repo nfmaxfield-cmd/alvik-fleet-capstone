@@ -36,7 +36,8 @@ Leave this tab alone until the end.
 python tools\experiment\e02.py --pi st1maxfini.local --hours 1.75 --no-side --map --robot 192.168.1.250 --robot 192.168.1.252 --robot 192.168.1.253
 ```
 Answers: **y** (the green outline sits on the board), **left** (the x-board), **top** (the y-board).
-Then it works on its own; you watch:
+Then it works on its own. To see what it thinks, open **http://localhost:8090** in a browser on the laptop
+(the camera picture with each robot's name, the one it is following in green, and its last lines). You watch:
 1. **Finding** (about 20 s): each robot turns a little on its spot and back; it says where each one is.
 2. **Parking** (about 2 minutes): each robot drives a short way (to see which way it faces), then to its
    corner, going round the others.

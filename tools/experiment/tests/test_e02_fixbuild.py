@@ -174,3 +174,44 @@ def test_rays_towards_a_parked_robot_are_skipped():
     assert MAP.ray_blocked((61.0, 61.0), 135.0, [("Right", (20.0, 100.0))]) == "Right"
     assert MAP.ray_blocked((61.0, 61.0), -45.0, [("Right", (20.0, 100.0))]) == ""
     assert MAP.ray_blocked((61.0, 61.0), 0.0, [("Center", (110.0, 75.0))]) == "Center"
+
+
+def _clear_of(run, pts, others, clear):
+    for a, b in zip(pts, pts[1:]):
+        for t in np.linspace(0, 1, 60):
+            x, y = a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t
+            if any(math.hypot(x - o[0], y - o[1]) <= clear for o in others):
+                return False
+    return True
+
+
+def test_paths_go_round_two_robots_and_give_up_when_walled_in():
+    run = _runner_with({"A": [45.0, 60.0, None], "B": [75.0, 60.0, None]})
+    p, target = (15.0, 60.0), (105.0, 60.0)
+    wps = run.safe_path("Left", p, target)
+    assert wps is not None and wps[-1] == target
+    assert _clear_of(run, [p] + wps, [(45.0, 60.0), (75.0, 60.0)], PL.PARK_CLEAR_CM)
+    # the target itself boxed in by robots on every side: no clear way
+    box = {"N%d" % k: [60.0 + 20.0 * math.cos(k * math.pi / 3), 60.0 + 20.0 * math.sin(k * math.pi / 3), None]
+           for k in range(6)}
+    run2 = _runner_with(box)
+    assert run2.safe_path("Left", (15.0, 15.0), (60.0, 60.0)) is None
+
+
+def test_a_parked_robot_does_not_capture_the_tracker(cam_setup):
+    w, sc, cam, _ = cam_setup
+    mover, parked = FakeRobot(40.0, 60.0, 0.0), FakeRobot(62.0, 60.0, 0.0)
+    w.robots[:] = []
+    bg = [sc.render() for _ in range(3)]
+    w.robots[:] = [mover, parked]
+    tr = _tracker(cam)
+    tr.set_background(bg)
+    tr.park("P", parked.x, parked.y)
+    tr.follow("M", mover.x, mover.y, t=0.0)
+    t = 0.0
+    for k in range(30):                     # it drives up next to the parked robot, then backs away
+        t += 1 / 15.0
+        mover.x += (0.5 if k < 15 else -0.5)
+        s = tr.push(sc.render(), t)
+        p = tr.where()
+        assert math.hypot(p[1] - mover.x, p[2] - mover.y) < 4.0, (k, p)
