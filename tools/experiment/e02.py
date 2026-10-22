@@ -98,6 +98,7 @@ CHECK_CM, CHECK_FRAC = 5.0, 0.35   # camera vs wheels: a go leg's distances may 
 ID_EXTRA_CM = 5.0                  # ...plus this on the first leg after a turn on the spot (its centre is rougher)
 PARK_LEG_CM = 60.0        # parking: long legs on the robot's own wheels and gyro, the camera checks in between
 STALE_S = 1.5             # a camera position older than this is not used to steer
+RESCUE_EDGE_CM = 25.0     # a lost robot finds itself against the boards only if last seen this far in from the open edges
 SWEEP_STEP_DEG = 30.0     # a finder robot turns in these steps, reading its front sensor after each
 SWEEP_RANGE_CM = 70.0     # ... a reading nearer than this
 SWEEP_GAP_CM = 8.0        # ... and this much shorter than the map says is something not on the map
@@ -1136,6 +1137,36 @@ class Runner:
                     return p
         return None
 
+    def rescue_find(self, robot):
+        """Nick, 2026-10-22: a robot the camera can't find finds itself, against the two boards. Its own pose (the
+        last camera fix plus the legs since, wheels and gyro) is good enough to drive to the find's staging point;
+        the find's own checks keep it safe (the front stop; a bump much sooner than the pose says fails it; the
+        edge guard). No camera fix is sent (the camera can't see it). After the find its position is exact: the
+        camera then looks for its turn there. Only when its last known place was well in from the open edges and
+        nothing says it was moved by hand. Returns (x, y) or None."""
+        q = self.st["positions"].get(robot)
+        if not q or self.board.edge_room(q[0], q[1])[0] < RESCUE_EDGE_CM:
+            return None
+        if self.tracker is not None and self.tracker.moved_by_hand and self.tracker.active == robot:
+            return None
+        self.say("  %s finds itself against the boards (the camera can't see it) ..." % robot)
+        for c in self.board_params():
+            self.send(robot, c)
+            time.sleep(0.05)
+        if self.tracker is not None and self.tracker.active == robot:
+            self.tracker.idle()            # do_find must not send a fix from a lost track
+        out = self.do_find(robot, "rescue")
+        if not out.get("ok"):
+            self.say("  %s: %s" % (robot, out.get("words")))
+            return None
+        fr = self.listener.latest("FIND", robot, out["t0"])
+        ax, ay = (num(fr[1].get("after_x")), num(fr[1].get("after_y"))) if fr else (None, None)
+        if ax is None or ay is None:
+            return None
+        self.say("  %s found itself at (%.1f, %.1f) cm; the camera looks there ..." % (robot, ax, ay))
+        self.fresh_floor()
+        return self.identify(robot, near=(ax, ay, SWEEP_NEAR_CM))
+
     def help_from_nick(self, robot, problem, park=True):
         """Stuck, lost or off the board: first AUTO_TRIES tries on its own (2026-10-22: pressing Enter with no
         hands, i.e. just finding it again, worked nearly every time); then exact steps for Nick, then the runner
@@ -1155,14 +1186,25 @@ class Runner:
                     problem = "it is at (or over) an open edge, and which way it faces is not known"
                     break
                 if why == "noturn" and k == AUTO_TRIES - 1 and self.tracker is not None:
-                    p = self.sweep_for(robot)
+                    self.heads[robot] = [None, False]        # a rescue find sets it (exact); a sweep does not
+                    p = self.sweep_for(robot) or self.rescue_find(robot)
                     if p is not None:
                         self.st["positions"][robot] = [p[0], p[1], None]
-                        self.say("  Found %s at (%.1f, %.1f) cm with another robot's help." % (robot, p[0], p[1]))
+                        self.say("  Found %s again at (%.1f, %.1f) cm." % (robot, p[0], p[1]))
                         if not park:
                             return True
-                        if not (self.board.edge_room(p[0], p[1])[0] < EDGE_TURN_CM + 3) and \
-                                self.acquire_heading(robot, p) is not None:
+                        h = self.heads.get(robot, [None, False])
+                        if h[0] is not None and h[1]:
+                            # just found itself against the boards: its heading is exact, no drive needed
+                            self.tracker.robot_at(p[0], p[1])
+                            self.tracker.follow(robot, p[0], p[1])
+                            self.history.clear()
+                            self.tracker.hold(HOLD_CM)
+                            headed = True
+                        else:
+                            headed = not (self.board.edge_room(p[0], p[1])[0] < EDGE_TURN_CM + 3) and \
+                                self.acquire_heading(robot, p) is not None
+                        if headed:
                             self.set_corrections(robot, self.move_corrections(robot))
                             ok, why = self.park(robot)
                             if ok:

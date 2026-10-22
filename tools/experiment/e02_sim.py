@@ -258,6 +258,7 @@ class SimCamera:
         import camera as SC
         import config as SCFG
         self.w = world
+        self.t_start = time.time()
         cfg = SCFG.load_config(os.path.join(TOOLS, "sim", "configs", "real_oct18.json"))
         c = cfg.camera
         c.floor_width_cm = 640.0 / args.px_per_cm
@@ -363,7 +364,15 @@ class SimCamera:
     def render(self):
         self.sync_bricks()
         img = self.bg.copy()
+        hide = os.environ.get("E02_SIM_HIDE", "")          # "Left:600:660": not drawn from 600 to 660 s (a shadow)
+        hidden = set()
+        for h in hide.split(",") if hide else []:
+            name, a, b = h.split(":")
+            if float(a) <= time.time() - self.t_start <= float(b):
+                hidden.add(name)
         for r in self.w.robots:
+            if getattr(r, "name", None) in hidden:
+                continue
             x, y, th, lv = self.w.view(r)
             col = (lv, lv, lv)
             self.R.draw_robot(img, x, y, math.radians(th), 0.0, col, col)
