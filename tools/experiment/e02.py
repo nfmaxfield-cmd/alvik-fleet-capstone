@@ -98,12 +98,21 @@ CHECK_CM, CHECK_FRAC = 5.0, 0.35   # camera vs wheels: a go leg's distances may 
 ID_EXTRA_CM = 5.0                  # ...plus this on the first leg after a turn on the spot (its centre is rougher)
 PARK_LEG_CM = 60.0        # parking: long legs on the robot's own wheels and gyro, the camera checks in between
 STALE_S = 1.5             # a camera position older than this is not used to steer
+BLIND_PIECE_CM = 15.0     # driving blind (own wheels and gyro): drives no longer than this
+BLIND_EDGE_CM = 15.0      # ... never to a point nearer an open edge than this
+BLIND_RETRACE_LEGS = 6    # ... retracing: its last this many drives
 BLOCKS_FIND_CM = 35.0     # a robot put aside this near the find's staging point blocks every find
 RESCUE_EDGE_CM = 15.0     # a lost robot finds itself against the boards only if last seen this far in from the open edges (park spots: 17+)
 SWEEP_STEP_DEG = 30.0     # a finder robot turns in these steps, reading its front sensor after each
 SWEEP_RANGE_CM = 70.0     # ... a reading nearer than this
 SWEEP_GAP_CM = 8.0        # ... and this much shorter than the map says is something not on the map
 SWEEP_NEAR_CM = 25.0      # the camera then looks for the lost robot's turn within this of it
+FRONT_OFFSET_CM = 0.0     # front sensor reading minus the map's distance (data before the session; set it from the
+                          # next real session's front_checks.csv: none yet, the simulator agrees within 1 cm)
+FRONT_TOL_CM = 8.0        # ... and how far a reading may be from that before it counts as a disagreement
+FRONT_STEER_FACTOR = 1.5  # a disagreement this many tolerances, with a measured heading, makes the runner find it again
+FRONT_LEARN_MIN = 8       # --front-learn: readings before the learned offset and tolerance are used
+FRONT_LEARN_MIN_TOL = 3.0
 FRONT_CHECK_RANGE_CM = 50.0  # the front-sensor check only counts things nearer than this
 FRONT_CHECK_CM = 6.0      # ... and says so when the sensor and the map differ by more
 EXPECT_TURN_CM = 7.0       # a robot turning on its spot stays within this of where it stood (camera's view)
@@ -295,6 +304,8 @@ class Runner:
         self.bricks_guard = None      # the brick demo's free_space while objects are on the board (camera watchdog)
         self.link = self.listener = self.watch = self.pi = None
         self.feed = self.tracker = self.history = self.cam = self.board = None
+        self.front_seen = {}                 # "all" -> [front reading - map distance]
+        self.front_bad = {}                  # robot -> words: the last leg's front reading disagreed with the map
 
     # --- talking ----------------------------------------------------------------------------------
     def say(self, msg, quiet=False):
@@ -579,10 +590,32 @@ class Runner:
                 w.writerow(["t", "robot", "leg", "value", "x_cm", "y_cm", "heading_deg", "heading_measured",
                             "front_cm", "expected_cm", "what"])
             w.writerow(row)
-        if ahead is not None and ahead[0] <= FRONT_CHECK_RANGE_CM and abs(front - ahead[0]) > FRONT_CHECK_CM:
-            self.say("    %s: front sensor %.0f cm, the camera and map say %s at %.0f cm" % (
-                robot, front, ahead[1], ahead[0]), quiet=True)
+        if ahead is not None and ahead[0] <= FRONT_CHECK_RANGE_CM:
+            off, tol = self.front_limits()
+            miss = front - off - ahead[0]
+            if h[1]:
+                self.front_seen.setdefault("all", []).append(front - ahead[0])
+            if abs(miss) > tol:
+                self.say("    %s: front sensor %.0f cm, the camera and map say %s at %.0f cm" % (
+                    robot, front, ahead[1], ahead[0]), quiet=not (h[1] and abs(miss) > FRONT_STEER_FACTOR * tol))
+                if h[1] and abs(miss) > FRONT_STEER_FACTOR * tol:
+                    # a measured heading, and the sensor far from the map: the camera position is suspect
+                    self.front_bad[robot] = "the front sensor reads %.0f cm, the map says %s at %.0f cm" % (
+                        front, ahead[1], ahead[0] + off)
         return front, ahead
+
+    def front_limits(self):
+        """(offset, tolerance) cm for the front sensor against the map. Nick, 2026-10-22: for now from data gathered
+        before the session (FRONT_OFFSET_CM / FRONT_TOL_CM, to be set from the front_checks.csv of the next real
+        session); --front-learn (off by default) learns them in this session instead, from scratch, once
+        FRONT_LEARN_MIN readings are in: the median of reading - map, and 3 x its spread (MAD x 1.48), at least
+        FRONT_LEARN_MIN_TOL. NOTE (Nick): switch to --front-learn once the from-scratch setup can stand on it."""
+        v = self.front_seen.get("all") or []
+        if getattr(self.a, "front_learn", False) and len(v) >= FRONT_LEARN_MIN:
+            med = float(np.median(v))
+            mad = float(np.median([abs(x - med) for x in v])) * 1.4826
+            return med, max(FRONT_LEARN_MIN_TOL, 3.0 * mad)
+        return FRONT_OFFSET_CM, FRONT_TOL_CM
 
     def ahead_cm(self, robot, p, heading):
         """Distance from the robot's front face to the first thing straight ahead, by the map: (cm, what) or None.
@@ -834,6 +867,7 @@ class Runner:
                          arrive_cm=arrive_cm, max_leg=max_leg)
         stuck = 0
         blocked = 0
+        self.front_bad.pop(robot, None)
         while True:
             p = self.settle(min_s=0.3, timeout=2.0)
             if p is None:
@@ -856,6 +890,14 @@ class Runner:
             if steer.heading is not None:
                 self.heads[robot] = [steer.heading, steer.measured]     # the front-sensor check reads it
             p0, p1, res = self.leg(robot, cmd, run=run)
+            fb = self.front_bad.pop(robot, None)
+            if fb and p1 is not None and not res.startswith("camera and wheels"):
+                p1 = self.refind(robot, fb)
+                if p1 is None:
+                    return False, fb
+                steer.heading, steer.measured = None, False
+                steer.legs += 1
+                continue
             if res.startswith("camera and wheels"):
                 if p1 is None or self.disagree[robot] >= 2:
                     return False, res
@@ -1291,6 +1333,107 @@ class Runner:
             else:
                 self.say("It moved, but parking failed: %s. Put it somewhere open again and press Enter." % why)
 
+    # --- moving a robot the camera can't see, on its own wheels and gyro (Nick, 2026-10-22) -------------------
+    def own_pose(self, robot, since=0.0):
+        """The robot's own position (x, y, heading) from its last finished leg: wheels and gyro since the last
+        camera fix or find, in the board's frame. None if it has not reported one."""
+        r = self.listener.latest("LEG", robot, since)
+        if not r:
+            return None
+        x, y, th = num(r[1].get("x_cm")), num(r[1].get("y_cm")), num(r[1].get("th_deg"))
+        return None if None in (x, y, th) else (x, y, th)
+
+    def own_path(self, robot, n=BLIND_RETRACE_LEGS):
+        """Where the robot's own pose was at the end of each of its last n finished drives (newest last)."""
+        out = []
+        with self.listener.cv:
+            for t, nm, rec in self.listener.recs["LEG"]:
+                st_ = rec.get("state") or rec.get("result")
+                if nm == robot and st_ == "done" and rec.get("kind") == "go":
+                    x, y = num(rec.get("x_cm")), num(rec.get("y_cm"))
+                    if x is not None and y is not None:
+                        out.append((x, y))
+        return out[-n:]
+
+    def drive_blind(self, robot, waypoints):
+        """Drive through waypoints on the robot's own pose: turn to face each, then short drives
+        (BLIND_PIECE_CM), the front stop and the edge guard on. After every drive the front sensor is checked
+        against what the map says should be ahead (boards, robots we know of): landmarks confirm the pose. Returns
+        (ok, words)."""
+        if not self.begin_moves(robot, "driving blind"):
+            return False, "could not start its moves"
+        for wp in waypoints:
+            for _ in range(20):
+                pose = self.own_pose(robot)
+                if pose is None:
+                    return False, "it has not said where it thinks it is"
+                d = math.hypot(wp[0] - pose[0], wp[1] - pose[1])
+                if d < 3.0:
+                    break
+                if not self.board.on_board(wp[0], wp[1], margin=BLIND_EDGE_CM):
+                    return False, "the way out runs near an open edge"
+                turn = ST.wrap180(math.degrees(math.atan2(wp[1] - pose[1], wp[0] - pose[0])) - pose[2])
+                if abs(turn) > ST.MIN_TURN_DEG:
+                    state, info = self.send_leg(robot, "turn %.1f" % turn, abs(turn) / TURN_DPS_GUESS * 2.5 + 6.0)
+                    if state not in ("done", "dup"):
+                        return False, "a turn did not finish (%s %s)" % (state, info)
+                go = min(d, BLIND_PIECE_CM)
+                state, info = self.send_leg(robot, "go %.1f" % go, go / DRIVE_CMS_GUESS * 2.5 + 6.0)
+                if state not in ("done", "dup"):
+                    return False, "a drive did not finish (%s %s)" % (state, info)
+                # landmarks: what is ahead by its own pose against what its front sensor reads
+                pose = self.own_pose(robot)
+                m = re.search(r"front=([0-9.]+)", info or "")
+                if pose and m and float(m.group(1)) > 0:
+                    ahead = self.ahead_cm(robot, pose[:2], pose[2])
+                    off, tol = self.front_limits()
+                    if ahead and ahead[0] <= FRONT_CHECK_RANGE_CM and \
+                            abs(float(m.group(1)) - off - ahead[0]) > FRONT_STEER_FACTOR * tol:
+                        return False, "its front sensor reads %.0f cm where its own pose puts %s at %.0f cm" % (
+                            float(m.group(1)), ahead[1], ahead[0])
+        return True, ""
+
+    def drive_out(self, robot):
+        """A robot the camera can't see, or can't park, stuck where it blocks the others (the find's corner): drive
+        it to its park spot on its own pose, round the robots we know of; else retrace its last drives backwards
+        (that way was clear a moment ago); then the camera looks for it where it should be. Returns (x, y) or
+        None."""
+        pose = self.own_pose(robot)
+        if pose is None:
+            return None
+        if self.tracker is not None and robot in self.tracker.hand_moved:
+            return None                    # moved by hand: its own pose is wrong
+        self.say("  %s drives out on its own wheels and gyro (the camera can't follow it there) ..." % robot)
+        self.mark("e02 drive out %s" % robot)
+        px, py, _ = self.board.park(self.park_index(robot))     # its own park spot: out of every route's way
+        wps = self.safe_path(robot, pose[:2], (px, py)) or [(px, py)]
+        ok, words = self.drive_blind(robot, wps)
+        if not ok:
+            self.say("  %s: %s; retracing its last drives instead ..." % (robot, words))
+            back = list(reversed(self.own_path(robot)))
+            pose2 = self.own_pose(robot)
+            back = [q for q in back if pose2 is None or math.hypot(q[0] - pose2[0], q[1] - pose2[1]) > 3.0]
+            if not back:
+                return None
+            ok, words = self.drive_blind(robot, back)
+            if not ok:
+                self.say("  %s: %s" % (robot, words))
+                return None
+        self.moves.pop(robot, None)
+        pose = self.own_pose(robot)
+        self.fresh_floor()
+        p = self.identify(robot, near=(pose[0], pose[1], SWEEP_NEAR_CM)) if pose else None
+        if p is not None:
+            self.say("  %s is in view again at (%.1f, %.1f) cm." % (robot, p[0], p[1]))
+            return p
+        if pose is not None:
+            # it drove there without trouble, but the camera can't see it there either: go by its own pose (the
+            # others are planned round it; better than leaving it where every find drives)
+            self.say("  The camera can't see %s at (%.0f, %.0f) cm, where it drove; going by its own position." % (
+                robot, pose[0], pose[1]))
+            return (pose[0], pose[1])
+        return None
+
     def keep_on_map(self, robot):
         """A robot put aside stays on the board as an obstacle the others go round: try once more to find where it
         is (a turn on its spot, no Nick); if that fails, keep the last place it was seen. During setup nobody knows
@@ -1316,7 +1459,19 @@ class Runner:
         fx, fy = self.board.find_stage()
         if math.hypot(p[0] - fx, p[1] - fy) < BLOCKS_FIND_CM:
             # dry run 13:15: a robot put aside by the blocked corner, where every find drives: every run after it
-            # failed its find. Better to stop and say so than to fail run after run.
+            # failed its find. Nick (2026-10-22): drive it out blind first (its own pose, landmarks, retracing),
+            # then the finder sweep and its own find; stop only if all of that fails.
+            self.say("  %s is in the corner every find drives to: moving it out ..." % robot)
+            q2 = self.drive_out(robot) or self.sweep_for(robot) or self.rescue_find(robot)
+            if q2 is not None and math.hypot(q2[0] - fx, q2[1] - fy) >= BLOCKS_FIND_CM:
+                self.st["positions"][robot] = [q2[0], q2[1], None]
+                if self.tracker is not None:
+                    self.tracker.robot_at(q2[0], q2[1])
+                    self.tracker.park(robot, q2[0], q2[1])
+                self.say("  %s stays at about (%.0f, %.0f) cm, out of the way; the others go round it." % (
+                    robot, q2[0], q2[1]))
+                self.st.save()
+                return
             raise SystemExit("%s is put aside at about (%.0f, %.0f) cm, in the corner every robot's find drives to, "
                              "so no run can start. Take %s off the board, then start again with --resume." % (
                                  robot, p[0], p[1], robot))
@@ -3385,6 +3540,9 @@ def main(argv=None):
     ap.add_argument("--side-port", type=int, default=8001)
     ap.add_argument("--stream-q", type=int, default=0, help="JPEG quality of the live camera stream (0 = the Pi's "
                                                               "default, 95; e.g. 70 for more pictures a second)")
+    ap.add_argument("--front-learn", action="store_true",
+                    help="learn the front sensor's offset and spread against the map in this session (from scratch); "
+                         "off: the values from data (FRONT_OFFSET_CM, FRONT_TOL_CM)")
     ap.add_argument("--no-side", action="store_true", help="no side camera this session: don't check or ask about it")
     ap.add_argument("--map", action="store_true", help="after setup, one robot maps the board by touch (about 6 min)")
     ap.add_argument("--map-only", action="store_true", help="setup and the mapping only, then stop")

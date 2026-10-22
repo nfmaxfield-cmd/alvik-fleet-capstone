@@ -134,3 +134,39 @@ def test_move_in_point_keeps_clear_of_both_open_edges():
     assert q is not None
     for a, v in b.open_edges():
         assert abs((q[0] if a == "x" else q[1]) - v) >= 27.9, (q, a, v)
+
+
+def test_front_limits_from_data_unless_learning():
+    import e02 as E
+    import types
+    r = E.Runner.__new__(E.Runner)
+    r.a = types.SimpleNamespace(front_learn=False)
+    r.front_seen = {"all": [4.0] * 20}
+    assert r.front_limits() == (E.FRONT_OFFSET_CM, E.FRONT_TOL_CM)
+    r.a.front_learn = True
+    off, tol = r.front_limits()
+    assert off == 4.0 and tol == E.FRONT_LEARN_MIN_TOL
+
+
+def test_drive_blind_stops_when_landmarks_disagree():
+    """Driving on its own pose: the front sensor reading far from what the map says ahead ends the drive."""
+    import e02 as E
+    import types
+    r = E.Runner.__new__(E.Runner)
+    r.board = _board()
+    r.a = types.SimpleNamespace(front_learn=False)
+    r.front_seen = {}
+    r.st = {"positions": {}}
+    r.begin_moves = lambda *a, **k: True
+    pose = {"p": (60.0, 80.0, 90.0)}                    # facing the x-board (119.4): 34.6 cm ahead of its front
+    r.own_pose = lambda robot, since=0.0: pose["p"]
+
+    def send_leg(robot, text, timeout):
+        v, a = text.split()
+        if v == "go":
+            x, y, th = pose["p"]
+            pose["p"] = (x, y + float(a), th)
+        return "done", "front=5.0"                       # something right in front: not on the map
+    r.send_leg = send_leg
+    ok, words = r.drive_blind("Left", [(60.0, 100.0)])
+    assert not ok and "front sensor" in words
