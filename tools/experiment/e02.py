@@ -1063,7 +1063,7 @@ class Runner:
             self.st.save()
         return ok, why
 
-    def recover(self, robot, park=True):
+    def retry_find(self, robot, park=True):
         """One try at getting a robot back with nobody's hands: a fresh picture of the floor, a turn on its spot,
         which way it faces, then parking. Returns (ok, words)."""
         time.sleep(1.0)
@@ -1178,7 +1178,7 @@ class Runner:
                 self.mark("e02 auto-retry %s %d: %s" % (robot, k + 1, problem))
                 self.st.setdefault("auto_retries", []).append([round(time.time(), 1), robot, problem])
                 self.send(robot, "stop")
-                ok, why = self.recover(robot, park)
+                ok, why = self.retry_find(robot, park)
                 if ok:
                     self.say("  %s is back without help." % robot)
                     return True
@@ -1251,7 +1251,7 @@ class Runner:
                 continue
             self.say("Taking a fresh picture of the board (keep hands out of it), then %s turns a little on its "
                      "spot ..." % robot)
-            ok, why = self.recover(robot, park)
+            ok, why = self.retry_find(robot, park)
             if ok:
                 return True
             if why == "noturn":

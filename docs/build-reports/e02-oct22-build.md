@@ -23,7 +23,8 @@ going until the usage runs out, then make the logic more generic. Plan and check
 1. **Obstacle stops:** a robot backs off 8 cm, then turns a quarter turn toward the board's middle. After 3 blocks
    it stops.
 2. **Retries:** three tries on its own before Nick is called. If the camera can't see it at all, another robot
-   sweeps for it with its front sensor.
+   sweeps for it with its front sensor, and failing that the lost robot finds itself against the two boards on its
+   own wheels and gyro (the find's front stop, bump check and edge guard keep it safe); then the camera looks there.
 3. **Move-in:** only within 14 cm of an open edge, to a point 25+ cm from both boards. A robot found at an open
    edge is never driven.
 4. **Firmware 2026-10-22b:**
@@ -43,16 +44,16 @@ going until the usage runs out, then make the logic more generic. Plan and check
    another. On last night's four clips, all pass as before.
 6. **Front-sensor check:** after every leg, the front reading is compared with the map and written to
    `front_checks.csv`. It's recorded only, until a real session sets the limits.
-7. **Generic design outline:** `docs/build-plans/generic-platform-outline.md`, to discuss.
+7. **Today's footage is a permanent test:** Left's failing minute (never takes Right, never past the wall, seen
+   70%+), with last night's four clips. `get_clips.py` downloads it.
+8. **Generic design outline:** `docs/build-plans/generic-platform-outline.md`, to discuss.
 
 ## What's next
 - **Nick:** upload firmware 2026-10-22b to all three robots before the next session (the runner refuses older).
 - A robot pressed against a board is still unseen for stretches (10:40:30-40 on the footage: 30% seen).
-- The lost robot finding itself against the boards needs a firmware "find from my own pose" mode.
 - The second camera, once the overhead tracker holds.
 
 ## Sweep 1: new tests that may now be needed
-- Today's footage as a regression clip (like last night's four), once the release's two video parts are joined.
 - A simulator run where a robot is hidden from the camera, to exercise the finder sweep end to end. Today it is
   only tested with a stub robot.
 - The edge guard's new "no plywood at the start" stop, on the real robot at an open edge (simulator only so far).

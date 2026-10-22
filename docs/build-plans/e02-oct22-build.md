@@ -45,9 +45,10 @@ logic more generic for other equipment and sensors.
 - [ ] Nick's ideas: robot-to-robot check (front_checks.csv already lists another robot ahead); finder robot sweep; the lost
       robot does a find to rescue itself; second camera (after the overhead tracker is solid); colour sensor (low)
 - [x] Generic: outline for discussion, docs/build-plans/generic-platform-outline.md
-- [ ] The lost robot finds itself against the boards (self-rescue find): not built. The firmware's find wants a
-      camera fix first, and a lost robot's own pose may be far off; needs a firmware "find from my own pose" mode
-      and a simulator test with a robot pushed by hand. Next build.
+- [x] The lost robot finds itself against the boards (rescue find): no firmware change needed (the firmware keeps
+      its own pose between camera fixes; `run find` without a fix uses it). Only when last seen 25+ cm in from the
+      open edges and not moved by hand. Simulator: E02_SIM_HIDE="Left:110:170" hides a robot from the camera.
+- [x] Today's footage as a regression test (tests/test_e02_realclips.py::test_tracker_on_oct22_footage)
 
 ## Before the next session
 Nick uploads firmware 2026-10-22b to all three robots (same steps as this morning: Tools > Port, each robot).
