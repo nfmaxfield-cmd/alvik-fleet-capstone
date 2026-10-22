@@ -125,4 +125,13 @@ not known yet (to check on the next real footage).
   it drove out on its own wheels and gyro to its spot (the camera never saw it), and Center and Right ran their
   runs. One more fix on the way: the front-sensor landmark check only counts boards met within 45 deg of head-on
   (at 19 deg the simulated sensor read 92 cm for a board 42 cm away, which stopped the drive out).
+- **Search before stopping (Nick, 16:30):** when nobody knows where a robot is (camera blind and its own find
+  failed, or a find whose end the camera did not see), another robot searches: its own find first (exact position),
+  then lookout points 40/85 cm in from the boards, sweeping its front sensor at each; a stop for something in front
+  where the map is clear also counts as a hit. The camera checks each hit; if it can't see there, the hit is taken
+  as the robot's place. The session stops only if the whole search finds nothing. In the simulator the search ran
+  once and failed for a reason now fixed (it planned round the lost robot's stale place, so no lookout had a clear
+  way); the fixed version is tested with stand-in robots only, because the random failed find that leads to it did
+  not come up again in two more runs (both recovered earlier, by the robot's own find and drive out). Also: poses
+  a robot reports after a failed find are not trusted until the camera fixes it.
 
