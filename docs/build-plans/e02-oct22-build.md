@@ -70,3 +70,10 @@ Nick uploads firmware 2026-10-22b to all three robots (same steps as this mornin
 4. **Setup questions optional:** the robots' mapping and board touches measure the board lines; the picture's
    questions become a cross-check (Nick, 19:33).
 5. Check tonight's footage for the moving-robot fixes (newest picture, moving beats still, no ghosts).
+
+## Backlog (Nick, 2026-10-23)
+- **Unknown objects onto the map**: a front-sensor stop where the map is clear (no robot, no board) puts an obstacle
+  on the map that paths go round; a parked robot in the way is asked to move aside. Not needed now; fold into a
+  build later. Default slot: Thursday morning (last of the usage), sooner if a session shows a reason.
+- **Engineer alerts in the live view** (decisions clicked, phone alert): later; assessment first
+  (docs/build-plans/engineer-loop.md).
