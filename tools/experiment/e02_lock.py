@@ -194,9 +194,10 @@ class LockTracker:
         return self.base is not None and self.pos is not None
 
     # --- every picture --------------------------------------------------------------------------------------------
-    def step(self, img, t, predict=None, still=False, search_cm=SEARCH_CM, feat=None, in_leg=False):
+    def step(self, img, t, predict=None, still=False, search_cm=SEARCH_CM, feat=None, in_leg=False, pin_cm=None):
         """One picture. predict: (x, y) where the robot should be, if the runner knows (else: last place moved on by
-        its recent speed). still: the runner says it stands still (its look may be refreshed). Returns (t, x, y,
+        its recent speed). still: the runner says it stands still (its look may be refreshed). pin_cm: the wheels
+        say it stays at predict (a turn on its spot): a match further than this from it is not taken. Returns (t, x, y,
         score) when the match is good, else None; after LOST_S of poor matches it lets go (locked becomes False)."""
         if not self.locked:
             return None
@@ -214,6 +215,12 @@ class LockTracker:
             return self._miss(t)
         score, cu, cv_, a = b
         self.score = float(score)
+        if pin_cm is not None and predict is not None:
+            mx, my = self._floor(cu, cv_)
+            if not (np.isfinite(mx) and np.isfinite(my)) or math.hypot(mx - predict[0], my - predict[1]) > pin_cm:
+                # 2026-10-23, Right 20:26:20 in the bright corner: mid-turn the match crept 9 cm onto the boards'
+                # corner and stayed there; the wheels said it was turning on its spot
+                score = min(score, MATCH_OK - 1e-3)
         if score < MATCH_OK:
             if in_leg:
                 # mid-leg (a turn on its spot blurs the picture): a poor match is expected and not a loss; after the

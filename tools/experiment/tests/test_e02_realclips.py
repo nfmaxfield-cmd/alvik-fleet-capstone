@@ -132,16 +132,19 @@ def test_tracker_on_oct22_footage():
     assert len(seen) / n >= 0.70, len(seen) / n
 
 
-def test_lock_on_oct22_evening():
-    """The lock-on tracker (e02_lock.py), 2026-10-22 19:29:59-19:32:15: Left with its lights steady while driving,
-    beside the x-board; the runner (the floor-memory detector alone) lost it four times here. Handed Left once at
-    the start, told nothing about its look; the empty board's edges taken out; its look taken again after each turn
-    on its spot. Pass: seen in at least 85% of pictures (91% when written) and within 6 cm of each of the runner's
-    four camera fixes (checked by eye on the footage: on the robot in every 5 s picture)."""
+@pytest.mark.parametrize("name,share", [("oct22eve_left", 0.85), ("oct22eve_center", 0.80), ("oct22eve_right", 0.85)])
+def test_lock_on_oct22_evening(name, share):
+    """The lock-on tracker (e02_lock.py) on the three evening stretches where the runner (the floor-memory detector
+    alone) lost a robot four times each (Left 19:30 beside the x-board, Center 20:09 in the open corner, Right 20:26
+    in the bright, noisy corner where its top washes out). Handed the robot once at the start, told nothing about its
+    look (its lights are steady while it drives); the empty board's edges taken out; its look taken again after each
+    turn on its spot, and held to its spot during the turn (the wheels say it does not move).
+    Pass: seen in at least `share` of pictures (when written: 91%, 85%, 92%) and within 6 cm of each of the runner's
+    camera fixes in the stretch (checked by eye on the footage: on the robot in every 5 s picture)."""
     import e02_camera as CAM
     import e02_lock as L
     import e02_replay as R
-    m = json.load(open(os.path.join(DATA, "oct22eve_left.json")))
+    m = json.load(open(os.path.join(DATA, name + ".json")))
     video, frames = os.path.join(CLIPS, m["video"]), os.path.join(CLIPS, m["frames"])
     if not (os.path.exists(video) and os.path.exists(frames)):
         pytest.skip("Oct 22 evening footage not here (python tools/experiment/get_clips.py)")
@@ -162,11 +165,12 @@ def test_lock_on_oct22_evening():
         if any(g[2] == "turn" and g[1] + 0.3 < t <= g[1] + 0.345 for g in legs):
             lk.retake(img, t)
         cur = [g for g in legs if g[0] - 0.1 <= t <= g[1] + 0.3]
-        pred = (lk.pos[1], lk.pos[2]) if cur and cur[0][2] == "turn" else None
-        s = lk.step(img, t, predict=pred, still=not cur, in_leg=bool(cur))
+        turning = bool(cur) and cur[0][2] == "turn"
+        pred = (lk.pos[1], lk.pos[2]) if turning else None
+        s = lk.step(img, t, predict=pred, still=not cur, in_leg=bool(cur), pin_cm=3.0 if turning else None)
         seen += s is not None
         out.append((t, s))
-    assert seen >= 0.85 * len(out), (seen, len(out))
+    assert seen >= share * len(out), (seen, len(out))
     for tf, x, y in m["fixes"]:
         near = [s for t, s in out if s is not None and abs(t - tf) < 0.5]
         assert near, ("not seen at fix", tf)
