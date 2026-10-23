@@ -239,3 +239,25 @@ def test_search_takes_a_blocked_drive_as_a_hit():
     r.identify = lambda robot, near=None: None              # the camera can't see it there either
     p = r.search_for("Left")
     assert p is not None and abs(p[0] - 60.0) < 1 and p[1] > 50.0  # just ahead of the stopped searcher
+
+
+def test_map_never_aims_at_open_corner():
+    import e02_map as MAP
+    mid, corner = (60.0, 60.0), (120.0, 120.0)
+    assert MAP.toward_corner(mid, 45.0, corner)
+    assert MAP.toward_corner(mid, 60.0, corner)
+    assert not MAP.toward_corner(mid, 80.0, corner)
+    assert not MAP.toward_corner(mid, -135.0, corner)
+    hs = [h for h in MAP.ray_headings(16) if MAP.toward_corner(mid, h, corner)]
+    assert len(hs) == 2          # 33.75 and 56.25 deg: both within 25 deg of 45
+
+
+def test_refused_leg_is_not_cross_checked():
+    """2026-10-22 20:00: a refused back-off re-checked the previous ray's 72 cm of wheels, refind backed off again,
+    forever. A leg whose id did not change is not checked; nothing is checked inside a refind."""
+    import inspect
+    import e02
+    src = inspect.getsource(e02.Runner.leg)
+    assert "lid_before" in src and "self.refinding" in src
+    src = inspect.getsource(e02.Runner.refind)
+    assert "self.refinding.add" in src and "discard" in src

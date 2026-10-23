@@ -306,6 +306,7 @@ class Runner:
         self.main_lid = {}            # robot -> id of the last leg() asked for (not a refind's turns)
         self.watch_count = defaultdict(int)  # robot -> watchdog stops in the current drive
         self.disagree = defaultdict(int)  # robot -> camera / wheels disagreements in a row
+        self.refinding = set()            # robots being found again (no camera/wheels check inside: no recursion)
         self.fresh_id = {}            # robot -> True: its position came from identify() and it has not driven since
         self.watch_edge_cm = None     # the watchdog's open-edge distance (None: PL.WATCH_EDGE_CM; mapping: 0)
         self.bricks_view = None       # the brick demo's drawing on the live view (bricks, path, tracks), or None
@@ -704,6 +705,7 @@ class Runner:
         the room behind it and a camera fix is sent (the firmware allows e02_back_max_cm of blind backing per
         fix). Returns (p0, p1, words)."""
         kind, val = ("go" if cmd[0] == "probe" else cmd[0]), float(cmd[1])
+        lid_before = self.last_lid.get(robot)
         p0 = self.settle(min_s=0.3, timeout=1.5)
         pieces = [val]
         if kind == "go" and val < -BACK_MAX_CM:
@@ -743,7 +745,11 @@ class Runner:
         self.main_lid[robot] = self.last_lid.get(robot)
         p1 = self.settle(t_from=time.time() - 0.6, min_s=0.3, timeout=2.0)
         self.front_check(robot, p1, words, kind, val)
-        if kind == "go" and p0 is not None and len(pieces) == 1:
+        # only a leg that really ran is checked: a refused one leaves last_lid at the leg before, whose wheel
+        # distance would be compared again (2026-10-22 20:00: a back-off refused at the open edge -> refind ->
+        # back-off refused -> ... "the camera saw it move 0 cm, its wheels say 72 cm" once a second, forever)
+        ran = self.last_lid.get(robot) != lid_before
+        if kind == "go" and p0 is not None and len(pieces) == 1 and ran and robot not in self.refinding:
             bad = self.cross_check(robot, p0, p1)
             if bad:
                 words = "camera and wheels disagree (%s)" % bad
@@ -790,6 +796,13 @@ class Runner:
         just then). Returns its position, or None (then the caller gives up and, twice in a row, Nick is called)."""
         self.disagree[robot] += 1
         self.say("    %s: %s: finding it again by a short turn on its spot" % (robot, why))
+        self.refinding.add(robot)
+        try:
+            return self._refind(robot, why)
+        finally:
+            self.refinding.discard(robot)
+
+    def _refind(self, robot, why):
         self.st.setdefault("disagreements", []).append([round(time.time(), 1), robot, why, self.order])
         self.send(robot, "stop")
         time.sleep(0.5)
@@ -2146,7 +2159,16 @@ class Runner:
         self.watch_edge_cm = 0.0
         try:
             others = [(n, tuple(q[:2])) for n, q in st["positions"].items() if n != robot and q]
+            (_, cx), (_, cy) = self.board.open_edges()
+            self.disagree[robot] = 0
             for k, h in enumerate(MAP.ray_headings(n_rays)):
+                if MAP.toward_corner(mid, h, (cx, cy)):
+                    self.say("  ray %2d, %4.0f deg: skipped (toward the corner of the two open edges)" % (k + 1, h))
+                    rays.append(dict(k=k, heading=round(h, 1), skipped="open corner", kind=None))
+                    continue
+                if self.disagree[robot] >= 2:
+                    self.say("  the camera and %s's wheels disagreed twice: mapping ends here" % robot)
+                    break
                 blocker = MAP.ray_blocked(mid, h, others)
                 if blocker:
                     self.say("  ray %2d, %4.0f deg: skipped (%s is parked that way)" % (k + 1, h, blocker))
@@ -2191,6 +2213,9 @@ class Runner:
                                                        (" at (%.1f, %.1f) cm" % tuple(ray["point"])) if ray.get("point") else ""))
                 # straight back: off the edge first (a turn on the spot puts a wheel over an edge it is this close
                 # to: firmware edge.h), then turn round and forward (the guards look ahead; backing up is blind)
+                if p1 is None and words.startswith("camera and wheels disagree"):
+                    self.say("  the camera can't find %s again after this ray: mapping ends here" % robot)
+                    break
                 back = math.hypot(p1[0] - p0[0], p1[1] - p0[1]) if (p0 and p1) else None
                 q = p1 or p0
                 if kind == "edge" or (q and self.board.edge_room(q[0], q[1])[0] < EDGE_TURN_CM + 3):

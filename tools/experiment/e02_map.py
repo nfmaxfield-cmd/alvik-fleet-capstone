@@ -29,6 +29,16 @@ def ray_headings(n=16, offset_deg=11.25):
     return [((offset_deg + 360.0 * k / n + 180.0) % 360.0) - 180.0 for k in range(n)]
 
 
+CORNER_SKIP_DEG = 25.0   # chosen: no ray within this of the open corner's bearing (a DOE would not help: a safety margin)
+
+
+def toward_corner(start, heading_deg, corner, within_deg=CORNER_SKIP_DEG):
+    """True when the ray from start points within within_deg of the corner where the two open edges meet (Nick,
+    2026-10-22 evening: never aim at it; both edge guards would have to stop it at once, with nothing behind)."""
+    b = math.degrees(math.atan2(corner[1] - start[1], corner[0] - start[0]))
+    return abs(((heading_deg - b) + 180.0) % 360.0 - 180.0) <= within_deg
+
+
 def ray_blocked(start, heading_deg, others, clear_cm=22.0, length_cm=RAY_CM):
     """Name of the first robot standing within clear_cm of the ray (it would stop the ray, or the camera watchdog
     would), or ''. others: [(name, (x, y))]."""
