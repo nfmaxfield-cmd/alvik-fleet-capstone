@@ -17,6 +17,18 @@ How it follows:
 The steady white lights the runner switches on while a robot drives (firmware `led`) make its look sharper; nothing
 here needs them.
 
+2026-10-23 (Nick: "we shouldn't need to tell the program what the two lights look like ... the program should do
+what it already does well: detect the robot based on motion. Once it locks on to that image, the tracker ... should
+keep track of it"): two changes made the learned look hold on the 19:30-19:32 evening footage (Left, lights steady,
+beside the x-board, where the runner lost it four times): seen in 91% of pictures, on the robot in every checked
+picture, 6-28 ms a picture:
+  - the scenery's own edges are taken out: the features are the picture's edges MINUS the empty floor's edges (the
+    detector's floor memory, dilated a little), so a board's edge beside the robot is not part of its look (before
+    this, after a re-take the look slid along the x-board);
+  - after a turn on its spot (the wheels say it did not move), its look is taken again where it stands (retake()):
+    a turn changes how its lights' glare falls on the floor, which turns wrongly with a stored look.
+Nothing about the robot is given beforehand; whatever is on it (lights, an attachment) becomes part of its look.
+
 Its score is one witness for the runner's confidence; the others (the detector's periodic check, wheels against the
 tracked move, the lights, the front sensor against the map) are combined in e02.py (Confidence).
 """
@@ -38,8 +50,11 @@ LOST_S = 1.0                  # poor matches this long in a row: let go
 
 
 class LockTracker:
-    def __init__(self, cam, rpx, z_cm):
+    def __init__(self, cam, rpx, z_cm, floor=None):
         self.cam = cam
+        self.floor_feat = None
+        if floor is not None:
+            self.set_floor(floor)
         self.rpx = float(rpx)
         self.z = z_cm
         self.base = None              # float32 patch, 2 robot widths square, centred on the robot (not turned)
@@ -63,12 +78,27 @@ class LockTracker:
 
     # --- its look -------------------------------------------------------------------------------------------------
     @staticmethod
-    def features(img):
+    def edges(img):
         """Edges: the gradient's size of the (blurred) grey picture, float32."""
+        if img.ndim == 3:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         g = cv2.GaussianBlur(img, (3, 3), 0).astype(np.float32)
         gx = cv2.Sobel(g, cv2.CV_32F, 1, 0, ksize=3)
         gy = cv2.Sobel(g, cv2.CV_32F, 0, 1, ksize=3)
         return cv2.magnitude(gx, gy)
+
+    FLOOR_GROW_PX = 5             # the floor's edges are widened this much (a picture shifts by a pixel or two)
+
+    def set_floor(self, floor_img):
+        """The empty floor (the detector's floor memory): its edges are taken out of every picture's."""
+        k = np.ones((self.FLOOR_GROW_PX, self.FLOOR_GROW_PX), np.uint8)
+        self.floor_feat = cv2.dilate(self.edges(floor_img), k)
+
+    def features(self, img):
+        f = self.edges(img)
+        if self.floor_feat is not None and self.floor_feat.shape == f.shape:
+            f = np.maximum(0.0, f - self.floor_feat)
+        return f
 
     def _patch(self, img, u, v, half):
         u, v, half = int(round(u)), int(round(v)), int(round(half))
@@ -149,6 +179,12 @@ class LockTracker:
         self.pos, self.uv, self.vel = (t, float(x), float(y)), (u, v), (0.0, 0.0)
         self.score, self.last_ok, self.angle = 1.0, t, 0.0
         return True
+
+    def retake(self, img, t):
+        """Take its look again where it stands (after a turn on its spot: the wheels say it did not move)."""
+        if self.pos is None:
+            return False
+        return self.start(img, self.pos[1], self.pos[2], t)
 
     def stop(self):
         self.base, self.tpls, self.pos = None, [], None

@@ -130,3 +130,44 @@ def test_tracker_on_oct22_footage():
         past = (y - wall_y) if bd.uy < 0 else (wall_y - y)       # how far past the wall limit, outwards
         assert past <= 3.5, ("past the wall", t, x, y)
     assert len(seen) / n >= 0.70, len(seen) / n
+
+
+def test_lock_on_oct22_evening():
+    """The lock-on tracker (e02_lock.py), 2026-10-22 19:29:59-19:32:15: Left with its lights steady while driving,
+    beside the x-board; the runner (the floor-memory detector alone) lost it four times here. Handed Left once at
+    the start, told nothing about its look; the empty board's edges taken out; its look taken again after each turn
+    on its spot. Pass: seen in at least 85% of pictures (91% when written) and within 6 cm of each of the runner's
+    four camera fixes (checked by eye on the footage: on the robot in every 5 s picture)."""
+    import e02_camera as CAM
+    import e02_lock as L
+    import e02_replay as R
+    m = json.load(open(os.path.join(DATA, "oct22eve_left.json")))
+    video, frames = os.path.join(CLIPS, m["video"]), os.path.join(CLIPS, m["frames"])
+    if not (os.path.exists(video) and os.path.exists(frames)):
+        pytest.skip("Oct 22 evening footage not here (python tools/experiment/get_clips.py)")
+    rec = R.MjpgPiece(video, frames, 0)
+    cam = CAM.load_camera(os.path.join(os.path.dirname(HERE), "data", "overhead_floorcal_roam1.json"))
+    rpx = CAM.ROBOT_CM * cam.px_per_cm(61, 61, CAM.ROBOT_TOP_CM)
+    floor = rec.read(rec.index(rec.t_frame(0) + m["floor_t_after_start"]))
+    lk = L.LockTracker(cam, rpx, CAM.ROBOT_TOP_CM, floor=floor)
+    i0, i1 = rec.index(m["start_t"]), rec.index(m["end_t"])
+    assert lk.start(rec.read(i0), m["at"][0], m["at"][1], rec.t_frame(i0))
+    legs = m["legs"]
+    out, seen = [], 0
+    for i in range(i0, i1 + 1):
+        t, img = rec.t_frame(i), rec.read(i)
+        if not lk.locked:
+            out.append((t, None))
+            continue
+        if any(g[2] == "turn" and g[1] + 0.3 < t <= g[1] + 0.345 for g in legs):
+            lk.retake(img, t)
+        cur = [g for g in legs if g[0] - 0.1 <= t <= g[1] + 0.3]
+        pred = (lk.pos[1], lk.pos[2]) if cur and cur[0][2] == "turn" else None
+        s = lk.step(img, t, predict=pred, still=not cur, in_leg=bool(cur))
+        seen += s is not None
+        out.append((t, s))
+    assert seen >= 0.85 * len(out), (seen, len(out))
+    for tf, x, y in m["fixes"]:
+        near = [s for t, s in out if s is not None and abs(t - tf) < 0.5]
+        assert near, ("not seen at fix", tf)
+        assert min(math.hypot(s[1] - x, s[2] - y) for s in near) < 6.0, ("off at fix", tf, x, y, near[0])

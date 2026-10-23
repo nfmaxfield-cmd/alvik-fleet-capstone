@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Download the real footage the regression tests replay into tools/experiment/data/clips/, for
 tests/test_e02_realclips.py: GitHub release `e02-setup-oct21` (setup.avi, 1.3 GB, and frames.csv) and the last piece
-of release `e02-session-oct22` (video.part-ab, 0.3 GB, and its frames.csv, saved as oct22_frames.csv). Needs access to the repository: a GitHub token in
+of release `e02-session-oct22` (video.part-ab, 0.3 GB, and its frames.csv, saved as oct22_frames.csv) and the first evening video of release
+`e02-session-oct22-evening` (video_1910.avi, 1.5 GB, for the lock-on tracker's test). Needs access to the repository: a GitHub token in
 GITHUB_TOKEN (or `gh auth token`).
 
     python tools/experiment/get_clips.py
@@ -14,7 +15,8 @@ import urllib.request
 
 REPO = "nfmaxfield-cmd/alvik-fleet-capstone"
 GET = (("e02-setup-oct21", {"setup.avi": "setup.avi", "frames.csv": "frames.csv"}),
-       ("e02-session-oct22", {"video.part-ab": "oct22_video.part-ab", "frames.csv": "oct22_frames.csv"}))
+       ("e02-session-oct22", {"video.part-ab": "oct22_video.part-ab", "frames.csv": "oct22_frames.csv"}),
+       ("e02-session-oct22-evening", {"video_1910.avi": "video_1910.avi", "frames_1910.csv": "frames_1910.csv"}))
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "clips")
 
 
