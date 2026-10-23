@@ -21,11 +21,16 @@ shows, how, and what it needs first. Newest at the bottom of each section.
 ## Tracking and confidence
 6. **Confidence threshold (DOE).** Which combined-confidence level should make a robot pause and confirm: false
    pauses vs wrong positions driven on, across levels; and how fast each witness confirms (a stop and a light blink:
-   seconds; a board touch: much longer).
+   seconds; a board touch: much longer). Written up: DOE-tracking.md (DOE 2).
 7. **Detector check rate (DOE).** Every stop + every 1 / 2 / 4 / 8 s: wrong locks caught and how soon, vs laptop load.
-   Starting value 2 s (chosen).
+   Starting value 2 s (chosen). Written up: DOE-tracking.md (DOE 1, by replay: no robot time).
 8. **Lock-on tracker vs off-the-shelf (OpenCV) vs the old floor-difference tracker** on the same footage: share of
    pictures followed, wrong-object locks, position error against hand-checked positions.
+   First pass (2026-10-23, three evening stretches, distance from the runner's camera fixes): detector alone seen
+   41 / 40 / 72%, 24 cm off Right twice; detector + lock-on 94 / 93 / 96%, all fixes within 6 cm, 31-40 ms a
+   picture; OpenCV CSRT 17 ms but drifted 24 cm off Right without saying so; OpenCV MIL as close at the fixes, but
+   67 ms a picture (too slow for 25 a second) and never says it lost the robot. Still to do: hand-checked truth
+   every second, not only at the fixes.
 
 ## Sensors
 9. **Cliff sense.** Each robot creeps up to the open edges at several angles (head-on, 30, 60 deg, the open

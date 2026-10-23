@@ -298,7 +298,7 @@ class Runner:
         self.trackf = open(os.path.join(session_dir, "track.csv"), "a", newline="")
         self.trackw = csv.writer(self.trackf)
         if os.path.getsize(os.path.join(session_dir, "track.csv")) == 0:
-            self.trackw.writerow(["t", "robot", "x_cm", "y_cm", "order", "phase"])
+            self.trackw.writerow(["t", "robot", "x_cm", "y_cm", "order", "phase", "source", "lock_score"])
         self.heads = {}               # robot -> [heading deg or None, measured bool]
         self.unavailable = set()
         self.last_result = ""
@@ -412,7 +412,10 @@ class Runner:
             except Exception:
                 pass
         if self.tracker is not None and self.tracker.active:
-            self.trackw.writerow(["%.3f" % s[0], self.tracker.active, "%.2f" % s[1], "%.2f" % s[2], self.order, self.phase])
+            lk = getattr(self.tracker, "lk", None)
+            self.trackw.writerow(["%.3f" % s[0], self.tracker.active, "%.2f" % s[1], "%.2f" % s[2], self.order, self.phase,
+                                  getattr(self.tracker, "source", "") or "",
+                                  "%.2f" % lk.score if lk is not None and lk.locked else ""])
 
     def pos(self, robot=None, fresh_s=1.5):
         p = self.tracker.where()
@@ -685,7 +688,7 @@ class Runner:
             r = val + EXPECT_GO_EXTRA_CM
         else:
             return
-        self.tracker.expect(p[1], p[2], r, for_s=timeout + 3.0)
+        self.tracker.expect(p[1], p[2], r, for_s=timeout + 3.0, kind="turn" if verb == "turn" else "go")
 
     def room_behind(self, robot, p, back_cm):
         """Backing up is blind (no edge guard, no front sensor): is there room behind for back_cm, by the camera?
@@ -4068,6 +4071,14 @@ def launch(a, state, sdir, sim):
             pass
         if feed:
             feed.close()
+        if run.tracker is not None and getattr(run.tracker, "stats", None):
+            st_ = dict(run.tracker.stats)
+            state.setdefault("tracker_stats", []).append(dict(t=round(time.time(), 1), **st_))
+            n = sum(st_.get(k, 0) for k in ("lock", "detector", "held", "none")) or 1
+            run.say("Tracker: position from the lock-on %.0f%%, the detector %.0f%%, held %.0f%%, none %.0f%% of pictures; "
+                    "detector checks agreed %d of %d (it saw the robot), %d re-locks" % (
+                        100.0 * st_["lock"] / n, 100.0 * st_["detector"] / n, 100.0 * st_["held"] / n,
+                        100.0 * st_["none"] / n, st_["agree"], st_["agree"] + st_["disagree"], st_["relocks"]))
         state.save()
         run.trackf.close()
         if sim is not None:

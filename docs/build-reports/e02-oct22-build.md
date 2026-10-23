@@ -135,3 +135,42 @@ not known yet (to check on the next real footage).
   not come up again in two more runs (both recovered earlier, by the robot's own find and drive out). Also: poses
   a robot reports after a failed find are not trusted until the camera fixes it.
 
+
+## Appendix: the morning of 2026-10-23 (Nick's "tonight's build" list)
+- **Mapping:** no ray toward the corner of the two open edges (two of 16 skipped). The "the camera saw it move
+  0 cm, its wheels say 72 cm" loop (once a second, 20:00:28 on): a back-off refused at the open edge was checked
+  against the previous ray's 72 cm of wheels, so refind backed off again, forever. Now only a leg that ran is
+  checked, nothing is checked inside a refind, and mapping ends (then parks or calls help) after two disagreements.
+- **Setup:** a "no" to the green outline goes to the studio's floor calibration (step by step; the runner waits and
+  checks the new one the same way) instead of stopping. The two board questions take Enter for the usual layout.
+  After mapping, a board felt where an open edge was taken is reported. An open edge felt where a board was taken
+  stops the session, because a find would drive over it.
+- **Edge guard, both cues on** (safe_edge 3). Line sensors: plywood 52-84 while driving on this board (every E02
+  log), the two evening trips 241 and 573, limit 150 (unchanged). Bottom zone: plywood at most 10.3 cm while driving
+  in every real log (7.2-8.8 per robot on this board). At the two line trips it read only 9.0-9.7, so it is a later
+  backup, at 11 cm (chosen). Every EDGE record says which cue fired first.
+- **Tracking: the detector hands over, the lock-on follows** (Nick, 06:06: lights steady, nothing told beforehand).
+  The lock-on tracker's look is whatever the robot looks like when handed over, with the empty floor's own edges
+  taken out. During a turn on its spot the wheels hold it in place, and it re-takes its look afterwards. The
+  detector checks it every 2 s and at each stop. When both see the robot, the detector's outline centre is
+  reported. When the detector doesn't see it, the lock-on's position is used, corrected by the learned offset.
+  - On the three evening losses: seen in 94 / 93 / 96% of pictures (the detector alone: 41 / 40 / 72%), within
+    7 cm of every camera fix (the detector alone was 24 cm off Right at two). It costs 31-40 ms a picture against
+    9 ms. These are permanent tests now (footage: get_clips.py).
+  - Yardstick: OpenCV CSRT and MIL (lock_yardstick.py). CSRT drifted silently; MIL was as accurate but too slow.
+    Neither ever says it lost the robot.
+- **DOE write-ups:** docs/experiments/DOE-tracking.md (check rate and agreement limit by replay; confidence
+  threshold and how fast each confirmation is, on hardware).
+
+### Sweep 1: new tests that may now be needed
+- The lock-on with two robots touching (it has only been tested with others 20+ cm away).
+- The runner's time per picture on Nick's laptop with the lock-on (the feed drops pictures rather than lag).
+- A real edge test with both cues on: which fires first, and how far past the edge.
+
+### Sweep 2: possible inaccuracies this relies on
+- "Truth" in the new tests is the runner's own camera fixes plus a check by eye of one picture every 5 s, not hand
+  measurement.
+- The Pi clock offset (1.6 s) was measured once each morning and evening, from motion in the footage.
+- The floor picture for the replays is the empty board 30 s into each recording. Live, it is the detector's floor
+  memory, which may hold ghosts.
+- MIN_LOOK 38 sits between floor 27 and Right's washed-out 49: a thin margin.

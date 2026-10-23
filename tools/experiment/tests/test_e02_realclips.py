@@ -175,3 +175,55 @@ def test_lock_on_oct22_evening(name, share):
         near = [s for t, s in out if s is not None and abs(t - tf) < 0.5]
         assert near, ("not seen at fix", tf)
         assert min(math.hypot(s[1] - x, s[2] - y) for s in near) < 6.0, ("off at fix", tf, x, y, near[0])
+
+
+@pytest.mark.parametrize("name", ["oct22eve_left", "oct22eve_center", "oct22eve_right"])
+def test_detector_with_lock_oct22_evening(name):
+    """The live tracker as the runner uses it (e02_camera.MotionTracker, USE_LOCK): the detector hands the robot to
+    the lock-on tracker and checks it every 2 s and at each stop; legs told as the runner tells them (kind, then a
+    hold). On the three evening losses, when written: seen 94 / 93 / 96% (the detector alone: 41 / 40 / 72%, and
+    24 cm off Right at two fixes). Pass: seen in at least 85% of pictures and within 7 cm of every camera fix."""
+    import cv2
+    import e02_camera as CAM
+    import e02_plan as PL
+    import e02_replay as R
+    m = json.load(open(os.path.join(DATA, name + ".json")))
+    video, frames = os.path.join(CLIPS, m["video"]), os.path.join(CLIPS, m["frames"])
+    if not (os.path.exists(video) and os.path.exists(frames)):
+        pytest.skip("Oct 22 evening footage not here (python tools/experiment/get_clips.py)")
+    rec = R.MjpgPiece(video, frames, 0)
+    cam = CAM.load_camera(os.path.join(os.path.dirname(HERE), "data", "overhead_floorcal_roam1.json"))
+    bd = PL.Board(xboard_side=1, yboard_side=1)
+    tr = CAM.MotionTracker(cam, (61, 61), board_rect=(bd.x0, bd.y0, bd.x1, bd.y1))
+    assert tr.use_lock
+    tr.set_area((bd.x0, bd.y0, bd.x1, bd.y1), walls=[("y", bd.xboard_cm + bd.uy * PL.ROBOT_HALF_CM),
+                                                    ("x", bd.yboard_cm + bd.ux * PL.ROBOT_HALF_CM)])
+    gray = (lambda im: cv2.cvtColor(im, cv2.COLOR_BGR2GRAY) if im.ndim == 3 else im)
+    i0, i1 = rec.index(m["start_t"]), rec.index(m["end_t"])
+    fl = rec.index(rec.t_frame(0) + m["floor_t_after_start"])
+    tr.set_background([gray(rec.read(i)) for i in range(fl, fl + 12)])
+    tr.follow("R", m["at"][0], m["at"][1], t=rec.t_frame(i0))
+    for i in range(i0 - 12, i0):
+        tr.push(gray(rec.read(i)), rec.t_frame(i))
+    tr.follow("R", m["at"][0], m["at"][1], t=rec.t_frame(i0))
+    tr.hold(6.0)
+    held, out = True, []
+    for i in range(i0, i1 + 1):
+        t, img = rec.t_frame(i), gray(rec.read(i))
+        cur = [g for g in m["legs"] if g[0] - 0.1 <= t <= g[1] + 0.3]
+        if cur and held:
+            p = tr.where()
+            tr.clear_expect()
+            if p:
+                tr.expect(p[1], p[2], 7.0 if cur[0][2] == "turn" else 18.0, kind=cur[0][2])
+                tr.hint = tr.hint[:3] + (t + 30,)            # replay time, not the wall clock
+            held = False
+        elif not cur and not held:
+            tr.hold(6.0)
+            held = True
+        out.append((t, tr.push(img, t)))
+    seen = sum(1 for _, s in out if s)
+    assert seen >= 0.85 * len(out), (seen, len(out), tr.stats)
+    for tf, x, y in m["fixes"]:
+        near = [s for t, s in out if s is not None and abs(t - tf) < 0.5]
+        assert near and min(math.hypot(s[1] - x, s[2] - y) for s in near) < 7.0, ("fix", tf, x, y)

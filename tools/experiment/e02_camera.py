@@ -324,6 +324,15 @@ class MotionTracker:
     GATE_GROW_S = 0.6           # a lost robot's search circle grows with time for at most this long
     OTHER_CM = 1.1 * ROBOT_CM   # an outline this near another robot's last place is that robot (two touching: 9.5-13)
     MERGE_CM = 0.8 * ROBOT_CM   # robot-shaped outlines this near each other are one robot
+    USE_LOCK = True             # follow with the lock-on tracker, this detector checking it
+    CHECK_S = 2.0               # chosen (Nick: start at 2 s; a DOE is written up to set it): detector checks the lock
+    AGREE_CM = 6.0              # chosen: the detector's outline within this of the lock agrees (a DOE could set it)
+    DISAGREE_N = 2              # checks in a row the detector sees it elsewhere, standing still: lock on there again
+    LOCK_SURE = 0.7             # chosen: a lock match this good is trusted over the detector's outline (DOE: confidence)
+    NUDGE_CM = 3.0              # ... below it, a detector outline further than this from the lock moves the lock
+    START_NEAR_CM = 12.0        # the lock starts on the detector's outline within this of the place handed over
+    START_WAIT_S = 1.0          # ... waiting at most this long for it, then on the place handed over
+    PIN_CM = 3.0                # during a turn on its spot the lock may not move further than this
 
     def __init__(self, cam, board_center=(61.0, 61.0), thr=16.0, alpha=0.02, z_cm=ROBOT_TOP_CM, max_speed_cms=30.0,
                  board_rect=None, margin_cm=8.0):
@@ -363,6 +372,21 @@ class MotionTracker:
         self.hand_moved = set()                 # robots found moved while held (the runner clears one when it is back)
         self.last_real = 0.0                    # when the followed robot's outline was last really seen
         self.held_hist = deque(maxlen=self.HELD_MEDIAN_N)   # its real positions since it was told to stand still
+        # the lock-on tracker (e02_lock.py, Nick 2026-10-22/23): handed the followed robot by this detector, it
+        # follows that robot's own look; this detector checks it every CHECK_S and at every stop
+        self.use_lock = self.USE_LOCK
+        self.lk = None
+        self.lock_start = None                  # (x, y): lock on here at the next picture
+        self.lock_retake = False                # a turn on its spot just ended: take its look again
+        self.lock_off = (0.0, 0.0)              # the detector's outline centre minus the lock's (learned)
+        self.lock_start_t = None
+        self.leg_kind = None                    # "turn" / "go" while the runner drives a leg
+        self.check_t = 0.0
+        self.check_hold = False                 # a check is due at the next picture (it just stopped)
+        self.disagree_n = 0
+        self.source = None                      # where the last position came from: lock / detector / held
+        self.stats = dict(lock=0, detector=0, held=0, none=0, checks=0, agree=0, disagree=0, relocks=0)
+        self.last_check = None                  # (t, distance cm or None)
 
     # --- geometry --------------------------------------------------------------------------------
     def _px(self, x, y):
@@ -539,6 +563,7 @@ class MotionTracker:
                 gate_cm = ROBOT_CM * 0.9 + self.vmax * min(dt_, self.GATE_GROW_S)
                 hint = self.hint if (self.hint and t <= self.hint[3]) else None
                 best = None
+                det_moving = False
                 others = [q for r, q in self.protect.items() if r != self.active]
                 ok = [c for c in cands if c["shape"]
                       and not any(math.hypot(c["x"] - q[0], c["y"] - q[1]) < self.OTHER_CM for q in others)]
@@ -557,7 +582,13 @@ class MotionTracker:
                     score = d - 3.0 * c["moving"]
                     if best is None or score < best[0]:
                         best = (score, c["x"], c["y"])
+                        det_moving = c["moving"] >= self.MOVING_MIN
                 held_now = self.hint is not None and self.hint[3] == float("inf")
+                det = (best[1], best[2]) if best is not None else None
+                if self.use_lock:
+                    lk_out = self._lock_step(img, t, det, held_now, hint, det_moving)
+                    if lk_out is not None:
+                        best = (0.0, lk_out[0], lk_out[1])
                 if best is not None:
                     self.last_real = t
                 if best is None and self.hold_ref is not None and not self.disturbed and \
@@ -578,6 +609,9 @@ class MotionTracker:
                     best = (best[0], float(np.mean([q[0] for q in self.held_hist])),
                             float(np.mean([q[1] for q in self.held_hist])))
                 if best is not None:
+                    if not self.use_lock or self.source != "lock":
+                        self.source = "held" if len(best) > 3 else "detector"
+                    self.stats[self.source] += 1
                     self.pos = (t, best[1], best[2])
                     self.protect[self.active] = (best[1], best[2])
                     self.last_seen = t
@@ -585,9 +619,105 @@ class MotionTracker:
                     out = self.pos
                 else:
                     self.misses += 1
+                    self.source = None
+                    self.stats["none"] += 1
             if not self.frozen:
                 self._learn(g, dt_frame)
             return out
+
+    def _lock_step(self, img, t, det, held_now, hint, det_moving=False):
+        """The lock-on tracker's picture (called under self.lock from push). det: the detector's own outline of the
+        followed robot this picture, or None. Returns the lock's (x, y), or None (then the detector's is used).
+        Sets self.source to "lock" when the lock's position is used."""
+        import e02_lock as LK
+        self.source = None
+        if self.lk is None:
+            self.lk = LK.LockTracker(self.cam, self.rpx, self.z)
+        if self.lock_start is not None:
+            if self.lock_start_t is None:
+                self.lock_start_t = t
+            x, y = self.lock_start
+            if det is not None and math.hypot(det[0] - x, det[1] - y) < self.START_NEAR_CM:
+                x, y = det                       # where the detector sees its outline, not just the place handed
+            elif t - self.lock_start_t < self.START_WAIT_S:
+                return None                      # (2026-10-21 footage: handed 7 cm off, the lock took the floor)
+            if self.bg is not None:
+                self.lk.set_floor(np.clip(self.bg, 0, 255).astype(np.uint8))
+            self.lock_start, self.lock_start_t = None, None
+            self.lock_off = (0.0, 0.0)
+            if not self.lk.start(img, x, y, t):
+                self.lk.stop()
+            self.check_t = t
+        if not self.lk.locked:
+            # lost: the detector carries on; once it sees the robot stand still, lock on to it there again
+            if det is not None and held_now:
+                self.lock_start = det
+                self.stats["relocks"] += 1
+            return None
+        if self.lock_retake:
+            self.lock_retake = False
+            self.lk.retake(img, t)
+        driving = hint is not None and not held_now
+        turning = driving and self.leg_kind == "turn"
+        pred = (self.lk.pos[1], self.lk.pos[2]) if turning else None
+        s = self.lk.step(img, t, predict=pred, still=held_now, in_leg=driving,
+                         pin_cm=self.PIN_CM if turning else None)
+        # the detector checks the lock every CHECK_S and when the robot has just stopped
+        if (t - self.check_t >= self.CHECK_S or self.check_hold) and self.lk.pos is not None:
+            self.check_t, self.check_hold = t, False
+            self.stats["checks"] += 1
+            if det is None:
+                self.last_check = (t, None)
+            else:
+                d = math.hypot(det[0] - self.lk.pos[1], det[1] - self.lk.pos[2])
+                self.last_check = (t, round(d, 1))
+                if d <= self.AGREE_CM:
+                    self.stats["agree"] += 1
+                    self.disagree_n = 0
+                else:
+                    self.stats["disagree"] += 1
+                    self.disagree_n += 1
+                    if self.disagree_n >= self.DISAGREE_N and held_now:
+                        # the detector keeps seeing it elsewhere while it stands still: lock on there
+                        self.disagree_n = 0
+                        self.lock_start = det
+                        self.stats["relocks"] += 1
+                        return det
+            if self.bg is not None:
+                self.lk.set_floor(np.clip(self.bg, 0, 255).astype(np.uint8))
+        if s is None:
+            return None
+        if det is not None:
+            gap = math.hypot(det[0] - s[1], det[1] - s[2])
+            if gap <= self.AGREE_CM:
+                # both see it: the detector's outline centre is the body's centre; the lock's centre is wherever its
+                # look was centred, a few cm off (its lights' glare): learn that offset, report the detector's
+                a = 0.1
+                self.lock_off = ((1 - a) * self.lock_off[0] + a * (det[0] - s[1]),
+                                 (1 - a) * self.lock_off[1] + a * (det[1] - s[2]))
+                return None
+            if self.lk.score < self.LOCK_SURE or det_moving:
+                # an unsure lock falling behind a robot the detector sees clearly (2026-10-21 footage, Center
+                # driven with no leg told: the lock lagged 8 cm): the detector's place, and the lock searches there
+                self.lk.nudge(det[0] - self.lock_off[0], det[1] - self.lock_off[1], t)
+                return None
+        # the detector does not see it (or sees something standing still elsewhere while the lock is sure): the
+        # lock's place, if it is on the board's area (inside the walls)
+        x, y = s[1] + self.lock_off[0], s[2] + self.lock_off[1]
+        if not self.on_area(x, y):
+            return None
+        self.source = "lock"
+        return (x, y)
+
+    def confidence(self):
+        """Witness summary for the runner: where the position comes from, the lock's match score, and the
+        detector's last check (seconds ago, distance cm or None = it did not see it)."""
+        with self.lock:
+            lc = self.last_check
+            return dict(source=self.source, score=round(self.lk.score, 2) if self.lk is not None else None,
+                        locked=bool(self.lk is not None and self.lk.locked),
+                        check_age_s=None if lc is None or self.frame_t is None else round(self.frame_t - lc[0], 1),
+                        check_cm=None if lc is None else lc[1], stats=dict(self.stats))
 
     def _merge(self, cands):
         """Pieces of one robot (its body and the glare of its lights, or two halves split by a shadow line) as
@@ -696,10 +826,12 @@ class MotionTracker:
             self.bg[m] = self.frame[m] - self.offset
             self.known[m] = 1
 
-    def expect(self, x, y, radius_cm, for_s=10.0):
-        """The runner expects the followed robot within radius_cm of (x, y) for the next for_s seconds."""
+    def expect(self, x, y, radius_cm, for_s=10.0, kind=None):
+        """The runner expects the followed robot within radius_cm of (x, y) for the next for_s seconds (kind: the
+        leg, "turn" or "go")."""
         with self.lock:
             self.hint = (x, y, radius_cm, time.time() + for_s)
+            self.leg_kind = kind
 
     def clear_expect(self):
         with self.lock:
@@ -712,6 +844,10 @@ class MotionTracker:
         camera saw it just now: a hold round an old position could never find it again."""
         with self.lock:
             self.held_hist.clear()
+            if self.leg_kind == "turn" and self.lk is not None and self.lk.locked:
+                self.lock_retake = True          # a turn on its spot ended: its look is taken again where it is
+            self.leg_kind = None
+            self.check_hold = True
             if self.pos is not None and self.frame_t is not None and self.frame_t - self.last_seen < 0.5:
                 self.hint = (self.pos[1], self.pos[2], radius_cm, float("inf"))
                 m = self._disk_mask(self.frame.shape, [(self.pos[1], self.pos[2])], 1.1) > 0
@@ -727,6 +863,11 @@ class MotionTracker:
 
     def follow(self, robot, x, y, t=None):
         with self.lock:
+            if self.lk is not None:
+                self.lk.stop()
+            self.lock_start = (x, y)            # the detector (or the runner's find) hands it over: lock on
+            self.lock_start_t = None
+            self.lock_retake, self.leg_kind, self.disagree_n = False, None, 0
             self.active = robot
             self.pos = (time.time() if t is None else t, x, y)
             self.last_real = self.pos[0]
@@ -742,12 +883,18 @@ class MotionTracker:
     def idle(self):
         with self.lock:
             self.active, self.pos, self.hint = None, None, None
+            self.lock_start = None
+            if self.lk is not None:
+                self.lk.stop()
 
     def forget(self, robot):
         with self.lock:
             self.protect.pop(robot, None)
             if self.active == robot:
                 self.active, self.pos, self.hint = None, None, None
+                self.lock_start = None
+                if self.lk is not None:
+                    self.lk.stop()
 
     def where(self):
         with self.lock:

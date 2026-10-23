@@ -46,6 +46,9 @@ REFRESH_MIN = 0.88            # ... and at least this good while standing still 
 REFRESH_RATE = 0.10           # ... by this share each time
 NEAR_TURNS = 7                # turns tried first, nearest the last one (+-30 deg); all of them only if none matches
 LOOK = "learned"              # "outline" (a drawn robot-sized square) or "learned" (its own edges): see start()
+MIN_LOOK = 38.0               # chosen: a look with less edge (floor's taken out) than this is floor, not a robot
+                              # (plain floor 27; robots 83-114, but 49-50 for Right washed out in the bright corner
+                              # 2026-10-22 20:26: a thin margin, so a DOE on more footage should set it)
 LOST_S = 1.0                  # poor matches this long in a row: let go
 
 
@@ -155,7 +158,7 @@ class LockTracker:
                 best = (mx, int(round(u)) - half + loc[0] + n // 2, int(round(v)) - half + loc[1] + n // 2, a)
         return best
 
-    def start(self, img, x, y, t):
+    def start(self, img, x, y, t, check=True):
         """Lock on to the robot at about (x, y) floor cm in this picture (it should stand still in it)."""
         feat = self.features(img)
         n = 2 * int(math.ceil(RADIUS * self.rpx)) + 1
@@ -174,6 +177,11 @@ class LockTracker:
         # LOOK: "learned" = its own edges in this picture (refreshed while still); "outline" = a drawn square of a
         # robot's size, the same for every robot and every light (2026-10-23: the learned look fell to a 0.5 match
         # after a 167 deg turn: the glare of its lights and the floor round it turn with it, wrongly)
+        self.look_energy = float((p * self._mask(n)).sum() / max(1.0, self._mask(n).sum()))
+        if check and self.look_energy < MIN_LOOK:
+            # nothing there but floor (its edges were taken out): no robot to lock on to (2026-10-21 footage,
+            # handed a place 7 cm beside Center: plain floor scored 0.8 against itself for seconds)
+            return False
         self.base = p if LOOK == "learned" else model
         self._make_templates()
         self.pos, self.uv, self.vel = (t, float(x), float(y)), (u, v), (0.0, 0.0)
@@ -184,7 +192,13 @@ class LockTracker:
         """Take its look again where it stands (after a turn on its spot: the wheels say it did not move)."""
         if self.pos is None:
             return False
-        return self.start(img, self.pos[1], self.pos[2], t)
+        return self.start(img, self.pos[1], self.pos[2], t, check=False)   # the wheels vouch for it
+
+    def nudge(self, x, y, t):
+        """Another witness (the detector's moving outline) says the robot is at (x, y): search from there next."""
+        if self.pos is not None:
+            self.pos = (t, float(x), float(y))
+            self.last_ok = t
 
     def stop(self):
         self.base, self.tpls, self.pos = None, [], None

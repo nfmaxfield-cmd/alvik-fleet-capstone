@@ -79,3 +79,11 @@ Newest first.
   session (`--front-learn`).
 - **For the profiles later:** robot size, turn and drive speeds, command words, record names (LEG, FIND, EDGE), the
   `front=` field; site walls, open edges, park spots, the find corner; sensor offset/tolerance pairs.
+
+### 2026-10-23 morning (no session; footage replays and simulator)
+- **Carries over:** identify by motion, then follow by a look learned at the moment of handover (nothing told
+  beforehand: lights, attachments, any robot); remove the site's static edges from that look; let the robot's own
+  sensors vouch for it during moves the camera sees badly (a turn on the spot); a periodic check by the detector.
+  This is the "identify, recognise, label, track anything" path.
+- **Specific:** steady white lights while driving (an Alvik command); 10 deg look steps for a square robot; the edge
+  guard's two cues and their limits (line sensors and the ToF bottom zone are Alvik parts: a sensor profile item).
