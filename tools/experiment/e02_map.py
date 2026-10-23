@@ -64,10 +64,30 @@ def stop_kind(leg_state, info):
     return None
 
 
-def contact_point(x, y, th_deg, kind):
-    """The point the robot met, from its axle pose at the stop: an edge just ahead of its line sensors, a board
-    its front stop distance ahead of the distance sensor."""
-    ahead = LINE_AHEAD_CM if kind == "edge" else TOF_AHEAD_CM + SAFE_FRONT_CM
+def edge_cue(info):
+    """Which edge cue stopped it ('bottom': the distance sensor's bottom zone, which looks ahead; 'line': the line
+    sensors), from the firmware's 'plywood edge (cue)' words, or ''."""
+    text = (info or "").lower()
+    i = text.find("plywood edge (")
+    if i < 0:
+        return ""
+    return text[i + len("plywood edge ("):].split(")")[0].strip()
+
+
+BOTTOM_AHEAD_CM = 9.0       # where the distance sensor's bottom zone sees an open edge, ahead of the axle, square on.
+                            # From the simulator's geometry (2026-10-23 dry run: 8-10 cm); the simulator's sensor is a
+                            # guess, so this is to be measured on the real board (explore's refine_edges reports its own
+                            # estimate from the rays' slants every session)
+
+
+def contact_point(x, y, th_deg, kind, cue=""):
+    """The point the robot met, from its axle pose at the stop: an edge just ahead of its line sensors (or, when the
+    distance sensor's bottom zone stopped it, BOTTOM_AHEAD_CM ahead), a board its front stop distance ahead of the
+    distance sensor."""
+    if kind == "edge":
+        ahead = BOTTOM_AHEAD_CM if cue == "bottom" else LINE_AHEAD_CM
+    else:
+        ahead = TOF_AHEAD_CM + SAFE_FRONT_CM
     return (x + ahead * math.cos(math.radians(th_deg)), y + ahead * math.sin(math.radians(th_deg)))
 
 

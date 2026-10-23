@@ -84,6 +84,16 @@ import e02_steer as ST  # noqa: E402
 import e02_fit as FIT  # noqa: E402
 import e02_camera as CAM  # noqa: E402
 import e02_map as MAP  # noqa: E402
+import e02_explore as EX  # noqa: E402
+import e02_edgefind as EF  # noqa: E402
+
+
+def EX_provisional_camera(w, h, f=600.0, height_cm=260.0):
+    """A stand-in camera before explore has fitted one: straight down from height_cm above the picture's centre (the
+    tracker needs some floor scale to size a robot; explore only uses the pixels it gives back)."""
+    import cameras as CMS
+    return CMS.CameraModel([[f, 0, w / 2.0], [0, f, h / 2.0], [0, 0, 1]], [0, 0, 0, 0, 0], [math.pi, 0.0, 0.0],
+                           [0.0, 0.0, height_cm], (w, h), name="provisional")
 
 PAUSE_MS = 1000
 FIX_HZ = 3.0
@@ -290,6 +300,10 @@ class Listener:
 
 
 # =============================================================================== the runner
+class ExploreShort(Exception):
+    """Explore's rays did not meet all four sides yet (more rays, then try again)."""
+
+
 class Runner:
     def __init__(self, a, state, session_dir):
         self.a = a
@@ -306,6 +320,7 @@ class Runner:
             self.trackw.writerow(["t", "robot", "x_cm", "y_cm", "order", "phase", "source", "lock_score"])
         self.heads = {}               # robot -> [heading deg or None, measured bool]
         self.unavailable = set()
+        self.exploring = False        # explore: no calibration and no board known yet
         self.skip_conds = set()       # conditions put aside for this session (backup: camera-dependent ones failing)
         self.in_runs = False          # the session's runs have started (backups apply only then)
         self.last_result = ""
@@ -1174,6 +1189,8 @@ class Runner:
 
     # --- finding a robot with the camera ------------------------------------------------------------
     def board_rect(self):
+        if getattr(self, "exploring", False):
+            return None                      # nothing is known about the board yet: look anywhere
         b = self.board or PL.Board()
         return (b.x0, b.y0, b.x1, b.y1)
 
@@ -1962,6 +1979,17 @@ class Runner:
         if not frames:
             raise SystemExit("No pictures from the overhead camera.")
         img = frames[-1]
+        if not getattr(a, "classic_setup", False) and not st.get("calibration"):
+            # Nick, 2026-10-23: from scratch. No calibration file, no outline to confirm, no board questions: the
+            # robots calibrate the camera and map the board themselves (explore, after they are connected)
+            self.say("From scratch: no camera calibration and no board are known; the robots will work them out "
+                     "(explore) once they are connected.")
+            self.cam = EX_provisional_camera(img.shape[1], img.shape[0])
+            self.exploring = True
+            self.make_tracker()
+            setup["explore_pending"] = True
+            st.save()
+            return
         cal = st.get("calibration")
         if not cal or not os.path.exists(cal):
             cal = None
@@ -2081,7 +2109,8 @@ class Runner:
     def make_tracker(self):
         if self.tracker is None:
             b = PL.Board()
-            self.tracker = CAM.MotionTracker(self.cam, ((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2))
+            centre = (0.0, 0.0) if getattr(self, "exploring", False) else ((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2)
+            self.tracker = CAM.MotionTracker(self.cam, centre)
             if getattr(self.a, "no_lock", False):
                 self.tracker.use_lock = False     # backup (--no-lock): the motion detector alone
                 self.say("Tracker: the motion detector alone (--no-lock).")
@@ -2190,11 +2219,293 @@ class Runner:
         self.calibrate([n for n in names if n not in self.unavailable])
         # every robot found first by a short turn on its spot (nothing leaves its spot, so nothing is mistaken for
         # a robot), THEN parked, each going round the others (2026-10-22, after the first real session)
-        self.find_all([n for n in names if n not in self.unavailable])
+        if self.st["setup"].get("explore_pending"):
+            self.explore([n for n in names if n not in self.unavailable])
+        else:
+            self.find_all([n for n in names if n not in self.unavailable])
         self.park_all([n for n in names if n not in self.unavailable])
         self.active = None
         CAM.draw_check(self.feed.last_img, self.cam, os.path.join(self.dir, "check_robots.png"), self.board,
                        robots={n: tuple(self.st["positions"][n][:2]) for n in names if n in self.st["positions"]})
+
+    # --- explore: the robots calibrate the camera and map the board (Nick, 2026-10-23) ------------------------
+    EXPLORE_DANCE = (("go", 15.0), ("turn", 90.0), ("go", 15.0), ("turn", 90.0), ("go", 15.0), ("turn", 90.0),
+                     ("go", 15.0), ("turn", 90.0))           # a small square: its corners and turns
+    EXPLORE_RAYS = 8                                          # rays per robot, evenly spread in its own frame
+    EXPLORE_RAY_CM = 105.0                                    # a ray's longest drive (firmware cap: 110)
+
+    def explore_stop(self, robot, obs, lid=None, contact=None, turn_cmd=None):
+        """One observation at a stop: where the camera sees the robot (pixels) and where its own wheels and gyro say
+        it is (its own frame, from its last LEG record)."""
+        p = self.settle(min_s=0.4, timeout=3.0)
+        rec = self.listener.leg_final(robot, "-", lid) if lid is not None else None
+        if rec is None or rec.get("state") in ("refused", "dup") or None in (num(rec.get("x_cm")), num(rec.get("th_deg"))):
+            # the leg did not run (refused, or no record of it): the robot did not move (never an older leg's pose:
+            # 2026-10-23 dry run, a refused half turn read as the ray before it and broke Right's whole path)
+            rec = dict(x_cm=0.0, y_cm=0.0, th_deg=0.0)
+            turn_cmd = None
+        x, y, th = (num(rec.get("x_cm")), num(rec.get("y_cm")), num(rec.get("th_deg")))
+        if p is None or None in (x, y, th):
+            return None
+        u, v = self.cam.project((p[0], p[1], EX.ROBOT_TOP_CM))
+        # an idle leg's pose is from the leg's own start (x forward, th turned): the leg's distance and turn
+        d = x if abs(y) < abs(x) + 1e-9 else math.copysign(math.hypot(x, y), x)
+        skip = False
+        if obs[robot]:
+            bad = self.explore_implausible(obs[robot][-1], d, u, v)
+            if bad:
+                # the camera's spot does not fit what the wheels did (2026-10-23 dry run: the tracker stayed on
+                # Left's old spot for 19 stops while it drove 30-90 cm rays): find it again by a turn on its spot
+                # and back (net heading unchanged), and use that
+                self.say("    %s: %s: finding it again" % (robot, bad), quiet=True)
+                q = self.identify(robot)
+                if q is not None:
+                    self.tracker.follow(robot, q[0], q[1])
+                    self.history.clear()
+                    self.tracker.hold(HOLD_CM)
+                    p2 = self.settle(min_s=0.3) or q
+                    u, v = self.cam.project((p2[0], p2[1], EX.ROBOT_TOP_CM))
+                    skip = bool(self.explore_implausible(obs[robot][-1], d, u, v))
+                else:
+                    skip = True
+                self.st.setdefault("explore_refinds", []).append(
+                    [round(time.time(), 1), robot, len(obs[robot]), bad, q is not None, skip])
+        if turn_cmd is not None:
+            th = turn_cmd + ST.wrap180(th - turn_cmd)     # a half turn reads as +-180: keep the side it was told
+        if not obs[robot]:
+            d, th = 0.0, 0.0                              # the first stop: the frame's origin
+        o = dict(t=round(time.time(), 2), x=x, y=y, th=th, d=d, dth=th, u=float(u), v=float(v), lid=lid)
+        # its outline's long side in pixels (the robots' own size: a scale cross-check for explore)
+        near = [c for c in list(self.tracker.last_cands or []) if c.get("shape") and c.get("rw")
+                and math.hypot(c["u"] - u, c["v"] - v) < 12.0]
+        if near and not skip:
+            c = min(near, key=lambda c: math.hypot(c["u"] - u, c["v"] - v))
+            o["size_px"] = round(max(c["rw"], c["rh"]), 2)
+        if skip:
+            o["skip"] = True                              # its leg still counts for the path; its pixels do not
+        if contact:
+            o["contact"] = contact
+        obs[robot].append(o)
+        live = self.st["setup"].setdefault("explore_live", dict(stops=[], contacts=[]))
+        live["stops"].append([robot, round(float(u), 1), round(float(v), 1), bool(skip)])
+        if contact:
+            live["contacts"].append([robot, round(float(u), 1), round(float(v), 1), contact])
+        return o
+
+    EXPLORE_MIN_PX_PER_CM = 0.4   # chosen: a camera 6x higher than the provisional 260 cm would still show more
+    EXPLORE_STILL_JUMP_PX = 25.0  # chosen: a robot that only turned on its spot moves its top centre a few pixels
+
+    def explore_implausible(self, prev, d, u, v):
+        """Why the camera's spot cannot be this robot after a leg of d cm (or '' if it can): it drove but the spot
+        did not move (the tracker stayed behind), or it only turned and the spot jumped (the tracker went to
+        something else)."""
+        moved = math.hypot(u - prev["u"], v - prev["v"])
+        if abs(d) >= 8.0 and moved < self.EXPLORE_MIN_PX_PER_CM * abs(d):
+            return "it drove %.0f cm and the camera's spot moved %.0f px" % (abs(d), moved)
+        if abs(d) < 2.0 and moved > self.EXPLORE_STILL_JUMP_PX:
+            return "it only turned and the camera's spot jumped %.0f px" % moved
+        return ""
+
+    def explore_leg(self, robot, kind, val, timeout=None):
+        """One idle leg with no camera fix (nothing about the floor is known yet: the robot's own frame must stay as
+        it is). Returns (state, info, lid)."""
+        self.moves[robot] = dict(run="-", why="explore")
+        est = abs(val) / DRIVE_CMS_GUESS + 1.0 if kind == "go" else abs(val) / TURN_DPS_GUESS + 1.0
+        state, info = self.send_leg(robot, "%s %.2f" % (kind, val), timeout or (2.5 * est + 6.0))
+        return state, info, self.last_lid.get(robot)
+
+    def explore(self, names):
+        """Explore (hybrid): each robot dances a small square near where it stands (turns and straight drives the
+        camera can check: gyro scale, wheel balance, a first camera fit), then drives rays out until its front stop
+        or edge guard stops it, and back. Every stop pairs pixels with the robot's own pose; e02_explore fits the
+        camera, each robot's wheel and gyro scale and where its own frame sits, and the board's sides from the
+        rays' ends. One robot moves at a time (the tracker follows one robot); the others stand still."""
+        st = self.st
+        self.phase = "exploring"
+        self.order = "explore"
+        self.say("=== Explore: the robots work out the camera and the board (about %d minutes) ===" % max(
+            2, round(len(names) * 1.7)))
+        self.mark("e02 explore start")
+        self.find_all(names)
+        obs = {n: [] for n in names}
+        t0 = time.time()
+        for n in names:
+            q = st["positions"].get(n)
+            if not q:
+                continue
+            self.tracker.follow(n, q[0], q[1])
+            self.history.clear()
+            self.tracker.hold(HOLD_CM)
+            state, info, lid = self.explore_leg(n, "turn", 2.0)
+            self.explore_stop(n, obs, lid, turn_cmd=2.0)
+            self.say("  %s: a small square (camera and gyro check) ..." % n)
+            for kind, val in self.EXPLORE_DANCE:
+                state, info, lid = self.explore_leg(n, kind, val)
+                if state not in ("done", "dup", "failed"):
+                    break
+                self.explore_stop(n, obs, lid, turn_cmd=val if kind == "turn" else None)
+            self.say("  %s: %d rays out until it feels a board or an edge, and back ..." % (n, self.EXPLORE_RAYS))
+            self.explore_rays(n, obs, 0.5)
+            self.moves.pop(n, None)
+            p = self.settle(min_s=0.3)
+            if p:
+                st["positions"][n] = [p[0], p[1], None]
+                self.tracker.park(n, p[0], p[1])
+            st.save()
+        st["setup"]["explore_obs"] = obs
+        st.save()
+        self.say("  fitting the camera and the board from %d stops ..." % sum(len(v) for v in obs.values()))
+        try:
+            return self.explore_finish(names, obs, t0, last_try=False)
+        except ExploreShort as e:
+            # a side no ray met: more rays, between the first ones (Nick puts the robots down anywhere: three near
+            # one side leave the far side unmet)
+            self.say("  %s: more rays, between the first ones ..." % e)
+            for n in names:
+                q = st["positions"].get(n)
+                if not q:
+                    continue
+                self.tracker.follow(n, q[0], q[1])
+                self.history.clear()
+                self.tracker.hold(HOLD_CM)
+                self.explore_rays(n, obs, 0.0)
+                self.moves.pop(n, None)
+                p = self.settle(min_s=0.3)
+                if p:
+                    st["positions"][n] = [p[0], p[1], None]
+                    self.tracker.park(n, p[0], p[1])
+            st["setup"]["explore_obs"] = obs
+            st.save()
+            return self.explore_finish(names, obs, t0, last_try=True)
+
+    def explore_rays(self, n, obs, offset):
+        """EXPLORE_RAYS rays for robot n, at (k + offset) x 360 / EXPLORE_RAYS deg in its own frame, each out until
+        its front stop or edge guard stops it (or the ray's length) and back."""
+        for k in range(self.EXPLORE_RAYS):
+            # evenly spread rays in its own frame (its heading from its own legs: 2026-10-23 dry run 5, a fixed
+            # turn between rays after the half turn back left a 93 deg gap, and no robot met one side)
+            own_h = sum(q["dth"] for q in obs[n][1:])
+            want = (k + offset) * 360.0 / self.EXPLORE_RAYS
+            turn = ST.wrap180(want - own_h)
+            if abs(turn) > 150.0:          # two turns: a half turn is ambiguous (+-180 alike)
+                state, info, lid = self.explore_leg(n, "turn", turn / 2.0)
+                self.explore_stop(n, obs, lid, turn_cmd=turn / 2.0)
+                turn = turn / 2.0
+            state, info, lid = self.explore_leg(n, "turn", turn)
+            self.explore_stop(n, obs, lid, turn_cmd=turn)
+            state, info, lid = self.explore_leg(n, "go", self.EXPLORE_RAY_CM, timeout=40.0)
+            fin = self.listener.leg_final(n, "-", lid) or {}
+            kind = MAP.stop_kind(fin.get("state"), fin.get("info"))
+            o = self.explore_stop(n, obs, lid, contact=kind)
+            if o is not None and kind == "edge":
+                o["cue"] = MAP.edge_cue(fin.get("info"))
+            self.say("    ray %d: %s" % (k + 1, {"edge": "an open edge", "board": "a board (or a robot)"}.get(
+                kind, "nothing met")), quiet=True)
+            back = abs(o["d"]) if o else 0.0
+            if back > 1.0:
+                # back the way it came: (nearly) a half turn, then forward (175 deg: a 180 is ambiguous, the robot
+                # sometimes goes round the other way and reports +-180 alike: 2026-10-23 dry run); (backing up is blind and needs camera fixes,
+                # which explore can't give yet; forward has the front stop and the edge guard)
+                state, info, lid = self.explore_leg(n, "turn", 175.0)
+                self.explore_stop(n, obs, lid, turn_cmd=175.0)
+                state, info, lid = self.explore_leg(n, "go", back, timeout=40.0)
+                self.explore_stop(n, obs, lid)
+
+    def explore_finish(self, names, obs, t0, last_try=True):
+        st = self.st
+        robots = {n: v for n, v in obs.items() if len(v) >= 5}
+        if not robots:
+            raise SystemExit("Explore: too few stops seen by the camera to work anything out. Start again with "
+                             "--classic-setup to use a calibration file.")
+        size = (self.feed.last_img.shape[1], self.feed.last_img.shape[0])
+        sol = EX.fit(robots, size)
+        pts = EX.contacts(robots, sol)
+        sd = pts
+        rect = EX.rectangle_from_rays(pts)
+        edge_ahead = None
+        if rect:
+            # where the edge guard really sees an edge, from the rays' slants (most stops are the distance sensor's
+            # bottom zone, which looks ahead of the line sensors)
+            rect, edge_ahead = EX.refine_edges(rect, MAP.BOTTOM_AHEAD_CM)
+        bf = EX.board_frame(rect) if rect else None
+        rep = dict(rms_px=round(sol["rms_px"], 2), f_px=round(sol["f"], 1), k1=round(sol["k1"], 4),
+                   s={n: round(v, 4) for n, v in sol["s"].items()}, g={n: round(v, 4) for n, v in sol["g"].items()},
+                   n=sol["n"], per_robot_rms_px={n: round(v, 2) for n, v in sol["per_robot_rms_px"].items()},
+                   contacts=len(pts), sides=len(sd), minutes=round((time.time() - t0) / 60.0, 1),
+                   edge_ahead_cm=None if edge_ahead is None else round(edge_ahead, 2),
+                   outliers=sol.get("outliers", 0), size_check=EX.size_scale(robots, sol, size))
+        st["setup"]["explore"] = rep
+        self.say("  camera fit: %.1f px rms over %d stops; wheel scales %s; gyro scales %s" % (
+            sol["rms_px"], sol["n"], ", ".join("%s %.3f" % kv for kv in sol["s"].items()),
+            ", ".join("%s %.3f" % kv for kv in sol["g"].items())))
+        sc = rep.get("size_check")
+        if sc:
+            self.say("  scale check by the robots' own size: their outlines come out %.1f%% %s than %.1f cm (%d stops; "
+                     "reported, not applied: the outline includes some shadow)" % (
+                         abs(100 * (sc["ratio"] - 1)), "longer" if sc["ratio"] > 1 else "shorter", EX.ROBOT_LENGTH_CM,
+                         sc["n"]))
+        if edge_ahead is not None:
+            self.say("  the edge guard sees an open edge %.1f cm ahead of the axle (learned from the rays' slants)"
+                     % edge_ahead)
+        if bf is None and not last_try:
+            st.save()
+            raise ExploreShort("the rays did not show all four sides as two open edges and two boards")
+        if bf is None:
+            st.save()
+            raise SystemExit("Explore: the rays did not show all four sides as two open edges and two boards (%d "
+                             "sides from %d points). Start again (robots placed more in the middle), or with "
+                             "--classic-setup." % (len(sd), len(pts)))
+        rep.update(W=round(bf["W"], 2), H=round(bf["H"], 2), kinds=bf["kinds"], spreads={
+            k: round(v, 2) for k, v in bf["spreads"].items()}, side_points=bf["n"])
+        self.say("  the board: %.1f x %.1f cm (two open edges, two boards); sides fitted within %s cm" % (
+            bf["W"], bf["H"], "/".join("%.1f" % v for v in bf["spreads"].values())))
+        # the camera, in the board frame; saved as this session's calibration
+        cb = EX.camera_in_board(sol, bf)
+        import cameras as CMS
+        model = CMS.CameraModel(cb["K"], cb["dist"], cb["rvec"], cb["tvec"], cb["image_size"], name="overhead",
+                                fit=dict(method="explore (robots)", rms_px=round(sol["rms_px"], 2), n=sol["n"]))
+        path = os.path.join(self.dir, "cameras", "overhead.json")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        model.save(path)
+        st["calibration"] = path
+        bd = PL.Board(rect=(0.0, 0.0, bf["W"], bf["H"]), xboard_side=1, yboard_side=1, xboard_cm=bf["H"],
+                      yboard_cm=bf["W"])
+        st["board"] = bd.to_dict()
+        st["setup"]["board_lines_image"] = {"x": dict(value=bf["H"], from_explore=True),
+                                            "y": dict(value=bf["W"], from_explore=True)}
+        st["setup"]["map"] = dict(robot="all", from_explore=True, t=round(time.time(), 1),
+                                  sides={k: dict(kind=bf["kinds"][k], n=bf["n"][k], spread=bf["spreads"][k])
+                                         for k in bf["kinds"]})
+        # robots: where they are now, and which way they face, in the board frame
+        self.exploring = False
+        self.cam = CAM.load_camera(path)
+        self.board = bd
+        old_tr = self.tracker
+        self.tracker = None
+        self.make_tracker()
+        self.tracker_area()
+        if old_tr is not None:
+            old_tr.idle()
+        for n, stops in robots.items():
+            x, y, th = EX.to_world(EX.rebuild(stops, sol["s"][n], sol["g"][n]), sol["frames"][n])[-1]
+            bx, by = EX.to_board(bf, x, y)
+            hb = math.degrees(math.atan2(*(bf["R"] @ np.array([math.cos(math.radians(th)),
+                                                               math.sin(math.radians(th))]))[::-1]))
+            st["positions"][n] = [bx, by, None]
+            self.heads[n] = [ST.wrap180(hb), True]
+        self.fresh_floor()
+        for n in robots:
+            q = st["positions"][n]
+            self.tracker.follow(n, q[0], q[1])
+            self.history.clear()
+            self.tracker.hold(HOLD_CM)
+            self.fix_now(n, self.heads[n][0])              # the robot's own frame becomes the board's
+            self.tracker.park(n, q[0], q[1])
+        st["setup"]["explore_pending"] = False
+        st.save()
+        self.mark("e02 explore end")
+        self.say("  explore done in %.1f min: the camera is calibrated and the board mapped by the robots." % rep["minutes"])
+        return rep
 
     def find_all(self, names):
         """Identify every robot (a turn on its spot), then a fresh floor memory with all of them known."""
@@ -3206,6 +3517,22 @@ class Runner:
         MAP.save(os.path.join(self.dir, "map.json"), m["robot"], m["rays"], m["sides"], self.board)
 
     def do_find(self, robot, order):
+        """A find: `run find` against the two boards (do_board_find), or the edge find (any two boundaries, no
+        camera) with --edge-find or once a board has been found missing; a board find that met an open edge where
+        the board should be is followed by the edge find (Nick, 2026-10-23: the remove-a-board test)."""
+        if getattr(self.a, "edge_find", False) or self.board.missing:
+            return self.edge_find(robot, order)
+        out = self.do_board_find(robot, order)
+        why = "%s %s %s" % (out.get("result"), out.get("runend"), self.listener.latest("FIND", robot, out["t0"]) or "")
+        if not out["ok"] and "plywood edge" in why:
+            self.say("    %s: an open edge where the map has a board: finding itself against any two boundaries "
+                     "instead" % robot)
+            ef = self.edge_find(robot, order)
+            ef["board_find"] = out
+            return ef
+        return out
+
+    def do_board_find(self, robot, order):
         """A camera fix (the firmware wants one before every find), then `run find`, and the camera's view of
         it. Returns dict(ok, words, run, board_lines, t0, t1)."""
         self.end_moves(robot)
@@ -3271,6 +3598,153 @@ class Runner:
         self.mark("e02 %s %s find end %s" % (order, robot, end["result"]))
         return out
 
+    def edge_leg(self, robot, kind, val, timeout=None):
+        """One idle leg for the edge find. Returns (state, info, rec): rec the LEG record (its pose: x_cm, y_cm,
+        th_deg, in the robot's own frame, kept across legs since its pose is known)."""
+        est = abs(val) / DRIVE_CMS_GUESS + 1.0 if kind == "go" else abs(val) / TURN_DPS_GUESS + 1.0
+        state, info = self.send_leg(robot, "%s %.2f" % (kind, val), timeout or (2.5 * est + 6.0))
+        rec = self.listener.leg_final(robot, "-", self.last_lid.get(robot))
+        return state, info, rec
+
+    def edge_sides(self):
+        """The map's four boundaries for the edge find: [('x' | 'y', value, 'board' | 'edge')]."""
+        bd = self.board
+        out = []
+        for a, v in (("x", bd.x0), ("x", bd.x1), ("y", bd.y0), ("y", bd.y1)):
+            is_open = any(a == oa and abs(v - ov) < 1.0 for oa, ov in bd.open_edges())
+            line = v
+            if not is_open:
+                line = bd.yboard_cm if a == "x" else bd.xboard_cm     # a board's face, a little inside the edge
+            out.append((a, line, "edge" if is_open else "board"))
+        return out
+
+    def edge_find(self, robot, order):
+        """The edge find (_edge_find), with the camera watchdog's open-edge check off for this robot throughout
+        (dry run 2026-10-23: it stopped the sidestep running beside an open edge; the edge guard is the protection,
+        as in explore)."""
+        self.edge_touch = robot
+        try:
+            return self._edge_find(robot, order)
+        finally:
+            self.edge_touch = None
+
+    def _edge_find(self, robot, order):
+        """The edge find (e02_edgefind): touch boundary A twice a sidestep apart, then B once, by the robot's own
+        stops (front stop at a board, edge guard at an open edge); no camera. A touch that meets the other kind of
+        boundary than the map says is believed (the map is corrected: a board gone is an open edge from now on).
+        Ends with `fix` (its pose in the board's frame). Returns the do_find dict."""
+        t0 = time.time()
+        self.end_moves(robot)
+        self.phase = "find"
+        self.mark("e02 %s %s edge find start" % (order, robot))
+        out = dict(ok=False, run=None, t0=t0, result="failed", runend="-", board_lines={}, bumps=0, bump_results=[],
+                   kind="edge")
+        p = self.pos(robot, fresh_s=2.0)
+        p = (p[1], p[2]) if p is not None else None        # pos() is (t, x, y)
+        own = self.own_pose(robot)
+        h = self.heads.get(robot, [None])[0]
+        if p is None and own is not None:
+            p = own[:2]
+        if h is None and own is not None:
+            h = own[2]
+        if p is None or h is None:
+            out.update(words="edge find: where it is or which way it faces is not known", t1=time.time())
+            return out
+        # one frame for the touches: its believed pose, set now (a pose it keeps across the legs)
+        self.send(robot, "fix %.2f %.2f %.1f %.3f" % (p[0], p[1], h, time.time()))
+        self.fix_t[robot] = time.time()
+        time.sleep(0.15)
+        self.moves[robot] = dict(run="-", why="edge find")
+        sides = self.edge_sides()
+        ab = EF.choose_boundaries(p[0], p[1], sides)
+        if ab is None:
+            out.update(words="edge find: no two boundaries at right angles on the map", t1=time.time())
+            return out
+        a, b = ab
+        touches, pose = [], [p[0], p[1], h]
+        found_kinds = {}
+
+        def update(rec):
+            if rec and None not in (num(rec.get("x_cm")), num(rec.get("y_cm")), num(rec.get("th_deg"))):
+                pose[:] = [num(rec.get("x_cm")), num(rec.get("y_cm")), num(rec.get("th_deg"))]
+
+        def turn_to(hdg):
+            d = EF.wrap(hdg - pose[2])
+            if abs(d) > 1.0:
+                st_, info, rec = self.edge_leg(robot, "turn", d)
+                update(rec)
+                return st_ in ("done", "dup")
+            return True
+
+        def touch(bd, on):
+            if not turn_to(EF.facing(bd, pose[0], pose[1])):
+                return "could not turn to face the %s=%.0f side" % (bd[0], bd[1])
+            gap = abs((pose[0] if bd[0] == "x" else pose[1]) - bd[1])
+            st_, info, rec = self.edge_leg(robot, "go", min(100.0, gap + EF.APPROACH_EXTRA_CM))
+            update(rec)
+            kind = MAP.stop_kind(st_, info)
+            if kind is None:
+                return "drove %.0f cm towards the %s=%.0f side and met nothing" % (gap + EF.APPROACH_EXTRA_CM, bd[0], bd[1])
+            touches.append(dict(x=pose[0], y=pose[1], th=pose[2], kind=kind, on=on, cue=MAP.edge_cue(info)))
+            found_kinds[(bd[0], round(bd[1], 1))] = (bd[2], kind)
+            st_, info, rec = self.edge_leg(robot, "go", -(EF.BACK_EDGE_CM if kind == "edge" else EF.BACK_CM))
+            update(rec)
+            return ""
+
+        why = touch(a, "A")
+        if not why:
+            sgn = EF.sidestep_sign(a, b, pose[0], pose[1])
+            for kind, val in (("turn", sgn * 90.0), ("go", EF.SIDESTEP_CM), ("turn", -sgn * 90.0)):
+                st_, info, rec = self.edge_leg(robot, kind, val)
+                update(rec)
+                if st_ not in ("done", "dup"):
+                    why = "the sidestep along the %s=%.0f side stopped (%s)" % (a[0], a[1], info)
+                    break
+        if not why:
+            why = touch(a, "A")
+        if not why:
+            why = touch(b, "B")
+        sol = EF.solve(touches, a, b) if not why else None
+        self.end_moves(robot)
+        t1 = time.time()
+        rec = dict(t=round(t0, 1), robot=robot, order=order, a=list(a[:2]), b=list(b[:2]),
+                   touches=touches, kinds={"%s=%g" % k: v for k, v in found_kinds.items()}, why=why)
+        if sol is None:
+            out.update(words="edge find failed: %s" % (why or "the two touches on one side came out too close"), t1=t1)
+            rec["ok"] = False
+            self.st.setdefault("edge_finds", []).append(rec)
+            self.lost_place.add(robot)
+            return out
+        bx, by, bth = EF.to_board(sol, pose[0], pose[1], pose[2])
+        self.send(robot, "fix %.2f %.2f %.1f %.3f" % (bx, by, bth, time.time()))
+        self.fix_t[robot] = time.time()
+        self.heads[robot] = [bth, True]
+        self.lost_place.discard(robot)
+        rec.update(ok=True, rot_deg=round(sol["rot"], 2), shift=[round(sol["tx"], 2), round(sol["ty"], 2)],
+                   before=[round(v, 2) for v in pose], after=[round(bx, 2), round(by, 2), round(bth, 1)])
+        self.st.setdefault("edge_finds", []).append(rec)
+        # the map against what was felt
+        for (ax, v), (was, felt) in found_kinds.items():
+            if was == "board" and felt == "edge":
+                which = "y" if ax == "x" else "x"            # the y board stands along an x = value line
+                self.board.missing.add(which)
+                self.st.setdefault("board_changes", []).append([round(t1, 1), robot, "%s board gone" % which, v])
+                self.say("    %s felt an open edge where the map had the %s board (%s = %.0f): the map now has an open "
+                         "edge there" % (robot, which, ax, v))
+                self.mark("e02 board gone %s" % which)
+                self.st["board"] = self.board.to_dict()
+            elif was == "edge" and felt == "board":
+                self.st.setdefault("board_changes", []).append([round(t1, 1), robot, "%s board felt at an open edge" % ax, v])
+                self.say("    %s felt a board where the map has an open edge (%s = %.0f); noted" % (robot, ax, v))
+        self.say("    %s found itself against the %s=%.0f and %s=%.0f sides (%s, %s): at (%.1f, %.1f) facing %.0f deg "
+                 "(its own pose was %.1f cm, %.1f deg off)" % (
+                     robot, a[0], a[1], b[0], b[1], touches[0]["kind"], touches[-1]["kind"], bx, by, bth,
+                     math.hypot(bx - pose[0], by - pose[1]), EF.wrap(bth - pose[2])))
+        self.mark("e02 %s %s edge find end ok" % (order, robot))
+        self.st.save()
+        out.update(ok=True, result="ok", words="found itself against two boundaries", t1=t1)
+        return out
+
     def watchdog(self, robot=None):
         """For wait_end polls: has the camera watchdog stopped the robot in this run?"""
         return self.watchdog_fired
@@ -3292,7 +3766,8 @@ class Runner:
                 if len(smp) < 3 or time.time() - smp[-1][0] > 1.0:
                     continue
                 parked = {n: tuple(q[:2]) for n, q in self.st["positions"].items() if n != robot and q}
-                why = ST.hazard(smp, self.board, parked, edge_cm=self.watch_edge_cm)
+                edge_cm = -1e9 if robot == getattr(self, "edge_touch", None) else self.watch_edge_cm
+                why = ST.hazard(smp, self.board, parked, edge_cm=edge_cm)
                 if not why and getattr(self, "bricks_guard", None) is not None:      # the brick demo's objects
                     import e02_bricks as BR
                     why = BR.object_hazard(smp, self.bricks_guard)
@@ -4112,6 +4587,8 @@ def main(argv=None):
                                                              "measured precision this session")
     ap.add_argument("--gap-k", type=float, default=None, help="tight gap: room = half the robot + k x the 95th "
                                                               "percentile of its measured error (default 1.0)")
+    ap.add_argument("--dry-remove-board", default="", help="dry run: the remove-a-board test: 'x@600' takes the x "
+                    "board away 600 s after the start, without telling the runner")
     ap.add_argument("--dry-bricks", default="", help="dry run: the bricks the simulator puts down when asked, "
                                                      "'x,y,length,width[,deg];...' cm")
     ap.add_argument("--dance", action="store_true", help="after the session: the 3-robot dance to a beat (about 1.5 "
@@ -4149,11 +4626,16 @@ def main(argv=None):
     ap.add_argument("--skip-naming", action="store_true")
     ap.add_argument("--skip-find-check", action="store_true")
     ap.add_argument("--max-runs", type=int, default=0, help="stop after this many runs (0 = all)")
+    ap.add_argument("--classic-setup", action="store_true", help="the old setup: a calibration file (green outline "
+                    "check) and the two board questions, instead of the robots exploring")
     ap.add_argument("--no-recording", action="store_true", help="the Pi runs camrec.py --no-record (live picture "
                     "only): no video and no notes are expected; the runs are measured from the live picture, and "
                     "snapshots/ keeps each run's measured frames")
     ap.add_argument("--edge-careful", action="store_true", help="production behaviour: never turn on the spot near "
                     "an open edge with the heading unknown (call Nick instead); test sessions turn anyway and log it")
+    ap.add_argument("--edge-find", action="store_true", help="every find against any two boundaries (boards or open "
+                    "edges, no camera) instead of `run find` against the two boards; also used on its own once a "
+                    "board is found missing")
     ap.add_argument("--no-lock", action="store_true", help="backup: the tracker without the lock-on (the motion "
                     "detector alone, as before 2026-10-23)")
     ap.add_argument("--own-sensor-only", action="store_true", help="backup: only the runs where the robots drive on "
@@ -4355,6 +4837,12 @@ def start_sim(state, sdir):
                            + (["--bricks", (state["setup"].get("args") or {}).get("dry_bricks")]
                               if (state["setup"].get("args") or {}).get("dry_bricks") else []),
                            stdout=open(os.path.join(simdir, "sim_stdout.txt"), "a"), stderr=subprocess.STDOUT)
+    rb = (state["setup"].get("args") or {}).get("dry_remove_board") or ""
+    if rb:
+        # the remove-a-board test in the simulator: the board goes after this many seconds, the runner not told
+        which, _, after = rb.partition("@")
+        threading.Timer(float(after or 600), lambda: open(os.path.join(simdir, "REMOVE_BOARD_" + which), "w").close()
+                        ).start()
     t0 = time.time()
     while time.time() - t0 < 40 and not os.path.exists(os.path.join(simdir, "sim_info.json")):
         if sim.poll() is not None:

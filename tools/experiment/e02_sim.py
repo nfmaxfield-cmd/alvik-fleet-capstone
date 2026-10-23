@@ -158,6 +158,7 @@ class World:
             a = sum(p_[0] * q[1] - q[0] * p_[1] for p_, q in zip(poly, poly[1:] + poly[:1]))
             return poly if a > 0 else poly[::-1]
         self.polys = [ccw(xpoly), ccw(ypoly)]
+        self.board_polys = dict(x=self.polys[0], y=self.polys[1])     # the remove-a-board test takes one away
         self.brick_specs = parse_bricks(getattr(args, "bricks", "") or "")
         self.brick_polys = [ccw(brick_corners(b)) for b in self.brick_specs]
         self.brick_h = float(getattr(args, "brick_height", 6.0))
@@ -515,6 +516,32 @@ def notes_loop(world, path, port, rec=None):
     s.close()
 
 
+def remove_board_loop(world, simdir):
+    """A board taken away (the remove-a-board test, Nick 2026-10-23) when the file <out>/REMOVE_BOARD_x or
+    REMOVE_BOARD_y appears: it is no longer solid, and its side of the plywood is an open edge (the line sensors
+    see the end). The picture still shows it (the camera is not what the test is about)."""
+    done = set()
+    while not world.stop.is_set():
+        for which in ("x", "y"):
+            if which in done or not os.path.exists(os.path.join(simdir, "REMOVE_BOARD_" + which)):
+                continue
+            done.add(which)
+            bd = world.board
+            gone = world.board_polys[which]
+            keep = [p_ for p_ in world.polys if p_ is not gone]
+            world.polys = keep
+            for rb in world.robots:
+                rb.world_polys = [list(p_) for p_ in keep] + (
+                    [list(p_) for p_ in world.brick_polys] if world.bricks_on else [])
+            edge = ("y1" if bd.xboard_side == 1 else "y0") if which == "x" else ("x1" if bd.yboard_side == 1 else "x0")
+            world.cfg.session.open_edges = list(world.cfg.session.open_edges) + [edge]
+            for rb in world.robots:
+                if rb.cfg is not world.cfg and edge not in rb.cfg.session.open_edges:
+                    rb.cfg.session.open_edges = list(rb.cfg.session.open_edges) + [edge]
+            print("e02_sim: the %s board taken away (%s is an open edge now)" % (which, edge), flush=True)
+        time.sleep(0.2)
+
+
 def bricks_loop(world, flag):
     """Bricks on the board while the flag file exists (e02.py makes and removes it)."""
     while not world.stop.is_set():
@@ -584,6 +611,7 @@ def main(argv=None):
                threading.Thread(target=world.truth_loop, args=(os.path.join(a.out, "truth.csv"),), daemon=True),
                threading.Thread(target=notes_loop, args=(world, os.path.join(a.out, "notes.csv"), NOTES_PORT, rec),
                                 daemon=True)]
+    threads.append(threading.Thread(target=remove_board_loop, args=(world, a.out), daemon=True))
     if world.brick_polys:
         threads.append(threading.Thread(target=bricks_loop, args=(world, os.path.join(a.out, "BRICKS_ON")), daemon=True))
     servers = []

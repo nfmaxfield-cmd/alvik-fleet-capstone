@@ -9,6 +9,35 @@ on particular spots. Put them anywhere on the open board; the runner finds each 
 parks them itself (going round the others), and checks the camera against the robots' own wheels all the time.
 New: the robots feel out the board first (mapping), which also measures the edge guard for the first time.
 
+## Session 2, 2026-10-23 evening: the robots calibrate the camera, and the remove-a-board test
+New since the morning (docs/build-plans/e02-oct22-build.md, "Built 2026-10-23 afternoon"):
+- **No green-outline question, no corner clicks.** With no calibration, the runner starts with **explore**:
+  each robot in turn dances a small square, then drives 8 rays out until its front sensor meets a board or its edge
+  sensors meet an open edge, and back. The live view (http://localhost:8090) shows each robot's stops, the ray ends
+  (orange: a board; red: an open edge) and the border so far (dashed). About 9 minutes. Then the usual parking,
+  find check, naming check and runs, on the robots' own camera calibration.
+- **Watch the open edges during explore**: only the robots' edge sensors protect them (the camera knows nothing yet).
+  If one looks like it will go over, pick it up and press Ctrl + C. Each edge stop is the first real measurement of
+  where the edge sensors stop a robot.
+- If explore says a side was not met, it drives more rays by itself. If it still fails, start again with the robots
+  placed nearer the middle, or add `--classic-setup` (the old green outline / corner clicks).
+- **The remove-a-board test**: once the runs are going (after about 4 runs), wait until a robot is parked and none
+  is moving near the board, then quietly take away **one** board (the left one) and its cement blocks. Don't tell
+  the runner. At the next find near that side, the robot meets an open edge where the board was, finds itself
+  against any two boundaries instead (touching one twice, 25 cm apart, then another), and says "the map now has an
+  open edge there". Every find after that uses the new way. Write down the time you took it away.
+
+Start the runner with:
+```
+python tools\experiment\e02.py --pi st1maxfini.local --hours 1.5 --no-side --robot 192.168.1.250 --robot 192.168.1.252 --robot 192.168.1.253
+```
+(no `--map`: explore maps the board). After the session, in the LAPTOP tab:
+```
+python tools\experiment\explore_check.py logs\e02-<the session folder>
+```
+It compares the robots' calibration with the corner-click one over the whole board, and says where the edge
+sensors really stopped the robots.
+
 ## Before you start (at the board)
 1. Charge all three robots fully. Firmware: 2026-10-22b, already on all three (2026-10-23: no new upload).
 2. Boards on the **top** and **left** edges of the overhead picture, cement blocks behind them. The other two

@@ -88,3 +88,16 @@ argument (minimal labour, infrastructure and know-how; better data of any type r
   straightness: a camera keeps straight lines straight; the camera's floor map from many rays; distance from the
   wheels' average, cross-checked by the robots' known size).
 - Wheel slip (stress tests on a slippery floor) is a known limit with a plan (build notes), so it can be named.
+
+## Notes from the explore build (2026-10-23 afternoon), for the summary
+- Self-calibration now includes the camera: with no calibration file, the robots dance a square and drive rays;
+  one fit gives the camera and every robot's wheel and gyro scale. Simulator check against the true camera: shape
+  within 0.1 cm; turned and shifted only, 1.1 cm median over the board. The remaining error is size (+2%: the wheels
+  set it) and where the corner lies (~4 cm). The real number comes from the session (`explore_check.py` against the
+  corner clicks). A failure with a plan: absolute size (the dock's printed stripe-to-wall distance; the robots' size).
+- The robots catch their own tracking errors during explore: a stop whose camera spot does not fit what the wheels
+  did (a 30-90 cm ray the picture did not show) is found again by a wiggle turn or left out of the camera fit.
+- Edge stops: the distance sensor's bottom zone sees the drop ~9 cm ahead (simulator); the line sensors 3.5 cm. The
+  robots record which one stopped them. Real value: first measured in this session.
+- The edge find: a robot locates itself against any two boundaries at right angles (boards or open edges), no
+  camera; a board taken away without telling them is detected and the map corrected (remove-a-board test).

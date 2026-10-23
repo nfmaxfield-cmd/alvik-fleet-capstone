@@ -205,6 +205,7 @@ class LiveView:
             bv = getattr(r, "bricks_view", None)
             if bv:
                 draw_bricks(v, cam, bv)
+            draw_explore(v, r)
             m = (r.st.get("setup") or {}).get("map") or {}
             for ray in m.get("rays", []):
                 s0, pt = ray.get("cam_start"), ray.get("point")
@@ -213,6 +214,48 @@ class LiveView:
                     if a and b:
                         cv2.line(v, a, b, (0, 0, 255) if ray.get("kind") == "edge" else (255, 160, 0), 1)
         return v
+
+
+EXPLORE_COLOURS = {"Left": (255, 200, 0), "Center": (0, 200, 255), "Right": (255, 0, 200)}
+
+
+def draw_explore(v, r):
+    """Explore (Nick, 2026-10-23: "virtual border being created live"): in picture pixels, as the camera saw them
+    at each stop (setup.explore_live, written by the runner): every robot's stops joined in order (its colour; a grey
+    cross where the camera's spot did not fit what the wheels did), each ray's end (orange: the front sensor met a
+    board; red: an edge sensor met an open edge), and the border so far (dashed white: the outline round the ray
+    ends). Drawn only while exploring; afterwards the fitted board outline takes over."""
+    if not getattr(r, "exploring", False):
+        return
+    live = (r.st.get("setup") or {}).get("explore_live") or {}
+    stops, contacts = live.get("stops") or [], live.get("contacts") or []
+    last = {}
+    for s in stops:
+        n, u, w = s[0], int(s[1]), int(s[2])
+        skip = len(s) > 3 and s[3]
+        col = EXPLORE_COLOURS.get(n, (200, 200, 200))
+        if skip:
+            cv2.drawMarker(v, (u, w), (150, 150, 150), cv2.MARKER_TILTED_CROSS, 8, 1)
+            continue
+        if n in last:
+            cv2.line(v, last[n], (u, w), col, 1)
+        cv2.circle(v, (u, w), 2, col, -1)
+        last[n] = (u, w)
+    pts = []
+    for c in contacts:
+        n, u, w, kind = c[0], int(c[1]), int(c[2]), c[3]
+        cv2.circle(v, (u, w), 5, (0, 0, 255) if kind == "edge" else (0, 160, 255), 2)
+        pts.append((u, w))
+    if len(pts) >= 3:
+        hull = cv2.convexHull(np.array(pts, np.int32)).reshape(-1, 2)
+        for a_, b_ in zip(hull, np.roll(hull, -1, 0)):
+            n_ = max(1, int(math.hypot(*(b_ - a_)) // 8))
+            for k in range(0, n_, 2):
+                p1_ = tuple(int(x) for x in a_ + (b_ - a_) * k / n_)
+                p2_ = tuple(int(x) for x in a_ + (b_ - a_) * (k + 1) / n_)
+                cv2.line(v, p1_, p2_, (255, 255, 255), 1)
+    cv2.putText(v, "Explore: dots = robot stops seen by the camera; circles = ray ends (orange board, red edge); "
+                   "dashed = border so far", (6, v.shape[0] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.33, (255, 255, 255), 1)
 
 
 BRICKS_NOTE = ("Brick demo: red outlines = the objects the camera found; dashed red = the room kept round them; blue "

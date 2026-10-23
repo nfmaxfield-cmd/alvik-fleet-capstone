@@ -175,18 +175,21 @@ class Board:
         self.x0, self.y0, self.x1, self.y1 = (float(v) for v in rect)
         self.face_cm = float(face_cm)
         self.xboard_side, self.yboard_side = int(xboard_side), int(yboard_side)
+        self.missing = set()      # boards found gone ('x' / 'y': the x board / the y board), open edges now
         self.xboard_cm = float(xboard_cm) if xboard_cm is not None else (self.y0 if self.xboard_side == 0 else self.y1)
         self.yboard_cm = float(yboard_cm) if yboard_cm is not None else (self.x0 if self.yboard_side == 0 else self.x1)
 
     def to_dict(self):
         return dict(rect=[self.x0, self.y0, self.x1, self.y1], xboard_side=self.xboard_side,
                     yboard_side=self.yboard_side, xboard_cm=round(self.xboard_cm, 2), yboard_cm=round(self.yboard_cm, 2),
-                    face_cm=self.face_cm)
+                    face_cm=self.face_cm, missing=sorted(self.missing))
 
     @classmethod
     def from_dict(cls, d):
-        return cls(d["rect"], d["xboard_side"], d["yboard_side"], d.get("xboard_cm"), d.get("yboard_cm"),
-                   d.get("face_cm", FACE_CM))
+        b = cls(d["rect"], d["xboard_side"], d["yboard_side"], d.get("xboard_cm"), d.get("yboard_cm"),
+                d.get("face_cm", FACE_CM))
+        b.missing = set(d.get("missing") or ())
+        return b
 
     def firmware_sides(self):
         """e02_xboard_side / e02_yboard_side as the firmware wants them: -1 = the board is at lower y / x than
@@ -245,8 +248,14 @@ class Board:
         return self.uv(FIND_STAGE_CM, FIND_STAGE_CM)
 
     def open_edges(self):
-        """The two edges without a board: [('x', value) | ('y', value)] (x = value or y = value lines)."""
-        return [("x", self.x1 if self.yboard_side == 0 else self.x0), ("y", self.y1 if self.xboard_side == 0 else self.y0)]
+        """The edges without a board: [('x', value) | ('y', value)] (x = value or y = value lines): the two open
+        ones, and a board's edge once that board has been found gone (the edge find: Nick, 2026-10-23)."""
+        out = [("x", self.x1 if self.yboard_side == 0 else self.x0), ("y", self.y1 if self.xboard_side == 0 else self.y0)]
+        if "y" in getattr(self, "missing", ()):          # the y board stands along an x = value line
+            out.append(("x", self.x0 if self.yboard_side == 0 else self.x1))
+        if "x" in getattr(self, "missing", ()):
+            out.append(("y", self.y0 if self.xboard_side == 0 else self.y1))
+        return out
 
     def edge_room(self, x, y):
         """Distance (cm) from a point to the nearest open edge, and to the nearest board line."""

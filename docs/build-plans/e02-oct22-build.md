@@ -113,3 +113,42 @@ Nick uploads firmware 2026-10-22b to all three robots (same steps as this mornin
   the dock's floor stripe sits a known printed distance from its back wall; a robot creeping in measures that
   distance with its wheels between the stripe and the switches clicking: an absolute wheel-scale check at every
   docking, which then fixes the camera's scale through the explore fit.
+
+## Built 2026-10-23 afternoon: explore (item 1) and the edge find (item 2)
+**Explore** (`e02_explore.py`, `Runner.explore`): with no calibration file, the robots calibrate the camera and map the
+board themselves; `--classic-setup` keeps the corner clicks. Each robot dances a 15 cm square, then drives 7 rays out
+to a board (front stop) or an open edge (edge guard) and back (a 175 deg turn and forward: backing up is blind).
+Every stop pairs the camera's pixels with the robot's own wheels and gyro; one least-squares fit gives the camera
+(focal length, lens bend, pose), each robot's wheel and gyro scale and where its own frame sits.
+- **Tracking guard:** at each stop the camera's spot must fit what the wheels did (a drive of 8 cm or more must move it
+  at least 0.4 px a cm; a turn on the spot must not jump it more than 25 px). If not, a wiggle turn finds the robot
+  again; a stop that still does not fit is kept for the path but not for the camera. The fit also drops such stops,
+  then refits without any stop more than max(10 px, 4 x the median) off. (Dry run 3: Left's tracker stayed on its old
+  spot for 19 stops; refitted with the guard: 1.5 px.)
+- **The reference robot** for the frames is the one the camera saw at most stops (not always Left).
+- **Contacts** near another robot at that moment (where it stood then, not where it ended) are left out; a ray that
+  turned more than 3 deg while stopping is left out.
+- **Edge reach:** most edge stops in the simulator are the distance sensor's bottom zone, which sees the drop ~9 cm
+  ahead of the axle (the line sensors: 3.5 cm). The stop's cue is recorded (`plywood edge (bottom|line)`) and the
+  reach chosen by it (`e02_map.BOTTOM_AHEAD_CM` 9.0, from the simulator: **to be measured on the real board**).
+  `refine_edges` estimates the reach from the rays' slants when they differ enough (reported).
+- **Scale check by the robots' size** (Nick: "robot size for now"): the outline's long side at each stop against
+  9.5 cm, reported at the end of explore; not applied (the real outline includes some shadow, not yet measured).
+- **Live lab:** while exploring, the picture shows each robot's stops (its colour; grey cross where the camera's spot
+  did not fit), the ray ends (orange: board; red: open edge) and the border so far (dashed), with a caption.
+- **Simulator result (dry run 4, against the simulator's true camera, `explore_check.py`):** turned and shifted only,
+  the robots' calibration is within 1.1 cm median (worst 1.6 cm) over the board; with a scale it is within 0.1 cm.
+  So the camera's shape is exact; what is left is the size (+2%: the wheels' average sets it) and where the corner
+  lies (~4 cm). Tracker in the runs after: 6.5 cm median against the truth (from the corner placement).
+- **The real check:** `python tools/experiment/explore_check.py logs/e02-<session>` compares the robots'
+  calibration with the corner-click one over the whole board.
+
+**Edge find** (`e02_edgefind.py`, `Runner.edge_find`): locating against any two boundaries at right angles, boards or
+open edges, with no camera. Touch boundary A twice 25 cm apart (heading against A: 1 cm of touch error is 2.3 deg),
+then B once. `fix` with the result. Never two open edges together (the open corner). The camera watchdog lets that
+robot reach an open edge meanwhile (the edge guard stops it).
+- `--edge-find`: every find is an edge find.
+- Otherwise a board find that meets an open edge where the board should be (`run find` fails: "an open plywood edge,
+  not a board") is followed by an edge find, and the map is corrected: the board is gone, its side is an open edge
+  for the watchdog and the planning (`Board.missing`, saved in the state).
+- Simulator: `--dry-remove-board y@760` takes the y board away 760 s in, without telling the runner.

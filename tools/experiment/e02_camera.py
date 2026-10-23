@@ -525,6 +525,7 @@ class MotionTracker:
                 sub = motion[stats[i, 1]:stats[i, 1] + h, stats[i, 0]:stats[i, 0] + w]
                 mv = float((sub[ys, xs] > 0).mean()) if len(xs) else 0.0
             out.append(dict(u=float(u), v=float(v), area=a, x=float(x), y=float(y), moving=mv,
+                            rw=float(rw), rh=float(rh),
                             shape=bool(self._shape_ok(a, rw, rh) and self.on_area(x, y))))
         return out
 
