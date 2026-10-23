@@ -22,5 +22,7 @@ easier routes we could have taken and didn't. A running list: add to it as choic
 ## The argument (Nick, 2026-10-23)
 It is easy to make anything work under sterile lab conditions with the best equipment. This system is built to be
 deployed anywhere, to use whatever equipment is there, and to stay accurate in poor conditions: versatility and
-adaptability are the point, not a cost. Where a site does have better equipment or aids (a sharper camera,
-markers, a survey), the system takes them as extra evidence; it never depends on them.
+adaptability are the point, not a cost. It works with minimal labour, infrastructure and technical know-how. And
+because the system merges every source of data (the data-merging principle at the heart of the project), better
+data of any type, where a site has it (a sharper camera, markers, a survey, a dock), raises the program's
+confidence in its own accuracy; it never depends on it.
