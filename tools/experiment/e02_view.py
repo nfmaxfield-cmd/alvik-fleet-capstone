@@ -162,7 +162,11 @@ class LiveView:
                     cv2.polylines(v, [np.array(pts, np.int32)], True, (0, 160, 0), 1)
             for c in list(getattr(tr, "last_cands", []) or []):
                 cv2.circle(v, (int(c["u"]), int(c["v"])), 4, (0, 220, 220) if c["shape"] else (150, 150, 150), -1)
+            live = tr.where() if tr is not None else None
             for n, q in list((r.st.get("positions") or {}).items()):
+                if tr is not None and n == tr.active and live is not None and time.time() - live[0] < 2.0:
+                    q = (live[1], live[2])        # the robot being followed: its label goes with it (2026-10-23:
+                                                  # it stayed at its park spot while the robot drove out to map)
                 if q:
                     p = px(q[0], q[1], 3.7)
                     if p:
