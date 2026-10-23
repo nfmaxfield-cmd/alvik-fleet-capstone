@@ -1698,7 +1698,14 @@ def finds(session):
             if not r["ok"]:
                 k = str(r["result"]).split("failed:", 1)[-1].split(",")[0].strip()[:60]
                 reasons[k] = reasons.get(k, 0) + 1
+        c1 = [r["corr1_cm"] for r in okr]
+        c2 = [r["corr2_cm"] for r in okr]
         summ.append(dict(robot=rb, finds=len(rr), ok=sum(r["ok"] for r in rr), failed=sum(1 - r["ok"] for r in rr),
+                         off_x_cm=float(np.mean(c1)) if c1 else float("nan"),
+                         off_y_cm=float(np.mean(c2)) if c2 else float("nan"),
+                         sd_x_cm=float(np.std(c1, ddof=1)) if len(c1) > 1 else float("nan"),
+                         sd_y_cm=float(np.std(c2, ddof=1)) if len(c2) > 1 else float("nan"),
+                         min_since_med=float(np.median([r["min_since_fix"] for r in okr])) if okr else float("nan"),
                          n_err=len(e), err_med_cm=float(np.median(e)) if e else float("nan"),
                          err_max_cm=max(e) if e else float("nan"),
                          head_med_deg=float(np.median(hd)) if hd else float("nan"),
@@ -1717,17 +1724,21 @@ def finds_lines(rows, summ):
     if not rows:
         return ["### Finds", "", "No find.csv in this session.", ""], []
     L = ["### Finds (the board-push finds, beyond the fix they give)", "",
-         "| Robot | finds ok / failed | own pose off at the boards: median (worst), cm | heading off, deg | drift since "
-         "its last fix, cm/min | gyro scale between the boards (turn_k) | gyro drift standing still, deg/s |",
-         "|---|---|---|---|---|---|---|"]
+         "| Robot | finds ok / failed | own pose off at the boards: median (worst), cm | steady offset from the x-board / "
+         "y-board, cm (mean) | scatter, cm (SD) | heading off, deg | minutes since its last fix (median) | gyro scale "
+         "between the boards (turn_k) | gyro drift standing still, deg/s |",
+         "|---|---|---|---|---|---|---|---|---|"]
     for r in summ:
-        L.append("| %s | %d / %d | %s (%s) | %s | %s | %s ± %s (n=%d) | %s (n=%d) |" % (
-            r["robot"], r["ok"], r["failed"], f(r["err_med_cm"], 1), f(r["err_max_cm"], 1), f(r["head_med_deg"], 1),
-            f(r["drift_cm_per_min"], 2), f(r["turn_k_med"], 3), f(r["turn_k_spread"], 3), r["n_turn_k"],
+        L.append("| %s | %d / %d | %s (%s) | %s / %s | %s / %s | %s | %s | %s ± %s (n=%d) | %s (n=%d) |" % (
+            r["robot"], r["ok"], r["failed"], f(r["err_med_cm"], 1), f(r["err_max_cm"], 1), f(r["off_x_cm"], 1),
+            f(r["off_y_cm"], 1), f(r["sd_x_cm"], 1), f(r["sd_y_cm"], 1), f(r["head_med_deg"], 1),
+            f(r["min_since_med"], 2), f(r["turn_k_med"], 3), f(r["turn_k_spread"], 3), r["n_turn_k"],
             f(r["gyro_still_dps"], 4), r["n_gyro"]))
     L += ["", "Own pose off: how far the robot's wheels-and-gyro position was from where the two boards put it, at "
-              "the touch (no camera). Drift: that distance divided by the minutes since its last camera fix or find. "
-              "Per find: finds.csv.", ""]
+              "the touch (no camera). It splits into a steady offset (the same every find: where the camera's "
+              "coordinates put the boards against where the robots touch them, and the bumper geometry) and the "
+              "scatter around it (what the wheels and gyro drifted on the drive from the last camera fix to the "
+              "boards). Per find: finds.csv.", ""]
     fails = [r for r in summ if r["reasons"]]
     if fails:
         L += ["Failed finds: " + "; ".join("%s: %s" % (r["robot"], r["reasons"]) for r in fails) + ".", ""]
