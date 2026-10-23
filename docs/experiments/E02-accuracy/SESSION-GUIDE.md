@@ -68,13 +68,24 @@ looks like (keep its lights steady while driving: the runner does this) and foll
 it every 2 s and at every stop. In the live view, the robot it follows should stay ringed in green through its
 turns, also beside the boards, where it lost them last night.
 
+**Backups (2026-10-23), so a bad patch doesn't end the session:**
+- A robot that needs your help 3 times during the runs is put aside by itself; the other two carry on. You may take
+  it off the board whenever you like.
+- 3 failed camera-steered runs (K, or KC) in a session: the rest of that kind wait for later; the runs on the
+  robots' own sensors carry on.
+- The Pi's card almost full: the video so far is saved, and the live picture carries on, so the runs are still
+  measured (just no video after that point).
+- If the new tracker misbehaves: Ctrl + C in the LAPTOP tab, then start again with `--resume --no-lock` added (the
+  motion detector alone, as last night). To run only the robots'-own-sensor runs: add `--own-sensor-only`.
+
 ## 4. Watch the first 3 runs, then leave
 If the first 3 runs go without a call for help, the rest should too. If something odd happens, take a
 screenshot of the LAPTOP tab and send it. If a robot needs you, the runner says exactly what to do: put it
 anywhere open on the board and press Enter; it finds it and parks it itself.
 
 ## 5. The end
-The last lines say how the tracker did ("Tracker: position from the lock-on ...%"): screenshot them.
+The last lines say how the tracker did ("Tracker: of the pictures, both saw the robot ...%") and whether the laptop kept up
+("Camera processing: ... a picture's age ..."): screenshot them.
 **Start copying the footage straight away** (Nick, 2026-10-21): it takes 10+ minutes, so it runs while the
 next steps are discussed. Claude gives the copy and upload steps first, before anything else.
 1. PI tab: **Ctrl + C** stops the recording.

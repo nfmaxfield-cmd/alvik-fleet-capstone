@@ -138,12 +138,14 @@ def balance(schedule, blocks=None):
     return out
 
 
-def next_run(schedule, has_fit, unavailable=()):
+def next_run(schedule, has_fit, unavailable=(), skip_conds=()):
     """The next pending run to do, or None. A C or KC run for a robot with no accepted fit yet waits behind
     the other runs of its block: has_fit(robot) -> bool. If only such runs are left in the block, the first
     one runs on the priors (the caller records that). Robots in `unavailable` (flat battery, waiting for
-    Nick) are skipped. Returns the run dict (from the schedule)."""
-    pend = [r for r in schedule if r["status"] == "pending" and r["robot"] not in unavailable]
+    Nick) are skipped, and so are runs of conditions in `skip_conds` (camera-dependent conditions put aside: they
+    stay pending for a later session). Returns the run dict (from the schedule)."""
+    pend = [r for r in schedule if r["status"] == "pending" and r["robot"] not in unavailable
+            and r["cond"] not in skip_conds]
     if not pend:
         return None
     block = pend[0]["block"]

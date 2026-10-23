@@ -251,9 +251,23 @@ def test_disk_watch_stops_recording(tmp_path):
     stop = threading.Event()
     lines = []
     levels = iter([5.0, 0.8, 0.8, 0.2])
-    camrec.watch_disk(str(tmp_path), stop, 0.01, lines.append, free=lambda _: next(levels))
+    camrec.watch_disk(str(tmp_path), stop, 0.01, lines.append, free=lambda _: next(levels), keep_live=False)
     assert stop.is_set()
     assert sum("LOW DISK SPACE" in ln for ln in lines) == 1 and any("stopping and saving" in ln for ln in lines)
+
+
+def test_disk_watch_keeps_live_picture(tmp_path):
+    """2026-10-23 backup: the card almost full closes the video but keeps the live picture for the runner."""
+    stop = threading.Event()
+    lines = []
+    levels = iter([5.0, 0.2])
+
+    class Cam:
+        pass
+    c = Cam()
+    camrec.watch_disk(str(tmp_path), stop, 0.01, lines.append, cams=[c], free=lambda _: next(levels))
+    assert not stop.is_set() and c.rec_stop_req
+    assert any("live picture carries on" in ln for ln in lines)
 
 
 def test_list_cameras_marks_the_ones_that_send_pictures():
@@ -274,3 +288,22 @@ def test_tag_line():
     assert camrec.tag_line("  ! exposure: x", "cam1 (side): ") == "  ! cam1 (side): exposure: x"
     assert camrec.tag_line("Camera: exposure 80", "cam0: ") == "cam0: Camera: exposure 80"
     assert camrec.tag_line("!" * 10, "cam0: ") == "!" * 10
+
+
+def test_recording_stops_cleanly_but_live_goes_on(tmp_path):
+    """The card almost full mid-recording: the video is closed and readable, the camera keeps being read."""
+    import cv2
+    lines = []
+    levels = iter([5.0] * 5 + [0.2] * 1000)
+    orig = camrec.free_gb
+    camrec.free_gb = lambda _: next(levels)
+    try:
+        folder, cams = camrec.run_session([FakeCapture(30)], ["0"], out=str(tmp_path), label="E1", seconds=2.0,
+                                          fps=30, port=0, notes_port=0, stdin_notes=False, replays=[False],
+                                          log=lines.append, disk_check_s=0.1)
+    finally:
+        camrec.free_gb = orig
+    c = cams[0]
+    assert "live picture on" in (c.stopped or "")
+    n_video = int(cv2.VideoCapture(os.path.join(folder, "video.avi")).get(cv2.CAP_PROP_FRAME_COUNT))
+    assert 0 < n_video < c.n - 10           # the video stopped; the camera went on being read

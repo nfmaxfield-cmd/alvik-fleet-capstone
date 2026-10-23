@@ -132,6 +132,10 @@ FIND_TIMEOUT_S = 150
 E02_TIMEOUT_S = {0: 150, 1: 400}
 BATTERY_WARN, BATTERY_STOP = 40, 15
 EXPECTED_FW = "2026-10-22b"
+# Backups (Nick, 2026-10-23: "build in backup plans in case our session goes poorly ... get as much data as possible
+# before stopping for a rebuild"). Chosen numbers; a DOE would not help much here (they trade data for Nick's time).
+HELP_DROP_N = 3           # help calls for one robot during the runs: then it is put aside, not Nick called again
+COND_FAIL_N = 3           # failed runs of a camera-dependent condition (K, KC): its remaining runs are put aside
 # The edge guard (both cues, Nick 2026-10-22 evening: "essential if we're going to be mapping by feel alone") and
 # the bare body. safe_edge is not saved on the robot: set after every power-on.
 # Line cue, edge_thr 150 (chosen; a DOE would not add much: the gap is wide): on this board, driving, the line
@@ -301,6 +305,8 @@ class Runner:
             self.trackw.writerow(["t", "robot", "x_cm", "y_cm", "order", "phase", "source", "lock_score"])
         self.heads = {}               # robot -> [heading deg or None, measured bool]
         self.unavailable = set()
+        self.skip_conds = set()       # conditions put aside for this session (backup: camera-dependent ones failing)
+        self.in_runs = False          # the session's runs have started (backups apply only then)
         self.last_result = ""
         self.kc_stop = threading.Event()
         self.marks_unconfirmed = 0
@@ -416,6 +422,41 @@ class Runner:
             self.trackw.writerow(["%.3f" % s[0], self.tracker.active, "%.2f" % s[1], "%.2f" % s[2], self.order, self.phase,
                                   getattr(self.tracker, "source", "") or "",
                                   "%.2f" % lk.score if lk is not None and lk.locked else ""])
+
+    PERF_COLS = ["t", "fps_handled", "dropped", "ms_mean", "ms_max", "age_mean_s", "age_max_s", "wait_s", "source",
+                 "phase"]
+
+    def on_perf(self, row):
+        """perf.csv, one row a second: is the laptop keeping up with the camera (Nick, 2026-10-23)."""
+        if getattr(self, "perfw", None) is None:
+            path = os.path.join(self.dir, "perf.csv")
+            new = not os.path.exists(path) or os.path.getsize(path) == 0
+            self.perff = open(path, "a", newline="")
+            self.perfw = csv.DictWriter(self.perff, fieldnames=self.PERF_COLS)
+            if new:
+                self.perfw.writeheader()
+            self.perf_rows = []
+        row = dict(row, phase=self.phase)
+        self.perfw.writerow(row)
+        self.perff.flush()
+        self.perf_rows.append(row)
+        if row["age_max_s"] > 1.0 and time.time() - getattr(self, "perf_warned", 0) > 60:
+            self.perf_warned = time.time()
+            self.say("  (camera: a picture was %.1f s old when its position was ready; %d dropped in the last second)"
+                     % (row["age_max_s"], row["dropped"]), quiet=True)
+
+    def perf_summary(self):
+        rows = getattr(self, "perf_rows", None)
+        if not rows:
+            return None
+        import statistics as STS
+        q = lambda a, f: sorted(a)[min(len(a) - 1, int(f * len(a)))]
+        ages = [r["age_mean_s"] for r in rows]
+        return ("Camera processing: %.1f pictures a second handled (of ~25), %.0f ms a picture (95%%: %.0f ms), "
+                "a picture's age when its position was ready: median %.2f s, 95%% %.2f s, worst %.2f s" % (
+                    STS.median([r["fps_handled"] for r in rows]), STS.median([r["ms_mean"] for r in rows]),
+                    q([r["ms_max"] for r in rows], 0.95), STS.median(ages), q([r["age_max_s"] for r in rows], 0.95),
+                    max(r["age_max_s"] for r in rows)))
 
     def pos(self, robot=None, fresh_s=1.5):
         p = self.tracker.where()
@@ -1445,6 +1486,26 @@ class Runner:
                             return True
                 if why not in ("noturn", "noheading"):
                     problem = why
+        calls = [h for h in self.st.get("help_calls", []) if h[1] == robot and h[0] >= self.st.get("t_session_start", 0)]
+        if self.in_runs and len(calls) >= HELP_DROP_N and \
+                len([n for n in self.st["robots"] if n not in self.unavailable and n != robot]) >= 1:
+            # backup: this robot keeps needing help; put it aside (it stays on the map where it was last seen, the
+            # others go round it) and carry on with the others; --resume later runs what it missed
+            self.mark("e02 drop %s: %s" % (robot, problem))
+            self.st.setdefault("dropped", []).append([round(time.time(), 1), robot, problem])
+            self.unavailable.add(robot)
+            self.say("  %s has needed help %d times this session (now: %s). It is put aside and the others carry on; "
+                     "you may take it off the board whenever you like (--resume runs its remaining runs later)."
+                     % (robot, len(calls), problem))
+            self.send(robot, "stop")
+            try:
+                self.keep_on_map(robot)
+                self.st.save()
+                return False
+            except SystemExit:
+                # nobody knows where it is, so the others could drive into it: Nick after all
+                self.unavailable.discard(robot)
+                self.say("  ... but nobody can find it, so the others could drive into it: help is needed after all.")
         where = ("anywhere on the open part of the board, at least 30 cm (1 ft) from the other robots, the boards "
                  "and the edges")
         facing = "open board"
@@ -1887,6 +1948,9 @@ class Runner:
         if self.tracker is None:
             b = PL.Board()
             self.tracker = CAM.MotionTracker(self.cam, ((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2))
+            if getattr(self.a, "no_lock", False):
+                self.tracker.use_lock = False     # backup (--no-lock): the motion detector alone
+                self.say("Tracker: the motion detector alone (--no-lock).")
             self.feed.tracker = self.tracker
 
     def find_boards(self, img):
@@ -3715,11 +3779,16 @@ class Runner:
                 self.say(line)
         self.write_runs()
         st["t_session_start"] = time.time()
+        self.in_runs = True
+        if getattr(self.a, "own_sensor_only", False):
+            self.skip_conds |= {"K", "KC"}
+            self.say("Own-sensor runs only (--own-sensor-only): the K and KC runs stay in the plan for later.")
         self.mark("e02 session start")
         n_this = 0
         cur_block = None
         while True:
-            r = PL.next_run(st["schedule"], lambda rb: self.fitted(rb) is not None, self.unavailable)
+            r = PL.next_run(st["schedule"], lambda rb: self.fitted(rb) is not None, self.unavailable,
+                            self.skip_conds)
             if r is None:
                 break
             if self.a.max_runs and n_this >= self.a.max_runs:
@@ -3741,6 +3810,21 @@ class Runner:
                 self.recorder_ok()
             self.do_run(r)
             n_this += 1
+            for c in ("K", "KC"):
+                bad = [x for x in st["schedule"] if x["cond"] == c and x["status"] == "failed"
+                       and x.get("t_end", x.get("t_start", 0)) >= st["t_session_start"]]
+                if c not in self.skip_conds and len(bad) >= COND_FAIL_N:
+                    # backup: the camera-dependent runs keep failing; the runs on the robots' own sensors still give
+                    # accuracy data (the camera only measures their start and end)
+                    self.skip_conds.add(c)
+                    self.mark("e02 skip condition %s" % c)
+                    self.say("  %d %s runs (%s) failed this session: the rest of them stay in the plan for later; the "
+                             "other conditions carry on." % (len(bad), c, PL.COND_WORDS[c]))
+            if not [x for x in st["schedule"] if x["status"] == "pending" and x["robot"] not in self.unavailable
+                    and x["cond"] not in self.skip_conds]:
+                if self.skip_conds or self.unavailable:
+                    self.say("Nothing left that can run now (put aside: %s). --resume runs the rest later." % ", ".join(
+                        sorted(self.skip_conds) + sorted(self.unavailable)))
         done = [r for r in st["schedule"] if r["status"] == "done"]
         self.mark("e02 session end")
         self.say("=== Session: %d runs done, %d failed, %d still to do ===" % (
@@ -3919,6 +4003,10 @@ def main(argv=None):
     ap.add_argument("--skip-naming", action="store_true")
     ap.add_argument("--skip-find-check", action="store_true")
     ap.add_argument("--max-runs", type=int, default=0, help="stop after this many runs (0 = all)")
+    ap.add_argument("--no-lock", action="store_true", help="backup: the tracker without the lock-on (the motion "
+                    "detector alone, as before 2026-10-23)")
+    ap.add_argument("--own-sensor-only", action="store_true", help="backup: only the runs where the robots drive on "
+                    "their own sensors (U, C); K and KC stay in the plan for later")
     ap.add_argument("--resume", nargs="?", const="latest", help="carry on a session (folder, or the latest)")
     ap.add_argument("--auto", action="store_true", help="answer every question with its default (no person)")
     ap.add_argument("--dry-run", action="store_true", help="against the simulator (tools/experiment/e02_sim.py)")
@@ -4029,6 +4117,7 @@ def launch(a, state, sdir, sim):
     try:
         feed = CAM.Feed(stream_url(a), None, hist, log=lambda m: run.say("  (camera: %s)" % m))
         feed.on_sample = run.on_sample
+        feed.on_perf = run.on_perf
         feed.start()
         run.feed = feed
         run.setup()
@@ -4074,11 +4163,19 @@ def launch(a, state, sdir, sim):
         if run.tracker is not None and getattr(run.tracker, "stats", None):
             st_ = dict(run.tracker.stats)
             state.setdefault("tracker_stats", []).append(dict(t=round(time.time(), 1), **st_))
-            n = sum(st_.get(k, 0) for k in ("lock", "detector", "held", "none")) or 1
-            run.say("Tracker: position from the lock-on %.0f%%, the detector %.0f%%, held %.0f%%, none %.0f%% of pictures; "
-                    "detector checks agreed %d of %d (it saw the robot), %d re-locks" % (
-                        100.0 * st_["lock"] / n, 100.0 * st_["detector"] / n, 100.0 * st_["held"] / n,
+            n = sum(st_.get(k, 0) for k in ("both", "lock", "detector", "held", "none")) or 1
+            run.say("Tracker: of the pictures, both saw the robot %.0f%%, the lock-on alone %.0f%%, the detector alone "
+                    "%.0f%%, held %.0f%%, none %.0f%%; detector checks agreed %d of %d (it saw the robot), %d re-locks" % (
+                        100.0 * st_.get("both", 0) / n, 100.0 * st_["lock"] / n, 100.0 * st_["detector"] / n,
+                        100.0 * st_["held"] / n,
                         100.0 * st_["none"] / n, st_["agree"], st_["agree"] + st_["disagree"], st_["relocks"]))
+        try:
+            ps = run.perf_summary()
+            if ps:
+                run.say(ps)
+                state["perf_summary"] = ps
+        except Exception as e:
+            run.say("(processing summary failed: %s)" % e)
         state.save()
         run.trackf.close()
         if sim is not None:

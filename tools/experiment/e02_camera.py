@@ -385,7 +385,7 @@ class MotionTracker:
         self.check_hold = False                 # a check is due at the next picture (it just stopped)
         self.disagree_n = 0
         self.source = None                      # where the last position came from: lock / detector / held
-        self.stats = dict(lock=0, detector=0, held=0, none=0, checks=0, agree=0, disagree=0, relocks=0)
+        self.stats = dict(both=0, lock=0, detector=0, held=0, none=0, checks=0, agree=0, disagree=0, relocks=0)
         self.last_check = None                  # (t, distance cm or None)
 
     # --- geometry --------------------------------------------------------------------------------
@@ -609,7 +609,7 @@ class MotionTracker:
                     best = (best[0], float(np.mean([q[0] for q in self.held_hist])),
                             float(np.mean([q[1] for q in self.held_hist])))
                 if best is not None:
-                    if not self.use_lock or self.source != "lock":
+                    if not self.use_lock or self.source not in ("lock", "both"):
                         self.source = "held" if len(best) > 3 else "detector"
                     self.stats[self.source] += 1
                     self.pos = (t, best[1], best[2])
@@ -695,6 +695,7 @@ class MotionTracker:
                 a = 0.1
                 self.lock_off = ((1 - a) * self.lock_off[0] + a * (det[0] - s[1]),
                                  (1 - a) * self.lock_off[1] + a * (det[1] - s[2]))
+                self.source = "both"
                 return None
             if self.lk.score < self.LOCK_SURE or det_moving:
                 # an unsure lock falling behind a robot the detector sees clearly (2026-10-21 footage, Center
@@ -1025,6 +1026,8 @@ class Feed(threading.Thread):
         self.skipped = 0             # frames dropped because the tracker was busy (newest_only)
         self.lag = 0.0
         self.on_sample = None        # function((t, x, y)) for every position of the followed robot
+        self.on_perf = None          # function(dict) once a second: is the laptop keeping up with the camera?
+        self._perf = dict(t0=None, n=0, push_s=0.0, push_max=0.0, age_max=0.0, age_sum=0.0, skipped0=0)
 
     def _read(self):
         """Reader thread: takes every frame off the stream as it arrives (so nothing piles up in the network
@@ -1077,7 +1080,9 @@ class Feed(threading.Thread):
                 t = fr.t_pi + self.clock.offset - self.cap
                 for h in list(self.hooks):
                     h(fr.img, t)
+                a = time.time()
                 s = self.tracker.push(fr.img, t) if self.tracker is not None else None
+                self._perf_add(a, time.time(), t)
                 if s is not None:
                     self.history.add(s)
                     if self.on_sample:
@@ -1090,6 +1095,33 @@ class Feed(threading.Thread):
                     self.cond.notify_all()
         except Exception as e:      # keep the reason for the console
             self.err = e
+
+    def _perf_add(self, a, b, t):
+        """Once a second (to on_perf): pictures handled, pictures dropped, the tracker's time per picture, and each
+        picture's age when its position was ready (laptop clock minus the picture's time: capture + WiFi + waiting +
+        processing). Nick, 2026-10-23: "make sure the program doesn't fall behind reality"."""
+        p = self._perf
+        if p["t0"] is None:
+            p["t0"], p["skipped0"] = a, self.skipped
+        p["n"] += 1
+        p["push_s"] += b - a
+        p["push_max"] = max(p["push_max"], b - a)
+        age = b - t
+        p["age_sum"] += age
+        p["age_max"] = max(p["age_max"], age)
+        if b - p["t0"] >= 1.0:
+            dt = b - p["t0"]
+            row = dict(t=round(b, 3), fps_handled=round(p["n"] / dt, 1),
+                       dropped=self.skipped - p["skipped0"], ms_mean=round(1000 * p["push_s"] / p["n"], 1),
+                       ms_max=round(1000 * p["push_max"], 1), age_mean_s=round(p["age_sum"] / p["n"], 3),
+                       age_max_s=round(p["age_max"], 3), wait_s=round(self.lag, 3),
+                       source=getattr(self.tracker, "source", None) or "")
+            self._perf = dict(t0=b, n=0, push_s=0.0, push_max=0.0, age_max=0.0, age_sum=0.0, skipped0=self.skipped)
+            if self.on_perf:
+                try:
+                    self.on_perf(row)
+                except Exception:
+                    pass
 
     def wait_frames(self, n, timeout=10.0):
         """Wait for n new frames; returns them (grey images) or fewer on timeout."""

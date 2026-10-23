@@ -297,3 +297,39 @@ def test_layout_check_flags_open_edge_where_board_taken():
              "board-x": dict(axis="x", nominal=b.x1 if vx == b.x0 else b.x0, kind="edge", n=3)}
     safe, risky = MAP.layout_check(sides, b)
     assert len(safe) == 1 and len(risky) == 1
+
+
+def test_next_run_skips_conditions():
+    import e02_plan as PL
+    sched = [dict(status="pending", robot="Left", cond="K", block=0), dict(status="pending", robot="Left", cond="U", block=0)]
+    r = PL.next_run(sched, lambda rb: True, (), {"K"})
+    assert r["cond"] == "U"
+    assert PL.next_run(sched[:1], lambda rb: True, (), {"K"}) is None
+
+
+def test_backup_flags_parse():
+    import e02
+    src = open(e02.__file__).read()
+    assert '"--no-lock"' in src and '"--own-sensor-only"' in src and "HELP_DROP_N" in src and "COND_FAIL_N" in src
+
+
+def test_help_drops_robot_after_three_calls():
+    """Backup (Nick, 2026-10-23): a robot that keeps needing help during the runs is put aside, not Nick called."""
+    import types, time
+    import e02
+    r = e02.Runner.__new__(e02.Runner)
+    t0 = time.time() - 100
+
+    class St(dict):
+        def save(self):
+            pass
+    r.st = St(robots=["Left", "Center"], help_calls=[[t0 + k, "Left", "lost"] for k in range(3)], t_session_start=t0)
+    r.in_runs, r.unavailable = True, set()
+    said, kept = [], []
+    r.say = lambda m, quiet=False: said.append(m)
+    r.mark = lambda m: None
+    r.send = lambda rb, c: None
+    r.keep_on_map = lambda rb: kept.append(rb)
+    r.a = types.SimpleNamespace(auto=True)
+    assert r.help_from_nick("Left", "off the board") is False
+    assert "Left" in r.unavailable and kept == ["Left"] and r.st["dropped"]

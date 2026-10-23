@@ -735,6 +735,16 @@ class CamRec:
                 cam_ms = float(cam_ms)
             except (TypeError, ValueError):
                 cam_ms = -1.0
+            if recording and getattr(self, "rec_stop_req", False):
+                # the card is almost full (watch_disk): the video so far is closed cleanly, and the live picture
+                # carries on so the laptop's runner can keep measuring runs (Nick, 2026-10-23: storage is the
+                # bottleneck; get as much data as possible)
+                recording = False
+                self.writer.release()
+                with self.lock:
+                    self.ff.flush()
+                self.stopped = self.stopped or "disk almost full (recording stopped, live picture on)"
+                self.log(f"! {self.tag}recording stopped and saved (card almost full); the live picture carries on.")
             if recording:
                 self.writer.write(frame)
                 with self.lock:
@@ -1022,7 +1032,7 @@ def start_notes(cams, stdin_notes, notes_port, log=print):
         threading.Thread(target=net_notes, daemon=True).start()
 
 
-def watch_disk(out, stop, every_s, log=print, cams=(), free=None):
+def watch_disk(out, stop, every_s, log=print, cams=(), free=None, keep_live=True):
     """While recording: one loud warning below DISK_WARN_GB free; below
     DISK_STOP_GB stop and save cleanly (a full card leaves a broken video.avi)."""
     free = free or free_gb
@@ -1033,6 +1043,12 @@ def watch_disk(out, stop, every_s, log=print, cams=(), free=None):
         except OSError:
             continue
         if gb < DISK_STOP_GB:
+            if keep_live:
+                log(f"\n! DISK ALMOST FULL ({gb:.2f} GB free): the recording stops and is saved now; the live "
+                    f"picture carries on for the runner. Press Ctrl+C here when the session ends.")
+                for c in cams:
+                    c.rec_stop_req = True
+                return
             log(f"\n! DISK ALMOST FULL ({gb:.2f} GB free): stopping and saving now.")
             for c in cams:
                 c.stopped = c.stopped or "disk almost full"
