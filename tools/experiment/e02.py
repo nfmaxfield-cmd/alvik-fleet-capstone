@@ -397,6 +397,46 @@ class Runner:
         except Exception:
             pass
 
+    FRAMES_KEEP_S = 150.0      # pictures kept for the measured frames (a run and its find; about 60 MB as JPEG)
+
+    def measured_frames(self, r, items):
+        """Nick, 2026-10-23: the pictures behind each run's numbers. For each (name, laptop time, measured point,
+        reference point): the kept picture nearest that time (0.05 s after it, as the measurement starts there), with
+        the measured point (green cross) and the reference (white ring: the intended far point, or the start for
+        the end) drawn, into snapshots/run<order>_<robot>_<cond>_<route>_<name>.jpg. Never stops the session."""
+        try:
+            import cv2
+            if self.feed is None or not getattr(self.feed, "keep_s", 0) or self.cam is None:
+                return
+            d = os.path.join(self.dir, "snapshots")
+            os.makedirs(d, exist_ok=True)
+            for name, t, pt, ref in items:
+                if t is None:
+                    continue
+                img = self.feed.frame_at(t + 0.05)
+                if img is None:
+                    continue
+                v = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR) if img.ndim == 2 else img
+                for q, col, kind in ((ref, (255, 255, 255), "ring"), (pt, (0, 255, 0), "cross")):
+                    if q is None:
+                        continue
+                    u, w = self.cam.project((q[0], q[1], CAM.ROBOT_TOP_CM))
+                    if not (np.isfinite(u) and np.isfinite(w)):
+                        continue
+                    if kind == "ring":
+                        cv2.circle(v, (int(u), int(w)), 10, col, 1)
+                    else:
+                        cv2.drawMarker(v, (int(u), int(w)), col, cv2.MARKER_CROSS, 14, 2)
+                cv2.putText(v, "run %s %s %s %s: %s" % (r.get("order"), r.get("robot"), r.get("cond"),
+                                                         PL.ROUTE_SHORT.get(r.get("route"), r.get("route")), name),
+                            (8, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
+                fn = "run%02d_%s_%s_%s_%s.jpg" % (int(r.get("order") or 0), r.get("robot"), r.get("cond"),
+                                                  PL.ROUTE_SHORT.get(r.get("route"), r.get("route")), name)
+                cv2.imwrite(os.path.join(d, re.sub(r"[^A-Za-z0-9_.-]+", "-", fn)), v,
+                            [cv2.IMWRITE_JPEG_QUALITY, 90])
+        except Exception as e:
+            self.say("  (measured frames not saved: %s)" % e, quiet=True)
+
     def mark(self, text):
         """A note in both camera videos (camrec.py writes it to each camera's events.csv), and a snapshot."""
         self.snapshot(text)
@@ -3528,6 +3568,8 @@ class Runner:
         r["intended_far"] = [round(goal[0], 2), round(goal[1], 2)]
         r["cam_far"] = [round(far[0], 2), round(far[1], 2)] if far else None
         r["cam_end"] = [round(endp[0], 2), round(endp[1], 2)] if endp else None
+        self.measured_frames(r, [("start", lap("ms_start"), start, None), ("far", lap("ms_far"), far, goal),
+                                 ("end", t_e1, endp, start)])
         far_err = math.hypot(far[0] - goal[0], far[1] - goal[1]) if far else None
         end_err = math.hypot(endp[0] - start[0], endp[1] - start[1]) if (endp and start) else None
         r["far_err_cm"] = round(far_err, 2) if far_err is not None else None
@@ -4173,6 +4215,7 @@ def launch(a, state, sdir, sim):
         feed = CAM.Feed(stream_url(a), None, hist, log=lambda m: run.say("  (camera: %s)" % m))
         feed.on_sample = run.on_sample
         feed.on_perf = run.on_perf
+        feed.keep_s = run.FRAMES_KEEP_S
         feed.start()
         run.feed = feed
         run.setup()

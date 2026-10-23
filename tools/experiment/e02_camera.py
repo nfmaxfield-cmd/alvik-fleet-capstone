@@ -1027,6 +1027,8 @@ class Feed(threading.Thread):
         self.lag = 0.0
         self.on_sample = None        # function((t, x, y)) for every position of the followed robot
         self.on_perf = None          # function(dict) once a second: is the laptop keeping up with the camera?
+        self.keep_s = 0.0            # > 0: keep this many seconds of pictures (JPEG) for frame_at (measured frames)
+        self.ring = deque()          # (t, jpeg bytes)
         self._perf = dict(t0=None, n=0, push_s=0.0, push_max=0.0, age_max=0.0, age_sum=0.0, skipped0=0)
 
     def _read(self):
@@ -1087,6 +1089,13 @@ class Feed(threading.Thread):
                     self.history.add(s)
                     if self.on_sample:
                         self.on_sample(s)
+                if self.keep_s > 0:
+                    ok_, jpg = cv2.imencode(".jpg", fr.img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    if ok_:
+                        with self.cond:
+                            self.ring.append((t, jpg))
+                            while self.ring and t - self.ring[0][0] > self.keep_s:
+                                self.ring.popleft()
                 with self.cond:
                     self.frames += 1
                     self.last_t = t
@@ -1095,6 +1104,14 @@ class Feed(threading.Thread):
                     self.cond.notify_all()
         except Exception as e:      # keep the reason for the console
             self.err = e
+
+    def frame_at(self, t, within=0.3):
+        """The kept picture nearest laptop time t (decoded), or None (keep_s off, or nothing within `within` s)."""
+        with self.cond:
+            best = min(self.ring, key=lambda q: abs(q[0] - t)) if self.ring else None
+        if best is None or abs(best[0] - t) > within:
+            return None
+        return cv2.imdecode(best[1], cv2.IMREAD_UNCHANGED)
 
     def _perf_add(self, a, b, t):
         """Once a second (to on_perf): pictures handled, pictures dropped, the tracker's time per picture, and each
