@@ -1128,6 +1128,30 @@ class Runner:
             self.st.save()
         return ok, why
 
+    def back_out(self, robot, within_s=60.0):
+        """Reverse the robot's last forward drive (that way was clear a moment ago): a camera fix if the camera sees
+        it, then `go -d` (at most BACK_MAX_CM: backing is blind). True if it backed."""
+        last = None
+        with self.listener.cv:
+            for t, nm, rec in reversed(self.listener.recs["LEG"]):
+                if nm != robot or t < time.time() - within_s:
+                    continue
+                if (rec.get("state") or rec.get("result")) in ("done", "failed") and rec.get("kind") == "go":
+                    v = num(rec.get("value"))
+                    if v is not None and v > 0:
+                        last = v
+                        break
+        if last is None:
+            return False
+        d = min(last + 2.0, BACK_MAX_CM)
+        self.say("  %s is at an open edge: backing out the way it came (%.0f cm) ..." % (robot, d))
+        if not self.begin_moves(robot, "backing out"):
+            return False
+        self.fix_now(robot)
+        state, info = self.send_leg(robot, "go %.1f" % -d, d / DRIVE_CMS_GUESS * 2.5 + 6.0)
+        self.moves.pop(robot, None)
+        return state in ("done", "dup")
+
     def retry_find(self, robot, park=True, placed=False):
         """One try at getting a robot back with nobody's hands: a fresh picture of the floor, a turn on its spot,
         which way it faces, then parking. Returns (ok, words)."""
@@ -1135,8 +1159,10 @@ class Runner:
         q = (last[1], last[2]) if last else tuple((self.st["positions"].get(robot) or [None, None])[:2])
         if not placed and q[0] is not None and (not self.board.on_board(q[0], q[1]) or
                                  self.board.edge_room(q[0], q[1])[0] < EDGE_TURN_CM + 3):
-            # review 2026-10-22: a turn on the spot this near an open edge could put a wheel over it
-            return False, "atedge"
+            # review 2026-10-22: a turn on the spot this near an open edge could put a wheel over it. Nick (evening):
+            # it just drove there and the camera sees it: back out the way it came first
+            if not self.back_out(robot):
+                return False, "atedge"
         time.sleep(1.0)
         old_pos = self.st["positions"].pop(robot, None)
         self.disagree[robot] = 0
