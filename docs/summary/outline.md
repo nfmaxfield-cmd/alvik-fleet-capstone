@@ -101,3 +101,10 @@ argument (minimal labour, infrastructure and know-how; better data of any type r
   robots record which one stopped them. Real value: first measured in this session.
 - The edge find: a robot locates itself against any two boundaries at right angles (boards or open edges), no
   camera; a board taken away without telling them is detected and the map corrected (remove-a-board test).
+
+## Nick, 18:24
+- Minimalist feature to state: the robot itself is the only thing needed to calibrate the camera (no target, no
+  clicks, no tape). Hard-on-purpose row 10 updated.
+- The Fable review must not just confirm our numbers: it should look through the data (logs, track.csv, perf.csv,
+  find.csv, explore stops, edge stops, footage frames) for observations we missed: patterns by robot, time,
+  battery, place on the board, delay, tracker state; anything surprising or unexplained.
