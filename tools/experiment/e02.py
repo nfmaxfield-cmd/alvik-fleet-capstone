@@ -1128,12 +1128,12 @@ class Runner:
             self.st.save()
         return ok, why
 
-    def retry_find(self, robot, park=True):
+    def retry_find(self, robot, park=True, placed=False):
         """One try at getting a robot back with nobody's hands: a fresh picture of the floor, a turn on its spot,
         which way it faces, then parking. Returns (ok, words)."""
         last = self.tracker.where() if (self.tracker is not None and self.tracker.active == robot) else None
         q = (last[1], last[2]) if last else tuple((self.st["positions"].get(robot) or [None, None])[:2])
-        if q[0] is not None and (not self.board.on_board(q[0], q[1]) or
+        if not placed and q[0] is not None and (not self.board.on_board(q[0], q[1]) or
                                  self.board.edge_room(q[0], q[1])[0] < EDGE_TURN_CM + 3):
             # review 2026-10-22: a turn on the spot this near an open edge could put a wheel over it
             return False, "atedge"
@@ -1436,7 +1436,9 @@ class Runner:
                 continue
             self.say("Taking a fresh picture of the board (keep hands out of it), then %s turns a little on its "
                      "spot ..." % robot)
-            ok, why = self.retry_find(robot, park)
+            # (placed: Nick has just put it down, so where it was last seen says nothing; evening 20:12, it kept
+            # saying "at an open edge" from its old place after Nick had moved it)
+            ok, why = self.retry_find(robot, park, placed=True)
             if ok:
                 return True
             if why == "noturn":
