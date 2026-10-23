@@ -149,3 +149,24 @@ def test_report_keeps_the_house_headings(tmp_path):
     assert text.index("## What's next") < text.index("Set FRONT_OFFSET_CM = 2.0") < text.index("## Two sweeps")
     assert text.index("Possible inaccuracies") < text.index("Help calls avoided:")
     assert text.count("MAD x 1.4826") == 1 and "how to read" not in text.lower()
+
+
+def test_finds_section(tmp_path):
+    import e02_analysis as A
+    d = tmp_path / "robot-logs-1"
+    d.mkdir()
+    (d / "find.csv").write_text(
+        "robot,t_recv,run,result,known_before,before_x,before_y,before_th,bump2_x,bump2_y,bump2_th,reset_x,reset_y,"
+        "reset_th,after_x,after_y,after_th,corr1_cm,corr1_deg,corr2_cm,corr2_deg,turn_k,retrace_cm,face_cm,ms_total,"
+        "battery\n"
+        "Left,1000.0,A-1,ok,1,0,0,0,0,0,0,0,0,0,0,0,0,-3.0,2.0,4.0,-1.0,1.01,0.5,4.75,30000,90\n"
+        "Left,1300.0,A-2,failed: x board: still turning after 1500 ms of pushing: not square,1,0,0,0,0,0,0,0,0,0,0,"
+        "0,0,0,0,0,0,1.0,0,4.75,9000,90\n")
+    (d / "fix.csv").write_text("robot,t_recv,run,ms,t_wall,cam_x,cam_y,cam_th,k,result\nLeft,880.0,-,1,880.0,1,1,0,1,replaced\n")
+    rows, summ = A.finds(str(tmp_path))
+    assert len(rows) == 2 and rows[0]["pos_err_cm"] == 5.0 and rows[0]["min_since_fix"] == 2.0
+    s = summ[0]
+    assert s["ok"] == 1 and s["failed"] == 1 and abs(s["drift_cm_per_min"] - 2.5) < 1e-9 and s["head_med_deg"] == 2.0
+    assert "x board" in s["reasons"]
+    L, _ = A.finds_lines(rows, summ)
+    assert any("| Left | 1 / 1 | 5.0 (5.0)" in x for x in L)

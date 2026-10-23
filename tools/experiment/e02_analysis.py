@@ -52,6 +52,7 @@ What is measured, in plain words
 """
 import argparse
 import csv
+import glob
 import json
 import math
 import os
@@ -1632,6 +1633,106 @@ def recovery(session, events=None):
     return out, source
 
 
+def _robot_csv(session, name):
+    """All robot-logs-*/<name> rows of a session (every launch), in time order."""
+    rows = []
+    for d in sorted(glob.glob(os.path.join(session, "robot-logs-*"))):
+        p = os.path.join(d, name)
+        if os.path.exists(p):
+            rows += read_csv(p)
+    rows.sort(key=lambda r: nanf(r.get("t_recv")))
+    return rows
+
+
+def _mad(a):
+    a = np.asarray(a, float)
+    return float(np.median(np.abs(a - np.median(a)))) * 1.4826 if len(a) else float("nan")
+
+
+def finds(session):
+    """Nick, 2026-10-23: what the board-push finds give besides a fix. Per robot, from find.csv (one row per `run
+    find`), fix.csv and gyro.csv:
+      - finds done / failed, and the failure reasons;
+      - how wrong the robot's own pose was at each board touch (corr1: distance from the x-board and heading, corr2:
+        from the y-board): the wheels-and-gyro drift since its last fix, with no camera;
+      - that drift per minute since its last fix (a camera fix or a find);
+      - turn_k: the gyro's scale measured between the two boards (the boards are square: 90 deg);
+      - gyro.csv: the gyro's drift standing still (deg/s).
+    Returns (rows per find, per-robot summary rows)."""
+    if not session:
+        return [], []
+    fr = _robot_csv(session, "find.csv")
+    fixes = [(nanf(r.get("t_wall")), r.get("robot")) for r in _robot_csv(session, "fix.csv")]
+    gy = _robot_csv(session, "gyro.csv")
+    out, last = [], {}
+    for r in fr:
+        rb, t = r.get("robot"), nanf(r.get("t_recv"))
+        ok = str(r.get("result", "")).startswith("ok")
+        prev = max([tf for tf, n in fixes if n == rb and tf < t] + [last.get(rb, float("nan"))],
+                   key=lambda v: -1 if not np.isfinite(v) else v) if (fixes or rb in last) else float("nan")
+        row = dict(robot=rb, t=round(t, 1), run=r.get("run"), ok=int(ok), result=r.get("result"),
+                   known_before=r.get("known_before"))
+        if ok:
+            c1, d1, c2, d2 = (nanf(r.get(k)) for k in ("corr1_cm", "corr1_deg", "corr2_cm", "corr2_deg"))
+            row.update(corr1_cm=c1, corr1_deg=d1, corr2_cm=c2, corr2_deg=d2, pos_err_cm=round(math.hypot(c1, c2), 2),
+                       turn_k=nanf(r.get("turn_k")), retrace_cm=nanf(r.get("retrace_cm")),
+                       min_since_fix=round((t - prev) / 60.0, 2) if np.isfinite(prev) else float("nan"))
+            last[rb] = t
+        out.append(row)
+    summ = []
+    for rb in sorted({r["robot"] for r in out} | {r.get("robot") for r in gy}, key=lambda x: (len(x or ""), x or "")):
+        rr = [r for r in out if r["robot"] == rb]
+        okr = [r for r in rr if r["ok"] and r.get("known_before") in ("1", 1)]
+        e = [r["pos_err_cm"] for r in okr]
+        hd = [abs(r["corr1_deg"]) for r in okr]          # heading belief vs the x-board at the first touch
+        rate = [r["pos_err_cm"] / r["min_since_fix"] for r in okr if r["min_since_fix"] and r["min_since_fix"] > 0.2]
+        tk = [r["turn_k"] for r in rr if r["ok"] and np.isfinite(r.get("turn_k", float("nan")))]
+        gd = [nanf(g.get("raw_drift_dps")) for g in gy if g.get("robot") == rb]
+        reasons = {}
+        for r in rr:
+            if not r["ok"]:
+                k = str(r["result"]).split("failed:", 1)[-1].split(",")[0].strip()[:60]
+                reasons[k] = reasons.get(k, 0) + 1
+        summ.append(dict(robot=rb, finds=len(rr), ok=sum(r["ok"] for r in rr), failed=sum(1 - r["ok"] for r in rr),
+                         n_err=len(e), err_med_cm=float(np.median(e)) if e else float("nan"),
+                         err_max_cm=max(e) if e else float("nan"),
+                         head_med_deg=float(np.median(hd)) if hd else float("nan"),
+                         drift_cm_per_min=float(np.median(rate)) if rate else float("nan"),
+                         turn_k_med=float(np.median(tk)) if tk else float("nan"), turn_k_spread=_mad(tk),
+                         n_turn_k=len(tk), gyro_still_dps=float(np.median(gd)) if gd else float("nan"),
+                         n_gyro=len(gd), reasons="; ".join("%s (%d)" % kv for kv in sorted(reasons.items()))))
+    return out, summ
+
+
+FIND_COLS = ["robot", "t", "run", "ok", "result", "known_before", "corr1_cm", "corr1_deg", "corr2_cm", "corr2_deg",
+             "pos_err_cm", "turn_k", "retrace_cm", "min_since_fix"]
+
+
+def finds_lines(rows, summ):
+    if not rows:
+        return ["### Finds", "", "No find.csv in this session.", ""], []
+    L = ["### Finds (the board-push finds, beyond the fix they give)", "",
+         "| Robot | finds ok / failed | own pose off at the boards: median (worst), cm | heading off, deg | drift since "
+         "its last fix, cm/min | gyro scale between the boards (turn_k) | gyro drift standing still, deg/s |",
+         "|---|---|---|---|---|---|---|"]
+    for r in summ:
+        L.append("| %s | %d / %d | %s (%s) | %s | %s | %s ± %s (n=%d) | %s (n=%d) |" % (
+            r["robot"], r["ok"], r["failed"], f(r["err_med_cm"], 1), f(r["err_max_cm"], 1), f(r["head_med_deg"], 1),
+            f(r["drift_cm_per_min"], 2), f(r["turn_k_med"], 3), f(r["turn_k_spread"], 3), r["n_turn_k"],
+            f(r["gyro_still_dps"], 4), r["n_gyro"]))
+    L += ["", "Own pose off: how far the robot's wheels-and-gyro position was from where the two boards put it, at "
+              "the touch (no camera). Drift: that distance divided by the minutes since its last camera fix or find. "
+              "Per find: finds.csv.", ""]
+    fails = [r for r in summ if r["reasons"]]
+    if fails:
+        L += ["Failed finds: " + "; ".join("%s: %s" % (r["robot"], r["reasons"]) for r in fails) + ".", ""]
+    L += ["<sub>± after turn_k: the spread (MAD x 1.4826).</sub>", ""]
+    notes = ["Finds: the pose error at a touch is only as exact as the touch itself (the bump is felt by tyre slip, "
+             "about 1-2 cm); finds where the robot had no pose before (known_before 0) are left out of the error "
+             "columns; 'minutes since its last fix' uses the laptop's clock for both."]
+    return L, notes
+
+
 def setup_recovery(session, out, events=None):
     """Writes front_sensor.csv and recovery.csv in out (when there is anything to write) and returns
     dict(lines=report lines for the "Setup and recovery" part of Data, notes=for the inaccuracies sweep, next=for
@@ -1684,7 +1785,13 @@ def setup_recovery(session, out, events=None):
                      "an episode counts as avoided when no help call for that robot follows within 2 minutes; a "
                      "session that ended (or the robot put aside) in that window would also count. Sweeps are counted "
                      "for the robot looked for, rescue finds per attempt (up to 2 per rescue).")
-    return dict(lines=L, notes=notes, next=nxt, front=fs, recovery=rec)
+    frows, fsumm = finds(session)
+    if frows:
+        write_csv(os.path.join(out, "finds.csv"), frows, FIND_COLS)
+    fl, fn = finds_lines(frows, fsumm)
+    L += fl
+    notes += fn
+    return dict(lines=L, notes=notes, next=nxt, front=fs, recovery=rec, finds=fsumm)
 
 
 # =============================================================================== main
