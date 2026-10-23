@@ -35,7 +35,7 @@ setup.json, robot logs in robot-logs-<n>/ (the console's CSVs: raw, bump, find, 
 
 PROTOCOL: firmware 2026-10-22a (docs/data-formats.md "E02", firmware/home_lab/e02.h); the runner refuses other
 firmware. What this runner sends:
-  set safe_edge 1, edge_dir 0, edge_thr 150, edge_n 3, bumper_cm 0, e02_face_cm 0  (SAFETY: at setup, checked by
+  set safe_edge 3, edge_dir 0, edge_thr 150, edge_n 3, edge_bot_cm 11, bumper_cm 0, e02_face_cm 0  (SAFETY: at setup, checked by
       `get`, and with every find / route, checked in its PARAM records; the firmware refuses to drive without
       the edge guard)
   calibrate (once after power-on; calib_spin_deg 0, calib_roll_cm 0: only the compass wiggle)
@@ -132,12 +132,19 @@ FIND_TIMEOUT_S = 150
 E02_TIMEOUT_S = {0: 150, 1: 400}
 BATTERY_WARN, BATTERY_STOP = 40, 15
 EXPECTED_FW = "2026-10-22b"
-# The edge guard (line sensors) and the bare body. safe_edge is not saved on the robot: set after every power-on.
-# edge_thr 150 is CHOSEN, not measured at a real open edge: plywood reads 37-84 (roam1 RAW, ~70 000 rows), so a
-# change of 150 is far outside its noise; what the sensors read past the edge has not been logged yet. The camera
-# watchdog is the second, independent guard.
-SAFETY_SETTINGS = (("safe_edge", 1.0), ("edge_dir", 0.0), ("edge_thr", 150.0), ("edge_n", 3.0), ("bumper_cm", 0.0),
-                   ("e02_face_cm", 0.0))
+# The edge guard (both cues, Nick 2026-10-22 evening: "essential if we're going to be mapping by feel alone") and
+# the bare body. safe_edge is not saved on the robot: set after every power-on.
+# Line cue, edge_thr 150 (chosen; a DOE would not add much: the gap is wide): on this board, driving, the line
+#   sensors read 52-84 (all E02 sessions' RAW, 2026-10-21/22); at the two real edge trips (Left, 22nd evening) 241
+#   and 573. Plywood + 66 or more is never reached on plywood; both trips were well past it.
+# Bottom-zone cue, edge_bot_cm 11 (chosen as a backup): driving on plywood the bottom zone read at most 10.3 cm in
+#   every real log (8.8 on this board; each robot has its own level, 7.2-8.8), and at the two line trips only 9.0 and
+#   9.7, so it fires later than the line cue, if the line sensors miss. What it reads further past the edge is not
+#   measured: every EDGE record now says which cue fired first and its reading (tests-to-run: cliff sense). A DOE
+#   would be sensible for this one (limit vs false stops vs how far past the edge), once the edge test has data.
+# The camera watchdog is a third, independent guard.
+SAFETY_SETTINGS = (("safe_edge", 3.0), ("edge_dir", 0.0), ("edge_thr", 150.0), ("edge_n", 3.0), ("edge_bot_cm", 11.0),
+                   ("bumper_cm", 0.0), ("e02_face_cm", 0.0))
 SAFETY_CMDS = ["set %s %g" % kv for kv in SAFETY_SETTINGS]
 DEFAULT_CALIB = os.path.join(HERE, "data", "overhead_floorcal_roam1.json")   # roam1 board corners, camera unmoved
 

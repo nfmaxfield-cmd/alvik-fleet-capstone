@@ -252,7 +252,7 @@ def test_kc_fixes_only_from_pictures_after_the_stop():
 
 def test_runner_safety_settings_go_with_every_find_and_route():
     import e02 as E
-    assert ("safe_edge", 1.0) in E.SAFETY_SETTINGS and ("bumper_cm", 0.0) in E.SAFETY_SETTINGS
+    assert ("safe_edge", 3.0) in E.SAFETY_SETTINGS and ("edge_bot_cm", 11.0) in E.SAFETY_SETTINGS and ("bumper_cm", 0.0) in E.SAFETY_SETTINGS
     r = E.Runner.__new__(E.Runner)
     r.board = PL.Board(xboard_side=1, yboard_side=1)
     cmds = r.board_params()
