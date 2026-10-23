@@ -85,3 +85,6 @@ Nick uploads firmware 2026-10-22b to all three robots (same steps as this mornin
   instead of 36); the full-picture detector every 2 s and at stops, possibly from a single sharp high-resolution
   frame (tests-to-run); idle checks when nothing moves. Questions for Nick first (laptop as viewer? recording on the
   Pi?). The Pi is a Pi 4 Model B.
+- **Live lab graphs: say what they measure and where the data comes from** (Nick, 2026-10-23). Every chart in
+  the live lab (and the live view) gets a minimal line: the quantity, its unit, and its source (e.g. "gyro scale
+  per self-calibration fit, from fits.csv"). Next build.

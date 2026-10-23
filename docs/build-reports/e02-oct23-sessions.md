@@ -27,7 +27,13 @@ Late pictures by 10 minutes in session 2: 11:40 15%, 11:50 37%, 12:00 40%, 12:10
 2. **The top board is a second, separate cause.** In session 2, drives by the top board failed twice as often as
    elsewhere (36% vs 19%), and half of all drives started there (the robots kept being put back near it). In the
    morning that area was no worse than elsewhere (5% both), so the board area hurts mainly when pictures are late.
-3. **Battery cannot be judged from this.** All of session 2 was at 50-53% *and* under the copy; the morning had no
+3. **The laptop's place is a second suspect for the WiFi, not separable here** (Nick: the laptop was upstairs,
+   plugged in, during session 2; downstairs in session 1). The camera's pictures travel Pi -> router -> laptop, so a
+   laptop further from the router gets them later, copy or not. Late pictures fell to 0% of seconds by 12:20 while
+   the copy was still finishing (until about 12:29), which leans toward the copy, but the two overlap in time.
+   Experiment: alternate the laptop's place (by the board / upstairs) with no copy running, 10 minutes each, twice;
+   compare picture age and losses per drive (also the WiFi signal: the robots log theirs in runinfo.csv).
+4. **Battery cannot be judged from this.** All of session 2 was at 50-53% *and* under the copy; the morning had no
    drives at 50%. A battery session without a copy running is needed.
 
 ## What's next

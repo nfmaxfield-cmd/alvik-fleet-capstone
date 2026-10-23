@@ -64,3 +64,10 @@ argument (minimal labour, infrastructure and know-how; better data of any type r
 - Run accuracy: session 1's live numbers are in; the footage re-measurement adds the final ones (the earlier
   question "how to handle thin data" no longer applies: 44 runs).
 - The 100 cm far point (run 16, camera lost) is excluded as a measurement failure, and said so.
+
+## Nick's answers (2026-10-23 13:21)
+- Title: as above. Lead: self-calibration.
+- Failures: in the summary only with a plan to experiment on and overcome them; otherwise a private note to Nick.
+  So headline 4 keeps the WiFi result, with its plan (no copies during sessions; the laptop-place test; the latency
+  test). The top-board trap and the 24 s stall go to Nick privately unless their fixes are tested by Saturday.
+- Every chart states what it measures and where the data comes from (one minimal line).
