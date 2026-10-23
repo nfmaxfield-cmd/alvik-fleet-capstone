@@ -55,3 +55,18 @@ logic more generic for other equipment and sensors.
 
 ## Before the next session
 Nick uploads firmware 2026-10-22b to all three robots (same steps as this morning: Tools > Port, each robot).
+
+## Tonight's build (after the evening session), Nick 20:06
+1. **Cliff sense, measured (essential before mapping by feel):** from tonight's logs (Left's drive to the open
+   corner at ~20:00, and every robot's RAW lineL/C/R and dbot_cm), the line sensors' and the front sensor's bottom
+   zone's readings on plywood, at the edge and past it; set edge_thr / edge_bot_cm from them and turn both cues on
+   (safe_edge 3). If one approach is too little data: a 10-minute edge test next time (tools/edge_check.py).
+   Simulator test, then mapping back on.
+2. **Mapping:** never aim a ray at the corner where the two open edges meet; the "camera saw it move 0 cm, wheels
+   72 cm" retry loop (once a second, forever) must stop after a few tries and fall to the help ladder.
+3. **Manual board borders:** answering **n** to "does the green outline sit on the board's edges?" lets Nick fix
+   the outline himself (drag its corners in the live view, or click the 4 board corners in the picture) instead of
+   stopping the runner.
+4. **Setup questions optional:** the robots' mapping and board touches measure the board lines; the picture's
+   questions become a cross-check (Nick, 19:33).
+5. Check tonight's footage for the moving-robot fixes (newest picture, moving beats still, no ghosts).
