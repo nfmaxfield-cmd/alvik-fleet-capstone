@@ -152,3 +152,19 @@ robot reach an open edge meanwhile (the edge guard stops it).
   not a board") is followed by an edge find, and the map is corrected: the board is gone, its side is an open edge
   for the watchdog and the planning (`Board.missing`, saved in the state).
 - Simulator: `--dry-remove-board y@760` takes the y board away 760 s in, without telling the runner.
+
+## Next build, first (Nick, 2026-10-23 18:53-19:06): sensors that don't meet expectations must not ruin a session
+Session 2's explore failed on the real board (fit 136 px rms; wheel scales hit the bounds; all three robots ended
+with a wheel over an open edge; then every compass check failed). To build before items 3-5:
+- **Check before trust, stage by stage:** measure each robot's gyro scale (full spin: the picture repeats) and wheel
+  scale (straight drives) in the dance, accepted only in a sensible range and when a second try repeats; the camera
+  fit then uses those measured numbers. Each robot's data is scored on its own (px rms); a robot whose data does not
+  fit is left out of the camera calibration and flagged, and the others carry it.
+- **Never end the session over it:** after retries, fall back to the best calibration already on hand (the corner
+  clicks, or an earlier session's), and **say so explicitly every time it is used: at setup, in each run's line, in
+  the session summary and in the analysis report** (Nick: "make it explicitly clear to me if old calibration data is
+  used to complete a run").
+- **Explore ends with each robot driven back towards the middle**, never left at an edge.
+- **A failed compass check stops and asks** (it means a wheel is off the board or the robot cannot spin).
+- For the summary: the system doesn't trust any sensor it hasn't checked, the camera included, and one bad robot
+  can't spoil the rest.
