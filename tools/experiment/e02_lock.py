@@ -29,9 +29,11 @@ TURN_STEP_DEG = 10.0          # chosen: the look is matched at this many degrees
 RADIUS = 0.75                 # the look: a circle this many robot widths across its middle (the turned corners: 0.71)
 START_SEARCH_CM = 5.0         # the place it is handed is refined within this
 SEARCH_CM = 6.0               # search this far round the predicted place each picture (25 pictures/s: 10 cm/s = 0.4 cm)
-MATCH_OK = 0.70               # chosen: a match at least this good is the robot (to be set from footage: DOE)
+MATCH_OK = 0.55               # chosen: a match at least this good is the robot (to be set from footage: DOE)
 REFRESH_MIN = 0.88            # ... and at least this good while standing still refreshes its look
 REFRESH_RATE = 0.10           # ... by this share each time
+NEAR_TURNS = 7                # turns tried first, nearest the last one (+-30 deg); all of them only if none matches
+LOOK = "learned"              # "outline" (a drawn robot-sized square) or "learned" (its own edges): see start()
 LOST_S = 1.0                  # poor matches this long in a row: let go
 
 
@@ -91,8 +93,10 @@ class LockTracker:
         return out
 
     def _make_templates(self):
-        self.tpls = self._rotations(self.base)
         self.mask = self._mask(self.base.shape[0])
+        # the look outside the circle is zeroed in each turned copy (an unmasked match is ~50x faster than a masked
+        # one: 244 ms a picture with masks, 2026-10-22)
+        self.tpls = [(a, t * self.mask) for a, t in self._rotations(self.base)]
 
     def _outline_model(self, n):
         """A drawn robot: its square outline (rpx a side) as edges, n x n."""
@@ -112,9 +116,9 @@ class LockTracker:
         order = tpls if near_angle is None else sorted(
             tpls, key=lambda at: abs(((at[0] - near_angle) + 180) % 360 - 180))
         for i, (a, tp) in enumerate(order):
-            if near_angle is not None and i >= 7 and best is not None and best[0] >= REFRESH_MIN:
-                break
-            res = cv2.matchTemplate(win, tp, cv2.TM_CCORR_NORMED, mask=mask)
+            if near_angle is not None and i >= NEAR_TURNS and best is not None and best[0] >= MATCH_OK:
+                break                    # a good match among the turns near the last one: no need for the rest
+            res = cv2.matchTemplate(win, tp, cv2.TM_CCOEFF_NORMED)
             res = np.nan_to_num(res, nan=0.0, posinf=0.0, neginf=0.0)
             _, mx, _, loc = cv2.minMaxLoc(res)
             if best is None or mx > best[0]:
@@ -128,14 +132,19 @@ class LockTracker:
         model = self._outline_model(n)
         u, v = self._px(x, y)
         k = self._px_per_cm(x, y)
-        b = self._best(feat, u, v, int(math.ceil(START_SEARCH_CM * k)), self._rotations(model), self._mask(n))
+        mk = self._mask(n)
+        b = self._best(feat, u, v, int(math.ceil(START_SEARCH_CM * k)), [(a, t * mk) for a, t in self._rotations(model)],
+                       mk)
         if b is not None:
             _, u, v, _ = b
             x, y = self._floor(u, v)
         p = self._patch(feat, u, v, n // 2)
         if p is None:
             return False
-        self.base = p
+        # LOOK: "learned" = its own edges in this picture (refreshed while still); "outline" = a drawn square of a
+        # robot's size, the same for every robot and every light (2026-10-23: the learned look fell to a 0.5 match
+        # after a 167 deg turn: the glare of its lights and the floor round it turn with it, wrongly)
+        self.base = p if LOOK == "learned" else model
         self._make_templates()
         self.pos, self.uv, self.vel = (t, float(x), float(y)), (u, v), (0.0, 0.0)
         self.score, self.last_ok, self.angle = 1.0, t, 0.0
@@ -149,7 +158,7 @@ class LockTracker:
         return self.base is not None and self.pos is not None
 
     # --- every picture --------------------------------------------------------------------------------------------
-    def step(self, img, t, predict=None, still=False, search_cm=SEARCH_CM, feat=None):
+    def step(self, img, t, predict=None, still=False, search_cm=SEARCH_CM, feat=None, in_leg=False):
         """One picture. predict: (x, y) where the robot should be, if the runner knows (else: last place moved on by
         its recent speed). still: the runner says it stands still (its look may be refreshed). Returns (t, x, y,
         score) when the match is good, else None; after LOST_S of poor matches it lets go (locked becomes False)."""
@@ -170,6 +179,13 @@ class LockTracker:
         score, cu, cv_, a = b
         self.score = float(score)
         if score < MATCH_OK:
+            if in_leg:
+                # mid-leg (a turn on its spot blurs the picture): a poor match is expected and not a loss; after the
+                # leg the search starts from where the leg should have put it (2026-10-23: lost in every 167 deg turn)
+                self.last_ok = t
+                if predict is not None:
+                    self.pos = (t, float(predict[0]), float(predict[1]))
+                return None
             return self._miss(t)
         x, y = self._floor(cu, cv_)
         if not (np.isfinite(x) and np.isfinite(y)):
@@ -180,7 +196,7 @@ class LockTracker:
         self.pos, self.uv, self.angle, self.last_ok = (t, float(x), float(y)), (cu, cv_), a, t
         if still:
             self.vel = (0.0, 0.0)
-            if score >= REFRESH_MIN:
+            if score >= REFRESH_MIN and LOOK == "learned":
                 self._refresh(feat, cu, cv_, a)
         return (t, float(x), float(y), self.score)
 
