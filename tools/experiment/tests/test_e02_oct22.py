@@ -349,3 +349,21 @@ def test_edge_risk_test_mode_and_careful():
     assert r.edge_risk("Left", (5.0, 60.0), "test") and r.st["edge_risks"][0][1] == "Left"
     r.a.edge_careful = True
     assert not r.edge_risk("Left", (5.0, 60.0), "test")
+
+
+def test_snapshot_at_marks(tmp_path):
+    import types
+    import numpy as np
+    import e02
+    r = e02.Runner.__new__(e02.Runner)
+    r.dir, r.view = str(tmp_path), None
+    r.feed = types.SimpleNamespace(last_img=np.zeros((48, 64), np.uint8))
+    r.pi, r.marks_unconfirmed = None, 0
+    r.say = lambda m, quiet=False: None
+
+    class St(dict):
+        pass
+    r.st = St()
+    r.mark("e02 help Left: lost")
+    files = list((tmp_path / "snapshots").iterdir())
+    assert len(files) == 1 and "help-Left-lost" in files[0].name

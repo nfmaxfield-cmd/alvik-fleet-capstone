@@ -373,8 +373,33 @@ class Runner:
             print("\a", end="", flush=True)
             time.sleep(30.0)
 
+    SNAP_MIN_S = 1.0          # at most one snapshot a second (marks come in bursts)
+
+    def snapshot(self, text):
+        """A still of the live view (the picture with the runner's drawings) at an important moment, into
+        <session>/snapshots/ (Nick, 2026-10-23: a session run without video still gets its important frames; and
+        the summary's screenshots). Never stops the session."""
+        try:
+            import cv2
+            now = time.time()
+            if now - getattr(self, "snap_t", 0.0) < self.SNAP_MIN_S:
+                return
+            view = getattr(self, "view", None)
+            img = view.frame_bgr() if view is not None else (self.feed.last_img if self.feed is not None else None)
+            if img is None:
+                return
+            self.snap_t = now
+            d = os.path.join(self.dir, "snapshots")
+            os.makedirs(d, exist_ok=True)
+            slug = re.sub(r"[^A-Za-z0-9]+", "-", text)[:60].strip("-")
+            name = time.strftime("%H%M%S", time.localtime(now)) + "_" + slug + ".jpg"
+            cv2.imwrite(os.path.join(d, name), img, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        except Exception:
+            pass
+
     def mark(self, text):
-        """A note in both camera videos (camrec.py writes it to each camera's events.csv)."""
+        """A note in both camera videos (camrec.py writes it to each camera's events.csv), and a snapshot."""
+        self.snapshot(text)
         ok = self.pi.send(text) if self.pi else False
         self.marks_unconfirmed = 0 if ok else self.marks_unconfirmed + 1
         self.say("  [video mark] %s%s" % (text, "" if ok else "  (the Pi didn't confirm it)"), quiet=ok)
