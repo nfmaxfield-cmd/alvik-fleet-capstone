@@ -75,6 +75,8 @@ turns, also beside the boards, where it lost them last night.
   robots' own sensors carry on.
 - The Pi's card almost full: the video so far is saved, and the live picture carries on, so the runs are still
   measured (just no video after that point).
+- Near an open edge with its heading unknown, a robot now turns anyway (test mode; logged, the footage shows if a
+  wheel went over). `--edge-careful` brings back the old "call Nick" behaviour.
 - If the new tracker misbehaves: Ctrl + C in the LAPTOP tab, then start again with `--resume --no-lock` added (the
   motion detector alone, as last night). To run only the robots'-own-sensor runs: add `--own-sensor-only`.
 

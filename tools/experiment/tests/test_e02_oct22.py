@@ -333,3 +333,19 @@ def test_help_drops_robot_after_three_calls():
     r.a = types.SimpleNamespace(auto=True)
     assert r.help_from_nick("Left", "off the board") is False
     assert "Left" in r.unavailable and kept == ["Left"] and r.st["dropped"]
+
+
+def test_edge_risk_test_mode_and_careful():
+    import types
+    import e02, e02_plan as PL
+    r = e02.Runner.__new__(e02.Runner)
+
+    class St(dict):
+        def save(self):
+            pass
+    r.st, r.board = St(), PL.Board(xboard_side=1, yboard_side=1)
+    r.say, r.mark = (lambda m, quiet=False: None), (lambda m: None)
+    r.a = types.SimpleNamespace(edge_careful=False)
+    assert r.edge_risk("Left", (5.0, 60.0), "test") and r.st["edge_risks"][0][1] == "Left"
+    r.a.edge_careful = True
+    assert not r.edge_risk("Left", (5.0, 60.0), "test")

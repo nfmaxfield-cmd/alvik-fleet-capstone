@@ -853,6 +853,22 @@ class Runner:
         finally:
             self.refinding.discard(robot)
 
+    def edge_risk(self, robot, p, what):
+        """Test mode (Nick, 2026-10-23: "I don't mind if the robot falls and it might give us good data. This
+        setting seems good for production runs but not test runs"): near an open edge with its heading unknown, turn
+        on the spot anyway instead of calling Nick. Logged (edge_risks in the state, a video mark) so the footage
+        shows whether a wheel went over. --edge-careful turns it off (production behaviour). Returns True to go on."""
+        if getattr(self.a, "edge_careful", False):
+            return False
+        room = self.board.edge_room(p[0], p[1])[0] if p else None
+        self.say("  %s is %s from an open edge and which way it faces is not known: turning anyway (test mode; "
+                 "--edge-careful stops this)." % (robot, "%.0f cm" % room if room is not None else "near"))
+        self.mark("e02 edge risk %s: %s" % (robot, what))
+        self.st.setdefault("edge_risks", []).append([round(time.time(), 1), robot, what,
+                                                     [round(p[0], 1), round(p[1], 1)] if p else None,
+                                                     None if room is None else round(room, 1)])
+        return True
+
     def _refind(self, robot, why):
         self.st.setdefault("disagreements", []).append([round(time.time(), 1), robot, why, self.order])
         self.send(robot, "stop")
@@ -864,8 +880,10 @@ class Runner:
             # known which way it faces; otherwise Nick
             h = self.heads.get(robot, [None])[0]
             if h is None:
-                return None
-            self.leg(robot, ("go", -6.0))
+                if not self.edge_risk(robot, (last[1], last[2]), "refind turn"):
+                    return None
+            else:
+                self.leg(robot, ("go", -6.0))
         p = self.identify(robot, near=near) or self.identify(robot)
         if p is None:
             return None
@@ -1225,7 +1243,8 @@ class Runner:
                                  self.board.edge_room(q[0], q[1])[0] < EDGE_TURN_CM + 3):
             # review 2026-10-22: a turn on the spot this near an open edge could put a wheel over it. Nick (evening):
             # it just drove there and the camera sees it: back out the way it came first
-            if not self.back_out(robot):
+            if not self.back_out(robot) and not (self.board.on_board(q[0], q[1]) and
+                                                 self.edge_risk(robot, q, "retry turn")):
                 return False, "atedge"
         time.sleep(1.0)
         old_pos = self.st["positions"].pop(robot, None)
@@ -1244,10 +1263,12 @@ class Runner:
         self.lost_place.discard(robot)
         if not park:
             return True, ""
-        if not self.board.on_board(p[0], p[1]) or self.board.edge_room(p[0], p[1])[0] < EDGE_TURN_CM + 3:
+        if not self.board.on_board(p[0], p[1]) or (self.board.edge_room(p[0], p[1])[0] < EDGE_TURN_CM + 3 and
+                                                   not self.edge_risk(robot, p, "heading drive")):
             # 2026-10-22 10:23: Center found 3.5 cm off the board, then its heading drive and "moving it in first"
             # took it over the edge (it fell): its edge guard had learned the plywood level with a sensor already
-            # over the edge. Its heading is unknown here, so no drive at all: Nick.
+            # over the edge. Its heading is unknown here, so no drive at all: Nick (firmware 22b now refuses a
+            # forward drive that starts off the plywood). Test mode drives anyway unless its centre is off the board.
             return False, "atedge"
         if self.acquire_heading(robot, p) is None:
             return False, "noheading"
@@ -1470,7 +1491,8 @@ class Runner:
                             self.tracker.hold(HOLD_CM)
                             headed = True
                         else:
-                            headed = not (self.board.edge_room(p[0], p[1])[0] < EDGE_TURN_CM + 3) and \
+                            headed = (not (self.board.edge_room(p[0], p[1])[0] < EDGE_TURN_CM + 3) or
+                                      self.edge_risk(robot, p, "heading drive after a search")) and \
                                 self.acquire_heading(robot, p) is not None
                         if headed:
                             self.set_corrections(robot, self.move_corrections(robot))
@@ -4003,6 +4025,8 @@ def main(argv=None):
     ap.add_argument("--skip-naming", action="store_true")
     ap.add_argument("--skip-find-check", action="store_true")
     ap.add_argument("--max-runs", type=int, default=0, help="stop after this many runs (0 = all)")
+    ap.add_argument("--edge-careful", action="store_true", help="production behaviour: never turn on the spot near "
+                    "an open edge with the heading unknown (call Nick instead); test sessions turn anyway and log it")
     ap.add_argument("--no-lock", action="store_true", help="backup: the tracker without the lock-on (the motion "
                     "detector alone, as before 2026-10-23)")
     ap.add_argument("--own-sensor-only", action="store_true", help="backup: only the runs where the robots drive on "
