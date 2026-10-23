@@ -261,3 +261,39 @@ def test_refused_leg_is_not_cross_checked():
     assert "lid_before" in src and "self.refinding" in src
     src = inspect.getsource(e02.Runner.refind)
     assert "self.refinding.add" in src and "discard" in src
+
+
+def test_studio_calibration_waits_for_a_new_file(tmp_path):
+    """Nick, 2026-10-22: answering n to the green outline goes to the studio's floor calibration, not a stop."""
+    import os, time, types
+    import e02, e02_camera as CAM
+    cams = tmp_path / "cameras"
+    cams.mkdir()
+    old = cams / (CAM.CAMERA_NAMES[0] + ".json")
+    old.write_text("{}")
+    os.utime(old, (time.time() - 100, time.time() - 100))
+    r = e02.Runner.__new__(e02.Runner)
+    r.a = types.SimpleNamespace(project=str(tmp_path), auto=False)
+    said, answers = [], iter(["", "", "stop"])
+    r.say = lambda m, quiet=False: said.append(m)
+
+    def ask(prompt, default="y"):
+        a = next(answers)
+        if a == "" and len(said) > 6:          # second Enter: the studio has saved a new one by now
+            (cams / (CAM.CAMERA_NAMES[-1] + ".json")).write_text("{}")
+        return a
+    r.ask = ask
+    r.confirm_calibration = lambda cal, img: True
+    cal = r.studio_calibration(None)
+    assert cal.endswith(CAM.CAMERA_NAMES[-1] + ".json")
+    assert any("No new floor calibration" in m for m in said)
+
+
+def test_layout_check_flags_open_edge_where_board_taken():
+    import e02_plan as PL, e02_map as MAP
+    b = PL.Board(xboard_side=1, yboard_side=1)
+    (ax, vx), (ay, vy) = b.open_edges()
+    sides = {"open-x": dict(axis=ax, nominal=vx, kind="board", n=2),
+             "board-x": dict(axis="x", nominal=b.x1 if vx == b.x0 else b.x0, kind="edge", n=3)}
+    safe, risky = MAP.layout_check(sides, b)
+    assert len(safe) == 1 and len(risky) == 1

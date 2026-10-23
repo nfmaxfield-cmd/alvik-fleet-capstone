@@ -1768,20 +1768,21 @@ class Runner:
                     cal = DEFAULT_CALIB
             if cal and not self.confirm_calibration(cal, img):
                 self.say("The board outline does not line up with this calibration (%s)." % cal)
-                cal = None
-                a.make_calibration = True
+                # Nick, 2026-10-22 evening: a "no" goes to the studio's floor calibration, not a stop
+                cal = self.studio_calibration(img)
         if cal:
             self.say("Floor calibration: %s" % cal)
         else:
             self.say("No floor calibration found (looked in the studio project %s\\cameras and this session)."
                      % (a.project or CAM.default_project()))
-            if self.ask("Make one now from the board's 4 corners in the camera picture? (y/n) ", "y").lower() != "y":
-                raise SystemExit("Make one in the studio (More -> Floor calibration -> rectangle: the board's 4 "
-                                 "corners, 122.15 x 121.9 cm), then start this again.")
-            corners, why = CAM.find_board_corners(img)
-            if corners is None:
-                raise SystemExit("Could not find the board's corners by myself (%s). Make the calibration in the "
-                                 "studio instead, then start this again." % why)
+            corners, why = None, ""
+            if self.ask("Make one now from the board's 4 corners in the camera picture? (y/n) ", "y").lower() == "y":
+                corners, why = CAM.find_board_corners(img)
+                if corners is None:
+                    self.say("Could not find the board's corners by myself (%s): the studio, then." % why)
+        if not cal and corners is None:
+            cal = self.studio_calibration(img)
+        elif not cal:
             cal = os.path.join(self.dir, "cameras", "overhead.json")
             res = CAM.make_calibration(corners, (img.shape[1], img.shape[0]), cal, height_cm=a.lens_height_cm)
             cam = CAM.load_camera(cal)
@@ -1791,8 +1792,9 @@ class Runner:
             self.say("Open %s: the green outline must sit on the board's edges, 0,0 in the bottom-right corner." % pic)
             if self.ask("Does the green outline sit on the board's edges? (y/n) ", "y").lower() != "y":
                 os.remove(cal)
-                raise SystemExit("Not used. Make the calibration in the studio instead, then start this again.")
-            setup["calibration_made_here"] = dict(corners=corners, err_cm=res["err_cm"], text=res["text"])
+                cal = self.studio_calibration(img)
+            else:
+                setup["calibration_made_here"] = dict(corners=corners, err_cm=res["err_cm"], text=res["text"])
         st["calibration"] = cal
         self.cam = CAM.load_camera(cal)
         self.make_tracker()
@@ -1814,6 +1816,31 @@ class Runner:
                      "head into the x-board. The square runs are left out of this session's plan.")
             st["setup"]["square_left_out"] = True
         st.save()
+
+    def studio_calibration(self, img):
+        """The outline did not line up: Nick makes a floor calibration in the studio while the runner waits, then
+        it is checked the same way (green outline, y/n). Repeats until a yes; 'stop' ends the session."""
+        proj = self.a.project or CAM.default_project()
+        while True:
+            t_ask = time.time()
+            self.say("Make a new floor calibration in the studio, leaving this window open:")
+            self.say("  1. Open the MIRLT studio on this laptop (the project %s)." % proj)
+            self.say("  2. More -> Floor calibration -> rectangle.")
+            self.say("  3. Click the plywood board's 4 corners (122.15 x 121.9 cm) and save.")
+            ans = self.ask("  4. Come back here and press Enter (or type stop and press Enter to end): ", "")
+            if ans.lower().startswith("stop"):
+                raise SystemExit("Stopped at the floor calibration (Nick). Start this again when it is made.")
+            cands = [os.path.join(proj, "cameras", n + ".json") for n in CAM.CAMERA_NAMES]
+            cands = [c for c in cands if os.path.exists(c)]
+            cal = max(cands, key=os.path.getmtime) if cands else None
+            if cal is None or os.path.getmtime(cal) < t_ask - 1.0:
+                self.say("No new floor calibration saved in %s\\cameras yet (%s)." % (
+                    proj, "nothing there" if cal is None else "the newest is from before"))
+                continue
+            if self.confirm_calibration(cal, img):
+                self.say("Using the studio's new floor calibration: %s" % cal)
+                return cal
+            self.say("That one does not line up either.")
 
     def confirm_calibration(self, cal, img):
         """The plain check: the board's outline (from the calibration) drawn over the live picture, on screen;
@@ -1865,9 +1892,14 @@ class Runner:
             CAM.draw_check(img, self.cam, os.path.join(self.dir, "check_board_edges.png"), b0)
             self.say("Look at the camera picture (also saved as %s)." % os.path.join(self.dir, "check_board_edges.png"))
 
-            def pick(question, words):
+            # optional (Nick, 2026-10-22 evening: the robots map the board): Enter takes the usual layout (boards
+            # at x = max and y = max); the mapping run then says if a board was felt where an open edge was taken
+            def pick(question, words, usual=1):
                 while True:
-                    ans = self.ask("%s Type %s or %s and press Enter: " % (question, words[0], words[1]), words[0]).lower()
+                    ans = self.ask("%s Type %s or %s, or just press Enter for %s: " % (
+                        question, words[0], words[1], words[usual]), words[usual]).lower()
+                    if ans == "":
+                        return usual
                     for side, w in words.items():
                         if ans == w:
                             return side
@@ -1876,6 +1908,7 @@ class Runner:
                       % (xs_words[0], xs_words[1]), xs_words)
             ys = pick("The other blocked board runs along the %s or %s edge (the y-board). Which?"
                       % (ys_words[0], ys_words[1]), ys_words)
+            self.st["setup"]["board_sides_answered"] = True
         bd = PL.Board(xboard_side=xs, yboard_side=ys)
         self.say("Blocked boards: the x-board along the %s of the picture, the y-board along the %s."
                  % (xs_words[xs], ys_words[ys]))
@@ -2233,6 +2266,10 @@ class Runner:
         sides = MAP.fit_sides(pts, self.board, others=others)
         for line in MAP.summary_words(sides, self.board):
             self.say(line)
+        safe, risky = MAP.layout_check(sides, self.board)
+        for line in safe + risky:
+            self.say(line)
+        st["setup"]["layout_check"] = dict(safe=safe, risky=risky)
         # the blocked boards: felt vs the picture
         felt = {}
         for key, sd in sides.items():
@@ -2255,6 +2292,11 @@ class Runner:
         except Exception as e:
             self.say("  (map picture failed: %s)" % e, quiet=True)
         self.mark("e02 map end %s" % robot)
+        if risky:
+            st.save()
+            raise SystemExit("The robots felt an open edge where the setup took a board (above). A find drives into "
+                             "the boards, so it would go over that edge. Start the runner again (without --resume) and answer the two "
+                             "board questions by what is really there.")
         ok, why = self.park(robot)
         if not ok:
             self.help_from_nick(robot, why)

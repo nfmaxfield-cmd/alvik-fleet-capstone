@@ -113,6 +113,23 @@ def summary_words(sides, board):
     return lines
 
 
+def layout_check(sides, board, tol_cm=10.0):
+    """The felt sides against the layout taken at setup (which edges have boards). Returns (safe, risky): sentences
+    for a board felt where an open edge was taken (harmless: the plan keeps away from it anyway) and for an open
+    edge felt where a board was taken (a find drives into that 'board' and would go over the edge)."""
+    opens = board.open_edges()
+    safe, risky = [], []
+    for key, sd in sorted(sides.items()):
+        if sd["kind"] not in ("board", "edge"):
+            continue
+        is_open = any(a == sd["axis"] and abs(v - sd["nominal"]) < tol_cm for a, v in opens)
+        if sd["kind"] == "board" and is_open:
+            safe.append("  the %s side was taken as an open edge, but %d rays felt a board there" % (key, sd["n"]))
+        elif sd["kind"] == "edge" and not is_open:
+            risky.append("  the %s side was taken as a board, but %d rays felt an open edge there" % (key, sd["n"]))
+    return safe, risky
+
+
 def save(path, robot, rays, sides, board):
     with open(path, "w") as f:
         json.dump(dict(robot=robot, rays=rays, sides=sides, board=board.to_dict()), f, indent=1)
