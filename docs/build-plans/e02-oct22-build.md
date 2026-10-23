@@ -80,3 +80,8 @@ Nick uploads firmware 2026-10-22b to all three robots (same steps as this mornin
 - **The robots calibrate the camera** (Nick, 2026-10-23): no corner clicks, no file; a robot drives known
   distances (wheels) in several places and directions while the camera watches its pixels move, and the pixels-to-cm
   mapping is solved from that. In the from-scratch rebuild. **Ask Nick questions before starting.**
+- **Run a whole session on the Pi** (Nick, 2026-10-23, after the summary): stop-and-go driving on the robots' own
+  sensors; tracking only near each robot's predicted spot; the gyro's heading picks the lock-on's rotation (1-2
+  instead of 36); the full-picture detector every 2 s and at stops, possibly from a single sharp high-resolution
+  frame (tests-to-run); idle checks when nothing moves. Questions for Nick first (laptop as viewer? recording on the
+  Pi?). The Pi is a Pi 4 Model B.

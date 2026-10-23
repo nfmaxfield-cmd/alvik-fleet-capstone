@@ -134,6 +134,7 @@ BATTERY_WARN, BATTERY_STOP = 40, 15
 EXPECTED_FW = "2026-10-22b"
 # Backups (Nick, 2026-10-23: "build in backup plans in case our session goes poorly ... get as much data as possible
 # before stopping for a rebuild"). Chosen numbers; a DOE would not help much here (they trade data for Nick's time).
+HEADING_LONG_ROOM_CM = 30.0   # a 15 cm heading drive only this far (or more) from an open edge
 HELP_DROP_N = 3           # help calls for one robot during the runs: then it is put aside, not Nick called again
 COND_FAIL_N = 3           # failed runs of a camera-dependent condition (K, KC): its remaining runs are put aside
 # The edge guard (both cues, Nick 2026-10-22 evening: "essential if we're going to be mapping by feel alone") and
@@ -360,6 +361,11 @@ class Runner:
         a = self.a
         while True:
             ok1, w1, _, _ = CAM.check_stream(a.pi, a.overhead_port)
+            if not ok1 and self.feed is not None and self.feed.last_t is not None and \
+                    time.time() - self.feed.last_t < 3.0:
+                # the runner's own feed has fresh pictures: the camera is fine, only a second connection was slow
+                # (2026-10-23 12:10: a 6 GB copy from the Pi filled the WiFi; the check paused the session)
+                ok1 = True
             # --no-recording: the Pi runs camrec.py --no-record (live picture only: no video, no notes)
             notes = True if getattr(a, "no_recording", False) else CAM.notes_answer(a.pi)
             if ok1 and notes:
@@ -869,8 +875,15 @@ class Runner:
         if kind == "go" and p0 is not None and len(pieces) == 1 and ran and robot not in self.refinding:
             bad = self.cross_check(robot, p0, p1)
             if bad:
-                words = "camera and wheels disagree (%s)" % bad
-                p1 = self.refind(robot, bad)
+                q = self.detect_after_move(robot)
+                if q is not None:
+                    # Nick, 2026-10-23: the camera lost it while it drove, but it has stopped where its wheels say:
+                    # the detector finds it there and hands it back to the tracker (no turn on its spot needed)
+                    words = "found again where its wheels put it (%s)" % bad
+                    p1 = q
+                else:
+                    words = "camera and wheels disagree (%s)" % bad
+                    p1 = self.refind(robot, bad)
         return p0, p1, words
 
     def wheels_moved(self, robot, lid):
@@ -907,6 +920,37 @@ class Runner:
             return "the camera saw it move %.0f cm, its wheels say %.0f cm" % (c, w)
         self.disagree[robot] = 0
         return ""
+
+    DETECT_NEAR_CM = 6.0      # chosen: a still robot outline this near where the wheels put it is the robot (DOE)
+
+    def detect_after_move(self, robot):
+        """Detection mode after a move the camera did not follow (Nick, 2026-10-23: "go back to detection mode after
+        it moves to grab it again and hand it back to tracking mode"): the robot has stopped; its own pose (wheels
+        and gyro since its last fix) says where. The detector's robot-shaped outlines within DETECT_NEAR_CM of that,
+        and not where another robot stands, are it: the tracker follows it from there. Returns its position, or
+        None (then the turn on its spot, as before)."""
+        if self.tracker is None:
+            return None
+        own = self.own_pose(robot, since=time.time() - 30.0)
+        if own is None:
+            return None
+        time.sleep(0.5)                                   # a few pictures of it standing still
+        others = [tuple(q[:2]) for n, q in self.st["positions"].items() if n != robot and q]
+        cands = [c for c in list(self.tracker.last_cands or []) if c.get("shape")
+                 and math.hypot(c["x"] - own[0], c["y"] - own[1]) <= self.DETECT_NEAR_CM
+                 and not any(math.hypot(c["x"] - o[0], c["y"] - o[1]) < CAM.MotionTracker.OTHER_CM for o in others)]
+        if not cands:
+            return None
+        c = min(cands, key=lambda c: math.hypot(c["x"] - own[0], c["y"] - own[1]))
+        self.st.setdefault("detect_after_move", []).append(
+            [round(time.time(), 1), robot, round(c["x"], 1), round(c["y"], 1),
+             round(math.hypot(c["x"] - own[0], c["y"] - own[1]), 1)])
+        self.say("    %s: the camera lost it during the move; found it again where its wheels put it (%.1f, %.1f) cm"
+                 % (robot, c["x"], c["y"]), quiet=True)
+        self.tracker.follow(robot, c["x"], c["y"])
+        self.history.clear()
+        self.tracker.hold(HOLD_CM)
+        return self.settle(min_s=0.3)
 
     def refind(self, robot, why):
         """The camera and the wheels disagree: stop, and find it again by a turn on its spot (nothing else turns
@@ -2312,7 +2356,11 @@ class Runner:
                 self.say("    %s: something %.0f cm in front; turning before its heading drive" % (robot, f), quiet=True)
                 self.leg(robot, ("turn", 90.0))
                 continue
-            p0, p1, words = self.leg(robot, ("go", 10.0))
+            # 15 cm where there is room (Nick, 2026-10-23: a 1 cm position error is 6 deg over 10 cm, 4 deg over 15
+            # cm); 10 cm near an open edge, whose direction from it is unknown (chosen; DOE: tests-to-run)
+            q = self.pos(robot) or p
+            far = self.board.edge_room(q[0], q[1])[0] > HEADING_LONG_ROOM_CM and (f is None or f > 15.0 + HEADING_CLEAR_CM)
+            p0, p1, words = self.leg(robot, ("go", 15.0 if far else 10.0))
             if p0 and p1 and math.hypot(p1[0] - p0[0], p1[1] - p0[1]) >= ST.MIN_HEADING_CM:
                 self.heads[robot] = [ST.bearing(p0, p1), True]
                 self.say("  %s faces %.0f deg" % (robot, self.heads[robot][0]))

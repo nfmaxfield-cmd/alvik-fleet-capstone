@@ -39,3 +39,18 @@ shows, how, and what it needs first. Newest at the bottom of each section.
 10. **Front sensor against the map.** Offset and spread from a session's front_checks.csv (the analysis prints the
     suggested values); then whether it can steer (re-find on disagreement).
 11. **Gyro drift and scale over a session, per robot,** from the naming checks and the self-calibration history.
+
+## Driving
+- **Heading drive length (DOE).** A robot found by a turn on its spot learns which way it faces by a short drive the
+  camera measures (10 cm; 15 cm where it has 30 cm of room from an open edge, chosen 2026-10-23). Factors: drive
+  length (10 / 15 / 20 cm) x place (middle, beside a board, near an open edge). Responses: heading error (against
+  the next leg's camera bearing), camera losses during the drive, distance toward an edge. About 30 min of robot
+  time; repeats per cell ~8.
+- **Detect after a move** (2026-10-23): how often the detector finds a robot where its wheels put it after the
+  camera lost it while driving (`detect_after_move` in the state), against the old turn on its spot: time saved,
+  wrong pick-ups (another robot or a ghost within 6 cm).
+- **One sharp picture every check (Nick, 2026-10-23).** For the detector's periodic check (every 2 s), grab a single
+  frame at the camera's highest resolution instead of the stream's 640x480, and match it with what the robots'
+  sensors say. Test at each resolution the camera offers: position error at the checks, time to grab and process,
+  and the effect on the stream. Later, the opposite end too: the laptop tracker at the lowest workable resolution,
+  for the comparison (not now: perfect the tracking first).

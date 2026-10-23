@@ -289,9 +289,23 @@ class Board:
                 q[0] = self.yboard_cm + (board_room_cm if self.ux > 0 else -board_room_cm)
         return tuple(q)
 
+    BOARD_SLACK_CM = 2.0      # a centre may be measured this far past a blocked board's line (calibration)
+
     def on_board(self, x, y, margin=0.0):
-        return (min(self.x0, self.x1) + margin <= x <= max(self.x0, self.x1) - margin and
-                min(self.y0, self.y1) + margin <= y <= max(self.y0, self.y1) - margin)
+        """On the plywood. On the two blocked sides the limit is the board's line as measured (2026-10-23: the
+        y-board measured at 123.8 cm, past the nominal 122.15 cm edge, so Center touching it was "off the board"
+        and parking gave up), plus BOARD_SLACK_CM; the open sides keep the plywood's own edge."""
+        xlo, xhi = min(self.x0, self.x1), max(self.x0, self.x1)
+        ylo, yhi = min(self.y0, self.y1), max(self.y0, self.y1)
+        if self.yboard_side == 0:
+            xlo = min(xlo, self.yboard_cm - self.BOARD_SLACK_CM)
+        else:
+            xhi = max(xhi, self.yboard_cm + self.BOARD_SLACK_CM)
+        if self.xboard_side == 0:
+            ylo = min(ylo, self.xboard_cm - self.BOARD_SLACK_CM)
+        else:
+            yhi = max(yhi, self.xboard_cm + self.BOARD_SLACK_CM)
+        return xlo + margin <= x <= xhi - margin and ylo + margin <= y <= yhi - margin
 
     def park(self, i):
         """(x, y, heading) of park spot i (PARK_UV), facing the find's staging point (its next drive)."""

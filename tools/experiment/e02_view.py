@@ -160,6 +160,16 @@ class LiveView:
                 pts = [px(bd.x0, bd.y0), px(bd.x1, bd.y0), px(bd.x1, bd.y1), px(bd.x0, bd.y1)]
                 if all(pts):
                     cv2.polylines(v, [np.array(pts, np.int32)], True, (0, 160, 0), 1)
+                # the same outline at the height of a robot's top (where the rings are drawn): the camera looks down
+                # at a slant, so a robot touching a board leans past the floor's line in the picture (Nick, 2026-10-23)
+                pts = [px(bd.x0, bd.y0, 3.7), px(bd.x1, bd.y0, 3.7), px(bd.x1, bd.y1, 3.7), px(bd.x0, bd.y1, 3.7)]
+                if all(pts):
+                    for a_, b_ in zip(pts, pts[1:] + pts[:1]):
+                        n_ = max(1, int(math.hypot(b_[0] - a_[0], b_[1] - a_[1]) // 8))
+                        for k in range(0, n_, 2):
+                            p1_ = (int(a_[0] + (b_[0] - a_[0]) * k / n_), int(a_[1] + (b_[1] - a_[1]) * k / n_))
+                            p2_ = (int(a_[0] + (b_[0] - a_[0]) * (k + 1) / n_), int(a_[1] + (b_[1] - a_[1]) * (k + 1) / n_))
+                            cv2.line(v, p1_, p2_, (0, 110, 0), 1)
             for c in list(getattr(tr, "last_cands", []) or []):
                 cv2.circle(v, (int(c["u"]), int(c["v"])), 4, (0, 220, 220) if c["shape"] else (150, 150, 150), -1)
             live = tr.where() if tr is not None else None

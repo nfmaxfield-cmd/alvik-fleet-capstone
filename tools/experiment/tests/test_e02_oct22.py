@@ -367,3 +367,32 @@ def test_snapshot_at_marks(tmp_path):
     r.mark("e02 help Left: lost")
     files = list((tmp_path / "snapshots").iterdir())
     assert len(files) == 1 and "help-Left-lost" in files[0].name
+
+
+def test_on_board_uses_measured_board_lines():
+    import e02_plan as PL
+    b = PL.Board(xboard_side=1, yboard_side=1, xboard_cm=119.2, yboard_cm=123.8)
+    assert b.on_board(123.0, 43.0)          # touching the y-board, measured past the nominal 122.15 edge
+    assert not b.on_board(127.0, 43.0)      # beyond the board's face
+    assert not b.on_board(-1.0, 43.0)       # the open side keeps the plywood's edge
+
+
+def test_detect_after_move_finds_robot_where_wheels_put_it():
+    import types
+    import e02
+    r = e02.Runner.__new__(e02.Runner)
+    followed = []
+    r.tracker = types.SimpleNamespace(
+        last_cands=[dict(x=50.0, y=40.0, shape=True), dict(x=80.0, y=80.0, shape=True)],
+        follow=lambda rb, x, y: followed.append((x, y)), hold=lambda cm: None)
+    r.own_pose = lambda rb, since=0.0: (52.0, 41.0, 90.0)
+
+    class St(dict):
+        pass
+    r.st = St(positions={"Right": [80.0, 81.0, None]})
+    r.history = types.SimpleNamespace(clear=lambda: None)
+    r.say = lambda m, quiet=False: None
+    r.settle = lambda **k: (50.0, 40.0)
+    assert r.detect_after_move("Left") == (50.0, 40.0) and followed == [(50.0, 40.0)]
+    r.own_pose = lambda rb, since=0.0: (79.0, 80.0, 0.0)      # only another robot there: not taken
+    assert r.detect_after_move("Left") is None
