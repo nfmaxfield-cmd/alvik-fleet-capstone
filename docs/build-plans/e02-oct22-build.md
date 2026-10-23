@@ -84,7 +84,11 @@ Nick uploads firmware 2026-10-22b to all three robots (same steps as this mornin
   sensors; tracking only near each robot's predicted spot; the gyro's heading picks the lock-on's rotation (1-2
   instead of 36); the full-picture detector every 2 s and at stops, possibly from a single sharp high-resolution
   frame (tests-to-run); idle checks when nothing moves. Questions for Nick first (laptop as viewer? recording on the
-  Pi?). The Pi is a Pi 4 Model B.
+  Pi?). The Pi is a Pi 4 Model B. **Measured 2026-10-23 (tools/pi/tracker_timing.py, 30 s of this morning's
+  footage, Left):** decoding 5.7 ms, motion detector 32 ms (about 26 pictures a second), detector + lock-on 35 ms
+  (about 25 a second): close to the laptop's live 45 ms, not the 3-5x slower Claude estimated. Still to add: the
+  Pi's own camera streaming and the runner in the same Pi. On that stretch the lock-on made it worse (seen 68% vs the
+  detector's 95%): being fixed first.
 - **Live lab graphs: say what they measure and where the data comes from** (Nick, 2026-10-23). Every chart in
   the live lab (and the live view) gets a minimal line: the quantity, its unit, and its source (e.g. "gyro scale
   per self-calibration fit, from fits.csv"). Next build.
