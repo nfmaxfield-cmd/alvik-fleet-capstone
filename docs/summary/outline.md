@@ -108,3 +108,6 @@ argument (minimal labour, infrastructure and know-how; better data of any type r
 - The Fable review must not just confirm our numbers: it should look through the data (logs, track.csv, perf.csv,
   find.csv, explore stops, edge stops, footage frames) for observations we missed: patterns by robot, time,
   battery, place on the board, delay, tracker state; anything surprising or unexplained.
+- (18:28) The Fable review also covers the methodology, not only the data: experimental design, controls,
+  measurement truth, statistics, threats to validity; and it suggests directions that would impress professors and
+  could lead toward a publication (what is novel here, what experiment would make it publishable, which venues).
