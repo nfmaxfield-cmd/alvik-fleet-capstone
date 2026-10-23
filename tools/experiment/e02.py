@@ -3480,6 +3480,12 @@ class Runner:
             return (float(np.median([q[1] for q in smp])), float(np.median([q[2] for q in smp])))
         start = (k_info or {}).get("start") or cam_at("ms_start", 0.4) or pre
         far = (k_info or {}).get("far") or cam_at("ms_far", 0.8 * PAUSE_MS / 1000.0)
+        if start is None:
+            # 2026-10-23 09:44: a K drive the camera lost from the start (no start sample, no pre-run position): the
+            # runner crashed here. Nothing to measure: a failed run (kept in the record)
+            r.setdefault("flags", []).append("no_camera_start")
+            self.finish_failed(r, robot, "the camera did not see where it started (%s)" % end.get("result"))
+            return
         bs = [num(rec.get(k)) for k in ("start_x", "start_y", "far_goal_x", "far_goal_y")]
         if k_info and k_info.get("far_goal"):
             goal = k_info["far_goal"]
