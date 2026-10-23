@@ -83,7 +83,7 @@ def main():
             seen += tr.push(imgs[k], ts[k]) is not None
             per.append(time.perf_counter() - s0)
         per = np.array(per) * 1000
-        print("  %-30s %5.1f ms a picture (95%%: %5.1f ms) -> about %4.1f pictures a second; robot seen in %3.0f%%" % (
+        print("  %-30s %5.1f ms a picture (95%%: %5.1f ms) -> about %4.1f pictures a second; a position reported in %3.0f%% of pictures (not checked against the truth: a ghost counts)" % (
             name + ":", per.mean(), np.percentile(per, 95), 1000.0 / max(1e-6, per.mean() + dec_ms),
             100.0 * seen / len(per)))
 

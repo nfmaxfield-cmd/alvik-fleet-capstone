@@ -227,3 +227,42 @@ def test_detector_with_lock_oct22_evening(name):
     for tf, x, y in m["fixes"]:
         near = [s for t, s in out if s is not None and abs(t - tf) < 0.5]
         assert near and min(math.hypot(s[1] - x, s[2] - y) for s in near) < 7.0, ("fix", tf, x, y)
+
+
+def test_no_ghost_at_start_oct23():
+    """2026-10-23 09:14:35 (session 1): Left drives off from (37, 105) during a find. The detector alone reported it
+    at its start spot for the rest of the stretch (a ghost; the spot was empty floor), which a "seen %" counted as
+    seen. Pass for the live tracker (detector + lock-on): after Left has left (left_by), no position within 6 cm of
+    the ghost spot; it follows Left past x = far_x; and it reports a position in at least 80% of the pictures (85%
+    when written, after the re-lock on a still outline)."""
+    import cv2
+    import e02_camera as CAM
+    m = json.load(open(os.path.join(DATA, "oct23_left_ghost.json")))
+    d = os.path.join(CLIPS, "oct23")
+    video, frames = os.path.join(d, m["video"]), os.path.join(d, m["frames"])
+    if not (os.path.exists(video) and os.path.exists(frames)):
+        pytest.skip("2026-10-23 footage not here (python tools/experiment/get_clips.py)")
+    tab = [(int(r["frame"]), float(r["t_wall"])) for r in csv.DictReader(open(frames))]
+    i0 = min(range(len(tab)), key=lambda k: abs(tab[k][1] - (m["start_t"] + m["offset"])))
+    n = int((m["end_t"] - m["start_t"]) * 25)
+    cap = cv2.VideoCapture(video)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, i0 - 12)
+    imgs = []
+    for _ in range(n + 12):
+        ok, fr = cap.read()
+        assert ok
+        imgs.append(cv2.cvtColor(fr, cv2.COLOR_BGR2GRAY))
+    ts = [tab[i0 - 12 + k][1] - m["offset"] for k in range(len(imgs))]
+    cam = CAM.load_camera(os.path.join(os.path.dirname(HERE), "data", "overhead_floorcal_roam1.json"))
+    tr = CAM.MotionTracker(cam, (61.0, 61.0), board_rect=(0.0, 0.0, 122.15, 121.9))
+    assert tr.use_lock
+    at = tuple(m["at"])
+    tr.set_background(imgs[:12], robots=[at])
+    tr.follow("Left", at[0], at[1], t=ts[12])
+    out = [(ts[k], tr.push(imgs[k], ts[k])) for k in range(12, len(imgs))]
+    gx, gy = m["ghost"]
+    for t, s in out:
+        if s is not None and t > m["left_by"]:
+            assert math.hypot(s[1] - gx, s[2] - gy) > 6.0, ("ghost", t, s)
+    assert max(s[1] for _, s in out if s is not None) > m["far_x"]
+    assert sum(1 for _, s in out if s is not None) >= 0.8 * len(out)

@@ -330,6 +330,8 @@ class MotionTracker:
     DISAGREE_N = 2              # checks in a row the detector sees it elsewhere, standing still: lock on there again
     LOCK_SURE = 0.7             # chosen: a lock match this good is trusted over the detector's outline (DOE: confidence)
     NUDGE_CM = 3.0              # ... below it, a detector outline further than this from the lock moves the lock
+    RELOCK_STILL_N = 12         # chosen: a detector outline still for this many pictures (~0.5 s) can be locked on
+    RELOCK_STILL_CM = 1.0       # ... within this
     START_NEAR_CM = 12.0        # the lock starts on the detector's outline within this of the place handed over
     START_WAIT_S = 1.0          # ... waiting at most this long for it, then on the place handed over
     PIN_CM = 3.0                # during a turn on its spot the lock may not move further than this
@@ -380,6 +382,7 @@ class MotionTracker:
         self.lock_retake = False                # a turn on its spot just ended: take its look again
         self.lock_off = (0.0, 0.0)              # the detector's outline centre minus the lock's (learned)
         self.lock_start_t = None
+        self.det_hist = deque(maxlen=50)        # the detector's own outline, picture by picture (None: not seen)
         self.leg_kind = None                    # "turn" / "go" while the runner drives a leg
         self.check_t = 0.0
         self.check_hold = False                 # a check is due at the next picture (it just stopped)
@@ -648,9 +651,16 @@ class MotionTracker:
             if not self.lk.start(img, x, y, t):
                 self.lk.stop()
             self.check_t = t
+        self.det_hist.append(det)
         if not self.lk.locked:
-            # lost: the detector carries on; once it sees the robot stand still, lock on to it there again
-            if det is not None and held_now:
+            # lost: the detector carries on; once it sees the robot stand still, lock on to it there again. Still:
+            # the runner says so (a hold), or the detector's own outline has not moved for RELOCK_STILL_N pictures
+            # (2026-10-23 replay, a find run (no hold during the robot's own runs): after the lock let go it never
+            # came back, and the robot went unseen whenever it stood still)
+            recent = list(self.det_hist)[-self.RELOCK_STILL_N:]
+            still = len(recent) == self.RELOCK_STILL_N and all(q is not None for q in recent) and \
+                max(math.hypot(q[0] - recent[-1][0], q[1] - recent[-1][1]) for q in recent) <= self.RELOCK_STILL_CM
+            if det is not None and (held_now or still):
                 self.lock_start = det
                 self.stats["relocks"] += 1
             return None

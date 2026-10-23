@@ -17,7 +17,9 @@ REPO = "nfmaxfield-cmd/alvik-fleet-capstone"
 GET = (("e02-setup-oct21", {"setup.avi": "setup.avi", "frames.csv": "frames.csv"}),
        ("e02-session-oct22", {"video.part-ab": "oct22_video.part-ab", "frames.csv": "oct22_frames.csv"}),
        ("e02-session-oct22-evening", {"video_1910.avi": "video_1910.avi", "frames_1910.csv": "frames_1910.csv",
-                                      "video_1952.avi": "video_1952.avi", "frames_1952.csv": "frames_1952.csv"}))
+                                      "video_1952.avi": "video_1952.avi", "frames_1952.csv": "frames_1952.csv"}),
+       ("e02-session-oct23", {"video.part-aa": "oct23/video.part-aa", "video.part-ab": "oct23/video.part-ab",
+                              "video.part-ac": "oct23/video.part-ac", "frames.csv": "oct23/frames.csv"}))
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "clips")
 
 
@@ -41,6 +43,18 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     for tag, want in GET:
         get_release(tag, want, tok)
+    parts = [os.path.join(OUT, "oct23", "video.part-a" + c) for c in "abc"]
+    whole = os.path.join(OUT, "oct23", "video.avi")
+    if all(os.path.exists(p) for p in parts) and not os.path.exists(whole):
+        with open(whole, "wb") as g:                    # the pieces put back together (then removed: 5.5 GB)
+            for p in parts:
+                with open(p, "rb") as f:
+                    while True:
+                        b = f.read(1 << 24)
+                        if not b:
+                            break
+                        g.write(b)
+                os.remove(p)
     print("clips in", OUT)
 
 
@@ -50,6 +64,10 @@ def get_release(tag, want, tok):
         if a["name"] not in want:
             continue
         path = os.path.join(OUT, want[a["name"]])
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if a["name"].startswith("video.part-") and os.path.exists(os.path.join(os.path.dirname(path), "video.avi")):
+            print("have", a["name"], "(joined)")
+            continue
         if os.path.exists(path) and os.path.getsize(path) == a["size"]:
             print("have", a["name"])
             continue

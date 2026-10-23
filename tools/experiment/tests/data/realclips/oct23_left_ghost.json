@@ -1,0 +1,18 @@
+{
+ "note": "Left, 2026-10-23 09:14:35-09:15:05 (session 1, a find run: no runner legs, no holds). The detector alone keeps 'seeing' Left at its start spot after it drove off (a ghost in its floor memory); the detector + lock-on follows Left across the board. Laptop times; the Pi clock 1.6 s ahead.",
+ "video": "video.avi",
+ "frames": "frames.csv",
+ "start_t": 1792761275.0,
+ "end_t": 1792761305.0,
+ "at": [
+  36.98,
+  104.54
+ ],
+ "offset": 1.6,
+ "ghost": [
+  46.5,
+  107.0
+ ],
+ "left_by": 1792761281.0,
+ "far_x": 90.0
+}

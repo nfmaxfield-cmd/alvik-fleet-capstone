@@ -1858,7 +1858,9 @@ def session_inputs(session, recording=None, calib=None):
         cands = [st.get("calibration") or "", os.path.join(session, "cameras", "overhead.json"),
                  os.path.join(session, "sim", "camera_model.json")]
         if st.get("calibration"):        # a laptop path moved with the folder: same name inside the session
-            cands.append(os.path.join(session, "cameras", os.path.basename(st["calibration"].replace("\\", "/"))))
+            base = os.path.basename(st["calibration"].replace("\\", "/"))
+            cands.append(os.path.join(session, "cameras", base))
+            cands.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", base))   # the repo's own
         cal = next((c for c in cands if c and os.path.exists(c)), None)
     if not cal:
         raise SystemExit("No floor calibration found (e02_state.json says %r). Give --calib <the camera json the runner "
