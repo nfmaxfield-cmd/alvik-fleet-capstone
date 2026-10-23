@@ -79,3 +79,12 @@ argument (minimal labour, infrastructure and know-how; better data of any type r
   Left 3, Center 1, Right 4; calibrated end error Left 1.2, Center 1.4, Right 1.7 cm. Left is not the worst; it does
   the most drives (mapping, first in the find check: 237 vs 194 / 166).
 - Find error explained: a steady ~4 cm offset toward both boards (same every find) plus 2-6 cm scatter.
+
+## For the summary (Nick, 14:45)
+- State plainly how little the robots know at the start: the floor is flat, their own size and sensor positions,
+  a camera somewhere above. Not the board's size, edges, boards, the camera's place, or their own corrections.
+- Explain how uncalibrated wheels and gyros can be trusted: the camera and the robots calibrate each other (gyro
+  scale from a full spin: the picture repeats at 360 deg whatever the camera's calibration; wheel balance from
+  straightness: a camera keeps straight lines straight; the camera's floor map from many rays; distance from the
+  wheels' average, cross-checked by the robots' known size).
+- Wheel slip (stress tests on a slippery floor) is a known limit with a plan (build notes), so it can be named.

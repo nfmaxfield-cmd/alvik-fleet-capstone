@@ -92,3 +92,24 @@ Nick uploads firmware 2026-10-22b to all three robots (same steps as this mornin
 - **Live lab graphs: say what they measure and where the data comes from** (Nick, 2026-10-23). Every chart in
   the live lab (and the live view) gets a minimal line: the quantity, its unit, and its source (e.g. "gyro scale
   per self-calibration fit, from fits.csv"). Next build.
+
+## Next build (Nick, 2026-10-23 14:38-14:45): decisions
+- **Explore = hybrid.** A short dance (each robot spins 360 deg, drives a few short legs near where it stands:
+  gyro scales from "the picture looks the same again", wheel balance from straightness in the picture, a first
+  camera fit), then all three robots drive rays outward in their own sectors; the rays map the border by feel and
+  refine the camera fit. The robots' camera calibration **replaces** the corner-click one. The live lab shows the
+  border points and the fitted edges as they come in.
+- **Safety in the first minutes: the edge sensors only** (test mode).
+- **Scale:** the robots' known size in the picture for now. Dock question below.
+- **Remove a board without telling them:** in the second session today (needs the edge find: a robot locating
+  itself against any two non-parallel boundaries, boards or edges).
+- **Wheel slip (Nick: stress testers will make the floor slippery):** note, not for this build. The system must let
+  wheels slip without losing too much confidence in its position or calibration. Ideas to weigh: detect slip (wheel
+  speed vs gyro turn rate, vs the accelerometer, vs the camera, vs motor effort); down-weight the wheels while
+  slipping (the filter's wheel noise grows with the slip signs); drop slipping legs from the self-calibration; map
+  slippery patches as a layer of the site map and plan round them or slow down there.
+- **A standardized dock as the scale reference (Nick's question):** yes, two ways. (1) The dock's printed shape is a
+  known size in the picture (a reference object that is equipment, not a marker added for the camera). (2) Better:
+  the dock's floor stripe sits a known printed distance from its back wall; a robot creeping in measures that
+  distance with its wheels between the stripe and the switches clicking: an absolute wheel-scale check at every
+  docking, which then fixes the camera's scale through the explore fit.

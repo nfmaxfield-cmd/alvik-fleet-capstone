@@ -44,3 +44,4 @@ should treat "pose error at a fix" as one quantity, whether it came from a board
 
 ## Log
 - 2026-10-23: started this log. No dock hardware fitted yet.
+- 2026-10-23: the dock as the scale reference: its printed size in the picture, and the stripe-to-back-wall distance measured by the wheels at every docking (an absolute wheel-scale check). See e02-oct22-build.md.
