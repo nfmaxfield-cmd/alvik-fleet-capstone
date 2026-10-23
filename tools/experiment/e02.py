@@ -360,7 +360,8 @@ class Runner:
         a = self.a
         while True:
             ok1, w1, _, _ = CAM.check_stream(a.pi, a.overhead_port)
-            notes = CAM.notes_answer(a.pi)
+            # --no-recording: the Pi runs camrec.py --no-record (live picture only: no video, no notes)
+            notes = True if getattr(a, "no_recording", False) else CAM.notes_answer(a.pi)
             if ok1 and notes:
                 self.marks_unconfirmed = 0
                 return True
@@ -1897,11 +1898,13 @@ class Runner:
             ok2, w2 = True, "not used this session (--no-side)"
         else:
             ok2, w2, _, _ = CAM.check_stream(a.pi, a.side_port)
-        notes = CAM.notes_answer(a.pi)
+        notes = True if getattr(a, "no_recording", False) else CAM.notes_answer(a.pi)
         self.say("Overhead camera (%s:%d): %s" % (a.pi, a.overhead_port, "OK, " + w1 if ok1 else "PROBLEM: " + w1))
         self.say("Side camera (%s:%d): %s" % (a.pi, a.side_port, ("OK, " if not a.no_side else "") + w2 if ok2
                                                  else "PROBLEM: " + w2))
-        self.say("Pi recorder hears notes: %s" % ("OK" if notes else "PROBLEM: no answer on port 5007"))
+        self.say("Pi recorder hears notes: %s" % ("not used (--no-recording: live picture only, no video)"
+                                                   if getattr(a, "no_recording", False) else
+                                                   "OK" if notes else "PROBLEM: no answer on port 5007"))
         setup["pi"] = dict(overhead=ok1, side=ok2, notes=notes, fps=round(fps, 1))
         if not ok1:
             raise SystemExit("The overhead camera is not sending pictures. On the Pi (SSH window), start the "
@@ -4098,6 +4101,9 @@ def main(argv=None):
     ap.add_argument("--skip-naming", action="store_true")
     ap.add_argument("--skip-find-check", action="store_true")
     ap.add_argument("--max-runs", type=int, default=0, help="stop after this many runs (0 = all)")
+    ap.add_argument("--no-recording", action="store_true", help="the Pi runs camrec.py --no-record (live picture "
+                    "only): no video and no notes are expected; the runs are measured from the live picture, and "
+                    "snapshots/ keeps each run's measured frames")
     ap.add_argument("--edge-careful", action="store_true", help="production behaviour: never turn on the spot near "
                     "an open edge with the heading unknown (call Nick instead); test sessions turn anyway and log it")
     ap.add_argument("--no-lock", action="store_true", help="backup: the tracker without the lock-on (the motion "
