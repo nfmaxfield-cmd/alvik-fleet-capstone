@@ -1121,6 +1121,32 @@ METRICS = [
 PRIMARY = ["end_err_cm", "end_head_abs_deg"]
 
 
+EARLY_KINDS = ("safety_stop", "watchdog", "stopped")
+
+
+def ended_early(row):
+    """A run that a safety stop (the camera watchdog, or the robot's own guard) ended before its route was done
+    (Nick, 2026-10-23: reported separately; in session 1, 4 of 9 camera-steered runs ended so, 22-39 cm from the end
+    they never reached, which said nothing about how accurately a finished run ends)."""
+    return str(row.get("recovery") or "").strip().lower() in EARLY_KINDS
+
+
+def early_table(rows):
+    """Per condition: runs, runs that ended early, the share, and the early runs' distance from the intended end."""
+    out = []
+    for c in CONDITIONS:
+        rs = [r for r in rows if r["condition"] == c]
+        if not rs:
+            continue
+        e = [r for r in rs if r.get("ended_early")]
+        d = [nanf(r.get("end_err_cm")) for r in e if np.isfinite(nanf(r.get("end_err_cm")))]
+        out.append(dict(condition=c, runs=len(rs), ended_early=len(e), share=round(len(e) / len(rs), 3),
+                        robots=" ".join(sorted({r.get("robot", "") for r in e})),
+                        routes=" ".join(sorted({r.get("route", "") for r in e})),
+                        early_dist_median_cm=round(float(np.median(d)), 1) if d else ""))
+    return out
+
+
 def flag_runs(rows):
     """Add outlier_<metric> flags: beyond the Tukey fences (1.5 x IQR) within the same condition AND route (the
     routes' errors differ by design: pooled, every run of the longest route would look like an outlier). Purely
@@ -1313,8 +1339,25 @@ def write_report(path, rows, bumps, summ, comps, charts, notes, args_text="", se
           "what the camera saw and what was intended. Four conditions: U uncalibrated, C calibrated on-board "
           "sensors (corrections learned during the session from U runs, so the first block is U-heavy), K camera "
           "steering only, KC camera plus calibrated sensors. Question: do the conditions differ, and by how much.", ""]
+    early = [r for r in rows if r.get("ended_early")]
+    rows = [r for r in rows if not r.get("ended_early")]
+    n_by = {c: sum(1 for r in rows if r["condition"] == c) for c in CONDITIONS}
     rec = [r for r in rows if r.get("recovery")]
     kinds = sorted({r["recovery"] for r in rec})
+    if early:
+        L += ["## Runs that ended early (reported separately)", "",
+              "%d run(s) were stopped by a safety stop before finishing their route; they are left out of every "
+              "accuracy statistic below (their distance from an end they never reached is not an accuracy), and "
+              "counted here instead (ended_early.csv)." % len(early), "",
+              "| Condition | Runs | Ended early | Share | Robots | Routes |", "|---|---|---|---|---|---|"]
+        for c in CONDITIONS:
+            n_all = n_by[c] + sum(1 for r in early if r["condition"] == c)
+            k = sum(1 for r in early if r["condition"] == c)
+            if n_all:
+                L.append("| %s | %d | %d | %.0f%% | %s | %s |" % (
+                    c, n_all, k, 100.0 * k / n_all, " ".join(sorted({r["robot"] for r in early if r["condition"] == c})) or "-",
+                    " ".join(sorted({r["route"] for r in early if r["condition"] == c})) or "-"))
+        L.append("")
     L += ["## Data", "",
           "%d runs (%s). %s %d are statistical outliers on end position error (beyond 1.5 x IQR within the same condition "
           "and route); every table gives the mean with and without them. Runs with a missing measurement are in "
@@ -1938,15 +1981,19 @@ def analyse(recording, logs, runs, calib, out, background=None, bump_frame="auto
             print("run %s %-6s %-3s %-8s end %s cm %s deg %s" % (
                 run["run_id"], run["robot"], run["condition"], run["route"], f(row.get("end_err_cm")),
                 f(row.get("end_err_deg"), 1), row.get("flags", "")))
-    flag_runs(rows)
-    summ, comps = summarise(rows)
+    for r in rows:
+        r["ended_early"] = int(ended_early(r))
+    fin = [r for r in rows if not r["ended_early"]]
+    flag_runs(fin)
+    summ, comps = summarise(fin)
     write_csv(os.path.join(out, "runs.csv"), rows)
+    write_csv(os.path.join(out, "ended_early.csv"), early_table(rows))
     write_csv(os.path.join(out, "bumps.csv"), bumps)
     write_csv(os.path.join(out, "summary.csv"), summ)
     write_csv(os.path.join(out, "comparisons.csv"), comps)
     charts = {}
     for m, lab in METRICS[:2]:
-        p = spread_chart(rows, m, lab, os.path.join(out, "charts", m + ".png"))
+        p = spread_chart(fin, m, lab, os.path.join(out, "charts", m + ".png"))
         if p:
             charts[m] = os.path.join("charts", m + ".png")
     p = bump_chart(bumps, os.path.join(out, "charts", "bump_believed_vs_camera.png"))

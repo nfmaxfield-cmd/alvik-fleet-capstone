@@ -185,10 +185,11 @@ def calibration_series(st):
 
 
 def results_series(st):
-    """Each finished run's end and far-point error (camera), by condition."""
+    """Each finished run's end and far-point error (camera), by condition; runs a safety stop ended are left out
+    (they never reached their end: the analysis reports them apart)."""
     out = []
     for r in st.get("schedule") or []:
-        if r.get("status") == "done" and r.get("end_err_cm") is not None:
+        if r.get("status") == "done" and r.get("end_err_cm") is not None and r.get("recovery") != "safety_stop":
             out.append(dict(cond=r["cond"], robot=r["robot"], route=r["route"], order=r["order"],
                             end_err_cm=r["end_err_cm"], far_err_cm=r.get("far_err_cm")))
     return out

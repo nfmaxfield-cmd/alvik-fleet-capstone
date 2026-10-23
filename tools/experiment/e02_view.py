@@ -29,12 +29,18 @@ img{max-width:100%;width:800px;border:1px solid #333}
 #side{flex:1;min-width:260px}
 h1{font-size:18px;margin:0 0 8px}
 .k{color:var(--dim)} pre{white-space:pre-wrap;font-size:13px;line-height:1.35}
+.src{color:var(--dim);font-size:11px;margin:2px 0 10px}
+#health{margin:10px 0 0;font-size:14px}#health div{margin:2px 0}
+.ok{color:var(--ok)}.amber{color:#e5c07b}.red{color:#e06c75}.none{color:var(--dim)}
 </style></head><body><main>
 <img id="pic" src="/frame.jpg" alt="overhead camera with the runner's view">
 <div id="side"><h1>E02 live view <a href="/lab" style="font-size:13px;color:#8cf">live lab &rarr;</a></h1>
 <div><span class="k">Phase:</span> <span id="phase">-</span></div>
 <div><span class="k">Following:</span> <span id="active">-</span></div>
 <div><span class="k">Run:</span> <span id="order">-</span></div>
+<div id="health"></div>
+<p class="src">Tracker health, last 30 s: shares of camera pictures by where the robot's position came from, and
+camera timing. Data: the tracker's own counters and perf.csv. Amber / red: past a chosen limit.</p>
 <p class="k">Green ring: the robot being followed (dashed circle: it should stand still there). Yellow dots: things
 that look like a robot. Grey dots: other changes (a hand, a shadow). Labels: robots the runner knows of.</p>
 <p id="note" class="k"></p>
@@ -47,8 +53,19 @@ function tick(){
   fetch('/status.json').then(r=>r.json()).then(s=>{
     for(const k of ['phase','active','order'])document.getElementById(k).textContent=s[k]||'-';
     document.getElementById('note').textContent=s.note||'';
+    health(s.health);
     document.getElementById('log').textContent=(s.log||[]).join('\\n');}).catch(()=>{});
 }
+function pc(v){return v==null?'-':Math.round(100*v)+'%'}
+function health(h){const el=document.getElementById('health');if(!h){el.innerHTML='';return}const L=h.levels||{};const sh=h.share||{};
+  const row=(lv,txt)=>'<div class="'+(lv||'none')+'">&#9679; '+txt+'</div>';
+  el.innerHTML='<b>Tracker health'+(h.robot?' ('+h.robot+')':'')+'</b>'+
+   (h.pictures?row(L.seen,'Robot seen in '+pc(h.seen_share)+' of '+h.pictures+' pictures: both trackers '+pc(sh.both)+', lock-on alone '+pc(sh.lock)+', detector alone '+pc(sh.detector)+', held '+pc(sh.held)+', none '+pc(sh.none)):row('none','No robot followed in the last 30 s'))+
+   row(L.score,'Lock-on match score now: '+(h.score==null?'-':h.score)+' (1 = a perfect match; carrying from 0.7)')+
+   row(L.disagree,'Detector checks that disagreed: '+h.disagree+' of '+h.checks+'; re-locks: '+h.relocks)+
+   row(L.seen_age,'Last seen: '+(h.seen_age_s==null?'-':h.seen_age_s+' s ago'))+
+   row(L.fps,'Pictures handled: '+(h.fps==null?'-':h.fps+' a second')+' (camera sends ~25)')+
+   row(L.age,'Oldest picture when its position was ready: '+(h.age_s==null?'-':h.age_s+' s')+'; dropped last second: '+(h.dropped==null?'-':h.dropped));}
 setInterval(tick,400);
 </script></body></html>"""
 
@@ -131,6 +148,57 @@ class LiveView:
                     calibration=LIVE.calibration_series(st), results=LIVE.results_series(st),
                     phase=getattr(r, "phase", ""), t=time.time())
 
+    HEALTH_WINDOW_S = 30.0    # chosen: long enough to smooth one bad second, short enough to show trouble coming
+
+    def health(self):
+        """Tracker health for the engineer (engineer-loop.md item 4): over the last HEALTH_WINDOW_S, where the
+        position came from (both / lock-on alone / detector alone / held / none, shares of pictures), re-locks, the
+        detector's checks that disagreed; now: the lock's match score, how long since the robot was last seen; from
+        perf.csv's last row: pictures handled a second, a picture's age when its position was ready, pictures
+        dropped. Each gets a level: ok / amber / red (limits below, chosen; a DOE on the confidence threshold would
+        set them). Data: the tracker's own counters (track.csv) and perf.csv."""
+        r = self.r
+        tr = r.tracker
+        if tr is None or not hasattr(tr, "confidence"):
+            return None
+        now = time.time()
+        c = tr.confidence()
+        st = c.get("stats") or {}
+        hist = getattr(self, "_hist", None)
+        if hist is None:
+            from collections import deque
+            hist = self._hist = deque()
+        hist.append((now, dict(st)))
+        while len(hist) > 2 and hist[1][0] < now - self.HEALTH_WINDOW_S:
+            hist.popleft()
+        old = hist[0][1]
+        d = {k: st.get(k, 0) - old.get(k, 0) for k in st}
+        pics = sum(d.get(k, 0) for k in ("both", "lock", "detector", "held", "none"))
+        share = {k: (d.get(k, 0) / pics if pics else None) for k in ("both", "lock", "detector", "held", "none")}
+        perf = (getattr(r, "perf_rows", None) or [None])[-1]
+        seen_age = None if not getattr(tr, "last_seen", None) else round(now - tr.last_seen, 1)
+
+        def lvl(v, amber, red, low_bad=False):
+            if v is None:
+                return "none"
+            if low_bad:
+                return "red" if v < red else "amber" if v < amber else "ok"
+            return "red" if v > red else "amber" if v > amber else "ok"
+
+        seen_share = None if not pics else 1.0 - (share["none"] or 0) - (share["held"] or 0)
+        out = dict(window_s=self.HEALTH_WINDOW_S, robot=tr.active or "", source=c.get("source"),
+                   score=c.get("score"), share=share, pictures=pics, relocks=d.get("relocks", 0),
+                   disagree=d.get("disagree", 0), checks=d.get("checks", 0), seen_age_s=seen_age,
+                   fps=None if perf is None else perf.get("fps_handled"),
+                   age_s=None if perf is None else perf.get("age_max_s"),
+                   dropped=None if perf is None else perf.get("dropped"))
+        out["levels"] = dict(seen=lvl(seen_share, 0.9, 0.7, low_bad=True),
+                             score=lvl(c.get("score"), 0.7, 0.5, low_bad=True),
+                             age=lvl(out["age_s"], 0.5, 1.0), fps=lvl(out["fps"], 10, 5, low_bad=True),
+                             disagree=lvl(out["disagree"], 0, 2), seen_age=lvl(seen_age if tr.active else None, 1.0, 3.0))
+        out["seen_share"] = seen_share
+        return out
+
     def status(self):
         r = self.r
         tr = r.tracker
@@ -138,7 +206,8 @@ class LiveView:
             log = list(self.lines)
         note = BRICKS_NOTE if getattr(r, "bricks_view", None) else ""
         return dict(phase=getattr(r, "phase", ""), order=getattr(r, "order", ""),
-                    active=(tr.active if tr is not None and tr.active else ""), log=log, t=time.time(), note=note)
+                    active=(tr.active if tr is not None and tr.active else ""), log=log, t=time.time(), note=note,
+                    health=self.health())
 
     def frame_jpg(self):
         ok, buf = cv2.imencode(".jpg", self.frame_bgr(), [cv2.IMWRITE_JPEG_QUALITY, 80])
@@ -323,6 +392,7 @@ header{padding:14px 16px 0}h1{font-size:20px;margin:0}header p{color:var(--dim);
 main{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;padding:16px}
 .card{background:var(--card);border-radius:10px;padding:14px}
 .card h2{font-size:15px;margin:0 0 4px}.card .note{color:var(--dim);font-size:13px;margin:6px 0 0}
+.card .src{color:var(--dim);font-size:11px;margin:6px 0 0;opacity:.85}
 img{width:100%;border-radius:6px}
 .bar{display:flex;align-items:center;gap:8px;margin:8px 0}.bar span{width:64px;color:var(--dim)}
 .track{flex:1;height:14px;background:var(--grid);border-radius:7px;overflow:hidden}
@@ -333,7 +403,8 @@ svg text{fill:var(--dim);font-size:11px}
 <header><h1>Live lab</h1><p>What the system is learning while the robots run. <a href="/" style="color:#8cf">camera view</a></p></header>
 <main>
 <div class="card"><h2>The camera, with the filter's view</h2><img id="pic" src="/frame.jpg" alt="overhead camera">
-<p class="note">Magenta: where the filter thinks the moving robot is, and how unsure it is (the ellipse; smaller is surer).</p></div>
+<p class="note">Magenta: where the filter thinks the moving robot is, and how unsure it is (the ellipse; smaller is surer).</p>
+<p class="src">Measured: the filter's position and 1-sigma uncertainty (cm). Data: the robot's wheels and gyro (RAW rows) and the overhead camera, in the live Kalman filter (tools/fusion/ekf.py).</p></div>
 <div class="card"><h2>How much the filter trusts each sensor now</h2>
 <div id="robot" class="note"></div>
 <p style="margin:10px 0 2px">Where it is</p>
@@ -345,11 +416,14 @@ svg text{fill:var(--dim);font-size:11px}
 <div id="words" class="big"></div>
 <p class="note">Where it is: how much of any error the camera corrects within a second, against what the wheels and
 gyro carry forward. Which way it turns: the gyro doesn't slip, the wheels do, more the faster it turns.
-How unsure it is now: <b id="sigma">-</b>.</p></div>
+How unsure it is now: <b id="sigma">-</b>.</p>
+<p class="src">Measured: the share of each reading's surprise the filter took on (0-100%), averaged per sensor over the last few seconds. Data: RAW rows from the moving robot and the camera's positions.</p></div>
 <div class="card"><h2>Self-calibration, settling run by run</h2><svg id="cal" viewBox="0 0 340 210" width="100%"></svg>
-<p class="note">Each line is one robot's gyro scale as the system learned it from the camera: it starts at a guess and settles.</p></div>
+<p class="note">Each line is one robot's gyro scale as the system learned it from the camera: it starts at a guess and settles.</p>
+<p class="src">Measured: gyro scale (true turn / the gyro's reading), y; the run it was refitted after, x. Data: the runner's accepted self-calibration fits (fits.csv).</p></div>
 <div class="card"><h2>Results so far: how far from its start each robot ended</h2><svg id="res" viewBox="0 0 340 210" width="100%"></svg>
-<p class="note">One dot per run, by condition; the bar is the average. Lower is better.</p></div>
+<p class="note">One dot per run, by condition; the bar is the average. Lower is better.</p>
+<p class="src">Measured: end error, cm (camera position at the end vs the start, live, before the footage re-measurement). Data: the runner's run results (e02_runs.csv). Runs a safety stop ended are not shown.</p></div>
 </main>
 <script>
 const COL={U:'var(--U)',C:'var(--C)',K:'var(--K)',KC:'var(--KC)'};

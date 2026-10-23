@@ -218,3 +218,31 @@ def test_pages_replay_only(session):
     assert d["paused"] and d["speed"] == 2 and d["now_hms"] == "22:03:00"
     assert v.status()["log"][-1] == "  a continuation line without a time"
     assert v.frame_jpg()[:2] == b"\xff\xd8"
+
+
+def test_tracker_health_levels():
+    """Item 6 (2026-10-23): the live view's tracker health from the tracker's counters and perf.csv."""
+    import time
+    import e02_view as V
+
+    class T:
+        active = "Left"
+        last_seen = time.time() - 0.2
+
+        def __init__(self):
+            self.s = dict(both=0, lock=0, detector=0, held=0, none=0, checks=0, agree=0, disagree=0, relocks=0)
+
+        def confidence(self):
+            return dict(source="both", score=0.82, stats=dict(self.s))
+
+    class R:
+        tracker = T()
+        perf_rows = [dict(fps_handled=15.0, age_max_s=1.4, dropped=3)]
+
+    v = V.LiveView(R(), port=0)
+    assert v.health()["pictures"] == 0
+    R.tracker.s.update(both=80, lock=5, none=15, checks=10, disagree=3, relocks=1)
+    h = v.health()
+    assert h["pictures"] == 100 and abs(h["seen_share"] - 0.85) < 1e-9
+    assert h["levels"]["seen"] == "amber" and h["levels"]["age"] == "red" and h["levels"]["disagree"] == "red"
+    assert h["levels"]["score"] == "ok" and h["levels"]["seen_age"] == "ok"

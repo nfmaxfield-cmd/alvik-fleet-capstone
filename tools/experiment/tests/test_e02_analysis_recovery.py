@@ -170,3 +170,17 @@ def test_finds_section(tmp_path):
     assert "x board" in s["reasons"]
     L, _ = A.finds_lines(rows, summ)
     assert any("| Left | 1 / 1 | 5.0 (5.0)" in x for x in L)
+
+
+def test_ended_early_runs_are_reported_apart():
+    """Item 7 (2026-10-23): safety-stopped runs leave the accuracy statistics and get their own table."""
+    import e02_analysis as A
+    rows = [dict(condition="K", robot="Left", route="L", recovery="safety_stop", end_err_cm=31.9),
+            dict(condition="K", robot="Right", route="straight", recovery="", end_err_cm=1.2),
+            dict(condition="U", robot="Left", route="straight", recovery="far_off", end_err_cm=20.0)]
+    for r in rows:
+        r["ended_early"] = int(A.ended_early(r))
+    assert [r["ended_early"] for r in rows] == [1, 0, 0]
+    t = {d["condition"]: d for d in A.early_table(rows)}
+    assert t["K"]["ended_early"] == 1 and t["K"]["share"] == 0.5 and t["K"]["early_dist_median_cm"] == 31.9
+    assert t["U"]["ended_early"] == 0
