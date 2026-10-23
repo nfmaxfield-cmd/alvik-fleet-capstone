@@ -1,6 +1,7 @@
 # Made hard on purpose: the choices, what each bought, and why it matters at scale
 
-For the Saturday summary and the final capstone report (Nick, 2026-10-23). The first three are Nick's; the rest are
+For the Saturday summary and the final capstone report (Nick, 2026-10-23). The framing: versatility and
+adaptability (see the end), not difficulty for its own sake. The first three are Nick's; the rest are
 easier routes we could have taken and didn't. A running list: add to it as choices come up.
 
 | # | The easy route we didn't take | What we did instead | What it bought | At commercial scale |
@@ -18,7 +19,8 @@ easier routes we could have taken and didn't. A running list: add to it as choic
 | 11 | Processing on a fast computer or a GPU, over a wired network | An ordinary laptop over home WiFi, the camera streaming from a Raspberry Pi | It had to keep up: newest picture only, and every picture's age measured (0.12 s typical today) | Cheap hardware; the delay is measured, so our approach can show it doesn't depend on it (the latency test) |
 | 12 | A person on hand to rescue a stuck robot | A recovery ladder: retry, another robot searches, it finds itself against the boards, it drives out blind, and only then a person; backups so a session doesn't stop | 30 runs this morning with no help calls after the restart | Fewer operators per robot |
 
-## The honest trade
-Each choice cost build time and early sessions; markers (4) alone would have removed most of the tracking work. The
-claim for the report: the system doesn't *need* any of these aids, and can still use them when a site has them (as
-extra witnesses). That is the scale argument.
+## The argument (Nick, 2026-10-23)
+It is easy to make anything work under sterile lab conditions with the best equipment. This system is built to be
+deployed anywhere, to use whatever equipment is there, and to stay accurate in poor conditions: versatility and
+adaptability are the point, not a cost. Where a site does have better equipment or aids (a sharper camera,
+markers, a survey), the system takes them as extra evidence; it never depends on them.
