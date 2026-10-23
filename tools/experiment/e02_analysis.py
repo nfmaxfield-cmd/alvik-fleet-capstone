@@ -1333,13 +1333,16 @@ def write_report(path, rows, bumps, summ, comps, charts, notes, args_text="", se
     L += ["<sub>1.5 x IQR (Tukey's fences): the IQR is the spread of the middle half of the runs (75th minus 25th "
           "percentile); a run more than 1.5 IQR below the 25th or above the 75th percentile of its condition and route is "
           "called an outlier. Fewer than 4 runs in a group: none are called.</sub>", ""]
-    route_scopes = [s for s in dict.fromkeys(x["scope"] for x in summ) if s.startswith("route=")] or ["all"]
+    # all routes pooled first (2026-10-23: 2-6 runs per condition and route left every per-route permutation test
+    # unable to reach p < 0.05; pooled, the permutation test still only shuffles within robot and route), then each
+    route_scopes = ["all"] + [s for s in dict.fromkeys(x["scope"] for x in summ) if s.startswith("route=")]
     first = True
     for m, lab in [x for x in METRICS if x[0] in PRIMARY]:
         for sc in route_scopes:
             if not any(find_row_for(summ, sc, m, c) for c in CONDITIONS):
                 continue
-            L += ["**%s, %s**" % (lab, sc.replace("route=", "route ") if sc != "all" else "all routes"), "",
+            L += ["**%s, %s**" % (lab, sc.replace("route=", "route ") if sc != "all" else
+                                  "all routes pooled (the permutation test shuffles only within robot and route)"), "",
                   "| Condition | n | mean | 95% CI of mean | SD | 95% CI of SD | median | mean without outliers (n) |",
                   "|---|---|---|---|---|---|---|---|"]
             for c in CONDITIONS:
@@ -1474,7 +1477,9 @@ def write_report(path, rows, bumps, summ, comps, charts, notes, args_text="", se
 
 def conclusion_lines(rows, summ, comps):
     out = []
-    route_scopes = [s for s in dict.fromkeys(x["scope"] for x in summ) if s.startswith("route=")] or ["all"]
+    # all routes pooled first (2026-10-23: 2-6 runs per condition and route left every per-route permutation test
+    # unable to reach p < 0.05; pooled, the permutation test still only shuffles within robot and route), then each
+    route_scopes = ["all"] + [s for s in dict.fromkeys(x["scope"] for x in summ) if s.startswith("route=")]
     for m, lab in [x for x in METRICS if x[0] in PRIMARY]:
         any_route = False
         for sc in route_scopes:
@@ -1485,7 +1490,7 @@ def conclusion_lines(rows, summ, comps):
             any_route = True
             ds.sort(key=lambda x: x[0]["mean"])
             best, worst = ds[0], ds[-1]
-            where = sc.replace("route=", "route ") if sc != "all" else "all routes"
+            where = sc.replace("route=", "route ") if sc != "all" else "all routes pooled"
             s = "- %s, %s: lowest mean %s %s (n=%d), highest %s %s (n=%d)." % (
                 lab, where, best[1], f(best[0]["mean"]), best[0]["n"], worst[1], f(worst[0]["mean"]), worst[0]["n"])
             pairs = [c for c in comps if c["scope"] == sc and c["metric"] == m and c["set"] == "all runs"]
