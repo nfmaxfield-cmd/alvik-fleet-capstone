@@ -88,7 +88,8 @@ anywhere open on the board and press Enter; it finds it and parks it itself.
 ## 5. The end
 The last lines say how the tracker did ("Tracker: of the pictures, both saw the robot ...%") and whether the laptop kept up
 ("Camera processing: ... a picture's age ..."): screenshot them.
-**Start copying the footage straight away** (Nick, 2026-10-21): it takes 10+ minutes, so it runs while the
+**Start copying the footage straight away** (but never while a session is running: a copy filled the WiFi on
+2026-10-23 and made the camera lose robots 5 times as often; docs/build-reports/e02-oct23-sessions.md) (Nick, 2026-10-21): it takes 10+ minutes, so it runs while the
 next steps are discussed. Claude gives the copy and upload steps first, before anything else.
 1. PI tab: **Ctrl + C** stops the recording.
 2. Copy the recording and the laptop's `logs\e02-...` folder to a GitHub release (steps as for e02-setup-oct21);
