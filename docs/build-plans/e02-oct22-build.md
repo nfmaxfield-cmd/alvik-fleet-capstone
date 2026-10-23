@@ -77,3 +77,6 @@ Nick uploads firmware 2026-10-22b to all three robots (same steps as this mornin
   build later. Default slot: Thursday morning (last of the usage), sooner if a session shows a reason.
 - **Engineer alerts in the live view** (decisions clicked, phone alert): later; assessment first
   (docs/build-plans/engineer-loop.md).
+- **The robots calibrate the camera** (Nick, 2026-10-23): no corner clicks, no file; a robot drives known
+  distances (wheels) in several places and directions while the camera watches its pixels move, and the pixels-to-cm
+  mapping is solved from that. In the from-scratch rebuild. **Ask Nick questions before starting.**
