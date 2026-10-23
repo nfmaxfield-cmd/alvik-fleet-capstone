@@ -71,3 +71,11 @@ argument (minimal labour, infrastructure and know-how; better data of any type r
   So headline 4 keeps the WiFi result, with its plan (no copies during sessions; the laptop-place test; the latency
   test). The top-board trap and the 24 s stall go to Nick privately unless their fixes are tested by Saturday.
 - Every chart states what it measures and where the data comes from (one minimal line).
+
+## Nick, 14:21
+- Fable: only for the final review of the assessment, likely Saturday overnight; submission Sunday (time Sunday
+  morning to act on it, even a new test run).
+- Robots compared (session 1): camera/wheels disagreements per drive Left 4.6%, Center 4.6%, Right 7.2%; auto-retries
+  Left 3, Center 1, Right 4; calibrated end error Left 1.2, Center 1.4, Right 1.7 cm. Left is not the worst; it does
+  the most drives (mapping, first in the find check: 237 vs 194 / 166).
+- Find error explained: a steady ~4 cm offset toward both boards (same every find) plus 2-6 cm scatter.
