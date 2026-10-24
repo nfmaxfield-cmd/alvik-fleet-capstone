@@ -225,3 +225,9 @@ board's axis (`board_correct`, sent as a fix, logged as `board_corrections`; at 
 - **Open (dry run 23:20):** after a board is gone, the routes are not re-checked against the new open edge: Left's
   straight route from the start spot ran at the edge where the board had been and the watchdog stopped it. Next:
   re-run `route_fits` when `Board.missing` changes, and leave out (or move) routes that no longer fit.
+
+## Pending from the independent review (2026-10-24)
+Full report: kept outside the repo (review of the summary, 2026-10-24). Agreed with Nick: K and the evening C run stay in the summary with these plans.
+- **Camera-steered runs survive the runner's re-identify stop.** In session 1, 4 of 9 K runs were ended at the L route's far corner when the front-sensor-vs-map check sent `stop`, which also ended `run e02` mode 1 (logged as safety_stop; no edge guard fired). Fix: pause the check during a K run, or resume the run after it; label it apart from safety stops.
+- **Bound the learned gyro drift.** Evening fits gave -0.08 to -0.25 deg/s against a standing-still 0.000; the one evening C run ended 13.2 cm off. Hold drift at the standing-still value (or within 0.05 deg/s of it); refit the evening stretches offline to check it explains the 13.2 cm (DOE note: 0.05 deg/s is chosen; the refit's predicted-vs-observed error decides it).
+- Later: blend camera fixes by confidence instead of k = 0.5.
