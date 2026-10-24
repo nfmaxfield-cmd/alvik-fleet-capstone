@@ -138,3 +138,23 @@ def test_robot_check_rejects_nonsense():
     assert not c["ok"] and c["why"]
     assert math.isfinite(len(c["why"]))
     assert os.path.exists(os.path.dirname(X.__file__))
+
+
+def test_no_pictures_waits_for_the_camera_instead_of_crashing():
+    """2026-10-23 evening: the laptop slept, the Pi's recorder stopped, fresh_floor crashed on no pictures."""
+    import pytest
+    r = _runner()
+    r.camera_alive = lambda: True
+
+    class F:
+        n = 0
+
+        def wait_frames(self, k, timeout=0):
+            F.n += 1
+            return ["img"] if F.n >= 3 else []
+    r.feed = F()
+    assert r.wait_for_camera() == ["img"]
+    r.CAMERA_WAIT_S = 0.0
+    F.n = -100
+    with pytest.raises(SystemExit):
+        r.wait_for_camera()

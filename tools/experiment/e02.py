@@ -2837,9 +2837,33 @@ class Runner:
         self.st.save()
         self.fresh_floor()
 
+    CAMERA_WAIT_S = 300.0     # chosen: long enough to restart the Pi's recorder by hand
+
+    def wait_for_camera(self):
+        """No pictures (2026-10-23 evening: the laptop slept, the SSH window closed and with it the Pi's recorder):
+        wait for the camera to come back, saying so every 30 s; if it does not, save and stop cleanly with how to
+        carry on (never a crash). Returns the new pictures."""
+        self.say("  NO PICTURES from the overhead camera. If the PI window closed, start the recorder again there:\n"
+                 "    python3 tools/pi/camrec.py --device 0 --names overhead --fps 25 --label E02 --no-lock\n"
+                 "  Waiting up to %d minutes ..." % round(self.CAMERA_WAIT_S / 60))
+        self.mark("e02 camera lost")
+        end = time.time() + self.CAMERA_WAIT_S
+        while time.time() < end:
+            self.camera_alive()
+            frames = self.feed.wait_frames(5, timeout=30)
+            if frames:
+                self.say("  The camera is back.")
+                return frames
+            self.say("  ... still no pictures (%d s left)" % max(0, round(end - time.time())))
+        self.st.save()
+        raise SystemExit("The overhead camera did not come back. Everything so far is saved; start the recorder on "
+                         "the Pi, then run the same command again and type y to carry on this session.")
+
     def fresh_floor(self):
         """A new floor memory from a few still pictures; every robot the runner knows of is marked on it."""
         frames = self.feed.wait_frames(10, timeout=8)
+        if not frames:
+            frames = self.wait_for_camera()
         known = {n: tuple(q[:2]) for n, q in self.st["positions"].items() if q}
         self.tracker.idle()
         self.tracker.clear_protect()
