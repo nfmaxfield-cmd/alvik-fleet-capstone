@@ -341,3 +341,11 @@ change stage, or stop. No timeout that carries on by itself (the stage waits; th
 explore for 0.5 h (the fix's first real test), --fit-max-rms-cm 2.5 (chosen) and battery.csv (driving Right
 against Left and Center idle, if still switched on). The first video's upload ran during it: picture age and the
 robots' round trips (clock_sync) with and without the upload are a WiFi-load comparison.
+
+**Battery log on by default (Nick, 2026-10-24).** battery.csv every 300 s in every session from now on (driving and
+idle robots, the phase): a few weeks of sessions answer the drain questions (driving against idle, per phase).
+
+**Next build: a virtual border (Nick, 2026-10-24).** A line some cm inside the open edges; a robot the camera sees
+past it stops every robot, and the session pauses and waits for Nick's answer on the live page. Design questions
+put to Nick the same evening (margin, all sessions or away only, explore before the camera is calibrated, a lost
+robot while driving, the robot's own check in the firmware).

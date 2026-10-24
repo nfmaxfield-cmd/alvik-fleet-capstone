@@ -5909,9 +5909,9 @@ def main(argv=None):
     ap.add_argument("--mark-accept-cm", type=float, default=0.0,
                     help="the tape marks keep the robots' camera calibration only within this (median; 0 = the "
                          "default, Runner.MARK_ACCEPT_CM)")
-    ap.add_argument("--battery-watch-s", type=float, default=0,
+    ap.add_argument("--battery-watch-s", type=float, default=300,
                     help="every this many seconds, log every switched-on robot's battery to battery.csv, driving or "
-                         "idle (0: off)")
+                         "idle (0: off; on by default, Nick 2026-10-24: weeks of it decide the drain questions)")
     ap.add_argument("--no-shift-watch", action="store_true",
                     help="do not measure or correct the camera's creep during the runs (CAM.CameraShiftWatch)")
     ap.add_argument("--marks", action="store_true",
