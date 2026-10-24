@@ -59,8 +59,13 @@ fi
 mkdir -p "$OUT" || { echo "Can't write to $OUT. Stopped."; exit 1; }
 free_gb=$(df -BG --output=avail "$OUT" | tail -1 | tr -dc 0-9)
 echo "Video goes to $OUT ($free_gb GB free)."
-if [ "${free_gb:-0}" -lt 12 ]; then
-  echo "Less than 12 GB free: a 2-hour session needs about 10 GB. Free some space first. Stopped."
+# space needed: about 3 GB an hour of video plus 1 GB to spare (session 1: 5.5 GB in 2 h); --hours sets it
+hours=2
+prev=""
+for a in "$@"; do [ "$prev" = "--hours" ] && hours="$a"; prev="$a"; done
+need_gb=$(python3 -c "import math,sys; print(int(math.ceil(3*float(sys.argv[1])+1)))" "$hours" 2>/dev/null || echo 7)
+if [ "${free_gb:-0}" -lt "$need_gb" ]; then
+  echo "Only $free_gb GB free; a $hours-hour session needs about $need_gb GB. Free some space first. Stopped."
   exit 1
 fi
 if [ ! -f "$HOME/.config/mirlt/github_token" ]; then
