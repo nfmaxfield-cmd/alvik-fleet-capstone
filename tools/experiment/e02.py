@@ -5217,6 +5217,8 @@ class Runner:
         done = []                                  # t_stop of the stops already fixed
         last = dict(i=0, dist=0.0, turned=0.0)     # the waypoint of the last fix (0: the start, from the find)
         wps = r.get("kc_waypoints") or []
+        fixed_wps = set()                          # 2026-10-24 dry run: 12 fixes at one far point (jitter moved
+        # t_stop, so each looked like a new stop) compounded towards the camera as the half-way blend had
         while not self.kc_stop.wait(period):
             recent = self.history.since(time.time() - 3.0)
             fx = kc_fix_from(recent)
@@ -5229,6 +5231,8 @@ class Runner:
             if own is None:
                 continue                          # the camera is not near any waypoint still ahead: not sure where
             i, (bx, by), dist, turned = own
+            if i in fixed_wps:
+                continue                          # one fix per waypoint: the camera's jitter is not a new stop
             bth = None
             cx, cy, csd = self.camerr.corrected(x, y)
             if self.quality.poor(x, y):
@@ -5250,6 +5254,7 @@ class Runner:
             self.send(robot, "fix %.2f %.2f %s %.3f" % (fxp, fyp, th, t_pic))
             n += 1
             done.append(t_stop)
+            fixed_wps.add(i)
             last.update(i=i)
             row = [round(time.time(), 2), robot, run, r.get("order", ""), round(t_stop, 2), round(bx, 2), round(by, 2),
                    round(x, 2), round(y, 2), round(cx, 2), round(cy, 2), round(csd, 2), round(dist, 1),
