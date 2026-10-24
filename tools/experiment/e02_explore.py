@@ -147,6 +147,13 @@ def _init(robots, size):
         T = mw - sc * R @ mp
         frames[n] = (float(T[0]), float(T[1]), math.degrees(math.atan2(R[1, 0], R[0, 0])))
         scales[n] = sc
+    return _pnp(robots, frames, scales, G, size)
+
+
+def _pnp(robots, frames, scales, G, size):
+    """From the robots' frames and wheel scales (any shared size): the shared scale set by the wheels' average,
+    then the camera by solvePnP over a range of focal lengths."""
+    names = list(robots)
     # the shared distance scale: the wheels averaged
     gm = math.exp(np.mean([math.log(max(1e-6, v)) for v in scales.values()]))
     scales = {n: v / gm for n, v in scales.items()}
@@ -180,6 +187,57 @@ def _init(robots, size):
     if best is None:
         raise ValueError("no camera pose puts the camera above the floor")
     return frames, scales, best, G
+
+
+def _init_prov(robots, size, h_cm=260.0, f_px=None):
+    """Start values without any one robot's homography (2026-10-23 real board: the reference robot's few stops,
+    nearly in a line, extrapolated badly to the others): the pixels laid on the floor as a camera straight overhead
+    would see them (a near-similarity of the truth for a camera looking roughly down), each robot's path (its
+    gyro scale from robot_check) fitted to that by a rigid fit with scale. Tries both handednesses."""
+    f_px = f_px or float(size[0])
+    names = list(robots)
+    best = None
+    for flip in (1.0, -1.0):
+        frames, scales, G, err = {}, {}, {}, 0.0
+        for n in names:
+            st = implausible(robots[n])
+            ok = np.array([not q.get("skip") for q in st])
+            if ok.sum() < 4:
+                continue
+            g = robot_check(robots[n]).get("g") or 1.0
+            p = np.array([(q[0], q[1]) for q in rebuild(st, 1.0, g)], float)[ok]
+            uv = np.array([(q["u"], q["v"]) for q in st], float)[ok]
+            w = np.column_stack([(uv[:, 0] - size[0] / 2) * h_cm / f_px, flip * (uv[:, 1] - size[1] / 2) * h_cm / f_px])
+            mp, mw = p.mean(0), w.mean(0)
+            P, Wc = p - mp, w - mw
+            if (P ** 2).sum() < 1e-6:
+                continue
+            U, S, Vt = np.linalg.svd(Wc.T @ P)
+            D = np.eye(2)
+            if np.linalg.det(U @ Vt) < 0:
+                D[1, 1] = -1
+            R = U @ D @ Vt
+            sc = float(np.trace(np.diag(S) @ D) / (P ** 2).sum())
+            T = mw - sc * R @ mp
+            err += float(np.sum(np.linalg.norm((sc * (R @ P.T)).T + mw - w, axis=1) ** 2))
+            frames[n] = (float(T[0]), float(T[1]), math.degrees(math.atan2(R[1, 0], R[0, 0])))
+            scales[n], G[n] = sc, g
+        if len(frames) == len(names) and (best is None or err < best[0]):
+            best = (err, frames, scales, G)
+    if best is None:
+        raise ValueError("too few stops for a start")
+    _, frames, scales, G = best
+    ref = names[0]
+    # the first robot's frame as the world frame: move everything into it
+    x0, y0, a0 = frames[ref]
+    s0 = scales[ref]
+    c, sn = math.cos(math.radians(-a0)), math.sin(math.radians(-a0))
+    fr2 = {}
+    for n, (x, y, a) in frames.items():
+        dx, dy = (x - x0) / s0, (y - y0) / s0
+        fr2[n] = (c * dx - sn * dy, sn * dx + c * dy, a - a0) if n != ref else (0.0, 0.0, 0.0)
+    sc2 = {n: v / s0 for n, v in scales.items()}
+    return _pnp(robots, fr2, sc2, G, size)
 
 
 MIN_PX_PER_CM = 0.4      # chosen: a camera 6x higher than any we would use still shows more than this
@@ -218,7 +276,7 @@ def fit(robots, size, g_fixed=None, outlier_px=10.0):
     First, before any fit: stops whose pixels cannot be the robot given its own wheels and gyro (implausible())."""
     robots = {n: implausible(v) for n, v in robots.items()}
     pre = sum(1 for v in robots.values() for q in v if q.get("skip"))
-    sol = fit_once(robots, size, g_fixed)
+    sol = best_fit(robots, size, g_fixed)
     sol["implausible"] = pre
     res = sol["resid"]
     allr = np.concatenate([res[n] for n in res]) if res else np.array([])
@@ -240,18 +298,35 @@ def fit(robots, size, g_fixed=None, outlier_px=10.0):
         sol["outliers"] = pre
         sol["skipped"] = {n: [i for i, q in enumerate(v) if q.get("skip")] for n, v in robots.items()}
         return sol
-    sol2 = fit_once(robots2, size, g_fixed)
+    sol2 = best_fit(robots2, size, g_fixed)
     sol2["implausible"] = pre
     sol2["outliers"] = n_out + pre
     sol2["skipped"] = {n: [i for i, q in enumerate(v) if q.get("skip")] for n, v in robots2.items()}
     return sol2
 
 
-def fit_once(robots, size, g_fixed=None):
+def best_fit(robots, size, g_fixed=None):
+    """fit_once from both starts (a homography through the best-seen robot; the pixels laid flat as from overhead):
+    the better fit."""
+    sols = []
+    for how in ("homography", "overhead"):
+        try:
+            init = None if how == "homography" else _init_prov(robots, size)
+            sol = fit_once(robots, size, g_fixed, init=init)
+            sol["init"] = how
+            sols.append(sol)
+        except (ValueError, np.linalg.LinAlgError, cv2.error):
+            continue
+    if not sols:
+        raise ValueError("no start value worked")
+    return min(sols, key=lambda q: q["rms_px"] if np.isfinite(q["rms_px"]) else 1e9)
+
+
+def fit_once(robots, size, g_fixed=None, init=None):
     """robots: {name: [stop dict(x, y, th (its own pose), u, v (pixels of its top))]}, in time order; the first
     robot's own frame is the world frame (the one the camera saw at most stops). Returns dict(f, k1, rvec, tvec, frames {name: (x0, y0, turn)},
     s {name}, g {name}, rms_px, n, per_robot_rms_px)."""
-    frames0, scales0, (_, f0, rv0, tv0), G0 = _init(robots, size)
+    frames0, scales0, (_, f0, rv0, tv0), G0 = init if init is not None else _init(robots, size)
     ref = next(n for n, fr in frames0.items() if fr == (0.0, 0.0, 0.0))
     names = [ref] + [n for n in robots if n != ref]      # the reference robot's frame is the world frame
     nr = len(names)
@@ -647,3 +722,71 @@ def size_scale(robots, sol, size):
         return None
     v = np.array(vals)
     return dict(ratio=round(float(np.median(v)), 4), n=len(v), sd=round(float(np.std(v)), 4))
+
+
+# ---- check before trust (Nick, 2026-10-23 evening: one robot's bad data must not spoil the calibration) ----
+ROBOT_RMS_MAX_PX = 20.0     # chosen: a robot's own path fits its pixels within this (simulator 0.5-7 px, the most
+                            # from its own drift over ~40 stops; a lens bend adds little: the real camera against a
+                            # flat-floor mapping, 0 px); a sanity bound against nonsense (2026-10-23: 136 px), not a
+                            # quality target, so a DOE would not help
+ROBOT_INLIERS_MIN = 0.7     # chosen: at least 70% of its stops within 3 x that
+GYRO_RANGE = (0.85, 1.25)   # chosen: real gyros read 91-95% of a turn (scale 1.05-1.10); outside this, something
+                            # other than the gyro is wrong (a wheel off the board, the tracker on something else)
+FIT_RMS_MAX_PX = 8.0        # chosen: the joint camera fit (simulator 1.5-4.5 px); a sanity bound like the above
+FIT_ROBOT_MAX_PX = 12.0     # chosen: one robot's stops against the joint fit (the robot check above is cruder: a
+                            # flat mapping cannot follow a robot's own drift over 50 stops, simulator up to 13 px)
+
+
+def robot_check(stops):
+    """One robot judged on its own: the gyro scale whose path a flat-floor mapping (homography) fits best, how well
+    it fits (robust rms, px, over the stops within 3 x ROBOT_RMS_MAX_PX), and the share of stops that fit. Returns
+    dict(ok, why, rms_px, g, inliers, n)."""
+    st = implausible(stops)
+    ok_m = np.array([not q.get("skip") for q in st])
+    n = int(ok_m.sum())
+    if n < 6:
+        return dict(ok=False, why="only %d stops the camera saw" % n, rms_px=None, g=None, inliers=0.0, n=n)
+    uv = np.array([(q["u"], q["v"]) for q in st], float)[ok_m]
+    best = None
+    for g in np.arange(0.75, 1.35, 0.005):
+        p = np.array([(q[0], q[1]) for q in rebuild(st, 1.0, g)], float)[ok_m]
+        if np.ptp(p[:, 0]) < 1e-6 and np.ptp(p[:, 1]) < 1e-6:
+            continue
+        H, _ = cv2.findHomography(p, uv, cv2.RANSAC, 3.0 * ROBOT_RMS_MAX_PX)
+        if H is None:
+            continue
+        e = np.linalg.norm(cv2.perspectiveTransform(p.reshape(-1, 1, 2), H).reshape(-1, 2) - uv, axis=1)
+        inl = e <= 3.0 * ROBOT_RMS_MAX_PX
+        if inl.sum() < 4:
+            continue
+        rms = float(np.sqrt(np.mean(e[inl] ** 2)))
+        key = (-inl.mean(), rms)
+        if best is None or key < best[0]:
+            best = (key, float(g), rms, float(inl.mean()))
+    if best is None:
+        return dict(ok=False, why="its path and its pixels have nothing in common", rms_px=None, g=None,
+                    inliers=0.0, n=n)
+    _, g, rms, share = best
+    why = []
+    if share < ROBOT_INLIERS_MIN:
+        why.append("only %.0f%% of its stops fit its own path" % (100 * share))
+    if rms > ROBOT_RMS_MAX_PX:
+        why.append("its stops fit its path only within %.1f px" % rms)
+    if not (GYRO_RANGE[0] <= g <= GYRO_RANGE[1]):
+        why.append("its gyro would have to be %.0f%% off" % (100 * abs(g - 1)))
+    return dict(ok=not why, why="; ".join(why), rms_px=round(rms, 2), g=round(g, 3), inliers=round(share, 3), n=n)
+
+
+def fit_check(sol, lo_s=-0.2, hi_s=0.2, lo_g=-0.3, hi_g=0.3):
+    """The joint fit, checked: its rms and no scale pinned at a bound (2026-10-23: wheel scales of 0.819 and 1.492
+    were the bounds, i.e. the fit had nowhere sensible to go). Returns '' or why not."""
+    why = []
+    if not np.isfinite(sol["rms_px"]) or sol["rms_px"] > FIT_RMS_MAX_PX:
+        why.append("the camera fit misses by %.1f px (limit %.0f)" % (sol["rms_px"], FIT_RMS_MAX_PX))
+    for n, v in sol["s"].items():
+        if not (lo_s + 0.01 < math.log(v) < hi_s - 0.01):
+            why.append("%s's wheel scale ran to its limit (%.3f)" % (n, v))
+    for n, v in sol["g"].items():
+        if not (lo_g + 0.01 < math.log(v) < hi_g - 0.01):
+            why.append("%s's gyro scale ran to its limit (%.3f)" % (n, v))
+    return "; ".join(why)

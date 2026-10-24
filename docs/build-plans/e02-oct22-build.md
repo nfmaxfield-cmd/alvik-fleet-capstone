@@ -168,3 +168,46 @@ with a wheel over an open edge; then every compass check failed). To build befor
 - **A failed compass check stops and asks** (it means a wheel is off the board or the robot cannot spin).
 - For the summary: the system doesn't trust any sensor it hasn't checked, the camera included, and one bad robot
   can't spoil the rest.
+
+### Built 2026-10-23 evening (after session 2's failed explore)
+**Why explore failed on the real board** (logs e02-20261023-183245, Nick's zip): (1) at an open edge the edge guard
+refused every turn after the stop, so each robot stayed with a wheel over the edge and its later rays were lost
+(Center spun its wheels 105 cm without moving); (2) the fit started from the best-seen robot's homography, whose
+stops lay nearly in a line, and the start fell apart for the robots further away. Each robot alone fitted its own
+pixels within 2.6-6.7 px: the data were good, the start was not.
+- After an edge stop the robot backs off 10 cm (blind) before turning (`EXPLORE_EDGE_BACK_CM`); a stop where the robot
+  had not left the edge is not a side point.
+- Wheels turning without the robot moving (found again where it was) count as no move: logged as slip.
+- A second start for the fit: the pixels laid flat as a camera overhead would see them, each robot's path fitted to
+  that; the better of the two starts is kept. **On the real data: 4.4 px (was 136), gyro scales 1.076-1.086, and
+  against the corner-click calibration 2.9 cm median (95%: 5.0 cm) turned and shifted only; with a 6% scale, 1.6 cm.**
+  Which of the two has the size right (wheels, or the corner clicks' guessed lens height) is not known yet.
+  Regression test: tests/test_e02_explore.py::test_real_board_explore_fits (data tests/data/explore_real_20261023.json).
+- Check before trust: each robot alone (`robot_check`: a flat mapping of its own path to its pixels, <= 20 px, 70% of
+  stops, gyro 0.85-1.25), then against the joint fit (<= 12 px); one that fails is left out of the camera
+  calibration, said, and found again with the new calibration. The joint fit must be <= 8 px with no scale at a
+  bound (`fit_check`).
+- Never end the session: if explore fails its checks, `explore_fallback` uses the calibration on hand (confirmed the
+  usual way) and says so: "!!! EXPLORE FAILED ... FALLING BACK", a line under every run, the session summary, and the
+  analysis report's first note. `calib_note()` also marks every run that used a calibration made before the session.
+- Explore ends with each robot driven back to where it started (its own wheels and gyro).
+- A failed compass check stops and asks (Enter to check again, `skip`, `stop`); automatic mode: once more, then
+  without it.
+- `--dry-explore-fail` (dry run) tests the fallback.
+
+**Item 3: board lines learned from the finds** (`learn_board_lines`): each finished board find adds where the camera
+saw the robot press each board; after 3 touches the line moves to their median (each robot's own steady difference
+taken out first, so one odd robot doesn't move a board), when 0.5 cm or more off, capped 8 cm from the picture's line;
+logged (`board_line_updates`, `robot_board_offsets`) and said. The robots' own differences are reported, not applied
+to their poses (they may be how the camera sees each robot's top; to check against the footage).
+**Open edges:** every edge-guard stop in an idle leg is logged (`edge_touches`) with the map's line and said in the
+session summary; not applied yet (first real edge stops tonight).
+
+**Item 4: confidence pauses** (`confidence_pause`, threshold `CONF_PAUSE_CM` 3 cm, Nick): own uncertainty
+0.5 + 1% of the distance + distance x (0.5 deg + 0.5% of the turn) since the last fix or find (chosen constants);
+before a drive that would pass 3 cm it stands and takes a camera fix. Logged in confidence.csv with the camera's
+correction (the check on the model). DOE: docs/experiments/DOE-confidence.md.
+
+**Item 5: late pictures** (`pictures_late` > 1 s): no confidence pause (no fresh picture to take); the robot drives on
+its own wheels and gyro, and after a leg the front sensor reading a board square on corrects its position along that
+board's axis (`board_correct`, sent as a fix, logged as `board_corrections`; at most 15 cm, else ignored).

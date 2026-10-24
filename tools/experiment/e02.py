@@ -129,6 +129,19 @@ FRONT_STEER_FACTOR = 1.5  # a disagreement this many tolerances, with a measured
 FRONT_LEARN_MIN = 8       # --front-learn: readings before the learned offset and tolerance are used
 FRONT_LEARN_MIN_TOL = 3.0
 FRONT_MIN_COS = 0.7       # the front-sensor check only counts boards met within 45 deg of head-on
+# Item 4 (Nick, 2026-10-23): confidence pauses. The robot's own position uncertainty (1 sd, cm) grows with what it
+# has driven and turned since its last camera fix or find; before a drive that would take it past the threshold it
+# stops and takes a fresh camera fix. Model constants chosen from session 1 (calibrated runs ~1.4 cm after ~200 cm):
+# wheel scale ~1% left after self-calibration, heading 0.5 deg + 0.5% of what it turned. The threshold: Nick 3 cm,
+# to be settled by a DOE (docs/experiments/DOE-confidence.md).
+CONF_PAUSE_CM = 3.0
+UNC_BASE_CM = 0.5
+UNC_PER_CM = 0.01
+UNC_DEG = 0.5
+UNC_DEG_PER_DEG = 0.005
+# Item 5 (Nick, 2026-10-23: option a): pictures older than this are "late": the robot drives on its own wheels and
+# gyro, and the front sensor reading a board square on corrects its position along that board's axis.
+LATE_PICTURE_S = 1.0
 FRONT_CHECK_RANGE_CM = 50.0  # the front-sensor check only counts things nearer than this
 FRONT_CHECK_CM = 6.0      # ... and says so when the sensor and the map differ by more
 EXPECT_TURN_CM = 7.0       # a robot turning on its spot stays within this of where it stood (camera's view)
@@ -300,8 +313,17 @@ class Listener:
 
 
 # =============================================================================== the runner
+EXPLORE_HOME_FRAC = 0.35       # chosen: explore ends this share of the way from its start towards its rays' middle
+EXPLORE_HOME_IN_CM = 30.0      # chosen: at most this far in from its start
+EXPLORE_EDGE_BACK_CM = 10.0   # chosen: clears the bottom zone's ~9 cm look-ahead past the edge
+
+
 class ExploreShort(Exception):
     """Explore's rays did not meet all four sides yet (more rays, then try again)."""
+
+
+class ExploreFailed(Exception):
+    """Explore's results did not pass their checks: the runner falls back to a calibration on hand."""
 
 
 class Runner:
@@ -345,6 +367,7 @@ class Runner:
         self.front_seen = {}                 # "all" -> [front reading - map distance]
         self.front_bad = {}                  # robot -> words: the last leg's front reading disagreed with the map
         self.fix_t = {}                      # robot -> when the camera last told it where it is
+        self.unc = {}                         # item 4: driven and turned since the last fix, per robot
         self.lost_place = set()              # robots that moved unseen with no trusted pose since (a failed own find)
 
     # --- talking ----------------------------------------------------------------------------------
@@ -610,7 +633,41 @@ class Runner:
         self.say("  %s did not start `%s`%s" % (robot, cmd, (": " + said[-1]) if said else ""))
         return None
 
-    def calibrate(self, robots):
+    def calibrate(self, robots, tries=0):
+        """The compass check, checked (Nick, 2026-10-23 evening: all three failed it with a wheel over an open edge
+        after explore, and the session carried on). A robot that fails it cannot be trusted to turn: the runner
+        stops and asks (put its wheels on the board, then Enter to try again; `skip` to go on without it; `stop`)."""
+        self._calibrate(robots)
+        failed = [r for r in robots if r not in self.unavailable and not self.compass_ok(r)]
+        if not failed:
+            return
+        self.say("  The compass check FAILED on %s. That usually means a wheel is off the board or it cannot "
+                 "spin freely (pressed against a board, or a robot)." % ", ".join(failed))
+        self.mark("e02 compass check failed %s" % ",".join(failed))
+        if self.a.auto:
+            if tries < 1:
+                self.say("  (automatic mode: trying once more)")
+                return self.calibrate(failed, tries + 1)
+            for r in failed:
+                self.unavailable.add(r)
+            self.say("  (automatic mode: going on without %s)" % ", ".join(failed))
+            return
+        ans = self.ask("  Put its wheels flat on the board, clear of the edges, then press Enter to check again "
+                       "(or type skip to go on without it, or stop to end): ", "").lower()
+        if ans.startswith("stop"):
+            raise SystemExit("Stopped at the compass check (Nick).")
+        if ans.startswith("skip"):
+            for r in failed:
+                self.unavailable.add(r)
+            self.say("  Going on without %s." % ", ".join(failed))
+            return
+        return self.calibrate(failed, tries + 1)
+
+    def compass_ok(self, robot):
+        rows = [c for c in self.st.get("calibrations") or [] if c[1] == robot]
+        return bool(rows) and str(rows[-1][3] or "").lower() in ("done", "ok")
+
+    def _calibrate(self, robots):
         """The compass check after power-on (`calibrate`, needed before find / e02 / gyro runs): spin and roll
         switched off, so it only wiggles in place on its park spot. All at once (each stays on its spot)."""
         robots = [r for r in robots if r not in self.unavailable]
@@ -646,6 +703,7 @@ class Runner:
         h = heading if heading is not None else self.heads.get(robot, [None])[0]
         self.send(robot, "fix %.2f %.2f %s %.3f" % (p[0], p[1], "-" if h is None else "%.1f" % h, time.time()))
         self.fix_t[robot] = time.time()
+        self.unc_reset(robot)
         time.sleep(0.15)
         return p
 
@@ -714,6 +772,103 @@ class Runner:
                 self.moves.pop(robot, None)
                 return "refused", "its camera-steered run ended (%s)" % self.watch.ended[m["run"]]["result"]
         return "lost", "no answer"
+
+    def unc_cm(self, robot, extra_go=0.0, extra_turn=0.0):
+        """The robot's own position uncertainty (1 sd, cm) since its last camera fix or find (item 4)."""
+        u = self.unc.setdefault(robot, dict(dist=0.0, turned=0.0))
+        d, t = u["dist"] + abs(extra_go), u["turned"] + abs(extra_turn)
+        return UNC_BASE_CM + UNC_PER_CM * d + d * math.radians(UNC_DEG + UNC_DEG_PER_DEG * t)
+
+    def unc_reset(self, robot):
+        self.unc[robot] = dict(dist=0.0, turned=0.0)
+
+    def pictures_late(self):
+        """Item 5: is the camera's newest picture older than LATE_PICTURE_S (or the last second's oldest)?"""
+        f = self.feed
+        t = getattr(f, "last_t", None) if f is not None else None
+        if t is not None and time.time() - t > LATE_PICTURE_S:
+            return True
+        rows = getattr(self, "perf_rows", None) or []
+        return bool(rows) and time.time() - rows[-1].get("t", 0) < 2.0 and rows[-1].get("age_max_s", 0) > LATE_PICTURE_S
+
+    def confidence_pause(self, robot, kind, val):
+        """Item 4: before a drive that would take its uncertainty past CONF_PAUSE_CM, stop and take a fresh camera
+        fix (it stands still for it). With the pictures late (item 5), no pause: it drives on its own sensors, and
+        the boards correct it. Every decision is logged (confidence_pauses in the state, confidence.csv)."""
+        if kind != "go":
+            return
+        now_sd, after_sd = self.unc_cm(robot), self.unc_cm(robot, extra_go=val)
+        if after_sd <= CONF_PAUSE_CM:
+            return
+        late = self.pictures_late()
+        own = self.own_pose(robot)
+        p = None if late else self.fix_now(robot)
+        corr = None if (p is None or own is None) else round(math.hypot(p[0] - own[0], p[1] - own[1]), 2)
+        what = "paused for a camera fix" if p is not None else (
+            "pictures late: drove on its own sensors" if late else "paused, but the camera did not see it")
+        if p is not None:
+            self.unc_reset(robot)
+        row = [round(time.time(), 2), robot, round(now_sd, 2), round(after_sd, 2), CONF_PAUSE_CM, what,
+               self.order or "", "" if corr is None else corr]
+        self.st.setdefault("confidence_pauses", []).append(row)
+        path = os.path.join(self.dir, "confidence.csv")
+        new = not os.path.exists(path)
+        with open(path, "a", newline="") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(["t", "robot", "sd_now_cm", "sd_after_cm", "threshold_cm", "what", "order",
+                            "correction_cm"])
+            w.writerow(row)
+        self.say("    %s: %s (its position uncertainty would reach %.1f cm, over %.0f)" % (
+            robot, what, after_sd, CONF_PAUSE_CM), quiet=True)
+
+    def edge_touch_log(self, robot, p, words, kind):
+        """Where an open edge stopped a robot (its edge guard), against the map's open edge: the edge's felt position
+        (the camera's position plus the cue's reach along its heading) for the edge nearest. Logged only for now
+        (edge_touches in the state, said in the session summary); it will move the open edges like the boards
+        (item 3) once real edge stops have been measured (none before 2026-10-23)."""
+        if kind != "go" or p is None or "plywood edge" not in (words or "") or self.board is None:
+            return
+        h = self.heads.get(robot, [None])[0]
+        if h is None:
+            return
+        fx, fy = MAP.contact_point(p[0], p[1], h, "edge", MAP.edge_cue(words))
+        a, v = min(self.board.open_edges(), key=lambda e: abs((fx if e[0] == "x" else fy) - e[1]))
+        felt = fx if a == "x" else fy
+        if abs(felt - v) > 15.0:
+            return
+        self.st.setdefault("edge_touches", []).append(
+            [round(time.time(), 1), robot, a, round(v, 2), round(felt, 2), MAP.edge_cue(words)])
+
+    def board_correct(self, robot, front, ahead, words):
+        """Item 5: pictures late, the front sensor reading a board square on: its position along that board's axis
+        is where the board line and the reading put it; the other coordinate and the heading stay its own. Sent as
+        a fix; logged (board_corrections)."""
+        own = self.own_pose(robot)
+        if own is None or ahead is None or "board" not in str(ahead[1]):
+            return None
+        off, tol = self.front_limits()
+        hd = own[2]
+        ux, uy = math.cos(math.radians(hd)), math.sin(math.radians(hd))
+        reach = front - off + PL.ROBOT_HALF_CM            # axle to the board along its heading
+        x, y = own[0], own[1]
+        if ahead[1] == "the y-board" and abs(ux) >= FRONT_MIN_COS:
+            x = self.board.yboard_cm - reach * ux
+        elif ahead[1] == "the x-board" and abs(uy) >= FRONT_MIN_COS:
+            y = self.board.xboard_cm - reach * uy
+        else:
+            return None
+        shift = math.hypot(x - own[0], y - own[1])
+        if shift > 15.0:
+            return None                                   # too far to be a correction: something else is ahead
+        self.send(robot, "fix %.2f %.2f %.1f %.3f" % (x, y, hd, time.time()))
+        self.unc_reset(robot)
+        self.st.setdefault("board_corrections", []).append(
+            [round(time.time(), 2), robot, ahead[1], round(front, 1), [round(v, 1) for v in own], [round(x, 1), round(y, 1)],
+             round(shift, 2)])
+        self.say("    %s: pictures late; its front sensor on %s corrected it %.1f cm" % (robot, ahead[1], shift),
+                 quiet=True)
+        return (x, y)
 
     def front_check(self, robot, p, words, kind, val):
         """Nick, 2026-10-22: the front sensor as a free check of the position. After every finished leg the firmware
@@ -859,6 +1014,8 @@ class Runner:
                     words = "refused (no room to back up: %s)" % bad
                     break
                 self.fix_now(robot)
+            if robot in self.moves:
+                self.confidence_pause(robot, kind, v)
             for attempt in range(2):
                 if robot not in self.moves and not self.begin_moves(robot):
                     return p0, p0, "could not start camera-steered moves"
@@ -881,8 +1038,22 @@ class Runner:
                 break
         time.sleep(0.25)
         self.main_lid[robot] = self.last_lid.get(robot)
+        u = self.unc.setdefault(robot, dict(dist=0.0, turned=0.0))
+        if kind == "go":
+            u["dist"] += abs(val)
+        else:
+            u["turned"] += abs(val)
         p1 = self.settle(t_from=time.time() - 0.6, min_s=0.3, timeout=2.0)
+        if p1 is None and self.pictures_late():
+            own = self.own_pose(robot)
+            fc = self.front_check(robot, own[:2], words, kind, val) if own else None
+            if fc and fc[1] is not None and fc[1][0] <= FRONT_CHECK_RANGE_CM and self.square_on(fc[1]):
+                q = self.board_correct(robot, fc[0], fc[1], words)
+                if q is not None:
+                    p1 = q
+            return p0, p1, words
         self.front_check(robot, p1, words, kind, val)
+        self.edge_touch_log(robot, p1, words, kind)
         # only a leg that really ran is checked: a refused one leaves last_lid at the leg before, whose wheel
         # distance would be compared again (2026-10-22 20:00: a back-off refused at the open edge -> refind ->
         # back-off refused -> ... "the camera saw it move 0 cm, its wheels say 72 cm" once a second, forever)
@@ -1990,6 +2161,14 @@ class Runner:
             setup["explore_pending"] = True
             st.save()
             return
+        self.classic_calibration(img)
+
+    def classic_calibration(self, img):
+        """The camera calibration from a file (the studio's, the corner clicks, or one made here from the board's
+        corners), confirmed by Nick's look at the green outline; then the blocked boards from the picture. Used with
+        --classic-setup, and as explore's fallback (explore_fallback)."""
+        a, st = self.a, self.st
+        setup = st["setup"]
         cal = st.get("calibration")
         if not cal or not os.path.exists(cal):
             cal = None
@@ -2029,6 +2208,9 @@ class Runner:
             else:
                 setup["calibration_made_here"] = dict(corners=corners, err_cm=res["err_cm"], text=res["text"])
         st["calibration"] = cal
+        if not (st["setup"].get("calibration_source") or {}).get("kind"):
+            st["setup"]["calibration_source"] = dict(kind="file", file=cal, session=False,
+                                                     words="%s, not made by the robots this session" % os.path.basename(cal))
         self.cam = CAM.load_camera(cal)
         self.make_tracker()
         st.save()
@@ -2266,6 +2448,14 @@ class Runner:
                     p2 = self.settle(min_s=0.3) or q
                     u, v = self.cam.project((p2[0], p2[1], EX.ROBOT_TOP_CM))
                     skip = bool(self.explore_implausible(obs[robot][-1], d, u, v))
+                    if skip and abs(d) >= 8.0 and math.hypot(u - obs[robot][-1]["u"], v - obs[robot][-1]["v"]) < 6.0:
+                        # found where it was: the tracker was right and the wheels turned without moving it (a
+                        # wheel over an edge, or slipping): the leg moved it nowhere
+                        self.say("    %s: its wheels turned %.0f cm but it did not move (slip, or a wheel off the "
+                                 "board): that leg counts as no move" % (robot, abs(d)))
+                        self.st.setdefault("explore_slips", []).append([round(time.time(), 1), robot, round(d, 1)])
+                        x = y = d = 0.0
+                        skip = False
                 else:
                     skip = True
                 self.st.setdefault("explore_refinds", []).append(
@@ -2346,6 +2536,7 @@ class Runner:
                 self.explore_stop(n, obs, lid, turn_cmd=val if kind == "turn" else None)
             self.say("  %s: %d rays out until it feels a board or an edge, and back ..." % (n, self.EXPLORE_RAYS))
             self.explore_rays(n, obs, 0.5)
+            self.explore_home(n, obs)
             self.moves.pop(n, None)
             p = self.settle(min_s=0.3)
             if p:
@@ -2357,6 +2548,8 @@ class Runner:
         self.say("  fitting the camera and the board from %d stops ..." % sum(len(v) for v in obs.values()))
         try:
             return self.explore_finish(names, obs, t0, last_try=False)
+        except ExploreFailed as e:
+            return self.explore_fallback(names, str(e))
         except ExploreShort as e:
             # a side no ray met: more rays, between the first ones (Nick puts the robots down anywhere: three near
             # one side leave the far side unmet)
@@ -2369,6 +2562,7 @@ class Runner:
                 self.history.clear()
                 self.tracker.hold(HOLD_CM)
                 self.explore_rays(n, obs, 0.0)
+                self.explore_home(n, obs)
                 self.moves.pop(n, None)
                 p = self.settle(min_s=0.3)
                 if p:
@@ -2376,7 +2570,82 @@ class Runner:
                     self.tracker.park(n, p[0], p[1])
             st["setup"]["explore_obs"] = obs
             st.save()
-            return self.explore_finish(names, obs, t0, last_try=True)
+            try:
+                return self.explore_finish(names, obs, t0, last_try=True)
+            except ExploreFailed as e2:
+                return self.explore_fallback(names, str(e2))
+
+    def explore_fallback(self, names, why):
+        """Explore's results failed their checks: never end the session over it (Nick, 2026-10-23 evening). The
+        best calibration on hand is used instead (the studio's, or the corner clicks), confirmed the usual way, and
+        it is said plainly, here, on every run's line, in the session summary and in the analysis."""
+        st = self.st
+        self.mark("e02 explore failed")
+        self.say("")
+        self.say("!!! EXPLORE FAILED: %s." % why)
+        self.say("!!! FALLING BACK to a camera calibration not made by the robots (the studio's, the corner clicks, or "
+                 "the board's corners). Every run will say so.")
+        st["setup"]["explore_failed"] = dict(why=why, t=round(time.time(), 1))
+        self.exploring = False
+        old_tr = self.tracker
+        self.tracker = None
+        if old_tr is not None:
+            old_tr.idle()
+        st["calibration"] = None
+        st["board"] = None
+        img = self.feed.wait_frames(5, timeout=8)[-1]
+        self.classic_calibration(img)
+        st["setup"]["calibration_source"] = dict(kind="fallback", file=st["calibration"], session=False, why=why,
+                                                 words="FALLBACK: %s, not made by the robots (explore failed: %s)"
+                                                 % (os.path.basename(st["calibration"] or "?"), why))
+        st["setup"]["explore_pending"] = False
+        st.save()
+        self.find_all(names)
+        return None
+
+    def calib_note(self):
+        """'' when the camera calibration was made this session by the robots; else words saying which older one is
+        used (Nick: "make it explicitly clear to me if old calibration data is used to complete a run")."""
+        src = (self.st.get("setup") or {}).get("calibration_source") or {}
+        if src.get("session"):
+            return ""
+        if src.get("kind") == "fallback":
+            return "camera calibration: FALLBACK, %s (explore failed)" % os.path.basename(src.get("file") or "?")
+        cal = self.st.get("calibration")
+        return "camera calibration: %s, not made by the robots this session" % (os.path.basename(cal) if cal else "none")
+
+    def explore_home(self, n, obs):
+        """Back to where it started exploring, on its own wheels and gyro (Nick, 2026-10-23 evening: the robots
+        ended explore with a wheel over an open edge, and every compass check after failed). Its own path from its
+        legs (no camera: the camera is not calibrated yet); the edge guard and front stop still on."""
+        if len(obs[n]) < 2:
+            return
+        path = EX.rebuild(obs[n], 1.0, 1.0)
+        x, y, th = path[-1]
+        # a little towards the middle of what it met (its ray ends, in its own frame), from where it started: away
+        # from the edges it started near, but not so far that the robots crowd together (2026-10-23 dry run: back
+        # at its start, 9 cm from an open edge, it could not park)
+        ends = [(p_[0], p_[1]) for p_, q in zip(path, obs[n]) if q.get("contact")]
+        tx = ty = 0.0
+        if len(ends) >= 3:
+            cx, cy = float(np.mean([e[0] for e in ends])), float(np.mean([e[1] for e in ends]))
+            k = min(EXPLORE_HOME_IN_CM, math.hypot(cx, cy) * EXPLORE_HOME_FRAC) / max(1e-6, math.hypot(cx, cy))
+            tx, ty = cx * k, cy * k
+        x, y = x - tx, y - ty
+        dist = math.hypot(x, y)
+        if dist < 3.0:
+            return
+        turn = ST.wrap180(math.degrees(math.atan2(-y, -x)) - th)
+        if abs(turn) > 150.0:
+            state, info, lid = self.explore_leg(n, "turn", turn / 2.0)
+            self.explore_stop(n, obs, lid, turn_cmd=turn / 2.0)
+            turn /= 2.0
+        state, info, lid = self.explore_leg(n, "turn", turn)
+        self.explore_stop(n, obs, lid, turn_cmd=turn)
+        state, info, lid = self.explore_leg(n, "go", min(dist, self.EXPLORE_RAY_CM), timeout=40.0)
+        self.explore_stop(n, obs, lid)
+        self.say("    %s: back near where it started exploring, a little towards the middle (%.0f cm by its own wheels)"
+                 % (n, dist), quiet=True)
 
     def explore_rays(self, n, obs, offset):
         """EXPLORE_RAYS rays for robot n, at (k + offset) x 360 / EXPLORE_RAYS deg in its own frame, each out until
@@ -2401,7 +2670,16 @@ class Runner:
                 o["cue"] = MAP.edge_cue(fin.get("info"))
             self.say("    ray %d: %s" % (k + 1, {"edge": "an open edge", "board": "a board (or a robot)"}.get(
                 kind, "nothing met")), quiet=True)
-            back = abs(o["d"]) if o else 0.0
+            if o is not None and kind and abs(o["d"]) < 2.0:
+                o.pop("contact", None)            # it was already there (it never left the edge): not a new side point
+            if kind == "edge":
+                # back off the edge first, blind (2026-10-23 real board: at an open edge the edge guard refused every
+                # turn after it, the robot stayed with a wheel over the edge, and the rest of its rays were lost)
+                state, info, lid = self.explore_leg(n, "go", -EXPLORE_EDGE_BACK_CM)
+                bo = self.explore_stop(n, obs, lid)
+                if o is not None and bo is not None:
+                    o["d_back"] = bo["d"]
+            back = abs(o["d"]) + (o.get("d_back") or 0.0) if o else 0.0
             if back > 1.0:
                 # back the way it came: (nearly) a half turn, then forward (175 deg: a 180 is ambiguous, the robot
                 # sometimes goes round the other way and reports +-180 alike: 2026-10-23 dry run); (backing up is blind and needs camera fixes,
@@ -2418,7 +2696,37 @@ class Runner:
             raise SystemExit("Explore: too few stops seen by the camera to work anything out. Start again with "
                              "--classic-setup to use a calibration file.")
         size = (self.feed.last_img.shape[1], self.feed.last_img.shape[0])
+        # check before trust: each robot's own path against its own pixels, alone (one robot's bad data, a wheel
+        # off the board or the tracker on something else, must not bend everyone's calibration)
+        checks = {n: EX.robot_check(v) for n, v in robots.items()}
+        st["setup"]["explore_robot_checks"] = checks
+        for n, c in checks.items():
+            self.say("  %s: %s" % (n, "its camera path fits its own wheels and gyro within %.1f px (gyro scale %.3f): "
+                                      "used" % (c["rms_px"], c["g"]) if c["ok"] else
+                                   "LEFT OUT of the camera calibration: %s" % c["why"]))
+        left_out = [n for n in robots if not checks[n]["ok"]]
+        robots = {n: v for n, v in robots.items() if checks[n]["ok"]}
+        if not robots:
+            raise ExploreFailed("no robot's camera path fitted its own wheels and gyro")
         sol = EX.fit(robots, size)
+        # then each robot against the joint fit: one whose stops the shared camera misses by more than
+        # FIT_ROBOT_MAX_PX is left out and the rest fitted again (once)
+        worse = [n for n, v in sol["per_robot_rms_px"].items() if not (v <= EX.FIT_ROBOT_MAX_PX)]
+        if worse and len(worse) < len(robots):
+            for n in worse:
+                self.say("  %s: LEFT OUT of the camera calibration: the shared camera misses its stops by %.1f px" % (
+                    n, sol["per_robot_rms_px"][n]))
+                checks[n] = dict(checks[n], ok=False, why="joint fit %.1f px" % sol["per_robot_rms_px"][n])
+                left_out.append(n)
+            robots = {n: v for n, v in robots.items() if n not in worse}
+            sol = EX.fit(robots, size)
+        bad = EX.fit_check(sol) or ("forced to fail (--dry-explore-fail)" if getattr(self.a, "dry_explore_fail", False)
+                                    and getattr(self.a, "dry_run", False) else "")
+        if bad:
+            self.say("  camera fit: %.1f px rms; wheel scales %s; gyro scales %s" % (
+                sol["rms_px"], ", ".join("%s %.3f" % kv for kv in sol["s"].items()),
+                ", ".join("%s %.3f" % kv for kv in sol["g"].items())))
+            raise ExploreFailed(bad)
         pts = EX.contacts(robots, sol)
         sd = pts
         rect = EX.rectangle_from_rays(pts)
@@ -2433,7 +2741,7 @@ class Runner:
                    n=sol["n"], per_robot_rms_px={n: round(v, 2) for n, v in sol["per_robot_rms_px"].items()},
                    contacts=len(pts), sides=len(sd), minutes=round((time.time() - t0) / 60.0, 1),
                    edge_ahead_cm=None if edge_ahead is None else round(edge_ahead, 2),
-                   outliers=sol.get("outliers", 0), size_check=EX.size_scale(robots, sol, size))
+                   outliers=sol.get("outliers", 0), size_check=EX.size_scale(robots, sol, size), left_out=left_out)
         st["setup"]["explore"] = rep
         self.say("  camera fit: %.1f px rms over %d stops; wheel scales %s; gyro scales %s" % (
             sol["rms_px"], sol["n"], ", ".join("%s %.3f" % kv for kv in sol["s"].items()),
@@ -2452,9 +2760,8 @@ class Runner:
             raise ExploreShort("the rays did not show all four sides as two open edges and two boards")
         if bf is None:
             st.save()
-            raise SystemExit("Explore: the rays did not show all four sides as two open edges and two boards (%d "
-                             "sides from %d points). Start again (robots placed more in the middle), or with "
-                             "--classic-setup." % (len(sd), len(pts)))
+            raise ExploreFailed("the rays did not show all four sides as two open edges and two boards (%d points)"
+                                % len(pts))
         rep.update(W=round(bf["W"], 2), H=round(bf["H"], 2), kinds=bf["kinds"], spreads={
             k: round(v, 2) for k, v in bf["spreads"].items()}, side_points=bf["n"])
         self.say("  the board: %.1f x %.1f cm (two open edges, two boards); sides fitted within %s cm" % (
@@ -2502,7 +2809,12 @@ class Runner:
             self.fix_now(n, self.heads[n][0])              # the robot's own frame becomes the board's
             self.tracker.park(n, q[0], q[1])
         st["setup"]["explore_pending"] = False
+        st["setup"]["calibration_source"] = dict(kind="explore", file=path, session=True,
+                                                 words="made by the robots this session (explore)")
         st.save()
+        if left_out:
+            self.say("  finding %s with the new calibration (left out of it) ..." % ", ".join(left_out))
+            self.find_all(left_out)
         self.mark("e02 explore end")
         self.say("  explore done in %.1f min: the camera is calibrated and the board mapped by the robots." % rep["minutes"])
         return rep
@@ -3523,6 +3835,8 @@ class Runner:
         if getattr(self.a, "edge_find", False) or self.board.missing:
             return self.edge_find(robot, order)
         out = self.do_board_find(robot, order)
+        if out.get("ok") and out.get("board_lines"):
+            self.learn_board_lines(robot, out["board_lines"])
         why = "%s %s %s" % (out.get("result"), out.get("runend"), self.listener.latest("FIND", robot, out["t0"]) or "")
         if not out["ok"] and "plywood edge" in why:
             self.say("    %s: an open edge where the map has a board: finding itself against any two boundaries "
@@ -3531,6 +3845,61 @@ class Runner:
             ef["board_find"] = out
             return ef
         return out
+
+    BOARD_LEARN_MIN_N = 3          # chosen: three touches before a board line moves (one odd touch must not)
+    BOARD_LEARN_STEP_CM = 0.5      # chosen: smaller differences are left (the camera's own noise)
+    BOARD_LEARN_CAP_CM = 8.0       # Nick, 2026-10-23: never more than 8 cm from the picture's line
+    BOARD_LEARN_LAST = 30          # the newest touches only (a board bumped mid-session is followed)
+
+    def learn_board_lines(self, robot, lines):
+        """Item 3 (Nick, 2026-10-23: option (a) revised): the map's board lines move to where the robots feel them.
+        Session 1: every robot touched both boards ~4 cm before its own pose expected, the same at every find: the
+        map's lines, not the robots. Each finished board find adds where the camera saw it press against each board;
+        each robot's steady difference from the others is learned too (its own residual, median of its touches
+        against everyone's) and taken out before the shared line is formed, so one robot's oddity does not move
+        the board; it is reported per robot (not applied to its pose: it may be how the camera sees that robot's
+        top, not where the robot is; to be checked against the footage). The line moves after BOARD_LEARN_MIN_N
+        touches when the difference is BOARD_LEARN_STEP_CM or more, capped at BOARD_LEARN_CAP_CM from the
+        picture's line; every move is logged (board_line_updates) and said."""
+        st = self.st
+        tl = st.setdefault("board_touches", [])
+        for which, v in lines.items():
+            tl.append([round(time.time(), 1), robot, which, round(float(v), 2)])
+        img = (st["setup"].get("board_lines_image") or {})
+        res_all = st.setdefault("robot_board_offsets", {})
+        for which in ("x", "y"):
+            rows = [r for r in tl if r[2] == which][-self.BOARD_LEARN_LAST:]
+            if len(rows) < self.BOARD_LEARN_MIN_N:
+                continue
+            med = float(np.median([r[3] for r in rows]))
+            # each robot's own steady difference from everyone's line
+            res = {}
+            for n in {r[1] for r in rows}:
+                mine = [r[3] - med for r in rows if r[1] == n]
+                if len(mine) >= 2:
+                    res[n] = float(np.median(mine))
+                    res_all.setdefault(n, {})[which] = round(res[n], 2)
+            line = float(np.median([r[3] - res.get(r[1], 0.0) for r in rows]))
+            pic = (img.get(which) or {}).get("value")
+            if pic is not None:
+                line = min(pic + self.BOARD_LEARN_CAP_CM, max(pic - self.BOARD_LEARN_CAP_CM, line))
+            cur = self.board.xboard_cm if which == "x" else self.board.yboard_cm
+            if abs(line - cur) < self.BOARD_LEARN_STEP_CM:
+                continue
+            if which == "x":
+                self.board.xboard_cm = line
+            else:
+                self.board.yboard_cm = line
+            st.setdefault("board_line_updates", []).append(
+                dict(t=round(time.time(), 1), board=which, before=round(cur, 2), after=round(line, 2),
+                     picture=pic, touches=len(rows), robot_offsets={k: round(v, 2) for k, v in res.items()}))
+            self.say("    the %s-board's line moved %+.1f cm to where the robots feel it (%.2f cm; %d touches%s)" % (
+                which, line - cur, line, len(rows), "; robots' own differences: " + ", ".join(
+                    "%s %+.1f" % kv for kv in sorted(res.items())) if res else ""))
+            self.mark("e02 board line %s %.2f" % (which, line))
+        st["board"] = self.board.to_dict()
+        self.tracker_area()
+        st.save()
 
     def do_board_find(self, robot, order):
         """A camera fix (the firmware wants one before every find), then `run find`, and the camera's view of
@@ -3900,6 +4269,9 @@ class Runner:
         print("")
         self.say("=== Run %d of %d (block %d): %s, %s (%s), route %s | %s in, about %s left ===" % (
             done + 1, total, r["block"], robot, cond, PL.COND_WORDS[cond], PL.ROUTE_NAMES[route], hms(el), hms(left)))
+        if self.calib_note():
+            self.say("    (%s)" % self.calib_note())
+            r["calibration"] = self.calib_note()
         if self.last_result:
             self.say("    last result: " + self.last_result)
         r["status"] = "running"
@@ -4451,6 +4823,25 @@ class Runner:
         self.say("=== Session: %d runs done, %d failed, %d still to do ===" % (
             len(done), sum(1 for r in st["schedule"] if r["status"] == "failed"),
             sum(1 for r in st["schedule"] if r["status"] == "pending")))
+        et = st.get("edge_touches") or []
+        for a in ("x", "y"):
+            v = [r[4] - r[3] for r in et if r[2] == a]
+            if v:
+                self.say("  Open edge %s: felt %+.1f cm from the map's line (median of %d edge stops; logged, not yet "
+                         "applied)" % (a, float(np.median(v)), len(v)))
+        if st.get("board_line_updates"):
+            last = {u["board"]: u for u in st["board_line_updates"]}
+            for b, u in sorted(last.items()):
+                self.say("  The %s-board's line ended at %.2f cm (the picture said %s): moved to where the robots feel "
+                         "it" % (b, u["after"], u["picture"]))
+        if st.get("confidence_pauses"):
+            cp = st["confidence_pauses"]
+            self.say("  Confidence pauses: %d (%d with a camera fix; threshold %.1f cm)" % (
+                len(cp), sum(1 for r in cp if r[5].startswith("paused for")), CONF_PAUSE_CM))
+        if st.get("board_corrections"):
+            self.say("  Pictures late: the front sensor on a board corrected a robot %d times" % len(st["board_corrections"]))
+        self.say("  Camera calibration for every run: %s" % (
+            ((st.get("setup") or {}).get("calibration_source") or {}).get("words") or st.get("calibration") or "?"))
         for cond in PL.CONDITIONS:
             e = [r["end_err_cm"] for r in done if r["cond"] == cond and r.get("end_err_cm") is not None]
             f = [r["far_err_cm"] for r in done if r["cond"] == cond and r.get("far_err_cm") is not None]
@@ -4587,6 +4978,8 @@ def main(argv=None):
                                                              "measured precision this session")
     ap.add_argument("--gap-k", type=float, default=None, help="tight gap: room = half the robot + k x the 95th "
                                                               "percentile of its measured error (default 1.0)")
+    ap.add_argument("--dry-explore-fail", action="store_true", help="dry run: explore's fit check always fails "
+                    "(tests the fallback to a calibration on hand)")
     ap.add_argument("--dry-remove-board", default="", help="dry run: the remove-a-board test: 'x@600' takes the x "
                     "board away 600 s after the start, without telling the runner")
     ap.add_argument("--dry-bricks", default="", help="dry run: the bricks the simulator puts down when asked, "

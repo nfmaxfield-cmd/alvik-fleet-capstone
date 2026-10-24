@@ -2012,6 +2012,12 @@ def analyse(recording, logs, runs, calib, out, background=None, bump_frame="auto
     if not vc:
         notes.append("No laptop-to-camera clock offset (no video_clock.json, no pi_offset_s): robot times were not mapped "
                      "to the camera clock, so bumps were matched by order, not time.")
+    src = ((_state(session).get("setup") or {}).get("calibration_source") or {}) if session else {}
+    if src and not src.get("session"):
+        notes.insert(0, "**Camera calibration: %s.** Positions in this session were measured with a calibration "
+                        "the robots did not make this session." % src.get("words", "made before this session"))
+    elif src:
+        notes.insert(0, "Camera calibration: %s." % src.get("words"))
     setup = setup_recovery(session, out, video.events or None) if session else None
     write_report(os.path.join(out, "report.md"), rows, bumps, summ, comps, charts, notes, setup=setup)
     return dict(rows=rows, bumps=bumps, summary=summ, comparisons=comps, charts=charts, setup=setup)

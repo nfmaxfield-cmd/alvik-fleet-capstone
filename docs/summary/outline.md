@@ -111,3 +111,9 @@ argument (minimal labour, infrastructure and know-how; better data of any type r
 - (18:28) The Fable review also covers the methodology, not only the data: experimental design, controls,
   measurement truth, statistics, threats to validity; and it suggests directions that would impress professors and
   could lead toward a publication (what is novel here, what experiment would make it publishable, which venues).
+- (19:06) Versatility point for the summary: the system doesn't trust any sensor it hasn't checked, the camera
+  included, and one bad robot can't spoil the rest (each robot's data checked alone and against the shared fit;
+  a failed calibration falls back to the one on hand, said plainly on every run).
+- (19:40) Session 2's explore, failure with its plan: robots stuck at the first open edge (the edge guard refused
+  turns there) and a poor start for the fit. Fixed; on the same real data the robots' calibration now agrees with
+  the corner clicks to 2.9 cm median (scale 6% apart: which one is right is still open). To be re-run on the board.

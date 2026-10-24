@@ -125,3 +125,27 @@ def test_explore_recovers_camera_scales_and_board(cam, stuck):
     bf, med, mx = floor_error(cam, sol)
     assert abs(bf["W"] - W) < 4 and abs(bf["H"] - H) < 4
     assert med < 2.0 and mx < 5.0
+
+
+def test_real_board_explore_fits():
+    """2026-10-23 session 2 on the real board: the fit failed (136 px) from a poor start (the reference robot's few
+    stops nearly in a line). With the overhead-style start it must pass its own checks and agree with the corner-click
+    calibration (turned and shifted only) within a few cm on the stops it used."""
+    import json
+    d = json.load(open(os.path.join(HERE, "data", "explore_real_20261023.json")))
+    obs = d["explore_obs"]
+    sol = X.fit(obs, (640, 480))
+    assert X.fit_check(sol) == ""
+    for n in obs:
+        assert X.robot_check(obs[n])["ok"], n
+    ref = CAM.load_camera(CALIB)
+    W, T = [], []
+    for n, v in obs.items():
+        for (x, y, _), q, r in zip(X.to_world(X.rebuild(v, sol["s"][n], sol["g"][n]), sol["frames"][n]), v, sol["resid"][n]):
+            if r < 10:
+                W.append((x, y))
+                T.append(ref.to_floor(q["u"], q["v"], X.ROBOT_TOP_CM))
+    import explore_check as EC
+    s_, R, t = EC.umeyama(np.array(W), np.array(T), False)
+    dist = np.linalg.norm((R @ np.array(W).T).T + t - np.array(T), axis=1)
+    assert len(W) > 80 and np.median(dist) < 4.0
