@@ -157,6 +157,9 @@ def main():
     ap.add_argument("--recordings", required=True, help="the folder the recorder saved into")
     ap.add_argument("--session", default="", help="the runner's session folder (default: the newest logs/e02-*)")
     ap.add_argument("--stop-recorder", action="store_true")
+    ap.add_argument("--logs-only", action="store_true", help="only the session folder (between the sessions of a plan)")
+    ap.add_argument("--no-logs", action="store_true", help="only the recording (the end of a plan)")
+    ap.add_argument("--tag", default="", help="the release's tag (default: e02-session-<the session's date-time>)")
     a = ap.parse_args()
     if a.stop_recorder:
         stop_recorder()
@@ -167,19 +170,20 @@ def main():
     sess = a.session or max((d for d in glob.glob(os.path.join(REPO, "logs", "e02-*")) if "-dryrun" not in d),
                             key=os.path.getmtime, default="")
     recs = sorted((d for d in glob.glob(os.path.join(a.recordings, "*")) if os.path.isdir(d)), key=os.path.getmtime)
-    rec = recs[-1] if recs else ""
+    rec = "" if a.logs_only else (recs[-1] if recs else "")
     if not sess:
         raise SystemExit("No session folder found under logs/.")
     name = os.path.basename(sess)
-    tag = "e02-session-" + name.replace("e02-", "")
+    tag = a.tag or ("e02-session-" + name.replace("e02-", ""))
     print("Uploading %s and recording %s to release %s" % (name, os.path.basename(rec) or "(none)", tag), flush=True)
     rel = release_for(tag, tok, "Session %s, uploaded from the Pi at the end of the session (tools/pi/upload_session.py)."
                       " Video parts: join them in order (cat video.avi.part-* > video.avi)." % name)
     have = {x["name"] for x in rel.get("assets", [])}
     tmp = os.path.join(os.path.dirname(a.recordings.rstrip("/")), ".upload-tmp")
     os.makedirs(tmp, exist_ok=True)
-    z = zip_folder(sess, os.path.join(tmp, "logs-%s.zip" % name))
-    upload(rel, os.path.basename(z), z, tok, have=have)
+    if not a.no_logs:
+        z = zip_folder(sess, os.path.join(tmp, "logs-%s.zip" % name))
+        upload(rel, os.path.basename(z), z, tok, have=have)
     if rec:
         z = zip_folder(rec, os.path.join(tmp, "rec-%s-small.zip" % os.path.basename(rec)), small_only=True)
         upload(rel, os.path.basename(z), z, tok, have=have)
