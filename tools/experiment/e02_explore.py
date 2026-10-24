@@ -662,7 +662,7 @@ def refine_edges(rect, nominal_ahead_cm, lo_cm=0.0, hi_cm=16.0, min_spread=0.3):
 SWERVE_DEG = 3.0     # chosen: a straight ray that turned more than this by the time it stopped
 
 
-def contacts(robots, sol, robot_clear_cm=16.0, ahead=None):
+def contacts(robots, sol, robot_clear_cm=22.0, ahead=None):
     """The rays' contact points in the world frame: [(x, y, kind, heading deg)]. A ray stopped by another robot is
     left out: where that robot stood at that moment (its last stop before then, or its first one if it had not
     moved yet: 2026-10-23 dry run, Center's ray met Right, which had not explored yet, and only robots' end places
@@ -789,4 +789,32 @@ def fit_check(sol, lo_s=-0.2, hi_s=0.2, lo_g=-0.3, hi_g=0.3):
     for n, v in sol["g"].items():
         if not (lo_g + 0.01 < math.log(v) < hi_g - 0.01):
             why.append("%s's gyro scale ran to its limit (%.3f)" % (n, v))
+    return "; ".join(why)
+
+
+SIDE_MIN_POINTS = 2         # chosen: a side from one ray end is a guess (2026-10-23 dry run: a robot taken for a board)
+SIDE_NEAR_CM = 6.0          # chosen: a ray end this near its side's median agrees with it (simulator spread 0-8 cm)
+SIDE_KIND_SHARE = 0.66      # chosen: two thirds of the agreeing ray ends agree on what it is (board or edge)
+
+
+def rect_check(rect):
+    """The board's four sides, checked before they are trusted: at least SIDE_MIN_POINTS ray ends near each side's
+    line, at least half of the side's ray ends among them (one stray end, e.g. a robot met, is allowed), and two
+    thirds of those agreeing on what the side is. Returns '' or why not."""
+    a = math.radians(rect["angle_deg"])
+    ca, sa = math.cos(-a), math.sin(-a)
+    why = []
+    for name, (v, sd) in rect["lines"].items():
+        pts = sd.get("pts") or []
+        if len(pts) < SIDE_MIN_POINTS:
+            why.append("side %s met by %d ray" % (name, len(pts)))
+            continue
+        coords = [(ca * p[0] - sa * p[1]) if name in ("x0", "x1") else (sa * p[0] + ca * p[1]) for p in pts]
+        near = [p for p, c in zip(pts, coords) if abs(c - v) <= SIDE_NEAR_CM]
+        if len(near) < SIDE_MIN_POINTS or len(near) < 0.5 * len(pts):
+            why.append("side %s: only %d of %d ray ends agree where it is" % (name, len(near), len(pts)))
+            continue
+        kinds = [p[2] for p in near]
+        if kinds.count(sd["kind"]) / float(len(kinds)) < SIDE_KIND_SHARE:
+            why.append("side %s is %s in only %d of %d rays" % (name, sd["kind"], kinds.count(sd["kind"]), len(kinds)))
     return "; ".join(why)

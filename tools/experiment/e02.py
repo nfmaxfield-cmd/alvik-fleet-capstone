@@ -2744,6 +2744,10 @@ class Runner:
             # where the edge guard really sees an edge, from the rays' slants (most stops are the distance sensor's
             # bottom zone, which looks ahead of the line sensors)
             rect, edge_ahead = EX.refine_edges(rect, MAP.BOTTOM_AHEAD_CM)
+        rect_bad = EX.rect_check(rect) if rect else ""
+        if rect_bad:
+            self.say("  the sides from the rays don't hold together yet: %s" % rect_bad)
+            rect = None
         bf = EX.board_frame(rect) if rect else None
         rep = dict(rms_px=round(sol["rms_px"], 2), f_px=round(sol["f"], 1), k1=round(sol["k1"], 4),
                    s={n: round(v, 4) for n, v in sol["s"].items()}, g={n: round(v, 4) for n, v in sol["g"].items()},
