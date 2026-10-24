@@ -5912,7 +5912,7 @@ def main(argv=None):
         state["setup"]["args"] = vars(a)
         state.save()
     if a.dry_run:
-        a.auto = True
+        a.auto = not a.web_ask            # --web-ask in a dry run: the questions go on the live page (tests it)
         a.pi = "127.0.0.1"
         a.robot = a.robot or ["127.0.0.%d" % (2 + k) for k in range(len(state["robots"]))]
         if a.board_sides is None:
