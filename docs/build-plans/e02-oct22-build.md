@@ -211,3 +211,11 @@ correction (the check on the model). DOE: docs/experiments/DOE-confidence.md.
 **Item 5: late pictures** (`pictures_late` > 1 s): no confidence pause (no fresh picture to take); the robot drives on
 its own wheels and gyro, and after a leg the front sensor reading a board square on corrects its position along that
 board's axis (`board_correct`, sent as a fix, logged as `board_corrections`; at most 15 cm, else ignored).
+- **Open (2026-10-23 22:30 dry run):** the edge find can still fail when the robot's only allowed second boundary
+  lies behind a parked robot (Right by the open x = 0 edge, Left parked between it and the far board; the
+  two-open-edges rule forbids the near open edge). It fails cleanly (the run is redone, no help call). Fix next:
+  move the parked robot aside, or allow the two open edges when the touch is far enough from their corner.
+  Only matters once a board is gone (or with --edge-find).
+- The sides check (`rect_check`) also passed on 4 recorded dry runs and rejected the bad one; the explore in the
+  last dry run: 4.8 px, board 125.2 x 118.1 cm (truth 121.55 x 121.3), the y-board line then moved 7.7 cm by the
+  finds (item 3 doing its job on explore's worst side).
