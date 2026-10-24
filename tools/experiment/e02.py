@@ -4941,6 +4941,12 @@ class Runner:
         self.watchdog_fired = False
         self.watch_stop = None
         if cond == "KC":
+            # where the robot believes it is at each stop: its route's waypoints (it drives to each until its own
+            # pose says it is there, and again at the far point and the end if more than e02_redo_cm off). 2026-10-24
+            # dry run: the RAW rows' x/y are its raw odometry, not this pose (a fix 138 cm off sent it away).
+            sx_, sy_, _ = self.board.nominal_start()
+            out_w, back_w = self.board.route_floor(route, (sx_, sy_), rdeg)
+            r["kc_waypoints"] = [[round(sx_, 2), round(sy_, 2)]] + [[round(a, 2), round(b, 2)] for a, b in out_w + back_w]
             self.kc_stop.clear()
             th = threading.Thread(target=self.kc_fixes, args=(robot, r, run), daemon=True)
             th.start()
@@ -5209,7 +5215,8 @@ class Runner:
         n = nh = 0
         period = 1.0 / self.a.fix_hz
         done = []                                  # t_stop of the stops already fixed
-        last = dict(t=time.time(), dist=0.0, turned=0.0, pose=None)
+        last = dict(i=0, dist=0.0, turned=0.0)     # the waypoint of the last fix (0: the start, from the find)
+        wps = r.get("kc_waypoints") or []
         while not self.kc_stop.wait(period):
             recent = self.history.since(time.time() - 3.0)
             fx = kc_fix_from(recent)
@@ -5218,10 +5225,11 @@ class Runner:
             x, y, t_pic, t_stop, seg = fx
             if any(abs(t_stop - d) < 0.5 for d in done):
                 continue                          # this stop has had its fix
-            own = self.kc_own_pose(run, last)
+            own = kc_belief(wps, (x, y), last["i"])
             if own is None:
-                continue
-            bx, by, bth, dist, turned = own
+                continue                          # the camera is not near any waypoint still ahead: not sure where
+            i, (bx, by), dist, turned = own
+            bth = None
             cx, cy, csd = self.camerr.corrected(x, y)
             if self.quality.poor(x, y):
                 csd *= KC_POOR_CELL_SD_FACTOR        # the camera sees robots badly here (glare): trust it less
@@ -5242,12 +5250,13 @@ class Runner:
             self.send(robot, "fix %.2f %.2f %s %.3f" % (fxp, fyp, th, t_pic))
             n += 1
             done.append(t_stop)
+            last.update(i=i)
             row = [round(time.time(), 2), robot, run, r.get("order", ""), round(t_stop, 2), round(bx, 2), round(by, 2),
                    round(x, 2), round(y, 2), round(cx, 2), round(cy, 2), round(csd, 2), round(dist, 1),
                    round(turned, 1), round(rsd, 2), round(w, 3), "" if wh is None else round(wh, 3),
                    round(fxp, 2), round(fyp, 2), th, round(math.hypot(cx - bx, cy - by), 2)]
             self.kc_log(row)
-            last.update(t=time.time(), dist=0.0, turned=0.0, pose=(fxp, fyp, bth))
+            last.update(dist=0.0, turned=0.0)
         r["fixes_sent"] = n
         r["fixes_with_heading"] = nh
 
@@ -5263,23 +5272,6 @@ class Runner:
             if new:
                 w.writerow(self.KC_COLS)
             w.writerow(row)
-
-    def kc_own_pose(self, run, last):
-        """The robot's own pose now (its newest RAW row of this run, standing still) and how far it drove and
-        turned since the last fix (from its RAW rows): (x, y, th, dist_cm, turned_deg), or None."""
-        raw = [q for q in (self.listener.raw.get(run) or []) if q.get("x_cm") is not None and q.get("th_deg") is not None]
-        if not raw or time.time() - raw[-1]["t_recv"] > 1.5:
-            return None
-        since = [q for q in raw if q["t_recv"] >= last["t"] - 0.2] or raw[-1:]
-        dist = turned = 0.0
-        for a, b in zip(since, since[1:]):
-            dist += math.hypot(b["x_cm"] - a["x_cm"], b["y_cm"] - a["y_cm"])
-            turned += abs(ST.wrap180(b["th_deg"] - a["th_deg"]))
-        if last.get("pose") is None:
-            # the first fix of the run: since its find (a few cm and turns away), so start from the run's start
-            dist, turned = dist + 2.0, turned + 90.0
-        q = raw[-1]
-        return q["x_cm"], q["y_cm"], q["th_deg"], dist + last["dist"], turned + last["turned"]
 
     def gyro_turn_since(self, run, t):
         """How far the robot turned (deg, left +, raw gyro) since laptop time t, from its RAW rows, or None."""
@@ -5611,6 +5603,36 @@ def stream_url(a):
     second: 2026-10-22, the laptop got only ~2 a second at the default quality 95)."""
     q = getattr(a, "stream_q", 0)
     return "%s:%d/live%s" % (a.pi, a.overhead_port, ("?q=%d" % q) if q else "")
+
+
+KC_WP_MAX_CM = 15.0      # chosen: a still camera position this near a route waypoint is the robot standing there
+
+
+def kc_belief(wps, cam_xy, i0):
+    """Where the robot believes it stands at a KC stop: the route waypoint (index >= i0: it only goes forward along
+    its route) nearest the camera's position, if within KC_WP_MAX_CM. Returns (index, (x, y), cm driven since
+    waypoint i0, deg turned since then) or None."""
+    if not wps:
+        return None
+    best = None
+    for i in range(i0, len(wps)):
+        d = math.hypot(wps[i][0] - cam_xy[0], wps[i][1] - cam_xy[1])
+        if best is None or d < best[0] - 1e-9:
+            best = (d, i)
+    if best is None or best[0] > KC_WP_MAX_CM:
+        return None
+    i = best[1]
+    dist = turned = 0.0
+    for k in range(i0, i):
+        dist += math.hypot(wps[k + 1][0] - wps[k][0], wps[k + 1][1] - wps[k][1])
+    for k in range(max(i0, 1), i + 1):
+        if k + 1 < len(wps) and k - 1 >= 0:
+            h1 = math.atan2(wps[k][1] - wps[k - 1][1], wps[k][0] - wps[k - 1][0])
+            h2 = math.atan2(wps[k + 1][1] - wps[k][1], wps[k + 1][0] - wps[k][0])
+            turned += abs(math.degrees(math.atan2(math.sin(h2 - h1), math.cos(h2 - h1))))
+    if i0 == 0 and i == 0:
+        dist, turned = 2.0, 90.0      # at the start: since its find (a back-off and a turn or two)
+    return i, (float(wps[i][0]), float(wps[i][1])), dist, turned
 
 
 def kc_fix_from(samples, after_stop_s=0.1, min_still_s=0.3, moved_cm=0.8):

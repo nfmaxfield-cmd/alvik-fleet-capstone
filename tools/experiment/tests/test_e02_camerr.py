@@ -140,3 +140,13 @@ def test_quality_map_marks_poor_cells():
     assert not q.poor(50.0, 50.0)            # never seen: not called poor
     rows = q.rows()
     assert {r["poor"] for r in rows} == {0, 1}
+
+
+def test_kc_belief_walks_forward_along_the_route():
+    import e02 as E
+    wps = [[95, 90], [45, 90], [45, 40], [95, 40], [95, 90]]          # a square: start, ..., back at the start
+    assert E.kc_belief(wps, (96, 91), 0)[0] == 0                     # at the start
+    i, xy, dist, turned = E.kc_belief(wps, (46, 41), 0)
+    assert i == 2 and xy == (45.0, 40.0) and abs(dist - 100.0) < 1e-6 and abs(turned - 180.0) < 1e-6
+    assert E.kc_belief(wps, (94, 91), 3)[0] == 4                     # back at the start: the last waypoint, not the first
+    assert E.kc_belief(wps, (70, 65), 0) is None                     # between waypoints: not sure
