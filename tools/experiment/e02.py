@@ -187,6 +187,22 @@ SAFETY_SETTINGS = (("safe_edge", 3.0), ("edge_dir", 0.0), ("edge_thr", 150.0), (
                    ("e02_cms", 10.0))   # back_max and cms: undo explore's raise and crawl
 SAFETY_CMDS = ["set %s %g" % kv for kv in SAFETY_SETTINGS]
 DEFAULT_CALIB = os.path.join(HERE, "data", "overhead_floorcal_roam1.json")   # roam1 board corners, camera unmoved
+# The virtual border (Nick, 2026-10-24 evening, after Left and Center went over the open edge in the Pi plan's
+# stage 3): a robot the camera sees within BORDER_CM of an open edge (its centre), moving towards it, stops EVERY robot
+# and the session waits for Nick (hold_for_nick). Every session. 15 cm: the Pi's worst picture age (0.56 s) at 10 cm/s
+# is about 6 cm, braking about 1 cm, the robot's half length 5 cm, so it stops before a wheel reaches the edge.
+# Chosen, not measured: a DOE should set it (drive at the line at 4 and 10 cm/s a few times, measure the overshoot).
+# Exempt: a forward crawl that is looking for the edge on purpose (explore's rays and probes, the edge find): the
+# firmware's edge guard stops those, forwards; anything backwards, or at speed, is never exempt.
+BORDER_CM = 15.0
+BORDER_TOWARDS_CMS = 1.0      # chosen: moving towards the edge faster than this counts (still or away is allowed)
+BORDER_JUMP_CMS = 50.0        # chosen: faster than this is the tracker jumping to a new spot, not the robot (it drives
+                              # at most ~20 cm/s); replaying the 2026-10-24 Pi plan's tracks, one such jump would have held
+# A robot driving a leg that the camera has no position for this long is lost: everything stops and Nick is asked
+# (Nick, 2026-10-24: "stop and wait"; in stage 3 the tracker stayed on Left's old spot while it drove). Chosen.
+LOST_DRIVE_S = 1.5
+HOLD_DRY_ANSWER_S = 5.0       # a dry run with nobody to ask: "carry on" after this long (said loudly)
+HOLD_MOVE_CMDS = ("go ", "turn ", "run ", "e02 ", "calibrate", "identify", "dock", "follow")
 
 
 def num(v):
@@ -399,6 +415,14 @@ class Runner:
         self.watchdog_fired = False
         self.watch_stop = None
         self.watch_quit = threading.Event()
+        self.hold = threading.Event()     # set while the session waits for Nick (hold_for_nick)
+        self.hold_lock = threading.Lock()
+        self.hold_answer = None
+        self.held_out = set()             # robots Nick left out at a hold: they do not move again this session
+        self.hold_auto_refind = False     # Nick's answer "a": lost robots are found again without asking (border still asks)
+        self.guard = None                 # (camera, board) for the border while exploring (no board of its own yet)
+        self.seek = set()                 # robots on a forward crawl looking for the edge on purpose (border exempt)
+        self.leg_live = {}                # robot -> time its current leg was sent (cleared when it ends)
         self.moves = {}               # robot -> dict(run ("-" = idle legs), why): it is taking legs now
         self.leg_ids = {}
         self.last_lid = {}            # robot -> id of the last leg sent
@@ -610,6 +634,16 @@ class Runner:
             return ""
 
     def send(self, robot, cmd):
+        if cmd.startswith(HOLD_MOVE_CMDS):
+            if self.hold.is_set() and threading.current_thread() is threading.main_thread():
+                # the watchdog is holding the session for Nick: nothing moves until he answers
+                while self.hold.is_set():
+                    time.sleep(0.2)
+                if self.hold_answer == "s":
+                    raise KeyboardInterrupt
+            if robot in self.held_out:
+                self.say("    (%s was left out at a hold: not sent %s)" % (robot, cmd), quiet=True)
+                return
         self.link.send_name(robot, cmd)
         self.say("    -> %s: %s" % (robot, cmd), quiet=True)
 
@@ -870,6 +904,8 @@ class Runner:
         m = self.moves.get(robot)
         if m is None:
             return "refused", "not moving"
+        if robot in self.held_out:
+            return "refused", "left out by Nick"
         lid = self.next_id(robot)
         self.last_lid[robot] = lid
         following = self.tracker is not None and self.tracker.active == robot
@@ -879,8 +915,13 @@ class Runner:
         for attempt in range(2):
             t_s = time.time()
             self.send(robot, "%s %d" % (text, lid))
+            if not text.startswith("mark"):
+                self.leg_live[robot] = time.time()
             stop = (lambda: self.watch.ended.get(m["run"]) is not None) if m["run"] != "-" else None
-            res = self.listener.wait_leg(robot, m["run"], lid, t_s - 0.05, timeout, stop=stop)
+            try:
+                res = self.listener.wait_leg(robot, m["run"], lid, t_s - 0.05, timeout, stop=stop)
+            finally:
+                self.leg_live.pop(robot, None)
             if res and following and res.get("state") in ("done", "failed", "dup"):
                 time.sleep(0.3)                  # it has stopped: from now on it can't be anywhere else
                 self.tracker.hold(HOLD_CM)
@@ -1349,6 +1390,10 @@ class Runner:
 
     def _refind(self, robot, why):
         self.st.setdefault("disagreements", []).append([round(time.time(), 1), robot, why, self.order])
+        # Nick, 2026-10-24: a robot the camera lost, or whose spot did not move with its wheels, stops everything
+        # and the session waits for him (his answer "a" makes these find it again without asking)
+        if self.hold_for_nick(robot, "lost", why) == "o":
+            return None
         if self.moves.get(robot, {}).get("why") == "K":
             # 2026-10-24 review: in session 1, 4 of 9 camera-steered runs were ended here, because `stop` also ends
             # the firmware's camera-steered program. Between legs the robot already stands still, so no stop: the
@@ -1948,6 +1993,8 @@ class Runner:
         hands, i.e. just finding it again, worked nearly every time); then exact steps for Nick, then the runner
         finds it again by a turn on its spot and parks it itself. Returns True when it is back (and parked, unless
         park=False: then only found)."""
+        if robot in self.held_out:
+            return False                   # Nick left it out at a hold: it stays where it is
         if park and "off the board" not in problem:
             # (park=False: the caller goes on from where the robot stands, e.g. jammed on a brick: Nick moves it)
             for k in range(AUTO_TRIES):
@@ -2311,41 +2358,56 @@ class Runner:
         return [n for n in names if n not in self.link.robots()]
 
     def start_battery_watch(self, names):
-        """battery.csv: every robot heard on the WiFi, the ones in this session (driving) and any others left
-        switched on (idle, asked `status`), every --battery-watch-s seconds (Nick 2026-10-24: driving against idle
-        drain, from the one-robot session with Left and Center off the board). `status` only answers; it never
-        moves a robot."""
+        """battery.csv (Nick, 2026-10-24): every robot heard on the WiFi, every --battery-watch-s seconds, and every
+        battery the robots report with their runs. Columns: role (driving: in this session; idle: switched on but not
+        in it), state (moving: a leg or a firmware run going, else still), still_s (seconds since it last moved: the
+        battery % comes from its voltage, which sags while the motors draw and recovers after, so the fair readings
+        are the rested ones, still_s of 60 or more), phase, source (status: asked; run: a run's own record). A robot
+        is asked `status` only while it is still (`status` only answers; it never moves a robot)."""
         every = getattr(self.a, "battery_watch_s", 0) or 0
         if every <= 0 or getattr(self, "_bat_thread", None) is not None:
             return
         path = os.path.join(self.dir, "battery.csv")
         new = not os.path.exists(path)
         drive = set(names)
+        t_start = time.time()
+
+        def busy(n):
+            return n in self.leg_live or (self.moves.get(n) or {}).get("run", "-") not in ("-", None)
 
         def loop():
             if new:
                 with open(path, "w") as f:
-                    f.write("t,robot,role,battery,phase\n")
-            logged = {}
+                    f.write("t,robot,role,state,still_s,battery,phase,source\n")
+            logged, last_moved, asked, last_ask = {}, {}, set(), 0.0
             while True:
-                # only the idle robots are asked (a driving robot reports its battery with every run's records)
-                for n in self.link.robots():
-                    if n not in drive:
-                        try:
-                            self.link.send_name(n, "status")
-                        except OSError:
-                            pass
-                time.sleep(2.0)
+                now = time.time()
+                for n in set(self.link.robots()) | drive:
+                    if busy(n):
+                        last_moved[n] = now
+                if now - last_ask >= every:
+                    last_ask = now
+                    asked = set()
+                    for n in self.link.robots():
+                        if not busy(n) and not self.hold.is_set():
+                            try:
+                                self.link.send_name(n, "status")
+                                asked.add(n)
+                            except OSError:
+                                pass
                 rows = []
                 for n, (tb, b) in sorted(self.listener.battery.items()):
                     if tb > logged.get(n, 0.0):
                         logged[n] = tb
-                        rows.append("%.1f,%s,%s,%d,%s" % (tb, n, "driving" if n in drive else "idle", b,
-                                                          getattr(self, "phase", "") or ""))
+                        mv = busy(n)
+                        still = 0.0 if mv else tb - last_moved.get(n, t_start)
+                        rows.append("%.1f,%s,%s,%s,%.0f,%d,%s,%s" % (
+                            tb, n, "driving" if n in drive else "idle", "moving" if mv else "still", still, b,
+                            getattr(self, "phase", "") or "", "status" if n in asked else "run"))
                 if rows:
                     with open(path, "a") as f:
                         f.write("\n".join(rows) + "\n")
-                time.sleep(max(1.0, every - 2.0))
+                time.sleep(2.0)
 
         self._bat_thread = threading.Thread(target=loop, daemon=True)
         self._bat_thread.start()
@@ -2690,7 +2752,8 @@ class Runner:
                 # Left's old spot for 19 stops while it drove 30-90 cm rays): find it again by a turn on its spot
                 # and back (net heading unchanged), and use that
                 self.say("    %s: %s: finding it again" % (robot, bad), quiet=True)
-                q = self.identify(robot)
+                self.hold_for_nick(robot, "lost", bad)
+                q = self.identify(robot) if robot not in self.held_out else None
                 if q is not None:
                     self.tracker.follow(robot, q[0], q[1])
                     self.history.clear()
@@ -2751,7 +2814,15 @@ class Runner:
         it is). Returns (state, info, lid)."""
         self.moves[robot] = dict(run="-", why="explore")
         est = abs(val) / DRIVE_CMS_GUESS + 1.0 if kind == "go" else abs(val) / TURN_DPS_GUESS + 1.0
-        state, info = self.send_leg(robot, "%s %.2f" % (kind, val), timeout or (2.5 * est + 6.0))
+        # a forward crawl looks for the edge on purpose (the firmware's edge guard stops it): the virtual border
+        # lets it; backwards, or at speed, never
+        seek = kind == "go" and val > 0 and self.speed_now.get(robot) == EXPLORE_CRAWL_CMS
+        if seek:
+            self.seek.add(robot)
+        try:
+            state, info = self.send_leg(robot, "%s %.2f" % (kind, val), timeout or (2.5 * est + 6.0))
+        finally:
+            self.seek.discard(robot)
         return state, info, self.last_lid.get(robot)
 
     def explore(self, names):
@@ -2766,6 +2837,8 @@ class Runner:
         self.say("=== Explore: the robots work out the camera and the board (about %d minutes) ===" % max(
             2, round(len(names) * 1.7)))
         self.mark("e02 explore start")
+        if self.guard is None:
+            self.guard = self.make_guard()
         self.find_all(names)
         # backing off an edge it has just felt is the one blind move explore needs, and no camera fix can be sent
         # yet (its pose is unknown): the per-fix allowance is raised for explore and put back after (2026-10-23
@@ -4691,6 +4764,145 @@ class Runner:
         out.update(ok=True, result="ok", words="found itself against two boundaries", t1=t1)
         return out
 
+    # --- the virtual border and holding for Nick (Nick, 2026-10-24 evening) -------------------------------------
+    def stop_everyone(self):
+        names = set(self.st["robots"]) | set(self.link.robots() if self.link else [])
+        for _ in range(3):
+            for n in names:
+                try:
+                    self.link.send_name(n, "stop")
+                except Exception:
+                    pass
+            time.sleep(0.2)
+
+    def hold_for_nick(self, robot, kind, why):
+        """Stop every robot and wait for Nick's answer (the live page, or the console): no timeout carries on by
+        itself (Nick: "pause and wait for my guidance so we don't lose all 3 robots to the same problem"). kind is
+        'border' or 'lost'. Returns his answer: 'c' carry on, 'a' carry on and find lost robots again without
+        asking from now on, 'o' leave this robot out (it stays where it is; the others carry on), 's' stop the
+        session (KeyboardInterrupt in the main thread: every robot stopped, --resume later)."""
+        if kind == "lost" and self.hold_auto_refind:
+            self.say("  %s: %s (finding it again without asking, as Nick chose)" % (robot, why), quiet=True)
+            return "c"
+        with self.hold_lock:
+            self.hold.set()
+            self.hold_answer = None
+            try:
+                self.stop_everyone()
+                self.mark("e02 hold %s %s: %s" % (kind, robot, why))
+                rec = [round(time.time(), 1), robot, kind, why, self.order, None, None]
+                self.st.setdefault("holds", []).append(rec)
+                self.st.save()
+                print("\n" + "!" * 78)
+                self.say("HOLD: every robot is stopped. %s: %s." % (robot, why))
+                self.say("The session waits for your answer (no time limit).")
+                print("!" * 78)
+                prompt = ("HOLD (%s): %s: %s. Every robot is stopped. Answer: c = carry on, a = carry on and find lost "
+                          "robots again without asking from now on, o = leave %s out (it stays where it is), s = stop "
+                          "the session (--resume later): " % ("virtual border" if kind == "border" else "lost robot",
+                                                              robot, why, robot))
+                t0 = time.time()
+                while True:
+                    ans = self.hold_ask(prompt)
+                    ans = (ans or "").strip().lower()[:1]
+                    if ans in ("c", "a", "o", "s"):
+                        break
+                    self.say("  (answer c, a, o or s)")
+                rec[5], rec[6] = ans, round(time.time() - t0, 1)
+                self.say("  Nick's answer: %s" % dict(c="carry on", a="carry on; lost robots found again without "
+                                                       "asking from now on", o="leave %s out" % robot,
+                                                       s="stop the session")[ans])
+                self.mark("e02 hold answer %s %s" % (ans, robot))
+                if ans == "a":
+                    self.hold_auto_refind = True
+                if ans == "o":
+                    self.held_out.add(robot)
+                    self.unavailable.add(robot)
+                    self.moves.pop(robot, None)
+                    try:
+                        self.keep_on_map(robot)
+                    except SystemExit:
+                        pass
+                self.hold_answer = ans
+                self.st.save()
+            finally:
+                self.hold.clear()
+        if ans == "s" and threading.current_thread() is threading.main_thread():
+            raise KeyboardInterrupt
+        return ans
+
+    def hold_ask(self, prompt):
+        """Nick's answer with no time limit: the live page (and the console) when there is one, else the console;
+        a dry run with nobody there answers c after HOLD_DRY_ANSWER_S."""
+        if getattr(self.a, "dry_run", False) and (self.a.auto or not getattr(self.a, "web_ask", False)):
+            time.sleep(HOLD_DRY_ANSWER_S)
+            self.say(prompt + " -> " + getattr(self.a, "dry_hold_answer", "c") + " (dry run: automatic)")
+            return getattr(self.a, "dry_hold_answer", "c")
+        if getattr(self, "view", None) is not None:
+            ans = self.web_ask(prompt, "", None)
+            if ans:
+                return ans
+            time.sleep(1.0)
+            return ""
+        return self._input(prompt)
+
+    def make_guard(self):
+        """The border while exploring (the robots' own camera fit and board are not made yet): the calibration file
+        (--calib, else the session-1 roam1 file) and the board laid out as --board-sides says. Positions on the
+        provisional camera go back to pixels and onto this one. None (said loudly) if there is no file."""
+        cal = getattr(self.a, "calib", None) or (DEFAULT_CALIB if os.path.exists(DEFAULT_CALIB) else None)
+        sim_cal = os.path.join(self.dir, "sim", "camera_model.json")
+        if getattr(self.a, "dry_run", False) and os.path.exists(sim_cal):
+            cal = sim_cal                  # a dry run: the simulator's camera stands in for the session-1 file
+        if not cal or not os.path.exists(cal):
+            self.say("  WARNING: no calibration file for the virtual border while exploring: explore runs without it.")
+            return None
+        try:
+            cam = CAM.load_camera(cal)
+        except Exception as e:
+            self.say("  WARNING: the virtual border can't use %s (%s): explore runs without it." % (cal, e))
+            return None
+        xs, ys = (int(v) for v in (getattr(self.a, "board_sides", None) or "1,1").split(","))
+        self.say("  Virtual border while exploring: %.0f cm inside the open edges, placed by %s (until explore's own "
+                 "fit)." % (BORDER_CM, os.path.basename(cal)))
+        return cam, PL.Board(xboard_side=xs, yboard_side=ys)
+
+    def border_frame(self, x, y):
+        """A tracker position as (board, x, y) for the border: the session's own board, or the guard while
+        exploring. None if neither."""
+        if self.board is not None and not getattr(self, "exploring", False):
+            return self.board, x, y
+        if self.guard is None or self.cam is None:
+            return None
+        u, v = self.cam.project((x, y, EX.ROBOT_TOP_CM))
+        gx, gy = self.guard[0].to_floor(float(u), float(v), EX.ROBOT_TOP_CM)
+        if not (np.isfinite(gx) and np.isfinite(gy)):
+            return None
+        return self.guard[1], float(gx), float(gy)
+
+    def border_check(self, robot, smp):
+        """Words if the robot is within BORDER_CM of an open edge and moving towards it, else ''. smp: the tracker's
+        recent (t, x, y, ...) samples."""
+        if robot in self.seek or robot == getattr(self, "edge_touch", None) or len(smp) < 3:
+            return ""
+        a = self.border_frame(smp[0][1], smp[0][2])
+        b = self.border_frame(smp[-1][1], smp[-1][2])
+        if a is None or b is None:
+            return ""
+        bd, x, y = b
+        dt_ = max(1e-3, smp[-1][0] - smp[0][0])
+        for ax, val in bd.open_edges():
+            d = abs((x if ax == "x" else y) - val)
+            if d >= BORDER_CM:
+                continue
+            p0 = a[1] if ax == "x" else a[2]
+            p1 = x if ax == "x" else y
+            towards = (abs(p0 - val) - abs(p1 - val)) / dt_          # cm/s closer to that edge
+            if BORDER_TOWARDS_CMS < towards < BORDER_JUMP_CMS:
+                return "its centre is %.0f cm from an open edge (the border is %.0f cm), moving towards it" % (
+                    d, BORDER_CM)
+        return ""
+
     def watchdog(self, robot=None):
         """For wait_end polls: has the camera watchdog stopped the robot in this run?"""
         return self.watchdog_fired
@@ -4706,10 +4918,35 @@ class Runner:
             time.sleep(0.1)
             try:
                 robot = self.tracker.active if self.tracker is not None else None
-                if not robot or self.board is None:
+                if not robot or self.hold.is_set() or robot in self.held_out:
                     continue
+                # a driving leg the camera has lost (Nick, 2026-10-24: stop and wait)
+                t_leg = self.leg_live.get(robot)
+                if t_leg is not None and robot not in self.refinding and robot not in self.seek \
+                        and time.time() - t_leg > LOST_DRIVE_S:
+                    last_t = self.history.last_t() if hasattr(self.history, "last_t") else None
+                    if last_t is None:
+                        allp = self.history.since(time.time() - 30.0)
+                        last_t = allp[-1][0] if allp else None
+                    if last_t is not None and time.time() - max(last_t, t_leg) > LOST_DRIVE_S \
+                            and not self.hold_auto_refind:
+                        self.watchdog_fired = True
+                        self.watch_stop = "lost while driving"
+                        self.hold_for_nick(robot, "lost", "the camera has not seen it for %.1f s while it drives"
+                                           % (time.time() - max(last_t, t_leg)))
+                        continue
                 smp = self.history.since(time.time() - 0.6)
                 if len(smp) < 3 or time.time() - smp[-1][0] > 1.0:
+                    continue
+                why_b = self.border_check(robot, smp)
+                if why_b:
+                    self.watchdog_fired = True
+                    self.watch_stop = "virtual border"
+                    self.st.setdefault("watchdog_stops", []).append([round(time.time(), 1), robot, "border: " + why_b,
+                                                                     self.order])
+                    self.hold_for_nick(robot, "border", why_b)
+                    continue
+                if self.board is None:
                     continue
                 parked = {n: tuple(q[:2]) for n, q in self.st["positions"].items() if n != robot and q}
                 edge_cm = -1e9 if robot == getattr(self, "edge_touch", None) else self.watch_edge_cm

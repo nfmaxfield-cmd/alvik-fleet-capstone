@@ -994,6 +994,11 @@ class History:
         with self.lock:
             return [s for s in self.q if s[0] >= t0 and (t1 is None or s[0] <= t1)]
 
+    def last_t(self):
+        """The newest sample's time, or None."""
+        with self.lock:
+            return self.q[-1][0] if self.q else None
+
     def clear(self):
         with self.lock:
             self.q.clear()
