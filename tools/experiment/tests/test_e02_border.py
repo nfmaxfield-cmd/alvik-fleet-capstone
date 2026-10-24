@@ -19,6 +19,7 @@ def _stub(board=None, exploring=False):
     r.edge_touch = None
     r.guard = None
     r.cam = None
+    r.leg_live, r.leg_kind = {}, {}
     r.border_frame = types.MethodType(E.Runner.border_frame, r)
     return r
 
@@ -110,4 +111,12 @@ def test_border_lets_it_drive_along_the_edge():
     # 12 cm from x = 0, 4 cm/s along the edge with 1.5 cm/s drift towards it: allowed
     assert E.Runner.border_check(r, "Left", _track(12.75, 60.0, 12.0, 62.0)) == ""
     # the same speed straight at it: held
+    assert E.Runner.border_check(r, "Left", _track(14.0, 60.0, 12.0, 60.0)) != ""
+
+
+def test_border_ignores_a_turn_on_the_spot():
+    r = _stub()
+    r.leg_live["Left"], r.leg_kind["Left"] = 0.0, "turn"
+    assert E.Runner.border_check(r, "Left", _track(14.0, 60.0, 12.0, 60.0)) == ""
+    r.leg_kind["Left"] = "go"
     assert E.Runner.border_check(r, "Left", _track(14.0, 60.0, 12.0, 60.0)) != ""

@@ -426,6 +426,7 @@ class Runner:
         self.guard = None                 # (camera, board) for the border while exploring (no board of its own yet)
         self.seek = set()                 # robots on a forward crawl looking for the edge on purpose (border exempt)
         self.leg_live = {}                # robot -> time its current leg was sent (cleared when it ends)
+        self.leg_kind = {}                # robot -> "go" / "turn": its current (or last) leg
         self.moves = {}               # robot -> dict(run ("-" = idle legs), why): it is taking legs now
         self.leg_ids = {}
         self.last_lid = {}            # robot -> id of the last leg sent
@@ -920,6 +921,7 @@ class Runner:
             self.send(robot, "%s %d" % (text, lid))
             if not text.startswith("mark"):
                 self.leg_live[robot] = time.time()
+                self.leg_kind[robot] = text.split()[0]
             stop = (lambda: self.watch.ended.get(m["run"]) is not None) if m["run"] != "-" else None
             try:
                 res = self.listener.wait_leg(robot, m["run"], lid, t_s - 0.05, timeout, stop=stop)
@@ -4887,6 +4889,10 @@ class Runner:
         """Words if the robot is within BORDER_CM of an open edge and moving towards it, else ''. smp: the tracker's
         recent (t, x, y, ...) samples."""
         if robot in self.seek or robot == getattr(self, "edge_touch", None) or len(smp) < 3:
+            return ""
+        if robot in self.leg_live and self.leg_kind.get(robot) == "turn":
+            # turning on its spot: the camera's spot (the top's centre, not the axle) swings a few cm, the robot
+            # goes nowhere (dry run 2026-10-24: a 90 deg turn 15 cm from the edge held the session)
             return ""
         a = self.border_frame(smp[0][1], smp[0][2])
         b = self.border_frame(smp[-1][1], smp[-1][2])
