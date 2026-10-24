@@ -15,6 +15,21 @@ Gathered as the week goes; the summary is written from these. Failures go in onl
     nose attachment with the switches and lights);
   - battery logged in every session (driving against idle, rested readings) to plan run length and charging.
 
+## Latency: running on the Pi (Nick, 2026-10-24: strong evidence the latency issue is solved)
+The camera is plugged into the Pi, so the pictures no longer cross the WiFi. Picture age when its position was
+ready (perf.csv, the runner's own log, one row a second):
+
+| Where it ran | Median | 95th percentile | Worst |
+|---|---|---|---|
+| Laptop, 2026-10-23 morning (quiet WiFi) | 0.12 s | 0.30 s | - |
+| Laptop, 2026-10-23 afternoon (a file copy on the WiFi) | 0.20 s | 2.37 s | - |
+| Pi, 2026-10-24 stages 1-3 | 0.12-0.13 s | 0.18-0.23 s | 0.30-0.56 s |
+
+What it shows: the Pi is as quick as the laptop at its best and no longer depends on the WiFi's load. Still to
+show before calling it solved: (1) the Right-only session ran while the first video uploaded over the same WiFi
+(the robots' commands share it): picture age and the robots' round trips with and without the upload; (2) the Pi
+handles 14-16 of the camera's 25 pictures a second (the laptop 18-21): fresh pictures, fewer of them.
+
 ## Planned experiment: degraded sensors (after the robots stay on the board reliably)
 Nick, 2026-10-24: runs in which a sensor's input is deliberately degraded (or swapped for an ineffective one) to
 see whether the program notices and adapts. Goes with the next build: the system learns how much to trust each
