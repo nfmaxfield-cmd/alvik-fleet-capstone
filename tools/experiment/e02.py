@@ -2578,7 +2578,9 @@ class Runner:
         # every robot found first by a short turn on its spot (nothing leaves its spot, so nothing is mistaken for
         # a robot), THEN parked, each going round the others (2026-10-22, after the first real session)
         if self.st["setup"].get("explore_pending"):
-            self.explore([n for n in names if n not in self.unavailable])
+            ok_names = [n for n in names if n not in self.unavailable]
+            self.explore(ok_names)
+            self.explore_tape_check(ok_names)
         else:
             self.find_all([n for n in names if n not in self.unavailable])
         self.park_all([n for n in names if n not in self.unavailable])
@@ -5473,6 +5475,35 @@ class Runner:
                 self.mark("e02 camera moved %.1f px" % math.hypot(d["du"], d["dv"]))
         self.shift_watch = CAM.CameraShiftWatch(self.cam, (b.x0, b.y0, b.x1, b.y1), self.tracker, on_shift=on_shift)
         self.feed.hooks.append(self.shift_watch)
+
+    MARK_ACCEPT_CM = 2.5    # chosen: the robots' camera calibration is kept only if the tape marks put it within
+    # this (median); 2026-10-24 dry run with the robots scattered: explore passed its own checks at 4.3 cm off the
+    # marks, and the session that followed lost robots 29 times. DOE: explore's mark error against the runs' errors
+
+    def explore_tape_check(self, names):
+        """With --marks: right after explore, the tape-mark check judges the robots' own camera calibration. Too far
+        off the marks: explore's calibration is put aside (the fallback, said plainly) and the marks are taken again
+        with the calibration that replaces it."""
+        if not getattr(self.a, "marks", False):
+            return
+        src = (self.st["setup"].get("calibration_source") or {})
+        if not src.get("session"):
+            return                                # explore already fell back: the session's check does the marks
+        self.mark_check()
+        d = sorted(math.hypot(s_["dx"], s_["dy"]) for s_ in self.camerr.samples if s_.get("source") == "mark")
+        if len(d) < 3:
+            return
+        med = d[len(d) // 2]
+        self.st["setup"]["explore_tape_check"] = dict(median_cm=round(med, 2), n=len(d), limit_cm=self.MARK_ACCEPT_CM)
+        if med <= self.MARK_ACCEPT_CM:
+            self.say("  The robots' camera calibration agrees with the tape marks within %.1f cm (median): kept." % med)
+            return
+        self.camerr.samples = [s_ for s_ in self.camerr.samples if s_.get("source") != "mark"]
+        self.st["camera_error_samples"] = self.camerr.to_list()
+        self.st["setup"]["marks_done"] = None
+        self.explore_fallback(names, "the tape marks put the robots' calibration %.1f cm off (median; limit %.1f)"
+                              % (med, self.MARK_ACCEPT_CM))
+        self.mark_check()
 
     def session(self):
         st = self.st
