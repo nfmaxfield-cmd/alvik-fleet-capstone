@@ -19,7 +19,8 @@ def _stub(board=None, exploring=False):
     r.edge_touch = None
     r.guard = None
     r.cam = None
-    r.leg_live, r.leg_kind = {}, {}
+    r.leg_live, r.leg_kind = {"Left": 0.0}, {"Left": "go"}
+    r.moves = {}
     r.border_frame = types.MethodType(E.Runner.border_frame, r)
     return r
 
@@ -120,3 +121,11 @@ def test_border_ignores_a_turn_on_the_spot():
     assert E.Runner.border_check(r, "Left", _track(14.0, 60.0, 12.0, 60.0)) == ""
     r.leg_kind["Left"] = "go"
     assert E.Runner.border_check(r, "Left", _track(14.0, 60.0, 12.0, 60.0)) != ""
+
+
+def test_border_ignores_a_robot_standing_still():
+    r = _stub()
+    r.leg_live.clear()
+    assert E.Runner.border_check(r, "Left", _track(14.0, 60.0, 12.0, 60.0)) == ""      # settling, not driving
+    r.moves["Left"] = dict(run="E806-30", why="U")
+    assert E.Runner.border_check(r, "Left", _track(14.0, 60.0, 12.0, 60.0)) != ""      # its firmware run drives it

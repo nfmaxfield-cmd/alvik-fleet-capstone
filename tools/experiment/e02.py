@@ -4922,6 +4922,11 @@ class Runner:
         if robot in self.seek or robot == getattr(self, "edge_touch", None) or len(smp) < 3 \
                 or time.time() < getattr(self, "seek_until", {}).get(robot, 0.0):
             return ""
+        driving = robot in self.leg_live or (self.moves.get(robot) or {}).get("run", "-") not in ("-", None)
+        if not driving:
+            # standing still: the camera's estimate settling after the tracker moves to it is not the robot moving
+            # (dry run 2026-10-24 19:41: Center held the session while it stood, 5 cm of settling "towards" the edge)
+            return ""
         if robot in self.leg_live and self.leg_kind.get(robot) == "turn":
             # turning on its spot: the camera's spot (the top's centre, not the axle) swings a few cm, the robot
             # goes nowhere (dry run 2026-10-24: a 90 deg turn 15 cm from the edge held the session)
