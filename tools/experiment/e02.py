@@ -5495,14 +5495,16 @@ class Runner:
             return
         med = d[len(d) // 2]
         self.st["setup"]["explore_tape_check"] = dict(median_cm=round(med, 2), n=len(d), limit_cm=self.MARK_ACCEPT_CM)
-        if med <= self.MARK_ACCEPT_CM:
+        limit = getattr(self.a, "mark_accept_cm", None) or self.MARK_ACCEPT_CM
+        self.st["setup"]["explore_tape_check"]["limit_cm"] = limit
+        if med <= limit:
             self.say("  The robots' camera calibration agrees with the tape marks within %.1f cm (median): kept." % med)
             return
         self.camerr.samples = [s_ for s_ in self.camerr.samples if s_.get("source") != "mark"]
         self.st["camera_error_samples"] = self.camerr.to_list()
         self.st["setup"]["marks_done"] = None
         self.explore_fallback(names, "the tape marks put the robots' calibration %.1f cm off (median; limit %.1f)"
-                              % (med, self.MARK_ACCEPT_CM))
+                              % (med, limit))
         self.mark_check()
 
     def session(self):
@@ -5830,6 +5832,9 @@ def main(argv=None):
     ap.add_argument("--routes", default="1,2,3", help="only these routes (testing)")
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--fix-hz", type=float, default=FIX_HZ)
+    ap.add_argument("--mark-accept-cm", type=float, default=0.0,
+                    help="the tape marks keep the robots' camera calibration only within this (median; 0 = the "
+                         "default, Runner.MARK_ACCEPT_CM)")
     ap.add_argument("--no-shift-watch", action="store_true",
                     help="do not measure or correct the camera's creep during the runs (CAM.CameraShiftWatch)")
     ap.add_argument("--marks", action="store_true",
