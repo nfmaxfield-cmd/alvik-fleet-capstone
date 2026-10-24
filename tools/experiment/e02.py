@@ -4122,6 +4122,8 @@ class Runner:
                 return st_ in ("done", "dup")
             return True
 
+        moved_aside = []
+
         def touch(bd, on):
             # a parked robot in the way moves aside first (Nick, 2026-10-23: practice for robots moving together)
             here = self.pos(robot, fresh_s=2.0)
@@ -4129,6 +4131,7 @@ class Runner:
             others = {n: tuple(q[:2]) for n, q in self.st["positions"].items() if n != robot and q}
             for m in EF.blockers(hx, hy, bd, others):
                 ok_, words_ = self.make_way(robot, m, (hx, hy), bd)
+                moved_aside.append(m)
                 if not ok_:
                     return "%s is in the way and could not move aside (%s)" % (m, words_)
             if not turn_to(EF.facing(bd, pose[0], pose[1])):
@@ -4176,6 +4179,18 @@ class Runner:
             why = touch(b, "B")
         sol = EF.solve(touches, a, b) if not why else None
         self.end_moves(robot)
+        if moved_aside:
+            # and back to their spots, now the way is free again (2026-10-23 dry run: left where it stepped aside,
+            # Left stood in the next run's route and the camera watchdog stopped it)
+            p_here = self.pos(robot, fresh_s=2.0)
+            if p_here:
+                self.st["positions"][robot] = [p_here[1], p_here[2], self.heads.get(robot, [None])[0]]
+                self.tracker.park(robot, p_here[1], p_here[2])
+            for m in dict.fromkeys(moved_aside):
+                if self.activate(m):
+                    ok_, why_ = self.park(m)
+                    self.say("    %s: back to its spot%s" % (m, "" if ok_ else " failed (%s)" % why_), quiet=ok_)
+            self.activate(robot)
         t1 = time.time()
         rec = dict(t=round(t0, 1), robot=robot, order=order, a=list(a[:2]), b=list(b[:2]),
                    touches=touches, kinds={"%s=%g" % k: v for k, v in found_kinds.items()}, why=why)
