@@ -3571,7 +3571,15 @@ class Runner:
             # cm); 10 cm near an open edge, whose direction from it is unknown (chosen; DOE: tests-to-run)
             q = self.pos(robot) or p
             far = self.board.edge_room(q[0], q[1])[0] > HEADING_LONG_ROOM_CM and (f is None or f > 15.0 + HEADING_CLEAR_CM)
-            p0, p1, words = self.leg(robot, ("go", 15.0 if far else 10.0))
+            # which way it faces is not known yet, so this short drive forward may head at an edge: the firmware's
+            # edge guard stops it there (forwards); the virtual border lets it (Pi, 2026-10-24 19:35: Right's heading
+            # drive held the session at 13 cm), and a moment after
+            self.seek.add(robot)
+            try:
+                p0, p1, words = self.leg(robot, ("go", 15.0 if far else 10.0))
+            finally:
+                self.seek.discard(robot)
+                self.seek_until[robot] = time.time() + 1.0
             if p0 and p1 and math.hypot(p1[0] - p0[0], p1[1] - p0[1]) >= ST.MIN_HEADING_CM:
                 self.heads[robot] = [ST.bearing(p0, p1), True]
                 self.say("  %s faces %.0f deg" % (robot, self.heads[robot][0]))
