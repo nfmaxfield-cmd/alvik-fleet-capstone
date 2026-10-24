@@ -172,7 +172,8 @@ COND_FAIL_N = 3           # failed runs of a camera-dependent condition (K, KC):
 #   would be sensible for this one (limit vs false stops vs how far past the edge), once the edge test has data.
 # The camera watchdog is a third, independent guard.
 SAFETY_SETTINGS = (("safe_edge", 3.0), ("edge_dir", 0.0), ("edge_thr", 150.0), ("edge_n", 3.0), ("edge_bot_cm", 11.0),
-                   ("bumper_cm", 0.0), ("e02_face_cm", 0.0), ("e02_back_max_cm", 10.0))   # back_max: undoes explore's raise
+                   ("bumper_cm", 0.0), ("e02_face_cm", 0.0), ("e02_back_max_cm", 10.0),
+                   ("e02_cms", 10.0))   # back_max and cms: undo explore's raise and crawl
 SAFETY_CMDS = ["set %s %g" % kv for kv in SAFETY_SETTINGS]
 DEFAULT_CALIB = os.path.join(HERE, "data", "overhead_floorcal_roam1.json")   # roam1 board corners, camera unmoved
 
@@ -313,6 +314,10 @@ class Listener:
 
 
 # =============================================================================== the runner
+EXPLORE_CRAWL_CMS = 4.0        # Nick 2026-10-24: rays, probes and the square crawl (DOE-explore-crawl.md decides it)
+EXPLORE_FAST_CMS = 10.0        # e02_cms otherwise (the firmware's default): returns over ground just driven
+EXPLORE_PROBE_CM = 12.0        # chosen: the room check's short drive each way
+EXPLORE_RAY_CLEAR_CM = 25.0    # Nick 2026-10-24: no ray passes nearer another robot than this
 MAKE_WAY_EDGE_CM = 20.0        # chosen: a robot moving aside stays this far from an open edge
 EXPLORE_HOME_FRAC = 0.35       # chosen: explore ends this share of the way from its start towards its rays' middle
 EXPLORE_HOME_IN_CM = 30.0      # chosen: at most this far in from its start
@@ -370,6 +375,7 @@ class Runner:
         self.front_seen = {}                 # "all" -> [front reading - map distance]
         self.front_bad = {}                  # robot -> words: the last leg's front reading disagreed with the map
         self.fix_t = {}                      # robot -> when the camera last told it where it is
+        self.speed_now = {}                   # e02_cms last set per robot (explore crawls)
         self.return_after = []                # robots that stepped aside, to go back to their spots
         self.unc = {}                         # item 4: driven and turned since the last fix, per robot
         self.lost_place = set()              # robots that moved unseen with no trusted pose since (a failed own find)
@@ -2528,16 +2534,30 @@ class Runner:
             self.send(n, "set e02_back_max_cm %d" % EXPLORE_BACK_ALLOW_CM)
         obs = {n: [] for n in names}
         t0 = time.time()
+        # 1. the room check, every robot first (Nick, 2026-10-24, after two robots went over an open edge: one had
+        # been put down 10 cm from it): short slow drives four ways; a robot near an edge works its way in
+        room = {}
         for n in names:
             q = st["positions"].get(n)
             if not q:
                 continue
-            self.tracker.follow(n, q[0], q[1])
-            self.history.clear()
-            self.tracker.hold(HOLD_CM)
+            self.explore_follow(n)
             state, info, lid = self.explore_leg(n, "turn", 2.0)
             self.explore_stop(n, obs, lid, turn_cmd=2.0)
+            room[n] = self.explore_room(n, obs)
+            self.explore_park(n)
+        # 2. the robot with the most room explores first (Nick, 2026-10-24)
+        def room_score(n):
+            q = st["positions"].get(n) or (0.0, 0.0)
+            others = [tuple(p[:2]) for m, p in st["positions"].items() if m != n and p]
+            near = min([math.hypot(q[0] - o[0], q[1] - o[1]) for o in others] or [999.0])
+            return (sum(1 for f in room.get(n, []) if f), near)
+        order = sorted(room, key=room_score, reverse=True)
+        self.say("  exploring in this order (most room first): %s" % ", ".join(order))
+        for n in order:
+            self.explore_follow(n)
             self.say("  %s: a small square (camera and gyro check) ..." % n)
+            self.explore_speed(n, EXPLORE_CRAWL_CMS)
             for kind, val in self.EXPLORE_DANCE:
                 state, info, lid = self.explore_leg(n, kind, val)
                 if state not in ("done", "dup", "failed"):
@@ -2597,6 +2617,7 @@ class Runner:
         st["setup"]["explore_failed"] = dict(why=why, t=round(time.time(), 1))
         for n in names:
             self.send(n, "set e02_back_max_cm %d" % BACK_ALLOW_CM)
+            self.explore_speed(n, EXPLORE_FAST_CMS)
         self.exploring = False
         old_tr = self.tracker
         self.tracker = None
@@ -2624,6 +2645,94 @@ class Runner:
             return "camera calibration: FALLBACK, %s (explore failed)" % os.path.basename(src.get("file") or "?")
         cal = self.st.get("calibration")
         return "camera calibration: %s, not made by the robots this session" % (os.path.basename(cal) if cal else "none")
+
+    def explore_speed(self, n, cms):
+        """e02_cms for the robot's next straight legs (idle go legs drive at it)."""
+        if self.speed_now.get(n) != cms:
+            self.send(n, "set e02_cms %g" % cms)
+            self.speed_now[n] = cms
+            time.sleep(0.05)
+
+    def explore_follow(self, n):
+        q = self.st["positions"].get(n)
+        self.tracker.follow(n, q[0], q[1])
+        self.history.clear()
+        self.tracker.hold(HOLD_CM)
+
+    def explore_park(self, n):
+        self.moves.pop(n, None)
+        p = self.settle(min_s=0.3)
+        if p:
+            self.st["positions"][n] = [p[0], p[1], None]
+            self.tracker.park(n, p[0], p[1])
+        self.st.save()
+
+    def explore_room(self, n, obs):
+        """The room check: a slow EXPLORE_PROBE_CM drive each of four ways and back, a turn of 90 deg between, a
+        last turn back to where it faced. Returns [free?] for the four ways. Then, if an open edge was met, it moves
+        in the opposite way (if that was free) by EXPLORE_PROBE_CM, slowly. Every leg is an explore stop (more
+        data for the camera fit)."""
+        self.explore_speed(n, EXPLORE_CRAWL_CMS)
+        free, met = [], []
+        for k in range(4):
+            if k:
+                state, info, lid = self.explore_leg(n, "turn", 90.0)
+                self.explore_stop(n, obs, lid, turn_cmd=90.0)
+            state, info, lid = self.explore_leg(n, "go", EXPLORE_PROBE_CM)
+            fin = self.listener.leg_final(n, "-", lid) or {}
+            kind = MAP.stop_kind(fin.get("state"), fin.get("info"))
+            o = self.explore_stop(n, obs, lid)
+            d = abs(o["d"]) if o else 0.0
+            free.append(kind is None)
+            met.append(kind)
+            if d > 0.5:
+                state, info, lid = self.explore_leg(n, "go", -min(d, EXPLORE_EDGE_BACK_CM if kind else d))
+                self.explore_stop(n, obs, lid)
+        state, info, lid = self.explore_leg(n, "turn", 90.0)
+        self.explore_stop(n, obs, lid, turn_cmd=90.0)
+        edges = [k for k in range(4) if met[k] == "edge"]
+        self.st.setdefault("setup", {}).setdefault("explore_room", {})[n] = dict(free=free, met=met)
+        if edges:
+            away = [(k + 2) % 4 for k in edges if free[(k + 2) % 4]]
+            if away:
+                k = away[0]
+                turn = ST.wrap180(90.0 * k)
+                if abs(turn) > 150.0:
+                    for _ in range(2):
+                        state, info, lid = self.explore_leg(n, "turn", turn / 2.0)
+                        self.explore_stop(n, obs, lid, turn_cmd=turn / 2.0)
+                elif abs(turn) > 1.0:
+                    state, info, lid = self.explore_leg(n, "turn", turn)
+                    self.explore_stop(n, obs, lid, turn_cmd=turn)
+                state, info, lid = self.explore_leg(n, "go", EXPLORE_PROBE_CM)
+                self.explore_stop(n, obs, lid)
+                self.say("    %s: an open edge within %.0f cm: moved in %.0f cm first" % (n, EXPLORE_PROBE_CM,
+                                                                                     EXPLORE_PROBE_CM))
+            else:
+                self.say("    %s: an open edge within %.0f cm and no free way in: exploring carefully" % (
+                    n, EXPLORE_PROBE_CM))
+        self.say("    %s: room check: %s" % (n, ", ".join("free" if f else (m or "?") for f, m in zip(free, met))),
+                 quiet=True)
+        return free
+
+    def explore_ray_blocked(self, n, obs, own_heading):
+        """Would a ray at own_heading (its own frame) pass within EXPLORE_RAY_CLEAR_CM of another robot? Its own
+        frame is laid on the provisional floor by its stops so far (a fit with a turn, a size and maybe a mirror).
+        Returns the other robot's name or ''."""
+        stops = [q for q in obs[n] if not q.get("skip")]
+        if len(stops) < 5:
+            return ""
+        own = [(p[0], p[1]) for p, q in zip(EX.rebuild(obs[n], 1.0, 1.0), obs[n]) if not q.get("skip")]
+        flo = [self.cam.to_floor(q["u"], q["v"], EX.ROBOT_TOP_CM) for q in stops]
+        m = EX.own_to_floor_map(own, flo)
+        if m is None:
+            return ""
+        A, t = m
+        here = flo[-1]
+        d = A @ np.array([math.cos(math.radians(own_heading)), math.sin(math.radians(own_heading))])
+        hd = math.degrees(math.atan2(d[1], d[0]))
+        others = [(k, tuple(q[:2])) for k, q in self.st["positions"].items() if k != n and q]
+        return MAP.ray_blocked(here, hd, others, clear_cm=EXPLORE_RAY_CLEAR_CM, length_cm=self.EXPLORE_RAY_CM)
 
     def explore_home(self, n, obs):
         """Back to where it started exploring, on its own wheels and gyro (Nick, 2026-10-23 evening: the robots
@@ -2653,7 +2762,9 @@ class Runner:
             turn /= 2.0
         state, info, lid = self.explore_leg(n, "turn", turn)
         self.explore_stop(n, obs, lid, turn_cmd=turn)
-        state, info, lid = self.explore_leg(n, "go", min(dist, self.EXPLORE_RAY_CM), timeout=40.0)
+        self.explore_speed(n, EXPLORE_CRAWL_CMS)
+        state, info, lid = self.explore_leg(n, "go", min(dist, self.EXPLORE_RAY_CM),
+                                            timeout=min(dist, self.EXPLORE_RAY_CM) / EXPLORE_CRAWL_CMS * 1.5 + 10.0)
         self.explore_stop(n, obs, lid)
         self.say("    %s: back near where it started exploring, a little towards the middle (%.0f cm by its own wheels)"
                  % (n, dist), quiet=True)
@@ -2673,7 +2784,14 @@ class Runner:
                 turn = turn / 2.0
             state, info, lid = self.explore_leg(n, "turn", turn)
             self.explore_stop(n, obs, lid, turn_cmd=turn)
-            state, info, lid = self.explore_leg(n, "go", self.EXPLORE_RAY_CM, timeout=40.0)
+            who = self.explore_ray_blocked(n, obs, want)
+            if who:
+                self.say("    ray %d: skipped (it would pass %s)" % (k + 1, who), quiet=True)
+                self.st.setdefault("setup", {}).setdefault("explore_skipped_rays", []).append([n, k, round(want, 1), who])
+                continue
+            self.explore_speed(n, EXPLORE_CRAWL_CMS)
+            state, info, lid = self.explore_leg(n, "go", self.EXPLORE_RAY_CM,
+                                                timeout=self.EXPLORE_RAY_CM / EXPLORE_CRAWL_CMS * 1.5 + 10.0)
             fin = self.listener.leg_final(n, "-", lid) or {}
             kind = MAP.stop_kind(fin.get("state"), fin.get("info"))
             o = self.explore_stop(n, obs, lid, contact=kind)
@@ -2697,6 +2815,7 @@ class Runner:
                 # which explore can't give yet; forward has the front stop and the edge guard)
                 state, info, lid = self.explore_leg(n, "turn", 175.0)
                 self.explore_stop(n, obs, lid, turn_cmd=175.0)
+                self.explore_speed(n, EXPLORE_FAST_CMS)          # back over ground it has just driven
                 state, info, lid = self.explore_leg(n, "go", back, timeout=40.0)
                 self.explore_stop(n, obs, lid)
 
@@ -2825,6 +2944,7 @@ class Runner:
             self.tracker.park(n, q[0], q[1])
         for n in names:
             self.send(n, "set e02_back_max_cm %d" % BACK_ALLOW_CM)
+            self.explore_speed(n, EXPLORE_FAST_CMS)
         st["setup"]["explore_pending"] = False
         st["setup"]["calibration_source"] = dict(kind="explore", file=path, session=True,
                                                  words="made by the robots this session (explore)")

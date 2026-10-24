@@ -818,3 +818,29 @@ def rect_check(rect):
         if kinds.count(sd["kind"]) / float(len(kinds)) < SIDE_KIND_SHARE:
             why.append("side %s is %s in only %d of %d rays" % (name, sd["kind"], kinds.count(sd["kind"]), len(kinds)))
     return "; ".join(why)
+
+
+def own_to_floor_map(own_xy, floor_xy):
+    """A 2x2 linear map with a shift (a turn, a size and, if the camera's view needs it, a mirror) from a robot's own
+    frame to the provisional floor frame, from matched points: (A, t) with floor = A @ own + t, or None. Used while
+    exploring to know which way a robot's ray points on the floor (to keep rays off the other robots)."""
+    P = np.asarray(own_xy, float)
+    W = np.asarray(floor_xy, float)
+    if len(P) < 4 or np.ptp(P[:, 0]) + np.ptp(P[:, 1]) < 10.0:
+        return None
+    best = None
+    for flip in (1.0, -1.0):
+        Pf = P * np.array([1.0, flip])
+        mp, mw = Pf.mean(0), W.mean(0)
+        A_, B_ = Pf - mp, W - mw
+        U, S, Vt = np.linalg.svd(B_.T @ A_)
+        D = np.eye(2)
+        if np.linalg.det(U @ Vt) < 0:
+            D[1, 1] = -1
+        R = U @ D @ Vt
+        s = float(np.trace(np.diag(S) @ D) / max(1e-9, (A_ ** 2).sum()))
+        err = float(np.sum(np.linalg.norm((s * (R @ A_.T)).T - B_, axis=1) ** 2))
+        if best is None or err < best[0]:
+            A = s * R @ np.diag([1.0, flip])
+            best = (err, A, mw - A @ P.mean(0))
+    return best[1], best[2]

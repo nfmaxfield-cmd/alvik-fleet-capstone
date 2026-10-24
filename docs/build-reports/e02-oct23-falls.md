@@ -33,3 +33,19 @@ to Nick until there is a tested fix (summary rule).
 - Rays checked against the other robots' places (provisional camera positions are enough for that).
 - Explore one robot at a time with the others parked well away, or give each robot its own sector.
 - Edge guard tuning from tonight's real readings (first real edge stops at ray speed: 7 bottom-zone, 1 line).
+
+## The footage (release e02-session-oct23-night, part aa)
+Both robots went over the **right-hand open edge** of the picture. Frame 14944 (22:32:54) shows one past the
+plywood's end, lower right; frame 24500 (22:39:15) shows robots along that edge. The 22:45 snapshot shows Center off
+the top-right corner and Right off the right edge a third of the way up. Center had been put down about 10 cm from
+that edge.
+
+## Fixes built 2026-10-24 (Nick: all four)
+1. Room check first: 12 cm crawling drives four ways before anything else; a robot that meets an open edge moves in
+   12 cm the opposite way first.
+2. Rays, the square and the way home crawl at 4 cm/s (`EXPLORE_CRAWL_CMS`); returns over ground just driven at
+   10 cm/s. DOE: docs/experiments/DOE-explore-crawl.md.
+3. A ray that would pass within 25 cm of another robot is skipped (its own frame laid on the provisional floor by
+   its stops so far).
+4. The robot with the most room explores first.
+`e02_cms` and `e02_back_max_cm` are put back after explore and at every session start (SAFETY_SETTINGS).
