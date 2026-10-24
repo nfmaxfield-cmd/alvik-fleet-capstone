@@ -270,3 +270,19 @@ live page with a 15-minute default: `--view-open`, `--web-ask`); `wait_robots` c
 answer the Pi. The laptop way is unchanged.
 **Simulator:** `PLACE_<robot>.json` in the sim folder puts a robot down by hand (the mark check in dry runs).
 Tests: tests/test_e02_camerr.py, tests/test_e02_webask.py, tools/pi/tests/test_upload_session.py.
+**Fixes from the 2026-10-24 dry runs (after the build above):**
+- KC took the robot's pose from its RAW rows, which are raw odometry, not its board pose: a first fix 138 cm off sent
+  a robot away (safety stop). The pose at a stop is now its route waypoint (`kc_belief`, the waypoints from
+  `board.route_floor`; no fix if the camera is not within 15 cm of a waypoint still ahead), position only.
+- One fix per waypoint (camera jitter made one stop look like twelve).
+- Explore: robots left out of the fit still count as obstacles for the rays (`EX.contacts(others=)`); a board side's
+  check ignores front stops well inside the board (something standing on it).
+- With `--marks`, the tape marks judge explore's calibration right after explore (`explore_tape_check`): more than
+  `MARK_ACCEPT_CM` 2.5 cm off (median; `--mark-accept-cm`) falls back and takes the marks again. Scattered-start dry
+  run: explore passed its own checks at 4.3 cm off the marks and the session lost robots 29 times; with this check a
+  bad explore cannot spoil a session. Explore from scattered starts is still not accurate enough on its own: open.
+- Dry runs with `--web-ask` put the questions on the live page (tested: 10 questions answered there).
+Dry runs 2026-10-24 (simulator truth): scattered start, explore kept (1.5 cm at the marks): 14 runs, 0 failed;
+end / far-point mean C 2.7 / 1.9 cm, KC 2.3 / 0.8, K 0.3 / 0.7, U 24.1 / 16.7. Forced fallback: 7 runs, 0 failed.
+Open: the uncertainty model put the robot's own error at the far point near 4 cm where the simulator's truth was
+1.6 cm (it trusts the camera too much; DOE-confidence.md).
