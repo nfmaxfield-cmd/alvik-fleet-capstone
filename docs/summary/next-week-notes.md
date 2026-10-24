@@ -35,6 +35,22 @@ Nick, 2026-10-24: runs in which a sensor's input is deliberately degraded (or sw
 see whether the program notices and adapts. Goes with the next build: the system learns how much to trust each
 sensor for itself (docs/build-plans/e02-oct22-build.md, "Next build").
 
+## Simulation before the real board (Nick, 2026-10-24: talk about it in the summary)
+Every change runs in the simulator (tools/experiment/e02_sim.py: the robots, the camera, the board) before the
+robots. How to put a number on what it saved:
+- **A catch log:** each problem found, where (simulator or real board), and what it would have cost on the real
+  board (a robot off the edge, a session stalled, a run lost). So far, roughly: 39 fixes in the runner's code say a
+  dry run found them, and 25 of 366 commits. 2026-10-24 evening alone, before the robots ran it: the virtual
+  border's first version would have held a real session 5 times for nothing (driving along the edge, turning on
+  its spot, backing away just after a crawl) and twice backed a robot into the border; explore with one robot
+  failed its fit (a fallback was added). Measured cost of not simulating: stage 3's bug (pose kept from the
+  session before) was not in the simulator, because its robots start each session switched on fresh, and two
+  robots went over the edge.
+- **Simulator against the real board:** the simulator predicts well that the program works (no errors, no
+  holds), but is optimistic about accuracy (KC 0.6 cm at the start point in the simulator, 2-17 cm real). That
+  is its role: catching logic faults cheaply, not predicting accuracy. Adding real failure modes found on the
+  board (a pose kept between sessions, a lost tracker) makes it catch more.
+
 ## Planned test: driving without the lights (Nick, 2026-10-24)
 Runs with the robots' blink code off (`set blink_codes 0`: no firmware change) to see whether the camera's
 tracking and naming lean on the lights. A degraded-input run like the sensor ones.
