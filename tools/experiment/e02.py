@@ -3118,7 +3118,7 @@ class Runner:
                 sol["rms_px"], ", ".join("%s %.3f" % kv for kv in sol["s"].items()),
                 ", ".join("%s %.3f" % kv for kv in sol["g"].items())))
             raise ExploreFailed(bad)
-        pts = EX.contacts(robots, sol)
+        pts = EX.contacts(robots, sol, others={n: obs[n] for n in left_out if n in obs})
         sd = pts
         rect = EX.rectangle_from_rays(pts)
         edge_ahead = None

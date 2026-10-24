@@ -662,11 +662,13 @@ def refine_edges(rect, nominal_ahead_cm, lo_cm=0.0, hi_cm=16.0, min_spread=0.3):
 SWERVE_DEG = 3.0     # chosen: a straight ray that turned more than this by the time it stopped
 
 
-def contacts(robots, sol, robot_clear_cm=22.0, ahead=None):
+def contacts(robots, sol, robot_clear_cm=22.0, ahead=None, others=None):
     """The rays' contact points in the world frame: [(x, y, kind, heading deg)]. A ray stopped by another robot is
     left out: where that robot stood at that moment (its last stop before then, or its first one if it had not
     moved yet: 2026-10-23 dry run, Center's ray met Right, which had not explored yet, and only robots' end places
-    were checked). ahead: {kind: cm} to override e02_map's reach."""
+    were checked). ahead: {kind: cm} to override e02_map's reach. others: {name: stops} of robots left out of the
+    fit (2026-10-24 dry run: Center was left out, and rays that met it were taken for the board, scattering that
+    side over 28 cm): they still stand on the board, so where the fitted camera sees them is checked too."""
     paths = {n: to_world(rebuild(st, sol["s"][n], sol["g"][n]), sol["frames"][n]) for n, st in robots.items()}
 
     def where(m, t):
@@ -676,6 +678,20 @@ def contacts(robots, sol, robot_clear_cm=22.0, ahead=None):
             if q.get("t") is not None and t is not None and q["t"] <= t:
                 k = i
         return paths[m][k]
+
+    def seen(m, t):
+        """A left-out robot's place at time t: its stop then, where the fitted camera sees it."""
+        st = (others or {}).get(m) or []
+        q0 = None
+        for q in st:
+            if q.get("u") is None:
+                continue
+            if q0 is None or (q.get("t") is not None and t is not None and q["t"] <= t):
+                q0 = q
+        if q0 is None:
+            return None
+        w = world_of(sol, q0["u"], q0["v"])
+        return w if w is not None and np.all(np.isfinite(w)) else None
 
     out = []
     for n, stops in robots.items():
@@ -692,6 +708,9 @@ def contacts(robots, sol, robot_clear_cm=22.0, ahead=None):
                 c = MAP.contact_point(x, y, th, kind, q.get("cue", ""))
             if any(math.hypot(c[0] - o[0], c[1] - o[1]) < robot_clear_cm
                    for m in robots if m != n for o in [where(m, q.get("t"))]):
+                continue
+            if any(math.hypot(c[0] - o[0], c[1] - o[1]) < robot_clear_cm
+                   for m in (others or {}) for o in [seen(m, q.get("t"))] if o is not None):
                 continue
             out.append((c[0], c[1], kind, th, q.get("cue", "")))
     return out
@@ -810,6 +829,13 @@ def rect_check(rect):
             why.append("side %s met by %d ray" % (name, len(pts)))
             continue
         coords = [(ca * p[0] - sa * p[1]) if name in ("x0", "x1") else (sa * p[0] + ca * p[1]) for p in pts]
+        if sd.get("kind") == "board":
+            # a front stop well inside the board met something standing on it (a robot, parked or left out of the
+            # fit), not the board: not counted against the side (2026-10-24 dry run: three such stops, 25-60 cm short
+            # of the board, failed a side that four stops agreed on)
+            inward = 1.0 if name.endswith("0") else -1.0
+            keep = [(p, c) for p, c in zip(pts, coords) if (c - v) * inward <= SIDE_NEAR_CM]
+            pts, coords = [k[0] for k in keep], [k[1] for k in keep]
         near = [p for p, c in zip(pts, coords) if abs(c - v) <= SIDE_NEAR_CM]
         if len(near) < SIDE_MIN_POINTS or len(near) < 0.5 * len(pts):
             why.append("side %s: only %d of %d ray ends agree where it is" % (name, len(near), len(pts)))
