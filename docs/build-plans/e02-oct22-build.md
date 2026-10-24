@@ -219,3 +219,9 @@ board's axis (`board_correct`, sent as a fix, logged as `board_corrections`; at 
 - The sides check (`rect_check`) also passed on 4 recorded dry runs and rejected the bad one; the explore in the
   last dry run: 4.8 px, board 125.2 x 118.1 cm (truth 121.55 x 121.3), the y-board line then moved 7.7 cm by the
   finds (item 3 doing its job on explore's worst side).
+- **Make way (Nick 22:40: "your call"; coordinated moves, first piece):** a parked robot within 20 cm of an edge-find
+  path drives sideways out of it (on the board, 20 cm from open edges and other robots), and goes back to its own
+  spot before the next run starts (straight away it met the finder, still by its spot). Logged (`make_way`).
+- **Open (dry run 23:20):** after a board is gone, the routes are not re-checked against the new open edge: Left's
+  straight route from the start spot ran at the edge where the board had been and the watchdog stopped it. Next:
+  re-run `route_fits` when `Board.missing` changes, and leave out (or move) routes that no longer fit.

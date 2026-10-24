@@ -370,6 +370,7 @@ class Runner:
         self.front_seen = {}                 # "all" -> [front reading - map distance]
         self.front_bad = {}                  # robot -> words: the last leg's front reading disagreed with the map
         self.fix_t = {}                      # robot -> when the camera last told it where it is
+        self.return_after = []                # robots that stepped aside, to go back to their spots
         self.unc = {}                         # item 4: driven and turned since the last fix, per robot
         self.lost_place = set()              # robots that moved unseen with no trusted pose since (a failed own find)
 
@@ -4179,18 +4180,12 @@ class Runner:
             why = touch(b, "B")
         sol = EF.solve(touches, a, b) if not why else None
         self.end_moves(robot)
-        if moved_aside:
-            # and back to their spots, now the way is free again (2026-10-23 dry run: left where it stepped aside,
-            # Left stood in the next run's route and the camera watchdog stopped it)
-            p_here = self.pos(robot, fresh_s=2.0)
-            if p_here:
-                self.st["positions"][robot] = [p_here[1], p_here[2], self.heads.get(robot, [None])[0]]
-                self.tracker.park(robot, p_here[1], p_here[2])
-            for m in dict.fromkeys(moved_aside):
-                if self.activate(m):
-                    ok_, why_ = self.park(m)
-                    self.say("    %s: back to its spot%s" % (m, "" if ok_ else " failed (%s)" % why_), quiet=ok_)
-            self.activate(robot)
+        for m in moved_aside:
+            # back to their spots once this robot's run is over and it has parked (2026-10-23 dry runs: left where it
+            # stepped aside, Left stood in the next run's route; sent back straight away, this robot still stood
+            # by its spot)
+            if m not in self.return_after:
+                self.return_after.append(m)
         t1 = time.time()
         rec = dict(t=round(t0, 1), robot=robot, order=order, a=list(a[:2]), b=list(b[:2]),
                    touches=touches, kinds={"%s=%g" % k: v for k, v in found_kinds.items()}, why=why)
@@ -4376,9 +4371,22 @@ class Runner:
             robot, len(obs), len(data), words, ("; " + "; ".join(res["reasons"])) if res["reasons"] else ""))
 
     # --- one run ----------------------------------------------------------------------------------
+    def send_back_aside(self):
+        """Robots that stepped aside for another (make_way) go back to their own spots, before the next run starts
+        (every other robot is parked by then)."""
+        while self.return_after:
+            m = self.return_after.pop(0)
+            if m in self.unavailable or not self.activate(m):
+                continue
+            ok_, why_ = self.park(m)
+            self.say("    %s: back to its spot%s" % (m, "" if ok_ else " failed (%s)" % why_))
+        self.active = None
+
     def do_run(self, r):
         robot, cond, route = r["robot"], r["cond"], r["route"]
         st = self.st
+        if self.return_after:
+            self.send_back_aside()
         done, total = st.counts()
         el = time.time() - st["t_session_start"] + st.get("elapsed_before", 0)
         left = (total - done) * st.mean_run_s()
@@ -4934,6 +4942,8 @@ class Runner:
                 if self.skip_conds or self.unavailable:
                     self.say("Nothing left that can run now (put aside: %s). --resume runs the rest later." % ", ".join(
                         sorted(self.skip_conds) + sorted(self.unavailable)))
+        if self.return_after:
+            self.send_back_aside()
         done = [r for r in st["schedule"] if r["status"] == "done"]
         self.mark("e02 session end")
         self.say("=== Session: %d runs done, %d failed, %d still to do ===" % (
