@@ -197,6 +197,22 @@ def num(v):
         return None
 
 
+def leg_delta(start, fin):
+    """An idle leg's own move (x forward, y left, th turned) from its 'started' and final LEG records. A robot
+    with no pose yet starts every idle leg at (0, 0, 0), so the final pose is already the move; one whose pose
+    was set by camera fixes (a session before, not switched off) reports its board pose (2026-10-24 Pi plan,
+    stage 3). Returns (None, None, None) if the final pose is missing; the final pose as is if the start is."""
+    x1, y1, t1 = (num(fin.get("x_cm")), num(fin.get("y_cm")), num(fin.get("th_deg")))
+    if None in (x1, y1, t1):
+        return None, None, None
+    x0, y0, t0 = (num((start or {}).get("x_cm")), num((start or {}).get("y_cm")), num((start or {}).get("th_deg")))
+    if None in (x0, y0, t0):
+        return x1, y1, t1
+    dx, dy = x1 - x0, y1 - y0
+    c, s = math.cos(math.radians(t0)), math.sin(math.radians(t0))
+    return dx * c + dy * s, -dx * s + dy * c, ST.wrap180(t1 - t0)
+
+
 def hms(s):
     s = max(0, int(s))
     return "%d:%02d" % (s // 3600, (s % 3600) // 60)
@@ -289,6 +305,15 @@ class Listener:
                 state = rec.get("state") or rec.get("result")
                 if n == robot and rec.get("id") == str(lid) and rec.get("run") in (run, "-") and \
                         state in ("done", "failed", "refused", "dup"):
+                    return dict(rec, state=state)
+        return None
+
+    def leg_start(self, robot, run, lid):
+        """The 'started' LEG record of leg id `lid` (the robot's pose as the leg began), or None."""
+        with self.cv:
+            for t, n, rec in reversed(self.recs["LEG"]):
+                state = rec.get("state") or rec.get("result")
+                if n == robot and rec.get("id") == str(lid) and rec.get("run") in (run, "-") and state == "started":
                     return dict(rec, state=state)
         return None
 
@@ -2605,6 +2630,12 @@ class Runner:
             rec = dict(x_cm=0.0, y_cm=0.0, th_deg=0.0)
             turn_cmd = None
         x, y, th = (num(rec.get("x_cm")), num(rec.get("y_cm")), num(rec.get("th_deg")))
+        if lid is not None and rec.get("state") not in ("refused", "dup") and None not in (x, y, th):
+            # 2026-10-24 Pi plan, stage 3: a robot whose pose was set by camera fixes earlier (a session before,
+            # no switch-off) reports its board pose, not the leg's own: "go 12" read as 112 cm, it backed 112 cm
+            # and went over the open edge. The leg's own move is always the done pose less the started pose.
+            st0 = self.listener.leg_start(robot, "-", lid)
+            x, y, th = leg_delta(st0, rec)
         if p is None or None in (x, y, th):
             return None
         u, v = self.cam.project((p[0], p[1], EX.ROBOT_TOP_CM))
@@ -2854,6 +2885,7 @@ class Runner:
             d = abs(o["d"]) if o else 0.0
             free.append(kind is None)
             met.append(kind)
+            d = min(d, EXPLORE_PROBE_CM + 2.0)     # never back further than the probe could have gone (stage 3)
             if d > 0.5:
                 state, info, lid = self.explore_leg(n, "go", -min(d, EXPLORE_EDGE_BACK_CM if kind else d))
                 self.explore_stop(n, obs, lid)
@@ -2983,6 +3015,7 @@ class Runner:
             if o is not None and bo is not None:
                 o["d_back"] = bo["d"]
         back = abs(o["d"]) + (o.get("d_back") or 0.0) if o else 0.0
+        back = min(back, self.EXPLORE_RAY_CM + EXPLORE_EDGE_BACK_CM)   # never further than the ray could go (stage 3)
         if back > 1.0:
             # back the way it came: (nearly) a half turn, then forward (175 deg: a 180 is ambiguous, the robot
             # sometimes goes round the other way and reports +-180 alike: 2026-10-23 dry run); (backing up is blind and needs camera fixes,

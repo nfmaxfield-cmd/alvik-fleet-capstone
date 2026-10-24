@@ -150,3 +150,19 @@ def test_kc_belief_walks_forward_along_the_route():
     assert i == 2 and xy == (45.0, 40.0) and abs(dist - 100.0) < 1e-6 and abs(turned - 180.0) < 1e-6
     assert E.kc_belief(wps, (94, 91), 3)[0] == 4                     # back at the start: the last waypoint, not the first
     assert E.kc_belief(wps, (70, 65), 0) is None                     # between waypoints: not sure
+
+
+def test_leg_delta_with_a_board_pose_kept_from_the_session_before():
+    """2026-10-24 Pi plan, stage 3: Left's records for `go 12` (pose known from stage 2's camera fixes). The leg
+    moved 12 cm, not 112 (the board pose's y), and the turn records give the turn, not the board heading."""
+    import e02 as E
+    st = dict(x_cm="18.60", y_cm="100.40", th_deg="116.48")
+    fin = dict(x_cm="13.29", y_cm="110.99", th_deg="116.56")
+    x, y, th = E.leg_delta(st, fin)
+    assert abs(x - 11.85) < 0.1 and abs(y) < 0.5 and abs(th) < 0.2
+    x, y, th = E.leg_delta(dict(x_cm="63.31", y_cm="11.54", th_deg="116.87"),
+                           dict(x_cm="63.48", y_cm="11.24", th_deg="-153.05"))       # turn 90
+    assert abs(x) < 0.5 and abs(th - 90.08) < 0.1
+    # a robot with no pose yet starts each idle leg at 0: the final record is the move
+    assert E.leg_delta(dict(x_cm="0", y_cm="0", th_deg="0"), dict(x_cm="12", y_cm="0.1", th_deg="0.2"))[0] == 12.0
+    assert E.leg_delta(None, dict(x_cm="12", y_cm="0", th_deg="0"))[0] == 12.0
