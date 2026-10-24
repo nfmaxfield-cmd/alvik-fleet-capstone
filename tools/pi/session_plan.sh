@@ -33,7 +33,7 @@ if [ "${1:-}" = "right" ]; then
   # with the session-1 calibration file, all refused at 1.5; chosen, the sensor-trust build replaces it).
   EXTRA="--robots Right --fit-max-rms-cm 2.5 --battery-watch-s 300"
   stage R1 $CAL $EXTRA --hours 1
-  stage R2 $EXTRA --hours 0.5
+  stage R2 $EXTRA --calib tools/experiment/data/overhead_floorcal_roam1.json --hours 0.5   # the fallback if explore fails (still explore: no --classic-setup)
 else
   stage 1 $CAL --own-sensor-only --hours 0.25
   stage 2 $CAL --hours 0.75
