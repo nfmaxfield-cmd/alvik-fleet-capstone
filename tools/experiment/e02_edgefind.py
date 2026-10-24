@@ -19,7 +19,7 @@ import e02_map as MAP
 SIDESTEP_CM = 25.0          # chosen: 25 cm between the two touches on A; a 1 cm error in a touch is then 2.3 deg
 SIDESTEP_MIN_CM = 10.0      # chosen: a sidestep cut short by an edge is still used from this far (1 cm -> 5.7 deg)
 BACK_CM = 8.0               # backing off a board before turning (blind, short)
-BACK_EDGE_CM = 12.0         # backing off an open edge: the sidestep then runs beside it with room for a slant
+BACK_EDGE_CM = 9.5          # backing off an open edge: the sidestep then runs beside it with room for a slant
 CORNER_KEEP_CM = 20.0       # touches no nearer than this to where A and B meet (both guards at once otherwise)
 APPROACH_EXTRA_CM = 15.0    # drive this much past where the map puts the boundary before giving up (not found)
 
@@ -28,13 +28,26 @@ def wrap(a):
     return (a + 180.0) % 360.0 - 180.0
 
 
-def choose_boundaries(x, y, sides, corner_skip=None):
+def path_clear(x, y, boundary, others, clear_cm=20.0):
+    """No other robot within clear_cm of the straight drive from (x, y) to the boundary (2026-10-23 dry run: a
+    robot driving to the far board met a parked robot, and the camera watchdog stopped it)."""
+    h = math.radians(facing(boundary, x, y))
+    ux, uy = math.cos(h), math.sin(h)
+    length = abs((x if boundary[0] == "x" else y) - boundary[1])
+    for ox, oy in others:
+        t = (ox - x) * ux + (oy - y) * uy
+        if 0 < t < length + 5 and abs(-(ox - x) * uy + (oy - y) * ux) < clear_cm:
+            return False
+    return True
+
+
+def choose_boundaries(x, y, sides, corner_skip=None, others=()):
     """The two boundaries to touch from (x, y): the nearest 'x' line and the nearest 'y' line from sides
     [('x', value, kind), ('y', value, kind)] (kind 'board' or 'edge'). Returns (A, B): A is the nearer one (touched
     twice). corner_skip: an (x, y) corner whose two lines are both open edges (never touched together: Nick,
     2026-10-22, both edge guards at once with nothing behind) - then the farther 'y' or 'x' line is used."""
-    xs = sorted([s for s in sides if s[0] == "x"], key=lambda s: abs(x - s[1]))
-    ys = sorted([s for s in sides if s[0] == "y"], key=lambda s: abs(y - s[1]))
+    xs = sorted([s for s in sides if s[0] == "x"], key=lambda s: (not path_clear(x, y, s, others), abs(x - s[1])))
+    ys = sorted([s for s in sides if s[0] == "y"], key=lambda s: (not path_clear(x, y, s, others), abs(y - s[1])))
     if not xs or not ys:
         return None
     a, b = xs[0], ys[0]

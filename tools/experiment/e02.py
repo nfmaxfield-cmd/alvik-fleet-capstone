@@ -172,7 +172,7 @@ COND_FAIL_N = 3           # failed runs of a camera-dependent condition (K, KC):
 #   would be sensible for this one (limit vs false stops vs how far past the edge), once the edge test has data.
 # The camera watchdog is a third, independent guard.
 SAFETY_SETTINGS = (("safe_edge", 3.0), ("edge_dir", 0.0), ("edge_thr", 150.0), ("edge_n", 3.0), ("edge_bot_cm", 11.0),
-                   ("bumper_cm", 0.0), ("e02_face_cm", 0.0))
+                   ("bumper_cm", 0.0), ("e02_face_cm", 0.0), ("e02_back_max_cm", 10.0))   # back_max: undoes explore's raise
 SAFETY_CMDS = ["set %s %g" % kv for kv in SAFETY_SETTINGS]
 DEFAULT_CALIB = os.path.join(HERE, "data", "overhead_floorcal_roam1.json")   # roam1 board corners, camera unmoved
 
@@ -315,7 +315,9 @@ class Listener:
 # =============================================================================== the runner
 EXPLORE_HOME_FRAC = 0.35       # chosen: explore ends this share of the way from its start towards its rays' middle
 EXPLORE_HOME_IN_CM = 30.0      # chosen: at most this far in from its start
-EXPLORE_EDGE_BACK_CM = 10.0   # chosen: clears the bottom zone's ~9 cm look-ahead past the edge
+EXPLORE_EDGE_BACK_CM = 9.5    # chosen: clears most of the bottom zone's ~9 cm look-ahead; under the firmware's 10 cm
+EXPLORE_BACK_ALLOW_CM = 1000   # e02_back_max_cm while exploring (only edge back-offs go backwards)
+BACK_ALLOW_CM = 10             # the firmware's default, put back after explore
 
 
 class ExploreShort(Exception):
@@ -2517,6 +2519,11 @@ class Runner:
             2, round(len(names) * 1.7)))
         self.mark("e02 explore start")
         self.find_all(names)
+        # backing off an edge it has just felt is the one blind move explore needs, and no camera fix can be sent
+        # yet (its pose is unknown): the per-fix allowance is raised for explore and put back after (2026-10-23
+        # dry run: every 10 cm back-off after the first was refused)
+        for n in names:
+            self.send(n, "set e02_back_max_cm %d" % EXPLORE_BACK_ALLOW_CM)
         obs = {n: [] for n in names}
         t0 = time.time()
         for n in names:
@@ -2586,6 +2593,8 @@ class Runner:
         self.say("!!! FALLING BACK to a camera calibration not made by the robots (the studio's, the corner clicks, or "
                  "the board's corners). Every run will say so.")
         st["setup"]["explore_failed"] = dict(why=why, t=round(time.time(), 1))
+        for n in names:
+            self.send(n, "set e02_back_max_cm %d" % BACK_ALLOW_CM)
         self.exploring = False
         old_tr = self.tracker
         self.tracker = None
@@ -2808,6 +2817,8 @@ class Runner:
             self.tracker.hold(HOLD_CM)
             self.fix_now(n, self.heads[n][0])              # the robot's own frame becomes the board's
             self.tracker.park(n, q[0], q[1])
+        for n in names:
+            self.send(n, "set e02_back_max_cm %d" % BACK_ALLOW_CM)
         st["setup"]["explore_pending"] = False
         st["setup"]["calibration_source"] = dict(kind="explore", file=path, session=True,
                                                  words="made by the robots this session (explore)")
@@ -4049,7 +4060,8 @@ class Runner:
         time.sleep(0.15)
         self.moves[robot] = dict(run="-", why="edge find")
         sides = self.edge_sides()
-        ab = EF.choose_boundaries(p[0], p[1], sides)
+        others = [tuple(q[:2]) for n, q in self.st["positions"].items() if n != robot and q]
+        ab = EF.choose_boundaries(p[0], p[1], sides, others=others)
         if ab is None:
             out.update(words="edge find: no two boundaries at right angles on the map", t1=time.time())
             return out
@@ -4080,6 +4092,9 @@ class Runner:
                 return "drove %.0f cm towards the %s=%.0f side and met nothing" % (gap + EF.APPROACH_EXTRA_CM, bd[0], bd[1])
             touches.append(dict(x=pose[0], y=pose[1], th=pose[2], kind=kind, on=on, cue=MAP.edge_cue(info)))
             found_kinds[(bd[0], round(bd[1], 1))] = (bd[2], kind)
+            # its pose as the fix first: the firmware allows e02_back_max_cm of blind backing per fix
+            self.send(robot, "fix %.2f %.2f %.1f %.3f" % (pose[0], pose[1], pose[2], time.time()))
+            time.sleep(0.15)
             st_, info, rec = self.edge_leg(robot, "go", -(EF.BACK_EDGE_CM if kind == "edge" else EF.BACK_CM))
             update(rec)
             return ""
@@ -4096,6 +4111,8 @@ class Runner:
                     continue
                 moved = math.hypot(pose[0] - before[0], pose[1] - before[1])
                 if kind == "go" and "plywood edge" in (info or "") and moved >= EF.SIDESTEP_MIN_CM:
+                    self.send(robot, "fix %.2f %.2f %.1f %.3f" % (pose[0], pose[1], pose[2], time.time()))
+                    time.sleep(0.15)
                     # stopped by an edge part way (2026-10-23 dry run: a slant took it towards the open edge it had
                     # just touched): back off it, blind, and use the sidestep it made (the two touches need only be
                     # apart, not exactly SIDESTEP_CM)
