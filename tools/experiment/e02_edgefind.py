@@ -17,6 +17,7 @@ import math
 import e02_map as MAP
 
 SIDESTEP_CM = 25.0          # chosen: 25 cm between the two touches on A; a 1 cm error in a touch is then 2.3 deg
+SIDESTEP_MIN_CM = 10.0      # chosen: a sidestep cut short by an edge is still used from this far (1 cm -> 5.7 deg)
 BACK_CM = 8.0               # backing off a board before turning (blind, short)
 BACK_EDGE_CM = 12.0         # backing off an open edge: the sidestep then runs beside it with room for a slant
 CORNER_KEEP_CM = 20.0       # touches no nearer than this to where A and B meet (both guards at once otherwise)
@@ -65,6 +66,28 @@ def sidestep_sign(boundary_a, boundary_b, x, y):
     bx = boundary_b[1] - x if boundary_b[0] == "x" else 0.0
     by = boundary_b[1] - y if boundary_b[0] == "y" else 0.0
     return -1 if lx * bx + ly * by > 0 else 1
+
+
+def sidestep_room(boundary_a, x, y, sides):
+    """The sidestep direction along A with the most room: (+1 turn left / -1 turn right, facing A), and that room
+    (cm to the nearest boundary across A's direction on that side). 2026-10-23 dry run: away-from-B took a robot
+    21 cm from the open edge on the other side into it; room on both sides decides now."""
+    h = math.radians(facing(boundary_a, x, y))
+    lx, ly = -math.sin(h), math.cos(h)            # its left, facing A
+    best = None
+    for sgn in (1, -1):
+        dx, dy = sgn * lx, sgn * ly
+        room = float("inf")
+        for s_ in sides:
+            if s_[0] == boundary_a[0]:
+                continue                          # parallel to A
+            d = ((s_[1] - x) / dx) if s_[0] == "x" and abs(dx) > 1e-6 else (
+                ((s_[1] - y) / dy) if s_[0] == "y" and abs(dy) > 1e-6 else -1)
+            if d > 0:
+                room = min(room, d)
+        if best is None or room > best[1]:
+            best = (sgn, room)
+    return best
 
 
 def solve(touches, a, b):

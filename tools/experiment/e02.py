@@ -4086,13 +4086,24 @@ class Runner:
 
         why = touch(a, "A")
         if not why:
-            sgn = EF.sidestep_sign(a, b, pose[0], pose[1])
-            for kind, val in (("turn", sgn * 90.0), ("go", EF.SIDESTEP_CM), ("turn", -sgn * 90.0)):
+            sgn, room = EF.sidestep_room(a, pose[0], pose[1], sides)
+            step = max(EF.SIDESTEP_MIN_CM, min(EF.SIDESTEP_CM, room - 20.0))     # 20 cm clear of what is beside
+            for kind, val in (("turn", sgn * 90.0), ("go", step), ("turn", -sgn * 90.0)):
+                before = list(pose)
                 st_, info, rec = self.edge_leg(robot, kind, val)
                 update(rec)
-                if st_ not in ("done", "dup"):
-                    why = "the sidestep along the %s=%.0f side stopped (%s)" % (a[0], a[1], info)
-                    break
+                if st_ in ("done", "dup"):
+                    continue
+                moved = math.hypot(pose[0] - before[0], pose[1] - before[1])
+                if kind == "go" and "plywood edge" in (info or "") and moved >= EF.SIDESTEP_MIN_CM:
+                    # stopped by an edge part way (2026-10-23 dry run: a slant took it towards the open edge it had
+                    # just touched): back off it, blind, and use the sidestep it made (the two touches need only be
+                    # apart, not exactly SIDESTEP_CM)
+                    st2, info2, rec2 = self.edge_leg(robot, "go", -EF.BACK_CM)
+                    update(rec2)
+                    continue
+                why = "the sidestep along the %s=%.0f side stopped (%s)" % (a[0], a[1], info)
+                break
         if not why:
             why = touch(a, "A")
         if not why:

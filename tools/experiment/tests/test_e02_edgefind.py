@@ -70,3 +70,11 @@ def test_sidestep_moves_away_from_b():
     sgn = EF.sidestep_sign(a, b, x, y)
     # facing +x, left is +y (toward B at y = H): the sidestep must go right (-1)
     assert sgn == -1
+
+
+def test_sidestep_goes_where_there_is_room():
+    """2026-10-23 dry run: facing the x = 122 edge at y = 21, away from the far board took it into the y = 0 edge."""
+    sides = [("x", 0.0, "edge"), ("x", 121.9, "edge"), ("y", 0.0, "edge"), ("y", 122.4, "board")]
+    sgn, room = EF.sidestep_room(("x", 121.9, "edge"), 113.7, 20.9, sides)
+    # facing +x, left is +y: room 101 cm that way, 21 cm the other
+    assert sgn == 1 and room > 100
