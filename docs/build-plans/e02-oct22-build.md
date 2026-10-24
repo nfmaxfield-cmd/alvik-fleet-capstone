@@ -349,3 +349,8 @@ idle robots, the phase): a few weeks of sessions answer the drain questions (dri
 past it stops every robot, and the session pauses and waits for Nick's answer on the live page. Design questions
 put to Nick the same evening (margin, all sessions or away only, explore before the camera is calibrated, a lost
 robot while driving, the robot's own check in the firmware).
+
+**Later (after all the building): the self-charging dock (Nick, 2026-10-24 18:43).** The Alvik charges through a
+standard USB-C port: plug in a short USB-C extension and design our own point of contact on the dock. Not a
+separate part: one nose attachment that holds the switches, the lights and now the charging contact. Plan to be
+written once the current builds are done (tools: 3D printer, soldering iron).
