@@ -178,6 +178,8 @@ class World:
                 px, py, ph = bd.park((k + 1) % len(names))
             elif args.start == "corners":       # Nick's 2026-10-22 08:09 layout (camera frame): it dead-locked parking
                 px, py, ph = [(87.1, 27.8, 125.0), (35.2, 86.1, -50.0), (88.2, 87.3, 45.0)][k % 3]
+            elif args.start == "edge":          # 2026-10-23 night: one put down 10 cm from an open edge, facing it
+                px, py, ph = [(10.0, 60.0, 180.0), (60.0, 40.0, 90.0), (70.0, 85.0, -30.0)][k % 3]
             elif args.start == "scatter":       # anywhere open, as Nick puts them down now
                 while True:
                     px, py, ph = rng.uniform(30, 92), rng.uniform(30, 92), rng.uniform(-180, 180)
@@ -555,7 +557,7 @@ def main(argv=None):
     ap.add_argument("--out", default="e02_sim_out")
     ap.add_argument("--robots", default="Left,Center,Right")
     ap.add_argument("--seed", type=int, default=2)
-    ap.add_argument("--start", default="parks", choices=["parks", "swapped", "scatter", "corners"],
+    ap.add_argument("--start", default="parks", choices=["parks", "swapped", "scatter", "corners", "edge"],
                     help="where the robots stand at the start: near their park spots, each on another's, anywhere, or "
                          "Nick's 2026-10-22 corners layout")
     ap.add_argument("--fps", type=float, default=15.0)

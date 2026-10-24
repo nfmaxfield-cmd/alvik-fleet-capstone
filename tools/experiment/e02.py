@@ -5238,7 +5238,7 @@ def main(argv=None):
     ap.add_argument("--view-port", type=int, default=8090, help="live view in a browser: http://localhost:<port> (0 = off)")
     ap.add_argument("--map-rays", type=int, default=16)
     ap.add_argument("--map-robot", default="", help="which robot maps (default: the first)")
-    ap.add_argument("--dry-start", default="parks", choices=["parks", "swapped", "scatter", "corners"],
+    ap.add_argument("--dry-start", default="parks", choices=["parks", "swapped", "scatter", "corners", "edge"],
                     help="dry run: where the simulated robots stand at the start")
     ap.add_argument("--calib", help="floor calibration file (default: the studio project's cameras/overhead.json)")
     ap.add_argument("--project", help="the studio project folder (default Documents\\recognition-project)")
