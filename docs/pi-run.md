@@ -67,3 +67,25 @@ python3 tools/pi/upload_session.py --recordings /media/$USER/*/recordings
   and watched** (`--hours 0.5`).
 - The robots answer whichever computer last sent them a command: while it waits for them, the runner on the Pi calls
   them on the WiFi so they answer the Pi.
+
+## When the session holds for you (the virtual border, a lost robot)
+
+Every session (Pi or laptop), from 2026-10-24:
+- **The virtual border.** A robot the camera sees within 15 cm of an open edge, moving towards it, stops every
+  robot. Explore's forward crawls looking for the edge, and the edge find, are allowed past it (the robot's own
+  edge guard stops those); anything backwards or at speed never is.
+- **A lost robot.** A robot driving a leg that the camera has not seen for 1.5 s, or whose spot did not move the
+  way its wheels say, stops every robot too.
+
+Then the session waits for you, with no time limit. The question is on the live page
+(http://100.122.222.75:8090 over Tailscale); type one letter in the box and press the button:
+
+| Answer | What happens |
+|---|---|
+| c | carry on (the lost robot is found again by a turn on its spot) |
+| a | carry on, and from now on find lost robots again without asking (the border still asks) |
+| o | leave that robot out: it stays where it is, the others carry on round it |
+| s | stop the session: every robot stopped; `--resume` carries on later |
+
+Every hold is in the log (HOLD), in e02_state.json ("holds": when, which robot, why, your answer, how long it
+waited) and marked on the video.
