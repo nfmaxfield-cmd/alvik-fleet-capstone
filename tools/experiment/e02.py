@@ -1176,7 +1176,7 @@ class Runner:
         if front <= 0:
             return None                           # no reading (nothing in range)
         if self.degrade.spec.get("front"):
-            front = self.degrade.front(front)     # --degrade: a bad front sensor
+            front = self.degrade.front(front, robot)     # --degrade: a bad front sensor
         hd = ST.wrap180(h[0] + val) if kind == "turn" else h[0]      # heads[] holds the heading before the leg
         ahead = self.ahead_cm(robot, p, hd)
         row = [round(time.time(), 2), robot, kind, round(val, 1), round(p[0], 1), round(p[1], 1), round(hd, 1),

@@ -14,7 +14,7 @@ in its state, and the analysis keeps it apart.
     --degrade gyro:drift=0.2            0.2 deg/s more drift than it has
     --degrade front:bias=5              the front sensor reads 5 cm long
     --degrade front:noise=3             the front sensor's readings with random noise (sd 3 cm)
-Several at once: comma-separated (camera:noise=3,front:bias=5).
+Several at once: comma-separated (camera:noise=3,front:bias=5). One robot only: wheels@Center:jitter=0.05.
 
 The amounts are chosen per test; the swap test's DOE (docs/build-plans/e02-oct22-build.md) sets the grid."""
 import math
@@ -32,7 +32,10 @@ def parse(spec):
             continue
         sensor, _, rest = part.partition(":")
         key, _, val = rest.partition("=")
+        sensor, _, only = sensor.strip().partition("@")       # wheels@Center: that robot only
         sensor, key = sensor.strip().lower(), key.strip().lower()
+        if only:
+            out.setdefault(sensor, {})["robot"] = only.strip()
         if sensor not in ("camera", "wheels", "gyro", "front") or not key:
             raise ValueError("--degrade: %r is not sensor:what=amount (camera, wheels, gyro, front)" % part)
         if key == "bias" and "/" in val:
@@ -79,9 +82,13 @@ class Degrade:
         return (s[0], x, y) + tuple(s[3:])
 
     # wheels and gyro: the factor for a robot's next run or move (new every call)
+    def applies(self, sensor, robot):
+        c = self.spec.get(sensor)
+        return bool(c) and (not c.get("robot") or c["robot"] == robot)
+
     def new_factors(self, robot):
         for sensor in ("wheels", "gyro"):
-            j = (self.spec.get(sensor) or {}).get("jitter")
+            j = (self.spec.get(sensor) or {}).get("jitter") if self.applies(sensor, robot) else None
             self.factors[(robot, sensor)] = max(0.5, 1.0 + self.rng.gauss(0.0, j)) if j else 1.0
         return self.factors[(robot, "wheels")], self.factors[(robot, "gyro")]
 
@@ -91,7 +98,8 @@ class Degrade:
         v = dict(values)
         v["wheel_scale"] = v["wheel_scale"] * fw
         v["gyro_scale"] = v["gyro_scale"] * fg
-        v["gyro_drift_dps"] = v["gyro_drift_dps"] + (self.spec.get("gyro") or {}).get("drift", 0.0)
+        if self.applies("gyro", robot):
+            v["gyro_drift_dps"] = v["gyro_drift_dps"] + (self.spec.get("gyro") or {}).get("drift", 0.0)
         return v
 
     def raw_rows(self, robot, rows):
@@ -116,9 +124,9 @@ class Degrade:
             out.append(q)
         return out
 
-    def front(self, cm):
+    def front(self, cm, robot=None):
         f = self.spec.get("front")
-        if not f or cm is None or cm <= 0:
+        if not f or cm is None or cm <= 0 or (robot is not None and not self.applies("front", robot)):
             return cm
         cm = cm + f.get("bias", 0.0)
         if f.get("noise"):
