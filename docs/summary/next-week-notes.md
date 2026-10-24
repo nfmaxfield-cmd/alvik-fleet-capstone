@@ -35,6 +35,10 @@ Nick, 2026-10-24: runs in which a sensor's input is deliberately degraded (or sw
 see whether the program notices and adapts. Goes with the next build: the system learns how much to trust each
 sensor for itself (docs/build-plans/e02-oct22-build.md, "Next build").
 
+## Planned test: driving without the lights (Nick, 2026-10-24)
+Runs with the robots' blink code off (`set blink_codes 0`: no firmware change) to see whether the camera's
+tracking and naming lean on the lights. A degraded-input run like the sensor ones.
+
 ## Results this week (with their plans)
 - 2026-10-24 Pi plan, stages 1-2: 30 runs, none failed; the Pi kept up (14-16 pictures a second, picture age
   0.12-0.13 s at the median). C (calibrated) ended 3.4 cm off on average against U's 21.9.

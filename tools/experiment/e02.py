@@ -425,6 +425,7 @@ class Runner:
         self.hold_auto_refind = False     # Nick's answer "a": lost robots are found again without asking (border still asks)
         self.guard = None                 # (camera, board) for the border while exploring (no board of its own yet)
         self.seek = set()                 # robots on a forward crawl looking for the edge on purpose (border exempt)
+        self.seek_until = {}              # robot -> time its last edge-seeking crawl's exemption ends
         self.leg_live = {}                # robot -> time its current leg was sent (cleared when it ends)
         self.leg_kind = {}                # robot -> "go" / "turn": its current (or last) leg
         self.moves = {}               # robot -> dict(run ("-" = idle legs), why): it is taking legs now
@@ -2827,7 +2828,11 @@ class Runner:
         try:
             state, info = self.send_leg(robot, "%s %.2f" % (kind, val), timeout or (2.5 * est + 6.0))
         finally:
-            self.seek.discard(robot)
+            if seek:
+                # the border's 0.6 s window still holds the crawl towards the edge for a moment after it stops
+                # (dry run 2026-10-24: the back-off away from the edge held the session): exempt a moment longer
+                self.seek.discard(robot)
+                self.seek_until[robot] = time.time() + 1.0
         return state, info, self.last_lid.get(robot)
 
     def explore(self, names):
@@ -4906,7 +4911,8 @@ class Runner:
     def border_check(self, robot, smp):
         """Words if the robot is within BORDER_CM of an open edge and moving towards it, else ''. smp: the tracker's
         recent (t, x, y, ...) samples."""
-        if robot in self.seek or robot == getattr(self, "edge_touch", None) or len(smp) < 3:
+        if robot in self.seek or robot == getattr(self, "edge_touch", None) or len(smp) < 3 \
+                or time.time() < getattr(self, "seek_until", {}).get(robot, 0.0):
             return ""
         if robot in self.leg_live and self.leg_kind.get(robot) == "turn":
             # turning on its spot: the camera's spot (the top's centre, not the axle) swings a few cm, the robot
