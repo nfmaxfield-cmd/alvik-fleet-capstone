@@ -103,3 +103,11 @@ def test_hold_stop_answer_ends_the_session():
         raise AssertionError("not stopped")
     except KeyboardInterrupt:
         pass
+
+
+def test_border_lets_it_drive_along_the_edge():
+    r = _stub()
+    # 12 cm from x = 0, 4 cm/s along the edge with 1.5 cm/s drift towards it: allowed
+    assert E.Runner.border_check(r, "Left", _track(12.75, 60.0, 12.0, 62.0)) == ""
+    # the same speed straight at it: held
+    assert E.Runner.border_check(r, "Left", _track(14.0, 60.0, 12.0, 60.0)) != ""

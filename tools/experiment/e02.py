@@ -195,7 +195,10 @@ DEFAULT_CALIB = os.path.join(HERE, "data", "overhead_floorcal_roam1.json")   # r
 # Exempt: a forward crawl that is looking for the edge on purpose (explore's rays and probes, the edge find): the
 # firmware's edge guard stops those, forwards; anything backwards, or at speed, is never exempt.
 BORDER_CM = 15.0
-BORDER_TOWARDS_CMS = 1.0      # chosen: moving towards the edge faster than this counts (still or away is allowed)
+BORDER_TOWARDS_CMS = 2.0      # chosen: moving towards the edge faster than this counts (still or away is allowed) ...
+BORDER_TOWARDS_FRAC = 0.5     # ... and mostly towards it (within 60 deg of straight at it): driving along the edge is
+                              # allowed (dry run 2026-10-24, a robot put down 10 cm from the edge backed along it in
+                              # its room check, 1-2 cm/s sideways drift, and held the session)
 BORDER_JUMP_CMS = 50.0        # chosen: faster than this is the tracker jumping to a new spot, not the robot (it drives
                               # at most ~20 cm/s); replaying the 2026-10-24 Pi plan's tracks, one such jump would have held
 # A robot driving a leg that the camera has no position for this long is lost: everything stops and Nick is asked
@@ -4891,6 +4894,7 @@ class Runner:
             return ""
         bd, x, y = b
         dt_ = max(1e-3, smp[-1][0] - smp[0][0])
+        speed = math.hypot(x - a[1], y - a[2]) / dt_
         for ax, val in bd.open_edges():
             d = abs((x if ax == "x" else y) - val)
             if d >= BORDER_CM:
@@ -4898,7 +4902,7 @@ class Runner:
             p0 = a[1] if ax == "x" else a[2]
             p1 = x if ax == "x" else y
             towards = (abs(p0 - val) - abs(p1 - val)) / dt_          # cm/s closer to that edge
-            if BORDER_TOWARDS_CMS < towards < BORDER_JUMP_CMS:
+            if BORDER_TOWARDS_CMS < towards < BORDER_JUMP_CMS and towards >= BORDER_TOWARDS_FRAC * speed:
                 return "its centre is %.0f cm from an open edge (the border is %.0f cm), moving towards it" % (
                     d, BORDER_CM)
         return ""
