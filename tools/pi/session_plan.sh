@@ -25,12 +25,23 @@ stage() {
   python3 tools/pi/upload_session.py --recordings "$OUT" --logs-only || echo "(upload of stage $n's logs failed: it is retried at the end)"
   sleep 20
 }
-stage 1 $CAL --own-sensor-only --hours 0.25
-stage 2 $CAL --hours 0.75
-stage 3 --hours 0.5
-stage 4 $CAL --hours 4
+if [ "${1:-}" = "right" ]; then
+  # Nick, 2026-10-24 evening: Left and Center went over the edge in stage 3; Right is the one robot left on the
+  # board. Only Right is driven (--robots Right; the others, if still switched on, are only asked their battery:
+  # driving against idle drain). All four conditions first, then explore (its fix: a leg's move is its done pose
+  # less its started pose), last because it is the riskier one. The fit limit is 2.5 cm for these (stage 2: 2.1-2.5
+  # with the session-1 calibration file, all refused at 1.5; chosen, the sensor-trust build replaces it).
+  EXTRA="--robots Right --fit-max-rms-cm 2.5 --battery-watch-s 300"
+  stage R1 $CAL $EXTRA --hours 1
+  stage R2 $EXTRA --hours 0.5
+else
+  stage 1 $CAL --own-sensor-only --hours 0.25
+  stage 2 $CAL --hours 0.75
+  stage 3 --hours 0.5
+  stage 4 $CAL --hours 4
+fi
 echo; echo "=== Plan done: uploading the recording ==="
-for d in $(ls -td logs/e02-* 2>/dev/null | grep -v dryrun | head -4); do
+for d in $(ls -td logs/e02-* 2>/dev/null | grep -v dryrun | head -$([ "${1:-}" = "right" ] && echo 2 || echo 4)); do
   python3 tools/pi/upload_session.py --recordings "$OUT" --logs-only --session "$d" || true
 done
 python3 tools/pi/upload_session.py --recordings "$OUT" --stop-recorder --no-logs --tag "e02-pi-plan-$DAY-recording"

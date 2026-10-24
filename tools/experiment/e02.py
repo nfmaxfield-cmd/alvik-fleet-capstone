@@ -2310,6 +2310,46 @@ class Runner:
             time.sleep(0.5)
         return [n for n in names if n not in self.link.robots()]
 
+    def start_battery_watch(self, names):
+        """battery.csv: every robot heard on the WiFi, the ones in this session (driving) and any others left
+        switched on (idle, asked `status`), every --battery-watch-s seconds (Nick 2026-10-24: driving against idle
+        drain, from the one-robot session with Left and Center off the board). `status` only answers; it never
+        moves a robot."""
+        every = getattr(self.a, "battery_watch_s", 0) or 0
+        if every <= 0 or getattr(self, "_bat_thread", None) is not None:
+            return
+        path = os.path.join(self.dir, "battery.csv")
+        new = not os.path.exists(path)
+        drive = set(names)
+
+        def loop():
+            if new:
+                with open(path, "w") as f:
+                    f.write("t,robot,role,battery,phase\n")
+            logged = {}
+            while True:
+                # only the idle robots are asked (a driving robot reports its battery with every run's records)
+                for n in self.link.robots():
+                    if n not in drive:
+                        try:
+                            self.link.send_name(n, "status")
+                        except OSError:
+                            pass
+                time.sleep(2.0)
+                rows = []
+                for n, (tb, b) in sorted(self.listener.battery.items()):
+                    if tb > logged.get(n, 0.0):
+                        logged[n] = tb
+                        rows.append("%.1f,%s,%s,%d,%s" % (tb, n, "driving" if n in drive else "idle", b,
+                                                          getattr(self, "phase", "") or ""))
+                if rows:
+                    with open(path, "a") as f:
+                        f.write("\n".join(rows) + "\n")
+                time.sleep(max(1.0, every - 2.0))
+
+        self._bat_thread = threading.Thread(target=loop, daemon=True)
+        self._bat_thread.start()
+
     def batteries(self, names):
         t = time.time()
         for n in names:
@@ -2580,6 +2620,7 @@ class Runner:
             raise SystemExit("Not heard from: %s. Switch them on (same WiFi as this laptop), then start again."
                              % ", ".join(missing))
         bats = self.batteries(names)
+        self.start_battery_watch(names)
         for n in names:
             b = bats.get(n)
             fw = self.listener.firmware.get(n, "?")
@@ -5868,6 +5909,9 @@ def main(argv=None):
     ap.add_argument("--mark-accept-cm", type=float, default=0.0,
                     help="the tape marks keep the robots' camera calibration only within this (median; 0 = the "
                          "default, Runner.MARK_ACCEPT_CM)")
+    ap.add_argument("--battery-watch-s", type=float, default=0,
+                    help="every this many seconds, log every switched-on robot's battery to battery.csv, driving or "
+                         "idle (0: off)")
     ap.add_argument("--no-shift-watch", action="store_true",
                     help="do not measure or correct the camera's creep during the runs (CAM.CameraShiftWatch)")
     ap.add_argument("--marks", action="store_true",
@@ -5895,10 +5939,16 @@ def main(argv=None):
                     "their own sensors (U, C); K and KC stay in the plan for later")
     ap.add_argument("--resume", nargs="?", const="latest", help="carry on a session (folder, or the latest)")
     ap.add_argument("--auto", action="store_true", help="answer every question with its default (no person)")
+    ap.add_argument("--fit-max-rms-cm", type=float, default=None,
+                    help="the self-calibration's camera-vs-wheels limit per stretch (default e02_fit.MAX_RMS_CM, 1.5; "
+                         "2026-10-24 Pi plan: the session-1 calibration file gave 2.1-2.5 and every fit was refused)")
     ap.add_argument("--dry-run", action="store_true", help="against the simulator (tools/experiment/e02_sim.py)")
     ap.add_argument("--dry-true-calib", action="store_true", help="dry run: use the simulator's true camera "
                                                                   "instead of making one from the corners")
     a = ap.parse_args(argv)
+    if a.fit_max_rms_cm is not None:
+        # chosen for the session (Nick 2026-10-24: 2.5 cm); the sensor-trust build (or a DOE) should set it
+        FIT.MAX_RMS_CM = a.fit_max_rms_cm
     if a.on_pi:
         # the Pi run (Nick, 2026-10-24: start a session and leave the house): the camera is this computer, the
         # live view is open on the WiFi and questions are answered there (run-e02-pi.sh starts all of it)

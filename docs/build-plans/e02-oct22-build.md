@@ -328,3 +328,16 @@ session's best. Right KC (17.0 cm) started 12 cm from where it believed; the fir
 because the robot's own sd just after a find was small: the overconfident sensor the next build is about.
 Plans: the analysis marks a far point the camera did not see as unseen (no number); route planning refuses a far
 point off the board; KC's first fix after a find checks the find against the camera.
+
+**Next build: away sessions pause for Nick (Nick, 2026-10-24 evening).** "Next time I'm running 'away' sessions
+the program should pause and wait for my guidance so we don't lose all 3 robots to the same problem, and we can
+redirect the other two without me going home." Stage 3 lost Left, then Center four minutes later, to the same
+bug, while --auto answered every question itself. Plan: in an --on-pi session, a robot that goes over an edge,
+drives without moving ("wheels turned but it did not move") or is lost stops the whole session (every robot
+stopped where it is) and asks on the live page, with a phone notification, what to do: carry on without it,
+change stage, or stop. No timeout that carries on by itself (the stage waits; the battery is the limit).
+
+**Right-only session (2026-10-24 evening): `./run-e02-pi.sh --plan right`.** All four conditions for 1 h, then
+explore for 0.5 h (the fix's first real test), --fit-max-rms-cm 2.5 (chosen) and battery.csv (driving Right
+against Left and Center idle, if still switched on). The first video's upload ran during it: picture age and the
+robots' round trips (clock_sync) with and without the upload are a WiFi-load comparison.

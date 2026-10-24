@@ -21,7 +21,12 @@
 set -u
 cd "$(dirname "$0")"
 PLAN=0
-if [ "${1:-}" = "--plan" ]; then PLAN=1; shift; fi
+PLAN_NAME=""
+if [ "${1:-}" = "--plan" ]; then
+  PLAN=1; shift
+  # an optional plan name: ./run-e02-pi.sh --plan right (Right alone, tools/pi/session_plan.sh)
+  case "${1:-}" in right) PLAN_NAME="$1"; shift;; esac
+fi
 REPO="$(pwd)"
 RUN_ARGS_DEFAULT="--no-side --robot 192.168.1.250 --robot 192.168.1.252 --robot 192.168.1.253"
 CAM_ARGS="--device 0 --names overhead --fps 25 --label E02 --no-lock"
@@ -67,6 +72,7 @@ echo "Video goes to $OUT ($free_gb GB free)."
 # space needed: about 3 GB an hour of video plus 1 GB to spare (session 1: 5.5 GB in 2 h); --hours sets it
 hours=2
 [ "$PLAN" = 1 ] && hours=5.5
+[ "$PLAN_NAME" = right ] && hours=1.5
 prev=""
 for a in "$@"; do [ "$prev" = "--hours" ] && hours="$a"; prev="$a"; done
 need_gb=$(python3 -c "import math,sys; print(int(math.ceil(3*float(sys.argv[1])+1)))" "$hours" 2>/dev/null || echo 7)
@@ -86,7 +92,7 @@ tmux new-session -d -s e02 -n rec "cd '$REPO' && python3 tools/pi/camrec.py $CAM
 echo "Recorder starting (8 s) ..."
 sleep 8
 if [ "$PLAN" = 1 ]; then
-  tmux new-window -t e02 -n run "cd '$REPO' && bash tools/pi/session_plan.sh '$OUT'; echo; read -r -p 'Plan done. Press Enter to close this window.'"
+  tmux new-window -t e02 -n run "cd '$REPO' && bash tools/pi/session_plan.sh '$OUT' $PLAN_NAME; echo; read -r -p 'Plan done. Press Enter to close this window.'"
 else
   tmux new-window -t e02 -n run "cd '$REPO' && python3 tools/experiment/e02.py --on-pi $RUN_ARGS; echo; echo '=== Runner finished: stopping the recorder and uploading ==='; python3 tools/pi/upload_session.py --recordings '$OUT' --stop-recorder; echo; read -r -p 'All done. Press Enter to close this window.'"
 fi
