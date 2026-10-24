@@ -393,10 +393,15 @@ class MotionTracker:
 
     # --- geometry --------------------------------------------------------------------------------
     def _px(self, x, y):
-        return self.cam.project((x, y, self.z))
+        u, v = self.cam.project((x, y, self.z))
+        du, dv = getattr(self, "px_shift", (0.0, 0.0))
+        return u + du, v + dv
 
     def _floor(self, u, v):
-        return self.cam.to_floor(u, v, self.z)
+        # the camera's picture creeps (2026-10-24: up to 2 px over a session, the mount): CameraShiftWatch measures
+        # it against the session's first picture, and pixels are taken back before they become floor positions
+        du, dv = getattr(self, "px_shift", (0.0, 0.0))
+        return self.cam.to_floor(u - du, v - dv, self.z)
 
     def _area_lims(self):
         """(xlo, xhi, ylo, yhi) floor cm a robot's centre can be in: the board plus margin_cm at open edges, and
@@ -1010,6 +1015,136 @@ def still_position(samples, min_s=0.4, max_spread_cm=0.4):
 
 
 # =============================================================================== the Pi stream
+class QualityMap:
+    """How well the camera sees a robot, place by place, built while the robots drive (2026-10-24 analysis of the
+    morning footage: the detail the camera sees on a robot predicts whether the lock-on tracker holds it, r = 0.73
+    across 20 cm cells; near the top board the bright floor flattens the robot and the lock-on held 8-36% of the time
+    against 90%+ near the open edges). Per cell: the robot's detail (brightness spread within DETAIL_R_PX of its
+    centre), the floor's brightness round it, and the tracker's source (both / lock / detector). poor(x, y): a cell
+    with enough sightings whose lock-on share is under POOR_LOCK or detail under POOR_DETAIL (both chosen from that
+    analysis; DOE: KC with and without the poor-cell weighting)."""
+
+    CELL_CM = 20.0
+    DETAIL_R_PX = 9
+    RING_PX = (13, 20)
+    MIN_N = 15
+    POOR_LOCK = 0.4
+    POOR_DETAIL = 25.0
+    PERIOD_S = 0.5
+
+    def __init__(self):
+        self.cells = {}
+        self.t_last = 0.0
+        yy, xx = np.mgrid[-24:25, -24:25]
+        rr = np.hypot(xx, yy)
+        self.inner = rr <= self.DETAIL_R_PX
+        self.ring = (rr >= self.RING_PX[0]) & (rr <= self.RING_PX[1])
+
+    def add(self, img, u, v, x, y, source, t):
+        if t - self.t_last < self.PERIOD_S or img is None:
+            return None
+        self.t_last = t
+        u, v = int(round(u)), int(round(v))
+        h, w = img.shape[:2]
+        if not (24 <= u < w - 24 and 24 <= v < h - 24):
+            return None
+        g = img if img.ndim == 2 else cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        patch = g[v - 24:v + 25, u - 24:u + 25].astype(np.float32)
+        detail, floor = float(patch[self.inner].std()), float(patch[self.ring].mean())
+        k = (int(math.floor(x / self.CELL_CM)), int(math.floor(y / self.CELL_CM)))
+        c = self.cells.setdefault(k, dict(n=0, detail=0.0, floor=0.0, lock=0))
+        c["n"] += 1
+        c["detail"] += detail
+        c["floor"] += floor
+        c["lock"] += 1 if source in ("both", "lock") else 0
+        return detail
+
+    def cell(self, x, y):
+        return self.cells.get((int(math.floor(x / self.CELL_CM)), int(math.floor(y / self.CELL_CM))))
+
+    def poor(self, x, y):
+        c = self.cell(x, y)
+        if not c or c["n"] < self.MIN_N:
+            return False
+        return c["lock"] / c["n"] < self.POOR_LOCK or c["detail"] / c["n"] < self.POOR_DETAIL
+
+    def rows(self):
+        out = []
+        for (i, j), c in sorted(self.cells.items()):
+            n = c["n"]
+            out.append(dict(x0_cm=i * self.CELL_CM, y0_cm=j * self.CELL_CM, n=n, detail=round(c["detail"] / n, 1),
+                            floor=round(c["floor"] / n, 1), lock_share=round(c["lock"] / n, 3),
+                            poor=int(n >= self.MIN_N and (c["lock"] / n < self.POOR_LOCK or
+                                                         c["detail"] / n < self.POOR_DETAIL))))
+        return out
+
+
+class CameraShiftWatch:
+    """Has the camera moved since the session started? (2026-10-24: the pictures' background, the walls and the
+    shelf round the plywood, crept up to 2 px during sessions, about 1 cm on the board near the top board; the
+    top board's line walked 1 cm though the board never moved.) Every PERIOD_S a picture is aligned to the
+    session's first one (OpenCV ECC, a shift only, at half size), using only what lies outside the plywood (robots
+    never go there). The shift goes to the tracker (px_shift), so positions are taken back to the first picture's
+    camera; on_shift(dict) is told each measurement. Chosen: PERIOD_S, WARN_PX (DOE: the shift's effect on the
+    board-line checks, with and without the correction)."""
+
+    PERIOD_S = 5.0
+    WARN_PX = 1.0
+    MARGIN_PX = 12
+
+    def __init__(self, cam, board_rect, tracker, on_shift=None):
+        self.cam, self.rect, self.tracker, self.on_shift = cam, board_rect, tracker, on_shift
+        self.ref = None
+        self.mask = None
+        self.t_last = None
+        self.shift = (0.0, 0.0)
+        self.cc = None
+        self.n = 0
+        self.max_px = 0.0
+
+    def _make_mask(self, shape):
+        x0, y0, x1, y1 = self.rect
+        pts = [self.cam.project((x, y, 0.0)) for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))]
+        if not all(np.isfinite(p).all() for p in map(np.asarray, pts)):
+            return None
+        m = np.full(shape, 255, np.uint8)
+        poly = np.array([[int(round(u)), int(round(v))] for u, v in pts], np.int32)
+        cv2.fillPoly(m, [poly], 0)
+        m = cv2.erode(m, np.ones((2 * self.MARGIN_PX + 1, 2 * self.MARGIN_PX + 1), np.uint8))
+        return m[::2, ::2].copy()
+
+    def __call__(self, img, t):
+        if self.t_last is not None and t - self.t_last < self.PERIOD_S:
+            return
+        self.t_last = t
+        g = img if img.ndim == 2 else cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        small = cv2.GaussianBlur(g[::2, ::2].astype(np.float32), (5, 5), 0)
+        if self.ref is None:
+            self.mask = self._make_mask(g.shape)
+            if self.mask is None or self.mask.sum() < 255 * 2000:
+                return
+            self.ref = small
+            return
+        W = np.eye(2, 3, dtype=np.float32)
+        try:
+            cc, W = cv2.findTransformECC(self.ref, small, W, cv2.MOTION_TRANSLATION,
+                                         (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 60, 1e-4), self.mask, 3)
+        except cv2.error:
+            return
+        if cc < 0.8:
+            return                                   # the background itself changed (a person, a light): not a shift
+        self.shift = (2.0 * float(W[0, 2]), 2.0 * float(W[1, 2]))
+        self.cc = float(cc)
+        self.n += 1
+        mag = math.hypot(*self.shift)
+        self.max_px = max(self.max_px, mag)
+        if self.tracker is not None:
+            self.tracker.px_shift = self.shift
+        if self.on_shift:
+            self.on_shift(dict(t=round(t, 1), du=round(self.shift[0], 2), dv=round(self.shift[1], 2), cc=round(cc, 3),
+                               warn=mag > self.WARN_PX))
+
+
 class Feed(threading.Thread):
     """Reads the overhead camera's /live stream (tools/live/sources.StreamSource), turns the Pi's time into
     laptop time (ClockEnvelope, minus the capture delay) and pushes every frame to the tracker."""

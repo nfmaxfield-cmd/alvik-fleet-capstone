@@ -544,6 +544,27 @@ def remove_board_loop(world, simdir):
         time.sleep(0.2)
 
 
+def place_loop(world, simdir):
+    """Nick's hand in the simulator (the tape-mark check, 2026-10-24): <out>/PLACE_<robot>.json = {"x", "y"} lifts
+    that robot and puts it down there (its own pose does not change: it was carried). The file is removed."""
+    while not world.stop.is_set():
+        for rb in world.robots:
+            f = os.path.join(simdir, "PLACE_%s.json" % rb.name)
+            if os.path.exists(f):
+                try:
+                    with open(f) as fh:
+                        d = json.load(fh)
+                    rb.x, rb.y = float(d["x"]), float(d["y"])
+                    print("e02_sim: %s put down by hand at (%.1f, %.1f)" % (rb.name, rb.x, rb.y), flush=True)
+                except (ValueError, KeyError, OSError):
+                    pass
+                try:
+                    os.remove(f)
+                except OSError:
+                    pass
+        time.sleep(0.2)
+
+
 def bricks_loop(world, flag):
     """Bricks on the board while the flag file exists (e02.py makes and removes it)."""
     while not world.stop.is_set():
@@ -614,6 +635,7 @@ def main(argv=None):
                threading.Thread(target=notes_loop, args=(world, os.path.join(a.out, "notes.csv"), NOTES_PORT, rec),
                                 daemon=True)]
     threads.append(threading.Thread(target=remove_board_loop, args=(world, a.out), daemon=True))
+    threads.append(threading.Thread(target=place_loop, args=(world, a.out), daemon=True))
     if world.brick_polys:
         threads.append(threading.Thread(target=bricks_loop, args=(world, os.path.join(a.out, "BRICKS_ON")), daemon=True))
     servers = []

@@ -428,7 +428,8 @@ class State:
     def counts(self):
         s = self.d["schedule"]
         done = sum(1 for r in s if r["status"] in ("done", "failed"))
-        return done, len(s)
+        left_out = sum(1 for r in s if r["status"] == "left_out")     # routes that no longer fit the map
+        return done, len(s) - left_out
 
     def mean_run_s(self, default=110.0):
         d = [x for x in self.d.get("durations") or [] if x > 5]

@@ -1117,15 +1117,45 @@ METRICS = [
     ("px_return_deg_abs", "Return to start, angle in the picture (deg, size)"),
     ("bel_end_err_cm", "Robot's belief vs camera at the end (cm)"),
     ("find_err_cm", "Find position error (cm)"),
+    # 2026-10-24 review: the camera corrected by its own error at each place (tape marks, finds; e02_camerr);
+    # only when the session had a tape-mark check. The far point is where KC should be judged.
+    ("far_err_tape_cm", "Far-point position error, tape-checked camera (cm)"),
+    ("end_err_tape_cm", "End position error, tape-checked camera (cm)"),
 ]
 PRIMARY = ["end_err_cm", "end_head_abs_deg"]
 
 
-EARLY_KINDS = ("safety_stop", "watchdog", "stopped")
+EARLY_KINDS = ("safety_stop", "watchdog", "stopped", "runner_stop")   # runner_stop: 2026-10-24 review
+
+
+def apply_tape(rows, session):
+    """far_err_tape_cm / end_err_tape_cm for each measured run, when the session's state holds tape-mark samples of
+    the camera's error (e02_camerr): start, far point and end corrected by the camera's error there."""
+    st = _state(session) if session else None
+    smp = (st or {}).get("camera_error_samples") or []
+    if not any(s_.get("source") == "mark" for s_ in smp):
+        return 0
+    import e02_camerr as CE
+    m = CE.CameraErrorMap(smp)
+    n = 0
+    for r in rows:
+        v = [nanf(r.get(k)) for k in ("start_x", "start_y", "far_x", "far_y", "int_far_x", "int_far_y", "end_x", "end_y")]
+        if not all(np.isfinite(v[:6])):
+            continue
+        cs, cf = m.corrected(v[0], v[1])[:2], m.corrected(v[2], v[3])[:2]
+        gx, gy = v[4] - v[0] + cs[0], v[5] - v[1] + cs[1]
+        r["far_err_tape_cm"] = round(math.hypot(cf[0] - gx, cf[1] - gy), 3)
+        if np.isfinite(v[6]) and np.isfinite(v[7]):
+            ce = m.corrected(v[6], v[7])[:2]
+            r["end_err_tape_cm"] = round(math.hypot(ce[0] - cs[0], ce[1] - cs[1]), 3)
+        n += 1
+    return n
 
 
 def ended_early(row):
-    """A run that a safety stop (the camera watchdog, or the robot's own guard) ended before its route was done
+    """A run that a safety stop (the camera watchdog, or the robot's own guard), or the runner's own stop to find
+    the robot again (runner_stop, 2026-10-24 review: the 4 'safety stops' of session 1 were these), ended before its
+    route was done
     (Nick, 2026-10-23: reported separately; in session 1, 4 of 9 camera-steered runs ended so, 22-39 cm from the end
     they never reached, which said nothing about how accurately a finished run ends)."""
     return str(row.get("recovery") or "").strip().lower() in EARLY_KINDS
@@ -1983,6 +2013,7 @@ def analyse(recording, logs, runs, calib, out, background=None, bump_frame="auto
                 f(row.get("end_err_deg"), 1), row.get("flags", "")))
     for r in rows:
         r["ended_early"] = int(ended_early(r))
+    apply_tape(rows, session)
     fin = [r for r in rows if not r["ended_early"]]
     flag_runs(fin)
     summ, comps = summarise(fin)

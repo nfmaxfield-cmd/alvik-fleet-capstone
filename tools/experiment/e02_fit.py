@@ -34,6 +34,12 @@ MIN_COUNTED_CM = 40.0   # total straight driving needed for the wheel scale
 # with a measured drift (naming check, prior SD 0.1) the measurement itself pins it.
 MAX_SE = dict(gyro_scale=0.03, gyro_drift_dps=0.3, wheel_scale=0.02)
 MAX_RMS_DEG = 4.0
+# 2026-10-24 review: evening fits gave -0.08 to -0.25 deg/s of "drift" while the robots' own standing-still test read
+# 0.000 and the one evening C run ended 13.2 cm off. With a measured standing-still drift, the fitted drift may differ
+# from it by at most DRIFT_BAND_DPS; beyond that the drift is held at the band's edge and the gyro scale refitted.
+# 0.05 is chosen (the morning's fits were -0.03 to +0.05): a DOE, or the offline refit of the evening's stretches
+# (predicted against measured end errors at 0.02 / 0.05 / 0.1), should set it.
+DRIFT_BAND_DPS = 0.05
 MAX_RMS_CM = 1.5
 
 
@@ -210,8 +216,9 @@ def _huber_w(r, k):
     return np.where(a <= k, 1.0, k / np.maximum(a, 1e-12))
 
 
-def fit_turns(obs, prior=None, prior_sd=None, iters=20):
-    """obs: [dict(run, tm, phi, psi)]. Returns dict(g, d, se_g, se_d, rms_deg, n, turns) or None."""
+def fit_turns(obs, prior=None, prior_sd=None, iters=20, fixed_d=None):
+    """obs: [dict(run, tm, phi, psi)]. Returns dict(g, d, se_g, se_d, rms_deg, n, turns) or None.
+    fixed_d: hold the drift at this value (deg/s) and fit only the scale (se_d is then 0)."""
     prior = dict(PRIOR, **(prior or {}))
     prior_sd = dict(PRIOR_SD, **(prior_sd or {}))
     g0, d0 = prior["gyro_scale"], prior["gyro_drift_dps"]
@@ -244,7 +251,9 @@ def fit_turns(obs, prior=None, prior_sd=None, iters=20):
     yv = np.zeros(n)
     for i, (r, dpsi, dt_, dphi) in enumerate(rows):
         X[i, 0], X[i, 1], X[i, 2 + idx[r]] = dpsi, -dt_, 1.0
-        yv[i] = dphi
+        yv[i] = dphi + (fixed_d * dt_ if fixed_d is not None else 0.0)
+    if fixed_d is not None:
+        X[:, 1] = 0.0
     lg = SIGMA_DEG / prior_sd["gyro_scale"]
     ld = SIGMA_DEG / prior_sd["gyro_drift_dps"]
     P = np.zeros((2, p))
@@ -268,6 +277,8 @@ def fit_turns(obs, prior=None, prior_sd=None, iters=20):
     s2 = max(float(np.sum(w * res ** 2) / dof), SIGMA_DEG ** 2 * 0.25)
     A = np.vstack([X * np.sqrt(w)[:, None], P])
     cov = np.linalg.pinv(A.T @ A) * s2
+    if fixed_d is not None:
+        beta[1], cov[1, 1] = fixed_d, 0.0
     return dict(g=float(beta[0]), d=float(beta[1]), se_g=float(math.sqrt(max(cov[0, 0], 0))),
                 se_d=float(math.sqrt(max(cov[1, 1], 0))), rms_deg=float(math.sqrt(np.sum(w * res ** 2) / np.sum(w))),
                 n=n, turns=turns)
@@ -303,22 +314,30 @@ def fit_wheels(obs, prior=None, prior_sd=None, iters=20):
                 counted_cm=float(b.sum()))
 
 
-def fit_robot(obs, previous=None, prior=None, prior_sd=None):
+def fit_robot(obs, previous=None, prior=None, prior_sd=None, measured_drift=None):
     """The whole self-calibration for one robot from all its paired stretches so far.
     previous: the last accepted values (dict gyro_scale, gyro_drift_dps, wheel_scale) or None.
     Returns dict(values (what C/KC should use now), accepted (bool: this fit was taken), fitted (raw fit
-    numbers), reasons (why a part was refused), n_runs)."""
+    numbers), reasons (why a part was refused), n_runs). measured_drift: the robot's own standing-still drift
+    (deg/s); the fitted drift is kept within DRIFT_BAND_DPS of it (2026-10-24 review)."""
     prior = dict(PRIOR, **(prior or {}))
     values = dict(previous or {})
     reasons = []
     fitted = {}
     ok_turn = ok_wheel = False
     t = fit_turns(obs, prior, prior_sd)
+    held = None
+    if t is not None and measured_drift is not None and abs(t["d"] - measured_drift) > DRIFT_BAND_DPS:
+        held = measured_drift + math.copysign(DRIFT_BAND_DPS, t["d"] - measured_drift)
+        free_d = t["d"]
+        t = fit_turns(obs, prior, prior_sd, fixed_d=held)
+        reasons.append("gyro drift %+.2f deg/s fitted, more than %.2f from the %+.3f measured standing still: held at "
+                       "%+.3f and the scale refitted" % (free_d, DRIFT_BAND_DPS, measured_drift, held))
     if t is None:
         reasons.append("not enough straight stretches seen yet for the gyro")
     else:
         fitted.update(gyro_scale=t["g"], gyro_drift_dps=t["d"], se_gyro_scale=t["se_g"], se_gyro_drift_dps=t["se_d"],
-                      rms_deg=t["rms_deg"], turns=t["turns"], n_turn_obs=t["n"])
+                      rms_deg=t["rms_deg"], turns=t["turns"], n_turn_obs=t["n"], drift_held=held)
         lo, hi = BOUNDS["gyro_scale"]
         dlo, dhi = BOUNDS["gyro_drift_dps"]
         if t["turns"] < MIN_TURNS:

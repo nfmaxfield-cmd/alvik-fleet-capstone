@@ -191,7 +191,8 @@ def judge_run(far_err_cm, end_err_cm, on_board=True, seen=True, recover_cm=RECOV
     condition by the analysis; every run is parked by camera afterwards anyway, which flags nothing)?
     Recovery = the robot was too far off to safely carry on by itself, or headed for a board, an open edge or a
     parked robot: 'unseen' (the camera lost it), 'off_board', 'safety_stop' (a front stop, the edge guard, the
-    camera watchdog or the travel cap ended the route early: the run did not finish), 'far_off' (it ended more
+    camera watchdog or the travel cap ended the route early: the run did not finish), 'runner_stop' (the runner's
+    own `stop` to find the robot again ended it: not a safety event; 2026-10-24 review), 'far_off' (it ended more
     than recover_cm from its start spot). Returns (recovery or '', plain words)."""
     if lost_cm is not None:
         recover_cm = lost_cm
@@ -200,6 +201,8 @@ def judge_run(far_err_cm, end_err_cm, on_board=True, seen=True, recover_cm=RECOV
     if not on_board:
         return "off_board", "the camera sees it off the board"
     low = (runend or "done").lower()
+    if "runner stop" in low:
+        return "runner_stop", "the runner itself stopped its route to find it again (%s)" % runend
     if low != "done" and any(w in low for w in SAFETY_STOPS):
         return "safety_stop", "a safety stop ended its route early (%s)" % runend
     if end_err_cm is not None and end_err_cm > recover_cm:

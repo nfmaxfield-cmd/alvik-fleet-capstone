@@ -43,6 +43,11 @@ h1{font-size:18px;margin:0 0 8px}
 camera timing. Data: the tracker's own counters and perf.csv. Amber / red: past a chosen limit.</p>
 <p class="k">Green ring: the robot being followed (dashed circle: it should stand still there). Yellow dots: things
 that look like a robot. Grey dots: other changes (a hand, a shadow). Labels: robots the runner knows of.</p>
+<div id="ask" style="display:none;border:2px solid #e5c07b;padding:10px;margin:10px 0;border-radius:6px">
+<b>The runner asks:</b><pre id="askq" style="font-size:14px"></pre>
+<input id="askin" style="width:70%;font-size:15px;padding:4px" placeholder="type an answer (or leave empty)">
+<button onclick="answer()" style="font-size:15px;padding:4px 12px">Send</button>
+<div class="k" id="askdef"></div></div>
 <p id="note" class="k"></p>
 <pre id="log"></pre></div></main>
 <script>
@@ -54,8 +59,16 @@ function tick(){
     for(const k of ['phase','active','order'])document.getElementById(k).textContent=s[k]||'-';
     document.getElementById('note').textContent=s.note||'';
     health(s.health);
+    const a=document.getElementById('ask');
+    if(s.question){if(a.dataset.id!=String(s.question.id)){a.dataset.id=s.question.id;document.getElementById('askin').value='';}
+      a.style.display='block';document.getElementById('askq').textContent=s.question.prompt;
+      document.getElementById('askdef').textContent='Empty = the default ('+(s.question.default||'Enter')+')'+(s.question.timeout_s?'; no answer in '+Math.round(s.question.timeout_s/60)+' min = the default':'');}
+    else{a.style.display='none';a.dataset.id='';}
     document.getElementById('log').textContent=(s.log||[]).join('\\n');}).catch(()=>{});
 }
+function answer(){const a=document.getElementById('ask');
+  fetch('/answer',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({id:a.dataset.id,text:document.getElementById('askin').value})}).then(()=>{a.style.display='none'});}
 function pc(v){return v==null?'-':Math.round(100*v)+'%'}
 function health(h){const el=document.getElementById('health');if(!h){el.innerHTML='';return}const L=h.levels||{};const sh=h.share||{};
   const row=(lv,txt)=>'<div class="'+(lv||'none')+'">&#9679; '+txt+'</div>';
@@ -73,9 +86,12 @@ setInterval(tick,400);
 class LiveView:
     """Serves the page. runner: an e02.Runner (read only: feed.last_img, tracker, st, cam, board, phase, order)."""
 
-    def __init__(self, runner, port=8090):
+    def __init__(self, runner, port=8090, bind="127.0.0.1"):
         self.r = runner
         self.port = port
+        self.bind = bind               # "0.0.0.0": other computers and phones on the WiFi can open it (the Pi run)
+        self.question = None           # dict(id, prompt, default, timeout_s): the runner waits for an answer
+        self.answers = {}              # id -> text
         self.lines = []
         self.lock = threading.Lock()
         self.srv = None
@@ -120,12 +136,54 @@ class LiveView:
                 self.end_headers()
                 self.wfile.write(body)
 
+            def do_POST(self):
+                if self.path.split("?")[0] != "/answer":
+                    self.send_error(404)
+                    return
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    d = json.loads(self.rfile.read(n).decode() or "{}")
+                    with view.lock:
+                        if view.question and str(d.get("id")) == str(view.question["id"]):
+                            view.answers[view.question["id"]] = str(d.get("text") or "")
+                    body = b"ok"
+                except Exception as e:
+                    body = ("error: %s" % e).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
         try:
-            self.srv = ThreadingHTTPServer(("127.0.0.1", self.port), H)
+            self.srv = ThreadingHTTPServer((self.bind, self.port), H)
         except OSError as e:
             return "live view not started (port %d: %s)" % (self.port, e)
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
-        return "live view: open http://localhost:%d in a browser" % self.port
+        if self.bind == "127.0.0.1":
+            return "live view: open http://localhost:%d in a browser" % self.port
+        import socket
+        host = socket.gethostname()
+        return ("live view: open http://%s.local:%d in a browser on any computer or phone on this WiFi (questions "
+                "are asked there too)" % (host, self.port))
+
+    def ask(self, prompt, default="", timeout_s=None):
+        """Put a question on the page and wait for its answer (or timeout_s: then None)."""
+        with self.lock:
+            qid = int(time.time() * 1000)
+            self.question = dict(id=qid, prompt=prompt.strip(), default=default, timeout_s=timeout_s)
+        t_end = None if timeout_s is None else time.time() + timeout_s
+        try:
+            while t_end is None or time.time() < t_end:
+                with self.lock:
+                    if qid in self.answers:
+                        return self.answers.pop(qid).strip()
+                time.sleep(0.3)
+            return None
+        finally:
+            with self.lock:
+                if self.question and self.question["id"] == qid:
+                    self.question = None
 
     def stop(self):
         if self.srv:
@@ -205,9 +263,11 @@ class LiveView:
         with self.lock:
             log = list(self.lines)
         note = BRICKS_NOTE if getattr(r, "bricks_view", None) else ""
+        with self.lock:
+            q = dict(self.question) if self.question else None
         return dict(phase=getattr(r, "phase", ""), order=getattr(r, "order", ""),
                     active=(tr.active if tr is not None and tr.active else ""), log=log, t=time.time(), note=note,
-                    health=self.health())
+                    health=self.health(), question=q)
 
     def frame_jpg(self):
         ok, buf = cv2.imencode(".jpg", self.frame_bgr(), [cv2.IMWRITE_JPEG_QUALITY, 80])

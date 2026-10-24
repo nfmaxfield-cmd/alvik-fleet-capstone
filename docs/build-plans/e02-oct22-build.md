@@ -231,3 +231,42 @@ Full report: kept outside the repo (review of the summary, 2026-10-24). Agreed w
 - **Camera-steered runs survive the runner's re-identify stop.** In session 1, 4 of 9 K runs were ended at the L route's far corner when the front-sensor-vs-map check sent `stop`, which also ended `run e02` mode 1 (logged as safety_stop; no edge guard fired). Fix: pause the check during a K run, or resume the run after it; label it apart from safety stops.
 - **Bound the learned gyro drift.** Evening fits gave -0.08 to -0.25 deg/s against a standing-still 0.000; the one evening C run ended 13.2 cm off. Hold drift at the standing-still value (or within 0.05 deg/s of it); refit the evening stretches offline to check it explains the 13.2 cm (DOE note: 0.05 deg/s is chosen; the refit's predicted-vs-observed error decides it).
 - Later: blend camera fixes by confidence instead of k = 0.5.
+
+### Built 2026-10-24 (after the review and the four analyses; Nick: "finish the pending build", and the Pi run)
+**KC, one weighted fix per stop** (`kc_fixes`, the review's KC findings): before, every still picture was blended half
+way (a stop's correction 50-94% by timing) and 160 of 242 fixes arrived after the robot had moved on. Now one fix per
+stop: the camera's still position, corrected by the camera's error at that place (`e02_camerr`), weighted against the
+robot's own pose (RAW rows) by how sure each is (`CE.blend_weight`: own sd from the uncertainty model since the last
+fix, camera sd from the error map, x1.5 in a poor camera-quality cell); sent pre-weighted with `e02_fix_k 1`. Every
+stop logged in kc_stops.csv. The stand-still after each leg (`leg_pause_ms`, all mode-0 conditions alike) is set from
+the session's picture delay: 300 + 1000 x (0.45 + p95 age + 0.25) ms, 1.0-2.5 s (chosen; DOE in the code).
+**The camera's error by place** (`e02_camerr.py`): samples from tape marks (`--marks`: Nick puts a robot by hand on
+7 marks measured from the boards' faces, `CE.MARKS`) and from every finished find (its pose is exact against both
+boards); a Gaussian-kernel map (25 cm). Runs get `far_err_tape_cm` / `end_err_tape_cm` (live and in the analysis)
+when the session had tape marks: KC is judged at the far point against the tape-checked camera.
+**K survives the runner's re-find** (`_refind`): no `stop` to a robot in a camera-steered run; a runner stop is
+labelled `runner_stop`, never `safety_stop` (`ST.judge_run`, the analysis's ended-early kinds).
+**Gyro drift held** (`FIT.fit_robot(measured_drift=)`, `DRIFT_BAND_DPS` 0.05): beyond the band the drift is held at
+its edge and the scale refitted. Offline on the evening's data this moves Left's scale to 1.096 (morning 1.072):
+drift and scale trade off when every route turns the same way; the plan is a spin check for the scale on its own.
+**Explore with the robots scattered** (`explore_gap_rays`): when the rays leave a side unmet, rays are aimed at the
+45 deg sectors (round the middle of everything seen) with fewer than 2 ray ends, by the robot whose ray there is
+clear of the others; `explore_one_ray` is the single ray, shared with `explore_rays`.
+**Routes re-checked when a board goes missing** (`recheck_routes`): routes that no longer fit are left out and their
+pending runs put aside (status `left_out`, not counted in the plan's total).
+**Open edges learned from edge stops** (`learn_open_edges`): after 3 edge-guard stops of an edge, it moves to their
+median, inwards up to 8 cm, outwards up to 3 cm from where it first stood (chosen; DOE with the crawl-speed runs).
+**From the four analyses** (docs/build-reports/e02-oct24-analyses.md):
+- Camera-drift watch (`CAM.CameraShiftWatch`): every 5 s a picture is aligned to the runs' first one using only what
+  lies outside the plywood; the tracker takes the shift back out of every pixel (`px_shift`); said once past 1 px;
+  logged (`camera_shift`). `--no-shift-watch` turns it off.
+- Camera-quality map (`CAM.QualityMap`): per 20 cm cell, the robot's detail, the floor's brightness and the lock-on's
+  share, built while the robots drive; quality_map.csv; poor cells raise the camera's sd for KC.
+- The fix before a find carries the runner's heading only if it was measured and the robot's own gyro agrees within
+  5 deg (`find_heading_ok`); otherwise position only (Center's 13-24 cm finds came from a camera heading 19 deg off).
+**The Pi run** (docs/pi-run.md): `run-e02-pi.sh` (tmux: recorder + runner; USB drive checked; uploads at the end with
+`tools/pi/upload_session.py`); `e02.py --on-pi` (camera at 127.0.0.1, the live view open on the WiFi, questions on the
+live page with a 15-minute default: `--view-open`, `--web-ask`); `wait_robots` calls the robots by broadcast so they
+answer the Pi. The laptop way is unchanged.
+**Simulator:** `PLACE_<robot>.json` in the sim folder puts a robot down by hand (the mark check in dry runs).
+Tests: tests/test_e02_camerr.py, tests/test_e02_webask.py, tools/pi/tests/test_upload_session.py.

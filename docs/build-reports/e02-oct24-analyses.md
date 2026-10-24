@@ -24,7 +24,9 @@ so robots and overlays do not count.
 
 **Result.** The board did not move; the camera's picture did, by up to 2 pixels (about 1 cm on the board near the
 top board), creeping while sessions ran (19:14 to 19:58: -1.3 to -2.0 px) and partly coming back between them
-(18:33: -0.5 px). That matches the 1 cm walk of the top board's line (123.8 cm in the morning, 124.9 in the
+(18:33: -0.5 px). Run through session 1's calibration, the evening's shift (+0.2, -2.0 px) moves the top board's
+line (the y-board, along the top of the picture) by +0.8 cm and the left board's (the x-board) by 0.0 cm; the
+lines measured +1.1 and 0.0 to +0.4 cm. That matches the 1 cm walk of the top board's line (123.8 cm in the morning, 124.9 in the
 evening). Likely a slow sag or warming of the camera's mount; the program's line measurement was right about the
 picture it was given.
 

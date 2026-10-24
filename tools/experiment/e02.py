@@ -86,6 +86,7 @@ import e02_camera as CAM  # noqa: E402
 import e02_map as MAP  # noqa: E402
 import e02_explore as EX  # noqa: E402
 import e02_edgefind as EF  # noqa: E402
+import e02_camerr as CE  # noqa: E402
 
 
 def EX_provisional_camera(w, h, f=600.0, height_cm=260.0):
@@ -99,6 +100,16 @@ PAUSE_MS = 1000
 FIX_HZ = 3.0
 DRIVE_CMS_GUESS = 8.0
 LEG_PAUSE_MS = 700        # e02_leg_pause_ms in every mode-0 run: still long enough for a camera fix (KC)
+# 2026-10-24 review: at 700 ms, 160 of 242 KC fixes arrived after the robot had moved on. The pause is now set from
+# the session's measured picture delay (leg_pause_ms()): the firmware's still check (e02_fix_still_ms 300) +
+# KC_STILL_S of still pictures + the delay's 95th percentile + KC_SEND_MARGIN_S, between these bounds. All chosen
+# (DOE: the share of stops with a fix that landed, and the time cost, at 1.0 / 1.4 / 2.0 s).
+LEG_PAUSE_MIN_MS, LEG_PAUSE_MAX_MS = 1000, 2500
+KC_STILL_S = 0.45           # kc_fix_from: 0.1 s after the stop + 0.3 s of still pictures, and a little
+KC_SEND_MARGIN_S = 0.25     # the laptop's own work and the WiFi to the robot
+KC_POOR_CELL_SD_FACTOR = 1.5   # chosen: the camera's sd in a poor cell (CAM.QualityMap); DOE with the tape marks
+KC_HEAD_SD_DEG = 3.0
+WEB_ASK_TIMEOUT_S = 15 * 60   # the Pi run: a question on the live page waits this long, then its default (chosen)        # chosen: the camera's heading from a straight stretch's end (DOE with tape marks)
 TRANSIT_MAX_CM = 140      # e02_transit_max_cm: park spots are up to ~110 cm from the find's staging point
 BACK_MAX_CM = 9.5         # firmware e02_back_max_cm is 10: backwards legs are split into pieces this long
 TURN_DPS_GUESS = 45.0
@@ -355,6 +366,10 @@ class Runner:
         self.in_runs = False          # the session's runs have started (backups apply only then)
         self.last_result = ""
         self.kc_stop = threading.Event()
+        # the camera's error by place (e02_camerr.py; 2026-10-24 review): tape marks and finds; KC fixes are
+        # corrected with it and weighted by it
+        self.camerr = CE.CameraErrorMap(state.get("camera_error_samples"))
+        self.quality = CAM.QualityMap()      # how well the camera sees a robot, place by place (2026-10-24)
         self.marks_unconfirmed = 0
         self.watchdog_fired = False
         self.watch_stop = None
@@ -366,6 +381,7 @@ class Runner:
         self.watch_count = defaultdict(int)  # robot -> watchdog stops in the current drive
         self.disagree = defaultdict(int)  # robot -> camera / wheels disagreements in a row
         self.refinding = set()            # robots being found again (no camera/wheels check inside: no recursion)
+        self.runner_stopped = set()       # robots the runner itself sent `stop` during a run (not the watchdog)
         self.fresh_id = {}            # robot -> True: its position came from identify() and it has not driven since
         self.watch_edge_cm = None     # the watchdog's open-edge distance (None: PL.WATCH_EDGE_CM; mapping: 0)
         self.bricks_view = None       # the brick demo's drawing on the live view (bricks, path, tracks), or None
@@ -500,10 +516,50 @@ class Runner:
         self.say("  [video mark] %s%s" % (text, "" if ok else "  (the Pi didn't confirm it)"), quiet=ok)
         self.st.setdefault("notes", []).append([round(time.time(), 3), text, bool(ok)])
 
+    def web_ask(self, prompt, default, timeout_s):
+        """The Pi run (--web-ask): the question goes on the live page (any phone or computer on the WiFi answers
+        it), the console can answer too; after timeout_s with no answer, the default (said loudly)."""
+        v = getattr(self, "view", None)
+        if v is None:
+            return None
+        self.say("QUESTION (answer on the live page): " + prompt.strip())
+        box = []
+        if sys.stdin is not None and sys.stdin.isatty():
+            threading.Thread(target=lambda: box.append(self._input("")), daemon=True).start()
+        t_end = None if timeout_s is None else time.time() + timeout_s
+        with v.lock:
+            qid = int(time.time() * 1000)
+            v.question = dict(id=qid, prompt=prompt.strip(), default=default, timeout_s=timeout_s)
+        try:
+            while t_end is None or time.time() < t_end:
+                with v.lock:
+                    if qid in v.answers:
+                        ans = v.answers.pop(qid).strip()
+                        break
+                if box:
+                    ans = box[0]
+                    break
+                time.sleep(0.3)
+            else:
+                ans = None
+        finally:
+            with v.lock:
+                if v.question and v.question["id"] == qid:
+                    v.question = None
+        if ans is None:
+            self.say("  (no answer in %d min: the default, %r, is taken)" % (round((timeout_s or 0) / 60), default))
+            self.mark("e02 question timed out: %s" % prompt.strip()[:60])
+        else:
+            self.say("  answer: %r" % ans)
+        return ans
+
     def ask(self, prompt, default="y"):
         if self.a.auto:
             self.say(prompt + " -> " + default + " (automatic)")
             return default
+        if getattr(self.a, "web_ask", False):
+            ans = self.web_ask(prompt, default, WEB_ASK_TIMEOUT_S)
+            return default if ans is None else (ans or default)
         try:
             return input(prompt).strip()
         except EOFError:
@@ -513,6 +569,8 @@ class Runner:
         """input() that gives up after timeout_s (None): an unattended session must never wait for ever."""
         if self.a.auto:
             return None
+        if getattr(self.a, "web_ask", False):
+            return self.web_ask(prompt, "", timeout_s)
         box = []
         th = threading.Thread(target=lambda: box.append(self._input(prompt)), daemon=True)
         th.start()
@@ -536,6 +594,12 @@ class Runner:
             try:
                 self.lab.on_camera(self.tracker.active, s[0], s[1], s[2])
             except Exception:
+                pass
+        if self.tracker is not None and self.tracker.active and self.feed is not None:
+            try:
+                u, v = self.tracker._px(s[1], s[2])
+                self.quality.add(self.feed.last_img, u, v, s[1], s[2], getattr(self.tracker, "source", ""), s[0])
+            except Exception:              # a display-grade measurement: never break the camera loop
                 pass
         if self.tracker is not None and self.tracker.active:
             lk = getattr(self.tracker, "lk", None)
@@ -703,14 +767,36 @@ class Runner:
                 self.heads[r][1] = False             # the wiggle may have turned it a little
         self.st.save()
 
-    def fix_now(self, robot, heading=None):
-        """Tell the robot where the camera sees it (`fix x y th t_wall`; while idle it replaces its pose)."""
+    FIND_HEAD_AGREE_DEG = 5.0     # chosen: the runner's heading goes with the fix before a find only within this of
+    # the robot's own gyro heading (2026-10-24 analysis: Center's finds 13-24 cm off came from a camera heading set 2 s
+    # before the find, up to 19 deg wrong; DOE: the find's heading correction against this limit)
+
+    def find_heading_ok(self, robot):
+        """(heading, position_only) for the fix before a find: the runner's heading, only if it was measured and the
+        robot's own gyro heading agrees within FIND_HEAD_AGREE_DEG; otherwise position only (the robot keeps its own
+        heading). A robot with no pose of its own gets the runner's heading as before (it needs one)."""
+        h = self.heads.get(robot, [None, False])
+        own = self.own_pose(robot)
+        if own is None or own[2] is None:
+            return h[0], False
+        if h[0] is None or not h[1]:
+            ok = False
+        else:
+            ok = abs(ST.wrap180(h[0] - own[2])) <= self.FIND_HEAD_AGREE_DEG
+        self.st.setdefault("find_heading_checks", []).append(
+            [round(time.time(), 1), robot, None if h[0] is None else round(h[0], 1), bool(h[1]),
+             round(own[2], 1), ok])
+        return (h[0], False) if ok else (None, True)
+
+    def fix_now(self, robot, heading=None, position_only=False):
+        """Tell the robot where the camera sees it (`fix x y th t_wall`; while idle it replaces its pose).
+        position_only: the heading is left to the robot's own gyro ("-")."""
         if self.tracker is None or self.tracker.active != robot:
             return None                  # the camera follows another robot (or none): no position for this one
         p = self.settle(min_s=0.3)
         if p is None:
             return None
-        h = heading if heading is not None else self.heads.get(robot, [None])[0]
+        h = None if position_only else (heading if heading is not None else self.heads.get(robot, [None])[0])
         self.send(robot, "fix %.2f %.2f %s %.3f" % (p[0], p[1], "-" if h is None else "%.1f" % h, time.time()))
         self.fix_t[robot] = time.time()
         self.unc_reset(robot)
@@ -792,6 +878,30 @@ class Runner:
     def unc_reset(self, robot):
         self.unc[robot] = dict(dist=0.0, turned=0.0)
 
+    def leg_pause_ms(self):
+        """The stand-still after every leg of a mode-0 run (all conditions alike), long enough for a KC camera fix
+        to land: the firmware's still check + still pictures + this session's picture delay (95th percentile of the
+        last minutes' worst age a second) + a margin. 2026-10-24 review: at a fixed 700 ms two thirds of KC's fixes
+        arrived after the robot had moved on."""
+        rows = (getattr(self, "perf_rows", None) or [])[-300:]
+        ages = sorted(r.get("age_max_s", 0.0) for r in rows if r.get("age_max_s") is not None)
+        p95 = ages[int(0.95 * (len(ages) - 1))] if ages else 0.3
+        p95 = min(p95, 1.5)                       # a WiFi copy's seconds-long stalls: pausing longer would not help
+        ms = 300 + 1000.0 * (KC_STILL_S + p95 + KC_SEND_MARGIN_S)
+        ms = int(round(min(LEG_PAUSE_MAX_MS, max(LEG_PAUSE_MIN_MS, ms)) / 100.0) * 100)
+        st = getattr(self, "st", None)
+        if st is not None:
+            st.setdefault("leg_pause_ms", []).append([round(time.time(), 1), ms, round(p95, 3)])
+        return ms
+
+    def camerr_add(self, x, y, cam, source, robot):
+        """One place where the camera's error is known (e02_camerr.py), saved in the state."""
+        if cam is None or x is None or y is None:
+            return None
+        smp = self.camerr.add(x, y, cam[0], cam[1], source, robot=robot, t=round(time.time(), 1))
+        self.st["camera_error_samples"] = self.camerr.to_list()
+        return smp
+
     def pictures_late(self):
         """Item 5: is the camera's newest picture older than LATE_PICTURE_S (or the last second's oldest)?"""
         f = self.feed
@@ -835,8 +945,9 @@ class Runner:
     def edge_touch_log(self, robot, p, words, kind):
         """Where an open edge stopped a robot (its edge guard), against the map's open edge: the edge's felt position
         (the camera's position plus the cue's reach along its heading) for the edge nearest. Logged only for now
-        (edge_touches in the state, said in the session summary); it will move the open edges like the boards
-        (item 3) once real edge stops have been measured (none before 2026-10-23)."""
+        (edge_touches in the state, said in the session summary), and the open edges move to where the robots feel
+        them like the boards (learn_open_edges, 2026-10-24: the night of 2026-10-23 gave the first real edge
+        stops)."""
         if kind != "go" or p is None or "plywood edge" not in (words or "") or self.board is None:
             return
         h = self.heads.get(robot, [None])[0]
@@ -849,6 +960,42 @@ class Runner:
             return
         self.st.setdefault("edge_touches", []).append(
             [round(time.time(), 1), robot, a, round(v, 2), round(felt, 2), MAP.edge_cue(words)])
+        self.learn_open_edges()
+
+    EDGE_LEARN_MIN_N = 3          # chosen, as for the boards: three edge stops before an open edge moves
+    EDGE_LEARN_STEP_CM = 0.5
+    EDGE_LEARN_IN_CM = 8.0        # chosen: an open edge may move inwards (safer) up to this from its first line
+    EDGE_LEARN_OUT_CM = 3.0       # ... and outwards (less safe: the watchdog lets robots nearer) only this far.
+    # DOE for both caps: edge stops at known tape distances from the plywood's end (the crawl-speed experiment's runs)
+
+    def learn_open_edges(self):
+        """The map's open edges move to where the robots' edge guards feel them (the median of the last touches of
+        that edge), after EDGE_LEARN_MIN_N touches, inwards up to EDGE_LEARN_IN_CM and outwards up to
+        EDGE_LEARN_OUT_CM from where the edge first stood; logged (open_edge_updates) and said."""
+        st, bd = self.st, self.board
+        first = st.setdefault("open_edges_first", {})
+        for a, v in bd.open_edges():
+            attr = ("x0" if abs(v - bd.x0) < 1e-6 else "x1") if a == "x" else ("y0" if abs(v - bd.y0) < 1e-6 else "y1")
+            rows = [r for r in st.get("edge_touches") or [] if r[2] == a and abs(r[4] - v) <= 15.0][-12:]
+            if len(rows) < self.EDGE_LEARN_MIN_N:
+                continue
+            v0 = first.setdefault(attr, round(v, 2))
+            inward = 1.0 if attr.endswith("0") else -1.0          # x0 / y0 edges: inside is larger values
+            felt = float(np.median([r[4] for r in rows]))
+            move = (felt - v0) * inward                          # + = inwards
+            move = min(self.EDGE_LEARN_IN_CM, max(-self.EDGE_LEARN_OUT_CM, move))
+            line = v0 + inward * move
+            if abs(line - v) < self.EDGE_LEARN_STEP_CM:
+                continue
+            setattr(bd, attr, line)
+            st.setdefault("open_edge_updates", []).append(dict(t=round(time.time(), 1), edge=attr, before=round(v, 2),
+                                                               after=round(line, 2), first=v0, touches=len(rows)))
+            self.say("    the open edge %s moved %+.1f cm to where the robots' edge guards feel it (%.2f cm; %d stops)"
+                     % (attr, line - v, line, len(rows)))
+            self.mark("e02 open edge %s %.2f" % (attr, line))
+            st["board"] = bd.to_dict()
+            self.tracker_area()
+            st.save()
 
     def board_correct(self, robot, front, ahead, words):
         """Item 5: pictures late, the front sensor reading a board square on: its position along that board's axis
@@ -1177,7 +1324,15 @@ class Runner:
 
     def _refind(self, robot, why):
         self.st.setdefault("disagreements", []).append([round(time.time(), 1), robot, why, self.order])
-        self.send(robot, "stop")
+        if self.moves.get(robot, {}).get("why") == "K":
+            # 2026-10-24 review: in session 1, 4 of 9 camera-steered runs were ended here, because `stop` also ends
+            # the firmware's camera-steered program. Between legs the robot already stands still, so no stop: the
+            # turn on its spot that finds it again is just more legs of the same run.
+            self.say("    %s: camera-steered run: finding it again without stopping the run" % robot, quiet=True)
+        else:
+            self.send(robot, "stop")
+            if self.moves.get(robot):
+                self.runner_stopped.add(robot)
         time.sleep(0.5)
         last = self.tracker.where()
         near = (last[1], last[2], 60.0) if last else None
@@ -2114,8 +2269,19 @@ class Runner:
 
     # --- checks -----------------------------------------------------------------------------------
     def wait_robots(self, names, timeout=40):
+        """Wait for the robots to be heard. A robot that last took commands from another computer (the laptop, when
+        the session runs on the Pi) sends its lines only there and no longer says hello: a `status` to everyone on
+        the WiFi (broadcast) makes this computer the one it answers (firmware net.h: a robot answers whoever last
+        sent it a command)."""
         t0 = time.time()
+        last_call = 0.0
         while time.time() - t0 < timeout and not set(names) <= set(self.link.robots()):
+            if time.time() - last_call > 2.0:
+                last_call = time.time()
+                try:
+                    self.link.send_ip("255.255.255.255", "status")
+                except OSError:
+                    pass
             time.sleep(0.5)
         return [n for n in names if n not in self.link.robots()]
 
@@ -2582,8 +2748,9 @@ class Runner:
         except ExploreShort as e:
             # a side no ray met: more rays, between the first ones (Nick puts the robots down anywhere: three near
             # one side leave the far side unmet)
-            self.say("  %s: more rays, between the first ones ..." % e)
-            for n in names:
+            self.say("  %s: rays aimed at the sides not met yet ..." % e)
+            n_gap = self.explore_gap_rays(names, obs)
+            for n in (names if not n_gap else []):
                 q = st["positions"].get(n)
                 if not q:
                     continue
@@ -2775,49 +2942,143 @@ class Runner:
         for k in range(self.EXPLORE_RAYS):
             # evenly spread rays in its own frame (its heading from its own legs: 2026-10-23 dry run 5, a fixed
             # turn between rays after the half turn back left a 93 deg gap, and no robot met one side)
-            own_h = sum(q["dth"] for q in obs[n][1:])
-            want = (k + offset) * 360.0 / self.EXPLORE_RAYS
-            turn = ST.wrap180(want - own_h)
-            if abs(turn) > 150.0:          # two turns: a half turn is ambiguous (+-180 alike)
-                state, info, lid = self.explore_leg(n, "turn", turn / 2.0)
-                self.explore_stop(n, obs, lid, turn_cmd=turn / 2.0)
-                turn = turn / 2.0
-            state, info, lid = self.explore_leg(n, "turn", turn)
-            self.explore_stop(n, obs, lid, turn_cmd=turn)
-            who = self.explore_ray_blocked(n, obs, want)
-            if who:
-                self.say("    ray %d: skipped (it would pass %s)" % (k + 1, who), quiet=True)
-                self.st.setdefault("setup", {}).setdefault("explore_skipped_rays", []).append([n, k, round(want, 1), who])
+            self.explore_one_ray(n, obs, (k + offset) * 360.0 / self.EXPLORE_RAYS, k)
+
+    def explore_one_ray(self, n, obs, want, k):
+        """One ray of robot n at heading `want` (deg, its own frame): turn, out until a board or an edge stops it
+        (or the ray's length), back off an edge, and back the way it came. Returns the contact kind or None
+        (skipped: it would pass another robot)."""
+        own_h = sum(q["dth"] for q in obs[n][1:])
+        turn = ST.wrap180(want - own_h)
+        if abs(turn) > 150.0:          # two turns: a half turn is ambiguous (+-180 alike)
+            state, info, lid = self.explore_leg(n, "turn", turn / 2.0)
+            self.explore_stop(n, obs, lid, turn_cmd=turn / 2.0)
+            turn = turn / 2.0
+        state, info, lid = self.explore_leg(n, "turn", turn)
+        self.explore_stop(n, obs, lid, turn_cmd=turn)
+        who = self.explore_ray_blocked(n, obs, want)
+        if who:
+            self.say("    ray %d: skipped (it would pass %s)" % (k + 1, who), quiet=True)
+            self.st.setdefault("setup", {}).setdefault("explore_skipped_rays", []).append([n, k, round(want, 1), who])
+            return None
+        self.explore_speed(n, EXPLORE_CRAWL_CMS)
+        state, info, lid = self.explore_leg(n, "go", self.EXPLORE_RAY_CM,
+                                            timeout=self.EXPLORE_RAY_CM / EXPLORE_CRAWL_CMS * 1.5 + 10.0)
+        fin = self.listener.leg_final(n, "-", lid) or {}
+        kind = MAP.stop_kind(fin.get("state"), fin.get("info"))
+        o = self.explore_stop(n, obs, lid, contact=kind)
+        if o is not None and kind == "edge":
+            o["cue"] = MAP.edge_cue(fin.get("info"))
+        self.say("    ray %d: %s" % (k + 1, {"edge": "an open edge", "board": "a board (or a robot)"}.get(
+            kind, "nothing met")), quiet=True)
+        if o is not None and kind and abs(o["d"]) < 2.0:
+            o.pop("contact", None)            # it was already there (it never left the edge): not a new side point
+        if kind == "edge":
+            # back off the edge first, blind (2026-10-23 real board: at an open edge the edge guard refused every
+            # turn after it, the robot stayed with a wheel over the edge, and the rest of its rays were lost)
+            state, info, lid = self.explore_leg(n, "go", -EXPLORE_EDGE_BACK_CM)
+            bo = self.explore_stop(n, obs, lid)
+            if o is not None and bo is not None:
+                o["d_back"] = bo["d"]
+        back = abs(o["d"]) + (o.get("d_back") or 0.0) if o else 0.0
+        if back > 1.0:
+            # back the way it came: (nearly) a half turn, then forward (175 deg: a 180 is ambiguous, the robot
+            # sometimes goes round the other way and reports +-180 alike: 2026-10-23 dry run); (backing up is blind and needs camera fixes,
+            # which explore can't give yet; forward has the front stop and the edge guard)
+            state, info, lid = self.explore_leg(n, "turn", 175.0)
+            self.explore_stop(n, obs, lid, turn_cmd=175.0)
+            self.explore_speed(n, EXPLORE_FAST_CMS)          # back over ground it has just driven
+            state, info, lid = self.explore_leg(n, "go", back, timeout=40.0)
+            self.explore_stop(n, obs, lid)
+        return kind or ""
+
+    EXPLORE_SECTORS = 8         # chosen: 45 deg sectors round the middle of all stops seen
+    EXPLORE_SECTOR_MIN = 2      # a sector with fewer ray ends than this is a gap (rect_check wants 2 a side)
+
+    def explore_gaps(self, names, obs):
+        """Where the rays have not met anything yet: 45 deg sectors round the middle of every stop seen (on the
+        provisional floor) with fewer than EXPLORE_SECTOR_MIN ray ends. Returns [(sector heading deg, count)]."""
+        flo_all, ends = [], []
+        for n in names:
+            for q in obs.get(n, []):
+                if q.get("skip"):
+                    continue
+                f = self.cam.to_floor(q["u"], q["v"], EX.ROBOT_TOP_CM)
+                if not (np.isfinite(f[0]) and np.isfinite(f[1])):
+                    continue
+                flo_all.append(f)
+                if q.get("contact"):
+                    ends.append(f)
+        if len(flo_all) < 5:
+            return []
+        cx, cy = float(np.mean([f[0] for f in flo_all])), float(np.mean([f[1] for f in flo_all]))
+        w = 360.0 / self.EXPLORE_SECTORS
+        cnt = [0] * self.EXPLORE_SECTORS
+        for e in ends:
+            a = math.degrees(math.atan2(e[1] - cy, e[0] - cx)) % 360.0
+            cnt[int(a // w) % self.EXPLORE_SECTORS] += 1
+        return [((k + 0.5) * w, cnt[k]) for k in range(self.EXPLORE_SECTORS) if cnt[k] < self.EXPLORE_SECTOR_MIN], (cx, cy)
+
+    def explore_gap_rays(self, names, obs):
+        """2026-10-24 (robots put down scattered: rays skipped because they would pass another robot left a side
+        unmet, and explore fell back): rays aimed at the gaps. For each sector the rays have not met, the robot
+        whose ray there is clear of the others (on the provisional floor) drives one, aimed out from the middle of
+        everything seen. Returns how many gap rays were driven."""
+        got = self.explore_gaps(names, obs)
+        if not got:
+            return 0
+        gaps, (cx, cy) = got
+        if not gaps:
+            return 0
+        done = 0
+        self.say("  %d sector(s) of the board no ray has met yet: rays aimed at them ..." % len(gaps))
+        for hd, c in gaps:
+            best = None
+            for n in names:
+                stops = [q for q in obs.get(n, []) if not q.get("skip")]
+                if len(stops) < 5:
+                    continue
+                own = [(p[0], p[1]) for p, q in zip(EX.rebuild(obs[n], 1.0, 1.0), obs[n]) if not q.get("skip")]
+                flo = [self.cam.to_floor(q["u"], q["v"], EX.ROBOT_TOP_CM) for q in stops]
+                m = EX.own_to_floor_map(own, flo)
+                if m is None:
+                    continue
+                A, _ = m
+                here = flo[-1]
+                # aim from where it stands towards the sector's far side (out from the middle)
+                tx, ty = cx + 200.0 * math.cos(math.radians(hd)), cy + 200.0 * math.sin(math.radians(hd))
+                fh = math.degrees(math.atan2(ty - here[1], tx - here[0]))
+                others = [(k_, tuple(q[:2])) for k_, q in self.st["positions"].items() if k_ != n and q]
+                if MAP.ray_blocked(here, fh, others, clear_cm=EXPLORE_RAY_CLEAR_CM, length_cm=self.EXPLORE_RAY_CM):
+                    continue
+                try:
+                    d = np.linalg.solve(A, np.array([math.cos(math.radians(fh)), math.sin(math.radians(fh))]))
+                except np.linalg.LinAlgError:
+                    continue
+                own_h = math.degrees(math.atan2(d[1], d[0]))
+                # the robot nearest the gap goes
+                dist = math.hypot(tx - here[0], ty - here[1])
+                if best is None or dist < best[0]:
+                    best = (dist, n, own_h)
+            if best is None:
+                self.say("    sector at %.0f deg: every robot's ray there would pass another robot" % hd, quiet=True)
                 continue
-            self.explore_speed(n, EXPLORE_CRAWL_CMS)
-            state, info, lid = self.explore_leg(n, "go", self.EXPLORE_RAY_CM,
-                                                timeout=self.EXPLORE_RAY_CM / EXPLORE_CRAWL_CMS * 1.5 + 10.0)
-            fin = self.listener.leg_final(n, "-", lid) or {}
-            kind = MAP.stop_kind(fin.get("state"), fin.get("info"))
-            o = self.explore_stop(n, obs, lid, contact=kind)
-            if o is not None and kind == "edge":
-                o["cue"] = MAP.edge_cue(fin.get("info"))
-            self.say("    ray %d: %s" % (k + 1, {"edge": "an open edge", "board": "a board (or a robot)"}.get(
-                kind, "nothing met")), quiet=True)
-            if o is not None and kind and abs(o["d"]) < 2.0:
-                o.pop("contact", None)            # it was already there (it never left the edge): not a new side point
-            if kind == "edge":
-                # back off the edge first, blind (2026-10-23 real board: at an open edge the edge guard refused every
-                # turn after it, the robot stayed with a wheel over the edge, and the rest of its rays were lost)
-                state, info, lid = self.explore_leg(n, "go", -EXPLORE_EDGE_BACK_CM)
-                bo = self.explore_stop(n, obs, lid)
-                if o is not None and bo is not None:
-                    o["d_back"] = bo["d"]
-            back = abs(o["d"]) + (o.get("d_back") or 0.0) if o else 0.0
-            if back > 1.0:
-                # back the way it came: (nearly) a half turn, then forward (175 deg: a 180 is ambiguous, the robot
-                # sometimes goes round the other way and reports +-180 alike: 2026-10-23 dry run); (backing up is blind and needs camera fixes,
-                # which explore can't give yet; forward has the front stop and the edge guard)
-                state, info, lid = self.explore_leg(n, "turn", 175.0)
-                self.explore_stop(n, obs, lid, turn_cmd=175.0)
-                self.explore_speed(n, EXPLORE_FAST_CMS)          # back over ground it has just driven
-                state, info, lid = self.explore_leg(n, "go", back, timeout=40.0)
-                self.explore_stop(n, obs, lid)
+            _, n, own_h = best
+            q = self.st["positions"].get(n)
+            if q:
+                self.tracker.follow(n, q[0], q[1])
+                self.history.clear()
+                self.tracker.hold(HOLD_CM)
+            kind = self.explore_one_ray(n, obs, own_h, 99)
+            self.st.setdefault("setup", {}).setdefault("explore_gap_rays", []).append(
+                [n, round(hd, 1), round(own_h, 1), kind])
+            done += 1
+            self.moves.pop(n, None)
+            p = self.settle(min_s=0.3)
+            if p:
+                self.st["positions"][n] = [p[0], p[1], None]
+                self.tracker.park(n, p[0], p[1])
+        return done
 
     def explore_finish(self, names, obs, t0, last_try=True):
         st = self.st
@@ -3900,7 +4161,7 @@ class Runner:
         return ["set e02_xboard_side %d" % xs, "set e02_yboard_side %d" % ys,
                 "set e02_xboard_cm %.2f" % b.xboard_cm, "set e02_yboard_cm %.2f" % b.yboard_cm,
                 "set e02_pause_ms %d" % PAUSE_MS, "set e02_start_x %.2f" % sx, "set e02_start_y %.2f" % sy,
-                "set e02_l_turn %d" % (1 if b.turn_sign > 0 else -1), "set e02_leg_pause_ms %d" % LEG_PAUSE_MS,
+                "set e02_l_turn %d" % (1 if b.turn_sign > 0 else -1), "set e02_leg_pause_ms %d" % (self.leg_pause_ms() if hasattr(self, "leg_pause_ms") else LEG_PAUSE_MIN_MS),
                 "set e02_transit_max_cm %d" % TRANSIT_MAX_CM] + SAFETY_CMDS
 
     def find_check(self):
@@ -4068,7 +4329,8 @@ class Runner:
         self.end_moves(robot)
         t0 = time.time()
         self.phase = "find"
-        self.fix_now(robot)
+        hfind, ponly = self.find_heading_ok(robot)
+        self.fix_now(robot, heading=hfind, position_only=ponly)
         self.watchdog_fired = False
         self.watch_stop = None
         self.mark("e02 %s %s find start" % (order, robot))
@@ -4123,6 +4385,13 @@ class Runner:
                 else:
                     lines["y"] = sp[0] - self.board.ux * face
         out["board_lines"] = {k: round(v, 2) for k, v in lines.items()}
+        if ok and fr:
+            # its pose is exact against both boards now: where the camera sees it is a check of the camera there
+            ax, ay = num(fr[1].get("after_x")), num(fr[1].get("after_y"))
+            cam = self.settle(min_s=0.3, timeout=2.0)
+            smp = self.camerr_add(ax, ay, cam, "find", robot)
+            if smp:
+                out["camera_error_cm"] = round(math.hypot(smp["dx"], smp["dy"]), 2)
         out["bumps"] = len(bumps)
         out["bump_results"] = [rec.get("result") for _, rec in bumps]
         self.mark("e02 %s %s find end %s" % (order, robot, end["result"]))
@@ -4329,6 +4598,7 @@ class Runner:
                 which = "y" if ax == "x" else "x"            # the y board stands along an x = value line
                 self.board.missing.add(which)
                 self.st.setdefault("board_changes", []).append([round(t1, 1), robot, "%s board gone" % which, v])
+                self.recheck_routes("the %s board is gone" % which)
                 self.say("    %s felt an open edge where the map had the %s board (%s = %.0f): the map now has an open "
                          "edge there" % (robot, which, ax, v))
                 self.mark("e02 board gone %s" % which)
@@ -4475,8 +4745,10 @@ class Runner:
         data += obs
         prev = self.fitted(robot)
         measured_drift = ((self.st.get("naming_check") or {}).get("gyro_raw_drift_dps") or {}).get(robot) is not None
-        res = FIT.fit_robot(data, prev, prior=self.prior(robot),
-                            prior_sd=dict(gyro_drift_dps=0.1) if measured_drift else None)
+        pr = self.prior(robot)
+        res = FIT.fit_robot(data, prev, prior=pr,
+                            prior_sd=dict(gyro_drift_dps=0.1) if measured_drift else None,
+                            measured_drift=pr["gyro_drift_dps"] if measured_drift else None)
         entry = dict(t=round(time.time(), 1), order=run_row["order"], n_new=len(obs), n_total=len(data),
                      n_stretches=len(stretches), accepted=res["accepted"], fitted=res["fitted"], reasons=res["reasons"],
                      values=res["values"], gyro_ok=res["gyro_ok"], wheel_ok=res["wheel_ok"])
@@ -4502,9 +4774,39 @@ class Runner:
             self.say("    %s: back to its spot%s" % (m, "" if ok_ else " failed (%s)" % why_))
         self.active = None
 
+    def recheck_routes(self, why):
+        """After the map changes (a board found gone: its side is an open edge now), every route is checked again
+        from the start spot (dry run 2026-10-23 23:20: the straight route ran at the edge where the board had been
+        and the watchdog stopped it). Routes that no longer fit are left out: their pending runs are put aside,
+        said, and kept in the plan's record (status left_out)."""
+        out = []
+        for rt in PL.ROUTES:
+            ok, open_room, board_room = self.board.route_fits(rt)
+            if not ok:
+                out.append(rt)
+                self.say("  Route %s no longer fits (%s): front %.0f cm from an open edge, body %.1f cm from a board"
+                         % (PL.ROUTE_NAMES[rt], why, open_room, board_room))
+        prev = set(self.st["setup"].get("routes_left_out") or [])
+        self.st["setup"]["routes_left_out"] = sorted(prev | set(out))
+        n = 0
+        for r in self.st["schedule"]:
+            if r["status"] == "pending" and r["route"] in out:
+                r["status"] = "left_out"
+                r.setdefault("notes", []).append("route left out: %s" % why)
+                n += 1
+        if n:
+            self.say("  %d pending run(s) on those routes are put aside (left_out)." % n)
+        self.st.save()
+        return out
+
     def do_run(self, r):
         robot, cond, route = r["robot"], r["cond"], r["route"]
         st = self.st
+        if route in (st["setup"].get("routes_left_out") or []):
+            r["status"] = "left_out"
+            r.setdefault("notes", []).append("route left out after the map changed")
+            st.save()
+            return
         if self.return_after:
             self.send_back_aside()
         done, total = st.counts()
@@ -4593,7 +4895,11 @@ class Runner:
         if mode == 0:
             cmds = ["set e02_route_gyro_scale %.4f" % vals["gyro_scale"],
                     "set e02_route_gyro_drift_dps %.4f" % vals["gyro_drift_dps"],
-                    "set e02_route_wheel_scale %.4f" % vals["wheel_scale"]]
+                    "set e02_route_wheel_scale %.4f" % vals["wheel_scale"],
+                    # KC's fixes are weighted on the laptop (kc_fixes): the firmware takes each as sent
+                    "set e02_fix_k 1",
+                    # the stand-still after every leg, from this session's picture delay (same for U, C and KC)
+                    "set e02_leg_pause_ms %d" % self.leg_pause_ms()]
             for c in cmds:
                 self.send(robot, c)
                 time.sleep(0.05)
@@ -4716,6 +5022,15 @@ class Runner:
         end_err = math.hypot(endp[0] - start[0], endp[1] - start[1]) if (endp and start) else None
         r["far_err_cm"] = round(far_err, 2) if far_err is not None else None
         r["end_err_cm"] = round(end_err, 2) if end_err is not None else None
+        # the same, with the camera corrected by its error at each place (tape marks, finds: e02_camerr). The far
+        # point is where KC should beat C (2026-10-24 review): scored here against the tape-checked camera.
+        if any(sm.get("source") == "mark" for sm in self.camerr.samples) and start and far:
+            cs, cf = self.camerr.corrected(*start)[:2], self.camerr.corrected(*far)[:2]
+            gx, gy = goal[0] - start[0] + cs[0], goal[1] - start[1] + cs[1]
+            r["far_err_tape_cm"] = round(math.hypot(cf[0] - gx, cf[1] - gy), 2)
+            if endp:
+                ce = self.camerr.corrected(*endp)[:2]
+                r["end_err_tape_cm"] = round(math.hypot(ce[0] - cs[0], ce[1] - cs[1]), 2)
         bel = None
         sx, sy, ex, ey = (num(rec.get(k)) for k in ("start_x", "start_y", "end_x", "end_y"))
         if None not in (sx, sy, ex, ey):
@@ -4727,7 +5042,11 @@ class Runner:
         on_board = endp is not None and self.board.on_board(endp[0], endp[1], margin=-1.0)
         verdict, why = ST.judge_run(far_err, end_err, on_board=on_board, seen=endp is not None,
                                     recover_cm=self.a.recover_cm,
-                                    runend="watchdog stop" if self.watchdog_fired else end["result"])
+                                    runend="watchdog stop" if self.watchdog_fired else (
+                                        "runner stop (finding it again)" if (robot in self.runner_stopped and
+                                                                             "stop command" in str(end["result"]))
+                                        else end["result"]))
+        self.runner_stopped.discard(robot)
         r["recovery"] = verdict
         r["verdict"] = verdict or "ok"
         if end["result"] != "done":
@@ -4876,28 +5195,91 @@ class Runner:
         return info
 
     def kc_fixes(self, robot, r, run):
-        """Condition KC: camera fixes to the robot, --fix-hz a second, while its run lasts. The firmware takes a
-        fix only while its wheels have stood still e02_fix_still_ms (it stands e02_leg_pause_ms after every leg).
-        The heading goes with a fix only when the camera saw a straight stretch end just before and the gyro
-        (RAW yaw) says it has not turned since; otherwise position only ("-")."""
+        """Condition KC: ONE camera fix at each stop of its route (2026-10-24 review). Before, every still picture
+        that arrived was blended half way, so a stop's correction was 50-94% by chance of timing, and two thirds of
+        the fixes arrived after it had moved on. Now, at each stop (kc_fix_from: still pictures after it stopped):
+          - the camera's position, corrected by the camera's error at that place (e02_camerr), and how sure that is;
+          - the robot's own pose there (its RAW rows) and how sure that is (the uncertainty model, from what it
+            drove and turned since its last fix);
+          - the two weighted by how sure each is (CE.blend_weight), sent as the new pose; the firmware replaces
+            its pose with it (e02_fix_k 1 for KC: the weighting is done here).
+        The heading goes with a fix only when the camera saw a straight stretch end just before and the gyro says
+        it has not turned since, weighted the same way (KC_HEAD_SD_DEG against the gyro's own). Every stop is
+        logged (kc_stops.csv)."""
         n = nh = 0
         period = 1.0 / self.a.fix_hz
+        done = []                                  # t_stop of the stops already fixed
+        last = dict(t=time.time(), dist=0.0, turned=0.0, pose=None)
         while not self.kc_stop.wait(period):
             recent = self.history.since(time.time() - 3.0)
             fx = kc_fix_from(recent)
             if fx is None:
                 continue                          # moving, or not still long enough: no picture of where it is now
             x, y, t_pic, t_stop, seg = fx
+            if any(abs(t_stop - d) < 0.5 for d in done):
+                continue                          # this stop has had its fix
+            own = self.kc_own_pose(run, last)
+            if own is None:
+                continue
+            bx, by, bth, dist, turned = own
+            cx, cy, csd = self.camerr.corrected(x, y)
+            if self.quality.poor(x, y):
+                csd *= KC_POOR_CELL_SD_FACTOR        # the camera sees robots badly here (glare): trust it less
+            rsd = UNC_BASE_CM + UNC_PER_CM * dist + dist * math.radians(UNC_DEG + UNC_DEG_PER_DEG * turned)
+            w = CE.blend_weight(rsd, csd)
+            fxp, fyp = bx + w * (cx - bx), by + w * (cy - by)
             th = "-"
             h = ST.heading_from_track(seg, min_cm=3.0, max_rms_cm=0.4) if seg else None
-            turned = self.gyro_turn_since(run, t_stop) if h is not None else None
-            if h is not None and turned is not None and abs(turned) < 2.0:
-                th = "%.1f" % ST.wrap180(h + turned)
-                nh += 1
-            self.send(robot, "fix %.2f %.2f %s %.3f" % (x, y, th, t_pic))
+            tsd = UNC_DEG + UNC_DEG_PER_DEG * turned
+            wh = None
+            if h is not None and bth is not None:
+                trn = self.gyro_turn_since(run, t_stop)
+                if trn is not None and abs(trn) < 2.0:
+                    hc = ST.wrap180(h + trn)
+                    wh = CE.blend_weight(tsd, KC_HEAD_SD_DEG)
+                    th = "%.1f" % ST.wrap180(bth + wh * ST.wrap180(hc - bth))
+                    nh += 1
+            self.send(robot, "fix %.2f %.2f %s %.3f" % (fxp, fyp, th, t_pic))
             n += 1
+            done.append(t_stop)
+            row = [round(time.time(), 2), robot, run, r.get("order", ""), round(t_stop, 2), round(bx, 2), round(by, 2),
+                   round(x, 2), round(y, 2), round(cx, 2), round(cy, 2), round(csd, 2), round(dist, 1),
+                   round(turned, 1), round(rsd, 2), round(w, 3), "" if wh is None else round(wh, 3),
+                   round(fxp, 2), round(fyp, 2), th, round(math.hypot(cx - bx, cy - by), 2)]
+            self.kc_log(row)
+            last.update(t=time.time(), dist=0.0, turned=0.0, pose=(fxp, fyp, bth))
         r["fixes_sent"] = n
         r["fixes_with_heading"] = nh
+
+    KC_COLS = ["t", "robot", "run", "order", "t_stop", "own_x", "own_y", "cam_x", "cam_y", "cam_corr_x", "cam_corr_y",
+               "cam_sd_cm", "dist_since_fix_cm", "turned_since_fix_deg", "own_sd_cm", "weight", "head_weight",
+               "fix_x", "fix_y", "fix_th", "camera_minus_own_cm"]
+
+    def kc_log(self, row):
+        path = os.path.join(self.dir, "kc_stops.csv")
+        new = not os.path.exists(path)
+        with open(path, "a", newline="") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(self.KC_COLS)
+            w.writerow(row)
+
+    def kc_own_pose(self, run, last):
+        """The robot's own pose now (its newest RAW row of this run, standing still) and how far it drove and
+        turned since the last fix (from its RAW rows): (x, y, th, dist_cm, turned_deg), or None."""
+        raw = [q for q in (self.listener.raw.get(run) or []) if q.get("x_cm") is not None and q.get("th_deg") is not None]
+        if not raw or time.time() - raw[-1]["t_recv"] > 1.5:
+            return None
+        since = [q for q in raw if q["t_recv"] >= last["t"] - 0.2] or raw[-1:]
+        dist = turned = 0.0
+        for a, b in zip(since, since[1:]):
+            dist += math.hypot(b["x_cm"] - a["x_cm"], b["y_cm"] - a["y_cm"])
+            turned += abs(ST.wrap180(b["th_deg"] - a["th_deg"]))
+        if last.get("pose") is None:
+            # the first fix of the run: since its find (a few cm and turns away), so start from the run's start
+            dist, turned = dist + 2.0, turned + 90.0
+        q = raw[-1]
+        return q["x_cm"], q["y_cm"], q["th_deg"], dist + last["dist"], turned + last["turned"]
 
     def gyro_turn_since(self, run, t):
         """How far the robot turned (deg, left +, raw gyro) since laptop time t, from its RAW rows, or None."""
@@ -4926,6 +5308,7 @@ class Runner:
     RUN_COLS = ["order", "block", "robot", "cond", "route", "status", "recovery", "flags", "find_run", "e02_run",
                 "find_result", "e02_result", "t_start", "t_end", "cam_start_x", "cam_start_y", "cam_far_x", "cam_far_y",
                 "cam_end_x", "cam_end_y", "intended_far_x", "intended_far_y", "far_err_cm", "end_err_cm",
+                "far_err_tape_cm", "end_err_tape_cm",
                 "robot_thought_end_cm", "corr_source", "gyro_scale", "gyro_drift_dps", "wheel_scale", "battery",
                 "fixes_sent", "fixes_used", "legs", "fit_obs", "notes"]
 
@@ -4947,6 +5330,7 @@ class Runner:
                              cam_end_x=xy("cam_end", 0), cam_end_y=xy("cam_end", 1),
                              intended_far_x=xy("intended_far", 0), intended_far_y=xy("intended_far", 1),
                              far_err_cm=r.get("far_err_cm", ""), end_err_cm=r.get("end_err_cm", ""),
+                             far_err_tape_cm=r.get("far_err_tape_cm", ""), end_err_tape_cm=r.get("end_err_tape_cm", ""),
                              robot_thought_end_cm=r.get("robot_thought_end_cm", ""), corr_source=r.get("corr_source", ""),
                              gyro_scale=c.get("gyro_scale", ""), gyro_drift_dps=c.get("gyro_drift_dps", ""),
                              wheel_scale=c.get("wheel_scale", ""), battery=r.get("battery", ""),
@@ -5001,9 +5385,103 @@ class Runner:
                                  used_wheel_scale=v.get("wheel_scale", ""), reasons=" | ".join(h.get("reasons", []))))
         write_csv(os.path.join(self.dir, "fits.csv"), cols, rows)
 
+    # --- the tape-mark check (2026-10-24 review: truth that is not the camera) ---------------------------------
+    MARK_NEAR_CM = 15.0     # chosen: a robot put by hand on a mark is within this of where the camera should see it
+
+    def mark_check(self):
+        """Nick puts one robot by hand on each tape mark (e02_camerr.MARKS: measured from the boards' faces); the
+        camera's view of it there is a sample of the camera's own error (e02_camerr). Optional (--marks); a mark
+        can be skipped. The robot goes back to where it was parked afterwards (Nick puts it back)."""
+        robots = [n for n in self.st["robots"] if n not in self.unavailable]
+        if not robots or self.tracker is None or self.board is None:
+            return
+        robot = robots[0]
+        home = self.st["positions"].get(robot)
+        self.say("=== Tape-mark check (the camera against the tape marks) ===")
+        self.say("  Lift %s by hand for this; it does not drive. Put its middle over each cross, facing any way." % robot)
+        others = [tuple(q[:2]) for n, q in self.st["positions"].items() if n != robot and q]
+        got = []
+        self.tracker.idle()
+        bd = self.board
+        mid = ((bd.x0 + bd.x1) / 2.0, (bd.y0 + bd.y1) / 2.0)
+        yw = "%s board" % CAM.picture_side(self.cam, bd.yboard_cm, mid[1])      # the board along x = yboard_cm
+        xw = "%s board" % CAM.picture_side(self.cam, mid[0], bd.xboard_cm)
+        for name, fy, fx in CE.MARKS:
+            x, y = CE.mark_xy(self.board, fy, fx)
+            ans = self.ask("  Mark %s (%.0f cm from the %s, %.0f cm from the %s): put %s on it, "
+                           "take your hand away, press Enter (s = skip this mark, q = stop the check) "
+                           % (name, fy, yw, fx, xw, robot), "").lower()
+            if ans.startswith("q"):
+                break
+            if ans.startswith("s"):
+                continue
+            if self.a.dry_run:
+                # the simulator's hand: put it down near the mark (a hand is about 0.5 cm off)
+                with open(os.path.join(self.dir, "sim", "PLACE_%s.json" % robot), "w") as fh:
+                    json.dump(dict(x=x + 0.4, y=y - 0.3), fh)
+                time.sleep(1.0)
+            time.sleep(1.0)                                  # still pictures of it standing there
+            with self.tracker.lock:
+                allc = self.tracker.candidates()            # the detector on the newest picture (it is idle now)
+            cands = [c for c in allc if c.get("shape")
+                     and math.hypot(c["x"] - x, c["y"] - y) <= self.MARK_NEAR_CM
+                     and not any(math.hypot(c["x"] - o[0], c["y"] - o[1]) < CAM.MotionTracker.OTHER_CM for o in others)]
+            if not cands:
+                self.say("    The camera does not see a robot within %.0f cm of mark %s: skipped." % (self.MARK_NEAR_CM, name))
+                continue
+            c = min(cands, key=lambda c: math.hypot(c["x"] - x, c["y"] - y))
+            self.tracker.follow(robot, c["x"], c["y"])
+            self.history.clear()
+            p = self.settle(min_s=0.5, timeout=3.0) or (c["x"], c["y"])
+            smp = self.camerr_add(x, y, p, "mark", robot)
+            got.append(smp)
+            self.say("    Mark %s: the camera sees it %.1f cm off (%+.1f, %+.1f)" % (name, math.hypot(smp["dx"], smp["dy"]),
+                                                                              smp["dx"], smp["dy"]))
+        if home:
+            self.ask("  Put %s back on its parking spot (%.0f, %.0f) and press Enter " % (robot, home[0], home[1]), "")
+            if self.a.dry_run:
+                with open(os.path.join(self.dir, "sim", "PLACE_%s.json" % robot), "w") as fh:
+                    json.dump(dict(x=home[0], y=home[1]), fh)
+                time.sleep(1.0)
+            time.sleep(1.0)
+            self.tracker.follow(robot, home[0], home[1])
+            self.history.clear()
+        self.st["setup"]["marks_done"] = dict(t=round(time.time(), 1), n=len(got), robot=robot)
+        if got:
+            d = sorted(math.hypot(g["dx"], g["dy"]) for g in got)
+            self.say("  Tape marks: the camera is %.1f cm off at the median, %.1f at most (%d marks); KC's fixes are "
+                     "corrected by this from now on." % (d[len(d) // 2], d[-1], len(d)))
+        self.st.save()
+
     # --- the session --------------------------------------------------------------------------------
+    def start_shift_watch(self):
+        """The camera-drift watch (CAM.CameraShiftWatch; 2026-10-24 analysis: the picture crept up to 2 px during
+        sessions). From now on positions are corrected for the camera's creep; every measurement is kept
+        (camera_shift in the state) and the first time it passes CameraShiftWatch.WARN_PX it is said."""
+        if getattr(self.a, "no_shift_watch", False) or self.feed is None or self.tracker is None or self.board is None:
+            return
+        if getattr(self, "shift_watch", None) is not None:
+            return
+        b = self.board
+        self.shift_warned = False
+
+        def on_shift(d):
+            lst = self.st.setdefault("camera_shift", [])
+            lst.append([d["t"], d["du"], d["dv"], d["cc"]])
+            del lst[:-3000]
+            if d["warn"] and not self.shift_warned:
+                self.shift_warned = True
+                self.say("  The camera's picture has moved %.1f px since the runs started (its mount creeping?): "
+                         "positions are corrected for it from here on." % math.hypot(d["du"], d["dv"]))
+                self.mark("e02 camera moved %.1f px" % math.hypot(d["du"], d["dv"]))
+        self.shift_watch = CAM.CameraShiftWatch(self.cam, (b.x0, b.y0, b.x1, b.y1), self.tracker, on_shift=on_shift)
+        self.feed.hooks.append(self.shift_watch)
+
     def session(self):
         st = self.st
+        self.start_shift_watch()
+        if getattr(self.a, "marks", False) and not st["setup"].get("marks_done"):
+            self.mark_check()
         if not st["schedule"]:
             sched = self.planned_schedule()
             if st["setup"].get("square_left_out"):
@@ -5073,8 +5551,35 @@ class Runner:
         for a in ("x", "y"):
             v = [r[4] - r[3] for r in et if r[2] == a]
             if v:
-                self.say("  Open edge %s: felt %+.1f cm from the map's line (median of %d edge stops; logged, not yet "
-                         "applied)" % (a, float(np.median(v)), len(v)))
+                self.say("  Open edge %s: felt %+.1f cm from the map's line (median of %d edge stops)"
+                         % (a, float(np.median(v)), len(v)))
+        for u in st.get("open_edge_updates") or []:
+            self.say("  Open edge %s moved %.2f -> %.2f cm (%d stops)" % (u["edge"], u["before"], u["after"], u["touches"]))
+        if st["setup"].get("routes_left_out"):
+            self.say("  Routes left out after the map changed: %s" % ", ".join(
+                PL.ROUTE_NAMES[r] for r in st["setup"]["routes_left_out"]))
+        qrows = self.quality.rows()
+        if qrows:
+            write_csv(os.path.join(self.dir, "quality_map.csv"), list(qrows[0].keys()), qrows)
+            poor = [r for r in qrows if r["poor"]]
+            self.say("  Camera quality: %d of %d board cells seen enough; %d poor (the robot shows little detail or the "
+                     "lock-on rarely holds: quality_map.csv)" % (sum(1 for r in qrows if r["n"] >= CAM.QualityMap.MIN_N),
+                                                                 len(qrows), len(poor)))
+        sh = st.get("camera_shift") or []
+        if sh:
+            mx = max(math.hypot(q[1], q[2]) for q in sh)
+            self.say("  The camera's picture moved at most %.1f px during the runs (corrected; %d checks)" % (mx, len(sh)))
+        if self.camerr.samples:
+            for src, d in sorted(self.camerr.summary().items()):
+                self.say("  The camera against %s: %.1f cm off at the median, %.1f at most (%d)" % (
+                    "the tape marks" if src == "mark" else "the finds", d["median_cm"], d["max_cm"], d["n"]))
+        kp = os.path.join(self.dir, "kc_stops.csv")
+        if os.path.exists(kp):
+            with open(kp) as fh:
+                kr = list(csv.DictReader(fh))
+            if kr:
+                self.say("  KC: %d stops fixed; weight towards the camera median %.2f (one fix per stop)" % (
+                    len(kr), float(np.median([float(r["weight"]) for r in kr]))))
         if st.get("board_line_updates"):
             last = {u["board"]: u for u in st["board_line_updates"]}
             for b, u in sorted(last.items()):
@@ -5236,6 +5741,14 @@ def main(argv=None):
     ap.add_argument("--dance-bpm", type=float, default=120.0, help="the dance's tempo (120: the lights flash on "
                                                                    "every beat)")
     ap.add_argument("--view-port", type=int, default=8090, help="live view in a browser: http://localhost:<port> (0 = off)")
+    ap.add_argument("--view-open", action="store_true",
+                    help="the live view can be opened from other computers and phones on the WiFi (the Pi run)")
+    ap.add_argument("--web-ask", action="store_true",
+                    help="questions go on the live page (answered from any phone or computer); no answer in "
+                         "WEB_ASK_TIMEOUT_S = the default (the Pi run)")
+    ap.add_argument("--on-pi", action="store_true",
+                    help="the whole session runs on the Pi (run-e02-pi.sh): the camera is this computer "
+                         "(--pi 127.0.0.1), the live view is open on the WiFi, questions go on it")
     ap.add_argument("--map-rays", type=int, default=16)
     ap.add_argument("--map-robot", default="", help="which robot maps (default: the first)")
     ap.add_argument("--dry-start", default="parks", choices=["parks", "swapped", "scatter", "corners", "edge"],
@@ -5259,6 +5772,11 @@ def main(argv=None):
     ap.add_argument("--routes", default="1,2,3", help="only these routes (testing)")
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--fix-hz", type=float, default=FIX_HZ)
+    ap.add_argument("--no-shift-watch", action="store_true",
+                    help="do not measure or correct the camera's creep during the runs (CAM.CameraShiftWatch)")
+    ap.add_argument("--marks", action="store_true",
+                    help="before the runs, a tape-mark check: Nick puts a robot by hand on each tape mark "
+                         "(e02_camerr.MARKS), and the camera's error there corrects KC's fixes and the far-point scores")
     ap.add_argument("--recover-cm", "--lost-cm", dest="recover_cm", type=float, default=ST.RECOVER_CM,
                     help="a run that ends this far from its start spot needed recovery (noted, not an outlier)")
     ap.add_argument("--naming-s", type=int, default=120)
@@ -5285,6 +5803,12 @@ def main(argv=None):
     ap.add_argument("--dry-true-calib", action="store_true", help="dry run: use the simulator's true camera "
                                                                   "instead of making one from the corners")
     a = ap.parse_args(argv)
+    if a.on_pi:
+        # the Pi run (Nick, 2026-10-24: start a session and leave the house): the camera is this computer, the
+        # live view is open on the WiFi and questions are answered there (run-e02-pi.sh starts all of it)
+        a.pi = "127.0.0.1"
+        a.view_open = True
+        a.web_ask = True
 
     sim = None
     if not a.resume and not a.dry_run and not a.auto:
@@ -5373,7 +5897,7 @@ def launch(a, state, sdir, sim):
     if a.view_port:
         try:
             import e02_view
-            run.view = e02_view.LiveView(run, a.view_port)
+            run.view = e02_view.LiveView(run, a.view_port, bind="0.0.0.0" if a.view_open else "127.0.0.1")
             run.say(run.view.start())
         except Exception as e:          # the view is a convenience: never stop a session over it
             run.say("(live view not started: %s)" % e)
