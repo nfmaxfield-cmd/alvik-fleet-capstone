@@ -313,6 +313,7 @@ class Listener:
 
 
 # =============================================================================== the runner
+MAKE_WAY_EDGE_CM = 20.0        # chosen: a robot moving aside stays this far from an open edge
 EXPLORE_HOME_FRAC = 0.35       # chosen: explore ends this share of the way from its start towards its rays' middle
 EXPLORE_HOME_IN_CM = 30.0      # chosen: at most this far in from its start
 EXPLORE_EDGE_BACK_CM = 9.5    # chosen: clears most of the bottom zone's ~9 cm look-ahead; under the firmware's 10 cm
@@ -4026,6 +4027,42 @@ class Runner:
             out.append((a, line, "edge" if is_open else "board"))
         return out
 
+    def make_way(self, robot, blocker, here, boundary):
+        """Coordinated moves, first piece (Nick, 2026-10-23: "we will need for multiple robots to move in coordinated
+        patterns soon"): `robot` stands still where it is (parked in the tracker's memory), `blocker` drives sideways
+        out of its path to `boundary` and parks there, then the camera goes back to `robot`. Logged (make_way).
+        Returns (ok, words)."""
+        others = [tuple(q[:2]) for n, q in self.st["positions"].items() if n not in (robot, blocker) and q]
+        others.append(tuple(here))
+        b = self.st["positions"].get(blocker)
+        if not b:
+            return False, "where it is is not known"
+        spot = EF.make_way_spot(b[0], b[1], here[0], here[1], boundary, others,
+                                inside=lambda x, y: self.board.on_board(x, y, margin=-1.0)
+                                and self.board.edge_room(x, y)[0] >= MAKE_WAY_EDGE_CM)
+        if spot is None:
+            return False, "no room beside the path"
+        self.say("    %s: %s is in the way; it moves aside to (%.0f, %.0f) cm" % (robot, blocker, spot[0], spot[1]))
+        self.mark("e02 make way %s for %s" % (blocker, robot))
+        h = self.heads.get(robot, [None])[0]
+        self.st["positions"][robot] = [here[0], here[1], h]
+        self.tracker.park(robot, here[0], here[1])
+        self.end_moves(robot)
+        if not self.activate(blocker):
+            self.activate(robot)
+            return False, "the camera can't see it"
+        ok, why = self.drive_to(blocker, spot, arrive_cm=3.0, max_leg=PARK_LEG_CM)
+        self.end_moves(blocker)
+        p = self.settle(min_s=0.3) or spot
+        self.st["positions"][blocker] = [p[0], p[1], self.heads.get(blocker, [None])[0]]
+        self.tracker.park(blocker, p[0], p[1])
+        self.st.setdefault("make_way", []).append([round(time.time(), 1), robot, blocker, [round(v, 1) for v in b[:2]],
+                                                    [round(p[0], 1), round(p[1], 1)], bool(ok), why])
+        self.activate(robot)
+        self.moves[robot] = dict(run="-", why="edge find")
+        self.st.save()
+        return ok, why
+
     def edge_find(self, robot, order):
         """The edge find (_edge_find), with the camera watchdog's open-edge check off for this robot throughout
         (dry run 2026-10-23: it stopped the sidestep running beside an open edge; the edge guard is the protection,
@@ -4086,6 +4123,14 @@ class Runner:
             return True
 
         def touch(bd, on):
+            # a parked robot in the way moves aside first (Nick, 2026-10-23: practice for robots moving together)
+            here = self.pos(robot, fresh_s=2.0)
+            hx, hy = (here[1], here[2]) if here else (pose[0], pose[1])
+            others = {n: tuple(q[:2]) for n, q in self.st["positions"].items() if n != robot and q}
+            for m in EF.blockers(hx, hy, bd, others):
+                ok_, words_ = self.make_way(robot, m, (hx, hy), bd)
+                if not ok_:
+                    return "%s is in the way and could not move aside (%s)" % (m, words_)
             if not turn_to(EF.facing(bd, pose[0], pose[1])):
                 return "could not turn to face the %s=%.0f side" % (bd[0], bd[1])
             gap = abs((pose[0] if bd[0] == "x" else pose[1]) - bd[1])

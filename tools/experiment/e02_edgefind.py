@@ -41,6 +41,36 @@ def path_clear(x, y, boundary, others, clear_cm=20.0):
     return True
 
 
+def blockers(x, y, boundary, others, clear_cm=20.0):
+    """Names of the robots within clear_cm of the straight drive from (x, y) to the boundary. others: {name: (x, y)}."""
+    out = []
+    for n, (ox, oy) in others.items():
+        if not path_clear(x, y, boundary, [(ox, oy)], clear_cm):
+            out.append(n)
+    return out
+
+
+def make_way_spot(bx, by, x, y, boundary, others, inside, clear_cm=20.0, step_cm=8.0):
+    """Where a robot standing at (bx, by) in the path from (x, y) to the boundary should move to: the nearest spot
+    sideways out of that path (clear_cm + a body to spare), on the board (inside(x, y) True), and not nearer than
+    clear_cm to any other robot (others: [(x, y)]). None if there is none within 60 cm."""
+    h = math.radians(facing(boundary, x, y))
+    ux, uy = math.cos(h), math.sin(h)
+    px, py = -uy, ux                                   # across the path
+    off = -(bx - x) * uy + (by - y) * ux               # its side of the path's line
+    need = clear_cm + 10.0
+    for k in range(0, 9):
+        for sgn in ((1, -1) if off >= 0 else (-1, 1)):
+            d = sgn * need + sgn * k * step_cm - off   # from where it stands, across
+            tx, ty = bx + d * px, by + d * py
+            if not inside(tx, ty):
+                continue
+            if any(math.hypot(tx - ox, ty - oy) < clear_cm for ox, oy in others):
+                continue
+            return (tx, ty)
+    return None
+
+
 def choose_boundaries(x, y, sides, corner_skip=None, others=()):
     """The two boundaries to touch from (x, y): the nearest 'x' line and the nearest 'y' line from sides
     [('x', value, kind), ('y', value, kind)] (kind 'board' or 'edge'). Returns (A, B): A is the nearer one (touched

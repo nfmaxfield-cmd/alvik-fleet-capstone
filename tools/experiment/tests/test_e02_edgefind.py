@@ -78,3 +78,14 @@ def test_sidestep_goes_where_there_is_room():
     sgn, room = EF.sidestep_room(("x", 121.9, "edge"), 113.7, 20.9, sides)
     # facing +x, left is +y: room 101 cm that way, 21 cm the other
     assert sgn == 1 and room > 100
+
+
+def test_a_robot_in_the_way_gets_a_spot_beside_the_path():
+    """2026-10-23 dry run: Right at (14, 50) going for the far board at y = 118; Left parked at (18, 101) in the way."""
+    b = ("y", 118.1, "board")
+    assert EF.blockers(14.0, 50.0, b, {"Left": (18.0, 101.6), "Center": (90.0, 60.0)}) == ["Left"]
+    spot = EF.make_way_spot(18.0, 101.6, 14.0, 50.0, b, [(90.0, 60.0), (14.0, 50.0)],
+                            inside=lambda x, y: 20 <= x <= 102 and 20 <= y <= 102)
+    assert spot is not None
+    assert EF.path_clear(14.0, 50.0, b, [spot])                 # out of the path now
+    assert 20 <= spot[0] <= 102 and 20 <= spot[1] <= 102
