@@ -2406,10 +2406,10 @@ class Runner:
                     if tb > logged.get(n, 0.0):
                         logged[n] = tb
                         mv = busy(n)
-                        still = 0.0 if mv else tb - last_moved.get(n, t_start)
+                        still = 0.0 if mv else max(0.0, tb - last_moved.get(n, t_start))
                         rows.append("%.1f,%s,%s,%s,%.0f,%d,%s,%s" % (
                             tb, n, "driving" if n in drive else "idle", "moving" if mv else "still", still, b,
-                            getattr(self, "phase", "") or "", "status" if n in asked else "run"))
+                            getattr(self, "phase", "") or "", "status" if n in asked and tb - last_ask < 5.0 else "run"))
                 if rows:
                     with open(path, "a") as f:
                         f.write("\n".join(rows) + "\n")
