@@ -412,7 +412,10 @@ def test_fit_says_when_there_are_not_enough_turns():
     rb.go(30)
     obs = FIT.pair(FIT.camera_stretches(rb.cam), FIT.raw_series(rb.rawrows), run="a")
     res = FIT.fit_robot(obs)
-    assert not res["gyro_ok"] and res["values"] is None
+    # 2026-10-24: parts are used as they pass; the gyro, not learned yet, keeps its starting values (and says so)
+    assert not res["gyro_ok"] and res["wheel_ok"]
+    assert sorted(res["values"]["prior_parts"]) == ["gyro_drift_dps", "gyro_scale"]
+    assert any("gyro" in r for r in res["reasons"])
 
 
 def test_camera_stretches_handle_backwards_driving():

@@ -1177,6 +1177,7 @@ class Feed(threading.Thread):
         self.skipped = 0             # frames dropped because the tracker was busy (newest_only)
         self.lag = 0.0
         self.on_sample = None        # function((t, x, y)) for every position of the followed robot
+        self.sample_filter = None    # function(sample) -> sample or None: the --degrade test's camera (e02_degrade)
         self.on_perf = None          # function(dict) once a second: is the laptop keeping up with the camera?
         self.keep_s = 0.0            # > 0: keep this many seconds of pictures (JPEG) for frame_at (measured frames)
         self.ring = deque()          # (t, jpeg bytes)
@@ -1236,6 +1237,8 @@ class Feed(threading.Thread):
                 a = time.time()
                 s = self.tracker.push(fr.img, t) if self.tracker is not None else None
                 self._perf_add(a, time.time(), t)
+                if s is not None and self.sample_filter is not None:
+                    s = self.sample_filter(s)
                 if s is not None:
                     self.history.add(s)
                     if self.on_sample:

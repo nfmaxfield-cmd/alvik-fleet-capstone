@@ -314,7 +314,7 @@ def fit_wheels(obs, prior=None, prior_sd=None, iters=20):
                 counted_cm=float(b.sum()))
 
 
-def fit_robot(obs, previous=None, prior=None, prior_sd=None, measured_drift=None):
+def fit_robot(obs, previous=None, prior=None, prior_sd=None, measured_drift=None, max_rms_cm=None):
     """The whole self-calibration for one robot from all its paired stretches so far.
     previous: the last accepted values (dict gyro_scale, gyro_drift_dps, wheel_scale) or None.
     Returns dict(values (what C/KC should use now), accepted (bool: this fit was taken), fitted (raw fit
@@ -367,12 +367,28 @@ def fit_robot(obs, previous=None, prior=None, prior_sd=None, measured_drift=None
             reasons.append("wheel scale %.3f is outside the sane range %.2f-%.2f: refused" % (wf["w"], lo, hi))
         elif wf["se_w"] > MAX_SE["wheel_scale"]:
             reasons.append("wheel scale not pinned down yet (+-%.3f)" % wf["se_w"])
-        elif wf["rms_cm"] > MAX_RMS_CM:
+        elif wf["rms_cm"] > (max_rms_cm if max_rms_cm is not None else MAX_RMS_CM):
             reasons.append("camera and wheels disagree by %.1f cm per stretch: refused" % wf["rms_cm"])
         else:
             ok_wheel = True
             values.update(wheel_scale=round(wf["w"], 4))
-    complete = all(k in values for k in ("gyro_scale", "gyro_drift_dps", "wheel_scale"))
+    # parts are used as they pass (2026-10-24 Pi plan: the gyro passed every fit, but the wheels' refusal threw it
+    # away with them for the whole session): a part not learned yet comes from the prior, and says so
+    keys = ("gyro_scale", "gyro_drift_dps", "wheel_scale")
+    prior_parts = set((previous or {}).get("prior_parts") or [])
+    if ok_turn:
+        prior_parts -= {"gyro_scale", "gyro_drift_dps"}
+    if ok_wheel:
+        prior_parts -= {"wheel_scale"}
+    if any(k in values for k in keys):
+        for k in keys:
+            if k not in values:
+                values[k] = round(prior[k], 4)
+                prior_parts.add(k)
+        values["prior_parts"] = sorted(prior_parts)
+        if not prior_parts:
+            values.pop("prior_parts", None)
+    complete = all(k in values for k in keys)
     return dict(values=values if complete else None, accepted=ok_turn or ok_wheel, gyro_ok=ok_turn,
                 wheel_ok=ok_wheel, fitted=fitted, reasons=reasons, n_runs=len({o["run"] for o in obs}))
 
@@ -380,5 +396,8 @@ def fit_robot(obs, previous=None, prior=None, prior_sd=None, measured_drift=None
 def describe(values):
     if not values:
         return "no learned corrections yet"
-    return "gyro scale %.3f, drift %+.2f deg/s, wheels %.3f" % (
+    out = "gyro scale %.3f, drift %+.2f deg/s, wheels %.3f" % (
         values["gyro_scale"], values["gyro_drift_dps"], values["wheel_scale"])
+    if values.get("prior_parts"):
+        out += " (not learned yet, the starting values: %s)" % ", ".join(values["prior_parts"])
+    return out

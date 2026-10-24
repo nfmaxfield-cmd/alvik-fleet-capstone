@@ -87,6 +87,8 @@ import e02_map as MAP  # noqa: E402
 import e02_explore as EX  # noqa: E402
 import e02_edgefind as EF  # noqa: E402
 import e02_camerr as CE  # noqa: E402
+import e02_trust as TR  # noqa: E402
+import e02_degrade as DG  # noqa: E402
 
 
 def EX_provisional_camera(w, h, f=600.0, height_cm=260.0):
@@ -187,6 +189,28 @@ SAFETY_SETTINGS = (("safe_edge", 3.0), ("edge_dir", 0.0), ("edge_thr", 150.0), (
                    ("e02_cms", 10.0))   # back_max and cms: undo explore's raise and crawl
 SAFETY_CMDS = ["set %s %g" % kv for kv in SAFETY_SETTINGS]
 DEFAULT_CALIB = os.path.join(HERE, "data", "overhead_floorcal_roam1.json")   # roam1 board corners, camera unmoved
+def stretch_rms_against(obs, fitted, prior):
+    """(rms cm, rms deg) of these stretches against fixed values (the pooled fit's, else the prior)."""
+    w = fitted.get("wheel_scale") or prior["wheel_scale"]
+    lens = [(o["cam_len"], o["bel_len"]) for o in obs if o.get("cam_len") and o.get("bel_len")]
+    rc = math.sqrt(sum((c - w * b) ** 2 for c, b in lens) / len(lens)) if lens else None
+    g = fitted.get("gyro_scale") or prior["gyro_scale"]
+    d = fitted.get("gyro_drift_dps") if fitted.get("gyro_drift_dps") is not None else prior["gyro_drift_dps"]
+    t = FIT.fit_turns(obs, prior=dict(gyro_scale=g, gyro_drift_dps=d),
+                      prior_sd=dict(gyro_scale=1e-6, gyro_drift_dps=1e-6))
+    return rc, (t["rms_deg"] if t else None)
+
+
+def trust_path(a):
+    """Where the learned sensor trust lives (kept between sessions, never in git): logs/sensor_trust.json; dry runs
+    and degraded tests keep their own, so they never touch the real robots' trust."""
+    if getattr(a, "trust_file", None):
+        return a.trust_file
+    name = "sensor_trust%s%s.json" % ("-dryrun" if getattr(a, "dry_run", False) else "",
+                                      "-degraded" if getattr(a, "degrade", "") else "")
+    return os.path.join(REPO, "logs", name)
+
+
 # The virtual border (Nick, 2026-10-24 evening, after Left and Center went over the open edge in the Pi plan's
 # stage 3): a robot the camera sees within BORDER_CM of an open edge (its centre), moving towards it, stops EVERY robot
 # and the session waits for Nick (hold_for_nick). Every session. 15 cm: the Pi's worst picture age (0.56 s) at 10 cm/s
@@ -390,6 +414,20 @@ class ExploreFailed(Exception):
 
 
 class Runner:
+    # defaults for objects made without __init__ (the tests' stand-ins); __init__ sets each one for real
+    held_out = frozenset()
+    hold = threading.Event()
+    hold_answer = None
+    hold_auto_refind = False
+    seek = set()
+    leg_live = {}
+    leg_kind = {}
+    seek_until = {}
+    guard = None
+    degrade = DG.Degrade("")
+    trust = TR.SensorTrust()
+    trust_path = os.path.join(REPO, "logs", "sensor_trust-test.json")
+
     def __init__(self, a, state, session_dir):
         self.a = a
         self.st = state
@@ -413,6 +451,13 @@ class Runner:
         # the camera's error by place (e02_camerr.py; 2026-10-24 review): tape marks and finds; KC fixes are
         # corrected with it and weighted by it
         self.camerr = CE.CameraErrorMap(state.get("camera_error_samples"))
+        # how much each sensor is trusted, learned (e02_trust.py; Nick 2026-10-24), and the --degrade test
+        self.trust_path = trust_path(a)
+        self.trust = TR.load(self.trust_path)
+        if not state.get("trust_session_started"):
+            self.trust.new_session()
+            state["trust_session_started"] = round(time.time(), 1)
+        self.degrade = DG.Degrade(getattr(a, "degrade", "") or "", seed=int(time.time()) % 100000)
         self.quality = CAM.QualityMap()      # how well the camera sees a robot, place by place (2026-10-24)
         self.marks_unconfirmed = 0
         self.watchdog_fired = False
@@ -741,6 +786,7 @@ class Runner:
         nf = CAM.Feed(stream_url(self.a), self.tracker, self.history,
                       log=lambda m: self.say("  (camera: %s)" % m))
         nf.on_sample = f.on_sample
+        nf.sample_filter = f.sample_filter
         nf.hooks = f.hooks
         nf.start()
         self.feed = nf
@@ -966,6 +1012,23 @@ class Runner:
             st.setdefault("leg_pause_ms", []).append([round(time.time(), 1), ms, round(p95, 3)])
         return ms
 
+    def trust_note(self):
+        """Save the learned trust; say loudly when a sensor starts or stops looking bad (mark on the video too)."""
+        names = [n for n in self.st["robots"]]
+        for s_, r_, what, kk in self.trust.update_flags(names):
+            who = "the camera" if r_ == "*" else "%s's %s" % (r_, {"front": "front sensor"}.get(s_, s_))
+            if what == "degraded":
+                self.say("!!! SENSOR: %s looks bad: %.1f x its healthy noise (e02_trust). It is trusted less from "
+                         "now on." % (who, kk))
+            else:
+                self.say("  SENSOR: %s looks healthy again (%.1f x its healthy noise)." % (who, kk))
+            self.mark("e02 sensor %s %s %s" % (s_, r_, what))
+            self.st.setdefault("sensor_trust_events", []).append([round(time.time(), 1), s_, r_, what, round(kk, 2)])
+        try:
+            TR.save(self.trust, self.trust_path)
+        except OSError as e:
+            self.say("  (sensor trust not saved: %s)" % e, quiet=True)
+
     def camerr_add(self, x, y, cam, source, robot):
         """One place where the camera's error is known (e02_camerr.py), saved in the state."""
         if cam is None or x is None or y is None:
@@ -1112,6 +1175,8 @@ class Runner:
         front = float(m.group(1))
         if front <= 0:
             return None                           # no reading (nothing in range)
+        if self.degrade.spec.get("front"):
+            front = self.degrade.front(front)     # --degrade: a bad front sensor
         hd = ST.wrap180(h[0] + val) if kind == "turn" else h[0]      # heads[] holds the heading before the leg
         ahead = self.ahead_cm(robot, p, hd)
         row = [round(time.time(), 2), robot, kind, round(val, 1), round(p[0], 1), round(p[1], 1), round(hd, 1),
@@ -1129,10 +1194,14 @@ class Runner:
             miss = front - off - ahead[0]
             if h[1]:
                 self.front_seen.setdefault("all", []).append(front - ahead[0])
+                self.trust.front_vs_map(robot, front - ahead[0])
+                self.trust_note()
             if abs(miss) > tol:
                 self.say("    %s: front sensor %.0f cm, the camera and map say %s at %.0f cm" % (
                     robot, front, ahead[1], ahead[0]), quiet=not (h[1] and abs(miss) > FRONT_STEER_FACTOR * tol))
-                if h[1] and abs(miss) > FRONT_STEER_FACTOR * tol and not getattr(self.a, "no_front_steer", False):
+                if h[1] and abs(miss) > FRONT_STEER_FACTOR * tol and not getattr(self.a, "no_front_steer", False) \
+                        and not self.trust.bad("front", robot):
+                    # (a front sensor that has itself been found bad does not make the camera suspect: e02_trust)
                     # a measured heading, and the sensor far from the map: the camera position is suspect
                     self.front_bad[robot] = "the front sensor reads %.0f cm, the map says %s at %.0f cm" % (
                         front, ahead[1], ahead[0] + off)
@@ -4563,6 +4632,11 @@ class Runner:
             # its pose is exact against both boards now: where the camera sees it is a check of the camera there
             ax, ay = num(fr[1].get("after_x")), num(fr[1].get("after_y"))
             cam = self.settle(min_s=0.3, timeout=2.0)
+            if cam is not None and ax is not None and ay is not None:
+                # the camera's error here, corrected by its map from the OTHER finds (leave one out): its trust
+                cx_, cy_, _ = self.camerr.corrected(cam[0], cam[1])
+                self.trust.camera_at_find(robot, cx_ - ax, cy_ - ay)
+                self.trust_note()
             smp = self.camerr_add(ax, ay, cam, "find", robot)
             if smp:
                 out["camera_error_cm"] = round(math.hypot(smp["dx"], smp["dy"]), 2)
@@ -5079,6 +5153,8 @@ class Runner:
         corrections, and the simulator does not have `corr`."""
         if values is None:
             values = dict(gyro_scale=1.0, gyro_drift_dps=0.0, wheel_scale=1.0)
+        if self.degrade.spec.get("wheels") or self.degrade.spec.get("gyro"):
+            values = self.degrade.corrections(robot, values)     # --degrade: a bad wheel or gyro, this run's amount
         cmds = ["set gyro_scale %.4f" % values["gyro_scale"], "set gyro_drift_dps %.4f" % values["gyro_drift_dps"],
                 "set wheel_scale %.4f" % values["wheel_scale"]]
         for c in cmds:
@@ -5093,6 +5169,8 @@ class Runner:
         obs = []
         for run in runs:
             raw = self.listener.raw.get(run) or []
+            if self.degrade:
+                raw = self.degrade.raw_rows(robot, raw)     # --degrade: what a bad encoder or gyro reports
             info = self.listener.runinfo.get(run) or {}
             ys = num(info.get("yaw_sign")) or 1
             ser = FIT.raw_series(raw, yaw_sign=1 if ys >= 0 else -1)
@@ -5106,10 +5184,18 @@ class Runner:
         prev = self.fitted(robot)
         measured_drift = ((self.st.get("naming_check") or {}).get("gyro_raw_drift_dps") or {}).get(robot) is not None
         pr = self.prior(robot)
+        gate = self.trust.wheel_gate_cm(override=getattr(self.a, "fit_max_rms_cm", None))
         res = FIT.fit_robot(data, prev, prior=pr,
                             prior_sd=dict(gyro_drift_dps=0.1) if measured_drift else None,
-                            measured_drift=pr["gyro_drift_dps"] if measured_drift else None)
-        entry = dict(t=round(time.time(), 1), order=run_row["order"], n_new=len(obs), n_total=len(data),
+                            measured_drift=pr["gyro_drift_dps"] if measured_drift else None,
+                            max_rms_cm=gate)
+        # the wheels' and gyro's trust: this run's own stretches against the values fitted to ALL runs (a run
+        # fitted on its own would absorb a sensor that is off by a different amount every run)
+        if obs:
+            rc, rd = stretch_rms_against(obs, res.get("fitted") or {}, pr)
+            self.trust.stretch_fit(robot, rc, rd, len(obs))
+            self.trust_note()
+        entry = dict(t=round(time.time(), 1), order=run_row["order"], n_new=len(obs), n_total=len(data), gate_cm=round(gate, 2),
                      n_stretches=len(stretches), accepted=res["accepted"], fitted=res["fitted"], reasons=res["reasons"],
                      values=res["values"], gyro_ok=res["gyro_ok"], wheel_ok=res["wheel_ok"])
         f = self.st["fits"].setdefault(robot, dict(values=None, history=[]))
@@ -5178,6 +5264,10 @@ class Runner:
         if self.calib_note():
             self.say("    (%s)" % self.calib_note())
             r["calibration"] = self.calib_note()
+        if self.degrade:
+            self.say("    (%s)" % self.degrade.words())
+            r["degraded"] = self.degrade.words()
+            r.setdefault("notes", []).append(self.degrade.words())
         if self.last_result:
             self.say("    last result: " + self.last_result)
         r["status"] = "running"
@@ -5366,18 +5456,47 @@ class Runner:
             self.finish_failed(r, robot, "the camera did not see where it started (%s)" % end.get("result"))
             return
         bs = [num(rec.get(k)) for k in ("start_x", "start_y", "far_goal_x", "far_goal_y")]
+        k_ended = False
         if k_info and k_info.get("far_goal"):
             goal = k_info["far_goal"]
+        elif cond == "K":
+            # a K drive that ended before its route was planned: the firmware's own route numbers mean nothing in
+            # mode 1 (2026-10-24 Pi plan: Right's K run "intended" a far point at (210, 104), beyond the board)
+            out_w, _ = self.board.route_floor(route, start, nominal)
+            goal = out_w[-1]
+            r.setdefault("flags", []).append("k_drive_ended_early")
+            r.setdefault("notes", []).append("far point not scored: the K drive ended before its far point")
+            far = None
+            k_ended = True
         elif None not in bs:
             goal = (start[0] + bs[2] - bs[0], start[1] + bs[3] - bs[1])     # the robot's own route, from the camera start
         else:
             out_w, _ = self.board.route_floor(route, start, nominal)
             goal = out_w[-1]
             r.setdefault("flags", []).append("goal_from_nominal_route")
-        if far is None:
+        if far is None and not k_ended:
             far = self.longest_still(t_e0, t_e1, goal)
             if far:
                 r.setdefault("flags", []).append("far_from_stillness")
+        if goal is not None and self.board is not None and \
+                not (self.board.x0 - 1.0 <= goal[0] <= self.board.x1 + 1.0 and self.board.y0 - 1.0 <= goal[1] <= self.board.y1 + 1.0):
+            r.setdefault("flags", []).append("intended_far_off_board")
+            r.setdefault("notes", []).append("far point not scored: the intended far point (%.0f, %.0f) is off the "
+                                             "board" % (goal[0], goal[1]))
+            far = None
+        # 2026-10-24 Pi plan: three K/KC runs lost the robot on the camera and their "far point" was only where the
+        # camera last saw it (50-127 cm "errors"). The far point counts only when the camera saw the robot around
+        # the far time and did not lose or re-find it between the start and then.
+        t_far = (k_info or {}).get("t_far") or lap("ms_far")
+        if far is not None and t_far is not None:
+            seen = self.history.since(t_far - 0.5, t_far + 1.5)
+            lost = [d_ for d_ in (self.st.get("disagreements") or [])
+                    if d_[1] == robot and t_e0 - 1.0 <= d_[0] <= t_far + 1.0]
+            if not seen or lost:
+                r.setdefault("flags", []).append("far_unseen")
+                r.setdefault("notes", []).append("far point not scored: the camera %s" % (
+                    "lost it before the far point" if lost else "did not see it at the far point"))
+                far = None
         r["cam_start"] = [round(start[0], 2), round(start[1], 2)] if start else None
         r["intended_far"] = [round(goal[0], 2), round(goal[1], 2)]
         r["cam_far"] = [round(far[0], 2), round(far[1], 2)] if far else None
@@ -5537,7 +5656,16 @@ class Runner:
         info["start"] = start
         info["t_start"] = time.time()
         self.mark_leg(robot, "start")
-        pts, far_i = self.route_points(route, prm, start, heading)
+        pts, far_i = self.route_points(route, prm, start or (sx, sy), heading)
+        # never a route off the board (2026-10-24 Pi plan): from where it really stands, every waypoint must keep
+        # its centre BORDER_CM inside the open edges (the virtual border would hold the session there anyway)
+        off = [w for w in pts if self.board.edge_room(w[0], w[1])[0] < BORDER_CM]
+        if off:
+            self.say("  K drive: from where it stands (%.0f, %.0f) the route would come within %.0f cm of an open edge: "
+                     "not driven" % (start[0] if start else sx, start[1] if start else sy,
+                                     min(self.board.edge_room(w[0], w[1])[0] for w in pts)))
+            self.mark_leg(robot, "end")
+            return info
         info["far_goal"] = pts[far_i]
         for k, w in enumerate(pts):
             last = k == len(pts) - 1
@@ -5598,7 +5726,16 @@ class Runner:
             if self.quality.poor(x, y):
                 csd *= KC_POOR_CELL_SD_FACTOR        # the camera sees robots badly here (glare): trust it less
             rsd = UNC_BASE_CM + UNC_PER_CM * dist + dist * math.radians(UNC_DEG + UNC_DEG_PER_DEG * turned)
-            w = CE.blend_weight(rsd, csd)
+            # what has been learned about each sensor (e02_trust): a robot whose wheels look noisy is less sure of
+            # itself, a camera that looks noisy counts for less; and a belief the camera contradicts far beyond
+            # both is wrong (2026-10-24: Right's KC run started 12 cm from where it believed)
+            rsd, csd = self.trust.kc_sds(robot, rsd, csd)
+            w, rejected = TR.kc_gate((bx, by), (cx, cy), rsd, csd)
+            if rejected:
+                r["kc_beliefs_rejected"] = r.get("kc_beliefs_rejected", 0) + 1
+                self.say("    %s: KC: the camera puts it %.0f cm from where it believes (more than %.0f x both sds): "
+                         "its belief is taken as wrong (%.0f%% camera)" % (
+                             robot, math.hypot(cx - bx, cy - by), TR.KC_GATE_SIGMA, 100 * w), quiet=True)
             fxp, fyp = bx + w * (cx - bx), by + w * (cy - by)
             th = "-"
             h = ST.heading_from_track(seg, min_cm=3.0, max_rms_cm=0.4) if seg else None
@@ -5935,6 +6072,12 @@ class Runner:
         self.say("=== Session: %d runs done, %d failed, %d still to do ===" % (
             len(done), sum(1 for r in st["schedule"] if r["status"] == "failed"),
             sum(1 for r in st["schedule"] if r["status"] == "pending")))
+        self.say("  Sensor trust (learned, e02_trust; %s):" % os.path.basename(self.trust_path))
+        for line in self.trust.summary([n for n in st["robots"]]):
+            self.say("    " + line)
+        if self.degrade:
+            self.say("  " + self.degrade.words())
+        st["sensor_trust_summary"] = self.trust.summary([n for n in st["robots"]])
         et = st.get("edge_touches") or []
         for a in ("x", "y"):
             v = [r[4] - r[3] for r in et if r[2] == a]
@@ -6193,6 +6336,9 @@ def main(argv=None):
     ap.add_argument("--mark-accept-cm", type=float, default=0.0,
                     help="the tape marks keep the robots' camera calibration only within this (median; 0 = the "
                          "default, Runner.MARK_ACCEPT_CM)")
+    ap.add_argument("--degrade", default="", help="make a sensor bad on purpose, in software (e02_degrade.py), e.g. "
+                    "camera:noise=3 or wheels:jitter=0.05")
+    ap.add_argument("--trust-file", default=None, help="the learned sensor trust (default logs/sensor_trust.json)")
     ap.add_argument("--battery-watch-s", type=float, default=300,
                     help="every this many seconds, log every switched-on robot's battery to battery.csv, driving or "
                          "idle (0: off; on by default, Nick 2026-10-24: weeks of it decide the drain questions)")
@@ -6341,8 +6487,13 @@ def launch(a, state, sdir, sim):
     code = 0
     feed = None
     try:
+        if run.degrade:
+            run.say("!!! " + run.degrade.words() + " (e02_degrade.py): every run's line says so.")
+            state.setdefault("setup", {})["degraded"] = run.degrade.spec
         feed = CAM.Feed(stream_url(a), None, hist, log=lambda m: run.say("  (camera: %s)" % m))
         feed.on_sample = run.on_sample
+        if run.degrade.spec.get("camera"):
+            feed.sample_filter = run.degrade.camera
         feed.on_perf = run.on_perf
         feed.keep_s = run.FRAMES_KEEP_S
         feed.start()
