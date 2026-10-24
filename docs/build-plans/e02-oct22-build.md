@@ -286,3 +286,20 @@ Dry runs 2026-10-24 (simulator truth): scattered start, explore kept (1.5 cm at 
 end / far-point mean C 2.7 / 1.9 cm, KC 2.3 / 0.8, K 0.3 / 0.7, U 24.1 / 16.7. Forced fallback: 7 runs, 0 failed.
 Open: the uncertainty model put the robot's own error at the far point near 4 cm where the simulator's truth was
 1.6 cm (it trusts the camera too much; DOE-confidence.md).
+
+## Next build (Nick, 2026-10-24 15:43): the system learns how much to trust each sensor
+"The system needs to learn how to weigh each sensor's accuracy confidence for itself. I want to be able to swap out
+any one of those sensors for an ineffective version and have the system catch the error and account for it."
+- Every sensor's trust (its noise and its bias, place by place where that matters) is estimated from the session's own
+  cross-checks instead of chosen: camera vs wheels after each leg, camera fixes vs the robot's pose (confidence.csv),
+  finds and tape marks vs the camera, front sensor vs the map, gyro vs the camera's headings, edge stops vs the map.
+  Starting values are wide priors, narrowed as the checks come in; the fusion (KC, confidence pauses, explore's fit)
+  weights each source by its learned trust.
+- A sensor that turns bad mid-session (drifts, gets noisy, stops) is caught by its checks failing, its trust drops,
+  and the others carry it; said plainly and logged.
+- The test that proves it: a "swap in a bad sensor" experiment. One at a time: a gyro with a wrong scale or drift
+  added in firmware, a noisy or offset front sensor, wheel slip (tape on a wheel), a blurred or shifted camera, a
+  delayed camera. Each against a clean session: does the system notice (how fast), down-weight it, and keep its
+  accuracy? Simulator first (the sim can degrade any sensor), then the board.
+- Known gap it fixes: in the 2026-10-24 dry runs the robot's own uncertainty was put at ~4 cm at the far point where
+  the truth was ~1.6 cm, so KC trusted the camera too much.
