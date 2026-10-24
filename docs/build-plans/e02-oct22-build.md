@@ -303,3 +303,28 @@ any one of those sensors for an ineffective version and have the system catch th
   accuracy? Simulator first (the sim can degrade any sensor), then the board.
 - Known gap it fixes: in the 2026-10-24 dry runs the robot's own uncertainty was put at ~4 cm at the far point where
   the truth was ~1.6 cm, so KC trusted the camera too much.
+
+## Pi plan results, 2026-10-24 (stages 1-3), and what they add to the next build
+
+**Stage 3 (explore): why Left and Center went over the edge. FIXED (6d86e36).** The robots were not switched off
+after stage 2, so their pose was still the board pose stage 2's camera fixes gave them. The firmware then reports
+an idle leg's pose on the board, not from the leg's start (pose::known -> resume, e02.h begin()). Explore read the
+pose as the leg's own move: Left's room-check `go 12` read as 112 cm, it was told to back 112 cm (blind), and it
+went over the open edge; Center the same 4 minutes later. Now a leg's move is its done pose less its started
+pose, back-offs are capped at what the leg could have driven, and a test uses Left's real records.
+
+**Stage 2: every learned correction refused.** The gyro fits passed every time; the wheel fits were consistent
+(scale 0.975-1.002, +-0.01) but the camera and wheels disagreed by 2.1-2.5 cm per stretch, over MAX_RMS_CM 1.5
+(the 23rd morning: 1.1-1.2; the evening: 1.45-2.0). The set is only used when all three parts pass, so the
+accepted gyro parts were thrown away too. The camera is the noisy one: the session-1 calibration file was 5.3 cm
+off at the finds. Plan (next build, part of "learns how much to trust each sensor"): the gate from the camera's
+own measured noise, not a fixed 1.5 cm; parts used as they pass; a fresh calibration each session.
+
+**Stage 2: K 59.9 / KC 45.8 cm at the far point.** Three of the six K/KC runs lost the robot on the camera at the
+start (Left K, Right K, Left KC; all starting near (96-112, 91-104) cm) and their "far point" is where the camera
+last saw them, not where they went; Right K's intended far point (210, 104) is beyond the board (a route planned
+from a wrong heading: to be traced). The two clean runs (Center K 2.1 / 0.5, Center KC 2.8 / 2.2 cm) were the
+session's best. Right KC (17.0 cm) started 12 cm from where it believed; the first fix gave the camera only 20%
+because the robot's own sd just after a find was small: the overconfident sensor the next build is about.
+Plans: the analysis marks a far point the camera did not see as unseen (no number); route planning refuses a far
+point off the board; KC's first fix after a find checks the find against the camera.
