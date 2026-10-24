@@ -2997,6 +2997,7 @@ class Runner:
             if k:
                 state, info, lid = self.explore_leg(n, "turn", 90.0)
                 self.explore_stop(n, obs, lid, turn_cmd=90.0)
+            started_in_band = self.in_border_band(n)
             state, info, lid = self.explore_leg(n, "go", EXPLORE_PROBE_CM)
             fin = self.listener.leg_final(n, "-", lid) or {}
             kind = MAP.stop_kind(fin.get("state"), fin.get("info"))
@@ -3005,10 +3006,10 @@ class Runner:
             free.append(kind is None)
             met.append(kind)
             d = min(d, EXPLORE_PROBE_CM + 2.0)     # never back further than the probe could have gone (stage 3)
-            if d > 0.5 and kind is None and self.in_border_band(n):
-                # a free probe from a spot inside the virtual border: stay where it got to (further in) rather than
-                # back blindly towards the edge (dry run 2026-10-24: put down 4 cm from the edge, the back-off held
-                # the session); the next probe starts from here
+            if d > 0.5 and kind is None and (started_in_band or self.in_border_band(n)):
+                # a free probe from (or to) a spot inside the virtual border: stay where it got to rather than back
+                # blindly into the border (dry runs 2026-10-24: put down 4 and 12 cm from the edge, each back-off
+                # held the session); the next probe starts from here
                 self.say("    %s: inside the virtual border: not backing towards the edge" % n, quiet=True)
                 d = 0.0
             if d > 0.5:
