@@ -25,7 +25,7 @@ PLAN_NAME=""
 if [ "${1:-}" = "--plan" ]; then
   PLAN=1; shift
   # an optional plan name: ./run-e02-pi.sh --plan right (Right alone, tools/pi/session_plan.sh)
-  case "${1:-}" in right) PLAN_NAME="$1"; shift;; esac
+  case "${1:-}" in right|right-explore) PLAN_NAME="$1"; shift;; esac
 fi
 REPO="$(pwd)"
 RUN_ARGS_DEFAULT="--no-side --robot 192.168.1.250 --robot 192.168.1.252 --robot 192.168.1.253"
@@ -72,7 +72,7 @@ echo "Video goes to $OUT ($free_gb GB free)."
 # space needed: about 3 GB an hour of video plus 1 GB to spare (session 1: 5.5 GB in 2 h); --hours sets it
 hours=2
 [ "$PLAN" = 1 ] && hours=5.5
-[ "$PLAN_NAME" = right ] && hours=1.5
+[ -n "$PLAN_NAME" ] && hours=1.5
 prev=""
 for a in "$@"; do [ "$prev" = "--hours" ] && hours="$a"; prev="$a"; done
 need_gb=$(python3 -c "import math,sys; print(int(math.ceil(3*float(sys.argv[1])+1)))" "$hours" 2>/dev/null || echo 7)
