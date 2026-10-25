@@ -52,7 +52,7 @@ def main():
 
     ch = ru["chosen"]
     for v in ("plain", "disguised"):
-        keep = {(0.80, 0), (0.90, 0), (0.95, 0), (0.90, 240), (0.95, 240)}
+        keep = {(0.80, 0), (0.90, 0), (0.95, 0), (0.90, 60), (0.90, 240)}
         pts = [c for c in ru["rules"] if c["side"] == "heldout" and c["variant"] == v and
                (round(c["threshold"], 2), c["gate_s"]) in keep]
         for c in pts:
@@ -65,9 +65,9 @@ def main():
             if c["gate_s"] == 0:
                 off, ha = ((7, 4), "left") if v == "plain" else ((-7, 4), "right")
             elif chosen:
-                off, ha = ((0, 30), "center") if v == "plain" else ((0, 18), "center")
+                off, ha = ((10, 46), "left") if v == "plain" else ((-10, 62), "right")
             else:
-                off, ha = ((10, -14), "left") if v == "plain" else ((-10, -14), "right")
+                off, ha = ((10, 22), "left") if v == "plain" else ((-10, 34), "right")
             b.annotate(txt + (" (chosen)" if chosen else ""), (x, y), xytext=off, ha=ha,
                        textcoords="offset points", fontsize=7, color=INK if chosen else MUTED,
                        fontweight="bold" if chosen else "normal",
