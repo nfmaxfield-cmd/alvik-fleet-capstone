@@ -95,12 +95,12 @@ STANDS_OUT = 1.5          # (2026-10-24; kept for the replays) the old gate: thi
 STANDS_OUT_FLAG = 3.0     # chosen: the second check flags a robot whose stretches are 3 x the healthy robots' median
                           # (the simulator's healthy robots differ by up to 1.5x; Right's 5% gyro jitter was 4.4x;
                           # DOE: the same replay at 2 / 3 / 4)
-RUN_CHI_FLAG = 20.0       # chosen: chi2/run at which the runs check reaches DEGRADED_K. Healthy, real and simulated:
-                          # at most 7.4 (Center on the slow-camera 15:45 session: k 1.2); the simulator's 5-10% jittered
-                          # wheels 43 and up (k 2.9 and up). 20 sits midway on a log scale. For independent camera errors
-                          # 3.4 is already 1-in-1000 with 8 runs; the margin is for camera errors shared within a run (a
-                          # slow camera). DOE: replay all sessions at 10 / 20 / 40, and the simulator at 2 / 4% jitter for
-                          # the smallest fault caught
+RUN_CHI_FLAG = 12.0       # chosen: chi2/run at which the runs check reaches DEGRADED_K. Healthy at the session's end:
+                          # real robots 0.2-3.8 (3.1 for Center on the slow-camera 15:45 session), simulator up to 3.2; the
+                          # simulator's 5-10% jittered wheels 36 and up. 12 sits midway on a log scale (healthy k 1.1 at
+                          # most, the weakest fault 3.5). For independent camera errors 3.4 is already 1-in-1000 with 8
+                          # runs; the margin is for camera errors shared within a run (a slow camera). DOE: replay all
+                          # sessions at 6 / 12 / 24, and the simulator at 2 / 4% jitter for the smallest fault caught
 RUN_CAM_FLOOR_CM = 0.3    # chosen: the camera's miss per stretch is never taken below this (a run of near-perfect
                           # stretches must not make an ordinary run-to-run difference look huge)
 RUN_MIN_LEN_CM = 40.0     # chosen: a run's stretches must add up to this before its scale counts (camera noise of
@@ -369,9 +369,8 @@ class SensorTrust:
         stretches and its scale held 0.963-0.981: the camera's error, charged to the wheels.) Each run's scale has a
         scatter from the camera alone: the camera's miss per stretch (its stretches about their own run's scale)
         x sqrt(stretches) / the run's length. chi2/run (fine print: each run's scale minus the median, squared, over
-        that camera-only scatter squared; the median of those x 2.2, so one odd run doesn't move it) is about 1 when
-        the camera explains the spread: healthy robots at most 7.4 (real, the slow-camera 15:45 session), the
-        simulator's jittered wheels 43 and up. k = DEGRADED_K x sqrt(chi2/run / RUN_CHI_FLAG). Evidence from before
+        that camera-only scatter squared, averaged with the one largest left out, so one odd run doesn't move it) is about 1 when
+        the camera explains the spread: healthy robots at most 3.8 (real), the simulator's jittered wheels 36 and up. k = DEGRADED_K x sqrt(chi2/run / RUN_CHI_FLAG). Evidence from before
         (no stretches kept) is judged by the spread against the prior, as before."""
         its = self._items("wheels", robot, "run_scale")
         now_its = self._now(its)
@@ -384,7 +383,8 @@ class SensorTrust:
             a = max(a, RUN_CAM_FLOOR_CM ** 2)
             med = statistics.median(now)
             z2 = [((it["v"] - med) / (math.sqrt(it["n"] * a) / it["len"])) ** 2 for it in now_its]
-            chi = statistics.median(z2) / 0.455
+            z2 = sorted(z2)[:-1] if len(z2) >= 5 else z2       # the one largest left out: one odd run (a tracker jump)
+            chi = sum(z2) / len(z2)
             return dict(check="runs", v=chi, base=1.0, k=DEGRADED_K * math.sqrt(chi / RUN_CHI_FLAG), n=len(now),
                         src="the camera's own scatter, %.1f cm a stretch" % math.sqrt(a), spread=rel_spread(now))
         v = rel_spread(now)
