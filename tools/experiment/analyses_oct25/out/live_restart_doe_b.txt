@@ -1,0 +1,30 @@
+oct23-evening: 93046 RAW, 41216 camera, 35 floor offsets, 1224 s
+stage1: 62055 RAW, 19915 camera, 21 floor offsets, 994 s
+stage2: 124781 RAW, 44949 camera, 49 floor offsets, 1111 s
+
+Pooled over sessions (restarts / lab hours; errors pooled by camera-sample-weighted median of sessions)
+start    T       restarts    per h   err med   err p95  diverged   gap p50
+today    15          2794     2188      0.45      3.51      7.0%       nan
+today    30          1593     1248      0.46      3.77      7.4%       nan
+today    60          1005      787      0.46      3.97      8.1%      3.80
+today    120          888      695      0.46      4.13      8.6%       nan
+today    240          859      673      0.46      4.12      8.6%       nan
+today    never          0        0      0.48      4.99     10.4%       nan
+position 15          1911     1530      0.44      3.20      4.7%       nan
+position 30           718      575      0.45      3.44      5.1%       nan
+position 60           154      123      0.45      3.62      5.9%      3.69
+position 120           48       38      0.45      3.73      6.3%       nan
+position 240           21       17      0.45      3.73      6.4%       nan
+position never          0        0      0.45      3.82      6.6%       nan
+camera   15          1492     1195      0.42      2.64      4.3%       nan
+camera   30           535      428      0.43      2.76      4.0%       nan
+camera   60            81       65      0.43      2.91      4.1%      3.32
+camera   120           25       20      0.43      2.89      4.1%       nan
+camera   240           11        9      0.43      2.90      4.2%       nan
+camera   never          0        0      0.43      2.93      4.3%       nan
+floor    15          1464     1172      0.41      2.58      4.1%       nan
+floor    30           513      411      0.43      2.69      3.7%       nan
+floor    60            57       46      0.43      2.80      3.7%      3.03
+floor    120           13       10      0.43      2.77      3.6%       nan
+floor    240            3        2      0.43      2.79      3.6%       nan
+floor    never          0        0      0.43      2.79      3.7%       nan
