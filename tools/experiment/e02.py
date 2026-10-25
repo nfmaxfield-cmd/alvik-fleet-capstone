@@ -38,6 +38,8 @@ firmware. What this runner sends:
   set safe_edge 3, edge_dir 0, edge_thr 150, edge_n 3, edge_bot_cm 11, bumper_cm 0, e02_face_cm 0  (SAFETY: at setup, checked by
       `get`, and with every find / route, checked in its PARAM records; the firmware refuses to drive without
       the edge guard)
+  --switches-back: also set sw_on 1, sw_back 1, e02_find_reverse 1, e02_back_face_cm 6.10 (BACK_SETTINGS: read back
+      at setup, sent again before every find): the find backs into the boards (firmware 2026-10-25b; FIND reverse)
   calibrate (once after power-on; calib_spin_deg 0, calib_roll_cm 0: only the compass wiggle)
   set gyro_scale / gyro_drift_dps / wheel_scale  (finds, transits and moves: the latest learned, else the priors;
       K: 1, 0, 1) and e02_route_gyro_scale / _gyro_drift_dps / _wheel_scale (U: 1, 0, 1; C, KC: learned): the
@@ -171,8 +173,16 @@ EDGE_TURN_CM = 9.0        # no turn on the spot closer than this to an open edge
 FIND_TIMEOUT_S = 150
 E02_TIMEOUT_S = {0: 150, 1: 400}
 BATTERY_WARN, BATTERY_STOP = 40, 15
-EXPECTED_FW = "2026-10-25a"
-OK_FW = ("2026-10-22b", "2026-10-25a")   # 2026-10-25a adds the robot's own virtual border and `sleep`; 22b still runs
+EXPECTED_FW = "2026-10-25b"
+OK_FW = ("2026-10-22b", "2026-10-25a", "2026-10-25b")   # 25a adds the robot's own virtual border and `sleep`; 25b the
+                                                        # back switches and the reverse find; 22b still runs
+BORDER_FW = ("2026-10-25a", "2026-10-25b")   # firmware with the robot's own virtual border and `sleep`
+# --switches-back (Nick, 2026-10-25: "one attachment in total with switches in the back"): these too, sent and read
+# back with the safety settings and again before every find (a robot switched off and on loses them; it would then
+# find nose first, which still works). The find then backs into each board (firmware 2026-10-25b, e02.h REVERSE
+# FIND). e02_back_face_cm: hardware/dock/build_attachment_v3.py's rear bar (a design number, to be tape-measured).
+BACK_SETTINGS = (("sw_on", 1.0), ("sw_back", 1.0), ("e02_find_reverse", 1.0), ("e02_back_face_cm", 6.10))
+BACK_FW = ("2026-10-25b",)
 # Backups (Nick, 2026-10-23: "build in backup plans in case our session goes poorly ... get as much data as possible
 # before stopping for a rebuild"). Chosen numbers; a DOE would not help much here (they trade data for Nick's time).
 HEADING_LONG_ROOM_CM = 30.0   # a 15 cm heading drive only this far (or more) from an open edge
@@ -2913,7 +2923,7 @@ class Runner:
             # robots switched on but not in this session: to sleep (firmware 2026-10-25a), checking in every N min
             time.sleep(1.0)
             for n in self.link.robots():
-                if n not in names and self.listener.firmware.get(n) == "2026-10-25a":
+                if n not in names and self.listener.firmware.get(n) in BORDER_FW:
                     self.send(n, "sleep %d" % self.a.sleep_idle)
                     self.say("  %s is not in this session: sent to sleep (it checks in every %d min)" % (
                         n, self.a.sleep_idle))
@@ -4542,27 +4552,52 @@ class Runner:
         self.say("  Saved: %s" % os.path.join(self.dir, "bricks.json"))
         return out
 
+    def switches_back(self, robot):
+        """--switches-back: does this robot wear the one attachment with the switches at the back (all robots, or
+        the names given)?"""
+        v = getattr(getattr(self, "a", None), "switches_back", None)
+        if not v:
+            return False
+        return v == "all" or robot in [x.strip() for x in v.split(",")]
+
+    def safety_list(self, robot):
+        """The settings safety_settings() sends and reads back for this robot (+ BACK_SETTINGS: --switches-back)."""
+        return SAFETY_SETTINGS + (BACK_SETTINGS if self.switches_back(robot) else ())
+
     def safety_settings(self, names):
-        """The edge guard on and the bare body (no nose bracket fitted), sent and read back with `get`. A robot
-        that does not confirm them gets them again; still not: the session refuses to start."""
+        """The edge guard on and the bare front (no nose bracket fitted), sent and read back with `get`; with
+        --switches-back also the back switches and the reverse find (BACK_SETTINGS; firmware 2026-10-25b only). A
+        robot that does not confirm them gets them again; still not: the session refuses to start."""
+        old = [n for n in names if self.switches_back(n) and self.listener.firmware.get(n) not in BACK_FW]
+        if old:
+            raise SystemExit("--switches-back: %s run%s older firmware (%s); the reverse find needs %s. Upload "
+                             "firmware/home_lab to it (Arduino IDE: open home_lab.ino, pick the robot's port, press "
+                             "Upload), or leave it out of --switches-back." % (
+                                 ", ".join(old), "s" if len(old) == 1 else "",
+                                 "/".join(sorted({str(self.listener.firmware.get(n)) for n in old})), " or ".join(BACK_FW)))
         for attempt in range(3):
             todo = []
             for n in names:
                 t0 = time.time()
-                for c in SAFETY_CMDS:
-                    self.send(n, c)
+                want = self.safety_list(n)
+                for kv in want:
+                    self.send(n, "set %s %g" % kv)
                     time.sleep(0.05)
-                for k, _ in SAFETY_SETTINGS:
+                for k, _ in want:
                     self.send(n, "get %s" % k)
                     time.sleep(0.05)
                 time.sleep(1.0)
                 got = self.listener.got_params(n, t0)
-                bad = [k for k, v in SAFETY_SETTINGS if got.get(k) is None or abs(got[k] - v) > 1e-3]
+                bad = [k for k, v in want if got.get(k) is None or abs(got[k] - v) > 1e-3]
                 if bad:
                     todo.append((n, bad))
             if not todo:
                 self.say("Edge guard on and no nose bracket set on %s (read back)." % ", ".join(names))
                 self.st["setup"]["safety_settings"] = dict(SAFETY_SETTINGS)
+                back = [n for n in names if self.switches_back(n)]
+                if back:
+                    self.say("Back switches on and the find backing into the boards on %s (read back)." % ", ".join(back))
+                    self.st["setup"]["switches_back"] = back
                 return
             names = [n for n, _ in todo]
         raise SystemExit("These robots did not confirm the edge guard settings: %s. Check they are switched on and "
@@ -4596,7 +4631,7 @@ class Runner:
         cmds = ["set e02_xboard_side %d" % xs, "set e02_yboard_side %d" % ys, "set e02_open_x_cm %.2f" % ox,
                 "set e02_open_y_cm %.2f" % oy, "set border_cm %g" % self.fw_border_cm(), "set border_seek 0"]
         for n in names:
-            if self.listener.firmware.get(n) != "2026-10-25a":
+            if self.listener.firmware.get(n) not in BORDER_FW:
                 continue
             for c in cmds:
                 self.send(n, c)
@@ -4608,7 +4643,7 @@ class Runner:
 
     def fw_seek(self, robot, on):
         """border_seek for the robot's next leg (a crawl looking for the edge on purpose)."""
-        if self.listener is not None and self.listener.firmware.get(robot) == "2026-10-25a":
+        if self.listener is not None and self.listener.firmware.get(robot) in BORDER_FW:
             self.send(robot, "set border_seek %d" % (1 if on else 0))
 
     def find_check(self):
@@ -4793,6 +4828,10 @@ class Runner:
         self.watchdog_fired = False
         self.watch_stop = None
         self.mark("e02 %s %s find start" % (order, robot))
+        if self.switches_back(robot):
+            for kv in BACK_SETTINGS:                 # again before every find: a power-cycled robot lost them
+                self.send(robot, "set %s %g" % kv)
+                time.sleep(0.03)
         run = self.start_run(robot, "run find")
         if not run:
             return dict(ok=False, words="did not start `run find`", run=None, t0=t0, t1=time.time())
@@ -4802,9 +4841,19 @@ class Runner:
             self.send(robot, "stop")
             end = self.watch.wait_end(run, 5) or dict(result="no end record")
         fr = self.listener.latest("FIND", robot, t0)
-        # find ends squared up to the boards, backed off: its own heading is then as good as the camera's
+        # find ends squared up to the boards, backed off: its own heading is then as good as the camera's. Nose
+        # first it ends facing the y board; backing in (FIND reverse 1, firmware 2026-10-25b) facing away from it
+        rev = bool(fr and (fr[1].get("reverse") or "0").strip() == "1")
+        if self.switches_back(robot) and fr and not rev:
+            self.say("  %s: found itself nose first, not backing in (its back switches were not set: see its "
+                     "messages); carrying on" % robot)
         ath = num(fr[1].get("after_th")) if fr else None
-        self.heads[robot] = [ath, True] if ath is not None else [ST.wrap180(self.board.start_heading + 180.0), False]
+        if ath is None:
+            ath_guess = self.board.start_heading if (rev or (fr is None and self.switches_back(robot))) else \
+                self.board.start_heading + 180.0
+            self.heads[robot] = [ST.wrap180(ath_guess), False]
+        else:
+            self.heads[robot] = [ath, True]
         result = fr[1].get("result", "?") if fr else end["result"]
         ok = end["result"] == "done" and (fr is None or result == "ok")
         out = dict(ok=ok, run=run, t0=t0, t1=t1, result=result, runend=end["result"],
@@ -4825,6 +4874,11 @@ class Runner:
         face = PL.ROBOT_HALF_CM + (prm.get("bumper_cm") or 0.0)      # body centre (the camera's point) to its face
         if prm.get("bumper_cm") and prm.get("bump_ahead_cm"):
             self.board.face_cm = prm["bump_ahead_cm"]
+        if rev:
+            # backed in: the back attachment's face touched (centre ~ axle: PL.ROBOT_HALF_CM is both); the robot
+            # reaches that far behind its centre too
+            face = prm.get("e02_back_face_cm") or num(fr[1].get("face_cm")) or BACK_SETTINGS[-1][1]
+            self.board.face_cm = max(self.board.face_cm, face)
         for _, rec in bumps:
             ms = num(rec.get("ms_contact")) or num(rec.get("ms_detect")) or num(rec.get("ms"))
             which = (rec.get("board") or "").strip().lower()[:1]
@@ -5385,7 +5439,7 @@ class Runner:
         tr = getattr(self, "trust", None)
         lis = getattr(self, "listener", None)
         if tr is not None and tr.bad("camera") and lis is not None and \
-                lis.firmware.get(robot) == "2026-10-25a":
+                lis.firmware.get(robot) in BORDER_FW:
             # a camera that looks bad: routes are kept inside the shrunken area (border_cm), and the robot's own
             # border (FW_BORDER_CM, its wheels and gyro) is the line; the camera's would hold on its own noise (2026-10-25 simulator, camera noise 4 cm: 6 camera
             # border holds in 15 minutes, none with the robot really at the edge)
@@ -6837,6 +6891,10 @@ def main(argv=None):
     ap.add_argument("--edge-find", action="store_true", help="every find against any two boundaries (boards or open "
                     "edges, no camera) instead of `run find` against the two boards; also used on its own once a "
                     "board is found missing")
+    ap.add_argument("--switches-back", nargs="?", const="all", default=None, metavar="ROBOTS",
+                    help="the robots wear the one attachment with the switches at the BACK (Nick, 2026-10-25): sets "
+                         "sw_on 1, sw_back 1, e02_find_reverse 1, e02_back_face_cm 6.10 (read back), so every find "
+                         "backs into the boards; firmware 2026-10-25b. All robots, or a list: --switches-back Left,Center")
     ap.add_argument("--no-lock", action="store_true", help="backup: the tracker without the lock-on (the motion "
                     "detector alone, as before 2026-10-23)")
     ap.add_argument("--own-sensor-only", action="store_true", help="backup: only the runs where the robots drive on "

@@ -258,7 +258,52 @@ def test_runner_safety_settings_go_with_every_find_and_route():
     cmds = r.board_params()
     for c in E.SAFETY_CMDS:
         assert c in cmds
-    assert E.EXPECTED_FW == "2026-10-25a" and "2026-10-22b" in E.OK_FW   # the robot's own border; the old one still runs
+    assert E.EXPECTED_FW == "2026-10-25b" and {"2026-10-22b", "2026-10-25a"} <= set(E.OK_FW)   # back switches; older still run
+    assert set(E.BORDER_FW) == {"2026-10-25a", "2026-10-25b"}                                  # both have the robot's own border
+
+
+def test_switches_back_flag_adds_the_back_settings_per_robot():
+    """--switches-back (Nick, 2026-10-25: one attachment, switches at the back): those robots get sw_on, sw_back,
+    e02_find_reverse 1 and e02_back_face_cm with the safety settings (sent, then read back); the others don't; a
+    robot on older firmware stops the session with what to do."""
+    import types
+    import e02 as E
+    r = E.Runner.__new__(E.Runner)
+    r.a = types.SimpleNamespace(switches_back="Left,Right")
+    assert r.switches_back("Left") and r.switches_back("Right") and not r.switches_back("Center")
+    assert ("e02_find_reverse", 1.0) in r.safety_list("Left") and ("sw_back", 1.0) in r.safety_list("Left")
+    assert r.safety_list("Center") == E.SAFETY_SETTINGS
+    r.a = types.SimpleNamespace(switches_back="all")
+    assert r.switches_back("Center")
+    r.a = types.SimpleNamespace(switches_back=None)
+    assert not r.switches_back("Left")
+    sent, said = [], []
+    r.a = types.SimpleNamespace(switches_back="all")
+    r.send = lambda n, c: sent.append((n, c))
+    r.say = lambda *a, **k: said.append(a[0])
+    r.st = {"setup": {}}
+
+    class Lis:
+        firmware = {"Left": "2026-10-25b"}
+
+        def got_params(self, n, t0):
+            return dict(E.SAFETY_SETTINGS + E.BACK_SETTINGS)
+    r.listener = Lis()
+    import time as _t
+    orig = _t.sleep
+    _t.sleep = lambda s: None
+    try:
+        r.safety_settings(["Left"])
+        assert ("Left", "set e02_find_reverse 1") in sent and ("Left", "get sw_back") in sent
+        assert r.st["setup"]["switches_back"] == ["Left"]
+        r.listener.firmware = {"Left": "2026-10-25a"}
+        try:
+            r.safety_settings(["Left"])
+            raise AssertionError("older firmware must stop the session")
+        except SystemExit as e:
+            assert "2026-10-25b" in str(e)
+    finally:
+        _t.sleep = orig
 
 
 def test_default_floor_calibration_is_roam1s_and_lines_up_with_its_corners():

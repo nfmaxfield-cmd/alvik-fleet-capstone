@@ -254,6 +254,70 @@ at least `calib_roll_min_cm` (5 cm). That roll back is not guarded, on
 purpose: it retraces the path the robot has just driven forward on the
 board, so it can only end where the roll started.
 
+## Finding itself against the boards (`run find`; backing in from firmware 2026-10-25b)
+
+`run find` gives a robot an exact position from the two boards (full rules: docs/data-formats.md "E02").
+Send a camera fix first (the E02 runner does); the robot drives to a point 25 cm from both boards' faces, then
+finds each board in turn, squares up on it, and resets its distance from that board and its heading.
+
+**Nose first** (`e02_find_reverse 0`, the default; robots without the back attachment): it faces the board,
+creeps into it with its bare front face and knows it touched by the wheels stalling, a jolt, or the front sensor
+reading under 1.5 cm. It backs off 8 cm after each board.
+
+**Backing in** (`e02_find_reverse 1`; Nick, 2026-10-25: one attachment with the switches, ID lights and charging
+pads at the BACK). Per board:
+
+1. It faces the board and its front sensor must see it where the map puts it (within 20 cm). If not, the board
+   is gone and the find stops there, without backing ("no board seen ... (not backing in)").
+2. It turns round and backs in slowly. A back switch clicking is the touch (the wheels stalling counts too).
+3. It pushes backwards until both switches are pressed, so its back face lies flat on the board.
+4. It drives 8 cm forward, away from the board (forward means the edge guard is on).
+
+Backing is blind, so it backs at most about 3 cm (plus a little for drift since the camera fix) past where it
+believes the board is, and never so far that its wheels come within 2 cm of the board's line; then it stops with
+"no board behind". It ends facing away from the y board, which is the routes' start heading. It needs the
+switches set up and a pose; without either it finds nose first and says so.
+
+| setting | default | what |
+| --- | --- | --- |
+| `sw_back` | 0 | 1 = the switches are on the back attachment (the dock, touch and posts runs back in too) |
+| `e02_find_reverse` | 0 | 1 = the find backs into the boards |
+| `e02_back_face_cm` | 6.10 | wheel axle to the back attachment's face, cm (the v3 design's number: tape-measure the printed one) |
+| `e02_find_turn_cm` | 30 | a board further than this is first approached nose first, to this far |
+| `e02_find_see_cm` | 20 | the look's allowance: the board may read at most this much further than the map puts it |
+| `e02_find_back_margin_cm` | 3 | how far past the believed board it may back (+ 20% of the travel since the camera fix) |
+| `e02_find_keep_cm` | 2 | ... but the axle never nearer the board's line than this |
+
+**To use it** (once the attachment is on and wired): flash firmware 2026-10-25b to each robot (as in Flashing,
+above), then start the session runner with `--switches-back` (all robots) or `--switches-back Left,Center`
+(only those). The runner sets the four settings, reads them back, and sends them again before every find.
+By hand, in the robot console (`python tools/alvik_console.py`), type one line at a time and press Enter:
+
+```
+set sw_on 1
+```
+```
+set sw_back 1
+```
+```
+set e02_find_reverse 1
+```
+
+Each answers with the new value. Then check the switches: put the robot on the table with at least 10 cm of open
+table BEHIND it, and type these two, one at a time:
+
+```
+set dock_max_cm 6
+```
+```
+run touch
+```
+
+It creeps backwards slowly. Press the LEFT back lever with a finger (left = the robot's own left, standing behind
+it looking where it looks): it stops at once and the console prints a TOUCH line containing `,L,touched,`. Do it
+again pressing the RIGHT lever: `,R,touched,`. If it rolls 6 cm and prints `no click within 6 cm`, that switch is
+not wired (or is on another pin). Afterwards type `set dock_max_cm 40`.
+
 ## Step 1: sensor explorer
 
 Upload `sensor_explorer`, open Serial Monitor at 115200, and switch the robot
@@ -380,6 +444,8 @@ if it hangs.
   open edge (head-on and at 45 and 30 degrees), across the painter's tape, and
   fast over plain plywood (the bottom zone tilts when the robot speeds up or
   brakes); measure how much wheel is left on the board each time.
+- Backing-in find (firmware 2026-10-25b): 10 finds per robot with the back attachment on camera, and one with a
+  board removed (it must stop at "no board seen" without backing). Details: docs/build-reports/e02-oct25-reverse-find.md.
 
 ## Possible inaccuracies in what this relied on
 
@@ -397,6 +463,9 @@ if it hangs.
 - **Home results won't carry over 1:1.** The floor, tape, lighting and
   battery level all differ from the lab testbed. The direction and rough size
   of an effect are what transfer.
+- **The backing-in find's numbers are design or chosen numbers**: `e02_back_face_cm` 6.10 (the v3 attachment's
+  design, not a printed part), `e02_find_see_cm` 20, `e02_find_back_margin_cm` 3, `e02_find_keep_cm` 2,
+  `e02_find_turn_cm` 30 (docs/doe-backlog.md).
 - **Untested on hardware.** The sketches were type-checked against stand-in
   headers built from the real library, and the laptop tools were tested
   against a simulated robot, but nothing has run on an Alvik yet.

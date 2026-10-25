@@ -1185,7 +1185,7 @@ belief (wheel distance x wheel_scale, gyro heading x gyro_scale - drift): its ax
 
 | command | what it does |
 |---|---|
-| `run find` | Find itself: (pose known) drive to the staging point `e02_find_stage_cm` from both faces; face the x board, drive at `e02_cms` to `e02_find_slow_cm` short of where it believes the board is, creep at `bump_creep_cms` until a bump (at most `e02_find_slow_cm` + `e02_find_margin_cm`, or `e02_find_max_cm` with no pose), push square, reset its distance from the board and its heading; back off `e02_find_back_cm`; the same against the y board; then the position along each board too; back off again. FIND record; one BUMP record per board. |
+| `run find` | Find itself (nose first; `e02_find_reverse 1`: backing in, see "Reverse find" below): (pose known) drive to the staging point `e02_find_stage_cm` from both faces; face the x board, drive at `e02_cms` to `e02_find_slow_cm` short of where it believes the board is, creep at `bump_creep_cms` until a bump (at most `e02_find_slow_cm` + `e02_find_margin_cm`, or `e02_find_max_cm` with no pose), push square, reset its distance from the board and its heading; back off `e02_find_back_cm`; the same against the y board; then the position along each board too; back off again. FIND record; one BUMP record per board. |
 | `run e02` | One route (`e02_route` 1 straight `e02_straight_cm` 100, 2 L `e02_l_cm` 30 / turn / `e02_l_cm`, 3 square `e02_square_cm` 50, one lap, far point = the opposite corner; the L's and the square's turns go towards the plywood's middle, away from the x board, unless `e02_l_turn` / `e02_square_turn` is -1 right or +1 left), forwards only, out to the far point, stand `e02_pause_ms`, back to the start, turn to the start heading. Mode 0 (`e02_mode 0`): on its own pose; first to `e02_start_x`, `e02_start_y` if set (at most `e02_transit_max_cm` away), then turns to `e02_route_deg` (-999 = away from the y board); then (2026-10-21b) switches `gyro_scale` / `gyro_drift_dps` / `wheel_scale` to `e02_route_gyro_scale` / `e02_route_gyro_drift_dps` / `e02_route_wheel_scale` (-999 = keep), so the transit and start turn run on the laptop's best corrections and only the route on the condition's (U: 1, 0, 1). Mode 1: drives only the legs the laptop sends. E02 record. Needs a pose (a find or a fix). |
 | `fix x y th t_wall` | A camera fix: the camera's pose of the robot (th `-` = position only); `t_wall` = the laptop's clock at the camera picture, logged as given. Used only while the wheels have been still `e02_fix_still_ms` (the picture shows where it is now, whatever the WiFi delay), any time except during a find or another kind of run (during `run follow`, `fix` keeps its follow meaning). It REPLACES the pose while idle (send one before every find) and in a camera-steered run (mode 1, K). In a mode 0 run (KC) it is blended: new pose = old + `e02_fix_k` x (camera - old), heading the same way, the shorter way round (`e02_fix_k` 0.5 = halfway; with `e02_leg_pause_ms` > 0 the robot stands still after every turn and straight so fixes can be used, and at the far point and the end drives once more if the fixed pose is more than `e02_redo_cm` off). No pose yet: the fix sets it (needs a heading). FIX record. |
 | `go d [id]` | Drive d cm straight along its current heading (negative: backwards, at most `e02_back_max_cm` 10; at most `e02_go_max_cm` 110). In a mode 1 run: a leg of the route. With no run going: an idle leg (parking, finding a robot in the picture, bringing a lost one back): the edge guard learns the plywood first (`edge_learn_ms` standing still), then the same checks as mode 1; LEG run `-`; one at a time. |
@@ -1220,6 +1220,41 @@ last one's `done`. Mode 1 ends "failed" after `e02_quiet_ms` with nothing from t
   transit + the route + `e02_margin_cm`; mode 1 the route + `e02_transit_max_cm` + `e02_margin_cm`.
 - `stop`, the cancel button and a lift stop everything, as in every run. Sync flashes at the start and end
   as every logged run (sync.csv).
+
+### Reverse find: backing into the boards (firmware 2026-10-25b)
+
+Nick, 2026-10-25: "one attachment in total with switches in the back": the two switches, the ID lights and the
+charging pads sit on one attachment at the robot's back, so the front distance sensor and the front line sensors
+(the edge guard) stay clear. With `sw_on 1`, `sw_back 1` and `e02_find_reverse 1` (the E02 runner sets all three
+with `--switches-back`), and a pose (a camera fix first), each board is found backwards:
+
+1. Face the board. If it is further than `e02_find_turn_cm` 30 (axle to its face, by the pose) drive nose first
+   (front sensor and edge guard on) to that distance; from the staging point (25 cm) it is nearer already.
+2. Look: standing still, the front sensor (nearest middle zone, median of 5 frames) must see the board no
+   further than the map puts it + `e02_find_see_cm` 20 (+ the same 20% slack as below). If not ("no board seen
+   (front N cm; the board should be M) (not backing in)") the find fails here, without backing: a removed board
+   over an open edge cannot draw the robot backwards off the plywood (its rear caster is ~4 cm behind the axle).
+   BUMP `front_cm` holds this reading.
+3. Turn round (its back to the board) and creep backwards at `bump_creep_cms`, heading held. Bump = either back
+   switch clicking (cue `switch-L`, `switch-R`, `switch-LR`; the contact is the switch's first raw closing), or
+   the stall / jolt cues as nose first. Not used backwards: the touch cue and the "something far ahead" check
+   (the front sensor looks away from the board).
+4. Capped: at most `e02_find_back_margin_cm` 3 (+ `e02_find_tol_pct` 20% of the travel since the pose was set)
+   past where the pose says the board is, and never so far that the axle comes within `e02_find_keep_cm` 2 of the
+   board's line; then "no board behind within N cm" and the find fails. Never more than `e02_find_max_cm`.
+5. Push square backwards until both switches are pressed or the heading stops changing (BUMP `squared` 2 = both
+   switches pressed at the end, 1 = heading still).
+6. The touching face is the back one, `e02_back_face_cm` 6.10 behind the axle (FIND `face_cm`), and its heading
+   against a board is the board's + 180: the reset, the bump check and the turn_k re-trace use both. Leaving a board
+   is a forward drive of `e02_find_back_cm` 8 (edge guard on; front stop `safe_front_cm`). It ends facing AWAY from
+   the y board (the routes' start heading).
+
+Without the switches (`sw_on 0` or `sw_back 0`) or without a pose it finds nose first, as before, and says so
+("find: not backing in: ...; nose first instead", FIND `reverse` 0). Between the squarings the gyro's turn is added
+up unwrapped (2026-10-25b): turning round can wind it past 180 degrees, which a wrapped angle got wrong.
+
+The dock, the touch probe and the posts run backwards too with `sw_back 1` (dock.h: put the robot down with its back
+to the dock or board; it leaves forwards; the docked pose is the wall's + `e02_back_face_cm` along the way it faces).
 
 ### Bump detection (no switches) and push-to-square
 
@@ -1263,7 +1298,7 @@ BUMP (`bump.csv`), one per board touched: header `H,BUMP,run,ms,n,board,result,c
 | run, ms | run id; robot ms of the detection (= ms_detect; the robot's clock when it stopped, or now if none) |
 | n, board | 1 = first board, 2 = second; `x` / `y` |
 | result | `bump`, or why not (no bump within N cm, stalled with something N cm ahead: not at a board, bump N cm sooner/later than the x board should be, still turning after N ms of pushing: not square, creep timed out) |
-| cue | `jolt+stall` or `stall` |
+| cue | `jolt+stall` or `stall` (nose first also `touch`); reverse find: `switch-L`, `switch-R`, `switch-LR` (which back switch clicked first), or the stall cues |
 | ms_start, ms_contact, ms_detect | robot ms: creep start, the contact (the jolt if there was one, else the stall's start), detection |
 | delay_ms | ms_detect - ms_contact |
 | jolt_g | biggest jolt around the contact, g |
@@ -1271,16 +1306,16 @@ BUMP (`bump.csv`), one per board touched: header `H,BUMP,run,ms,n,board,result,c
 | x_cm, y_cm, th_deg | believed pose at the contact (before any reset) |
 | travel_cm | creep travel (wheels) to the contact |
 | overshoot_cm | wheel travel from the contact until the wheels stood still (the tyres slip while stalling) |
-| front_cm | front sensor, centre zone, at detection |
+| front_cm | front sensor, centre zone, at detection; reverse find: the look's reading of the board before it turned round |
 | jolts_ignored | jolts during the creep that were not the bump |
 | square_deg | gyro heading change while pushing square (about the approach angle, opposite sign) |
-| push_ms, squared | how long it pushed; 1 = settled square |
+| push_ms, squared | how long it pushed; 1 = settled square; 2 = settled with both back switches pressed (reverse) |
 
-FIND (`find.csv`), one per `run find`: header `H,FIND,run,result,known_before,before_x,before_y,before_th,bump2_x,bump2_y,bump2_th,reset_x,reset_y,reset_th,after_x,after_y,after_th,corr1_cm,corr1_deg,corr2_cm,corr2_deg,turn_k,retrace_cm,face_cm,ms_total,battery`
+FIND (`find.csv`), one per `run find`: header `H,FIND,run,result,known_before,before_x,before_y,before_th,bump2_x,bump2_y,bump2_th,reset_x,reset_y,reset_th,after_x,after_y,after_th,corr1_cm,corr1_deg,corr2_cm,corr2_deg,turn_k,retrace_cm,face_cm,ms_total,battery,reverse`
 
 | column | meaning |
 |---|---|
-| result | `ok` or `failed: <plain reason>` (x board: no bump within N cm; edge guard tripped before the x board (an open plywood edge, not a board); stopped (stop command); the gyro turned N deg between the boards but they are N deg apart ...; drive to the staging point stopped; backing off the x board stopped) |
+| result | `ok` or `failed: <plain reason>` (x board: no bump within N cm; edge guard tripped before the x board (an open plywood edge, not a board); stopped (stop command); the gyro turned N deg between the boards but they are N deg apart ...; drive to the staging point stopped; backing off the x board stopped; reverse: x board: no board seen (...) (not backing in); x board: no board behind within N cm; driving off the x board stopped (...)) |
 | known_before | 1 = it had a pose before (a find or fix); 0 = it assumed it faced the x board |
 | before_x, before_y, before_th | believed pose before the find |
 | bump2_x, bump2_y, bump2_th | believed pose squared on the y board, just before the final reset |
@@ -1289,8 +1324,9 @@ FIND (`find.csv`), one per `run find`: header `H,FIND,run,result,known_before,be
 | corr1_cm, corr1_deg | what bump 1 changed: distance from the x board, heading (how wrong the belief was) |
 | corr2_cm, corr2_deg | the same for bump 2 (distance from the y board) |
 | turn_k, retrace_cm | the gyro scale between the boards; how far the re-trace moved the position |
-| face_cm | axle to touching face used |
+| face_cm | axle to touching face used (reverse: the back face, `e02_back_face_cm`) |
 | ms_total, battery | |
+| reverse | 1 = it backed into the boards (firmware 2026-10-25b, `e02_find_reverse`); 0 = nose first (also when reverse was asked for but the switches or the pose were missing) |
 
 E02 (`e02.csv`), one per `run e02`: header `H,E02,run,route,mode,result,fix_k,start_x,start_y,start_th,far_goal_x,far_goal_y,far_x,far_y,far_th,end_x,end_y,end_th,ms_start,ms_far,ms_end,path_cm,legs,fixes_used,fixes_rejected,gyro_scale,gyro_drift_dps,wheel_scale,battery`
 

@@ -15,6 +15,7 @@ time from start to pushed, including tests and fixes; Nick's own time at the boa
 | 2026-10-25 | Dataset packager + tests | (not estimated) | 0.3 h | - | |
 | 2026-10-25 | Live-view mockup (2 artboards), checklist update, paper outline page | (not estimated) | 0.8 h | - | |
 | 2026-10-25 | Agents: publication plan + generality audit; charging plan + CAD; side camera | (not estimated) | 0.3-0.4 h each, run in parallel | - | agents' wall-clock: 19 min, 23 min, about 1.5 h |
+| 2026-10-25 | Firmware 2026-10-25b: backing-in find + dock backwards (back switches), simulator, runner flag, docs | (not estimated: assigned with a full spec) | 1.0 h | - | its own simulator runs found 3 issues (wrapped turn; the cap vs the rear caster, hence the look; a comma in a CSV message); another agent's WIP commit overwrote one edit mid-build |
 
 **What this says so far.** Estimates for code built on existing parts ran 3-5x too high. Simulator testing of
 behaviour that interacts with the real board (holds, borders) took longer than the code itself. Next estimates:

@@ -12,7 +12,7 @@ Status: open / planned (date) / done (result, link).
 **Count (2026-10-25 sweep):** 51 rows. 2 simulator-only. 23 need logs or recorded footage but no board: 17 can
 run on what is already on disk, 6 wait for data a later session brings. Claude's call: logs-only rows are treated
 like simulator rows and run without asking. 26 need the board, the bench or Nick's time. 3 in progress, 1 building,
-none done. **Update 2026-10-25 (logs run, [write-up](build-reports/e02-oct25-logs-doe.md)):** 7 logs rows done or done
+none done. **Added 2026-10-25 (reverse find build):** 3 rows (2 Sim, 1 Board), below. **Update 2026-10-25 (logs run, [write-up](build-reports/e02-oct25-logs-doe.md)):** 7 logs rows done or done
 in their logs part (uncertainty model, drift band, jump cut, wheel fit, find heading, trust MIN_N, other trust
 limits); 12 need more data or hand-checked truth; sample size has a preliminary count; the front sensor row was
 done separately. Sweep sources: code comments (tools/experiment, firmware,
@@ -115,6 +115,16 @@ a decision.
 | Sample-size minimums (build-plans/publication-plan.md) | 3 camera poses, 3 sessions, 20 injected trials, 10 healthy hours; sd 0.8-1.5 cm from one session | Not a DOE: a power calculation from the first new session's sd, in week 3 | Logs | open; preliminary (2026-10-25): all 13 C runs give 25 per arm with a robust sd, 247 with the ordinary sd; the outlier rule decides it; [write-up](build-reports/e02-oct25-logs-doe.md) §13 |
 | Fusion settings, older lane (tools/fusion/engine.py; ACCURACY-CHECKS.md B19) | simulator values | Tune on half of T1, score on the other half | Logs | building (split rule), per ACCURACY-CHECKS.md |
 
+## Reverse find (backing into the boards, firmware 2026-10-25b)
+
+[Build report](build-reports/e02-oct25-reverse-find.md). All in firmware/home_lab/params.h.
+
+| Number (where) | Value now | Experiment that would set it | Needs | Status |
+|---|---|---|---|---|
+| Look allowance (params.h e02_find_see_cm) | 20 cm | At the staging point, facing each board: 20 looks per robot with the board in, 5 with it lifted out (the robot stops before backing); put the limit between the two spreads, nearer the "in" side. The simulator only has a flat ray model, so this needs the board | Board, ~15 min (part of the first backing-in session) | open |
+| Backing cap (params.h e02_find_back_margin_cm, e02_find_keep_cm) | 3 cm + 20% of travel; axle 2 cm from the line | Simulator grid: margin 2 / 3 / 5 x keep 2 / 4 / 5.5 x gyro corrected / uncorrected x camera fix noise 0.3 / 1 / 2 cm, 20 finds each: finds done, false "no board behind", and (board removed, look off) how near the axle and the rear caster come to the line. 5.5 keeps the caster on a plywood edge at the line; whether that matters depends on where the boards stand (question to Nick) | Sim | open |
+| Nose-first approach before turning round (params.h e02_find_turn_cm) | 30 cm | Simulator: starts 30-90 cm from a board with no staging point, turn_cm 12 / 20 / 30 / 50: reset error, failures, time | Sim | open |
+
 ## Already set by data
 
 - **Line edge cue edge_thr 150** (e02.py SAFETY_SETTINGS): plywood reads 52-84 in every E02 session, the two real
@@ -134,6 +144,8 @@ a decision.
 - Backups that trade data for Nick's time (e02.py): HELP_DROP_N 3, COND_FAIL_N 3, HEADING_LONG_ROOM_CM 30. The last
   one conflicts with the heading-drive DOE in tests-to-run (row above); it is kept as a row.
 - Side camera: SIFT ratio 0.8, RANSAC 4 px, "same robot" 8 cm, 21 pictures per median. A sweep is enough.
+- Reverse find's look (e02.h lookAhead): 150 ms settle, 5 frames ~70 ms apart, median. Set by the sensor's ~15
+  frames a second, not by tuning; a DOE would not change it (its allowance, e02_find_see_cm, has a row above).
 - Dock geometry: pad spacing 20 mm, pad height 10 mm, sense divider, cavity and channel sizes.
 - The 1 cm equivalence margin (publication-plan.md): it should come from what a task needs, not a DOE.
 - Display-only numbers (chat 2026-10-25): live view refresh, 5-minute chart window, last 30 values per trend line,
@@ -166,7 +178,8 @@ seems sensible.
 - Nick's time: WEB_ASK_TIMEOUT_S 15 min, CAMERA_WAIT_S 300 s, the engineer loop's countdown defaults.
 - Not yet tried: the second camera's mount (1.2-1.5 m, 35-45°).
 
-**To measure, not a DOE:** the simulator's GUESSES (tools/sim/config.py: motion, bottom-zone geometry, seams, dock
+**To measure, not a DOE:** the back attachment's axle-to-face distance (params.h e02_back_face_cm 6.10, from the
+v3 design: tape-measure the printed part, as bump_ahead_cm was); the simulator's GUESSES (tools/sim/config.py: motion, bottom-zone geometry, seams, dock
 contact; the E0c edge rows measure them), params.h tof_recess_cm and tof_lag_ms, the spring pins' ASSUMED sizes and
 force (gauge print, bench tests 4-5), and the fusion-era assumptions in
 [ACCURACY-CHECKS.md](experiments/ACCURACY-CHECKS.md).
