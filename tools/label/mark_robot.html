@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Mark the robot</title>
+<style>
+:root{--bg:#0E1116;--panel:#151A22;--line:#222833;--fg:#E6E9EE;--mut:#8E98A7;--mut2:#9AA4B2;--amber:#E0A33A;--amber-t:#FFD58A;
+--amber-bg:#3A2A0B;--follow:#7FB8FF;--ok:#6CCB8F;--bad:#F07B72;--grid:#262D39;--slate:#3A4352;--ring:#41F08A;
+--sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,"DejaVu Sans","Liberation Sans",Arial,sans-serif;
+--mono:"IBM Plex Mono",ui-monospace,"DejaVu Sans Mono","Liberation Mono",Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 var(--sans)}
+button{font:inherit;color:inherit}
+.mono{font-family:var(--mono)}
+.top{display:flex;flex-wrap:wrap;align-items:center;gap:8px 18px;padding:10px 16px;border-bottom:1px solid var(--line);background:#0B0E13;position:sticky;top:0;z-index:5}
+.brand{display:flex;flex-direction:column;min-width:0}
+.brand b{font-size:16px;letter-spacing:.02em}.brand b i{font-style:normal;color:var(--ring)}
+.brand span{color:var(--mut);font-size:12px;overflow-wrap:anywhere}
+.prog{flex:1 1 320px;min-width:220px}
+.pbar{display:flex;height:10px;border-radius:5px;background:var(--grid);overflow:hidden}
+.pbar i{display:block;height:100%}
+.pbar .confirmed{background:var(--ok)}.pbar .corrected{background:var(--follow)}.pbar .unsure{background:var(--amber)}
+.pbar .not_visible{background:var(--slate)}.pbar .skipped{background:#2B313C}
+.ptext{font:12px var(--mono);color:var(--mut2);margin-top:4px;display:flex;flex-wrap:wrap;gap:2px 12px}
+.ptext b{color:var(--fg);font-weight:500}
+.topbtn{background:none;border:1px solid var(--line);border-radius:8px;padding:6px 10px;color:var(--mut2);cursor:pointer}
+.topbtn:hover{border-color:var(--mut);color:var(--fg)}
+.wrap{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px;padding:14px 16px 16px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;min-width:0}
+.viewer{padding:8px}
+#cv{display:block;width:100%;border-radius:6px;background:#000;touch-action:none;cursor:crosshair}
+.cap{margin:8px 4px 0;font-size:13px;color:var(--fg)}
+.src{margin:3px 4px 0;color:var(--mut);font-size:11px;font-family:var(--mono);overflow-wrap:anywhere}
+.gline{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;margin:0 4px 8px;font-size:13px}
+.chip{font:12px var(--mono);padding:2px 8px;border-radius:9px;border:1px solid var(--line);color:var(--mut2)}
+.chip.ok{color:var(--ok);border-color:#2D5A43}.chip.corr{color:var(--follow);border-color:#2F4A6B}
+.chip.amb{color:var(--amber-t);border-color:#6B5021;background:var(--amber-bg)}
+.chip.wait{color:var(--mut2)}
+.spin{display:inline-block;width:10px;height:10px;border:2px solid var(--mut);border-right-color:transparent;border-radius:50%;animation:sp 1s linear infinite;vertical-align:-1px;margin-right:4px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.side{display:flex;flex-direction:column;gap:12px;min-width:0}
+.acts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.acts .sm{display:none}
+.acts button{border-radius:9px;border:1px solid var(--line);background:#1A202A;padding:10px 10px;cursor:pointer;text-align:left;min-height:54px;display:flex;flex-direction:column;justify-content:center}
+.acts button:hover:not(:disabled){border-color:var(--mut)}
+.acts button small{font:11px var(--mono);color:var(--mut);margin-top:2px}
+.acts .confirm{grid-column:1/-1;background:#123020;border-color:#2D7A4E;min-height:64px}
+.acts .confirm b{font-size:18px;color:#CFF7DD}.acts .confirm:hover{background:#174028;border-color:var(--ok)}
+.acts .unsure{border-color:#6B5021}.acts .unsure b{color:var(--amber-t)}
+button:disabled{opacity:.45;cursor:default}
+.row{display:flex;flex-wrap:wrap;gap:6px}
+.row button{flex:1 1 auto;border-radius:8px;border:1px solid var(--line);background:#1A202A;padding:7px 8px;cursor:pointer;font-size:13px;white-space:nowrap}
+.row button:hover:not(:disabled){border-color:var(--mut)}
+.row button.on{border-color:var(--ring);color:var(--ring)}
+h2{font-size:12px;font-weight:500;color:var(--mut2);margin:0 0 6px;letter-spacing:.04em;text-transform:uppercase}
+#mini{display:block;width:100%;border-radius:5px;background:#000;cursor:pointer;touch-action:manipulation}
+.read{font:12px var(--mono);color:var(--mut2);display:grid;grid-template-columns:auto 1fr;gap:2px 10px;margin-top:6px}
+.read b{color:var(--fg);font-weight:500}
+.keys{font-size:12px;color:var(--mut2)}
+.keys table{border-collapse:collapse;width:100%}
+.keys td{padding:2px 4px;vertical-align:top}.keys td:first-child{font-family:var(--mono);color:var(--fg);white-space:nowrap}
+details summary{cursor:pointer;color:var(--mut2);font-size:12px}
+.note{font-size:13px;color:var(--fg)}
+.small{font-size:12px;color:var(--mut2)}
+.warn{color:var(--amber-t)}
+.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#0B0E13;border:1px solid var(--line);border-radius:8px;padding:8px 14px;font-size:13px;z-index:30;display:none;max-width:90vw}
+/* home */
+.home{max-width:880px;margin:0 auto;padding:18px 16px}
+.home h1{font-size:20px;margin:6px 0 4px}
+.home p{color:var(--mut2);margin:0 0 14px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:6px}
+.card b{font-size:15px}.card .st{font:12px var(--mono);color:var(--mut2)}
+.card .st.ok{color:var(--ok)}
+.card button{margin-top:6px;border-radius:8px;border:1px solid #2D7A4E;background:#123020;color:#CFF7DD;padding:9px;cursor:pointer;font-size:14px}
+.card button:hover:not(:disabled){border-color:var(--ok)}
+.job{margin-top:14px;font:12px/1.5 var(--mono);color:var(--mut2);white-space:pre-wrap}
+.done{border:2px solid #2D7A4E}
+.done h3{margin:0 0 6px;color:#CFF7DD;font-size:16px}
+.done code{font:12px var(--mono);color:var(--fg);overflow-wrap:anywhere}
+.hidden{display:none!important}
+@media (max-width:820px){
+  .wrap{grid-template-columns:1fr;padding:10px 10px 96px;gap:10px}
+  .top{padding:8px 12px;gap:6px 12px;flex-wrap:wrap}
+  .brand{flex:1 1 0}.brand span{font-size:11px}
+  .prog{order:3;flex-basis:100%}
+  .topbtn{padding:4px 8px;font-size:12px}
+  .acts .lg{display:none}.acts .sm{display:inline}
+  .acts{position:fixed;left:0;right:0;bottom:0;z-index:10;background:#0B0E13;border-top:1px solid var(--line);padding:8px 10px calc(8px + env(safe-area-inset-bottom));grid-template-columns:2fr 1fr 1fr 1fr;gap:6px}
+  .acts .confirm{grid-column:auto;min-height:56px}
+  .acts .confirm b{font-size:16px}
+  .acts button{min-height:56px;padding:6px 8px}
+  .acts button b{font-size:13px}
+  .acts button small{display:none}
+  .keyshelp{display:none}
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><b>MIRLT <i>&middot;</i> Mark the robot</b><span id="title">&nbsp;</span></div>
+  <div class="prog" id="progbox">
+    <div class="pbar" id="pbar" role="progressbar" aria-label="pictures marked"></div>
+    <div class="ptext" id="ptext"></div>
+  </div>
+  <button class="topbtn" id="homebtn" title="The list of stretches">Stretches</button>
+</header>
+
+<main id="home" class="home hidden">
+  <h1>Which stretch?</h1>
+  <p>Each stretch is a piece of a recorded session where the tracker lost a robot. You mark that robot on one picture a second. The page downloads only the stretch you pick (about 100&nbsp;MB) and keeps your place if you stop.</p>
+  <div class="cards" id="cards"></div>
+  <div class="job" id="job"></div>
+</main>
+
+<main id="work" class="wrap hidden">
+  <section class="panel viewer">
+    <div class="gline" id="gline"></div>
+    <canvas id="cv" width="640" height="480" aria-label="the picture; the green ring marks the robot"></canvas>
+    <p class="cap" id="cap"></p>
+    <p class="src" id="src"></p>
+  </section>
+  <aside class="side">
+    <div class="acts" id="acts">
+      <button class="confirm" id="bConfirm"><b>Confirm</b><small>Enter: the ring is on the robot</small></button>
+      <button class="unsure" id="bUnsure"><b><span class="lg">Not sure which</span><span class="sm">Unsure</span></b><small>W: several robots close</small></button>
+      <button id="bHidden"><b><span class="lg">Not visible</span><span class="sm">Hidden</span></b><small>N: hidden or out of picture</small></button>
+      <button id="bSkip"><b>Skip</b><small>S: leave it out</small></button>
+    </div>
+    <div class="panel">
+      <div class="row">
+        <button id="bPrev" title="Previous picture ( [ )">&#8592; Back</button>
+        <button id="bNext" title="Next picture ( ] )">Next &#8594;</button>
+        <button id="bUndo" title="Take back the last mark (Z)">Undo</button>
+        <button id="bPlay" title="Play the second before this picture (P)">&#9654; Last second</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Zoom</h2>
+      <div class="row" id="zrow"></div>
+      <canvas id="mini" width="300" height="225" aria-label="the whole picture; tap to move the ring there"></canvas>
+      <p class="small" style="margin:6px 0 0">The whole picture; the box is the part shown above. Tap it to jump the ring there.</p>
+      <div class="read" id="read"></div>
+    </div>
+    <div class="panel" id="statsbox">
+      <h2>So far</h2>
+      <div class="note" id="stats"></div>
+    </div>
+    <div class="panel done hidden" id="donebox"></div>
+    <div class="panel keyshelp">
+      <details id="keys"><summary>Keys and how to mark</summary>
+      <div class="keys"><table>
+        <tr><td>Enter / Space</td><td>Confirm: the ring is on the robot</td></tr>
+        <tr><td>drag</td><td>slide the ring (anywhere on the picture)</td></tr>
+        <tr><td>click / tap</td><td>put the ring there</td></tr>
+        <tr><td>arrow keys</td><td>nudge 1 pixel (Shift: 5)</td></tr>
+        <tr><td>N</td><td>not visible</td></tr>
+        <tr><td>W</td><td>not sure which robot (ring on your best guess)</td></tr>
+        <tr><td>S</td><td>skip</td></tr>
+        <tr><td>Z</td><td>undo the last mark</td></tr>
+        <tr><td>P</td><td>play the second before</td></tr>
+        <tr><td>[ &nbsp; ]</td><td>previous / next picture</td></tr>
+        <tr><td>+ &nbsp; &minus; &nbsp; 0</td><td>zoom in / out / whole picture</td></tr>
+        <tr><td>C</td><td>centre the view on the ring</td></tr>
+      </table>
+      <p>Put the ring's centre on the centre of the robot itself: its body, not the bright glow its lights throw on the floor next to it. The ring is a robot's size, so a good mark has the ring around the robot's top edge evenly.</p></div>
+      </details>
+    </div>
+  </aside>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const cv = $("cv"), ctx = cv.getContext("2d"), mini = $("mini"), mctx = mini.getContext("2d");
+const LABEL = {confirmed: "as guessed", corrected: "moved", unsure: "not sure which", not_visible: "not visible", skipped: "skipped"};
+let S = null;            // state from the server
+let item = null;         // the item shown
+let img = null;          // its picture
+let ring = null;         // {u, v} image px
+let ringStart = null;    // where the ring was when the picture was shown
+let touched = false;     // the ring was moved on this picture
+let shownAt = 0;
+let zoom = 0;            // 0 = automatic
+let view = {cx: 320, cy: 240};
+let grid = null;
+let busy = false, playing = false, pollT = null;
+const store = {get(k){try{return localStorage.getItem(k)}catch(e){return null}}, set(k, v){try{localStorage.setItem(k, v)}catch(e){}}};
+
+function toast(t, ms) {
+  const el = $("toast"); el.textContent = t; el.style.display = "block";
+  clearTimeout(toast.t); toast.t = setTimeout(() => el.style.display = "none", ms || 2200);
+}
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+// ---------------------------------------------------------------- home
+async function boot() {
+  try { S = await api("/api/state"); } catch (e) { toast("The program is not answering: is its window still open?", 6000); return; }
+  if (S.home) return showHome();
+  showWork();
+}
+function showHome() {
+  $("home").classList.remove("hidden"); $("work").classList.add("hidden"); $("progbox").classList.add("hidden");
+  $("homebtn").classList.add("hidden");
+  $("title").textContent = "Pick a stretch to mark";
+  const c = $("cards"); c.innerHTML = "";
+  for (const s of S.stretches) {
+    const d = document.createElement("div"); d.className = "card";
+    const m = s.marks, n = Math.round(s.seconds);
+    let st = s.downloaded ? "Downloaded" : "Not downloaded yet (about " + Math.round(n * 0.7) + " MB)";
+    let cls = "st";
+    if (m && m.done) { st = "All " + m.n + " pictures marked"; cls += " ok"; }
+    else if (m && m.marked) st = m.marked + " of " + m.n + " pictures marked";
+    d.innerHTML = `<b></b><span class="small"></span><span class="${cls}"></span><button></button>`;
+    d.querySelector("b").textContent = s.title;
+    d.querySelector(".small").textContent = Math.floor(n / 60) + ":" + String(n % 60).padStart(2, "0") + " of footage, about " + n + " pictures to mark (" + s.robot + ")";
+    d.querySelector(".st").textContent = st;
+    const b = d.querySelector("button");
+    b.textContent = m && m.done ? "Open again" : m && m.marked ? "Carry on marking" : s.downloaded ? "Start marking" : "Download and mark";
+    b.disabled = !!(S.job && !S.job.done);
+    b.onclick = async () => { await api("/api/open", {name: s.name}); pollHome(); };
+    c.appendChild(d);
+  }
+  const j = S.job;
+  $("job").textContent = j ? (j.error ? "Could not open it: " + j.error : (j.done ? "" : "Getting " + j.name + " ready ...\n" + (j.log || []).join("\n"))) : "Downloads go to " + S.folder;
+}
+async function pollHome() {
+  S = await api("/api/state");
+  if (!S.home) return showWork();
+  showHome();
+  if (S.job && !S.job.done) setTimeout(pollHome, 800);
+}
+$("homebtn").onclick = async () => { await api("/api/home", {}); boot(); };
+
+// ---------------------------------------------------------------- work
+async function showWork() {
+  $("home").classList.add("hidden"); $("work").classList.remove("hidden"); $("progbox").classList.remove("hidden");
+  $("homebtn").classList.remove("hidden");
+  $("title").textContent = S.title + " · " + S.robot + " · " + S.t0 + "–" + S.t1;
+  try { grid = await api("/api/calgrid"); if (!grid.xy) grid = null; } catch (e) { grid = null; }
+  const z = parseInt(store.get("mr.zoom") || "0", 10); zoom = isNaN(z) ? 0 : z;
+  buildZoom(); progress();
+  load(S.done ? 0 : S.next);
+}
+function progress() {
+  const n = S.n_picks, c = S.counts, b = $("pbar"); b.innerHTML = "";
+  for (const k of ["confirmed", "corrected", "unsure", "not_visible", "skipped"]) {
+    if (!c[k]) continue;
+    const i = document.createElement("i"); i.className = k; i.style.width = (100 * c[k] / n) + "%"; i.title = c[k] + " " + LABEL[k]; b.appendChild(i);
+  }
+  b.setAttribute("aria-valuenow", S.marked_picks); b.setAttribute("aria-valuemax", n);
+  const parts = [`<span><b>${S.marked_picks}</b> of ${n} pictures marked</span>`];
+  for (const k of ["confirmed", "corrected", "unsure", "not_visible", "skipped"]) if (c[k]) parts.push(`<span>${c[k]} ${LABEL[k]}</span>`);
+  if (S.n_items > n) parts.push(`<span>checks ${Math.max(0, S.marked - S.marked_picks)} of ${S.n_items - n}</span>`);
+  $("ptext").innerHTML = parts.join("");
+  const sm = S.summary;
+  $("stats").innerHTML = sm.n ? `${sm.as_is} of ${sm.n} rings were right as guessed${sm.med_cm !== null ? "; the median move was " + sm.med_cm + " cm" : ""}. ${sm.minutes} minutes so far.`
+    : `Nothing marked yet. ${S.guesses ? "" : "<span class='warn'>No tracker guesses (no floor calibration): the ring follows your last mark.</span>"}`;
+  if (S.guess_error) $("stats").innerHTML += `<br><span class="warn">The tracker stopped (${S.guess_error}); the ring follows your marks.</span>`;
+  $("bUndo").disabled = !S.can_undo;
+  const db = $("donebox");
+  if (S.done) {
+    db.classList.remove("hidden");
+    db.innerHTML = `<h3>All marked</h3><p class="note">The marks are saved in</p><code></code><p class="note">Send <b>marks.csv</b> and <b>summary.json</b> from that folder (drag them into the chat). You can still go back and change any picture.</p>`;
+    db.querySelector("code").textContent = S.out;
+  } else db.classList.add("hidden");
+}
+
+async function load(k) {
+  clearTimeout(pollT);
+  k = Math.max(0, Math.min(k, S.n_items - 1));
+  const it = await api("/api/item?k=" + k);
+  const fresh = !item || item.k !== it.k;
+  item = it;
+  if (fresh) {
+    touched = false; shownAt = performance.now();
+    const m = it.mark;
+    ring = m && m.u !== null ? {u: m.u, v: m.v} : {u: it.guess.u, v: it.guess.v};
+    ringStart = {u: ring.u, v: ring.v};
+    img = await loadImg("/img/" + it.frame + ".jpg");
+    view = {cx: ring.u, cy: ring.v};
+    sizeCanvas();
+    prefetch(k + 1);
+  }
+  info(); draw();
+  if (!it.guess.ready && !it.mark) pollT = setTimeout(() => refreshGuess(k), 400);
+}
+async function refreshGuess(k) {
+  if (!item || item.k !== k) return;
+  const it = await api("/api/item?k=" + k);
+  if (!item || item.k !== k) return;
+  item = it;
+  if (!touched && !it.mark) { ring = {u: it.guess.u, v: it.guess.v}; ringStart = {u: ring.u, v: ring.v}; recenterIfNeeded(true); }
+  info(); draw();
+  if (!it.guess.ready) pollT = setTimeout(() => refreshGuess(k), 400);
+}
+const imgCache = new Map();
+function loadImg(src) {
+  if (imgCache.has(src)) return imgCache.get(src);
+  const p = new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+  imgCache.set(src, p); if (imgCache.size > 40) imgCache.delete(imgCache.keys().next().value);
+  return p;
+}
+async function prefetch(k) { if (k < S.n_items) try { const it = await api("/api/item?k=" + k); loadImg("/img/" + it.frame + ".jpg"); } catch (e) {} }
+
+function info() {
+  const it = item, g = it.guess;
+  const head = it.kind === "check" ? `<span class="chip amb">Repeat check ${it.check_no} of ${it.n_checks}: the ring starts off on purpose</span>`
+    : `<span class="chip">Picture ${it.pick + 1} of ${it.n_picks}</span>`;
+  let st;
+  if (it.mark) {
+    const m = it.mark, cls = m.status === "confirmed" ? "ok" : m.status === "corrected" ? "corr" : m.status === "unsure" ? "amb" : "";
+    st = `<span class="chip ${cls}">Marked: ${LABEL[m.status]}${m.status === "corrected" && m.diff_cm !== null ? " (" + m.diff_cm.toFixed(1) + " cm)" : ""}</span>`;
+  } else st = `<span class="chip">Not marked yet</span>`;
+  const gs = g.ready ? `<span class="small">Guess: ${esc(g.source)}</span>` : `<span class="small"><span class="spin"></span>The tracker is still working; meanwhile the ring follows ${esc(g.source)}</span>`;
+  $("gline").innerHTML = head + st + `<span class="small mono">${it.clock} (${it.rel})</span>` + gs;
+  const extra = [];
+  if (it.prev) extra.push("the dashed grey ring is your mark one picture before");
+  if (it.runner) extra.push("the red cross is where the runner thought " + esc(S.robot) + " was");
+  $("cap").innerHTML = `Put the green ring on <b>${esc(S.robot)}</b>, centred on the robot itself (not the glow of its lights on the floor).` + (extra.length ? " " + cap1(extra.join("; ")) + "." : "");
+  $("src").textContent = "Picture: overhead camera, frame " + it.frame + (S.calib ? " · cm from " + S.calib : " · no calibration: pixels only");
+  $("bPrev").disabled = it.k <= 0; $("bNext").disabled = it.k >= S.n_items - 1;
+  readout();
+}
+function cap1(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c])); }
+
+// ---------------------------------------------------------------- drawing
+function fitScale() { const r = cv.getBoundingClientRect(); return Math.min(r.width / S.width, r.height / S.height); }
+function autoZoom() {
+  const d = 2 * (item ? item.ring_r : 11) * fitScale();
+  return Math.max(1, Math.min(6, Math.round(64 / Math.max(d, 1))));
+}
+function curZoom() { return zoom || autoZoom(); }
+function sizeCanvas() {
+  const w = cv.parentElement.clientWidth - 16;
+  const avail = window.innerWidth > 820 ? window.innerHeight - 190 : window.innerHeight * 0.62;
+  const h = Math.max(220, Math.min(w * S.height / S.width, avail));
+  const dpr = window.devicePixelRatio || 1;
+  cv.style.height = h + "px"; cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  const mw = mini.parentElement.clientWidth - 28;
+  mini.style.height = (mw * S.height / S.width) + "px"; mini.width = Math.round(mw * dpr); mini.height = Math.round(mw * S.height / S.width * dpr);
+}
+function scale() { return fitScale() * curZoom(); }
+function clampView() {
+  const r = cv.getBoundingClientRect(), s = scale();
+  const hw = r.width / 2 / s, hh = r.height / 2 / s;
+  view.cx = hw * 2 >= S.width ? S.width / 2 : Math.max(hw, Math.min(S.width - hw, view.cx));
+  view.cy = hh * 2 >= S.height ? S.height / 2 : Math.max(hh, Math.min(S.height - hh, view.cy));
+}
+function toScr(u, v) { const r = cv.getBoundingClientRect(), s = scale(); return [(u - view.cx) * s + r.width / 2, (v - view.cy) * s + r.height / 2]; }
+function toImg(x, y) { const r = cv.getBoundingClientRect(), s = scale(); return [(x - r.width / 2) / s + view.cx, (y - r.height / 2) / s + view.cy]; }
+
+function draw(frameImg, dim) {
+  if (!item || !img) return;
+  clampView();
+  const dpr = window.devicePixelRatio || 1, r = cv.getBoundingClientRect(), s = scale();
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, r.width, r.height);
+  ctx.imageSmoothingEnabled = curZoom() < 3;
+  const [x0, y0] = toScr(0, 0);
+  ctx.drawImage(frameImg || img, x0, y0, S.width * s, S.height * s);
+  const rr = item.ring_r * s;
+  if (item.prev) { const [px, py] = toScr(item.prev[0], item.prev[1]); circle(px, py, rr, "rgba(154,164,178,.85)", 1.5, [5, 4]); }
+  if (item.runner) { const [qx, qy] = toScr(item.runner[0], item.runner[1]); cross(qx, qy, 7, "#F07B72", 2.5); }
+  const [sx, sy] = toScr(ringStart.u, ringStart.v), [rx, ry] = toScr(ring.u, ring.v);
+  if (touched && Math.hypot(sx - rx, sy - ry) > 3) circle(sx, sy, rr, "rgba(65,240,138,.45)", 1.2, [3, 4]);
+  const col = dim ? "rgba(65,240,138,.5)" : "#41F08A";
+  circle(rx, ry, rr, "rgba(0,0,0,.55)", 4.5);
+  circle(rx, ry, rr, col, 2.2);
+  cross(rx, ry, Math.max(4, Math.min(8, rr * 0.25)), col, 1.5);
+  if (dim) { ctx.fillStyle = "rgba(11,14,19,.75)"; ctx.fillRect(8, 8, 128, 24); ctx.fillStyle = "#E6E9EE"; ctx.font = "12px " + getComputedStyle(document.body).getPropertyValue("--mono"); ctx.fillText("▶ the second before", 16, 24); }
+  drawMini();
+}
+function circle(x, y, r, col, w, dash) { ctx.beginPath(); ctx.setLineDash(dash || []); ctx.strokeStyle = col; ctx.lineWidth = w; ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
+function cross(x, y, r, col, w) { ctx.beginPath(); ctx.strokeStyle = col; ctx.lineWidth = w; ctx.moveTo(x - r, y); ctx.lineTo(x + r, y); ctx.moveTo(x, y - r); ctx.lineTo(x, y + r); ctx.stroke(); }
+function drawMini() {
+  const dpr = window.devicePixelRatio || 1, w = mini.width / dpr, h = mini.height / dpr, k = w / S.width;
+  mctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  mctx.drawImage(img, 0, 0, w, h);
+  const r = cv.getBoundingClientRect(), s = scale();
+  mctx.strokeStyle = "#7FB8FF"; mctx.lineWidth = 1.5;
+  mctx.strokeRect((view.cx - r.width / 2 / s) * k, (view.cy - r.height / 2 / s) * k, r.width / s * k, r.height / s * k);
+  mctx.beginPath(); mctx.fillStyle = "#41F08A"; mctx.arc(ring.u * k, ring.v * k, 3.5, 0, Math.PI * 2); mctx.fill();
+}
+function floorAt(u, v) {
+  if (!grid) return null;
+  const st = grid.step, i = Math.max(0, Math.min(grid.nu - 2, Math.floor(u / st))), j = Math.max(0, Math.min(grid.nv - 2, Math.floor(v / st)));
+  const a = grid.xy[j][i], b = grid.xy[j][i + 1], c = grid.xy[j + 1][i], d = grid.xy[j + 1][i + 1];
+  if (!a || !b || !c || !d) return null;
+  const fu = u / st - i, fv = v / st - j;
+  return [0, 1].map(n => (a[n] * (1 - fu) + b[n] * fu) * (1 - fv) + (c[n] * (1 - fu) + d[n] * fu) * fv);
+}
+function readout() {
+  const f = floorAt(ring.u, ring.v), mv = Math.hypot(ring.u - ringStart.u, ring.v - ringStart.v);
+  $("read").innerHTML = `<span>ring at</span><b>${f ? "x " + f[0].toFixed(1) + " cm, y " + f[1].toFixed(1) + " cm" : "—"}</b>`
+    + `<span>pixels</span><b>${ring.u.toFixed(1)}, ${ring.v.toFixed(1)}</b><span>moved</span><b>${mv.toFixed(1)} px</b>`;
+}
+
+// ---------------------------------------------------------------- zoom and moving the ring
+function buildZoom() {
+  const z = $("zrow"); z.innerHTML = "";
+  for (const [lab, v] of [["Whole", 1], ["2×", 2], ["3×", 3], ["4×", 4], ["6×", 6], ["Auto", 0]]) {
+    const b = document.createElement("button"); b.textContent = lab; b.dataset.z = v;
+    b.onclick = () => setZoom(v); z.appendChild(b);
+  }
+  markZoom();
+}
+function markZoom() { for (const b of $("zrow").children) b.classList.toggle("on", +b.dataset.z === zoom); }
+function setZoom(v) { zoom = v; store.set("mr.zoom", String(v)); view = {cx: ring.u, cy: ring.v}; markZoom(); draw(); }
+function stepZoom(d) { const L = [1, 2, 3, 4, 6], c = curZoom(); let i = L.findIndex(x => x >= c); if (i < 0) i = L.length - 1; setZoom(L[Math.max(0, Math.min(L.length - 1, i + d))]); }
+function recenterIfNeeded(force) {
+  const r = cv.getBoundingClientRect(), [x, y] = toScr(ring.u, ring.v);
+  if (force || x < r.width * .18 || x > r.width * .82 || y < r.height * .18 || y > r.height * .82) view = {cx: ring.u, cy: ring.v};
+}
+function moveRing(u, v) {
+  ring = {u: Math.max(0, Math.min(S.width, u)), v: Math.max(0, Math.min(S.height, v))};
+  touched = true; draw(); readout();
+}
+let drag = null;
+cv.addEventListener("pointerdown", e => {
+  if (!item || playing) return;
+  cv.setPointerCapture(e.pointerId);
+  const r = cv.getBoundingClientRect();
+  drag = {x: e.clientX - r.left, y: e.clientY - r.top, ring: {...ring}, t: performance.now(), moved: false};
+});
+cv.addEventListener("pointermove", e => {
+  if (!drag) return;
+  const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+  if (!drag.moved && Math.hypot(x - drag.x, y - drag.y) < 6) return;
+  drag.moved = true;
+  const s = scale();
+  moveRing(drag.ring.u + (x - drag.x) / s, drag.ring.v + (y - drag.y) / s);
+});
+cv.addEventListener("pointerup", e => {
+  if (!drag) return;
+  const r = cv.getBoundingClientRect();
+  if (!drag.moved) { const [u, v] = toImg(e.clientX - r.left, e.clientY - r.top); moveRing(u, v); }
+  drag = null; recenterIfNeeded(false); draw();
+});
+cv.addEventListener("pointercancel", () => { drag = null; });
+cv.addEventListener("wheel", e => { e.preventDefault(); stepZoom(e.deltaY < 0 ? 1 : -1); }, {passive: false});
+mini.addEventListener("click", e => {
+  const r = mini.getBoundingClientRect(), k = r.width / S.width;
+  const u = (e.clientX - r.left) / k, v = (e.clientY - r.top) / k;
+  moveRing(u, v); view = {cx: u, cy: v}; draw();
+});
+
+// ---------------------------------------------------------------- marking
+async function mark(status) {
+  if (!item || busy || playing) return;
+  busy = true;
+  try {
+    const pos = status === "not_visible" || status === "skipped" ? {} : {u: ring.u, v: ring.v};
+    const r = await api("/api/mark", {k: item.k, status, ...pos, moved_px: Math.hypot(ring.u - ringStart.u, ring.v - ringStart.v), seconds: (performance.now() - shownAt) / 1000});
+    S = r.state; progress();
+    item = null;
+    if (S.done && !S._shownDone) { S._shownDone = true; toast("All marked. The marks are saved.", 4000); }
+    await load(r.next);
+  } catch (e) { toast("Not saved: " + e.message, 5000); }
+  busy = false;
+}
+async function undo() {
+  if (busy) return; busy = true;
+  try { const r = await api("/api/undo", {}); S = r.state; progress(); if (r.k !== null) { item = null; await load(r.k); toast("Took back the last mark"); } }
+  catch (e) { toast(e.message); }
+  busy = false;
+}
+async function play() {
+  if (!item || playing || item.prev_frame === null) { if (item && item.prev_frame === null) toast("This is the first picture"); return; }
+  playing = true;
+  try {
+    const r = await api("/api/between?a=" + item.prev_frame + "&b=" + item.frame);
+    const ims = await Promise.all(r.frames.map(f => loadImg("/img/" + f + ".jpg")));
+    for (const im of ims) { draw(im, true); await new Promise(res => setTimeout(res, 85)); }
+  } catch (e) { toast("Could not play it: " + e.message); }
+  playing = false; draw();
+}
+$("bConfirm").onclick = () => mark("confirmed");
+$("bUnsure").onclick = () => mark("unsure");
+$("bHidden").onclick = () => mark("not_visible");
+$("bSkip").onclick = () => mark("skipped");
+$("bUndo").onclick = undo;
+$("bPrev").onclick = () => { if (item) { const k = item.k - 1; item = null; load(k); } };
+$("bNext").onclick = () => { if (item) { const k = item.k + 1; item = null; load(k); } };
+$("bPlay").onclick = play;
+document.addEventListener("keydown", e => {
+  if ($("work").classList.contains("hidden") || e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+  const k = e.key;
+  if ((k === "z" || k === "Z") && (e.ctrlKey || e.metaKey)) { e.preventDefault(); return undo(); }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const step = e.shiftKey ? 5 : 1;
+  const map = {
+    "Enter": () => mark("confirmed"), " ": () => mark("confirmed"),
+    "w": () => mark("unsure"), "n": () => mark("not_visible"), "s": () => mark("skipped"),
+    "z": undo, "Backspace": undo, "p": play,
+    "[": () => $("bPrev").click(), "]": () => $("bNext").click(), ",": () => $("bPrev").click(), ".": () => $("bNext").click(),
+    "+": () => stepZoom(1), "=": () => stepZoom(1), "-": () => stepZoom(-1), "0": () => setZoom(1),
+    "c": () => { view = {cx: ring.u, cy: ring.v}; draw(); },
+    "ArrowLeft": () => moveRing(ring.u - step, ring.v), "ArrowRight": () => moveRing(ring.u + step, ring.v),
+    "ArrowUp": () => moveRing(ring.u, ring.v - step), "ArrowDown": () => moveRing(ring.u, ring.v + step),
+  };
+  const f = map[k.length === 1 ? k.toLowerCase() : k] || map[k];
+  if (f) { e.preventDefault(); if (e.target.tagName === "BUTTON" && (k === "Enter" || k === " ")) e.target.blur(); f(); }
+});
+window.addEventListener("resize", () => { if (item && img) { sizeCanvas(); draw(); } });
+boot();
+</script>
+</body>
+</html>
