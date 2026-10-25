@@ -2,39 +2,55 @@
 to weigh each sensor's accuracy confidence for itself. I want to be able to swap out any one of those sensors for
 an ineffective version and have the system catch the error and account for it").
 
-Four sensors: the overhead camera, each robot's wheels, its gyro and its front distance sensor. For each, a learned
-noise (sd) from how well it agrees with something else, and a trust factor k = learned sd / healthy sd (1 = as
-healthy; DEGRADED_K or more = this sensor looks bad, and it is said loudly). Where the evidence comes from:
+Four sensors: the overhead camera, each robot's wheels, its gyro and its front distance sensor.
+
+THE RULE (Nick, 2026-10-25 13:03): "we should not compare one robot's wheels or anything else to another robot until
+they've each been fully calibrated independently." So every robot's sensors are first judged ON THEIR OWN, against
+references that do not involve another robot, and against their OWN history; the robots are compared with each other
+only afterwards, as a second check. A sensor is flagged when any one check says it has clearly changed or is clearly
+worse than its own baseline (DEGRADED_K x); cleared when every check is back under RECOVERED_K.
+
+The checks (each gives k = this session's value / the sensor's own baseline):
 
   camera   the finds: right after a find the robot's position is known from touching both boards (to about a
-           millimetre); the camera's position there, corrected by its error map built from the OTHER finds
-           (leave one out), against it. Per axis.
-  wheels   the self-calibration's stretches (camera against wheels, rms per stretch, e02_fit). A stretch's rms
-           holds the camera's share and the wheels' share; which is which comes from what the robots share:
-           the camera is the same for every robot, the wheels are each robot's own. With two or more robots, the
-           part common to all of them is the camera's (the shared term); what one robot has on top is its wheels.
-           With one robot, the camera's share comes from the finds instead.
-  gyro     the same, with the stretches' heading rms (deg).
-  front    the front sensor against the map (front_checks: reading minus the camera-and-map distance ahead). The
-           camera's share (its sd) is taken off.
+           millimetre); the camera's position there, corrected by its error map from the OTHER finds, against it.
+           And a robot standing still: its camera position's scatter. Against the Alvik prior (HEALTHY camera).
+  wheels   1. stretches: the self-calibration's stretches (camera against wheels, rms per fit), this session's
+              against the robot's own earlier sessions.
+           2. runs: each run's wheel scale (the camera's length over the wheels' length, that run alone). A healthy
+              wheel gives the same scale every run (0.1-0.5% apart in the simulator); one that counts wrongly by a
+              different amount every run does not (2.6-12% apart at 5-10% jitter). This session's spread against its
+              own earlier spread, never below the REAL robots' healthy 2.6% (their camera errors differ across the
+              board and runs go to different places: 0.4-4.8% apart when healthy). Needs no other robot.
+  gyro     stretches: the same as the wheels' check 1, with the stretches' heading rms (deg).
+  front    1. map: the reading against the camera-and-map distance ahead (after its learned offset, about zero, so a
+              bias counts); the camera's share is taken off.
+           2. face: right after a nose-first find the robot is square to the y board at a distance known from the
+              board touches (no camera): a front reading there (e02.py face_reading).
+           3. changed: e02_front's "reads differently from earlier sessions" report flags it for the session.
+  second   (wheels, gyro) only once every robot has its own verdict from this session: a robot whose stretches are
+           STANDS_OUT_FLAG x the median of the robots that look healthy is flagged too. It never clears or blocks a
+           flag from the robot's own checks.
 
-How the runner uses them (e02.py): the self-calibration's limit for camera against wheels comes from the camera's
-shared term and the healthy wheel sd (not a fixed 1.5 cm); KC's blend weights use the learned sds (the robot's own
-uncertainty x its wheels' k, the camera's x the camera's k) and refuse a belief the camera contradicts far beyond
-both; a front sensor that looks bad no longer makes the camera suspect; every sensor's state is in the log, the
-state file and the session summary.
+The baseline of a check: the robot's own items from earlier sessions (items from a session in which that sensor was
+flagged are left out, so a bad part never becomes the baseline), once there are HIST_MIN of them; until then the
+Alvik prior from the real robots (HEALTHY, with the camera's measured share added where the check includes it).
+Floors (BASE_FLOOR) keep a very quiet history from making ordinary noise look bad.
 
-Persisted between sessions (logs/sensor_trust.json): each evidence item keeps a weight that halves every new session
-(DECAY_PER_SESSION), so the trust follows a sensor that changes (a swapped part) within a session or two.
+Not changed by this: the self-calibration's limit (wheel_gate_cm) and the "every robot shares it" note still use
+what the robots share (that is about how much camera noise to allow in a fit, not about which sensor is bad).
 
-The healthy sds are the median of the 2026-10-23 and 2026-10-24 sessions (numbers beside them). All limits are
-chosen, not measured: DOE notes beside them. Pure functions and a small class; tests in tests/test_e02_trust.py."""
+Persisted between sessions (logs/sensor_trust.json): each item's weight halves every new session (DECAY_PER_SESSION)
+and is dropped below 0.01 (about 7 sessions), so a history follows a sensor that changes. All limits are chosen, not
+measured: DOE notes beside them, rows in docs/doe-backlog.md. Tests: tests/test_e02_trust.py."""
 import json
 import math
 import os
+import statistics
 import time
 
-# healthy noise (1 sd), from real sessions (2026-10-24, tools: this module's docstring)
+# The Alvik prior: healthy noise (1 sd) from the real robots (2026-10-23 and 2026-10-24 sessions). Since 2026-10-25
+# only the STARTING baseline of a sensor that has no history of its own yet; each robot's own replaces it.
 CAMERA_STILL_HEALTHY = 0.4   # cm per axis: a still robot's camera position wobbles this much over a few seconds
                              # (the KC replay's still pictures: 0.3-1 cm; chosen inside that; a DOE with a robot
                              # standing still at several places would set it)
@@ -45,17 +61,33 @@ HEALTHY = dict(
     front=5.0,     # cm, front sensor against the map after its offset, about zero (MAD x 1.48 about the median:
                    # 4.0-4.6 in four sessions, medians -3 to +1)
 )
+RUN_SPREAD_PRIOR = 0.026  # measured: a healthy wheel's run-to-run scale spread on the REAL robots, median of 12
+                          # robot-sessions (2026-10-23 laptop, 2026-10-24 Pi stages 1-2): 0.4-4.8%. The runs check's
+                          # baseline never goes below it (own history can raise the bar, not lower it): the simulator's
+                          # 0.1-0.5% would make the real robots' ordinary 2-5% look bad (trust_fix_real_replay.py). DOE:
+                          # more real sessions; split by laptop / Pi camera and by route, which may explain the spread
 FLOOR = dict(camera=0.3, wheels=0.2, gyro=0.3, front=1.0)    # learned sds are never taken below these
-DEGRADED_K = 2.0          # chosen: twice its healthy noise = looks bad (DOE: the swap test at 1.5 / 2 / 3)
+BASE_FLOOR = dict(wheels=0.25, gyro=0.3, front=2.0, runs=RUN_SPREAD_PRIOR)
+                          # chosen (runs: measured, above): a baseline is never taken below these (cm / deg / cm /
+                          # spread): the simulator's healthy robots sit at 0.11-0.28 cm, 0.04-0.41 deg, 1-3 cm; a
+                          # session's 3-4 fits scatter by up to 2x about their own level (DOE: replay healthy
+                          # sessions against each other's history at 0.2 / 0.25 / 0.35 and count false flags)
+DEGRADED_K = 2.0          # chosen: twice its baseline = looks bad (DOE: the swap test at 1.5 / 2 / 3)
 RECOVERED_K = 1.5         # chosen: back under this = healthy again (hysteresis: no flapping at the line)
-MIN_N = dict(camera=4, wheels=3, gyro=3, front=6)     # chosen: evidence items before a sensor's k is used
+MIN_N = dict(camera=4, wheels=3, gyro=3, front=6, runs=4)     # chosen: this session's items before a check speaks
+HIST_MIN = dict(wheels=3, gyro=3, front=6, runs=4)            # chosen: earlier items before they replace the prior
 DECAY_PER_SESSION = 0.5   # chosen: an item's weight halves every new session
 STRETCH_CAM_FACTOR = math.sqrt(2.0)   # a stretch has two camera ends
 CAM_HEADING_HEALTHY_DEG = 1.0   # the camera's share of a stretch's heading rms when healthy: the 2026-10-23 morning's
                                 # rms 1.39 deg = sqrt(gyro 1.0^2 + camera 1.0^2); x the camera's k with one robot
 GATE_MAX_CM = 3.0         # chosen: the wheel fit's limit never above this, however noisy the camera looks (2026-10-24
                           # review: a shared term can't tell "the camera across the board" from "every robot's wheels")
-STANDS_OUT = 1.5          # chosen: with 2+ robots, a wheel or gyro flag needs this robot's stretch rms 1.5 x theirs
+STANDS_OUT = 1.5          # (2026-10-24; kept for the replays) the old gate: this robot's stretch rms 1.5 x the median
+STANDS_OUT_FLAG = 3.0     # chosen: the second check flags a robot whose stretches are 3 x the healthy robots' median
+                          # (the simulator's healthy robots differ by up to 1.5x; Right's 5% gyro jitter was 4.4x;
+                          # DOE: the same replay at 2 / 3 / 4)
+RUN_MIN_LEN_CM = 40.0     # chosen: a run's stretches must add up to this before its scale counts (camera noise of
+                          # ~1 cm at each end is then under 2% of it; most runs have 150-300 cm)
 GATE_K = 1.5              # chosen: refuse a wheel fit only beyond 1.5 x what the camera and healthy wheels explain
 KC_GATE_SIGMA = 3.0       # chosen: a camera position this many sds from the belief means the belief is wrong
 KC_GATE_WEIGHT = 0.9      # then the fix takes this much of the camera
@@ -79,25 +111,54 @@ def weighted_rms(items):
     return math.sqrt(sum(w * v * v for v, w in items) / tw)
 
 
+def rel_spread(values):
+    """Relative spread of run scales about their median: MAD x 1.4826 / median (robust to one odd run)."""
+    if len(values) < 2:
+        return None
+    med = statistics.median(values)
+    if med <= 0:
+        return None
+    return statistics.median([abs(v - med) for v in values]) * 1.4826 / med
+
+
 class SensorTrust:
     """Evidence per sensor and robot ('*' for the camera, which all robots share), and what it says."""
 
     def __init__(self, data=None):
         d = data or {}
-        self.items = d.get("items", [])        # dict(sensor, robot, kind, v, w, t, session)
+        self.items = d.get("items", [])        # dict(sensor, robot, kind, v, w, t, session[, excl])
         self.session = d.get("session", 0)
         self.flags = d.get("flags", {})        # "sensor/robot" -> True while it looks bad
         self.events = d.get("events", [])      # [t, sensor, robot, "degraded" | "recovered", k]
+        self.reasons = d.get("reasons", {})    # "sensor/robot" -> the check that flagged it (words)
+        self.changed = d.get("changed", {})    # "sensor/robot" -> words: changed this session (e02_front)
+        self.flag_session = d.get("flag_session", {})   # "sensor/robot" -> the session its flag was raised in
+        self._cache, self._stamp = {}, None
+
+    def _memo(self, key, fn):
+        """The checks are re-read for every flag update (several a second at times): cached until the evidence
+        changes (items added, a new session)."""
+        stamp = (len(self.items), self.session, self.items[-1]["t"] if self.items else None)
+        if stamp != self._stamp:
+            self._cache, self._stamp = {}, stamp
+        if key not in self._cache:
+            self._cache[key] = fn()
+        return self._cache[key]
 
     # --- evidence -----------------------------------------------------------------------------------------
     def new_session(self):
+        # what a flagged sensor gave in the session it was flagged never becomes its baseline
+        for it in self.items:
+            if it.get("session") == self.session and self.flags.get("%s/%s" % (it["sensor"], it["robot"])):
+                it["excl"] = 1
         self.session += 1
+        self.changed = {}
         for it in self.items:
             it["w"] = round(it["w"] * DECAY_PER_SESSION, 6)
         self.items = [it for it in self.items if it["w"] >= 0.01]
 
-    def add(self, sensor, robot, kind, v, t=None):
-        self.items.append(dict(sensor=sensor, robot=robot, kind=kind, v=round(float(v), 4), w=1.0,
+    def add(self, sensor, robot, kind, v, t=None, w=1.0):
+        self.items.append(dict(sensor=sensor, robot=robot, kind=kind, v=round(float(v), 5), w=w,
                                t=round(t or time.time(), 1), session=self.session))
 
     def camera_at_find(self, robot, resid_x, resid_y, t=None):
@@ -113,32 +174,64 @@ class SensorTrust:
         self.add("camera", "*", "still", sd_y, t)
 
     def stretch_fit(self, robot, rms_cm, rms_deg, n, t=None):
-        """A self-calibration fit's rms over n stretches: kept as the mean square (with weight n, capped)."""
+        """A self-calibration fit's rms over n stretches (with weight n, capped)."""
         w = min(float(n), 10.0) / 10.0
         if rms_cm is not None:
-            self.items.append(dict(sensor="wheels", robot=robot, kind="stretch_rms", v=round(rms_cm, 4), w=w,
-                                   t=round(t or time.time(), 1), session=self.session))
+            self.add("wheels", robot, "stretch_rms", rms_cm, t, w)
         if rms_deg is not None:
-            self.items.append(dict(sensor="gyro", robot=robot, kind="stretch_rms", v=round(rms_deg, 4), w=w,
-                                   t=round(t or time.time(), 1), session=self.session))
+            self.add("gyro", robot, "stretch_rms", rms_deg, t, w)
+
+    def run_scale(self, robot, scale, length_cm, t=None):
+        """One run's wheel scale on its own: the camera's length over the wheels' length, summed over its stretches
+        (length_cm: the wheels' total). Short runs are not counted (RUN_MIN_LEN_CM)."""
+        if scale is None or not length_cm or length_cm < RUN_MIN_LEN_CM or scale <= 0:
+            return False
+        self.add("wheels", robot, "run_scale", scale, t)
+        return True
 
     def front_vs_map(self, robot, resid_cm, t=None):
         self.add("front", robot, "map", resid_cm, t)
 
-    def _items(self, sensor, robot=None):
-        return [it for it in self.items if it["sensor"] == sensor and (robot is None or it["robot"] == robot)]
+    def front_face(self, robot, resid_cm, t=None):
+        """A front reading square to a board at a distance known from the board touches (no camera), after the
+        sensor's learned offset."""
+        self.add("front", robot, "face", resid_cm, t)
 
-    # --- what the evidence says -----------------------------------------------------------------------------
+    def mark_changed(self, sensor, robot, words):
+        """An independent check says this sensor reads differently from its own history (e02_front): flagged for the
+        rest of the session (update_flags)."""
+        self.changed["%s/%s" % (sensor, robot)] = words
+
+    def _items(self, sensor, robot=None, kind=None):
+        return [it for it in self.items if it["sensor"] == sensor and (robot is None or it["robot"] == robot)
+                and (kind is None or it["kind"] == kind)]
+
+    def _now(self, its):
+        return [it for it in its if it.get("session") == self.session]
+
+    def _hist(self, its):
+        return [it for it in its if it.get("session", self.session) < self.session and not it.get("excl")]
+
+    # --- the camera (one for all robots) ------------------------------------------------------------------
     def camera_sd(self):
+        return self._memo(("camera_sd",), self._camera_sd)
+
+    def _camera_sd(self):
         """(sd cm per axis, n): the camera at the finds, after its error map; or, if worse in proportion, its scatter
-        standing still (scaled to the finds' healthy level). Healthy if too little evidence."""
+        standing still (scaled to the finds' healthy level). Healthy if too little evidence. Each kind from THIS
+        session's evidence once it has MIN_N of it (2026-10-25 replay: pooled with a healthy history, a camera with 4 cm
+        of noise was not flagged at all), earlier sessions' until then."""
         def sd_of(its):
             rep = []
             for it in its:
                 rep += [it["v"]] * max(1, int(round(it["w"] * 10)))
             return robust_sd(rep)
-        finds = [it for it in self._items("camera") if it["kind"] == "find"]
-        still = [it for it in self._items("camera") if it["kind"] == "still"]
+
+        def fresh(its):
+            now = self._now(its)
+            return now if len(now) >= MIN_N["camera"] else its
+        finds = fresh(self._items("camera", kind="find"))
+        still = fresh(self._items("camera", kind="still"))
         best, n = HEALTHY["camera"], 0
         cands = []
         if len(finds) >= MIN_N["camera"]:
@@ -156,79 +249,218 @@ class SensorTrust:
         """Is there enough evidence about the camera to blame another sensor's disagreement with it?"""
         return len(self._items("camera")) >= MIN_N["camera"]
 
+    def camera_share(self, sensor):
+        """The camera's share of a stretch's rms from the camera's OWN evidence (finds, standing still): never from
+        what the robots have in common."""
+        csd = self.camera_sd()[0]
+        if sensor == "wheels":
+            return STRETCH_CAM_FACTOR * csd
+        return CAM_HEADING_HEALTHY_DEG * csd / HEALTHY["camera"]
+
+    # --- what the robots share (the self-calibration's limit and a note only; never a flag) ----------------
     def shared_stretch(self, sensor):
-        """The camera's share of the stretches' rms (cm or deg), from what all robots have in common: the robots'
-        typical mean square less a healthy own share. None with fewer than two robots' evidence."""
+        """The camera's share of the stretches' rms, from what all robots have in common: the robots' typical mean
+        square less a healthy own share. None with fewer than two robots' evidence. Used for the self-calibration's
+        limit (wheel_gate_cm), not to judge a sensor."""
         per = {}
-        for it in self._items(sensor):
+        for it in self._items(sensor, kind="stretch_rms"):
             per.setdefault(it["robot"], []).append((it["v"], it["w"]))
         ms = sorted(weighted_rms(v) ** 2 for r, v in per.items()
                     if len(v) >= MIN_N[sensor] and weighted_rms(v) is not None)
         if len(ms) < 2:
             return None
-        # two robots: the cleaner one (a bad one must not raise the camera's share); three or more: the median
-        # (one bad robot can't move it, and one unusually clean robot doesn't make the others look bad)
         base = ms[0] if len(ms) == 2 else ms[len(ms) // 2] if len(ms) % 2 else 0.5 * (ms[len(ms) // 2 - 1] + ms[len(ms) // 2])
         return math.sqrt(max(0.0, base - HEALTHY[sensor] ** 2))
 
     def camera_stretch_share(self, sensor):
-        """The camera's share of a stretch's rms: shared term (2+ robots) or from the finds (one robot)."""
+        """The camera's share of a stretch's rms for the self-calibration's limit: shared term (2+ robots) or from
+        the finds (one robot)."""
         sh = self.shared_stretch(sensor)
         if sh is not None:
             return sh, "shared by the robots"
-        csd = self.camera_sd()[0]
-        if sensor == "wheels":
-            return STRETCH_CAM_FACTOR * csd, "from the finds"
-        return CAM_HEADING_HEALTHY_DEG * csd / HEALTHY["camera"], "from the finds"
+        return self.camera_share(sensor), "from the finds"
 
     def shared_unexplained(self, sensor="wheels"):
-        """With 2+ robots: is what they all share far more than the camera at the finds explains? Then it is the
-        camera across the board (the finds are all in one corner) or every robot's wheels alike: it can't tell, and
-        says so (2026-10-24 review)."""
+        """With 2+ robots: is what they all share far more than the camera at the finds explains? (A note in the
+        summary: the camera away from the find corner, or every robot's wheels alike; the runs check tells.)"""
         sh = self.shared_stretch(sensor)
         if sh is None:
             return False
-        csd = self.camera_sd()[0]
-        ref = STRETCH_CAM_FACTOR * csd if sensor == "wheels" else CAM_HEADING_HEALTHY_DEG * csd / HEALTHY["camera"]
-        return sh > 2.0 * ref
+        return sh > 2.0 * self.camera_share(sensor)
 
+    # --- each robot's own checks ----------------------------------------------------------------------------
+    def _stretch_check(self, sensor, robot):
+        c = self._memo(("stretch", sensor, robot), lambda: self._stretch_check0(sensor, robot))
+        return dict(c) if c else None
+
+    def _stretch_check0(self, sensor, robot):
+        """This session's stretch rms against the robot's own earlier sessions (or the prior). dict or None."""
+        its = self._items(sensor, robot, "stretch_rms")
+        now = self._now(its)
+        if len(now) < MIN_N[sensor]:
+            return None
+        v = weighted_rms([(it["v"], it["w"]) for it in now])
+        hist = self._hist(its)
+        if len(hist) >= HIST_MIN[sensor]:
+            base, src = weighted_rms([(it["v"], it["w"]) for it in hist]), "its own history (%d fits)" % len(hist)
+        else:
+            base = math.sqrt(HEALTHY[sensor] ** 2 + self.camera_share(sensor) ** 2)
+            src = "the Alvik prior"
+        base = max(base, BASE_FLOOR[sensor])
+        return dict(check="stretches", v=v, base=base, k=v / base, n=len(now), src=src)
+
+    def _runs_check(self, robot):
+        c = self._memo(("runs", robot), lambda: self._runs_check0(robot))
+        return dict(c) if c else None
+
+    def _runs_check0(self, robot):
+        """This session's run-to-run wheel scale spread against its own earlier spread (or the prior)."""
+        its = self._items("wheels", robot, "run_scale")
+        now = [it["v"] for it in self._now(its)]
+        if len(now) < MIN_N["runs"]:
+            return None
+        v = rel_spread(now)
+        if v is None:
+            return None
+        per = {}
+        for it in self._hist(its):
+            per.setdefault(it["session"], []).append(it["v"])
+        devs = []
+        for vals in per.values():                    # about each session's own median: a refit between sessions
+            if len(vals) >= 2:                       # is not a spread
+                med = statistics.median(vals)
+                devs += [(x - med) / med for x in vals]
+        if len(devs) >= HIST_MIN["runs"]:
+            base = statistics.median([abs(d) for d in devs]) * 1.4826
+            src = "its own history (%d runs)" % len(devs)
+        else:
+            base, src = RUN_SPREAD_PRIOR, "the prior"
+        base = max(base, BASE_FLOOR["runs"])
+        return dict(check="runs", v=v, base=base, k=v / base, n=len(now), src=src)
+
+    def _front_own(self, its):
+        """The front sensor's own sd from items (map: the camera's share taken off; face: as it is)."""
+        if not its:
+            return None
+        csd = self.camera_sd()[0]
+        ms = []
+        for kind, sub in (("map", [it for it in its if it["kind"] == "map"]),
+                          ("face", [it for it in its if it["kind"] == "face"])):
+            if not sub:
+                continue
+            sd = robust_sd([it["v"] for it in sub])
+            own2 = max(0.0, sd ** 2 - csd ** 2) if kind == "map" else sd ** 2
+            ms.append((own2, len(sub)))
+        n = sum(c for _, c in ms)
+        return max(FLOOR["front"], math.sqrt(sum(m * c for m, c in ms) / n))
+
+    def _front_check(self, robot):
+        c = self._memo(("front", robot), lambda: self._front_check0(robot))
+        return dict(c) if c else None
+
+    def _front_check0(self, robot):
+        its = self._items("front", robot)
+        now = self._now(its)
+        if len(now) < MIN_N["front"]:
+            return None
+        v = self._front_own(now)
+        hist = self._hist(its)
+        if len(hist) >= HIST_MIN["front"]:
+            base, src = self._front_own(hist), "its own history (%d readings)" % len(hist)
+        else:
+            base, src = HEALTHY["front"], "the Alvik prior"
+        base = max(base, BASE_FLOOR["front"])
+        nf = len([it for it in now if it["kind"] == "face"])
+        return dict(check="front" + (" (%d at a board)" % nf if nf else ""), v=v, base=base, k=v / base,
+                    n=len(now), src=src)
+
+    def checks(self, sensor, robot):
+        """This robot's own checks of one sensor (no other robot involved): [dict(check, v, base, k, n, src)]."""
+        if sensor == "wheels":
+            out = [self._stretch_check("wheels", robot), self._runs_check(robot)]
+        elif sensor == "gyro":
+            out = [self._stretch_check("gyro", robot)]
+        elif sensor == "front":
+            out = [self._front_check(robot)]
+        else:
+            return []
+        return [c for c in out if c is not None]
+
+    def second_check(self, sensor, robot, robots):
+        """After every robot has its own verdict from this session: does this robot's stretch rms stand out from the
+        robots that look healthy? dict(check, v, base, k, ...) with k scaled so that STANDS_OUT_FLAG x = DEGRADED_K,
+        or None."""
+        if sensor not in ("wheels", "gyro") or len(robots) < 2:
+            return None
+        mine = self._stretch_check(sensor, robot)
+        if mine is None:
+            return None
+        others = []
+        for r in robots:
+            if r == robot:
+                continue
+            c = self._stretch_check(sensor, r)
+            if c is None:
+                return None                          # not every robot judged on its own yet: no comparing
+            if not self.flags.get("%s/%s" % (sensor, r)):
+                others.append(c["v"])
+        if not others:
+            return None
+        med = statistics.median(others)
+        base = max(med, BASE_FLOOR[sensor])
+        ratio = mine["v"] / base
+        return dict(check="stands out from the other robots", v=mine["v"], base=base, ratio=ratio,
+                    k=ratio * DEGRADED_K / STANDS_OUT_FLAG, n=mine["n"], src="%d other robots" % len(others))
+
+    def judge(self, sensor, robot, robots=None):
+        """dict(k, worst, checks): k the worst check's (1.0 with no check yet). robots: for the second check. (No
+        "every robot alike" exemption: it hid Right's 8% wheels in the trained replay, and the real all-alike rises
+        (2026-10-24 Pi stage 2: 1.6-1.9 x) stay under the flag line without it: trust_fix_real_replay.py.)"""
+        cs = self.checks(sensor, robot)
+        sc = self.second_check(sensor, robot, robots or [])
+        if sc is not None:
+            cs.append(sc)
+        if not cs:
+            return dict(k=1.0, worst=None, checks=[])
+        worst = max(cs, key=lambda c: c["k"])
+        return dict(k=worst["k"], worst=worst, checks=cs)
+
+    # --- the old views (the viewer, the summary, the replays) ---------------------------------------------
     def own_sd(self, sensor, robot):
-        """(sd, n, how): a robot's wheels or gyro, its own share of the stretches' rms (healthy if too little)."""
-        its = self._items(sensor, robot)
+        """(sd, n, how): a robot's wheels or gyro, its stretch rms this session (all sessions while this one has
+        too little), with its baseline in words."""
+        c = self._stretch_check(sensor, robot)
+        if c is not None:
+            return c["v"], c["n"], "baseline %.2f from %s" % (c["base"], c["src"])
+        its = self._items(sensor, robot, "stretch_rms")
         if len(its) < MIN_N[sensor]:
             return HEALTHY[sensor], len(its), "too little evidence yet"
-        rms = weighted_rms([(it["v"], it["w"]) for it in its])
-        cam, how = self.camera_stretch_share(sensor)
-        return max(FLOOR[sensor], math.sqrt(max(0.0, rms ** 2 - cam ** 2))), len(its), "camera's share " + how
+        return weighted_rms([(it["v"], it["w"]) for it in its]), len(its), "earlier sessions"
 
     def front_sd(self, robot):
-        """The front sensor against the map, after the expected offset, about zero: a sensor that reads long or
-        short throughout counts as bad too (2026-10-24 review: about its own median, a bias was invisible)."""
+        """(sd, n): the front sensor's own sd this session (all sessions while this one has too little)."""
+        c = self._front_check(robot)
+        if c is not None:
+            return c["v"], c["n"]
         its = self._items("front", robot)
         if len(its) < MIN_N["front"]:
             return HEALTHY["front"], len(its)
-        vals = [it["v"] for it in its]
-        sd = robust_sd(vals)
-        csd = self.camera_sd()[0]
-        return max(FLOOR["front"], math.sqrt(max(0.0, sd ** 2 - csd ** 2))), len(its)
+        return self._front_own(its), len(its)
 
-    def k(self, sensor, robot="*"):
-        """The trust factor: learned sd / healthy sd (1 = healthy)."""
+    def k(self, sensor, robot="*", robots=None):
+        """The trust factor: this session's value / the sensor's own baseline, the worst check (1 = as usual)."""
         if sensor == "camera":
             return self.camera_sd()[0] / HEALTHY["camera"]
-        if sensor == "front":
-            return self.front_sd(robot)[0] / HEALTHY["front"]
-        return self.own_sd(sensor, robot)[0] / HEALTHY[sensor]
+        return self.judge(sensor, robot, robots)["k"]
 
     def bad(self, sensor, robot="*"):
         return bool(self.flags.get("%s/%s" % (sensor, robot)))
 
     def stands_out(self, sensor, robot):
-        """With two or more robots: is this robot's stretch rms at least STANDS_OUT x the robots' median? (2026-10-24
-        night replay: on k alone, whichever robot was above the median got flagged when the robots differed by
-        about 1 cm, even on the healthy laptop morning.) True with fewer robots (nothing to compare)."""
+        """(2026-10-24; replays only) is this robot's stretch rms at least STANDS_OUT x the robots' median? No longer
+        used for flags: a robot is judged on its own first (Nick, 2026-10-25)."""
         per = {}
-        for it in self._items(sensor):
+        for it in self._items(sensor, kind="stretch_rms"):
             per.setdefault(it["robot"], []).append((it["v"], it["w"]))
         rms = {r: weighted_rms(v) for r, v in per.items() if len(v) >= MIN_N[sensor]}
         if len(rms) < 2 or robot not in rms:
@@ -238,27 +470,56 @@ class SensorTrust:
         return rms[robot] >= STANDS_OUT * med
 
     def update_flags(self, robots):
-        """Flags with hysteresis; returns the changes [(sensor, robot, 'degraded' | 'recovered', k)]."""
+        """Flags with hysteresis; returns the changes [(sensor, robot, 'degraded' | 'recovered', k)]; the check that
+        decided is in self.reasons. While the camera is unknown or looks bad, no wheel, gyro or front sensor is newly
+        flagged: their checks are all against the camera, so a disagreement can't be blamed on them."""
         out = []
-        keys = [("camera", "*")] + [(s, r) for r in robots for s in ("wheels", "gyro", "front")]
-        for s, r in keys:
-            kk = self.k(s, r)
-            key = "%s/%s" % (s, r)
-            if s in ("wheels", "gyro") and not self.stands_out(s, r):
-                kk = min(kk, RECOVERED_K - 0.01) if not self.flags.get(key) else kk
-            if s == "front" and (not self.camera_known() or self.bad("camera")):
-                # the front sensor is checked against the camera's position: with the camera unknown or bad, a
-                # disagreement can't be blamed on the front sensor
-                kk = min(kk, RECOVERED_K - 0.01) if not self.flags.get(key) else kk
-            if not self.flags.get(key) and kk >= DEGRADED_K:
-                self.flags[key] = True
-                out.append((s, r, "degraded", kk))
-            elif self.flags.get(key) and kk < RECOVERED_K:
-                self.flags[key] = False
-                out.append((s, r, "recovered", kk))
-        for s, r, what, kk in out:
-            self.events.append([round(time.time(), 1), s, r, what, round(kk, 2)])
+        kk = self.k("camera")
+        if not self.flags.get("camera/*") and kk >= DEGRADED_K:
+            self.flags["camera/*"] = True
+            self.reasons["camera/*"] = "the camera at the finds / standing still: %.1f x healthy" % kk
+            out.append(("camera", "*", "degraded", kk))
+        elif self.flags.get("camera/*") and kk < RECOVERED_K:
+            self.flags["camera/*"] = False
+            out.append(("camera", "*", "recovered", kk))
+        cam_ok = self.camera_known() and not self.bad("camera")
+        # first every robot on its own; then (second check) against the others
+        for s in ("wheels", "gyro", "front"):
+            for r in robots:
+                key = "%s/%s" % (s, r)
+                j = self.judge(s, r, robots)
+                kk, w = j["k"], j["worst"]
+                ch = self.changed.get(key)
+                if not self.flags.get(key):
+                    if not cam_ok:
+                        continue
+                    if ch or kk >= DEGRADED_K:
+                        self.flags[key] = True
+                        self.flag_session[key] = self.session
+                        self.reasons[key] = ("changed: " + ch) if ch else self._words(w)
+                        out.append((s, r, "degraded", max(kk, DEGRADED_K) if ch and kk < DEGRADED_K else kk))
+                elif not ch and kk < RECOVERED_K and j["checks"] and self.flag_session.get(key) != self.session:
+                    # a robot's sensor flagged this session stays flagged to its end (2026-10-25 replay: Center's
+                    # wheels at 8% flagged, cleared and flagged again as its few runs' spread wobbled); the next
+                    # session's evidence clears it
+                    self.flags[key] = False
+                    out.append((s, r, "recovered", kk))
+        for s, r, what, k_ in out:
+            self.events.append([round(time.time(), 1), s, r, what, round(k_, 2)])
         return out
+
+    @staticmethod
+    def _words(c):
+        if not c:
+            return ""
+        if c["check"] == "runs":
+            return "runs: scale %.1f%% apart run to run, baseline %.1f%% (%s)" % (100 * c["v"], 100 * c["base"], c["src"])
+        if "ratio" in c:
+            return "%s: %.2f, %.1f x their median %.2f (second check)" % (c["check"], c["v"], c["ratio"], c["base"])
+        return "%s: %.2f, baseline %.2f (%s)" % (c["check"], c["v"], c["base"], c["src"])
+
+    def reason(self, sensor, robot="*"):
+        return self.reasons.get("%s/%s" % (sensor, robot), "")
 
     # --- the runner's uses ----------------------------------------------------------------------------------
     def wheel_gate_cm(self, override=None):
@@ -271,9 +532,10 @@ class SensorTrust:
         return min(GATE_MAX_CM, GATE_K * math.sqrt(cam ** 2 + HEALTHY["wheels"] ** 2))
 
     def kc_sds(self, robot, robot_sd, camera_sd):
-        """KC: the model's sds scaled by what has been learned (the robot's own position: its wheels' k; the
-        camera: its k)."""
-        return robot_sd * max(1.0, self.k("wheels", robot)), camera_sd * max(1.0, self.k("camera"))
+        """KC: the model's sds scaled by what has been learned (the robot's own position: its wheels' k, while they
+        are flagged; the camera: its k)."""
+        kw = self.k("wheels", robot) if self.bad("wheels", robot) else 1.0
+        return robot_sd * max(1.0, kw), camera_sd * max(1.0, self.k("camera"))
 
     def summary(self, robots):
         """Plain lines for the log."""
@@ -282,18 +544,31 @@ class SensorTrust:
             csd, cn, HEALTHY["camera"], " LOOKS BAD" if self.bad("camera") else "")]
         if self.shared_unexplained("wheels"):
             lines.append("every robot's stretches are noisier than the camera at the finds explains: the camera away "
-                         "from the find corner, or every robot's wheels alike (can't tell which; tape marks would)")
+                         "from the find corner, or every robot's wheels alike (each robot's runs check tells which)")
         for r in robots:
-            ws, wn, how = self.own_sd("wheels", r)
-            gs, gn, _ = self.own_sd("gyro", r)
-            fs, fn = self.front_sd(r)
+            parts = []
+            for s, unit in (("wheels", "cm a stretch"), ("gyro", "deg a stretch"), ("front", "cm")):
+                j = self.judge(s, r, robots)
+                if not j["checks"]:
+                    parts.append("%s: too little evidence yet" % s)
+                    continue
+                cs = []
+                for c in j["checks"]:
+                    if c["check"] == "runs":
+                        cs.append("runs %.1f%% apart (%d; baseline %.1f%%, %s)" % (100 * c["v"], c["n"], 100 * c["base"],
+                                                                                   c["src"]))
+                    elif "ratio" in c:
+                        cs.append("%.1f x the other robots" % c["ratio"])
+                    else:
+                        cs.append("%.2f %s (%d; baseline %.2f, %s)" % (c["v"], unit, c["n"], c["base"], c["src"]))
+                parts.append("%s k %.1f: %s" % (s, j["k"], "; ".join(cs)))
             bad = [s for s in ("wheels", "gyro", "front") if self.bad(s, r)]
-            lines.append("%s: wheels %.1f cm a stretch (%d fits), gyro %.1f deg (%d), front %.1f cm (%d)%s; %s" % (
-                r, ws, wn, gs, gn, fs, fn, (" LOOKS BAD: " + ", ".join(bad)) if bad else "", how))
+            lines.append("%s: %s%s" % (r, " | ".join(parts), (" LOOKS BAD: " + ", ".join(bad)) if bad else ""))
         return lines
 
     def to_dict(self):
-        return dict(items=self.items, session=self.session, flags=self.flags, events=self.events[-200:])
+        return dict(items=self.items, session=self.session, flags=self.flags, events=self.events[-200:],
+                    reasons=self.reasons, changed=self.changed, flag_session=self.flag_session)
 
 
 def load(path):

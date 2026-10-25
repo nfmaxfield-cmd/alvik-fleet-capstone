@@ -56,23 +56,32 @@ def test_wheels_blamed_on_the_one_robot_that_stands_out():
 
 def test_what_every_robot_shares_is_the_camera_not_the_wheels():
     # 2026-10-24 Pi plan: all three robots 2.1-2.5 cm a stretch with the session-1 calibration file
+    # 2026-10-25: each robot judged on its own against the Alvik prior (1.28 cm with a 0.8 cm camera): 2.1-2.4 cm is
+    # 1.6-1.9 x, under the flag line, as the real Pi stage 2 was (trust_fix_real_replay.py); the summary still says
+    # every robot is noisier than the camera at the finds explains
     t = TR.SensorTrust()
-    _cam_finds(t, 0.8)
+    for v in (0.8, -0.8) * 6:
+        t.camera_at_find("Left", v, v)
     for r, v in (("Left", 2.2), ("Center", 2.4), ("Right", 2.1)):
         _stretches(t, r, v)
-    assert all(t.k("wheels", r) < TR.DEGRADED_K for r in ("Left", "Center", "Right"))
-    assert t.update_flags(["Left", "Center", "Right"]) == []
+    robots = ["Left", "Center", "Right"]
+    assert all(t.k("wheels", r, robots) < TR.DEGRADED_K for r in robots)
+    assert t.update_flags(robots) == []
+    assert not any("LOOKS BAD" in line for line in t.summary(robots))
     # and the self-calibration's limit grows with the camera's share: 2.1-2.5 cm passes
     assert t.wheel_gate_cm() > 2.5
     assert t.wheel_gate_cm(override=1.5) == 1.5
 
 
 def test_one_robot_takes_the_cameras_share_from_the_finds():
+    # with no history the baseline is the Alvik prior with the camera's share from its own finds (1.4 x 0.8 cm):
+    # 1.3 cm a stretch is about that baseline (2026-10-23 morning's 1.25)
     t = TR.SensorTrust()
     _cam_finds(t, 0.8)
     _stretches(t, "Right", 1.3)
     sd, n, how = t.own_sd("wheels", "Right")
-    assert "finds" in how and sd < 1.0
+    assert "Alvik prior" in how and abs(sd - 1.3) < 1e-6
+    assert 0.8 < t.k("wheels", "Right") < TR.RECOVERED_K
 
 
 def test_flags_recover_with_hysteresis_and_old_sessions_fade():
