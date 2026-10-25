@@ -442,6 +442,7 @@ class Runner:
     leg_live = {}
     leg_kind = {}
     leg_val = {}
+    leg_end = {}
     speed_now = {}
     seek_end = {}
     history_raw = None
@@ -503,6 +504,7 @@ class Runner:
         self.leg_live = {}                # robot -> time its current leg was sent (cleared when it ends)
         self.leg_kind = {}                # robot -> "go" / "turn": its current (or last) leg
         self.leg_val = {}                 # robot -> its current leg's value (cm or deg)
+        self.leg_end = {}                 # robot -> when its last leg ended
         self.moves = {}               # robot -> dict(run ("-" = idle legs), why): it is taking legs now
         self.leg_ids = {}
         self.last_lid = {}            # robot -> id of the last leg sent
@@ -1012,6 +1014,7 @@ class Runner:
                 res = self.listener.wait_leg(robot, m["run"], lid, t_s - 0.05, timeout, stop=stop)
             finally:
                 self.leg_live.pop(robot, None)
+                self.leg_end[robot] = time.time()
             if res and following and res.get("state") in ("done", "failed", "dup"):
                 time.sleep(0.3)                  # it has stopped: from now on it can't be anywhere else
                 self.tracker.hold(HOLD_CM)
@@ -5178,6 +5181,26 @@ class Runner:
         bd, x, y = f
         return min(abs((x if ax == "x" else y) - v) for ax, v in bd.open_edges()) < BORDER_CM
 
+    STILL_WINDOW_S = 3.0      # chosen: a still robot's camera scatter is measured over this long ...
+    STILL_EVERY_S = 10.0      # ... at most this often (one evidence item per axis each time)
+
+    def camera_still_check(self, robot, last_still):
+        """The camera's trust from a robot standing still (e02_trust camera_still): nothing sent to it for
+        STILL_WINDOW_S + 0.5 s, no run, and the camera sees it the whole window."""
+        now = time.time()
+        if now - last_still.get(robot, 0.0) < self.STILL_EVERY_S:
+            return
+        if robot in self.leg_live or (self.moves.get(robot) or {}).get("run", "-") not in ("-", None):
+            return
+        if now - self.leg_end.get(robot, 0.0) < self.STILL_WINDOW_S + 0.5:
+            return
+        smp = self.history.since(now - self.STILL_WINDOW_S)
+        if len(smp) < 15 or smp[-1][0] - smp[0][0] < 0.8 * self.STILL_WINDOW_S:
+            return
+        xs, ys = np.array([q[1] for q in smp]), np.array([q[2] for q in smp])
+        last_still[robot] = now
+        self.trust.camera_still(robot, float(np.std(xs)), float(np.std(ys)))
+
     def border_check(self, robot, smp):
         """Words if the robot is within BORDER_CM of an open edge and moving towards it, else ''. smp: the tracker's
         recent (t, x, y, ...) samples."""
@@ -5230,6 +5253,7 @@ class Runner:
         brought back. The firmware's edge guard and front stop are the first line; this is the second."""
         last = {}
         last_lost = {}
+        last_still = {}
         seen_border = time.time()
         while not self.watch_quit.is_set():
             time.sleep(0.1)
@@ -5278,6 +5302,7 @@ class Runner:
                         self.watch_stop = "lost while driving"
                         self.hold_for_nick(robot, "lost", why_l)
                         continue
+                self.camera_still_check(robot, last_still)
                 smp = self.history.since(time.time() - 0.6)
                 if len(smp) < 3 or time.time() - smp[-1][0] > 1.0:
                     continue

@@ -35,6 +35,9 @@ import os
 import time
 
 # healthy noise (1 sd), from real sessions (2026-10-24, tools: this module's docstring)
+CAMERA_STILL_HEALTHY = 0.4   # cm per axis: a still robot's camera position wobbles this much over a few seconds
+                             # (the KC replay's still pictures: 0.3-1 cm; chosen inside that; a DOE with a robot
+                             # standing still at several places would set it)
 HEALTHY = dict(
     camera=0.8,    # cm per axis at a find, after the error map (leave one out): 0.71 / 1.03 on 2026-10-24's stages
     wheels=0.6,    # cm per stretch, the wheels' own share: the 2026-10-23 morning's rms 1.25 with the camera's 0.8
@@ -102,6 +105,13 @@ class SensorTrust:
         self.add("camera", "*", "find", resid_x, t)
         self.add("camera", "*", "find", resid_y, t)
 
+    def camera_still(self, robot, sd_x, sd_y, t=None):
+        """A robot standing still: its camera position's scatter over a few seconds (cm per axis). Needs no find,
+        so a camera that is bad from the start is caught during setup (2026-10-24 simulator: with the camera off
+        by 4 cm, the session never reached a find, and the front sensor was blamed instead)."""
+        self.add("camera", "*", "still", sd_x, t)
+        self.add("camera", "*", "still", sd_y, t)
+
     def stretch_fit(self, robot, rms_cm, rms_deg, n, t=None):
         """A self-calibration fit's rms over n stretches: kept as the mean square (with weight n, capped)."""
         w = min(float(n), 10.0) / 10.0
@@ -120,15 +130,31 @@ class SensorTrust:
 
     # --- what the evidence says -----------------------------------------------------------------------------
     def camera_sd(self):
-        """(sd cm per axis, n): the camera at the finds, after its error map. Healthy if too little evidence."""
-        its = self._items("camera")
-        if len(its) < MIN_N["camera"]:
-            return HEALTHY["camera"], len(its)
-        # robust: the weighted items' magnitudes, repeated by weight in tenths
-        rep = []
-        for it in its:
-            rep += [it["v"]] * max(1, int(round(it["w"] * 10)))
-        return max(FLOOR["camera"], robust_sd(rep)), len(its)
+        """(sd cm per axis, n): the camera at the finds, after its error map; or, if worse in proportion, its scatter
+        standing still (scaled to the finds' healthy level). Healthy if too little evidence."""
+        def sd_of(its):
+            rep = []
+            for it in its:
+                rep += [it["v"]] * max(1, int(round(it["w"] * 10)))
+            return robust_sd(rep)
+        finds = [it for it in self._items("camera") if it["kind"] == "find"]
+        still = [it for it in self._items("camera") if it["kind"] == "still"]
+        best, n = HEALTHY["camera"], 0
+        cands = []
+        if len(finds) >= MIN_N["camera"]:
+            cands.append(sd_of(finds))
+            n += len(finds)
+        if len(still) >= MIN_N["camera"]:
+            # a still scatter of CAMERA_STILL_HEALTHY counts as healthy (the finds' 0.8); worse scales up with it
+            cands.append(sd_of(still) / CAMERA_STILL_HEALTHY * HEALTHY["camera"])
+            n += len(still)
+        if not cands:
+            return best, len(finds) + len(still)
+        return max(FLOOR["camera"], max(cands)), n
+
+    def camera_known(self):
+        """Is there enough evidence about the camera to blame another sensor's disagreement with it?"""
+        return len(self._items("camera")) >= MIN_N["camera"]
 
     def shared_stretch(self, sensor):
         """The camera's share of the stretches' rms (cm or deg), from what all robots have in common: the robots'
@@ -219,6 +245,10 @@ class SensorTrust:
             kk = self.k(s, r)
             key = "%s/%s" % (s, r)
             if s in ("wheels", "gyro") and not self.stands_out(s, r):
+                kk = min(kk, RECOVERED_K - 0.01) if not self.flags.get(key) else kk
+            if s == "front" and (not self.camera_known() or self.bad("camera")):
+                # the front sensor is checked against the camera's position: with the camera unknown or bad, a
+                # disagreement can't be blamed on the front sensor
                 kk = min(kk, RECOVERED_K - 0.01) if not self.flags.get(key) else kk
             if not self.flags.get(key) and kk >= DEGRADED_K:
                 self.flags[key] = True
