@@ -95,6 +95,14 @@ STANDS_OUT = 1.5          # (2026-10-24; kept for the replays) the old gate: thi
 STANDS_OUT_FLAG = 3.0     # chosen: the second check flags a robot whose stretches are 3 x the healthy robots' median
                           # (the simulator's healthy robots differ by up to 1.5x; Right's 5% gyro jitter was 4.4x;
                           # DOE: the same replay at 2 / 3 / 4)
+RUN_CHI_FLAG = 20.0       # chosen: chi2/run at which the runs check reaches DEGRADED_K. Healthy, real and simulated:
+                          # at most 7.4 (Center on the slow-camera 15:45 session: k 1.2); the simulator's 5-10% jittered
+                          # wheels 43 and up (k 2.9 and up). 20 sits midway on a log scale. For independent camera errors
+                          # 3.4 is already 1-in-1000 with 8 runs; the margin is for camera errors shared within a run (a
+                          # slow camera). DOE: replay all sessions at 10 / 20 / 40, and the simulator at 2 / 4% jitter for
+                          # the smallest fault caught
+RUN_CAM_FLOOR_CM = 0.3    # chosen: the camera's miss per stretch is never taken below this (a run of near-perfect
+                          # stretches must not make an ordinary run-to-run difference look huge)
 RUN_MIN_LEN_CM = 40.0     # chosen: a run's stretches must add up to this before its scale counts (camera noise of
                           # ~1 cm at each end is then under 2% of it; most runs have 150-300 cm)
 GATE_K = 1.5              # chosen: refuse a wheel fit only beyond 1.5 x what the camera and healthy wheels explain
@@ -193,12 +201,20 @@ class SensorTrust:
         if rms_deg is not None:
             self.add("gyro", robot, "stretch_rms", rms_deg, t, w)
 
-    def run_scale(self, robot, scale, length_cm, t=None):
+    def run_scale(self, robot, scale, length_cm, t=None, pairs=None):
         """One run's wheel scale on its own: the camera's length over the wheels' length, summed over its stretches
-        (length_cm: the wheels' total). Short runs are not counted (RUN_MIN_LEN_CM)."""
+        (length_cm: the wheels' total). Short runs are not counted (RUN_MIN_LEN_CM). pairs: the run's stretches
+        [(camera cm, wheels cm)]; each one's miss against the run's own scale is kept too ("run_resid"): that scatter is
+        the camera's (a wheel fault that changes run to run can't show inside one run), and it says how far apart the
+        runs' scales would be from the camera alone (_runs_check)."""
         if scale is None or not length_cm or length_cm < RUN_MIN_LEN_CM or scale <= 0:
             return False
         self.add("wheels", robot, "run_scale", scale, t)
+        self.items[-1]["len"] = round(float(length_cm), 2)
+        if pairs:
+            self.items[-1]["n"] = len(pairs)
+            for c, b in pairs:
+                self.add("wheels", robot, "run_resid", c - scale * b, t)
         return True
 
     def front_vs_map(self, robot, resid_cm, t=None):
@@ -348,11 +364,29 @@ class SensorTrust:
         return dict(c) if c else None
 
     def _runs_check0(self, robot):
-        """This session's run-to-run wheel scale spread against its own earlier spread (or the prior)."""
+        """Do this robot's runs disagree on its wheel scale by more than the camera explains? (2026-10-25, real session
+        15:45: Center's wheels flagged by their stretches at 2.3 x, but the error was the same on short and long
+        stretches and its scale held 0.963-0.981: the camera's error, charged to the wheels.) Each run's scale has a
+        scatter from the camera alone: the camera's miss per stretch (its stretches about their own run's scale)
+        x sqrt(stretches) / the run's length. chi2/run (fine print: each run's scale minus the median, squared, over
+        that camera-only scatter squared; the median of those x 2.2, so one odd run doesn't move it) is about 1 when
+        the camera explains the spread: healthy robots at most 7.4 (real, the slow-camera 15:45 session), the
+        simulator's jittered wheels 43 and up. k = DEGRADED_K x sqrt(chi2/run / RUN_CHI_FLAG). Evidence from before
+        (no stretches kept) is judged by the spread against the prior, as before."""
         its = self._items("wheels", robot, "run_scale")
-        now = [it["v"] for it in self._now(its)]
+        now_its = self._now(its)
+        now = [it["v"] for it in now_its]
         if len(now) < MIN_N["runs"]:
             return None
+        res = [it["v"] for it in self._now(self._items("wheels", robot, "run_resid"))]
+        if all(it.get("n") and it.get("len") for it in now_its) and len(res) >= len(now) + 2:
+            a = robust_sd(res) ** 2 * len(res) / max(1, len(res) - len(now))
+            a = max(a, RUN_CAM_FLOOR_CM ** 2)
+            med = statistics.median(now)
+            z2 = [((it["v"] - med) / (math.sqrt(it["n"] * a) / it["len"])) ** 2 for it in now_its]
+            chi = statistics.median(z2) / 0.455
+            return dict(check="runs", v=chi, base=1.0, k=DEGRADED_K * math.sqrt(chi / RUN_CHI_FLAG), n=len(now),
+                        src="the camera's own scatter, %.1f cm a stretch" % math.sqrt(a), spread=rel_spread(now))
         v = rel_spread(now)
         if v is None:
             return None
@@ -408,7 +442,13 @@ class SensorTrust:
     def checks(self, sensor, robot):
         """This robot's own checks of one sensor (no other robot involved): [dict(check, v, base, k, n, src)]."""
         if sensor == "wheels":
-            out = [self._stretch_check("wheels", robot), self._runs_check(robot)]
+            st = self._stretch_check("wheels", robot)
+            if st is not None and self._runs_check(robot) is not None and self._runs_check(robot)["src"].startswith(
+                    "the camera's own"):
+                # with the camera-corrected runs check in place the stretches only inform: on the real robots their
+                # rms is mostly the camera's (15:45 session: the same on short and long stretches)
+                st["info"] = True
+            out = [st, self._runs_check(robot)]
         elif sensor == "gyro":
             out = [self._stretch_check("gyro", robot)]
         elif sensor == "front":
@@ -453,10 +493,11 @@ class SensorTrust:
         sc = self.second_check(sensor, robot, robots or [])
         if sc is not None:
             cs.append(sc)
-        if not cs:
-            return dict(k=1.0, worst=None, checks=[])
-        worst = max(cs, key=lambda c: c["k"])
-        return dict(k=worst["k"], worst=worst, checks=cs)
+        live = [c for c in cs if not c.get("info")]
+        if not live:
+            return dict(k=1.0, worst=None, checks=cs, live=[])
+        worst = max(live, key=lambda c: c["k"])
+        return dict(k=worst["k"], worst=worst, checks=cs, live=live)
 
     # --- the old views (the viewer, the summary, the replays) ---------------------------------------------
     def own_sd(self, sensor, robot):
@@ -533,7 +574,7 @@ class SensorTrust:
                         self.flag_session[key] = self.session
                         self.reasons[key] = ("changed: " + ch) if ch else self._words(w)
                         out.append((s, r, "degraded", max(kk, DEGRADED_K) if ch and kk < DEGRADED_K else kk))
-                elif not ch and kk < RECOVERED_K and j["checks"] and self.flag_session.get(key) != self.session:
+                elif not ch and kk < RECOVERED_K and j["live"] and self.flag_session.get(key) != self.session:
                     # a robot's sensor flagged this session stays flagged to its end (2026-10-25 replay: Center's
                     # wheels at 8% flagged, cleared and flagged again as its few runs' spread wobbled); the next
                     # session's evidence clears it
@@ -547,6 +588,9 @@ class SensorTrust:
     def _words(c):
         if not c:
             return ""
+        if c["check"] == "runs" and "spread" in c:
+            return "runs: scale %.1f%% apart run to run, %.0f x what the camera explains (chi2/run; %s)" % (
+                100 * (c["spread"] or 0), c["v"], c["src"])
         if c["check"] == "runs":
             return "runs: scale %.1f%% apart run to run, baseline %.1f%% (%s)" % (100 * c["v"], 100 * c["base"], c["src"])
         if "ratio" in c:
@@ -589,15 +633,18 @@ class SensorTrust:
                     continue
                 cs = []
                 for c in j["checks"]:
-                    if c["check"] == "runs":
+                    if c["check"] == "runs" and "spread" in c:
+                        cs.append("runs %.1f%% apart (%d), chi2/run %.1f (camera alone: 1; %s)" % (
+                            100 * (c["spread"] or 0), c["n"], c["v"], c["src"]))
+                    elif c["check"] == "runs":
                         cs.append("runs %.1f%% apart (%d; baseline %.1f%%, %s)" % (100 * c["v"], c["n"], 100 * c["base"],
                                                                                    c["src"]))
                     elif "ratio" in c:
                         cs.append("%.1f x the other robots" % c["ratio"])
                     else:
-                        cs.append("%s%.2f %s (%d; baseline %.2f, %s)" % (
+                        cs.append("%s%.2f %s (%d; baseline %.2f, %s)%s" % (
                             (c["check"].split(", ")[1] + " ") if s == "front" else "", c["v"], unit, c["n"], c["base"],
-                            c["src"]))
+                            c["src"], ", shown only: the runs check decides" if c.get("info") else ""))
                 parts.append("%s k %.1f: %s" % (s, j["k"], "; ".join(cs)))
             bad = [s for s in ("wheels", "gyro", "front") if self.bad(s, r)]
             lines.append("%s: %s%s" % (r, " | ".join(parts), (" LOOKS BAD: " + ", ".join(bad)) if bad else ""))

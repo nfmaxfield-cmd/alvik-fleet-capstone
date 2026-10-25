@@ -8,6 +8,7 @@ readings), plus each run's wheel scale (e02.run_scales), through the current e02
 trust), then chained (each session the next one's history: morning -> evening -> stage 1 -> stage 2).
 
     python3 tools/experiment/analyses_oct25/trust_fix_real_replay.py
+    TRUST_EXTRA_SESSIONS="s1545=<unzipped e02-20261025-154522>" python3 ...   (adds sessions; not chained after stage 2)
 """
 import contextlib
 import io
@@ -24,7 +25,12 @@ from night_common import TR, FIT  # noqa: E402
 import night_common as N  # noqa: E402
 import e02 as E  # noqa: E402
 
-SESS = ("oct23-morning", "oct23-evening", "stage1", "stage2")
+SESS = ["oct23-morning", "oct23-evening", "stage1", "stage2"]
+# more sessions by folder: TRUST_EXTRA_SESSIONS="s1545=/path/to/e02-20261025-154522,..." (2026-10-25: the 15:45 session)
+for _kv in filter(None, os.environ.get("TRUST_EXTRA_SESSIONS", "").split(",")):
+    _k, _, _v = _kv.partition("=")
+    N.SESSIONS[_k] = _v
+    SESS.append(_k)
 
 
 def replay(name, trust=None):
@@ -50,8 +56,8 @@ def replay(name, trust=None):
             if obs:
                 rc, rd = NT.stretch_rms_against(obs, res.get("fitted") or {}, pr)
                 trust.stretch_fit(robot, rc, rd, len(obs), t)
-                for _r, sc, ln in E.run_scales(obs):
-                    if not hasattr(trust, "run_scale") or trust.run_scale(robot, sc, ln, t):
+                for _r, sc, ln, pairs in E.run_scales(obs):
+                    if not hasattr(trust, "run_scale") or trust.run_scale(robot, sc, ln, t, pairs=pairs):
                         runs.setdefault(robot, []).append(sc)
             if res["values"] and res["accepted"]:
                 prev[robot] = res["values"]

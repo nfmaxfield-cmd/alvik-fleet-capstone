@@ -229,9 +229,10 @@ def stretch_rms_against(obs, fitted, prior):
 
 
 def run_scales(obs):
-    """[(run, wheel scale, wheels' length cm)] per run: the camera's length over the wheels' length summed over that
-    run's stretches (two or more), for e02_trust's runs check (2026-10-25: a wheel that counts wrongly by a different
-    amount every run shows as runs that disagree, with no other robot needed)."""
+    """[(run, wheel scale, wheels' length cm, [(camera cm, wheels cm)])] per run: the camera's length over the wheels'
+    length summed over that run's stretches (two or more), and the stretches themselves, for e02_trust's runs check
+    (2026-10-25: a wheel that counts wrongly by a different amount every run shows as runs that disagree beyond what the
+    camera's own scatter about each run explains, with no other robot needed)."""
     per = {}
     for o in obs:
         if o.get("cam_len") and o.get("bel_len"):
@@ -240,7 +241,7 @@ def run_scales(obs):
     for run, lens in per.items():
         b = sum(x[1] for x in lens)
         if len(lens) >= 2 and b > 0:
-            out.append((run, sum(x[0] for x in lens) / b, b))
+            out.append((run, sum(x[0] for x in lens) / b, b, lens))
     return out
 
 
@@ -6682,8 +6683,11 @@ class Runner:
             self.trust.stretch_fit(robot, rc, rd, len(obs))
             # and each run's wheel scale on its own (e02_trust runs check: the robot against itself, run to run)
             if hasattr(self.trust, "run_scale"):
-                for _run, sc_, len_ in run_scales(obs):
-                    self.trust.run_scale(robot, sc_, len_)
+                for _run, sc_, len_, pairs_ in run_scales(obs):
+                    try:
+                        self.trust.run_scale(robot, sc_, len_, pairs=pairs_)
+                    except TypeError:                   # an older e02_trust
+                        self.trust.run_scale(robot, sc_, len_)
             self.trust_note()
         entry = dict(t=round(time.time(), 1), order=run_row["order"], n_new=len(obs), n_total=len(data), gate_cm=round(gate, 2),
                      n_stretches=len(stretches), accepted=res["accepted"], fitted=res["fitted"], reasons=res["reasons"],

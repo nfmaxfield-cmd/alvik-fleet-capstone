@@ -45,8 +45,8 @@ def evidence(name, folder):
             tm = {}
             for o in obs:
                 tm[o.get("run")] = max(tm.get(o.get("run"), 0.0), o.get("tm") or 0.0)
-            for run, sc, ln in E.run_scales(obs):
-                ev.append((tm.get(run, 0.0) + 1.0, "run", (robot, sc, ln)))
+            for run, sc, ln, pairs in E.run_scales(obs):
+                ev.append((tm.get(run, 0.0) + 1.0, "run", (robot, sc, ln, pairs)))
     return sorted(ev, key=lambda e: e[0])
 
 
@@ -60,7 +60,7 @@ def feed(t, ev, robots=ROBOTS):
             it["w"] = a["w"]
             t.items.append(it)
         else:
-            t.run_scale(*a)
+            t.run_scale(*a[:3], pairs=a[3]) if len(a) > 3 else t.run_scale(*a)
         if i + 1 < len(ev) and ev[i + 1][0] == tt:
             continue                     # the runner checks after a whole piece of evidence (x and y, wheels and gyro)
         for s, r, what, k in t.update_flags(robots):

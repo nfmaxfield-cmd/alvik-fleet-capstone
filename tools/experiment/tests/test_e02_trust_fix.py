@@ -431,3 +431,46 @@ def test_front_noise_caught_at_a_board_and_against_the_others():
     sc = t.second_check("front", "Left", ROBOTS)
     assert sc is not None and sc["ratio"] > TR.STANDS_OUT_FLAG
     assert any("at a board" in ln for ln in t.summary(ROBOTS))
+
+
+def _feed_runs(t, robot, obs):
+    import e02 as E
+    for _run, sc, ln, pairs in E.run_scales(obs):
+        t.run_scale(robot, sc, ln, pairs=pairs)
+
+
+def test_runs_check_camera_error_is_not_charged_to_the_wheels():
+    # 2026-10-25 real session 15:45: Center's wheels were flagged by their stretches (1.96 cm against 0.87), but the
+    # error was the same on short and long stretches and the wheel scale held 0.963-0.981: the camera's error. The
+    # runs check compares the run-to-run spread with what the camera's own scatter explains (chi2/run).
+    import json
+    d = json.load(open(os.path.join(HERE, "data", "trust_runs_stretches.json")))
+    t = TR.SensorTrust()
+    _camera(t)
+    for r in ("Center", "Left"):
+        _feed_runs(t, r, d["real_1545"][r])
+        _fits(t, r, [(1.96, .8)] * 4 if r == "Center" else [(2.0, .8)] * 4, None)
+    for r in ("Center", "Left"):
+        runs = [c for c in t.checks("wheels", r) if c["check"] == "runs"][0]
+        assert runs["k"] < TR.RECOVERED_K and runs["src"].startswith("the camera's own")
+        st = [c for c in t.checks("wheels", r) if c["check"] == "stretches"][0]
+        assert st.get("info")                         # its stretches are shown, not used to flag
+    assert [c for c in t.update_flags(["Center", "Left"]) if c[0] == "wheels"] == []
+
+
+def test_runs_check_catches_every_jittered_robot_with_no_history():
+    # simulator wheels:jitter=0.08 on every robot: before, only Center; Right's draws were mild (runs 2.6% apart)
+    import json
+    d = json.load(open(os.path.join(HERE, "data", "trust_runs_stretches.json")))
+    t = TR.SensorTrust()
+    _camera(t)
+    for r in ROBOTS:
+        _feed_runs(t, r, d["sim_jitter08"][r])
+    assert _flags(t) == [("wheels", "Center"), ("wheels", "Left"), ("wheels", "Right")]
+    assert "what the camera explains" in t.reason("wheels", "Right")
+    t2 = TR.SensorTrust()
+    _camera(t2)
+    for r in ROBOTS:
+        _feed_runs(t2, r, d["sim_healthy"][r])
+    assert _flags(t2) == []
+    assert all([c for c in t2.checks("wheels", r) if c["check"] == "runs"][0]["v"] < 3 for r in ROBOTS)
