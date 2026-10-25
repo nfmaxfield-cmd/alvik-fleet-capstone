@@ -12,7 +12,7 @@ Status: open / planned (date) / done (result, link).
 **Count (2026-10-25 sweep):** 51 rows. 2 simulator-only. 23 need logs or recorded footage but no board: 17 can
 run on what is already on disk, 6 wait for data a later session brings. Claude's call: logs-only rows are treated
 like simulator rows and run without asking. 26 need the board, the bench or Nick's time. 3 in progress, 1 building,
-none done. **Added 2026-10-25 (reverse find build):** 3 rows (2 Sim, 1 Board), below. **Added 2026-10-25 (heading diagnosis, [write-up](build-reports/e02-oct25-heading.md)):** 1 Logs row (heading push). **Update 2026-10-25 (logs run, [write-up](build-reports/e02-oct25-logs-doe.md)):** 7 logs rows done or done
+none done. **Added 2026-10-25 (reverse find build):** 3 rows (2 Sim, 1 Board), below. **Added 2026-10-25 (dock v5):** 6 rows in Docking and charging (2 Sim or Logs + Sim, 2 Bench/Board, 2 waiting on bench test 1); the charge-levels row is in progress. **Added 2026-10-25 (heading diagnosis, [write-up](build-reports/e02-oct25-heading.md)):** 1 Logs row (heading push). **Update 2026-10-25 (logs run, [write-up](build-reports/e02-oct25-logs-doe.md)):** 7 logs rows done or done
 in their logs part (uncertainty model, drift band, jump cut, wheel fit, find heading, trust MIN_N, other trust
 limits); 12 need more data or hand-checked truth; sample size has a preliminary count; the front sensor row was
 done separately. Sweep sources: code comments (tools/experiment, firmware,
@@ -94,7 +94,13 @@ a decision.
 
 | Number (where) | Value now | Experiment that would set it | Needs | Status |
 |---|---|---|---|---|
-| Charge levels (build-plans/self-charging-dock.md; asked of Nick, chat 2026-10-25) | 40% go / 90% leave | Simulator sweep once bench test 1 gives the real charge rate; drain rates driving against standing from battery logs every 5 min (Nick 2026-10-25: cheap, a few weeks of data) | Bench test 1 + Logs, then Sim | open |
+| Charge levels (build-plans/self-charging-dock.md; tools/dock/charge_levels.py) | go from its parts (49-54 % on the logs' rates), leave = the knee (80 % PLACEHOLDER), top-up L - 20 | Method in place (2026-10-25): drain learned per robot from the logs (battery_rates.py), go = error + job + drive + queue + floor. Remaining: bench test 1's charge curve, then `charge_policy_sim.py --compare` | Bench test 1 + Sim | in progress (drain part done on 6 sessions; charge curve open) |
+| Drain margin (charge_levels.py P k_se; v5) | rate + 2 standard errors | Simulator: each robot's drain drawn from its learned uncertainty, k = 1 / 2 / 3, 7 days x 5 seeds: flat batteries against uptime | Sim | open |
+| Battery learner thresholds (battery_rates.py SESSION_MIN_HOURS, SHIFT_MIN / SHIFT_SE, RISE_SPLIT, JOIN_GAP_MIN, MIN_HOURS; v5) | 0.75 / 0.25 / 0.75 h; 3 %/h and 3 se; 3 %; 45 min; 0.1 h | Replay the sessions on disk with a drain change injected (+5 %/h from mid-session) and without: how soon it is flagged against false flags, at 0.25 / 0.5 / 1 h | Logs + Sim | open |
+| Rest policy (charge_policy_sim.py --rest K; Nick 2026-10-25: rest robots off the dock before a second dock) | none chosen | `--compare` once bench test 1 and the sleep test give the charge rate and the sleep drain: the sleep drain decides whether resting helps (it fails below about 25 %/h at 3 %/h asleep) | Bench test 1 + sleep test, then Sim | open |
+| Contact force: pad position, spring rate, crown height (build_dock_v5.py PAD_X_MM, SPRING_K_N_MM, CROWN_FREE_Z_MM) | 8 mm behind the axle, 0.2 N/mm, 9.0 mm | 2 spring rates (penny test: about 20 and 40 g at 1.5 mm) x 2 crown heights (one paper shim) x 20 back-ins: contact resistance, contact within 10 s, caster pinch | Bench + Nick (springs) | open |
+| U arms and mouth (build_dock_v5.py ARM_IN_HALF_W_MM, FLARE_L_MM / FLARE_MM, ARM_END_X_MM) | +-1.5 mm play, 10 mm chamfer opening 7 mm, arms to 105 mm | Bench test 6's back-ins from staging offsets of 0 / 5 / 10 mm and 0 / 5 deg: count clean dockings; widen the chamfer only if 10 mm misses | Board + Nick | open |
+| Dock marker size (build_dock_v5.py STRIP_CELL_MM, STRIP_N) | 2 x 6 squares of 15 mm | E00e Part C: the 15 mm strip against the old 10 mm tile, a 1 px bump (shim under the camera mount) 10 times each, and a robot docked beside it: caught / false alarms | Board + Nick (~20 min) | open |
 | Pin protrusion and pad recess (build_attachment_v2.py STEP_VBUS_MM / STEP_GND_MM / PAD_RECESS_MM) | +1.0 mm, GND 1.3 mm, recess 0.3 mm | Small DOE if bench test 6 shows misses or a shifted fix: two step heights x 20 dockings, contact rate and seat repeatability | Bench + Nick (printing) | open (only if test 6 shows misses; contacts may change to floor strips, chat 2026-10-25) |
 | Pin hole fit (build_attachment_v2.py POGO_HOLE_PRESS_MM) | 0.05 mm over | Print the gauge (pogo_gauge.stl) and use its best hole | Nick (one print) | open |
 | Dock fuse (self-charging-dock.md, PTC hold) | 1.1 A | Bench test 1's measured peak current x 1.5 | Bench, ~1.5 h (tests 1-3) | open |
@@ -148,6 +154,8 @@ a decision.
 - Reverse find's look (e02.h lookAhead): 150 ms settle, 5 frames ~70 ms apart, median. Set by the sensor's ~15
   frames a second, not by tuning; a DOE would not change it (its allowance, e02_find_see_cm, has a row above).
 - Dock geometry: pad spacing 20 mm, pad height 10 mm, sense divider, cavity and channel sizes.
+- Dock v5 geometry (build_dock_v5.py): plate 22 mm hinge to crown and 0.8 mm brass, slot width 10.4 mm (follows from
+  the arms' play), base depth 36 mm (fits the strip), groove and screw positions: set by geometry, not a DOE.
 - The 1 cm equivalence margin (publication-plan.md): it should come from what a task needs, not a DOE.
 - Display-only numbers (chat 2026-10-25): live view refresh, 5-minute chart window, last 30 values per trend line,
   2 s between trust-table rebuilds.

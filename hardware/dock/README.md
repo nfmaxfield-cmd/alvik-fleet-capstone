@@ -23,9 +23,29 @@ Firmware: `firmware/home_lab/switches.h`, `dock.h` (2026-10-19a; pins A0 / A1 fr
 | `stl/dock_v2.stl` | **dock version 2** (`build_v2.py`): the same funnel for parking, plus a pair of measuring posts molded into each of its three closed sides; no floor stripe |
 | `preview/dock_v2_layout.png` | version 2 from above with a robot parked and one at each post station |
 | `build_attachment_v2.py` | **self-charging** (plan: `docs/build-plans/self-charging-dock.md`, not built yet): `stl/attachment_v2.stl` (the one-piece attachment plus two brass screw-head charging pads in the bar; same outside, same firmware numbers), `stl/dock_v3.stl` (dock v2 plus two spring pins in the back wall, a wiring cavity and a cable channel), `stl/attachment_v2_fit_test.stl` (13 mm slice to try on first), `stl/pogo_gauge.stl`; previews `attachment_v2.png`, `dock_v3.png`, `charging_contact.png`, `nose_bracket_size.png` |
-| `build_attachment_v3.py` | **current design: back-mounted, charges from underneath** (plan: `docs/build-plans/self-charging-dock.md`, not built yet): `stl/attachment_v3.stl` (one attachment: bumper switches at the BACK, light plate, cable clips), `stl/pad_sled.stl` (two flush brass pads under the robot's rear), `stl/dock_v4.stl` (funnel, two switch bumps on the back wall, a two-pronged tongue with an upright spring pin in each prong, taller posts), fit tests `clearance_gauge.stl`, `attachment_v3_fit_test.stl`, `pogo_gauge_v.stl`; previews `attachment_v3.png`, `pad_sled.png`, `dock_v4.png`, `docked_v4.png`, `underside_v4.png` |
+| `build_dock_v5.py` | **current design (2026-10-25): dock v5, a U the robot backs into** (plan: `docs/build-plans/self-charging-dock.md`, not built yet): `stl/dock_v5.stl` (U with bumps inside and three post stations outside, a 10 mm mouth chamfer instead of the funnel, two prongs each carrying a stiff brass contact plate hinged at its front and held up by a small spring at its rear), `stl/pad_sled_v5.stl` (pads 8 mm behind the axle), `stl/attachment_v5.stl` (v3 with the pad-wire holes moved), `stl/marker_strip_v5.stl` (2 x 6 squares of 15 mm, 90 x 30 mm); previews `dock_v5.png`, `docked_v5.png`, `contact_v5.png`, `lift_v5.png`, `sled_v5.png` |
+| `build_attachment_v3.py` | **superseded by v5** (back-mounted, charges from underneath) (plan: `docs/build-plans/self-charging-dock.md`, not built yet): `stl/attachment_v3.stl` (one attachment: bumper switches at the BACK, light plate, cable clips), `stl/pad_sled.stl` (two flush brass pads under the robot's rear), `stl/dock_v4.stl` (funnel, two switch bumps on the back wall, a two-pronged tongue with an upright spring pin in each prong, taller posts), fit tests `clearance_gauge.stl`, `attachment_v3_fit_test.stl`, `pogo_gauge_v.stl`; previews `attachment_v3.png`, `pad_sled.png`, `dock_v4.png`, `docked_v4.png`, `underside_v4.png` |
 
-## Back-mounted attachment v3 and dock v4 (self-charging): `build_attachment_v3.py`
+## Dock v5 (self-charging, current): `build_dock_v5.py`
+
+Nick, 2026-10-25 10:39 and 11:05. Plan, numbers, force budget and the build steps: `docs/build-plans/self-charging-dock.md`.
+
+- **A U** the robot backs into (151 x 145 x 22 mm, 73 % of dock v4's footprint): two bumps on the inner face at the
+  bottom of the U press the back switches; post stations on its three outer faces for touch calibration; the funnel
+  is now a 10 mm chamfer at the mouth (catches 8.5 mm off centre); a groove along the arms lets the screw heads pass.
+- **Contacts are ramps:** on each prong a stiff brass plate (1/32 x 1/4 in strip), hinged at its front by a tab bent
+  through the prong, held up at its rear by a small compression spring (target 0.2 N/mm). The robot's pad rides onto
+  it and pushes it down: 0.21 N per plate docked, 14 % of the caster's (assumed) load, against v3's 59 %. A flexible
+  30 AWG lead is soldered to the tab's foot.
+- **Pad sled v5:** pads 8 mm behind the axle, wider slots so the plates touch nothing until the last 12 mm.
+  **Attachment v5** = v3 with the pad-wire holes at +-33 mm.
+- **Marker strip** 90 x 30 mm (2 x 6 squares of 15 mm) on the base: the camera's bump check
+  (`tools/session_checks.py`, now with a rectangular patch) and the system's **known length** (measure the print).
+- Build: `python hardware/dock/build_dock_v5.py` (expect one WARN line, a comparison; no FAIL). Fitting: the
+  paper-stack check in the plan's Appendix B (no gauge to print).
+- Firmware and map numbers are the same as v4's (below).
+
+## Back-mounted attachment v3 and dock v4 (self-charging, superseded by v5): `build_attachment_v3.py`
 
 Nick, 2026-10-25: one attachment, at the BACK. Robots back into the dock and into boards, and the front stays clear
 for the distance sensor and the line sensors. Plan, numbers and sources: `docs/build-plans/self-charging-dock.md`.

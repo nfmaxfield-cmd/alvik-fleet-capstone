@@ -1,383 +1,445 @@
-# Self-charging dock: back-mounted attachment v3, pad sled, dock v4
+# Self-charging dock: dock v5 (a U with sprung ramp contacts), pad sled v5, battery-driven charge levels
 
-Written 2026-10-25. Redesigned the same day after Nick's decisions below. Nothing here is built or bought yet.
-CAD: `hardware/dock/build_attachment_v3.py`. Charge policy: `tools/dock/charge_policy_sim.py`. Firmware and runner
-changes are described here but not written. The earlier front-pad design (attachment v2, dock v3) is in Appendix D.
+Written 2026-10-25 (v5: same day, after Nick's decisions at 10:39 and 11:05). Nothing here is built or bought yet.
+CAD: `hardware/dock/build_dock_v5.py`. Battery rates: `tools/dock/battery_rates.py`. Charge levels:
+`tools/dock/charge_levels.py`. Policy simulator: `tools/dock/charge_policy_sim.py`. Tests: `tools/dock/tests/` (12).
+The v3/v4 design (pins in a fork, funnel dock) is in Appendix D; its files are kept.
 
 ## Premise
 
-Nick's decisions, 2026-10-25:
-- **One dock for now** (small workspace). Robots charge on their own; **the long-term goal is 24/7 running**.
-- **Charging:** a standard USB-C plug in the Nano ESP32's port, cut down to its 5 V and ground wires, wired to our
-  own contacts. The port is on top at the robot's front and faces one side. Which side is not known yet, so the
-  cable route works either way.
-- **Contacts:** two flat pads, flush on the robot's underside, so nothing hangs down to rub the plywood. The dock has
-  a thin tongue on its floor that slides under the robot and carries the spring contacts, pressing up onto the pads.
-  **The robot backs in.**
-- **Two bumps on the dock's back wall** for the bumper switches, so the parking spot has switch bumps on all four
-  sides.
-- **One attachment, mounted at the BACK:** the two bumper switches, the ID lights, the pads and the cable route.
-  Robots calibrate by backing into the boards (Nick is changing the firmware and runner for that). The front stays
-  clear for the distance sensor and the line sensors.
+Standing decisions (2026-10-25, earlier): one dock for now (two later); robots charge on their own, aiming at 24/7;
+a cut-down USB-C plug in the Nano's port wired to two flush pads under the robot; one attachment at the BACK (bumper
+switches, lights, cable route); robots back into the dock and into the boards.
+
+Nick's decisions, 10:39 and 11:05:
+1. **Contacts are a ramp.** The dock's contact on each fork prong is a **stiff strip with springs under its rear, no
+   bending** (11:05): raised at the rear, sloping down to the front. The robot's pad rides onto it and pushes the rear
+   down. The springs are weak, so they are pushed down instead of lifting the robot. The clearance then need not be
+   precise: Nick checks it with stacked paper or pennies instead of printing a gauge.
+2. **Shorter funnel:** the robots approach accurately and cautiously.
+3. **A U** the robot backs into. Bumps on its 3 outer edges (touch calibration from outside, as now) and on the inner
+   edge at the bottom of the U (the back switches when docked).
+4. **The marker** could be a skinny rectangle along the bottom of the U.
+5. One dock now. Robots sleep while docked. If charging is slow, robots take turns resting asleep off the dock
+   (not a second dock yet).
+6. The battery log feeds the charge levels: learn each robot's drain while moving, still and asleep, with
+   uncertainty; flag a robot whose drain changes; give the runner its go and leave levels.
+7. (11:05) **The dock is the one known length** in the system: it must carry a clearly measurable feature, with its
+   exact printed size written down for the software.
 
 ## Data
 
-**The robot's underside.** Measured from Arduino's CAD model of the Alvik by casting vertical rays through it,
-4 mm apart and finer near the wheels and the caster.
+**The robot's underside** (Arduino's CAD model, measured 2026-10-25; Appendix A of v3, unchanged): flat at
+**10.1 mm** above the floor between the wheels from the back edge to the front sensor board; caster (9 mm ball) on the
+centre line 41 mm behind the axle, its holder 7.1 mm up across ±9.5 mm; tyres' inner faces ±41.2 mm; robot 192 g.
+**Weight on the caster: ASSUMED 0.6 N** (not measured; check item 4).
 
-| What | Number | Source |
-|---|---|---|
-| Flat underside between the wheels, from the back edge to the front sensor board | **10.1 mm** above the floor | [STEP] |
-| Back face's bottom edge | 10.1-10.4 mm up (the front's is 4.2: the line sensor board) | [STEP] |
-| Caster | a 9 mm steel ball, **on the centre line, 6.6 mm in front of the back edge** (41 mm behind the axle). Its holder hangs to 7.1 mm up, ±9.5 mm wide | [STEP]; ball size [DS] §2.1; "a ball castor at the robot's rear" ([DroneBot](https://dronebotworkshop.com/alvik/)) |
-| Wheels | 34 mm; inner faces 41.2 mm either side of the centre (82.4 apart) | [STEP]; [DS] §2.1 |
-| Battery cover | "at the bottom", opened with a Phillips screwdriver. Its position and screws are not in the CAD | [DS] §2.3.1 |
-| Weight | 192 g | [tech-specs.yml](https://github.com/arduino/docs-content/blob/main/content/hardware/edu/solution-and-kits/alvik/tech-specs.yml) |
-| Back connectors | Qwiic ×2, Grove ×2, servo ×2, "at the back of the robot". Arduino's picture shows them along the top's back edge | [DS] §2.4.1, [picture](https://github.com/arduino/docs-content/blob/main/content/hardware/edu/solution-and-kits/alvik/datasheet/assets/perspective_front.png) |
-| Nano ESP32 | lies across the front of the top. Its USB-C is at one end and faces a side | Arduino's picture (same link) |
+**Camera:** 262 cm above the floor, 640 × 480, about **3.1 px/cm** (`floor_calibration.json` of the 2026-10-22 to 24
+sessions).
 
-<sub>[STEP] = Arduino's `alvik_reference_design.step`; [DS] = the
-[AKX00066 datasheet](https://docs.arduino.cc/resources/datasheets/AKX00066-datasheet.pdf). Links and the model's
-frame are in `hardware/dock/dock_params.py`. The model is a simplified shell: no battery cover, no screws, no tyre
-squash. Fit test 1 measures the real clearance.</sub>
+**What the marker is used for** (grep of `tools/` and `docs/` for checker, chessboard, findChessboard, dock tile):
+only `session_checks.PatternWatch` / `dock_tile_checks` (check A15, E00e Part C). It tracks a patch of the picture
+around the marker by ECC alignment, **translation only**, to catch a bumped camera (alarm at 0.5 px). Nothing calls
+OpenCV's chessboard finder and nothing takes a pose from the marker.
 
-**Feasibility: the tongue fits, with two changes.** Nick's idea works in the 10.1 mm under the robot, but a
-straight centred tongue would not. Two problems showed up:
+**Battery readings on disk:** 6 sessions (2026-10-23 morning and evening, 2026-10-24 stages 1-3, the 24th's night
+session); 3 robots; about 100 one-minute readings per robot; 4 h awake still, 0.8-1.0 h moving per robot; nothing
+asleep. Only the night session has a `battery.csv`, and it holds 8 rows (15 s), so the rest come from the robot logs
+(runinfo, runend, find, e02, gyro, the RAW rows), with driving from the RAW rows' wheel speeds and `leg.csv`.
 
-1. **The caster sits exactly where a centred tongue would go** (back centre, touching the floor). So the tongue is a
-   **fork**: two prongs, one each side of the caster, each carrying one spring pin (+ on one, − on the other). The
-   caster rolls down the open middle.
-2. **The springs push the robot's rear up.** The robot is light (192 g), and only part of that weight is on the
-   caster. A pin under the back edge acts on a longer lever than the caster's own load, so it would lift the caster.
-   So the pads sit as far forward as the funnel allows: **24 mm behind the axle**. The pins should also be low-force
-   (about 30 g each). Two such pins take an estimated 59 % of the caster's load off it (it stays down). That rests on
-   an assumed caster load: check item 4 measures it.
+**Drain per robot** (`python tools/dock/battery_rates.py`), %/h ± one standard error. Each session was fitted on its
+own and then pooled with the spread between sessions (what the runner would use):
 
-A third point follows from "flush". A spring pin has to be free while it passes under the robot and pressed once it
-reaches the pad, so the pad has to be the lowest point on its path. The pads are therefore flush in a thin
-(2.4 mm) **pad sled** under the robot's rear. The sled has a slot for each pin to travel in, with a ramp at its end
-down onto the pad. The lowest thing the robot carries is then 7.7 mm off the plywood (the caster's holder is 7.1).
-
-Height stack, mm above the plywood (checks all pass; `build_attachment_v3.py`):
-
-| Prong top | Pin boss top | Barrel top | Pad face (pin pressed 1.0 of 1.5 mm) | Free pin tip | Robot underside and bar bottom |
+| Robot | Still, awake | Moving | Asleep | Sessions | Moving share |
 |---|---|---|---|---|---|
-| 4.0 | 6.7 | 7.2 | **7.7** | 8.7 | **10.1** |
+| Center | 14.8 ± 2.4 | 17.8 ± 5.7 | none yet (default 3 ± 3) | 4 (still), 3 (moving) | 0.20 |
+| Left | 17.0 ± 2.6 | 19.3 ± 5.1 | none yet | 4, 3 | 0.20 |
+| Right | 13.0 ± 1.7 | 18.5 ± 6.6 | none yet | 4, 4 | 0.21 |
 
-<sub>A free pin tip travels 1.4 mm below the robot. If the real clearance is under about 9.6 mm, a free tip would
-rub. Fit test 1 decides: the fix is a thinner sled and a lower pin seat, both single numbers in the script.</sub>
-
-**How the Alvik charges** (unchanged from the first plan; details in Appendix C). It charges from 5 V on the Nano's
-USB-C VBUS line. The MAX17332 chip on the robot controls the charge. The charge current is **not published**. Bench
-test 1 measures it, and the charge thresholds depend on it. Our firmware already logs `is_battery_charging()`.
-[Bandini's self-charging Alvik](https://www.hackster.io/roni-bandini/building-a-self-charging-alvik-6daed7) confirms
-that 5 V on VBUS charges the robot while it is switched on.
-
-**Drain** (measured, `docs/build-reports/e02-oct24-night-analyses.md` §C): **11-16 %/h** standing still and
-switched on; 13-24 %/h over day fits that include driving (robots drove about a quarter of the time). **Job length**
-(measured, 741 runs in `logs/*/robot-logs-*/runend.csv`): median 28 s, 95 % 52 s, longest 191 s.
+<sub>Session by session the still rate moves 9.6-19.3 %/h, and the moving rate 15-34 %/h with ±4-12 standard
+errors: robots moved only 0.1-0.5 h in a session. No session's rate differed from the earlier ones by more than
+3 standard errors, so no change was flagged. The standard errors are inflated for the readings' correlation in time
+(lag-1 autocorrelation of the residuals, 0.1-0.34).</sub>
 
 ## Conclusion: the design
 
-![The docked robot](../../hardware/dock/preview/docked_v4.png)
-*A robot (grey) backed into dock v4 (black), drawn from the CAD. The spring pin (gold) in each of the dock's two
-prongs presses up on a brass pad in the sled (green) under the robot, and the caster rolls between the prongs.*
+![The docked robot](../../hardware/dock/preview/docked_v5.png)
+*A robot (grey) backed into dock v5 (black), drawn from the CAD: its rear bar (blue) on the two bumps at the bottom of
+the U, and a gold contact plate on each prong pressed down by a pad in the sled (green).*
 
-![The underside](../../hardware/dock/preview/underside_v4.png)
-*The robot from below (drawn as if seen through it). The sled carries the two pads between the caster and the wheels,
-and the dashed boxes are where the prongs lie once it is docked.*
+**Dock v5** (`stl/dock_v5.stl`, **151 × 145 × 22 mm**, 73 % of v4's footprint, one print, bottom down, brim on):
+- **The U.** A base (the bottom of the U, 36 mm deep) and two arms 10 mm thick. The last 14 mm before the bottom is
+  the old pocket: the bar seats to ±0.5 mm. Along the arms the bar has ±1.5 mm. A groove along the arms' inner faces
+  (10.5-19 mm up) lets the M3 screw heads of the attachment and the light plate's legs slide through. The funnel is
+  now **a 10 mm chamfer at the mouth**, opening 7 mm each side: it catches a robot up to 8.5 mm off centre (v4's
+  funnel was 50 mm long). Checked in the CAD: the attachment slides in from 100 mm out to docked, centred and 1.4 mm
+  off, without touching the U.
+- **Bumps:** two on the base's inner face for the back switches (as v4: 4 mm out, they press each lever 1.5 mm and
+  stop the bar's face). **Post stations** on the back face and on both arms' outer faces (dock v2's posts, 22 mm
+  tall, tips 85.45 mm apart; all of dock v2's station checks pass).
+- **Marker strip** in a recess on top of the base (below). Wiring cavity under it, cable channel out of the back,
+  4 countersunk holes for #6 × 1 1/4 in wood screws, + mark on top above the + contact.
+- **Two prongs** on the floor, 12 × 4 mm, at ±22 mm, either side of the caster (it misses them by 3 mm or more for
+  any robot the mouth can catch), each pinned at its far end by a #4 × 1/2 in wood screw through a tab.
+
+**The contact on each prong** (Nick's "stiff strip with springs under the rear"):
+
+![The contact](../../hardware/dock/preview/contact_v5.png)
+*One prong cut lengthwise (dark), with the plate free (light gold) and docked (dark gold), from the script's numbers.*
+
+- **A stiff brass plate,** 1/32 in (0.8 mm) × 1/4 in (6.35 mm) brass strip, about 31.5 mm of strip. 22 mm from hinge
+  to crown, rising 4.2 mm (11°). It bends 0.000 mm under the largest force: it is stiff; only the spring moves.
+- **Hinge at the front** (towards the mouth): the strip's front end goes down through a slot across the prong and is
+  bent flat under it (a 3 mm foot in a recess). The tab rocks in the slot; the foot stops it lifting out. Nothing
+  stands above the plate, so the robot's sled only ever meets the plate.
+- **Spring under the rear:** one small compression spring in a pocket, 2 mm in front of the crown. Target **0.2 N/mm
+  (20 g per mm)**, 3 mm across, about 6 mm long (a 0.2 mm wire micro spring; buy an assortment and pick one with the
+  penny test in Appendix B). The plate simply rests on it: the crown's free height is set by the spring's length.
+- **The rear end is bent down in a short lip,** so the robot's pad meets a rounded edge. The lip's pocket floor is the
+  stop: the crown can go down 3.6 mm at most, with the spring then 2.6 mm long (solid at about 2.0).
+- **Flexible lead:** 30 AWG silicone-insulated stranded wire soldered to the foot (it barely moves when the plate
+  rocks), along a groove under the prong to the cavity. The current never goes through the spring or the hinge.
 
 **Robot side**
-- **Attachment v3** (`stl/attachment_v3.stl`, 116 × 103 × 53 mm, one print). Version 1's bracket is moved to the
-  back, the same width (102.2 mm) with the same switches, and screwed to the back insert pair. Its bar is raised to
-  10.1-20.1 mm so its bottom is level with the robot's underside. The light plate keeps its layout (bright bar at
-  the front) and stands on the front insert pair. **Cable clips** under the plate run across the front over the
-  Nano, so the plug works from either end, then down the middle to the back. They keep the cable off the robot's
-  touch buttons. The bar has two wire holes for the pad wires and two pilot holes for the sled's screws.
-- **Pad sled** (`stl/pad_sled.stl`, 72 × 42 × 2.4 mm). It sits against the robot's flat underside and is screwed to
-  the bar's underside with two M2 screws. The pins push it up against the robot, so it needs no glue. It has two
-  **brass-shim pads** (8 × 10 mm, 0.4 mm, flush in recesses), a slot and ramp for each pin, and wire channels on its
-  top back to the bar. It is notched around the caster.
-- **Polarity:** the robot's **left pad = + (VBUS)**, right = − (GND). The dock's + pin is marked with a dimple on
-  top.
-- **Electrics (as before):** USB-C plug → a Schottky diode (SS34, striped end towards the plug) in the + wire → the
-  + pad. The − wire goes to the − pad. Contact sense: 100 kΩ from the + pad to a free Nano analog pin, and 150 kΩ from
-  that pin to GND (about 3 V when docked on live pins). The plug blocks the USB port, so firmware goes on by WiFi.
+- **Pad sled v5** (`stl/pad_sled_v5.stl`, 59 × 72 × 2.4 mm): the pads move forward to **8 mm behind the axle** (v3:
+  24) and are 12 × 10 mm. The slots the crowns travel in are 10.4 mm wide (the plate's 6.35 plus the arms' ±1.5 and
+  0.5 to spare), so the crown passes under the robot touching nothing until the last 12 mm. Pad position chosen for
+  the force budget (below).
+- **Attachment v5** (`stl/attachment_v5.stl`) = attachment v3 with the two pad-wire holes moved out to ±33 mm, clear
+  of the wider slots. Print it instead of v3.
+- Electrics, polarity (robot's left pad = +), diode, sense resistors and the dock's charger and fuse: as before
+  (Appendix C).
 
-**Dock side: dock v4** (`stl/dock_v4.stl`, 172 × 174 × 22 mm)
-- This is dock v2's funnel and check tile, with **two bumps** (4 mm out) on the back wall. Each bump presses its
-  switch's lever 1.5 mm and stops the bar's face. The three outside **post stations** stay, with their posts raised
-  from 15 to 22 mm to reach the higher rear bar.
-- **The tongue:** two prongs, 12 × 4 mm, from the back wall 47 mm into the dock, at ±22 mm. Each prong holds one
-  upright spring pin, seated on a printed step, with its solder tail in a wire groove underneath (open to the
-  plywood) that leads to the cavity behind the wall. The prong tips have chamfered noses.
-- **Power:** USB-A wall charger (5 V, 2 A+) → cut USB-A cable → resettable fuse (PTC, 1.1 A hold) in the red wire →
-  + pin. Black → − pin. The cable leaves through the channel under the head, or a hole drilled in the plywood.
+### Force budget: the contacts against the caster's load
 
-**How a docking goes:** the runner drives the robot to the staging point 20 cm in front of the dock (`PARK_STAGE_CM`,
-as for a park spot), turns it, and backs it in.
-1. The funnel centres the rear bar.
-2. The caster rolls between the prongs. Checked: by the time the caster reaches the prong tips, the funnel holds
-   the bar within 10.1 mm of centre, so the ball misses them.
-3. Each pin travels in its sled slot, climbs the ramp, and is pressed 1.0 mm onto its pad.
-4. Both switches click on the bumps.
+![Lift during the back-in](../../hardware/dock/preview/lift_v5.png)
+*The share of the caster's load the two contacts take off at each point of the back-in, computed from the CAD numbers
+and the assumed 0.6 N on the caster; at 100 % the caster would leave the floor.*
 
-The wheels never reach the prongs: docked, the tyres touch the plywood 12 mm short of the tips.
+| | v3 spring pins | **v5 sprung plates** |
+|---|---|---|
+| Where it pushes up | 24 mm behind the axle | **8 mm behind the axle** |
+| Force per contact, docked | 0.3 N (30 g, ASSUMED pin) | **0.21 N (22 g)**: 0.165 N/mm at the crown × 1.3 mm press |
+| Lift on the caster, docked | 59 % | **14 %** |
+| Most lift while backing in | 71 % (as the pin crosses the pad's edge) | **24 %** (the crown meets the pad's back edge, 14 mm behind the axle) |
+| Robot 0.5 mm lower than the CAD | not in the design's range | 19 % docked, 34 % at most |
+| Robot 1.0 mm lower | the pin would rub the robot | 25 % docked, 43 % at most; crown still 0.1 mm clear of the slot roof |
+| Robot 0.9 mm higher | no contact | still pressed 0.4 mm (0.07 N: weak but touching) |
 
-**Firmware and map numbers** (printed by the script): the bumper face is **6.10 cm behind the axle**, switches
-±4.27 cm, `sw_gap_cm` 0.020, `bumper_cm` 1.34 (now at the back). Docked, the axle is 6.5 cm from the back wall,
-because the bumps add 0.4 cm. The map's dock pose is the middle of the two bumps' faces, heading out of the dock.
-While docked, the firmware should refuse **backward** moves; leaving means driving forward, which is the reverse of
-the first plan.
+<sub>Lift = force × distance behind the axle ÷ 41 mm (the caster's distance) ÷ 0.6 N. The plate turns about its hinge;
+the force at the crown is the spring rate × (spring's distance ÷ crown's distance from the hinge)².</sub>
 
-**Risk: backing has no line sensor behind.** The line sensors (the edge guard) are at the front. A robot that backs
-towards a board that isn't there, or towards the board's edge, is stopped only by the camera's border and the
-robot's own position border (`FW_BORDER_CM`, `HOME_FW_BORDER_CM`). A board-push find that misses its board, or a
-pose error larger than the border, sends the robot off the edge backwards. Before relying on back-finds, run the
-simulator's back-find with camera noise and a missing board (new test 9 below).
+The robot sitting lower than the CAD is the one direction that raises the force, so the paper-stack check
+(Appendix B) is set up to catch it. One condition carries the design: the robot must stay within the arms' ±1.5 mm
+while the crowns travel in their slots. A robot 2.6 mm off centre would drag a crown under the sled's plastic, up to
+87 % lift (dashed line). The arms hold it.
 
-## Conclusion: charge thresholds (go and leave levels)
+### Marker: a rectangle works
 
-**Method.** No more round numbers (40 % / 90 %). Each level comes from what it has to cover:
-- **Go level** = reading error + finishing the current job + driving to the dock + **the worst wait for the one
-  dock** + a floor above empty. Each part is a drain rate × a time. The worst wait is every other robot charging
-  ahead of this one. Because that wait depends on the go level itself, the script solves for it.
-- **Leave level** = the **knee** of the charge curve: the point where constant current turns to constant voltage and
-  the %/min drops. Charging past the knee buys little charge for a long time on the only dock, while the others
-  wait.
-- **Check:** a queue simulation (`tools/dock/charge_policy_sim.py`). N robots, one dock, 7 days, the measured drain,
-  the charge curve as parameters. It reports uptime (share of robot-time spent working) and the lowest true battery
-  for a grid of go / leave levels. Each cell takes the worse of two cases: a worst case (top drain, all start full at
-  the same moment, every reading 3 % high) and a typical case (5 random runs).
+The marker is only used to see whether the camera moved (ECC translation of a patch around it). For that, a
+rectangle works as well as a square: it needs edges in both directions, which two rows of squares give.
 
-**Result, with PLACEHOLDER charge numbers** (40 %/h, i.e. 1.0 A, to a knee at 80 %; asleep while docked). The
-placeholders are marked in the script and replaced after bench test 1. The drain and job numbers are measured.
+**Recommended: 2 × 6 squares of 15 mm, 90 × 30 mm** (`stl/marker_strip_v5.stl`, white with black raised squares,
+filament change at 1.2 mm), across the top of the base, its long side along the bottom of the U.
+- **15 mm squares** are 4.6 px each at the camera's 3.1 px/cm. The old tile's 10 mm squares are 3.1 px, close to
+  blurring into grey.
+- **Two rows** give edges both ways. One row on the black dock would also work, but more slowly (fewer edges across).
+- **90 mm long** is the dock's longest camera-visible known length (below), and it fits the 36 mm base.
+- **3 mm behind the U's inner face:** the docked robot's light plate (59-63 mm up) ends 17 mm short of it. Seen from
+  the camera up to 90 cm away it appears 15 mm closer, so the strip stays visible (3 mm to spare).
+- **Code updated** (`tools/session_checks.py`): the patch around the marker is now a rectangle fitted to the strip
+  (a square patch would take in the docked robot); the marker's place is 2.24 cm behind the bump faces, against the
+  dock's heading (the v4/v5 map pose faces out of the dock). The session-check tests pass (28).
+- If a **pose** from the marker were ever wanted, OpenCV's chessboard finder needs more than 2 inner corners each way
+  (4 × 4 squares at least). That is not a skinny strip; ArUco tags would be the better choice then.
 
-| Policy (3 robots, 1 dock) | Go | Leave | Uptime, typical (worst case) | Lowest battery |
+### The known lengths (Nick, 11:05)
+
+Printed sizes the software can take as the system's absolute scale (`python hardware/dock/build_dock_v5.py` prints
+them). A print can come out 0.1-0.3 % off (PLA shrinkage, the printer's steps: 0.1-0.3 mm over 90 mm). So measure the
+printed part once with calipers or a steel rule, and the software uses the measured value.
+
+| Length | Printed (mm) | Who sees it |
+|---|---|---|
+| **Marker strip, long side** (6 squares) | **90.00** | camera: the strip's two ends and its 7 square edges along it |
+| Marker strip, short side; square pitch | 30.00; 15.00 | camera |
+| U's inner width at the bottom (the pocket) | 103.25 | the robot: the bar seats to ±0.5 |
+| Post tips of each station, centre to centre | 85.45 | the robot's two back switches |
+| Back station's tip line to the bumps' faces | 50.00 | the robot: docked, then a back-touch on the back posts |
+| Side stations, tip line to tip line across the dock | 145.25 | the robot: a touch on each side station |
+| Outer width of the U | 125.25 | tape, camera |
+
+## Conclusion: charge levels from the battery log
+
+**The software** (tests: `tools/dock/tests/test_battery_rates.py`):
+- `battery_rates.load_session(folder)` reads `battery.csv` and the robot logs, and marks a robot asleep from the
+  log's "sent to sleep" line. `BatteryModel` fits, per robot, battery = segment start − still rate × hours still −
+  moving rate × hours moving − asleep rate × hours asleep. A new segment starts at each charge or session.
+- It is the front sensor's method (`e02_front.py`): this session's own rate once it has enough hours (0.75 h still,
+  0.25 h moving, 0.75 h asleep); before that, the robot's earlier sessions (`logs/battery_learned.json`); before that,
+  the fleet default. A rate that differs from the earlier one by more than 3 %/h and 3 standard errors is reported
+  once: "Left drains faster while still than before: ...".
+- `charge_levels.levels(robot, model, fleet)` returns the **go level, the leave level, the early top-up level, the
+  parts and the reasons**. It uses each drain at its **upper bound (rate + 2 standard errors)**, the dock queue (the
+  robot on the dock and how far it has to go, the queued ones, the working ones that could arrive first) and the
+  reading error. `should_go()` adds the early top-up rule. `rest_advice` says when one dock can't keep everyone
+  working.
+
+**The levels on the real data** (all six sessions as history, 3 robots, nobody at the dock, charge curve still the
+PLACEHOLDER 40 %/h to a knee at 80 %):
+
+| Robot | Go | Leave | Early top-up below | Go's parts (%) | Capacity check |
+|---|---|---|---|---|---|
+| Center | **52 %** | 80 % | 60 % | error 3 + job 1.6 + drive 1.7 + queue 40.5 + floor 5 | 3.0 robots: ok |
+| Left | **54 %** | 80 % | 60 % | 3 + 1.6 + 1.7 + 42.5 + 5 | 2.8 robots: **rest one** |
+| Right | **49 %** | 80 % | 60 % | 3 + 1.7 + 1.8 + 37.2 + 5 | 3.2 robots: ok |
+
+<sub>Queue = the worst case: both other robots reach their go level at the same moment as this one, each needing about
+1 h on the dock. The drains go in at their upper bounds (Left: still 22.2, moving 29.6, docked 9.0 %/h). That is why
+the go levels sit above the simulator's 40-50 %.</sub>
+
+- **The queue is still almost all of the go level** (75-80 %). A robot that is nearly done on the dock lowers the
+  others' go level at once (tested).
+- **The uncertainty costs about 10 points of go level:** at the plain rates instead of rate + 2 standard errors,
+  the go levels would be 41-46 % (Right 40.7, Center 42.9, Left 45.6). More hours of logs narrow it. The moving rate is the loosest (±5-7 %/h),
+  because robots drove only 0.1-0.5 h a session.
+- **Left alone fails the capacity check** at the placeholder charge rate: it drains fastest (17.0 still).
+
+**Resting robots instead of a second dock** (`python tools/dock/charge_policy_sim.py --compare`; 3 robots, one dock,
+7 days, the plan's drain range; best safe go/leave on a small grid; uptime typical (worst case)):
+
+| Charge rate | Plain | Early top-up | Rest: 1 works, 2 sleep | Rest: 2 work, 1 sleeps |
 |---|---|---|---|---|
-| Plain: go at G, leave at L | 50 % | 80 % | 61 % (44 %) | 9 % |
-| **Plus early top-up**: also go whenever the dock is free, nobody is waiting, and the reading is below L − 20 | **40 %** | **70 %** | **66 % (45 %)** | **20 %** |
-| Upper limit (no queue at all) | | | 71 % | |
+| 20 %/h (0.5 A) | none safe | none safe | none safe | none safe |
+| 25 %/h (0.62 A) | none safe | none safe | none safe | none safe |
+| 30 %/h (0.75 A) | none safe | none safe | **33 % (34) = 1.0 robot working**, lowest 13 % | none safe |
+| 40 %/h (1.0 A) | 61 % (44) = 1.8 robots | **66 % (45) = 2.0 robots**, lowest 20 % | 33 % = 1.0 | 61 % (50) = 1.8, lowest 6 % |
 
-- **The knee rule holds:** with the plain policy, uptime rises with the leave level up to the knee and falls after
-  it: 56, 59, 61, 61.3, 61.2, 59 % at 65-90 %, then 35 % at 95 %.
-- **The go level from its parts** (plain, worst case, leave 80): 3.0 error + 1.0 job + 1.4 drive + 34.1 queue
-  (2.1 h) + 5.0 floor = **44.5 %**. The simulation's lowest safe level is 50 %; the gap is the gauge's whole-%
-  rounding. **The queue is almost all of it.**
-- **The early top-up is better** (+5 points of uptime, lowest 20 % instead of 9 %). It spreads the robots out, so
-  they rarely need the dock at the same time. Recommended, pending the real curve.
-- **Capacity: the real charge current decides whether 24/7 is possible.** One dock keeps at most 1 + charge rate ÷
-  drain rate robots running. At the placeholder that is 3.5, and 3 robots keep the dock busy 86 % of the time. At
-  **0.5 A** (20 %/h) it is 2.2, and **no thresholds keep 3 robots running without one going flat**. The same happens
-  if robots stay **awake** while docked (2.6). So 3 robots on one dock need a net charge of about **33 %/h (0.8 A,
-  asleep)**, or about 39 %/h (1.0 A) at the top of the drain range. Below that, the runner has to rest one robot at a
-  time (2 working, 1 asleep), or a second dock is needed.
-
-**What bench test 1 must measure** (then rerun
-`python tools/dock/charge_policy_sim.py --cc-rate R --knee K --sleep-drain S`):
-1. **The charge curve:** the current (A) and battery % every 5 minutes from about 20 % to full, robot asleep. This
-   gives the rate before the knee (R, in %/h), the knee (K), and where the charger stops.
-2. The same for 30 minutes **awake**. The difference is the awake penalty.
-3. **Sleep drain** (S): one robot asleep for 1 h, not charging.
-4. **Reading error:** the meter's mAh against the change in battery % over the full charge.
+- **Resting works only in a band of charge rates.** A robot asleep off the dock still drains (PLACEHOLDER 3 %/h). So
+  one dock keeps K robots working only if K × working drain + the others' sleep drain < charge rate − sleep drain.
+  At 30 %/h, resting two robots is the only safe policy (one robot always working). Below about 25 %/h not even that
+  holds: the sleepers' own drain outruns the dock.
+- **At 40 %/h resting costs uptime.** Early top-up stays best (2.0 robots working on average against 1.8).
+- **So the sleep drain decides it as much as the charge current does.** If the firmware's `sleep` draws well under
+  3 %/h, resting reaches lower charge rates. If it can't, the alternative is switching resting robots off (the
+  Alvik's switch is manual) or a second dock.
+- The same comparison on the logs' drain rates: Appendix E.
 
 ## What's next
 
-1. Nick does the check list below and prints fit test 1 (clearance gauge). Its result may move one number.
-2. Bench tests 1-3 (no printing). Then rerun the simulator with test 1's numbers. **That decides whether one dock
-   can run 3 robots nonstop.**
-3. Order the parts (Professor Sodhi orders project parts).
-4. Print fit tests 2 and 3, then attachment v3, the sled and dock v4 (Appendix B).
-5. Bench tests 4-8, then the firmware (back-in `charge` run, docked guard, sense pin) and the runner (send home,
-   early top-up, sleep while docked, leave, alerts), with simulator tests.
-
-### Check list: measure with a ruler (or the printed gauge)
-
-Robot switched off, on a flat table.
-
-| # | What to measure, and where | Expect | Sets |
-|---|---|---|---|
-| 1 | **Clearance under the back.** Print `clearance_gauge.stl` (six fingers, 8.0-10.5 mm tall; the notches count them, one notch = 8.0). Slide each finger in from behind the robot, between the caster and a wheel, under the flat part. Write down the tallest one that slides in without lifting the robot | the 10.0 slides in, the 10.5 doesn't | `Z_UNDER_MM` |
-| 2 | **Battery cover.** Turn the robot over and take a photo. Is anything (cover edge, screw heads, labels) raised above the flat bottom in the area from the back edge to 1 1/2 in (38 mm) forward, between the wheels? | flat | the sled's outline |
-| 3 | **Caster.** From the robot's back edge to the centre of the steel ball; and the width of the plastic holder around the ball | 1/4 in (6.6 mm); 3/4 in (19 mm) | `CASTER_X_MM`, holder width |
-| 4 | **Weight on the caster.** Kitchen scale. Stand the robot with only its caster on the scale and its wheels on a book stack of the same height as the scale's top. Then weigh the whole robot | about 60 g; 192 g | `CASTER_LOAD_N` (the pins must take less than half of it off) |
-| 5 | **Nano's USB-C port.** Which side it faces (robot's left or right, standing behind the robot looking where it looks); from the robot's front edge to the port's centre; how far the port's end is from that side's edge of the shell | ASSUMED 1 3/16-1 5/16 in (30-33 mm) back | `NANO_X_MM`, plug choice |
-| 6 | **Back face.** The height above the table of the lowest connector (Grove, Qwiic or servo) on the back | above 13/16 in (20 mm), where the rear bar ends | the bar's height |
-| 7 | **Tyres.** Inside face to inside face, across | 3 1/4 in (82.4 mm) | `WHEEL_INNER_Y_MM` |
-| 8 | **When the spring pins arrive:** which hole of `pogo_gauge_v.stl` holds one snugly (smallest at the notched end), and how high the pin's tip then stands above the table | tip 11/32 in (8.7 mm) | `POGO_V_BARREL_DIA_MM`, `POGO_V_LEN_MM` |
-
-### Bench tests, in order
-
-1. **Charge curve** (above). The robot on the stock cable through the USB power meter.
-2. **Is the robot's 5 V live when it runs on battery?** Robot ON. Measure between the cut plug's red and black wires
-   (keep the bare ends apart). Above 0.5 V means the SS34 diode is required.
-3. **The cut plug alone,** fed from the dock's charger through the PTC fuse and the diode with clip leads, through
-   the meter. It should read the same as test 1, a little lower for the diode.
-4. **Dock short test:** dock v4 wired, no robot. A wire across the two pins for 5 s: the fuse warms and the current
-   drops; 5 V returns once the wire is removed.
-5. **Spring force and caster:** one pin pressed 1 mm into a kitchen scale (want 30 g or less). Then a robot docked
-   on unpowered pins: slide a sheet of paper under the caster. It must be pinched (the caster still carries weight),
-   and the robot must stay seated, both switches pressed, for 60 s.
-6. **Back-in repeatability:** 20 back-ins from varied starts at the staging point, up to 2 cm off to the side,
-   power on. Count contact sense plus charging within 10 s (goal 20/20). Watch for the caster touching a prong, and
-   for a pin catching the sled.
-7. **One supervised full charge,** docked, robot asleep, 20 → 100 %. Every 30 min, feel the battery cover, pins and
-   fuse.
-8. **Runner trial** in the simulator, then one real low-battery send-home.
+1. **Nick:** order the parts (Appendix F), print the dock, sled, attachment v5 and marker strip, do the paper-stack
+   check (Appendix B), and fit the contacts.
+2. **Bench test 1 (charge curve) and the sleep-drain test.** Then rerun
+   `python tools/dock/charge_policy_sim.py --compare --cc-rate R --knee K --sleep-drain S`. That decides between
+   plain, top-up and rest, and whether one dock can run 3 robots nonstop.
+3. **Runner wiring (simulator first):** call `BatteryModel.update(load_session(session dir))` every battery tick,
+   print its change messages, call `charge_levels.should_go()` with the dock queue, and save the model at the end.
+   Also log `state=asleep` in `battery.csv` for robots sent to sleep (the learner already reads it).
+4. **Software scale:** measure the printed marker strip and enter it as the dock's known length.
+5. Bench tests 4-8 (Appendix B), then the firmware (back-in `charge` run, docked guard, sense pin).
 
 ---
 
 ## New tests that may now be needed
-1. **Real clearance and caster load** (check items 1 and 4): the whole stack and the caster-lift margin rest on them.
-2. **Caster lift during the approach.** When the robot is still off-centre as the pins reach the sled's back end
-   (the funnel then allows up to 17 mm; the slots' flared mouths take 6), a pin rides under the sled's plastic for a
-   few mm, briefly pressed far behind the axle. Bench test 6 watches for it. If the caster lifts, flare the slots
-   wider or send the robot to the staging point more precisely.
-3. **Back-in docking in the simulator:** `tools/sim/fw_dock.py` models nose-first docking with the old pocket. It
-   needs the back bumper, the bumps and the fork (prongs as obstacles for the caster).
-4. **Charge curve, awake penalty, sleep drain, reading error** (bench test 1). Then rerun the policy simulator; it is
-   the 24/7 go / no-go.
-5. **Early top-up in the runner,** simulator first: two robots wanting the dock at once, a robot topping up when
-   another drops to the go level (does the runner pull the top-up robot out?), and resting one robot when the
-   capacity check fails.
-6. **Contact wear:** 100 back-ins, then the contact resistance (meter on the pad and pin) before and after. The pins
-   slide 4 mm over the ramp and pad on every docking.
-7. **Contact-sense calibration:** ADC reading with the pads open, on live pins, and with the dock unpowered.
-8. **Firmware guard:** a docked robot refuses backward moves, and driving forward clears the guard.
-9. **Back-finds without a line sensor behind:** a back-find towards a missing board, and towards the board's edge,
-   with camera noise in the simulator. The position borders must stop it before the edge.
-10. **Post stations with the raised posts:** repeat the `run posts` check, since the levers now meet the posts
-    14.6 mm up instead of about 9.
+1. **Paper-stack check and spring pick** (Appendix B): the real clearance, pad height and spring rate. The force
+   budget rests on them and on the caster load (check item 4).
+2. **Back-in with the plates, 20 times** (bench test 6): watch for the caster lifting while the crown crosses the
+   pad's back edge (the 24 % peak), and for the plate catching the sled's slot end.
+3. **Contact resistance at 0.2 N:** meter on pad and plate, docked, unpowered; then voltage at the plug while charging
+   at full current. Low force on brass may not be enough. If it isn't: a stiffer spring (the budget allows about
+   0.35 N per plate below 25 %), or tin both faces.
+4. **Plate wear and hinge:** 100 back-ins, then the contact resistance again, and check the tab hasn't worn its slot
+   (a worn slot lets the plate shift sideways).
+5. **Sleep drain** (one robot asleep 1 h): it now decides whether resting robots helps at all.
+6. **Battery learner on a long session:** a 2-hour session with `--battery-watch-s 300`; check the moving rate's
+   standard error falls below 3 %/h, and that `battery.csv`'s state rule (without RAW rows) agrees with the RAW
+   rows' driving time.
+7. **Runner integration** in the simulator: levels recomputed as robots queue; a resting robot reaching its go level
+   waits asleep until the dock is free; two robots wanting the dock at once.
+8. **Dock-marker bump check on a real recording** with the strip (E00e Part C): it must catch a 0.5 px bump with the
+   rectangular patch, and pass with a robot docked beside it.
+9. **The dock as the scale:** the measured strip length against the camera's px/cm. If they disagree by more than
+   0.3 %, the floor calibration or the print is off.
+10. Carried over: back-in docking in the simulator (prongs and plates as obstacles), back-finds without a line sensor
+    behind, the post stations with the rear bar.
 
 ## Possible inaccuracies
-- **The underside numbers come from Arduino's simplified CAD**, which has no battery cover, screws or tyre squash.
-  The 10.1 mm clearance carries the whole stack (check items 1-2).
-- **Caster load 0.6 N: ASSUMED** (about 30 % of 192 g plus the attachment). The 59 % lift figure scales with it
-  (check item 4).
-- **Spring pins: every number ASSUMED** (3.0 mm barrel, 6.5 mm long, 1.5 mm stroke, 0.3 N). None bought. Low-force
-  pins of this exact length may not exist off the shelf. The pin seat height is the one number to change for
-  another length.
-- **The back face is assumed to mirror the front** (47.6 mm behind the axle), from the CAD's 47.4-48.0.
-- **Nano port position** is read off Arduino's picture, not measured (check item 5).
-- **Back connectors** assumed above the rear bar (check item 6).
-- **The robot's lateral offset at the sled** (17 mm) comes from the funnel's shape alone. The real offset depends on
-  how precisely the runner reaches the staging point.
-- **Charge-policy placeholders:** charge rate 40 %/h, knee 80 %, the CV taper's shape, cut-off at C/10, sleep drain
-  3 %/h, reading error ±3 %. The answer moves with all of them; only the method is final.
-- **Drain rates** are per-day fits with driving about a quarter of the time. A 24/7 duty with more driving would
-  drain faster. The battery % is a smoothed integer whose meaning is not checked (night analyses).
-- **The simulation queues first come, first served,** with no robot ever rested and a fixed 2 min drive and 1.5 min
-  swap (both estimates).
-- **Prices** are estimates, not looked up.
-- **Chosen numbers** (CHOSEN in the scripts), each with whether a design of experiment should set it:
-  - Pad position 24 mm behind the axle, prong width 12, pin compression 1.0 mm: **yes, a small DOE** if bench test 6
-    shows misses or caster lift. Two compressions × two pad positions × 20 back-ins, scored on contact rate and
-    caster pinch.
-  - Bump height out of the wall 4 mm, rear bar height 10.1-20.1: no (geometry: lever travel, pin clearance).
-  - Sled thickness 2.4, slot width 7, flare 14, ramp 4 mm: no, unless test 6 shows catching; then a DOE on the
-    flare.
-  - Go / leave / top-up levels: **set by the simulator** (a simulated DOE over the grid), not physically.
-  - Floor 5 %: **yes, a one-robot test:** run it down and note the % where the motors weaken or it browns out.
-  - Drive 2 min and swap 1.5 min: no; timed in bench test 8.
-  - PTC 1.1 A hold: no; 1.5 × test 1's peak.
+- **Caster load 0.6 N: ASSUMED.** Every lift percentage scales with it (check item 4).
+- **Underside 10.1 mm and pad height 7.7 mm:** Arduino's simplified CAD (no battery cover, screws or tyre squash).
+  The sled now reaches 8 mm further forward (to just past the axle). The battery cover's position is unknown: it may
+  sit under the sled (check item 2).
+- **Spring rate 0.2 N/mm, 6 mm long, solid at 2 mm: ASSUMED** until bought. The free crown height follows the
+  spring's length (Appendix B sets it).
+- **The lift curve's model:** the plate as a rigid line turning about its hinge, the robot as rigid, contact where
+  the robot must push the plate down furthest. Friction, plate rocking in its slot and the sled flexing are left out.
+- **The rest policy's sleep drain (3 %/h) is a PLACEHOLDER;** the comparison's verdict turns on it.
+- **Charge curve:** still the PLACEHOLDER 40 %/h to a knee at 80 %, so the leave level (80 %) is a placeholder too.
+- **Drain:** only about 1 h of moving per robot over all sessions. Fitting all sessions jointly (instead of session
+  by session) gives moving rates *below* still (10-13 against 14-17 %/h). That is not physical: the joint fit's
+  assumption that robots stood switched on between the 24th's stages is probably wrong, or the gauge's smoothing
+  confounds it. The table uses the session-by-session fits.
+- **`battery.csv` alone** does not say how long a robot moved between rows. Without RAW rows the learner ASSUMES half
+  the time it was not known to be still. RAW rows, when present, override it.
+- **The battery % is a smoothed whole number** whose meaning is unchecked (night analyses). The AR(1) inflation may
+  not fully cover its correlation.
+- **Marker visibility margin (3 mm)** assumes the camera up to 90 cm from the dock at 262 cm height. A lower camera
+  or a dock further out shrinks it.
+- **Known lengths** are the printed sizes. A print's real size can differ by 0.1-0.3 % until measured.
+- **Chosen numbers**, each with whether a DOE should set it (rows in `docs/doe-backlog.md`):
+  - Pad 8 mm behind the axle, spring 0.2 N/mm, crown 9.0 mm free: **yes, a small DOE:** 2 spring rates × 2 crown
+    heights (one paper sheet of shims) × 20 back-ins, scored on contact resistance, contact rate and caster pinch.
+  - Plate 22 mm hinge to crown, 0.8 mm brass: no (geometry; any stiff strip).
+  - Arms' play ±1.5 mm, mouth chamfer 10 mm × 7 mm, arm length to 105 mm: **yes:** bench test 6's back-ins from
+    staging offsets of 0 / 5 / 10 mm, then a narrower or wider chamfer if any miss.
+  - Slot width 10.4 mm: no (follows from the arms' play).
+  - Marker squares 15 mm, 2 × 6: **yes, cheap:** E00e Part C with the 15 mm strip against the old 10 mm tile, a known
+    bump of 1 px, 10 times each.
+  - Base 36 mm deep: no (fits the strip).
+  - Drain at rate + 2 standard errors: **yes, in the simulator:** each robot's rate drawn from its uncertainty,
+    k = 1 / 2 / 3, scored on flat batteries against uptime.
+  - Learner thresholds (0.75 / 0.25 h before a session's own rate; 3 %/h and 3 standard errors to flag; 3 % rise =
+    a charge; 45 min to join sessions): **yes, logs-only:** replay sessions with a drain change injected; how soon
+    it is caught against false flags.
+  - Rest K (how many robots work): set by the simulator after bench test 1 and the sleep test.
 
 ---
 
-## Appendix A: geometry report (`python hardware/dock/build_attachment_v3.py`, 33 ok, 2 WARN, 0 FAIL)
-- WARN, approach: when the pins reach the sled's back end, the funnel holds the robot within 17.1 mm; the flared
-  mouths take 6.2 (new test 2).
-- WARN, lift: two 0.3 N pins at 24 mm take 0.35 N off the caster, 59 % of the assumed 0.6 N (check item 4, test 5).
-- Prongs 16-28 mm out from the centre: they miss the ball (out to 4.5) and pass under its holder (7.1 mm up), and
-  are 13.2 mm inside the wheels. The ball clears the prong tips by 1.4 mm at the funnel's worst.
-- On the pad, the pin has 3.2 mm to spare sideways (docked play 0.5) and 4.2 mm along it.
-- Dock v2's checks on dock v4 pass (post spacing 85.45 mm, stations clear, posts 22 mm).
-- Print: attachment v3 upside down with supports (about 1570 mm², version 1 1450). Sled top face down, no
-  supports (its only down-facing faces are 2 mm wire-channel roofs). Dock v4 bottom down (the cavity roof, cable
-  channel and wire grooves are bridges).
-- Files: `stl/attachment_v3.stl`, `pad_sled.stl`, `dock_v4.stl`, `clearance_gauge.stl`,
-  `attachment_v3_fit_test.stl` (the rear bar and lower arms, 38 × 102 × 8 mm), `pogo_gauge_v.stl`. Previews:
-  `preview/attachment_v3.png`, `pad_sled.png`, `dock_v4.png`, `docked_v4.png`, `underside_v4.png`.
+## Appendix A: geometry report (`python hardware/dock/build_dock_v5.py`: 0 FAIL, 1 WARN)
+- WARN (for comparison only): a robot 2.6 mm off centre would drag a crown under the sled: up to 87 % lift.
+- Spring 5.9 mm long free (pocket floor 1.9 mm up); the lip's pocket stops the crown after 3.6 mm (spring 2.6 mm,
+  solid about 2.0). The foot swings up 0.5 mm at the stop in a 1.8 mm recess.
+- Prongs 16-28 mm out: clear of the caster's holder by 6.5 mm and 13.2 inside the wheels; screw tabs to 38 mm.
+- When the caster reaches the prong tips, the bar is at the mouth: a robot the chamfer can catch (8.5 mm) misses the
+  tips by 3.0 mm or more.
+- The sled's front end never meets the plate above 7.2 mm (the sled face is 7.7).
+- Light plate legs clear the arms by 0.97 mm; M3 heads (to 53.75) run in the 55 mm groove.
+- Print: dock bottom down, brim on (2258 mm² faces down, about 2171 of it bridges: the cavity roof, wire grooves,
+  screw-head groove roofs). Sled top face down, no supports. Attachment v5 as v3 (upside down, supports).
+- Firmware and map numbers (as v3/v4): bumper face 6.10 cm behind the axle, switches ±4.27 cm, `sw_gap_cm` 0.020,
+  `bumper_cm` 1.34; docked, the axle is 6.5 cm from the bottom of the U; the map's dock pose is the middle of the
+  bumps' faces, heading out of the dock. Crowns at dock X −57.0, Y ±22; marker centre 18.4 mm behind the U's inner
+  face.
+- Previews: `preview/dock_v5.png`, `docked_v5.png`, `contact_v5.png`, `lift_v5.png`, `sled_v5.png`.
 
-## Appendix B: build steps
+## Appendix B: build steps and the paper-stack check
 
-**Make the files** (only if a number changed). Open a **Terminal window on the laptop** in the project folder,
-type this and press Enter:
+**Make the files** (only if a number changed). Open a **Terminal window on the laptop** in the project folder, type
+this and press Enter:
 
 ```
-python hardware/dock/build_attachment_v3.py
+python hardware/dock/build_dock_v5.py
 ```
 
-You should see lines starting `ok`, two starting `WARN` (above), and none starting `FAIL`.
+You should see lines starting `ok`, one starting `WARN`, and none starting `FAIL`.
 
 **Print** (PLA, 0.2 mm layers, 4 walls, 20 % infill; do not rotate the parts in the slicer):
-1. `clearance_gauge.stl`: bottom down, no support (check item 1).
-2. `attachment_v3_fit_test.stl`: bottom down, no support. Hold it against the robot's back. The bar's bottom
-   should be level with the robot's underside, and the low arm holes should line up with the back pair of brass
-   inserts.
-3. `pogo_gauge_v.stl` once the pins arrive (check item 8).
-4. `attachment_v3.stl`: upside down as exported, **supports on** (tree if offered).
-5. `pad_sled.stl`: as exported (top face down), no support.
-6. `dock_v4.stl`: bottom down, brim on, black.
+1. `dock_v5.stl`: bottom down, brim on, black.
+2. `pad_sled_v5.stl`: as exported, no support.
+3. `attachment_v5.stl`: upside down as exported, supports on (tree if offered). (Not v3: v5 has the wire holes moved.)
+4. `marker_strip_v5.stl`: white; add a filament change (pause, M600) at 1.2 mm so the raised squares print black.
+
+**Paper-stack check** (robot switched off, on a flat table). Sizes: a US penny is 1.52 mm thick. Printer paper is
+about 0.1 mm a sheet. To check yours: a 500-sheet ream's thickness in mm ÷ 500.
+1. **Clearance under the robot.** Make a stack of 6 pennies (9.1 mm). Slide it under the robot's flat underside from
+   behind, between the caster and a wheel. If it slides in without lifting the robot, add one sheet of paper at a
+   time on top until the robot just starts to lift. Write down the last stack that slid in: pennies × 1.52 + sheets
+   × 0.1 = **clearance**. Expect about 10.1 (6 pennies + 10 sheets).
+2. **Fit the sled** (Robot side, below). Then the **pad height**: the same with 5 pennies (7.6 mm) under one brass
+   pad. Expect about 7.7 (5 pennies + 1 sheet). Write it down: **pad height**.
+3. **Your crown height** = pad height + 1.3 mm, but **at least 0.8 mm under the clearance**. If those two clash (pad
+   height + 1.3 is more than clearance − 0.8), stop and tell Claude: the sled's thickness changes.
+4. **Set each crown.** Make two equal stacks of pennies and paper at your crown height. Stand them on the plywood,
+   one each side of a plate's crown, and lay a ruler across them over the crown. A strip of paper slid between the
+   crown and the ruler should be lightly pinched. Crown too low (the paper is loose): put a paper disk under the
+   spring. Crown too high (the ruler rocks): snip a quarter turn off the spring's bottom with side cutters.
+5. **Docked check** (power off): back the robot in by hand until both switches click. Slide a sheet of paper under
+   the caster: it must be pinched (the caster still carries weight).
+
+**Picking the spring** (penny test; the spring stands upright on a kitchen scale; zero the scale first): press it
+down with a flat stick until it is as tall as a stack of 3 pennies (4.6 mm). The scale should read **20-45 g**. Under
+20 g the contact is weak; over 45 g it lifts more of the caster.
 
 **Robot side** (each robot):
-1. Cut two brass-shim pads, 8 × 10 mm, each with a 3 mm tab on one short end. Bend the tab up 90°.
-2. Push each pad into its recess on the sled's underside (the recesses are at the end away from the two screw
-   holes), with the tab up through the slot. Glue it with a thin film of superglue. Run a fingernail across: it
-   must not stick out.
-3. Solder a red wire to the tab of the pad that will be on the **robot's left**. Hold the sled with its wire
-   channels facing up and the two screw holes towards you: that is the pad on your **left**. Solder a black wire to
-   the other. Press each wire
-   into the channel on the sled's top, out to the back.
-4. Fit attachment v3 to the robot with eight M3 × 8 screws: the bar's arms on the back inserts, the plate's legs on
-   the front inserts.
-5. Thread the two wires up through the bar's wire holes. Hold the sled flat under the robot's back and screw it to
-   the bar with two M2 × 6 pan-head screws.
-6. Above the bar: SS34 diode in the red wire, **striped end towards the plug**. Join red to the cut plug's red and
-   black to its black, and heat-shrink each joint. Add the sense resistors as before (100 kΩ from red, on the pad
-   side of the diode, to the analog pin; 150 kΩ from that pin to GND).
-7. Lay the cable in the clips under the plate, from the back to the front, and plug it into the Nano.
+1. Cut two brass-shim pads, 12 × 10 mm (12 along the robot), each with a 3 mm tab on one short end. Bend the tab up
+   90°.
+2. Push each pad into its recess on the sled's underside, tab up through its slot, with a thin film of superglue. Run
+   a fingernail across: it must not stick out.
+3. Solder red to the pad on the robot's left and black to the other (sled channels facing up, screw holes towards
+   you: left is on your left). Press each wire into the channel on the sled's top, out to the back.
+4. Fit attachment v5 with eight M3 × 8 screws. Thread the two wires up through the bar's holes. Screw the sled to the
+   bar's underside with two M2 × 6 screws. A strip of thin double-sided tape near the sled's front end holds it flat.
+5. Above the bar: SS34 diode in the red wire (striped end towards the plug), sense resistors, the cut USB-C plug, as
+   before (Appendix C).
 
-**Dock side:**
-1. Solder a short wire to each spring pin's tail first, then press the pin into its prong from above until it stops
-   on its seat (a drop of superglue on the barrel if loose). Lay the wire in the groove under the prong, to the
-   cavity. The pin under the dimple on top is **+**.
-2. Wire the cut USB-A cable: PTC fuse in red, then red to the + pin's wire and black to the −. Heat-shrink
-   everything.
-3. **Polarity check before any robot docks:** charger plugged in, multimeter on DC volts, red probe on the + pin,
-   black on the −. You should see about +5.0 V. A minus sign means swap them.
-4. Screw the dock down as dock v2 (four #6 × 1 1/4 in wood screws through the head, two in the funnel tabs). Leave
-   25 cm clear in front of the mouth for the staging point.
+**Dock side** (each contact):
+1. Cut 31.5 mm of 1/32 × 1/4 in brass strip. Bend 7 mm at one end down 90° (the tab: 4 mm through the prong plus the
+   3 mm foot). Bend the last 2.5 mm at the other end down about 60° (the lip). Round the lip's outside with a fine
+   file.
+2. Solder 10 cm of 30 AWG silicone wire to the tab's last 3 mm (the foot).
+3. Drop the spring into its pocket (a dot of superglue on its bottom end).
+4. Push the tab and wire down through the slot from above. Turn the dock over and bend the foot flat towards the mouth
+   into its recess. Lay the wire in the groove to the cavity.
+5. Turn the dock back over: the plate's rear should rest on the spring, its lip over the lip's pocket. Press the rear
+   down with a finger: it should spring back up and not rub the pocket's sides.
+6. Wire the charger as before (PTC fuse in red, red to the + plate under the dimple, black to the −). **Polarity check
+   before any robot docks:** charger plugged in, meter on DC volts, red probe on the + plate, black on the −: about
+   +5.0 V.
+7. Screw the dock down through the four holes and the two prong tabs. Leave 25 cm clear in front of the mouth.
 
-## Appendix C: how the Alvik charges (research, 2026-10-24/25)
+**Bench tests** (unchanged from the first plan): 1 charge curve; 2 robot's 5 V on battery (diode needed?); 3 cut plug
+through the meter; 4 dock short test (fuse); 5 force and caster pinch (now the penny test and step 5 above); 6 20
+back-ins (contact within 10 s; watch the caster at the pad's edge); 7 one supervised full charge; 8 runner trial.
+
+## Appendix C: how the Alvik charges, and electrics (research 2026-10-24/25)
 
 | Question | Answer | Source |
 |---|---|---|
 | Battery | One 18650 Li-ion cell, 2500 mAh, 3.0-4.2 V | [DS] §2.3; tech-specs.yml |
 | Charge port | The Nano ESP32's USB-C; charging comes in on VBUS | [Hackster](https://www.hackster.io/glowascii/first-steps-with-the-arduino-alvik-robot-kit-f229bb); [CNX](https://www.cnx-software.com/2024/05/14/arduino-alvik-is-a-3-wheel-robot-designed-for-steam-education/) |
-| Charger chip | MAX17332 (charger, fuel gauge, protector) plus LTC4360 over/reverse-voltage protection | [DS] §2.3.1; [Analog Devices](https://www.analog.com/en/products/MAX17332.html) |
+| Charger chip | MAX17332 (charger, fuel gauge, protector) plus LTC4360 protection | [DS] §2.3.1; [Analog Devices](https://www.analog.com/en/products/MAX17332.html) |
 | Charge current | Not published | bench test 1 |
-| Switched off / on | Charges either way. When off, the Nano's LED blinks red, then goes solid green when full | [docs commit](https://github.com/arduino/docs-content/commit/5442398e6b4358783dfb01e38d9ecb4c320ed9c5); [Bandini](https://www.hackster.io/roni-bandini/building-a-self-charging-alvik-6daed7) |
-| Which USB-C lines | Only VBUS and GND. No CC resistors on the robot side. A USB-A charger with a cut USB-A cable always gives 5 V | [Hackaday](https://hackaday.com/tag/vconn/); [DigiKey forum](https://forum.digikey.com/t/simple-way-to-use-usb-type-c-to-get-5v-at-up-to-3a-15w/7016/11) |
+| Switched off / on | Charges either way | [docs commit](https://github.com/arduino/docs-content/commit/5442398e6b4358783dfb01e38d9ecb4c320ed9c5); [Bandini](https://www.hackster.io/roni-bandini/building-a-self-charging-alvik-6daed7) |
+| Which USB-C lines | Only VBUS and GND; a USB-A charger with a cut USB-A cable always gives 5 V | [Hackaday](https://hackaday.com/tag/vconn/); [DigiKey forum](https://forum.digikey.com/t/simple-way-to-use-usb-type-c-to-get-5v-at-up-to-3a-15w/7016/11) |
 
-Bandini (the only Alvik self-charger found) rejected plugging into the USB-C port ("needed precision and pressure")
-and used a 5 V / 1 A wireless coil soldered to the Nano's VBUS and GND, with the robot going home below 20 %.
+<sub>[DS] = the [AKX00066 datasheet](https://docs.arduino.cc/resources/datasheets/AKX00066-datasheet.pdf).</sub>
 
-## Appendix D: superseded designs
-- **Attachment v2 / dock v3** (`build_attachment_v2.py`, files kept): brass screw-head pads in the FRONT bar, and
-  spring pins in the dock's back wall. Replaced by Nick's decisions above: back-mounted attachment, contacts
-  underneath, tongue.
-- **Thresholds 40 % / 90 %:** replaced by the method above.
+Electrics: USB-C plug → SS34 Schottky diode (striped end towards the plug) in the + wire → the + pad (robot's left).
+Contact sense: 100 kΩ from the + pad to a free Nano analog pin, 150 kΩ from that pin to GND. Dock: USB-A wall charger
+(5 V, 2 A+) → cut USB-A cable → resettable fuse (PTC, 1.1 A hold) in the red wire → + plate; black → − plate.
 
-## Parts (rough prices, estimated, not checked against a store)
+## Appendix D: superseded designs (files kept)
+- **v3 / dock v4** (`build_attachment_v3.py`): upright spring pins in a two-pronged tongue, pads 24 mm behind the
+  axle (59 % caster lift docked, 71 % while crossing the pad's edge), a funnel dock with a 50 mm funnel and a solid
+  100 mm head. Replaced by Nick's 10:39 decisions.
+- **A leaf spring** (a bent phosphor-bronze strip) was drafted for v5 first, then replaced by Nick's 11:05
+  clarification (a stiff strip on springs, no bending).
+- **v2 / dock v3:** pads in the front bar, pins in the back wall. **Thresholds 40 % / 90 %:** replaced by the method
+  above.
+
+## Appendix E: the policy comparison on the logs' drain rates
+`python tools/dock/charge_policy_sim.py --compare --learned` (drain from `battery_rates.py`):
+
+| Charge rate | Plain | Early top-up | Rest 1 (1 works) | Rest 2 (2 work) | Rest 1 + top-up | Rest 2 + top-up |
+|---|---|---|---|---|---|---|
+| 20 %/h | none safe | none | none | none | none | none |
+| 25 %/h | none | none | none | none | 33 % (34) = 1.0 robot, lowest 15 % | none |
+| 30 %/h | none | none | 33 % (34) = 1.0, lowest 14 % | none | 33 % (34) = 1.0, lowest 34 % | none |
+| 40 %/h | 62 % (51) = 1.9, lowest 7 % | **65 % (55) = 2.0, lowest 19 %** | 33 % = 1.0 | 62 % (64) = 1.9, lowest 15 % | 33 % = 1.0, lowest 39 % | 59 % (40) = 1.8, lowest 32 % |
+
+<sub>Drain from the logs: working 14.2-17.5, driving 19.3, waiting 17.0 %/h (the robots' own rates, not their upper
+bounds); asleep 3.0 (PLACEHOLDER). Same verdict as the plan's drain range, a little more forgiving: with early
+top-up added, resting two robots is also safe at 25 %/h.</sub>
+
+## Appendix F: parts (rough prices, estimated, not checked against a store)
 
 | Part | Per | Rough price |
 |---|---|---|
-| Spring pins, through-hole with solder tail, **low force (about 30 g)**, about 3 mm barrel, about 6.5 mm long, 1.5 mm stroke | dock (2) | $5-10 for 10-20 |
-| Brass shim, 0.3-0.5 mm (or a scrap of copper-clad board) | a small sheet | $5-8 |
+| Brass strip 1/32 × 1/4 in (0.8 × 6.35 mm), 12 in | dock (2 plates) | $3-5 |
+| Micro compression spring assortment (wire 0.2-0.3 mm, 3 mm across, 5-8 mm long) | dock (2) | $6-10 |
+| 30 AWG silicone stranded wire | once | $5-8 |
+| #4 × 1/2 in wood screws (prong tabs) | dock (2) | on hand? |
+| Brass shim 0.3-0.5 mm (pads) | small sheet | $5-8 |
 | M2 × 6 pan-head screws | robot (2) | $4 a pack |
-| M3 × 8 screws (as version 1) | robot (8) | on hand |
-| USB-C plug: a short USB-C cable to cut, or a 2-wire plug breakout. Ideally right-angle (check item 5) | robot | $1-3 |
-| SS34 Schottky diode; 100 kΩ and 150 kΩ resistors | robot | under $1 |
-| USB-A wall charger 5 V 2 A+, USB-A cable to cut, PTC fuse 1.1 A hold | dock | $12-18 |
+| USB-C plug (short cable to cut), SS34 diode, 100 kΩ and 150 kΩ | robot | $2-4 |
+| USB-A charger 5 V 2 A+, USB-A cable to cut, PTC fuse 1.1 A hold | dock | $12-18 |
 | Inline USB power meter (bench tests) | once | $10-15 |
-| Hook-up wire 26-28 AWG, heat-shrink | once | on hand? |

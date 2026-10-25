@@ -415,7 +415,7 @@ def write_tile_recording(folder, shift_after_s=None, shift=(0.0, 0.0), seconds=8
         json.dump(dict(fps_requested=25, fps_reported=25.0), f)
     mp = os.path.join(folder, "map.json")
     with open(mp, "w") as f:
-        json.dump({"home_docks": [{"name": "h1", "x": 30.0 - sc.DOCK_TILE_CENTER_CM + 2.56, "y": 30.0, "heading": 0}]}, f)
+        json.dump({"home_docks": [{"name": "h1", "x": 32.56 + sc.DOCK_TILE_CENTER_CM, "y": 30.0, "heading": 0}]}, f)
     cp = os.path.join(folder, "floor_calibration.json")
     with open(cp, "w") as f:
         json.dump({"H_floor_to_px": [[4, 0, 20], [0, 4, 20], [0, 0, 1]]}, f)

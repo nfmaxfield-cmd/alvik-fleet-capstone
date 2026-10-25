@@ -853,11 +853,16 @@ def flash_length_checks(rec, sync_video_times, sync_ms=300.0, max_blink_ms=220.0
 
 
 # ---------------------------------------------------------------- home dock check tile (hardware/dock)
-# Each home dock carries a printed black-and-white check tile on its back block (40 mm, 4 x 4 squares), fixed
-# to the plywood: a spot the overhead camera sees in every frame that never moves. If its position in the image
-# drifts, the camera (or the board) was bumped: every camera fix after that is off by the same amount.
+# Each home dock carries a printed black-and-white marker on top, fixed to the plywood: a spot the overhead camera
+# sees in every frame that never moves. If its position in the image drifts, the camera (or the board) was bumped:
+# every camera fix after that is off by the same amount. Dock v5 (hardware/dock/build_dock_v5.py, 2026-10-25): a
+# strip of 2 x 6 squares of 15 mm (3.0 cm along the dock, 9.0 cm across it) on the base at the bottom of the U. Only
+# ECC translation tracking uses it (no chessboard finder, no pose), so a rectangle works; the patch around it is a
+# rectangle too, so the docked robot beside it stays out of the patch. (Docks v1-v4: a 4 cm square tile.)
 
-DOCK_TILE_CENTER_CM = 2.56      # tile centre ahead of the back wall's inner face (dock_params TILE_CENTER_X_MM)
+DOCK_TILE_CENTER_CM = 1.84 + 0.4  # marker centre behind the bump faces (build_dock_v5 STRIP_CX_MM 18.4 behind the
+                                  # U's inner face, + the bumps' 4 mm)
+DOCK_TILE_SIZE_CM = (3.0, 9.0)  # along the dock's axis, across it (build_dock_v5 STRIP_DEP_MM, STRIP_LEN_MM)
 DOCK_TILE_HEIGHT_CM = 2.2       # on top of the dock's 22 mm walls (seen slightly further out than its floor point)
 
 
@@ -869,8 +874,24 @@ def dock_tile_floor_points(map_path):
     out = []
     for d in m.get("home_docks", []) or []:
         h = math.radians(float(d["heading"]))
-        out.append((d.get("name", "dock"), float(d["x"]) + DOCK_TILE_CENTER_CM * math.cos(h),
-                    float(d["y"]) + DOCK_TILE_CENTER_CM * math.sin(h)))
+        # the dock pose (docks v4-v5, backed into): the middle of the bump faces, heading = the way a docked robot
+        # faces, OUT of the dock; the marker is on the base behind the bumps, so against the heading
+        out.append((d.get("name", "dock"), float(d["x"]) - DOCK_TILE_CENTER_CM * math.cos(h),
+                    float(d["y"]) - DOCK_TILE_CENTER_CM * math.sin(h)))
+    return out
+
+
+def dock_tile_corners(map_path):
+    """[(dock name, [(x_cm, y_cm) x 4])]: the marker's four corners on the floor (map frame), for the patch size."""
+    with open(map_path) as f:
+        m = json.load(f)
+    out = []
+    for (name, cx, cy), d in zip(dock_tile_floor_points(map_path), m.get("home_docks", []) or []):
+        h = math.radians(float(d["heading"]))
+        ax, ay, bx, by = math.cos(h), math.sin(h), -math.sin(h), math.cos(h)
+        a, b = DOCK_TILE_SIZE_CM[0] / 2, DOCK_TILE_SIZE_CM[1] / 2
+        out.append((name, [(cx + sa * a * ax + sb * b * bx, cy + sa * a * ay + sb * b * by)
+                           for sa, sb in ((1, 1), (1, -1), (-1, -1), (-1, 1))]))
     return out
 
 
@@ -886,21 +907,24 @@ class PatternWatch:
     every n-th grey frame) and on a recording (dock_tile_checks)."""
 
     def __init__(self, center_px, half_px=12, margin_px=6, alarm_px=0.75, confirm=3):
+        """half_px: half the patch's side (a square), or (half width, half height) for a rectangle."""
         self.cx, self.cy = float(center_px[0]), float(center_px[1])
-        self.h, self.m = int(half_px), int(margin_px)
+        hw, hh = (half_px, half_px) if isinstance(half_px, (int, float)) else half_px
+        self.hw, self.hh, self.m = int(hw), int(hh), int(margin_px)
         self.alarm_px, self.confirm = alarm_px, confirm
         self.ref = None
         self.last = (0.0, 0.0)
         self.high = 0
         self.history = []          # (t, dx, dy, match 0..1)
 
-    def _patch(self, gray, half):
+    def _patch(self, gray, extra):
         import numpy as np
-        x0, y0 = int(round(self.cx)) - half, int(round(self.cy)) - half
+        hw, hh = self.hw + extra, self.hh + extra
+        x0, y0 = int(round(self.cx)) - hw, int(round(self.cy)) - hh
         H, W = gray.shape[:2]
-        if x0 < 0 or y0 < 0 or x0 + 2 * half > W or y0 + 2 * half > H:
+        if x0 < 0 or y0 < 0 or x0 + 2 * hw > W or y0 + 2 * hh > H:
             return None
-        return np.ascontiguousarray(gray[y0:y0 + 2 * half, x0:x0 + 2 * half], dtype=np.float32)
+        return np.ascontiguousarray(gray[y0:y0 + 2 * hh, x0:x0 + 2 * hw], dtype=np.float32)
 
     def update(self, gray, t=0.0):
         """One frame (grey, float or uint8). Returns (dx, dy, match, alarm) or None if out of view. match is
@@ -908,12 +932,12 @@ class PatternWatch:
         import cv2
         import numpy as np
         if self.ref is None:
-            self.ref = self._patch(gray, self.h)
+            self.ref = self._patch(gray, 0)
             if self.ref is None:
                 return None
             self.history.append((t, 0.0, 0.0, 1.0))
             return 0.0, 0.0, 1.0, False
-        cur = self._patch(gray, self.h + self.m)
+        cur = self._patch(gray, self.m)
         if cur is None:
             return None
         warp = np.array([[1, 0, self.m + self.last[0]], [0, 1, self.m + self.last[1]]], np.float32)
@@ -959,10 +983,15 @@ def dock_tile_checks(rec, map_path, calib_path, every_s=2.0, max_shift_px=0.5, p
     fps = nominal_fps(rec) or 25.0
     step = max(1, int(round(every_s * fps)))
     watches = []
+    corners = dict(dock_tile_corners(map_path))
     for dn, x, y in tiles:
         u, v = floor_to_px(H, x, y)
-        half = max(8, int(round(3.0 * px_per_cm)))      # the 4 cm tile plus a margin
-        watches.append((dn, PatternWatch((u, v), half_px=half, margin_px=max(4, int(round(1.5 * px_per_cm))))))
+        # the marker's own outline in the picture plus 0.5 cm: a rectangle, so the docked robot stays outside it
+        pc = [floor_to_px(H, a, b) for a, b in corners.get(dn, [(x, y)])]
+        pad = 0.5 * px_per_cm
+        hw = max(6, int(round(max(abs(q[0] - u) for q in pc) + pad)))
+        hh = max(6, int(round(max(abs(q[1] - v) for q in pc) + pad)))
+        watches.append((dn, PatternWatch((u, v), half_px=(hw, hh), margin_px=max(4, int(round(1.5 * px_per_cm))))))
     f = 0
     while n <= 0 or f < n:
         cap.set(cv2.CAP_PROP_POS_FRAMES, f)
