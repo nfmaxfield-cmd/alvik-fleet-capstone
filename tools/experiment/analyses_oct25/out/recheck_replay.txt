@@ -1,0 +1,20 @@
+go legs replayed: 677
+disagree (or no still position) at the first look: 47 (6.9%)
+  oct23-morning  legs  342  first look not agreeing  25  (no still position 7)
+  oct23-evening  legs  112  first look not agreeing   5  (no still position 5)
+  stage1         legs   69  first look not agreeing   3  (no still position 0)
+  stage2         legs  151  first look not agreeing  13  (no still position 7)
+  right-alone    legs    3  first look not agreeing   1  (no still position 1)
+
+Of those, by the recheck delay: rescued (agrees by then), still disagreeing, no reading, censored (the robot moved again first)
+   1.0 s: rescued   1  disagree   4  none  36  censored   6
+   2.0 s: rescued   1  disagree   1  none  22  censored  23
+   3.0 s: rescued   1  disagree   1  none  21  censored  24
+   3.5 s: rescued   1  disagree   1  none  14  censored  31
+   4.0 s: rescued   1  disagree   1  none   2  censored  43
+   5.0 s: rescued   1  disagree   1  none   1  censored  44
+   6.0 s: rescued   1  disagree   1  none   1  censored  44
+
+seconds from 'done' to the robot's next move after a first-look disagreement: median 1.9, 10-90% 1.0-4.1
+
+legs where the first look AGREED but a later look disagrees (a settle the recheck would not have seen): 1
