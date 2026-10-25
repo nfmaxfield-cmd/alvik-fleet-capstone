@@ -23,7 +23,7 @@ LABEL = {"gyro_rate": "gyro rate", "gyro_angle": "gyro angle", "wheel_angle": "w
          "mode": "step / mode index", "id": "text id", "derived": "derived (computed from other streams)",
          "unknown": "unknown"}
 ACCEPT, ASK = 0.90, 0.60       # chosen (design doc section 3); evaluated at other values in the replay
-UNKNOWN_FLOOR = 0.12           # chosen: an "unknown" score every stream starts with
+UNKNOWN_FLOOR = 0.05           # chosen: an "unknown" score every stream starts with
 COPY_R = 0.97                  # chosen: copies (a processed copy keeps |r| above this)
 
 
@@ -46,15 +46,26 @@ def _fin(v, d=0.0):
     return max(v, 0.0) if np.isfinite(v) else d
 
 
+def _board(f, n_min=12):
+    """Agreement of a reading with the camera's distance to the boards ahead: a range reading grows with that
+    distance (positive r); needs n_min drive ends."""
+    if (f.get("board_n") or 0) < n_min:
+        return 0.0
+    v = f.get("board_corr")
+    return float(v) if v is not None and np.isfinite(v) else 0.0
+
+
 def _g(f, k, d=np.nan):
     v = f.get(k, d)
     return d if v is None else v
 
 
 def _twin_distance(fa, fb):
-    """How alike two streams look (0 = identical statistics): resolution, levels, change rate, rest noise."""
+    """How alike two streams look (0 = identical statistics): levels, how often they change, how often they sit
+    flat, how often they flicker at rest."""
     out = []
-    for k in ("n_unique", "change_frac", "rel_quantum", "window_sd_median"):
+    # scale-free statistics only, so two channels in different units (or one rescaled) still match
+    for k in ("n_unique", "change_frac", "flat_frac", "still_change_frac"):
         a, b = _g(fa, k), _g(fb, k)
         if np.isfinite(a) and np.isfinite(b) and a > 0 and b > 0:
             out.append(abs(np.log(a / b)))
@@ -71,14 +82,21 @@ def find_derived(feats, R):
         Rv, xa, ya, h, u, sg = pl[0]
         for s in (xa, ya):
             der[s] = ("position worked out from a heading and distance: the direction of its change with its "
-                      "partner follows the heading stream (circular R %.3f)" % Rv, [xa, ya, h], Rv)
-        der[h] = ("heading of that position pair (circular R %.3f)" % Rv, [xa, ya], Rv)
+                      "partner follows the heading stream (circular R %.3f)" % Rv, [xa, ya, h], Rv, "planar")
+        der[h] = ("heading of that position pair (circular R %.3f)" % Rv, [xa, ya], Rv, "planar")
         # the turn rate that the pose heading integrates, when it has no rest flicker of its own (a sensor has
         # noise when still; a computed rate is zero)
         for a, b, r in R["integration"]:
             if a == h and b not in der and _g(feats[b], "still_change_frac", 1.0) < 0.02:
+                # when the rate has a copy with fewer distinct levels, that coarser copy is the computed one
+                c = rel.get(b, {}).get("copy_of")
+                if c and abs(rel[b].get("copy_r", 0)) >= COPY_R and \
+                        (_g(feats[c], "n_unique", 0) or 0) < (_g(feats[b], "n_unique", 0) or 0):
+                    der[c] = ("turn rate of the pose: a coarser copy (r %.3f) of the rate the pose heading "
+                              "integrates" % rel[b]["copy_r"], [b], abs(rel[b]["copy_r"]), "poserate")
+                    continue
                 der[b] = ("turn rate of the pose: the pose heading is its integral (r %.3f) and it is exactly "
-                          "still at rest" % r, [h], abs(r))
+                          "still at rest" % r, [h], abs(r), "poserate")
     # 2. copies (one is a processed copy of the other: the one with less rest flicker, else fewer levels)
     pairs = []
     ids = R["ids"]
@@ -92,10 +110,13 @@ def find_derived(feats, R):
         fa, fb = feats[a], feats[b]
         if rel[a].get("accumulates") and rel[b].get("accumulates"):
             continue        # two angles from the same rate: handled as gyro angle / pose heading
+        if _twin_distance(fa, fb) < 0.35:
+            continue        # two look-alike channels (two wheels driving straight), not a copy
         ka = (_g(fa, "still_change_frac", 0.0), _g(fa, "n_unique", 0))
         kb = (_g(fb, "still_change_frac", 0.0), _g(fb, "n_unique", 0))
         copy, orig = (a, b) if ka < kb else (b, a)
-        der[copy] = ("a processed copy of another stream (r %.3f), with less noise at rest" % r, [orig], abs(r))
+        der[copy] = ("a processed copy of another stream (r %.3f), with less noise at rest" % r, [orig], abs(r),
+                     "copy")
     # 3. exact combinations of two: in a set of three that explain each other, the odd one out is computed from
     #    the two that look alike (two wheels, two zones)
     for a, p, q, r2 in sorted(R["combos"], key=lambda c: -c[3]):
@@ -104,15 +125,27 @@ def find_derived(feats, R):
         if p in der or q in der:
             continue
         trio = [a, p, q]
-        best = None
+        cands = []
         for i in range(3):
             o = trio[i]
             pair = [x for x in trio if x != o]
-            dist = _twin_distance(feats[pair[0]], feats[pair[1]])
-            if best is None or dist < best[0]:
-                best = (dist, o, pair)
-        if best[1] == a:
-            der[a] = ("an exact combination of two similar streams (R2 %.3f on held-out windows)" % r2, [p, q], r2)
+            cands.append((_twin_distance(feats[pair[0]], feats[pair[1]]), o, pair))
+        cands.sort(key=lambda c: c[0])
+        best = cands[0]
+        gof = R["group_of"]
+        same_group = R.get("grouping") == "rest" and gof.get(a) is not None and gof.get(a) == gof.get(p) == gof.get(q)
+        if same_group or cands[1][0] - cands[0][0] < 0.15:
+            # all three look alike (three zones of one sensor): the computed one is the weighted sum of the
+            # other two with both weights positive (a mean or a sum); the reverse relations need one negative
+            coef = rel[a].get("combo_coef")
+            best = (0.0, a if coef and coef[0] > 0 and coef[1] > 0 else None, [p, q])
+        if any(a in (x, y) and x not in der and y not in der for x, y, r in R["integration"]):
+            continue        # a stream with its own integral partner is a measured channel (a wheel's speed)
+        own = _g(feats[a], "still_change_frac", 0) or 0
+        theirs = max(_g(feats[p], "still_change_frac", 0) or 0, _g(feats[q], "still_change_frac", 0) or 0)
+        if best[1] == a and not (own > 0.05 and theirs < 0.01):
+            der[a] = ("an exact combination of two similar streams (R2 %.3f on held-out windows)" % r2, [p, q], r2,
+                      "combo")
     # 4. outputs that update in lockstep with a computed angle (the integral of a sensor's rate)
     angles = {a for a, b, r in R["integration"]}
     gof = R["group_of"]
@@ -121,10 +154,18 @@ def find_derived(feats, R):
             continue
         gi = gof.get(s)
         mates = [m for m in R["groups"][gi] if m != s] if gi is not None else []
-        comp = [m for m in mates if m in angles and m not in der]
+        # a running sum or a stream that is flat at rest is a computed output, never a sensor channel
+        comp = [m for m in mates if m not in der and (m in angles or m in R.get("motion_streams", []))]
+        if len(mates) + 1 > 4:
+            comp = []       # a big group is a multi-zone sensor that happens to share the tick, not one output
+        # and it must update no more often than the computed angle does (a faster sensor's changes contain the
+        # angle's ticks without being computed with it)
+        tick = max([_g(feats[m], "change_hz", 0) or 0 for m in mates] + [1e-9])
+        if (_g(feats[s], "change_hz", 0) or 0) > 1.5 * tick:
+            comp = []
         if comp and not rel[s].get("accumulates") and R.get("grouping") == "rest":
             der[s] = ("updates in lockstep with a computed angle (an integral of a rate), not with any sensor "
-                      "group", comp, 0.8)
+                      "group", comp, 0.8, "lockstep")
     return der
 
 
@@ -144,7 +185,7 @@ def score_stream(s, f, R, der, ctx):
     mono = _g(f, "monotone_up", 0)
     tcorr = _g(f, "time_corr_in_seg", 0)
     stepm = _g(f, "step_mode_frac", 0)
-    if mono > 0.999 and tcorr > 0.99:
+    if mono > 0.999 and tcorr > 0.99 and (_g(f, "change_frac", 0) or 0) > 0.5:
         c = ramp(stepm, 0.8, 0.98)
         sc["counter"] = c
         sc["clock"] = 1 - c
@@ -152,24 +193,31 @@ def score_stream(s, f, R, der, ctx):
                   % (tcorr, 100 * stepm))
         return sc, ev
     if f.get("binary"):
-        sc["switch"] = 0.45
-        ev.append("two values only")
+        sc["switch"] = 0.3
+        ev.append("two values only (a contact or flag; only a touch or the user can confirm which)")
         return sc, ev
     chz = _g(f, "change_hz", 0)
     nun = _g(f, "n_unique", 0)
     oneq = _g(f, "one_quantum_frac", 0)
     integer = bool(f.get("integer"))
-    if chz < 0.3 and nun <= 120:
+    short = ctx["short"]
+    if chz < 0.3 and nun <= 120 and s not in der:
         b = ramp(chz, 0.05, 0.005) * ramp(abs(_fin(_g(f, "trend_corr", 0), 0) if False else abs(_g(f, "trend_corr", 0) or 0)), 0.3, 0.7)
         m = ramp(chz, 0.005, 0.05) * (0.9 if integer else 0.6)
-        sc["battery"], sc["mode"] = b, min(1.0, m)
+        sc["battery"], sc["mode"] = b * (1 - 0.6 * short), min(1.0, m) * (1 - 0.6 * short)
         ev.append("changes slowly (%.3f a second), %d levels, %.0f%% of changes are one step, trend over time r %.2f"
                   % (chz, nun, 100 * oneq, _g(f, "trend_corr", 0)))
         return sc, ev
+    # from here on the evidence is about behaviour: a short case (little time, little motion) earns less trust
+    sc["unknown"] = UNKNOWN_FLOOR + 0.35 * short
+    if short > 0:
+        ev.append("short case (%.0f s of log): weaker evidence" % ctx["duration_s"])
     if s in der:
-        why, partners, strength = der[s]
+        why, partners, strength = der[s][0], der[s][1], der[s][2]
         sc["derived"] = 0.6 + 0.4 * ramp(strength, 0.8, 0.99)
         ev.append(why)
+        if der[s][3] in ("lockstep", "planar", "poserate", "copy"):
+            return sc, ev
     rel = R["rel"].get(s, {})
     acc = rel.get("accumulates", False)
     integ = {a: (b, r) for a, b, r in R["integration"]}
@@ -196,13 +244,16 @@ def score_stream(s, f, R, der, ctx):
         r = integ[s][1] if is_angle else dict((b, r) for a, b, r in R["integration"])[s]
         rate_s = partner if is_angle else s
         angle_s = s if is_angle else partner
-        fr = ctx["feats"][rate_s]
         twin = ctx["twin_pair"].get(angle_s)
-        rate_flicker = _g(fr, "still_change_frac", np.nan)
-        rg = R["groups"][gof[rate_s]] if rate_s in gof else [rate_s]
-        imu_like = len(rg) >= 3 and (rate_flicker if np.isfinite(rate_flicker) else 0) > 0.05
-        turn_ref = max(ctx["feats"][rate_s].get("cam_turn_int_excess", 0) or 0,
-                       ctx["feats"][angle_s].get("cam_turn_ang_excess", 0) or 0, 0)
+        imu = ctx["imu_group"]
+        sensor_rate = rate_s
+        for s2 in R["ids"]:
+            if R["rel"][s2].get("copy_of") == rate_s and abs(R["rel"][s2].get("copy_r", 0)) >= COPY_R:
+                if imu is not None and s2 in imu["members"]:
+                    sensor_rate = s2
+        imu_like = imu is not None and sensor_rate in imu["members"]
+        turn_ref = max(_fin(ctx["feats"][sensor_rate].get("cam_turn_int_excess")),
+                       _fin(ctx["feats"][angle_s].get("cam_turn_ang_excess")))
         drive_ref = max(abs(_g(ctx["feats"][angle_s], "cam_go_delta_corr", 0) or 0),
                         abs(_g(ctx["feats"][angle_s], "go_delta_corr", 0) or 0),
                         abs(_g(ctx["feats"][angle_s], "cam_speed_corr_rate", 0) or 0))
@@ -212,7 +263,7 @@ def score_stream(s, f, R, der, ctx):
         if twin:
             ev.append("its angle has a look-alike partner (a second wheel?)")
         if imu_like:
-            ev.append("the rate flickers at rest together with %d other streams (an IMU-like group)" % (len(rg) - 1))
+            ev.append("the rate (or the sensor it copies) belongs to the IMU-like set")
         if turn_ref > 0:
             ev.append("follows the camera's heading change between drives (excess R %.2f)" % turn_ref)
         if is_angle:
@@ -226,32 +277,63 @@ def score_stream(s, f, R, der, ctx):
             sc["gyro_rate"] *= 0.5
         return sc, ev
 
-    # sensor groups
+    # a running sum that follows the turn-rate sensor's integral roughly (a fused angle), not exactly
     imu = ctx["imu_group"]
+    if imu is not None and s not in der and (acc or s in R.get("motion_streams", [])):
+        r_int = abs(rel.get("ds", {}).get(imu["rate"], 0.0) or 0.0)
+        if r_int >= 0.7:
+            sc["gyro_angle"] = 0.5 + 0.5 * ramp(r_int, 0.7, 0.98)
+            ev.append("a running sum whose changes follow the integral of the IMU's turn rate (r %.2f): an angle "
+                      "fused from it" % r_int)
+            return sc, ev
+    # sensor groups
     if imu is not None and s in imu["members"]:
+        # the split between accelerometer and gyro axes rests on one sensor's axes sharing units (a noise floor);
+        # only the gravity axis and the turn-following rate have direct evidence, so the others are asked about
+        direct = s in (imu["gravity"], imu["rate"])
+        cap = 1.0 if direct else 0.45
         if s in imu["accel"]:
-            sc["accel"] = 0.55 + 0.45 * imu["split_quality"]
+            sc["accel"] = (0.55 + 0.45 * imu["split_quality"]) * cap
+            sc["gyro_rate"] = 0.1 * (1 - imu["split_quality"]) + (0.0 if direct else 0.08)
             ev.append("in the group that flickers with the turn-following rate at rest; shares the noise floor of "
                       "the axis reading a steady %s at rest (gravity)" % ("level" if s != imu["gravity"] else "large level"))
         else:
-            sc["gyro_rate"] = 0.55 + 0.45 * imu["split_quality"]
+            sc["gyro_rate"] = (0.55 + 0.45 * imu["split_quality"]) * cap
+            sc["accel"] = 0.1 * (1 - imu["split_quality"]) + (0.0 if direct else 0.08)
             ev.append("in the IMU-like group; shares the noise floor of the turn-following rate")
         if s in der:
             sc["derived"] *= 0.5
         return sc, ev
-    if gsize >= 3 and not acc:
+    if gsize >= 3 and has_gravity_like(grp, ctx["feats"]):
+        sc["accel"] = 0.5
+        ev.append("one of %d streams that flicker together at rest, one of which reads a large steady level "
+                  "(gravity?); no turn reference found to place the gyro" % gsize)
+        return sc, ev
+    if gsize >= 3:
         pos = _g(f, "lo", -1) >= 0
         big = ramp(aor, 2.0, 6.0, nan=0.3)
         drive = max(ramp(-(camgo if np.isfinite(camgo) else 0), 0.2, 0.6),
-                    ramp(abs(_g(f, "board_corr", 0) or 0), 0.3, 0.7))
+                    ramp(_board(f), 0.3, 0.7))
         # the group as a whole: most members respond strongly to motion
         g_aor = np.nanmedian([_g(ctx["feats"][m], "active_over_rest", np.nan) for m in grp])
         gbig = ramp(g_aor, 2.0, 6.0, nan=0.3)
         moving = R.get("moving_frac", np.nan)
-        motion_seen = ramp(moving, 0.03, 0.15, nan=0.5)
-        sc["range"] = (0.35 * gbig + 0.25 * big + 0.25 * drive + 0.15 * pos) * (0.3 + 0.7 * motion_seen)
-        sc["line"] = (0.4 * (1 - gbig) + 0.3 * (1 - big) + 0.2 * (1 if integer else 0) + 0.1 * pos) * \
-                     (1 - 0.6 * drive) * (0.3 + 0.7 * motion_seen)
+        motion_seen = ramp(moving, 0.03, 0.15, nan=0.3)
+        if R.get("grouping") != "rest":
+            motion_seen *= 0.5
+            ev.append("(group found from timing during motion only: weaker)")
+        # the group's best agreement with the camera's distances counts for every member (zones that face away
+        # from the boards have no prediction of their own)
+        # (the second-best member, so one chance agreement does not carry the group)
+        g_vals = sorted([max(ramp(-(_g(ctx["feats"][m], "cam_go_delta_corr", 0) or 0), 0.2, 0.6),
+                             ramp(_board(ctx["feats"][m]), 0.3, 0.7)) for m in grp] + [0, 0])
+        g_drive = g_vals[-2]
+        drive = max(drive, 0.7 * g_drive)
+        sc["range"] = (0.25 * gbig + 0.15 * big + 0.45 * drive + 0.15 * pos) * (0.3 + 0.7 * motion_seen)
+        # "barely responds to motion" is weak evidence for a floor sensor; whole-number readings (raw counts) are
+        # the positive cue
+        sc["line"] = (0.25 * (1 - gbig) + 0.15 * (1 - big) + 0.45 * (1 if integer else 0) + 0.15 * pos) * \
+                     (1 - 0.8 * drive) * (0.3 + 0.7 * motion_seen)
         if motion_seen < 0.5:
             ev.append("the robot hardly moved in this case (moving %.0f%% of the time): zones and counts look alike"
                       % (100 * moving if np.isfinite(moving) else -1))
@@ -263,9 +345,12 @@ def score_stream(s, f, R, der, ctx):
         if np.isfinite(_g(f, "board_corr", np.nan)):
             ev.append("reading vs camera distance to the boards ahead r %.2f" % f["board_corr"])
         if s in der:
-            # a combination inside a sensor group keeps the group's type; the derived note stays in the evidence
-            sc["derived"] = 0.0
-            ev.append("(computed from two neighbours in its group; same type, not separate evidence)")
+            if all(m in grp for m in der[s][1]):
+                # a combination inside a sensor group keeps the group's type; the derived note stays in the evidence
+                sc["derived"] = 0.0
+                ev.append("(computed from two neighbours in its group; same type, not separate evidence)")
+            else:
+                return {t: (v if t in ("derived", "unknown") else 0.0) for t, v in sc.items()}, ev
         return sc, ev
     if s not in der:
         # a lone responsive stream with no partner: weak guesses only
@@ -278,9 +363,22 @@ def score_stream(s, f, R, der, ctx):
     return sc, ev
 
 
+def has_gravity_like(gr, feats, lon_min=300.0):
+    """Does the group hold an axis that reads a large steady level compared with its own noise (gravity on an
+    accelerometer axis: about 1000x on the Alvik)? A range sensor's zones or a set of reflectance counts do not:
+    their readings are tens of times their noise at most."""
+    return any((_g(feats[m], "level_over_noise", 0) or 0) >= lon_min and not feats[m].get("accumulates")
+               and (_g(feats[m], "still_change_frac", np.nan) > 0.05 if np.isfinite(_g(feats[m], "still_change_frac", np.nan))
+                    else (_g(feats[m], "change_frac", 0) or 0) > 0.3)
+               for m in gr)
+
+
 def build_context(feats, R, der=None):
     """Case-wide structure the per-stream scores lean on: the IMU-like group and its split, look-alike pairs."""
     ctx = {"feats": feats, "twin_pair": {}, "imu_group": None, "derived": der or {}}
+    dur = max([_g(f, "duration_s", 0) or 0 for f in feats.values()] + [0])
+    ctx["duration_s"] = dur
+    ctx["short"] = 1 - ramp(dur, 30.0, 120.0)        # chosen: under 30 s counts as fully short
     angles = [a for a, b, r in R["integration"]]
     for a in angles:
         best = None
@@ -304,10 +402,15 @@ def build_context(feats, R, der=None):
         for s2 in R["ids"]:
             if R["rel"][s2].get("copy_of") == b and abs(R["rel"][s2].get("copy_r", 0)) >= COPY_R:
                 rates.append(s2)
+    # the pose heading (if the planar test found one) is a turn reference too: a turn-rate sensor's integral
+    # follows it even when the robot computes its pose from other streams
+    head = R["planar"][0][3] if R.get("planar") else None
+    hds = R["rel"].get(head, {}).get("ds", {}) if head else {}
+
     def turnscore(s):
         f = feats[s]
         return _fin(_g(f, "cam_turn_int_excess", 0)) + abs(_fin(_g(f, "turn_mid_corr", 0))) + \
-            (0.5 if s in rates else 0)
+            (0.5 if s in rates else 0) + abs(hds.get(s, 0.0) or 0.0)
     flick = [s for s in R["ids"] if (_g(feats[s], "still_change_frac", np.nan) > 0.05
                                      if np.isfinite(_g(feats[s], "still_change_frac", np.nan))
                                      else (_g(feats[s], "change_frac", 0) or 0) > 0.5)]
@@ -320,11 +423,9 @@ def build_context(feats, R, der=None):
                 continue
             gi = R["group_of"].get(s)
             gr = R["groups"][gi] if gi is not None else [s]
-            if len(gr) >= 3 and rate not in gr:
-                g_aor = np.nanmedian([_g(feats[m], "active_over_rest", np.nan) for m in gr])
-                ints = np.mean([bool(feats[m].get("integer")) for m in gr])
-                if (np.isfinite(g_aor) and g_aor >= 3) or ints > 0.5:
-                    continue
+            if len(gr) >= 3 and rate not in gr and (not has_gravity_like(gr, feats) or
+                                                    np.mean([bool(feats[m].get("integer")) for m in gr]) > 0.5):
+                continue
             if s in ctx.get("derived", {}):
                 continue
             mem.append(s)
@@ -342,6 +443,21 @@ def build_context(feats, R, der=None):
             split = ramp(abs(ng - nr), 0.5, 2.0)
             ctx["imu_group"] = {"members": set(mem), "accel": set(acc), "gyro": set(gyr), "gravity": grav,
                                 "rate": rate, "split_quality": split}
+            # a tilt angle computed from the accelerometer: follows one accelerometer axis (|r| >= 0.6)
+            # but updates more slowly than the accelerometer does (a computed output on its own tick)
+            acc_hz = np.median([_g(feats[m], "change_hz", 0) or 0 for m in acc]) if acc else 0
+            for m in list(mem):
+                if m in acc and m == grav:
+                    continue
+                vv = R["rel"].get(m, {}).get("vv", {})
+                hit = [(a, vv.get(a, 0)) for a in acc if a != m and abs(vv.get(a, 0)) >= 0.6]
+                if hit and (_g(feats[m], "change_hz", 0) or 0) < 0.6 * acc_hz and der is not None:
+                    a, r = max(hit, key=lambda h: abs(h[1]))
+                    der[m] = ("a tilt angle worked out from an accelerometer axis: follows it (r %.2f) but updates "
+                              "%.0f%% as often" % (r, 100 * (_g(feats[m], "change_hz", 0) or 0) / max(acc_hz, 1e-9)),
+                              [a], abs(r), "lockstep")
+                    for k in ("members", "accel", "gyro"):
+                        ctx["imu_group"][k].discard(m)
     return ctx
 
 
@@ -356,9 +472,15 @@ def classify_case(feats, R):
         ranked = sorted(sc.items(), key=lambda kv: -kv[1])
         best, second = ranked[0], ranked[1]
         conf = best[1] / tot if tot > 0 else 0.0
+        derived, derived_of = s in der, (list(der[s][1]) if s in der else [])
+        if best[0] == "gyro_angle" and not derived:
+            # provenance (design doc section 2): an angle summed from a rate is derived, never separate evidence
+            rate = [b for a, b, r in R["integration"] if a == s]
+            imu = ctx["imu_group"]
+            derived, derived_of = True, rate or ([imu["rate"]] if imu else [])
         out[s] = {"type": best[0], "confidence": float(conf), "scores": sc,
                   "top3": [(t, round(v / tot, 3)) for t, v in ranked[:3] if v > 0],
-                  "evidence": ev, "derived": s in der, "derived_of": der[s][1] if s in der else [],
+                  "evidence": ev, "derived": derived, "derived_of": derived_of,
                   "decision": decide(conf) if best[0] != "unknown" else "unknown"}
     return out
 

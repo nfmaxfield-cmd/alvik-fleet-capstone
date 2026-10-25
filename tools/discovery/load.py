@@ -46,7 +46,7 @@ class Case:
 
 def find_sessions(root=ROOT):
     """session id -> folder. A session copied to several places on disk is used once (the copy with the most RAW
-    bytes; copies of the same id were checked to be byte-identical except for missing robot-logs folders)."""
+    bytes: some copies lack a robot-logs folder; the two copies of e02-20261024-193526 differ by 450 bytes)."""
     best = {}
     for f in glob.glob(os.path.join(root, "**", "e02-2026*", "robot-logs-*", "raw.csv"), recursive=True):
         if "scratchpad" in f or "/-home-claude/" in f:

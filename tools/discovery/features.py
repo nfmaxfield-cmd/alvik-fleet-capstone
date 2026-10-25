@@ -13,10 +13,12 @@ import numpy as np
 
 GRID_HZ = 10.0          # resample rate for relations (chosen: RAW is ~20 Hz, the front sensor ~15 Hz)
 SEG_GAP_S = 1.0         # a gap in rows longer than this starts a new segment (logging paused between runs)
-WIN_S = 2.0             # window for increment / integral relations (chosen)
+WIN_S = 1.0             # window for increment / integral relations (chosen)
 REST_Q = 0.10           # rest noise = this quantile of per-window spread (chosen)
 
-_NUM = re.compile(r"^-?\d+(\.\d+)?$")
+# a plain or scientific-notation number as printf writes it; never a leading zero before another digit (a run id
+# such as '052E-3' would otherwise read as 0.052)
+_NUM = re.compile(r"^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?$")
 
 
 @dataclass
@@ -71,6 +73,10 @@ def detect_wrap(x, seg):
     # the jumps must be close to one size (the period) and go from one end of the range to the other
     p = np.median(np.abs(d[big]))
     if np.std(np.abs(d[big])) > 0.1 * p:
+        return False, None
+    # a wrapped angle sweeps its whole range; a sensor that drops out to a limit value sits at two ends
+    hist, _ = np.histogram(x[f], bins=10)
+    if np.sum(hist > 0.002 * f.sum()) < 4:
         return False, None
     xa = x[:-1][same][big]
     xb = x[1:][same][big]
@@ -441,7 +447,7 @@ def _axial_scan(arr, dh, ks=K_SCAN):
     return float(Rf[jf]), float(fine[jf])
 
 
-def camera_turn_features(g, sid, pairs, dh, rng):
+def camera_turn_features(g, sid, pairs, dh, rng, bias=0.0):
     """A turning stream between two drive stretches: its change (an angle) or its integral (a rate) times some
     unit factor k should equal the camera's heading change. R near 1 = follows; R_null = the same scan against
     shuffled heading changes, so 'excess' is how much better than chance."""
@@ -450,7 +456,9 @@ def camera_turn_features(g, sid, pairs, dh, rng):
         return out
     y = g.v[sid]
     dA = np.array([np.nanmedian(y[b[0]:b[0] + 3]) - np.nanmedian(y[max(0, a[1] - 2):a[1] + 1]) for a, b in pairs])
-    iA = np.array([np.nansum(y[a[1]:b[0] + 1]) * g.dt for a, b in pairs])
+    # a rate's level at rest (its bias) is taken off before integrating
+    b0 = bias if np.isfinite(bias) else 0.0
+    iA = np.array([np.nansum(y[a[1]:b[0] + 1] - b0) * g.dt for a, b in pairs])
     perm = rng.permutation(len(dh))
     for nm, arr in (("ang", dA), ("int", iA)):
         R, k = _axial_scan(arr, dh)
@@ -463,7 +471,7 @@ def camera_turn_features(g, sid, pairs, dh, rng):
 
 def find_clock(parsed, t, seg):
     """The stream that is the robot's own clock: never falls inside a segment, rises in proportion to the laptop's
-    arrival times (r >= 0.9999), and does not step by a fixed amount each row (that is a counter). Returns
+    arrival times (median r >= 0.999), and does not step by a fixed amount each row (that is a counter). Returns
     (stream id, robot-clock time per row aligned to the laptop clock) or (None, t)."""
     best = None
     for sid, (x, is_text) in parsed.items():
@@ -482,7 +490,7 @@ def find_clock(parsed, t, seg):
             if k.sum() > 20:
                 rs.append(np.corrcoef(t[k], x[k])[0, 1])
         r = np.median(rs) if rs else 0
-        if r >= 0.9999 and (best is None or r > best[0]):
+        if r >= 0.999 and (best is None or r > best[0]):
             best = (r, sid)
     if best is None:
         return None, t
@@ -501,6 +509,34 @@ def find_clock(parsed, t, seg):
         off = np.percentile(t[k] - tc, 5)
         tt[k] = tc + off
     return sid, tt
+
+
+def episode_features(g, sid, eps):
+    """Over the camera's drive stretches: how far the stream moved per cm the camera saw (a wheel angle or a
+    position), and its typical size per cm/s of camera speed (a speed). Magnitudes only: the camera does not say
+    whether a stretch was driven forwards or backwards."""
+    out = {}
+    if len(eps) < 4:
+        return out
+    y = g.v[sid]
+    per_cm, per_speed = [], []
+    for i0, i1, head, dist in eps:
+        a, b = y[i0], y[i1]
+        if np.isfinite(a) and np.isfinite(b) and abs(b - a) > 0:
+            per_cm.append(abs(b - a) / dist)
+        # a speed's integral over the stretch (it is zero outside the drive, so the stretch's edges do not matter)
+        integ = np.nansum(np.abs(y[max(0, i0 - 10):i1 + 11])) * g.dt
+        if np.isfinite(integ) and integ > 0:
+            per_speed.append(integ / dist)
+    if len(per_cm) >= 4:
+        out["ep_per_cm"] = float(np.median(per_cm))
+        out["ep_per_cm_spread"] = float(np.subtract(*np.percentile(per_cm, [75, 25])) / max(np.median(per_cm), 1e-12))
+    if len(per_speed) >= 4:
+        out["ep_per_cms"] = float(np.median(per_speed))
+        out["ep_per_cms_spread"] = float(np.subtract(*np.percentile(per_speed, [75, 25])) /
+                                         max(np.median(per_speed), 1e-12))
+    out["ep_n"] = len(per_cm)
+    return out
 
 
 def case_features(case):
@@ -531,6 +567,7 @@ def case_features(case):
     for sid in num:
         feats[sid].update(leg_features(g, case.legs, sid))
         feats[sid].update(camera_features(case, g, sid, cam_speed))
-        feats[sid].update(camera_turn_features(g, sid, pairs, dh, rng))
+        feats[sid].update(camera_turn_features(g, sid, pairs, dh, rng, bias=feats[sid].get("rest_level", 0.0)))
+        feats[sid].update(episode_features(g, sid, eps))
         feats[sid]["cam_episodes"] = len(eps)
     return g, feats, cam_speed, num

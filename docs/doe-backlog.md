@@ -12,7 +12,7 @@ Status: open / planned (date) / done (result, link).
 **Count (2026-10-25 sweep):** 51 rows. 2 simulator-only. 23 need logs or recorded footage but no board: 17 can
 run on what is already on disk, 6 wait for data a later session brings. Claude's call: logs-only rows are treated
 like simulator rows and run without asking. 26 need the board, the bench or Nick's time. 3 in progress, 1 building,
-none done. **Added 2026-10-25 (reverse find build):** 3 rows (2 Sim, 1 Board), below. **Added 2026-10-25 (backing in, learned uncertainty, find recovery, [write-up](build-reports/e02-oct25-backing-unc.md)):** 10 rows (4 Logs, 1 Logs + Sim, 2 Sim, 3 Board), 1 chosen with no DOE; the backing-cap row partly done. **Added 2026-10-25 (dock v5):** 6 rows in Docking and charging (2 Sim or Logs + Sim, 2 Bench/Board, 2 waiting on bench test 1); the charge-levels row is in progress. **Added 2026-10-25 (heading diagnosis, [write-up](build-reports/e02-oct25-heading.md)):** 1 Logs row (heading push). **Update 2026-10-25 (logs run, [write-up](build-reports/e02-oct25-logs-doe.md)):** 7 logs rows done or done
+none done. **Added 2026-10-25 (reverse find build):** 3 rows (2 Sim, 1 Board), below. **Added 2026-10-25 (backing in, learned uncertainty, find recovery, [write-up](build-reports/e02-oct25-backing-unc.md)):** 10 rows (4 Logs, 1 Logs + Sim, 2 Sim, 3 Board), 1 chosen with no DOE; the backing-cap row partly done. **Added 2026-10-25 (dock v5):** 6 rows in Docking and charging (2 Sim or Logs + Sim, 2 Bench/Board, 2 waiting on bench test 1); the charge-levels row is in progress. **Added 2026-10-25 (sensor discovery replay, [write-up](build-reports/e02-oct25-discovery-replay.md)):** 7 Logs rows (1 partly done, 1 chosen test design). **Added 2026-10-25 (heading diagnosis, [write-up](build-reports/e02-oct25-heading.md)):** 1 Logs row (heading push). **Update 2026-10-25 (logs run, [write-up](build-reports/e02-oct25-logs-doe.md)):** 7 logs rows done or done
 in their logs part (uncertainty model, drift band, jump cut, wheel fit, find heading, trust MIN_N, other trust
 limits); 12 need more data or hand-checked truth; sample size has a preliminary count; the front sensor row was
 done separately. Sweep sources: code comments (tools/experiment, firmware,
@@ -148,6 +148,22 @@ a decision.
 | Second staging point (e02.py FIND_RESTAGE_CM, FIND_RESTAGE_ALONG_CM) | 35 cm out, 25 cm along | Simulator: "no board behind" finds (gyro uncorrected) retried from 25 / 35 / 50 cm out: share that then succeed | Sim | open |
 | Board visit backing in (tools/fleet planner touch_lead_cm, touch_over_cm) | 3 cm; 1 cm | Kinematic and fleet simulator: pose error at the pre-dock 0.3 / 1 / 2 cm x lead 2 / 3 / 5 x over 0.5 / 1 / 1.5: false "no click", visit time, and (board taken away) how far the rear caster goes past the edge | Sim | open |
 | Holds for one find before it counts as failed (e02.py FIND_HOLD_MAX) | 3 | None: it trades Nick's time, not accuracy | - | chosen, no DOE |
+
+## Sensor discovery (blind replay, 2026-10-25)
+
+[Build report](build-reports/e02-oct25-discovery-replay.md). All in `tools/discovery/`. Each row is a logs-only rerun
+of `tools/discovery/replay.py` at several values, scored on the held-out cases (robot Right; 10-24) and the disguised
+reruns. Wrong accepted labels are counted against questions asked.
+
+| Number (where) | Value now | Experiment that would set it | Needs | Status |
+|---|---|---|---|---|
+| Accept / ask bars (classify.py ACCEPT, ASK; design doc §7) | 0.90 / 0.60 | Done once on this replay. Held-out logs with motion: 0 wrong at 0.80 to 0.95, 3 wrong at 0.70; questions per robot 8.3 at 0.80, 12.5 at 0.90. The 9 s logs: 7 wrong below 0.90. Next: make the bar depend on how much motion the log holds, and rerun on a real test-motion battery log | Logs | partly done ([report](build-reports/e02-oct25-discovery-replay.md)); 0.90 kept |
+| Exact-relation bars (relations.py EXACT_R 0.98, classify.py COPY_R 0.97, PLANAR_R 0.80, PLANAR_EXCESS 0.30) | as listed | Sweep each (0.95-0.995; planar 0.6-0.95, excess 0.1-0.5); score derived-stream tags and false "derived" on sensors, plain and disguised | Logs | open |
+| Relation windows and grid (features.py WIN_S 1 s, + 2 s; relations.py PLANAR_WIN_S 2 s; GRID_HZ 10; SEG_GAP_S 1 s) | as listed | Sweep windows 0.5-4 s and grid 5-20 Hz on the replay; count integral pairs found (r >= bar) in short and long cases | Logs | open |
+| Sensor-group affinity (relations.py AFFINITY_GROUP) and stillness (flat run 1 s, edge trim 0.3 s) | 0.45; 1 s; 0.3 s | Sweep 0.3-0.8; score the groups against the true sensor groups (zones, line, IMU, orientation) | Logs | open |
+| Score floors and weights (classify.py UNKNOWN_FLOOR 0.05, short-case ramp 30-120 s, IMU-axis cap 0.45, gravity level / noise 300, range/line weights, camera drive threshold features.py CAM_MOVE_CMS 2.5 cm/s) | as listed | Not a one-factor sweep: fit them on the development split, check on the held-out split, report the confidence calibration (are 0.9 guesses right 90% of the time?) | Logs | open |
+| Unit snap window (calibrate.py SNAP; design doc §4) | 15% | Replay with streams rescaled by known factors (x10, x57.3, x1000) at windows of 5-25%; count right unit guesses against false snaps | Logs | open |
+| Disguise factor set (replay.py disguise) | x0.1, 10, 57.3, 1/57.3, 2.54, 1000; half sign-flipped; 5-row delay | Not a DOE: a test design. Widen it with axis swaps and offsets (report, new test 5) | Logs | chosen |
 
 ## Already set by data
 

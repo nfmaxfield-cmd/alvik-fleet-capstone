@@ -1,0 +1,7115 @@
+{
+ "headline": {
+  "dev_rich": {
+   "right": 327,
+   "streams": 333,
+   "share": 0.9819819819819819,
+   "accepted": 184,
+   "accepted_right": 183,
+   "asked": 129,
+   "unknown": 20,
+   "cases": 9
+  },
+  "test_rich": {
+   "right": 378,
+   "streams": 407,
+   "share": 0.9287469287469288,
+   "accepted": 234,
+   "accepted_right": 234,
+   "asked": 138,
+   "unknown": 35,
+   "cases": 11
+  },
+  "test_short": {
+   "right": 150,
+   "streams": 481,
+   "share": 0.31185031185031187,
+   "accepted": 109,
+   "accepted_right": 109,
+   "asked": 25,
+   "unknown": 347,
+   "cases": 13
+  },
+  "disguised": {
+   "right": 308,
+   "streams": 407,
+   "share": 0.7567567567567568,
+   "accepted": 209,
+   "accepted_right": 196,
+   "asked": 140,
+   "unknown": 58,
+   "cases": 11,
+   "same_as_plain": 337
+  },
+  "disguised+delay": {
+   "right": 277,
+   "streams": 407,
+   "share": 0.6805896805896806,
+   "accepted": 174,
+   "accepted_right": 164,
+   "asked": 130,
+   "unknown": 103,
+   "cases": 11,
+   "same_as_plain": 300
+  }
+ },
+ "by_split": {
+  "all": {
+   "right": 1069,
+   "streams": 1924,
+   "share": 0.5556133056133056,
+   "accepted": 677,
+   "accepted_right": 676,
+   "asked": 332,
+   "unknown": 915,
+   "cases": 52
+  },
+  "dev": {
+   "right": 541,
+   "streams": 1036,
+   "share": 0.5222007722007722,
+   "accepted": 334,
+   "accepted_right": 333,
+   "asked": 169,
+   "unknown": 533,
+   "cases": 28
+  },
+  "test": {
+   "right": 528,
+   "streams": 888,
+   "share": 0.5945945945945946,
+   "accepted": 343,
+   "accepted_right": 343,
+   "asked": 163,
+   "unknown": 382,
+   "cases": 24
+  },
+  "dev_rich": {
+   "right": 327,
+   "streams": 333,
+   "share": 0.9819819819819819,
+   "accepted": 184,
+   "accepted_right": 183,
+   "asked": 129,
+   "unknown": 20,
+   "cases": 9
+  },
+  "test_rich": {
+   "right": 378,
+   "streams": 407,
+   "share": 0.9287469287469288,
+   "accepted": 234,
+   "accepted_right": 234,
+   "asked": 138,
+   "unknown": 35,
+   "cases": 11
+  },
+  "dev_short": {
+   "right": 214,
+   "streams": 703,
+   "share": 0.30440967283072545,
+   "accepted": 150,
+   "accepted_right": 150,
+   "asked": 40,
+   "unknown": 513,
+   "cases": 19
+  },
+  "test_short": {
+   "right": 150,
+   "streams": 481,
+   "share": 0.31185031185031187,
+   "accepted": 109,
+   "accepted_right": 109,
+   "asked": 25,
+   "unknown": 347,
+   "cases": 13
+  },
+  "test_robot_rich": {
+   "right": 168,
+   "streams": 185,
+   "share": 0.9081081081081082,
+   "accepted": 111,
+   "accepted_right": 111,
+   "asked": 59,
+   "unknown": 15,
+   "cases": 5
+  },
+  "test_robot_short": {
+   "right": 105,
+   "streams": 333,
+   "share": 0.3153153153153153,
+   "accepted": 76,
+   "accepted_right": 76,
+   "asked": 17,
+   "unknown": 240,
+   "cases": 9
+  },
+  "test_date_rich": {
+   "right": 145,
+   "streams": 148,
+   "share": 0.9797297297297297,
+   "accepted": 81,
+   "accepted_right": 81,
+   "asked": 58,
+   "unknown": 9,
+   "cases": 4
+  },
+  "test_date_short": {
+   "right": 28,
+   "streams": 74,
+   "share": 0.3783783783783784,
+   "accepted": 16,
+   "accepted_right": 16,
+   "asked": 7,
+   "unknown": 51,
+   "cases": 2
+  },
+  "test_both_rich": {
+   "right": 65,
+   "streams": 74,
+   "share": 0.8783783783783784,
+   "accepted": 42,
+   "accepted_right": 42,
+   "asked": 21,
+   "unknown": 11,
+   "cases": 2
+  },
+  "test_both_short": {
+   "right": 17,
+   "streams": 74,
+   "share": 0.22972972972972974,
+   "accepted": 17,
+   "accepted_right": 17,
+   "asked": 1,
+   "unknown": 56,
+   "cases": 2
+  },
+  "disguised": {
+   "right": 308,
+   "streams": 407,
+   "share": 0.7567567567567568,
+   "accepted": 209,
+   "accepted_right": 196,
+   "asked": 140,
+   "unknown": 58,
+   "cases": 11,
+   "same_as_plain": 337
+  },
+  "disguised+delay": {
+   "right": 277,
+   "streams": 407,
+   "share": 0.6805896805896806,
+   "accepted": 174,
+   "accepted_right": 164,
+   "asked": 130,
+   "unknown": 103,
+   "cases": 11,
+   "same_as_plain": 300
+  }
+ },
+ "calibration": {
+  "dev_rich": [
+   {
+    "band": "0.00-0.50",
+    "n": 3,
+    "right": 3,
+    "share_right": 1.0,
+    "mean_conf": 0.46986666666666665
+   },
+   {
+    "band": "0.50-0.60",
+    "n": 15,
+    "right": 15,
+    "share_right": 1.0,
+    "mean_conf": 0.5387
+   },
+   {
+    "band": "0.60-0.70",
+    "n": 7,
+    "right": 7,
+    "share_right": 1.0,
+    "mean_conf": 0.6582285714285714
+   },
+   {
+    "band": "0.70-0.80",
+    "n": 82,
+    "right": 79,
+    "share_right": 0.9634146341463414,
+    "mean_conf": 0.7535743902439024
+   },
+   {
+    "band": "0.80-0.90",
+    "n": 40,
+    "right": 40,
+    "share_right": 1.0,
+    "mean_conf": 0.8414050000000002
+   },
+   {
+    "band": "0.90-0.95",
+    "n": 52,
+    "right": 52,
+    "share_right": 1.0,
+    "mean_conf": 0.9352480769230769
+   },
+   {
+    "band": "0.95-1.00",
+    "n": 132,
+    "right": 131,
+    "share_right": 0.9924242424242424,
+    "mean_conf": 0.9523090909090909
+   }
+  ],
+  "test_rich": [
+   {
+    "band": "0.00-0.50",
+    "n": 10,
+    "right": 5,
+    "share_right": 0.5,
+    "mean_conf": 0.47669999999999996
+   },
+   {
+    "band": "0.50-0.60",
+    "n": 23,
+    "right": 13,
+    "share_right": 0.5652173913043478,
+    "mean_conf": 0.5401043478260871
+   },
+   {
+    "band": "0.60-0.70",
+    "n": 17,
+    "right": 8,
+    "share_right": 0.47058823529411764,
+    "mean_conf": 0.6394117647058823
+   },
+   {
+    "band": "0.70-0.80",
+    "n": 74,
+    "right": 71,
+    "share_right": 0.9594594594594594,
+    "mean_conf": 0.7619905405405405
+   },
+   {
+    "band": "0.80-0.90",
+    "n": 47,
+    "right": 47,
+    "share_right": 1.0,
+    "mean_conf": 0.8404553191489365
+   },
+   {
+    "band": "0.90-0.95",
+    "n": 62,
+    "right": 62,
+    "share_right": 1.0,
+    "mean_conf": 0.9328161290322581
+   },
+   {
+    "band": "0.95-1.00",
+    "n": 172,
+    "right": 172,
+    "share_right": 1.0,
+    "mean_conf": 0.9523302325581396
+   }
+  ],
+  "test_short": [
+   {
+    "band": "0.00-0.50",
+    "n": 5,
+    "right": 0,
+    "share_right": 0.0,
+    "mean_conf": 0.44078
+   },
+   {
+    "band": "0.50-0.60",
+    "n": 73,
+    "right": 23,
+    "share_right": 0.3150684931506849,
+    "mean_conf": 0.5274191780821917
+   },
+   {
+    "band": "0.60-0.70",
+    "n": 18,
+    "right": 18,
+    "share_right": 1.0,
+    "mean_conf": 0.6451999999999999
+   },
+   {
+    "band": "0.70-0.80",
+    "n": 0,
+    "right": 0,
+    "share_right": null,
+    "mean_conf": null
+   },
+   {
+    "band": "0.80-0.90",
+    "n": 7,
+    "right": 0,
+    "share_right": 0.0,
+    "mean_conf": 0.8571
+   },
+   {
+    "band": "0.90-0.95",
+    "n": 0,
+    "right": 0,
+    "share_right": null,
+    "mean_conf": null
+   },
+   {
+    "band": "0.95-1.00",
+    "n": 109,
+    "right": 109,
+    "share_right": 1.0,
+    "mean_conf": 0.9524000000000001
+   }
+  ],
+  "dev_short": [
+   {
+    "band": "0.00-0.50",
+    "n": 10,
+    "right": 0,
+    "share_right": 0.0,
+    "mean_conf": 0.39531
+   },
+   {
+    "band": "0.50-0.60",
+    "n": 89,
+    "right": 37,
+    "share_right": 0.4157303370786517,
+    "mean_conf": 0.5327494382022472
+   },
+   {
+    "band": "0.60-0.70",
+    "n": 23,
+    "right": 21,
+    "share_right": 0.9130434782608695,
+    "mean_conf": 0.6442434782608694
+   },
+   {
+    "band": "0.70-0.80",
+    "n": 5,
+    "right": 5,
+    "share_right": 1.0,
+    "mean_conf": 0.7142200000000001
+   },
+   {
+    "band": "0.80-0.90",
+    "n": 12,
+    "right": 1,
+    "share_right": 0.08333333333333333,
+    "mean_conf": 0.8548083333333333
+   },
+   {
+    "band": "0.90-0.95",
+    "n": 0,
+    "right": 0,
+    "share_right": null,
+    "mean_conf": null
+   },
+   {
+    "band": "0.95-1.00",
+    "n": 150,
+    "right": 150,
+    "share_right": 1.0,
+    "mean_conf": 0.9523999999999999
+   }
+  ]
+ },
+ "sweep": {
+  "dev_rich": [
+   {
+    "accept": 0.5,
+    "ask": 0.4,
+    "accepted": 328,
+    "accepted_wrong": 4,
+    "wrong_rate": 0.012195121951219513,
+    "questions": 3,
+    "question_truth_not_offered": 0,
+    "unknown": 2,
+    "unknown_truly_identifiable": 2
+   },
+   {
+    "accept": 0.5,
+    "ask": 0.5,
+    "accepted": 328,
+    "accepted_wrong": 4,
+    "wrong_rate": 0.012195121951219513,
+    "questions": 0,
+    "question_truth_not_offered": 0,
+    "unknown": 5,
+    "unknown_truly_identifiable": 5
+   },
+   {
+    "accept": 0.6,
+    "ask": 0.4,
+    "accepted": 313,
+    "accepted_wrong": 4,
+    "wrong_rate": 0.012779552715654952,
+    "questions": 18,
+    "question_truth_not_offered": 0,
+    "unknown": 2,
+    "unknown_truly_identifiable": 2
+   },
+   {
+    "accept": 0.6,
+    "ask": 0.5,
+    "accepted": 313,
+    "accepted_wrong": 4,
+    "wrong_rate": 0.012779552715654952,
+    "questions": 15,
+    "question_truth_not_offered": 0,
+    "unknown": 5,
+    "unknown_truly_identifiable": 5
+   },
+   {
+    "accept": 0.6,
+    "ask": 0.6,
+    "accepted": 313,
+    "accepted_wrong": 4,
+    "wrong_rate": 0.012779552715654952,
+    "questions": 0,
+    "question_truth_not_offered": 0,
+    "unknown": 20,
+    "unknown_truly_identifiable": 20
+   },
+   {
+    "accept": 0.7,
+    "ask": 0.4,
+    "accepted": 306,
+    "accepted_wrong": 4,
+    "wrong_rate": 0.013071895424836602,
+    "questions": 25,
+    "question_truth_not_offered": 0,
+    "unknown": 2,
+    "unknown_truly_identifiable": 2
+   },
+   {
+    "accept": 0.7,
+    "ask": 0.5,
+    "accepted": 306,
+    "accepted_wrong": 4,
+    "wrong_rate": 0.013071895424836602,
+    "questions": 22,
+    "question_truth_not_offered": 0,
+    "unknown": 5,
+    "unknown_truly_identifiable": 5
+   },
+   {
+    "accept": 0.7,
+    "ask": 0.6,
+    "accepted": 306,
+    "accepted_wrong": 4,
+    "wrong_rate": 0.013071895424836602,
+    "questions": 7,
+    "question_truth_not_offered": 0,
+    "unknown": 20,
+    "unknown_truly_identifiable": 20
+   },
+   {
+    "accept": 0.7,
+    "ask": 0.7,
+    "accepted": 306,
+    "accepted_wrong": 4,
+    "wrong_rate": 0.013071895424836602,
+    "questions": 0,
+    "question_truth_not_offered": 0,
+    "unknown": 27,
+    "unknown_truly_identifiable": 27
+   },
+   {
+    "accept": 0.8,
+    "ask": 0.4,
+    "accepted": 224,
+    "accepted_wrong": 1,
+    "wrong_rate": 0.004464285714285714,
+    "questions": 107,
+    "question_truth_not_offered": 3,
+    "unknown": 2,
+    "unknown_truly_identifiable": 2
+   },
+   {
+    "accept": 0.8,
+    "ask": 0.5,
+    "accepted": 224,
+    "accepted_wrong": 1,
+    "wrong_rate": 0.004464285714285714,
+    "questions": 104,
+    "question_truth_not_offered": 3,
+    "unknown": 5,
+    "unknown_truly_identifiable": 5
+   },
+   {
+    "accept": 0.8,
+    "ask": 0.6,
+    "accepted": 224,
+    "accepted_wrong": 1,
+    "wrong_rate": 0.004464285714285714,
+    "questions": 89,
+    "question_truth_not_offered": 3,
+    "unknown": 20,
+    "unknown_truly_identifiable": 20
+   },
+   {
+    "accept": 0.8,
+    "ask": 0.7,
+    "accepted": 224,
+    "accepted_wrong": 1,
+    "wrong_rate": 0.004464285714285714,
+    "questions": 82,
+    "question_truth_not_offered": 3,
+    "unknown": 27,
+    "unknown_truly_identifiable": 27
+   },
+   {
+    "accept": 0.85,
+    "ask": 0.4,
+    "accepted": 192,
+    "accepted_wrong": 1,
+    "wrong_rate": 0.005208333333333333,
+    "questions": 139,
+    "question_truth_not_offered": 3,
+    "unknown": 2,
+    "unknown_truly_identifiable": 2
+   },
+   {
+    "accept": 0.85,
+    "ask": 0.5,
+    "accepted": 192,
+    "accepted_wrong": 1,
+    "wrong_rate": 0.005208333333333333,
+    "questions": 136,
+    "question_truth_not_offered": 3,
+    "unknown": 5,
+    "unknown_truly_identifiable": 5
+   },
+   {
+    "accept": 0.85,
+    "ask": 0.6,
+    "accepted": 192,
+    "accepted_wrong": 1,
+    "wrong_rate": 0.005208333333333333,
+    "questions": 121,
+    "question_truth_not_offered": 3,
+    "unknown": 20,
+    "unknown_truly_identifiable": 20
+   },
+   {
+    "accept": 0.85,
+    "ask": 0.7,
+    "accepted": 192,
+    "accepted_wrong": 1,
+    "wrong_rate": 0.005208333333333333,
+    "questions": 114,
+    "question_truth_not_offered": 3,
+    "unknown": 27,
+    "unknown_truly_identifiable": 27
+   },
+   {
+    "accept": 0.9,
+    "ask": 0.4,
+    "accepted": 184,
+    "accepted_wrong": 1,
+    "wrong_rate": 0.005434782608695652,
+    "questions": 147,
+    "question_truth_not_offered": 3,
+    "unknown": 2,
+    "unknown_truly_identifiable": 2
+   },
+   {
+    "accept": 0.9,
+    "ask": 0.5,
+    "accepted": 184,
+    "accepted_wrong": 1,
+    "wrong_rate": 0.005434782608695652,
+    "questions": 144,
+    "question_truth_not_offered": 3,
+    "unknown": 5,
+    "unknown_truly_identifiable": 5
+   },
+   {
+    "accept": 0.9,
+    "ask": 0.6,
+    "accepted": 184,
+    "accepted_wrong": 1,
+    "wrong_rate": 0.005434782608695652,
+    "questions": 129,
+    "question_truth_not_offered": 3,
+    "unknown": 20,
+    "unknown_truly_identifiable": 20
+   },
+   {
+    "accept": 0.9,
+    "ask": 0.7,
+    "accepted": 184,
+    "accepted_wrong": 1,
+    "wrong_rate": 0.005434782608695652,
+    "questions": 122,
+    "question_truth_not_offered": 3,
+    "unknown": 27,
+    "unknown_truly_identifiable": 27
+   },
+   {
+    "accept": 0.95,
+    "ask": 0.4,
+    "accepted": 132,
+    "accepted_wrong": 1,
+    "wrong_rate": 0.007575757575757576,
+    "questions": 199,
+    "question_truth_not_offered": 3,
+    "unknown": 2,
+    "unknown_truly_identifiable": 2
+   },
+   {
+    "accept": 0.95,
+    "ask": 0.5,
+    "accepted": 132,
+    "accepted_wrong": 1,
+    "wrong_rate": 0.007575757575757576,
+    "questions": 196,
+    "question_truth_not_offered": 3,
+    "unknown": 5,
+    "unknown_truly_identifiable": 5
+   },
+   {
+    "accept": 0.95,
+    "ask": 0.6,
+    "accepted": 132,
+    "accepted_wrong": 1,
+    "wrong_rate": 0.007575757575757576,
+    "questions": 181,
+    "question_truth_not_offered": 3,
+    "unknown": 20,
+    "unknown_truly_identifiable": 20
+   },
+   {
+    "accept": 0.95,
+    "ask": 0.7,
+    "accepted": 132,
+    "accepted_wrong": 1,
+    "wrong_rate": 0.007575757575757576,
+    "questions": 174,
+    "question_truth_not_offered": 3,
+    "unknown": 27,
+    "unknown_truly_identifiable": 27
+   }
+  ],
+  "test_rich": [
+   {
+    "accept": 0.5,
+    "ask": 0.4,
+    "accepted": 395,
+    "accepted_wrong": 22,
+    "wrong_rate": 0.05569620253164557,
+    "questions": 10,
+    "question_truth_not_offered": 0,
+    "unknown": 2,
+    "unknown_truly_identifiable": 2
+   },
+   {
+    "accept": 0.5,
+    "ask": 0.5,
+    "accepted": 395,
+    "accepted_wrong": 22,
+    "wrong_rate": 0.05569620253164557,
+    "questions": 0,
+    "question_truth_not_offered": 0,
+    "unknown": 12,
+    "unknown_truly_identifiable": 12
+   },
+   {
+    "accept": 0.6,
+    "ask": 0.4,
+    "accepted": 372,
+    "accepted_wrong": 12,
+    "wrong_rate": 0.03225806451612903,
+    "questions": 33,
+    "question_truth_not_offered": 0,
+    "unknown": 2,
+    "unknown_truly_identifiable": 2
+   },
+   {
+    "accept": 0.6,
+    "ask": 0.5,
+    "accepted": 372,
+    "accepted_wrong": 12,
+    "wrong_rate": 0.03225806451612903,
+    "questions": 23,
+    "question_truth_not_offered": 0,
+    "unknown": 12,
+    "unknown_truly_identifiable": 12
+   },
+   {
+    "accept": 0.6,
+    "ask": 0.6,
+    "accepted": 372,
+    "accepted_wrong": 12,
+    "wrong_rate": 0.03225806451612903,
+    "questions": 0,
+    "question_truth_not_offered": 0,
+    "unknown": 35,
+    "unknown_truly_identifiable": 35
+   },
+   {
+    "accept": 0.7,
+    "ask": 0.4,
+    "accepted": 355,
+    "accepted_wrong": 3,
+    "wrong_rate": 0.008450704225352112,
+    "questions": 50,
+    "question_truth_not_offered": 0,
+    "unknown": 2,
+    "unknown_truly_identifiable": 2
+   },
+   {
+    "accept": 0.7,
+    "ask": 0.5,
+    "accepted": 355,
+    "accepted_wrong": 3,
+    "wrong_rate": 0.008450704225352112,
+    "questions": 40,
+    "question_truth_not_offered": 0,
+    "unknown": 12,
+    "unknown_truly_identifiable": 12
+   },
+   {
+    "accept": 0.7,
+    "ask": 0.6,
+    "accepted": 355,
+    "accepted_wrong": 3,
+    "wrong_rate": 0.008450704225352112,
+    "questions": 17,
+    "question_truth_not_offered": 0,
+    "unknown": 35,
+    "unknown_truly_identifiable": 35
+   },
+   {
+    "accept": 0.7,
+    "ask": 0.7,
+    "accepted": 355,
+    "accepted_wrong": 3,
+    "wrong_rate": 0.008450704225352112,
+    "questions": 0,
+    "question_truth_not_offered": 0,
+    "unknown": 52,
+    "unknown_truly_identifiable": 52
+   },
+   {
+    "accept": 0.8,
+    "ask": 0.4,
+    "accepted": 281,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 124,
+    "question_truth_not_offered": 0,
+    "unknown": 2,
+    "unknown_truly_identifiable": 2
+   },
+   {
+    "accept": 0.8,
+    "ask": 0.5,
+    "accepted": 281,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 114,
+    "question_truth_not_offered": 0,
+    "unknown": 12,
+    "unknown_truly_identifiable": 12
+   },
+   {
+    "accept": 0.8,
+    "ask": 0.6,
+    "accepted": 281,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 91,
+    "question_truth_not_offered": 0,
+    "unknown": 35,
+    "unknown_truly_identifiable": 35
+   },
+   {
+    "accept": 0.8,
+    "ask": 0.7,
+    "accepted": 281,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 74,
+    "question_truth_not_offered": 0,
+    "unknown": 52,
+    "unknown_truly_identifiable": 52
+   },
+   {
+    "accept": 0.85,
+    "ask": 0.4,
+    "accepted": 244,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 161,
+    "question_truth_not_offered": 0,
+    "unknown": 2,
+    "unknown_truly_identifiable": 2
+   },
+   {
+    "accept": 0.85,
+    "ask": 0.5,
+    "accepted": 244,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 151,
+    "question_truth_not_offered": 0,
+    "unknown": 12,
+    "unknown_truly_identifiable": 12
+   },
+   {
+    "accept": 0.85,
+    "ask": 0.6,
+    "accepted": 244,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 128,
+    "question_truth_not_offered": 0,
+    "unknown": 35,
+    "unknown_truly_identifiable": 35
+   },
+   {
+    "accept": 0.85,
+    "ask": 0.7,
+    "accepted": 244,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 111,
+    "question_truth_not_offered": 0,
+    "unknown": 52,
+    "unknown_truly_identifiable": 52
+   },
+   {
+    "accept": 0.9,
+    "ask": 0.4,
+    "accepted": 234,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 171,
+    "question_truth_not_offered": 0,
+    "unknown": 2,
+    "unknown_truly_identifiable": 2
+   },
+   {
+    "accept": 0.9,
+    "ask": 0.5,
+    "accepted": 234,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 161,
+    "question_truth_not_offered": 0,
+    "unknown": 12,
+    "unknown_truly_identifiable": 12
+   },
+   {
+    "accept": 0.9,
+    "ask": 0.6,
+    "accepted": 234,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 138,
+    "question_truth_not_offered": 0,
+    "unknown": 35,
+    "unknown_truly_identifiable": 35
+   },
+   {
+    "accept": 0.9,
+    "ask": 0.7,
+    "accepted": 234,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 121,
+    "question_truth_not_offered": 0,
+    "unknown": 52,
+    "unknown_truly_identifiable": 52
+   },
+   {
+    "accept": 0.95,
+    "ask": 0.4,
+    "accepted": 172,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 233,
+    "question_truth_not_offered": 0,
+    "unknown": 2,
+    "unknown_truly_identifiable": 2
+   },
+   {
+    "accept": 0.95,
+    "ask": 0.5,
+    "accepted": 172,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 223,
+    "question_truth_not_offered": 0,
+    "unknown": 12,
+    "unknown_truly_identifiable": 12
+   },
+   {
+    "accept": 0.95,
+    "ask": 0.6,
+    "accepted": 172,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 200,
+    "question_truth_not_offered": 0,
+    "unknown": 35,
+    "unknown_truly_identifiable": 35
+   },
+   {
+    "accept": 0.95,
+    "ask": 0.7,
+    "accepted": 172,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 183,
+    "question_truth_not_offered": 0,
+    "unknown": 52,
+    "unknown_truly_identifiable": 52
+   }
+  ],
+  "test_short": [
+   {
+    "accept": 0.5,
+    "ask": 0.4,
+    "accepted": 207,
+    "accepted_wrong": 57,
+    "wrong_rate": 0.2753623188405797,
+    "questions": 3,
+    "question_truth_not_offered": 0,
+    "unknown": 271,
+    "unknown_truly_identifiable": 271
+   },
+   {
+    "accept": 0.5,
+    "ask": 0.5,
+    "accepted": 207,
+    "accepted_wrong": 57,
+    "wrong_rate": 0.2753623188405797,
+    "questions": 0,
+    "question_truth_not_offered": 0,
+    "unknown": 274,
+    "unknown_truly_identifiable": 274
+   },
+   {
+    "accept": 0.6,
+    "ask": 0.4,
+    "accepted": 134,
+    "accepted_wrong": 7,
+    "wrong_rate": 0.05223880597014925,
+    "questions": 76,
+    "question_truth_not_offered": 13,
+    "unknown": 271,
+    "unknown_truly_identifiable": 271
+   },
+   {
+    "accept": 0.6,
+    "ask": 0.5,
+    "accepted": 134,
+    "accepted_wrong": 7,
+    "wrong_rate": 0.05223880597014925,
+    "questions": 73,
+    "question_truth_not_offered": 13,
+    "unknown": 274,
+    "unknown_truly_identifiable": 274
+   },
+   {
+    "accept": 0.6,
+    "ask": 0.6,
+    "accepted": 134,
+    "accepted_wrong": 7,
+    "wrong_rate": 0.05223880597014925,
+    "questions": 0,
+    "question_truth_not_offered": 0,
+    "unknown": 347,
+    "unknown_truly_identifiable": 347
+   },
+   {
+    "accept": 0.7,
+    "ask": 0.4,
+    "accepted": 116,
+    "accepted_wrong": 7,
+    "wrong_rate": 0.0603448275862069,
+    "questions": 94,
+    "question_truth_not_offered": 13,
+    "unknown": 271,
+    "unknown_truly_identifiable": 271
+   },
+   {
+    "accept": 0.7,
+    "ask": 0.5,
+    "accepted": 116,
+    "accepted_wrong": 7,
+    "wrong_rate": 0.0603448275862069,
+    "questions": 91,
+    "question_truth_not_offered": 13,
+    "unknown": 274,
+    "unknown_truly_identifiable": 274
+   },
+   {
+    "accept": 0.7,
+    "ask": 0.6,
+    "accepted": 116,
+    "accepted_wrong": 7,
+    "wrong_rate": 0.0603448275862069,
+    "questions": 18,
+    "question_truth_not_offered": 0,
+    "unknown": 347,
+    "unknown_truly_identifiable": 347
+   },
+   {
+    "accept": 0.7,
+    "ask": 0.7,
+    "accepted": 116,
+    "accepted_wrong": 7,
+    "wrong_rate": 0.0603448275862069,
+    "questions": 0,
+    "question_truth_not_offered": 0,
+    "unknown": 365,
+    "unknown_truly_identifiable": 365
+   },
+   {
+    "accept": 0.8,
+    "ask": 0.4,
+    "accepted": 116,
+    "accepted_wrong": 7,
+    "wrong_rate": 0.0603448275862069,
+    "questions": 94,
+    "question_truth_not_offered": 13,
+    "unknown": 271,
+    "unknown_truly_identifiable": 271
+   },
+   {
+    "accept": 0.8,
+    "ask": 0.5,
+    "accepted": 116,
+    "accepted_wrong": 7,
+    "wrong_rate": 0.0603448275862069,
+    "questions": 91,
+    "question_truth_not_offered": 13,
+    "unknown": 274,
+    "unknown_truly_identifiable": 274
+   },
+   {
+    "accept": 0.8,
+    "ask": 0.6,
+    "accepted": 116,
+    "accepted_wrong": 7,
+    "wrong_rate": 0.0603448275862069,
+    "questions": 18,
+    "question_truth_not_offered": 0,
+    "unknown": 347,
+    "unknown_truly_identifiable": 347
+   },
+   {
+    "accept": 0.8,
+    "ask": 0.7,
+    "accepted": 116,
+    "accepted_wrong": 7,
+    "wrong_rate": 0.0603448275862069,
+    "questions": 0,
+    "question_truth_not_offered": 0,
+    "unknown": 365,
+    "unknown_truly_identifiable": 365
+   },
+   {
+    "accept": 0.85,
+    "ask": 0.4,
+    "accepted": 116,
+    "accepted_wrong": 7,
+    "wrong_rate": 0.0603448275862069,
+    "questions": 94,
+    "question_truth_not_offered": 13,
+    "unknown": 271,
+    "unknown_truly_identifiable": 271
+   },
+   {
+    "accept": 0.85,
+    "ask": 0.5,
+    "accepted": 116,
+    "accepted_wrong": 7,
+    "wrong_rate": 0.0603448275862069,
+    "questions": 91,
+    "question_truth_not_offered": 13,
+    "unknown": 274,
+    "unknown_truly_identifiable": 274
+   },
+   {
+    "accept": 0.85,
+    "ask": 0.6,
+    "accepted": 116,
+    "accepted_wrong": 7,
+    "wrong_rate": 0.0603448275862069,
+    "questions": 18,
+    "question_truth_not_offered": 0,
+    "unknown": 347,
+    "unknown_truly_identifiable": 347
+   },
+   {
+    "accept": 0.85,
+    "ask": 0.7,
+    "accepted": 116,
+    "accepted_wrong": 7,
+    "wrong_rate": 0.0603448275862069,
+    "questions": 0,
+    "question_truth_not_offered": 0,
+    "unknown": 365,
+    "unknown_truly_identifiable": 365
+   },
+   {
+    "accept": 0.9,
+    "ask": 0.4,
+    "accepted": 109,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 101,
+    "question_truth_not_offered": 20,
+    "unknown": 271,
+    "unknown_truly_identifiable": 271
+   },
+   {
+    "accept": 0.9,
+    "ask": 0.5,
+    "accepted": 109,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 98,
+    "question_truth_not_offered": 20,
+    "unknown": 274,
+    "unknown_truly_identifiable": 274
+   },
+   {
+    "accept": 0.9,
+    "ask": 0.6,
+    "accepted": 109,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 25,
+    "question_truth_not_offered": 7,
+    "unknown": 347,
+    "unknown_truly_identifiable": 347
+   },
+   {
+    "accept": 0.9,
+    "ask": 0.7,
+    "accepted": 109,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 7,
+    "question_truth_not_offered": 7,
+    "unknown": 365,
+    "unknown_truly_identifiable": 365
+   },
+   {
+    "accept": 0.95,
+    "ask": 0.4,
+    "accepted": 109,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 101,
+    "question_truth_not_offered": 20,
+    "unknown": 271,
+    "unknown_truly_identifiable": 271
+   },
+   {
+    "accept": 0.95,
+    "ask": 0.5,
+    "accepted": 109,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 98,
+    "question_truth_not_offered": 20,
+    "unknown": 274,
+    "unknown_truly_identifiable": 274
+   },
+   {
+    "accept": 0.95,
+    "ask": 0.6,
+    "accepted": 109,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 25,
+    "question_truth_not_offered": 7,
+    "unknown": 347,
+    "unknown_truly_identifiable": 347
+   },
+   {
+    "accept": 0.95,
+    "ask": 0.7,
+    "accepted": 109,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 7,
+    "question_truth_not_offered": 7,
+    "unknown": 365,
+    "unknown_truly_identifiable": 365
+   }
+  ],
+  "dev_short": [
+   {
+    "accept": 0.5,
+    "ask": 0.4,
+    "accepted": 279,
+    "accepted_wrong": 65,
+    "wrong_rate": 0.23297491039426524,
+    "questions": 3,
+    "question_truth_not_offered": 0,
+    "unknown": 421,
+    "unknown_truly_identifiable": 421
+   },
+   {
+    "accept": 0.5,
+    "ask": 0.5,
+    "accepted": 279,
+    "accepted_wrong": 65,
+    "wrong_rate": 0.23297491039426524,
+    "questions": 0,
+    "question_truth_not_offered": 0,
+    "unknown": 424,
+    "unknown_truly_identifiable": 424
+   },
+   {
+    "accept": 0.6,
+    "ask": 0.4,
+    "accepted": 190,
+    "accepted_wrong": 13,
+    "wrong_rate": 0.06842105263157895,
+    "questions": 92,
+    "question_truth_not_offered": 13,
+    "unknown": 421,
+    "unknown_truly_identifiable": 421
+   },
+   {
+    "accept": 0.6,
+    "ask": 0.5,
+    "accepted": 190,
+    "accepted_wrong": 13,
+    "wrong_rate": 0.06842105263157895,
+    "questions": 89,
+    "question_truth_not_offered": 13,
+    "unknown": 424,
+    "unknown_truly_identifiable": 424
+   },
+   {
+    "accept": 0.6,
+    "ask": 0.6,
+    "accepted": 190,
+    "accepted_wrong": 13,
+    "wrong_rate": 0.06842105263157895,
+    "questions": 0,
+    "question_truth_not_offered": 0,
+    "unknown": 513,
+    "unknown_truly_identifiable": 513
+   },
+   {
+    "accept": 0.7,
+    "ask": 0.4,
+    "accepted": 167,
+    "accepted_wrong": 11,
+    "wrong_rate": 0.0658682634730539,
+    "questions": 115,
+    "question_truth_not_offered": 15,
+    "unknown": 421,
+    "unknown_truly_identifiable": 421
+   },
+   {
+    "accept": 0.7,
+    "ask": 0.5,
+    "accepted": 167,
+    "accepted_wrong": 11,
+    "wrong_rate": 0.0658682634730539,
+    "questions": 112,
+    "question_truth_not_offered": 15,
+    "unknown": 424,
+    "unknown_truly_identifiable": 424
+   },
+   {
+    "accept": 0.7,
+    "ask": 0.6,
+    "accepted": 167,
+    "accepted_wrong": 11,
+    "wrong_rate": 0.0658682634730539,
+    "questions": 23,
+    "question_truth_not_offered": 2,
+    "unknown": 513,
+    "unknown_truly_identifiable": 513
+   },
+   {
+    "accept": 0.7,
+    "ask": 0.7,
+    "accepted": 167,
+    "accepted_wrong": 11,
+    "wrong_rate": 0.0658682634730539,
+    "questions": 0,
+    "question_truth_not_offered": 0,
+    "unknown": 536,
+    "unknown_truly_identifiable": 536
+   },
+   {
+    "accept": 0.8,
+    "ask": 0.4,
+    "accepted": 162,
+    "accepted_wrong": 11,
+    "wrong_rate": 0.06790123456790123,
+    "questions": 120,
+    "question_truth_not_offered": 15,
+    "unknown": 421,
+    "unknown_truly_identifiable": 421
+   },
+   {
+    "accept": 0.8,
+    "ask": 0.5,
+    "accepted": 162,
+    "accepted_wrong": 11,
+    "wrong_rate": 0.06790123456790123,
+    "questions": 117,
+    "question_truth_not_offered": 15,
+    "unknown": 424,
+    "unknown_truly_identifiable": 424
+   },
+   {
+    "accept": 0.8,
+    "ask": 0.6,
+    "accepted": 162,
+    "accepted_wrong": 11,
+    "wrong_rate": 0.06790123456790123,
+    "questions": 28,
+    "question_truth_not_offered": 2,
+    "unknown": 513,
+    "unknown_truly_identifiable": 513
+   },
+   {
+    "accept": 0.8,
+    "ask": 0.7,
+    "accepted": 162,
+    "accepted_wrong": 11,
+    "wrong_rate": 0.06790123456790123,
+    "questions": 5,
+    "question_truth_not_offered": 0,
+    "unknown": 536,
+    "unknown_truly_identifiable": 536
+   },
+   {
+    "accept": 0.85,
+    "ask": 0.4,
+    "accepted": 160,
+    "accepted_wrong": 9,
+    "wrong_rate": 0.05625,
+    "questions": 122,
+    "question_truth_not_offered": 17,
+    "unknown": 421,
+    "unknown_truly_identifiable": 421
+   },
+   {
+    "accept": 0.85,
+    "ask": 0.5,
+    "accepted": 160,
+    "accepted_wrong": 9,
+    "wrong_rate": 0.05625,
+    "questions": 119,
+    "question_truth_not_offered": 17,
+    "unknown": 424,
+    "unknown_truly_identifiable": 424
+   },
+   {
+    "accept": 0.85,
+    "ask": 0.6,
+    "accepted": 160,
+    "accepted_wrong": 9,
+    "wrong_rate": 0.05625,
+    "questions": 30,
+    "question_truth_not_offered": 4,
+    "unknown": 513,
+    "unknown_truly_identifiable": 513
+   },
+   {
+    "accept": 0.85,
+    "ask": 0.7,
+    "accepted": 160,
+    "accepted_wrong": 9,
+    "wrong_rate": 0.05625,
+    "questions": 7,
+    "question_truth_not_offered": 2,
+    "unknown": 536,
+    "unknown_truly_identifiable": 536
+   },
+   {
+    "accept": 0.9,
+    "ask": 0.4,
+    "accepted": 150,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 132,
+    "question_truth_not_offered": 26,
+    "unknown": 421,
+    "unknown_truly_identifiable": 421
+   },
+   {
+    "accept": 0.9,
+    "ask": 0.5,
+    "accepted": 150,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 129,
+    "question_truth_not_offered": 26,
+    "unknown": 424,
+    "unknown_truly_identifiable": 424
+   },
+   {
+    "accept": 0.9,
+    "ask": 0.6,
+    "accepted": 150,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 40,
+    "question_truth_not_offered": 13,
+    "unknown": 513,
+    "unknown_truly_identifiable": 513
+   },
+   {
+    "accept": 0.9,
+    "ask": 0.7,
+    "accepted": 150,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 17,
+    "question_truth_not_offered": 11,
+    "unknown": 536,
+    "unknown_truly_identifiable": 536
+   },
+   {
+    "accept": 0.95,
+    "ask": 0.4,
+    "accepted": 150,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 132,
+    "question_truth_not_offered": 26,
+    "unknown": 421,
+    "unknown_truly_identifiable": 421
+   },
+   {
+    "accept": 0.95,
+    "ask": 0.5,
+    "accepted": 150,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 129,
+    "question_truth_not_offered": 26,
+    "unknown": 424,
+    "unknown_truly_identifiable": 424
+   },
+   {
+    "accept": 0.95,
+    "ask": 0.6,
+    "accepted": 150,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 40,
+    "question_truth_not_offered": 13,
+    "unknown": 513,
+    "unknown_truly_identifiable": 513
+   },
+   {
+    "accept": 0.95,
+    "ask": 0.7,
+    "accepted": 150,
+    "accepted_wrong": 0,
+    "wrong_rate": 0.0,
+    "questions": 17,
+    "question_truth_not_offered": 11,
+    "unknown": 536,
+    "unknown_truly_identifiable": 536
+   }
+  ]
+ },
+ "derived": {
+  "dev_rich": {
+   "computed": 72,
+   "flagged": 67,
+   "sensors": 225,
+   "sensors_flagged": 10
+  },
+  "test_rich": {
+   "computed": 88,
+   "flagged": 87,
+   "sensors": 275,
+   "sensors_flagged": 11
+  },
+  "test_short": {
+   "computed": 98,
+   "flagged": 0,
+   "sensors": 311,
+   "sensors_flagged": 0
+  },
+  "dev_short": {
+   "computed": 151,
+   "flagged": 1,
+   "sensors": 459,
+   "sensors_flagged": 1
+  }
+ },
+ "per_column": {
+  "dev_rich": {
+   "ax": [
+    9,
+    9
+   ],
+   "ay": [
+    9,
+    9
+   ],
+   "az": [
+    9,
+    9
+   ],
+   "battery": [
+    9,
+    9
+   ],
+   "charging": [
+    9,
+    9
+   ],
+   "dCL_cm": [
+    9,
+    9
+   ],
+   "dCR_cm": [
+    9,
+    9
+   ],
+   "dC_cm": [
+    9,
+    9
+   ],
+   "dL_cm": [
+    9,
+    9
+   ],
+   "dR_cm": [
+    9,
+    9
+   ],
+   "dbot_cm": [
+    9,
+    9
+   ],
+   "dtop_cm": [
+    9,
+    9
+   ],
+   "gx": [
+    9,
+    9
+   ],
+   "gy": [
+    9,
+    9
+   ],
+   "gz": [
+    8,
+    9
+   ],
+   "lifted": [
+    9,
+    9
+   ],
+   "lineC": [
+    9,
+    9
+   ],
+   "lineL": [
+    9,
+    9
+   ],
+   "lineR": [
+    9,
+    9
+   ],
+   "ms": [
+    9,
+    9
+   ],
+   "pitch_deg": [
+    8,
+    9
+   ],
+   "raw_n": [
+    9,
+    9
+   ],
+   "roll_deg": [
+    7,
+    9
+   ],
+   "run": [
+    9,
+    9
+   ],
+   "step": [
+    9,
+    9
+   ],
+   "swL": [
+    9,
+    9
+   ],
+   "swR": [
+    9,
+    9
+   ],
+   "th_deg": [
+    9,
+    9
+   ],
+   "v_cms": [
+    9,
+    9
+   ],
+   "w_dps": [
+    8,
+    9
+   ],
+   "wl_deg": [
+    9,
+    9
+   ],
+   "wl_rpm": [
+    9,
+    9
+   ],
+   "wr_deg": [
+    9,
+    9
+   ],
+   "wr_rpm": [
+    9,
+    9
+   ],
+   "x_cm": [
+    9,
+    9
+   ],
+   "y_cm": [
+    9,
+    9
+   ],
+   "yaw_deg": [
+    8,
+    9
+   ]
+  },
+  "test_rich": {
+   "ax": [
+    11,
+    11
+   ],
+   "ay": [
+    11,
+    11
+   ],
+   "az": [
+    11,
+    11
+   ],
+   "battery": [
+    11,
+    11
+   ],
+   "charging": [
+    11,
+    11
+   ],
+   "dCL_cm": [
+    7,
+    11
+   ],
+   "dCR_cm": [
+    7,
+    11
+   ],
+   "dC_cm": [
+    9,
+    11
+   ],
+   "dL_cm": [
+    6,
+    11
+   ],
+   "dR_cm": [
+    7,
+    11
+   ],
+   "dbot_cm": [
+    6,
+    11
+   ],
+   "dtop_cm": [
+    9,
+    11
+   ],
+   "gx": [
+    11,
+    11
+   ],
+   "gy": [
+    10,
+    11
+   ],
+   "gz": [
+    11,
+    11
+   ],
+   "lifted": [
+    11,
+    11
+   ],
+   "lineC": [
+    11,
+    11
+   ],
+   "lineL": [
+    11,
+    11
+   ],
+   "lineR": [
+    11,
+    11
+   ],
+   "ms": [
+    11,
+    11
+   ],
+   "pitch_deg": [
+    11,
+    11
+   ],
+   "raw_n": [
+    11,
+    11
+   ],
+   "roll_deg": [
+    10,
+    11
+   ],
+   "run": [
+    11,
+    11
+   ],
+   "step": [
+    11,
+    11
+   ],
+   "swL": [
+    11,
+    11
+   ],
+   "swR": [
+    11,
+    11
+   ],
+   "th_deg": [
+    11,
+    11
+   ],
+   "v_cms": [
+    10,
+    11
+   ],
+   "w_dps": [
+    11,
+    11
+   ],
+   "wl_deg": [
+    11,
+    11
+   ],
+   "wl_rpm": [
+    11,
+    11
+   ],
+   "wr_deg": [
+    11,
+    11
+   ],
+   "wr_rpm": [
+    11,
+    11
+   ],
+   "x_cm": [
+    11,
+    11
+   ],
+   "y_cm": [
+    11,
+    11
+   ],
+   "yaw_deg": [
+    11,
+    11
+   ]
+  },
+  "test_short": {
+   "ax": [
+    6,
+    13
+   ],
+   "ay": [
+    8,
+    13
+   ],
+   "az": [
+    9,
+    13
+   ],
+   "battery": [
+    12,
+    13
+   ],
+   "charging": [
+    13,
+    13
+   ],
+   "dCL_cm": [
+    0,
+    13
+   ],
+   "dCR_cm": [
+    0,
+    13
+   ],
+   "dC_cm": [
+    0,
+    13
+   ],
+   "dL_cm": [
+    0,
+    13
+   ],
+   "dR_cm": [
+    0,
+    13
+   ],
+   "dbot_cm": [
+    0,
+    13
+   ],
+   "dtop_cm": [
+    0,
+    13
+   ],
+   "gx": [
+    0,
+    13
+   ],
+   "gy": [
+    0,
+    13
+   ],
+   "gz": [
+    0,
+    13
+   ],
+   "lifted": [
+    13,
+    13
+   ],
+   "lineC": [
+    6,
+    13
+   ],
+   "lineL": [
+    6,
+    13
+   ],
+   "lineR": [
+    6,
+    13
+   ],
+   "ms": [
+    13,
+    13
+   ],
+   "pitch_deg": [
+    0,
+    13
+   ],
+   "raw_n": [
+    13,
+    13
+   ],
+   "roll_deg": [
+    0,
+    13
+   ],
+   "run": [
+    13,
+    13
+   ],
+   "step": [
+    0,
+    13
+   ],
+   "swL": [
+    13,
+    13
+   ],
+   "swR": [
+    13,
+    13
+   ],
+   "th_deg": [
+    0,
+    13
+   ],
+   "v_cms": [
+    0,
+    13
+   ],
+   "w_dps": [
+    0,
+    13
+   ],
+   "wl_deg": [
+    0,
+    13
+   ],
+   "wl_rpm": [
+    0,
+    13
+   ],
+   "wr_deg": [
+    0,
+    13
+   ],
+   "wr_rpm": [
+    0,
+    13
+   ],
+   "x_cm": [
+    0,
+    13
+   ],
+   "y_cm": [
+    6,
+    13
+   ],
+   "yaw_deg": [
+    0,
+    13
+   ]
+  },
+  "dev_short": {
+   "ax": [
+    9,
+    19
+   ],
+   "ay": [
+    10,
+    19
+   ],
+   "az": [
+    12,
+    19
+   ],
+   "battery": [
+    16,
+    19
+   ],
+   "charging": [
+    19,
+    19
+   ],
+   "dCL_cm": [
+    0,
+    19
+   ],
+   "dCR_cm": [
+    0,
+    19
+   ],
+   "dC_cm": [
+    0,
+    19
+   ],
+   "dL_cm": [
+    0,
+    19
+   ],
+   "dR_cm": [
+    0,
+    19
+   ],
+   "dbot_cm": [
+    0,
+    19
+   ],
+   "dtop_cm": [
+    0,
+    19
+   ],
+   "gx": [
+    0,
+    19
+   ],
+   "gy": [
+    0,
+    19
+   ],
+   "gz": [
+    0,
+    19
+   ],
+   "lifted": [
+    19,
+    19
+   ],
+   "lineC": [
+    9,
+    19
+   ],
+   "lineL": [
+    9,
+    19
+   ],
+   "lineR": [
+    9,
+    19
+   ],
+   "ms": [
+    19,
+    19
+   ],
+   "pitch_deg": [
+    0,
+    19
+   ],
+   "raw_n": [
+    19,
+    19
+   ],
+   "roll_deg": [
+    0,
+    19
+   ],
+   "run": [
+    19,
+    19
+   ],
+   "step": [
+    1,
+    19
+   ],
+   "swL": [
+    19,
+    19
+   ],
+   "swR": [
+    19,
+    19
+   ],
+   "th_deg": [
+    0,
+    19
+   ],
+   "v_cms": [
+    1,
+    19
+   ],
+   "w_dps": [
+    0,
+    19
+   ],
+   "wl_deg": [
+    1,
+    19
+   ],
+   "wl_rpm": [
+    1,
+    19
+   ],
+   "wr_deg": [
+    1,
+    19
+   ],
+   "wr_rpm": [
+    1,
+    19
+   ],
+   "x_cm": [
+    0,
+    19
+   ],
+   "y_cm": [
+    1,
+    19
+   ],
+   "yaw_deg": [
+    0,
+    19
+   ]
+  }
+ },
+ "confusion": {
+  "dev_rich": {
+   "types": [
+    "gyro_rate",
+    "gyro_angle",
+    "wheel_angle",
+    "wheel_speed",
+    "accel",
+    "range",
+    "line",
+    "switch",
+    "battery",
+    "constant",
+    "clock",
+    "counter",
+    "mode",
+    "id",
+    "derived",
+    "unknown"
+   ],
+   "matrix": [
+    [
+     26,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0
+    ],
+    [
+     0,
+     8,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1
+    ],
+    [
+     0,
+     0,
+     18,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     18,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     27,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     63,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     27,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     9,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     36,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     9,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     9,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     9,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     9,
+     0,
+     0
+    ],
+    [
+     3,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     59,
+     1
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   ]
+  },
+  "test_rich": {
+   "types": [
+    "gyro_rate",
+    "gyro_angle",
+    "wheel_angle",
+    "wheel_speed",
+    "accel",
+    "range",
+    "line",
+    "switch",
+    "battery",
+    "constant",
+    "clock",
+    "counter",
+    "mode",
+    "id",
+    "derived",
+    "unknown"
+   ],
+   "matrix": [
+    [
+     32,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1
+    ],
+    [
+     0,
+     11,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     22,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     22,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     33,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     51,
+     26,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     33,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     11,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     44,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     11,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     11,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     11,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     11,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     75,
+     1
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   ]
+  },
+  "test_short": {
+   "types": [
+    "gyro_rate",
+    "gyro_angle",
+    "wheel_angle",
+    "wheel_speed",
+    "accel",
+    "range",
+    "line",
+    "switch",
+    "battery",
+    "constant",
+    "clock",
+    "counter",
+    "mode",
+    "id",
+    "derived",
+    "unknown"
+   ],
+   "matrix": [
+    [
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     38
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     13
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     26
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     6,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     20
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     23,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     16
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     42,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     49
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     18,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     21
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     72,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     13,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     13,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     13
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     11,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     6,
+     0,
+     0,
+     6,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     73
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   ]
+  },
+  "dev_short": {
+   "types": [
+    "gyro_rate",
+    "gyro_angle",
+    "wheel_angle",
+    "wheel_speed",
+    "accel",
+    "range",
+    "line",
+    "switch",
+    "battery",
+    "constant",
+    "clock",
+    "counter",
+    "mode",
+    "id",
+    "derived",
+    "unknown"
+   ],
+   "matrix": [
+    [
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     56
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     19
+    ],
+    [
+     0,
+     0,
+     2,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     36
+    ],
+    [
+     0,
+     0,
+     0,
+     2,
+     5,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     31
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     31,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     26
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     49,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     84
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     27,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     30
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     3,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     93,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     19,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     19,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     18
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     19,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     1,
+     1,
+     7,
+     0,
+     0,
+     6,
+     0,
+     0,
+     0,
+     0,
+     2,
+     0,
+     1,
+     114
+    ],
+    [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   ]
+  }
+ },
+ "structure": [
+  {
+   "case": "e02-20261021-222237/Center",
+   "split": "dev",
+   "kind": "short",
+   "rows": 449,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "dCR_cm",
+     "dL_cm",
+     "dC_cm",
+     "dCL_cm",
+     "dR_cm",
+     "dtop_cm",
+     "dbot_cm"
+    ],
+    [
+     "pitch_deg",
+     "roll_deg"
+    ],
+    [
+     "lineL",
+     "lineR",
+     "lineC"
+    ],
+    [
+     "ay",
+     "ax",
+     "az"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "rest",
+   "moving_frac": 0.4721603563474388
+  },
+  {
+   "case": "e02-20261021-222237/Left",
+   "split": "dev",
+   "kind": "short",
+   "rows": 448,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "dCL_cm",
+     "dCR_cm",
+     "dR_cm",
+     "dtop_cm",
+     "dbot_cm",
+     "dC_cm",
+     "dL_cm"
+    ],
+    [
+     "gy",
+     "wl_rpm"
+    ],
+    [
+     "th_deg",
+     "v_cms",
+     "ay",
+     "ax"
+    ],
+    [
+     "w_dps",
+     "wr_rpm",
+     "gz"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "motion",
+   "moving_frac": 0.8772321428571429
+  },
+  {
+   "case": "e02-20261021-222237/Right",
+   "split": "test_robot",
+   "kind": "short",
+   "rows": 450,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "dR_cm",
+     "dL_cm",
+     "dtop_cm",
+     "dCL_cm",
+     "dC_cm",
+     "dCR_cm",
+     "dbot_cm"
+    ],
+    [
+     "ax",
+     "ay",
+     "az"
+    ],
+    [
+     "roll_deg",
+     "pitch_deg"
+    ],
+    [
+     "lineC",
+     "lineL",
+     "lineR"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "rest",
+   "moving_frac": 0.45333333333333337
+  },
+  {
+   "case": "e02-20261021-223606/Center",
+   "split": "dev",
+   "kind": "short",
+   "rows": 448,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "dL_cm",
+     "dtop_cm",
+     "dC_cm",
+     "dbot_cm",
+     "dCL_cm",
+     "dR_cm",
+     "dCR_cm"
+    ],
+    [
+     "pitch_deg",
+     "roll_deg"
+    ],
+    [
+     "lineL",
+     "lineR",
+     "lineC"
+    ],
+    [
+     "ay",
+     "ax",
+     "az"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "rest",
+   "moving_frac": 0.2098214285714286
+  },
+  {
+   "case": "e02-20261021-223606/Left",
+   "split": "dev",
+   "kind": "short",
+   "rows": 449,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "az",
+     "ax",
+     "ay"
+    ],
+    [
+     "dL_cm",
+     "dtop_cm",
+     "dCL_cm",
+     "dCR_cm",
+     "dC_cm",
+     "dbot_cm",
+     "dR_cm"
+    ],
+    [
+     "lineL",
+     "lineR",
+     "lineC"
+    ],
+    [
+     "pitch_deg",
+     "roll_deg"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "rest",
+   "moving_frac": 0.20935412026726052
+  },
+  {
+   "case": "e02-20261021-223606/Right",
+   "split": "test_robot",
+   "kind": "short",
+   "rows": 451,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "ax",
+     "az",
+     "ay"
+    ],
+    [
+     "dCR_cm",
+     "dL_cm",
+     "dC_cm",
+     "dR_cm",
+     "dtop_cm",
+     "dbot_cm",
+     "dCL_cm"
+    ],
+    [
+     "lineC",
+     "lineL",
+     "lineR"
+    ],
+    [
+     "pitch_deg",
+     "roll_deg"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "rest",
+   "moving_frac": 0.21507760532150777
+  },
+  {
+   "case": "e02-20261021-224552/Center",
+   "split": "dev",
+   "kind": "short",
+   "rows": 446,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "th_deg",
+     "az",
+     "w_dps",
+     "wr_rpm",
+     "ay"
+    ],
+    [
+     "dC_cm",
+     "dCR_cm",
+     "dR_cm",
+     "dtop_cm",
+     "dL_cm",
+     "dbot_cm",
+     "dCL_cm"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "motion",
+   "moving_frac": 0.9282511210762332
+  },
+  {
+   "case": "e02-20261021-224552/Left",
+   "split": "dev",
+   "kind": "short",
+   "rows": 317,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "dL_cm",
+     "dR_cm",
+     "dC_cm",
+     "dtop_cm",
+     "dCL_cm",
+     "dCR_cm",
+     "dbot_cm"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "motion",
+   "moving_frac": 0.8801261829652997
+  },
+  {
+   "case": "e02-20261021-224552/Right",
+   "split": "test_robot",
+   "kind": "short",
+   "rows": 450,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "w_dps",
+     "th_deg",
+     "az",
+     "wr_rpm",
+     "wl_rpm",
+     "gz"
+    ],
+    [
+     "dL_cm",
+     "dCL_cm",
+     "dbot_cm",
+     "dC_cm",
+     "dtop_cm",
+     "dCR_cm",
+     "dR_cm"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "motion",
+   "moving_frac": 0.9533333333333334
+  },
+  {
+   "case": "e02-20261022-080709/Center",
+   "split": "dev",
+   "kind": "short",
+   "rows": 448,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "th_deg",
+     "ax",
+     "wl_rpm",
+     "w_dps",
+     "wr_rpm"
+    ],
+    [
+     "dR_cm",
+     "dCR_cm",
+     "dL_cm",
+     "dbot_cm",
+     "dtop_cm",
+     "dCL_cm",
+     "dC_cm"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "motion",
+   "moving_frac": 1.0
+  },
+  {
+   "case": "e02-20261022-080709/Left",
+   "split": "dev",
+   "kind": "short",
+   "rows": 448,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "dbot_cm",
+     "dCR_cm",
+     "dCL_cm",
+     "dR_cm",
+     "dtop_cm",
+     "dC_cm",
+     "dL_cm"
+    ],
+    [
+     "lineL",
+     "lineR",
+     "lineC"
+    ],
+    [
+     "roll_deg",
+     "pitch_deg"
+    ],
+    [
+     "az",
+     "ax",
+     "ay"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "rest",
+   "moving_frac": 0.5066964285714286
+  },
+  {
+   "case": "e02-20261022-080709/Right",
+   "split": "test_robot",
+   "kind": "short",
+   "rows": 450,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "wl_rpm",
+     "th_deg",
+     "w_dps",
+     "ay",
+     "wr_rpm",
+     "az"
+    ],
+    [
+     "dC_cm",
+     "dCL_cm",
+     "dL_cm",
+     "dCR_cm",
+     "dbot_cm",
+     "dR_cm",
+     "dtop_cm"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "motion",
+   "moving_frac": 0.8377777777777777
+  },
+  {
+   "case": "e02-20261022-081629/Center",
+   "split": "dev",
+   "kind": "short",
+   "rows": 448,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "lineL",
+     "lineC",
+     "lineR"
+    ],
+    [
+     "dC_cm",
+     "dL_cm",
+     "dbot_cm",
+     "dCR_cm",
+     "dR_cm",
+     "dCL_cm",
+     "dtop_cm"
+    ],
+    [
+     "roll_deg",
+     "pitch_deg"
+    ],
+    [
+     "ax",
+     "ay",
+     "az"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "rest",
+   "moving_frac": 0.2276785714285714
+  },
+  {
+   "case": "e02-20261022-081629/Left",
+   "split": "dev",
+   "kind": "short",
+   "rows": 1820,
+   "legs_used": 0,
+   "cam_episodes": 2,
+   "turn_pairs": 1,
+   "groups": [
+    [
+     "dR_cm",
+     "dCR_cm",
+     "dtop_cm",
+     "dCL_cm",
+     "dC_cm"
+    ],
+    [
+     "lineL",
+     "lineR",
+     "lineC"
+    ],
+    [
+     "yaw_deg",
+     "roll_deg",
+     "pitch_deg"
+    ],
+    [
+     "az",
+     "w_dps",
+     "wl_rpm",
+     "ay"
+    ],
+    [
+     "x_cm",
+     "gy",
+     "y_cm",
+     "ax",
+     "wl_deg",
+     "wr_deg"
+    ]
+   ],
+   "integration": [
+    [
+     "th_deg",
+     "w_dps",
+     0.9816
+    ],
+    [
+     "wl_deg",
+     "wl_rpm",
+     0.9983
+    ],
+    [
+     "wr_deg",
+     "wr_rpm",
+     0.9963
+    ]
+   ],
+   "combos": [
+    [
+     "dCL_cm",
+     "dCR_cm",
+     "dC_cm",
+     1.0
+    ],
+    [
+     "wr_rpm",
+     "v_cms",
+     "wl_rpm",
+     0.9995
+    ],
+    [
+     "v_cms",
+     "wr_rpm",
+     "wl_rpm",
+     0.9999
+    ],
+    [
+     "wl_rpm",
+     "wr_rpm",
+     "w_dps",
+     1.0
+    ],
+    [
+     "dCR_cm",
+     "dCL_cm",
+     "dC_cm",
+     1.0
+    ],
+    [
+     "dC_cm",
+     "dCL_cm",
+     "dCR_cm",
+     1.0
+    ]
+   ],
+   "planar": [],
+   "grouping": "motion",
+   "moving_frac": 0.9659340659340659
+  },
+  {
+   "case": "e02-20261022-081629/Right",
+   "split": "test_robot",
+   "kind": "short",
+   "rows": 450,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "lineC",
+     "lineL",
+     "lineR"
+    ],
+    [
+     "ay",
+     "az",
+     "ax"
+    ],
+    [
+     "dbot_cm",
+     "dCR_cm",
+     "dtop_cm",
+     "dCL_cm",
+     "dR_cm",
+     "dL_cm",
+     "dC_cm"
+    ],
+    [
+     "pitch_deg",
+     "roll_deg"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "rest",
+   "moving_frac": 0.49777777777777776
+  },
+  {
+   "case": "e02-20261022-095125/Center",
+   "split": "dev",
+   "kind": "rich",
+   "rows": 8733,
+   "legs_used": 0,
+   "cam_episodes": 1,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "lineR",
+     "lineC",
+     "lineL"
+    ],
+    [
+     "az",
+     "ay",
+     "ax"
+    ],
+    [
+     "pitch_deg",
+     "roll_deg"
+    ],
+    [
+     "dR_cm",
+     "dbot_cm",
+     "dCL_cm",
+     "dL_cm",
+     "dC_cm",
+     "dCR_cm",
+     "dtop_cm"
+    ]
+   ],
+   "integration": [
+    [
+     "wr_deg",
+     "wr_rpm",
+     0.9994
+    ],
+    [
+     "wl_deg",
+     "wl_rpm",
+     0.9995
+    ],
+    [
+     "th_deg",
+     "w_dps",
+     0.9914
+    ]
+   ],
+   "combos": [
+    [
+     "wr_rpm",
+     "wl_rpm",
+     "v_cms",
+     1.0
+    ],
+    [
+     "dCR_cm",
+     "dCL_cm",
+     "dC_cm",
+     1.0
+    ],
+    [
+     "dCL_cm",
+     "dCR_cm",
+     "dC_cm",
+     1.0
+    ],
+    [
+     "wl_rpm",
+     "wr_rpm",
+     "v_cms",
+     1.0
+    ],
+    [
+     "v_cms",
+     "wr_rpm",
+     "wl_rpm",
+     1.0
+    ],
+    [
+     "dC_cm",
+     "dCR_cm",
+     "dCL_cm",
+     1.0
+    ]
+   ],
+   "planar": [
+    [
+     0.8202,
+     "x_cm",
+     "y_cm",
+     "th_deg"
+    ]
+   ],
+   "grouping": "rest",
+   "moving_frac": 0.44154357036528114
+  },
+  {
+   "case": "e02-20261022-095125/Left",
+   "split": "dev",
+   "kind": "rich",
+   "rows": 8903,
+   "legs_used": 0,
+   "cam_episodes": 3,
+   "turn_pairs": 2,
+   "groups": [
+    [
+     "az",
+     "ay",
+     "ax"
+    ],
+    [
+     "dCL_cm",
+     "dbot_cm",
+     "dCR_cm",
+     "dtop_cm",
+     "dR_cm",
+     "dC_cm",
+     "dL_cm"
+    ],
+    [
+     "roll_deg",
+     "pitch_deg"
+    ],
+    [
+     "lineC",
+     "lineR",
+     "lineL"
+    ]
+   ],
+   "integration": [
+    [
+     "th_deg",
+     "gz",
+     0.9989
+    ],
+    [
+     "wr_deg",
+     "wr_rpm",
+     0.9982
+    ],
+    [
+     "y_cm",
+     "v_cms",
+     -0.9914
+    ],
+    [
+     "yaw_deg",
+     "gz",
+     0.9982
+    ],
+    [
+     "wl_deg",
+     "wl_rpm",
+     0.9968
+    ]
+   ],
+   "combos": [
+    [
+     "x_cm",
+     "y_cm",
+     "wl_deg",
+     0.9676
+    ],
+    [
+     "dCL_cm",
+     "dCR_cm",
+     "dC_cm",
+     1.0
+    ],
+    [
+     "dCR_cm",
+     "dCL_cm",
+     "dC_cm",
+     1.0
+    ],
+    [
+     "dC_cm",
+     "dCL_cm",
+     "dCR_cm",
+     1.0
+    ],
+    [
+     "gz",
+     "az",
+     "w_dps",
+     0.9929
+    ],
+    [
+     "wr_rpm",
+     "w_dps",
+     "v_cms",
+     1.0
+    ],
+    [
+     "w_dps",
+     "gz",
+     "gx",
+     0.9922
+    ],
+    [
+     "v_cms",
+     "wr_rpm",
+     "wl_rpm",
+     1.0
+    ],
+    [
+     "wl_rpm",
+     "wr_rpm",
+     "v_cms",
+     0.9998
+    ]
+   ],
+   "planar": [
+    [
+     0.9573,
+     "x_cm",
+     "y_cm",
+     "th_deg"
+    ]
+   ],
+   "grouping": "rest",
+   "moving_frac": 0.9573177580590813
+  },
+  {
+   "case": "e02-20261022-095125/Right",
+   "split": "test_robot",
+   "kind": "rich",
+   "rows": 11278,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "pitch_deg",
+     "roll_deg"
+    ],
+    [
+     "dC_cm",
+     "dCL_cm",
+     "dCR_cm",
+     "dtop_cm",
+     "dR_cm",
+     "dL_cm",
+     "dbot_cm"
+    ],
+    [
+     "lineR",
+     "lineL",
+     "lineC"
+    ],
+    [
+     "ay",
+     "ax",
+     "az"
+    ]
+   ],
+   "integration": [
+    [
+     "yaw_deg",
+     "gz",
+     0.995
+    ],
+    [
+     "wl_deg",
+     "wl_rpm",
+     0.998
+    ],
+    [
+     "wr_deg",
+     "wr_rpm",
+     0.9988
+    ],
+    [
+     "th_deg",
+     "gz",
+     0.9989
+    ]
+   ],
+   "combos": [
+    [
+     "gz",
+     "w_dps",
+     "gy",
+     0.9912
+    ],
+    [
+     "dC_cm",
+     "dCL_cm",
+     "dCR_cm",
+     1.0
+    ],
+    [
+     "v_cms",
+     "wl_rpm",
+     "wr_rpm",
+     1.0
+    ],
+    [
+     "dCL_cm",
+     "dC_cm",
+     "dCR_cm",
+     1.0
+    ],
+    [
+     "wl_rpm",
+     "v_cms",
+     "wr_rpm",
+     0.9999
+    ],
+    [
+     "dCR_cm",
+     "dC_cm",
+     "dCL_cm",
+     1.0
+    ],
+    [
+     "wr_rpm",
+     "wl_rpm",
+     "w_dps",
+     1.0
+    ],
+    [
+     "w_dps",
+     "gz",
+     "gy",
+     0.9912
+    ]
+   ],
+   "planar": [
+    [
+     0.9857,
+     "x_cm",
+     "y_cm",
+     "th_deg"
+    ]
+   ],
+   "grouping": "rest",
+   "moving_frac": 0.5202163504167405
+  },
+  {
+   "case": "e02-20261022-192858/Center",
+   "split": "dev",
+   "kind": "short",
+   "rows": 449,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "dCR_cm",
+     "dtop_cm",
+     "dCL_cm",
+     "dC_cm",
+     "dR_cm",
+     "dbot_cm",
+     "dL_cm"
+    ],
+    [
+     "wr_rpm",
+     "az",
+     "ax",
+     "w_dps",
+     "th_deg"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "motion",
+   "moving_frac": 0.9599109131403119
+  },
+  {
+   "case": "e02-20261022-192858/Left",
+   "split": "dev",
+   "kind": "short",
+   "rows": 448,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "ay",
+     "v_cms",
+     "wr_rpm",
+     "th_deg",
+     "w_dps",
+     "ax",
+     "wl_rpm",
+     "az"
+    ],
+    [
+     "lineR",
+     "lineL",
+     "lineC"
+    ],
+    [
+     "dR_cm",
+     "dL_cm",
+     "dCL_cm",
+     "dC_cm",
+     "dtop_cm",
+     "dCR_cm",
+     "dbot_cm"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "motion",
+   "moving_frac": 0.7388392857142857
+  },
+  {
+   "case": "e02-20261022-192858/Right",
+   "split": "test_robot",
+   "kind": "short",
+   "rows": 448,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "dCR_cm",
+     "dL_cm",
+     "dbot_cm",
+     "dCL_cm",
+     "dR_cm",
+     "dC_cm",
+     "dtop_cm"
+    ],
+    [
+     "w_dps",
+     "th_deg",
+     "wl_rpm",
+     "wr_rpm"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "motion",
+   "moving_frac": 0.6473214285714286
+  },
+  {
+   "case": "e02-20261022-195419/Center",
+   "split": "dev",
+   "kind": "short",
+   "rows": 450,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "lineC",
+     "lineL",
+     "lineR"
+    ],
+    [
+     "dCL_cm",
+     "dbot_cm",
+     "dR_cm",
+     "dCR_cm",
+     "dL_cm",
+     "dtop_cm",
+     "dC_cm"
+    ],
+    [
+     "pitch_deg",
+     "roll_deg"
+    ],
+    [
+     "ay",
+     "ax",
+     "az"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "rest",
+   "moving_frac": 0.24444444444444446
+  },
+  {
+   "case": "e02-20261022-195419/Left",
+   "split": "dev",
+   "kind": "short",
+   "rows": 448,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "wl_rpm",
+     "az",
+     "gy"
+    ],
+    [
+     "dtop_cm",
+     "dCL_cm",
+     "dR_cm",
+     "dC_cm",
+     "dbot_cm",
+     "dCR_cm",
+     "dL_cm"
+    ],
+    [
+     "v_cms",
+     "w_dps",
+     "th_deg",
+     "ax",
+     "wr_rpm"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "motion",
+   "moving_frac": 0.6495535714285714
+  },
+  {
+   "case": "e02-20261022-195419/Right",
+   "split": "test_robot",
+   "kind": "short",
+   "rows": 450,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "dR_cm",
+     "dL_cm",
+     "dbot_cm",
+     "dtop_cm",
+     "dCR_cm"
+    ],
+    [
+     "wr_rpm",
+     "wl_rpm",
+     "th_deg",
+     "w_dps"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "motion",
+   "moving_frac": 0.9088888888888889
+  },
+  {
+   "case": "e02-20261022-200532/Center",
+   "split": "dev",
+   "kind": "short",
+   "rows": 317,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "dCL_cm",
+     "dC_cm",
+     "dL_cm",
+     "dtop_cm",
+     "dbot_cm",
+     "dR_cm",
+     "dCR_cm"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "motion",
+   "moving_frac": 0.7634069400630915
+  },
+  {
+   "case": "e02-20261022-200532/Left",
+   "split": "dev",
+   "kind": "rich",
+   "rows": 8262,
+   "legs_used": 0,
+   "cam_episodes": 1,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "dCR_cm",
+     "dL_cm",
+     "dC_cm",
+     "dR_cm",
+     "dtop_cm",
+     "dCL_cm",
+     "dbot_cm"
+    ],
+    [
+     "ax",
+     "ay",
+     "az"
+    ],
+    [
+     "lineC",
+     "lineR",
+     "lineL"
+    ],
+    [
+     "roll_deg",
+     "pitch_deg"
+    ]
+   ],
+   "integration": [
+    [
+     "yaw_deg",
+     "gz",
+     0.998
+    ],
+    [
+     "th_deg",
+     "gz",
+     0.9982
+    ],
+    [
+     "wl_deg",
+     "wl_rpm",
+     0.9967
+    ],
+    [
+     "wr_deg",
+     "wr_rpm",
+     0.997
+    ]
+   ],
+   "combos": [
+    [
+     "dCR_cm",
+     "dCL_cm",
+     "dC_cm",
+     1.0
+    ],
+    [
+     "dCL_cm",
+     "dCR_cm",
+     "dC_cm",
+     1.0
+    ],
+    [
+     "w_dps",
+     "wr_rpm",
+     "v_cms",
+     0.9998
+    ],
+    [
+     "wl_rpm",
+     "wr_rpm",
+     "v_cms",
+     1.0
+    ],
+    [
+     "dC_cm",
+     "dCR_cm",
+     "dCL_cm",
+     1.0
+    ],
+    [
+     "wr_rpm",
+     "w_dps",
+     "v_cms",
+     1.0
+    ],
+    [
+     "v_cms",
+     "wl_rpm",
+     "wr_rpm",
+     1.0
+    ],
+    [
+     "gz",
+     "w_dps",
+     "wr_rpm",
+     0.9955
+    ]
+   ],
+   "planar": [
+    [
+     0.9899,
+     "y_cm",
+     "x_cm",
+     "th_deg"
+    ]
+   ],
+   "grouping": "rest",
+   "moving_frac": 0.48995400629387553
+  },
+  {
+   "case": "e02-20261022-200532/Right",
+   "split": "test_robot",
+   "kind": "rich",
+   "rows": 8849,
+   "legs_used": 0,
+   "cam_episodes": 5,
+   "turn_pairs": 3,
+   "groups": [
+    [
+     "dL_cm",
+     "dC_cm",
+     "dCR_cm",
+     "dCL_cm",
+     "dtop_cm",
+     "dR_cm",
+     "dbot_cm"
+    ],
+    [
+     "ay",
+     "az",
+     "ax"
+    ],
+    [
+     "roll_deg",
+     "pitch_deg"
+    ],
+    [
+     "lineC",
+     "lineL",
+     "lineR"
+    ]
+   ],
+   "integration": [
+    [
+     "wl_deg",
+     "wl_rpm",
+     0.9983
+    ],
+    [
+     "yaw_deg",
+     "gz",
+     0.9954
+    ],
+    [
+     "th_deg",
+     "w_dps",
+     0.9987
+    ],
+    [
+     "wr_deg",
+     "wr_rpm",
+     0.9993
+    ]
+   ],
+   "combos": [
+    [
+     "dCR_cm",
+     "dCL_cm",
+     "dC_cm",
+     1.0
+    ],
+    [
+     "dCL_cm",
+     "dCR_cm",
+     "dC_cm",
+     1.0
+    ],
+    [
+     "dR_cm",
+     "dCR_cm",
+     "v_cms",
+     0.9896
+    ],
+    [
+     "gz",
+     "gx",
+     "w_dps",
+     0.9801
+    ],
+    [
+     "wr_rpm",
+     "w_dps",
+     "v_cms",
+     1.0
+    ],
+    [
+     "wl_rpm",
+     "wr_rpm",
+     "v_cms",
+     0.9999
+    ],
+    [
+     "w_dps",
+     "gx",
+     "gz",
+     0.9803
+    ],
+    [
+     "v_cms",
+     "wr_rpm",
+     "wl_rpm",
+     1.0
+    ],
+    [
+     "dC_cm",
+     "dCR_cm",
+     "dCL_cm",
+     1.0
+    ]
+   ],
+   "planar": [
+    [
+     0.9679,
+     "x_cm",
+     "y_cm",
+     "th_deg"
+    ]
+   ],
+   "grouping": "rest",
+   "moving_frac": 0.9684710136738615
+  },
+  {
+   "case": "e02-20261023-085107/Center",
+   "split": "dev",
+   "kind": "rich",
+   "rows": 73484,
+   "legs_used": 93,
+   "cam_episodes": 143,
+   "turn_pairs": 111,
+   "groups": [
+    [
+     "ay",
+     "ax",
+     "az"
+    ],
+    [
+     "dL_cm",
+     "dtop_cm",
+     "dCL_cm",
+     "dC_cm",
+     "dCR_cm",
+     "dR_cm",
+     "dbot_cm"
+    ],
+    [
+     "lineC",
+     "lineL",
+     "lineR"
+    ],
+    [
+     "pitch_deg",
+     "roll_deg"
+    ]
+   ],
+   "integration": [
+    [
+     "th_deg",
+     "w_dps",
+     0.9981
+    ],
+    [
+     "wr_deg",
+     "wr_rpm",
+     0.9975
+    ],
+    [
+     "yaw_deg",
+     "gz",
+     0.9982
+    ],
+    [
+     "wl_deg",
+     "wl_rpm",
+     0.9974
+    ]
+   ],
+   "combos": [
+    [
+     "dCL_cm",
+     "dCR_cm",
+     "dC_cm",
+     1.0
+    ],
+    [
+     "dCR_cm",
+     "dCL_cm",
+     "dC_cm",
+     1.0
+    ],
+    [
+     "v_cms",
+     "wl_rpm",
+     "wr_rpm",
+     1.0
+    ],
+    [
+     "dC_cm",
+     "dCL_cm",
+     "dCR_cm",
+     1.0
+    ],
+    [
+     "gz",
+     "wl_rpm",
+     "wr_rpm",
+     0.9918
+    ],
+    [
+     "wl_rpm",
+     "v_cms",
+     "w_dps",
+     1.0
+    ],
+    [
+     "wr_rpm",
+     "v_cms",
+     "w_dps",
+     1.0
+    ],
+    [
+     "w_dps",
+     "wl_rpm",
+     "wr_rpm",
+     0.9999
+    ]
+   ],
+   "planar": [
+    [
+     0.9998,
+     "y_cm",
+     "x_cm",
+     "th_deg"
+    ]
+   ],
+   "grouping": "rest",
+   "moving_frac": 0.8947525992052692
+  },
+  {
+   "case": "e02-20261023-085107/Left",
+   "split": "dev",
+   "kind": "rich",
+   "rows": 75474,
+   "legs_used": 113,
+   "cam_episodes": 149,
+   "turn_pairs": 116,
+   "groups": [
+    [
+     "dL_cm",
+     "dtop_cm",
+     "dCL_cm",
+     "dCR_cm",
+     "dC_cm",
+     "dR_cm",
+     "dbot_cm"
+    ],
+    [
+     "lineL",
+     "lineC",
+     "lineR"
+    ],
+    [
+     "roll_deg",
+     "pitch_deg"
+    ],
+    [
+     "ax",
+     "ay",
+     "az"
+    ]
+   ],
+   "integration": [
+    [
+     "wr_deg",
+     "wr_rpm",
+     0.9975
+    ],
+    [
+     "wl_deg",
+     "wl_rpm",
+     0.9972
+    ],
+    [
+     "yaw_deg",
+     "gz",
+     0.9989
+    ],
+    [
+     "th_deg",
+     "gz",
+     0.9991
+    ]
+   ],
+   "combos": [
+    [
+     "wl_rpm",
+     "w_dps",
+     "v_cms",
+     1.0
+    ],
+    [
+     "dCR_cm",
+     "dC_cm",
+     "dCL_cm",
+     1.0
+    ],
+    [
+     "dC_cm",
+     "dCR_cm",
+     "dCL_cm",
+     1.0
+    ],
+    [
+     "v_cms",
+     "wl_rpm",
+     "wr_rpm",
+     1.0
+    ],
+    [
+     "wr_rpm",
+     "wl_rpm",
+     "w_dps",
+     1.0
+    ],
+    [
+     "dCL_cm",
+     "dCR_cm",
+     "dC_cm",
+     1.0
+    ]
+   ],
+   "planar": [
+    [
+     0.9997,
+     "y_cm",
+     "x_cm",
+     "th_deg"
+    ]
+   ],
+   "grouping": "rest",
+   "moving_frac": 0.8944669687574529
+  },
+  {
+   "case": "e02-20261023-085107/Right",
+   "split": "test_robot",
+   "kind": "rich",
+   "rows": 71020,
+   "legs_used": 32,
+   "cam_episodes": 145,
+   "turn_pairs": 113,
+   "groups": [
+    [
+     "dL_cm",
+     "dCR_cm",
+     "dC_cm",
+     "dCL_cm",
+     "dR_cm",
+     "dtop_cm",
+     "dbot_cm"
+    ],
+    [
+     "pitch_deg",
+     "roll_deg"
+    ],
+    [
+     "ay",
+     "ax",
+     "az"
+    ],
+    [
+     "lineR",
+     "lineC",
+     "lineL"
+    ]
+   ],
+   "integration": [
+    [
+     "th_deg",
+     "w_dps",
+     0.9981
+    ],
+    [
+     "wr_deg",
+     "wr_rpm",
+     0.9979
+    ],
+    [
+     "wl_deg",
+     "wl_rpm",
+     0.9972
+    ],
+    [
+     "yaw_deg",
+     "gz",
+     0.9977
+    ]
+   ],
+   "combos": [
+    [
+     "dCR_cm",
+     "dC_cm",
+     "dCL_cm",
+     1.0
+    ],
+    [
+     "dC_cm",
+     "dCR_cm",
+     "dCL_cm",
+     1.0
+    ],
+    [
+     "w_dps",
+     "wl_rpm",
+     "wr_rpm",
+     1.0
+    ],
+    [
+     "wl_rpm",
+     "w_dps",
+     "wr_rpm",
+     1.0
+    ],
+    [
+     "dCL_cm",
+     "dCR_cm",
+     "dC_cm",
+     1.0
+    ],
+    [
+     "wr_rpm",
+     "w_dps",
+     "wl_rpm",
+     1.0
+    ],
+    [
+     "gz",
+     "w_dps",
+     "gx",
+     0.9848
+    ],
+    [
+     "v_cms",
+     "wl_rpm",
+     "wr_rpm",
+     1.0
+    ]
+   ],
+   "planar": [
+    [
+     0.9998,
+     "x_cm",
+     "y_cm",
+     "th_deg"
+    ]
+   ],
+   "grouping": "rest",
+   "moving_frac": 0.867854125598423
+  },
+  {
+   "case": "e02-20261023-114620/Center",
+   "split": "dev",
+   "kind": "rich",
+   "rows": 8201,
+   "legs_used": 0,
+   "cam_episodes": 5,
+   "turn_pairs": 4,
+   "groups": [
+    [
+     "lineL",
+     "lineR",
+     "lineC"
+    ],
+    [
+     "dbot_cm",
+     "dC_cm",
+     "dCL_cm",
+     "dR_cm",
+     "dtop_cm",
+     "dL_cm",
+     "dCR_cm"
+    ],
+    [
+     "pitch_deg",
+     "roll_deg"
+    ],
+    [
+     "ay",
+     "ax",
+     "az"
+    ]
+   ],
+   "integration": [
+    [
+     "wl_deg",
+     "wl_rpm",
+     0.999
+    ],
+    [
+     "wr_deg",
+     "wr_rpm",
+     0.9984
+    ],
+    [
+     "th_deg",
+     "w_dps",
+     0.9911
+    ]
+   ],
+   "combos": [
+    [
+     "v_cms",
+     "wr_rpm",
+     "wl_rpm",
+     1.0
+    ],
+    [
+     "dCR_cm",
+     "dCL_cm",
+     "dC_cm",
+     1.0
+    ],
+    [
+     "wr_rpm",
+     "v_cms",
+     "wl_rpm",
+     0.9999
+    ],
+    [
+     "dCL_cm",
+     "dCR_cm",
+     "dC_cm",
+     1.0
+    ],
+    [
+     "dC_cm",
+     "dCR_cm",
+     "dCL_cm",
+     1.0
+    ],
+    [
+     "wl_rpm",
+     "v_cms",
+     "wr_rpm",
+     0.9999
+    ]
+   ],
+   "planar": [
+    [
+     0.9934,
+     "y_cm",
+     "x_cm",
+     "th_deg"
+    ]
+   ],
+   "grouping": "rest",
+   "moving_frac": 0.4831118156322399
+  },
+  {
+   "case": "e02-20261023-114620/Left",
+   "split": "dev",
+   "kind": "rich",
+   "rows": 8080,
+   "legs_used": 0,
+   "cam_episodes": 3,
+   "turn_pairs": 2,
+   "groups": [
+    [
+     "roll_deg",
+     "pitch_deg"
+    ],
+    [
+     "lineR",
+     "lineC",
+     "lineL"
+    ],
+    [
+     "dtop_cm",
+     "dCR_cm",
+     "dCL_cm",
+     "dL_cm",
+     "dbot_cm",
+     "dR_cm",
+     "dC_cm"
+    ],
+    [
+     "ay",
+     "az",
+     "ax"
+    ]
+   ],
+   "integration": [
+    [
+     "yaw_deg",
+     "gz",
+     0.9976
+    ],
+    [
+     "wr_deg",
+     "wr_rpm",
+     0.9969
+    ],
+    [
+     "wl_deg",
+     "wl_rpm",
+     0.998
+    ],
+    [
+     "th_deg",
+     "w_dps",
+     0.9994
+    ]
+   ],
+   "combos": [
+    [
+     "wr_rpm",
+     "w_dps",
+     "v_cms",
+     0.9997
+    ],
+    [
+     "dCR_cm",
+     "dC_cm",
+     "dCL_cm",
+     1.0
+    ],
+    [
+     "dC_cm",
+     "dCR_cm",
+     "dCL_cm",
+     1.0
+    ],
+    [
+     "v_cms",
+     "wr_rpm",
+     "wl_rpm",
+     0.9952
+    ],
+    [
+     "wl_rpm",
+     "wr_rpm",
+     "v_cms",
+     0.9794
+    ]
+   ],
+   "planar": [
+    [
+     0.8737,
+     "y_cm",
+     "x_cm",
+     "th_deg"
+    ]
+   ],
+   "grouping": "rest",
+   "moving_frac": 0.5465346534653466
+  },
+  {
+   "case": "e02-20261023-114620/Right",
+   "split": "test_robot",
+   "kind": "rich",
+   "rows": 9014,
+   "legs_used": 0,
+   "cam_episodes": 5,
+   "turn_pairs": 3,
+   "groups": [
+    [
+     "lineR",
+     "lineC",
+     "lineL"
+    ],
+    [
+     "dtop_cm",
+     "dCL_cm",
+     "dR_cm",
+     "dbot_cm",
+     "dCR_cm",
+     "dC_cm",
+     "dL_cm"
+    ],
+    [
+     "ay",
+     "ax",
+     "az"
+    ],
+    [
+     "roll_deg",
+     "pitch_deg"
+    ]
+   ],
+   "integration": [
+    [
+     "yaw_deg",
+     "gz",
+     0.997
+    ],
+    [
+     "wl_deg",
+     "wl_rpm",
+     0.9964
+    ],
+    [
+     "x_cm",
+     "v_cms",
+     -0.9816
+    ],
+    [
+     "wr_deg",
+     "wr_rpm",
+     0.9992
+    ],
+    [
+     "th_deg",
+     "w_dps",
+     0.9972
+    ]
+   ],
+   "combos": [
+    [
+     "w_dps",
+     "gz",
+     "gx",
+     0.9795
+    ],
+    [
+     "gz",
+     "w_dps",
+     "gx",
+     0.9804
+    ],
+    [
+     "wr_rpm",
+     "w_dps",
+     "wl_rpm",
+     1.0
+    ],
+    [
+     "dC_cm",
+     "dCL_cm",
+     "dCR_cm",
+     1.0
+    ],
+    [
+     "dCL_cm",
+     "dC_cm",
+     "dCR_cm",
+     1.0
+    ],
+    [
+     "dCR_cm",
+     "dC_cm",
+     "dCL_cm",
+     1.0
+    ],
+    [
+     "v_cms",
+     "wr_rpm",
+     "wl_rpm",
+     1.0
+    ],
+    [
+     "wl_rpm",
+     "wr_rpm",
+     "v_cms",
+     0.9999
+    ]
+   ],
+   "planar": [
+    [
+     0.9041,
+     "x_cm",
+     "y_cm",
+     "th_deg"
+    ]
+   ],
+   "grouping": "rest",
+   "moving_frac": 0.8841801641890392
+  },
+  {
+   "case": "e02-20261023-183245/Center",
+   "split": "dev",
+   "kind": "short",
+   "rows": 449,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "ay",
+     "ax",
+     "az"
+    ],
+    [
+     "dC_cm",
+     "dbot_cm",
+     "dCL_cm",
+     "dL_cm",
+     "dCR_cm",
+     "dR_cm",
+     "dtop_cm"
+    ],
+    [
+     "lineR",
+     "lineL",
+     "lineC"
+    ],
+    [
+     "roll_deg",
+     "pitch_deg"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "rest",
+   "moving_frac": 0.4454342984409799
+  },
+  {
+   "case": "e02-20261023-183245/Left",
+   "split": "dev",
+   "kind": "short",
+   "rows": 449,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "ax",
+     "ay",
+     "th_deg",
+     "w_dps",
+     "wl_rpm",
+     "gz"
+    ],
+    [
+     "dL_cm",
+     "dbot_cm",
+     "dC_cm",
+     "dCR_cm",
+     "dR_cm",
+     "dCL_cm",
+     "dtop_cm"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "motion",
+   "moving_frac": 0.9153674832962138
+  },
+  {
+   "case": "e02-20261023-183245/Right",
+   "split": "test_robot",
+   "kind": "short",
+   "rows": 449,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "dC_cm",
+     "dbot_cm",
+     "dCR_cm",
+     "dtop_cm",
+     "dR_cm",
+     "dCL_cm",
+     "dL_cm"
+    ],
+    [
+     "lineL",
+     "lineC",
+     "lineR"
+    ],
+    [
+     "ay",
+     "az",
+     "ax"
+    ],
+    [
+     "roll_deg",
+     "pitch_deg"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "rest",
+   "moving_frac": 0.2293986636971047
+  },
+  {
+   "case": "e02-20261023-191347/Center",
+   "split": "dev",
+   "kind": "rich",
+   "rows": 25185,
+   "legs_used": 38,
+   "cam_episodes": 33,
+   "turn_pairs": 23,
+   "groups": [
+    [
+     "dCL_cm",
+     "dC_cm",
+     "dL_cm",
+     "dR_cm",
+     "dCR_cm",
+     "dtop_cm",
+     "dbot_cm"
+    ],
+    [
+     "az",
+     "ay",
+     "ax"
+    ],
+    [
+     "lineC",
+     "lineL",
+     "lineR"
+    ],
+    [
+     "roll_deg",
+     "pitch_deg"
+    ]
+   ],
+   "integration": [
+    [
+     "yaw_deg",
+     "gz",
+     0.9986
+    ],
+    [
+     "wr_deg",
+     "wr_rpm",
+     0.9976
+    ],
+    [
+     "wl_deg",
+     "wl_rpm",
+     0.9976
+    ],
+    [
+     "th_deg",
+     "gz",
+     0.9989
+    ]
+   ],
+   "combos": [
+    [
+     "dCL_cm",
+     "dC_cm",
+     "dCR_cm",
+     1.0
+    ],
+    [
+     "v_cms",
+     "wr_rpm",
+     "wl_rpm",
+     1.0
+    ],
+    [
+     "dC_cm",
+     "dCL_cm",
+     "dCR_cm",
+     1.0
+    ],
+    [
+     "dCR_cm",
+     "dCL_cm",
+     "dC_cm",
+     1.0
+    ],
+    [
+     "wr_rpm",
+     "v_cms",
+     "w_dps",
+     1.0
+    ],
+    [
+     "w_dps",
+     "wr_rpm",
+     "wl_rpm",
+     0.9999
+    ],
+    [
+     "wl_rpm",
+     "v_cms",
+     "w_dps",
+     1.0
+    ],
+    [
+     "gz",
+     "wr_rpm",
+     "wl_rpm",
+     0.9953
+    ]
+   ],
+   "planar": [
+    [
+     0.9996,
+     "x_cm",
+     "y_cm",
+     "th_deg"
+    ]
+   ],
+   "grouping": "rest",
+   "moving_frac": 0.8004764740917213
+  },
+  {
+   "case": "e02-20261023-191347/Left",
+   "split": "dev",
+   "kind": "rich",
+   "rows": 31222,
+   "legs_used": 5,
+   "cam_episodes": 48,
+   "turn_pairs": 34,
+   "groups": [
+    [
+     "pitch_deg",
+     "roll_deg"
+    ],
+    [
+     "dCR_cm",
+     "dtop_cm",
+     "dC_cm",
+     "dR_cm",
+     "dCL_cm",
+     "dL_cm",
+     "dbot_cm"
+    ],
+    [
+     "lineC",
+     "lineL",
+     "lineR"
+    ],
+    [
+     "az",
+     "ay",
+     "ax"
+    ]
+   ],
+   "integration": [
+    [
+     "th_deg",
+     "gz",
+     0.9989
+    ],
+    [
+     "wr_deg",
+     "wr_rpm",
+     0.9984
+    ],
+    [
+     "yaw_deg",
+     "gz",
+     0.9991
+    ],
+    [
+     "wl_deg",
+     "wl_rpm",
+     0.9969
+    ]
+   ],
+   "combos": [
+    [
+     "dCR_cm",
+     "dCL_cm",
+     "dC_cm",
+     1.0
+    ],
+    [
+     "wl_rpm",
+     "w_dps",
+     "v_cms",
+     1.0
+    ],
+    [
+     "dCL_cm",
+     "dCR_cm",
+     "dC_cm",
+     1.0
+    ],
+    [
+     "wr_rpm",
+     "w_dps",
+     "v_cms",
+     1.0
+    ],
+    [
+     "v_cms",
+     "wl_rpm",
+     "wr_rpm",
+     1.0
+    ],
+    [
+     "dC_cm",
+     "dCR_cm",
+     "dCL_cm",
+     1.0
+    ]
+   ],
+   "planar": [
+    [
+     0.9998,
+     "x_cm",
+     "y_cm",
+     "th_deg"
+    ]
+   ],
+   "grouping": "rest",
+   "moving_frac": 0.8406892575747871
+  },
+  {
+   "case": "e02-20261023-191347/Right",
+   "split": "test_robot",
+   "kind": "rich",
+   "rows": 36639,
+   "legs_used": 67,
+   "cam_episodes": 63,
+   "turn_pairs": 50,
+   "groups": [
+    [
+     "dCR_cm",
+     "dC_cm",
+     "dtop_cm",
+     "dL_cm",
+     "dCL_cm",
+     "dR_cm",
+     "dbot_cm"
+    ],
+    [
+     "ax",
+     "ay",
+     "az"
+    ],
+    [
+     "lineR",
+     "lineL",
+     "lineC"
+    ],
+    [
+     "roll_deg",
+     "pitch_deg"
+    ]
+   ],
+   "integration": [
+    [
+     "wl_deg",
+     "wl_rpm",
+     0.9968
+    ],
+    [
+     "wr_deg",
+     "wr_rpm",
+     0.9976
+    ],
+    [
+     "th_deg",
+     "gz",
+     0.9985
+    ],
+    [
+     "yaw_deg",
+     "gz",
+     0.9984
+    ]
+   ],
+   "combos": [
+    [
+     "dCR_cm",
+     "dCL_cm",
+     "dC_cm",
+     1.0
+    ],
+    [
+     "wl_rpm",
+     "w_dps",
+     "v_cms",
+     1.0
+    ],
+    [
+     "w_dps",
+     "wl_rpm",
+     "wr_rpm",
+     0.9999
+    ],
+    [
+     "wr_rpm",
+     "w_dps",
+     "v_cms",
+     1.0
+    ],
+    [
+     "dCL_cm",
+     "dCR_cm",
+     "dC_cm",
+     1.0
+    ],
+    [
+     "v_cms",
+     "wl_rpm",
+     "wr_rpm",
+     1.0
+    ],
+    [
+     "gz",
+     "wl_rpm",
+     "wr_rpm",
+     0.9949
+    ],
+    [
+     "dC_cm",
+     "dCR_cm",
+     "dCL_cm",
+     1.0
+    ]
+   ],
+   "planar": [
+    [
+     0.9997,
+     "y_cm",
+     "x_cm",
+     "th_deg"
+    ]
+   ],
+   "grouping": "rest",
+   "moving_frac": 0.8490679330767761
+  },
+  {
+   "case": "e02-20261023-222510/Center",
+   "split": "dev",
+   "kind": "short",
+   "rows": 449,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "wl_rpm",
+     "wr_rpm",
+     "w_dps",
+     "th_deg"
+    ],
+    [
+     "dtop_cm",
+     "dR_cm",
+     "dbot_cm",
+     "dC_cm",
+     "dL_cm",
+     "dCR_cm",
+     "dCL_cm"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "motion",
+   "moving_frac": 0.5991091314031181
+  },
+  {
+   "case": "e02-20261023-222510/Left",
+   "split": "dev",
+   "kind": "short",
+   "rows": 449,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "dbot_cm",
+     "dCR_cm",
+     "dtop_cm",
+     "dCL_cm",
+     "dC_cm",
+     "dR_cm",
+     "dL_cm"
+    ],
+    [
+     "w_dps",
+     "v_cms",
+     "ay"
+    ],
+    [
+     "az",
+     "wl_rpm"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "motion",
+   "moving_frac": 0.8997772828507795
+  },
+  {
+   "case": "e02-20261023-222510/Right",
+   "split": "test_robot",
+   "kind": "short",
+   "rows": 449,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "th_deg",
+     "ay",
+     "wr_rpm",
+     "wl_rpm",
+     "w_dps",
+     "az"
+    ],
+    [
+     "dR_cm",
+     "dbot_cm",
+     "dCL_cm",
+     "dC_cm",
+     "dtop_cm",
+     "dL_cm",
+     "dCR_cm"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "motion",
+   "moving_frac": 1.0
+  },
+  {
+   "case": "e02-20261024-153612/Center",
+   "split": "test_date",
+   "kind": "rich",
+   "rows": 20389,
+   "legs_used": 0,
+   "cam_episodes": 21,
+   "turn_pairs": 15,
+   "groups": [
+    [
+     "lineR",
+     "lineL",
+     "lineC"
+    ],
+    [
+     "dCR_cm",
+     "dC_cm",
+     "dCL_cm",
+     "dL_cm",
+     "dtop_cm",
+     "dR_cm",
+     "dbot_cm"
+    ],
+    [
+     "ay",
+     "ax",
+     "az"
+    ],
+    [
+     "roll_deg",
+     "pitch_deg"
+    ]
+   ],
+   "integration": [
+    [
+     "yaw_deg",
+     "gz",
+     0.9983
+    ],
+    [
+     "wl_deg",
+     "wl_rpm",
+     0.9978
+    ],
+    [
+     "th_deg",
+     "w_dps",
+     0.9979
+    ],
+    [
+     "wr_deg",
+     "wr_rpm",
+     0.9977
+    ]
+   ],
+   "combos": [
+    [
+     "w_dps",
+     "wl_rpm",
+     "wr_rpm",
+     0.9999
+    ],
+    [
+     "wl_rpm",
+     "w_dps",
+     "wr_rpm",
+     1.0
+    ],
+    [
+     "dCR_cm",
+     "dCL_cm",
+     "dC_cm",
+     1.0
+    ],
+    [
+     "v_cms",
+     "wl_rpm",
+     "wr_rpm",
+     1.0
+    ],
+    [
+     "wr_rpm",
+     "w_dps",
+     "v_cms",
+     1.0
+    ],
+    [
+     "dCL_cm",
+     "dCR_cm",
+     "dC_cm",
+     1.0
+    ],
+    [
+     "dC_cm",
+     "dCR_cm",
+     "dCL_cm",
+     1.0
+    ],
+    [
+     "gz",
+     "wl_rpm",
+     "wr_rpm",
+     0.9916
+    ]
+   ],
+   "planar": [
+    [
+     0.9997,
+     "y_cm",
+     "x_cm",
+     "th_deg"
+    ]
+   ],
+   "grouping": "rest",
+   "moving_frac": 0.7539849919074011
+  },
+  {
+   "case": "e02-20261024-153612/Left",
+   "split": "test_date",
+   "kind": "rich",
+   "rows": 20988,
+   "legs_used": 0,
+   "cam_episodes": 19,
+   "turn_pairs": 14,
+   "groups": [
+    [
+     "az",
+     "ay",
+     "ax"
+    ],
+    [
+     "dR_cm",
+     "dL_cm",
+     "dCR_cm",
+     "dC_cm",
+     "dCL_cm",
+     "dtop_cm",
+     "dbot_cm"
+    ],
+    [
+     "roll_deg",
+     "pitch_deg"
+    ],
+    [
+     "lineC",
+     "lineL",
+     "lineR"
+    ]
+   ],
+   "integration": [
+    [
+     "wr_deg",
+     "wr_rpm",
+     0.9984
+    ],
+    [
+     "yaw_deg",
+     "gz",
+     0.9986
+    ],
+    [
+     "th_deg",
+     "gz",
+     0.9989
+    ],
+    [
+     "wl_deg",
+     "wl_rpm",
+     0.9972
+    ]
+   ],
+   "combos": [
+    [
+     "v_cms",
+     "wr_rpm",
+     "wl_rpm",
+     1.0
+    ],
+    [
+     "gz",
+     "wr_rpm",
+     "wl_rpm",
+     0.9958
+    ],
+    [
+     "dCR_cm",
+     "dC_cm",
+     "dCL_cm",
+     1.0
+    ],
+    [
+     "dC_cm",
+     "dCR_cm",
+     "dCL_cm",
+     1.0
+    ],
+    [
+     "w_dps",
+     "wr_rpm",
+     "wl_rpm",
+     0.9999
+    ],
+    [
+     "dCL_cm",
+     "dCR_cm",
+     "dC_cm",
+     1.0
+    ],
+    [
+     "wr_rpm",
+     "v_cms",
+     "w_dps",
+     1.0
+    ],
+    [
+     "wl_rpm",
+     "v_cms",
+     "w_dps",
+     1.0
+    ]
+   ],
+   "planar": [
+    [
+     0.9922,
+     "x_cm",
+     "y_cm",
+     "th_deg"
+    ]
+   ],
+   "grouping": "rest",
+   "moving_frac": 0.7112159329140462
+  },
+  {
+   "case": "e02-20261024-153612/Right",
+   "split": "test_both",
+   "kind": "rich",
+   "rows": 20678,
+   "legs_used": 0,
+   "cam_episodes": 21,
+   "turn_pairs": 15,
+   "groups": [
+    [
+     "roll_deg",
+     "pitch_deg"
+    ],
+    [
+     "ax",
+     "ay",
+     "az"
+    ],
+    [
+     "dC_cm",
+     "dCR_cm",
+     "dCL_cm",
+     "dtop_cm",
+     "dL_cm",
+     "dR_cm",
+     "dbot_cm"
+    ],
+    [
+     "lineR",
+     "lineL",
+     "lineC"
+    ]
+   ],
+   "integration": [
+    [
+     "th_deg",
+     "gz",
+     0.9987
+    ],
+    [
+     "yaw_deg",
+     "gz",
+     0.9981
+    ],
+    [
+     "wr_deg",
+     "wr_rpm",
+     0.9982
+    ],
+    [
+     "wl_deg",
+     "wl_rpm",
+     0.9975
+    ]
+   ],
+   "combos": [
+    [
+     "v_cms",
+     "wl_rpm",
+     "wr_rpm",
+     1.0
+    ],
+    [
+     "gz",
+     "wl_rpm",
+     "wr_rpm",
+     0.9948
+    ],
+    [
+     "dC_cm",
+     "dCL_cm",
+     "dCR_cm",
+     1.0
+    ],
+    [
+     "dCL_cm",
+     "dC_cm",
+     "dCR_cm",
+     1.0
+    ],
+    [
+     "wl_rpm",
+     "v_cms",
+     "w_dps",
+     1.0
+    ],
+    [
+     "wr_rpm",
+     "v_cms",
+     "w_dps",
+     1.0
+    ],
+    [
+     "w_dps",
+     "wl_rpm",
+     "wr_rpm",
+     0.9999
+    ],
+    [
+     "dCR_cm",
+     "dC_cm",
+     "dCL_cm",
+     1.0
+    ]
+   ],
+   "planar": [
+    [
+     0.9993,
+     "y_cm",
+     "x_cm",
+     "th_deg"
+    ]
+   ],
+   "grouping": "rest",
+   "moving_frac": 0.6841087145758777
+  },
+  {
+   "case": "e02-20261024-161612/Center",
+   "split": "test_date",
+   "kind": "rich",
+   "rows": 45878,
+   "legs_used": 79,
+   "cam_episodes": 84,
+   "turn_pairs": 66,
+   "groups": [
+    [
+     "ax",
+     "ay",
+     "az"
+    ],
+    [
+     "dR_cm",
+     "dCR_cm",
+     "dL_cm",
+     "dtop_cm",
+     "dC_cm",
+     "dCL_cm",
+     "dbot_cm"
+    ],
+    [
+     "roll_deg",
+     "pitch_deg"
+    ],
+    [
+     "lineL",
+     "lineC",
+     "lineR"
+    ]
+   ],
+   "integration": [
+    [
+     "wr_deg",
+     "wr_rpm",
+     0.9972
+    ],
+    [
+     "wl_deg",
+     "wl_rpm",
+     0.9972
+    ],
+    [
+     "th_deg",
+     "gz",
+     0.9989
+    ],
+    [
+     "yaw_deg",
+     "gz",
+     0.9986
+    ]
+   ],
+   "combos": [
+    [
+     "gz",
+     "wr_rpm",
+     "wl_rpm",
+     0.996
+    ],
+    [
+     "wr_rpm",
+     "w_dps",
+     "v_cms",
+     1.0
+    ],
+    [
+     "wl_rpm",
+     "w_dps",
+     "v_cms",
+     1.0
+    ],
+    [
+     "dCR_cm",
+     "dC_cm",
+     "dCL_cm",
+     1.0
+    ],
+    [
+     "w_dps",
+     "wr_rpm",
+     "wl_rpm",
+     1.0
+    ],
+    [
+     "dC_cm",
+     "dCR_cm",
+     "dCL_cm",
+     1.0
+    ],
+    [
+     "v_cms",
+     "wr_rpm",
+     "wl_rpm",
+     1.0
+    ],
+    [
+     "dCL_cm",
+     "dCR_cm",
+     "dC_cm",
+     1.0
+    ]
+   ],
+   "planar": [
+    [
+     0.9997,
+     "y_cm",
+     "x_cm",
+     "th_deg"
+    ]
+   ],
+   "grouping": "rest",
+   "moving_frac": 0.8328392693665809
+  },
+  {
+   "case": "e02-20261024-161612/Left",
+   "split": "test_date",
+   "kind": "rich",
+   "rows": 41337,
+   "legs_used": 16,
+   "cam_episodes": 57,
+   "turn_pairs": 41,
+   "groups": [
+    [
+     "dC_cm",
+     "dtop_cm",
+     "dCL_cm",
+     "dR_cm",
+     "dCR_cm",
+     "dL_cm",
+     "dbot_cm"
+    ],
+    [
+     "roll_deg",
+     "pitch_deg"
+    ],
+    [
+     "lineR",
+     "lineL",
+     "lineC"
+    ],
+    [
+     "az",
+     "ay",
+     "ax"
+    ]
+   ],
+   "integration": [
+    [
+     "yaw_deg",
+     "gz",
+     0.9988
+    ],
+    [
+     "wl_deg",
+     "wl_rpm",
+     0.9974
+    ],
+    [
+     "wr_deg",
+     "wr_rpm",
+     0.9982
+    ],
+    [
+     "th_deg",
+     "w_dps",
+     0.9981
+    ]
+   ],
+   "combos": [
+    [
+     "dC_cm",
+     "dCR_cm",
+     "dCL_cm",
+     1.0
+    ],
+    [
+     "dCR_cm",
+     "dC_cm",
+     "dCL_cm",
+     1.0
+    ],
+    [
+     "dCL_cm",
+     "dC_cm",
+     "dCR_cm",
+     1.0
+    ],
+    [
+     "v_cms",
+     "wr_rpm",
+     "wl_rpm",
+     1.0
+    ],
+    [
+     "wr_rpm",
+     "v_cms",
+     "w_dps",
+     1.0
+    ],
+    [
+     "w_dps",
+     "wr_rpm",
+     "wl_rpm",
+     1.0
+    ],
+    [
+     "wl_rpm",
+     "wr_rpm",
+     "w_dps",
+     1.0
+    ]
+   ],
+   "planar": [
+    [
+     0.9981,
+     "y_cm",
+     "x_cm",
+     "th_deg"
+    ]
+   ],
+   "grouping": "rest",
+   "moving_frac": 0.7653675883590971
+  },
+  {
+   "case": "e02-20261024-161612/Right",
+   "split": "test_both",
+   "kind": "rich",
+   "rows": 37566,
+   "legs_used": 24,
+   "cam_episodes": 61,
+   "turn_pairs": 45,
+   "groups": [
+    [
+     "ax",
+     "ay",
+     "az"
+    ],
+    [
+     "dbot_cm",
+     "dL_cm",
+     "dC_cm",
+     "dCL_cm",
+     "dCR_cm",
+     "dR_cm",
+     "dtop_cm"
+    ],
+    [
+     "lineR",
+     "lineL",
+     "lineC"
+    ],
+    [
+     "roll_deg",
+     "pitch_deg"
+    ]
+   ],
+   "integration": [
+    [
+     "wl_deg",
+     "wl_rpm",
+     0.9972
+    ],
+    [
+     "yaw_deg",
+     "gz",
+     0.9983
+    ],
+    [
+     "wr_deg",
+     "wr_rpm",
+     0.998
+    ],
+    [
+     "th_deg",
+     "gz",
+     0.9988
+    ]
+   ],
+   "combos": [
+    [
+     "v_cms",
+     "wr_rpm",
+     "wl_rpm",
+     1.0
+    ],
+    [
+     "gz",
+     "wr_rpm",
+     "wl_rpm",
+     0.9953
+    ],
+    [
+     "wr_rpm",
+     "v_cms",
+     "w_dps",
+     1.0
+    ],
+    [
+     "dC_cm",
+     "dCR_cm",
+     "dCL_cm",
+     1.0
+    ],
+    [
+     "w_dps",
+     "wr_rpm",
+     "wl_rpm",
+     0.9999
+    ],
+    [
+     "wl_rpm",
+     "v_cms",
+     "w_dps",
+     1.0
+    ],
+    [
+     "dCR_cm",
+     "dC_cm",
+     "dCL_cm",
+     1.0
+    ],
+    [
+     "dCL_cm",
+     "dC_cm",
+     "dCR_cm",
+     1.0
+    ]
+   ],
+   "planar": [
+    [
+     0.9991,
+     "x_cm",
+     "y_cm",
+     "th_deg"
+    ]
+   ],
+   "grouping": "rest",
+   "moving_frac": 0.7838737155938881
+  },
+  {
+   "case": "e02-20261024-173242/Center",
+   "split": "test_date",
+   "kind": "short",
+   "rows": 449,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "ay",
+     "ax",
+     "az"
+    ],
+    [
+     "pitch_deg",
+     "roll_deg"
+    ],
+    [
+     "dL_cm",
+     "dbot_cm",
+     "dCR_cm",
+     "dCL_cm",
+     "dtop_cm",
+     "dC_cm",
+     "dR_cm"
+    ],
+    [
+     "lineC",
+     "lineL",
+     "lineR"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "rest",
+   "moving_frac": 0.38084632516703787
+  },
+  {
+   "case": "e02-20261024-173242/Left",
+   "split": "test_date",
+   "kind": "short",
+   "rows": 449,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "dR_cm",
+     "dL_cm",
+     "dC_cm",
+     "dtop_cm",
+     "dCL_cm",
+     "dCR_cm",
+     "dbot_cm"
+    ],
+    [
+     "pitch_deg",
+     "roll_deg"
+    ],
+    [
+     "az",
+     "ay",
+     "ax"
+    ],
+    [
+     "lineL",
+     "lineC",
+     "lineR"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "rest",
+   "moving_frac": 0.5055679287305123
+  },
+  {
+   "case": "e02-20261024-173242/Right",
+   "split": "test_both",
+   "kind": "short",
+   "rows": 445,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "ay",
+     "wl_rpm",
+     "w_dps"
+    ],
+    [
+     "dtop_cm",
+     "dCL_cm",
+     "dCR_cm",
+     "dL_cm",
+     "dR_cm",
+     "dbot_cm",
+     "dC_cm"
+    ],
+    [
+     "az",
+     "th_deg"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "motion",
+   "moving_frac": 1.0
+  },
+  {
+   "case": "e02-20261024-193526/Right",
+   "split": "test_both",
+   "kind": "short",
+   "rows": 449,
+   "legs_used": 0,
+   "cam_episodes": 0,
+   "turn_pairs": 0,
+   "groups": [
+    [
+     "dbot_cm",
+     "dL_cm",
+     "dCR_cm",
+     "dtop_cm",
+     "dC_cm",
+     "dCL_cm",
+     "dR_cm"
+    ],
+    [
+     "th_deg",
+     "ax",
+     "wl_rpm",
+     "wr_rpm",
+     "w_dps",
+     "ay"
+    ]
+   ],
+   "integration": [],
+   "combos": [],
+   "planar": [],
+   "grouping": "motion",
+   "moving_frac": 0.9354120267260579
+  }
+ ],
+ "timing_s": [
+  [
+   "e02-20261021-222237/Center",
+   449,
+   0.2
+  ],
+  [
+   "e02-20261021-222237/Left",
+   448,
+   0.1
+  ],
+  [
+   "e02-20261021-222237/Right",
+   450,
+   0.1
+  ],
+  [
+   "e02-20261021-223606/Center",
+   448,
+   0.2
+  ],
+  [
+   "e02-20261021-223606/Left",
+   449,
+   0.1
+  ],
+  [
+   "e02-20261021-223606/Right",
+   451,
+   0.1
+  ],
+  [
+   "e02-20261021-224552/Center",
+   446,
+   0.3
+  ],
+  [
+   "e02-20261021-224552/Left",
+   317,
+   0.2
+  ],
+  [
+   "e02-20261021-224552/Right",
+   450,
+   0.1
+  ],
+  [
+   "e02-20261022-080709/Center",
+   448,
+   0.2
+  ],
+  [
+   "e02-20261022-080709/Left",
+   448,
+   0.2
+  ],
+  [
+   "e02-20261022-080709/Right",
+   450,
+   0.1
+  ],
+  [
+   "e02-20261022-081629/Center",
+   448,
+   0.2
+  ],
+  [
+   "e02-20261022-081629/Left",
+   1820,
+   0.8
+  ],
+  [
+   "e02-20261022-081629/Right",
+   450,
+   0.2
+  ],
+  [
+   "e02-20261022-095125/Center",
+   8733,
+   2.2
+  ],
+  [
+   "e02-20261022-095125/Left",
+   8903,
+   3.5
+  ],
+  [
+   "e02-20261022-095125/Right",
+   11278,
+   8.7
+  ],
+  [
+   "e02-20261022-192858/Center",
+   449,
+   0.1
+  ],
+  [
+   "e02-20261022-192858/Left",
+   448,
+   0.2
+  ],
+  [
+   "e02-20261022-192858/Right",
+   448,
+   0.1
+  ],
+  [
+   "e02-20261022-195419/Center",
+   450,
+   0.2
+  ],
+  [
+   "e02-20261022-195419/Left",
+   448,
+   0.3
+  ],
+  [
+   "e02-20261022-195419/Right",
+   450,
+   0.3
+  ],
+  [
+   "e02-20261022-200532/Center",
+   317,
+   0.4
+  ],
+  [
+   "e02-20261022-200532/Left",
+   8262,
+   2.5
+  ],
+  [
+   "e02-20261022-200532/Right",
+   8849,
+   7.5
+  ],
+  [
+   "e02-20261023-085107/Center",
+   73484,
+   12.5
+  ],
+  [
+   "e02-20261023-085107/Left",
+   75474,
+   12.5
+  ],
+  [
+   "e02-20261023-085107/Right",
+   71020,
+   32.2
+  ],
+  [
+   "e02-20261023-114620/Center",
+   8201,
+   2.2
+  ],
+  [
+   "e02-20261023-114620/Left",
+   8080,
+   2.1
+  ],
+  [
+   "e02-20261023-114620/Right",
+   9014,
+   7.0
+  ],
+  [
+   "e02-20261023-183245/Center",
+   449,
+   0.1
+  ],
+  [
+   "e02-20261023-183245/Left",
+   449,
+   0.1
+  ],
+  [
+   "e02-20261023-183245/Right",
+   449,
+   0.1
+  ],
+  [
+   "e02-20261023-191347/Center",
+   25185,
+   3.8
+  ],
+  [
+   "e02-20261023-191347/Left",
+   31222,
+   4.3
+  ],
+  [
+   "e02-20261023-191347/Right",
+   36639,
+   15.4
+  ],
+  [
+   "e02-20261023-222510/Center",
+   449,
+   0.3
+  ],
+  [
+   "e02-20261023-222510/Left",
+   449,
+   0.2
+  ],
+  [
+   "e02-20261023-222510/Right",
+   449,
+   0.2
+  ],
+  [
+   "e02-20261024-153612/Center",
+   20389,
+   11.1
+  ],
+  [
+   "e02-20261024-153612/Left",
+   20988,
+   14.2
+  ],
+  [
+   "e02-20261024-153612/Right",
+   20678,
+   11.3
+  ],
+  [
+   "e02-20261024-161612/Center",
+   45878,
+   22.5
+  ],
+  [
+   "e02-20261024-161612/Left",
+   41337,
+   17.5
+  ],
+  [
+   "e02-20261024-161612/Right",
+   37566,
+   17.6
+  ],
+  [
+   "e02-20261024-173242/Center",
+   449,
+   0.2
+  ],
+  [
+   "e02-20261024-173242/Left",
+   449,
+   0.2
+  ],
+  [
+   "e02-20261024-173242/Right",
+   445,
+   0.2
+  ],
+  [
+   "e02-20261024-193526/Right",
+   449,
+   0.3
+  ]
+ ],
+ "total_s": 217.5
+}

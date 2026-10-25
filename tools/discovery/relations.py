@@ -8,8 +8,8 @@ import numpy as np
 from . import features as F
 
 EXACT_R = 0.98         # |correlation| counted as "one is an exact function of the other" (chosen)
-AFFINITY_GROUP = 0.60  # co-update affinity that puts two streams in one sensor group (chosen)
-PLANAR_R = 0.90        # circular agreement of a position pair's direction with a heading stream (chosen)
+AFFINITY_GROUP = 0.45  # co-update affinity that puts two streams in one sensor group (chosen)
+PLANAR_R = 0.80        # circular agreement of a position pair's direction with a heading stream (chosen)
 UNIT_FACTORS = (1.0, np.pi / 180.0, 180.0 / np.pi)   # same units, deg->rad, rad->deg
 
 
@@ -25,9 +25,9 @@ def windows(g, w_s=F.WIN_S):
     return np.array(starts, dtype=int), W
 
 
-def window_views(g, ids):
+def window_views(g, ids, w_s=F.WIN_S):
     """V (mean), D (end - start), S (integral) per window, as (n_windows, n_streams) arrays."""
-    st, W = windows(g)
+    st, W = windows(g, w_s)
     if len(st) == 0:
         z = np.zeros((0, len(ids)))
         return z, z, z
@@ -114,10 +114,14 @@ def _r2_two(C, t, p, q):
         return np.nan
 
 
-def planar_test(g, ids, D, cand_xy, cand_h):
+PLANAR_EXCESS = 0.3    # how much the agreement must beat the pair's or the heading's own concentration (chosen)
+PLANAR_WIN_S = 2.0     # longer windows for the direction test: a short move's direction is noisy (chosen)
+
+
+def planar_test(g, ids, D, cand_xy, cand_h, w_s=PLANAR_WIN_S, extra_units=None):
     """For position pairs (X, Y) and heading streams H: does the direction of each window's (dX, dY) follow H?
     Returns list of (R, X, Y, H, unit factor, sign)."""
-    st, W = windows(g)
+    st, W = windows(g, w_s)
     out = []
     if len(st) < 20:
         return out
@@ -132,6 +136,7 @@ def planar_test(g, ids, D, cand_xy, cand_h):
             if ok.sum() < 15:
                 continue
             psi = np.arctan2(dy[ok], dx[ok])
+            half = (np.arange(ok.sum()) // 8) % 2 == 0
             for h in cand_h:
                 if h in (xa, ya):
                     continue
@@ -143,11 +148,37 @@ def planar_test(g, ids, D, cand_xy, cand_h):
                         continue
                 else:
                     fm = np.ones(len(mid), bool)
-                for u in UNIT_FACTORS:
+                # unit factor: the common ones, plus one fitted from how the travel direction turns as the
+                # heading stream changes between neighbouring windows (so a heading in unknown units still fits)
+                units = list(UNIT_FACTORS)
+                dpsi = np.angle(np.exp(2j * np.diff(psi[fm]))) / 2.0          # radians, folded to +-90 deg
+                dh = np.diff(mid[fm])
+                okk = (np.abs(dpsi) > 0.1) & (dh != 0)
+                if okk.sum() >= 8:
+                    ratio = np.abs(dpsi[okk] / dh[okk])
+                    for q in (30, 50, 70):
+                        k0 = np.percentile(ratio, q)
+                        if np.isfinite(k0) and k0 > 0:
+                            units += [k0 * f for f in (0.95, 1.0, 1.05)]
+                # the camera's own measure of this stream's unit (deg of heading change per unit), if it has one
+                ck = (extra_units or {}).get(h)
+                if ck:
+                    units += [abs(ck) * np.pi / 180.0]
+                for u in units:
                     for sg in (1.0, -1.0):
                         # axial (doubled angles): a backwards drive points the other way along the same line
                         z = np.exp(2j * (psi[fm] - sg * u * mid[fm]))
-                        R = float(np.abs(np.mean(z)))
+                        hh = half[fm]
+                        if hh.sum() < 8 or (~hh).sum() < 8:
+                            continue
+                        # held-out check: the same offset must hold on both halves
+                        R = float(min(np.abs(np.mean(z[hh])), np.abs(np.mean(z[~hh]))))
+                        # and it must be more than either side's own concentration: a pair that always moves
+                        # the same way, or a heading that hardly changes, agree trivially
+                        r_psi = float(np.abs(np.mean(np.exp(2j * psi[fm]))))
+                        r_h = float(np.abs(np.mean(np.exp(2j * sg * u * mid[fm]))))
+                        if R - max(r_psi, r_h) < PLANAR_EXCESS:
+                            continue
                         out.append((R, xa, ya, h, u, sg))
     out.sort(key=lambda r: -r[0])
     return out
@@ -198,7 +229,14 @@ def still_rows(feats, ids, n, min_streams=2):
     still = np.ones(n, bool)
     for s in ms:
         still &= feats[s]["_flat"]
-    return still, ms
+    # trim each still stretch at both ends (the rows where motion stops and starts belong to the motion)
+    trim = max(1, int(round(0.3 * (feats[ms[0]].get("row_hz") or 20))))
+    edge = np.r_[True, np.diff(still.astype(int)) != 0]
+    idx = np.where(edge)[0]
+    out = still.copy()
+    for i in idx:
+        out[max(0, i - trim):i + trim] = False
+    return out & still, ms
 
 
 def analyse(case, g, feats, num):
@@ -222,6 +260,7 @@ def analyse(case, g, feats, num):
     grp = groups_from_affinity(A, motion_ids)
     group_of = {s: gi for gi, gr in enumerate(grp) for s in gr}
     aff = {(a, b): A[i, j] for i, a in enumerate(motion_ids) for j, b in enumerate(motion_ids)}
+    aff_motion = {(a, b): A_all[i, j] for i, a in enumerate(motion_ids) for j, b in enumerate(motion_ids)}
     for s in motion_ids:
         feats[s]["accumulates"] = accum[s]
         if still is not None and still.sum() > 50:
@@ -234,16 +273,28 @@ def analyse(case, g, feats, num):
 
     V, D, S = window_views(g, motion_ids)
     rel = {s: {"accumulates": accum[s]} for s in motion_ids}
-    res = {"ids": motion_ids, "groups": grp, "group_of": group_of, "affinity": aff, "rel": rel,
+    res = {"ids": motion_ids, "groups": grp, "group_of": group_of, "affinity": aff, "aff_motion": aff_motion,
+           "rel": rel,
            "integration": [], "copies": [], "combos": [], "planar": [], "n_windows": len(D),
            "still_rows": int(still.sum()) if still is not None else 0, "motion_streams": mstreams, "grouping": grouping,
            "moving_frac": float(1 - still.mean()) if still is not None else np.nan}
     if len(D) < 16:
         return res
     h0, h1 = _halves(len(D))
-    DS = _both(corr_matrix(D[h0], S[h0]), corr_matrix(D[h1], S[h1]))    # row's change vs column's integral
-    DD = _both(corr_matrix(D[h0], D[h0]), corr_matrix(D[h1], D[h1]))
-    VV = _both(corr_matrix(V[h0], V[h0]), corr_matrix(V[h1], V[h1]))
+
+    def mats(V_, D_, S_):
+        a, b = _halves(len(D_))
+        return (_both(corr_matrix(D_[a], S_[a]), corr_matrix(D_[b], S_[b])),    # row's change vs column's integral
+                _both(corr_matrix(D_[a], D_[a]), corr_matrix(D_[b], D_[b])),
+                _both(corr_matrix(V_[a], V_[a]), corr_matrix(V_[b], V_[b])))
+    DS, DD, VV = mats(V, D, S)
+    # the same on 2 s windows; keep whichever is stronger (a slow-updating output lines up better over longer
+    # windows; both are checked on held-out halves)
+    V2, D2w, S2 = window_views(g, motion_ids, 2.0 * F.WIN_S)
+    if len(D2w) >= 16:
+        for M1, M2 in zip((DS, DD, VV), mats(V2, D2w, S2)):
+            take = np.abs(M2) > np.abs(M1)
+            M1[take] = M2[take]
     active = np.sum(np.isfinite(D) & (np.abs(D) > 0), axis=0)
     k = len(motion_ids)
     for i, a in enumerate(motion_ids):
@@ -305,13 +356,31 @@ def analyse(case, g, feats, num):
                 if np.isfinite(v) and v > best[0]:
                     best = (v, motion_ids[p], motion_ids[q])
         rel[a]["combo_r2"], rel[a]["combo_of"] = best[0], (best[1], best[2])
+        if best[1] is not None:
+            p, q = motion_ids.index(best[1]), motion_ids.index(best[2])
+            X = np.column_stack([D[:, p] if accum[a] else V[:, p], D[:, q] if accum[a] else V[:, q]])
+            k_ = np.isfinite(y) & np.all(np.isfinite(X), axis=1)
+            if k_.sum() > 8:
+                sol, *_ = np.linalg.lstsq(np.column_stack([X[k_], np.ones(k_.sum())]), y[k_], rcond=None)
+                rel[a]["combo_coef"] = (float(sol[0]), float(sol[1]))
         if best[0] >= EXACT_R ** 2 and best[0] - single ** 2 > 0.02:
             res["combos"].append((a, best[1], best[2], best[0]))
     # planar position pairs: running sums that are not the integral of anything
-    cand_xy = [s for s in motion_ids if (accum[s] or s in mstreams) and abs(rel[s]["int_r"]) < EXACT_R]
-    cand_h = sorted(set([a for a, b, r in res["integration"]]))
-    pl = planar_test(g, motion_ids, D, cand_xy, cand_h) if cand_xy and cand_h else []
-    res["planar"] = [p for p in pl if p[0] >= PLANAR_R][:6]
+    cand_xy = [s for s in motion_ids if (accum[s] or s in mstreams)]
+    cand_h = sorted(set([a for a, b, r in res["integration"]] + [s for s in motion_ids if accum[s] or s in mstreams]))
+    D2 = window_views(g, motion_ids, PLANAR_WIN_S)[1]
+    extra = {h: feats[h].get("cam_turn_ang_k") for h in cand_h
+             if np.isfinite(feats[h].get("cam_turn_ang_k", np.nan) or np.nan) and (feats[h].get("cam_turn_ang_excess") or 0) > 0.15}
+    pl = planar_test(g, motion_ids, D2, cand_xy, cand_h, extra_units=extra) if cand_xy and cand_h else []
+    good = [p for p in pl if p[0] >= PLANAR_R]
+    if good:
+        # several headings may fit (two angles from one rate): the pose's own heading is the one that changes on
+        # the same rows as the position pair (computed together)
+        top = good[0]
+        near = [p for p in good if p[0] >= top[0] - 0.05 and {p[1], p[2]} == {top[1], top[2]}]
+        best = max(near, key=lambda p: aff_motion.get((p[3], p[1]), 0) + aff_motion.get((p[3], p[2]), 0))
+        good = [best] + [p for p in good if p is not best]
+    res["planar"] = good[:6]
     res["planar_best"] = pl[0] if pl else None
     return res
 
