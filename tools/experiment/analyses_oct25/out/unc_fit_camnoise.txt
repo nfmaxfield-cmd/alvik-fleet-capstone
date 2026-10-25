@@ -1,0 +1,4 @@
+chains: 551
+camera 0.5 cm: robot base 0.43 per_cm 0.0034 deg 1.02 per deg turned 0.0138 outliers 0.154 (-logL 1081.3; model now with this camera: 1117.9); robot sd after 50 cm + 180 deg 3.65 cm (now 2.22)
+camera 0.8 cm: robot base 0.00 per_cm 0.0199 deg 0.58 per deg turned 0.0140 outliers 0.146 (-logL 1085.6; model now with this camera: 1138.3); robot sd after 50 cm + 180 deg 3.71 cm (now 2.22)
+camera 1.1 cm: robot base 0.00 per_cm 0.0000 deg 1.39 per deg turned 0.0140 outliers 0.107 (-logL 1117.1; model now with this camera: 1178.3); robot sd after 50 cm + 180 deg 3.42 cm (now 2.22)

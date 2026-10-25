@@ -23,7 +23,7 @@ compared with the camera's, at the route's end, at the far point, and at every l
 
 | # | Row (constant, value now) | Result in one line | Status |
 |---|---|---|---|
-| 1 | Uncertainty model (`UNC_*`: 0.5 cm, 1 %, 0.5°, 0.5 %) | Too confident: 59 % of 673 corrections fall inside the model's 95 % range. Refit: turning counts 2.7 × more (0.0136 per degree, was 0.005); after 50 cm and 180° the sd is 3.6 cm, not 2.2. 17 % of chains end with the heading 30°+ wrong, which no setting of these four numbers covers | done (logs part); Sim next |
+| 1 | Uncertainty model (`UNC_*`: 0.5 cm, 1 %, 0.5°, 0.5 %) | Too confident: 59 % of 673 corrections fall inside the model's 95 % range. Refit: turning counts 2.8 × more (0.014 per degree, was 0.005); after 50 cm and 180° the sd is 3.4-3.7 cm, not 2.2. 17 % of chains end with the heading 30°+ wrong, which no setting of these four numbers covers | done (logs part); Sim next |
 | 2 | Gyro drift band (`DRIFT_BAND_DPS` 0.05 °/s) | Holding the drift at the measured standing value (band 0) predicts where the robot went best: 0.12-0.15 cm closer at the far point and along the path than 0.05 (paired, p < 0.001, 48-49 runs). Letting the drift float is worst | done: 0 recommended |
 | 3 | Tracker jump cut (`JUMP_CM` 3 cm) | 2, 3 and 4 cm cuts give the same predicted errors (differences ≤ 0.09 cm, p > 0.2). No cut is slightly worse at the end (+0.12 cm, p 0.016) and the same elsewhere | done: keep 3 |
 | 4 | Wheel fit accepted (`MAX_RMS_CM` 1.5, 2.5 for sessions) | No effect on predicted end errors: with the 3 cm cut every fit on disk passes 1.5 cm; without it, 1.5-3 cm differ by ≤ 0.01 cm. Bigger finding: the fixed prior predicts the path as well as or better than the session's own fit | done |
@@ -73,6 +73,11 @@ Fitted (maximum likelihood, with a share of outliers allowed), on the chains who
 base 0.63 cm, 1 % per cm (unchanged), 0.43°, **0.0136 per degree turned**. After 50 cm and 180° that gives 3.6 cm
 (now 2.2). It still leaves 15 % outliers, and 78 % (not 95 %) of corrections inside 2.45 sd. On all chains the best
 fit puts the turning term at 0.13 per degree, which only says the heading failures dominate.
+
+A correction is the robot's error plus the camera's own. Refitted with the camera's noise added separately (0.5, 0.8
+or 1.1 cm per axis, `unc_fit_camnoise.py`), the turning term stays at 0.0138-0.0140 and the sd after 50 cm and 180°
+at 3.4-3.7 cm. The base term is what moves: at the camera's healthy 0.8 cm it drops to 0. So the turning term is
+solid, and the base's rise to 0.63 is the camera's noise, not the robot's.
 
 The pauses in `confidence.csv` show the same: median correction 8.2 cm against a predicted 2.9 cm; 10 of 22 over
 10 cm (one of them is shown below).
@@ -277,10 +282,10 @@ picture alone would rank settings by cost, not by being right. **What's next.** 
 1. **`e02_fit.DRIFT_BAND_DPS` 0.05 → 0** (hold the drift at the measured standing value). Evidence: row 2, band 0
    beats 0.05 by 0.15 cm at the far point and 0.12 cm along the path, p < 0.001, 48-49 runs; the fitted drift
    sat at the band edge in every session.
-2. **`e02.py UNC_DEG_PER_DEG` 0.005 → 0.0136 and `UNC_BASE_CM` 0.5 → 0.63** (`UNC_DEG` 0.5 → 0.43 optional, it
-   barely matters; `UNC_PER_CM` stays). Evidence: row 1, 551 chains, best fit by AIC; the model now covers 59 %
-   of corrections inside its 95 % range. Expect about twice as many confidence pauses at 3 cm. Rerun the
-   confidence-pause simulator grid after it.
+2. **`e02.py UNC_DEG_PER_DEG` 0.005 → 0.014**; the other three stay (the base's fitted rise to 0.63 is the
+   camera's own noise). Evidence: row 1, 551 chains, best fit by AIC, and 0.0138-0.0140 whatever camera noise is
+   assumed; the model now covers 59 % of corrections inside its 95 % range. Expect about twice as many confidence
+   pauses at 3 cm. Rerun the confidence-pause simulator grid after it.
 3. **`e02_trust.MIN_N` wheels and gyro 3 → 5**, once the simulator swap test confirms the slower catch is
    acceptable. Evidence: row 9, 3 false flags in 4.8 healthy hours at 3, none at 5.
 4. **`Runner.FIND_HEAD_AGREE_DEG` 5 → 10.** Evidence: row 8, 39 finds; weak.
@@ -315,6 +320,9 @@ Other:
 - **Chains (row 1)** assume nothing moved the robot between a fix and the next one except the logged legs. The
   check that the legs' poses join up removes the clear breaks (31 of 704), not every one. 2026-10-22 sessions ran
   older firmware.
+- **Row 1, camera noise:** each correction holds the camera's error at both fixes. The refit with it added
+  separately moves only the base term; the camera's noise is taken from e02_trust HEALTHY, itself set from these
+  sessions.
 - **Row 1 fit choices:** the outlier part is a second Rayleigh with an sd of 15 cm (chosen); the "heading within 30°"
   subset is chosen (it selects on part of the outcome, which biases the turning term downward if anything).
 - **Re-integration (rows 2-4)** gives the error the robot's own belief would have had; it assumes the robot would have
