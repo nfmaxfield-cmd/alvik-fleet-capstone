@@ -37,9 +37,10 @@ MAX_RMS_DEG = 4.0
 # 2026-10-24 review: evening fits gave -0.08 to -0.25 deg/s of "drift" while the robots' own standing-still test read
 # 0.000 and the one evening C run ended 13.2 cm off. With a measured standing-still drift, the fitted drift may differ
 # from it by at most DRIFT_BAND_DPS; beyond that the drift is held at the band's edge and the gyro scale refitted.
-# 0.05 is chosen (the morning's fits were -0.03 to +0.05): a DOE, or the offline refit of the evening's stretches
-# (predicted against measured end errors at 0.02 / 0.05 / 0.1), should set it.
-DRIFT_BAND_DPS = 0.05
+# Set by data (2026-10-25, docs/build-reports/e02-oct25-logs-doe.md): refitting 49 runs' stretches at 0 / 0.02 / 0.05 /
+# 0.1, band 0 (the drift held at the robot's own standing-still measurement) predicted far points and paths best,
+# 0.12-0.15 cm better than 0.05 (p < 0.001), and the free drift ran to the band's edge in every session. Was 0.05.
+DRIFT_BAND_DPS = 0.0
 MAX_RMS_CM = 1.5
 
 

@@ -80,10 +80,17 @@ def test_drift_is_held_near_the_standing_still_value():
     assert any("held" in r for r in held["reasons"])
 
 
-def test_drift_within_band_is_untouched():
+def test_drift_within_band_is_untouched(monkeypatch):
+    monkeypatch.setattr(FIT, "DRIFT_BAND_DPS", 0.05)     # the band's logic (the session value is 0 since 2026-10-25)
     obs = _turn_obs(d_true=0.02)
     res = FIT.fit_robot(obs, None, prior_sd=dict(gyro_drift_dps=0.1), measured_drift=0.0)
     assert res["fitted"]["drift_held"] is None
+
+
+def test_band_zero_holds_the_drift_at_the_measured_value():
+    obs = _turn_obs(d_true=0.02)
+    res = FIT.fit_robot(obs, None, prior_sd=dict(gyro_drift_dps=0.1), measured_drift=0.0)
+    assert res["fitted"]["drift_held"] is not None and abs(res["fitted"]["drift_held"]) < 1e-9
 
 
 def test_runner_stop_is_not_a_safety_stop():
