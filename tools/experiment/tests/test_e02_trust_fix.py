@@ -371,3 +371,19 @@ def test_camera_still_check_skips_a_robot_during_its_find():
     r2.find_live = {"Center": float("inf")}
     r2.camera_still_check("Left", {})
     assert len(r2.trust.items) == 2
+
+
+def test_two_finds_do_not_flag_the_camera_four_do():
+    # 2026-10-25 rerun, wheels:jitter=0.08: the first two finds read 1.3-2.2 cm (a find's back-off is the wheels'
+    # counting) and flagged the camera; the finds now need CAMERA_FIND_MIN items (4 finds)
+    t = TR.SensorTrust()
+    for v in ((-1.27, -1.59), (1.64, 2.17)):
+        t.camera_at_find("Left", *v)
+    assert t.update_flags(ROBOTS) == []
+    for v in ((0.1, -0.2), (0.2, 0.05)):                 # two good finds after them: still healthy
+        t.camera_at_find("Left", *v)
+    assert t.k("camera") < TR.DEGRADED_K
+    t2 = TR.SensorTrust()
+    for v in _spread(TR.CAMERA_FIND_MIN, 3.0):           # a camera really 3 cm off: caught by the 4th find
+        t2.camera_at_find("Left", v, -v)
+    assert ("camera", "*", "degraded") in [c[:3] for c in t2.update_flags(ROBOTS)]

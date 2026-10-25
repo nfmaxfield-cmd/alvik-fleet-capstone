@@ -75,6 +75,11 @@ BASE_FLOOR = dict(wheels=0.25, gyro=0.3, front=2.0, runs=RUN_SPREAD_PRIOR)
 DEGRADED_K = 2.0          # chosen: twice its baseline = looks bad (DOE: the swap test at 1.5 / 2 / 3)
 RECOVERED_K = 1.5         # chosen: back under this = healthy again (hysteresis: no flapping at the line)
 MIN_N = dict(camera=4, wheels=3, gyro=3, front=6, runs=4)     # chosen: this session's items before a check speaks
+CAMERA_FIND_MIN = 8       # chosen: find items (2 per find) before the finds speak for the camera. A find's pose is not
+                          # all board touch: its back-off and moves between the boards are the wheels' counting, so with
+                          # 8% jitter on every robot the first two finds read 1.3-2.2 cm and flagged the camera (2026-10-25
+                          # rerun); four finds outvote one or two such. A camera bad from the start is still caught at once
+                          # standing still. DOE: the grid replay at 4 / 8 / 12 (bad camera caught how soon, false flags)
 HIST_MIN = dict(wheels=3, gyro=3, front=6, runs=4)            # chosen: earlier items before they replace the prior
 DECAY_PER_SESSION = 0.5   # chosen: an item's weight halves every new session
 STRETCH_CAM_FACTOR = math.sqrt(2.0)   # a stretch has two camera ends
@@ -227,14 +232,14 @@ class SensorTrust:
                 rep += [it["v"]] * max(1, int(round(it["w"] * 10)))
             return robust_sd(rep)
 
-        def fresh(its):
+        def fresh(its, m):
             now = self._now(its)
-            return now if len(now) >= MIN_N["camera"] else its
-        finds = fresh(self._items("camera", kind="find"))
-        still = fresh(self._items("camera", kind="still"))
+            return now if len(now) >= m else its
+        finds = fresh(self._items("camera", kind="find"), CAMERA_FIND_MIN)
+        still = fresh(self._items("camera", kind="still"), MIN_N["camera"])
         best, n = HEALTHY["camera"], 0
         cands = []
-        if len(finds) >= MIN_N["camera"]:
+        if len(finds) >= CAMERA_FIND_MIN:
             cands.append(sd_of(finds))
             n += len(finds)
         if len(still) >= MIN_N["camera"]:
