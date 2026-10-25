@@ -123,3 +123,35 @@ def test_threshold_bootstrap_counts():
     assert st["wrong_total"] == 2 and st["accepted_total"] == 22
     st = TD.boot(rows, 0.90, n_boot=200)
     assert st["wrong_total"] == 0 and st["wrong_share_hi"] == pytest.approx(3 / 20)
+
+
+def test_motion_gate_in_the_decision():
+    """The rule from the threshold report: motion-type labels are asked about until the log holds the gate's
+    seconds of motion; passive labels are accepted at the threshold from the start."""
+    from discovery import classify as C
+    assert C.decide(0.95, "gyro_rate", C.MOTION_GATE_S - 1) == "ask"
+    assert C.decide(0.95, "gyro_rate", C.MOTION_GATE_S) == "accept"
+    assert C.decide(0.95, "clock", 0.0) == "accept"
+    assert C.decide(0.95) == "accept"                      # no type or motion given: plain threshold
+    assert C.decide(0.50, "clock", 0.0) == "unknown"
+
+
+def test_one_clock_per_robot():
+    """A stream that rises with time in a log that already has a time base is judged on behaviour, not called a
+    clock (wheel angles turning one way through a short log were accepted as clocks)."""
+    from discovery import classify as C
+    f = {"monotone_up": 1.0, "time_corr_in_seg": 0.999, "change_frac": 0.9, "step_mode_frac": 0.1,
+         "is_time_base": False, "n_unique": 500, "change_hz": 30.0}
+    R = {"rel": {}, "integration": [], "group_of": {}, "groups": [], "ids": []}
+    ctx = {"short": 0.0, "duration_s": 300.0, "has_time_base": True, "imu_group": None, "twin_pair": {},
+           "feats": {"s": f}}
+    sc, ev = C.score_stream("s", f, R, {}, ctx)
+    assert sc["clock"] == 0.0
+    ctx["has_time_base"] = False
+    sc, ev = C.score_stream("s", f, R, {}, ctx)
+    assert sc["clock"] > 0.5
+
+
+def test_weak_evidence_cannot_be_accepted():
+    from discovery import classify as C
+    assert C.CONF_CAP[0] + C.CONF_CAP[1] * 0.5 < C.ACCEPT       # a lone 0.5 score is asked about at most

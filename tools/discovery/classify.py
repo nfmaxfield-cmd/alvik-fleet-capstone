@@ -30,6 +30,9 @@ COPY_R = 0.97                  # chosen: copies (a processed copy keeps |r| abov
 # zones' groups 1.6-13.6 (median 3.3). Was 2.0-6.0 on the all-window figure. Chosen on dev only (DOE row)
 AOR_RAMP = (1.5, 3.0)
 GRAVITY_LON = 300.0            # chosen (as has_gravity_like's 300): level / noise a gravity axis must reach
+PASSIVE_TYPES = {"clock", "counter", "id", "constant", "battery", "mode", "switch"}
+MOTION_GATE_S = 60.0           # seconds of motion before a motion-type label may be accepted (threshold report;
+#                                chosen on dev from 0/5/60/120/160/240 s, confirmed on held-out)
 CONF_CAP = (0.6, 0.4)          # chosen: confidence <= 0.6 + 0.4 x best score (DOE row)
 HEADING_TIE = 0.10             # chosen: planar fits this close count as a tie between two headings (DOE row)
 SHORT_RAMP = (30.0, 120.0)     # chosen: log duration (s) from "fully short" to "long"; see the threshold report
@@ -569,8 +572,21 @@ def tilt_pairs(feats, R, ctx, flick, der):
     return out
 
 
-def classify_case(feats, R):
-    """{stream: result dict}: type, confidence, decision, top3, evidence, derived note."""
+def motion_seconds(feats):
+    """The discoverer's own estimate of the seconds of motion in a log: 1 s windows in which a stream that sits
+    flat at rest (an encoder, the pose) changed on every row. The chosen rule with this estimate in place of the
+    true seconds still met its criterion on held-out log pieces (0.14% wrong plain, 0.65% disguised;
+    build-reports/e02-oct25-discovery-threshold.md). A discovery run that commands its own moves passes the
+    commanded seconds instead."""
+    return float(max([f.get("moving_windows", 0) or 0 for f in feats.values()] + [0]))
+
+
+def classify_case(feats, R, motion_s=None):
+    """{stream: result dict}: type, confidence, decision, top3, evidence, derived note. motion_s: seconds of
+    motion in the log (the commanded seconds, when the system commanded the moves); default: the blind estimate
+    (motion_seconds)."""
+    if motion_s is None:
+        motion_s = motion_seconds(feats)
     der = find_derived(feats, R)
     ctx = build_context(feats, R, der)
     out = {}
@@ -593,13 +609,18 @@ def classify_case(feats, R):
         out[s] = {"type": best[0], "confidence": float(conf), "scores": sc,
                   "top3": [(t, round(v / tot, 3)) for t, v in ranked[:3] if v > 0],
                   "evidence": ev, "derived": derived, "derived_of": derived_of,
-                  "decision": decide(conf) if best[0] != "unknown" else "unknown"}
+                  "decision": decide(conf, best[0], motion_s) if best[0] != "unknown" else "unknown"}
     return out
 
 
-def decide(conf, accept=ACCEPT, ask=ASK):
-    if conf >= accept:
-        return "accept"
-    if conf >= ask:
+def decide(conf, typ=None, motion_s=None, accept=ACCEPT, ask=ASK, gate=None):
+    """accept / ask / unknown. The rule (2026-10-25, chosen on development log pieces and confirmed on held-out
+    ones: build-reports/e02-oct25-discovery-threshold.md): accept at `accept`; but a label that needs motion to
+    identify (anything except the passive types) is only asked about until the log holds MOTION_GATE_S seconds of
+    motion. With typ or motion_s left out, the gate does not apply (the plain threshold)."""
+    gate = MOTION_GATE_S if gate is None else gate
+    if conf < ask:
+        return "unknown"
+    if typ is not None and motion_s is not None and typ not in PASSIVE_TYPES and motion_s < gate:
         return "ask"
-    return "unknown"
+    return "accept" if conf >= accept else "ask"
