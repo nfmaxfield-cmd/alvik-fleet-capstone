@@ -78,10 +78,10 @@ svg text{fill:var(--mut);font:11px var(--mono)}
 .hold .hq{font-size:21px;line-height:1.3;font-weight:600;color:#FFF3DA;margin:8px 0 4px;overflow-wrap:anywhere}
 .hold .hs{color:var(--amber-t);font-size:13px;margin:0 0 10px}
 .btns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.btns button{font:inherit;text-align:left;padding:12px;border-radius:9px;border:1px solid #6B5021;background:var(--amber-bg);color:#FFF3DA;cursor:pointer;min-height:76px}
-.btns button b{display:block;font-size:16px;margin-bottom:3px}.btns button span{display:block;font-size:12px;color:#E9CF9C;line-height:1.3}
+.btns button{font:inherit;text-align:left;display:flex;flex-direction:column;justify-content:flex-start;padding:12px;border-radius:9px;border:1px solid #6B5021;background:var(--amber-bg);color:#FFF3DA;cursor:pointer;min-height:76px}
+.btns button b{display:block;font-size:16px;margin-bottom:3px}.btns button>span{display:block;font-size:12px;color:#E9CF9C;line-height:1.3}
 .btns button:hover:not(:disabled){background:#4A3610;border-color:var(--amber)}
-.btns button.stopb{border-color:#7A3A35;background:#2A1513}.btns button.stopb span{color:#E8B4AE}
+.btns button.stopb{border-color:#7A3A35;background:#2A1513}.btns button.stopb>span{color:#E8B4AE}
 .btns button:disabled{opacity:.45;cursor:default}
 .btns button.picked{opacity:1;outline:2px solid var(--amber-t)}
 .hsent{font-size:13px;color:var(--amber-t);margin-top:8px;min-height:1em}
@@ -124,9 +124,9 @@ tr.grp td{border-bottom:none;padding-top:9px}
 @media (max-width:860px){.two,.calw{grid-template-columns:1fr}}
 @media (max-width:600px){
  .top{padding:8px 12px;gap:8px}.top .stats{font-size:11px;gap:2px 10px}.chip{flex:1 1 100%}.top .lab{margin-left:0}
- main{flex-direction:column;padding:10px 12px;gap:12px}
+ main{flex-direction:column;align-items:stretch;padding:10px 12px;gap:12px}
  .left,.right{display:contents}
- #picp{order:1}#hold{order:2}#ask{order:3}#robots{order:4}#perfp{order:5}#trustp{order:6}#tlp{order:7}#planres{order:8}#calp{order:9}#logp{order:10}
+ #picp{order:1}#hold{order:2}#ask{order:3}#robots{order:4}#robsrc{order:4}#perfp{order:5}#trustp{order:6}#tlp{order:7}#planres{order:8}#calp{order:9}#logp{order:10}
  #robots{display:flex;flex-direction:column;gap:12px}
  .btns{grid-template-columns:1fr}.btns button{min-height:64px}
  .hold .hq{font-size:19px}
@@ -165,9 +165,10 @@ tr.grp td{border-bottom:none;padding-top:9px}
  </div>
  <div class="panel" id="perfp">
   <h2>Processing speed <span class="badge" id="perfb">-</span></h2>
-  <svg id="perf" viewBox="0 0 640 210"></svg>
+  <svg id="perf" viewBox="0 0 760 210"></svg>
   <p class="note" id="perfn">How many camera pictures the runner works through each second, and how old a picture is by the time its position is ready; shaded seconds were slow.</p>
-  <p class="src">Measured: pictures handled a second (of about 25 the camera sends) and a picture's age when its position was ready (s: line = the second's average, faint = its worst). Slow: under <span id="sfps">10</span> a second or older than <span id="sage">1</span> s. Data: the runner's perf rows (perf.csv), last 5 minutes.</p>
+  <div class="legend"><span><i style="background:#E6E9EE"></i>average</span><span><i style="background:#9AA4B2;opacity:.55"></i>worst picture age</span><span><i style="background:#F07B72;opacity:.35"></i>slow seconds</span><span><i style="background:#8B79D9"></i>planned load on</span><span><i style="border-top:2px dashed #F07B72;height:0;border-radius:0"></i>slow line</span></div>
+  <p class="src">Measured: pictures handled a second (of about 25 the camera sends) and a picture's age when its position was ready, s. Slow: <span id="prule">-</span> (the runner's own speed watch, e02_load.py). Data: the runner's perf rows (perf.csv), last 5 minutes.</p>
  </div>
  <div class="panel" id="trustp">
   <h2>How much each sensor is trusted</h2>
@@ -192,7 +193,7 @@ tr.grp td{border-bottom:none;padding-top:9px}
    <button data-a="c"><b>Carry on</b><span>every robot carries on from where it stopped</span></button>
    <button data-a="a"><b>Carry on, don't ask</b><span>and from now on a lost robot is found again without asking (the border still asks)</span></button>
    <button data-a="o"><b>Leave <span class="hrb">it</span> out</b><span><span class="hrb">it</span> stays where it is for the rest of the session; the others carry on</span></button>
-   <button data-a="s" class="stopb"><b>Stop the session</b><span>every robot stays stopped; carry it on later with --resume</span></button>
+   <button data-a="s" class="stopb"><b>Stop the session</b><span>every robot stays stopped; carry it on later with <span style="white-space:nowrap">--resume</span></span></button>
   </div>
   <div class="hsent" id="hsent"></div>
   <details><summary>The runner's full question</summary><pre id="hprompt"></pre></details>
@@ -204,6 +205,7 @@ tr.grp td{border-bottom:none;padding-top:9px}
   <p class="src" id="askdef"></p>
  </div>
  <div id="robots" style="display:flex;flex-direction:column;gap:12px"></div>
+ <p class="src" id="robsrc" style="margin:-4px 2px 0"><span style="color:var(--fg);font-size:13px">Each card shows what that robot is doing, its battery, how far its sensors are trusted and how close it is to an open edge.</span><br>Battery: the robot's own reading from its voltage (it sags while driving), line: this session's readings (battery.csv and what the robots report). Sensor chips: k from the sensor trust table below. Edge bar: distance to the nearest open edge, cm (amber: inside the virtual border; dashed: where the robot stops itself), from the camera tracker or its last parked spot (e02_state.json) and the runner's border settings.</p>
  <div class="panel" id="logp"><h2>Log <span class="badge" id="phase">-</span></h2><pre id="log"></pre>
   <p class="src">The runner's last lines (e02_log.txt).</p></div>
 </aside>
@@ -288,7 +290,7 @@ function robots(list){const box=$('robots');box.innerHTML='';
  (list||[]).forEach(r=>{rcol(r.name);const d=document.createElement('div');d.className='panel robot'+(r.cls=='follow'?' follow':'');
   let h='<div class="rh"><span class="rn">'+esc(r.name)+'</span><span class="rs">'+esc(r.state)+'</span>'+(r.cls=='follow'?'<span class="tag">followed</span>':'')+(r.cls=='out'?'<span class="tag out">'+esc(r.state)+'</span>':'')+'</div>';
   const b=r.battery;h+='<div class="bat"><div class="bar"><div class="'+(b!=null&&b<20?'low':'')+'" style="width:'+(b==null?0:Math.max(0,Math.min(100,b)))+'%"></div></div><span class="mono">'+(b==null?'-':Math.round(b)+'%')+'</span><span class="bs"></span></div>';
-  h+='<div class="src">Battery: '+(b==null?'not heard yet':'reported at '+new Date(r.battery_t*1000).toTimeString().slice(0,5)+'; line: its readings this session')+' (the robot\'s own voltage reading, battery.csv; it sags while driving).</div>';
+  h+='<div class="src">'+(b==null?'battery not heard yet':'battery reported at '+new Date(r.battery_t*1000).toTimeString().slice(0,5))+'</div>';
   h+='<div class="chips">'+(r.sensors||[]).map(q=>'<span class="'+q.state+'" title="'+SWORD[q.state]+', '+q.n+' evidence items">'+SICON[q.state]+' '+q.name+' ×'+num(q.k,1)+(q.state=='ok'?'':' '+SWORD[q.state])+'</span>').join('')+'</div>';
   h+='<div class="edge"></div>';d.innerHTML=h;
   const tr=(r.battery_trend||[]).map(q=>q[1]);d.querySelector('.bs').appendChild(spark(tr,0,100,'var(--mut2)'));
@@ -301,7 +303,7 @@ function robots(list){const box=$('robots');box.innerHTML='';
    s.appendChild(el('text',{x:4,y:26,style:'font-size:9px'},'edge'));s.appendChild(el('text',{x:W-4,y:26,'text-anchor':'end',style:'font-size:9px'},mx+' cm'));
    eg.appendChild(s);const t=document.createElement('div');t.className='et';
    t.textContent=num(e.dist_cm,0)+' cm from the nearest open edge'+(e.border_cm?' · virtual border '+num(e.border_cm,0)+' cm':'')+(e.fw_border_cm?', its own stop '+num(e.fw_border_cm,0)+' cm':'')+' ('+e.where+' spot)';eg.appendChild(t);
-   const sr=document.createElement('div');sr.className='src';sr.textContent='Measured: distance to the nearest open edge (cm; shaded: inside the virtual border, dashed: where the robot stops itself). Data: the camera tracker, or its last parked spot (e02_state.json), and the runner\'s border settings.';eg.appendChild(sr)}
+   }
   else eg.innerHTML='<div class="src">Distance to the open edge: not known yet (no board or no position).</div>';
   box.appendChild(d)})}
 
@@ -341,29 +343,30 @@ function results(rows){const box=$('res');box.innerHTML='';rows=rows||[];
  box.appendChild(s)}
 
 /* processing speed: pictures a second (top) and picture age (bottom), the last 5 minutes */
-let perfData=null;
-function perf(p){const s=$('perf');s.innerHTML='';perfData=p;if(!p)return;
- $('sfps').textContent=p.slow_fps;$('sage').textContent=p.slow_age_s;
- const b=$('perfb');b.className='badge '+(p.slow?'slow':p.slow==null?'':'okb');b.textContent=p.slow?'SLOW: '+p.why:p.slow==null?'no camera yet':'keeping up'+(p.slow_s?' · '+p.slow_s+' slow s in 5 min':'');
- const rows=p.rows||[],W=640,L=40,R=W-8,X=t=>L+(R-L)*(t+p.window_s)/p.window_s;
+function perf(p){const s=$('perf');s.innerHTML='';if(!p)return;
+ $('prule').textContent=p.rule||'-';
+ const b=$('perfb');b.className='badge '+(p.slow?'slow':p.slow==null?'':'okb');
+ b.textContent=p.slow?'SLOW: '+p.why:p.slow==null?'no camera yet':'keeping up'+(p.slow_s?' · '+p.slow_s+' slow s in 5 min':'')+(p.load?' · planned load on':'');
+ const rows=p.rows||[],W=760,L=40,R=W-8,X=t=>L+(R-L)*(t+p.window_s)/p.window_s;
  const pan=(top,h,lo,hi,ttl,fmt)=>{const y=v=>top+h-h*(Math.min(hi,Math.max(lo,v))-lo)/(hi-lo);
   for(let i=0;i<=2;i++){const v=lo+(hi-lo)*i/2;s.appendChild(el('line',{x1:L,x2:R,y1:y(v),y2:y(v),stroke:'#262D39'}));s.appendChild(el('text',{x:L-6,y:y(v)+4,'text-anchor':'end'},fmt(v)))}
   s.appendChild(el('text',{x:L,y:top-5},ttl));return y};
- rows.forEach(q=>{if(q[4])s.appendChild(el('rect',{x:X(q[0])-1.1,y:14,width:2.4,height:174,fill:'#F07B72',opacity:.16}))});
+ rows.forEach(q=>{if(q[4])s.appendChild(el('rect',{x:X(q[0])-1.1,y:14,width:2.4,height:174,fill:'#F07B72',opacity:.16}));
+  if(q[5])s.appendChild(el('rect',{x:X(q[0])-1.1,y:192,width:2.4,height:4,fill:'#8B79D9'}))});
  const y1=pan(16,70,0,p.camera_fps,'pictures handled a second',v=>Math.round(v));
- s.appendChild(el('line',{x1:L,x2:R,y1:y1(p.slow_fps),y2:y1(p.slow_fps),stroke:'#F07B72','stroke-dasharray':'3 3',opacity:.7}));
- let amax=Math.max(p.slow_age_s*1.5,...rows.map(q=>q[3]||0));amax=Math.ceil(amax*2)/2;
- const y2=pan(118,70,0,amax,'picture age when its position was ready (s)',v=>v.toFixed(v%1?1:0));
- s.appendChild(el('line',{x1:L,x2:R,y1:y2(p.slow_age_s),y2:y2(p.slow_age_s),stroke:'#F07B72','stroke-dasharray':'3 3',opacity:.7}));
+ if(p.slow_fps!=null)s.appendChild(el('line',{x1:L,x2:R,y1:y1(p.slow_fps),y2:y1(p.slow_fps),stroke:'#F07B72','stroke-dasharray':'3 3',opacity:.7}));
+ let amax=Math.max((p.slow_age_s||0.5)*1.5,...rows.map(q=>q[3]||0));amax=amax>1?Math.ceil(amax*2)/2:Math.ceil(amax*10)/10;
+ const y2=pan(118,70,0,amax,'picture age when its position was ready (s)',v=>v.toFixed(amax>1?1:2));
+ if(p.slow_age_s!=null)s.appendChild(el('line',{x1:L,x2:R,y1:y2(p.slow_age_s),y2:y2(p.slow_age_s),stroke:'#F07B72','stroke-dasharray':'3 3',opacity:.7}));
  const line=(i,y,c,w,o)=>{const pts=rows.filter(q=>q[i]!=null).map(q=>X(q[0]).toFixed(1)+','+y(q[i]).toFixed(1));if(pts.length>1)s.appendChild(el('polyline',{points:pts.join(' '),fill:'none',stroke:c,'stroke-width':w,opacity:o,'stroke-linejoin':'round'}))};
  line(1,y1,'#E6E9EE',2,1);line(3,y2,'#9AA4B2',1,.55);line(2,y2,'#E6E9EE',2,1);
- s.appendChild(el('text',{x:L,y:205},'5 min ago'));s.appendChild(el('text',{x:R,y:205,'text-anchor':'end'},'now'));
+ s.appendChild(el('text',{x:L,y:208},'5 min ago'));s.appendChild(el('text',{x:R,y:208,'text-anchor':'end'},'now'));
  if(!rows.length)s.appendChild(el('text',{x:(L+R)/2,y:105,'text-anchor':'middle',style:'font-size:13px'},'No camera pictures handled yet'));
- const cross=el('line',{x1:0,x2:0,y1:12,y2:190,stroke:'#7FB8FF',opacity:0});s.appendChild(cross);
- const hit=el('rect',{x:L,y:10,width:R-L,height:182,fill:'transparent'});s.appendChild(hit);
+ const cross=el('line',{x1:0,x2:0,y1:12,y2:196,stroke:'#7FB8FF',opacity:0});s.appendChild(cross);
+ const hit=el('rect',{x:L,y:10,width:R-L,height:188,fill:'transparent'});s.appendChild(hit);
  hit.addEventListener('mousemove',e=>{if(!rows.length)return;const bb=s.getBoundingClientRect(),vx=(e.clientX-bb.left)*W/bb.width;
   let best=rows[0];rows.forEach(q=>{if(Math.abs(X(q[0])-vx)<Math.abs(X(best[0])-vx))best=q});cross.setAttribute('x1',X(best[0]));cross.setAttribute('x2',X(best[0]));cross.setAttribute('opacity',.8);
-  showTip(e,Math.round(-best[0])+' s ago: '+num(best[1],1)+' pictures/s · age '+num(best[2],2)+' s (worst '+num(best[3],2)+' s)'+(best[4]?' · slow':''))});
+  showTip(e,Math.round(-best[0])+' s ago: '+num(best[1],1)+' pictures/s · age '+num(best[2],2)+' s (worst '+num(best[3],2)+' s)'+(best[4]?' · slow':'')+(best[5]?' · load on':''))});
  hit.addEventListener('mouseleave',()=>{cross.setAttribute('opacity',0);hideTip()})}
 
 /* sensor trust table */
@@ -387,7 +390,7 @@ function calib(rows){rows=rows||[];const leg=$('calleg');
  [['gyro_scale','calg',3],['wheel_scale','calw',3]].forEach(([k,id,dp])=>{const box=$(id);box.innerHTML='';const v=rows.filter(r=>r[k]!=null);
   if(!v.length){box.innerHTML='<div class="empty">No accepted fit yet.</div>';return}
   let lo=Math.min(...v.map(r=>r[k])),hi=Math.max(...v.map(r=>r[k]));const pad=Math.max(0.005,(hi-lo)*0.15);lo-=pad;hi+=pad;
-  const n=Math.max(2,...v.map(r=>r.order||0)),W=300,H=150,L=44,T=8,B=H-20,X=o=>L+(W-L-8)*(o||0)/n,Y=x=>B-(B-T)*(x-lo)/(hi-lo);
+  const n=Math.max(2,...v.map(r=>r.order||0)),W=420,H=170,L=44,T=8,B=H-20,X=o=>L+(W-L-8)*(o||0)/n,Y=x=>B-(B-T)*(x-lo)/(hi-lo);
   const s=el('svg',{viewBox:'0 0 '+W+' '+H});
   for(let i=0;i<=3;i++){const x=lo+(hi-lo)*i/3;s.appendChild(el('line',{x1:L,x2:W-8,y1:Y(x),y2:Y(x),stroke:'#262D39'}));s.appendChild(el('text',{x:L-6,y:Y(x)+4,'text-anchor':'end'},x.toFixed(dp)))}
   s.appendChild(el('text',{x:L,y:H-4},'run 0'));s.appendChild(el('text',{x:W-8,y:H-4,'text-anchor':'end'},'run '+n));
@@ -622,6 +625,11 @@ class LiveView:
         """The console's extra state: header, trust table, processing speed, timeline, plan, results, robots
         (state, battery and its trend, sensors, distance to the open edge), self-calibration and the open hold.
         Each part is built on its own: one that fails comes back as None and the rest still show."""
+        lk = self.__dict__.setdefault("_live_lock", threading.Lock())   # two viewers: one builder at a time
+        with lk:
+            return self._live_state()
+
+    def _live_state(self):
         out = {}
         for k, f in (("header", self._live_header), ("trust", self._live_trust), ("perf", self._live_perf),
                      ("timeline", self._live_timeline), ("plan", self._live_plan), ("results", self._live_results),
@@ -684,30 +692,61 @@ class LiveView:
                     fps=perf.get("fps"), age_s=perf.get("age_s"), slow=perf.get("slow"), slow_why=perf.get("why"),
                     rec_fps=rec, camera_fps=CAMERA_FPS)
 
-    # processing speed: when is it "slow"? (chosen; a DOE is not the way to set these: they are display marks,
-    # set from what the runner itself treats as trouble: LATE_PICTURE_S in e02.py, the health page's amber fps)
-    SLOW_FPS = 10.0        # pictures handled a second below this = slow (the tracker health's amber line)
-    SLOW_AGE_S = 1.0       # a picture this old when its position was ready = slow (e02.py LATE_PICTURE_S)
+    # processing speed: "slow" is the runner's own (e02_load.SpeedWatch, 2026-10-25: below 0.75 x its baseline
+    # pictures a second or above 1.5 x its baseline picture age, 5 s in a row; the baseline is its first 2 minutes
+    # without load). These fixed marks are only the fallback for a runner without the watcher (a replay, an old
+    # session): chosen from what the runner treats as trouble (LATE_PICTURE_S, the tracker health's amber fps).
+    SLOW_FPS = 10.0
+    SLOW_AGE_S = 1.0       # on the second's worst picture age (fallback only)
     STALL_S = 3.0          # no perf row for this long = the camera loop has stalled
     PERF_WINDOW_S = 300.0  # the chart's last 5 minutes
 
-    def _slow(self, row):
-        why = []
-        if row.get("fps_handled") is not None and row["fps_handled"] < self.SLOW_FPS:
-            why.append("%.0f pictures a second (under %g)" % (row["fps_handled"], self.SLOW_FPS))
-        if row.get("age_max_s") is not None and row["age_max_s"] > self.SLOW_AGE_S:
-            why.append("a picture %.1f s old (over %g s)" % (row["age_max_s"], self.SLOW_AGE_S))
-        return why
+    def _watch(self):
+        sw = getattr(self.r, "speed", None)
+        return sw if sw is not None and hasattr(sw, "is_slow_row") else None
+
+    def _slow_row(self, row):
+        """Was this second slow? The runner's own mark when it has one (its 5-in-a-row rule), else this view's."""
+        if "slow" in row:
+            return bool(row["slow"])
+        sw = self._watch()
+        if sw is not None:
+            try:
+                return bool(sw.is_slow_row(row))
+            except Exception:
+                return False
+        return bool((row.get("fps_handled") is not None and row["fps_handled"] < self.SLOW_FPS) or
+                    (row.get("age_max_s") is not None and row["age_max_s"] > self.SLOW_AGE_S))
+
+    def _limits(self):
+        """(fps limit, age limit, age column, words, baseline dict or None)."""
+        sw = self._watch()
+        if sw is not None and sw.base_fps is not None:
+            return (sw.fps_frac * sw.base_fps, sw.age_frac * sw.base_age, "mean",
+                    "under %.0f%% of this session's baseline (%.1f a second) or a picture age over %.1f x its "
+                    "baseline (%.2f s), %d s in a row" % (100 * sw.fps_frac, sw.base_fps, sw.age_frac, sw.base_age,
+                                                          getattr(sw, "hold_s", 5)),
+                    dict(fps=round(sw.base_fps, 1), age_s=round(sw.base_age, 3)))
+        if sw is not None:
+            return (None, None, "mean", "learning this session's baseline (its first minutes without load)", None)
+        return (self.SLOW_FPS, self.SLOW_AGE_S, "max", "under %g a second or a picture older than %g s" % (
+            self.SLOW_FPS, self.SLOW_AGE_S), None)
 
     def _perf_now(self):
         rows = getattr(self.r, "perf_rows", None) or []
         if not rows:
             return dict(fps=None, age_s=None, slow=None, why="")
         last = rows[-1]
-        why = self._slow(last)
-        if time.time() - (last.get("t") or 0) > self.STALL_S:
-            why = ["no picture handled for %.0f s" % (time.time() - (last.get("t") or 0))]
-        return dict(fps=last.get("fps_handled"), age_s=last.get("age_mean_s"), slow=bool(why), why="; ".join(why))
+        sw = self._watch()
+        slow = bool(sw.slow) if sw is not None else self._slow_row(last)
+        why = ""
+        if slow:
+            why = "%.0f pictures a second, picture age %.2f s" % (last.get("fps_handled") or 0,
+                                                                 last.get("age_mean_s") or 0)
+        gap = time.time() - (last.get("t") or 0)
+        if gap > self.STALL_S:
+            slow, why = True, "no picture handled for %.0f s" % gap
+        return dict(fps=last.get("fps_handled"), age_s=last.get("age_mean_s"), slow=slow, why=why)
 
     def _live_perf(self):
         now = time.time()
@@ -718,12 +757,16 @@ class LiveView:
             if t < now - self.PERF_WINDOW_S:
                 break
             pts.append([round(t - now, 1), _r(row.get("fps_handled"), 1), _r(row.get("age_mean_s"), 2),
-                        _r(row.get("age_max_s"), 2), 1 if self._slow(row) else 0])
+                        _r(row.get("age_max_s"), 2), 1 if self._slow_row(row) else 0, 1 if row.get("load") else 0])
         pts.reverse()
         p = self._perf_now()
-        return dict(window_s=self.PERF_WINDOW_S, rows=pts, slow_fps=self.SLOW_FPS, slow_age_s=self.SLOW_AGE_S,
-                    slow=p["slow"], why=p["why"], camera_fps=CAMERA_FPS,
-                    slow_s=sum(1 for q in pts if q[4]))
+        fl, al, acol, words, base = self._limits()
+        ld = getattr(self.r, "load", None)
+        return dict(window_s=self.PERF_WINDOW_S, rows=pts, slow_fps=None if fl is None else round(fl, 1),
+                    slow_age_s=None if al is None else round(al, 3), age_col=acol, rule=words, baseline=base,
+                    slow=p["slow"], why=p["why"], camera_fps=CAMERA_FPS, slow_s=sum(1 for q in pts if q[4]),
+                    load=None if ld is None else bool(getattr(ld, "on", False)),
+                    load_s=sum(1 for q in pts if q[5]))
 
     TREND_N = 30           # learned noise values kept per sensor for the trend
     TRUST_EVERY_S = 2.0    # the trust table is rebuilt at most this often
