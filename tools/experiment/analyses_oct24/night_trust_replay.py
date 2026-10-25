@@ -13,7 +13,8 @@ What it feeds, in time order, the way e02.py does:
 Variants: each stage on its own (a fresh trust file) and stage 1 then stage 2 (the trust file carried, one
 new_session between them, as logs/sensor_trust.json would be).
 
-Usage: python3 night_trust_replay.py            (prints the tables used in the report)"""
+Usage: python3 night_trust_replay.py            (prints the tables used in the report)
+       python3 night_trust_replay.py --split 3  (the stretches found with the camera track cut at 3 cm jumps: B)"""
 import math
 import sys
 
@@ -21,6 +22,7 @@ import night_common as N
 from night_common import FIT, TR, CE
 
 FRONT_OFFSET_CM, FRONT_CHECK_RANGE_CM, FRONT_MIN_COS = 0.0, 50.0, 0.7    # e02.py
+SPLIT = float(sys.argv[sys.argv.index("--split") + 1]) if "--split" in sys.argv else None
 
 
 def prior(st, robot):
@@ -71,7 +73,7 @@ def find_events(name, loo=False):
 
 def fit_events(name):
     """(t, 'fit', robot, (order, obs of this run)) per U run, t = the run's end."""
-    rb = N.rebuild_stretches(name)
+    rb = N.rebuild_stretches(name, split_jump_cm=SPLIT)
     by = {}
     for robot, obs in rb.items():
         for o in obs:
@@ -184,6 +186,17 @@ def camera_table(name):
 
 def main():
     robots = list(N.ROBOTS)
+    if SPLIT:
+        print("(stretches found with the camera track cut at %.1f cm jumps)" % SPLIT)
+        tr, f1, fl1 = replay("stage1")
+        show("stage1 alone", tr, f1, fl1, robots)
+        tr2, f2, fl2 = replay("stage2")
+        show("stage2 alone", tr2, f2, fl2, robots)
+        tr, f2, fl2 = replay("stage2", trust=tr)
+        show("stage 1 then stage 2", tr, f2, fl1 + fl2, robots)
+        tr, f, fl = replay("oct23-morning")
+        show("2026-10-23 laptop morning", tr, f, fl, robots)
+        return
     for name in ("stage1", "stage2"):
         camera_table(name)
     for name in ("stage1", "stage2"):

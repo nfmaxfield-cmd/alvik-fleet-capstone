@@ -107,11 +107,26 @@ def u_runs(name):
     return out
 
 
-def rebuild_stretches(name, cam_fn=None, time_shift=0.0, keep_pos=True):
+def split_at_jumps(cam, jump_cm):
+    """Pieces of a camera track [(t, x, y)] split wherever one picture moves more than jump_cm (a tracker jump:
+    drives are 8-10 cm/s, 0.5-0.8 cm a picture)."""
+    out, cur = [], []
+    for q in cam:
+        if cur and math.hypot(q[1] - cur[-1][1], q[2] - cur[-1][2]) > jump_cm:
+            out.append(cur)
+            cur = []
+        cur.append(q)
+    if cur:
+        out.append(cur)
+    return out
+
+
+def rebuild_stretches(name, cam_fn=None, time_shift=0.0, keep_pos=True, split_jump_cm=None):
     """The runner's learn() again, offline: per U run the camera's straight stretches (track.csv) paired with the
     robot's raw counting (raw.csv). cam_fn(t, x, y) -> (x, y) corrects each camera position first (part B);
-    time_shift (s) moves the camera's times (camera time - shift) before pairing. Returns robot -> [obs], each obs
-    as FIT.pair gives plus p0, p1 (camera ends), order and the sources at the ends."""
+    time_shift (s) moves the camera's times (camera time - shift) before pairing; split_jump_cm: the camera track is
+    cut at jumps bigger than this before the stretches are found (the fix tested in part B). Returns robot -> [obs],
+    each obs as FIT.pair gives plus p0, p1 (camera ends), order and the sources at the ends."""
     tr = track(name)
     raw = raw_by_run(name)
     info = runinfo(name)
@@ -123,7 +138,10 @@ def rebuild_stretches(name, cam_fn=None, time_shift=0.0, keep_pos=True):
             if cam_fn is not None:
                 x, y = cam_fn(t, x, y)
             cam.append((t - time_shift, x, y))
-        stretches = FIT.camera_stretches(cam)
+        if split_jump_cm:
+            stretches = [s for piece in split_at_jumps(cam, split_jump_cm) for s in FIT.camera_stretches(piece)]
+        else:
+            stretches = FIT.camera_stretches(cam)
         src_at = {round(q[0] - time_shift, 3): q[3] for q in cam_all}
         for run in runs:
             rr = raw.get(run) or []
