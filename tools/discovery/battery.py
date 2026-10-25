@@ -247,6 +247,54 @@ class Bot:
             d += s + self.hold(1.0)
         return d
 
+    def ramp(self, n=2, pitch_deg=14.0, speed=4.0):
+        """Hands-free pitch: drive over a printed ramp-and-plateau (1 cm rise over 8 cm, 6 cm plateau, 8 cm down),
+        commanded, starting 6 cm before it so the start and stop of the drive fall on flat floor. The drive
+        wheels climb first while the rear caster is still on the floor, so the nose tips up (about atan(1 / 4) =
+        14 deg for a caster 4 cm behind the axle); it levels when the caster climbs, tips nose down as the wheels
+        go down, and levels again. Then back over it in reverse. 34 cm each way."""
+        d = 0.0
+        lead = 6.0
+        for k in range(n):
+            for direction in (1, -1):
+                L = 2 * lead + 22.0
+                m = int(round(L / speed * HZ))
+                m0 = int(round(lead / speed * HZ))
+                q = (m - 2 * m0) // 4
+                self.step += 1
+                t0 = self.t
+                for i in range(m):
+                    j = i - m0
+                    seg = j // q if 0 <= j < 4 * q else -1
+                    u = (j % q) / max(1, q - 1) if seg >= 0 else 0.0
+                    rate = pitch_deg * np.pi * np.sin(2 * np.pi * u) / (q / HZ) / 2.0
+                    sign = {0: 1, 2: -1}.get(seg, 0) * direction
+                    self.sample(v=direction * speed, dpitch=sign * rate)
+                self.pitch = 0.0
+                self.legs.append({"kind": "go", "value": direction * L, "t0": t0, "t1": self.t})
+                d += m / HZ + self.hold(1.0)
+        return d
+
+    def bump(self, n=2, roll_deg=6.4, speed=4.0):
+        """Hands-free roll: drive one wheel over a printed half-width bump (1 cm high, 10 cm long, rounded):
+        roll about atan(1 / 8.9) = 6.4 deg up and back. Forward over it, then back over it (commanded)."""
+        d = 0.0
+        for k in range(n):
+            for direction in (1, -1):
+                L = 20.0
+                m = int(round(L / speed * HZ))
+                self.step += 1
+                t0 = self.t
+                p, rate = _bump(L / speed, m // 2)
+                for i in range(m):
+                    j = i - m // 4
+                    rr = rate[j] if 0 <= j < len(rate) else 0.0
+                    self.sample(v=direction * speed, droll=roll_deg * rr * (1 if k % 2 == 0 else -1))
+                self.roll = 0.0
+                self.legs.append({"kind": "go", "value": direction * L, "t0": t0, "t1": self.t})
+                d += m / HZ + self.hold(1.0)
+        return d
+
     def line_cross(self, n=2):
         """Drive across a tape stripe laid 12 cm ahead (by hand, before the move) and back."""
         c, sn = math.cos(math.radians(self.th)), math.sin(math.radians(self.th))
@@ -273,7 +321,7 @@ def run_plan(plan, seed=1):
     for mv, a in plan:
         a = a if isinstance(a, tuple) else (a,)
         fn = {"stand": b.stand, "spins": b.spins, "drive": b.drive, "square": b.square, "tilt": b.tilt,
-              "lift": b.lift, "line": b.line_cross}[mv]
+              "lift": b.lift, "line": b.line_cross, "ramp": b.ramp, "bump": b.bump}[mv]
         secs[mv] = secs.get(mv, 0.0) + fn(*a)
         b.hold(0.5)
     return b, secs

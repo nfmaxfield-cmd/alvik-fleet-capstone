@@ -50,6 +50,14 @@ def plans():
                                              ("tilt", (2, 20.0)), ("lift", (2, 5.0)), ("stand", 5.0)]
     out["compact B (one tilt, one lift)"] = [("stand", 10.0), ("spins", (4, 90.0)), ("drive", (2, 20.0)),
                                              ("tilt", (1, 20.0)), ("lift", (1, 5.0)), ("stand", 5.0)]
+    # hands-free: a printed ramp (pitch) and one-wheel bump (roll) instead of hand tilts, no lift; the line move
+    # stands in for creeping to an open plywood edge until the edge guard trips (both give the line sensors a
+    # large step while the robot drives)
+    hf = [("stand", 10.0), ("spins", (4, 90.0)), ("drive", (2, 20.0)), ("square", (12, 15.0)), ("ramp", (2,)),
+          ("bump", (2,)), ("line", (2,)), ("stand", 5.0)]
+    out["hands-free battery (ramp, bump, edge)"] = hf
+    out["hands-free minus bump"] = [p for p in hf if p[0] != "bump"]
+    out["hands-free minus ramp"] = [p for p in hf if p[0] != "ramp"]
     return out
 
 

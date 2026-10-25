@@ -167,8 +167,10 @@ def find_derived(feats, R):
         if best[1] == a and not (own > 0.05 and theirs < 0.01):
             der[a] = ("an exact combination of two similar streams (R2 %.3f on held-out windows)" % r2, [p, q], r2,
                       "combo")
-    # 4. outputs that update in lockstep with a computed angle (the integral of a sensor's rate)
-    angles = {a for a, b, r in R["integration"]}
+    # 4. outputs that update in lockstep with a computed angle (the integral of a sensor's rate). An "angle" that
+    #    flickers at rest is a sensor axis that a tilt made follow a rate's integral (2026-10-25: a tilted
+    #    accelerometer axis), not a computed angle, so its group-mates are not computed outputs
+    angles = {a for a, b, r in R["integration"] if (_g(feats[a], "still_change_frac", 0.0) or 0.0) <= 0.05}
     gof = R["group_of"]
     for s in ids:
         if s in der or s in angles:
