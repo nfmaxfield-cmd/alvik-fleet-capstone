@@ -1,0 +1,30 @@
+=== baseline start 21:14:23
+=== baseline end 21:56:25 exit 0 dir /home/claude/alvik-fleet-capstone/logs/e02-20261024-211423-dryrun
+=== keptpose start 21:56:30
+=== keptpose end 22:46:30 exit 0 dir /home/claude/alvik-fleet-capstone/logs/e02-20261024-215631-dryrun
+=== camera:noise=2 start 22:46:36
+=== camera:noise=2 start 23:14:35
+=== camera:noise=2 end 23:55:50 exit 0
+=== camera:noise=4 start 23:56:06
+=== camera:noise=4 end 00:13:35 exit 0
+=== camera:drop=0.3 start 00:14:38
+=== camera:drop=0.3 end 00:56:34 exit 0
+=== camera:noise=2.0 start 07:06:47
+=== camera:noise=2.0 stopped (firmware border change)
+=== camera:noise=2.0 start 07:15:43
+=== camera:noise=2.0 end 07:35:06 exit 0
+=== camera:noise=4.0 start 07:35:19
+=== camera:noise=4.0 end 07:56:17 exit 0
+=== camera:noise=2.00 start 07:58:39
+=== camera:noise=2.00 end 08:53:39 exit 0
+=== wheels@Center:jitter=0.05 start 08:53:43
+=== wheels@Center:jitter=0.05 end 09:35:47 exit 0
+=== wheels@Center:jitter=0.1 start 10:00:33
+=== wheels@Center:jitter=0.1 end 10:42:39 exit 0
+=== wheels:jitter=0.08 start 10:42:41
+=== wheels:jitter=0.08 end 11:26:03 exit 0
+=== gyro@Right:jitter=0.05 start 11:26:05
+=== gyro@Right:jitter=0.05 end 12:11:48 exit 0
+=== front@Left:bias=8 start 12:11:50
+=== front@Left:bias=8 end 12:54:58 exit 0
+=== front@Left:noise=6 start 12:55:01

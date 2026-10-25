@@ -1,0 +1,76 @@
+| Session | Runs scored | Holds | Sensors flagged (k, after runs) | C back at start | KC back at start | KC far |
+|---|---|---|---|---|---|---|
+| baseline | 21 | none | none | 1.3 cm | 0.9 cm | 1.2 cm |
+| camera_drop_0_3 | 21 | none | none | 1.5 cm | 0.8 cm | 1.0 cm |
+| camera_noise_2 | 8 | border (camera) 11, border (robot's own) 12, front sensor 8 | the camera BAD 4.0 (0) | - | 89.3 cm | 1.9 cm |
+| camera_noise_2_0 | 1 | border (robot's own) 5 | the camera BAD 8.2 (0) | - | - | - |
+| camera_noise_2_00 | 11 (did not finish) | border (camera) 2, border (robot's own) 2, lost / camera-wheels 1 | the camera BAD 5.0 (0) | - | - | - |
+| camera_noise_4 | 0 | border (camera) 6, border (robot's own) 4, front sensor 6, lost / camera-wheels 1 | the camera BAD 5.7 (0) | - | - | - |
+| camera_noise_4_0 | 0 | border (camera) 2, border (robot's own) 5 | the camera BAD 9.5 (0) | - | - | - |
+| front_Left_bias_8 | 21 | none | Left's front sensor BAD 2.9 (16) | 1.2 cm | 1.0 cm | 0.8 cm |
+| front_Left_noise_6 | 9 (did not finish) | none | the camera BAD 2.1 (0); the camera BAD 2.1 (0); the camera BAD 2.1 (0) | - | - | - |
+| gyro_Right_jitter_0_05 | 21 | border (robot's own) 1, lost / camera-wheels 2 | none | 2.0 cm | 0.8 cm | 1.3 cm |
+| keptpose | 17 (did not finish) | border (camera) 1, border (robot's own) 5 | none | - | - | - |
+| wheels_Center_jitter_0_05 | 21 | none | Center's wheels BAD 3.8 (8) | 0.7 cm | 0.4 cm | 0.7 cm |
+| wheels_Center_jitter_0_1 | 21 | none | Center's wheels BAD 4.6 (7) | 1.4 cm | 1.2 cm | 1.9 cm |
+| wheels_jitter_0_08 | 21 | lost / camera-wheels 1 | Center's wheels BAD 8.0 (7) | 1.0 cm | 0.4 cm | 1.4 cm |
+
+baseline trust at the end:
+    camera: 0.5 cm per axis at the finds (412 readings; healthy 0.8)
+    Left: wheels 0.2 cm a stretch (4 fits), gyro 0.3 deg (4), front 2.3 cm (6); camera's share shared by the robots
+    Center: wheels 0.2 cm a stretch (4 fits), gyro 0.3 deg (4), front 5.0 cm (5); camera's share shared by the robots
+    Right: wheels 0.2 cm a stretch (4 fits), gyro 0.3 deg (4), front 5.0 cm (2); camera's share shared by the robots
+camera_drop_0_3 trust at the end:
+    camera: 0.6 cm per axis at the finds (410 readings; healthy 0.8)
+    Left: wheels 0.3 cm a stretch (4 fits), gyro 0.4 deg (4), front 5.0 cm (4); camera's share shared by the robots
+    Center: wheels 0.3 cm a stretch (4 fits), gyro 0.3 deg (4), front 5.0 cm (5); camera's share shared by the robots
+    Right: wheels 0.3 cm a stretch (4 fits), gyro 0.4 deg (4), front 5.0 cm (3); camera's share shared by the robots
+camera_noise_2 trust at the end:
+    camera: 3.7 cm per axis at the finds (214 readings; healthy 0.8) LOOKS BAD
+    Left: wheels 0.2 cm a stretch (4 fits), gyro 0.3 deg (4), front 1.5 cm (41); camera's share from the finds
+    Center: wheels 0.6 cm a stretch (0 fits), gyro 1.0 deg (0), front 5.0 cm (4); too little evidence yet
+    Right: wheels 0.6 cm a stretch (1 fits), gyro 1.0 deg (1), front 5.0 cm (3); too little evidence yet
+camera_noise_2_0 trust at the end:
+    camera: 3.8 cm per axis at the finds (78 readings; healthy 0.8) LOOKS BAD
+    Left: wheels 0.6 cm a stretch (0 fits), gyro 1.0 deg (0), front 1.0 cm (8); too little evidence yet
+    Center: wheels 0.6 cm a stretch (0 fits), gyro 1.0 deg (0), front 5.0 cm (0); too little evidence yet
+    Right: wheels 0.6 cm a stretch (1 fits), gyro 1.0 deg (1), front 5.0 cm (4); too little evidence yet
+camera_noise_2_00 trust at the end:
+camera_noise_4 trust at the end:
+    camera: 6.1 cm per axis at the finds (32 readings; healthy 0.8) LOOKS BAD
+    Left: wheels 0.6 cm a stretch (0 fits), gyro 1.0 deg (0), front 5.0 cm (5); too little evidence yet
+    Center: wheels 0.6 cm a stretch (0 fits), gyro 1.0 deg (0), front 11.0 cm (8); too little evidence yet
+    Right: wheels 0.6 cm a stretch (0 fits), gyro 1.0 deg (0), front 5.0 cm (2); too little evidence yet
+camera_noise_4_0 trust at the end:
+    camera: 8.0 cm per axis at the finds (20 readings; healthy 0.8) LOOKS BAD
+    Left: wheels 0.6 cm a stretch (0 fits), gyro 1.0 deg (0), front 5.0 cm (3); too little evidence yet
+    Center: wheels 0.6 cm a stretch (0 fits), gyro 1.0 deg (0), front 5.0 cm (5); too little evidence yet
+    Right: wheels 0.6 cm a stretch (0 fits), gyro 1.0 deg (0), front 5.0 cm (1); too little evidence yet
+front_Left_bias_8 trust at the end:
+    camera: 0.5 cm per axis at the finds (410 readings; healthy 0.8)
+    Left: wheels 0.2 cm a stretch (4 fits), gyro 0.3 deg (4), front 14.6 cm (6) LOOKS BAD: front; camera's share shared by the robots
+    Center: wheels 0.2 cm a stretch (4 fits), gyro 0.4 deg (4), front 2.8 cm (7); camera's share shared by the robots
+    Right: wheels 0.2 cm a stretch (4 fits), gyro 0.3 deg (4), front 5.0 cm (2); camera's share shared by the robots
+front_Left_noise_6 trust at the end:
+gyro_Right_jitter_0_05 trust at the end:
+    camera: 0.5 cm per axis at the finds (418 readings; healthy 0.8)
+    Left: wheels 0.2 cm a stretch (4 fits), gyro 0.3 deg (4), front 1.7 cm (6); camera's share shared by the robots
+    Center: wheels 0.3 cm a stretch (4 fits), gyro 0.3 deg (4), front 5.0 cm (5); camera's share shared by the robots
+    Right: wheels 0.2 cm a stretch (4 fits), gyro 1.1 deg (4), front 5.0 cm (5); camera's share shared by the robots
+keptpose trust at the end:
+wheels_Center_jitter_0_05 trust at the end:
+    camera: 0.5 cm per axis at the finds (402 readings; healthy 0.8)
+    Left: wheels 0.3 cm a stretch (4 fits), gyro 0.3 deg (4), front 5.0 cm (4); camera's share shared by the robots
+    Center: wheels 2.0 cm a stretch (4 fits), gyro 0.3 deg (4), front 1.0 cm (6) LOOKS BAD: wheels; camera's share shared by the robots
+    Right: wheels 0.3 cm a stretch (4 fits), gyro 0.3 deg (4), front 5.0 cm (2); camera's share shared by the robots
+wheels_Center_jitter_0_1 trust at the end:
+    camera: 0.5 cm per axis at the finds (406 readings; healthy 0.8)
+    Left: wheels 0.3 cm a stretch (4 fits), gyro 0.3 deg (4), front 5.0 cm (5); camera's share shared by the robots
+    Center: wheels 4.6 cm a stretch (4 fits), gyro 0.3 deg (4), front 5.0 cm (4) LOOKS BAD: wheels; camera's share shared by the robots
+    Right: wheels 0.3 cm a stretch (4 fits), gyro 0.4 deg (4), front 5.0 cm (3); camera's share shared by the robots
+wheels_jitter_0_08 trust at the end:
+    camera: 0.5 cm per axis at the finds (412 readings; healthy 0.8)
+    every robot's stretches are noisier than the camera at the finds explains: the camera away from the find corner, or every robot's wheels alike (can't tell which; tape marks would)
+    Left: wheels 0.2 cm a stretch (4 fits), gyro 0.3 deg (4), front 3.8 cm (6); camera's share shared by the robots
+    Center: wheels 3.9 cm a stretch (4 fits), gyro 0.4 deg (4), front 2.9 cm (6) LOOKS BAD: wheels; camera's share shared by the robots
+    Right: wheels 0.6 cm a stretch (4 fits), gyro 0.3 deg (4), front 5.0 cm (5); camera's share shared by the robots
