@@ -105,14 +105,13 @@ of the line sensors when the robot stopped, so 4 cm of creep still reaches it.
    below 12 pictures a second, and 15:10 spent minutes at 10-14. That is fixed; run C2 is the check.
 5. **Telling an open edge from an object beyond it works call by call**, in the simulator's terms. But at 2 cm the
    creep spoiled the camera fit. At 3 cm it is right on both counts with the object beyond the edge: the edge was called open twice and explore found the board. With an object on the plywood, every creep that reached it called it blocked. That run's fit still failed, because the brick on the working floor brushed the robots on normal legs: wheels counted 3-7 cm more than the robots moved on 4 legs. The tracker's error near the brick was 0.3 cm, so the camera was not the cause. The fit check caught it and the run fell back safely. A board out from the plywood, with floor under the gap, cannot be tested until the simulator has floor beyond the plywood.
-6. **Part 2c, what else slowed the 16:00 session: its logs are not uploaded yet.** The releases list ends at
-   `e02-session-20261025-151004`, checked at 17:00 and again at 18:10. So this could not be answered.
+6. **Part 2c, what else slowed the 16:00 session, is not answered here.** Its logs were not uploaded during the
+   build (checked at 17:00 and 18:10). They are now on `e02-session-20261025-154522`, with a separate analysis agent.
 
 ## What's next
 
-1. Nick: upload the 16:00 session (the logs zip, and the recorder's small zip). Its `stalls.csv` and `threads.csv`
-   will not be there, because the build came after it. Its perf.csv and the tracker's sources will show whether it
-   was the tracking cost, as at 15:10, or something new.
+1. The 16:00 session's logs are now on the release `e02-session-20261025-154522`. A separate analysis agent is
+   working on them. Its `stalls.csv` and `threads.csv` will not be there, because the build came after it.
 2. The next real session is the first with the stall watch on. Read `stalls.csv` and `threads.csv` beside
    `perf.csv`.
 3. The crawl DOE (DOE-explore-crawl.md) gains the creep's stop distance and speed. It also gains an object at
@@ -135,8 +134,7 @@ of the line sensors when the robot stopped, so 4 cm of creep still reaches it.
 
 *Other*
 
-4. The time tracker has its last block of rows twice, from another chat. I left it as it is; shall I remove the
-   copy?
+4. (Withdrawn: the time tracker has no duplicated block. Two overlapping printouts of the file misled me.)
 
 ## Sweep 1: new tests that may now be needed
 
