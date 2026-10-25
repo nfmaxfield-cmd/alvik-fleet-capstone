@@ -166,9 +166,11 @@ def test_drive_blind_stops_when_landmarks_disagree():
         if v == "go":
             x, y, th = pose["p"]
             pose["p"] = (x, y + float(a), th)
-        return "done", "front=5.0"                       # something right in front: not on the map
+        return "done", "front=2.0"                       # something right in front: not on the map
     r.send_leg = send_leg
-    ok, words = r.drive_blind("Left", [(60.0, 100.0)])
+    # (2026-10-25: the tolerance is now 3 sd of the measured spread, 16.5 cm, so the obstacle must be well off the map:
+    # 2 cm read where the map says about 30)
+    ok, words = r.drive_blind("Left", [(60.0, 85.0)])
     assert not ok and "front sensor" in words
 
 

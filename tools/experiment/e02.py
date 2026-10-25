@@ -89,6 +89,7 @@ import e02_edgefind as EF  # noqa: E402
 import e02_camerr as CE  # noqa: E402
 import e02_trust as TR  # noqa: E402
 import e02_load as LD  # noqa: E402
+import e02_front as FR  # noqa: E402
 import e02_degrade as DG  # noqa: E402
 
 
@@ -138,9 +139,9 @@ SWEEP_STEP_DEG = 30.0     # a finder robot turns in these steps, reading its fro
 SWEEP_RANGE_CM = 70.0     # ... a reading nearer than this
 SWEEP_GAP_CM = 8.0        # ... and this much shorter than the map says is something not on the map
 SWEEP_NEAR_CM = 25.0      # the camera then looks for the lost robot's turn within this of it
-FRONT_OFFSET_CM = 0.0     # front sensor reading minus the map's distance (data before the session; set it from the
-                          # next real session's front_checks.csv: none yet, the simulator agrees within 1 cm)
-FRONT_TOL_CM = 8.0        # ... and how far a reading may be from that before it counts as a disagreement
+FRONT_OFFSET_CM = FR.DEFAULT_OFFSET_CM                  # front sensor reading minus the map's distance: measured, 115
+FRONT_TOL_CM = FR.TOL_SD * FR.DEFAULT_SD_CM             # readings of 2026-10-23/24 (was 0 / 8 cm, chosen); with
+                          # --no-front-learn only: by default each robot's are learned every session (e02_front.py)
 FRONT_STEER_FACTOR = 1.5  # a disagreement this many tolerances, with a measured heading, makes the runner find it again
 FRONT_LEARN_MIN = 8       # --front-learn: readings before the learned offset and tolerance are used
 FRONT_LEARN_MIN_TOL = 3.0
@@ -554,6 +555,9 @@ class Runner:
         self.link = self.listener = self.watch = self.pi = None
         self.feed = self.tracker = self.history = self.cam = self.board = None
         self.front_seen = {}                 # "all" -> [front reading - map distance]
+        # each robot's front-sensor offset and tolerance, learned every session from earlier ones (e02_front.py)
+        self.front = FR.FrontModel(os.path.join(REPO, "logs", "front_learned%s.json" % (
+            "-dryrun" if getattr(a, "dry_run", False) else "")))
         self.front_bad = {}                  # robot -> words: the last leg's front reading disagreed with the map
         self.fix_t = {}                      # robot -> when the camera last told it where it is
         self.speed_now = {}                   # e02_cms last set per robot (explore crawls)
@@ -1251,7 +1255,7 @@ class Runner:
         own = self.own_pose(robot)
         if own is None or ahead is None or "board" not in str(ahead[1]):
             return None
-        off, tol = self.front_limits()
+        off, tol = self.front_limits(robot)
         hd = own[2]
         ux, uy = math.cos(math.radians(hd)), math.sin(math.radians(hd))
         reach = front - off + PL.ROBOT_HALF_CM            # axle to the board along its heading
@@ -1302,10 +1306,17 @@ class Runner:
                             "front_cm", "expected_cm", "what"])
             w.writerow(row)
         if ahead is not None and ahead[0] <= FRONT_CHECK_RANGE_CM and self.square_on(ahead):
-            off, tol = self.front_limits()
+            off, tol = self.front_limits(robot)
             miss = front - off - ahead[0]
             if h[1]:
                 self.front_seen.setdefault("all", []).append(front - ahead[0])
+                fm = getattr(self, "front", None)
+                if fm is not None:
+                    ch_ = fm.add(robot, front - ahead[0])
+                    if ch_:
+                        self.say("!!! FRONT SENSOR: " + ch_ + ".")
+                        self.mark("e02 front sensor changed %s" % robot)
+                        self.st.setdefault("front_changes", []).append([round(time.time(), 1), robot, ch_])
                 self.trust.front_vs_map(robot, miss)      # after the expected offset: a bias counts too
                 self.trust_note(save=False)
             if abs(miss) > tol:
@@ -1321,12 +1332,16 @@ class Runner:
                         front, ahead[1], ahead[0] + off)
         return front, ahead
 
-    def front_limits(self):
+    def front_limits(self, robot=None):
         """(offset, tolerance) cm for the front sensor against the map. Nick, 2026-10-22: for now from data gathered
         before the session (FRONT_OFFSET_CM / FRONT_TOL_CM, to be set from the front_checks.csv of the next real
         session); --front-learn (off by default) learns them in this session instead, from scratch, once
         FRONT_LEARN_MIN readings are in: the median of reading - map, and 3 x its spread (MAD x 1.48), at least
         FRONT_LEARN_MIN_TOL. NOTE (Nick): switch to --front-learn once the from-scratch setup can stand on it."""
+        fm = getattr(self, "front", None)
+        if robot is not None and fm is not None and not getattr(self.a, "no_front_learn", False):
+            off_, tol_, _src = fm.limits(robot)       # each robot's own, learned every session (Nick, 2026-10-25)
+            return off_, tol_
         v = self.front_seen.get("all") or []
         if getattr(self.a, "front_learn", False) and len(v) >= FRONT_LEARN_MIN:
             med = float(np.median(v))
@@ -2391,7 +2406,7 @@ class Runner:
                 m = re.search(r"front=([0-9.]+)", info or "")
                 if pose and m and float(m.group(1)) > 0:
                     ahead = self.ahead_cm(robot, pose[:2], pose[2])
-                    off, tol = self.front_limits()
+                    off, tol = self.front_limits(robot)
                     if ahead and ahead[0] <= FRONT_CHECK_RANGE_CM and self.square_on(ahead) and \
                             abs(float(m.group(1)) - off - ahead[0]) > FRONT_STEER_FACTOR * tol:
                         return False, "its front sensor reads %.0f cm where its own pose puts %s at %.0f cm" % (
@@ -5346,6 +5361,9 @@ class Runner:
         xs, ys = np.array([q[1] for q in smp]), np.array([q[2] for q in smp])
         last_still[robot] = now
         self.trust.camera_still(robot, float(np.std(xs)), float(np.std(ys)))
+        # flags re-checked with every new piece of evidence (Nick, 2026-10-25: a check costs well under a ms, and
+        # how often it runs doesn't change false flags, only how late a real one is seen)
+        self.trust_note(save=False)
 
     def border_check(self, robot, smp, bcm=None):
         """Words if the robot is within BORDER_CM of an open edge and moving towards it, else ''. smp: the tracker's
@@ -6713,6 +6731,9 @@ def main(argv=None):
     ap.add_argument("--no-front-steer", action="store_true",
                     help="the front sensor is only logged, never makes the runner find a robot again (if its first "
                          "real readings turn out noisy)")
+    ap.add_argument("--no-front-learn", action="store_true",
+                    help="use the fixed front-sensor offset and tolerance (FRONT_OFFSET_CM / FRONT_TOL_CM) instead of "
+                         "each robot's, learned every session (e02_front.py)")
     ap.add_argument("--front-learn", action="store_true",
                     help="learn the front sensor's offset and spread against the map in this session (from scratch); "
                          "off: the values from data (FRONT_OFFSET_CM, FRONT_TOL_CM)")
@@ -7024,6 +7045,18 @@ def launch(a, state, sdir, sim):
             if ps:
                 run.say(ps)
                 state["perf_summary"] = ps
+            fm_ = getattr(run, "front", None)
+            if fm_ is not None:
+                try:
+                    lims = {n: fm_.limits(n) for n in state.get("robots", {})}
+                    state["front_limits"] = {n: dict(offset_cm=round(o, 2), tol_cm=round(t_, 2), source=src)
+                                             for n, (o, t_, src) in lims.items()}
+                    run.say("Front sensors: " + "; ".join("%s offset %+.1f cm, tolerance %.1f cm (%s)" % (n, o, t_, src)
+                                                          for n, (o, t_, src) in lims.items()))
+                    if not getattr(run.a, "degrade", ""):          # a degraded test never teaches the real values
+                        fm_.save()
+                except Exception as e:
+                    run.say("  (front sensor values not saved: %s)" % e, quiet=True)
             sw_ = getattr(run, "speed", None)
             if sw_ is not None and sw_.spans:
                 run.say("Slow spells: %d (%d with the planned load on), %.0f s in all" % (

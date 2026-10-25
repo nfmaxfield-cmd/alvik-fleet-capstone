@@ -85,7 +85,7 @@ def test_late_pictures_mean_no_pause_and_a_board_correction():
     r.unc["Left"] = dict(dist=400.0, turned=0.0)
     r.confidence_pause("Left", "go", 30.0)
     assert r.st["confidence_pauses"][-1][5].startswith("pictures late")
-    r.front_limits = lambda: (0.0, 3.0)
+    r.front_limits = lambda robot=None: (0.0, 3.0)
     front = 119.4 - 100.0 - PL.ROBOT_HALF_CM                   # really at y = 100: 5 cm further than it believes
     q = r.board_correct("Left", front, (front, "the x-board", 1.0), "done")
     assert q is not None and abs(q[1] - 100.0) < 1e-6 and abs(q[0] - 60.0) < 1e-6
