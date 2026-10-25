@@ -1,0 +1,39 @@
+[end]
+  prior                n 49 median 1.67 mean 2.61  vs prior: median diff +0.00 p 1.000
+  fitted               n 49 median 1.13 mean 2.44  vs prior: median diff +0.04 p 0.686
+  gyro scale only      n 49 median 1.29 mean 2.22  vs prior: median diff -0.00 p 0.201
+  drift only           n 49 median 1.59 mean 2.79  vs prior: median diff +0.31 p 0.206
+  wheel only           n 49 median 1.97 mean 2.63  vs prior: median diff +0.01 p 0.303
+  gyro scale + drift   n 49 median 1.15 mean 2.38  vs prior: median diff -0.10 p 0.423
+[far]
+  prior                n 48 median 4.57 mean 4.52  vs prior: median diff +0.00 p 1.000
+  fitted               n 48 median 4.23 mean 4.50  vs prior: median diff -0.02 p 0.923
+  gyro scale only      n 48 median 4.47 mean 4.51  vs prior: median diff +0.00 p 0.278
+  drift only           n 48 median 4.78 mean 4.67  vs prior: median diff +0.18 p 0.000
+  wheel only           n 48 median 3.91 mean 4.33  vs prior: median diff -0.13 p 0.010
+  gyro scale + drift   n 48 median 4.78 mean 4.67  vs prior: median diff +0.14 p 0.000
+[path]
+  prior                n 49 median 3.40 mean 3.44  vs prior: median diff +0.00 p 1.000
+  fitted               n 49 median 3.55 mean 3.68  vs prior: median diff +0.22 p 0.000
+  gyro scale only      n 49 median 3.29 mean 3.38  vs prior: median diff +0.00 p 0.667
+  drift only           n 49 median 3.49 mean 3.59  vs prior: median diff +0.15 p 0.000
+  wheel only           n 49 median 3.31 mean 3.58  vs prior: median diff +0.08 p 0.013
+  gyro scale + drift   n 49 median 3.49 mean 3.53  vs prior: median diff +0.09 p 0.002
+[rot]
+  prior                n 44 median 2.47 mean 2.68  vs prior: median diff +0.00 p 1.000
+  fitted               n 44 median 2.78 mean 2.96  vs prior: median diff +0.23 p 0.000
+  gyro scale only      n 44 median 2.74 mean 2.69  vs prior: median diff +0.00 p 0.110
+  drift only           n 44 median 2.59 mean 2.75  vs prior: median diff +0.01 p 0.038
+  wheel only           n 44 median 2.69 mean 2.88  vs prior: median diff +0.16 p 0.001
+  gyro scale + drift   n 44 median 2.70 mean 2.75  vs prior: median diff +0.01 p 0.064
+fitted values per session (median over the robot's LORO fits):
+  oct23-morning  Left   gyro 1.0757 drift +0.0500 wheel 0.9874 (n 9)
+  oct23-morning  Center gyro 1.0821 drift +0.0388 wheel 0.9903 (n 9)
+  oct23-morning  Right  gyro 1.0772 drift +0.0349 wheel 1.0031 (n 9)
+  oct23-evening  Left   gyro 1.0914 drift -0.0502 wheel 0.9728 (n 4)
+  oct23-evening  Center gyro 1.0714 drift -0.0501 wheel 0.9607 (n 3)
+  oct23-evening  Right  gyro 1.0756 drift -0.0445 wheel 0.9891 (n 3)
+  stage1         Center gyro 1.0933 drift -0.0501 wheel 0.9845 (n 1)
+  stage2         Left   gyro 1.0873 drift -0.0500 wheel 0.9590 (n 3)
+  stage2         Center gyro 1.0754 drift -0.0501 wheel 0.9764 (n 5)
+  stage2         Right  gyro 1.0813 drift -0.0501 wheel 0.9834 (n 3)

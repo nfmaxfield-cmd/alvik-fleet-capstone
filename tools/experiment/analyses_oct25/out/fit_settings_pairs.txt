@@ -1,0 +1,36 @@
+[end_err_cm]
+  cut 3.0  band 0.0   minus cut 3.0  band 0.02 : n 49 median -0.02 mean +0.03 p 1.000
+  cut 3.0  band 0.0   minus cut 3.0  band 0.05 : n 49 median -0.16 mean -0.20 p 0.181
+  cut 3.0  band 0.02  minus cut 3.0  band 0.05 : n 49 median -0.13 mean -0.23 p 0.003
+  cut 3.0  band 0.0   minus cut 3.0  band free : n 49 median -0.34 mean -1.04 p 0.006
+  cut none band 0.0   minus cut 3.0  band 0.0  : n 49 median +0.12 mean +0.39 p 0.016
+  cut none band 0.05  minus cut 3.0  band 0.05 : n 49 median +0.03 mean -0.01 p 0.534
+  cut 2.0  band 0.0   minus cut 3.0  band 0.0  : n 49 median +0.02 mean +0.15 p 0.647
+  cut 4.0  band 0.0   minus cut 3.0  band 0.0  : n 49 median +0.09 mean +0.08 p 0.226
+[far_err_cm]
+  cut 3.0  band 0.0   minus cut 3.0  band 0.02 : n 48 median -0.07 mean -0.07 p 0.000
+  cut 3.0  band 0.0   minus cut 3.0  band 0.05 : n 48 median -0.15 mean -0.16 p 0.000
+  cut 3.0  band 0.02  minus cut 3.0  band 0.05 : n 48 median -0.08 mean -0.09 p 0.000
+  cut 3.0  band 0.0   minus cut 3.0  band free : n 48 median -0.25 mean -0.27 p 0.000
+  cut none band 0.0   minus cut 3.0  band 0.0  : n 48 median -0.02 mean -0.21 p 0.212
+  cut none band 0.05  minus cut 3.0  band 0.05 : n 48 median -0.03 mean -0.23 p 0.120
+  cut 2.0  band 0.0   minus cut 3.0  band 0.0  : n 48 median -0.02 mean +0.03 p 0.886
+  cut 4.0  band 0.0   minus cut 3.0  band 0.0  : n 48 median +0.01 mean -0.13 p 0.148
+[path_err_cm]
+  cut 3.0  band 0.0   minus cut 3.0  band 0.02 : n 49 median -0.05 mean -0.07 p 0.000
+  cut 3.0  band 0.0   minus cut 3.0  band 0.05 : n 49 median -0.12 mean -0.15 p 0.000
+  cut 3.0  band 0.02  minus cut 3.0  band 0.05 : n 49 median -0.04 mean -0.09 p 0.000
+  cut 3.0  band 0.0   minus cut 3.0  band free : n 49 median -0.21 mean -0.37 p 0.000
+  cut none band 0.0   minus cut 3.0  band 0.0  : n 49 median +0.02 mean +0.03 p 0.474
+  cut none band 0.05  minus cut 3.0  band 0.05 : n 49 median +0.02 mean -0.05 p 0.898
+  cut 2.0  band 0.0   minus cut 3.0  band 0.0  : n 49 median +0.01 mean +0.06 p 0.421
+  cut 4.0  band 0.0   minus cut 3.0  band 0.0  : n 49 median +0.02 mean +0.01 p 0.276
+[rot_err_cm]
+  cut 3.0  band 0.0   minus cut 3.0  band 0.02 : n 44 median -0.00 mean -0.03 p 0.003
+  cut 3.0  band 0.0   minus cut 3.0  band 0.05 : n 44 median -0.02 mean -0.09 p 0.001
+  cut 3.0  band 0.02  minus cut 3.0  band 0.05 : n 44 median -0.01 mean -0.06 p 0.001
+  cut 3.0  band 0.0   minus cut 3.0  band free : n 44 median -0.02 mean -0.32 p 0.001
+  cut none band 0.0   minus cut 3.0  band 0.0  : n 44 median +0.05 mean -0.02 p 0.462
+  cut none band 0.05  minus cut 3.0  band 0.05 : n 44 median +0.05 mean -0.06 p 0.575
+  cut 2.0  band 0.0   minus cut 3.0  band 0.0  : n 44 median -0.00 mean +0.03 p 0.871
+  cut 4.0  band 0.0   minus cut 3.0  band 0.0  : n 44 median +0.02 mean -0.01 p 0.339

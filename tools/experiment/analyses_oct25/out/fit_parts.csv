@@ -1,0 +1,295 @@
+session,robot,order,cond,variant,gyro_scale,gyro_drift_dps,wheel_scale,end,far,path,rot
+oct23-morning,Right,1,U,prior,1.075,0.0003,0.979,1.667,3.566,2.14,1.851
+oct23-morning,Right,1,U,fitted,1.0772,0.0278,0.9983,1.818,2.817,2.181,1.828
+oct23-morning,Right,1,U,gyro scale only,1.0772,0.0003,0.979,2.105,3.599,2.178,1.932
+oct23-morning,Right,1,U,drift only,1.075,0.0278,0.979,1.076,3.622,2.17,1.775
+oct23-morning,Right,1,U,wheel only,1.075,0.0003,0.9983,1.972,2.703,2.127,1.829
+oct23-morning,Right,1,U,gyro scale + drift,1.0772,0.0278,0.979,1.515,3.64,2.178,1.833
+oct23-morning,Center,2,U,prior,1.075,-0.0002,0.979,0.18,3.341,2.492,2.429
+oct23-morning,Center,2,U,fitted,1.0828,0.0326,0.9902,0.761,3.197,2.875,2.841
+oct23-morning,Center,2,U,gyro scale only,1.0828,-0.0002,0.979,0.941,3.184,2.706,2.688
+oct23-morning,Center,2,U,drift only,1.075,0.0326,0.979,0.494,3.462,2.478,2.384
+oct23-morning,Center,2,U,wheel only,1.075,-0.0002,0.9902,0.186,3.276,2.705,2.647
+oct23-morning,Center,2,U,gyro scale + drift,1.0828,0.0326,0.979,0.683,3.291,2.668,2.632
+oct23-morning,Right,3,U,prior,1.075,0.0003,0.979,0.752,3.8,3.111,2.869
+oct23-morning,Right,3,U,fitted,1.0767,0.0418,1.0065,0.928,3.861,3.678,3.434
+oct23-morning,Right,3,U,gyro scale only,1.0767,0.0003,0.979,0.807,3.763,3.139,2.915
+oct23-morning,Right,3,U,drift only,1.075,0.0418,0.979,1.023,3.953,3.116,2.812
+oct23-morning,Right,3,U,wheel only,1.075,0.0003,1.0065,0.772,3.727,3.65,3.44
+oct23-morning,Right,3,U,gyro scale + drift,1.0767,0.0418,0.979,0.979,3.913,3.138,2.856
+oct23-morning,Left,4,U,prior,1.075,0.0,0.979,1.114,3.112,2.5,2.149
+oct23-morning,Left,4,U,fitted,1.0762,0.05,0.9885,1.014,3.278,2.727,2.333
+oct23-morning,Left,4,U,gyro scale only,1.0762,0.0,0.979,1.249,3.078,2.484,2.145
+oct23-morning,Left,4,U,drift only,1.075,0.05,0.979,0.886,3.316,2.593,2.164
+oct23-morning,Left,4,U,wheel only,1.075,0.0,0.9885,1.181,3.096,2.647,2.316
+oct23-morning,Left,4,U,gyro scale + drift,1.0762,0.05,0.979,0.973,3.28,2.575,2.159
+oct23-morning,Center,5,U,prior,1.075,-0.0002,0.979,3.357,5.219,3.518,3.07
+oct23-morning,Center,5,U,fitted,1.0827,0.044,0.9906,0.712,4.392,3.546,2.821
+oct23-morning,Center,5,U,gyro scale only,1.0827,-0.0002,0.979,0.945,5.219,3.518,3.07
+oct23-morning,Center,5,U,drift only,1.075,0.044,0.979,2.022,5.418,3.741,3.07
+oct23-morning,Center,5,U,wheel only,1.075,-0.0002,0.9906,3.086,4.142,3.308,2.821
+oct23-morning,Center,5,U,gyro scale + drift,1.0827,0.044,0.979,0.398,5.418,3.74,3.07
+oct23-morning,Left,6,U,prior,1.075,0.0,0.979,1.147,4.86,3.454,2.741
+oct23-morning,Left,6,U,fitted,1.0763,0.05,0.9887,1.016,4.429,3.675,2.614
+oct23-morning,Left,6,U,gyro scale only,1.0763,0.0,0.979,0.749,4.86,3.454,2.741
+oct23-morning,Left,6,U,drift only,1.075,0.05,0.979,0.387,5.177,3.758,2.741
+oct23-morning,Left,6,U,wheel only,1.075,0.0,0.9887,0.919,4.051,3.36,2.614
+oct23-morning,Left,6,U,gyro scale + drift,1.0763,0.05,0.979,0.775,5.177,3.758,2.741
+oct23-morning,Right,7,U,prior,1.075,0.0003,0.979,2.572,5.148,3.316,3.315
+oct23-morning,Right,7,U,fitted,1.0792,0.0473,1.0012,0.848,2.908,3.262,3.216
+oct23-morning,Right,7,U,gyro scale only,1.0792,0.0003,0.979,1.286,5.148,3.316,3.315
+oct23-morning,Right,7,U,drift only,1.075,0.0473,0.979,1.166,5.136,3.36,3.315
+oct23-morning,Right,7,U,wheel only,1.075,0.0003,1.0012,2.077,2.93,3.217,3.216
+oct23-morning,Right,7,U,gyro scale + drift,1.0792,0.0473,0.979,0.326,5.136,3.359,3.315
+oct23-morning,Center,8,U,prior,1.075,-0.0002,0.979,0.721,5.526,3.627,1.645
+oct23-morning,Center,8,U,fitted,1.0817,0.0462,0.9908,0.629,5.469,3.832,1.886
+oct23-morning,Center,8,U,gyro scale only,1.0817,-0.0002,0.979,0.966,5.341,3.371,1.567
+oct23-morning,Center,8,U,drift only,1.075,0.0462,0.979,1.589,5.888,4.001,1.811
+oct23-morning,Center,8,U,wheel only,1.075,-0.0002,0.9908,0.65,5.343,3.791,1.948
+oct23-morning,Center,8,U,gyro scale + drift,1.0817,0.0462,0.979,0.608,5.662,3.686,1.609
+oct23-morning,Left,9,U,prior,1.075,0.0,0.979,0.584,3.719,2.42,1.43
+oct23-morning,Left,9,U,fitted,1.0738,0.05,0.9879,0.624,4.049,2.935,1.796
+oct23-morning,Left,9,U,gyro scale only,1.0738,0.0,0.979,0.346,3.754,2.462,1.447
+oct23-morning,Left,9,U,drift only,1.075,0.05,0.979,0.509,4.093,2.755,1.559
+oct23-morning,Left,9,U,wheel only,1.075,0.0,0.9879,0.73,3.553,2.499,1.549
+oct23-morning,Left,9,U,gyro scale + drift,1.0738,0.05,0.979,0.747,4.138,2.814,1.606
+oct23-morning,Right,10,U,prior,1.075,0.0003,0.979,0.655,3.047,1.907,1.644
+oct23-morning,Right,10,U,fitted,1.0767,0.028,1.0073,0.827,2.303,2.705,2.464
+oct23-morning,Right,10,U,gyro scale only,1.0767,0.0003,0.979,0.985,3.062,1.88,1.649
+oct23-morning,Right,10,U,drift only,1.075,0.028,0.979,0.116,3.128,2.031,1.665
+oct23-morning,Right,10,U,wheel only,1.075,0.0003,1.0073,1.094,2.128,2.612,2.422
+oct23-morning,Right,10,U,gyro scale + drift,1.0767,0.028,0.979,0.396,3.129,1.982,1.649
+oct23-morning,Center,11,U,prior,1.075,-0.0002,0.979,0.187,4.518,3.065,2.505
+oct23-morning,Center,11,U,fitted,1.083,0.029,0.9906,0.846,4.376,3.357,2.911
+oct23-morning,Center,11,U,gyro scale only,1.083,-0.0002,0.979,1.051,4.312,3.159,2.744
+oct23-morning,Center,11,U,drift only,1.075,0.029,0.979,0.201,4.636,3.091,2.466
+oct23-morning,Center,11,U,wheel only,1.075,-0.0002,0.9906,0.27,4.496,3.256,2.727
+oct23-morning,Center,11,U,gyro scale + drift,1.083,0.029,0.979,0.738,4.422,3.168,2.697
+oct23-morning,Left,13,U,prior,1.075,0.0,0.979,3.777,4.812,3.469,
+oct23-morning,Left,13,U,fitted,1.0753,0.05,0.985,2.973,4.544,3.283,
+oct23-morning,Left,13,U,gyro scale only,1.0753,0.0,0.979,3.864,4.812,3.469,
+oct23-morning,Left,13,U,drift only,1.075,0.05,0.979,2.815,5.061,3.648,
+oct23-morning,Left,13,U,wheel only,1.075,0.0,0.985,3.904,4.262,3.082,
+oct23-morning,Left,13,U,gyro scale + drift,1.0753,0.05,0.979,2.877,5.061,3.648,
+oct23-morning,Right,16,C,prior,1.075,0.0003,0.979,0.568,3.448,2.928,2.832
+oct23-morning,Right,16,C,fitted,1.0772,0.0349,1.0031,0.664,3.332,3.401,3.303
+oct23-morning,Right,16,C,gyro scale only,1.0772,0.0003,0.979,0.326,3.41,2.963,2.878
+oct23-morning,Right,16,C,drift only,1.075,0.0349,0.979,0.93,3.564,2.922,2.799
+oct23-morning,Right,16,C,wheel only,1.075,0.0003,1.0031,0.577,3.247,3.376,3.291
+oct23-morning,Right,16,C,gyro scale + drift,1.0772,0.0349,0.979,0.657,3.522,2.953,2.842
+oct23-morning,Left,19,C,prior,1.075,0.0,0.979,0.21,3.533,2.31,1.425
+oct23-morning,Left,19,C,fitted,1.0757,0.05,0.9874,1.096,3.747,2.726,1.651
+oct23-morning,Left,19,C,gyro scale only,1.0757,0.0,0.979,0.229,3.515,2.289,1.427
+oct23-morning,Left,19,C,drift only,1.075,0.05,0.979,1.254,3.915,2.652,1.499
+oct23-morning,Left,19,C,wheel only,1.075,0.0,0.9874,0.211,3.327,2.38,1.526
+oct23-morning,Left,19,C,gyro scale + drift,1.0757,0.05,0.979,1.102,3.89,2.62,1.482
+oct23-morning,Center,20,C,prior,1.075,-0.0002,0.979,2.14,5.658,4.002,
+oct23-morning,Center,20,C,fitted,1.0821,0.0388,0.9903,1.124,5.064,3.581,
+oct23-morning,Center,20,C,gyro scale only,1.0821,-0.0002,0.979,0.263,5.657,4.0,
+oct23-morning,Center,20,C,drift only,1.075,0.0388,0.979,0.997,5.923,4.189,
+oct23-morning,Center,20,C,wheel only,1.075,-0.0002,0.9903,2.175,4.75,3.36,
+oct23-morning,Center,20,C,gyro scale + drift,1.0821,0.0388,0.979,1.126,5.921,4.187,
+oct23-morning,Left,22,C,prior,1.075,0.0,0.979,0.42,3.126,2.241,1.88
+oct23-morning,Left,22,C,fitted,1.0757,0.05,0.9874,0.315,3.336,2.5,2.075
+oct23-morning,Left,22,C,gyro scale only,1.0757,0.0,0.979,0.513,3.104,2.224,1.872
+oct23-morning,Left,22,C,drift only,1.075,0.05,0.979,0.356,3.349,2.388,1.929
+oct23-morning,Left,22,C,wheel only,1.075,0.0,0.9874,0.419,3.121,2.367,2.025
+oct23-morning,Left,22,C,gyro scale + drift,1.0757,0.05,0.979,0.318,3.327,2.369,1.92
+oct23-morning,Center,23,U,prior,1.075,-0.0002,0.979,4.395,5.628,4.033,2.956
+oct23-morning,Center,23,U,fitted,1.0817,0.0382,0.992,0.803,4.92,4.153,2.736
+oct23-morning,Center,23,U,gyro scale only,1.0817,-0.0002,0.979,2.283,5.628,4.032,2.956
+oct23-morning,Center,23,U,drift only,1.075,0.0382,0.979,3.242,5.886,4.286,2.956
+oct23-morning,Center,23,U,wheel only,1.075,-0.0002,0.992,4.088,4.604,3.887,2.736
+oct23-morning,Center,23,U,gyro scale + drift,1.0817,0.0382,0.979,1.153,5.886,4.286,2.956
+oct23-morning,Right,24,U,prior,1.075,0.0003,0.979,0.74,3.122,2.728,2.682
+oct23-morning,Right,24,U,fitted,1.0768,0.032,1.0015,0.86,3.105,3.213,3.163
+oct23-morning,Right,24,U,gyro scale only,1.0768,0.0003,0.979,0.73,3.087,2.768,2.73
+oct23-morning,Right,24,U,drift only,1.075,0.032,0.979,1.019,3.234,2.708,2.64
+oct23-morning,Right,24,U,wheel only,1.075,0.0003,1.0015,0.681,3.021,3.195,3.155
+oct23-morning,Right,24,U,gyro scale + drift,1.0768,0.032,0.979,0.938,3.195,2.744,2.687
+oct23-morning,Left,25,U,prior,1.075,0.0,0.979,1.413,4.494,2.721,0.935
+oct23-morning,Left,25,U,fitted,1.0758,0.05,0.9859,0.614,4.807,3.067,0.974
+oct23-morning,Left,25,U,gyro scale only,1.0758,0.0,0.979,1.56,4.469,2.694,0.948
+oct23-morning,Left,25,U,drift only,1.075,0.05,0.979,0.369,4.901,3.103,1.016
+oct23-morning,Left,25,U,wheel only,1.075,0.0,0.9859,1.527,4.395,2.685,0.796
+oct23-morning,Left,25,U,gyro scale + drift,1.0758,0.05,0.979,0.507,4.871,3.062,0.99
+oct23-morning,Center,27,C,prior,1.075,-0.0002,0.979,1.461,5.763,3.952,1.598
+oct23-morning,Center,27,C,fitted,1.0821,0.0388,0.9903,0.935,5.62,4.062,1.764
+oct23-morning,Center,27,C,gyro scale only,1.0821,-0.0002,0.979,0.344,5.558,3.653,1.522
+oct23-morning,Center,27,C,drift only,1.075,0.0388,0.979,2.377,6.085,4.301,1.736
+oct23-morning,Center,27,C,wheel only,1.075,-0.0002,0.9903,1.456,5.553,4.083,1.859
+oct23-morning,Center,27,C,gyro scale + drift,1.0821,0.0388,0.979,0.945,5.848,3.954,1.55
+oct23-morning,Right,33,C,prior,1.075,0.0003,0.979,2.145,5.881,4.589,4.573
+oct23-morning,Right,33,C,fitted,1.0772,0.0349,1.0031,0.478,3.477,5.064,5.064
+oct23-morning,Right,33,C,gyro scale only,1.0772,0.0003,0.979,1.508,5.881,4.589,4.573
+oct23-morning,Right,33,C,drift only,1.075,0.0349,0.979,1.16,5.856,4.574,4.573
+oct23-morning,Right,33,C,wheel only,1.075,0.0003,1.0031,2.137,3.521,5.079,5.064
+oct23-morning,Right,33,C,gyro scale + drift,1.0772,0.0349,0.979,0.524,5.856,4.574,4.573
+oct23-morning,Center,34,U,prior,1.075,-0.0002,0.979,1.464,5.342,3.925,1.55
+oct23-morning,Center,34,U,fitted,1.0809,0.0429,0.9878,1.33,5.308,4.092,1.695
+oct23-morning,Center,34,U,gyro scale only,1.0809,-0.0002,0.979,1.132,5.194,3.755,1.576
+oct23-morning,Center,34,U,drift only,1.075,0.0429,0.979,2.197,5.663,4.208,1.561
+oct23-morning,Center,34,U,wheel only,1.075,-0.0002,0.9878,1.406,5.176,4.005,1.708
+oct23-morning,Center,34,U,gyro scale + drift,1.0809,0.0429,0.979,1.368,5.479,4.02,1.553
+oct23-morning,Left,35,U,prior,1.075,0.0,0.979,1.28,2.862,2.716,2.632
+oct23-morning,Left,35,U,fitted,1.0767,0.0469,0.9879,1.134,3.007,2.92,2.814
+oct23-morning,Left,35,U,gyro scale only,1.0767,0.0,0.979,1.485,2.814,2.755,2.683
+oct23-morning,Left,35,U,drift only,1.075,0.0469,0.979,0.889,3.056,2.697,2.569
+oct23-morning,Left,35,U,wheel only,1.075,0.0,0.9879,1.353,2.855,2.904,2.826
+oct23-morning,Left,35,U,gyro scale + drift,1.0767,0.0469,0.979,1.073,3.004,2.73,2.617
+oct23-morning,Center,36,C,prior,1.075,-0.0002,0.979,0.948,3.519,2.521,1.771
+oct23-morning,Center,36,C,fitted,1.0821,0.0388,0.9903,0.496,3.462,2.653,1.961
+oct23-morning,Center,36,C,gyro scale only,1.0821,-0.0002,0.979,0.236,3.328,2.408,1.754
+oct23-morning,Center,36,C,drift only,1.075,0.0388,0.979,1.387,3.692,2.622,1.785
+oct23-morning,Center,36,C,wheel only,1.075,-0.0002,0.9903,0.962,3.51,2.684,1.988
+oct23-morning,Center,36,C,gyro scale + drift,1.0821,0.0388,0.979,0.488,3.49,2.501,1.759
+oct23-morning,Left,41,C,prior,1.075,0.0,0.979,0.349,4.577,3.236,
+oct23-morning,Left,41,C,fitted,1.0757,0.05,0.9874,1.398,4.035,2.853,
+oct23-morning,Left,41,C,gyro scale only,1.0757,0.0,0.979,0.159,4.577,3.236,
+oct23-morning,Left,41,C,drift only,1.075,0.05,0.979,1.173,4.79,3.387,
+oct23-morning,Left,41,C,wheel only,1.075,0.0,0.9874,0.352,3.777,2.671,
+oct23-morning,Left,41,C,gyro scale + drift,1.0757,0.05,0.979,1.389,4.79,3.387,
+oct23-morning,Right,42,U,prior,1.075,0.0003,0.979,2.752,5.253,3.398,3.303
+oct23-morning,Right,42,U,fitted,1.0771,0.034,1.0034,0.502,2.941,3.38,3.186
+oct23-morning,Right,42,U,gyro scale only,1.0771,0.0003,0.979,2.088,5.253,3.398,3.303
+oct23-morning,Right,42,U,drift only,1.075,0.034,0.979,1.735,5.314,3.486,3.303
+oct23-morning,Right,42,U,wheel only,1.075,0.0003,1.0034,2.191,2.827,3.287,3.186
+oct23-morning,Right,42,U,gyro scale + drift,1.0771,0.034,0.979,1.071,5.314,3.486,3.303
+oct23-morning,Right,44,C,prior,1.075,0.0003,0.979,0.615,3.502,2.439,1.393
+oct23-morning,Right,44,C,fitted,1.0772,0.0349,1.0031,0.696,3.403,3.118,2.202
+oct23-morning,Right,44,C,gyro scale only,1.0772,0.0003,0.979,0.771,3.454,2.372,1.402
+oct23-morning,Right,44,C,drift only,1.075,0.0349,0.979,0.984,3.743,2.68,1.424
+oct23-morning,Right,44,C,wheel only,1.075,0.0003,1.0031,0.634,3.164,2.954,2.149
+oct23-morning,Right,44,C,gyro scale + drift,1.0772,0.0349,0.979,0.696,3.681,2.591,1.399
+oct23-evening,Right,2,U,prior,1.075,-0.0001,0.979,8.261,8.511,4.772,4.301
+oct23-evening,Right,2,U,fitted,1.0755,-0.0501,0.9921,9.305,7.098,4.155,3.833
+oct23-evening,Right,2,U,gyro scale only,1.0755,-0.0001,0.979,8.104,8.511,4.772,4.301
+oct23-evening,Right,2,U,drift only,1.075,-0.0501,0.979,9.756,8.4,4.587,4.301
+oct23-evening,Right,2,U,wheel only,1.075,-0.0001,0.9921,7.95,7.231,4.362,3.833
+oct23-evening,Right,2,U,gyro scale + drift,1.0755,-0.0501,0.979,9.598,8.4,4.587,4.301
+oct23-evening,Left,4,U,prior,1.075,-0.0002,0.979,6.148,6.74,4.459,3.646
+oct23-evening,Left,4,U,fitted,1.0922,-0.0502,0.9716,2.607,7.197,4.655,4.162
+oct23-evening,Left,4,U,gyro scale only,1.0922,-0.0002,0.979,1.486,6.74,4.46,3.646
+oct23-evening,Left,4,U,drift only,1.075,-0.0502,0.979,7.617,6.501,4.204,3.646
+oct23-evening,Left,4,U,wheel only,1.075,-0.0002,0.9716,6.325,7.411,4.884,4.161
+oct23-evening,Left,4,U,gyro scale + drift,1.0922,-0.0502,0.979,2.412,6.502,4.204,3.646
+oct23-evening,Center,5,U,prior,1.075,-0.0001,0.979,3.979,4.862,4.326,2.104
+oct23-evening,Center,5,U,fitted,1.0683,-0.0501,0.972,4.333,5.101,4.514,2.306
+oct23-evening,Center,5,U,gyro scale only,1.0683,-0.0001,0.979,5.238,4.435,4.254,2.342
+oct23-evening,Center,5,U,drift only,1.075,-0.0501,0.979,3.038,5.409,4.579,1.999
+oct23-evening,Center,5,U,wheel only,1.075,-0.0001,0.972,4.093,5.002,4.406,2.287
+oct23-evening,Center,5,U,gyro scale + drift,1.0683,-0.0501,0.979,4.22,4.974,4.443,2.138
+oct23-evening,Center,6,U,prior,1.075,-0.0001,0.979,5.455,8.997,5.578,5.212
+oct23-evening,Center,6,U,fitted,1.0714,-0.0501,0.9595,8.444,10.826,6.704,6.535
+oct23-evening,Center,6,U,gyro scale only,1.0714,-0.0001,0.979,6.566,8.997,5.578,5.212
+oct23-evening,Center,6,U,drift only,1.075,-0.0501,0.979,6.903,8.884,5.426,5.212
+oct23-evening,Center,6,U,wheel only,1.075,-0.0001,0.9595,5.92,10.916,6.825,6.535
+oct23-evening,Center,6,U,gyro scale + drift,1.0714,-0.0501,0.979,8.03,8.884,5.426,5.212
+oct23-evening,Center,7,U,prior,1.075,-0.0001,0.979,0.871,4.625,3.761,2.037
+oct23-evening,Center,7,U,fitted,1.075,-0.0417,0.9607,1.175,4.605,3.974,2.262
+oct23-evening,Center,7,U,gyro scale only,1.075,-0.0001,0.979,0.87,4.624,3.761,2.037
+oct23-evening,Center,7,U,drift only,1.075,-0.0417,0.979,1.315,4.76,3.832,1.949
+oct23-evening,Center,7,U,wheel only,1.075,-0.0001,0.9607,0.764,4.449,3.905,2.332
+oct23-evening,Center,7,U,gyro scale + drift,1.075,-0.0417,0.979,1.314,4.76,3.832,1.949
+oct23-evening,Right,8,U,prior,1.075,-0.0001,0.979,1.644,3.426,2.469,1.258
+oct23-evening,Right,8,U,fitted,1.0756,-0.0445,0.9891,2.375,3.749,2.735,1.176
+oct23-evening,Right,8,U,gyro scale only,1.0756,-0.0001,0.979,1.684,3.466,2.494,1.272
+oct23-evening,Right,8,U,drift only,1.075,-0.0445,0.979,2.196,3.928,2.819,1.418
+oct23-evening,Right,8,U,wheel only,1.075,-0.0001,0.9891,1.669,3.226,2.394,1.081
+oct23-evening,Right,8,U,gyro scale + drift,1.0756,-0.0445,0.979,2.275,3.969,2.849,1.443
+oct23-evening,Left,9,U,prior,1.075,-0.0002,0.979,3.965,0.641,1.868,1.667
+oct23-evening,Left,9,U,fitted,1.0901,-0.0502,0.9748,5.68,0.983,2.015,1.978
+oct23-evening,Left,9,U,gyro scale only,1.0901,-0.0002,0.979,5.16,0.691,1.916,1.839
+oct23-evening,Left,9,U,drift only,1.075,-0.0502,0.979,4.501,0.488,1.836,1.702
+oct23-evening,Left,9,U,wheel only,1.075,-0.0002,0.9748,3.937,0.692,1.922,1.728
+oct23-evening,Left,9,U,gyro scale + drift,1.0901,-0.0502,0.979,5.722,0.816,1.934,1.895
+oct23-evening,Left,11,U,prior,1.075,-0.0002,0.979,4.417,6.527,4.73,
+oct23-evening,Left,11,U,fitted,1.0924,-0.0502,0.9719,1.478,6.996,5.07,
+oct23-evening,Left,11,U,gyro scale only,1.0924,-0.0002,0.979,2.061,6.527,4.73,
+oct23-evening,Left,11,U,drift only,1.075,-0.0502,0.979,5.835,6.318,4.588,
+oct23-evening,Left,11,U,wheel only,1.075,-0.0002,0.9719,4.584,7.184,5.197,
+oct23-evening,Left,11,U,gyro scale + drift,1.0924,-0.0502,0.979,1.406,6.318,4.588,
+oct23-evening,Left,14,C,prior,1.075,-0.0002,0.979,5.22,3.241,2.578,2.019
+oct23-evening,Left,14,C,fitted,1.0906,-0.0502,0.9738,9.797,4.057,3.838,3.805
+oct23-evening,Left,14,C,gyro scale only,1.0906,-0.0002,0.979,8.526,3.538,3.286,3.149
+oct23-evening,Left,14,C,drift only,1.075,-0.0502,0.979,6.507,3.174,2.698,2.439
+oct23-evening,Left,14,C,wheel only,1.075,-0.0002,0.9738,5.257,3.553,2.755,2.244
+oct23-evening,Left,14,C,gyro scale + drift,1.0906,-0.0502,0.979,9.783,3.675,3.621,3.587
+oct23-evening,Right,16,U,prior,1.075,-0.0001,0.979,3.219,2.106,2.467,2.363
+oct23-evening,Right,16,U,fitted,1.0763,-0.035,0.9861,4.323,2.085,2.694,2.498
+oct23-evening,Right,16,U,gyro scale only,1.0763,-0.0001,0.979,3.461,2.196,2.563,2.449
+oct23-evening,Right,16,U,drift only,1.075,-0.035,0.979,3.964,2.417,2.79,2.621
+oct23-evening,Right,16,U,wheel only,1.075,-0.0001,0.9861,3.327,1.654,2.273,2.159
+oct23-evening,Right,16,U,gyro scale + drift,1.0763,-0.035,0.979,4.206,2.511,2.89,2.71
+stage1,Center,1,U,prior,1.075,-0.0001,0.979,2.172,6.258,5.213,3.674
+stage1,Center,1,U,fitted,1.0933,-0.0501,0.9845,0.638,6.883,5.102,2.696
+stage1,Center,1,U,gyro scale only,1.0933,-0.0001,0.979,0.313,6.626,5.041,2.867
+stage1,Center,1,U,drift only,1.075,-0.0501,0.979,1.562,6.452,5.224,3.52
+stage1,Center,1,U,wheel only,1.075,-0.0001,0.9845,2.124,6.332,5.17,3.601
+stage1,Center,1,U,gyro scale + drift,1.0933,-0.0501,0.979,0.577,6.839,5.133,2.772
+stage2,Center,1,U,prior,1.075,-0.0001,0.979,3.532,5.482,5.044,3.679
+stage2,Center,1,U,fitted,1.0794,-0.0501,0.9764,2.539,5.728,4.998,3.336
+stage2,Center,1,U,gyro scale only,1.0794,-0.0001,0.979,3.019,5.56,4.96,3.456
+stage2,Center,1,U,drift only,1.075,-0.0501,0.979,3.017,5.671,5.034,3.502
+stage2,Center,1,U,wheel only,1.075,-0.0001,0.9764,3.553,5.449,5.073,3.722
+stage2,Center,1,U,gyro scale + drift,1.0794,-0.0501,0.979,2.518,5.755,4.971,3.29
+stage2,Center,3,U,prior,1.075,-0.0001,0.979,7.773,6.102,5.102,5.052
+stage2,Center,3,U,fitted,1.077,-0.0501,0.9797,8.691,5.87,5.433,5.423
+stage2,Center,3,U,gyro scale only,1.077,-0.0001,0.979,7.138,6.102,4.843,4.789
+stage2,Center,3,U,drift only,1.075,-0.0501,0.979,9.347,5.943,5.756,5.747
+stage2,Center,3,U,wheel only,1.075,-0.0001,0.9797,7.755,6.031,5.068,5.017
+stage2,Center,3,U,gyro scale + drift,1.077,-0.0501,0.979,8.708,5.943,5.466,5.457
+stage2,Center,6,U,prior,1.075,-0.0001,0.979,0.574,2.115,1.914,1.762
+stage2,Center,6,U,fitted,1.0741,-0.0501,0.9793,0.645,2.464,2.112,1.819
+stage2,Center,6,U,gyro scale only,1.0741,-0.0001,0.979,0.713,2.061,1.908,1.767
+stage2,Center,6,U,drift only,1.075,-0.0501,0.979,0.792,2.545,2.158,1.858
+stage2,Center,6,U,wheel only,1.075,-0.0001,0.9793,0.571,2.095,1.906,1.754
+stage2,Center,6,U,gyro scale + drift,1.0741,-0.0501,0.979,0.64,2.483,2.12,1.829
+stage2,Left,7,U,prior,1.075,-0.0,0.979,7.018,5.947,4.849,4.656
+stage2,Left,7,U,fitted,1.0866,-0.05,0.9599,5.495,7.655,5.005,4.922
+stage2,Left,7,U,gyro scale only,1.0866,-0.0,0.979,3.632,5.947,3.76,3.498
+stage2,Left,7,U,drift only,1.075,-0.05,0.979,8.546,5.77,5.342,5.266
+stage2,Left,7,U,wheel only,1.075,-0.0,0.9599,7.472,7.786,5.706,5.547
+stage2,Left,7,U,gyro scale + drift,1.0866,-0.05,0.979,5.006,5.77,4.042,3.937
+stage2,Right,8,U,prior,1.075,-0.0001,0.979,6.837,,5.009,
+stage2,Right,8,U,fitted,1.0893,-0.014,0.9806,2.799,,2.995,
+stage2,Right,8,U,gyro scale only,1.0893,-0.0001,0.979,2.429,,2.834,
+stage2,Right,8,U,drift only,1.075,-0.014,0.979,7.273,,5.287,
+stage2,Right,8,U,wheel only,1.075,-0.0001,0.9806,6.799,,4.989,
+stage2,Right,8,U,gyro scale + drift,1.0893,-0.014,0.979,2.843,,3.005,
+stage2,Left,10,C,prior,1.075,-0.0,0.979,2.196,2.739,2.245,2.245
+stage2,Left,10,C,fitted,1.0873,-0.05,0.959,5.099,5.01,4.498,4.411
+stage2,Left,10,C,gyro scale only,1.0873,-0.0,0.979,4.028,3.247,3.21,3.173
+stage2,Left,10,C,drift only,1.075,-0.05,0.979,3.034,2.918,2.721,2.681
+stage2,Left,10,C,wheel only,1.075,-0.0,0.959,2.178,4.136,2.932,2.932
+stage2,Left,10,C,gyro scale + drift,1.0873,-0.05,0.979,5.19,3.577,3.856,3.751
+stage2,Center,11,C,prior,1.075,-0.0001,0.979,0.562,5.862,4.231,4.087
+stage2,Center,11,C,fitted,1.0754,-0.0501,0.9754,2.152,6.418,4.474,4.206
+stage2,Center,11,C,gyro scale only,1.0754,-0.0001,0.979,0.648,5.862,4.231,4.087
+stage2,Center,11,C,drift only,1.075,-0.0501,0.979,2.046,6.077,4.432,4.16
+stage2,Center,11,C,wheel only,1.075,-0.0001,0.9754,0.56,6.216,4.265,4.123
+stage2,Center,11,C,gyro scale + drift,1.0754,-0.0501,0.979,2.159,6.077,4.442,4.171
+stage2,Right,13,U,prior,1.075,-0.0001,0.979,1.352,3.565,3.515,3.408
+stage2,Right,13,U,fitted,1.0809,-0.0501,0.9834,1.249,4.078,3.995,3.745
+stage2,Right,13,U,gyro scale only,1.0809,-0.0001,0.979,0.46,3.939,3.762,3.615
+stage2,Right,13,U,drift only,1.075,-0.0501,0.979,0.516,3.952,3.804,3.607
+stage2,Right,13,U,wheel only,1.075,-0.0001,0.9834,1.28,3.271,3.36,3.247
+stage2,Right,13,U,gyro scale + drift,1.0809,-0.0501,0.979,1.184,4.361,4.149,3.91
+stage2,Right,14,C,prior,1.075,-0.0001,0.979,7.883,2.927,3.192,2.061
+stage2,Right,14,C,fitted,1.0813,-0.0501,0.9854,9.414,2.453,3.328,2.463
+stage2,Right,14,C,gyro scale only,1.0813,-0.0001,0.979,8.674,2.721,3.276,2.257
+stage2,Right,14,C,drift only,1.075,-0.0501,0.979,8.624,2.651,3.211,2.243
+stage2,Right,14,C,wheel only,1.075,-0.0001,0.9854,7.88,2.958,3.184,2.039
+stage2,Right,14,C,gyro scale + drift,1.0813,-0.0501,0.979,9.408,2.459,3.33,2.471
+stage2,Left,15,U,prior,1.075,-0.0,0.979,4.777,5.212,3.809,3.646
+stage2,Left,15,U,fitted,1.0888,-0.05,0.9569,3.088,7.258,4.188,4.134
+stage2,Left,15,U,gyro scale only,1.0888,-0.0,0.979,2.534,5.212,2.974,2.745
+stage2,Left,15,U,drift only,1.075,-0.05,0.979,6.16,5.059,4.252,4.203
+stage2,Left,15,U,wheel only,1.075,-0.0,0.9569,5.271,7.363,4.864,4.74
+stage2,Left,15,U,gyro scale + drift,1.0888,-0.05,0.979,2.683,5.059,3.002,2.925
+stage2,Center,17,U,prior,1.075,-0.0001,0.979,2.32,4.564,4.548,3.654
+stage2,Center,17,U,fitted,1.0693,-0.0501,0.9668,2.568,4.489,4.846,4.011
+stage2,Center,17,U,gyro scale only,1.0693,-0.0001,0.979,2.994,4.481,4.717,3.952
+stage2,Center,17,U,drift only,1.075,-0.0501,0.979,1.826,4.743,4.518,3.486
+stage2,Center,17,U,wheel only,1.075,-0.0001,0.9668,2.418,4.408,4.735,3.895
+stage2,Center,17,U,gyro scale + drift,1.0693,-0.0501,0.979,2.477,4.649,4.66,3.772
