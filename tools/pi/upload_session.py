@@ -8,11 +8,14 @@ What goes up, as assets of one release (tag e02-session-<date-time>):
 An interrupted upload can be run again: parts already in the release are skipped.
 
 The GitHub token is read from ~/.config/mirlt/github_token (a fine-grained token for this repository with
-"Contents: read and write"; set up once, see docs/pi-run.md). Nothing is deleted on the Pi.
+"Contents: read and write"; set up once, see docs/pi-run.md). Nothing is deleted on the Pi. The laptop's
+mark-the-robot page (tools/label/mark_robot.py) uploads its marks with the same token file and code (on Windows the
+file is C:/Users/<you>/.config/mirlt/github_token; docs/how-to/mark-the-robot.md sets it up).
 
     python3 tools/pi/upload_session.py --recordings /media/<user>/<drive>/recordings
     python3 tools/pi/upload_session.py --recordings ... --stop-recorder     # first Ctrl+C the recorder (tmux e02:rec)
     python3 tools/pi/upload_session.py --set-token                          # once: paste the GitHub token
+    python3 tools/pi/upload_session.py --check-token                        # does the saved token still work?
 """
 import argparse
 import glob
@@ -42,6 +45,9 @@ def token():
         return None
 
 
+_open = urllib.request.urlopen     # tests replace it (no network)
+
+
 def api(method, url, tok, data=None, ctype="application/json", length=None):
     req = urllib.request.Request(url, data=data, method=method)
     req.add_header("Authorization", "Bearer " + tok)
@@ -51,7 +57,7 @@ def api(method, url, tok, data=None, ctype="application/json", length=None):
         req.add_header("Content-Type", ctype)
         if length is not None:
             req.add_header("Content-Length", str(length))
-    with urllib.request.urlopen(req, timeout=600) as r:
+    with _open(req, timeout=600) as r:
         body = r.read()
         return json.loads(body) if body else {}
 
@@ -146,13 +152,36 @@ def set_token():
     os.makedirs(os.path.dirname(TOKEN_PATH), exist_ok=True)
     with open(TOKEN_PATH, "w") as f:
         f.write(tok + "\n")
-    os.chmod(TOKEN_PATH, 0o600)
-    print("Saved. The Pi can upload sessions to %s now." % REPO_SLUG)
+    try:
+        os.chmod(TOKEN_PATH, 0o600)
+    except OSError:
+        pass
+    print("Saved. This computer can upload to %s now (saved in %s)." % (REPO_SLUG, TOKEN_PATH))
+
+
+def check_token():
+    """Is the saved token there, and can it still write to the repository? Prints one plain line."""
+    tok = token()
+    if not tok:
+        raise SystemExit("No token saved on this computer (%s). Save one with --set-token." % TOKEN_PATH)
+    try:
+        r = api("GET", "https://api.github.com/repos/%s" % REPO_SLUG, tok)
+    except urllib.error.HTTPError as e:
+        raise SystemExit("GitHub refused the saved token (%s): it has expired or was deleted. Make a new one and save "
+                         "it with --set-token." % e.code)
+    except (urllib.error.URLError, OSError) as e:
+        raise SystemExit("Could not reach GitHub (%s): check the WiFi and try again." % e)
+    if not (r.get("permissions") or {}).get("push"):
+        raise SystemExit("The saved token can read the repository but not write to it: make a new one with "
+                         "Contents: read and write, and save it with --set-token.")
+    print("Token works: this computer can upload to %s." % REPO_SLUG)
 
 
 def main():
     if "--set-token" in sys.argv:
         return set_token()
+    if "--check-token" in sys.argv:
+        return check_token()
     ap = argparse.ArgumentParser()
     ap.add_argument("--recordings", required=True, help="the folder the recorder saved into")
     ap.add_argument("--session", default="", help="the runner's session folder (default: the newest logs/e02-*)")

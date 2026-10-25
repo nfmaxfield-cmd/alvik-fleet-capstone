@@ -6,13 +6,19 @@ Drawn on the picture: the board outline; every robot the runner knows of (name, 
 the robot being followed (green ring), and the hold circle while it should stand still; everything that differs
 from the floor memory (yellow: robot-shaped, grey: not, e.g. a hand); the robot-map rays when mapping. Beside
 it: the phase, the run, and the runner's last lines (camera / wheels checks, help calls). Read-only: the page can't
-drive anything.
+drive anything. One button saves pictures without steering anything: "Mark this moment" (Nick, 2026-10-25) copies
+the last MOMENT_BEFORE_S seconds of kept pictures, named by the recorder's own frame numbers, into
+<session>/moments/ and opens the mark-the-robot page (tools/label/mark_robot.py) on them in a new tab, to check by
+hand where the runner had the robot.
 
     started by e02.py (--view-port, default 8090; 0 = off); open http://localhost:8090 on the laptop
 """
 import json
 import math
 import os
+import socket
+import subprocess
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -121,6 +127,10 @@ td svg{width:90px;height:22px}
 tr.grp td{border-bottom:none;padding-top:9px}
 .tip{position:fixed;pointer-events:none;background:#0B0E13;border:1px solid var(--line);border-radius:6px;padding:5px 8px;font:12px var(--mono);color:var(--fg);z-index:20;display:none;white-space:nowrap}
 .calw{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.mm{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin-top:8px}
+.mm button{font:13px var(--sans);padding:6px 12px;border-radius:8px;border:1px solid #2F4A6B;background:#132033;color:#CFE3FF;cursor:pointer}
+.mm button:hover:not(:disabled){border-color:var(--follow)}.mm button:disabled{opacity:.5;cursor:default}
+.mm span{font-size:12px;color:var(--mut2);overflow-wrap:anywhere}
 .calw h3{font-size:12px;font-weight:500;color:var(--mut2);margin:0 0 4px}
 @media (max-width:1100px){.right{flex-basis:330px}}
 @media (max-width:860px){.two,.calw{grid-template-columns:1fr}}
@@ -145,6 +155,7 @@ tr.grp td{border-bottom:none;padding-top:9px}
  <div class="panel" id="picp">
   <img id="pic" src="/frame.jpg" alt="overhead camera with the runner's view drawn on it">
   <div class="th" id="th"></div>
+  <div class="mm"><button id="mmb" title="Open the mark-the-robot page on the last 20 seconds of pictures">Mark this moment</button><span id="mms">Opens the last 20 s of pictures on the mark page in a new tab, to check by hand where the runner had the robot. The session carries on.</span></div>
   <p class="note">The overhead camera's latest picture with what the runner thinks: teal is the board outline (dashed: the same outline at a robot's top height), the amber strip is the virtual border along the open edges, the blue ring is the robot being followed (dashed circle: where it should stand still), yellow dots look like a robot and grey dots are other changes (a hand, a shadow).</p>
   <p class="note" id="bnote" style="display:none"></p>
   <p class="src">Data: the overhead camera through the runner (e02.py), drawn by this page's server about once a second. Tracker line: the tracker's own counters over the last 30 s and the last perf.csv row.</p>
@@ -208,7 +219,7 @@ tr.grp td{border-bottom:none;padding-top:9px}
   <p class="src" id="askdef"></p>
  </div>
  <div id="robots" style="display:flex;flex-direction:column;gap:12px"></div>
- <p class="src" id="robsrc" style="margin:-4px 2px 0"><span style="color:var(--fg);font-size:13px">Each card shows what that robot is doing, its battery, how far its sensors are trusted and how close it is to an open edge.</span><br>Battery: the robot's own reading from its voltage (it sags while driving), line: this session's readings (battery.csv and what the robots report). Sensor chips: k from the sensor trust table below. Edge bar: distance to the nearest open edge, cm (amber: inside the virtual border; dashed: where the robot stops itself), from the camera tracker or its last parked spot (e02_state.json) and the runner's border settings.</p>
+ <p class="src" id="robsrc" style="margin:-4px 2px 0"><span style="color:var(--fg);font-size:13px">Each card shows what that robot is doing, its battery, how far its sensors are trusted and how close it is to an open edge.</span><br>Battery: the robot's own reading from its voltage (it sags while driving), line: this session's readings (battery.csv and what the robots report). Dock: the go and leave levels (dashed amber and blue on the line), from each robot's drain learned so far (battery.csv and earlier sessions, tools/dock/charge_levels.py). Sensor chips: k from the sensor trust table below. Edge bar: distance to the nearest open edge, cm (amber: inside the virtual border; dashed: where the robot stops itself), from the camera tracker or its last parked spot (e02_state.json) and the runner's border settings.</p>
  <div class="panel" id="logp"><h2>Log <span class="badge" id="phase">-</span></h2><pre id="log"></pre>
   <p class="src">The runner's last lines (e02_log.txt).</p></div>
 </aside>
@@ -299,9 +310,10 @@ function robots(list){const box=$('robots');box.innerHTML='';
   let h='<div class="rh"><span class="rn">'+esc(r.name)+'</span><span class="rs">'+esc(r.state)+'</span>'+(r.cls=='follow'?'<span class="tag">followed</span>':'')+(r.cls=='out'?'<span class="tag out">'+esc(r.state)+'</span>':'')+'</div>';
   const b=r.battery;h+='<div class="bat"><div class="bar"><div class="'+(b!=null&&b<20?'low':'')+'" style="width:'+(b==null?0:Math.max(0,Math.min(100,b)))+'%"></div></div><span class="mono">'+(b==null?'-':Math.round(b)+'%')+'</span><span class="bs"></span></div>';
   h+='<div class="src">'+(b==null?'battery not heard yet':'battery reported at '+new Date(r.battery_t*1000).toTimeString().slice(0,5))+'</div>';
+  const cg=r.charge;if(cg)h+='<div class="src">dock: go at '+num(cg.go,0)+' %, leave at '+num(cg.leave,0)+' % · drain '+num(cg.still,1)+' %/h still, '+num(cg.moving,1)+' moving ('+esc(cg.src)+')'+(cg.rest?' · rest one robot':'')+'</div>';
   h+='<div class="chips">'+(r.sensors||[]).map(q=>'<span class="'+q.state+'" title="'+SWORD[q.state]+', '+q.n+' evidence items">'+SICON[q.state]+' '+q.name+' ×'+num(q.k,1)+(q.state=='ok'?'':' '+SWORD[q.state])+(q.lag?(q.state=='bad'?', clearing':', rising'):'')+'</span>').join('')+'</div>';
   h+='<div class="edge"></div>';d.innerHTML=h;
-  const tr=(r.battery_trend||[]).map(q=>q[1]);d.querySelector('.bs').appendChild(spark(tr,0,100,'var(--mut2)'));
+  const tr=(r.battery_trend||[]).map(q=>q[1]);d.querySelector('.bs').appendChild(spark(tr,0,100,'var(--mut2)',cg?[[cg.go,'#E0A33A','2 2'],[cg.leave,'#7FB8FF','2 2']]:[]));
   const eg=d.querySelector('.edge');const e=r.edge;
   if(e){const mx=Math.max(40,(e.border_cm||0)+20,Math.min(80,e.dist_cm+5)),W=300,x=v=>4+(W-8)*Math.min(mx,Math.max(0,v))/mx;
    const s=el('svg',{viewBox:'0 0 '+W+' 26'});s.appendChild(el('rect',{x:4,y:9,width:W-8,height:8,rx:4,fill:'#262D39'}));
@@ -422,12 +434,35 @@ function render(s){const L=s.live||{};
  if(changed('perf',L.perf))perf(L.perf);
  if(changed('trust',L.trust))trust(L.trust);
  if(changed('calib',L.calib))calib(L.calib)}
+/* mark this moment: the mark page on the last pictures (a new tab; opened at once so the browser allows it) */
+$('mmb').onclick=()=>{const w=window.open('about:blank','_blank');const b=$('mmb');b.disabled=true;$('mms').textContent='Saving the last pictures and starting the mark page ...';
+ fetch('/mark-moment',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(r=>r.json()).then(d=>{
+  if(!d.ok)throw new Error(d.error||'no answer');const u=d.url.replace('HOST',location.hostname);
+  if(w)w.location=u;$('mms').innerHTML='Opened: recorder frame <b>'+d.frame+'</b> ('+esc(d.clock)+'), '+esc(d.robot)+', '+d.n+' pictures. '+(w?'':'Your browser blocked the new tab: <a href="'+u+'" target="_blank">open it here</a>. ')+'Saved in '+esc(d.folder)})
+ .catch(e=>{if(w)w.close();$('mms').textContent='Not opened: '+e.message}).finally(()=>{b.disabled=false})};
+
 function tick(){fetch('/status.json',{cache:'no-store'}).then(r=>r.json()).then(render).catch(()=>{$('chips').textContent='no answer from the runner'}).finally(()=>setTimeout(tick,1000))}
 tick();pic();
 </script></body></html>"""
 
 
 CAMERA_FPS = 25           # the overhead camera sends about this many pictures a second
+MOMENT_BEFORE_S = 20      # "Mark this moment": this many seconds of pictures before the click (chosen: enough to see
+                          # the robot before and as it was lost; a viewing window, so no DOE; the feed keeps 150 s)
+MOMENT_PAGES = 3          # at most this many moment pages run at once (each is a Python process)
+MARK_PORT = 8771          # the first port tried for a moment's page (8770 is the stand-alone page's)
+MARK_ROBOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "label", "mark_robot.py")
+
+
+def _free_port(first, n=20):
+    for p in range(first, first + n):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sk:
+            try:
+                sk.bind(("0.0.0.0", p))
+                return p
+            except OSError:
+                continue
+    raise OSError("ports %d-%d are all busy" % (first, first + n - 1))
 PHASE_CAT = dict(setup="setup", parking="setup", exploring="setup", mapping="setup", route="runs",
                  find="finding", finding="finding")   # the runner's phases -> the timeline's bands
 BATTERY_KEEP = 400        # battery readings kept per robot
@@ -495,6 +530,18 @@ class LiveView:
                     pass                        # the browser went away mid-answer (a closed tab): nothing to do
 
             def do_POST(self):
+                if self.path.split("?")[0] == "/mark-moment":
+                    try:
+                        out = view.mark_moment()
+                    except Exception as e:      # never break the session over it
+                        out = dict(ok=False, error="%s: %s" % (type(e).__name__, e))
+                    body = json.dumps(out).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 if self.path.split("?")[0] != "/answer":
                     self.send_error(404)
                     return
@@ -546,6 +593,106 @@ class LiveView:
     def stop(self):
         if self.srv:
             self.srv.shutdown()
+
+    # --- mark this moment (Nick, 2026-10-25): the mark page on the last pictures, for troubleshooting -------------
+    def mark_moment(self, now=None):
+        """Copy the last MOMENT_BEFORE_S seconds of the feed's kept pictures into <session>/moments/<time>_<robot>_
+        f<frame>/ (<recorder frame>.jpg, frames.csv with the Pi times, stretch.json), start mark_robot.py on that
+        folder (the session's calibration and track.csv: the red cross is where the runner had the robot), and
+        return dict(ok, url (HOST = the page's own host), frame (the recorder's frame number of the newest
+        picture), clock, robot, n, folder, later (the command to mark the full recording once it is uploaded)).
+        Only writes files and starts a program: the runner, the robots and the session are not touched."""
+        r = self.r
+        feed = getattr(r, "feed", None)
+        if feed is None or not hasattr(feed, "kept") or not getattr(feed, "keep_s", 0):
+            return dict(ok=False, error="this session keeps no pictures on the laptop (no camera feed)")
+        now = time.time() if now is None else now
+        rows = [q for q in feed.kept(now - MOMENT_BEFORE_S) if len(q) >= 4 and q[2] is not None and q[3] is not None]
+        if len(rows) < 2:
+            return dict(ok=False, error="no pictures kept in the last %d s" % MOMENT_BEFORE_S)
+        tr = getattr(r, "tracker", None)
+        robot = (getattr(tr, "active", None) or "") if tr is not None else ""
+        if not robot:
+            names = list((getattr(r, "st", None) or {}).get("robots") or [])
+            robot = names[0] if names else "the robot"
+        sdir = getattr(r, "dir", None)
+        if not sdir:
+            return dict(ok=False, error="the runner has no session folder")
+        pf, t_pi = int(rows[-1][2]), float(rows[-1][3])
+        stamp = time.strftime("%H%M%S", time.localtime(t_pi))
+        folder = os.path.join(sdir, "moments", "%s_%s_f%d" % (stamp, robot.replace(" ", ""), pf))
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "frames.csv"), "w") as f:
+            f.write("frame,t_wall,t_laptop\n")
+            for t, jpg, n, tp in rows:
+                with open(os.path.join(folder, "%06d.jpg" % int(n)), "wb") as g:
+                    g.write(bytes(jpg))
+                f.write("%d,%.4f,%.4f\n" % (int(n), float(tp), float(t)))
+        off = sorted(float(q[3]) - float(q[0]) for q in rows)[len(rows) // 2]   # laptop time + off = Pi time
+        name = os.path.basename(sdir.rstrip("/\\"))
+        meta = dict(name="moment-%s-%s" % (name, stamp), robot=robot,
+                    title="%s, the moment marked at %s (live view, %s)" % (robot, time.strftime("%H:%M:%S",
+                                                                                              time.localtime(t_pi)), name),
+                    start_t=float(rows[0][3]), end_t=t_pi, recorder_frames=[int(rows[0][2]), pf], recorder_t=t_pi,
+                    laptop_t=float(rows[-1][0]), clock_offset_s=round(off, 4), session_dir=os.path.abspath(sdir),
+                    note="Pictures the runner kept (JPEG quality 80, only those the tracker looked at), named by the "
+                         "recorder's frame numbers: the same numbers as the recording's frames.csv")
+        with open(os.path.join(folder, "stretch.json"), "w") as f:
+            json.dump(meta, f, indent=1)
+        port = _free_port(MARK_PORT)
+        cmd = [sys.executable, MARK_ROBOT, folder, "--robot", robot, "--session", os.path.abspath(sdir),
+               "--clock-offset", "%.4f" % off, "--no-guesses", "--every", "0.5", "--port", str(port), "--no-browser",
+               "--out", os.path.join(folder, "marks")]
+        if self.bind != "127.0.0.1":
+            cmd.append("--phone")
+        err = self.launch(cmd, os.path.join(folder, "mark_robot.log"), port)
+        if err:
+            return dict(ok=False, error=err, folder=folder)
+        hhmmss = time.strftime("%H:%M:%S", time.localtime(t_pi))
+        start = time.strftime("%H:%M:%S", time.localtime(float(rows[0][3])))
+        later = ("py -3 tools\\label\\mark_robot.py --release e02-session-%s --robot %s --from %s --to %s"
+                 % (name.replace("e02-", ""), robot, start, hhmmss))
+        self.log("Moment marked: recorder frame %d (%s), %s; the mark page is on port %d (%s)"
+                 % (pf, hhmmss, robot, port, folder))
+        return dict(ok=True, url="http://HOST:%d" % port, port=port, frame=pf, clock=hhmmss, robot=robot,
+                    n=len(rows), folder=folder, later=later)
+
+    def launch(self, cmd, log_path, port, wait_s=25.0):
+        """Start the mark page (low priority: the session's tracker comes first) and wait until it answers.
+        Returns None, or why not. At most MOMENT_PAGES run at once: the oldest is closed (its marks are saved)."""
+        procs = self.__dict__.setdefault("_moment_procs", [])
+        while len([p for p in procs if p.poll() is None]) >= MOMENT_PAGES:
+            old = next(p for p in procs if p.poll() is None)
+            try:
+                old.terminate()
+            except OSError:
+                pass
+            procs.remove(old)
+        kw = {}
+        if os.name == "nt":
+            kw["creationflags"] = getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0) | \
+                getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        else:
+            kw["preexec_fn"] = lambda: os.nice(10)
+        logf = open(log_path, "w")
+        p = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT, cwd=os.path.dirname(MARK_ROBOT), **kw)
+        procs.append(p)
+        t_end = time.time() + wait_s
+        while time.time() < t_end:
+            if p.poll() is not None:
+                logf.flush()
+                try:
+                    with open(log_path) as f:
+                        tail = f.read().strip().splitlines()[-3:]
+                except OSError:
+                    tail = []
+                return "the mark page stopped: %s" % (" / ".join(tail) or "no message")
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                    return None
+            except OSError:
+                time.sleep(0.3)
+        return "the mark page did not start within %d s (see %s)" % (wait_s, log_path)
 
     # hooks for e02_replay_view.py (the live view serves the pages as they are and nothing else)
     def page(self, name):
@@ -799,6 +946,11 @@ class LiveView:
         def add(sensor, robot, label, unit, sd, n):
             healthy = TR.HEALTHY[sensor]
             k = sd / healthy if healthy else None
+            if sensor != "camera" and hasattr(tr, "judge"):
+                # 2026-10-25: judged against the robot's own baseline (e02_trust); the worst check's k and baseline
+                j = tr.judge(sensor, robot, self._names())
+                if j["worst"] is not None:
+                    k, healthy = j["k"], round(j["worst"]["base"], 3)
             if n < TR.MIN_N[sensor]:
                 state = "little"
             elif tr.bad(sensor, robot):
@@ -993,8 +1145,18 @@ class LiveView:
             out.append(dict(name=n, state=words, cls=cls, battery=b[-1][1] if b else None,
                             battery_t=round(b[-1][0]) if b else None,
                             battery_trend=[[round(t), v] for t, v in b[-BATTERY_SEND:]],
-                            sensors=sensors, edge=edge))
+                            sensors=sensors, edge=edge, charge=self._charge(n)))
         return out
+
+    def _charge(self, n):
+        """The robot's dock levels as the runner last worked them out (e02.charge_levels_tick -> e02_state.json
+        "charge_levels"): go, leave and where the drain comes from; None before the first tick."""
+        st = getattr(self.r, "st", None)
+        q = ((st.get("charge_levels") if st is not None else None) or {}).get(n)
+        if not q:
+            return None
+        return dict(go=q.get("go"), leave=q.get("leave"), still=q.get("still"), moving=q.get("moving"),
+                    src=q.get("still_from") or "", rest=bool(q.get("rest")))
 
     def frame_jpg(self):
         ok, buf = cv2.imencode(".jpg", self.frame_bgr(), [cv2.IMWRITE_JPEG_QUALITY, 80])

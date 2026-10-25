@@ -1227,7 +1227,7 @@ class Feed(threading.Thread):
         self.history_raw = None      # a History of the undegraded samples (the --degrade test scores runs by it)
         self.on_perf = None          # function(dict) once a second: is the laptop keeping up with the camera?
         self.keep_s = 0.0            # > 0: keep this many seconds of pictures (JPEG) for frame_at (measured frames)
-        self.ring = deque()          # (t, jpeg bytes)
+        self.ring = deque()          # (t, jpeg bytes, recorder frame number, Pi time)
         self._perf = dict(t0=None, n=0, push_s=0.0, push_max=0.0, age_max=0.0, age_sum=0.0, skipped0=0)
 
     def _read(self):
@@ -1295,8 +1295,8 @@ class Feed(threading.Thread):
                 if self.keep_s > 0:
                     ok_, jpg = cv2.imencode(".jpg", fr.img, [cv2.IMWRITE_JPEG_QUALITY, 80])
                     if ok_:
-                        with self.cond:
-                            self.ring.append((t, jpg))
+                        with self.cond:     # + the recorder's frame number and Pi time (the live view's moments)
+                            self.ring.append((t, jpg, getattr(fr, "pi_frame", None), getattr(fr, "t_pi", None)))
                             while self.ring and t - self.ring[0][0] > self.keep_s:
                                 self.ring.popleft()
                 with self.cond:
@@ -1307,6 +1307,12 @@ class Feed(threading.Thread):
                     self.cond.notify_all()
         except Exception as e:      # keep the reason for the console
             self.err = e
+
+    def kept(self, t_from, t_to=None):
+        """The kept pictures between laptop times t_from and t_to (default: now), oldest first:
+        [(t, jpeg bytes, recorder frame number, Pi time)]."""
+        with self.cond:
+            return [q for q in self.ring if q[0] >= t_from and (t_to is None or q[0] <= t_to)]
 
     def frame_at(self, t, within=0.3):
         """The kept picture nearest laptop time t (decoded), or None (keep_s off, or nothing within `within` s)."""

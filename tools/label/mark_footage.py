@@ -237,6 +237,11 @@ class FolderStore(_Base):
 
     def __init__(self, folder, frames_csv=None, fps=None):
         import re
+        self.meta = {}
+        mp = os.path.join(folder, "stretch.json")      # what it is (e.g. a moment saved from the live view)
+        if os.path.exists(mp):
+            with open(mp) as f:
+                self.meta = json.load(f)
         self.paths = {}
         for name in os.listdir(folder):
             mt = re.search(r"(\d+)\.(jpe?g|png)$", name, re.I)

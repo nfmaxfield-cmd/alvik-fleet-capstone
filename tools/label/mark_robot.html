@@ -80,6 +80,20 @@ details summary{cursor:pointer;color:var(--mut2);font-size:12px}
 .done h3{margin:0 0 6px;color:#CFF7DD;font-size:16px}
 .done code{font:12px var(--mono);color:var(--fg);overflow-wrap:anywhere}
 .hidden{display:none!important}
+/* size check and upload */
+.sz select{font:inherit;color:var(--fg);background:#1A202A;border:1px solid var(--line);border-radius:8px;padding:6px 8px;flex:1 1 auto;min-width:0;width:100%}
+.sz .row button{white-space:normal}
+.sz .row{margin-top:8px}
+.sz button.go{border-color:#2F4A6B;color:#CFE3FF}
+.sz button.save{border-color:#2D7A4E;background:#123020;color:#CFF7DD}
+.szres{font-size:13px;margin-top:8px}
+.szgrid{display:grid;grid-template-columns:auto repeat(3,1fr);gap:3px;margin-top:8px;font:12px var(--mono)}
+.szgrid span{padding:4px 2px;text-align:center;border-radius:4px;color:var(--mut2)}
+.szgrid .c{background:#1A202A;color:var(--fg)}
+.szgrid .c.ok{background:#14301F;color:#CFF7DD}.szgrid .c.off{background:#3A1A17;color:#FFD2CD}.szgrid .c.uns{background:#2A2414;color:var(--amber-t)}
+.szgrid .c small{display:block;color:var(--mut);font-size:10px}
+.szgrid .h{color:var(--mut);font-size:10px}
+.upst{font-size:13px;margin:0 0 8px}
 @media (max-width:820px){
   .wrap{grid-template-columns:1fr;padding:10px 10px 96px;gap:10px}
   .top{padding:8px 12px;gap:6px 12px;flex-wrap:wrap}
@@ -148,6 +162,32 @@ details summary{cursor:pointer;color:var(--mut2);font-size:12px}
       <div class="note" id="stats"></div>
     </div>
     <div class="panel done hidden" id="donebox"></div>
+    <div class="panel" id="upbox">
+      <h2>Upload to GitHub</h2>
+      <p class="upst" id="upst"></p>
+      <div class="row"><button id="bUpload" title="Put the marks on GitHub now">Upload now</button></div>
+    </div>
+    <div class="panel sz" id="sizebox">
+      <h2>Size check (the camera's scale)</h2>
+      <p class="small" style="margin:0">Fit four corners to something of known size; the page measures it through the floor calibration. If the calibration is right it measures its real size everywhere on the board.</p>
+      <div class="row">
+        <select id="szObj" aria-label="what to fit"><option value="robot">the robot's top (9.60 &times; 9.60 cm)</option><option value="dock_strip">the dock's marker strip (9.00 &times; 3.00 cm)</option></select>
+      </div>
+      <div class="row" id="szIdle"><button class="go" id="bSzStart" title="Put four corner handles on this picture (F)">Fit the size here</button></div>
+      <div class="row hidden" id="szActive">
+        <button class="save" id="bSzSave" title="Save this fit (Enter)">Save fit</button>
+        <button id="bSzReset" title="Start the handles again">Reset</button>
+        <button id="bSzDel" title="Remove this picture's saved fit">Remove</button>
+        <button id="bSzDone" title="Back to marking (Esc)">Done</button>
+      </div>
+      <div class="szres" id="szNow"></div>
+      <div class="row"><button id="bSzNext" title="A marked picture in the part of the board with the fewest fits">Next picture in an unchecked part</button></div>
+      <div class="szres" id="szSum"></div>
+      <div id="szGrid"></div>
+      <div class="szres" id="szAuto"></div>
+      <div class="row"><button id="bSzAuto" title="Find the robot's outline by itself on every marked picture">Measure every marked picture automatically</button></div>
+      <p class="src" id="szSrc"></p>
+    </div>
     <div class="panel keyshelp">
       <details id="keys"><summary>Keys and how to mark</summary>
       <div class="keys"><table>
@@ -163,6 +203,8 @@ details summary{cursor:pointer;color:var(--mut2);font-size:12px}
         <tr><td>[ &nbsp; ]</td><td>previous / next picture</td></tr>
         <tr><td>+ &nbsp; &minus; &nbsp; 0</td><td>zoom in / out / whole picture</td></tr>
         <tr><td>C</td><td>centre the view on the ring</td></tr>
+        <tr><td>F</td><td>size check: four corner handles on this picture</td></tr>
+        <tr><td>in the size check</td><td>drag a corner (or inside: all four); Tab: next corner; arrows: a quarter pixel (Shift: 1); Enter: save the fit; R: start again; Esc: done</td></tr>
       </table>
       <p>Put the ring's centre on the centre of the robot itself: its body, not the bright glow its lights throw on the floor next to it. The ring is a robot's size, so a good mark has the ring around the robot's top edge evenly.</p></div>
       </details>
@@ -270,9 +312,10 @@ function progress() {
   const db = $("donebox");
   if (S.done) {
     db.classList.remove("hidden");
-    db.innerHTML = `<h3>All marked</h3><p class="note">The marks are saved in</p><code></code><p class="note">Send <b>marks.csv</b> and <b>summary.json</b> from that folder (drag them into the chat). You can still go back and change any picture.</p>`;
+    db.innerHTML = `<h3>All marked</h3><p class="note">The marks are saved in</p><code></code><p class="note">They go up to GitHub by themselves (the box below says when). If it says it can't, drag <b>marks.csv</b> and <b>summary.json</b> from that folder into the chat instead. You can still go back and change any picture.</p>`;
     db.querySelector("code").textContent = S.out;
   } else db.classList.add("hidden");
+  upRender(); szRender();
 }
 
 async function load(k) {
@@ -291,6 +334,7 @@ async function load(k) {
     view = {cx: ring.u, cy: ring.v};
     sizeCanvas();
     prefetch(k + 1);
+    if (size) await szBegin(size.obj);
   }
   if (!S || S.home) return;
   info(); draw();
@@ -375,11 +419,14 @@ function draw(frameImg, dim) {
   if (item.prev) { const [px, py] = toScr(item.prev[0], item.prev[1]); circle(px, py, rr, "rgba(154,164,178,.85)", 1.5, [5, 4]); }
   if (item.runner) { const [qx, qy] = toScr(item.runner[0], item.runner[1]); cross(qx, qy, 7, "#F07B72", 2.5); }
   const [sx, sy] = toScr(ringStart.u, ringStart.v), [rx, ry] = toScr(ring.u, ring.v);
-  if (touched && Math.hypot(sx - rx, sy - ry) > 3) circle(sx, sy, rr, "rgba(65,240,138,.45)", 1.2, [3, 4]);
-  const col = dim ? "rgba(65,240,138,.5)" : "#41F08A";
-  circle(rx, ry, rr, "rgba(0,0,0,.55)", 4.5);
-  circle(rx, ry, rr, col, 2.2);
-  cross(rx, ry, Math.max(4, Math.min(8, rr * 0.25)), col, 1.5);
+  if (size) drawSize();
+  else {
+    if (touched && Math.hypot(sx - rx, sy - ry) > 3) circle(sx, sy, rr, "rgba(65,240,138,.45)", 1.2, [3, 4]);
+    const col = dim ? "rgba(65,240,138,.5)" : "#41F08A";
+    circle(rx, ry, rr, "rgba(0,0,0,.55)", 4.5);
+    circle(rx, ry, rr, col, 2.2);
+    cross(rx, ry, Math.max(4, Math.min(8, rr * 0.25)), col, 1.5);
+  }
   if (dim) { ctx.fillStyle = "rgba(11,14,19,.75)"; ctx.fillRect(8, 8, 128, 24); ctx.fillStyle = "#E6E9EE"; ctx.font = "12px " + getComputedStyle(document.body).getPropertyValue("--mono"); ctx.fillText("▶ the second before", 16, 24); }
   drawMini();
 }
@@ -431,11 +478,13 @@ function moveRing(u, v) {
 let drag = null;
 cv.addEventListener("pointerdown", e => {
   if (!item || playing) return;
+  if (size) return szDown(e);
   cv.setPointerCapture(e.pointerId);
   const r = cv.getBoundingClientRect();
   drag = {x: e.clientX - r.left, y: e.clientY - r.top, ring: {...ring}, t: performance.now(), moved: false};
 });
 cv.addEventListener("pointermove", e => {
+  if (sdrag) return szMove(e);
   if (!drag) return;
   const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
   if (!drag.moved && Math.hypot(x - drag.x, y - drag.y) < 6) return;
@@ -444,14 +493,16 @@ cv.addEventListener("pointermove", e => {
   moveRing(drag.ring.u + (x - drag.x) / s, drag.ring.v + (y - drag.y) / s);
 });
 cv.addEventListener("pointerup", e => {
+  if (sdrag) return szUp(e);
   if (!drag) return;
   const r = cv.getBoundingClientRect();
   if (!drag.moved) { const [u, v] = toImg(e.clientX - r.left, e.clientY - r.top); moveRing(u, v); }
   drag = null; recenterIfNeeded(false); draw();
 });
-cv.addEventListener("pointercancel", () => { drag = null; });
+cv.addEventListener("pointercancel", () => { drag = null; sdrag = null; });
 cv.addEventListener("wheel", e => { e.preventDefault(); stepZoom(e.deltaY < 0 ? 1 : -1); }, {passive: false});
 mini.addEventListener("click", e => {
+  if (size) return;
   const r = mini.getBoundingClientRect(), k = r.width / S.width;
   const u = (e.clientX - r.left) / k, v = (e.clientY - r.top) / k;
   moveRing(u, v); view = {cx: u, cy: v}; draw();
@@ -501,6 +552,17 @@ document.addEventListener("keydown", e => {
   if ((k === "z" || k === "Z") && (e.ctrlKey || e.metaKey)) { e.preventDefault(); return undo(); }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   const step = e.shiftKey ? 5 : 1;
+  if (size) {
+    const ns = e.shiftKey ? 1 : 0.25, a = size.active;
+    const sm = {"Enter": szSave, "Escape": szDone, "r": () => szBegin(size.obj, true),
+      "ArrowLeft": () => szNudge(a, -ns, 0), "ArrowRight": () => szNudge(a, ns, 0), "ArrowUp": () => szNudge(a, 0, -ns), "ArrowDown": () => szNudge(a, 0, ns),
+      "+": () => stepZoom(1), "=": () => stepZoom(1), "-": () => stepZoom(-1), "0": () => setZoom(1),
+      "[": () => $("bPrev").click(), "]": () => $("bNext").click(), "Tab": () => { size.active = (a + (e.shiftKey ? 3 : 1)) % 4; draw(); }};
+    const g = sm[k.length === 1 ? k.toLowerCase() : k] || sm[k];
+    if (g) { e.preventDefault(); if (e.target.tagName === "BUTTON") e.target.blur(); g(); }
+    return;
+  }
+  if (k === "f" || k === "F") { e.preventDefault(); return szBegin($("szObj").value); }
   const map = {
     "Enter": () => mark("confirmed"), " ": () => mark("confirmed"),
     "w": () => mark("unsure"), "n": () => mark("not_visible"), "s": () => mark("skipped"),
@@ -515,6 +577,181 @@ document.addEventListener("keydown", e => {
   if (f) { e.preventDefault(); if (e.target.tagName === "BUTTON" && (k === "Enter" || k === " ")) e.target.blur(); f(); }
 });
 window.addEventListener("resize", () => { if (item && img) { sizeCanvas(); draw(); } });
+
+// ---------------------------------------------------------------- size check (the camera's scale)
+let size = null;         // {obj, corners [[u, v] x 4], start, fit, src, active}
+let sdrag = null;
+const SZCOL = "#7FB8FF";
+function quadCentre(c) { return [c.reduce((a, p) => a + p[0], 0) / 4, c.reduce((a, p) => a + p[1], 0) / 4]; }
+async function szBegin(obj, fresh) {
+  if (!item) return;
+  if (!S.has_cm) { toast("No floor calibration: the size check measures through it", 4000); return; }
+  try {
+    const c = size && size.corners.length === 4 ? quadCentre(size.corners) : null;
+    const at = (size && size.k === item.k && c) ? {u: c[0], v: c[1]} : ring;
+    const r = await api("/api/size_start", {k: item.k, obj, u: at.u, v: at.v, fresh: !!fresh});
+    size = {obj, k: item.k, corners: r.corners.map(p => p.slice()), start: r.corners.map(p => p.slice()), fit: r.fit, src: r.source, active: 0};
+    $("szIdle").classList.add("hidden"); $("szActive").classList.remove("hidden");
+    $("szObj").value = obj;
+    const [cx, cy] = quadCentre(size.corners); view = {cx, cy};
+    if (!zoom || zoom < 4) { zoom = 6; markZoom(); }
+    szNowRender(); draw();
+    const cr = cv.getBoundingClientRect();
+    if (cr.top < 0 || cr.bottom > window.innerHeight) cv.scrollIntoView({block: "center", behavior: "smooth"});
+  } catch (e) { toast("Size check: " + e.message, 5000); }
+}
+function szDone() { size = null; sdrag = null; $("szIdle").classList.remove("hidden"); $("szActive").classList.add("hidden"); $("szNow").innerHTML = ""; draw(); }
+function drawSize() {
+  const pts = size.corners.map(p => toScr(p[0], p[1]));
+  ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath();
+  ctx.strokeStyle = "rgba(0,0,0,.6)"; ctx.lineWidth = 3.5; ctx.stroke();
+  ctx.strokeStyle = SZCOL; ctx.lineWidth = 1.4; ctx.stroke();
+  pts.forEach((p, i) => {
+    ctx.fillStyle = i === size.active ? SZCOL : "rgba(11,14,19,.85)"; ctx.strokeStyle = SZCOL; ctx.lineWidth = 1.5;
+    ctx.fillRect(p[0] - 5, p[1] - 5, 10, 10); ctx.strokeRect(p[0] - 5, p[1] - 5, 10, 10);
+  });
+  if (size.fit && size.fit.corners_px) {
+    const fc = size.fit.corners_px.map(p => toScr(p[0], p[1]));
+    ctx.font = "12px " + getComputedStyle(document.body).getPropertyValue("--mono");
+    for (let i = 0; i < 4; i++) {
+      const a = fc[i], b = fc[(i + 1) % 4], t = size.fit.sides_cm[i].toFixed(2) + " cm";
+      const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2, w = ctx.measureText(t).width;
+      ctx.fillStyle = "rgba(11,14,19,.8)"; ctx.fillRect(mx - w / 2 - 3, my - 9, w + 6, 16);
+      ctx.fillStyle = "#E6E9EE"; ctx.fillText(t, mx - w / 2, my + 3);
+    }
+  }
+}
+function szDown(e) {
+  cv.setPointerCapture(e.pointerId);
+  const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+  let best = -1, bd = 16;
+  size.corners.forEach((p, i) => { const [sx, sy] = toScr(p[0], p[1]); const d = Math.hypot(sx - x, sy - y); if (d < bd) { bd = d; best = i; } });
+  if (best >= 0) size.active = best;
+  sdrag = {x, y, which: best, from: size.corners.map(p => p.slice())};
+  draw();
+}
+function szMove(e) {
+  const r = cv.getBoundingClientRect(), s = scale(), dx = (e.clientX - r.left - sdrag.x) / s, dy = (e.clientY - r.top - sdrag.y) / s;
+  if (sdrag.which >= 0) size.corners[sdrag.which] = [sdrag.from[sdrag.which][0] + dx, sdrag.from[sdrag.which][1] + dy];
+  else size.corners = sdrag.from.map(p => [p[0] + dx, p[1] + dy]);
+  draw();
+}
+function szUp() { sdrag = null; szEval(); }
+function szNudge(i, du, dv) { size.corners[i] = [size.corners[i][0] + du, size.corners[i][1] + dv]; draw(); clearTimeout(szNudge.t); szNudge.t = setTimeout(szEval, 250); }
+async function szEval() {
+  try { const r = await api("/api/size_eval", {obj: size.obj, corners: size.corners}); if (size) { size.fit = r.fit; szNowRender(); draw(); } }
+  catch (e) { toast(e.message); }
+}
+async function szSave() {
+  if (!size || busy) return; busy = true;
+  try {
+    const r = await api("/api/size_save", {k: item.k, obj: size.obj, corners: size.corners});
+    S.size = r.size; size.fit = r.fit; size.src = "your fit";
+    toast("Fit saved: " + pct(r.fit.scale_pct) + " against the real size"); szNowRender(); szRender(); draw();
+  } catch (e) { toast("Not saved: " + e.message, 5000); }
+  busy = false;
+}
+async function szDelete() {
+  if (!size) return;
+  try { const r = await api("/api/size_delete", {k: item.k, obj: size.obj}); S.size = r.size; toast("Removed this picture's fit"); szRender(); } catch (e) { toast(e.message); }
+}
+async function szNext() {
+  const obj = size ? size.obj : $("szObj").value;
+  try {
+    const r = await api("/api/size_suggest?obj=" + obj);
+    if (r.k === undefined) { toast("Mark some pictures first: the size check picks among the pictures you have marked", 4500); return; }
+    if (!size) size = {obj, corners: [], start: [], fit: null, src: "", active: 0, k: -1};
+    item = null; await load(r.k);
+  } catch (e) { toast(e.message); }
+}
+async function szAuto() {
+  try { const r = await api("/api/size_auto", {}); S.size = r.size; szRender(); pollState(); } catch (e) { toast("Automatic check: " + e.message, 5000); }
+}
+function pct(v) { return v === null || v === undefined ? "–" : (v > 0 ? "+" : "") + v.toFixed(1) + " %"; }
+function szNowRender() {
+  const f = size && size.fit;
+  if (!f) { $("szNow").innerHTML = size ? "<span class='warn'>A corner is outside the calibration.</span>" : ""; return; }
+  const saved = S.size && S.size.fitted_items.includes(item.k);
+  $("szNow").innerHTML = `This outline: <b>${f.long_cm.toFixed(2)} &times; ${f.short_cm.toFixed(2)} cm</b>, real ${f.real_long_cm.toFixed(2)} &times; ${f.real_short_cm.toFixed(2)}: <b>${pct(f.scale_pct)}</b>`
+    + `<br><span class="small">Started from ${esc(size.src)}. Drag each corner onto the top corner of ${size.obj === "robot" ? "the robot's shell" : "the strip"} (drag inside to move all four; Tab picks a corner, arrows nudge it by a quarter pixel). ${saved ? "This picture has a saved fit." : "Enter saves it."}</span>`;
+}
+function szRender() {
+  const z = S && S.size;
+  if (!z) return;
+  const r = z.robot;
+  $("szSum").innerHTML = z.robot_plain ? esc(z.robot_plain) : "";
+  if (r && r.n) {
+    const reg = {}; for (const c of r.regions) reg[c.col + "," + c.row] = c;
+    const K = z.known.robot, xs = ["0–41", "41–81", "81–122"];
+    let h = `<div class="szgrid"><span class="h"></span>${xs.map(x => `<span class="h">x ${x}</span>`).join("")}`;
+    for (const row of [2, 1, 0]) {
+      h += `<span class="h">y ${xs[row]}</span>`;
+      for (const col of [0, 1, 2]) {
+        const c = reg[col + "," + row];
+        if (!c || !c.n) { h += `<span class="c">–<small>no fit</small></span>`; continue; }
+        let cls = "uns";
+        if (c.ci95_pct) cls = (c.ci95_pct[0] >= -r.limit_pct && c.ci95_pct[1] <= r.limit_pct) ? "ok" : (c.ci95_pct[0] > r.limit_pct || c.ci95_pct[1] < -r.limit_pct) ? "off" : "uns";
+        h += `<span class="c ${cls}">${pct(c.mean_pct)}<small>${c.n} fit${c.n > 1 ? "s" : ""}</small></span>`;
+      }
+    }
+    h += `</div><p class="small" style="margin:6px 0 0">Each cell is a third of the board: how much bigger (+) or smaller (&minus;) the robot measures there than its real size, through the calibration (green: within &plusmn;${r.limit_pct} % for sure; amber: too few fits to say; red: off).</p>`;
+    const ax = [];
+    if (r.axis_x) ax.push("sides along x " + pct(r.axis_x.mean_pct));
+    if (r.axis_y) ax.push("along y " + pct(r.axis_y.mean_pct));
+    if (r.trend) ax.push(`from one side of the board to the other: ${pct(r.trend.across_x_pct)} across x, ${pct(r.trend.across_y_pct)} across y`);
+    if (ax.length) h += `<p class="small" style="margin:4px 0 0">${cap1(ax.join("; "))}.</p>`;
+    $("szGrid").innerHTML = h;
+  } else $("szGrid").innerHTML = `<p class="small" style="margin:6px 0 0">Aim for 2 or 3 fits in each part of the board (about 15 in all). One fit alone is good to about &plusmn;1.5 %: the robot is only about 23 pixels across, and a corner placed half a pixel off moves it that much. Fifteen together pin the scale to under &plusmn;1 %.</p>`;
+  const a = z.auto, j = z.job;
+  let t = "";
+  if (j && !j.done) t = `<span class="spin"></span>Finding the outline on ${j.n} of ${j.of} marked pictures ...`;
+  else if (j && j.error) t = `<span class="warn">The automatic check stopped: ${esc(j.error)}</span>`;
+  else if (a) {
+    const o = a.summary.overall;
+    t = `Automatic outlines on ${a.summary.n} marked pictures: <b>${pct(o.mean_pct)}</b>.`;
+    if (a.padding) {
+      const c = a.corrected.overall, V = {ok: "right to within " + a.corrected.limit_pct + " %", off: "off by more than " + a.corrected.limit_pct + " %", unsure: "not settled yet"};
+      t += ` Of that, ${pct(a.padding.median_pct)} is shadow or glow round the robot (measured on ${a.padding.n} pictures you also fitted by hand). Without it: <b>${pct(c.mean_pct)}</b>${c.ci95_pct ? " (95 % range " + pct(c.ci95_pct[0]) + " to " + pct(c.ci95_pct[1]) + ")" : ""}, ${V[a.corrected.verdict]}.`;
+    } else t += " That includes the shadow or glow round the robot: fit 3 or more of the same pictures by hand to measure how much.";
+  }
+  $("szAuto").innerHTML = t;
+  $("szSrc").textContent = "Measured: the outline's sides in floor cm through " + (S.calib || "the calibration") + " at the object's top height. Real sizes: the robot from hardware/dock/dock_params.py (Arduino's CAD), the strip from build_dock_v5.py (printed size). Fits: size_fits.csv in the marks folder.";
+  $("bSzAuto").disabled = !!(j && !j.done) || !S.has_cm;
+  if (j && !j.done) pollState();
+}
+$("bSzStart").onclick = () => szBegin($("szObj").value);
+$("bSzSave").onclick = szSave;
+$("bSzReset").onclick = () => szBegin(size ? size.obj : $("szObj").value, true);
+$("bSzDel").onclick = szDelete;
+$("bSzDone").onclick = szDone;
+$("bSzNext").onclick = szNext;
+$("bSzAuto").onclick = szAuto;
+$("szObj").onchange = () => { if (size) szBegin($("szObj").value); };
+
+// ---------------------------------------------------------------- upload to GitHub
+function upRender() {
+  const u = S.upload || {state: "never"}, el = $("upst");
+  const stale = u.state === "up" && u.changed > u.seq;
+  const T = {
+    never: "Not uploaded yet. The marks go up by themselves once every picture is marked; Upload now sends what there is.",
+    waiting: "<span class='spin'></span>Uploading in a few seconds ...",
+    uploading: "<span class='spin'></span>Uploading ...",
+    up: `Uploaded at <b>${esc(u.at || "")}</b> (${esc(u.asset || "")}).` + (stale ? " Changed since: it uploads again by itself." : " Nothing else to send."),
+    no_token: "<span class='warn'>No GitHub token on this laptop yet, so nothing went up.</span> The how-to's part 6, <b>GitHub token</b>, sets it up (5 minutes, once). The marks are saved on the laptop meanwhile.",
+    error: `<span class='warn'>The upload did not work: ${esc(u.error || "")}</span> The marks are saved on the laptop; Upload now tries again.`,
+  };
+  el.innerHTML = T[u.state] || T.never;
+  $("bUpload").disabled = u.state === "uploading";
+  if (u.state === "waiting" || u.state === "uploading") pollState();
+}
+async function pollState() {
+  if (pollState.t) return;
+  pollState.t = setTimeout(async () => {
+    pollState.t = null;
+    try { const s2 = await api("/api/state"); if (!s2.home) { S = s2; progress(); } } catch (e) {}
+  }, 1500);
+}
+$("bUpload").onclick = async () => { try { const r = await api("/api/upload", {}); S = r.state; progress(); } catch (e) { toast(e.message); } };
 boot();
 </script>
 </body>

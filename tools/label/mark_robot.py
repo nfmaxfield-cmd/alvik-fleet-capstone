@@ -34,8 +34,19 @@ On each picture:
   - Undo (Z) takes back the last mark. You can close the window any time: the next start carries on where you
     stopped. A few pictures come back at the end with the ring put off on purpose: they measure how exactly
     marks repeat.
-When it says "All marked", the marks are in tools/experiment/data/marks/<stretch>/ (marks.csv and summary.json).
-Send those two files (drag them into the chat).
+When it says "All marked", the marks are in tools/experiment/data/marks/<stretch>/ (marks.csv and summary.json), and
+the page uploads them to GitHub by itself (release mirlt-marks, marks-<stretch>.zip; again after any later change;
+"Upload now" any time). The token: upload_session.py's file, saved once with
+    py -3 tools\\pi\\upload_session.py --set-token
+(docs/how-to/mark-the-robot.md part 6). --no-upload: never upload.
+
+Size check (size_check.py): four corner handles on something of known size (the robot's top, later the dock's marker
+strip), measured in floor cm through the calibration against the real size, per third of the board; and the same
+done by itself on every marked picture (the automatic outline, corrected by the hand fits for the shadow or glow it
+takes in).
+
+The live view's "Mark this moment" button (e02_view.py) starts this page on the last 20 s of a running session's
+pictures (--no-guesses: the ring starts on the runner's own position instead of a tracker replay).
 
 Any other session that was uploaded to GitHub (troubleshooting: where did the runner lose the robot?). Only the
 minutes you ask for are downloaded, plus the session's logs, so each picture also shows where the runner thought
@@ -91,6 +102,7 @@ for p in (HERE, EXP):
         sys.path.insert(0, p)
 
 import mark_footage as FT  # noqa: E402
+import size_check as SZ   # noqa: E402
 
 PAGE = os.path.join(HERE, "mark_robot.html")
 DEFAULT_CALIB = os.path.join(EXP, "data", "overhead_floorcal_roam1.json")
@@ -108,6 +120,12 @@ CHECK_OFFSET_CM = 6.0       # a repeat check's ring starts this far off the firs
 CHECK_SHARE = 0.05          # chosen: share of marked pictures shown again as repeat checks (at least 3)
 MARK_STATUSES = ("confirmed", "corrected", "unsure", "not_visible", "skipped")
 TRUTH_STATUSES = ("confirmed", "corrected")
+UPLOAD_TAG = "mirlt-marks"  # the GitHub release every stretch's marks go to (one zip each: marks-<stretch>.zip)
+UPLOAD_WAIT_S = 8.0         # after the last change, wait this long before uploading again (chosen: a few marks
+                            # in a row become one upload; nothing to measure, so no DOE)
+SIZE_COLUMNS = ["item", "frame", "t_wall", "obj", "how", "u1", "v1", "u2", "v2", "u3", "v3", "u4", "v4", "x_cm",
+                "y_cm", "long_cm", "short_cm", "real_long_cm", "real_short_cm", "scale_pct", "scale_x_pct",
+                "scale_y_pct", "corner_dev_deg", "region", "area_ratio", "calib", "saved_at"]
 
 # The stretches the tracker-replay DOE needs (DOE-tracking.md DOE 1: the three evening losses of 2026-10-22).
 # Each reads its times, start spot and legs from the regression test's json (tests/data/realclips).
@@ -370,7 +388,7 @@ class Session:
 
     def __init__(self, store, calib, robot, t0, t1, out_dir, every=1.0, seed=None, legs=(), others=(), board=None,
                  walls=False, floor_frames=(), runner=None, checks=CHECK_SHARE, name="", title="",
-                 tracker_settings=None, guesses=True, source=None):
+                 tracker_settings=None, guesses=True, source=None, strip_mm=None):
         import e02_plan as PL
         self.store, self.calib, self.robot = store, calib, robot
         self.t0, self.t1, self.every = float(t0), float(t1), float(every)
@@ -394,7 +412,15 @@ class Session:
         self.seq = 0
         self.started = time.time()
         self.seed0 = (0, float(seed[0]), float(seed[1])) if seed else None
+        self.strip_mm = strip_mm
+        self.size_fits = {}                 # (item, obj) -> row (SIZE_COLUMNS): your size fits
+        self.size_auto = []                 # rows: the automatic outlines of the marked pictures
+        self.size_job = None                # dict(done, n, of, error) while the automatic check runs
+        self.changed_seq = 0                # counts every change (marks, undo, size fits): the uploader's cue
+        self.on_change = None               # function(session) after each change (the App's uploader)
+        self.upload_status = None
         self._load()
+        self._load_size()
         self.guesser = None
         if guesses and calib.ok:
             self.guesser = Guesser(self)
@@ -449,6 +475,15 @@ class Session:
                 self.undo = []
         if not hasattr(self, "spent_before"):
             self.spent_before = 0.0
+
+    def _changed(self):
+        """Something you did changed the marks: count it, and tell the uploader (App.kick_upload)."""
+        self.changed_seq += 1
+        if self.on_change:
+            try:
+                self.on_change(self)
+            except Exception:       # noqa: BLE001 (the marks are saved; an upload problem shows on the page)
+                pass
 
     def _save(self):
         p = os.path.join(self.out, "marks.csv")
@@ -568,6 +603,11 @@ class Session:
                 bu, bv = self.bias_px() if g[2].startswith("tracker") else (0.0, 0.0)
                 return dict(u=px[0] + bu, v=px[1] + bv, source=g[2] + (" (+ your usual offset)" if (bu or bv) else ""),
                             ready=True, tracker=(g[0], g[1]), tracker_px=px)
+        if self.guesser is None and self.runner:
+            run = self.runner_at(self.store.t(it["frame"]))
+            px = self.calib.to_px(*run) if run else None
+            if px:          # no tracker replay (a moment marked during a session): start on the runner's position
+                return dict(u=px[0], v=px[1], source="where the runner thought it was", ready=True, tracker=None)
         lm = self._last_mark_px(k_item)
         if lm:
             return dict(u=lm[0], v=lm[1], source="your last mark", ready=ready, tracker=None)
@@ -632,7 +672,8 @@ class Session:
                         calib=os.path.basename(self.calib.path) if self.calib.path else None,
                         every=self.every, t0=clock(self.t0), t1=clock(self.t1), can_undo=bool(self.undo),
                         guesses=gs is not None, guess_error=gs.error if gs else None,
-                        summary=self.summary_short())
+                        summary=self.summary_short(), size=self.size_state(),
+                        upload=dict(self.upload_status or dict(state="never"), changed=self.changed_seq))
 
     # --- marking -----------------------------------------------------------------------------------
     def mark(self, k, status, u=None, v=None, moved_px=None, seconds=None):
@@ -692,6 +733,7 @@ class Session:
             self._maybe_add_checks()
             self._save()
             self._update_seed()
+            self._changed()
             return self._next_after(k)
 
     def _next_after(self, k):
@@ -711,6 +753,7 @@ class Session:
                 self.marks[k] = prev
             self._save()
             self._update_seed()
+            self._changed()
             return k
 
     def _maybe_add_checks(self):
@@ -774,9 +817,207 @@ class Session:
                                     "how exactly marks repeat" % CHECK_OFFSET_CM,
                                **(stats(rep) or dict(n=0))),
             minutes_spent=round(self.spent() / 60.0, 1),
+            size_check=self.size_summary() if (self.size_fits or self.size_auto) else None,
             files=dict(marks="marks.csv (one row per picture: kind pick = the truth, kind check = a repeat)",
+                       size_fits="size_fits.csv (your outline fits of things of known size; size_auto.csv: the "
+                                 "automatic outlines)",
                        read_with="tools/label/mark_robot.py load_truth() and score_track()"),
             written=dt.datetime.now().isoformat(timespec="seconds"))
+
+    # --- the scale check (size_check.py): outlines of things of known size ---------------------------
+    def _load_size(self):
+        p = os.path.join(self.out, "size_fits.csv")
+        if os.path.exists(p):
+            with open(p, newline="") as f:
+                for r in csv.DictReader(f):
+                    self.size_fits[(int(r["item"]), r["obj"])] = {c: r.get(c, "") for c in SIZE_COLUMNS}
+        p = os.path.join(self.out, "size_auto.csv")
+        if os.path.exists(p):
+            with open(p, newline="") as f:
+                self.size_auto = [{c: r.get(c, "") for c in SIZE_COLUMNS} for r in csv.DictReader(f)]
+
+    def _save_size(self):
+        for name, rows in (("size_fits.csv", [self.size_fits[k] for k in sorted(self.size_fits)]),
+                           ("size_auto.csv", self.size_auto)):
+            p = os.path.join(self.out, name)
+            if not rows and not os.path.exists(p):
+                continue
+            with open(p + ".tmp", "w", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=SIZE_COLUMNS)
+                w.writeheader()
+                w.writerows(rows)
+            os.replace(p + ".tmp", p)
+        with open(os.path.join(self.out, "summary.json"), "w") as f:
+            json.dump(self.summary(), f, indent=1)
+        self._changed()
+
+    def _size_row(self, k, obj, how, m):
+        it = self.items[k] if k is not None and 0 <= k < len(self.items) else None
+        row = {c: "" for c in SIZE_COLUMNS}
+        row.update(item=k if k is not None else "", frame=it["frame"] if it else "",
+                   t_wall="%.4f" % self.store.t(it["frame"]) if it else "", obj=obj, how=how,
+                   x_cm=_f(m["x"]), y_cm=_f(m["y"]), long_cm=_f(m["long_cm"], 3), short_cm=_f(m["short_cm"], 3),
+                   real_long_cm=_f(m["real_long_cm"], 3), real_short_cm=_f(m["real_short_cm"], 3),
+                   scale_pct=_f(m["scale_pct"]), scale_x_pct=_f(m["scale_x_pct"]), scale_y_pct=_f(m["scale_y_pct"]),
+                   corner_dev_deg=_f(m["corner_dev_deg"]), region="%d,%d" % tuple(m["region"]),
+                   area_ratio=_f(m.get("area_ratio"), 3), calib=os.path.basename(self.calib.path or ""),
+                   saved_at="%.1f" % time.time())
+        for i, (u, v) in enumerate(m["corners_px"]):
+            row["u%d" % (i + 1)], row["v%d" % (i + 1)] = _f(u), _f(v)
+        return row
+
+    @staticmethod
+    def _row_fit(r):
+        """A saved size row back as size_check.measure()'s fields (what summarize reads)."""
+        return dict(x=float(r["x_cm"]), y=float(r["y_cm"]), scale_pct=_num(r["scale_pct"]),
+                    scale_x_pct=_num(r["scale_x_pct"]), scale_y_pct=_num(r["scale_y_pct"]),
+                    region=[int(v) for v in r["region"].split(",")])
+
+    def _need_cam(self):
+        if not self.calib.ok:
+            raise ValueError("no floor calibration: the size check measures through it")
+
+    def size_start(self, k, obj, u, v, fresh=False):
+        """Where the four handles start on picture k: the automatic outline near (u, v) (the robot only), else the
+        calibration's own prediction of the object there. Plus how that start measures."""
+        self._need_cam()
+        k_ = SZ.known(obj, self.strip_mm)
+        p = SZ.to_floor(self.calib.cam, u, v, k_["z_cm"])
+        if p is None:
+            raise ValueError("that spot is outside the calibration")
+        with self.lock:
+            prev = self.size_fits.get((k, obj))
+        if prev and not fresh:
+            corners = [[float(prev["u%d" % i]), float(prev["v%d" % i])] for i in range(1, 5)]
+            src = "your fit"
+        else:
+            a = SZ.auto_outline(self.store.gray(self.items[k]["frame"]), self.calib.cam, p[0], p[1], obj,
+                                self.strip_mm, self.board) if obj == "robot" else None
+            if a:
+                corners, src = a["corners_px"], "the automatic outline"
+            else:
+                corners, src = SZ.predicted_corners(self.calib.cam, p[0], p[1], obj, 0.0, self.strip_mm), \
+                    "the calibration's prediction of its size"
+        m = SZ.measure(self.calib.cam, corners, obj, self.strip_mm, self.board)
+        return dict(corners=[list(map(float, c)) for c in (m["corners_px"] if m else corners)], source=src,
+                    fit=m, known=k_)
+
+    def size_eval(self, corners, obj):
+        self._need_cam()
+        return SZ.measure(self.calib.cam, corners, obj, self.strip_mm, self.board)
+
+    def size_save(self, k, obj, corners):
+        self._need_cam()
+        m = SZ.measure(self.calib.cam, corners, obj, self.strip_mm, self.board)
+        if m is None:
+            raise ValueError("a corner is outside the calibration")
+        with self.lock:
+            self.size_fits[(int(k), obj)] = self._size_row(int(k), obj, "hand", m)
+            self._save_size()
+        return dict(fit=m, size=self.size_state())
+
+    def size_delete(self, k, obj):
+        with self.lock:
+            self.size_fits.pop((int(k), obj), None)
+            self._save_size()
+        return self.size_state()
+
+    def size_suggest(self, obj="robot"):
+        """A marked (or guessed) picture in the board region with the fewest fits, away from the ones done: the
+        next picture to fit, so the fits spread over the board."""
+        with self.lock:
+            done = {int(r["item"]) for (k, o), r in self.size_fits.items() if o == obj}
+            per = {}
+            for (k, o), r in self.size_fits.items():
+                if o == obj:
+                    c = tuple(int(v) for v in r["region"].split(","))
+                    per[c] = per.get(c, 0) + 1
+            best = None
+            for k, r in self.marks.items():
+                if k in done or r["kind"] != "pick" or r["status"] not in TRUTH_STATUSES or r["x_cm"] == "":
+                    continue
+                c = SZ.region_of(float(r["x_cm"]), float(r["y_cm"]), self.board)
+                key = (per.get(c, 0), k)
+                if best is None or key < best[0]:
+                    best = (key, k, c)
+        if best is None:
+            return None
+        return dict(k=best[1], region=list(best[2]), fits_there=best[0][0])
+
+    def size_state(self):
+        with self.lock:
+            hand = [r for (k, o), r in self.size_fits.items() if o == "robot"]
+            strip = [r for (k, o), r in self.size_fits.items() if o == "dock_strip"]
+            sh = SZ.summarize([self._row_fit(r) for r in hand], self.board)
+            out = dict(robot=sh, robot_plain=SZ.plain(sh, "the robot's top"), n_auto=len(self.size_auto),
+                       fitted_items=sorted({k for (k, o) in self.size_fits}), has_cm=self.calib.ok,
+                       job=dict(self.size_job) if self.size_job else None,
+                       known={o: SZ.known(o, self.strip_mm) for o in SZ.KNOWN})
+            if strip:
+                ss = SZ.summarize([self._row_fit(r) for r in strip], self.board)
+                out.update(dock_strip=ss, dock_strip_plain=SZ.plain(ss, "the dock's marker strip"))
+            if self.size_auto:
+                a = self._auto_summary()
+                out.update(auto=a)
+            return out
+
+    def _auto_summary(self):
+        fits = [self._row_fit(r) for r in self.size_auto]
+        sa = SZ.summarize(fits, self.board)
+        by_item = {int(r["item"]): r for r in self.size_auto if r["item"] != ""}
+        pairs = [(self._row_fit(h), self._row_fit(by_item[k])) for (k, o), h in self.size_fits.items()
+                 if o == "robot" and k in by_item]
+        pad = SZ.auto_padding(pairs)
+        out = dict(summary=sa, plain=SZ.plain(sa, "the automatic outline"), padding=pad)
+        if pad:
+            corr = [dict(f, scale_pct=f["scale_pct"] - pad["median_pct"],
+                         scale_x_pct=None if f["scale_x_pct"] is None else f["scale_x_pct"] - pad["median_pct"],
+                         scale_y_pct=None if f["scale_y_pct"] is None else f["scale_y_pct"] - pad["median_pct"])
+                    for f in fits]
+            sc = SZ.summarize(corr, self.board)
+            out.update(corrected=sc, corrected_plain=SZ.plain(sc, "the corrected automatic outline"))
+        return out
+
+    def size_auto_run(self):
+        """The automatic outline of the robot on every picture marked with a position you were sure of (in the
+        background; size_state()['job'] says how far it is)."""
+        self._need_cam()
+        with self.lock:
+            if self.size_job and not self.size_job.get("done"):
+                return
+            todo = [(k, r) for k, r in sorted(self.marks.items())
+                    if r["kind"] == "pick" and r["status"] in TRUTH_STATUSES and r["x_cm"] != ""]
+            self.size_job = dict(done=False, n=0, of=len(todo), found=0, error=None)
+
+        def work():
+            rows = []
+            try:
+                for k, r in todo:
+                    m = SZ.auto_outline(self.store.gray(int(r["frame"])), self.calib.cam, float(r["x_cm"]),
+                                        float(r["y_cm"]), "robot", None, self.board)
+                    if m:
+                        rows.append(self._size_row(k, "robot", "auto", m))
+                    self.size_job.update(n=self.size_job["n"] + 1, found=len(rows))
+                with self.lock:
+                    self.size_auto = rows
+                    self._save_size()
+            except Exception as e:      # noqa: BLE001
+                self.size_job["error"] = "%s: %s" % (type(e).__name__, e)
+            self.size_job["done"] = True
+        threading.Thread(target=work, daemon=True).start()
+
+    def size_summary(self):
+        st = self.size_state()
+        out = dict(what="The calibration's scale checked against things of known size (tools/label/size_check.py): "
+                        "each fit is the object's outline measured in floor cm through the calibration, against its "
+                        "real size. +1 %% = it measures 1 %% too big. Verdict: the 95 %% range of the mean inside "
+                        "+-%.0f %% = ok." % SZ.LIMIT_PCT,
+                   known=st["known"], robot=st["robot"], robot_plain=st["robot_plain"],
+                   calibration=self.calib.path)
+        for k in ("dock_strip", "dock_strip_plain", "auto"):
+            if k in st:
+                out[k] = st[k]
+        return out
 
     def close(self):
         if self.guesser:
@@ -979,6 +1220,62 @@ def fetch_release(tag, a, root=None, log=print, opener=None):
     return folder
 
 
+# ============================================================================ uploading the marks
+class NoToken(Exception):
+    pass
+
+
+def _uploader():
+    """tools/pi/upload_session.py: the Pi's session upload, whose token file and release code the page reuses."""
+    pi = os.path.join(REPO, "tools", "pi")
+    if pi not in sys.path:
+        sys.path.insert(0, pi)
+    import upload_session as UP
+    return UP
+
+
+UPLOAD_FILES = ("marks.csv", "summary.json", "size_fits.csv", "size_auto.csv", "picks.json", "items.json")
+
+
+def marks_asset_name(name):
+    return "marks-%s.zip" % re.sub(r"[^A-Za-z0-9._-]+", "_", name or "stretch")
+
+
+def upload_marks(out_dir, name, tok=None, log=print):
+    """Zip a marks folder's files (UPLOAD_FILES) and put the zip on the GitHub release UPLOAD_TAG as
+    marks-<stretch>.zip, replacing an older one of the same name. The token: upload_session's file
+    (~/.config/mirlt/github_token, saved with  upload_session.py --set-token). Returns dict(asset, url)."""
+    import tempfile
+    UP = _uploader()
+    tok = tok or UP.token()
+    if not tok:
+        raise NoToken("no GitHub token at %s" % UP.TOKEN_PATH)
+    asset = marks_asset_name(name)
+    tmp = tempfile.mkdtemp(prefix="mirlt-marks-")
+    zp = os.path.join(tmp, asset)
+    with zipfile.ZipFile(zp, "w", zipfile.ZIP_DEFLATED) as z:
+        for fn in UPLOAD_FILES:
+            p = os.path.join(out_dir, fn)
+            if os.path.exists(p):
+                z.write(p, os.path.join(os.path.basename(out_dir.rstrip("/\\")) or "marks", fn))
+    try:
+        rel = UP.release_for(UPLOAD_TAG, tok, "Hand-checked robot positions from the mark-the-robot page "
+                                              "(tools/label/mark_robot.py): one zip per stretch, marks-<stretch>.zip, "
+                                              "with marks.csv, summary.json and the size fits. Uploaded by the page "
+                                              "itself; a newer zip replaces the older one of the same name.")
+        for a in rel.get("assets", []):
+            if a.get("name") == asset:
+                UP.api("DELETE", a["url"], tok)      # GitHub refuses a second file of the same name
+        UP.upload(rel, asset, zp, tok)
+    finally:
+        try:
+            os.remove(zp)
+            os.rmdir(tmp)
+        except OSError:
+            pass
+    return dict(asset=asset, url="https://github.com/%s/releases/download/%s/%s" % (REPO_SLUG, UPLOAD_TAG, asset))
+
+
 def session_for_folder(folder, a=None, out=None, guesses=True):
     """A Session for a fetched stretch folder (stretch.json says what it is) or anything open_store reads."""
     import e02_plan as PL
@@ -1049,7 +1346,8 @@ def session_for_folder(folder, a=None, out=None, guesses=True):
     return Session(store, calib, robot, t0, t1, out, every=getattr(a, "every", 1.0) or 1.0, seed=seed, legs=legs,
                    others=others, board=board, walls=bool(sides), floor_frames=floor, runner=runner,
                    checks=getattr(a, "checks", CHECK_SHARE), name=name, title=meta.get("title", name),
-                   guesses=guesses, source=dict(footage=os.path.abspath(folder), **{k: meta[k] for k in
+                   guesses=guesses and not getattr(a, "no_guesses", False),
+                   strip_mm=getattr(a, "strip_mm", None), source=dict(footage=os.path.abspath(folder), **{k: meta[k] for k in
                                                 ("release", "video", "frames") if k in meta}))
 
 
@@ -1073,11 +1371,69 @@ def read_legs(path, robot, offset=0.0):
 class App:
     """The server's state: the open session, or the home list of stretches while none is open."""
 
-    def __init__(self, session=None, root=None):
-        self.session = session
+    def __init__(self, session=None, root=None, auto_upload=True):
         self.root = root
         self.lock = threading.RLock()
         self.job = None             # dict(name, log, error, done) while a stretch downloads
+        self.auto_upload = auto_upload
+        self.up_cv = threading.Condition()
+        self.up_due = None          # (session, time) of the next upload
+        self.up_thread = None
+        self.uploader = upload_marks    # (out_dir, name) -> dict(asset, url); tests replace it
+        self.session = None
+        if session is not None:
+            self.attach(session)
+
+    def attach(self, sess):
+        """Make sess the open session (and have its changes uploaded)."""
+        sess.on_change = self._on_change
+        self.session = sess
+
+    # --- uploading: by itself once every picture is marked (and after every change from then on), or on asking
+    def _on_change(self, sess):
+        if not self.auto_upload:
+            return
+        n_marked = sum(1 for r in sess.marks.values() if r["kind"] == "pick")
+        if n_marked >= len(sess.picks) or (sess.upload_status or {}).get("state") in ("up", "uploading", "waiting"):
+            self.kick_upload(sess)
+
+    def kick_upload(self, sess, now=False):
+        with self.up_cv:
+            self.up_due = (sess, time.time() + (0.0 if now else UPLOAD_WAIT_S))
+            if (sess.upload_status or {}).get("state") != "uploading":
+                sess.upload_status = dict(sess.upload_status or {}, state="waiting")
+            if self.up_thread is None or not self.up_thread.is_alive():
+                self.up_thread = threading.Thread(target=self._upload_loop, daemon=True)
+                self.up_thread.start()
+            self.up_cv.notify_all()
+
+    def _upload_loop(self):
+        while True:
+            with self.up_cv:
+                while self.up_due is None:
+                    if not self.up_cv.wait(60):
+                        return
+                sess, due = self.up_due
+                wait = due - time.time()
+                if wait > 0:
+                    self.up_cv.wait(wait)
+                    continue
+                self.up_due = None
+            seq = sess.changed_seq
+            prev = sess.upload_status or {}
+            sess.upload_status = dict(prev, state="uploading", error=None)
+            try:
+                with sess.lock:
+                    pass                    # the files are written under this lock: never zip half a file
+                r = self.uploader(sess.out, sess.name)
+                sess.upload_status = dict(state="up", at=clock(time.time()), asset=r["asset"], url=r["url"], seq=seq)
+            except NoToken as e:
+                sess.upload_status = dict(state="no_token", error=str(e))
+            except Exception as e:      # noqa: BLE001 (no WiFi, a refused token: say so on the page)
+                code = getattr(e, "code", None)
+                why = ("GitHub refused the token (%s): make a new one (the how-to's 'GitHub token' part)" % code
+                       if code in (401, 403) else "%s: %s" % (type(e).__name__, e))
+                sess.upload_status = dict(prev, state="error", error=why)
 
     def state(self):
         """The open session's state, or the home list (decided under the lock: never the list of a job that has
@@ -1125,7 +1481,7 @@ class App:
                 with self.lock:
                     if self.session:
                         self.session.close()
-                    self.session = sess
+                    self.attach(sess)
                     job["done"] = True
             except BaseException as e:      # noqa: BLE001 (SystemExit from fetch too)
                 job["error"] = "%s" % (e,)
@@ -1186,6 +1542,8 @@ def make_handler(app):
                     return self._send(200, s.calib.grid(st["width"], st["height"]) or {}, cache=True)
                 if u.path == "/api/summary":
                     return self._send(200, s.summary())
+                if u.path == "/api/size_suggest":
+                    return self._send(200, s.size_suggest(q.get("obj", ["robot"])[0]) or {})
                 return self._send(404, dict(error="not found"))
             except Exception as e:      # noqa: BLE001
                 return self._send(500, dict(error="%s: %s" % (type(e).__name__, e)))
@@ -1214,6 +1572,21 @@ def make_handler(app):
                 if u.path == "/api/undo":
                     k = s.undo_last()
                     return self._send(200, dict(k=k, state=s.state()))
+                if u.path == "/api/size_start":
+                    return self._send(200, s.size_start(int(d["k"]), d.get("obj", "robot"), float(d["u"]),
+                                                        float(d["v"]), bool(d.get("fresh"))))
+                if u.path == "/api/size_eval":
+                    return self._send(200, dict(fit=s.size_eval(d["corners"], d.get("obj", "robot"))))
+                if u.path == "/api/size_save":
+                    return self._send(200, s.size_save(int(d["k"]), d.get("obj", "robot"), d["corners"]))
+                if u.path == "/api/size_delete":
+                    return self._send(200, dict(size=s.size_delete(int(d["k"]), d.get("obj", "robot"))))
+                if u.path == "/api/size_auto":
+                    s.size_auto_run()
+                    return self._send(200, dict(size=s.size_state()))
+                if u.path == "/api/upload":
+                    app.kick_upload(s, now=True)
+                    return self._send(200, dict(state=s.state()))
                 return self._send(404, dict(error="not found"))
             except Exception as e:      # noqa: BLE001
                 return self._send(400, dict(error="%s: %s" % (type(e).__name__, e)))
@@ -1302,30 +1675,35 @@ def main(argv=None):
     ap.add_argument("--no-browser", action="store_true")
     ap.add_argument("--get-only", action="store_true", help="only download the stretch, then stop")
     ap.add_argument("--recompute-cm", metavar="MARKS_FOLDER", help="fill in the cm of a marks folder from --calib")
+    ap.add_argument("--no-guesses", action="store_true", help="don't replay the tracker for the ring's start (it "
+                                                               "starts on the runner's position, or your last mark)")
+    ap.add_argument("--strip-mm", type=float, help="the dock marker strip's measured long side, mm (size check; "
+                                                   "default the printed 90.00)")
+    ap.add_argument("--no-upload", action="store_true", help="don't upload the marks to GitHub by themselves")
     a = ap.parse_args(argv)
     if a.recompute_cm:
         if not a.calib:
             raise SystemExit("Give the calibration with --calib")
         print("Recomputed %d rows." % recompute_cm(a.recompute_cm, a.calib))
         return
-    app = App(root=a.footage)
+    app = App(root=a.footage, auto_upload=not a.no_upload)
     if a.release:
         if not (a.t_from and a.t_to):
             raise SystemExit("With --release, give --from and --to (the stretch to download).")
         folder = fetch_release(a.release, a, a.footage)
         if a.get_only:
             return
-        app.session = session_for_folder(folder, a)
+        app.attach(session_for_folder(folder, a))
     elif a.what in PRESETS:
         folder = fetch_preset(a.what, a.footage)
         if a.get_only:
             return
-        app.session = session_for_folder(folder, a)
+        app.attach(session_for_folder(folder, a))
     elif a.what:
         if not os.path.exists(a.what):
             raise SystemExit("Not found: %s\nGive a stretch name (%s) or a folder / video." % (a.what,
                                                                                          ", ".join(PRESETS)))
-        app.session = session_for_folder(a.what, a)
+        app.attach(session_for_folder(a.what, a))
     serve(app, a.port, a.phone, not a.no_browser)
 
 

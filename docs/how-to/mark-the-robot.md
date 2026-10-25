@@ -51,7 +51,7 @@ Then the page shows the first picture with a **green ring**, and a progress bar 
 | The green ring sits on the robot | Press **Enter** (or the green **Confirm** button) |
 | The ring is a bit off | **Drag anywhere** on the picture: the ring slides with your mouse. Or **click** on the robot to put the ring there. Then **Enter** |
 | The robot is hidden (a hand over it) or out of the picture | **N** (Not visible) |
-| Several robots close together and you can't tell which is the one named at the top | Put the ring on your best guess, then **W** (Not sure which) |
+| Several robots close together and you can't tell which is the one named at the top | Put the ring on your best guess, then **W** (Not sure which). It is kept, but left out of the truth the experiments score against |
 | You'd rather not judge this one | **S** (Skip) |
 | You want to see which robot was moving | **P** plays the second before this picture |
 | You pressed the wrong thing | **Z** (Undo) takes back the last mark |
@@ -70,11 +70,98 @@ Then the page shows the first picture with a **green ring**, and a progress bar 
 
 **When it says "All marked"** (a green box on the right): click **Stretches** (top right) and do the next card.
 
-## 5. Send the marks
+## 5. The marks upload themselves
 
-The green "All marked" box shows the folder the marks are in:
-`alvik-fleet-capstone\tools\experiment\data\marks\<stretch name>\`. Open it in File Explorer and drag
-**marks.csv** and **summary.json** into the chat (for each of the three stretches).
+Once every picture of a stretch is marked, the page puts the marks on GitHub by itself (the **Upload to GitHub** box
+on the right says `Uploaded at 14:05`). If you change a mark afterwards, it uploads again a few seconds later. The
+**Upload now** button sends what there is at any time (half-done is fine). Nothing to drag into the chat.
+
+This needs a GitHub token on the laptop, once (part 6). Without one, the box says `No GitHub token on this laptop
+yet`: the marks stay saved on the laptop, in `alvik-fleet-capstone\tools\experiment\data\marks\<stretch name>\`.
+
+## 6. GitHub token (once, about 5 minutes)
+
+A token is a password that lets the laptop put files on the project's GitHub page, and nothing else. Make a **new**
+one for the laptop: the Pi keeps its own (regenerating the Pi's token would stop the Pi's uploads until you save
+the new one there too).
+
+**Make the token** (in Chrome or Edge, signed in to GitHub as nfmaxfield-cmd):
+
+1. Click the address bar, type this and press **Enter**:
+
+```
+github.com/settings/personal-access-tokens/new
+```
+
+2. You see **New fine-grained personal access token**. Fill in:
+   - **Token name:** `mirlt-laptop`
+   - **Expiration:** click it and pick the longest it offers (1 year, or No expiration if it is there).
+   - **Repository access:** click **Only select repositories**, then the **Select repositories** list, and click
+     **alvik-fleet-capstone**.
+   - **Permissions:** under **Repository permissions**, find **Contents** (or click **Add permissions** and tick
+     **Contents**) and set it to **Read and write**. GitHub adds **Metadata: Read-only** by itself; leave it.
+3. Click **Generate token** at the bottom (and **Generate token** again if it asks to confirm).
+4. The token shows once, starting `github_pat_`. Click the **copy** icon next to it. Leave this page open until
+   step 6 below says `Saved`.
+
+**Save it on the laptop:**
+
+5. Open **File Explorer**, go into the project folder **alvik-fleet-capstone**, click the **address bar**, type
+   `powershell` and press **Enter**. A blue PowerShell window opens. Type this and press **Enter**:
+
+```
+py -3 tools\pi\upload_session.py --set-token
+```
+
+6. It says `Paste the GitHub token (it will not show) and press Enter:`. **Right-click** once inside the blue window
+   (that pastes; nothing appears, on purpose), then press **Enter**. You should see:
+   `Saved. This computer can upload to nfmaxfield-cmd/alvik-fleet-capstone now (saved in C:\Users\...\github_token).`
+
+**Check it works** (any time; in the same blue window):
+
+```
+py -3 tools\pi\upload_session.py --check-token
+```
+
+You should see `Token works: this computer can upload to nfmaxfield-cmd/alvik-fleet-capstone.`
+
+| What it says | What to do |
+| --- | --- |
+| `GitHub refused that token (401)` | It was not copied whole. Go back to the token page, make a new one (steps 1-4), paste again |
+| `... can read the repository but not write to it` | **Contents** was left at Read-only. Make a new token with **Read and write** |
+| `GitHub refused the saved token (401)` (the check) | It expired. Open `github.com/settings/personal-access-tokens`, click **mirlt-laptop**, click **Regenerate token**, pick the expiration, click **Regenerate token**, copy it, then do steps 5 and 6 again |
+| `Could not reach GitHub` | Check the WiFi and run the check again |
+
+## 7. Size check: is the camera's scale right? (optional, about 10 minutes)
+
+The floor calibration turns pixels into cm. The robot's top is 9.60 cm square, so measured through the calibration
+it should come out 9.60 cm everywhere on the board. If it comes out bigger or smaller, the calibration's scale is off
+there.
+
+1. On any marked picture, click **Fit the size here** (in the **Size check** box on the right, or press **F**).
+   Four small blue squares appear on the robot's corners, with each side's length in cm.
+2. Drag each square onto the corner of the robot's **white shell top** (not its shadow or the glow on the floor).
+   The picture zooms in to 6x for this. **Tab** picks the next corner; the arrow keys move it a quarter pixel.
+3. Press **Enter** (or **Save fit**). The box shows `This outline: 9.71 x 9.64 cm ... +0.9 %`.
+4. Click **Next picture in an unchecked part**: it opens a marked picture in the part of the board with the fewest
+   fits. Repeat until the 3 x 3 grid has 2 or 3 fits in each square (about 15 in all).
+5. The grid shows each part of the board: green = right to within 2 %, red = off, amber = not enough fits yet.
+6. Click **Measure every marked picture automatically**: the program finds the robot's outline by itself on every
+   marked picture. The pictures you fitted by hand tell it how much shadow or glow it takes in, and it corrects for
+   that.
+
+Once the dock is printed, choose **the dock's marker strip** in the list and fit its four corners the same way
+(measure the printed strip with calipers first; start the page with `--strip-mm 90.1` if it is not 90.0 mm).
+
+The fits are saved with the marks (`size_fits.csv`) and go up with them.
+
+## 8. From the live view: mark this moment
+
+During a session, the live view (`localhost:8090`) has a **Mark this moment** button under the camera picture.
+Click it when the runner seems to have lost a robot. A new tab opens with the mark page on the **last 20 seconds**
+of pictures of the robot being followed: the ring starts where the runner thought the robot was (the red cross),
+you put it where the robot really is. The session carries on meanwhile. The pictures and marks are saved in the
+session folder, `logs\e02-<date-time>\moments\`, and the marks upload themselves like the others.
 
 ## On a phone instead
 
@@ -116,3 +203,5 @@ py -3 tools\label\mark_robot.py "C:\Users\Nick\Desktop\recordings\20261025-10150
 | The page says "The program is not answering" | The black window was closed: double-click the .bat again (your marks are kept) |
 | The download stops with an error | Check the WiFi, then click the card again (it starts the download over) |
 | "No tracker guesses" under **So far** | The floor calibration file is missing: `git pull` (step 1). You can still mark; the ring follows your last mark |
+| The **Upload to GitHub** box says `No GitHub token` | Part 6 |
+| It says `The upload did not work` | Check the WiFi, then click **Upload now** |
