@@ -24,6 +24,7 @@ import json
 import math
 import os
 import random
+import threading
 
 CONDITIONS = ("U", "C", "K", "KC")
 ROUTES = (1, 2, 3)
@@ -405,12 +406,25 @@ class State:
             raise ValueError("%s was written by another version of e02.py" % p)
         return cls(folder, d)
 
+    _save_lock = threading.Lock()
+
     def save(self):
+        """One writer at a time (2026-10-24 review: the watchdog's holds save too); the dict is copied first so a
+        change from another thread mid-dump can't break it."""
         os.makedirs(self.folder, exist_ok=True)
-        tmp = self.path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(self.d, f, indent=1)
-        os.replace(tmp, self.path)
+        with State._save_lock:
+            for _ in range(3):
+                try:
+                    text = json.dumps(self.d, indent=1)
+                    break
+                except RuntimeError:            # changed size while being written out: try again
+                    continue
+            else:
+                return
+            tmp = self.path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(text)
+            os.replace(tmp, self.path)
 
     def __getitem__(self, k):
         return self.d[k]

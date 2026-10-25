@@ -75,9 +75,11 @@ def test_border_while_exploring_goes_through_the_guard_camera():
 
 def test_hold_blocks_moves_and_left_out_robots_are_not_sent():
     sent = []
-    r = types.SimpleNamespace(hold=threading.Event(), hold_answer=None, held_out=set(),
+    r = types.SimpleNamespace(hold=threading.Event(), hold_answer=None, held_out=set(), hold_owner=None,
+                              stop_requested=False,
                               link=types.SimpleNamespace(send_name=lambda n, c: sent.append((n, c))),
                               say=lambda *a, **k: None)
+    r.raise_if_stopped = types.MethodType(E.Runner.raise_if_stopped, r)
     send = types.MethodType(E.Runner.send, r)
     r.hold.set()
 
@@ -96,10 +98,16 @@ def test_hold_blocks_moves_and_left_out_robots_are_not_sent():
 
 
 def test_hold_stop_answer_ends_the_session():
-    r = types.SimpleNamespace(hold=threading.Event(), hold_answer="s", held_out=set(),
+    r = types.SimpleNamespace(hold=threading.Event(), hold_answer="s", held_out=set(), hold_owner=None,
+                              stop_requested=False,
                               link=types.SimpleNamespace(send_name=lambda n, c: None), say=lambda *a, **k: None)
+    r.raise_if_stopped = types.MethodType(E.Runner.raise_if_stopped, r)
     r.hold.set()
-    threading.Timer(0.3, r.hold.clear).start()
+
+    def answer_s():
+        r.stop_requested = True
+        r.hold.clear()
+    threading.Timer(0.3, answer_s).start()
     try:
         E.Runner.send(r, "Right", "go 10.00 7")
         raise AssertionError("not stopped")
@@ -129,3 +137,23 @@ def test_border_ignores_a_robot_standing_still():
     assert E.Runner.border_check(r, "Left", _track(14.0, 60.0, 12.0, 60.0)) == ""      # settling, not driving
     r.moves["Left"] = dict(run="E806-30", why="U")
     assert E.Runner.border_check(r, "Left", _track(14.0, 60.0, 12.0, 60.0)) != ""      # its firmware run drives it
+
+
+def test_stop_answer_is_sticky_after_the_hold():
+    # 2026-10-24 review: an "s" given while the main thread was not waiting in send() was lost
+    r = types.SimpleNamespace(hold=threading.Event(), held_out=set(), hold_owner=None, stop_requested=True,
+                              link=types.SimpleNamespace(send_name=lambda n, c: None), say=lambda *a, **k: None)
+    r.raise_if_stopped = types.MethodType(E.Runner.raise_if_stopped, r)
+    E.Runner.send(r, "Right", "status")                  # answers only: still allowed
+    try:
+        E.Runner.send(r, "Right", "go 10.00 9")
+        raise AssertionError("moved after s")
+    except KeyboardInterrupt:
+        pass
+
+
+def test_crawl_end_window_drops_older_pictures():
+    r = _stub()
+    r.seek_end = {"Left": 0.25}
+    # samples before 0.25 s were the crawl towards the edge; after it, the robot backs away: allowed
+    assert E.Runner.border_check(r, "Left", _track(16.0, 60.0, 13.0, 60.0)[:3] + _track(13.0, 60.0, 14.0, 60.0, n=3)) == ""

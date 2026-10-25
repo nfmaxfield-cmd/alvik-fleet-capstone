@@ -39,7 +39,8 @@ HEALTHY = dict(
     camera=0.8,    # cm per axis at a find, after the error map (leave one out): 0.71 / 1.03 on 2026-10-24's stages
     wheels=0.6,    # cm per stretch, the wheels' own share: the 2026-10-23 morning's rms 1.25 with the camera's 0.8
     gyro=1.0,      # deg per stretch, the gyro's own share (the morning's rms 1.39 less the camera's heading share)
-    front=4.5,     # cm, front sensor against the map, robust sd (MAD x 1.48): 4.0-4.6 in four sessions
+    front=5.0,     # cm, front sensor against the map after its offset, about zero (MAD x 1.48 about the median:
+                   # 4.0-4.6 in four sessions, medians -3 to +1)
 )
 FLOOR = dict(camera=0.3, wheels=0.2, gyro=0.3, front=1.0)    # learned sds are never taken below these
 DEGRADED_K = 2.0          # chosen: twice its healthy noise = looks bad (DOE: the swap test at 1.5 / 2 / 3)
@@ -47,7 +48,10 @@ RECOVERED_K = 1.5         # chosen: back under this = healthy again (hysteresis:
 MIN_N = dict(camera=4, wheels=3, gyro=3, front=6)     # chosen: evidence items before a sensor's k is used
 DECAY_PER_SESSION = 0.5   # chosen: an item's weight halves every new session
 STRETCH_CAM_FACTOR = math.sqrt(2.0)   # a stretch has two camera ends
-CAM_HEADING_LEN_CM = 40.0             # a typical stretch: the camera's heading noise is about sqrt(2) sd / length
+CAM_HEADING_HEALTHY_DEG = 1.0   # the camera's share of a stretch's heading rms when healthy: the 2026-10-23 morning's
+                                # rms 1.39 deg = sqrt(gyro 1.0^2 + camera 1.0^2); x the camera's k with one robot
+GATE_MAX_CM = 3.0         # chosen: the wheel fit's limit never above this, however noisy the camera looks (2026-10-24
+                          # review: a shared term can't tell "the camera across the board" from "every robot's wheels")
 GATE_K = 1.5              # chosen: refuse a wheel fit only beyond 1.5 x what the camera and healthy wheels explain
 KC_GATE_SIGMA = 3.0       # chosen: a camera position this many sds from the belief means the belief is wrong
 KC_GATE_WEIGHT = 0.9      # then the fix takes this much of the camera
@@ -148,7 +152,18 @@ class SensorTrust:
         csd = self.camera_sd()[0]
         if sensor == "wheels":
             return STRETCH_CAM_FACTOR * csd, "from the finds"
-        return math.degrees(STRETCH_CAM_FACTOR * csd / CAM_HEADING_LEN_CM), "from the finds"
+        return CAM_HEADING_HEALTHY_DEG * csd / HEALTHY["camera"], "from the finds"
+
+    def shared_unexplained(self, sensor="wheels"):
+        """With 2+ robots: is what they all share far more than the camera at the finds explains? Then it is the
+        camera across the board (the finds are all in one corner) or every robot's wheels alike: it can't tell, and
+        says so (2026-10-24 review)."""
+        sh = self.shared_stretch(sensor)
+        if sh is None:
+            return False
+        csd = self.camera_sd()[0]
+        ref = STRETCH_CAM_FACTOR * csd if sensor == "wheels" else CAM_HEADING_HEALTHY_DEG * csd / HEALTHY["camera"]
+        return sh > 2.0 * ref
 
     def own_sd(self, sensor, robot):
         """(sd, n, how): a robot's wheels or gyro, its own share of the stretches' rms (healthy if too little)."""
@@ -160,12 +175,13 @@ class SensorTrust:
         return max(FLOOR[sensor], math.sqrt(max(0.0, rms ** 2 - cam ** 2))), len(its), "camera's share " + how
 
     def front_sd(self, robot):
+        """The front sensor against the map, after the expected offset, about zero: a sensor that reads long or
+        short throughout counts as bad too (2026-10-24 review: about its own median, a bias was invisible)."""
         its = self._items("front", robot)
         if len(its) < MIN_N["front"]:
             return HEALTHY["front"], len(its)
         vals = [it["v"] for it in its]
-        med = sorted(vals)[len(vals) // 2]
-        sd = robust_sd([v - med for v in vals])
+        sd = robust_sd(vals)
         csd = self.camera_sd()[0]
         return max(FLOOR["front"], math.sqrt(max(0.0, sd ** 2 - csd ** 2))), len(its)
 
@@ -205,7 +221,7 @@ class SensorTrust:
         if override is not None:
             return override
         cam, _ = self.camera_stretch_share("wheels")
-        return GATE_K * math.sqrt(cam ** 2 + HEALTHY["wheels"] ** 2)
+        return min(GATE_MAX_CM, GATE_K * math.sqrt(cam ** 2 + HEALTHY["wheels"] ** 2))
 
     def kc_sds(self, robot, robot_sd, camera_sd):
         """KC: the model's sds scaled by what has been learned (the robot's own position: its wheels' k; the
@@ -217,6 +233,9 @@ class SensorTrust:
         csd, cn = self.camera_sd()
         lines = ["camera: %.1f cm per axis at the finds (%d readings; healthy %.1f)%s" % (
             csd, cn, HEALTHY["camera"], " LOOKS BAD" if self.bad("camera") else "")]
+        if self.shared_unexplained("wheels"):
+            lines.append("every robot's stretches are noisier than the camera at the finds explains: the camera away "
+                         "from the find corner, or every robot's wheels alike (can't tell which; tape marks would)")
         for r in robots:
             ws, wn, how = self.own_sd("wheels", r)
             gs, gn, _ = self.own_sd("gyro", r)

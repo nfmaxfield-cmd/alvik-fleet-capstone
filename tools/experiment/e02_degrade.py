@@ -11,7 +11,8 @@ in its state, and the analysis keeps it apart.
                                         or move: the robot drives by it AND reports it (its own position and the
                                         self-calibration's raw counts both wrong by the same factor)
     --degrade gyro:jitter=0.03          the same for the gyro's turns
-    --degrade gyro:drift=0.2            0.2 deg/s more drift than it has
+    (gyro drift is not offered: a drift sent as a correction changes how the robot turns but not what its raw gyro
+    reports, so nothing could see it: 2026-10-24 review)
     --degrade front:bias=5              the front sensor reads 5 cm long
     --degrade front:noise=3             the front sensor's readings with random noise (sd 3 cm)
 Several at once: comma-separated (camera:noise=3,front:bias=5). One robot only: wheels@Center:jitter=0.05.
@@ -36,6 +37,8 @@ def parse(spec):
         sensor, key = sensor.strip().lower(), key.strip().lower()
         if only:
             out.setdefault(sensor, {})["robot"] = only.strip()
+        if sensor == "gyro" and key == "drift":
+            raise ValueError("--degrade gyro:drift is not offered (nothing could see it); use gyro:jitter")
         if sensor not in ("camera", "wheels", "gyro", "front") or not key:
             raise ValueError("--degrade: %r is not sensor:what=amount (camera, wheels, gyro, front)" % part)
         if key == "bias" and "/" in val:
@@ -98,8 +101,6 @@ class Degrade:
         v = dict(values)
         v["wheel_scale"] = v["wheel_scale"] * fw
         v["gyro_scale"] = v["gyro_scale"] * fg
-        if self.applies("gyro", robot):
-            v["gyro_drift_dps"] = v["gyro_drift_dps"] + (self.spec.get("gyro") or {}).get("drift", 0.0)
         return v
 
     def raw_rows(self, robot, rows):

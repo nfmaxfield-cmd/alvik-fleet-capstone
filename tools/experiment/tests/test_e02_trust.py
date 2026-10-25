@@ -140,10 +140,10 @@ def test_degraded_camera_holds_its_offset_then_changes():
 
 
 def test_degraded_wheels_drive_and_report_the_same_factor():
-    d = DG.Degrade("wheels:jitter=0.1,gyro:drift=0.2", seed=3)
+    d = DG.Degrade("wheels:jitter=0.1", seed=3)
     v = d.corrections("Left", dict(gyro_scale=1.07, gyro_drift_dps=0.0, wheel_scale=0.98))
     fw = d.factors[("Left", "wheels")]
-    assert abs(v["wheel_scale"] - 0.98 * fw) < 1e-12 and fw != 1.0 and v["gyro_drift_dps"] == 0.2
+    assert abs(v["wheel_scale"] - 0.98 * fw) < 1e-12 and fw != 1.0 and v["gyro_drift_dps"] == 0.0
     rows = [dict(ms=0, x_cm=0.0, y_cm=0.0, yaw_deg=170.0), dict(ms=100, x_cm=10.0, y_cm=0.0, yaw_deg=-170.0)]
     out = d.raw_rows("Left", rows)
     assert abs(out[1]["x_cm"] - 10.0 * fw) < 1e-9
