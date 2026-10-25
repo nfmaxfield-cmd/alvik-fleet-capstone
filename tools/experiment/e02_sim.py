@@ -191,6 +191,8 @@ class World:
             rb.th = math.radians(ph + rng.uniform(-15, 15))
             rb._record()
             rb.fw_yaw_sign = 0                      # just switched on: needs `calibrate` (the compass check)
+            if getattr(args, "kept_pose", False):
+                rb.kept_pose_err = (rng.gauss(0, 1.5), rng.gauss(0, 1.5), rng.gauss(0, 2.0))
             rb.gyro_scale = rng.uniform(-0.085, -0.055)   # the gyro counts 91.5-94.5% of every turn (real: ~93%)
             rb.world_polys = [list(p_) for p_ in self.polys]
             rb.update_solids()
@@ -581,6 +583,9 @@ def main(argv=None):
     ap.add_argument("--start", default="parks", choices=["parks", "swapped", "scatter", "corners", "edge"],
                     help="where the robots stand at the start: near their park spots, each on another's, anywhere, or "
                          "Nick's 2026-10-22 corners layout")
+    ap.add_argument("--kept-pose", action="store_true",
+                    help="the robots kept a board pose from an earlier session (not switched off): the 2026-10-24 "
+                         "stage-3 case")
     ap.add_argument("--fps", type=float, default=15.0)
     ap.add_argument("--px-per-cm", type=float, default=2.34, help="camera scale on the floor (real footage: 2.34)")
     ap.add_argument("--tilt", type=float, default=3.0, help="camera tilt from straight down, deg")

@@ -1045,6 +1045,13 @@ class Robot(FollowMixin, DockMixin, E02Mixin):
         self.tick_wait(300)
         self.brake()
         self.tick_wait(300)
+        kp = getattr(self, "kept_pose_err", None)
+        if kp is not None and not self.pose.known:
+            # --kept-pose: it was not switched off after a session that set its pose by camera fixes (2026-10-24
+            # Pi plan, stage 3): it still has a board pose, a little off
+            ex, ey, eth = kp
+            self.pose.set(self.x + ex, self.y + ey, math.degrees(self.th) + eth, 1.0, 1.0)
+            self.send("M,(simulation) %s keeps its pose from an earlier session" % self.name)
         return True
 
     def imu_turn_to(self, target):

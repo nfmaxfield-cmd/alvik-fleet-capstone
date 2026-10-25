@@ -6539,6 +6539,8 @@ def main(argv=None):
                          "(--pi 127.0.0.1), the live view is open on the WiFi, questions go on it")
     ap.add_argument("--map-rays", type=int, default=16)
     ap.add_argument("--map-robot", default="", help="which robot maps (default: the first)")
+    ap.add_argument("--dry-kept-pose", action="store_true", help="dry run: the robots kept a board pose from an earlier "
+                    "session (the 2026-10-24 stage-3 case)")
     ap.add_argument("--dry-start", default="parks", choices=["parks", "swapped", "scatter", "corners", "edge"],
                     help="dry run: where the simulated robots stand at the start")
     ap.add_argument("--calib", help="floor calibration file (default: the studio project's cameras/overhead.json)")
@@ -6811,7 +6813,8 @@ def start_sim(state, sdir):
                             "--robots", ",".join(state["robots"]), "--seed", str(state["seed"] % 1000 + 1),
                             "--start", (state["setup"].get("args") or {}).get("dry_start") or "parks"]
                            + (["--bricks", (state["setup"].get("args") or {}).get("dry_bricks")]
-                              if (state["setup"].get("args") or {}).get("dry_bricks") else []),
+                              if (state["setup"].get("args") or {}).get("dry_bricks") else [])
+                           + (["--kept-pose"] if (state["setup"].get("args") or {}).get("dry_kept_pose") else []),
                            stdout=open(os.path.join(simdir, "sim_stdout.txt"), "a"), stderr=subprocess.STDOUT)
     rb = (state["setup"].get("args") or {}).get("dry_remove_board") or ""
     if rb:
