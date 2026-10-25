@@ -574,6 +574,10 @@ class ReplayView(VIEW.LiveView):
         html = html.replace("<body>", "<body>" + BADGE % dict(label=r.label), 1)
         return html.replace("</body>", BAR + "</body>")
 
+    def note(self, text=None, nid=None, now=None):
+        """The Note button writes live moments only: a replay must not add rows, timed now, to the old session."""
+        return dict(ok=False, error="notes are for live sessions; this is a replay")
+
     def status(self):
         r = self.r
         d = super().status()

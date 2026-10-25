@@ -9,7 +9,9 @@ it: the phase, the run, and the runner's last lines (camera / wheels checks, hel
 drive anything. One button saves pictures without steering anything: "Mark this moment" (Nick, 2026-10-25) copies
 the last MOMENT_BEFORE_S seconds of kept pictures, named by the recorder's own frame numbers, into
 <session>/moments/ and opens the mark-the-robot page (tools/label/mark_robot.py) on them in a new tab, to check by
-hand where the runner had the robot.
+hand where the runner had the robot. "Note" (the floating button, 2026-10-25) writes the moment down: the time, the
+time into the session and every robot's position, plus optional words, in <session>/notes_live.csv. A question about
+a picture (ask(..., image=)) shows that picture inside the question.
 
     started by e02.py (--view-port, default 8090; 0 = off); open http://localhost:8090 on the laptop
 """
@@ -132,6 +134,18 @@ tr.grp td{border-bottom:none;padding-top:9px}
 .mm button:hover:not(:disabled){border-color:var(--follow)}.mm button:disabled{opacity:.5;cursor:default}
 .mm span{font-size:12px;color:var(--mut2);overflow-wrap:anywhere}
 .calw h3{font-size:12px;font-weight:500;color:var(--mut2);margin:0 0 4px}
+/* a question about a picture (2026-10-25): the picture inside the question, full width of the left column */
+.ask [hidden]{display:none!important}
+.ask .qimg{display:block;margin:4px 0 6px}.ask #askimgs{margin:0 0 10px}.ask .qimg img{display:block;width:100%;height:auto;border-radius:6px;background:#000}
+.ask .yn{display:flex;gap:8px;margin:8px 0 4px}.ask .yn button{flex:1;margin:0;font-size:17px;padding:12px}
+/* Note: a floating button, any scroll position, phone or computer */
+#noteb{position:fixed;right:16px;bottom:16px;z-index:30;font:600 16px var(--sans);padding:14px 20px;border-radius:28px;border:1px solid #6B5021;background:var(--amber-bg);color:#FFF3DA;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.45)}
+#noteb:disabled{opacity:.6}
+#notes{position:fixed;left:50%;transform:translateX(-50%);bottom:84px;z-index:31;width:min(460px,calc(100vw - 32px));box-sizing:border-box;background:#141922;border:2px solid var(--amber);border-radius:10px;padding:12px}
+#notes .nt{font-size:14px;color:#FFF3DA;margin:0 0 8px}
+#notes input{width:100%;box-sizing:border-box;font:16px var(--sans);padding:10px;border-radius:6px;border:1px solid var(--line);background:#0E1116;color:var(--fg)}
+#notes .nb{display:flex;gap:8px;margin-top:8px}#notes .nb button{flex:1;font:15px var(--sans);padding:10px;border-radius:6px;border:1px solid var(--amber);background:var(--amber-bg);color:#FFF3DA;cursor:pointer}
+#notes .nb button.sec{border-color:var(--line);background:transparent;color:var(--mut2)}
 @media (max-width:1100px){.right{flex-basis:330px}}
 @media (max-width:860px){.two,.calw{grid-template-columns:1fr}}
 @media (max-width:600px){
@@ -155,7 +169,7 @@ tr.grp td{border-bottom:none;padding-top:9px}
  <div class="panel" id="picp">
   <img id="pic" src="/frame.jpg" alt="overhead camera with the runner's view drawn on it">
   <div class="th" id="th"></div>
-  <div class="mm"><button id="mmb" title="Open the mark-the-robot page on the last 20 seconds of pictures">Mark this moment</button><span id="mms">Opens the last 20 s of pictures on the mark page in a new tab, to check by hand where the runner had the robot. The session carries on.</span></div>
+  <div class="mm"><button id="mmb" title="Open the mark-the-robot page on the last 20 seconds of pictures">Mark this moment</button><span id="mms">Opens the last 20 s of pictures on the mark page in a new tab, to check by hand where the runner had the robot. The session carries on. (To just write a moment down, use the Note button at the bottom right.)</span></div>
   <p class="note">The overhead camera's latest picture with what the runner thinks: teal is the board outline (dashed: the same outline at a robot's top height), the amber strip is the virtual border along the open edges, the blue ring is the robot being followed (dashed circle: where it should stand still), yellow dots look like a robot and grey dots are other changes (a hand, a shadow).</p>
   <p class="note" id="bnote" style="display:none"></p>
   <p class="src">Data: the overhead camera through the runner (e02.py), drawn by this page's server about once a second. Tracker line: the tracker's own counters over the last 30 s and the last perf.csv row.</p>
@@ -213,7 +227,11 @@ tr.grp td{border-bottom:none;padding-top:9px}
   <details><summary>The runner's full question</summary><pre id="hprompt"></pre></details>
  </div>
  <div class="panel ask" id="ask" hidden>
-  <h2>The runner asks</h2><pre id="askq"></pre>
+  <h2>The runner asks</h2>
+  <a class="qimg" id="askimga" target="_blank" hidden title="Open the picture full size"><img id="askimg" alt="the picture this question is about"></a>
+  <p class="src" id="askimgs" hidden></p>
+  <pre id="askq"></pre>
+  <div class="yn" id="askyn" hidden><button data-a="y">Yes</button><button data-a="n">No</button></div>
   <input id="askin" placeholder="type an answer (or leave empty)">
   <button id="askbtn">Send</button>
   <p class="src" id="askdef"></p>
@@ -224,6 +242,9 @@ tr.grp td{border-bottom:none;padding-top:9px}
   <p class="src">The runner's last lines (e02_log.txt).</p></div>
 </aside>
 </main>
+<button id="noteb" title="Write down this moment: the time, every robot's position, and a few words if you like">&#9998; Note</button>
+<div id="notes" hidden><p class="nt" id="ntt"></p><input id="ntin" placeholder="What happened? (optional, e.g. Left and Center touched)" maxlength="300">
+ <div class="nb"><button id="ntsave">Save words</button><button id="ntdone" class="sec">Close</button></div><p class="src" id="nts"></p></div>
 <div class="tip" id="tip"></div>
 <script>
 "use strict";
@@ -292,10 +313,34 @@ function askRender(q,hold,force){lastQ=q;lastHold=hold;
   $('hsent').textContent=!qid?'The question is not on this page yet (a dry run with --auto answers its holds by itself).':picked?'Sent: '+WORDS[picked]+'. Waiting for the runner to take it.':'';
   return}
  H.hidden=true;
- if(q&&!sent[String(q.id)]){if(A.dataset.qid!=String(q.id)){A.dataset.qid=q.id;$('askin').value=''}
+ if(q&&!sent[String(q.id)]){if(A.dataset.qid!=String(q.id)){A.dataset.qid=q.id;$('askin').value='';askPic(q)}
   A.hidden=false;$('askq').textContent=q.prompt;
+  $('askyn').hidden=!/\(y\/n\)|\by or n\b/i.test(q.prompt);
   $('askdef').textContent='Empty = the default ('+(q.default||'Enter')+')'+(q.timeout_s?'; no answer in '+Math.round(q.timeout_s/60)+' min = the default':'')}
- else A.hidden=true}
+ else{A.hidden=true;askPic(null)}}
+/* a question about a picture: the picture inside the question, the panel moved to the top of the wide column (and
+   first on a phone), so the picture is big enough to judge */
+function askPic(q){const A=$('ask'),a=$('askimga'),im=$('askimg'),c=$('askimgs');
+ if(q&&q.image){const u='/question-image?id='+q.id;im.src=u;a.href=u;a.hidden=false;c.hidden=false;
+  c.textContent='The picture this question is about: '+q.image_name+' in the session folder, drawn by the runner on the overhead camera\'s picture when it asked. Tap it to open it full size.';
+  const L=document.querySelector('main .left');if(A.parentNode!==L)L.insertBefore(A,L.firstChild);A.style.order='0'}
+ else{a.hidden=true;c.hidden=true;im.removeAttribute('src');
+  const R=document.querySelector('main .right');if(A.parentNode!==R)R.insertBefore(A,$('robots'));A.style.order=''}}
+document.querySelectorAll('#askyn button').forEach(b=>b.onclick=()=>{const A=$('ask');post(A.dataset.qid,b.dataset.a).then(()=>{A.hidden=true;sent[A.dataset.qid]='text';askPic(null)})});
+
+/* Note: the moment is written down on the tap (time, every robot's position); words can be added after */
+let noteId=null;
+$('noteb').onclick=()=>{const b=$('noteb');b.disabled=true;
+ fetch('/note',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(r=>r.json()).then(d=>{
+  if(!d.ok)throw new Error(d.error||'no answer');noteId=d.id;$('ntin').value='';
+  $('ntt').innerHTML='Note '+d.id+' written at <b>'+esc(d.clock)+'</b>'+(d.elapsed?' ('+esc(d.elapsed)+' into the session)':'')+' with '+(d.robots_total?d.robots+' of '+d.robots_total+' robots\' positions'+(d.robots<d.robots_total?' (the others are not known yet)':''):'no robots known yet')+'.';
+  $('nts').textContent='Saved in '+d.file+' in the session folder (it goes up with the session upload).';$('notes').hidden=false;$('ntin').focus()})
+ .catch(e=>{$('ntt').textContent='Not written: '+e.message;$('nts').textContent='';$('notes').hidden=false}).finally(()=>{b.disabled=false})};
+$('ntsave').onclick=()=>{if(noteId==null)return;
+ fetch('/note',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:noteId,text:$('ntin').value})}).then(r=>r.json()).then(d=>{
+  if(!d.ok)throw new Error(d.error||'no answer');$('notes').hidden=true}).catch(e=>{$('nts').textContent='Words not saved: '+e.message})};
+$('ntin').addEventListener('keydown',e=>{if(e.key=='Enter')$('ntsave').click()});
+$('ntdone').onclick=()=>{$('notes').hidden=true};
 
 /* robot cards */
 function spark(vals,lo,hi,col,refs){const w=100,h=22,s=el('svg',{viewBox:'0 0 '+w+' '+h,preserveAspectRatio:'none'});
@@ -454,6 +499,42 @@ MARK_PORT = 8771          # the first port tried for a moment's page (8770 is th
 MARK_ROBOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "label", "mark_robot.py")
 
 
+NOTES_CSV = "notes_live.csv"   # the Note button's moments, in the session folder (the session upload takes it all)
+NOTE_FIRST = ["note", "clock", "elapsed", "text", "phase", "run", "followed", "recorder_frame", "elapsed_s", "t_wall"]
+
+
+def _hms(s):
+    s = int(round(s))
+    return "%d:%02d:%02d" % (s // 3600, s % 3600 // 60, s % 60)
+
+
+def _read_notes(path):
+    """The notes already in the file (a resumed session keeps them)."""
+    import csv
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, newline="") as f:
+            return [dict(q) for q in csv.DictReader(f)]
+    except (OSError, csv.Error):
+        return []
+
+
+def _write_notes(path, rows):
+    """The whole file again (a few dozen rows at most): the columns grow if a robot joins later."""
+    import csv
+    cols = list(NOTE_FIRST)
+    for q in rows:
+        cols += [k for k in q if k not in cols]
+    tmp = path + ".tmp"
+    with open(tmp, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
+        w.writeheader()
+        for q in rows:
+            w.writerow({k: q.get(k, "") for k in cols})
+    os.replace(tmp, path)
+
+
 def _free_port(first, n=20):
     for p in range(first, first + n):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sk:
@@ -511,6 +592,12 @@ class LiveView:
                         body, ctype = json.dumps(view.lab_state()).encode(), "application/json"
                     elif path == "/status.json":
                         body, ctype = json.dumps(view.status()).encode(), "application/json"
+                    elif path == "/question-image":
+                        got = view.question_image(self.path)
+                        if got is None:
+                            self.send_error(404)
+                            return
+                        body, ctype = got
                     else:
                         extra = view.extra_get(self.path)
                         if extra is None:
@@ -530,9 +617,14 @@ class LiveView:
                     pass                        # the browser went away mid-answer (a closed tab): nothing to do
 
             def do_POST(self):
-                if self.path.split("?")[0] == "/mark-moment":
+                if self.path.split("?")[0] in ("/mark-moment", "/note"):
                     try:
-                        out = view.mark_moment()
+                        if self.path.split("?")[0] == "/note":
+                            n = int(self.headers.get("Content-Length") or 0)
+                            d = json.loads(self.rfile.read(n).decode() or "{}")
+                            out = view.note(d.get("text"), d.get("id"))
+                        else:
+                            out = view.mark_moment()
                     except Exception as e:      # never break the session over it
                         out = dict(ok=False, error="%s: %s" % (type(e).__name__, e))
                     body = json.dumps(out).encode()
@@ -593,6 +685,115 @@ class LiveView:
     def stop(self):
         if self.srv:
             self.srv.shutdown()
+
+    # --- a question about a picture (Nick, 2026-10-25: he answered the outline question blind) -------------------
+    def question_image(self, path):
+        """(bytes, content type) of the open question's picture, or None. Only the picture the runner attached to
+        the question now on the page is served (asked for by question id: the page never names a file)."""
+        from urllib.parse import parse_qs, urlparse
+        qid = (parse_qs(urlparse(path).query).get("id") or [""])[0]
+        with self.lock:
+            q = dict(self.question) if self.question else None
+        if not q or not q.get("image") or str(q["id"]) != qid or not os.path.isfile(q["image"]):
+            return None
+        with open(q["image"], "rb") as f:
+            body = f.read()
+        ext = os.path.splitext(q["image"])[1].lower()
+        return body, {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}.get(ext, "application/octet-stream")
+
+    # --- Note (Nick, 2026-10-25): write a moment down from a phone, e.g. two robots touching ----------------------
+    def note(self, text=None, nid=None, now=None):
+        """A tap (nid None): a new row in <session>/NOTES_CSV with the time, the time into the session, the
+        recorder's newest frame, the phase and run, and every robot's position (where it comes from, its heading
+        when known, what it is doing); text: optional words. With nid: the words for that note. Returns dict(ok,
+        id, clock, elapsed, robots, file). Only writes the file: the runner, the robots and the session are not
+        touched."""
+        r = self.r
+        sdir = getattr(r, "dir", None)
+        if not sdir:
+            return dict(ok=False, error="the runner has no session folder")
+        path = os.path.join(sdir, NOTES_CSV)
+        row = None if nid is not None else self._note_row(time.time() if now is None else now)
+        nlock = self.__dict__.setdefault("_note_lock", threading.Lock())
+        with nlock:
+            rows = self.__dict__.get("_notes")
+            if rows is None:
+                rows = self._notes = _read_notes(path)
+            if nid is not None:
+                row = next((q for q in rows if str(q.get("note")) == str(nid)), None)
+                if row is None:
+                    return dict(ok=False, error="no note %s" % nid)
+                row["text"] = str(text or "").strip()
+            else:
+                row["note"] = max([int(q.get("note") or 0) for q in rows] + [0]) + 1
+                row["text"] = str(text or "").strip()
+                rows.append(row)
+            _write_notes(path, rows)
+        robots = len([k for k in row if k.endswith(" x_cm") and row[k] != ""])
+        total = len([k for k in row if k.endswith(" x_cm")])
+        self.log("Note %s at %s%s" % (row["note"], row["clock"], (": " + row["text"]) if row["text"] else ""))
+        return dict(ok=True, id=row["note"], clock=row["clock"], elapsed=row["elapsed"], robots=robots,
+                    robots_total=total, file=NOTES_CSV)
+
+    def _note_row(self, now):
+        r = self.r
+        t0 = getattr(r, "t_launch", None)
+        el = None if t0 is None else max(0.0, now - t0)
+        frame = ""
+        feed = getattr(r, "feed", None)
+        try:
+            if feed is not None and getattr(feed, "keep_s", 0):
+                k = feed.kept(now - 2.0)
+                if k and len(k[-1]) >= 3 and k[-1][2] is not None:
+                    frame = int(k[-1][2])
+        except Exception:
+            pass
+        tr = getattr(r, "tracker", None)
+        row = dict(note=0, clock=time.strftime("%H:%M:%S", time.localtime(now)), t_wall="%.3f" % now,
+                   elapsed_s="" if el is None else "%.1f" % el, elapsed="" if el is None else _hms(el),
+                   recorder_frame=frame, phase=getattr(r, "phase", "") or "", run=str(getattr(r, "order", "") or ""),
+                   followed=(getattr(tr, "active", None) or "") if tr is not None else "", text="")
+        for n in self._names():
+            try:
+                x, y, src = self._note_where(n, now)
+            except Exception:
+                x, y, src = None, None, "unknown"
+            h = None
+            try:
+                h = ((getattr(r, "heads", None) or {}).get(n) or [None])[0]
+                if h is None:
+                    q = (r.st.get("positions") or {}).get(n)
+                    h = q[2] if q and len(q) > 2 else None
+            except Exception:
+                h = None
+            try:
+                doing = self._robot_state(n)[0]
+            except Exception:
+                doing = ""
+            row["%s x_cm" % n] = "" if x is None else "%.1f" % x
+            row["%s y_cm" % n] = "" if y is None else "%.1f" % y
+            row["%s heading_deg" % n] = "" if h is None else "%.0f" % h
+            row["%s where_from" % n] = src
+            row["%s doing" % n] = doing
+        return row
+
+    def _note_where(self, n, now):
+        """(x, y, where the position comes from) for a note: the camera now (the followed robot, seen within 2 s),
+        else the camera's last fix or parked spot of it, else the session state's last position."""
+        r = self.r
+        tr = getattr(r, "tracker", None)
+        if tr is not None and getattr(tr, "active", None) == n:
+            w = tr.where()
+            if w is not None and now - w[0] < 2.0:
+                return w[1], w[2], "camera, now"
+        prot = getattr(tr, "protect", None) if tr is not None else None
+        if prot and n in prot:
+            q = prot[n]
+            return q[0], q[1], "camera, last fix or parked spot"
+        q = (r.st.get("positions") or {}).get(n)
+        if q and q[0] is not None and q[1] is not None:
+            return q[0], q[1], "last known (session state)"
+        return None, None, "unknown"
 
     # --- mark this moment (Nick, 2026-10-25): the mark page on the last pictures, for troubleshooting -------------
     def mark_moment(self, now=None):
@@ -770,6 +971,9 @@ class LiveView:
         note = BRICKS_NOTE if getattr(r, "bricks_view", None) else ""
         with self.lock:
             q = dict(self.question) if self.question else None
+        if q and q.get("image"):
+            q["image_name"] = os.path.basename(q["image"])   # the page asks for it by question id, not by path
+            q["image"] = True
         try:
             live = self.live_state()
         except Exception as e:          # the console must never break the session (or the old fields)
@@ -1434,7 +1638,7 @@ function res(rows){const svg=document.getElementById('res');let hi=8;rows.forEac
   if(v.length){const m=v.reduce((a,r)=>a+r.end_err_cm,0)/v.length;svg.appendChild(svgEl('line',{x1:x-18,x2:x+18,y1:20+160*(1-m/hi),y2:20+160*(1-m/hi),stroke:COL[c],'stroke-width':3}))}
   const t=svgEl('text',{x:x-8,y:200});t.textContent=c+' ('+v.length+')';svg.appendChild(t)});}
 function tick(){pic();fetch('/lab.json').then(r=>r.json()).then(s=>{const f=s.filter||{};
- document.getElementById('robot').textContent=f.robot?('Following '+f.robot+(f.run?' (run '+f.run+')':'')):'No robot moving right now ('+(s.phase||'-')+').';
+ document.getElementById('robot').textContent=f.robot?('Following '+f.robot+(f.run?' (run '+f.run+')':'')+(f.restarts!=null?' · filter restarts this session: '+f.restarts+' (it starts again from the camera when they are '+Math.round(Math.sqrt(f.threshold))+' sigma apart)':'')):'No robot moving right now ('+(s.phase||'-')+').';
  const w=f.weights;if(w){const set=(id,v)=>{document.getElementById(id).style.width=(100*v)+'%'};
   set('p_motion',w.position.motion);set('p_camera',w.position.camera);set('t_gyro',w.turning.gyro);set('t_wheels',w.turning.wheels);
   const txt=(id,v)=>{document.getElementById(id).textContent=Math.round(100*v)+'%'};

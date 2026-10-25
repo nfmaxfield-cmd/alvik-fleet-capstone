@@ -2049,6 +2049,10 @@ def analyse(recording, logs, runs, calib, out, background=None, bump_frame="auto
                         "the robots did not make this session." % src.get("words", "made before this session"))
     elif src:
         notes.insert(0, "Camera calibration: %s." % src.get("words"))
+    if session and (_state(session).get("setup") or {}).get("calibration_doubted"):
+        notes.insert(1 if src else 0, "**Nick said the calibration's green outline did not sit on the board's edges**; "
+                                      "it was used anyway (no other one on hand), so positions near the edges may be "
+                                      "a few cm off.")
     setup = setup_recovery(session, out, video.events or None) if session else None
     write_report(os.path.join(out, "report.md"), rows, bumps, summ, comps, charts, notes, setup=setup)
     return dict(rows=rows, bumps=bumps, summary=summ, comparisons=comps, charts=charts, setup=setup)

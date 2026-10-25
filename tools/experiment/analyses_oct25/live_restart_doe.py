@@ -62,9 +62,9 @@ HFM_MAX_S = 2.0       # ... within this long
 D2R = math.pi / 180.0
 
 
-class Lab(LIVE.LiveLab):
+class Lab(LIVE.LiveLabBefore):
     """The Live lab with the restart threshold and the start rule as parameters. With T=60 and start="today" it does
-    exactly what e02_live.LiveLab does (checked: 301 restarts on stage2, as the units-fix report)."""
+    exactly what e02_live.LiveLabBefore (the Live lab until 2026-10-25) does (checked: 301 restarts on stage2, as the units-fix report)."""
 
     def __init__(self, threshold=60.0, start="today", floor_offsets=None):
         super().__init__()

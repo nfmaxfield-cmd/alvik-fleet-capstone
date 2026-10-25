@@ -723,11 +723,13 @@ class Runner:
         self.say("  [video mark] %s%s" % (text, "" if ok else "  (the Pi didn't confirm it)"), quiet=ok)
         self.st.setdefault("notes", []).append([round(time.time(), 3), text, bool(ok)])
 
-    def web_ask(self, prompt, default, timeout_s, hold=False):
+    def web_ask(self, prompt, default, timeout_s, hold=False, image=None):
         """The Pi run (--web-ask): the question goes on the live page (any phone or computer on the WiFi answers
         it), the console can answer too; after timeout_s with no answer, the default (said loudly). A question
         from anywhere else waits while a hold's question is on the page (the page shows one question: 2026-10-24
-        review, a recovery's question replaced the hold's and the hold could never be answered)."""
+        review, a recovery's question replaced the hold's and the hold could never be answered). image: a picture
+        the question is about (a file path); the page shows it inside the question (Nick, 2026-10-25: he answered
+        the outline question blind)."""
         v = getattr(self, "view", None)
         if v is None:
             return None
@@ -741,6 +743,8 @@ class Runner:
         with v.lock:
             qid = int(time.time() * 1000)
             v.question = dict(id=qid, prompt=prompt.strip(), default=default, timeout_s=timeout_s)
+            if image and os.path.exists(image):
+                v.question["image"] = os.path.abspath(image)
         try:
             while t_end is None or time.time() < t_end:
                 with v.lock:
@@ -764,24 +768,25 @@ class Runner:
             self.say("  answer: %r" % ans)
         return ans
 
-    def ask(self, prompt, default="y"):
+    def ask(self, prompt, default="y", image=None):
+        """image: the picture the question is about (shown inside the question on the live page)."""
         if self.a.auto:
             self.say(prompt + " -> " + default + " (automatic)")
             return default
         if getattr(self.a, "web_ask", False):
-            ans = self.web_ask(prompt, default, WEB_ASK_TIMEOUT_S)
+            ans = self.web_ask(prompt, default, WEB_ASK_TIMEOUT_S, image=image)
             return default if ans is None else (ans or default)
         try:
             return input(prompt).strip()
         except EOFError:
             return default
 
-    def ask_timeout(self, prompt, timeout_s):
+    def ask_timeout(self, prompt, timeout_s, image=None):
         """input() that gives up after timeout_s (None): an unattended session must never wait for ever."""
         if self.a.auto:
             return None
         if getattr(self.a, "web_ask", False):
-            return self.web_ask(prompt, "", timeout_s)
+            return self.web_ask(prompt, "", timeout_s, image=image)
         box = []
         th = threading.Thread(target=lambda: box.append(self._input(prompt)), daemon=True)
         th.start()
@@ -2921,8 +2926,9 @@ class Runner:
                     cal = DEFAULT_CALIB
             if cal and not self.confirm_calibration(cal, img):
                 self.say("The board outline does not line up with this calibration (%s)." % cal)
-                # Nick, 2026-10-22 evening: a "no" goes to the studio's floor calibration, not a stop
-                cal = self.studio_calibration(img)
+                # Nick, 2026-10-22 evening: a "no" is not a stop. 2026-10-25: nor the studio's steps (they assume
+                # a laptop and loop): the stored calibration, said plainly (outline_doubted)
+                cal = self.outline_doubted(cal, img)
         if cal:
             self.say("Floor calibration: %s" % cal)
         else:
@@ -2943,9 +2949,9 @@ class Runner:
                                  PL.Board(), corners)
             self.say("Made %s: %s" % (cal, res["text"]))
             self.say("Open %s: the green outline must sit on the board's edges, 0,0 in the bottom-right corner." % pic)
-            if self.ask("Does the green outline sit on the board's edges? (y/n) ", "y").lower() != "y":
+            if self.ask("Does the green outline sit on the board's edges? (y/n) ", "y", image=pic).lower() != "y":
                 os.remove(cal)
-                cal = self.studio_calibration(img)
+                cal = self.outline_doubted(None, img)
             else:
                 setup["calibration_made_here"] = dict(corners=corners, err_cm=res["err_cm"], text=res["text"])
         st["calibration"] = cal
@@ -2972,6 +2978,23 @@ class Runner:
                      "head into the x-board. The square runs are left out of this session's plan.")
             st["setup"]["square_left_out"] = True
         st.save()
+
+    def outline_doubted(self, cal, img):
+        """Nick said the green outline is off. The stored calibration is used anyway, said plainly here and on every
+        run's line (calib_note); the fix is new corner clicks before the next session. The studio's steps are only
+        for when no calibration is stored at all (2026-10-25 15:26, on the Pi: they assume a laptop and loop)."""
+        stored = cal if cal and os.path.exists(cal) else (DEFAULT_CALIB if os.path.exists(DEFAULT_CALIB) else None)
+        if stored is None:
+            return self.studio_calibration(img)
+        self.say("")
+        self.say("!!! You said the green outline is off. Carrying on with the stored camera calibration anyway "
+                 "(%s): there is no other one here." % os.path.basename(stored))
+        self.say("!!! Positions near the board's edges may be a few cm off. Every run's line and the session summary "
+                 "say so.")
+        self.say("    Before the next session: make a new floor calibration from the board's 4 corners (about 5 min).")
+        self.st["setup"]["calibration_doubted"] = dict(file=stored, t=round(time.time(), 1))
+        self.mark("e02 outline judged off: stored calibration used")
+        return stored
 
     def studio_calibration(self, img):
         """The outline did not line up: Nick makes a floor calibration in the studio while the runner waits, then
@@ -3013,7 +3036,7 @@ class Runner:
         self.say("%s the camera picture with the board's outline in green from the floor calibration%s." % (
             "On screen now:" if shown else "Open", "" if shown else " (" + path + ")"))
         ans = self.ask("Does the green outline sit on the plywood board's 4 edges (within about a finger's width)? "
-                       "Type y or n and press Enter: ", "y").lower()
+                       "Type y or n and press Enter: ", "y", image=path).lower()
         CAM.close_picture()
         ok = ans.startswith("y")
         self.st["setup"]["calibration_confirmed"] = dict(file=cal, answer=ans)
@@ -3049,15 +3072,16 @@ class Runner:
         if self.a.board_sides:
             xs, ys = (int(v) for v in self.a.board_sides.split(","))
         else:
-            CAM.draw_check(img, self.cam, os.path.join(self.dir, "check_board_edges.png"), b0)
-            self.say("Look at the camera picture (also saved as %s)." % os.path.join(self.dir, "check_board_edges.png"))
+            edges_pic = os.path.join(self.dir, "check_board_edges.png")
+            CAM.draw_check(img, self.cam, edges_pic, b0)
+            self.say("Look at the camera picture (also saved as %s)." % edges_pic)
 
             # optional (Nick, 2026-10-22 evening: the robots map the board): Enter takes the usual layout (boards
             # at x = max and y = max); the mapping run then says if a board was felt where an open edge was taken
             def pick(question, words, usual=1):
                 while True:
                     ans = self.ask("%s Type %s or %s, or just press Enter for %s: " % (
-                        question, words[0], words[1], words[usual]), words[usual]).lower()
+                        question, words[0], words[1], words[usual]), words[usual], image=edges_pic).lower()
                     if ans == "":
                         return usual
                     for side, w in words.items():
@@ -3420,10 +3444,13 @@ class Runner:
         src = (self.st.get("setup") or {}).get("calibration_source") or {}
         if src.get("session"):
             return ""
+        doubt = "; Nick said its outline is off" if (self.st.get("setup") or {}).get("calibration_doubted") else ""
         if src.get("kind") == "fallback":
-            return "camera calibration: FALLBACK, %s (explore failed)" % os.path.basename(src.get("file") or "?")
+            return "camera calibration: FALLBACK, %s (explore failed%s)" % (os.path.basename(src.get("file") or "?"),
+                                                                           doubt)
         cal = self.st.get("calibration")
-        return "camera calibration: %s, not made by the robots this session" % (os.path.basename(cal) if cal else "none")
+        return "camera calibration: %s, not made by the robots this session%s" % (
+            os.path.basename(cal) if cal else "none", doubt)
 
     def explore_speed(self, n, cms):
         """e02_cms for the robot's next straight legs (idle go legs drive at it)."""
