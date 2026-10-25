@@ -176,6 +176,10 @@ class FleetSim:
                 a = np.linspace(0, 2 * np.pi, 16, endpoint=False)
                 c, r = o["center"], o["radius"]
                 self.static_polys.append([[c[0] + r * math.cos(t), c[1] + r * math.sin(t)] for t in a])
+        if float(self.m["robot"].get("back_bumper_cm", 0.0) or 0.0) > 0:
+            # switches at the back (map robot.back_bumper_cm): board visits back in until a switch clicks on the board
+            # (follow step P), so the boards must be solid for the switches (fw_dock, as in the touch tests)
+            self.cfg.dock.contact_boards = True
         if self.m.get("home_docks"):          # home docks (hardware/dock): solid, with their floor stripe
             self.cfg.dock.docks = [[d["x"], d["y"], d["heading"]] for d in self.m["home_docks"]]
         params = config.firmware_params()
@@ -386,7 +390,8 @@ class FleetSim:
                 bn = min(docks, key=lambda b: math.hypot(x - docks[b]["dock"][0], y - docks[b]["dock"][1]))
                 dk = docks[bn]
                 u = np.array([math.cos(th), math.sin(th)])
-                front = np.array([x, y]) + self.body.front * u
+                # the face that met the board: the front, or the back attachment's (a backing-in touch step)
+                front = np.array([x, y]) + (-self.body.back if d.get("face") == "back" else self.body.front) * u
                 n = np.array(dk["normal"])
                 gap = float(np.dot(front - np.array(dk["surface"]), n))
                 tang = np.array([-n[1], n[0]])

@@ -55,6 +55,19 @@ DEFAULT_SETTINGS = {
     "turn_settle_s": 0.3,       # pause after each turn
     "drive_settle_s": 0.2,      # pause after a straight run ends
     "dwell_s": 2.0,             # time spent docked at a board
+    # switches at the back (map robot.back_bumper_cm; Nick, 2026-10-25: "switch all bumping activity to backing in"):
+    # a board visit backs in. Backwards there is no distance sensor, so the board is found by touch: back at
+    # approach_cms to touch_lead_cm before the board (by the pose), creep until a back switch clicks (follow step P),
+    # drive forward gap_cm, dwell, drive forward out to the pre-dock.
+    "touch_lead_cm": 3.0,       # chosen: the creep's share (~1.1 cm/s) of the way in. DOE note: 2 / 3 / 5 cm against
+                                # the camera's pose error at the pre-dock (touches that start late / visit time)
+    "touch_over_cm": 1.0,       # chosen: the creep gives up this far past where the board should be ("no switch
+                                # clicked": a missing board). Boards stand against the plywood's side, so the line is
+                                # the edge: the rear caster (4.1 cm behind the axle, back face 6.1) is then 1 cm on
+                                # the plywood, less the pose error (kinematic sim: 0.4 cm; 1.5 left only 0.1 cm).
+                                # DOE note: touches with the board in at camera pose errors 0.3 / 1 / 2 cm (false
+                                # "no click" rate) and with it out (caster margin), as doe-backlog.md "Backing cap"
+    "touch_cms": 1.1,           # firmware dock_rpm 6 = about 1.1 cm/s (timing only)
     "chunk_cm": 15.0,           # long drives are split into steps of at most this
     "tick_s": 0.1,              # time resolution of the plan
     "max_wait_s": 120.0,        # most waiting one robot may add
@@ -391,7 +404,11 @@ def _visit_prims(item, pose, task, grid, docks, s, body):
 
 
 def _visit_tail(pose, board, d, task, s, phase):
-    """The fixed part of a board visit from `phase` on: approach, dwell, back out."""
+    """The fixed part of a board visit from `phase` on: approach, dwell, back out. Backing in (d["reverse"]: the
+    switches at the back): back towards the board to touch_lead_cm before it, the touch (an "approach" step with
+    reverse set: run_plan sends it as follow step P), dwell, then drive forward out to the pre-dock."""
+    if d.get("reverse"):
+        return _visit_tail_back(pose, board, d, task, s, phase)
     out = []
     if phase == "approach":
         ap = drive_prims(pose, d["dock"], s, speed=s.approach_cms, kind="approach", phase="approach",
@@ -404,6 +421,33 @@ def _visit_tail(pose, board, d, task, s, phase):
         phase = "backout"
     if phase == "backout":
         out += drive_prims(pose, d["predock"], s, speed=s.backout_cms, reverse=True, phase="backout",
+                           board=board, task=task, heading=pose[2])
+    return out
+
+
+def _visit_tail_back(pose, board, d, task, s, phase):
+    out = []
+    if phase == "approach":
+        dock = d["dock"]
+        nrm = np.array([math.cos(dock[2]), math.sin(dock[2])])          # away from the board
+        pre = np.array(dock[:2]) + nrm * s.touch_lead_cm                # where the creep starts
+        if float(np.dot(np.array(pose[:2]) - pre, nrm)) > 0.05:
+            out += drive_prims(pose, pre, s, speed=s.approach_cms, reverse=True, phase="approach", board=board,
+                               task=task, heading=dock[2])
+            pose = out[-1]["to"] if out else pose
+        L = math.dist(pose[:2], dock[:2])
+        # creep back L + gap to the click, then forward gap: the time of both, plus the pivot and the press
+        move = (L + 2.0 * d.get("gap_cm", 1.0)) / s.touch_cms + 1.5
+        out.append(prim("approach", pose, [dock[0], dock[1], dock[2]], s, speed=s.touch_cms, move_s=move,
+                        settle=s.drive_settle_s, reverse=True, phase="approach", board=board, task=task))
+        pose = out[-1]["to"]
+        phase = "dwell"
+    if phase == "dwell":
+        out.append(wait_prim(pose, _ticks(s.dwell_s, s), s, phase="dwell", board=board, task=task))
+        phase = "backout"
+    if phase == "backout":
+        # leaving is a FORWARD drive (front sensor and edge guard on): the "backout" phase keeps its name
+        out += drive_prims(pose, d["predock"], s, speed=s.backout_cms, reverse=False, phase="backout",
                            board=board, task=task, heading=pose[2])
     return out
 
@@ -1139,7 +1183,9 @@ def verify(m, plan, step_s=0.02):
                 approach.append(c)
                 if st["type"] == "approach":
                     d = docks[st["board"]]
-                    front = np.array(p["to"][:2]) + body.front * np.array([math.cos(p["to"][2]), math.sin(p["to"][2])])
+                    u_ = np.array([math.cos(p["to"][2]), math.sin(p["to"][2])])
+                    # the face that meets the board: the front, or the back attachment's when backing in
+                    front = np.array(p["to"][:2]) + (-body.back if st.get("reverse") else body.front) * u_
                     gap = float(np.dot(front - np.array(d["surface"]), np.array(d["normal"])))
                     approach.append(("gap", gap))
     gaps = [g[1] for g in approach if isinstance(g, tuple)]
@@ -1185,7 +1231,15 @@ def to_steps(sched, after, s, t0=0.0, committed=0, front_ray=None, gap_cm=1.0, b
                 seen = [front_ray([p["from"][0], p["from"][1], p["from"][2] + d * j / k]) for j in range(k + 1)]
                 seen = [v for v in seen if v is not None]
                 st["front_min_cm"] = min(seen) if seen else None
-        if p["type"] == "approach":
+        if p["type"] == "approach" and p.get("reverse"):
+            # backing in (switches at the back): creep back until a switch clicks, then forward gap_cm (step P)
+            L = math.dist(p["from"][:2], p["to"][:2])
+            st["touch"] = True
+            st["gap_cm"] = gap_cm                    # back face to the board when docked
+            st["back_cm"] = gap_cm
+            st["handover_cm"] = s.handover_cm        # unused backwards; kept so run_plan's format check passes
+            st["max_travel_cm"] = round(L + gap_cm + s.touch_over_cm, 2)
+        elif p["type"] == "approach":
             L = math.dist(p["from"][:2], p["to"][:2])
             st["gap_cm"] = gap_cm                    # front of the robot (the bumper, if fitted) to the board
             if bumper_cm:
@@ -1297,7 +1351,8 @@ def make_plan(m, jobs=None, over=None, t0_s=0.0, replan_of=None, events=None, t_
             "settings": dict(s), "priority_order": info["priority_order"],
             "docks": {b: {"dock": FM.pose_out(pl.docks[b]["dock"]), "predock": FM.pose_out(pl.docks[b]["predock"])}
                       for b in used},
-            "events": events or [], "warnings": pl.warnings, "stranded": info["stranded"], "robots": robots}
+            "events": events or [], "warnings": pl.warnings, "stranded": info["stranded"], "robots": robots,
+            "switches_back": FM.switches_back(m)}
     rep = verify(m, plan)
     fin = [r["finish_s"] for r in robots.values()]
     plan["summary"] = {"makespan_s": max(fin) if fin else 0.0, "sum_finish_s": round(sum(fin), 2),
@@ -1354,14 +1409,16 @@ def with_home(m, homes):
     return m2, a
 
 
-def home_step(d, frm, t0, max_extra_cm=3.0, back_cm=0.0, bump_ahead_cm=BUMP_AHEAD_CM):
-    """The creep-in step (run_plan sends it as follow step K): from the mouth pose `frm` ([x, y, deg])."""
-    to = FM.pose_out(FM.home_docked_pose(d, bump_ahead_cm))
+def home_step(d, frm, t0, max_extra_cm=3.0, back_cm=0.0, bump_ahead_cm=BUMP_AHEAD_CM, back=False):
+    """The creep-in step (run_plan sends it as follow step K): from the mouth pose `frm` ([x, y, deg]). back: the
+    switches at the back (firmware sw_back 1): it backs in, and K's heading is the way the docked robot faces (out of
+    the dock: the map's heading + 180; dock.h)."""
+    to = FM.pose_out(FM.home_docked_pose(d, bump_ahead_cm, back=back))
     L = math.dist(frm[:2], to[:2])
     dur = L / 1.0 + 6.0                   # ~1 cm/s creep, pivot, seat, standing still for the gyro
     return {"i": 0, "type": "home", "phase": "home", "from": list(frm), "to": to, "t_start": t0,
             "t_end": round(t0 + dur, 2), "move_s": round(dur, 3), "board": None, "task": None, "after": [],
-            "speed": 1.0, "dock": d["name"], "wall": [d["x"], d["y"], d["heading"]],
+            "speed": 1.0, "dock": d["name"], "wall": [d["x"], d["y"], (d["heading"] + 180.0) % 360.0 if back else d["heading"]],
             "max_travel_cm": round(L + max_extra_cm, 2), "back_cm": back_cm}
 
 
@@ -1376,7 +1433,7 @@ def append_home(plan, assigned):
             continue
         frm = steps[-1]["to"] if steps else rob["start"]
         t0 = steps[-1]["t_end"] if steps else 0.0
-        st = home_step(d, frm, t0)
+        st = home_step(d, frm, t0, back=bool(plan.get("switches_back")))
         st["i"] = len(steps)
         steps.append(st)
         rob["finish_s"] = st["t_end"]

@@ -158,6 +158,7 @@ class Sim:
         self.s = P.settings(plan["settings"])
         self.docks = FM.docks(self.m)
         self.boards = {b["name"]: G.segment_rect(b["p1"], b["p2"], b["thickness_cm"]) for b in self.m["boards"]}
+        self.gone_boards = set()      # boards taken away without telling the plan (a backing-in touch finds none)
         self.robots = {n: Robot(n, FM.pose_in(r["start"]), np.random.default_rng(seed * 101 + i), sp)
                        for i, (n, r) in enumerate(plan["robots"].items())}
         self.t = 0.0
@@ -336,6 +337,9 @@ class Sim:
                         return
                 self.move(r, v, w + r.run["drift"], dt)
                 return
+            if st.get("touch"):
+                self.touch_step(r, st, bel, dt)
+                return
             # approach: creep until the front sensor reads the stop distance
             polys = list(self.boards.values()) + ([self.brick] if self.brick is not None else [])
             stop_at = st.get("gap_cm") or self.m["dock"]["gap_cm"]
@@ -395,6 +399,42 @@ class Sim:
         if self.t >= r.run["until"] - 1e-9:
             self.finish_step(r, 0.0)
 
+    def touch_step(self, r, st, bel, dt):
+        """Backing in (switches at the back; follow step P, firmware dock.h): creep backwards holding the board's
+        heading until the back face meets the board (a switch clicks; pressing both squares it to the board), then
+        drive forward back_cm on the wheels. No click within the step's travel cap: the step fails."""
+        d = self.docks[st["board"]]
+        n = np.array(d["normal"])
+        x, y, th = r.true
+        u = np.array([math.cos(th), math.sin(th)])
+        gap = float(np.dot(np.array([x, y]) - self.body.back * u - np.array(d["surface"]), n))
+        if r.run.get("touch_out") is None:
+            cap = r.run.get("cap", st.get("max_travel_cm", 20.0))
+            if gap <= 1e-6 and st["board"] not in self.gone_boards:
+                r.true[0] -= gap * n[0]                       # pressed flat against it
+                r.true[1] -= gap * n[1]
+                r.true[2] = math.atan2(n[1], n[0])            # both switches pressed: square to the board
+                r.run["touch_out"] = st.get("back_cm", 0.0) * (1 + self.sp["wheel_err"] * r.rng.standard_normal())
+                return
+            if r.run["travel"] >= cap - 1e-9:
+                r.run["capped"] = True
+                self.end_approach(r, st, failed=True)
+                return
+            hd = math.radians(st["to"][2])
+            w = float(np.clip(3.0 * G.wrap(hd - bel[2]), -math.radians(10), math.radians(10)))
+            ds = min(r.run["v"] * dt, cap - r.run["travel"])
+            if st["board"] not in self.gone_boards:
+                ds = min(ds, gap / max(0.2, abs(float(np.dot(u, n)))))
+            self.move(r, -ds / dt if dt > 0 else 0.0, w, dt)
+            r.run["travel"] += ds
+            return
+        if r.run["touch_out"] <= 1e-9:
+            self.end_approach(r, st)
+            return
+        ds = min(3.0 * dt, r.run["touch_out"])
+        self.move(r, ds / dt if dt > 0 else 0.0, 0.0, dt)
+        r.run["touch_out"] -= ds
+
     def move(self, r, v, w, dt):
         th = r.true[2]
         r.true[0] += v * math.cos(th) * dt
@@ -405,7 +445,8 @@ class Sim:
         d = self.docks[st["board"]]
         x, y, th = r.true
         u = np.array([math.cos(th), math.sin(th)])
-        front = np.array([x, y]) + self.body.front * u
+        # the face that meets the board: the front, or the back attachment's when backing in (a touch step)
+        front = np.array([x, y]) + (-self.body.back if st.get("touch") else self.body.front) * u
         n = np.array(d["normal"])
         gap = float(np.dot(front - np.array(d["surface"]), n))
         tang = np.array([-n[1], n[0]])

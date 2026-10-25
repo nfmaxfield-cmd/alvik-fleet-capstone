@@ -625,7 +625,17 @@ left, heading degrees, 0 = +x, counter-clockwise positive. Poses are
   The planner's footprint (length, front) includes it; a board dock's `gap_cm`
   is then from the bumper; approach steps tell the robot gap + bumper (and
   handover + bumper), what its distance sensor on the shell measures.
-  `run_plan.py --home` sets it to the printed bumper if it is 0.
+  `run_plan.py --home` sets it to the printed bumper if it is 0 (not when `back_bumper_cm` is set).
+  `back_bumper_cm` (default 0; 2026-10-25): the one attachment at the robot's BACK (switches, ID lights,
+  charging pads), sticking out this far behind the shell, or `"fitted"` (the bracket mirrored, 1.34 cm:
+  back face 6.09 cm behind the axle, firmware `e02_back_face_cm`); `back_bumper_w_cm` its width (default
+  the bracket's). Set, it means the switches are at the back: every board visit backs in (dock pose facing
+  away from the board, its back face `gap_cm` from it; the plan backs to `touch_lead_cm` before the board,
+  then an `approach` step with `touch: true` and `reverse: true`, sent as follow step P: creep back until a
+  switch clicks, then forward `gap_cm`; leaving is a forward drive), every home dock is entered backwards
+  (mouth pose and docked pose facing out of the dock, step K's heading = the map's heading + 180), the plan
+  says `"switches_back": true`, and run_plan.py sends `set sw_on 1`, `set sw_back 1` and `set
+  e02_back_face_cm` before the follow runs.
 - `dock.gap_cm`: front face to board surface when docked.
   `dock.predock_cm`: how far out the slow, straight final approach starts.
 - `boards`: the "machines". `p1`, `p2` are the two ends of the board's centre

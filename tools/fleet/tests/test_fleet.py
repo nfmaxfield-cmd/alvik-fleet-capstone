@@ -686,3 +686,129 @@ def test_nose_bumper_lengthens_the_footprint_and_the_board_gap_stays():
           "gap_cm": 1.0, "max_travel_cm": 20.0, "bumper_cm": 1.34}
     parts = RP.step_command(1, st).split()
     assert float(parts[10]) == pytest.approx(2.34) and float(parts[9]) == pytest.approx(5.34)
+
+
+# ----------------------------------------------------------------------------
+# Switches at the back (Nick, 2026-10-25: "switch all bumping activity to backing in")
+# ----------------------------------------------------------------------------
+
+def back_map():
+    m = demo_map()
+    m["robot"]["back_bumper_cm"] = "fitted"
+    return m
+
+
+def test_back_attachment_docks_facing_away_with_the_back_face_at_the_gap():
+    base = {"boards": [{"name": "A", "p1": [30, 2], "p2": [50, 2], "thickness_cm": 1.5}]}
+    m = FM.normalize(dict(base, robot={"back_bumper_cm": "fitted"}))
+    assert FM.switches_back(m) and FM.back_face_cm(m) == pytest.approx(4.75 + FM.BUMPER_FITTED_CM)
+    b = FM.body_of(m)
+    assert b.back == pytest.approx(FM.back_face_cm(m)) and b.front == pytest.approx(4.75)
+    d = FM.docks(m)["A"]
+    assert d["reverse"] and math.degrees(d["dock"][2]) == pytest.approx(90.0)      # facing away from the board
+    assert d["dock"][1] == pytest.approx(2 + 0.75 + 1.0 + FM.back_face_cm(m))
+    corners = b.corners([d["dock"]])[0]
+    assert G.polygon_polygon_dist(corners, G.segment_rect([30, 2], [50, 2], 1.5)) == pytest.approx(1.0, abs=1e-9)
+    assert not FM.docks(FM.normalize(base))["A"]["reverse"]                         # no attachment: nose first
+
+
+def test_back_visit_is_turn_away_back_touch_dwell_drive_out():
+    import run_plan as RP
+    sys.path.insert(0, os.path.join(os.path.dirname(FLEET), "sim"))
+    import random as rnd
+    import config as SC
+    import robot as SR
+    m = back_map()
+    plan = P.make_plan(m)
+    assert plan["switches_back"]
+    ver = P.verify(m, plan)
+    assert ver["min_separation_cm"] >= 5.0 and all(g == pytest.approx(1.0, abs=1e-6) for g in ver["planned_dock_gaps_cm"])
+    s = P.settings()
+    rb = SR.Robot("Left", SC.load_config(), rnd.Random(1), SC.firmware_params(), "t", 0.0, 1, "ip")
+    rb.f_active = True
+    touches = 0
+    for n, r in plan["robots"].items():
+        st = r["steps"]
+        for i, x in enumerate(st):
+            if x["type"] != "approach":
+                continue
+            touches += 1
+            assert x["touch"] and x["reverse"]
+            assert st[i - 1]["type"] == "drive" and st[i - 1]["reverse"] and st[i - 1]["phase"] == "approach"
+            assert st[i + 1]["type"] == "wait" and st[i + 1]["phase"] == "dwell"
+            assert st[i + 2]["phase"] == "backout" and not st[i + 2]["reverse"]       # leaving: forwards
+            assert x["max_travel_cm"] == pytest.approx(s.touch_lead_cm + 1.0 + s.touch_over_cm, abs=0.05)
+            text = RP.step_command(100 + touches, x)
+            assert text.split()[2] == "P"
+            rb.follow_command(*text.split(" ", 1))
+            q = rb.f_q.pop()
+            assert (q["h"], q["max_travel"], q["back"]) == pytest.approx((x["to"][2], x["max_travel_cm"], 1.0), abs=0.01)
+    assert touches == 6
+
+
+def test_back_visits_dock_within_tolerance_in_the_kinematic_sim():
+    m = back_map()
+    plan = P.make_plan(m)
+    sim = SP.Sim(m, copy.deepcopy(plan), dict(SP.DEFAULT_SIM), seed=1, verbose=False)
+    res = sim.run_sim()
+    assert res["finished"] and not res["collision"] and res["dockings"] == 6 and res["docking_all_ok"]
+    assert res["dock_gap_error_cm_max"] <= SP.DEFAULT_SIM["dock_tol_cm"]
+
+
+def test_missing_board_backing_in_stops_on_the_cap():
+    """A board taken away: the touch creep stops at its cap (touch_over_cm past the line) and the step fails, the
+    back face never more than that past the board's line (the rear caster stays on the plywood)."""
+    m = back_map()
+    plan = P.make_plan(m)
+    gone = plan["robots"]["Left"]["steps"][[x["type"] for x in plan["robots"]["Left"]["steps"]].index("approach")]["board"]
+    sim = SP.Sim(m, copy.deepcopy(plan), dict(SP.DEFAULT_SIM), seed=1, verbose=False)
+    sim.gone_boards.add(gone)
+    sim.run_sim()
+    bad = [d for d in sim.docking if d["board"] == gone]
+    assert bad and all(d["failed"] and d["travel_cap_reached"] for d in bad), bad
+    past = [-d["front_gap_cm"] for d in bad]            # how far the back face went past the board's line
+    assert all(v <= P.settings().touch_over_cm + 0.6 for v in past), past
+    assert all(v < FM.back_face_cm(FM.normalize(m)) - 4.1 for v in past), past   # the rear caster stays on
+
+
+def test_going_home_backwards_faces_out_of_the_dock():
+    import run_plan as RP
+    m = back_map()
+    m["home_docks"] = [{"name": "h1", "x": 112.0, "y": 100.0, "heading": 0.0},
+                       {"name": "h2", "x": 10.0, "y": 100.0, "heading": 180.0}]
+    mn = FM.normalize(m)
+    d = FM.home_dock(mn, "h1")
+    assert math.degrees(FM.home_mouth_pose(mn, d)[2]) == pytest.approx(180.0)      # its back to the mouth
+    m2, assigned = P.with_home(m, {"Right": "h1"})
+    plan = P.make_plan(m2)
+    P.append_home(plan, assigned)
+    last = plan["robots"]["Right"]["steps"][-1]
+    assert last["type"] == "home" and last["wall"][2] == pytest.approx(180.0)
+    assert abs(G.wrap(math.radians(last["to"][2] - 180.0))) < 1e-6
+    assert RP.step_command(9, last).split()[2] == "K"
+
+
+@pytest.mark.skipif(not os.environ.get("FLEET_DRYRUN"), reason="about 90 s: set FLEET_DRYRUN=1 to run")
+def test_dry_run_end_to_end_backing_in(tmp_path):
+    """run_plan.py against tools/sim/fleet_sim.py with the back attachment: every board visit backs in (follow step P,
+    sw_back 1) and every docking is close."""
+    import socket
+    import subprocess
+    try:
+        sk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sk.bind(("0.0.0.0", 5005))
+        sk.close()
+    except OSError:
+        pytest.skip("port 5005 is in use (another console or a dry run is going)")
+    mp = tmp_path / "map.json"
+    mp.write_text(json.dumps(back_map()))
+    out = tmp_path / "s"
+    r = subprocess.run([sys.executable, os.path.join(FLEET, "run_plan.py"), "--map", str(mp), "--dry-run",
+                        "--session", str(out), "--yes"], capture_output=True, text=True, timeout=400)
+    s = json.load(open(out / "run_plan_summary.json"))
+    sim = s.get("simulator", {})
+    why = "%s\nsimulator: %s" % (r.stdout[-3000:], {k: v for k, v in sim.items() if k not in ("dockings", "events")})
+    assert s["result"] == "done", why
+    assert not sim["collision"], why
+    assert len(sim["dockings"]) == 6 and sim["dock_gap_error_cm_max"] < 0.4, why
+    assert not s["boards_not_visited"], why

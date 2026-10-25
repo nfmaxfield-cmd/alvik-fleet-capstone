@@ -25,7 +25,7 @@ DEFAULT_MAP = {
     "version": VERSION,
     "units": "cm, degrees",
     "floor": {"x_min": 0.0, "x_max": 122.0, "y_min": 0.0, "y_max": 122.0},
-    "robot": {"length_cm": 9.5, "width_cm": 9.5, "front_offset_cm": 4.75, "bumper_cm": 0.0},
+    "robot": {"length_cm": 9.5, "width_cm": 9.5, "front_offset_cm": 4.75, "bumper_cm": 0.0, "back_bumper_cm": 0.0},
     "dock": {"gap_cm": 1.0, "predock_cm": 15.0},
     "boards": [],
     "keepouts": [],
@@ -104,6 +104,9 @@ def normalize(m):
         out[k].update(m.get(k) or {})
     if str(out["robot"].get("bumper_cm")).lower() in ("fitted", "true", "yes"):
         out["robot"]["bumper_cm"] = BUMPER_FITTED_CM       # the printed nose bumper (hardware/dock)
+    if str(out["robot"].get("back_bumper_cm")).lower() in ("fitted", "true", "yes"):
+        out["robot"]["back_bumper_cm"] = BUMPER_FITTED_CM  # the one attachment at the back (v3: the bracket mirrored)
+    for k in ("floor", "robot", "dock"):
         for kk, vv in out[k].items():
             try:
                 out[k][kk] = float(vv)
@@ -259,7 +262,21 @@ def body_of(m):
     r = m["robot"]
     b = r.get("bumper_cm", 0.0)
     bw = r.get("bumper_w_cm", BUMPER_W_FITTED_CM) if b else 0.0
-    return G.Body(r["length_cm"], r["width_cm"], r["front_offset_cm"], b, bw)
+    rb = r.get("back_bumper_cm", 0.0)
+    rbw = r.get("back_bumper_w_cm", BUMPER_W_FITTED_CM) if rb else 0.0
+    return G.Body(r["length_cm"], r["width_cm"], r["front_offset_cm"], b, bw, rb, rbw)
+
+
+def switches_back(m):
+    """The switches are on the robot's back attachment (robot.back_bumper_cm set; Nick, 2026-10-25): every touch
+    of a board or a home dock backs in."""
+    return float(m["robot"].get("back_bumper_cm", 0.0) or 0.0) > 0.0
+
+
+def back_face_cm(m):
+    """Axle (the tracked centre) to the back attachment's face, cm (firmware e02_back_face_cm: 6.10 for v3)."""
+    r = m["robot"]
+    return r["length_cm"] - r["front_offset_cm"] + float(r.get("back_bumper_cm", 0.0) or 0.0)
 
 
 # ----------------------------------------------------------------------------
@@ -273,6 +290,10 @@ def dock_for(m, board):
     `dock_at` along the board (0.5 = its middle), square to the board. The
     robot's centre sits gap + front_offset from the board surface, so its
     front face is `gap_cm` from the surface; heading points at the board.
+    With the switches at the back (switches_back): it backs in instead, so
+    its back face is `gap_cm` from the surface and it faces away from the
+    board ("reverse": True); the planner reaches it by backing until a back
+    switch clicks, then driving forward gap_cm (follow step P).
     """
     p1 = np.array(board["p1"], float)
     p2 = np.array(board["p2"], float)
@@ -286,12 +307,18 @@ def dock_for(m, board):
         side = "left" if np.dot(centre - mid, n_left) >= 0 else "right"
     n = n_left if side == "left" else -n_left
     surface = mid + n * board["thickness_cm"] / 2
-    off = m["dock"]["gap_cm"] + m["robot"]["front_offset_cm"] + m["robot"].get("bumper_cm", 0.0)   # gap from the bumper
+    rev = switches_back(m)
+    if rev:
+        off = m["dock"]["gap_cm"] + back_face_cm(m)                                   # gap from the back face
+        heading = math.atan2(n[1], n[0])                                              # facing away from the board
+    else:
+        off = m["dock"]["gap_cm"] + m["robot"]["front_offset_cm"] + m["robot"].get("bumper_cm", 0.0)   # from the bumper
+        heading = math.atan2(-n[1], -n[0])
     d = surface + n * off
     p = d + n * m["dock"]["predock_cm"]
-    heading = math.atan2(-n[1], -n[0])
     return {"board": board["name"], "side": side, "normal": n.tolist(), "surface": surface.tolist(),
-            "dock": [float(d[0]), float(d[1]), heading], "predock": [float(p[0]), float(p[1]), heading]}
+            "dock": [float(d[0]), float(d[1]), heading], "predock": [float(p[0]), float(p[1]), heading],
+            "reverse": rev, "gap_cm": float(m["dock"]["gap_cm"])}
 
 
 def docks(m):
@@ -321,17 +348,18 @@ def home_dock_outline(d):
 
 def home_mouth_pose(m, d):
     """Where a robot going home stops before creeping in: [x, y, rad], axle mouth_cm in front of the mouth,
-    facing into the dock."""
+    facing into the dock (switches at the back: facing out of it, its back to the mouth, so it backs in)."""
     f = _dock_frame(d)
     x = -(d["pocket_depth_cm"] + d["funnel_len_cm"]) - d["mouth_cm"]
     p = f(x, 0.0)
-    return [p[0], p[1], math.radians(d["heading"])]
+    return [p[0], p[1], math.radians(d["heading"]) + (math.pi if switches_back(m) else 0.0)]
 
 
-def home_docked_pose(d, bump_ahead_cm):
-    """Robot pose [x, y, rad] when flush in the dock (axle bump_ahead_cm behind the back wall's inner face)."""
+def home_docked_pose(d, bump_ahead_cm, back=False):
+    """Robot pose [x, y, rad] when flush in the dock (axle bump_ahead_cm from the back wall's inner face; the map's
+    dock heading points from the mouth to the wall). back: switches at the back, so the docked robot faces out."""
     p = _dock_frame(d)(-bump_ahead_cm, 0.0)
-    return [p[0], p[1], math.radians(d["heading"])]
+    return [p[0], p[1], math.radians(d["heading"]) + (math.pi if back else 0.0)]
 
 
 def home_dock(m, name):

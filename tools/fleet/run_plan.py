@@ -174,6 +174,9 @@ def step_command(sid, st):
         return "fs %d D %.2f %.2f %.2f %.2f %.2f %.2f %d %s" % (
             sid, st["from"][0], st["from"][1], st["to"][0], st["to"][1], st["from"][2], st["speed"],
             1 if st.get("reverse") else 0, _f(st.get("front_min_cm")))
+    if t == "approach" and st.get("touch"):
+        # backing in (switches at the back, firmware sw_back 1): creep back until a switch clicks, forward gap_cm
+        return "fs %d P %.2f %.2f %.2f" % (sid, st["to"][2], st["max_travel_cm"], st.get("back_cm", 0.0))
     if t == "approach":
         return "fs %d A %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %s" % (
             sid, st["from"][0], st["from"][1], st["to"][0], st["to"][1], st["to"][2], st["speed"],
@@ -1149,8 +1152,9 @@ def main(argv=None):
                          "(repeatable)")
     ap.add_argument("--home", action="append", default=[], metavar="ROBOT[=DOCK]",
                     help="send ROBOT home: plan its route to a home dock's mouth (map home_docks; nearest free one "
-                         "unless =DOCK), then it creeps in until both nose switches click (firmware dock.h). "
-                         "Repeatable; 'all' = every robot. Also sends 'set sw_on 1'.")
+                         "unless =DOCK), then it creeps in until both nose switches click (firmware dock.h; with the "
+                         "back attachment, robot.back_bumper_cm in the map: it backs in until both back switches "
+                         "click). Repeatable; 'all' = every robot. Also sends 'set sw_on 1'.")
     ap.add_argument("--site-map", help="locked site map (tools/site/setup.py): warn when the robots' front sensors "
                                        "keep disagreeing with a landmark on it (tools/site/change.py)")
     g = ap.add_argument_group("dry run against the simulator (tools/sim/fleet_sim.py)")
@@ -1171,12 +1175,17 @@ def main(argv=None):
     if homes:
         if args.plan:
             raise SystemExit("--home plans the route itself: leave out --plan")
-        if not m["robot"].get("bumper_cm"):
+        if not m["robot"].get("bumper_cm") and not FM.switches_back(FM.normalize(m)):
             m["robot"]["bumper_cm"] = FM.BUMPER_FITTED_CM
             print("--home: the robots wear the nose bumper: planning with it (%.2f cm in front of the shell); set "
                   "robot.bumper_cm in the map to change it" % FM.BUMPER_FITTED_CM)
         m, assigned = P.with_home(m, homes)
         args.send = list(args.send) + ["set sw_on 1"]
+    if FM.switches_back(FM.normalize(m)):
+        # the one attachment at the back (Nick, 2026-10-25): board visits and home docks back in (follow steps P, K)
+        args.send = list(args.send) + ["set sw_on 1", "set sw_back 1",
+                                       "set e02_back_face_cm %.2f" % FM.back_face_cm(FM.normalize(m))]
+        print("Switches at the back (map robot.back_bumper_cm): every board visit and home dock backs in")
     if args.plan:
         with open(args.plan, encoding="utf-8") as f:
             plan = json.load(f)

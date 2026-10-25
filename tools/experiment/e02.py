@@ -92,6 +92,7 @@ import e02_camerr as CE  # noqa: E402
 import e02_trust as TR  # noqa: E402
 import e02_load as LD  # noqa: E402
 import e02_front as FR  # noqa: E402
+import e02_unc as UNC  # noqa: E402
 import e02_degrade as DG  # noqa: E402
 
 
@@ -153,11 +154,13 @@ FRONT_MIN_COS = 0.7       # the front-sensor check only counts boards met within
 # stops and takes a fresh camera fix. Model constants chosen from session 1 (calibrated runs ~1.4 cm after ~200 cm):
 # wheel scale ~1% left after self-calibration, heading 0.5 deg + 0.5% of what it turned. The threshold: Nick 3 cm,
 # to be settled by a DOE (docs/experiments/DOE-confidence.md).
+# 2026-10-25 (Nick: "create a calibration run that establishes this on its own, without simulators"): the four model
+# numbers are now LEARNED every session from the robot's own camera corrections (e02_unc.py: earlier sessions', then
+# this session's own from 30 corrections on, reported when they differ), saved in logs/unc_learned.json. These are
+# only where a robot with no history starts: the logs DOE's refit (turning 0.014 per degree, was 0.005; 673
+# corrections, docs/build-reports/e02-oct25-logs-doe.md row 1). --no-unc-learn keeps them fixed.
 CONF_PAUSE_CM = 3.0
-UNC_BASE_CM = 0.5
-UNC_PER_CM = 0.01
-UNC_DEG = 0.5
-UNC_DEG_PER_DEG = 0.005
+UNC_BASE_CM, UNC_PER_CM, UNC_DEG, UNC_DEG_PER_DEG = UNC.DEFAULT
 # Item 5 (Nick, 2026-10-23: option a): pictures older than this are "late": the robot drives on its own wheels and
 # gyro, and the front sensor reading a board square on corrects its position along that board's axis.
 LATE_PICTURE_S = 1.0
@@ -181,6 +184,10 @@ BORDER_FW = ("2026-10-25a", "2026-10-25b")   # firmware with the robot's own vir
 # back with the safety settings and again before every find (a robot switched off and on loses them; it would then
 # find nose first, which still works). The find then backs into each board (firmware 2026-10-25b, e02.h REVERSE
 # FIND). e02_back_face_cm: hardware/dock/build_attachment_v3.py's rear bar (a design number, to be tape-measured).
+# The boards stand on the cement pressed against the plywood's side (Nick, 2026-10-25), so a board's line is the
+# plywood's edge: touching it, the rear caster (4.1 cm behind the axle) is 2 cm inside the edge. The firmware's
+# backing cap (e02_find_keep_cm 2) is left as it is: the look before backing is what keeps a robot off an edge where
+# a board was taken away (firmware e02.h REVERSE FIND; build report e02-oct25-backing-unc.md, item B).
 BACK_SETTINGS = (("sw_on", 1.0), ("sw_back", 1.0), ("e02_find_reverse", 1.0), ("e02_back_face_cm", 6.10))
 BACK_FW = ("2026-10-25b",)
 # Backups (Nick, 2026-10-23: "build in backup plans in case our session goes poorly ... get as much data as possible
@@ -573,6 +580,9 @@ class Runner:
         self.speed_now = {}                   # e02_cms last set per robot (explore crawls)
         self.return_after = []                # robots that stepped aside, to go back to their spots
         self.unc = {}                         # item 4: driven and turned since the last fix, per robot
+        # item 4's model, learned every session from the robot's own camera corrections (e02_unc.py)
+        self.uncm = UNC.UncModel(os.path.join(REPO, "logs", "unc_learned%s.json" % (
+            "-dryrun" if getattr(a, "dry_run", False) else "")))
         self.lost_place = set()              # robots that moved unseen with no trusted pose since (a failed own find)
 
     # --- talking ----------------------------------------------------------------------------------
@@ -909,6 +919,8 @@ class Runner:
         on) gets its calibration first, then one more try. Returns the run id or None."""
         before = self.watch.started.get(robot)
         t0 = time.time()
+        if cmd != "run find" and robot in getattr(self, "unc", {}):
+            self.unc[robot]["clean"] = False     # its own driving is not in unc: no uncertainty correction until a fix
         if self.tracker is not None and self.tracker.active == robot:
             self.tracker.clear_expect()          # a run drives it: the camera must follow it anywhere
         self.send(robot, cmd)
@@ -1010,18 +1022,68 @@ class Runner:
 
     def fix_now(self, robot, heading=None, position_only=False):
         """Tell the robot where the camera sees it (`fix x y th t_wall`; while idle it replaces its pose).
-        position_only: the heading is left to the robot's own gyro ("-")."""
+        position_only: the heading is left to the robot's own gyro ("-").
+        heading None: the runner's heading goes with the fix only if it was MEASURED (heads[robot][1]); otherwise
+        "-" and the robot keeps its own gyro heading (2026-10-25 heading diagnosis, docs/build-reports/
+        e02-oct25-heading.md fix 1: 100 of 112 30-deg+ heading errors were unmeasured runner headings written in by
+        fixes). Only a robot with no pose of its own (the firmware refuses a first fix without a heading) still gets
+        the unmeasured one; that fix is marked, and the uncertainty model does not learn from the stretch after it."""
         if self.tracker is None or self.tracker.active != robot:
             return None                  # the camera follows another robot (or none): no position for this one
         p = self.settle(min_s=0.3)
         if p is None:
             return None
-        h = None if position_only else (heading if heading is not None else self.heads.get(robot, [None])[0])
+        h0, meas = (self.heads.get(robot) or [None, False])[:2]
+        own = self.own_pose(robot) if getattr(self, "listener", None) is not None else None
+        guessed = False
+        if position_only:
+            h = None
+        elif heading is not None:
+            h = heading
+            # an explicit heading counts as measured when it is the runner's measured one (callers pass measured
+            # headings: a find, explore's frame, the bricks crossing, a heading push)
+            guessed = not (meas and h0 is not None and abs(ST.wrap180(h - h0)) < 0.5)
+        elif meas:
+            h = h0
+        elif own is None:
+            h, guessed = h0, h0 is not None   # no pose at all: it needs some heading (begin_moves' placeholder)
+        else:
+            h = None                         # unmeasured: the robot's own gyro heading is the better one
+        self.unc_learn(robot, own, p)        # how far off its own pose was (e02_unc), before the fix
         self.send(robot, "fix %.2f %.2f %s %.3f" % (p[0], p[1], "-" if h is None else "%.1f" % h, time.time()))
         self.fix_t[robot] = time.time()
         self.unc_reset(robot)
+        if guessed:
+            # the heading it now holds was not measured: a correction after this stretch says nothing about its
+            # wheels and gyro (e02_unc would learn the placeholder's error); it is learned again after the next fix
+            self.unc[robot]["clean"] = False
+            self.st.setdefault("fix_unmeasured_heading", []).append([round(time.time(), 1), robot, round(h, 1)])
         time.sleep(0.15)
         return p
+
+    HEADING_PUSH_DEG = 8.0        # heading fix 3 (e02-oct25-heading.md): chosen, about the noise of a 10 cm leg's
+    # direction. DOE: doe-backlog.md "Heading push after a measured go leg" (logs, heading_legs.csv)
+
+    def heading_push(self, robot, heading):
+        """Heading fix 3: a go leg just MEASURED the heading (the camera saw it drive straight): if the robot's own
+        heading differs by more than HEADING_PUSH_DEG, send it now (a fix with that heading), so a wrong heading the
+        robot holds (a placeholder, a U run's end heading) is corrected on the first measuring leg. Returns True if
+        it was sent. Logged (heading_pushes)."""
+        if heading is None:
+            return False
+        own = self.own_pose(robot)
+        if own is None or own[2] is None:
+            return False
+        d = ST.wrap180(heading - own[2])
+        if abs(d) <= self.HEADING_PUSH_DEG:
+            return False
+        self.heads[robot] = [heading, True]
+        if self.fix_now(robot, heading) is None:
+            return False
+        self.st.setdefault("heading_pushes", []).append([round(time.time(), 1), robot, round(own[2], 1),
+                                                         round(heading, 1), round(d, 1)])
+        self.say("    %s: its own heading was %.0f deg off the measured one: corrected" % (robot, d), quiet=True)
+        return True
 
     def begin_moves(self, robot, why="moving"):
         """Camera-steered moves that are not measurements (parking, finding a robot, putting it back) are idle
@@ -1032,8 +1094,17 @@ class Runner:
         if robot in self.moves:
             return True
         self.set_corrections(robot, self.move_corrections(robot))
-        h = self.heads.get(robot, [None])[0]
-        self.fix_now(robot, h if h is not None else self.board.face_xboard)
+        h, measured = (self.heads.get(robot) or [None, False])[:2]
+        if measured and h is not None:
+            self.fix_now(robot, h)
+        elif self.own_pose(robot) is not None:
+            # heading fix 2 (e02-oct25-heading.md): it has a pose of its own: keep its gyro heading (the +-90 deg
+            # placeholder written here caused 76 of the 112 30-deg+ heading errors)
+            self.fix_now(robot, position_only=True)
+        else:
+            # no pose at all: the firmware needs a heading with its first fix; the placeholder until the first
+            # measuring leg (heading_push then corrects it)
+            self.fix_now(robot, h if h is not None else self.board.face_xboard)
         self.moves[robot] = dict(run="-", why=why)
         return True
 
@@ -1101,13 +1172,59 @@ class Runner:
         return "lost", "no answer"
 
     def unc_cm(self, robot, extra_go=0.0, extra_turn=0.0):
-        """The robot's own position uncertainty (1 sd, cm) since its last camera fix or find (item 4)."""
+        """The robot's own position uncertainty (1 sd, cm) since its last camera fix or find (item 4), by its
+        learned model (e02_unc)."""
         u = self.unc.setdefault(robot, dict(dist=0.0, turned=0.0))
         d, t = u["dist"] + abs(extra_go), u["turned"] + abs(extra_turn)
-        return UNC_BASE_CM + UNC_PER_CM * d + d * math.radians(UNC_DEG + UNC_DEG_PER_DEG * t)
+        return float(UNC.sd_of(self.unc_params(robot), d, t))
+
+    def unc_params(self, robot):
+        """(base, per_cm, deg, deg_per_deg) of the uncertainty model in use for this robot: learned (e02_unc), or the
+        fixed starting values with --no-unc-learn."""
+        um = getattr(self, "uncm", None)
+        if um is None or getattr(getattr(self, "a", None), "no_unc_learn", False):
+            return (UNC_BASE_CM, UNC_PER_CM, UNC_DEG, UNC_DEG_PER_DEG)
+        return um.params(robot)
 
     def unc_reset(self, robot):
-        self.unc[robot] = dict(dist=0.0, turned=0.0)
+        # clean: nothing but idle legs since (a run's own driving is not counted here, so a correction after one
+        # says nothing about this model: unc_learn leaves it out)
+        self.unc[robot] = dict(dist=0.0, turned=0.0, clean=True)
+
+    def unc_learn(self, robot, own, cam, kind="fix", dist=None, turned=None):
+        """One camera correction for the uncertainty model (e02_unc): the robot's own position `own` just before the
+        camera's `cam` replaced it, with what it drove and turned since its last fix (this robot's unc, or given).
+        Logged (unc_obs.csv); a changed robot is said loudly. Never stops the session."""
+        um = getattr(self, "uncm", None)
+        if um is None or own is None or cam is None:
+            return
+        try:
+            if dist is None:
+                u = self.unc.get(robot) or {}
+                if not u.get("clean") or (u.get("dist", 0.0) <= 0.0):
+                    return                       # a run since the last reset, or nothing driven: not this model's
+                dist, turned = u["dist"], u.get("turned", 0.0)
+            corr = math.hypot(cam[0] - own[0], cam[1] - own[1])
+            ce_ = getattr(self, "camerr", None)
+            csd = ce_.corrected(cam[0], cam[1])[2] if ce_ is not None else None
+            words = um.add(robot, dist, turned or 0.0, corr, csd, kind=kind)
+            path = os.path.join(self.dir, "unc_obs.csv")
+            new = not os.path.exists(path)
+            with open(path, "a", newline="") as f:
+                w = csv.writer(f)
+                if new:
+                    w.writerow(["t", "robot", "kind", "dist_cm", "turned_deg", "correction_cm", "cam_sd_cm",
+                                "sd_model_cm", "model_from"])
+                m_ = um.model(robot)
+                w.writerow([round(time.time(), 2), robot, kind, round(dist, 1), round(turned or 0.0, 1),
+                            round(corr, 2), "" if csd is None else round(csd, 2),
+                            round(float(UNC.sd_of(m_["p"], dist, turned or 0.0)), 2), m_["src"]])
+            if words:
+                self.say("!!! UNCERTAINTY: " + words + ".")
+                self.mark("e02 uncertainty changed %s" % robot)
+                self.st.setdefault("unc_changes", []).append([round(time.time(), 1), robot, words])
+        except Exception as e:
+            self.say("  (uncertainty correction not learned: %s)" % e, quiet=True)
 
     def leg_pause_ms(self):
         """The stand-still after every leg of a mode-0 run (all conditions alike), long enough for a KC camera fix
@@ -1179,6 +1296,7 @@ class Runner:
         if kind != "go":
             return
         now_sd, after_sd = self.unc_cm(robot), self.unc_cm(robot, extra_go=val)
+        u0 = dict(self.unc.get(robot) or {})
         if after_sd <= CONF_PAUSE_CM:
             return
         late = self.pictures_late()
@@ -1190,7 +1308,8 @@ class Runner:
         if p is not None:
             self.unc_reset(robot)
         row = [round(time.time(), 2), robot, round(now_sd, 2), round(after_sd, 2), CONF_PAUSE_CM, what,
-               self.order or "", "" if corr is None else corr]
+               self.order or "", "" if corr is None else corr, round(u0.get("dist", 0.0), 1),
+               round(u0.get("turned", 0.0), 1)]
         self.st.setdefault("confidence_pauses", []).append(row)
         path = os.path.join(self.dir, "confidence.csv")
         new = not os.path.exists(path)
@@ -1198,7 +1317,7 @@ class Runner:
             w = csv.writer(f)
             if new:
                 w.writerow(["t", "robot", "sd_now_cm", "sd_after_cm", "threshold_cm", "what", "order",
-                            "correction_cm"])
+                            "correction_cm", "dist_cm", "turned_deg"])
             w.writerow(row)
         self.say("    %s: %s (its position uncertainty would reach %.1f cm, over %.0f)" % (
             robot, what, after_sd, CONF_PAUSE_CM), quiet=True)
@@ -1771,6 +1890,8 @@ class Runner:
             if res.startswith("refused") or res.startswith("could not"):
                 return False, "it refused the leg: " + res
             steer.after(cmd, p0, p1)
+            if run is None and cmd[0] == "go" and steer.measured and "obstacle" not in res:
+                self.heading_push(robot, steer.heading)      # heading fix 3
             if "obstacle" in res and cmd[0] in ("go", "probe") and cmd[1] > 0:
                 # its front stop saw something (a board, another robot): the heading guess was wrong or the way
                 # is blocked. Back off first (2026-10-22: turning on the spot against a board, then planning straight
@@ -3838,6 +3959,7 @@ class Runner:
             if p0 and p1 and math.hypot(p1[0] - p0[0], p1[1] - p0[1]) >= ST.MIN_HEADING_CM:
                 self.heads[robot] = [ST.bearing(p0, p1), True]
                 self.say("  %s faces %.0f deg" % (robot, self.heads[robot][0]))
+                self.heading_push(robot, self.heads[robot][0])    # heading fix 3: tell the robot at once
                 return p1
             if "disagree" in words and self.disagree[robot] >= 2:
                 return None
@@ -3911,7 +4033,8 @@ class Runner:
                 if abs(turn) >= ST.MIN_TURN_DEG:
                     self.leg(robot, ("turn", turn))
                 self.heads[robot] = [h, False]
-                self.fix_now(robot, h)
+                # heading fix 4: h is the COMMANDED heading after a turn: its own gyro saw the real turn
+                self.fix_now(robot, position_only=self.own_pose(robot) is not None)
                 p0, p1, words = self.leg(robot, ("go", MAP.RAY_CM))
                 lid = self.main_lid.get(robot)
                 fin = self.listener.leg_final(robot, "-", lid) or {}
@@ -4364,7 +4487,8 @@ class Runner:
         if p is None or h is None:
             c["failed"] = "the camera did not see where it starts, or which way it faces"
             return c
-        self.fix_now(robot, h)
+        # heading fix 4: the runner's heading only if measured; else its own gyro's (fix_now decides)
+        self.fix_now(robot, h if measured else None)
         goal = tuple(ch["goal"])
         pts = [tuple(p)] + [tuple(q) for q in ch["path"]["points"][1:]]
         c.update(start_cam=[round(p[0], 2), round(p[1], 2)], start_heading=round(h, 1), heading_measured=bool(measured))
@@ -4739,6 +4863,33 @@ class Runner:
         if getattr(self.a, "edge_find", False) or self.board.missing:
             return self.edge_find(robot, order)
         out = self.do_board_find(robot, order)
+        tried = None
+        if not out["ok"] and find_hold_kind(out.get("result")):
+            # backing in found no board: the runner's own recovery first (Nick, 2026-10-25 11:05: "contacting the
+            # user should be a last resort"); only what it cannot settle reaches the hold below
+            out, settled, tried = self.find_recover(robot, order, out)
+            if settled:
+                return out
+        holds = 0
+        while not out["ok"] and find_hold_kind(out.get("result")) and holds < FIND_HOLD_MAX:
+            # backing in found no board, and the recovery ladder did not settle it: stop everyone and ask Nick
+            holds += 1
+            ans = self.find_hold(robot, out, tried if holds == 1 else None)
+            if ans == "a":
+                self.say("    %s: Nick: the board is not there: finding itself against any two boundaries instead "
+                         "(the edge find)" % robot)
+                ef = self.edge_find(robot, order)
+                ef["board_find"] = out
+                return ef
+            if ans != "c":
+                out["words"] = "find stopped: %s (Nick: %s)" % (find_hold_kind(out.get("result")),
+                                                                 "leave it out" if ans == "o" else "stop")
+                return out
+            self.say("    %s: trying the find again after a fresh camera fix" % robot)
+            if not self.activate(robot):
+                out["words"] = "find stopped: the camera can't see it after the hold"
+                return out
+            out = self.do_board_find(robot, order)      # its first step is a fresh camera fix
         if out.get("ok") and out.get("board_lines"):
             self.learn_board_lines(robot, out["board_lines"])
         why = "%s %s %s" % (out.get("result"), out.get("runend"), self.listener.latest("FIND", robot, out["t0"]) or "")
@@ -4749,6 +4900,199 @@ class Runner:
             ef["board_find"] = out
             return ef
         return out
+
+    # --- recovery ladder for a backing-in find that found no board (Nick, 2026-10-25 11:05) -------------------
+    FIND_LOOK_TOL_CM = 15.0       # chosen: the look sees the board if the front sensor reads no more than this past
+    # where the map puts it (the firmware's look allows e02_find_see_cm 20 from the staging point; nearer here).
+    # DOE: doe-backlog.md "Look allowance" (the same readings with the board in and lifted out set both)
+    FIND_LINE_TOL_CM = 3.0        # chosen: the camera's board line within this of the setup's = the board is there
+    FIND_LOOK_ROOM_CM = 15.0      # the look's turn on the spot only this far (axle) from the board's line: the body
+    # with the back attachment sweeps ~7.7 cm when it turns (geometry, no DOE)
+    FIND_RESTAGE_CM = 35.0        # chosen: the second try starts this far out from the board, at another place
+    FIND_RESTAGE_ALONG_CM = 25.0  # ... at least this far along it from where the first try started
+
+    def find_recover(self, robot, order, out):
+        """The runner's own recovery steps after "no board seen" / "no board behind" (each logged in
+        find_recoveries and said): (1) a fresh camera fix (its position, and its heading only if measured);
+        (2) look: turn to face where the board should be and read the front sensor, and re-measure that board's line
+        in the camera picture; (3) if either says the board is there: the find again from another staging point
+        (FIND_RESTAGE_CM out, elsewhere along the board); (4) if both say it is gone: the map marks it missing (an open
+        edge from now on, as the edge find does: the virtual border keeps the robots off it, and routes are
+        rechecked) and the robot finds itself against the other boundaries (the edge find). Returns (out, settled,
+        tried): settled True if no hold is needed; tried is the list of plain-word steps for the hold's message."""
+        res = out.get("result") or ""
+        kind = find_hold_kind(res)
+        m = re.search(r"\b([xy]) board", res)
+        which = m.group(1) if m else None
+        rec = dict(t=round(time.time(), 1), robot=robot, order=order, kind=kind, board=which, steps=[])
+        self.st.setdefault("find_recoveries", []).append(rec)
+        tried = []
+
+        def step(name, words, **kw):
+            rec["steps"].append(dict(step=name, words=words, **kw))
+            tried.append(words)
+            self.say("    %s: find recovery (%s): %s" % (robot, name, words))
+            self.mark("e02 find recovery %s %s" % (robot, name))
+        self.say("  %s: the find found no board (%s); trying to sort it out before calling Nick" % (robot, kind))
+        # (1) a fresh camera fix
+        p = self.fix_now(robot) if self.activate(robot) else None
+        step("fix", "a fresh camera fix: %s" % ("it is at (%.0f, %.0f) cm" % tuple(p[:2]) if p is not None
+                                                 else "the camera could not see it"), ok=p is not None)
+        if p is None or which is None:
+            return out, False, tried
+        # (2) look: the front sensor facing the board, and the camera picture of its line
+        front, expect = self.find_look(robot, which, p)
+        seen_front = None if front is None and expect is None else (
+            front is not None and expect is not None and front <= expect + self.FIND_LOOK_TOL_CM)
+        step("look", "facing the %s-board its front sensor read %s (the board should be about %s)" % (
+            which, "nothing" if front is None else "%.0f cm" % front, "?" if expect is None else "%.0f cm" % expect),
+            front_cm=front, expected_cm=None if expect is None else round(expect, 1), sees=seen_front)
+        line = self.camera_board_line(which)
+        ref = ((self.st.get("setup") or {}).get("board_lines_image") or {}).get(which) or {}
+        ref_v = ref.get("value") if not ref.get("from_edge") else None
+        if ref_v is None:
+            ref_v = self.board.xboard_cm if which == "x" else self.board.yboard_cm
+        seen_cam = None if line is False else (line is not None and abs(line - ref_v) <= self.FIND_LINE_TOL_CM)
+        step("picture", "the camera picture %s" % (
+            "could not be checked" if line is False else "shows no line where the %s-board stands" % which
+            if line is None else "shows the %s-board's line at %.1f cm (%s %.1f at setup)" % (
+                which, line, "as" if seen_cam else "not as", ref_v)), line_cm=None if line in (None, False) else
+            round(line, 2), sees=seen_cam)
+        # (4) both say it is gone: the map changes, and the robot finds itself against the other boundaries
+        if seen_front is False and seen_cam is False:
+            self.board_gone(robot, which, "the front sensor and the camera picture both say so")
+            step("missing", "the front sensor and the camera both say the %s-board is gone: the map now has an open "
+                            "edge there, and %s finds itself against the other boundaries" % (which, robot))
+            ef = self.edge_find(robot, order)
+            ef["board_find"] = out
+            ef["recovery"] = rec
+            return ef, True, tried
+        # (3) the board looks there (or one check could not tell): the find again from another staging point
+        spot = self.restage_spot(which, p)
+        if spot is not None:
+            ok_, why_ = self.drive_to(robot, spot, max_leg=PARK_LEG_CM, arrive_cm=4.0)
+            self.end_moves(robot)
+        else:
+            ok_, why_ = False, "no room for another staging point"
+        if ok_:
+            out2 = self.do_board_find(robot, order)
+            step("retry", "the find again from (%.0f, %.0f) cm: %s" % (spot[0], spot[1], "it worked" if out2["ok"] else
+                                                                        out2.get("result") or out2["words"]),
+                 ok=bool(out2["ok"]))
+            out2["recovery"] = rec
+            if out2["ok"] or not find_hold_kind(out2.get("result")):
+                return out2, out2["ok"], tried
+            out = out2
+        else:
+            step("retry", "could not move to another staging point (%s)" % why_, ok=False)
+        return out, False, tried
+
+    def find_look(self, robot, which, p):
+        """Recovery step 2: turn to face the board (the x-board is a line y = xboard_cm, the y-board x = yboard_cm)
+        and read the front sensor. Returns (reading cm or None, where the map puts the board from the sensor)."""
+        b = self.board
+        line = b.xboard_cm if which == "x" else b.yboard_cm
+        here = p[1] if which == "x" else p[0]
+        face = (90.0 if line > here else -90.0) if which == "x" else (0.0 if line > here else 180.0)
+        own = self.own_pose(robot)
+        h = own[2] if own is not None else (self.heads.get(robot) or [None])[0]
+        if h is None or not self.begin_moves(robot, "looking for the %s-board" % which):
+            return None, None
+        if abs(line - here) < self.FIND_LOOK_ROOM_CM:
+            # right against the board ("no board behind" leaves it there, facing away): turning on its spot would
+            # sweep its corners into the board, so first forward, away from it
+            if math.cos(math.radians(h - face)) > -0.7:
+                self.end_moves(robot)
+                return None, None                 # not facing away: no safe way to make room
+            self.leg(robot, ("go", self.FIND_LOOK_ROOM_CM - abs(line - here) + 2.0))
+            q = self.settle(min_s=0.3, timeout=2.0)
+            if q is not None:
+                here = q[1] if which == "x" else q[0]
+        t = ST.wrap180(face - h)
+        if abs(t) >= ST.MIN_TURN_DEG:
+            self.leg(robot, ("turn", t))
+        f = self.front_now(robot)
+        off, _tol = self.front_limits(robot)
+        expect = abs(line - here) - PL.ROBOT_HALF_CM + off
+        self.end_moves(robot)
+        return f, expect
+
+    def camera_board_line(self, which):
+        """Recovery step 2: the board's floor line in the camera's newest picture (cm), None if no line is seen
+        there, False if there is no picture to check."""
+        img = getattr(self.feed, "last_img", None) if self.feed is not None else None
+        if img is None or self.cam is None:
+            return False
+        try:
+            m = CAM.measure_board_line(img, self.cam, self.board, which)
+        except Exception:
+            return False
+        return None if m is None else float(m["value"])
+
+    def restage_spot(self, which, p):
+        """Recovery step 3: another staging point for the find: FIND_RESTAGE_CM out from the board, at least
+        FIND_RESTAGE_ALONG_CM along it from where the robot is, on the board and away from the open edges."""
+        b = self.board
+        line = b.xboard_cm if which == "x" else b.yboard_cm
+        here_n = p[1] if which == "x" else p[0]
+        out_n = line - self.FIND_RESTAGE_CM if line > here_n else line + self.FIND_RESTAGE_CM
+        lo, hi = (b.x0, b.x1) if which == "x" else (b.y0, b.y1)
+        lo, hi = min(lo, hi), max(lo, hi)
+        here_a = p[0] if which == "x" else p[1]
+        mid = (lo + hi) / 2.0
+        cands = [mid, mid - 30.0, mid + 30.0, lo + 30.0, hi - 30.0]
+        for a in sorted(cands, key=lambda v: -abs(v - here_a)):
+            if abs(a - here_a) < self.FIND_RESTAGE_ALONG_CM:
+                continue
+            x, y = (a, out_n) if which == "x" else (out_n, a)
+            if b.on_board(x, y, margin=-15.0) and b.edge_room(x, y)[0] >= 20.0:
+                return (x, y)
+        return None
+
+    def board_gone(self, robot, which, why):
+        """The map marks a board missing (an open edge from now on), as the edge find does when it feels one."""
+        if which in self.board.missing:
+            return
+        self.board.missing.add(which)
+        v = self.board.xboard_cm if which == "x" else self.board.yboard_cm
+        self.st.setdefault("board_changes", []).append([round(time.time(), 1), robot, "%s board gone (%s)" % (which, why),
+                                                        v])
+        self.recheck_routes("the %s board is gone" % which)
+        self.say("    the %s-board is gone (%s): the map now has an open edge there; the robots keep the virtual "
+                 "border's distance from it" % (which, why))
+        self.mark("e02 board gone %s" % which)
+        self.st["board"] = self.board.to_dict()
+
+    def find_hold(self, robot, out, tried=None):
+        """A backing-in find that found no board (firmware 2026-10-25b: "no board seen", the look before turning
+        round; "no board behind", the backing cap): hold everyone and ask Nick (hold_for_nick, kind 'find') with
+        what happened, which board, where the robot is and what to check. Returns his answer: c (try again after a
+        fresh camera fix), a (the board is gone: the edge find), o (leave it out), s (stop)."""
+        res = out.get("result") or ""
+        why, detail = find_hold_words(robot, res, self.find_hold_where(robot), self.board)
+        if tried:
+            detail = "What the runner tried first: " + "; ".join(tried) + ". " + detail
+        self.st.setdefault("find_holds", []).append([round(time.time(), 1), robot, find_hold_kind(res), res])
+        return self.hold_for_nick(robot, "find", why, detail=detail)
+
+    def find_hold_where(self, robot):
+        """(x, y, heading or None, where from) of the robot for a find hold: the camera's, else its own pose."""
+        q = None
+        try:
+            w = self.pos(robot, fresh_s=3.0)              # tracker.where(): (t, x, y, ...)
+            if w is not None:
+                q = (w[1], w[2])
+            elif self.tracker is not None and self.tracker.active == robot:
+                q = self.settle(min_s=0.3, timeout=2.0)   # (x, y)
+        except Exception:
+            q = None
+        h = (self.heads.get(robot) or [None])[0]
+        if q is not None:
+            return (float(q[0]), float(q[1]), h, "the camera")
+        own = self.own_pose(robot) if self.listener is not None else None
+        if own is not None:
+            return (own[0], own[1], own[2], "its own wheels and gyro")
+        return None
 
     BOARD_LEARN_MIN_N = 3          # chosen: three touches before a board line moves (one odd touch must not)
     BOARD_LEARN_STEP_CM = 0.5      # chosen: smaller differences are left (the camera's own noise)
@@ -5146,7 +5490,7 @@ class Runner:
                     pass
             time.sleep(0.2)
 
-    def hold_for_nick(self, robot, kind, why):
+    def hold_for_nick(self, robot, kind, why, detail=None):
         """Stop every robot and wait for Nick's answer (the live page, or the console): no timeout carries on by
         itself (Nick: "pause and wait for my guidance so we don't lose all 3 robots to the same problem"). kind is
         'border' or 'lost'. Returns his answer: 'c' carry on, 'a' carry on and find lost robots again without
@@ -5154,7 +5498,10 @@ class Runner:
         session (sticky: every move after it raises KeyboardInterrupt in the main thread; --resume later).
         2026-10-24 review: nothing drives during a hold (an "o" only records where the robot was last seen), the
         stop is sent again every HOLD_RESTOP_S while it waits, and a question asked by another part of the runner
-        waits for the hold's answer instead of replacing it on the page."""
+        waits for the hold's answer instead of replacing it on the page.
+        kind 'find' (a backing-in find found no board; find_hold): detail says where it is and what to check (the
+        live page shows it under the question); 'c' tries the find again after a fresh camera fix, 'a' means "the
+        board is gone" (the edge find; it does not change how lost robots are handled)."""
         if self.stop_requested:
             self.raise_if_stopped()
             return "s"
@@ -5190,7 +5537,7 @@ class Runner:
             try:
                 self.stop_everyone()
                 threading.Thread(target=keep_stopping, daemon=True).start()
-                rec = [round(time.time(), 1), robot, kind, why, self.order, None, None]
+                rec = [round(time.time(), 1), robot, kind, why, self.order, None, None, detail or ""]
                 try:
                     self.mark("e02 hold %s %s: %s" % (kind, robot, why))
                     self.st.setdefault("holds", []).append(rec)
@@ -5199,12 +5546,20 @@ class Runner:
                     self.say("  (hold: could not record it: %s)" % e, quiet=True)
                 print("\n" + "!" * 78)
                 self.say("HOLD: every robot is stopped. %s: %s." % (robot, why))
+                if detail:
+                    self.say(detail)
                 self.say("The session waits for your answer (no time limit).")
                 print("!" * 78)
-                prompt = ("HOLD (%s): %s: %s. Every robot is stopped. Answer: c = carry on, a = carry on and find lost "
-                          "robots again without asking from now on, o = leave %s out (it stays where it is), s = stop "
-                          "the session (--resume later): " % ("virtual border" if kind == "border" else "lost robot",
-                                                              robot, why, robot))
+                if kind == "find":
+                    prompt = ("HOLD (find stopped): %s: %s. Every robot is stopped. Answer: c = carry on (it tries the "
+                              "find again after a fresh camera fix), a = the board is gone (it finds itself against "
+                              "any two edges instead), o = leave %s out (it stays where it is), s = stop the session "
+                              "(--resume later): " % (robot, why, robot))
+                else:
+                    prompt = ("HOLD (%s): %s: %s. Every robot is stopped. Answer: c = carry on, a = carry on and find "
+                              "lost robots again without asking from now on, o = leave %s out (it stays where it is), "
+                              "s = stop the session (--resume later): " % (
+                                  "virtual border" if kind == "border" else "lost robot", robot, why, robot))
                 t0 = time.time()
                 while True:
                     a_ = self.hold_ask(prompt)
@@ -5215,14 +5570,16 @@ class Runner:
                     self.say("  (answer c, a, o or s)", quiet=True)
                     time.sleep(1.0)
                 rec[5], rec[6] = ans, round(time.time() - t0, 1)
-                self.say("  Nick's answer: %s" % dict(c="carry on", a="carry on; lost robots found again without "
-                                                       "asking from now on", o="leave %s out" % robot,
-                                                       s="stop the session")[ans])
+                self.say("  Nick's answer: %s" % dict(
+                    c="carry on" + (": the find again after a fresh camera fix" if kind == "find" else ""),
+                    a="the board is gone: the edge find" if kind == "find" else
+                    "carry on; lost robots found again without asking from now on", o="leave %s out" % robot,
+                    s="stop the session")[ans])
                 if ans == "o" and not self.leave_out(robot):
                     self.say("  Nobody knows where %s is, so the others could drive into it: the session stops "
                              "instead (--resume later)." % robot)
                     ans = "s"
-                if ans == "a":
+                if ans == "a" and kind != "find":
                     self.hold_auto_refind = True
                 if ans == "s":
                     self.stop_requested = True
@@ -6233,7 +6590,11 @@ class Runner:
             cx, cy, csd = self.camerr.corrected(x, y)
             if self.quality.poor(x, y):
                 csd *= KC_POOR_CELL_SD_FACTOR        # the camera sees robots badly here (glare): trust it less
-            rsd = UNC_BASE_CM + UNC_PER_CM * dist + dist * math.radians(UNC_DEG + UNC_DEG_PER_DEG * turned)
+            up_ = self.unc_params(robot)
+            rsd = float(UNC.sd_of(up_, dist, turned))
+            if not self.trust.bad("camera"):
+                # a KC stop is a correction too (its belief against the camera, corrected): the model learns from it
+                self.unc_learn(robot, (bx, by), (x, y), kind="kc", dist=dist, turned=turned)
             # what has been learned about each sensor (e02_trust): a robot whose wheels look noisy is less sure of
             # itself, a camera that looks noisy counts for less; and a belief the camera contradicts far beyond
             # both is wrong (2026-10-24: Right's KC run started 12 cm from where it believed)
@@ -6251,7 +6612,7 @@ class Runner:
             fxp, fyp = bx + w * (cx - bx), by + w * (cy - by)
             th = "-"
             h = ST.heading_from_track(seg, min_cm=3.0, max_rms_cm=0.4) if seg else None
-            tsd = UNC_DEG + UNC_DEG_PER_DEG * turned
+            tsd = UNC.heading_sd(up_, turned)
             wh = None
             if h is not None and bth is not None:
                 trn = self.gyro_turn_since(run, t_stop)
@@ -6725,6 +7086,67 @@ def write_csv(path, cols, rows):
         pass
 
 
+FIND_HOLD_MAX = 3   # holds for one find before it counts as a failed find (the run is redone later); Nick's time, no DOE
+
+
+def find_hold_kind(result):
+    """'no board seen' / 'no board behind' when a backing-in find (firmware 2026-10-25b) found no board, else None."""
+    r = (result or "").lower()
+    for k in ("no board seen", "no board behind"):
+        if k in r:
+            return k
+    return None
+
+
+def find_hold_words(robot, result, where, board):
+    """The find hold's words for Nick (Nick, 2026-10-25): (why: what happened, one line for the page's big text;
+    detail: which board, where the robot is, what to check, and what each answer does)."""
+    kind = find_hold_kind(result) or "no board"
+    m = re.search(r"\b([xy]) board", result or "")
+    which = m.group(1) if m else None
+    bname = ("the %s-board" % which) if which else "a board"
+    nums = [float(v) for v in re.findall(r"(\d+(?:\.\d+)?) cm", result or "")]
+    if kind == "no board seen":
+        seen = nums[0] if nums else None
+        exp_ = re.search(r"should be (\d+(?:\.\d+)?)", result or "")
+        why = "its find stopped before backing in: facing %s, its front sensor %s where the board should be %s" % (
+            bname, "saw nothing nearer than %.0f cm" % seen if seen is not None else "did not see it",
+            "%.0f cm away" % float(exp_.group(1)) if exp_ else "close")
+    else:
+        why = ("its find stopped while backing into %s: it backed as far as it is allowed%s and neither back switch "
+               "touched a board" % (bname, " (%.0f cm)" % nums[0] if nums else ""))
+    line = None
+    if board is not None and which:
+        line = board.xboard_cm if which == "x" else board.yboard_cm
+    parts = []
+    if where is not None:
+        x, y, h, src = where
+        here = "about (%.0f, %.0f) cm by %s" % (x, y, src)
+        if board is not None:
+            here += ", %.0f cm from the x-board's line and %.0f cm from the y-board's line" % (
+                abs(y - board.xboard_cm), abs(x - board.yboard_cm))
+        if h is not None:
+            here += ", facing %.0f deg" % h
+        parts.append("Where %s is: %s." % (robot, here))
+    else:
+        parts.append("Where %s is: not known (the camera does not see it now); it is near %s." % (robot, bname))
+    checks = ["is %s there, standing on the cement and pressed against the side of the plywood%s?" % (
+        bname, " (its face at %s = %.0f cm on the camera's map)" % ("y" if which == "x" else "x", line)
+        if line is not None else ""),
+        "is anything between %s and %s (another robot, a brick, a cable, a hand)?" % (robot, bname)]
+    if kind == "no board seen":
+        checks.append("is the board upright, not leaning away from the plywood?")
+    else:
+        checks.append("do both of %s's back switches click when you press them by hand, and is nothing caught on its "
+                      "back bumper?" % robot)
+    parts.append("Check: " + " ".join("(%d) %s" % (i + 1, c) for i, c in enumerate(checks)))
+    parts.append("Answers: Carry on = %s tries the find again after a fresh camera fix (put the board back first if "
+                 "it was missing). The board is gone = %s finds itself against any two edges instead (the edge "
+                 "find), and the map marks %s missing. Leave %s out = it stays where it is for the rest of the "
+                 "session. Stop = the session stops (--resume later)." % (robot, robot, bname, robot))
+    return why, " ".join(parts)
+
+
 def check_params(watch, run, cmds, wait_s=2.0):
     """run_sheet.check_params, with `corr reset` understood."""
     import run_sheet
@@ -6791,6 +7213,9 @@ def main(argv=None):
     ap.add_argument("--front-learn", action="store_true",
                     help="learn the front sensor's offset and spread against the map in this session (from scratch); "
                          "off: the values from data (FRONT_OFFSET_CM, FRONT_TOL_CM)")
+    ap.add_argument("--no-unc-learn", action="store_true",
+                    help="keep the uncertainty model's starting numbers (e02.py UNC_*) instead of learning each robot's "
+                         "from its own camera corrections every session (e02_unc.py)")
     ap.add_argument("--no-side", action="store_true", help="no side camera this session: don't check or ask about it")
     ap.add_argument("--map", action="store_true", help="after setup, one robot maps the board by touch (about 6 min)")
     ap.add_argument("--map-only", action="store_true", help="setup and the mapping only, then stop")
@@ -7115,6 +7540,20 @@ def launch(a, state, sdir, sim):
                         fm_.save()
                 except Exception as e:
                     run.say("  (front sensor values not saved: %s)" % e, quiet=True)
+            um_ = getattr(run, "uncm", None)
+            if um_ is not None:
+                try:
+                    sm_ = {n: um_.summary(n) for n in state.get("robots", {})}
+                    state["unc_model"] = sm_
+                    run.say("Own position uncertainty after 50 cm and a half turn: " + "; ".join(
+                        "%s %.1f cm (%s; %d corrections this session%s)" % (
+                            n, v["sd_ref_cm"], v["src"], v["corrections"],
+                            "" if v["within_2_45_sd"] is None else ", %.0f%% inside 2.45 sd (95%% if right)" %
+                            (100 * v["within_2_45_sd"])) for n, v in sm_.items()))
+                    if not getattr(run.a, "degrade", "") and not getattr(run.a, "no_unc_learn", False):
+                        um_.save()
+                except Exception as e:
+                    run.say("  (uncertainty model not saved: %s)" % e, quiet=True)
             sw_ = getattr(run, "speed", None)
             if sw_ is not None and sw_.spans:
                 run.say("Slow spells: %d (%d with the planned load on), %.0f s in all" % (

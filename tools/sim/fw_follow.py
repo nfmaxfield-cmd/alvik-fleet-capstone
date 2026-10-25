@@ -649,7 +649,13 @@ class FollowMixin:
             self.front_limit = 0.0
             return self.wait_ms(s.get("wait_ms", 0))
         if t in ("K", "P"):
-            return self.run_dock_step(s)          # fw_dock.py (dock.h)
+            ok = self.run_dock_step(s)            # fw_dock.py (dock.h)
+            if ok and t == "P" and self.params.get("sw_back", 0.0) > 0:
+                # a board visit backing in (tools/fleet: touch, then forward gap): logged like an approach's end
+                self.dock_log.append(dict(id=s["id"], ms=self.millis(), x=self.x, y=self.y, th=self.th,
+                                          pose=(self.pose.x, self.pose.y, self.pose.th()), info=self.f_info,
+                                          face="back"))
+            return ok
         self.fail = "unknown step type"
         return False
 

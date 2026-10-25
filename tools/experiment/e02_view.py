@@ -77,6 +77,7 @@ svg text{fill:var(--mut);font:11px var(--mono)}
 .hold .hk{font:12px var(--mono);color:var(--amber-t);letter-spacing:.04em}
 .hold .hq{font-size:21px;line-height:1.3;font-weight:600;color:#FFF3DA;margin:8px 0 4px;overflow-wrap:anywhere}
 .hold .hs{color:var(--amber-t);font-size:13px;margin:0 0 10px}
+.hold .hd{color:#FFF3DA;font-size:14px;line-height:1.45;margin:0 0 10px;white-space:pre-wrap;overflow-wrap:anywhere}
 .btns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .btns button{font:inherit;text-align:left;display:flex;flex-direction:column;justify-content:flex-start;padding:12px;border-radius:9px;border:1px solid #6B5021;background:var(--amber-bg);color:#FFF3DA;cursor:pointer;min-height:76px}
 .btns button b{display:block;font-size:16px;margin-bottom:3px}.btns button>span{display:block;font-size:12px;color:#E9CF9C;line-height:1.3}
@@ -189,6 +190,7 @@ tr.grp td{border-bottom:none;padding-top:9px}
  <div class="panel hold" id="hold" hidden>
   <div class="hk">HOLD · <span id="hkind"></span> · <span id="hsince"></span></div>
   <div class="hq" id="hq"></div>
+  <p class="hd" id="hdetail" hidden></p>
   <p class="hs">Every robot is stopped. The session waits for your answer, with no time limit.</p>
   <div class="btns">
    <button data-a="c"><b>Carry on</b><span>every robot carries on from where it stopped</span></button>
@@ -264,7 +266,12 @@ let lastQ=null,lastHold=null;
 function askRender(q,hold,force){lastQ=q;lastHold=hold;
  const H=$('hold'),A=$('ask');
  if(hold){H.hidden=false;A.hidden=true;
-  $('hkind').textContent=hold.kind=='border'?'virtual border':hold.kind=='lost'?'lost robot':(hold.kind||'');
+  const F=hold.kind=='find';
+  $('hkind').textContent=hold.kind=='border'?'virtual border':hold.kind=='lost'?'lost robot':F?'find stopped':(hold.kind||'');
+  $('hdetail').textContent=hold.detail||'';$('hdetail').hidden=!hold.detail;
+  /* a find hold (backing in found no board): carry on = the find again; the second button = the board is gone */
+  const BT=F?{c:['Carry on','it tries the find again after a fresh camera fix (put the board back first if it was missing)'],a:['The board is gone','it finds itself against any two edges instead; the map marks that board missing']}:{c:['Carry on','every robot carries on from where it stopped'],a:["Carry on, don't ask",'and from now on a lost robot is found again without asking (the border still asks)']};
+  ['c','a'].forEach(k=>{const b=document.querySelector('#hold button[data-a="'+k+'"]');b.querySelector('b').textContent=BT[k][0];b.querySelector('span').textContent=BT[k][1];WORDS[k]=BT[k][0]});
   $('hsince').textContent=hold.since_s==null?'':'waiting '+dur(hold.since_s);
   $('hq').textContent=(hold.robot?hold.robot+': ':'')+(hold.why||'');
   document.querySelectorAll('#hold .hrb').forEach(x=>x.textContent=hold.robot||'it');
@@ -659,7 +666,7 @@ class LiveView:
                 continue
             t0, dur = h[0], h[6]
             out.append(dict(t0=t0, t1=None if dur is None else t0 + dur, robot=h[1], kind=h[2], why=h[3],
-                            answer=h[5]))
+                            answer=h[5], detail=h[7] if len(h) > 7 else ""))
         return out
 
     def _hold_open(self):
@@ -880,8 +887,9 @@ class LiveView:
         hs = [h for h in self._holds() if h["answer"] is None]
         h = hs[-1] if hs else (self._holds() or [None])[-1]
         if h is None:
-            return dict(robot="", kind="", why="", since_s=None)
-        return dict(robot=h["robot"], kind=h["kind"], why=h["why"], since_s=round(time.time() - h["t0"]))
+            return dict(robot="", kind="", why="", detail="", since_s=None)
+        return dict(robot=h["robot"], kind=h["kind"], why=h["why"], detail=h.get("detail") or "",
+                    since_s=round(time.time() - h["t0"]))
 
     def _battery_hist(self):
         """Battery % over time per robot: battery.csv's rows (read once, if the runner writes it), then what the

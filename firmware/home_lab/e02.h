@@ -653,7 +653,14 @@ bool oneBoard(const Board& bd, int n, bool known, FindRec& f, Bump& b) {
       return false;
     }
     // how far past the board's line it may back (second layer, after the look): margin + slack, but never so far
-    // that the axle comes nearer than e02_find_keep_cm to that line
+    // that the axle comes nearer than e02_find_keep_cm to that line.
+    // Where the boards stand (Nick, 2026-10-25): on the cement, pressed against the side of the plywood, 6-8 inches
+    // (15-20 cm) tall, so a board's line IS the plywood's edge. With the board there, the back face (6.1 cm behind
+    // the axle) touches it while the rear caster (4.1 cm behind the axle) is still 2 cm inside the edge. With the
+    // board gone AND the look fooled, the default cap (keep 2 cm) would let the caster reach 2.1 cm past the edge:
+    // kept anyway, because a cap that keeps the caster on (keep 4.6) stopped 8 of 30 simulated finds WITH the board
+    // there ("no board behind", each a hold for Nick) against 2 of 30 (camera fix 0.8 cm / 2 deg; build report
+    // e02-oct25-backing-unc.md). The look is what protects the caster; DOE: doe-backlog.md "Backing cap".
     float expect = toGo(bd);                       // back face to the board, by the own pose
     float over = fminf(P("e02_find_back_margin_cm") + slack, P("e02_back_face_cm") - P("e02_find_keep_cm"));
     maxCm = fminf(P("e02_find_max_cm"), fmaxf(0.0f, expect + fmaxf(0.0f, over)));

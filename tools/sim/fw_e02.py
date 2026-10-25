@@ -541,6 +541,8 @@ class E02Mixin:
                 f.why = "turn away from the %s board %s" % (bd.name, "stopped" if self.abort_reason else "failed")
                 return False
             expect = self.to_go(bd)
+            # boards stand on the cement against the plywood's side: their line is the plywood's edge (e02.h: why
+            # keep 2 cm stays although the caster, 4.1 cm behind the axle, would pass the edge with no board there)
             over = min(P("e02_find_back_margin_cm") + slack, P("e02_back_face_cm") - P("e02_find_keep_cm"))
             max_cm = min(P("e02_find_max_cm"), max(0.0, expect + max(0.0, over)))
         elif not self.turn_to_floor(bd.toward):
