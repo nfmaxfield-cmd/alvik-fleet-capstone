@@ -28,3 +28,9 @@ Nick: "For now I just want to get the robots running ... we can circle back to t
 ## Added after 15:11 (discovery threshold result)
 - Rule in code: accept at 0.90, motion labels held until 60 s of wheel motion (held-out: 1 wrong in 1,374; 11.5 questions/robot).
 - Ask Nick: is 1 wrong per 100 accepted the right limit? Calibration run as a runner stage (square drive, one-wheel bump, edge approach) hands-free, or with a 5 s hand nose-tilt + lift? Edge guard or printed black strip for the edge approach? Print the bump strip (STL)?
+
+## Added 15:3x (first real-session fusion, docs/build-reports/e02-oct25-real-fusion.md)
+- Fused wheels+gyro+camera beats wheels+gyro alone by 15-30% over camera gaps (2.2 vs 2.7 cm at 5 s, 3.8 vs 4.6 at 20 s, 5.1 vs 7.3 at 40 s) and halves the robot's own pose error.
+- Biggest finding: the robot steers by the IMU's yaw (7% short until calibrated); the raw gyro rate with drift measured at standstill gets uncalibrated routes to 2.0 cm vs 15.9 cm.
+- Ask Nick: heading from the raw gyro rate in firmware (simulator first)? K routes on factory corrections? Live lab fix now (display only: one filter per robot started at the camera, threshold 120)? Longer routes for 40 s+ drift data?
+- Also: Note button on the live page (yes/no); Left-Center collision at ~15:21 and Right's edge approach at 15:15 to diagnose.
