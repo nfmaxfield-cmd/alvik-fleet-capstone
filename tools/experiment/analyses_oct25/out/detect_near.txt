@@ -1,0 +1,6 @@
+stage1 15:38 Right: picked up 2.4 cm from its wheels' pose; next fix correction 1.8 cm after 12 s; camera-wheels disagreements in the next 60 s: 0
+stage2 16:54 Left: picked up 3.4 cm from its wheels' pose; next fix correction 2.3 cm after 19 s; camera-wheels disagreements in the next 60 s: 0
+stage2 16:55 Left: picked up 4.7 cm from its wheels' pose; next fix correction 2.8 cm after 18 s; camera-wheels disagreements in the next 60 s: 0
+stage2 16:55 Left: picked up 3.3 cm from its wheels' pose; next fix correction 2.8 cm after 4 s; camera-wheels disagreements in the next 60 s: 0
+stage2 17:19 Left: picked up 5.2 cm from its wheels' pose; next fix correction 6.5 cm after 34 s; camera-wheels disagreements in the next 60 s: 0
+At 4 cm, 2 of these would have been refused (the turn on its spot instead); at 9 cm none more accepted, since outlines further than 6 cm are not logged.
