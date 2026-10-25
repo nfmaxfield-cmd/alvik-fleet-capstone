@@ -1,0 +1,39 @@
+oct23-morning: 219978 RAW, 122315 camera, 100 floor offsets, 3127 s
+stage3: 1343 RAW, 2278 camera, 0 floor offsets, 5 s
+right-alone: 449 RAW, 5130 camera, 0 floor offsets, 6 s
+oct21-2222: 1347 RAW, 4332 camera, 0 floor offsets, 2 s
+oct21-2236: 1348 RAW, 6183 camera, 0 floor offsets, 2 s
+oct21-2245: 1213 RAW, 10162 camera, 0 floor offsets, 2 s
+oct22-0807: 1346 RAW, 2926 camera, 0 floor offsets, 2 s
+oct22-0816: 2718 RAW, 9179 camera, 1 floor offsets, 22 s
+oct22-0951: 28914 RAW, 32969 camera, 6 floor offsets, 206 s
+oct22-1929: 1345 RAW, 4324 camera, 0 floor offsets, 3 s
+oct22-1954: 1348 RAW, 8040 camera, 0 floor offsets, 2 s
+oct22-2005: 17428 RAW, 10887 camera, 2 floor offsets, 81 s
+
+Pooled over sessions (restarts / lab hours; errors pooled by camera-sample-weighted median of sessions)
+start    T       restarts    per h   err med   err p95  diverged   gap p50
+today    15          4211     3440       nan       nan      7.8%       nan
+today    30          2614     2135       nan       nan      8.5%       nan
+today    60          2078     1698       nan       nan     10.1%      3.23
+today    120         1958     1600       nan       nan     10.5%       nan
+today    240         1947     1591       nan       nan     10.5%       nan
+today    never          0        0       nan       nan     13.0%       nan
+position 15          2249     1908       nan       nan      4.3%       nan
+position 30           655      556       nan       nan      5.0%       nan
+position 60           128      109       nan       nan      6.6%      3.00
+position 120           12       10       nan       nan      7.0%       nan
+position 240            1        1       nan       nan      7.1%       nan
+position never          0        0       nan       nan      7.1%       nan
+camera   15          1509     1280       nan       nan      3.6%       nan
+camera   30           303      257       nan       nan      3.1%       nan
+camera   60            38       32       nan       nan      3.4%      2.52
+camera   120            9        8       nan       nan      3.5%       nan
+camera   240            1        1       nan       nan      3.5%       nan
+camera   never          0        0       nan       nan      3.5%       nan
+floor    15          1474     1251       nan       nan      3.6%       nan
+floor    30           285      242       nan       nan      2.9%       nan
+floor    60            33       28       nan       nan      2.8%      2.34
+floor    120            6        5       nan       nan      2.9%       nan
+floor    240            0        0       nan       nan      3.0%       nan
+floor    never          0        0       nan       nan      3.0%       nan

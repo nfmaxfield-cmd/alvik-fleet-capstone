@@ -131,3 +131,31 @@ Fused with the camera always on, distance from the camera: median of run medians
 - wheels + gyro: 3.0 / 7.3 (n 57)
 - robot's own pose: 8.6 / 17.5 (n 57)
 - camera held at 10 s: 36.8 / 81.2 (n 57)
+
+### Live lab DOE (pooled over sessions)
+| heading | T | restarts | per hour | prediction error p95 cm | time diverged (> 5 cm) | after a 2 s gap: median / 90th pct cm |
+|---|---|---|---|---|---|---|
+| today | 15 | 7005 | 2801 | 7.15 | 7.4% | - |
+| today | 30 | 4207 | 1682 | 7.47 | 8.0% | - |
+| today | 60 | 3083 | 1233 | 7.74 | 9.1% | 3.46 / 29.10 |
+| today | 120 | 2846 | 1138 | 7.86 | 9.5% | - |
+| today | 240 | 2806 | 1122 | 7.86 | 9.6% | - |
+| today | never | 0 | 0 | 8.56 | 11.7% | - |
+| position | 15 | 4160 | 1714 | 3.12 | 4.5% | - |
+| position | 30 | 1373 | 566 | 3.43 | 5.0% | - |
+| position | 60 | 282 | 116 | 3.70 | 6.2% | 3.33 / 18.44 |
+| position | 120 | 60 | 25 | 3.80 | 6.7% | - |
+| position | 240 | 22 | 9 | 3.80 | 6.7% | - |
+| position | never | 0 | 0 | 3.83 | 6.9% | - |
+| camera | 15 | 3001 | 1236 | 2.40 | 3.9% | - |
+| camera | 30 | 838 | 345 | 2.55 | 3.5% | - |
+| camera | 60 | 119 | 49 | 2.66 | 3.8% | 2.90 / 15.53 |
+| camera | 120 | 34 | 14 | 2.66 | 3.8% | - |
+| camera | 240 | 12 | 5 | 2.67 | 3.9% | - |
+| camera | never | 0 | 0 | 2.69 | 3.9% | - |
+| floor | 15 | 2938 | 1210 | 2.36 | 3.9% | - |
+| floor | 30 | 798 | 329 | 2.47 | 3.3% | - |
+| floor | 60 | 90 | 37 | 2.52 | 3.3% | 2.67 / 12.71 |
+| floor | 120 | 19 | 8 | 2.51 | 3.3% | - |
+| floor | 240 | 3 | 1 | 2.53 | 3.3% | - |
+| floor | never | 0 | 0 | 2.53 | 3.3% | - |

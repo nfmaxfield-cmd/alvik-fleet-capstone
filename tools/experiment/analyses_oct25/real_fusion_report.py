@@ -171,11 +171,14 @@ def chart_lab(lab, path):
         for s in ("top", "right"):
             a.spines[s].set_visible(False)
     axs[0].set_yscale("symlog", linthresh=10)
+    axs[0].set_ylim(0, 5000)
     axs[0].legend(fontsize=7.5, frameon=False)
     fig.suptitle("Live lab replayed on every real session: restarts and error by threshold", fontsize=10)
-    fig.text(0.01, 0.01, "Data: robot-logs RAW (arrival times) and every track.csv camera sample, all real sessions; "
-             "replayed through tools/experiment/e02_live.py's filter.", fontsize=7, color="#52514e")
-    fig.tight_layout(rect=(0, 0.04, 1, 0.95))
+    fig.text(0.01, 0.01, "Measured: filter restarts, and the share of time its prediction was over 5 cm from the next "
+             "camera sample. Data: robot-logs RAW (arrival times) and every track.csv\nsample of all 15 real session "
+             "folders (2.5 h of lab time), replayed through tools/experiment/e02_live.py's filter.", fontsize=7,
+             color="#52514e")
+    fig.tight_layout(rect=(0, 0.07, 1, 0.95))
     fig.savefig(path)
     plt.close(fig)
 
