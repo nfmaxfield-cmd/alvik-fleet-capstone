@@ -6955,4 +6955,13 @@ def dry_run_report(sdir):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _code = main()
+    # 2026-10-24 Pi, 20:43: after "Saved in ..." the runner never exited, so the plan never uploaded. The likely
+    # cause: a console-answer thread still blocked in input() (web_ask starts one per question when a terminal is
+    # attached) holds stdin's lock, and Python's shutdown waits on it. Everything is saved and closed by now
+    # (main's finally): leave at once.
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    finally:
+        os._exit(int(_code or 0))
