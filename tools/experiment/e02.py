@@ -88,6 +88,7 @@ import e02_explore as EX  # noqa: E402
 import e02_edgefind as EF  # noqa: E402
 import e02_camerr as CE  # noqa: E402
 import e02_trust as TR  # noqa: E402
+import e02_load as LD  # noqa: E402
 import e02_degrade as DG  # noqa: E402
 
 
@@ -511,6 +512,13 @@ class Runner:
             self.trust.new_session()
             state["trust_session_started"] = round(time.time(), 1)
         self.degrade = DG.Degrade(getattr(a, "degrade", "") or "", seed=int(time.time()) % 100000)
+        # the runner's own speed against its baseline, and a planned load (e02_load.py; Nick 2026-10-25)
+        self.speed = LD.SpeedWatch()
+        self.load = None
+        if getattr(a, "load", None):
+            self.load = LD.Load(a.load, getattr(a, "load_on_s", 300.0), getattr(a, "load_off_s", 300.0),
+                                log=self.say, mark=self.mark,
+                                record=lambda r_: self.st.setdefault("load_blocks", []).append(r_))
         self.quality = CAM.QualityMap()      # how well the camera sees a robot, place by place (2026-10-24)
         self.marks_unconfirmed = 0
         self.watchdog_fired = False
@@ -795,6 +803,30 @@ class Runner:
         row = dict(row, phase=self.phase)
         self.perfw.writerow(row)
         self.perff.flush()
+        ld_ = getattr(self, "load", None)
+        lon = bool(ld_ is not None and ld_.on)
+        sw = getattr(self, "speed", None)
+        if sw is not None:
+            ch = sw.feed(row, load_on=lon)
+            if sw.base_fps is not None and not getattr(self, "speed_base_said", False):
+                self.speed_base_said = True
+                self.st["speed_baseline"] = dict(fps=round(sw.base_fps, 1), age_s=round(sw.base_age, 3))
+                self.say("  Camera speed baseline: %.1f pictures a second handled, picture age %.2f s (slow below "
+                         "%.1f or above %.2f s)." % (sw.base_fps, sw.base_age, sw.fps_frac * sw.base_fps,
+                                                     sw.age_frac * sw.base_age))
+            if ch == "slow":
+                self.say("!!! SLOW: the runner handles %.1f pictures a second (baseline %.1f), picture age %.2f s "
+                         "(baseline %.2f)%s." % (row["fps_handled"], sw.base_fps, row["age_mean_s"], sw.base_age,
+                                                 " while the planned load is on" if lon else ""))
+                self.mark("e02 slow")
+            elif ch == "normal":
+                sp = sw.spans[-1]
+                self.say("  Speed back to normal (slow for %.0f s; worst %.1f pictures a second, age %.2f s)." % (
+                    sp["t1"] - sp["t0"], sp["fps_min"], sp["age_max"]))
+                self.mark("e02 speed normal")
+            if ch:
+                self.st["slow_spans"] = [dict(v) for v in sw.spans]
+        row = dict(row, load=lon, slow=bool(sw is not None and sw.slow))
         self.perf_rows.append(row)
         if row["age_max_s"] > 1.0 and time.time() - getattr(self, "perf_warned", 0) > 60:
             self.perf_warned = time.time()
@@ -5249,6 +5281,47 @@ class Runner:
         bd, x, y = f
         return min(abs((x if ax == "x" else y) - v) for ax, v in bd.open_edges()) < self.border_cm()
 
+    SHADOW_EVERY_S = 5.0      # chosen: one shadow record per robot per 5 s at most (one approach, not 50 pictures of it)
+
+    def border_shadow(self, robot, smp, home_tripped):
+        """Home sessions (Nick, 2026-10-25): where the AWAY border (BORDER_CM, and the bad-camera shrink) would have
+        stopped the session, recorded without stopping anything (border_shadow.csv, state "border_shadow"), with
+        whether home's own border tripped too. Over a few sessions: how often the away border fires for a robot that
+        really goes on to the edge, against how often for nothing, the evidence for dropping it."""
+        last = getattr(self, "shadow_last", None)
+        if last is None:
+            last = self.shadow_last = {}
+        if time.time() - last.get(robot, 0.0) < self.SHADOW_EVERY_S:
+            return
+        tr = getattr(self, "trust", None)
+        away = BORDER_CM
+        if tr is not None and tr.bad("camera"):
+            away = self.border_cm() - HOME_BORDER_CM + BORDER_CM
+        why = self.border_check(robot, smp, bcm=away)
+        if not why:
+            return
+        last[robot] = time.time()
+        f = self.border_frame(smp[-1][1], smp[-1][2])
+        d = None
+        if f is not None:
+            bd_, x_, y_ = f
+            d = min(abs((x_ if ax == "x" else y_) - v) for ax, v in bd_.open_edges())
+        rec = [round(time.time(), 2), robot, None if d is None else round(d, 1), round(away, 1), int(home_tripped),
+               self.phase, self.order]
+        self.st.setdefault("border_shadow", []).append(rec)
+        path = os.path.join(self.dir, "border_shadow.csv")
+        new = not os.path.exists(path)
+        try:
+            with open(path, "a", newline="") as fh:
+                w = csv.writer(fh)
+                if new:
+                    w.writerow(["t", "robot", "edge_cm", "away_border_cm", "home_tripped", "phase", "order"])
+                w.writerow(rec)
+        except OSError:
+            pass
+        self.say("    (away border would have stopped the session here: %s; home's %s)" % (
+            why, "tripped too" if home_tripped else "did not"), quiet=True)
+
     STILL_WINDOW_S = 3.0      # chosen: a still robot's camera scatter is measured over this long ...
     STILL_EVERY_S = 10.0      # ... at most this often (one evidence item per axis each time)
 
@@ -5274,7 +5347,7 @@ class Runner:
         last_still[robot] = now
         self.trust.camera_still(robot, float(np.std(xs)), float(np.std(ys)))
 
-    def border_check(self, robot, smp):
+    def border_check(self, robot, smp, bcm=None):
         """Words if the robot is within BORDER_CM of an open edge and moving towards it, else ''. smp: the tracker's
         recent (t, x, y, ...) samples."""
         if robot in self.seek or robot == getattr(self, "edge_touch", None):
@@ -5308,7 +5381,7 @@ class Runner:
         if a is None or b is None:
             return ""
         bd, x, y = b
-        bcm = self.border_cm()
+        bcm = self.border_cm() if bcm is None else bcm
         dt_ = max(1e-3, smp[-1][0] - smp[0][0])
         speed = math.hypot(x - a[1], y - a[2]) / dt_
         for ax, val in bd.open_edges():
@@ -5396,6 +5469,8 @@ class Runner:
                 if len(smp) < 3 or time.time() - smp[-1][0] > 1.0:
                     continue
                 why_b = self.border_check(robot, smp)
+                if getattr(self.a, "home", False):
+                    self.border_shadow(robot, smp, bool(why_b))
                 if why_b and self.forward_explore_leg(robot):
                     # the same for the camera's border: stop that robot, no hold (backwards never gets here)
                     if time.time() - last.get(robot, 0) > 2.0:
@@ -5605,6 +5680,10 @@ class Runner:
         el = time.time() - st["t_session_start"] + st.get("elapsed_before", 0)
         left = (total - done) * st.mean_run_s()
         print("")
+        if getattr(self, "load", None) is not None and self.load._thread is None:
+            self.say("  Planned load from now on: %s, %.0f s on and %.0f s off (load.csv in the state; marked on the "
+                     "video)." % (self.load.spec, self.load.on_s, self.load.off_s))
+            self.load.start()
         self.say("=== Run %d of %d (block %d): %s, %s (%s), route %s | %s in, about %s left ===" % (
             done + 1, total, r["block"], robot, cond, PL.COND_WORDS[cond], PL.ROUTE_NAMES[route], hms(el), hms(left)))
         if self.calib_note():
@@ -6709,6 +6788,11 @@ def main(argv=None):
                          "idle (0: off; on by default, Nick 2026-10-24: weeks of it decide the drain questions)")
     ap.add_argument("--no-shift-watch", action="store_true",
                     help="do not measure or correct the camera's creep during the runs (CAM.CameraShiftWatch)")
+    ap.add_argument("--load", default=None,
+                    help="a planned background load from the first run on, switched on and off in blocks (e02_load.py): "
+                         "cpu[:N], disk:FOLDER (read and compress its files, like an upload), or cmd:COMMAND")
+    ap.add_argument("--load-on-s", type=float, default=300.0, help="--load: seconds on (default 300)")
+    ap.add_argument("--load-off-s", type=float, default=300.0, help="--load: seconds off (default 300)")
     ap.add_argument("--home", action="store_true",
                     help="Nick is home: the virtual border sits closer to the edge (camera %g cm, the robots' own %g cm; "
                          "away: %g / %g); a crossing still stops every robot and asks" % (
@@ -6745,6 +6829,11 @@ def main(argv=None):
     ap.add_argument("--dry-true-calib", action="store_true", help="dry run: use the simulator's true camera "
                                                                   "instead of making one from the corners")
     a = ap.parse_args(argv)
+    if a.load:
+        try:
+            LD.parse(a.load)
+        except ValueError as e:
+            ap.error(str(e))
     if a.fit_max_rms_cm is not None:
         # chosen for the session (Nick 2026-10-24: 2.5 cm); the sensor-trust build (or a DOE) should set it
         FIT.MAX_RMS_CM = a.fit_max_rms_cm
@@ -6904,6 +6993,11 @@ def launch(a, state, sdir, sim):
         code = 1
     finally:
         run.watch_quit.set()
+        if getattr(run, "load", None) is not None:
+            try:
+                run.load.stop()
+            except Exception:
+                pass
         try:
             link.close()
         except Exception:
@@ -6930,6 +7024,15 @@ def launch(a, state, sdir, sim):
             if ps:
                 run.say(ps)
                 state["perf_summary"] = ps
+            sw_ = getattr(run, "speed", None)
+            if sw_ is not None and sw_.spans:
+                run.say("Slow spells: %d (%d with the planned load on), %.0f s in all" % (
+                    len(sw_.spans), sum(1 for v in sw_.spans if v["load"]),
+                    sum(((v["t1"] or time.time()) - v["t0"]) for v in sw_.spans)))
+            if state.get("border_shadow"):
+                run.say("Home session: the away border would have stopped it %d times (%d where home's border did "
+                        "too): border_shadow.csv" % (len(state["border_shadow"]),
+                                                     sum(1 for v in state["border_shadow"] if v[4])))
         except Exception as e:
             run.say("(processing summary failed: %s)" % e)
         state.save()

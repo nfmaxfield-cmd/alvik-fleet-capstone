@@ -210,3 +210,21 @@ def test_home_mode_moves_both_borders_closer_and_away_keeps_them():
     assert "from an open edge" in E.Runner.border_check(r, "Left", _track(9.0, 60.0, 7.0, 60.0))
     r.trust = _Trust(True, 2.5)                                     # a bad camera still moves the line in at home
     assert E.Runner.border_cm(r) > E.HOME_BORDER_CM
+
+
+def test_home_session_records_where_the_away_border_would_have_stopped(tmp_path):
+    r = _stub()
+    r.a = types.SimpleNamespace(home=True)
+    r.fw_border_cm = types.MethodType(E.Runner.fw_border_cm, r)
+    r.border_check = types.MethodType(E.Runner.border_check, r)
+    r.dir, r.phase, r.order = str(tmp_path), "runs", 3
+    r.st = {}
+    r.say = lambda *a, **k: None
+    r.SHADOW_EVERY_S = E.Runner.SHADOW_EVERY_S
+    track = _track(14.0, 60.0, 12.0, 60.0)                # 12 cm: inside away's 15, outside home's 8
+    assert r.border_check("Left", track) == ""            # home doesn't stop
+    E.Runner.border_shadow(r, "Left", track, False)
+    assert len(r.st["border_shadow"]) == 1 and r.st["border_shadow"][0][4] == 0
+    E.Runner.border_shadow(r, "Left", track, False)       # within 5 s: not again
+    assert len(r.st["border_shadow"]) == 1
+    assert (tmp_path / "border_shadow.csv").read_text().count("\n") == 2
