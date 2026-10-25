@@ -5268,10 +5268,10 @@ class Runner:
                             continue
                         self.watchdog_fired = True
                         self.watch_stop = "virtual border (the robot's own)"
-                        ans = self.hold_for_nick(n_, "border", "it stopped itself %s cm from an open edge (its own "
-                                                 "border check)" % rec_.get("dist_cm", "?"))
-                        if ans in ("c", "a"):
-                            self.send(n_, "border clear")
+                        # (no `border clear` after "carry on": the robot still refuses moves towards the edge and
+                        # lets go by itself once back inside; moves away and along stay allowed)
+                        self.hold_for_nick(n_, "border", "it stopped itself %s cm from an open edge (its own border "
+                                           "check)" % rec_.get("dist_cm", "?"))
                 robot = self.tracker.active if self.tracker is not None else None
                 if not robot or self.hold.is_set() or robot in self.held_out:
                     continue

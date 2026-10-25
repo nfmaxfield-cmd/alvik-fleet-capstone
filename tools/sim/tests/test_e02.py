@@ -974,3 +974,10 @@ class VirtualBorderAndSleep(unittest.TestCase):
         n = len(r.lines)
         r.handle_command("border", False)
         self.assertGreater(len(r.lines), n)
+
+    def test_driving_along_the_edge_inside_the_border_is_allowed(self):
+        # put down 10 cm from the open edge x = 122, driving parallel to it with a slight angle in
+        r = self.border_bot(112.0, 40.0, 92.0)
+        r.handle_command("go 30 1", False)
+        self.assertEqual(records(r, "LEG")[-1]["result"], "done")
+        self.assertEqual(records(r, "BORDER"), [])

@@ -77,12 +77,16 @@ const float UNSET = -999.0f;
 // away from the boards, by e02_xboard_side / e02_yboard_side). Within border_cm of one and moving towards it (its
 // distance down by BORDER_TOWARDS_CM since it was nearest... the reference resets whenever it moves away) the motion
 // stops, a BORDER record goes to the laptop, and the border latches: no go leg towards that edge (by its heading)
-// until the laptop sends `border clear` (after Nick's answer). Turns and moves away are always allowed. A crawl
+// until it is BORDER_UNLATCH_CM back outside the border, or the laptop sends `border clear`. Turns and moves away are always allowed. A crawl
 // that is looking for the edge on purpose (explore, the edge find) has border_seek 1 set by the laptop for its
 // leg: forwards then passes (the edge guard stops it). border_cm 0 = off (the default: the laptop turns it on).
 const float BORDER_TOWARDS_CM = 0.5f;   // chosen: how much nearer counts as moving towards (not wheel jitter)
+const float BORDER_MOSTLY = 0.5f;       // chosen: ... and nearer by at least half the distance driven (driving along
+                                        // an edge is allowed: the laptop's camera border does the same)
+const float BORDER_UNLATCH_CM = 3.0f;   // chosen: back this far outside the border, the latch lets go by itself
 bool borderLatched = false;
 float borderRef = 1e9f;                 // its distance when it was last moving away or still
+float borderRefDist = 0;                // pose::dist then
 
 float borderDist(float px, float py) {
   if (!pose::known || P("border_cm") <= 0) return UNSET;
@@ -102,8 +106,14 @@ void borderRecord(float d) {
 void borderTick() {
   float d = borderDist(pose::x, pose::y);
   if (d == UNSET) { borderRef = 1e9f; return; }
-  if (d > borderRef) borderRef = d;                     // moving away (or a fix moved it): the new reference
+  if (borderLatched && d >= P("border_cm") + BORDER_UNLATCH_CM) borderLatched = false;   // well inside again
+  if (borderRef >= 1e8f) { borderRef = d; borderRefDist = pose::dist; return; }        // the first reading
+  if (d > borderRef || fabsf(pose::dist - borderRefDist) > 30.0f) {   // moving away, a fix, or a long way since
+    borderRef = d;
+    borderRefDist = pose::dist;
+  }
   if (d >= P("border_cm") || borderRef - d < BORDER_TOWARDS_CM) return;
+  if (borderRef - d < BORDER_MOSTLY * fabsf(pose::dist - borderRefDist)) return;   // mostly along it, not at it
   float sl, sr;
   alvik.get_wheels_speed(sl, sr);
   bool forward = sl + sr > 0;
@@ -114,6 +124,7 @@ void borderTick() {
   if (!borderLatched) borderRecord(d);
   borderLatched = true;
   borderRef = d;
+  borderRefDist = pose::dist;
 }
 
 // would a go leg of arg cm (along its heading) bring it nearer an open edge while it is inside the border?
@@ -181,6 +192,7 @@ void begin() {
   lastMoveMs = 0;               // runs start from standing still
   fixesUsed = fixesRejected = 0;
   pathOn = false;
+  borderRef = 1e9f;             // the border's reference starts again with every leg or run (a fix may have moved it)
   gTickHook = tickHook;
   active = true;
 }

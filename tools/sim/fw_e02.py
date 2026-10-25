@@ -139,9 +139,18 @@ class E02Mixin:
         if d is None:
             self.e_border_ref = 1e9
             return
-        if d > self.e_border_ref:
+        if self.e_border_latched and d >= self.P("border_cm") + 3.0:
+            self.e_border_latched = False
+        if self.e_border_ref >= 1e8:
+            self.e_border_ref, self.e_border_ref_dist = d, p.dist
+            return
+        ref_dist = getattr(self, "e_border_ref_dist", 0.0)
+        if d > self.e_border_ref or abs(p.dist - ref_dist) > 30.0:
             self.e_border_ref = d
+            self.e_border_ref_dist = ref_dist = p.dist
         if d >= self.P("border_cm") or self.e_border_ref - d < 0.5:
+            return
+        if self.e_border_ref - d < 0.5 * abs(p.dist - ref_dist):
             return
         sl, sr = self.wheels_speed()
         if self.P("border_seek") > 0 and sl + sr > 0:
@@ -156,6 +165,7 @@ class E02Mixin:
                                                               self.P("border_cm")))
         self.e_border_latched = True
         self.e_border_ref = d
+        self.e_border_ref_dist = p.dist
 
     def e_border_towards(self, arg):
         p = self.pose
@@ -177,6 +187,7 @@ class E02Mixin:
         self.e_last_move = -10 ** 9                  # runs start from standing still
         self.e_fixes_used = self.e_fixes_rejected = 0
         self.e_path_on = False
+        self.e_border_ref = 1e9
         self.tick_hook = self.e_tick_hook
         self.e_active = True
 
