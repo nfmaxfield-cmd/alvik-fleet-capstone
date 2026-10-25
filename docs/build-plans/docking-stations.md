@@ -45,3 +45,4 @@ should treat "pose error at a fix" as one quantity, whether it came from a board
 ## Log
 - 2026-10-23: started this log. No dock hardware fitted yet.
 - 2026-10-23: the dock as the scale reference: its printed size in the picture, and the stripe-to-back-wall distance measured by the wheels at every docking (an absolute wheel-scale check). See e02-oct22-build.md.
+- 2026-10-25: self-charging planned (docs/build-plans/self-charging-dock.md): dock v3 = dock v2 + spring pins in the back wall; attachment v2 = brass pads in the bar, same outside and firmware numbers. To change when built: a `charge` run (dock, confirm contact and charging, sleep, back out), a docked forward-move guard, a contact-sense pin; the runner sends robots at 40 % home and logs every charge's docking as a pose fix.

@@ -22,6 +22,7 @@ Firmware: `firmware/home_lab/switches.h`, `dock.h` (2026-10-19a; pins A0 / A1 fr
 | `preview/docked.png` | a docked robot and bracket in the dock, from above |
 | `stl/dock_v2.stl` | **dock version 2** (`build_v2.py`): the same funnel for parking, plus a pair of measuring posts molded into each of its three closed sides; no floor stripe |
 | `preview/dock_v2_layout.png` | version 2 from above with a robot parked and one at each post station |
+| `build_attachment_v2.py` | **self-charging** (plan: `docs/build-plans/self-charging-dock.md`, not built yet): `stl/attachment_v2.stl` (the one-piece attachment plus two brass screw-head charging pads in the bar; same outside, same firmware numbers), `stl/dock_v3.stl` (dock v2 plus two spring pins in the back wall, a wiring cavity and a cable channel), `stl/attachment_v2_fit_test.stl` (13 mm slice to try on first), `stl/pogo_gauge.stl`; previews `attachment_v2.png`, `dock_v3.png`, `charging_contact.png`, `nose_bracket_size.png` |
 
 ## Dock version 2: park in the funnel, measure at the posts
 
