@@ -3,6 +3,8 @@
     python tools/dock/charge_policy_sim.py                 the grid with the current numbers (placeholders marked)
     python tools/dock/charge_policy_sim.py --robots 4      the same for a fleet of 4
     python tools/dock/charge_policy_sim.py --awake-dock    robots stay awake while docked (no sleep)
+    python tools/dock/charge_policy_sim.py --cc-rate 32 --knee 85 --sleep-drain 2   with bench test 1's numbers
+(about 2.5 minutes)
 
 Plan: docs/build-plans/self-charging-dock.md ("Charge thresholds").
 
@@ -173,8 +175,14 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--robots", type=int, default=3)
     ap.add_argument("--awake-dock", action="store_true", help="robots stay awake while docked")
+    ap.add_argument("--cc-rate", type=float, help="charge rate %%/h before the knee (bench test 1)")
+    ap.add_argument("--knee", type=float, help="%% where the charge rate starts to fall (bench test 1)")
+    ap.add_argument("--sleep-drain", type=float, help="%%/h drain while asleep (sleep test)")
     a = ap.parse_args(argv)
-    p, n = P, a.robots
+    p, n = dict(P), a.robots
+    for k, v in (("cc_rate", a.cc_rate), ("knee", a.knee), ("sleep", a.sleep_drain)):
+        if v is not None:
+            p[k] = v
     print("charge policy, %d robots, one dock%s" % (n, ", awake while docked" if a.awake_dock else ", asleep while docked"))
     print("PLACEHOLDERS in use (replace after bench test 1 and the sleep test): charge %.0f %%/h to a knee at %.0f %%, "
           "sleep drain %.0f %%/h, reading error %.0f %%" % (p["cc_rate"], p["knee"], p["sleep"], p["read_err"]))

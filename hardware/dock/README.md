@@ -23,6 +23,30 @@ Firmware: `firmware/home_lab/switches.h`, `dock.h` (2026-10-19a; pins A0 / A1 fr
 | `stl/dock_v2.stl` | **dock version 2** (`build_v2.py`): the same funnel for parking, plus a pair of measuring posts molded into each of its three closed sides; no floor stripe |
 | `preview/dock_v2_layout.png` | version 2 from above with a robot parked and one at each post station |
 | `build_attachment_v2.py` | **self-charging** (plan: `docs/build-plans/self-charging-dock.md`, not built yet): `stl/attachment_v2.stl` (the one-piece attachment plus two brass screw-head charging pads in the bar; same outside, same firmware numbers), `stl/dock_v3.stl` (dock v2 plus two spring pins in the back wall, a wiring cavity and a cable channel), `stl/attachment_v2_fit_test.stl` (13 mm slice to try on first), `stl/pogo_gauge.stl`; previews `attachment_v2.png`, `dock_v3.png`, `charging_contact.png`, `nose_bracket_size.png` |
+| `build_attachment_v3.py` | **current design: back-mounted, charges from underneath** (plan: `docs/build-plans/self-charging-dock.md`, not built yet): `stl/attachment_v3.stl` (one attachment: bumper switches at the BACK, light plate, cable clips), `stl/pad_sled.stl` (two flush brass pads under the robot's rear), `stl/dock_v4.stl` (funnel, two switch bumps on the back wall, a two-pronged tongue with an upright spring pin in each prong, taller posts), fit tests `clearance_gauge.stl`, `attachment_v3_fit_test.stl`, `pogo_gauge_v.stl`; previews `attachment_v3.png`, `pad_sled.png`, `dock_v4.png`, `docked_v4.png`, `underside_v4.png` |
+
+## Back-mounted attachment v3 and dock v4 (self-charging): `build_attachment_v3.py`
+
+Nick, 2026-10-25: one attachment, at the BACK. Robots back into the dock and into boards, and the front stays clear
+for the distance sensor and the line sensors. Plan, numbers and sources: `docs/build-plans/self-charging-dock.md`.
+
+- **Attachment v3:** version 1's bracket moved to the back (same width and switches, on the back insert pair), its
+  bar raised to 10.1-20.1 mm so its bottom is level with the robot's underside. The light plate keeps its layout and
+  stands on the front insert pair. Cable clips under the plate run across the front over the Nano (the USB-C plug
+  works from either side) and down the middle to the back.
+- **Pad sled:** a 2.4 mm plate screwed to the bar's underside (two M2 screws), lying flat under the robot's rear.
+  It carries two brass-shim pads (robot's left = +), notched around the caster, with a slot and ramp for each pin.
+- **Dock v4:** dock v2 plus two bumps on the back wall (they press the levers), posts raised to 22 mm, and a fork
+  on the floor: two 4 mm prongs either side of the caster, each with one upright low-force spring pin pressing up on
+  a pad.
+- **Why a fork and why there:** Arduino's CAD puts the caster at the back centre (where a single tongue would go),
+  and the flat underside 10.1 mm up. The pads sit 24 mm behind the axle, as far forward as the funnel allows, so
+  the springs don't lift the caster. Measure first: print `clearance_gauge.stl` and slide its fingers under the
+  robot's rear (the plan's check list, item 1).
+- Build: `python hardware/dock/build_attachment_v3.py` (expect two WARN lines, explained in the plan; no FAIL).
+- **Firmware numbers for the back bumper:** face 6.10 cm behind the axle, switches ±4.27 cm, `sw_gap_cm` 0.020,
+  `bumper_cm` 1.34. Docked, the axle is 6.5 cm from the back wall (the bumps add 0.4 cm). The map's dock pose is the
+  middle of the two bumps' faces, heading out of the dock.
 
 ## Dock version 2: park in the funnel, measure at the posts
 
