@@ -91,6 +91,8 @@ import e02_edgefind as EF  # noqa: E402
 import e02_camerr as CE  # noqa: E402
 import e02_trust as TR  # noqa: E402
 import e02_load as LD  # noqa: E402
+import e02_offload as OFF  # noqa: E402
+import e02_stall as STL  # noqa: E402
 import e02_front as FR  # noqa: E402
 import e02_unc as UNC  # noqa: E402
 import e02_degrade as DG  # noqa: E402
@@ -299,6 +301,26 @@ BORDER_TOWARDS_FRAC = 0.5     # ... and mostly towards it (within 60 deg of stra
                               # its room check, 1-2 cm/s sideways drift, and held the session)
 BORDER_JUMP_CMS = 50.0        # chosen: faster than this is the tracker jumping to a new spot, not the robot (it drives
                               # at most ~20 cm/s); replaying the 2026-10-24 Pi plan's tracks, one such jump would have held
+# The speed guard (2026-10-25 runner fixes, part 2b; at 15:10-16:00 the pictures handled a second fell 24 -> 15 -> 10
+# and a robot crossed home's 8 cm border). The camera's lag = a picture's age when its position is ready + one picture
+# interval (1 / pictures a second): how long a robot drives before the runner can see where it is. The borders were
+# sized for a lag budget (HOME_BORDER_CM's note: ~0.2 s at 10 cm/s = 2 cm; BORDER_CM's: the Pi's worst age 0.56 s).
+# Above the budget, each robot's border moves out by how far IT drives in the extra lag (its speed x (lag - budget)):
+# a robot driving towards an open edge inside that wider band is stopped (no hold: nothing is wrong with the robot),
+# and no robot in the band is sent a new move until the lag is back within budget (at most SPEED_WAIT_MAX_S).
+SPEED_LAG_BUDGET_HOME_S = 0.2   # from HOME_BORDER_CM's own note (not new). 15:10's baseline lag was 0.18 s (age 0.123 +
+                                # 1/16.7): inside it. DOE note: the drive-at-the-line DOE (doe-backlog) run at three
+                                # camera rates (--dry-slow-camera, or a --load on the Pi) would set both budgets
+SPEED_LAG_BUDGET_AWAY_S = 0.56  # from BORDER_CM's note (the Pi's worst picture age then); same DOE
+SPEED_GUARD_MIN_CM = 0.5        # chosen: a wider band than this switches the guard on (below it is camera noise, sd
+                                # ~0.3 cm still). No DOE: a noise floor
+SPEED_GUARD_MAX_CM = 15.0       # chosen: the band never grows past this (10 cm/s x 1.5 s of lag); a camera slower than
+                                # that is the lost check's job (LOST_DRIVE_S). DOE note: no, a cap on a formula
+SPEED_WAIT_MAX_S = 60.0         # chosen: a robot in the band waits at most this long for the camera before its move
+                                # goes anyway (the in-motion stop still guards it). 15:10's slow spells lasted 8-36 s.
+                                # DOE note: no; set from the slow spells' lengths once the fits are out of the way
+SPEED_RECOVER_ROWS = 2          # chosen: two perf rows (seconds) in budget in a row before moves start again (one good
+                                # second inside a slow spell is common: 15:10 perf.csv). DOE note: no, a debounce
 # A robot driving a leg that the camera has no position for this long is lost: everything stops and Nick is asked
 # (Nick, 2026-10-24: "stop and wait"; in stage 3 the tracker stayed on Left's old spot while it drove). Chosen.
 LOST_DRIVE_S = 1.5
@@ -476,6 +498,35 @@ EXPLORE_CRAWL_CMS = 4.0        # Nick 2026-10-24: rays, probes and the square cr
 EXPLORE_FAST_CMS = 10.0        # e02_cms otherwise (the firmware's default): returns over ground just driven
 EXPLORE_PROBE_CM = 12.0        # chosen: the room check's short drive each way
 EXPLORE_RAY_CLEAR_CM = 25.0    # Nick 2026-10-24: no ray passes nearer another robot than this
+# ... and, since 2026-10-25 (15:10: Left's home leg pushed Center), no home or return leg either:
+EXPLORE_LEG_SHORTEN = (0.75, 0.5, 0.25)   # chosen: a blocked leg is tried this much shorter. No DOE: any clear part
+                                          # is better than none; how close it gets is EXPLORE_RAY_CLEAR_CM's job
+# An object beyond an open edge is not a board (Nick, 2026-10-25, after 15:10: a light object on the floor past the
+# bottom edge read as "board" twice). A ray the front stop ends is not taken as a board yet: the robot creeps on,
+# its edge guard on and its front stop moved in to EXPLORE_CREEP_FRONT_CM, in EXPLORE_CREEP_STEP_CM steps. Its line
+# sensors (or the bottom zone) finding the edge first: an OPEN edge, the object logged as beyond it. Reaching the
+# object with floor still under it: a blocked side it can approach (flush with the plywood or not).
+EXPLORE_CREEP_FRONT_CM = 3.0    # chosen: the front stop while creeping. Line sensors 3.5 cm and the front sensor 4.5 cm
+                                # ahead of the axle, the bumper ~6 cm, the bottom zone ~9 cm: at 3 cm from the object the
+                                # bumper is 1.5 cm clear, the line sensors have checked the floor to 4 cm short of it and
+                                # the bottom zone looks past it. (2 cm in the first simulator runs: slanting approaches
+                                # touched with the bumper's corner first, the wheels slipped, and the camera fit's wheel
+                                # scales went 10 % off.) At 15:10 the object stood 5-10 cm past the edge, so the edge lay
+                                # 0-3 cm ahead of the line sensors at the 7 cm stop: 4 cm of creep covers it.
+                                # DOE note: yes, with the crawl DOE (DOE-explore-crawl.md): objects 0-10 cm past an open
+                                # edge and boards 0-5 cm out, 2 / 3 / 4 cm, count right calls against bumper contacts
+EXPLORE_CREEP_STEP_CM = 3.0     # chosen: one creep leg; the camera sees where each ends before the next. DOE note: no, the
+                                # robot's own edge guard is the stop; the step only paces the camera's checks
+EXPLORE_CREEP_CMS = 2.0         # chosen: creep speed, half the ray's crawl ... and never more than
+EXPLORE_CREEP_UNSEEN_CM = 1.0   # ... this far driven in one camera lag (speed <= 1 cm / lag: 2 cm/s needs lag <= 0.5 s;
+                                # at 15:10's worst second, lag 0.59 s, 1.7 cm/s). DOE note: yes, the crawl DOE's speed
+                                # factor (2 / 4 cm/s) at two camera rates sets both; the edge guard's stop distance is
+                                # what it measures
+EXPLORE_CREEP_MAX_CM = 15.0     # chosen: never creep further than this past the front stop (7 cm reading + margin).
+                                # No DOE: a cap
+FRONT_STOP_CM = 7.0             # the firmware's safe_front_cm (params.h), put back after a creep
+EXPLORE_HOME_MOVE_CM = 15.0    # chosen: a home leg that would pass a robot is aimed up to this far to one side of its
+                               # target (session-1510 report, question 3 to Nick). No DOE: a setup preference
 MAKE_WAY_EDGE_CM = 20.0        # chosen: a robot moving aside stays this far from an open edge
 EXPLORE_HOME_FRAC = 0.35       # chosen: explore ends this share of the way from its start towards its rays' middle
 EXPLORE_HOME_IN_CM = 30.0      # chosen: at most this far in from its start
@@ -811,6 +862,9 @@ class Runner:
             if robot in self.held_out:
                 self.say("    (%s was left out at a hold: not sent %s)" % (robot, cmd), quiet=True)
                 return False
+            sgw = getattr(self, "speed_guard_wait", None)       # (absent on the tests' stand-in runners)
+            if sgw is not None and threading.current_thread() is threading.main_thread():
+                sgw(robot, cmd)
         self.link.send_name(robot, cmd)
         self.say("    -> %s: %s" % (robot, cmd), quiet=True)
         return True
@@ -3197,8 +3251,15 @@ class Runner:
     def explore_stop(self, robot, obs, lid=None, contact=None, turn_cmd=None):
         """One observation at a stop: where the camera sees the robot (pixels) and where its own wheels and gyro say
         it is (its own frame, from its last LEG record)."""
-        p = self.settle(min_s=0.4, timeout=3.0)
         rec = self.listener.leg_final(robot, "-", lid) if lid is not None else None
+        if robot in self.held_out and (rec is None or rec.get("state") in ("refused", "dup")):
+            # left out by Nick: the leg was never sent, so this is no stop (2026-10-25 15:10: Right's 6 unsent rays
+            # went in as stops and "nothing met")
+            return None
+        res = getattr(self, "explore_resumed", {}).get((robot, lid))
+        if res is not None and turn_cmd is not None:
+            turn_cmd = res["val"]              # the rest of a turn a hold cut short: that is what it was told
+        p = self.settle(min_s=0.4, timeout=3.0)
         if rec is None or rec.get("state") in ("refused", "dup") or None in (num(rec.get("x_cm")), num(rec.get("th_deg"))):
             # the leg did not run (refused, or no record of it): the robot did not move (never an older leg's pose:
             # 2026-10-23 dry run, a refused half turn read as the ray before it and broke Right's whole path)
@@ -3270,6 +3331,8 @@ class Runner:
             o["skip"] = True                              # its leg still counts for the path; its pixels do not
         if contact:
             o["contact"] = contact
+        if res is not None:
+            o["d_cut"] = round(res["d_before"], 2)        # how far the same leg went before a hold cut it (fix 3)
         obs[robot].append(o)
         live = self.st["setup"].setdefault("explore_live", dict(stops=[], contacts=[]))
         live["stops"].append([robot, round(float(u), 1), round(float(v), 1), bool(skip)])
@@ -3291,14 +3354,104 @@ class Runner:
             return "it only turned and the camera's spot jumped %.0f px" % moved
         return ""
 
+    EXPLORE_RESUME_MAX = 3          # chosen: a leg cut by holds is finished at most this often (no DOE: a loop guard)
+    EXPLORE_RESUME_MIN_CM = 1.0     # chosen: less left than this of a drive (or EXPLORE_RESUME_MIN_DEG of a turn) is
+    EXPLORE_RESUME_MIN_DEG = 2.0    # not sent (no DOE: below what the robot's own legs resolve; 2026-10-25 15:10 the
+                                    # cut turns were 2 deg, 13 deg and 103 deg short)
+
     def explore_leg(self, robot, kind, val, timeout=None):
         """One idle leg with no camera fix (nothing about the floor is known yet: the robot's own frame must stay as
-        it is). Returns (state, info, lid)."""
+        it is). Returns (state, info, lid). A leg that a hold stopped ("stop command" with a hold during it) is
+        finished after Nick's "carry on" (2026-10-25 15:10: a lost hold stopped Left's 175 deg turn at 72 deg and
+        nothing finished it; its return then drove 56 cm the wrong way, at the right edge). The part before the cut
+        is an explore stop of its own (obs: self.explore_obs_live); the rest goes as a new leg. Never for a robot
+        Nick left out, and never on with a drive towards an edge the camera border held it at."""
+        t_from = time.time()
+        state, info, lid = self._explore_leg_once(robot, kind, val, timeout)
+        d_before = 0.0
+        for _ in range(self.EXPLORE_RESUME_MAX):
+            if not (state == "failed" and "stop command" in (info or "").lower()):
+                break
+            while self.hold.is_set() and not self.stop_requested:
+                time.sleep(0.2)                                   # Nick's answer first
+            cut = [h for h in (self.st.get("holds") or []) if h[0] >= t_from - 0.2] + \
+                [[g[0], g[1], "speed"] for g in (self.st.get("speed_guard_stops") or [])
+                 if g[0] >= t_from - 0.2 and g[1] == robot]
+            if not cut or robot in self.held_out or self.stop_requested:
+                break
+            if kind == "go" and any(h[1] == robot and h[2] == "border" for h in cut):
+                break
+            fin = self.listener.leg_final(robot, "-", lid)
+            st0 = self.listener.leg_start(robot, "-", lid)
+            if fin is None or st0 is None:
+                break                                             # how far it got is not known: nothing to finish
+            dx, dy, dth = leg_delta(st0, fin)
+            if dx is None:
+                break
+            done = dx if kind == "go" else dth
+            rest = val - done
+            if abs(rest) < (self.EXPLORE_RESUME_MIN_CM if kind == "go" else self.EXPLORE_RESUME_MIN_DEG) or \
+                    rest * val <= 0:
+                break
+            obs = getattr(self, "explore_obs_live", None)
+            if obs is not None and robot in obs:
+                self.explore_stop(robot, obs, lid)                # the cut point: a stop of its own
+            d_before += dx if kind == "go" else 0.0
+            self.say("    %s: a hold cut its %s short (%.1f of %.1f %s): finishing it, %.1f more" % (
+                robot, "turn" if kind == "turn" else "drive", done, val, "deg" if kind == "turn" else "cm", rest))
+            self.st.setdefault("setup", {}).setdefault("explore_resumed", []).append(
+                [round(time.time(), 1), robot, kind, round(val, 1), round(done, 1), round(rest, 1)])
+            t_from = time.time()
+            to = None if timeout is None else max(10.0, timeout * abs(rest) / max(1e-6, abs(val)))
+            state, info, lid = self._explore_leg_once(robot, kind, rest, to)
+            if not hasattr(self, "explore_resumed"):
+                self.explore_resumed = {}
+            self.explore_resumed[(robot, lid)] = dict(val=rest, d_before=d_before)
+            val = rest
+        return state, info, lid
+
+    def dry_scene_leg(self, robot, kind, val):
+        """--dry-scene: start this leg's injected event, if any (a camera gap, or a hold with its answer)."""
+        sc = getattr(self, "scene", None)
+        if not sc:
+            return
+        cnt = self.__dict__.setdefault("scene_count", {})
+        kinds = [kind] + (["ray"] if kind == "go" and abs(val - self.EXPLORE_RAY_CM) < 0.01 else []) + \
+            (["bigturn"] if kind == "turn" and abs(val) >= 150.0 else [])
+        for k in kinds:
+            cnt[(robot, k)] = cnt.get((robot, k), 0) + 1
+        for ev in sc:
+            if ev["done"] or ev["robot"] != robot or ev["kind"] not in kinds or cnt[(robot, ev["kind"])] != ev["n"]:
+                continue
+            ev["done"] = True
+            self.st.setdefault("dry_scene", []).append([round(time.time(), 1), robot, kind, round(val, 1), ev["what"]])
+            if ev["what"].startswith("gap"):
+                secs = float(ev["what"][3:])
+                self.say("  (dry run scene: the camera loses %s for %.1f s, %.1f s into its %s %.0f)" % (
+                    robot, secs, ev["at"], kind, val), quiet=True)
+                self.scene_blind = (time.time() + ev["at"], time.time() + ev["at"] + secs)
+            else:
+                def fire(ev=ev):
+                    self.dry_next_answer = ev["what"]
+                    self.say("  (dry run scene: a hold during %s's %s %.0f, answer %s)" % (robot, kind, val, ev["what"]))
+                    self.hold_for_nick(robot, "lost", "dry run scene: a hold injected (15:10 re-creation)")
+                threading.Timer(ev["at"], fire).start()
+
+    def scene_filter(self, s):
+        """The camera samples during a --dry-scene gap: none."""
+        b = getattr(self, "scene_blind", None)
+        if b is not None and b[0] <= time.time() <= b[1]:
+            return None
+        return s
+
+    def _explore_leg_once(self, robot, kind, val, timeout=None):
+        if getattr(self, "scene", None):
+            self.dry_scene_leg(robot, kind, val)
         self.moves[robot] = dict(run="-", why="explore")
         est = abs(val) / DRIVE_CMS_GUESS + 1.0 if kind == "go" else abs(val) / TURN_DPS_GUESS + 1.0
         # a forward crawl looks for the edge on purpose (the firmware's edge guard stops it): the virtual border
         # lets it; backwards, or at speed, never
-        seek = kind == "go" and val > 0 and self.speed_now.get(robot) == EXPLORE_CRAWL_CMS
+        seek = kind == "go" and val > 0 and (self.speed_now.get(robot) or 99.0) <= EXPLORE_CRAWL_CMS
         if seek:
             self.seek.add(robot)
             self.fw_seek(robot, True)
@@ -3335,13 +3488,14 @@ class Runner:
         for n in names:
             self.send(n, "set e02_back_max_cm %d" % EXPLORE_BACK_ALLOW_CM)
         obs = {n: [] for n in names}
+        self.explore_obs_live = obs          # explore_leg's cut-short legs record their cut point here (fix 3)
         t0 = time.time()
         # 1. the room check, every robot first (Nick, 2026-10-24, after two robots went over an open edge: one had
         # been put down 10 cm from it): short slow drives four ways; a robot near an edge works its way in
         room = {}
         for n in names:
             q = st["positions"].get(n)
-            if not q:
+            if not q or n in self.held_out:
                 continue
             self.explore_follow(n)
             state, info, lid = self.explore_leg(n, "turn", 2.0)
@@ -3357,22 +3511,27 @@ class Runner:
         order = sorted(room, key=room_score, reverse=True)
         self.say("  exploring in this order (most room first): %s" % ", ".join(order))
         for n in order:
+            if n in self.held_out:
+                # left out by Nick (a hold during another robot's turn, or its own room check): it stays where it is
+                self.say("  %s: left out by Nick: no square, no rays" % n)
+                continue
             self.explore_follow(n)
             self.say("  %s: a small square (camera and gyro check) ..." % n)
             self.explore_speed(n, EXPLORE_CRAWL_CMS)
             for kind, val in self.EXPLORE_DANCE:
                 state, info, lid = self.explore_leg(n, kind, val)
-                if state not in ("done", "dup", "failed"):
+                if state not in ("done", "dup", "failed") or n in self.held_out:
                     break
                 self.explore_stop(n, obs, lid, turn_cmd=val if kind == "turn" else None)
             self.say("  %s: %d rays out until it feels a board or an edge, and back ..." % (n, self.EXPLORE_RAYS))
             self.explore_rays(n, obs, 0.5)
             self.explore_home(n, obs)
             self.moves.pop(n, None)
-            p = self.settle(min_s=0.3)
-            if p:
-                st["positions"][n] = [p[0], p[1], None]
-                self.tracker.park(n, p[0], p[1])
+            if n not in self.held_out:            # (a left-out robot was placed on the map by leave_out)
+                p = self.settle(min_s=0.3)
+                if p:
+                    st["positions"][n] = [p[0], p[1], None]
+                    self.tracker.park(n, p[0], p[1])
             st.save()
         st["setup"]["explore_obs"] = obs
         st.save()
@@ -3386,9 +3545,12 @@ class Runner:
             # one side leave the far side unmet)
             self.say("  %s: rays aimed at the sides not met yet ..." % e)
             n_gap = self.explore_gap_rays(names, obs)
+            # no gap ray could be driven (every sector's ray would pass a robot, or the only robots left are left
+            # out): more rays from every robot still in, between its first ones (2026-10-25 15:10: two gap rays
+            # given to the left-out Right counted as driven, and this was skipped)
             for n in (names if not n_gap else []):
                 q = st["positions"].get(n)
-                if not q:
+                if not q or n in self.held_out:
                     continue
                 self.tracker.follow(n, q[0], q[1])
                 self.history.clear()
@@ -3489,7 +3651,7 @@ class Runner:
             fin = self.listener.leg_final(n, "-", lid) or {}
             kind = MAP.stop_kind(fin.get("state"), fin.get("info"))
             o = self.explore_stop(n, obs, lid)
-            d = abs(o["d"]) if o else 0.0
+            d = abs(o["d"] + o.get("d_cut", 0.0)) if o else 0.0
             free.append(kind is None)
             met.append(kind)
             d = min(d, EXPLORE_PROBE_CM + 2.0)     # never back further than the probe could have gone (stage 3)
@@ -3529,10 +3691,12 @@ class Runner:
                  quiet=True)
         return free
 
-    def explore_ray_blocked(self, n, obs, own_heading):
+    def explore_ray_blocked(self, n, obs, own_heading, length_cm=None):
         """Would a ray at own_heading (its own frame) pass within EXPLORE_RAY_CLEAR_CM of another robot? Its own
         frame is laid on the provisional floor by its stops so far (a fit with a turn, a size and maybe a mirror).
-        Returns the other robot's name or ''."""
+        length_cm: how far it goes (default a ray's longest); the home and return legs are checked the same way
+        (2026-10-25 15:10: Left's unchecked home leg passed 6 cm from Center and pushed it). Returns the other
+        robot's name or ''."""
         stops = [q for q in obs[n] if not q.get("skip")]
         if len(stops) < 5:
             return ""
@@ -3546,13 +3710,30 @@ class Runner:
         d = A @ np.array([math.cos(math.radians(own_heading)), math.sin(math.radians(own_heading))])
         hd = math.degrees(math.atan2(d[1], d[0]))
         others = [(k, tuple(q[:2])) for k, q in self.st["positions"].items() if k != n and q]
-        return MAP.ray_blocked(here, hd, others, clear_cm=EXPLORE_RAY_CLEAR_CM, length_cm=self.EXPLORE_RAY_CM)
+        if length_cm is None:
+            length_cm = self.EXPLORE_RAY_CM
+        else:
+            # its own wheels' cm to floor cm (the provisional camera's scale), and the same clearance at its end
+            length_cm = length_cm * float(np.sqrt(abs(np.linalg.det(A)))) + EXPLORE_RAY_CLEAR_CM
+        return MAP.ray_blocked(here, hd, others, clear_cm=EXPLORE_RAY_CLEAR_CM, length_cm=length_cm)
+
+    def explore_clear_leg(self, n, obs, own_heading, dist):
+        """How far (cm, its own frame) a drive at own_heading can go and stay EXPLORE_RAY_CLEAR_CM clear of the
+        other robots: dist when clear, else the longest of EXPLORE_LEG_SHORTEN x dist that is, else 0. Returns
+        (cm, who): who is the robot in the way ('' when clear)."""
+        who = self.explore_ray_blocked(n, obs, own_heading, length_cm=dist)
+        if not who:
+            return dist, ""
+        for f in EXPLORE_LEG_SHORTEN:
+            if not self.explore_ray_blocked(n, obs, own_heading, length_cm=f * dist):
+                return f * dist, who
+        return 0.0, who
 
     def explore_home(self, n, obs):
         """Back to where it started exploring, on its own wheels and gyro (Nick, 2026-10-23 evening: the robots
         ended explore with a wheel over an open edge, and every compass check after failed). Its own path from its
         legs (no camera: the camera is not calibrated yet); the edge guard and front stop still on."""
-        if len(obs[n]) < 2:
+        if len(obs[n]) < 2 or n in self.held_out:
             return
         path = EX.rebuild(obs[n], 1.0, 1.0)
         x, y, th = path[-1]
@@ -3565,17 +3746,50 @@ class Runner:
             cx, cy = float(np.mean([e[0] for e in ends])), float(np.mean([e[1] for e in ends]))
             k = min(EXPLORE_HOME_IN_CM, math.hypot(cx, cy) * EXPLORE_HOME_FRAC) / max(1e-6, math.hypot(cx, cy))
             tx, ty = cx * k, cy * k
+        # its own frame: the target (tx, ty); it stands at (x, y). The straight line there must stay clear of the
+        # parked robots (fix 4): else a target up to EXPLORE_HOME_MOVE_CM from it whose line is clear, else as far
+        # as is clear, else it stays where it is
+        x0_, y0_ = x, y
         x, y = x - tx, y - ty
         dist = math.hypot(x, y)
         if dist < 3.0:
             return
-        turn = ST.wrap180(math.degrees(math.atan2(-y, -x)) - th)
+        own_h = math.degrees(math.atan2(-y, -x))
+        go_cm, who = self.explore_clear_leg(n, obs, own_h, dist)
+        if who:
+            best = None
+            for r_ in (EXPLORE_HOME_MOVE_CM / 2.0, EXPLORE_HOME_MOVE_CM):
+                for k_ in range(8):
+                    a_ = math.radians(45.0 * k_)
+                    gx, gy = tx + r_ * math.cos(a_), ty + r_ * math.sin(a_)
+                    d_ = math.hypot(gx - x0_, gy - y0_)
+                    h_ = math.degrees(math.atan2(gy - y0_, gx - x0_))
+                    if d_ >= 3.0 and not self.explore_ray_blocked(n, obs, h_, length_cm=d_):
+                        if best is None or r_ < best[0]:
+                            best = (r_, d_, h_)
+                if best is not None:
+                    break
+            if best is not None:
+                self.say("    %s: the way back would pass %s: aimed %.0f cm to one side of its start instead" % (
+                    n, who, best[0]), quiet=True)
+                dist, own_h, go_cm = best[1], best[2], best[1]
+            else:
+                self.say("    %s: the way back would pass %s: %s" % (n, who, "only %.0f of %.0f cm driven" % (
+                    go_cm, dist) if go_cm >= 3.0 else "it stays where it is"), quiet=True)
+            self.st.setdefault("setup", {}).setdefault("explore_legs_checked", []).append(
+                [round(time.time(), 1), n, "home", who, round(dist, 1), round(go_cm, 1), best is not None])
+            if go_cm < 3.0:
+                return
+            dist = go_cm
+        turn = ST.wrap180(own_h - th)
         if abs(turn) > 150.0:
             state, info, lid = self.explore_leg(n, "turn", turn / 2.0)
             self.explore_stop(n, obs, lid, turn_cmd=turn / 2.0)
             turn /= 2.0
         state, info, lid = self.explore_leg(n, "turn", turn)
         self.explore_stop(n, obs, lid, turn_cmd=turn)
+        if n in self.held_out:
+            return
         self.explore_speed(n, EXPLORE_CRAWL_CMS)
         state, info, lid = self.explore_leg(n, "go", min(dist, self.EXPLORE_RAY_CM),
                                             timeout=min(dist, self.EXPLORE_RAY_CM) / EXPLORE_CRAWL_CMS * 1.5 + 10.0)
@@ -3583,18 +3797,78 @@ class Runner:
         self.say("    %s: back near where it started exploring, a little towards the middle (%.0f cm by its own wheels)"
                  % (n, dist), quiet=True)
 
+    def explore_creep(self, n, obs, o, fin, k):
+        """The front stop ended ray k: creep on to tell an open edge with something beyond it from a blocked side
+        (EXPLORE_CREEP_*). o: the ray's stop (its 'board' contact moves to where the creep ends). Returns (kind, cm
+        crept): 'edge', 'board' or None (it reached neither: nothing met)."""
+        m = re.search(r"front=([0-9.]+)", fin.get("info") or "")
+        front0 = float(m.group(1)) if m else FRONT_STOP_CM
+        o.pop("contact", None)
+        lag = self.camera_lag_s() or 0.0
+        cms = max(0.5, min(EXPLORE_CREEP_CMS, EXPLORE_CREEP_UNSEEN_CM / max(lag, 1e-3)))
+        self.explore_speed(n, cms)
+        self.send(n, "set safe_front_cm %g" % EXPLORE_CREEP_FRONT_CM)
+        crept, result, reach = 0.0, None, None
+        try:
+            while crept < min(EXPLORE_CREEP_MAX_CM, front0 + 2.0) and n not in self.held_out:
+                step = min(EXPLORE_CREEP_STEP_CM, EXPLORE_CREEP_MAX_CM - crept)
+                state, info, lid = self.explore_leg(n, "go", step, timeout=step / cms * 2.0 + 6.0)
+                f2 = self.listener.leg_final(n, "-", lid) or {}
+                k2 = MAP.stop_kind(f2.get("state"), f2.get("info"))
+                o2 = self.explore_stop(n, obs, lid, contact=k2)
+                dd = (o2["d"] + o2.get("d_cut", 0.0)) if o2 is not None else 0.0
+                crept += max(0.0, dd)
+                if k2 == "edge":
+                    if o2 is not None:
+                        o2["cue"] = MAP.edge_cue(f2.get("info"))
+                    result = "edge"
+                    break
+                if k2 == "board":
+                    m2 = re.search(r"front=([0-9.]+)", f2.get("info") or "")
+                    reach = MAP.TOF_AHEAD_CM + (float(m2.group(1)) if m2 else EXPLORE_CREEP_FRONT_CM)
+                    if o2 is not None:
+                        o2["reach_cm"] = round(reach, 2)
+                    result = "board"
+                    break
+                if state != "done" or dd < 0.3:
+                    break
+        finally:
+            self.send(n, "set safe_front_cm %g" % FRONT_STOP_CM)
+            self.explore_speed(n, EXPLORE_CRAWL_CMS)
+        beyond = round(front0 - crept, 1) if result == "edge" else None
+        self.st.setdefault("setup", {}).setdefault("explore_creeps", []).append(
+            [round(time.time(), 1), n, k + 1, round(front0, 1), round(crept, 1), result, beyond, round(cms, 2)])
+        if result == "edge":
+            self.say("    ray %d: the front saw something %.0f cm ahead, but the floor ended first (after %.1f cm): an "
+                     "OPEN edge; the object stands beyond it, about %.0f cm on (not a board side)" % (
+                         k + 1, front0, crept, max(0.0, beyond or 0.0)), quiet=True)
+        elif result == "board":
+            self.say("    ray %d: crept %.1f cm up to what the front saw, floor all the way: a blocked side" % (
+                k + 1, crept), quiet=True)
+        else:
+            self.say("    ray %d: the front saw something %.0f cm ahead; crept %.1f cm and met neither" % (
+                k + 1, front0, crept), quiet=True)
+        return result, crept
+
     def explore_rays(self, n, obs, offset):
         """EXPLORE_RAYS rays for robot n, at (k + offset) x 360 / EXPLORE_RAYS deg in its own frame, each out until
         its front stop or edge guard stops it (or the ray's length) and back."""
         for k in range(self.EXPLORE_RAYS):
+            if n in self.held_out:
+                left = self.EXPLORE_RAYS - k
+                self.say("    %s: left out by Nick: its last %d ray(s) not driven" % (n, left), quiet=True)
+                self.st.setdefault("setup", {}).setdefault("explore_rays_not_driven", []).append([n, k, left])
+                return
             # evenly spread rays in its own frame (its heading from its own legs: 2026-10-23 dry run 5, a fixed
             # turn between rays after the half turn back left a 93 deg gap, and no robot met one side)
             self.explore_one_ray(n, obs, (k + offset) * 360.0 / self.EXPLORE_RAYS, k)
 
     def explore_one_ray(self, n, obs, want, k):
         """One ray of robot n at heading `want` (deg, its own frame): turn, out until a board or an edge stops it
-        (or the ray's length), back off an edge, and back the way it came. Returns the contact kind or None
-        (skipped: it would pass another robot)."""
+        (or the ray's length), back off an edge, and back the way it came. Returns the contact kind, '' (driven,
+        nothing met) or None (not driven: it would pass another robot, or Nick left it out)."""
+        if n in self.held_out:
+            return None
         own_h = sum(q["dth"] for q in obs[n][1:])
         turn = ST.wrap180(want - own_h)
         if abs(turn) > 150.0:          # two turns: a half turn is ambiguous (+-180 alike)
@@ -3603,6 +3877,8 @@ class Runner:
             turn = turn / 2.0
         state, info, lid = self.explore_leg(n, "turn", turn)
         self.explore_stop(n, obs, lid, turn_cmd=turn)
+        if n in self.held_out:
+            return None
         who = self.explore_ray_blocked(n, obs, want)
         if who:
             self.say("    ray %d: skipped (it would pass %s)" % (k + 1, who), quiet=True)
@@ -3616,9 +3892,19 @@ class Runner:
         o = self.explore_stop(n, obs, lid, contact=kind)
         if o is not None and kind == "edge":
             o["cue"] = MAP.edge_cue(fin.get("info"))
+        if n in self.held_out:
+            # a hold stopped the ray and Nick left the robot out: it stays where it is (not "nothing met")
+            self.say("    ray %d: stopped by a hold; Nick left %s out" % (k + 1, n), quiet=True)
+            return None
+        creep_cm = 0.0
+        if kind == "board" and o is not None:
+            kind, creep_cm = self.explore_creep(n, obs, o, fin, k)
+            if n in self.held_out:
+                return None
         self.say("    ray %d: %s" % (k + 1, {"edge": "an open edge", "board": "a board (or a robot)"}.get(
             kind, "nothing met")), quiet=True)
-        if o is not None and kind and abs(o["d"]) < 2.0:
+        d_out = (o["d"] + o.get("d_cut", 0.0) + creep_cm) if o is not None else 0.0
+        if o is not None and kind and abs(d_out) < 2.0:
             o.pop("contact", None)            # it was already there (it never left the edge): not a new side point
         if kind == "edge":
             # back off the edge first, blind (2026-10-23 real board: at an open edge the edge guard refused every
@@ -3627,17 +3913,29 @@ class Runner:
             bo = self.explore_stop(n, obs, lid)
             if o is not None and bo is not None:
                 o["d_back"] = bo["d"]
-        back = abs(o["d"]) + (o.get("d_back") or 0.0) if o else 0.0
+        back = abs(d_out) + (o.get("d_back") or 0.0) if o else 0.0
         back = min(back, self.EXPLORE_RAY_CM + EXPLORE_EDGE_BACK_CM)   # never further than the ray could go (stage 3)
-        if back > 1.0:
+        if back > 1.0 and n not in self.held_out:
             # back the way it came: (nearly) a half turn, then forward (175 deg: a 180 is ambiguous, the robot
             # sometimes goes round the other way and reports +-180 alike: 2026-10-23 dry run); (backing up is blind and needs camera fixes,
             # which explore can't give yet; forward has the front stop and the edge guard)
             state, info, lid = self.explore_leg(n, "turn", 175.0)
             self.explore_stop(n, obs, lid, turn_cmd=175.0)
-            self.explore_speed(n, EXPLORE_FAST_CMS)          # back over ground it has just driven
-            state, info, lid = self.explore_leg(n, "go", back, timeout=40.0)
-            self.explore_stop(n, obs, lid)
+            if n in self.held_out:
+                return kind or ""
+            # the way back checked like a ray (fix 4): a 175 deg turn and gyro drift do not bring it back on the
+            # same line (2026-10-25 15:10: ray 8's return drifted about 11 deg)
+            own_h = sum(q["dth"] for q in obs[n][1:])
+            go_cm, who = self.explore_clear_leg(n, obs, own_h, back)
+            if who:
+                self.say("    ray %d: the way back would pass %s: %s" % (k + 1, who, "only %.0f of %.0f cm" % (
+                    go_cm, back) if go_cm >= 3.0 else "it stays where it is"), quiet=True)
+                self.st.setdefault("setup", {}).setdefault("explore_legs_checked", []).append(
+                    [round(time.time(), 1), n, "return", who, round(back, 1), round(go_cm, 1), False])
+            if go_cm >= 3.0:
+                self.explore_speed(n, EXPLORE_FAST_CMS)          # back over ground it has just driven
+                state, info, lid = self.explore_leg(n, "go", go_cm, timeout=40.0)
+                self.explore_stop(n, obs, lid)
         return kind or ""
 
     EXPLORE_SECTORS = 8         # chosen: 45 deg sectors round the middle of all stops seen
@@ -3683,6 +3981,8 @@ class Runner:
         for hd, c in gaps:
             best = None
             for n in names:
+                if n in self.held_out or n in self.unavailable:
+                    continue                  # left out by Nick: never a gap ray (2026-10-25 15:10: both top rays)
                 stops = [q for q in obs.get(n, []) if not q.get("skip")]
                 if len(stops) < 5:
                     continue
@@ -3720,13 +4020,32 @@ class Runner:
             kind = self.explore_one_ray(n, obs, own_h, 99)
             self.st.setdefault("setup", {}).setdefault("explore_gap_rays", []).append(
                 [n, round(hd, 1), round(own_h, 1), kind])
-            done += 1
+            if kind is not None:
+                done += 1                     # only a ray that was driven counts (a skipped or left-out one is not)
             self.moves.pop(n, None)
-            p = self.settle(min_s=0.3)
-            if p:
-                self.st["positions"][n] = [p[0], p[1], None]
-                self.tracker.park(n, p[0], p[1])
+            if n not in self.held_out:
+                p = self.settle(min_s=0.3)
+                if p:
+                    self.st["positions"][n] = [p[0], p[1], None]
+                    self.tracker.park(n, p[0], p[1])
         return done
+
+    def heavy(self, fn, *args, **kw):
+        """A long calculation (explore's camera fit: 11 s here, 25-28 s on the Pi) in the helper process
+        (e02_offload), so the camera loop keeps its pictures a second (2026-10-25 15:10: 24 -> 3.8 during the
+        fits). --fits-in-runner: in the runner, as before (the before/after measurement)."""
+        if getattr(getattr(self, "a", None), "fits_in_runner", False):
+            return fn(*args, **kw)
+        if getattr(self, "offload", None) is None:
+            self.offload = OFF.Worker(log=lambda m: self.say(m))
+        t0 = time.time()
+        self.mark("e02 heavy start %s" % fn.__name__)
+        try:
+            return self.offload.call(fn, *args, **kw)
+        finally:
+            self.mark("e02 heavy end %s %.1f s" % (fn.__name__, time.time() - t0))
+            self.st.setdefault("heavy_calls", []).append([round(t0, 1), round(time.time() - t0, 2), fn.__name__,
+                                                          "runner" if self.offload.failed else "helper"])
 
     def explore_finish(self, names, obs, t0, last_try=True):
         st = self.st
@@ -3737,7 +4056,7 @@ class Runner:
         size = (self.feed.last_img.shape[1], self.feed.last_img.shape[0])
         # check before trust: each robot's own path against its own pixels, alone (one robot's bad data, a wheel
         # off the board or the tracker on something else, must not bend everyone's calibration)
-        checks = {n: EX.robot_check(v) for n, v in robots.items()}
+        checks = {n: self.heavy(EX.robot_check, v) for n, v in robots.items()}
         st["setup"]["explore_robot_checks"] = checks
         for n, c in checks.items():
             self.say("  %s: %s" % (n, "its camera path fits its own wheels and gyro within %.1f px (gyro scale %.3f): "
@@ -3747,7 +4066,7 @@ class Runner:
         robots = {n: v for n, v in robots.items() if checks[n]["ok"]}
         if not robots:
             raise ExploreFailed("no robot's camera path fitted its own wheels and gyro")
-        sol = EX.fit(robots, size)
+        sol = self.heavy(EX.fit, robots, size)
         # then each robot against the joint fit: one whose stops the shared camera misses by more than
         # FIT_ROBOT_MAX_PX is left out and the rest fitted again (once)
         worse = [n for n, v in sol["per_robot_rms_px"].items() if not (v <= EX.FIT_ROBOT_MAX_PX)]
@@ -3758,7 +4077,7 @@ class Runner:
                 checks[n] = dict(checks[n], ok=False, why="joint fit %.1f px" % sol["per_robot_rms_px"][n])
                 left_out.append(n)
             robots = {n: v for n, v in robots.items() if n not in worse}
-            sol = EX.fit(robots, size)
+            sol = self.heavy(EX.fit, robots, size)
         bad = EX.fit_check(sol) or ("forced to fail (--dry-explore-fail)" if getattr(self.a, "dry_explore_fail", False)
                                     and getattr(self.a, "dry_run", False) else "")
         if bad:
@@ -5811,6 +6130,12 @@ class Runner:
         """Nick's answer with no time limit: the live page (and the console) when there is one, else the console;
         a dry run with nobody there answers c after HOLD_DRY_ANSWER_S. With no page and no console (started
         without a terminal), nobody can ever answer: the session stops (s)."""
+        nxt = getattr(self, "dry_next_answer", None)
+        if nxt and getattr(self.a, "dry_run", False):
+            self.dry_next_answer = None            # --dry-scene: this hold's own answer
+            time.sleep(HOLD_DRY_ANSWER_S)
+            self.say(prompt + " -> " + nxt + " (dry run: the scene's answer)")
+            return nxt
         if getattr(self.a, "dry_run", False) and (self.a.auto or not getattr(self.a, "web_ask", False)):
             time.sleep(HOLD_DRY_ANSWER_S)
             self.say(prompt + " -> " + getattr(self.a, "dry_hold_answer", "c") + " (dry run: automatic)")
@@ -5845,6 +6170,13 @@ class Runner:
         xs, ys = (int(v) for v in (getattr(self.a, "board_sides", None) or "1,1").split(","))
         self.say("  Virtual border while exploring: %.0f cm inside the open edges, placed by %s (until explore's own "
                  "fit)." % (self.border_cm(), os.path.basename(cal)))
+        sh = getattr(self.a, "dry_guard_shift", "") if getattr(self.a, "dry_run", False) else ""
+        if sh:
+            # the 15:10 re-creation: the stored outline off the plywood, so a line-sensor edge stop leaves the
+            # robot's centre past the border's line (as 3.8-5.5 cm past at every 15:10 edge stop)
+            dx, dy = (float(v) for v in sh.split("/"))
+            cam = ShiftedFloor(cam, dx, dy)
+            self.say("  (dry run: the border's calibration shifted %+.0f / %+.0f cm off the simulator's floor)" % (dx, dy))
         return cam, PL.Board(xboard_side=xs, yboard_side=ys)
 
     def border_frame(self, x, y):
@@ -5882,7 +6214,8 @@ class Runner:
         if f is None:
             return False
         bd, x, y = f
-        return min(abs((x if ax == "x" else y) - v) for ax, v in bd.open_edges()) < self.border_cm()
+        # signed: a centre past the line is inside the band too, however far past (2026-10-25 runner fixes)
+        return min(ST.inward_cm(bd, ax, v, x if ax == "x" else y) for ax, v in bd.open_edges()) < self.border_cm()
 
     SHADOW_EVERY_S = 5.0      # chosen: one shadow record per robot per 5 s at most (one approach, not 50 pictures of it)
 
@@ -5908,7 +6241,7 @@ class Runner:
         d = None
         if f is not None:
             bd_, x_, y_ = f
-            d = min(abs((x_ if ax == "x" else y_) - v) for ax, v in bd_.open_edges())
+            d = min(ST.inward_cm(bd_, ax, v, x_ if ax == "x" else y_) for ax, v in bd_.open_edges())   # - : past
         rec = [round(time.time(), 2), robot, None if d is None else round(d, 1), round(away, 1), int(home_tripped),
                self.phase, self.order]
         self.st.setdefault("border_shadow", []).append(rec)
@@ -5960,6 +6293,98 @@ class Runner:
         # how often it runs doesn't change false flags, only how late a real one is seen)
         self.trust_note(save=False)
 
+    def camera_lag_s(self):
+        """The camera's lag now (s): the newest perf row's picture age + one picture interval; a camera loop that
+        has written no row for over a second (stuck) counts that time too. None before the first row."""
+        rows = getattr(self, "perf_rows", None)
+        if not rows:
+            return None
+        r = rows[-1]
+        lag = float(r["age_mean_s"]) + 1.0 / max(0.5, float(r["fps_handled"]))
+        return max(lag, time.time() - float(r["t"]) - 1.0)
+
+    def speed_guard_cm(self, robot, v_cms=0.0):
+        """How much further out this robot's border sits because the camera is slow: its speed (driving, or what it
+        will drive at) x the lag above the budget, at most SPEED_GUARD_MAX_CM; 0 within budget."""
+        lag = self.camera_lag_s()
+        if lag is None:
+            return 0.0
+        budget = SPEED_LAG_BUDGET_HOME_S if getattr(getattr(self, "a", None), "home", False) else \
+            SPEED_LAG_BUDGET_AWAY_S
+        v = max(float(v_cms or 0.0), float((getattr(self, "speed_now", {}) or {}).get(robot) or EXPLORE_FAST_CMS))
+        return min(SPEED_GUARD_MAX_CM, v * max(0.0, lag - budget))
+
+    def speed_guard_check(self, robot, smp, last):
+        """The watchdog's speed guard (part 2b): the camera is slow and the robot drives towards an open edge inside
+        its widened border (border_cm + speed_guard_cm): stop it, no hold. True if it was stopped."""
+        if len(smp) < 2:
+            return False
+        dt_ = max(1e-3, smp[-1][0] - smp[0][0])
+        v_meas = math.hypot(smp[-1][1] - smp[0][1], smp[-1][2] - smp[0][2]) / dt_
+        extra = self.speed_guard_cm(robot, v_meas if v_meas < BORDER_JUMP_CMS else 0.0)
+        if extra < SPEED_GUARD_MIN_CM:
+            return False
+        why = self.border_check(robot, smp, bcm=self.border_cm() + extra)
+        if not why or time.time() - last.get(robot, 0.0) < 2.0:
+            return bool(why)
+        last[robot] = time.time()
+        for _ in range(3):
+            self.link.send_name(robot, "stop")
+            time.sleep(0.1)
+        lag = self.camera_lag_s() or 0.0
+        rec = [round(time.time(), 2), robot, round(extra, 1), round(lag, 3), why, self.phase, self.order]
+        self.st.setdefault("speed_guard_stops", []).append(rec)
+        self.say("  SPEED GUARD: %s stopped: the camera is slow (lag %.2f s), so its border is %.1f cm wider: %s. "
+                 "It waits until the camera catches up." % (robot, lag, extra, why))
+        self.mark("e02 speed guard stop %s" % robot)
+        return True
+
+    def in_band(self, robot, bcm):
+        """Is the robot's centre (the camera's latest, else its parked spot) within bcm of an open edge (or past
+        it)? False if not known."""
+        q = None
+        if self.tracker is not None and self.tracker.active == robot and self.history is not None:
+            smp = self.history.since(time.time() - 1.0)
+            if smp:
+                q = (smp[-1][1], smp[-1][2])
+        if q is None and (self.st.get("positions") or {}).get(robot):
+            q = tuple(self.st["positions"][robot][:2])
+        if q is None:
+            return False
+        f = self.border_frame(q[0], q[1])
+        if f is None:
+            return False
+        bd, x, y = f
+        return min(ST.inward_cm(bd, ax, v, x if ax == "x" else y) for ax, v in bd.open_edges()) < bcm
+
+    def speed_guard_wait(self, robot, cmd=""):
+        """Before a move (main thread): while the camera is slow and the robot is in its widened band, wait until
+        the lag is back within budget for SPEED_RECOVER_ROWS rows, at most SPEED_WAIT_MAX_S."""
+        extra = self.speed_guard_cm(robot)
+        if extra < SPEED_GUARD_MIN_CM or not self.in_band(robot, self.border_cm() + extra):
+            return 0.0
+        t0 = time.time()
+        lag0 = self.camera_lag_s() or 0.0
+        self.say("  SPEED GUARD: the camera is slow (lag %.2f s): %s is within %.0f cm of an open edge, so `%s` waits "
+                 "until it catches up (at most %.0f s)" % (lag0, robot, self.border_cm() + extra, cmd.strip(),
+                                                           SPEED_WAIT_MAX_S))
+        good, seen = 0, None
+        while time.time() - t0 < SPEED_WAIT_MAX_S and not self.stop_requested:
+            time.sleep(0.25)
+            rows = getattr(self, "perf_rows", None) or []
+            if rows and rows[-1] is not seen:
+                seen = rows[-1]
+                good = good + 1 if self.speed_guard_cm(robot) < SPEED_GUARD_MIN_CM else 0
+                if good >= SPEED_RECOVER_ROWS:
+                    break
+        waited = time.time() - t0
+        self.st.setdefault("speed_guard_waits", []).append([round(t0, 1), robot, round(extra, 1), round(lag0, 3),
+                                                            round(waited, 1), good >= SPEED_RECOVER_ROWS])
+        self.say("  SPEED GUARD: %s after %.0f s" % ("camera caught up: going on" if good >= SPEED_RECOVER_ROWS else
+                                                     "still slow: the move goes, the in-motion guard still on", waited),
+                 quiet=good >= SPEED_RECOVER_ROWS)
+        return waited
+
     def border_check(self, robot, smp, bcm=None):
         """Words if the robot is within BORDER_CM of an open edge and moving towards it, else ''. smp: the tracker's
         recent (t, x, y, ...) samples."""
@@ -5998,13 +6423,18 @@ class Runner:
         dt_ = max(1e-3, smp[-1][0] - smp[0][0])
         speed = math.hypot(x - a[1], y - a[2]) / dt_
         for ax, val in bd.open_edges():
-            d = abs((x if ax == "x" else y) - val)
+            # signed, as ST.hazard: + on the board, - past the line (2026-10-25 15:10: with abs(), every back-off
+            # from a line-sensor edge stop, centre 3.8-5.5 cm past the stored line, read as approaching: 6 of 9
+            # border trips false, 4 holds)
+            d = ST.inward_cm(bd, ax, val, x if ax == "x" else y)
             if d >= bcm:
                 continue
-            p0 = a[1] if ax == "x" else a[2]
-            p1 = x if ax == "x" else y
-            towards = (abs(p0 - val) - abs(p1 - val)) / dt_          # cm/s closer to that edge
+            d0 = ST.inward_cm(bd, ax, val, a[1] if ax == "x" else a[2])
+            towards = (d0 - d) / dt_                                  # cm/s closer to (or further past) that edge
             if BORDER_TOWARDS_CMS < towards < BORDER_JUMP_CMS and towards >= BORDER_TOWARDS_FRAC * speed:
+                if d < 0:
+                    return ("its centre is %.0f cm past an open edge's line (the border is %.0f cm), moving further "
+                            "out" % (-d, bcm))
                 return "its centre is %.0f cm from an open edge (the border is %.0f cm), moving towards it" % (
                     d, bcm)
         return ""
@@ -6012,6 +6442,32 @@ class Runner:
     def watchdog(self, robot=None):
         """For wait_end polls: has the camera watchdog stopped the robot in this run?"""
         return self.watchdog_fired
+
+    def lost_why(self, robot, now):
+        """The watchdog's lost check for the followed robot: words if it is lost (a driving leg the camera has not
+        seen for LOST_DRIVE_S, or whose spot does not move while its wheels drive), else ''."""
+        t_leg = self.leg_live.get(robot)
+        # a robot turning on its spot goes nowhere: the camera gets RECHECK_S to see it again before it is called
+        # lost (2026-10-25 15:10: 3 lost holds during turns, camera gaps of 1.8-3.0 s beside a robot or a light
+        # object; each hold cut the turn short)
+        lost_s = RECHECK_S if self.leg_kind.get(robot) == "turn" else LOST_DRIVE_S
+        if t_leg is None or robot in self.refinding or robot in self.seek or now - t_leg <= lost_s:
+            return ""
+        last_t = self.history.last_t() if hasattr(self.history, "last_t") else None
+        if last_t is None or now - max(last_t, t_leg) > lost_s:
+            return "the camera has not seen it for %.1f s while it %s" % (
+                now - max(last_t or t_leg, t_leg), "turns" if lost_s == RECHECK_S else "drives")
+        if self.leg_kind.get(robot) == "go":
+            since = self.history.since(t_leg)
+            el = now - t_leg
+            cms = self.speed_now.get(robot) or EXPLORE_FAST_CMS
+            expect = min(abs(self.leg_val.get(robot) or 0.0), cms * max(0.0, el - LOST_START_S))
+            if since and el > LOST_FROZEN_S and expect >= LOST_FROZEN_CM:
+                moved = math.hypot(since[-1][1] - since[0][1], since[-1][2] - since[0][2])
+                if moved < LOST_FROZEN_FRAC * expect:
+                    return ("its wheels should have taken it about %.0f cm but the camera's spot moved %.0f cm (the "
+                            "camera may be following something else)" % (expect, moved))
+        return ""
 
     def watchdog_loop(self):
         """The camera watchdog, all session, 10 times a second, for whichever robot the camera follows (finds,
@@ -6053,30 +6509,14 @@ class Runner:
                 # a driving leg the camera has lost (Nick, 2026-10-24: stop and wait): no positions for LOST_DRIVE_S,
                 # or positions that do not move while the wheels drive (the tracker stuck on the old spot, as in
                 # stage 3: 2026-10-24 review)
-                t_leg = self.leg_live.get(robot)
-                if t_leg is not None and robot not in self.refinding and robot not in self.seek \
-                        and time.time() - t_leg > LOST_DRIVE_S and time.time() - last_lost.get(robot, 0.0) > 3.0:
-                    now = time.time()
-                    last_t = self.history.last_t() if hasattr(self.history, "last_t") else None
-                    why_l = ""
-                    if last_t is None or now - max(last_t, t_leg) > LOST_DRIVE_S:
-                        why_l = "the camera has not seen it for %.1f s while it drives" % (now - max(last_t or t_leg, t_leg))
-                    elif self.leg_kind.get(robot) == "go":
-                        since = self.history.since(t_leg)
-                        el = now - t_leg
-                        cms = self.speed_now.get(robot) or EXPLORE_FAST_CMS
-                        expect = min(abs(self.leg_val.get(robot) or 0.0), cms * max(0.0, el - LOST_START_S))
-                        if since and el > LOST_FROZEN_S and expect >= LOST_FROZEN_CM:
-                            moved = math.hypot(since[-1][1] - since[0][1], since[-1][2] - since[0][2])
-                            if moved < LOST_FROZEN_FRAC * expect:
-                                why_l = ("its wheels should have taken it about %.0f cm but the camera's spot moved %.0f "
-                                         "cm (the camera may be following something else)" % (expect, moved))
-                    if why_l:
-                        last_lost[robot] = now
-                        self.watchdog_fired = True
-                        self.watch_stop = "lost while driving"
-                        self.hold_for_nick(robot, "lost", why_l)
-                        continue
+                now = time.time()
+                why_l = self.lost_why(robot, now) if now - last_lost.get(robot, 0.0) > 3.0 else ""
+                if why_l:
+                    last_lost[robot] = now
+                    self.watchdog_fired = True
+                    self.watch_stop = "lost while driving"
+                    self.hold_for_nick(robot, "lost", why_l)
+                    continue
                 self.camera_still_check(robot, last_still)
                 smp = self.history.since(time.time() - 0.6)
                 if len(smp) < 3 or time.time() - smp[-1][0] > 1.0:
@@ -6084,6 +6524,8 @@ class Runner:
                 why_b = self.border_check(robot, smp)
                 if getattr(self.a, "home", False):
                     self.border_shadow(robot, smp, bool(why_b))
+                if not why_b and self.speed_guard_check(robot, smp, last):
+                    continue
                 if why_b and self.forward_explore_leg(robot):
                     # the same for the camera's border: stop that robot, no hold (backwards never gets here)
                     if time.time() - last.get(robot, 0) > 2.0:
@@ -6101,11 +6543,21 @@ class Runner:
                                                                      self.order])
                     self.hold_for_nick(robot, "border", why_b)
                     continue
-                if self.board is None:
-                    continue
                 parked = {n: tuple(q[:2]) for n, q in self.st["positions"].items() if n != robot and q}
-                edge_cm = -1e9 if robot == getattr(self, "edge_touch", None) else self.watch_edge_cm
-                why = ST.hazard(smp, self.board, parked, edge_cm=edge_cm)
+                # a slow camera: the last 1.2 s (hazard needs 4 pictures), and the parked robots' clearance widened
+                # like the border, by how far this robot drives in the lag above budget (speed guard)
+                smp_w = self.history.since(time.time() - 1.2)
+                robot_cm = PL.WATCH_ROBOT_CM + self.speed_guard_cm(robot)
+                if self.board is None:
+                    if not getattr(self, "exploring", False):
+                        continue
+                    # exploring (no board yet): the parked-robot half only, in the provisional frame that the
+                    # positions and the parked spots share (2026-10-25 15:10: this returned before it, and Left's
+                    # home leg pushed Center for 7 s); the open edges are the border's job (the guard) meanwhile
+                    why = ST.hazard(smp_w, None, parked, robot_cm=robot_cm)
+                else:
+                    edge_cm = -1e9 if robot == getattr(self, "edge_touch", None) else self.watch_edge_cm
+                    why = ST.hazard(smp_w, self.board, parked, edge_cm=edge_cm, robot_cm=robot_cm)
                 if not why and getattr(self, "bricks_guard", None) is not None:      # the brick demo's objects
                     import e02_bricks as BR
                     why = BR.object_hazard(smp, self.bricks_guard)
@@ -7444,7 +7896,7 @@ def main(argv=None):
     ap.add_argument("--map-robot", default="", help="which robot maps (default: the first)")
     ap.add_argument("--dry-kept-pose", action="store_true", help="dry run: the robots kept a board pose from an earlier "
                     "session (the 2026-10-24 stage-3 case)")
-    ap.add_argument("--dry-start", default="parks", choices=["parks", "swapped", "scatter", "corners", "edge"],
+    ap.add_argument("--dry-start", default="parks", choices=["parks", "swapped", "scatter", "corners", "edge", "s1510"],
                     help="dry run: where the simulated robots stand at the start")
     ap.add_argument("--calib", help="floor calibration file (default: the studio project's cameras/overhead.json)")
     ap.add_argument("--project", help="the studio project folder (default Documents\\recognition-project)")
@@ -7519,6 +7971,20 @@ def main(argv=None):
     ap.add_argument("--fit-max-rms-cm", type=float, default=None,
                     help="the self-calibration's camera-vs-wheels limit per stretch (default e02_fit.MAX_RMS_CM, 1.5; "
                          "2026-10-24 Pi plan: the session-1 calibration file gave 2.1-2.5 and every fit was refused)")
+    ap.add_argument("--dry-bricks-now", action="store_true", help="dry run: the --dry-bricks objects stand there from "
+                    "the start (e.g. one just past an open edge), not only in the brick demo")
+    ap.add_argument("--dry-scene", default="", help="dry run: events during explore, ROBOT:KIND:N:WHAT[:AT_S],... "
+                    "(e.g. Right:ray:2:o = a hold during Right's 2nd ray, answered o; Left:bigturn:1:gap3 = the "
+                    "camera loses Left for 3 s in its first 175 deg turn): the 15:10 re-creation")
+    ap.add_argument("--dry-guard-shift", default="", help="dry run: DX/DY cm: the explore border's calibration off the "
+                    "simulator's floor (e.g. -9/-9 leaves edge stops' centres past the line, as at 15:10)")
+    ap.add_argument("--dry-slow-camera", default="", help="dry run: PERIOD/ON/MS[/FIRST]: every PERIOD s, for ON s, each "
+                    "picture MS ms slower, from FIRST s on (the speed guard's test)")
+    ap.add_argument("--no-stall-watch", action="store_true",
+                    help="do not record what blocks the camera loop (e02_stall.py: stalls.csv, threads.csv)")
+    ap.add_argument("--fits-in-runner", action="store_true",
+                    help="run explore's camera fits in the runner's own process, as before 2026-10-25 (for the "
+                         "before/after measurement; default: a helper process, e02_offload.py)")
     ap.add_argument("--dry-run", action="store_true", help="against the simulator (tools/experiment/e02_sim.py)")
     ap.add_argument("--dry-true-calib", action="store_true", help="dry run: use the simulator's true camera "
                                                                   "instead of making one from the corners")
@@ -7653,6 +8119,17 @@ def launch(a, state, sdir, sim):
         feed.keep_s = run.FRAMES_KEEP_S
         feed.start()
         run.feed = feed
+        if getattr(a, "dry_run", False) and getattr(a, "dry_scene", ""):
+            run.scene = dry_scene(a.dry_scene)
+            prev_f = feed.sample_filter
+            feed.sample_filter = (lambda s_, pf=prev_f: run.scene_filter(pf(s_) if pf else s_))
+        if getattr(a, "dry_run", False) and getattr(a, "dry_slow_camera", ""):
+            feed.hooks.append(slow_camera_hook(a.dry_slow_camera, run))
+        if not getattr(a, "no_stall_watch", False):
+            # what blocks the camera loop, every session (stalls.csv, threads.csv; part 2a of the 2026-10-25 fixes)
+            run.stallw = STL.StallWatch(run.dir, camera_ident=lambda: getattr(run.feed, "ident", None),
+                                        log=lambda m: run.say(m, quiet=True))
+            run.stallw.start()
         run.setup()
         run.robots_ready()
         if (a.map or a.map_only) and not state["setup"].get("map"):
@@ -7713,6 +8190,21 @@ def launch(a, state, sdir, sim):
                 state["tracker_stats"][-1]["during_holds"] = sh_
                 run.say("  (not counted above: %d pictures during holds, every robot stopped; the robot was seen in %.0f%% "
                         "of them)" % (nh, 100.0 * (nh - sh_.get("none", 0)) / nh))
+        sw_ = getattr(run, "stallw", None)
+        if sw_ is not None:
+            sw_.stop()
+            try:
+                state["stall_summary"] = sm_ = sw_.summary()
+                run.say("Camera loop blocked 100 ms or more: %d times, %.1f s in all, worst %.2f s%s" % (
+                    sm_["stalls"], sm_["stall_ms_total"] / 1000.0, sm_["stall_ms_worst"] / 1000.0,
+                    "; most by: " + ", ".join("%s (%.1f s)" % (k, v / 1000.0) for k, v in sm_["culprits_ms"][:3])
+                    if sm_["culprits_ms"] else ""))
+            except Exception as e:
+                run.say("  (stall summary: %s)" % e, quiet=True)
+        off_ = getattr(run, "offload", None)
+        if off_ is not None:
+            state["offload_calls"] = list(off_.calls)
+            off_.stop()
         try:
             ps = run.perf_summary()
             if ps:
@@ -7768,6 +8260,57 @@ def launch(a, state, sdir, sim):
     return code
 
 
+class ShiftedFloor:
+    """A camera whose floor positions are moved by (dx, dy) cm (--dry-guard-shift)."""
+
+    def __init__(self, cam, dx, dy):
+        self.cam, self.dx, self.dy = cam, dx, dy
+
+    def to_floor(self, u, v, z=0.0):
+        x, y = self.cam.to_floor(u, v, z)
+        return x + self.dx, y + self.dy
+
+    def __getattr__(self, k):
+        return getattr(self.cam, k)
+
+
+def dry_scene(spec):
+    """--dry-scene: events injected during explore in a dry run (the 15:10 re-creation). Comma-separated
+    ROBOT:KIND:N:WHAT[:AT_S]: during ROBOT's N-th explore leg of KIND (go, turn, ray = a 105 cm ray, bigturn = a turn
+    of 150 deg or more), AT_S s (default 1.0) into it: WHAT 'gapS' (the camera loses it for S s), or a hold with
+    Nick's answer 'c' / 'o'. Returns [dict]."""
+    out = []
+    for part in (spec or "").split(","):
+        if not part.strip():
+            continue
+        f = part.strip().split(":")
+        out.append(dict(robot=f[0], kind=f[1], n=int(f[2]), what=f[3], at=float(f[4]) if len(f) > 4 else 1.0,
+                        done=False))
+    return out
+
+
+def slow_camera_hook(spec, run=None):
+    """--dry-slow-camera PERIOD/ON/MS[/FIRST]: a camera hook that makes every picture MS ms slower for ON seconds of
+    every PERIOD, from FIRST seconds after the start (the speed guard's test: a slow camera while robots drive)."""
+    period, on, ms = (float(v) for v in spec.split("/")[:3])
+    first = float(spec.split("/")[3]) if len(spec.split("/")) > 3 else 0.0
+    t0 = time.time() + first
+    state = dict(on=False)
+
+    def hook(img, t):
+        el = time.time() - t0
+        slow = el >= 0 and (el % period) < on
+        if slow != state["on"]:
+            state["on"] = slow
+            if run is not None:
+                run.say("  (dry run: the camera %s)" % ("SLOWED: +%.0f ms a picture" % ms if slow else "back to speed"),
+                        quiet=True)
+                run.st.setdefault("dry_slow_camera", []).append([round(time.time(), 1), slow])
+        if slow:
+            time.sleep(ms / 1000.0)
+    return hook
+
+
 def start_sim(state, sdir):
     simdir = os.path.join(sdir, "sim")
     os.makedirs(simdir, exist_ok=True)
@@ -7779,10 +8322,14 @@ def start_sim(state, sdir):
                             "--xboard-side", sides.split(",")[0], "--yboard-side", sides.split(",")[1],
                             "--robots", ",".join(state["robots"]), "--seed", str(state["seed"] % 1000 + 1),
                             "--start", (state["setup"].get("args") or {}).get("dry_start") or "parks"]
-                           + (["--bricks", (state["setup"].get("args") or {}).get("dry_bricks")]
+                           + (["--bricks=" + (state["setup"].get("args") or {}).get("dry_bricks")]
                               if (state["setup"].get("args") or {}).get("dry_bricks") else [])
                            + (["--kept-pose"] if (state["setup"].get("args") or {}).get("dry_kept_pose") else []),
                            stdout=open(os.path.join(simdir, "sim_stdout.txt"), "a"), stderr=subprocess.STDOUT)
+    if (state["setup"].get("args") or {}).get("dry_bricks_now"):
+        # --dry-bricks-now: the bricks stand there from the start (objects past an open edge, boards out from the
+        # plywood: explore's creep test)
+        open(os.path.join(simdir, "BRICKS_ON"), "w").close()
     rb = (state["setup"].get("args") or {}).get("dry_remove_board") or ""
     if rb:
         # the remove-a-board test in the simulator: the board goes after this many seconds, the runner not told

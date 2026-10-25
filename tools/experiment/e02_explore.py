@@ -701,7 +701,10 @@ def contacts(robots, sol, robot_clear_cm=22.0, ahead=None, others=None):
             kind = q["contact"]
             if abs(q.get("dth", 0.0) or 0.0) > SWERVE_DEG and q.get("d") is not None:
                 continue                  # it turned while stopping (2026-10-23: -6.9 deg): where it met is unsure
-            if ahead and kind in ahead:
+            if q.get("reach_cm") is not None:
+                # measured at the stop (explore's creep: its own front reading, 2026-10-25)
+                c = (x + q["reach_cm"] * math.cos(math.radians(th)), y + q["reach_cm"] * math.sin(math.radians(th)))
+            elif ahead and kind in ahead:
                 c = (x + ahead[kind] * math.cos(math.radians(th)), y + ahead[kind] * math.sin(math.radians(th)))
             else:
                 import e02_map as MAP

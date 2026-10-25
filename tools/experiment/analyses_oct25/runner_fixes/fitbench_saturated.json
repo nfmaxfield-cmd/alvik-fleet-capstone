@@ -1,0 +1,51 @@
+{
+ "rows": [
+  {
+   "mode": "runner",
+   "fit_s": 25.0,
+   "fps_before": 100.2,
+   "fps_during": 59.4,
+   "fps_after": 108.4,
+   "worst_second": 42,
+   "gap_max_ms_during": 169,
+   "gap_max_ms_before": 126,
+   "rep": 1
+  },
+  {
+   "mode": "helper",
+   "fit_s": 35.7,
+   "fps_before": 93.6,
+   "fps_during": 92.5,
+   "fps_after": 109.3,
+   "worst_second": 42,
+   "gap_max_ms_during": 176,
+   "gap_max_ms_before": 106,
+   "rep": 1
+  },
+  {
+   "mode": "runner",
+   "fit_s": 23.7,
+   "fps_before": 105.2,
+   "fps_during": 61.1,
+   "fps_after": 59.3,
+   "worst_second": 45,
+   "gap_max_ms_during": 111,
+   "gap_max_ms_before": 130,
+   "rep": 2
+  },
+  {
+   "mode": "helper",
+   "fit_s": 67.9,
+   "fps_before": 53.8,
+   "fps_during": 80.7,
+   "fps_after": 86.0,
+   "worst_second": 37,
+   "gap_max_ms_during": 316,
+   "gap_max_ms_before": 571,
+   "rep": 2
+  }
+ ],
+ "cpus": 2,
+ "interval_s": 0.0,
+ "note": "Part 2a's replay measurement: the camera loop's pictures a second while explore's camera fit runs, in the runner's"
+}

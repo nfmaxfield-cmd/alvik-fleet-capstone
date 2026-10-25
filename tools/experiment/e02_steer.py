@@ -210,18 +210,34 @@ def judge_run(far_err_cm, end_err_cm, on_board=True, seen=True, recover_cm=RECOV
     return "", ""
 
 
+def inward_cm(board, axis, value, p):
+    """Signed distance (cm) from an open edge's line (axis 'x' or 'y', at value) to the coordinate p: + on the
+    board's side, - past the line. (2026-10-25 15:10: the camera border measured abs(p - value), so a robot whose
+    centre had stopped past the line and was coming back in read as approaching the edge.)"""
+    lo = min(board.x0, board.x1) if axis == "x" else min(board.y0, board.y1)
+    sgn = 1.0 if abs(value - lo) < 1e-6 else -1.0
+    return sgn * (p - value)
+
+
 def hazard(samples, board, parked, horizon_s=0.3, edge_cm=None, robot_cm=None):
     """Camera watchdog: is the moving robot (samples [(t, x, y), ...], newest last) at, or within horizon_s of,
     an open edge (centre nearer than edge_cm) or a parked robot (centre nearer than robot_cm), while moving
     towards it? parked: {name: (x, y)} (not the mover). Moving away from a hazard is always allowed (so it can be
-    brought back). Returns plain words or None."""
+    brought back). board None (exploring: no board yet): only the parked robots are checked. Returns plain words or
+    None."""
     import e02_plan as PL
     edge_cm = PL.WATCH_EDGE_CM if edge_cm is None else edge_cm
     robot_cm = PL.WATCH_ROBOT_CM if robot_cm is None else robot_cm
     if not samples:
         return None
     win = [q for q in samples if q[0] >= samples[-1][0] - 0.5]
-    if len(win) < 6 or win[-1][0] - win[0][0] < 0.3:
+    if len(win) < 6:
+        # a slow camera (2026-10-25 simulator, 4 pictures a second: a ray drove into a parked robot while this
+        # waited for 6 pictures in 0.5 s, i.e. 12 a second): the last 1.2 s, at least 4 pictures
+        win = [q for q in samples if q[0] >= samples[-1][0] - 1.2]
+        if len(win) < 4:
+            return None
+    if win[-1][0] - win[0][0] < 0.3:
         return None
     # medians of the first and last few pictures: one stray camera position must not look like a dash
     k = max(2, len(win) // 4)
@@ -235,11 +251,9 @@ def hazard(samples, board, parked, horizon_s=0.3, edge_cm=None, robot_cm=None):
     if sp < 1.0:                                 # standing still (camera noise): nothing is closing in
         vx = vy = 0.0
     px, py = x + vx * horizon_s, y + vy * horizon_s
-    for a, v in board.open_edges():
-        lo = min(board.x0, board.x1) if a == "x" else min(board.y0, board.y1)
-        sgn = 1.0 if abs(v - lo) < 1e-6 else -1.0            # inward distance: + on the board, - past the edge
-        d0 = sgn * ((x if a == "x" else y) - v)
-        d1 = sgn * ((px if a == "x" else py) - v)
+    for a, v in (board.open_edges() if board is not None else []):
+        d0 = inward_cm(board, a, v, x if a == "x" else y)      # inward distance: + on the board, - past the edge
+        d1 = inward_cm(board, a, v, px if a == "x" else py)
         if d1 < edge_cm and d1 < d0 - 0.5:          # closing at 1.7+ cm/s, not just drifting along it
             return ("%.0f cm from the open edge and heading for it" % d0) if d0 >= 0 else \
                 ("%.0f cm past the open edge and still going" % -d0)

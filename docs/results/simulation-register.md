@@ -18,8 +18,8 @@ experiment was run for this register.
 |---|---|
 | Simulator dry runs on disk (2026-10-23 to 10-25) | 61 folders; 57 with a log, **22.2 h** of simulated sessions, **382 simulated route runs** done |
 | Bad-sensor grid sessions (2026-10-24 21:14 to 10-25, still running) | 14 sessions, 13 degradations plus a baseline |
-| Results in the register below | 26 |
-| Problems found in the simulator first (catch log, Appendix C) | **31** (2026-10-22 to 10-25) |
+| Results in the register below | 33 |
+| Problems found in the simulator first (catch log, Appendix C) | **33** (2026-10-22 to 10-25) |
 | Problems found on the real board or in its logs first | 18 (2026-10-21 to 10-25) |
 | Simulator results a real session has confirmed | 1 yes (row 6), 2 partly (rows 2, 4), 3 where the real board or its logs disagreed (rows 1, 24, 25); the rest not yet (no real session has run since 2026-10-24 19:35). Real session 2026-10-25 15:10 (rows 27-29): row 6's border **disagreed** (6 false trips, a sign fault the simulator could not show), row 3's explore **partly** (camera fit fine, sides failed), and explore's robot clearance partly |
 | Board time saved by simulating first | **about 16 h (range 5-24 h): an estimate**, section 2 |
@@ -60,6 +60,10 @@ last real session was Right alone on 2026-10-24 at 19:35, and most of these resu
 | 27 | 10-24 evening (row 6) | The virtual border's "only movement mostly towards the edge counts", checked against real explore | Simulator: no false holds after the fix (rows 6, 22: 3 border holds in a full dry run) | - | **Real board disagreed** (10-25 15:10, home mode): 6 of 9 shadow trips false, 4 of them holds and 2 forward stops. Every time a robot's centre was 3.8-5.5 cm past the stored edge line after a line-sensor edge stop, moving back in; `border_check` uses an absolute distance, so coming back in reads as approaching. In the simulator the edge and the calibration agree, so a centre never ends past the line | e02-oct25-session-1510.md Q1, Q6 |
 | 28 | 10-23 (row 3) | Explore with three robots from scratch | Calibration within 1.1 cm median of the simulator's true camera; board found each time | - | **Partly** (10-25 15:10, the first real explore to reach its fit): camera fit 6.8 px rms (simulator 1.5-4.5), every robot used; its floor within 2.7 cm median of the stored calibration (90 % within 6.4), scale within 2.5 %. But the fitted camera is 99 cm high with f 234 px (real about 262 cm, 606 px), and the sides failed: the top board was never met (a held-out robot's rays, a 105 cm ray cap 28 cm short, rays skipped next to a touching robot) and an object past an open edge read as a board twice | e02-oct25-session-1510.md Q3 |
 | 29 | 10-23 night (catch B10) | Explore rays kept 25 cm off the other robots | Rays that would pass another robot are skipped | Ray clearance check | **Partly** (10-25 15:10): 8 rays were skipped rightly, but a home leg (not checked) drove Left into parked Center; the camera's parked-robot stop does not run while exploring (no board yet) | e02-oct25-session-1510.md Q2 |
+| 30 | 10-25 16:33-18:00 | The 15:10 re-creation (`--dry-start s1510`, `--dry-scene`: an `o` at a ray, a 3 s camera gap in a 175° turn, a hold in a turn; border shifted so edge stops end past the line), runs A and B | Left-out robot: 4 rays not driven, 0 logged as met, gap rays to the others; cut turn finished (89° + 86°); no lost hold for the 3 s gap; border replay on the same tracks: edge back-offs tripped 7 of 20 (old rule) against 0 (new); explore found the board 118.1 x 122.4 cm in A, failed its sides in B (cramped layout) | Fixes 1-5 built | Not yet | e02-oct25-runner-fixes.md |
+| 31 | 10-25 17:04 | Camera slowed on purpose to ~4 a second, 20 s in 45 (`--dry-slow-camera`), run C | 25 slow spells; 12 moves in the widened band waited 1.5-40 s, all went on recovery; 0 border holds; board 120.1 x 121.7 cm. **Center's ray touched parked Right (6.7 cm centre to centre)**: the parked-robot check needed 12 pictures a second | Speed guard; hazard works at 4 pictures in 1.2 s; clearance widened with the lag | Not yet | e02-oct25-runner-fixes.md |
+| 32 | 10-25 17:05 | Explore's fit beside the camera, replayed (`fitbench.py`: 15:10's stops, the real tracker on 15:10 frames) | Camera loop flat out: fit in the runner 100 → 59 a second (-41 %), in the helper 94 → 93; at 25 offered, no difference on this machine. Dry runs (simulator camera capped at 15) showed none either way | Fits in a helper process | Not yet (the Pi: 24 → 3.8 at 15:10) | e02-oct25-runner-fixes.md |
+| 33 | 10-25 17:25-18:10 | Explore's creep: a brick 5-10 cm past an open edge (D1), a brick 4 cm in from an open edge (D2; the simulator cannot model a board out from the plywood with floor under the gap) | At a 2 cm creep stop: each run 1 edge with an object beyond, 7 blocked, 1 neither, but both fits spoiled (paths 6-20 px, wheel scales 0.89-1.10: the bumper touched first). 3 cm: see the write-up | Creep stop 3 cm | Not yet | e02-oct25-runner-fixes.md |
 
 <sub>k = a sensor's learned noise ÷ its healthy noise; 2 or more flags it as bad, under 1.5 clears it. C = calibrated
 runs, K = camera-steered, KC = camera fixes blended with the robot's own belief, U = uncalibrated. "Back at start" =
@@ -206,7 +210,7 @@ results are in the build reports (rows 1-2).
 S / H / M = stopped or spoiled a session / a few holds / wrong numbers only (Claude's rating). Sources: build
 reports and plans named, `e02.py` dated comments (line numbers at commit 4208770), and commits.
 
-**Found in the simulator first (31)**
+**Found in the simulator first (33)**
 
 | # | Date | Problem | Rating | Source |
 |---|---|---|---|---|
@@ -241,6 +245,8 @@ reports and plans named, `e02.py` dated comments (line numbers at commit 4208770
 | C29 | 10-25 12:11 | Front sensor 8 cm long flagged only after 16 runs | M | grid (row 17) |
 | C30 | 10-25 10:42 | A fault every robot shares is pinned on one robot | M | grid (row 15) |
 | C31 | 10-25 12:56 | False camera flags in setup (k 2.1, three times) | M | grid (row 18) |
+| C32 | 10-25 17:17 | The watchdog's parked-robot check blind under 12 pictures a second: a ray touched a parked robot | S | e02-oct25-runner-fixes.md (row 31) |
+| C33 | 10-25 17:37 | Explore's creep at 2 cm: bumper contact and wheel slip spoiled the camera fit | M | e02-oct25-runner-fixes.md (row 33) |
 
 **Found on the real board or in its logs first (18)**
 
