@@ -110,6 +110,7 @@ object that stops for a long time may be lost).
 | `page.html` | the page (one file, nothing loaded from the internet) |
 | `motion.py` | motion detector. It is also the project's non-learning comparison detector. Use it frame by frame (`detect(frame, state)`) or through the detector interface (`load`, `predict`). `python tools/label/motion.py <recording> --show` plays the video with its guesses |
 | `tracker.py` | follows guesses from frame to frame. Gating stops a far-away look-alike from taking over a robot's number. Stopped robots stay put, headings carry over, and your corrections act as anchors |
+| `mark_robot.py`, `mark_robot.html`, `mark_footage.py` | **Mark the robot**: hand-checked robot positions, one picture a second, for the tracker experiments (the tracker's guess as a green ring; you confirm or move it; saved in pixels and floor cm). Downloads only the stretch it needs from a GitHub release. How-to: docs/how-to/mark-the-robot.md; double-click `mark-the-robot.bat` |
 | `select_frames.py` | picks the frames to label (named so because a `select.py` here would hide Python's own `select` module) |
 | `tests/` | synthetic recordings with known truth (`synth.py`), an accuracy report (`evaluate.py`), and the tests |
 

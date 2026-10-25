@@ -390,3 +390,45 @@ def test_presets_name_the_doe_stretches():
         assert m["video"].endswith(".avi") and m["at"] and m["legs"]
         total += m["end_t"] - m["start_t"]
     assert 5.5 * 60 < total < 6.5 * 60
+
+
+def test_release_files_are_found_for_both_upload_styles():
+    """Pi uploads (video.avi.part-aa ..., frames.csv inside rec-...-small.zip) and laptop uploads (video.part-aa,
+    frames.csv)."""
+    pi = {"logs-e02-20261024-193526.zip", "rec-20261024-193518_E02-small.zip", "video.avi.part-ab",
+          "video.avi.part-aa", "side_video.avi.part-aa"}
+    v, fr, z, logs = M.pick_release_files(pi)
+    assert v == ["video.avi.part-aa", "video.avi.part-ab"] and fr is None
+    assert z == "rec-20261024-193518_E02-small.zip" and logs == "logs-e02-20261024-193526.zip"
+    lap = {"events.csv", "frames.csv", "meta.json", "video.part-aa", "video.part-ab", "video.part-ac"}
+    v, fr, z, logs = M.pick_release_files(lap)
+    assert v == ["video.part-aa", "video.part-ab", "video.part-ac"] and fr == "frames.csv" and z is None and logs is None
+
+
+def test_legs_from_the_runners_leg_csv(tmp_path):
+    p = tmp_path / "leg.csv"
+    p.write_text("robot,t_recv,run,id,kind,value,result,ms,x_cm,y_cm,th_deg,info\n"
+                 "Right,100.0,-,1,turn,40,queued,0,0,0,0,\nRight,100.1,-,1,turn,40,started,0,0,0,0,\n"
+                 "Right,101.5,-,1,turn,40,done,0,0,0,0,\nLeft,102.0,-,2,go,10,queued,0,0,0,0,\n"
+                 "Right,103.0,-,3,go,10,queued,0,0,0,0,\nRight,104.0,-,3,go,10,done,0,0,0,0,\n")
+    assert M.read_legs(str(p), "Right", offset=-1.6) == [[98.4, 99.9, "turn"], [101.4, 102.4, "go"]]
+
+
+def test_a_quick_confirm_does_not_restart_the_tracker(recording, tmp_path):
+    """Confirming a picture before the tracker has reached it: the mark waits for the tracker's guess and restarts
+    it only if they disagree (here they agree), so fast marking never makes it start over and over."""
+    folder, truth = recording
+    s = session(folder, tmp_path / "m", t_from="+0:00.5", t_to="+0:10.5", at="%g,%g" % truth[12])
+    seed = s.guesser.want
+    last = len(s.picks) - 1
+    s.mark(last, "confirmed", *s.calib.to_px(*truth[s.picks[last]]))
+    deadline = time.time() + 120
+    while _rows(tmp_path / "m")[0]["reseed"] == "pending" or not s.guesser.done_run:
+        assert time.time() < deadline
+        s.state()
+        time.sleep(0.2)
+    s.state()
+    r = _rows(tmp_path / "m")[0]
+    assert r["reseed"] == "0" and float(r["tracker_diff_cm"]) < 3.0
+    assert s.guesser.want == seed
+    s.close()

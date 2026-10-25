@@ -29,7 +29,8 @@ order.
 
 **Responses.**
 - Wrong-position time: the share of pictures where the reported position is more than 5 cm from the true one. The
-  true position is hand-checked on a picture every second (the replay viewer's contact sheet).
+  true position is hand-checked on a picture every second (2026-10-25: marked on the laptop with
+  tools/label/mark_robot.py, docs/how-to/mark-the-robot.md; read with its `load_truth()`, scored with `score_track()`).
 - Time to catch a wrong lock: seconds from going wrong to being fixed.
 - Seen share: pictures with a position.
 - Laptop cost: ms per picture.

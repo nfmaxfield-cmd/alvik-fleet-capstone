@@ -277,8 +277,14 @@ class CvStore(_Base):
         self.frames = list(self._t)
         self._finish()
         self.pos = None
+        import threading
+        self.lock = threading.Lock()            # the tracker and the page read from different threads
 
     def _read(self, frame):
+        with self.lock:
+            return self._read_locked(frame)
+
+    def _read_locked(self, frame):
         if self.pos != frame:
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame)
         ok, img = self.cap.read()

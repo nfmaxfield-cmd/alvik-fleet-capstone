@@ -37,32 +37,46 @@ On each picture:
 When it says "All marked", the marks are in tools/experiment/data/marks/<stretch>/ (marks.csv and summary.json).
 Send those two files (drag them into the chat).
 
-Your own recordings (a recording folder copied from the Pi: video.avi + frames.csv; or a folder of pictures):
+Any other session that was uploaded to GitHub (troubleshooting: where did the runner lose the robot?). Only the
+minutes you ask for are downloaded, plus the session's logs, so each picture also shows where the runner thought
+the robot was (red cross), and the marks save how far that was from your mark:
 
-    py -3 tools\\label\\mark_robot.py "C:\\Users\\Nick\\Desktop\\recordings\\20261025-101500_E02" --robot Left --from 10:20:05 --to 10:22:00
+    py -3 tools\\label\\mark_robot.py --release e02-session-20261024-193526 --robot Right --from 19:40:00 --to 19:42:00
 
-Times are the clock time on the recording's day (or +M:SS from the recording's start). Troubleshooting a session
-(where did the runner lose the robot?): add --session <the runner's session folder> to show the runner's own
-position for each picture (red cross) and save how far it was from your mark; --legs <leg.csv> tells the tracker
-when the robot was driving. A from-scratch session's own calibration is found in its session folder
-(cameras/overhead.json); without any calibration the marks are saved in pixels only, and
+Your own recording folder on the laptop (video.avi + frames.csv, copied from the Pi; or a folder of pictures),
+with the runner's session folder for the red crosses:
+
+    py -3 tools\\label\\mark_robot.py "C:\\Users\\Nick\\Desktop\\recordings\\20261025-101500_E02" --robot Left --from 10:20:05 --to 10:22:00 --session logs\\e02-20261025-101530
+
+Times are the clock time on the recording's day (or +M:SS after the recording's start). With a session folder the
+tool uses that session's own calibration (a from-scratch session's too), its legs (when the robot was driving) and
+its laptop-to-Pi clock offset. Without any calibration (--no-calib) the marks are saved in pixels only;
     py -3 tools\\label\\mark_robot.py --recompute-cm <marks folder> --calib <calibration.json>
 fills in the cm later.
 
-Other options: --every 0.5 (pictures this many seconds apart), --port, --phone (also reachable from a phone on the
-home WiFi: the black window prints the address), --no-browser, --checks 0 (no repeat checks).
+Other options: --every 0.5 (pictures this many seconds apart), --at x,y (where the robot is at --from, floor cm),
+--port, --phone (also reachable from a phone on the home WiFi: the black window prints the address), --no-browser,
+--checks 0 (no repeat checks), --get-only (download, don't open the page).
+
+For the replay experiments: load_truth(<marks folder>) gives the sure marks [dict(t, x, y, ...)];
+score_track(samples, truth) scores a replayed track [(t, x, y or None)] against them (more than 5 cm off = wrong).
 """
 import argparse
 import csv
 import datetime as dt
+import glob
+import io
 import json
 import math
 import os
 import random
+import re
 import socket
 import sys
 import threading
 import time
+import urllib.request
+import zipfile
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -461,6 +475,38 @@ class Session:
                 return k
         return len(self.items)
 
+    def _resolve_pending(self):
+        """Marks made before the tracker reached their picture: once it has, fill in its guess and restart it from
+        the mark only if it disagrees (so confirming quickly never makes it start over and over)."""
+        if self.guesser is None:
+            return
+        changed = False
+        with self.guesser.cv:
+            if self.guesser.running != self.guesser.want:
+                return                              # a new run is starting: wait for it
+            gs, run, reached, done = dict(self.guesser.guesses), self.guesser.running, self.guesser.reached, \
+                self.guesser.done_run
+        for k, r in self.marks.items():
+            if r["reseed"] != "pending":
+                continue
+            pk = int(r["pick"])
+            g = gs.get(pk)
+            if g is not None and r["x_cm"] != "":
+                px = self.calib.to_px(g[0], g[1])
+                r["tracker_x_cm"], r["tracker_y_cm"] = _f(g[0]), _f(g[1])
+                if px:
+                    r["tracker_u_px"], r["tracker_v_px"] = _f(px[0]), _f(px[1])
+                d = math.hypot(float(r["x_cm"]) - g[0], float(r["y_cm"]) - g[1])
+                r["tracker_diff_cm"] = _f(d)
+                r["reseed"] = "1" if d > RESEED_CM else "0"
+                changed = True
+            elif run is not None and (run[0] > pk or ((reached >= pk or done) and run[0] <= pk)):
+                r["reseed"] = "1" if run[0] <= pk else "0"     # it passed without seeing the robot / never will
+                changed = True
+        if changed:
+            self._save()
+            self._update_seed()
+
     def _update_seed(self):
         """Run the tracker from your latest correction before the first unmarked picture (or the start spot)."""
         if self.guesser is None:
@@ -543,6 +589,7 @@ class Session:
     # --- the page's questions ----------------------------------------------------------------------
     def item_info(self, k):
         with self.lock:
+            self._resolve_pending()
             it = self.items[k]
             f = it["frame"]
             t = self.store.t(f)
@@ -571,9 +618,12 @@ class Session:
             for r in self.marks.values():
                 if r["kind"] == "pick":
                     counts[r["status"]] = counts.get(r["status"], 0) + 1
+            self._resolve_pending()
             n_marked_picks = sum(1 for r in self.marks.values() if r["kind"] == "pick")
-            img = self.store.gray(self.picks[0])
-            h, w = img.shape[:2] if img is not None else (480, 640)
+            if not hasattr(self, "_wh"):
+                img = self.store.gray(self.picks[0])
+                self._wh = img.shape[1::-1] if img is not None else (640, 480)
+            w, h = self._wh
             gs = self.guesser
             return dict(name=self.name, title=self.title, robot=self.robot, n_picks=len(self.picks),
                         n_items=len(self.items), marked=len(self.marks), marked_picks=n_marked_picks,
@@ -624,7 +674,12 @@ class Session:
                 if status == "confirmed" and d_px > 0.5:
                     row["status"] = status = "corrected"
                 tr_d = _num(row["tracker_diff_cm"])
-                row["reseed"] = "1" if it["kind"] == "pick" and (tr_d is None or tr_d > RESEED_CM) else "0"
+                if it["kind"] != "pick":
+                    row["reseed"] = "0"
+                elif tr_d is None and self.guesser is not None and not g["ready"]:
+                    row["reseed"] = "pending"      # the tracker hasn't got here yet: decide when it has
+                else:
+                    row["reseed"] = "1" if tr_d is None or tr_d > RESEED_CM else "0"
                 if it["kind"] == "check":
                     row["repeat_of_u_px"], row["repeat_of_v_px"] = _f(it["orig_u"]), _f(it["orig_v"])
                     ocm = self.calib.to_cm(it["orig_u"], it["orig_v"])
@@ -830,6 +885,100 @@ def fetch_preset(name, root=None, log=print):
     return folder
 
 
+REPO_SLUG = "nfmaxfield-cmd/alvik-fleet-capstone"
+
+
+def release_assets(tag, opener=None):
+    """{name: download url} of a release's files (public repository: no token needed)."""
+    op = opener or (lambda req: urllib.request.urlopen(req, timeout=60))
+    req = urllib.request.Request("https://api.github.com/repos/%s/releases/tags/%s" % (REPO_SLUG, tag),
+                                 headers={"Accept": "application/vnd.github+json", "User-Agent": "mirlt-mark-robot"})
+    with op(req) as r:
+        d = json.loads(r.read())
+    return {x["name"]: x["browser_download_url"] for x in d.get("assets", [])}
+
+
+def pick_release_files(names, video=None, frames=None):
+    """From a release's file names: the overhead video (whole, or its parts in order), where frames.csv is
+    (a file, or inside the recording's small zip), and the logs zip. Session releases name them video.avi.part-aa
+    ... (Pi upload) or video.part-aa (laptop); frames.csv sits in rec-<...>-small.zip."""
+    vids = video.split(",") if video else sorted(n for n in names if re.fullmatch(r"video(\.avi)?(\.part-[a-z]{2})?", n))
+    if not vids:
+        raise SystemExit("No video in this release (files: %s). Give --video." % ", ".join(sorted(names)))
+    if len(vids) > 1 and "video.avi" in vids:
+        vids = ["video.avi"]
+    fr = frames or ("frames.csv" if "frames.csv" in names else None)
+    zipped = None
+    if fr is None:
+        zs = sorted(n for n in names if n.startswith("rec-") and n.endswith("-small.zip"))
+        zipped = zs[0] if zs else None
+        if zipped is None:
+            raise SystemExit("No frames.csv in this release. Give --frames-name.")
+    logs = sorted(n for n in names if n.startswith("logs") and n.endswith(".zip"))
+    return vids, fr, zipped, (logs[0] if logs else None)
+
+
+def fetch_release(tag, a, root=None, log=print, opener=None):
+    """Download --from to --to of a session release's video into a stretch folder (plus its logs, so the runner's
+    own positions and the legs can be shown). Returns the folder."""
+    op = opener or (lambda req: urllib.request.urlopen(req, timeout=120))
+    assets = release_assets(tag, opener)
+    vids, fr, zipped, logs = pick_release_files(set(assets), getattr(a, "video", None),
+                                                getattr(a, "frames_name", None))
+    root = root or default_footage_root()
+    tmp = os.path.join(root, tag + "_partial")
+    os.makedirs(tmp, exist_ok=True)
+    fpath = os.path.join(tmp, "frames.csv")
+    if not os.path.exists(fpath):
+        log("Getting the recording's frames.csv ...")
+        with op(urllib.request.Request(assets[zipped or fr])) as r:
+            blob = r.read()
+        if zipped:
+            z = zipfile.ZipFile(io.BytesIO(blob))
+            cands = sorted((n for n in z.namelist() if n.endswith("/frames.csv") or n == "frames.csv"),
+                           key=lambda n: n.count("/"))
+            if not cands:
+                raise SystemExit("No frames.csv inside %s." % zipped)
+            blob = z.read(cands[0])
+        with open(fpath, "wb") as f:
+            f.write(blob)
+    times = FT.read_frame_times(fpath)
+    first = min(times.values())
+    t0, t1 = parse_time(a.t_from, first), parse_time(a.t_to, first)
+    robot = getattr(a, "robot", None) or "robot"
+    name = "%s_%s_%s-%s" % (tag, robot.replace(" ", ""), clock(t0).replace(":", ""), clock(t1).replace(":", ""))
+    folder = os.path.join(root, name)
+    if os.path.exists(os.path.join(folder, "stretch_index.csv")):
+        return folder
+    os.makedirs(folder, exist_ok=True)
+    os.replace(fpath, os.path.join(folder, "frames.csv"))
+    meta = dict(name=name, title="%s, %s %s-%s" % (robot, tag, clock(t0), clock(t1)), robot=robot, start_t=t0,
+                end_t=t1, release=tag, video=vids, frames=zipped or fr)
+    if getattr(a, "at", None):
+        meta["at"] = [float(v) for v in a.at.split(",")]
+    if logs:
+        log("Getting the session's logs (%s) ..." % logs)
+        with op(urllib.request.Request(assets[logs])) as r:
+            z = zipfile.ZipFile(io.BytesIO(r.read()))
+        sd = os.path.join(folder, "session")
+        for n in z.namelist():
+            parts = n.split("/")
+            if n.endswith("/") or ".." in parts:
+                continue
+            if parts[-1] in ("track.csv", "leg.csv", "e02_state.json") or n.endswith(".json") and "cameras" in parts:
+                dst = os.path.join(sd, *parts[1:]) if len(parts) > 1 else os.path.join(sd, parts[0])
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                with open(dst, "wb") as f:
+                    f.write(z.read(n))
+        meta["session_dir"] = "session"
+    FT.fetch(folder, [assets[v] for v in vids], None, t0, t1, meta=meta, log=log, opener=opener)
+    try:
+        os.rmdir(tmp)
+    except OSError:
+        pass
+    return folder
+
+
 def session_for_folder(folder, a=None, out=None, guesses=True):
     """A Session for a fetched stretch folder (stretch.json says what it is) or anything open_store reads."""
     import e02_plan as PL
@@ -841,10 +990,21 @@ def session_for_folder(folder, a=None, out=None, guesses=True):
     t1 = parse_time(a.t_to, first_t) if getattr(a, "t_to", None) else meta.get("end_t", store.t(store.frames[-1]))
     robot = getattr(a, "robot", None) or meta.get("robot") or "the robot"
     calib_path = getattr(a, "calib", None)
-    session_dir = getattr(a, "session", None)
+    session_dir = getattr(a, "session", None) or meta.get("session_dir")
+    if session_dir and not os.path.isabs(session_dir) and os.path.isdir(os.path.join(folder, session_dir)):
+        session_dir = os.path.join(folder, session_dir)
+    sess_st = {}
+    if session_dir and os.path.exists(os.path.join(session_dir, "e02_state.json")):
+        with open(os.path.join(session_dir, "e02_state.json")) as f:
+            sess_st = json.load(f)
     if not calib_path and session_dir:
         import e02_camera as CAM
-        calib_path = CAM.find_calibration(None, None, session_dir)
+        c = sess_st.get("calibration")                 # what the runner used (a from-scratch session: its own)
+        for cand in ([c, os.path.join(REPO, c), os.path.join(session_dir, c)] if c else []):
+            if cand and os.path.exists(cand):
+                calib_path = cand
+                break
+        calib_path = calib_path or CAM.find_calibration(None, None, session_dir)
     if not calib_path and not getattr(a, "no_calib", False) and os.path.exists(DEFAULT_CALIB):
         calib_path = DEFAULT_CALIB
     calib = Calib(calib_path, getattr(a, "robot_px", None))
@@ -856,14 +1016,24 @@ def session_for_folder(folder, a=None, out=None, guesses=True):
     others = [tuple(float(v) for v in p.split(",")) for p in (getattr(a, "others", "") or "").split(";") if p.strip()] \
         or [tuple(o) for o in meta.get("others", [])]
     legs = list(meta.get("legs", []))
-    off = float(getattr(a, "clock_offset", 0.0) or 0.0)
-    if getattr(a, "legs", None):
-        legs = read_legs(a.legs, robot, off)
+    off = getattr(a, "clock_offset", None)
+    if off is None:                                    # Pi time = laptop time - pi_offset_s (e02.py)
+        po = (sess_st.get("setup") or {}).get("pi_offset_s")
+        off = -float(po) if po is not None else 0.0
+    off = float(off)
+    leg_files = [a.legs] if getattr(a, "legs", None) else (
+        sorted(glob.glob(os.path.join(session_dir, "robot-logs-*", "leg.csv"))) if session_dir else [])
+    if leg_files:
+        legs = sorted(g for p in leg_files for g in read_legs(p, robot, off))
     runner = []
     track = getattr(a, "runner_track", None) or (os.path.join(session_dir, "track.csv") if session_dir else None)
     if track and os.path.exists(track):
         runner = [(float(r["t"]) + off, float(r["x_cm"]), float(r["y_cm"])) for r in csv.DictReader(open(track))
                   if r.get("robot") == robot and r.get("x_cm")]
+    if seed is None and runner:                        # troubleshooting: start from where the runner thought it was
+        near = min(runner, key=lambda r: abs(r[0] - t0))
+        if abs(near[0] - t0) <= 1.0:
+            seed = (near[1], near[2])
     sides = meta.get("board_sides")
     board = PL.Board(xboard_side=sides[0], yboard_side=sides[1]) if sides else PL.Board()
     floor = []
@@ -906,8 +1076,16 @@ class App:
     def __init__(self, session=None, root=None):
         self.session = session
         self.root = root
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.job = None             # dict(name, log, error, done) while a stretch downloads
+
+    def state(self):
+        """The open session's state, or the home list (decided under the lock: never the list of a job that has
+        just finished while its session is being attached)."""
+        with self.lock:
+            if self.session is not None:
+                return self.session.state()
+            return self.home()
 
     def home(self):
         out = []
@@ -948,9 +1126,10 @@ class App:
                     if self.session:
                         self.session.close()
                     self.session = sess
+                    job["done"] = True
             except BaseException as e:      # noqa: BLE001 (SystemExit from fetch too)
                 job["error"] = "%s" % (e,)
-            job["done"] = True
+                job["done"] = True
         threading.Thread(target=work, daemon=True).start()
 
     def go_home(self):
@@ -987,7 +1166,7 @@ def make_handler(app):
                     with open(PAGE, "rb") as f:
                         return self._send(200, f.read(), "text/html; charset=utf-8")
                 if u.path == "/api/state":
-                    return self._send(200, s.state() if s else app.home())
+                    return self._send(200, app.state())
                 if s is None:
                     return self._send(404, dict(error="no stretch open"))
                 if u.path == "/api/item":
@@ -1106,8 +1285,14 @@ def main(argv=None):
                                       "runner thought the robot was; its calibration is used")
     ap.add_argument("--runner-track", help="a track.csv to compare with (default: the --session's)")
     ap.add_argument("--legs", help="leg.csv (robot, t_recv, id, result, kind): when the robot drove")
-    ap.add_argument("--clock-offset", type=float, default=0.0,
-                    help="seconds to add to the session's (laptop) times to get the video's (Pi) clock")
+    ap.add_argument("--clock-offset", type=float, default=None,
+                    help="seconds to add to the session's (laptop) times to get the video's (Pi) clock (default: "
+                         "from the session's e02_state.json, else 0)")
+    ap.add_argument("--release", help="a GitHub release of a session (e.g. e02-session-20261024-193526): download "
+                                      "only --from to --to of its video (and its logs, for troubleshooting)")
+    ap.add_argument("--video", help="with --release: the video's file name(s), comma-separated parts (default: "
+                                    "found by itself)")
+    ap.add_argument("--frames-name", help="with --release: the frames.csv's name in the release (default: found)")
     ap.add_argument("--out", help="where to save the marks")
     ap.add_argument("--checks", type=float, default=CHECK_SHARE, help="share of pictures shown again as repeat "
                                                                       "checks (0 = none)")
@@ -1124,7 +1309,14 @@ def main(argv=None):
         print("Recomputed %d rows." % recompute_cm(a.recompute_cm, a.calib))
         return
     app = App(root=a.footage)
-    if a.what in PRESETS:
+    if a.release:
+        if not (a.t_from and a.t_to):
+            raise SystemExit("With --release, give --from and --to (the stretch to download).")
+        folder = fetch_release(a.release, a, a.footage)
+        if a.get_only:
+            return
+        app.session = session_for_folder(folder, a)
+    elif a.what in PRESETS:
         folder = fetch_preset(a.what, a.footage)
         if a.get_only:
             return

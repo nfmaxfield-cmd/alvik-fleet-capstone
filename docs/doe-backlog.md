@@ -40,7 +40,7 @@ a decision.
 
 | Number (where) | Value now | Experiment that would set it | Needs | Status |
 |---|---|---|---|---|
-| Detector check rate (e02_camera.py CHECK_S; Nick 2026-10-22: "start at 2 s") | 2 s | [DOE-tracking.md](experiments/DOE-tracking.md) DOE 1: 1 / 2 / 4 s on replayed footage; wrong-position time, time to catch, laptop cost | Logs (replay) + hand-checked truth, ~1 min per footage minute | needs hand-checked truth (a position checked about once a second; the clips have 3-6; [write-up](build-reports/e02-oct25-logs-doe.md) §12) |
+| Detector check rate (e02_camera.py CHECK_S; Nick 2026-10-22: "start at 2 s") | 2 s | [DOE-tracking.md](experiments/DOE-tracking.md) DOE 1: 1 / 2 / 4 s on replayed footage; wrong-position time, time to catch, laptop cost | Logs (replay) + hand-checked truth, ~1 min per footage minute | needs hand-checked truth (a position checked about once a second; the clips have 3-6; [write-up](build-reports/e02-oct25-logs-doe.md) §12). 2026-10-25: the marking page is built ([how-to](how-to/mark-the-robot.md)); waits on Nick marking the three evening stretches (~20 min) |
 | Detector-lock agreement (e02_camera.py AGREE_CM) | 6 cm | Same replay, 4 / 6 / 9 cm (DOE-tracking.md DOE 1) | Logs (replay) | needs hand-checked truth ([write-up](build-reports/e02-oct25-logs-doe.md) §12) |
 | Lock trusted over detector (e02_camera.py LOCK_SURE) | 0.7 | DOE-tracking.md "other chosen numbers": same replay method | Logs (replay) | needs hand-checked truth ([write-up](build-reports/e02-oct25-logs-doe.md) §12) |
 | Lock pinned during a turn (e02_camera.py PIN_CM) | 3 cm | DOE-tracking.md "other chosen numbers": same replay method | Logs (replay) | needs hand-checked truth ([write-up](build-reports/e02-oct25-logs-doe.md) §12) |

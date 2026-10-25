@@ -235,9 +235,10 @@ async function pollHome() {
   S = await api("/api/state");
   if (!S.home) return showWork();
   showHome();
-  if (S.job && !S.job.done) setTimeout(pollHome, 800);
+  if (S.job && (!S.job.done || (!S.job.error && !pollHome.again))) { pollHome.again = S.job.done; setTimeout(pollHome, 800); }
+  else pollHome.again = false;
 }
-$("homebtn").onclick = async () => { await api("/api/home", {}); boot(); };
+$("homebtn").onclick = async () => { clearTimeout(pollT); item = null; await api("/api/home", {}); boot(); };
 
 // ---------------------------------------------------------------- work
 async function showWork() {
@@ -250,6 +251,7 @@ async function showWork() {
   load(S.done ? 0 : S.next);
 }
 function progress() {
+  if (!S || S.home) return;
   const n = S.n_picks, c = S.counts, b = $("pbar"); b.innerHTML = "";
   for (const k of ["confirmed", "corrected", "unsure", "not_visible", "skipped"]) {
     if (!c[k]) continue;
@@ -275,6 +277,7 @@ function progress() {
 
 async function load(k) {
   clearTimeout(pollT);
+  if (!S || S.home) return;
   k = Math.max(0, Math.min(k, S.n_items - 1));
   const it = await api("/api/item?k=" + k);
   const fresh = !item || item.k !== it.k;
@@ -289,6 +292,7 @@ async function load(k) {
     sizeCanvas();
     prefetch(k + 1);
   }
+  if (!S || S.home) return;
   info(); draw();
   if (!it.guess.ready && !it.mark) pollT = setTimeout(() => refreshGuess(k), 400);
 }
