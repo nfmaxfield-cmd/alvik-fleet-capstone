@@ -48,12 +48,17 @@ and `home_lab.ino` (the RAW record, the `help` command list), `docs/data-formats
 7. **Sensor discovery works with or without a camera.** Without one, the references are board touches, gravity,
    commanded motion, other robots, beacons, the dock, and agreement between independent sensors (three ways of
    measuring a turn that agree confirm all three) (section 7).
-8. **Truly user-only input shrinks to two things:** places robots must not go, and consent to start moving. Which
+8. **The robot-side agent becomes MIRLT's published standard (Nick, 11:20); observe-only is the floor under it.**
+   Where a robot cannot run the agent (closed or certified firmware, no network, industrial buses, cloud-only
+   control), MIRLT uses the vendor's API, ROS 2 or MAVLink, a hardware adapter or a user's driver, and otherwise
+   tracks and plans around the robot without commanding it (section 5a). Appendix D catalogues the sensors, drive
+   types and interfaces it could meet, rated against the plan (summary in section 7a).
+9. **Truly user-only input shrinks to two things:** places robots must not go, and consent to start moving. Which
    robots are ours (the ones that respond to our commands), drops (edge sensors, approached cautiously) and the
    dock (a known printed shape) are all inferred (section 8).
-9. **The cheapest proof is free data [Claude]:** the Alvik's 37 RAW columns with names hidden, and the heading
+10. **The cheapest proof is free data [Claude]:** the Alvik's 37 RAW columns with names hidden, and the heading
    logs, are labelled test sets. Logs-only replays can score discovery and the error checks before any board time.
-10. **Biggest risk: no From scratch session has finished on real hardware yet.** The one real explore (2026-10-24
+11. **Biggest risk: no From scratch session has finished on real hardware yet.** The one real explore (2026-10-24
     stage 3) stopped during identify.
 
 ---
@@ -198,8 +203,32 @@ What a fresh install can realistically find, with no configuration:
 go, turn, stop, status, streams), written once per robot kind and shared; or a **robot-side agent**, a small
 program or firmware flashed onto the robot (or onto a microcontroller wired to it) that speaks MIRLT's protocol:
 it announces itself, lists its streams by name, and accepts velocity and stop commands. The Alvik firmware is
-already close to such an agent. **[Claude]** Make the agent's protocol the documented MIRLT standard, so any lab
-can bring a robot to level 2 in an afternoon.
+already close to such an agent. **Decided (Nick, 11:20): the MIRLT robot-side agent protocol becomes the published
+standard for adding other robots**, so any lab can bring a robot to level 2 in an afternoon. It will not fit every
+robot; section 5a says when, and what MIRLT does instead.
+
+### 5a. When the agent won't work, and what MIRLT falls back to
+
+The aim in every case is that MIRLT still does its job: know where every robot is, calibrate what it can, and
+control what it is allowed to control.
+
+| Case | Why the agent can't run | Fallback, best first | What MIRLT can still do |
+|---|---|---|---|
+| Closed firmware (consumer and vendor robots) | Nothing can be flashed | Vendor SDK or API; a ROS 2 driver if one exists; observe-only | With an API: full control and calibration. Without one: track and calibrate the cameras, no control |
+| No network (stand-alone toys, IR-remote robots) | Nothing to talk to | Hardware adapter (a small board on the robot running the agent, wired to its motor driver), if modifying it is allowed; else observe-only | Observe-only: track it, learn how it moves from what the camera sees, predict where it will go |
+| No compute (motor driver only, Kilobot-class) | Nowhere to run code | Hardware adapter; or MIRLT drives it through whatever already commands it | Full, through the adapter |
+| Safety-certified controllers (industrial AGVs and AMRs, ISO 3691-4; cobots, ISO 10218) | Changes would void the certification | **Never write to the controller.** The vendor's own API (most AMRs offer REST or ROS 2); read-only bus taps; observe-only | Track, calibrate cameras, send missions only through the vendor's own interface, within its safety envelope |
+| Vendor-locked fleets (a fleet manager owns the robots) | Commands must go through the fleet manager | The fleet manager's API (missions, positions); observe-only | Positions in and missions out at the level the vendor allows; MIRLT adds camera tracking and checks |
+| CAN, Modbus or industrial buses (PLC-run conveyors and AGVs; EtherNet/IP, PROFINET, EtherCAT) | No IP agent; the bus belongs to the PLC | Read-only first: a USB-CAN or Modbus gateway, decoded from the vendor's register map or CAN database file; OPC UA where it exists (it is browseable, so partly self-describing); writing only with the owner's sign-off | Read speeds, states and positions; calibrate them against the cameras; control only with permission |
+| Controlled only by a vendor app or cloud | No local interface; often needs the internet, which conflicts with MIRLT's offline goal | The vendor's cloud API if one exists (an online exception the user must approve); observe-only | Observe-only: track and calibrate the cameras; no control |
+| People-driven vehicles (forklifts, carts) | Not robots | Observe-only | Track them as moving obstacles; plan the robots around them |
+| Anything else | | **Ask the user for a driver** (a `RobotDriver` file) | Full, once the driver exists |
+
+**Observe-only mode [Claude]** is the floor under every case: MIRLT tracks the robot with its cameras and beacons
+and never commands it. It can still learn the robot's look (MIRLT's labelling), its size and its usual speeds and
+turns (system identification from what it sees, tagged *measured* by the camera), refine the camera with it as a
+moving target if it reports any readable odometry, and plan the other robots around it as a moving obstacle. It
+cannot calibrate the robot's own sensors without access to them.
 
 ---
 
@@ -294,6 +323,27 @@ dock fix scale.
 
 **Stage C, repeat** at the end of the run. A label whose score changes between passes goes back to a question.
 
+### 7a. What MIRLT could meet when distributed (summary of Appendix D)
+
+Ratings are for the current plan: **yes** = the plan handles it; **with work** = the plan's method applies, but a
+measurement model, an adapter or a test motion must be added; **not yet** = outside the plan.
+
+| Group | Examples (full list: Appendix D) | From scratch (types known) | New system from scratch (types unknown) |
+|---|---|---|---|
+| Proprioceptive | Wheel and motor encoders, gyro, accelerometer, magnetometer, IMU fusion output, motor current, joint encoders | Yes, except magnetometer and motor current (with work) and joints (not yet) | Mostly yes; magnetometer, current with work; joints not yet |
+| Ranging | Single and multizone ToF, IR triangulation, sonar, 2D lidar, 3D lidar, radar, structured light, stereo and depth cameras | ToF yes; IR, sonar, 2D lidar, depth with work; 3D lidar and radar not yet | ToF yes; IR, sonar, 2D lidar with work; depth, 3D lidar, radar not yet |
+| Vision | Overhead webcam, security and IP cameras, fisheye, PTZ, 360, on-robot, thermal, event, smart cameras | Overhead yes; security, IP, fisheye, smart cameras with work; PTZ, 360, on-robot, thermal, event not yet | Same |
+| Contact | Bumper switches and zone bumpers, capacitive, force and torque, cliff and line sensors, lift switches | Switches, cliff, line yes; the rest with work | Switches yes; cliff, line, lift, capacitive with work; force and torque not yet |
+| Positioning | UWB, ultrasonic beacons, IR docks, BLE RSSI, fiducial floors, tape and RFID markers, optical flow, motion capture, Wi-Fi RTT, GNSS | With work for most; Wi-Fi RTT and GNSS not yet | Same |
+| Environment | Light, colour, temperature, humidity, pressure, gas, sound | Colour, light with work; the rest logged only | Logged as "unknown" unless the user names them; colour and light with work |
+| Power | Battery voltage, current, state of charge, charging flag, motor faults | Yes | Yes (faults with work) |
+| Drive types | Differential, skid-steer, tracked, mecanum and omni, swerve, Ackermann, legged, aerial, arms, conveyors, AGVs | Differential yes; skid, tracked, holonomic, Ackermann, conveyors with work; legged, aerial, arms not yet | Same, with drive identification (section 6) |
+| Interfaces | Wi-Fi UDP/TCP, USB serial, ROS 2, ROS 1, MAVLink, BLE, CAN, Modbus, OPC UA and industrial Ethernet, vendor SDKs and clouds, I2C/SPI via a board | Wi-Fi UDP yes; ROS 2 (planned, TurtleBot3 test) and most others with work; industrial Ethernet other than OPC UA not yet | Same; at level 4, section 5a |
+
+**[Claude]** The most valuable additions after the Alvik, for the fewest new models: 2D lidar and ROS 2 (one
+simulated TurtleBot3 covers both, approved by Nick 11:20), security cameras (Nick's stated aim), and UWB beacons
+(the realistic camera-free reference for a real floor).
+
 ---
 
 ## 8. User input: what is inferred, what is truly the user's
@@ -365,9 +415,11 @@ Runs offline and reuses the live view's question channel (`e02_view.LiveView.ask
 | 8 | Test-motion battery as a runner stage | Calib run, backing find with switches (2026-10-25b), lights | Edge approach, docking motion, repeat pass | 6-8 h |
 | 9 | Mount, latency and units estimators | `tof_calib` zone directions, capture delay tool, compass wiggle | IMU axis map, edge offsets, switch side, unit snapping, lag | 8-12 h |
 | 10 | Setup screens (tabs 1-8) | Live view look and question channel; the mark page (separately) | The tabs | 16-24 h |
-| 11 | Robot-side agent protocol (documented standard) | The Alvik firmware's protocol | A written spec and a reference agent | 4-6 h spec; agent per board |
+| 11 | Robot-side agent protocol (the published standard, Nick 11:20) | The Alvik firmware's protocol | A written spec and a reference agent | 4-6 h spec; agent per board |
+| 12 | Observe-only mode (track, learn motion, plan around; section 5a) | The tracker, MIRLT labelling, the obstacle layer idea (audit A7) | A robot entry with no driver; motion model from the camera | 6-8 h |
+| 13 | Fallback adapters (vendor REST API, read-only CAN and Modbus, OPC UA browse) | None | One reference adapter each, read-only first | 4-8 h each, when a robot needs one |
 
-Total about 98-144 h. Ranks 1-3 (24-34 h) prove the idea on real data before any screen is built.
+Total about 104-152 h, plus 4-8 h per fallback adapter when a real robot needs one. Ranks 1-3 (24-34 h) prove the idea on real data before any screen is built.
 
 ### Risks
 
@@ -409,9 +461,16 @@ Total about 98-144 h. Ranks 1-3 (24-34 h) prove the idea on real data before any
 8. **Drive identification in the simulator:** a robot with flipped sign, 3x scale, a deadband and 200 ms latency
    must be learned without leaving a safe radius.
 9. **No-camera discovery in the simulator:** IMU, wheels, a range sensor and the dock only; labels and scale.
-10. **ROS 2 robot in a simulator** (TurtleBot3 in Gazebo): devices, drive and sensor types found end to end.
+10. **ROS 2 robot in a simulator** (TurtleBot3 in Gazebo, approved as the second test robot, Nick 11:20): devices,
+    drive, the 2D lidar and the IMU found and calibrated end to end.
 11. **One full real explore with marks**, then From scratch end to end.
 12. **Instruction checks:** each instruction tried wrongly on purpose (hand in frame, wrong ring) must be caught.
+13. **Observe-only:** a simulated robot MIRLT may not command; it must be tracked, its speeds and turns learned from
+    the camera, and the controlled robots must plan around it.
+14. **Never-write check:** with a robot marked safety-certified or vendor-locked, no command of any kind leaves
+    MIRLT except through the vendor interface (unit test on the driver layer).
+15. **Catalogue spot checks:** for each "yes" row in Appendix D that has no hardware here, one simulator stream with
+    that sensor's typical noise and failure modes must be labelled and calibrated.
 
 ## Possible inaccuracies
 
@@ -430,6 +489,11 @@ Total about 98-144 h. Ranks 1-3 (24-34 h) prove the idea on real data before any
 - **The dock as the absolute length** assumes its printed dimensions are accurate after printing and that the robot
   seats the same way each time; neither is measured yet.
 - **The decaying-trust finding** is reasoned from `new_session`'s code, not seen in a session; test 6 checks it.
+- **The catalogue (Appendix D) is from general knowledge of these devices**, not from datasheets opened for this
+  document: rates, noise figures and interfaces are typical values and vary by model. Its yes / with work / not yet
+  ratings are Claude's judgement of the plan, not tested.
+- **The fallback table (section 5a)** names standards (ISO 3691-4, ISO 10218) and vendor interfaces from general
+  knowledge; what a given certified robot allows must be checked with its vendor.
 - **The heading figures** (112 of 663, 100 of 112) are the heading report's, which takes the camera's direction of
   travel as truth (about ±8 degrees sd on an 8 cm leg).
 
@@ -471,3 +535,138 @@ at k 2, clear below 1.5; evidence weight halves each session.
 - **New system from scratch:** device discovery 2-3 min; drive identification 3-4 min per robot (10-12 min);
   stage A 1 min per robot; the six motions 4-5 min per robot (12-15 min); then From scratch 30-40 min; the repeat
   pass about 10 min; confirmations 2-5 min: 70-85 min. Rounded up to 75-90 min for retries.
+
+## Appendix D. Catalogue: sensors MIRLT could meet when distributed
+
+Columns: what it measures; typical interface and data format; typical rate; typical noise and failure modes;
+references that calibrate it (section 4); the discovery test motion that reveals it (section 7: 1 still, 2 spin,
+3 drive, 4 back into a wall, 5 edge approach, 6 dock; "stimulus" = something other than motion, such as a light
+switched on); and whether **FS** (From scratch, types known) and **NS** (New system from scratch, types unknown)
+handle it with the current plan: **Y** yes, **W** with work, **N** not yet. Typical values are general knowledge,
+not from datasheets (see Possible inaccuracies).
+
+**Proprioceptive (the robot sensing itself)**
+
+| Sensor | Measures | Interface, format | Rate | Noise, failures | Calibrated against | Revealed by | FS | NS |
+|---|---|---|---|---|---|---|---|---|
+| Quadrature wheel encoder (optical or magnetic) | Wheel turn, ticks or degrees | Counter on the robot's board; ticks, deg, or cm | 50-1000 Hz | Quantisation; wheel radius error; slip; missed counts | Camera distance, touches, dock | 2 (opposite), 3 (same sign) | Y | Y |
+| Hall-effect motor encoder (BLDC commutation) | Coarse motor turn | Motor driver; ticks | 50-500 Hz | Low resolution; gear backlash | Same | 2, 3 | Y | Y |
+| Absolute encoder (magnetic, e.g. AS5600 class) | Shaft angle | I2C, SPI, PWM | 100-1000 Hz | Zero offset; magnet misalignment | Same; gravity for joints | 2, 3 | Y | W |
+| Motor current / back-EMF | Load, stall | ADC on the motor driver; A or raw | 100 Hz-kHz | PWM ripple; temperature drift | Contact events (stall at a wall) | 4 | W | W |
+| Gyroscope (MEMS) | Turn rate, deg/s or rad/s | I2C or SPI; ROS `Imu` | 100-1000 Hz | Bias drift with temperature; scale error; saturation on fast spins | Still (bias); camera, lidar or wheel turn (scale) | 1, 2 | Y | Y |
+| Accelerometer | Specific force, g or m/s² | I2C or SPI; ROS `Imu` | 100-1000 Hz | Vibration; bias; tilt mixing | Gravity at rest | 1, 3, 4 | Y | Y |
+| Magnetometer | Magnetic field, µT | I2C | 10-100 Hz | Steel, motors and wiring indoors distort it; hard and soft iron | Ellipse fit over a spin; camera heading | 2 | W | W |
+| IMU fusion output (quaternion, yaw; Alvik `yaw_deg`, BNO055 class) | Orientation | I2C; ROS `Imu` orientation | 50-100 Hz | Jumps when its own calibration changes; magnetometer pull | Camera heading; must be tagged *derived* | 2 | Y | Y (as derived) |
+| Robot's own odometry (Alvik `x_cm, y_cm, th_deg`; ROS `Odometry`) | Pose from wheels and gyro | Robot record; ROS `nav_msgs/Odometry` | 10-100 Hz | Everything its inputs have; resets | Camera; tagged *derived* | 2, 3 | Y | Y (as derived) |
+| Joint encoders (arms, legs) | Joint angles | ROS `JointState`; vendor SDK | 100-1000 Hz | Home offsets; backlash | Camera, touches, gravity | Joint moves (not in the six) | N | N |
+
+**Ranging (distance to things around it)**
+
+| Sensor | Measures | Interface, format | Rate | Noise, failures | Calibrated against | Revealed by | FS | NS |
+|---|---|---|---|---|---|---|---|---|
+| Single-zone ToF (VL53L0X / L1X class) | Distance, mm | I2C; ROS `Range` | 10-50 Hz | Bias by surface colour; sunlight; max range 2-4 m | Camera + map; touches | 2, 3, 4 | Y | Y |
+| Multizone ToF (VL53L5CX / L7CX, the Alvik's) | Distance per zone | I2C | 15-60 Hz | Same; zone directions | Same (`tof_calib`) | 2 | Y | Y |
+| IR triangulation (Sharp GP2Y class) | Distance, as a non-linear voltage | Analog | 25-40 Hz | Non-linear; reads the same very near and far | Camera + map (a curve fit) | 3, 4 | W | W |
+| Ultrasonic sonar (HC-SR04, MaxBotix class) | Echo distance | GPIO timing, serial, analog; ROS `Range` | 10-40 Hz | Wide cone (15-30 deg); misses angled walls; robots' sonars interfere | Camera + map (with a cone model) | 2, 3 | W | W |
+| 2D lidar (RPLIDAR, LDS-01 on TurtleBot3, Hokuyo class) | 360 ranges in a plane | USB serial (vendor protocol); ROS `LaserScan` | 5-15 scans/s | Glass and black surfaces missed; scan skew while turning; mount angle | Walls, camera, scan matching against itself | 2 (whole scan rotates), 3 | W | W |
+| 3D lidar (Livox, Ouster, Velodyne class) | Point cloud | Ethernet UDP; ROS `PointCloud2` | 10-20 Hz | Same; 6-DoF mount | Floor plane, walls | 2, 3 | N | N |
+| Radar / mmWave (TI IWR6843 class) | Range, speed, angle of points | UART, USB | 10-30 Hz | Sparse; multipath; coarse angle | Camera; moving robots (Doppler) | 3 | N | N |
+| Structured-light depth (Kinect v1 class) | Depth image | USB | 30 Hz | Sunlight; near-range limit | Floor plane, walls | 2, 3 | W | N |
+| Stereo or active depth camera (RealSense D4xx, OAK-D, ZED class) | Depth + colour | USB 3 | 30-90 Hz | Error grows with distance squared; blank walls | Floor plane, camera | 2, 3 | W | N |
+
+**Vision (pictures)**
+
+| Sensor | Measures | Interface, format | Rate | Noise, failures | Calibrated against | Revealed by | FS | NS |
+|---|---|---|---|---|---|---|---|---|
+| Fixed overhead webcam (today's) | Pixels | USB (UVC); MJPEG | 15-30 fps | Lens bend; exposure; glare | The robots (explore), dock, touches | Any robot motion | Y | Y |
+| Security / IP camera, slanted | Pixels | RTSP (H.264/H.265), ONVIF | 10-30 fps | 100+ ms latency; compression; scale changes near to far | The robots | Any robot motion | W | W |
+| Fisheye or very wide (>120 deg) | Pixels | USB, RTSP | 15-30 fps | Strong distortion (needs a fisheye model, audit S3) | The robots | Any | W | W |
+| PTZ camera | Pixels; its own pan, tilt, zoom | ONVIF PTZ | 10-30 fps | Model changes with every move | The robots, after each move, or its reported PTZ position | Any | N | N |
+| 360 camera | Panoramic pixels | USB, vendor | 15-30 fps | Stitching seams | The robots | Any | N | N |
+| On-robot forward camera | Pixels from the robot | On-board, or streamed | 15-30 fps | Motion blur; needs visual odometry | Floor and walls; the overhead camera | 2, 3 | N | N |
+| Thermal camera (Lepton, MLX90640 class) | Temperature image | SPI, I2C, USB | 8-9 fps (export-limited) | Very low resolution; needs heat contrast (warm motors) | The visible camera (lined up) | Any | N | N |
+| Event camera (DVS) | Brightness-change events | USB, vendor SDK | Microseconds | Specialised processing | The visible camera | Any | N | N |
+| Smart camera (Pixy, OpenMV class) | Already-found blobs or lines | UART, I2C | 50-60 Hz | Its own tuning; output is *derived* | The overhead camera | 3 | W | W |
+
+**Contact**
+
+| Sensor | Measures | Interface, format | Rate | Noise, failures | Calibrated against | Revealed by | FS | NS |
+|---|---|---|---|---|---|---|---|---|
+| Bumper or micro switches (the Alvik's back pair) | Pressed, 0/1 | GPIO, debounced | 50-1000 Hz | Bounce; stuck; mount position | Camera + map; stall | 4 | Y | Y |
+| Zone bumper rings (Create 3 hazard detections) | Which zone pressed | ROS `HazardDetection`, vendor | 10-60 Hz | Zone mapping | Approach at angles | 4 | Y | W |
+| Capacitive touch or proximity | Capacitance | I2C | 10-100 Hz | Humidity drift | Contact moments | 4 | W | W |
+| Force or torque (FSR, load cell, 6-axis F/T) | Force, N | ADC, HX711, EtherCAT | 10 Hz-kHz | Drift; hysteresis | Known masses (gravity); contacts | 4 | W | N |
+| Cliff or drop (downward IR, downward ToF) | Floor present / distance down | Analog, I2C | 50-500 Hz | Dark floors read like drops | Edge crossings seen by the camera | 5 | Y | W |
+| Line sensors (reflectance array; the Alvik's three) | Floor reflectance | Analog | 50-500 Hz | Surface dependent | Camera at known lines or edges | 5, or crossing a line | Y | W |
+| Wheel-drop or lift switch | Lifted, 0/1 | GPIO | 50+ Hz | Rare events | A lift by hand (optional) | Lift (stimulus) | Y | W |
+
+**Positioning (where it is, from outside references)**
+
+| Sensor | Measures | Interface, format | Rate | Noise, failures | Calibrated against | Revealed by | FS | NS |
+|---|---|---|---|---|---|---|---|---|
+| UWB beacons (Qorvo DWM class) | Ranges to anchors, or a position | UART, SPI, BLE | 10-100 Hz | 10-50 cm bias when blocked; antenna delay offset | Camera; robot odometry; anchors' places learned | 3 | W | W |
+| Ultrasonic beacons (Marvelmind class) | Position | USB serial | 8-16 Hz | Needs line of sight; about 2 cm | Camera | 3 | W | W |
+| IR beacons and docks (Roomba-style dock, virtual wall) | Bearing or zone codes | GPIO | 10-50 Hz | Binary zones; reflections | Dock position | 6 | W | W |
+| BLE RSSI | Signal strength | BLE | 1-10 Hz | Several dB of noise: metres of error | Camera | 3 | W (coarse) | W (coarse) |
+| Wi-Fi RTT (802.11mc FTM) | Range to an access point | Supported chips, phones | 1-5 Hz | 1-2 m | Camera | 3 | N | N |
+| GNSS / RTK | Latitude, longitude | UART (NMEA, UBX) | 1-20 Hz | Unusable indoors; RTK about 2 cm outdoors | Itself, outdoors | n/a indoors | N | N |
+| Fiducial floors (QR, AprilTag, ArUco grids under or around the robot) | Absolute pose when a tag is seen | Camera | 15-60 Hz | Needs a tag map (surveyed, or learned SLAM-style) | Overhead camera; tags | 3 | W | W |
+| Magnetic tape, painted line, RFID floor tags (industrial AGVs) | Offset from tape; tag IDs | Modbus, CAN, serial | 10-100 Hz | Worn tape; tag map | Camera at known tape | Crossing it (3) | W | W |
+| Optical flow (mouse sensor, PMW3901 class) | Floor displacement | SPI | 100 Hz-kHz | Scale depends on height; texture loss | Camera, wheels | 3 | W | W |
+| External motion capture (OptiTrack, Vicon) | 6-DoF pose of markers | Ethernet (NatNet, VRPN) | 100-360 Hz | Marker swaps; sub-mm otherwise | Itself (a truth source) | Any | W | W |
+| Other robots' sensors (one robot sees another) | Relative range and bearing | Whatever the other robot has | Varies | Both robots' errors | Commanded motion of the one watched | 3 (of the other robot) | W | W |
+
+**Environment**
+
+| Sensor | Measures | Interface, format | Rate | Noise, failures | Calibrated against | Revealed by | FS | NS |
+|---|---|---|---|---|---|---|---|---|
+| Ambient light | Lux | I2C, analog | 1-100 Hz | Room lights | Camera's overall brightness | Stimulus (lights) | W | W |
+| Colour (TCS34725 class) | RGB of the floor | I2C | 10-100 Hz | Height; ambient light | Camera's colour under the robot | Crossing colours (3) | W | W |
+| Temperature | deg C | I2C | <1-10 Hz | Slow | None for motion; a useful cause of gyro bias drift | None (logged) | W | N |
+| Humidity, pressure (barometer) | %, hPa (height on drones) | I2C | 1-50 Hz | Slow; weather | None indoors | None | N | N |
+| Gas, air quality | ppm | I2C, analog | <1 Hz | Warm-up | None | None | N | N |
+| Microphone | Sound | I2S, USB | kHz | Room noise | Commanded beeps; motor noise against commanded speed | Stimulus; 3 | W | N |
+
+**Power**
+
+| Sensor | Measures | Interface, format | Rate | Noise, failures | Calibrated against | Revealed by | FS | NS |
+|---|---|---|---|---|---|---|---|---|
+| Battery voltage, current, state of charge | V, A, % | I2C fuel gauge; ROS `BatteryState` | 1-10 Hz | Sag under load; state-of-charge jumps | Load (dips while driving); charging | 3, 6 | Y | Y |
+| Charging contacts or flag | Charging, 0/1 | GPIO | 1-50 Hz | Contact bounce | Dock | 6 | Y | Y |
+| Motor-driver fault and temperature flags | Fault codes | Driver status | 1-10 Hz | Rare | None | Rarely (stall, 4) | W | W |
+
+## Appendix E. Catalogue: drive types
+
+| Drive | How it moves | Typical commands | Calibration terms | What drive identification (section 6) must add | FS | NS |
+|---|---|---|---|---|---|---|
+| Differential (Alvik, TurtleBot3, Create 3) | Two wheels, turns on the spot | Legs (go, turn) or (v, w) | Wheel scale, gyro scale, left-right mismatch | Nothing new | Y | Y |
+| Skid-steer (4 or 6 fixed wheels) | Turns by sliding | (v, w) | Turning slip: the turn is not what the wheel geometry says | A turn-slip term, per surface | W | W |
+| Tracked | Like skid-steer, heavier slip | (v, w) | Same, larger | Same | W | W |
+| Mecanum or omni (holonomic) | Any direction, any heading | (vx, vy, w) | Per-axis scale; roller slip sideways | Try the sideways axis too | W | W |
+| Kiwi (3 omni wheels), swerve | Holonomic | (vx, vy, w) or per-module | Per-wheel scale; module angles | Same | W | W |
+| Ackermann (car-like, RC cars, F1TENTH) | Cannot turn on the spot | (speed, steering angle) | Steering trim and scale; smallest circle | Arcs replace the spin test; planner arcs (audit R1) | W | W |
+| Legged (quadrupeds, hexapods) | Steps; body bobs | Velocity through a vendor SDK | Gait-dependent drift | Vendor SDK only; observe-only first | N | N |
+| Aerial (drones) | 3D | MAVLink, vendor SDK | Height, drift, wind | Safety case first; observe-only | N | N |
+| Fixed arms (manipulators, cobots) | Joints, no travel | Joint or Cartesian targets | Joint offsets; camera to arm | Not a mobile robot: a separate design | N | N |
+| Conveyors | One axis | Belt speed (PLC) | Belt speed scale; slip of items | Read the speed and calibrate against the camera; control only with permission | W | W |
+| Industrial AGVs and AMRs (tape-following, laser-guided) | Vendor navigation | Missions through the vendor or PLC | Its own positions vs the camera | Through the vendor interface only (section 5a) | W | W |
+| People-driven vehicles | n/a | none | n/a | Observe-only, moving obstacle | W | W |
+
+## Appendix F. Catalogue: interfaces
+
+| Interface | Carries | Can it be found automatically? | Is its meaning self-describing? | Plan |
+|---|---|---|---|---|
+| Wi-Fi UDP/TCP (the Alvik's) | Text lines or binary | Broadcasts, mDNS, port scan | If it has a `help` and a header (the Alvik does) | Y (Alvik adapter) |
+| USB serial (CDC, FTDI, CH340) | Text or binary | Yes (vendor and product IDs) | Only if text with a help or header | W (listen first; send only once known) |
+| I2C / SPI via a board | Sensor registers | Not from the computer; only through the robot's board | Chip IDs, if the board reports them | Through the agent |
+| ROS 2 | Typed topics, services, TF | Yes (DDS discovery) | **Yes** (message types, frames, REP 103 units) | W (planned; TurtleBot3 in Gazebo test) |
+| ROS 1 | Typed topics | Through its master | Yes | W (through a ROS 1 to ROS 2 bridge) |
+| MAVLink | Vehicle messages | Heartbeat | Yes | W |
+| BLE | Services and characteristics | Yes (advertisements) | Standard services only | W |
+| CAN / CAN FD (CANopen, J1939) | Frames | With a USB-CAN adapter, by listening | Only with the vendor's database or EDS file (CANopen) | W (read-only first; section 5a) |
+| Modbus RTU / TCP | Registers | Modbus TCP by port 502; RTU by listening | No: needs the register map | W (read-only first) |
+| OPC UA | Browseable data | Discovery server | Partly (named, typed nodes) | W |
+| EtherNet/IP, PROFINET, EtherCAT | PLC data | Needs the PLC's configuration | No | N (through OPC UA or the vendor) |
+| Vendor SDK or REST API (AMR vendors, consumer robots) | Positions, missions, sensors | Sometimes mDNS | Documented per vendor | W (one adapter per vendor) |
+| Vendor cloud API | Same, over the internet | No | Documented per vendor | W (an online exception the user approves) |
+| IR remote, Zigbee, LoRa | Commands or telemetry | Partly | No | N |
