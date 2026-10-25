@@ -299,8 +299,9 @@ def _sim_robot(seed, g_under, bias, bd):
     return r
 
 
+@pytest.mark.parametrize("park_in", [0.0, 22.0])     # 22: park spots moved in while the camera looks bad (E.PARK_OPEN_MAX_CM)
 @pytest.mark.parametrize("g_under,bias", [(-0.085, 0.3), (-0.085, -0.3), (-0.055, 0.3), (-0.055, -0.3), (-0.07, 0.0)])
-def test_worst_case_uncalibrated_routes_never_reach_a_parked_robot(g_under, bias):
+def test_worst_case_uncalibrated_routes_never_reach_a_parked_robot(g_under, bias, park_in):
     """The simulator's robot (firmware e02.h copy) as in a U run of the session: from a park spot, `run find` on the
     prior corrections, then `run e02` (transit and start turn on those, the route itself UNCALIBRATED: gyro 5.5-8.5%
     short, creep +-0.3 deg/s, factory values from the start mark), Nick's layout. Its true path keeps PARK_CLEAR_CM
@@ -308,6 +309,8 @@ def test_worst_case_uncalibrated_routes_never_reach_a_parked_robot(g_under, bias
     (no board, front stop or edge cuts it short)."""
     import e02 as E
     bd = PL.Board(xboard_side=1, yboard_side=1, xboard_cm=121.3, yboard_cm=121.55)
+    assert park_in in (0.0, E.PARK_OPEN_MAX_CM)
+    bd.park_min_open_cm = park_in
     worst, worst_edge = 99.0, 99.0
     for route in PL.ROUTES:
         i = route % 3

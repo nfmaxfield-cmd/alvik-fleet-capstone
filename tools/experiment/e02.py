@@ -245,6 +245,10 @@ FW_BORDER_CM = 10.0           # chosen (DOE note: a robot's front is 5 cm ahead 
                               # pose drifts a few cm between camera fixes; a DOE driving at the line uncalibrated, at
                               # 4 and 10 cm/s, would set it). Fixed: a bad camera moves the camera's line and the routes
                               # in (border_cm), never this one
+PARK_OPEN_MAX_CM = 22.0       # while the camera looks bad, park spots move in to border_cm() but no further than this
+                              # from the open edges: at 22 the square route still passes 22 cm from the moved spot's
+                              # centre (at 25 it would be 19.2, near PARK_CLEAR_CM 18). Chosen from the nominal paths;
+                              # the uncalibrated-drift simulator test (test_e02_runner) is the check
 BORDER_TOWARDS_CMS = 2.0      # chosen: moving towards the edge faster than this counts (still or away is allowed) ...
 BORDER_TOWARDS_FRAC = 0.5     # ... and mostly towards it (within 60 deg of straight at it): driving along the edge is
                               # allowed (dry run 2026-10-24, a robot put down 10 cm from the edge backed along it in
@@ -1084,6 +1088,12 @@ class Runner:
                 self.say("  Working area: the virtual border is now %.0f cm inside the open edges%s." % (
                     self.border_cm(), " (the camera looks bad: the area shrinks)" if what == "degraded" else ""))
                 self.st.setdefault("border_changes", []).append([round(time.time(), 1), round(self.border_cm(), 1)])
+                if self.board is not None:
+                    bad_ = what == "degraded"
+                    self.board.park_min_open_cm = min(self.border_cm(), PARK_OPEN_MAX_CM) if bad_ else 0.0
+                    self.say("  Park spots: %s." % ("moved in to %.0f cm from the open edges (each robot goes there "
+                                                    "when it next parks)" % self.board.park_min_open_cm if bad_ else
+                                                    "back where they were"))
             self.st.setdefault("sensor_trust_events", []).append([round(time.time(), 1), s_, r_, what, round(kk, 2)])
         if not save:
             return

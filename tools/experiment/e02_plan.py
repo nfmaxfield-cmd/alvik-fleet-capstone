@@ -317,10 +317,24 @@ class Board:
             yhi = max(yhi, self.xboard_cm + self.BOARD_SLACK_CM)
         return xlo + margin <= x <= xhi - margin and ylo + margin <= y <= yhi - margin
 
+    park_min_open_cm = 0.0    # set by the runner while the camera looks bad: park spots keep their centre this far
+                              # from the open edges (Nick, 2026-10-25: "parking spots can move in")
+
     def park(self, i):
-        """(x, y, heading) of park spot i (PARK_UV), facing the find's staging point (its next drive)."""
+        """(x, y, heading) of park spot i (PARK_UV), facing the find's staging point (its next drive). While
+        park_min_open_cm is set, a spot nearer an open edge than that moves straight in from it."""
         u, v = PARK_UV[i % len(PARK_UV)]
         x, y = self.uv(u, v)
+        m = float(self.park_min_open_cm or 0.0)
+        if m > 0:
+            for a, val in self.open_edges():
+                c = x if a == "x" else y
+                if abs(c - val) < m:
+                    c = val + (m if c >= val else -m)
+                    if a == "x":
+                        x = c
+                    else:
+                        y = c
         sx, sy = self.find_stage()
         return (x, y, math.degrees(math.atan2(sy - y, sx - x)))
 
