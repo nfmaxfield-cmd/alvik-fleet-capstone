@@ -51,6 +51,15 @@
 //
 // Both refuse to start unless sw_on is 1 (failed: "nose switches not
 // configured"), and refuse if a switch is already pressed (stuck or wiring).
+//
+// SWITCHES AT THE BACK (sw_back 1, firmware 2026-10-25b; Nick, 2026-10-25: one attachment, switches, ID lights and
+// charging pads at the back). Everything above runs backwards: the robot is put down with its BACK to the dock /
+// board / posts, creeps backwards, and the pivot mirrors (the clicked side's wheel presses backwards gently, the
+// other backs faster, bringing its corner back to the wall). Left / right stay the robot's own (standing behind
+// it, looking where it looks): the left switch is on its left. The switch face is e02_back_face_cm BEHIND the
+// axle: a docked robot faces away from the back wall, and its pose is the wall's + e02_back_face_cm along its
+// heading (h = the way the docked robot faces, as before). The floor stripe is not read (the line sensors are at
+// the front, far from the mouth). Backing out after a docking or a touch becomes driving forward (edge guard on).
 #pragma once
 
 #include "pose.h"
@@ -60,6 +69,12 @@ extern String gRunId;
 namespace dock {
 
 const float NONE = -1.0f;
+
+// +1: the switches are on the nose (creep forwards); -1: on the back attachment (sw_back 1: creep backwards).
+float dir() { return P("sw_back") > 0 ? -1.0f : 1.0f; }
+
+// Wheel axle to the switch face, signed along the heading: + ahead (nose bracket), - behind (back attachment).
+float faceAhead() { return P("sw_back") > 0 ? -P("e02_back_face_cm") : P("bump_ahead_cm"); }
 
 struct Result {
   bool ok = false;
@@ -122,7 +137,8 @@ bool creep(bool dockMode, Result& r, float maxCm = -1, bool posts = false) {
   float saved = gFrontLimitCm;
   gFrontLimitCm = 0;                       // it is meant to touch what is ahead
   float level[3] = {0, 0, 0};
-  bool stripe = dockMode && !posts && P("stripe_on") > 0.5f;
+  const float sgn = dir();                 // -1: switches at the back, creep backwards
+  bool stripe = dockMode && !posts && P("stripe_on") > 0.5f && sgn > 0;   // line sensors are at the front
   if (stripe && !learnStripe(level)) { gFrontLimitCm = saved; return false; }
   edge::lineOff = dockMode && !posts;    // a version 1 dock's stripe is not an edge (logged or not)
   float lx0, ly0, lth;
@@ -181,9 +197,11 @@ bool creep(bool dockMode, Result& r, float maxCm = -1, bool posts = false) {
       break;
     }
     if (now - r.msStart > limit) { snprintf(r.why, sizeof(r.why), "creep timed out (stalled?)"); break; }
-    if (!L && !R) alvik.set_wheels_speed(creepRpm, creepRpm);
-    else if (L) alvik.set_wheels_speed(press, pivot);    // left corner on the wall: turn left about it
-    else alvik.set_wheels_speed(pivot, press);           // right corner on the wall: turn right about it
+    // (backwards, sgn -1: the same wheel speeds reversed: the touching corner's wheel presses back gently, the
+    // other wheel backs faster and brings its own back corner to the wall)
+    if (!L && !R) alvik.set_wheels_speed(sgn * creepRpm, sgn * creepRpm);
+    else if (L) alvik.set_wheels_speed(sgn * press, sgn * pivot);    // left corner on the wall: pivot about it
+    else alvik.set_wheels_speed(sgn * pivot, sgn * press);           // right corner on the wall: pivot about it
     delay(5);
   }
   alvik.brake();
@@ -191,7 +209,7 @@ bool creep(bool dockMode, Result& r, float maxCm = -1, bool posts = false) {
   if (ok && dockMode && !posts) {
     // seat: both wheels push gently so the face lies flush, then let go
     unsigned long t0 = millis();
-    alvik.set_wheels_speed(press, press);
+    alvik.set_wheels_speed(sgn * press, sgn * press);
     while (millis() - t0 < (unsigned long)P("dock_seat_ms")) {
       if (shouldAbort()) { ok = false; break; }
       delay(5);
@@ -287,7 +305,7 @@ bool dockOnce(int n, float wallX, float wallY, float h, Result& r, float maxCm =
   int used = 0;
   if (ok) {
     if (pose::on && !isNaN(wallX) && !isNaN(wallY) && !isNaN(h)) {
-      float a = P("bump_ahead_cm");
+      float a = faceAhead();                 // negative with the back attachment: the axle is ahead of the wall
       pose::set(wallX - a * cosf(h * pose::DEG2RAD), wallY - a * sinf(h * pose::DEG2RAD), h, 0.05f, 0.3f);
     }
     ok = holdStill(drift, gz, stillMs);
@@ -305,8 +323,8 @@ bool dockOnce(int n, float wallX, float wallY, float h, Result& r, float maxCm =
 
 // ===================================================================
 // DOCK run (`run dock`): put the robot down 5-25 cm in front of the dock
-// mouth, roughly facing in. dock_n dockings, each followed by backing out
-// dock_back_cm (0: one docking, stays docked so it can be tape-measured).
+// mouth, roughly facing in (sw_back 1: its back to the mouth, facing out). dock_n dockings, each followed by
+// backing out dock_back_cm (sw_back 1: driving out forwards; 0: one docking, stays docked so it can be tape-measured).
 // ===================================================================
 void runDock() {
   dock::dockHeader();
@@ -318,7 +336,7 @@ void runDock() {
     rawlog::step = i;
     dock::Result r;
     if (!dock::dockOnce(i, NAN, NAN, NAN, r)) return;
-    if (back > 0 && !(libraryMove(-back) && waitMs(500))) return;
+    if (back > 0 && !(libraryMove(-back * dock::dir()) && waitMs(500))) return;
   }
   net::logf("M,%s dock: %d docking%s done", net::name, n, n == 1 ? "" : "s");
 }
@@ -339,7 +357,7 @@ void runTouch() {
     dock::touchRecord(r, i);
     if (!ok) return;
     if (!waitMs(300)) return;
-    if (back > 0 && !(libraryMove(-back) && waitMs(500))) return;
+    if (back > 0 && !(libraryMove(-back * dock::dir()) && waitMs(500))) return;
   }
 }
 
@@ -367,7 +385,7 @@ void runPosts() {
     if (!ok && !miss) return;
     if (miss) { gFail = ""; }
     if (!waitMs(300)) return;
-    if (back > 0 && !(libraryMove(-back) && waitMs(500))) return;
+    if (back > 0 && !(libraryMove(-back * dock::dir()) && waitMs(500))) return;
   }
   net::logf("M,%s posts: %d measurement%s done", net::name, n, n == 1 ? "" : "s");
 }

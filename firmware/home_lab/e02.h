@@ -1,7 +1,29 @@
-// E02 accuracy experiment (firmware 2026-10-22b). Plan: docs/build-plans/accuracy-experiment-E02.md.
+// E02 accuracy experiment (firmware 2026-10-22b; reverse find 2026-10-25b). Plan: docs/build-plans/accuracy-experiment-E02.md.
 // Records and commands: docs/data-formats.md "E02". Simulator copy: tools/sim/fw_e02.py.
 //
-// BUMP DETECTION (no switches). The robot creeps into a board at bump_creep_cms, holding its gyro heading.
+// REVERSE FIND (firmware 2026-10-25b, e02_find_reverse 1; Nick, 2026-10-25: one attachment, switches at the BACK).
+// Each board is found by BACKING into it, so the front distance sensor and the front line sensors (the edge guard)
+// stay clear and look where the robot is going between boards. Per board: face it (a board further than
+// e02_find_turn_cm is first approached nose first, front sensor and edge guard on, to that distance; from the
+// staging point it is nearer); look (below); turn round to face AWAY from it; creep backwards; bump = either back switch clicking (cue switch-L / switch-R / switch-LR: the
+// strongest cue; the press is timed from the switch's first raw closing), or the stall / jolt cues as before (the
+// front touch cue and the "something far ahead" check do not apply backwards); square by pushing backwards until
+// both switches are pressed or the heading stops changing (BUMP squared = 2: both pressed, 1: heading still).
+// The touching face is the back face, e02_back_face_cm behind the axle, and the robot's heading against a board is
+// the board's `toward` + 180: the reset, toGo() and the turn_k re-trace use both. Leaving a board is a FORWARD
+// drive of e02_find_back_cm (edge guard and front stop on). Backing is blind, so: the creep backs at most
+// e02_find_back_margin_cm (+ e02_find_tol_pct of the travel since the pose was set) past where the pose says the
+// board is, and never so far that the axle comes within e02_find_keep_cm of the board's line, then stops with
+// "no board behind" (never further than e02_find_max_cm); the virtual border stays on. Before it turns its back,
+// it LOOKS: facing the board, standing still, the front sensor must see it no further than the map puts it +
+// e02_find_see_cm (+ slack), else the find fails without backing ("no board seen"): a removed board over an open
+// edge cannot draw it backwards off the plywood (its rear caster is ~4 cm behind the axle).
+// It needs the switches (sw_on 1, sw_back 1) and a pose (a camera fix or a find): without either it finds nose
+// first, as before, and says so (FIND reverse 0). RAW steps as below; each board's step 1 / 5 is (turn + drive near
+// it +) the turn to face away.
+//
+// BUMP DETECTION (no switches; nose first. Backing in with the back switches: REVERSE FIND above). The robot
+// creeps into a board at bump_creep_cms, holding its gyro heading.
 // Two cues:
 //   - stall: the wheels' measured speed (get_wheels_speed) falls below bump_stall_frac of what was commanded;
 //   - jolt: the accelerometer's driving-axis reading (ax) jumps more than bump_jolt_g from its running level.
@@ -54,7 +76,8 @@
 // before every find). A robot with no pose takes the fix as it is.
 //
 // SAFETY. The edge guard (edge.h) stays on in every mode (forward driving; backing up is blind: the backward
-// moves here retrace the path just driven forward, or are at most e02_back_max_cm). Find, e02 runs and go legs
+// moves here retrace the path just driven forward, or are at most e02_back_max_cm; the reverse find's creep is
+// capped at e02_find_back_margin_cm past where the board should be, "no board behind"). Find, e02 runs and go legs
 // refuse to start while safe_edge is 0 (2026-10-21b: the guard was found off for a whole session's plan).
 // Blind backing: go legs backwards add up (backSince); more than e02_back_max_cm in all since the last camera fix
 // or find is refused, so the laptop must look (camera) and send a fix between pieces. A stop command always
@@ -63,6 +86,7 @@
 #pragma once
 
 #include "pose.h"
+#include "switches.h"
 
 extern String gRunId;
 
@@ -153,6 +177,10 @@ float pathDs[NPATH], pathRel[NPATH];
 int nPath = 0;
 bool pathOn = false;
 float pathG0 = 0, segDs = 0, segRelW = 0;
+// the gyro's turn since square 1, UNWRAPPED (2026-10-25b): the reverse find turns round between the boards, so the
+// heading can wind past +-180 deg from square 1 (e.g. +90 then +180 = +270); a wrapped angle then broke turn_k and
+// the re-trace (simulation: 5 cm off). Added up every tick, turning in place included.
+float pathTurn = 0, pathLastH = 0;
 
 void pathPush() {
   if (segDs == 0) return;
@@ -169,9 +197,14 @@ void tickHook() {
   lastDist = pose::dist;
   travelAbs += fabsf(ds);
   sinceSet += fabsf(ds);
+  if (pathOn) {
+    float hNow = heading();
+    pathTurn += wrap180(hNow - pathLastH);
+    pathLastH = hNow;
+  }
   if (pathOn && ds != 0) {
     segDs += ds;
-    segRelW += wrap180(heading() - pathG0) * fabsf(ds);
+    segRelW += pathTurn * fabsf(ds);
     if (fabsf(segDs) >= 0.5f) pathPush();
   }
   float sl, sr;
@@ -218,8 +251,31 @@ float faceCm() {
   return P("bumper_cm") > 0 ? P("bump_ahead_cm") : P("tof_ahead_cm") + P("tof_recess_cm");
 }
 
+// Reverse find (2026-10-25b): this find backs into the boards (set at the start of runFind).
+bool findRev = false;
+
+// The front sensor's view straight ahead, standing still (reverse find's look): the nearest of the three middle
+// zones, median of 5 frames ~70 ms apart, after letting the sensor settle 150 ms. -1 on a stop.
+float lookAhead() {
+  if (!waitMs(150)) return -1;
+  float v[5];
+  for (int i = 0; i < 5; i++) {
+    float d[5];
+    alvik.get_distance(d[0], d[1], d[2], d[3], d[4]);
+    v[i] = fminf(d[1], fminf(d[2], d[3]));
+    if (i < 4 && !waitMs(70)) return -1;
+  }
+  for (int i = 1; i < 5; i++)                     // sort (5 values)
+    for (int j = i; j > 0 && v[j] < v[j - 1]; j--) { float t = v[j]; v[j] = v[j - 1]; v[j - 1] = t; }
+  return v[2];
+}
+
+// The face that touches the board in this find: the front face (faceCm) or the back attachment's (reverse).
+float touchFace() { return findRev ? P("e02_back_face_cm") : faceCm(); }
+
 // A board's face as a line: n = unit vector from the robot towards the board, c = n . (any point on the face).
-// A robot square against it has its axle at n . a = c - faceCm(), heading = toward.
+// A robot square against it has its axle at n . a = c - touchFace(), heading = faceHeading() (toward, or
+// toward + 180 when it backs into it).
 struct Board { float nx, ny, c, toward; const char* name; };
 
 Board board(bool xb) {
@@ -234,8 +290,11 @@ Board board(bool xb) {
   return b;
 }
 
+// The robot's heading while square against the board in this find.
+float faceHeading(const Board& b) { return findRev ? wrap180(b.toward + 180.0f) : b.toward; }
+
 // How far the axle still has to go along n to sit square against the board (own pose).
-float toGo(const Board& b) { return b.c - faceCm() - (b.nx * pose::x + b.ny * pose::y); }
+float toGo(const Board& b) { return b.c - touchFace() - (b.nx * pose::x + b.ny * pose::y); }
 
 // The edge guard must be on before anything here drives (find, e02, go legs). Empty = fine.
 const char* edgeOff() {
@@ -264,18 +323,33 @@ struct Bump {
   float squareDeg = 0;              // heading change while pushing square (the approach angle, opposite sign)
   unsigned long pushMs = 0;
   bool squared = false;
+  bool bothSw = false;              // reverse: both back switches pressed at the end of the push (squared = 2)
 };
 
 void bumpRecord(const Bump& b) {
   net::logf("D,BUMP,%s,%lu,%d,%s,%s,%s,%lu,%lu,%lu,%ld,%.3f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.1f,%d,%.2f,%lu,%d",
             gRunId.c_str(), b.msDetect ? b.msDetect : millis(), b.n, b.board, b.ok ? "bump" : b.why, b.cue, b.msStart, b.msContact, b.msDetect,
             b.msDetect ? (long)(b.msDetect - b.msContact) : -1L, b.jolt, b.stallFrac, b.x, b.y, b.th, b.travel,
-            b.overshoot, b.front, b.seams, b.squareDeg, b.pushMs, b.squared ? 1 : 0);
+            b.overshoot, b.front, b.seams, b.squareDeg, b.pushMs, b.squared ? (b.bothSw ? 2 : 1) : 0);
 }
 
 // ------------------------------------------------------------------ bump and square
 // Creep along floor heading h until a bump (true), or a stop / failure (false: b.why, gAbortReason).
+// Reverse find (findRev): backwards, heading kept, the back switches are the first cue.
 bool creep(float h, float maxCm, Bump& b) {
+  const float sgn = findRev ? -1.0f : 1.0f;    // direction of motion along the heading
+  if (findRev) {
+    sw::tick();
+    if (!sw::on || sw::raw[0] || sw::raw[1]) {
+      snprintf(b.why, sizeof(b.why), "%s", !sw::on ? "back switches not configured (sw_on 0)"
+               : sw::raw[0] ? "left back switch pressed before the creep (stuck or wiring)"
+               : "right back switch pressed before the creep (stuck or wiring)");
+      b.ok = false;
+      return false;
+    }
+  }
+  bool swSeen = false;                          // a back switch's first raw closing seen (reverse)
+  float distSw = 0;
   float v = P("bump_creep_cms"), kh = P("drive_kh");
   float joltThr = P("bump_jolt_g"), frac = P("bump_stall_frac"), farCm = P("bump_far_cm");
   unsigned long stallMs = (unsigned long)P("bump_stall_ms"), stallOnly = (unsigned long)P("bump_stall_only_ms");
@@ -297,7 +371,7 @@ bool creep(float h, float maxCm, Bump& b) {
   while (true) {
     if (shouldAbort()) break;
     unsigned long now = millis();
-    float travel = pose::dist - d0;
+    float travel = sgn * (pose::dist - d0);
     float ax, ay, az, gx, gy, gz;
     alvik.get_imu(ax, ay, az, gx, gy, gz);
     if (!haveBase) { base = ax; haveBase = true; }
@@ -312,12 +386,38 @@ bool creep(float h, float maxCm, Bump& b) {
     if (stallSince) peak = fmaxf(peak, dev);
     float sl, sr;
     alvik.get_wheels_speed(sl, sr);
-    float meas = 0.5f * (sl + sr);
+    float meas = sgn * 0.5f * (sl + sr);          // speed along the direction of motion
     bool stalled = armed && meas < frac * cmdRpm;
     if (stalled && !stallSince) { stallSince = now | 1; distStall = travel; peak = dev; }
     if (!stalled) stallSince = 0;
-    // touch: the front sensor's three middle zones; the nearest of them at most touchCm (face on the board)
-    if (touchCm > 0) {
+    // reverse: a back switch (switches.h, debounced; the contact is its first raw closing). Not gated by `armed`:
+    // a click is a click, even while the wheels speed up.
+    if (findRev) {
+      bool edge = sw::firstEdge[0] || sw::firstEdge[1];
+      if (edge && !swSeen) { swSeen = true; distSw = travel; }
+      if (!edge) swSeen = false;                   // a chatter that never became a press
+      bool L = sw::left(), R = sw::right();
+      if (L || R) {
+        alvik.brake();
+        b.msDetect = now;
+        b.cue = L && R ? "switch-LR" : L ? "switch-L" : "switch-R";
+        unsigned long pm = 0;
+        for (int k = 0; k < 2; k++)
+          if (sw::pressMs[k] && (!pm || (long)(sw::pressMs[k] - pm) < 0)) pm = sw::pressMs[k];
+        b.msContact = pm ? pm : now;
+        b.travel = swSeen ? distSw : travel;
+        bool jolted = lastJolt && (long)(lastJolt + win - b.msContact) >= 0 && (long)(b.msContact + win - lastJolt) >= 0;
+        b.jolt = jolted ? lastJoltG : 0;
+        if (jolted && b.seams > 0) b.seams--;      // that jolt was this contact, not a seam
+        b.stallFrac = meas / cmdRpm;               // (b.front keeps the look's reading: oneBoard)
+        if (!pose::at(b.msContact, b.x, b.y, b.th)) { b.x = pose::x; b.y = pose::y; b.th = pose::th(); }
+        ok = true;
+        break;
+      }
+    }
+    // touch: the front sensor's three middle zones; the nearest of them at most touchCm (face on the board).
+    // Nose first only (backwards the front sensor looks away from the board).
+    if (touchCm > 0 && !findRev) {
       float dd[5];
       alvik.get_distance(dd[0], dd[1], dd[2], dd[3], dd[4]);
       float near = fminf(dd[1], fminf(dd[2], dd[3]));
@@ -354,11 +454,13 @@ bool creep(float h, float maxCm, Bump& b) {
         b.jolt = jolted ? fmaxf(peak, lastJoltG) : peak;
         b.stallFrac = meas / cmdRpm;
         if (jolted && b.seams > 0) b.seams--;              // that jolt was the bump, not a seam
-        float d[5];
-        alvik.get_distance(d[0], d[1], d[2], d[3], d[4]);
-        b.front = d[2];
+        if (!findRev) {                            // backwards b.front keeps the look's reading (oneBoard)
+          float d[5];
+          alvik.get_distance(d[0], d[1], d[2], d[3], d[4]);
+          b.front = d[2];
+        }
         if (!pose::at(b.msContact, b.x, b.y, b.th)) { b.x = pose::x; b.y = pose::y; b.th = pose::th(); }
-        if (b.front > farCm && b.front < 100.0f) {
+        if (!findRev && b.front > farCm && b.front < 100.0f) {   // backwards the front sensor looks away: no check
           snprintf(b.why, sizeof(b.why), "stalled with something %.0f cm ahead: not at a board", b.front);
           break;
         }
@@ -366,10 +468,14 @@ bool creep(float h, float maxCm, Bump& b) {
         break;
       }
     }
-    if (travel > maxCm) { snprintf(b.why, sizeof(b.why), "no bump within %.0f cm", maxCm); break; }
+    if (travel > maxCm) {
+      if (findRev) snprintf(b.why, sizeof(b.why), "no board behind within %.0f cm", maxCm);
+      else snprintf(b.why, sizeof(b.why), "no bump within %.0f cm", maxCm);
+      break;
+    }
     if (now - t0 > limit) { snprintf(b.why, sizeof(b.why), "creep timed out"); break; }
     float herr = wrap180(h - pose::th());
-    setDrive(v, constrain(kh * herr, -20.0f, 20.0f));
+    setDrive(sgn * v, constrain(kh * herr, -20.0f, 20.0f));   // turn rate keeps its sign backwards (setDrive)
     delay(5);
   }
   alvik.brake();
@@ -382,15 +488,17 @@ bool creep(float h, float maxCm, Bump& b) {
     if (millis() - ts > 60 && fabsf(sl) < 0.5f && fabsf(sr) < 0.5f) break;
     delay(5);
   }
-  if (b.msDetect) b.overshoot = (pose::dist - d0) - b.travel;
+  if (b.msDetect) b.overshoot = sgn * (pose::dist - d0) - b.travel;
   gFrontLimitCm = saved;
   b.ok = ok;
   return ok;
 }
 
-// Push gently so the whole front face lies on the board. False on a stop, or if it never settled.
+// Push gently so the whole touching face lies on the board (reverse: push backwards; done once both back
+// switches are pressed, or the heading stops changing). False on a stop, or if it never settled.
 bool square(Bump& b) {
   float rpm = P("push_rpm"), still = P("push_still_deg");
+  if (findRev) rpm = -rpm;
   unsigned long maxMs = (unsigned long)P("push_ms"), minMs = (unsigned long)P("push_min_ms");
   float saved = gFrontLimitCm;
   gFrontLimitCm = 0;
@@ -403,6 +511,7 @@ bool square(Bump& b) {
     unsigned long now = millis();
     if (now - tRef >= 250) {
       float h = heading();
+      if (now - t0 >= minMs && findRev && sw::left() && sw::right()) { settled = true; break; }   // flush: both levers
       if (now - t0 >= minMs && fabsf(wrap180(h - hRef)) <= still) { settled = true; break; }
       hRef = h;
       tRef = now;
@@ -416,6 +525,7 @@ bool square(Bump& b) {
   gFrontLimitCm = saved;
   b.squareDeg = wrap180(heading() - h0);
   b.squared = settled;
+  b.bothSw = findRev && sw::left() && sw::right();
   if (ok && !settled) {
     snprintf(b.why, sizeof(b.why), "still turning after %lu ms of pushing: not square", b.pushMs);
     b.ok = false;
@@ -469,34 +579,89 @@ struct FindRec {
   float shift = 0;                        // how far re-tracing the path with turn_k moved the position, cm
 };
 
+// face_cm: the face that touched (the back face when reverse); reverse: 1 = it backed into the boards (2026-10-25b)
 void findRecord(const FindRec& f, unsigned long ms) {
   net::sendLine("H,FIND,run,result,known_before,before_x,before_y,before_th,bump2_x,bump2_y,bump2_th,reset_x,"
                 "reset_y,reset_th,after_x,after_y,after_th,corr1_cm,corr1_deg,corr2_cm,corr2_deg,turn_k,retrace_cm,"
-                "face_cm,ms_total,battery");
+                "face_cm,ms_total,battery,reverse");
   String res = String(f.result);
   if (f.why[0]) res += String(": ") + String(f.why);
   net::logf("D,FIND,%s,%s,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.4f,"
-            "%.2f,%.2f,%lu,%d", gRunId.c_str(), res.c_str(), f.knownBefore, f.bx, f.by, f.bth, f.b2x, f.b2y, f.b2th,
+            "%.2f,%.2f,%lu,%d,%d", gRunId.c_str(), res.c_str(), f.knownBefore, f.bx, f.by, f.bth, f.b2x, f.b2y, f.b2th,
             f.rx, f.ry, f.rth, f.ax, f.ay, f.ath, f.corr1, f.corr1Deg, f.corr2, f.corr2Deg, f.turnK, f.shift,
-            faceCm(), ms, alvik.get_battery_charge());
+            touchFace(), ms, alvik.get_battery_charge(), findRev ? 1 : 0);
 }
 
 
 // One board: turn to face it, drive near it (pose known), creep, bump, check the bump is where the board should
 // be (pose known), square. Sends the BUMP record. Returns false with f.why set on any failure.
+// Reverse (findRev, pose always known then): a board further than e02_find_turn_cm is first approached nose first
+// to that distance; then it turns its back to the board and creeps backwards, at most e02_find_back_margin_cm
+// (+ slack, axle never within BACK_KEEP_CM of the line) past where the pose says the board is.
 bool oneBoard(const Board& bd, int n, bool known, FindRec& f, Bump& b) {
   b.n = n;
   b.board = bd.name;
   rawlog::step = n == 1 ? 1 : 5;
   gFrontLimitCm = 0;                         // the board is ahead (it may be inside safe_front_cm)
-  if (!turnToFloor(bd.toward)) {
-    snprintf(f.why, sizeof(f.why), "turn to the %s board %s", bd.name, gAbortReason.length() ? "stopped" : "failed");
-    return false;
-  }
   float maxCm = P("e02_find_max_cm");
   // how far the own pose may be off by now: dead reckoning since the pose was last set drifts
   float slack = P("e02_find_tol_pct") / 100.0f * sinceSet;
-  if (known) {
+  if (findRev) {
+    // face it first: the front sensor must see the board before the robot turns its back to it
+    if (!turnToFloor(bd.toward)) {
+      snprintf(f.why, sizeof(f.why), "turn to the %s board %s", bd.name, gAbortReason.length() ? "stopped" : "failed");
+      return false;
+    }
+    float along = bd.c - (bd.nx * pose::x + bd.ny * pose::y);       // axle to the face, by the own pose
+    float pre = fminf(along - P("e02_find_turn_cm"), P("e02_transit_max_cm"));
+    if (pre > 2.0f) {
+      travelCap += pre;
+      gFrontLimitCm = 0.5f * P("e02_find_slow_cm");   // soft: a board nearer than the pose says ends it early
+      gFrontSoft = true;
+      bool ok = straight(bd.toward, pre, P("e02_cms"));
+      gFrontSoft = false;
+      gFrontLimitCm = 0;
+      gFrontLowSince = 0;
+      if (!ok && gStepStop == "obstacle") { ok = true; gStepStop = ""; }
+      if (!ok) {
+        if (gAbortReason == "plywood edge ahead")
+          snprintf(f.why, sizeof(f.why), "edge guard tripped before the %s board (an open plywood edge, not a board)", bd.name);
+        else snprintf(f.why, sizeof(f.why), "drive towards the %s board stopped (%s)", bd.name,
+                      gAbortReason.length() ? gAbortReason.c_str() : gFail.c_str());
+        return false;
+      }
+    }
+    // LOOK: standing still, facing the board, the front sensor must see it no further than the map puts it (+
+    // e02_find_see_cm + slack). A removed board over an open edge (the remove-a-board test) reads the room beyond:
+    // the find fails here instead of backing blind towards the edge. BUMP front_cm = this reading (reverse).
+    along = bd.c - (bd.nx * pose::x + bd.ny * pose::y);
+    float expectSee = along - (P("tof_ahead_cm") + P("tof_recess_cm"));   // sensor to the face
+    float seen = lookAhead();
+    b.front = seen;
+    if (seen < 0) {
+      snprintf(f.why, sizeof(f.why), "stopped (%s)", gAbortReason.length() ? gAbortReason.c_str() : "look");
+      return false;
+    }
+    if (seen > expectSee + P("e02_find_see_cm") + slack) {
+      snprintf(b.why, sizeof(b.why), "no board seen (front %.0f cm; the board should be %.0f)", seen, expectSee);
+      bumpRecord(b);
+      snprintf(f.why, sizeof(f.why), "%s board: %s (not backing in)", bd.name, b.why);
+      return false;
+    }
+    if (!turnToFloor(faceHeading(bd))) {         // its back to the board
+      snprintf(f.why, sizeof(f.why), "turn away from the %s board %s", bd.name, gAbortReason.length() ? "stopped" : "failed");
+      return false;
+    }
+    // how far past the board's line it may back (second layer, after the look): margin + slack, but never so far
+    // that the axle comes nearer than e02_find_keep_cm to that line
+    float expect = toGo(bd);                       // back face to the board, by the own pose
+    float over = fminf(P("e02_find_back_margin_cm") + slack, P("e02_back_face_cm") - P("e02_find_keep_cm"));
+    maxCm = fminf(P("e02_find_max_cm"), fmaxf(0.0f, expect + fmaxf(0.0f, over)));
+  } else if (!turnToFloor(bd.toward)) {
+    snprintf(f.why, sizeof(f.why), "turn to the %s board %s", bd.name, gAbortReason.length() ? "stopped" : "failed");
+    return false;
+  }
+  if (known && !findRev) {
     float expect = toGo(bd);
     float margin = P("e02_find_margin_cm") + slack;
     maxCm = fminf(maxCm, fmaxf(0.0f, expect) + margin);
@@ -520,11 +685,11 @@ bool oneBoard(const Board& bd, int n, bool known, FindRec& f, Bump& b) {
     }
   }
   rawlog::step = n == 1 ? 2 : 6;
-  bool ok = creep(bd.toward, fmaxf(maxCm, 1.0f), b);
+  bool ok = creep(faceHeading(bd), fmaxf(maxCm, 1.0f), b);
   if (ok && known) {
     // where the bump was against where the own pose said the board would be
     // sooner: something in the way (another robot?); later can only be the board (nothing stands beyond it)
-    float off = bd.c - faceCm() - (bd.nx * b.x + bd.ny * b.y);
+    float off = bd.c - touchFace() - (bd.nx * b.x + bd.ny * b.y);
     if (off > P("e02_find_tol_cm") + slack) {
       snprintf(b.why, sizeof(b.why), "bump %.1f cm sooner than the %s board should be", off, bd.name);
       b.ok = ok = false;
@@ -556,7 +721,16 @@ void runFind() {
   bool known = pose::known;
   f.knownBefore = known ? 1 : 0;
   Board bx = board(true), by = board(false);
-  float face = faceCm(), back = P("e02_find_back_cm");
+  // reverse (2026-10-25b): only with the back switches and a pose; otherwise nose first, and it says why
+  findRev = false;
+  if (P("e02_find_reverse") > 0) {
+    sw::configure();
+    const char* no = !(sw::on && P("sw_back") > 0) ? "the back switches are not set up (sw_on 1, sw_back 1)"
+                   : !known ? "no pose (backing blind with no pose is not safe: send a camera fix first)" : "";
+    if (no[0]) net::logf("M,%s find: not backing in: %s; nose first instead", net::name, no);
+    else findRev = true;
+  }
+  float face = touchFace(), back = P("e02_find_back_cm");
   if (edgeOff()[0]) {
     snprintf(f.why, sizeof(f.why), "%s", edgeOff());
     gFail = f.why;
@@ -591,26 +765,40 @@ void runFind() {
     if (!oneBoard(bx, 1, known, f, b1)) break;
     // bump 1: the distance from the x board and the heading are now exact
     float off1 = toGo(bx);
+    float h1 = faceHeading(bx);                // its heading square on the x board (toward, or + 180 reverse)
     f.corr1 = off1;
-    f.corr1Deg = wrap180(bx.toward - pose::th());
-    pose::set(pose::x + off1 * bx.nx, pose::y + off1 * bx.ny, bx.toward, 0.05f, 0.3f);
+    f.corr1Deg = wrap180(h1 - pose::th());
+    pose::set(pose::x + off1 * bx.nx, pose::y + off1 * bx.ny, h1, 0.05f, 0.3f);
     reset1 = true;
     // the distance from the x board and the heading are exact now; the position along it is not: keep the slack
     float a1x = pose::x, a1y = pose::y;
     pathG0 = heading();
+    pathLastH = pathG0;
+    pathTurn = 0;
     nPath = 0;
     segDs = segRelW = 0;
     pathOn = true;
     rawlog::step = 4;
-    gFrontLimitCm = 0;
-    if (!straight(bx.toward, -back, 3.0f)) { snprintf(f.why, sizeof(f.why), "backing off the x board stopped"); break; }
+    if (findRev) {
+      // off the board nose first (edge guard on; front stop at safe_front_cm: another robot there ends the find)
+      gFrontLimitCm = P("safe_front_cm");
+      bool good = straight(h1, back, 3.0f);
+      gFrontLimitCm = 0;
+      if (!good) { snprintf(f.why, sizeof(f.why), "driving off the x board stopped (%s)", gAbortReason.length() ? gAbortReason.c_str() : "failed"); break; }
+    } else {
+      gFrontLimitCm = 0;
+      if (!straight(bx.toward, -back, 3.0f)) { snprintf(f.why, sizeof(f.why), "backing off the x board stopped"); break; }
+    }
     Bump b2;
     if (!oneBoard(by, 2, known, f, b2)) break;
     pathPush();
     pathOn = false;
     // the gyro's turn between the two squarings against the boards' own angle: its scale on this stretch
-    float rel2 = wrap180(heading() - pathG0);
+    float rel2 = pathTurn;                                  // unwrapped
     float trueTurn = wrap180(by.toward - bx.toward);
+    // the body's true turn is the boards' angle + a whole number of turns: the one nearest the gyro's
+    while (trueTurn - rel2 > 180.0f) trueTurn -= 360.0f;
+    while (rel2 - trueTurn > 180.0f) trueTurn += 360.0f;
     float k = 1;
     if (fabsf(rel2) > 30.0f && fabsf(trueTurn) > 30.0f) {
       k = trueTurn / rel2;
@@ -622,24 +810,33 @@ void runFind() {
     }
     f.turnK = k;
     // re-trace the path from square 1 with that scale
+    // (each step's heading = the heading at square 1 + k x the gyro's turn since; ds is signed along the heading)
     float px = a1x, py = a1y;
     for (int i = 0; i < nPath; i++) {
-      float th = (bx.toward + k * pathRel[i]) * pose::DEG2RAD;
+      float th = (h1 + k * pathRel[i]) * pose::DEG2RAD;
       px += pathDs[i] * cosf(th);
       py += pathDs[i] * sinf(th);
     }
+    float h2 = faceHeading(by);
     f.b2x = pose::x; f.b2y = pose::y; f.b2th = pose::th();
     f.shift = sqrtf((px - pose::x) * (px - pose::x) + (py - pose::y) * (py - pose::y));
     f.corr2 = by.c - face - (by.nx * pose::x + by.ny * pose::y);
-    f.corr2Deg = wrap180(by.toward - pose::th());
+    f.corr2Deg = wrap180(h2 - pose::th());
     float off2 = by.c - face - (by.nx * px + by.ny * py);
-    pose::set(px + off2 * by.nx, py + off2 * by.ny, by.toward, 0.05f, 0.3f);
+    pose::set(px + off2 * by.nx, py + off2 * by.ny, h2, 0.05f, 0.3f);
     sinceSet = 0;
     backSince = 0;
     f.rx = pose::x; f.ry = pose::y; f.rth = pose::th();
     rawlog::step = 8;
-    gFrontLimitCm = 0;
-    if (!straight(by.toward, -back, 3.0f)) { snprintf(f.why, sizeof(f.why), "backing off the y board stopped"); break; }
+    if (findRev) {
+      gFrontLimitCm = P("safe_front_cm");
+      bool good = straight(h2, back, 3.0f);
+      gFrontLimitCm = 0;
+      if (!good) { snprintf(f.why, sizeof(f.why), "driving off the y board stopped (%s)", gAbortReason.length() ? gAbortReason.c_str() : "failed"); break; }
+    } else {
+      gFrontLimitCm = 0;
+      if (!straight(by.toward, -back, 3.0f)) { snprintf(f.why, sizeof(f.why), "backing off the y board stopped"); break; }
+    }
     ok = true;
   } while (false);
   pathOn = false;
@@ -656,6 +853,7 @@ void runFind() {
                     f.turnK);
   else net::logf("M,%s find failed: %s", net::name, f.why);
   end();
+  findRev = false;
 }
 
 // ------------------------------------------------------------------ routes

@@ -264,6 +264,9 @@ class DockModel:
     contact_boards: bool = False          # boards (world_polys) are solid for the robot's body too (touch probe)
     # the TRUE bumper and switches (the firmware's bump_ahead_cm / bump_half_cm / sw_gap_cm are its belief)
     bump_ahead_cm: float = _dp("BUMP_AHEAD_MM", 6.10)       # wheel axle to the bumper's front face
+    # the back attachment (firmware sw_back 1, 2026-10-25b): wheel axle to its switch face, behind the axle. PLACEHOLDER
+    # (as params.h e02_back_face_cm): the nose bracket's depth mirrored, until hardware/dock has the back attachment
+    back_face_cm: float = 6.10
     bump_half_cm: float = _dp("SWITCH_LATERAL_MM", 4.27)    # each lever's contact, left/right of the centre line
     sw_gap_cm: float = _dp("SW_GAP_MM", 0.02)               # face-to-wall gap when a lever clicks
     sw_hyst_cm: float = 0.02              # it lets go only this much further out (switch hysteresis)

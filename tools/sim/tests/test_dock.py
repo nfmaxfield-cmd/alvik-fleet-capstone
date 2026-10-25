@@ -208,6 +208,90 @@ class DockTests(unittest.TestCase):
         self.assertAlmostEqual(r.pose.y, y, delta=0.06)
 
 
+class BackSwitchTests(unittest.TestCase):
+    """Firmware 2026-10-25b (Nick, 2026-10-25: one attachment, switches at the BACK; sw_back 1): the robot backs into
+    the dock and the board, its switch face cfg.dock.back_face_cm behind the axle (the bracket shape mirrored), and
+    leaves forwards. Docked it faces OUT of the dock (dock heading + 180)."""
+
+    def place_back_to_dock(self, r, gap_cm, lat_cm, th_err):
+        """Its back face gap_cm in front of the dock mouth, lat_cm to the side, facing out (180 deg) th_err off."""
+        dm = r.cfg.dock
+        mouth = DOCK[0] - dm.pocket_depth_cm - dm.funnel_len_cm
+        r.x = mouth - gap_cm - dm.back_face_cm * math.cos(math.radians(th_err))
+        r.y = DOCK[1] + lat_cm
+        r.th = math.radians(180.0 + th_err)
+
+    def test_reverse_docking_seats_square(self):
+        """12 dockings backwards from hand-placed starts: every one docks with both switches, the axle sits
+        back_face_cm in front of the back wall to 0.3 mm, sideways within the pocket's play, facing out to 0.4 deg."""
+        rng = random.Random(44)
+        r = make("Left", 44, sw_on=1, sw_back=1, dock_back_cm=0, dock_still_ms=300, settle_end_ms=100)
+        dm = r.cfg.dock
+        for k in range(12):
+            self.place_back_to_dock(r, rng.uniform(1.0, 8.0), rng.uniform(-1.0, 1.0), rng.uniform(-8.0, 8.0))
+            run = r.run_experiment("dock")
+            self.assertEqual(run["result"], "done", (k, records(r, "DOCK")[-1]))
+            self.assertEqual(records(r, "DOCK")[-1]["result"], "docked")
+            x, y, th = r.docks_done[-1]["true"]
+            self.assertLess(abs(x - (DOCK[0] - dm.back_face_cm)), 0.03, (k, x))
+            self.assertLess(abs(y - DOCK[1]), 0.08, (k, y))
+            self.assertLess(abs(robot.wrap180(math.degrees(th) - 180.0)), 0.4, (k, math.degrees(th)))
+
+    def test_reverse_dock_leaves_forwards(self):
+        """dock_back_cm 6 with the back switches: after docking it drives OUT forwards (away from the wall)."""
+        r = make(sw_on=1, sw_back=1, dock_back_cm=6, dock_still_ms=300)
+        self.place_back_to_dock(r, 3.0, 0.0, 0.0)
+        self.assertEqual(r.run_experiment("dock")["result"], "done")
+        x_docked = r.docks_done[-1]["true"][0]
+        self.assertAlmostEqual(r.x, x_docked - 6.0, delta=0.6)
+
+    def test_reverse_touch_gives_the_board_distance(self):
+        """Touch a board behind it 10 times from 3 cm: travel at the click + sw_gap_cm = the 3 cm placed."""
+        board = [[120.0, 30.0], [121.5, 30.0], [121.5, 70.0], [120.0, 70.0]]
+        r = make(sw_on=1, sw_back=1, touch_n=10, touch_back_cm=1.0, contact_boards=True)
+        r.world_polys = [board]
+        dm = r.cfg.dock
+        r.x, r.y, r.th = 120.0 - 3.0 - dm.back_face_cm, 50.0, math.pi       # its back to the board
+        self.assertEqual(r.run_experiment("touch")["result"], "done")
+        t = records(r, "TOUCH")
+        self.assertEqual(len(t), 10)
+        self.assertTrue(all(rec["result"] == "touched" for rec in t))
+        self.assertAlmostEqual(float(t[0]["travel_cm"]) + r.P("sw_gap_cm"), 3.0, delta=0.05)
+        self.assertLess(statistics.pstdev(float(x["travel_cm"]) for x in t[1:]), 0.02)
+
+    def test_follow_dock_step_backwards_resets_the_pose(self):
+        """Follow step K with the back switches, h = 180 (facing out of the dock): the pose is reset to the wall +
+        e02_back_face_cm along h, even when it was 1 cm off."""
+        r = make(sw_on=1, sw_back=1, dock_still_ms=1000)
+        self.place_back_to_dock(r, 4.0, 0.3, 3.0)
+        cmds = ["fpose %.2f %.2f %.2f 0.5 2" % (r.x + 1.0, r.y - 0.7, math.degrees(r.th) + 2.0),
+                "fs 1 K %.2f %.2f %.2f 15 0" % (DOCK[0], DOCK[1], 180.0)]
+        queue = list(cmds)
+
+        class Radio:
+            def poll(self, rb):
+                return queue.pop(0) if (queue and rb.f_active) else None
+
+            def transmit(self, rb, text):
+                pass
+        r.radio = Radio()
+        r.params.update(follow_quiet_ms=1e9)
+        orig = r.should_abort
+
+        def abort_when_done():
+            if r.millis() > 120000:
+                r.abort_reason = "test timeout"
+            if any("D,STEP" in l and (",1,done," in l or ",1,failed," in l) for _, l in r.lines):
+                r.abort_reason = r.abort_reason or "stop command"
+            return orig()
+        r.should_abort = abort_when_done
+        r.run_experiment("follow")
+        self.assertTrue(any(l.startswith("D,STEP") and ",done," in l and "docked" in l for _, l in r.lines))
+        x, y, th = r.docks_done[-1]["true"]
+        self.assertAlmostEqual(r.pose.x, DOCK[0] - r.P("e02_back_face_cm"), delta=0.05)
+        self.assertAlmostEqual(x, DOCK[0] - r.cfg.dock.back_face_cm, delta=0.03)
+        self.assertAlmostEqual(abs(r.pose.th()), 180.0, delta=0.4)
+
 
 class TestGeometryAgrees(unittest.TestCase):
     """The bracket and dock numbers are written in several places; they must all be dock_params.py's."""

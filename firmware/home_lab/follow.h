@@ -332,8 +332,10 @@ bool runStep(const Step& s) {
       else snprintf(info, sizeof(info), "touch %s %.3f cm", r.first == 0 ? "L" : "R", r.travelAt[r.first]);
       if (s.handover > 0) {
         if (!waitMs(300)) return false;
-        float ux = cosf(s.h * pose::DEG2RAD), uy = sinf(s.h * pose::DEG2RAD);
-        int d = driveLine(pose::x, pose::y, pose::x - s.handover * ux, pose::y - s.handover * uy, s.h, 3.0f, true);
+        // away from what it touched: backwards with the nose switches, forwards with the back ones (sw_back 1)
+        float ux = cosf(s.h * pose::DEG2RAD), uy = sinf(s.h * pose::DEG2RAD), sg = dock::dir();
+        int d = driveLine(pose::x, pose::y, pose::x - sg * s.handover * ux, pose::y - sg * s.handover * uy, s.h, 3.0f,
+                          sg > 0);
         if (d != DRIVE_OK) return false;
       }
       return true;

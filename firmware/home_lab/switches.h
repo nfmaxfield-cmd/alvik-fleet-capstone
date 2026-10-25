@@ -1,5 +1,8 @@
-// Nose bumper switches (firmware 2026-10-19a+): two lever microswitches on the
-// printed nose bracket, one at each front corner (hardware/dock/README.md). They
+// Bumper switches (firmware 2026-10-19a+): two lever microswitches on the
+// printed nose bracket, one at each front corner (hardware/dock/README.md); from
+// 2026-10-25b on the one attachment at the robot's BACK instead (sw_back 1: dock.h
+// and the reverse find in e02.h then back into what they touch; left = the robot's
+// own left, standing behind it looking where it looks). They
 // tell the home dock run (dock.h) when the robot sits flush against the dock's
 // back wall, and make the robot a touch probe (`run touch`, follow step P).
 //

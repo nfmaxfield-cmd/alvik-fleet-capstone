@@ -981,3 +981,162 @@ class VirtualBorderAndSleep(unittest.TestCase):
         r.handle_command("go 30 1", False)
         self.assertEqual(records(r, "LEG")[-1]["result"], "done")
         self.assertEqual(records(r, "BORDER"), [])
+
+
+REV = dict(bumper_cm=0, sw_on=1, sw_back=1, e02_find_reverse=1)    # the one attachment, switches at the back
+
+
+class ReverseFindTests(unittest.TestCase):
+    """Firmware 2026-10-25b (Nick, 2026-10-25: one attachment with the switches at the back): `run find` backs into
+    each board (e02_find_reverse 1). The back face is e02_back_face_cm (6.10) behind the axle; the simulated body has
+    the bracket at its back (fw_dock.robot_outline) and its levers look backwards."""
+
+    def fixed(self, r, rng, x, y, th):
+        place(r, x, y, th)
+        r.handle_command("fix %.2f %.2f %.2f 1.0" % (x + rng.gauss(0, 0.3), y + rng.gauss(0, 0.3), th + rng.gauss(0, 1)),
+                         False)
+
+    def test_reverse_find_on_both_boards_both_layouts(self):
+        """8 finds (boards at the low ends and at the far corner), spots all over the sheet, any heading, camera fix
+        first, the gyro corrected (corr.h, as on the robots): both bumps are back-switch clicks, both pushes end with
+        both switches pressed, and the reset pose is within 1 cm and 0.6 deg; the robot ends facing away from the y
+        board, e02_find_back_cm off it (driven forwards)."""
+        rng = random.Random(51)
+        worst = 0.0
+        for k in range(8):
+            far = k % 2 == 1
+            p = dict(REV, gyro_scale=GYRO_FIX)
+            if far:
+                r = make_max(seed=1100 + k, safe_edge=1, edge_dir=1, edge_thr=400, **p)
+                self.fixed(r, rng, rng.uniform(15, 100), rng.uniform(15, 100), rng.uniform(-180, 180))
+            else:
+                r = make(seed=1100 + k, **p)
+                self.fixed(r, rng, rng.uniform(25, 90), rng.uniform(15, 90), rng.uniform(-180, 180))
+            run = r.run_experiment("find")
+            self.assertEqual(run["result"], "done", (k, records(r, "FIND"), records(r, "BUMP")))
+            f = records(r, "FIND")[-1]
+            self.assertEqual((f["reverse"], f["face_cm"]), ("1", "6.10"), f)
+            bumps = records(r, "BUMP")
+            self.assertEqual(len(bumps), 2)
+            self.assertTrue(all(b["cue"].startswith("switch-") and b["squared"] == "2" for b in bumps), bumps)
+            tx, ty, tth = r.e_reset_true
+            e = math.hypot(float(f["reset_x"]) - tx, float(f["reset_y"]) - ty)
+            self.assertLess(e, 1.0, (k, f))
+            self.assertLess(abs(ang(float(f["reset_th"]) - math.degrees(tth))), 0.6, (k, f))
+            bf = r.P("e02_back_face_cm")
+            if far:      # y board at x = 122: its back to it, facing -x
+                self.assertAlmostEqual(float(f["reset_x"]), 122.0 - bf, delta=0.01)
+                self.assertAlmostEqual(abs(float(f["reset_th"])), 180.0, delta=0.01)
+                self.assertAlmostEqual(float(f["after_x"]), 122.0 - bf - r.P("e02_find_back_cm"), delta=0.3)
+            else:        # y board at x = 0: facing +x
+                self.assertAlmostEqual(float(f["reset_x"]), bf, delta=0.01)
+                self.assertAlmostEqual(float(f["reset_th"]), 0.0, delta=0.01)
+                self.assertAlmostEqual(float(f["after_x"]), bf + r.P("e02_find_back_cm"), delta=0.3)
+            self.assertAlmostEqual(float(f["turn_k"]), 1.0, delta=0.03)          # corrected gyro: nothing left
+            self.assertLess(math.hypot(r.pose.x - r.x, r.pose.y - r.y), 1.0)
+            self.assertFalse(r.edge_trips)
+            worst = max(worst, e)
+        print("\nreverse finds: worst reset error %.2f cm over 8" % worst)
+
+    def test_uncorrected_gyro_finds_or_fails_safely(self):
+        """With the gyro uncorrected (7% short) the turns before the creep leave the pose several cm off along the
+        board; backing is capped tightly (e02_find_back_margin_cm + slack, axle e02_find_keep_cm from the line), so
+        some finds stop with "no board behind" instead of backing on. Every find either lands within 1 cm, with
+        turn_k measuring the gyro, or fails that way; most land."""
+        rng = random.Random(52)
+        good = 0
+        for k in range(6):
+            r = make(seed=1200 + k, **REV)
+            self.fixed(r, rng, rng.uniform(25, 90), rng.uniform(15, 90), rng.uniform(-180, 180))
+            run = r.run_experiment("find")
+            f = records(r, "FIND")[-1]
+            if run["result"] != "done":
+                self.assertIn("no board behind", f["result"], f)
+                continue
+            tx, ty, _ = r.e_reset_true
+            self.assertLess(math.hypot(float(f["reset_x"]) - tx, float(f["reset_y"]) - ty), 1.0, (k, f))
+            self.assertAlmostEqual(float(f["turn_k"]), GYRO_FIX, delta=0.04, msg=str(f))
+            good += 1
+        self.assertGreaterEqual(good, 4)
+
+    def test_turn_round_wound_past_180_keeps_turn_k_right(self):
+        """Reverse finds that turn round between the boards (nose first to e02_find_turn_cm, then 180 deg): the gyro's
+        turn since square 1 can pass +-180 deg. turn_k and the re-trace use the unwrapped turn (a wrapped one gave
+        turn_k 0.83 and a 5 cm error)."""
+        rng = random.Random(53)
+        for k in range(4):
+            r = make(seed=1300 + k, e02_find_turn_cm=12, **REV)
+            self.fixed(r, rng, rng.uniform(25, 70), rng.uniform(15, 45), rng.uniform(-180, 180))
+            run = r.run_experiment("find")
+            f = records(r, "FIND")[-1]
+            if run["result"] != "done":
+                self.assertIn("no board behind", f["result"], f)
+                continue
+            self.assertAlmostEqual(float(f["turn_k"]), GYRO_FIX, delta=0.04, msg=str(f))
+            tx, ty, _ = r.e_reset_true
+            self.assertLess(math.hypot(float(f["reset_x"]) - tx, float(f["reset_y"]) - ty), 1.0, (k, f))
+
+    def test_removed_board_is_seen_before_backing(self):
+        """The x board removed, an open plywood edge there (the remove-a-board test): facing where the board should
+        be, the front sensor reads the room beyond, so the find fails before it turns its back ("no board seen") and
+        never backs towards the edge."""
+        for k, (x, y, th) in enumerate(((50.0, 30.0, 40.0), (70.0, 60.0, -150.0))):
+            r = make(seed=1400 + k, boards=(YBOARD,), safe_edge=1, edge_dir=1, edge_thr=400, gyro_scale=GYRO_FIX, **REV)
+            r.cfg.session.board_cm = [0.0, 0.0, 122.0, 122.0]
+            r.cfg.session.open_edges = ["y0"]
+            place(r, x, y, th)
+            r.handle_command("fix %.2f %.2f %.2f 1.0" % (x, y, th), False)
+            n0 = len(r.traj)
+            run = r.run_experiment("find")
+            f = records(r, "FIND")[-1]
+            self.assertTrue(run["result"].startswith("failed:"), run["result"])
+            self.assertIn("no board seen", f["result"])
+            self.assertIn("not backing in", f["result"])
+            self.assertGreater(min(p[2] for p in r.traj[n0:]), 15.0)         # never near the open edge
+            self.assertFalse([b for b in records(r, "BUMP") if b["result"] == "bump"])
+
+    def test_cap_stops_before_the_line_if_the_look_is_fooled(self):
+        """Second layer: with the look switched off (e02_find_see_cm 999) and the board removed, the backing creep
+        stops with "no board behind" while the axle is still e02_find_keep_cm (2) from the board's line (pose exact
+        here, so within a few mm of that)."""
+        r = make(seed=1500, boards=(YBOARD,), gyro_scale=GYRO_FIX, e02_find_see_cm=999, **REV)
+        r.cfg.session.board_cm = [0.0, 0.0, 122.0, 122.0]
+        r.cfg.session.open_edges = ["y0"]
+        place(r, 40.0, 40.0, 0.0)
+        r.handle_command("fix 40 40 0 1.0", False)
+        n0 = len(r.traj)
+        run = r.run_experiment("find")
+        f = records(r, "FIND")[-1]
+        self.assertTrue(run["result"].startswith("failed:"), run["result"])
+        self.assertIn("no board behind", f["result"])
+        lowest = min(p[2] for p in r.traj[n0:])
+        self.assertGreater(lowest, r.P("e02_find_keep_cm") - 0.6, lowest)
+        self.assertLess(lowest, r.P("e02_find_keep_cm") + 0.8, lowest)    # and it did back up to the cap
+
+    def test_falls_back_to_nose_first(self):
+        """e02_find_reverse 1 but no back switches (sw_on 0), or no pose (power-on, no fix): it finds nose first, as
+        before, says why, and FIND says reverse 0."""
+        r = make(seed=1600, bumper_cm=0, e02_find_reverse=1, sw_back=1, gyro_scale=GYRO_FIX)
+        self.fixed(r, random.Random(1), 45.0, 35.0, -80.0)
+        self.assertEqual(r.run_experiment("find")["result"], "done", records(r, "FIND"))
+        self.assertEqual(records(r, "FIND")[-1]["reverse"], "0")
+        self.assertTrue(any("not backing in: the back switches" in l for _, l in r.lines))
+        r = make(seed=1601, **REV)
+        place(r, 35.0, 30.0, -88.0)                                          # no fix: unknown pose
+        self.assertEqual(r.run_experiment("find")["result"], "done", records(r, "FIND"))
+        f = records(r, "FIND")[-1]
+        self.assertEqual((f["reverse"], f["known_before"]), ("0", "0"))
+        self.assertTrue(any("not backing in: no pose" in l for _, l in r.lines))
+
+    def test_route_after_a_reverse_find(self):
+        """C after a reverse find: the route starts where it left the y board (already facing away from it) and
+        comes back within 2 cm."""
+        r = make(seed=1700, gyro_scale=GYRO_FIX, **REV)
+        self.fixed(r, random.Random(2), 40.0, 40.0, 120.0)
+        self.assertEqual(r.run_experiment("find")["result"], "done")
+        r.params.update(e02_route=2)
+        run = r.run_experiment("e02")
+        self.assertEqual(run["result"], "done", records(r, "E02")[-1])
+        R = r.e_routes[-1]
+        s, en = R["start"], R["end"]
+        self.assertLess(math.hypot(en.true[0] - s.true[0], en.true[1] - s.true[1]), 2.0)

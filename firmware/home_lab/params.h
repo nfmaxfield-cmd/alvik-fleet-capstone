@@ -179,6 +179,11 @@ Param PARAMS[] = {
   {"posts_pivot_max_deg", 8, "posts: a lever that has not clicked after the robot has pivoted this far has missed its post"},
   {"touch_back_cm",    2,   "touch run: back off this far after each click"},
   {"touch_n",          1,   "touch run: touches per run (back off touch_back_cm, wait, creep again)"},
+  // Firmware 2026-10-25b (Nick, 2026-10-25: "one attachment in total with switches in the back"): the switches,
+  // the ID lights and the charging pads sit on one attachment at the robot's BACK, so the front distance sensor
+  // and the front line sensors (edge guard) stay clear. The robot then backs into what it touches.
+  {"sw_back",          0,   "the switch attachment is at the BACK: 1 = dock / touch / posts creep backwards into the wall and leave forwards (switch faces e02_back_face_cm behind the axle); 0 = the old nose bracket (front)"},
+  {"e02_back_face_cm", 6.10, "wheel axle to the back attachment's face, cm (6.10 = hardware/dock/build_attachment_v3.py's rear bar: the nose bracket mirrored, 47.6 + 13.4 mm; a design number until a printed one is tape-measured)"},
 
   // --- E02 accuracy experiment (e02.h, firmware 2026-10-21a/b; docs/data-formats.md "E02") ---
   // Boards, floor frame (the camera's): the x board runs along x (a line y = e02_xboard_cm), the y board along y
@@ -196,7 +201,12 @@ Param PARAMS[] = {
   {"e02_find_tol_pct", 20,  "find: tolerance and creep margin grow by this % of the distance driven since the pose was last set (camera fix or find): dead reckoning without corrections drifts"},
   {"e02_find_slow_cm", 10,  "find: drive at e02_cms until this far from where it believes the board is, then creep"},
   {"e02_find_stage_cm", 25, "find (pose known): first go to the point this far from both board faces, so both approaches are short (0 = off)"},
-  {"e02_find_back_cm", 8,   "find: back off this far from each board after squaring up (8 keeps the board beyond safe_front_cm)"},
+  {"e02_find_back_cm", 8,   "find: back off this far from each board after squaring up (8 keeps the board beyond safe_front_cm); reverse find: drive forward this far off it"},
+  {"e02_find_reverse", 0,   "find: 1 = back into each board (switches at the back: needs sw_on 1 and sw_back 1, and a pose: else nose first as 0); 0 = nose first (bare front face)"},
+  {"e02_find_turn_cm", 30,  "reverse find: a board further than this (axle to its face, by the pose) is first approached nose first (front sensor, edge guard) to this far, then it turns round; nearer (the staging point is 25), it turns its back to it and backs in (chosen)"},
+  {"e02_find_back_margin_cm", 3, "reverse find: back at most this much (+ e02_find_tol_pct of the travel since the pose was set; but the axle never within e02_find_keep_cm of the board's line) past where the pose says the board is, then stop: no board behind (backing is blind; chosen)"},
+  {"e02_find_keep_cm",  2,  "reverse find: backing in, the axle never comes nearer the board's line than this (second layer after the look; chosen: 5.5 keeps the rear caster, 4.1 cm behind the axle, on a plywood edge at the line, but fails more finds)"},
+  {"e02_find_see_cm",  20,  "reverse find: facing the board before backing in, the front sensor must see it no further than the map puts it + this (+ slack), else the find fails: a removed board (chosen)"},
   {"e02_route",        1,   "E02 route: 1 = straight e02_straight_cm, 2 = L e02_l_cm / turn / e02_l_cm, 3 = square e02_square_cm; out to the far point, pause, back"},
   {"e02_mode",         0,   "E02: 0 = drive the route on its own sensors, 1 = camera-steered (drives only the go / turn legs the laptop sends)"},
   {"e02_pause_ms", 1000,    "E02: stand still this long at the far point"},

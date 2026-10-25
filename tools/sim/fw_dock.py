@@ -20,6 +20,11 @@ there straight ahead to a solid is at most sw_gap_cm (opens again beyond
 sw_gap_cm + sw_hyst_cm); for sw_bounce_ms after each change the raw reading
 chatters at random. The firmware copy below debounces it exactly as
 switches.h does.
+
+Back attachment (sw_back 1, firmware 2026-10-25b): the outline's front is the bare
+body and the bracket shape sits at the back, its face cfg.dock.back_face_cm behind
+the axle; the levers look backwards from there; dock / touch creep backwards and
+leave forwards, as dock.h does.
 """
 import math
 
@@ -89,17 +94,36 @@ def bracket_fitted(rb):
     return P.get("bumper_cm", 0.0) > 0 or P.get("sw_on", 0.0) > 0
 
 
+def sw_back(rb):
+    """The switch attachment is at the robot's back (firmware sw_back 1, 2026-10-25b): the bare front face, the
+    attachment's face cfg.dock.back_face_cm behind the axle."""
+    P = getattr(rb, "params", None) or {}
+    return P.get("sw_back", 0.0) > 0
+
+
 def robot_outline(rb, bracket=None):
     """The robot's outline (body frame: x forward from the axle, y left), counter-clockwise. With the nose bracket
     (bracket_fitted): its face bump_ahead_cm ahead of the axle; the bracket (bumper_w_cm wide, bumper_len_cm from
     its face back to its arms' ends) is wider than the robot; the outline must stay convex, so behind the arms it
     narrows in a straight line to the robot's rear corners (slightly wider than the real robot there: on the safe
-    side). Without it: the bare 9.5 x 9.5 cm body (front face length/2 ahead of the body centre)."""
+    side). Without it: the bare 9.5 x 9.5 cm body (front face length/2 ahead of the body centre). With the back
+    attachment (sw_back): the bare front, and the same bracket shape mirrored at the back, its face back_face_cm
+    behind the axle."""
     m, dm = rb.m, rb.cfg.dock
     if bracket is None:
         bracket = bracket_fitted(rb)
     hw = m.width_cm / 2.0
     rear = m.length_cm / 2.0 - m.axle_to_center_cm
+    if sw_back(rb):
+        fa, ch = m.length_cm / 2.0 + m.axle_to_center_cm, dm.chamfer_cm
+        rb_ = dm.back_face_cm
+        bw = max(hw, dm.bumper_w_cm / 2.0)
+        xa = min(fa - ch - 0.1, -rb_ + dm.bumper_len_cm)        # the arms' front end
+        if bw <= hw + 1e-9:
+            return [(-rb_ + ch, -hw), (fa - ch, -hw), (fa, -hw + ch), (fa, hw - ch), (fa - ch, hw), (-rb_ + ch, hw),
+                    (-rb_, hw - ch), (-rb_, -hw + ch)]
+        return [(-rb_ + ch, -bw), (xa, -bw), (fa - ch, -hw), (fa, -hw + ch), (fa, hw - ch), (fa - ch, hw), (xa, bw),
+                (-rb_ + ch, bw), (-rb_, bw - ch), (-rb_, -bw + ch)]
     if not bracket:
         fa, ch = m.length_cm / 2.0 + m.axle_to_center_cm, dm.chamfer_cm
         return [(-rear, -hw), (fa - ch, -hw), (fa, -hw + ch), (fa, hw - ch), (fa - ch, hw), (-rear, hw)]
@@ -256,11 +280,11 @@ class DockMixin:
 
     def contact_refresh(self):
         """(Re)build the contact body when the bracket setting changed (`set bumper_cm` / `set sw_on`)."""
-        b = bracket_fitted(self)
+        b = (bracket_fitted(self), sw_back(self))
         if getattr(self, "_contact_bracket", None) == b:
             return
         self._contact_bracket = b
-        self.contact_outline = robot_outline(self, b)
+        self.contact_outline = robot_outline(self, b[0])
         self.contact_pts = body_points(self)
         self.contact_out_edges = edges_of(self.contact_outline)
         self.contact_reach = max(math.hypot(x, y) for x, y in self.contact_outline) + 0.5
@@ -291,7 +315,8 @@ class DockMixin:
 
     # ---- the true switch contact and the stripe ----
     def lever_gap(self, k):
-        """Gap (cm) from lever k's contact point on the bumper face straight ahead to a solid."""
+        """Gap (cm) from lever k's contact point on the bumper face straight out (ahead, or behind with the back
+        attachment: sw_back) to a solid. Lever 0 is on the robot's left either way."""
         dm = self.cfg.dock
         if self._solids_from != (len(self.world_polys), dm.contact_boards):
             self.update_solids()
@@ -299,6 +324,10 @@ class DockMixin:
             return float("inf")
         lat = dm.bump_half_cm if k == 0 else -dm.bump_half_cm
         c, s = math.cos(self.th), math.sin(self.th)
+        if sw_back(self):
+            px = self.x - c * dm.back_face_cm - s * lat
+            py = self.y - s * dm.back_face_cm + c * lat
+            return ray_solids(self, px + c * 0.05, py + s * 0.05, -c, -s, 50.0) - 0.05
         px = self.x + c * dm.bump_ahead_cm - s * lat
         py = self.y + s * dm.bump_ahead_cm + c * lat
         # start a hair behind the face so a face already touching still reads ~0
@@ -412,7 +441,8 @@ class DockMixin:
         saved = self.front_limit
         self.front_limit = 0.0
         level = [0.0, 0.0, 0.0]
-        stripe_on = dock_mode and P("stripe_on") > 0.5     # dock version 1's stripe; version 2 has none
+        sgn = -1.0 if sw_back(self) else 1.0               # dock.h dir(): the back attachment creeps backwards
+        stripe_on = dock_mode and P("stripe_on") > 0.5 and sgn > 0   # dock version 1's stripe; version 2 has none
         if stripe_on:
             buf = [[], [], []]
             t0 = self.millis()
@@ -490,17 +520,17 @@ class DockMixin:
                 r["why"] = "creep timed out (stalled?)"
                 break
             if not L and not R:
-                self.set_wheels_speed(creep, creep)
+                self.set_wheels_speed(sgn * creep, sgn * creep)
             elif L:
-                self.set_wheels_speed(press, pivot)
+                self.set_wheels_speed(sgn * press, sgn * pivot)
             else:
-                self.set_wheels_speed(pivot, press)
+                self.set_wheels_speed(sgn * pivot, sgn * press)
             self.loop_delay(5)
         self.brake()
         if ok and dock_mode:
             r["pivot"] = wrap180(self.heading() - h_first)
             t0 = self.millis()
-            self.set_wheels_speed(press, press)
+            self.set_wheels_speed(sgn * press, sgn * press)
             while self.millis() - t0 < P("dock_seat_ms"):
                 if self.should_abort():
                     ok = False
@@ -582,7 +612,7 @@ class DockMixin:
         if ok:
             self.docks_done.append(dict(run=self.run_id, n=n, ms=self.ms, true=(self.x, self.y, self.th), r=r))
             if p.on and not (isnan(wall_x) or isnan(wall_y) or isnan(h)):
-                a = self.P("bump_ahead_cm")
+                a = -self.P("e02_back_face_cm") if sw_back(self) else self.P("bump_ahead_cm")   # dock.h faceAhead()
                 p.set(wall_x - a * math.cos(h * DEG2RAD), wall_y - a * math.sin(h * DEG2RAD), h, 0.05, 0.3)
             ok, drift, gz, still = self.dock_hold()
             if ok and self.fw_yaw_sign and abs(drift) <= self.P("dock_drift_max_dps"):
@@ -606,7 +636,7 @@ class DockMixin:
             ok, _ = self.dock_once(i, float("nan"), float("nan"), float("nan"))
             if not ok:
                 return
-            if back > 0 and not (self.library_move(-back) and self.wait_ms(500)):
+            if back > 0 and not (self.library_move(-back * (-1.0 if sw_back(self) else 1.0)) and self.wait_ms(500)):
                 return
         self.send("M,%s dock: %d docking%s done" % (self.name, n, "" if n == 1 else "s"))
 
@@ -623,7 +653,7 @@ class DockMixin:
                 return
             if not self.wait_ms(300):
                 return
-            if back > 0 and not (self.library_move(-back) and self.wait_ms(500)):
+            if back > 0 and not (self.library_move(-back * (-1.0 if sw_back(self) else 1.0)) and self.wait_ms(500)):
                 return
 
     # ---- follow steps K and P (follow.h runStep) ----
@@ -654,6 +684,8 @@ class DockMixin:
                 return False
             p = self.pose
             ux, uy = math.cos(s["h"] * DEG2RAD), math.sin(s["h"] * DEG2RAD)
-            if self.drive_line(p.x, p.y, p.x - s["back"] * ux, p.y - s["back"] * uy, s["h"], 3.0, True) != DRIVE_OK:
+            sg = -1.0 if sw_back(self) else 1.0          # follow.h: away from what it touched
+            if self.drive_line(p.x, p.y, p.x - sg * s["back"] * ux, p.y - sg * s["back"] * uy, s["h"], 3.0,
+                               sg > 0) != DRIVE_OK:
                 return False
         return True

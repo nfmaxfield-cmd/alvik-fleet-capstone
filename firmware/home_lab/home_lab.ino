@@ -41,7 +41,9 @@
 Arduino_Alvik alvik;
 
 // Bump this whenever the firmware changes, so every logged run says which code it ran.
-#define FW_VERSION "2026-10-25a"
+#define FW_VERSION "2026-10-25b"
+// 2026-10-25b: switches at the BACK (one attachment, Nick 2026-10-25): sw_back (dock / touch / posts backwards),
+// e02_find_reverse (the find backs into the boards; e02.h REVERSE FIND), e02_back_face_cm; FIND gets a reverse column.
 
 uint16_t gBootId = 0;   // random each power-on; starts every run id
 

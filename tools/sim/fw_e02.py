@@ -1,5 +1,6 @@
-"""E02 in the simulator: a copy of firmware/home_lab/e02.h (2026-10-22a) (bump detection without switches, push-to-square,
-`run find`, `run e02`, camera fixes, camera-steered legs), step for step, mixed into robot.Robot.
+"""E02 in the simulator: a copy of firmware/home_lab/e02.h (2026-10-22a; reverse find 2026-10-25b) (bump detection
+without switches, push-to-square, `run find` nose first or backing in with the back switches, `run e02`, camera fixes,
+camera-steered legs), step for step, mixed into robot.Robot.
 
 What the simulator adds for it (robot.py, config.py): the boards are solids for the body (dock.contact_boards,
 fw_dock.resolve_contacts); a wheel the contact holds back keeps only dock.wall_stall_frac of its commanded speed
@@ -33,6 +34,7 @@ class Bump:
         self.square_deg = 0.0
         self.push_ms = 0
         self.squared = False
+        self.both_sw = False              # reverse: both back switches pressed at the end of the push (squared 2)
         self.true_contact = None          # simulation only: the true pose when the bump was detected
 
 
@@ -53,6 +55,7 @@ class FindRec:
         self.corr1 = self.corr1_deg = self.corr2 = self.corr2_deg = 0.0
         self.turn_k = 1.0
         self.shift = 0.0
+        self.reverse = 0
 
 
 class Mark:
@@ -79,6 +82,7 @@ class E02Mixin:
         self.e_path = []                       # [(ds, rel)] between the two bumps of a find
         self.e_path_on = False
         self.e_g0 = self.e_seg_ds = self.e_seg_rel = 0.0
+        self.e_path_turn = self.e_path_last_h = 0.0
         self.e_q = []
         self.e_last_id = 0
         self.e_end_marked = False
@@ -88,6 +92,7 @@ class E02Mixin:
         self.e_finds = []                      # simulation only: (FindRec, true pose at the end)
         self.e_routes = []                     # simulation only: dict per e02 run with the true poses at the marks
         self.e_border_latched = False          # e02.h virtual border (firmware 2026-10-25a)
+        self.e_rev = False                     # e02.h findRev: this find backs into the boards (2026-10-25b)
         self.e_border_ref = 1e9
 
     # ------------------------------------------------------------------ tracking
@@ -109,9 +114,13 @@ class E02Mixin:
         self.e_last_dist = p.dist
         self.e_travel += abs(ds)
         self.e_since_set += abs(ds)
+        if self.e_path_on:                       # e02.h pathTurn: the gyro's turn since square 1, unwrapped
+            h = self.heading()
+            self.e_path_turn += wrap180(h - self.e_path_last_h)
+            self.e_path_last_h = h
         if self.e_path_on and ds != 0:
             self.e_seg_ds += ds
-            self.e_seg_rel += wrap180(self.heading() - self.e_g0) * abs(ds)
+            self.e_seg_rel += self.e_path_turn * abs(ds)
             if abs(self.e_seg_ds) >= 0.5:
                 self.e_path_push()
         sl, sr = self.wheels_speed()
@@ -211,6 +220,26 @@ class E02Mixin:
             return f
         return self.P("bump_ahead_cm") if self.P("bumper_cm") > 0 else self.P("tof_ahead_cm") + self.P("tof_recess_cm")
 
+    def e_look_ahead(self):
+        """e02.h lookAhead(): standing still, the nearest middle zone, median of 5 frames ~70 ms apart. -1 on a stop."""
+        if not self.wait_ms(150):
+            return -1.0
+        v = []
+        for i in range(5):
+            d = self.tof()
+            v.append(min(d[1], d[2], d[3]))
+            if i < 4 and not self.wait_ms(70):
+                return -1.0
+        return sorted(v)[2]
+
+    def touch_face(self):
+        """e02.h touchFace(): the face that touches the board in this find."""
+        return self.P("e02_back_face_cm") if self.e_rev else self.face_cm()
+
+    def face_heading(self, b):
+        """e02.h faceHeading(): its heading square on the board (toward, + 180 backing in)."""
+        return wrap180(b.toward + 180.0) if self.e_rev else b.toward
+
     def e_board(self, xb):
         P = self.P
         side = 1.0 if P("e02_xboard_side" if xb else "e02_yboard_side") > 0 else -1.0   # 0 or -1 low, 1 high
@@ -225,7 +254,7 @@ class E02Mixin:
         return Board(nx, ny, c, math.degrees(math.atan2(ny, nx)), "x" if xb else "y")
 
     def to_go(self, b):
-        return b.c - self.face_cm() - (b.nx * self.pose.x + b.ny * self.pose.y)
+        return b.c - self.touch_face() - (b.nx * self.pose.x + b.ny * self.pose.y)
 
     def e_edge_off(self):
         """e02.h edgeOff(): the edge guard must be on before anything here drives. '' = fine."""
@@ -240,12 +269,22 @@ class E02Mixin:
         self.send("D,BUMP,%s,%d,%d,%s,%s,%s,%d,%d,%d,%d,%.3f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.1f,%d,%.2f,%d,%d" % (
             self.run_id, b.ms_detect or self.millis(), b.n, b.board, "bump" if b.ok else b.why, b.cue, b.ms_start, b.ms_contact, b.ms_detect,
             (b.ms_detect - b.ms_contact) if b.ms_detect else -1, b.jolt, b.stall_frac, b.x, b.y, b.th, b.travel,
-            b.overshoot, b.front, b.seams, b.square_deg, b.push_ms, 1 if b.squared else 0))
+            b.overshoot, b.front, b.seams, b.square_deg, b.push_ms, (2 if b.both_sw else 1) if b.squared else 0))
         self.e_bumps.append(b)
 
     # ------------------------------------------------------------------ bump and square
     def e_creep(self, h, max_cm, b):
         P, pose = self.P, self.pose
+        sgn = -1.0 if self.e_rev else 1.0
+        if self.e_rev:
+            self.sw_tick()
+            if not self.sw_on or self.sw_raw[0] or self.sw_raw[1]:
+                b.why = ("back switches not configured (sw_on 0)" if not self.sw_on else
+                         "left back switch pressed before the creep (stuck or wiring)" if self.sw_raw[0] else
+                         "right back switch pressed before the creep (stuck or wiring)")
+                b.ok = False
+                return False
+        sw_seen, dist_sw = False, 0.0
         v, kh = P("bump_creep_cms"), P("drive_kh")
         jolt_thr, frac, far_cm = P("bump_jolt_g"), P("bump_stall_frac"), P("bump_far_cm")
         stall_ms, stall_only = int(P("bump_stall_ms")), int(P("bump_stall_only_ms"))
@@ -267,7 +306,7 @@ class E02Mixin:
             if self.should_abort():
                 break
             now = self.millis()
-            travel = pose.dist - d0
+            travel = sgn * (pose.dist - d0)
             ax = self.accel_x()
             if not have_base:
                 base, have_base = ax, True
@@ -286,14 +325,39 @@ class E02Mixin:
             if stall_since:
                 peak = max(peak, dev)
             sl, sr = self.wheels_speed()
-            meas = 0.5 * (sl + sr)
+            meas = sgn * 0.5 * (sl + sr)
             stalled = armed and meas < frac * cmd_rpm
             if stalled and not stall_since:
                 stall_since, dist_stall, peak = now | 1, travel, dev
             if not stalled:
                 stall_since = 0
-            # touch (firmware 2026-10-22a): the front sensor's middle zones at most touch_cm for touch_ms
-            if touch_cm > 0:
+            # reverse (2026-10-25b): a back switch, debounced; the contact is its first raw closing
+            if self.e_rev:
+                edge = bool(self.sw_first[0] or self.sw_first[1])
+                if edge and not sw_seen:
+                    sw_seen, dist_sw = True, travel
+                if not edge:
+                    sw_seen = False
+                L, R = self.sw_left(), self.sw_right()
+                if L or R:
+                    self.brake()
+                    b.ms_detect = now
+                    b.cue = "switch-LR" if L and R else "switch-L" if L else "switch-R"
+                    pm = [m for m in self.sw_press_ms if m]
+                    b.ms_contact = min(pm) if pm else now
+                    b.travel = dist_sw if sw_seen else travel
+                    jolted = bool(last_jolt) and last_jolt + win - b.ms_contact >= 0 and b.ms_contact + win - last_jolt >= 0
+                    b.jolt = last_jolt_g if jolted else 0.0
+                    if jolted and b.seams > 0:
+                        b.seams -= 1
+                    b.stall_frac = meas / cmd_rpm         # (b.front keeps the look's reading)
+                    b.true_contact = (self.x, self.y, self.th)
+                    at = pose.at(b.ms_contact)
+                    b.x, b.y, b.th = at if at is not None else (pose.x, pose.y, pose.th())
+                    ok = True
+                    break
+            # touch (firmware 2026-10-22a): the front sensor's middle zones at most touch_cm for touch_ms (nose first)
+            if touch_cm > 0 and not self.e_rev:
                 dd = self.tof()
                 near = min(dd[1], dd[2], dd[3])
                 if near <= touch_cm:
@@ -333,23 +397,24 @@ class E02Mixin:
                     b.stall_frac = meas / cmd_rpm
                     if jolted and b.seams > 0:
                         b.seams -= 1
-                    b.front = self.tof()[2]
+                    if not self.e_rev:                    # backwards b.front keeps the look's reading
+                        b.front = self.tof()[2]
                     b.true_contact = (self.x, self.y, self.th)
                     at = pose.at(b.ms_contact)
                     b.x, b.y, b.th = at if at is not None else (pose.x, pose.y, pose.th())
-                    if far_cm < b.front < 100.0:
+                    if not self.e_rev and far_cm < b.front < 100.0:
                         b.why = "stalled with something %.0f cm ahead: not at a board" % b.front
                         break
                     ok = True
                     break
             if travel > max_cm:
-                b.why = "no bump within %.0f cm" % max_cm
+                b.why = ("no board behind within %.0f cm" if self.e_rev else "no bump within %.0f cm") % max_cm
                 break
             if now - t0 > limit:
                 b.why = "creep timed out"
                 break
             herr = wrap180(h - pose.th())
-            self.set_drive(v, max(-20.0, min(20.0, kh * herr)))
+            self.set_drive(sgn * v, max(-20.0, min(20.0, kh * herr)))
             self.loop_delay(5)
         self.brake()
         ts = self.millis()
@@ -362,7 +427,7 @@ class E02Mixin:
                 break
             self.loop_delay(5)
         if b.ms_detect:
-            b.overshoot = (pose.dist - d0) - b.travel
+            b.overshoot = sgn * (pose.dist - d0) - b.travel
         self.front_limit = saved
         b.ok = ok
         return ok
@@ -370,6 +435,8 @@ class E02Mixin:
     def e_square(self, b):
         P = self.P
         rpm, still = P("push_rpm"), P("push_still_deg")
+        if self.e_rev:
+            rpm = -rpm
         max_ms, min_ms = int(P("push_ms")), int(P("push_min_ms"))
         saved = self.front_limit
         self.front_limit = 0.0
@@ -384,6 +451,9 @@ class E02Mixin:
             now = self.millis()
             if now - t_ref >= 250:
                 hh = self.heading()
+                if now - t0 >= min_ms and self.e_rev and self.sw_left() and self.sw_right():
+                    settled = True
+                    break
                 if now - t0 >= min_ms and abs(wrap180(hh - h_ref)) <= still:
                     settled = True
                     break
@@ -398,6 +468,7 @@ class E02Mixin:
         self.front_limit = saved
         b.square_deg = wrap180(self.heading() - h0)
         b.squared = settled
+        b.both_sw = self.e_rev and self.sw_left() and self.sw_right()
         b.true_square = (self.x, self.y, self.th)                  # simulation only
         if ok and not settled:
             b.why = "still turning after %d ms of pushing: not square" % b.push_ms
@@ -415,24 +486,67 @@ class E02Mixin:
     def find_record(self, f, ms):
         self.send("H,FIND,run,result,known_before,before_x,before_y,before_th,bump2_x,bump2_y,bump2_th,reset_x,"
                   "reset_y,reset_th,after_x,after_y,after_th,corr1_cm,corr1_deg,corr2_cm,corr2_deg,turn_k,retrace_cm,"
-                  "face_cm,ms_total,battery")
+                  "face_cm,ms_total,battery,reverse")
         res = f.result + (": " + f.why if f.why else "")
         self.send("D,FIND,%s,%s,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.4f,"
-                  "%.2f,%.2f,%d,%d" % (self.run_id, res, f.known_before, f.bx, f.by, f.bth, f.b2x, f.b2y, f.b2th, f.rx,
-                                       f.ry, f.rth, f.ax, f.ay, f.ath, f.corr1, f.corr1_deg, f.corr2, f.corr2_deg,
-                                       f.turn_k, f.shift, self.face_cm(), ms, int(self.battery)))
+                  "%.2f,%.2f,%d,%d,%d" % (self.run_id, res, f.known_before, f.bx, f.by, f.bth, f.b2x, f.b2y, f.b2th,
+                                          f.rx, f.ry, f.rth, f.ax, f.ay, f.ath, f.corr1, f.corr1_deg, f.corr2,
+                                          f.corr2_deg, f.turn_k, f.shift, self.touch_face(), ms, int(self.battery),
+                                          1 if self.e_rev else 0))
 
     def one_board(self, bd, n, known, f, b):
         P, pose = self.P, self.pose
         b.n, b.board = n, bd.name
         self.step = 1 if n == 1 else 5
         self.front_limit = 0.0
-        if not self.turn_to_floor(bd.toward):
-            f.why = "turn to the %s board %s" % (bd.name, "stopped" if self.abort_reason else "failed")
-            return False
         max_cm = P("e02_find_max_cm")
         slack = P("e02_find_tol_pct") / 100.0 * self.e_since_set
-        if known:
+        if self.e_rev:
+            # face it (nose first to e02_find_turn_cm if further), look, turn round, back in (capped: no board behind)
+            if not self.turn_to_floor(bd.toward):
+                f.why = "turn to the %s board %s" % (bd.name, "stopped" if self.abort_reason else "failed")
+                return False
+            along = bd.c - (bd.nx * pose.x + bd.ny * pose.y)
+            pre = min(along - P("e02_find_turn_cm"), P("e02_transit_max_cm"))
+            if pre > 2.0:
+                self.e_cap += pre
+                self.front_limit = 0.5 * P("e02_find_slow_cm")
+                self.front_soft = True
+                ok = self.e_straight(bd.toward, pre, P("e02_cms"))
+                self.front_soft = False
+                self.front_limit = 0.0
+                self.front_low_since = 0
+                if not ok and self.step_stop == "obstacle":
+                    ok, self.step_stop = True, ""
+                if not ok:
+                    if self.abort_reason == "plywood edge ahead":
+                        f.why = "edge guard tripped before the %s board (an open plywood edge, not a board)" % bd.name
+                    else:
+                        f.why = "drive towards the %s board stopped (%s)" % (bd.name, self.abort_reason or self.fail)
+                    return False
+            # look: the front sensor must see the board no further than the map puts it + e02_find_see_cm + slack
+            along = bd.c - (bd.nx * pose.x + bd.ny * pose.y)
+            expect_see = along - (P("tof_ahead_cm") + P("tof_recess_cm"))
+            seen = self.e_look_ahead()
+            b.front = seen
+            if seen < 0:
+                f.why = "stopped (%s)" % (self.abort_reason or "look")
+                return False
+            if seen > expect_see + P("e02_find_see_cm") + slack:
+                b.why = "no board seen (front %.0f cm; the board should be %.0f)" % (seen, expect_see)
+                self.bump_record(b)
+                f.why = "%s board: %s (not backing in)" % (bd.name, b.why)
+                return False
+            if not self.turn_to_floor(self.face_heading(bd)):
+                f.why = "turn away from the %s board %s" % (bd.name, "stopped" if self.abort_reason else "failed")
+                return False
+            expect = self.to_go(bd)
+            over = min(P("e02_find_back_margin_cm") + slack, P("e02_back_face_cm") - P("e02_find_keep_cm"))
+            max_cm = min(P("e02_find_max_cm"), max(0.0, expect + max(0.0, over)))
+        elif not self.turn_to_floor(bd.toward):
+            f.why = "turn to the %s board %s" % (bd.name, "stopped" if self.abort_reason else "failed")
+            return False
+        if known and not self.e_rev:
             expect = self.to_go(bd)
             margin = P("e02_find_margin_cm") + slack
             max_cm = min(max_cm, max(0.0, expect) + margin)
@@ -452,9 +566,9 @@ class E02Mixin:
                     return False
                 max_cm = min(P("e02_find_max_cm"), P("e02_find_slow_cm") + margin)
         self.step = 2 if n == 1 else 6
-        ok = self.e_creep(bd.toward, max(max_cm, 1.0), b)
+        ok = self.e_creep(self.face_heading(bd), max(max_cm, 1.0), b)
         if ok and known:
-            off = bd.c - self.face_cm() - (bd.nx * b.x + bd.ny * b.y)
+            off = bd.c - self.touch_face() - (bd.nx * b.x + bd.ny * b.y)
             if off > P("e02_find_tol_cm") + slack:  # sooner: something in the way; later can only be the board
                 b.why = "bump %.1f cm sooner than the %s board should be" % (off, bd.name)
                 b.ok = ok = False
@@ -483,7 +597,16 @@ class E02Mixin:
         known = pose.known
         f.known_before = 1 if known else 0
         bx, by = self.e_board(True), self.e_board(False)
-        face, back = self.face_cm(), P("e02_find_back_cm")
+        self.e_rev = False
+        if P("e02_find_reverse") > 0:
+            self.sw_configure()
+            no = ("the back switches are not set up (sw_on 1, sw_back 1)" if not (self.sw_on and P("sw_back") > 0) else
+                  "no pose (backing blind with no pose is not safe: send a camera fix first)" if not known else "")
+            if no:
+                self.send("M,%s find: not backing in: %s; nose first instead" % (self.name, no))
+            else:
+                self.e_rev = True
+        face, back = self.touch_face(), P("e02_find_back_cm")
         if self.e_edge_off():
             f.why = self.e_edge_off()
             self.fail = f.why
@@ -516,26 +639,40 @@ class E02Mixin:
             if not self.one_board(bx, 1, known, f, b1):
                 break
             off1 = self.to_go(bx)
+            h1 = self.face_heading(bx)
             f.corr1 = off1
-            f.corr1_deg = wrap180(bx.toward - pose.th())
-            pose.set(pose.x + off1 * bx.nx, pose.y + off1 * bx.ny, bx.toward, 0.05, 0.3)
+            f.corr1_deg = wrap180(h1 - pose.th())
+            pose.set(pose.x + off1 * bx.nx, pose.y + off1 * bx.ny, h1, 0.05, 0.3)
             a1x, a1y = pose.x, pose.y
             self.e_g0 = self.heading()
+            self.e_path_last_h, self.e_path_turn = self.e_g0, 0.0
             self.e_path = []
             self.e_seg_ds = self.e_seg_rel = 0.0
             self.e_path_on = True
             self.step = 4
-            self.front_limit = 0.0
-            if not self.e_straight(bx.toward, -back, 3.0):
-                f.why = "backing off the x board stopped"
-                break
+            if self.e_rev:
+                self.front_limit = P("safe_front_cm")
+                good = self.e_straight(h1, back, 3.0)
+                self.front_limit = 0.0
+                if not good:
+                    f.why = "driving off the x board stopped (%s)" % (self.abort_reason or "failed")
+                    break
+            else:
+                self.front_limit = 0.0
+                if not self.e_straight(bx.toward, -back, 3.0):
+                    f.why = "backing off the x board stopped"
+                    break
             b2 = Bump()
             if not self.one_board(by, 2, known, f, b2):
                 break
             self.e_path_push()
             self.e_path_on = False
-            rel2 = wrap180(self.heading() - self.e_g0)
+            rel2 = self.e_path_turn                                  # unwrapped
             true_turn = wrap180(by.toward - bx.toward)
+            while true_turn - rel2 > 180.0:                          # the whole turns nearest the gyro's
+                true_turn -= 360.0
+            while rel2 - true_turn > 180.0:
+                true_turn += 360.0
             k = 1.0
             if abs(rel2) > 30.0 and abs(true_turn) > 30.0:
                 k = true_turn / rel2
@@ -546,24 +683,33 @@ class E02Mixin:
             f.turn_k = k
             px, py = a1x, a1y
             for ds, rel in self.e_path:
-                th = (bx.toward + k * rel) * DEG2RAD
+                th = (h1 + k * rel) * DEG2RAD
                 px += ds * math.cos(th)
                 py += ds * math.sin(th)
+            h2 = self.face_heading(by)
             f.b2x, f.b2y, f.b2th = pose.x, pose.y, pose.th()
             f.shift = math.hypot(px - pose.x, py - pose.y)
             f.corr2 = by.c - face - (by.nx * pose.x + by.ny * pose.y)
-            f.corr2_deg = wrap180(by.toward - pose.th())
+            f.corr2_deg = wrap180(h2 - pose.th())
             off2 = by.c - face - (by.nx * px + by.ny * py)
-            pose.set(px + off2 * by.nx, py + off2 * by.ny, by.toward, 0.05, 0.3)
+            pose.set(px + off2 * by.nx, py + off2 * by.ny, h2, 0.05, 0.3)
             self.e_since_set = 0.0
             self.e_back_since = 0.0
             f.rx, f.ry, f.rth = pose.x, pose.y, pose.th()
             self.e_reset_true = (self.x, self.y, self.th)          # simulation only: true pose at the reset
             self.step = 8
-            self.front_limit = 0.0
-            if not self.e_straight(by.toward, -back, 3.0):
-                f.why = "backing off the y board stopped"
-                break
+            if self.e_rev:
+                self.front_limit = P("safe_front_cm")
+                good = self.e_straight(h2, back, 3.0)
+                self.front_limit = 0.0
+                if not good:
+                    f.why = "driving off the y board stopped (%s)" % (self.abort_reason or "failed")
+                    break
+            else:
+                self.front_limit = 0.0
+                if not self.e_straight(by.toward, -back, 3.0):
+                    f.why = "backing off the y board stopped"
+                    break
             ok = True
             break
         self.e_path_on = False
@@ -584,6 +730,7 @@ class E02Mixin:
         else:
             self.send("M,%s find failed: %s" % (self.name, f.why))
         self.e_end_run()
+        self.e_rev = False
 
     # ------------------------------------------------------------------ routes
     def e_turn_sign(self, param):
