@@ -376,7 +376,7 @@ function trust(t){const tb=document.querySelector('#trust tbody');tb.innerHTML='
  let grp=null;
  (t.rows||[]).forEach(r=>{const g=r.robot=='*'?'Shared':r.robot;if(g!=grp){grp=g;const gr=document.createElement('tr');gr.className='grp';gr.innerHTML='<td colspan="6" style="color:var(--mut);font-size:11px;letter-spacing:.06em">'+esc(g.toUpperCase())+'</td>';tb.appendChild(gr)}
   const tr=document.createElement('tr');tr.className=r.state=='bad'?'bad':'';
-  const st=r.state=='little'?'? too little evidence ('+r.n+' of '+r.min_n+')':(SICON[r.state]+' '+SWORD[r.state]+' ('+r.n+')');
+  const st=(r.state=='little'?'? too little evidence ('+r.n+' of '+r.min_n+')':(SICON[r.state]+' '+SWORD[r.state]+' ('+r.n+')'))+(r.lag?'<br><span class="u">'+esc(r.lag)+'</span>':'');
   tr.innerHTML='<td>'+esc(r.label)+'</td><td class="n">'+num(r.sd,2)+' <span class="u">'+r.unit+'</span></td><td class="n">'+num(r.healthy,1)+' <span class="u">'+r.unit+'</span></td><td class="n">×'+num(r.k,2)+'</td><td class="'+r.state+'">'+st+'</td><td></td>';
   const hi=Math.max(r.healthy*t.degraded_k*1.2,...r.trend);
   tr.lastChild.appendChild(spark(r.trend,0,hi,r.state=='bad'?'#F07B72':'#E6E9EE',[[r.healthy,'#6CCB8F','3 2'],[r.healthy*t.degraded_k,'#F07B72','1 2']]));
@@ -476,12 +476,15 @@ class LiveView:
                         body, ctype = extra
                 except Exception as e:          # never break the session over a picture
                     body, ctype = ("view error: %s" % e).encode(), "text/plain"
-                self.send_response(200)
-                self.send_header("Content-Type", ctype)
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
+                try:
+                    self.send_response(200)
+                    self.send_header("Content-Type", ctype)
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass                        # the browser went away mid-answer (a closed tab): nothing to do
 
             def do_POST(self):
                 if self.path.split("?")[0] != "/answer":
@@ -794,6 +797,13 @@ class LiveView:
                 state = "bad"
             else:
                 state = "ok"
+            # the runner's flag changes only at its next trust check (e02.trust_note, with hysteresis): say when the
+            # numbers have already crossed back (or over) so a "looks bad" next to k 0.4 is not a puzzle
+            lag = ""
+            if k is not None and state == "bad" and k < TR.RECOVERED_K:
+                lag = "back under %g: cleared at the runner's next check" % TR.RECOVERED_K
+            elif k is not None and state == "ok" and k >= TR.DEGRADED_K:
+                lag = "over %g: the runner's next check decides" % TR.DEGRADED_K
             key = "%s/%s" % (sensor, robot)
             h = hist.setdefault(key, [])
             if not h or abs(h[-1][1] - sd) > 0.005 or (n != h[-1][2]):
@@ -801,7 +811,7 @@ class LiveView:
                 del h[:-self.TREND_N]
             rows.append(dict(key=key, sensor=sensor, robot=robot, label=label, unit=unit, sd=round(sd, 2),
                              healthy=healthy, k=None if k is None else round(k, 2), n=n, min_n=TR.MIN_N[sensor],
-                             state=state, trend=[q[1] for q in h]))
+                             state=state, lag=lag, trend=[q[1] for q in h]))
         sd, n = tr.camera_sd()
         add("camera", "*", "Camera", "cm", sd, n)
         for rb in self._names():

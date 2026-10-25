@@ -133,6 +133,11 @@ def test_state_has_trust_table_and_perf_series(tmp_path):
     assert rows["gyro/Left"]["unit"] == "deg/stretch" and rows["front/Left"]["unit"] == "cm"
     assert rows["front/Right"]["state"] == "bad" and rows["front/Left"]["state"] == "little"
     assert rows["camera/*"]["state"] == "ok" and rows["camera/*"]["n"] >= TR.MIN_N["camera"]
+    assert rows["front/Right"]["lag"] == ""
+    r.trust.flags["camera/*"] = True                    # flagged earlier, the numbers healthy since: said so
+    v._trust_cache = None
+    cam = {q["key"]: q for q in v.status()["live"]["trust"]["rows"]}["camera/*"]
+    assert cam["state"] == "bad" and "next check" in cam["lag"]
     q = rows["wheels/Left"]
     assert abs(q["k"] - q["sd"] / q["healthy"]) < 0.02 and q["trend"]
     p = L["perf"]
