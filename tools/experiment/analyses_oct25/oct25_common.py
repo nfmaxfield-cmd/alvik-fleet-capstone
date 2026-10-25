@@ -161,7 +161,7 @@ def fix_chain(name):
     for robot, lst in ev.items():
         lst.sort(key=lambda e: e[1])
         my_legs = sorted(((float(l["t_recv"]), l) for l in legs if l["robot"] == robot), key=lambda e: e[0])
-        my_runs = sorted(float(r["t_recv"]) for r in runs_ if r["robot"] == robot and r.get("experiment") != "calib")
+        my_runs = sorted(float(r["t_recv"]) for r in runs_ if r["robot"] == robot)
         prev = None
         for kind, t, r in lst:
             if kind == "fix" and prev is not None:
@@ -170,6 +170,23 @@ def fix_chain(name):
                 dist = sum(abs(num(l["value"]) or 0.0) for l in between if l["kind"] == "go")
                 turned = sum(abs(num(l["value"]) or 0.0) for l in between if l["kind"] == "turn")
                 run_between = any(t_prev < tr_ < t for tr_ in my_runs)
+                # chain intact: from the previous reset's pose, every done leg moves the own pose by no more than it
+                # asked for (+2 cm), and this fix's "before" pose is where the last leg ended (within 2 cm)
+                if prev[0] == "fix":
+                    px, py = num(prev[2]["after_x"]), num(prev[2]["after_y"])
+                else:
+                    px, py = num(prev[2]["after_x"]), num(prev[2]["after_y"])
+                intact = px is not None and py is not None
+                for l in between:
+                    lx, ly = num(l["x_cm"]), num(l["y_cm"])
+                    if not intact or lx is None or ly is None:
+                        intact = False
+                        break
+                    allow = (abs(num(l["value"]) or 0.0) if l["kind"] == "go" else 0.0) + 2.0
+                    if math.hypot(lx - px, ly - py) > allow:
+                        intact = False
+                        break
+                    px, py = lx, ly
                 bx, by, bth = num(r["before_x"]), num(r["before_y"]), num(r["before_th"])
                 cx, cy, cth = num(r["cam_x"]), num(r["cam_y"]), num(r["cam_th"])
                 pth = None
@@ -177,7 +194,10 @@ def fix_chain(name):
                     pth_cam, pth_bef = num(prev[2]["cam_th"]), num(prev[2]["before_th"])
                     # the previous fix carried no camera heading of its own when it equals the robot's own (to 0.1)
                     pth = None if pth_cam is None or pth_bef is None else abs(wrap180(pth_cam - pth_bef)) > 0.05
-                out.append(dict(session=name, robot=robot, t=t, run=r.get("run", "-"), prev_kind=prev[0],
+                bx_, by_ = num(r["before_x"]), num(r["before_y"])
+                if intact and (bx_ is None or math.hypot(bx_ - px, by_ - py) > 2.0):
+                    intact = False
+                out.append(dict(session=name, robot=robot, t=t, run=r.get("run", "-"), prev_kind=prev[0], intact=intact,
                                 prev_dt=t - t_prev, dist=dist, turned=turned, n_legs=len(between),
                                 chain=(r.get("run", "-") == "-") and not run_between and
                                       (prev[0] == "find" or prev[2].get("run", "-") == "-"),
