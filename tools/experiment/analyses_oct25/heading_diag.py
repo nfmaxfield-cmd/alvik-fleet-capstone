@@ -383,6 +383,224 @@ def resets_report():
     return rt
 
 
+ORIGINS = [   # (label, colour: reference categorical slots in fixed order, marker) - the chart's legend order
+    ("placeholder +-90 heading (begin_moves, heading unknown)", "#2a78d6", "o"),
+    ("U run's own end heading echoed by a fix", "#eb6834", "s"),
+    ("other runner heading wrong", "#1baf7a", "^"),
+    ("robot's gyro / turns inside the chain", "#eda100", "D"),
+    ("other heading written (the 4 checked: pre-turn heading kept by a refind)", "#e87ba4", "v"),
+    ("no go leg to measure it", "#8a8984", "x"),
+]
+
+
+def origins(rows_out, rt):
+    """Join every chain to the reset that ended it (this fix) and the one that started it, and name the origin of a
+    |dth| >= 30 chain."""
+    idx = {}
+    for x in rt:
+        idx.setdefault((x["session"], x["robot"]), []).append(x)
+    for v in idx.values():
+        v.sort(key=lambda e: e["t"])
+    runs = {}
+    for name in U.ALL:
+        try:
+            for r in C.rows(name, "runs.csv"):
+                if r.get("t_end"):
+                    runs.setdefault((name, r["robot"]), []).append((float(r["t_end"]), r["cond"]))
+        except (OSError, KeyError):
+            pass
+
+    def after_u(s, rb, t):
+        v = [e for e in runs.get((s, rb), []) if e[0] < t]
+        return bool(v) and max(v)[1] == "U" and t - max(v)[0] < 60.0
+
+    for x in rows_out:
+        v = idx.get((x["session"], x["robot"]), [])
+        this = next((e for e in v if abs(e["t"] - x["t"]) < 0.02), None)
+        prev = [e for e in v if e["t"] < x["t"] - 0.02]
+        prev = prev[-1] if prev else None
+        x["end_kind"] = this["kind"] if this else ""
+        x["start_kind"] = prev["kind"] if prev else ""
+        echo = prev is not None and prev["kind"] == "heading" and prev["dth"] is not None and abs(prev["dth"]) < 0.5
+        x["start_echo_after_u"] = bool(echo and after_u(x["session"], x["robot"], prev["t"]))
+        o = ""
+        if x["dth"] is not None and abs(x["dth"]) >= 30:
+            c = x["cause"]
+            robot_wrong = c in ("written", "both", "grew")
+            if x["end_kind"] == "placeholder" and c in ("runner", "unmeasured", "neither", "both"):
+                o = ORIGINS[0][0]
+            elif robot_wrong and c != "grew" and x["start_kind"] == "placeholder":
+                o = ORIGINS[0][0]
+            elif robot_wrong and c != "grew" and x["start_echo_after_u"]:
+                o = ORIGINS[1][0]
+            elif c == "runner":
+                o = ORIGINS[2][0]
+            elif c == "grew":
+                o = ORIGINS[3][0]
+            elif c == "unmeasured":
+                o = ORIGINS[5][0]
+            else:
+                o = ORIGINS[4][0]
+        x["origin"] = o
+    return rows_out
+
+
+_PH = {}
+
+
+def phase_at(name, robot, t):
+    """The runner's phase (track.csv) of the robot's last camera sample at or before t."""
+    if name not in _PH:
+        d = {}
+        for r in C.rows(name, "track.csv"):
+            d.setdefault(r["robot"], []).append((float(r["t"]), r["phase"]))
+        for v in d.values():
+            v.sort()
+        _PH[name] = d
+    v = _PH[name].get(robot, [])
+    i = bisect.bisect_right([e[0] for e in v], t) - 1
+    return v[i][1] if i >= 0 else ""
+
+
+def wheel_vs_gyro(names=U.ALL):
+    """Hypothesis 4: turns on the spot inside firmware runs (RAW, 20 Hz): the turn the wheels' difference says
+    (wheel radius 1.7 cm, half track 4.5 cm: motion.h spinBy's nominal) against the gyro's (th_deg). Wheel slip shows as
+    the wheels turning more than the gyro. The firmware's heading is the gyro's, so slip moves the robot without
+    turning its heading wrong; this only says how much the wheels slip."""
+    out = []
+    for name in names:
+        try:
+            raw = C.robot_rows(name, "raw.csv")
+        except OSError:
+            continue
+        by = {}
+        for r in raw:
+            by.setdefault((r["robot"], r["run"]), []).append(r)
+        for (robot, run), rr in by.items():
+            rr.sort(key=lambda r: float(r["ms"]))
+            seg = None
+            for a, b in zip(rr, rr[1:]):
+                v = C.num(b["v_cms"]) or 0.0
+                wdps = C.num(b["w_dps"]) or 0.0
+                spinning = abs(v) < 1.0 and abs(wdps) > 15.0
+                if spinning:
+                    if seg is None:
+                        seg = [a, b]
+                    else:
+                        seg[1] = b
+                elif seg is not None:
+                    s0, s1 = seg
+                    g = w(C.num(s1["th_deg"]) - C.num(s0["th_deg"]))
+                    wl = C.num(s1["wl_deg"]) - C.num(s0["wl_deg"])
+                    wr = C.num(s1["wr_deg"]) - C.num(s0["wr_deg"])
+                    wh = (wr - wl) / 2.0 * 1.7 / 4.5
+                    if abs(g) >= 30 and abs(g) < 179:
+                        out.append((name, robot, abs(g), wh / g if g else None))
+                    seg = None
+    return out
+
+
+def plot(rows_out, path):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5.2), sharey=True)
+    small = [x for x in rows_out if x["dth"] is not None and abs(x["dth"]) < 30]
+    for ax, key, lab, logx in ((axes[0], "prev_dt", "time since the previous fix or find (s, log scale)", True),
+                               (axes[1], "turned", "degrees turned since the previous fix or find (sum of turn legs)", False)):
+        xs = [max(x[key], 0.3) if logx else x[key] for x in small]
+        ax.scatter(xs, [abs(x["dth"]) for x in small], s=10, color="#c3c2b7", label="under 30 deg (%d)" % len(small),
+                   linewidths=0, zorder=1)
+        for o, col, mk in ORIGINS:
+            q = [x for x in rows_out if x.get("origin") == o]
+            if not q:
+                continue
+            xs = [max(x[key], 0.3) if logx else x[key] for x in q]
+            kw = dict(s=34, color=col, marker=mk, zorder=3, label="%s (%d)" % (o, len(q)))
+            if mk != "x":
+                kw.update(edgecolors="#fcfcfb", linewidths=0.8)
+            ax.scatter(xs, [abs(x["dth"]) for x in q], **kw)
+        if logx:
+            ax.set_xscale("log")
+        ax.set_xlabel(lab)
+        ax.axhline(30, color="#8a8984", lw=0.8, ls="--", zorder=0)
+        ax.grid(True, color="#e6e5e0", lw=0.6)
+        ax.set_axisbelow(True)
+        for s in ("top", "right"):
+            ax.spines[s].set_visible(False)
+    axes[0].set_ylabel("|runner's heading - robot's own| at the fix (deg)")
+    axes[0].set_ylim(0, 185)
+    h, l = axes[1].get_legend_handles_labels()
+    fig.legend(h, l, loc="lower center", ncol=2, frameon=False, fontsize=8.5)
+    fig.suptitle("Heading at each camera fix between runs: what the runner sent against the robot's own (673 chains, 10 sessions)",
+                 fontsize=11)
+    fig.text(0.5, 0.005, "Measured: |cam_th - before_th| in each session's robot-logs fix.csv; cause from the camera's "
+             "direction of travel on go legs (track.csv) against the robot's th_deg (leg.csv). Oct 22-24 sessions.",
+             ha="center", fontsize=8, color="#52514e")
+    fig.tight_layout(rect=(0, 0.17, 1, 0.95))
+    fig.savefig(path, dpi=130)
+
+
 if __name__ == "__main__":
-    main()
-    resets_report()
+    rows_out = main()
+    rt = resets_report()
+    origins(rows_out, rt)
+    big = [x for x in rows_out if x["origin"]]
+    print("\nOrigin of each |dth| >= 30 chain (n %d):" % len(big))
+    for o, _, _ in ORIGINS:
+        q = [x for x in big if x["origin"] == o]
+        if q:
+            print("  %-58s n %3d (%2.0f%%)  position correction median %5.1f cm, 90%% %5.1f" % (
+                o, len(q), 100.0 * len(q) / len(big), np.median([x["corr"] for x in q]),
+                np.percentile([x["corr"] for x in q], 90)))
+    # quarter turns: are the ones near 90 the placeholder's?
+    n90 = [x for x in big if abs(abs(x["dth"]) - 90) <= 7]
+    print("  of the %d within 7 deg of 90: placeholder %d" % (len(n90), sum(x["origin"] == ORIGINS[0][0] for x in n90)))
+    # phase (track.csv phase at the fix)
+    ph = {}
+    for x in rows_out:
+        if x["dth"] is None:
+            continue
+        p = phase_at(x["session"], x["robot"], x["t"]) or "?"
+        ph.setdefault(p, [0, 0])
+        ph[p][0] += 1
+        ph[p][1] += abs(x["dth"]) >= 30
+        x["phase"] = p
+    print("\nBy runner phase at the fix (track.csv):")
+    for p, (n, b) in sorted(ph.items(), key=lambda kv: -kv[1][0]):
+        print("  %-10s n %3d  big %3d (%2.0f%%)" % (p, n, b, 100.0 * b / n))
+    # wheels vs gyro
+    wg = [e for e in wheel_vs_gyro() if e[3] is not None]
+    print("\nH4 turns on the spot inside firmware runs: wheels' turn / gyro's turn, per robot (median, 10-90%):")
+    for robot in ("Left", "Center", "Right"):
+        q = [e[3] for e in wg if e[1] == robot]
+        if q:
+            print("  %-7s n %4d  %.3f  (%.3f-%.3f)" % (robot, len(q), np.median(q), np.percentile(q, 10), np.percentile(q, 90)))
+    C.write_csv(os.path.join(C.OUT, "heading_big.csv"),
+                ["session", "robot", "hm", "phase", "corr_cm", "dist_cm", "turned_deg", "since_prev_s", "dth_deg",
+                 "runner_sent", "robot_own", "robot_err_first", "robot_err_last", "runner_err", "robot_err_next",
+                 "start_reset", "end_reset", "origin", "legs"],
+                [[x["session"], x["robot"], x["hm"], x.get("phase", ""), round(x["corr"], 1), round(x["dist"]),
+                  round(x["turned"]), round(x["prev_dt"]), _r(x["dth"]), _r(x["cam_th"]), _r(x["before_th"]),
+                  _r(x["e_first"]), _r(x["e_last"]), _r(x["r_err"]), _r(x["e_next"]), x["start_kind"], x["end_kind"],
+                  x["origin"], x["seq"]] for x in sorted(big, key=lambda x: (x["session"], x["t"]))])
+    # the uncertainty refit without the chains a wrongly written heading started (what the model would face once
+    # the runner stops writing unmeasured headings)
+    from scipy.optimize import minimize
+    clean = [x for x in rows_out if x["start_kind"] != "placeholder" and not x["start_echo_after_u"]
+             and not (x["e_first"] is not None and abs(x["e_first"]) >= BIG)]
+    for title, q in (("all chains", rows_out), ("chains not started by a wrong written heading", clean)):
+        r_ = np.array([x["corr"] for x in q]); d_ = np.array([x["dist"] for x in q]); t_ = np.array([x["turned"] for x in q])
+
+        def f(v):
+            return U.nll(r_, U.sd_of((v[0], 0.01, v[1], v[2]), d_, t_), v[3])
+        res = minimize(f, [0.5, 0.5, 0.005, 0.05], bounds=[(0.05, 5), (0, 20), (0, 0.5), (0, 0.5)], method="L-BFGS-B")
+        b, dg, dpd, eps = res.x
+        s_now = U.sd_of(U.NOW, d_, t_)
+        print("Refit (base, 1%%/cm fixed, deg, per degree turned; outliers eps), %s: n %d  base %.2f deg %.2f "
+              "per-deg %.4f eps %.3f; sd after 50 cm + 180 deg %.2f cm; model now inside 2.45 sd: %.0f%%" % (
+                  title, len(q), b, dg, dpd, eps, float(U.sd_of((b, 0.01, dg, dpd), np.array([50.0]), np.array([180.0]))[0]),
+                  100 * np.mean(r_ < 2.45 * s_now)))
+    plot(rows_out, os.path.join(C.OUT, "heading_diag.png"))
+    print("\nwrote out/heading_big.csv, out/heading_chains.csv, out/heading_resets.csv, out/heading_legs.csv, "
+          "out/heading_diag.png")

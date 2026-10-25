@@ -1,0 +1,70 @@
+Chains (as unc_fit.py): 673; with a heading at the fix 663; |dth| >= 30: 112 (17%)
+
+H1 quarter turns: |dth| of the big ones, in 10-deg bins from 30:
+  30-40:15 40-50:7 50-60:5 60-70:5 70-80:8 80-90:10 90-100:17 100-110:6 110-120:6 120-130:5 130-140:8 140-150:5 150-160:7 160-170:3 170-180:5
+  within 7 deg of 90: 24 (uniform over 30-180 would give 10.5); of 180: 5 (5.2)
+
+Cause of each |dth| >= 30 (robot error e = own heading - camera direction of a go leg >= 8 cm; runner error r = dth + e_last; BIG = 20 deg):
+  written    n  65  position correction median  38.2 cm
+  unmeasured n  22  position correction median   8.5 cm
+  runner     n  19  position correction median   4.7 cm
+  both       n   3  position correction median  83.0 cm
+  neither    n   3  position correction median   9.4 cm
+  check: runner error from before the fix vs the robot's error after it (turns <= 90 deg between): n 145, |difference| median 1.7 deg, 90% 5.3
+  all chains with both measured: n 384; runner |r| >= 20: 17 (4%); robot |e_last| >= 20: 93 (24%)
+  robot wrong (|e_last| >= BIG)  n  93  position correction median  32.6 cm, 90%  88.2
+  robot right, runner wrong      n   7  position correction median   6.5 cm, 90%  10.2
+  both right                     n 284  position correction median   1.1 cm, 90%   5.2
+
+Robot's own heading error within a segment (first -> last measured leg), by turning between them:
+  turned    0-90    n  15  |growth| median  1.4 deg, 90%   5.5, max  10.7
+  turned   90-270   n  64  |growth| median  2.1 deg, 90%   6.4, max  17.9
+  turned  270-720   n  68  |growth| median  3.6 deg, 90%   8.4, max  30.3
+  turned  720-      n   6  |growth| median  3.7 deg, 90%  13.7, max  20.4
+  error at the first measured leg after a reset: n 387, |e| >= BIG: 93 (24%)
+
+By robot / session (|dth| >= 30 share; causes):
+  Center         n 184  big  22 (12%)  neither 1, runner 3, unmeasured 2, written 16
+  Left           n 260  big  45 (17%)  both 2, neither 2, runner 6, unmeasured 16, written 19
+  Right          n 219  big  45 (21%)  both 1, runner 10, unmeasured 4, written 30
+  oct22-0816     n  18  big   6 (33%)  runner 1, unmeasured 2, written 3
+  oct22-0951     n  41  big  15 (37%)  both 2, neither 2, runner 3, unmeasured 3, written 5
+  oct22-1929     n   8  big   8 (100%)  runner 1, unmeasured 7
+  oct22-1954     n  12  big   3 (25%)  written 3
+  oct22-2005     n  29  big   6 (21%)  neither 1, runner 1, unmeasured 2, written 2
+  oct23-evening  n  89  big  15 (17%)  runner 2, unmeasured 3, written 10
+  oct23-morning  n 277  big  36 (13%)  runner 7, unmeasured 5, written 24
+  right-alone    n   2  big   0 ( 0%)  
+  stage1         n  63  big  10 (16%)  written 10
+  stage2         n 124  big  13 (10%)  both 1, runner 4, written 8
+
+Every reset: the heading error it wrote in (robot error at the first measured leg after it, <= 90 deg turned first) and the robot's error just before it:
+  kind             n  measured    wrote >= 20 was right before    made it wrong
+  placeholder     90        39       33 (85%)                2                2
+  heading        833       330       29 ( 9%)              140                1
+  position       121         1        1 (100%)                0                0
+  find           112         0        0 ( 0%)                0                0
+
+Origin of each |dth| >= 30 chain (n 112):
+  placeholder +-90 heading (begin_moves, heading unknown)    n  76 (68%)  position correction median  23.7 cm, 90%  97.3
+  U run's own end heading echoed by a fix                    n  13 (12%)  position correction median  36.6 cm, 90%  40.4
+  other runner heading wrong                                 n   4 ( 4%)  position correction median   0.7 cm, 90%   1.3
+  other heading written (the 4 checked: pre-turn heading kept by a refind) n  11 (10%)  position correction median  43.1 cm, 90%  83.5
+  no go leg to measure it                                    n   8 ( 7%)  position correction median   3.5 cm, 90%  13.7
+  of the 24 within 7 deg of 90: placeholder 17
+
+By runner phase at the fix (track.csv):
+  parking    n 549  big 100 (18%)
+  find       n  92  big   7 ( 8%)
+  mapping    n  11  big   0 ( 0%)
+  route      n   8  big   3 (38%)
+  finding    n   3  big   2 (67%)
+
+H4 turns on the spot inside firmware runs: wheels' turn / gyro's turn, per robot (median, 10-90%):
+  Left    n  213  0.949  (0.916-0.990)
+  Center  n  190  0.962  (0.918-0.992)
+  Right   n  173  0.972  (0.930-0.992)
+Refit (base, 1%/cm fixed, deg, per degree turned; outliers eps), all chains: n 673  base 0.73 deg 0.00 per-deg 0.1258 eps 0.168; sd after 50 cm + 180 deg 20.98 cm; model now inside 2.45 sd: 59%
+Refit (base, 1%/cm fixed, deg, per degree turned; outliers eps), chains not started by a wrong written heading: n 476  base 0.72 deg 0.06 per-deg 0.0126 eps 0.151; sd after 50 cm + 180 deg 3.24 cm; model now inside 2.45 sd: 69%
+
+wrote out/heading_big.csv, out/heading_chains.csv, out/heading_resets.csv, out/heading_legs.csv, out/heading_diag.png
