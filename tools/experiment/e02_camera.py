@@ -420,6 +420,10 @@ class MotionTracker:
         self.disagree_n = 0
         self.source = None                      # where the last position came from: lock / detector / held
         self.stats = dict(both=0, lock=0, detector=0, held=0, none=0, checks=0, agree=0, disagree=0, relocks=0)
+        # pictures during a hold (every robot stopped, waiting for Nick) are counted apart: an hour's hold with the
+        # lock-on off read as "none 93%" for Right on 2026-10-24 while the detector saw it standing in plain view
+        self.in_hold = False
+        self.stats_hold = dict(both=0, lock=0, detector=0, held=0, none=0)
         self.last_check = None                  # (t, distance cm or None)
 
     # --- geometry --------------------------------------------------------------------------------
@@ -660,7 +664,7 @@ class MotionTracker:
                 if best is not None:
                     if not self.use_lock or self.source not in ("lock", "both"):
                         self.source = "held" if len(best) > 3 else "detector"
-                    self.stats[self.source] += 1
+                    (self.stats_hold if self.in_hold else self.stats)[self.source] += 1
                     self.pos = (t, best[1], best[2])
                     self.protect[self.active] = (best[1], best[2])
                     self.last_seen = t
@@ -669,7 +673,7 @@ class MotionTracker:
                 else:
                     self.misses += 1
                     self.source = None
-                    self.stats["none"] += 1
+                    (self.stats_hold if self.in_hold else self.stats)["none"] += 1
             if not self.frozen:
                 self._learn(g, dt_frame)
             return out

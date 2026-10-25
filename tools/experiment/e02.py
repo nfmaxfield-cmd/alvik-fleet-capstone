@@ -5050,6 +5050,8 @@ class Runner:
                 # a hold ended while this one waited: everyone was stopped and Nick answered since this was seen
                 return self.hold_answer or "c"
             self.hold.set()
+            if self.tracker is not None:
+                self.tracker.in_hold = True
             self.hold_owner = threading.current_thread()
             self.hold_answer = None
             restop = threading.Event()
@@ -5104,6 +5106,8 @@ class Runner:
                     pass
             finally:
                 restop.set()
+                if self.tracker is not None:
+                    self.tracker.in_hold = False
                 self.hold_owner = None
                 self.last_hold_end = time.time()
                 self.hold.clear()
@@ -6883,6 +6887,12 @@ def launch(a, state, sdir, sim):
                         100.0 * st_.get("both", 0) / n, 100.0 * st_["lock"] / n, 100.0 * st_["detector"] / n,
                         100.0 * st_["held"] / n,
                         100.0 * st_["none"] / n, st_["agree"], st_["agree"] + st_["disagree"], st_["relocks"]))
+            sh_ = dict(getattr(run.tracker, "stats_hold", None) or {})
+            nh = sum(sh_.values())
+            if nh:
+                state["tracker_stats"][-1]["during_holds"] = sh_
+                run.say("  (not counted above: %d pictures during holds, every robot stopped; the robot was seen in %.0f%% "
+                        "of them)" % (nh, 100.0 * (nh - sh_.get("none", 0)) / nh))
         try:
             ps = run.perf_summary()
             if ps:
