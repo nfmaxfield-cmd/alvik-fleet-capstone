@@ -238,6 +238,13 @@ BORDER_CM = 15.0
 BORDER_EXTRA_SIGMA = 2.0      # chosen (DOE note: 2 sd of the extra noise keeps ~98% of single readings inside; the
                               # simulator grid's camera:noise=2/4 sessions are the test, more real data would set it)
 BORDER_EXTRA_MAX_CM = 10.0    # chosen: a 25 cm border still leaves the L and square routes room on the 120 cm board
+# The robot's own border (firmware 2026-10-25a) is the backstop for when the camera can't see or can't be trusted,
+# not a second copy of the camera's line: at 15 cm it sat inside the parking spots' band and, with a noisy camera
+# (2026-10-25 simulator, camera noise 2 cm), held the session 5 times in 5 minutes during setup alone.
+FW_BORDER_CM = 10.0           # chosen (DOE note: a robot's front is 5 cm ahead of its centre, braking about 1 cm, its own
+                              # pose drifts a few cm between camera fixes; a DOE driving at the line uncalibrated, at
+                              # 4 and 10 cm/s, would set it). Fixed: a bad camera moves the camera's line and the routes
+                              # in (border_cm), never this one
 BORDER_TOWARDS_CMS = 2.0      # chosen: moving towards the edge faster than this counts (still or away is allowed) ...
 BORDER_TOWARDS_FRAC = 0.5     # ... and mostly towards it (within 60 deg of straight at it): driving along the edge is
                               # allowed (dry run 2026-10-24, a robot put down 10 cm from the edge backed along it in
@@ -1077,10 +1084,6 @@ class Runner:
                 self.say("  Working area: the virtual border is now %.0f cm inside the open edges%s." % (
                     self.border_cm(), " (the camera looks bad: the area shrinks)" if what == "degraded" else ""))
                 self.st.setdefault("border_changes", []).append([round(time.time(), 1), round(self.border_cm(), 1)])
-                try:
-                    self.fw_border(list(self.st["robots"]))
-                except Exception as e:                    # the robots' copy is a second line; never stop for it
-                    self.say("  (the robots' own border not updated: %s)" % e, quiet=True)
             self.st.setdefault("sensor_trust_events", []).append([round(time.time(), 1), s_, r_, what, round(kk, 2)])
         if not save:
             return
@@ -4524,7 +4527,7 @@ class Runner:
         oy = next((v for a_, v in b.open_edges() if a_ == "y"), -999.0)
         xs, ys = b.firmware_sides()
         cmds = ["set e02_xboard_side %d" % xs, "set e02_yboard_side %d" % ys, "set e02_open_x_cm %.2f" % ox,
-                "set e02_open_y_cm %.2f" % oy, "set border_cm %.1f" % self.border_cm(), "set border_seek 0"]
+                "set e02_open_y_cm %.2f" % oy, "set border_cm %g" % FW_BORDER_CM, "set border_seek 0"]
         for n in names:
             if self.listener.firmware.get(n) != "2026-10-25a":
                 continue
@@ -5267,8 +5270,8 @@ class Runner:
         lis = getattr(self, "listener", None)
         if tr is not None and tr.bad("camera") and lis is not None and \
                 lis.firmware.get(robot) == "2026-10-25a":
-            # a camera that looks bad: the robot's own border (its wheels and gyro, moved in with the area) is the
-            # line; the camera's would hold on its own noise (2026-10-25 simulator, camera noise 4 cm: 6 camera
+            # a camera that looks bad: routes are kept inside the shrunken area (border_cm), and the robot's own
+            # border (FW_BORDER_CM, its wheels and gyro) is the line; the camera's would hold on its own noise (2026-10-25 simulator, camera noise 4 cm: 6 camera
             # border holds in 15 minutes, none with the robot really at the edge)
             return ""
         if robot in self.leg_live and self.leg_kind.get(robot) == "turn":
