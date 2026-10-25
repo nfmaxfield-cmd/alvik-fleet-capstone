@@ -119,6 +119,8 @@ ID_TURN_DEG = 40.0        # identify: turn this much on the spot and back (2026-
 HOLD_CM = 6.0             # between legs the followed robot stands still: the camera only accepts it this near
 CHECK_CM, CHECK_FRAC = 5.0, 0.35   # camera vs wheels: a go leg's distances may differ by this much...
 ID_EXTRA_CM = 5.0                  # ...plus this on the first leg after a turn on the spot (its centre is rougher)
+RECHECK_S = 3.5    # chosen (DOE note: one event, 2026-10-24 19:39, a ghost held 3 s; 3.5 s covers it with a margin and
+                   # costs 3.5 s only on a disagreement; to test: count recheck rescues vs holds over the next sessions)
 PARK_LEG_CM = 60.0        # parking: long legs on the robot's own wheels and gyro, the camera checks in between
 STALE_S = 1.5             # a camera position older than this is not used to steer
 ASIDE_PARK_CM = 15.0      # a robot put aside further than this from its park spot is driven there (own pose)
@@ -1403,6 +1405,13 @@ class Runner:
         if kind == "go" and p0 is not None and len(pieces) == 1 and ran and robot not in self.refinding:
             bad = self.cross_check(robot, p0, p1)
             if bad:
+                # look again once the picture has had RECHECK_S to settle (2026-10-24 19:39, Right alone: the camera
+                # held a ghost 9 cm past the robot for 3 s after a 10.8 cm leg, "saw it move 24 cm, its wheels say
+                # 11 cm", and the session waited an hour on a robot standing exactly where its wheels said)
+                time.sleep(RECHECK_S)
+                q2 = self.settle(t_from=time.time() - 0.6, min_s=0.3, timeout=1.5)
+                if q2 is not None and not self.cross_check(robot, p0, q2):
+                    return p0, q2, words + " (camera looked again: agrees with the wheels)"
                 q = self.detect_after_move(robot)
                 if q is not None:
                     # Nick, 2026-10-23: the camera lost it while it drove, but it has stopped where its wheels say:
@@ -4663,13 +4672,15 @@ class Runner:
             # the finds so far put their robots against the OLD line: their true positions (the camera error map's
             # samples) move with it (2026-10-24 night replay: the first finds were 2.6-2.8 cm off after a move)
             dlt = line - cur
-            for smp_ in self.camerr.samples:
+            ce_ = getattr(self, "camerr", None)
+            for smp_ in (ce_.samples if ce_ is not None else []):
                 if smp_.get("source") != "find":
                     continue
                 k_ = "y" if which == "x" else "x"
                 smp_[k_] = round(smp_[k_] + dlt, 2)
                 smp_["d" + k_] = round(smp_["d" + k_] - dlt, 2)
-            st["camera_error_samples"] = self.camerr.to_list()
+            if ce_ is not None:
+                st["camera_error_samples"] = ce_.to_list()
             st.setdefault("board_line_updates", []).append(
                 dict(t=round(time.time(), 1), board=which, before=round(cur, 2), after=round(line, 2),
                      picture=pic, touches=len(rows), robot_offsets={k: round(v, 2) for k, v in res.items()}))
