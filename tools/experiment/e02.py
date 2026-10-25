@@ -5184,6 +5184,11 @@ class Runner:
     STILL_WINDOW_S = 3.0      # chosen: a still robot's camera scatter is measured over this long ...
     STILL_EVERY_S = 10.0      # ... at most this often (one evidence item per axis each time)
 
+    def forward_explore_leg(self, robot):
+        """Is the robot exploring, on a forward go leg (its edge guard on)?"""
+        return bool(getattr(self, "exploring", False) and self.leg_kind.get(robot) == "go"
+                    and (self.leg_val.get(robot) or 0.0) > 0)
+
     def camera_still_check(self, robot, last_still):
         """The camera's trust from a robot standing still (e02_trust camera_still): nothing sent to it for
         STILL_WINDOW_S + 0.5 s, no run, and the camera sees it the whole window."""
@@ -5268,6 +5273,13 @@ class Runner:
                             continue
                         self.watchdog_fired = True
                         self.watch_stop = "virtual border (the robot's own)"
+                        if self.forward_explore_leg(n_):
+                            # explore driving forwards (its edge guard on) back towards a start near the edge: it has
+                            # stopped itself at the border, which is all that was needed; explore goes on from there
+                            # (simulator 2026-10-24, kept poses: every return leg held the session)
+                            self.say("    %s stopped itself at the virtual border (forwards, exploring): it carries on "
+                                     "from there" % n_, quiet=True)
+                            continue
                         # (no `border clear` after "carry on": the robot still refuses moves towards the edge and
                         # lets go by itself once back inside; moves away and along stay allowed)
                         self.hold_for_nick(n_, "border", "it stopped itself %s cm from an open edge (its own border "
@@ -5307,6 +5319,16 @@ class Runner:
                 if len(smp) < 3 or time.time() - smp[-1][0] > 1.0:
                     continue
                 why_b = self.border_check(robot, smp)
+                if why_b and self.forward_explore_leg(robot):
+                    # the same for the camera's border: stop that robot, no hold (backwards never gets here)
+                    if time.time() - last.get(robot, 0) > 2.0:
+                        last[robot] = time.time()
+                        for _ in range(3):
+                            self.link.send_name(robot, "stop")
+                            time.sleep(0.1)
+                        self.say("    %s: stopped at the virtual border (forwards, exploring): %s" % (robot, why_b),
+                                 quiet=True)
+                    continue
                 if why_b:
                     self.watchdog_fired = True
                     self.watch_stop = "virtual border"
