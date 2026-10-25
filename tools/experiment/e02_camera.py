@@ -151,15 +151,37 @@ def find_board_corners(img):
     return [[round(float(u), 1), round(float(v), 1)] for u, v in out], "found"
 
 
-def make_calibration(corners, image_size, path, width_cm=BOARD_W_CM, length_cm=BOARD_L_CM, height_cm=None):
-    """Fit and save a camera model from the board corners (floorcal's rectangle method). Returns the
-    floorcal result dict (ok, err_cm, text, model ...)."""
+def order_corners_like(found, predicted):
+    """Put 4 board corners found in a picture (any order) into the order of predicted (4 pixel points, e.g. the
+    floor corners (0,0), (W,0), (W,L), (0,L) projected by a rough model of that camera). For a camera that does not
+    look straight down (the side camera), where find_board_corners' picture-position order is wrong. Only the 8 ways
+    round the quadrilateral (4 starts x 2 directions) are tried, so the corners stay a closed outline. Returns
+    (ordered [[u, v] x 4], worst distance px to its predicted corner)."""
+    f = np.asarray(found, float).reshape(4, 2)
+    p = np.asarray(predicted, float).reshape(4, 2)
+    c = f.mean(axis=0)
+    ring = f[np.argsort(np.arctan2(f[:, 1] - c[1], f[:, 0] - c[0]))]    # around the outline
+    best = None
+    for rev in (False, True):
+        r = ring[::-1] if rev else ring
+        for k in range(4):
+            cand = np.roll(r, -k, axis=0)
+            cost = np.hypot(*(cand - p).T)
+            if best is None or cost.sum() < best[0]:
+                best = (cost.sum(), cand, float(cost.max()))
+    return [[round(float(u), 1), round(float(v), 1)] for u, v in best[1]], best[2]
+
+
+def make_calibration(corners, image_size, path, width_cm=BOARD_W_CM, length_cm=BOARD_L_CM, height_cm=None,
+                     name="overhead"):
+    """Fit and save a camera model from the board corners (floorcal's rectangle method). name: the camera's name
+    in the file ("overhead" unless told, e.g. "side"). Returns the floorcal result dict (ok, err_cm, text, model ...)."""
     spec = dict(mode="rectangle", corners_px=corners, width_cm=width_cm, length_cm=length_cm)
     if height_cm:
         spec["height_cm"] = height_cm
     res = floorcal.fit(spec, image_size)
     d = res["model"].to_dict()
-    d["name"] = "overhead"
+    d["name"] = name
     d["studio_calibration"] = dict(spec=res["spec"], mode="rectangle", err_cm=res["err_cm"],
                                    max_err_cm=res["max_err_cm"], mirrored=res["mirrored"], points=res["points"],
                                    note="made by tools/experiment/e02.py from the board corners found in the picture")
@@ -335,13 +357,22 @@ class MotionTracker:
     START_NEAR_CM = 12.0        # the lock starts on the detector's outline within this of the place handed over
     START_WAIT_S = 1.0          # ... waiting at most this long for it, then on the place handed over
     PIN_CM = 3.0                # during a turn on its spot the lock may not move further than this
+    SIZE_PER_SPOT = False       # True: a robot's size in pixels is taken at each outline's own spot, not once at the
+                                # board's middle (a steep side camera: its scale changes 2-3x near to far; 2026-10-24)
 
     def __init__(self, cam, board_center=(61.0, 61.0), thr=16.0, alpha=0.02, z_cm=ROBOT_TOP_CM, max_speed_cms=30.0,
-                 board_rect=None, margin_cm=8.0):
+                 board_rect=None, margin_cm=8.0, size_per_spot=None):
         self.cam = cam
         self.z = z_cm
         self.rpx = ROBOT_CM * cam.px_per_cm(board_center[0], board_center[1], z_cm)
         self.area = self.rpx ** 2
+        self.size_per_spot = self.SIZE_PER_SPOT if size_per_spot is None else bool(size_per_spot)
+        self.area_min = self.area               # smallest robot area anywhere on the board (size_per_spot)
+        if self.size_per_spot:
+            x0, y0, x1, y1 = board_rect if board_rect is not None else (0.0, 0.0, 2 * board_center[0],
+                                                                         2 * board_center[1])
+            r = [self._rpx_at(x, y) for x in (x0, 0.5 * (x0 + x1), x1) for y in (y0, 0.5 * (y0 + y1), y1)]
+            self.area_min = min(r) ** 2
         self.thr_min = thr
         self.thr = thr
         self.alpha = alpha
@@ -392,6 +423,13 @@ class MotionTracker:
         self.last_check = None                  # (t, distance cm or None)
 
     # --- geometry --------------------------------------------------------------------------------
+    def _rpx_at(self, x, y):
+        """A robot's width in pixels at floor spot (x, y): self.rpx (the board's middle) unless size_per_spot."""
+        if not self.size_per_spot:
+            return self.rpx
+        s = self.cam.px_per_cm(x, y, self.z)
+        return ROBOT_CM * s if np.isfinite(s) and s > 0 else self.rpx
+
     def _px(self, x, y):
         u, v = self.cam.project((x, y, self.z))
         du, dv = getattr(self, "px_shift", (0.0, 0.0))
@@ -465,7 +503,8 @@ class MotionTracker:
         for x, y in pts:
             u, v = self._px(x, y)
             if np.isfinite(u) and np.isfinite(v):
-                cv2.circle(m, (int(round(u)), int(round(v))), r, 1, -1)
+                rr = int(round(r_scale * self._rpx_at(x, y))) if self.size_per_spot else r
+                cv2.circle(m, (int(round(u)), int(round(v))), rr, 1, -1)
         return m
 
     def _covered(self, shape):
@@ -491,8 +530,8 @@ class MotionTracker:
         lim = np.where(self.known > 0, self.thr, self.thr + self.UNKNOWN_EXTRA).astype(np.float32)
         return d, (d > lim).astype(np.uint8) * 255
 
-    def _shape_ok(self, area, w, h):
-        a, r = self.area, self.rpx
+    def _shape_ok(self, area, w, h, rpx=None):
+        a, r = (self.area, self.rpx) if rpx is None else (rpx ** 2, rpx)
         lo, hi = sorted((w, h))
         return (0.3 * a <= area <= 2.6 * a and hi <= 2.0 * r and lo >= 0.4 * r and hi / max(lo, 1.0) <= 2.3
                 and area / max(w * h, 1.0) >= 0.3)
@@ -513,7 +552,7 @@ class MotionTracker:
         out = []
         for i in range(1, n):
             a = int(stats[i, cv2.CC_STAT_AREA])
-            if a < 0.15 * self.area:
+            if a < 0.15 * (self.area_min if self.size_per_spot else self.area):
                 continue
             w, h = stats[i, cv2.CC_STAT_WIDTH], stats[i, cv2.CC_STAT_HEIGHT]
             u, v = cents[i]
@@ -531,7 +570,8 @@ class MotionTracker:
                 mv = float((sub[ys, xs] > 0).mean()) if len(xs) else 0.0
             out.append(dict(u=float(u), v=float(v), area=a, x=float(x), y=float(y), moving=mv,
                             rw=float(rw), rh=float(rh),
-                            shape=bool(self._shape_ok(a, rw, rh) and self.on_area(x, y))))
+                            shape=bool(self._shape_ok(a, rw, rh, self._rpx_at(x, y) if self.size_per_spot else None)
+                                       and self.on_area(x, y))))
         return out
 
     def blobs(self, g=None):
@@ -652,6 +692,8 @@ class MotionTracker:
                 return None                      # (2026-10-21 footage: handed 7 cm off, the lock took the floor)
             if self.bg is not None:
                 self.lk.set_floor(np.clip(self.bg, 0, 255).astype(np.uint8))
+            if self.size_per_spot:
+                self.lk.rpx = float(self._rpx_at(x, y))     # its look is taken at the size it has here
             self.lock_start, self.lock_start_t = None, None
             self.lock_off = (0.0, 0.0)
             if not self.lk.start(img, x, y, t):

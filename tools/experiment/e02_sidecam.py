@@ -239,7 +239,9 @@ def side_at(cam, side, t, x, y, offset, dt, z=SIDE_Z_CM, win_s=0.2, near_px=None
     for f in range(f0, f1 + 1):
         for u, v, _ in side.get(f, ()):
             if math.hypot(u - u0, v - v0) < near_px:
-                got.append(cam.to_floor(u, v, z))
+                p = cam.to_floor(u, v, z)
+                if np.isfinite(p[0]) and np.isfinite(p[1]):
+                    got.append(p)
     if len(got) < 2:
         return None
     a = np.array(got)
@@ -270,6 +272,16 @@ def region(x, y, W=CAM.BOARD_W_CM, L=CAM.BOARD_L_CM, edge_cm=12.0, corner_cm=25.
     if any(near.values()):
         return "open edge"
     return "middle"
+
+
+def region_split(x, y, W=CAM.BOARD_W_CM):
+    """region() with the boards and open edges named one by one (for the report's table)."""
+    r = region(x, y)
+    if r == "along a board":
+        return "board at x=122" if x > W - 12.0 else "board at y=122"
+    if r == "open edge":
+        return "open edge x=0" if x < 12.0 else "open edge y=0"
+    return r
 
 
 def coverage(cam, side, ots, oxy, offset, dt, z=SIDE_Z_CM, near_cm=NEAR_CM, tol=0.04, **reg):
@@ -436,6 +448,10 @@ def main(argv=None):
     check_picture(cam, side, os.path.join(a.out, "side_check_roam1.png"))
     res["coverage_side"] = coverage(cam, side, ots, oxy, off, dt)
     res["coverage_overhead"] = overhead_coverage(cam, side, ots, oxy, off, dt)
+    # robot-time per region and camera, by roam1's phases (events.csv: calibration 170 s, roaming 480 s, objects 730 s)
+    res["presence"] = {name: presence(cam, side, ots, oxy, off, dt, t_range=rng, region_fn=region_split)
+                       for name, rng in (("calibration+roaming 170-730 s", (170.0, 730.0)),
+                                         ("objects 730-940 s", (730.0, 940.0)))}
     with open(os.path.join(a.out, "results.json"), "w") as f:
         json.dump(res, f, indent=1, default=float)
     print(json.dumps({k: v for k, v in res.items() if k not in ("offset_scan", "offset_fine", "cross_check")},
