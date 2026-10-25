@@ -343,7 +343,7 @@ def test_face_reading_stops_at_the_target_and_skips_what_is_not_a_board(tmp_path
     assert r2.st["face_readings"]["Left"] == 0
 
 
-def test_camera_still_check_skips_a_robot_in_a_firmware_run():
+def test_camera_still_check_skips_a_robot_during_its_find():
     # 2026-10-25 simulator, front@Left:noise=6: each setup find (`run find`, not an idle leg) was measured as a still
     # robot, 4.8-7.2 cm of "scatter", and the camera was flagged bad 3 times
     import time as _t
@@ -353,23 +353,21 @@ def test_camera_still_check_skips_a_robot_in_a_firmware_run():
     r.trust_note = lambda save=True: None
     r.leg_live, r.moves, r.leg_end = {}, {}, {}
     now = _t.time()
-    smp = [(now - 3.0 + 0.1 * i, 50.0 + (i % 7), 50.0, 0) for i in range(30)]     # it is driving
+    smp = [(now - 3.0 + 0.1 * i, 50.0, 50.0, 0) for i in range(30)]
     r.history = types.SimpleNamespace(since=lambda t0: smp)
-    r.watch = types.SimpleNamespace(started={"Left": ("run1", "find")}, ended={})
-    last = {}
-    r.camera_still_check("Left", last)
+    r.find_live = {"Left": float("inf")}
+    r.camera_still_check("Left", {})
     assert not r.trust.items                       # its find is going
-    r.watch.ended["run1"] = dict(result="done")
-    r.camera_still_check("Left", last)
+    r.find_live["Left"] = now - 1.0
+    r.camera_still_check("Left", {})
     assert not r.trust.items                       # just ended: the window still holds the driving
-    r.run_seen["Left"] = now - 10.0
-    r.camera_still_check("Left", last)
+    r.find_live["Left"] = now - 10.0
+    r.camera_still_check("Left", {})
     assert len(r.trust.items) == 2                 # standing since: counted
-    # a run whose end record never came is taken as over after RUN_LIVE_MAX_S
+    # another robot's find, or no find at all, does not stop it
     r2 = E.Runner.__new__(E.Runner)
     r2.trust, r2.trust_note = TR.SensorTrust(), (lambda save=True: None)
     r2.leg_live, r2.moves, r2.leg_end, r2.history = {}, {}, {}, r.history
-    r2.watch = types.SimpleNamespace(started={"Left": ("run9", "e02")}, ended={})
-    r2.run_seen = {("first", "Left", "run9"): now - E.Runner.RUN_LIVE_MAX_S - 1}
+    r2.find_live = {"Center": float("inf")}
     r2.camera_still_check("Left", {})
     assert len(r2.trust.items) == 2

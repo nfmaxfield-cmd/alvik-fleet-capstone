@@ -5258,14 +5258,20 @@ class Runner:
             for kv in BACK_SETTINGS:                 # again before every find: a power-cycled robot lost them
                 self.send(robot, "set %s %g" % kv)
                 time.sleep(0.03)
-        run = self.start_run(robot, "run find")
-        if not run:
-            return dict(ok=False, words="did not start `run find`", run=None, t0=t0, t1=time.time())
-        end = self.watch.wait_end(run, FIND_TIMEOUT_S, poll=lambda: self.watchdog(robot))
-        t1 = time.time()
-        if end is None:
-            self.send(robot, "stop")
-            end = self.watch.wait_end(run, 5) or dict(result="no end record")
+        if getattr(self, "find_live", None) is None:
+            self.find_live = {}
+        self.find_live[robot] = float("inf")     # driving: no still-camera evidence from it (camera_still_check)
+        try:
+            run = self.start_run(robot, "run find")
+            if not run:
+                return dict(ok=False, words="did not start `run find`", run=None, t0=t0, t1=time.time())
+            end = self.watch.wait_end(run, FIND_TIMEOUT_S, poll=lambda: self.watchdog(robot))
+            t1 = time.time()
+            if end is None:
+                self.send(robot, "stop")
+                end = self.watch.wait_end(run, 5) or dict(result="no end record")
+        finally:
+            self.find_live[robot] = time.time()
         fr = self.listener.latest("FIND", robot, t0)
         # find ends squared up to the boards, backed off: its own heading is then as good as the camera's. Nose
         # first it ends facing the y board; backing in (FIND reverse 1, firmware 2026-10-25b) facing away from it
@@ -5894,8 +5900,6 @@ class Runner:
 
     STILL_WINDOW_S = 3.0      # chosen: a still robot's camera scatter is measured over this long ...
     STILL_EVERY_S = 10.0      # ... at most this often (one evidence item per axis each time)
-    RUN_LIVE_MAX_S = 600.0    # chosen: a run with no end record after this long is taken as over (a lost end record
-                              # must not stop the camera's still evidence for the rest of the session; runs last < 5 min)
 
     def forward_explore_leg(self, robot):
         """Is the robot exploring, on a forward go leg (its edge guard on)?"""
@@ -5904,21 +5908,14 @@ class Runner:
 
     def camera_still_check(self, robot, last_still):
         """The camera's trust from a robot standing still (e02_trust camera_still): nothing sent to it for
-        STILL_WINDOW_S + 0.5 s, no run, and the camera sees it the whole window. A firmware run (`run find`, a U run)
-        counts as moving too, until STILL_WINDOW_S + 0.5 s after its end (2026-10-25 simulator, front@Left:noise=6:
-        each setup find was taken for a still robot, 4.8-7.2 cm of "scatter", and the camera was flagged bad 3 times)."""
+        STILL_WINDOW_S + 0.5 s, no run, and the camera sees it the whole window. A find (`run find`, a firmware run
+        that drives the whole time) counts as moving until STILL_WINDOW_S + 0.5 s after it ends (2026-10-25 simulator,
+        front@Left:noise=6: each setup find was taken for a still robot, 4.8-7.2 cm of "scatter", and the camera was
+        flagged bad 3 times). Other firmware runs are not skipped: their settle pauses are real still moments, and
+        skipping every open run left no still evidence after setup (2026-10-25 rerun)."""
         now = time.time()
-        seen = getattr(self, "run_seen", None)
-        if seen is None:
-            seen = self.run_seen = {}
-        st_ = (getattr(getattr(self, "watch", None), "started", None) or {}).get(robot)
-        run_ = st_[0] if isinstance(st_, (tuple, list)) else st_
-        if run_ is not None and (getattr(self.watch, "ended", None) or {}).get(run_) is None:
-            first = seen.setdefault(("first", robot, run_), now)
-            if now - first < self.RUN_LIVE_MAX_S:
-                seen[robot] = now
-                return
-        if now - seen.get(robot, 0.0) < self.STILL_WINDOW_S + 0.5:
+        t_find = (getattr(self, "find_live", None) or {}).get(robot)
+        if t_find is not None and now - t_find < self.STILL_WINDOW_S + 0.5:
             return
         if now - last_still.get(robot, 0.0) < self.STILL_EVERY_S:
             return
