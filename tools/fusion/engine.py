@@ -77,12 +77,18 @@ robot, a brick) is in front. Geometry in landmarks.py.
 """
 import bisect
 import math
+import os
 import random
+import sys
 from collections import deque
 
 import numpy as np
 
-from ekf import EKF, Noise, D2R, wrap
+_TOOLS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _TOOLS not in sys.path:
+    sys.path.insert(0, _TOOLS)
+import raw_units as RU  # noqa: E402  (RAW v_cms is mm/s; rpm, v_cms, w_dps read 1.08 high)
+from ekf import EKF, Noise, D2R, wrap  # noqa: E402
 import landmarks as lm
 import dockfix
 
@@ -133,10 +139,10 @@ DEFAULT = dict(
     hfm_track_min_cms=3.0,    # and the camera fixes moved at least this fast
     hfm_floor_deg=1.0,        # added to the heading noise (rolling straight is assumed: no side slip)
     hfm_gate_chi2=16.0,       # drop a heading fix this far (squared sigmas) from the estimate
-    wheel_radius_cm=1.7,      # turns RAW wl_rpm / wr_rpm into cm/s: a number, or per robot {"Left": 1.69, ...,
+    wheel_radius_cm=1.7,      # turns RAW wl_rpm / wr_rpm (after raw_units.wheel_rpm) into cm/s: a number, or per robot {"Left": 1.69, ...,
                               # "default": 1.7} once measured. With wheel_scale on it also sets each robot's
                               # starting wheel scale: lib_wheel_radius_cm / this (the robot's own v_cms uses 1.7)
-    lib_wheel_radius_cm=1.7,  # the radius the Alvik library itself converts wheel speed with (RAW v_cms)
+    lib_wheel_radius_cm=1.7,  # the radius the Alvik library itself converts wheel speed with (RAW v_cms, mm/s)
     calib_heading=False,      # opt in: calibration_results.csv start-nudge headings become heading fixes
                               # (off by default so the older setups stay comparable when the file is given)
     calib_heading_sigma_deg="auto",  # noise of each start-nudge heading; auto: from how far the nudge moved on
@@ -265,7 +271,7 @@ def fastest_speed(runs):
     top = 0.0
     for run in runs:
         for r in run.raw:
-            top = max(top, abs(fnum(r.get("v_cms"))))
+            top = max(top, abs(fnum(RU.speed_cms(r.get("v_cms")))))
     return max(15.0, 1.5 * top + 5.0)
 
 
@@ -978,7 +984,8 @@ class StillTest:
     angle (RAW wl_deg / wr_deg) moved more than still_deg over the last still_window_s, looking back only
     (so it works live). The wheel speeds (wl_rpm, v_cms, w_dps) are too noisy for this at rest: the
     simulator reads up to 0.7 rpm on a still wheel, so the old thresholds passed only ~15% of still rows.
-    Rows without wheel angles fall back to those thresholds (still_mode "speed")."""
+    Rows without wheel angles fall back to those thresholds (still_mode "speed"), on true speeds: `v` is
+    cm/s (raw_units.speed_cms), and rpm / w_dps are divided by the board's 1.08 here."""
 
     def __init__(self, cfg):
         self.cfg = cfg
@@ -988,8 +995,8 @@ class StillTest:
         cfg = self.cfg
         wl, wr = fnum(r.get("wl_deg"), float("nan")), fnum(r.get("wr_deg"), float("nan"))
         if cfg["still_mode"] == "speed" or math.isnan(wl) or math.isnan(wr):
-            return (abs(fnum(r.get("wl_rpm"))) < 0.2 and abs(fnum(r.get("wr_rpm"))) < 0.2
-                    and abs(v) < 0.1 and abs(fnum(r.get("w_dps"))) < 0.5)
+            return (abs(fnum(RU.wheel_rpm(r.get("wl_rpm")))) < 0.2 and abs(fnum(RU.wheel_rpm(r.get("wr_rpm")))) < 0.2
+                    and abs(v) < 0.1 and abs(fnum(RU.turn_dps(r.get("w_dps")))) < 0.5)
         t = r["t"]
         h = self.hist
         h.append((t, wl, wr))
@@ -1053,12 +1060,13 @@ def run_engine(runs, detections, cfg, gyro_f=None, blink=None, calib_rows=None, 
         still_test = StillTest(cfg)
         prev_z = None
         for r in run.raw:
-            v = fnum(r.get("v_cms"))
-            w = fnum(r.get("w_dps")) * D2R * ws
+            v = fnum(RU.speed_cms(r.get("v_cms")))          # true cm/s (the column is mm/s, 1.08 high)
+            w = fnum(RU.turn_dps(r.get("w_dps"))) * D2R * ws
             # still = wheels not turning at all (a turn in place moves the wheels too)
             still = still_test.step(r, v)
             d = dict(v=v, w=w, g=fnum(r.get("gz")) * gf, still=still, lifted=fnum(r.get("lifted")) > 0.5,
-                     vl=fnum(r.get("wl_rpm")) * fs * rpm2cms, vr=fnum(r.get("wr_rpm")) * fs * rpm2cms)
+                     vl=fnum(RU.wheel_rpm(r.get("wl_rpm"))) * fs * rpm2cms,
+                     vr=fnum(RU.wheel_rpm(r.get("wr_rpm"))) * fs * rpm2cms)
             if use_tof:
                 z = tuple(zone_reading(r.get(c)) for c in lm.ZONE_COLS)
                 if not cfg["tof_new_frames_only"] or z != prev_z:

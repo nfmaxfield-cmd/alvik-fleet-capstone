@@ -11,6 +11,7 @@ for p in (FUSION, os.path.dirname(FUSION)):
         sys.path.insert(0, p)
 
 import runs as rn  # noqa: E402
+import raw_units  # noqa: E402
 
 D2R = math.pi / 180
 
@@ -31,8 +32,9 @@ def straight_run(run_id, robot, x0, y0, h_deg, v=10.0, t0=1000.0, still_s=1.0, d
         vv = v if moving else 0.0
         w = turn_dps if moving else 0.0
         half = w * D2R * 4.5            # wheel speed difference for a 9 cm track
-        run.raw.append(dict(t=t, v_cms=vv, w_dps=w, wl_rpm=(vv - half) * rpm_per_cms, wr_rpm=(vv + half) * rpm_per_cms,
-                            gz=w + gyro_bias_dps, lifted=0))
+        # logged as a robot logs them (tools/raw_units.py: v_cms in mm/s, speeds 1.08 high)
+        sp = raw_units.robot_columns((vv - half) * rpm_per_cms, (vv + half) * rpm_per_cms, wheel_r, 9.0)
+        run.raw.append(dict(t=t, gz=w + gyro_bias_dps, lifted=0, **sp))
         truth.append((t, x, y, th))
         x += vv * math.cos(th) / hz
         y += vv * math.sin(th) / hz

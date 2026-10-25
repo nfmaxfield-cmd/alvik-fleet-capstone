@@ -27,6 +27,7 @@ for p in (os.path.join(TOOLS, "fusion"), TOOLS):
         sys.path.insert(0, p)
 
 import ekf as EKF  # noqa: E402
+import raw_units as RU  # noqa: E402  (RAW v_cms is mm/s; v_cms, w_dps read 1.08 high)
 
 D2R = math.pi / 180.0
 SENSORS = ("wheels", "gyro", "camera")
@@ -73,7 +74,8 @@ class LiveLab:
     # --- inputs -----------------------------------------------------------------------------------------
     def on_raw(self, robot, rec, t):
         """A RAW row from a robot (dict by column name), received at laptop time t."""
-        v, w, gz = _num(rec.get("v_cms")), _num(rec.get("w_dps")), _num(rec.get("gz"))
+        # true cm/s and deg/s (tools/raw_units.py): the robots log v_cms in mm/s, and both 1.08 high
+        v, w, gz = _num(RU.speed_cms(rec.get("v_cms"))), _num(RU.turn_dps(rec.get("w_dps"))), _num(rec.get("gz"))
         x, y, th = _num(rec.get("x_cm")), _num(rec.get("y_cm")), _num(rec.get("th_deg"))
         run = rec.get("run")
         with self.lock:

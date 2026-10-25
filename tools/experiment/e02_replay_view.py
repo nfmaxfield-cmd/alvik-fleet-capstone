@@ -46,6 +46,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import e02_camera as CAM  # noqa: E402
 import e02_live as LIVE  # noqa: E402
+import raw_units as RU  # noqa: E402  (e02_live put tools/ on the path)
 import e02_plan as PL  # noqa: E402
 import e02_view as VIEW  # noqa: E402
 
@@ -360,10 +361,12 @@ def load_track(session_dir):
 def load_raw(session_dir):
     rows = []
     for p in sorted(glob.glob(os.path.join(session_dir, "robot-logs-*", "raw.csv"))):
+        legacy = RU.legacy_sim_folder(os.path.dirname(p))   # a dry run from before 2026-10-25: v_cms in cm/s
         for r in csv.DictReader(open(p, newline="")):
             t = _num(r.get("t_recv"))
             if t is not None:
-                rows.append((t, r.get("robot", ""), {k: r.get(k) for k in RAW_KEYS}))
+                d = {k: r.get(k) for k in RAW_KEYS}
+                rows.append((t, r.get("robot", ""), RU.to_robot_units([d])[0] if legacy else d))
     rows.sort(key=lambda q: q[0])
     return rows
 

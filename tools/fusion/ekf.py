@@ -27,8 +27,9 @@ State (floor frame, cm and radians):
   pose by at most about that much, however long the robot looks at it.
 
 Measurements:
-    wheel_v   forward speed from the wheel encoders (RAW v_cms)
-    wheel_w   turn rate from the wheel encoders (RAW w_dps); slips in turns
+    wheel_v   forward speed from the wheel encoders, cm/s (RAW v_cms is mm/s and 1.08 high: callers convert
+              with tools/raw_units.py speed_cms)
+    wheel_w   turn rate from the wheel encoders (RAW w_dps / 1.08: raw_units.turn_dps); slips in turns
     gyro      turn rate + bias (RAW gz); does not slip, but drifts
     zupt      "zero velocity update": wheels say the robot is still, so v = w = 0
     cam_xy    camera position fix (cm), possibly late

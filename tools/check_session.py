@@ -45,6 +45,7 @@ from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import session_checks as sc  # noqa: E402
+import raw_units  # noqa: E402  (RAW speed columns' units)
 
 
 def rows(folder, name):
@@ -55,6 +56,8 @@ def rows(folder, name):
             continue
         with open(path, newline="") as f:
             out += list(csv.DictReader(f))
+    if name == "raw" and out and raw_units.legacy_sim_folder(folder):
+        raw_units.to_robot_units(out)     # simulator logs from before 2026-10-25: v_cms cm/s, no 1.08 (raw_units.py)
     return out
 
 

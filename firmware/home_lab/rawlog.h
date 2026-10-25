@@ -34,6 +34,12 @@ unsigned long next = 0, period = 20;
 unsigned long rows = 0;     // RAW records sent this run (the laptop compares with what arrived)
 int step = 0;               // route steps completed so far; matches the DEMO_STEP records
 
+// Column units (checked 2026-10-25, docs/build-reports/e02-oct25-right-front-and-rpm.md; readers convert with
+// tools/raw_units.py). The names stay as they are so old logs keep their meaning:
+//   v_cms is mm/s, not cm/s: Arduino_Alvik's get_drive_speed passes 'MM_S' (a char constant) as the source
+//         unit, so no conversion is done.
+//   wl_rpm, wr_rpm, v_cms, w_dps read about 1.08x the true speed: the motor board divides encoder counts by an
+//         assumed 20 ms update, but its loop runs about 21.6 ms. wl_deg, wr_deg and x/y/th_deg are right.
 void header() {
   net::sendLine("H,RAW,run,ms,step,wl_deg,wr_deg,wl_rpm,wr_rpm,v_cms,w_dps,x_cm,y_cm,th_deg,"
                 "ax,ay,az,gx,gy,gz,roll_deg,pitch_deg,yaw_deg,"

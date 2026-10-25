@@ -21,9 +21,15 @@ sends is stamped with that clock; the network module turns robot time into
 laptop time later, using the clock offset and drift of this robot.
 """
 import math
+import os
 import random
+import sys
 
-from config import firmware_raw_columns
+_TOOLS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _TOOLS not in sys.path:
+    sys.path.insert(0, _TOOLS)
+import raw_units  # noqa: E402  (tools/raw_units.py: the RAW speed columns' units)
+from config import firmware_raw_columns  # noqa: E402
 from fw_follow import FollowMixin
 from fw_dock import DockMixin, resolve_contacts
 from fw_e02 import E02Mixin
@@ -671,13 +677,15 @@ class Robot(FollowMixin, DockMixin, E02Mixin):
     def raw_values(self, now):
         m, im, rng = self.m, self.imu_m, self.rng
         moving = abs(self.wL) + abs(self.wR) > 1
-        wl_rpm = self.wL / 6 + rng.gauss(0, m.wheel_speed_noise_rpm)
-        wr_rpm = self.wR / 6 + rng.gauss(0, m.wheel_speed_noise_rpm)
-        # get_drive_speed(): the library's own conversion with nominal sizes
-        vl = wl_rpm * 2 * math.pi * m.wheel_radius_cm / 60
-        vr = wr_rpm * 2 * math.pi * m.wheel_radius_cm / 60
-        v_cms = (vl + vr) / 2
-        w_dps = math.degrees((vr - vl) / m.wheel_track_cm)
+        # the RAW speed columns as a real robot logs them (tools/raw_units.py): rpm, v_cms, w_dps 1.08 high (the
+        # motor board's assumed 20 ms update), v_cms in mm/s (the library's get_drive_speed bug); nominal sizes.
+        # Only the logged columns change. The simulated firmware's get_wheels_speed() (wheels_speed) reads the
+        # commanded level at steady speed, as the real one does (its PID holds the 1.08-high reading on the
+        # command); but the simulated wheels then turn AT the command, where the real ones turn 7.5% slower.
+        sp = raw_units.robot_columns(self.wL / 6 + rng.gauss(0, m.wheel_speed_noise_rpm),
+                                     self.wR / 6 + rng.gauss(0, m.wheel_speed_noise_rpm),
+                                     m.wheel_radius_cm, m.wheel_track_cm)
+        wl_rpm, wr_rpm, v_cms, w_dps = sp["wl_rpm"], sp["wr_rpm"], sp["v_cms"], sp["w_dps"]
         an = im.accel_noise_g + (im.accel_vibration_g if moving else 0) + (0.05 if self.lifted else 0)
         ax = self.a_fwd / 981.0 + self.acc_bias[0] + rng.gauss(0, an)
         ay = self.v * self.w / 981.0 + self.acc_bias[1] + rng.gauss(0, an)

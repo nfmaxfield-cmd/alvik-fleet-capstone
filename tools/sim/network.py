@@ -27,6 +27,7 @@ TOOLS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if TOOLS not in sys.path:
     sys.path.insert(0, TOOLS)
 import alvik_console  # noqa: E402
+import raw_units  # noqa: E402  (RAW speed columns in the robots' units)
 
 CLOCK_EVERY_S = alvik_console.CLOCK_EVERY_S
 
@@ -169,7 +170,7 @@ def write_session_json(outdir, start_unix, start_iso):
         json.dump(dict(start=start_iso, start_unix=start_unix, laptop="SIMULATED", python=platform.python_version(),
                        repo_commit="simulated",
                        note="t_recv in every CSV is the laptop clock (Unix seconds) when the line arrived",
-                       simulated=True), f, indent=2)
+                       simulated=True, raw_units=raw_units.RAW_UNITS), f, indent=2)
 
 
 def iso_from_unix(t, tz_text):

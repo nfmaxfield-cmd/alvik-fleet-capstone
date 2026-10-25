@@ -139,6 +139,25 @@ class RobotModelTests(unittest.TestCase):
             self.assertLess(longest, 230.0, "code %d: longest blink pulse %.0f ms" % (code, longest))
             self.assertGreater(longest, 150.0)                 # the stretch does happen
 
+    def test_raw_speed_columns_in_robot_units(self):
+        """RAW speeds as the real robots log them (tools/raw_units.py): rpm 1.08 high, v_cms mm/s (and 1.08
+        high), w_dps 1.08 high; raw_units turns them back into the true speed."""
+        import raw_units
+        cfg = perfect_config()
+        cfg.robot.wheel_speed_noise_rpm = 0.0
+        r = make_robot(cfg)
+        r.set_wheels_speed(20, 30)
+        r.advance(1000)
+        true_v = (r.wL + r.wR) / 2 / 360 * 2 * math.pi * cfg.robot.wheel_radius_cm     # cm/s
+        true_w = math.degrees((r.wR - r.wL) / 360 * 2 * math.pi * cfg.robot.wheel_radius_cm / cfg.robot.wheel_track_cm)
+        v = r.raw_values(r.ms)
+        self.assertAlmostEqual(v["wl_rpm"], 20 * 1.08, delta=0.01)
+        self.assertAlmostEqual(v["wr_rpm"], 30 * 1.08, delta=0.01)
+        self.assertAlmostEqual(v["v_cms"], true_v * 10 * 1.08, delta=0.05)
+        self.assertAlmostEqual(raw_units.speed_cms(v["v_cms"]), true_v, delta=0.005)
+        self.assertAlmostEqual(raw_units.wheel_rpm(v["wl_rpm"]), 20, delta=0.01)
+        self.assertAlmostEqual(raw_units.turn_dps(v["w_dps"]), true_w, delta=0.01)
+
     def test_raw_columns_match_firmware(self):
         r = make_robot(perfect_config())
         r.run_id = "1234-1"

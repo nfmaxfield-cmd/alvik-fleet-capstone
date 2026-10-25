@@ -48,6 +48,7 @@ import numpy as np  # noqa: E402
 
 from config import REPO, dump_config, firmware_params, firmware_version, load_config  # noqa: E402
 from robot import Robot, wrap180  # noqa: E402
+import raw_units  # noqa: E402  (tools/raw_units.py; robot.py puts tools/ on the path)
 import network  # noqa: E402
 
 SHEET_COLS = ["order", "robot", "level", "commands", "run_id", "target_x_cm", "target_y_cm", "target_heading_deg",
@@ -395,7 +396,8 @@ def main(argv=None):
                                  nrng, rec_iso, out, progress)
 
     # ---- what was simulated, for checking analysis results against ----
-    info = dict(seed=args.seed, firmware=fw, start_unix=start_unix, frames=n_frames, robots={}, runs=[])
+    info = dict(seed=args.seed, firmware=fw, start_unix=start_unix, frames=n_frames, robots={}, runs=[],
+                raw_units=raw_units.RAW_UNITS)   # RAW speed columns in the robots' units (tools/raw_units.py)
     for n, r in robots.items():
         info["robots"][n] = dict(
             boot_id="%04X" % r.boot_id, t_boot=r.t_boot, clock_drift_ppm=r.drift_ppm,

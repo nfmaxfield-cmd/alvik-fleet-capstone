@@ -27,6 +27,7 @@ for _p in (HERE, TOOLS, os.path.join(TOOLS, "fusion")):
         sys.path.insert(0, _p)
 
 import landmarks as LM  # noqa: E402
+import raw_units as RU  # noqa: E402  (RAW v_cms is mm/s; v_cms, w_dps read 1.08 high)
 
 STILL_V, STILL_W, STILL_MIN_S, SETTLE_S = 0.3, 2.0, 0.8, 0.25
 STILL_MEDIAN_N = 5     # still/moving flag is median-filtered over this many RAW rows (~0.1 s): a lone wheel-speed
@@ -40,6 +41,16 @@ def fnum(v, default=float("nan")):
         return x
     except (TypeError, ValueError):
         return default
+
+
+def speed_cms(r):
+    """True forward speed (cm/s) of a RAW row (tools/raw_units.py: the column is mm/s, 1.08 high); 0 if missing."""
+    return RU.speed_cms(r.get("v_cms")) if fnum(r.get("v_cms"), None) is not None else 0.0
+
+
+def turn_dps(r):
+    """True wheel turn rate (deg/s) of a RAW row (the column is 1.08 high); 0 if missing."""
+    return RU.turn_dps(r.get("w_dps")) if fnum(r.get("w_dps"), None) is not None else 0.0
 
 
 class Station:
@@ -60,7 +71,7 @@ class Station:
 
 def still_spans(raw):
     """[(i0, i1)] index ranges of RAW rows where the robot stands still long enough."""
-    flag = [abs(fnum(r.get("v_cms"), 0.0)) < STILL_V and abs(fnum(r.get("w_dps"), 0.0)) < STILL_W
+    flag = [abs(speed_cms(r)) < STILL_V and abs(turn_dps(r)) < STILL_W
             and fnum(r.get("lifted"), 0.0) < 0.5 for r in raw]
     h = STILL_MEDIAN_N // 2
     out, start = [], None
@@ -127,10 +138,10 @@ def yaw_to_floor(raw, gyro_th, sight, win_s=0.6):
     i = 0
     while i < len(raw):
         r = raw[i]
-        if fnum(r.get("v_cms"), 0.0) > 3.0 and abs(fnum(r.get("w_dps"), 0.0)) < 3.0:
+        if speed_cms(r) > 3.0 and abs(turn_dps(r)) < 3.0:
             t0 = r["t"]
             j = int(np.searchsorted(T, t0 + win_s))
-            if j < len(raw) and all(fnum(q.get("v_cms"), 0.0) > 2.0 for q in raw[i:j + 1]):
+            if j < len(raw) and all(speed_cms(q) > 2.0 for q in raw[i:j + 1]):
                 a = S[np.abs(S[:, 0] - t0) < 0.15]
                 b = S[np.abs(S[:, 0] - (t0 + win_s)) < 0.15]
                 if len(a) and len(b):

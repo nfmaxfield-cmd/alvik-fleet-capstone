@@ -53,6 +53,7 @@ for p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recognit
         sys.path.insert(0, p)
 
 import e02_plan as PL  # noqa: E402
+import raw_units  # noqa: E402  (tools/raw_units.py)
 
 LOG_PORT, CMD_PORT, NOTES_PORT = 5005, 5006, 5007
 HALF = PL.ROBOT_HALF_CM
@@ -629,6 +630,7 @@ def main(argv=None):
                             "lower)",
                        board=world.board.to_dict(),
                        model="tools/sim/robot.py + fw_e02.py (the firmware lane's E02 model), real time",
+                       raw_units=raw_units.RAW_UNITS,   # RAW speed columns in the robots' units (v_cms mm/s, x1.08)
                        bricks=[dict(b, corners=brick_corners(b), height_cm=world.brick_h) for b in world.brick_specs],
                        robots={r.name: dict(g_true=1.0 / (1.0 + r.gyro_scale), raw_drift_dps=r.gyro_bias,
                                             gyro_drift_dps=r.gyro_bias / (1.0 + r.gyro_scale),

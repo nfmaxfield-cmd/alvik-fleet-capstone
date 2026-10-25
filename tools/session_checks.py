@@ -18,12 +18,19 @@ import json
 import math
 import os
 import statistics as st
+import sys
 from dataclasses import dataclass
+
+if os.path.dirname(os.path.abspath(__file__)) not in sys.path:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import raw_units as RU  # noqa: E402  (RAW v_cms is mm/s; rpm, v_cms, w_dps read 1.08 high)
 
 CSV_COLS = ["check", "scope", "status", "value", "unit", "rule", "detail"]
 
-# The fusion's "still" test (tools/fusion/engine.py): the wheels say the robot isn't moving.
+# The fusion's "still" test (tools/fusion/engine.py): the wheels say the robot isn't moving. True units (rpm,
+# cm/s, deg/s): the RAW columns go through tools/raw_units.py first.
 FUSION_STILL = dict(rpm=0.2, v_cms=0.1, w_dps=0.5)
+_TRUE = dict(wl_rpm=RU.wheel_rpm, wr_rpm=RU.wheel_rpm, v_cms=RU.speed_cms, w_dps=RU.turn_dps)
 
 
 def fnum(x, default=float("nan")):
@@ -322,11 +329,14 @@ def rest_noise_checks(raw_by_run, still=FUSION_STILL, min_share=0.95):
         if not rows:
             continue
 
+        def tv(r, col):
+            return _TRUE[col](r.get(col))
+
         def p95(col):
-            v = sorted(abs(fnum(r.get(col))) for r in rows if fnum(r.get(col)) == fnum(r.get(col)))
+            v = sorted(abs(tv(r, col)) for r in rows if tv(r, col) == tv(r, col))
             return v[int(0.95 * (len(v) - 1))] if v else float("nan")
-        ok = sum(1 for r in rows if abs(fnum(r.get("wl_rpm"))) < still["rpm"] and abs(fnum(r.get("wr_rpm"))) < still["rpm"]
-                 and abs(fnum(r.get("v_cms"))) < still["v_cms"] and abs(fnum(r.get("w_dps"))) < still["w_dps"])
+        ok = sum(1 for r in rows if abs(tv(r, "wl_rpm")) < still["rpm"] and abs(tv(r, "wr_rpm")) < still["rpm"]
+                 and abs(tv(r, "v_cms")) < still["v_cms"] and abs(tv(r, "w_dps")) < still["w_dps"])
         share = ok / len(rows)
         rpm = max(p95("wl_rpm"), p95("wr_rpm"))
         v, w = p95("v_cms"), p95("w_dps")

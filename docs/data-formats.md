@@ -78,6 +78,24 @@ Also in the folder:
 Notes:
 - `run` ids are `<boot>-<n>`: boot is 4 hex digits, random per power-on.
 - `ms` is the robot's millis() (ms since its power-on).
+- **RAW speed columns: their names are not their units** (every firmware version; found 2026-10-25,
+  docs/build-reports/e02-oct25-right-front-and-rpm.md). Read them through `tools/raw_units.py`
+  (`speed_cms`, `wheel_rpm`, `turn_dps`), never directly as a speed:
+
+  | column | holds | true value |
+  | --- | --- | --- |
+  | `v_cms` | **mm/s** (Arduino_Alvik `get_drive_speed` passes `'MM_S'`, a char constant, as its source unit: no conversion), 1.08 high | `v_cms / 10 / 1.08` cm/s |
+  | `wl_rpm`, `wr_rpm` | wheel rpm (gear ratio applied), 1.08 high, 50 ms behind the wheel angle (the board's 5-update average) | `/ 1.08`, or the rate of `wl_deg` / `wr_deg` (no delay) |
+  | `w_dps` | deg/s from the wheels (nominal track), 1.08 high | `/ 1.08` |
+
+  The 1.08 is measured (rpm ÷ wheel-angle rate 1.080 / 1.085 / 1.081 for Left / Center / Right, spread 0.004
+  across 212 runs): the motor board divides encoder counts by an assumed 20 ms update, but its loop runs about
+  21.6 ms. The wheel angles and `x_cm, y_cm, th_deg` count encoder steps and are right. The columns keep their
+  names so old logs keep their meaning. The simulator (`tools/sim/robot.py`) logs them the same way from
+  2026-10-25 and marks its output `"raw_units": "robot-2026-10-25"` (`sim_info.json`; `session.json` for
+  tools/sim/simulate.py). Simulator logs without that mark hold `v_cms` in cm/s and no 1.08:
+  `check_session.rows(folder, "raw")` (used by tools/fusion/runs.py and check_session.py) and
+  e02_replay_view.py rescale them to robot units on reading (`raw_units.legacy_sim_folder`, `to_robot_units`).
 - RAW `x_cm,y_cm,th_deg` are the robot's own wheel odometry, reset to 0 at the
   start of straight and demo runs. `step` counts completed route steps;
   -1 = the start nudge (2026-10-17e+). In a `calib` run (firmware

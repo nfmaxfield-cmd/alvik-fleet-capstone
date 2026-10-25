@@ -1249,7 +1249,7 @@ def check_still_test(tb, t1):
         if any(v is None for v in wl + wr):
             continue
         test = eng.StillTest(cfg)
-        called = [test.step(r, eng.fnum(r.get("v_cms"))) for r in rows]
+        called = [test.step(r, eng.fnum(eng.RU.speed_cms(r.get("v_cms")))) for r in rows]   # true cm/s
         quiet = [False] + [abs(wl[i] - wl[i - 1]) < 0.5 and abs(wr[i] - wr[i - 1]) < 0.5 for i in range(1, len(rows))]
         i = 0
         acc = per[t["robot"]]
