@@ -30,7 +30,7 @@ COPY_R = 0.97                  # chosen: copies (a processed copy keeps |r| abov
 # zones' groups 1.6-13.6 (median 3.3). Was 2.0-6.0 on the all-window figure. Chosen on dev only (DOE row)
 AOR_RAMP = (1.5, 3.0)
 GRAVITY_LON = 300.0            # chosen (as has_gravity_like's 300): level / noise a gravity axis must reach
-WEAK_K = 0.5                   # chosen: "unknown" score = WEAK_K x (1 - best score) at least (DOE row)
+CONF_CAP = (0.6, 0.4)          # chosen: confidence <= 0.6 + 0.4 x best score (DOE row)
 HEADING_TIE = 0.10             # chosen: planar fits this close count as a tie between two headings (DOE row)
 SHORT_RAMP = (30.0, 120.0)     # chosen: log duration (s) from "fully short" to "long"; see the threshold report
 
@@ -574,16 +574,14 @@ def classify_case(feats, R):
     out = {}
     for s, f in feats.items():
         sc, ev = score_stream(s, f, R, der, ctx)
-        # weak evidence (2026-10-25): confidence is a share of all scores, so one lone weak score (0.5 from a
-        # single cue) used to read 0.9+. "unknown" now grows with how far the best score is from full marks
-        # (capped below the best, so the top guess never changes)
-        top = max(v for t, v in sc.items() if t != "unknown")
-        if top > 0:
-            sc["unknown"] = max(sc["unknown"], min(WEAK_K * (1 - top), 0.9 * top))
         tot = sum(sc.values())
         ranked = sorted(sc.items(), key=lambda kv: -kv[1])
         best, second = ranked[0], ranked[1]
         conf = best[1] / tot if tot > 0 else 0.0
+        # weak evidence (2026-10-25): confidence is a share of all scores, so one lone weak score (0.5 from a
+        # single cue) used to read 0.9+. It is now capped by the score itself: weak evidence can be asked about,
+        # never accepted (a score of 0.75 is needed to reach 0.90)
+        conf = min(conf, CONF_CAP[0] + CONF_CAP[1] * best[1])
         derived, derived_of = s in der, (list(der[s][1]) if s in der else [])
         if best[0] == "gyro_angle" and not derived:
             # provenance (design doc section 2): an angle summed from a rate is derived, never separate evidence
