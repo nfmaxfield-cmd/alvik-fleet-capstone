@@ -143,11 +143,12 @@ def legs_moving(path, robot, pad_s=0.8):
 
 
 def replay(rec, cam, robot, at, others, t0, t1, board_rect=PL.Board().to_dict()["rect"], every=1.0, old=None,
-           out=None, expect_fn=None, bg_s=0.5, cols=4, moving_fn=None):
+           out=None, expect_fn=None, bg_s=0.5, cols=4, moving_fn=None, tracker_kw=None):
     """Feed the frames t0..t1 through a fresh tracker that follows `robot` from `at`. Returns the samples
-    [(t, x, y or None)] and writes <out>.csv / .png when out is given."""
+    [(t, x, y or None)] and writes <out>.csv / .png when out is given. tracker_kw: extra MotionTracker arguments
+    (the side camera: z_cm, size_per_spot)."""
     tr = CAM.MotionTracker(cam, ((board_rect[0] + board_rect[2]) / 2, (board_rect[1] + board_rect[3]) / 2),
-                           board_rect=tuple(board_rect))
+                           board_rect=tuple(board_rect), **(tracker_kw or {}))
     i0, i1 = rec.index(t0), rec.index(t1)
     nb = max(3, int(round(bg_s * 25)))
     bg = [rec.read(i) for i in range(max(0, i0 - nb), i0)]

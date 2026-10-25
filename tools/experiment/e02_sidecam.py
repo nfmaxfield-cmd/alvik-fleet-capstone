@@ -1,21 +1,26 @@
-"""Side camera (EMEET C950, steep view) offline: calibrate it to the floor from robots seen by both cameras, cross-check
-it against the overhead at moments a robot stands still, and count where it sees robots the overhead does not.
+"""Side camera (EMEET C950, steep view) offline: calibrate it to the floor, cross-check it against the overhead at
+moments a robot stands still, and compare where each camera sees robots (built for steps 2-3 of
+docs/build-plans/second-camera-plan.md, on roam1, 2026-10-20).
 
-Built 2026-10-24 for steps 2-3 of docs/build-plans/second-camera-plan.md, on roam1 (2026-10-20). What roam1 has for the
-side camera: the studio's motion detections (labels/<rec>_side/cache/motion_detections.csv, side pixels, 27,928 frames);
-NOT its video or frames.csv (they stayed on Nick's laptop). So:
-  - time: side frame i is taken at t = offset + i * dt (dt = 960.02 s / 27,928 frames, the cache's own figures), and
-    the offset is found by how well the two cameras' robots line up (find_offset);
-  - calibration: floor positions from the overhead (its roam1 calibration) paired with side pixels at the same
-    moment, a RANSAC plane homography to throw out pairs of different robots, then CameraModel.from_points on
-    per-cell medians (fit_from_pairs). The board's corners are then predicted in the side picture;
-    order_corners_like (e02_camera) puts corners found in a real side picture into floorcal's order, once one exists.
-The side positions are on the plane SIDE_Z_CM up: the side camera's outline of a robot is its top plus its near side
-face, whose centre is about half way up.
+Two calibrations:
+  - from the side PICTURE (2026-10-25, the default; tools/experiment/data/side_floorcal_roam1.json): the plywood's grain
+    is matched between the overhead's and the side's robot-free median pictures (grain_pairs), the overhead's points are
+    taken to the floor (z = 0) with the overhead's calibration, and the side camera is fitted to them
+    (fit_from_floor_points). The side picture shows only one board corner, so the 4-corner method can't be used there;
+    order_corners_like (e02_camera) is for a mount that shows all four.
+  - from ROBOTS seen by both cameras (2026-10-24, before the side video was uploaded; side_floorcal_roam1_sightings.json):
+    overhead floor positions paired with the side camera's motion detections at the same moment, RANSAC to drop pairs
+    of different robots, CameraModel.from_points on per-cell medians (fit_from_pairs).
+Time: the side camera's frames.csv (FrameClock); without it, t = offset + frame * dt with the offset fitted (find_offset).
+A robot's outline centre in the side picture is on the plane SIDE_Z_CM up (its top and its near face; measured on roam1:
+no lean left at that plane).
 
 Run on roam1 (paths are arguments; nothing is downloaded here):
+    python tools/experiment/e02_sidecam.py picture --overhead-video <video.avi> --side-video <side_video.avi>
+        --out <folder>                                        # the picture calibration
     python tools/experiment/e02_sidecam.py --overhead-dets <...overhead/cache/motion_detections.csv>
-        --side-dets <...side/cache/motion_detections.csv> --overhead-frames <frames.csv> --out <folder>
+        --side-dets <...side/cache/motion_detections.csv> --overhead-frames <frames.csv>
+        [--side-frames-csv <side_frames.csv>] --out <folder>  # the sightings calibration, cross-check and coverage
 """
 import argparse
 import collections
@@ -67,8 +72,35 @@ def overhead_floor(cam, dets, times, z=CAM.ROBOT_TOP_CM):
     return ts, xy
 
 
+class FrameClock:
+    """The side camera's real clock: frame -> t_mono from its camrec frames.csv (roam1's side_frames.csv, uploaded
+    2026-10-25). Pass it as `offset` to the functions here (dt is then ignored) in place of a fitted offset."""
+
+    def __init__(self, times):
+        items = sorted(times.items())
+        self.frames = np.array([f for f, _ in items], int)
+        self.ts = np.array([t for _, t in items], float)
+
+    @classmethod
+    def from_csv(cls, path):
+        return cls(read_frame_times(path))
+
+    def __call__(self, frame):
+        return np.interp(frame, self.frames, self.ts)
+
+    def frame_at(self, t):
+        return float(np.interp(t, self.ts, self.frames))
+
+
 def side_time(frame, offset, dt):
+    """Side frame -> time: offset + frame * dt (a fitted clock), or offset(frame) when offset is a FrameClock."""
+    if callable(offset):
+        return offset(frame)
     return offset + frame * dt
+
+
+def _side_frame(t, offset, dt):
+    return offset.frame_at(t) if callable(offset) else (t - offset) / dt
 
 
 def _nearest(ts, t, tol):
@@ -166,14 +198,90 @@ def fit_from_pairs(P, image_size=(640, 480), z=SIDE_Z_CM, name="side", rounds=2,
     return cam, info
 
 
-def save_side_calibration(cam, path, info, board=(CAM.BOARD_W_CM, CAM.BOARD_L_CM), note=""):
+# =============================================================================== calibration from the side picture
+GRAIN_RATIO = 0.8        # chosen: SIFT ratio test (Lowe's usual 0.7-0.8; a sweep is enough, no DOE)
+
+
+def median_picture(read, frames):
+    """Median of the grey pictures read(i) for i in frames (robots that move are gone from it)."""
+    imgs = [g for g in (read(i) for i in frames) if g is not None]
+    if not imgs:
+        raise ValueError("no pictures could be read")
+    return np.median(np.stack(imgs), axis=0).astype(np.uint8)
+
+
+def grain_pairs(over_img, side_img, ocam, board=(CAM.BOARD_W_CM, CAM.BOARD_L_CM), margin_cm=2.0,
+                ratio=GRAIN_RATIO, px=RANSAC_PX, n_features=8000):
+    """Floor points seen in both pictures (the plywood's grain): SIFT on both (after local contrast evening), Lowe's
+    ratio test, overhead keypoints taken to the floor (z = 0) with the overhead's calibration, kept on the board, then a
+    RANSAC floor->side homography. Returns (pairs (n, 4): x, y, u, v; info)."""
+    cl = cv2.createCLAHE(3.0, (8, 8))
+    sift = cv2.SIFT_create(nfeatures=n_features, contrastThreshold=0.01)
+    k1, d1 = sift.detectAndCompute(cl.apply(over_img), None)
+    k2, d2 = sift.detectAndCompute(cl.apply(side_img), None)
+    if d1 is None or d2 is None or len(k1) < 8 or len(k2) < 8:
+        raise ValueError("too few features in the pictures")
+    good = [a for a, b in (m for m in cv2.BFMatcher().knnMatch(d1, d2, k=2) if len(m) == 2)
+            if a.distance < ratio * b.distance]
+    W, L = board
+    P = []
+    for g in good:
+        u, v = k1[g.queryIdx].pt
+        x, y = ocam.to_floor(u, v, 0.0)
+        if -margin_cm < x < W + margin_cm and -margin_cm < y < L + margin_cm:
+            P.append((x, y, *k2[g.trainIdx].pt))
+    P = np.array(P, float).reshape(-1, 4)
+    H, m = homography_inliers(np.column_stack([P, np.zeros(len(P))]), px)
+    if m is None or m.sum() < 8:
+        raise ValueError("the two pictures' floors do not line up (%d matches)" % len(P))
+    return P[m], dict(features=[len(k1), len(k2)], matches=len(good), on_board=len(P), inliers=int(m.sum()))
+
+
+def fit_from_floor_points(P, image_size=(640, 480), name="side", k1="auto"):
+    """Side CameraModel from floor points (x, y, u, v) at z = 0 (from_points, mirror found, lens bend kept only if
+    it lowers the leave-one-out error)."""
+    if len(P) < 6:
+        raise ValueError("need at least 6 floor points, have %d" % len(P))
+    return CameraModel.from_points(P[:, 2:4], P[:, :2], image_size, k1=k1, mirror="auto", name=name)
+
+
+def tape_check(img_bgr, cam, edges, n=23, search_px=15):
+    """How far the calibration's board edges lie from the blue tape in a colour side picture. edges: {name: ((x0, y0),
+    (x1, y1))} floor cm. Returns {name: dict(n, median_px, max_px, median_cm, missing)} (missing: points with no tape
+    within search_px, e.g. an edge without tape)."""
+    hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+    blue = (hsv[:, :, 0] > 95) & (hsv[:, :, 0] < 130) & (hsv[:, :, 1] > 90) & (hsv[:, :, 2] > 40)
+    out = {}
+    for name, ((x0, y0), (x1, y1)) in edges.items():
+        ds, dcm, miss = [], [], 0
+        for k in np.linspace(0.04, 0.96, n):
+            x, y = x0 + (x1 - x0) * k, y0 + (y1 - y0) * k
+            u, v = cam.project((x, y, 0.0))
+            if not cam.in_image(u, v, 3):
+                continue
+            a, b = max(0, int(v) - search_px), max(0, int(u) - search_px)
+            yy, xx = np.nonzero(blue[a:int(v) + search_px + 1, b:int(u) + search_px + 1])
+            if len(xx) == 0:
+                miss += 1
+                continue
+            d = float(np.hypot(xx + b - u, yy + a - v).min())
+            ds.append(d)
+            dcm.append(d / cam.px_per_cm(x, y, 0.0))
+        out[name] = dict(n=len(ds) + miss, missing=miss, median_px=round(float(np.median(ds)), 2) if ds else None,
+                         max_px=round(float(max(ds)), 2) if ds else None,
+                         median_cm=round(float(np.median(dcm)), 2) if dcm else None)
+    return out
+
+
+def save_side_calibration(cam, path, info, board=(CAM.BOARD_W_CM, CAM.BOARD_L_CM), note="",
+                          kind="robot_match_calibration"):
     """Write the side camera file (CameraModel.to_dict + how it was made + where the board's corners fall)."""
     d = cam.to_dict()
     d["name"] = cam.name or "side"
     W, L = board
     corners = [[0.0, 0.0], [W, 0.0], [W, L], [0.0, L]]
     d["board_corners_px"] = [[round(c, 1) for c in cam.project((x, y, 0.0))] for x, y in corners]
-    d["robot_match_calibration"] = dict(info, note=note)
+    d[kind] = dict(info, note=note)
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     with open(path, "w") as f:
         json.dump(d, f, indent=1)
@@ -233,8 +341,8 @@ def side_at(cam, side, t, x, y, offset, dt, z=SIDE_Z_CM, win_s=0.2, near_px=None
         return None
     if near_px is None:
         near_px = 1.5 * CAM.ROBOT_CM * cam.px_per_cm(x, y, z)
-    f0 = int(math.floor((t - win_s - offset) / dt))
-    f1 = int(math.ceil((t + win_s - offset) / dt))
+    f0 = int(math.floor(_side_frame(t - win_s, offset, dt)))
+    f1 = int(math.ceil(_side_frame(t + win_s, offset, dt)))
     got = []
     for f in range(f0, f1 + 1):
         for u, v, _ in side.get(f, ()):
@@ -376,6 +484,60 @@ def presence(cam, side, ots, oxy, offset, dt, z=SIDE_Z_CM, bin_s=0.5, near_cm=NE
     return dict(out)
 
 
+# =============================================================================== both trackers on the same robot
+AGREE_CM = 8.0     # chosen: the two trackers' positions this near are the same robot (a DOE is not needed: a sweep)
+
+
+def replay_pair(over_rec, side_rec, ocam, scam, at, others, t0, t1, side_kw=None, out=None):
+    """e02_replay.replay on both cameras, following the same robot from `at` over wall times t0..t1, the others parked.
+    side_kw: the side tracker's MotionTracker arguments (default: z_cm SIDE_Z_CM, size_per_spot True).
+    Returns (overhead samples, side samples), each [(t, x or None, y or None)]."""
+    import e02_replay as R
+    kw = dict(z_cm=SIDE_Z_CM, size_per_spot=True) if side_kw is None else side_kw
+    so = R.replay(over_rec, ocam, "robot", at, others, t0, t1, out=out and out + "_overhead")
+    ss = R.replay(side_rec, scam, "robot", at, others, t0, t1, out=out and out + "_side", tracker_kw=kw)
+    return so, ss
+
+
+def compare_tracks(so, ss, step=0.2, within=0.1, agree_cm=AGREE_CM, region_fn=None):
+    """Both trackers' samples on a common time step: {region: dict(both, disagree, overhead_only, side_only, neither)}.
+    The region is from the overhead's position, else the side's, else the last known one."""
+    region_fn = region_fn or region_split
+
+    def at(samples, ts, t):
+        i = int(np.searchsorted(ts, t))
+        best = None
+        for j in (i - 1, i):
+            if 0 <= j < len(ts) and abs(ts[j] - t) <= within and (best is None or abs(ts[j] - t) < abs(ts[best] - t)):
+                best = j
+        if best is None or samples[best][1] is None:
+            return None
+        return samples[best][1], samples[best][2]
+    to = np.array([s[0] for s in so])
+    tsd = np.array([s[0] for s in ss])
+    if not len(to) or not len(tsd):
+        return {}
+    out = collections.defaultdict(lambda: dict(both=0, disagree=0, overhead_only=0, side_only=0, neither=0))
+    last = None
+    t = max(to[0], tsd[0])
+    while t <= min(to[-1], tsd[-1]):
+        o, s = at(so, to, t), at(ss, tsd, t)
+        p = o or s or last
+        last = p
+        if p is not None:
+            r = region_fn(*p)
+            if o and s:
+                out[r]["both" if math.hypot(o[0] - s[0], o[1] - s[1]) < agree_cm else "disagree"] += 1
+            elif o:
+                out[r]["overhead_only"] += 1
+            elif s:
+                out[r]["side_only"] += 1
+            else:
+                out[r]["neither"] += 1
+        t += step
+    return dict(out)
+
+
 def check_picture(cam, side, path, size=(640, 480), board=None, every=25):
     """draw_check on a plain grey canvas (no side picture exists for roam1): the calibrated board outline, the
     predicted corners, and every every-th side robot sighting as a dot."""
@@ -403,7 +565,8 @@ def main(argv=None):
     ap.add_argument("--side-frames", type=int, default=27928)
     ap.add_argument("--side-seconds", type=float, default=960.02)
     ap.add_argument("--out", required=True, help="folder for results.json and the check picture")
-    ap.add_argument("--cal-out", default=os.path.join(HERE, "data", "side_floorcal_roam1.json"))
+    ap.add_argument("--side-frames-csv", default=None, help="the side camera's frames.csv: its real clock")
+    ap.add_argument("--cal-out", default=os.path.join(HERE, "data", "side_floorcal_roam1_sightings.json"))
     a = ap.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)
     ocam = CAM.load_camera(a.overhead_cal)
@@ -412,10 +575,14 @@ def main(argv=None):
     dt = a.side_seconds / a.side_frames
     res = dict(dt=dt)
 
-    off, scores = find_offset(side, ots, oxy, dt, -3.0, 3.0, 0.25)
-    off, fine = find_offset(side, ots, oxy, dt, off - 0.3, off + 0.3, 0.02)
-    res.update(offset_s=off, offset_scan=scores, offset_fine=fine)
-    print("side clock offset %.2f s" % off)
+    if a.side_frames_csv:
+        off = FrameClock.from_csv(a.side_frames_csv)
+        res.update(clock="side frames.csv")
+    else:
+        off, scores = find_offset(side, ots, oxy, dt, -3.0, 3.0, 0.25)
+        off, fine = find_offset(side, ots, oxy, dt, off - 0.3, off + 0.3, 0.02)
+        res.update(offset_s=off, offset_scan=scores, offset_fine=fine)
+        print("side clock offset %.2f s" % off)
 
     # 2-fold by alternating 60 s blocks: fit on one, cross-check the other's still moments
     P = pairs(side, ots, oxy, off, dt, slow_cm=SLOW_CM)
@@ -442,8 +609,9 @@ def main(argv=None):
     cam, info = fit_from_pairs(P)
     save_side_calibration(cam, a.cal_out, info, note=(
         "roam1 2026-10-20, from robots seen by both cameras (no side picture was uploaded): overhead floor positions "
-        "(overhead_floorcal_roam1.json) paired with side motion detections, side clock offset %.2f s, side z %.2f cm. "
-        "Made by tools/experiment/e02_sidecam.py." % (off, SIDE_Z_CM)))
+        "(overhead_floorcal_roam1.json) paired with side motion detections, side clock %s, side z %.2f cm. "
+        "Made by tools/experiment/e02_sidecam.py." % ("from its frames.csv" if callable(off) else "offset %.2f s" % off,
+                                                      SIDE_Z_CM)))
     res["calibration"] = dict(info, path=a.cal_out, pose=cam.pose_summary() if hasattr(cam, "pose_summary") else None)
     check_picture(cam, side, os.path.join(a.out, "side_check_roam1.png"))
     res["coverage_side"] = coverage(cam, side, ots, oxy, off, dt)
@@ -459,5 +627,59 @@ def main(argv=None):
     return res
 
 
+def picture_main(argv=None):
+    """The side camera's calibration from its picture (see the module notes)."""
+    import e02_plan as PL
+    ap = argparse.ArgumentParser(description="side camera calibration from the side picture (grain matched to the overhead's)")
+    ap.add_argument("--overhead-video", required=True)
+    ap.add_argument("--side-video", required=True)
+    ap.add_argument("--overhead-cal", default=os.path.join(HERE, "data", "overhead_floorcal_roam1.json"))
+    ap.add_argument("--overhead-range", default="12100,18100", help="overhead frames for the median picture (roam1: roaming)")
+    ap.add_argument("--side-range", default="14100,21100", help="side frames for the median picture")
+    ap.add_argument("--n", type=int, default=21, help="pictures in each median")
+    ap.add_argument("--check-frame", type=int, default=15000, help="side frame (colour) for the tape check and picture")
+    ap.add_argument("--out", required=True, help="folder for the check picture")
+    ap.add_argument("--cal-out", default=os.path.join(HERE, "data", "side_floorcal_roam1.json"))
+    a = ap.parse_args(argv)
+    os.makedirs(a.out, exist_ok=True)
+
+    def reader(path):
+        cap = cv2.VideoCapture(path)
+
+        def read(i, grey=True):
+            cap.set(cv2.CAP_PROP_POS_FRAMES, int(i))
+            ok, img = cap.read()
+            return (cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if grey else img) if ok else None
+        return read
+    ro, rs = reader(a.overhead_video), reader(a.side_video)
+    lo, hi = (int(v) for v in a.overhead_range.split(","))
+    ov = median_picture(ro, np.linspace(lo, hi, a.n).astype(int))
+    lo, hi = (int(v) for v in a.side_range.split(","))
+    sd = median_picture(rs, np.linspace(lo, hi, a.n).astype(int))
+    ocam = CAM.load_camera(a.overhead_cal)
+    P, info = grain_pairs(ov, sd, ocam)
+    cam = fit_from_floor_points(P)
+    W, L = CAM.BOARD_W_CM, CAM.BOARD_L_CM
+    col = rs(a.check_frame, grey=False)
+    info.update(rms_px=cam.fit["rms_px"], loo_rms_cm=cam.fit["loo_rms_cm"], loo_max_cm=cam.fit["loo_max_cm"],
+                k1=float(cam.dist[0]), floor_x_range=[round(float(P[:, 0].min()), 1), round(float(P[:, 0].max()), 1)],
+                floor_y_range=[round(float(P[:, 1].min()), 1), round(float(P[:, 1].max()), 1)],
+                tape_check=tape_check(col, cam, {"x=0": ((0, 0), (0, L)), "y=0": ((0, 0), (W, 0)), "x=W": ((W, 0), (W, L))}),
+                pictures="median of %d overhead frames %s and %d side frames %s" % (a.n, a.overhead_range, a.n, a.side_range))
+    save_side_calibration(cam, a.cal_out, info, kind="picture_calibration", note=(
+        "from the side picture: plywood grain matched to the overhead's picture (SIFT), overhead points taken to the floor "
+        "(z = 0) with %s, RANSAC homography, CameraModel.from_points (lens bend kept if it helps). A robot's outline centre "
+        "is on the plane z = %.2f cm. Made by tools/experiment/e02_sidecam.py." % (os.path.basename(a.overhead_cal), SIDE_Z_CM)))
+    b = PL.Board(xboard_side=1, yboard_side=1)
+    CAM.draw_check(col, cam, os.path.join(a.out, "side_check.png"), board=b,
+                   corners=[cam.project((x, y, 0.0)) for x, y in ((0, 0), (W, 0), (W, L), (0, L))])
+    print(json.dumps(info, indent=1, default=float))
+    print(cam.pose_summary())
+    return cam, info
+
+
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1 and sys.argv[1] == "picture":
+        picture_main(sys.argv[2:])
+    else:
+        main()

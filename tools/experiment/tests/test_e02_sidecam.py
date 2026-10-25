@@ -247,3 +247,121 @@ def test_side_floorcal_roam1_file_loads_and_sees_the_board():
     assert cam.center[2] > 50                                   # above the floor
     u, v = cam.project((61.0, 61.0, 0.0))
     assert cam.in_image(u, v)
+
+
+# ----------------------------------------------------------------------------------- the real side clock (2026-10-25)
+def test_frame_clock_maps_frames_to_times_and_back(tmp_path):
+    p = tmp_path / "frames.csv"
+    p.write_text("frame,t_wall,t_mono,cam_ms\n0,100.0,0.5,0\n1,100.04,0.54,0\n2,100.2,0.70,0\n3,100.24,0.74,0\n")
+    clk = S.FrameClock.from_csv(str(p))
+    assert clk(2) == pytest.approx(0.70)
+    assert S.side_time(1, clk, None) == pytest.approx(0.54)
+    assert S.side_time(1, 0.5, 0.04) == pytest.approx(0.54)          # the fitted form still works
+    assert clk.frame_at(0.62) == pytest.approx(1.5)
+    assert S._side_frame(0.62, clk, None) == pytest.approx(1.5)
+
+
+def test_side_at_works_with_the_real_clock():
+    cam = steep_camera()
+    times = {f: 0.5 + f * 0.0344 for f in range(100)}
+    clk = S.FrameClock(times)
+    u, v = cam.project((40.0, 50.0, S.SIDE_Z_CM))
+    side = {f: [(u, v, 1.0)] for f in range(100)}
+    sx, sy, n = S.side_at(cam, side, 2.0, 40.0, 50.0, clk, None)
+    assert math.hypot(sx - 40.0, sy - 50.0) < 0.1 and n >= 5
+
+
+# ----------------------------------------------------------------------------------- calibration from the picture
+def _floor_texture(seed=5, px_per_cm=4):
+    rng = np.random.default_rng(seed)
+    W, L = int(126 * px_per_cm), int(126 * px_per_cm)
+    t = rng.normal(0, 1, (L // 4, W // 4)).astype(np.float32)
+    t = cv2.resize(cv2.GaussianBlur(t, (0, 0), 1.2), (W, L), interpolation=cv2.INTER_CUBIC)
+    t = (t - t.min()) / (np.ptp(t) + 1e-9) * 200 + 30
+    return t.astype(np.uint8), px_per_cm
+
+
+def _render_floor(cam, tex, ppc, off_cm=2.0):
+    """The floor texture (pixel (i, j) = floor ((j / ppc) - off_cm, (i / ppc) - off_cm)) as cam sees it (no lens)."""
+    R = cam.R
+    Hf = cam.K @ np.column_stack([R[:, 0], R[:, 1], cam.tvec])          # floor (x, y, 1) -> image
+    T = np.array([[1.0 / ppc, 0, -off_cm], [0, 1.0 / ppc, -off_cm], [0, 0, 1]])
+    return cv2.warpPerspective(tex, Hf @ T, tuple(cam.image_size), flags=cv2.INTER_LINEAR, borderValue=20)
+
+
+def test_grain_pairs_and_fit_recover_the_side_camera_from_the_floor_texture():
+    over = steep_camera(C=(61.0, 55.0, 260.0), target=(61.0, 61.0, 0.0), f=560.0)
+    side = steep_camera()
+    tex, ppc = _floor_texture()
+    P, info = S.grain_pairs(_render_floor(over, tex, ppc), _render_floor(side, tex, ppc), over)
+    assert info["inliers"] >= 30
+    fit = S.fit_from_floor_points(P)
+    errs = []
+    for x, y in ((10, 10), (61, 61), (110, 20), (20, 110), (110, 110)):
+        u, v = side.project((x, y, 0.0))
+        fx, fy = fit.to_floor(u, v, 0.0)
+        errs.append(math.hypot(fx - x, fy - y))
+    assert max(errs) < 1.5, errs
+
+
+def test_grain_pairs_refuses_pictures_that_do_not_match():
+    over = steep_camera(C=(61.0, 55.0, 260.0), target=(61.0, 61.0, 0.0), f=560.0)
+    tex, ppc = _floor_texture(seed=5)
+    other, _ = _floor_texture(seed=9)
+    with pytest.raises(ValueError):
+        S.grain_pairs(_render_floor(over, tex, ppc), _render_floor(steep_camera(), other, ppc), over)
+
+
+def test_tape_check_measures_distance_to_blue_tape_and_counts_edges_without_tape():
+    cam = steep_camera()
+    img = np.full((480, 640, 3), 90, np.uint8)
+    a, b = cam.project((0.0, 0.0, 0.0)), cam.project((0.0, 120.0, 0.0))
+    cv2.line(img, (int(round(a[0])) + 8, int(round(a[1]))), (int(round(b[0])) + 8, int(round(b[1]))), (200, 60, 20), 1)
+    # blue (BGR) tape 8 px to the right: the nearest tape pixel is 8 px x sin(the edge's slant) away
+    out = S.tape_check(img, cam, {"x=0": ((0.0, 0.0), (0.0, 120.0)), "x=W": ((120.0, 0.0), (120.0, 120.0))})
+    assert 5.0 <= out["x=0"]["median_px"] <= 8.5 and out["x=0"]["missing"] == 0
+    assert out["x=W"]["missing"] == out["x=W"]["n"] and out["x=W"]["median_px"] is None
+
+
+# ----------------------------------------------------------------------------------- both trackers compared
+def test_compare_tracks_counts_by_region():
+    so = [(t * 0.2, 61.0, 61.0) if t < 10 else (t * 0.2, None, None) for t in range(20)]
+    ss = [(t * 0.2 + 0.01, 61.5, 61.0) if t >= 5 else (t * 0.2 + 0.01, 90.0, 20.0) for t in range(20)]
+    c = S.compare_tracks(so, ss)
+    m = c["middle"]
+    assert m["both"] == 5 and m["disagree"] == 5 and m["side_only"] >= 9 and m["overhead_only"] == 0
+
+
+class _FakeRec:
+    """e02_replay's Recording interface over drawn pictures: a robot box driving along y at 10 cm/s."""
+
+    def __init__(self, cam, n=40, fps=20.0):
+        self.cam, self.n, self.fps = cam, n, fps
+
+    def index(self, t):
+        return max(0, min(self.n - 1, int(round(t * self.fps))))
+
+    def t_frame(self, i):
+        return i / self.fps
+
+    def where(self, i):
+        return 61.0, 20.0 + 10.0 * max(0.0, i / self.fps - 0.5)
+
+    def read(self, i):
+        if not 0 <= i < self.n:
+            return None
+        return _robot_picture(self.cam, *self.where(i))
+
+
+def test_replay_passes_tracker_kw_and_default_is_unchanged():
+    import e02_replay as R
+    cam = steep_camera()
+    rec = _FakeRec(cam)
+    # floor memory comes from the frames before t0: start at 0.5 s with the robot at its spot
+    smp = R.replay(rec, cam, "robot", rec.where(10), [], 0.5, 1.9, tracker_kw=dict(z_cm=S.SIDE_Z_CM, size_per_spot=True))
+    seen = [(t, x, y) for t, x, y in smp if x is not None]
+    assert len(seen) >= 0.6 * len(smp)
+    t, x, y = seen[-1]
+    assert math.hypot(x - rec.where(rec.index(t))[0], y - rec.where(rec.index(t))[1]) < 3.0
+    import inspect
+    assert inspect.signature(R.replay).parameters["tracker_kw"].default is None
