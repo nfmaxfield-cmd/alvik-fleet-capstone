@@ -98,10 +98,11 @@ def chart_gaps(stats, path):
         ax.spines[s].set_visible(False)
     ax.legend(fontsize=8, frameon=False, loc="upper left")
     ax.set_xlim(1.7, 90)
-    fig.text(0.01, 0.01, "Data: track.csv (camera) and robot-logs RAW of 6 real sessions, 2026-10-22 to 10-24; "
-             "line = median, band = middle half; ok-heading runs, gap ends >= 15 cm from the boards.",
+    fig.text(0.01, 0.01, "Measured: distance from each estimate to the camera's position at the end of each gap. Data: "
+             "track.csv + robot-logs RAW, the 7 real sessions with driving\n(2026-10-22 to 10-24); line = median, "
+             "band = middle half; runs with a checked start heading, gap ends 15 cm or more from the boards.",
              fontsize=7, color="#52514e")
-    fig.tight_layout(rect=(0, 0.04, 1, 1))
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
     fig.savefig(path)
     plt.close(fig)
 
@@ -136,9 +137,11 @@ def chart_routes(routes, path):
     for s in ("top", "right"):
         ax.spines[s].set_visible(False)
     ax.legend(fontsize=8, frameon=False, loc="upper right")
-    fig.text(0.01, 0.01, "Data: done E02 routes (e02.csv, runs.csv), RAW and track.csv, ok-heading routes; dot = one "
-             "route, bar = median. All start from the robot's own start belief.", fontsize=7, color="#52514e")
-    fig.tight_layout(rect=(0, 0.04, 1, 1))
+    fig.text(0.01, 0.01, "Measured: distance between each estimate's end position and the camera's, per finished route. "
+             "Data: e02.csv, runs.csv, RAW, track.csv (oct23 morning,\nevening, stage 1-2); dot = one route, bar = "
+             "median. Own pose and wheels + gyro start from the robot's start belief; the fused one sees the camera "
+             "for 10 s.", fontsize=7, color="#52514e")
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
     fig.savefig(path)
     plt.close(fig)
 
