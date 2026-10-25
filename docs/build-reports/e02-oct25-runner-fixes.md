@@ -10,8 +10,8 @@ board time. The Pi was not touched.
 **Sources.** Seven dry runs (`logs/e02-20261025-1633*` to `-18*-dryrun` in the build's worktree; the commands are in
 Appendix A). The 15:10 session's `e02_state.json` and `perf.csv`, and two of its video frames. Scripts are in
 `tools/experiment/analyses_oct25/runner_fixes/`: `runsum.py` sums up a run, `border_replay.py` replays the border's
-old and new rule on the same tracks, and `fitbench.py` is the camera-against-fit replay. There are 24 new unit tests
-in `tests/test_e02_runner_fixes.py`. The whole suite passes: 365 tests, 17 skipped.
+old and new rule on the same tracks, and `fitbench.py` is the camera-against-fit replay. There are 23 new unit tests
+in `tests/test_e02_runner_fixes.py`. The whole suite passes: 382 tests, 17 skipped, on main as of 18:05.
 
 **The 15:10 re-creation** (`--dry-start s1510`: the robots on 15:10's spots, `--home`, plus `--dry-scene` events):
 - The border's calibration is shifted, so that line-sensor edge stops leave the robot's centre past the line.
@@ -64,7 +64,7 @@ Run C slowed the camera on purpose to about 4 a second, 20 s in every 45 (25 slo
 - No border holds, no robot off the board, and explore found the board at 120.1 x 121.7 cm.
 - But Center's ray drove into parked Right (6.7 cm centre to centre). The watchdog's parked-robot check wanted
   6 pictures in 0.5 s, which means 12 a second, so at 4 a second it never looked. It now uses 1.2 s and 4 pictures
-  at a slow rate. The parked robots' clearance also widens with the lag, like the border. Run C2 checks this: [C2].
+  at a slow rate. The parked robots' clearance also widens with the lag, like the border. Run C2, the same slow camera, checks it. The closest robots came was 13.7 cm, with no touch, no parked-robot stop needed, 12 waits and 0 border holds. Both runs had 2 lost holds after explore at 4 pictures a second; those holds were correct.
 
 **Part 3: an object beyond an open edge.** When the front stop ends a ray, the robot creeps on to find out what it
 met:
@@ -82,8 +82,8 @@ can do is a brick on the plywood 4 cm in from an open edge.
 |---|---|---|---|---|---|
 | D1, brick 5-10 cm past the x = 0 edge, front stop 2 cm | 9 | 1 (object about 6 cm on) | 7 | 1 | failed (sides) |
 | D2, brick 4-8 cm inside the y = 0 edge, front stop 2 cm | 9 | 1 (at the brick's end) | 7 | 1 | failed (fit 8.9 px) |
-| D1b, the same at 3 cm | [D1b] | | | | |
-| D2b, the same at 3 cm | [D2b] | | | | |
+| **D1b, the same at 3 cm** | 6 | **2 (objects about 6 cm on)** | 4 | 0 | **board found, 122.5 x 121.8 cm; fit 2.3 px** |
+| **D2b, the same at 3 cm** | 9 | 0 | **8** | 1 | failed (fit 9.9 px): see below |
 
 At 2 cm both D runs' camera fits went bad: each robot's path fitted 6-20 px, against 1-4 in run A, and wheel scales
 came out 0.89-1.10. A slanting creep touches with the bumper's corner before the front sensor's centre reads 2 cm, and
@@ -104,9 +104,9 @@ of the line sensors when the robot stopped, so 4 cm of creep still reaches it.
 4. **The speed guard works on a slow camera, and it found a real gap.** The watchdog's parked-robot check was blind
    below 12 pictures a second, and 15:10 spent minutes at 10-14. That is fixed; run C2 is the check.
 5. **Telling an open edge from an object beyond it works call by call**, in the simulator's terms. But at 2 cm the
-   creep spoiled the camera fit. At 3 cm: [D-conclusion].
+   creep spoiled the camera fit. At 3 cm it is right on both counts with the object beyond the edge: the edge was called open twice and explore found the board. With an object on the plywood, every creep that reached it called it blocked. That run's fit still failed, because the brick on the working floor brushed the robots on normal legs: wheels counted 3-7 cm more than the robots moved on 4 legs. The tracker's error near the brick was 0.3 cm, so the camera was not the cause. The fit check caught it and the run fell back safely. A board out from the plywood, with floor under the gap, cannot be tested until the simulator has floor beyond the plywood.
 6. **Part 2c, what else slowed the 16:00 session: its logs are not uploaded yet.** The releases list ends at
-   `e02-session-20261025-151004`, checked at 17:00 and 18:0x. So this could not be answered.
+   `e02-session-20261025-151004`, checked at 17:00 and again at 18:10. So this could not be answered.
 
 ## What's next
 
@@ -149,7 +149,9 @@ of the line sensors when the robot stopped, so 4 cm of creep still reaches it.
 - The fit helper on the Pi: start-up time (it imports numpy and OpenCV) and how long the fit takes there.
 - Explore when a cut stop is not seen by the camera: the leg's first part is then missing from the path. This was
   true before this build too.
-- `explore_home` re-aimed beside its start (the 7.5 / 15 cm targets): seen in unit tests, not yet in a dry run.
+- `explore_home` re-aimed beside its start (the 7.5 / 15 cm targets): not seen in a dry run yet. Every blocked home leg so far was cut short or kept still.
+- Robots 11.9 cm apart centre to centre in D1b, a possible corner touch: a test that measures body-to-body gaps (outlines, not centres) during explore.
+- An object on the plywood near an open edge: the robots brush it on ordinary legs and the fit fails. Decide whether explore should treat that as "stop and ask".
 
 ## Sweep 2: possible inaccuracies in what this relied on
 
@@ -186,7 +188,9 @@ each in its own network namespace (`unshare -n`), so that they could run beside 
 | C | 170419 | `--dry-start s1510 --dry-guard-shift=-14/-14 --dry-slow-camera 45/20/200/100 --seed 11` | board found; 12 guard waits; the 6.7 cm touch |
 | D1 | 172639 | `--dry-start parks --dry-bricks=-8,60,100,5,90 --dry-bricks-now --seed 12` | creep front stop 2 cm |
 | D2 | 172440 | `--dry-start parks --dry-bricks=60,6,30,4,0 --dry-bricks-now --seed 13` | creep front stop 2 cm |
-| D1b, D2b, C2 | [folders] | as D1, D2, C, after the 3 cm creep stop and the slow-camera hazard fix | [results] |
+| D1b | 174356 | as D1, creep stop 3 cm | board found 122.5 x 121.8 cm; 2 open edges with the object beyond; closest robots 11.9 cm |
+| D2b | 174411 | as D2, creep stop 3 cm | 8 blocked, 1 neither; fit 9.9 px (the brick brushing robots), fallback |
+| C2 | 174426 | as C, after the slow-camera hazard fix | board found 123.6 x 122.3 cm; closest 13.7 cm; 12 waits; border replay 7 of 17 back-offs old, 0 new |
 
 -9 cm in A was not enough to put the simulator's edge stops past the line (they end 8.7-10.3 cm in). The border
 replay uses -14 cm.
