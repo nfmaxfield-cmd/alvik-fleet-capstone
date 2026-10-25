@@ -1,0 +1,1157 @@
+session,robot,t,hm,kind,heading_sent,dth_sent_minus_own,err_before,err_after,turn_before_meas,first_legs
+oct22-0816,Left,1792671535.94,08:18,placeholder,90.0,109.3,,78.9,0,g+10 g+6 t+40 t-40
+oct22-0816,Left,1792671548.55,08:19,position,,,78.9,,0,g-6
+oct22-0816,Left,1792671550.28,08:19,position,,,,,0,g-6
+oct22-0816,Left,1792671552.15,08:19,position,,,,,92,g-6 t+92 g+4
+oct22-0816,Left,1792671558.87,08:19,heading,6.4,-175.9,,,361,g-3 t-116 t-78 t+168
+oct22-0816,Left,1792671794.66,08:23,placeholder,90.0,117.4,,45.0,0,g+10 t+80 g+10 t-3
+oct22-0816,Left,1792671816.91,08:23,heading,-8.0,-42.6,,,0,g-7
+oct22-0816,Left,1792671819.4,08:23,heading,-8.0,0.7,,,0,g-7
+oct22-0816,Left,1792671821.54,08:23,heading,-8.0,0.2,,,0,g-7
+oct22-0816,Left,1792671872.91,08:24,heading,-9.1,-0.7,,5.3,20,t-18 t+2 g+10 t+11
+oct22-0816,Left,1792671896.76,08:24,heading,11.2,-2.2,2.0,-0.9,0,g+95 t+180 g+58 t-158
+oct22-0816,Left,1792671923.28,08:25,heading,33.8,1.0,,0.6,0,g+95 t+180 g+67 t-157
+oct22-0816,Left,1792671950.56,08:25,heading,56.2,0.2,,-0.2,0,g+95 t+180 g+63 t-157
+oct22-0816,Left,1792671977.07,08:26,heading,78.8,0.0,,,341,g+95 t+40 t-40 t+180
+oct22-0816,Left,1792672278.03,08:31,placeholder,90.0,149.1,,175.5,0,g+10 t-163 t-1 g+10
+oct22-0816,Left,1792672303.6,08:31,heading,-8.0,-175.3,,,0,g-6
+oct22-0816,Left,1792672305.46,08:31,heading,-8.0,0.5,,,0,g-6
+oct22-0816,Left,1792672307.44,08:31,heading,-8.0,0.6,,,0,g-6
+oct22-0816,Left,1792672310.49,08:31,heading,-8.6,-0.3,,,0,
+oct22-0816,Left,1792672338.92,08:32,heading,89.5,-0.0,,,185,t+105 g+10 t+40 t-40
+oct22-0816,Left,1792672356.6,08:32,heading,89.5,-105.9,,,0,g-5 g+4
+oct22-0816,Center,1792671823.99,08:23,placeholder,90.0,-63.7,,0.3,0,g+10 t-90 t-6 g+11
+oct22-0816,Center,1792671836.4,08:23,heading,99.6,1.2,,,0,g-6
+oct22-0816,Center,1792671838.45,08:23,heading,99.6,0.0,,,0,g-6
+oct22-0816,Center,1792671840.19,08:24,heading,99.6,0.1,,,4,g-6 t-4
+oct22-0816,Right,1792671844.2,08:24,placeholder,90.0,,,76.8,0,g+10 t+60 g+10 t+40
+oct22-0816,Right,1792671864.1,08:24,heading,14.0,-81.0,,-4.7,0,g-7
+oct22-0816,Right,1792671866.49,08:24,heading,14.0,-0.6,-4.7,,0,g-7
+oct22-0816,Right,1792671868.37,08:24,heading,14.0,0.1,,,3,g-7 t+3
+oct22-0951,Left,1792677148.47,09:52,placeholder,90.0,,,83.8,0,g+10 t+93 t-7 g+15
+oct22-0951,Left,1792677164.85,09:52,position,,,,-95.0,0,g-7 t-74 g+10 g+10
+oct22-0951,Left,1792677504.7,09:58,placeholder,90.0,26.7,,103.0,0,g+10 t+148 g+10 t+40
+oct22-0951,Left,1792677527.69,09:58,heading,-13.4,105.9,105.6,,145,g-2 t-145
+oct22-0951,Left,1792677532.83,09:58,heading,-8.0,149.1,,1.1,0,g-8
+oct22-0951,Left,1792677535.06,09:58,heading,-8.0,0.0,1.1,0.9,0,g-8
+oct22-0951,Left,1792677537.3,09:58,heading,-8.0,0.4,0.9,1.5,0,g-8
+oct22-0951,Left,1792677753.61,10:02,heading,-9.2,-0.8,1.5,-5.2,41,t-37 t+4 g+10 t-6
+oct22-0951,Left,1792677779.17,10:02,heading,11.2,1.2,-1.3,-1.2,0,g+95 t+180 g+59 t-159
+oct22-0951,Left,1792677803.46,10:03,heading,33.8,2.0,,3.7,0,g+95 t+180 g+64 t+40
+oct22-0951,Left,1792678193.58,10:09,placeholder,90.0,-124.6,,-127.9,0,g+10 t-116 g+10 t+40
+oct22-0951,Left,1792678220.74,10:10,heading,-141.6,-159.0,-126.3,,153,g-4 t-153
+oct22-0951,Left,1792678226.2,10:10,heading,-8.0,-72.9,,1.9,0,g-8
+oct22-0951,Left,1792678228.26,10:10,heading,-8.0,0.2,1.9,2.4,0,g-8
+oct22-0951,Left,1792678230.3,10:10,heading,-8.0,0.2,2.4,2.7,0,g-8
+oct22-0951,Left,1792678233.68,10:10,heading,-10.6,-2.7,2.7,,0,
+oct22-0951,Left,1792678265.67,10:11,find,-0.1,,,,0,
+oct22-0951,Left,1792678271.87,10:11,heading,-0.1,-0.4,,,177,t-177 g+10 t+6 g+58
+oct22-0951,Left,1792678295.31,10:11,heading,-8.0,3.2,,6.6,0,g-8
+oct22-0951,Left,1792678297.56,10:11,heading,-8.0,0.2,6.6,7.7,0,g-8
+oct22-0951,Left,1792678299.62,10:11,heading,-8.0,0.4,7.7,2.6,0,g-8 t+6
+oct22-0951,Left,1792679954.44,10:39,heading,-8.0,-5.3,2.6,,80,t+40 t-40
+oct22-0951,Left,1792679967.81,10:39,placeholder,90.0,102.3,,,257,g+10 t-177 t+40 t-40
+oct22-0951,Left,1792679998.34,10:39,placeholder,90.0,177.9,,-77.3,0,g+10 t-167 t+62 g+10
+oct22-0951,Left,1792710939.56,19:15,placeholder,90.0,,,-49.7,0,g+10 t-110 t+40 t-40
+oct22-0951,Left,1792710989.63,19:16,heading,-144.4,47.7,,,0,g-1
+oct22-0951,Left,1792711071.07,19:17,placeholder,90.0,-126.9,,,372,g+10 t+40 t-40 t-40
+oct22-0951,Left,1792711106.05,19:18,placeholder,90.0,53.2,,,250,g+10 t+40 t-40 t+7
+oct22-0951,Left,1792711140.85,19:19,placeholder,90.0,-9.2,,,339,g+10 t+40 t-40 t-19
+oct22-0951,Left,1792711179.3,19:19,placeholder,90.0,18.1,,,0,g+10
+oct22-0951,Center,1792677539.86,09:58,placeholder,90.0,,,13.9,0,g+10 t-70 t+4 g+10
+oct22-0951,Center,1792677558.03,09:59,heading,99.6,-12.4,,,0,g-7
+oct22-0951,Center,1792677560.19,09:59,heading,99.6,-0.3,,,0,g-7
+oct22-0951,Center,1792677562.3,09:59,heading,99.6,0.2,,,0,g-7
+oct22-0951,Center,1792678304.75,10:11,heading,97.3,-2.1,,,0,
+oct22-0951,Center,1792678336.8,10:12,find,-0.2,,,,0,
+oct22-0951,Center,1792678338.76,10:12,heading,-0.2,-0.4,,,2436,t+96 g+14 t+90 t-90
+oct22-0951,Center,1792678547.97,10:15,placeholder,90.0,-28.1,,-19.3,0,g+10 t-144 g+10 t+40
+oct22-0951,Center,1792678584.7,10:16,heading,99.6,21.4,,-0.2,0,g-9
+oct22-0951,Center,1792678586.85,10:16,heading,99.6,-0.2,-0.2,-2.4,0,g-9 t-88 g+2 t+40
+oct22-0951,Center,1792678619.19,10:16,placeholder,90.0,79.1,,,760,g+10 t+70 t+40 t-40
+oct22-0951,Center,1792679005.62,10:23,placeholder,90.0,84.9,,,338,g+10 t+40 t-40 g+10
+oct22-0951,Center,1792679106.88,10:25,heading,99.6,-177.4,177.1,,0,g-7
+oct22-0951,Center,1792679108.8,10:25,heading,99.6,0.3,,,0,g-7
+oct22-0951,Center,1792679110.81,10:25,heading,99.6,-0.2,,,0,g-7
+oct22-0951,Center,1792710991.37,19:16,placeholder,90.0,,,-30.1,0,g+10 t-149 g+10 g+60
+oct22-0951,Center,1792711027.62,19:17,heading,99.6,34.0,,,490,g-8 t+40 t-40 g+4
+oct22-0951,Right,1792677564.86,09:59,placeholder,90.0,,,80.8,0,g+10 t+89 t-3 g+10
+oct22-0951,Right,1792677743.64,10:02,heading,14.0,-85.0,,0.9,0,g-8
+oct22-0951,Right,1792677745.88,10:02,heading,14.0,-1.6,0.9,0.9,0,g-8
+oct22-0951,Right,1792677747.91,10:02,heading,14.0,-0.5,0.9,-5.9,0,g-8 g+2
+oct22-0951,Right,1792679115.21,10:25,heading,15.4,1.4,-5.9,,0,
+oct22-0951,Right,1792679119.97,10:25,heading,16.7,1.9,,0.1,22,t-17 t+6 g+9 t+40
+oct22-0951,Right,1792679230.52,10:27,placeholder,90.0,160.8,,169.6,0,g+10
+oct22-0951,Right,1792679233.1,10:27,heading,-80.0,-168.4,169.6,,236,g-3 t+96 t-140 g+4
+oct22-0951,Right,1792679252.99,10:27,heading,-80.0,42.9,,,281,g-3 t+144 t-137 g+4
+oct22-0951,Right,1792679264.6,10:27,heading,-80.0,-5.3,,,339,g-3 t+134 t+43 t-161
+oct22-0951,Right,1792679416.7,10:30,heading,-103.8,-40.7,,,0,
+oct22-0951,Right,1792679452.34,10:30,find,-0.1,,,,0,
+oct22-0951,Right,1792679500.21,10:31,heading,-136.5,0.0,,,2386,t+137 g+10 t+90 t-90
+oct22-0951,Right,1792679905.0,10:38,placeholder,90.0,-76.7,,-45.9,0,g+10 g+27 t+40 t-40
+oct22-0951,Right,1792679933.61,10:38,placeholder,90.0,2.6,,-30.8,0,g+10 t+175 t-5 g+9
+oct22-0951,Right,1792679946.88,10:39,heading,14.0,38.0,-37.5,0.4,0,g-8
+oct22-0951,Right,1792679948.89,10:39,heading,14.0,-1.1,0.4,4.4,0,g-8
+oct22-0951,Right,1792679950.82,10:39,heading,14.0,0.2,4.4,,0,g-8
+oct22-1929,Left,1792711812.24,19:30,placeholder,90.0,-6.5,,,303,g+10 t+40 t-40 t+143
+oct22-1929,Left,1792711837.27,19:30,placeholder,90.0,-142.9,,,430,g+10 t+40 t-40 t+90
+oct22-1929,Left,1792711890.55,19:31,placeholder,90.0,91.8,,,349,g+10 t+40 t-40 t-40
+oct22-1929,Left,1792711919.76,19:31,placeholder,90.0,-108.3,,,296,g+10 t+40 t-40 t-147
+oct22-1929,Left,1792712205.17,19:36,placeholder,90.0,-146.1,,,397,g+10 t+40 t-40 t+157
+oct22-1929,Left,1792712326.05,19:38,placeholder,90.0,-156.5,,,461,g+10 t+90 g+10 t+40
+oct22-1929,Left,1792712525.73,19:42,placeholder,90.0,40.1,,,211,g+10 t+40 t-40 t-131
+oct22-1929,Left,1792712665.76,19:44,placeholder,90.0,130.7,,,290,g+10 t+40 t-40 t-50
+oct22-1929,Left,1792713207.86,19:53,placeholder,90.0,50.9,,,173,g+10 t+40 t-40 t+93
+oct22-1954,Left,1792713321.6,19:55,placeholder,90.0,99.0,,153.4,2,t+2 g+10 t+153 g+10
+oct22-1954,Left,1792713338.2,19:55,heading,-8.0,-156.1,,,0,g-7
+oct22-1954,Left,1792713340.48,19:55,heading,-8.0,0.4,,,0,g-7
+oct22-1954,Left,1792713342.44,19:55,heading,-8.0,-0.1,,,0,g-7
+oct22-1954,Left,1792713409.54,19:56,heading,-7.6,-0.0,,-0.7,21,t-19 t+2 g+10 g+13
+oct22-1954,Left,1792713433.17,19:57,heading,11.2,-0.9,0.9,-1.7,0,g+95 t+180 g+56 t-159
+oct22-1954,Left,1792713456.42,19:57,heading,33.8,3.7,,4.4,0,g+95 t+180 g+61 t-153
+oct22-1954,Left,1792713480.76,19:58,heading,56.2,-5.3,,-0.2,0,g+95 t+180 g+58 t-157
+oct22-1954,Left,1792713505.57,19:58,heading,78.8,0.0,,-1.3,0,g+95 t+180 g+54 t-159
+oct22-1954,Left,1792713527.77,19:58,heading,101.2,1.5,,1.7,0,g+95 t+180 g+60 t+180
+oct22-1954,Left,1792713556.13,19:59,heading,123.8,-2.3,2.0,-0.2,0,g+95 t+180 g+64 t-90
+oct22-1954,Left,1792713580.15,19:59,heading,-146.2,0.2,,-0.2,0,g+95
+oct22-1954,Left,1792713589.98,19:59,heading,-146.2,0.1,-0.2,5.1,0,g-7 t+180 g+75 t+152
+oct22-1954,Left,1792713618.83,20:00,heading,-123.8,0.8,-0.8,0.2,0,g+95
+oct22-1954,Center,1792713345.18,19:55,placeholder,90.0,-94.2,,-84.6,2,t+2 g+10 t-157 t-2
+oct22-1954,Center,1792713364.25,19:56,heading,99.6,85.1,-85.1,,0,g-7
+oct22-1954,Center,1792713366.39,19:56,heading,99.6,0.4,,,0,g-7
+oct22-1954,Center,1792713368.39,19:56,heading,99.6,-1.1,,,0,g-7
+oct22-1954,Right,1792713371.06,19:56,placeholder,90.0,,,74.5,2,t+2 g+10 t+162 g+10
+oct22-1954,Right,1792713400.86,19:56,heading,14.0,-79.3,,,0,g-7
+oct22-1954,Right,1792713402.68,19:56,heading,14.0,-0.3,,,0,g-7
+oct22-1954,Right,1792713404.49,19:56,heading,14.0,-1.7,,,5,g-7 t-5
+oct22-2005,Left,1792713986.75,20:06,placeholder,90.0,34.5,,34.5,2,t+2 g+10 t+38 g+10
+oct22-2005,Left,1792714013.11,20:06,heading,-8.0,-28.8,,,0,g-8
+oct22-2005,Left,1792714015.24,20:06,heading,-8.0,0.1,,,0,g-8
+oct22-2005,Left,1792714017.8,20:06,heading,-8.0,0.4,,6.0,0,g-8 g+0 t-89 g+4
+oct22-2005,Left,1792714062.68,20:07,placeholder,90.0,28.9,,,448,t+2 t+90 t+2 t+90
+oct22-2005,Left,1792714104.65,20:08,placeholder,90.0,-12.5,,,278,t+2 t+90 t+2 t+90
+oct22-2005,Left,1792714151.48,20:09,heading,-8.0,-26.6,26.6,,0,g-7
+oct22-2005,Left,1792714153.39,20:09,heading,-8.0,0.3,,,0,g-7
+oct22-2005,Left,1792714155.32,20:09,heading,-8.0,-0.1,,,0,g-7
+oct22-2005,Left,1792714629.63,20:17,heading,-8.6,-0.4,,,0,
+oct22-2005,Left,1792714662.15,20:17,find,0.2,,,,0,
+oct22-2005,Left,1792714664.42,20:17,heading,0.2,-0.0,,,9,t-9 g+14
+oct22-2005,Left,1792714667.95,20:17,heading,-9.0,0.2,,,419,g-8 t+40 t-40 t-40
+oct22-2005,Left,1792714742.11,20:19,heading,-8.0,-11.8,,,0,g-7
+oct22-2005,Left,1792714744.12,20:19,heading,-8.0,0.1,,,0,
+oct22-2005,Left,1792714755.0,20:19,heading,-8.0,0.1,,,0,g-7
+oct22-2005,Left,1792714756.88,20:19,heading,-8.0,0.1,,-5.6,9,g-7 t+7 t-3 g+9
+oct22-2005,Center,1792714158.07,20:09,placeholder,90.0,-10.4,,,186,t+2 g+10 t+40 t-40
+oct22-2005,Center,1792714182.32,20:09,placeholder,90.0,-28.4,,,146,t+2 g+10 t-64 t+40
+oct22-2005,Center,1792714198.5,20:09,placeholder,90.0,60.9,,,94,t+2 t+90 t+2 g+10
+oct22-2005,Center,1792714220.49,20:10,heading,99.6,-28.5,,-11.3,0,g-9
+oct22-2005,Center,1792714222.66,20:10,heading,99.6,0.0,-11.3,,153,g-9 t-73 t+40 t-40
+oct22-2005,Center,1792714237.34,20:10,placeholder,90.0,61.7,,,448,t+2 t+90 t+2 t+90
+oct22-2005,Center,1792714305.68,20:11,placeholder,90.0,-10.5,,,368,t+2 t+90 t+2 t+90
+oct22-2005,Right,1792714602.48,20:16,placeholder,90.0,79.5,,82.9,2,t+2 g+10 t+5 g+9
+oct22-2005,Right,1792714620.22,20:17,heading,19.8,-75.4,82.9,,2,g-3 t+2
+oct22-2005,Right,1792714623.26,20:17,heading,14.0,-7.1,,4.8,0,g-9
+oct22-2005,Right,1792714625.55,20:17,heading,14.0,-0.5,4.8,,0,g-9
+oct22-2005,Right,1792714767.66,20:19,heading,13.1,-1.4,,,0,
+oct22-2005,Right,1792714785.36,20:19,heading,75.3,-0.1,,,220,t+140 t+40 t-40
+oct22-2005,Right,1792714798.63,20:19,placeholder,90.0,-125.1,,,359,t+2 g+10 t+40 t-40
+oct22-2005,Right,1792714866.75,20:21,heading,14.0,142.3,,,0,g-7
+oct22-2005,Right,1792714868.69,20:21,heading,14.0,-0.7,,,0,g-7
+oct22-2005,Right,1792714870.68,20:21,heading,14.0,-0.3,,,8,g-7 t+8
+oct22-2005,Right,1792715023.22,20:23,heading,14.0,-7.3,,,0,
+oct22-2005,Right,1792715179.11,20:26,heading,0.0,0.1,,,240,t-160 t+40 t-40
+oct22-2005,Right,1792715190.56,20:26,placeholder,90.0,-109.4,,,190,t+2 g+10 t+40 t-40
+oct22-2005,Right,1792715214.19,20:26,placeholder,90.0,27.9,,,278,t+2 t+90 t+2 g+10
+oct22-2005,Right,1792715274.98,20:27,placeholder,90.0,-5.5,,,278,t+2 t+90 t+2 g+10
+oct23-morning,Center,1792759938.46,08:52,placeholder,90.0,,,-74.7,2,t+2 g+10 t-150 g+10
+oct23-morning,Center,1792759954.47,08:52,heading,99.6,78.5,-79.2,1.3,0,g-8
+oct23-morning,Center,1792759956.62,08:52,heading,99.6,-0.6,1.3,1.6,0,g-8
+oct23-morning,Center,1792759958.67,08:52,heading,99.6,-0.1,1.6,0.3,0,g-8
+oct23-morning,Center,1792760466.37,09:01,heading,98.4,-1.4,0.3,,0,
+oct23-morning,Center,1792760495.34,09:01,find,-0.1,,,,80,t+40 t-40
+oct23-morning,Center,1792760507.17,09:01,placeholder,90.0,89.9,,,278,t+2 t+90 t+2 t+90
+oct23-morning,Center,1792760542.01,09:02,heading,99.6,-90.5,,2.2,0,g-8
+oct23-morning,Center,1792760544.26,09:02,heading,99.6,-1.1,2.2,0.8,0,g-8
+oct23-morning,Center,1792760546.28,09:02,heading,99.6,-1.2,0.8,0.1,0,g-8
+oct23-morning,Center,1792760900.57,09:08,heading,98.6,-1.1,0.1,,0,
+oct23-morning,Center,1792760937.62,09:08,find,0.1,,,,0,
+oct23-morning,Center,1792760987.88,09:09,heading,179.6,0.0,,,111,t+110 t-1 g+10 g+52
+oct23-morning,Center,1792761001.86,09:10,heading,-71.9,-0.2,0.7,,171,g-2 t+171
+oct23-morning,Center,1792761007.33,09:10,heading,99.6,-0.2,,-0.7,0,g-8
+oct23-morning,Center,1792761009.36,09:10,heading,99.6,-0.1,-0.7,-0.6,0,g-8
+oct23-morning,Center,1792761011.62,09:10,heading,99.6,-0.5,-0.6,-2.4,0,g-8
+oct23-morning,Center,1792761154.81,09:12,heading,100.9,7.1,-2.4,,0,
+oct23-morning,Center,1792761189.64,09:13,find,0.3,,,,0,
+oct23-morning,Center,1792761240.74,09:14,heading,-135.1,0.1,,27.2,42,t+41 t+1 g+10 t+36
+oct23-morning,Center,1792761263.01,09:14,heading,99.6,-31.6,,,0,g-8
+oct23-morning,Center,1792761265.19,09:14,heading,99.6,-0.4,,-1.5,0,g-8
+oct23-morning,Center,1792761267.43,09:14,heading,99.6,-1.2,-1.5,-1.9,0,g-8
+oct23-morning,Center,1792761509.81,09:18,heading,100.5,12.5,-1.9,,0,
+oct23-morning,Center,1792761539.5,09:18,find,0.4,,,,0,
+oct23-morning,Center,1792761596.36,09:19,heading,-179.5,0.1,,,115,t+113 t-2 g+10 t-34
+oct23-morning,Center,1792761624.3,09:20,heading,99.6,30.8,,0.8,0,g-8
+oct23-morning,Center,1792761626.32,09:20,heading,99.6,-0.6,0.8,-0.3,0,g-8
+oct23-morning,Center,1792761628.42,09:20,heading,99.6,-0.2,-0.3,-1.7,0,g-8
+oct23-morning,Center,1792762184.8,09:29,heading,100.1,20.7,-1.7,,0,
+oct23-morning,Center,1792762211.47,09:30,heading,64.6,0.2,,,119,t-119 g+10 t-21 g+10
+oct23-morning,Center,1792762239.04,09:30,heading,99.6,26.2,,,0,g-8
+oct23-morning,Center,1792762241.33,09:30,heading,99.6,-0.4,,0.8,0,g-8
+oct23-morning,Center,1792762243.41,09:30,heading,99.6,-1.0,0.8,-1.0,0,g-8
+oct23-morning,Center,1792762780.4,09:39,heading,99.0,19.4,-1.0,,0,
+oct23-morning,Center,1792762811.5,09:40,find,0.3,,,,0,
+oct23-morning,Center,1792762825.0,09:40,heading,-137.3,-1.6,,,0,
+oct23-morning,Center,1792762826.86,09:40,position,,,,,0,
+oct23-morning,Center,1792762827.06,09:40,position,,,,,0,
+oct23-morning,Center,1792762827.43,09:40,position,,,,,0,
+oct23-morning,Center,1792762827.9,09:40,position,,,,,0,
+oct23-morning,Center,1792762840.09,09:40,heading,-83.0,5.6,,,0,
+oct23-morning,Center,1792762840.28,09:40,heading,-83.0,2.8,,,0,
+oct23-morning,Center,1792762843.72,09:40,position,,,,,0,
+oct23-morning,Center,1792762844.07,09:40,position,,,,,0,
+oct23-morning,Center,1792762851.11,09:40,position,,,,,0,
+oct23-morning,Center,1792762858.62,09:40,position,,,,,0,
+oct23-morning,Center,1792762860.59,09:41,position,,,,,0,
+oct23-morning,Center,1792762860.61,09:41,position,,,,,0,
+oct23-morning,Center,1792762860.62,09:41,position,,,,,0,
+oct23-morning,Center,1792762860.64,09:41,position,,,,,0,
+oct23-morning,Center,1792762860.66,09:41,position,,,,,0,
+oct23-morning,Center,1792762861.55,09:41,heading,179.5,0.1,,,108,t+106 t-2 g+10 t+4
+oct23-morning,Center,1792762879.97,09:41,heading,99.6,-0.2,,,0,g-8
+oct23-morning,Center,1792762882.15,09:41,heading,99.6,-0.4,,-1.5,0,g-8
+oct23-morning,Center,1792762884.17,09:41,heading,99.6,-0.7,-1.5,-6.4,0,g-8 t+79 t-70 g+4
+oct23-morning,Center,1792762893.87,09:41,heading,110.4,1.9,,,319,g-3 t-15 t-84 t+153
+oct23-morning,Center,1792763588.04,09:53,placeholder,90.0,18.0,,-3.2,2,t+2 g+10 t+21 g+10
+oct23-morning,Center,1792763605.6,09:53,heading,99.6,16.0,,12.3,0,g-7
+oct23-morning,Center,1792763607.67,09:53,heading,99.6,-0.5,12.3,,0,g-7
+oct23-morning,Center,1792763609.8,09:53,heading,99.6,-0.7,,,1036,g-7 t-77 t+23 t-8
+oct23-morning,Center,1792764143.97,10:02,heading,-74.4,7.8,,,0,
+oct23-morning,Center,1792764176.19,10:02,find,0.3,,,,0,
+oct23-morning,Center,1792764226.52,10:03,heading,-135.8,0.1,,3.7,62,t+60 t-2 g+10 t+4
+oct23-morning,Center,1792764249.67,10:04,heading,99.6,3.3,,0.1,0,g-8
+oct23-morning,Center,1792764251.79,10:04,heading,99.6,0.2,0.1,-0.4,0,g-8
+oct23-morning,Center,1792764253.97,10:04,heading,99.6,-0.6,-0.4,-1.8,0,g-8
+oct23-morning,Center,1792764257.5,10:04,heading,100.4,0.7,-1.8,,0,
+oct23-morning,Center,1792764289.58,10:04,find,0.4,,,,135,t-135 g+10 t+24 t-6
+oct23-morning,Center,1792764327.48,10:05,heading,180.0,-4.2,,9.3,14,g-2 g+4 g-5 t+14
+oct23-morning,Center,1792764392.58,10:06,heading,-103.4,10.0,,,88,g-4 t-88
+oct23-morning,Center,1792764396.6,10:06,heading,-180.0,9.9,,,364,g-2 g+4 t-20 t+172
+oct23-morning,Center,1792764415.72,10:06,heading,171.3,0.1,,,114,t+111 t-2 g+10 t+11
+oct23-morning,Center,1792764450.38,10:07,heading,99.6,-3.2,,,0,g-8
+oct23-morning,Center,1792764452.54,10:07,heading,99.6,-0.3,,-1.0,0,g-8
+oct23-morning,Center,1792764454.67,10:07,heading,99.6,-0.4,-1.0,-2.0,0,g-8
+oct23-morning,Center,1792764458.16,10:07,heading,100.6,0.9,-2.0,,0,
+oct23-morning,Center,1792764489.8,10:08,find,0.1,,,,0,
+oct23-morning,Center,1792764540.32,10:09,heading,178.8,0.0,,,111,t+110 t-1 g+10 t-3
+oct23-morning,Center,1792764559.55,10:09,heading,99.6,0.6,,,0,g-7
+oct23-morning,Center,1792764561.52,10:09,heading,99.6,-0.0,,,0,g-7
+oct23-morning,Center,1792764563.66,10:09,heading,99.6,0.0,,,0,g-7
+oct23-morning,Center,1792764679.33,10:11,heading,100.9,6.9,,,0,
+oct23-morning,Center,1792764707.48,10:11,find,0.3,,,,0,
+oct23-morning,Center,1792764758.28,10:12,heading,-135.5,-0.0,,28.0,68,t+39 t+2 g+10 t+27
+oct23-morning,Center,1792764777.56,10:12,heading,99.6,-27.9,,9.3,0,g-8
+oct23-morning,Center,1792764779.62,10:12,heading,99.6,-0.3,9.3,-0.3,0,g-8
+oct23-morning,Center,1792764781.74,10:13,heading,99.6,-0.7,-0.3,-0.6,0,g-8 t+3
+oct23-morning,Center,1792765168.38,10:19,heading,99.6,15.5,-0.6,,0,
+oct23-morning,Center,1792765202.53,10:20,find,0.2,,,,0,
+oct23-morning,Center,1792765258.92,10:20,heading,179.5,0.1,,,107,t+105 t-2 g+10 t+4
+oct23-morning,Center,1792765281.18,10:21,heading,99.6,3.7,,,0,g-8
+oct23-morning,Center,1792765283.34,10:21,heading,99.6,-0.0,,0.1,0,g-8
+oct23-morning,Center,1792765285.51,10:21,heading,99.6,0.2,0.1,-1.8,0,g-8
+oct23-morning,Center,1792765533.77,10:25,heading,99.7,11.6,-1.8,,0,
+oct23-morning,Center,1792765564.53,10:26,find,0.2,,,,0,
+oct23-morning,Center,1792765578.0,10:26,heading,-137.5,-1.3,,,0,
+oct23-morning,Center,1792765578.25,10:26,heading,-137.5,-0.7,,,0,
+oct23-morning,Center,1792765578.61,10:26,heading,-137.5,-0.3,,,0,
+oct23-morning,Center,1792765579.05,10:26,heading,-137.5,-0.1,,,0,
+oct23-morning,Center,1792765579.29,10:26,heading,-136.3,1.1,,,0,
+oct23-morning,Center,1792765612.35,10:26,position,,,,,0,
+oct23-morning,Center,1792765613.99,10:26,position,,,,,0,
+oct23-morning,Center,1792765614.01,10:26,position,,,,,0,
+oct23-morning,Center,1792765614.03,10:26,position,,,,,0,
+oct23-morning,Center,1792765614.05,10:26,position,,,,,0,
+oct23-morning,Center,1792765614.07,10:26,position,,,,,0,
+oct23-morning,Center,1792765614.87,10:26,heading,-137.0,0.2,,1.8,64,t+61 t-3 g+10 t+1
+oct23-morning,Center,1792765636.36,10:27,heading,99.6,5.7,,2.0,0,g-8
+oct23-morning,Center,1792765638.59,10:27,heading,99.6,-0.5,2.0,-0.5,0,g-8
+oct23-morning,Center,1792765640.63,10:27,heading,99.6,-0.3,-0.5,-1.6,0,g-8
+oct23-morning,Center,1792765644.23,10:27,heading,99.7,-0.6,-1.6,,0,
+oct23-morning,Center,1792765674.79,10:27,find,0.3,,,,163,t-149 t+14 g+10 t+15
+oct23-morning,Center,1792765701.85,10:28,heading,-180.0,-11.8,11.1,0.1,8,g-1 g+4 g-4 t+8
+oct23-morning,Center,1792765727.31,10:28,heading,-101.6,5.0,-5.1,,208,g-2 m+1 t-168 t+40
+oct23-morning,Center,1792765750.47,10:29,heading,-101.6,127.9,,,205,g+4 g+4 t-42 t+40
+oct23-morning,Center,1792765803.6,10:30,heading,-105.9,-137.1,137.3,,0,g-2
+oct23-morning,Center,1792765805.47,10:30,heading,-105.9,-0.3,,,119,g-3 t+102 t-14 t+3
+oct23-morning,Center,1792765825.25,10:30,heading,180.0,-1.3,,,5,g-3 t+5
+oct23-morning,Center,1792765829.56,10:30,heading,90.5,-92.9,,,171,t-168 t-3 g+10 t-101
+oct23-morning,Center,1792765860.1,10:31,heading,99.6,94.3,,,0,g-8
+oct23-morning,Center,1792765862.14,10:31,heading,99.6,-0.5,,-0.6,0,g-8
+oct23-morning,Center,1792765864.34,10:31,heading,99.6,-0.1,-0.6,-0.9,0,g-8
+oct23-morning,Center,1792766224.01,10:37,heading,100.3,17.7,-0.9,,0,
+oct23-morning,Center,1792766255.54,10:37,find,0.4,,,,0,
+oct23-morning,Center,1792766312.46,10:38,heading,-179.2,0.0,,,115,t+113 t-2 g+10 t-35
+oct23-morning,Center,1792766340.41,10:39,heading,99.6,33.7,,3.2,0,g-8
+oct23-morning,Center,1792766342.47,10:39,heading,99.6,-0.4,3.2,-0.0,0,g-8
+oct23-morning,Center,1792766344.5,10:39,heading,99.6,-0.5,-0.0,-2.0,0,g-8
+oct23-morning,Center,1792766377.11,10:39,heading,99.2,0.5,-2.0,,0,
+oct23-morning,Center,1792766408.88,10:40,find,0.2,,,,0,
+oct23-morning,Center,1792766458.75,10:40,heading,-179.4,0.1,,,105,t+103 t-2 g+10 t+7
+oct23-morning,Center,1792766482.59,10:41,heading,99.6,3.5,,1.3,0,g-8
+oct23-morning,Center,1792766484.77,10:41,heading,99.6,-0.7,1.3,-0.1,0,g-8
+oct23-morning,Center,1792766487.01,10:41,heading,99.6,-0.8,-0.1,-1.0,0,g-8
+oct23-morning,Center,1792766784.19,10:46,heading,99.6,12.1,-1.0,,0,
+oct23-morning,Center,1792766818.71,10:46,find,0.1,,,,134,t-134 g+10 t+17 t-5
+oct23-morning,Center,1792766954.87,10:49,heading,67.6,179.6,,,145,t-143 t-2 g+10 t-156
+oct23-morning,Center,1792766978.21,10:49,heading,-84.4,159.7,-159.6,,174,g-3 t-174
+oct23-morning,Center,1792766983.96,10:49,heading,99.6,-3.0,,-4.2,0,g-9
+oct23-morning,Center,1792766986.18,10:49,heading,99.6,-0.7,-4.2,-4.4,0,g-9
+oct23-morning,Center,1792766988.34,10:49,heading,99.6,-1.1,-4.4,-5.6,0,g-9 t-5
+oct23-morning,Center,1792767439.14,10:57,heading,99.6,23.1,-5.6,,0,
+oct23-morning,Center,1792767469.31,10:57,find,0.5,,,,0,
+oct23-morning,Center,1792767484.6,10:58,position,,,,,0,
+oct23-morning,Center,1792767484.95,10:58,position,,,,,0,
+oct23-morning,Center,1792767485.26,10:58,position,,,,,0,
+oct23-morning,Center,1792767485.62,10:58,position,,,,,0,
+oct23-morning,Center,1792767494.64,10:58,position,,,,,0,
+oct23-morning,Center,1792767504.69,10:58,position,,,,,0,
+oct23-morning,Center,1792767511.28,10:58,heading,-2.1,-2.5,,,0,
+oct23-morning,Center,1792767513.74,10:58,position,,,,,0,
+oct23-morning,Center,1792767520.31,10:58,heading,86.7,-3.4,,,0,
+oct23-morning,Center,1792767522.75,10:58,position,,,,,0,
+oct23-morning,Center,1792767524.47,10:58,position,,,,,0,
+oct23-morning,Center,1792767524.47,10:58,position,,,,,0,
+oct23-morning,Center,1792767524.48,10:58,position,,,,,0,
+oct23-morning,Center,1792767524.51,10:58,position,,,,,0,
+oct23-morning,Center,1792767524.52,10:58,position,,,,,0,
+oct23-morning,Center,1792767525.36,10:58,heading,178.0,0.2,,,112,t+109 t-2 g+10 t+3
+oct23-morning,Center,1792767542.85,10:59,heading,17.7,5.5,-4.2,,137,g-4 t+137
+oct23-morning,Center,1792767548.05,10:59,heading,99.6,-55.6,,,0,g-8
+oct23-morning,Center,1792767550.07,10:59,heading,99.6,0.0,,,0,g-8
+oct23-morning,Center,1792767552.07,10:59,heading,99.6,-20.0,,,103,g-8 t+103 g+10 t-70
+oct23-morning,Center,1792767572.48,10:59,heading,99.6,75.3,,,6,g-3 t+6
+oct23-morning,Right,1792759961.08,08:52,placeholder,90.0,,,139.8,2,t+2 g+10 t+151 t-89
+oct23-morning,Right,1792759971.87,08:52,heading,14.0,-139.4,,6.1,0,g-7
+oct23-morning,Right,1792759973.86,08:52,heading,14.0,-0.4,6.1,,0,g-7
+oct23-morning,Right,1792759975.76,08:52,heading,14.0,0.1,,,8,g-7 t+8
+oct23-morning,Right,1792760550.24,09:02,heading,14.0,-7.5,,,0,
+oct23-morning,Right,1792760582.75,09:03,find,-0.1,,,,80,t+40 t-40
+oct23-morning,Right,1792760594.55,09:03,placeholder,90.0,89.4,,,278,t+2 t+90 t+2 t+90
+oct23-morning,Right,1792760650.96,09:04,heading,14.0,-91.5,,0.3,0,g-8
+oct23-morning,Right,1792760653.36,09:04,heading,14.0,-1.3,0.3,3.8,0,g-8
+oct23-morning,Right,1792760655.26,09:04,heading,14.0,-0.4,3.8,-1.1,0,g-8
+oct23-morning,Right,1792760799.01,09:06,heading,12.9,-1.7,-1.1,,80,t+40 t-40
+oct23-morning,Right,1792760857.13,09:07,placeholder,90.0,90.2,,,186,t+2 t+90 t+2 t+90
+oct23-morning,Right,1792760892.54,09:08,heading,14.0,-178.9,,6.1,0,g-8
+oct23-morning,Right,1792760894.59,09:08,heading,14.0,-1.3,6.1,2.1,0,g-8
+oct23-morning,Right,1792760896.78,09:08,heading,14.0,-0.7,2.1,-0.4,0,g-8
+oct23-morning,Right,1792761015.66,09:10,heading,11.5,-2.9,-0.4,,0,
+oct23-morning,Right,1792761048.1,09:10,find,-0.0,,,,0,
+oct23-morning,Right,1792761098.53,09:11,heading,-179.7,-0.0,,-0.9,21,t+21 g+10 t-2 g+41
+oct23-morning,Right,1792761114.45,09:11,heading,14.0,1.3,,1.7,0,g-8
+oct23-morning,Right,1792761116.53,09:11,heading,14.0,-0.4,1.7,2.2,0,g-8
+oct23-morning,Right,1792761118.61,09:11,heading,14.0,-0.4,2.2,-1.8,0,g-8
+oct23-morning,Right,1792761385.96,09:16,heading,13.4,-8.7,-1.8,,0,
+oct23-morning,Right,1792761418.67,09:16,find,-0.3,,,,0,
+oct23-morning,Right,1792761469.46,09:17,heading,-134.9,0.0,,30.0,52,t-51 t+1 g+10 t+36
+oct23-morning,Right,1792761494.97,09:18,heading,-115.0,-31.3,,,129,g-1 t+129
+oct23-morning,Right,1792761500.09,09:18,heading,14.0,-2.4,,-2.9,0,g-9
+oct23-morning,Right,1792761502.18,09:18,heading,14.0,0.4,-2.9,-0.6,0,g-9
+oct23-morning,Right,1792761504.29,09:18,heading,14.0,-0.3,-0.6,-3.2,0,g-9 g+1
+oct23-morning,Right,1792761831.49,09:23,heading,16.0,-6.2,-3.2,,0,
+oct23-morning,Right,1792761864.73,09:24,find,-0.3,,,,0,
+oct23-morning,Right,1792761921.36,09:25,heading,-179.4,-0.0,,-26.0,27,t+26 t-1 g+10 t-35
+oct23-morning,Right,1792761942.73,09:25,heading,14.0,27.2,,1.1,0,g-9
+oct23-morning,Right,1792761944.87,09:25,heading,14.0,-0.3,1.1,6.4,0,g-9
+oct23-morning,Right,1792761947.16,09:25,heading,14.0,-0.2,6.4,-0.2,0,g-9
+oct23-morning,Right,1792762063.07,09:27,heading,11.6,-2.6,-0.2,,0,
+oct23-morning,Right,1792762096.22,09:28,find,-0.4,,,,0,
+oct23-morning,Right,1792762152.85,09:29,heading,179.1,-0.0,,-29.7,30,t+29 t-1 g+10 t-41
+oct23-morning,Right,1792762176.55,09:29,heading,14.0,25.9,,-0.7,0,g-9
+oct23-morning,Right,1792762178.86,09:29,heading,14.0,0.3,-0.7,4.2,0,g-9
+oct23-morning,Right,1792762180.95,09:29,heading,14.0,0.2,4.2,-0.4,0,g-9
+oct23-morning,Right,1792762247.57,09:30,heading,12.9,-1.0,-0.4,,0,
+oct23-morning,Right,1792762281.04,09:31,find,0.3,,,,0,
+oct23-morning,Right,1792762294.32,09:31,heading,-140.3,-2.6,,,0,
+oct23-morning,Right,1792762296.05,09:31,position,,,,,0,
+oct23-morning,Right,1792762296.4,09:31,position,,,,,0,
+oct23-morning,Right,1792762296.74,09:31,position,,,,,0,
+oct23-morning,Right,1792762297.08,09:31,position,,,,,0,
+oct23-morning,Right,1792762306.11,09:31,position,,,,,0,
+oct23-morning,Right,1792762306.48,09:31,position,,,,,0,
+oct23-morning,Right,1792762316.51,09:31,position,,,,,0,
+oct23-morning,Right,1792762322.71,09:32,heading,-1.9,1.0,,,0,
+oct23-morning,Right,1792762325.19,09:32,position,,,,,0,
+oct23-morning,Right,1792762333.81,09:32,position,,,,,0,
+oct23-morning,Right,1792762335.69,09:32,position,,,,,0,
+oct23-morning,Right,1792762335.69,09:32,position,,,,,0,
+oct23-morning,Right,1792762335.72,09:32,position,,,,,0,
+oct23-morning,Right,1792762335.74,09:32,position,,,,,0,
+oct23-morning,Right,1792762335.77,09:32,position,,,,,0,
+oct23-morning,Right,1792762336.77,09:32,heading,178.6,0.0,,-4.0,15,t+15 g+10 t-6 g+42
+oct23-morning,Right,1792762359.58,09:32,heading,-87.7,21.7,,,118,g-3 t+118
+oct23-morning,Right,1792762364.62,09:32,heading,14.0,-17.7,,-1.4,0,g-9
+oct23-morning,Right,1792762366.71,09:32,heading,14.0,0.3,-1.4,2.9,0,g-9
+oct23-morning,Right,1792762368.85,09:32,heading,14.0,-0.9,2.9,-2.2,0,g-9
+oct23-morning,Right,1792762909.99,09:41,heading,14.2,6.4,-2.2,,0,
+oct23-morning,Right,1792762943.38,09:42,find,0.3,,,,0,
+oct23-morning,Right,1792762992.92,09:43,heading,179.7,0.0,,2.3,15,t+15 g+10 t+2 g+48
+oct23-morning,Right,1792763009.29,09:43,heading,14.0,-1.2,,-0.6,0,g-8
+oct23-morning,Right,1792763011.69,09:43,heading,14.0,-0.3,-0.6,0.6,0,g-8
+oct23-morning,Right,1792763013.72,09:43,heading,14.0,-0.9,0.6,-2.4,0,g-8
+oct23-morning,Right,1792763017.14,09:43,heading,14.5,-0.9,-2.4,,0,
+oct23-morning,Right,1792763050.27,09:44,find,0.2,,,,40,t+40
+oct23-morning,Right,1792763078.03,09:44,heading,0.2,-40.6,,,80,g+4 t+40 t-40
+oct23-morning,Right,1792763650.11,09:54,placeholder,90.0,95.0,,,448,t+2 t+90 t+2 t+90
+oct23-morning,Right,1792763682.64,09:54,placeholder,90.0,-11.4,,,94,t+2 t+90 t+2 g+10
+oct23-morning,Right,1792763707.58,09:55,heading,14.0,-32.8,,-0.9,0,g-8
+oct23-morning,Right,1792763709.77,09:55,heading,14.0,-0.5,-0.9,1.9,0,g-8
+oct23-morning,Right,1792763711.94,09:55,heading,14.0,-0.0,1.9,-1.6,0,g-8
+oct23-morning,Right,1792763718.78,09:55,heading,14.2,0.2,-1.6,,0,
+oct23-morning,Right,1792763752.25,09:55,find,0.3,,,,149,t-149 m+2
+oct23-morning,Right,1792763771.37,09:56,heading,-148.0,0.0,,12.2,11,t-11 g+10 t+13 g+60
+oct23-morning,Right,1792763853.62,09:57,placeholder,90.0,-120.4,,-109.4,2,t+2 g+10 t-172 t+5
+oct23-morning,Right,1792763910.12,09:58,heading,14.0,107.2,,0.1,0,g-8
+oct23-morning,Right,1792763912.26,09:58,heading,14.0,0.2,0.1,5.0,0,g-8
+oct23-morning,Right,1792763914.65,09:58,heading,14.0,-1.0,5.0,0.4,0,g-8
+oct23-morning,Right,1792764787.21,10:13,heading,12.4,8.0,0.4,,0,
+oct23-morning,Right,1792764820.06,10:13,find,0.1,,,,0,
+oct23-morning,Right,1792764870.63,10:14,heading,-179.7,-0.0,,0.5,21,t+21 g+10 g+43 t+174
+oct23-morning,Right,1792764885.21,10:14,heading,14.0,-0.3,,-0.1,0,g-8
+oct23-morning,Right,1792764887.43,10:14,heading,14.0,-0.6,-0.1,3.4,0,g-8
+oct23-morning,Right,1792764889.58,10:14,heading,14.0,-1.1,3.4,-3.3,0,g-8
+oct23-morning,Right,1792765289.8,10:21,heading,14.0,6.4,-3.3,,0,
+oct23-morning,Right,1792765324.28,10:22,find,0.2,,,,0,
+oct23-morning,Right,1792765339.43,10:22,position,,,,,0,
+oct23-morning,Right,1792765339.76,10:22,position,,,,,0,
+oct23-morning,Right,1792765340.46,10:22,position,,,,,0,
+oct23-morning,Right,1792765356.08,10:22,position,,,,,0,
+oct23-morning,Right,1792765356.41,10:22,position,,,,,0,
+oct23-morning,Right,1792765360.59,10:22,heading,92.3,0.3,,,0,
+oct23-morning,Right,1792765363.03,10:22,position,,,,,0,
+oct23-morning,Right,1792765370.99,10:22,position,,,,,0,
+oct23-morning,Right,1792765372.71,10:22,position,,,,,0,
+oct23-morning,Right,1792765372.73,10:22,position,,,,,0,
+oct23-morning,Right,1792765373.71,10:22,heading,-179.9,0.0,,1.9,12,t+12 g+10 t+2 g+46
+oct23-morning,Right,1792765385.84,10:23,heading,-165.7,1.3,-0.9,,180,g-2 t+180
+oct23-morning,Right,1792765391.61,10:23,heading,14.0,-0.7,,1.2,0,g-9
+oct23-morning,Right,1792765393.8,10:23,heading,14.0,0.1,1.2,1.0,0,g-9
+oct23-morning,Right,1792765395.89,10:23,heading,14.0,-0.4,1.0,-2.1,0,g-9
+oct23-morning,Right,1792765868.41,10:31,heading,14.0,6.6,-2.1,,0,
+oct23-morning,Right,1792765881.13,10:31,heading,18.4,-3.9,,,160,t-156 t-4 g+10 t-28
+oct23-morning,Right,1792765900.03,10:31,heading,-144.0,24.1,-22.9,,158,g-3 t+158
+oct23-morning,Right,1792765905.97,10:31,heading,14.0,-0.5,,0.1,0,g-9
+oct23-morning,Right,1792765908.08,10:31,heading,14.0,0.2,0.1,3.3,0,g-9
+oct23-morning,Right,1792765910.31,10:31,heading,14.0,0.1,3.3,1.3,0,g-9
+oct23-morning,Right,1792765913.87,10:31,heading,12.4,-1.7,1.3,,0,
+oct23-morning,Right,1792765947.07,10:32,find,0.3,,,,0,
+oct23-morning,Right,1792765993.94,10:33,heading,-135.4,0.0,,5.5,33,t-33 g+10 t+7 g+50
+oct23-morning,Right,1792766011.17,10:33,heading,14.0,-3.4,,4.6,0,g-8
+oct23-morning,Right,1792766013.32,10:33,heading,14.0,-0.4,4.6,6.2,0,g-8
+oct23-morning,Right,1792766015.33,10:33,heading,14.0,-0.3,6.2,-0.1,0,g-8 t+4
+oct23-morning,Right,1792766020.37,10:33,heading,14.0,-4.0,-0.1,,0,
+oct23-morning,Right,1792766053.0,10:34,find,0.3,,,,40,t+40
+oct23-morning,Right,1792766081.22,10:34,heading,0.3,-39.7,,,80,g+4 t+40 t-40
+oct23-morning,Right,1792766095.24,10:34,heading,0.4,1.0,,,239,t-159 t+40 t-40
+oct23-morning,Right,1792766106.92,10:35,placeholder,90.0,-111.3,,,522,t+2 g+10 t+90 t+2
+oct23-morning,Right,1792766159.33,10:35,placeholder,90.0,89.5,,,186,t+2 t+90 t+2 g+10
+oct23-morning,Right,1792766189.25,10:36,heading,-127.6,63.3,-62.8,,142,g-3 t+142
+oct23-morning,Right,1792766194.48,10:36,heading,14.0,0.3,,-1.0,0,g-9
+oct23-morning,Right,1792766196.61,10:36,heading,14.0,0.1,-1.0,1.3,0,g-9
+oct23-morning,Right,1792766198.82,10:36,heading,14.0,-0.6,1.3,3.7,0,g-9 t-68 g+3 t-67
+oct23-morning,Right,1792766215.9,10:36,heading,19.4,-2.5,,,7,g-4 t-7
+oct23-morning,Right,1792766490.91,10:41,heading,14.0,4.8,,,0,
+oct23-morning,Right,1792766524.0,10:42,find,0.2,,,,0,
+oct23-morning,Right,1792766538.2,10:42,heading,-137.5,-1.8,,,0,
+oct23-morning,Right,1792766538.51,10:42,heading,-138.2,-1.6,,,0,
+oct23-morning,Right,1792766538.9,10:42,heading,-139.0,-1.6,,,0,
+oct23-morning,Right,1792766571.13,10:42,position,,,,,0,
+oct23-morning,Right,1792766573.09,10:42,position,,,,,0,
+oct23-morning,Right,1792766574.02,10:42,heading,-137.2,0.0,,1.9,32,t-32 g+10 t+4 g+50
+oct23-morning,Right,1792766590.73,10:43,heading,14.0,0.9,,4.8,0,g-8
+oct23-morning,Right,1792766592.86,10:43,heading,14.0,-1.3,4.8,3.4,0,g-8
+oct23-morning,Right,1792766594.9,10:43,heading,14.0,0.3,3.4,-0.8,0,g-8
+oct23-morning,Right,1792766993.82,10:49,heading,11.3,3.9,-0.8,,0,
+oct23-morning,Right,1792767027.58,10:50,find,0.3,,,,165,t-150 t+15 g+10 t+20
+oct23-morning,Right,1792767055.83,10:50,heading,-180.0,-10.4,12.8,,0,g-1 g+1
+oct23-morning,Right,1792767057.98,10:50,heading,-180.0,1.6,,,376,g-1 g+4 t-23 t+175
+oct23-morning,Right,1792767095.18,10:51,heading,-96.1,4.1,-3.1,,216,g-2 m+1 t-176 t+40
+oct23-morning,Right,1792767118.96,10:51,heading,-93.9,138.5,,157.0,0,g+4 t-30 t+2 g+10
+oct23-morning,Right,1792767157.93,10:52,heading,-180.0,-148.2,,,0,g-3 g+4
+oct23-morning,Right,1792767161.39,10:52,heading,174.5,-3.9,,,7,g-4 t+7
+oct23-morning,Right,1792767165.89,10:52,heading,87.6,-94.5,,,106,t+105 t-1 g+10 t-111
+oct23-morning,Right,1792767192.04,10:53,heading,14.0,95.0,,4.3,0,g-8
+oct23-morning,Right,1792767194.5,10:53,heading,14.0,-1.2,4.3,3.1,0,g-8
+oct23-morning,Right,1792767196.6,10:53,heading,14.0,-0.6,3.1,-1.2,0,g-8
+oct23-morning,Right,1792767310.27,10:55,heading,12.0,-1.7,-1.2,,0,
+oct23-morning,Right,1792767343.5,10:55,find,0.3,,,,0,
+oct23-morning,Right,1792767394.27,10:56,heading,-136.4,0.0,,29.3,51,t-50 t+1 g+10 t+36
+oct23-morning,Right,1792767431.14,10:57,heading,14.0,-35.4,,-1.8,0,g-8
+oct23-morning,Right,1792767433.37,10:57,heading,14.0,0.1,-1.8,-4.8,0,g-8
+oct23-morning,Right,1792767435.39,10:57,heading,14.0,0.0,-4.8,,0,g-8
+oct23-morning,Right,1792767577.41,10:59,heading,16.7,3.8,,,0,
+oct23-morning,Right,1792767611.73,11:00,find,0.5,,,,0,
+oct23-morning,Right,1792767667.28,11:01,heading,179.4,-0.0,,-2.2,16,t+16 g+10 t-3 g+47
+oct23-morning,Right,1792767683.53,11:01,heading,14.0,2.9,,-0.2,0,g-8
+oct23-morning,Right,1792767685.5,11:01,heading,14.0,-0.4,-0.2,0.2,0,g-8
+oct23-morning,Right,1792767687.59,11:01,heading,14.0,-0.1,0.2,-3.5,0,g-8
+oct23-morning,Left,1792759979.84,08:52,placeholder,90.0,,,,317,t+2 t+90 t+2 t+90
+oct23-morning,Left,1792760022.95,08:53,heading,-8.0,126.2,,4.7,0,g-8
+oct23-morning,Left,1792760025.19,08:53,heading,-8.0,0.1,4.7,5.9,0,g-8
+oct23-morning,Left,1792760027.18,08:53,heading,-8.0,0.4,5.9,4.2,0,g-8 t+5
+oct23-morning,Left,1792760031.15,08:53,heading,-8.0,-3.6,4.2,1.3,41,t-39 t+2 g+10 t+2
+oct23-morning,Left,1792760047.81,08:54,heading,11.2,-1.1,0.8,-0.6,0,g+95 t+180 g+54 t-158
+oct23-morning,Left,1792760070.54,08:54,heading,33.8,2.2,,4.2,0,g+95 t+180 g+58 t-153
+oct23-morning,Left,1792760094.58,08:54,heading,56.2,-4.5,,6.3,0,g+95 t+180 g+60 t-18
+oct23-morning,Left,1792760119.7,08:55,heading,78.8,-6.3,,-6.7,0,g+95 t+180 g+53 t-164
+oct23-morning,Left,1792760142.0,08:55,heading,101.2,7.2,,1.6,0,g+95 t+180 g+56 t-161
+oct23-morning,Left,1792760168.55,08:56,heading,123.8,-0.5,,1.7,0,g+95 t+180 g+69 t+170
+oct23-morning,Left,1792760201.53,08:56,heading,-101.2,-1.2,,0.1,0,g+95
+oct23-morning,Left,1792760209.37,08:56,heading,-101.3,0.2,0.1,,180,g-7 t+180 g+51 t-157
+oct23-morning,Left,1792760226.65,08:57,heading,-78.8,0.7,,1.3,0,g+95
+oct23-morning,Left,1792760234.82,08:57,heading,-80.1,-0.9,1.3,,180,g-7 t+180 g+53 t-111
+oct23-morning,Left,1792760251.97,08:57,heading,-11.2,0.1,,0.2,0,g+95 t+180 g+56 t-54
+oct23-morning,Left,1792760285.4,08:58,heading,-8.0,-0.7,,0.7,0,g-8
+oct23-morning,Left,1792760287.43,08:58,heading,-8.0,0.8,0.7,1.7,0,g-8
+oct23-morning,Left,1792760289.48,08:58,heading,-8.0,0.4,1.7,2.5,0,g-8
+oct23-morning,Left,1792760293.0,08:58,heading,-9.9,-1.8,2.5,,0,
+oct23-morning,Left,1792760325.75,08:58,find,-0.1,,,,80,t+40 t-40
+oct23-morning,Left,1792760337.65,08:58,placeholder,90.0,90.9,,,562,t+2 t+90 t+2 t+90
+oct23-morning,Left,1792760379.92,08:59,placeholder,90.0,-155.6,,,254,t+2 g+10 t+40 t-40
+oct23-morning,Left,1792760419.67,09:00,placeholder,90.0,-10.7,,,246,t+2 t+90 t+2 g+10
+oct23-morning,Left,1792760438.45,09:00,heading,-8.0,95.8,,,0,g-9
+oct23-morning,Left,1792760440.57,09:00,heading,-8.0,0.1,,20.5,0,g-9 t-88 t-5 t-3
+oct23-morning,Left,1792760463.19,09:01,heading,-9.5,-24.8,,,0,g-3
+oct23-morning,Left,1792761122.43,09:12,heading,-5.4,3.6,,,0,
+oct23-morning,Left,1792761135.47,09:12,heading,-7.3,-6.2,,4.3,15,t+12 t-3 g+13 t-6
+oct23-morning,Left,1792761143.76,09:12,heading,-8.0,-4.4,4.3,-0.9,0,g-7
+oct23-morning,Left,1792761145.77,09:12,heading,-8.0,0.5,-0.9,,0,g-7
+oct23-morning,Left,1792761147.72,09:12,heading,-8.0,0.4,,-1.4,0,g-7 g+3 t+8
+oct23-morning,Left,1792761271.15,09:14,heading,-8.0,-6.9,-1.4,,0,
+oct23-morning,Left,1792761301.83,09:15,find,0.1,,,,0,
+oct23-morning,Left,1792761352.51,09:15,heading,-135.6,0.0,,28.3,70,t-68 t+1 g+10 t+34
+oct23-morning,Left,1792761371.75,09:16,heading,162.4,-28.4,28.7,,170,g-2 t-170
+oct23-morning,Left,1792761377.26,09:16,heading,-8.0,-0.5,,1.1,0,g-9
+oct23-morning,Left,1792761379.56,09:16,heading,-8.0,0.5,1.1,0.3,0,g-9
+oct23-morning,Left,1792761381.64,09:16,heading,-8.0,0.5,0.3,2.0,0,g-9
+oct23-morning,Left,1792761632.47,09:20,heading,-9.0,-0.9,2.0,,0,
+oct23-morning,Left,1792761667.1,09:21,find,0.2,,,,0,
+oct23-morning,Left,1792761723.97,09:22,heading,179.6,-0.0,,-28.4,1,t-1 g+10 t-40 t+4
+oct23-morning,Left,1792761741.63,09:22,heading,99.1,24.2,-24.7,,129,g-4 t-129
+oct23-morning,Left,1792761746.86,09:22,heading,-8.0,23.2,,24.3,0,g-8
+oct23-morning,Left,1792761749.0,09:22,heading,-8.0,0.4,24.3,21.6,0,g-8
+oct23-morning,Left,1792761751.19,09:22,heading,-8.0,0.3,21.6,25.8,0,g-8 t-68 g+8
+oct23-morning,Left,1792761758.44,09:22,heading,-110.9,-34.9,33.1,,177,g-3 t+89 t+88 g+4
+oct23-morning,Left,1792761794.39,09:23,heading,-103.3,10.0,,,151,g-2 t+82 t-69 g+4
+oct23-morning,Left,1792761803.37,09:23,heading,-90.8,-0.6,,,741,g-3 t+80 t-82 t+82
+oct23-morning,Left,1792761950.99,09:25,heading,-37.2,2.9,,,0,
+oct23-morning,Left,1792761984.1,09:26,find,0.3,,,,0,
+oct23-morning,Left,1792762034.61,09:27,heading,179.7,0.1,,2.8,5,t-5 g+10 t+5 g+37
+oct23-morning,Left,1792762045.2,09:27,heading,175.9,-3.4,2.8,,173,g-2 t+173
+oct23-morning,Left,1792762050.94,09:27,heading,-8.0,2.8,,3.7,0,g-9
+oct23-morning,Left,1792762053.25,09:27,heading,-8.0,-0.0,3.7,0.2,0,g-9
+oct23-morning,Left,1792762055.38,09:27,heading,-8.0,0.4,0.2,3.0,0,g-9
+oct23-morning,Left,1792762372.89,09:32,heading,-10.4,3.1,3.0,,0,
+oct23-morning,Left,1792762407.69,09:33,find,0.3,,,,0,
+oct23-morning,Left,1792762470.48,09:34,heading,-135.6,0.3,,-28.3,45,t-42 t+3 g+10 t-45
+oct23-morning,Left,1792762495.71,09:34,heading,-8.0,25.7,,-0.9,0,g-8
+oct23-morning,Left,1792762497.76,09:34,heading,-8.0,0.2,-0.9,-2.7,0,g-8
+oct23-morning,Left,1792762499.78,09:34,heading,-8.0,0.1,-2.7,-1.9,0,g-8
+oct23-morning,Left,1792762503.36,09:35,heading,-6.0,2.0,-1.9,,0,
+oct23-morning,Left,1792762536.93,09:35,find,0.2,,,,161,t-148 t+13 g+10 t+20
+oct23-morning,Left,1792762565.6,09:36,heading,180.0,-11.2,8.4,,197,g-1 g+4 t-23 t+173
+oct23-morning,Left,1792762575.76,09:36,heading,-20.7,10.6,,,197,g-4 t-159 t-38
+oct23-morning,Left,1792762583.14,09:36,heading,142.5,0.6,,,59,g-4 t+59
+oct23-morning,Left,1792762586.92,09:36,heading,180.0,-21.1,,-6.7,0,g-1 m+0 g+10 t-14
+oct23-morning,Left,1792762631.66,09:37,heading,75.0,-62.7,0.9,-57.4,0,g+4 g+4 t+40 t-40
+oct23-morning,Left,1792762686.83,09:38,heading,-152.9,66.5,-66.9,,157,g-2 t+154 t-3 g+10
+oct23-morning,Left,1792762721.98,09:38,heading,-163.3,-5.8,,,17,g-2 t-17 g+4
+oct23-morning,Left,1792762727.21,09:38,heading,176.8,-3.2,,,3,g-4 t-3
+oct23-morning,Left,1792762731.58,09:38,heading,97.6,-77.1,,-94.6,70,t+70 g+10 t-108 t+4
+oct23-morning,Left,1792762771.93,09:39,heading,-8.0,87.7,,-0.8,0,g-8
+oct23-morning,Left,1792762774.24,09:39,heading,-8.0,0.8,-0.8,1.4,0,g-8
+oct23-morning,Left,1792762776.39,09:39,heading,-8.0,0.0,1.4,-2.1,0,g-8
+oct23-morning,Left,1792763549.16,09:52,placeholder,90.0,115.2,-2.1,94.1,2,t+2 g+10 t-21 g+15
+oct23-morning,Left,1792763579.67,09:52,heading,-8.0,-96.3,,-2.4,0,g-8
+oct23-morning,Left,1792763581.71,09:53,heading,-8.0,0.1,-2.4,-3.8,0,g-8
+oct23-morning,Left,1792763583.93,09:53,heading,-8.0,0.2,-3.8,-5.4,0,g-8 t-4
+oct23-morning,Left,1792763918.37,09:58,heading,-8.0,12.4,-5.4,,0,
+oct23-morning,Left,1792763953.0,09:59,find,0.2,,,,0,
+oct23-morning,Left,1792763966.95,09:59,position,,,,,0,
+oct23-morning,Left,1792763967.28,09:59,position,,,,,0,
+oct23-morning,Left,1792763967.64,09:59,position,,,,,0,
+oct23-morning,Left,1792763968.03,09:59,position,,,,,0,
+oct23-morning,Left,1792763980.42,09:59,heading,-135.1,0.5,,,0,
+oct23-morning,Left,1792763980.77,09:59,heading,-135.1,0.2,,,0,
+oct23-morning,Left,1792763984.92,09:59,position,,,,,0,
+oct23-morning,Left,1792764000.85,10:00,position,,,,,0,
+oct23-morning,Left,1792764002.51,10:00,position,,,,,0,
+oct23-morning,Left,1792764002.53,10:00,position,,,,,0,
+oct23-morning,Left,1792764002.57,10:00,position,,,,,0,
+oct23-morning,Left,1792764002.57,10:00,position,,,,,0,
+oct23-morning,Left,1792764003.58,10:00,heading,-135.1,0.1,,1.1,57,t-56 t+1 g+10 t+4
+oct23-morning,Left,1792764017.44,10:00,heading,172.4,0.7,-0.1,,177,g-3 t+177
+oct23-morning,Left,1792764023.47,10:00,heading,-8.0,1.1,,1.0,0,g-9
+oct23-morning,Left,1792764025.71,10:00,heading,-8.0,0.2,1.0,1.8,0,g-9
+oct23-morning,Left,1792764027.95,10:00,heading,-8.0,-0.1,1.8,0.7,0,g-9
+oct23-morning,Left,1792764031.61,10:00,heading,-8.7,-0.6,0.7,,0,
+oct23-morning,Left,1792764064.77,10:01,find,0.5,,,,0,
+oct23-morning,Left,1792764118.14,10:01,heading,-179.2,0.1,,0.1,10,t-10 g+10 t+2 g+43
+oct23-morning,Left,1792764130.05,10:02,heading,173.8,1.5,-1.8,,178,g-2 t+178
+oct23-morning,Left,1792764135.78,10:02,heading,-8.0,-0.2,,-2.3,0,g-9
+oct23-morning,Left,1792764137.92,10:02,heading,-8.0,0.3,-2.3,0.6,0,g-9
+oct23-morning,Left,1792764140.01,10:02,heading,-8.0,0.1,0.6,2.4,0,g-9
+oct23-morning,Left,1792764570.36,10:09,heading,-8.3,11.0,2.4,,0,
+oct23-morning,Left,1792764602.92,10:10,find,0.1,,,,0,
+oct23-morning,Left,1792764653.43,10:10,heading,179.2,0.0,,3.1,10,t-10 g+10 t+5 g+45
+oct23-morning,Left,1792764665.27,10:11,heading,172.4,-1.2,1.3,,180,g-3 t+180
+oct23-morning,Left,1792764671.1,10:11,heading,-8.0,-0.9,,-3.3,0,g-9
+oct23-morning,Left,1792764673.24,10:11,heading,-8.0,0.1,-3.3,-1.6,0,g-9
+oct23-morning,Left,1792764675.4,10:11,heading,-8.0,0.1,-1.6,-1.2,0,g-9
+oct23-morning,Left,1792764893.77,10:14,heading,-6.1,8.1,-1.2,,0,
+oct23-morning,Left,1792764928.06,10:15,find,0.1,,,,0,
+oct23-morning,Left,1792764987.2,10:16,heading,179.8,-0.0,,-28.4,2,t-2 g+10 t-39 t+4
+oct23-morning,Left,1792765006.85,10:16,heading,-8.0,26.9,,2.4,0,g-8
+oct23-morning,Left,1792765009.09,10:16,heading,-8.0,0.2,2.4,-1.4,0,g-8
+oct23-morning,Left,1792765011.15,10:16,heading,-8.0,-0.2,-1.4,2.0,0,g-8
+oct23-morning,Left,1792765014.85,10:16,heading,-9.2,-1.5,2.0,,0,
+oct23-morning,Left,1792765047.74,10:17,find,0.3,,,,164,t-150 t+15 g+10 t+17
+oct23-morning,Left,1792765083.62,10:18,heading,-134.0,-9.6,9.4,,179,g-2 m+1 t+179 g+10
+oct23-morning,Left,1792765113.96,10:18,heading,-135.0,12.8,,,12,g-2 g+4 g-4 t-12
+oct23-morning,Left,1792765122.24,10:18,heading,-145.8,0.0,,-43.9,52,t-44 t+8 g+10 t-55
+oct23-morning,Left,1792765160.05,10:19,heading,-8.0,13.6,,0.4,0,g-8
+oct23-morning,Left,1792765162.29,10:19,heading,-8.0,0.2,0.4,2.2,0,g-8
+oct23-morning,Left,1792765164.35,10:19,heading,-8.0,-0.2,2.2,2.9,0,g-8
+oct23-morning,Left,1792765399.93,10:23,heading,-9.9,6.7,2.9,,0,
+oct23-morning,Left,1792765452.68,10:24,find,0.3,,,,0,
+oct23-morning,Left,1792765466.68,10:24,heading,-138.8,-2.4,,,0,
+oct23-morning,Left,1792765468.42,10:24,position,,,,,0,
+oct23-morning,Left,1792765468.76,10:24,position,,,,,0,
+oct23-morning,Left,1792765478.46,10:24,position,,,,,0,
+oct23-morning,Left,1792765478.81,10:24,position,,,,,0,
+oct23-morning,Left,1792765485.42,10:24,heading,-89.8,2.4,,,0,
+oct23-morning,Left,1792765497.56,10:24,position,,,,,0,
+oct23-morning,Left,1792765506.31,10:25,position,,,,,0,
+oct23-morning,Left,1792765506.59,10:25,position,,,,,0,
+oct23-morning,Left,1792765508.36,10:25,position,,,,,0,
+oct23-morning,Left,1792765508.36,10:25,position,,,,,0,
+oct23-morning,Left,1792765508.36,10:25,position,,,,,0,
+oct23-morning,Left,1792765508.36,10:25,position,,,,,0,
+oct23-morning,Left,1792765508.38,10:25,position,,,,,0,
+oct23-morning,Left,1792765509.34,10:25,heading,178.9,0.1,,-0.8,9,t-9 g+10 g+41
+oct23-morning,Left,1792765519.59,10:25,heading,173.1,3.0,-2.9,,179,g-2 t+179
+oct23-morning,Left,1792765525.22,10:25,heading,-8.0,-1.3,,-1.4,0,g-9
+oct23-morning,Left,1792765527.59,10:25,heading,-8.0,0.2,-1.4,-1.9,0,g-9
+oct23-morning,Left,1792765529.81,10:25,heading,-8.0,0.0,-1.9,-1.1,0,g-9
+oct23-morning,Left,1792766348.49,10:39,heading,-6.6,31.8,-1.1,,0,
+oct23-morning,Left,1792766356.26,10:39,heading,-8.6,-1.3,,-0.5,12,t+8 t-3 t+2 g+15
+oct23-morning,Left,1792766365.99,10:39,heading,-8.0,1.5,-0.5,4.4,0,g-7
+oct23-morning,Left,1792766368.18,10:39,heading,-8.0,0.2,4.4,,0,g-7
+oct23-morning,Left,1792766370.06,10:39,heading,-8.0,0.3,,,6,g-7 g+3 t-6
+oct23-morning,Left,1792766598.95,10:43,heading,-8.0,15.0,,,0,
+oct23-morning,Left,1792766633.27,10:43,find,0.3,,,,140,t-138 t+3 g+10 t+17
+oct23-morning,Left,1792766652.7,10:44,heading,-180.0,-11.5,10.6,,391,g-1 g+4 t-23 t+174
+oct23-morning,Left,1792766669.41,10:44,heading,147.1,13.8,,,158,g-4 t+55 t+65 t+37
+oct23-morning,Left,1792766677.36,10:44,heading,-77.6,-22.1,,,127,g-4 m+0 t-119 t+1
+oct23-morning,Left,1792766749.83,10:45,heading,180.0,23.9,,,8,g-2 g+4 g-4 t-8
+oct23-morning,Left,1792766757.84,10:45,heading,174.3,0.0,,-6.1,5,t-5 g+10 t-7 g+46
+oct23-morning,Left,1792766769.84,10:46,heading,168.6,6.0,-6.4,,178,g-2 t-178
+oct23-morning,Left,1792766775.55,10:46,heading,-8.0,0.9,,5.2,0,g-9
+oct23-morning,Left,1792766777.63,10:46,heading,-8.0,-0.2,5.2,-0.4,0,g-9
+oct23-morning,Left,1792766780.12,10:46,heading,-8.0,-0.0,-0.4,1.6,0,g-9
+oct23-morning,Left,1792767200.77,10:53,heading,-10.3,13.8,1.6,,0,
+oct23-morning,Left,1792767234.24,10:53,find,0.3,,,,0,
+oct23-morning,Left,1792767281.87,10:54,heading,-135.6,0.1,,1.3,56,t-55 t+1 g+10 t+3
+oct23-morning,Left,1792767295.72,10:54,heading,173.0,0.5,-0.3,,179,g-3 t+179
+oct23-morning,Left,1792767301.72,10:55,heading,-8.0,0.3,,-1.5,0,g-9
+oct23-morning,Left,1792767303.77,10:55,heading,-8.0,-0.0,-1.5,1.4,0,g-9
+oct23-morning,Left,1792767306.22,10:55,heading,-8.0,-0.1,1.4,0.5,0,g-9
+oct23-morning,Left,1792767691.43,11:01,heading,-8.0,14.3,0.5,,0,
+oct23-morning,Left,1792767724.94,11:02,find,0.2,,,,0,
+oct23-morning,Left,1792767728.78,11:02,position,,,,,0,
+oct23-morning,Left,1792767728.81,11:02,position,,,,,0,
+oct23-morning,Left,1792767736.61,11:02,heading,-146.4,0.7,,,0,
+oct23-morning,Left,1792767738.39,11:02,position,,,,,0,
+oct23-morning,Left,1792767738.7,11:02,position,,,,,0,
+oct23-morning,Left,1792767739.05,11:02,position,,,,,0,
+oct23-morning,Left,1792767739.41,11:02,position,,,,,0,
+oct23-morning,Left,1792767743.55,11:02,position,,,,,0,
+oct23-morning,Left,1792767750.86,11:02,heading,-86.5,1.6,,,0,
+oct23-morning,Left,1792767755.01,11:02,position,,,,,0,
+oct23-morning,Left,1792767759.68,11:02,heading,92.9,-0.8,,,0,
+oct23-morning,Left,1792767761.98,11:02,position,,,,,0,
+oct23-morning,Left,1792767762.33,11:02,position,,,,,0,
+oct23-morning,Left,1792767766.52,11:02,heading,-4.9,-1.9,,,0,
+oct23-morning,Left,1792767770.01,11:02,position,,,,,0,
+oct23-morning,Left,1792767771.77,11:02,position,,,,,0,
+oct23-morning,Left,1792767771.79,11:02,position,,,,,0,
+oct23-morning,Left,1792767771.81,11:02,position,,,,,0,
+oct23-morning,Left,1792767771.84,11:02,position,,,,,0,
+oct23-morning,Left,1792767771.87,11:02,position,,,,,0,
+oct23-morning,Left,1792767772.74,11:02,heading,179.0,0.1,,2.9,13,t-13 g+10 t+4 g+36
+oct23-morning,Left,1792767794.91,11:03,heading,-8.0,2.2,,4.0,0,g-8
+oct23-morning,Left,1792767797.11,11:03,heading,-8.0,-0.1,4.0,2.8,0,g-8
+oct23-morning,Left,1792767799.22,11:03,heading,-8.0,0.1,2.8,5.2,0,g-8 t+4
+oct23-morning,Left,1792767804.29,11:03,heading,-8.0,-2.1,5.2,,0,
+oct23-morning,Left,1792767837.66,11:03,find,0.4,,,,0,
+oct23-morning,Left,1792767885.35,11:04,heading,179.0,-0.0,,4.0,6,t-6 g+10 t+5 g+38
+oct23-morning,Left,1792767896.4,11:04,heading,175.8,-3.1,3.0,,176,g-2 t+176
+oct23-morning,Left,1792767902.02,11:05,heading,-8.0,-0.1,,-1.5,0,g-9
+oct23-morning,Left,1792767904.27,11:05,heading,-8.0,0.2,-1.5,0.6,0,g-9
+oct23-morning,Left,1792767906.55,11:05,heading,-8.0,0.1,0.6,-0.4,0,g-9
+oct23-evening,Left,1792797283.07,19:14,placeholder,90.0,100.1,,97.5,2,t+2 g+15 t+128 t-5
+oct23-evening,Left,1792797299.19,19:14,heading,147.0,-97.5,103.9,,155,g-2 t-155
+oct23-evening,Left,1792797304.48,19:15,heading,-8.0,-0.1,,,0,g-8
+oct23-evening,Left,1792797306.6,19:15,heading,-8.0,0.3,,,0,g-8
+oct23-evening,Left,1792797308.64,19:15,heading,-8.0,-0.1,,2.1,0,g-8
+oct23-evening,Left,1792797374.18,19:16,heading,-10.4,-2.0,2.1,,0,
+oct23-evening,Left,1792797408.19,19:16,find,0.1,,,,0,
+oct23-evening,Left,1792797410.16,19:16,heading,0.1,0.2,,,179,t-179 g+10 t+2 g+61
+oct23-evening,Left,1792797431.74,19:17,heading,-8.0,-3.3,,,0,g-6
+oct23-evening,Left,1792797433.9,19:17,heading,-8.0,0.4,,,0,g-6
+oct23-evening,Left,1792797435.79,19:17,heading,-8.0,0.2,,,0,g-6
+oct23-evening,Left,1792797738.15,19:22,heading,-6.7,1.7,,,0,
+oct23-evening,Left,1792797773.05,19:22,find,-0.3,,,,0,
+oct23-evening,Left,1792797828.11,19:23,heading,-179.9,-0.2,,,146,t-3 g+10 t+40 t-40
+oct23-evening,Left,1792797858.08,19:24,heading,175.8,21.7,-22.3,,176,g-2 t+176
+oct23-evening,Left,1792797863.83,19:24,heading,-8.0,-0.6,,,0,g-8
+oct23-evening,Left,1792797866.33,19:24,heading,-8.0,-0.0,,5.6,0,g-8
+oct23-evening,Left,1792797868.62,19:24,heading,-8.0,0.3,5.6,2.3,0,g-8
+oct23-evening,Left,1792798178.61,19:29,heading,-10.7,-50.6,2.3,,0,
+oct23-evening,Left,1792798211.92,19:30,find,-0.4,,,,0,
+oct23-evening,Left,1792798259.84,19:30,heading,-135.9,-0.1,,28.2,69,t-68 t-2 g+10 t+33
+oct23-evening,Left,1792798287.6,19:31,heading,-8.0,-35.0,,,0,g-7
+oct23-evening,Left,1792798289.86,19:31,heading,-8.0,-0.1,,,0,g-7
+oct23-evening,Left,1792798291.9,19:31,heading,-8.0,0.1,,,0,g-7
+oct23-evening,Left,1792798799.07,19:39,heading,-8.8,-94.8,,,0,
+oct23-evening,Left,1792798832.83,19:40,find,-0.3,,,,0,
+oct23-evening,Left,1792798881.18,19:41,heading,179.4,-0.1,,3.0,9,t-7 t-1 g+10 g+39
+oct23-evening,Left,1792798900.5,19:41,heading,-8.0,-10.1,,,0,g-7
+oct23-evening,Left,1792798902.6,19:41,heading,-8.0,0.5,,,0,g-7
+oct23-evening,Left,1792798905.2,19:41,heading,-8.0,0.0,,,0,g-7
+oct23-evening,Left,1792799180.69,19:46,heading,-7.6,-49.0,,,0,
+oct23-evening,Left,1792799214.03,19:46,find,-0.1,,,,0,
+oct23-evening,Left,1792799262.15,19:47,heading,-135.1,-0.1,,27.4,69,t-67 t-2 g+10 t+32
+oct23-evening,Left,1792799291.97,19:48,heading,-8.0,-36.6,,,0,g-7
+oct23-evening,Left,1792799294.06,19:48,heading,-8.0,0.0,,,0,g-7
+oct23-evening,Left,1792799296.1,19:48,heading,-8.0,0.7,,,0,g-7
+oct23-evening,Left,1792799399.21,19:49,heading,-6.5,-16.2,,,0,
+oct23-evening,Left,1792799434.36,19:50,find,-0.1,,,,136,t-136 g+10 t+14 t+3
+oct23-evening,Left,1792799473.88,19:51,placeholder,90.0,-157.3,,,139,t+2 g+15 t+40 t-40
+oct23-evening,Left,1792799516.29,19:51,heading,-8.0,136.2,,,0,g-7
+oct23-evening,Left,1792799518.31,19:51,heading,-8.0,0.1,,,0,g-7
+oct23-evening,Left,1792799520.38,19:52,heading,-8.0,0.7,,,0,g-7
+oct23-evening,Left,1792799524.1,19:52,heading,-7.9,-0.2,,,0,
+oct23-evening,Left,1792799558.06,19:52,find,-0.1,,,,0,
+oct23-evening,Left,1792799612.22,19:53,heading,-179.1,-0.4,,10.8,18,t-18 g+10 t+11 g+52
+oct23-evening,Left,1792799646.08,19:54,heading,-8.0,-27.5,,,0,g-7
+oct23-evening,Left,1792799648.07,19:54,heading,-8.0,0.2,,,0,g-7
+oct23-evening,Left,1792799650.1,19:54,heading,-8.0,0.1,,,8,g-7 t-8
+oct23-evening,Center,1792797311.61,19:15,placeholder,90.0,-131.1,,,94,t+2 t+90 t+2 g+15
+oct23-evening,Center,1792797339.77,19:15,heading,86.4,-61.5,62.8,,13,g-4 t+13
+oct23-evening,Center,1792797343.58,19:15,heading,99.6,-0.1,,1.5,0,g-9
+oct23-evening,Center,1792797345.95,19:15,heading,99.6,-0.3,1.5,0.0,0,g-9
+oct23-evening,Center,1792797439.58,19:17,heading,98.8,-0.8,0.0,,0,
+oct23-evening,Center,1792797468.39,19:17,find,0.0,,,,0,
+oct23-evening,Center,1792797470.33,19:17,heading,0.0,0.0,,,91,t-90 t-1 g+10 g+61
+oct23-evening,Center,1792797493.67,19:18,heading,99.6,-2.9,,,0,g-7
+oct23-evening,Center,1792797495.69,19:18,heading,99.6,-0.4,,,0,g-7
+oct23-evening,Center,1792797497.7,19:18,heading,99.6,-0.6,,,3,g-7 t-3
+oct23-evening,Center,1792798295.55,19:31,heading,99.6,2.1,,,0,
+oct23-evening,Center,1792798325.9,19:32,find,-0.2,,,,0,
+oct23-evening,Center,1792798380.15,19:33,heading,-179.3,-0.0,,,114,t+112 t+2 g+10 t-32
+oct23-evening,Center,1792798408.66,19:33,heading,99.6,29.6,,,0,g-9
+oct23-evening,Center,1792798411.29,19:33,heading,99.6,-0.1,,-1.9,0,g-9
+oct23-evening,Center,1792798415.16,19:33,heading,99.2,-1.5,-1.9,,0,
+oct23-evening,Center,1792798445.13,19:34,find,-0.1,,,,0,
+oct23-evening,Center,1792798493.34,19:34,heading,-135.7,-0.1,,29.8,39,t+39 g+10 t+40 t+5
+oct23-evening,Center,1792798507.84,19:35,heading,-81.6,-30.3,30.4,,176,g-4 t+176
+oct23-evening,Center,1792798513.76,19:35,heading,99.6,4.7,,,0,g-7
+oct23-evening,Center,1792798515.71,19:35,heading,99.6,-0.2,,,0,g-7
+oct23-evening,Center,1792798517.71,19:35,heading,99.6,-0.6,,9.5,0,g-7 t-77 t+8 t-3
+oct23-evening,Center,1792798533.38,19:35,heading,100.2,-17.0,,,0,g-5
+oct23-evening,Center,1792798536.56,19:35,heading,99.1,-2.3,,,0,
+oct23-evening,Center,1792798565.66,19:36,find,0.2,,,,0,
+oct23-evening,Center,1792798615.39,19:36,heading,-179.4,-0.0,,,109,t+109 g+10 t-5 t-1
+oct23-evening,Center,1792798642.09,19:37,heading,99.6,-12.4,11.7,,0,g-7
+oct23-evening,Center,1792798644.22,19:37,heading,99.6,-0.2,,,0,g-7
+oct23-evening,Center,1792798646.39,19:37,heading,99.6,-0.5,,,0,g-7
+oct23-evening,Center,1792799655.54,19:54,heading,96.9,107.1,,,0,
+oct23-evening,Center,1792799686.22,19:54,find,-0.0,,,,134,t-134 g+10 t+13 g+20
+oct23-evening,Center,1792799712.64,19:55,heading,-58.1,-28.8,29.4,,211,g-2 g+4 t+30 t+163
+oct23-evening,Center,1792799728.39,19:55,heading,-130.0,17.7,-17.4,,276,g-1 g+4 t-27 t+34
+oct23-evening,Center,1792799747.56,19:55,heading,-74.5,-23.9,23.5,,0,g-4 g+2
+oct23-evening,Center,1792799750.39,19:55,heading,-78.1,-3.2,,,312,g-2 t-102 t-6 t-4
+oct23-evening,Center,1792799772.15,19:56,heading,-33.6,-0.1,,-2.4,44,t-43 t-1 g+10 t-5
+oct23-evening,Center,1792799795.82,19:56,heading,99.6,-0.5,,,0,g-7
+oct23-evening,Center,1792799797.8,19:56,heading,99.6,-0.4,,,0,g-7
+oct23-evening,Center,1792799799.84,19:56,heading,99.6,-0.4,,,0,g-7
+oct23-evening,Right,1792797349.06,19:15,placeholder,90.0,,,78.0,2,t+2 g+10 t+82 g+10
+oct23-evening,Right,1792797365.1,19:16,heading,14.0,-86.4,87.4,,0,g-7
+oct23-evening,Right,1792797367.14,19:16,heading,14.0,-0.9,,,0,g-7
+oct23-evening,Right,1792797369.1,19:16,heading,14.0,0.6,,,3,g-7 t-3
+oct23-evening,Right,1792797502.68,19:18,heading,14.0,2.8,,,0,
+oct23-evening,Right,1792797534.63,19:18,find,0.1,,,,0,
+oct23-evening,Right,1792797536.47,19:18,heading,0.1,0.2,,,161,t-161 g+10 t-2 g+60
+oct23-evening,Right,1792797560.07,19:19,heading,-103.6,8.9,,,118,g-2 t+118
+oct23-evening,Right,1792797565.48,19:19,heading,14.0,-0.4,,4.0,0,g-8
+oct23-evening,Right,1792797568.05,19:19,heading,14.0,-0.1,4.0,,0,g-8
+oct23-evening,Right,1792797570.36,19:19,heading,14.0,-0.1,,,384,g-8 t-90 t+48 g+4
+oct23-evening,Right,1792797589.91,19:19,heading,-86.8,7.7,,,454,g-4 t+119 t-129 g+4
+oct23-evening,Right,1792797872.51,19:24,heading,11.6,-0.0,,,0,
+oct23-evening,Right,1792797908.49,19:25,find,-0.3,,,,0,
+oct23-evening,Right,1792797956.69,19:25,heading,-135.1,0.0,,30.8,57,t-52 t-1 t+3 g+10
+oct23-evening,Right,1792797986.83,19:26,heading,14.0,-45.8,,,0,g-7
+oct23-evening,Right,1792797989.01,19:26,heading,14.0,-0.9,,,0,g-7
+oct23-evening,Right,1792797990.95,19:26,heading,14.0,-1.2,,,706,g-7 t+94 g+2 t+72
+oct23-evening,Right,1792798023.26,19:27,heading,21.7,29.8,,,7,g-3 t-7
+oct23-evening,Right,1792798027.92,19:27,heading,14.0,-0.4,,,0,
+oct23-evening,Right,1792798061.8,19:27,find,0.2,,,,0,
+oct23-evening,Right,1792798111.78,19:28,heading,179.1,-0.0,,5.8,18,t+18 g+10 t+7 g+43
+oct23-evening,Right,1792798136.5,19:28,heading,14.0,-1.8,,,0,g-8
+oct23-evening,Right,1792798138.89,19:28,heading,14.0,-0.8,,-1.1,0,g-8
+oct23-evening,Right,1792798141.45,19:29,heading,14.0,-0.2,-1.1,,116,g-8 t-116 g+4
+oct23-evening,Right,1792798149.23,19:29,heading,-119.6,-15.6,,,180,g-5 t+119 t+61
+oct23-evening,Right,1792798157.71,19:29,heading,75.0,14.0,,,501,g-4 t-19 g+4 t-153
+oct23-evening,Right,1792798650.09,19:37,heading,-110.2,-6.3,,,0,
+oct23-evening,Right,1792798682.96,19:38,find,0.2,,,,0,
+oct23-evening,Right,1792798737.97,19:38,heading,-179.5,-0.0,,,266,t+26 g+10 t+40 t-40
+oct23-evening,Right,1792798769.36,19:39,placeholder,90.0,-117.3,,-133.0,78,t+2 g+15 t-66 t-10
+oct23-evening,Right,1792798789.6,19:39,heading,14.0,133.7,,,0,g-7
+oct23-evening,Right,1792798792.88,19:39,heading,14.0,-0.5,,,0,g-7
+oct23-evening,Right,1792798795.18,19:39,heading,14.0,0.2,,-2.0,0,g-7
+oct23-evening,Right,1792798913.05,19:41,heading,12.8,-11.7,-2.0,,0,
+oct23-evening,Right,1792798944.38,19:42,find,-0.3,,,,135,t-135 g+10 t+6 g+13
+oct23-evening,Right,1792798970.95,19:42,heading,9.0,-19.2,19.3,,284,g-1 t-144 g+4 t-28
+oct23-evening,Right,1792798987.37,19:43,heading,65.8,-29.6,,,362,g-1 t+159 t+33 g+3
+oct23-evening,Right,1792799021.36,19:43,heading,27.7,22.4,-21.8,,163,g-1 m+0 t-163 g+10
+oct23-evening,Right,1792799106.16,19:45,heading,162.1,0.0,,29.5,29,t+29 g+10 t+35 g+10
+oct23-evening,Right,1792799132.54,19:45,heading,14.0,-41.2,,,0,g-9
+oct23-evening,Right,1792799134.97,19:45,heading,14.0,-0.0,,-15.8,0,g-9 t+112 g+4
+oct23-evening,Right,1792799142.52,19:45,heading,137.0,11.1,,,359,g-3 t-118 t-67 t+174
+oct23-evening,Right,1792799157.03,19:45,heading,127.6,0.8,,,703,g-4 t-109 t-70 t+176
+oct23-evening,Right,1792799299.88,19:48,heading,114.5,-15.8,,,0,
+oct23-evening,Right,1792799333.06,19:48,find,-0.3,,,,0,
+oct23-evening,Right,1792799340.01,19:49,position,,,,,0,
+oct23-evening,Right,1792799345.52,19:49,position,,,,,0,
+oct23-evening,Right,1792799345.88,19:49,position,,,,,0,
+oct23-evening,Right,1792799356.87,19:49,heading,178.9,-0.3,,,104,t+86 t-18 g+10 g+4
+oct23-evening,Right,1792799370.03,19:49,heading,14.0,-9.6,,,0,g-7
+oct23-evening,Right,1792799372.24,19:49,heading,14.0,-0.9,,,0,g-7
+oct23-evening,Right,1792799374.25,19:49,heading,14.0,-0.2,,,82,g-7 t+82
+oct23-evening,Right,1792799378.49,19:49,heading,101.3,22.7,,,405,g-3 t-67 g+4 g+4
+oct23-evening,Right,1792799803.69,19:56,heading,14.0,-50.2,,,0,
+oct23-evening,Right,1792799836.36,19:57,find,-0.3,,,,0,
+oct23-evening,Right,1792799896.25,19:58,heading,-180.0,-0.3,,,67,t+27 g+10 t+40
+stage1,Left,1792870627.89,15:37,placeholder,90.0,129.0,,,94,t+2 t+90 t+2 g+10
+stage1,Left,1792870650.12,15:37,heading,160.2,-134.6,129.5,,168,g-1 t-168
+stage1,Left,1792870655.75,15:37,heading,-8.0,0.3,,,0,g-8
+stage1,Left,1792870657.77,15:37,heading,-8.0,0.2,,,0,g-8
+stage1,Left,1792870659.74,15:37,heading,-8.0,-0.2,,-6.5,0,g-8 t-5
+stage1,Left,1792870763.34,15:39,heading,-8.0,4.9,-6.5,,0,
+stage1,Left,1792870796.19,15:39,find,-0.1,,,,0,
+stage1,Left,1792870798.18,15:39,heading,-0.1,0.3,,,179,t-179 g+10
+stage1,Left,1792870804.66,15:40,heading,-178.8,-0.5,0.5,3.3,0,g+63 t+147 g+4 t+28
+stage1,Left,1792870820.63,15:40,heading,-8.0,-4.6,,,0,g-7
+stage1,Left,1792870822.65,15:40,heading,-8.0,0.1,,,0,g-7
+stage1,Left,1792870824.6,15:40,heading,-8.0,0.4,,,6,g-7 t-6
+stage1,Left,1792871244.88,15:47,position,,,,,0,
+stage1,Left,1792871276.65,15:47,find,0.2,,,,160,t+40 t-40 t-40 t+40
+stage1,Left,1792871348.79,15:49,placeholder,90.0,-90.4,,,186,t+2 t+90 t+2 g+15
+stage1,Left,1792871377.73,15:49,heading,155.0,94.2,-95.1,9.4,0,g+53 t+110 g+9 t+99
+stage1,Left,1792871393.71,15:49,heading,-8.0,-13.7,,,0,g-7
+stage1,Left,1792871395.69,15:49,heading,-8.0,0.3,,,0,g-7
+stage1,Left,1792871397.61,15:49,heading,-8.0,-0.2,,,8,g-7 t-8
+stage1,Left,1792872050.02,16:00,position,,,,,0,
+stage1,Left,1792872081.86,16:01,find,0.2,,,,40,t+40
+stage1,Left,1792872152.79,16:02,placeholder,90.0,-135.2,,,94,t+2 t+90 t+2 g+15
+stage1,Left,1792872189.82,16:03,heading,139.0,106.8,-106.1,2.1,0,g+60 t+21 t-3 g+7
+stage1,Left,1792872207.79,16:03,heading,-8.0,-2.7,,,0,g-7
+stage1,Left,1792872209.88,16:03,heading,-8.0,0.1,,,0,g-7
+stage1,Left,1792872211.91,16:03,heading,-8.0,0.3,,,0,g-7
+stage1,Left,1792872424.13,16:07,heading,-7.5,0.5,,,0,
+stage1,Left,1792872455.29,16:07,find,0.5,,,,320,t+40 t-40 t-40 t+40
+stage1,Left,1792872893.56,16:14,placeholder,90.0,-88.3,,,94,t+2 t+90 t+2 g+15
+stage1,Left,1792872910.4,16:15,heading,157.0,114.7,-115.1,5.9,0,g+47 t+122 t+40 t-13
+stage1,Left,1792872932.83,16:15,heading,-8.0,-7.0,,,0,g-7
+stage1,Left,1792872934.99,16:15,heading,-8.0,0.2,,,0,g-7
+stage1,Left,1792872936.94,16:15,heading,-8.0,-0.2,,,0,g-7
+stage1,Center,1792870663.84,15:37,placeholder,90.0,163.3,,12.6,2,t+2 g+15 t-107 t-2
+stage1,Center,1792870682.36,15:38,heading,99.6,-11.0,,,0,g-6
+stage1,Center,1792870684.2,15:38,heading,99.6,0.4,,,0,g-6
+stage1,Center,1792870686.32,15:38,heading,99.6,-0.4,,,0,g-6
+stage1,Center,1792870829.82,15:40,heading,98.3,-1.4,,,0,
+stage1,Center,1792870858.78,15:40,find,-0.3,,,,0,
+stage1,Center,1792870860.82,15:41,heading,-0.3,-0.4,,0.0,89,t-89 g+10 g+60 t+53
+stage1,Center,1792870876.97,15:41,heading,-35.0,0.9,-1.1,,141,g-3 t+141
+stage1,Center,1792870882.22,15:41,heading,99.6,-8.4,,-8.6,0,g-9
+stage1,Center,1792870884.45,15:41,heading,99.6,-0.0,-8.6,-4.8,0,g-9 t-7
+stage1,Center,1792871119.98,15:45,position,,,-4.8,,0,
+stage1,Center,1792871154.61,15:45,find,-0.0,,,,0,
+stage1,Center,1792871209.38,15:46,heading,179.9,0.0,,,113,t+111 t+2 g+10 t+7
+stage1,Center,1792871235.58,15:47,heading,99.6,-4.0,,,0,g-6
+stage1,Center,1792871237.43,15:47,heading,99.6,0.4,,,0,g-6
+stage1,Center,1792871239.47,15:47,heading,99.6,-0.7,,,7,g-6 t+7
+stage1,Center,1792871524.83,15:52,position,,,,,0,
+stage1,Center,1792871553.41,15:52,find,-0.4,,,,160,t+40 t-40 t-40 t+40
+stage1,Center,1792871630.63,15:53,placeholder,90.0,-90.7,,,186,t+2 t+90 t+2 t+90
+stage1,Center,1792871653.68,15:54,heading,-72.9,122.8,-125.0,-4.4,0,g+60 t-155 g+5 t-35
+stage1,Center,1792871669.54,15:54,heading,99.6,3.1,,,0,g-7
+stage1,Center,1792871671.55,15:54,heading,99.6,-0.4,,,0,g-7
+stage1,Center,1792871673.52,15:54,heading,99.6,-0.1,,,3,g-7 t-3
+stage1,Center,1792871678.44,15:54,heading,99.6,2.2,,,0,
+stage1,Center,1792871708.51,15:55,find,-0.2,,,,80,t+40 t-40
+stage1,Center,1792871774.28,15:56,placeholder,90.0,-134.5,,-162.1,51,t+2 g+15 t+46 t+3
+stage1,Center,1792871796.46,15:56,heading,1.1,164.7,-164.7,,70,g-3 t+70
+stage1,Center,1792871800.79,15:56,heading,99.6,28.2,,31.2,0,g-9
+stage1,Center,1792871802.99,15:56,heading,99.6,-0.1,31.2,31.4,0,g-9 t-76 t+5 g+10
+stage1,Center,1792871816.89,15:56,heading,95.5,-34.8,,,0,g-4
+stage1,Right,1792870688.94,15:38,placeholder,90.0,50.4,,97.9,2,t+2 g+15 t+117 t+1
+stage1,Right,1792870708.88,15:38,heading,14.0,-100.9,,,0,g-7
+stage1,Right,1792870711.09,15:38,heading,14.0,-0.3,,,0,g-7
+stage1,Right,1792870712.96,15:38,heading,14.0,0.0,,,319,g-7 t+87 t+40 t-40
+stage1,Right,1792870746.05,15:39,heading,14.0,0.9,,,0,g+4
+stage1,Right,1792870747.82,15:39,heading,14.0,-0.1,,,12,g-5 t-12
+stage1,Right,1792870889.95,15:41,position,,,,,0,
+stage1,Right,1792870923.63,15:42,find,-0.0,,,,0,
+stage1,Right,1792870925.58,15:42,heading,-0.0,-0.1,,,162,t-162 g+10 t-1 g+60
+stage1,Right,1792870944.35,15:42,heading,-146.0,-2.7,3.4,-1.8,0,g+15 t+158 t+79 t+12
+stage1,Right,1792870979.14,15:42,heading,14.0,-6.6,,,352,g+4 t-176 g+4 t+176
+stage1,Right,1792871403.14,15:50,position,,,,,0,
+stage1,Right,1792871433.2,15:50,find,-0.0,,,,0,
+stage1,Right,1792871485.47,15:51,heading,-135.9,0.0,,29.9,54,t-53 t-1 g+10 t+34
+stage1,Right,1792871510.07,15:51,heading,-52.5,-32.9,,,66,g+2 g+3 t+66
+stage1,Right,1792871516.27,15:51,heading,14.0,1.8,,,0,g-6
+stage1,Right,1792871518.69,15:51,heading,14.0,-0.7,,-2.8,0,g-6
+stage1,Right,1792871520.98,15:52,heading,14.0,-0.4,-2.8,,0,g-6
+stage1,Right,1792871820.49,15:57,heading,13.8,-0.4,,,0,
+stage1,Right,1792871851.38,15:57,find,0.0,,,,320,t+40 t-40 t-40 t+40
+stage1,Right,1792872003.81,16:00,placeholder,90.0,-90.4,,,140,t+2 g+15 t+135 t-2
+stage1,Right,1792872027.81,16:00,heading,-171.9,117.2,-118.9,9.0,0,g+30 t+146 t-14 g+5
+stage1,Right,1792872042.51,16:00,heading,14.0,-5.6,,,0,g-9
+stage1,Right,1792872045.79,16:00,heading,14.0,-0.5,,,0,g-9
+stage1,Right,1792872215.97,16:03,heading,12.5,-0.8,,,0,
+stage1,Right,1792872249.31,16:04,find,-0.1,,,,160,t+40 t-40 t-40 t+40
+stage1,Right,1792872321.74,16:05,placeholder,90.0,-90.1,,,389,t+2 t+90 t+2 g+15
+stage1,Right,1792872365.33,16:06,heading,168.6,82.4,-82.7,-1.6,0,g+49
+stage1,Right,1792872372.69,16:06,heading,170.2,2.8,-1.6,,0,g-3
+stage1,Right,1792872374.57,16:06,heading,170.2,-0.4,,,183,g-3 g+2 t-164 g+2
+stage1,Right,1792872395.7,16:06,heading,14.0,-10.1,,-13.2,0,g-7
+stage1,Right,1792872397.95,16:06,heading,14.0,0.0,-13.2,,0,g-7
+stage1,Right,1792872399.83,16:06,heading,14.0,-0.4,,-15.1,0,g-7 t+39 t+8 g+8
+stage1,Right,1792872413.82,16:06,heading,82.7,12.2,,,79,g-5 t-79
+stage1,Right,1792872418.81,16:06,heading,14.0,9.9,,,7,g-3 t+7
+stage2,Left,1792873009.29,16:16,placeholder,90.0,93.3,,93.5,2,t+2 g+10 t-29 t-3
+stage2,Left,1792873030.02,16:17,heading,-101.3,-94.2,,,93,g-2 t+93
+stage2,Left,1792873034.78,16:17,heading,-8.0,2.5,,,0,g-6
+stage2,Left,1792873036.77,16:17,heading,-8.0,0.0,,,0,g-6
+stage2,Left,1792873038.46,16:17,heading,-8.0,-0.1,,,0,g-6
+stage2,Left,1792873040.56,16:17,heading,-14.7,-6.4,,,8,g-4 t+8
+stage2,Left,1792873113.73,16:18,heading,-8.0,-1.5,,,0,
+stage2,Left,1792873145.3,16:19,find,-0.2,,,,0,
+stage2,Left,1792873147.5,16:19,heading,-0.2,-0.3,,,178,t-178 g+10 t+2 g+61
+stage2,Left,1792873167.9,16:19,heading,-8.0,-3.7,,-6.1,0,g-9
+stage2,Left,1792873170.38,16:19,heading,-8.0,0.5,-6.1,-7.2,0,g-9 t-7
+stage2,Left,1792874197.29,16:36,position,,,-7.2,,0,
+stage2,Left,1792874228.94,16:37,find,-0.1,,,,0,
+stage2,Left,1792874282.29,16:38,heading,-180.0,0.0,,3.8,13,t-13 g+10 t+5 t+5
+stage2,Left,1792874297.58,16:38,placeholder,90.0,-88.1,3.8,-91.1,2,t+2 g+15 t-17 g+10
+stage2,Left,1792874313.07,16:38,heading,-174.1,79.2,-80.5,,166,g-2 t+166
+stage2,Left,1792874318.72,16:38,heading,-8.0,-1.2,,,0,g-8
+stage2,Left,1792874320.87,16:38,heading,-8.0,0.0,,-5.9,0,g-8
+stage2,Left,1792874322.97,16:38,heading,-8.0,0.1,-5.9,-6.9,0,g-8 t-6
+stage2,Left,1792874581.41,16:43,position,,,-6.9,,0,
+stage2,Left,1792874612.74,16:43,find,-0.2,,,,0,
+stage2,Left,1792874664.53,16:44,heading,-136.3,-0.0,,3.5,71,t-69 t-2 g+10 t+4
+stage2,Left,1792874685.92,16:44,heading,-8.0,-7.4,,,0,g-8
+stage2,Left,1792874688.21,16:44,heading,-8.0,-0.0,,-1.7,0,g-8
+stage2,Left,1792874690.33,16:44,heading,-8.0,0.4,-1.7,-2.9,0,g-8 t-3
+stage2,Left,1792874830.81,16:47,heading,-8.0,3.0,-2.9,,0,
+stage2,Left,1792874862.29,16:47,find,0.1,,,,0,
+stage2,Left,1792874927.23,16:48,heading,179.6,-0.0,,,120,t-7 g+10 t+40 t-40
+stage2,Left,1792874951.6,16:49,heading,157.6,22.4,-22.7,,0,g-4
+stage2,Left,1792874971.99,16:49,heading,-8.0,1.2,,,0,g-8
+stage2,Left,1792874974.13,16:49,heading,-8.0,0.2,,3.6,0,g-8
+stage2,Left,1792874976.36,16:49,heading,-8.0,0.0,3.6,-2.2,0,g-8
+stage2,Left,1792875151.63,16:52,heading,-7.6,0.7,-2.2,,0,
+stage2,Left,1792875184.55,16:53,find,0.1,,,,0,
+stage2,Left,1792875236.99,16:53,heading,-135.7,0.0,,2.8,81,t-68 g+10 t-12 g+60
+stage2,Left,1792875271.21,16:54,heading,138.1,-1.8,2.8,-4.7,0,g-8 t+90 t-40 t+15
+stage2,Left,1792875319.2,16:55,heading,-170.4,-9.1,7.2,-4.4,0,g+13
+stage2,Left,1792875322.12,16:55,heading,-165.1,5.5,-4.4,,157,g-2 t+157
+stage2,Left,1792875327.56,16:55,heading,-8.0,-1.3,,,0,g-8
+stage2,Left,1792875329.92,16:55,heading,-8.0,0.3,,-2.6,0,g-8
+stage2,Left,1792875332.04,16:55,heading,-8.0,0.3,-2.6,-3.9,0,g-8
+stage2,Left,1792875494.49,16:58,find,-0.1,,-3.9,,0,
+stage2,Left,1792875496.27,16:58,heading,-0.1,-0.3,,,179,t+179 g+10 t+1 g+61
+stage2,Left,1792875517.35,16:58,heading,-8.0,3.4,,1.0,0,g-9
+stage2,Left,1792875519.69,16:58,heading,-8.0,0.4,1.0,5.5,0,g-9 t-87 t+40 t-40
+stage2,Left,1792875540.28,16:59,heading,28.1,7.3,,,36,g-3 t-36 g+4
+stage2,Left,1792875546.04,16:59,heading,-17.5,-9.0,,,10,g-3 t+10
+stage2,Left,1792875551.11,16:59,heading,-8.0,-0.5,,,0,
+stage2,Left,1792875582.99,16:59,find,-0.1,,,,140,t-138 t-2 g+10 t+16
+stage2,Left,1792876165.24,17:09,find,-0.1,,,,260,t+40 t-40 t-180 g+10
+stage2,Left,1792876183.99,17:09,heading,-178.6,-8.8,9.0,-7.1,0,g+60 t-126 t+31 t-31
+stage2,Left,1792876210.39,17:10,heading,-8.0,9.2,,,0,g-7
+stage2,Left,1792876212.43,17:10,heading,-8.0,-0.2,,,0,g-7
+stage2,Left,1792876596.19,17:16,heading,-10.7,-2.5,,,0,
+stage2,Left,1792876629.76,17:17,find,0.1,,,,0,
+stage2,Left,1792876694.24,17:18,heading,-179.2,0.0,,19.1,18,t-15 t-3 g+10 t+24
+stage2,Left,1792876723.04,17:18,heading,-168.5,-0.6,1.1,,150,g-3 t+150
+stage2,Left,1792876728.77,17:18,heading,-8.0,10.2,,,0,g-8
+stage2,Left,1792876731.04,17:18,heading,-8.0,0.2,,11.0,0,g-8
+stage2,Left,1792876733.07,17:18,heading,-8.0,0.1,11.0,12.5,0,g-8 t-86 t-9 t-4
+stage2,Left,1792876783.17,17:19,heading,165.4,-16.6,,,0,g+4
+stage2,Left,1792876785.08,17:19,heading,160.5,-4.7,,,172,g-4 t-172
+stage2,Left,1792876791.06,17:19,heading,-8.0,3.9,,,0,g-4
+stage2,Left,1792877305.02,17:28,position,,,,,0,
+stage2,Left,1792877337.75,17:28,find,0.1,,,,160,t+40 t-40 t-40 t+40
+stage2,Left,1792877406.53,17:30,placeholder,90.0,-132.7,,,186,t+2 t+90 t+2 g+10
+stage2,Left,1792877436.12,17:30,heading,166.5,138.8,-137.2,1.7,0,g+62 t-173
+stage2,Left,1792877449.14,17:30,heading,-8.0,-0.7,,,0,g-9
+stage2,Left,1792877451.63,17:30,heading,-8.0,1.3,,,1255,g-9 t-103 g+4 t+159
+stage2,Center,1792873045.19,16:17,placeholder,90.0,-74.4,,-16.7,2,t+2 g+15 g+3
+stage2,Center,1792873051.24,16:17,heading,99.6,5.4,-16.7,,0,g-7
+stage2,Center,1792873053.19,16:17,heading,99.6,-0.2,,,0,g-7
+stage2,Center,1792873055.12,16:17,heading,99.6,-0.7,,,0,g-7
+stage2,Center,1792873175.84,16:19,heading,96.6,-3.8,,,0,
+stage2,Center,1792873205.82,16:20,find,0.0,,,,0,
+stage2,Center,1792873207.57,16:20,heading,0.0,0.1,,,91,t-90 t-1 g+60
+stage2,Center,1792873232.17,16:20,heading,-89.8,-0.3,0.4,,171,g-4 t-171
+stage2,Center,1792873238.45,16:20,heading,99.6,0.1,,,0,g-7
+stage2,Center,1792873240.35,16:20,heading,99.6,0.0,,,0,g-7
+stage2,Center,1792873242.18,16:20,heading,99.6,-0.4,,,0,g-7
+stage2,Center,1792873509.09,16:25,heading,96.8,-2.9,,,0,
+stage2,Center,1792873542.14,16:25,find,0.1,,,,0,
+stage2,Center,1792873547.61,16:25,heading,0.1,0.1,,0.3,89,t-89 g+10 g+57
+stage2,Center,1792873561.08,16:26,heading,-88.2,1.4,-1.1,,0,g-3 g+1
+stage2,Center,1792873564.34,16:26,heading,-92.1,-3.8,,,0,g-1 g+1
+stage2,Center,1792873567.49,16:26,heading,-92.1,0.1,,,168,g-1 t-168
+stage2,Center,1792873572.92,16:26,heading,99.6,-0.6,,-2.9,0,g-9
+stage2,Center,1792873575.17,16:26,heading,99.6,-0.3,-2.9,-0.3,0,g-9
+stage2,Center,1792873578.99,16:26,heading,101.2,0.8,-0.3,,0,
+stage2,Center,1792873609.33,16:26,find,-0.1,,,,0,
+stage2,Center,1792873611.25,16:26,heading,-0.1,-0.3,,0.5,89,t-89 g+10 g+57 t-144
+stage2,Center,1792873632.18,16:27,heading,120.9,4.3,,,15,t-15
+stage2,Center,1792873645.57,16:27,heading,99.6,-5.2,,,0,g-7
+stage2,Center,1792873647.57,16:27,heading,99.6,-0.5,,,0,g-7
+stage2,Center,1792873649.63,16:27,heading,99.6,-0.2,,,0,g-7
+stage2,Center,1792873692.65,16:28,find,-0.2,,,,0,
+stage2,Center,1792873748.19,16:29,heading,179.1,-0.0,,,113,t+113 g+10 t-2 t-6
+stage2,Center,1792873768.87,16:29,heading,46.6,-3.8,,-6.1,0,g+9 t+47
+stage2,Center,1792873773.6,16:29,heading,99.6,7.0,-6.1,,0,g-7
+stage2,Center,1792873775.63,16:29,heading,99.6,-0.2,,,0,g-7
+stage2,Center,1792873777.57,16:29,heading,99.6,0.6,,,0,g-7
+stage2,Center,1792874091.6,16:34,heading,98.3,-1.2,,,0,
+stage2,Center,1792874121.19,16:35,find,-0.1,,,,0,
+stage2,Center,1792874173.42,16:36,heading,-135.3,-0.0,,30.1,38,t+38 g+10 t+44 t+5
+stage2,Center,1792874193.2,16:36,heading,99.6,-28.7,,,0,g-8
+stage2,Center,1792874446.11,16:40,heading,100.7,1.1,,,0,
+stage2,Center,1792874473.7,16:41,find,-0.1,,,,116,t+116 g+10 t-31 g+10
+stage2,Center,1792874570.12,16:42,heading,-155.9,29.9,-30.4,,105,g-2 t-105
+stage2,Center,1792874574.89,16:42,heading,99.6,1.4,,3.8,0,g-9
+stage2,Center,1792874577.13,16:42,heading,99.6,-0.9,3.8,1.0,0,g-9
+stage2,Center,1792875336.08,16:55,heading,97.7,-3.0,1.0,,0,
+stage2,Center,1792875367.24,16:56,find,-0.3,,,,0,
+stage2,Center,1792875421.01,16:57,heading,179.3,0.0,,,112,t+112 g+10 t-3 g+52
+stage2,Center,1792875446.89,16:57,heading,-70.0,0.4,-0.5,,0,g-3 g+2
+stage2,Center,1792875450.15,16:57,heading,-68.3,0.6,,,168,g-2 t+168
+stage2,Center,1792875455.88,16:57,heading,99.6,-0.7,,,0,g-6
+stage2,Center,1792875457.78,16:57,heading,99.6,-0.2,,,0,g-6
+stage2,Center,1792875459.8,16:57,heading,99.6,-0.4,,,0,g-6
+stage2,Center,1792876216.42,17:10,heading,100.5,-3.4,,,0,
+stage2,Center,1792876248.73,17:10,find,-0.4,,,,137,t-137 g+10 t+12 g+17
+stage2,Center,1792876291.42,17:11,heading,-51.8,5.7,,,661,g+6 t-135 t-54 g+3
+stage2,Center,1792876326.54,17:12,heading,174.1,-18.9,,2.7,0,g+10 t+3 t+6 t+2
+stage2,Center,1792876341.36,17:12,heading,-176.7,-1.6,2.6,-5.5,84,g-3 t+80 t-4 g+10
+stage2,Center,1792876356.88,17:12,heading,-103.7,7.8,-8.0,,104,g-2 m+1 t+101 t-2
+stage2,Center,1792876382.34,17:13,heading,89.3,13.9,-13.8,-0.9,0,g+25 t+40 t-40 g+4
+stage2,Center,1792876417.89,17:13,heading,131.4,-9.1,,,321,g+2 g+4 t+175 t+8
+stage2,Center,1792876433.63,17:13,heading,169.6,-2.7,,,0,g-2 m+2
+stage2,Center,1792876437.54,17:13,heading,170.0,0.0,,,114,t+113 t-1 g+10 t+9
+stage2,Center,1792876458.14,17:14,heading,99.6,-6.4,,,0,g-8
+stage2,Center,1792876460.32,17:14,heading,99.6,-0.1,,1.6,0,g-8
+stage2,Center,1792876794.76,17:19,heading,99.0,-1.1,1.6,,0,
+stage2,Center,1792876822.67,17:20,find,-0.2,,,,0,
+stage2,Center,1792876876.23,17:21,heading,-134.8,0.0,,-1.3,61,t+61 g+10 g+47
+stage2,Center,1792876887.97,17:21,heading,-73.2,1.5,-1.5,,172,g-4 g+3 t+172
+stage2,Center,1792876895.39,17:21,heading,99.6,0.3,,,0,g-9
+stage2,Center,1792876897.53,17:21,heading,99.6,-0.1,,,0,g-9
+stage2,Center,1792876901.3,17:21,heading,100.0,0.0,,,0,
+stage2,Center,1792876930.9,17:22,find,-0.5,,,,0,
+stage2,Center,1792876961.33,17:22,position,,,,,0,
+stage2,Center,1792876975.44,17:22,position,,,,,0,
+stage2,Center,1792876983.49,17:23,position,,,,,0,
+stage2,Center,1792876997.05,17:23,heading,179.8,0.0,,,107,t+107 g+10 g+45
+stage2,Center,1792877009.37,17:23,heading,-73.1,0.6,-0.6,,176,g-4 g+3 t+176
+stage2,Center,1792877016.93,17:23,heading,99.6,-2.6,,,3,g-8 g-8 t-3
+stage2,Right,1792873057.84,16:17,placeholder,90.0,65.7,,83.9,2,t+2 g+10 t-5 g+8
+stage2,Right,1792873069.9,16:17,heading,14.0,-95.7,83.9,,0,g-7
+stage2,Right,1792873072.52,16:17,heading,14.0,0.3,,,0,g-7
+stage2,Right,1792873074.39,16:17,heading,14.0,0.4,,,223,g-7 t+105 g+3 t-118
+stage2,Right,1792873084.65,16:18,heading,14.0,12.3,,,860,g-2 g+4 t+65 g+4
+stage2,Right,1792873245.83,16:20,position,,,,,0,
+stage2,Right,1792873278.51,16:21,find,0.1,,,,0,
+stage2,Right,1792873280.34,16:21,heading,0.1,0.2,,,163,t-163 g+10 t-5 t+51
+stage2,Right,1792873308.38,16:21,placeholder,90.0,-152.2,,,92,g+15 t+90 t+2 g+15
+stage2,Right,1792873333.43,16:22,heading,124.8,150.8,,,0,g-3 g+4
+stage2,Right,1792873336.92,16:22,heading,127.5,1.9,,,203,g-3 t+40 t-40 g+4
+stage2,Right,1792873350.33,16:22,heading,14.0,10.4,,,0,g-8
+stage2,Right,1792873352.93,16:22,heading,14.0,0.0,,,102,g-8 t-102 g+3
+stage2,Right,1792873376.37,16:22,heading,14.0,-18.6,,,8,g-3 t-8
+stage2,Right,1792873781.78,16:29,position,,,,,0,
+stage2,Right,1792873813.72,16:30,find,0.1,,,,0,
+stage2,Right,1792873874.08,16:31,heading,-179.8,-0.0,,,505,t+25 t+40 t-40 t-40
+stage2,Right,1792873998.99,16:33,placeholder,90.0,-117.5,,,138,t+2 g+15 t+40 t-40
+stage2,Right,1792874052.07,16:34,heading,-22.0,179.8,,29.7,0,g+11 t+137 t-7 g+7
+stage2,Right,1792874083.58,16:34,heading,14.0,-0.3,2.1,,0,g-7
+stage2,Right,1792874086.22,16:34,heading,14.0,-0.6,,,6,g-7 t+6
+stage2,Right,1792874328.68,16:38,position,,,,,0,
+stage2,Right,1792874362.83,16:39,find,-0.1,,,,0,
+stage2,Right,1792874416.91,16:40,heading,179.3,-0.0,,2.7,16,t+16 g+10 t+4 g+41
+stage2,Right,1792874436.67,16:40,heading,14.0,-5.5,,,0,g-7
+stage2,Right,1792874439.0,16:40,heading,14.0,0.1,,,0,g-7
+stage2,Right,1792874440.9,16:40,heading,14.0,0.8,,,3,g-7 t-3
+stage2,Right,1792874695.82,16:44,heading,14.0,3.0,,,0,
+stage2,Right,1792874728.14,16:45,find,-0.0,,,,0,
+stage2,Right,1792874780.53,16:46,heading,-136.0,0.0,,29.6,53,t-53 g+10 t+34 g+55
+stage2,Right,1792874818.44,16:46,heading,-42.1,-30.7,,,56,g+4 t+56
+stage2,Right,1792874822.71,16:47,heading,14.0,-0.0,,,0,g-7
+stage2,Right,1792874824.62,16:47,heading,14.0,-1.1,,,0,g-7
+stage2,Right,1792874826.86,16:47,heading,14.0,-0.1,,,0,g-7
+stage2,Right,1792874981.71,16:49,heading,14.3,1.0,,,0,
+stage2,Right,1792875012.78,16:50,find,-0.0,,,,265,t+25 g+10 t+40 t-40
+stage2,Right,1792875105.79,16:51,placeholder,90.0,-113.3,,-135.4,81,t+2 g+15 t-72 t-8
+stage2,Right,1792875137.47,16:52,heading,175.8,135.4,-134.2,,158,g-4 t-158
+stage2,Right,1792875143.2,16:52,heading,14.0,-4.3,,,0,g-7
+stage2,Right,1792875145.81,16:52,heading,14.0,0.2,,,0,g-7
+stage2,Right,1792875147.72,16:52,heading,14.0,0.0,,-6.6,0,g-7
+stage2,Right,1792876464.51,17:14,heading,16.2,-3.0,,,0,
+stage2,Right,1792876494.82,17:14,find,-0.1,,,,146,t-139 t-5 t-2 g+10
+stage2,Right,1792876512.08,17:15,heading,-134.4,-16.6,10.9,,0,g-2
+stage2,Right,1792876513.48,17:15,heading,-134.4,0.1,,,324,g-1 t+35 t-7 t-12
+stage2,Right,1792876555.19,17:15,heading,-140.5,0.0,,,118,t-38 t+40 t-40
+stage2,Right,1792876565.35,17:16,placeholder,90.0,-90.8,,-97.5,2,t+2 g+15 t-14 t-2
+stage2,Right,1792876586.0,17:16,heading,14.0,91.6,,,0,g-7
+stage2,Right,1792876587.84,17:16,heading,14.0,-0.6,,-6.2,0,g-7
+stage2,Right,1792876590.5,17:16,heading,14.0,0.4,-6.2,,3,g-7 t-3
+stage2,Right,1792877024.62,17:23,heading,14.0,3.0,,,0,
+stage2,Right,1792877056.7,17:24,find,-0.1,,,,0,
+stage2,Right,1792877111.88,17:25,heading,178.9,-0.0,,4.7,7,t+6 t+1 g+10 t+6
+stage2,Right,1792877133.2,17:25,heading,14.0,-1.0,,,0,g-8
+stage2,Right,1792877135.62,17:25,heading,14.0,-0.3,,5.4,0,g-8 t-179 g+4 t-176
+stage2,Right,1792877149.67,17:25,heading,11.5,-4.5,,,0,g-4
+stage2,Right,1792877153.07,17:25,heading,15.2,4.3,,,0,
+stage2,Right,1792877185.07,17:26,find,-0.0,,,,0,
+stage2,Right,1792877192.3,17:26,position,,,,,0,
+stage2,Right,1792877208.49,17:26,position,,,,,0,
+stage2,Right,1792877228.62,17:27,position,,,,,0,
+stage2,Right,1792877241.83,17:27,position,,,,,0,
+stage2,Right,1792877245.24,17:27,heading,179.4,-0.0,,14.4,11,t+11 g+10 t+18 t+3
+stage2,Right,1792877275.41,17:27,heading,14.0,-5.4,,,0,g-6
+stage2,Right,1792877277.3,17:27,heading,14.0,-1.4,,,0,g-6
+stage2,Right,1792877279.29,17:27,heading,14.0,0.0,,,0,
+stage2,Right,1792877290.13,17:28,heading,14.0,0.3,,-6.7,18,g-6 t+14 g+7 t-4
+stage2,Right,1792877301.47,17:28,heading,14.0,7.5,-6.7,,0,g-3
+right-alone,Right,1792884948.15,19:35,placeholder,90.0,72.7,,,2,t+2 g+10
+right-alone,Right,1792885142.48,19:39,heading,54.5,-83.3,83.6,,62,g-2 t-62
+right-alone,Right,1792885156.02,19:39,heading,-8.0,0.7,,1.7,0,g-9
+right-alone,Right,1792885158.3,19:39,heading,-8.0,0.2,1.7,2.4,0,g-9 t+92 t-33 t-6
