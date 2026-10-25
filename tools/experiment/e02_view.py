@@ -113,6 +113,7 @@ th{font-weight:500;color:var(--mut2);font-size:12px;text-align:left;padding:4px 
 td{padding:5px 8px;border-bottom:1px solid #1B212B;white-space:nowrap}
 td.n{font-family:var(--mono);text-align:right}th.n{text-align:right}
 td .u{color:var(--mut);font-size:11px}
+h3 .u{color:var(--mut);font-size:11px;font-weight:400}
 td.ok{color:var(--ok)}td.bad{color:#FFB3AC}td.little{color:var(--mut)}
 tr.bad td{background:#1E1412}
 td svg{width:90px;height:22px}
@@ -178,7 +179,7 @@ tr.grp td{border-bottom:none;padding-top:9px}
  </div>
  <div class="panel" id="calp">
   <h2>Self-calibration, settling run by run</h2>
-  <div class="calw"><div><h3>Gyro scale</h3><div id="calg"></div></div><div><h3>Wheel scale</h3><div id="calw"></div></div></div>
+  <div class="calw"><div><h3>Gyro scale <span class="u">(true turn ÷ gyro reading, no unit) · x: run number</span></h3><div id="calg"></div></div><div><h3>Wheel scale <span class="u">(true distance ÷ wheel count, no unit) · x: run number</span></h3><div id="calw"></div></div></div>
   <div class="legend" id="calleg"></div>
   <p class="note">Each line is one robot's correction as the system learned it from the camera; it starts at a guess and should flatten as runs are added.</p>
   <p class="src">Measured: gyro scale (true turn / the gyro's reading) and wheel scale (true distance / the wheels' reading), y; the run each was refitted after, x. Data: the runner's accepted self-calibration fits (fits in e02_state.json).</p>
@@ -334,7 +335,7 @@ function results(rows){const box=$('res');box.innerHTML='';rows=rows||[];
  let hi=4;rows.forEach(r=>hi=Math.max(hi,r.end_err_cm));hi=Math.ceil(hi/4)*4;const W=320,H=180,L=34,T=8,B=H-24,y=v=>B-(B-T)*v/hi;
  const s=el('svg',{viewBox:'0 0 '+W+' '+H});
  for(let i=0;i<=4;i++){const v=hi*i/4;s.appendChild(el('line',{x1:L,x2:W,y1:y(v),y2:y(v),stroke:'#262D39'}));s.appendChild(el('text',{x:L-6,y:y(v)+4,'text-anchor':'end'},v%1?v.toFixed(1):v))}
- s.appendChild(el('text',{x:0,y:T-1,style:'font-size:9px'},'cm'));
+ s.appendChild(el('text',{x:0,y:T-1,style:'font-size:9px'},'end error, cm'));
  const cs=['U','C','K','KC'],cw=(W-L)/4;
  cs.forEach((c,i)=>{const cx=L+cw*(i+.5),v=rows.filter(r=>r.cond==c);
   v.forEach((r,j)=>{const d=el('circle',{cx:cx-15+((j*7)%31),cy:y(r.end_err_cm),r:4,fill:CC[c],stroke:'#151A22','stroke-width':2});tipOn(d,c+' · run '+r.order+' · '+esc(r.robot)+' · route '+r.route+': '+num(r.end_err_cm,1)+' cm');s.appendChild(d)});
@@ -1245,16 +1246,19 @@ const RCOL=['#f2a33a','#5aa9ff','#3ccf8e','#c678dd','#e06c75'];
 let busy=false;
 function pic(){if(busy)return;busy=true;const im=new Image();im.onload=()=>{document.getElementById('pic').src=im.src;busy=false};im.onerror=()=>{busy=false};im.src='/frame.jpg?t='+Date.now();}
 function svgEl(t,a){const e=document.createElementNS('http://www.w3.org/2000/svg',t);for(const k in a)e.setAttribute(k,a[k]);return e}
-function axes(svg,ylab,lo,hi){svg.innerHTML='';for(let i=0;i<=4;i++){const y=20+i*40;svg.appendChild(svgEl('line',{x1:40,x2:330,y1:y,y2:y,stroke:'#2a2f38'}));
+function axes(svg,ylab,lo,hi,ytitle,xtitle){svg.innerHTML='';
+ // axis titles with units (Nick, 2026-10-25: the charts didn't say what the axes were)
+ if(ytitle){const yt=svgEl('text',{x:40,y:11,style:'font-size:10px;fill:#9aa4b2'});yt.textContent=ytitle;svg.appendChild(yt)}
+ if(xtitle){const xt=svgEl('text',{x:330,y:193,'text-anchor':'end',style:'font-size:10px;fill:#9aa4b2'});xt.textContent=xtitle;svg.appendChild(xt)}for(let i=0;i<=4;i++){const y=20+i*40;svg.appendChild(svgEl('line',{x1:40,x2:330,y1:y,y2:y,stroke:'#2a2f38'}));
  const t=svgEl('text',{x:4,y:y+4});const val=hi-(hi-lo)*i/4;t.textContent=val.toFixed(ylab=='gyro'?3:(Number.isInteger(val)?0:1));svg.appendChild(t)}}
 function cal(rows){const svg=document.getElementById('cal');const v=rows.filter(r=>r.gyro_scale!=null);
- let lo=1.0,hi=1.12;v.forEach(r=>{lo=Math.min(lo,r.gyro_scale-0.01);hi=Math.max(hi,r.gyro_scale+0.01)});axes(svg,'gyro',lo,hi);
+ let lo=1.0,hi=1.12;v.forEach(r=>{lo=Math.min(lo,r.gyro_scale-0.01);hi=Math.max(hi,r.gyro_scale+0.01)});axes(svg,'gyro',lo,hi,'gyro scale (true turn ÷ gyro reading, no unit)','run number →');
  const robots=[...new Set(v.map(r=>r.robot))];const n=Math.max(2,...v.map(r=>r.order||0));
  robots.forEach((rb,i)=>{const pts=v.filter(r=>r.robot==rb).map(r=>[40+290*(r.order||0)/n,20+160*(hi-r.gyro_scale)/(hi-lo)]);
   if(pts.length)svg.appendChild(svgEl('polyline',{points:pts.map(p=>p.join(',')).join(' '),fill:'none',stroke:RCOL[i%5],'stroke-width':2}));
   pts.forEach(p=>svg.appendChild(svgEl('circle',{cx:p[0],cy:p[1],r:3,fill:RCOL[i%5]})));
   const t=svgEl('text',{x:44+i*70,y:205});t.textContent=rb;t.setAttribute('style','fill:'+RCOL[i%5]);svg.appendChild(t)});}
-function res(rows){const svg=document.getElementById('res');let hi=8;rows.forEach(r=>hi=Math.max(hi,Math.ceil(r.end_err_cm/8)*8));axes(svg,'cm',0,hi);
+function res(rows){const svg=document.getElementById('res');let hi=8;rows.forEach(r=>hi=Math.max(hi,Math.ceil(r.end_err_cm/8)*8));axes(svg,'cm',0,hi,'end error from the start, cm','');
  ['U','C','K','KC'].forEach((c,i)=>{const x=80+i*70;const v=rows.filter(r=>r.cond==c);
   v.forEach((r,j)=>svg.appendChild(svgEl('circle',{cx:x-12+(j%5)*6,cy:20+160*(1-r.end_err_cm/hi),r:3,fill:COL[c],opacity:.8})));
   if(v.length){const m=v.reduce((a,r)=>a+r.end_err_cm,0)/v.length;svg.appendChild(svgEl('line',{x1:x-18,x2:x+18,y1:20+160*(1-m/hi),y2:20+160*(1-m/hi),stroke:COL[c],'stroke-width':3}))}
