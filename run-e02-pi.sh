@@ -21,6 +21,14 @@
 set -u
 cd "$(dirname "$0")"
 PLAN=0
+# --with-side: record the side camera too (Nick, 2026-10-24: footage for its calibration and the two-camera
+# tracker; the runner does not use it yet). Its device number: SIDE_DEV (default 2; `python3 tools/pi/camrec.py
+# --list` shows which numbers send pictures). Recording only: the overhead's picture rate is in perf.csv to check.
+SIDE=0
+for a in "$@"; do [ "$a" = "--with-side" ] && SIDE=1; done
+if [ "$SIDE" = 1 ]; then
+  set -- $(for a in "$@"; do [ "$a" != "--with-side" ] && printf '%s ' "$a"; done)
+fi
 PLAN_NAME=""
 if [ "${1:-}" = "--plan" ]; then
   PLAN=1; shift
@@ -30,6 +38,16 @@ fi
 REPO="$(pwd)"
 RUN_ARGS_DEFAULT="--no-side --robot 192.168.1.250 --robot 192.168.1.252 --robot 192.168.1.253"
 CAM_ARGS="--device 0 --names overhead --fps 25 --label E02 --no-lock"
+if [ "$SIDE" = 1 ]; then
+  SD="${SIDE_DEV:-2}"
+  if [ ! -e "/dev/video$SD" ]; then
+    echo "No side camera at /dev/video$SD. Plug it in, or find its number with:  python3 tools/pi/camrec.py --list"
+    echo "then start again with SIDE_DEV=<number> in front, e.g.  SIDE_DEV=4 ./run-e02-pi.sh --with-side"
+    exit 1
+  fi
+  CAM_ARGS="--device 0,$SD --names overhead,side --fps 25 --label E02 --no-lock"
+  echo "Recording the side camera too (/dev/video$SD); the runner uses the overhead only."
+fi
 
 echo "=== E02 on the Pi ==="
 need=""
@@ -75,7 +93,7 @@ hours=2
 [ -n "$PLAN_NAME" ] && hours=1.5
 prev=""
 for a in "$@"; do [ "$prev" = "--hours" ] && hours="$a"; prev="$a"; done
-need_gb=$(python3 -c "import math,sys; print(int(math.ceil(3*float(sys.argv[1])+1)))" "$hours" 2>/dev/null || echo 7)
+need_gb=$(python3 -c "import math,sys; print(int(math.ceil(3*float(sys.argv[1])*(1+int(sys.argv[2]))+1)))" "$hours" "$SIDE" 2>/dev/null || echo 13)   # the side camera doubles it
 if [ "${free_gb:-0}" -lt "$need_gb" ]; then
   echo "Only $free_gb GB free; a $hours-hour session needs about $need_gb GB. Free some space first. Stopped."
   exit 1
