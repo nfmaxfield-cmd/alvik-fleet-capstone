@@ -22,6 +22,7 @@ def _stub(board=None, exploring=False):
     r.leg_live, r.leg_kind = {"Left": 0.0}, {"Left": "go"}
     r.moves = {}
     r.border_frame = types.MethodType(E.Runner.border_frame, r)
+    r.border_cm = types.MethodType(E.Runner.border_cm, r)
     return r
 
 
@@ -157,3 +158,40 @@ def test_crawl_end_window_drops_older_pictures():
     r.seek_end = {"Left": 0.25}
     # samples before 0.25 s were the crawl towards the edge; after it, the robot backs away: allowed
     assert E.Runner.border_check(r, "Left", _track(16.0, 60.0, 13.0, 60.0)[:3] + _track(13.0, 60.0, 14.0, 60.0, n=3)) == ""
+
+
+class _Trust:
+    def __init__(self, bad, k):
+        self._bad, self._k = bad, k
+
+    def bad(self, sensor, robot="*"):
+        return self._bad and sensor == "camera"
+
+    def k(self, sensor, robot="*"):
+        return self._k if sensor == "camera" else 1.0
+
+
+def test_a_bad_camera_shrinks_the_working_area_and_a_healthy_one_gives_it_back():
+    r = _stub()
+    assert E.Runner.border_cm(r) == E.BORDER_CM                          # no trust yet: the plain border
+    r.trust = _Trust(False, 3.0)
+    assert E.Runner.border_cm(r) == E.BORDER_CM                          # not flagged: unchanged
+    r.trust = _Trust(True, 2.5)
+    b = E.Runner.border_cm(r)
+    assert E.BORDER_CM < b < E.BORDER_CM + E.BORDER_EXTRA_MAX_CM         # flagged: moved in, by its extra noise
+    r.trust = _Trust(True, 40.0)
+    assert E.Runner.border_cm(r) == E.BORDER_CM + E.BORDER_EXTRA_MAX_CM  # never more than the cap
+    track = _track(22.0, 60.0, 19.0, 60.0)                               # 19 cm from x = 0, towards it
+    assert "border is 25 cm" in E.Runner.border_check(r, "Left", track)
+    r.trust = _Trust(False, 1.0)
+    assert E.Runner.border_check(r, "Left", track) == ""                 # healthy again: 19 cm is inside the area
+
+
+def test_a_bad_camera_leaves_the_border_to_robots_that_have_their_own():
+    r = _stub()
+    r.trust = _Trust(True, 2.5)
+    track = _track(16.0, 60.0, 13.0, 60.0)
+    r.listener = types.SimpleNamespace(firmware={"Left": "2026-10-25a"})
+    assert E.Runner.border_check(r, "Left", track) == ""                 # its own border is the line
+    r.listener = types.SimpleNamespace(firmware={"Left": "2026-10-22b"})
+    assert "from an open edge" in E.Runner.border_check(r, "Left", track)   # older firmware: the camera still holds

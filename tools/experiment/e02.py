@@ -232,6 +232,12 @@ def trust_base_path(a):
 # Exempt: a forward crawl that is looking for the edge on purpose (explore's rays and probes, the edge find): the
 # firmware's edge guard stops those, forwards; anything backwards, or at speed, is never exempt.
 BORDER_CM = 15.0
+# A camera that looks bad shrinks the working area instead (Nick's question, 2026-10-24 night: shrink the area, not
+# loosen the border): the border moves in by BORDER_EXTRA_SIGMA x the camera's noise above healthy, at most
+# BORDER_EXTRA_MAX_CM, while the camera is flagged (e02_trust), and back when it looks healthy again.
+BORDER_EXTRA_SIGMA = 2.0      # chosen (DOE note: 2 sd of the extra noise keeps ~98% of single readings inside; the
+                              # simulator grid's camera:noise=2/4 sessions are the test, more real data would set it)
+BORDER_EXTRA_MAX_CM = 10.0    # chosen: a 25 cm border still leaves the L and square routes room on the 120 cm board
 BORDER_TOWARDS_CMS = 2.0      # chosen: moving towards the edge faster than this counts (still or away is allowed) ...
 BORDER_TOWARDS_FRAC = 0.5     # ... and mostly towards it (within 60 deg of straight at it): driving along the edge is
                               # allowed (dry run 2026-10-24, a robot put down 10 cm from the edge backed along it in
@@ -1067,6 +1073,14 @@ class Runner:
             else:
                 self.say("  SENSOR: %s looks healthy again (%.1f x its healthy noise)." % (who, kk))
             self.mark("e02 sensor %s %s %s" % (s_, r_, what))
+            if s_ == "camera":
+                self.say("  Working area: the virtual border is now %.0f cm inside the open edges%s." % (
+                    self.border_cm(), " (the camera looks bad: the area shrinks)" if what == "degraded" else ""))
+                self.st.setdefault("border_changes", []).append([round(time.time(), 1), round(self.border_cm(), 1)])
+                try:
+                    self.fw_border(list(self.st["robots"]))
+                except Exception as e:                    # the robots' copy is a second line; never stop for it
+                    self.say("  (the robots' own border not updated: %s)" % e, quiet=True)
             self.st.setdefault("sensor_trust_events", []).append([round(time.time(), 1), s_, r_, what, round(kk, 2)])
         if not save:
             return
@@ -1246,7 +1260,9 @@ class Runner:
                 self.say("    %s: front sensor %.0f cm, the camera and map say %s at %.0f cm" % (
                     robot, front, ahead[1], ahead[0]), quiet=not (h[1] and abs(miss) > FRONT_STEER_FACTOR * tol))
                 if h[1] and abs(miss) > FRONT_STEER_FACTOR * tol and not getattr(self.a, "no_front_steer", False) \
-                        and not self.trust.bad("front", robot):
+                        and not self.trust.bad("front", robot) and not self.trust.bad("camera"):
+                    # (nor while the camera itself looks bad: the map's position is known to be off, and a hold
+                    # would only say so again; 2026-10-25 simulator, camera noise 4 cm: 6 front-sensor holds)
                     # (a front sensor that has itself been found bad does not make the camera suspect: e02_trust)
                     # a measured heading, and the sensor far from the map: the camera position is suspect
                     self.front_bad[robot] = "the front sensor reads %.0f cm, the map says %s at %.0f cm" % (
@@ -4508,7 +4524,7 @@ class Runner:
         oy = next((v for a_, v in b.open_edges() if a_ == "y"), -999.0)
         xs, ys = b.firmware_sides()
         cmds = ["set e02_xboard_side %d" % xs, "set e02_yboard_side %d" % ys, "set e02_open_x_cm %.2f" % ox,
-                "set e02_open_y_cm %.2f" % oy, "set border_cm %g" % BORDER_CM, "set border_seek 0"]
+                "set e02_open_y_cm %.2f" % oy, "set border_cm %.1f" % self.border_cm(), "set border_seek 0"]
         for n in names:
             if self.listener.firmware.get(n) != "2026-10-25a":
                 continue
@@ -5178,6 +5194,15 @@ class Runner:
             return None
         return self.guard[1], float(gx), float(gy)
 
+    def border_cm(self):
+        """The virtual border now: BORDER_CM, moved in while the camera looks bad (BORDER_EXTRA_SIGMA)."""
+        tr = getattr(self, "trust", None)
+        if tr is None or not tr.bad("camera"):
+            return BORDER_CM
+        k = max(1.0, tr.k("camera"))
+        extra = BORDER_EXTRA_SIGMA * TR.HEALTHY["camera"] * math.sqrt(k * k - 1.0)
+        return BORDER_CM + min(BORDER_EXTRA_MAX_CM, extra)
+
     def in_border_band(self, robot):
         """Is the robot's latest camera position within BORDER_CM of an open edge (False if not known, or if the
         camera follows another robot)?"""
@@ -5190,7 +5215,7 @@ class Runner:
         if f is None:
             return False
         bd, x, y = f
-        return min(abs((x if ax == "x" else y) - v) for ax, v in bd.open_edges()) < BORDER_CM
+        return min(abs((x if ax == "x" else y) - v) for ax, v in bd.open_edges()) < self.border_cm()
 
     STILL_WINDOW_S = 3.0      # chosen: a still robot's camera scatter is measured over this long ...
     STILL_EVERY_S = 10.0      # ... at most this often (one evidence item per axis each time)
@@ -5234,6 +5259,14 @@ class Runner:
             # standing still: the camera's estimate settling after the tracker moves to it is not the robot moving
             # (dry run 2026-10-24 19:41: Center held the session while it stood, 5 cm of settling "towards" the edge)
             return ""
+        tr = getattr(self, "trust", None)
+        lis = getattr(self, "listener", None)
+        if tr is not None and tr.bad("camera") and lis is not None and \
+                lis.firmware.get(robot) == "2026-10-25a":
+            # a camera that looks bad: the robot's own border (its wheels and gyro, moved in with the area) is the
+            # line; the camera's would hold on its own noise (2026-10-25 simulator, camera noise 4 cm: 6 camera
+            # border holds in 15 minutes, none with the robot really at the edge)
+            return ""
         if robot in self.leg_live and self.leg_kind.get(robot) == "turn":
             # turning on its spot: the camera's spot (the top's centre, not the axle) swings a few cm, the robot
             # goes nowhere (dry run 2026-10-24: a 90 deg turn 15 cm from the edge held the session)
@@ -5243,18 +5276,19 @@ class Runner:
         if a is None or b is None:
             return ""
         bd, x, y = b
+        bcm = self.border_cm()
         dt_ = max(1e-3, smp[-1][0] - smp[0][0])
         speed = math.hypot(x - a[1], y - a[2]) / dt_
         for ax, val in bd.open_edges():
             d = abs((x if ax == "x" else y) - val)
-            if d >= BORDER_CM:
+            if d >= bcm:
                 continue
             p0 = a[1] if ax == "x" else a[2]
             p1 = x if ax == "x" else y
             towards = (abs(p0 - val) - abs(p1 - val)) / dt_          # cm/s closer to that edge
             if BORDER_TOWARDS_CMS < towards < BORDER_JUMP_CMS and towards >= BORDER_TOWARDS_FRAC * speed:
                 return "its centre is %.0f cm from an open edge (the border is %.0f cm), moving towards it" % (
-                    d, BORDER_CM)
+                    d, bcm)
         return ""
 
     def watchdog(self, robot=None):
@@ -5950,7 +5984,7 @@ class Runner:
         pts, far_i = self.route_points(route, prm, start or (sx, sy), heading)
         # never a route off the board (2026-10-24 Pi plan): from where it really stands, every waypoint must keep
         # its centre BORDER_CM inside the open edges (the virtual border would hold the session there anyway)
-        off = [w for w in pts if self.board.edge_room(w[0], w[1])[0] < BORDER_CM]
+        off = [w for w in pts if self.board.edge_room(w[0], w[1])[0] < self.border_cm()]
         if off:
             self.say("  K drive: from where it stands (%.0f, %.0f) the route would come within %.0f cm of an open edge: "
                      "not driven" % (start[0] if start else sx, start[1] if start else sy,
