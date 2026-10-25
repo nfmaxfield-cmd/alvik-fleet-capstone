@@ -17,7 +17,14 @@ counted (it joins the queue only when it reaches the go level asleep, hours late
 The leave level is the charge curve's knee (constant current turns to constant voltage); the early top-up level is
 leave - TOPUP_GAP (the policy simulator's best, tools/dock/charge_policy_sim.py).
 A capacity check says when one dock cannot keep this many robots working (1 + net charge rate / drain): then rest one
-robot at a time asleep off the dock (the simulator's `--rest` policy).
+robot at a time asleep off the dock (the simulator's `--rest` policy; asleep by the firmware's `sleep`, never switched
+off by hand).
+
+The levels ADAPT as data comes in (Nick, 2026-10-25 13:03: "as long as we adapt once we have data"): the drains are
+the battery model's (this session's own once it has enough hours, else the earlier sessions', else the fleet
+default), their standard errors shrink with more hours, and the charge curve (rate and knee, so the leave level too)
+is the one learned from the robots' charging (BatteryModel.charge_curve) as soon as there is CHARGE_MIN_H of it.
+LiveLevels below is what the runner calls every battery tick.
 Every number below: MEASURED / PLACEHOLDER / CHOSEN as in the policy simulator. Tests: tools/dock/tests/.
 """
 import math
@@ -76,7 +83,13 @@ def levels(robot, model, fleet=(), p=None):
     fleet: the OTHER robots, each dict(robot, state, reading): state is 'charging' (on the dock), 'queued' (waiting
     for it, in queue order), 'working', or 'resting' (asleep off the dock). Returns dict(go, leave, topup, parts,
     wait_h, rates, capacity, rest_advice, reasons)."""
-    p = dict(P, **(p or {}))
+    learned = model.charge_curve() if hasattr(model, "charge_curve") else None
+    base = dict(P)
+    if learned is not None:
+        base["cc_rate"] = learned["cc_rate"]
+        if learned.get("knee") is not None:
+            base["knee"] = learned["knee"]
+    p = dict(base, **(p or {}))
     k = p["k_se"]
     rates, share = _rates(model, robot)
     still_hi, move_hi = rates["still"].hi(k), rates["moving"].hi(k)
@@ -140,8 +153,13 @@ def levels(robot, model, fleet=(), p=None):
                    + " (wait %.2f h: %s%s)" % (wait_h, "; ".join(desc) or "dock free",
                                                 ("; %d working robot%s could arrive first, %.1f h each"
                                                  % (n_working, "" if n_working == 1 else "s", per)) if n_working else ""))
-    reasons.append("leave %.0f %% = the charge curve's knee (PLACEHOLDER %.0f %%/h to %.0f %% until bench test 1)"
-                   % (leave, p["cc_rate"], p["knee"]))
+    if learned is not None:
+        reasons.append("leave %.0f %% = the charge curve's knee (%.0f %%/h to %.0f %%, %s%s)" % (
+            leave, p["cc_rate"], p["knee"], learned["source"],
+            "" if learned.get("knee") is not None else "; knee still the PLACEHOLDER: no charge has reached it yet"))
+    else:
+        reasons.append("leave %.0f %% = the charge curve's knee (PLACEHOLDER %.0f %%/h to %.0f %% until the robots have "
+                       "charged %.2f h on the dock, or bench test 1)" % (leave, p["cc_rate"], p["knee"], BR.CHARGE_MIN_H))
     reasons.append("capacity: one dock keeps %.1f robots working (net charge %.1f / drain %.1f %%/h); %d active%s"
                    % (cap, net, work_mean, active, ": REST one robot at a time asleep off the dock" if rest else ""))
     return dict(go=go, leave=leave, topup=leave - p["topup_gap"], parts=parts, wait_h=wait_h, capacity=cap,
@@ -173,3 +191,60 @@ def sim_params(model, robots):
         st.append(rates["still"].rate)
         sl.append(rates["asleep"].rate)
     return dict(work_lo=min(w), work_hi=max(w), drive=max(mv), wait=max(st), sleep=max(sl))
+
+
+class LiveLevels:
+    """The runner's hook (tools/experiment/e02.py, every battery tick): refit the battery model from the session
+    folder so far (battery.csv and e02_log.txt only: cheap), save it into the history, and give every robot's go /
+    leave / top-up level with where its numbers come from.
+
+        live = LiveLevels(session_dir, history_path)
+        levels, words = live.tick(robots, resting=("Right",))     # words: change messages and level moves to log
+    """
+
+    def __init__(self, session_dir, history_path, p=None):
+        self.dir = session_dir
+        self.model = BR.BatteryModel(history_path)
+        self.p = p
+        self.last = {}                 # robot -> go level last reported
+
+    def tick(self, robots, resting=(), charging=None, queued=(), readings=None):
+        """robots: the session's robots (working unless named in resting / queued, or the one charging);
+        readings: {robot: latest %} (for the one on the dock). Returns ({robot: dict}, [message lines])."""
+        sess = BR.load_session(self.dir, robot_logs=False)
+        words = list(self.model.update(sess))
+        try:
+            self.model.save()
+        except OSError as e:
+            words.append("battery history not saved: %s" % e)
+        readings = readings or {}
+        out = {}
+        names = list(robots) + [r for r in resting if r not in robots]
+
+        def state(o):
+            if o == charging:
+                return "charging"
+            if o in queued:
+                return "queued"
+            return "resting" if o in resting else "working"
+
+        for r in names:
+            fleet = [dict(robot=o, state=state(o), reading=readings.get(o)) for o in names if o != r]
+            lv = levels(r, self.model, fleet, self.p)
+            rates = self.model.rates(r)
+            cur = self.model.charge_curve()
+            out[r] = dict(go=round(lv["go"], 1), leave=round(lv["leave"], 1), topup=round(lv["topup"], 1),
+                          still=round(rates["still"].rate, 2), still_se=round(rates["still"].se, 2),
+                          moving=round(rates["moving"].rate, 2), moving_se=round(rates["moving"].se, 2),
+                          asleep=round(rates["asleep"].rate, 2), still_from=rates["still"].source,
+                          asleep_from=rates["asleep"].source,
+                          charge_from=cur["source"] if cur else "placeholder (no charging yet)",
+                          rest=bool(lv["rest_advice"]), t=round(sess["t1"] or 0.0, 1))
+            prev = self.last.get(r)
+            if prev is None or abs(prev - lv["go"]) >= 1.0:
+                self.last[r] = lv["go"]
+                words.append("%s: go to the dock at %.0f %%, leave at %.0f %% (still %.1f +- %.1f %%/h from %s; "
+                             "moving %.1f; charge curve %s)" % (r, lv["go"], lv["leave"], rates["still"].rate,
+                                                                rates["still"].se, rates["still"].source,
+                                                                rates["moving"].rate, out[r]["charge_from"]))
+        return out, words

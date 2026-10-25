@@ -23,10 +23,27 @@ Firmware: `firmware/home_lab/switches.h`, `dock.h` (2026-10-19a; pins A0 / A1 fr
 | `stl/dock_v2.stl` | **dock version 2** (`build_v2.py`): the same funnel for parking, plus a pair of measuring posts molded into each of its three closed sides; no floor stripe |
 | `preview/dock_v2_layout.png` | version 2 from above with a robot parked and one at each post station |
 | `build_attachment_v2.py` | **self-charging** (plan: `docs/build-plans/self-charging-dock.md`, not built yet): `stl/attachment_v2.stl` (the one-piece attachment plus two brass screw-head charging pads in the bar; same outside, same firmware numbers), `stl/dock_v3.stl` (dock v2 plus two spring pins in the back wall, a wiring cavity and a cable channel), `stl/attachment_v2_fit_test.stl` (13 mm slice to try on first), `stl/pogo_gauge.stl`; previews `attachment_v2.png`, `dock_v3.png`, `charging_contact.png`, `nose_bracket_size.png` |
-| `build_dock_v5.py` | **current design (2026-10-25): dock v5, a U the robot backs into** (plan: `docs/build-plans/self-charging-dock.md`, not built yet): `stl/dock_v5.stl` (U with bumps inside and three post stations outside, a 10 mm mouth chamfer instead of the funnel, two prongs each carrying a stiff brass contact plate hinged at its front and held up by a small spring at its rear), `stl/pad_sled_v5.stl` (pads 8 mm behind the axle), `stl/attachment_v5.stl` (v3 with the pad-wire holes moved), `stl/marker_strip_v5.stl` (2 x 6 squares of 15 mm, 90 x 30 mm); previews `dock_v5.png`, `docked_v5.png`, `contact_v5.png`, `lift_v5.png`, `sled_v5.png` |
+| `build_dock_v6.py` | **current design (2026-10-25 13:03): dock v6** (plan: `docs/build-plans/self-charging-dock.md`, not built yet): `stl/dock_v6.stl` (v5's U with the crowns under the battery cover's pads, two springs under each contact plate, a 20 mm mouth chamfer catching 13.5 mm off centre), `stl/pad_carrier_v6.stl` (a 2.4 mm carrier taped to the battery cover: two pads of 1/4 in brass strip 19 mm behind the axle, lanes, wire channels); attachment and marker strip: v5's files; previews `dock_v6.png`, `docked_v6.png`, `contact_v6.png`, `lift_v6.png`, `carrier_v6.png`, `carrier_on_photo_v6.png` (the carrier drawn on Nick's underside photo) |
+| `build_dock_v5.py` | **superseded by v6** (pads on a sled 8 mm behind the axle, one spring per plate): dock v5, a U the robot backs into (plan: `docs/build-plans/self-charging-dock.md`, not built yet): `stl/dock_v5.stl` (U with bumps inside and three post stations outside, a 10 mm mouth chamfer instead of the funnel, two prongs each carrying a stiff brass contact plate hinged at its front and held up by a small spring at its rear), `stl/pad_sled_v5.stl` (pads 8 mm behind the axle), `stl/attachment_v5.stl` (v3 with the pad-wire holes moved), `stl/marker_strip_v5.stl` (2 x 6 squares of 15 mm, 90 x 30 mm); previews `dock_v5.png`, `docked_v5.png`, `contact_v5.png`, `lift_v5.png`, `sled_v5.png` |
 | `build_attachment_v3.py` | **superseded by v5** (back-mounted, charges from underneath) (plan: `docs/build-plans/self-charging-dock.md`, not built yet): `stl/attachment_v3.stl` (one attachment: bumper switches at the BACK, light plate, cable clips), `stl/pad_sled.stl` (two flush brass pads under the robot's rear), `stl/dock_v4.stl` (funnel, two switch bumps on the back wall, a two-pronged tongue with an upright spring pin in each prong, taller posts), fit tests `clearance_gauge.stl`, `attachment_v3_fit_test.stl`, `pogo_gauge_v.stl`; previews `attachment_v3.png`, `pad_sled.png`, `dock_v4.png`, `docked_v4.png`, `underside_v4.png` |
 
-## Dock v5 (self-charging, current): `build_dock_v5.py`
+## Dock v6 (self-charging, current): `build_dock_v6.py`
+
+Nick, 2026-10-25 13:03. Plan, numbers, force budget and build steps: `docs/build-plans/self-charging-dock.md`.
+
+- **Pads on the battery cover** (behind the wheels, in front of the caster), so they come off with it: a printed
+  **pad carrier** stuck on with thin double-sided tape (no drilling; the cover's screw stays 2.8 mm clear), two pads cut
+  from the same 1/4 in brass strip, 19 mm behind the axle. The wires run in channels to the carrier's back edge, along
+  the underside to attachment v5's holes, through a 2-pin plug, to the cut USB-C plug at the Nano's front left. The
+  cover's position comes from Nick's photo (about +-1.5 mm): **measure it before printing** (plan, Appendix B, step 0).
+- **Two springs per plate,** side by side under its edges (0.15 N/mm each): the plate cannot rock. 0.25 N per plate
+  docked; 38 % of the caster's (assumed) load docked, 44 % at most while backing in (v5: 14 / 24 %, pads 8 mm behind
+  the axle).
+- **Mouth:** a 20 mm chamfer opening 12 mm each side (catches 13.5 mm off centre; v5: 8.5). 161 x 145 x 22 mm.
+- Everything else as v5: bumps, post stations, marker strip, firmware and map numbers.
+- Build: `python hardware/dock/build_dock_v6.py` (expect one WARN line, a comparison; no FAIL).
+
+## Dock v5 (self-charging, superseded by v6): `build_dock_v5.py`
 
 Nick, 2026-10-25 10:39 and 11:05. Plan, numbers, force budget and the build steps: `docs/build-plans/self-charging-dock.md`.
 

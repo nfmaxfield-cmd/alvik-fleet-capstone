@@ -176,6 +176,8 @@ EDGE_TURN_CM = 9.0        # no turn on the spot closer than this to an open edge
 FIND_TIMEOUT_S = 150
 E02_TIMEOUT_S = {0: 150, 1: 400}
 BATTERY_WARN, BATTERY_STOP = 40, 15
+LEVELS_EVERY_S = 300.0      # chosen: refit the battery and the charge levels at most every 5 min (the battery reads in
+                            # whole %; about 1 % per 4 min while standing). No DOE: it only sets how fresh the display is
 EXPECTED_FW = "2026-10-25b"
 OK_FW = ("2026-10-22b", "2026-10-25a", "2026-10-25b")   # 25a adds the robot's own virtual border and `sleep`; 25b the
                                                         # back switches and the reverse find; 22b still runs
@@ -2740,15 +2742,28 @@ class Runner:
         battery the robots report with their runs. Columns: role (driving: in this session; idle: switched on but not
         in it), state (moving: a leg or a firmware run going, else still), still_s (seconds since it last moved: the
         battery % comes from its voltage, which sags while the motors draw and recovers after, so the fair readings
-        are the rested ones, still_s of 60 or more), phase, source (status: asked; run: a run's own record). A robot
-        is asked `status` only while it is still (`status` only answers; it never moves a robot)."""
+        are the rested ones, still_s of 60 or more), phase, source (status: asked; run: a run's own record), moved_s
+        (2026-10-25: seconds it was moving since its previous row, counted every 2 s: the battery learner's driving
+        time when the robot logs are not fetched yet; a resumed session whose file has no such column goes without).
+        Robots sent to sleep are logged "asleep". A robot is asked `status` only while it is still (`status` only
+        answers; it never moves a robot)."""
+        if not hasattr(self, "asleep_names"):
+            self.asleep_names = set()           # robots sent to sleep (robots_ready): their rows say "asleep"
         every = getattr(self.a, "battery_watch_s", 0) or 0
         if every <= 0 or getattr(self, "_bat_thread", None) is not None:
             return
         path = os.path.join(self.dir, "battery.csv")
         new = not os.path.exists(path)
+        with_moved = new
+        if not new:
+            try:
+                with open(path) as f:
+                    with_moved = "moved_s" in f.readline()
+            except OSError:
+                with_moved = False
         drive = set(names)
         t_start = time.time()
+        self.st.setdefault("charge_levels", {})
 
         def busy(n):
             return n in self.leg_live or (self.moves.get(n) or {}).get("run", "-") not in ("-", None)
@@ -2756,15 +2771,18 @@ class Runner:
         def loop():
             if new:
                 with open(path, "w") as f:
-                    f.write("t,robot,role,state,still_s,battery,phase,source\n")
-            box = dict(logged={}, last_moved={}, asked=set(), last_ask=0.0)
+                    f.write("t,robot,role,state,still_s,battery,phase,source,moved_s\n")
+            box = dict(logged={}, last_moved={}, asked=set(), last_ask=0.0, moved={}, t_tick=None)
 
             def tick():
                 logged, last_moved = box["logged"], box["last_moved"]
                 now = time.time()
+                dt_tick = min(10.0, now - box["t_tick"]) if box["t_tick"] is not None else 0.0
+                box["t_tick"] = now
                 for n in set(self.link.robots()) | drive:
                     if busy(n):
                         last_moved[n] = now
+                        box["moved"][n] = box["moved"].get(n, 0.0) + dt_tick
                 if now - box["last_ask"] >= every:
                     box["last_ask"] = now
                     box["asked"] = set()
@@ -2782,22 +2800,52 @@ class Runner:
                         mv = busy(n)
                         still = 0.0 if mv else max(0.0, tb - last_moved.get(n, t_start))
                         rows.append("%.1f,%s,%s,%s,%.0f,%d,%s,%s" % (
-                            tb, n, "driving" if n in drive else "idle", "moving" if mv else "still", still, b,
+                            tb, n, "driving" if n in drive else "idle",
+                            "moving" if mv else ("asleep" if n in self.asleep_names else "still"), still, b,
                             getattr(self, "phase", "") or "",
-                            "status" if n in box["asked"] and tb - box["last_ask"] < 5.0 else "run"))
+                            "status" if n in box["asked"] and tb - box["last_ask"] < 5.0 else "run")
+                            + (",%.0f" % box["moved"].pop(n, 0.0) if with_moved else ""))
                 if rows:
                     with open(path, "a") as f:
                         f.write("\n".join(rows) + "\n")
 
-            while True:
+            last_levels = 0.0
+            while not getattr(self, "_bat_stop", False):       # _bat_stop: only the tests set it
                 try:
                     tick()
                 except Exception as e:          # the battery log must never die quietly (2026-10-24 review)
                     self.say("  (battery log: %s)" % e, quiet=True)
+                if time.time() - last_levels >= min(every, LEVELS_EVERY_S):
+                    last_levels = time.time()
+                    try:
+                        self.charge_levels_tick(names)
+                    except Exception as e:      # the levels are advice: never stop the battery log
+                        self.say("  (charge levels: %s)" % e, quiet=True)
                 time.sleep(2.0)
 
         self._bat_thread = threading.Thread(target=loop, daemon=True)
         self._bat_thread.start()
+
+    def charge_levels_tick(self, names):
+        """Each robot's go / leave levels from the battery learned so far (Nick, 2026-10-25 13:03: the levels adapt as
+        data comes in): tools/dock/charge_levels.LiveLevels refits the drains from battery.csv and the log, saves them
+        into logs/battery_learned.json (dry runs: battery_learned-dryrun.json), and gives the levels; they go into
+        e02_state.json "charge_levels" (the live view's robot cards) and the session log when they move a point."""
+        if getattr(self, "_live_levels", None) is None:
+            dock = os.path.join(TOOLS, "dock")
+            if dock not in sys.path:
+                sys.path.insert(0, dock)
+            import charge_levels as CLV
+            hist = os.path.join(REPO, "logs", "battery_learned%s.json" % (
+                "-dryrun" if getattr(self.a, "dry_run", False) else ""))
+            self._live_levels = CLV.LiveLevels(self.dir, hist)
+        working = [n for n in names if n not in self.unavailable]
+        out, words = self._live_levels.tick(working, resting=sorted(getattr(self, "asleep_names", ())))
+        self.st["charge_levels"] = out
+        self.st.save()
+        for w in words:
+            self.say("  battery: " + w, quiet=" drains " not in w)
+        return out
 
     def batteries(self, names):
         t = time.time()
@@ -3079,6 +3127,7 @@ class Runner:
             for n in self.link.robots():
                 if n not in names and self.listener.firmware.get(n) in BORDER_FW:
                     self.send(n, "sleep %d" % self.a.sleep_idle)
+                    self.asleep_names.add(n)        # battery.csv logs it asleep (the battery learner's sleep drain)
                     self.say("  %s is not in this session: sent to sleep (it checks in every %d min)" % (
                         n, self.a.sleep_idle))
         for n in names:
