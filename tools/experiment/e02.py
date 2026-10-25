@@ -245,6 +245,13 @@ FW_BORDER_CM = 10.0           # chosen (DOE note: a robot's front is 5 cm ahead 
                               # pose drifts a few cm between camera fixes; a DOE driving at the line uncalibrated, at
                               # 4 and 10 cm/s, would set it). Fixed: a bad camera moves the camera's line and the routes
                               # in (border_cm), never this one
+# Home mode (--home; Nick, 2026-10-25: "we can take more risk when I'm home", the goal being to drop the virtual border
+# eventually): the camera's border and the robots' own both move closer to the edge; a crossing still stops every
+# robot and asks. Away sessions (no --home) keep BORDER_CM / FW_BORDER_CM.
+HOME_BORDER_CM = 8.0          # chosen (DOE note: front 5 cm ahead of the centre, braking ~1 cm, picture age ~0.2 s at
+                              # 10 cm/s = 2 cm; the drive-at-the-line DOE at 4 and 10 cm/s would set it)
+HOME_FW_BORDER_CM = 6.0       # chosen: the robots' own stays below the camera's, as away (15 / 10); its front 1 cm from
+                              # the edge, where the forward edge sensors also stop it
 PARK_OPEN_MAX_CM = 22.0       # while the camera looks bad, park spots move in to border_cm() but no further than this
                               # from the open edges: at 22 the square route still passes 22 cm from the moved spot's
                               # centre (at 25 it would be 19.2, near PARK_CLEAR_CM 18). Chosen from the nominal paths;
@@ -2596,6 +2603,9 @@ class Runner:
         a, st = self.a, self.st
         setup = st["setup"]
         self.say("=== Setup checks ===")
+        self.say("Virtual border: %s session, the camera's %.0f cm and the robots' own %.0f cm inside the open edges "
+                 "(a crossing stops every robot and asks)." % ("home" if getattr(self.a, "home", False) else "away",
+                                                               self.border_cm(), self.fw_border_cm()))
         # 1. Pi recorder
         ok1, w1, size, fps = CAM.check_stream(a.pi, a.overhead_port)
         if a.no_side:
@@ -4537,13 +4547,17 @@ class Runner:
         oy = next((v for a_, v in b.open_edges() if a_ == "y"), -999.0)
         xs, ys = b.firmware_sides()
         cmds = ["set e02_xboard_side %d" % xs, "set e02_yboard_side %d" % ys, "set e02_open_x_cm %.2f" % ox,
-                "set e02_open_y_cm %.2f" % oy, "set border_cm %g" % FW_BORDER_CM, "set border_seek 0"]
+                "set e02_open_y_cm %.2f" % oy, "set border_cm %g" % self.fw_border_cm(), "set border_seek 0"]
         for n in names:
             if self.listener.firmware.get(n) != "2026-10-25a":
                 continue
             for c in cmds:
                 self.send(n, c)
                 time.sleep(0.03)
+
+    def fw_border_cm(self):
+        """The robots' own border: FW_BORDER_CM away, HOME_FW_BORDER_CM with --home."""
+        return HOME_FW_BORDER_CM if getattr(getattr(self, "a", None), "home", False) else FW_BORDER_CM
 
     def fw_seek(self, robot, on):
         """border_seek for the robot's next leg (a crawl looking for the edge on purpose)."""
@@ -5195,7 +5209,7 @@ class Runner:
             return None
         xs, ys = (int(v) for v in (getattr(self.a, "board_sides", None) or "1,1").split(","))
         self.say("  Virtual border while exploring: %.0f cm inside the open edges, placed by %s (until explore's own "
-                 "fit)." % (BORDER_CM, os.path.basename(cal)))
+                 "fit)." % (self.border_cm(), os.path.basename(cal)))
         return cam, PL.Board(xboard_side=xs, yboard_side=ys)
 
     def border_frame(self, x, y):
@@ -5213,12 +5227,13 @@ class Runner:
 
     def border_cm(self):
         """The virtual border now: BORDER_CM, moved in while the camera looks bad (BORDER_EXTRA_SIGMA)."""
+        base = HOME_BORDER_CM if getattr(getattr(self, "a", None), "home", False) else BORDER_CM
         tr = getattr(self, "trust", None)
         if tr is None or not tr.bad("camera"):
-            return BORDER_CM
+            return base
         k = max(1.0, tr.k("camera"))
         extra = BORDER_EXTRA_SIGMA * TR.HEALTHY["camera"] * math.sqrt(k * k - 1.0)
-        return BORDER_CM + min(BORDER_EXTRA_MAX_CM, extra)
+        return base + min(BORDER_EXTRA_MAX_CM, extra)
 
     def in_border_band(self, robot):
         """Is the robot's latest camera position within BORDER_CM of an open edge (False if not known, or if the
@@ -6694,6 +6709,10 @@ def main(argv=None):
                          "idle (0: off; on by default, Nick 2026-10-24: weeks of it decide the drain questions)")
     ap.add_argument("--no-shift-watch", action="store_true",
                     help="do not measure or correct the camera's creep during the runs (CAM.CameraShiftWatch)")
+    ap.add_argument("--home", action="store_true",
+                    help="Nick is home: the virtual border sits closer to the edge (camera %g cm, the robots' own %g cm; "
+                         "away: %g / %g); a crossing still stops every robot and asks" % (
+                             HOME_BORDER_CM, HOME_FW_BORDER_CM, BORDER_CM, FW_BORDER_CM))
     ap.add_argument("--marks", action="store_true",
                     help="before the runs, a tape-mark check: Nick puts a robot by hand on each tape mark "
                          "(e02_camerr.MARKS), and the camera's error there corrects KC's fixes and the far-point scores")

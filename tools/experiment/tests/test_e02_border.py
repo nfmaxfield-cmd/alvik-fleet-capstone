@@ -195,3 +195,18 @@ def test_a_bad_camera_leaves_the_border_to_robots_that_have_their_own():
     assert E.Runner.border_check(r, "Left", track) == ""                 # its own border is the line
     r.listener = types.SimpleNamespace(firmware={"Left": "2026-10-22b"})
     assert "from an open edge" in E.Runner.border_check(r, "Left", track)   # older firmware: the camera still holds
+
+
+def test_home_mode_moves_both_borders_closer_and_away_keeps_them():
+    r = _stub()
+    r.fw_border_cm = types.MethodType(E.Runner.fw_border_cm, r)
+    r.a = types.SimpleNamespace(home=False)
+    assert E.Runner.border_cm(r) == E.BORDER_CM and r.fw_border_cm() == E.FW_BORDER_CM
+    r.a = types.SimpleNamespace(home=True)
+    assert E.Runner.border_cm(r) == E.HOME_BORDER_CM and r.fw_border_cm() == E.HOME_FW_BORDER_CM
+    assert E.HOME_FW_BORDER_CM < E.HOME_BORDER_CM < E.BORDER_CM
+    track = _track(12.0, 60.0, 10.0, 60.0)                          # 10 cm from x = 0, towards it
+    assert E.Runner.border_check(r, "Left", track) == ""           # home: outside the 8 cm line
+    assert "from an open edge" in E.Runner.border_check(r, "Left", _track(9.0, 60.0, 7.0, 60.0))
+    r.trust = _Trust(True, 2.5)                                     # a bad camera still moves the line in at home
+    assert E.Runner.border_cm(r) > E.HOME_BORDER_CM
