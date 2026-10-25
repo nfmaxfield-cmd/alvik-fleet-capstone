@@ -87,7 +87,9 @@ robot whose heading has gone 30° or more wrong (17 % of chains). Where a headin
 next correction was smaller (median 1.3 cm) than where it didn't (4.3 cm). An example from stage 1 (15:51): after
 an uncalibrated U run, the fix set Right's position but kept its own heading (−135.9°, wrong by about 33°); 75 cm
 later the next fix was 37.8 cm off. The refit numbers move the pause earlier: at 3 cm a straight drive after a
-half turn now pauses after about 39 cm, not 73 cm.
+half turn now pauses after about 39 cm, not 73 cm. The 2026-10-24 dry run found the opposite (model 4 cm, simulator
+truth 1.6 cm): the simulator's robots err less on turns than the real ones, so its turning noise is worth checking
+against these chains before the simulator grid is trusted for the pause.
 
 **What's next.** Apply the refit (Recommended changes), then rerun the confidence-pause simulator grid before the
 board DOE. Separately: find where the ≥ 30° heading errors come from. The candidates are a fix that keeps a wrong
@@ -306,7 +308,8 @@ Other:
   rows can run?
 
 ## New tests that may now be needed
-1. Simulator: the confidence-pause grid again with the refit uncertainty constants (row 1).
+1. Simulator: the confidence-pause grid again with the refit uncertainty constants (row 1), after checking the
+   simulator's turning noise against the 551 real chains (the simulator errs less than the real robots).
 2. Where the ≥ 30° heading errors come from: replay the fixes before them, with the heading each carried (row 1).
 3. A unit test that a camera fix after an uncalibrated run also corrects the heading, or that the uncertainty
    starts high when it doesn't (row 1's example).
