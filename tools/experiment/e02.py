@@ -4657,6 +4657,16 @@ class Runner:
                 self.board.xboard_cm = line
             else:
                 self.board.yboard_cm = line
+            # the finds so far put their robots against the OLD line: their true positions (the camera error map's
+            # samples) move with it (2026-10-24 night replay: the first finds were 2.6-2.8 cm off after a move)
+            dlt = line - cur
+            for smp_ in self.camerr.samples:
+                if smp_.get("source") != "find":
+                    continue
+                k_ = "y" if which == "x" else "x"
+                smp_[k_] = round(smp_[k_] + dlt, 2)
+                smp_["d" + k_] = round(smp_["d" + k_] - dlt, 2)
+            st["camera_error_samples"] = self.camerr.to_list()
             st.setdefault("board_line_updates", []).append(
                 dict(t=round(time.time(), 1), board=which, before=round(cur, 2), after=round(line, 2),
                      picture=pic, touches=len(rows), robot_offsets={k: round(v, 2) for k, v in res.items()}))

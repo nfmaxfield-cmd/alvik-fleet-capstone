@@ -52,6 +52,7 @@ CAM_HEADING_HEALTHY_DEG = 1.0   # the camera's share of a stretch's heading rms 
                                 # rms 1.39 deg = sqrt(gyro 1.0^2 + camera 1.0^2); x the camera's k with one robot
 GATE_MAX_CM = 3.0         # chosen: the wheel fit's limit never above this, however noisy the camera looks (2026-10-24
                           # review: a shared term can't tell "the camera across the board" from "every robot's wheels")
+STANDS_OUT = 1.5          # chosen: with 2+ robots, a wheel or gyro flag needs this robot's stretch rms 1.5 x theirs
 GATE_K = 1.5              # chosen: refuse a wheel fit only beyond 1.5 x what the camera and healthy wheels explain
 KC_GATE_SIGMA = 3.0       # chosen: a camera position this many sds from the belief means the belief is wrong
 KC_GATE_WEIGHT = 0.9      # then the fix takes this much of the camera
@@ -196,6 +197,20 @@ class SensorTrust:
     def bad(self, sensor, robot="*"):
         return bool(self.flags.get("%s/%s" % (sensor, robot)))
 
+    def stands_out(self, sensor, robot):
+        """With two or more robots: is this robot's stretch rms at least STANDS_OUT x the robots' median? (2026-10-24
+        night replay: on k alone, whichever robot was above the median got flagged when the robots differed by
+        about 1 cm, even on the healthy laptop morning.) True with fewer robots (nothing to compare)."""
+        per = {}
+        for it in self._items(sensor):
+            per.setdefault(it["robot"], []).append((it["v"], it["w"]))
+        rms = {r: weighted_rms(v) for r, v in per.items() if len(v) >= MIN_N[sensor]}
+        if len(rms) < 2 or robot not in rms:
+            return True
+        vals = sorted(rms.values())
+        med = vals[len(vals) // 2] if len(vals) % 2 else 0.5 * (vals[len(vals) // 2 - 1] + vals[len(vals) // 2])
+        return rms[robot] >= STANDS_OUT * med
+
     def update_flags(self, robots):
         """Flags with hysteresis; returns the changes [(sensor, robot, 'degraded' | 'recovered', k)]."""
         out = []
@@ -203,6 +218,8 @@ class SensorTrust:
         for s, r in keys:
             kk = self.k(s, r)
             key = "%s/%s" % (s, r)
+            if s in ("wheels", "gyro") and not self.stands_out(s, r):
+                kk = min(kk, RECOVERED_K - 0.01) if not self.flags.get(key) else kk
             if not self.flags.get(key) and kk >= DEGRADED_K:
                 self.flags[key] = True
                 out.append((s, r, "degraded", kk))

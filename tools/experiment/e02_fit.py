@@ -108,9 +108,38 @@ def _split_straight(pts, tol):
     return [("split", k)]
 
 
-def camera_stretches(cam, min_len=6.0, tol_cm=0.8, trim_s=0.1, min_speed=2.5):
+JUMP_CM = 3.0          # chosen (2026-10-24 night analysis B6: 2/3/4 cm swept; a DOE could settle it): one picture
+JUMP_CMS = 25.0        # moving more than this, and faster than this (cm/s: the robots drive 4-20), is the tracker
+                       # jumping (catching up after lagging), not the robot
+
+
+def split_at_jumps(cam, jump_cm=JUMP_CM, jump_cms=JUMP_CMS):
+    """Pieces of a camera track [(t, x, y)] split wherever one picture jumps (more than jump_cm, and faster than
+    jump_cms: a gap of dropped pictures is not a jump)."""
+    out, cur = [], []
+    for q in cam:
+        if cur:
+            d = math.hypot(q[1] - cur[-1][1], q[2] - cur[-1][2])
+            dt = max(1e-3, q[0] - cur[-1][0])
+            if d > jump_cm and d / dt > jump_cms:
+                out.append(cur)
+                cur = []
+        cur.append(q)
+    if cur:
+        out.append(cur)
+    return out
+
+
+def camera_stretches(cam, min_len=6.0, tol_cm=0.8, trim_s=0.1, min_speed=2.5, jump_cm=JUMP_CM):
     """Straight stretches of driving in a camera track [(t, x, y), ...]: list of dict(t0, t1, tm, dir
-    (deg, direction of travel), len (cm), p0, p1)."""
+    (deg, direction of travel), len (cm), p0, p1). The track is first cut where the camera's position jumps
+    (2026-10-24 night analysis: 66% of the Pi plan's stage-2 stretches held a 3-7 cm jump along the direction of
+    travel, which the straightness check can't see; cut there, stage 2's camera-against-wheels rms went from
+    2.1-2.35 to 0.8-1.3 cm a stretch). jump_cm None: no cut."""
+    if jump_cm:
+        pieces = split_at_jumps(cam, jump_cm)
+        if len(pieces) > 1:
+            return [s for piece in pieces for s in camera_stretches(piece, min_len, tol_cm, trim_s, min_speed, None)]
     out = []
     if len(cam) < 3:
         return out

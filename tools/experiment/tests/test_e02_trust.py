@@ -166,3 +166,20 @@ def test_fit_uses_parts_as_they_pass():
     if res["gyro_ok"]:
         assert res["values"] is not None and res["values"]["prior_parts"] == ["wheel_scale"]
         assert "not learned yet" in FIT.describe(res["values"])
+
+
+def test_camera_stretches_cut_at_a_tracker_jump():
+    # 10 cm/s along x, 15 pictures a second, and a 5 cm jump forward at t = 2 s (the tracker catching up)
+    cam = []
+    for k in range(60):
+        t = k / 15.0
+        x = 20.0 + 10.0 * t + (5.0 if t >= 2.0 else 0.0)
+        cam.append((t, x, 50.0))
+    whole = FIT.camera_stretches(cam, jump_cm=None)
+    cut = FIT.camera_stretches(cam)
+    assert max(s["len"] for s in whole) > 40.0               # the jump is inside one "straight" stretch
+    assert all(s["len"] < 32.0 for s in cut) and len(cut) == 2
+    # a gap of dropped pictures at driving speed is not a jump
+    gap = [q for q in cam if not (1.0 < q[0] < 1.4)]
+    gap = [(t, 20.0 + 10.0 * t, 50.0) for t, _, _ in gap]
+    assert len(FIT.camera_stretches(gap)) == 1
