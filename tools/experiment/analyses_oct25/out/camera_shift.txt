@@ -1,0 +1,16 @@
+stage1: 363 measurements over 30 min; shift max 0.42 px (0.17-0.19 cm on the board), at the end 0.40 px; alignment score min 0.995; over WARN_PX 1: 0
+   change within   5 s: median 0.036 px, max 0.189 px
+   change within  15 s: median 0.036 px, max 0.206 px
+   change within  30 s: median 0.041 px, max 0.208 px
+   change within  60 s: median 0.042 px, max 0.277 px
+   change within 120 s: median 0.050 px, max 0.205 px
+   x-board touches: n 12, spread (sd) 0.61 cm, range 2.05 cm
+   y-board touches: n 12, spread (sd) 0.11 cm, range 0.33 cm
+stage2: 799 measurements over 67 min; shift max 0.43 px (0.17-0.20 cm on the board), at the end 0.35 px; alignment score min 0.998; over WARN_PX 1: 0
+   change within   5 s: median 0.036 px, max 0.112 px
+   change within  15 s: median 0.040 px, max 0.117 px
+   change within  30 s: median 0.036 px, max 0.120 px
+   change within  60 s: median 0.040 px, max 0.122 px
+   change within 120 s: median 0.041 px, max 0.121 px
+   x-board touches: n 26, spread (sd) 0.37 cm, range 1.56 cm
+   y-board touches: n 26, spread (sd) 0.11 cm, range 0.47 cm

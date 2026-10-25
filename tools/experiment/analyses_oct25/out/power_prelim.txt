@@ -1,0 +1,7 @@
+TOST per arm at a 1 cm margin
+  C runs, oct23-morning                            n   9  mean 1.39  sd 0.76 ->  10 per arm;  robust sd 0.87 ->  14 per arm
+  C runs, oct23-evening                            n   1  13.19
+  C runs, stage2                                   n   3  mean 3.43  sd 4.52 -> 351 per arm;  robust sd 0.70 ->   9 per arm
+  C runs, all sessions on disk                     n  13  mean 2.77  sd 3.79 -> 247 per arm;  robust sd 1.20 ->  25 per arm
+  re-integrated end error, LORO calibration (U+C)  n  49  mean 2.24  sd 2.08 ->  74 per arm;  robust sd 1.16 ->  24 per arm
+    the same, C runs only                          n  13  mean 2.21  sd 3.00 -> 155 per arm;  robust sd 0.75 ->  10 per arm
