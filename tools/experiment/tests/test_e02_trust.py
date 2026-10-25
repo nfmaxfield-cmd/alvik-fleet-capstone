@@ -12,6 +12,10 @@ import e02_trust as TR  # noqa: E402
 
 
 def _cam_finds(t, sd, n=10, seed=1):
+    # 2026-10-25: a find counts for the camera once its robot's wheels have been judged (here: 4 healthy runs)
+    if len([it for it in t.items if it["kind"] == "run_scale" and it.get("session") == t.session]) < 4:
+        for _ in range(4):
+            t.run_scale("Left", 0.98, 150.0)
     rng = random.Random(seed)
     for _ in range(n):
         t.camera_at_find("Left", rng.gauss(0, sd), rng.gauss(0, sd))

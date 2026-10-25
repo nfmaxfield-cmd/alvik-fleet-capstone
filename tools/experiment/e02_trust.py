@@ -75,11 +75,11 @@ BASE_FLOOR = dict(wheels=0.25, gyro=0.3, front=2.0, runs=RUN_SPREAD_PRIOR)
 DEGRADED_K = 2.0          # chosen: twice its baseline = looks bad (DOE: the swap test at 1.5 / 2 / 3)
 RECOVERED_K = 1.5         # chosen: back under this = healthy again (hysteresis: no flapping at the line)
 MIN_N = dict(camera=4, wheels=3, gyro=3, front=6, runs=4)     # chosen: this session's items before a check speaks
-CAMERA_FIND_MIN = 8       # chosen: find items (2 per find) before the finds speak for the camera. A find's pose is not
-                          # all board touch: its back-off and moves between the boards are the wheels' counting, so with
-                          # 8% jitter on every robot the first two finds read 1.3-2.2 cm and flagged the camera (2026-10-25
-                          # rerun); four finds outvote one or two such. A camera bad from the start is still caught at once
-                          # standing still. DOE: the grid replay at 4 / 8 / 12 (bad camera caught how soon, false flags)
+CAMERA_FIND_MIN = 8       # chosen: find items (2 per find) before the finds speak for the camera (one odd find is
+                          # outvoted). Finds count only once their robot's wheels are judged (_find_counts): with 8%
+                          # jitter on every robot, 3 of the first 4 setup finds read 1.2-2.2 cm (2026-10-25 rerun). A
+                          # camera bad from the start is caught standing still. DOE: the grid at 4 / 8 / 12 (bad camera
+                          # caught how soon, false flags)
 HIST_MIN = dict(wheels=3, gyro=3, front=6, runs=4)            # chosen: earlier items before they replace the prior
 DECAY_PER_SESSION = 0.5   # chosen: an item's weight halves every new session
 STRETCH_CAM_FACTOR = math.sqrt(2.0)   # a stretch has two camera ends
@@ -143,7 +143,8 @@ class SensorTrust:
     def _memo(self, key, fn):
         """The checks are re-read for every flag update (several a second at times): cached until the evidence
         changes (items added, a new session)."""
-        stamp = (len(self.items), self.session, self.items[-1]["t"] if self.items else None)
+        stamp = (len(self.items), self.session, self.items[-1]["t"] if self.items else None,
+                 tuple(sorted(k for k, v in self.flags.items() if v)))
         if stamp != self._stamp:
             self._cache, self._stamp = {}, stamp
         if key not in self._cache:
@@ -167,9 +168,11 @@ class SensorTrust:
                                t=round(t or time.time(), 1), session=self.session))
 
     def camera_at_find(self, robot, resid_x, resid_y, t=None):
-        """The camera's leave-one-out error at a find (cm, per axis)."""
-        self.add("camera", "*", "find", resid_x, t)
-        self.add("camera", "*", "find", resid_y, t)
+        """The camera's leave-one-out error at a find (cm, per axis). Kept with the robot that made it ("by"): a
+        find's pose leans on that robot's wheels (camera_sd)."""
+        for v in (resid_x, resid_y):
+            self.add("camera", "*", "find", v, t)
+            self.items[-1]["by"] = robot
 
     def camera_still(self, robot, sd_x, sd_y, t=None):
         """A robot standing still: its camera position's scatter over a few seconds (cm per axis). Needs no find,
@@ -235,7 +238,9 @@ class SensorTrust:
         def fresh(its, m):
             now = self._now(its)
             return now if len(now) >= m else its
-        finds = fresh(self._items("camera", kind="find"), CAMERA_FIND_MIN)
+        judged = {}
+        finds = fresh([it for it in self._items("camera", kind="find") if self._find_counts(it, judged)],
+                      CAMERA_FIND_MIN)
         still = fresh(self._items("camera", kind="still"), MIN_N["camera"])
         best, n = HEALTHY["camera"], 0
         cands = []
@@ -249,6 +254,26 @@ class SensorTrust:
         if not cands:
             return best, len(finds) + len(still)
         return max(FLOOR["camera"], max(cands)), n
+
+    def _find_counts(self, it, judged=None):
+        """Does this find count against the camera? Its pose is the board touches plus the robot's own counting of
+        its back-off and of the moves between the boards, so only once that robot's wheels have been judged on their
+        own (MIN_N fits or runs this session) and are not flagged (Nick's rule, 2026-10-25: each calibrated on its
+        own first; the wheels:jitter=0.08 rerun: setup finds at 1.2-2.2 cm flagged a healthy camera). Until then the
+        camera is judged standing still. Items from before 2026-10-25 (no "by") count as before."""
+        r = it.get("by")
+        if r is None:
+            return True
+        if self.flags.get("wheels/%s" % r):
+            return False
+        if it.get("session") != self.session:
+            return True
+        judged = {} if judged is None else judged
+        if r not in judged:
+            n_fits = len(self._now(self._items("wheels", r, "stretch_rms")))
+            n_runs = len(self._now(self._items("wheels", r, "run_scale")))
+            judged[r] = n_fits >= MIN_N["wheels"] or n_runs >= MIN_N["runs"]
+        return judged[r]
 
     def camera_known(self):
         """Is there enough evidence about the camera to blame another sensor's disagreement with it?"""

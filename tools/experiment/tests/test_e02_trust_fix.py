@@ -44,9 +44,13 @@ def _spread(n, sd):
 
 
 def _camera(t, sd=0.5, n=24, seed=1):
+    # finds count for the camera once their robot's wheels are judged: "Cam", a robot judged healthy here
+    if len([it for it in t.items if it["robot"] == "Cam" and it.get("session") == t.session]) < 4:
+        for _ in range(4):
+            t.run_scale("Cam", 0.98, 150.0)
     rng = random.Random(seed)
     for _ in range(n):
-        t.camera_at_find("Left", rng.gauss(0, sd), rng.gauss(0, sd))
+        t.camera_at_find("Cam", rng.gauss(0, sd), rng.gauss(0, sd))
 
 
 def _fits(t, robot, wheels=None, gyro=None):
@@ -377,13 +381,32 @@ def test_two_finds_do_not_flag_the_camera_four_do():
     # 2026-10-25 rerun, wheels:jitter=0.08: the first two finds read 1.3-2.2 cm (a find's back-off is the wheels'
     # counting) and flagged the camera; the finds now need CAMERA_FIND_MIN items (4 finds)
     t = TR.SensorTrust()
+    _camera(t, n=0)
     for v in ((-1.27, -1.59), (1.64, 2.17)):
-        t.camera_at_find("Left", *v)
+        t.camera_at_find("Cam", *v)
     assert t.update_flags(ROBOTS) == []
     for v in ((0.1, -0.2), (0.2, 0.05)):                 # two good finds after them: still healthy
-        t.camera_at_find("Left", *v)
+        t.camera_at_find("Cam", *v)
     assert t.k("camera") < TR.DEGRADED_K
     t2 = TR.SensorTrust()
+    _camera(t2, n=0)
     for v in _spread(TR.CAMERA_FIND_MIN, 3.0):           # a camera really 3 cm off: caught by the 4th find
-        t2.camera_at_find("Left", v, -v)
+        t2.camera_at_find("Cam", v, -v)
     assert ("camera", "*", "degraded") in [c[:3] for c in t2.update_flags(ROBOTS)]
+
+
+def test_a_find_counts_for_the_camera_only_once_its_robots_wheels_are_judged():
+    # 2026-10-25 rerun, wheels:jitter=0.08 on every robot: 3 of the first 4 setup finds read 1.2-2.2 cm (a find's pose
+    # leans on the robot's own counting) and flagged a healthy camera. Each robot's wheels are judged first.
+    t = TR.SensorTrust()
+    for v in (-1.27, -1.59, 1.64, 2.17, 1.19, 1.17, 0.4, 0.69):
+        t.camera_at_find("Left", v, v)
+    assert t.camera_sd()[1] == 0 and t.update_flags(["Left"]) == []
+    for sc in RUNS_HEALTHY["Left"][:4]:                  # Left's wheels judged healthy: its finds count now
+        t.run_scale("Left", sc, 150.0)
+    assert t.camera_sd()[1] == 16
+    t.flags["wheels/Left"] = True                       # flagged wheels: their finds never count
+    assert t.camera_sd()[1] == 0
+    old = TR.SensorTrust(dict(items=[dict(sensor="camera", robot="*", kind="find", v=0.5, w=1.0, t=1.0, session=0)
+                                     for _ in range(8)]))
+    assert old.camera_sd()[1] == 8                      # saved items from before (no robot named) count as before
