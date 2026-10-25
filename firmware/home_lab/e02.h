@@ -1028,6 +1028,12 @@ void legCommand(const String& verb, const String& rest, bool running) {
     return;
   }
   if (kind == 't' && fabsf(arg) > 180.0f) { legRecord(id, kind, arg, "refused", "turns are -180 to 180 deg"); return; }
+  // 2026-10-25c: with no compass check since power-on (gYawSign 0) the heading never moves, so a turn spins until
+  // it times out (Right on the table, 2026-10-25 19:13: 405 deg for `turn 90`). Refuse instead.
+  if ((kind == 't' || kind == 'g') && gYawSign == 0) {
+    legRecord(id, kind, arg, "refused", "no compass check since power-on: send calibrate first");
+    return;
+  }
   if (kind == 'g' && edgeOff()[0]) { legRecord(id, kind, arg, "refused", edgeOff()); return; }
   if (kind == 'g' && borderLatched && borderTowards(arg) && !(P("border_seek") > 0 && arg > 0)) {
     legRecord(id, kind, arg, "refused", "virtual border: towards the open edge (the laptop clears it)");

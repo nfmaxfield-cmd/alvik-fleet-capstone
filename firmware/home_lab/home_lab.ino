@@ -41,7 +41,9 @@
 Arduino_Alvik alvik;
 
 // Bump this whenever the firmware changes, so every logged run says which code it ran.
-#define FW_VERSION "2026-10-25b"
+#define FW_VERSION "2026-10-25c"
+// 2026-10-25c: go/turn legs are refused until the compass check has run (gYawSign set); before, a turn spun until
+// its timeout because the heading stayed 0 (Right, 2026-10-25 table test).
 // 2026-10-25b: switches at the BACK (one attachment, Nick 2026-10-25): sw_back (dock / touch / posts backwards),
 // e02_find_reverse (the find backs into the boards; e02.h REVERSE FIND), e02_back_face_cm; FIND gets a reverse column.
 
