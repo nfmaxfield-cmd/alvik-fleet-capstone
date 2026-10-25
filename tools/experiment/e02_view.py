@@ -291,7 +291,7 @@ function robots(list){const box=$('robots');box.innerHTML='';
   let h='<div class="rh"><span class="rn">'+esc(r.name)+'</span><span class="rs">'+esc(r.state)+'</span>'+(r.cls=='follow'?'<span class="tag">followed</span>':'')+(r.cls=='out'?'<span class="tag out">'+esc(r.state)+'</span>':'')+'</div>';
   const b=r.battery;h+='<div class="bat"><div class="bar"><div class="'+(b!=null&&b<20?'low':'')+'" style="width:'+(b==null?0:Math.max(0,Math.min(100,b)))+'%"></div></div><span class="mono">'+(b==null?'-':Math.round(b)+'%')+'</span><span class="bs"></span></div>';
   h+='<div class="src">'+(b==null?'battery not heard yet':'battery reported at '+new Date(r.battery_t*1000).toTimeString().slice(0,5))+'</div>';
-  h+='<div class="chips">'+(r.sensors||[]).map(q=>'<span class="'+q.state+'" title="'+SWORD[q.state]+', '+q.n+' evidence items">'+SICON[q.state]+' '+q.name+' ×'+num(q.k,1)+(q.state=='ok'?'':' '+SWORD[q.state])+'</span>').join('')+'</div>';
+  h+='<div class="chips">'+(r.sensors||[]).map(q=>'<span class="'+q.state+'" title="'+SWORD[q.state]+', '+q.n+' evidence items">'+SICON[q.state]+' '+q.name+' ×'+num(q.k,1)+(q.state=='ok'?'':' '+SWORD[q.state])+(q.lag?(q.state=='bad'?', clearing':', rising'):'')+'</span>').join('')+'</div>';
   h+='<div class="edge"></div>';d.innerHTML=h;
   const tr=(r.battery_trend||[]).map(q=>q[1]);d.querySelector('.bs').appendChild(spark(tr,0,100,'var(--mut2)'));
   const eg=d.querySelector('.edge');const e=r.edge;
@@ -976,7 +976,7 @@ class LiveView:
             for s, lab in (("camera", "Camera"), ("wheels", "Wheels"), ("gyro", "Gyro"), ("front", "Front")):
                 q = trows.get("%s/%s" % (s, "*" if s == "camera" else n))
                 if q:
-                    sensors.append(dict(name=lab, k=q["k"], state=q["state"], n=q["n"]))
+                    sensors.append(dict(name=lab, k=q["k"], state=q["state"], n=q["n"], lag=q.get("lag", "")))
             try:
                 edge = self._edge(n)
             except Exception:
