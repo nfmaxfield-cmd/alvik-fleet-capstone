@@ -9,8 +9,12 @@ import csv
 import json
 import math
 import os
+import sys
 
 import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+import raw_units                                             # noqa: E402  (tools/raw_units.py)
 
 HZ = 50.0
 R_WHEEL = 1.7       # cm
@@ -87,8 +91,12 @@ def simulate(seed=1, n_actions=60):
             x += v * dt * math.cos(math.radians(th))
             y += v * dt * math.sin(math.radians(th))
             th += w * dt
-            rpm_l = round((vl / (2 * math.pi * R_WHEEL) * 60) / 0.667) * 0.667
-            rpm_r = round((vr / (2 * math.pi * R_WHEEL) * 60) / 0.667) * 0.667
+            # what a robot logs (tools/raw_units.py): rpm, v_cms and w_dps 1.08 high, v_cms in mm/s; the
+            # board reports rpm in steps of about 0.66
+            sp = raw_units.robot_columns(vl / (2 * math.pi * R_WHEEL) * 60, vr / (2 * math.pi * R_WHEEL) * 60,
+                                         R_WHEEL, 2 * HALF_AXLE)
+            rpm_l = round(sp["wl_rpm"] / 0.667) * 0.667
+            rpm_r = round(sp["wr_rpm"] / 0.667) * 0.667
             gz = w * 0.97 + 0.6 + rng.normal(0, 0.03)
             gx = -0.9 + rng.normal(0, 0.03)
             gy = 0.3 + rng.normal(0, 0.03)
@@ -116,7 +124,7 @@ def simulate(seed=1, n_actions=60):
             rows.append({
                 "run": "AB12-1", "ms": ms0 + int(n * 20 + rng.integers(0, 3)), "step": step,
                 "wl_deg": "%.2f" % wl, "wr_deg": "%.2f" % wr, "wl_rpm": "%.2f" % rpm_l, "wr_rpm": "%.2f" % rpm_r,
-                "v_cms": "%.2f" % ((rpm_l + rpm_r) * math.pi * R_WHEEL / 60.0),
+                "v_cms": "%.2f" % ((rpm_l + rpm_r) * math.pi * R_WHEEL / 60.0 * raw_units.V_COL_PER_CMS),
                 "w_dps": "%.2f" % ((rpm_r - rpm_l) * 2 * math.pi * R_WHEEL / 60.0 / (2 * HALF_AXLE) * 57.2958),
                 "x_cm": "%.2f" % (x - 60.0), "y_cm": "%.2f" % (y - 60.0), "th_deg": "%.2f" % pose_th,
                 "ax": "%.4f" % ax, "ay": "%.4f" % ay, "az": "%.4f" % az,
@@ -167,6 +175,8 @@ def make_session(d, seed=1, n_actions=60, robot="Synth"):
         w.writerow(["t", "robot", "x_cm", "y_cm", "order", "phase", "source", "lock_score"])
         for t, x, y in cam:
             w.writerow(["%.3f" % t, robot, "%.2f" % x, "%.2f" % y, "", "", "lock", "1"])
+    with open(os.path.join(d, "sim_info.json"), "w") as f:      # simulator marker: RAW speeds in robot units
+        json.dump({"source": "tools/discovery/tests/synth.py", "raw_units": raw_units.RAW_UNITS}, f)
     with open(os.path.join(d, "e02_state.json"), "w") as f:
         json.dump({"board": {"xboard_cm": BOX, "yboard_cm": BOX, "xboard_side": 1, "yboard_side": 1}}, f)
     return d

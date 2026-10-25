@@ -212,8 +212,12 @@ def passive(x, t, seg, is_text):
     f["level_over_noise"] = float(abs(f["rest_level"]) / max(f["rest_noise"], f["quantum"] or 1e-9, 1e-12)) \
         if np.isfinite(f.get("rest_level", np.nan)) else np.nan
     f["level_over_spread"] = float(abs(np.median(xv)) / sd_all) if sd_all > 0 else np.nan
+    # typical 1 s spread over its rest noise, over every window (still ones included). relations.analyse replaces
+    # active_over_rest with the same figure over the windows where the robot moves (moving_response below) once
+    # it knows when the robot stands still; this all-window value stays as active_over_rest_all
     f["active_over_rest"] = float(f["window_sd_median"] / max(f["rest_noise"], f["quantum"] or 1e-9, 1e-12)) \
         if np.isfinite(f.get("window_sd_median", np.nan)) else np.nan
+    f["active_over_rest_all"] = f["active_over_rest"]
     # exactly flat stretches of 1 s or more (an encoder or a computed pose at rest; a noisy sensor never is)
     w1 = max(5, int(round(f["row_hz"])))
     flat = np.zeros(n, bool)
@@ -236,6 +240,30 @@ def passive(x, t, seg, is_text):
     # bounded? the share of the range the 1-99% band covers; sentinel-like extremes
     f["sat_frac"] = float(np.mean((xv >= xv.max()) | (xv <= xv.min())))
     return f
+
+
+MOVE_MIN_WINDOWS = 5    # 1 s windows of motion needed before the motion response counts (chosen)
+
+
+def moving_response(x, seg, moving, row_hz, rest_noise, quantum):
+    """Motion response: the median 1 s spread over the windows where the robot moves (every row in the window
+    moving), divided by the stream's rest noise. NaN with fewer than MOVE_MIN_WINDOWS such windows.
+
+    Why not every window: a range zone that looks past the boards while parked flickers by tens of cm, and that
+    flicker, not motion, set the all-window figure (Right's zones looked 3-7x where Left/Center's looked 12-29x;
+    build-reports/e02-oct25-right-front-and-rpm.md)."""
+    w = max(5, int(round(row_hz)))
+    fin = np.isfinite(x)
+    sds = []
+    for s in np.unique(seg):
+        idx = np.where((seg == s) & fin)[0]
+        for i in range(0, len(idx) - w + 1, w):
+            k = idx[i:i + w]
+            if np.all(moving[k]):
+                sds.append(np.std(x[k]))
+    if len(sds) < MOVE_MIN_WINDOWS:
+        return np.nan, len(sds)
+    return float(np.median(sds) / max(rest_noise if np.isfinite(rest_noise) else 0, quantum or 1e-9, 1e-12)), len(sds)
 
 
 def _win(gt, a, b):
@@ -524,8 +552,10 @@ def episode_features(g, sid, eps):
         a, b = y[i0], y[i1]
         if np.isfinite(a) and np.isfinite(b) and abs(b - a) > 0:
             per_cm.append(abs(b - a) / dist)
-        # a speed's integral over the stretch (it is zero outside the drive, so the stretch's edges do not matter)
-        integ = np.nansum(np.abs(y[max(0, i0 - 10):i1 + 11])) * g.dt
+        # a speed's integral over the stretch itself. (Until 2026-10-25 this took 1 s either side as well, on the
+        # idea that a speed is zero outside a drive; the wheels also turn in those margins (speeding up, slowing
+        # down, the turn before), which read the wheel speed 11% low: build-reports/e02-oct25-right-front-and-rpm.md)
+        integ = np.nansum(np.abs(y[i0:i1 + 1])) * g.dt
         if np.isfinite(integ) and integ > 0:
             per_speed.append(integ / dist)
     if len(per_cm) >= 4:

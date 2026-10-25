@@ -1,0 +1,6676 @@
+{
+ "today 9 s log": [
+  {
+   "seed": 11,
+   "variant": "plain",
+   "duration_s": 11.78,
+   "move_s": {
+    "stand": 7.0,
+    "spins": 3.3
+   },
+   "families": {
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "derived": {
+     "streams": 8,
+     "right": 3,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 11,
+   "variant": "disguised",
+   "duration_s": 11.78,
+   "move_s": {
+    "stand": 7.0,
+    "spins": 3.3
+   },
+   "families": {
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "derived": {
+     "streams": 8,
+     "right": 3,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "plain",
+   "duration_s": 11.78,
+   "move_s": {
+    "stand": 7.0,
+    "spins": 3.3
+   },
+   "families": {
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 3,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "disguised",
+   "duration_s": 11.78,
+   "move_s": {
+    "stand": 7.0,
+    "spins": 3.3
+   },
+   "families": {
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 3,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "plain",
+   "duration_s": 11.78,
+   "move_s": {
+    "stand": 7.0,
+    "spins": 3.3
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 3,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "disguised",
+   "duration_s": 11.78,
+   "move_s": {
+    "stand": 7.0,
+    "spins": 3.3
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 3,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  }
+ ],
+ "full battery": [
+  {
+   "seed": 11,
+   "variant": "plain",
+   "duration_s": 141.4,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 6,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "derived": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 11,
+   "variant": "disguised",
+   "duration_s": 141.4,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 5,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "derived": {
+     "streams": 8,
+     "right": 6,
+     "accepted_right": 5,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 1,
+     "questions": 3
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 3,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "plain",
+   "duration_s": 141.4,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 6,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 1,
+     "questions": 2
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "disguised",
+   "duration_s": 141.4,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "plain",
+   "duration_s": 141.4,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 6,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "derived": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "disguised",
+   "duration_s": 141.4,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 5
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "derived": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 3,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  }
+ ],
+ "full minus spins": [
+  {
+   "seed": 11,
+   "variant": "plain",
+   "duration_s": 129.3,
+   "move_s": {
+    "stand": 15.0,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "derived": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 6,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 11,
+   "variant": "disguised",
+   "duration_s": 129.3,
+   "move_s": {
+    "stand": 15.0,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 1,
+     "questions": 2
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "derived": {
+     "streams": 8,
+     "right": 6,
+     "accepted_right": 5,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "plain",
+   "duration_s": 129.3,
+   "move_s": {
+    "stand": 15.0,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 6,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "disguised",
+   "duration_s": 129.3,
+   "move_s": {
+    "stand": 15.0,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 6,
+     "accepted_right": 5,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 1,
+     "questions": 2
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "plain",
+   "duration_s": 129.3,
+   "move_s": {
+    "stand": 15.0,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 6,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "disguised",
+   "duration_s": 129.3,
+   "move_s": {
+    "stand": 15.0,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 7,
+     "accepted_right": 6,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 2,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 1,
+     "questions": 1
+    }
+   }
+  }
+ ],
+ "full minus drive": [
+  {
+   "seed": 11,
+   "variant": "plain",
+   "duration_s": 127.3,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 6,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 11,
+   "variant": "disguised",
+   "duration_s": 127.3,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 6,
+     "accepted_right": 5,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 1,
+     "questions": 3
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "plain",
+   "duration_s": 127.3,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 6,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "derived": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "disguised",
+   "duration_s": 127.3,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "wheels": {
+     "streams": 4,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 1,
+     "questions": 3
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "derived": {
+     "streams": 8,
+     "right": 5,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "plain",
+   "duration_s": 127.3,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 6,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "derived": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "disguised",
+   "duration_s": 127.3,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "derived": {
+     "streams": 8,
+     "right": 7,
+     "accepted_right": 6,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  }
+ ],
+ "full minus square": [
+  {
+   "seed": 11,
+   "variant": "plain",
+   "duration_s": 83.3,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "tilt": 18.0,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "derived": {
+     "streams": 8,
+     "right": 6,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 7
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 7
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    }
+   }
+  },
+  {
+   "seed": 11,
+   "variant": "disguised",
+   "duration_s": 83.3,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "tilt": 18.0,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "IMU other axes": {
+     "streams": 4,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "derived": {
+     "streams": 8,
+     "right": 3,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 6
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "plain",
+   "duration_s": 83.3,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "tilt": 18.0,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 7
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "derived": {
+     "streams": 8,
+     "right": 5,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 6
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "disguised",
+   "duration_s": 83.3,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "tilt": 18.0,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 6
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "derived": {
+     "streams": 8,
+     "right": 6,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 6
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "plain",
+   "duration_s": 83.3,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "tilt": 18.0,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 7
+    },
+    "derived": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 7
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "disguised",
+   "duration_s": 83.3,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "tilt": 18.0,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "range zones": {
+     "streams": 7,
+     "right": 5,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "derived": {
+     "streams": 8,
+     "right": 4,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 6
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  }
+ ],
+ "full minus tilt": [
+  {
+   "seed": 11,
+   "variant": "plain",
+   "duration_s": 122.9,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "derived": {
+     "streams": 8,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 2,
+     "questions": 2
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 6,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 11,
+   "variant": "disguised",
+   "duration_s": 122.9,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "derived": {
+     "streams": 8,
+     "right": 3,
+     "accepted_right": 3,
+     "accepted_wrong": 2,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 1,
+     "questions": 2
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 1,
+     "accepted_wrong": 1,
+     "questions": 2
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "plain",
+   "duration_s": 122.9,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 6,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "derived": {
+     "streams": 8,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 2,
+     "questions": 2
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "disguised",
+   "duration_s": 122.9,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 5
+    },
+    "derived": {
+     "streams": 8,
+     "right": 7,
+     "accepted_right": 6,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 1,
+     "questions": 2
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 3,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "plain",
+   "duration_s": 122.9,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "derived": {
+     "streams": 8,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 4,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 6,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "disguised",
+   "duration_s": 122.9,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "lift": 8.0,
+    "line": 13.6
+   },
+   "families": {
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 1,
+     "questions": 3
+    },
+    "derived": {
+     "streams": 8,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 4,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 5,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  }
+ ],
+ "full minus lift": [
+  {
+   "seed": 11,
+   "variant": "plain",
+   "duration_s": 132.9,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "line": 13.6
+   },
+   "families": {
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 6,
+     "accepted_right": 6,
+     "accepted_wrong": 2,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 6,
+     "accepted_right": 6,
+     "accepted_wrong": 1,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 11,
+   "variant": "disguised",
+   "duration_s": 132.9,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "line": 13.6
+   },
+   "families": {
+    "IMU other axes": {
+     "streams": 4,
+     "right": 3,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 7,
+     "accepted_right": 6,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 6,
+     "accepted_right": 2,
+     "accepted_wrong": 1,
+     "questions": 4
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 2,
+     "questions": 1
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "plain",
+   "duration_s": 132.9,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "line": 13.6
+   },
+   "families": {
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 6,
+     "accepted_right": 6,
+     "accepted_wrong": 1,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "disguised",
+   "duration_s": 132.9,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "line": 13.6
+   },
+   "families": {
+    "IMU other axes": {
+     "streams": 4,
+     "right": 3,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 6,
+     "accepted_right": 6,
+     "accepted_wrong": 1,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 5,
+     "accepted_right": 4,
+     "accepted_wrong": 1,
+     "questions": 2
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 2,
+     "questions": 1
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "plain",
+   "duration_s": 132.9,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "line": 13.6
+   },
+   "families": {
+    "range zones": {
+     "streams": 7,
+     "right": 6,
+     "accepted_right": 6,
+     "accepted_wrong": 1,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "disguised",
+   "duration_s": 132.9,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "line": 13.6
+   },
+   "families": {
+    "range zones": {
+     "streams": 7,
+     "right": 6,
+     "accepted_right": 3,
+     "accepted_wrong": 1,
+     "questions": 3
+    },
+    "derived": {
+     "streams": 8,
+     "right": 7,
+     "accepted_right": 6,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 3,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 3,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  }
+ ],
+ "full minus line": [
+  {
+   "seed": 11,
+   "variant": "plain",
+   "duration_s": 127.3,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "lift": 8.0
+   },
+   "families": {
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 6,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "derived": {
+     "streams": 8,
+     "right": 6,
+     "accepted_right": 6,
+     "accepted_wrong": 2,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    }
+   }
+  },
+  {
+   "seed": 11,
+   "variant": "disguised",
+   "duration_s": 127.3,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "lift": 8.0
+   },
+   "families": {
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 5,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "derived": {
+     "streams": 8,
+     "right": 6,
+     "accepted_right": 6,
+     "accepted_wrong": 2,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "plain",
+   "duration_s": 127.3,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "lift": 8.0
+   },
+   "families": {
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 6,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "derived": {
+     "streams": 8,
+     "right": 6,
+     "accepted_right": 6,
+     "accepted_wrong": 2,
+     "questions": 0
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "disguised",
+   "duration_s": 127.3,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "lift": 8.0
+   },
+   "families": {
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 5
+    },
+    "derived": {
+     "streams": 8,
+     "right": 6,
+     "accepted_right": 6,
+     "accepted_wrong": 2,
+     "questions": 0
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 3,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "plain",
+   "duration_s": 127.3,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "lift": 8.0
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 6,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 6,
+     "accepted_right": 6,
+     "accepted_wrong": 2,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 2,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "disguised",
+   "duration_s": 127.3,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "square": 57.59999999999999,
+    "tilt": 18.0,
+    "lift": 8.0
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 6,
+     "accepted_right": 6,
+     "accepted_wrong": 2,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  }
+ ],
+ "stand + spins": [
+  {
+   "seed": 11,
+   "variant": "plain",
+   "duration_s": 28.1,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6
+   },
+   "families": {
+    "wheels": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 5,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 11,
+   "variant": "disguised",
+   "duration_s": 28.1,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6
+   },
+   "families": {
+    "wheels": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 6,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "plain",
+   "duration_s": 28.1,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6
+   },
+   "families": {
+    "wheels": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 3,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "disguised",
+   "duration_s": 28.1,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6
+   },
+   "families": {
+    "wheels": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 3,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "plain",
+   "duration_s": 28.1,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 6,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "disguised",
+   "duration_s": 28.1,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 5,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    }
+   }
+  }
+ ],
+ "stand + drive": [
+  {
+   "seed": 11,
+   "variant": "plain",
+   "duration_s": 30.1,
+   "move_s": {
+    "stand": 15.0,
+    "drive": 13.6
+   },
+   "families": {
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "derived": {
+     "streams": 8,
+     "right": 4,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 6
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 11,
+   "variant": "disguised",
+   "duration_s": 30.1,
+   "move_s": {
+    "stand": 15.0,
+    "drive": 13.6
+   },
+   "families": {
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "derived": {
+     "streams": 8,
+     "right": 4,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 5
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "plain",
+   "duration_s": 30.1,
+   "move_s": {
+    "stand": 15.0,
+    "drive": 13.6
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 7
+    },
+    "derived": {
+     "streams": 8,
+     "right": 4,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "disguised",
+   "duration_s": 30.1,
+   "move_s": {
+    "stand": 15.0,
+    "drive": 13.6
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 6
+    },
+    "derived": {
+     "streams": 8,
+     "right": 4,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "plain",
+   "duration_s": 30.1,
+   "move_s": {
+    "stand": 15.0,
+    "drive": 13.6
+   },
+   "families": {
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 6
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 3,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "disguised",
+   "duration_s": 30.1,
+   "move_s": {
+    "stand": 15.0,
+    "drive": 13.6
+   },
+   "families": {
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 6
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 3,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  }
+ ],
+ "stand + square": [
+  {
+   "seed": 11,
+   "variant": "plain",
+   "duration_s": 74.1,
+   "move_s": {
+    "stand": 15.0,
+    "square": 57.59999999999999
+   },
+   "families": {
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 7
+    },
+    "derived": {
+     "streams": 8,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 6
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 7,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    }
+   }
+  },
+  {
+   "seed": 11,
+   "variant": "disguised",
+   "duration_s": 74.1,
+   "move_s": {
+    "stand": 15.0,
+    "square": 57.59999999999999
+   },
+   "families": {
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 7
+    },
+    "derived": {
+     "streams": 8,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 5
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 7,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "plain",
+   "duration_s": 74.1,
+   "move_s": {
+    "stand": 15.0,
+    "square": 57.59999999999999
+   },
+   "families": {
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 7
+    },
+    "derived": {
+     "streams": 8,
+     "right": 5,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 6
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 7,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "disguised",
+   "duration_s": 74.1,
+   "move_s": {
+    "stand": 15.0,
+    "square": 57.59999999999999
+   },
+   "families": {
+    "IMU other axes": {
+     "streams": 4,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 6
+    },
+    "derived": {
+     "streams": 8,
+     "right": 5,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 6
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 7,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "plain",
+   "duration_s": 74.1,
+   "move_s": {
+    "stand": 15.0,
+    "square": 57.59999999999999
+   },
+   "families": {
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 7,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "derived": {
+     "streams": 8,
+     "right": 5,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 6
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 7
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "disguised",
+   "duration_s": 74.1,
+   "move_s": {
+    "stand": 15.0,
+    "square": 57.59999999999999
+   },
+   "families": {
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 7,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "derived": {
+     "streams": 8,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 6
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 6
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  }
+ ],
+ "stand + tilt": [
+  {
+   "seed": 11,
+   "variant": "plain",
+   "duration_s": 34.5,
+   "move_s": {
+    "stand": 15.0,
+    "tilt": 18.0
+   },
+   "families": {
+    "range zones": {
+     "streams": 7,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 5,
+     "accepted_right": 5,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 11,
+   "variant": "disguised",
+   "duration_s": 34.5,
+   "move_s": {
+    "stand": 15.0,
+    "tilt": 18.0
+   },
+   "families": {
+    "range zones": {
+     "streams": 7,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 5,
+     "accepted_right": 5,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "plain",
+   "duration_s": 34.5,
+   "move_s": {
+    "stand": 15.0,
+    "tilt": 18.0
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 5,
+     "accepted_right": 5,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 7
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "disguised",
+   "duration_s": 34.5,
+   "move_s": {
+    "stand": 15.0,
+    "tilt": 18.0
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 5,
+     "accepted_right": 5,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 7
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "plain",
+   "duration_s": 34.5,
+   "move_s": {
+    "stand": 15.0,
+    "tilt": 18.0
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 7
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 5,
+     "accepted_right": 5,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "disguised",
+   "duration_s": 34.5,
+   "move_s": {
+    "stand": 15.0,
+    "tilt": 18.0
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 7
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 5,
+     "accepted_right": 5,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    }
+   }
+  }
+ ],
+ "stand + lift": [
+  {
+   "seed": 11,
+   "variant": "plain",
+   "duration_s": 24.5,
+   "move_s": {
+    "stand": 15.0,
+    "lift": 8.0
+   },
+   "families": {
+    "line sensors": {
+     "streams": 3,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 5,
+     "accepted_right": 5,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 11,
+   "variant": "disguised",
+   "duration_s": 24.5,
+   "move_s": {
+    "stand": 15.0,
+    "lift": 8.0
+   },
+   "families": {
+    "line sensors": {
+     "streams": 3,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 5,
+     "accepted_right": 5,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "plain",
+   "duration_s": 24.5,
+   "move_s": {
+    "stand": 15.0,
+    "lift": 8.0
+   },
+   "families": {
+    "line sensors": {
+     "streams": 3,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "derived": {
+     "streams": 8,
+     "right": 5,
+     "accepted_right": 5,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "disguised",
+   "duration_s": 24.5,
+   "move_s": {
+    "stand": 15.0,
+    "lift": 8.0
+   },
+   "families": {
+    "line sensors": {
+     "streams": 3,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 5,
+     "accepted_right": 5,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "plain",
+   "duration_s": 24.5,
+   "move_s": {
+    "stand": 15.0,
+    "lift": 8.0
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 5,
+     "accepted_right": 5,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "disguised",
+   "duration_s": 24.5,
+   "move_s": {
+    "stand": 15.0,
+    "lift": 8.0
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 5,
+     "accepted_right": 5,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 4,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  }
+ ],
+ "stand + line": [
+  {
+   "seed": 11,
+   "variant": "plain",
+   "duration_s": 30.1,
+   "move_s": {
+    "stand": 15.0,
+    "line": 13.6
+   },
+   "families": {
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 6
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 3,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 11,
+   "variant": "disguised",
+   "duration_s": 30.1,
+   "move_s": {
+    "stand": 15.0,
+    "line": 13.6
+   },
+   "families": {
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 6
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 3,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "plain",
+   "duration_s": 30.1,
+   "move_s": {
+    "stand": 15.0,
+    "line": 13.6
+   },
+   "families": {
+    "derived": {
+     "streams": 8,
+     "right": 3,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 7
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "disguised",
+   "duration_s": 30.1,
+   "move_s": {
+    "stand": 15.0,
+    "line": 13.6
+   },
+   "families": {
+    "derived": {
+     "streams": 8,
+     "right": 3,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 5
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "plain",
+   "duration_s": 30.1,
+   "move_s": {
+    "stand": 15.0,
+    "line": 13.6
+   },
+   "families": {
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 6
+    },
+    "derived": {
+     "streams": 8,
+     "right": 3,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "disguised",
+   "duration_s": 30.1,
+   "move_s": {
+    "stand": 15.0,
+    "line": 13.6
+   },
+   "families": {
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 5
+    },
+    "derived": {
+     "streams": 8,
+     "right": 3,
+     "accepted_right": 3,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 0
+    }
+   }
+  }
+ ],
+ "compact A (no square, no line)": [
+  {
+   "seed": 11,
+   "variant": "plain",
+   "duration_s": 69.2,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "tilt": 18.0,
+    "lift": 8.0
+   },
+   "families": {
+    "derived": {
+     "streams": 8,
+     "right": 6,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 5
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 7
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    }
+   }
+  },
+  {
+   "seed": 11,
+   "variant": "disguised",
+   "duration_s": 69.2,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "tilt": 18.0,
+    "lift": 8.0
+   },
+   "families": {
+    "derived": {
+     "streams": 8,
+     "right": 6,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 5
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 7
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "plain",
+   "duration_s": 69.2,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "tilt": 18.0,
+    "lift": 8.0
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 5,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 5
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 7
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "disguised",
+   "duration_s": 69.2,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "tilt": 18.0,
+    "lift": 8.0
+   },
+   "families": {
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "derived": {
+     "streams": 8,
+     "right": 3,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 5,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "plain",
+   "duration_s": 69.2,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "tilt": 18.0,
+    "lift": 8.0
+   },
+   "families": {
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "derived": {
+     "streams": 8,
+     "right": 6,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 6
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 7
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "disguised",
+   "duration_s": 69.2,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "tilt": 18.0,
+    "lift": 8.0
+   },
+   "families": {
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "derived": {
+     "streams": 8,
+     "right": 4,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 7
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  }
+ ],
+ "compact B (one tilt, one lift)": [
+  {
+   "seed": 11,
+   "variant": "plain",
+   "duration_s": 56.2,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "tilt": 9.0,
+    "lift": 4.0
+   },
+   "families": {
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 6,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 7
+    },
+    "derived": {
+     "streams": 8,
+     "right": 6,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 5
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 11,
+   "variant": "disguised",
+   "duration_s": 56.2,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "tilt": 9.0,
+    "lift": 4.0
+   },
+   "families": {
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 0,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 6,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 5
+    },
+    "derived": {
+     "streams": 8,
+     "right": 6,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 5
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "plain",
+   "duration_s": 56.2,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "tilt": 9.0,
+    "lift": 4.0
+   },
+   "families": {
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 7
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "derived": {
+     "streams": 8,
+     "right": 6,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 6
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    }
+   }
+  },
+  {
+   "seed": 12,
+   "variant": "disguised",
+   "duration_s": 56.2,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "tilt": 9.0,
+    "lift": 4.0
+   },
+   "families": {
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 6
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "derived": {
+     "streams": 8,
+     "right": 5,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 6
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "plain",
+   "duration_s": 56.2,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "tilt": 9.0,
+    "lift": 4.0
+   },
+   "families": {
+    "derived": {
+     "streams": 8,
+     "right": 6,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 6
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 7,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 7
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 8,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    }
+   }
+  },
+  {
+   "seed": 13,
+   "variant": "disguised",
+   "duration_s": 56.2,
+   "move_s": {
+    "stand": 15.0,
+    "spins": 11.6,
+    "drive": 13.6,
+    "tilt": 9.0,
+    "lift": 4.0
+   },
+   "families": {
+    "derived": {
+     "streams": 8,
+     "right": 6,
+     "accepted_right": 1,
+     "accepted_wrong": 0,
+     "questions": 6
+    },
+    "IMU other axes": {
+     "streams": 4,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    },
+    "line sensors": {
+     "streams": 3,
+     "right": 3,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 0
+    },
+    "range zones": {
+     "streams": 7,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 3
+    },
+    "passive (clock, ids, constants)": {
+     "streams": 8,
+     "right": 8,
+     "accepted_right": 7,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "wheels": {
+     "streams": 4,
+     "right": 4,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 4
+    },
+    "lifted flag": {
+     "streams": 1,
+     "right": 1,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 1
+    },
+    "gravity axis + yaw rate": {
+     "streams": 2,
+     "right": 2,
+     "accepted_right": 0,
+     "accepted_wrong": 0,
+     "questions": 2
+    }
+   }
+  }
+ ]
+}

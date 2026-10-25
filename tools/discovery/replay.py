@@ -26,7 +26,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
 from discovery import load, features as F, relations as REL, classify as C, calibrate as CAL   # noqa: E402
-from discovery import truth as T, score as S                                                     # noqa: E402
+from discovery import truth as T, disc_score as S                                                    # noqa: E402
 
 OUT = os.path.join(HERE, "results")
 REPO = os.path.dirname(os.path.dirname(HERE))

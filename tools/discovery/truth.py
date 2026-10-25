@@ -1,4 +1,4 @@
-"""The hidden answer key: what each Alvik RAW column really is. Used only by score.py, never by the discoverer.
+"""The hidden answer key: what each Alvik RAW column really is. Used only by disc_score.py, never by the discoverer.
 
 Nominal types follow docs/data-formats.md and firmware/home_lab/rawlog.h. "derived" = worked out on the robot from
 other streams (get_pose, get_drive_speed, the roll and pitch of get_orientation). yaw_deg is labelled gyro angle

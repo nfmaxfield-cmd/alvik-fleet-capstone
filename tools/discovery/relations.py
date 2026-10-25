@@ -261,8 +261,21 @@ def analyse(case, g, feats, num):
     group_of = {s: gi for gi, gr in enumerate(grp) for s in gr}
     aff = {(a, b): A[i, j] for i, a in enumerate(motion_ids) for j, b in enumerate(motion_ids)}
     aff_motion = {(a, b): A_all[i, j] for i, a in enumerate(motion_ids) for j, b in enumerate(motion_ids)}
+    # rows where the robot moves: some stream that is flat at rest (an encoder, the pose) is changing
+    moving = None
+    if still is not None:
+        flat_all = np.ones(len(seg), bool)
+        for s in mstreams:
+            flat_all &= feats[s]["_flat"]
+        moving = ~flat_all
     for s in motion_ids:
         feats[s]["accumulates"] = accum[s]
+        if moving is not None:
+            aor, nw = F.moving_response(num[s], seg, moving, feats[s].get("row_hz") or 20.0,
+                                        feats[s].get("rest_noise", np.nan), feats[s].get("quantum", 0.0))
+            feats[s]["active_over_rest"], feats[s]["moving_windows"] = aor, nw
+        else:
+            feats[s]["active_over_rest"], feats[s]["moving_windows"] = np.nan, 0
         if still is not None and still.sum() > 50:
             x = num[s][still]
             d = np.diff(x)

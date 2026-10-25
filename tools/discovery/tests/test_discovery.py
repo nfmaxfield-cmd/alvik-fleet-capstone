@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 
 import synth                                                     # noqa: E402
 from discovery import load, features as F, classify as C        # noqa: E402
-from discovery import calibrate as CAL, replay, score as S       # noqa: E402
+from discovery import calibrate as CAL, replay, disc_score as S  # noqa: E402
 from discovery import truth as T                                 # noqa: E402
 
 PKG = os.path.dirname(HERE)
@@ -120,12 +120,13 @@ def test_integration_pairs(result):
 
 
 def test_calibration_recovers_known_scales(result):
-    """Wheel: 2 pi 1.7 / 360 cm per degree; wheel speed: 2 pi 1.7 / 60 cm/s per rpm; gyro: the synthetic gyro
+    """Wheel: 2 pi 1.7 / 360 cm per degree; wheel speed: 2 pi 1.7 / 60 cm/s per true rpm, and the column reads
+    1.08 high as on the robots (tools/raw_units.py), so / 1.08 per logged unit; gyro: the synthetic gyro
     reads 3% short, so the camera says 1/0.97 deg per unit; gravity axis: 1 g."""
     case, key, feats, R, res, cal = result
     by = {key[s]: c for s, c in cal.items()}
     assert by["wl_deg"]["physical_per_unit"] == pytest.approx(2 * np.pi * 1.7 / 360, rel=0.05)
-    assert by["wr_rpm"]["physical_per_unit"] == pytest.approx(2 * np.pi * 1.7 / 60, rel=0.06)
+    assert by["wr_rpm"]["physical_per_unit"] == pytest.approx(2 * np.pi * 1.7 / 60 / 1.08, rel=0.06)
     assert by["gz"]["physical_per_unit"] == pytest.approx(1 / 0.97, rel=0.03)
     assert by["gz"]["unit_guess"] == "same units"
     assert by["az"]["physical_per_unit"] == pytest.approx(1.0, rel=0.01)

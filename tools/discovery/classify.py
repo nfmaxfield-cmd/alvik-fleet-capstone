@@ -25,6 +25,11 @@ LABEL = {"gyro_rate": "gyro rate", "gyro_angle": "gyro angle", "wheel_angle": "w
 ACCEPT, ASK = 0.90, 0.60       # chosen (design doc section 3); evaluated at other values in the replay
 UNKNOWN_FLOOR = 0.05           # chosen: an "unknown" score every stream starts with
 COPY_R = 0.97                  # chosen: copies (a processed copy keeps |r| above this)
+# motion response (1 s spread while moving / rest noise) from "weak" to "strong". Re-anchored 2026-10-25 when the
+# figure changed to moving windows only: on the development cases line sensors' groups read 0.9-1.7 and range
+# zones' groups 1.6-13.6 (median 3.3). Was 2.0-6.0 on the all-window figure. Chosen on dev only (DOE row)
+AOR_RAMP = (1.5, 3.0)
+SHORT_RAMP = (30.0, 120.0)     # chosen: log duration (s) from "fully short" to "long"; see the threshold report
 
 
 def ramp(x, lo, hi, nan=0.0):
@@ -237,6 +242,18 @@ def score_stream(s, f, R, der, ctx):
     camabs = _g(f, "cam_speed_corr_abs", np.nan)
     aor = _g(f, "active_over_rest", np.nan)
 
+    # tilt evidence (a tilt by hand): this stream's integral explains another IMU stream's change (a gyro axis
+    # turning gravity between accelerometer axes), or the reverse. Direct evidence for both, so no cap
+    tilt = ctx.get("tilt") or {}
+    if s in tilt.get("gyro", {}) or s in tilt.get("accel", {}):
+        is_g = s in tilt["gyro"]
+        partner, r = (tilt["gyro"] if is_g else tilt["accel"])[s]
+        sc["gyro_rate" if is_g else "accel"] = 1.0
+        ev.append("tilt test: %s (r %.2f on held-out windows)" %
+                  ("its integral follows the change of another IMU axis: a rotation rate turning gravity"
+                   if is_g else "its change follows the integral of a rotation rate: gravity moving onto this axis",
+                   r))
+        return sc, ev
     # angle / rate pairs
     if s in integ or s in rate_of:
         is_angle = s in integ
@@ -311,12 +328,14 @@ def score_stream(s, f, R, der, ctx):
         return sc, ev
     if gsize >= 3:
         pos = _g(f, "lo", -1) >= 0
-        big = ramp(aor, 2.0, 6.0, nan=0.3)
+        big = ramp(aor, *AOR_RAMP, nan=0.3)
         drive = max(ramp(-(camgo if np.isfinite(camgo) else 0), 0.2, 0.6),
                     ramp(_board(f), 0.3, 0.7))
         # the group as a whole: most members respond strongly to motion
-        g_aor = np.nanmedian([_g(ctx["feats"][m], "active_over_rest", np.nan) for m in grp])
-        gbig = ramp(g_aor, 2.0, 6.0, nan=0.3)
+        # (motion response: over the windows where the robot moves; NaN when it hardly moved)
+        g_list = [v for v in (_g(ctx["feats"][m], "active_over_rest", np.nan) for m in grp) if np.isfinite(v)]
+        g_aor = float(np.median(g_list)) if g_list else np.nan
+        gbig = ramp(g_aor, *AOR_RAMP, nan=0.3)
         moving = R.get("moving_frac", np.nan)
         motion_seen = ramp(moving, 0.03, 0.15, nan=0.3)
         if R.get("grouping") != "rest":
@@ -378,7 +397,7 @@ def build_context(feats, R, der=None):
     ctx = {"feats": feats, "twin_pair": {}, "imu_group": None, "derived": der or {}}
     dur = max([_g(f, "duration_s", 0) or 0 for f in feats.values()] + [0])
     ctx["duration_s"] = dur
-    ctx["short"] = 1 - ramp(dur, 30.0, 120.0)        # chosen: under 30 s counts as fully short
+    ctx["short"] = 1 - ramp(dur, *SHORT_RAMP)          # chosen: under 30 s counts as fully short
     angles = [a for a, b, r in R["integration"]]
     for a in angles:
         best = None
@@ -458,7 +477,65 @@ def build_context(feats, R, der=None):
                               [a], abs(r), "lockstep")
                     for k in ("members", "accel", "gyro"):
                         ctx["imu_group"][k].discard(m)
+            ctx["tilt"] = tilt_pairs(feats, R, ctx, flick, der)
     return ctx
+
+
+TILT_R = 0.90       # chosen: |r| of one stream's change with another's integral, on held-out windows (DOE row)
+
+
+def tilt_pairs(feats, R, ctx, flick, der):
+    """Tilt evidence (added 2026-10-25 from the synthetic calibration battery, tools/discovery/battery.py; it fires
+    on no real log on disk, none of which has a deliberate tilt). A hand tilt turns the robot about x or y: that
+    gyro axis's integral is the tilt angle, and gravity moves onto an accelerometer axis by sin(angle), so that
+    axis's change follows the same integral (it even passes the exact-integral test, like a wheel angle). Sides:
+      rate side   flickers at rest, continuous, is not the turn-following rate and is not itself an integral;
+      changing side flickers at rest (a gyro angle or wheel angle sits still), is not a fused yaw (follows the
+                  turn rate's integral) and then is either a computed tilt angle (updates < 0.6 x as often as the
+                  accelerometer) or an accelerometer axis (its rest noise sits nearer the gravity axis's than the
+                  gyro's).
+    Returns {"gyro": {s: (partner, r)}, "accel": {s: (partner, r)}}."""
+    imu = ctx["imu_group"]
+    out = {"gyro": {}, "accel": {}}
+    if imu is None:
+        return out
+    angles = {a for a, b, r in R["integration"]}
+    cands = [s for s in flick if not feats[s].get("integer") and s not in der and s != imu["rate"]]
+    rates = [b for b in cands if b not in angles]
+    acc_hz = np.median([_g(feats[m], "change_hz", 0) or 0 for m in imu["accel"]]) if imu["accel"] else 0
+    noise = lambda m: np.log(max(_g(feats[m], "rest_noise", 0) or 0, _g(feats[m], "quantum", 0) or 0, 1e-12))
+    ng, nr = noise(imu["gravity"]), noise(imu["rate"])
+    for a in cands:
+        ds = R["rel"].get(a, {}).get("ds", {})
+        if abs(ds.get(imu["rate"], 0.0) or 0.0) >= 0.7:
+            continue                            # an angle fused from the turn rate (yaw)
+        gi = R["group_of"].get(a)
+        gr = R["groups"][gi] if gi is not None else [a]
+        if len(gr) >= 4 and not (set(gr) & imu["members"]):
+            continue                            # a multi-zone sensor: tilting it changes what it sees (range zones
+            #                                     look over the boards), which follows the tilt without being one
+        best = None
+        for b in rates:
+            v = ds.get(b, 0.0) or 0.0
+            if b != a and abs(v) >= TILT_R and (best is None or abs(v) > abs(best[1])):
+                best = (b, v)
+        if best is None:
+            continue
+        b, v = best
+        if (_g(feats[a], "change_hz", 0) or 0) < 0.6 * acc_hz:
+            der[a] = ("a tilt angle: its change follows the integral of a rotation rate (r %.2f) but it updates "
+                      "less often than the accelerometer (computed)" % v, [b], abs(v), "lockstep")
+            continue
+        if abs(noise(a) - ng) >= min(abs(noise(a) - nr), 1.0):
+            continue                            # an accelerometer axis shares the gravity axis's noise floor
+            #                                     (within a factor of e): a pose heading that follows a wheel turn
+            #                                     rate does not (seen on a real 20 s piece, 2026-10-25)
+        out["accel"][a] = (b, v)
+        if b not in out["gyro"] or abs(v) > abs(out["gyro"][b][1]):
+            out["gyro"][b] = (a, v)
+    for s in list(out["gyro"]):
+        out["accel"].pop(s, None)
+    return out
 
 
 def classify_case(feats, R):

@@ -6,7 +6,7 @@ end times), the camera track (track.csv) and, where explore or the setup measure
 
 Column names stop here. `load_case` returns a Case whose streams are called stream_01, stream_02, ... in a shuffled
 order (seeded by the case id, so a rerun gives the same names) and a separate `key` {stream id: real column name}
-that only `score.py` may read. Nothing in features / relations / classify takes the key.
+that only `disc_score.py` may read. Nothing in features / relations / classify takes the key.
 
 Offline only: reads session folders on disk (default root /tmp/claude-0, override with DISCOVERY_ROOT)."""
 import csv
