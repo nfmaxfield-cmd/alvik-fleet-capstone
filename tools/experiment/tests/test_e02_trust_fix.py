@@ -410,3 +410,24 @@ def test_a_find_counts_for_the_camera_only_once_its_robots_wheels_are_judged():
     old = TR.SensorTrust(dict(items=[dict(sensor="camera", robot="*", kind="find", v=0.5, w=1.0, t=1.0, session=0)
                                      for _ in range(8)]))
     assert old.camera_sd()[1] == 8                      # saved items from before (no robot named) count as before
+
+
+def test_front_noise_caught_at_a_board_and_against_the_others():
+    # 2026-10-25 rerun, front@Left:noise=6 (its own evidence): Left read 4 cm at a board and 9.8 cm against the map,
+    # Center and Right 1 cm at a board; one 5 cm bar for both kinds let it pass (k 1.7)
+    t = TR.SensorTrust()
+    _camera(t, sd=0.4)
+    for v in (0.8, 8.2, -6.5, 2.7, 4.6):
+        t.front_face("Left", v)
+    for v in (3.2, -6.5, -9.7, 6.7, -11.0, 5.1):
+        t.front_vs_map("Left", v)
+    for v in (-0.9, -0.8, -0.5, -0.8, -0.5):
+        t.front_face("Center", v)
+    for v in (1.8, -0.3, 0.9, -0.2, 0.5, -0.1):
+        t.front_face("Right", v)
+    face = [c for c in t.checks("front", "Left") if c["check"].endswith("at a board")][0]
+    assert face["k"] >= TR.DEGRADED_K and face["src"] == "the prior"
+    assert _flags(t) == [("front", "Left")]
+    sc = t.second_check("front", "Left", ROBOTS)
+    assert sc is not None and sc["ratio"] > TR.STANDS_OUT_FLAG
+    assert any("at a board" in ln for ln in t.summary(ROBOTS))

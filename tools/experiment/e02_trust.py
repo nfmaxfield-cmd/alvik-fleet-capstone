@@ -66,8 +66,12 @@ RUN_SPREAD_PRIOR = 0.026  # measured: a healthy wheel's run-to-run scale spread 
                           # baseline never goes below it (own history can raise the bar, not lower it): the simulator's
                           # 0.1-0.5% would make the real robots' ordinary 2-5% look bad (trust_fix_real_replay.py). DOE:
                           # more real sessions; split by laptop / Pi camera and by route, which may explain the spread
+FACE_HEALTHY = 2.0        # chosen: a healthy front sensor's sd at a board, its distance known from the board touches
+                          # (no camera, no map), before a robot has a history; the simulator's healthy ones read 0.6 cm,
+                          # the real robots' are not measured yet (DOE: the first real session's face readings set it)
+FACE_MIN = 4              # chosen: face readings this session before that check speaks (up to 8 come in a session)
 FLOOR = dict(camera=0.3, wheels=0.2, gyro=0.3, front=1.0)    # learned sds are never taken below these
-BASE_FLOOR = dict(wheels=0.25, gyro=0.3, front=2.0, runs=RUN_SPREAD_PRIOR)
+BASE_FLOOR = dict(wheels=0.25, gyro=0.3, front=2.0, face=1.0, runs=RUN_SPREAD_PRIOR)
                           # chosen (runs: measured, above): a baseline is never taken below these (cm / deg / cm /
                           # spread): the simulator's healthy robots sit at 0.11-0.28 cm, 0.04-0.41 deg, 1-3 cm; a
                           # session's 3-4 fits scatter by up to 2x about their own level (DOE: replay healthy
@@ -368,41 +372,38 @@ class SensorTrust:
         base = max(base, BASE_FLOOR["runs"])
         return dict(check="runs", v=v, base=base, k=v / base, n=len(now), src=src)
 
-    def _front_own(self, its):
-        """The front sensor's own sd from items (map: the camera's share taken off; face: as it is)."""
+    def _front_own(self, its, kind):
+        """The front sensor's own sd from items of one kind (map: the camera's share taken off; face: as it is)."""
         if not its:
             return None
-        csd = self.camera_sd()[0]
-        ms = []
-        for kind, sub in (("map", [it for it in its if it["kind"] == "map"]),
-                          ("face", [it for it in its if it["kind"] == "face"])):
-            if not sub:
-                continue
-            sd = robust_sd([it["v"] for it in sub])
-            own2 = max(0.0, sd ** 2 - csd ** 2) if kind == "map" else sd ** 2
-            ms.append((own2, len(sub)))
-        n = sum(c for _, c in ms)
-        return max(FLOOR["front"], math.sqrt(sum(m * c for m, c in ms) / n))
+        sd = robust_sd([it["v"] for it in its])
+        if kind == "map":
+            sd = math.sqrt(max(0.0, sd ** 2 - self.camera_sd()[0] ** 2))
+        return max(FLOOR["front"], sd)
 
-    def _front_check(self, robot):
-        c = self._memo(("front", robot), lambda: self._front_check0(robot))
+    def _front_check(self, robot, kind="map"):
+        c = self._memo(("front", robot, kind), lambda: self._front_check0(robot, kind))
         return dict(c) if c else None
 
-    def _front_check0(self, robot):
-        its = self._items("front", robot)
+    def _front_check0(self, robot, kind):
+        """map: readings against the camera-and-map distance (prior HEALTHY front). face: readings square to a board
+        at a distance known from the board touches, no camera (prior FACE_HEALTHY): two checks, since a face reading
+        is far tighter than a map reading (2026-10-25 rerun: Left's 6 cm noise read 4 cm at a board and 9.8 cm against
+        the map, Center and Right 1 cm at a board; one 5 cm bar for both let it pass)."""
+        its = [it for it in self._items("front", robot) if it["kind"] == kind]
         now = self._now(its)
-        if len(now) < MIN_N["front"]:
+        if len(now) < (MIN_N["front"] if kind == "map" else FACE_MIN):
             return None
-        v = self._front_own(now)
+        v = self._front_own(now, kind)
         hist = self._hist(its)
-        if len(hist) >= HIST_MIN["front"]:
-            base, src = self._front_own(hist), "its own history (%d readings)" % len(hist)
+        prior = HEALTHY["front"] if kind == "map" else FACE_HEALTHY
+        if len(hist) >= (HIST_MIN["front"] if kind == "map" else FACE_MIN):
+            base, src = self._front_own(hist, kind), "its own history (%d readings)" % len(hist)
         else:
-            base, src = HEALTHY["front"], "the Alvik prior"
-        base = max(base, BASE_FLOOR["front"])
-        nf = len([it for it in now if it["kind"] == "face"])
-        return dict(check="front" + (" (%d at a board)" % nf if nf else ""), v=v, base=base, k=v / base,
-                    n=len(now), src=src)
+            base, src = prior, "the Alvik prior" if kind == "map" else "the prior"
+        base = max(base, BASE_FLOOR["front"] if kind == "map" else BASE_FLOOR["face"])
+        return dict(check="front, " + ("against the map" if kind == "map" else "at a board"), v=v, base=base,
+                    k=v / base, n=len(now), src=src)
 
     def checks(self, sensor, robot):
         """This robot's own checks of one sensor (no other robot involved): [dict(check, v, base, k, n, src)]."""
@@ -411,25 +412,27 @@ class SensorTrust:
         elif sensor == "gyro":
             out = [self._stretch_check("gyro", robot)]
         elif sensor == "front":
-            out = [self._front_check(robot)]
+            out = [self._front_check(robot, "map"), self._front_check(robot, "face")]
         else:
             return []
         return [c for c in out if c is not None]
 
     def second_check(self, sensor, robot, robots):
-        """After every robot has its own verdict from this session: does this robot's stretch rms stand out from the
-        robots that look healthy? dict(check, v, base, k, ...) with k scaled so that STANDS_OUT_FLAG x = DEGRADED_K,
-        or None."""
-        if sensor not in ("wheels", "gyro") or len(robots) < 2:
+        """After every robot has its own verdict from this session: does this robot's stretch rms (wheels, gyro) or
+        its face readings (front: the same camera-free test for every robot) stand out from the robots that look
+        healthy? dict(check, v, base, k, ...) with k scaled so that STANDS_OUT_FLAG x = DEGRADED_K, or None."""
+        if sensor not in ("wheels", "gyro", "front") or len(robots) < 2:
             return None
-        mine = self._stretch_check(sensor, robot)
+        get = (lambda r: self._front_check(r, "face")) if sensor == "front" else \
+            (lambda r: self._stretch_check(sensor, r))
+        mine = get(robot)
         if mine is None:
             return None
         others = []
         for r in robots:
             if r == robot:
                 continue
-            c = self._stretch_check(sensor, r)
+            c = get(r)
             if c is None:
                 return None                          # not every robot judged on its own yet: no comparing
             if not self.flags.get("%s/%s" % (sensor, r)):
@@ -437,7 +440,7 @@ class SensorTrust:
         if not others:
             return None
         med = statistics.median(others)
-        base = max(med, BASE_FLOOR[sensor])
+        base = max(med, BASE_FLOOR["face" if sensor == "front" else sensor])
         ratio = mine["v"] / base
         return dict(check="stands out from the other robots", v=mine["v"], base=base, ratio=ratio,
                     k=ratio * DEGRADED_K / STANDS_OUT_FLAG, n=mine["n"], src="%d other robots" % len(others))
@@ -468,14 +471,16 @@ class SensorTrust:
         return weighted_rms([(it["v"], it["w"]) for it in its]), len(its), "earlier sessions"
 
     def front_sd(self, robot):
-        """(sd, n): the front sensor's own sd this session (all sessions while this one has too little)."""
-        c = self._front_check(robot)
-        if c is not None:
+        """(sd, n): the front sensor's own sd this session, the worse of its map and face checks (all sessions' map
+        readings while this one has too little)."""
+        cs = [c for c in (self._front_check(robot, "map"), self._front_check(robot, "face")) if c]
+        if cs:
+            c = max(cs, key=lambda c: c["k"])
             return c["v"], c["n"]
-        its = self._items("front", robot)
+        its = [it for it in self._items("front", robot) if it["kind"] == "map"]
         if len(its) < MIN_N["front"]:
-            return HEALTHY["front"], len(its)
-        return self._front_own(its), len(its)
+            return HEALTHY["front"], len(self._items("front", robot))
+        return self._front_own(its, "map"), len(its)
 
     def k(self, sensor, robot="*", robots=None):
         """The trust factor: this session's value / the sensor's own baseline, the worst check (1 = as usual)."""
@@ -590,7 +595,9 @@ class SensorTrust:
                     elif "ratio" in c:
                         cs.append("%.1f x the other robots" % c["ratio"])
                     else:
-                        cs.append("%.2f %s (%d; baseline %.2f, %s)" % (c["v"], unit, c["n"], c["base"], c["src"]))
+                        cs.append("%s%.2f %s (%d; baseline %.2f, %s)" % (
+                            (c["check"].split(", ")[1] + " ") if s == "front" else "", c["v"], unit, c["n"], c["base"],
+                            c["src"]))
                 parts.append("%s k %.1f: %s" % (s, j["k"], "; ".join(cs)))
             bad = [s for s in ("wheels", "gyro", "front") if self.bad(s, r)]
             lines.append("%s: %s%s" % (r, " | ".join(parts), (" LOOKS BAD: " + ", ".join(bad)) if bad else ""))
