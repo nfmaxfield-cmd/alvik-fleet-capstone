@@ -1,370 +1,473 @@
-# Self-calibrating a sensor array it has never seen: design assessment (2026-10-25)
+# Self-calibrating robots and sensors it has never seen: design assessment (2026-10-25, revised 11:05)
 
 **Premise.** Nick, 2026-10-25: "The from scratch setting should work in a new system with different sensor types.
 We need to apply the logic you describe for front sensor applying to new unknown sensors. Do an assessment of
 everything the system would need in user input for an offline system to self-calibrate an array of sensors,
 identify and label anything and issue instructions. The UI for this will likely precede the live lab."
-He named three settings (a known system with history; from scratch on a known system; a new system from scratch)
-and wants every user input made at the laptop (marking the robot in camera frames), not with a tape on the floor.
+His answers (11:05) set the scope: three settings named **Fresh**, **From scratch** and **New system from
+scratch**; the dock's printed dimensions are the one known length; truly unknown robots are in scope (the program
+guesses what each sensor does *and* where the drive commands are and how they work, with UI confirmation and
+cautious testing allowed); sensors of any kind (lidar, sonar, homing beacons), with or without a camera; a shifted
+sensor is simply re-learned and noted; all setup screens in one place; and the long-term goal is to find the
+robots, find every relevant sensor and control the robots accurately, all automatically, with minimal user input.
 
-This is a design assessment only. No code was changed, and nothing below is built until Nick approves it. Every
-conclusion in this document is Claude's (marked **[Claude]** where it is a recommendation or a judgement); the
-facts about the existing code are cited by file.
+This is a design assessment only. No code was changed, and nothing below is built until Nick approves it. The
+recommendations and judgements are Claude's and are marked **[Claude]**; facts about the existing code cite files.
 
 **Data read.** `tools/experiment/e02_front.py`, `e02_trust.py`, `e02_fit.py`, `e02_explore.py`, the runner's setup,
 identify and question code (`e02.py`, `e02_view.py`), `tools/fusion/tof_calib.py`, `firmware/home_lab/rawlog.h`
-(the RAW record), `docs/data-formats.md`, `docs/build-plans/generality-audit.md`, `publication-plan.md`,
-`live-lab-outline.md`, `generic-platform-outline.md`, the 2026-10-25 reverse-find build report, and the MIRLT
-recognition and labelling READMEs.
+and `home_lab.ino` (the RAW record, the `help` command list), `docs/data-formats.md`,
+`docs/build-reports/e02-oct25-heading.md`, `e02-oct25-reverse-find.md`, and the build plans `generality-audit.md`,
+`publication-plan.md`, `live-lab-outline.md`, `generic-platform-outline.md`.
 
 ---
 
 ## Conclusion, in short
 
-1. **The three settings are one engine with three starting points [Claude].** Setting 3 (discover) adds a
-   "what is this stream?" stage in front of setting 2; setting 2 (known kit) measures everything fresh with only
-   generic starting guesses; setting 1 is setting 2 plus a comparison with saved history. Build one pipeline, not
-   three.
-2. **The setting belongs to each sensor, not to the whole session [Claude].** A known Alvik with one swapped or
-   newly added sensor is setting 1 for its wheels and gyro and setting 3 for the new sensor. The engine keeps a
-   state per stream: *unknown*, *known type, no history*, *known with history*, *changed*.
-3. **Recommended name for setting 1: "Fresh vs history"** (candidates in section 1). Settings 2 and 3 become
-   **"From scratch: known kit"** and **"From scratch: discover"**, so "from scratch" always means "no old data".
-4. **The front-sensor logic generalises to any stream** as one recipe: predict what the stream should read from
-   a reference the system already trusts, take the difference, learn offset and scale from it, take the
-   reference's own noise off, compare with history, and turn the result into a trust factor (section 2).
-5. **Discovery (setting 3) is feasible for any sensor that responds to motion, contact, gravity or the camera**,
-   using six commanded test motions whose responses do not overlap (section 3). A sensor that responds to none
-   of them (a temperature or light sensor) stays "unknown" and is kept out of the fusion.
-6. **Only two things truly need a person [Claude]:** one known length (absolute scale: a spec-sheet number typed
-   at the laptop, not a floor measurement), and intent (which robots are ours, where they may not go, whether
-   an edge is a drop, whether a sensor was swapped on purpose). Everything else is a confirmation the system can
-   do without, with a stated fallback (section 4).
-7. **Setting 3 still needs a known way to drive the robot.** A system cannot safely discover how to move a robot
-   it has never seen. "New system" here means unknown sensors and cameras on a robot that speaks a known driver
-   (the audit's `RobotDriver`, R1). This is an assumption; if Nick wants truly unknown robots, the user would
-   supply a driver file, and that is a separate design.
-8. **The cheapest proof is free data [Claude]:** the Alvik's 37 RAW columns, with their names hidden, are a
-   labelled test set for discovery. A logs-only replay can score the classifier before any board time.
-9. **Biggest risk: no from-scratch session has finished on real hardware yet.** The one real explore (2026-10-24
-   stage 3) stopped during identify. Setting 2 and 3 both stand on explore.
+1. **One engine, three starting points [Claude].** New system from scratch = find the devices, learn the drive
+   commands, learn what each sensor is, then run From scratch. From scratch = measure everything with only generic
+   starting guesses. Fresh = From scratch, with old measurements as the starting guess and the yardstick for change.
+2. **The setting belongs to each sensor, not the session [Claude].** A known robot with one new sensor is Fresh
+   for its wheels and New system from scratch for the new sensor. The engine keeps a state per stream.
+3. **Provenance is the first rule.** Every number carries whether it was *measured*, *derived*, *guessed* or
+   *copied*, and from what. A guessed or copied number is never used as if measured: never written into a robot,
+   never used to judge another sensor. The heading problem (section 3) was exactly this rule broken: the runner
+   wrote unmeasured headings into the robots, and 100 of 112 large heading errors traced to it.
+4. **The front-sensor logic generalises to any stream:** predict what it should read from an independent
+   reference, take the difference, learn offset, scale and noise, compare with old measurements, turn it into a
+   trust factor. Today's code learns offset but not scale, and its trust code keeps old evidence too long after a
+   swap (section 4).
+5. **On a computer MIRLT was just installed on, finding the devices is realistic; reading an arbitrary closed
+   protocol is not.** Cameras, USB and serial devices, network devices (mDNS, open ports, broadcasts), Bluetooth
+   devices and ROS 2 graphs can all be listed automatically, and ROS 2 topics describe themselves (LaserScan, Imu,
+   Range, Twist). A closed binary protocol cannot be reverse-engineered safely; it needs a small adapter or a
+   robot-side agent (section 5).
+6. **Drive commands are learned by cautious system identification:** prove the stop works first, then tiny
+   commands, watching the camera or the robot's own sensors, growing only while the response is consistent; out
+   come sign, scale, deadband, latency and turning geometry (section 6).
+7. **Sensor discovery works with or without a camera.** Without one, the references are board touches, gravity,
+   commanded motion, other robots, beacons, the dock, and agreement between independent sensors (three ways of
+   measuring a turn that agree confirm all three) (section 7).
+8. **Truly user-only input shrinks to two things:** places robots must not go, and consent to start moving. Which
+   robots are ours (the ones that respond to our commands), drops (edge sensors, approached cautiously) and the
+   dock (a known printed shape) are all inferred (section 8).
+9. **The cheapest proof is free data [Claude]:** the Alvik's 37 RAW columns with names hidden, and the heading
+   logs, are labelled test sets. Logs-only replays can score discovery and the error checks before any board time.
+10. **Biggest risk: no From scratch session has finished on real hardware yet.** The one real explore (2026-10-24
+    stage 3) stopped during identify.
 
 ---
 
 ## 1. The three settings
 
-### Names for setting 1 (fresh raw data compared against old data)
+| | **Fresh** | **From scratch** | **New system from scratch** |
+|---|---|---|---|
+| In Nick's words | New measurements compared against old | No old measurements; sensor types known | No old measurements; sensor types unknown |
+| Knows at the start | Robot and sensor list, types, mounts, units, drivers; every past session's measurements | Robot and sensor list, types, mounts, units, drivers (the robot profile); generic starting guesses | That MIRLT is installed, and the dock's printed dimensions. Not which devices exist, how to drive them, or what their sensors are |
+| Measures | Every value again: offset, scale, noise, latency against independent references; compares with old | The same, plus the camera (explore) and work area if there is a camera, and every robot's wheel and gyro scale | First the devices, the drive commands and each stream's type; then everything From scratch measures |
+| When a value has shifted | Uses the new value at once, adapts the fusion to it, notes it in the results (Nick, 11:05). No question | (nothing old to compare) | (nothing old to compare) |
+| Asks the user | Consent to start | Consent; no-go areas; low-confidence confirmations only | Consent; no-go areas; low-confidence confirmations of sensor types and drive channels |
+| Calibration run, 3 robots (estimate, Appendix C) | 8-12 min before trials; keeps checking through the session | 30-40 min | 75-90 min |
 
-| Candidate | Says "fresh" | Says "against old data" | Short enough for a button | Note |
+Nick has said accuracy and autonomy matter more than run time, so New system from scratch repeats its test motions
+at the end as a repeatability check (about 10 minutes, included above).
+
+---
+
+## 2. Provenance: every number knows where it came from
+
+**Rule [Claude, from Nick's 11:05 answer].** Every value the system holds (a calibration, a heading, a sensor's
+offset, a mount position, a type label) carries a tag:
+
+| Tag | Meaning | May it be written into a robot? | May it judge another sensor? |
+|---|---|---|---|
+| **measured** | From this session's data against a named reference, with its n and sd | Yes | Yes, within its sd |
+| **derived** | Computed from measured values (a heading from a path the camera saw) | Yes, if its inputs are measured | Yes, but never counted as separate evidence from its inputs |
+| **guessed** | A default, a placeholder, a discovery guess not yet confirmed, a commanded value assumed to have happened | **No** | **No** |
+| **copied** | From an earlier session, another robot or a profile | Only as a starting guess, labelled as such | Only as the yardstick for "changed" |
+
+Each tag also records the reference, the time and the session. Every log row, fix and report line shows the tag.
+Values are promoted (guessed to measured) only by a measurement, never by time passing or by being used.
+
+---
+
+## 3. Errors: identify, diagnose, adapt to reality
+
+### The worked example: the heading problem (`docs/build-reports/e02-oct25-heading.md`)
+
+- **Symptom.** 112 of 663 stretches between camera fixes (17%) ended with a heading disagreement of 30 degrees or
+  more, needing a 22 cm (median) position correction.
+- **Identify.** The disagreement was the runner's heading against the robot's. Neither was a measurement, so the
+  check compared two unmeasured things. The independent reference was the direction the camera saw the robot
+  drive on a go leg of 8 cm or more: 803 legs measured.
+- **Diagnose.** Five hypotheses, each tested against the logs: a quarter-turn artefact (partly), a fix writing a
+  wrong heading (**yes: 100 of 112**), gyro scale, drift or wrap (no: the gyro's own error grew a median 1.4-3.6
+  degrees), wheel slip (no), one robot or phase (mostly parking). Attribution came from *which* reference
+  disagreed *when*: the error was already there at the first measured leg after a fix, so the fix wrote it in; it
+  did not grow on the way.
+- **The cause was provenance.** A placeholder heading of plus or minus 90 degrees (68%), a run's own end heading
+  echoed back (12%) and a stale heading kept across a refind (10%) were all *guessed* values sent as if
+  *measured*. Of 140 ordinary fixes that found the robot right, 1 made it wrong.
+- **Adapt.** Send a heading only when it was measured; measure one with a short commanded drive as soon as
+  possible; never write a guessed one (the report's fixes 1-3, waiting on Nick).
+
+### The general method, for every setting
+
+| Step | What the system does | Fresh | From scratch | New system from scratch |
 |---|---|---|---|---|
-| **Fresh vs history** | yes | yes | yes | Reads as exactly what it does. **Recommended [Claude]** |
-| Fresh check | yes | implied ("check" against what?) | yes | Shortest; loses the "old data" half |
-| Compare to history | no | yes | yes | Does not say the data are new each time |
-| Re-baseline | no | partly | yes | An engineering term, but suggests old data are thrown away, which they are not |
-| Recheck against record | yes (re-) | yes | long | Clear, clunky on a phone |
+| **Identify** | Residuals against **independent** references (never a value checked against itself or its own source); consistency across sensors (do gyro, wheels and camera agree on a turn?) and across robots (does one stand out?); provenance checks (is any value in a comparison guessed or copied?) | Also against old measurements: a shift beyond max(minimum, 3 standard errors) | Against the references only | Also: does each stream still behave like its label? Does each drive channel still move as learned? |
+| **Diagnose** | List hypotheses, test each against the logs; attribute by which references disagree (only the camera disagrees with all robots = camera; one robot disagrees with camera and siblings = that robot; the error appears at a reset = what the reset wrote) and by when (at a reset, growing with distance, growing with turning, only in one region) | History says whether this is new | Siblings and references only | Plus: is the label itself wrong? |
+| **Adapt** (cheapest first) | 1. Re-estimate from this session's data. 2. Quarantine the source (trust factor up, or out of the fusion), keep logging it. 3. Re-test with a commanded motion designed to separate the hypotheses. 4. Ask the user, last, only for intent | Use the new value, note it (no question) | Same | Same; a stream whose behaviour no longer fits its label goes back to "unknown" |
 
-"Fresh vs history" keeps the principle already in `e02_front.py`: this session's own readings are used as soon as
-there are enough; history is only the starting guess and the yardstick for "something changed", never a
-substitute for measuring.
-
-### What each setting knows, measures and asks
-
-| | **Fresh vs history** (setting 1) | **From scratch: known kit** (setting 2) | **From scratch: discover** (setting 3) |
-|---|---|---|---|
-| Knows at the start | Robot and sensor list, each sensor's type, mount and units; every past session's calibrations, noise and trust | Robot and sensor list, types, mounts, units (the robot profile); generic starting guesses only | A driver to move each robot; that a camera is somewhere; nothing about the sensors |
-| Does not use | Nothing is skipped: every value is measured again | Any saved calibration, noise, trust or map | Column names (used only as a hint), any profile |
-| Measures | Each sensor's offset, scale, noise, latency against the camera and touches, fresh; compares with history and flags shifts | The same, plus the camera (explore), the work area's edges and every robot's wheel and gyro scale | First: which streams exist, how fast, at rest and in motion, and what each one is; then everything setting 2 measures |
-| Asks the user | Approve the run; "was this swapped on purpose?" only when a shift is found | Approve; confirm or drag each robot's ring; drops at the edges; no-go areas | All of setting 2, plus one known length, and a confirmation for each sensor guess below the confidence bar |
-| Calibration run (3 robots, estimate) | 8-12 min before trials; the comparison keeps going through the session | 30-40 min | 60-70 min, plus 2-5 min of the user's answers |
-
-Run times are estimates from the code's constants (Appendix C), not timed sessions. Nick has said accuracy and
-autonomy matter more than run time, so setting 3 repeats its test motions at the end of the run as a
-repeatability check (section 3), which costs about 10 extra minutes.
+<sub>Residual: a reading minus what it should have read. Standard error: how far the median of n readings is likely
+to be from the true value, about 1.25 x sd / sqrt(n).</sub>
 
 ---
 
-## 2. A general sensor model, and how each part is learned
+## 4. A general sensor model, and how each part is learned
 
-Every sensor stream gets the same record. Each entry is estimated from data against a **reference the system
-already trusts**, in this order of strength: a board touch (switch click, 1-2 cm), the camera after explore
-(0.8 cm per axis at a find, `e02_trust.HEALTHY`), physics (gravity reads 1 g at rest; a still robot is not
-turning), the other robots (what all share is the camera's, what one has on top is its own), and the motion the
-system commanded (sign and timing are known, size only roughly).
+Every stream (camera, wheels, IMU, ranging, lidar, sonar, beacons, switches, line and cliff sensors, anything)
+gets the same record, each entry tagged with its provenance. **References, strongest first:** a board or dock
+touch (1-2 cm); the dock's printed dimensions (the absolute length); the camera after explore (0.8 cm per axis at
+a find, `e02_trust.HEALTHY`), if there is one; fixed beacons once their positions are learned; gravity (1 g at
+rest, no turning at rest); agreement between independent sensors; the other robots (what all share is the common
+reference's, what one has on top is its own); the motion the system commanded (sign and timing known, size only
+roughly, and only *guessed* until measured).
 
-| What the system needs | How it is estimated | Reference | Test motion |
-|---|---|---|---|
-| Identity | Which robot sent it, which column; streams that update at the same instants and move together are grouped into one sensor (the front sensor's 5 zones, the IMU's 3 axes) | Timestamps | Any |
-| Type | Section 3 (discovery) | All | All six |
-| Units | The ratio between the stream and its reference is snapped to the nearest unit factor (1, 10, 100, 1000, 57.3, 9.81) when within 15%; the remainder is a calibration scale | Camera, gravity | Still, spin, drive |
-| Rate | Count only rows where the value changes: RAW repeats the front sensor's last frame (about 15 a second inside 50 rows a second) | Timestamps | Still |
-| Noise | Robust spread at rest and about its prediction in motion, minus the reference's own share (`front_sd`: sqrt(sd² − camera sd²)) | Camera, siblings | Still, drive |
-| Bias (offset) | Median of reading minus prediction (`e02_front`: −1.1 cm across 115 readings) | Camera + map, gravity, still | Still, approach |
-| Scale | Slope of reading against prediction (robust regression). **Not in `e02_front` today**: a median offset hides a sensor that reads 5% long, which shows as error growing with distance. `tof_calib.py` already fits a range scale offline | Camera, gravity | Spin (gyro), drive (wheels), approach (range) |
-| Latency | The time shift that best lines the stream up with its reference at the sharp start and stop of a commanded spin or drive | Camera (capture delay measured by `tools/live/capture_delay.py`), commands | Spin, drive |
-| Position and direction on the robot | Range: where the boards must be for the readings to fit while spinning (`tof_calib` zone directions). IMU: gravity at rest gives "down", the spin gives the yaw axis and its sign. Line or cliff: where the camera puts the robot when the reading steps at a known edge. Switch: which side clicks first on an angled approach, and how far from the axle the board line is at the click | Camera, gravity, map | Still, spin, approach, edge |
-| Valid range and field of view | Largest and smallest readings that still agree with the prediction; zone directions from the spin | Camera + map | Spin, approach |
-| Failure signs | Stuck (no change while the reference changes); dropouts (missing rows, a sentinel such as −1); clipping at a limit; noise above its own baseline (trust factor k = learned sd ÷ baseline sd ≥ 2, `DEGRADED_K`); offset shift beyond max(3 cm, 3 standard errors) (`e02_front`); disagreement only in one region or speed | All | All, continuously |
-
-<sub>Robust spread: MAD × 1.48 (the median distance from the median, scaled so it equals the standard deviation for
-normal data); few outliers barely move it. Standard error: how far the median of n readings is likely to be from
-the true value, about 1.25 × sd ÷ √n.</sub>
-
-### The worked example, generalised
-
-The front sensor today (`e02_front.py`, `e02_trust.py`) does five things. Written for any stream:
-
-1. **Predict.** From the reference (camera position + map), what should this stream read now? For the front
-   sensor: the distance to the board ahead. For a gyro: the camera's turn rate. For a switch: 1 when the camera
-   and map put the robot's back face on a board line.
-2. **Residual.** Reading minus prediction, kept only where the prediction is trustworthy (square on, measured
-   heading, in range: `front_check`).
-3. **Learn offset, scale and noise.** Until this session has N residuals (8 for the front sensor), use history
-   (setting 1) or a generic starting guess (settings 2 and 3); from N on, this session's own. Take the
-   reference's share off the noise.
-4. **Compare with history** (setting 1 only). A shift beyond max(minimum, 3 standard errors) is reported in plain
-   words, and this session's value is used.
-5. **Trust.** k = learned noise ÷ baseline noise; flag at 2, clear below 1.5. With two or more robots, flag only a
-   robot that stands out from its siblings (`STANDS_OUT`); never blame a sensor when the reference itself is
-   unknown or flagged (`update_flags`).
-
-Three gaps when this is applied to sensors it does not know **[Claude]**:
-
-- **No "healthy" value exists for a new sensor.** `e02_trust.HEALTHY` holds Alvik numbers (audit E6). In settings
-  2 and 3 the baseline must be the session's own first stretch (marked provisional) or the same sensor type on the
-  other robots. With one robot and a new sensor, the system can say "agrees with the camera within X" but not
-  "worse than normal" until a second session exists.
-- **Trust mixes history in; the front sensor does not.** `SensorTrust.new_session` halves old evidence's weight
-  but keeps it, so in the first session after a swap, 20 old items at half weight outweigh 5 new ones. The front
-  rule (this session's own after N) catches a swap at once. The general model should use the front rule for
-  every stream, and keep history only as the prior and the yardstick.
-- **Offset only is not enough.** Add the scale term (step 3) so a sensor that reads long in proportion is caught.
-
----
-
-## 3. Sensor discovery (From scratch: discover)
-
-**Input:** every raw stream the robot sends (for an Alvik, the 37 RAW columns in `rawlog.h`), each with a name
-that may or may not mean anything. Names give a starting hint ("gz", "_cm"), shown to the user, but the guess comes
-from behaviour.
-
-**Stage A, passive (robot standing still, 30 s, twice).** Sort every column into: constant (a setting or a
-"not configured" flag), counter (+1 a row: `raw_n`), clock (rises with time: `ms`), on/off, slow drift (battery),
-noisy continuous. Measure rest level, rest noise and true update rate.
-
-**Stage B, six test motions.** Chosen so each sensor type has a pattern no other type has:
-
-| Test motion | Gyro | Accelerometer | Wheel counts | Range ahead | Line / cliff | Switch | Lift flag | Charging |
-|---|---|---|---|---|---|---|---|---|
-| 1. Stand still | about 0 (its bias) | one axis reads gravity | flat | steady | steady | 0 | 0 | as is |
-| 2. Spin left, then right (360 deg each) | one axis follows the camera's turn, sign flips | small | equal and opposite | sweeps once per turn | steady on a uniform floor | 0 | 0 | as is |
-| 3. Drive 20 cm forward and back | about 0 | a pulse along one axis at each start and stop | same sign, matches camera distance | changes by the distance driven if facing something | steady | 0 | 0 | as is |
-| 4. Back slowly into a board the camera sees | 0 | a jolt at contact | stop while commanded (stall) | grows as it backs away from what is ahead | steady | steps 0 to 1 at the moment the camera stops it | 0 | as is |
-| 5. Drive slowly toward an open edge (only if the user says edges are drops, at crawl speed, stopping on the first step change) | 0 | 0 | steady | bottom zone jumps | steps | 0 | 0 | as is |
-| 6. Lights on and off; lift (asks the user); dock (if one exists) | lift: noisy | lift: off-gravity | lift: wheels may spin | lift: bottom zone jumps | lift: jumps | 0 | lift: 1 | dock: 0 to 1 |
-
-**Scoring.** For each stream and each candidate type, a match score from the pattern above: correlation with the
-reference in the motion where that type should respond, the ratio after integrating (a gyro integrated over a
-camera-measured 720 deg spin gives 720 × a unit factor), sign consistency between left and right spins, and step
-timing at a contact. Confidence = the best type's share of all the scores, and its lead over the second.
-
-- **0.90 or more, and a clear lead:** labelled "likely X", listed for one-tap confirmation, used provisionally.
-- **0.60-0.90:** the user picks from the top two or three, each shown with its evidence chart.
-- **Below 0.60:** "unknown"; kept in the logs, kept out of the fusion. The user may name it, but it is used only
-  once a reference exists to check it against.
-
-These bars are chosen, not measured. **A design of experiments is the sensible way to set them:** replay the
-Alvik's labelled logs with names hidden at bars of 0.5 / 0.6 / 0.7 / 0.8 / 0.9 and score wrong-label rate against
-the number of questions asked.
-
-<sub>Correlation: a number from −1 to 1 saying how closely two signals rise and fall together; near ±1 means one
-tracks the other.</sub>
-
-**Two traps the discovery must handle [Claude].**
-
-- **Derived streams.** `x_cm`, `y_cm`, `th_deg`, `v_cms`, `w_dps`, `roll_deg`, `pitch_deg`, `yaw_deg` are worked
-  out on the robot from the wheels and the IMU. They pass every test a real sensor would. A stream the others
-  predict almost exactly (for example `th_deg` against the integrated gyro and wheel difference) is labelled
-  "derived" and never counted as separate evidence, or the fusion would trust the same information twice.
-- **Inputs that the motions do not exercise.** A light or temperature sensor, or a microphone, will not respond
-  to any of the six motions. It stays unknown unless the user names it; that is the honest answer.
-
-**Stage C, repeat.** The six motions run again at the end of the calibration. A label whose score changes between
-the two passes is reopened as a question. This costs about 10 minutes and buys the accuracy Nick prefers to speed.
-
----
-
-## 4. Every point of user input, minimised and moved to the laptop
-
-| # | What is asked | Why it can't be inferred | UI element | When | Fallback if nobody is there | Settings |
-|---|---|---|---|---|---|---|
-| 1 | Approve the calibration run | Nick approves calibration runs before trials (his rule); motion near people needs consent | One "Start" button with the plan and time estimate | Start | Fresh vs history may start on a schedule; the others wait | 1, 2, 3 |
-| 2 | Which robots are ours | A hello on the network could be any device (a neighbour's, a spare) | List of robots that answered, with checkboxes | Connect | Saved list (setting 1); otherwise wait | 1, 2, 3 |
-| 3 | Is any edge of the work area a drop? | Finding out by driving off it breaks the robot | Yes / No / Not sure | Work area | "Not sure" = treat every edge as a drop: crawl speed and stop on the first edge-sensor step | 2, 3 |
-| 4 | Places the robots must not go | Intent (a laptop on the floor, a fragile model) | Paint areas on the camera frame | Work area (optional) | Explore's own border with a margin; front-sensor obstacle stop | 2, 3 |
-| 5 | May robots touch the walls and boards? | Fragility and safety of what is there | Yes / No | Work area | No: the camera and edges only, no touch references (fewer and weaker references, flagged in the report) | 2, 3 |
-| 6 | Mark each robot (drag the ring onto it) | When the camera model is unknown, the turn-and-look guess (`identify`) can pick a shadow or a second change | The mark-the-robot page: guess shown as a ring, drag to fix, tap to confirm | After connect | Identify by turn, then by lights (both exist); retry; a robot still unfound sits out | 2, 3 (1 only if identify fails) |
-| 7 | One known length: the robot's width or wheel diameter from its spec sheet | Absolute scale. Wheels, gyro and camera can all agree with each other at the wrong size; explore assumes the robots' wheels average to correct and checks with the robot's known size (6% apart from the clicks on 2026-10-23) | Number box with units, plus a picture of which length | Before the run | Use the robot's own reported cm (if its firmware reports cm) and flag "scale not confirmed" in every result | 3 (2 reads it from the profile) |
-| 8 | Confirm sensor guesses below 0.90 | Two types can look alike in a short test; the person knows what was plugged in | One card per sensor group: guess, confidence, evidence chart; Confirm / Change / Ignore | During or after the run, as a queue | Below 0.90: kept out of the fusion until answered; logs kept | 3 |
-| 9 | Lift a robot for 3 seconds | Only a hand can do it; it is the only way to find a lift sensor | Instruction with a countdown | End of the motion battery (optional) | Skipped; a lift flag stays unknown | 3 |
-| 10 | Was this sensor swapped on purpose? | Intent: a planned swap starts a new history; an unplanned one is a fault to report | Yes (start new history) / No (report as a fault) | When a shift is found | This session's value is used either way (front rule); both histories kept; the question waits in the report | 1 |
-| 11 | Robot names | Human preference | Text box beside each robot's light colour | Connect (optional) | Auto names (R1, R2, ...) | 1, 2, 3 |
-| 12 | Where the dock is (if any) | A dock is an unknown object to the camera in setting 3 | Drag a box onto it in the frame | Work area (optional) | No charging this session | 2, 3 |
-| 13 | Tape marks for grading | Truth for the paper, not needed to calibrate | Place a robot on each mark when asked | Separate grading stage | Skipped; results say "camera-scored only" | Grading only |
-
-**What is not asked, though one might expect it [Claude]:** camera choice (the camera where robots move when
-commanded is the one that sees the work area); camera height or lens (explore fits them); board size and edges
-(explore); sensor positions on the robot (section 2); time sync (clock records and light flashes, existing).
-
----
-
-## 5. Instructions the system issues
-
-Rules for wording **[Claude]**: one action per instruction; name the object by what the user sees (its light
-colour, the ring on screen), never by an internal name; say what "done" looks like; and **check it with a sensor
-or the camera instead of trusting a button press**. When the check fails, say what was seen, in one sentence, and
-repeat the full instruction (Nick's rule: never "see step 4").
-
-| Instruction (example wording) | How it is checked | If the check fails |
+| What the system needs | How it is estimated | Example references |
 |---|---|---|
-| "Put the robot with blue lights anywhere inside the green outline, wheels on the floor, then step back." | The camera sees a new robot-sized object inside the outline; accelerometer level and not lifted; no hand in the frame (MIRLT's "hand" class) | "I can see a hand near the bottom edge. Step back from the board so the robots can move." |
-| "Drag the ring onto the robot that is turning now." | The dragged spot agrees with the turn-and-look change within a robot's width | "That spot did not change when the robot turned. The robot turning now has blue lights; drag the ring onto it." |
+| Identity and grouping | Which device, which channel; streams that update at the same instants and move together are one sensor (5 ToF zones; 3 gyro axes; 360 lidar beams) | Timestamps |
+| Type | Sections 5-7 | All |
+| Units | The ratio to its reference snapped to the nearest unit factor (1, 10, 100, 1000, 57.3, 9.81) when within 15%; the rest is a calibration scale | Camera, gravity, dock, touches |
+| Rate | Count only rows where the value changes (RAW repeats the front sensor's last frame: about 15 a second inside 50 rows) | Timestamps |
+| Noise | Robust spread at rest and about its prediction in motion, minus the reference's own share (`front_sd`: sqrt(sd² − reference sd²)) | Still periods, siblings |
+| Bias and scale | Robust regression of reading on prediction: intercept and slope. **`e02_front` learns only the offset**; a sensor reading 5% long hides in the median. `tof_calib.py` already fits a range scale offline | Camera + map, touches, gravity |
+| Latency | The time shift that best lines the stream up with its reference at the sharp start and stop of a commanded motion | Commands, camera (`capture_delay.py`), encoders |
+| Position and direction on the robot | Range or lidar: where the walls must be for the readings to fit during a spin (`tof_calib` zone directions). IMU: gravity gives down, the spin gives the yaw axis and sign. Line or cliff: where the robot was when the reading stepped at a known edge. Switch: which side clicks first on an angled approach, and how far from the axle the wall is at the click. In ROS 2 the TF tree may give it, as *copied* until checked | Camera, gravity, touches, map |
+| Valid range and field of view | The widest readings that still agree with the prediction | Camera + map, touches |
+| Failure signs | Stuck (no change while the reference changes); dropouts or sentinels (−1); clipping; noise above its own baseline (k ≥ 2, `DEGRADED_K`); offset or scale shift; disagreement only in one region or speed | All, continuously |
+
+<sub>Robust spread: MAD x 1.48, the median distance from the median, scaled to equal the standard deviation for
+normal data; a few outliers barely move it. Robust regression: a straight-line fit that gives little weight to
+readings far from the line.</sub>
+
+**The front-sensor logic, written for any stream.** (1) Predict what it should read from an independent
+reference. (2) Residual = reading − prediction, kept only where the prediction is trustworthy (`front_check`: square
+on, measured heading, in range). (3) Until this session has N residuals (8 for the front sensor), start from old
+measurements (Fresh) or a generic guess (the others), tagged *copied* or *guessed*; from N on, this session's own,
+tagged *measured*. (4) Fresh only: a shift beyond max(minimum, 3 standard errors) is noted and the new value used.
+(5) Trust factor k = learned noise / baseline noise; flag at 2, clear below 1.5; with two or more robots flag only
+one that stands out (`STANDS_OUT`); never blame a sensor while its reference is unknown or flagged.
+
+**Three gaps when applied to sensors it does not know [Claude]:**
+- **No healthy value exists for a new sensor.** `e02_trust.HEALTHY` holds Alvik numbers (audit E6). The baseline
+  must be the session's own first stretch (tagged provisional) or the same type on sibling robots. With one robot
+  and a new sensor, the system can say "agrees with the reference within X", not "worse than normal", until a
+  second session.
+- **Trust keeps old evidence too long.** `SensorTrust.new_session` halves old evidence but keeps it: after a swap,
+  20 old items at half weight outweigh 5 new ones. The front rule (this session's own after N) catches a swap at
+  once and matches Nick's "just use the new value". Use the front rule for every stream.
+- **Add the scale term**, so a sensor that reads long in proportion is caught.
+
+---
+
+## 5. Discovery on a computer MIRLT was just installed on
+
+What a fresh install can realistically find, with no configuration:
+
+| Kind of device | How it is found | What it tells the system | Realistic? |
+|---|---|---|---|
+| USB and built-in cameras | The operating system's camera list (Video4Linux, DirectShow / Media Foundation, AVFoundation) | A picture stream, resolution, frame rate | **Yes** |
+| Network cameras | ONVIF WS-Discovery, mDNS, RTSP on port 554, MJPEG over HTTP (the Pi recorder's `/live`) | A picture stream; often a name | **Yes** (a password may be needed: a user-only input) |
+| USB serial devices | The USB vendor and product IDs (an Arduino, an ESP32, a USB-serial chip); then listening at common speeds for readable text | That a microcontroller is there; whether it talks text | **Yes** to list; listening is safe; *sending* is not, until a protocol is known |
+| Network robots | mDNS / DNS-SD service names; listening for broadcasts (the Alvik's UDP hello on ports 5005/5006); a scan of the local subnet's common ports | An address and often a name | **Yes** (a scan may be blocked on campus or enterprise networks) |
+| Bluetooth LE devices | Advertisements and their GATT services (standard ones such as battery are self-describing) | A device, its standard services | **Partly**: custom services are opaque |
+| ROS 2 robots | DDS discovery lists nodes and topics **with their message types**: `sensor_msgs/LaserScan`, `Imu`, `Range`, `BatteryState`, `nav_msgs/Odometry`, and `geometry_msgs/Twist` for drive commands (`cmd_vel`); the TF tree gives mounts; REP 103 fixes the units | Sensor types, units, frames and the drive channel, nearly all at once | **Yes, the best case.** Types are *copied* until a test motion confirms them |
+| MAVLink robots and drones | The heartbeat message, a self-describing message set | Type of vehicle, sensors, command set | **Yes** (rare in this lab) |
+
+**Levels of how much can be learned, and what to do at each [Claude]:**
+
+| Level | Example | Sensors | Drive commands |
+|---|---|---|---|
+| 1. Self-describing | ROS 2, MAVLink | Types listed; confirmed by test motions | Listed (`cmd_vel`); scale, sign, latency learned (section 6) |
+| 2. Known protocol | The Alvik's UDP lines (`help` lists every command; `H,RAW,...` names every column); Firmata | From an adapter in MIRLT's adapter library | From the adapter |
+| 3. Readable text, unknown meaning | A robot printing comma-separated numbers or `key=value` lines | Column discovery (section 7): realistic | **A help or command list must be readable.** Then candidate commands are tried cautiously (section 6). With no list, guessing commands is not safe |
+| 4. Closed binary protocol | A vendor robot with an undocumented byte protocol | Not realistic | **Not realistic**: reverse-engineering it means sending bytes of unknown meaning to a machine that moves |
+
+**At level 4, two ways forward:** a small **driver adapter** (one file implementing the audit's `RobotDriver`:
+go, turn, stop, status, streams), written once per robot kind and shared; or a **robot-side agent**, a small
+program or firmware flashed onto the robot (or onto a microcontroller wired to it) that speaks MIRLT's protocol:
+it announces itself, lists its streams by name, and accepts velocity and stop commands. The Alvik firmware is
+already close to such an agent. **[Claude]** Make the agent's protocol the documented MIRLT standard, so any lab
+can bring a robot to level 2 in an afternoon.
+
+---
+
+## 6. Learning the drive commands: cautious system identification
+
+**Order of work [Claude].**
+
+1. **Find the stop first.** Before any motion, the stop must be known and shown to work: a robot already moving
+   (or a motion that is the smallest possible) is stopped, and the stop is confirmed by the camera or the robot's
+   encoders. No stop, no motion. At levels 3-4 with no known stop, the user is asked to hold the robot or keep a
+   hand on its power switch (cautious testing, Nick 11:05).
+2. **Tiny commands, one at a time.** The smallest command the channel accepts, for a fraction of a second, then
+   stop. Watch every reference: camera, encoders, IMU, lidar scan shift, beacons.
+3. **Grow only while it is consistent.** Each step doubles the size only if the last one moved the way predicted;
+   any surprise (moved the other way, did not stop, moved too far) stops the sequence and lowers the size.
+4. **Learn the model.** From the pairs of command and measured motion:
+
+| What | How | Why it matters |
+|---|---|---|
+| Which channel moves which way | Forward, backward, left, right, each alone; which references respond | A robot whose "forward" is backwards |
+| Sign | The direction of the measured motion | Same |
+| Scale | Measured speed / commanded value (a straight-line fit) | Commanded 10 = 4.2 cm/s |
+| Deadband | The smallest command that moves it at all | Small corrections that do nothing |
+| Saturation | The command beyond which it moves no faster | Planning within what it can do |
+| Latency | Command to first motion; stop to standstill | Steering and stopping distance |
+| Turning geometry | Does it turn on the spot? Smallest turning circle? Left/right asymmetry | Path planning (audit R1, a car-like robot) |
+| Stopping distance | Distance from stop command to standstill at each speed | Safe margins from walls and drops |
+
+5. **Confirm, if confidence is low.** The UI shows the learned model with a short clip ("I sent 'forward 0.05';
+   the robot moved 1.9 cm the way its lidar faces"), for a one-click confirm.
+
+**Without a camera** the same steps use the robot's own encoders and IMU once they are identified (a turn command
+shows on the gyro and as opposite wheel counts), a lidar or range scan's shift, or another robot's sensors
+watching it. **Every learned value is tagged *measured* with its reference; a commanded motion is never assumed
+to have happened.**
+
+<sub>System identification: learning a model of how a machine responds to its inputs by trying inputs and
+measuring the responses.</sub>
+
+---
+
+## 7. Sensor discovery (New system from scratch)
+
+**Input:** every stream the device sends. Names (`gz`, `dL_cm`, ROS topic types) are a starting hint, tagged
+*copied*; the label comes from behaviour.
+
+**Stage A, passive (robot still, 30 s, twice).** Sort every stream: constant (a setting, or a "not configured"
+flag), counter (+1 a row: `raw_n`), clock (`ms`), on/off, slow drift (battery), noisy continuous. Measure rest
+level, noise and true update rate.
+
+**Stage B, test motions** (after the drive model in section 6), chosen so that each type has a pattern no other has:
+
+| Test motion | Gyro | Accel. | Wheel counts | Range / sonar ahead | Lidar | Beacon range | Line / cliff | Switch | Charging |
+|---|---|---|---|---|---|---|---|---|---|
+| 1. Still | about 0 | one axis reads gravity | flat | steady | steady scan | steady | steady | 0 | as is |
+| 2. Spin left, then right (360 deg each) | one axis follows the turn; sign flips | small | equal and opposite | sweeps once per turn | whole scan rotates (scan matching gives the angle) | steady (bearing, if reported, rotates) | steady | 0 | as is |
+| 3. Drive 20 cm forward and back | about 0 | pulse at start and stop along one axis | same sign | changes by the distance if facing a wall | scan shifts | changes with the distance to the beacon | steady | 0 | as is |
+| 4. Back slowly into a wall | 0 | jolt at contact | stall while commanded | grows (front) as it backs away | wall approaches behind | small change | steady | 0 to 1 at contact | as is |
+| 5. Approach an edge slowly (stopping on the first step of any stream) | 0 | 0 | steady | bottom zone jumps | (blind to drops) | small change | steps | 0 | as is |
+| 6. Dock | 0 | jolt | stall | dock walls close | dock walls close | at the dock: known | steady | 1 | 0 to 1 |
+
+**Scoring.** For each stream and candidate type, a match score from the pattern: correlation with the reference
+in the motion where that type should respond, the ratio after integrating (a gyro integrated over a 720 deg spin
+gives 720 x a unit factor), sign agreement between the left and right spins, step timing at contact. Confidence =
+the best type's share of all scores and its lead over the second.
+
+- **0.90 or more, clear lead:** labelled, used, listed for an optional glance.
+- **0.60-0.90:** used only once confirmed; the user picks from the top two or three, each with its evidence chart.
+- **Below 0.60:** "unknown", logged, kept out of the fusion.
+
+These bars are chosen. **A design of experiments is the sensible way to set them:** replay the Alvik's logs with
+names hidden at 0.5 / 0.6 / 0.7 / 0.8 / 0.9 and score wrong labels against questions asked.
+
+<sub>Correlation: from −1 to 1, how closely two signals rise and fall together.</sub>
+
+**With no camera.** The references are the board and dock touches (position at contact, from the dock's printed
+dimensions), gravity, commanded motion (measured by whichever sensor is confirmed first), other robots (one
+robot's range sensor or lidar watching another that is told to move), beacons once their places are learned, and
+**agreement between independent sensors**: if the gyro, the wheel difference and the lidar's scan rotation agree
+on a spin, all three are confirmed together; if one disagrees, it is the suspect. The dock is the absolute length:
+the robot's position when docked is known from the dock's printed geometry, and two touches at known points of the
+dock fix scale.
+
+**Three traps [Claude].**
+- **Derived streams** (`x_cm`, `y_cm`, `th_deg`, `v_cms`, `w_dps`, `roll_deg`, `pitch_deg`, `yaw_deg` on the Alvik;
+  `Odometry` in ROS 2) pass every test a real sensor would. A stream the others predict almost exactly is tagged
+  *derived*, never counted as separate evidence.
+- **Sensors the motions do not exercise** (light, temperature, a microphone) stay unknown unless the user names
+  them.
+- **Beacons and lidar need the room to stay put** during discovery; a person walking past looks like a moving
+  wall. Stage C catches it.
+
+**Stage C, repeat** at the end of the run. A label whose score changes between passes goes back to a question.
+
+---
+
+## 8. User input: what is inferred, what is truly the user's
+
+| Input | Inferred how | Truly user-only? | UI | Fallback if nobody answers |
+|---|---|---|---|---|
+| Which robots are ours | The ones that respond to our commands: a commanded wiggle seen by the camera or by the device's own sensors | No | Shown for a glance | Every responding device is ours; a device that does not respond is ignored |
+| Is an edge a drop? | Edge and cliff sensors, during a slow approach that stops on the first step of any stream; with no edge sensor, robots stay inside the area already driven | No | Shown as the found border | Unseen edges are treated as drops |
+| Walls safe to touch | Gentle contact at stall-limited force; a wall that moves when touched is not a reference | No (fragile things go under no-go areas) | none | No-go areas cover it |
+| The dock and the absolute length | The dock's printed shape found by the camera, or by a robot's charging flag on a search; its printed dimensions give scale | No | Shown for a glance | Search slowly; scale tagged *guessed* until docked |
+| Robot names | Auto (R1, R2 ... with light colours if any) | Preference only | Optional rename | Auto names |
+| Sensor types and drive channels below 0.90 | Section 7 | Confirmation only | Card per item | Kept out of the fusion until confirmed |
+| A shifted sensor | Re-learned (section 3) | No (Nick 11:05) | Noted in results | (no question) |
+| Network or camera passwords | Cannot be inferred | **Yes** | Password box | That device is skipped |
+| **Places robots must not go** | Intent | **Yes** | Paint areas on the camera frame, or draw on the map | Only the found border |
+| **Consent to start moving** | Safety and Nick's rule (he approves calibration runs) | **Yes** | One Start button with the plan and time estimate | Fresh may start on a schedule; the others wait |
+| Holding a robot during a level 3-4 drive test with no known stop | Safety | **Yes**, only then | Instruction with a countdown | That robot is not driven |
+| Tape marks for grading | Truth for the paper, not for calibration | Yes, grading only | Place a robot when asked | Results say "camera-scored only" |
+
+---
+
+## 9. Instructions the system issues
+
+Rules [Claude]: one action per instruction; name the object by what the user sees (its light colour, the ring on
+screen); say what "done" looks like; **check it with a sensor or the camera instead of trusting a button press**;
+when the check fails, say what was seen in one sentence and repeat the whole instruction.
+
+| Instruction (example) | How it is checked | If the check fails |
+|---|---|---|
+| "Put the robot with blue lights anywhere inside the green outline, wheels on the floor, then step back." | Camera sees a new robot-sized object inside; accelerometer level, not lifted; no hand in the frame (MIRLT's "hand" class) | "I can see a hand near the bottom edge. Step back from the board so the robots can move." |
+| "Drag the ring onto the robot that is turning now." | The spot agrees with the turn-and-look change within a robot's width | "That spot did not change when the robot turned. The robot turning now has blue lights; drag the ring onto it." |
 | "Plug the dock's power cable into the wall socket." | The dock answers, or a docked robot's charging flag reads 1 | "The dock is not answering yet. Check the cable is in the dock and the socket is switched on." |
-| "Lift the robot with blue lights about a hand's height and hold it for 3 seconds." | Lift flag or accelerometer off gravity, for at least 2 s | "I did not feel a lift. Lift the robot with blue lights straight up about a hand's height and hold it there for 3 seconds." |
-| "Type the robot's width from its spec sheet, in cm or inches." | Within 0.5-3x the camera's own estimate | "That is far from what the camera sees (about 10 cm). Check the number and the units." |
+| "Keep a hand near the robot on the left of the picture: I will send it the smallest move I can." | The robot's response is seen; the stop is confirmed | "It did not stop when I sent stop. Switch it off with its power switch." |
+| "Type the password for the camera named 'garage-cam'." | The stream opens | "That password was refused by garage-cam. Type it again." |
 | "Stand clear of the board: the run starts in 10 seconds." | No moving object other than robots for 10 s | Countdown restarts; after three tries it asks whether to start anyway |
 
 ---
 
-## 6. The setup wizard (precedes the live lab)
+## 10. The setup screens (one place, tabs; laptop)
 
-The same dark console look as the live view (`e02_view.py` tokens: background `#0E1116`, panels `#151A22`, amber
-`#E0A33A` for actions, IBM Plex Sans and Mono). One column on a phone, two on a laptop. Questions arrive as a
-queue that can be answered from either; a phone at the board is where the person placing robots will be. It runs
-offline on the laptop, and reuses the live view's question channel (`e02_view.LiveView.ask`, tested in
-`test_e02_webask.py`).
+The same dark console look as the live view (`e02_view.py`: background `#0E1116`, panels `#151A22`, amber `#E0A33A`
+for actions, IBM Plex Sans and Mono). One page with tabs; each tab shows a status dot (done, working, needs you).
+Runs offline and reuses the live view's question channel (`e02_view.LiveView.ask`, `test_e02_webask.py`).
 
-| Screen | What it shows | User action |
+| Tab | What it shows | User action |
 |---|---|---|
-| 0. Choose a setting | Three cards: Fresh vs history / From scratch: known kit / From scratch: discover. The system pre-selects one (history exists and known robots answered = Fresh vs history) and marks it recommended. Each card states what it will measure and the time estimate | Pick one |
-| 1. Connect | Cameras found (thumbnails and pictures a second); robots that answered (light colour, battery, rows a second, losses) | Tick our robots; name them (optional) |
-| 2. Work area | Live camera frame | Drops? (Yes/No/Not sure); touch allowed?; paint no-go areas and the dock (optional) |
-| 3. Mark the robots | The mark-the-robot page (being built separately): one robot turns and lights up, its ring is shown | Drag and confirm, one robot at a time |
-| 4. One known length (discover only) | Picture of the robot with the length to enter | Type it |
-| 5. Calibration run | Live frame with overlays; a stage timeline (still, spin, drive, explore, finds, repeat); one card per sensor filling in as it is learned; the question queue badge | Nothing unless a question arrives; a large stop button always |
-| 6. Review sensors | A card per sensor group: type, confidence, a small chart of the stream against its reference during the motion that decided it; low-confidence cards open, others folded | Confirm / Change / Ignore |
-| 7. Results | Per robot and sensor: offset, scale, noise, latency, position on the robot, trust; in Fresh vs history, what changed since last time | Answer "swapped on purpose?" if asked; "Open live lab" |
+| 1. Setting | Fresh / From scratch / New system from scratch, pre-selected from what it found (old measurements exist and known robots answered = Fresh), with what each will measure and its time estimate | Pick; Start (consent) |
+| 2. Devices | Everything found: cameras (thumbnails, pictures a second), robots and other devices, with their level (1-4) and adapter | Passwords if asked |
+| 3. Drive | Per robot: the learned drive model (sign, scale, deadband, latency, turning), each with its provenance and a clip | Confirm low-confidence ones |
+| 4. Sensors | A card per sensor group: type, confidence, provenance, a small chart of the stream against its reference in the motion that decided it | Confirm / Change / Ignore below 0.90 |
+| 5. Work area | Camera frame or map: found border, edges, dock, robots (the mark-the-robot page, being built separately, sits here) | Paint no-go areas; drag a ring if identify was unsure |
+| 6. Run | Live picture with overlays; stage timeline; the question queue; a large stop button | Nothing unless asked |
+| 7. Errors and changes | Every flagged residual, its diagnosis, which references disagreed, and what was done (re-estimated, quarantined, re-tested); every shifted value with old and new | Read |
+| 8. Results | Per robot and sensor: offset, scale, noise, latency, mount, trust, each with provenance | "Open live lab" |
 
 ---
 
-## 7. What exists, what must be built (ordered by value)
+## 11. What exists, what must be built (ordered by value)
 
 | Rank | Piece | Exists | To build | Effort (Claude hours, a guess) |
 |---|---|---|---|---|
-| 1 | Blind discovery replay on existing logs (Alvik RAW with names hidden): stage A and B features, scores, confusion table | All the logs; nothing of the classifier | Feature extraction, scoring, report | 8-12 h, logs only, no board time |
-| 2 | General stream model (predict, residual, offset + scale, noise less reference, history compare, trust) with a state per stream | `e02_front.py`, `e02_trust.py`, `tof_calib.py` | Merge into one class per stream; front rule for history; scale term; provisional baselines | 10-14 h |
-| 3 | Test-motion battery as a runner stage | Firmware calib run (still, spin both ways, roll), `identify`, backing find with switches (2026-10-25b), lights | Approach-to-edge crawl; lift prompt; repeat pass; records per motion | 6-8 h |
-| 4 | Setup wizard (screens 0-7) | Live view look, question channel, the mark page (separately) | The screens and the question queue | 16-24 h |
-| 5 | Mount, latency and units estimators | Zone directions in `tof_calib`, capture delay tool, IMU sign check (compass wiggle) | IMU axis map, line-sensor offset at an edge, switch side and face distance, unit snapping, lag by cross-correlation | 8-12 h |
-| 6 | Robot profile with where each value came from (confirmed / history / discovered / default) and `site.json` | Audit rank 1 (not built) | As the audit, plus the provenance tag | 8-10 h (audit's figure) + 2 h |
-| 7 | Derived-stream detector | Nothing | Predict each stream from the others; flag near-perfect fits | 3-4 h |
-| 8 | `RobotDriver` interface (needed before any non-Alvik robot) | Audit R1 (not built) | As the audit | 6-10 h |
+| 1 | Provenance tags on every value, fixes, logs and reports | The heading report's fixes 1-3 (designed, not applied) | Tag type and rules; apply the heading fixes | 6-8 h |
+| 2 | Blind discovery replay on existing logs (names hidden), plus the heading logs as an error-check test set | All the logs | Features, scores, confusion table | 8-12 h, logs only |
+| 3 | General stream model (predict, residual, offset + scale, noise less reference, front rule, trust) | `e02_front.py`, `e02_trust.py`, `tof_calib.py` | One class per stream; scale term; provisional baselines | 10-14 h |
+| 4 | Error engine (identify, diagnose, adapt) | Trust flags, `heading_diag.py`, camera drift watch | Hypothesis checks per stream, attribution by reference, the adapt ladder | 10-14 h |
+| 5 | `RobotDriver` interface and adapter library (Alvik first) | Audit R1 (not built) | Interface, Alvik adapter, ROS 2 adapter | 14-22 h (audit's figure) |
+| 6 | Device discovery (cameras, serial, mDNS, broadcasts, BLE list, ROS 2 graph) | Alvik hello listener, Pi camera streams | Scanners and the Devices tab data | 8-12 h |
+| 7 | Cautious drive identification | `identify`, firmware calib run | Stop-first sequence, growing steps, model fit | 8-12 h |
+| 8 | Test-motion battery as a runner stage | Calib run, backing find with switches (2026-10-25b), lights | Edge approach, docking motion, repeat pass | 6-8 h |
+| 9 | Mount, latency and units estimators | `tof_calib` zone directions, capture delay tool, compass wiggle | IMU axis map, edge offsets, switch side, unit snapping, lag | 8-12 h |
+| 10 | Setup screens (tabs 1-8) | Live view look and question channel; the mark page (separately) | The tabs | 16-24 h |
+| 11 | Robot-side agent protocol (documented standard) | The Alvik firmware's protocol | A written spec and a reference agent | 4-6 h spec; agent per board |
 
-Total about 67-96 h. Ranks 1 and 2 alone (18-26 h) would show that the idea works on real data before any UI.
+Total about 98-144 h. Ranks 1-3 (24-34 h) prove the idea on real data before any screen is built.
 
 ### Risks
 
 | Risk | Effect | What reduces it |
 |---|---|---|
-| Explore has never finished on real hardware | Settings 2 and 3 cannot be shown | Finish one real explore with marks before building the wizard |
-| Absolute scale | Everything right in shape, wrong in size (6% seen on 2026-10-23) | Input 7; tape marks for grading |
-| Circular references (camera taught by robots, robots by camera) | A shared error all robots have looks like the camera's (`shared_unexplained` already says it cannot tell) | Touch references at several walls; the known length |
-| A new robot falls off before its edge sensors are known | Damage | Input 3 defaults to "drop"; crawl speed until a cliff stream is confirmed |
-| The classifier learns the Alvik, not sensors | Fails on the first other robot | Test on a second robot or the simulator with renamed, rescaled and re-mounted columns |
-| One robot only | No sibling comparison, so no "this one is worse" in the first session | Say so in the results; provisional baselines |
-| The person is not there | Questions stall the run | Every question has a fallback (section 4) and the run continues on it |
+| Explore has never finished on real hardware | From scratch with a camera cannot be shown | Finish one real explore with marks before the screens |
+| Sending commands to an unknown device | A robot moves unexpectedly or will not stop | Stop-first rule; tiny steps; a hand on the power switch at levels 3-4 |
+| Circular references (camera taught by robots, robots by the camera) | A shared error looks like the reference's (`shared_unexplained` says it cannot tell) | Touches at several walls; the dock as an absolute length |
+| A new robot falls off before its edge sensors are known | Damage | Unseen edges are drops; crawl until a cliff stream is confirmed |
+| The classifier learns the Alvik, not sensors | Fails on the first other robot | Disguised-log replays; a ROS 2 simulator robot (TurtleBot3 in Gazebo) as a second test |
+| Only one robot | No sibling comparison in the first session | Say so; provisional baselines |
+| Campus networks block discovery | Robots not found | Manual address entry as a fallback (a user input, but rare) |
 
 ---
 
-## 8. What's next
+## 12. What's next
 
-1. Nick answers the questions below (names, scope of "new system", the known length).
-2. Build rank 1 (blind discovery replay on existing logs): logs-only, so it can run without board time.
-3. Finish one real explore with marks (the board-time prerequisite for settings 2 and 3).
-4. Build rank 2, then the wizard (rank 4) once the mark page is in.
+1. Nick decides on the heading fixes 1-3 (the report's), since provenance rank 1 includes them.
+2. Build ranks 2 and 3 (logs-only discovery replay and the general stream model): no board time.
+3. Finish one real explore with marks (the board-time prerequisite for From scratch).
+4. Then the error engine, the driver interface and the screens.
 
 ---
 
 ## New tests that may now be needed
 
-1. **Blind discovery on Alvik logs:** names hidden, every column labelled by behaviour; score correct types,
-   questions asked and wrong labels (sets the 0.60 / 0.90 bars).
-2. **Disguised-sensor replay:** the same logs with columns rescaled (×10, ×57.3), sign-flipped, delayed 100 ms and
-   with axes swapped; units, signs, latency and axis map must all be recovered.
-3. **Derived-stream test:** `th_deg`, `x_cm`, `yaw_deg` must be labelled derived, not independent.
-4. **Swap test per stream:** degrade one stream in replay (offset, scale, noise ×2, stuck) and measure how many
-   readings until it is flagged, under the front rule and under the current decaying-trust rule.
-5. **Front scale term:** do the 115 front residuals grow with distance? If so, the scale term changes the offset.
-6. **One full real explore with marks**, then From scratch: known kit end to end.
-7. **Repeatability of discovery:** the two test-motion passes in one session must give the same labels.
-8. **Wizard dry run with no person present:** every question must fall back and the run must finish.
-9. **Instruction checks:** each instruction in section 5 tried wrongly on purpose (hand in frame, wrong ring, no
-   lift) must be caught.
+1. **Blind discovery on Alvik logs:** names hidden; score correct types, questions asked and wrong labels (sets the
+   0.60 / 0.90 bars).
+2. **Disguised-sensor replay:** columns rescaled (x10, x57.3), sign-flipped, delayed 100 ms, axes swapped; units,
+   signs, latency and axis map must all be recovered.
+3. **Derived-stream test:** `th_deg`, `x_cm`, `yaw_deg` must be tagged derived.
+4. **Provenance test:** no value tagged guessed or copied is ever written into a robot or used to judge another
+   sensor (unit tests on every fix and trust path; the heading report's tests 1-3).
+5. **Error-engine replay on the heading logs:** given only the logs, the engine must attribute the large heading
+   errors to the fixes, not the gyro.
+6. **Swap test per stream:** degrade one stream in replay (offset, scale, noise x2, stuck); readings until flagged
+   under the front rule against the current decaying trust.
+7. **Front scale term:** do the 115 front residuals grow with distance?
+8. **Drive identification in the simulator:** a robot with flipped sign, 3x scale, a deadband and 200 ms latency
+   must be learned without leaving a safe radius.
+9. **No-camera discovery in the simulator:** IMU, wheels, a range sensor and the dock only; labels and scale.
+10. **ROS 2 robot in a simulator** (TurtleBot3 in Gazebo): devices, drive and sensor types found end to end.
+11. **One full real explore with marks**, then From scratch end to end.
+12. **Instruction checks:** each instruction tried wrongly on purpose (hand in frame, wrong ring) must be caught.
 
 ## Possible inaccuracies
 
-- **Run times** (section 1, Appendix C) are worked out from constants (crawl speed 4 cm/s, 8 rays of up to 105 cm,
-  62 s calib runs), not timed. Real explore has never finished, so its time is the least certain.
-- **Effort estimates are guesses**, made the same way as the audit's (not checked against a time tracker).
-- **Confidence bars 0.60 / 0.90, the 15% unit-snap window, 30 s still periods, 360 deg spins and 20 cm drives are
-  chosen.** A design of experiments (the blind replay at several values) is the sensible way to set the bars and
-  the snap window; the motion sizes could be set the same way against label accuracy.
-- **The six-motion table is predicted, not measured.** In particular the accelerometer's contact jolt is weak on
-  a light robot (the find uses stall and switches first), and the Alvik's IMU units are still "to be confirmed on
-  hardware" (`data-formats.md`).
-- **The 0.8 cm camera and 1-2 cm touch figures** come from `e02_trust.py` and the publication plan; the touch
-  figure was never measured directly (the trust docstring says about a millimetre, the analysis says 1-2 cm).
-- **The decaying-trust finding** (old evidence outweighs new after a swap) is reasoned from `new_session`'s code,
-  not seen in a session; test 4 checks it.
-- **"No sensor needs a tape measure"** assumes the robot's spec-sheet size is right and the floor is flat (audit
-  A6).
-- **The derived-stream list** is from the RAW header and the firmware's library calls; the Alvik library's own
-  fusion of `yaw_deg` was not read.
-- **Setting 3's scope** (a known driver) is an assumption pending Nick's answer.
+- **Run times** (section 1, Appendix C) are worked out from constants, not timed; explore has never finished on
+  real hardware, and the device discovery and drive identification times are guesses.
+- **Effort estimates are guesses**, made the same way as the audit's.
+- **Chosen numbers:** the 0.60 / 0.90 bars, the 15% unit-snap window, 30 s still periods, 360 deg spins, 20 cm
+  drives, the doubling step in drive identification. A design of experiments (blind replay at several values) is
+  the sensible way to set the bars and the snap window; the simulator drive tests can set the step size.
+- **The test-motion table is predicted, not measured**: the accelerometer's contact jolt is weak on a light robot,
+  and the Alvik's IMU units are still "to be confirmed on hardware" (`data-formats.md`).
+- **The discovery table** (mDNS, ONVIF, ROS 2, BLE, MAVLink) is from general knowledge of those standards, not from
+  tests on this lab's network or this Pi. Campus networks often block broadcasts.
+- **The 0.8 cm camera and 1-2 cm touch figures** come from `e02_trust.py` and the publication plan; the touch was
+  never measured directly.
+- **The dock as the absolute length** assumes its printed dimensions are accurate after printing and that the robot
+  seats the same way each time; neither is measured yet.
+- **The decaying-trust finding** is reasoned from `new_session`'s code, not seen in a session; test 6 checks it.
+- **The heading figures** (112 of 663, 100 of 112) are the heading report's, which takes the camera's direction of
+  travel as truth (about ±8 degrees sd on an 8 cm leg).
 
 ---
 
-## Appendix A. Discovery features per stream (detail)
+## Appendix A. Discovery features per stream
 
-| Feature | Computed from | Separates |
+| Feature | From | Separates |
 |---|---|---|
-| Rest mean and spread | Stage A | Gravity axis (mean about 1 g or 9.81) from other IMU axes; constant flags |
-| Distinct-value rate | Stage A | Real update rate (front sensor about 15 a second inside 50 rows) |
-| Monotonic step +1 | Stage A | Row counter (`raw_n`) |
-| Monotonic with time | Stage A | Clock (`ms`); battery (slow, falling) |
-| Correlation with the camera's turn rate | Motion 2 | Gyro yaw axis; its sign from left vs right |
-| Integral over the spin ÷ the camera's angle | Motion 2 | Gyro units (1 = deg/s, 1/57.3 = rad/s) and scale |
-| Periodic at the spin's period | Motion 2 | Range sensors; their phase gives their direction |
-| Opposite signs left and right during a spin, same sign driving | Motions 2-3 | Wheel encoders, which side each is |
-| Pulse at start and stop of a drive | Motion 3 | Accelerometer along the drive; its sign |
-| Change ÷ camera distance | Motion 3-4 | Range scale and units; wheel scale |
-| 0 to 1 step at the camera's stop | Motion 4 | Switch; which one by approach angle |
-| Step at the edge | Motion 5 | Line and cliff sensors; bottom range zone |
-| Responds only to the lift | Motion 6 | Lift flag |
-| Predicted almost exactly by other streams | All | Derived stream |
+| Rest mean and spread | Stage A | Gravity axis (about 1 g or 9.81) from other IMU axes; constant flags |
+| Distinct-value rate | Stage A | Real update rate |
+| +1 a row / rises with time | Stage A | Row counter; clock; battery (slow, falling) |
+| Correlation with the measured turn rate | Motion 2 | Gyro yaw axis and sign |
+| Integral over the spin / measured angle | Motion 2 | Gyro units and scale |
+| Periodic at the spin's period | Motion 2 | Range and sonar sensors; their phase gives direction |
+| Whole-profile rotation | Motion 2 | Lidar; scan matching gives the angle |
+| Opposite during a spin, same driving | Motions 2-3 | Wheel encoders, which side |
+| Pulse at start and stop | Motion 3 | Accelerometer along the drive |
+| Change / measured distance | Motions 3-4 | Range, sonar, beacon scale and units; wheel scale |
+| 0 to 1 at the stop | Motion 4 | Switch; which one by approach angle |
+| Step at the edge | Motion 5 | Line and cliff sensors |
+| 0 to 1 when docked | Motion 6 | Charging |
+| Predicted almost exactly by other streams | All | Derived |
 
 ## Appendix B. The front-sensor numbers this generalises
 
 From `e02_front.py`: 115 readings (2026-10-23/24), median −1.1 cm, spread 5.5 cm; per robot −3.4 / −0.9 / +1.2 cm;
 this session's own after 8 readings; tolerance 3 sd, at least 3 cm; a shift is reported beyond max(3 cm, 3
-standard errors); 200 readings kept per robot. From `e02_trust.py`: healthy sds camera 0.8 cm, wheels 0.6 cm,
-gyro 1.0 deg, front 5.0 cm; flag at k 2, clear below 1.5; evidence weight halves each session.
+standard errors). From `e02_trust.py`: healthy sds camera 0.8 cm, wheels 0.6 cm, gyro 1.0 deg, front 5.0 cm; flag
+at k 2, clear below 1.5; evidence weight halves each session.
 
 ## Appendix C. How the run times were estimated
 
-- **Fresh vs history:** connect and health 1 min; per robot a 10 s still check, a 62-65 s calib run and one find
-  (about 1-2 min); 3 robots one at a time: 8-12 min. The front sensor's 8 readings arrive during the first trials.
-- **From scratch: known kit:** connect and marks 3-5 min (user); explore per robot 8 rays of up to 105 cm at 4 cm/s
-  out and 10 cm/s back (about 40 s a ray, 5-6 min) plus its square dance (about 1 min), 3 robots one at a time
-  about 20 min; calib runs 3 min; finds at two walls per robot 6-10 min: 30-40 min with the user's 3-5 min.
-- **From scratch: discover:** stage A 1 min per robot; the six motions about 4-5 min per robot (15 min for 3);
-  then the known-kit run 30-40 min; the repeat pass about 10 min: 60-70 min, plus 2-5 min of the user's review.
+- **Fresh:** connect and health 1 min; per robot a 10 s still check, a 62-65 s calib run and one find (1-2 min);
+  3 robots one at a time: 8-12 min.
+- **From scratch:** explore per robot 8 rays of up to 105 cm at 4 cm/s out and 10 cm/s back (about 40 s a ray,
+  5-6 min) plus its square (about 1 min), 3 robots about 20 min; calib runs 3 min; finds at two walls per robot
+  6-10 min; marks and checks 3-5 min: 30-40 min.
+- **New system from scratch:** device discovery 2-3 min; drive identification 3-4 min per robot (10-12 min);
+  stage A 1 min per robot; the six motions 4-5 min per robot (12-15 min); then From scratch 30-40 min; the repeat
+  pass about 10 min; confirmations 2-5 min: 70-85 min. Rounded up to 75-90 min for retries.
