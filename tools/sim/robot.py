@@ -1216,6 +1216,24 @@ class Robot(FollowMixin, DockMixin, E02Mixin):
         cmd = raw.strip()
         verb, _, rest = cmd.partition(" ")
         verb, rest = verb.lower(), rest.strip()
+        if getattr(self, "sleep_until", 0):
+            now = self.millis()
+            if now < self.sleep_until:
+                return False                          # asleep: hears nothing
+            awake_ms = self.P("sleep_awake_s") * 1000
+            if now >= self.sleep_until + awake_ms:     # missed check-ins: the one now
+                k = int((now - self.sleep_until) // (self.sleep_min * 60000 + awake_ms))
+                self.sleep_until += k * (self.sleep_min * 60000 + awake_ms)
+                if now < self.sleep_until:
+                    return False
+            if not getattr(self, "checkin_said", False):
+                self.send("M,%s: awake for a check-in (sleeping %d min at a time)" % (self.name, self.sleep_min))
+                self.checkin_said = True
+            if now >= self.sleep_until + awake_ms:
+                self.sleep_until = now + self.sleep_min * 60000      # the check-in ended: asleep again
+                self.checkin_said = False
+                return False
+            # within the check-in: commands are heard (`wake` keeps it awake)
         self.last_rx = self.millis()
         if verb == "stop":
             if not running:
@@ -1235,6 +1253,28 @@ class Robot(FollowMixin, DockMixin, E02Mixin):
                 self.follow_command(verb, rest)
             elif verb == "fs":
                 self.send("M,not following: send run follow first")
+            return False
+        if verb == "sleep":                           # home_lab.ino `sleep` (2026-10-25a): deaf until it wakes
+            try:
+                m = int(float(rest or "10"))
+            except ValueError:
+                m = 10
+            self.send("M,%s: sleeping %d min" % (self.name, m))
+            self.sleep_until = self.millis() + m * 60000 if m > 0 else float("inf")
+            self.sleep_min = m
+            return False
+        if verb == "wake":
+            self.sleep_until = 0
+            self.checkin_said = False
+            self.send("M,%s: awake (it stays awake now)" % self.name)
+            return False
+        if verb == "border":                          # e02.h virtual border: `border clear`
+            if rest == "clear":
+                self.e_border_latched = False
+                self.e_border_ref = 1e9
+            d = self.e_border_dist(self.pose.x, self.pose.y)
+            self.send("M,%s: border %s, %s" % (self.name, "latched" if self.e_border_latched else "clear",
+                                                "not known" if d is None else "%.1f" % d))
             return False
         if verb == "clock":
             now = self.millis()

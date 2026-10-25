@@ -167,7 +167,8 @@ EDGE_TURN_CM = 9.0        # no turn on the spot closer than this to an open edge
 FIND_TIMEOUT_S = 150
 E02_TIMEOUT_S = {0: 150, 1: 400}
 BATTERY_WARN, BATTERY_STOP = 40, 15
-EXPECTED_FW = "2026-10-22b"
+EXPECTED_FW = "2026-10-25a"
+OK_FW = ("2026-10-22b", "2026-10-25a")   # 2026-10-25a adds the robot's own virtual border and `sleep`; 22b still runs
 # Backups (Nick, 2026-10-23: "build in backup plans in case our session goes poorly ... get as much data as possible
 # before stopping for a rebuild"). Chosen numbers; a DOE would not help much here (they trade data for Nick's time).
 HEADING_LONG_ROOM_CM = 30.0   # a 15 cm heading drive only this far (or more) from an open edge
@@ -333,7 +334,7 @@ class Listener:
                     b = num(rec.get("battery"))
                     if b is not None:
                         self.battery[name] = (t, int(b))
-                elif rtype in ("BUMP", "FIND", "E02", "LEG", "GYRO", "CORR") and rec:
+                elif rtype in ("BUMP", "FIND", "E02", "LEG", "GYRO", "CORR", "BORDER") and rec:
                     self.recs[rtype].append((t, name, rec))
             self.cv.notify_all()
 
@@ -1440,7 +1441,10 @@ class Runner:
             return "the camera lost it while its wheels say it moved %.0f cm" % w
         c = math.hypot(p1[0] - p0[0], p1[1] - p0[1])
         extra = ID_EXTRA_CM if self.fresh_id.pop(robot, False) else 0.0   # p0 came from a turn on the spot
-        if abs(c - w) > max(CHECK_CM, CHECK_FRAC * w) + extra:
+        # a camera or wheels found noisy (e02_trust) widen the check by as much: their disagreement is that noise,
+        # not a lost robot (2026-10-24 simulator, camera noise 4 cm: every other leg held the session)
+        kk = max(1.0, self.trust.k("camera"), self.trust.k("wheels", robot))
+        if abs(c - w) > kk * max(CHECK_CM, CHECK_FRAC * w) + extra:
             return "the camera saw it move %.0f cm, its wheels say %.0f cm" % (c, w)
         self.disagree[robot] = 0
         return ""
@@ -2807,6 +2811,14 @@ class Runner:
                              % ", ".join(missing))
         bats = self.batteries(names)
         self.start_battery_watch(names)
+        if getattr(self.a, "sleep_idle", 0):
+            # robots switched on but not in this session: to sleep (firmware 2026-10-25a), checking in every N min
+            time.sleep(1.0)
+            for n in self.link.robots():
+                if n not in names and self.listener.firmware.get(n) == "2026-10-25a":
+                    self.send(n, "sleep %d" % self.a.sleep_idle)
+                    self.say("  %s is not in this session: sent to sleep (it checks in every %d min)" % (
+                        n, self.a.sleep_idle))
         for n in names:
             b = bats.get(n)
             fw = self.listener.firmware.get(n, "?")
@@ -2817,14 +2829,15 @@ class Runner:
                 self.unavailable.add(n)
                 self.say("  %s is too flat to run: its runs are put aside." % n)
         self.st["setup"]["batteries"] = bats
-        old = [n for n in names if self.listener.firmware.get(n) not in (EXPECTED_FW, None)]
+        old = [n for n in names if self.listener.firmware.get(n) not in OK_FW + (None,)]
         if old:
             raise SystemExit("%s run%s firmware %s; this session needs %s (it refuses to drive without the edge guard "
                              "and limits blind backing). Upload firmware/home_lab to each robot (Arduino IDE: open "
                              "home_lab.ino, pick the robot's port, press Upload), then start this again." % (
                                  ", ".join(old), "s" if len(old) == 1 else "", "/".join(sorted(
-                                     {self.listener.firmware.get(n) for n in old})), EXPECTED_FW))
+                                     {self.listener.firmware.get(n) for n in old})), " or ".join(OK_FW)))
         self.safety_settings([n for n in names if n not in self.unavailable])
+        self.fw_border([n for n in names if n not in self.unavailable])
         self.say("Compass check (`calibrate`, needed once after switching on; spin and roll off: it only wiggles) ...")
         self.calibrate([n for n in names if n not in self.unavailable])
         # every robot found first by a short turn on its spot (nothing leaves its spot, so nothing is mistaken for
@@ -2953,10 +2966,12 @@ class Runner:
         seek = kind == "go" and val > 0 and self.speed_now.get(robot) == EXPLORE_CRAWL_CMS
         if seek:
             self.seek.add(robot)
+            self.fw_seek(robot, True)
         try:
             state, info = self.send_leg(robot, "%s %.2f" % (kind, val), timeout or (2.5 * est + 6.0))
         finally:
             if seek:
+                self.fw_seek(robot, False)
                 # the border's 0.6 s window still holds the crawl towards the edge for a moment after it stops
                 # (dry run 2026-10-24: the back-off away from the edge held the session): exempt a moment longer
                 self.seek.discard(robot)
@@ -2977,6 +2992,7 @@ class Runner:
         self.mark("e02 explore start")
         if self.guard is None:
             self.guard = self.make_guard()
+        self.fw_border(names)
         self.find_all(names)
         # backing off an edge it has just felt is the one blind move explore needs, and no camera fix can be sent
         # yet (its pose is unknown): the per-fix allowance is raised for explore and put back after (2026-10-23
@@ -3509,6 +3525,7 @@ class Runner:
             self.find_all(left_out)
         self.mark("e02 explore end")
         self.say("  explore done in %.1f min: the camera is calibrated and the board mapped by the robots." % rep["minutes"])
+        self.fw_border(names)                 # its own board now: the robots' own border follows it
         return rep
 
     def find_all(self, names):
@@ -3703,9 +3720,11 @@ class Runner:
             # edge guard stops it there (forwards); the virtual border lets it (Pi, 2026-10-24 19:35: Right's heading
             # drive held the session at 13 cm), and a moment after
             self.seek.add(robot)
+            self.fw_seek(robot, True)
             try:
                 p0, p1, words = self.leg(robot, ("go", 15.0 if far else 10.0))
             finally:
+                self.fw_seek(robot, False)
                 self.seek.discard(robot)
                 self.seek_end[robot] = time.time() + 0.3     # + the picture's age
             if p0 and p1 and math.hypot(p1[0] - p0[0], p1[1] - p0[1]) >= ST.MIN_HEADING_CM:
@@ -4466,6 +4485,30 @@ class Runner:
                 "set e02_l_turn %d" % (1 if b.turn_sign > 0 else -1), "set e02_leg_pause_ms %d" % (self.leg_pause_ms() if hasattr(self, "leg_pause_ms") else LEG_PAUSE_MIN_MS),
                 "set e02_transit_max_cm %d" % TRANSIT_MAX_CM] + SAFETY_CMDS
 
+    def fw_border(self, names, board=None):
+        """The robot's own virtual border (firmware 2026-10-25a): its open edges and border_cm. Sent whenever the
+        board is (re)known; robots on older firmware are skipped (they don't have it). During explore the guard's
+        board (the calibration file's) stands in until explore's own."""
+        b = board or self.board or (self.guard[1] if getattr(self, "guard", None) else None)
+        if b is None or self.listener is None:
+            return
+        ox = next((v for a_, v in b.open_edges() if a_ == "x"), -999.0)
+        oy = next((v for a_, v in b.open_edges() if a_ == "y"), -999.0)
+        xs, ys = b.firmware_sides()
+        cmds = ["set e02_xboard_side %d" % xs, "set e02_yboard_side %d" % ys, "set e02_open_x_cm %.2f" % ox,
+                "set e02_open_y_cm %.2f" % oy, "set border_cm %g" % BORDER_CM, "set border_seek 0"]
+        for n in names:
+            if self.listener.firmware.get(n) != "2026-10-25a":
+                continue
+            for c in cmds:
+                self.send(n, c)
+                time.sleep(0.03)
+
+    def fw_seek(self, robot, on):
+        """border_seek for the robot's next leg (a crawl looking for the edge on purpose)."""
+        if self.listener is not None and self.listener.firmware.get(robot) == "2026-10-25a":
+            self.send(robot, "set border_seek %d" % (1 if on else 0))
+
     def find_check(self):
         """One `run find` per robot before the session: does it work, and where does the camera see each
         robot touching each board (a second measure of the board lines)."""
@@ -4765,9 +4808,11 @@ class Runner:
         (dry run 2026-10-23: it stopped the sidestep running beside an open edge; the edge guard is the protection,
         as in explore)."""
         self.edge_touch = robot
+        self.fw_seek(robot, True)
         try:
             return self._edge_find(robot, order)
         finally:
+            self.fw_seek(robot, False)
             self.edge_touch = None
 
     def _edge_find(self, robot, order):
@@ -5175,9 +5220,24 @@ class Runner:
         brought back. The firmware's edge guard and front stop are the first line; this is the second."""
         last = {}
         last_lost = {}
+        seen_border = time.time()
         while not self.watch_quit.is_set():
             time.sleep(0.1)
             try:
+                # a robot's own virtual border (firmware 2026-10-25a): it has stopped itself; Nick decides
+                if self.listener is not None and not self.hold.is_set():
+                    with self.listener.cv:
+                        new_b = [(t_, n_, rec_) for t_, n_, rec_ in self.listener.recs["BORDER"] if t_ > seen_border]
+                    for t_, n_, rec_ in new_b:
+                        seen_border = max(seen_border, t_)
+                        if n_ in self.held_out:
+                            continue
+                        self.watchdog_fired = True
+                        self.watch_stop = "virtual border (the robot's own)"
+                        ans = self.hold_for_nick(n_, "border", "it stopped itself %s cm from an open edge (its own "
+                                                 "border check)" % rec_.get("dist_cm", "?"))
+                        if ans in ("c", "a"):
+                            self.send(n_, "border clear")
                 robot = self.tracker.active if self.tracker is not None else None
                 if not robot or self.hold.is_set() or robot in self.held_out:
                     continue
@@ -5513,6 +5573,7 @@ class Runner:
             for c in cmds[3:]:
                 self.send(robot, c)
                 time.sleep(0.05)
+        self.fw_border([robot])
         r["corr_source"] = source
         time.sleep(0.3)
         # 3. the route
@@ -6505,6 +6566,8 @@ def main(argv=None):
     ap.add_argument("--degrade", default="", help="make a sensor bad on purpose, in software (e02_degrade.py), e.g. "
                     "camera:noise=3 or wheels:jitter=0.05")
     ap.add_argument("--trust-file", default=None, help="the learned sensor trust (default logs/sensor_trust.json)")
+    ap.add_argument("--sleep-idle", type=int, default=0, help="robots switched on but not in this session go to sleep, "
+                    "checking in every this many minutes (firmware 2026-10-25a; 0: off)")
     ap.add_argument("--battery-watch-s", type=float, default=300,
                     help="every this many seconds, log every switched-on robot's battery to battery.csv, driving or "
                          "idle (0: off; on by default, Nick 2026-10-24: weeks of it decide the drain questions)")

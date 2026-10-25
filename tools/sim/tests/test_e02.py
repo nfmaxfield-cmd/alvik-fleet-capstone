@@ -909,3 +909,68 @@ class DocsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VirtualBorderAndSleep(unittest.TestCase):
+    """Firmware 2026-10-25a (Nick, 2026-10-24): the robot's own virtual border (e02.h) and `sleep` / `wake`. The
+    boards here are along y = 0 and x = 0 (sides 0), so the open edges are x = 122 and y = 122."""
+
+    def border_bot(self, x, y, th, **params):
+        r = make(seed=5, border_cm=15, e02_open_x_cm=122, e02_open_y_cm=122, e02_back_max_cm=40, **params)
+        place(r, x, y, th)
+        r.handle_command("fix %.1f %.1f %.1f 1.0" % (x, y, th), False)       # its pose is known
+        return r
+
+    def test_forward_into_the_border_stops_and_latches(self):
+        r = self.border_bot(100.0, 60.0, 0.0)
+        r.handle_command("go 20 1", False)
+        last = records(r, "LEG")[-1]
+        self.assertEqual(last["result"], "failed")
+        self.assertIn("virtual border", last["info"])
+        self.assertLess(r.x, 109.0)                                           # 122 - 15, plus braking
+        b = records(r, "BORDER")
+        self.assertEqual(len(b), 1)
+        r.handle_command("go 5 2", False)                                     # towards: refused while latched
+        self.assertEqual(records(r, "LEG")[-1]["result"], "refused")
+        r.handle_command("turn 180 3", False)                                 # turning: always allowed
+        self.assertEqual(records(r, "LEG")[-1]["result"], "done")
+        r.handle_command("go 10 4", False)                                    # away (it faces in now): allowed
+        self.assertEqual(records(r, "LEG")[-1]["result"], "done")
+        r.handle_command("border clear", False)
+        self.assertFalse(r.e_border_latched)
+
+    def test_backing_blind_towards_the_edge_stops(self):
+        # the Pi plan's stage 3: a robot backing towards the open edge it can't see
+        r = self.border_bot(100.0, 60.0, 180.0)
+        r.handle_command("go -30 1", False)
+        self.assertIn("virtual border", records(r, "LEG")[-1]["info"])
+        self.assertLess(r.x, 109.0)
+
+    def test_a_crawl_looking_for_the_edge_passes(self):
+        r = self.border_bot(100.0, 60.0, 0.0, border_seek=1)
+        r.handle_command("go 15 1", False)
+        self.assertEqual(records(r, "LEG")[-1]["result"], "done")
+        self.assertGreater(r.x, 112.0)
+        self.assertEqual(records(r, "BORDER"), [])
+
+    def test_off_without_a_pose_or_without_border_cm(self):
+        r = make(seed=5, border_cm=0, e02_open_x_cm=122, e02_open_y_cm=122)
+        place(r, 100.0, 60.0, 0.0)
+        r.handle_command("fix 100 60 0 1.0", False)
+        r.handle_command("go 15 1", False)
+        self.assertEqual(records(r, "LEG")[-1]["result"], "done")
+
+    def test_sleep_deaf_then_check_in_then_wake(self):
+        r = make(seed=6)
+        r.handle_command("sleep 1", False)
+        n = len(r.lines)
+        r.handle_command("status", False)
+        self.assertEqual(len(r.lines), n)                                     # asleep: hears nothing
+        r.idle_until(r.ms / 1000.0 + 61.0)
+        r.handle_command("status", False)
+        self.assertTrue(any("check-in" in line for _, line in r.lines[n:]))
+        r.handle_command("wake", False)
+        self.assertTrue(any("stays awake" in line for _, line in r.lines[n:]))
+        n = len(r.lines)
+        r.handle_command("border", False)
+        self.assertGreater(len(r.lines), n)

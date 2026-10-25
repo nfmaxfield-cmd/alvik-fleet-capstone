@@ -24,6 +24,9 @@
 #include <cctype>
 #include <strings.h>
 unsigned long millis(); void delay(unsigned long); uint32_t esp_random();
+#define RTC_DATA_ATTR
+enum { ESP_SLEEP_WAKEUP_UNDEFINED = 0, ESP_SLEEP_WAKEUP_TIMER = 4 };
+int esp_sleep_get_wakeup_cause(); int esp_sleep_enable_timer_wakeup(uint64_t us); void esp_deep_sleep_start();
 #define constrain(amt,low,high) ((amt)<(low)?(low):((amt)>(high)?(high):(amt)))
 class String { std::string s; public:
  String(const char* c=""):s(c){} String(const std::string& x):s(x){}

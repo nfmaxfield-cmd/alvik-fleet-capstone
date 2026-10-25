@@ -71,6 +71,60 @@ namespace e02 {
 const float NONE = -1.0f;
 const float UNSET = -999.0f;
 
+// VIRTUAL BORDER (firmware 2026-10-25a; Nick, 2026-10-24: the robots' own check, under the laptop's camera border).
+// Once the robot knows where it is (pose::known: a find or a camera fix), every motion is checked against the open
+// edges the laptop sent (e02_open_x_cm: the open edge along x = that, e02_open_y_cm: along y = that; the inside is
+// away from the boards, by e02_xboard_side / e02_yboard_side). Within border_cm of one and moving towards it (its
+// distance down by BORDER_TOWARDS_CM since it was nearest... the reference resets whenever it moves away) the motion
+// stops, a BORDER record goes to the laptop, and the border latches: no go leg towards that edge (by its heading)
+// until the laptop sends `border clear` (after Nick's answer). Turns and moves away are always allowed. A crawl
+// that is looking for the edge on purpose (explore, the edge find) has border_seek 1 set by the laptop for its
+// leg: forwards then passes (the edge guard stops it). border_cm 0 = off (the default: the laptop turns it on).
+const float BORDER_TOWARDS_CM = 0.5f;   // chosen: how much nearer counts as moving towards (not wheel jitter)
+bool borderLatched = false;
+float borderRef = 1e9f;                 // its distance when it was last moving away or still
+
+float borderDist(float px, float py) {
+  if (!pose::known || P("border_cm") <= 0) return UNSET;
+  float ox = P("e02_open_x_cm"), oy = P("e02_open_y_cm");
+  float d = 1e9f;
+  if (ox > UNSET + 1) d = fminf(d, (px - ox) * (P("e02_yboard_side") > 0 ? 1.0f : -1.0f));
+  if (oy > UNSET + 1) d = fminf(d, (py - oy) * (P("e02_xboard_side") > 0 ? 1.0f : -1.0f));
+  return d >= 1e8f ? UNSET : d;
+}
+
+void borderRecord(float d) {
+  net::sendLine("H,BORDER,run,ms,x_cm,y_cm,th_deg,dist_cm,border_cm");
+  net::logf("D,BORDER,%s,%lu,%.2f,%.2f,%.2f,%.2f,%.1f", gRunId.length() ? gRunId.c_str() : "-", millis(), pose::x,
+            pose::y, pose::th(), d, P("border_cm"));
+}
+
+void borderTick() {
+  float d = borderDist(pose::x, pose::y);
+  if (d == UNSET) { borderRef = 1e9f; return; }
+  if (d > borderRef) borderRef = d;                     // moving away (or a fix moved it): the new reference
+  if (d >= P("border_cm") || borderRef - d < BORDER_TOWARDS_CM) return;
+  float sl, sr;
+  alvik.get_wheels_speed(sl, sr);
+  bool forward = sl + sr > 0;
+  if (P("border_seek") > 0 && forward) return;          // looking for the edge on purpose: the edge guard's job
+  if (gAbortReason.length()) return;
+  gAbortReason = "virtual border";
+  alvik.brake();
+  if (!borderLatched) borderRecord(d);
+  borderLatched = true;
+  borderRef = d;
+}
+
+// would a go leg of arg cm (along its heading) bring it nearer an open edge while it is inside the border?
+bool borderTowards(float arg) {
+  float d0 = borderDist(pose::x, pose::y);
+  if (d0 == UNSET || d0 >= P("border_cm")) return false;
+  float h = pose::th() * (float)M_PI / 180.0f;
+  float d1 = borderDist(pose::x + arg * cosf(h), pose::y + arg * sinf(h));
+  return d1 != UNSET && d1 < d0 - 0.1f;
+}
+
 bool active = false;          // a find or e02 run is going (fix / go / turn / mark are for it)
 bool finding = false;         // the find: no fixes now (the bumps are the fix)
 bool mode1 = false;           // e02 run, camera-steered
@@ -114,6 +168,7 @@ void tickHook() {
   if (fabsf(sl) + fabsf(sr) > 4.0f || fabsf(ds) > 0.05f) lastMoveMs = millis();   // turning or rolling (not noise)
   if (travelCap > 0 && travelAbs > travelCap && !gAbortReason.length())
     gAbortReason = "drove further than the route allows";
+  borderTick();
 }
 
 // Tracking on for a run: keep the pose if one is known (a find, a fix), else start one.
@@ -757,6 +812,10 @@ void legCommand(const String& verb, const String& rest, bool running) {
   }
   if (kind == 't' && fabsf(arg) > 180.0f) { legRecord(id, kind, arg, "refused", "turns are -180 to 180 deg"); return; }
   if (kind == 'g' && edgeOff()[0]) { legRecord(id, kind, arg, "refused", edgeOff()); return; }
+  if (kind == 'g' && borderLatched && borderTowards(arg) && !(P("border_seek") > 0 && arg > 0)) {
+    legRecord(id, kind, arg, "refused", "virtual border: towards the open edge (the laptop clears it)");
+    return;
+  }
   if (kind == 'g' && arg < 0 && backSince - arg > P("e02_back_max_cm") + 0.05f) {
     legRecord(id, kind, arg, "refused", "backing blind: more than e02_back_max_cm since the last camera fix");
     return;

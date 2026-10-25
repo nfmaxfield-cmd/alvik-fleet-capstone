@@ -24,6 +24,9 @@
 */
 
 #include "Arduino_Alvik.h"
+#if __has_include("esp_sleep.h")
+#include "esp_sleep.h"     // deep sleep (the `sleep` command)
+#endif
 #include "params.h"
 #include "net.h"
 #include "motion.h"
@@ -38,9 +41,31 @@
 Arduino_Alvik alvik;
 
 // Bump this whenever the firmware changes, so every logged run says which code it ran.
-#define FW_VERSION "2026-10-22b"
+#define FW_VERSION "2026-10-25a"
 
 uint16_t gBootId = 0;   // random each power-on; starts every run id
+
+// SLEEP (firmware 2026-10-25a; Nick, 2026-10-24: robots left switched on drain about 14% an hour idle).
+// `sleep <minutes>`: motors off, lights off, the WiFi chip in deep sleep for that long. Then it wakes (a fresh
+// start), joins the WiFi and checks in ("M,<name>: awake for a check-in ..."); if nothing sends `wake` within
+// sleep_awake_s it sleeps again for the same time. While asleep it can't hear anything. `sleep 0`: until the
+// reset button or the power switch. The minutes survive the deep sleep in the chip's RTC memory.
+RTC_DATA_ATTR uint32_t gSleepMin = 0;
+unsigned long gCheckinUntil = 0;   // millis() when this check-in ends (0: not a check-in)
+
+void goToSleep(uint32_t minutes) {
+  alvik.brake();
+  alvik.left_led.set_color(0, 0, 0);
+  alvik.right_led.set_color(0, 0, 0);
+  alvik.set_illuminator(false);
+  gSleepMin = minutes;
+  if (minutes > 0) net::logf("M,%s: sleeping %lu min (it checks in for %d s each time it wakes; `wake` then keeps "
+                             "it awake)", net::name, (unsigned long)minutes, (int)P("sleep_awake_s"));
+  else net::logf("M,%s: sleeping until its reset button or power switch", net::name);
+  delay(300);                      // the message goes out first
+  if (minutes > 0) esp_sleep_enable_timer_wakeup((uint64_t)minutes * 60ULL * 1000000ULL);
+  esp_deep_sleep_start();
+}
 
 // The buttons cycle through the first N_EXP. "follow" (index 7) needs the
 // laptop, so it is started with `run follow` only; "calib" (index 8) is the
@@ -95,6 +120,7 @@ void printHelp() {
   net::sendLine("M,commands: run stream|turn|lap|grid|demo|straight|survey|follow|dock|touch|posts|gyro|find|e02  stop  corr [reset|tape|save <name> <value>]  calibrate  clock  name <Left|Center|Right>  set <name> <value>  get <name>  params  route <SLRE...>  status  identify  lights  help");
   net::sendLine("M,during run follow: fs <id> <T|D|A|W> ...  fix <t_ms> <x> <y> <th> <sigma>  fpose <x> <y> <th>  hold [id]  halt  (tools/fleet/run_plan.py sends these)");
   net::sendLine("M,E02: fix <x> <y> <heading|-> <t_wall> (camera fix: idle or K replaces, KC blends e02_fix_k)  go <cm> [id]  turn <deg> [id] (idle, or in run e02 with e02_mode 1)  mark|e02 start|far|end [id]");
+  net::sendLine("M,sleep <min> (deep sleep, checks in every <min>; 0 = until reset)  wake  border [clear] (the virtual border)");
   net::sendLine("M,before calibrate: set calib_dir_limits <deg> <cm> ... caps its roll per direction (deg from where it faces, left +; next calibration only; off = none)");
 }
 
@@ -194,6 +220,26 @@ bool handleCommand(const String& raw, bool running) {
   if (verb == "params") {
     if (running) { net::sendLine("M,busy: send stop first"); return false; }   // blocks ~135 ms
     printParams();
+    return false;
+  }
+  if (verb == "sleep") {
+    if (running) { net::sendLine("M,busy: send stop first"); return false; }
+    long m = rest.length() ? rest.toInt() : 10;
+    goToSleep(m > 0 ? (uint32_t)m : 0);
+    return false;
+  }
+  if (verb == "wake") {
+    gSleepMin = 0;
+    gCheckinUntil = 0;
+    net::logf("M,%s: awake (it stays awake now)", net::name);
+    return false;
+  }
+  if (verb == "border") {
+    // `border clear`: the laptop's answer after a virtual border stop (e02.h); `border`: where it stands
+    if (rest == "clear") { e02::borderLatched = false; e02::borderRef = 1e9f; }
+    float d = e02::borderDist(pose::x, pose::y);
+    net::logf("M,%s: border %s, %s", net::name, e02::borderLatched ? "latched" : "clear",
+              d == e02::UNSET ? "not known" : String(d, 1).c_str());
     return false;
   }
   if (verb == "clock") {
@@ -652,6 +698,12 @@ void setup() {
     net::sendLine("M,WARNING: robot firmware doesn't match the Alvik library; run the library's firmware updater example. Color readings may be off.");
   }
   net::logf("M,home_lab %s ready, battery %d%%", FW_VERSION, alvik.get_battery_charge());
+  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER && gSleepMin > 0) {
+    // woken by its sleep timer: a check-in (the laptop may send `wake`; else back to sleep)
+    gCheckinUntil = millis() + (unsigned long)(P("sleep_awake_s") * 1000);
+    net::logf("M,%s: awake for a check-in (sleeping %lu min at a time; send `wake` within %d s to keep it awake), "
+              "battery %d%%", net::name, (unsigned long)gSleepMin, (int)P("sleep_awake_s"), alvik.get_battery_charge());
+  }
   corr::load();       // this robot's saved corrections (gyro_scale, gyro_drift_dps, wheel_scale)
   printHelp();
   showSelection(false);
@@ -670,6 +722,7 @@ void otaFinished(bool ok) {
 }
 
 void loop() {
+  if (gCheckinUntil && (long)(millis() - gCheckinUntil) >= 0) { gCheckinUntil = 0; goToSleep(gSleepMin); }
   if (gLedUntil && (long)(millis() - gLedUntil) >= 0) { gLedUntil = 0; showSelection(false); }   // `led` ends
   yawTrack();         // keeps the corrected heading's turn count while idle (motion.h)
   net::keepTrying();  // joins WiFi later if it failed at startup

@@ -87,6 +87,8 @@ class E02Mixin:
         self.e_bumps = []                      # simulation only: every Bump (with the true pose at detection)
         self.e_finds = []                      # simulation only: (FindRec, true pose at the end)
         self.e_routes = []                     # simulation only: dict per e02 run with the true poses at the marks
+        self.e_border_latched = False          # e02.h virtual border (firmware 2026-10-25a)
+        self.e_border_ref = 1e9
 
     # ------------------------------------------------------------------ tracking
     def e_path_push(self):
@@ -117,6 +119,52 @@ class E02Mixin:
             self.e_last_move = self.millis()
         if self.e_cap > 0 and self.e_travel > self.e_cap and not self.abort_reason:
             self.abort_reason = "drove further than the route allows"
+        self.e_border_tick()
+
+    # ------------------------------------------------------------------ virtual border (e02.h, 2026-10-25a)
+    def e_border_dist(self, px, py):
+        if not self.pose.known or self.P("border_cm") <= 0:
+            return None
+        ox, oy = self.P("e02_open_x_cm"), self.P("e02_open_y_cm")
+        d = 1e9
+        if ox > -998:
+            d = min(d, (px - ox) * (1.0 if self.P("e02_yboard_side") > 0 else -1.0))
+        if oy > -998:
+            d = min(d, (py - oy) * (1.0 if self.P("e02_xboard_side") > 0 else -1.0))
+        return None if d >= 1e8 else d
+
+    def e_border_tick(self):
+        p = self.pose
+        d = self.e_border_dist(p.x, p.y)
+        if d is None:
+            self.e_border_ref = 1e9
+            return
+        if d > self.e_border_ref:
+            self.e_border_ref = d
+        if d >= self.P("border_cm") or self.e_border_ref - d < 0.5:
+            return
+        sl, sr = self.wheels_speed()
+        if self.P("border_seek") > 0 and sl + sr > 0:
+            return
+        if self.abort_reason:
+            return
+        self.abort_reason = "virtual border"
+        self.brake()
+        if not self.e_border_latched:
+            self.send("H,BORDER,run,ms,x_cm,y_cm,th_deg,dist_cm,border_cm")
+            self.send("D,BORDER,%s,%d,%.2f,%.2f,%.2f,%.2f,%.1f" % (self.run_id or "-", self.millis(), p.x, p.y, p.th(), d,
+                                                              self.P("border_cm")))
+        self.e_border_latched = True
+        self.e_border_ref = d
+
+    def e_border_towards(self, arg):
+        p = self.pose
+        d0 = self.e_border_dist(p.x, p.y)
+        if d0 is None or d0 >= self.P("border_cm"):
+            return False
+        h = math.radians(p.th())
+        d1 = self.e_border_dist(p.x + arg * math.cos(h), p.y + arg * math.sin(h))
+        return d1 is not None and d1 < d0 - 0.1
 
     def e_begin(self):
         if self.pose.known:
@@ -680,6 +728,10 @@ class E02Mixin:
             return
         if kind == "g" and self.e_edge_off():
             self.leg_record(lid, kind, arg, "refused", self.e_edge_off())
+            return
+        if kind == "g" and self.e_border_latched and self.e_border_towards(arg) and \
+                not (self.P("border_seek") > 0 and arg > 0):
+            self.leg_record(lid, kind, arg, "refused", "virtual border: towards the open edge (the laptop clears it)")
             return
         if kind == "g" and arg < 0 and self.e_back_since - arg > self.P("e02_back_max_cm") + 0.05:
             self.leg_record(lid, kind, arg, "refused", "backing blind: more than e02_back_max_cm since the last camera fix")
