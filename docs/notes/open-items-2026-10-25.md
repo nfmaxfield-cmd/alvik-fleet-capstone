@@ -24,3 +24,7 @@ Nick: "For now I just want to get the robots running ... we can circle back to t
 - Simulator wheels 7.5% slower than commanded (to match real): do after the trust fix's runs.
 - Flash firmware 2026-10-25b on all robots (needed for the robot's own border, sleep, back switches).
 - GitHub token: laptop setup (new token or regenerate + Pi).
+
+## Added after 15:11 (discovery threshold result)
+- Rule in code: accept at 0.90, motion labels held until 60 s of wheel motion (held-out: 1 wrong in 1,374; 11.5 questions/robot).
+- Ask Nick: is 1 wrong per 100 accepted the right limit? Calibration run as a runner stage (square drive, one-wheel bump, edge approach) hands-free, or with a 5 s hand nose-tilt + lift? Edge guard or printed black strip for the edge approach? Print the bump strip (STL)?
