@@ -111,16 +111,23 @@ What it shows:
   open edge: 2 failed runs, 3 border holds. Fix: before a find, a robot's own heading counts against the runner's
   only if it reported it in the last 15 s; otherwise the runner's measured heading goes with the fix
   (`find_heading_ok`, `FIND_OWN_FRESH_S`; test added). Parking and other moves already send a measured heading
-  (heading fix 2). DRYRUN2
+  (heading fix 2).
+
+**Second dry run, with that fix** (2026-10-25 12:19, same flags; this seed's gyros drift 0.14 / 0.25 / -0.09 °/s,
+uncorrected): 21 of 21 runs done, 0 holds, 0 failed. The fresh-heading rule chose the runner's measured heading
+16 times. End error medians U / C / K / KC: 12.0 / 1.25 / 0.17 / 1.20 cm (the same as before within noise).
+Pauses: 5, correction median 6.3 cm. Left started from the first run's history (dry-run file, 31 corrections);
+Center's own model rose to 2.8 cm and Right's to 2.3 cm, without a "changed" line (30 corrections were not enough to
+pass the 95 % test). 85 % of 93 corrections fell inside 2.45 sd.
 
 **Fleet dry run** (run_plan.py against fleet_sim.py, demo map, back attachment): all 6 board visits backed in and
 touched (creep 4.1-4.2 cm, as planned: 3 cm lead + 1 cm gap), back face 1 cm from the board within 0.13 cm, sideways
 within 0.22 cm, heading within 0.5°; nearest two robots 6.0 cm; done in 79 s against 86 s planned.
 
-**Tests.** `pytest tools/experiment/tests tools/sim/tests`: TESTCOUNT. New: tests/test_e02_backing_unc.py (19:
+**Tests.** `pytest tools/experiment/tests tools/sim/tests`: 434 passed, 17 skipped (was 414). New: tests/test_e02_backing_unc.py (20:
 the learner, its wiring, heading fixes 1-3 with a simulator robot that reproduces the placeholder (a 20 cm drive
 ended 15+ cm from its belief with the old fix, under 1 cm with the new one), the hold's words, the four ladder
-outcomes, the look's room check, the live page). `pytest tools/fleet/tests`: 36 passed, 2 skipped (the two 90 s dry
+outcomes, the look's room check, the fresh-heading rule, the live page). `pytest tools/fleet/tests`: 36 passed, 2 skipped (the two 90 s dry
 runs; both pass with FLEET_DRYRUN=1). New: 6 back-attachment tests. Firmware syntax check (tools/fwcheck): clean
 (comment only).
 
@@ -129,7 +136,7 @@ runs; both pass with FLEET_DRYRUN=1). New: 6 back-attachment tests. Firmware syn
 Every intentional touch of a board or dock now backs in when the back attachment is fitted; what stays forward is
 what looks for an unknown boundary or never touches. The cap stays at 2 cm because the look is the caster's real
 protection. A find that finds no board now sorts itself out before calling Nick. The uncertainty model needs no
-simulator: every session's own camera fixes set it. CONCLUSION_DRYRUN
+simulator: every session's own camera fixes set it. In the simulator the end errors are unchanged, each robot moved to its own model at its 30th correction, and the one new failure (an uncorrected gyro creeping while parked, unmasked by heading fix 1) is fixed and checked by a second run.
 
 ## What's next
 

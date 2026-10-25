@@ -224,6 +224,22 @@ def stretch_rms_against(obs, fitted, prior):
     return rc, (t["rms_deg"] if t else None)
 
 
+def run_scales(obs):
+    """[(run, wheel scale, wheels' length cm)] per run: the camera's length over the wheels' length summed over that
+    run's stretches (two or more), for e02_trust's runs check (2026-10-25: a wheel that counts wrongly by a different
+    amount every run shows as runs that disagree, with no other robot needed)."""
+    per = {}
+    for o in obs:
+        if o.get("cam_len") and o.get("bel_len"):
+            per.setdefault(o.get("run"), []).append((o["cam_len"], o["bel_len"]))
+    out = []
+    for run, lens in per.items():
+        b = sum(x[1] for x in lens)
+        if len(lens) >= 2 and b > 0:
+            out.append((run, sum(x[0] for x in lens) / b, b))
+    return out
+
+
 def trust_path(a):
     """Where the learned sensor trust lives (kept between sessions, never in git): logs/sensor_trust.json; dry runs
     and degraded tests keep their own, so they never touch the real robots' trust."""
@@ -1261,10 +1277,11 @@ class Runner:
         for s_, r_, what, kk in self.trust.update_flags(names):
             who = "the camera" if r_ == "*" else "%s's %s" % (r_, {"front": "front sensor"}.get(s_, s_))
             if what == "degraded":
-                self.say("!!! SENSOR: %s looks bad: %.1f x its healthy noise (e02_trust). It is trusted less from "
-                         "now on." % (who, kk))
+                rsn = self.trust.reason(s_, r_) if hasattr(self.trust, "reason") else ""
+                self.say("!!! SENSOR: %s looks bad: %.1f x its own baseline (e02_trust%s). It is trusted less from "
+                         "now on." % (who, kk, (": " + rsn) if rsn else ""))
             else:
-                self.say("  SENSOR: %s looks healthy again (%.1f x its healthy noise)." % (who, kk))
+                self.say("  SENSOR: %s looks healthy again (%.1f x its own baseline)." % (who, kk))
             self.mark("e02 sensor %s %s %s" % (s_, r_, what))
             if s_ == "camera":
                 self.say("  Working area: the virtual border is now %.0f cm inside the open edges%s." % (
@@ -1458,6 +1475,8 @@ class Runner:
                         self.say("!!! FRONT SENSOR: " + ch_ + ".")
                         self.mark("e02 front sensor changed %s" % robot)
                         self.st.setdefault("front_changes", []).append([round(time.time(), 1), robot, ch_])
+                        if hasattr(self.trust, "mark_changed"):
+                            self.trust.mark_changed("front", robot, ch_)    # a clear change flags it (Nick, 10-25)
                 self.trust.front_vs_map(robot, miss)      # after the expected offset: a bias counts too
                 self.trust_note(save=False)
             if abs(miss) > tol:
@@ -1679,7 +1698,9 @@ class Runner:
         extra = ID_EXTRA_CM if self.fresh_id.pop(robot, False) else 0.0   # p0 came from a turn on the spot
         # a camera or wheels found noisy (e02_trust) widen the check by as much: their disagreement is that noise,
         # not a lost robot (2026-10-24 simulator, camera noise 4 cm: every other leg held the session)
-        kk = max(1.0, self.trust.k("camera"), self.trust.k("wheels", robot))
+        # (the wheels' k is against the robot's own baseline since 2026-10-25: it widens the check only while flagged)
+        kk = max(1.0, self.trust.k("camera"),
+                 self.trust.k("wheels", robot) if self.trust.bad("wheels", robot) else 1.0)
         if abs(c - w) > kk * max(CHECK_CM, CHECK_FRAC * w) + extra:
             return "the camera saw it move %.0f cm, its wheels say %.0f cm" % (c, w)
         self.disagree[robot] = 0
@@ -5266,10 +5287,72 @@ class Runner:
             smp = self.camerr_add(ax, ay, cam, "find", robot)
             if smp:
                 out["camera_error_cm"] = round(math.hypot(smp["dx"], smp["dy"]), 2)
+            if not rev and not getattr(self.a, "no_face_reading", False):
+                out["face_resid_cm"] = self.face_reading(robot, fr)
         out["bumps"] = len(bumps)
         out["bump_results"] = [rec.get("result") for _, rec in bumps]
         self.mark("e02 %s %s find end %s" % (order, robot, end["result"]))
         return out
+
+    FACE_TARGET = 8           # chosen: face readings per robot per session (= e02_front SESSION_MIN, so a session's own
+                              # offset is known from them alone; about every nose-first find in a 25-min session; DOE:
+                              # how soon a shifted sensor is caught at 4 / 8 / 16, in the simulator with front:bias)
+
+    def face_reading(self, robot, fr):
+        """A deliberate front-sensor reading against a known distance (2026-10-25: the front sensor's evidence was slow,
+        Left had ~6 square-on readings a session). Right after a nose-first find the robot stands square to the y
+        board, its pose known from touching both boards (no camera): a 2 deg turn leg reports the front sensor
+        (firmware 2026-10-22b), compared with the distance to the board by that pose. Idle leg with no camera fix
+        first (begin_moves would overwrite the exact pose with the camera's). Up to FACE_TARGET a session. Returns the
+        residual (reading - distance, cm) or None."""
+        st = self.st
+        done = st.setdefault("face_readings", {}).get(robot, 0)
+        if done >= self.FACE_TARGET or self.board is None or robot in self.moves:
+            return None
+        ax, ay, ath = num(fr[1].get("after_x")), num(fr[1].get("after_y")), num(fr[1].get("after_th"))
+        if None in (ax, ay, ath):
+            return None
+        self.moves[robot] = dict(run="-", why="its front sensor at the board")
+        try:
+            f = self.front_now(robot)
+        finally:
+            self.moves.pop(robot, None)
+        hd = ST.wrap180(ath + 2.0)
+        self.heads[robot] = [hd, True]
+        if f is None:
+            return None
+        if self.degrade.spec.get("front"):
+            f = self.degrade.front(f, robot)              # --degrade: a bad front sensor
+        ahead = self.ahead_cm(robot, (ax, ay), hd)
+        if ahead is None or "board" not in str(ahead[1]) or ahead[0] > FRONT_CHECK_RANGE_CM or not self.square_on(ahead):
+            return None
+        st["face_readings"][robot] = done + 1
+        off, _tol = self.front_limits(robot)
+        resid = f - ahead[0]
+        path = os.path.join(self.dir, "front_checks.csv")
+        new = not os.path.exists(path)
+        with open(path, "a", newline="") as fh:
+            w = csv.writer(fh)
+            if new:
+                w.writerow(["t", "robot", "leg", "value", "x_cm", "y_cm", "heading_deg", "heading_measured",
+                            "front_cm", "expected_cm", "what"])
+            w.writerow([round(time.time(), 2), robot, "face", 2.0, round(ax, 1), round(ay, 1), round(hd, 1), 1, f,
+                        round(ahead[0], 1), ahead[1]])
+        fm = getattr(self, "front", None)
+        if fm is not None:
+            ch_ = fm.add(robot, resid)
+            if ch_:
+                self.say("!!! FRONT SENSOR: " + ch_ + ".")
+                self.mark("e02 front sensor changed %s" % robot)
+                st.setdefault("front_changes", []).append([round(time.time(), 1), robot, ch_])
+                if hasattr(self.trust, "mark_changed"):
+                    self.trust.mark_changed("front", robot, ch_)
+        if hasattr(self.trust, "front_face"):
+            self.trust.front_face(robot, resid - off)
+            self.trust_note(save=False)
+        self.say("    %s: front sensor %.1f cm at %s, %.1f cm by the board touches (face reading %d)" % (
+            robot, f, ahead[1], ahead[0], done + 1), quiet=True)
+        return round(resid, 2)
 
     def edge_leg(self, robot, kind, val, timeout=None):
         """One idle leg for the edge find. Returns (state, info, rec): rec the LEG record (its pose: x_cm, y_cm,
@@ -6056,6 +6139,10 @@ class Runner:
         if obs:
             rc, rd = stretch_rms_against(obs, res.get("fitted") or {}, pr)
             self.trust.stretch_fit(robot, rc, rd, len(obs))
+            # and each run's wheel scale on its own (e02_trust runs check: the robot against itself, run to run)
+            if hasattr(self.trust, "run_scale"):
+                for _run, sc_, len_ in run_scales(obs):
+                    self.trust.run_scale(robot, sc_, len_)
             self.trust_note()
         entry = dict(t=round(time.time(), 1), order=run_row["order"], n_new=len(obs), n_total=len(data), gate_cm=round(gate, 2),
                      n_stretches=len(stretches), accepted=res["accepted"], fitted=res["fitted"], reasons=res["reasons"],
@@ -7219,6 +7306,8 @@ def main(argv=None):
     ap.add_argument("--no-front-steer", action="store_true",
                     help="the front sensor is only logged, never makes the runner find a robot again (if its first "
                          "real readings turn out noisy)")
+    ap.add_argument("--no-face-reading", action="store_true",
+                    help="no front-sensor reading right after a nose-first find (face_reading; on by default)")
     ap.add_argument("--no-front-learn", action="store_true",
                     help="use the fixed front-sensor offset and tolerance (FRONT_OFFSET_CM / FRONT_TOL_CM) instead of "
                          "each robot's, learned every session (e02_front.py)")
