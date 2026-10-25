@@ -1003,6 +1003,10 @@ class Runner:
     # the robot's own gyro heading (2026-10-24 analysis: Center's finds 13-24 cm off came from a camera heading set 2 s
     # before the find, up to 19 deg wrong; DOE: the find's heading correction against this limit)
 
+    FIND_OWN_FRESH_S = 15.0       # chosen: its own heading counts against the runner's only if it reported it this
+    # recently (a parked robot's gyro creeps unseen). DOE note: the creep of each robot standing still (the naming
+    # check's gyro run) x the time robots stand parked between finds says how long an own heading stays good
+
     def find_heading_ok(self, robot):
         """(heading, position_only) for the fix before a find: the runner's heading, only if it was measured and the
         robot's own gyro heading agrees within FIND_HEAD_AGREE_DEG; otherwise position only (the robot keeps its own
@@ -1011,13 +1015,21 @@ class Runner:
         own = self.own_pose(robot)
         if own is None or own[2] is None:
             return h[0], False
+        # its own heading as last reported (its last leg or find): while it stood still since, its gyro may have
+        # crept unseen (2026-10-25 dry run: Right's uncorrected 0.57 deg/s drift took it 156 deg off while parked,
+        # once fixes stopped writing the runner's heading over it); a measured runner heading then wins
+        last = [r[0] for r in (self.listener.latest("LEG", robot), self.listener.latest("FIND", robot)) if r] \
+            if getattr(self, "listener", None) is not None and hasattr(self.listener, "latest") else []
+        stale = bool(last) and time.time() - max(last) > self.FIND_OWN_FRESH_S
         if h[0] is None or not h[1]:
             ok = False
         else:
-            ok = abs(ST.wrap180(h[0] - own[2])) <= self.FIND_HEAD_AGREE_DEG
+            ok = stale or abs(ST.wrap180(h[0] - own[2])) <= self.FIND_HEAD_AGREE_DEG
         self.st.setdefault("find_heading_checks", []).append(
             [round(time.time(), 1), robot, None if h[0] is None else round(h[0], 1), bool(h[1]),
              round(own[2], 1), ok])
+        if stale:
+            self.st.setdefault("find_heading_stale", []).append([round(time.time(), 1), robot, round(max(last), 1)])
         return (h[0], False) if ok else (None, True)
 
     def fix_now(self, robot, heading=None, position_only=False):

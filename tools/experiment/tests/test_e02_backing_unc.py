@@ -335,3 +335,14 @@ def test_ladder_look_drives_away_from_the_board_before_turning():
     r2 = _ladder(front=19.0, line=119.5, retry_ok=True)
     r2.own_pose = lambda robot, since=0.0: (60.0, 112.0, 90.0)      # facing the board, too near to turn: no look
     assert r2.find_look("Left", "x", (60.0, 112.0)) == (None, None) and r2.legs == []
+
+
+def test_find_heading_prefers_a_measured_heading_when_its_own_is_stale():
+    import time as _t
+    r = _runner(own=(50.0, 50.0, -143.0))                  # its gyro crept while it stood parked
+    r.heads["Left"] = [13.0, True]
+    recs = {"LEG": (_t.time() - 300.0, {}), "FIND": None}
+    r.listener = types.SimpleNamespace(latest=lambda kind, robot, *a, **k: recs[kind])
+    assert r.find_heading_ok("Left") == (13.0, False) and r.st["find_heading_stale"]
+    recs["LEG"] = (_t.time() - 2.0, {})                    # it just drove: its own heading counts
+    assert r.find_heading_ok("Left") == (None, True)
