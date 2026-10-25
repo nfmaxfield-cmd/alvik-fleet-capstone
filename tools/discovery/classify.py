@@ -29,6 +29,9 @@ COPY_R = 0.97                  # chosen: copies (a processed copy keeps |r| abov
 # figure changed to moving windows only: on the development cases line sensors' groups read 0.9-1.7 and range
 # zones' groups 1.6-13.6 (median 3.3). Was 2.0-6.0 on the all-window figure. Chosen on dev only (DOE row)
 AOR_RAMP = (1.5, 3.0)
+GRAVITY_LON = 300.0            # chosen (as has_gravity_like's 300): level / noise a gravity axis must reach
+WEAK_K = 0.5                   # chosen: "unknown" score = WEAK_K x (1 - best score) at least (DOE row)
+HEADING_TIE = 0.10             # chosen: planar fits this close count as a tie between two headings (DOE row)
 SHORT_RAMP = (30.0, 120.0)     # chosen: log duration (s) from "fully short" to "long"; see the threshold report
 
 
@@ -85,6 +88,19 @@ def find_derived(feats, R):
     pl = R.get("planar") or []
     if pl:
         Rv, xa, ya, h, u, sg = pl[0]
+        # Two angles can both steer the position pair: the pose's own heading and the IMU's fused yaw (both follow
+        # the robot's turns). The fused yaw is the running sum of a rate that flickers at rest (a sensor); the
+        # pose heading is not (it comes from the wheels). Among headings that fit almost as well (circular R within
+        # HEADING_TIE), prefer one that is not the integral of a flickering rate (2026-10-25: the two were swapped
+        # and accepted at 0.95 on synthetic batteries and on log pieces)
+        def sensor_sum(hh):
+            return any(a == hh and _g(feats[b], "still_change_frac", 0.0) > 0.05 for a, b, r in R["integration"])
+        ties = [p for p in pl if {p[1], p[2]} == {xa, ya} and p[0] >= Rv - HEADING_TIE]
+        if sensor_sum(h):
+            alt = [p for p in ties if not sensor_sum(p[3])]
+            if alt:
+                Rv, xa, ya, h, u, sg = alt[0]
+                R["planar"] = [alt[0]] + [p for p in pl if p is not alt[0]]   # later rules read [0] as the pose
         for s in (xa, ya):
             der[s] = ("position worked out from a heading and distance: the direction of its change with its "
                       "partner follows the heading stream (circular R %.3f)" % Rv, [xa, ya, h], Rv, "planar")
@@ -192,11 +208,18 @@ def score_stream(s, f, R, der, ctx):
     stepm = _g(f, "step_mode_frac", 0)
     if mono > 0.999 and tcorr > 0.99 and (_g(f, "change_frac", 0) or 0) > 0.5:
         c = ramp(stepm, 0.8, 0.98)
-        sc["counter"] = c
-        sc["clock"] = 1 - c
-        ev.append("never falls inside a segment and rises with time (r %.4f); equal steps on %.0f%% of rows"
-                  % (tcorr, 100 * stepm))
-        return sc, ev
+        if c < 0.5 and ctx.get("has_time_base") and not f.get("is_time_base"):
+            # one clock per robot: another stream already is the time base, so a stream that merely rose with time
+            # here (a wheel turned one way, the pose drove one way through a short log) is judged on behaviour
+            # (2026-10-25: wheel angles and pose x/y were accepted as clocks at 0.95 on log pieces)
+            ev.append("rises with time here (r %.4f), but another stream is the clock: judged on its behaviour"
+                      % tcorr)
+        else:
+            sc["counter"] = c
+            sc["clock"] = 1 - c
+            ev.append("never falls inside a segment and rises with time (r %.4f); equal steps on %.0f%% of rows"
+                      % (tcorr, 100 * stepm))
+            return sc, ev
     if f.get("binary"):
         sc["switch"] = 0.3
         ev.append("two values only (a contact or flag; only a touch or the user can confirm which)")
@@ -395,6 +418,7 @@ def has_gravity_like(gr, feats, lon_min=300.0):
 def build_context(feats, R, der=None):
     """Case-wide structure the per-stream scores lean on: the IMU-like group and its split, look-alike pairs."""
     ctx = {"feats": feats, "twin_pair": {}, "imu_group": None, "derived": der or {}}
+    ctx["has_time_base"] = any(f.get("is_time_base") for f in feats.values())
     dur = max([_g(f, "duration_s", 0) or 0 for f in feats.values()] + [0])
     ctx["duration_s"] = dur
     ctx["short"] = 1 - ramp(dur, *SHORT_RAMP)          # chosen: under 30 s counts as fully short
@@ -452,6 +476,11 @@ def build_context(feats, R, der=None):
             mem.append(rate)
         lv = {m: _g(feats[m], "level_over_noise", 0) or 0 for m in mem}
         grav = max([m for m in mem if m != rate], key=lambda m: lv[m]) if len(mem) > 1 else None
+        if grav is not None and lv[grav] < GRAVITY_LON:
+            # gravity reads about 1000x its noise on the Alvik; a computed tilt angle reads about 100x (2026-10-25:
+            # pitch_deg was taken for the gravity axis, and accepted as an accelerometer, on a log piece whose az
+            # had dropped out of the set)
+            grav = None
         noise = {m: max(_g(feats[m], "rest_noise", 0) or 0, _g(feats[m], "quantum", 0) or 0, 1e-12) for m in mem}
         if grav is not None:
             ng, nr = np.log(noise[grav]), np.log(noise[rate])
@@ -545,6 +574,12 @@ def classify_case(feats, R):
     out = {}
     for s, f in feats.items():
         sc, ev = score_stream(s, f, R, der, ctx)
+        # weak evidence (2026-10-25): confidence is a share of all scores, so one lone weak score (0.5 from a
+        # single cue) used to read 0.9+. "unknown" now grows with how far the best score is from full marks
+        # (capped below the best, so the top guess never changes)
+        top = max(v for t, v in sc.items() if t != "unknown")
+        if top > 0:
+            sc["unknown"] = max(sc["unknown"], min(WEAK_K * (1 - top), 0.9 * top))
         tot = sum(sc.values())
         ranked = sorted(sc.items(), key=lambda kv: -kv[1])
         best, second = ranked[0], ranked[1]

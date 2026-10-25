@@ -379,8 +379,12 @@ def analyse(case, g, feats, num):
         if best[0] >= EXACT_R ** 2 and best[0] - single ** 2 > 0.02:
             res["combos"].append((a, best[1], best[2], best[0]))
     # planar position pairs: running sums that are not the integral of anything
-    cand_xy = [s for s in motion_ids if (accum[s] or s in mstreams)]
-    cand_h = sorted(set([a for a, b, r in res["integration"]] + [s for s in motion_ids if accum[s] or s in mstreams]))
+    # (2026-10-25) a position coordinate is not the running sum of any one stream (a wheel angle is, of its wheel
+    # speed; the fused yaw is, of the gyro), and a heading is a running sum (a speed or a rate is not). With units
+    # disguised, the unit scan otherwise fitted pairs such as (wheel angle, fused yaw) steered by the drive speed
+    angles = {a for a, b, r in res["integration"]}
+    cand_xy = [s for s in motion_ids if (accum[s] or s in mstreams) and s not in angles]
+    cand_h = sorted(set([a for a, b, r in res["integration"]] + [s for s in motion_ids if accum[s]]))
     D2 = window_views(g, motion_ids, PLANAR_WIN_S)[1]
     extra = {h: feats[h].get("cam_turn_ang_k") for h in cand_h
              if np.isfinite(feats[h].get("cam_turn_ang_k", np.nan) or np.nan) and (feats[h].get("cam_turn_ang_excess") or 0) > 0.15}

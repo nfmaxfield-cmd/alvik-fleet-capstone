@@ -24,7 +24,9 @@ Heading (docs/build-reports/e02-oct25-heading.md): a run that starts from a wron
 echo written in by a fix) makes every dead-reckoned source wrong from the start. Each run's start heading is checked
 against the camera's direction of travel on its first straight stretch of >= MIN_MOVE_CM (A's heading, which is the
 start belief plus the gyro): ok (within BIG), wrong (BIG or more), unmeasured (no such stretch in the first
-HDG_WINDOW_S). Headline numbers use ok runs; the others are reported apart.
+HDG_WINDOW_S). A stretch must drive one way only (>= 90 % of its rows at >= 1 cm/s the same way) and straight (>= 90 % of its
+rows with the wheels within 15 % of each other); the status is the
+median of the first three stretches' errors (the smaller one if there are two). Headline numbers use ok runs; the others are reported apart.
 
 Identity is taken from track.csv (the runner's tracker names the moving robot), so each robot's filter is given only
 its own camera rows; the engine's possible-area gate still rejects camera rows that disagree with it.
@@ -176,6 +178,26 @@ def ms_to_t(run):
     return lambda m: float(np.interp(m, ms, tt))
 
 
+def board_lines(name):
+    """[(axis, value)] of the two blocked boards' faces (e02_state board), or [] if not recorded."""
+    try:
+        with open(os.path.join(sdir(name), "e02_state.json")) as f:
+            b = json.load(f).get("board") or {}
+    except (OSError, ValueError):
+        return []
+    out = []
+    for axis, k in (("x", "xboard_cm"), ("y", "yboard_cm")):
+        if b.get(k) is not None:
+            out.append((axis, float(b[k])))
+    return out
+
+
+def board_dist(lines, p):
+    if not lines or p is None:
+        return None
+    return min(abs((p[0] if a == "x" else p[1]) - v) for a, v in lines)
+
+
 # =============================================================================== camera lag
 def camera_lag(runs, cams):
     """Shift (s) to add to the camera's times so its speed lines up best with the wheels' speed (driving runs)."""
@@ -316,6 +338,9 @@ def heading_check(tj, cam, raw):
     t0 = tj["t"][0]
     tt = np.array([q["t"] for q in raw])
     v = np.array([E.fnum(E.RU.speed_cms(q.get("v_cms"))) for q in raw])
+    wl = np.array([E.fnum(q.get("wl_rpm")) for q in raw])
+    wr = np.array([E.fnum(q.get("wr_rpm")) for q in raw])
+    arc = np.abs(wl - wr) / np.maximum(np.abs(wl) + np.abs(wr), 1e-6)     # 0 straight, 1 turning on the spot
     grid = np.arange(t0, min(tj["t"][-1], t0 + HDG_WINDOW_S), 0.2)
     errs = []
     i = 0
@@ -339,20 +364,24 @@ def heading_check(tj, cam, raw):
         a, b = at(tj, grid[i]), at(tj, grid[j])
         k = (tt >= grid[i]) & (tt <= grid[j])
         vm = float(np.mean(v[k])) if k.any() else 0.0
-        if a is None or b is None or abs(vm) < 1.0:
+        # one direction only: >= 90% of the rows driving the same way at >= 1 cm/s (no reversal, no stop inside)
+        same = float(np.mean((np.sign(v[k]) == np.sign(vm)) & (np.abs(v[k]) >= 1.0))) if k.any() else 0.0
+        straight = float(np.mean(arc[k] < 0.15)) if k.any() else 0.0     # both wheels within ~15 % of each other
+        if a is None or b is None or abs(vm) < 1.0 or same < 0.9 or straight < 0.9:
             i += 1
             continue
         if abs(math.degrees(w180_rad(b[2] - a[2]))) < STRAIGHT_DEG:
             d = math.degrees(math.atan2(pb[1] - pa[1], pb[0] - pa[0]))
             if vm < 0:
                 d += 180.0
-            errs.append((grid[i] - t0, w180(math.degrees(0.5 * (a[2] + b[2])) - d)))
+            errs.append((grid[i] - t0, w180(math.degrees(a[2] + 0.5 * w180_rad(b[2] - a[2])) - d)))
             i = j
             continue
         i += 1
     if not errs:
         return "unmeasured", None, []
-    e0 = errs[0][1]
+    first = [e for _, e in errs[:3]]          # the first three stretches (one can be a camera hiccup)
+    e0 = float(np.median(first)) if len(first) != 2 else min(first, key=abs)
     return ("ok" if abs(e0) < BIG else "wrong"), e0, errs
 
 
@@ -369,6 +398,7 @@ def score_session(name, out_gaps, out_runs, out_routes, log):
     for c in cams.values():
         c.shift(lag)
     dr = driving_runs(name, runs)
+    lines = board_lines(name)
     fixes = {}
     for r in logs(name, "fix.csv"):
         fixes.setdefault(r["robot"], []).append(float(r["t_recv"]))
@@ -447,6 +477,22 @@ def score_session(name, out_gaps, out_runs, out_routes, log):
                         if c0 is not None:
                             row["own_end_aligned"] = round(math.hypot((oe[0] - o0[0]) - (pe[0] - c0[0]),
                                                                       (oe[1] - o0[1]) - (pe[1] - c0[1])), 2)
+            if info["kind"] == "find" and info.get("result") == "ok" and pe is not None:
+                # the find's own end pose comes from touching both boards: a reference independent of the camera
+                f = info["rec"]
+                fx_, fy_ = num(f.get("after_x")), num(f.get("after_y"))
+                if fx_ is not None and fy_ is not None:
+                    row["find_vs_cam"] = round(math.hypot(fx_ - pe[0], fy_ - pe[1]), 2)
+                    bfe = at(Bf[rid], t1 - 0.3) if rid in Bf else None
+                    if bfe is not None:
+                        row["find_vs_fused_seen"] = round(math.hypot(fx_ - bfe[0], fy_ - bfe[1]), 2)
+                    if ae is not None:
+                        row["find_vs_A"] = round(math.hypot(fx_ - ae[0], fy_ - ae[1]), 2)
+                    bce = at(Bc[rid], t1 - 0.3) if rid in Bc else None
+                    if bce is not None:
+                        row["find_vs_Bc"] = round(math.hypot(fx_ - bce[0], fy_ - bce[1]), 2)
+            bd = board_dist(lines, pe)
+            row["end_board_cm"] = round(bd, 1) if bd is not None else ""
             if info["kind"] == "route":
                 rec, rc = info["rec"], info["rc"]
                 ex, ey = num(rec.get("end_x")), num(rec.get("end_y"))
@@ -473,6 +519,8 @@ def score_session(name, out_gaps, out_runs, out_routes, log):
                              L=L, t_s=round(ts, 2), moved_cm=round(cam.path_len(ts, te), 1),
                              disp_cm=round(math.hypot(pe_[0] - ps[0], pe_[1] - ps[1]), 1),
                              fix_inside=int(any(ts <= t <= te for t in fixes.get(robot, []))))
+                    bd = board_dist(lines, pe_)
+                    g["board_cm"] = round(bd, 1) if bd is not None else ""
                     q = at(bl, te)
                     if q is not None:
                         g["fused"] = round(math.hypot(q[0] - pe_[0], q[1] - pe_[1]), 2)

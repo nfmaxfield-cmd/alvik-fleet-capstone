@@ -1,0 +1,77 @@
+[
+ {
+  "session": "oct21-2222",
+  "lag": 0.0,
+  "n": 0
+ },
+ {
+  "session": "oct21-2236",
+  "lag": 0.0,
+  "n": 0
+ },
+ {
+  "session": "oct21-2245",
+  "lag": 0.0,
+  "n": 0
+ },
+ {
+  "session": "oct22-0807",
+  "lag": 0.0,
+  "n": 0
+ },
+ {
+  "session": "oct22-0816",
+  "lag": -0.04,
+  "n": 1
+ },
+ {
+  "session": "oct22-0951",
+  "lag": 0.14,
+  "n": 4
+ },
+ {
+  "session": "oct22-1929",
+  "lag": 0.0,
+  "n": 0
+ },
+ {
+  "session": "oct22-1954",
+  "lag": 0.0,
+  "n": 0
+ },
+ {
+  "session": "oct22-2005",
+  "lag": 0.04,
+  "n": 2
+ },
+ {
+  "session": "oct23-morning",
+  "lag": 0.08,
+  "n": 92
+ },
+ {
+  "session": "oct23-evening",
+  "lag": 0.08,
+  "n": 34
+ },
+ {
+  "session": "stage1",
+  "lag": 0.06,
+  "n": 21
+ },
+ {
+  "session": "stage2",
+  "lag": 0.04,
+  "n": 49
+ },
+ {
+  "session": "stage3",
+  "lag": 0.0,
+  "n": 0
+ },
+ {
+  "session": "right-alone",
+  "lag": 0.0,
+  "n": 0
+ }
+]

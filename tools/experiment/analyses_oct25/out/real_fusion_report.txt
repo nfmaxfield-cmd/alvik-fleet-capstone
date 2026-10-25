@@ -1,0 +1,133 @@
+Runs scored: 203 (86 routes, 117 finds); sessions: oct22-0816, oct22-0951, oct22-2005, oct23-evening, oct23-morning, stage1, stage2
+Start heading check: find ok 115, find unmeasured 2, route ok 80, route unmeasured 6
+
+### Gaps, all driving runs (ok heading, gap end >= 15 cm from the boards)
+| gap s | gaps | wheels + gyro + camera (fused) | wheels + gyro (fusion, no camera) | robot's own pose | camera alone, moving on at its last speed | camera alone, last position held | fused beat the best single source |
+|---|---|---|---|---|---|---|---|
+| 2 | 273 | 1.4 (5.2) | 1.5 (3.9) | 2.5 (4.8) | 3.1 (12.1) | 16.5 (18.8) | 39% |
+| 5 | 250 | 2.2 (5.7) | 2.7 (6.4) | 3.9 (7.7) | 8.0 (36.5) | 40.4 (45.0) | 50% |
+| 10 | 126 | 3.4 (6.5) | 4.2 (7.6) | 4.6 (11.0) | 47.7 (96.4) | 46.9 (66.5) | 58% |
+| 20 | 100 | 3.8 (6.6) | 4.6 (7.4) | 7.5 (16.4) | 142.7 (237.9) | 47.1 (60.9) | 46% |
+| 40 | 7 | 5.1 (14.7) | 7.3 (19.6) | 19.2 (24.2) | 65.6 (131.5) | 46.0 (63.0) | 57% |
+<sub>Each cell: median (90th percentile) error at the gap's end against the camera, cm.</sub>
+
+### Gaps, routes only
+| gap s | gaps | wheels + gyro + camera (fused) | wheels + gyro (fusion, no camera) | robot's own pose | camera alone, moving on at its last speed | camera alone, last position held | fused beat the best single source |
+|---|---|---|---|---|---|---|---|
+| 2 | 158 | 2.4 (6.0) | 1.7 (4.1) | 2.5 (4.8) | 4.1 (12.7) | 14.8 (19.5) | 35% |
+| 5 | 147 | 3.2 (7.3) | 3.0 (6.7) | 3.9 (7.7) | 19.5 (43.2) | 19.5 (45.2) | 40% |
+| 10 | 93 | 3.7 (6.6) | 3.7 (7.7) | 4.6 (11.0) | 53.7 (109.0) | 40.4 (66.4) | 53% |
+| 20 | 75 | 4.1 (6.6) | 4.6 (7.6) | 7.5 (16.4) | 165.3 (269.8) | 28.1 (55.2) | 33% |
+| 40 | 7 | 5.1 (14.7) | 7.3 (19.6) | 19.2 (24.2) | 65.6 (131.5) | 46.0 (63.0) | 57% |
+<sub>Each cell: median (90th percentile) error at the gap's end against the camera, cm.</sub>
+
+### Gaps, finds only
+| gap s | gaps | wheels + gyro + camera (fused) | wheels + gyro (fusion, no camera) | robot's own pose | camera alone, moving on at its last speed | camera alone, last position held | fused beat the best single source |
+|---|---|---|---|---|---|---|---|
+| 2 | 115 | 0.9 (3.3) | 1.1 (3.7) | - | 1.8 (11.0) | 17.4 (18.7) | 44% |
+| 5 | 103 | 1.8 (4.2) | 2.3 (5.8) | - | 2.9 (12.8) | 43.6 (45.0) | 63% |
+| 10 | 33 | 3.0 (5.6) | 4.6 (7.3) | - | 34.1 (52.4) | 51.6 (68.2) | 73% |
+| 20 | 25 | 2.7 (4.5) | 4.9 (6.5) | - | 115.6 (142.5) | 56.9 (69.2) | 84% |
+<sub>Each cell: median (90th percentile) error at the gap's end against the camera, cm.</sub>
+
+### Gaps ending NEAR a board (< 15 cm)
+| gap s | gaps | wheels + gyro + camera (fused) | wheels + gyro (fusion, no camera) | robot's own pose | camera alone, moving on at its last speed | camera alone, last position held | fused beat the best single source |
+|---|---|---|---|---|---|---|---|
+| 2 | 75 | 2.4 (6.9) | 1.6 (5.3) | 1.7 (2.1) | 6.7 (19.8) | 11.1 (18.2) | 28% |
+| 5 | 85 | 1.1 (5.0) | 1.4 (4.2) | 9.1 (12.0) | 21.3 (41.0) | 11.5 (36.8) | 46% |
+| 10 | 55 | 4.0 (10.6) | 2.9 (8.8) | - | 21.7 (46.7) | 68.1 (72.2) | 33% |
+| 20 | 77 | 2.5 (8.1) | 3.9 (7.7) | - | 121.3 (136.8) | 62.7 (70.5) | 58% |
+| 40 | 1 | 40.7 (40.7) | 39.0 (39.0) | - | 277.9 (277.9) | 73.0 (73.0) | 0% |
+<sub>Each cell: median (90th percentile) error at the gap's end against the camera, cm.</sub>
+
+### Gaps in runs whose start heading was wrong or unmeasured
+| gap s | gaps | wheels + gyro + camera (fused) | wheels + gyro (fusion, no camera) | robot's own pose | camera alone, moving on at its last speed | camera alone, last position held | fused beat the best single source |
+|---|---|---|---|---|---|---|---|
+| 2 | 3 | 50.8 (92.6) | 18.3 (18.3) | 18.2 (18.4) | 0.7 (0.9) | 0.2 (0.3) | 0% |
+| 5 | 3 | 76.7 (100.7) | 39.2 (44.0) | 41.9 (44.3) | 0.8 (1.2) | 0.1 (0.2) | 0% |
+| 10 | 1 | 96.6 (96.6) | 66.0 (66.0) | 65.5 (65.5) | 2.7 (2.7) | 0.2 (0.2) | 0% |
+| 20 | 1 | 42.3 (42.3) | 18.4 (18.4) | 2.8 (2.8) | 5.1 (5.1) | 0.2 (0.2) | 0% |
+<sub>Each cell: median (90th percentile) error at the gap's end against the camera, cm.</sub>
+
+### Left
+| gap s | gaps | wheels + gyro + camera (fused) | wheels + gyro (fusion, no camera) | robot's own pose | camera alone, moving on at its last speed | camera alone, last position held | fused beat the best single source |
+|---|---|---|---|---|---|---|---|
+| 5 | 87 | 2.1 (8.1) | 3.3 (6.0) | 3.7 (7.5) | 5.8 (33.9) | 41.3 (45.0) | 52% |
+| 10 | 48 | 3.0 (6.9) | 4.2 (9.8) | 6.1 (11.3) | 43.5 (88.1) | 47.7 (64.3) | 69% |
+| 20 | 40 | 3.5 (6.8) | 4.7 (8.7) | 10.8 (16.2) | 132.9 (209.0) | 50.9 (56.9) | 45% |
+<sub>Each cell: median (90th percentile) error at the gap's end against the camera, cm.</sub>
+
+### Center
+| gap s | gaps | wheels + gyro + camera (fused) | wheels + gyro (fusion, no camera) | robot's own pose | camera alone, moving on at its last speed | camera alone, last position held | fused beat the best single source |
+|---|---|---|---|---|---|---|---|
+| 5 | 81 | 2.4 (5.7) | 2.4 (6.6) | 4.2 (7.5) | 8.9 (44.8) | 27.1 (44.6) | 52% |
+| 10 | 34 | 3.4 (5.4) | 4.1 (7.2) | 4.8 (10.8) | 59.5 (116.6) | 32.8 (66.6) | 56% |
+| 20 | 31 | 3.8 (5.9) | 4.8 (7.7) | 7.1 (16.9) | 153.3 (270.1) | 28.1 (59.5) | 58% |
+<sub>Each cell: median (90th percentile) error at the gap's end against the camera, cm.</sub>
+
+### Right
+| gap s | gaps | wheels + gyro + camera (fused) | wheels + gyro (fusion, no camera) | robot's own pose | camera alone, moving on at its last speed | camera alone, last position held | fused beat the best single source |
+|---|---|---|---|---|---|---|---|
+| 5 | 82 | 2.1 (5.2) | 2.5 (6.0) | 3.9 (7.9) | 11.5 (38.3) | 40.5 (45.2) | 45% |
+| 10 | 44 | 3.9 (6.4) | 4.3 (6.4) | 4.0 (11.5) | 44.1 (96.4) | 48.4 (69.0) | 48% |
+| 20 | 29 | 4.0 (6.0) | 4.0 (5.6) | 6.1 (13.7) | 140.1 (248.1) | 46.6 (69.0) | 34% |
+<sub>Each cell: median (90th percentile) error at the gap's end against the camera, cm.</sub>
+
+Fused with the camera always on, distance from the camera: median of run medians 0.69 cm, median of run 95th percentiles 4.80 cm
+
+### Find ends: each estimate against the find's own board-touch pose
+| estimate | finds | median cm | 90th pct cm |
+|---|---|---|---|
+| camera | 71 | 5.09 | 9.70 |
+| fused, camera on | 71 | 3.63 | 5.30 |
+| fused, camera for the first 10 s only | 71 | 3.99 | 5.73 |
+| wheels + gyro only | 71 | 5.18 | 10.14 |
+
+### Routes: end error against the camera (cm, median; ok-heading routes)
+| cond | robot | n | robot's own pose (firmware) | own, start aligned | wheels + gyro (fusion) | wheels + gyro, start aligned | fused, camera first 10 s | runner end_err (ended from start) | runner robot_thought_end |
+|---|---|---|---|---|---|---|---|---|---|
+| U | Left | 15 | 17.0 | 17.9 | 2.9 | 3.8 | 3.9 | 18.1 | 1.0 |
+| U | Center | 15 | 15.9 | 16.0 | 1.7 | 1.9 | 1.6 | 16.7 | 0.9 |
+| U | Right | 16 | 15.8 | 15.7 | 2.0 | 1.9 | 2.3 | 16.8 | 0.9 |
+| U | all | 46 | 15.9 | 15.9 | 2.0 | 1.9 | 2.4 | 16.8 | 0.9 |
+| C | Left | 5 | 3.1 | 1.4 | 2.6 | 3.3 | 3.6 | 1.1 | 0.9 |
+| C | Center | 4 | 1.8 | 0.7 | 0.6 | 0.7 | 1.8 | 1.1 | 0.9 |
+| C | Right | 4 | 3.0 | 1.9 | 1.9 | 0.9 | 2.3 | 2.2 | 0.9 |
+| C | all | 13 | 2.5 | 1.3 | 1.4 | 1.3 | 2.3 | 1.5 | 0.9 |
+| K | Left | 4 | 22.1 | 20.0 | 3.1 | 1.7 | 0.9 | 0.9 | 7.7 |
+| K | Center | 3 | 13.6 | 12.4 | 5.9 | 5.5 | 6.1 | 1.4 | 5.3 |
+| K | Right | 2 | 18.1 | 18.1 | 5.0 | 5.0 | 4.8 | 17.3 | 28.2 |
+| K | all | 9 | 18.0 | 17.9 | 4.2 | 3.7 | 5.3 | 1.4 | 11.1 |
+| KC | Left | 4 | 2.4 | 1.2 | 2.2 | 2.6 | 1.9 | 1.0 | 1.0 |
+| KC | Center | 4 | 0.8 | 0.8 | 1.2 | 1.5 | 2.3 | 2.1 | 0.7 |
+| KC | Right | 4 | 1.9 | 1.9 | 1.1 | 0.9 | 1.5 | 3.6 | 1.9 |
+| KC | all | 12 | 1.5 | 1.2 | 1.3 | 1.6 | 1.9 | 2.6 | 1.1 |
+
+### Drift of wheels + gyro alone (start aligned), per robot
+| robot | kind | runs | end error median cm | per minute median | per metre driven median |
+|---|---|---|---|---|---|
+| Left | route | 22 | 2.9 | 4.7 | 0.7 |
+| Left | find | 31 | 8.5 | 15.1 | 2.1 |
+| Center | route | 24 | 1.6 | 2.4 | 0.3 |
+| Center | find | 21 | 6.4 | 13.0 | 2.2 |
+| Right | route | 20 | 1.5 | 2.6 | 0.3 |
+| Right | find | 23 | 8.2 | 15.7 | 2.3 |
+
+### Drift of the robot's own pose (start aligned), routes
+| robot | cond | routes | end error median cm | per metre driven median |
+|---|---|---|---|---|
+| Left | U | 12 | 17.9 | 4.4 |
+| Left | C | 5 | 1.4 | 0.4 |
+| Left | K | 2 | 20.0 | 3.5 |
+| Center | U | 13 | 16.0 | 3.5 |
+| Center | C | 4 | 0.7 | 0.1 |
+| Center | K | 3 | 12.4 | 1.3 |
+| Right | U | 11 | 15.7 | 3.1 |
+| Right | C | 4 | 1.9 | 0.3 |
+| Right | K | 1 | 18.1 | 1.7 |
+
+### Routes driven blind after the first 10 s: error at the end, each source anchored at the camera's position at 10 s (cm, median / 90th pct; ok heading)
+- fused (its own state at 10 s, then blind): 2.3 / 4.6 (n 57)
+- wheels + gyro: 3.0 / 7.3 (n 57)
+- robot's own pose: 8.6 / 17.5 (n 57)
+- camera held at 10 s: 36.8 / 81.2 (n 57)
