@@ -143,7 +143,7 @@ def fit(obs, start=DEFAULT):
         for j, i in enumerate(idx):
             # floor + a positive amount, never past the ceiling
             p[i] = min(CEIL[i], FLOOR[i] + math.exp(min(30.0, x[j])))
-        eps = 0.001 + 0.399 / (1.0 + math.exp(-x[-1]))
+        eps = 0.001 + 0.399 / (1.0 + math.exp(-max(-30.0, min(30.0, x[-1]))))   # clamped: exp overflowed (2026-10-25)
         return tuple(p), eps
 
     def f(x):
