@@ -93,6 +93,7 @@ import e02_trust as TR  # noqa: E402
 import e02_load as LD  # noqa: E402
 import e02_offload as OFF  # noqa: E402
 import e02_stall as STL  # noqa: E402
+import e02_trackwire as TKW  # noqa: E402  (the tracker process, frame saving, cpu.csv, fusion steering)
 import e02_front as FR  # noqa: E402
 import e02_unc as UNC  # noqa: E402
 import e02_degrade as DG  # noqa: E402
@@ -755,6 +756,8 @@ class Runner:
         must answer. If not: pause, tell Nick, check again every 30 s until both answer (no runs without the
         video that measures them)."""
         a = self.a
+        if not TKW.recorder_used(a):
+            return True                         # production: no recorder, no video to protect
         while True:
             ok1, w1, _, _ = CAM.check_stream(a.pi, a.overhead_port)
             if not ok1 and self.feed is not None and self.feed.last_t is not None and \
@@ -843,6 +846,10 @@ class Runner:
     def mark(self, text):
         """A note in both camera videos (camrec.py writes it to each camera's events.csv), and a snapshot."""
         self.snapshot(text)
+        try:
+            TKW.on_mark(self, text)            # a hold, a stop, a help call, a failed turn: a still and a clip (frames/)
+        except Exception:
+            pass
         ok = self.pi.send(text) if self.pi else False
         self.marks_unconfirmed = 0 if ok else self.marks_unconfirmed + 1
         self.say("  [video mark] %s%s" % (text, "" if ok else "  (the Pi didn't confirm it)"), quiet=ok)
@@ -1027,6 +1034,10 @@ class Runner:
 
     def pos(self, robot=None, fresh_s=1.5):
         p = self.tracker.where()
+        if getattr(getattr(self, "a", None), "fusion_steer", False) and (robot or self.tracker.active):
+            # --fusion-steer (OFF by default, not yet tried on the board): the combined estimate where it was better
+            r_ = robot or self.tracker.active
+            return TKW.steer_pos(self, r_, p if (p is not None and self.tracker.active == r_) else None, fresh_s)
         if p is None or (robot and self.tracker.active != robot):
             return None
         if time.time() - p[0] > fresh_s:
@@ -1053,6 +1064,10 @@ class Runner:
         2026-10-22: a dead feed froze every position without anyone noticing)."""
         f = self.feed
         if f is None or self.a is None or getattr(self.a, "dry_run_feed_ok", False):
+            return True
+        if TKW.is_proc(f):
+            if not f.is_alive():
+                TKW.restart_feed(self)          # the tracker process stopped: a new one, set up the same way
             return True
         if f.is_alive():
             return True
@@ -3453,8 +3468,8 @@ class Runner:
         self.say("Virtual border: %s session, the camera's %.0f cm and the robots' own %.0f cm inside the open edges "
                  "(a crossing stops every robot and asks)." % ("home" if getattr(self.a, "home", False) else "away",
                                                                self.border_cm(), self.fw_border_cm()))
-        # 1. Pi recorder
-        ok1, w1, size, fps = CAM.check_stream(a.pi, a.overhead_port)
+        # 1. Pi recorder (production: no recorder; the tracker process's own pictures)
+        ok1, w1, size, fps = TKW.check_overhead(self, a)
         if a.no_side:
             ok2, w2 = True, "not used this session (--no-side)"
         else:
@@ -3639,11 +3654,11 @@ class Runner:
         if self.tracker is None:
             b = PL.Board()
             centre = (0.0, 0.0) if getattr(self, "exploring", False) else ((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2)
-            self.tracker = CAM.MotionTracker(self.cam, centre)
-            if getattr(self.a, "no_lock", False):
-                self.tracker.use_lock = False     # backup (--no-lock): the motion detector alone
+            no_lock = bool(getattr(self.a, "no_lock", False))
+            # in the tracker process when the feed is its (e02_trackproc, 2026-10-25), else in the runner as before
+            self.tracker = TKW.make_tracker(self, centre, use_lock=not no_lock)
+            if no_lock:
                 self.say("Tracker: the motion detector alone (--no-lock).")
-            self.feed.tracker = self.tracker
 
     def find_boards(self, img):
         """Which two edges are blocked (asked, in picture words; or --board-sides), then their floor lines
@@ -8786,7 +8801,8 @@ def main(argv=None):
     ap.add_argument("--dry-run", action="store_true", help="against the simulator (tools/experiment/e02_sim.py)")
     ap.add_argument("--dry-true-calib", action="store_true", help="dry run: use the simulator's true camera "
                                                                   "instead of making one from the corners")
-    a = ap.parse_args(argv)
+    TKW.add_args(ap)
+    a = TKW.fix_args(ap.parse_args(argv))
     if a.load:
         try:
             LD.parse(a.load)
@@ -8908,7 +8924,8 @@ def launch(a, state, sdir, sim):
         if run.degrade:
             run.say("!!! " + run.degrade.words() + " (e02_degrade.py): every run's line says so.")
             state.setdefault("setup", {})["degraded"] = run.degrade.spec
-        feed = CAM.Feed(stream_url(a), None, hist, log=lambda m: run.say("  (camera: %s)" % m))
+        # the tracker in its own process (e02_trackproc; --tracker-in-runner: as before)
+        feed = TKW.make_feed(run, a, hist, stream_url(a))
         feed.on_sample = run.on_sample
         if run.degrade.spec.get("camera"):
             feed.sample_filter = run.degrade.camera
@@ -8917,6 +8934,7 @@ def launch(a, state, sdir, sim):
         feed.keep_s = run.FRAMES_KEEP_S
         feed.start()
         run.feed = feed
+        run.cpulog = TKW.start_cpu_log(run, a)   # cpu.csv: each core, temperature, throttling, our processes
         if getattr(a, "dry_run", False) and getattr(a, "dry_scene", ""):
             run.scene = dry_scene(a.dry_scene)
             prev_f = feed.sample_filter
@@ -8973,6 +8991,13 @@ def launch(a, state, sdir, sim):
             pass
         if feed:
             feed.close()
+        if getattr(run, "cpulog", None) is not None:
+            run.cpulog.stop()
+        try:
+            for ln_ in TKW.summary(run):
+                run.say(ln_)
+        except Exception as e_:
+            run.say("(tracker process summary: %s)" % e_, quiet=True)
         if run.tracker is not None and getattr(run.tracker, "stats", None):
             st_ = dict(run.tracker.stats)
             state.setdefault("tracker_stats", []).append(dict(t=round(time.time(), 1), **st_))

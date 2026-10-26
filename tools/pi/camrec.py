@@ -1099,7 +1099,17 @@ def main(argv=None):
     ap.add_argument("--lock", dest="lock", action="store_true", default=True,
                     help="(default) after a 2 s warm-up, freeze the automatic exposure, focus and white balance")
     ap.add_argument("--no-lock", dest="lock", action="store_false", help="leave the camera's automatics alone")
+    ap.add_argument("--cores", default="", help="run on these cores only, e.g. 1 (run-e02-pi.sh: the recorder on core "
+                                                "1, the tracker process on 2-3, the runner on 0; 2026-10-25)")
     args = ap.parse_args(argv)
+    if args.cores:
+        try:
+            want = {int(c) for c in args.cores.split(",") if c.strip() and int(c) < (os.cpu_count() or 1)}
+            if want:
+                os.sched_setaffinity(0, want)
+                print(f"Recorder on core(s) {','.join(str(c) for c in sorted(want))}.")
+        except (OSError, AttributeError, ValueError) as e:
+            print(f"! cores not set ({e}); the recorder runs on any core")
 
     if args.list:
         list_cameras()

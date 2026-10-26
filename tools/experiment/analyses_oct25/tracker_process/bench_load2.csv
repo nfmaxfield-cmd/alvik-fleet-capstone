@@ -1,0 +1,4 @@
+mode,fps_median,fps_p10,ms_median,age_median_s,seconds,this_cpu_pct,tracker_proc_cpu_pct,load_threads,cores,cv_threads,cpus
+before,6.3,5.1,159.6,0.227,39,77.6,,2,[],2,2
+thread,11.9,9.4,83.6,0.15,40,88.0,,2,[],2,2
+process,24.6,22.9,21.7,0.069,40,63.9,29.4,2,[],2,2

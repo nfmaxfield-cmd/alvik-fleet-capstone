@@ -18,6 +18,12 @@
 #
 # A plan of sessions until the batteries run out, nobody there (tools/pi/session_plan.sh):
 #     ./run-e02-pi.sh --plan
+# A production session (2026-10-25: no video; the tracker opens the camera itself and keeps a clip and a still of
+# every hold, border or edge stop, help call, Note and failed turn, plus a thumbnail every 30 s, in the session's
+# frames/ folder):
+#     ./run-e02-pi.sh --production
+# Cores (2026-10-25, a 4-core Pi): the runner and the live page on core 0, the recorder on core 1, the camera tracker
+# (its own process, started by the runner) on cores 2-3. cpu.csv in the session folder shows each core's load.
 set -u
 cd "$(dirname "$0")"
 PLAN=0
@@ -25,7 +31,8 @@ PLAN=0
 # tracker; the runner does not use it yet). Its device number: SIDE_DEV (default 2; `python3 tools/pi/camrec.py
 # --list` shows which numbers send pictures). Recording only: the overhead's picture rate is in perf.csv to check.
 SIDE=0
-for a in "$@"; do [ "$a" = "--with-side" ] && SIDE=1; done
+PROD=0
+for a in "$@"; do [ "$a" = "--with-side" ] && SIDE=1; [ "$a" = "--production" ] && PROD=1; done
 if [ "$SIDE" = 1 ]; then
   set -- $(for a in "$@"; do [ "$a" != "--with-side" ] && printf '%s ' "$a"; done)
 fi
@@ -49,6 +56,17 @@ if [ "$SIDE" = 1 ]; then
   echo "Recording the side camera too (/dev/video$SD); the runner uses the overhead only."
 fi
 
+NCPU=$(nproc 2>/dev/null || echo 1)
+RUN_PIN=""; REC_CORES=""
+if [ "$NCPU" -ge 4 ] && command -v taskset >/dev/null; then
+  RUN_PIN="taskset -c 0"; REC_CORES="--cores 1"
+  [ "$SIDE" = 1 ] && REC_CORES="--cores 0,1"     # two cameras: the recorder shares core 0 with the runner
+  [ "$PROD" = 1 ] && RUN_PIN="taskset -c 0,1"    # no recorder: the runner gets its core too
+fi
+if [ "$PROD" = 1 ] && [ "$SIDE" = 1 ]; then
+  echo "--production records no video, so --with-side does nothing there. Stopped."; exit 1
+fi
+
 echo "=== E02 on the Pi ==="
 need=""
 command -v tmux >/dev/null || need="$need tmux"
@@ -65,8 +83,15 @@ if tmux has-session -t e02 2>/dev/null; then
   exit 1
 fi
 
-# where the video goes
+# where the video goes (none in a production session: frames go into the session folder)
 OUT=""
+if [ "$PROD" = 1 ]; then
+  free_gb=$(df -BG --output=avail "$REPO" | tail -1 | tr -dc 0-9)
+  if [ "${free_gb:-0}" -lt 3 ]; then
+    echo "Only $free_gb GB free on the Pi's card; a production session's clips need up to about 3 GB. Stopped."; exit 1
+  fi
+  echo "Production session: no video; clips and stills go to the session folder (logs/e02-*/frames)."
+else
 for m in /media/"$USER"/*; do
   [ -d "$m" ] && [ -w "$m" ] || continue
   fs="$(findmnt -no FSTYPE -T "$m" 2>/dev/null)"
@@ -98,6 +123,7 @@ if [ "${free_gb:-0}" -lt "$need_gb" ]; then
   echo "Only $free_gb GB free; a $hours-hour session needs about $need_gb GB. Free some space first. Stopped."
   exit 1
 fi
+fi
 if [ ! -f "$HOME/.config/mirlt/github_token" ]; then
   echo "NOTE: no GitHub token yet (docs/pi-run.md, 'GitHub token'): the session runs, but the upload at the end"
   echo "      is skipped; the files stay on the Pi."
@@ -106,13 +132,24 @@ git -C "$REPO" pull --ff-only >/dev/null 2>&1 && echo "Code up to date." || echo
 
 if [ "$#" -gt 0 ]; then RUN_ARGS="$RUN_ARGS_DEFAULT $*"; else RUN_ARGS="$RUN_ARGS_DEFAULT"; fi
 
-tmux new-session -d -s e02 -n rec "cd '$REPO' && python3 tools/pi/camrec.py $CAM_ARGS --out '$OUT'; echo; read -r -p 'Recorder stopped. Press Enter to close this window.'"
+if [ "$PROD" = 1 ]; then
+  if [ "$PLAN" = 1 ]; then echo "--production and --plan don't go together yet. Stopped."; exit 1; fi
+  tmux new-session -d -s e02 -n run "cd '$REPO' && $RUN_PIN python3 tools/experiment/e02.py --on-pi $RUN_ARGS; echo; echo '=== Runner finished: uploading the logs and frames ==='; python3 tools/pi/upload_session.py --recordings '$REPO/logs' --logs-only; echo; read -r -p 'All done. Press Enter to close this window.'"
+  tmux select-window -t e02:run
+  echo
+  echo "Started (production: no video). Watch it on any phone or computer on the WiFi:"
+  echo "    http://$(hostname).local:8090"
+  sleep 2
+  tmux attach -t e02
+  exit 0
+fi
+tmux new-session -d -s e02 -n rec "cd '$REPO' && python3 tools/pi/camrec.py $CAM_ARGS $REC_CORES --out '$OUT'; echo; read -r -p 'Recorder stopped. Press Enter to close this window.'"
 echo "Recorder starting (8 s) ..."
 sleep 8
 if [ "$PLAN" = 1 ]; then
   tmux new-window -t e02 -n run "cd '$REPO' && bash tools/pi/session_plan.sh '$OUT' $PLAN_NAME; echo; read -r -p 'Plan done. Press Enter to close this window.'"
 else
-  tmux new-window -t e02 -n run "cd '$REPO' && python3 tools/experiment/e02.py --on-pi $RUN_ARGS; echo; echo '=== Runner finished: stopping the recorder and uploading ==='; python3 tools/pi/upload_session.py --recordings '$OUT' --stop-recorder; echo; read -r -p 'All done. Press Enter to close this window.'"
+  tmux new-window -t e02 -n run "cd '$REPO' && $RUN_PIN python3 tools/experiment/e02.py --on-pi $RUN_ARGS; echo; echo '=== Runner finished: stopping the recorder and uploading ==='; python3 tools/pi/upload_session.py --recordings '$OUT' --stop-recorder; echo; read -r -p 'All done. Press Enter to close this window.'"
 fi
 tmux select-window -t e02:run
 echo

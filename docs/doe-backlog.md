@@ -213,6 +213,24 @@ reruns. Wrong accepted labels are counted against questions asked.
 | Heading tie-break and the gravity bar (classify.py HEADING_TIE, GRAVITY_LON) | 0.10; 300 | HEADING_TIE: sweep 0.02-0.2 on the synthetic ablation plans where the yaw/pose heading swap remains, and on the replay. GRAVITY_LON reuses the existing gravity bar (300); sweep 100-1000 on pieces | Logs + Sim | open |
 | Printed calibration parts (report spec: one-wheel bump 1.0 cm x 10 cm, ramp 1.0 cm over 8 cm with a 6 cm plateau, crossing speed 3 cm/s) | as listed | Synthetic: bump height 0.5 / 1.0 / 1.5 cm x speed 2 / 3 / 5 cm/s (tilt test r and labels accepted); then one real log on one robot with the printed bump | Sim, then Board | open |
 
+## Tracker process, parked-robot watch, frame saving, fusion steering (2026-10-25 evening)
+
+Build report: [e02-oct25-tracker-process.md](build-reports/e02-oct25-tracker-process.md).
+
+| Number (where) | Value now | Experiment that would set it | Needs | Status |
+|---|---|---|---|---|
+| Cores and OpenCV threads (e02_trackproc.py TRACKER_CORES, CV_THREADS; run-e02-pi.sh: runner core 0, recorder core 1) | tracker 2-3, 2 threads; recorder 1 (0-1 with the side camera); runner 0 | On the Pi with no board: tools/pi/tracker_proc_bench.py, cores 2-3 / 1-3 / unpinned x OpenCV threads 1 / 2 / 3; pictures a second with a robot followed and the recorder's own rate (frames.csv). Then the next session's cpu.csv: any core over 90 % for minutes means the split is wrong | Pi, ~30 min | open |
+| Parked-robot watch (e02_alltrack.py PARK_GATE_CM, PARK_MOVED_CM, PARK_MOVED_N, PARK_STILL_CM, PARK_PIC_DIFF) | 8 cm; 2 cm; 12 pictures; 1 cm; 12 grey levels | Replay real footage with known moves of parked robots (the 15:45 collision; a short board session where Nick nudges a parked robot 1, 2, 4 and 8 cm) and long stretches without: missed moves, false moves and "outline shifted" calls, over a grid of the five | Footage + ~10 min board | open (6 min of 15:45 footage: 0 false moves) |
+| Parked robot "unseen" after (PARK_UNSEEN_S) | 3 s | Same replay: false "unseen" an hour by a board's edge against how long a picked-up robot goes unnoticed | Footage | open |
+| Frame-saving window (e02_framesaver.py BEFORE_S, AFTER_S) | 10 s (Nick's figure); 3 s | First production sessions: for each event, how long before it its cause began (the hold's own report, the track); the window that covers 95 % of them | Production logs | open |
+| Fusion steering (e02_fusesteer.py CAM_FRESH_S, SD_MAX_CM, DISAGREE_CM) | 0.5 s; 3 cm; 3 cm | Replay of the real-fusion runs with the camera withheld 0.3-1.0 s and near the boards: steering error per rule; then one board session with --fusion-steer against the same routes without | Logs, then board | open |
+| The bench's stand-in for the runner's own work (tools/pi/tracker_proc_bench.py LOAD_BUSY_MS, LOAD_IDLE_MS) | 1 thread, 5 ms busy / 5 ms idle | Replace by the runner's measured thread profile (threads.csv of the next session) | Logs | open |
+
+Chosen with no DOE (sizes, guards, geometry): picture ring SLOTS 128 (5 s); DECODE_QUEUE 4; START_TIMEOUT_S 20;
+CALL_TIMEOUT_S 10; THUMB_EVERY_S 30 (Nick's figure); MAX_CLIP_S 60; MAX_MB 4000; cpu.csv EVERY_S 2 and
+VCGENCMD_EVERY_S 10; PARK_CROWD_CM 14 (two touching robots); PARK_LOOK_R 0.6 robot widths; PARK_MEAN_N 8;
+NEAR_BOARD_CM 15 (the real-fusion report's own figure); FUSE_FRESH_S 0.3.
+
 ## Already set by data
 
 - **Line edge cue edge_thr 150** (e02.py SAFETY_SETTINGS): plywood reads 52-84 in every E02 session, the two real

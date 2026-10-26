@@ -569,3 +569,34 @@ def test_wiring_fusion_steer_uses_the_camera_when_it_is_fresh(tmp_path):
     assert TKW.steer_pos(run, "Left", (now - 0.1, 50.0, 50.0), 1.5)[1:] == (50.0, 50.0)
     assert TKW.steer_pos(run, "Left", (now - 1.0, 50.0, 50.0), 1.5)[1:] == (50.0, 50.0)   # no lab: the old rule
     assert TKW.steer_pos(run, "Left", (now - 2.0, 50.0, 50.0), 1.5) is None
+
+
+def test_device_source_keeps_the_cameras_own_jpeg_bytes():
+    """Production: the tracker process opens the camera. With CONVERT_RGB off, OpenCV hands over the MJPG bytes as
+    one row; they are kept as they are (no decode and encode again). A camera that decodes anyway is handled too."""
+    import e02_trackproc as TP
+    img = np.full((48, 64), 90, np.uint8)
+    jpg = cv2.imencode(".jpg", img)[1]
+
+    class Cap:
+        def __init__(self, raw):
+            self.raw, self.n = raw, 0
+
+        def set(self, prop, v):
+            return self.raw
+
+        def read(self):
+            self.n += 1
+            return True, (jpg.reshape(1, -1) if self.raw else cv2.cvtColor(img, cv2.COLOR_GRAY2BGR))
+
+        def release(self):
+            pass
+    for raw in (True, False):
+        src = TP.DevicePics(opener=lambda *a, raw=raw: Cap(raw), log=lambda m: None)
+        it = iter(src)
+        p = next(it)
+        assert p.jpeg[:2] == b"\xff\xd8"
+        assert (p.img is None) == raw
+        if raw:
+            assert p.jpeg == jpg.tobytes()
+        src.close()

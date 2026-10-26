@@ -755,6 +755,12 @@ class LiveView:
         robots = len([k for k in row if k.endswith(" x_cm") and row[k] != ""])
         total = len([k for k in row if k.endswith(" x_cm")])
         self.log("Note %s at %s%s" % (row["note"], row["clock"], (": " + row["text"]) if row["text"] else ""))
+        if nid is None:
+            try:
+                import e02_trackwire as TKW
+                TKW.on_note(r, row)             # a Note tap: a still and a clip of that moment (frames/)
+            except Exception:
+                pass
         return dict(ok=True, id=row["note"], clock=row["clock"], elapsed=row["elapsed"], robots=robots,
                     robots_total=total, file=NOTES_CSV)
 
