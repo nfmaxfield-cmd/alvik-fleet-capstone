@@ -52,7 +52,7 @@ other robot (the camera, the board touches) and against their own history. The r
 |---|---|---|---|---|
 | Healthy baseline | none | BASE_ROW | 0 / BASE_HOLDS | 0.9 / BASE_KC cm |
 | Gyro, Right, 5% jitter | none | **Right's gyro 3.2 x (9; second check, 4.8 x the others)** | 3 / 0 | 0.8 / 0.6 cm |
-| Wheels, all robots, 8% jitter | Center's wheels (7) | WHEELS_ROW | 1 / WHEELS_HOLDS | 0.4 / WHEELS_KC cm |
+| Wheels, all robots, 8% jitter | Center's wheels (7) | **all three, each by its own runs: Center 3.4 x (5), Left 2.0 x (6), Right 4.6 x (8)** | 1 / 3 | 0.4 / 2.3 cm |
 | Front, Left, 6 cm noise | the camera 3 times, Left never | **Left's front sensor 2.9 x (8; 5.8 cm at a board, 5.7 x the others); no camera flag** | 0 / 1 | 1.0 / 1.4 cm |
 
 <sub>Source: runner logs, `/tmp/claude-0/grid/*.txt` (before) and `/tmp/claude-0/grid-fix/*.txt` (after), read by
@@ -61,7 +61,10 @@ sessions ran on the code before the last wheel change, which doesn't touch them 
 session's hold came before Left was flagged (a flagged front sensor no longer holds the session; before the fix, the false
 camera flag had switched those holds off). The reruns shared the machine with other agents' work (a logs DOE on both
 cores, then their own simulator sessions); slow pictures caused some of the holds. KC far is not shown: the scorer
-sometimes takes a run's end point as its far point (44 and 99 cm on runs that back at start were under 1 cm off).</sub>
+sometimes takes a run's end point as its far point (44 and 99 cm on runs that back at start were under 1 cm off). The
+wheels session's 3 holds came where the jittered wheels took a robot towards an edge (2 borders, 1 camera-wheels
+disagreement during setup), and it crashed after its 21st run in `e02_unc.py` (not this fix: an overflow in
+`math.exp(-x[-1])`, line 146, during the uncertainty fit while parking), so its KC figure is from `runs.csv`.</sub>
 
 Each intermediate rerun found something that changed the code before the final runs (kept in `/tmp/claude-0/grid-fix`
 as `*.log`):
