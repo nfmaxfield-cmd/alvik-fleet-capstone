@@ -46,6 +46,11 @@ PARK_UNSEEN_S = 3.0      # chosen: no outline near the spot this long: unseen. D
 PARK_CROWD_CM = 14.0     # chosen: the followed robot this near a parked spot: the parked one is not judged (two
                          # touching robots are 9.5-13 cm apart centre to centre). No DOE: geometry
 PARK_MEAN_N = 8          # a moved robot's new spot: the mean of its latest this-many sightings. No DOE: smoothing only
+PARK_PIC_DIFF = 12.0     # the picture where a parked robot stood differs from when it settled by more than this (mean
+                         # grey levels, the picture's brightness shift taken out): something there changed. The same
+                         # test and value as MotionTracker._check_held (a held robot picked up). DOE with the gate
+PARK_LOOK_R = 0.6        # chosen: the picture compared is a disk this many robot widths in radius round the outline's
+                         # place (the body's corners are at 0.71). No DOE: geometry; the threshold above is the DOE's
 PARK_STILL_CM = 1.0      # chosen: a move counts once the outline stands still again: its last PARK_MOVED_N places within
                          # this of each other (the lock-on's own RELOCK_STILL_CM). DOE with the gate
 
@@ -152,6 +157,7 @@ class AllTracker(CAM.MotionTracker):
         super().__init__(*a, **k)
         self.parked = {}                 # robot -> dict(x, y, t_seen, status, off_cm, run, hist, moves, since)
         self.park_events = []            # (t, robot, kind, dict): moved / unseen / seen again (the process sends them)
+        self.on_park_event = None        # function(t, robot, kind, dict): told at once instead (the in-runner fallback)
         self._cands_n = -1               # picture number of last_cands
 
     # the lock-on: the faster matcher
@@ -219,6 +225,7 @@ class AllTracker(CAM.MotionTracker):
         try:
             with self.lock:
                 self._watch_parked(t)
+            self._flush_events()
         except Exception:                       # the parked watch must never stop the followed robot's tracking
             pass
         return out
@@ -263,6 +270,14 @@ class AllTracker(CAM.MotionTracker):
                 if d <= PARK_GATE_CM and (best is None or key < best[3]):
                     best = (d, i, c, key)
             if best is None:
+                if p.get("look") is not None and not self._look_changed(p["look"]):
+                    # no outline (merged with a board's edge, a shadow), but the picture where it stands is as it was
+                    p["t_seen"] = t
+                    p["run"] = 0
+                    if p["status"] == "unseen":
+                        self.park_events.append((t, r, "seen again", dict(x=round(p["x"], 2), y=round(p["y"], 2))))
+                    p["status"] = "seen (picture)"
+                    continue
                 last = p["t_seen"] if p["t_seen"] is not None else (p["since"] if p["since"] is not None else t)
                 if t - last >= PARK_UNSEEN_S and p["status"] != "unseen":
                     p["status"] = "unseen"
@@ -273,7 +288,15 @@ class AllTracker(CAM.MotionTracker):
             d, i, c, _ = best
             taken.add(i)
             sure = bool(c.get("shape")) and c.get("moving", 0.0) < self.MOVING_MIN
-            was_unseen = p["status"] == "unseen"
+            if p["status"] == "unseen":
+                # something robot-shaped near its spot after it was gone: maybe it, maybe not (a dry run, 2026-10-25:
+                # a hidden robot "moved" 6.6 cm onto something else). Its place is learned again from scratch and no
+                # move is ever inferred across the gap: the spot stays, the runner finds the robot when it needs it.
+                self.park_events.append((t, r, "seen again", dict(x=round(c["x"], 2), y=round(c["y"], 2),
+                                                                  cm=round(d, 2))))
+                p["ref"], p["look"], p["hist"], p["run"] = None, None, [], 0
+                p["status"] = "settling"
+                p["after_unseen"] = True
             p["t_seen"], p["sx"], p["sy"] = t, c["x"], c["y"]
             p["hist"].append((c["x"], c["y"]))
             del p["hist"][:-max(PARK_MEAN_N, PARK_MOVED_N)]
@@ -284,6 +307,7 @@ class AllTracker(CAM.MotionTracker):
                         max(math.hypot(q[0] - last[-1][0], q[1] - last[-1][1]) for q in last) <= PARK_STILL_CM:
                     # its outline's own place, once it stands still in the picture
                     p["ref"] = (float(np.mean([q[0] for q in last])), float(np.mean([q[1] for q in last])))
+                    p["look"] = self._look_at(*p["ref"])
                     p["status"] = "seen"
                     p["off_cm"] = 0.0
             else:
@@ -298,6 +322,18 @@ class AllTracker(CAM.MotionTracker):
                         nx = float(np.mean([q[0] for q in recent]))
                         ny = float(np.mean([q[1] for q in recent]))
                         dx, dy = nx - p["ref"][0], ny - p["ref"][1]
+                        if p.get("look") is not None and not self._look_changed(p["look"]):
+                            # the outline moved, the robot did not: the picture where it stood is unchanged (15:45
+                            # footage 16:31:36, Left by the bottom edge: its outline's centre jumped 8 cm as the floor
+                            # memory beside it changed). Its outline's place is taken again; the spot stays.
+                            self.park_events.append((t, r, "outline shifted", dict(x=round(p["x"], 2),
+                                                                                   y=round(p["y"], 2),
+                                                                                   cm=round(math.hypot(dx, dy), 2))))
+                            p["ref"] = (nx, ny)
+                            p["run"] = 0
+                            p["status"] = "seen"
+                            p["shifts"] = p.get("shifts", 0) + 1
+                            continue
                         ev = dict(x0=round(p["x"], 2), y0=round(p["y"], 2), x=round(p["x"] + dx, 2),
                                   y=round(p["y"] + dy, 2), cm=round(math.hypot(dx, dy), 2))
                         self.park_events.append((t, r, "moved", ev))
@@ -305,6 +341,7 @@ class AllTracker(CAM.MotionTracker):
                         p["run"] = 0
                         p["status"] = "moved"
                         p["ref"] = (nx, ny)
+                        p["look"] = self._look_at(nx, ny)
                         if self.MOVE_SPOT:
                             p["x"], p["y"] = p["x"] + dx, p["y"] + dy
                             self.protect[r] = (p["x"], p["y"])     # the "robot here" mask follows it
@@ -315,17 +352,41 @@ class AllTracker(CAM.MotionTracker):
                     p["run"] = 0
                     if p["status"] != "moved" or d < 0.5 * PARK_MOVED_CM:
                         p["status"] = "seen"
-            if was_unseen:
-                self.park_events.append((t, r, "seen again", dict(x=round(c["x"], 2), y=round(c["y"], 2))))
+
+    def _look_at(self, x, y):
+        """The picture where a robot stands (its body: a disk of radius 0.6 robot widths), for _look_changed. Smaller
+        than _check_held's 1.1: a push of 2-3 cm must change most of it, not a fifth."""
+        m = self._disk_mask(self.frame.shape, [(x, y)], PARK_LOOK_R) > 0
+        if not m.any():
+            return None
+        return (m, self.frame[m].copy(), float(self.offset))
+
+    def _look_changed(self, look):
+        m, ref, off0 = look
+        if m.shape != self.frame.shape:
+            return True
+        return float(np.mean(np.abs((self.frame[m] - self.offset) - (ref - off0)))) > PARK_PIC_DIFF
 
     def parked_state(self, now=None):
         """{robot: dict(x, y (its spot), status, seen_age_s, off_cm, moves)} for every parked robot."""
         with self.lock:
             now = self.frame_t if now is None else now
-            return {r: dict(x=round(p["x"], 2), y=round(p["y"], 2), status=p["status"],
+            return {r: dict(x=round(p["x"], 2), y=round(p["y"], 2),
+                            status=p["status"] + (" (after unseen: unconfirmed)" if p.get("after_unseen") and
+                                                  p["status"] in ("seen", "settling") else ""),
                             seen_age_s=None if p["t_seen"] is None or now is None else round(now - p["t_seen"], 2),
                             off_cm=None if p["off_cm"] is None else round(p["off_cm"], 2), moves=p["moves"])
                     for r, p in self.parked.items()}
+
+    def _flush_events(self):
+        if self.on_park_event is not None and self.park_events:
+            ev, self.park_events = self.park_events, []
+            for e in ev:
+                try:
+                    self.on_park_event(*e)
+                except Exception:
+                    pass
+        del self.park_events[:-200]              # nobody taking them: keep the latest only
 
     def take_park_events(self):
         with self.lock:

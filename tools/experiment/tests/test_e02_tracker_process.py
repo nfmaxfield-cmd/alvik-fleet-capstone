@@ -192,6 +192,80 @@ def test_a_parked_robot_taken_away_is_unseen_after_the_wait(scene):
             seen_unseen = t
     assert seen_unseen is not None
     assert any(e[2] == "unseen" for e in tr.take_park_events())
+    # something robot-shaped comes back 5 cm away: "seen again", never a move across the gap
+    b.y = 35.0
+    w.robots[:] = [b]
+    for _ in range(60):
+        t += 0.04
+        tr.push(grey(sc), t)
+    ev = tr.take_park_events()
+    assert any(e[2] == "seen again" for e in ev) and not any(e[2] == "moved" for e in ev)
+    assert tr.parked["B"]["y"] == pytest.approx(30.0)
+    assert "unconfirmed" in tr.parked_state()["B"]["status"]
+
+
+def test_an_outline_that_shifts_while_the_robot_stands_is_not_a_move(scene):
+    """15:45 footage, Left by the bottom edge: its outline's centre jumped though it never moved. The picture where
+    it stands is unchanged, so its spot must stay."""
+    w, sc, cam = scene
+    w.robots[:] = []
+    tr = AT.AllTracker(cam, (61.0, 61.0))
+    tr.set_area((0.0, 0.0, 122.15, 121.9))
+    tr.set_background([grey(sc) for _ in range(3)])
+    b = Robot(95.0, 30.0, 0.0, "B")
+    w.robots[:] = [b]
+    tr.robot_at(b.x, b.y)
+    tr.park("B", b.x, b.y)
+    t = 0.0
+    for _ in range(25):
+        t += 0.04
+        tr.push(grey(sc), t)
+    assert tr.parked["B"]["ref"] is not None
+    # the floor memory beside it goes wrong (as by a board's edge): a robot-wide strip next to it now differs
+    u, v = tr._px(95.0 + 6.0, 30.0)
+    r = int(tr.rpx * 0.5)
+    tr.frozen = True                                    # keep the floor memory from healing during the check
+    tr.bg[int(v) - r:int(v) + r, int(u) - r // 2:int(u) + r] -= 60.0
+    for _ in range(40):
+        t += 0.04
+        tr.push(grey(sc), t)
+    ev = tr.take_park_events()
+    assert not any(e[2] == "moved" for e in ev)
+    assert any(e[2] == "outline shifted" for e in ev)      # the outline did move: the check had work to do
+    assert tr.parked["B"]["x"] == pytest.approx(95.0) and tr.parked["B"]["moves"] == 0
+
+
+def test_proc_tracker_takes_no_position_from_before_its_latest_command():
+    import e02_trackproc as TP
+
+    class FakeFeed:
+        def __init__(self):
+            self.n = 0
+
+        def command(self, tr, op, *a, **k):
+            self.n += 1
+            tr.__dict__["_sent"] = self.n
+            return self.n
+
+    class Cam:
+        @staticmethod
+        def px_per_cm(x, y, z):
+            return 2.34
+
+    f = FakeFeed()
+    tr = TP.ProcTracker(f, Cam(), (61.0, 61.0))
+    tr.follow("A", 10.0, 20.0, t=5.0)
+    assert tr.active == "A" and tr.where() == (5.0, 10.0, 20.0)
+    base = dict(active=None, pos=None, last_seen=0.0, misses=0, source=None, frame_t=1.0, protect={}, hand_moved=[],
+                moved_by_hand=0, conf={}, stats={}, stats_hold={}, in_hold=False, last_cands=[], hint=None,
+                offset=0.0, thr=16.0, lock_off=(0.0, 0.0), use_lock=True, tn=1)
+    assert tr._update(dict(base, cmd=0)) is False        # from before follow(): not taken
+    assert tr.active == "A" and tr.where() == (5.0, 10.0, 20.0)
+    assert tr._update(dict(base, cmd=1, active="A", pos=(6.0, 11.0, 20.0))) is True
+    assert tr.where() == (6.0, 11.0, 20.0)
+    tr.hand_moved.add("A")
+    tr.hand_moved.discard("A")
+    assert f.n == 2                                      # the discard went to the process
 
 
 def test_parked_watch_off_changes_nothing(scene):
@@ -261,7 +335,7 @@ def test_frame_saver_cap_stops_clips_not_stills():
 
 
 @pytest.mark.parametrize("text,kind", [("e02 hold Right lost", "hold"), ("e02 hold answer a", None),
-                                       ("e02 help Left", "help call"), ("e02 watchdog stop Left", "border stop"),
+                                       ("e02 help Left", "help call"), ("e02 watchdog stop Left", "edge stop"), ("e02 hold border Right: crossed", "border stop"),
                                        ("e02 edge risk Right", "edge stop"), ("e02 turn fault Right", "failed turn"),
                                        ("e02 run 3 start", None)])
 def test_marks_to_frame_saving_kinds(text, kind):
@@ -391,24 +465,30 @@ def test_process_tracker_none_pauses_and_returns(scene):
     import e02_trackproc as TP
     w, sc, cam = scene
     w.robots[:] = []
-    imgs = [grey(sc) for _ in range(200)]
+    imgs = [grey(sc) for _ in range(500)]
     d = tempfile.mkdtemp()
     write_clip(os.path.join(d, "clip"), imgs)
     f = TP.ProcFeed("clip:%s@1" % os.path.join(d, "clip"), CAM.History(), log=lambda m: None)
     f.start()
+
+    def grows(timeout=6.0):
+        n0, end = f.n_trk, time.time() + timeout
+        while time.time() < end:
+            if f.n_trk > n0 + 2:
+                return True
+            time.sleep(0.05)
+        return False
     try:
         tr = f.make_tracker(cam, (61.0, 61.0))
-        time.sleep(0.8)
-        n0 = f.n_trk
+        assert grows()
         f.tracker = None
         assert f.tracker is None
-        time.sleep(0.8)
+        time.sleep(0.5)                      # pictures already on their way
         n1 = f.n_trk
-        time.sleep(0.8)
-        assert f.n_trk - n1 <= 1 and n1 > n0
+        time.sleep(1.0)
+        assert f.n_trk - n1 <= 1
         f.tracker = tr
-        time.sleep(0.8)
-        assert f.n_trk > n1 + 3
+        assert grows()
         with pytest.raises(ValueError):
             f.tracker = CAM.MotionTracker(cam)
     finally:
@@ -441,3 +521,51 @@ def test_real_footage_same_positions():
         tr.follow("Center", 111.09, 17.1, t=float(rows[0]["t_wall"]))
         res.append([tr.push(im, float(r["t_wall"])) for im, r in zip(imgs, rows)])
     assert res[0] == res[1]
+
+
+# =============================================================================== the runner's wiring (e02_trackwire)
+class FakeRun:
+    def __init__(self, d):
+        import e02_plan as PL
+        self.dir = d
+        self.st = {"robots": ["Left", "Center", "Right"], "positions": {"Right": [30.0, 80.0, None]}}
+        self.lines = []
+        self.board = PL.Board(xboard_side=1, yboard_side=1)
+        self.lab = None
+
+    def say(self, m, quiet=False):
+        self.lines.append(m)
+
+
+def test_wiring_parked_move_updates_the_stored_place_and_logs(tmp_path):
+    import e02_trackwire as TKW
+    run = FakeRun(str(tmp_path))
+    run.feed = None
+    TKW.on_park_event(run, 100.0, "Right", "moved", dict(x0=30.0, y0=80.0, x=30.5, y=84.0, cm=4.0))
+    assert run.st["positions"]["Right"][:2] == [30.5, 84.0]
+    rows = list(csv.DictReader(open(os.path.join(str(tmp_path), "parked.csv"))))
+    assert rows[0]["event"] == "moved" and rows[0]["robot"] == "Right"
+    assert any("moved 4.0 cm" in ln for ln in run.lines)
+
+
+def test_wiring_marks_become_events_only_with_the_process(tmp_path):
+    import e02_trackwire as TKW
+    import e02_trackproc as TP
+    run = FakeRun(str(tmp_path))
+    sent = []
+    f = TP.ProcFeed.__new__(TP.ProcFeed)
+    f.event = lambda *a: sent.append(a)
+    run.feed = f
+    TKW.on_mark(run, "e02 hold lost Right: no camera position")
+    TKW.on_mark(run, "e02 run 3 start")
+    TKW.on_note(run, {"note": 4, "text": "two robots touching"})
+    assert [s[0] for s in sent] == ["hold", "note"] and sent[0][3] == "Right"
+
+
+def test_wiring_fusion_steer_uses_the_camera_when_it_is_fresh(tmp_path):
+    import e02_trackwire as TKW
+    run = FakeRun(str(tmp_path))
+    now = time.time()
+    assert TKW.steer_pos(run, "Left", (now - 0.1, 50.0, 50.0), 1.5)[1:] == (50.0, 50.0)
+    assert TKW.steer_pos(run, "Left", (now - 1.0, 50.0, 50.0), 1.5)[1:] == (50.0, 50.0)   # no lab: the old rule
+    assert TKW.steer_pos(run, "Left", (now - 2.0, 50.0, 50.0), 1.5) is None

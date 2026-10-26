@@ -1047,9 +1047,17 @@ class ProcFeed:
         self.saver_summary = None
         self.make_args = None
         self.area_args = None
+        self.q = queue.Queue()
+        self.q_warned = False
+        self.disp = None
+        self.hook_th = None
+        self.hook_cond = threading.Condition()
+        self.hook_next = None
 
     # --- life ---------------------------------------------------------------------------------------------------
     def start(self):
+        if self.proc is not None and self.proc.alive():
+            return self                                   # already running (make_feed starts it)
         self.proc = _ProcHandle(self.cfg, log=self.log, on_msg=self._on_msg, python=self.python)
         self.proc.start()
         if self._keep_s:
@@ -1067,6 +1075,11 @@ class ProcFeed:
         self.stopped = True
         if self.proc is not None:
             self.proc.close()
+        self.q.put(None)
+        if self.disp is not None:
+            self.disp.join(5.0)
+        with self.hook_cond:
+            self.hook_cond.notify_all()
 
     def restart(self):
         """A new tracker process after the old one died: same source, same tracker set-up (calibration, area, lock
@@ -1111,12 +1124,10 @@ class ProcFeed:
         self.proc.command("tracking", True)
         return tr
 
-    @property
-    def tracker(self):
+    def _get_tracker(self):
         return self._tracker if self._tracker_on else None
 
-    @tracker.setter
-    def tracker(self, tr):
+    def _set_tracker(self, tr):
         """None: the process stops tracking (the dance's own tracker works meanwhile); the tracker back: it goes on.
         Any other tracker object is refused (it would run in the runner)."""
         if tr is None:
@@ -1127,6 +1138,8 @@ class ProcFeed:
             self.proc.command("tracking", True)
         else:
             raise ValueError("ProcFeed tracks with its own process; use make_tracker()")
+
+    tracker = property(_get_tracker, _set_tracker)   # (one name each: tests/test_e02_oct22 no_method_is_defined_twice)
 
     def command(self, tr, op, *a, **k):
         """A command from tracker tr (only the current tracker's commands go through)."""
@@ -1159,8 +1172,8 @@ class ProcFeed:
 
     # --- messages (the pipe thread) -------------------------------------------------------------------------------
     def _on_msg(self, m):
-        if self.ident is None:
-            self.ident = threading.get_ident()
+        """The pipe's thread: picture numbers at once (cheap); positions and the rest to the dispatch thread, so a
+        slow runner never stops the pipe (a full pipe would stop the tracker process)."""
         k = m[0]
         if k == "frm":
             _, n, t, pf, t_pi, off = m
@@ -1171,15 +1184,62 @@ class ProcFeed:
                 self.last_n = n
                 self.cond.notify_all()
             if self.hooks:
-                r = self.proc.ring.read(n) if self.proc.ring is not None else None
-                if r is not None:
-                    img = r[0]
-                    for h in list(self.hooks):
-                        try:
-                            h(img, t)
-                        except Exception as e:
-                            self.log("(camera hook failed: %s)" % e)
-        elif k == "trk":
+                with self.hook_cond:
+                    self.hook_next = (n, t)
+                    self.hook_cond.notify()
+                self._start_threads()
+            return
+        self._start_threads()
+        self.q.put(m)
+        if self.q.qsize() > 250 and not self.q_warned:
+            self.q_warned = True
+            self.log("(the runner is behind the tracker process by %d messages)" % self.q.qsize())
+
+    def _start_threads(self):
+        if self.disp is None:
+            self.disp = threading.Thread(target=self._dispatch, daemon=True, name="tracker-process-dispatch")
+            self.disp.start()
+        if self.hook_th is None and self.hooks:
+            self.hook_th = threading.Thread(target=self._run_hooks, daemon=True, name="tracker-process-hooks")
+            self.hook_th.start()
+
+    def _run_hooks(self):
+        """The camera hooks (naming check, camera shift watch, the dance's tracker): the newest picture each time
+        they are ready for one, as the old feed gave them the pictures its tracker took."""
+        while not self.stopped:
+            with self.hook_cond:
+                while self.hook_next is None and not self.stopped:
+                    self.hook_cond.wait(0.5)
+                if self.stopped:
+                    return
+                n, t = self.hook_next
+                self.hook_next = None
+            hooks = list(self.hooks)
+            if not hooks:
+                continue
+            r = self.proc.ring.read(n) if (self.proc is not None and self.proc.ring is not None) else None
+            if r is None:
+                continue
+            for h in hooks:
+                try:
+                    h(r[0], t)
+                except Exception as e:
+                    self.log("(camera hook failed: %s)" % e)
+
+    def _dispatch(self):
+        self.ident = threading.get_ident()
+        while True:
+            m = self.q.get()
+            if m is None:
+                return
+            try:
+                self._handle(m)
+            except Exception as e:
+                self.log("(tracker process message failed in the runner: %s)" % e)
+
+    def _handle(self, m):
+        k = m[0]
+        if k == "trk":
             d = m[1]
             tr = self._tracker
             if tr is None:
@@ -1277,15 +1337,15 @@ class ProcFeed:
                 ts.append(r[1][0])
         return imgs, ts
 
-    @property
-    def keep_s(self):
+    def _get_keep_s(self):
         return self._keep_s
 
-    @keep_s.setter
-    def keep_s(self, v):
+    def _set_keep_s(self, v):
         self._keep_s = float(v)
         if self.proc is not None:
             self.proc.command("keep_s", self._keep_s)
+
+    keep_s = property(_get_keep_s, _set_keep_s)
 
     def kept(self, t_from, t_to=None):
         try:
