@@ -18,6 +18,10 @@ pictures a second (-1 to +1; near 0 = no link, or temperature barely varied).
   picture rate line up with what the runner was doing (e.g. 25 a second at minutes 42-52, while it waited on a
   question), not with temperature. The comparison that settles it: the same session plan with a fan or heatsink case
   on the Pi (the "Cooling" column).
+  Update from the session analysis (build-reports/e02-oct26-session-0955.md): the tracker's time per picture was the
+  same hot or cool (26-29 ms with nothing to track, about 54 ms watching parked robots, about 73 ms following one
+  as well), so in this session the picture rate was set by the tracker's workload on one core, not by heat. Heat
+  is still worth a fan: 86 C is close to the Pi's 85 C hard limit.
   ![Pi temperature and camera speed, 2026-10-26](heat/e02-20261026-095541.png)
   The Pi's temperature (orange, red dots where it was throttling) and the pictures the camera handled each second
   (green), over the session; data: the session's cpu.csv and perf.csv.
