@@ -258,8 +258,9 @@ def test_runner_safety_settings_go_with_every_find_and_route():
     cmds = r.board_params()
     for c in E.SAFETY_CMDS:
         assert c in cmds
-    assert E.EXPECTED_FW == "2026-10-25b" and {"2026-10-22b", "2026-10-25a"} <= set(E.OK_FW)   # back switches; older still run
-    assert set(E.BORDER_FW) == {"2026-10-25a", "2026-10-25b"}                                  # both have the robot's own border
+    assert E.EXPECTED_FW == "2026-10-25c" and {"2026-10-22b", "2026-10-25a", "2026-10-25b"} <= set(E.OK_FW)   # older still run
+    assert set(E.BORDER_FW) == {"2026-10-25a", "2026-10-25b", "2026-10-25c"}   # all have the robot's own border
+    assert set(E.BACK_FW) == {"2026-10-25b", "2026-10-25c"}                     # 25c has everything 25b had
 
 
 def test_switches_back_flag_adds_the_back_settings_per_robot():

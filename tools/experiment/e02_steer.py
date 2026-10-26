@@ -29,6 +29,9 @@ MIN_TURN_DEG = 1.0       # turns smaller than this are not sent (the robot can't
 RECOVER_CM = 40.0        # camera end this far from its start spot: too far off to trust the drive back (needs recovery)
 LOST_CM = RECOVER_CM     # old name (2026-10-21a flagged runs "lost" at 15 cm: most U runs, by design)
 STUCK_FRACTION = 0.3     # a leg that moved less than this share of what was asked: stuck
+STILL_GOING_CM = 1.0     # the 15:45 analysis: past an open edge's line, "still going" needs this much real outward motion
+# over the watchdog's window (Left's stopped back-out: 0.6 cm of tracker jitter). DOE note: yes, logs: the tracker's
+# jitter on still robots near the edges (doe-backlog.md '"Still going" jitter')
 
 
 def wrap180(a):
@@ -219,7 +222,7 @@ def inward_cm(board, axis, value, p):
     return sgn * (p - value)
 
 
-def hazard(samples, board, parked, horizon_s=0.3, edge_cm=None, robot_cm=None):
+def hazard(samples, board, parked, horizon_s=0.3, edge_cm=None, robot_cm=None, jump_cms=None):
     """Camera watchdog: is the moving robot (samples [(t, x, y), ...], newest last) at, or within horizon_s of,
     an open edge (centre nearer than edge_cm) or a parked robot (centre nearer than robot_cm), while moving
     towards it? parked: {name: (x, y)} (not the mover). Moving away from a hazard is always allowed (so it can be
@@ -246,8 +249,8 @@ def hazard(samples, board, parked, horizon_s=0.3, edge_cm=None, robot_cm=None):
     x, y = float(np.median([q[1] for q in win[-k:]])), float(np.median([q[2] for q in win[-k:]]))
     vx, vy = (x - x0) / max(t1 - t0, 1e-3), (y - y0) / max(t1 - t0, 1e-3)
     sp = math.hypot(vx, vy)
-    if sp > 30.0:                                # faster than any robot drives: a tracking jump, not a robot
-        return None
+    if sp > (30.0 if jump_cms is None else jump_cms):   # faster than any robot drives (or than this one crawls):
+        return None                              # a tracking jump, not a robot
     if sp < 1.0:                                 # standing still (camera noise): nothing is closing in
         vx = vy = 0.0
     px, py = x + vx * horizon_s, y + vy * horizon_s
@@ -255,8 +258,14 @@ def hazard(samples, board, parked, horizon_s=0.3, edge_cm=None, robot_cm=None):
         d0 = inward_cm(board, a, v, x if a == "x" else y)      # inward distance: + on the board, - past the edge
         d1 = inward_cm(board, a, v, px if a == "x" else py)
         if d1 < edge_cm and d1 < d0 - 0.5:          # closing at 1.7+ cm/s, not just drifting along it
-            return ("%.0f cm from the open edge and heading for it" % d0) if d0 >= 0 else \
-                ("%.0f cm past the open edge and still going" % -d0)
+            if d0 < 0:
+                # past the line: "still going" needs the robot to have really moved out over the window, not a
+                # tracker jitter extrapolated (2026-10-25 15:45: Left's back-out stopped on a 0.6 cm jitter)
+                d_first = inward_cm(board, a, v, x0 if a == "x" else y0)
+                if d_first - d0 < STILL_GOING_CM:
+                    continue
+                return "%.0f cm past the open edge and still going" % -d0
+            return "%.0f cm from the open edge and heading for it" % d0
     for n, (qx, qy) in (parked or {}).items():
         d0 = math.hypot(x - qx, y - qy)
         d1 = math.hypot(px - qx, py - qy)

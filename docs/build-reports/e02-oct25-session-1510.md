@@ -141,6 +141,11 @@ and measured the plywood's bright edge across each side at three places:
 | Left (board) | line 3-4 cm outside |
 | Top (board) | line about 3 cm inside |
 
+> **Correction (2026-10-25, 15:45 fixes):** the dark strip along the bottom edge is painter's tape on the plywood
+> (Nick). It is surface, not a drop. The bottom row above measured the bright plywood's edge, which is the tape's
+> inner edge: the real drop is within about 1-2 cm of the stored bottom line ([15:45 analysis](e02-oct25-session-1545.md)).
+> The bottom line is not 4-5 cm outside the drop.
+
 The outline is shifted about 3-4 cm towards the bottom-left of the picture. Three sides miss by more than a
 finger's width (about 2 cm). The live page shows only the live picture and the question text, so Nick could not
 have seen it. He took 150 s to answer.

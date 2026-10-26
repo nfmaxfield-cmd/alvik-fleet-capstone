@@ -183,6 +183,9 @@ class World:
                 px, py, ph = [(10.0, 60.0, 180.0), (60.0, 40.0, 90.0), (70.0, 85.0, -30.0)][k % 3]
             elif args.start == "s1510":         # the real 2026-10-25 15:10 session's spots (on the stored calibration)
                 px, py, ph = [(46.1, 86.6, 180.0), (37.5, 53.1, 0.0), (85.9, 31.0, 90.0)][k % 3]
+            elif args.start == "s1545":         # the real 2026-10-25 15:45 session: Left 11.6 cm from the bottom edge
+                # facing it (16:40:13, centre and its own heading), Right mid-board, Center by its spot
+                px, py, ph = [(11.6, 96.2, -126.0), (60.0, 40.0, 90.0), (36.0, 72.0, 40.0)][k % 3]
             elif args.start == "scatter":       # anywhere open, as Nick puts them down now
                 while True:
                     px, py, ph = rng.uniform(30, 92), rng.uniform(30, 92), rng.uniform(-180, 180)
@@ -190,8 +193,9 @@ class World:
                         break
             else:
                 px, py, ph = bd.park(k)
-            rb.x, rb.y = px + rng.uniform(-6, 6), py + rng.uniform(-4, 4)
-            rb.th = math.radians(ph + rng.uniform(-15, 15))
+            jit = (1.0, 1.0, 3.0) if args.start == "s1545" else (6.0, 4.0, 15.0)   # s1545: Left must stay at the edge
+            rb.x, rb.y = px + rng.uniform(-jit[0], jit[0]), py + rng.uniform(-jit[1], jit[1])
+            rb.th = math.radians(ph + rng.uniform(-jit[2], jit[2]))
             rb._record()
             rb.fw_yaw_sign = 0                      # just switched on: needs `calibrate` (the compass check)
             if getattr(args, "kept_pose", False):
@@ -570,6 +574,54 @@ def place_loop(world, simdir):
         time.sleep(0.2)
 
 
+def turn_fault_loop(world, spec):
+    """--turn-fault ROBOT[@S]: the 2026-10-25 15:45 Right. Its turns worked at its compass check and failed from its
+    next move on: S s after the check its gyro's sign flips (its own IMU model only), so every turn's heading moves
+    the wrong way and runs to the firmware's turn timeout, and a straight drive's heading hold steers it off."""
+    import copy
+    name, _, after = spec.partition("@")
+    after, _, mode = after.partition(":")         # mode "restart": it loses its compass check (as after a power-on)
+    rb = next((r for r in world.robots if r.name == name), None)
+    if rb is None:
+        print("e02_sim: --turn-fault: no robot %s" % name, flush=True)
+        return
+    while not world.stop.is_set() and rb.fw_yaw_sign == 0:
+        time.sleep(0.2)
+    t_end = time.time() + float(after or 5.0)
+    while not world.stop.is_set() and time.time() < t_end:
+        time.sleep(0.2)
+    if world.stop.is_set():
+        return
+    if mode == "restart":
+        rb.fw_yaw_sign = 0
+        print("e02_sim: %s lost its compass check (as after a restart) at %.1f" % (name, time.time()), flush=True)
+    elif mode == "persist":
+        # a fault no compass check mends: every time it learns its sign again, its turns break again a moment later
+        def flip():
+            im = copy.copy(rb.imu_m)
+            im.yaw_sign = -im.yaw_sign
+            rb.imu_m = im
+        flip()
+        print("e02_sim: %s's turns broken for good (each new compass check undone) at %.1f" % (name, time.time()),
+              flush=True)
+        seen = rb.fw_yaw_sign
+        while not world.stop.is_set():
+            time.sleep(0.05)
+            if rb.fw_yaw_sign != seen:
+                seen = rb.fw_yaw_sign
+                time.sleep(0.8)          # after the wiggle's end
+                flip()
+    else:
+        # the 15:45 Right: its compass check learned the wrong sign (an 11 deg yaw jump); the same as its gyro
+        # reading the other way from now on. A new compass check learns the sign again and mends it.
+        im = copy.copy(rb.imu_m)
+        im.yaw_sign = -im.yaw_sign
+        rb.imu_m = im
+        print("e02_sim: %s's turns broken (its gyro reads turns the wrong way) at %.1f" % (name, time.time()), flush=True)
+    with open(os.path.join(world.args.out, "turn_fault.json"), "w") as f:
+        json.dump(dict(robot=name, t=time.time()), f)
+
+
 def bricks_loop(world, flag):
     """Bricks on the board while the flag file exists (e02.py makes and removes it)."""
     while not world.stop.is_set():
@@ -583,9 +635,13 @@ def main(argv=None):
     ap.add_argument("--out", default="e02_sim_out")
     ap.add_argument("--robots", default="Left,Center,Right")
     ap.add_argument("--seed", type=int, default=2)
-    ap.add_argument("--start", default="parks", choices=["parks", "swapped", "scatter", "corners", "edge", "s1510"],
+    ap.add_argument("--start", default="parks", choices=["parks", "swapped", "scatter", "corners", "edge", "s1510", "s1545"],
                     help="where the robots stand at the start: near their park spots, each on another's, anywhere, or "
                          "Nick's 2026-10-22 corners layout")
+    ap.add_argument("--turn-fault", default="", help="ROBOT[@S[:restart]]: S s (default 5) after that robot's compass "
+                         "check its turns read the wrong way (turns run to the timeout, straight drives curve: the "
+                         "2026-10-25 15:45 Right, whose check learned the wrong sign; a new compass check mends it); "
+                         ":restart = it loses its compass check instead (legs refused, firmware 2026-10-25c)")
     ap.add_argument("--kept-pose", action="store_true",
                     help="the robots kept a board pose from an earlier session (not switched off): the 2026-10-24 "
                          "stage-3 case")
@@ -645,6 +701,8 @@ def main(argv=None):
                                 daemon=True)]
     threads.append(threading.Thread(target=remove_board_loop, args=(world, a.out), daemon=True))
     threads.append(threading.Thread(target=place_loop, args=(world, a.out), daemon=True))
+    if a.turn_fault:
+        threads.append(threading.Thread(target=turn_fault_loop, args=(world, a.turn_fault), daemon=True))
     if world.brick_polys:
         threads.append(threading.Thread(target=bricks_loop, args=(world, os.path.join(a.out, "BRICKS_ON")), daemon=True))
     servers = []

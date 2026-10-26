@@ -96,6 +96,7 @@ import e02_stall as STL  # noqa: E402
 import e02_front as FR  # noqa: E402
 import e02_unc as UNC  # noqa: E402
 import e02_degrade as DG  # noqa: E402
+import e02_turnwatch as TW  # noqa: E402
 
 
 def EX_provisional_camera(w, h, f=600.0, height_cm=260.0):
@@ -174,16 +175,78 @@ HEADING_CLEAR_CM = 20.0   # the heading drive (10 cm) only with at least this mu
 ID_UNKNOWN_SCALE = 1.7    # a robot found by a turn on its spot: its floor is unknown this many robot widths round
 AUTO_TRIES = 3            # a lost or stuck robot tries this many times on its own before Nick is called
 BACK_OFF_CM = 8.0         # a leg stopped by its front sensor backs this far before turning away (2026-10-22 loop)
-EDGE_TURN_CM = 9.0        # no turn on the spot closer than this to an open edge (the wheels reach it first)
+EDGE_TURN_CM = 9.0        # no turn on the spot closer than this to an open edge (the wheels reach it first); since the
+# 15:45 fixes drive_to obeys it too (it moves straight away first). DOE note: yes, on the board with the crawl DOE:
+# turns on the spot at 6 / 9 / 12 cm, camera-measured body sweep (doe-backlog.md "No turns near an open edge")
+# --- 2026-10-25 15:45 session fixes (docs/build-reports/e02-oct25-1545-fixes.md). The dark strip along the bottom
+# edge is painter's tape on the plywood (Nick, 18:46): surface, not a drop. The drop is within about 1-2 cm of the
+# stored bottom line, so every distance below is from that line.
+EDGE_AWAY_MARGIN_CM = 1.5     # chosen: move away until the centre is this much past EDGE_TURN_CM (the camera's noise
+# at an edge, about 1 cm). DOE note: no, a margin on a limit that has its own DOE row
+EDGE_AWAY_MIN_COS = 0.34      # chosen: straight driving only moves it away if it faces within 70 deg of the edge's
+# normal (either way); along the edge it turns slowly instead (logged edge_turns_along). DOE note: no, geometry
+EDGE_AWAY_MAX_CM = 12.0       # chosen: at most this far in one move-away leg (then planned again). DOE note: no
+HEADING_CRAWL_ROOM_CM = 20.0  # heading unknown and the centre within this of an open edge: no blind drive, a crawl. The
+# 15:45 analysis said 15; the 19:02 dry run showed a 10 cm heading drive from 17 cm ending 9 cm from the edge, so it
+# is the 10 cm drive + the watchdog's 9 cm + 1. DOE note: yes, the crawl DOE (doe-backlog.md "Heading-drive crawl
+# near an edge")
+HEADING_CRAWL_CM = 3.0        # Nick, 18:46: "about 3 cm" a crawl step; at most 2 steps until the camera has seen 3 cm
+HEADING_CRAWL_CMS = 2.0       # chosen: slow, as explore's creep (EXPLORE_CREEP_CMS). Same DOE row
+HEADING_CRAWL_BACK_CM = 6.0   # the 15:45 analysis: an edge stop on the crawl backs straight out this far (it came that
+# way, so it is clear; 6 cm also measures the heading on the way). Same DOE row
+TURN_SLOW_ROOM_CM = 20.0      # chosen: within this of an open edge turns go slower (Nick: "more cautious around turns",
+# not slower everywhere). DOE note: yes, with the turn-near-edge DOE row: body sweep and gyro error against turn speed
+TURN_SLOW_RPM = 20.0          # chosen: half the firmware's turn_max_rpm (40). Same DOE row
+TURN_FAST_RPM = 40.0          # params.h turn_max_rpm, put back away from the edges
+TURN_SLOW_TIMEOUT_MS = 9000   # a slow turn gets this long (params.h turn_timeout_ms 5000 at full speed: a 180 deg turn
+# at half speed takes about 8 s on the real robots, 45 deg/s at full speed). Derived from the speed, no DOE
+TURN_TIMEOUT_MS = 5000        # params.h turn_timeout_ms, put back
+TURN_CONFIRM_ROOM_CM = 25.0   # chosen: after a turn this near an open edge, the first straight drive is a short check
+# (HEADING_CHECK_CM) the camera measures before the rest. In the open it drives at full length. DOE note: yes, logs:
+# how far the first drive after a turn went off its heading in every session, by distance to the edge
+CRAWL_MIN_ROOM_CM = 5.5       # chosen: no heading crawl with the centre nearer an open edge than this: the line
+# sensors (3.5 cm ahead of the axle) could already be over the drop and the guard would learn it as floor (the
+# 2026-10-22 fall); Nick is called. DOE note: no, geometry (3.5 cm + 2 cm of camera error)
+CRAWL_HEADING_MIN_CM = 1.5    # chosen: a crawl's heading counts from 1.5 cm of straight camera track (a straight-line
+# fit through every locked picture, rms under 0.6 cm). Dry runs 19:11-19:28: near the bottom edge the simulator's
+# camera saw only 33-40 % of the crawl (2.0-2.3 of 6.0 cm) but in the right direction (within 2 deg) whenever it
+# stayed locked. DOE note: yes, with the crawl DOE row (heading error against camera distance, on the real board)
+CRAWL_LOCKED_SHARE = 0.8      # chosen: ... and only if the tracker was locked on in this share of the crawl's pictures
+# (19:28: locked in 32 of 56, the direction 25 deg off; 19:18: detector only, 165 deg off). Same DOE row
+CRAWL_CAMERA_SHARE = 0.25     # chosen: a crawl's camera track counts only if it saw at least this share of what the
+# wheels drove (a backstop: the simulator's camera saw 33-49 % near the bottom edge, right direction). DOE note: yes,
+# the crawl DOE row
+FOUND_SETTLE_S = 1.5          # chosen: after a find the watchdog's distance check waits this long for the tracker to
+# lock on. DOE note: no, a settling window (the tracker's own lock-on time)
+CRAWL_JUMP_CMS = 8.0          # chosen: while crawling (2 cm/s) a camera position moving faster than 4x that is the
+# tracker settling, not the robot. DOE note: no, a multiple of the crawl speed
+CRAWL_WATCH_EDGE_CM = 5.0     # chosen: while a robot crawls towards an open edge on purpose (the heading crawl,
+# explore's crawls), the watchdog stops it only this near (its front then at the drop): the edge sensors stop it
+# first (the bottom zone looks about 9 cm ahead). DOE note: no, a backstop behind the edge sensors
+HEADING_CHECK_CM = 4.0        # chosen: the check drive (ST.MIN_HEADING_CM 3 cm measures a heading; 1 cm of margin)
+TURN_SPIN_DRIFT_CM = 2.5      # chosen: a turn on its spot whose camera centre moved this much towards an open edge,
+# inside the border, holds like a drive into the border (the top's centre swings about 1.5 cm on a turn). DOE note:
+# yes, logs: centre drift during healthy turns (track.csv) against Right's 15:45 spins
+EDGE_BACKOUT_S = 30.0         # chosen: a backwards drive this soon after the robot's own edge guard stopped it is a
+# back-out: the watchdog's open-edge stop lets it run. DOE note: no, a time window for "right after"
+FIX_HELD_AFTER_GO_S = 5.0     # chosen: this soon after a drive, a "held" tracker spot is not sent as a camera fix until
+# the camera has really seen the robot again (15:45: a held spot 15 cm off was sent to Left). DOE note: no
+FIX_HELD_WAIT_S = 1.5         # ... waiting at most this long for a real sighting (then no fix). DOE note: no
+ASIDE_ROUTE_MARGIN_CM = 3.0   # chosen: a route passing a set-aside robot nearer than the watchdog's parked-robot
+# distance plus this is not run (15:45: 4 square runs cut 14-17 cm from parked Right). DOE note: no, a margin on
+# PL.WATCH_ROBOT_CM
+ALERT_REPEAT_S = 30           # the live page sounds again this often while a hold or help call waits (chosen: Nick
+# missed two 10-minute help calls). DOE note: no, Nick's time
 FIND_TIMEOUT_S = 150
 E02_TIMEOUT_S = {0: 150, 1: 400}
 BATTERY_WARN, BATTERY_STOP = 40, 15
 LEVELS_EVERY_S = 300.0      # chosen: refit the battery and the charge levels at most every 5 min (the battery reads in
                             # whole %; about 1 % per 4 min while standing). No DOE: it only sets how fresh the display is
-EXPECTED_FW = "2026-10-25b"
-OK_FW = ("2026-10-22b", "2026-10-25a", "2026-10-25b")   # 25a adds the robot's own virtual border and `sleep`; 25b the
-                                                        # back switches and the reverse find; 22b still runs
-BORDER_FW = ("2026-10-25a", "2026-10-25b")   # firmware with the robot's own virtual border and `sleep`
+EXPECTED_FW = "2026-10-25c"
+OK_FW = ("2026-10-22b", "2026-10-25a", "2026-10-25b", "2026-10-25c")   # 25a adds the robot's own virtual border and
+                                                        # `sleep`; 25b the back switches and the reverse find; 25c refuses
+                                                        # go / turn legs before a compass check; 22b still runs
+BORDER_FW = ("2026-10-25a", "2026-10-25b", "2026-10-25c")   # firmware with the robot's own virtual border and `sleep`
 # --switches-back (Nick, 2026-10-25: "one attachment in total with switches in the back"): these too, sent and read
 # back with the safety settings and again before every find (a robot switched off and on loses them; it would then
 # find nose first, which still works). The find then backs into each board (firmware 2026-10-25b, e02.h REVERSE
@@ -193,7 +256,7 @@ BORDER_FW = ("2026-10-25a", "2026-10-25b")   # firmware with the robot's own vir
 # backing cap (e02_find_keep_cm 2) is left as it is: the look before backing is what keeps a robot off an edge where
 # a board was taken away (firmware e02.h REVERSE FIND; build report e02-oct25-backing-unc.md, item B).
 BACK_SETTINGS = (("sw_on", 1.0), ("sw_back", 1.0), ("e02_find_reverse", 1.0), ("e02_back_face_cm", 6.10))
-BACK_FW = ("2026-10-25b",)
+BACK_FW = ("2026-10-25b", "2026-10-25c")
 # Backups (Nick, 2026-10-23: "build in backup plans in case our session goes poorly ... get as much data as possible
 # before stopping for a rebuild"). Chosen numbers; a DOE would not help much here (they trade data for Nick's time).
 HEADING_LONG_ROOM_CM = 30.0   # a 15 cm heading drive only this far (or more) from an open edge
@@ -627,6 +690,16 @@ class Runner:
         self.leg_kind = {}                # robot -> "go" / "turn": its current (or last) leg
         self.leg_val = {}                 # robot -> its current leg's value (cm or deg)
         self.leg_end = {}                 # robot -> when its last leg ended
+        # 2026-10-25 15:45 fixes
+        self.turnwatch = TW.TurnWatch()   # fix 1: turns that keep failing (e02_turnwatch.py)
+        self.turn_done = {}               # robot -> its own heading change over its last turn leg (deg, None unknown)
+        self.turn_start_xy = {}           # robot -> the camera's position when its current turn began (fix 5: spins)
+        self.turned_since_measure = {}    # robot -> one of its own turns since its heading was last measured
+        self.edge_stop_t = {}             # robot -> when its own edge guard last stopped it (fix 4: back-outs)
+        self.go_end = {}                  # robot -> when its last drive ended (fix 6: no fix from a held spot)
+        self.src_log = []                 # [(t, tracker source)] of the latest pictures (fix 6)
+        self.turn_speed_now = {}          # robot -> the turn speed (rpm) last set on it (fix 5)
+        self.help_waiting = None          # the robot whose help call waits for Nick (the live page sounds)
         self.moves = {}               # robot -> dict(run ("-" = idle legs), why): it is taking legs now
         self.leg_ids = {}
         self.last_lid = {}            # robot -> id of the last leg sent
@@ -884,6 +957,10 @@ class Runner:
             except Exception:              # a display-grade measurement: never break the camera loop
                 pass
         if self.tracker is not None and self.tracker.active:
+            sl = self.__dict__.setdefault("src_log", [])
+            sl.append((s[0], getattr(self.tracker, "source", "") or ""))      # fix 6: was it really seen?
+            if len(sl) > 400:
+                del sl[:200]
             lk = getattr(self.tracker, "lk", None)
             self.trackw.writerow(["%.3f" % s[0], self.tracker.active, "%.2f" % s[1], "%.2f" % s[2], self.order, self.phase,
                                   getattr(self.tracker, "source", "") or "",
@@ -1051,7 +1128,7 @@ class Runner:
         rows = [c for c in self.st.get("calibrations") or [] if c[1] == robot]
         return bool(rows) and str(rows[-1][3] or "").lower() in ("done", "ok")
 
-    def _calibrate(self, robots):
+    def _calibrate(self, robots, verify=True):
         """The compass check after power-on (`calibrate`, needed before find / e02 / gyro runs): spin and roll
         switched off, so it only wiggles in place on its park spot. All at once (each stays on its spot)."""
         robots = [r for r in robots if r not in self.unavailable]
@@ -1076,6 +1153,69 @@ class Runner:
             if r in self.heads and self.heads[r][0] is not None:
                 self.heads[r][1] = False             # the wiggle may have turned it a little
         self.st.save()
+        if verify:
+            for r in robots:
+                self.compass_verify(r)
+
+    COMPASS_CHECK_DEG = 15.0      # chosen: the check turn after a compass check; small enough to stay on its spot
+    COMPASS_CHECK_TIMEOUT_MS = 2000   # chosen: a wrong sign spins the check turn at full speed: this caps it (about 90
+    # deg at the real robots' 45 deg/s). DOE note: no, a cap
+    COMPASS_TRIES = 3             # chosen: compass checks before a robot whose check turn keeps failing is left out (fix 1)
+
+    def compass_verify(self, robot, tries=None):
+        """Fix 1, root cause (2026-10-25 15:45): Right's compass check said "done" but learned the wrong turn sign:
+        one 11.3 deg jump in its fused yaw at the start of the left wiggle made the yaw fall 4.6 deg while the
+        gyro rate and the wheels both turned left (Left: +10.2, Center: +4.9). Every turn after it ran backwards
+        to the timeout. Here a check turn of COMPASS_CHECK_DEG (its timeout capped) must turn the right way by its
+        own heading; if not, the compass check runs again, up to COMPASS_TRIES in all, then the robot is left out
+        (turn_fault_found). Returns True when it passed. Logged (compass_checks)."""
+        tries = self.COMPASS_TRIES if tries is None else tries
+        for k in range(tries):
+            ok, why = self.compass_turn_check(robot)
+            self.st.setdefault("compass_checks", []).append([round(time.time(), 1), robot, k + 1, ok, why])
+            if ok:
+                if k:
+                    self.say("  %s: its compass check is good now (try %d)" % (robot, k + 1))
+                return True
+            self.say("!!! COMPASS: %s's check turn after its compass check failed (%s): checking the compass again "
+                     "(%d of %d)" % (robot, why, k + 1, tries))
+            self.mark("e02 compass check failed %s" % robot)
+            if k < tries - 1:
+                self._calibrate([robot], verify=False)
+        self.__dict__.setdefault("compass_repairs", {})[robot] = True     # (no further compass repair)
+        self.turn_fault_found(robot, "its compass check turn failed %d times (%s)" % (tries, why))
+        return False
+
+    def compass_turn_check(self, robot):
+        """One check turn (+COMPASS_CHECK_DEG, then back) with the turn timeout capped: (ok, words). Judged by its
+        own heading (LEG records): done, and turned the right way by at least half of it."""
+        had = self.moves.get(robot)
+        if had is None:
+            self.moves[robot] = dict(run="-", why="compass check")
+        try:
+            self.link.send_name(robot, "set turn_timeout_ms %d" % self.COMPASS_CHECK_TIMEOUT_MS)
+            time.sleep(0.05)
+            ang = self.COMPASS_CHECK_DEG
+            lid = self.next_id(robot)
+            self.last_lid[robot] = lid
+            state, info = self._send_leg_once(robot, "turn %.1f" % ang, 8.0, self.moves[robot], lid, False)
+            st0 = self.listener.leg_start(robot, "-", lid)
+            fin = self.listener.leg_final(robot, "-", lid)
+            done = TW.turn_done_deg(num((st0 or {}).get("th_deg")), num((fin or {}).get("th_deg"))) \
+                if (st0 and fin) else None
+            if state in ("done", "dup") and done is not None and done * ang > 0 and abs(done) >= 0.5 * ang:
+                self._send_leg_once(robot, "turn %.1f" % -ang, 8.0, self.moves[robot], self.next_id(robot), False)
+                return True, "turned %.0f deg" % done
+            if state == "refused":
+                return False, "refused (%s)" % info
+            return False, "%s%s" % (state + (" (%s)" % info if info else ""),
+                                    "" if done is None else ", its own heading moved %.0f deg" % done)
+        finally:
+            self.link.send_name(robot, "set turn_timeout_ms %d" % (
+                TURN_SLOW_TIMEOUT_MS if (getattr(self, "turn_speed_now", {}) or {}).get(robot) == TURN_SLOW_RPM
+                else TURN_TIMEOUT_MS))
+            if had is None:
+                self.moves.pop(robot, None)
 
     FIND_HEAD_AGREE_DEG = 5.0     # chosen: the runner's heading goes with the fix before a find only within this of
     # the robot's own gyro heading (2026-10-24 analysis: Center's finds 13-24 cm off came from a camera heading set 2 s
@@ -1110,6 +1250,32 @@ class Runner:
             self.st.setdefault("find_heading_stale", []).append([round(time.time(), 1), robot, round(max(last), 1)])
         return (h[0], False) if ok else (None, True)
 
+    REAL_SOURCES = ("lock", "detector", "both")
+
+    def seen_since_drive(self, robot, now=None):
+        """Fix 6 (15:45: after a parking drive the tracker "held" the spot Left had left, and that spot, 15 cm off,
+        went to Left as a camera fix). Within FIX_HELD_AFTER_GO_S of a drive, a fix needs a picture where the camera
+        really saw the robot (lock, detector, both) after the drive ended: waits up to FIX_HELD_WAIT_S for one.
+        Returns the time from which positions can be used (None: no drive lately, any picture will do), or False
+        (only held spots: no fix; logged fix_skipped_held)."""
+        now = time.time() if now is None else now
+        t_go = (getattr(self, "go_end", None) or {}).get(robot)
+        if t_go is None or now - t_go > FIX_HELD_AFTER_GO_S:
+            return None
+        end = now + FIX_HELD_WAIT_S
+        while True:
+            real = [t for t, src in list(getattr(self, "src_log", None) or []) if t > t_go + 0.2
+                    and src in self.REAL_SOURCES]
+            if real:
+                return real[0]
+            if time.time() >= end:
+                break
+            time.sleep(0.1)
+        self.st.setdefault("fix_skipped_held", []).append([round(time.time(), 1), robot, round(time.time() - t_go, 1)])
+        self.say("    %s: no camera fix: since its drive the camera only holds its old spot (not seen again)" % robot,
+                 quiet=True)
+        return False
+
     def fix_now(self, robot, heading=None, position_only=False):
         """Tell the robot where the camera sees it (`fix x y th t_wall`; while idle it replaces its pose).
         position_only: the heading is left to the robot's own gyro ("-").
@@ -1120,7 +1286,10 @@ class Runner:
         the unmeasured one; that fix is marked, and the uncertainty model does not learn from the stretch after it."""
         if self.tracker is None or self.tracker.active != robot:
             return None                  # the camera follows another robot (or none): no position for this one
-        p = self.settle(min_s=0.3)
+        t_seen = self.seen_since_drive(robot)
+        if t_seen is False:
+            return None                  # fix 6: right after a drive, only a "held" spot: not sent
+        p = self.settle(t_from=t_seen, min_s=0.3)
         if p is None:
             return None
         h0, meas = (self.heads.get(robot) or [None, False])[:2]
@@ -1165,6 +1334,14 @@ class Runner:
         if own is None or own[2] is None:
             return False
         d = ST.wrap180(heading - own[2])
+        tsm = self.__dict__.setdefault("turned_since_measure", {})
+        after_turn = tsm.pop(robot, False)
+        tw = getattr(self, "turnwatch", None)
+        if tw is not None:
+            why = tw.correction(robot, d, after_turn)        # fix 1: its own heading far off after its own turns
+            if why:
+                self.turn_fault_found(robot, why)
+                return False
         if abs(d) <= self.HEADING_PUSH_DEG:
             return False
         self.heads[robot] = [heading, True]
@@ -1228,12 +1405,170 @@ class Runner:
             return "refused", "not moving"
         if robot in self.held_out:
             return "refused", "left out by Nick"
+        verb = text.split()[0]
+        if verb == "turn" and m["run"] == "-":
+            timeout = self.turn_speed_for(robot, timeout)     # fix 5: slower near an open edge
         lid = self.next_id(robot)
         self.last_lid[robot] = lid
         following = self.tracker is not None and self.tracker.active == robot
         if following:
             self.tracker.clear_expect()          # it may move now
             self.expect_leg(text, timeout)
+        if verb == "turn":
+            w_ = self.tracker.where() if following else None
+            self.__dict__.setdefault("turn_start_xy", {})[robot] = (w_[1], w_[2]) if w_ else None
+        try:
+            out = self._send_leg_once(robot, text, timeout, m, lid, following)
+        finally:
+            if verb == "go":
+                self.__dict__.setdefault("go_end", {})[robot] = time.time()
+        self.leg_health(robot, text, m, lid, out)
+        return out
+
+    def turn_speed_for(self, robot, timeout):
+        """Fix 5: an idle turn within TURN_SLOW_ROOM_CM of an open edge goes at TURN_SLOW_RPM (and gets
+        TURN_SLOW_TIMEOUT_MS); elsewhere at full speed. Sent only when it changes. Returns the leg's timeout (s),
+        longer for a slow turn."""
+        room = self.open_room_now(robot)
+        slow = room is not None and room < TURN_SLOW_ROOM_CM
+        rpm = TURN_SLOW_RPM if slow else TURN_FAST_RPM
+        tsn = self.__dict__.setdefault("turn_speed_now", {})
+        if tsn.get(robot, TURN_FAST_RPM) != rpm:
+            self.link.send_name(robot, "set turn_max_rpm %g" % rpm)
+            time.sleep(0.05)
+            self.link.send_name(robot, "set turn_timeout_ms %d" % (TURN_SLOW_TIMEOUT_MS if slow else TURN_TIMEOUT_MS))
+            time.sleep(0.05)
+            tsn[robot] = rpm
+            self.say("    %s: turns %s (%s)" % (robot, "slower" if slow else "at full speed again",
+                                                  "%.0f cm from an open edge" % room if room is not None else "-"),
+                     quiet=True)
+        if slow:
+            self.st.setdefault("slow_turns", []).append([round(time.time(), 1), robot, round(room, 1)])
+            return timeout * TURN_FAST_RPM / TURN_SLOW_RPM
+        return timeout
+
+    def open_room_now(self, robot):
+        """Signed distance (cm) from the robot's centre to the nearest open edge (- past it): the camera's latest
+        position when it follows this robot, else its parked spot; None if neither or no board."""
+        bd = self.board
+        if bd is None or getattr(self, "exploring", False):
+            return None
+        q = None
+        if self.tracker is not None and self.tracker.active == robot:
+            w_ = self.tracker.where()
+            if w_ and time.time() - w_[0] < STALE_S:
+                q = (w_[1], w_[2])
+        if q is None and (self.st.get("positions") or {}).get(robot):
+            q = tuple(self.st["positions"][robot][:2])
+        if q is None:
+            return None
+        return min(ST.inward_cm(bd, a, v, q[0] if a == "x" else q[1]) for a, v in bd.open_edges())
+
+    def leg_health(self, robot, text, m, lid, out):
+        """After every leg: fix 1's turn health (a robot whose turns keep failing is stopped, named and left out),
+        the robot's own heading change over a turn (fix 3: what a cut turn did), and when its own edge guard
+        stopped it (fix 4: the back-out after it is allowed)."""
+        state, info = out
+        verb = text.split()[0]
+        if "plywood edge" in (info or ""):
+            self.__dict__.setdefault("edge_stop_t", {})[robot] = time.time()
+        if verb not in ("go", "turn") or getattr(self, "listener", None) is None:
+            return
+        tw = getattr(self, "turnwatch", None)
+        if verb == "go":
+            if tw is not None and state not in ("refused", "dup", "lost"):
+                tw.feed_go(robot)
+            return
+        val = num(text.split()[1]) if len(text.split()) > 1 else None
+        st0 = self.listener.leg_start(robot, m["run"], lid)
+        fin = self.listener.leg_final(robot, m["run"], lid)
+        done = None
+        if st0 is not None and fin is not None:
+            done = TW.turn_done_deg(num(st0.get("th_deg")), num(fin.get("th_deg")))
+        self.__dict__.setdefault("turn_done", {})[robot] = done
+        if state in ("done", "failed", "lost"):
+            self.__dict__.setdefault("turned_since_measure", {})[robot] = True
+        if tw is None or val is None or state == "lost":
+            return
+        why = tw.feed_turn(robot, val, state, info, done)
+        if why:
+            self.turn_fault_found(robot, why)
+
+    def turn_fault_found(self, robot, why):
+        """Fix 1: a robot whose turns keep failing is stopped, named, and left out for the rest of the session (Nick,
+        2026-10-25 18:46: "leave that robot out and carry on with the others"); the live page sounds. Nobody knows
+        where it is (no camera position, no parked spot): Nick is asked instead (a hold), so the others cannot
+        drive into it."""
+        for _ in range(3):
+            try:
+                self.link.send_name(robot, "stop")
+            except Exception:
+                pass
+            time.sleep(0.1)
+        rep = self.__dict__.setdefault("compass_repairs", {})
+        if not rep.get(robot) and not getattr(self, "in_compass", False) and getattr(self, "watch", None) is not None:
+            # the 15:45 root cause: a compass check that learned the wrong sign. A new compass check, verified by a
+            # check turn, mends that: tried once before the robot is left out
+            rep[robot] = True
+            self.say("!!! TURNS: %s's turns are failing (%s): checking its compass again before anything else" % (
+                robot, why))
+            self.st.setdefault("compass_repairs", []).append([round(time.time(), 1), robot, why])
+            self.in_compass = True
+            had = self.moves.get(robot)
+            try:
+                self._calibrate([robot], verify=False)
+                ok, how = self.compass_turn_check(robot)
+            finally:
+                self.in_compass = False
+                if had is not None:
+                    self.moves[robot] = had          # (the compass check ends its idle moves)
+            self.st["compass_repairs"][-1] += [ok, how]
+            if ok:
+                self.turnwatch.tripped.pop(robot, None)
+                self.turnwatch.run[robot] = 0
+                self.turnwatch.corr.pop(robot, None)
+                self.alert("compass", robot, "%s's turns failed; a new compass check mended them" % robot)
+                self.say("  %s: its new compass check is good (%s): it carries on" % (robot, how))
+                return
+        words = "%s's turns are not working: %s" % (robot, why)
+        self.st.setdefault("turn_faults", []).append([round(time.time(), 1), robot, why])
+        self.say("!!! TURNS: %s. It is stopped and left out for the rest of this session; the others carry on. Check "
+                 "it on the bench (turn 90 on the table) before the next session." % words)
+        self.mark("e02 turn fault %s" % robot)
+        self.alert("turn_fault", robot, words + ": stopped and left out")
+        if not self.leave_out(robot):
+            # the camera does not know where it is yet (its turns failed while it was being found): it is left out
+            # all the same (nothing drives it again), and where its lights are found is kept on the map so the others
+            # go round it (identify). 19:03 dry run: a hold here, answered "carry on", let it be driven on.
+            self.held_out.add(robot)
+            self.unavailable.add(robot)
+            self.moves.pop(robot, None)
+            self.st.setdefault("left_out", []).append([round(time.time(), 1), robot, None])
+            self.say("  %s: the camera does not know where it is yet: it is found by its lights only (no turns), "
+                     "and the others keep clear of where it is found." % robot)
+            if getattr(self, "feed", None) is not None and getattr(self, "cam", None) is not None \
+                    and not getattr(self, "in_identify", False):
+                try:
+                    p_ = self.identify(robot)       # lights only (it is left out): kept on the map where found
+                except Exception as e:
+                    p_ = None
+                    self.say("  (%s: not found by its lights: %s)" % (robot, e), quiet=True)
+                if p_ is None:
+                    self.say("!!! %s is left out and the camera cannot see where it is: keep the others clear of it by "
+                             "hand, or take it off the board." % robot)
+                    self.alert("help", robot, "%s is left out and the camera cannot find it" % robot)
+                else:
+                    self.say("  %s is at (%.1f, %.1f) cm (found by its lights): the others go round it." % (
+                        robot, p_[0], p_[1]))
+        self.st.save()
+
+    def alert(self, kind, robot, words):
+        """Something Nick must hear (the live page plays a sound for each new one): a hold, a help call, a robot
+        left out for a fault. Kept in the state (alerts)."""
+        al = self.st.setdefault("alerts", [])
+        al.append(dict(id=len(al) + 1, t=round(time.time(), 1), kind=kind, robot=robot, words=words))
+
+    def _send_leg_once(self, robot, text, timeout, m, lid, following):
         for attempt in range(2):
             t_s = time.time()
             if self.send(robot, "%s %d" % (text, lid)) is False:
@@ -1254,6 +1589,23 @@ class Runner:
             if res:
                 if res.get("state") == "refused" and "running" in (res.get("info") or "") and attempt == 0:
                     time.sleep(1.0)              # an idle leg still finishing: once more
+                    continue
+                if res.get("state") == "refused" and "no compass check" in (res.get("info") or "") and attempt == 0 \
+                        and not getattr(self, "in_compass", False):
+                    # firmware 2026-10-25c: no compass check since power-on (switched off and on, a restart): the
+                    # compass check now, verified, then the leg once more (coordinator, 2026-10-25 19:20)
+                    self.say("!!! COMPASS: %s says it has had no compass check since power-on: checking it now" % robot)
+                    self.st.setdefault("compass_missing", []).append([round(time.time(), 1), robot, text])
+                    self.in_compass = True
+                    try:
+                        self._calibrate([robot])
+                    finally:
+                        self.in_compass = False
+                        self.moves[robot] = m        # (the compass check ends its idle moves)
+                    if robot in self.held_out:
+                        return "refused", "left out: its compass check failed"
+                    lid = self.next_id(robot)
+                    self.last_lid[robot] = lid
                     continue
                 return res.get("state", "?"), res.get("info", "")
             if m["run"] != "-" and self.watch.ended.get(m["run"]) is not None:
@@ -1421,8 +1773,13 @@ class Runner:
         stops)."""
         if kind != "go" or p is None or "plywood edge" not in (words or "") or self.board is None:
             return
-        h = self.heads.get(robot, [None])[0]
+        h, meas = (list(self.heads.get(robot) or [None, False]) + [False])[:2]
         if h is None:
+            return
+        if not meas:
+            # fix 4 (15:45): Left's three touches logged with a heading it did not have (refused turns counted as
+            # done) moved the bottom line 8 cm in. Only a heading measured since its last turn places a touch.
+            self.st.setdefault("edge_touches_skipped", []).append([round(time.time(), 1), robot, MAP.edge_cue(words)])
             return
         fx, fy = MAP.contact_point(p[0], p[1], h, "edge", MAP.edge_cue(words))
         a, v = min(self.board.open_edges(), key=lambda e: abs((fx if e[0] == "x" else fy) - e[1]))
@@ -1642,11 +1999,15 @@ class Runner:
                         return "%s parked behind it" % n
         return ""
 
-    def leg(self, robot, cmd, run=None):
+    def leg(self, robot, cmd, run=None, backout=False):
         """One go / turn leg. A backwards go goes in pieces of at most BACK_MAX_CM; before each the camera checks
         the room behind it and a camera fix is sent (the firmware allows e02_back_max_cm of blind backing per
-        fix). Returns (p0, p1, words)."""
+        fix). backout: a straight back-out right after the robot's own edge guard stopped it (fix 4): the way it
+        came is clear, so no room check (with its heading unknown that check assumes every way, and near an edge
+        always finds "an open edge behind it"). Returns (p0, p1, words)."""
         kind, val = ("go" if cmd[0] == "probe" else cmd[0]), float(cmd[1])
+        if getattr(self, "scene", None):
+            self.dry_scene_leg(robot, kind, val, ctx="leg")
         lid_before = self.last_lid.get(robot)
         p0 = self.settle(min_s=0.3, timeout=1.5)
         pieces = [val]
@@ -1658,7 +2019,7 @@ class Runner:
         for v in pieces:
             if kind == "go" and v < 0:
                 pb = self.settle(min_s=0.3, timeout=1.5)
-                bad = self.room_behind(robot, pb, -v)
+                bad = "" if backout else self.room_behind(robot, pb, -v)
                 if bad:
                     words = "refused (no room to back up: %s)" % bad
                     break
@@ -1935,6 +2296,9 @@ class Runner:
                          arrive_cm=arrive_cm, max_leg=max_leg)
         stuck = 0
         blocked = 0
+        edge_stops = 0
+        aways = 0
+        after_turn = None            # fix 5: (time the last turn ended) until a straight drive has followed it
         self.front_bad.pop(robot, None)
         while True:
             p = self.settle(min_s=0.3, timeout=2.0)
@@ -1945,6 +2309,9 @@ class Runner:
                 steer.heading, steer.measured = None, False
             if not self.board.on_board(p[0], p[1]):
                 return False, "the camera sees it off the board at (%.0f, %.0f) cm" % p
+            if robot in self.held_out:
+                return False, "it was left out (%s)" % ("its turns are not working" if robot in
+                                                        getattr(self.turnwatch, "tripped", {}) else "by Nick")
             cmd = steer.next(p)
             if cmd[0] == "done":
                 self.heads[robot] = [steer.heading, steer.measured]
@@ -1955,10 +2322,96 @@ class Runner:
             if cmd[0] == "turn" and abs(cmd[1]) < ST.MIN_TURN_DEG:
                 self.heads[robot] = [steer.heading, steer.measured]
                 return True, ""
+            room = self.signed_room(p)
+            if cmd[0] == "probe" and steer.heading is None and room is not None and room[0] < HEADING_CRAWL_ROOM_CM:
+                # fix 2: heading unknown near an open edge: the crawl, not a blind 4 cm probe
+                q = self.heading_crawl(robot)
+                steer.legs += 1
+                if q is None:
+                    self.heads[robot] = [None, False]
+                    return False, "which way it faces is not known, and the crawl did not show it"
+                steer.heading, steer.measured = self.heads[robot][0], True
+                continue
+            if cmd[0] == "turn" and room is not None and room[0] < EDGE_TURN_CM and steer.heading is not None \
+                    and aways < 2:
+                # fix 5: no turn on its spot within EDGE_TURN_CM of an open edge: straight away from it first
+                mv = self.away_leg(steer.heading, room)
+                if mv is not None:
+                    aways += 1
+                    self.say("    %s: %.0f cm from an open edge: moving %.1f cm straight away from it before it turns"
+                             % (robot, room[0], abs(mv)), quiet=True)
+                    self.st.setdefault("edge_aways", []).append([round(time.time(), 1), robot, round(room[0], 1),
+                                                                 round(mv, 1)])
+                    self.heads[robot] = [steer.heading, steer.measured]
+                    q0, q1, res_a = self.leg(robot, ("go", mv), run=run)
+                    if q0 is not None and q1 is not None and res_a.startswith(("done", "dup")):
+                        steer.after(("go", mv), q0, q1)
+                    else:
+                        steer.legs += 1
+                    continue
+                self.st.setdefault("edge_turns_along", []).append([round(time.time(), 1), robot, round(room[0], 1)])
+            if cmd[0] == "go" and cmd[1] > 0 and after_turn is not None:
+                # fix 5: after every turn a fresh picture, taken after the turn ended, before the next straight drive
+                lag = self.camera_lag_s() or 0.3
+                q = self.settle(t_from=after_turn + lag, min_s=0.3, timeout=2.0 + lag)
+                if q is None:
+                    p = self.refind(robot, "no fresh picture of it after its turn")
+                    if p is None:
+                        return False, "no fresh picture of it after its turn, and a turn on its spot did not show it"
+                    steer.heading, steer.measured = None, False
+                    after_turn = None
+                    continue
+                p = q
+                if room is not None and room[0] < TURN_CONFIRM_ROOM_CM and not steer.measured \
+                        and cmd[1] > HEADING_CHECK_CM:
+                    # near an open edge: the first drive after a turn is a short check the camera measures
+                    cmd = ("go", HEADING_CHECK_CM)
+                    self.st.setdefault("heading_checks", []).append([round(time.time(), 1), robot, round(room[0], 1)])
             if steer.heading is not None:
                 self.heads[robot] = [steer.heading, steer.measured]     # the front-sensor check reads it
             self.front_bad.pop(robot, None)
+            h_before = steer.heading
             p0, p1, res = self.leg(robot, cmd, run=run)
+            if cmd[0] == "turn":
+                after_turn = time.time()
+                if not res.startswith(("done", "dup")):
+                    # fix 3: a turn cut short (a hold, the watchdog), refused or stopped at the edge counts only for
+                    # what it really turned by its own gyro; the plan then sends just the rest. (15:45: Left's cut
+                    # 154 deg turn, 118 done, was sent again in full and it faced the bottom edge)
+                    done = (getattr(self, "turn_done", None) or {}).get(robot)
+                    steer.legs += 1
+                    steer.heading = None if (done is None or h_before is None) else ST.wrap180(h_before + done)
+                    steer.measured = False
+                    self.heads[robot] = [steer.heading, False]
+                    self.st.setdefault("turns_cut", []).append([round(time.time(), 1), robot, round(cmd[1], 1),
+                                                                None if done is None else round(done, 1), res])
+                    if res.startswith("refused") or res.startswith("could not"):
+                        return False, "it refused the leg: " + res
+                    if res.startswith("watchdog") and self.watch_stop and "lost" not in str(self.watch_stop):
+                        self.watch_count[robot] += 1
+                        if self.watch_count[robot] >= 2:
+                            self.watch_count[robot] = 0
+                            return False, "the camera watchdog stopped it twice: " + res
+                    continue
+            elif cmd[0] in ("go", "probe") and cmd[1] > 0:
+                after_turn = None
+            if cmd[0] in ("go", "probe") and cmd[1] > 0 and "plywood edge" in res:
+                # fix 4: its edge guard stopped a forward drive: it faces an edge (the heading belief was wrong).
+                # Straight back out (always allowed), measuring the heading on the way; the plan goes on from there
+                edge_stops += 1
+                self.say("    %s: its edge sensors stopped it (%s): backing straight out" % (robot, res))
+                if edge_stops >= 2:
+                    q0, q1, _ = self.edge_back_out(robot, HEADING_CRAWL_BACK_CM)
+                    self.heads[robot] = [None, False]
+                    return False, "its edge sensors stopped it twice: " + res
+                q0, q1, _ = self.edge_back_out(robot, HEADING_CRAWL_BACK_CM)
+                steer.legs += 1
+                if q0 is not None and q1 is not None and math.hypot(q1[0] - q0[0], q1[1] - q0[1]) >= ST.MIN_HEADING_CM:
+                    steer.heading, steer.measured = ST.wrap180(ST.bearing(q0, q1) + 180.0), True
+                else:
+                    steer.heading, steer.measured = None, False
+                self.heads[robot] = [steer.heading, steer.measured]
+                continue
             fb = self.front_bad.pop(robot, None)
             if fb and p1 is not None and not res.startswith("camera and wheels"):
                 p1 = self.refind(robot, fb)
@@ -2018,6 +2471,36 @@ class Runner:
             else:
                 stuck = 0
 
+    def signed_room(self, p):
+        """(signed cm from p to the nearest open edge (- past it), (ux, uy) the inward direction from that edge), or
+        None (no board, no position)."""
+        bd = self.board
+        if bd is None or p is None:
+            return None
+        best = None
+        for a, v in bd.open_edges():
+            d = ST.inward_cm(bd, a, v, p[0] if a == "x" else p[1])
+            sgn = ST.inward_cm(bd, a, v, v + 1.0)                 # +1 if inside is the larger values
+            n = (sgn, 0.0) if a == "x" else (0.0, sgn)
+            if best is None or d < best[0]:
+                best = (d, n)
+        return best
+
+    @staticmethod
+    def away_leg(heading, room):
+        """Fix 5: the straight drive (cm, + forward, - backward) that takes a robot facing `heading` to
+        EDGE_TURN_CM + EDGE_AWAY_MARGIN_CM from the open edge of `room` (signed_room), at most EDGE_AWAY_MAX_CM; None
+        when it faces along the edge (within EDGE_AWAY_MIN_COS of it: driving would barely move it away)."""
+        d, n = room
+        c = math.cos(math.radians(heading)) * n[0] + math.sin(math.radians(heading)) * n[1]
+        if abs(c) < EDGE_AWAY_MIN_COS:
+            return None
+        need = EDGE_TURN_CM + EDGE_AWAY_MARGIN_CM - d
+        if need <= 0:
+            return None
+        cm = min(EDGE_AWAY_MAX_CM, need / abs(c))
+        return round(cm if c > 0 else -cm, 2)
+
     def away_turn(self, p, heading):
         """A quarter turn, to whichever side points more towards the board's middle (a fixed +90 could turn it
         along a board or towards an open edge). +90 when the heading or position is not known."""
@@ -2041,6 +2524,28 @@ class Runner:
         return (b.x0, b.y0, b.x1, b.y1)
 
     def identify(self, robot, near=None, angle=ID_TURN_DEG):
+        """_identify, and a robot left out for failing turns (fix 1) that is found (by its lights: it takes no more
+        turns) is kept on the map where it stands, so the others go round it."""
+        self.in_identify = True
+        try:
+            p = self._identify(robot, near=near, angle=angle)
+        finally:
+            self.in_identify = False
+        if p is not None:
+            # found and standing still: the tracker re-locks on it now, and that jump is not the robot moving (dry
+            # run 19:27 at the bottom edge: the watchdog stopped Left on it, a second after its find)
+            self.__dict__.setdefault("settle_until", {})[robot] = time.time() + FOUND_SETTLE_S
+        if p is not None and robot in self.held_out:
+            self.st["positions"][robot] = [p[0], p[1], None]
+            if self.tracker is not None:
+                try:
+                    self.tracker.park(robot, p[0], p[1])
+                except Exception:
+                    pass
+            self.st.setdefault("left_out", []).append([round(time.time(), 1), robot, [round(p[0], 1), round(p[1], 1)]])
+        return p
+
+    def _identify(self, robot, near=None, angle=ID_TURN_DEG):
         """Where is `robot`? It turns a little on its spot and back (2026-10-21: a short DRIVE left its old spot
         behind, which the camera could take for the robot; a turn leaves nothing behind) and the camera looks for
         the one robot-sized change. Only this robot moves meanwhile. near = (x, y, radius cm) to look only there.
@@ -2051,12 +2556,18 @@ class Runner:
             self.tracker.idle()
         if robot not in self.moves:          # inside a camera-steered run (K) its legs stay in that run
             self.moves[robot] = dict(run="-", why="identify")
-        for ang in (angle, -angle):
+        # a robot left out (its turns fail, fix 1) takes no turns: straight to its lights (a turn try first would leave
+        # its lights on, and the lights' before-pictures lit: dry run 19:06, Right not found)
+        for ang in (() if robot in self.held_out else (angle, -angle)):
+            if robot in self.held_out:
+                break                         # left out by its last turn (fix 1): its lights next
             before = self.feed.wait_frames(8, timeout=5)
             # lights on while it turns (2026-10-22, Nick): two changes in one place, the body's corners and the
             # lights; in a shadow, where the corners barely show, the lights carry it (firmware 2026-10-22a `led`)
             self.send(robot, "led 1 1 1 %d" % int((abs(ang) / TURN_DPS_GUESS * 2.5 + 4.0) * 1000))
             state, info = self.send_leg(robot, "turn %.1f" % ang, abs(ang) / TURN_DPS_GUESS * 2.5 + 6.0)
+            if robot in self.held_out:
+                break                         # left out by that turn (fix 1): no turn back, its lights next
             time.sleep(0.6)
             after = self.feed.wait_frames(8, timeout=5)
             self.send_leg(robot, "turn %.1f" % -ang, abs(ang) / TURN_DPS_GUESS * 2.5 + 6.0)
@@ -2078,6 +2589,9 @@ class Runner:
         # third try: its lights, steady (firmware 2026-10-22a `led`): pictures before and while they are on; the one
         # spot that got brighter. Works at the ~2 pictures a second the laptop gets (the 2 Hz flash below does not).
         if self.feed is not None and hasattr(self.feed, "collect"):
+            if robot in self.held_out:
+                self.send(robot, "led 0 0 0 100")     # (left out during a turn try: its turn lights may still be on)
+                time.sleep(0.6)
             before, _ = self.feed.collect(1.2)
             self.send(robot, "led 1 1 1 2500")
             time.sleep(0.5)
@@ -2236,12 +2750,18 @@ class Runner:
         self.lost_place.discard(robot)
         if not park:
             return True, ""
-        if not self.board.on_board(p[0], p[1]) or (self.board.edge_room(p[0], p[1])[0] < EDGE_TURN_CM + 3 and
-                                                   not self.edge_risk(robot, p, "heading drive")):
+        if not self.board.on_board(p[0], p[1]):
+            # (near an edge on the board the heading is found by the crawl now, fix 2: no blind drive, so no test-mode
+            # risk is needed for it)
             # 2026-10-22 10:23: Center found 3.5 cm off the board, then its heading drive and "moving it in first"
             # took it over the edge (it fell): its edge guard had learned the plywood level with a sensor already
             # over the edge. Its heading is unknown here, so no drive at all: Nick (firmware 22b now refuses a
             # forward drive that starts off the plywood). Test mode drives anyway unless its centre is off the board.
+            return False, "atedge"
+        rm_ = self.signed_room(p)
+        if rm_ is not None and rm_[0] < CRAWL_MIN_ROOM_CM:
+            # its front sensors may already be over the drop: the edge guard would learn the drop as floor (the
+            # 2026-10-22 fall); no crawl, Nick
             return False, "atedge"
         if self.acquire_heading(robot, p) is None:
             return False, "noheading"
@@ -2466,9 +2986,7 @@ class Runner:
                             self.tracker.hold(HOLD_CM)
                             headed = True
                         else:
-                            headed = (not (self.board.edge_room(p[0], p[1])[0] < EDGE_TURN_CM + 3) or
-                                      self.edge_risk(robot, p, "heading drive after a search")) and \
-                                self.acquire_heading(robot, p) is not None
+                            headed = self.acquire_heading(robot, p) is not None    # near an edge: the crawl
                         if headed:
                             self.set_corrections(robot, self.move_corrections(robot))
                             ok, why = self.park(robot)
@@ -2521,6 +3039,16 @@ class Runner:
         wait_s = self.a.help_wait_min * 60.0
         self.say("(If nobody answers within %.0f minutes, %s is put aside and the others carry on; --resume later "
                  "runs what it missed.)" % (self.a.help_wait_min, robot))
+        # 15:45: two help calls went unanswered for 10 minutes: the live page sounds now, and again every
+        # ALERT_REPEAT_S while this waits
+        self.alert("help", robot, problem)
+        self.help_waiting = robot
+        try:
+            return self._help_wait(robot, park, wait_s)
+        finally:
+            self.help_waiting = None
+
+    def _help_wait(self, robot, park, wait_s):
         while True:
             print("\a", end="", flush=True)
             ans = self.ask_timeout("Press Enter when it is back on the board (f = flash it again, skip = put it "
@@ -3411,14 +3939,22 @@ class Runner:
             val = rest
         return state, info, lid
 
-    def dry_scene_leg(self, robot, kind, val):
-        """--dry-scene: start this leg's injected event, if any (a camera gap, or a hold with its answer)."""
+    def dry_scene_leg(self, robot, kind, val, ctx="explore"):
+        """--dry-scene: start this leg's injected event, if any (a camera gap, or a hold with its answer). ctx "leg":
+        a leg outside explore (drive_to, parking, finding): kinds "dturn" (a turn of 90 deg or more) and "dgo" (a
+        forward drive), so the 15:45 crossings can be re-created after setup."""
         sc = getattr(self, "scene", None)
         if not sc:
             return
         cnt = self.__dict__.setdefault("scene_count", {})
-        kinds = [kind] + (["ray"] if kind == "go" and abs(val - self.EXPLORE_RAY_CM) < 0.01 else []) + \
-            (["bigturn"] if kind == "turn" and abs(val) >= 150.0 else [])
+        if ctx == "leg":
+            kinds = (["dturn"] if kind == "turn" and abs(val) >= 90.0 else []) + (["dgo"] if kind == "go" and val > 0
+                                                                                 else [])
+        else:
+            kinds = [kind] + (["ray"] if kind == "go" and abs(val - self.EXPLORE_RAY_CM) < 0.01 else []) + \
+                (["bigturn"] if kind == "turn" and abs(val) >= 150.0 else [])
+        if not kinds:
+            return
         for k in kinds:
             cnt[(robot, k)] = cnt.get((robot, k), 0) + 1
         for ev in sc:
@@ -4359,8 +4895,25 @@ class Runner:
         self.tracker.hold(HOLD_CM)
         self.heads[robot] = [None, False]
         self.moves.pop(robot, None)
+        # the tracker settles from the find's rough spot onto the robot (dry run 19:10, at the bottom edge: 13.1 ->
+        # 7.5 cm in a second); that settling is not the robot moving: wait for it, then drop those pictures, so the
+        # watchdog does not take it for a dash at the edge and the first fix is the settled spot
+        if self.settle(t_from=time.time() + 0.3, min_s=0.5, timeout=2.5) is not None and self.history is not None:
+            self.history.clear()
         if not self.begin_moves(robot, "finding its heading"):
             return None
+        q_ = self.pos(robot) and self.pos(robot)[1:3] or p
+        rm_ = self.signed_room(q_)
+        room = None if rm_ is None else rm_[0]
+        if room is not None and not self.board.on_board(q_[0], q_[1], margin=HEADING_CRAWL_ROOM_CM):
+            # the camera puts it off the board, or near a side the camera may have wrong (dry run 19:31 after a poor
+            # explore fit: Center seen at x = 135, past the board, really 3 cm from the open edge; three 15 cm heading
+            # drives took it there): the crawl too
+            room = min(room, 0.0)
+        if room is not None and room < HEADING_CRAWL_ROOM_CM:
+            # fix 2 (15:45: Left's 4 cm heading drive from 11 cm went forward at the edge and put its nose at the
+            # drop): near an open edge no blind drive, a crawl (Nick's choice)
+            return self.heading_crawl(robot)
         for attempt in range(4):
             # look before driving (2026-10-22 evening: Left, put down against the left board facing it, drove its
             # heading leg into the board; the wheels spun "10 cm", it stayed put, and its outline merged with the
@@ -4394,6 +4947,136 @@ class Runner:
                 return None
             self.leg(robot, ("turn", 90.0))
         return None
+
+    def heading_crawl(self, robot):
+        """Fix 2 (Nick, 2026-10-25 18:46): which way a robot faces, found near an open edge without a blind drive:
+        it crawls forward HEADING_CRAWL_CM at HEADING_CRAWL_CMS with its edge guard on (and the camera border
+        letting it, as explore's crawls), at most twice until the camera has seen it move ST.MIN_HEADING_CM. If its
+        edge guard stops it, it faces the edge: it backs straight out HEADING_CRAWL_BACK_CM (the way it came is
+        clear; the watchdog lets a back-out run), and the camera measures the heading on the way back. Sets
+        heads[robot] (measured) and returns its position, or None (heading still unknown). Logged
+        (heading_crawls)."""
+        # a still position the tracker has had time to lock on (a find's first position is rough: dry run 19:03, the
+        # crawl measured end to end from it came out 44 deg off)
+        p_start = self.settle(t_from=time.time() + 0.3, min_s=0.5, timeout=2.5) or self.settle(min_s=0.3, timeout=2.0)
+        if p_start is None:
+            return None
+        rm_ = self.signed_room(p_start)
+        room0 = None if rm_ is None else rm_[0]
+        if room0 is not None and room0 < CRAWL_MIN_ROOM_CM:
+            self.say("    %s: only %.0f cm from an open edge: no crawl (its edge sensors may be over it)" % (robot, room0))
+            self.st.setdefault("heading_crawls", []).append(dict(t=round(time.time(), 1), robot=robot,
+                                                                 room_cm=round(room0, 1), refused=True))
+            return None
+        self.say("    %s: %s from an open edge, which way it faces not known: a %.0f cm crawl with its edge sensors "
+                 "watching" % (robot, "%.0f cm" % room0 if room0 is not None else "near", HEADING_CRAWL_CM),
+                 quiet=True)
+        old_cms = self.speed_now.get(robot)
+        self.explore_speed(robot, HEADING_CRAWL_CMS)
+        edge, words, p_end = False, "", p_start
+        t_crawl = time.time()
+        wheels = [0.0, 0]           # cm its wheels drove on the crawl legs, legs counted
+        self.seek.add(robot)
+        self.fw_seek(robot, True)
+        try:
+            for step in range(2):
+                _a, p_b, words = self.leg(robot, ("go", HEADING_CRAWL_CM))
+                if p_b is not None:
+                    p_end = p_b
+                self.add_wheels(robot, wheels)
+                if "plywood edge" in (words or ""):
+                    edge = True
+                    break
+                if not (words or "").startswith(("done", "dup")) or \
+                        self.track_heading(t_crawl, p_start, p_end, self.wheels_of(wheels))[0] is not None:
+                    break                     # (a heading already: no second step)
+        finally:
+            self.fw_seek(robot, False)
+            self.seek.discard(robot)
+            self.seek_end[robot] = time.time() + 0.3
+            self.explore_speed(robot, old_cms or EXPLORE_FAST_CMS)
+        rec = dict(t=round(time.time(), 1), robot=robot, room_cm=None if room0 is None else round(room0, 1),
+                   start=[round(v, 1) for v in p_start], end=[round(v, 1) for v in p_end], edge=edge, words=words)
+        h = None
+        if edge:
+            t_back = time.time()
+            q0, q1, w2 = self.edge_back_out(robot, HEADING_CRAWL_BACK_CM)
+            rec["back"] = w2
+            wb = [0.0, 0]
+            self.add_wheels(robot, wb)
+            if q0 is not None and q1 is not None:
+                hb, moved = self.track_heading(t_back, q0, q1, self.wheels_of(wb))
+                if hb is not None and moved >= CRAWL_HEADING_MIN_CM:
+                    h = ST.wrap180(hb + 180.0)                  # it backed: it faces the other way
+            if q1 is not None:
+                p_end = q1
+        else:
+            hf, moved = self.track_heading(t_crawl, p_start, p_end, self.wheels_of(wheels))
+            if hf is not None and moved >= CRAWL_HEADING_MIN_CM:
+                h = hf
+        rec["heading"] = None if h is None else round(h, 1)
+        self.st.setdefault("heading_crawls", []).append(rec)
+        if h is None:
+            self.say("    %s: the crawl did not show which way it faces (%s)" % (robot, words), quiet=True)
+            return None
+        self.heads[robot] = [h, True]
+        self.say("  %s faces %.0f deg (crawl%s)" % (robot, h, ", then backed out from the edge" if edge else ""))
+        self.heading_push(robot, h)
+        return p_end
+
+    LOCKED_SOURCES = ("lock", "both")
+
+    def track_heading(self, t0, p0, p1, wheels_cm=None):
+        """(direction of travel deg or None, cm moved) since t0: the straight line through the camera's pictures
+        of it where the tracker was locked on (ST.heading_from_track, as a run's heading), else p0 to p1 when there
+        are too few pictures. wheels_cm: what its wheels drove meanwhile; a camera that saw under
+        CRAWL_CAMERA_SHARE of it was not following the robot: no heading (dry run 19:18 at the bottom edge: the
+        lock lost, the detector's positions jumping 3 cm, a fitted heading 165 deg off)."""
+        hist = getattr(self, "history", None)
+        smp = [(q[0], q[1], q[2]) for q in (hist.since(t0) if hist is not None else [])]
+        sl = getattr(self, "src_log", None)
+        if sl:
+            locked = {t for t, src in list(sl) if src in self.LOCKED_SOURCES and t >= t0 - 0.01}
+            n_all = len(smp)
+            smp = [q for q in smp if q[0] in locked]
+            if n_all and len(smp) < CRAWL_LOCKED_SHARE * n_all:
+                return None, 0.0          # the lock came and went: its direction is not to be trusted
+        moved = math.hypot(p1[0] - p0[0], p1[1] - p0[1]) if (p0 is not None and p1 is not None) else 0.0
+        if len(smp) >= 5:
+            moved = math.hypot(smp[-1][1] - smp[0][1], smp[-1][2] - smp[0][2])
+            if wheels_cm is not None and wheels_cm > 1.0 and moved < CRAWL_CAMERA_SHARE * wheels_cm:
+                return None, moved
+            h = ST.heading_from_track(smp, min_cm=CRAWL_HEADING_MIN_CM, max_rms_cm=0.6)
+            if h is not None:
+                return h, moved
+            return None, moved
+        if wheels_cm is not None and wheels_cm > 1.0 and moved < CRAWL_CAMERA_SHARE * wheels_cm:
+            return None, moved
+        if moved >= ST.MIN_HEADING_CM:
+            return ST.bearing(p0, p1), moved
+        return None, moved
+
+    def add_wheels(self, robot, acc):
+        """Add what the robot's wheels say its last leg drove (cm) to acc = [cm, legs]."""
+        lis = getattr(self, "listener", None)
+        if lis is None:
+            return
+        w = self.wheels_moved(robot, self.last_lid.get(robot))
+        if w is not None:
+            acc[0] += w
+            acc[1] += 1
+
+    @staticmethod
+    def wheels_of(acc):
+        return acc[0] if acc[1] else None
+
+    def edge_back_out(self, robot, cm):
+        """Fix 4: back straight out cm right after the robot's own edge guard stopped it. The watchdog lets it run
+        (edge_stop_t), and no room check is made behind it (the way it came). Returns leg()'s (p0, p1, words)."""
+        self.__dict__.setdefault("edge_stop_t", {}).setdefault(robot, time.time())
+        self.st.setdefault("edge_back_outs", []).append([round(time.time(), 1), robot, cm])
+        self.say("    %s: its edge sensors stopped it: backing straight out %.0f cm" % (robot, cm), quiet=True)
+        return self.leg(robot, ("go", -abs(cm)), backout=True)
 
     def front_now(self, robot):
         """The front sensor's reading now (cm), by a tiny turn leg (firmware 2026-10-22b reports front= with every
@@ -6038,6 +6721,7 @@ class Runner:
                 try:
                     self.mark("e02 hold %s %s: %s" % (kind, robot, why))
                     self.st.setdefault("holds", []).append(rec)
+                    self.alert("hold", robot, why)          # the live page sounds (15:45 fixes)
                     self.st.save()
                 except Exception as e:              # the bookkeeping must never skip the question
                     self.say("  (hold: could not record it: %s)" % e, quiet=True)
@@ -6173,6 +6857,8 @@ class Runner:
                  "fit)." % (self.border_cm(), os.path.basename(cal)))
         sh = getattr(self.a, "dry_guard_shift", "") if getattr(self.a, "dry_run", False) else ""
         if sh:
+            # (the dark strip at the bottom edge is painter's tape, surface: the real drop is near the stored line,
+            # 2026-10-25 15:45 analysis; the shift re-creates where the 15:10 border's line sat, not a drop)
             # the 15:10 re-creation: the stored outline off the plywood, so a line-sensor edge stop leaves the
             # robot's centre past the border's line (as 3.8-5.5 cm past at every 15:10 edge stop)
             dx, dy = (float(v) for v in sh.split("/"))
@@ -6386,6 +7072,27 @@ class Runner:
                  quiet=good >= SPEED_RECOVER_ROWS)
         return waited
 
+    def spin_check(self, robot, smp, bcm=None):
+        """Fix 5: during a turn on its spot, words if the robot's centre (median of the last 3 pictures) is inside
+        the border and has moved more than TURN_SPIN_DRIFT_CM towards an open edge since the turn began, else ''."""
+        s0 = (getattr(self, "turn_start_xy", None) or {}).get(robot)
+        if s0 is None or len(smp) < 3:
+            return ""
+        xs, ys = sorted(q[1] for q in smp[-3:])[1], sorted(q[2] for q in smp[-3:])[1]
+        a = self.border_frame(s0[0], s0[1])
+        b = self.border_frame(xs, ys)
+        if a is None or b is None:
+            return ""
+        bd, x, y = b
+        bcm = self.border_cm() if bcm is None else bcm
+        for ax, val in bd.open_edges():
+            d = ST.inward_cm(bd, ax, val, x if ax == "x" else y)
+            d0 = ST.inward_cm(bd, ax, val, a[1] if ax == "x" else a[2])
+            if d < bcm and d0 - d > TURN_SPIN_DRIFT_CM:
+                return ("its centre moved %.1f cm towards an open edge while it turned on its spot (now %.0f cm from "
+                        "it; the border is %.0f cm)" % (d0 - d, d, bcm))
+        return ""
+
     def border_check(self, robot, smp, bcm=None):
         """Words if the robot is within BORDER_CM of an open edge and moving towards it, else ''. smp: the tracker's
         recent (t, x, y, ...) samples."""
@@ -6413,8 +7120,10 @@ class Runner:
             return ""
         if robot in self.leg_live and self.leg_kind.get(robot) == "turn":
             # turning on its spot: the camera's spot (the top's centre, not the axle) swings a few cm, the robot
-            # goes nowhere (dry run 2026-10-24: a 90 deg turn 15 cm from the edge held the session)
-            return ""
+            # goes nowhere (dry run 2026-10-24: a 90 deg turn 15 cm from the edge held the session). But a spin that
+            # carries the robot towards an open edge inside the border is held like a drive (fix 5; 15:45: Right's
+            # 5.4 s spins with its body over the tape strip were exempt)
+            return Runner.spin_check(self, robot, smp, bcm)
         a = self.border_frame(smp[0][1], smp[0][2])
         b = self.border_frame(smp[-1][1], smp[-1][2])
         if a is None or b is None:
@@ -6443,6 +7152,35 @@ class Runner:
     def watchdog(self, robot=None):
         """For wait_end polls: has the camera watchdog stopped the robot in this run?"""
         return self.watchdog_fired
+
+    STILL_GRACE_S = 2.0       # chosen: a robot counts as maybe moving this long after its last leg ended (braking, a
+    # late answer). DOE note: no, a margin
+
+    def may_move(self, robot, now=None):
+        """Could the robot be moving now? A leg is live, a camera-steered or firmware run is going (RUNINFO without
+        its end), a find is running, it is crawling, or its last leg ended under STILL_GRACE_S ago."""
+        now = time.time() if now is None else now
+        if robot in self.leg_live or robot in self.seek:
+            return True
+        if now < (getattr(self, "settle_until", None) or {}).get(robot, 0.0):
+            return False                  # just found, standing still: the tracker is settling on it
+        if (self.moves.get(robot) or {}).get("run", "-") not in ("-", None):
+            return True
+        if (getattr(self, "find_live", None) or {}).get(robot) == float("inf"):
+            return True
+        w = getattr(self, "watch", None)
+        cur = (getattr(w, "started", None) or {}).get(robot) if w is not None else None
+        if cur and cur[0] not in (getattr(w, "ended", None) or {}):
+            return True
+        return now - self.leg_end.get(robot, 0.0) < self.STILL_GRACE_S
+
+    def backing_out(self, robot, now=None):
+        """Fix 4: is the robot on a backwards drive within EDGE_BACKOUT_S of its own edge guard stopping it? (15:45:
+        the watchdog stopped Left's one right move, backing out, as "4 cm past the open edge and still going".)"""
+        now = time.time() if now is None else now
+        t_e = (getattr(self, "edge_stop_t", None) or {}).get(robot)
+        return bool(t_e is not None and now - t_e <= EDGE_BACKOUT_S and robot in self.leg_live
+                    and self.leg_kind.get(robot) == "go" and (self.leg_val.get(robot) or 0.0) < 0)
 
     def lost_why(self, robot, now):
         """The watchdog's lost check for the followed robot: words if it is lost (a driving leg the camera has not
@@ -6544,6 +7282,11 @@ class Runner:
                                                                      self.order])
                     self.hold_for_nick(robot, "border", why_b)
                     continue
+                if not self.may_move(robot):
+                    # commanded still (no leg, no firmware run, no find, not just after one): what the camera sees
+                    # moving is the tracker settling, not the robot (dry run 19:11: at the bottom edge the tracker
+                    # settled 5 cm after a find and the watchdog stopped Left's next move before it began)
+                    continue
                 parked = {n: tuple(q[:2]) for n, q in self.st["positions"].items() if n != robot and q}
                 # a slow camera: the last 1.2 s (hazard needs 4 pictures), and the parked robots' clearance widened
                 # like the border, by how far this robot drives in the lag above budget (speed guard)
@@ -6558,7 +7301,19 @@ class Runner:
                     why = ST.hazard(smp_w, None, parked, robot_cm=robot_cm)
                 else:
                     edge_cm = -1e9 if robot == getattr(self, "edge_touch", None) else self.watch_edge_cm
-                    why = ST.hazard(smp_w, self.board, parked, edge_cm=edge_cm, robot_cm=robot_cm)
+                    if self.backing_out(robot):
+                        edge_cm = -1e9       # fix 4: backing straight out after its own edge stop: always allowed
+                    jump = None
+                    if self.backing_out(robot):
+                        pass
+                    elif robot in self.seek:
+                        # fix 2: the heading crawl (and explore's crawls) look for the edge on purpose; the edge
+                        # sensors stop them. The watchdog stays as the last backstop, nearer; and at 2 cm/s anything
+                        # much faster is the tracker settling (dry run 19:06: its first lock after a find jumped 5 cm
+                        # and stopped the crawl as it was sent)
+                        edge_cm = min(edge_cm if edge_cm is not None else PL.WATCH_EDGE_CM, CRAWL_WATCH_EDGE_CM)
+                        jump = CRAWL_JUMP_CMS
+                    why = ST.hazard(smp_w, self.board, parked, edge_cm=edge_cm, robot_cm=robot_cm, jump_cms=jump)
                 if not why and getattr(self, "bricks_guard", None) is not None:      # the brick demo's objects
                     import e02_bricks as BR
                     why = BR.object_hazard(smp, self.bricks_guard)
@@ -6739,12 +7494,44 @@ class Runner:
         self.st.save()
         return out
 
+    def route_blocked_by_aside(self, route):
+        """Fix 7: (name, cm) of the first set-aside robot (put aside, left out) whose centre is within
+        PL.WATCH_ROBOT_CM + ASIDE_ROUTE_MARGIN_CM of the route's path from the start spot, else None."""
+        if self.board is None:
+            return None
+        aside = [n for n in self.unavailable if (self.st.get("positions") or {}).get(n)]
+        if not aside:
+            return None
+        sx, sy, _ = self.board.nominal_start()
+        out, back = self.board.route_floor(route, (sx, sy))
+        pts = [(sx, sy)] + [tuple(q) for q in out] + [tuple(q) for q in back]
+        lim = PL.WATCH_ROBOT_CM + ASIDE_ROUTE_MARGIN_CM
+        best = None
+        for n in aside:
+            q = self.st["positions"][n]
+            d = PL.dist_to_path((q[0], q[1]), pts)
+            if d < lim and (best is None or d < best[1]):
+                best = (n, d)
+        return best
+
     def do_run(self, r):
         robot, cond, route = r["robot"], r["cond"], r["route"]
         st = self.st
         if route in (st["setup"].get("routes_left_out") or []):
             r["status"] = "left_out"
             r.setdefault("notes", []).append("route left out after the map changed")
+            st.save()
+            return
+        blk = self.route_blocked_by_aside(route)
+        if blk:
+            # fix 7 (15:45: 4 of 5 square runs cut by watchdog stops 14-17 cm from put-aside Right in the square's
+            # path): a route that passes a set-aside robot is not run
+            r["status"] = "left_out"
+            r.setdefault("notes", []).append("route passes set-aside %s (%.0f cm)" % blk)
+            self.st.setdefault("routes_blocked", []).append([round(time.time(), 1), r["order"], route, blk[0],
+                                                             round(blk[1], 1)])
+            self.say("  Run %s (%s, route %s) is not run: the route passes %s, which is set aside there, %.0f cm "
+                     "from its path." % (r["order"], robot, PL.ROUTE_NAMES[route], blk[0], blk[1]))
             st.save()
             return
         if self.return_after:
@@ -7900,7 +8687,7 @@ def main(argv=None):
     ap.add_argument("--map-robot", default="", help="which robot maps (default: the first)")
     ap.add_argument("--dry-kept-pose", action="store_true", help="dry run: the robots kept a board pose from an earlier "
                     "session (the 2026-10-24 stage-3 case)")
-    ap.add_argument("--dry-start", default="parks", choices=["parks", "swapped", "scatter", "corners", "edge", "s1510"],
+    ap.add_argument("--dry-start", default="parks", choices=["parks", "swapped", "scatter", "corners", "edge", "s1510", "s1545"],
                     help="dry run: where the simulated robots stand at the start")
     ap.add_argument("--calib", help="floor calibration file (default: the studio project's cameras/overhead.json)")
     ap.add_argument("--project", help="the studio project folder (default Documents\\recognition-project)")
@@ -7980,6 +8767,13 @@ def main(argv=None):
     ap.add_argument("--dry-scene", default="", help="dry run: events during explore, ROBOT:KIND:N:WHAT[:AT_S],... "
                     "(e.g. Right:ray:2:o = a hold during Right's 2nd ray, answered o; Left:bigturn:1:gap3 = the "
                     "camera loses Left for 3 s in its first 175 deg turn): the 15:10 re-creation")
+    ap.add_argument("--dry-turn-fault", default="", help="dry run: ROBOT[@S]: that robot's turns break S s (default 5) "
+                    "after its compass check: its gyro reads every turn the wrong way, so turns run to the timeout and "
+                    "straight drives curve (the 15:45 Right re-creation)")
+    ap.add_argument("--dry-hold-answer", default="c", choices=["c", "a", "o"],
+                    help="dry run with --auto: the answer every hold gets (default c; a = the 15:45 session's answer)")
+    ap.add_argument("--dry-camera-fps", type=float, default=None, help="dry run: the simulated camera's pictures a "
+                    "second (default the simulator's 15)")
     ap.add_argument("--dry-guard-shift", default="", help="dry run: DX/DY cm: the explore border's calibration off the "
                     "simulator's floor (e.g. -9/-9 leaves edge stops' centres past the line, as at 15:10)")
     ap.add_argument("--dry-slow-camera", default="", help="dry run: PERIOD/ON/MS[/FIRST]: every PERIOD s, for ON s, each "
@@ -8328,7 +9122,11 @@ def start_sim(state, sdir):
                             "--start", (state["setup"].get("args") or {}).get("dry_start") or "parks"]
                            + (["--bricks=" + (state["setup"].get("args") or {}).get("dry_bricks")]
                               if (state["setup"].get("args") or {}).get("dry_bricks") else [])
-                           + (["--kept-pose"] if (state["setup"].get("args") or {}).get("dry_kept_pose") else []),
+                           + (["--kept-pose"] if (state["setup"].get("args") or {}).get("dry_kept_pose") else [])
+                           + (["--turn-fault", (state["setup"].get("args") or {}).get("dry_turn_fault")]
+                              if (state["setup"].get("args") or {}).get("dry_turn_fault") else [])
+                           + (["--fps", str((state["setup"].get("args") or {}).get("dry_camera_fps"))]
+                              if (state["setup"].get("args") or {}).get("dry_camera_fps") else []),
                            stdout=open(os.path.join(simdir, "sim_stdout.txt"), "a"), stderr=subprocess.STDOUT)
     if (state["setup"].get("args") or {}).get("dry_bricks_now"):
         # --dry-bricks-now: the bricks stand there from the start (objects past an open edge, boards out from the

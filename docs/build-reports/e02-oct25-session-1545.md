@@ -289,7 +289,7 @@ Before the next board session:
 
 *Substantive*
 1. Did anything happen to Right between 15:58:37 and 15:59 (picked up, bumped, a wheel or the top touched)? Its turns worked at the compass check and failed from its next move on, without a restart. Can you bench-test `turn 90` with Right on the table before the next session?
-2. What is the dark strip, about 4.5 cm wide, along the bottom open edge: tape on the plywood? This session says it is solid surface and the drop is near the stored line. The 15:10 report assumed the opposite; your answer settles it.
+2. (Answered by Nick, 18:46: painter's tape on the plywood, so surface, as this report found.) What is the dark strip, about 4.5 cm wide, along the bottom open edge: tape on the plywood? This session says it is solid surface and the drop is near the stored line. The 15:10 report assumed the opposite; your answer settles it.
 3. Fix 2 changes how a lost robot finds which way it faces near an edge. Do you prefer the 3 cm crawl (simple, the guard does the work) or the camera reading the body's outline (no movement, more code)?
 4. For a robot that can't turn (fix 1): stop the session and ask, or leave that robot out and carry on with the others?
 

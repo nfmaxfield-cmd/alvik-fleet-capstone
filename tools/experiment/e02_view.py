@@ -80,6 +80,9 @@ svg text{fill:var(--mut);font:11px var(--mono)}
 .sq i.done{border-color:transparent}.sq i.run{border:2px solid var(--follow)}
 .sq i.failed{background:repeating-linear-gradient(45deg,#5A2D2D 0 2px,transparent 2px 5px);border-color:#7A3A35}
 .sq i.left_out{opacity:.35;border-style:dashed}
+/* sounds (2026-10-25 15:45 fixes) */
+.snd{font:inherit;font-size:13px;padding:6px 12px;border-radius:8px;border:1px solid var(--amber);background:var(--amber-bg);color:var(--amber-t);cursor:pointer;white-space:nowrap}
+.snd.on{border-color:#3A4352;background:transparent;color:var(--mut)}
 /* hold */
 .hold{border:2px solid var(--amber);background:#1C1608}
 .hold .hk{font:12px var(--mono);color:var(--amber-t);letter-spacing:.04em}
@@ -162,6 +165,7 @@ tr.grp td{border-bottom:none;padding-top:9px}
  <div class="brand"><b>MIRLT</b><span class="mono" id="sess">-</span><span class="mono" id="mode"></span></div>
  <div class="chip run" id="chip"><b id="chipb">RUNNING</b><span id="chips">-</span></div>
  <div class="stats" id="stats"></div>
+ <button id="sndb" class="snd" title="Browsers only play sounds after a tap on the page: tap once to hear holds, help calls and robots left out">&#128264; Turn on sounds</button>
  <a class="lab" href="/lab">live lab &rarr;</a>
 </header>
 <main>
@@ -465,7 +469,7 @@ function calib(rows){rows=rows||[];const leg=$('calleg');
   box.appendChild(s)})}
 
 function render(s){const L=s.live||{};
- header(L.header,s);
+ header(L.header,s);sounds(s.alerts);
  if(changed('ask',[s.question,L.hold&&{r:L.hold.robot,k:L.hold.kind,w:L.hold.why},sent]))askRender(s.question,L.hold);
  else if(L.hold)$('hsince').textContent=L.hold.since_s==null?'':'waiting '+dur(L.hold.since_s);
  if(changed('health',s.health))health(s.health);
@@ -486,12 +490,31 @@ $('mmb').onclick=()=>{const w=window.open('about:blank','_blank');const b=$('mmb
   if(w)w.location=u;$('mms').innerHTML='Opened: recorder frame <b>'+d.frame+'</b> ('+esc(d.clock)+'), '+esc(d.robot)+', '+d.n+' pictures. '+(w?'':'Your browser blocked the new tab: <a href="'+u+'" target="_blank">open it here</a>. ')+'Saved in '+esc(d.folder)})
  .catch(e=>{if(w)w.close();$('mms').textContent='Not opened: '+e.message}).finally(()=>{b.disabled=false})};
 
+/* sounds: a hold, a help call, a robot left out because its turns fail. Browsers play sound only after a tap on
+   the page, so one tap on "Turn on sounds" unlocks them (and plays a short chime to show it works). While a hold or
+   a help call waits, the chime repeats every repeat_s. Alerts already there when the page opened are not played. */
+let AC=null,heard=null,lastRing=0;
+function tone(f,t0,d,g){const o=AC.createOscillator(),v=AC.createGain();o.type='sine';o.frequency.value=f;
+ v.gain.setValueAtTime(0.0001,AC.currentTime+t0);v.gain.exponentialRampToValueAtTime(g||0.3,AC.currentTime+t0+0.02);
+ v.gain.exponentialRampToValueAtTime(0.0001,AC.currentTime+t0+d);o.connect(v);v.connect(AC.destination);o.start(AC.currentTime+t0);o.stop(AC.currentTime+t0+d+0.05)}
+function ring(kind){if(!AC)return;lastRing=Date.now();
+ if(kind=='turn_fault'){tone(880,0,.25);tone(660,.3,.25);tone(440,.6,.45)}   /* falling: a robot is out */
+ else{tone(660,0,.3);tone(990,.35,.5)}}                                         /* rising: you are needed */
+$('sndb').onclick=()=>{try{AC=AC||new (window.AudioContext||window.webkitAudioContext)();AC.resume();ring('hold');
+ const b=$('sndb');b.classList.add('on');b.innerHTML='&#128266; Sounds on';b.title='Holds, help calls and robots left out play a chime; it repeats while one waits for you'}catch(e){$('sndb').textContent='No sound here: '+e.message}};
+function sounds(a){if(!a)return;const items=a.items||[];const top=items.length?items[items.length-1].id:0;
+ if(heard===null){heard=top;return}
+ const fresh=items.filter(x=>x.id>heard);heard=Math.max(heard,top);
+ if(fresh.length){ring(fresh.some(x=>x.kind=='turn_fault')?'turn_fault':'hold');return}
+ if(a.open&&Date.now()-lastRing>1000*(a.repeat_s||30))ring('hold')}
 function tick(){fetch('/status.json',{cache:'no-store'}).then(r=>r.json()).then(render).catch(()=>{$('chips').textContent='no answer from the runner'}).finally(()=>setTimeout(tick,1000))}
 tick();pic();
 </script></body></html>"""
 
 
 CAMERA_FPS = 25           # the overhead camera sends about this many pictures a second
+ALERT_REPEAT_S = 30       # while a hold or help call waits, the page sounds again this often (chosen: Nick missed two
+                          # 10-minute help calls on 2026-10-25; e02.py's ALERT_REPEAT_S says the same. No DOE: his time)
 MOMENT_BEFORE_S = 20      # "Mark this moment": this many seconds of pictures before the click (chosen: enough to see
                           # the robot before and as it was lost; a viewing window, so no DOE; the feed keeps 150 s)
 MOMENT_PAGES = 3          # at most this many moment pages run at once (each is a Python process)
@@ -980,7 +1003,21 @@ class LiveView:
             live = dict(error=str(e))
         return dict(phase=getattr(r, "phase", ""), order=getattr(r, "order", ""),
                     active=(tr.active if tr is not None and tr.active else ""), log=log, t=time.time(), note=note,
-                    health=self.health(), question=q, live=live)
+                    health=self.health(), question=q, live=live, alerts=self.alerts())
+
+    def alerts(self):
+        """What the page sounds for (2026-10-25 15:45 fixes: two help calls waited 10 silent minutes): the runner's
+        last alerts (a hold, a help call, a robot left out because its turns fail), whether one is still waiting
+        for Nick (open: the page sounds again every repeat_s), and the alert ids the page has not heard yet decide
+        what plays."""
+        r = self.r
+        try:
+            al = [dict(a) for a in list((r.st.get("alerts") or [])[-20:])]
+        except Exception:
+            al = []
+        hw = getattr(r, "help_waiting", None)
+        is_open = bool(self._hold_open() or hw)
+        return dict(items=al, open=is_open, open_robot=hw or "", repeat_s=ALERT_REPEAT_S)
 
     # --- the operations console (2026-10-25, Nick's approved mockup): everything below only reads the runner ----
     def live_state(self):

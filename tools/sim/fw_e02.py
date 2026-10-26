@@ -880,6 +880,10 @@ class E02Mixin:
         if not good:
             self.leg_record(lid, kind, arg, "refused", "could not read it (go <cm> | turn <deg> | mark start|far|end)")
             return
+        if kind in ("g", "t") and getattr(self, "fw_yaw_sign", 1) == 0:
+            # firmware 2026-10-25c: no compass check since power-on, the heading never moves: refused
+            self.leg_record(lid, kind, arg, "refused", "no compass check since power-on: send calibrate first")
+            return
         if kind == "g" and (arg > self.P("e02_go_max_cm") or arg < -self.P("e02_back_max_cm")):
             self.leg_record(lid, kind, arg, "refused", "too long (e02_go_max_cm / e02_back_max_cm)")
             return
