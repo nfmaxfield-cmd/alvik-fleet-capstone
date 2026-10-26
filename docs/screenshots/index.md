@@ -11,3 +11,4 @@ One line per picture: what it shows (feature or problem), and where it comes fro
 
 ## 2026-10-26
 - `2026-10-26/0956-session-start-tracker-process.png`: **feature.** A session starting on the Pi: the session timeouts listed, camera tracking in its own process on cores 2 and 3, all three robots on firmware 2026-10-25c, every compass check done.
+- `2026-10-26/1000-left-washed-out-lost-hold.png`: **problem.** Left on the board but washed out (white body on bright plywood); the camera's circle sits on empty plywood about 10 cm away, giving a "lost robot" hold. Nick: the blinking lights should have found it. Fix going into the 2026-10-26 runner build: try the lights before asking. Also shows the new tracking at 21 of 25 pictures a second.
