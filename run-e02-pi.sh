@@ -44,7 +44,10 @@ if [ "${1:-}" = "--plan" ]; then
 fi
 REPO="$(pwd)"
 RUN_ARGS_DEFAULT="--no-side --robot 192.168.1.250 --robot 192.168.1.252 --robot 192.168.1.253"
-CAM_ARGS="--device 0 --names overhead --fps 25 --label E02 --no-lock"
+# OVERHEAD_DEV: the overhead camera's device number (default 0). After a Pi restart the numbers can swap (Nick,
+# 2026-10-26: the live page showed the side camera); `python3 tools/pi/camrec.py --list` shows the numbers.
+OD="${OVERHEAD_DEV:-0}"
+CAM_ARGS="--device $OD --names overhead --fps 25 --label E02 --no-lock"
 if [ "$SIDE" = 1 ]; then
   SD="${SIDE_DEV:-2}"
   if [ ! -e "/dev/video$SD" ]; then
@@ -52,7 +55,7 @@ if [ "$SIDE" = 1 ]; then
     echo "then start again with SIDE_DEV=<number> in front, e.g.  SIDE_DEV=4 ./run-e02-pi.sh --with-side"
     exit 1
   fi
-  CAM_ARGS="--device 0,$SD --names overhead,side --fps 25 --label E02 --no-lock"
+  CAM_ARGS="--device $OD,$SD --names overhead,side --fps 25 --label E02 --no-lock"
   echo "Recording the side camera too (/dev/video$SD); the runner uses the overhead only."
 fi
 
