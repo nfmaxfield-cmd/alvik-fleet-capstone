@@ -36,3 +36,4 @@ One line per picture: what it shows (feature or problem), and where it comes fro
 - `2026-10-26/launcher-11-uploading-phone.png`: **feature.** The same on a phone.
 - `2026-10-26/launcher-12-done-idle-desktop.png`: **feature.** Back to idle: last session, how it ended, the upload link.
 - `2026-10-26/launcher-12-done-idle-phone.png`: **feature.** The same on a phone.
+- `2026-10-26/1105-session-end-summary-throttled.png`: **problem + feature.** The runner's end-of-session summary on the Pi. Problems: the Pi was throttled (soft temperature limit, frequency capped); 4 slow spells, 53 min in all; the session ended because Left was put aside in the corner every robot's find drives to, so no run could start. Features: the new cpu/throttle log, the tracker process at 17.9 pictures a second, home-vs-away border shadow count, and the automatic upload.
