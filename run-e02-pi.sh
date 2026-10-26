@@ -28,8 +28,7 @@ set -u
 cd "$(dirname "$0")"
 PLAN=0
 # --with-side: record the side camera too (Nick, 2026-10-24: footage for its calibration and the two-camera
-# tracker; the runner does not use it yet). Its device number: SIDE_DEV (default 2; `python3 tools/pi/camrec.py
-# --list` shows which numbers send pictures). Recording only: the overhead's picture rate is in perf.csv to check.
+# tracker; the runner does not use it yet). Found by its name (tools/pi/camnames.py); SIDE_DEV=<number> overrides. Recording only: the overhead's picture rate is in perf.csv to check.
 SIDE=0
 PROD=0
 for a in "$@"; do [ "$a" = "--with-side" ] && SIDE=1; [ "$a" = "--production" ] && PROD=1; done
@@ -44,17 +43,32 @@ if [ "${1:-}" = "--plan" ]; then
 fi
 REPO="$(pwd)"
 RUN_ARGS_DEFAULT="--no-side --robot 192.168.1.250 --robot 192.168.1.252 --robot 192.168.1.253"
-# OVERHEAD_DEV: the overhead camera's device number (default 0). After a Pi restart the numbers can swap (Nick,
-# 2026-10-26: the live page showed the side camera); `python3 tools/pi/camrec.py --list` shows the numbers.
-OD="${OVERHEAD_DEV:-0}"
+# Cameras by name (Nick, 2026-10-26: after a Pi restart the numbers swapped and the runner opened the side camera as
+# the overhead). tools/pi/camnames.py finds each camera's number from its name (~/.config/mirlt/cameras.json says
+# which name is the overhead and which the side); `python3 tools/pi/camnames.py` shows what it sees.
+# OVERHEAD_DEV / SIDE_DEV in front still pick a number by hand, e.g.  OVERHEAD_DEV=2 ./run-e02-pi.sh
+cam_dev() {   # cam_dev overhead|side: the number, or a plain message and stop
+  local d
+  local var=OVERHEAD_DEV; [ "$1" = side ] && var=SIDE_DEV
+  d="$(python3 tools/pi/camnames.py --dev "$1")" || {
+    echo "Stopped: the $1 camera was not found by its name (the line above says what the Pi sees). Plug it in and" >&2
+    echo "start again, or give its number by hand, e.g.  $var=2 ./run-e02-pi.sh" >&2
+    exit 1
+  }
+  echo "$d"
+}
+if [ -n "${OVERHEAD_DEV:-}" ]; then OD="$OVERHEAD_DEV"; echo "Overhead camera: /dev/video$OD (OVERHEAD_DEV, by hand)."
+else OD="$(cam_dev overhead)" || exit 1; echo "Overhead camera: /dev/video$OD (found by its name)."; fi
 CAM_ARGS="--device $OD --names overhead --fps 25 --label E02 --no-lock"
 if [ "$SIDE" = 1 ]; then
-  SD="${SIDE_DEV:-2}"
+  if [ -n "${SIDE_DEV:-}" ]; then SD="$SIDE_DEV"
+  else SD="$(cam_dev side)" || exit 1; fi
   if [ ! -e "/dev/video$SD" ]; then
-    echo "No side camera at /dev/video$SD. Plug it in, or find its number with:  python3 tools/pi/camrec.py --list"
+    echo "No side camera at /dev/video$SD. Plug it in, or find its number with:  python3 tools/pi/camnames.py"
     echo "then start again with SIDE_DEV=<number> in front, e.g.  SIDE_DEV=4 ./run-e02-pi.sh --with-side"
     exit 1
   fi
+  if [ "$SD" = "$OD" ]; then echo "The overhead and side cameras are both /dev/video$SD. Stopped."; exit 1; fi
   CAM_ARGS="--device $OD,$SD --names overhead,side --fps 25 --label E02 --no-lock"
   echo "Recording the side camera too (/dev/video$SD); the runner uses the overhead only."
 fi
@@ -108,7 +122,13 @@ for m in /media/"$USER"/*; do
 done
 if [ -z "$OUT" ]; then
   echo "No USB drive found (nothing under /media/$USER)."
+  if [ -n "${E02_LAUNCHER:-}" ]; then
+    # started from the start page: no terminal to ask in; the page's "record to the Pi's card" choice answers
+    ans="${E02_CARD_OK:-n}"
+    [ "$ans" = "y" ] || echo "Plug in the USB drive, or tick 'no USB drive: record to the Pi's card' on the start page."
+  else
   read -r -p "Record to the Pi's own card instead? Type y and press Enter (anything else stops): " ans
+  fi
   [ "$ans" = "y" ] || exit 1
   OUT="$HOME/recordings"
 fi
@@ -134,6 +154,12 @@ fi
 git -C "$REPO" pull --ff-only >/dev/null 2>&1 && echo "Code up to date." || echo "(git pull skipped: offline or local changes)"
 
 if [ "$#" -gt 0 ]; then RUN_ARGS="$RUN_ARGS_DEFAULT $*"; else RUN_ARGS="$RUN_ARGS_DEFAULT"; fi
+# a production session's tracker opens the camera itself: give it the overhead's number (before 2026-10-26 it
+# always opened /dev/video0, whatever OVERHEAD_DEV said)
+[ "$PROD" = 1 ] && RUN_ARGS="$RUN_ARGS --camera-device $OD"
+# the start page (tools/pi/launcher.py) keeps port 8090 while no session runs: ask it to let go (nothing happens
+# if it is not installed)
+python3 tools/pi/launcher.py --handoff >/dev/null 2>&1 || true
 
 if [ "$PROD" = 1 ]; then
   if [ "$PLAN" = 1 ]; then echo "--production and --plan don't go together yet. Stopped."; exit 1; fi
@@ -142,6 +168,7 @@ if [ "$PROD" = 1 ]; then
   echo
   echo "Started (production: no video). Watch it on any phone or computer on the WiFi:"
   echo "    http://$(hostname).local:8090"
+  [ -n "${E02_LAUNCHER:-}" ] && exit 0
   sleep 2
   tmux attach -t e02
   exit 0
@@ -158,6 +185,7 @@ tmux select-window -t e02:run
 echo
 echo "Started. Watch it and answer its questions on any phone or computer on the WiFi:"
 echo "    http://$(hostname).local:8090"
+[ -n "${E02_LAUNCHER:-}" ] && exit 0      # started from the start page: nobody to show the window to
 echo "Opening the runner's window now. To leave it running and close this terminal: Ctrl+B, then D."
 sleep 2
 tmux attach -t e02

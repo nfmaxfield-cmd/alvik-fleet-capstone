@@ -8994,6 +8994,8 @@ def main(argv=None):
     ap.add_argument("--own-sensor-only", action="store_true", help="backup: only the runs where the robots drive on "
                     "their own sensors (U, C); K and KC stay in the plan for later")
     ap.add_argument("--resume", nargs="?", const="latest", help="carry on a session (folder, or the latest)")
+    ap.add_argument("--new", action="store_true", help="a new session: don't offer to carry on an unfinished one "
+                                                       "(the start page, tools/pi/launcher.py, chose already)")
     ap.add_argument("--auto", action="store_true", help="answer every question with its default (no person)")
     ap.add_argument("--fit-max-rms-cm", type=float, default=None,
                     help="the self-calibration's camera-vs-wheels limit per stretch (default e02_fit.MAX_RMS_CM, 1.5; "
@@ -9041,7 +9043,7 @@ def main(argv=None):
         a.web_ask = True
 
     sim = None
-    if not a.resume and not a.dry_run and not a.auto:
+    if not a.resume and not a.dry_run and not a.auto and not a.new:
         # an unfinished real session on this laptop: offer to carry it on (the launcher double-click path)
         for c in sorted(glob.glob(os.path.join(REPO, "logs", "e02-*", "e02_state.json")), reverse=True):
             if "-dryrun" in c:

@@ -32,9 +32,79 @@ python3 tools/pi/upload_session.py --set-token
 Paste the token (Ctrl+Shift+V in the Pi's terminal; it does not show) and press Enter. It should say
 `Saved. The Pi can upload sessions ...`.
 
+## Once: the start page (2026-10-26)
+
+A web page on the Pi that starts and stops sessions, so no PowerShell is needed for a session. Install it once,
+**after any running session has finished uploading** (the install updates the code on the Pi).
+
+1. On the laptop, open **PowerShell** (Start menu, type `PowerShell`, press Enter).
+2. In the PowerShell window, type this and press Enter:
+   ```
+   ssh st1maxfini@100.122.222.75
+   ```
+   The first time it may ask `Are you sure you want to continue connecting (yes/no)?`: type `yes` and press Enter.
+   Then type the Pi's password (nothing shows while you type) and press Enter. You should see a line ending in
+   `st1maxfini@...:~ $`.
+3. Type this and press Enter:
+   ```
+   cd ~/alvik-fleet-capstone
+   ```
+4. Type this and press Enter (it fetches the newest code; a few lines scroll by):
+   ```
+   git pull
+   ```
+5. Type this and press Enter:
+   ```
+   bash tools/pi/install_launcher.sh
+   ```
+   - It lists the cameras; you should see `OK: overhead camera: USB 2.0 Camera: USB Camera at /dev/video...` and
+     `OK: side camera: EMEET SmartCam C950 at /dev/video...` (a `MISSING:` line means that camera is unplugged; the
+     install still goes on).
+   - It asks `Choose a PIN for the start page (4 to 12 digits; it will not show)`: type a PIN, press Enter, type it
+     again, press Enter.
+   - It may ask `[sudo] password for st1maxfini:`: type the Pi's password, press Enter.
+   - It ends with `DONE.` and the page's addresses, e.g. `Tailscale (anywhere): http://100.122.222.75:8091`.
+6. Type `exit` and press Enter. Close PowerShell.
+7. On the phone, open `http://100.122.222.75:8091`, type the PIN, press **Open**. Add it to the home screen
+   (Safari: Share, Add to Home Screen; Chrome: the three dots, Add to Home screen).
+
+Running the install again is safe: it keeps the PIN (press Enter) and restarts the page with the newest code.
+
+**Using it.** Pick the options and press **Start**; a box asks to confirm. **Stop** (with its own confirm box) does
+what Ctrl+C in the runner's window does: every robot stops, everything is saved, then the logs and video upload.
+The page shows: idle / starting / running (with a button to the live page) / stopping / uploading (a progress bar),
+the last session (runs done, how it ended, the upload link), free space, the cameras it found and which is which,
+and the robots' batteries (from the running session, or **Ask the robots now** while idle). It will not start a
+second session while one runs or uploads, or without the overhead camera.
+
+**The two addresses.** Port **8091** is always the start page. Port **8090** (the live page's address) shows the
+start page while nothing runs, the live page during a session, and the start page again during the upload. The live
+page has a "start page / Stop" link at the top.
+
+**Access.** Only from the home WiFi and Tailscale, and only with the PIN. The PIN is stored on the Pi only (as a
+salted hash in `~/.config/mirlt/launcher.json`). To change it: `python3 tools/pi/launcher.py --set-pin` in a
+terminal on the Pi, then `sudo systemctl restart mirlt-launcher`.
+
+**If the page does not answer:** in a terminal on the Pi, `sudo systemctl status mirlt-launcher` (it should say
+`active (running)`), and `sudo journalctl -u mirlt-launcher -n 30` for what it said.
+
+## Cameras by name (2026-10-26)
+
+After a Pi restart the camera numbers can swap (on 2026-10-26 the runner opened the side camera as the overhead).
+`run-e02-pi.sh` and the start page now pick each camera by its **name**. `~/.config/mirlt/cameras.json` on the Pi
+says which name is which (the install writes it):
+```
+{"overhead": "USB 2.0 Camera", "side": "EMEET SmartCam C950"}
+```
+`python3 tools/pi/camnames.py` shows what the Pi sees and which camera is which. If a camera is missing, the start
+page says so in red and will not start; `run-e02-pi.sh` stops with the same message. The old way still works as an
+override: `OVERHEAD_DEV=2 ./run-e02-pi.sh` (and `SIDE_DEV=0` with `--with-side`). A production session now passes
+the overhead's number to the tracker too (before, it always opened `/dev/video0`).
+
 ## Each session
 
-Robots on their parking spots, turned on, the camera aimed as usual. On the Pi (RealVNC, or SSH), in a terminal:
+Robots on their parking spots, turned on, the camera aimed as usual. The easy way: the start page (above). The
+terminal way, unchanged: on the Pi (RealVNC, or SSH), in a terminal:
 ```
 cd ~/alvik-fleet-capstone && ./run-e02-pi.sh
 ```

@@ -32,6 +32,8 @@ REPO_SLUG = "nfmaxfield-cmd/alvik-fleet-capstone"
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 TOKEN_PATH = os.path.expanduser("~/.config/mirlt/github_token")
+STATE_DIR = os.path.expanduser(os.environ.get("MIRLT_STATE_DIR", "~/.local/state/mirlt"))
+PROGRESS_PATH = os.path.join(STATE_DIR, "upload.json")   # the start page (tools/pi/launcher.py) shows it
 PART_BYTES = 1900 * 1024 * 1024
 SMALL_BYTES = 50 * 1024 * 1024    # files up to this size go in the small-files zip
 CHUNK = 4 * 1024 * 1024
@@ -46,6 +48,37 @@ def token():
 
 
 _open = urllib.request.urlopen     # tests replace it (no network)
+
+
+class Progress:
+    """How far the upload is, in PROGRESS_PATH (2026-10-26: the start page shows it). Bytes sent are counted as the
+    file parts are read, so a 1.9 GB part moves the bar while it goes. Written at most once a second; never fatal."""
+
+    def __init__(self, path=None):
+        self.path = path or PROGRESS_PATH
+        self.d = dict(state="idle")
+        self.t_last = 0.0
+
+    def set(self, force=True, **kw):
+        self.d.update(kw)
+        self.d["t"] = time.time()
+        if not force and time.time() - self.t_last < 1.0:
+            return
+        self.t_last = time.time()
+        try:
+            os.makedirs(os.path.dirname(self.path), exist_ok=True)
+            tmp = self.path + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(self.d, f)
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
+
+    def sent(self, n):
+        self.set(force=False, done_bytes=self.d.get("done_bytes", 0) + n)
+
+
+PROGRESS = Progress()
 
 
 def api(method, url, tok, data=None, ctype="application/json", length=None):
@@ -87,6 +120,7 @@ class _Slice:
         size = self.left if size is None or size < 0 else min(size, self.left)
         b = self.f.read(min(size, CHUNK))
         self.left -= len(b)
+        PROGRESS.sent(len(b))
         return b
 
     def close(self):
@@ -94,10 +128,13 @@ class _Slice:
 
 
 def upload(rel, name, path, tok, start=0, n=None, have=()):
+    n = os.path.getsize(path) - start if n is None else n
     if name in have:
         print("  %s: already up, skipped" % name, flush=True)
+        PROGRESS.sent(n)
         return
-    n = os.path.getsize(path) - start if n is None else n
+    PROGRESS.set(current=name)
+    done0 = PROGRESS.d.get("done_bytes", 0)
     url = rel["upload_url"].split("{")[0] + "?name=" + urllib.request.quote(name)
     for attempt in range(3):
         src = _Slice(path, start, n)
@@ -109,9 +146,11 @@ def upload(rel, name, path, tok, start=0, n=None, have=()):
             return
         except (urllib.error.URLError, OSError) as e:
             print("  %s: failed (%s), trying again" % (name, e), flush=True)
+            PROGRESS.set(done_bytes=done0, last_error=str(e)[:200])
             time.sleep(10)
         finally:
             src.close()
+    PROGRESS.set(state="failed", error="Upload of %s failed 3 times" % name)
     raise SystemExit("Upload of %s failed 3 times: run this again later (finished parts are skipped)." % name)
 
 
@@ -177,7 +216,34 @@ def check_token():
     print("Token works: this computer can upload to %s." % REPO_SLUG)
 
 
+def _folder_bytes(folder, small_only=False, big_only=False):
+    n = 0
+    for root, _, files in os.walk(folder):
+        for fn in files:
+            try:
+                k = os.path.getsize(os.path.join(root, fn))
+            except OSError:
+                continue
+            if (small_only and k > SMALL_BYTES) or (big_only and k <= SMALL_BYTES):
+                continue
+            n += k
+    return n
+
+
 def main():
+    try:
+        return _main()
+    except SystemExit as e:
+        if PROGRESS.d.get("state") == "uploading" and e.code not in (None, 0):
+            PROGRESS.set(state="failed", error=str(e.code)[:300])
+        raise
+    except BaseException as e:
+        if PROGRESS.d.get("state") == "uploading":
+            PROGRESS.set(state="failed", error="%s: %s" % (type(e).__name__, str(e)[:250]))
+        raise
+
+
+def _main():
     if "--set-token" in sys.argv:
         return set_token()
     if "--check-token" in sys.argv:
@@ -194,6 +260,8 @@ def main():
         stop_recorder()
     tok = token()
     if not tok:
+        PROGRESS.set(state="failed", error="no GitHub token on the Pi: nothing uploaded (the files stay on the Pi)",
+                     session="", link="")
         raise SystemExit("No GitHub token at %s: nothing uploaded. The files stay on the Pi and the USB drive "
                          "(docs/pi-run.md, 'GitHub token', sets it up)." % TOKEN_PATH)
     sess = a.session or max((d for d in glob.glob(os.path.join(REPO, "logs", "e02-*")) if "-dryrun" not in d),
@@ -205,6 +273,9 @@ def main():
     name = os.path.basename(sess)
     tag = a.tag or ("e02-session-" + name.replace("e02-", ""))
     print("Uploading %s and recording %s to release %s" % (name, os.path.basename(rec) or "(none)", tag), flush=True)
+    total = (0 if a.no_logs else _folder_bytes(sess)) + (_folder_bytes(rec) if rec else 0)   # zips: an estimate
+    PROGRESS.set(state="uploading", session=name, tag=tag, total_bytes=total, done_bytes=0, current="",
+                 t_start=time.time(), link="", error="")
     rel = release_for(tag, tok, "Session %s, uploaded from the Pi at the end of the session (tools/pi/upload_session.py)."
                       " Video parts: join them in order (cat video.avi.part-* > video.avi)." % name)
     have = {x["name"] for x in rel.get("assets", [])}
@@ -228,7 +299,9 @@ def main():
                     part = "%s.part-%s%s" % (stem, chr(97 + k // 26), chr(97 + k % 26))
                     upload(rel, part, p, tok, start, min(PART_BYTES, size - start), have=have)
                     k += 1
-    print("All up: https://github.com/%s/releases/tag/%s" % (REPO_SLUG, tag), flush=True)
+    link = "https://github.com/%s/releases/tag/%s" % (REPO_SLUG, tag)
+    PROGRESS.set(state="done", link=link, done_bytes=PROGRESS.d.get("total_bytes", 0), current="")
+    print("All up: " + link, flush=True)
 
 
 if __name__ == "__main__":
