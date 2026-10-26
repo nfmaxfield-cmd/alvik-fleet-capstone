@@ -259,6 +259,19 @@ new rows below them).
 | A leg is over (e02.py LEG_OVER_MARGIN_S) | its start + length / speed + 2 s | No DOE: a margin; leg.csv's leg times show the spread if needed | Logs | built (2026-10-26) |
 | Board sides from explore's contacts (e02.py BOARD_WORDS_MIN) | 2 board contacts on a picture side, more than its edge contacts | No DOE: explore's own side rule asks 2 a side | - | built (2026-10-26) |
 
+## The 2026-10-26 09:55 session (proposed, not built)
+
+Write-up: [e02-oct26-session-0955.md](build-reports/e02-oct26-session-0955.md).
+
+| Number (where) | Value proposed | Experiment that would set it | Needs | Status |
+|---|---|---|---|---|
+| Parked-robot watch rate (e02_alltrack.py, a new PARK_EVERY_N) | 1 picture in 5 (now every picture: about 28 ms of the 54) | Replay real footage (this session's parked spells, the 15:45 collision, Nick nudging a parked robot 1 / 2 / 4 / 8 cm) at every 1 / 3 / 5 / 10 pictures: missed and late "moved" calls against the time saved | Footage | open |
+| Overhead camera contrast and exposure (camrec controls: contrast, exposure_time_absolute) | contrast 48-64 (now 32), exposure 100-120 (now 157) | On the board, robots parked: each robot at 4 headings x 3 places (top, middle, bottom), contrast 32 / 48 / 64 x exposure 157 / 120 / 100, with and without a dark top mark; the darkest-pixel gap against the plywood (now 40 at worst, 120-130 at best) and the tracker's lock | Board | open |
+| Hung robot: tilt limit (params.h tilt_stop_deg, e02.py TILT_STOP_DEG) | 5 deg (built) | Add to the bench tilt DOE: a robot sliding sideways off an edge on a crawl. Real data point 10-26 10:09: 3.3 deg pitch, 1.7 deg roll from level while hung, under 5 deg | Bench | open (new evidence) |
+| Explore's scale check with one robot (e02.py explore_finish) | within 5 % of the robots' size or a measured board side | Replay explore's fits from every real session (21:14, 09:55) and dry runs with one robot passing: the scale against roam1 (09:55: 11 % small) and against the check | Logs | open |
+
+Chosen with no DOE: the heading crawl backwards when the front is blocked, 3 cm (the same as the forward crawl).
+
 ## Already set by data
 
 - **Line edge cue edge_thr 150** (e02.py SAFETY_SETTINGS): plywood reads 52-84 in every E02 session, the two real
