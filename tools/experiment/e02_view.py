@@ -169,6 +169,8 @@ tr.grp td{border-bottom:none;padding-top:9px}
  <div class="stats" id="stats"></div>
  <button id="sndb" class="snd" title="Browsers only play sounds after a tap on the page: tap once to hear holds, help calls and robots left out">&#128264; Turn on sounds</button>
  <a class="lab" href="/lab">live lab &rarr;</a>
+ <a class="lab" id="ctlk" href="/" title="The start page on the Pi (tools/pi/launcher.py, port 8091): Stop, status, upload">start page / Stop &rarr;</a>
+ <script>document.getElementById('ctlk').href=location.protocol+'//'+location.hostname+':8091/'</script>
 </header>
 <main>
 <section class="left">
