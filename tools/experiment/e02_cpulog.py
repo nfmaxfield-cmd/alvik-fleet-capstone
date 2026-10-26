@@ -12,7 +12,9 @@ cpu.csv, one row every EVERY_S:
                                  bit 0 under-voltage now, 1 frequency capped now, 2 throttled now, 3 soft temperature
                                  limit now; bits 16-19 the same "has happened since boot"
   throttle_words                 those bits in words ("" when none)
-  freq_mhz                       core 0's clock now
+  freq_mhz                       core 0's clock now, as the kernel asked for it (/sys scaling_cur_freq)
+  arm_mhz                        the ARM clock the firmware really runs (vcgencmd measure_clock arm), every
+                                 VCGENCMD_EVERY_S; lower than freq_mhz while the firmware caps it (heat, supply). 2026-10-26
   mem_avail_mb                   memory available
   <name>_cpu, <name>_rss_mb, <name>_cores   per watched process: its CPU share of ONE core since the last row (100 =
                                  one core busy, 200 = two), its memory, the cores it may run on
@@ -146,6 +148,14 @@ def throttle_words(v):
     return "; ".join(w for b, w in sorted(THROTTLE_BITS.items()) if v & (1 << b))
 
 
+def parse_arm_clock(s):
+    """'frequency(48)=1500398464' -> 1500 (MHz), or None."""
+    try:
+        return int(round(int(str(s).strip().split("=")[-1]) / 1e6))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
 def vcgencmd(*args, run=subprocess.run):
     if not shutil.which("vcgencmd") and run is subprocess.run:
         return None
@@ -199,13 +209,21 @@ class CpuLog(threading.Thread):
                 cache["v"] = None
         return cache.get("v")
 
+    def _arm_mhz(self, now, cache):
+        """The real ARM clock, MHz (vcgencmd measure_clock arm: 'frequency(48)=1500398464'), every VCGENCMD_EVERY_S;
+        None where there is no vcgencmd (not a Pi)."""
+        if now - cache.get("t", -1e9) >= VCGENCMD_EVERY_S:
+            cache["t"] = now
+            cache["v"] = parse_arm_clock(vcgencmd("measure_clock", "arm", run=self.run_))
+        return cache.get("v")
+
     def run(self):
         try:
             stat0 = read_stat()
             cores = sorted(stat0)
             names = sorted(set(self.procs) | set(self.find))
             cols = (["t", "clock"] + ["core%d" % c for c in cores] +
-                    ["load1", "temp_c", "throttled", "throttle_words", "freq_mhz", "mem_avail_mb"] +
+                    ["load1", "temp_c", "throttled", "throttle_words", "freq_mhz", "arm_mhz", "mem_avail_mb"] +
                     [n + s for n in names for s in ("_cpu", "_rss_mb", "_cores")])
             new = not os.path.exists(self.path)
             f = open(self.path, "a", newline="")
@@ -213,7 +231,7 @@ class CpuLog(threading.Thread):
             if new:
                 w.writeheader()
             prev_p, t_prev = {}, time.time()
-            thr_c, tmp_c = {}, {}
+            thr_c, tmp_c, arm_c = {}, {}, {}
             while not self.stop_ev.wait(self.every):
                 now = time.time()
                 stat1 = read_stat()
@@ -235,6 +253,8 @@ class CpuLog(threading.Thread):
                 if th:
                     self.throttled_seen |= th
                 row["freq_mhz"] = read_freq() or ""
+                am = self._arm_mhz(now, arm_c)
+                row["arm_mhz"] = "" if am is None else am
                 row["mem_avail_mb"] = read_mem_avail() or ""
                 dt = now - t_prev
                 t_prev = now

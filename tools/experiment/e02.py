@@ -650,6 +650,9 @@ class Listener:
 
 
 # =============================================================================== the runner
+EXPLORE_MIN_ROBOTS = 2         # 2026-10-26 (the 09:55 session analysis): explore's camera fit is used only when at least
+                               # this many robots' paths pass their own check (a single robot's scale is unconfirmed).
+                               # A one-robot session (--robots Right) keeps explore as before. No DOE: a rule
 EXPLORE_CRAWL_CMS = 4.0        # Nick 2026-10-24: rays, probes and the square crawl (DOE-explore-crawl.md decides it)
 EXPLORE_FAST_CMS = 10.0        # e02_cms otherwise (the firmware's default): returns over ground just driven
 EXPLORE_PROBE_CM = 12.0        # chosen: the room check's short drive each way
@@ -3723,6 +3726,11 @@ class Runner:
         q = self.st["positions"].get(robot)
         guess = (last[1], last[2]) if last else (tuple(q[:2]) if q else None)
         p = self.identify(robot, near=(guess[0], guess[1], 60.0) if guess else None)
+        if p is None:
+            # 2026-10-26 09:55 session: decisions about a put-aside robot use where it is NOW (11:05 used a place 20
+            # minutes old): its lights over the whole picture once more
+            p = self.lights_whole_picture(robot)
+        seen_now = p is not None
         self.moves.pop(robot, None)
         if p is None:
             # the camera can't see it: its own pose from its last leg, if that is newer than the camera's last
@@ -3751,6 +3759,24 @@ class Runner:
         fx, fy = self.board.find_stage()
         kx, ky, _ = self.board.park(self.park_index(robot))
         in_corner = math.hypot(p[0] - fx, p[1] - fy) < BLOCKS_FIND_CM
+        h_ = self.heads.get(robot, [None, False])
+        drivable = seen_now and h_[0] is not None and bool(h_[1])
+        if not drivable and (in_corner or math.hypot(p[0] - kx, p[1] - ky) > ASIDE_PARK_CM):
+            # 2026-10-26 09:55 session (11:05): a put-aside robot whose position and heading are not both known now
+            # is NOT driven (no drive-out on its own pose, no find: Left drove into the right edge that way). It stays
+            # put until Nick moves it; the others go round it, and find against a free corner if it blocks the usual
+            self.say("  %s is not driven (%s): it stays where it is until you move it; the others go round it." % (
+                robot, "its heading is not known" if seen_now else "the camera cannot see it now"))
+            self.st.setdefault("aside_not_driven", []).append([round(time.time(), 1), robot, [round(p[0], 1),
+                                                                round(p[1], 1)], seen_now, bool(h_[1])])
+            self.alert("help", robot, "%s is put aside at (%.0f, %.0f) cm and not driven: move it off the board when "
+                       "you can" % (robot, p[0], p[1]))
+            if in_corner and not self.free_find_corner(p):
+                raise SystemExit("%s is put aside at about (%.0f, %.0f) cm, in the corner every robot's find drives "
+                                 "to, and no other staging point is clear, so no run can start. Take %s off the board, "
+                                 "then start again with --resume." % (robot, p[0], p[1], robot))
+            self.st.save()
+            return
         if not in_corner and math.hypot(p[0] - kx, p[1] - ky) > ASIDE_PARK_CM:
             # put aside out on the board (dry run 15:01: at (73, 62), where the routes run; the next run's watchdog
             # stopped it): drive it to its own spot on its own pose; if that fails it stays where it is
@@ -3798,9 +3824,33 @@ class Runner:
                     robot, q2[0], q2[1]))
                 self.st.save()
                 return
+            pl = self.st["positions"].get(robot) or p          # where it is now, not where the help call saw it
+            if self.free_find_corner(pl):
+                self.st.save()
+                return
             raise SystemExit("%s is put aside at about (%.0f, %.0f) cm, in the corner every robot's find drives to, "
                              "so no run can start. Take %s off the board, then start again with --resume." % (
-                                 robot, p[0], p[1], robot))
+                                 robot, pl[0], pl[1], robot))
+
+    FIND_STAGE_FREE_CM = 50.0     # 2026-10-26 09:55 session: with a set-aside robot in the usual find corner, finds start
+                                  # this far from both board faces (instead of 25), so both bumps land 50 cm from the
+                                  # corner. Chosen: under the firmware's 60 cm find reach (e02_find_max_cm) with the
+                                  # back face's 6 cm; DOE note: no, geometry (a dry run checks a find from it)
+
+    def free_find_corner(self, p):
+        """A set-aside robot at p blocks the usual find staging point: move every later find's staging point to
+        FIND_STAGE_FREE_CM from both faces (sent with every find's board settings: e02_find_stage_cm) if p is clear of
+        it. True if done (the session carries on)."""
+        b = self.board
+        nx, ny = b.uv(Runner.FIND_STAGE_FREE_CM, Runner.FIND_STAGE_FREE_CM)
+        if math.hypot(p[0] - nx, p[1] - ny) < BLOCKS_FIND_CM:
+            return False
+        b.find_stage_cm = Runner.FIND_STAGE_FREE_CM
+        self.st["find_stage_cm"] = Runner.FIND_STAGE_FREE_CM
+        self.say("  Finds now start %.0f cm from both boards (not %.0f), clear of the robot in the corner." % (
+            Runner.FIND_STAGE_FREE_CM, PL.FIND_STAGE_CM))
+        self.mark("e02 find stage moved")
+        return True
 
     # --- checks -----------------------------------------------------------------------------------
     def wait_robots(self, names, timeout=40):
@@ -4043,6 +4093,8 @@ class Runner:
         if not st.get("board"):
             self.find_boards(img)
         self.board = PL.Board.from_dict(st["board"])
+        if st.get("find_stage_cm"):
+            self.board.find_stage_cm = float(st["find_stage_cm"])    # a free find corner chosen earlier (--resume)
         self.tracker_area()
         sx, sy, sh = self.board.nominal_start()
         self.say("Route start spot: (%.1f, %.1f) cm, near the blocked corner" % (sx, sy))
@@ -4129,6 +4181,17 @@ class Runner:
         self.tracker.set_area((b.x0, b.y0, b.x1, b.y1),
                               walls=[("y", b.xboard_cm + b.uy * PL.ROBOT_HALF_CM),
                                      ("x", b.yboard_cm + b.ux * PL.ROBOT_HALF_CM)])
+
+    def keep_tracker_stats(self, tr):
+        """A tracker about to be replaced (explore's end, a recalibration): add its counts to the session's, so the
+        end summary covers the whole session, not only the last tracker (2026-10-26 09:55 session: "none 98 %" was the
+        last 17,000 pictures only)."""
+        if tr is None or not getattr(tr, "stats", None):
+            return
+        acc = self.__dict__.setdefault("tracker_stats_before", {})
+        for k, v in dict(tr.stats).items():
+            if isinstance(v, (int, float)):
+                acc[k] = acc.get(k, 0) + v
 
     def make_tracker(self):
         if self.tracker is None:
@@ -4787,6 +4850,7 @@ class Runner:
             self.explore_speed(n, EXPLORE_FAST_CMS)
         self.exploring = False
         old_tr = self.tracker
+        self.keep_tracker_stats(old_tr)
         self.tracker = None
         if old_tr is not None:
             old_tr.idle()
@@ -5282,6 +5346,11 @@ class Runner:
             sol = self.heavy(EX.fit, robots, size)
         bad = EX.fit_check(sol) or ("forced to fail (--dry-explore-fail)" if getattr(self.a, "dry_explore_fail", False)
                                     and getattr(self.a, "dry_run", False) else "")
+        if not bad and len(robots) < EXPLORE_MIN_ROBOTS and len(obs) >= EXPLORE_MIN_ROBOTS:
+            # 2026-10-26 09:55 session: one robot's path alone set the camera's scale, with nothing to confirm it
+            # (its own wheel scale and the camera's size trade off). With a second robot's path the two must agree
+            bad = "only %s's path fits its own wheels and gyro: one robot cannot confirm the camera's scale" % (
+                ", ".join(robots))
         if bad:
             self.say("  camera fit: %.1f px rms; wheel scales %s; gyro scales %s" % (
                 sol["rms_px"], ", ".join("%s %.3f" % kv for kv in sol["s"].items()),
@@ -5363,6 +5432,7 @@ class Runner:
         self.cam = CAM.load_camera(path)
         self.board = bd
         old_tr = self.tracker
+        self.keep_tracker_stats(old_tr)
         self.tracker = None
         self.make_tracker()
         self.tracker_area()
@@ -5690,6 +5760,26 @@ class Runner:
             hf, moved = self.track_heading(t_crawl, p_start, p_end, self.wheels_of(wheels))
             if hf is not None and moved >= CRAWL_HEADING_MIN_CM:
                 h = hf
+            elif "obstacle" in (words or "") and (room0 is None or room0 >= HEADING_CRAWL_ROOM_CM):
+                # 2026-10-26 09:55 session (10:49, Left in the blocked corner facing a board): its front stop refused
+                # every crawl, which read as "lost". Something is in front: crawl backwards instead, the same way
+                # (away from a board, not near an open edge: the back has no edge guard)
+                self.say("    %s: something in front (its front stop): crawling backwards instead" % robot, quiet=True)
+                t_back = time.time()
+                old2 = self.speed_now.get(robot)
+                self.explore_speed(robot, HEADING_CRAWL_CMS)
+                try:
+                    q0, q1, w2 = self.leg(robot, ("go", -HEADING_CRAWL_CM))
+                finally:
+                    self.explore_speed(robot, old2 or EXPLORE_FAST_CMS)
+                wb = [0.0, 0]
+                self.add_wheels(robot, wb)
+                rec["backwards"] = w2
+                if q0 is not None and q1 is not None:
+                    hb, moved = self.track_heading(t_back, q0, q1, self.wheels_of(wb))
+                    if hb is not None and moved >= CRAWL_HEADING_MIN_CM:
+                        h = ST.wrap180(hb + 180.0)          # it backed: it faces the other way
+                    p_end = q1
         rec["heading"] = None if h is None else round(h, 1)
         self.st.setdefault("heading_crawls", []).append(rec)
         if h is None:
@@ -6528,7 +6618,8 @@ class Runner:
                 "set e02_xboard_cm %.2f" % b.xboard_cm, "set e02_yboard_cm %.2f" % b.yboard_cm,
                 "set e02_pause_ms %d" % PAUSE_MS, "set e02_start_x %.2f" % sx, "set e02_start_y %.2f" % sy,
                 "set e02_l_turn %d" % (1 if b.turn_sign > 0 else -1), "set e02_leg_pause_ms %d" % (self.leg_pause_ms() if hasattr(self, "leg_pause_ms") else LEG_PAUSE_MIN_MS),
-                "set e02_transit_max_cm %d" % TRANSIT_MAX_CM] + SAFETY_CMDS
+                "set e02_transit_max_cm %d" % TRANSIT_MAX_CM,
+                "set e02_find_stage_cm %g" % getattr(b, "find_stage_cm", PL.FIND_STAGE_CM)] + SAFETY_CMDS
 
     def fw_border(self, names, board=None):
         """The robot's own virtual border (firmware 2026-10-25a): its open edges and border_cm. Sent whenever the
@@ -8392,7 +8483,7 @@ class Runner:
                 self.watch_stop = why
                 self.st.setdefault("watchdog_stops", []).append([round(time.time(), 1), robot, why, self.order])
                 self.say("  STOPPED %s (camera watchdog): %s" % (robot, why))
-                self.mark("e02 watchdog stop %s" % robot)
+                self.mark("e02 %s stop %s" % ("near-robot" if "parked" in (why or "") else "watchdog", robot))
             except Exception as e:          # the watchdog must never die
                 self.say("  (watchdog: %s)" % e, quiet=True)
 
@@ -10112,6 +10203,8 @@ def launch(a, state, sdir, sim):
             run.say("(tracker process summary: %s)" % e_, quiet=True)
         if run.tracker is not None and getattr(run.tracker, "stats", None):
             st_ = dict(run.tracker.stats)
+            for k_, v_ in (getattr(run, "tracker_stats_before", None) or {}).items():
+                st_[k_] = st_.get(k_, 0) + v_          # the trackers before this one (the whole session)
             state.setdefault("tracker_stats", []).append(dict(t=round(time.time(), 1), **st_))
             n = sum(st_.get(k, 0) for k in ("both", "lock", "detector", "held", "none")) or 1
             run.say("Tracker: of the pictures, both saw the robot %.0f%%, the lock-on alone %.0f%%, the detector alone "

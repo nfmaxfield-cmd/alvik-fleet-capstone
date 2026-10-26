@@ -1,0 +1,7 @@
+case,parked_watch,ms_median,ms_mean,max_pictures_per_s
+idle,off,5.2,6.5,154.2
+idle,every picture,9.4,11.2,89.1
+idle,every 5th,5.4,7.2,138.8
+following,off,9.6,10.6,94.1
+following,every picture,9.8,10.7,93.8
+following,every 5th,8.6,9.3,107.1

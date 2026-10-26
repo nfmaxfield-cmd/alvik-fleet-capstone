@@ -147,7 +147,28 @@ def test_alltracker_follows_exactly_as_motiontracker(scene):
     assert t1.stats == t2.stats
 
 
-def test_parked_robots_are_seen_in_every_picture(scene):
+@pytest.fixture
+def every_picture(monkeypatch):
+    """The parked watch on every picture (as built on 2026-10-25): these tests check its logic picture by picture.
+    Since 2026-10-26 it runs on every PARK_EVERY_N-th picture (test_parked_watch_every_5th_picture)."""
+    monkeypatch.setattr(AT.AllTracker, "PARK_EVERY_N", 1)
+
+
+def test_parked_watch_every_5th_picture(scene):
+    """2026-10-26 09:55 session: the watch on every 5th picture (its cost) still sees parked robots and a push."""
+    assert AT.AllTracker.PARK_EVERY_N == 5 and AT.park_moved_n(5) == 3
+    steps = straight_steps(60)
+    for k in range(80):                     # B pushed 4 cm along y over 0.4 s, then stands (3.2 s)
+        y = 30.0 + min(4.0, 0.4 * k)
+        steps.append(({"A": (64.0, 50.0), "B": (95.0, y), "C": (30.0, 100.0)}, "A"))
+    (_, _), (_, tr) = run_both(scene, steps)
+    ev = [e for e in tr.take_park_events() if e[2] == "moved"]
+    assert len(ev) == 1 and ev[0][1] == "B" and ev[0][3]["cm"] == pytest.approx(4.0, abs=1.0)
+    ps = tr.parked_state()
+    assert ps["C"]["status"] == "seen" and ps["C"]["moves"] == 0 and ps["C"]["seen_age_s"] < 0.25
+
+
+def test_parked_robots_are_seen_in_every_picture(scene, every_picture):
     (_, _), (_, tr) = run_both(scene, straight_steps(40))
     ps = tr.parked_state()
     assert set(ps) == {"B", "C"}
@@ -155,7 +176,7 @@ def test_parked_robots_are_seen_in_every_picture(scene):
         assert ps[r]["status"] == "seen" and ps[r]["seen_age_s"] < 0.1 and ps[r]["moves"] == 0
 
 
-def test_a_pushed_parked_robot_is_a_move_and_its_spot_follows(scene):
+def test_a_pushed_parked_robot_is_a_move_and_its_spot_follows(scene, every_picture):
     steps = straight_steps(30)
     for k in range(40):                     # B pushed 4 cm along y over 0.4 s, then stands
         y = 30.0 + min(4.0, 0.4 * k)
@@ -168,7 +189,7 @@ def test_a_pushed_parked_robot_is_a_move_and_its_spot_follows(scene):
     assert tr.parked_state()["C"]["moves"] == 0
 
 
-def test_a_parked_robot_taken_away_is_unseen_after_the_wait(scene):
+def test_a_parked_robot_taken_away_is_unseen_after_the_wait(scene, every_picture):
     w, sc, cam = scene
     w.robots[:] = []
     tr = AT.AllTracker(cam, (61.0, 61.0))
@@ -204,7 +225,7 @@ def test_a_parked_robot_taken_away_is_unseen_after_the_wait(scene):
     assert "unconfirmed" in tr.parked_state()["B"]["status"]
 
 
-def test_an_outline_that_shifts_while_the_robot_stands_is_not_a_move(scene):
+def test_an_outline_that_shifts_while_the_robot_stands_is_not_a_move(scene, every_picture):
     """15:45 footage, Left by the bottom edge: its outline's centre jumped though it never moved. The picture where
     it stands is unchanged, so its spot must stay."""
     w, sc, cam = scene

@@ -666,7 +666,7 @@ class ProcTracker:
     """The runner's handle on the tracker in the tracker process: the methods and fields e02.py, e02_view.py,
     e02_bricks.py and e02_dance.py use of e02_camera.MotionTracker."""
 
-    FORWARD_ATTRS = ("use_lock", "in_hold", "px_shift", "frozen", "WATCH_PARKED", "MOVE_SPOT")
+    FORWARD_ATTRS = ("use_lock", "in_hold", "px_shift", "frozen", "WATCH_PARKED", "MOVE_SPOT", "PARK_EVERY_N")
 
     def __init__(self, proc, cam, centre, use_lock=True):
         d = self.__dict__

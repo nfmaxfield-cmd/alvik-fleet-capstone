@@ -5,7 +5,7 @@ Also holds and lost sends per hour of active session in windows grouped by ping 
 import csv, glob, json, os, sys
 from collections import defaultdict
 root = sys.argv[1]
-for f in sorted(glob.glob(os.path.join(root, '*', 'e02-2026102[45]-*', 'robot-logs-1', 'clock_sync.csv'))):
+for f in sorted(glob.glob(os.path.join(root, '*', 'e02-2026102[456]-*', 'robot-logs-1', 'clock_sync.csv'))):
     rows = list(csv.DictReader(open(f)))
     t = sorted((int(r['token'][1:]), float(r['t_send'])) for r in rows if r['token'][1:].isdigit())
     if f.find('211419') > 0:   # the active part only (before the robots went flat overnight)

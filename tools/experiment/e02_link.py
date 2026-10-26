@@ -48,17 +48,17 @@ NO_VERIFY = ("calib_dir_limits",)   # not one number (look.h): no read-back poss
 
 # The link gauge. Analysis of every real session's logs (2026-10-22 to 25; linkloss.py, bursts.py in
 # tools/experiment/analyses_oct26/link_loss):
-#   normal sessions (all but 21:14): lost pings 0-3.4 % per session, no 5-minute window over 4.8 % with commands
-#   being sent; holds 2.9 an hour where windows were under 2 %, none in the few 2-5 % windows;
+#   normal sessions (all but 21:14, today's 09:55 included): lost pings 0-3.4 % per session, no 5-minute window over
+#   4.8 % with commands being sent; holds 3.9 an hour where windows were under 2 %, 1.1 in the 2-5 % windows;
 #   21:14: 8-11 % from the first minute: 8.7 holds an hour, 10.6 % of moves never reached the robot.
 # LINK_WARN 5 %: above every normal session's worst 5-minute window, so a warning means "worse than any session
 #   before 21:14". DOE note: set from data, no DOE.
 # LINK_PAUSE 15 %: with resends a command is lost only if every send is lost; what stays at risk is time: a `stop` that
 #   needs a resend arrives about 1 s late (10 cm at full speed). Sent 3 times (STOP_COPIES), a stop is late only if
 #   all copies are lost: about p x q x q, q = the chance a lost packet is followed by another (0.20 in the 21:14
-#   session, 0.31-0.42 in the others). At p = 15 % that is 0.6-2.6 % of stops, against 1.2 % for a single stop on a
+#   session, 0.31-0.43 in the others). At p = 15 % that is 0.6-2.8 % of stops, against 1.2 % for a single stop on a
 #   normal link (p 1.2 %): above 15 % the stops are less reliable than they used to be. DOE note: yes, chosen within
-#   a derived range (8-29 % depending on q); the bench link test above would measure q at 1 s spacing and set it.
+#   a derived range (6-30 % depending on q); the bench link test above would measure q at 1 s spacing and set it.
 # LINK_RESUME: a pause ends when the last LINK_RESUME_S are back under LINK_PAUSE (chosen, no DOE: a debounce; the
 #   pause itself needs 2 standard errors of evidence, LINK_PAUSE_SE, so it does not flap at a steady 10-15 %).
 LINK_PAUSE_SE = 2.0           # chosen: 2 standard errors (about 98 % sure the share is above LINK_PAUSE). No DOE: a

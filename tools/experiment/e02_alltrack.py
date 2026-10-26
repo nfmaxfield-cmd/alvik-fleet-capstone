@@ -40,7 +40,13 @@ PARK_GATE_CM = 8.0       # chosen: an outline this near a parked spot is that ro
 PARK_MOVED_CM = 2.0      # chosen: a parked outline this far from its spot is a move (tracker jitter on a standing
                          # robot: 0.3-0.6 cm; the outline's centre sways ~1 cm by a board's edge). DOE with the gate
 PARK_MOVED_N = 12        # chosen: ... for this many pictures in a row (~0.5 s at 25/s; the floor memory's own
-                         # STABLE_FRAMES). DOE with the gate
+                         # STABLE_FRAMES). DOE with the gate. Counted in WATCHED pictures: with PARK_EVERY_N it is
+                         # scaled down (park_moved_n) so a move is still confirmed after about the same time
+PARK_EVERY_N = 5         # 2026-10-26 09:55 session: the parked watch cost 25-28 ms a picture on the Pi (the tracker's
+                         # pictures a second fell to 13-18). A parked robot moves only when pushed, so every 5th
+                         # picture (5 a second at 25) is enough. Chosen; DOE note: yes, the bench on recorded video
+                         # (tools/pi/tracker_proc_bench.py) at 1 / 3 / 5 / 10, pictures a second against how soon a
+                         # push is reported (the 15:45 collision footage)
 PARK_UNSEEN_S = 3.0      # chosen: no outline near the spot this long: unseen. DOE: the same replay, false "unseen"
                          # per hour by a board's edge against the time a picked-up robot goes unnoticed
 PARK_CROWD_CM = 14.0     # chosen: the followed robot this near a parked spot: the parked one is not judged (two
@@ -146,11 +152,17 @@ class FastLockTracker(LK.LockTracker):
         return best
 
 
+def park_moved_n(every_n):
+    """PARK_MOVED_N pictures in a row, counted in watched pictures (every every_n-th): at least 3."""
+    return max(3, int(math.ceil(PARK_MOVED_N / float(max(1, every_n)))))
+
+
 # =============================================================================== every robot, every picture
 class AllTracker(CAM.MotionTracker):
     """MotionTracker plus every parked robot watched in every picture (module docstring). Thread-safe like it."""
 
     WATCH_PARKED = True                  # False: the parked watch is off (the equivalence test; a fallback)
+    PARK_EVERY_N = PARK_EVERY_N          # the parked watch runs on every Nth picture (2026-10-26)
     MOVE_SPOT = True                     # False: a moved parked robot is reported, its spot not moved
 
     def __init__(self, *a, **k):
@@ -223,8 +235,10 @@ class AllTracker(CAM.MotionTracker):
     def push(self, img, t):
         out = super().push(img, t)
         try:
-            with self.lock:
-                self._watch_parked(t)
+            self._park_k = (getattr(self, "_park_k", -1) + 1) % max(1, int(self.PARK_EVERY_N))
+            if self._park_k == 0:
+                with self.lock:
+                    self._watch_parked(t)
             self._flush_events()
         except Exception:                       # the parked watch must never stop the followed robot's tracking
             pass
@@ -315,9 +329,9 @@ class AllTracker(CAM.MotionTracker):
                 if d >= PARK_MOVED_CM and sure:
                     p["run"] += 1
                     p["status"] = "moving?"
-                    last = p["hist"][-min(len(p["hist"]), PARK_MOVED_N):]
+                    last = p["hist"][-min(len(p["hist"]), park_moved_n(self.PARK_EVERY_N)):]
                     spread = max(math.hypot(q[0] - last[-1][0], q[1] - last[-1][1]) for q in last)
-                    if p["run"] >= PARK_MOVED_N and spread <= PARK_STILL_CM:
+                    if p["run"] >= park_moved_n(self.PARK_EVERY_N) and spread <= PARK_STILL_CM:
                         recent = p["hist"][-min(PARK_MEAN_N, p["run"]):]
                         nx = float(np.mean([q[0] for q in recent]))
                         ny = float(np.mean([q[1] for q in recent]))

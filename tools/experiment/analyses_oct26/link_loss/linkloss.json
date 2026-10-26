@@ -2308,5 +2308,184 @@
     "lost_holds": 0
    }
   ]
+ },
+ {
+  "session": "e02-20261026-095541",
+  "pings": 3618,
+  "lost": 68,
+  "loss": 0.018794914317302378,
+  "rtt_ms": {
+   "n": 3550,
+   "p50": 18.1,
+   "p90": 46.1,
+   "p99": 116.5,
+   "p999": 169.8,
+   "max": 2237.2
+  },
+  "sends": 234,
+  "lost_sends": 2,
+  "failed_legs": 54,
+  "holds": 6,
+  "lost_holds": 2,
+  "hold_kinds": [
+   "border",
+   "lost"
+  ],
+  "windows": [
+   {
+    "t": 1793022942.6835,
+    "pings": 261,
+    "lost": 3,
+    "loss": 0.011494252873563218,
+    "sends": 15,
+    "lost_sends": 0,
+    "failed_legs": 1,
+    "holds": 1,
+    "lost_holds": 1
+   },
+   {
+    "t": 1793023242.6835,
+    "pings": 261,
+    "lost": 7,
+    "loss": 0.02681992337164751,
+    "sends": 43,
+    "lost_sends": 0,
+    "failed_legs": 0,
+    "holds": 1,
+    "lost_holds": 1
+   },
+   {
+    "t": 1793023542.6835,
+    "pings": 252,
+    "lost": 5,
+    "loss": 0.01984126984126984,
+    "sends": 34,
+    "lost_sends": 0,
+    "failed_legs": 11,
+    "holds": 4,
+    "lost_holds": 0
+   },
+   {
+    "t": 1793023842.6835,
+    "pings": 261,
+    "lost": 7,
+    "loss": 0.02681992337164751,
+    "sends": 59,
+    "lost_sends": 2,
+    "failed_legs": 11,
+    "holds": 0,
+    "lost_holds": 0
+   },
+   {
+    "t": 1793024142.6835,
+    "pings": 261,
+    "lost": 8,
+    "loss": 0.03065134099616858,
+    "sends": 37,
+    "lost_sends": 0,
+    "failed_legs": 20,
+    "holds": 0,
+    "lost_holds": 0
+   },
+   {
+    "t": 1793024442.6835,
+    "pings": 252,
+    "lost": 5,
+    "loss": 0.01984126984126984,
+    "sends": 13,
+    "lost_sends": 0,
+    "failed_legs": 7,
+    "holds": 0,
+    "lost_holds": 0
+   },
+   {
+    "t": 1793024742.6835,
+    "pings": 261,
+    "lost": 4,
+    "loss": 0.01532567049808429,
+    "sends": 0,
+    "lost_sends": 0,
+    "failed_legs": 0,
+    "holds": 0,
+    "lost_holds": 0
+   },
+   {
+    "t": 1793025042.6835,
+    "pings": 261,
+    "lost": 4,
+    "loss": 0.01532567049808429,
+    "sends": 0,
+    "lost_sends": 0,
+    "failed_legs": 0,
+    "holds": 0,
+    "lost_holds": 0
+   },
+   {
+    "t": 1793025342.6835,
+    "pings": 252,
+    "lost": 0,
+    "loss": 0.0,
+    "sends": 0,
+    "lost_sends": 0,
+    "failed_legs": 0,
+    "holds": 0,
+    "lost_holds": 0
+   },
+   {
+    "t": 1793025642.6835,
+    "pings": 261,
+    "lost": 5,
+    "loss": 0.019157088122605363,
+    "sends": 0,
+    "lost_sends": 0,
+    "failed_legs": 0,
+    "holds": 0,
+    "lost_holds": 0
+   },
+   {
+    "t": 1793025942.6835,
+    "pings": 259,
+    "lost": 4,
+    "loss": 0.015444015444015444,
+    "sends": 22,
+    "lost_sends": 0,
+    "failed_legs": 3,
+    "holds": 0,
+    "lost_holds": 0
+   },
+   {
+    "t": 1793026242.6835,
+    "pings": 254,
+    "lost": 2,
+    "loss": 0.007874015748031496,
+    "sends": 5,
+    "lost_sends": 0,
+    "failed_legs": 1,
+    "holds": 0,
+    "lost_holds": 0
+   },
+   {
+    "t": 1793026542.6835,
+    "pings": 261,
+    "lost": 6,
+    "loss": 0.022988505747126436,
+    "sends": 0,
+    "lost_sends": 0,
+    "failed_legs": 0,
+    "holds": 0,
+    "lost_holds": 0
+   },
+   {
+    "t": 1793026842.6835,
+    "pings": 252,
+    "lost": 8,
+    "loss": 0.031746031746031744,
+    "sends": 6,
+    "lost_sends": 0,
+    "failed_legs": 0,
+    "holds": 0,
+    "lost_holds": 0
+   }
+  ]
  }
 ]

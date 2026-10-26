@@ -652,3 +652,32 @@ def test_a_silent_robot_is_not_a_bad_link():
         g.add(True, "Center", now - 250 + k)
         g.add(k < 100, "Right", now - 250 + k)               # Right went silent 150 s ago
     assert g.silent(now) == {"Right"} and g.level(now) == "ok"
+
+
+# =============================================================================== the 09:55 session analysis's fixes
+def test_reporting_fixes():
+    import e02_cpulog as CL
+    import e02_framesaver as FS
+    assert CL.parse_arm_clock("frequency(48)=1500398464") == 1500 and CL.parse_arm_clock("") is None
+    assert FS.kind_of_mark("e02 near-robot stop Left") == "near-robot stop"
+    assert FS.kind_of_mark("e02 watchdog stop Left") == "edge stop"
+    r = types.SimpleNamespace()
+    E.Runner.keep_tracker_stats(r, types.SimpleNamespace(stats={"both": 10, "none": 2}))
+    E.Runner.keep_tracker_stats(r, types.SimpleNamespace(stats={"both": 5, "lock": 1}))
+    assert r.tracker_stats_before == {"both": 15, "none": 2, "lock": 1}
+
+
+def test_a_put_aside_robot_in_the_find_corner_moves_the_finds_out():
+    r = types.SimpleNamespace(board=PL.Board(xboard_side=1, yboard_side=1), st={}, said=[], marks=[])
+    r.say = lambda m, quiet=False: r.said.append(m)
+    r.mark = lambda t: r.marks.append(t)
+    fx, fy = r.board.find_stage()
+    assert E.Runner.free_find_corner(r, (fx, fy)) is True             # the robot sits at the usual staging point
+    assert r.board.find_stage_cm == 50.0 and r.st["find_stage_cm"] == 50.0
+    nx, ny = r.board.find_stage()
+    assert math.hypot(nx - fx, ny - fy) > 30.0
+    assert "set e02_find_stage_cm 50" in E.Runner.board_params(r)
+    r2 = types.SimpleNamespace(board=PL.Board(xboard_side=1, yboard_side=1), st={}, say=lambda *a, **k: None,
+                               mark=lambda t: None)
+    nx2, ny2 = r2.board.uv(50.0, 50.0)
+    assert E.Runner.free_find_corner(r2, (nx2, ny2)) is False        # it sits at the other one too: no

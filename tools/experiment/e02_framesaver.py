@@ -36,7 +36,8 @@ MAX_MB = 4000.0          # chosen: clips stop past this much in frames/ (a 2 h s
                          # ~60 clips x 13 s x 25 x 35 KB = 700 MB). No DOE: a guard
 THUMB_SCALE = 0.5        # half size thumbnails. No DOE
 
-KINDS = ("hold", "border stop", "edge stop", "help call", "note", "failed turn", "parked robot moved", "other")
+KINDS = ("hold", "border stop", "edge stop", "near-robot stop", "help call", "note", "failed turn", "parked robot moved",
+         "other")
 
 
 def write_mjpeg_avi(path, jpegs, fps, width, height):
@@ -265,6 +266,8 @@ MARK_KINDS = (
     ("e02 hold border", "border stop"),    # a crossing of the virtual border stops every robot and holds
     ("e02 hold", "hold"),
     ("e02 help", "help call"),
+    ("e02 near-robot stop", "near-robot stop"),   # the watchdog stops a robot heading for a parked one (2026-10-26:
+                                                  # these were labelled "edge stop", 11 of them in the 09:55 session)
     ("e02 watchdog stop", "edge stop"),    # the camera watchdog stops a robot heading past an open edge
     ("e02 speed guard stop", "border stop"),
     ("e02 border", "border stop"),

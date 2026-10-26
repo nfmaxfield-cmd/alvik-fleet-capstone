@@ -246,7 +246,8 @@ class Board:
 
     def find_stage(self):
         """Where `run find` starts from (firmware e02_find_stage_cm from both faces; the axle)."""
-        return self.uv(FIND_STAGE_CM, FIND_STAGE_CM)
+        st_ = getattr(self, "find_stage_cm", FIND_STAGE_CM)     # moved out when a set-aside robot blocks the corner
+        return self.uv(st_, st_)
 
     def open_edges(self):
         """The edges without a board: [('x', value) | ('y', value)] (x = value or y = value lines): the two open
