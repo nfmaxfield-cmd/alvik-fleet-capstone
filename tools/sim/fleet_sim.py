@@ -91,26 +91,62 @@ class Radio:
             except OSError:
                 break
             now = time.time()
-            if self.sim.dropped(self.name, now):
+            md = getattr(self.sim, "drop_match", None)
+            if self.sim.dropped(self.name, now) or self._random_drop("in") or \
+                    (md is not None and md(self.name, data.decode("utf-8", "replace"))):
                 self.lost_in += 1
                 continue
             delay = (1.5 + self.rng.expovariate(1 / 3.0)) / 1000.0
             with self.lock:
                 self.inbox.append((now + delay, data.decode("utf-8", "replace").strip()))
 
+    ACK_KEEP = 64      # net.h ACK_KEEP
+
+    def _random_drop(self, direction):
+        """A packet lost at random (the e02 simulator's --drop-in-pct / --drop-out-pct: the 2026-10-25 21:14 link
+        lost about 1 command in 10). The simulation decides the share (drop_pct(direction) in %); none by default."""
+        f = getattr(self.sim, "drop_pct", None)
+        if f is None:
+            return False
+        pct = f(direction)
+        if pct <= 0:
+            return False
+        rng = self.__dict__.setdefault("drop_rng", random.Random((hash(self.name) & 0xFFFF) + 7))
+        return rng.random() * 100.0 < pct
+
     def poll(self, rb):
-        """net::poll(): one command, if one has arrived by the robot's current time."""
+        """net::poll(): one command, if one has arrived by the robot's current time. Firmware 2026-10-26a: a
+        numbered command "#<n> cmd" is answered at once (D,ACK,n,new|dup,ms) and a number seen among the last
+        ACK_KEEP is not run again."""
         t = rb.t_at(rb.ms)
         with self.lock:
-            if self.inbox and self.inbox[0][0] <= t:
-                self.got_cmd = True
-                return self.inbox.popleft()[1]
-        return None
+            if not (self.inbox and self.inbox[0][0] <= t):
+                return None
+            self.got_cmd = True
+            cmd = self.inbox.popleft()[1]
+        if cmd.startswith("#") and getattr(rb, "fw_version", "") >= "2026-10-26a":
+            head, _, rest = cmd.partition(" ")
+            try:
+                n = int(head[1:])
+            except ValueError:
+                return None
+            seen = self.__dict__.setdefault("ack_seen", deque(maxlen=self.ACK_KEEP))
+            cnt = self.__dict__.get("ack_count", 0)
+            if cnt % 50 == 0:
+                rb.send("H,ACK,n,result,ms")
+            self.ack_count = cnt + 1
+            dup = n in seen
+            rb.send("D,ACK,%d,%s,%d" % (n, "dup" if dup else "new", rb.millis()))
+            if dup:
+                return None
+            seen.append(n)
+            cmd = rest.strip()
+        return cmd or None
 
     def transmit(self, rb, text):
         payload = "%s|%d|%s" % (self.name, self.seq, text)
         self.seq += 1
-        if self.sim.dropped(self.name, time.time()):
+        if self.sim.dropped(self.name, time.time()) or self._random_drop("out"):
             self.lost_out += 1
             return
         try:

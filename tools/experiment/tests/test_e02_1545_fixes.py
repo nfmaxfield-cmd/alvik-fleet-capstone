@@ -279,7 +279,12 @@ def test_a_back_out_after_its_own_edge_stop_is_allowed():
     r.leg_val["Left"] = 4.0
     assert not E.Runner.backing_out(r, "Left", now=102.0)     # forwards: no
     r.leg_val["Left"] = -6.0
-    assert not E.Runner.backing_out(r, "Left", now=100.0 + E.EDGE_BACKOUT_S + 1)   # long after: no
+    # 2026-10-26 runner fixes, item 2: "right after" = nothing else has run since, however long a hold took (21:14:
+    # Left's second back-out came 27 s after its edge stop, after a 104 s hold); a turn or forward drive that ran
+    # clears the edge stop (leg_health), and then a back-out is an ordinary backwards drive
+    assert E.Runner.backing_out(r, "Left", now=100.0 + E.EDGE_BACKOUT_S + 300)
+    r.edge_stop_t.pop("Left")
+    assert not E.Runner.backing_out(r, "Left", now=102.0)
 
 
 # --- fix 2: the heading crawl -------------------------------------------------------------------------------------

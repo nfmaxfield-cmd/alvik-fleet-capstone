@@ -186,6 +186,9 @@ class World:
             elif args.start == "s1545":         # the real 2026-10-25 15:45 session: Left 11.6 cm from the bottom edge
                 # facing it (16:40:13, centre and its own heading), Right mid-board, Center by its spot
                 px, py, ph = [(11.6, 96.2, -126.0), (60.0, 40.0, 90.0), (36.0, 72.0, 40.0)][k % 3]
+            elif args.start == "s2114":         # the real 2026-10-25 21:14 corner: Left at the bottom-right corner
+                # (21:42:44, (7.4, 0.4) on roam1, crawling at the right edge, y = 0 open), the others mid-board
+                px, py, ph = [(7.4, 9.0, -90.0), (60.0, 60.0, 90.0), (70.0, 95.0, 0.0)][k % 3]
             elif args.start == "scatter":       # anywhere open, as Nick puts them down now
                 while True:
                     px, py, ph = rng.uniform(30, 92), rng.uniform(30, 92), rng.uniform(-180, 180)
@@ -193,7 +196,7 @@ class World:
                         break
             else:
                 px, py, ph = bd.park(k)
-            jit = (1.0, 1.0, 3.0) if args.start == "s1545" else (6.0, 4.0, 15.0)   # s1545: Left must stay at the edge
+            jit = (1.0, 1.0, 3.0) if args.start in ("s1545", "s2114") else (6.0, 4.0, 15.0)   # Left stays at the edge
             rb.x, rb.y = px + rng.uniform(-jit[0], jit[0]), py + rng.uniform(-jit[1], jit[1])
             rb.th = math.radians(ph + rng.uniform(-jit[2], jit[2]))
             rb._record()
@@ -204,6 +207,10 @@ class World:
             rb.world_polys = [list(p_) for p_ in self.polys]
             rb.update_solids()
             rb.radio = FS.Radio(self, n, ip, self.laptop)
+            # HANG (tools/sim/robot.py): a robot whose centre of mass goes this far past an open edge tips and hangs
+            # (tilted, wheels turning, body still): the 2026-10-25 21:45 corner. None: off
+            rb.hang_cm = None if getattr(args, "hang_cm", 0.0) is None or getattr(args, "hang_cm", 0.0) < 0 \
+                else float(getattr(args, "hang_cm", 0.0))
             rb.others = (lambda me: (lambda: [self.outline(o) for o in self.robots if o is not me]))(rb)
             add_identify(rb, R)
             self.robots.append(rb)
@@ -226,6 +233,31 @@ class World:
     # what fleet_sim.Radio and LiveRobot.firmware_loop expect of the simulation
     def dropped(self, name, t):
         return False
+
+    def drop_match(self, name, text):
+        """--drop-first ROBOT:TEXT:N[,...]: the first N commands to ROBOT containing TEXT never arrive (each send counts,
+        resends included: the 21:14 re-creation, a back-out `go -11.8` lost once). True to drop this one."""
+        spec = getattr(self, "_drop_first", None)
+        if spec is None:
+            spec = self._drop_first = []
+            for part in (getattr(self.args, "drop_first", "") or "").split(","):
+                if part.count(":") >= 2:
+                    rb, txt, n = part.split(":", 2)
+                    spec.append([rb, txt.replace("_", " "), int(n)])      # (_ stands for a space: go_- = "go -")
+        for sp in spec:
+            if sp[2] > 0 and sp[0] == name and sp[1] in text:
+                sp[2] -= 1
+                with open(os.path.join(self.args.out, "dropped_first.txt"), "a") as f:
+                    f.write("%.3f %s %s\n" % (time.time(), name, text.strip()))
+                return True
+        return False
+
+    def drop_pct(self, direction):
+        """--drop-in-pct (commands to the robots) / --drop-out-pct (the robots' lines): each packet lost at random
+        with this chance (2026-10-26 runner fixes: the 21:14 link lost ~1 command in 10, mostly on the way TO the
+        robots: a lost move's resend was queued as new, never dup)."""
+        a = self.args
+        return float(getattr(a, "drop_in_pct", 0.0) if direction == "in" else getattr(a, "drop_out_pct", 0.0)) or 0.0
 
     def follow_done(self, rb):
         pass
@@ -279,6 +311,7 @@ class SimCamera:
         c.center_floor_cm = [61.0, 61.0]
         c.noise_sd = getattr(args, "cam_noise", 2.5)          # (a bare Namespace, as the tests make: the old clean camera)
         self.jitter = getattr(args, "cam_jitter", 0.0)
+        self.args = args
         self.jpeg = getattr(args, "jpeg", 92)
         cfg.session.tape_lines = []
         self.cfg = cfg
@@ -387,7 +420,8 @@ class SimCamera:
                 continue
             x, y, th, lv = self.w.view(r)
             col = (lv, lv, lv)
-            self.R.draw_robot(img, x, y, math.radians(th), 0.0, col, col)
+            R = self.lowc_renderer() if self.low_contrast(getattr(r, "name", None)) else self.R
+            R.draw_robot(img, x, y, math.radians(th), 0.0, col, col)
         self.R.add_noise(img)
         g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         if self.jitter > 0:                      # the camera mount shakes a little every frame
@@ -395,6 +429,36 @@ class SimCamera:
             g = cv2.warpAffine(g, np.float32([[1, 0, dx], [0, 1, dy]]), (g.shape[1], g.shape[0]),
                                flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
         return g
+
+    def low_contrast(self, name):
+        """--low-contrast ROBOT[@FROM-TO] (s since start): that robot drawn washed out, its body as bright as the
+        plywood (2026-10-26 10:00, the real session: Left's white body against the bright plywood, the tracker's circle
+        10 cm off on empty plywood). Its lights still show."""
+        spec = getattr(self, "lowc_spec", None)
+        if spec is None:
+            spec = self.lowc_spec = {}
+            for part in (getattr(self.args, "low_contrast", "") or "").split(","):
+                if not part:
+                    continue
+                n, _, w = part.partition("@")
+                a, _, b = (w or "0-1e9").partition("-")
+                spec[n] = (float(a or 0), float(b or 1e9))
+        w = spec.get(name)
+        return bool(w) and w[0] <= time.time() - self.t_start <= w[1]
+
+    def lowc_renderer(self):
+        if getattr(self, "_lowc", None) is None:
+            import camera as SC
+            R2 = SC.Renderer(self.cfg, self.geom, np.random.default_rng(5))
+            parts = R2._robot_parts()
+            ply = (150, 170, 190)                  # make_background's plywood (BGR)
+            washed = []
+            for pts, z, col in parts:
+                k = 0.10 if sum(col) > 300 else 0.35          # the top and the shell nearly the plywood, wheels faint
+                washed.append((pts, z, tuple(int(p + (c - p) * k) for p, c in zip(ply, col))))
+            R2._robot_parts = lambda: washed
+            self._lowc = R2
+        return self._lowc
 
     def loop(self):
         period = 1.0 / self.fps
@@ -635,7 +699,7 @@ def main(argv=None):
     ap.add_argument("--out", default="e02_sim_out")
     ap.add_argument("--robots", default="Left,Center,Right")
     ap.add_argument("--seed", type=int, default=2)
-    ap.add_argument("--start", default="parks", choices=["parks", "swapped", "scatter", "corners", "edge", "s1510", "s1545"],
+    ap.add_argument("--start", default="parks", choices=["parks", "swapped", "scatter", "corners", "edge", "s1510", "s1545", "s2114"],
                     help="where the robots stand at the start: near their park spots, each on another's, anywhere, or "
                          "Nick's 2026-10-22 corners layout")
     ap.add_argument("--turn-fault", default="", help="ROBOT[@S[:restart]]: S s (default 5) after that robot's compass "
@@ -646,6 +710,16 @@ def main(argv=None):
                     help="the robots kept a board pose from an earlier session (not switched off): the 2026-10-24 "
                          "stage-3 case")
     ap.add_argument("--fps", type=float, default=15.0)
+    ap.add_argument("--drop-in-pct", type=float, default=0.0, help="each command TO a robot lost at random with this "
+                    "chance, %% (2026-10-25 21:14: about 10)")
+    ap.add_argument("--drop-out-pct", type=float, default=None, help="each line FROM a robot lost with this chance, %% "
+                    "(default: a quarter of --drop-in-pct; 21:14's lost moves were lost on the way to the robots)")
+    ap.add_argument("--drop-first", default="", help="ROBOT:TEXT:N,...: the first N commands to ROBOT containing TEXT "
+                    "are lost (the 21:14 lost back-outs: Right:go -:1)")
+    ap.add_argument("--low-contrast", default="", help="ROBOT[@FROM-TO],...: that robot drawn washed out (its body as "
+                    "bright as the plywood) from FROM to TO s after the start (2026-10-26 10:00, Left)")
+    ap.add_argument("--hang-cm", type=float, default=0.0, help="a robot whose centre of mass goes this far past an "
+                    "open edge hangs there, tilted 10 deg, wheels turning (the 21:45 corner); negative = off")
     ap.add_argument("--px-per-cm", type=float, default=2.34, help="camera scale on the floor (real footage: 2.34)")
     ap.add_argument("--tilt", type=float, default=3.0, help="camera tilt from straight down, deg")
     ap.add_argument("--yaw", type=float, default=1.5, help="camera turned against the board, deg")
@@ -672,6 +746,8 @@ def main(argv=None):
                     help="also save the overhead picture as a camrec.py recording in <out>/recording (cam0/video.avi, "
                          "frames.csv, events.csv): what e02_analysis.py reads. Also on with E02_SIM_RECORD=1")
     a = ap.parse_args(argv)
+    if a.drop_out_pct is None:
+        a.drop_out_pct = a.drop_in_pct / 4.0     # an assumption (21:14: the loss was mostly on the way to the robots)
     a.record = a.record or os.environ.get("E02_SIM_RECORD", "") not in ("", "0")
     os.makedirs(a.out, exist_ok=True)
     world = World(a)

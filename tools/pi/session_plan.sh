@@ -43,7 +43,8 @@ if [ -z "${1:-}" ]; then
   stage 1 $CAL --own-sensor-only --hours 0.25
   stage 2 $CAL --hours 0.75
   stage 3 --hours 0.5
-  stage 4 $CAL --hours 4
+  # the final stage runs until the batteries run out: no hard cap (Nick, 2026-10-26); the no-answer timeouts still apply
+  stage 4 $CAL --hours 4 --hard-cap-min 0
 fi
 echo; echo "=== Plan done: uploading the recording ==="
 for d in $(ls -td logs/e02-* 2>/dev/null | grep -v dryrun | head -$([ -n "${1:-}" ] && echo 1 || echo 4)); do

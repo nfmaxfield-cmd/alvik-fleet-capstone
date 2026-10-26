@@ -41,7 +41,10 @@
 Arduino_Alvik alvik;
 
 // Bump this whenever the firmware changes, so every logged run says which code it ran.
-#define FW_VERSION "2026-10-25c"
+#define FW_VERSION "2026-10-26a"
+// 2026-10-26a: numbered commands ("#<n> cmd"), each answered at once with an ACK record and a repeat not run again
+// (net.h); a leg id seen before answers `dup` before any refusal (e02.h); the tilt stop (motion.h TILT,
+// tilt_stop_deg 5, tilt_ms 300); the level is taken at the compass check.
 // 2026-10-25c: go/turn legs are refused until the compass check has run (gYawSign set); before, a turn spun until
 // its timeout because the heading stayed 0 (Right, 2026-10-25 table test).
 // 2026-10-25b: switches at the BACK (one attachment, Nick 2026-10-25): sw_back (dock / touch / posts backwards),

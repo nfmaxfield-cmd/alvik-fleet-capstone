@@ -859,6 +859,12 @@ class E02Mixin:
         except ValueError:
             lid = 0
         idle = not running and kind != "m"
+        if lid > 0 and lid <= self.e_last_id:
+            # firmware 2026-10-26a: a leg id seen before is answered `dup` first, before any refusal
+            if idle or not running:
+                self.leg_header()
+            self.leg_record(lid, kind, 0.0, "dup", "")
+            return
         if not idle and (not running or not self.e_active or not self.e_mode1 or self.e_idle_leg):
             self.leg_header()
             self.leg_record(lid, kind, arg, "refused", "a leg is running" if self.e_idle_leg else
@@ -893,15 +899,17 @@ class E02Mixin:
         if kind == "g" and self.e_edge_off():
             self.leg_record(lid, kind, arg, "refused", self.e_edge_off())
             return
+        lim = self.P("tilt_stop_deg") if "tilt_stop_deg" in self.params else 0.0
+        if kind in ("g", "t") and lim > 0 and self.tilt_dev() > lim:
+            # firmware 2026-10-26a: tilted (hung at an edge): no drive and no turn
+            self.leg_record(lid, kind, arg, "refused", "tilted %.1f deg (hung at an edge?)" % self.tilt_last)
+            return
         if kind == "g" and self.e_border_latched and self.e_border_towards(arg) and \
                 not (self.P("border_seek") > 0 and arg > 0):
             self.leg_record(lid, kind, arg, "refused", "virtual border: towards the open edge (the laptop clears it)")
             return
         if kind == "g" and arg < 0 and self.e_back_since - arg > self.P("e02_back_max_cm") + 0.05:
             self.leg_record(lid, kind, arg, "refused", "backing blind: more than e02_back_max_cm since the last camera fix")
-            return
-        if lid > 0 and lid <= self.e_last_id:
-            self.leg_record(lid, kind, arg, "dup", "")
             return
         if idle:
             if lid > 0:

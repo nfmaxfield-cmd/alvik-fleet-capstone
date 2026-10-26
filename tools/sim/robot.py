@@ -329,6 +329,7 @@ class Robot(FollowMixin, DockMixin, E02Mixin):
 
         # ---- where the robot really goes ----
         th0 = self.th
+        x_before_all, y_before_all = self.x, self.y
         if self.lifted:
             lf = self.lift
             f = min(1.0, max(0.0, (self.ms + h * 1000 - lf["lift_ms"]) / (lf["drop_ms"] - lf["lift_ms"])))
@@ -370,6 +371,19 @@ class Robot(FollowMixin, DockMixin, E02Mixin):
                         self.wheel_free = [1.0, 1.0]
         else:
             ds = 0.0
+        if getattr(self, "hang_cm", None) is not None and not self.lifted and (dL or dR):
+            # HANG (2026-10-26 runner fixes, a model of the 2026-10-25 21:45 corner): the body's centre of mass, taken
+            # HANG_COM_AHEAD_CM ahead of the axle (a guess: battery and board sit forward), more than hang_cm past an
+            # open edge: the robot tips onto the edge and hangs, tilted HANG_TILT_DEG; from then on its wheels turn
+            # but the body does not move (21:45: ray 8's wheels counted 104.85 cm, the camera saw 1 px)
+            if not getattr(self, "hung", False):
+                cx = self.x + self.HANG_COM_AHEAD_CM * math.cos(self.th)
+                cy = self.y + self.HANG_COM_AHEAD_CM * math.sin(self.th)
+                if self.past_open_edge(cx, cy) > self.hang_cm:
+                    self.hung = True
+            if getattr(self, "hung", False):
+                self.x, self.y, self.th = x_before_all, y_before_all, th0
+                ds = 0.0
         if self.cfg.session.seams and not self.lifted:
             self._seam_check()
         rate = (self.th - th0) / h                         # rad/s, true
@@ -599,6 +613,20 @@ class Robot(FollowMixin, DockMixin, E02Mixin):
         """get_distance_top(): the top zone looks slightly up, a bit further than the centre zone."""
         return min(self.tof_m.max_range_cm, self.tof()[2] * (1 + self.tof_m.top_extra_pct / 100))
 
+    HANG_COM_AHEAD_CM = 1.5     # a guess (no measurement): the centre of mass this far ahead of the axle
+    HANG_TILT_DEG = 10.0        # the 2026-10-25 21:45 reading of Left hanging (pitch -9.7, RAW 10.2 from its level)
+
+    def tilt_now(self, rng=None, tn=None):
+        """(roll, pitch) deg as the IMU reads them: its mounting offset, noise, and HANG_TILT_DEG nose down when it
+        hangs over an edge (HANG)."""
+        rng = rng or self.rng
+        tn = self.imu_m.tilt_noise_deg if tn is None else tn
+        roll = math.degrees(self.acc_bias[1]) + rng.gauss(0, tn)
+        pitch = -math.degrees(self.acc_bias[0]) + rng.gauss(0, tn)
+        if getattr(self, "hung", False):
+            pitch -= self.HANG_TILT_DEG
+        return roll, pitch
+
     # ---- the plywood board (session.board_cm) ----
     def past_open_edge(self, px, py):
         """How far (cm) the floor point (px, py) is past the nearest OPEN side of the board
@@ -695,8 +723,7 @@ class Robot(FollowMixin, DockMixin, E02Mixin):
         gy = self.gxy_bias[1] + rng.gauss(0, gn)
         gz = im.yaw_sign * (math.degrees(self.w) * (1 + self.gyro_scale) + self.gyro_bias) + rng.gauss(0, im.gyro_noise_dps)
         tn = im.tilt_noise_deg * (10 if self.lifted else 1)
-        roll = math.degrees(self.acc_bias[1]) + rng.gauss(0, tn)
-        pitch = -math.degrees(self.acc_bias[0]) + rng.gauss(0, tn)
+        roll, pitch = self.tilt_now(rng, tn)
         d = self.tof()
         dtop = min(self.tof_m.max_range_cm, d[2] * (1 + self.tof_m.top_extra_pct / 100))
         dbot = self._tof_bot if self.cfg.session.board_cm else max(0.0, rng.gauss(self.tof_m.bottom_cm, 0.3))
@@ -866,6 +893,8 @@ class Robot(FollowMixin, DockMixin, E02Mixin):
             return True
         if self.P("safe_lift") > 0 and self.lifted:
             self.abort_reason = "robot lifted"
+        elif self.tilt_over():
+            self.abort_reason = "tilted %.1f deg" % self.tilt_last
         elif self.edge_check():
             if getattr(self, "edge_soft", False):
                 self.step_stop = "edge"           # follow: only the step stops (motion.h gEdgeSoft)
@@ -1029,10 +1058,41 @@ class Robot(FollowMixin, DockMixin, E02Mixin):
         """motion.h tickWait(): logs (and blinks), no safety checks, no WiFi commands."""
         self.log_wait(ms)
 
+    # motion.h TILT (firmware 2026-10-26a)
+    tilt_level = (0.0, 0.0)
+    tilt_since = 0
+    tilt_last = 0.0
+
+    def tilt_dev(self):
+        """The latest tilt from its level (deg): tilt::now()."""
+        if "tilt_stop_deg" not in self.params or self.P("tilt_stop_deg") <= 0:
+            return 0.0
+        if getattr(self, "_tilt_rng", None) is None:
+            import random as _r
+            self._tilt_rng = _r.Random(hash(self.name) & 0xFFFF)   # its own: the sensor model's stream is unchanged
+        r, p = self.tilt_now(self._tilt_rng)
+        self.tilt_last = max(abs(p - self.tilt_level[1]), abs(r - self.tilt_level[0]))
+        return self.tilt_last
+
+    def tilt_over(self):
+        lim = self.P("tilt_stop_deg") if "tilt_stop_deg" in self.params else 0.0
+        if lim <= 0:
+            return False
+        if self.tilt_dev() <= lim:
+            self.tilt_since = 0
+            return False
+        if not self.tilt_since:
+            self.tilt_since = int(self.millis()) | 1
+        return self.millis() - self.tilt_since >= self.P("tilt_ms")
+
     def calibrate_yaw_sign(self, force=False):
         """motion.h calibrateYawSign(): a timed wiggle left, read the raw yaw change, wiggle back."""
         if self.fw_yaw_sign != 0 and not force:
             return True
+        if "tilt_stop_deg" in self.params:
+            self.tilt_dev()
+            self.tilt_level = self.tilt_now(self.__dict__.get("_tilt_rng"))       # standing still: its level for the tilt stop
+            self.send("M,level: pitch %.1f roll %.1f deg" % (self.tilt_level[1], self.tilt_level[0]))
         self.send("M,checking compass direction: small wiggle left and back")
         y0, o0 = self.yaw_raw, self.odo_th
         self.set_wheels_speed(-20, 20)              # left wheel back, right forward = turn left

@@ -40,6 +40,8 @@ ENSURE_END_S = 90.0           # chosen: after a timeout stops the session, the r
 NO_ANSWER = "no_answer"
 NO_ANSWER_AFTER_END = "no_answer_after_end"
 CAP = "cap"
+LINK = "link"                 # 2026-10-26 runner fixes: the radio link stayed past its pause level (e02_link.LINK_PAUSE)
+NO_ROBOTS = "no_robots"       # 2026-10-26 runner fixes, item 7: every robot left out after its rescue failed
 
 
 def hm(t):
@@ -92,6 +94,10 @@ class SessionClock:
                                                                        hm(self.planned_end))
         if key == CAP:
             return "hard cap reached, planned time + %s min (%s)" % (fmt_min(self.cap_min), hm(self.cap))
+        if key == LINK:
+            return "the radio link stayed too bad for 30 min (more than 15 % of commands needed a resend)"
+        if key == NO_ROBOTS:
+            return "no robot left: every robot was left out after its own rescue failed"
         return str(key)
 
     def page_words(self, t_end, uploads=True):

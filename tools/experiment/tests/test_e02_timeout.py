@@ -118,6 +118,11 @@ def _runner(tmp_path, clock, view=True, on_pi=True):
     r.wrap_up = False
     r.hold = threading.Event()
     r.hold_lock = threading.Lock()
+    r.unavailable = set()
+    r.moves = {}
+    st["positions"] = {"Left": [30.0, 30.0, None], "Center": [60.0, 60.0, None], "Right": [90.0, 90.0, None]}
+    r.board = None
+    r.feed = None
     r.hold_owner = None
     r.hold_answer = None
     r.last_hold_end = 0.0
@@ -138,8 +143,10 @@ def _in_thread(fn, *a):
     return th, box
 
 
-def test_unanswered_hold_ends_the_session(tmp_path):
-    """A hold nobody answers: every robot stopped, the session ends (s), the reason logged and saved."""
+def test_unanswered_robot_hold_rescues_and_leaves_it_out_and_the_session_goes_on(tmp_path):
+    """2026-10-26 runner fixes, item 7: a robot's hold nobody answers no longer ends the session. The robot tries to
+    rescue itself; here it cannot (the stand-in has no camera), so it is left out and the others carry on (o). The
+    attempt and its result are logged."""
     c = TO.SessionClock(time.time(), 2.0, answer_min=0.01)          # 0.6 s
     r = _runner(tmp_path, c)
     th, box = _in_thread(r.hold_for_nick, "Right", "lost", "the camera lost it for 3 s")
@@ -151,25 +158,48 @@ def test_unanswered_hold_ends_the_session(tmp_path):
                 break
         time.sleep(0.05)
     th.join(10)
-    assert box == ["s"]
-    assert seen and seen["ends_words"].startswith("No answer by ") and seen["ends_words"].endswith("and uploads")
-    assert r.stop_requested and r.timed_out
-    assert r.end_reason["key"] == TO.NO_ANSWER and r.end_reason["why"] == "no answer for 0.01 min"
+    assert box == ["o"]
+    assert seen and seen["ends_words"].startswith("No answer by ")
+    assert not r.stop_requested and not r.timed_out and r.end_reason is None
+    assert "Right" in r.held_out and "Right" in r.unavailable
     saved = json.load(open(os.path.join(str(tmp_path), "e02_state.json")))
-    assert saved["session_end"]["key"] == TO.NO_ANSWER
-    assert saved["holds"][-1][5] == "timeout"
+    assert saved["holds"][-1][5] == "rescue_failed"
+    assert saved["rescues"][-1][1:3] == ["Right", "lost"] and saved["rescues"][-1][4] is False
     assert {n for n, cmd in r.sent if cmd == "stop"} == {"Left", "Center", "Right"}
-    assert any("e02 session timeout no_answer" in m for m in r.marks)
-    assert any("e02 hold timeout Right" in m for m in r.marks)
+    assert any("e02 rescue Right lost" in m for m in r.marks)
     assert not r.hold.is_set()
 
 
-def test_hold_after_the_planned_end_uses_10_min(tmp_path):
-    c = TO.SessionClock(time.time() - 7200.0, 1.0, answer_min=30, after_end_min=0.01, cap_min=120)   # planned end 1 h ago
+def test_unanswered_hold_of_the_last_robot_ends_the_session(tmp_path):
+    """Item 7: the session ends when no robot is left (the others left out already)."""
+    c = TO.SessionClock(time.time(), 2.0, answer_min=0.01)
+    r = _runner(tmp_path, c)
+    r.unavailable |= {"Left", "Center"}
+    th, box = _in_thread(r.hold_for_nick, "Right", "lost", "the camera lost it for 3 s")
+    th.join(10)
+    assert box == ["s"] and r.timed_out and r.end_reason["key"] == TO.NO_ROBOTS
+    saved = json.load(open(os.path.join(str(tmp_path), "e02_state.json")))
+    assert saved["session_end"]["key"] == TO.NO_ROBOTS
+    assert any("e02 session timeout no_robots" in m for m in r.marks)
+
+
+def test_hold_at_the_hard_cap_still_ends_the_session(tmp_path):
+    """Item 7: the hard cap is the one deadline a robot's hold does not rescue past."""
+    c = TO.SessionClock(time.time() - 3600.0 - 59.0, 1.0, answer_min=30, after_end_min=30, cap_min=1)   # cap in 1 s
     r = _runner(tmp_path, c)
     th, box = _in_thread(r.hold_for_nick, "Left", "border", "near the edge")
     th.join(10)
-    assert box == ["s"] and r.end_reason["key"] == TO.NO_ANSWER_AFTER_END
+    assert box == ["s"] and r.end_reason["key"] == TO.CAP and not r.st.get("rescues")
+
+
+def test_hold_after_the_planned_end_uses_10_min(tmp_path):
+    """After the planned end the deadline is 10 min (here 0.6 s); it rescues (here: fails, left out)."""
+    c = TO.SessionClock(time.time() - 7200.0, 1.0, answer_min=30, after_end_min=0.01, cap_min=120)   # planned end 1 h ago
+    r = _runner(tmp_path, c)
+    t0 = time.time()
+    th, box = _in_thread(r.hold_for_nick, "Left", "border", "near the edge")
+    th.join(10)
+    assert box == ["o"] and time.time() - t0 < 5 and r.st["rescues"][-1][2] == "border"
 
 
 def test_answered_hold_does_not_end(tmp_path):

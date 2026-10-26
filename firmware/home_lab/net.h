@@ -7,7 +7,13 @@
 //     H,TYPE,col,col,...   column names for a record type
 //     D,TYPE,val,val,...   one data row
 //     M,text               a message to show on screen
-// Laptop -> robot (port 5006): a plain command such as "run turn".
+// Laptop -> robot (port 5006): a plain command such as "run turn", or a NUMBERED one (firmware 2026-10-26a):
+//   "#<n> <command>"   n: the laptop's command number (1..2^31, never 0). Every numbered command is answered at
+//   once, before it runs, with "D,ACK,<n>,<new|dup>,<ms>" (header H,ACK,n,result,ms). A number seen among the last
+//   ACK_KEEP is answered "dup" and NOT run again: the laptop resends a command whose answer did not arrive within
+//   about 1 s (2026-10-26 runner fixes: the 2025-10-25 21:14 link lost 1 command in 10, settings included), so a
+//   resend of one that did arrive is harmless whatever the command (go, turn, set, fix, run, calibrate, stop ...).
+//   Plain (unnumbered) commands work as before (the console, clock pings).
 //
 // Until the laptop sends something, the robot broadcasts to the whole
 // network. After the first command it replies straight to that laptop.
@@ -140,7 +146,21 @@ void heartbeat() {
   logf("M,hello from %s at %s (type help in the console)", name, WiFi.localIP().toString().c_str());
 }
 
-// Returns true and fills `out` when a command has arrived.
+// Numbered commands (see the top): the last ACK_KEEP numbers seen. A resend comes within seconds; the laptop sends
+// at most ~20 commands a second (camera fixes 3 a second per robot, legs, settings), so 64 covers 3 s or more.
+// Chosen, no DOE: a buffer size well above any resend window (the runner resends for at most ~8 s; a number older
+// than that is never resent). The laptop starts its numbers from its clock, so a restarted laptop never reuses one.
+const int ACK_KEEP = 64;
+uint32_t ackSeen[ACK_KEEP];
+int ackPos = 0;
+uint32_t ackCount = 0;
+
+bool ackKnown(uint32_t n) {
+  for (int i = 0; i < ACK_KEEP; i++) if (ackSeen[i] == n) return true;
+  return false;
+}
+
+// Returns true and fills `out` when a command has arrived (a numbered one: answered, and a repeat dropped).
 bool poll(String& out) {
   if (!up) return false;
   int n = udp.parsePacket();
@@ -148,10 +168,27 @@ bool poll(String& out) {
   laptop = udp.remoteIP();
   haveLaptop = true;
   lastRx = millis();
-  char buf[160];
+  char buf[192];
   int len = udp.read(buf, sizeof(buf) - 1);
   buf[len > 0 ? len : 0] = '\0';
-  out = String(buf);
+  char* cmd = buf;
+  while (*cmd == ' ') cmd++;
+  if (*cmd == '#') {
+    char* e = nullptr;
+    uint32_t num = strtoul(cmd + 1, &e, 10);
+    if (e == cmd + 1 || num == 0) return false;            // "#" with no number: not a command
+    bool dup = ackKnown(num);
+    if (ackCount % 50 == 0) sendLine("H,ACK,n,result,ms");  // the header now and then (the laptop also knows it)
+    ackCount++;
+    char a[48];
+    snprintf(a, sizeof(a), "D,ACK,%lu,%s,%lu", (unsigned long)num, dup ? "dup" : "new", millis());
+    sendLine(a);
+    if (dup) return false;                                   // already had it: answered, not run again
+    ackSeen[ackPos] = num;
+    ackPos = (ackPos + 1) % ACK_KEEP;
+    cmd = e;
+  }
+  out = String(cmd);
   out.trim();
   return out.length() > 0;
 }

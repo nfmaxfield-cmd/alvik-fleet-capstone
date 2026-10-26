@@ -55,6 +55,41 @@ float frontInPath() {
   return best;
 }
 
+// TILT (firmware 2026-10-26a; 2026-10-25 21:45, Left hung over the bottom-right corner at pitch -9.7 deg, 0.5 deg
+// normally, while its wheels kept turning). The robot's level is taken at its compass check (standing on the board);
+// a pitch or roll more than tilt_stop_deg away from it for tilt_ms stops any drive or turn ("tilted <deg> deg"), and
+// go / turn legs are refused while it lasts (e02.h). Chosen: 5 deg. Real RAW logs (2026-10-24/25, 5 sessions, 210,000
+// rows on plywood, driving included) stay within 4.1 deg of each robot's own level (99.9 % within 3.0); hanging read
+// 10.2. tilt_ms 300: the one 4.1 deg reading lasted 2 rows (17 ms). DOE note: yes, a bench DOE (one wheel off a
+// 1 / 2 / 3 cm step, nose over the board's edge at 2 / 4 / 6 cm) would set both; 0 switches it off.
+namespace tilt {
+float pitch0 = 0, roll0 = 0;
+bool haveLevel = false;
+unsigned long overSince = 0;
+float last = 0;            // the latest deviation, deg
+
+float now() {
+  float r, p, y;
+  alvik.get_orientation(r, p, y);
+  last = fmaxf(fabsf(p - pitch0), fabsf(r - roll0));
+  return last;
+}
+void level() {             // standing still on the board: this is level
+  float r, p, y, sr = 0, sp = 0;
+  for (int i = 0; i < 5; i++) { alvik.get_orientation(r, p, y); sr += r; sp += p; delay(4); }
+  roll0 = sr / 5; pitch0 = sp / 5;
+  haveLevel = true;
+}
+// True once it has been tilted past the limit for tilt_ms.
+bool over() {
+  float lim = P("tilt_stop_deg");
+  if (lim <= 0) return false;
+  if (now() <= lim) { overSince = 0; return false; }
+  if (!overSince) overSince = millis() | 1;
+  return millis() - overSince >= (unsigned long)P("tilt_ms");
+}
+}  // namespace tilt
+
 // Call often inside every loop. True means stop the experiment (or, with
 // gStepStop set, just the current step).
 bool shouldAbort() {
@@ -63,6 +98,7 @@ bool shouldAbort() {
   if (gAbortReason.length()) return true;
   if (alvik.get_touch_cancel()) { gAbortReason = "cancel button"; }
   else if (P("safe_lift") > 0 && alvik.get_lifted()) { gAbortReason = "robot lifted"; }
+  else if (tilt::over()) { gAbortReason = String("tilted ") + String(tilt::last, 1) + " deg"; }
   // open plywood edge (edge.h; safe_edge 0 = off): forward driving only, backing up is blind;
   // a hard stop in every experiment, follow steps and approaches included (gFrontLimitCm doesn't apply);
   // not a failure: RUNEND says "limited:plywood edge" (runExperiment), the calibration rolls back (runCalib)
@@ -180,6 +216,8 @@ void tickWait(unsigned long ms) {
 // `calibrate` first, THEN place the robot on its start mark.
 bool calibrateYawSign(bool force = false) {
   if (gYawSign != 0 && !force) return true;
+  tilt::level();                    // standing still before the wiggle: its level for the tilt stop
+  net::logf("M,level: pitch %.1f roll %.1f deg", tilt::pitch0, tilt::roll0);
   net::sendLine("M,checking compass direction: small wiggle left and back");
   float y0 = rawYaw(), o0 = rawOdo();
   alvik.set_wheels_speed(-20, 20);  // left wheel back, right forward = turn left

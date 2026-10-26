@@ -1004,6 +1004,13 @@ void legCommand(const String& verb, const String& rest, bool running) {
   float arg = 0;
   long id = n > 1 ? atol(tok[1]) : 0;
   bool idle = !running && kind != 'm';
+  // 2026-10-26a: a leg id seen before is answered `dup` FIRST, before any refusal: a resent leg that arrives while
+  // the first copy runs used to get "refused: a leg is running", which the laptop took for the leg's own answer
+  if (id > 0 && id <= lastId) {
+    if (idle || !running) legHeader();
+    legRecord(id, kind, arg, "dup", "");
+    return;
+  }
   if (!idle && (!running || !active || !mode1 || idleLeg)) {
     legHeader();
     legRecord(id, kind, arg, "refused", idleLeg ? "a leg is running" : kind == 'm' ? "marks are for a camera-steered e02 run"
@@ -1035,6 +1042,13 @@ void legCommand(const String& verb, const String& rest, bool running) {
     return;
   }
   if (kind == 'g' && edgeOff()[0]) { legRecord(id, kind, arg, "refused", edgeOff()); return; }
+  // 2026-10-26a: tilted (hung at an edge, a wheel off the board): no drive and no turn (motion.h TILT)
+  if ((kind == 't' || kind == 'g') && P("tilt_stop_deg") > 0 && tilt::now() > P("tilt_stop_deg")) {
+    char why[64];
+    snprintf(why, sizeof(why), "tilted %.1f deg (hung at an edge?)", tilt::last);
+    legRecord(id, kind, arg, "refused", why);
+    return;
+  }
   if (kind == 'g' && borderLatched && borderTowards(arg) && !(P("border_seek") > 0 && arg > 0)) {
     legRecord(id, kind, arg, "refused", "virtual border: towards the open edge (the laptop clears it)");
     return;
@@ -1043,7 +1057,6 @@ void legCommand(const String& verb, const String& rest, bool running) {
     legRecord(id, kind, arg, "refused", "backing blind: more than e02_back_max_cm since the last camera fix");
     return;
   }
-  if (id > 0 && id <= lastId) { legRecord(id, kind, arg, "dup", ""); return; }
   if (idle) {
     if (idlePending) { legRecord(id, kind, arg, "refused", "a leg is waiting"); return; }
     if (id > 0) lastId = id;

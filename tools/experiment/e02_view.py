@@ -205,6 +205,12 @@ tr.grp td{border-bottom:none;padding-top:9px}
   <div class="legend"><span><i style="background:#E6E9EE"></i>average</span><span><i style="background:#9AA4B2;opacity:.55"></i>worst picture age</span><span><i style="background:#F07B72;opacity:.35"></i>slow seconds</span><span><i style="background:#8B79D9"></i>planned load on</span><span><i style="border-top:2px dashed #F07B72;height:0;border-radius:0"></i>slow line</span></div>
   <p class="src">Measured: pictures handled a second (of about 25 the camera sends) and a picture's age when its position was ready, s. Slow: <span id="prule">-</span> (the runner's own speed watch, e02_load.py). Data: the runner's perf rows (perf.csv), last 5 minutes.</p>
  </div>
+ <div class="panel" id="linkp">
+  <h2>Radio link <span class="badge" id="linkb">-</span></h2>
+  <svg id="link" viewBox="0 0 760 150"></svg>
+  <p class="note" id="linkn">The share of commands to the robots that needed a resend, minute by minute; above the yellow line the runner warns, and when it is clearly above the red one new moves wait until the link recovers.</p>
+  <p class="src">Measured: commands not answered on their first send (resent, or never answered) and clock pings never answered, as a share of all, per minute, last 30 minutes; the badge is the last 5 minutes. Data: the runner's link gauge (e02_link.py; every command in link.csv).</p>
+ </div>
  <div class="panel" id="trustp">
   <h2>How much each sensor is trusted</h2>
   <div class="tw"><table id="trust"><thead><tr><th>Sensor</th><th class="n">Learned noise</th><th class="n">Healthy noise</th><th class="n">k</th><th>State</th><th>Trend</th></tr></thead><tbody></tbody></table></div>
@@ -447,6 +453,25 @@ function perf(p){const s=$('perf');s.innerHTML='';if(!p)return;
   showTip(e,Math.round(-best[0])+' s ago: '+num(best[1],1)+' pictures/s · age '+num(best[2],2)+' s (worst '+num(best[3],2)+' s)'+(best[4]?' · slow':'')+(best[5]?' · load on':''))});
  hit.addEventListener('mouseleave',()=>{cross.setAttribute('opacity',0);hideTip()})}
 
+/* radio link (2026-10-26 runner fixes): share of commands needing a resend, per minute, last 30 minutes */
+function linkp(p){const s=$('link');s.innerHTML='';const b=$('linkb');
+ if(!p){b.className='badge';b.textContent='plain commands';s.appendChild(el('text',{x:380,y:80,'text-anchor':'middle',style:'font-size:13px'},'This runner sends plain commands (no link gauge)'));return}
+ const pc=v=>v==null?'-':(100*v).toFixed(v<0.1?1:0)+' %';
+ b.className='badge '+(p.level=='pause'?'slow':p.level=='warn'?'slow':p.level=='ok'?'okb':'');
+ b.textContent=p.level==null?'too few commands yet ('+p.n+')':(p.level=='pause'?'PAUSED: ':p.level=='warn'?'POOR: ':'good: ')+pc(p.share)+' resent in 5 min'+(p.counts&&p.counts.unacked?' · '+p.counts.unacked+' never answered':'')+(p.set_failed&&p.set_failed.length?' · '+p.set_failed.length+' settings not confirmed':'');
+ const rows=p.series||[],W=760,L=40,R=W-8,T=14,B=128,n=p.series_min||30,X=k=>L+(R-L)*(n-k)/(n-1||1);
+ let hi=Math.max(0.2,p.pause*1.4,...rows.map(q=>q[1]||0));hi=Math.ceil(hi*10)/10;const Y=v=>B-(B-T)*Math.min(hi,v)/hi;
+ for(let i=0;i<=2;i++){const v=hi*i/2;s.appendChild(el('line',{x1:L,x2:R,y1:Y(v),y2:Y(v),stroke:'#262D39'}));s.appendChild(el('text',{x:L-6,y:Y(v)+4,'text-anchor':'end'},Math.round(100*v)+'%'))}
+ s.appendChild(el('line',{x1:L,x2:R,y1:Y(p.warn),y2:Y(p.warn),stroke:'#E8C15A','stroke-dasharray':'4 3',opacity:.8}));
+ s.appendChild(el('line',{x1:L,x2:R,y1:Y(p.pause),y2:Y(p.pause),stroke:'#F07B72','stroke-dasharray':'4 3',opacity:.9}));
+ s.appendChild(el('text',{x:L+4,y:Y(p.warn)-4,fill:'#E8C15A'},'warn '+Math.round(100*p.warn)+'%'));
+ s.appendChild(el('text',{x:L+4,y:Y(p.pause)-4,fill:'#F07B72'},'pause '+Math.round(100*p.pause)+'%'));
+ const pts=rows.filter(q=>q[1]!=null);
+ if(pts.length>1)s.appendChild(el('polyline',{points:pts.map(q=>X(q[0]).toFixed(1)+','+Y(q[1]).toFixed(1)).join(' '),fill:'none',stroke:'#E6E9EE','stroke-width':2,'stroke-linejoin':'round'}));
+ pts.forEach(q=>{const c=el('circle',{cx:X(q[0]),cy:Y(q[1]),r:3,fill:q[1]>=p.pause?'#F07B72':q[1]>=p.warn?'#E8C15A':'#E6E9EE'});tipOn(c,q[0]+' min ago: '+pc(q[1])+' of '+q[2]+' commands and pings');s.appendChild(c)});
+ s.appendChild(el('text',{x:L,y:146},n+' min ago'));s.appendChild(el('text',{x:R,y:146,'text-anchor':'end'},'now'));
+ if(!pts.length)s.appendChild(el('text',{x:(L+R)/2,y:75,'text-anchor':'middle',style:'font-size:13px'},'No commands or pings yet'))}
+
 /* sensor trust table */
 function trust(t){const tb=document.querySelector('#trust tbody');tb.innerHTML='';
  if(!t){tb.innerHTML='<tr><td colspan="6" class="little">No sensor trust in this runner.</td></tr>';return}
@@ -490,6 +515,7 @@ function render(s){const L=s.live||{};
  if(changed('plan',L.plan))plan(L.plan);
  if(changed('results',L.results))results(L.results);
  if(changed('perf',L.perf))perf(L.perf);
+ if(changed('link',L.link))linkp(L.link);
  if(changed('trust',L.trust))trust(L.trust);
  if(changed('calib',L.calib))calib(L.calib)}
 /* mark this moment: the mark page on the last pictures (a new tab; opened at once so the browser allows it) */
@@ -1016,6 +1042,11 @@ class LiveView:
             live = self.live_state()
         except Exception as e:          # the console must never break the session (or the old fields)
             live = dict(error=str(e))
+        try:
+            lk = getattr(r, "link", None)                   # the radio link gauge (2026-10-26 runner fixes, e02_link)
+            live["link"] = lk.status() if lk is not None and hasattr(lk, "gauge") else None
+        except Exception:
+            live["link"] = None
         return dict(phase=getattr(r, "phase", ""), order=getattr(r, "order", ""),
                     active=(tr.active if tr is not None and tr.active else ""), log=log, t=time.time(), note=note,
                     health=self.health(), question=q, live=live, alerts=self.alerts())

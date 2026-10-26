@@ -137,6 +137,8 @@ Param PARAMS[] = {
   // --- safety ---
   {"safe_front_cm",    7,   "stop if something is closer than this in front (0 = off)"},
   {"safe_lift",        1,   "1 = stop if the robot reports being lifted (0 = off, if it false-trips)"},
+  {"tilt_stop_deg",    5,   "stop driving and refuse go / turn legs when pitch or roll is this far from its level (taken at the compass check), deg (0 = off; motion.h TILT)"},
+  {"tilt_ms",        300,   "the tilt must last this long, ms"},
   // --- plywood edge guard (edge.h): OFF until tools/edge_check.py has the E0c edge rows ---
   {"safe_edge",        0,   "stop before an open plywood edge while driving forward: 0 = off, 1 = line sensors, 2 = distance sensor's bottom zone, 3 = both (backing up is blind)"},
   {"edge_dir",         0,   "line cue: +1 = readings go up past an edge, -1 = down, 0 = either way (from tools/edge_check.py)"},

@@ -225,7 +225,7 @@ look at the WiFi.
 *Substantive*
 1. Was anything different with the WiFi this evening: the router moved, other devices streaming, the phone on the live page all session, the side camera's upload? The link lost 8-11 % from the very first minute, against 1 % at 15:10 and 15:45.
 2. When the link is that bad, should the session refuse to start (or stop and ask), and at what share? My assumption: hold above 3 % over 5 minutes. If that is too strict, the fallback is fix 1's resends alone.
-3. The right edge has a dark strip like the bottom one. Is it painter's tape too, and does the plywood end at its outer side? The video puts the stored right line about 4 cm inside the drop there. If that's wrong, the tracker was not 5 cm off at the corner, and the nose was further over.
+3. (Answered by Nick, 2026-10-26: the strips along the right and bottom edges are painter's tape on the plywood, surface, not a drop. So the drop is at the strip's outer side, as this report read it: the stored right line is about 4 cm inside the drop, and the tracker's 5 cm outward bias at the corner stands. The runner's comments now say so; no rule treated a strip as a drop. [Runner fixes](e02-oct26-runner-fixes.md).) The right edge has a dark strip like the bottom one. Is it painter's tape too, and does the plywood end at its outer side? The video puts the stored right line about 4 cm inside the drop there. If that's wrong, the tracker was not 5 cm off at the corner, and the nose was further over.
 4. Fix 2 lets a back-out run without asking right after the robot's own edge stop. Agreed? It would have avoided every border hold this session.
 
 *Other*

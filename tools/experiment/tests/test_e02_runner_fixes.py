@@ -71,9 +71,13 @@ def test_border_band_counts_a_centre_far_past_the_line():
 
 
 # --- fix 5: a turn on the spot gets RECHECK_S before "lost" ---------------------------------------------------
-def _lost_stub(kind, t_leg, last_t):
+def _lost_stub(kind, t_leg, last_t, started=True):
+    """started: the robot's own 'started' LEG record arrived at t_leg (2026-10-26: the lost check counts from it)."""
+    import threading as _th
+    recs = {"LEG": [(t_leg, "Left", {"id": "7", "state": "started"})] if started else []}
     r = types.SimpleNamespace(leg_live={"Left": t_leg}, leg_kind={"Left": kind}, leg_val={"Left": 175.0},
-                              refinding=set(), seek=set(), speed_now={},
+                              refinding=set(), seek=set(), speed_now={}, last_lid={"Left": 7},
+                              listener=types.SimpleNamespace(cv=_th.Condition(), recs=recs),
                               history=types.SimpleNamespace(last_t=lambda: last_t, since=lambda t: []))
     return r
 
