@@ -67,6 +67,7 @@ import math
 import os
 import subprocess
 import re
+import signal
 import sys
 import threading
 import time
@@ -98,6 +99,7 @@ import e02_front as FR  # noqa: E402
 import e02_unc as UNC  # noqa: E402
 import e02_degrade as DG  # noqa: E402
 import e02_turnwatch as TW  # noqa: E402
+import e02_timeout as TO  # noqa: E402  (session timeouts: an unattended session always ends and uploads)
 
 
 def EX_provisional_camera(w, h, f=600.0, height_cm=260.0):
@@ -617,6 +619,10 @@ class Runner:
     last_hold_end = 0.0
     stop_requested = False
     hold_auto_refind = False
+    clock = None              # the session timeouts (e02_timeout.SessionClock); None: none (the tests' stand-ins)
+    end_reason = None         # dict(key, why, ...) once the session's end is decided (e02_state.json "session_end")
+    wrap_up = False           # the hard cap is reached: no new run starts
+    timed_out = False         # a timeout has stopped the session
     seek = set()
     leg_live = {}
     leg_kind = {}
@@ -636,6 +642,13 @@ class Runner:
         self.dir = session_dir
         self.logf = open(os.path.join(session_dir, "e02_log.txt"), "a", encoding="utf-8")
         self.t_launch = time.time()
+        # session timeouts (Nick, 2026-10-26: a hold sat unanswered all night): e02_timeout.py
+        self.clock = TO.from_args(a, self.t_launch)
+        self.end_reason = None
+        self.end_lock = threading.Lock()
+        self.ended = threading.Event()    # set when launch() reaches its own end (its finally)
+        self.wrap_up = False
+        self.timed_out = False
         self.phase = "setup"
         self.order = ""
         self.active = None
@@ -758,6 +771,7 @@ class Runner:
         a = self.a
         if not TKW.recorder_used(a):
             return True                         # production: no recorder, no video to protect
+        t_pause = None
         while True:
             ok1, w1, _, _ = CAM.check_stream(a.pi, a.overhead_port)
             if not ok1 and self.feed is not None and self.feed.last_t is not None and \
@@ -777,7 +791,20 @@ class Runner:
             self.st.setdefault("recorder_pauses", []).append([round(time.time(), 1), ok1, notes])
             self.st.save()
             print("\a", end="", flush=True)
-            time.sleep(30.0)
+            # the session timeouts (2026-10-26): this pause waits on Nick like a hold, so the same limits end it
+            t_pause = t_pause or time.time()
+            t_sess, key = self.session_deadline(t_pause, None)
+            if t_sess is not None:
+                self.say("  (%s.)" % self.end_page_words(t_sess))
+            for _ in range(60):
+                if self.stop_requested:
+                    self.raise_if_stopped()
+                    return False
+                if self.wrap_up or (t_sess is not None and time.time() >= t_sess):
+                    self.session_timeout(TO.CAP if self.wrap_up else key, t_pause, "the recorder check's pause")
+                    self.raise_if_stopped()
+                    return False
+                time.sleep(0.5)
 
     SNAP_MIN_S = 1.0          # at most one snapshot a second (marks come in bursts)
 
@@ -855,30 +882,53 @@ class Runner:
         self.say("  [video mark] %s%s" % (text, "" if ok else "  (the Pi didn't confirm it)"), quiet=ok)
         self.st.setdefault("notes", []).append([round(time.time(), 3), text, bool(ok)])
 
-    def web_ask(self, prompt, default, timeout_s, hold=False, image=None):
+    def web_ask(self, prompt, default, timeout_s, hold=False, image=None, t_asked=None):
         """The Pi run (--web-ask): the question goes on the live page (any phone or computer on the WiFi answers
         it), the console can answer too; after timeout_s with no answer, the default (said loudly). A question
         from anywhere else waits while a hold's question is on the page (the page shows one question: 2026-10-24
         review, a recovery's question replaced the hold's and the hold could never be answered). image: a picture
         the question is about (a file path); the page shows it inside the question (Nick, 2026-10-25: he answered
-        the outline question blind)."""
+        the outline question blind).
+        Session timeouts (2026-10-26, e02_timeout.py): if nobody answers by the session's deadline for this wait
+        (t_asked: when it was first put to Nick, e.g. a hold's start), the session ends (session_timeout) and this
+        returns None; the page shows "No answer by HH:MM ends the session and uploads" under it."""
         v = getattr(self, "view", None)
         if v is None:
             return None
         while not hold and self.hold.is_set() and self.hold_owner is not threading.current_thread():
             time.sleep(0.3)
+        if getattr(self, "stop_requested", False):  # a hold ended the session while this question waited for it
+            self.raise_if_stopped()
+            return None
+        t0 = time.time() if t_asked is None else t_asked
+        t_sess, key = Runner.session_deadline(self, t0, timeout_s)
+        ends = Runner.end_page_words(self, t_sess)
         self.say("QUESTION (answer on the live page): " + prompt.strip())
+        if ends:
+            self.say("  (%s.)" % ends)
         box = []
         if sys.stdin is not None and sys.stdin.isatty():
             threading.Thread(target=lambda: box.append(self._input("")), daemon=True).start()
         t_end = None if timeout_s is None else time.time() + timeout_s
+        timed = False
         with v.lock:
             qid = int(time.time() * 1000)
-            v.question = dict(id=qid, prompt=prompt.strip(), default=default, timeout_s=timeout_s)
+            v.question = dict(id=qid, prompt=prompt.strip(), default=default, timeout_s=timeout_s,
+                              ends_at=None if t_sess is None else round(t_sess, 1), ends_words=ends)
             if image and os.path.exists(image):
                 v.question["image"] = os.path.abspath(image)
         try:
-            while t_end is None or time.time() < t_end:
+            while True:
+                now = time.time()
+                if t_sess is not None and now >= t_sess:
+                    ans, timed = None, True
+                    break
+                if t_end is not None and now >= t_end:
+                    ans = None
+                    break
+                if getattr(self, "timed_out", False):                # another wait's timeout (or the hard cap) ended the session
+                    ans = None
+                    break
                 with v.lock:
                     if qid in v.answers:
                         ans = v.answers.pop(qid).strip()
@@ -887,18 +937,47 @@ class Runner:
                     ans = box[0]
                     break
                 time.sleep(0.3)
-            else:
-                ans = None
         finally:
             with v.lock:
                 if v.question and v.question["id"] == qid:
                     v.question = None
+        if timed:
+            Runner.session_timeout(self, key, t0, prompt)
+            return None
+        if ans is None and getattr(self, "timed_out", False):
+            return None
         if ans is None:
             self.say("  (no answer in %d min: the default, %r, is taken)" % (round((timeout_s or 0) / 60), default))
             self.mark("e02 question timed out: %s" % prompt.strip()[:60])
         else:
             self.say("  answer: %r" % ans)
         return ans
+
+    def console_wait(self, prompt, t_asked=None):
+        """The console's answer (no live page), with the session timeouts: the answer, None at end of input (no
+        console), or None once the session's deadline for this wait passed (the session is then ending)."""
+        t0 = time.time() if t_asked is None else t_asked
+        t_sess, key = Runner.session_deadline(self, t0, None)
+        if t_sess is None:
+            try:
+                return input(prompt).strip()
+            except EOFError:
+                return None
+        self.say("  (%s.)" % Runner.end_page_words(self, t_sess))
+        box = []
+
+        def read():
+            try:
+                box.append(input(prompt).strip())
+            except EOFError:
+                box.append(None)
+        threading.Thread(target=read, daemon=True).start()
+        while not box and time.time() < t_sess:
+            time.sleep(0.3)
+        if box:
+            return box[0]
+        Runner.session_timeout(self, key, t0, prompt)
+        return None
 
     def ask(self, prompt, default="y", image=None):
         """image: the picture the question is about (shown inside the question on the live page)."""
@@ -907,23 +986,131 @@ class Runner:
             return default
         if getattr(self.a, "web_ask", False):
             ans = self.web_ask(prompt, default, WEB_ASK_TIMEOUT_S, image=image)
+            if getattr(self, "timed_out", False):
+                Runner.raise_if_stopped(self)    # (the main thread: the session ends here)
             return default if ans is None else (ans or default)
-        try:
-            return input(prompt).strip()
-        except EOFError:
-            return default
+        ans = self.console_wait(prompt)
+        if getattr(self, "timed_out", False):
+            Runner.raise_if_stopped(self)
+        return default if ans is None else ans
 
     def ask_timeout(self, prompt, timeout_s, image=None):
         """input() that gives up after timeout_s (None): an unattended session must never wait for ever."""
         if self.a.auto:
             return None
         if getattr(self.a, "web_ask", False):
-            return self.web_ask(prompt, "", timeout_s, image=image)
+            ans = self.web_ask(prompt, "", timeout_s, image=image)
+            if getattr(self, "timed_out", False):
+                Runner.raise_if_stopped(self)
+            return ans
         box = []
         th = threading.Thread(target=lambda: box.append(self._input(prompt)), daemon=True)
         th.start()
-        th.join(timeout_s)
+        if timeout_s is None:
+            t_sess, key = Runner.session_deadline(self, time.time(), None)
+            th.join(None if t_sess is None else max(0.0, t_sess - time.time()))
+            if not box and t_sess is not None:
+                Runner.session_timeout(self, key, None, prompt)
+                self.raise_if_stopped()
+        else:
+            th.join(timeout_s)
         return box[0] if box else None
+
+    # --- session timeouts (Nick, 2026-10-26; e02_timeout.py) ------------------------------------------------
+    def session_deadline(self, t_asked, own_timeout_s=None):
+        """(t, key): when a wait on Nick begun at t_asked ends the session, or (None, None)."""
+        c = getattr(self, "clock", None)
+        if c is None:
+            return None, None
+        return c.wait_deadline(t_asked, own_timeout_s)
+
+    def end_page_words(self, t_end):
+        """'No answer by 23:05 ends the session and uploads' ('' for no deadline). Uploads: the Pi run."""
+        c = getattr(self, "clock", None)
+        if c is None or t_end is None:
+            return ""
+        return c.page_words(t_end, uploads=bool(getattr(self.a, "on_pi", False)))
+
+    def note_end(self, key, why, **extra):
+        """The reason the session ended (the first one decided wins): e02_state.json "session_end", the log."""
+        lock = getattr(self, "end_lock", None) or threading.Lock()
+        with lock:
+            if self.end_reason is not None:
+                return False
+            self.end_reason = dict(key=key, why=why, t=round(time.time(), 1), **extra)
+        try:
+            self.st["session_end"] = dict(self.end_reason)
+            self.st.save()
+        except Exception:
+            pass
+        return True
+
+    def session_timeout(self, key, t_asked=None, what=""):
+        """Nobody answered in time, or the hard cap: every robot stopped, the state saved, and the session ends the
+        way an "s" at a hold does (the main thread stops at its next move or question; ensure_end makes sure)."""
+        c = getattr(self, "clock", None)
+        why = c.why(key, t_asked) if c is not None else str(key)
+        self.note_end(key, why, asked=None if t_asked is None else round(t_asked, 1),
+                      waiting_on=(what or "").strip()[:160])
+        if getattr(self, "timed_out", False):
+            return
+        self.timed_out = True
+        self.say("!" * 78)
+        self.say("SESSION ENDS (%s): every robot is stopped, the state is saved, and the runner finishes so the "
+                 "upload runs and the recorder stops. --resume carries the rest on later." % why)
+        self.say("!" * 78)
+        try:
+            self.mark("e02 session timeout %s" % key)
+            self.alert("timeout", None, why)
+        except Exception:
+            pass
+        try:
+            self.stop_everyone()
+        except Exception:
+            pass
+        self.stop_requested = True
+        try:
+            self.st.save()
+        except Exception:
+            pass
+        if getattr(self, "ended", None) is not None:
+            threading.Thread(target=self.ensure_end, daemon=True).start()
+
+    def interrupt_main(self):
+        """Like Ctrl+C in the runner's window (also breaks a sleep or a console input())."""
+        os.kill(os.getpid(), signal.SIGINT)
+
+    def ensure_end(self, wait_s=None):
+        """After a timeout: if the runner has not reached its own end in ENSURE_END_S (stuck where nothing checks,
+        e.g. the recorder check's wait), interrupt it like Ctrl+C. Never after its end has begun."""
+        if self.ended.wait(TO.ENSURE_END_S if wait_s is None else wait_s):
+            return
+        self.say("  (the runner had not finished %d s after the timeout: interrupting it like Ctrl+C)" % (
+            TO.ENSURE_END_S if wait_s is None else wait_s))
+        self.interrupt_main()
+
+    def cap_watch(self, grace_s=None):
+        """The hard cap (planned hours + --hard-cap-min): no new run starts (session() checks wrap_up), the current
+        one finishes and parks if it does so within WRAP_GRACE_S; otherwise every robot is just stopped
+        (session_timeout). A hold or question open at the cap ends the session at once (its deadline is the cap)."""
+        c = getattr(self, "clock", None)
+        if c is None or c.cap is None:
+            return
+        while not self.ended.is_set() and time.time() < c.cap:
+            self.ended.wait(min(30.0, max(0.05, c.cap - time.time())))
+        if self.ended.is_set():
+            return
+        self.wrap_up = True
+        g = TO.WRAP_GRACE_S if grace_s is None else grace_s
+        self.say("HARD CAP (%s): no new run starts; the current one finishes and parks if it can within %d s, else "
+                 "every robot is stopped. Then the session ends and uploads." % (c.why(TO.CAP), g))
+        try:
+            self.mark("e02 hard cap")
+        except Exception:
+            pass
+        if self.ended.wait(g):
+            return
+        self.session_timeout(TO.CAP, None, "the hard cap's wrap-up (phase %s)" % getattr(self, "phase", "?"))
 
     @staticmethod
     def _input(prompt):
@@ -6712,6 +6899,7 @@ class Runner:
             return "c"
         ans = "c"
         t_call = time.time()
+        timed_out_here = False
         with self.hold_lock:
             if self.stop_requested:
                 self.raise_if_stopped()
@@ -6740,11 +6928,15 @@ class Runner:
                     self.st.save()
                 except Exception as e:              # the bookkeeping must never skip the question
                     self.say("  (hold: could not record it: %s)" % e, quiet=True)
+                t0 = time.time()
+                t_sess, _ = self.session_deadline(t0, None)
                 print("\n" + "!" * 78)
                 self.say("HOLD: every robot is stopped. %s: %s." % (robot, why))
                 if detail:
                     self.say(detail)
-                self.say("The session waits for your answer (no time limit).")
+                self.say("The session waits for your answer%s." % (
+                    " (no time limit)" if t_sess is None else ": " + self.end_page_words(t_sess).replace(
+                        "No answer", "no answer")))
                 print("!" * 78)
                 if kind == "find":
                     prompt = ("HOLD (find stopped): %s: %s. Every robot is stopped. Answer: c = carry on (it tries the "
@@ -6756,17 +6948,22 @@ class Runner:
                               "lost robots again without asking from now on, o = leave %s out (it stays where it is), "
                               "s = stop the session (--resume later): " % (
                                   "virtual border" if kind == "border" else "lost robot", robot, why, robot))
-                t0 = time.time()
                 while True:
-                    a_ = self.hold_ask(prompt)
+                    a_ = self.hold_ask(prompt, t_asked=t0)
+                    if self.timed_out:
+                        ans, timed_out_here = "s", True     # nobody answered in time: the session ends
+                        break
                     a_ = (a_ or "").strip().lower()[:1]
                     if a_ in ("c", "a", "o", "s"):
                         ans = a_
                         break
                     self.say("  (answer c, a, o or s)", quiet=True)
                     time.sleep(1.0)
-                rec[5], rec[6] = ans, round(time.time() - t0, 1)
-                self.say("  Nick's answer: %s" % dict(
+                rec[5], rec[6] = ("timeout" if timed_out_here else ans), round(time.time() - t0, 1)
+                if timed_out_here:
+                    self.say("  No answer: the session ends (%s)." % ((self.end_reason or {}).get("why") or "timeout"))
+                else:
+                    self.say("  Nick's answer: %s" % dict(
                     c="carry on" + (": the find again after a fresh camera fix" if kind == "find" else ""),
                     a="the board is gone: the edge find" if kind == "find" else
                     "carry on; lost robots found again without asking from now on", o="leave %s out" % robot,
@@ -6781,7 +6978,7 @@ class Runner:
                     self.stop_requested = True
                 self.hold_answer = ans
                 try:
-                    self.mark("e02 hold answer %s %s" % (ans, robot))
+                    self.mark("e02 hold %s %s" % ("timeout" if timed_out_here else "answer " + ans, robot))
                     self.st.save()
                 except Exception:
                     pass
@@ -6826,30 +7023,35 @@ class Runner:
         self.st.setdefault("left_out", []).append([round(time.time(), 1), robot, [round(q[0], 1), round(q[1], 1)]])
         return True
 
-    def hold_ask(self, prompt):
-        """Nick's answer with no time limit: the live page (and the console) when there is one, else the console;
-        a dry run with nobody there answers c after HOLD_DRY_ANSWER_S. With no page and no console (started
-        without a terminal), nobody can ever answer: the session stops (s)."""
+    def hold_ask(self, prompt, t_asked=None):
+        """Nick's answer: the live page (and the console) when there is one, else the console; a dry run with
+        nobody there answers c after HOLD_DRY_ANSWER_S. With no page and no console (started without a terminal),
+        nobody can ever answer: the session stops (s). The session timeouts (2026-10-26) end the session if
+        nobody answers by the hold's deadline (t_asked: the hold's start): self.timed_out is then set.
+        A --dry-scene hold answered "none": nobody answers it (the timeouts' simulator test)."""
         nxt = getattr(self, "dry_next_answer", None)
-        if nxt and getattr(self.a, "dry_run", False):
+        if nxt == "none" and getattr(self.a, "dry_run", False):
+            nxt = None                              # left unanswered: the page (or the console) waits as for real
+        elif nxt and getattr(self.a, "dry_run", False):
             self.dry_next_answer = None            # --dry-scene: this hold's own answer
             time.sleep(HOLD_DRY_ANSWER_S)
             self.say(prompt + " -> " + nxt + " (dry run: the scene's answer)")
             return nxt
-        if getattr(self.a, "dry_run", False) and (self.a.auto or not getattr(self.a, "web_ask", False)):
+        if getattr(self.a, "dry_run", False) and (self.a.auto or not getattr(self.a, "web_ask", False)) \
+                and getattr(self, "dry_next_answer", None) != "none":
             time.sleep(HOLD_DRY_ANSWER_S)
             self.say(prompt + " -> " + getattr(self.a, "dry_hold_answer", "c") + " (dry run: automatic)")
             return getattr(self.a, "dry_hold_answer", "c")
         if getattr(self, "view", None) is not None:
-            ans = self.web_ask(prompt, "", None, hold=True)
-            if ans:
+            ans = self.web_ask(prompt, "", None, hold=True, t_asked=t_asked)
+            if ans or self.timed_out:
                 return ans
             time.sleep(1.0)
             return ""
         if sys.stdin is None or not sys.stdin.isatty():
             self.say("  (no live page and no console to answer on: the session stops)")
             return "s"
-        return self._input(prompt)
+        return self.console_wait(prompt, t_asked=t_asked) or ""
 
     def make_guard(self):
         """The border while exploring (the robots' own camera fit and board are not made yet): the calibration file
@@ -8350,6 +8552,12 @@ class Runner:
                             self.skip_conds)
             if r is None:
                 break
+            if self.wrap_up:
+                # the hard cap (e02_timeout.py): no new run; the last one finished and parked
+                c_ = self.clock
+                self.note_end(TO.CAP, c_.why(TO.CAP) if c_ is not None else "hard cap", parked=True)
+                self.say("Hard cap: no new run starts; the robots are parked after their last run.")
+                break
             if self.a.max_runs and n_this >= self.a.max_runs:
                 self.say("Stopping after %d runs (--max-runs)." % n_this)
                 break
@@ -8714,6 +8922,19 @@ def main(argv=None):
     ap.add_argument("--robots", default="Left,Center,Right")
     ap.add_argument("--robot", action="append", default=[], help="robot IP, if robots aren't found automatically")
     ap.add_argument("--hours", type=float, default=2.0)
+    # session timeouts (Nick, 2026-10-26; e02_timeout.py). DOE note: chosen convenience settings, not measured; they
+    # only decide how long an unattended session waits for an answer, so no DOE is needed for them.
+    ap.add_argument("--answer-timeout-min", type=float, default=TO.ANSWER_TIMEOUT_MIN,
+                    help="a hold or question nobody answers for this long ends the session: every robot stopped, "
+                         "saved, uploaded (default %g; 0 = off). Questions that take their own default after a time "
+                         "limit keep it" % TO.ANSWER_TIMEOUT_MIN)
+    ap.add_argument("--after-end-timeout-min", type=float, default=TO.AFTER_END_TIMEOUT_MIN,
+                    help="after the planned time (--hours from the start) is up, a hold or question nobody answers for "
+                         "this long ends the session (default %g; 0 = off)" % TO.AFTER_END_TIMEOUT_MIN)
+    ap.add_argument("--hard-cap-min", type=float, default=TO.HARD_CAP_MIN,
+                    help="hard cap at --hours plus this: no new run starts, the current one finishes and parks if it "
+                         "can within %d s, else every robot is stopped; then the session ends and uploads (default "
+                         "%g; 0 = off)" % (TO.WRAP_GRACE_S, TO.HARD_CAP_MIN))
     ap.add_argument("--run-s", type=float, default=PL.RUN_S, help="time a route run with its parking takes, for the "
                                                                    "plan (s; measured ~70)")
     ap.add_argument("--find-s", type=float, default=PL.FIND_S, help="time a find takes, for the plan (s)")
@@ -8781,7 +9002,8 @@ def main(argv=None):
                     "the start (e.g. one just past an open edge), not only in the brick demo")
     ap.add_argument("--dry-scene", default="", help="dry run: events during explore, ROBOT:KIND:N:WHAT[:AT_S],... "
                     "(e.g. Right:ray:2:o = a hold during Right's 2nd ray, answered o; Left:bigturn:1:gap3 = the "
-                    "camera loses Left for 3 s in its first 175 deg turn): the 15:10 re-creation")
+                    "camera loses Left for 3 s in its first 175 deg turn; Right:ray:2:none = a hold nobody answers, the session "
+                    "timeouts' test): the 15:10 re-creation")
     ap.add_argument("--dry-turn-fault", default="", help="dry run: ROBOT[@S]: that robot's turns break S s (default 5) "
                     "after its compass check: its gyro reads every turn the wrong way, so turns run to the timeout and "
                     "straight drives curve (the 15:45 Right re-creation)")
@@ -8918,6 +9140,12 @@ def launch(a, state, sdir, sim):
         for line in PL.plan_words(run.planned_schedule(), a.run_s, a.find_s):
             run.say(line)
     threading.Thread(target=run.watchdog_loop, daemon=True).start()
+    run.say(run.clock.words())
+    state.setdefault("session_timeouts", []).append(dict(
+        launch=state["launches"], t_start=round(run.clock.t_start, 1), planned_end=round(run.clock.planned_end, 1),
+        answer_min=run.clock.answer_min, after_end_min=run.clock.after_end_min, cap_min=run.clock.cap_min,
+        cap=None if run.clock.cap is None else round(run.clock.cap, 1)))
+    threading.Thread(target=run.cap_watch, daemon=True).start()     # the hard cap (e02_timeout.py)
     code = 0
     feed = None
     try:
@@ -8968,17 +9196,37 @@ def launch(a, state, sdir, sim):
             if not a.skip_naming and not state.get("naming_check"):
                 run.naming_check()
             run.session()
-            if getattr(a, "bricks", False) or getattr(a, "tight_gap", False):
-                run.brick_demo()
-            if getattr(a, "dance", False):
-                run.dance()
+            if run.wrap_up and (getattr(a, "bricks", False) or getattr(a, "tight_gap", False) or getattr(a, "dance", False)):
+                run.say("Hard cap: the brick demo and the dance are skipped.")
+            else:
+                if getattr(a, "bricks", False) or getattr(a, "tight_gap", False):
+                    run.brick_demo()
+                if getattr(a, "dance", False):
+                    run.dance()
+        run.note_end("finished", "finished")
     except KeyboardInterrupt:
-        run.say("Stopped by Ctrl+C: every robot is stopped. Start again with --resume to carry on.")
-        code = 1
+        if run.timed_out:
+            # a session timeout (e02_timeout.py): this is how it is meant to end, so the exit is a normal one
+            run.say("Session ended by itself (%s): every robot is stopped. Start again with --resume to carry on."
+                    % run.end_reason["why"])
+            run.stop_everyone()
+        elif run.stop_requested:
+            run.note_end("nick_stop", "Nick chose stop at a hold")
+            run.say("Stopped (Nick's answer at a hold): every robot is stopped. Start again with --resume to carry on.")
+            code = 1
+        else:
+            run.note_end("ctrl_c", "Ctrl+C")
+            run.say("Stopped by Ctrl+C: every robot is stopped. Start again with --resume to carry on.")
+            code = 1
     except SystemExit as e:
+        run.note_end("exit", str(e))
         run.say(str(e))
         code = 1
+    except BaseException as e:
+        run.note_end("error", "%s: %s" % (type(e).__name__, e))
+        raise
     finally:
+        run.ended.set()                       # no timeout interrupts the runner from here on
         run.watch_quit.set()
         if getattr(run, "load", None) is not None:
             try:
@@ -9070,6 +9318,9 @@ def launch(a, state, sdir, sim):
                                                      sum(1 for v in state["border_shadow"] if v[4])))
         except Exception as e:
             run.say("(processing summary failed: %s)" % e)
+        if run.end_reason:
+            state["session_end"] = dict(run.end_reason)
+            run.say("Session ended: %s." % run.end_reason["why"])
         state.save()
         run.trackf.close()
         if sim is not None:

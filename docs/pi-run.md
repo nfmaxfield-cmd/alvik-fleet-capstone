@@ -77,7 +77,13 @@ Every session (Pi or laptop), from 2026-10-24:
 - **A lost robot.** A robot driving a leg that the camera has not seen for 1.5 s, or whose spot did not move the
   way its wheels say, stops every robot too.
 
-Then the session waits for you, with no time limit. The question is on the live page
+Then the session waits for you, but not for ever (2026-10-26). If nobody answers a hold or a question for 30
+minutes, or for 10 minutes once the planned time (`--hours`) is up, the session ends by itself: every robot stopped,
+everything saved, then the upload runs and the recorder stops. The live page shows the time under the question
+("No answer by 23:05 ends the session and uploads"). At the planned time plus 30 minutes there is a hard cap: no new
+run starts, and the session ends. Questions that already take their default after 15 minutes still do. The options
+`--answer-timeout-min`, `--after-end-timeout-min` and `--hard-cap-min` change the three times (0 switches one off).
+The question is on the live page
 (http://100.122.222.75:8090 over Tailscale); type one letter in the box and press the button:
 
 | Answer | What happens |

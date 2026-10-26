@@ -88,6 +88,8 @@ svg text{fill:var(--mut);font:11px var(--mono)}
 .hold .hk{font:12px var(--mono);color:var(--amber-t);letter-spacing:.04em}
 .hold .hq{font-size:21px;line-height:1.3;font-weight:600;color:#FFF3DA;margin:8px 0 4px;overflow-wrap:anywhere}
 .hold .hs{color:var(--amber-t);font-size:13px;margin:0 0 10px}
+.hold .hend{color:#FFF3DA;font-size:15px;font-weight:600;margin:0 0 10px}
+.ask .aend{font-weight:600;margin:6px 0 0}
 .hold .hd{color:#FFF3DA;font-size:14px;line-height:1.45;margin:0 0 10px;white-space:pre-wrap;overflow-wrap:anywhere}
 .btns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .btns button{font:inherit;text-align:left;display:flex;flex-direction:column;justify-content:flex-start;padding:12px;border-radius:9px;border:1px solid #6B5021;background:var(--amber-bg);color:#FFF3DA;cursor:pointer;min-height:76px}
@@ -220,7 +222,8 @@ tr.grp td{border-bottom:none;padding-top:9px}
   <div class="hk">HOLD · <span id="hkind"></span> · <span id="hsince"></span></div>
   <div class="hq" id="hq"></div>
   <p class="hd" id="hdetail" hidden></p>
-  <p class="hs">Every robot is stopped. The session waits for your answer, with no time limit.</p>
+  <p class="hs" id="hs">Every robot is stopped. The session waits for your answer.</p>
+  <p class="hend" id="hend" hidden></p>
   <div class="btns">
    <button data-a="c"><b>Carry on</b><span>every robot carries on from where it stopped</span></button>
    <button data-a="a"><b>Carry on, don't ask</b><span>and from now on a lost robot is found again without asking (the border still asks)</span></button>
@@ -239,6 +242,7 @@ tr.grp td{border-bottom:none;padding-top:9px}
   <input id="askin" placeholder="type an answer (or leave empty)">
   <button id="askbtn">Send</button>
   <p class="src" id="askdef"></p>
+  <p class="aend" id="askend" hidden></p>
  </div>
  <div id="robots" style="display:flex;flex-direction:column;gap:12px"></div>
  <p class="src" id="robsrc" style="margin:-4px 2px 0"><span style="color:var(--fg);font-size:13px">Each card shows what that robot is doing, its battery, how far its sensors are trusted and how close it is to an open edge.</span><br>Battery: the robot's own reading from its voltage (it sags while driving), line: this session's readings (battery.csv and what the robots report). Dock: the go and leave levels (dashed amber and blue on the line), from each robot's drain learned so far (battery.csv and earlier sessions, tools/dock/charge_levels.py). Sensor chips: k from the sensor trust table below. Edge bar: distance to the nearest open edge, cm (amber: inside the virtual border; dashed: where the robot stops itself), from the camera tracker or its last parked spot (e02_state.json) and the runner's border settings.</p>
@@ -312,6 +316,8 @@ function askRender(q,hold,force){lastQ=q;lastHold=hold;
   $('hq').textContent=(hold.robot?hold.robot+': ':'')+(hold.why||'');
   document.querySelectorAll('#hold .hrb').forEach(x=>x.textContent=hold.robot||'it');
   const qid=q?String(q.id):'';H.dataset.qid=qid;$('hprompt').textContent=q?q.prompt:'';
+  /* the session timeouts (2026-10-26): when no answer ends the session */
+  $('hend').textContent=q&&q.ends_words?q.ends_words+'.':'';$('hend').hidden=!(q&&q.ends_words);
   const picked=sent[qid];
   document.querySelectorAll('#hold button').forEach(b=>{b.disabled=!qid||!!picked;b.classList.toggle('picked',picked==b.dataset.a)});
   $('hsent').textContent=!qid?'The question is not on this page yet (a dry run with --auto answers its holds by itself).':picked?'Sent: '+WORDS[picked]+'. Waiting for the runner to take it.':'';
@@ -320,7 +326,8 @@ function askRender(q,hold,force){lastQ=q;lastHold=hold;
  if(q&&!sent[String(q.id)]){if(A.dataset.qid!=String(q.id)){A.dataset.qid=q.id;$('askin').value='';askPic(q)}
   A.hidden=false;$('askq').textContent=q.prompt;
   $('askyn').hidden=!/\(y\/n\)|\by or n\b/i.test(q.prompt);
-  $('askdef').textContent='Empty = the default ('+(q.default||'Enter')+')'+(q.timeout_s?'; no answer in '+Math.round(q.timeout_s/60)+' min = the default':'')}
+  $('askdef').textContent='Empty = the default ('+(q.default||'Enter')+')'+(q.timeout_s?'; no answer in '+Math.round(q.timeout_s/60)+' min = the default':'');
+  $('askend').textContent=q.ends_words?q.ends_words+'.':'';$('askend').hidden=!q.ends_words}
  else{A.hidden=true;askPic(null)}}
 /* a question about a picture: the picture inside the question, the panel moved to the top of the wide column (and
    first on a phone), so the picture is big enough to judge */

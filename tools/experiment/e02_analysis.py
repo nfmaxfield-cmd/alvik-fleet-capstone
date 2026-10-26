@@ -2053,6 +2053,11 @@ def analyse(recording, logs, runs, calib, out, background=None, bump_frame="auto
         notes.insert(1 if src else 0, "**Nick said the calibration's green outline did not sit on the board's edges**; "
                                       "it was used anyway (no other one on hand), so positions near the edges may be "
                                       "a few cm off.")
+    se = (_state(session).get("session_end") or {}) if session else {}
+    if se.get("key") in ("no_answer", "no_answer_after_end", "cap"):
+        # the session timeouts (e02_timeout.py, 2026-10-26): the session ended by itself
+        notes.insert(0, "**The session ended by itself: %s**%s. Every robot was stopped and the runs left stay in the "
+                        "plan." % (se.get("why"), " (waiting on: %s)" % se["waiting_on"] if se.get("waiting_on") else ""))
     setup = setup_recovery(session, out, video.events or None) if session else None
     write_report(os.path.join(out, "report.md"), rows, bumps, summ, comps, charts, notes, setup=setup)
     return dict(rows=rows, bumps=bumps, summary=summ, comparisons=comps, charts=charts, setup=setup)
