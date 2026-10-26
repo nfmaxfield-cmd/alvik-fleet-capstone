@@ -275,6 +275,23 @@ Write-up: [e02-oct26-session-0955.md](build-reports/e02-oct26-session-0955.md).
 
 Chosen with no DOE: the heading crawl backwards when the front is blocked, 3 cm (the same as the forward crawl).
 
+## Two camera angles (2026-10-26, proposed, not built)
+
+Write-up: [two-camera-geometry.md](build-plans/two-camera-geometry.md).
+
+| Number (where) | Value proposed | Experiment that would set it | Needs | Status |
+|---|---|---|---|---|
+| Side check rate (confirm(), not built) | 2 a second; 5 a second when the overhead is stale or a hold is coming | Replay the 09:56, 10:01 and 21:14 holds at 1 / 2 / 3 / 5 / 10 a second: time to a resolved hold against Pi CPU (crop method) | Logs | open |
+| Overrule rule: overhead stale after | 0.5 s without an update | Replay every real session: false overrules and missed rescues at 0.25 / 0.5 / 1 / 2 s | Logs | open |
+| Overrule rule: side outline gate and wheel agreement | within 15 cm of the expected path; side and wheels within 4 cm | Same replay, gates 8 / 15 / 25 cm x 2 / 4 / 8 cm, scored against hand-marked positions (mark page) | Logs + marking | open |
+| Crop size and reference for the cheap check | 80 x 60 px on a half-size grey picture, empty-board reference | Replay: outline found and centre error at 60 / 80 / 120 px crops, half against full size | Logs | open |
+| Outline threshold and minimum area (twocam/det.py) | 28 grey levels, 120 px | Sweep 16-40 / 60-300 on the pairs: share of tracked moments with an outline within 10 cm, and fit miss | Logs | open |
+| Camera-moved alarm (refit against the stored side model) | 1.5 cm | Replays with the model shifted 0.5-3 cm, and the T1 taped-mark test | Logs + Board | open |
+| Lag alarm | 0.15 s | T5 (robots' lights blink, both cameras) against the moving-robot estimate in 3+ sessions | Board | open |
+| Which camera carries the 5 cm offset | - (measure) | T1: robots on 5 taped marks, both cameras | Board (about 10 min) | open |
+
+Chosen with no DOE: the spots test's 10 cm cells with at least 3 still pairs and the alternating-minute folds (analysis choices only).
+
 ## Already set by data
 
 - **Line edge cue edge_thr 150** (e02.py SAFETY_SETTINGS): plywood reads 52-84 in every E02 session, the two real

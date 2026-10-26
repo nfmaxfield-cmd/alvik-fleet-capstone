@@ -1,0 +1,35 @@
+{
+ "note": "Side camera floor model made by the robots (2026-10-26, tools/experiment/analyses_oct26/twocam/pooled.py): pixel = C + (q - C)(1 + kappa |q - C|^2), q = H [x, y, 1] (overhead track.csv floor cm, roam1 frame, robot-top plane) -> side pixel of the robot's outline centre; C = (320, 240). Fitted on 6,650 pairs from sessions 2026-10-25 15:10, 15:45, 21:14 and 2026-10-26 09:55, each at its own lag. It inherits the overhead's systematic offset (about 4.7 cm against side_floorcal_roam1.json).",
+ "H": [
+  [
+   3.6154306377393484,
+   0.75596685806178,
+   125.51720947927443
+  ],
+  [
+   -0.08262855420945193,
+   -2.9307962199381667,
+   338.143041874665
+  ],
+  [
+   -0.00071014966657404,
+   0.0019900558457268906,
+   1.0
+  ]
+ ],
+ "kappa": -2.1751474240238574e-08,
+ "center": [
+  320,
+  240
+ ],
+ "lag_s": {
+  "1510": -0.4,
+  "1545": 0.05,
+  "2114": 0.02,
+  "0955": 0.08
+ },
+ "image_size": [
+  640,
+  480
+ ]
+}
