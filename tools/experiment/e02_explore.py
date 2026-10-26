@@ -60,11 +60,16 @@ def segments(stops):
     return out
 
 
-def rebuild(stops, s=1.0, g=1.0):
-    """The path (x, y, th) of the stops in the robot's own frame, its distances x s and turns x g."""
+def rebuild(stops, s=1.0, g=1.0, dmap=None, thmap=None):
+    """The path (x, y, th) of the stops in the robot's own frame, its distances x s and turns x g. dmap / thmap:
+    {stop index: distance / turn} replacing those legs' own (the fit's free legs: repair_legs, lost records)."""
     x, y, th = (0.0, 0.0, 0.0) if "dth" in stops[0] else (stops[0]["x"], stops[0]["y"], stops[0]["th"])
     out = [(x, y, th)]
-    for d, dth in segments(stops):
+    for k, (d, dth) in enumerate(segments(stops)):
+        if dmap and (k + 1) in dmap:
+            d = dmap[k + 1]
+        if thmap and (k + 1) in thmap:
+            dth = thmap[k + 1]
         mid = math.radians(th + g * dth / 2.0)
         x += s * d * math.cos(mid)
         y += s * d * math.sin(mid)
@@ -277,7 +282,17 @@ def fit(robots, size, g_fixed=None, outlier_px=10.0):
     robots = {n: implausible(v) for n, v in robots.items()}
     pre = sum(1 for v in robots.values() for q in v if q.get("skip"))
     sol = best_fit(robots, size, g_fixed)
+    rep = 0
+    if REPAIR_LEGS:
+        for _ in range(REPAIR_ROUNDS):
+            robots, k = repair_legs(robots, sol)
+            if not k:
+                break
+            rep += k
+            sol = best_fit(robots, size, g_fixed)
+            robots = _take_free_d(robots, sol)
     sol["implausible"] = pre
+    sol["repaired"] = rep
     res = sol["resid"]
     allr = np.concatenate([res[n] for n in res]) if res else np.array([])
     if not len(allr):
@@ -294,15 +309,157 @@ def fit(robots, size, g_fixed=None, outlier_px=10.0):
                 n_out += 1
             st2.append(q2)
         robots2[n] = st2
+    sol["repairs"] = repairs_of(_take_free_d(robots, sol))
     if not n_out:
         sol["outliers"] = pre
         sol["skipped"] = {n: [i for i, q in enumerate(v) if q.get("skip")] for n, v in robots.items()}
         return sol
     sol2 = best_fit(robots2, size, g_fixed)
     sol2["implausible"] = pre
+    sol2["repaired"] = rep
     sol2["outliers"] = n_out + pre
+    sol2["repairs"] = repairs_of(_take_free_d(robots2, sol2))
     sol2["skipped"] = {n: [i for i, q in enumerate(v) if q.get("skip")] for n, v in robots2.items()}
     return sol2
+
+
+# Legs whose wheels turned while the body did not follow (explore reliability, 2026-10-26). In the simulator batch a
+# creep into a board at a slant (the bumper's corner touches first; the wheels keep turning: 2.9 cm counted, 0.4 cm
+# moved, 4 times in a row) and a robot hanging at an open edge (26.4 cm counted, 17.3 moved) put up to 20 cm of
+# distance into one robot's path that never happened. One such robot pushed its wheel scale to the fit's bound and the
+# camera's scale 12 % off (seed 49). The fitted camera measures each straight leg between two trusted stops; a leg the
+# camera saw much shorter than its wheels is given the camera's length, and the fit is run again.
+REPAIR_LEGS = True
+REPAIR_MIN_CM = 1.5         # chosen: more than the camera's own noise between two stops (about 1 px, 0.4-0.5 cm, each).
+                            # DOE note: yes, simulator: 1 / 1.5 / 2.5 cm against the true leg errors (analysis
+                            # tools/experiment/analyses_oct26/explore_reliability/legcheck.py), count false repairs
+REPAIR_MAX_TURN_DEG = 10.0  # chosen: a straight leg that a hang twisted (seed 49: 3.6 deg) is still a straight leg; a
+                            # turn leg is 45 deg or more. No DOE: anything between the two works
+REPAIR_ABS_CM = 8.0         # chosen: ... or this many cm short and under REPAIR_ABS_SHARE of it. 0.93 caught a hang's
+REPAIR_ABS_SHARE = 0.85     # 10 cm on a 113 cm ray in the synthetic test, but on the after batch (r07) it also took two
+                            # good 105 cm rays the first camera fit saw 5-10 % short, and the fit then shrank them to
+                            # 45 cm. DOE note: yes, the same simulator row as REPAIR_MIN_CM: false repairs of good long
+                            # legs against overcounts caught, over the batch's recorded stops
+REPAIR_ROUNDS = 2           # chosen: a loop guard (a repaired leg lets the next fit see the next one); no DOE
+REPAIR_SHARE = 0.75         # chosen: the camera saw less than this share of the leg (a 2.9 cm creep that moved 0.4 cm,
+                            # a hang 65 %); real wheel and camera scales agree within about 5 %. Same DOE row
+
+
+REPAIR_NEXT_LONG = 1.25    # chosen: the next straight leg seen outside REPAIR_SHARE..this of its wheels' count: the
+                           # spot, not the wheels (same DOE row as REPAIR_MIN_CM)
+REPAIR_RAY_CM = 100.0       # a straight leg this long ended by its length, not by a side: a ray that met nothing (105 cm)
+
+
+def suspect_leg(q):
+    """Could this leg's wheels have turned without the body following? A leg that ended against something (a
+    contact: a hang at an edge, a push at a board), a ray that drove its whole length and met nothing (a slanted
+    bumper against a board or a robot, the front sensor seeing past it), a creep step (3 cm or less), or a leg whose
+    record was lost. Returns and plain drives over ground just crossed are not (after-batch run r07: the camera's spot
+    left behind at two ray ends made 105 cm rays look 45 cm, and repairing them put the camera 12 % small; a wrong
+    spot is the outlier pass's job, not this one's)."""
+    d = abs(q.get("d") or 0.0)
+    return bool(q.get("contact") or q.get("ray") or q.get("lost") or q.get("stalled") or d >= REPAIR_RAY_CM or d <= 3.5)
+
+
+def repair_legs(robots, sol, min_cm=None, share=None):
+    """A copy of robots with each straight leg (turned under REPAIR_MAX_TURN_DEG, 2 cm or more) that the fitted camera saw clearly
+    shorter than the wheels counted given the camera's length (d_own keeps the robot's own). "Shorter" is against
+    the robot's own other legs (the median of camera length / wheel length over its straight legs of 5 cm or more),
+    not the fit's wheel scale: a robot with overcounted legs has its fitted scale pulled by them (seed 49: 0.819, at
+    the bound), and a camera fit pulled by them is off in size, which would hide the very legs that pulled it.
+    Returns (robots, how many legs)."""
+    min_cm = REPAIR_MIN_CM if min_cm is None else min_cm
+    share = REPAIR_SHARE if share is None else share
+    out, k = {}, 0
+    for n, stops in robots.items():
+        st2 = [dict(q) for q in stops]
+        legs = []
+        for i in range(1, len(st2)):
+            a, b = st2[i - 1], st2[i]
+            if a.get("skip") or b.get("skip") or "dth" not in b or b.get("u") is None or a.get("u") is None:
+                continue
+            d = abs(b.get("d") or 0.0)
+            if (d < 2.0 and "d_own" not in b) or abs(b["dth"]) > REPAIR_MAX_TURN_DEG:
+                continue
+            pa, pb = world_of(sol, a["u"], a["v"]), world_of(sol, b["u"], b["v"])
+            cam = math.hypot(pb[0] - pa[0], pb[1] - pa[1])
+            if np.isfinite(cam):
+                legs.append((i, d, cam))
+        long_ = [c / d for i, d, c in legs if d >= 5.0 and "d_own" not in st2[i]]
+        m = float(np.median(long_)) if len(long_) >= 3 else 1.0
+        for k_, (i, d, cam) in enumerate(legs):
+            if "d_own" in st2[i]:
+                continue                      # already free in the fit (an earlier round)
+            if not suspect_leg(st2[i]):
+                continue
+            # a wrong camera spot at this stop (not the wheels) makes the next straight leg wrong too: long when the
+            # robot drives on, short when it comes back the way it came (after-batch r07: two 105 cm rays, out and
+            # back, both seen as 45 cm: the spot stayed 60 cm short of the ray's end). Wheels that overcounted leave
+            # the next leg as the wheels say. Creep steps are exempt (a stalled creep is followed by more)
+            nxt = None
+            for j in range(i + 1, len(st2)):
+                qj, pj = st2[j], st2[j - 1]
+                if abs(qj.get("d") or 0.0) >= 5.0 and abs(qj.get("dth") or 0.0) <= REPAIR_MAX_TURN_DEG and \
+                        qj.get("u") is not None and pj.get("u") is not None:
+                    p1, p2 = world_of(sol, pj["u"], pj["v"]), world_of(sol, qj["u"], qj["v"])
+                    nxt = (abs(qj["d"]), math.hypot(p2[0] - p1[0], p2[1] - p1[1]))
+                    break
+            if d > 3.5 and nxt is not None:
+                rel, rel2 = cam / (m * d), nxt[1] / (m * nxt[0])
+                if rel2 > REPAIR_NEXT_LONG or rel2 < 1.0 - 0.5 * (1.0 - rel):
+                    continue                  # the next leg is off too (half as much or more): the spot or the camera
+            short = m * d - cam
+            if (short > min_cm and cam < share * m * d) or (short >= REPAIR_ABS_CM and cam < REPAIR_ABS_SHARE * m * d):
+                b = st2[i]
+                b.setdefault("d_own", b["d"])
+                b["d"] = math.copysign(cam / m, b["d"])
+                k += 1
+        out[n] = st2
+    return out, k
+
+
+def _take_free_d(robots, sol):
+    """robots with the fitted lengths and turns of their free legs (sol['free_d']) as their d / dth (d_own kept)."""
+    fd = sol.get("free_d") or {}
+    out = {}
+    for n, v in robots.items():
+        v2 = [dict(q) for q in v]
+        dm, tm = fd.get(n) or ({}, {})
+        for i, d in dm.items():
+            v2[i]["d"] = d
+        for i, t in tm.items():
+            v2[i]["dth"] = t
+        out[n] = v2
+    return out
+
+
+def repairs_of(robots):
+    """{name: [[stop index, distance, turn], ...]} of the legs the fit set (repaired, or lost records)."""
+    out = {}
+    for n, v in robots.items():
+        rows = [[i, q["d"], q["dth"]] for i, q in enumerate(v) if "d_own" in q or q.get("lost")]
+        if rows:
+            out[n] = rows
+    return out
+
+
+def apply_repairs(robots, sol):
+    """The runner's stops with the fit's leg repairs and lost-record legs applied (for the contacts and positions
+    built on the fit)."""
+    rp = sol.get("repairs") or {}
+    out = {}
+    for n, v in robots.items():
+        v2 = [dict(q) for q in v]
+        for row in rp.get(n, []):
+            i, d = row[0], row[1]
+            if i < len(v2):
+                if v2[i].get("d") != d and "d_own" not in v2[i]:
+                    v2[i]["d_own"] = v2[i].get("d")
+                v2[i]["d"] = d
+                if len(row) > 2:
+                    v2[i]["dth"] = row[2]
+        out[n] = v2
+    return out
 
 
 def best_fit(robots, size, g_fixed=None):
@@ -322,6 +479,33 @@ def best_fit(robots, size, g_fixed=None):
     return min(sols, key=lambda q: q["rms_px"] if np.isfinite(q["rms_px"]) else 1e9)
 
 
+# Priors tried in the explore reliability study (2026-10-26; offline on the simulator batch's recorded stops,
+# analyses_oct26/explore_reliability/evalfits.py):
+# - each robot's wheel scale near 1 (sd 4 % in log): ON. With legs freed by repair_legs, the camera's perspective and
+#   the robots' separate wheel scales trade off (seed 49: wheel scales 0.91 / 1.06 / 1.04 against true 1.03 / 1.00 /
+#   1.00; batch run r00: the camera 47 % too big with the repairs alone, 0.6 % with this prior). Real wheel scales
+#   from runs against the camera: 0.96-0.98 (10-24, 10-25). DOE note: yes, simulator: sd 2 / 4 / 8 %, weight 1 / 3 / 10,
+#   over the batch's stops (camera scale error and pass rate), then the real sessions' stops against roam1
+S_PRIOR_SD_LOG = 0.04
+S_PRIOR_W = 3.0
+# - the camera looks roughly straight down (tilt sd 10 deg, weight 10): OFF. It fixes the real 09:55 Center-only fit
+#   (camera 12.5 % small -> 0.3 %) but that fit is refused anyway (EXPLORE_MIN_ROBOTS), and on the batch it was mixed.
+#   DOE note: yes, the same simulator row, at the simulator's 3 deg and the real camera's 8.8 deg tilt (--tilt)
+TILT_PRIOR_SD_DEG = None
+TILT_PRIOR_W = 3.0
+# - the webcam's focal length known (606 px at 640 wide): OFF, it did not fix the scale on its own (09:55: 12.8 %).
+#   No DOE: kept only for the study
+F_PRIOR_PX = None
+F_PRIOR_SD_LOG_KNOWN = 0.05
+
+
+def _tilt_deg(rvec):
+    """The camera's look direction from straight down, deg (0 = looking straight down at the floor)."""
+    R = cv2.Rodrigues(np.asarray(rvec, float))[0]
+    ax = R.T @ np.array([0.0, 0.0, 1.0])
+    return math.degrees(math.acos(min(1.0, abs(float(ax[2])))))
+
+
 def fit_once(robots, size, g_fixed=None, init=None):
     """robots: {name: [stop dict(x, y, th (its own pose), u, v (pixels of its top))]}, in time order; the first
     robot's own frame is the world frame (the one the camera saw at most stops). Returns dict(f, k1, rvec, tvec, frames {name: (x0, y0, turn)},
@@ -338,7 +522,27 @@ def fit_once(robots, size, g_fixed=None, init=None):
     ls = [math.log(scales0[n]) for n in names]
     x0 += ls[:-1]
     x0 += [math.log(G0.get(n, 1.0)) for n in names]
-    f_prior = math.log(size[0] / (2 * math.tan(math.radians(F_PRIOR_HFOV_DEG) / 2)))
+    # legs the camera saw much shorter than the wheels counted (repair_legs: d_own kept): their length is fitted too,
+    # between 0 and what the wheels counted (a body never goes further than its wheels, give or take slip)
+    # A leg whose record never arrived ("lost": taken as told by the runner) is free the same way: a drive between 0
+    # and what it was told, a turn between 0 and 1.2 x what it was told (the gyro counts 91-95 % of a turn)
+    free = []
+    for n in names:
+        for i, q in enumerate(robots[n]):
+            if i == 0:
+                continue
+            lost = q.get("lost") or {}
+            if "d_own" in q:
+                free.append((n, i, "d", 1.05 * abs(q["d_own"]) + 0.1, math.copysign(1.0, q["d_own"] or 1.0)))
+            elif lost.get("kind") == "go":
+                free.append((n, i, "d", 1.05 * abs(lost["val"]) + 0.1, math.copysign(1.0, lost["val"] or 1.0)))
+            if lost.get("kind") == "turn":
+                free.append((n, i, "th", 1.2 * abs(lost["val"]) + 1.0, math.copysign(1.0, lost["val"] or 1.0)))
+    n_fixed = len(x0)
+    x0 += [min(abs(robots[n][i].get("d" if k == "d" else "dth") or 0.0), hi_ - 1e-3) for n, i, k, hi_, _ in free]
+    f_prior = math.log(F_PRIOR_PX * size[0] / 640.0) if F_PRIOR_PX else \
+        math.log(size[0] / (2 * math.tan(math.radians(F_PRIOR_HFOV_DEG) / 2)))
+    f_sd = F_PRIOR_SD_LOG_KNOWN if F_PRIOR_PX else F_PRIOR_SD_LOG
     uv_all = {n: np.array([(q["u"], q["v"]) for q in robots[n]], float) for n in names}
     use = {n: np.array([0.0 if q.get("skip") else 1.0 for q in robots[n]], float)[:, None] for n in names}
 
@@ -357,16 +561,28 @@ def fit_once(robots, size, g_fixed=None, init=None):
         lg = list(x[i:i + nr])
         return lf, k1, rv, tv, fr, dict(zip(names, lsv)), dict(zip(names, lg))
 
+    def dmaps(x):
+        out = {}
+        for (n, i, k, _, sg), v in zip(free, x[n_fixed:]):
+            out.setdefault(n, ({}, {}))[0 if k == "d" else 1][i] = sg * float(v)
+        return out
+
     def resid(x):
         lf, k1, rv, tv, fr, lsd, lgd = unpack(x)
+        dm = dmaps(x)
         out = []
         for n in names:
             g = g_fixed[n] if g_fixed and n in g_fixed else math.exp(lgd[n])
-            w = to_world(rebuild(robots[n], math.exp(lsd[n]), g), fr[n])
+            w = to_world(rebuild(robots[n], math.exp(lsd[n]), g, *dm.get(n, (None, None))), fr[n])
             obj = [(p[0], p[1], ROBOT_TOP_CM) for p in w]
             uv = project(obj, math.exp(lf), k1, rv, tv, size)
             out.append(((uv - uv_all[n]) * use[n]).ravel())
-        out.append(np.array([(lf - f_prior) / F_PRIOR_SD_LOG * 3.0, k1 / K1_PRIOR_SD * 3.0]))
+        pri = [(lf - f_prior) / f_sd * 3.0, k1 / K1_PRIOR_SD * 3.0]
+        if TILT_PRIOR_SD_DEG:
+            pri.append(_tilt_deg(rv) / TILT_PRIOR_SD_DEG * TILT_PRIOR_W)
+        if S_PRIOR_SD_LOG:
+            pri += [v / S_PRIOR_SD_LOG * S_PRIOR_W for v in lsd.values()]
+        out.append(np.array(pri))
         return np.concatenate(out)
 
     lo = [-np.inf] * len(x0)
@@ -378,16 +594,18 @@ def fit_once(robots, size, g_fixed=None, init=None):
         lo[k], hi[k] = -0.2, 0.2
     for k in range(j + nr - 1, j + 2 * nr - 1):          # log gyro scales: within +-30%
         lo[k], hi[k] = -0.3, 0.3
+    for k, (n, i, _, hi_, _s) in enumerate(free):       # a free leg: 0 to its wheels' count (+5 % slip) or its told value
+        lo[n_fixed + k], hi[n_fixed + k] = 0.0, hi_
     x0 = np.clip(np.array(x0, float), np.array(lo) + 1e-9, np.array(hi) - 1e-9)
     sol = least_squares(resid, x0, loss="huber", f_scale=3.0, max_nfev=4000, bounds=(lo, hi), method="trf")
     lf, k1, rv, tv, fr, lsd, lgd = unpack(sol.x)
-    r = resid(sol.x)[:-2].reshape(-1, 2)
     per, i, res_n = {}, 0, {}
     lf, k1, rv, tv, fr, lsd, lgd = unpack(sol.x)
+    dm = dmaps(sol.x)
     for n in names:
         k = len(robots[n])
         g = g_fixed[n] if g_fixed and n in g_fixed else math.exp(lgd[n])
-        w = to_world(rebuild(robots[n], math.exp(lsd[n]), g), fr[n])
+        w = to_world(rebuild(robots[n], math.exp(lsd[n]), g, *dm.get(n, (None, None))), fr[n])
         uv = project([(p[0], p[1], ROBOT_TOP_CM) for p in w], math.exp(lf), k1, rv, tv, size)
         res_n[n] = np.hypot(*(uv - uv_all[n]).T)
         m = use[n].ravel() > 0
@@ -398,7 +616,7 @@ def fit_once(robots, size, g_fixed=None, init=None):
                 frames={n: tuple(float(v) for v in fr[n]) for n in names},
                 s={n: math.exp(lsd[n]) for n in names},
                 g={n: (g_fixed[n] if g_fixed and n in g_fixed else math.exp(lgd[n])) for n in names},
-                rms_px=float(np.sqrt(np.mean(np.sum(r ** 2, 1)))), per_robot_rms_px=per, resid=res_n,
+                rms_px=float(np.sqrt(np.mean(np.sum(r ** 2, 1)))), per_robot_rms_px=per, resid=res_n, free_d=dm,
                 n=int(sum(len(v) for v in robots.values())), size=list(size))
 
 
@@ -719,6 +937,58 @@ def contacts(robots, sol, robot_clear_cm=22.0, ahead=None, others=None):
     return out
 
 
+SEEN_RAY_MIN_CM = 8.0     # chosen: a left-out robot's ray must be at least this long for its heading to come from the
+                          # camera (2 px noise at each end is about 6 deg on 8 cm). No DOE: below it the heading is noise
+SEEN_RAY_AGREE = 0.25     # chosen: the camera's length of that ray within 25 % of the wheels' count (a camera spot that
+                          # followed the robot on this ray, whatever went wrong elsewhere). DOE note: yes, simulator,
+                          # with the leg-repair row (count wrong sides against contacts gained)
+
+
+def contacts_seen(others, sol, used_paths=None, robot_clear_cm=22.0):
+    """Contacts of robots left out of the camera fit, placed by the fitted camera alone (09:55 session: Left's and
+    Right's gap rays met the boards 8 times, but their paths were out of the fit, so none counted; the sides were
+    never closed). For each contact stop: where the camera sees it; its heading from the camera's line between the
+    ray's start and end (the ray is straight); only when the camera's length of the ray agrees with the wheels'
+    count (the spot followed the robot on that ray). Same format as contacts(); a contact near another robot is left
+    out as there. used_paths: {name: [(t, x, y)]} of the robots in the fit (their places in the world frame)."""
+    import e02_map as MAP
+    out = []
+    for n, stops in (others or {}).items():
+        imp = implausible(stops)
+        for i, q in enumerate(imp):
+            if not q.get("contact") or q.get("skip") or q.get("u") is None:
+                continue
+            # the ray: back to the stop before the out drive (creep stops ride on the ray before them)
+            j, d_tot = i, 0.0
+            while j > 0 and abs(imp[j].get("dth", 0.0) or 0.0) < 3.0 and (imp[j].get("d") or 0.0) > 0:
+                d_tot += imp[j]["d"]
+                j -= 1
+            a = imp[j]
+            if d_tot < SEEN_RAY_MIN_CM or a.get("skip") or a.get("u") is None:
+                continue
+            pa, pb = np.array(world_of(sol, a["u"], a["v"])), np.array(world_of(sol, q["u"], q["v"]))
+            cam = float(np.linalg.norm(pb - pa))
+            if not np.isfinite(cam) or abs(cam / d_tot - 1.0) > SEEN_RAY_AGREE:
+                continue
+            th = math.degrees(math.atan2(pb[1] - pa[1], pb[0] - pa[0]))
+            kind = q["contact"]
+            if q.get("reach_cm") is not None:
+                r = q["reach_cm"]
+                c = (pb[0] + r * math.cos(math.radians(th)), pb[1] + r * math.sin(math.radians(th)))
+            else:
+                c = MAP.contact_point(pb[0], pb[1], th, kind, q.get("cue", ""))
+            near = False
+            for m, path in (used_paths or {}).items():
+                if m == n or not path:
+                    continue
+                o = min(path, key=lambda r_: abs((r_[0] or 0) - (q.get("t") or 0)))
+                if math.hypot(c[0] - o[1], c[1] - o[2]) < robot_clear_cm:
+                    near = True
+            if not near:
+                out.append((c[0], c[1], kind, th, q.get("cue", "")))
+    return out
+
+
 ROBOT_LENGTH_CM = 9.5     # the Alvik's length (e02_plan.ROBOT_HALF_CM x 2): its outline's long side from above
 
 
@@ -759,10 +1029,54 @@ FIT_ROBOT_MAX_PX = 12.0     # chosen: one robot's stops against the joint fit (t
                             # flat mapping cannot follow a robot's own drift over 50 stops, simulator up to 13 px)
 
 
+def repair_legs_px(stops, min_px=None, share=None):
+    """repair_legs without a camera fit, for the robot check: each straight leg's pixel length against the robot's
+    own pixels per cm (the median over its straight legs of 5 cm or more; the camera's scale changes only a few % over
+    the board when it looks down). Returns (stops copy, how many legs)."""
+    share = REPAIR_SHARE if share is None else share
+    st2 = [dict(q) for q in stops]
+    legs = []
+    for i in range(1, len(st2)):
+        a, b = st2[i - 1], st2[i]
+        if a.get("skip") or b.get("skip") or "dth" not in b or b.get("u") is None or a.get("u") is None:
+            continue
+        d = abs(b.get("d") or 0.0)
+        if d < 2.0 or abs(b["dth"]) > REPAIR_MAX_TURN_DEG:
+            continue
+        legs.append((i, d, math.hypot(b["u"] - a["u"], b["v"] - a["v"])))
+    r = [c / d for _, d, c in legs if d >= 5.0]
+    if len(r) < 3:
+        return st2, 0
+    m = float(np.median(r))
+    k = 0
+    for i, d, c in legs:
+        short = d - c / m
+        if (short > REPAIR_MIN_CM and c < share * m * d) or (short >= REPAIR_ABS_CM and c < REPAIR_ABS_SHARE * m * d):
+            st2[i]["d"] = math.copysign(c / m, st2[i]["d"])
+            k += 1
+    return st2, k
+
+
 def robot_check(stops):
     """One robot judged on its own: the gyro scale whose path a flat-floor mapping (homography) fits best, how well
     it fits (robust rms, px, over the stops within 3 x ROBOT_RMS_MAX_PX), and the share of stops that fit. Returns
-    dict(ok, why, rms_px, g, inliers, n)."""
+    dict(ok, why, rms_px, g, inliers, n). 2026-10-26 explore reliability: a robot that fails is judged once more
+    with the legs its own pixels say its wheels overcounted taken at the pixels' length (repair_legs_px; the camera
+    fit then fits those legs itself): one creep against a board or a hang no longer leaves a robot out."""
+    out = _robot_check(stops)
+    if out["ok"] or not REPAIR_LEGS:
+        return out
+    st2, k = repair_legs_px(stops)
+    if not k:
+        return out
+    out2 = _robot_check(st2)
+    if out2["ok"]:
+        out2["repaired_px"] = k
+        return out2
+    return out
+
+
+def _robot_check(stops):
     st = implausible(stops)
     ok_m = np.array([not q.get("skip") for q in st])
     n = int(ok_m.sum())

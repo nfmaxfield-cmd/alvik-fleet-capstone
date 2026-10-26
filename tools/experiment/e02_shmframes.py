@@ -15,7 +15,13 @@ seqlock). The writer is one thread of one process.
     n = ring.write(img, t, t_pi=..., pi_frame=..., t_arrived=...)
     ring2 = FrameRing.attach(ring.name)                            # the runner
     img, meta = ring2.read(n)                                      # a copy, or None once overwritten
+
+Closing (2026-10-26, the shutdown crash, exit 139): numpy's views on the block do not keep it mapped, so a thread
+still reading while another closes the block read unmapped memory and the process died with a segmentation fault
+after the session was saved. Every access and close() now take one lock per FrameRing, and after close() every read
+returns None (newest() -1).
 """
+import threading
 import time
 
 import numpy as np
@@ -56,6 +62,8 @@ class FrameRing:
         off += self.slots * META_N * 8
         self.data = np.ndarray((self.slots, self.h, self.w), np.uint8, shm.buf, off)
         self.name = shm.name
+        self.lock = threading.Lock()
+        self.closed = False
 
     @staticmethod
     def size_for(slots, height, width):
@@ -81,46 +89,56 @@ class FrameRing:
 
     # --- writer -------------------------------------------------------------------------------------------------
     def write(self, img, t, t_pi=float("nan"), pi_frame=-1, t_arrived=float("nan")):
-        """Store a grey picture (height x width uint8); returns its number (0, 1, 2 ...)."""
+        """Store a grey picture (height x width uint8); returns its number (0, 1, 2 ...), or -1 once closed."""
         if img.shape != (self.h, self.w):
             raise ValueError("picture %s, ring %dx%d" % (img.shape, self.h, self.w))
-        n = int(self.head[4]) + 1
-        k = n % self.slots
-        m = self.meta[k]
-        m[0] = -1.0
-        self.data[k][...] = img
-        m[1], m[2], m[3], m[4] = t, t_pi, -1 if pi_frame is None else pi_frame, t_arrived
-        m[0] = float(n)
-        self.head[4] = n
-        return n
+        with self.lock:
+            if self.closed:
+                return -1
+            n = int(self.head[4]) + 1
+            k = n % self.slots
+            m = self.meta[k]
+            m[0] = -1.0
+            self.data[k][...] = img
+            m[1], m[2], m[3], m[4] = t, t_pi, -1 if pi_frame is None else pi_frame, t_arrived
+            m[0] = float(n)
+            self.head[4] = n
+            return n
 
     # --- readers ------------------------------------------------------------------------------------------------
     def newest(self):
-        """The newest picture's number, or -1 before the first."""
-        return int(self.head[4])
+        """The newest picture's number, or -1 before the first (and once closed)."""
+        with self.lock:
+            return -1 if self.closed else int(self.head[4])
 
     def meta_of(self, n):
         """(t, t_pi, pi_frame, t_arrived) of picture n, or None if its slot holds another picture now."""
-        m = self.meta[n % self.slots]
-        if int(m[0]) != n:
-            return None
-        out = (float(m[1]), float(m[2]), int(m[3]), float(m[4]))
-        return out if int(m[0]) == n else None
+        with self.lock:
+            if self.closed:
+                return None
+            m = self.meta[n % self.slots]
+            if int(m[0]) != n:
+                return None
+            out = (float(m[1]), float(m[2]), int(m[3]), float(m[4]))
+            return out if int(m[0]) == n else None
 
     def read(self, n, out=None):
         """A copy of picture n and its (t, t_pi, pi_frame, t_arrived), or None if it was overwritten (or not yet
-        written)."""
+        written, or the ring is closed)."""
         if n < 0:
             return None
-        k = n % self.slots
-        m = self.meta[k]
-        if int(m[0]) != n:
-            return None
-        meta = (float(m[1]), float(m[2]), int(m[3]), float(m[4]))
-        img = np.array(self.data[k], copy=True) if out is None else np.copyto(out, self.data[k]) or out
-        if int(m[0]) != n:
-            return None
-        return img, meta
+        with self.lock:
+            if self.closed:
+                return None
+            k = n % self.slots
+            m = self.meta[k]
+            if int(m[0]) != n:
+                return None
+            meta = (float(m[1]), float(m[2]), int(m[3]), float(m[4]))
+            img = np.array(self.data[k], copy=True) if out is None else np.copyto(out, self.data[k]) or out
+            if int(m[0]) != n:
+                return None
+            return img, meta
 
     def since(self, t_from, t_to=None):
         """Numbers of the pictures still in the ring with t_from <= t (<= t_to), oldest first."""
@@ -133,14 +151,18 @@ class FrameRing:
         return out
 
     def close(self):
-        try:
-            # drop the numpy views first (a block with views still on it can't be closed)
-            self.head = self.meta = self.data = None
-            self.shm.close()
-            if self.owner:
-                self.shm.unlink()
-        except Exception:
-            pass
+        with self.lock:
+            if self.closed:
+                return
+            self.closed = True
+            try:
+                # drop the numpy views first (a block with views still on it can't be closed)
+                self.head = self.meta = self.data = None
+                self.shm.close()
+                if self.owner:
+                    self.shm.unlink()
+            except Exception:
+                pass
 
 
 def wait_for(fn, timeout, step=0.005):

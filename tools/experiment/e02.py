@@ -599,14 +599,21 @@ class Listener:
         return None
 
     def leg_final(self, robot, run, lid):
-        """The final LEG record (done / failed / refused / dup) of leg id `lid` in `run`, or None."""
+        """The final LEG record (done / failed / refused / dup) of leg id `lid` in `run`, or None. A done or failed
+        record wins over a dup or refused one for the same id, whatever came last (2026-10-26 explore reliability:
+        a resent leg's `dup` answer arriving after its `done` hid the done, and explore recorded a 175 deg turn or an
+        11 cm back-out as no move at all; 4-8 legs a run at 10 % loss)."""
+        other = None
         with self.cv:
             for t, n, rec in reversed(self.recs["LEG"]):
                 state = rec.get("state") or rec.get("result")
                 if n == robot and rec.get("id") == str(lid) and rec.get("run") in (run, "-") and \
                         state in ("done", "failed", "refused", "dup"):
-                    return dict(rec, state=state)
-        return None
+                    if state in ("done", "failed"):
+                        return dict(rec, state=state)
+                    if other is None:
+                        other = dict(rec, state=state)
+        return other
 
     def leg_start(self, robot, run, lid):
         """The 'started' LEG record of leg id `lid` (the robot's pose as the leg began), or None."""
@@ -650,6 +657,16 @@ class Listener:
 
 
 # =============================================================================== the runner
+EXPLORE_SEEN_CONTACTS = True   # 2026-10-26 explore reliability: robots left out of the camera fit still give their contacts,
+                               # placed by the fitted camera (e02_explore.contacts_seen)
+EXPLORE_LOST_AS_TOLD = True    # 2026-10-26 explore reliability: a leg whose record never arrived is taken as told (marked "lost")
+EXPLORE_SIZE_CHECK_PCT = 6.0   # 2026-10-26 explore reliability: explore's board is not trusted when a side is more than this
+                               # far off the plywood's known 122 cm (0 = no check). Chosen: the before batch's passes were
+                               # 0-5 % off but one (8.8 %); the after batch's wrong pass 15 %. DOE note: yes, simulator: the
+                               # batch's sizes against 4 / 6 / 8 %, wrong boards let through against good ones refused
+EXPLORE_GAP_ROUNDS = 2         # 2026-10-26 explore reliability: rounds of rays aimed at the sides not met yet before explore
+                               # gives up (was 1). Chosen: each round costs 2-4 min. DOE note: yes, simulator: 1 / 2 / 3
+                               # rounds, pass rate against minutes, over the batch's seeds
 EXPLORE_MIN_ROBOTS = 2         # 2026-10-26 (the 09:55 session analysis): explore's camera fit is used only when at least
                                # this many robots' paths pass their own check (a single robot's scale is unconfirmed).
                                # A one-robot session (--robots Right) keeps explore as before. No DOE: a rule
@@ -674,6 +691,12 @@ EXPLORE_CREEP_FRONT_CM = 3.0    # chosen: the front stop while creeping. Line se
                                 # 0-3 cm ahead of the line sensors at the 7 cm stop: 4 cm of creep covers it.
                                 # DOE note: yes, with the crawl DOE (DOE-explore-crawl.md): objects 0-10 cm past an open
                                 # edge and boards 0-5 cm out, 2 / 3 / 4 cm, count right calls against bumper contacts
+EXPLORE_STALL_SHARE = 0.4      # 2026-10-26 explore reliability: a creep step the camera saw move under this share of its
+                                # wheels' count is against something (simulator: 0.3 of 2.9 cm, 4 steps in a row; a free
+                                # step moves 0.9-1.1 of it). DOE note: yes, simulator first (stall share against true
+                                # contact, 0.3 / 0.4 / 0.6), then the board: slanted creeps into a board at 30 / 45 / 60 deg
+EXPLORE_BUMPER_AHEAD_CM = 6.0   # the bumper's front, ahead of the axle (the comment above: "the bumper ~6 cm"); where a
+                                # stalled creep met the object. DOE note: no, measure it on a robot (a ruler)
 EXPLORE_CREEP_STEP_CM = 3.0     # chosen: one creep leg; the camera sees where each ends before the next. DOE note: no, the
                                 # robot's own edge guard is the stop; the step only paces the camera's checks
 EXPLORE_CREEP_CMS = 2.0         # chosen: creep speed, half the ray's crawl ... and never more than
@@ -4378,6 +4401,9 @@ class Runner:
         if self.st["setup"].get("explore_pending"):
             ok_names = [n for n in names if n not in self.unavailable]
             self.explore(ok_names)
+            if getattr(self.a, "dry_explore_only", False) and getattr(self.a, "dry_run", False):
+                self.note_end("explore_only", "explore done (--dry-explore-only)")
+                raise SystemExit("Explore done (--dry-explore-only): the session ends here.")
             self.explore_tape_check(ok_names)
         else:
             self.find_all([n for n in names if n not in self.unavailable])
@@ -4404,13 +4430,31 @@ class Runner:
         if res is not None and turn_cmd is not None:
             turn_cmd = res["val"]              # the rest of a turn a hold cut short: that is what it was told
         p = self.settle(min_s=0.4, timeout=3.0)
+        lost = None
+        if (rec is None or rec.get("state") == "dup") and lid is not None and \
+                (robot, lid) in getattr(self, "explore_told", {}) and EXPLORE_LOST_AS_TOLD:
+            # (a `dup` with no done record: the leg arrived before, ran, and its own record was lost)
+            # 2026-10-26 explore reliability: the leg's final record never arrived (a robot's line lost on the radio;
+            # simulator at 10 % loss: 4-8 a run, a 133 deg turn among them). With numbered commands the leg arrived
+            # and ran, so a turn is taken as told, and a drive by the camera's move at this robot's own pixels per cm
+            # (a ray stops early). Marked "lost": the camera fit takes its length or turn as unknown.
+            kind_, val_ = self.explore_told[(robot, lid)]
+            lost = dict(kind=kind_, val=val_)
+            if kind_ == "turn":
+                rec = dict(x_cm=0.0, y_cm=0.0, th_deg=val_, state="lost")
+            else:
+                rec = dict(x_cm=val_, y_cm=0.0, th_deg=0.0, state="lost")
+            self.st.setdefault("setup", {}).setdefault("explore_lost_records", []).append(
+                [round(time.time(), 1), robot, lid, kind_, round(val_, 1)])
+            self.say("    %s: leg %s's record never arrived: taken as told (%s %.1f), checked by the camera" % (
+                robot, lid, kind_, val_), quiet=True)
         if rec is None or rec.get("state") in ("refused", "dup") or None in (num(rec.get("x_cm")), num(rec.get("th_deg"))):
             # the leg did not run (refused, or no record of it): the robot did not move (never an older leg's pose:
             # 2026-10-23 dry run, a refused half turn read as the ray before it and broke Right's whole path)
             rec = dict(x_cm=0.0, y_cm=0.0, th_deg=0.0)
             turn_cmd = None
         x, y, th = (num(rec.get("x_cm")), num(rec.get("y_cm")), num(rec.get("th_deg")))
-        if lid is not None and rec.get("state") not in ("refused", "dup") and None not in (x, y, th):
+        if lid is not None and rec.get("state") not in ("refused", "dup", "lost") and None not in (x, y, th):
             # 2026-10-24 Pi plan, stage 3: a robot whose pose was set by camera fixes earlier (a session before,
             # no switch-off) reports its board pose, not the leg's own: "go 12" read as 112 cm, it backed 112 cm
             # and went over the open edge. The leg's own move is always the done pose less the started pose.
@@ -4422,6 +4466,22 @@ class Runner:
                 x, y, th = (v_, 0.0, 0.0) if rec.get("kind") == "go" else (0.0, 0.0, v_)
                 self.say("    %s: leg %s's start record is missing: taken as told (%s %.1f)" % (
                     robot, lid, rec.get("kind"), v_), quiet=True)
+            elif st0 is None and EXPLORE_LOST_AS_TOLD and (robot, lid) in getattr(self, "explore_told", {}):
+                # 2026-10-26 explore reliability (after-batch run r07): a ray stopped at an edge ("failed") whose start
+                # record was lost went in as no move at all (72 cm driven), and the camera's "jump" was then accepted.
+                # An exploring robot has no pose, so its final record is the leg's own move: used when it fits what the
+                # leg was told, else the told value; either way marked lost (the camera fit takes it as unknown)
+                kind_, val_ = self.explore_told[(robot, lid)]
+                lost = dict(kind=kind_, val=val_, src="final")
+                if kind_ == "go" and abs(x) <= abs(val_) * 1.05 + 1.0 and x * val_ >= 0 and abs(th) < 20.0:
+                    pass
+                elif kind_ == "turn" and abs(x) < 2.0 and abs(th) <= abs(val_) * 1.2 + 2.0:
+                    pass
+                else:
+                    lost["src"] = "told"
+                    x, y, th = (val_, 0.0, 0.0) if kind_ == "go" else (0.0, 0.0, val_)
+                self.st.setdefault("setup", {}).setdefault("explore_lost_records", []).append(
+                    [round(time.time(), 1), robot, lid, kind_, round(val_, 1), lost["src"]])
             elif st0 is None:
                 x = y = th = 0.0               # a failed leg with no start record: how far it got is not known
             else:
@@ -4496,6 +4556,13 @@ class Runner:
             o["contact"] = contact
         if res is not None:
             o["d_cut"] = round(res["d_before"], 2)        # how far the same leg went before a hold cut it (fix 3)
+        if lost is not None:
+            o["lost"] = lost
+            ppc = self.explore_px_per_cm(robot, obs)
+            if lost["kind"] == "go" and lost.get("src") != "final" and ppc and obs[robot] and \
+                    obs[robot][-1].get("u") is not None:
+                d_cam = math.hypot(o["u"] - obs[robot][-1]["u"], o["v"] - obs[robot][-1]["v"]) / ppc
+                o["d"] = o["x"] = round(math.copysign(min(d_cam, abs(lost["val"]) * 1.05), lost["val"]), 2)
         obs[robot].append(o)
         live = self.st["setup"].setdefault("explore_live", dict(stops=[], contacts=[]))
         live["stops"].append([robot, round(float(u), 1), round(float(v), 1), bool(skip)])
@@ -4704,7 +4771,10 @@ class Runner:
             return "refused", "at an open edge: no turn on its spot", self.last_lid.get(robot)
         room0 = self.camera_edge_room(robot) if kind == "go" else None
         try:
-            return self._explore_leg_inner(robot, kind, val, timeout)
+            out = self._explore_leg_inner(robot, kind, val, timeout)
+            # what it was told, by leg id: a leg whose final record never arrives is taken from this (explore_stop)
+            self.__dict__.setdefault("explore_told", {})[(robot, out[2])] = (kind, float(val))
+            return out
         finally:
             if kind == "go":
                 self.__dict__.setdefault("last_go", {})[robot] = (val, room0, self.camera_edge_room(robot))
@@ -4807,32 +4877,42 @@ class Runner:
             return self.explore_fallback(names, str(e))
         except ExploreShort as e:
             # a side no ray met: more rays, between the first ones (Nick puts the robots down anywhere: three near
-            # one side leave the far side unmet)
-            self.say("  %s: rays aimed at the sides not met yet ..." % e)
-            n_gap = self.explore_gap_rays(names, obs)
-            # no gap ray could be driven (every sector's ray would pass a robot, or the only robots left are left
-            # out): more rays from every robot still in, between its first ones (2026-10-25 15:10: two gap rays
-            # given to the left-out Right counted as driven, and this was skipped)
-            for n in (names if not n_gap else []):
-                q = st["positions"].get(n)
-                if not q or n in self.held_out:
+            # one side leave the far side unmet). 2026-10-26 explore reliability: up to EXPLORE_GAP_ROUNDS rounds
+            # (one before), each given first to the robots whose paths the camera fit used (09:55: the gap rays went
+            # to Left and Right, both out of the fit, and their contacts did not count)
+            why = str(e)
+            for rnd in range(EXPLORE_GAP_ROUNDS):
+                used = [n for n in ((getattr(self, "_ex_rec", None) or {}).get("used") or []) if n in names]
+                self.say("  %s: rays aimed at the sides not met yet (round %d of %d) ..." % (why, rnd + 1,
+                                                                                          EXPLORE_GAP_ROUNDS))
+                n_gap = self.explore_gap_rays(names, obs, prefer=used)
+                # no gap ray could be driven (every sector's ray would pass a robot, or the only robots left are left
+                # out): more rays from every robot still in, between its first ones (2026-10-25 15:10: two gap rays
+                # given to the left-out Right counted as driven, and this was skipped)
+                for n in ((used or names) if not n_gap else []):
+                    q = st["positions"].get(n)
+                    if not q or n in self.held_out:
+                        continue
+                    self.tracker.follow(n, q[0], q[1])
+                    self.history.clear()
+                    self.tracker.hold(HOLD_CM)
+                    self.explore_rays(n, obs, 0.0 if rnd == 0 else 0.25)
+                    self.explore_home(n, obs)
+                    self.moves.pop(n, None)
+                    p = self.settle(min_s=0.3)
+                    if p:
+                        st["positions"][n] = [p[0], p[1], None]
+                        self.tracker.park(n, p[0], p[1])
+                st["setup"]["explore_obs"] = obs
+                st.save()
+                try:
+                    return self.explore_finish(names, obs, t0, last_try=rnd == EXPLORE_GAP_ROUNDS - 1)
+                except ExploreShort as e2:
+                    why = str(e2)
                     continue
-                self.tracker.follow(n, q[0], q[1])
-                self.history.clear()
-                self.tracker.hold(HOLD_CM)
-                self.explore_rays(n, obs, 0.0)
-                self.explore_home(n, obs)
-                self.moves.pop(n, None)
-                p = self.settle(min_s=0.3)
-                if p:
-                    st["positions"][n] = [p[0], p[1], None]
-                    self.tracker.park(n, p[0], p[1])
-            st["setup"]["explore_obs"] = obs
-            st.save()
-            try:
-                return self.explore_finish(names, obs, t0, last_try=True)
-            except ExploreFailed as e2:
-                return self.explore_fallback(names, str(e2))
+                except ExploreFailed as e2:
+                    return self.explore_fallback(names, str(e2))
+            return self.explore_fallback(names, why)
 
     def explore_fallback(self, names, why):
         """Explore's results failed their checks: never end the session over it (Nick, 2026-10-23 evening). The
@@ -4845,6 +4925,10 @@ class Runner:
         self.say("!!! FALLING BACK to a camera calibration not made by the robots (the studio's, the corner clicks, or "
                  "the board's corners). Every run will say so.")
         st["setup"]["explore_failed"] = dict(why=why, t=round(time.time(), 1))
+        if getattr(self.a, "dry_explore_only", False) and getattr(self.a, "dry_run", False):
+            self.note_end("explore_only", "explore failed (--dry-explore-only): %s" % why)
+            st.save()
+            raise SystemExit("Explore failed (--dry-explore-only): no fallback, the session ends here.")
         for n in names:
             self.send(n, "set e02_back_max_cm %d" % BACK_ALLOW_CM)
             self.explore_speed(n, EXPLORE_FAST_CMS)
@@ -5081,9 +5165,29 @@ class Runner:
                 state, info, lid = self.explore_leg(n, "go", step, timeout=step / cms * 2.0 + 6.0)
                 f2 = self.listener.leg_final(n, "-", lid) or {}
                 k2 = MAP.stop_kind(f2.get("state"), f2.get("info"))
+                prev = (obs.get(n) or [None])[-1]
                 o2 = self.explore_stop(n, obs, lid, contact=k2)
                 dd = (o2["d"] + o2.get("d_cut", 0.0)) if o2 is not None else 0.0
                 crept += max(0.0, dd)
+                stall = Runner.explore_creep_stalled(self, n, obs, prev, o2, dd) if k2 not in ("edge", "board") else None
+                if stall is not None:
+                    # the wheels turned, the body did not follow: the bumper is against something standing on the
+                    # board (a slanted approach touches with the bumper's corner before the front sensor reads
+                    # EXPLORE_CREEP_FRONT_CM). A blocked side, met at the bumper; the leg is taken at the camera's
+                    # length (explore reliability 2026-10-26: these legs read "crept 11.6 cm and met neither", lost
+                    # the contact and put up to 10 cm that never happened into the path)
+                    o2["d_own"], o2["d"] = o2["d"], round(math.copysign(stall, o2["d"] or 1.0), 2)
+                    o2["contact"] = "board"
+                    o2["reach_cm"] = EXPLORE_BUMPER_AHEAD_CM
+                    o2["stalled"] = True
+                    crept += stall - max(0.0, dd)
+                    reach = EXPLORE_BUMPER_AHEAD_CM
+                    result = "board"
+                    self.st.setdefault("setup", {}).setdefault("explore_creep_stalls", []).append(
+                        [round(time.time(), 1), n, k + 1, round(dd, 2), round(stall, 2)])
+                    self.say("    %s: creep %d: the wheels went %.1f cm, the camera saw %.1f: against something at "
+                             "the bumper" % (n, k + 1, dd, stall), quiet=True)
+                    break
                 if k2 == "edge":
                     if o2 is not None:
                         o2["cue"] = MAP.edge_cue(f2.get("info"))
@@ -5115,6 +5219,31 @@ class Runner:
             self.say("    ray %d: the front saw something %.0f cm ahead; crept %.1f cm and met neither" % (
                 k + 1, front0, crept), quiet=True)
         return result, crept
+
+    def explore_px_per_cm(self, n, obs):
+        """The camera's pixels per cm of this robot's own wheel travel, from its straight legs of 8 cm or more so far
+        (the median: a local scale that needs no camera fit). None with fewer than 3 such legs."""
+        r = []
+        st = obs.get(n) or []
+        for a_, b_ in zip(st[:-1], st[1:]):
+            d_ = abs(b_.get("d") or 0.0)
+            if d_ >= 8.0 and abs(b_.get("dth") or 0.0) < 3.0 and not a_.get("skip") and not b_.get("skip") and \
+                    not b_.get("stalled"):
+                r.append(math.hypot(b_["u"] - a_["u"], b_["v"] - a_["v"]) / d_)
+        return float(np.median(r)) if len(r) >= 3 else None
+
+    def explore_creep_stalled(self, n, obs, prev, o2, dd):
+        """A creep step whose camera move is under EXPLORE_STALL_SHARE of what its wheels drove: the cm the body
+        really moved (by the robot's own pixels per cm), else None."""
+        if prev is None or o2 is None or dd < 1.5 or prev.get("u") is None or o2.get("u") is None:
+            return None
+        ppc = Runner.explore_px_per_cm(self, n, obs)
+        if not ppc:
+            return None
+        moved = math.hypot(o2["u"] - prev["u"], o2["v"] - prev["v"]) / ppc
+        if moved < EXPLORE_STALL_SHARE * dd and dd - moved >= 1.0:
+            return moved
+        return None
 
     def explore_rays(self, n, obs, offset):
         """EXPLORE_RAYS rays for robot n, at (k + offset) x 360 / EXPLORE_RAYS deg in its own frame, each out until
@@ -5156,6 +5285,8 @@ class Runner:
         fin = self.listener.leg_final(n, "-", lid) or {}
         kind = MAP.stop_kind(fin.get("state"), fin.get("info"))
         o = self.explore_stop(n, obs, lid, contact=kind)
+        if o is not None:
+            o["ray"] = True                   # a ray's out leg (the fit's leg repair looks at these: e02_explore)
         if o is not None and kind == "edge":
             o["cue"] = MAP.edge_cue(fin.get("info"))
         if n in self.held_out:
@@ -5231,7 +5362,7 @@ class Runner:
             cnt[int(a // w) % self.EXPLORE_SECTORS] += 1
         return [((k + 0.5) * w, cnt[k]) for k in range(self.EXPLORE_SECTORS) if cnt[k] < self.EXPLORE_SECTOR_MIN], (cx, cy)
 
-    def explore_gap_rays(self, names, obs):
+    def explore_gap_rays(self, names, obs, prefer=None):
         """2026-10-24 (robots put down scattered: rays skipped because they would pass another robot left a side
         unmet, and explore fell back): rays aimed at the gaps. For each sector the rays have not met, the robot
         whose ray there is clear of the others (on the provisional floor) drives one, aimed out from the middle of
@@ -5246,7 +5377,12 @@ class Runner:
         self.say("  %d sector(s) of the board no ray has met yet: rays aimed at them ..." % len(gaps))
         for hd, c in gaps:
             best = None
-            for n in names:
+            # the robots the camera fit used first; the others only when none of those has a clear ray there
+            order = [m for m in names if m in (prefer or [])]
+            order = order + [m for m in names if m not in order]
+            for n in order:
+                if best is not None and prefer and n not in prefer and best[1] in prefer:
+                    break
                 if n in self.held_out or n in self.unavailable:
                     continue                  # left out by Nick: never a gap ray (2026-10-25 15:10: both top rays)
                 stops = [q for q in obs.get(n, []) if not q.get("skip")]
@@ -5314,7 +5450,24 @@ class Runner:
                                                           "runner" if self.offload.failed else "helper"])
 
     def explore_finish(self, names, obs, t0, last_try=True):
+        """_explore_finish, with what each try found kept in the state (setup.explore_tries), passed or not: the
+        fitted camera, the robots used and left out, the contacts and why it failed (2026-10-26 explore reliability
+        study: failed tries kept nothing, so their camera could not be scored against the truth afterwards)."""
+        self._ex_rec = rec = dict(t=round(time.time(), 1), last_try=last_try, minutes=round((time.time() - t0) / 60.0, 1))
+        try:
+            return self._explore_finish(names, obs, t0, last_try)
+        except BaseException as e:
+            rec["why"] = "%s: %s" % (type(e).__name__, e)
+            raise
+        finally:
+            self.st.setdefault("setup", {}).setdefault("explore_tries", []).append(rec)
+            self.st.save()
+
+    def _explore_finish(self, names, obs, t0, last_try=True):
         st = self.st
+        rec = getattr(self, "_ex_rec", None)
+        if rec is None:
+            rec = {}
         robots = {n: v for n, v in obs.items() if len(v) >= 5}
         if not robots:
             raise SystemExit("Explore: too few stops seen by the camera to work anything out. Start again with "
@@ -5344,6 +5497,11 @@ class Runner:
                 left_out.append(n)
             robots = {n: v for n, v in robots.items() if n not in worse}
             sol = self.heavy(EX.fit, robots, size)
+        rec.update(sol=dict(f=sol["f"], k1=sol["k1"], rvec=list(sol["rvec"]), tvec=list(sol["tvec"]), size=list(sol["size"]),
+                            s=dict(sol["s"]), g=dict(sol["g"]), frames={k_: list(v_) for k_, v_ in sol["frames"].items()},
+                            rms_px=sol["rms_px"], per_robot_rms_px=dict(sol["per_robot_rms_px"]), n=sol["n"]),
+                   used=list(robots), left_out=list(left_out),
+                   checks={k_: dict(ok=v_["ok"], why=v_["why"], rms_px=v_["rms_px"]) for k_, v_ in checks.items()})
         bad = EX.fit_check(sol) or ("forced to fail (--dry-explore-fail)" if getattr(self.a, "dry_explore_fail", False)
                                     and getattr(self.a, "dry_run", False) else "")
         if not bad and len(robots) < EXPLORE_MIN_ROBOTS and len(obs) >= EXPLORE_MIN_ROBOTS:
@@ -5356,15 +5514,40 @@ class Runner:
                 sol["rms_px"], ", ".join("%s %.3f" % kv for kv in sol["s"].items()),
                 ", ".join("%s %.3f" % kv for kv in sol["g"].items())))
             raise ExploreFailed(bad)
+        # the legs the fit found the wheels had overcounted (a creep against a board, a hang at an edge) are taken at the
+        # camera's length here too: the contacts and the robots' end places are built on these paths
+        robots = EX.apply_repairs(robots, sol)
+        rec["repaired"] = sum(len(v) for v in (sol.get("repairs") or {}).values())
         pts = EX.contacts(robots, sol, others={n: obs[n] for n in left_out if n in obs})
+        if left_out and EXPLORE_SEEN_CONTACTS:
+            # the left-out robots' own rays still met sides: placed by the fitted camera (09:55: 8 board contacts by
+            # Left and Right's gap rays went uncounted and the sides never closed)
+            paths = {n: [(q.get("t"), p_[0], p_[1]) for p_, q in zip(EX.to_world(EX.rebuild(v, sol["s"][n], sol["g"][n]),
+                                                                              sol["frames"][n]), v)]
+                     for n, v in robots.items()}
+            seen = EX.contacts_seen({n: obs[n] for n in left_out if n in obs}, sol, paths)
+            rec["seen_contacts"] = len(seen)
+            pts = pts + seen
         sd = pts
         rect = EX.rectangle_from_rays(pts)
         edge_ahead = None
         if rect:
             # where the edge guard really sees an edge, from the rays' slants (most stops are the distance sensor's
             # bottom zone, which looks ahead of the line sensors)
+            rect0 = rect
             rect, edge_ahead = EX.refine_edges(rect, MAP.BOTTOM_AHEAD_CM)
+            if edge_ahead is not None and EX.rect_check(rect) and not EX.rect_check(rect0):
+                # 2026-10-26 explore reliability (after-batch run r04): the learned reach moved an open edge 7.6 cm and
+                # its ray ends no longer agreed, where the sides as met agreed: the sides as met are kept
+                self.say("  (the edge guard's learned reach (%.1f cm) would break the sides: not used)" % edge_ahead,
+                         quiet=True)
+                rec["refine_dropped"] = round(edge_ahead, 2)
+                rect, edge_ahead = rect0, None
         rect_bad = EX.rect_check(rect) if rect else ""
+        rec.update(contacts=[[round(c_[0], 1), round(c_[1], 1), c_[2], round(c_[3], 1)] for c_ in pts],
+                   rect=None if not rect else {k_: [round(v_[0], 2), v_[1]["kind"], v_[1]["n"]] for k_, v_ in
+                                               rect["lines"].items()},
+                   rect_angle=None if not rect else round(rect["angle_deg"], 2), rect_bad=rect_bad)
         if rect_bad:
             self.say("  the sides from the rays don't hold together yet: %s" % rect_bad)
             rect = None
@@ -5388,6 +5571,18 @@ class Runner:
         if edge_ahead is not None:
             self.say("  the edge guard sees an open edge %.1f cm ahead of the axle (learned from the rays' slants)"
                      % edge_ahead)
+        if bf is not None and EXPLORE_SIZE_CHECK_PCT:
+            # 2026-10-26 explore reliability: the board's known size as a last check (the plywood sheet, 122 x 122 cm,
+            # e02_plan.Board). After-batch run r07 "found" a board 15 % short on one side from a camera 8 % small; a
+            # wrong board is worse than none (the fallback says plainly what it uses)
+            kb = PL.Board()
+            kw, kh = kb.x1 - kb.x0, kb.y1 - kb.y0
+            off = max(abs(bf["W"] / kw - 1.0), abs(bf["H"] / kh - 1.0)) * 100.0
+            rec["size_off_pct"] = round(off, 1)
+            if off > EXPLORE_SIZE_CHECK_PCT:
+                self.say("  the board from the rays is %.1f x %.1f cm, %.0f %% off the plywood's %.0f x %.0f cm: not trusted"
+                         % (bf["W"], bf["H"], off, kw, kh))
+                bf = None
         if bf is None and not last_try:
             st.save()
             raise ExploreShort("the rays did not show all four sides as two open edges and two boards")
@@ -5395,6 +5590,7 @@ class Runner:
             st.save()
             raise ExploreFailed("the rays did not show all four sides as two open edges and two boards (%d points)"
                                 % len(pts))
+        rec.update(W=bf["W"], H=bf["H"], bf_R=np.asarray(bf["R"]).tolist(), bf_t=np.asarray(bf["t"]).tolist())
         rep.update(W=round(bf["W"], 2), H=round(bf["H"], 2), kinds=bf["kinds"], spreads={
             k: round(v, 2) for k, v in bf["spreads"].items()}, side_points=bf["n"])
         try:
@@ -9827,6 +10023,9 @@ def main(argv=None):
                                                               "percentile of its measured error (default 1.0)")
     ap.add_argument("--dry-explore-fail", action="store_true", help="dry run: explore's fit check always fails "
                     "(tests the fallback to a calibration on hand)")
+    ap.add_argument("--dry-explore-only", action="store_true", help="dry run: end the session as soon as explore "
+                    "has its result (found the board, or failed: no fallback); for explore-only batches (2026-10-26 "
+                    "explore reliability study)")
     ap.add_argument("--dry-remove-board", default="", help="dry run: the remove-a-board test: 'x@600' takes the x "
                     "board away 600 s after the start, without telling the runner")
     ap.add_argument("--dry-bricks", default="", help="dry run: the bricks the simulator puts down when asked, "

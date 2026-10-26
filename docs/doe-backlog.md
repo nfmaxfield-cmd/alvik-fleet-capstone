@@ -271,7 +271,7 @@ Write-up: [e02-oct26-session-0955.md](build-reports/e02-oct26-session-0955.md).
 | Parked-robot watch rate (e02_alltrack.py, a new PARK_EVERY_N) | 1 picture in 5 (now every picture: about 28 ms of the 54) | Replay real footage (this session's parked spells, the 15:45 collision, Nick nudging a parked robot 1 / 2 / 4 / 8 cm) at every 1 / 3 / 5 / 10 pictures: missed and late "moved" calls against the time saved | Footage | open |
 | Overhead camera contrast and exposure (camrec controls: contrast, exposure_time_absolute) | contrast 48-64 (now 32), exposure 100-120 (now 157) | On the board, robots parked: each robot at 4 headings x 3 places (top, middle, bottom), contrast 32 / 48 / 64 x exposure 157 / 120 / 100, with and without a dark top mark; the darkest-pixel gap against the plywood (now 40 at worst, 120-130 at best) and the tracker's lock | Board | open |
 | Hung robot: tilt limit (params.h tilt_stop_deg, e02.py TILT_STOP_DEG) | 5 deg (built) | Add to the bench tilt DOE: a robot sliding sideways off an edge on a crawl. Real data point 10-26 10:09: 3.3 deg pitch, 1.7 deg roll from level while hung, under 5 deg | Bench | open (new evidence) |
-| Explore's scale check with one robot (e02.py explore_finish) | within 5 % of the robots' size or a measured board side | Replay explore's fits from every real session (21:14, 09:55) and dry runs with one robot passing: the scale against roam1 (09:55: 11 % small) and against the check | Logs | open |
+| Explore's scale check with one robot (e02.py explore_finish) | within 5 % of the robots' size or a measured board side | Replay explore's fits from every real session (21:14, 09:55) and dry runs with one robot passing: the scale against roam1 (09:55: 11 % small) and against the check | Logs | **partly done** (2026-10-26 explore reliability): replayed; the robots' outline size can not be the check (it reads 1.68-1.71 x the robot on the real board whether the scale is right or 12 % off: the fit is right where the robot drove, the error is in the rest of the board). A board side or a second robot's coverage remains |
 
 Chosen with no DOE: the heading crawl backwards when the front is blocked, 3 cm (the same as the forward crawl).
 
@@ -291,6 +291,25 @@ Write-up: [two-camera-geometry.md](build-plans/two-camera-geometry.md).
 | Which camera carries the 5 cm offset | - (measure) | T1: robots on 5 taped marks, both cameras | Board (about 10 min) | open |
 
 Chosen with no DOE: the spots test's 10 cm cells with at least 3 still pairs and the alternating-minute folds (analysis choices only).
+
+## Explore reliability (2026-10-26, built)
+
+Write-up: [e02-oct26-explore-reliability.md](build-reports/e02-oct26-explore-reliability.md). All rows are simulator
+or logs first; each one's code comment says the same.
+
+| Number (where) | Value chosen | Experiment that would set it | Needs | Status |
+|---|---|---|---|---|
+| Leg repair: how much shorter the camera must see a leg (e02_explore.py REPAIR_MIN_CM, REPAIR_SHARE, REPAIR_ABS_CM, REPAIR_ABS_SHARE) | 1.5 cm and under 75 %, or 6 cm and under 93 % | Offline on the batch's recorded stops (evalfits.py) at 1 / 1.5 / 2.5 cm, 65 / 75 / 85 %, 4 / 6 / 8 cm: legs repaired against the true leg errors (legcheck.py), false repairs, camera scale error | Sim (logs) | open |
+| Each robot's wheel scale near 1 (e02_explore.py S_PRIOR_SD_LOG, S_PRIOR_W) | sd 4 %, weight 3 | The same offline replay at sd 2 / 4 / 8 %, weight 1 / 3 / 10; then the real sessions' stops against roam1 | Sim (logs), then Logs | open |
+| Camera tilt prior (e02_explore.py TILT_PRIOR_SD_DEG) | off (tried: sd 10 deg, weight 10) | Dry runs with the simulator camera at 3 and 9 deg tilt (`--tilt`), prior on / off: camera scale error over the board | Sim | open |
+| A left-out robot's contact used when its ray's camera length agrees (e02_explore.py SEEN_RAY_AGREE) | within 25 % | Offline: contacts gained against contacts more than 6 cm off a true side, at 15 / 25 / 40 % | Sim (logs) | open |
+| A creep step is stalled (e02.py EXPLORE_STALL_SHARE) | camera under 40 % of the wheels' count | Simulator: true contacts against calls at 30 / 40 / 60 %; then the board: slanted creeps into a board at 30 / 45 / 60 deg | Sim, then Board | open |
+| Rounds of gap rays (e02.py EXPLORE_GAP_ROUNDS) | 2 (was 1) | Dry runs at 1 / 2 / 3 rounds over the batch's 18 settings: pass rate against minutes | Sim | open |
+
+Chosen with no DOE: REPAIR_MAX_TURN_DEG 10 (anything between a hang's 3.6 deg twist and a 45 deg turn works),
+REPAIR_ROUNDS 2 (a loop guard), SEEN_RAY_MIN_CM 8 (below it the heading is noise), the free legs' bounds (0 to the
+wheels' count + 5 %, a lost turn 0 to 1.2 x told: physical limits), EXPLORE_BUMPER_AHEAD_CM 6 (measure it with a
+ruler). The analysis's own SIDE_NEAR_CM 15 and AHEAD_CM 8 (exsum.py) only sort contacts for the report.
 
 ## Already set by data
 
