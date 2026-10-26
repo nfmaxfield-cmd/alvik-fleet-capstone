@@ -50,7 +50,7 @@ other robot (the camera, the board touches) and against their own history. The r
 
 | Session | Flagged before (after runs) | Flagged after (after runs) | Holds before / after | KC back at start, before / after |
 |---|---|---|---|---|
-| Healthy baseline | none | BASE_ROW | 0 / BASE_HOLDS | 0.9 / BASE_KC cm |
+| Healthy baseline | none | **none** (wheels χ²/run 0.2-0.5) | 0 / 0 | 0.9 / 1.2 cm |
 | Gyro, Right, 5% jitter | none | **Right's gyro 3.2 x (9; second check, 4.8 x the others)** | 3 / 0 | 0.8 / 0.6 cm |
 | Wheels, all robots, 8% jitter | Center's wheels (7) | **all three, each by its own runs: Center 3.4 x (5), Left 2.0 x (6), Right 4.6 x (8)** | 1 / 3 | 0.4 / 2.3 cm |
 | Front, Left, 6 cm noise | the camera 3 times, Left never | **Left's front sensor 2.9 x (8; 5.8 cm at a board, 5.7 x the others); no camera flag** | 0 / 1 | 1.0 / 1.4 cm |
