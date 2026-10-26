@@ -52,7 +52,7 @@ Every turn after that drove its heading the wrong way, until the timeout. Right 
 | 7. Routes and set-aside robots | A route passing a set-aside robot nearer than 18 cm is not run. | **A4**: Right set aside 10.5 cm from the square route's path; **both square runs were not run** (orders 2 and 6), and 4 other runs scored. |
 | Live page | A one-tap "Turn on sounds" control. A rising chime for each hold and help call, repeated every 30 s while it waits; a falling one when a robot is left out. | Node test of the page's sound logic; the page serves `alerts` in its status |
 
-**Explore at a slow camera.** Run C (explore, camera at 10 pictures a second, 9.9 measured) **completed and found the board**: 119.3 x 121.2 cm (the simulator's board is 121.6 x 121.3), fit 3.6 px, in 15.6 minutes. Run C2 (another seed, run alongside four other simulators: worst 0.4 pictures a second, lag up to 4.8 s) failed its sides: 7 points, rays skipped because they would pass Left, and returns cut short. It fell back to the stored calibration safely. The last build saw the same failure on a cramped start (its run B). C3_LINE
+**Explore at a slow camera.** Run C (explore, camera at 10 pictures a second, 9.9 measured) **completed and found the board**: 119.3 x 121.2 cm (the simulator's board is 121.6 x 121.3), fit 3.6 px, in 15.6 minutes. Run C2 (another seed, run alongside four other simulators: worst 0.4 pictures a second, lag up to 4.8 s) failed its sides: 7 points, rays skipped because they would pass Left, and returns cut short. It fell back to the stored calibration safely. The last build saw the same failure on a cramped start (its run B). Run C3 used the same seed with less load (a steady 10 pictures a second) and **completed**: 121.1 x 125.0 cm, fit 7.3 px, 14.7 minutes. Its two board sides spread 17 and 24 cm, and the board line placed 5-8 cm off then gave 2 front-sensor holds while parking, plus 1 lost hold. So explore still completes at 10 a second when the machine keeps up. How good its fit is decides what follows (question 3).
 
 ### Problems the dry runs found and fixed during the build
 
@@ -99,8 +99,8 @@ Every turn after that drove its heading the wrong way, until the timeout. Right 
 2. The crawl near an edge trusts the camera's direction only when the tracker stays locked. When it doesn't, the
    robot asks for help after 3 tries (run B4, an earlier version: Left put aside after a 10-minute help call). Do
    you prefer that, or the outline-based heading (no movement) as a backup?
-3. Explore's fit was poor in run C (one side's points spread 23 cm, Center's path 17.6 px, still used). Should a
-   fit that loose stop and ask, rather than carry on?
+3. Explore's fit was loose in runs C and C3 (a side's points spread 23-24 cm; Center's path 17.6 px, still used),
+   and it led to a help call (C) and 3 holds (C3). Should a fit that loose stop and ask, rather than carry on?
 
 *Other*
 
@@ -152,7 +152,7 @@ namespace. Folders are in `logs/`.
 | A3 | 193844 | `--dry-turn-fault Right@40:restart --seed 33 --max-runs 2` | refused leg, then a compass check, then drove on; 2 runs |
 | A4 | 193836 | as A2, `--seed 32 --max-runs 6` | both square runs not run (Right 10.5 cm from the path); 4 runs |
 | C2 | 193803 | as C, `--seed 25` (machine overloaded) | explore failed its sides (7 points); fell back to the stored calibration |
-C3_ROW
+| C3 | 200025 | as C2, less load | explore completed: 121.1 x 125.0 cm, fit 7.3 px; 3 holds while parking (a board line 5-8 cm off) |
 
 Eight earlier runs (19:02-19:28) were stopped or superseded as the fixes changed. They found problems 1-5 above;
 their folders are in the build's scratch space, not in `logs/`.
