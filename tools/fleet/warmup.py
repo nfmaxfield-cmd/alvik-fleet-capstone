@@ -410,7 +410,8 @@ def apply(m, result, accept_zones=None, move_sides=False):
     for z in result["zones"]:
         if accept_zones is None or z["name"] in accept_zones:
             m = dict(WS.add_nogo(m, z["polygon"], name=z["name"], status="proposed" if accept_zones is None
-                                 else "confirmed", source="warm-up", note=z.get("note"), frame=z.get("frame"))[0])
+                                 else "confirmed", source="warm-up", note=z.get("note"), frame=z.get("frame"),
+                                 solid=True)[0])
     return FM.normalize(m)
 
 

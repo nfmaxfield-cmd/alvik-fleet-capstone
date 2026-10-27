@@ -161,6 +161,8 @@ def normalize(m):
         for extra in ("source", "note", "frame"):
             if extra in k:
                 ko[extra] = k[extra]
+        if k.get("solid"):
+            ko["solid"] = True        # a thing standing there (a felt object): the front sensors see it
         out["keepouts"].append(ko)
 
     for i, o in enumerate(m.get("obstacles") or []):

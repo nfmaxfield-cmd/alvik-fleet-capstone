@@ -1424,6 +1424,22 @@ def _front_ray_fn(m, body, max_cm=100.0):
             c, r = np.array(o["center"]), o["radius"]
             a = np.linspace(0, 2 * np.pi, 16, endpoint=False)
             polys.append(np.c_[c[0] + r * np.cos(a), c[1] + r * np.sin(a)])
+    for k in m.get("keepouts", []):      # a no-go zone round something standing there (a warm-up bump)
+        if k.get("solid"):
+            polys.append(np.array(k["polygon"], float))
+    # the table's barrier sides (workspace map) are walls too: without them a turn at a lane end beside a barrier was
+    # stopped by the front check (Mission Control dry run, 2026-10-27: Center, 7.0 cm ahead, twice)
+    if m.get("sides"):
+        f_ = m["floor"]
+        for sd in FM.SIDES:
+            bar, _ = FM.side_parts(m, sd)
+            for a0, a1 in bar:
+                v = f_[sd]
+                out = 1.5 if sd.endswith("max") else -1.5
+                if sd.startswith("x"):
+                    polys.append(np.array([[v, a0], [v + out, a0], [v + out, a1], [v, a1]], float))
+                else:
+                    polys.append(np.array([[a0, v], [a1, v], [a1, v + out], [a0, v + out]], float))
 
     def f(pose):
         u = np.array([math.cos(pose[2]), math.sin(pose[2])])

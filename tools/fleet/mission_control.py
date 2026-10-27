@@ -369,6 +369,17 @@ def preview(mm, plan, title=""):
             "floor": mm["floor"], "obstacles": mm.get("obstacles", []), "keepouts": mm.get("keepouts", [])}
 
 
+def clean(o):
+    """JSON for the browser: infinities and NaN (e.g. 'closest to a board: none') become null."""
+    if isinstance(o, float):
+        return o if math.isfinite(o) else None
+    if isinstance(o, dict):
+        return {k: clean(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [clean(v) for v in o]
+    return o
+
+
 class Handler(BaseHTTPRequestHandler):
     session = None
 
@@ -376,7 +387,7 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def _send(self, code, obj, ctype="application/json"):
-        body = obj if isinstance(obj, (bytes, bytearray)) else json.dumps(obj).encode()
+        body = obj if isinstance(obj, (bytes, bytearray)) else json.dumps(clean(obj)).encode()
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))

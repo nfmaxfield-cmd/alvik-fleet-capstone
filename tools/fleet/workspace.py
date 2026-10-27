@@ -62,11 +62,14 @@ def add_spot(m, xy, name=None, heading=None):
     return FM.normalize(m), nm
 
 
-def add_nogo(m, polygon, name=None, status="proposed", source="user", note=None, frame=None):
+def add_nogo(m, polygon, name=None, status="proposed", source="user", note=None, frame=None, solid=False):
+    """solid: something stands there (a warm-up bump): the front sensors' expected readings include it."""
     m = copy.deepcopy(m)
     n = sum(1 for k in m["keepouts"] if k.get("status")) + 1
     ko = {"name": name or "no-go %d" % n, "polygon": [list(map(float, p)) for p in polygon], "status": status,
           "source": source}
+    if solid:
+        ko["solid"] = True
     if note:
         ko["note"] = note
     if frame is not None:

@@ -483,3 +483,32 @@ def test_mission_control_api(tmp_path):
         assert c == 400                                   # nothing running
     finally:
         srv.shutdown()
+
+
+def test_mission_control_sends_no_infinity():
+    import mission_control as MC
+    import json as J
+    out = J.dumps(MC.clean({"a": float("inf"), "b": [1.0, float("nan")], "c": {"d": -float("inf")}}))
+    assert "Infinity" not in out and "NaN" not in out
+
+
+def test_front_check_expects_barrier_sides():
+    m = school({"y_min": "barrier"})
+    body = FM.body_of(m)
+    f = P._front_ray_fn(m, body)
+    d = f([76.0, 12.0, -math.pi / 2])               # facing the barrier at y = 0 from 12 cm in
+    assert d is not None and d == pytest.approx(12.0 - body.sensor, abs=0.2)
+    m2 = school({"y_min": "open"})
+    assert P._front_ray_fn(m2, body)([76.0, 12.0, -math.pi / 2]) is None      # an open edge is not a wall
+
+
+def test_felt_objects_are_expected_by_the_front_check():
+    m = school()
+    res = {"sides": m["sides"], "where": {}, "zones": [{"name": "box", "polygon": [[70, 50], [80, 50], [80, 60], [70, 60]],
+                                                        "note": "felt", "frame": 1.0}]}
+    m2 = WU.apply(m, res, accept_zones=["box"])
+    assert m2["keepouts"][0]["solid"] and m2["keepouts"][0]["status"] == "confirmed"
+    body = FM.body_of(m2)
+    assert P._front_ray_fn(m2, body)([75.0, 35.0, math.pi / 2]) is not None
+    m3, _ = WS.add_nogo(m, [[70, 50], [80, 50], [80, 60]])            # a drawn zone: not a wall
+    assert P._front_ray_fn(m3, body)([75.0, 35.0, math.pi / 2]) is None
