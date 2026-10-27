@@ -240,6 +240,21 @@ HEADING_CHECK_CM = 4.0        # chosen: the check drive (ST.MIN_HEADING_CM 3 cm 
 TURN_SPIN_DRIFT_CM = 2.5      # chosen: a turn on its spot whose camera centre moved this much towards an open edge,
 # inside the border, holds like a drive into the border (the top's centre swings about 1.5 cm on a turn). DOE note:
 # yes, logs: centre drift during healthy turns (track.csv) against Right's 15:45 spins
+TURN_SWING_CM = 3.0           # chosen from data (2026-10-27 00:28, tonight's stage 1): the camera's centre of a robot
+# sits about this far from the axle it turns about, so a healthy turn of a degrees swings it 2 x 3 x sin(a / 2) cm
+# (a half turn: 6 cm). Tonight's turns away from the edges moved it 2-6 cm on 90-170 deg turns; Left's and Right's
+# border holds (4.0-5.5 cm on such turns) were that swing, not slipping. DOE note: yes, logs: fit the offset per robot
+# from every session's turns (track.csv against the gyro's heading) instead of one chosen value.
+
+
+def spin_allowance_cm(turn_deg):
+    """How far a turn on its spot of turn_deg may move the camera's centre towards an edge before it counts as
+    slipping: the geometric swing about the axle plus TURN_SPIN_DRIFT_CM (2026-10-27: the fixed 2.5 cm alone held
+    healthy half turns near the edges and set Left and Right aside)."""
+    a = min(abs(float(turn_deg)), 180.0)
+    return 2.0 * TURN_SWING_CM * math.sin(math.radians(a) / 2.0) + TURN_SPIN_DRIFT_CM
+
+
 EDGE_BACKOUT_S = 30.0         # (until 2026-10-26: a backwards drive this soon after the robot's own edge stop was a
 # back-out. Now "right after" = no turn or forward drive has run since, however long a hold took: backing_out)
 FIX_HELD_AFTER_GO_S = 5.0     # chosen: this soon after a drive, a "held" tracker spot is not sent as a camera fix until
@@ -256,12 +271,14 @@ BATTERY_WARN, BATTERY_STOP = 40, 15
 LEVELS_EVERY_S = 300.0      # chosen: refit the battery and the charge levels at most every 5 min (the battery reads in
                             # whole %; about 1 % per 4 min while standing). No DOE: it only sets how fresh the display is
 EXPECTED_FW = "2026-10-26a"
-OK_FW = ("2026-10-22b", "2026-10-25a", "2026-10-25b", "2026-10-25c", "2026-10-26a")   # 25a adds the robot's own virtual
+OK_FW = ("2026-10-22b", "2026-10-25a", "2026-10-25b", "2026-10-25c", "2026-10-26a", "2026-10-27a")   # 25a adds the robot's own virtual
                                                         # border and `sleep`; 25b the back switches and the reverse find;
                                                         # 25c refuses go / turn legs before a compass check; 26a numbered,
                                                         # acknowledged commands (e02_link.py), `dup` before any refusal,
-                                                        # and the tilt stop; 22b still runs (plain commands, no tilt stop)
-BORDER_FW = ("2026-10-25a", "2026-10-25b", "2026-10-25c", "2026-10-26a")   # the robot's own virtual border and `sleep`
+                                                        # and the tilt stop; 22b still runs (plain commands, no tilt stop);
+                                                        # 27a (school build) adds the four-sided border (bd_*, off unless
+                                                        # bd_on 1: this runner leaves it off) and a second WiFi network
+BORDER_FW = ("2026-10-25a", "2026-10-25b", "2026-10-25c", "2026-10-26a", "2026-10-27a")   # the robot's own virtual border and `sleep`
 # --switches-back (Nick, 2026-10-25: "one attachment in total with switches in the back"): these too, sent and read
 # back with the safety settings and again before every find (a robot switched off and on loses them; it would then
 # find nose first, which still works). The find then backs into each board (firmware 2026-10-25b, e02.h REVERSE
@@ -271,8 +288,8 @@ BORDER_FW = ("2026-10-25a", "2026-10-25b", "2026-10-25c", "2026-10-26a")   # the
 # backing cap (e02_find_keep_cm 2) is left as it is: the look before backing is what keeps a robot off an edge where
 # a board was taken away (firmware e02.h REVERSE FIND; build report e02-oct25-backing-unc.md, item B).
 BACK_SETTINGS = (("sw_on", 1.0), ("sw_back", 1.0), ("e02_find_reverse", 1.0), ("e02_back_face_cm", 6.10))
-BACK_FW = ("2026-10-25b", "2026-10-25c", "2026-10-26a")
-TILT_FW = ("2026-10-26a",)    # firmware that stops itself on a tilt (motion.h TILT) and refuses legs while tilted
+BACK_FW = ("2026-10-25b", "2026-10-25c", "2026-10-26a", "2026-10-27a")
+TILT_FW = ("2026-10-26a", "2026-10-27a")    # firmware that stops itself on a tilt (motion.h TILT) and refuses legs while tilted
 # Backups (Nick, 2026-10-23: "build in backup plans in case our session goes poorly ... get as much data as possible
 # before stopping for a rebuild"). Chosen numbers; a DOE would not help much here (they trade data for Nick's time).
 HEADING_LONG_ROOM_CM = 30.0   # a 15 cm heading drive only this far (or more) from an open edge
@@ -1764,6 +1781,10 @@ class Runner:
         if verb == "turn":
             w_ = self.tracker.where() if following else None
             self.__dict__.setdefault("turn_start_xy", {})[robot] = (w_[1], w_[2]) if w_ else None
+            try:
+                self.__dict__.setdefault("turn_deg", {})[robot] = abs(float(text.split()[1]))
+            except (IndexError, ValueError):
+                self.__dict__.setdefault("turn_deg", {})[robot] = 180.0
         try:
             out = self._send_leg_once(robot, text, timeout, m, lid, following)
         finally:
@@ -3577,8 +3598,11 @@ class Runner:
                 self.mark("e02 help %s %s" % ("timeout" if ans is None else "skip", robot))
                 self.unavailable.add(robot)
                 if ans is None:
-                    self.say("Nobody answered in %.0f minutes: %s's remaining runs are put aside." % (
-                        self.a.help_wait_min, robot))
+                    # 2026-10-27 00:27: with --auto (the unattended plans) nothing waits for an answer here, and the
+                    # line used to claim 10 minutes had passed
+                    self.say(("Unattended (--auto): help calls are not waited for: %s's remaining runs are put aside."
+                              % robot) if self.a.auto else ("Nobody answered in %.0f minutes: %s's remaining runs are "
+                                                            "put aside." % (self.a.help_wait_min, robot)))
                     self.keep_on_map(robot)
                 else:                          # Nick took it off the board
                     self.st["positions"].pop(robot, None)
@@ -7842,6 +7866,12 @@ class Runner:
                         steps.append("its last forward drive reversed: %s" % ("done" if good else "no drive known"))
                     room = self.camera_edge_room(robot)
                     ok = bool(good) and (room is None or room >= EDGE_TURN_CM - 0.5)
+                    if not good and room is not None and room >= EDGE_TURN_CM - 0.5 and kind == "border":
+                        # 2026-10-27 00:28 (stage 1): Left and Right were held by a turn's swing 9-13 cm from an edge,
+                        # had no forward drive to reverse, and were left out although the camera put them far enough
+                        # in to turn. Nothing needs undoing: it carries on from where it is.
+                        ok = True
+                        steps.append("no drive to reverse, but %.1f cm from the edge is room to turn: carries on" % room)
                     if room is not None:
                         steps.append("the camera: %.1f cm from the edge" % room)
                     if kind == "stuck" and ok:
@@ -8413,10 +8443,13 @@ class Runner:
             return ""
         bd, x, y = b
         bcm = self.border_cm() if bcm is None else bcm
+        allow = spin_allowance_cm((getattr(self, "turn_deg", None) or {}).get(robot, 180.0))
         for ax, val in bd.open_edges():
             d = ST.inward_cm(bd, ax, val, x if ax == "x" else y)
             d0 = ST.inward_cm(bd, ax, val, a[1] if ax == "x" else a[2])
-            if d < bcm and d0 - d > TURN_SPIN_DRIFT_CM:
+            # the swing is allowed only while it stays EDGE_TURN_CM in; nearer, the strict limit (15:45: Right's spin
+            # carried it from 8.6 to 4.8 cm from the edge and it must still hold)
+            if d < bcm and d0 - d > (allow if d >= EDGE_TURN_CM else TURN_SPIN_DRIFT_CM):
                 return ("its centre moved %.1f cm towards an open edge while it turned on its spot (now %.0f cm from "
                         "it; the border is %.0f cm)" % (d0 - d, d, bcm))
         return ""

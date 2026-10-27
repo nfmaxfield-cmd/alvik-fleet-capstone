@@ -19,7 +19,11 @@ import e02_map as MAP
 SIDESTEP_CM = 25.0          # chosen: 25 cm between the two touches on A; a 1 cm error in a touch is then 2.3 deg
 SIDESTEP_MIN_CM = 10.0      # chosen: a sidestep cut short by an edge is still used from this far (1 cm -> 5.7 deg)
 BACK_CM = 8.0               # backing off a board before turning (blind, short)
-BACK_EDGE_CM = 9.5          # backing off an open edge: the sidestep then runs beside it with room for a slant
+BACK_EDGE_CM = 15.0         # backing off an open edge: the sidestep then runs beside it with room for a slant.
+# Was 9.5 until 2026-10-27: Center's sidestep along the x = 122 edge ended with its turn back timing out and the camera
+# seeing it 2 cm past the edge (stage 1, 00:27). 15 cm keeps the sidestep's far end past EDGE_TURN_CM (9 cm) even
+# with a 10 deg slant over SIDESTEP_CM (4.3 cm) and the edge stop's own ~2 cm. Chosen, not measured; DOE note: yes,
+# on the board: sidesteps at 10 / 15 / 20 cm off an open edge, camera-measured closest approach and failed turns.
 CORNER_KEEP_CM = 20.0       # touches no nearer than this to where A and B meet (both guards at once otherwise)
 APPROACH_EXTRA_CM = 15.0    # drive this much past where the map puts the boundary before giving up (not found)
 

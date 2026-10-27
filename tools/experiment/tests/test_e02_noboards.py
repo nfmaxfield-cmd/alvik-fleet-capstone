@@ -47,3 +47,9 @@ def test_no_boards_round_trips():
     b = _no_boards()
     b2 = PL.Board.from_dict(b.to_dict())
     assert b2.missing == {"x", "y"} and len(b2.open_edges()) == 4
+
+
+def test_a_healthy_turn_swing_away_from_the_edge_does_not_hold():
+    """2026-10-27 stage 1: Left's half turn 13 cm from an edge swung its camera centre 5.5 cm and set it aside."""
+    assert E.spin_allowance_cm(2) < 3.0 and 8.0 < E.spin_allowance_cm(180) < 9.0
+    assert E.spin_allowance_cm(-90) == E.spin_allowance_cm(90)
