@@ -63,3 +63,9 @@ One line per picture: what it shows (feature or problem), and where it comes fro
 - `2026-10-26/explore-pass-rate-before-after.png`: **feature (chart).** Explores that found the board, before and after this build, over the same 18 simulator settings, by camera speed, command loss and washed-out robot. Report: build-reports/e02-oct26-explore-reliability.md.
 - `2026-10-26/explore-camera-scale.png`: **problem + feature (chart).** Explore's camera size against the simulator's true camera, every run: before, the same recorded stops refitted with this build's fit, and driven again after. Report: build-reports/e02-oct26-explore-reliability.md.
 - `2026-10-26/noboards-dryrun-live-page.png`: **feature (simulator).** The live page during a `--no-boards` dry run: the virtual border strip on all four sides (the simulator still draws the boards). Report: build-reports/e02-oct26-noboards-and-replan.md.
+
+## 2026-10-27
+- `2026-10-27/wheel-speed-stretch-error-vs-speed.png`: **feature (chart).** The sensor-trust check's 338 stretches: signed wheel error has no trend with speed; its size grows about 0.2 cm per cm/s, the same for all three robots. Report: results/wheel-error-vs-speed.md.
+- `2026-10-27/wheel-speed-leg-ratio-by-commanded-speed.png`: **problem (chart).** Every go leg, camera over wheel distance by commanded speed: 12 of 23 creep steps (2 cm/s) moved under half of what the wheels counted, mostly Left's. Report: results/wheel-error-vs-speed.md.
+- `2026-10-27/wheel-speed-residuals.png`: **feature (chart).** Residuals of the error-size model against fitted value and speed (the fan-out that calls for robust errors). Report: results/wheel-error-vs-speed.md.
+- `2026-10-27/wheel-speed-spread-per-session.png`: **problem (chart).** Each robot's stretch error spread per session against the healthy 0.6 cm: Left is highest every session, Center varies 0.59-1.37 cm. Report: results/wheel-error-vs-speed.md.
