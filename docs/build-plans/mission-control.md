@@ -83,3 +83,8 @@ closest approach), styled like the mockup (Inter, ground #F6F7F9, white panels, 
 - **Side camera exposure check before locking** (09:56: the side picture was very dark on the setup page, likely a
   low value locked by the morning preview after a 2 s warm-up): longer settling for the EMEET and a brightness check
   before the lock, and the setup page sets the side camera to automatic when it opens it.
+- **Exposure control had no effect on the real overhead camera** (setup page flash check, 10:07): board brightness 193
+  and light contrast 52-59 at all four settings (157 / 78 / 39 / 20). Find why (control name, auto mode not switched
+  off, the camera ignoring it) and make the page say so when the picture does not change. Same check: robot 3 (bottom
+  of the picture) showed 0-3 grey levels top-vs-board against 14-24 for the others; side camera 8 ms ahead of the
+  overhead (median of 4 flashes), side 29.1 / overhead 25.0 pictures a second.

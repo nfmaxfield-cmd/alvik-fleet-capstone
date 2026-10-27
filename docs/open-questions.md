@@ -33,6 +33,8 @@ Answered ones move to the bottom with the answer and date.
 22. If the flash check recommends a darker exposure, use it from today on (check the first test's camera fixes are
     still accepted), or keep automatic?
 23. Is the board's 0,0 corner physically marked, so corner 1 can be confirmed by eye?
+24. Which robot was at the bottom of the overhead picture at 10:07? Its top showed almost no contrast against the
+    board (0-3 grey levels against 14-24 for the others).
 
 ### Robots and sessions
 8. What stands just beyond the home board's x = 0 edge at about y = 30-60? (Your 07:45 "yes" to this one was read as
