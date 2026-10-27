@@ -96,7 +96,11 @@ LEAD_IN_CM = 15.0       # chosen: a test starts this far along its first line fr
                         # centre 4 cm round its axle and the start check refused it). One planner step (chunk_cm).
                         # No DOE: any length from ~10 cm (a camera heading) to the side's length works
 START_TOL_CM = 4.0      # the start-spot check after a drive (the launcher's --place-tol-cm for a taped spot)
-START_TOL_DEG = 6.0     # chosen: run_plan's 5 deg plus the heading's spread from one 15 cm leg (dry runs: ~1 deg).
+START_TOL_DEG = 10.0    # was 6 (chosen from dry runs, ~1 deg spread). Real L4 2026-10-27 14:3x: Left 1.8 cm off but
+# 8.3 deg, its heading read from a camera line through only 8 cm of straight driving (26 pictures): at about 1 cm of
+# camera wobble that is worth ~7 deg alone, so 6 deg refused a good start. The test's own camera fixes correct the
+# heading within the first leg. DOE note: yes, 6 / 8 / 10 deg against how often good starts are refused and the line
+# check's p95 on the first leg. Previous comment: chosen: run_plan's 5 deg plus the heading's spread from one 15 cm leg (dry runs: ~1 deg).
                         # The test's first straight drive corrects the rest (a 10 deg start passed). No DOE: a check
 GATE_CM = 3.0           # line check: each robot's 95th percentile within 3 cm of its planned lines (Phase 0's gate)
 MIN_BATTERY = 25        # chosen: below this a robot is kept out (a run at 20 % sagged on 2026-10-25). No DOE
