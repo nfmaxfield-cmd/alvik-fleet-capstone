@@ -94,3 +94,10 @@ closest approach), styled like the mockup (Inter, ground #F6F7F9, white panels, 
 - **Setup page order** (Nick, 12:56): the flash check should come first (it measures the side camera's delay and
   finds the lights the side corner numbering uses), then the overhead and side corners. Reorder the page's sections,
   and skip any part whose saved result still checks good (show "saved this morning, still lines up" instead).
+- **Heading checks scaled by distance and risk** (Nick, 14:53: "should we incorporate distance into that? Short drives
+  matter less but should be noted that they need to confirm position before anything risky"). A heading error
+  matters by the sideways drift it causes before the next camera correction: allowed heading error = atan(allowed
+  drift / distance to the next fix), less the measurement's own uncertainty (about atan(1 cm camera wobble / length of
+  the line it was read from)). Short drives in open space pass with a loose heading; anything risky (near an edge,
+  near another robot, Chicken, a long leg) first confirms the heading with a short crawl watched by the camera. The
+  ladder's fixed 10 deg (14:5x) is the stop-gap until then.
