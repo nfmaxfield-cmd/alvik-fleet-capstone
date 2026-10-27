@@ -381,8 +381,64 @@ def measure_fps(cap, seconds=2.0, now=time.monotonic):
     return n, dt_, (n / dt_ if dt_ > 0 else 0.0)
 
 
+SETTLE_MAX_S = 8.0       # chosen (2026-10-27): the longest wait for auto exposure to settle before it is read/locked.
+                         # The side camera's picture was very dark after the 2 s warm-up (its exposure had been left
+                         # in manual by an earlier lock, and 2 s did not undo it). No DOE: a cap on a wait; the
+                         # settle rule below ends it as soon as the brightness stops changing
+SETTLE_TOL = 0.03        # chosen: settled = three 0.4 s brightness readings within 3 % of each other. DOE note: the
+                         # time to settle against the brightness after locking, from a dark and a bright start
+                         # (docs/doe-backlog.md, "Camera exposure settle")
+DARK_WARN, BRIGHT_WARN = 50.0, 215.0   # chosen: a picture's mean grey level outside these gets a loud warning
+                                       # (the side camera's dark picture this morning; the overhead's washed-out
+                                       # board is 193). No DOE: a warning, not a decision
+
+
+def settle_auto(cap, now=time.monotonic, min_s=2.0, max_s=SETTLE_MAX_S, tol=SETTLE_TOL, step_s=0.4):
+    """Read pictures until the automatic exposure has settled: at least min_s, then until the last three step_s
+    brightness readings agree within tol (relative), at most max_s. Returns dict(settled, seconds, brightness,
+    readings)."""
+    t0 = now()
+    readings = []
+    t_next = t0 + step_s
+    acc = []
+    while True:
+        ok, f = cap.read()
+        t = now()
+        if ok and f is not None:
+            g = cv2.cvtColor(f, cv2.COLOR_BGR2GRAY) if f.ndim == 3 else f
+            acc.append(float(cv2.resize(g, (80, 60), interpolation=cv2.INTER_AREA).mean()))
+        if t >= t_next:
+            if acc:
+                readings.append(round(sum(acc) / len(acc), 1))
+            acc = []
+            t_next = t + step_s
+            if t - t0 >= min_s and len(readings) >= 3:
+                last = readings[-3:]
+                m = max(1.0, sum(last) / 3)
+                if (max(last) - min(last)) / m <= tol:
+                    return dict(settled=True, seconds=round(t - t0, 2), brightness=last[-1], readings=readings)
+        if t - t0 >= max_s or (not ok and t - t0 > 2 * max_s):
+            return dict(settled=False, seconds=round(t - t0, 2), brightness=readings[-1] if readings else None,
+                        readings=readings)
+
+
+def brightness_warning(stats, name=""):
+    """A loud warning when the picture's mean brightness is outside DARK_WARN..BRIGHT_WARN, else None."""
+    if not stats or stats.get("brightness") is None:
+        return None
+    b = stats["brightness"]
+    who = (name + " camera: ") if name else ""
+    if b < DARK_WARN:
+        return (f"{who}PICTURE VERY DARK (mean {b:.0f} of 255, under {DARK_WARN:.0f}): the tracker cannot see robots "
+                "in it. Is the lens covered, the lamp off, or the exposure stuck low?")
+    if b > BRIGHT_WARN:
+        return (f"{who}PICTURE VERY BRIGHT (mean {b:.0f} of 255, over {BRIGHT_WARN:.0f}): washed out, robots may not "
+                "stand out from the board")
+    return None
+
+
 def apply_controls(cap, device, exposure="lock", focus="lock", wb="lock", warmup_s=2.0, log=print,
-                   run=subprocess.run, now=time.monotonic, fps=30, fps_check_s=2.0):
+                   run=subprocess.run, now=time.monotonic, fps=30, fps_check_s=2.0, name=""):
     """Exposure, focus and white balance: 'lock' = after a warm-up, freeze the camera's
     own automatic values; 'auto' = leave/turn automatic on; a number = that manual
     value; None = don't touch. Returns a report for meta.json.
@@ -400,9 +456,23 @@ def apply_controls(cap, device, exposure="lock", focus="lock", wb="lock", warmup
     c = Controls(cap, dev, log, run)
     rep["v4l2_ctl"] = "found" if c.v4l2 is not None else "not installed (optional: sudo apt install v4l-utils)"
     rep["before"] = read_controls(cap)
-    if "lock" in (exposure, focus, wb):
+    if exposure in ("lock", "auto"):
+        # automatic exposure ON first, whatever an earlier program left (a lock survives closing the camera: the side
+        # camera stayed dark this morning), then wait until the brightness stops changing (2026-10-27)
+        try:
+            ok = bool(cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, AE_AUTO))
+        except Exception:
+            ok = False
+        if not ok and c.v4l2 is not None and c._v4l2_name("auto_exposure"):
+            ok, _ = v4l2_set(dev, c._v4l2_name("auto_exposure"), AE_AUTO, run)
+        rep["auto_first"] = bool(ok)
+        rep["settle"] = settle_auto(cap, now=now, min_s=warmup_s)
+        if not rep["settle"]["settled"]:
+            log(f"  ! auto exposure still changing after {rep['settle']['seconds']} s (brightness readings "
+                f"{rep['settle']['readings'][-4:]}): locked as it is")
+    elif "lock" in (focus, wb):
         t0 = now()
-        while now() - t0 < warmup_s:          # let auto exposure / focus / white balance settle
+        while now() - t0 < warmup_s:          # let auto focus / white balance settle
             cap.read()
     auto_stats = frame_stats(cap)
     rep["stats_auto"] = auto_stats
@@ -486,6 +556,9 @@ def apply_controls(cap, device, exposure="lock", focus="lock", wb="lock", warmup
     rep["after"] = read_controls(cap)
     rep["stats_after"] = frame_stats(cap)
     a, b = rep["stats_auto"], rep["stats_after"]
+    bw = brightness_warning(b, name)
+    if bw:
+        c.warnings.append(bw)
     if a and b:
         if a["brightness"] > 5 and abs(b["brightness"] / a["brightness"] - 1) > 0.25:
             c.warnings.append(f"brightness changed {a['brightness']} -> {b['brightness']} when locking; "
@@ -1097,6 +1170,9 @@ def main(argv=None):
     ap.add_argument("--overhead-exposure", type=control_arg,
                     help="manual exposure for the camera named overhead only (--names); the others keep --exposure / "
                          "--lock / --no-lock. Set by tools/pi/camera_setup.py's flash check (tools/pi/setup_conf.py)")
+    ap.add_argument("--side-exposure", type=control_arg,
+                    help="exposure for the camera named side only (--names): lock (auto first, settled, then frozen), "
+                         "auto, or a number; the others keep --exposure / --no-lock (run-fleet-pi.sh: lock)")
     ap.add_argument("--focus", type=control_arg, help="manual focus (focus_absolute units), or auto")
     ap.add_argument("--wb", type=control_arg, help="manual white balance (K), or auto")
     ap.add_argument("--lock", dest="lock", action="store_true", default=True,
@@ -1143,9 +1219,15 @@ def main(argv=None):
         """--overhead-exposure for the camera named overhead, else the common exposure setting."""
         if getattr(args, "overhead_exposure", None) is not None and i < len(args.names) and args.names[i] == "overhead":
             return args.overhead_exposure
+        if getattr(args, "side_exposure", None) is not None and i < len(args.names) and args.names[i] == "side":
+            return args.side_exposure
         return ctl["exposure"]
+
+    def name_of(i):
+        return args.names[i] if i < len(args.names) else ""
     if not multi:
-        controls[0] = apply_controls(caps[0], devices[0], exposure_for(0), ctl["focus"], ctl["wb"], fps=args.fps)
+        controls[0] = apply_controls(caps[0], devices[0], exposure_for(0), ctl["focus"], ctl["wb"], fps=args.fps,
+                                     name=name_of(0))
     else:
         # both cameras' warm-up and frame-rate check at the same time (each ~4 s), each with its own values
         print_lock = threading.Lock()
@@ -1158,7 +1240,7 @@ def main(argv=None):
                     print("\n".join(tag_line(ln, tag) for ln in str(s).split("\n")))
             try:
                 controls[i] = apply_controls(caps[i], devices[i], exposure_for(i), ctl["focus"], ctl["wb"],
-                                             fps=args.fps, log=log)
+                                             fps=args.fps, log=log, name=name_of(i))
             except Exception as e:
                 controls[i] = dict(error=str(e))
                 log(f"! could not set the camera controls: {e}")

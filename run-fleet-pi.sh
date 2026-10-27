@@ -79,7 +79,7 @@ start_recorder() {
     CAMS="--device $OD --names overhead"; echo "Recording the overhead camera (/dev/video$OD) to $OUT (no side camera found)"
   fi
   python3 tools/pi/launcher.py --handoff >/dev/null 2>&1 || true
-  tmux new-session -d -s fleet -n rec "cd '$REPO' && python3 tools/pi/camrec.py $CAMS --fps 25 --label P0 --no-lock $EXPO_ARG --cores 1 --out '$OUT'; read -r -p 'Recorder stopped. Press Enter.'"
+  tmux new-session -d -s fleet -n rec "cd '$REPO' && python3 tools/pi/camrec.py $CAMS --fps 25 --label P0 --no-lock $EXPO_ARG --side-exposure lock --cores 1 --out '$OUT'; read -r -p 'Recorder stopped. Press Enter.'"
   echo "Recorder starting (8 s) ..."; sleep 8
 }
 

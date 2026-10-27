@@ -203,3 +203,61 @@ def test_dynamic_framerate_turned_off_when_offered():
     # no v4l2-ctl at all: nothing tried, no warning
     rep, _ = run(FakeCap(), focus=None, wb=None)
     assert "dynamic_framerate" not in rep and not rep["warnings"]
+
+
+# ------------------------------------------------------------------ 2026-10-27: auto first, settle, brightness check
+class DarkStartCap(FakeCap):
+    """Left in manual exposure 10 by an earlier program (the side camera this morning): dark until auto is switched
+    on, then auto exposure brightens it over ~1.5 s."""
+
+    def __init__(self):
+        super().__init__()
+        self.p[cv2.CAP_PROP_AUTO_EXPOSURE] = 1.0
+        self.p[cv2.CAP_PROP_EXPOSURE] = 10.0
+        self.t_auto = None
+
+    def set(self, prop, v):
+        if prop == cv2.CAP_PROP_AUTO_EXPOSURE and float(v) == 3.0 and self.p[prop] != 3.0:
+            self.t_auto = self.t
+        return super().set(prop, v)
+
+    def read(self):
+        if self.p[cv2.CAP_PROP_AUTO_EXPOSURE] == 3.0:
+            k = min(1.0, (self.t - self.t_auto) / 1.5) if self.t_auto is not None else 1.0
+            b = 15.0 + (120.0 - 15.0) * k
+            self.t += 1.0 / self.fps
+            img = np.full((48, 64, 3), b, np.uint8)
+            img[::8, :] = min(255, b + 60)
+            return True, img
+        return super().read()
+
+
+def test_lock_switches_auto_on_first_and_waits_for_it_to_settle():
+    cap = DarkStartCap()
+    rep, lines = run(cap, focus=None, wb=None)
+    assert rep["auto_first"] and rep["settle"]["settled"]
+    assert rep["settle"]["seconds"] >= 2.0
+    assert rep["stats_after"]["brightness"] > 100          # locked bright, not at the dark start
+    assert not any("DARK" in w for w in rep["warnings"])
+
+
+def test_settle_gives_up_at_the_cap_and_says_so():
+    class Drifting(FakeCap):
+        def read(self):
+            self.t += 1.0 / self.fps
+            b = 20 + 25 * self.t                             # still brightening after 8 s
+            return True, np.full((48, 64, 3), min(250, b), np.uint8)
+    cap = Drifting()
+    st = camrec.settle_auto(cap, now=lambda: cap.t)
+    assert not st["settled"] and abs(st["seconds"] - camrec.SETTLE_MAX_S) < 0.2
+
+
+def test_brightness_warning():
+    assert "DARK" in camrec.brightness_warning(dict(brightness=30), "side")
+    assert "BRIGHT" in camrec.brightness_warning(dict(brightness=230))
+    assert camrec.brightness_warning(dict(brightness=120)) is None
+    cap = FakeCap()
+    cap.auto_exposure_now = 80.0
+    cap.read_dark = True
+    rep, _ = run(cap, exposure=5.0, focus=None, wb=None)     # manual 5: about 7 grey levels
+    assert any("DARK" in w for w in rep["warnings"])

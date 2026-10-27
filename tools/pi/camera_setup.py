@@ -294,13 +294,26 @@ class Grabber(threading.Thread):
 class LiveSource:
     """A real camera through camrec's opening and control code."""
 
-    def __init__(self, dev, fps=25):
+    def __init__(self, dev, fps=25, name=""):
         import camrec
         self.CR = camrec
-        self.dev, self.fps = dev, fps
+        self.dev, self.fps, self.name = dev, fps, name
         self.cap = camrec.open_camera(str(dev), 640, 480, fps, 4, "MJPG",
                                       fail=lambda m: (_ for _ in ()).throw(RuntimeError(m)))
         self.ctl = camrec.Controls(self.cap, "/dev/video%s" % dev, log=lambda s: print("  " + s))
+        self.settle = self.settle_auto()
+
+    def settle_auto(self):
+        """Automatic exposure on (whatever an earlier program left: this morning the side camera opened dark, its
+        exposure still locked low), wait until the brightness stops changing, check it. Returns
+        dict(settled, seconds, brightness, warning)."""
+        self.ctl.set("auto_exposure", self.CR.AE_AUTO)
+        st = self.CR.settle_auto(self.cap)
+        st["warning"] = self.CR.brightness_warning(dict(brightness=st.get("brightness")), self.name)
+        print("  %s camera: automatic exposure %s after %.1f s, brightness %s%s" % (
+            self.name or "the", "settled" if st["settled"] else "STILL CHANGING", st["seconds"], st.get("brightness"),
+            ("\n  ! " + st["warning"]) if st["warning"] else ""), flush=True)
+        return st
 
     def read(self):
         return self.cap.read()
@@ -786,7 +799,7 @@ def main(argv=None):
             print("Stopped: no overhead camera found by its name.")
             return 1
         try:
-            over_src = LiveSource(od)
+            over_src = LiveSource(od, name="overhead")
         except RuntimeError as e:
             print("Stopped: %s\nIf the preview or recorder is still running, stop it first (Ctrl+C in its window, or "
                   "tmux kill-window -t fleet:rec), then start this again." % e)
@@ -797,7 +810,7 @@ def main(argv=None):
             print(words)
             if sd is not None and sd != od:
                 try:
-                    side_src = LiveSource(sd)
+                    side_src = LiveSource(sd, name="side")
                 except RuntimeError as e:
                     print("Side camera not opened (%s): the page goes on without it." % e)
         robots = UdpRobots()
