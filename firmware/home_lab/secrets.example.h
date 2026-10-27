@@ -6,6 +6,12 @@
 #define WIFI_SSID     "your-network-name"
 #define WIFI_PASSWORD "your-network-password"
 
+// Optional (firmware 2026-10-27a): a second network, e.g. the school's. The robot tries the first one, then this one,
+// and keeps alternating until one answers, so one flash works at home and at school. Leave these two lines out (or
+// commented) to use only the first network. PLACEHOLDERS: fill in from the school's network details.
+// #define WIFI_SSID2     "school-network-name"
+// #define WIFI_PASSWORD2 "school-network-password"
+
 // Optional. By default the robot broadcasts its logs to every computer on
 // your network, so you don't need your laptop's IP. If your router blocks
 // broadcast (logs never show up), put the laptop's IP here instead:

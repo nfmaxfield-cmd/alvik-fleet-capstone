@@ -86,6 +86,7 @@
 #pragma once
 
 #include "pose.h"
+#include "border.h"
 #include "switches.h"
 
 extern String gRunId;
@@ -114,6 +115,7 @@ float borderRefDist = 0;                // pose::dist then
 
 float borderDist(float px, float py) {
   if (!pose::known || P("border_cm") <= 0) return UNSET;
+  if (P("bd_on") > 0) return border::dist4(px, py);       // the four-sided border (border.h, 2026-10-27a)
   float ox = P("e02_open_x_cm"), oy = P("e02_open_y_cm");
   float d = 1e9f;
   if (ox > UNSET + 1) d = fminf(d, (px - ox) * (P("e02_yboard_side") > 0 ? 1.0f : -1.0f));

@@ -62,6 +62,11 @@ import session_checks as SC  # noqa: E402
 import planner as P         # noqa: E402
 
 MIN_FIRMWARE = "2026-10-18b"
+BORDER4_FIRMWARE = "2026-10-27a"     # the four-sided virtual border (border.h) and the second WiFi network
+BORDER_CM = 6.0     # chosen: the robots' own border holds their centre this far inside an open side: the body's half
+                    # width (4.75 cm) plus 1.25 cm. The planner keeps the centre r_turn + safety + open margin (about
+                    # 11 cm) inside, so it trips only on a pose error of about 5 cm. DOE note: 5 / 6 / 8 cm on the
+                    # school table (border stops per hour against edge-guard trips); docs/doe-backlog.md
 ACTIVE = ("sent", "acked", "started")
 
 
@@ -166,6 +171,14 @@ def _f(v):
     return "-" if v is None else "%.2f" % v
 
 
+def border_commands(m, border_cm):
+    """`set` commands for the robots' own four-sided border (workspace.firmware_params)."""
+    import workspace as WS
+    p = WS.firmware_params(m, border_cm)
+    order = ["bd_x0", "bd_x1", "bd_y0", "bd_y1"] + sorted(k for k in p if k.startswith(("bd_k_", "bd_lo_", "bd_hi_")))
+    return ["set %s %g" % (k, p[k]) for k in order] + ["set border_cm %g" % p["border_cm"], "set bd_on 1"]
+
+
 def step_command(sid, st):
     t = st["type"]
     if t in ("turn", "park"):
@@ -183,7 +196,7 @@ def step_command(sid, st):
             st["handover_cm"] + st.get("bumper_cm", 0.0), st["gap_cm"] + st.get("bumper_cm", 0.0), st["max_travel_cm"],
             _f(st.get("front_min_cm")))
     if t == "wait":
-        ms = int(round((st["t_end"] - st["t_start"]) * 1000)) if st["phase"] == "dwell" else 0
+        ms = int(round((st["t_end"] - st["t_start"]) * 1000)) if st["phase"] in ("dwell", "pause") else 0
         return "fs %d W %d" % (sid, ms)
     if t == "home":      # creep into a home dock until both nose switches click (firmware dock.h)
         w = st["wall"]
@@ -420,10 +433,24 @@ class Coordinator:
             if st["status"] not in ("done", "failed"):
                 st["status"] = "failed"
                 st["info"] = info
+                self.labelled(b, i, state, t, (x, y, th), front, info)
                 self.on_failed(b, i, info, (x, y, th), front)
         elif state == "dropped":
             if st["status"] in ACTIVE:
                 st["status"] = "dropped"
+        if state in ("started", "done"):
+            self.labelled(b, i, state, t, (x, y, th), front, info)
+
+    def labelled(self, b, i, state, t, pose, front, info):
+        """Steps the plan labelled (the warm-up's corner pauses and side feels): when they start and end, with the
+        robot's own pose and the camera's latest, for the warm-up's frame list and side answers (warmup.py)."""
+        stp = self.steps(b.name)[i]
+        if not stp.get("label"):
+            return
+        cam = getattr(b, "last_cam", None)
+        self.log("labelled_step", robot=b.name, plan=self.plan_no, i=i, label=stp["label"], phase=stp["phase"],
+                 state=state, t_run=round(t - self.t_run, 2) if self.t_run else None, pose=list(pose), front_cm=front,
+                 info=info, cam=cam, to=stp["to"], frm=stp["from"])
 
     def _expected_old(self, b, sid):
         return sid in getattr(b, "halted_ids", set())
@@ -526,6 +553,7 @@ class Coordinator:
             b = self.bots.get(ev.get("robot"))
             if b is not None:
                 b.fix = ev
+                self.cam_seen(b, ev)
         t = now()
         for b in self.bots.values():
             ev = b.fix
@@ -537,6 +565,42 @@ class Coordinator:
                                                                 ev.get("sigma", 0.5), ev.get("sigma_th", 1.5)))
             b.fix, b.fix_sent_t = None, t
             b.fix_sent += 1
+
+    TRACK_EVERY_S = 0.2       # cam_track.csv: one camera pose per robot this often (the mapping view's lines)
+    TRACK_LOST_S = 1.0        # chosen: no camera pose for this long = the tracker lost the robot (10 fixes missed at
+                              # 10 a second); the warm-up shows those moments to Nick. DOE: not needed (it only picks
+                              # frames for a person to look at)
+
+    def cam_seen(self, b, ev):
+        t = now()
+        b.last_cam = [round(float(ev["x"]), 2), round(float(ev["y"]), 2),
+                      None if ev.get("th") is None else round(float(ev["th"]), 1)]
+        if getattr(b, "lost_since", None) is not None:
+            self.log("tracker_back", robot=b.name, t_run=round(t - self.t_run, 2) if self.t_run else None,
+                     lost_s=round(t - b.lost_since, 2), cam=b.last_cam)
+            b.lost_since = None
+        b.cam_t = t
+        if t - getattr(b, "track_t", 0.0) >= self.TRACK_EVERY_S:
+            b.track_t = t
+            if getattr(self, "_track_f", None) is None:
+                self._track_f = open(os.path.join(self.outdir, "cam_track.csv"), "w", newline="")
+                self._track_w = csv.writer(self._track_f)
+                self._track_w.writerow(["t", "robot", "x_cm", "y_cm", "heading_deg"])
+            self._track_w.writerow(["%.3f" % float(ev.get("t", t)), b.name] + b.last_cam)   # the frame's time
+            self._track_f.flush()
+
+    def tracker_watch(self):
+        """A robot whose camera poses stop for TRACK_LOST_S while the plan runs: logged once (tracker_lost)."""
+        if not self.t_run:
+            return
+        t = now()
+        for b in self.bots.values():
+            if getattr(b, "cam_t", None) is None or getattr(b, "lost_since", None) is not None:
+                continue
+            if t - b.cam_t > self.TRACK_LOST_S:
+                b.lost_since = b.cam_t
+                self.log("tracker_lost", robot=b.name, t_run=round(b.cam_t - self.t_run, 2), last_cam=b.last_cam,
+                         own_pose=list(b.pose) if b.pose else None)
 
     # -- plans ----------------------------------------------------------------
     def _install(self, plan, keep, first, old):
@@ -579,11 +643,15 @@ class Coordinator:
             dwell_left = None
             if prog and i < len(steps) and steps[i]["type"] == "wait":
                 st = b.stat[i]
-                dur = steps[i]["t_end"] - steps[i]["t_start"] if steps[i]["phase"] == "dwell" else 0.0
+                dur = steps[i]["t_end"] - steps[i]["t_start"] if steps[i]["phase"] in ("dwell", "pause") else 0.0
                 dwell_left = max(0.0, dur - (t - st.get("t_started", t)))
             pose = b.pose or tuple(FM.pose_out(FM.pose_in(self.plan["robots"][n]["start"])))
+            ended = None
+            if prog and i < len(b.stat) and b.stat[i]["status"] == "failed" and \
+                    not str(b.stat[i].get("info", "")).startswith("halted"):
+                ended = b.stat[i].get("info", "")        # it ended by itself (a warm-up feel's answer), not by a halt
             out[n] = {"pose": [pose[0], pose[1], math.radians(pose[2])], "step": i, "in_progress": prog,
-                      "dwell_left_s": dwell_left}
+                      "dwell_left_s": dwell_left, "ended": ended}
         return out
 
     def handle_obstacle(self, ob, cause=None, budget=None, improving=False):
@@ -772,6 +840,14 @@ class Coordinator:
                      "re-planning around it" % (b.name, stp["type"], info))
             self.handle_obstacle(ob, cause=b.name)
             return
+        if info.startswith("virtual border"):
+            # its own four-sided border (firmware 2026-10-27a) stopped it near an open side: its pose and the plan
+            # disagree by about 5 cm. Re-plan from where it is (the plan's margins bring it back in)
+            self.n_border_stops = getattr(self, "n_border_stops", 0) + 1
+            self.log("border_stop", robot=b.name, i=i, info=info)
+            self.say("%s: its own border stopped it near an open side (%s); re-planning from where it is" % (b.name, info))
+            self.handle_obstacle(None, cause=b.name)
+            return
         if info.startswith("obstacle"):
             self.n_sensor_obstacles += 1
             ob = self.sensor_obstacle(b, pose, front, info)
@@ -936,6 +1012,7 @@ class Coordinator:
             if self.abort:
                 break
             self.finish_replan()
+            self.tracker_watch()
             if self.pending_replan and now() >= self.pending_replan[1] and self.planning is None:
                 self.pending_replan = None
                 self.handle_obstacle(None)
@@ -1033,6 +1110,18 @@ def start_robots(coord, link, args, source):
         elif fw < MIN_FIRMWARE:
             raise SystemExit("%s runs firmware %s; the step follower needs %s or later. Flash it first."
                              % (n, fw, MIN_FIRMWARE))
+    # the robots' own four-sided border from the workspace map (firmware 2026-10-27a, border.h)
+    if coord.m.get("sides") and getattr(args, "border_cm", 0) > 0:
+        bd = border_commands(coord.m, args.border_cm)
+        for n in names:
+            fw = coord.bots[n].firmware
+            if fw and fw < BORDER4_FIRMWARE:
+                print("  %s runs firmware %s: no four-sided border on the robot (needs %s); the planner's margins "
+                      "and the edge guard still apply" % (n, fw, BORDER4_FIRMWARE))
+                continue
+            for c in bd:
+                link.send_name(n, c)
+                time.sleep(0.02)
     if args.calibrate:
         for n in names:
             link.send_name(n, "calibrate")
@@ -1166,6 +1255,9 @@ def main(argv=None):
     ap.add_argument("--site-map", help="locked site map (tools/site/setup.py): warn when the robots' front sensors "
                                        "keep disagreeing with a landmark on it (tools/site/change.py)")
     g = ap.add_argument_group("dry run against the simulator (tools/sim/fleet_sim.py)")
+    ap.add_argument("--border-cm", type=float, default=BORDER_CM,
+                    help="the robots' own four-sided border (firmware 2026-10-27a), sent when the map has side kinds "
+                         "(default %(default)s; 0 = off)")
     g.add_argument("--dry-run", action="store_true")
     g.add_argument("--brick", help="auto@T or x,y[,angle]@T")
     g.add_argument("--wifi-drop", action="append", default=[], metavar="NAME@T:DUR")
@@ -1294,6 +1386,9 @@ def print_summary(s):
         print("Simulator truth: closest two robots %.2f cm (%s); closest to a board/brick %.2f cm (%s); contact: %s"
               % (sim["min_body_gap_cm"], sim["min_body_gap_at"], sim["min_static_clearance_cm"], sim["min_static_at"],
                  "YES" if sim["collision"] else "no"))
+        if sim.get("true_sides") is not None:
+            print("Simulator truth, table edge: closest a body came to an open part %s cm (%s); hung over the edge: %s"
+                  % (sim.get("min_open_edge_cm"), sim.get("min_open_edge_at"), ", ".join(sim.get("hung") or []) or "none"))
         for d in sim["dockings"]:
             print("  dock %-6s at %s: front gap %.2f cm (error %+.2f), sideways %+.2f cm, heading %+.1f deg  [%s]"
                   % (d["robot"], d["board"], d["front_gap_cm"], d["gap_error_cm"], d["lateral_cm"], d["heading_err_deg"], d["info"]))

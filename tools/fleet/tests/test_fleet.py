@@ -415,7 +415,12 @@ def test_time_only_execution_is_not_safe_with_delays(demo_plan):
 # ----------------------------------------------------------------------------
 
 def test_app_endpoints(tmp_path):
-    import app
+    # the fleet page's app.py by its path: tools/label/app.py has the same module name, and another test folder may
+    # have put tools/label first on the path (the whole suite failed here before 2026-10-27)
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("fleet_app", os.path.join(FLEET, "app.py"))
+    app = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(app)
     mp = tmp_path / "map.json"
     mp.write_text(json.dumps(FM.load(os.path.join(EX, "park_test_map.json"))))
     sess = app.Session(str(mp), str(tmp_path / "plan.json"))

@@ -636,7 +636,17 @@ class Robot(FollowMixin, DockMixin, E02Mixin):
             return float("-inf")
         x0, y0, x1, y1 = s.board_cm
         out = {"x0": x0 - px, "x1": px - x1, "y0": y0 - py, "y1": py - y1}
-        return max((out[k] for k in s.open_edges if k in out), default=float("-inf"))
+        spans = getattr(s, "open_spans", None) or {}
+        best = float("-inf")
+        for k in s.open_edges:
+            if k not in out:
+                continue
+            if k in spans:
+                along = py if k.startswith("x") else px
+                if not any(a <= along <= b for a, b in spans[k]):
+                    continue
+            best = max(best, out[k])
+        return best
 
     def bottom_true(self, pose):
         """The distance sensor's bottom zone, from the geometry in TofModel (guesses): the nearest hit of

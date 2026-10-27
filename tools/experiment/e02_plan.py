@@ -177,19 +177,25 @@ class Board:
         self.face_cm = float(face_cm)
         self.xboard_side, self.yboard_side = int(xboard_side), int(yboard_side)
         self.missing = set()      # boards found gone ('x' / 'y': the x board / the y board), open edges now
+        # general workspace (tools/fleet/workspace.py, 2026-10-27): {"x_min": "open" | "barrier" | "partial" |
+        # "unknown", ...}; when set, open_edges() lists exactly the sides that are not all barrier. None = the old
+        # two-board meaning, unchanged
+        self.sides = None
         self.xboard_cm = float(xboard_cm) if xboard_cm is not None else (self.y0 if self.xboard_side == 0 else self.y1)
         self.yboard_cm = float(yboard_cm) if yboard_cm is not None else (self.x0 if self.yboard_side == 0 else self.x1)
 
     def to_dict(self):
         return dict(rect=[self.x0, self.y0, self.x1, self.y1], xboard_side=self.xboard_side,
                     yboard_side=self.yboard_side, xboard_cm=round(self.xboard_cm, 2), yboard_cm=round(self.yboard_cm, 2),
-                    face_cm=self.face_cm, missing=sorted(self.missing))
+                    face_cm=self.face_cm, missing=sorted(self.missing),
+                    **({"sides": dict(self.sides)} if getattr(self, "sides", None) else {}))
 
     @classmethod
     def from_dict(cls, d):
         b = cls(d["rect"], d["xboard_side"], d["yboard_side"], d.get("xboard_cm"), d.get("yboard_cm"),
                 d.get("face_cm", FACE_CM))
         b.missing = set(d.get("missing") or ())
+        b.sides = dict(d["sides"]) if d.get("sides") else None
         return b
 
     def firmware_sides(self):
@@ -252,6 +258,11 @@ class Board:
     def open_edges(self):
         """The edges without a board: [('x', value) | ('y', value)] (x = value or y = value lines): the two open
         ones, and a board's edge once that board has been found gone (the edge find: Nick, 2026-10-23)."""
+        sides = getattr(self, "sides", None)
+        if sides:
+            line = {"x_min": ("x", min(self.x0, self.x1)), "x_max": ("x", max(self.x0, self.x1)),
+                    "y_min": ("y", min(self.y0, self.y1)), "y_max": ("y", max(self.y0, self.y1))}
+            return [line[k] for k in ("x_min", "x_max", "y_min", "y_max") if sides.get(k, "unknown") != "barrier"]
         out = [("x", self.x1 if self.yboard_side == 0 else self.x0), ("y", self.y1 if self.xboard_side == 0 else self.y0)]
         if "y" in getattr(self, "missing", ()):          # the y board stands along an x = value line
             out.append(("x", self.x0 if self.yboard_side == 0 else self.x1))
@@ -261,7 +272,7 @@ class Board:
 
     def edge_room(self, x, y):
         """Distance (cm) from a point to the nearest open edge, and to the nearest board line."""
-        open_d = min(abs(x - v) if a == "x" else abs(y - v) for a, v in self.open_edges())
+        open_d = min((abs(x - v) if a == "x" else abs(y - v) for a, v in self.open_edges()), default=math.inf)
         board_d = min(abs(y - self.xboard_cm), abs(x - self.yboard_cm))
         return open_d, board_d
 

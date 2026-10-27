@@ -41,7 +41,10 @@
 Arduino_Alvik alvik;
 
 // Bump this whenever the firmware changes, so every logged run says which code it ran.
-#define FW_VERSION "2026-10-26a"
+#define FW_VERSION "2026-10-27a"
+// 2026-10-27a: the four-sided virtual border (border.h: the table's rectangle and each side's kind, bd_*; in e02 runs
+//              and, new, in the step follower, where it stops only the step), and a second WiFi network (WIFI_SSID2 in
+//              secrets.h, tried after the first, alternating)
 // 2026-10-26a: numbered commands ("#<n> cmd"), each answered at once with an ACK record and a repeat not run again
 // (net.h); a leg id seen before answers `dup` before any refusal (e02.h); the tilt stop (motion.h TILT,
 // tilt_stop_deg 5, tilt_ms 300); the level is taken at the compass check.

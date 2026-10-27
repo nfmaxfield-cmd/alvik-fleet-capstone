@@ -427,7 +427,57 @@ class FollowMixin:
 
     def f_tick(self):
         self.pose.tick()
+        # the four-sided virtual border (border.h, firmware 2026-10-27a): only the step stops
+        if self.bd_follow_tick() and self.f_cur and not self.step_stop and not self.abort_reason:
+            self.step_stop = "border"
+            self.brake()
         self.f_log()
+
+    # ---- border.h (firmware 2026-10-27a): the twin of the four-sided border ----
+    BD_TOWARDS_CM = 0.5
+    BD_MOSTLY = 0.5
+    BD_HALF_CM = 5.0
+
+    def bd_dist4(self, px, py):
+        P = self.P
+        if P("bd_on") <= 0:
+            return None
+        d = None
+        for k, lo, hi, inside, along in (("bd_k_x0", "bd_lo_x0", "bd_hi_x0", px - P("bd_x0"), py),
+                                         ("bd_k_x1", "bd_lo_x1", "bd_hi_x1", P("bd_x1") - px, py),
+                                         ("bd_k_y0", "bd_lo_y0", "bd_hi_y0", py - P("bd_y0"), px),
+                                         ("bd_k_y1", "bd_lo_y1", "bd_hi_y1", P("bd_y1") - py, px)):
+            kind = int(P(k))
+            if kind == 1 or (kind == 2 and P(lo) - self.BD_HALF_CM <= along <= P(hi) + self.BD_HALF_CM):
+                d = inside if d is None else min(d, inside)
+        return d
+
+    def bd_reset(self):
+        self.bd_ref = None
+        self.bd_ref_dist = 0.0
+
+    def bd_follow_tick(self):
+        P = self.P
+        if not getattr(self.pose, "known", False) or P("border_cm") <= 0 or P("bd_on") <= 0:
+            self.bd_ref = None
+            return False
+        d = self.bd_dist4(self.pose.x, self.pose.y)
+        self.bd_last = d
+        if d is None:
+            self.bd_ref = None
+            return False
+        dist = self.pose.dist
+        if getattr(self, "bd_ref", None) is None:
+            self.bd_ref, self.bd_ref_dist = d, dist
+            return False
+        if d > self.bd_ref or abs(dist - self.bd_ref_dist) > 30.0:
+            self.bd_ref, self.bd_ref_dist = d, dist
+        if d >= P("border_cm") or self.bd_ref - d < self.BD_TOWARDS_CM:
+            return False
+        if self.bd_ref - d < self.BD_MOSTLY * abs(dist - self.bd_ref_dist):
+            return False
+        self.bd_ref, self.bd_ref_dist = d, dist
+        return True
 
     def f_drop(self, keep_up_to, why):
         kept = []
@@ -706,6 +756,7 @@ class FollowMixin:
             self.f_travel = 0.0
             self.step_stop = ""
             self.fail = ""
+            self.bd_reset()
             self.f_report(s["id"], "started", "")
             ok = self.run_step(s)
             self.brake()
@@ -724,6 +775,9 @@ class FollowMixin:
                 if self.step_stop == "obstacle":
                     d = self.tof()
                     why = "obstacle %.1f cm ahead; zones %.1f %.1f %.1f %.1f %.1f" % ((self.front_trip,) + tuple(d))
+                elif self.step_stop == "border":
+                    why = "virtual border at %.1f %.1f %.1f %.1f" % (self.pose.x, self.pose.y, self.pose.th(),
+                                                                     getattr(self, "bd_last", None) or 0.0)
                 elif self.step_stop == "edge":
                     why = "plywood edge at %.1f %.1f %.1f %s" % (self.pose.x, self.pose.y, self.pose.th(),
                                                                getattr(self, "edge_last_cue", ""))

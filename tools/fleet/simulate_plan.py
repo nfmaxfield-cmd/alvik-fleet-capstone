@@ -228,7 +228,7 @@ class Sim:
                 along = float(np.dot(np.array(st["to"][:2]) - r.belief()[:2], r.run["u"]))
                 r.run["cap"] = st.get("max_travel_cm", 20.0) - (L - along)
         else:  # wait
-            if st["phase"] == "dwell" or self.sp["gate"] in ("time", "both"):
+            if st["phase"] in ("dwell", "pause") or self.sp["gate"] in ("time", "both"):
                 dur = st["t_end"] - st["t_start"]
                 if self.sp["gate"] in ("time", "both"):
                     r.run["until"] = max(self.t, self.plan_start + st["t_end"]) if st["phase"] != "dwell" \
@@ -486,7 +486,7 @@ class Sim:
             steps = self.steps(r)
             acc = 0.0
             for st in steps[r.step:]:
-                acc += st["t_end"] - st["t_start"] if st["type"] != "wait" or st["phase"] == "dwell" else 0.0
+                acc += st["t_end"] - st["t_start"] if st["type"] != "wait" or st["phase"] in ("dwell", "pause") else 0.0
                 if st["type"] != "drive" or st["phase"] != "travel" or acc < self.sp["brick_ahead_s"]:
                     continue
                 a = np.array(st["from"][:2])

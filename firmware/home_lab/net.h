@@ -91,16 +91,46 @@ void logf(const char* fmt, ...) {
 
 void finishUp();
 
+// Two networks (firmware 2026-10-27a): WIFI_SSID, and WIFI_SSID2 if secrets.h defines it (the school's). The robot
+// tries one, then the other, alternating until one answers. netIndex = the one being tried (0 = first).
+#ifdef WIFI_SSID2
+const int N_NETS = 2;
+#else
+const int N_NETS = 1;
+#endif
+int netIndex = 0;
+
+const char* netSsid(int i) {
+#ifdef WIFI_SSID2
+  if (i == 1) return WIFI_SSID2;
+#endif
+  return WIFI_SSID;
+}
+
+void beginNet(int i) {
+#ifdef WIFI_SSID2
+  if (i == 1) { WiFi.begin(WIFI_SSID2, WIFI_PASSWORD2); return; }
+#endif
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+}
+
 // Join WiFi. Returns false (and the lab still runs over USB) if it can't.
 bool begin(unsigned long timeout_ms = 15000) {
   WiFi.mode(WIFI_STA);
   makeName();
   if (Serial) Serial.printf("This robot is %s (MAC %s)\n", name, WiFi.macAddress().c_str());
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  lastBegin = millis();   // so keepTrying()'s first retry doesn't cut off a slow join right away
   unsigned long t0 = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - t0 < timeout_ms) {
-    delay(250);
+  for (int k = 0; k < N_NETS && WiFi.status() != WL_CONNECTED; k++) {
+    netIndex = k;
+    if (k > 0) WiFi.disconnect();
+    beginNet(k);
+    lastBegin = millis();   // so keepTrying()'s first retry doesn't cut off a slow join right away
+    t0 = millis();
+    // each network gets timeout_ms / N_NETS at power-on (15 s for one network, as before; 7.5 s each for two).
+    // Chosen: a home router answered in 2-6 s; DOE: not needed (keepTrying carries on alternating in the background)
+    while (WiFi.status() != WL_CONNECTED && millis() - t0 < timeout_ms / N_NETS) {
+      delay(250);
+    }
   }
   if (WiFi.status() != WL_CONNECTED) {
     if (Serial) Serial.println("M,WiFi did not connect yet; logging over USB, and still trying in the background");
@@ -118,7 +148,8 @@ void finishUp() {
   WiFi.setSleep(false);   // power-save mode delays incoming commands (e.g. stop) by 100-300 ms
   udp.begin(CMD_PORT);
   up = true;
-  logf("M,%s joined WiFi as %s (signal %d dBm)", name, WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
+  logf("M,%s joined WiFi %s as %s (signal %d dBm)", name, netSsid(netIndex), WiFi.localIP().toString().c_str(),
+       (int)WiFi.RSSI());
 }
 
 // If WiFi didn't connect at startup, keep trying (call often while idle):
@@ -131,9 +162,10 @@ void keepTrying() {
   if (WiFi.status() == WL_CONNECTED) { finishUp(); return; }
   if (millis() - lastBegin > 20000) {
     lastBegin = millis();
-    if (Serial) Serial.println("M,still trying to join WiFi...");
+    netIndex = (netIndex + 1) % N_NETS;     // the other network next (two networks), the same one otherwise
+    if (Serial) Serial.printf("M,still trying to join WiFi (now %s)...\n", netSsid(netIndex));
     WiFi.disconnect();
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    beginNet(netIndex);
   }
 }
 

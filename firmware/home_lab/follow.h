@@ -39,6 +39,7 @@
 
 #include "pose.h"
 #include "dock.h"
+#include "border.h"
 
 extern String gRunId;
 
@@ -89,6 +90,11 @@ void log() {
 
 void tickHook() {
   pose::tick();
+  // the four-sided virtual border (border.h, 2026-10-27a): only the step stops; the laptop re-plans
+  if (border::followTick(pose::dist, pose::known) && curId && !gStepStop.length() && !gAbortReason.length()) {
+    gStepStop = "border";
+    alvik.brake();
+  }
   log();
 }
 
@@ -395,6 +401,7 @@ void run() {
     travel = 0;
     gStepStop = "";
     gFail = "";
+    border::reset();           // the border's reference starts again with every step (a re-plan may drive it back in)
     report(s.id, "started", "");
     bool ok = runStep(s);
     alvik.brake();
@@ -423,6 +430,9 @@ void run() {
         // where it stopped (own pose, floor cm / deg): the laptop maps the open edge just ahead of the line
         // sensors as a no-go strip and replans (run_plan.py); the robot holds
         snprintf(why, sizeof(why), "plywood edge at %.1f %.1f %.1f %s", pose::x, pose::y, pose::th(), edge::lastCue);
+      else if (gStepStop == "border")
+        // where it stopped and how far inside the open side it is (border.h): the laptop re-plans from there
+        snprintf(why, sizeof(why), "virtual border at %.1f %.1f %.1f %.1f", pose::x, pose::y, pose::th(), border::lastD);
       else snprintf(why, sizeof(why), "%s", gStepStop.length() ? gStepStop.c_str() : gFail.length() ? gFail.c_str() : "failed");
       lastFailed = s.id;
       report(s.id, "failed", why);

@@ -200,6 +200,8 @@ class FleetSim:
         self.events = []
         self.min_gap = (math.inf, None)
         self.min_static = (math.inf, None)
+        self.min_open = (math.inf, None)     # closest a body came to an open part of the edge (school workspace)
+        self.hung = []
         self.followed = set()
         self.log_lines = []
         self.lock = threading.Lock()
@@ -212,6 +214,38 @@ class FleetSim:
                 a = np.linspace(0, 2 * np.pi, 16, endpoint=False)
                 c, r = o["center"], o["radius"]
                 self.static_polys.append([[c[0] + r * math.cos(t), c[1] + r * math.sin(t)] for t in a])
+        # the table's real sides (school workspace, 2026-10-27): --true-sides, else the map's own. Open parts: the
+        # plywood ends there (edge guard, hang model); barrier parts: a solid 1.5 cm strip just outside the line
+        # that the front sensors see
+        self.true_sides = None
+        ts = getattr(args, "true_sides", None)
+        if ts or self.m.get("sides"):
+            mt = dict(self.m)
+            if ts:
+                mt["sides"] = parse_sides(ts)
+            mt = FM.normalize(mt)
+            self.true_sides = mt["sides"]
+            f = mt["floor"]
+            short = {"x_min": "x0", "x_max": "x1", "y_min": "y0", "y_max": "y1"}
+            self.cfg.session.board_cm = [f["x_min"], f["y_min"], f["x_max"], f["y_max"]]
+            self.cfg.session.open_edges = []
+            self.cfg.session.open_spans = {}
+            for sd in FM.SIDES:
+                bar, opn = FM.side_parts(mt, sd)
+                if opn:
+                    self.cfg.session.open_edges.append(short[sd])
+                    if bar:
+                        self.cfg.session.open_spans[short[sd]] = opn
+                for a, b in bar:
+                    v = mt["floor"][sd]
+                    out = 1.5 if sd.endswith("max") else -1.5
+                    if sd.startswith("x"):
+                        poly = [[v, a], [v + out, a], [v + out, b], [v, b]]
+                    else:
+                        poly = [[a, v], [b, v], [b, v + out], [a, v + out]]
+                    self.static_polys.append(poly)
+            for o in getattr(args, "true_objects", None) or []:       # things on the table the map does not know
+                self.static_polys.append(o)
         if float(self.m["robot"].get("back_bumper_cm", 0.0) or 0.0) > 0:
             # switches at the back (map robot.back_bumper_cm): board visits back in until a switch clicks on the board
             # (follow step P), so the boards must be solid for the switches (fw_dock, as in the touch tests)
@@ -236,6 +270,8 @@ class FleetSim:
             rb._record()
             rb.fw_yaw_sign = 0 if args.uncalibrated else 1
             rb.world_polys = self.static_polys       # shared list: a dropped brick shows up for everyone
+            if self.true_sides:
+                rb.hang_cm = 0.0                     # over an open part of the table's edge: it hangs there
             rb.radio = Radio(self, name, ip, args.laptop)
             if args.tof_robots:
                 rb.others = (lambda me: (lambda: [self.outline(o) for o in self.robots.values() if o is not me]))(rb)
@@ -272,7 +308,7 @@ class FleetSim:
             if period and now >= nxt:
                 nxt += period
                 for rb in self.robots.values():
-                    if rb.lifted:
+                    if rb.lifted or self.cam_gap(rb.name, now):
                         continue
                     msg = {"type": "fix", "robot": rb.name, "t": now,
                            "x": rb.x + rng.gauss(0, a.fix_sigma), "y": rb.y + rng.gauss(0, a.fix_sigma),
@@ -283,6 +319,82 @@ class FleetSim:
                 self.send_json(sent.popleft()[1])
             self.events_due(now)
             time.sleep(0.005)
+
+    HAND_BEFORE_S, HAND_AFTER_S = 1.2, 0.6      # the hand is in the picture this long before / after the brick lands
+
+    def picture_loop(self):
+        """--brick-camera: the overhead camera's pictures of the table (tools/sim/table_cam.py) at the brick watch's
+        rate, through the real "what changed" watch (tools/fleet/brickwatch.py): a hand reaches in from off the table
+        and puts the brick down; the watch reports the brick to run_plan as the camera would. Pictures where it reported
+        are saved (brick_seen.png) for the build report."""
+        import cv2
+        for p in (os.path.join(REPO, "tools", "experiment"), os.path.join(REPO, "tools", "recognition")):
+            if p not in sys.path:
+                sys.path.append(p)          # after the simulator's own modules (config.py, camera.py)
+        import table_cam as TC
+        import brickwatch as BW
+        f = self.m["floor"]
+        rect = (f["x_min"], f["y_min"], f["x_max"], f["y_max"])
+        tc = TC.TableCamera(rect, seed=self.args.seed + 11)
+        import e02_camera as CAM
+        cam = CAM.load_camera(tc.true_model(os.path.join(self.args.out, "table_camera.json")))
+        rng = random.Random(self.args.seed + 13)
+
+        def spots():
+            return [(rb.x + rng.gauss(0, 0.5), rb.y + rng.gauss(0, 0.5)) for rb in self.robots.values()]
+
+        def poses():
+            return [(rb.x, rb.y, rb.th) for rb in self.robots.values()]
+
+        def send(ob):
+            msg = {k: v for k, v in ob.items() if k != "area_cm2"}
+            self.send_json(msg)
+            self.event(dict(kind="camera_reported_brick", t=round(time.time() - self.t_plan0, 2), id=ob["id"],
+                            how="brick watch", area_cm2=ob.get("area_cm2")))
+        w = BW.BrickWatch(cam, rect, send=send, log=self.log)
+        while not self.stop.is_set() and self.t_plan0 is None:
+            time.sleep(0.05)
+        w.start([tc.render(poses()) for _ in range(5)], spots())
+        spec = self.args.brick
+        hand_from = None
+        saved = False
+        while not self.stop.is_set():
+            now = time.time()
+            boxes, hand = [], None
+            t_rel = now - self.t_plan0
+            if spec and self.brick is None and spec["t"] - self.HAND_BEFORE_S <= t_rel and self.brick_t is None:
+                # the hand comes in towards where the brick will land (placed at spec t); before then aim at the middle
+                hand = ((f["x_min"] + f["x_max"]) / 2, (f["y_min"] + f["y_max"]) / 2)
+            if self.brick is not None:
+                boxes = [self.brick.tolist()]
+                if now - self.brick_t <= self.HAND_AFTER_S:
+                    c = self.brick.mean(0)
+                    hand = (float(c[0]), float(c[1]))
+            if hand is not None:
+                hand_from = (hand[0], f["y_max"] + 60.0)          # the arm comes from the far side, off the table
+                img = tc.render(poses(), boxes, (hand, hand_from))
+            else:
+                img = tc.render(poses(), boxes)
+            got = w.check(img, spots(), now)
+            if got and not saved:
+                cv2.imwrite(os.path.join(self.args.out, "brick_seen.png"), img)
+                saved = True
+            if hand is not None and not getattr(self, "_hand_png", False) and self.brick is not None:
+                cv2.imwrite(os.path.join(self.args.out, "brick_hand.png"), img)
+                self._hand_png = True
+            time.sleep(max(0.0, 1.0 / BW.CHECK_HZ - (time.time() - now)))
+        self.event(dict(kind="brick_watch", checks=w.checks, hand_checks=w.hand_seen, objects=len(w.confirmed)))
+
+    def cam_gap(self, name, now):
+        """--cam-gap NAME@T:DUR: the camera does not see that robot for DUR s from T s after the plan starts."""
+        if self.t_plan0 is None:
+            return False
+        for g in getattr(self.args, "cam_gap", None) or []:
+            n, _, rest = g.partition("@")
+            t0, _, dur = rest.partition(":")
+            if n == name and float(t0) <= now - self.t_plan0 < float(t0) + float(dur):
+                return True
+        return False
 
     def send_json(self, msg):
         try:
@@ -320,7 +432,9 @@ class FleetSim:
             c = poly.mean(0)
             self.event(dict(kind="brick", t=round(now - self.t_plan0, 2), center=[round(c[0], 1), round(c[1], 1)],
                             points=poly.round(2).tolist()))
-            self.cam_report_at = now + self.args.cam_delay
+            if not getattr(self.args, "brick_camera", False):
+                self.cam_report_at = now + self.args.cam_delay
+            # (--brick-camera: the picture loop below shows the hand and the brick, and the brick watch reports it)
         if self.brick is not None and getattr(self, "cam_report_at", None) and now >= self.cam_report_at:
             self.cam_report_at = None
             rng = np.random.default_rng(self.args.seed)
@@ -414,6 +528,14 @@ class FleetSim:
                     g = G.polygon_polygon_dist(c, self.brick)
                     if g < self.min_static[0]:
                         self.min_static = (g, [n, "brick", round(now - self.t_plan0, 2)])
+                if self.true_sides:
+                    # the body's nearest corner to an open part of the table's edge (negative: over it)
+                    g = max(r.past_open_edge(float(px), float(py)) for px, py in c)
+                    if -g < self.min_open[0]:
+                        self.min_open = (-g, [n, round(now - self.t_plan0, 2)])
+                    if getattr(r, "hung", False) and n not in self.hung:
+                        self.hung.append(n)
+                        self.event(dict(kind="hung", robot=n, t=round(now - self.t_plan0, 2)))
         f.close()
 
     # ---------------------------------------------------------------- results
@@ -446,6 +568,11 @@ class FleetSim:
                    robot_runs={n: [dict(run=r["run"], exp=r["exp"], result=r["result"]) for r in rb.runs]
                                for n, rb in self.robots.items()},
                    tof_sees_robots=bool(self.args.tof_robots), seed=self.args.seed)
+        if self.true_sides:
+            rep["true_sides"] = self.true_sides
+            rep["min_open_edge_cm"] = None if not math.isfinite(self.min_open[0]) else round(self.min_open[0], 2)
+            rep["min_open_edge_at"] = self.min_open[1]
+            rep["hung"] = list(self.hung)
         if out:
             ge = [abs(d["gap_error_cm"]) for d in out]
             rep["dock_gap_error_cm_max"] = max(ge)
@@ -460,6 +587,8 @@ class FleetSim:
         threads = [threading.Thread(target=rb.firmware_loop, args=(self,), daemon=True) for rb in self.robots.values()]
         threads += [threading.Thread(target=self.camera_loop, daemon=True),
                     threading.Thread(target=self.monitor_loop, daemon=True)]
+        if getattr(self.args, "brick_camera", False):
+            threads.append(threading.Thread(target=self.picture_loop, daemon=True))
         for t in threads:
             t.start()
         try:
@@ -480,6 +609,29 @@ class FleetSim:
             f.write("\n".join(self.log_lines) + "\n")
         self.log("report written to %s" % os.path.join(self.args.out, "sim_report.json"))
         return rep
+
+
+def parse_sides(spec):
+    """"x_min=open,x_max=barrier,y_min=partial:0-60:90-120,y_max=open" -> the map's "sides"."""
+    out = {}
+    for part in spec.split(","):
+        k, _, v = part.partition("=")
+        kind, *spans = v.split(":")
+        sd = {"kind": kind.strip()}
+        if spans:
+            sd["barrier"] = [[float(x) for x in sp.split("-")] for sp in spans]
+        out[k.strip()] = sd
+    return out
+
+
+def parse_object(spec):
+    """"x,y,w,h[,angle]": a box on the table (centre, size cm, angle deg) the map does not know."""
+    v = [float(x) for x in spec.split(",")]
+    x, y, w, h = v[:4]
+    a = math.radians(v[4]) if len(v) > 4 else 0.0
+    c, s_ = math.cos(a), math.sin(a)
+    return [[x + c * u - s_ * w2, y + s_ * u + c * w2] for u, w2 in ((-w / 2, -h / 2), (w / 2, -h / 2), (w / 2, h / 2),
+                                                                     (-w / 2, h / 2))]
 
 
 def parse_brick(s):
@@ -509,6 +661,15 @@ def main(argv=None):
     ap.add_argument("--start-noise", type=float, default=0.5, help="placement error on the start spots, cm (x3 for deg)")
     ap.add_argument("--uncalibrated", action="store_true", help="robots need a calibrate first")
     ap.add_argument("--tof-robots", type=int, default=1, help="1: the front sensor sees the other robots")
+    ap.add_argument("--brick-camera", action="store_true",
+                    help="the brick is seen by the simulated overhead camera through the brick watch (a hand puts it "
+                         "down), not reported perfectly")
+    ap.add_argument("--cam-gap", action="append", default=[], metavar="NAME@T:DUR",
+                    help="the camera loses that robot for DUR s from T s after the plan starts (repeatable)")
+    ap.add_argument("--true-sides", help="the table's real side kinds (default: the map's), e.g. "
+                                         "x_min=open,x_max=barrier,y_min=partial:0-60,y_max=open")
+    ap.add_argument("--true-object", dest="true_objects", type=parse_object, action="append", default=[],
+                    help="x,y,w,h[,angle]: a box on the table the map does not know (repeatable)")
     ap.add_argument("--brick", type=parse_brick, help="auto@T or x,y[,angle]@T (s after the first step)")
     ap.add_argument("--brick-ahead-s", type=float, default=3.0)
     ap.add_argument("--cam-delay", type=float, default=0.5, help="camera reports a new obstacle after this, s")

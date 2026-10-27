@@ -72,6 +72,17 @@ HOME_DOCK_DEFAULTS = {"pocket_w_cm": _dp_cm("POCKET_W_MM", 10.32), "pocket_depth
 
 OBSTACLE_SOURCES = ("camera", "distance_sensor", "edge_guard", "user")   # edge_guard: an open plywood edge
 
+# General workspace (school demo, 2026-10-27; docs/build-plans/mission-control.md): the table's rectangle (floor) plus
+# each side's kind, named spots and no-go zones. Nothing assumes boards. A map without "sides" keeps the old meaning
+# (every floor edge a wall-like limit, no extra margin).
+SIDES = ("x_min", "x_max", "y_min", "y_max")          # the line x = x_min, x = x_max, y = y_min, y = y_max
+SIDE_KINDS = ("open", "barrier", "partial", "unknown")  # unknown: not felt yet, treated as open
+OPEN_MARGIN_CM = 3.0    # chosen: extra room the planner keeps from an open (drop) edge, on top of safety_margin_cm:
+                        # the camera's error near the table's edges (~3 cm, the brief's Chicken note; 3-5 cm seen at
+                        # 15:10 / 21:14 near the plywood edges). DOE note: 2 / 3 / 5 cm on the school table's warm-up
+                        # (edge-guard trips per hour against time lost); docs/doe-backlog.md
+NOGO_STATUS = ("proposed", "confirmed")                # proposed: from a warm-up bump, for Nick to confirm or delete
+
 
 class MapError(ValueError):
     pass
@@ -142,7 +153,15 @@ def normalize(m):
         poly = [_pt(p, "keep-out %d point" % (i + 1))[:2] for p in (k.get("polygon") or [])]
         if len(poly) < 3:
             raise MapError("keep-out %d needs at least 3 points" % (i + 1))
-        out["keepouts"].append({"name": str(k.get("name") or "keepout%d" % (i + 1)), "polygon": poly})
+        ko = {"name": str(k.get("name") or "keepout%d" % (i + 1)), "polygon": poly}
+        if "status" in k:                  # a no-go zone: proposed (a warm-up bump) or confirmed; both are kept out of
+            if k["status"] not in NOGO_STATUS:   # until deleted
+                raise MapError("keep-out %s status must be proposed or confirmed" % ko["name"])
+            ko["status"] = k["status"]
+        for extra in ("source", "note", "frame"):
+            if extra in k:
+                ko[extra] = k[extra]
+        out["keepouts"].append(ko)
 
     for i, o in enumerate(m.get("obstacles") or []):
         out["obstacles"].append(_norm_obstacle(o, i))
@@ -182,12 +201,85 @@ def normalize(m):
             pk.append(st[2])
         out["robots"].append({"name": nm, "start": st[:3], "park": pk[:3]})
 
+    if m.get("sides") is not None:
+        out["sides"] = _norm_sides(m["sides"], f)
+        out["open_margin_cm"] = float(m.get("open_margin_cm", OPEN_MARGIN_CM))
+        if out["open_margin_cm"] < 0:
+            raise MapError("open_margin_cm must be >= 0")
+    spots = {}
+    for nm, v in (m.get("spots") or {}).items():
+        pt = _pt(v, "spot %s" % nm)
+        if not (f["x_min"] <= pt[0] <= f["x_max"] and f["y_min"] <= pt[1] <= f["y_max"]):
+            raise MapError("spot %s (%.1f, %.1f) is off the table" % (nm, pt[0], pt[1]))
+        spots[str(nm)] = pt[:3]
+    if spots:
+        out["spots"] = spots
+
     tasks = m.get("tasks") or {}
     for rn, t in tasks.items():
         if rn not in rnames:
             raise MapError("tasks given for robot %r, which is not in robots" % rn)
-        out["tasks"][rn] = _norm_tasks(t, names, rn)
+        out["tasks"][rn] = _norm_tasks(t, names, rn, spots)
     return out
+
+
+def _norm_sides(sides, f):
+    """{"x_min": {"kind": "open" | "barrier" | "partial" | "unknown", "barrier": [[lo, hi], ...]}, ...}: the barrier
+    spans (along the side: y for the x sides, x for the y sides) of a partial side; the rest of it is open. A side not
+    given is "unknown" (treated as open)."""
+    if not isinstance(sides, dict):
+        raise MapError("sides must be an object with x_min, x_max, y_min, y_max")
+    out = {}
+    for k in sides:
+        if k not in SIDES:
+            raise MapError("unknown side %r (use %s)" % (k, ", ".join(SIDES)))
+    for k in SIDES:
+        v = sides.get(k) or {"kind": "unknown"}
+        if isinstance(v, str):
+            v = {"kind": v}
+        kind = str(v.get("kind", "unknown"))
+        if kind not in SIDE_KINDS:
+            raise MapError("side %s: kind must be one of %s" % (k, ", ".join(SIDE_KINDS)))
+        lo, hi = (f["y_min"], f["y_max"]) if k.startswith("x") else (f["x_min"], f["x_max"])
+        spans = []
+        if kind == "partial":
+            for sp in v.get("barrier") or []:
+                a, b = sorted(_pt(sp, "side %s barrier span" % k)[:2])
+                a, b = max(a, lo), min(b, hi)
+                if b > a:
+                    spans.append([a, b])
+            if not spans:
+                raise MapError("side %s is partial but has no barrier span inside it" % k)
+            spans.sort()
+        sd = {"kind": kind}
+        if spans:
+            sd["barrier"] = spans
+        for extra in ("source", "felt"):
+            if extra in v:
+                sd[extra] = v[extra]
+        out[k] = sd
+    return out
+
+
+def side_parts(m, side):
+    """(barrier spans, open spans) along a side, each [[lo, hi], ...] in floor cm along it. A map without sides: the
+    whole side is a barrier-like limit (the old meaning)."""
+    f = m["floor"]
+    lo, hi = (f["y_min"], f["y_max"]) if side.startswith("x") else (f["x_min"], f["x_max"])
+    sd = (m.get("sides") or {}).get(side)
+    if sd is None or sd["kind"] == "barrier":
+        return [[lo, hi]], []
+    if sd["kind"] in ("open", "unknown"):
+        return [], [[lo, hi]]
+    bar = [list(x) for x in sd["barrier"]]
+    opn, a = [], lo
+    for b0, b1 in bar:
+        if b0 > a:
+            opn.append([a, b0])
+        a = max(a, b1)
+    if a < hi:
+        opn.append([a, hi])
+    return bar, opn
 
 
 def _norm_obstacle(o, i):
@@ -213,21 +305,49 @@ def _norm_obstacle(o, i):
     return ob
 
 
-def _norm_tasks(t, board_names, rn):
+def _norm_tasks(t, board_names, rn, spots=None):
     """Task list: ["A", "B"] or {"visit": [...], "any_order": false, "park": true}.
-    A visit item is a board name or {"goto": [x, y]} / {"goto": [x, y, heading]}."""
+    A visit item is a board name, {"goto": [x, y]} / {"goto": [x, y, heading]}, {"spot": "A"} (a named spot: becomes
+    a goto that keeps the name) or {"wait_s": 5} (stand still)."""
     if isinstance(t, list):
         t = {"visit": t}
+    spots = spots or {}
     visit = []
     for it in t.get("visit") or []:
         if isinstance(it, str):
             if it not in board_names:
                 raise MapError("robot %s: no board called %r" % (rn, it))
             visit.append(it)
+        elif isinstance(it, dict) and "spot" in it:
+            nm = str(it["spot"])
+            if nm not in spots:
+                raise MapError("robot %s: no spot called %r" % (rn, nm))
+            visit.append({"goto": list(spots[nm]), "spot": nm})
         elif isinstance(it, dict) and "goto" in it:
-            visit.append({"goto": _pt(it["goto"], "robot %s goto" % rn)})
+            g = {"goto": _pt(it["goto"], "robot %s goto" % rn)}
+            for k in ("spot", "label"):
+                if k in it:
+                    g[k] = it[k]
+            visit.append(g)
+        elif isinstance(it, dict) and "wait_s" in it:
+            w = float(it["wait_s"])
+            if w < 0:
+                raise MapError("robot %s: wait_s must be >= 0" % rn)
+            visit.append({"wait_s": w, **({"label": str(it["label"])} if it.get("label") else {})})
+        elif isinstance(it, dict) and "probe" in it:
+            # a slow straight creep (the warm-up's side feel): from (x0, y0) towards (x1, y1), which may be past the
+            # table's edge; it ends at the first edge-guard trip or front-sensor stop (tools/fleet/warmup.py)
+            pr = [float(v) for v in it["probe"]]
+            if len(pr) != 4:
+                raise MapError("robot %s: probe must be [x0, y0, x1, y1]" % rn)
+            g = {"probe": pr, "front_cm": float(it.get("front_cm", 3.0))}
+            for k in ("label", "side", "along", "kind"):
+                if k in it:
+                    g[k] = it[k]
+            visit.append(g)
         else:
-            raise MapError("robot %s: task %r is not a board name or {goto: [x, y]}" % (rn, it))
+            raise MapError("robot %s: task %r is not a board name, {goto: [x, y]}, {spot: name} or {wait_s: s}"
+                           % (rn, it))
     return {"visit": visit, "any_order": bool(t.get("any_order", False)), "park": bool(t.get("park", True))}
 
 
@@ -251,6 +371,10 @@ def map_hash(m):
     boards, keep-outs, obstacles, robots. Not tasks or notes."""
     m = normalize(m)
     keep = {k: m[k] for k in ("floor", "robot", "dock", "boards", "keepouts", "obstacles", "robots")}
+    if m.get("sides"):
+        keep["sides"] = m["sides"]
+        keep["open_margin_cm"] = m["open_margin_cm"]
+    keep["keepouts"] = [{k: v for k, v in o.items() if k in ("name", "polygon")} for o in keep["keepouts"]]
     keep["obstacles"] = [{k: v for k, v in o.items() if k not in ("time", "note")} for o in keep["obstacles"]]
     s = json.dumps(keep, sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(s.encode()).hexdigest()[:16]
@@ -392,6 +516,14 @@ class World:
         self.m = m
         f = m["floor"]
         self.box = (f["x_min"], f["x_max"], f["y_min"], f["y_max"])
+        # per-side parts: (side, span lo, span hi, extra margin); None = the old meaning (plain box)
+        self.sides = None
+        if m.get("sides"):
+            om = float(m.get("open_margin_cm", OPEN_MARGIN_CM))
+            self.sides = []
+            for sd in SIDES:
+                bar, opn = side_parts(m, sd)
+                self.sides += [(sd, a, b, 0.0) for a, b in bar] + [(sd, a, b, om) for a, b in opn]
         self.polys = []      # (name, (K,2))
         self.circles = []    # (name, centre (2,), radius)
         for b in m["boards"]:
@@ -415,10 +547,21 @@ class World:
             self.polys.append((nm, np.array(o["points"], float)))
 
     def edge_dist(self, p):
-        """Distance from points to the floor edge (negative outside)."""
+        """Distance from points to the floor edge (negative outside). With per-side kinds, an open part of a side
+        counts open_margin_cm nearer than it is (the planner keeps that much more room from a drop)."""
         x0, x1, y0, y1 = self.box
         p = np.atleast_2d(p)
-        return np.minimum.reduce([p[:, 0] - x0, x1 - p[:, 0], p[:, 1] - y0, y1 - p[:, 1]])
+        if not self.sides:
+            return np.minimum.reduce([p[:, 0] - x0, x1 - p[:, 0], p[:, 1] - y0, y1 - p[:, 1]])
+        perp = {"x_min": p[:, 0] - x0, "x_max": x1 - p[:, 0], "y_min": p[:, 1] - y0, "y_max": y1 - p[:, 1]}
+        d = np.full(len(p), np.inf)
+        for sd, a, b, mg in self.sides:
+            q = perp[sd]
+            al = p[:, 1] if sd.startswith("x") else p[:, 0]
+            g = np.maximum(np.maximum(a - al, al - b), 0.0)
+            dd = np.where(q >= 0, np.hypot(q, g), q) - mg
+            np.minimum(d, dd, out=d)
+        return d
 
     def clearance(self, p):
         """Distance from points (N,2) to the nearest obstacle or floor edge."""

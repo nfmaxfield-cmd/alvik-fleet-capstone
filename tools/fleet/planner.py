@@ -84,6 +84,9 @@ DEFAULT_SETTINGS = {
                                     # 1.0 s over the 20-re-plan bench and dry runs with brick drops (robots held,
                                     # seconds lost to holds, closest approach); docs/doe-backlog.md
     "skip_unreachable": False,  # drop tasks that cannot be reached instead of failing
+    "probe_cms": 3.0,           # warm-up side feel: creep speed (chosen: the approach speed, approach_cms, which the
+                                # front sensor's 15 Hz and the edge guard's 3 checks were set for; DOE note: 2 / 3 / 5 cm/s
+                                # against the stop distance past the edge on the school table; docs/doe-backlog.md)
 }
 
 
@@ -422,13 +425,45 @@ def _visit_prims(item, pose, task, grid, docks, s, body):
         pose = out[-1]["to"]
         out += _visit_tail(pose, item, d, task, s, "approach")
         return out, out[-1]["to"]
+    if "wait_s" in item:
+        w = wait_prim(pose, _ticks(max(item["wait_s"], s.tick_s), s), s, phase="pause", task=task)
+        if item.get("label"):
+            w["label"] = item["label"]
+        return [w], pose
+    if "probe" in item:
+        return _probe_prims(item, pose, task, grid, s)
     g = item["goto"]
     out += _travel(pose, g, grid, s, task, "point (%.1f, %.1f)" % (g[0], g[1]))
     pose = out[-1]["to"] if out else pose
     if len(g) > 2:
         out.append(turn_prim(pose, math.radians(g[2]), s, phase="travel", task=task))
-    return [p for p in out if not (p["type"] == "turn" and abs(p["turn"]) < math.radians(0.5))], \
-        (out[-1]["to"] if out else pose)
+    out = [p for p in out if not (p["type"] == "turn" and abs(p["turn"]) < math.radians(0.5))]
+    if item.get("label") and out:
+        out[-1]["label"] = item["label"]
+    return out, (out[-1]["to"] if out else pose)
+
+
+def _probe_prims(item, pose, task, grid, s):
+    """A warm-up side feel: drive to the probe's start (a planned, safe point), face the end, creep there at
+    probe_cms (phase "probe"; the end may be past the table's edge: the edge guard or the front sensor ends it), then
+    back straight out to the start (phase "probe_back") when nothing stopped it. The creep's front check expects
+    something at front_cm (its step's front_min_cm), so a barrier stops it close, not at the usual 7 cm."""
+    x0, y0, x1, y1 = item["probe"]
+    out = _travel(pose, [x0, y0], grid, s, task, "probe start (%.1f, %.1f)" % (x0, y0))
+    pose = out[-1]["to"] if out else pose
+    h = math.atan2(y1 - y0, x1 - x0)
+    if abs(G.wrap(h - pose[2])) >= math.radians(0.5):
+        out.append(turn_prim(pose, h, s, phase="travel", task=task))
+        pose = out[-1]["to"]
+    cr = drive_prims(pose, [x1, y1], s, speed=s.probe_cms, phase="probe", task=task, heading=h)
+    for p in cr:
+        p["front_cm"] = item.get("front_cm", 3.0)
+        if item.get("label"):
+            p["label"] = item["label"]
+    out += cr
+    end = cr[-1]["to"] if cr else pose
+    out += drive_prims(end, [x0, y0], s, speed=s.backout_cms, reverse=True, phase="probe_back", task=task, heading=h)
+    return out, (out[-1]["to"] if out else pose)
 
 
 def _visit_tail(pose, board, d, task, s, phase):
@@ -821,8 +856,9 @@ class Planner:
     def candidate_orders(self, job, keep=3):
         n = len(job.visits)
         base = list(range(n))
-        if not job.any_order or n < 2:
-            return [base]
+        if not job.any_order or n < 2 or any(isinstance(v, dict) and ("wait_s" in v or "probe" in v)
+                                             for v in job.visits):
+            return [base]           # an instruction list with waits keeps its order
         pts = [job.hold()[:2]] + [self._goal_xy(v) for v in job.visits] + [job.park_pose[:2]]
         D = np.array([[self.grid.geodesic(a, b) for b in pts] for a in pts])
 
@@ -890,7 +926,9 @@ class Planner:
         (the timing check still keeps the separation)."""
         s, body = self.s, self.body
         R = body.r_turn + s.separation_cm + _slack(body, s) - s.safety_margin_cm
-        mine = [np.array(start_pose[:2])] + [np.array(self._goal_xy(v), float) for v in job.visits]
+        mine = [np.array(start_pose[:2])] + [np.array(self._goal_xy(v), float) for v in job.visits
+                                             if not (isinstance(v, dict) and ("wait_s" in v or "probe" in v))]
+        mine += [np.array(v["probe"][:2], float) for v in job.visits if isinstance(v, dict) and "probe" in v]
         if job.park:
             mine.append(np.array(job.park_pose[:2], float))
 
@@ -1217,6 +1255,8 @@ def verify(m, plan, step_s=0.02):
             p = step_to_prim(st)
             if st["type"] in ("approach", "backout") or st["phase"] in ("approach", "backout", "escape", "dwell"):
                 continue   # checked below against everything but the target board
+            if st["phase"] in ("probe", "probe_back"):
+                continue   # a warm-up side feel goes to the edge on purpose (the edge guard / front sensor end it)
             if st["type"] in ("turn", "park"):
                 c = float(world.clearance(np.array(p["from"][:2])[None])[0]) - body.r_turn
             elif st["type"] == "drive":
@@ -1301,6 +1341,11 @@ def to_steps(sched, after, s, t0=0.0, committed=0, front_ray=None, gap_cm=1.0, b
             st["max_travel_cm"] = round(L + gap_cm - s.approach_margin_cm, 2)
         if p["type"] == "drive" and p["phase"] == "backout":
             pass
+        if p["phase"] == "probe":
+            st["front_min_cm"] = p.get("front_cm", 3.0)      # a barrier is expected right at the end: stop close
+            st.pop("front_clear_cm", None)
+        if p.get("label"):
+            st["label"] = p["label"]
         if i < committed:
             st["committed"] = True
         out.append(st)
@@ -1346,6 +1391,10 @@ def step_to_prim(st):
          "speed": st.get("speed"), "reverse": st.get("reverse", False),
          "turn": math.radians(st["turn_deg"]) if "turn_deg" in st else None,
          "dur_s": st["t_end"] - st["t_start"]}
+    if st.get("label"):
+        p["label"] = st["label"]
+    if st["phase"] == "probe" and st.get("front_min_cm") is not None:
+        p["front_cm"] = st["front_min_cm"]
     return p
 
 
@@ -1530,8 +1579,16 @@ def _tasks_of(m, name):
 
 
 def _remaining_prim(st, pose, s, dwell_left_s=None):
-    """The rest of a step that is under way, from the robot's pose now."""
+    """The rest of a step that is under way, from the robot's pose now (keeping its label and a feel's front check)."""
     p = step_to_prim(st)
+    out = _remaining_core(st, p, pose, s, dwell_left_s)
+    for k in ("label", "front_cm"):
+        if k in p:
+            out[k] = p[k]
+    return out
+
+
+def _remaining_core(st, p, pose, s, dwell_left_s):
     if st["type"] in ("drive", "approach"):
         L = math.dist(pose[:2], p["to"][:2])
         v = st["speed"] or s.cruise_cms
@@ -1611,6 +1668,7 @@ def obstacle_decide(m, plan, states, new_obstacles, over=None):
     w_new = FM.World({**m2, "boards": [], "keepouts": [], "obstacles": []},
                      extra=[FM._norm_obstacle(o, i) for i, o in enumerate(new_obstacles)])
     w_new.box = (-1e9, 1e9, -1e9, 1e9)    # only the new obstacles count here
+    w_new.sides = None
     names = list(plan["robots"])
     budget_s = carry_on_s(s)
     budget_ticks = _ticks(budget_s, s)
@@ -1785,6 +1843,9 @@ def obstacle_replan(dec):
         seq_visits = [v for v in old["visit_order"] if v != "park"]
         off = old.get("task_offset", 0)
         lead = []
+        if nxt["phase"] == "probe_back" or (nxt["phase"] == "probe" and st.get("ended")):
+            task_i += 1         # a side feel that ended by itself (edge guard, front sensor) has its answer: not again.
+            #                     One halted for someone else's re-plan is tried again
         if nxt.get("board") and nxt["phase"] in ("approach", "dwell", "backout"):
             d = FM.dock_for(m2, next(b for b in m2["boards"] if b["name"] == nxt["board"]))
             lead = _visit_tail(hold, nxt["board"], d, task_i, s, nxt["phase"])

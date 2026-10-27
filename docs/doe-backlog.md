@@ -311,6 +311,21 @@ REPAIR_ROUNDS 2 (a loop guard), SEEN_RAY_MIN_CM 8 (below it the heading is noise
 wheels' count + 5 %, a lost turn 0 to 1.2 x told: physical limits), EXPLORE_BUMPER_AHEAD_CM 6 (measure it with a
 ruler). The analysis's own SIDE_NEAR_CM 15 and AHEAD_CM 8 (exsum.py) only sort contacts for the report.
 
+## School demo engine (2026-10-27, built)
+
+Write-up: [e02-oct27-school-engine.md](build-reports/e02-oct27-school-engine.md). Each number's code comment says the
+same.
+
+| Number (where) | Value chosen | Experiment that would set it | Needs | Status |
+|---|---|---|---|---|
+| Carry-on horizon while the first safe re-plan is made (planner.py replan_first_budget_s) | 0.5 s | `bench_replan.py` and dry runs with brick drops at 0.25 / 0.5 / 1.0 s: robots held, seconds lost to holds, closest approach | Sim | open |
+| Extra room from an open (drop) side (fleetmap.py OPEN_MARGIN_CM) | 3 cm | The school table's warm-up and a run at 2 / 3 / 5 cm: edge-guard trips per hour against time lost | Board (school) | open |
+| The robots' own four-sided border (run_plan.py BORDER_CM) | 6 cm | Dry runs with camera offsets of 2 / 5 / 8 cm, then the school table: border stops per hour against edge-guard trips at 5 / 6 / 8 cm | Sim, then Board | open |
+
+Chosen with no DOE: border.h's 5 cm half-width beside a partly open stretch (the Alvik's 4.75 cm half width: geometry);
+the WiFi join time split between two networks at power-on (the background retry keeps alternating, so it only sets how
+soon the first try ends).
+
 ## Already set by data
 
 - **Line edge cue edge_thr 150** (e02.py SAFETY_SETTINGS): plywood reads 52-84 in every E02 session, the two real

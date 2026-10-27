@@ -224,6 +224,9 @@ class SessionModel:
     # cement past an open side. Only the line sensors and the bottom zone use it (nothing falls off).
     board_cm: Optional[List[float]] = None
     open_edges: List[str] = field(default_factory=list)
+    # partly open sides (school workspace, 2026-10-27): {"y0": [[lo, hi], ...]}: only these stretches along the side
+    # are open (a side in open_edges with no entry here is open all along)
+    open_spans: dict = field(default_factory=dict)
     board_thick_cm: float = 1.9
     # floor seams (E02): lines [x0, y0, x1, y1] where two plywood sheets meet. Crossing one with the axle jolts
     # the accelerometer (seam_jolt_g, random sign, ~15 ms) and slows the wheels to seam_dip_frac for seam_dip_ms.

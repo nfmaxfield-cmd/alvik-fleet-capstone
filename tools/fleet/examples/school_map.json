@@ -1,0 +1,14 @@
+{
+ "format": "alvik-fleet-map",
+ "version": 1,
+ "notes": "School demo table (Monday 2026-11-02). ASSUMED size 152 x 76 cm (a 5 ft x 2.5 ft classroom table) until Nick measures it; no boards: every side an open edge until the warm-up feels it. Spots A-C are examples.",
+ "floor": {"x_min": 0, "x_max": 152, "y_min": 0, "y_max": 76},
+ "sides": {"x_min": "open", "x_max": "open", "y_min": "open", "y_max": "open"},
+ "robot": {"length_cm": 9.5, "width_cm": 9.5, "front_offset_cm": 4.75},
+ "spots": {"A": [25, 55], "B": [76, 40], "C": [127, 55]},
+ "robots": [{"name": "Left", "start": [30, 18, 90]}, {"name": "Center", "start": [76, 18, 90]},
+            {"name": "Right", "start": [122, 18, 90]}],
+ "tasks": {"Left": {"visit": [{"spot": "C"}, {"wait_s": 2}, {"spot": "A"}]},
+           "Center": {"visit": [{"spot": "B"}, {"wait_s": 3}]},
+           "Right": {"visit": [{"spot": "A"}, {"wait_s": 2}, {"spot": "C"}]}}
+}
