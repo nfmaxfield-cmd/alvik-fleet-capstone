@@ -28,6 +28,11 @@ Answered ones move to the bottom with the answer and date.
 19. A 2-minute who's-who check on the board today: drive one robot to stop about 13 cm from a parked one and watch
     for "who is who is checked" then "it is Left"?
 20. Should the new DOE notes go into docs/doe-backlog.md too?
+21. Was the overhead camera raised or lowered this morning? If so, its new lens height (yesterday 262 cm) for the
+    camera setup page.
+22. If the flash check recommends a darker exposure, use it from today on (check the first test's camera fixes are
+    still accepted), or keep automatic?
+23. Is the board's 0,0 corner physically marked, so corner 1 can be confirmed by eye?
 
 ### Robots and sessions
 8. What stands just beyond the home board's x = 0 edge at about y = 30-60? (Your 07:45 "yes" to this one was read as
