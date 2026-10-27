@@ -777,14 +777,14 @@ class Ladder:
                 # the side camera now looks too): it cannot be followed, so it never moves today, but it is on every
                 # map where its lights are, so the others go round it (OBSTACLE_R_CM covers the ~3 cm from its lights
                 # to its middle)
-                cams = "the overhead camera" + (" nor the side camera" if eye.trk.side is not None else
-                                                " (the side camera is not in use: %s)" % eye.side_words)
-                say("  %s: its lights are at (%.1f, %.1f), but neither %s can see its body there (too little "
-                    "contrast with the board): kept out, parked there; the others go round it." % (n, q[0], q[1], cams))
+                cams = "neither the overhead camera nor the side camera can" if eye.trk.side is not None else \
+                    "the overhead camera cannot (the side camera is not in use: %s)" % eye.side_words
+                say("  %s: its lights are at (%.1f, %.1f), but %s see its body there (too little contrast with the "
+                    "board): kept out, parked there; the others go round it." % (n, q[0], q[1], cams))
                 r = self.st["robots"].setdefault(n, {})
                 r.update(x=round(q[0], 2), y=round(q[1], 2), t=round(time.time(), 1), body_unseen=True)
                 r.pop("h", None)
-                self.st["kept_out"].setdefault(n, "the camera cannot see its body (only its lights)")
+                self.st["kept_out"].setdefault(n, "no camera can see its body (only its lights)")
                 self.save()
                 continue
             found[n] = p

@@ -83,6 +83,9 @@ AMBIG_LIGHT_CM = 3.0    # another robot's prediction within this of being as nea
 OCCLUDE_RPX = 1.1       # chosen: two robots whose bodies' centres are this many body widths apart in the side picture
                         # are in line from the side camera: its outlines are not trusted for either
 SIDE_BORDER = 0.6       # a side outline whose centre is within this many body widths of the picture's border is cut off
+SIDE_HIDDEN = 1.0       # a robot predicted within this many body widths of the side picture's border is "hidden" from
+                        # it, not missed (its top sticks out further up the picture than its middle). Chosen, last
+                        # night's footage: Left at the picture's top edge. No DOE: geometry
 UNKNOWN_EXTRA_RANGE = (4.0, 14.0)   # tune_unknown keeps the filled-in floor's margin within these (14: MotionTracker's)
 
 
@@ -239,8 +242,8 @@ class TwoCamTracker(MT.MultiTracker):
             u, v = self.side._px(p[0], p[1])
             r = self.side._rpx_at(p[0], p[1])
             px.append((u, v, r))
-            if not (np.isfinite(u) and np.isfinite(v)) or not (r * SIDE_BORDER <= u <= W - r * SIDE_BORDER
-                                                               and r * SIDE_BORDER <= v <= H - r * SIDE_BORDER):
+            if not (np.isfinite(u) and np.isfinite(v)) or not (r * SIDE_HIDDEN <= u <= W - r * SIDE_HIDDEN
+                                                               and r * SIDE_HIDDEN <= v <= H - r * SIDE_HIDDEN):
                 out[i] = ("hidden", "outside the side camera's picture")
         for i in range(len(preds)):
             for j in range(i + 1, len(preds)):
@@ -363,11 +366,12 @@ class TwoCamTracker(MT.MultiTracker):
                                                     missed=0))
         pos, src, sigma, why, obs_t = None, None, None, "", None
         if so and len(o) > 5 and o[5] < BIAS_AREA * self.area and self.side is not None and (
-                ss or s is None or not self._fresh(s, t, FRESH_S) or s[3] == "missed"):
+                ss or s is None or not self._fresh(s, t, FRESH_S)):
             # the overhead sees only part of it (washed out): the side's whole outline alone when it has one (dry run
-            # 2026-10-27: averaging the two put it 2.4 cm off, the side alone 0.5); before the side's first picture,
-            # or when the side looked and saw nothing there, a piece is not a robot. (Hidden from the side, or unsure
-            # there: the piece is all there is, as with the overhead alone)
+            # 2026-10-27: averaging the two put it 2.4 cm off, the side alone 0.5); before the side's first picture, a
+            # piece is not taken (a stray first sighting cost a start heading in a dry run). When the side looked and
+            # did not see it, the piece is all there is, as with the overhead alone (last night's footage: dropping it
+            # there lost Left, at the side picture's edge, twice as often as the overhead alone did)
             so = False
         if so and ss:
             po, ps = self._carry(tr, o, t), self._carry(tr, s, t)
