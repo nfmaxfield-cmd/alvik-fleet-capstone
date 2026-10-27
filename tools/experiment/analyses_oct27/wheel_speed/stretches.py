@@ -70,6 +70,8 @@ if __name__ == '__main__':
         r = run(s)
         print(s, len(r), 'stretches', {k: sum(1 for q in r if q['robot'] == k) for k in ('Left', 'Center', 'Right')})
         allr += r
+    if not allr:
+        sys.exit('nothing found: no file written')
     name = os.environ.get('WS_NAME', 'stretches.csv')
     with open(os.path.join(OUT, name), 'w', newline='') as f:
         w = csv.DictWriter(f, fieldnames=list(allr[0].keys()))

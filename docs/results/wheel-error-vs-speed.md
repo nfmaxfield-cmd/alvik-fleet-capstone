@@ -20,8 +20,9 @@ Oct 23 releases hold video only, with no robot logs.
 | **A. Stretches** (what the trust check uses) | a straight piece of driving, at least 6 cm and 2.5 cm/s, inside a find or route run that streamed raw wheel counts (`e02_fit.camera_stretches` + `pair`) | 338 (Left 95, Center 163, Right 80) | Oct 24 15:36, 16:16; Oct 25 15:45, 21:14 (4 items) | 4-9 cm/s, measured |
 | **B. Legs** (every `go` command) | camera position standing still after the leg, minus before it, against the robot's own pose change | 506 usable of 954 | all 8 (Oct 24-26) | 2, 4, 10 cm/s, commanded (`set e02_cms` in `e02_log.txt`) |
 
-**Tonight's session (`e02-20261027-001136`) was not on GitHub when this finished** (latest release: Oct 26 09:55),
-so it is not included as a separate group.
+**C. Tonight** (`e02-20261027-001136`, stage 1, 00:11-00:28; release `e02-session-20261027-001136`), its own group:
+0 stretches (1 run finished: Right's, cut short by a safety stop; Left's failed at the edge find; Center ran none) and
+18 usable legs of 45 (section 4).
 
 ### 1. Which driving can reach the ×2.9 at all
 
@@ -96,6 +97,30 @@ legs.</sub>
   whose camera positions are converted from explore's provisional camera.
 - Center's 09:55 hang over the right edge (wheels 102.7 cm, camera 15.3 cm, a crawl ray) is real, but it is one leg.
 
+### 4. Tonight, and where Center's ×2.9 came from
+
+| Tonight's legs (all 10 cm/s, except one 2 cm/s creep) | Left | Center | Right |
+|---|---|---|---|
+| Usable legs | 4 | 7 | 7 |
+| Median camera / wheel distance | 1.18 | 1.13 | 1.13 (creep step 1.05) |
+| Body moved under half of the wheels | 0 | 0 | 0 |
+
+The edge finds' 3 cm crawls are not `go` legs, so they are not in this table.
+
+**Center's ×2.9 was carried over, not new.** From tonight's `e02_log.txt`, `fits.csv`, `runs.csv` and
+`e02_trust.py`:
+
+- The flag was raised on **Oct 25 at 17:02**, in the 15:45 session: "Center's wheels looks bad: 2.3 x its own
+  baseline (stretches: 1.96, baseline 0.87)". Left's was raised in the same session, at 16:37 ("runs: scale 6.2 %
+  apart run to run"). No log since then records a recovery.
+- A flag clears only when the robot has this session's own evidence and its ratio drops under 1.5
+  (`update_flags`: `j["live"]`). The 21:14 and 09:55 sessions had no U runs, so they had no evidence. Tonight Center
+  drove no run, and the self-calibration saw 0 stretches for any robot. At 00:28 the log shows, for both Left and
+  Center: "wheels: too little evidence yet ... LOOKS BAD: wheels".
+- With nothing from this session, the live page (`e02_view.py`) shows k = the weighted error of all earlier
+  sessions' stretches ÷ the bare healthy 0.6 cm. ×2.9 means about 1.7 cm a stretch, close to Center's Oct 25 15:45
+  level (1.37 cm, figure 3) plus older sessions. It is not a measurement from tonight.
+
 ## Conclusion
 
 1. **Wheel error is not related to speed in direction.** Over 4-9 cm/s, faster stretches do not over-count or
@@ -107,16 +132,16 @@ legs.</sub>
    Left is the noisiest robot every session.
 4. **Claude's guess is wrong as an explanation of the ×2.9.** Creeps and edge finds never enter the number. The
    stalling pattern is real, but it is a 2 cm/s creep-step effect (12 of 23 legs), mostly Left's, and it is not what
-   the trust check measures. *Claude's reading:* tonight's ×2.9 is probably the same carried number found on Oct 25
-   at 21:14 ([report](../build-reports/e02-oct25-session-2114.md), section 5): Center's flag from 15:45, never
-   cleared because the 21:14 and 09:55 sessions ran no U runs, shown as all earlier stretch error over the bare
-   0.6 cm. At 00:16 the session was 5 minutes old, too soon for 3 new fits. Tonight's `e02_log.txt` and
-   `sensor_trust` lines will confirm or refute this.
+   the trust check measures. **Tonight's log confirms the ×2.9 was carried over** (section 4): Center's flag from Oct 25 17:02,
+   never cleared, shown as earlier sessions' stretch error over the bare 0.6 cm. Left carries the same kind of flag.
+   Tonight added no wheel evidence for any robot.
 
 ## What's next
 
-1. When tonight's logs are uploaded: rerun `stretches.py`, `legs.py` and `regress.py` on `e02-20261027-001136` as its
-   own group, and read the session's "SENSOR" and self-calibration lines for where Center's ×2.9 came from.
+1. The flags only clear once Left and Center finish U runs in a session. Until then the live page's "looks bad"
+   says nothing about tonight's wheels. Option: show "carried from Oct 25" and the flag's date on the live page, or
+   clear a flag that has had no evidence for N sessions. N would be a chosen number; the analyses so far give no
+   basis for one, so a replay of the trust history at N = 1, 2 and 3 would be the way to choose it.
 2. Re-plan creep steps: 12 of 23 stalled. The explore build already calls a stalled creep a board contact; tonight's
    no-board edge finds are the first real data on that.
 
@@ -142,6 +167,8 @@ legs.</sub>
   than a DOE): standing windows 1.0 s before and 0.4-1.4 s after a leg; still means scatter under 1.2 cm; the slow-leg
   fallback uses the position at the start and end times (up to 1.2 cm off at 4 cm/s); a stall is camera under 0.5 ×
   wheels.
+- **A flag's age is not stored with the flag** (only `flag_session`, which is a counter). The Oct 25 17:02 origin
+  comes from the logs here; `logs/sensor_trust.json` on the Pi would confirm it.
 - **Leg kinds are guessed from the command value** (105 = ray, 3 = creep, −9.5 = back-out, 12 = wiggle, 15 = square).
   A changed explore setting would mislabel legs.
 - **Commanded speed is the last `set e02_cms` in the log.** The firmware may slow a leg on its own (find creep 5 cm/s,

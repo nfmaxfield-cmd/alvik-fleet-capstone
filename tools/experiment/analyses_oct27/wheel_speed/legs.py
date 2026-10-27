@@ -164,6 +164,8 @@ if __name__ == '__main__':
         good = [q for q in r if q['still'] and not q['fix']]
         print(s, len(r), 'go legs;', len(good), 'usable (still before and after, no fix)')
         allr += r
+    if not allr:
+        sys.exit('nothing found: no file written')
     name = os.environ.get('WS_NAME', 'legs.csv')
     keys = list(allr[0].keys())
     with open(os.path.join(OUT, name), 'w', newline='') as f:
