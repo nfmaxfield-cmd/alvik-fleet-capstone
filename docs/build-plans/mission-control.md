@@ -91,3 +91,6 @@ closest approach), styled like the mockup (Inter, ground #F6F7F9, white panels, 
 - **A live page for planner runs** (Nick, 11:19: the ladder only had the camera feed, not the live lab): Mission
   Control's Run screen connected to the real robots (robots ringed on the overhead picture, planned lines, step
   results, battery, edge distance), so the ladder, the board tests and Monday all use the same page.
+- **Setup page order** (Nick, 12:56): the flash check should come first (it measures the side camera's delay and
+  finds the lights the side corner numbering uses), then the overhead and side corners. Reorder the page's sections,
+  and skip any part whose saved result still checks good (show "saved this morning, still lines up" instead).
