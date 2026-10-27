@@ -62,3 +62,15 @@ closest approach), styled like the mockup (Inter, ground #F6F7F9, white panels, 
 - Every chosen number gets a DOE note in the code.
 - Reports: premise → data → conclusion → next, ending with two sweeps (new tests; possible inaccuracies). Lean.
 - Time tracker row in docs/time-tracker.md. Commit and push to main as each piece lands.
+
+## Queued for the next build (Nick, 2026-10-27 09:55)
+
+- **Corner numbering decided automatically.** Nick: "Why does it matter which corner is which? That should be
+  determined automatically when the robots start moving." The floor frame's 0,0 only has to stay the same from day
+  to day (saved spots and zones, the side camera's model, comparing sessions). Plan: 0,0 = the board corner nearest
+  the side camera, found from the two-camera geometry; the frame's handedness (mirror) checked from the first robot
+  turn (the gyro's left against the camera's left). The page's "Move the numbering" button goes; a mismatch with
+  the saved frame is reported, not asked.
+- **Lens height and camera pose from geometry, not a tape.** Each camera's position and tilt (lens height included)
+  solved from the board's 4 corners in its picture and its lens model; the two cameras cross-check each other (and
+  later, the robots' tops at a known 4 cm). Removes the lens-height box from the setup page.
