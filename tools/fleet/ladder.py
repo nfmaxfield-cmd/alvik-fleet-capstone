@@ -106,6 +106,33 @@ OBSTACLE_R_CM = 10.0    # chosen: a parked robot on the planner's map: a circle 
                         # body). No DOE: a safety room
 SAFE = ["set safe_edge 3", "set edge_dir 0", "set edge_thr 150", "set edge_n 3", "set edge_bot_cm 11",
         "set bumper_cm 0"]   # the robots' edge guard, as run-fleet-pi.sh / e02.py (not kept over a power-off)
+# The stored driving corrections (2026-10-27 13:58, real L2: every robot turned +5 to +10 deg too far on each quarter
+# turn, about 7.5 %, because the ladder left them on factory values; the e02 runner has always sent its prior,
+# e02_fit.PRIOR: the robots' gyros under-read by ~7.5 % and their wheels over-read ~2 %). Sent with the edge guard on
+# every connect (not kept over a power-off). A per-robot file ~/.config/mirlt/corrections.json
+# {"Left": {"gyro_scale": .., "wheel_scale": .., "gyro_drift_dps": ..}} overrides it when present.
+CORR_FILE = os.path.expanduser(os.environ.get("MIRLT_CONF_DIR", "~/.config/mirlt") + "/corrections.json")
+
+
+def corrections_for(name):
+    try:
+        sys.path.insert(0, os.path.join(TOOLS, "experiment"))
+        import e02_fit as FIT
+        c = dict(FIT.PRIOR)
+    except Exception:
+        c = dict(gyro_scale=1.075, gyro_drift_dps=0.0, wheel_scale=0.979)
+    try:
+        with open(CORR_FILE) as f:
+            c.update((json.load(f) or {}).get(name) or {})
+    except (OSError, ValueError):
+        pass
+    return c
+
+
+def corrections_cmds(name):
+    c = corrections_for(name)
+    return ["set gyro_scale %.4f" % c["gyro_scale"], "set gyro_drift_dps %.4f" % c["gyro_drift_dps"],
+            "set wheel_scale %.4f" % c["wheel_scale"]]
 STEPS = ["L0", "L1", "L2", "L3", "L4", "L5", "L6"]
 TITLES = {"L0": "status: firmware, battery, edge guard, camera, every robot found by its lights",
           "L1": "calibrate each robot alone (the camera checks its room first)",
@@ -837,7 +864,8 @@ class Ladder:
             self.bench = Bench(self.ips, sub)
             self.bench.wait(lambda: len(self.bench.robots()) >= len(self.ips), 10)
             for n in self.bench.robots():           # the edge guard: not kept over a power-off, so every time
-                for c in SAFE:
+                # (the simulator's robots have no real gyro under-read: dry runs keep factory values)
+                for c in SAFE + ([] if getattr(self.a, "dry", False) else corrections_cmds(n)):
                     self.bench.send(n, c)
                     time.sleep(0.02)
             time.sleep(0.3)
