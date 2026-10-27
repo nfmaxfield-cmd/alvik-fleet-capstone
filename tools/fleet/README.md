@@ -298,6 +298,18 @@ two robots share board A):
 - **Planning time** is Python on this computer; check `replan_budget_s` on
   the laptop that will run it (the page shows how long each re-plan took).
 
+## Camera fixes from the Pi's overhead camera (the camera bridge, 2026-10-27)
+
+`cam_bridge.py` runs on the Pi next to run_plan.py: it reads the recorder's `/live` pictures, follows every robot with
+the E02 tracker (e02_multitrack.MultiTracker, floor memory) and names them by **prediction from each robot's own pose**
+(run_plan.py `--poses-to 127.0.0.1:5011`), never by looks. An unsure, merged or missing robot gets no fix. Headings:
+the map's start heading at the start (the robot is put down facing it), then the direction the camera saw it travel on
+straight drives. `--brick-watch` adds the brick watch's obstacles; `--observe` sends nothing. run_plan.py's **camera
+guard** (`--cam-guard-cm`, default 6 cm for 1 s) stops everyone when the camera and a robot's own pose disagree (the
+robot is refusing its fixes). `line_check.py` scores a run against its planned lines. Launcher: `run-fleet-pi.sh`
+(Phase 0 plan: docs/session-plans/2026-10-27.md). Dry runs: `FLEET_DRY=1 ./run-fleet-pi.sh cross` (the simulator
+serves its camera with `fleet_sim.py --serve-live`). Tested in the simulator only.
+
 ## Going home (home docks, 2026-10-19a)
 
 With home docks in the map (`home_docks`, docs/data-formats.md "Fleet map") and the robots' nose bumpers fitted

@@ -15,7 +15,13 @@ Answered ones move to the bottom with the answer and date.
 5. The school WiFi name and password (they go only in your own `secrets.h`, never on GitHub). Firmware 2026-10-27a
    waits on it.
 6. Connect the brick watch to the real camera and test it with your hands on the home board?
-7. A time for the 45-minute board test (Phase 0: the planner on real robots).
+7. A time for the 45-minute board test (Phase 0: the planner on real robots). Plan and steps ready:
+   [session plan 2026-10-27](session-plans/2026-10-27.md) (about 60 attended minutes with the bench checks).
+14. Phase 0 gate: "within about 3 cm" read as each robot's 95th percentile from its lines (one camera jump does not fail
+    a run). Or did you mean the maximum?
+15. If Center's turns stay 15-20 deg off after calibrating, should Monday count on two robots? (Dry run: a robot like
+    that cannot hold its lines even with camera fixes; the new camera guard stops it.)
+16. If `check` shows 2026-10-26a or 27a on a robot: did you flash it last night, and from which commit?
 
 ### Robots and sessions
 8. What stands just beyond the home board's x = 0 edge at about y = 30-60? (Your 07:45 "yes" to this one was read as

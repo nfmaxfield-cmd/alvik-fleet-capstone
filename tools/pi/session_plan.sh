@@ -15,6 +15,9 @@ set -u
 cd "$(dirname "$0")/../.."
 OUT="$1"; shift
 ROBOTS="--no-side --robot 192.168.1.250 --robot 192.168.1.252 --robot 192.168.1.253"
+# E02_PLAN_EXTRA (2026-10-27): runner options for every stage, e.g. E02_PLAN_EXTRA="--robots Left,Right" leaves a robot
+# out (switched off, off the board) without a plan of its own. run-e02-pi.sh passes it on.
+if [ -n "${E02_PLAN_EXTRA:-}" ]; then ROBOTS="$ROBOTS $E02_PLAN_EXTRA"; echo "Every stage also gets: $E02_PLAN_EXTRA"; fi
 CAL="--classic-setup --calib tools/experiment/data/overhead_floorcal_roam1.json"
 DAY=$(date +%Y%m%d-%H%M)
 stage() {

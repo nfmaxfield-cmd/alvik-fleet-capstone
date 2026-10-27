@@ -1,0 +1,9 @@
+{"format": "alvik-fleet-map", "version": 1,
+ "notes": "Phase 0 test 1 (2026-10-27): ONE robot drives a square twice on the home plywood with camera fixes (docs/session-plans/2026-10-27.md). roam1 floor frame (x = 0 the bottom open edge of the overhead picture, y = 0 the right one); both boards off, every side open. Corners 30 cm in from every edge (the camera spot rides onto the nose within ~15 cm of an open edge; the light object beyond x = 0 at y 30-60 stays out of the front sensor's 12 cm look). Put the robot on A facing +y (towards B). Other robots OFF the board: the planner does not know them.",
+ "floor": {"x_min": 0, "x_max": 122, "y_min": 0, "y_max": 122},
+ "sides": {"x_min": "open", "x_max": "open", "y_min": "open", "y_max": "open"},
+ "robot": {"length_cm": 9.5, "width_cm": 9.5, "front_offset_cm": 4.75},
+ "spots": {"A": [30, 30], "B": [30, 92], "C": [92, 92], "D": [92, 30]},
+ "robots": [{"name": "Left", "start": [30, 30, 90]}],
+ "tasks": {"Left": {"visit": [{"spot": "B"}, {"spot": "C"}, {"spot": "D"}, {"spot": "A"},
+                              {"spot": "B"}, {"spot": "C"}, {"spot": "D"}, {"spot": "A"}]}}}

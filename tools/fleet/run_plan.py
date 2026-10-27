@@ -452,6 +452,56 @@ class Coordinator:
                  state=state, t_run=round(t - self.t_run, 2) if self.t_run else None, pose=list(pose), front_cm=front,
                  info=info, cam=cam, to=stp["to"], frm=stp["from"])
 
+    CAM_GUARD_CM = 6.0        # chosen: the camera's spot and the robot's own pose further apart than this...
+    CAM_GUARD_S = 1.0         # ...for this long stops everyone. Found in the Phase 0 dry runs (2026-10-27): with an 18 %
+                              # gyro scale error (Center's turns were 15-20 deg off on 2026-10-27) the robot's pose
+                              # drifts more than its fix gate allows, it refuses every later fix and drives off the
+                              # table blind. Normal: the two agree within 1-2 cm (fixes 10 a second), plus up to 3 cm
+                              # of timing at 10 cm/s. DOE note: 4 / 6 / 8 cm x 0.5 / 1 / 2 s on the board's Phase 0
+                              # runs (false stops against the distance driven blind); docs/doe-backlog.md
+
+    def cam_guard(self):
+        """Stop everyone when a robot's own pose and the camera disagree for long (its fixes are being refused)."""
+        lim = getattr(self.args, "cam_guard_cm", self.CAM_GUARD_CM)
+        if not lim or not self.source.live:
+            return
+        t = now()
+        for b in self.bots.values():
+            cam, ct = getattr(b, "last_cam", None), getattr(b, "cam_t", None)
+            if cam is None or b.pose is None or ct is None or t - ct > 0.3 or t - b.pose_t > 0.3:
+                b.guard_since = None
+                continue
+            d = math.hypot(cam[0] - b.pose[0], cam[1] - b.pose[1])
+            if d <= lim:
+                b.guard_since = None
+                continue
+            if getattr(b, "guard_since", None) is None:
+                b.guard_since = t
+                self.log("cam_guard_start", robot=b.name, d_cm=round(d, 2), cam=cam, own=list(b.pose))
+            elif t - b.guard_since >= self.CAM_GUARD_S:
+                rej = b.follow.get("fixes_rejected")
+                self.abort = ("camera and %s's own pose disagree by %.1f cm for %.1f s (fixes refused so far: %s): "
+                              "stopping everyone" % (b.name, d, t - b.guard_since, rej))
+                self.log("cam_guard", robot=b.name, d_cm=round(d, 2), cam=cam, own=list(b.pose), refused=rej)
+                self.say(self.abort)
+                self.halt_all()
+                return
+
+    def echo_pose(self, b, t, ms, x, y, th, state):
+        """--poses-to HOST:PORT: the robot's own pose (wheels + gyro + the fixes it took), as JSON lines, for the
+        camera bridge (tools/fleet/cam_bridge.py): it predicts each robot's next camera spot from these, so who is
+        who never rests on looks. Time: the laptop's clock at the robot's own ms (its clock offset)."""
+        dest = getattr(self, "pose_dest", None)
+        if dest is None:
+            return
+        tp = (ms / 1000.0 + b.offset) if b.offset is not None else t
+        msg = {"type": "pose", "robot": b.name, "t": round(tp, 4), "x": round(x, 2), "y": round(y, 2),
+               "th": round(th, 2), "state": state}
+        try:
+            self.pose_sock.sendto(json.dumps(msg).encode(), dest)
+        except OSError:
+            pass
+
     def _expected_old(self, b, sid):
         return sid in getattr(b, "halted_ids", set())
 
@@ -468,6 +518,7 @@ class Coordinator:
                         x=x, y=y, th=th, sd=v[10], fixes_used=v[12], fixes_rejected=v[13], front=v[14])
         if state != "nopose":
             b.pose, b.pose_t = (x, y, th), t
+            self.echo_pose(b, t, ms, x, y, th, state)
         # done reports lost over WiFi: the robot runs its steps in order, so everything up to last_done is done
         for sid, i in b.id_index.items():
             st = b.stat[i]
@@ -1028,6 +1079,9 @@ class Coordinator:
                     self.halt_all()
             if self.abort:
                 break
+            self.cam_guard()
+            if self.abort:
+                break
             self.finish_replan()
             self.tracker_watch()
             pr = getattr(self, "pause_req", None)
@@ -1275,6 +1329,12 @@ def main(argv=None):
                          "click). Repeatable; 'all' = every robot. Also sends 'set sw_on 1'.")
     ap.add_argument("--site-map", help="locked site map (tools/site/setup.py): warn when the robots' front sensors "
                                        "keep disagreeing with a landmark on it (tools/site/change.py)")
+    ap.add_argument("--cam-guard-cm", type=float, default=Coordinator.CAM_GUARD_CM,
+                    help="stop everyone when a robot's own pose and the camera disagree by more than this for 1 s "
+                         "(0 = off; default %(default)s)")
+    ap.add_argument("--poses-to", metavar="HOST:PORT",
+                    help="send each robot's own pose (FOLLOW records) as JSON lines here: the camera bridge "
+                         "(tools/fleet/cam_bridge.py, default port 5011) predicts who is who from them")
     g = ap.add_argument_group("dry run against the simulator (tools/sim/fleet_sim.py)")
     ap.add_argument("--border-cm", type=float, default=BORDER_CM,
                     help="the robots' own four-sided border (firmware 2026-10-27a), sent when the map has side kinds "
@@ -1354,6 +1414,11 @@ def main(argv=None):
     link.session.quiet = True
     args.homes = assigned
     coord = Coordinator(args, m, plan, link, source, outdir)
+    coord.pose_dest = None
+    if args.poses_to:
+        h, _, pt = args.poses_to.rpartition(":")
+        coord.pose_dest = (h or "127.0.0.1", int(pt))
+        coord.pose_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     coord.first_plan_id = plan.get("plan_id")
     coord.first_makespan = plan["summary"]["makespan_s"]
     coord.started = now()

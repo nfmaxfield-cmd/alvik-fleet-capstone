@@ -1,0 +1,9 @@
+{"format": "alvik-fleet-map", "version": 1,
+ "notes": "Phase 0 test 2 (2026-10-27): TWO robots cross paths four times (an X through the middle and back, twice) with camera fixes; the planner's 'after' lists decide who waits. roam1 floor frame, every side open, spots 30 cm in. Left on A (30, 35) and Right on B (30, 87), both facing +x (towards x = 122). The third robot OFF the board.",
+ "floor": {"x_min": 0, "x_max": 122, "y_min": 0, "y_max": 122},
+ "sides": {"x_min": "open", "x_max": "open", "y_min": "open", "y_max": "open"},
+ "robot": {"length_cm": 9.5, "width_cm": 9.5, "front_offset_cm": 4.75},
+ "spots": {"A": [30, 35], "B": [30, 87], "C": [92, 35], "D": [92, 87]},
+ "robots": [{"name": "Left", "start": [30, 35, 0]}, {"name": "Right", "start": [30, 87, 0]}],
+ "tasks": {"Left": {"visit": [{"spot": "D"}, {"spot": "A"}, {"spot": "D"}, {"spot": "A"}]},
+           "Right": {"visit": [{"spot": "C"}, {"spot": "B"}, {"spot": "C"}, {"spot": "B"}]}}}

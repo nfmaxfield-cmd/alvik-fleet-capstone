@@ -341,6 +341,20 @@ Chosen with no DOE: border.h's 5 cm half-width beside a partly open stretch (the
 the WiFi join time split between two networks at power-on (the background retry keeps alternating, so it only sets how
 soon the first try ends).
 
+## Camera bridge and Phase 0 (2026-10-27, built)
+
+Plan: [2026-10-27 session plan](session-plans/2026-10-27.md). Each number's code comment says the same.
+
+| Setting | Chosen | DOE | Where | Status |
+|---|---|---|---|---|
+| Camera fix sigma the robot weighs bridge fixes by (cam_bridge FIX_SIGMA_CM) | 1.0 cm | 0.5 / 1 / 2 cm on the board's Phase 0 runs: cross-track error against the planned lines | Board | open |
+| Travel heading sigma (cam_bridge HEADING_SIGMA_DEG) | 3 deg | 2 / 3 / 6 deg, same runs | Board | open |
+| Camera guard: camera vs own pose (run_plan CAM_GUARD_CM / CAM_GUARD_S) | 6 cm for 1 s | 4 / 6 / 8 cm x 0.5 / 1 / 2 s: false stops against distance driven blind | Board (+ replay of follow.csv vs track.csv) | open |
+
+Chosen with no DOE: the Phase 0 gate (3 cm at the 95th percentile: a pass mark), the travel heading's window / least
+distance / straightness (1 s, 5 cm, 2 deg: guards), MAX_BACKLOG_S 0.3 s (a guard), the Phase 0 spots 30 cm in (keeps
+the camera out of the edge zone), 3 runs per test.
+
 ## Already set by data
 
 - **Line edge cue edge_thr 150** (e02.py SAFETY_SETTINGS): plywood reads 52-84 in every E02 session, the two real

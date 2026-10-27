@@ -178,7 +178,7 @@ tmux new-session -d -s e02 -n rec "cd '$REPO' && python3 tools/pi/camrec.py $CAM
 echo "Recorder starting (8 s) ..."
 sleep 8
 if [ "$PLAN" = 1 ]; then
-  tmux new-window -t e02 -n run "cd '$REPO' && bash tools/pi/session_plan.sh '$OUT' $PLAN_NAME; echo; read -r -p 'Plan done. Press Enter to close this window.'"
+  tmux new-window -t e02 -n run "cd '$REPO' && E02_PLAN_EXTRA='${E02_PLAN_EXTRA:-}' bash tools/pi/session_plan.sh '$OUT' $PLAN_NAME; echo; read -r -p 'Plan done. Press Enter to close this window.'"
 else
   tmux new-window -t e02 -n run "cd '$REPO' && $RUN_PIN python3 tools/experiment/e02.py --on-pi $RUN_ARGS; echo; echo '=== Runner finished: stopping the recorder and uploading ==='; python3 tools/pi/upload_session.py --recordings '$OUT' --stop-recorder; echo; read -r -p 'All done. Press Enter to close this window.'"
 fi

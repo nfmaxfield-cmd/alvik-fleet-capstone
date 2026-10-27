@@ -385,6 +385,88 @@ class FleetSim:
             time.sleep(max(0.0, 1.0 / BW.CHECK_HZ - (time.time() - now)))
         self.event(dict(kind="brick_watch", checks=w.checks, hand_checks=w.hand_seen, objects=len(w.confirmed)))
 
+    def live_loop(self):
+        """--serve-live PORT: the overhead camera as the Pi's recorder serves it (tools/pi/camrec.py's /live: grey JPEG
+        parts with X-Frame and X-Time), rendered by tools/sim/table_cam.py from the TRUE poses, so the camera bridge
+        (tools/fleet/cam_bridge.py) can be tested end to end: pictures -> tracker -> fixes -> run_plan -> robots.
+        The camera's model goes to --live-calib-out (what a perfect floor calibration would give). With --live-brick
+        the brick is only shown in the pictures (a hand puts it down), never reported directly."""
+        import cv2
+        from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+        import table_cam as TC
+        f = self.m["floor"]
+        rect = (f["x_min"], f["y_min"], f["x_max"], f["y_max"])
+        a = self.args
+        tc = TC.TableCamera(rect, seed=a.seed + 11, px_per_cm=a.live_px_per_cm)
+        calib = a.live_calib_out or os.path.join(a.out, "table_camera.json")
+        tmp = calib + ".tmp"
+        tc.true_model(tmp)
+        os.replace(tmp, calib)
+        cond = threading.Condition()
+        latest = [None]                      # (jpeg bytes, frame number, t_wall)
+        sim = self
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *x):
+                pass
+
+            def do_GET(self):
+                if self.path.split("?")[0] != "/live":
+                    self.send_error(404)
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+                self.end_headers()
+                last = 0
+                try:
+                    while not sim.stop.is_set():
+                        with cond:
+                            while latest[0] is None or latest[0][1] <= last:
+                                cond.wait(0.5)
+                                if sim.stop.is_set():
+                                    return
+                            body, n, tw = latest[0]
+                        last = n
+                        self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + str(len(body)).encode()
+                                         + b"\r\nX-Frame: " + str(n).encode() + b"\r\nX-Time: " + ("%.4f" % tw).encode()
+                                         + b"\r\n\r\n" + body + b"\r\n")
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    return
+        srv = ThreadingHTTPServer(("127.0.0.1", int(a.serve_live)), H)
+        srv.daemon_threads = True
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.log("serving the simulated overhead camera at http://127.0.0.1:%d/live (%.2f px/cm)"
+                 % (int(a.serve_live), a.live_px_per_cm))
+        period = 1.0 / max(1.0, a.live_fps)
+        n = 0
+        while not self.stop.is_set():
+            t_cap = time.time()
+            poses = [(rb.x, rb.y, rb.th) for rb in self.robots.values() if not rb.lifted]
+            boxes, hand = [], None
+            if getattr(a, "live_brick", False) and self.t_plan0 is not None:
+                spec = a.brick
+                t_rel = t_cap - self.t_plan0
+                if spec and self.brick is None and self.brick_t is None and spec["t"] - self.HAND_BEFORE_S <= t_rel:
+                    hand = ((f["x_min"] + f["x_max"]) / 2, (f["y_min"] + f["y_max"]) / 2)
+                if self.brick is not None:
+                    boxes = [self.brick.tolist()]
+                    if t_cap - self.brick_t <= self.HAND_AFTER_S:
+                        c = self.brick.mean(0)
+                        hand = (float(c[0]), float(c[1]))
+            img = tc.render(poses, boxes, (hand, (hand[0], f["y_max"] + 60.0)) if hand is not None else None)
+            ok, jpg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 90])
+            if ok:
+                n += 1
+                with cond:
+                    latest[0] = (jpg.tobytes(), n, t_cap + 0.04)     # stamped one picture late, as camrec.py (e02_sim.py)
+                    cond.notify_all()
+                if n == 1 or (hand is not None and boxes and not getattr(self, "_live_hand_png", False)):
+                    cv2.imwrite(os.path.join(a.out, "live_first.png" if n == 1 else "live_hand_brick.png"), img)
+                    if n > 1:
+                        self._live_hand_png = True
+            time.sleep(max(0.0, period - (time.time() - t_cap)))
+        srv.shutdown()
+
     def cam_gap(self, name, now):
         """--cam-gap NAME@T:DUR: the camera does not see that robot for DUR s from T s after the plan starts."""
         if self.t_plan0 is None:
@@ -432,7 +514,7 @@ class FleetSim:
             c = poly.mean(0)
             self.event(dict(kind="brick", t=round(now - self.t_plan0, 2), center=[round(c[0], 1), round(c[1], 1)],
                             points=poly.round(2).tolist()))
-            if not getattr(self.args, "brick_camera", False):
+            if not getattr(self.args, "brick_camera", False) and not getattr(self.args, "live_brick", False):
                 self.cam_report_at = now + self.args.cam_delay
             # (--brick-camera: the picture loop below shows the hand and the brick, and the brick watch reports it)
         if self.brick is not None and getattr(self, "cam_report_at", None) and now >= self.cam_report_at:
@@ -589,6 +671,8 @@ class FleetSim:
                     threading.Thread(target=self.monitor_loop, daemon=True)]
         if getattr(self.args, "brick_camera", False):
             threads.append(threading.Thread(target=self.picture_loop, daemon=True))
+        if getattr(self.args, "serve_live", 0):
+            threads.append(threading.Thread(target=self.live_loop, daemon=True))
         for t in threads:
             t.start()
         try:
@@ -674,6 +758,16 @@ def main(argv=None):
     ap.add_argument("--brick-ahead-s", type=float, default=3.0)
     ap.add_argument("--cam-delay", type=float, default=0.5, help="camera reports a new obstacle after this, s")
     ap.add_argument("--wifi-drop", action="append", default=[], metavar="NAME@T:DUR")
+    ap.add_argument("--serve-live", type=int, default=0, metavar="PORT",
+                    help="serve the simulated overhead camera's pictures at http://127.0.0.1:PORT/live as the Pi's "
+                         "recorder does (for tools/fleet/cam_bridge.py); use with --fix-hz 0")
+    ap.add_argument("--live-fps", type=float, default=15.0, help="--serve-live: pictures a second")
+    ap.add_argument("--live-px-per-cm", type=float, default=2.34,
+                    help="--serve-live: the camera's scale (the real overhead: 2.34 px/cm since 2026-10-21)")
+    ap.add_argument("--live-calib-out", help="--serve-live: where the camera's model is written (default "
+                                             "<out>/table_camera.json)")
+    ap.add_argument("--live-brick", action="store_true",
+                    help="--serve-live: the brick is only shown in the pictures (a hand puts it down)")
     ap.add_argument("--max-s", type=float, default=600.0)
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args(argv)
