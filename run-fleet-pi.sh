@@ -34,6 +34,10 @@ IPS="--robot 192.168.1.250 --robot 192.168.1.252 --robot 192.168.1.253"
 CALIB="$(python3 tools/pi/setup_conf.py calib)"
 EXPO="$(python3 tools/pi/setup_conf.py exposure)"
 EXPO_ARG=""; [ -n "$EXPO" ] && EXPO_ARG="--overhead-exposure $EXPO"
+# the side camera's calibration (setup page, part 2; two-camera tracking 2026-10-27): with it, both cameras follow the
+# robots (the recorder serves the side camera's pictures at 127.0.0.1:8001); without it, the overhead alone
+SIDECAL="$(python3 tools/pi/setup_conf.py side)"
+SIDE_ARG=""; [ -n "$SIDECAL" ] && SIDE_ARG="--side-calib $SIDECAL --side-stream 127.0.0.1:8001"
 DAY=$(date +%Y%m%d)
 # the robots' edge guard (both cues) and the bare body, as e02.py's SAFETY_SETTINGS: safe_edge is not saved on the
 # robot, so every power-on starts with it OFF. Sent to every robot before each test.
@@ -48,7 +52,7 @@ ladder() {
     python3 tools/fleet/ladder.py "$@" --dry ${LADDER_DRY_ARGS:-}
   else
     start_recorder
-    python3 tools/fleet/ladder.py "$@" $IPS --stream 127.0.0.1:8000 --calib "$CALIB"
+    python3 tools/fleet/ladder.py "$@" $IPS --stream 127.0.0.1:8000 --calib "$CALIB" $SIDE_ARG
   fi
 }
 
@@ -90,7 +94,7 @@ run_test() {   # run_test NAME MAP [bridge options]
   mkdir -p "$sess"
   # --place-tol-cm 4 (chosen: a robot put down by tape measure; further off, run_plan stops before anything moves
   # and says how far. No DOE: a placement check). No --yes on the robots: --yes would start a robot from anywhere.
-  local cal="$CALIB" stream="" rp="$IPS --place-tol-cm 4"
+  local cal="$CALIB" stream="$SIDE_ARG" rp="$IPS --place-tol-cm 4"
   if [ "$DRY" = 1 ]; then
     sess="$sess-dryrun"; mkdir -p "$sess"
     cal="$REPO/$sess/sim/table_camera.json"; stream="--stream 127.0.0.1:8765 --wait-calib-s 30"

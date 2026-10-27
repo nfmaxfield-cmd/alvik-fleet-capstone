@@ -110,8 +110,8 @@ class MultiTracker(CAM.MotionTracker):
     """Follows every robot it is told about, at once. Thread-safe (push from the camera thread; command / state
     from the runner)."""
 
-    def __init__(self, cam, board_center=(61.0, 61.0), board_rect=None, margin_cm=8.0, thr=16.0, alpha=0.02):
-        super().__init__(cam, board_center, thr=thr, alpha=alpha, board_rect=board_rect, margin_cm=margin_cm)
+    def __init__(self, cam, board_center=(61.0, 61.0), board_rect=None, margin_cm=8.0, thr=16.0, alpha=0.02, **kw):
+        super().__init__(cam, board_center, thr=thr, alpha=alpha, board_rect=board_rect, margin_cm=margin_cm, **kw)
         self.tracks = {}
         self.events = deque(maxlen=500)           # (t, robot, what): status changes, for the record
         self.n_frames = 0
@@ -230,17 +230,19 @@ class MultiTracker(CAM.MotionTracker):
                 self._learn(g, dt_frame)
             return None
 
-    def _assign(self, cands, t):
-        names = list(self.tracks)
-        trs = [self.tracks[n] for n in names]
-        preds = [self._predict(tr, t) for tr in trs]
-        gates = [self._gate(tr, t) for tr in trs]
-        A = self.area
-        usable = [c for c in cands if c["shape"] or (MERGE_AREA * A * 0.8 <= c["area"] <= 4.0 * A)]
+    def _verdicts(self, names, preds, gates, cands, dist=None):
+        """Each track's verdict on this picture's outlines: (usable outlines, {track index: ("seen", outline index) |
+        ("unsure", why) | ("missed", why)}). dist(c, p): the distance of outline c from prediction p (default: plain
+        distance on the floor; the side camera stretches it along its line of sight)."""
+        dist = dist or (lambda c, p: math.hypot(c["x"] - p[0], c["y"] - p[1]))
+        trs = names
+        def A_at(c):        # a robot's area in pixels where the outline is (the side camera's scale changes 2-3x)
+            return self._rpx_at(c["x"], c["y"]) ** 2 if self.size_per_spot else self.area
+        usable = [c for c in cands if c["shape"] or (MERGE_AREA * A_at(c) * 0.8 <= c["area"] <= 4.0 * A_at(c))]
         D = np.full((len(trs), len(usable)), np.inf)
         for i, p in enumerate(preds):
             for j, c in enumerate(usable):
-                d = math.hypot(c["x"] - p[0], c["y"] - p[1])
+                d = dist(c, p)
                 if d <= gates[i]:
                     D[i, j] = d
         verdict = {}                                   # track index -> ("seen", cand) | ("unsure", why) | ("missed", why)
@@ -248,7 +250,7 @@ class MultiTracker(CAM.MotionTracker):
         merged_c = set()
         for j, c in enumerate(usable):
             who = [i for i in range(len(trs)) if np.isfinite(D[i, j])]
-            if len(who) >= 2 and c["area"] >= MERGE_AREA * A:
+            if len(who) >= 2 and c["area"] >= MERGE_AREA * A_at(c):
                 merged_c.add(j)
                 for i in who:
                     verdict[i] = ("unsure", "merged with %s in the picture" % ", ".join(
@@ -303,6 +305,14 @@ class MultiTracker(CAM.MotionTracker):
                     verdict[k] = ("unsure", "as near to %s's predicted spot" % names[i])
             if not contested and i not in verdict:
                 verdict[i] = ("seen", j)
+        return usable, verdict
+
+    def _assign(self, cands, t):
+        names = list(self.tracks)
+        trs = [self.tracks[n] for n in names]
+        preds = [self._predict(tr, t) for tr in trs]
+        gates = [self._gate(tr, t) for tr in trs]
+        usable, verdict = self._verdicts(names, preds, gates, cands)
         # 4. update
         for i, tr in enumerate(trs):
             kind, what = verdict.get(i, ("missed", ""))

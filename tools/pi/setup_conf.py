@@ -3,6 +3,7 @@
 
 Two small files in ~/.config/mirlt (MIRLT_CONF_DIR overrides it; the same folder as camnames.py's cameras.json):
     overhead_calib          one line: the path of the overhead camera's floor calibration made by the setup page
+    side_calib              one line: the side camera's floor calibration (two-camera tracking, 2026-10-27)
     overhead_exposure.json  {"exposure": 78, "saved": "...", "why": "..."}: the overhead camera's manual exposure
                             (V4L2 units of 100 us), chosen with the setup page's flash check
 The calibration files themselves go in ~/.config/mirlt/calib/ (outside the repo, so the Pi's git pull never meets
@@ -10,6 +11,7 @@ them); the setup page also copies each one into its logs folder, which ./run-fle
 
     python3 tools/pi/setup_conf.py calib        # prints the calibration path to use (roam1 if none saved, said on stderr)
     python3 tools/pi/setup_conf.py exposure     # prints the saved overhead exposure, or nothing (camera's automatic)
+    python3 tools/pi/setup_conf.py side         # prints the side camera's calibration path, or nothing (overhead alone)
     python3 tools/pi/setup_conf.py show         # both, in words
 
 No OpenCV import: the launchers call this at every start.
@@ -71,6 +73,39 @@ def new_calib_path(now=None):
     return os.path.join(calib_dir(), "overhead_floorcal_%s.json" % time.strftime("%Y%m%d-%H%M%S", time.localtime(now)))
 
 
+def _side_pointer():
+    return os.path.join(conf_dir(), "side_calib")
+
+
+def side_calib():
+    """(path or None, words): the side camera's floor calibration saved by the setup page (two-camera tracking,
+    2026-10-27). None: the tracking runs on the overhead camera alone (and the robots' lights)."""
+    p = _side_pointer()
+    try:
+        with open(p) as f:
+            path = f.read().strip()
+    except OSError:
+        return None, ("No side camera calibration saved (%s missing): tracking with the overhead camera alone. To use "
+                      "both cameras: ./run-fleet-pi.sh setup, part 2 (side camera)." % p)
+    if not path or not os.path.exists(path):
+        return None, "The side calibration pointer (%s) names %s, which is not there: overhead camera alone." % (
+            p, path or "nothing")
+    return path, "Side camera calibration from the camera setup page: %s" % path
+
+
+def save_side_pointer(path):
+    os.makedirs(conf_dir(), exist_ok=True)
+    tmp = _side_pointer() + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(os.path.abspath(path) + "\n")
+    os.replace(tmp, _side_pointer())
+    return _side_pointer()
+
+
+def new_side_calib_path(now=None):
+    return os.path.join(calib_dir(), "side_floorcal_%s.json" % time.strftime("%Y%m%d-%H%M%S", time.localtime(now)))
+
+
 def overhead_exposure():
     """(value or None, the saved record or {}). A missing, unreadable or nonsense file = None (the camera's own)."""
     try:
@@ -113,8 +148,14 @@ def main(argv=None):
         if v is not None:
             print("%g" % v)
             print("Overhead exposure from the camera setup page: %g (saved %s)" % (v, d.get("saved", "?")), file=sys.stderr)
+    elif what == "side":
+        path, words = side_calib()
+        print(words, file=sys.stderr)
+        if path:
+            print(path)
     elif what == "show":
         print(overhead_calib()[1])
+        print(side_calib()[1])
         v, d = overhead_exposure()
         print("Overhead exposure: %s" % ("%g (V4L2 units of 100 us; saved %s)" % (v, d.get("saved", "?")) if v is not None
                                           else "the camera's own (nothing saved)"))

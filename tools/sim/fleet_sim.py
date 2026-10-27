@@ -443,12 +443,29 @@ class FleetSim:
         calib = a.live_calib_out or os.path.join(a.out, "table_camera.json")
         tmp = calib + ".tmp"
         tc.true_model(tmp)
+        if getattr(a, "live_washout", False):
+            tc = TC.washed_out(tc)           # the board under the lamp (2026-10-27 11:20): bodies hardly stand out
+        sc = None
+        if getattr(a, "live_side", 0):
+            # the side camera (two-camera tracking, 2026-10-27): its calibration first, then the overhead's (the ladder
+            # waits for the overhead's file and then expects the side's to be there)
+            sc = TC.SideCamera(rect, seed=a.seed + 17)
+            scal = a.live_side_calib_out or os.path.join(a.out, "side_camera.json")
+            sc.true_model(scal + ".tmp")
+            with open(scal + ".tmp") as fh:
+                d = json.load(fh)
+            d["lag_s"] = a.live_side_lag
+            with open(scal + ".tmp", "w") as fh:
+                json.dump(d, fh, indent=1)
+            os.replace(scal + ".tmp", scal)
         os.replace(tmp, calib)
         cond = threading.Condition()
         latest = [None]                      # (jpeg bytes, frame number, t_wall)
+        side_latest = [None]
         sim = self
 
-        class H(BaseHTTPRequestHandler):
+        def handler(latest):
+          class H(BaseHTTPRequestHandler):
             def log_message(self, *x):
                 pass
 
@@ -474,9 +491,17 @@ class FleetSim:
                                          + b"\r\n\r\n" + body + b"\r\n")
                 except (BrokenPipeError, ConnectionResetError, OSError):
                     return
-        srv = ThreadingHTTPServer(("127.0.0.1", int(a.serve_live)), H)
+          return H
+        srv = ThreadingHTTPServer(("127.0.0.1", int(a.serve_live)), handler(latest))
         srv.daemon_threads = True
         threading.Thread(target=srv.serve_forever, daemon=True).start()
+        srv2 = None
+        if sc is not None:
+            srv2 = ThreadingHTTPServer(("127.0.0.1", int(a.live_side)), handler(side_latest))
+            srv2.daemon_threads = True
+            threading.Thread(target=srv2.serve_forever, daemon=True).start()
+            self.log("serving the simulated side camera at http://127.0.0.1:%d/live (lag %.3f s)" % (int(a.live_side),
+                                                                                                   a.live_side_lag))
         self.log("serving the simulated overhead camera at http://127.0.0.1:%d/live (%.2f px/cm)"
                  % (int(a.serve_live), a.live_px_per_cm))
         period = 1.0 / max(1.0, a.live_fps)
@@ -499,15 +524,25 @@ class FleetSim:
             ok, jpg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 90])
             if ok:
                 n += 1
+                side_jpg = None
+                if sc is not None:
+                    ok2, side_jpg = cv2.imencode(".jpg", sc.render(poses), [cv2.IMWRITE_JPEG_QUALITY, 90])
                 with cond:
                     latest[0] = (jpg.tobytes(), n, t_cap + 0.04)     # stamped one picture late, as camrec.py (e02_sim.py)
+                    if side_jpg is not None:
+                        # the side camera's pictures show the moment t_cap but reach the Pi live_side_lag later
+                        side_latest[0] = (side_jpg.tobytes(), n, t_cap + 0.04 + a.live_side_lag)
                     cond.notify_all()
+                if n == 1 and sc is not None:
+                    cv2.imwrite(os.path.join(a.out, "live_first_side.png"), sc.render(poses))
                 if n == 1 or (hand is not None and boxes and not getattr(self, "_live_hand_png", False)):
                     cv2.imwrite(os.path.join(a.out, "live_first.png" if n == 1 else "live_hand_brick.png"), img)
                     if n > 1:
                         self._live_hand_png = True
             time.sleep(max(0.0, period - (time.time() - t_cap)))
         srv.shutdown()
+        if srv2 is not None:
+            srv2.shutdown()
 
     def cam_gap(self, name, now):
         """--cam-gap NAME@T:DUR: the camera does not see that robot for DUR s from T s after the plan starts."""
@@ -810,6 +845,13 @@ def main(argv=None):
                                              "<out>/table_camera.json)")
     ap.add_argument("--live-brick", action="store_true",
                     help="--serve-live: the brick is only shown in the pictures (a hand puts it down)")
+    ap.add_argument("--live-side", type=int, default=0, metavar="PORT",
+                    help="--serve-live: also a simulated side camera (table_cam.SideCamera) at this port")
+    ap.add_argument("--live-side-calib-out", help="--live-side: its camera model (default <out>/side_camera.json)")
+    ap.add_argument("--live-side-lag", type=float, default=0.04, help="--live-side: its pictures reach the Pi this "
+                                                                       "much later than the overhead's, s")
+    ap.add_argument("--live-washout", action="store_true",
+                    help="--serve-live: the board washed out under the lamp for the overhead camera (2026-10-27 11:20)")
     ap.add_argument("--max-s", type=float, default=600.0)
     ap.add_argument("--starts", help="JSON {name: [x, y, heading deg]}: where the robots really start (default: the "
                                      "map's start spots)")

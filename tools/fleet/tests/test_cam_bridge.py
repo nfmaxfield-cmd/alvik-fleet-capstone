@@ -137,20 +137,27 @@ def test_cam_guard_stops_on_disagreement():
 
 
 @pytest.mark.skipif(os.environ.get("FLEET_DRYRUN") != "1", reason="end-to-end dry run: set FLEET_DRYRUN=1")
-def test_dry_run_cross_through_the_bridge(tmp_path):
-    """Simulated camera pictures -> bridge -> run_plan -> simulated robots: both cross 4 times, within 3 cm."""
+@pytest.mark.parametrize("two", [False, True], ids=["overhead", "washed-out-plus-side"])
+def test_dry_run_cross_through_the_bridge(tmp_path, two):
+    """Simulated camera pictures -> bridge -> run_plan -> simulated robots: both cross 4 times, within 3 cm.
+    two: the board washed out for the overhead (2026-10-27 11:20) and the side camera on (two-camera tracking)."""
     mp = os.path.join(FLEET, "examples", "phase0_cross.json")
     cal = str(tmp_path / "run" / "sim" / "table_camera.json")
+    scal = str(tmp_path / "run" / "sim" / "side_camera.json")
+    extra = ["--side-calib", scal, "--side-stream", "127.0.0.1:8766"] if two else []
+    sim_extra = ["--sim-arg=--live-side=8766", "--sim-arg=--live-side-calib-out=" + scal, "--sim-arg=--live-washout",
+                 "--sim-arg=--live-side-lag=0.06"] if two else []
     br = subprocess.Popen([sys.executable, os.path.join(FLEET, "cam_bridge.py"), "--map", mp, "--calib", cal,
                            "--stream", "127.0.0.1:8765", "--out", str(tmp_path / "bridge"), "--max-s", "200",
-                           "--wait-calib-s", "30"], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+                           "--wait-calib-s", "30"] + extra, stdout=open(str(tmp_path / "bridge.txt"), "w"),
+                          stderr=subprocess.STDOUT)
     try:
         time.sleep(1.0)
         rc = subprocess.call([sys.executable, os.path.join(FLEET, "run_plan.py"), "--map", mp, "--dry-run", "--yes",
                               "--session", str(tmp_path / "run"), "--poses-to", "127.0.0.1:5011",
                               "--sim-arg=--fix-hz=0", "--sim-arg=--serve-live=8765",
-                              "--sim-arg=--live-calib-out=" + cal], timeout=240,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+                              "--sim-arg=--live-calib-out=" + cal] + sim_extra, timeout=240,
+                             stdout=open(str(tmp_path / "run_plan.txt"), "w"), stderr=subprocess.STDOUT)
     finally:
         br.terminate()
         br.wait(timeout=20)
@@ -161,3 +168,7 @@ def test_dry_run_cross_through_the_bridge(tmp_path):
         assert r["camera_vs_truth"]["p95_cm"] < 2.0
     s = json.load(open(tmp_path / "run" / "run_plan_summary.json"))
     assert not s["simulator"]["collision"]
+    if two:
+        bs = json.load(open(tmp_path / "bridge" / "bridge_summary.json"))
+        for n, c in bs["two_camera"]["robots"].items():
+            assert c["side"] + c["both"] > 0.8 * sum(c.values()), (n, c)      # the side camera carried it

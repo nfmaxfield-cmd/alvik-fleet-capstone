@@ -131,9 +131,10 @@ class LadderStop(Exception):
 
 # ---------------------------------------------------------------------------------------------------- the camera
 class Eye:
-    """The overhead camera's pictures (the recorder's /live) in a thread, a tracker on every robot, lights finding."""
+    """The overhead camera's pictures (the recorder's /live) in a thread, the side camera's too when it is calibrated
+    (two-camera tracking, 2026-10-27: e02_twocam.TwoCamTracker), a tracker on every robot, lights finding."""
 
-    def __init__(self, stream, calib, rect):
+    def __init__(self, stream, calib, rect, side_stream=None, side_calib=None, lights=True):
         import e02_camera as CAM
         import sources as S
         self.CAM = CAM
@@ -144,6 +145,17 @@ class Eye:
         self.lock = threading.Lock()
         self.closed = False
         self.n = 0
+        self.lights = lights
+        self.side_cam, self.side_lag, self.side_bias = None, None, (0.0, 0.0)
+        self.side_frames = deque(maxlen=30)
+        self.side_n = 0
+        self.side_words = "no side camera calibration: the overhead camera alone (and the robots' lights)"
+        if side_calib and side_stream:
+            import e02_twocam as TW
+            self.side_cam, self.side_lag, self.side_bias = TW.load_side(side_calib)
+            self.side_words = "side camera %s (lag %.3f s), calibration %s" % (side_stream, self.side_lag, side_calib)
+            self.side_src = S.StreamSource(side_stream, log=lambda s: None)
+            threading.Thread(target=self._run_side, daemon=True).start()
         self.src = S.StreamSource(stream, log=lambda s: None)
         self.th = threading.Thread(target=self._run, daemon=True)
         self.th.start()
@@ -163,13 +175,34 @@ class Eye:
         except Exception as e:      # the stream ended
             self.error = str(e)
 
+    def _run_side(self):
+        min_lag = None
+        try:
+            for fr in self.side_src:
+                if self.closed:
+                    break
+                lag = fr.t_arrived - fr.t_pi
+                min_lag = lag if min_lag is None else min(min_lag, lag)
+                t = fr.t_pi - 0.04
+                with self.lock:
+                    self.side_frames.append((fr.img, t))
+                    self.side_n += 1
+                trk = self.trk
+                if trk is not None and lag - min_lag <= 0.3:     # behind (pictures queued): skip
+                    trk.push_side(fr.img, t)
+        except Exception as e:
+            self.side_error = str(e)
+
     def close(self):
         self.closed = True
         self.src.closed = True
+        if getattr(self, "side_src", None) is not None:
+            self.side_src.closed = True
 
     def rate(self, s=2.0):
-        n0 = self.n
+        n0, m0 = self.n, self.side_n
         time.sleep(s)
+        self.side_rate = (self.side_n - m0) / s
         return (self.n - n0) / s
 
     def collect(self, s):
@@ -182,39 +215,60 @@ class Eye:
         with self.lock:
             return [im for im, _ in list(self.frames)[-k:]]
 
-    def find_lights(self, bench, name, others=(), tries=2):
+    def latest_side(self, k=5):
+        with self.lock:
+            return [im for im, _ in list(self.side_frames)[-k:]]
+
+    def find_lights(self, bench, name, others=(), tries=2, keeper=None):
         """Its lights (`led 1 1 1 2500`, steady white): the one spot that got brighter. (x, y) of the lights (near
-        its front) or None."""
-        for _ in range(tries):
-            before = self.collect(0.8)
-            bench.send(name, "led 1 1 1 2500")
-            time.sleep(0.5)
-            during = self.collect(1.0)
-            time.sleep(1.3)
-            if len(before) < 2 or len(during) < 2:
-                continue
-            f = self.CAM.locate_light(self.cam, before, during, board_rect=self.rect, margin_cm=8.0)
-            if f and all(math.hypot(f["x"] - o[0], f["y"] - o[1]) > 12.0 for o in others):
-                return f["x"], f["y"]
-        return None
+        its front) or None. keeper: the ladder's lights keeper, paused meanwhile (its steady lights would leave nothing
+        to change), and this robot's lights put out first."""
+        if keeper is not None:
+            keeper.pause(True)
+        try:
+            for _ in range(tries):
+                if keeper is not None:
+                    bench.send(name, "led 0 0 0 3000")      # dark before (the keeper had them on)
+                    time.sleep(0.4)
+                before = self.collect(0.8)
+                bench.send(name, "led 1 1 1 2500")
+                time.sleep(0.5)
+                during = self.collect(1.0)
+                time.sleep(1.3)
+                if len(before) < 2 or len(during) < 2:
+                    continue
+                f = self.CAM.locate_light(self.cam, before, during, board_rect=self.rect, margin_cm=8.0)
+                if f and all(math.hypot(f["x"] - o[0], f["y"] - o[1]) > 12.0 for o in others):
+                    return f["x"], f["y"]
+            return None
+        finally:
+            if keeper is not None:
+                keeper.pause(False)
 
     def start_tracking(self, spots):
-        """Floor memory from the last pictures with every robot's floor filled in from around it; a track on each."""
-        import e02_multitrack as MT
+        """Floor memory from the last pictures (each camera's) with every robot's floor filled in from around it; a
+        track on each."""
+        import e02_twocam as TW
         cx, cy = (self.rect[0] + self.rect[2]) / 2.0, (self.rect[1] + self.rect[3]) / 2.0
-        trk = MT.MultiTracker(self.cam, board_center=(cx, cy), board_rect=self.rect, margin_cm=8.0)
+        side_ok = self.side_cam is not None and len(self.side_frames) >= 3
+        trk = TW.TwoCamTracker(self.cam, board_center=(cx, cy), board_rect=self.rect, margin_cm=8.0,
+                               side_cam=self.side_cam if side_ok else None, side_lag_s=self.side_lag or TW.SIDE_LAG_S,
+                               lights=self.lights, side_bias=self.side_bias)
         fr = self.latest(5)
         trk.set_background(fr, robots=[(x, y) for x, y in spots.values()])
+        if side_ok:
+            trk.set_side_background(self.latest_side(5), robots=[(x, y) for x, y in spots.values()])
         for n, (x, y) in spots.items():
             trk.add(n, x, y)
         self.trk = trk
         time.sleep(0.8)
 
-    def still(self, name, s=0.8, timeout=6.0, spread_cm=1.2):
-        """Where the camera sees it standing still: the median of its sure spots over the last s, or None."""
+    def still(self, name, s=0.8, timeout=6.0, spread_cm=1.2, body_only=False):
+        """Where the camera sees it standing still: the median of its sure spots over the last s, or None. body_only:
+        only spots where a camera saw its body (not its lights alone): L0's check."""
         t_end = time.time() + timeout
         while time.time() < t_end:
-            h = self.trk.history(name, time.time() - s - 0.1) if self.trk else []
+            h = self.trk.history(name, time.time() - s - 0.1, body_only=body_only) if self.trk else []
             if len(h) >= 4 and h[-1][0] - h[0][0] >= 0.6 * s:
                 xs, ys = np.array([q[1] for q in h]), np.array([q[2] for q in h])
                 mx, my = float(np.median(xs)), float(np.median(ys))
@@ -222,6 +276,50 @@ class Eye:
                     return mx, my
             time.sleep(0.15)
         return None
+
+    def seen_by(self, name, s=1.5):
+        """Which camera saw it over the last s: 'both', 'overhead', 'side', 'lights' (the most frequent), or None."""
+        if not self.trk:
+            return None
+        with self.trk.lock:
+            tr = self.trk.tracks.get(name)
+            hs = [q[4] for q in tr.hist if q[0] >= time.time() - s and len(q) > 4 and q[4]] if tr else []
+        return max(set(hs), key=hs.count) if hs else None
+
+
+class LightsKeeper(threading.Thread):
+    """Keeps every robot's lights on (`led 1 1 1 20000`, renewed every RENEW_S) while the ladder watches between its
+    steps, so the lights can stand in for a body neither camera sees (e02_twocam). The robots ignore `led` while a
+    run is going (their blink codes then do the same job)."""
+    RENEW_S = 12.0          # chosen: well inside the firmware's 20 s cap on one `led`. No DOE: a renewal period
+
+    def __init__(self, bench, names):
+        super().__init__(daemon=True)
+        self.bench, self.names = bench, list(names)
+        self.paused = threading.Event()
+        self.stopping = False
+        self.next_t = 0.0
+
+    def pause(self, on):
+        if on:
+            self.paused.set()
+        else:
+            self.paused.clear()
+            self.next_t = 0.0
+
+    def run(self):
+        while not self.stopping:
+            if not self.paused.is_set() and time.time() >= self.next_t:
+                for n in self.names:
+                    try:
+                        self.bench.send(n, "led 1 1 1 20000")
+                    except Exception:
+                        pass
+                self.next_t = time.time() + self.RENEW_S
+            time.sleep(0.2)
+
+    def stop(self):
+        self.stopping = True
 
 
 # ------------------------------------------------------------------------------------------------- the robots
@@ -488,6 +586,8 @@ class Ladder:
         self.eye = None
         self.bench = None
         self.sim = None
+        self.keeper = None
+        self.side_stream, self.side_calib = None, None
         if a.dry and getattr(a, "what", "run") not in ("status", "stop", "reset"):
             self.dry_board()
         elif a.dry:
@@ -496,6 +596,8 @@ class Ladder:
             self.ips = a.robot
             self.stream = a.stream
             self.calib = a.calib
+            if a.side_calib:
+                self.side_stream, self.side_calib = a.side_stream, a.side_calib
         self.rect = tuple(self.st.get("rect") or (0.0, 0.0, 122.0, 122.0))
 
     # -- state ----------------------------------------------------------------------------------------
@@ -546,6 +648,9 @@ class Ladder:
         self.ips = ["127.0.0.2", "127.0.0.3", "127.0.0.4"]
         self.stream = "127.0.0.1:8765"
         self.calib = os.path.join(sd, "table_camera.json")
+        self.side_calib_dry = os.path.join(sd, "side_camera.json")
+        if not self.a.sim_no_side:
+            self.side_stream, self.side_calib = "127.0.0.1:8766", self.side_calib_dry
         pidf = os.path.join(sd, "pid")
         if os.path.exists(pidf):
             try:
@@ -572,6 +677,10 @@ class Ladder:
                "--live-calib-out", self.calib, "--persist", "--max-s", "5400", "--quiet"]
         if not self.a.sim_calibrated:
             cmd.append("--uncalibrated")           # as switched on: L1 must calibrate them
+        if not self.a.sim_no_side:
+            cmd += ["--live-side", "8766", "--live-side-calib-out", self.side_calib_dry]
+        if self.a.sim_washout:
+            cmd.append("--live-washout")
         for te in self.a.turn_err:
             cmd += ["--turn-err", te]
         p = subprocess.Popen(cmd, stdout=open(os.path.join(sd, "sim_stdout.txt"), "a"), stderr=subprocess.STDOUT,
@@ -609,6 +718,9 @@ class Ladder:
         return self.bench
 
     def drop_bench(self):
+        if self.keeper is not None:
+            self.keeper.stop()
+            self.keeper = None
         if self.bench is not None:
             self.bench.close()
             self.bench = None
@@ -616,16 +728,26 @@ class Ladder:
 
     def need_eye(self):
         if self.eye is None:
-            self.eye = Eye(self.stream, self.calib, self.rect)
+            self.eye = Eye(self.stream, self.calib, self.rect, side_stream=self.side_stream,
+                           side_calib=self.side_calib, lights=not self.a.no_lights)
             t0 = time.time()
-            while self.eye.n < 5 and time.time() - t0 < 15:
+            while (self.eye.n < 5 or (self.eye.side_cam is not None and self.eye.side_n < 5)) and time.time() - t0 < 15:
                 time.sleep(0.2)
             if self.eye.n < 5:
                 raise LadderStop("No pictures from the overhead camera (%s). Is the recorder running? "
                                  "(./run-fleet-pi.sh rec)" % self.stream)
+            if self.eye.side_cam is not None and self.eye.side_n < 5:
+                say("  NOTE: no pictures from the side camera (%s): following with the overhead camera alone."
+                    % self.side_stream)
+            if not self.a.no_lights and self.bench is not None and self.keeper is None:
+                self.keeper = LightsKeeper(self.bench, self.bench.robots())
+                self.keeper.start()
         return self.eye
 
     def drop_eye(self):
+        if self.keeper is not None:
+            self.keeper.stop()
+            self.keeper = None
         if self.eye is not None:
             self.eye.close()
             self.eye = None
@@ -642,20 +764,23 @@ class Ladder:
         names = names or sorted(bench.robots(), key=lambda n: PREFER.index(n) if n in PREFER else 9)
         found, lights = {}, {}
         for n in names:
-            q = eye.find_lights(bench, n, others=list(lights.values()))
+            q = eye.find_lights(bench, n, others=list(lights.values()), keeper=self.keeper)
             if q is None:
                 say("  %s: its lights were not seen anywhere on the board." % n)
                 continue
             lights[n] = q
         eye.start_tracking(lights)
         for n, q in lights.items():
-            p = eye.still(n, timeout=4.0)
+            p = eye.still(n, timeout=4.0, body_only=True)
             if p is None:
-                # its top does not stand out from the board (the 10:07 flash check: one robot 0-3 grey levels against
-                # 14-24): it cannot be followed, so it never moves today, but it is on every map where its lights
-                # are, so the others go round it (OBSTACLE_R_CM covers the ~3 cm from its lights to its middle)
-                say("  %s: its lights are at (%.1f, %.1f), but the camera cannot see its body there (too little "
-                    "contrast with the board): kept out, parked there; the others go round it." % (n, q[0], q[1]))
+                # NEITHER camera sees its body (2026-10-27 11:20: the overhead alone could not, on the washed-out board;
+                # the side camera now looks too): it cannot be followed, so it never moves today, but it is on every
+                # map where its lights are, so the others go round it (OBSTACLE_R_CM covers the ~3 cm from its lights
+                # to its middle)
+                cams = "the overhead camera" + (" nor the side camera" if eye.trk.side is not None else
+                                                " (the side camera is not in use: %s)" % eye.side_words)
+                say("  %s: its lights are at (%.1f, %.1f), but neither %s can see its body there (too little "
+                    "contrast with the board): kept out, parked there; the others go round it." % (n, q[0], q[1], cams))
                 r = self.st["robots"].setdefault(n, {})
                 r.update(x=round(q[0], 2), y=round(q[1], 2), t=round(time.time(), 1), body_unseen=True)
                 r.pop("h", None)
@@ -663,6 +788,8 @@ class Ladder:
                 self.save()
                 continue
             found[n] = p
+            say("  %s: body seen by %s" % (n, {"both": "both cameras", "overhead": "the overhead camera",
+                                               "side": "the side camera only"}.get(eye.seen_by(n), "a camera")))
             h = None
             old = self.st["robots"].get(n)
             if old and "h" in old and math.hypot(old["x"] - p[0], old["y"] - p[1]) < 2.5:
@@ -708,6 +835,10 @@ class Ladder:
         eye = self.need_eye()
         fps = eye.rate(2.0)
         say("Overhead camera: %.0f pictures a second" % fps)
+        if eye.side_cam is not None:
+            say("Side camera: %.0f pictures a second (%s)" % (getattr(eye, "side_rate", 0.0), eye.side_words))
+        else:
+            say("Side camera: not used (%s)" % eye.side_words)
         if fps < 5:
             raise LadderStop("The camera sends only %.0f pictures a second (it needs 5+). Is the Pi too hot or busy? "
                              "Look at the recorder window (tmux attach -t fleet)." % fps)
@@ -939,6 +1070,10 @@ class Ladder:
             # cam_bridge's travel heading needs HEADING_MIN_CM (5 cm) inside its window: 1 s at 5 cm/s never has it
             # (dry run 2026-10-27: no heading sent in a whole slow drive, a 19 deg error stayed); 2 s does
             bcmd += ["--heading-window-s", "%.1f" % max(1.0, 2.0 * 5.0 / cms)]
+        if self.side_calib:
+            bcmd += ["--side-stream", self.side_stream, "--side-calib", self.side_calib]
+        if self.a.no_lights:
+            bcmd += ["--no-lights"]
         bcmd += list(bridge_extra)
         bf = open(os.path.join(sess, "bridge.txt"), "w")
         br = subprocess.Popen(bcmd, stdout=bf, stderr=subprocess.STDOUT)
@@ -1380,6 +1515,13 @@ def main(argv=None):
     ap.add_argument("--stream", default="127.0.0.1:8000", help="the recorder's /live")
     ap.add_argument("--calib", default=os.path.join(REPO, "tools", "experiment", "data",
                                                     "overhead_floorcal_roam1.json"))
+    ap.add_argument("--side-stream", default="127.0.0.1:8001", help="the recorder's side camera /live (camera 1)")
+    ap.add_argument("--side-calib", default="", help="the side camera's floor calibration (setup page); none: the "
+                                                      "overhead camera alone")
+    ap.add_argument("--no-lights", action="store_true", help="no lights-as-markers fallback (and no steady lights)")
+    ap.add_argument("--sim-washout", action="store_true", help="--dry: the simulated board washed out under the lamp "
+                                                               "for the overhead camera (11:20), the side camera on")
+    ap.add_argument("--sim-no-side", action="store_true", help="--dry: no simulated side camera")
     ap.add_argument("--dir", help="the ladder's folder (default logs/<date>-ladder)")
     ap.add_argument("--dry", action="store_true", help="the simulator as the board")
     ap.add_argument("--seed", type=int, default=7, help="--dry: where the simulated robots start")

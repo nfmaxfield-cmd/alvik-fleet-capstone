@@ -35,6 +35,7 @@ import math
 import os
 import socket
 import sys
+import threading
 import time
 from collections import deque
 
@@ -113,9 +114,9 @@ def outline_heading(trk, g, x, y, ref_deg):
 
 
 def make_tracker_class():
-    import e02_multitrack as MT
+    import e02_twocam as TW
 
-    class OdoTracker(MT.MultiTracker):
+    class OdoTracker(TW.TwoCamTracker):
         """MultiTracker whose prediction is the robot's own pose: last sure spot + (own pose now - own pose then)."""
 
         def __init__(self, *a, **kw):
@@ -151,6 +152,11 @@ def make_tracker_class():
                 return super()._predict(tr, t)
             return tr.bx + (b[1] - a[1]), tr.by + (b[2] - a[2])
 
+        def _heading_at(self, tr, t):
+            """Its own heading (gyro, fixed by the camera) for the lights-to-middle offset; the start heading before."""
+            p = self.own_at(tr.name, t)
+            return p[3] if p is not None else tr.heading
+
     return OdoTracker
 
 
@@ -164,13 +170,20 @@ class Bridge:
         self.out = log_dir
         T = make_tracker_class()
         cx, cy = (rect[0] + rect[2]) / 2.0, (rect[1] + rect[3]) / 2.0
-        self.trk = T(cam, board_center=(cx, cy), board_rect=rect, margin_cm=args.margin_cm)
+        side_cam, side_lag, side_bias = getattr(args, "side", None) or (None, None, (0.0, 0.0))
+        import e02_twocam as TW
+        self.trk = T(cam, board_center=(cx, cy), board_rect=rect, margin_cm=args.margin_cm, side_cam=side_cam,
+                     side_lag_s=side_lag if side_lag is not None else TW.SIDE_LAG_S, side_bias=side_bias,
+                     lights=not getattr(args, "no_lights", False))
+        self.side_feed = None
+        self.last_obs = {n: None for n in starts}
         for n, (x, y, h) in starts.items():
             self.trk.add(n, x, y, heading=h)
         self.floor_frames = []
         self.ready = False
         self.has_pose = {n: False for n in starts}       # the robot has a pose of its own (run_plan's echo)
         self.moved = {n: False for n in starts}
+        self.moved_n = {}
         self.start_heads = {n: deque(maxlen=START_FRAMES) for n in starts}
         self.last_head_t = {n: 0.0 for n in starts}
         self.counts = {n: dict(seen=0, unsure=0, predicted=0, lost=0, fixes=0, headings=0) for n in starts}
@@ -183,7 +196,7 @@ class Bridge:
         self.obstacles = []
         self.track_f = open(os.path.join(log_dir, "track.csv"), "w", newline="")
         self.track_w = csv.writer(self.track_f)
-        self.track_w.writerow(["t", "robot", "x", "y", "status", "sent_th", "why"])
+        self.track_w.writerow(["t", "robot", "x", "y", "status", "sent_th", "why", "src"])
         self.ev_f = open(os.path.join(log_dir, "events.jsonl"), "a")
 
     def event(self, kind, **kw):
@@ -213,6 +226,15 @@ class Bridge:
             if len(self.floor_frames) >= FLOOR_FRAMES:
                 spots = [(x, y) for x, y, _ in self.starts.values()]
                 self.trk.set_background(self.floor_frames, robots=spots)
+                if self.trk.side is not None:
+                    sf = self.side_feed.latest(FLOOR_FRAMES) if self.side_feed is not None else []
+                    if len(sf) >= 3:
+                        self.trk.set_side_background(sf, robots=spots)
+                        self.side_feed.ready = True
+                        self.say("side camera: floor memory taken (%d pictures)" % len(sf))
+                    else:
+                        self.trk.side = None
+                        self.say("side camera: no pictures, following with the overhead camera alone")
                 if self.args.brick_watch:
                     import brickwatch as BW
                     self.bw = BW.BrickWatch(self.cam, self.rect, send=self.on_obstacle, log=self.say)
@@ -227,10 +249,23 @@ class Bridge:
             c = self.counts[n]
             c[st["status"]] = c.get(st["status"], 0) + 1
             sent_th = None
-            if st["status"] == "seen" and abs(st["t_seen"] - t) < 1e-6:
+            # a fix for every NEW picture that saw it: either camera's, or its lights (two-camera tracking: obs_t is the
+            # newest picture used; overhead alone, that is this picture)
+            new_obs = st["status"] == "seen" and st.get("obs_t") is not None and (
+                self.last_obs[n] is None or st["obs_t"] > self.last_obs[n] + 1e-6)
+            if new_obs:
+                self.last_obs[n] = st["obs_t"]
+                c[st.get("src") or "overhead"] = c.get(st.get("src") or "overhead", 0) + 1
+            if new_obs:
                 sx, sy, h0 = self.starts[n]
                 if math.hypot(st["x"] - sx, st["y"] - sy) > 3.0:
-                    self.moved[n] = True
+                    # moved off its start spot: three sightings in a row say so (2026-10-27 dry run: one stray first
+                    # sighting 3.6 cm off took the start heading away, and run_plan never got a fix it could start from)
+                    self.moved_n[n] = self.moved_n.get(n, 0) + 1
+                    if self.moved_n[n] >= 3 or self.has_pose[n]:
+                        self.moved[n] = True
+                else:
+                    self.moved_n[n] = 0
                 th, sth = None, None
                 if not self.has_pose[n] and not self.moved[n] and self.args.start_heading == "map":
                     th, sth = h0, START_SIGMA_DEG          # as placed: the start check then only checks the position
@@ -250,16 +285,17 @@ class Bridge:
                     sent_th = th
                 if not self.args.observe and (th is not None or self.has_pose[n] or self.moved[n]):
                     # (a robot with no pose yet takes no position-only fix: its first must carry a heading)
-                    msg = {"type": "fix", "robot": n, "t": round(t, 4), "x": round(st["x"], 2), "y": round(st["y"], 2),
-                           "th": None if th is None else round(th, 2), "sigma": FIX_SIGMA_CM,
-                           "sigma_th": sth or HEADING_SIGMA_DEG, "src": "cam_bridge"}
+                    sig = FIX_SIGMA_CM * max(1.0, st.get("sigma") or 1.0)    # side: stretched; lights: 2 cm
+                    msg = {"type": "fix", "robot": n, "t": round(st["t_seen"], 4), "x": round(st["sure_x"], 2),
+                           "y": round(st["sure_y"], 2), "th": None if th is None else round(th, 2), "sigma": round(sig, 2),
+                           "sigma_th": sth or HEADING_SIGMA_DEG, "src": "cam_bridge:%s" % (st.get("src") or "overhead")}
                     self.send(msg)
                     c["fixes"] += 1
                     if th is not None and self.has_pose[n]:
                         c["headings"] += 1
                         self.event("heading", robot=n, th=round(th, 2), how="travel")
             self.track_w.writerow(["%.4f" % t, n, "%.2f" % st["x"], "%.2f" % st["y"], st["status"],
-                                   "" if sent_th is None else "%.2f" % sent_th, st.get("why") or ""])
+                                   "" if sent_th is None else "%.2f" % sent_th, st.get("why") or "", st.get("src") or ""])
             if self.args.observe:
                 self.turn_watch(n, st, t)
         for (te, robot, what) in list(self.trk.events):
@@ -275,8 +311,9 @@ class Bridge:
         if time.time() - self.status_t >= STATUS_EVERY_S:
             self.status_t = time.time()
             rate = self.frames / max(1e-6, t - self.t_first) if self.t_first and t > self.t_first else 0.0
-            self.say("%.0f pictures/s; %s" % (rate, "; ".join(
-                "%s %s %d fixes" % (n, sts[n]["status"], self.counts[n]["fixes"]) for n in sts)))
+            self.say("%.0f pictures/s%s; %s" % (rate, "" if self.trk.side is None else " (+ side)", "; ".join(
+                "%s %s%s %d fixes" % (n, sts[n]["status"], (" by " + sts[n]["src"]) if sts[n].get("src") else "",
+                                      self.counts[n]["fixes"]) for n in sts)))
 
     def on_obstacle(self, ob):
         self.obstacles.append(ob)
@@ -334,7 +371,8 @@ class Bridge:
 
     def summary(self):
         s = dict(frames=self.frames, skipped_behind=getattr(self, "skipped", 0), robots=self.counts, obstacles=len(self.obstacles),
-                 duration_s=None if self.t_first is None else round(time.time() - self.t_first, 1))
+                 duration_s=None if self.t_first is None else round(time.time() - self.t_first, 1),
+                 two_camera=self.trk.summary())
         with open(os.path.join(self.out, "bridge_summary.json"), "w") as f:
             json.dump(s, f, indent=1)
         return s
@@ -342,6 +380,38 @@ class Bridge:
     def close(self):
         self.track_f.close()
         self.ev_f.close()
+
+
+class SideFeed(threading.Thread):
+    """The side camera's pictures: kept (the newest few, for its floor memory at the start) and, once the bridge has
+    taken that floor memory (ready), handed to the tracker. Newest only: a queue behind is skipped."""
+
+    def __init__(self, trk, stream):
+        super().__init__(daemon=True)
+        import sources as S
+        self.trk, self.src = trk, S.StreamSource(stream, log=lambda s: None)
+        self.buf = deque(maxlen=10)
+        self.ready = False
+        self.n = 0
+
+    def latest(self, k):
+        return [im for im, _ in list(self.buf)[-k:]]
+
+    def run(self):
+        min_lag = None
+        try:
+            for fr in self.src:
+                lag = fr.t_arrived - fr.t_pi
+                min_lag = lag if min_lag is None else min(min_lag, lag)
+                self.n += 1
+                self.buf.append((fr.img, fr.t_pi - CAPTURE_S))
+                if self.ready and lag - min_lag <= MAX_BACKLOG_S and self.trk.side is not None:
+                    self.trk.push_side(fr.img, fr.t_pi - CAPTURE_S)
+        except Exception as e:
+            print("side camera stream: %s" % e, flush=True)
+
+    def close(self):
+        self.src.closed = True
 
 
 def starts_from(args):
@@ -393,6 +463,10 @@ def main(argv=None):
                          "covers under HEADING_MIN_CM and no heading is ever sent: the remote ladder's slow runs use 2")
     ap.add_argument("--no-travel-heading", action="store_true",
                     help="position-only fixes once the robot has its pose (the A/B check of the travel heading)")
+    ap.add_argument("--side-stream", default="127.0.0.1:8001", help="the side camera's /live (camera 1 of the recorder)")
+    ap.add_argument("--side-calib", default="", help="the side camera's floor calibration (setup page): both cameras "
+                                                      "follow the robots (e02_twocam); none: the overhead alone")
+    ap.add_argument("--no-lights", action="store_true", help="no lights-as-markers fallback")
     ap.add_argument("--margin-cm", type=float, default=8.0, help="a robot's centre may be this far past an open side")
     ap.add_argument("--out", help="log folder (default logs/<date-time>-bridge)")
     ap.add_argument("--max-s", type=float, default=0, help="stop after this long (0: until Ctrl+C)")
@@ -405,6 +479,16 @@ def main(argv=None):
     import e02_camera as CAM
     cam = CAM.load_camera(args.calib)
     rect, starts = starts_from(args)
+    args.side = None
+    if args.side_calib:
+        import e02_twocam as TW
+        t1 = time.time()
+        while not os.path.exists(args.side_calib) and time.time() - t1 < args.wait_calib_s:
+            time.sleep(0.2)
+        try:
+            args.side = TW.load_side(args.side_calib)
+        except (OSError, ValueError) as e:
+            print("Side camera calibration not read (%s): the overhead camera alone." % e, flush=True)
     out = args.out or os.path.join(REPO, "logs", dt.datetime.now().strftime("%Y%m%d-%H%M%S") + "-bridge")
     os.makedirs(out, exist_ok=True)
     tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -430,6 +514,10 @@ def main(argv=None):
     import signal
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))   # kill / tmux: save first
     import sources as S
+    if args.side is not None:
+        br.side_feed = SideFeed(br.trk, args.side_stream)
+        br.side_feed.start()
+        print("Side camera: %s (lag %.3f s)" % (args.side_stream, args.side[1]), flush=True)
     src = S.StreamSource(args.stream, log=lambda s: print(s, flush=True))
     min_lag, skipped = None, 0
     try:
@@ -458,6 +546,8 @@ def main(argv=None):
         pass
     finally:
         src.closed = True
+        if br.side_feed is not None:
+            br.side_feed.close()
         s = br.summary()
         br.close()
         print("Camera bridge stopped: %s" % json.dumps(s["robots"]), flush=True)
