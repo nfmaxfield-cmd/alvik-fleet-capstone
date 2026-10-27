@@ -47,6 +47,11 @@ Answered ones move to the bottom with the answer and date.
 30. Add run_plan's refusal of any plan under 8 cm now? (The sweep found a planner bug that planned two robots into
     each other; fixed, but this is the safety net.)
 31. 3 more seeds for the conditions that held, before calling them safe (about 2 h of machine time)?
+32. Does the moved side camera see the whole board? A robot outside its picture can't be helped while the overhead
+    is washed out (fix: move it further back, or a third camera).
+33. Should a robot seen only by its lights be allowed to move? (Now: kept out at L0, the safe choice.)
+34. The taped-marks test (T1) to settle which camera carries the ~5 cm constant offset?
+35. Robots' white lights staying on while the ladder watches: OK?
 
 ### Robots and sessions
 8. What stands just beyond the home board's x = 0 edge at about y = 30-60? (Your 07:45 "yes" to this one was read as
