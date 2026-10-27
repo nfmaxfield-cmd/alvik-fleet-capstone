@@ -7607,6 +7607,26 @@ class Runner:
             self.lost_place.add(robot)
             return out
         bx, by, bth = EF.to_board(sol, pose[0], pose[1], pose[2])
+        barrier = [(ax, v) for (ax, v), (was, felt) in found_kinds.items() if was == "edge" and felt == "board"]
+        if barrier:
+            # Nick, 2026-10-26 23:33: things on the table can read as a board. A front stop where the map has an open
+            # edge is something standing on the board, not the boundary: the find would put the robot off by however
+            # far it stands in from the edge. The find is not used (no fix); the robot keeps its own / the camera's
+            # position, and the barrier is recorded (data for the warm-up's barrier map).
+            for ax, v in barrier:
+                self.st.setdefault("board_changes", []).append([round(t1, 1), robot, "barrier felt at an open edge",
+                                                                ax, v])
+            rec.update(ok=False, barrier=True, would_be=[round(bx, 2), round(by, 2), round(bth, 1)],
+                       before=[round(v, 2) for v in pose])
+            self.st.setdefault("edge_finds", []).append(rec)
+            self.say("    %s felt something solid where the map has an open edge (%s): a barrier on the table, not the "
+                     "edge. Its find is not used; it keeps its camera position (the find would have moved it %.1f cm)."
+                     % (robot, ", ".join("%s = %.0f" % b_ for b_ in barrier), math.hypot(bx - pose[0], by - pose[1])))
+            self.mark("e02 %s %s edge find barrier" % (order, robot))
+            self.st.save()
+            out.update(ok=True, result="ok", words="felt a barrier where an open edge should be: kept its camera "
+                       "position", t1=t1, barrier=True)
+            return out
         self.send(robot, "fix %.2f %.2f %.1f %.3f" % (bx, by, bth, time.time()))
         self.fix_t[robot] = time.time()
         self.heads[robot] = [bth, True]

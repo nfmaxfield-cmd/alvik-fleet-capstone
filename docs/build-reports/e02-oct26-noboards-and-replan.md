@@ -77,3 +77,13 @@ The re-plan is an anytime search: once a first safe plan exists it keeps trying 
 - `--answer-timeout-min 3` for the edges plan and E1's 15 minutes are chosen convenience settings, not measured (no
   DOE needed: they decide how long the night idles, not what is measured).
 - `replan_budget_s` 2.0 is chosen; a simulator sweep (0.5 / 1 / 2 s: robots stopped and seconds lost) would set it.
+
+## Addendum (23:40): a barrier where an open edge should be
+
+Nick, 23:33: things on the table can read as a board. Before this, an edge find that met something solid where the map
+has an open edge only noted it and still fitted the robot's position as if that thing were the table's edge. Now that
+find is not used: the robot keeps its camera position, and the barrier's place is recorded (`board_changes`,
+`edge_finds` with `barrier`). Dry run N5 (`--dry-bricks "6,65,40,4,90" --dry-bricks-now`, a 40 cm brick 4-8 cm in
+from the x = 0 edge): Right felt it, the find would have moved it 9.0 cm, it kept its camera position and finished its
+run. Open: the camera's trust flagged "bad" (5.2 x) right after; it also flapped (2.6-3.2 x) in N3 without a brick.
+To check in tonight's analysis.
