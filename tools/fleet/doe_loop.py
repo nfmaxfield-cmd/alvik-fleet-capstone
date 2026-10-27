@@ -562,6 +562,9 @@ class DoeLoop(LD.Ladder):
             if not self.st["passed"].get("L1:%s" % n):
                 self.park(n, "restarted, and calibrating it again failed")
                 fine = [m for m in fine if m != n]
+            else:
+                self.st["doe"].setdefault("turn_due", {})[n] = True     # a fresh calibration: turn check it first
+                self.save()
         return fine
 
     def correction_cmds(self, n):
@@ -801,7 +804,7 @@ class DoeLoop(LD.Ladder):
                 self.find_all(sub)
                 if n in self.st["kept_out"]:
                     raise LadderStop("the camera cannot see it now")
-                if i % TURN_EVERY == 0:
+                if i % TURN_EVERY == 0 or self.st["doe"].get("turn_due", {}).pop(n, False):
                     if not self.check(sub, [n], "%s's turn check" % n):
                         raise LadderStop(None)
                     say("  %s: turn check (drive %d is next)" % (n, i + 1))

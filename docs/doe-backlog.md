@@ -384,8 +384,9 @@ p95 and misses (the ladder's SLOW_CMS row above), and heading from a 25 vs a 40 
 | Readings in a row before a distance-sensor stop (firmware: front_confirm_ms 100 ms, about 2 sensor pictures) | unchanged; the loop records enough to judge 1 / 2 / 3 | 1 / 2 / 3 in a row against phantom stops (sensor_stops.csv) and the reaction to a real brick (brick runs) | Logs, then Board | open |
 | Full-rate clip around a stop / hold / FAIL (CLIP_S) | 5 s either side (Nick's figure) | From the first night's clips: how far back each stop's cause shows | Logs | open |
 
-Chosen with no DOE: the 4 h cap (Nick), 25 cm from every edge and parked robot (Nick's safety rule; the planner floor
-shrunk 20 cm and parked robots as 20 cm circles follow from it), the 8 cm p95 safety limit that parks a robot (a fault,
+Chosen with no DOE: the 4 h cap (Nick), 25 cm from every edge and 30 cm from every parked robot for planned spots and
+lines (Nick's safety rule; the planner floor shrunk 13.5 cm and parked robots as 17 cm circles follow from it and the
+planner's 8.2 cm turn room), the 8 cm p95 safety limit that parks a robot (a fault,
 not a measurement), the 3 cm miss threshold (Nick's question), 5 min .avi parts (a file size), the 4 s answer wait
 (round trips are 17-20 ms), the 0.0006 read-back tolerance (the firmware prints 3 decimals).
 
