@@ -371,6 +371,24 @@ Chosen with no DOE: 25 cm edge refusal (Nick's rule), calibration room 30 / 35 c
 test's lines to a parked robot (safety room), test layouts 30 cm in (25 if nothing fits), the 15 cm lead-in to a
 start spot, the start check 4 cm / 6 deg, the 25 cm straight in L3, minimum battery 25 %.
 
+## Monday sweep (2026-10-27, simulator)
+
+Write-up: [monday-mission-sweep.md](results/monday-mission-sweep.md). Sweep settings, not robot settings: they only
+decide what was tried (tools/fleet/sweeps/monday_sweep.py, sim_shim.py).
+
+| Number (where) | Value chosen | Experiment that would set it | Needs | Status |
+|---|---|---|---|---|
+| A stalling camera stalls once every (monday_sweep.py CAM_STALL_EVERY_S) | 20 s | Stall length x spacing (1 / 2.5 s x 10 / 20 / 60 s) against standstill and closest approach; better, measure the real stalls first (the Pi's tracker log on the school WiFi) | Sim, then Logs | open |
+| Camera on a stand for the angle cases (monday_sweep.py, cam_tilt) | 35 deg from 180 cm; 50 deg from 150 cm; corrected with 10 % height / 10 cm spot error | The school room's possible mounts (ceiling, tripod at the side): measure height and angle there, then one dry run each | Board (school) | open |
+| Picture age (monday_sweep.py) | 0.35 / 0.7 s | tools/live/capture_delay.py on the school WiFi gives the real age: no DOE, a measurement | Board (school) | open |
+| Brick watch picture scale for the 122 x 122 case (sim_shim.py cam_px_per_cm) | 2.6 px/cm | Not a DOE: set by where the camera can go in the room (the table plus a margin must be in view) | Board (school) | open |
+
+Chosen with no DOE (Monday sweep): BRICK_T_FRAC / BRICK_MID (the build's M-run drop, kept for comparison),
+BRICK_CLEAR_CM 15 (a person picks the spot on the day), TIMEOUT_K 1.6 / TIMEOUT_ADD_S 30 (machine time only), the
+standstill rule STILL_WIN_S 0.5 / STILL_CM 0.25 / STILL_DEG 2 (applied to plan and run alike; only the difference is
+reported), OUT_T_S 100 (one moment; the outcome is the same in kind after the show), REF_RANGE_CM 262 (the home
+camera's height, where the simulator's 0.3 cm noise comes from).
+
 ## Already set by data
 
 - **Line edge cue edge_thr 150** (e02.py SAFETY_SETTINGS): plywood reads 52-84 in every E02 session, the two real

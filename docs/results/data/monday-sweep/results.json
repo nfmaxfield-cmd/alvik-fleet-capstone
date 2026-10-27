@@ -1,0 +1,3874 @@
+[
+ {
+  "condition": "base 152x76",
+  "group": "table size",
+  "seed": 1,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "done",
+  "finished": true,
+  "took_s": 197.65,
+  "planned_s": 229.6,
+  "late_s": -31.9,
+  "closest_cm": 10.71,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Center",
+   "Right",
+   195.14
+  ],
+  "brick_cm": 1.83,
+  "contact": false,
+  "edge_cm": 4.14,
+  "edge_crossed": false,
+  "edge_at": [
+   "Right",
+   149.99
+  ],
+  "hung": [],
+  "replans": 1,
+  "replan_cpu_max_s": 1.6,
+  "replan_cpu_sum_s": 1.6,
+  "improves_kept": 1,
+  "stranded_events": 0,
+  "replan_sources": [
+   "camera"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "12/12",
+  "lanes_done": 12,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 66.4,
+   "Center": 16.9,
+   "Right": 63.8
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": -84.9,
+  "fleet_still_extra_s": -25.5,
+  "freeze_max_s": 7.7,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 122.0,
+  "brick_seen_t": 123.37,
+  "brick_seen_after_s": 1.37,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "base_152x76__s1"
+ },
+ {
+  "condition": "base 152x76",
+  "group": "table size",
+  "seed": 2,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "done",
+  "finished": true,
+  "took_s": 228.1,
+  "planned_s": 229.6,
+  "late_s": -1.5,
+  "closest_cm": 10.05,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Left",
+   "Center",
+   168.62
+  ],
+  "brick_cm": 4.38,
+  "contact": false,
+  "edge_cm": 4.28,
+  "edge_crossed": false,
+  "edge_at": [
+   "Left",
+   177.77
+  ],
+  "hung": [],
+  "replans": 4,
+  "replan_cpu_max_s": 5.94,
+  "replan_cpu_sum_s": 19.7,
+  "improves_kept": 1,
+  "stranded_events": 2,
+  "replan_sources": [
+   "camera",
+   "distance_sensor",
+   "retry"
+  ],
+  "sensor_obstacles": 1,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "12/12",
+  "lanes_done": 12,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 93.0,
+   "Center": 46.8,
+   "Right": 94.3
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": 2.1,
+  "fleet_still_extra_s": -5.7,
+  "freeze_max_s": 16.8,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 122.0,
+  "brick_seen_t": 123.29,
+  "brick_seen_after_s": 1.29,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "base_152x76__s2"
+ },
+ {
+  "condition": "180x90",
+  "group": "table size",
+  "seed": 1,
+  "brick": "118.4,47.4,90@140",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "done",
+  "finished": true,
+  "took_s": 268.46,
+  "planned_s": 268.4,
+  "late_s": 0.1,
+  "closest_cm": 10.73,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Left",
+   "Right",
+   34.84
+  ],
+  "brick_cm": 0.0,
+  "contact": true,
+  "edge_cm": 4.28,
+  "edge_crossed": false,
+  "edge_at": [
+   "Right",
+   178.74
+  ],
+  "hung": [],
+  "replans": 3,
+  "replan_cpu_max_s": 4.32,
+  "replan_cpu_sum_s": 11.6,
+  "improves_kept": 1,
+  "stranded_events": 2,
+  "replan_sources": [
+   "camera",
+   "retry"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "14/14",
+  "lanes_done": 14,
+  "lanes_planned": 14,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 98.5,
+   "Center": 30.5,
+   "Right": 98.0
+  },
+  "still_plan_s": {
+   "Left": 90.1,
+   "Center": 41.2,
+   "Right": 80.5
+  },
+  "extra_still_s": 15.2,
+  "fleet_still_extra_s": -9.2,
+  "freeze_max_s": 7.6,
+  "plan_freeze_max_s": 16.3,
+  "brick_t": 140.0,
+  "brick_seen_t": 141.3,
+  "brick_seen_after_s": 1.3,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "180x90__s1"
+ },
+ {
+  "condition": "180x90",
+  "group": "table size",
+  "seed": 2,
+  "brick": "118.4,47.4,90@140",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "done",
+  "finished": true,
+  "took_s": 264.06,
+  "planned_s": 268.4,
+  "late_s": -4.3,
+  "closest_cm": 10.59,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Left",
+   "Center",
+   38.7
+  ],
+  "brick_cm": 0.0,
+  "contact": true,
+  "edge_cm": 4.42,
+  "edge_crossed": false,
+  "edge_at": [
+   "Left",
+   200.4
+  ],
+  "hung": [],
+  "replans": 3,
+  "replan_cpu_max_s": 3.28,
+  "replan_cpu_sum_s": 8.3,
+  "improves_kept": 1,
+  "stranded_events": 2,
+  "replan_sources": [
+   "camera",
+   "retry"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "14/14",
+  "lanes_done": 14,
+  "lanes_planned": 14,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 94.3,
+   "Center": 27.6,
+   "Right": 97.4
+  },
+  "still_plan_s": {
+   "Left": 90.1,
+   "Center": 41.2,
+   "Right": 80.5
+  },
+  "extra_still_s": 7.5,
+  "fleet_still_extra_s": -12.2,
+  "freeze_max_s": 7.6,
+  "plan_freeze_max_s": 16.3,
+  "brick_t": 140.0,
+  "brick_seen_t": 141.28,
+  "brick_seen_after_s": 1.28,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "180x90__s2"
+ },
+ {
+  "condition": "122x122",
+  "group": "table size",
+  "seed": 1,
+  "brick": "80.3,64.2,90@146",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "out of re-plans",
+  "finished": false,
+  "took_s": 394.15,
+  "planned_s": 284.3,
+  "late_s": 109.8,
+  "closest_cm": 9.22,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Left",
+   "Center",
+   65.7
+  ],
+  "brick_cm": 16.73,
+  "contact": false,
+  "edge_cm": 5.24,
+  "edge_crossed": false,
+  "edge_at": [
+   "Center",
+   58.55
+  ],
+  "hung": [],
+  "replans": 30,
+  "replan_cpu_max_s": 6.65,
+  "replan_cpu_sum_s": 165.5,
+  "improves_kept": 0,
+  "stranded_events": 30,
+  "replan_sources": [
+   "camera",
+   "retry"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "5/9",
+  "lanes_done": 5,
+  "lanes_planned": 9,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Right"
+   ]
+  },
+  "parked": [
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 314.6,
+   "Center": 262.8,
+   "Right": 252.3
+  },
+  "still_plan_s": {
+   "Left": 127.3,
+   "Center": 101.2,
+   "Right": 139.3
+  },
+  "extra_still_s": 461.9,
+  "fleet_still_extra_s": 181.8,
+  "freeze_max_s": 176.4,
+  "plan_freeze_max_s": 30.1,
+  "brick_t": 146.0,
+  "brick_seen_t": 145.86,
+  "brick_seen_after_s": -0.14,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "122x122__s1"
+ },
+ {
+  "condition": "122x122",
+  "group": "table size",
+  "seed": 2,
+  "brick": "80.3,64.2,90@146",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "out of re-plans",
+  "finished": false,
+  "took_s": 360.74,
+  "planned_s": 284.3,
+  "late_s": 76.4,
+  "closest_cm": 9.39,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Left",
+   "Right",
+   36.04
+  ],
+  "brick_cm": 16.78,
+  "contact": false,
+  "edge_cm": 5.3,
+  "edge_crossed": false,
+  "edge_at": [
+   "Center",
+   134.69
+  ],
+  "hung": [],
+  "replans": 30,
+  "replan_cpu_max_s": 5.68,
+  "replan_cpu_sum_s": 126.6,
+  "improves_kept": 0,
+  "stranded_events": 30,
+  "replan_sources": [
+   "camera",
+   "retry"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "6/9",
+  "lanes_done": 6,
+  "lanes_planned": 9,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Right"
+   ]
+  },
+  "parked": [
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 280.9,
+   "Center": 229.1,
+   "Right": 223.7
+  },
+  "still_plan_s": {
+   "Left": 127.3,
+   "Center": 101.2,
+   "Right": 139.3
+  },
+  "extra_still_s": 365.9,
+  "fleet_still_extra_s": 151.8,
+  "freeze_max_s": 151.5,
+  "plan_freeze_max_s": 30.1,
+  "brick_t": 146.01,
+  "brick_seen_t": 145.49,
+  "brick_seen_after_s": -0.52,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "122x122__s2"
+ },
+ {
+  "condition": "122x122 camera sees all",
+  "group": "table size",
+  "seed": 1,
+  "brick": "80.3,64.2,90@146",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "out of re-plans",
+  "finished": false,
+  "took_s": 371.36,
+  "planned_s": 284.3,
+  "late_s": 87.1,
+  "closest_cm": 9.33,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Left",
+   "Center",
+   65.59
+  ],
+  "brick_cm": 16.78,
+  "contact": false,
+  "edge_cm": 5.33,
+  "edge_crossed": false,
+  "edge_at": [
+   "Center",
+   59.54
+  ],
+  "hung": [],
+  "replans": 30,
+  "replan_cpu_max_s": 5.74,
+  "replan_cpu_sum_s": 132.3,
+  "improves_kept": 0,
+  "stranded_events": 30,
+  "replan_sources": [
+   "camera",
+   "retry"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "6/9",
+  "lanes_done": 6,
+  "lanes_planned": 9,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Right"
+   ]
+  },
+  "parked": [
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 291.9,
+   "Center": 237.0,
+   "Right": 230.8
+  },
+  "still_plan_s": {
+   "Left": 127.3,
+   "Center": 101.2,
+   "Right": 139.3
+  },
+  "extra_still_s": 391.9,
+  "fleet_still_extra_s": 160.2,
+  "freeze_max_s": 158.5,
+  "plan_freeze_max_s": 30.1,
+  "brick_t": 146.0,
+  "brick_seen_t": 147.28,
+  "brick_seen_after_s": 1.28,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "122x122_camera_sees_all__s1"
+ },
+ {
+  "condition": "lost 5%",
+  "group": "lost packets",
+  "seed": 1,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "done",
+  "finished": true,
+  "took_s": 197.14,
+  "planned_s": 229.6,
+  "late_s": -32.5,
+  "closest_cm": 10.68,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Center",
+   "Right",
+   194.69
+  ],
+  "brick_cm": 1.83,
+  "contact": false,
+  "edge_cm": 4.11,
+  "edge_crossed": false,
+  "edge_at": [
+   "Right",
+   149.59
+  ],
+  "hung": [],
+  "replans": 1,
+  "replan_cpu_max_s": 1.53,
+  "replan_cpu_sum_s": 1.5,
+  "improves_kept": 1,
+  "stranded_events": 0,
+  "replan_sources": [
+   "camera"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "12/12",
+  "lanes_done": 12,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 66.3,
+   "Center": 16.9,
+   "Right": 63.6
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": -85.2,
+  "fleet_still_extra_s": -25.6,
+  "freeze_max_s": 7.6,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 122.0,
+  "brick_seen_t": 123.33,
+  "brick_seen_after_s": 1.33,
+  "old_code_drop_risk": 0,
+  "resends": 32,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 106,
+    "from_robot": 607
+   },
+   "Center": {
+    "to_robot": 107,
+    "from_robot": 652
+   },
+   "Right": {
+    "to_robot": 109,
+    "from_robot": 608
+   }
+  },
+  "folder": "lost_5pct__s1"
+ },
+ {
+  "condition": "lost 5%",
+  "group": "lost packets",
+  "seed": 2,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "done",
+  "finished": true,
+  "took_s": 197.45,
+  "planned_s": 229.6,
+  "late_s": -32.2,
+  "closest_cm": 10.82,
+  "sim_report_missing": true,
+  "closest_at": null,
+  "brick_cm": null,
+  "contact": null,
+  "edge_cm": 4.33,
+  "edge_crossed": false,
+  "edge_at": null,
+  "hung": [],
+  "replans": 1,
+  "replan_cpu_max_s": 4.21,
+  "replan_cpu_sum_s": 4.2,
+  "improves_kept": 1,
+  "stranded_events": 0,
+  "replan_sources": [
+   "camera"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "12/12",
+  "lanes_done": 12,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 62.9,
+   "Center": 18.7,
+   "Right": 68.6
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": -81.8,
+  "fleet_still_extra_s": -22.7,
+  "freeze_max_s": 7.6,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": null,
+  "brick_seen_t": null,
+  "brick_seen_after_s": null,
+  "old_code_drop_risk": 0,
+  "resends": 26,
+  "packets_lost": null,
+  "folder": "lost_5pct__s2"
+ },
+ {
+  "condition": "lost 15%",
+  "group": "lost packets",
+  "seed": 1,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "done",
+  "finished": true,
+  "took_s": 197.25,
+  "planned_s": 229.6,
+  "late_s": -32.3,
+  "closest_cm": 10.49,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Center",
+   "Right",
+   194.79
+  ],
+  "brick_cm": 2.43,
+  "contact": false,
+  "edge_cm": 4.04,
+  "edge_crossed": false,
+  "edge_at": [
+   "Right",
+   149.29
+  ],
+  "hung": [],
+  "replans": 1,
+  "replan_cpu_max_s": 1.2,
+  "replan_cpu_sum_s": 1.2,
+  "improves_kept": 1,
+  "stranded_events": 0,
+  "replan_sources": [
+   "camera"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "12/12",
+  "lanes_done": 12,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 66.2,
+   "Center": 17.2,
+   "Right": 63.4
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": -85.2,
+  "fleet_still_extra_s": -25.2,
+  "freeze_max_s": 7.6,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 122.0,
+  "brick_seen_t": 123.35,
+  "brick_seen_after_s": 1.35,
+  "old_code_drop_risk": 1,
+  "resends": 141,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 314,
+    "from_robot": 1835
+   },
+   "Center": {
+    "to_robot": 334,
+    "from_robot": 1975
+   },
+   "Right": {
+    "to_robot": 306,
+    "from_robot": 1894
+   }
+  },
+  "folder": "lost_15pct__s1"
+ },
+ {
+  "condition": "lost 15%",
+  "group": "lost packets",
+  "seed": 2,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "done",
+  "finished": true,
+  "took_s": 197.45,
+  "planned_s": 229.6,
+  "late_s": -32.2,
+  "closest_cm": 10.55,
+  "sim_report_missing": true,
+  "closest_at": null,
+  "brick_cm": null,
+  "contact": null,
+  "edge_cm": 4.42,
+  "edge_crossed": false,
+  "edge_at": null,
+  "hung": [],
+  "replans": 1,
+  "replan_cpu_max_s": 4.24,
+  "replan_cpu_sum_s": 4.2,
+  "improves_kept": 1,
+  "stranded_events": 0,
+  "replan_sources": [
+   "camera"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "12/12",
+  "lanes_done": 12,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 62.4,
+   "Center": 18.7,
+   "Right": 68.8
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": -82.1,
+  "fleet_still_extra_s": -23.0,
+  "freeze_max_s": 7.6,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": null,
+  "brick_seen_t": null,
+  "brick_seen_after_s": null,
+  "old_code_drop_risk": 0,
+  "resends": 108,
+  "packets_lost": null,
+  "folder": "lost_15pct__s2"
+ },
+ {
+  "condition": "age 0.35 s",
+  "group": "camera",
+  "seed": 1,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "done",
+  "finished": true,
+  "took_s": 201.55,
+  "planned_s": 229.6,
+  "late_s": -28.0,
+  "closest_cm": 10.69,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Left",
+   "Right",
+   34.8
+  ],
+  "brick_cm": 1.0,
+  "contact": false,
+  "edge_cm": 4.27,
+  "edge_crossed": false,
+  "edge_at": [
+   "Right",
+   137.25
+  ],
+  "hung": [],
+  "replans": 1,
+  "replan_cpu_max_s": 5.68,
+  "replan_cpu_sum_s": 5.7,
+  "improves_kept": 1,
+  "stranded_events": 0,
+  "replan_sources": [
+   "camera"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "12/12",
+  "lanes_done": 12,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 67.4,
+   "Center": 21.2,
+   "Right": 70.0
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": -73.4,
+  "fleet_still_extra_s": -21.4,
+  "freeze_max_s": 7.6,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 122.0,
+  "brick_seen_t": 123.22,
+  "brick_seen_after_s": 1.22,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "age_0.35_s__s1"
+ },
+ {
+  "condition": "age 0.7 s",
+  "group": "camera",
+  "seed": 1,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "done",
+  "finished": true,
+  "took_s": 201.26,
+  "planned_s": 229.6,
+  "late_s": -28.3,
+  "closest_cm": 11.01,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Left",
+   "Right",
+   34.77
+  ],
+  "brick_cm": 2.63,
+  "contact": false,
+  "edge_cm": 4.19,
+  "edge_crossed": false,
+  "edge_at": [
+   "Right",
+   138.37
+  ],
+  "hung": [],
+  "replans": 1,
+  "replan_cpu_max_s": 6.4,
+  "replan_cpu_sum_s": 6.4,
+  "improves_kept": 1,
+  "stranded_events": 0,
+  "replan_sources": [
+   "camera"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "12/12",
+  "lanes_done": 12,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 67.6,
+   "Center": 21.1,
+   "Right": 69.5
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": -73.8,
+  "fleet_still_extra_s": -20.5,
+  "freeze_max_s": 7.6,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 122.0,
+  "brick_seen_t": 123.29,
+  "brick_seen_after_s": 1.29,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "age_0.7_s__s1"
+ },
+ {
+  "condition": "age 0.7 s",
+  "group": "camera",
+  "seed": 2,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "done",
+  "finished": true,
+  "took_s": 232.84,
+  "planned_s": 229.6,
+  "late_s": 3.2,
+  "closest_cm": 9.83,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Left",
+   "Center",
+   173.4
+  ],
+  "brick_cm": 4.54,
+  "contact": false,
+  "edge_cm": 4.23,
+  "edge_crossed": false,
+  "edge_at": [
+   "Left",
+   182.6
+  ],
+  "hung": [],
+  "replans": 5,
+  "replan_cpu_max_s": 5.43,
+  "replan_cpu_sum_s": 21.5,
+  "improves_kept": 1,
+  "stranded_events": 3,
+  "replan_sources": [
+   "camera",
+   "distance_sensor",
+   "retry"
+  ],
+  "sensor_obstacles": 1,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "12/12",
+  "lanes_done": 12,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 97.4,
+   "Center": 52.1,
+   "Right": 98.6
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": 16.1,
+  "fleet_still_extra_s": 0.0,
+  "freeze_max_s": 24.6,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 122.0,
+  "brick_seen_t": 123.27,
+  "brick_seen_after_s": 1.27,
+  "old_code_drop_risk": 1,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "age_0.7_s__s2"
+ },
+ {
+  "condition": "stall 1 s",
+  "group": "camera",
+  "seed": 1,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "done",
+  "finished": true,
+  "took_s": 196.55,
+  "planned_s": 229.6,
+  "late_s": -33.0,
+  "closest_cm": 10.23,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Center",
+   "Right",
+   194.19
+  ],
+  "brick_cm": 0.95,
+  "contact": false,
+  "edge_cm": 4.24,
+  "edge_crossed": false,
+  "edge_at": [
+   "Right",
+   149.19
+  ],
+  "hung": [],
+  "replans": 1,
+  "replan_cpu_max_s": 1.13,
+  "replan_cpu_sum_s": 1.1,
+  "improves_kept": 1,
+  "stranded_events": 0,
+  "replan_sources": [
+   "camera"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 30,
+  "lanes": "12/12",
+  "lanes_done": 12,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 65.4,
+   "Center": 16.4,
+   "Right": 63.1
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": -87.1,
+  "fleet_still_extra_s": -25.6,
+  "freeze_max_s": 7.6,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 122.0,
+  "brick_seen_t": 123.28,
+  "brick_seen_after_s": 1.28,
+  "old_code_drop_risk": 1,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "stall_1_s__s1"
+ },
+ {
+  "condition": "stall 1 s",
+  "group": "camera",
+  "seed": 2,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "done",
+  "finished": true,
+  "took_s": 197.66,
+  "planned_s": 229.6,
+  "late_s": -31.9,
+  "closest_cm": 10.76,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Left",
+   "Right",
+   190.01
+  ],
+  "brick_cm": 0.27,
+  "contact": false,
+  "edge_cm": 4.26,
+  "edge_crossed": false,
+  "edge_at": [
+   "Left",
+   166.71
+  ],
+  "hung": [],
+  "replans": 1,
+  "replan_cpu_max_s": 4.39,
+  "replan_cpu_sum_s": 4.4,
+  "improves_kept": 1,
+  "stranded_events": 0,
+  "replan_sources": [
+   "camera"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 30,
+  "lanes": "12/12",
+  "lanes_done": 12,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 63.0,
+   "Center": 18.9,
+   "Right": 68.7
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": -81.4,
+  "fleet_still_extra_s": -22.7,
+  "freeze_max_s": 7.6,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 122.0,
+  "brick_seen_t": 123.21,
+  "brick_seen_after_s": 1.21,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "stall_1_s__s2"
+ },
+ {
+  "condition": "stall 2.5 s",
+  "group": "camera",
+  "seed": 1,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "done",
+  "finished": true,
+  "took_s": 197.25,
+  "planned_s": 229.6,
+  "late_s": -32.3,
+  "closest_cm": 10.53,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Center",
+   "Right",
+   194.75
+  ],
+  "brick_cm": 2.67,
+  "contact": false,
+  "edge_cm": 4.11,
+  "edge_crossed": false,
+  "edge_at": [
+   "Right",
+   149.2
+  ],
+  "hung": [],
+  "replans": 1,
+  "replan_cpu_max_s": 1.38,
+  "replan_cpu_sum_s": 1.4,
+  "improves_kept": 1,
+  "stranded_events": 0,
+  "replan_sources": [
+   "camera"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 30,
+  "lanes": "12/12",
+  "lanes_done": 12,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 65.9,
+   "Center": 17.2,
+   "Right": 63.7
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": -85.2,
+  "fleet_still_extra_s": -25.4,
+  "freeze_max_s": 7.6,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 122.0,
+  "brick_seen_t": 123.23,
+  "brick_seen_after_s": 1.23,
+  "old_code_drop_risk": 1,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "stall_2.5_s__s1"
+ },
+ {
+  "condition": "stall 2.5 s",
+  "group": "camera",
+  "seed": 2,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "done",
+  "finished": true,
+  "took_s": 228.34,
+  "planned_s": 229.6,
+  "late_s": -1.3,
+  "closest_cm": 10.21,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Left",
+   "Center",
+   168.8
+  ],
+  "brick_cm": 4.43,
+  "contact": false,
+  "edge_cm": 4.43,
+  "edge_crossed": false,
+  "edge_at": [
+   "Right",
+   128.5
+  ],
+  "hung": [],
+  "replans": 4,
+  "replan_cpu_max_s": 6.35,
+  "replan_cpu_sum_s": 20.1,
+  "improves_kept": 1,
+  "stranded_events": 2,
+  "replan_sources": [
+   "camera",
+   "distance_sensor",
+   "retry"
+  ],
+  "sensor_obstacles": 1,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 33,
+  "lanes": "12/12",
+  "lanes_done": 12,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 93.0,
+   "Center": 47.1,
+   "Right": 94.5
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": 2.6,
+  "fleet_still_extra_s": -4.9,
+  "freeze_max_s": 17.7,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 122.0,
+  "brick_seen_t": 123.24,
+  "brick_seen_after_s": 1.24,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "stall_2.5_s__s2"
+ },
+ {
+  "condition": "stall 2.5 s, watch checks stale picture",
+  "group": "camera",
+  "seed": 1,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "out of re-plans",
+  "finished": false,
+  "took_s": 349.74,
+  "planned_s": 229.6,
+  "late_s": 120.1,
+  "closest_cm": 10.68,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Left",
+   "Right",
+   34.79
+  ],
+  "brick_cm": 5.87,
+  "contact": false,
+  "edge_cm": 5.38,
+  "edge_crossed": false,
+  "edge_at": [
+   "Center",
+   57.79
+  ],
+  "hung": [],
+  "replans": 30,
+  "replan_cpu_max_s": 11.94,
+  "replan_cpu_sum_s": 192.3,
+  "improves_kept": 0,
+  "stranded_events": 30,
+  "replan_sources": [
+   "camera",
+   "retry"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 54,
+  "lanes": "1/12",
+  "lanes_done": 1,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [],
+   "roam": [],
+   "follow the leader": []
+  },
+  "parked": [],
+  "still_run_s": {
+   "Left": 299.2,
+   "Center": 295.4,
+   "Right": 295.9
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": 658.5,
+  "fleet_still_extra_s": 253.7,
+  "freeze_max_s": 280.2,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 122.0,
+  "brick_seen_t": 68.69,
+  "brick_seen_after_s": -53.31,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "stall_2.5_s,_watch_checks_stale_picture__s1"
+ },
+ {
+  "condition": "tilt 35 corrected",
+  "group": "camera angle",
+  "seed": 1,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "done",
+  "finished": true,
+  "took_s": 355.13,
+  "planned_s": 229.6,
+  "late_s": 125.5,
+  "closest_cm": 10.87,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Left",
+   "Right",
+   34.72
+  ],
+  "brick_cm": 3.78,
+  "contact": false,
+  "edge_cm": 4.33,
+  "edge_crossed": false,
+  "edge_at": [
+   "Right",
+   313.37
+  ],
+  "hung": [],
+  "replans": 21,
+  "replan_cpu_max_s": 6.68,
+  "replan_cpu_sum_s": 110.7,
+  "improves_kept": 1,
+  "stranded_events": 20,
+  "replan_sources": [
+   "camera",
+   "retry"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "12/12",
+  "lanes_done": 12,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 217.4,
+   "Center": 188.6,
+   "Right": 222.6
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": 396.6,
+  "fleet_still_extra_s": 131.4,
+  "freeze_max_s": 127.9,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 122.0,
+  "brick_seen_t": 123.2,
+  "brick_seen_after_s": 1.2,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "tilt_35_corrected__s1"
+ },
+ {
+  "condition": "tilt 35 uncorrected",
+  "group": "camera angle",
+  "seed": 1,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "out of re-plans",
+  "finished": false,
+  "took_s": 379.12,
+  "planned_s": 229.6,
+  "late_s": 149.5,
+  "closest_cm": 8.21,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Center",
+   "Right",
+   122.73
+  ],
+  "brick_cm": 1.73,
+  "contact": false,
+  "edge_cm": 3.39,
+  "edge_crossed": false,
+  "edge_at": [
+   "Right",
+   109.93
+  ],
+  "hung": [],
+  "replans": 29,
+  "replan_cpu_max_s": 8.24,
+  "replan_cpu_sum_s": 190.6,
+  "improves_kept": 1,
+  "stranded_events": 28,
+  "replan_sources": [
+   "camera",
+   "distance_sensor",
+   "edge_guard",
+   "retry"
+  ],
+  "sensor_obstacles": 3,
+  "border_stops": 0,
+  "edge_stops": 2,
+  "tracker_lost": 0,
+  "lanes": "5/12",
+  "lanes_done": 5,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": []
+  },
+  "parked": [],
+  "still_run_s": {
+   "Left": 287.2,
+   "Center": 285.7,
+   "Right": 281.9
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": 622.8,
+  "fleet_still_extra_s": 237.5,
+  "freeze_max_s": 256.5,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 122.0,
+  "brick_seen_t": 123.25,
+  "brick_seen_after_s": 1.25,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "tilt_35_uncorrected__s1"
+ },
+ {
+  "condition": "tilt 35 uncorrected",
+  "group": "camera angle",
+  "seed": 2,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "out of re-plans",
+  "finished": false,
+  "took_s": 334.2,
+  "planned_s": 229.6,
+  "late_s": 104.6,
+  "closest_cm": 9.74,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Left",
+   "Center",
+   42.22
+  ],
+  "brick_cm": 8.22,
+  "contact": false,
+  "edge_cm": 3.01,
+  "edge_crossed": false,
+  "edge_at": [
+   "Center",
+   70.37
+  ],
+  "hung": [],
+  "replans": 28,
+  "replan_cpu_max_s": 7.11,
+  "replan_cpu_sum_s": 144.1,
+  "improves_kept": 2,
+  "stranded_events": 26,
+  "replan_sources": [
+   "camera",
+   "edge_guard",
+   "retry"
+  ],
+  "sensor_obstacles": 2,
+  "border_stops": 0,
+  "edge_stops": 2,
+  "tracker_lost": 0,
+  "lanes": "5/12",
+  "lanes_done": 5,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": []
+  },
+  "parked": [],
+  "still_run_s": {
+   "Left": 244.2,
+   "Center": 237.2,
+   "Right": 238.7
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": 488.1,
+  "fleet_still_extra_s": 188.7,
+  "freeze_max_s": 204.2,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 122.0,
+  "brick_seen_t": 123.38,
+  "brick_seen_after_s": 1.38,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "tilt_35_uncorrected__s2"
+ },
+ {
+  "condition": "tilt 50 uncorrected",
+  "group": "camera angle",
+  "seed": 1,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "out of re-plans",
+  "finished": false,
+  "took_s": 344.82,
+  "planned_s": 229.6,
+  "late_s": 115.2,
+  "closest_cm": 10.84,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Left",
+   "Right",
+   34.34
+  ],
+  "brick_cm": 11.66,
+  "contact": false,
+  "edge_cm": 1.61,
+  "edge_crossed": false,
+  "edge_at": [
+   "Right",
+   108.49
+  ],
+  "hung": [],
+  "replans": 28,
+  "replan_cpu_max_s": 6.56,
+  "replan_cpu_sum_s": 157.8,
+  "improves_kept": 1,
+  "stranded_events": 26,
+  "replan_sources": [
+   "camera",
+   "edge_guard",
+   "retry"
+  ],
+  "sensor_obstacles": 3,
+  "border_stops": 0,
+  "edge_stops": 3,
+  "tracker_lost": 0,
+  "lanes": "5/12",
+  "lanes_done": 5,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": []
+  },
+  "parked": [],
+  "still_run_s": {
+   "Left": 254.5,
+   "Center": 252.2,
+   "Right": 249.2
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": 523.9,
+  "fleet_still_extra_s": 200.6,
+  "freeze_max_s": 221.6,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 122.0,
+  "brick_seen_t": 123.25,
+  "brick_seen_after_s": 1.25,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "tilt_50_uncorrected__s1"
+ },
+ {
+  "condition": "tilt 50 uncorrected",
+  "group": "camera angle",
+  "seed": 2,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "out of re-plans",
+  "finished": false,
+  "took_s": 333.55,
+  "planned_s": 229.6,
+  "late_s": 104.0,
+  "closest_cm": 9.97,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Left",
+   "Right",
+   58.9
+  ],
+  "brick_cm": 2.3,
+  "contact": false,
+  "edge_cm": 1.64,
+  "edge_crossed": false,
+  "edge_at": [
+   "Right",
+   110.45
+  ],
+  "hung": [],
+  "replans": 28,
+  "replan_cpu_max_s": 6.29,
+  "replan_cpu_sum_s": 150.9,
+  "improves_kept": 1,
+  "stranded_events": 26,
+  "replan_sources": [
+   "camera",
+   "edge_guard",
+   "retry"
+  ],
+  "sensor_obstacles": 3,
+  "border_stops": 0,
+  "edge_stops": 3,
+  "tracker_lost": 0,
+  "lanes": "5/12",
+  "lanes_done": 5,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": []
+  },
+  "parked": [],
+  "still_run_s": {
+   "Left": 237.0,
+   "Center": 241.5,
+   "Right": 240.3
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": 486.8,
+  "fleet_still_extra_s": 189.1,
+  "freeze_max_s": 209.7,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 122.0,
+  "brick_seen_t": 123.27,
+  "brick_seen_after_s": 1.27,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "tilt_50_uncorrected__s2"
+ },
+ {
+  "condition": "brick lane",
+  "group": "brick",
+  "seed": 1,
+  "brick": "96.2,38.0,0@118",
+  "brick_where": "across Center's mow lane 8 (mowed 13 s later)",
+  "result": "done",
+  "finished": true,
+  "took_s": 205.67,
+  "planned_s": 229.6,
+  "late_s": -23.9,
+  "closest_cm": 10.02,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Left",
+   "Center",
+   144.67
+  ],
+  "brick_cm": 3.4,
+  "contact": false,
+  "edge_cm": 4.24,
+  "edge_crossed": false,
+  "edge_at": [
+   "Right",
+   138.17
+  ],
+  "hung": [],
+  "replans": 1,
+  "replan_cpu_max_s": 6.7,
+  "replan_cpu_sum_s": 6.7,
+  "improves_kept": 1,
+  "stranded_events": 0,
+  "replan_sources": [
+   "camera"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "12/12",
+  "lanes_done": 12,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 72.1,
+   "Center": 20.8,
+   "Right": 73.9
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": -65.2,
+  "fleet_still_extra_s": -20.7,
+  "freeze_max_s": 7.6,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 118.0,
+  "brick_seen_t": 119.27,
+  "brick_seen_after_s": 1.27,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "brick_lane__s1"
+ },
+ {
+  "condition": "brick lane",
+  "group": "brick",
+  "seed": 2,
+  "brick": "96.2,38.0,0@118",
+  "brick_where": "across Center's mow lane 8 (mowed 13 s later)",
+  "result": "done",
+  "finished": true,
+  "took_s": 204.23,
+  "planned_s": 229.6,
+  "late_s": -25.4,
+  "closest_cm": 9.91,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Left",
+   "Center",
+   143.2
+  ],
+  "brick_cm": 3.37,
+  "contact": false,
+  "edge_cm": 4.23,
+  "edge_crossed": false,
+  "edge_at": [
+   "Left",
+   172.9
+  ],
+  "hung": [],
+  "replans": 1,
+  "replan_cpu_max_s": 5.18,
+  "replan_cpu_sum_s": 5.2,
+  "improves_kept": 1,
+  "stranded_events": 0,
+  "replan_sources": [
+   "camera"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "12/12",
+  "lanes_done": 12,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 70.0,
+   "Center": 20.2,
+   "Right": 75.7
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": -66.1,
+  "fleet_still_extra_s": -21.4,
+  "freeze_max_s": 7.6,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 118.0,
+  "brick_seen_t": 119.31,
+  "brick_seen_after_s": 1.31,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "brick_lane__s2"
+ },
+ {
+  "condition": "brick chicken",
+  "group": "brick",
+  "seed": 1,
+  "brick": "109.5,38.0,90@74",
+  "brick_where": "on Chicken's line, between them, before round 2",
+  "result": "done",
+  "finished": true,
+  "took_s": 205.42,
+  "planned_s": 229.6,
+  "late_s": -24.2,
+  "closest_cm": 10.89,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Left",
+   "Right",
+   34.81
+  ],
+  "brick_cm": 0.95,
+  "contact": false,
+  "edge_cm": 4.32,
+  "edge_crossed": false,
+  "edge_at": [
+   "Right",
+   162.26
+  ],
+  "hung": [],
+  "replans": 3,
+  "replan_cpu_max_s": 6.37,
+  "replan_cpu_sum_s": 12.8,
+  "improves_kept": 1,
+  "stranded_events": 0,
+  "replan_sources": [
+   "camera",
+   "distance_sensor"
+  ],
+  "sensor_obstacles": 1,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "12/12",
+  "lanes_done": 12,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 68.2,
+   "Center": 22.4,
+   "Right": 67.5
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": -73.9,
+  "fleet_still_extra_s": -19.1,
+  "freeze_max_s": 7.7,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 74.0,
+  "brick_seen_t": 75.25,
+  "brick_seen_after_s": 1.25,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "brick_chicken__s1"
+ },
+ {
+  "condition": "brick chicken",
+  "group": "brick",
+  "seed": 2,
+  "brick": "109.5,38.0,90@74",
+  "brick_where": "on Chicken's line, between them, before round 2",
+  "result": "done",
+  "finished": true,
+  "took_s": 221.82,
+  "planned_s": 229.6,
+  "late_s": -7.8,
+  "closest_cm": 9.42,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Center",
+   "Right",
+   148.01
+  ],
+  "brick_cm": 0.65,
+  "contact": false,
+  "edge_cm": 4.34,
+  "edge_crossed": false,
+  "edge_at": [
+   "Left",
+   165.76
+  ],
+  "hung": [],
+  "replans": 1,
+  "replan_cpu_max_s": 5.25,
+  "replan_cpu_sum_s": 5.2,
+  "improves_kept": 1,
+  "stranded_events": 0,
+  "replan_sources": [
+   "camera"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "12/12",
+  "lanes_done": 12,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 88.9,
+   "Center": 41.6,
+   "Right": 92.2
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": -9.3,
+  "fleet_still_extra_s": -5.5,
+  "freeze_max_s": 16.1,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 74.0,
+  "brick_seen_t": 75.19,
+  "brick_seen_after_s": 1.19,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "brick_chicken__s2"
+ },
+ {
+  "condition": "brick park row",
+  "group": "brick",
+  "seed": 1,
+  "brick": "76.0,13.2,0@184",
+  "brick_where": "on the park row (Right's spot)",
+  "result": "done",
+  "finished": true,
+  "took_s": 224.29,
+  "planned_s": 229.6,
+  "late_s": -5.3,
+  "closest_cm": 11.23,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Center",
+   "Right",
+   112.09
+  ],
+  "brick_cm": 3.07,
+  "contact": false,
+  "edge_cm": 4.22,
+  "edge_crossed": false,
+  "edge_at": [
+   "Right",
+   132.79
+  ],
+  "hung": [],
+  "replans": 1,
+  "replan_cpu_max_s": 0.09,
+  "replan_cpu_sum_s": 0.1,
+  "improves_kept": 1,
+  "stranded_events": 0,
+  "replan_sources": [
+   "camera"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "12/12",
+  "lanes_done": 12,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center"
+  ],
+  "still_run_s": {
+   "Left": 91.8,
+   "Center": 50.0,
+   "Right": 94.7
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": 4.5,
+  "fleet_still_extra_s": -0.6,
+  "freeze_max_s": 21.4,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 184.0,
+  "brick_seen_t": 185.33,
+  "brick_seen_after_s": 1.33,
+  "old_code_drop_risk": 1,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "brick_park_row__s1"
+ },
+ {
+  "condition": "brick ahead",
+  "group": "brick",
+  "seed": 1,
+  "brick": "auto@118",
+  "brick_where": "3 s ahead of a moving robot",
+  "result": "done",
+  "finished": true,
+  "took_s": 193.01,
+  "planned_s": 229.6,
+  "late_s": -36.6,
+  "closest_cm": 9.69,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Left",
+   "Center",
+   144.27
+  ],
+  "brick_cm": 2.94,
+  "contact": false,
+  "edge_cm": 4.26,
+  "edge_crossed": false,
+  "edge_at": [
+   "Left",
+   164.17
+  ],
+  "hung": [],
+  "replans": 1,
+  "replan_cpu_max_s": 5.41,
+  "replan_cpu_sum_s": 5.4,
+  "improves_kept": 1,
+  "stranded_events": 0,
+  "replan_sources": [
+   "camera"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "12/12",
+  "lanes_done": 12,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 60.8,
+   "Center": 20.7,
+   "Right": 61.4
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": -89.1,
+  "fleet_still_extra_s": -21.8,
+  "freeze_max_s": 7.6,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 118.0,
+  "brick_seen_t": 119.29,
+  "brick_seen_after_s": 1.29,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "brick_ahead__s1"
+ },
+ {
+  "condition": "brick ahead",
+  "group": "brick",
+  "seed": 2,
+  "brick": "auto@118",
+  "brick_where": "3 s ahead of a moving robot",
+  "result": "done",
+  "finished": true,
+  "took_s": 192.5,
+  "planned_s": 229.6,
+  "late_s": -37.1,
+  "closest_cm": 9.58,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Left",
+   "Center",
+   143.67
+  ],
+  "brick_cm": 2.83,
+  "contact": false,
+  "edge_cm": 4.38,
+  "edge_crossed": false,
+  "edge_at": [
+   "Left",
+   163.42
+  ],
+  "hung": [],
+  "replans": 1,
+  "replan_cpu_max_s": 5.0,
+  "replan_cpu_sum_s": 5.0,
+  "improves_kept": 1,
+  "stranded_events": 0,
+  "replan_sources": [
+   "camera"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "12/12",
+  "lanes_done": 12,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 59.5,
+   "Center": 21.2,
+   "Right": 63.6
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": -87.7,
+  "fleet_still_extra_s": -21.8,
+  "freeze_max_s": 7.6,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 118.0,
+  "brick_seen_t": 119.25,
+  "brick_seen_after_s": 1.25,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "brick_ahead__s2"
+ },
+ {
+  "condition": "Right dead",
+  "group": "robot out",
+  "seed": 1,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "timeout",
+  "finished": false,
+  "took_s": 398.21,
+  "planned_s": 229.6,
+  "late_s": 168.6,
+  "closest_cm": 9.94,
+  "sim_report_missing": true,
+  "closest_at": null,
+  "brick_cm": null,
+  "contact": null,
+  "edge_cm": 4.38,
+  "edge_crossed": false,
+  "edge_at": null,
+  "hung": [],
+  "replans": 4,
+  "replan_cpu_max_s": 6.66,
+  "replan_cpu_sum_s": 20.0,
+  "improves_kept": 0,
+  "stranded_events": 3,
+  "replan_sources": [
+   "camera",
+   "retry"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "6/12",
+  "lanes_done": 6,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left"
+   ]
+  },
+  "parked": [],
+  "still_run_s": {
+   "Left": 282.8,
+   "Center": 288.9,
+   "Right": 314.4
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": 654.1,
+  "fleet_still_extra_s": 222.7,
+  "freeze_max_s": 231.8,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": null,
+  "brick_seen_t": null,
+  "brick_seen_after_s": null,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": null,
+  "folder": "Right_dead__s1"
+ },
+ {
+  "condition": "Right lifted",
+  "group": "robot out",
+  "seed": 1,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "Right's follow run ended (stopped:robot lifted)",
+  "finished": false,
+  "took_s": 102.86,
+  "planned_s": 229.6,
+  "late_s": -126.7,
+  "closest_cm": 10.94,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Left",
+   "Right",
+   34.79
+  ],
+  "brick_cm": Infinity,
+  "contact": false,
+  "edge_cm": 5.35,
+  "edge_crossed": false,
+  "edge_at": [
+   "Center",
+   65.3
+  ],
+  "hung": [],
+  "replans": 0,
+  "replan_cpu_max_s": 0.0,
+  "replan_cpu_sum_s": 0,
+  "improves_kept": 0,
+  "stranded_events": 0,
+  "replan_sources": [],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 1,
+  "lanes": "4/12",
+  "lanes_done": 4,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": []
+  },
+  "parked": [],
+  "still_run_s": {
+   "Left": 20.1,
+   "Center": 15.7,
+   "Right": 18.9
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": -177.3,
+  "fleet_still_extra_s": -25.6,
+  "freeze_max_s": 7.6,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": null,
+  "brick_seen_t": null,
+  "brick_seen_after_s": null,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "Right_lifted__s1"
+ },
+ {
+  "condition": "Center dead",
+  "group": "robot out",
+  "seed": 1,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "timeout",
+  "finished": false,
+  "took_s": 398.23,
+  "planned_s": 229.6,
+  "late_s": 168.6,
+  "closest_cm": 11.08,
+  "sim_report_missing": true,
+  "closest_at": null,
+  "brick_cm": null,
+  "contact": null,
+  "edge_cm": 5.36,
+  "edge_crossed": false,
+  "edge_at": null,
+  "hung": [],
+  "replans": 1,
+  "replan_cpu_max_s": 3.97,
+  "replan_cpu_sum_s": 4.0,
+  "improves_kept": 1,
+  "stranded_events": 0,
+  "replan_sources": [
+   "camera"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "4/12",
+  "lanes_done": 4,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": []
+  },
+  "parked": [],
+  "still_run_s": {
+   "Left": 303.6,
+   "Center": 312.9,
+   "Right": 299.8
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": 684.3,
+  "fleet_still_extra_s": 254.8,
+  "freeze_max_s": 265.2,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": null,
+  "brick_seen_t": null,
+  "brick_seen_after_s": null,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": null,
+  "folder": "Center_dead__s1"
+ },
+ {
+  "condition": "wheel +3%",
+  "group": "wheel scale",
+  "seed": 1,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "done",
+  "finished": true,
+  "took_s": 195.65,
+  "planned_s": 229.6,
+  "late_s": -33.9,
+  "closest_cm": 10.93,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Left",
+   "Right",
+   158.23
+  ],
+  "brick_cm": 3.87,
+  "contact": false,
+  "edge_cm": 4.13,
+  "edge_crossed": false,
+  "edge_at": [
+   "Right",
+   148.63
+  ],
+  "hung": [],
+  "replans": 1,
+  "replan_cpu_max_s": 1.36,
+  "replan_cpu_sum_s": 1.4,
+  "improves_kept": 1,
+  "stranded_events": 0,
+  "replan_sources": [
+   "camera"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "12/12",
+  "lanes_done": 12,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 68.4,
+   "Center": 20.7,
+   "Right": 65.7
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": -77.2,
+  "fleet_still_extra_s": -25.6,
+  "freeze_max_s": 7.6,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 122.0,
+  "brick_seen_t": 123.27,
+  "brick_seen_after_s": 1.27,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "wheel_p3pct__s1"
+ },
+ {
+  "condition": "wheel +5%",
+  "group": "wheel scale",
+  "seed": 1,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "done",
+  "finished": true,
+  "took_s": 191.95,
+  "planned_s": 229.6,
+  "late_s": -37.7,
+  "closest_cm": 9.96,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Center",
+   "Right",
+   189.66
+  ],
+  "brick_cm": 4.03,
+  "contact": false,
+  "edge_cm": 4.2,
+  "edge_crossed": false,
+  "edge_at": [
+   "Left",
+   162.26
+  ],
+  "hung": [],
+  "replans": 1,
+  "replan_cpu_max_s": 5.57,
+  "replan_cpu_sum_s": 5.6,
+  "improves_kept": 1,
+  "stranded_events": 0,
+  "replan_sources": [
+   "camera"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "12/12",
+  "lanes_done": 12,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 63.7,
+   "Center": 20.0,
+   "Right": 66.0
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": -82.3,
+  "fleet_still_extra_s": -21.4,
+  "freeze_max_s": 7.6,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 122.0,
+  "brick_seen_t": 123.2,
+  "brick_seen_after_s": 1.2,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "wheel_p5pct__s1"
+ },
+ {
+  "condition": "wheel -5%",
+  "group": "wheel scale",
+  "seed": 1,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "done",
+  "finished": true,
+  "took_s": 207.05,
+  "planned_s": 229.6,
+  "late_s": -22.5,
+  "closest_cm": 10.98,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Left",
+   "Center",
+   154.7
+  ],
+  "brick_cm": 3.92,
+  "contact": false,
+  "edge_cm": 4.41,
+  "edge_crossed": false,
+  "edge_at": [
+   "Right",
+   142.0
+  ],
+  "hung": [],
+  "replans": 1,
+  "replan_cpu_max_s": 6.0,
+  "replan_cpu_sum_s": 6.0,
+  "improves_kept": 1,
+  "stranded_events": 0,
+  "replan_sources": [
+   "camera"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "12/12",
+  "lanes_done": 12,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 68.5,
+   "Center": 20.7,
+   "Right": 70.4
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": -72.4,
+  "fleet_still_extra_s": -20.9,
+  "freeze_max_s": 7.6,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 122.0,
+  "brick_seen_t": 123.26,
+  "brick_seen_after_s": 1.26,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "wheel_-5pct__s1"
+ },
+ {
+  "condition": "wheel +5% + stall 2.5 s",
+  "group": "wheel scale",
+  "seed": 1,
+  "brick": "100.0,40.0,90@122",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "done",
+  "finished": true,
+  "took_s": 192.15,
+  "planned_s": 229.6,
+  "late_s": -37.4,
+  "closest_cm": 9.57,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Center",
+   "Right",
+   189.77
+  ],
+  "brick_cm": 3.9,
+  "contact": false,
+  "edge_cm": 4.18,
+  "edge_crossed": false,
+  "edge_at": [
+   "Right",
+   131.49
+  ],
+  "hung": [],
+  "replans": 1,
+  "replan_cpu_max_s": 5.02,
+  "replan_cpu_sum_s": 5.0,
+  "improves_kept": 1,
+  "stranded_events": 0,
+  "replan_sources": [
+   "camera"
+  ],
+  "sensor_obstacles": 0,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 30,
+  "lanes": "12/12",
+  "lanes_done": 12,
+  "lanes_planned": 12,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 63.6,
+   "Center": 20.0,
+   "Right": 65.9
+  },
+  "still_plan_s": {
+   "Left": 86.8,
+   "Center": 52.9,
+   "Right": 92.3
+  },
+  "extra_still_s": -82.5,
+  "fleet_still_extra_s": -21.4,
+  "freeze_max_s": 7.6,
+  "plan_freeze_max_s": 25.1,
+  "brick_t": 122.0,
+  "brick_seen_t": 123.34,
+  "brick_seen_after_s": 1.34,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "wheel_p5pct_p_stall_2.5_s__s1"
+ },
+ {
+  "condition": "tilt 35 uncorrected, warm-up moves the sides",
+  "group": "camera angle",
+  "seed": 1,
+  "brick": "99.7,42.9,90@97",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "timeout",
+  "finished": false,
+  "took_s": 333.21,
+  "planned_s": 188.9,
+  "late_s": 144.3,
+  "closest_cm": 2.77,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Center",
+   "Right",
+   192.47
+  ],
+  "brick_cm": 1.82,
+  "contact": false,
+  "edge_cm": 3.33,
+  "edge_crossed": false,
+  "edge_at": [
+   "Center",
+   67.97
+  ],
+  "hung": [],
+  "replans": 22,
+  "replan_cpu_max_s": 7.12,
+  "replan_cpu_sum_s": 115.4,
+  "improves_kept": 1,
+  "stranded_events": 6,
+  "replan_sources": [
+   "camera",
+   "distance_sensor",
+   "edge_guard",
+   "retry"
+  ],
+  "sensor_obstacles": 15,
+  "border_stops": 0,
+  "edge_stops": 2,
+  "tracker_lost": 0,
+  "lanes": "5/11",
+  "lanes_done": 5,
+  "lanes_planned": 11,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": []
+  },
+  "parked": [
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 240.2,
+   "Center": 243.2,
+   "Right": 231.6
+  },
+  "still_plan_s": {
+   "Left": 68.4,
+   "Center": 31.5,
+   "Right": 67.3
+  },
+  "extra_still_s": 547.8,
+  "fleet_still_extra_s": 192.7,
+  "freeze_max_s": 139.5,
+  "plan_freeze_max_s": 7.6,
+  "brick_t": 97.0,
+  "brick_seen_t": 98.38,
+  "brick_seen_after_s": 1.38,
+  "old_code_drop_risk": 4,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "tilt_35_uncorrected,_warm-up_moves_the_sides__s1"
+ },
+ {
+  "condition": "base, warm-up moves the sides",
+  "group": "table size",
+  "seed": 1,
+  "brick": "99.0,39.6,90@124",
+  "brick_where": "middle (as the build's M runs)",
+  "result": "done",
+  "finished": true,
+  "took_s": 205.48,
+  "planned_s": 242.0,
+  "late_s": -36.5,
+  "closest_cm": 9.32,
+  "sim_report_missing": false,
+  "closest_at": [
+   "Left",
+   "Right",
+   123.43
+  ],
+  "brick_cm": 3.99,
+  "contact": false,
+  "edge_cm": 4.93,
+  "edge_crossed": false,
+  "edge_at": [
+   "Left",
+   175.93
+  ],
+  "hung": [],
+  "replans": 3,
+  "replan_cpu_max_s": 1.75,
+  "replan_cpu_sum_s": 3.7,
+  "improves_kept": 0,
+  "stranded_events": 2,
+  "replan_sources": [
+   "camera",
+   "distance_sensor",
+   "retry"
+  ],
+  "sensor_obstacles": 1,
+  "border_stops": 0,
+  "edge_stops": 0,
+  "tracker_lost": 0,
+  "lanes": "11/11",
+  "lanes_done": 11,
+  "lanes_planned": 11,
+  "activities": {
+   "chicken 1 swerve": [
+    "Left",
+    "Right"
+   ],
+   "chicken 2 swerve": [
+    "Left",
+    "Right"
+   ],
+   "roam": [
+    "Left",
+    "Right"
+   ],
+   "follow the leader": [
+    "Left",
+    "Right"
+   ]
+  },
+  "parked": [
+   "Left",
+   "Center",
+   "Right"
+  ],
+  "still_run_s": {
+   "Left": 95.6,
+   "Center": 43.4,
+   "Right": 89.8
+  },
+  "still_plan_s": {
+   "Left": 105.9,
+   "Center": 87.9,
+   "Right": 120.3
+  },
+  "extra_still_s": -85.3,
+  "fleet_still_extra_s": -21.9,
+  "freeze_max_s": 7.6,
+  "plan_freeze_max_s": 21.9,
+  "brick_t": 124.0,
+  "brick_seen_t": 125.23,
+  "brick_seen_after_s": 1.23,
+  "old_code_drop_risk": 0,
+  "resends": 0,
+  "packets_lost": {
+   "Left": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Center": {
+    "to_robot": 0,
+    "from_robot": 0
+   },
+   "Right": {
+    "to_robot": 0,
+    "from_robot": 0
+   }
+  },
+  "folder": "base,_warm-up_moves_the_sides__s1"
+ }
+]

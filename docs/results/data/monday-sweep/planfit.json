@@ -1,0 +1,159 @@
+[
+ {
+  "W": 120,
+  "H": 60,
+  "ok": false,
+  "error": "PlanError('robot x, task 4: point (47.8, 10.0): no room to turn there (7.0 cm clear, needs 8.2)')",
+  "plan_s": 0.2
+ },
+ {
+  "W": 120,
+  "H": 64,
+  "ok": false,
+  "error": "PlanError('no priority order gave a plan without robots meeting: the routes may be too crowded (try fewer robots at once, a smaller separation, or other start spots)')",
+  "plan_s": 14.3
+ },
+ {
+  "W": 120,
+  "H": 68,
+  "ok": false,
+  "error": "PlanError('no priority order gave a plan without robots meeting: the routes may be too crowded (try fewer robots at once, a smaller separation, or other start spots)')",
+  "plan_s": 33.8
+ },
+ {
+  "W": 120,
+  "H": 76,
+  "ok": false,
+  "error": "PlanError('no priority order gave a plan without robots meeting: the routes may be too crowded (try fewer robots at once, a smaller separation, or other start spots)')",
+  "plan_s": 29.2
+ },
+ {
+  "W": 120,
+  "H": 90,
+  "ok": true,
+  "makespan_s": 246.5,
+  "closest_cm": 9.82,
+  "shortened": [
+   "chicken round 1: no room away from the mower at 59 s: done where it is, the planner makes them wait for it",
+   "chicken round 2: no room away from the mower at 67 s: done where it is, the planner makes them wait for it",
+   "Roam and Follow the leader shortened to 34 s and 34 s so Left and Right finish with Center (its pass takes about 119 s after the show)"
+  ],
+  "plan_s": 39.7
+ },
+ {
+  "W": 120,
+  "H": 122,
+  "ok": false,
+  "error": "PlanError('no priority order gave a plan without robots meeting: the routes may be too crowded (try fewer robots at once, a smaller separation, or other start spots)')",
+  "plan_s": 36.8
+ },
+ {
+  "W": 152,
+  "H": 60,
+  "ok": false,
+  "error": "PlanError('robot x, task 4: point (97.2, 10.0): no room to turn there (7.0 cm clear, needs 8.2)')",
+  "plan_s": 0.3
+ },
+ {
+  "W": 152,
+  "H": 64,
+  "ok": true,
+  "makespan_s": 197.8,
+  "closest_cm": 9.29,
+  "shortened": [
+   "Roam and Follow the leader shortened to 39 s and 39 s so Left and Right finish with Center (its pass takes about 126 s after the show)"
+  ],
+  "plan_s": 35.3
+ },
+ {
+  "W": 152,
+  "H": 68,
+  "ok": true,
+  "makespan_s": 201.2,
+  "closest_cm": 10.57,
+  "shortened": [
+   "Roam and Follow the leader shortened to 42 s and 42 s so Left and Right finish with Center (its pass takes about 130 s after the show)"
+  ],
+  "plan_s": 35.2
+ },
+ {
+  "W": 152,
+  "H": 76,
+  "ok": true,
+  "makespan_s": 229.6,
+  "closest_cm": 10.57,
+  "shortened": [
+   "Roam and Follow the leader shortened to 46 s and 46 s so Left and Right finish with Center (its pass takes about 139 s after the show)"
+  ],
+  "plan_s": 34.6
+ },
+ {
+  "W": 152,
+  "H": 90,
+  "ok": true,
+  "makespan_s": 239.6,
+  "closest_cm": 10.57,
+  "shortened": [
+   "Roam and Follow the leader shortened to 57 s and 57 s so Left and Right finish with Center (its pass takes about 163 s after the show)"
+  ],
+  "plan_s": 50.9
+ },
+ {
+  "W": 152,
+  "H": 122,
+  "ok": true,
+  "makespan_s": 262.6,
+  "closest_cm": 10.57,
+  "shortened": [],
+  "plan_s": 37.0
+ },
+ {
+  "W": 180,
+  "H": 60,
+  "ok": false,
+  "error": "PlanError('robot x, task 4: point (112.1, 10.0): no room to turn there (7.0 cm clear, needs 8.2)')",
+  "plan_s": 0.3
+ },
+ {
+  "W": 180,
+  "H": 64,
+  "ok": true,
+  "makespan_s": 279.9,
+  "closest_cm": 10.21,
+  "shortened": [
+   "Roam and Follow the leader shortened to 48 s and 48 s so Left and Right finish with Center (its pass takes about 147 s after the show)"
+  ],
+  "plan_s": 44.2
+ },
+ {
+  "W": 180,
+  "H": 68,
+  "ok": true,
+  "makespan_s": 228.4,
+  "closest_cm": 10.57,
+  "shortened": [
+   "Roam and Follow the leader shortened to 50 s and 50 s so Left and Right finish with Center (its pass takes about 151 s after the show)"
+  ],
+  "plan_s": 72.4
+ },
+ {
+  "W": 180,
+  "H": 76,
+  "ok": true,
+  "makespan_s": 251.0,
+  "closest_cm": 10.57,
+  "shortened": [
+   "Roam and Follow the leader shortened to 56 s and 56 s so Left and Right finish with Center (its pass takes about 162 s after the show)"
+  ],
+  "plan_s": 42.7
+ },
+ {
+  "W": 180,
+  "H": 90,
+  "ok": true,
+  "makespan_s": 268.4,
+  "closest_cm": 9.72,
+  "shortened": [],
+  "plan_s": 59.3
+ }
+]

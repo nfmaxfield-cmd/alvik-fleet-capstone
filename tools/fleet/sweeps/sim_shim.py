@@ -6,6 +6,8 @@
                   from the run's seed (fleet_sim's own hook, Radio._random_drop)
   cam_stall_s     the whole camera stops for this long (no fixes for anyone), every cam_stall_every_s, first at
                   cam_stall_first_s after the plan starts (the brick watch's pictures stall with it)
+  stall_watch     "skip" (default): the brick watch makes no check while the camera is stalled; "stale": it checks
+                  the repeated picture against the robots' newest spots
   cam_age_s       picture age: the fixes arrive this late (fleet_sim --fix-delay) and so does the brick watch's report
   cam_tilt        {"tilt_deg", "height_cm", "led_cm", "corrected", "height_err_pct", "nadir_err_cm"}: the camera on a
                   stand at the audience side (y_min), tilted towards the table's centre. The robot's top lights are
@@ -14,6 +16,8 @@
                   height_err_pct / nadir_err_cm off; else no height correction (tools/live/floormap.py's "no camera
                   height" case). Noise grows with range: sigma x (range / 262 cm)^2 / cos(view angle). The brick
                   watch's picture is tilted too (table_cam tilt), its own calibration perfect.
+  cam_px_per_cm   the brick watch's picture scale (table_cam's default 3.4 px/cm, the home camera at 262 cm, sees
+                  188 x 141 cm: a 122 cm deep table runs off the picture); lower = the camera higher or wider
   robot_out       {"name", "t", "mode"}: at t s after the plan starts the robot is out. "dead": stops where it is and
                   is never heard again (battery or WiFi gone); "lifted": picked up off the table (the firmware's
                   safe_lift ends its run; the camera no longer sees it)
@@ -112,7 +116,8 @@ def install(sim, cond, seed):
             return
         orig_send(msg)
     sim.send_json = send_json
-    if tilt or st > 0:
+    pxcm = cond.get("cam_px_per_cm")
+    if tilt or st > 0 or pxcm:
         # the brick watch's camera: tilted like the robots' camera; its pictures stall with it
         import table_cam as TC
         TCcls = TC.TableCamera
@@ -122,6 +127,8 @@ def install(sim, cond, seed):
             def __init__(self, rect, seed=5, **kw):
                 if tdeg is not None:
                     kw["tilt"] = tdeg
+                if pxcm:
+                    kw["px_per_cm"] = float(pxcm)
                 super().__init__(rect, seed=seed, **kw)
                 self._last = None
 
@@ -131,6 +138,45 @@ def install(sim, cond, seed):
                 self._last = super().render(robots, boxes, hand)
                 return self._last
         TC.TableCamera = TiltedCam
+        if tilt:
+            # aim the tilted camera at the table: table_cam puts the lens straight above center_floor_cm and tilts
+            # about it, which at 35-50 deg looks past the table (first tilt runs: the watch never saw the table).
+            # One tilt axis, the lens at the cond's height, moved along y until the table's centre is mid-picture
+            import numpy as np
+            OrigG = TC.SC.CameraGeometry
+
+            class AimedGeometry(OrigG):
+                def __init__(self, c):
+                    c.tilt_deg = [-float(tilt["tilt_deg"]), 0.0]     # sign: the lens on the y_min (audience) side, as the fixes' model
+                    c.height_cm = float(tilt["height_cm"])
+                    tx, ty = c.center_floor_cm
+                    best = None
+                    for dy in np.arange(-500.0, 500.0, 1.0):
+                        c.center_floor_cm = [tx, ty + dy]
+                        g = OrigG(c)
+                        dz = g.Hc
+                        pz = g.R[2, 0] * 0.0 + g.R[2, 1] * (-(ty - g.Y0)) + g.R[2, 2] * dz
+                        if pz <= 0:
+                            continue
+                        u, v = g.project(tx, ty)
+                        err = abs(v - g.cy) + abs(u - g.cx)
+                        if best is None or err < best[0]:
+                            best = (err, dy)
+                    c.center_floor_cm = [tx, ty + best[1]]
+                    super().__init__(c)
+            TC.SC.CameraGeometry = AimedGeometry
+        if st > 0 and cond.get("stall_watch", "skip") == "skip":
+            # no new picture, no check: the watch and the tracker share the camera's pictures, so a stalled camera
+            # gives the watch nothing new (the "stale" mode instead checks the repeated picture against the robots'
+            # newest spots: robots' old images left unmasked)
+            import brickwatch as BW
+            orig_check = BW.BrickWatch.check
+
+            def check(self, frame, robots, t=None):
+                if sim.cam_stalled(time.time()):
+                    return []
+                return orig_check(self, frame, robots, t)
+            BW.BrickWatch.check = check
     # ---- one robot out
     out = cond.get("robot_out")
     if out:

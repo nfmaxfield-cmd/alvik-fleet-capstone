@@ -1,0 +1,848 @@
+{
+ "120x60-nominal": {
+  "size": "120x60",
+  "warm": "nominal",
+  "warm_planned_s": 68.6,
+  "warm_code": 0,
+  "warm_words": [
+   "left side: open edge, 3.1 cm further in than marked",
+   "right side: open edge, 3.1 cm further in than marked",
+   "bottom side: open edge, 3.2 cm further in than marked",
+   "top side: open edge, 3.1 cm further in than marked",
+   "Center: wheel 1.004 x stored (6); gyro 1.001 x stored (4)",
+   "Left: wheel 0.984 x stored (6); gyro 1.000 x stored (12)",
+   "Right: wheel 0.989 x stored (5); gyro 0.991 x stored (11)",
+   "14 frames for Nick's check (about 84 s)"
+  ],
+  "warm_sides": {
+   "x_min": "open",
+   "x_max": "open",
+   "y_min": "open",
+   "y_max": "open"
+  },
+  "warm_where": {
+   "x_min": {
+    "marked": 0.0,
+    "offset_cm": -3.1,
+    "n": 2
+   },
+   "x_max": {
+    "marked": 120.0,
+    "offset_cm": -3.1,
+    "n": 2
+   },
+   "y_min": {
+    "marked": 0.0,
+    "offset_cm": -3.2,
+    "n": 3
+   },
+   "y_max": {
+    "marked": 60.0,
+    "offset_cm": -3.1,
+    "n": 3
+   }
+  },
+  "warm_zones": 0,
+  "warm_scales": {
+   "Right": {
+    "stored": {
+     "gyro_scale": 1.0,
+     "wheel_scale": 1.0
+    },
+    "wheel": {
+     "camera_over_stored": 0.9885,
+     "n": 5,
+     "flag": false
+    },
+    "gyro": {
+     "camera_over_stored": 0.9905,
+     "n": 11,
+     "flag": false
+    }
+   },
+   "Left": {
+    "stored": {
+     "gyro_scale": 1.0,
+     "wheel_scale": 1.0
+    },
+    "wheel": {
+     "camera_over_stored": 0.9843,
+     "n": 6,
+     "flag": false
+    },
+    "gyro": {
+     "camera_over_stored": 0.9995,
+     "n": 12,
+     "flag": false
+    }
+   },
+   "Center": {
+    "stored": {
+     "gyro_scale": 1.0,
+     "wheel_scale": 1.0
+    },
+    "wheel": {
+     "camera_over_stored": 1.0037,
+     "n": 6,
+     "flag": false
+    },
+    "gyro": {
+     "camera_over_stored": 1.0006,
+     "n": 4,
+     "flag": false
+    }
+   }
+  },
+  "plan_ok": false,
+  "plan_s": 0.3,
+  "plan_error": "PlanError('robot x, task 4: point (47.8, 10.0): no room to turn there (7.0 cm clear, needs 8.2)')"
+ },
+ "122x122-nominal": {
+  "size": "122x122",
+  "warm": "nominal",
+  "warm_planned_s": 103.7,
+  "warm_code": 0,
+  "warm_words": [
+   "left side: open edge, 3.0 cm further in than marked",
+   "right side: open edge, 3.5 cm further in than marked",
+   "bottom side: open edge, 3.5 cm further in than marked",
+   "top side: open edge, 2.7 cm further in than marked",
+   "Center: wheel 0.999 x stored (18); gyro 1.001 x stored (13)",
+   "Left: wheel 1.020 x stored (14); gyro 0.985 x stored (17)",
+   "Right: wheel 0.981 x stored (15); gyro 0.989 x stored (16)",
+   "15 frames for Nick's check (about 90 s); 5 more not shown"
+  ],
+  "warm_sides": {
+   "x_min": "open",
+   "x_max": "open",
+   "y_min": "open",
+   "y_max": "open"
+  },
+  "warm_where": {
+   "x_min": {
+    "marked": 0.0,
+    "offset_cm": -3.0,
+    "n": 4
+   },
+   "x_max": {
+    "marked": 122.0,
+    "offset_cm": -3.5,
+    "n": 4
+   },
+   "y_min": {
+    "marked": 0.0,
+    "offset_cm": -3.5,
+    "n": 4
+   },
+   "y_max": {
+    "marked": 122.0,
+    "offset_cm": -2.7,
+    "n": 4
+   }
+  },
+  "warm_zones": 0,
+  "warm_scales": {
+   "Center": {
+    "stored": {
+     "gyro_scale": 1.0,
+     "wheel_scale": 1.0
+    },
+    "wheel": {
+     "camera_over_stored": 0.999,
+     "n": 18,
+     "flag": false
+    },
+    "gyro": {
+     "camera_over_stored": 1.0011,
+     "n": 13,
+     "flag": false
+    }
+   },
+   "Left": {
+    "stored": {
+     "gyro_scale": 1.0,
+     "wheel_scale": 1.0
+    },
+    "wheel": {
+     "camera_over_stored": 1.0197,
+     "n": 14,
+     "flag": false
+    },
+    "gyro": {
+     "camera_over_stored": 0.9851,
+     "n": 17,
+     "flag": false
+    }
+   },
+   "Right": {
+    "stored": {
+     "gyro_scale": 1.0,
+     "wheel_scale": 1.0
+    },
+    "wheel": {
+     "camera_over_stored": 0.9813,
+     "n": 15,
+     "flag": false
+    },
+    "gyro": {
+     "camera_over_stored": 0.9894,
+     "n": 16,
+     "flag": false
+    }
+   }
+  },
+  "plan_ok": true,
+  "plan_s": 78.2,
+  "makespan_s": 284.3,
+  "plan_closest_cm": 9.28,
+  "notes": [
+   "lanes start 12.2 cm in from the open sides, not 10: the planner keeps a robot's centre 11.2 cm from an open edge (turn circle + safety + open margin), plus 1 cm",
+   "9 lanes 12 cm apart, 98 cm long",
+   "chicken round 1: no room away from the mower at 60 s: done where it is, the planner makes them wait for it",
+   "chicken round 2: no room away from the mower at 68 s: done where it is, the planner makes them wait for it",
+   "Roam and Follow the leader shortened to 47 s and 47 s so Left and Right finish with Center (its pass takes about 145 s after the show)",
+   "Center has right of way (planned first); it sweeps the table end to end",
+   "Left and Right: Chicken x2, Roam 47 s, Follow the leader 47 s, then wait above their park spots until Center is done (about 199 s), then park"
+  ]
+ },
+ "152x76-nominal-moved": {
+  "size": "152x76",
+  "warm": "nominal-moved",
+  "warm_planned_s": 73.0,
+  "warm_code": 0,
+  "warm_words": [
+   "left side: open edge, 3.1 cm further in than marked",
+   "right side: open edge, 3.1 cm further in than marked",
+   "bottom side: open edge, 3.2 cm further in than marked",
+   "top side: open edge, 3.6 cm further in than marked",
+   "Center: wheel 1.002 x stored (14); gyro 0.994 x stored (10)",
+   "Left: wheel 0.983 x stored (8); gyro 0.988 x stored (12)",
+   "Right: wheel 1.041 x stored (8) CHECK; gyro 0.984 x stored (13)",
+   "15 frames for Nick's check (about 90 s); 1 more not shown"
+  ],
+  "warm_sides": {
+   "x_min": "open",
+   "x_max": "open",
+   "y_min": "open",
+   "y_max": "open"
+  },
+  "warm_where": {
+   "x_min": {
+    "marked": 0.0,
+    "offset_cm": -3.1,
+    "n": 2
+   },
+   "x_max": {
+    "marked": 152.0,
+    "offset_cm": -3.1,
+    "n": 2
+   },
+   "y_min": {
+    "marked": 0.0,
+    "offset_cm": -3.2,
+    "n": 4
+   },
+   "y_max": {
+    "marked": 76.0,
+    "offset_cm": -3.6,
+    "n": 4
+   }
+  },
+  "warm_zones": 0,
+  "warm_scales": {
+   "Center": {
+    "stored": {
+     "gyro_scale": 1.0,
+     "wheel_scale": 1.0
+    },
+    "wheel": {
+     "camera_over_stored": 1.0017,
+     "n": 14,
+     "flag": false
+    },
+    "gyro": {
+     "camera_over_stored": 0.9938,
+     "n": 10,
+     "flag": false
+    }
+   },
+   "Right": {
+    "stored": {
+     "gyro_scale": 1.0,
+     "wheel_scale": 1.0
+    },
+    "wheel": {
+     "camera_over_stored": 1.0411,
+     "n": 8,
+     "flag": true
+    },
+    "gyro": {
+     "camera_over_stored": 0.9837,
+     "n": 13,
+     "flag": false
+    }
+   },
+   "Left": {
+    "stored": {
+     "gyro_scale": 1.0,
+     "wheel_scale": 1.0
+    },
+    "wheel": {
+     "camera_over_stored": 0.9833,
+     "n": 8,
+     "flag": false
+    },
+    "gyro": {
+     "camera_over_stored": 0.9878,
+     "n": 12,
+     "flag": false
+    }
+   }
+  },
+  "moved_sides": true,
+  "plan_ok": true,
+  "plan_s": 74.5,
+  "makespan_s": 242.0,
+  "plan_closest_cm": 9.14,
+  "notes": [
+   "lanes start 12.2 cm in from the open sides, not 10: the planner keeps a robot's centre 11.2 cm from an open edge (turn circle + safety + open margin), plus 1 cm",
+   "11 lanes 12 cm apart, 45 cm long",
+   "chicken round 1: no room away from the mower at 59 s: done where it is, the planner makes them wait for it",
+   "chicken round 2: no room away from the mower at 67 s: done where it is, the planner makes them wait for it",
+   "Roam and Follow the leader shortened to 33 s and 33 s so Left and Right finish with Center (its pass takes about 116 s after the show)",
+   "Center has right of way (planned first); it sweeps the table end to end",
+   "Left and Right: Chicken x2, Roam 33 s, Follow the leader 33 s, then wait above their park spots until Center is done (about 170 s), then park",
+   "Left and Right's routine still ends -30 s after Center (the planner makes them wait; check the plan)"
+  ]
+ },
+ "152x76-nominal": {
+  "size": "152x76",
+  "warm": "nominal",
+  "warm_planned_s": 73.0,
+  "warm_code": 0,
+  "warm_words": [
+   "left side: open edge, 3.3 cm further in than marked",
+   "right side: open edge, 2.9 cm further in than marked",
+   "bottom side: open edge, 3.0 cm further in than marked",
+   "top side: open edge, 2.9 cm further in than marked",
+   "Center: wheel 0.991 x stored (14); gyro 0.990 x stored (11)",
+   "Left: wheel 0.988 x stored (8); gyro 0.989 x stored (17)",
+   "Right: wheel 1.013 x stored (8); gyro 0.977 x stored (12)",
+   "15 frames for Nick's check (about 90 s); 1 more not shown"
+  ],
+  "warm_sides": {
+   "x_min": "open",
+   "x_max": "open",
+   "y_min": "open",
+   "y_max": "open"
+  },
+  "warm_where": {
+   "x_min": {
+    "marked": 0.0,
+    "offset_cm": -3.3,
+    "n": 2
+   },
+   "x_max": {
+    "marked": 152.0,
+    "offset_cm": -2.9,
+    "n": 2
+   },
+   "y_min": {
+    "marked": 0.0,
+    "offset_cm": -3.0,
+    "n": 4
+   },
+   "y_max": {
+    "marked": 76.0,
+    "offset_cm": -2.9,
+    "n": 4
+   }
+  },
+  "warm_zones": 0,
+  "warm_scales": {
+   "Right": {
+    "stored": {
+     "gyro_scale": 1.0,
+     "wheel_scale": 1.0
+    },
+    "wheel": {
+     "camera_over_stored": 1.0134,
+     "n": 8,
+     "flag": false
+    },
+    "gyro": {
+     "camera_over_stored": 0.9773,
+     "n": 12,
+     "flag": false
+    }
+   },
+   "Left": {
+    "stored": {
+     "gyro_scale": 1.0,
+     "wheel_scale": 1.0
+    },
+    "wheel": {
+     "camera_over_stored": 0.988,
+     "n": 8,
+     "flag": false
+    },
+    "gyro": {
+     "camera_over_stored": 0.9894,
+     "n": 17,
+     "flag": false
+    }
+   },
+   "Center": {
+    "stored": {
+     "gyro_scale": 1.0,
+     "wheel_scale": 1.0
+    },
+    "wheel": {
+     "camera_over_stored": 0.9905,
+     "n": 14,
+     "flag": false
+    },
+    "gyro": {
+     "camera_over_stored": 0.9902,
+     "n": 11,
+     "flag": false
+    }
+   }
+  },
+  "plan_ok": true,
+  "plan_s": 43.2,
+  "makespan_s": 229.6,
+  "plan_closest_cm": 10.57,
+  "notes": [
+   "lanes start 12.2 cm in from the open sides, not 10: the planner keeps a robot's centre 11.2 cm from an open edge (turn circle + safety + open margin), plus 1 cm",
+   "12 lanes 12 cm apart, 52 cm long",
+   "Roam and Follow the leader shortened to 46 s and 46 s so Left and Right finish with Center (its pass takes about 139 s after the show)",
+   "Center has right of way (planned first); it sweeps the table end to end",
+   "Left and Right: Chicken x2, Roam 46 s, Follow the leader 46 s, then wait above their park spots until Center is done (about 193 s), then park"
+  ]
+ },
+ "152x76-tilt35u-moved": {
+  "size": "152x76",
+  "warm": "tilt35u-moved",
+  "warm_planned_s": 73.0,
+  "warm_code": 0,
+  "warm_words": [
+   "left side: open edge, 1.9 cm further in than marked",
+   "right side: open edge, 1.5 cm further in than marked",
+   "bottom side: open edge, 5.5 cm further in than marked",
+   "top side: open edge, 0.5 cm further out than marked",
+   "Center: wheel 1.012 x stored (14); gyro 0.987 x stored (9)",
+   "Left: wheel 1.030 x stored (8) CHECK; gyro 0.958 x stored (11) CHECK",
+   "Right: wheel 0.992 x stored (8); gyro 0.995 x stored (11)",
+   "15 frames for Nick's check (about 90 s); 1 more not shown"
+  ],
+  "warm_sides": {
+   "x_min": "open",
+   "x_max": "open",
+   "y_min": "open",
+   "y_max": "open"
+  },
+  "warm_where": {
+   "x_min": {
+    "marked": 0.0,
+    "offset_cm": -1.9,
+    "n": 2
+   },
+   "x_max": {
+    "marked": 152.0,
+    "offset_cm": -1.5,
+    "n": 2
+   },
+   "y_min": {
+    "marked": 0.0,
+    "offset_cm": -5.5,
+    "n": 4
+   },
+   "y_max": {
+    "marked": 76.0,
+    "offset_cm": 0.5,
+    "n": 4
+   }
+  },
+  "warm_zones": 0,
+  "warm_scales": {
+   "Center": {
+    "stored": {
+     "gyro_scale": 1.0,
+     "wheel_scale": 1.0
+    },
+    "wheel": {
+     "camera_over_stored": 1.0119,
+     "n": 14,
+     "flag": false
+    },
+    "gyro": {
+     "camera_over_stored": 0.9866,
+     "n": 9,
+     "flag": false
+    }
+   },
+   "Right": {
+    "stored": {
+     "gyro_scale": 1.0,
+     "wheel_scale": 1.0
+    },
+    "wheel": {
+     "camera_over_stored": 0.9918,
+     "n": 8,
+     "flag": false
+    },
+    "gyro": {
+     "camera_over_stored": 0.9947,
+     "n": 11,
+     "flag": false
+    }
+   },
+   "Left": {
+    "stored": {
+     "gyro_scale": 1.0,
+     "wheel_scale": 1.0
+    },
+    "wheel": {
+     "camera_over_stored": 1.03,
+     "n": 8,
+     "flag": true
+    },
+    "gyro": {
+     "camera_over_stored": 0.9583,
+     "n": 11,
+     "flag": true
+    }
+   }
+  },
+  "moved_sides": true,
+  "plan_ok": true,
+  "plan_s": 35.3,
+  "makespan_s": 188.9,
+  "plan_closest_cm": 10.53,
+  "notes": [
+   "lanes start 12.2 cm in from the open sides, not 10: the planner keeps a robot's centre 11.2 cm from an open edge (turn circle + safety + open margin), plus 1 cm",
+   "11 lanes 12 cm apart, 47 cm long",
+   "Roam and Follow the leader shortened to 37 s and 37 s so Left and Right finish with Center (its pass takes about 120 s after the show)",
+   "Center has right of way (planned first); it sweeps the table end to end",
+   "Left and Right: Chicken x2, Roam 37 s, Follow the leader 37 s, then wait above their park spots until Center is done (about 174 s), then park"
+  ]
+ },
+ "152x76-tilt35u": {
+  "size": "152x76",
+  "warm": "tilt35u",
+  "warm_planned_s": 73.0,
+  "warm_code": 0,
+  "warm_words": [
+   "left side: open edge, 1.7 cm further in than marked",
+   "right side: open edge, 1.5 cm further in than marked",
+   "bottom side: open edge, 5.6 cm further in than marked",
+   "top side: open edge, 0.3 cm further out than marked",
+   "Center: wheel 1.018 x stored (14); gyro 0.994 x stored (8)",
+   "Left: wheel 1.069 x stored (8) CHECK; gyro 0.973 x stored (11)",
+   "Right: wheel 1.018 x stored (8); gyro 0.993 x stored (11)",
+   "15 frames for Nick's check (about 90 s); 1 more not shown"
+  ],
+  "warm_sides": {
+   "x_min": "open",
+   "x_max": "open",
+   "y_min": "open",
+   "y_max": "open"
+  },
+  "warm_where": {
+   "x_min": {
+    "marked": 0.0,
+    "offset_cm": -1.7,
+    "n": 2
+   },
+   "x_max": {
+    "marked": 152.0,
+    "offset_cm": -1.5,
+    "n": 2
+   },
+   "y_min": {
+    "marked": 0.0,
+    "offset_cm": -5.6,
+    "n": 4
+   },
+   "y_max": {
+    "marked": 76.0,
+    "offset_cm": 0.3,
+    "n": 4
+   }
+  },
+  "warm_zones": 0,
+  "warm_scales": {
+   "Center": {
+    "stored": {
+     "gyro_scale": 1.0,
+     "wheel_scale": 1.0
+    },
+    "wheel": {
+     "camera_over_stored": 1.0178,
+     "n": 14,
+     "flag": false
+    },
+    "gyro": {
+     "camera_over_stored": 0.9938,
+     "n": 8,
+     "flag": false
+    }
+   },
+   "Right": {
+    "stored": {
+     "gyro_scale": 1.0,
+     "wheel_scale": 1.0
+    },
+    "wheel": {
+     "camera_over_stored": 1.0176,
+     "n": 8,
+     "flag": false
+    },
+    "gyro": {
+     "camera_over_stored": 0.9929,
+     "n": 11,
+     "flag": false
+    }
+   },
+   "Left": {
+    "stored": {
+     "gyro_scale": 1.0,
+     "wheel_scale": 1.0
+    },
+    "wheel": {
+     "camera_over_stored": 1.0686,
+     "n": 8,
+     "flag": true
+    },
+    "gyro": {
+     "camera_over_stored": 0.9727,
+     "n": 11,
+     "flag": false
+    }
+   }
+  },
+  "plan_ok": true,
+  "plan_s": 22.2,
+  "makespan_s": 229.6,
+  "plan_closest_cm": 10.57,
+  "notes": [
+   "lanes start 12.2 cm in from the open sides, not 10: the planner keeps a robot's centre 11.2 cm from an open edge (turn circle + safety + open margin), plus 1 cm",
+   "12 lanes 12 cm apart, 52 cm long",
+   "Roam and Follow the leader shortened to 46 s and 46 s so Left and Right finish with Center (its pass takes about 139 s after the show)",
+   "Center has right of way (planned first); it sweeps the table end to end",
+   "Left and Right: Chicken x2, Roam 46 s, Follow the leader 46 s, then wait above their park spots until Center is done (about 193 s), then park"
+  ]
+ },
+ "152x76-wheel+5": {
+  "size": "152x76",
+  "warm": "wheel+5",
+  "warm_planned_s": 73.0,
+  "warm_code": 0,
+  "warm_words": [
+   "left side: open edge, 3.2 cm further in than marked",
+   "right side: open edge, 2.9 cm further in than marked",
+   "bottom side: open edge, 3.4 cm further in than marked",
+   "top side: open edge, 3.0 cm further in than marked",
+   "Center: wheel 1.057 x stored (14) CHECK; gyro 0.993 x stored (12)",
+   "Left: wheel 1.066 x stored (6) CHECK; gyro 0.999 x stored (12)",
+   "Right: wheel 1.065 x stored (8) CHECK; gyro 0.983 x stored (12)",
+   "15 frames for Nick's check (about 90 s); 1 more not shown"
+  ],
+  "warm_sides": {
+   "x_min": "open",
+   "x_max": "open",
+   "y_min": "open",
+   "y_max": "open"
+  },
+  "warm_where": {
+   "x_min": {
+    "marked": 0.0,
+    "offset_cm": -3.2,
+    "n": 2
+   },
+   "x_max": {
+    "marked": 152.0,
+    "offset_cm": -2.9,
+    "n": 2
+   },
+   "y_min": {
+    "marked": 0.0,
+    "offset_cm": -3.4,
+    "n": 4
+   },
+   "y_max": {
+    "marked": 76.0,
+    "offset_cm": -3.0,
+    "n": 4
+   }
+  },
+  "warm_zones": 0,
+  "warm_scales": {
+   "Left": {
+    "stored": {
+     "gyro_scale": 1.0,
+     "wheel_scale": 1.0
+    },
+    "wheel": {
+     "camera_over_stored": 1.0662,
+     "n": 6,
+     "flag": true
+    },
+    "gyro": {
+     "camera_over_stored": 0.999,
+     "n": 12,
+     "flag": false
+    }
+   },
+   "Right": {
+    "stored": {
+     "gyro_scale": 1.0,
+     "wheel_scale": 1.0
+    },
+    "wheel": {
+     "camera_over_stored": 1.0649,
+     "n": 8,
+     "flag": true
+    },
+    "gyro": {
+     "camera_over_stored": 0.9828,
+     "n": 12,
+     "flag": false
+    }
+   },
+   "Center": {
+    "stored": {
+     "gyro_scale": 1.0,
+     "wheel_scale": 1.0
+    },
+    "wheel": {
+     "camera_over_stored": 1.0572,
+     "n": 14,
+     "flag": true
+    },
+    "gyro": {
+     "camera_over_stored": 0.9929,
+     "n": 12,
+     "flag": false
+    }
+   }
+  },
+  "plan_ok": true,
+  "plan_s": 22.0,
+  "makespan_s": 229.6,
+  "plan_closest_cm": 10.57,
+  "notes": [
+   "lanes start 12.2 cm in from the open sides, not 10: the planner keeps a robot's centre 11.2 cm from an open edge (turn circle + safety + open margin), plus 1 cm",
+   "12 lanes 12 cm apart, 52 cm long",
+   "Roam and Follow the leader shortened to 46 s and 46 s so Left and Right finish with Center (its pass takes about 139 s after the show)",
+   "Center has right of way (planned first); it sweeps the table end to end",
+   "Left and Right: Chicken x2, Roam 46 s, Follow the leader 46 s, then wait above their park spots until Center is done (about 193 s), then park"
+  ]
+ },
+ "180x90-nominal": {
+  "size": "180x90",
+  "warm": "nominal",
+  "warm_planned_s": 112.4,
+  "warm_code": 0,
+  "warm_words": [
+   "left side: open edge, 3.4 cm further in than marked",
+   "right side: open edge, 3.4 cm further in than marked",
+   "bottom side: open edge, 3.3 cm further in than marked",
+   "top side: open edge, 3.3 cm further in than marked",
+   "Center: wheel 1.011 x stored (10); gyro 0.991 x stored (3)",
+   "Left: wheel 0.983 x stored (13); gyro 0.996 x stored (17)",
+   "Right: wheel 1.002 x stored (12); gyro 0.992 x stored (16)",
+   "15 frames for Nick's check (about 90 s); 5 more not shown"
+  ],
+  "warm_sides": {
+   "x_min": "open",
+   "x_max": "open",
+   "y_min": "open",
+   "y_max": "open"
+  },
+  "warm_where": {
+   "x_min": {
+    "marked": 0.0,
+    "offset_cm": -3.4,
+    "n": 3
+   },
+   "x_max": {
+    "marked": 180.0,
+    "offset_cm": -3.4,
+    "n": 3
+   },
+   "y_min": {
+    "marked": 0.0,
+    "offset_cm": -3.3,
+    "n": 5
+   },
+   "y_max": {
+    "marked": 90.0,
+    "offset_cm": -3.3,
+    "n": 5
+   }
+  },
+  "warm_zones": 0,
+  "warm_scales": {
+   "Right": {
+    "stored": {
+     "gyro_scale": 1.0,
+     "wheel_scale": 1.0
+    },
+    "wheel": {
+     "camera_over_stored": 1.0016,
+     "n": 12,
+     "flag": false
+    },
+    "gyro": {
+     "camera_over_stored": 0.9923,
+     "n": 16,
+     "flag": false
+    }
+   },
+   "Left": {
+    "stored": {
+     "gyro_scale": 1.0,
+     "wheel_scale": 1.0
+    },
+    "wheel": {
+     "camera_over_stored": 0.983,
+     "n": 13,
+     "flag": false
+    },
+    "gyro": {
+     "camera_over_stored": 0.9963,
+     "n": 17,
+     "flag": false
+    }
+   },
+   "Center": {
+    "stored": {
+     "gyro_scale": 1.0,
+     "wheel_scale": 1.0
+    },
+    "wheel": {
+     "camera_over_stored": 1.0109,
+     "n": 10,
+     "flag": false
+    },
+    "gyro": {
+     "camera_over_stored": 0.9907,
+     "n": 3,
+     "flag": false
+    }
+   }
+  },
+  "plan_ok": true,
+  "plan_s": 73.9,
+  "makespan_s": 268.4,
+  "plan_closest_cm": 9.72,
+  "notes": [
+   "lanes start 12.2 cm in from the open sides, not 10: the planner keeps a robot's centre 11.2 cm from an open edge (turn circle + safety + open margin), plus 1 cm",
+   "14 lanes 12 cm apart, 66 cm long",
+   "Center has right of way (planned first); it sweeps the table end to end",
+   "Left and Right: Chicken x2, Roam 60 s, Follow the leader 60 s, then wait above their park spots until Center is done (about 244 s), then park"
+  ]
+ }
+}

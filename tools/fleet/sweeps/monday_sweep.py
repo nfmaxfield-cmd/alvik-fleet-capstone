@@ -75,6 +75,7 @@ def cond(name, group, size="152x76", seeds=(1,), brick="middle", warm="nominal",
 cond("base 152x76", "table size", seeds=(1, 2, 3))
 cond("180x90", "table size", size="180x90", seeds=(1, 2))
 cond("122x122", "table size", size="122x122", seeds=(1, 2))
+cond("122x122 camera sees all", "table size", size="122x122", seeds=(1,), cam_px_per_cm=2.6)
 cond("120x60", "table size", size="120x60", seeds=(1,))
 cond("lost 5%", "lost packets", seeds=(1, 2), drop_pct=5.0)
 cond("lost 15%", "lost packets", seeds=(1, 2), drop_pct=15.0)
@@ -82,6 +83,8 @@ cond("age 0.35 s", "camera", seeds=(1,), cam_age_s=0.35)
 cond("age 0.7 s", "camera", seeds=(1, 2), cam_age_s=0.7)
 cond("stall 1 s", "camera", seeds=(1, 2), cam_stall_s=1.0, cam_stall_every_s=CAM_STALL_EVERY_S)
 cond("stall 2.5 s", "camera", seeds=(1, 2), cam_stall_s=2.5, cam_stall_every_s=CAM_STALL_EVERY_S)
+cond("stall 2.5 s, watch checks stale picture", "camera", seeds=(1,), cam_stall_s=2.5,
+     cam_stall_every_s=CAM_STALL_EVERY_S, stall_watch="stale")
 cond("tilt 35 corrected", "camera angle", seeds=(1,),
      cam_tilt=dict(tilt_deg=35.0, height_cm=180.0, led_cm=4.0, corrected=True, height_err_pct=10.0, nadir_err_cm=10.0))
 cond("tilt 35 uncorrected", "camera angle", seeds=(1, 2), warm="tilt35u",
@@ -101,7 +104,13 @@ cond("wheel -5%", "wheel scale", seeds=(1, 2), wheel=-5.0)
 cond("wheel +5% + stall 2.5 s", "wheel scale", seeds=(1,), wheel=5.0, cam_stall_s=2.5,
      cam_stall_every_s=CAM_STALL_EVERY_S)
 
-WARMS = {"nominal": {}, "tilt35u": C["tilt 35 uncorrected"]["sim"], "wheel+5": {}}
+cond("tilt 35 uncorrected, warm-up moves the sides", "camera angle", seeds=(1,), warm="tilt35u-moved",
+     cam_tilt=dict(tilt_deg=35.0, height_cm=180.0, led_cm=4.0, corrected=False))
+cond("base, warm-up moves the sides", "table size", seeds=(1,), warm="nominal-moved")
+
+WARMS = {"nominal": {}, "tilt35u": C["tilt 35 uncorrected"]["sim"], "wheel+5": {},
+         "tilt35u-moved": C["tilt 35 uncorrected"]["sim"], "nominal-moved": {}}
+MOVE_SIDES = {"tilt35u-moved", "nominal-moved"}   # Mission Control's "move the sides to where the warm-up found them"
 WARM_WHEEL = {"wheel+5": 5.0}
 
 
@@ -182,7 +191,9 @@ def prep_one(root, size, warm="nominal", log=print):
     rec["warm_where"] = res.get("where")
     rec["warm_zones"] = len(res["zones"])
     rec["warm_scales"] = res.get("scales")
-    m2 = WU.apply(m, res)                     # Nick keeps what it found (zones stay "proposed": kept out)
+    rec["moved_sides"] = warm in MOVE_SIDES
+    m2 = WU.apply(m, res, move_sides=warm in MOVE_SIDES)   # Nick keeps what it found (zones stay "proposed": kept
+    #                                                           out); sides moved only in the *-moved variants
     FM.save(m2, os.path.join(d, "map.json"))
     t0 = time.time()
     try:
@@ -323,6 +334,15 @@ def _still(xs, ys, ths, dt):
     return out
 
 
+def _longest(flags):
+    """Longest run of True samples."""
+    best = cur = 0
+    for f in flags:
+        cur = cur + 1 if f else 0
+        best = max(best, cur)
+    return best
+
+
 def metrics(folder):
     s = json.load(open(os.path.join(folder, "run_plan_summary.json")))
     meta = json.load(open(os.path.join(folder, "sweep_meta.json"))) if os.path.exists(
@@ -341,16 +361,22 @@ def metrics(folder):
     t_run0 = min([e["t"] - e["t_run"] for e in lab if e.get("t_run") is not None] or [None]) if lab else None
     lanes_planned = len({st["label"].split(" ")[2] for st in plan["robots"]["Center"]["steps"]
                          if "mow lane" in (st.get("label") or "")})
-    lanes_done = len({e["label"].split(" ")[2] for e in lab if e["robot"] == "Center" and
-                      "mow lane" in e["label"] and e["label"].endswith("end") and e["state"] == "done"})
+    # a lane is mowed when its end's step is reported done, or (that report lost over WiFi) the next lane's start
+    # began, or it is the last lane and Center parked (see below)
+    cl = {(e["label"], e["state"]) for e in lab if e["robot"] == "Center" and "mow lane" in e["label"]}
+    lanes_ok = {k for k in range(1, lanes_planned + 1)
+                if ("mow lane %d end" % k, "done") in cl or ("mow lane %d start" % (k + 1), "started") in cl
+                or ("mow lane %d start" % (k + 1), "done") in cl}
     acts = {}
     for key in ("chicken 1 swerve", "chicken 2 swerve", "roam", "follow the leader"):
-        acts[key] = sorted({e["robot"] for e in lab if e["label"] == key and e["state"] == "done"})
+        # started counts (a done report can be lost over WiFi; a step stopped part-way re-plans and starts again)
+        acts[key] = sorted({e["robot"] for e in lab if e["label"] == key and e["state"] in ("done", "started")})
     parked = []
     rr = s.get("replans", [])
     replans = [r for r in rr if r.get("source") not in ("improve",)]
     # standstill from the simulator's truth against the first plan, same rule for both
     extra, fleet_extra, still_run, still_plan = None, None, {}, {}
+    freeze_run = freeze_plan = None
     tp = os.path.join(folder, "sim", "truth.csv")
     if os.path.exists(tp) and t_run0 is not None:
         rows = {}
@@ -388,6 +414,7 @@ def metrics(folder):
             for n, fl in pflags.items():
                 allp &= fl
             fleet_extra = round(float(allr.sum()) * dt - float(allp.sum()) * dt, 1)
+            freeze_run, freeze_plan = _longest(allr) * dt, _longest(allp) * dt
     # where each robot ended against its park spot (the truth)
     mm = json.load(open(os.path.join(meta["prep"], "mission.json"))) if meta.get("prep") else None
     if mm and os.path.exists(tp):
@@ -398,6 +425,9 @@ def metrics(folder):
         for r in mm["robots"]:
             if r["name"] in last and math.dist(last[r["name"]], r["park"][:2]) < 3.0:
                 parked.append(r["name"])
+    if "Center" in parked and ("mow lane %d end" % lanes_planned, "started") in cl:
+        lanes_ok.add(lanes_planned)
+    lanes_done = len(lanes_ok)
     # re-plans where the code before this sweep's planner fix would have dropped a robot's visits (its next step's
     # task before its plan's own visit list: seq_visits[negative:]). Approximate: the step under way at the event
     old_bug = 0
@@ -415,6 +445,11 @@ def metrics(folder):
             if nxt is not None and nxt.get("task") is not None and nxt["task"] < r.get("task_offset", 0):
                 old_bug += 1
     edge = sim.get("min_open_edge_cm")
+    closest, sim_missing = sim.get("min_body_gap_cm"), not sim
+    if sim_missing and os.path.exists(tp) and mm_for_truth(meta):
+        # the simulator wrote no report (it waits for every robot's follow run to end: a lost "stop" at the end kept
+        # one going): the same two numbers from its truth file, every 0.25 s
+        closest, edge = truth_margins(tp, mm_for_truth(meta))
     cond_ = meta.get("condition", {})
     brick_ev = [e for e in sim.get("events", []) if e.get("kind") in ("brick", "camera_reported_brick")]
     tb = next((e["t"] for e in brick_ev if e["kind"] == "brick"), None)
@@ -425,7 +460,7 @@ def metrics(folder):
         "result": s.get("result"), "finished": s.get("result") == "done",
         "took_s": s.get("duration_s"), "planned_s": s.get("planned_makespan_s"),
         "late_s": round((s.get("duration_s") or 0) - (s.get("planned_makespan_s") or 0), 1),
-        "closest_cm": sim.get("min_body_gap_cm"), "closest_at": sim.get("min_body_gap_at"),
+        "closest_cm": closest, "sim_report_missing": sim_missing, "closest_at": sim.get("min_body_gap_at"),
         "brick_cm": sim.get("min_static_clearance_cm"), "contact": sim.get("collision"),
         "edge_cm": edge, "edge_crossed": edge is not None and edge < 0, "edge_at": sim.get("min_open_edge_at"),
         "hung": sim.get("hung") or [],
@@ -440,12 +475,42 @@ def metrics(folder):
         "lanes": "%d/%d" % (lanes_done, lanes_planned), "lanes_done": lanes_done, "lanes_planned": lanes_planned,
         "activities": acts, "parked": parked,
         "still_run_s": still_run, "still_plan_s": still_plan, "extra_still_s": extra, "fleet_still_extra_s": fleet_extra,
+        "freeze_max_s": None if freeze_run is None else round(freeze_run, 1),
+        "plan_freeze_max_s": None if freeze_plan is None else round(freeze_plan, 1),
         "brick_t": tb, "brick_seen_t": tr, "brick_seen_after_s": round(tr - tb, 2) if (tr is not None and tb is not None) else None,
         "old_code_drop_risk": old_bug,
         "resends": sum((s.get("resends") or {}).values()),
         "packets_lost": sim.get("packets_lost"),
         "folder": os.path.basename(folder),
     }
+
+
+def mm_for_truth(meta):
+    p = os.path.join(meta.get("prep", ""), "mission.json")
+    return json.load(open(p)) if os.path.exists(p) else None
+
+
+def truth_margins(tp, mm):
+    """Closest two robot bodies and closest body corner to the table's edge (all sides open), from truth.csv."""
+    m = FM.normalize(mm)
+    body = FM.body_of(m)
+    f = m["floor"]
+    rows = {}
+    with open(tp) as fh:
+        for r in csv.DictReader(fh):
+            rows.setdefault(round(float(r["t"]) * 4) / 4, {})[r["robot"]] = (float(r["x_cm"]), float(r["y_cm"]),
+                                                                              math.radians(float(r["heading_deg"])))
+    gap, edge = math.inf, math.inf
+    for t, ps in rows.items():
+        ns = sorted(ps)
+        for i in range(len(ns)):
+            c = body.corners([list(ps[ns[i]])])[0]
+            edge = min(edge, float(min(c[:, 0].min() - f["x_min"], f["x_max"] - c[:, 0].max(),
+                                       c[:, 1].min() - f["y_min"], f["y_max"] - c[:, 1].max())))
+            for j in range(i + 1, len(ns)):
+                g = float(G.body_gaps(body, np.array([ps[ns[i]]]), np.array([ps[ns[j]]]))[0])
+                gap = min(gap, g)
+    return round(gap, 2), round(edge, 2)
 
 
 def collect(root):
@@ -458,6 +523,8 @@ def collect(root):
                 out.append(metrics(f))
             except Exception as e:          # noqa: BLE001
                 out.append({"folder": name, "error": repr(e)})
+    names = list(C)
+    out.sort(key=lambda r: (names.index(r["condition"]) if r.get("condition") in names else 999, r.get("seed") or 0))
     return out
 
 
