@@ -269,3 +269,13 @@ def test_a_drive_towards_the_edge_is_still_reversed():
     assert E.Runner.drive_was_inward(r, "Right", along) == ""
     far = dict(RIGHT_GO4, x_cm="60.0", y_cm="60.0")                       # no edge near
     assert E.Runner.drive_was_inward(r, "Right", far) == ""
+
+
+def test_raw_rows_feed_each_robots_odometry_for_the_identity_check():
+    cols = ["run", "ms", "x_cm", "y_cm", "th_deg", "yaw_deg", "pitch_deg", "roll_deg"]
+    lis = E.Listener(types.SimpleNamespace(headers={"RAW": cols}))
+    lis("Left", "D", "RAW", ["4931-7", "5144820", "-31.51", "-0.47", "409.61", "332.0", "-0.41", "-1.33"])
+    lis("Left", "D", "RAW", ["4931-7", "5145740", "-26.13", "5.96", "410.40", "332.7", "-1.11", "-1.64"])
+    q = list(lis.odo["Left"])
+    assert len(q) == 2 and q[-1][1:] == (-26.13, 5.96, "4931-7")
+    assert "Right" not in lis.odo
