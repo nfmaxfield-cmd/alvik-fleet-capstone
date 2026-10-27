@@ -169,6 +169,21 @@ class LiveRobot(R.Robot):
         refused during a run), which the robot model has none of; everything else as robot.py. 2026-10-27: the
         remote ladder (tools/fleet/ladder.py) finds robots by their lights in the simulated overhead pictures."""
         verb = raw.strip().split(" ")[0].lower()
+        if verb == "simctl":
+            # simulator only (DOE loop dry runs, 2026-10-27): `simctl restart` = a power-on / wake from sleep (new boot
+            # id, not calibrated, every setting back to its factory value); `simctl battery <pct>`. The real firmware
+            # has no such command (it would answer "unknown command")
+            parts = raw.split()
+            if len(parts) >= 2 and parts[1] == "restart":
+                self.boot_id = (self.boot_id * 7 + 0x1357) % 0xF000 + 0x1000
+                self.fw_yaw_sign = 0
+                for k, v in config.firmware_params():
+                    self.params[k] = v
+                self.send("M,%s: restarted (simulated power-on)" % self.name)
+            elif len(parts) >= 3 and parts[1] == "battery":
+                self.battery = float(parts[2])
+                self.send("M,%s: battery set to %s%% (simulated)" % (self.name, parts[2]))
+            return False
         if verb != "led":
             return super().handle_command(raw, running)
         self.last_rx = self.millis()

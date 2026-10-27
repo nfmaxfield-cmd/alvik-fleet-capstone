@@ -1,0 +1,221 @@
+"""The DOE loop's own parts (2026-10-27 evening): where a drive's line goes, the miss pattern, the distance-sensor
+runs and the 1/2/3-in-a-row evaluation, the check before every move (restart, battery, settings read back), the clip
+events, and upload_session's unique tag.
+
+    python3 -m pytest tools/fleet/tests/test_doe_loop.py -q          # a few seconds
+The loop itself against the simulated board: FLEET_DRY=1 DOE_DRY_ARGS="--sim-washout --sim-event restart:Center@2
+--sim-event battery:Left=24@3" ./run-fleet-pi.sh doe-run 0.25 (docs/build-reports/e02-oct27-doe-loop.md).
+"""
+import csv
+import json
+import math
+import os
+import sys
+import types
+
+import pytest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+FLEET = os.path.dirname(HERE)
+TOOLS = os.path.dirname(FLEET)
+for p in (FLEET, os.path.join(TOOLS, "sim"), TOOLS, os.path.join(TOOLS, "pi")):
+    if p not in sys.path:
+        sys.path.append(p)
+
+import doe_loop as D        # noqa: E402
+import ladder as LD         # noqa: E402
+
+RECT = (0.0, 0.0, 122.0, 122.0)
+
+
+@pytest.mark.parametrize("length", D.LENGTHS)
+def test_segment_keeps_25cm_from_edges_and_parked(length):
+    parked = [(61.0, 61.0), (35.0, 90.0)]
+    a, b = D.pick_segment(RECT, (40.0, 40.0), length, parked)
+    assert math.dist(a, b) == pytest.approx(length, abs=0.01)
+    for p in (a, b):
+        assert LD.edge_dist(RECT, *p) >= D.CLEAR_CM - 1e-6
+    assert LD.segs_clear([(a, b)], parked, 0) >= D.PARKED_CLEAR_CM - 1e-6
+
+
+def test_segment_none_when_no_room():
+    parked = [(x, y) for x in range(25, 100, 12) for y in range(25, 100, 12)]
+    assert D.pick_segment(RECT, (40.0, 40.0), 40.0, parked) is None
+
+
+def _session(tmp, raw_rows, stops, plan_lines=None, track=None):
+    s = tmp
+    with open(os.path.join(s, "raw.csv"), "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["robot", "t_recv", "dL_cm", "dCL_cm", "dC_cm", "dCR_cm", "dR_cm"])
+        for r in raw_rows:
+            w.writerow(r)
+    with open(os.path.join(s, "coordinator.jsonl"), "w") as f:
+        f.write(json.dumps(dict(t=0.0, event="step_sent", robot="Left", id=1, text="x")) + "\n")
+        for t, info in stops:
+            f.write(json.dumps(dict(t=t, event="step_report", robot="Left", id=2, state="failed", info=info)) + "\n")
+        f.write(json.dumps(dict(t=100.0, event="step_report", robot="Left", id=3, state="done")) + "\n")
+    if plan_lines:
+        steps = [dict(type="drive", **{"from": [a[0], a[1], 0], "to": [b[0], b[1], 0]}) for a, b in plan_lines]
+        json.dump(dict(robots={"Left": dict(steps=steps)}), open(os.path.join(s, "plan_given.json"), "w"))
+    if track:
+        os.makedirs(os.path.join(s, "bridge"), exist_ok=True)
+        with open(os.path.join(s, "bridge", "track.csv"), "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["t", "robot", "x", "y", "status"])
+            for t, x, y in track:
+                w.writerow([t, "Left", x, y, "seen"])
+    return s
+
+
+def test_sensor_runs_single_flicker_vs_real_stop(tmp_path):
+    far = [120, 120, 120, 120, 120]
+    rows = []
+    t = 1.0
+    seq = [far, [120, 120, 120, 11.5, 120], far, [121, 120, 120, 120, 120],                                    # one flicker: 1 reading
+           [120, 120, 120, 11.8, 14.0], [120, 120, 120, 11.6, 12.0], far,                 # 2 in a row: the stop
+           [120, 12.5, 120, 120, 120], [120, 12.0, 120, 120, 120], [120, 11.0, 120, 120, 120], far]   # 3 in a row
+    for z in seq:
+        rows.append(["Left", "%.2f" % t] + z)
+        rows.append(["Left", "%.2f" % (t + 0.02)] + z)        # the same sensor picture in the next RAW row
+        t += 0.066
+    t_stop = 1.0 + 5 * 0.066 + 0.01
+    s = _session(str(tmp_path), rows, [(t_stop, "obstacle 11.6 cm ahead; zones 120 120 120 11.6 12.0")])
+    summ, runs = D.sensor_runs(s, "Left")
+    assert summ["readings"] == len(seq)
+    assert [r["readings"] for r in runs] == [1, 2, 3]
+    assert summ["single"] == 1 and summ["runs_2"] == 1 and summ["runs_3_plus"] == 1
+    assert summ["stops"] == 1
+    assert summ["stops_avoided_by_2"] == 0 and summ["stops_avoided_by_3"] == 1
+    assert runs[0]["zones"] == "CR"
+
+
+def test_miss_pattern_single_vs_runs(tmp_path):
+    lines = [((30.0, 50.0), (70.0, 50.0))]
+    off = {3: 3.5, 10: 4.0, 11: 4.2, 12: 3.8, 20: 3.1}
+    track = [(1.0 + i * 0.1, 30.0 + i, 50.0 + off.get(i, 0.5)) for i in range(40)]
+    s = _session(str(tmp_path), [], [], lines, track)
+    mp = D.miss_pattern(s, os.path.join(s, "bridge"), "Left")
+    assert mp["n"] == 40 and mp["over"] == 5 and mp["runs"] == 3 and mp["single"] == 2 and mp["longest"] == 3
+    assert mp["in_runs_of_3_plus"] == 3
+
+
+def test_clip_kinds():
+    assert D.clip_kind(dict(event="step_report", state="failed", info="obstacle 11.6 cm ahead")) == "near-robot stop"
+    assert D.clip_kind(dict(event="step_report", state="failed", info="plywood edge at 1 2 3 line")) == "edge stop"
+    assert D.clip_kind(dict(event="step_report", state="held")) == "hold"
+    assert D.clip_kind(dict(event="step_report", state="done")) is None
+
+
+def test_sim_events():
+    assert D.parse_sim_events(["restart:Center@2", "battery:Left=24@3"]) == [("restart", "Center", None, 2),
+                                                                             ("battery", "Left", "24", 3)]
+    with pytest.raises(SystemExit):
+        D.parse_sim_events(["boom:Left@1"])
+
+
+class FakeBench:
+    """Answers like the robots: status (battery), clock (boot id, uptime), get (settings)."""
+
+    def __init__(self, loop, robots):
+        self.loop, self.r = loop, robots
+        self.fw, self.sent = {}, []
+        self.link = types.SimpleNamespace(session=types.SimpleNamespace(listeners=[]))
+
+    def robots(self):
+        return list(self.r)
+
+    def send(self, n, cmd):
+        self.sent.append((n, cmd))
+        r = self.r[n]
+        if r.get("silent"):
+            return
+        v = cmd.split()
+        if v[0] == "status":
+            self.fw[n] = ("2026-10-25c", r["battery"])
+        elif v[0] == "clock":
+            for fn in self.link.session.listeners:
+                fn(n, "D", "CLOCK", [v[1], str(int(r["up"] * 1000)), r["boot"]])
+        elif v[0] == "get":
+            for fn in self.link.session.listeners:
+                fn(n, "M", "", "%s = %.3f  (help)" % (v[1], r["params"][v[1]]))
+        elif v[0] == "set" and v[1] in r["params"] and not r.get("lose_set"):
+            r["params"][v[1]] = float(v[2])
+
+    def wait(self, cond, s):
+        return cond()
+
+
+def _loop(tmp_path, robots):
+    L = D.DoeLoop.__new__(D.DoeLoop)
+    L.a = types.SimpleNamespace(dry=False)
+    L.dir = str(tmp_path)
+    L.state_path = os.path.join(L.dir, "state.json")
+    L.st = {"passed": {"L1:%s" % n: 1 for n in robots}, "results": {}, "robots": {n: {"x": 60, "y": 60, "h": 0}
+                                                                                    for n in robots},
+            "kept_out": {}, "doe": {"i": {}, "boot": {}, "uptime": {}, "loops": 0}}
+    L.got, L.files, L.frames, L.keeper, L.eye = {}, {}, None, None, None
+    L.bench = FakeBench(L, robots)
+    L.need_bench = lambda sub: L.bench
+    L.recal = []
+
+    def L1(sub, names):
+        L.recal += names
+        for n in names:
+            L.st["passed"]["L1:%s" % n] = 1
+        return True
+    L.L1 = L1
+    return L
+
+
+def _good(boot="A1B2", up=100.0, battery=60):
+    return dict(boot=boot, up=up, battery=battery, params=dict(gyro_scale=1.075, wheel_scale=0.979,
+                                                               gyro_drift_dps=0.0))
+
+
+def test_check_restart_battery_and_settings(tmp_path, monkeypatch):
+    monkeypatch.setattr(LD, "corrections_for", lambda n: dict(gyro_scale=1.075, wheel_scale=0.979, gyro_drift_dps=0.0))
+    monkeypatch.setattr(D.time, "sleep", lambda s: None)
+    robots = {"Left": _good(), "Right": _good("C0DE"), "Center": _good("4305")}
+    L = _loop(tmp_path, robots)
+    assert sorted(L.check(str(tmp_path), list(robots), "loop 0")) == ["Center", "Left", "Right"]
+    assert not L.recal
+    # Center restarts (new boot id, factory settings), Left drops to 24 %, Right loses a `set wheel_scale`
+    robots["Center"].update(boot="9DA8", up=20.0, params=dict(gyro_scale=1.0, wheel_scale=1.0, gyro_drift_dps=0.0))
+    robots["Left"]["battery"] = 24
+    robots["Right"]["params"]["wheel_scale"] = 1.0
+    fine = L.check(str(tmp_path), list(robots), "loop 1")
+    assert "Left" in L.st["kept_out"] and "battery 24%" in L.st["kept_out"]["Left"]
+    assert L.recal == ["Center"]
+    assert ("Center", "wake") in L.bench.sent and ("Center", "set wheel_scale 0.9790") in L.bench.sent
+    assert ("Right", "set wheel_scale 0.9790") in L.bench.sent
+    assert sorted(fine) == ["Center", "Right"]
+    # a setting that will not stick parks the robot; a silent robot is woken, then parked
+    robots["Right"]["params"]["gyro_scale"] = 1.0
+    robots["Right"]["lose_set"] = True
+    robots["Center"]["silent"] = True
+    assert L.check(str(tmp_path), ["Right", "Center"], "loop 2") == []
+    assert "does not read back" in L.st["kept_out"]["Right"] and "not answering" in L.st["kept_out"]["Center"]
+    assert ("Center", "wake") in L.bench.sent
+    rows = list(csv.DictReader(open(os.path.join(str(tmp_path), "battery.csv"))))
+    assert {r["robot"] for r in rows} == {"Left", "Right", "Center"} and rows[0]["boot"] == "A1B2"
+
+
+def test_free_tag():
+    import upload_session as U
+    have = {"doe-x", "doe-x-2"}
+    assert U.free_tag("doe-x", "tok", exists=lambda t: t in have) == "doe-x-3"
+    assert U.free_tag("doe-y", "tok", exists=lambda t: t in have) == "doe-y"
+
+
+def test_summary_table(tmp_path):
+    p = os.path.join(str(tmp_path), "drives.csv")
+    with open(p, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=["speed_cms", "length_cm", "p95_cm", "over_3cm", "miss_single", "sensor_low",
+                                          "sensor_stops", "stops_avoided_by_2", "stops_avoided_by_3"])
+        w.writeheader()
+        w.writerow(dict(speed_cms=5.0, length_cm=25.0, p95_cm=1.2, over_3cm=0, miss_single=0, sensor_low=3,
+                        sensor_stops=1, stops_avoided_by_2=1, stops_avoided_by_3=1))
+    D.write_summary(str(tmp_path))
+    s = open(os.path.join(str(tmp_path), "summary.md")).read()
+    assert "| 5 | 25 | 1 | 1.20 | 0 | 0 | 3 | 1 | 1 / 1 |" in s

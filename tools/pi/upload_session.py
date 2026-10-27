@@ -106,6 +106,25 @@ def release_for(tag, tok, body):
     return api("POST", base, tok, d)
 
 
+def free_tag(tag, tok, exists=None):
+    """tag, or tag-2, tag-3, ...: the first with no release yet (--unique-tag)."""
+    def _exists(t):
+        try:
+            api("GET", "https://api.github.com/repos/%s/releases/tags/%s" % (REPO_SLUG, t), tok)
+            return True
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return False
+            raise
+    exists = exists or _exists
+    if not exists(tag):
+        return tag
+    k = 2
+    while exists("%s-%d" % (tag, k)):
+        k += 1
+    return "%s-%d" % (tag, k)
+
+
 class _Slice:
     """A file-like view of bytes [start, start + n) of a file, read in chunks (no 2 GB in memory)."""
 
@@ -154,9 +173,11 @@ def upload(rel, name, path, tok, start=0, n=None, have=()):
     raise SystemExit("Upload of %s failed 3 times: run this again later (finished parts are skipped)." % name)
 
 
-def zip_folder(folder, out, small_only=False):
+def zip_folder(folder, out, small_only=False, exclude=()):
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-        for root, _, files in os.walk(folder):
+        for root, dirs, files in os.walk(folder):
+            if root == folder:
+                dirs[:] = [d for d in dirs if d not in exclude]     # --exclude: uploaded on their own (DOE frames)
             for fn in files:
                 p = os.path.join(root, fn)
                 if small_only and os.path.getsize(p) > SMALL_BYTES:
@@ -255,6 +276,11 @@ def _main():
     ap.add_argument("--logs-only", action="store_true", help="only the session folder (between the sessions of a plan)")
     ap.add_argument("--no-logs", action="store_true", help="only the recording (the end of a plan)")
     ap.add_argument("--tag", default="", help="the release's tag (default: e02-session-<the session's date-time>)")
+    # 2026-10-27 (DOE loop): files already in a release are skipped by name, so a second upload under the same tag
+    # silently left out new logs (15:32 today). --unique-tag never reuses a release: tag, tag-2, tag-3, ...
+    ap.add_argument("--unique-tag", action="store_true", help="if a release with this tag exists, use tag-2, -3, ...")
+    ap.add_argument("--recording-dir", default="", help="this folder as the recording (not the newest in --recordings)")
+    ap.add_argument("--exclude", action="append", default=[], help="a sub-folder of the session left out of its zip")
     a = ap.parse_args()
     if a.stop_recorder:
         stop_recorder()
@@ -268,10 +294,14 @@ def _main():
                             key=os.path.getmtime, default="")
     recs = sorted((d for d in glob.glob(os.path.join(a.recordings, "*")) if os.path.isdir(d)), key=os.path.getmtime)
     rec = "" if a.logs_only else (recs[-1] if recs else "")
+    if a.recording_dir:
+        rec = a.recording_dir if os.path.isdir(a.recording_dir) else ""
     if not sess:
         raise SystemExit("No session folder found under logs/.")
     name = os.path.basename(sess)
     tag = a.tag or ("e02-session-" + name.replace("e02-", ""))
+    if a.unique_tag:
+        tag = free_tag(tag, tok)
     print("Uploading %s and recording %s to release %s" % (name, os.path.basename(rec) or "(none)", tag), flush=True)
     total = (0 if a.no_logs else _folder_bytes(sess)) + (_folder_bytes(rec) if rec else 0)   # zips: an estimate
     PROGRESS.set(state="uploading", session=name, tag=tag, total_bytes=total, done_bytes=0, current="",
@@ -282,7 +312,7 @@ def _main():
     tmp = os.path.join(os.path.dirname(a.recordings.rstrip("/")), ".upload-tmp")
     os.makedirs(tmp, exist_ok=True)
     if not a.no_logs:
-        z = zip_folder(sess, os.path.join(tmp, "logs-%s.zip" % name))
+        z = zip_folder(sess, os.path.join(tmp, "logs-%s.zip" % name), exclude=tuple(a.exclude))
         upload(rel, os.path.basename(z), z, tok, have=have)
     if rec:
         z = zip_folder(rec, os.path.join(tmp, "rec-%s-small.zip" % os.path.basename(rec)), small_only=True)

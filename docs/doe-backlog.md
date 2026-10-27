@@ -371,6 +371,24 @@ Chosen with no DOE: 25 cm edge refusal (Nick's rule), calibration room 30 / 35 c
 test's lines to a parked robot (safety room), test layouts 30 cm in (25 if nothing fits), the 15 cm lead-in to a
 start spot, the start check 4 cm / 6 deg, the 25 cm straight in L3, minimum battery 25 %.
 
+## DOE loop (2026-10-27 evening, built)
+
+Write-up: [e02-oct27-doe-loop.md](build-reports/e02-oct27-doe-loop.md). Code: `tools/fleet/doe_loop.py` (each
+number's comment says the same). The loop itself runs two DOEs from the backlog: speed 5 / 7.5 / 10 / 13 cm/s against
+p95 and misses (the ladder's SLOW_CMS row above), and heading from a 25 vs a 40 cm last straight.
+
+| Setting | Chosen | DOE | Where | Status |
+|---|---|---|---|---|
+| Turn check every Nth drive of a robot (TURN_EVERY) | 4 (and its first) | 2 / 4 / 8 against how fast the turn error drifts over a battery (turns.csv per robot over time): the first night's turns.csv gives the drift rate directly | Logs (first night), then Board | open |
+| Distance-sensor "low" reading (LOW_CM) | 13 cm (today's phantom stops 11.0-11.9) | Re-count the runs at 9 / 11 / 13 / 15 cm from the night's raw.csv files; no robot time | Logs | open |
+| Readings in a row before a distance-sensor stop (firmware: front_confirm_ms 100 ms, about 2 sensor pictures) | unchanged; the loop records enough to judge 1 / 2 / 3 | 1 / 2 / 3 in a row against phantom stops (sensor_stops.csv) and the reaction to a real brick (brick runs) | Logs, then Board | open |
+| Full-rate clip around a stop / hold / FAIL (CLIP_S) | 5 s either side (Nick's figure) | From the first night's clips: how far back each stop's cause shows | Logs | open |
+
+Chosen with no DOE: the 4 h cap (Nick), 25 cm from every edge and parked robot (Nick's safety rule; the planner floor
+shrunk 20 cm and parked robots as 20 cm circles follow from it), the 8 cm p95 safety limit that parks a robot (a fault,
+not a measurement), the 3 cm miss threshold (Nick's question), 5 min .avi parts (a file size), the 4 s answer wait
+(round trips are 17-20 ms), the 0.0006 read-back tolerance (the firmware prints 3 decimals).
+
 ## Monday sweep (2026-10-27, simulator)
 
 Write-up: [monday-mission-sweep.md](results/monday-mission-sweep.md). Sweep settings, not robot settings: they only

@@ -23,6 +23,11 @@
 #                                          L5 cross, L6 brick: `L6 attended`, only with someone at the board)
 #     ./run-fleet-pi.sh turncheck Center   the camera-measured turn check alone (replaces `turn` and the ruler)
 #     ./run-fleet-pi.sh ladder-status      what has passed, where each robot is
+# The DOE loop (unattended, tools/fleet/doe_loop.py): L0 + L1, then turn checks and straight out-and-backs at 5-13 cm/s
+# one robot at a time until every robot is out or 4 h; runs in tmux (session doe), so SSH can be closed:
+#     ./run-fleet-pi.sh doe [hours] [full-video]   start it (full-video: the recorder keeps its whole video too)
+#     ./run-fleet-pi.sh doe-status         drives so far, battery, who is out
+#     ./run-fleet-pi.sh doe-stop           stop it (every robot stops), then it uploads as when it finishes
 # The first test starts the recorder (both cameras, to the USB drive) in a tmux session called fleet; it keeps
 # recording until `stop`. Each test starts the camera bridge, runs the plan, then prints the line check (GATE).
 set -u
@@ -86,7 +91,8 @@ start_recorder() {
     CAMS="--device $OD --names overhead"; REC_CORES="--cores 1"; echo "Recording the overhead camera (/dev/video$OD) to $OUT (no side camera found)"
   fi
   python3 tools/pi/launcher.py --handoff >/dev/null 2>&1 || true
-  tmux new-session -d -s fleet -n rec "cd '$REPO' && python3 tools/pi/camrec.py $CAMS --fps 25 --label P0 --no-lock $EXPO_ARG --side-exposure lock $REC_CORES --out '$OUT'; read -r -p 'Recorder stopped. Press Enter.'"
+  # REC_EXTRA: the DOE loop's --no-record (pictures served, no video saved: the loop saves its own frames)
+  tmux new-session -d -s fleet -n rec "cd '$REPO' && python3 tools/pi/camrec.py $CAMS --fps 25 --label P0 --no-lock $EXPO_ARG --side-exposure lock $REC_CORES ${REC_EXTRA:-} --out '$OUT'; read -r -p 'Recorder stopped. Press Enter.'"
   echo "Recorder starting (8 s) ..."; sleep 8
 }
 
@@ -132,6 +138,52 @@ case "$WHAT" in
     ladder step "$WHAT" $A ;;
   turncheck)
     ladder turncheck "${1:-Center}" ;;
+  doe)
+    HRS=4; FULL=0
+    for x in "$@"; do case "$x" in full-video) FULL=1 ;; [0-9]*) HRS="$x" ;; esac; done
+    if tmux has-session -t doe 2>/dev/null; then
+      echo "A DOE loop is already running (tmux session doe). Watch it: tmux capture-pane -p -t doe | tail -40"
+      echo "Stop it first if you want a new one: ./run-fleet-pi.sh doe-stop"; exit 1
+    fi
+    for s in ladder ladder2; do tmux has-session -t $s 2>/dev/null && { echo "A ladder is running (tmux session $s): stop it first (tmux kill-session -t $s)."; exit 1; }; done
+    [ "$DRY" = 1 ] || { [ "$FULL" = 1 ] || REC_EXTRA="--no-record"; start_recorder; }
+    tmux new-session -d -s doe -x 200 -y 50 "cd '$REPO' && FLEET_DRY=$DRY DOE_DRY_ARGS='${DOE_DRY_ARGS:-}' ./run-fleet-pi.sh doe-run $HRS; FLEET_DRY=$DRY ./run-fleet-pi.sh doe-finish; read -r -p 'DOE loop finished. Press Enter.'"
+    # the loop's whole screen (run_plan's lines too) to a file; doe-finish moves it into the DOE folder (screen.txt)
+    tmux pipe-pane -t doe "cat >> '$REPO/logs/doe-screen.txt'" 2>/dev/null || true
+    echo "DOE loop started in tmux session 'doe' (time cap $HRS h; full video: $([ $FULL = 1 ] && echo yes || echo no))."
+    echo "You can close this window: it keeps running on the Pi."
+    echo "Watch it:        tmux capture-pane -p -t doe | tail -40"
+    echo "Or live:         tmux attach -t doe        (leave it again: Ctrl+B, then D)"
+    echo "Pictures:        http://100.122.222.75:8000 (overhead), http://100.122.222.75:8001 (side)"
+    echo "Progress:        ./run-fleet-pi.sh doe-status"
+    echo "Stop it:         ./run-fleet-pi.sh doe-stop" ;;
+  doe-run)          # (inside the tmux session doe)
+    if [ "$DRY" = 1 ]; then
+      python3 tools/fleet/doe_loop.py run --hours "${1:-4}" --dry ${DOE_DRY_ARGS:-}
+    else
+      PIN=""; if [ "$(nproc)" -ge 4 ] && command -v taskset >/dev/null; then PIN="taskset -c 2,3"; fi
+      $PIN python3 tools/fleet/doe_loop.py run --hours "${1:-4}" $IPS --stream 127.0.0.1:8000 --calib "$CALIB" $SIDE_ARG
+    fi ;;
+  doe-finish)       # (inside the tmux session doe, after the loop): recorder stopped, logs + frames uploaded
+    D="$(ls -td logs/*-doe 2>/dev/null | head -1)"
+    if [ -f logs/doe-screen.txt ]; then
+      DD="$D"; [ "$DRY" = 1 ] && DD="$(ls -td logs/*-doe-dryrun 2>/dev/null | head -1)"
+      [ -n "$DD" ] && mv logs/doe-screen.txt "$DD/screen.txt"
+    fi
+    [ "$DRY" = 1 ] && { echo "(dry run: no recorder to stop, nothing uploaded; folder $(ls -td logs/*-doe-dryrun | head -1))"; exit 0; }
+    OUT="$(cat /tmp/fleet_rec_out 2>/dev/null || echo "$HOME/recordings")"
+    if rec_running; then tmux send-keys -t fleet:rec C-c; echo "Stopping the recorder ..."; sleep 6; fi
+    [ -z "$D" ] && { echo "No DOE folder found."; exit 1; }
+    python3 tools/pi/upload_session.py --recordings "$OUT" --session "$D" --tag "doe-$(basename "$D")" --unique-tag \
+      --exclude frames --recording-dir "$D/frames" || echo "Upload failed: the files stay in $D (run ./run-fleet-pi.sh doe-finish again)" ;;
+  doe-status)
+    D=""; [ "$DRY" = 1 ] && D="--dry"
+    python3 tools/fleet/doe_loop.py status $D
+    tmux has-session -t doe 2>/dev/null && { echo "--- the loop's screen (last 15 lines) ---"; tmux capture-pane -p -t doe | grep -v '^$' | tail -15; } || echo "(no DOE loop running)" ;;
+  doe-stop)
+    if tmux has-session -t doe 2>/dev/null; then
+      tmux send-keys -t doe C-c; echo "Sent Ctrl+C to the DOE loop: every robot stops; it then uploads (watch: tmux capture-pane -p -t doe | tail -20)."
+    else echo "No DOE loop running."; fi ;;
   ladder-status)   # (no recorder needed)
     D=""; [ "$DRY" = 1 ] && D="--dry"
     python3 tools/fleet/ladder.py status $D ;;
@@ -180,5 +232,5 @@ case "$WHAT" in
     python3 tools/pi/upload_session.py --recordings "$OUT" --stop-recorder --no-logs --tag "p0-$DAY-recording" || true
     tmux kill-session -t fleet 2>/dev/null || true ;;
   *)
-    sed -n '2,27p' "$0"; exit 1 ;;
+    sed -n '2,32p' "$0"; exit 1 ;;
 esac
