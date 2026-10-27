@@ -74,3 +74,9 @@ closest approach), styled like the mockup (Inter, ground #F6F7F9, white panels, 
 - **Lens height and camera pose from geometry, not a tape.** Each camera's position and tilt (lens height included)
   solved from the board's 4 corners in its picture and its lens model; the two cameras cross-check each other (and
   later, the robots' tops at a known 4 cm). Removes the lens-height box from the setup page.
+- **Checkerboard calibration** (Nick, 09:56): a printed ChArUco pattern (A3 or larger, flat on a stiff backing) laid
+  on the board in 1-4 places while both cameras take pictures, then removed before runs. Gives each camera's pose,
+  lens height and distortion, the common frame and its orientation (0,0 and the mirror) without questions.
+- **Side camera exposure check before locking** (09:56: the side picture was very dark on the setup page, likely a
+  low value locked by the morning preview after a 2 s warm-up): longer settling for the EMEET and a brightness check
+  before the lock, and the setup page sets the side camera to automatic when it opens it.
