@@ -58,17 +58,25 @@ th:first-child,td:first-child{text-align:left}
 </section>
 
 <section id="s2">
-<h2>2. Side camera</h2>
+<h2>2. Side camera: its calibration (both cameras follow the robots)</h2>
+<p>The overhead camera alone could not see the robots' bodies on the washed-out board (11:20). With the side camera calibrated here, the ladder and the camera bridge follow every robot with both cameras. <b>Save part 1 first</b> if the overhead camera moved: the side's numbering is taken from it.</p>
+<div class="msg" id="sfound">-</div>
 <div class="row">
  <div class="col">
   <canvas id="cvs" width="640" height="480"></canvas>
-  <p class="cap">The side camera's picture, live (refreshed every second). Frame rate: <span class="fps" id="sfps">-</span>.</p>
+  <p class="cap">The side camera's picture, taken with "New side picture". Red points: the board's corners in the side picture, numbered like the overhead's (1 = the floor's 0,0 corner; 2 along x; 3; 4 along y). Frame rate now: <span class="fps" id="sfps">-</span>. <span id="sbright"></span></p>
+  <div class="bar">
+   <button id="sgrab">New side picture + find corners</button>
+   <button id="sclick">Click 4 corners in order</button>
+   <button id="sturn">Move the numbering one corner round</button>
+  </div>
+  <p class="fine">How the numbering is checked: points the overhead's calibration already knows (the plywood grain matched between the two pictures, and the robots' lights if the flash check (part 3) ran) are put into the side picture with each of the 8 possible numberings; the one where they land in the right place wins. If not all 4 corners are in the side picture, leave the corners out: the calibration is fitted from the plywood grain alone.</p>
  </div>
  <div class="col">
-  <p>The side camera does <b>not</b> need calibrating today. Its calibration is refitted from the robots as they drive (docs/build-plans/two-camera-geometry.md), so just check it still sees the whole board.</p>
-  <p class="fine">Optional: click its 4 board corners in the same order as the overhead's (1 = the 0,0 corner, 2 along x, 3, 4 along y) and save them. They are stored on their own (~/.config/mirlt/side_corners_...json) and nothing uses them yet.</p>
-  <div class="bar"><button id="sclick">Click 4 corners</button><button id="ssave" disabled>Save side corners</button></div>
-  <div class="msg" id="smsg">-</div>
+  <img class="pic" id="scheckimg" alt="side check picture" style="display:none">
+  <p class="cap" id="scheckcap">The check picture appears here after Check.</p>
+  <div class="bar"><button id="scheck">Check</button><button id="snocorners">Check without corners (plywood grain only)</button><button class="main" id="ssave" disabled>Save the side calibration</button></div>
+  <div class="msg" id="smsg">Check fits the side calibration and draws its 10 cm grid; nothing is saved until Save.</div>
  </div>
 </div>
 </section>
@@ -115,11 +123,33 @@ async function doCheck(save){$('checkmsg').textContent=(save?'Saving':'Fitting')
   $('checkmsg').innerHTML=w;$('save').disabled=false}catch(e){$('checkmsg').innerHTML='<span class="bad">Could not fit: '+e.message+'</span>'}}
 $('check').onclick=()=>doCheck(false);$('save').onclick=()=>doCheck(true);
 function drawSide(){const c=$('cvs'),g=c.getContext('2d');if(simg.complete&&simg.naturalWidth){c.width=simg.naturalWidth;c.height=simg.naturalHeight;g.drawImage(simg,0,0)}
- const pts=sclicked.length?sclicked:((S&&S.side_corners)?S.side_corners.corners:[]);pts.forEach((p,i)=>{g.beginPath();g.arc(p[0],p[1],7,0,7);g.strokeStyle='#ff2020';g.lineWidth=2;g.stroke();g.fillStyle='#ff2020';g.font='bold 15px system-ui';g.fillText(String(i+1),p[0]+9,p[1]-9)})}
+ const pts=sclicking?sclicked:(scorners||[]);g.lineWidth=2;g.strokeStyle='#00dc00';
+ if(pts.length>1){g.beginPath();pts.forEach((p,i)=>i?g.lineTo(p[0],p[1]):g.moveTo(p[0],p[1]));if(pts.length==4)g.closePath();g.stroke()}
+ pts.forEach((p,i)=>{g.beginPath();g.arc(p[0],p[1],7,0,7);g.strokeStyle='#ff2020';g.lineWidth=2;g.stroke();g.fillStyle='#ff2020';g.font='bold 15px system-ui';g.fillText(String(i+1),p[0]+9,p[1]-9)})}
 simg.onload=drawSide;img.onload=draw;
-$('cvs').addEventListener('pointerdown',e=>{if(!sclicking)return;sclicked.push(pos($('cvs'),e).map(v=>Math.round(v*10)/10));if(sclicked.length==4){sclicking=false;$('ssave').disabled=false;$('sclick').textContent='Click 4 corners'}drawSide()});
-$('sclick').onclick=()=>{sclicking=true;sclicked=[];$('ssave').disabled=true;$('sclick').textContent='Click corner 1 (0,0) ...'};
-$('ssave').onclick=async()=>{try{S=await api('/api/side_corners',{corners:sclicked});$('smsg').textContent='Saved (not used yet): '+S.side_corners.path;sclicked=[];$('ssave').disabled=true}catch(e){$('smsg').textContent='Could not: '+e.message}};
+let scorners=null,sdrag=-1,snocorn=false;
+$('cvs').addEventListener('pointerdown',e=>{const p=pos($('cvs'),e);
+ if(sclicking){sclicked.push(p.map(v=>Math.round(v*10)/10));if(sclicked.length==4){sclicking=false;scorners=sclicked;sclicked=[];$('sclick').textContent='Click 4 corners in order';sCheck(false)}drawSide();return}
+ if(!scorners)return;let best=-1,bd=1e9;scorners.forEach((q,i)=>{const d=Math.hypot(q[0]-p[0],q[1]-p[1]);if(d<bd){bd=d;best=i}});
+ if(bd<40){sdrag=best;$('cvs').setPointerCapture(e.pointerId)}});
+$('cvs').addEventListener('pointermove',e=>{if(sdrag<0)return;scorners[sdrag]=pos($('cvs'),e).map(v=>Math.round(v*10)/10);drawSide()});
+$('cvs').addEventListener('pointerup',e=>{if(sdrag>=0){sdrag=-1;sCheck(false)}});
+$('sclick').onclick=()=>{sclicking=!sclicking;sclicked=[];$('sclick').textContent=sclicking?'Cancel clicking (click corner 1: the 0,0 corner)':'Click 4 corners in order';drawSide()};
+$('sturn').onclick=()=>{if(!scorners)return;scorners=scorners.slice(1).concat([scorners[0]]);drawSide();sCheck(false)};
+$('sgrab').onclick=async()=>{$('sfound').textContent='Taking a side picture and matching it with the overhead\'s (several seconds on the Pi)...';
+ try{S=await api('/api/side_grab',{});scorners=S.side_corners?S.side_corners.corners:null;simg.src='/img/side_still.jpg?'+Date.now();show()}catch(e){$('sfound').textContent='Could not: '+e.message}};
+async function sCheck(save,nocorn){if(nocorn!==undefined)snocorn=nocorn;$('smsg').textContent=(save?'Saving':'Fitting')+' (up to a minute on the Pi without corners)...';$('ssave').disabled=true;
+ try{S=await api(save?'/api/side_save':'/api/side_check',{corners:snocorn?null:scorners});const k=S.side_check;
+  $('scheckimg').src='/img/side_check.jpg?'+Date.now();$('scheckimg').style.display='block';
+  $('scheckcap').textContent='The side calibration drawn on the side picture: a 10 cm grid over the board (pink every 50 cm), the board outline in green, 0,0 at the floor origin. The grid should lie on the board and 0,0 sit on the same board corner as in the overhead\'s check picture.';
+  let w='Fitted from '+k.method+': off by '+fmt(k.err_cm,2)+' cm on average, '+fmt(k.max_err_cm,2)+' cm at worst.';
+  if(k.anchor_check)w+=' Points the overhead knows land this far from where the side picture has them (median): '+k.anchor_check+'.';
+  if(k.mirrored)w+=' <span class="warn">The fit says the picture is mirrored: the numbering goes the wrong way round.</span>';
+  if(k.warning)w+='<br><b class="bad">'+k.warning+'</b>';
+  if(save&&S.side_saved)w+='<br><b class="ok">Saved: '+S.side_saved.path+'</b>. The ladder and the camera bridge now follow the robots with both cameras (through '+S.side_saved.pointer+'). Side lag: '+(S.side_saved.lag_s===null?'none measured (run the flash check first to measure it; the tracker uses 0.04 s)':fmt(S.side_saved.lag_s*1000)+' ms from the flash check')+'.';
+  else w+='<br>If the grid sits right, press Save.';
+  $('smsg').innerHTML=w;$('ssave').disabled=false}catch(e){$('smsg').innerHTML='<span class="bad">Could not fit: '+e.message+'</span>'}}
+$('scheck').onclick=()=>sCheck(false,false);$('snocorners').onclick=()=>sCheck(false,true);$('ssave').onclick=()=>sCheck(true);
 $('flash').onclick=async()=>{try{S=await api('/api/flash',{});show()}catch(e){$('prog').innerHTML='<span class="bad">'+e.message+'</span>'}};
 $('clearexp').onclick=async()=>{S=await api('/api/exposure',{value:null});show()};
 async function saveExp(v){S=await api('/api/exposure',{value:v});show()}
@@ -143,8 +173,9 @@ function show(){if(!S)return;
  $('found').innerHTML=S.found+'<br><span class="fine">Calibration in use until you save: '+S.old.words+'</span>';
  if($('height').value===''&&!$('height').dataset.set){$('height').value=S.height_cm;$('height').dataset.set=1}
  $('sfps').textContent=S.side?fmt(S.fps.side,1)+' pictures/s':'side camera not open';
- if(!S.side)$('smsg').textContent='The side camera is not open (not found by name, or busy). It is not needed for today.';
- else if(!S.side_corners)$('smsg').textContent='No side corners saved (optional).';
+ const st=(S.settle||{}).side;$('sbright').innerHTML=st?('Brightness after its automatic exposure settled: '+fmt(st.brightness)+' of 255'+(st.warning?' <b class="bad">'+st.warning+'</b>':'')):'';
+ $('sfound').innerHTML=S.side?(S.side_found||'Press "New side picture".')+'<br><span class="fine">'+S.side_calib+'</span>':'<span class="warn">The side camera is not open (not found by name, or busy): the robots are followed by the overhead camera alone.</span>';
+ if(S.side&&!scorners&&S.side_corners&&S.side_corners.corners){scorners=S.side_corners.corners;simg.src='/img/side_still.jpg?'+Date.now()}
  const d=S.doe;$('flash').disabled=d.state=='running';
  $('prog').innerHTML=d.state=='idle'?'':(d.state=='failed'?'<span class="bad">'+d.progress+'</span>':d.progress);
  const key=JSON.stringify([d.state,d.rows.length,d.rec]);if(key!==lastDoe){lastDoe=String(Date.now());$('doe').innerHTML=doeHtml(d)+(d.words?'<div class="msg"><b>'+d.words+'</b></div>':'');lastDoe=key;}
@@ -152,6 +183,6 @@ function show(){if(!S)return;
  else if(d.state=='done'){$('lag').style.display='block';$('lag').textContent=S.side?'The side camera\'s lag could not be measured (it did not see the lights clearly).':'Side camera not open: no lag measured.'}
  const e=S.exposure;$('expo').innerHTML=e.value?'Saved overhead exposure: <b>'+e.value+'</b> (saved '+e.saved+'). The recorder (run-fleet-pi.sh, run-e02-pi.sh) uses it from its next start; the side camera keeps its automatic.':'No overhead exposure saved: the recorder leaves the camera on its own automatic exposure, as before.'}
 async function poll(){try{S=await api('/api/state');if(!corners&&S.corners){corners=S.corners;img.src='/img/still.jpg?'+Date.now()}show()}catch(e){$('top').innerHTML='<span class="bad">The setup page on the Pi is not answering (stopped?)</span>'}
- if(S&&S.side)simg.src='/img/side.jpg?'+Date.now()}
+ }
 poll();setInterval(poll,1000);
 </script></body></html>

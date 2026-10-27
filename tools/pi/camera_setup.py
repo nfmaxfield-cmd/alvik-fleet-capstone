@@ -16,8 +16,11 @@ exposure (the saved value, if any, is applied by camrec at the recorder's next s
    3 = (122.15, 121.9), 4 = (0, 121.9)); drag any corner or click 4 in order; Check draws a 10 cm grid from the
    fitted calibration; Save writes ~/.config/mirlt/calib/overhead_floorcal_<date-time>.json and points
    ~/.config/mirlt/overhead_calib at it (tools/pi/setup_conf.py; run-fleet-pi.sh, session_plan.sh and e02.py read it).
-2. Side camera: its picture and frame rate. Its calibration is refitted from the robots
-   (docs/build-plans/two-camera-geometry.md); optional corner clicks are stored separately, not used yet.
+2. Side camera (two-camera tracking, 2026-10-27): its 4 board corners found (or clicked, or, when not all 4 are in its
+   picture, the plywood grain alone), NUMBERED LIKE THE OVERHEAD'S by anchors the overhead's calibration knows: the
+   robots' lights from the flash check, and the plywood grain matched between the two pictures; Check draws the grid;
+   Save writes ~/.config/mirlt/calib/side_floorcal_<date-time>.json (with the flash check's side lag) and points
+   ~/.config/mirlt/side_calib at it: the ladder and the camera bridge then follow the robots with both cameras.
 3. Flash check (a small DOE: one factor, exposure, at 4 levels): all robots light their LEDs (`led 1 1 1 1500`)
    while the overhead camera takes pictures at its locked automatic exposure and at 1/2, 1/4, 1/8 of it; for each:
    the lights' contrast (LED on minus LED off at each robot), light against the board, and the robots' tops against
@@ -200,6 +203,124 @@ def recommend(rows):
                  r["exposure"], "all" if r["fraction"] == 1 else "1/%d" % round(1 / r["fraction"]),
                  r["result"]["weakest_light"], r["result"]["weakest_top"], need))
     return best, words
+
+
+# ---------------------------------------------------------------- the side camera's calibration (two-camera tracking)
+SIDE_ANCHOR_BAD_PX = 15.0  # chosen: a saved side fit whose grain points land further than this (median) is flagged;
+                           # a right fit lands within a few px (fake board 0.5 px), a wrong numbering 100+. No DOE: a check
+SIDE_ORDER_MARGIN = 2.0    # chosen: the best corner order must fit its anchors this many times better than the next
+                           # best, else the page says the order is not sure. No DOE: a check's margin
+FLOOR_CORNERS = ((0.0, 0.0), (CAM.BOARD_W_CM, 0.0), (CAM.BOARD_W_CM, CAM.BOARD_L_CM), (0.0, CAM.BOARD_L_CM))
+
+
+def ring_orders(corners):
+    """The 8 ways to number 4 corners round the outline (4 starts x 2 directions): numbering that stays a closed
+    outline, as e02_camera.order_corners_like."""
+    f = np.asarray(corners, float).reshape(4, 2)
+    c = f.mean(axis=0)
+    ring = f[np.argsort(np.arctan2(f[:, 1] - c[1], f[:, 0] - c[0]))]
+    out = []
+    for rev in (False, True):
+        r = ring[::-1] if rev else ring
+        for k in range(4):
+            out.append(np.roll(r, -k, axis=0))
+    return out
+
+
+def order_by_anchors(corners, floor_pts, px_pts, paired=True):
+    """Number the side picture's 4 board corners so they match the overhead's (1 = the floor's 0,0; 2 along x; 3; 4
+    along y), using anchors: floor points the overhead camera knows (plywood grain matched between the two pictures,
+    or the robots' lights) and where the side camera sees them. For each of the 8 numberings, the floor -> side
+    homography through the corners puts the anchors' floor points into the side picture; the numbering whose anchors
+    land nearest wins. paired: px_pts[i] is floor_pts[i] (grain); else the nearest matching (lights: which light is
+    which is not known). Returns (ordered corners, its median miss px, the next best's median miss px)."""
+    fl = np.asarray(floor_pts, float).reshape(-1, 2)
+    px = np.asarray(px_pts, float).reshape(-1, 2)
+    res = []
+    for cand in ring_orders(corners):
+        H = cv2.getPerspectiveTransform(np.float32(FLOOR_CORNERS), np.float32(cand))
+        q = cv2.perspectiveTransform(fl.reshape(-1, 1, 2).astype(np.float64), H).reshape(-1, 2)
+        if not np.all(np.isfinite(q)):
+            continue
+        if paired:
+            e = np.hypot(*(q - px).T)
+        else:
+            D = np.hypot(q[:, None, 0] - px[None, :, 0], q[:, None, 1] - px[None, :, 1])
+            try:
+                from scipy.optimize import linear_sum_assignment
+                ri, ci = linear_sum_assignment(D)
+            except Exception:
+                ri = np.arange(min(D.shape))
+                ci = np.argmin(D, axis=1)[:len(ri)]
+            e = D[ri, ci]
+        res.append((float(np.median(e)), cand))
+    res.sort(key=lambda r: r[0])
+    best = res[0]
+    nxt = res[1][0] if len(res) > 1 else float("inf")
+    return [[round(float(u), 1), round(float(v), 1)] for u, v in best[1]], best[0], nxt
+
+
+def side_lights(off, on, max_robots=3, group_px=14):
+    """The lights in a side picture: where on - off brightened (as analyse_flash, without the board's outline):
+    up to max_robots groups (a robot's two LEDs together), strongest first. [(u, v)]."""
+    d = cv2.subtract(on, off).astype(np.int16)
+    peak = int(d.max())
+    if peak < 25:
+        return []
+    lit = (d >= max(20, 0.35 * peak)).astype(np.uint8)
+    g = cv2.dilate(lit, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (group_px, group_px)))
+    n, lab, stats, cents = cv2.connectedComponentsWithStats(g)
+    found = []
+    for k in range(1, n):
+        sel = (lab == k) & (lit > 0)
+        if sel.sum() < 2:
+            continue
+        vs, us = np.nonzero(sel)
+        found.append((float(d[sel].sum()), float(us.mean()), float(vs.mean())))
+    found.sort(reverse=True)
+    return [(u, v) for _, u, v in found[:max_robots]]
+
+
+def fit_side(corners, image_size, path, grain=None):
+    """The side camera's calibration: from its 4 board corners (floorcal's rectangle, as the overhead) when given,
+    else from the grain points alone (e02_sidecam.fit_from_floor_points). Written to path; returns (CameraModel,
+    dict(method, err_cm, ...))."""
+    if corners is not None:
+        res = CAM.make_calibration([[float(u), float(v)] for u, v in corners], tuple(image_size), path, name="side")
+        return CAM.load_camera(path), dict(method="4 corners", err_cm=res["err_cm"], max_err_cm=res["max_err_cm"],
+                                           mirrored=bool(res.get("mirrored")))
+    if grain is None or len(grain) < 8:
+        raise ValueError("no corners and too few plywood-grain matches to fit the side camera")
+    import e02_sidecam as SD
+    P = np.asarray(grain, float)
+    # one median point per 12 cm floor cell (the fit's leave-one-out check is slow: ~1400 points took minutes,
+    # 8 cm cells 16 s here; chosen. No DOE: a speed trade, the anchor check reports the fit)
+    cells = {}
+    for q in P:
+        cells.setdefault((int(q[0] // 12), int(q[1] // 12)), []).append(q)
+    P = np.array([np.median(np.array(v), axis=0) for v in cells.values() if len(v) >= 2], float).reshape(-1, 4)
+    if len(P) < 8:
+        raise ValueError("the plywood-grain points cover too little of the board (%d cells)" % len(P))
+    cam = SD.fit_from_floor_points(P, tuple(image_size))
+    d = cam.to_dict()
+    d["name"] = "side"
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(d, f, indent=1)
+    return CAM.load_camera(path), dict(method="plywood grain (%d points, %d floor cells)" % (len(grain), len(P)), err_cm=cam.fit.get("loo_rms_cm"),
+                                       max_err_cm=cam.fit.get("loo_max_cm"), mirrored=False)
+
+
+def anchor_miss(cam, floor_pts, px_pts, z=0.0, paired=True):
+    """Median distance (px) between where cam puts the anchors' floor points and where the side picture has them."""
+    q = np.array([cam.project((x, y, z)) for x, y in np.asarray(floor_pts, float).reshape(-1, 2)], float)
+    px = np.asarray(px_pts, float).reshape(-1, 2)
+    if paired:
+        e = np.hypot(*(q - px).T)
+    else:
+        e = np.array([np.min(np.hypot(px[:, 0] - a, px[:, 1] - b)) for a, b in q])
+    e = e[np.isfinite(e)]
+    return float(np.median(e)) if len(e) else float("nan")
 
 
 def _kth_largest(a, k):
@@ -387,20 +508,53 @@ def _moved_overhead():
     return CAM.CameraModel.from_dict(d)
 
 
+def _fake_side():
+    """The simulated side camera (tools/sim/table_cam.SideCamera's geometry: it sees the whole board, as the moved
+    camera may now)."""
+    sys.path.insert(0, os.path.join(REPO, "tools", "sim"))
+    import table_cam as TC
+    import tempfile
+    sc = TC.SideCamera((0.0, 0.0, CAM.BOARD_W_CM, CAM.BOARD_L_CM))
+    p = os.path.join(tempfile.mkdtemp(), "side_true.json")
+    sc.true_model(p)
+    return CAM.load_camera(p)
+
+
+def _floor_grain(seed=3, ppc=4.0):
+    """The plywood's grain in floor coordinates (ppc pixels a cm), the same for every camera: the side calibration
+    matches it between the two pictures."""
+    rng = np.random.default_rng(seed)
+    W, L = int(CAM.BOARD_W_CM * ppc) + 1, int(CAM.BOARD_L_CM * ppc) + 1
+    g = cv2.GaussianBlur(rng.normal(0, 1, (L, W)).astype(np.float32), (0, 0), 2.0)
+    g = g / (g.std() + 1e-6) * 9.0
+    streak = cv2.GaussianBlur(rng.normal(0, 1, (L, W)).astype(np.float32), (0, 0), sigmaX=12.0, sigmaY=1.5)
+    return g + streak / (streak.std() + 1e-6) * 6.0, ppc
+
+
+def _warp_floor(tex, ppc, cam, size):
+    """The floor texture as camera cam sees it (z = 0), through the homography of a 9 x 9 grid of floor points."""
+    xs, ys = np.meshgrid(np.linspace(0, CAM.BOARD_W_CM, 9), np.linspace(0, CAM.BOARD_L_CM, 9))
+    fl = np.column_stack([xs.ravel(), ys.ravel()])
+    uv = np.array([cam.project((x, y, 0.0)) for x, y in fl], float)
+    H, _ = cv2.findHomography((fl * ppc).astype(np.float32), uv.astype(np.float32))
+    return cv2.warpPerspective(tex, H, size, flags=cv2.INTER_LINEAR, borderValue=0.0)
+
+
 class FakeSource:
     def __init__(self, world, which="overhead", fps=25.0, seed=1):
         self.world, self.which, self.fps = world, which, fps
         if which == "overhead":
             self.cam = _moved_overhead()
         else:
-            self.cam = CAM.load_camera(os.path.join(REPO, "tools", "experiment", "data", "side_floorcal_roam1.json"))
+            self.cam = _fake_side()
         W, H = self.cam.image_size
         self.rng = np.random.default_rng(seed)
         base = np.full((H, W), 45.0, np.float32)
-        yy, xx = np.mgrid[0:H, 0:W]
         board = np.zeros((H, W), np.uint8)
         cv2.fillPoly(board, [np.round(board_outline_px(self.cam)).astype(np.int32)], 1)
-        base[board > 0] = (165 + 10 * np.sin(xx / 23.0) * np.cos(yy / 31.0))[board > 0]
+        tex, ppc = _floor_grain()
+        grain = _warp_floor(tex, ppc, self.cam, (W, H))
+        base[board > 0] = (165 + grain)[board > 0]
         leds = np.zeros((H, W), np.float32)
         for x, y, th in FakeWorld.ROBOTS:
             ring = [(x + 4.75 * np.cos(a), y + 4.75 * np.sin(a), CAM.ROBOT_TOP_CM) for a in np.linspace(0, 2 * np.pi, 30)]
@@ -459,6 +613,9 @@ class Setup:
         self.check = None              # dict(err_cm, max_err_cm, text, jpg, path)
         self.saved = None
         self.side_corners = None
+        self.side_still, self.side_found, self.side_check, self.side_saved = None, "", None, None
+        self.light_anchors = None
+        self.grain = None
         self.doe = dict(state="idle", progress="", rows=[], rec=None, words="", lag=None)
         old, words = SC.overhead_calib(relative=False)
         self.old_path, self.old_words = old, words
@@ -544,6 +701,138 @@ class Setup:
             self.side_corners = dict(path=path, corners=corners)
         return self.state()
 
+    # ---- side camera calibration (two-camera tracking, 2026-10-27)
+    def overhead_cam(self):
+        """The overhead calibration to take floor points from: the one saved on this page, else the one in use."""
+        if self.saved:
+            return CAM.load_camera(self.saved["path"])
+        return self.old_cam
+
+    def side_anchors(self):
+        """Plywood-grain matches between the overhead's and the side's pictures (floor point from the overhead's
+        calibration, side pixel), and the flash check's lights. Returns (grain (n, 4) or None, words)."""
+        words = []
+        grain = None
+        ocam = self.overhead_cam()
+        if ocam is None or self.still is None or self.side_still is None:
+            return None, "no overhead calibration or picture to take floor points from"
+        try:
+            import e02_sidecam as SD
+            P, info = SD.grain_pairs(self.still, self.side_still, ocam)
+            grain = P
+            words.append("%d plywood-grain points matched between the two pictures" % len(P))
+        except Exception as e:
+            words.append("plywood grain not matched (%s)" % e)
+        if self.light_anchors and len(self.light_anchors["px"]) >= 2:
+            words.append("%d robots' lights from the flash check" % len(self.light_anchors["px"]))
+        if not self.saved:
+            words.append("(the overhead calibration used for them is %s: save part 1 first if the overhead camera "
+                         "moved)" % os.path.basename(self.old_path))
+        return grain, "; ".join(words)
+
+    def side_grab(self):
+        if not self.side:
+            raise RuntimeError("the side camera is not open")
+        f = None
+        for _ in range(40):
+            f, _ = self.side.latest()
+            if f is not None:
+                break
+            time.sleep(0.1)
+        if f is None:
+            raise RuntimeError("the side camera sends no pictures")
+        corners, why = CAM.find_board_corners(f)
+        with self.lock:
+            self.side_still = f
+            self.side_check = None
+        cv2.imwrite(os.path.join(self.out, "side.png"), f)
+        grain, aw = self.side_anchors()
+        with self.lock:
+            self.grain = grain
+        order_w = ""
+        if corners is not None:
+            corners, order_w = self.order_side(corners, grain)
+            found = "Found the board's 4 corners in the side picture by myself. " + order_w
+        elif grain is not None and len(grain) >= 8:
+            # no corners (not all 4 in the picture): start from where the grain says they are
+            H, _ = cv2.findHomography(grain[:, :2].astype(np.float32), grain[:, 2:4].astype(np.float32), cv2.RANSAC, 4.0)
+            q = cv2.perspectiveTransform(np.float64(FLOOR_CORNERS).reshape(-1, 1, 2), H).reshape(-1, 2)
+            W, Hh = f.shape[1], f.shape[0]
+            inside = all(0 <= u < W and 0 <= v < Hh for u, v in q)
+            corners = [[round(float(u), 1), round(float(v), 1)] for u, v in q] if inside else None
+            found = ("Could not find the board's 4 corners by myself (%s). %s" % (
+                why, "The red points are where the plywood grain puts them: drag each onto its corner." if inside else
+                "Not all 4 corners are in the side picture: the calibration is fitted from the plywood grain alone "
+                "(Check / Save without corners)."))
+        else:
+            found = "Could not find the board's 4 corners (%s), and no plywood grain matched: click the 4 corners in " \
+                    "order (1 = the 0,0 corner, as the overhead's)." % why
+        with self.lock:
+            self.side_corners = None if corners is None else dict(corners=corners, path=None)
+            self.side_found = found + " Anchors: " + aw + "."
+        return self.state()
+
+    def order_side(self, corners, grain):
+        """(ordered corners, words): numbered like the overhead's by the anchors (lights first: they are the robots,
+        whose numbers are what matters; then the grain), else as found in the picture with a warning."""
+        tries = []
+        la = self.light_anchors
+        if la and len(la["px"]) >= 2 and len(la["floor"]) >= 2:
+            tries.append(("the robots' lights", la["floor"], la["px"], False))
+        if grain is not None and len(grain) >= 8:
+            tries.append(("the plywood grain", grain[:, :2], grain[:, 2:4], True))
+        for name, fl, px, paired in tries:
+            ordered, miss, nxt = order_by_anchors(corners, fl, px, paired)
+            if nxt >= SIDE_ORDER_MARGIN * max(miss, 1.0):
+                return ordered, ("Numbered like the overhead's by %s (they land %.0f px from where they should with "
+                                 "this numbering, %.0f px with the next best)." % (name, miss, nxt))
+        return corners, ("<b>The numbering could not be checked against the overhead</b> (no anchors, or none clear): "
+                         "it follows the picture. Check that corner 1 is the board's 0,0 corner (the overhead's corner 1) "
+                         "and move the numbering round if not.")
+
+    def side_fit(self, corners, save=False):
+        if self.side_still is None:
+            raise RuntimeError("no side picture yet")
+        size = (self.side_still.shape[1], self.side_still.shape[0])
+        path = SC.new_side_calib_path() if save else os.path.join(self.out, "candidate_side_floorcal.json")
+        cam, info = fit_side(corners, size, path, grain=None if self.grain is None else self.grain)
+        checks = []
+        bad = False
+        if self.grain is not None and len(self.grain) >= 8:
+            m = anchor_miss(cam, self.grain[:, :2], self.grain[:, 2:4])
+            checks.append("plywood grain %.1f px" % m)
+            bad = bad or m > SIDE_ANCHOR_BAD_PX
+        if self.light_anchors and self.light_anchors["px"]:
+            checks.append("lights %.1f px" % anchor_miss(cam, self.light_anchors["floor"], self.light_anchors["px"],
+                                                       CAM.ROBOT_TOP_CM, paired=False))
+        info["anchor_check"] = "; ".join(checks)
+        info["warning"] = ("The overhead's points land far from where the side picture has them: the numbering (or a "
+                           "corner) does not match the overhead's. Move the numbering round until this is a few px."
+                           if bad else "")
+        pic = draw_grid(self.side_still, cam, corners)
+        cv2.imwrite(os.path.join(self.out, "side_check_saved.png" if save else "side_check.png"), pic)
+        with self.lock:
+            self.jpgs["side_check"] = _jpg(pic)
+            self.side_check = info
+        if save:
+            with open(path) as f:
+                d = json.load(f)
+            lag = (self.doe.get("lag") or {}).get("median")
+            if lag is not None:
+                d["lag_s"] = lag
+            d["offset_cm"] = [0.0, 0.0]
+            d["camera_setup"] = dict(made=time.strftime("%Y-%m-%d %H:%M:%S"), corners_px=corners, method=info["method"],
+                                     overhead=(self.saved or {}).get("path") or self.old_path, anchors=info["anchor_check"],
+                                     lag_from="flash check" if lag is not None else "none measured (tracker default)",
+                                     page="tools/pi/camera_setup.py", fake=self.fake, logs=self.out)
+            with open(path, "w") as f:
+                json.dump(d, f, indent=1)
+            SC.save_side_pointer(path)
+            shutil.copy(path, os.path.join(self.out, os.path.basename(path)))
+            with self.lock:
+                self.side_saved = dict(path=path, pointer=os.path.join(SC.conf_dir(), "side_calib"), lag_s=lag)
+        return self.state()
+
     # ---- flash check (DOE)
     def start_flash(self):
         with self.lock:
@@ -611,6 +900,19 @@ class Setup:
                         ts, _ = onset([t for t, _ in sd], [g for _, g in sd], sref, t_send)
                 if to is not None and ts is not None:
                     lags.append(ts - to)
+                if sd and i == 0 and res.get("robots"):
+                    # the lights as anchors for the side camera's corner order: where the overhead has them on the
+                    # floor (its calibration in use, at the robots' top height) and where the side picture has them
+                    soffs = [g for t, g in sd if t < t_send - 0.05]
+                    sons = [g for t, g in sd if t_send + 0.35 <= t]
+                    if soffs and sons:
+                        spx = side_lights(np.median(np.stack(soffs), axis=0).astype(np.uint8),
+                                          np.median(np.stack(sons), axis=0).astype(np.uint8))
+                        ocam = self.overhead_cam()
+                        fl = [ocam.to_floor(r["u"], r["v"], CAM.ROBOT_TOP_CM) for r in res["robots"]]
+                        with self.lock:
+                            self.light_anchors = dict(floor=[[float(a), float(b)] for a, b in fl],
+                                                      px=[[float(a), float(b)] for a, b in spx])
                 key = "doe%d" % i
                 pic = flash_picture(off, on, res)
                 cv2.imwrite(os.path.join(self.out, "flash_%02d_exposure_%g.png" % (i, v)), pic)
@@ -662,7 +964,11 @@ class Setup:
                 check=self.check, saved=self.saved, old=dict(path=self.old_path, words=self.old_words),
                 height_cm=LENS_HEIGHT_CM, grid_cm=GRID_CM,
                 fps=dict(overhead=round(self.over.fps(), 1), side=None if not self.side else round(self.side.fps(), 1)),
-                side=bool(self.side), side_corners=self.side_corners,
+                side=bool(self.side), side_corners=self.side_corners, side_found=self.side_found,
+                side_check=self.side_check, side_saved=self.side_saved, side_calib=SC.side_calib()[1],
+                light_anchors=self.light_anchors,
+                settle={k: getattr(getattr(g, "src", None), "settle", None) for k, g in (("overhead", self.over),
+                                                                                       ("side", self.side)) if g},
                 doe=dict(state=self.doe["state"], progress=self.doe["progress"], words=self.doe.get("words", ""),
                          rec=self.doe.get("rec"), lag=self.doe.get("lag"), base=self.doe.get("base"),
                          rows=[dict(exposure=r["exposure"], fraction=r["fraction"], jpg=r["jpg"], res=r["result"],
@@ -740,6 +1046,10 @@ def make_handler(S):
                 with S.lock:
                     st = S.still
                 return self._send(200, _jpg(st), "image/jpeg") if st is not None else self._send(404, b"", "text/plain")
+            if p == "/img/side_still.jpg":
+                with S.lock:
+                    st = S.side_still
+                return self._send(200, _jpg(st), "image/jpeg") if st is not None else self._send(404, b"", "text/plain")
             if p in ("/img/side.jpg", "/img/overhead_live.jpg"):
                 g = S.side if p == "/img/side.jpg" else S.over
                 f, _ = g.latest() if g else (None, 0)
@@ -766,6 +1076,10 @@ def make_handler(S):
                     return self._send(200, S.fit_check(body["corners"], h, save=p == "/api/save"))
                 if p == "/api/side_corners":
                     return self._send(200, S.save_side(body["corners"]))
+                if p == "/api/side_grab":
+                    return self._send(200, S.side_grab())
+                if p in ("/api/side_check", "/api/side_save"):
+                    return self._send(200, S.side_fit(body.get("corners"), save=p == "/api/side_save"))
                 if p == "/api/flash":
                     return self._send(200, S.start_flash())
                 if p == "/api/exposure":
@@ -828,6 +1142,12 @@ def main(argv=None):
     except RuntimeError as e:
         print("Stopped: %s" % e)
         return 1
+    if side:
+        try:
+            S.side_grab()
+            print("Side camera: " + S.side_found)
+        except Exception as e:
+            print("Side camera picture: %s" % e)
     srv = ThreadingHTTPServer(("0.0.0.0", a.port), make_handler(S))
     print("Camera setup page: http://100.122.222.75:%d (Tailscale) or http://<the Pi>:%d. Logs: %s" % (a.port, a.port, out))
     print("Stop it with Ctrl+C (the overhead camera goes back to automatic exposure).", flush=True)

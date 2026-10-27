@@ -207,3 +207,56 @@ def test_page_api_dry_run(conf, tmp_path):
     finally:
         srv.shutdown()
         over.stopping = True
+
+
+# ------------------------------------------------------------------ the side camera's calibration (2026-10-27)
+def _true_side_corners():
+    cam = CS._fake_side()
+    return cam, CS.board_corners_px(cam)
+
+
+def test_side_corner_numbering_from_the_grain_any_start():
+    cam, truth = _true_side_corners()
+    rng = np.random.default_rng(1)
+    fl = np.column_stack([rng.uniform(5, 117, 60), rng.uniform(5, 117, 60)])
+    px = np.array([cam.project((x, y, 0.0)) for x, y in fl])
+    for k in range(4):                                       # handed over in any rotation / direction
+        for flip in (False, True):
+            given = np.roll(truth[::-1] if flip else truth, k, axis=0)
+            got, miss, nxt = CS.order_by_anchors(given, fl, px, paired=True)
+            assert np.allclose(got, truth, atol=0.11) and miss < 3 and nxt > 30
+
+
+def test_side_corner_numbering_from_three_lights_unpaired():
+    """The flash check's lights: three robots, which is which unknown, seen at their tops' height."""
+    import e02_camera as CAM
+    cam, truth = _true_side_corners()
+    fl = [(30.0, 40.0), (75.0, 90.0), (95.0, 25.0)]
+    px = [cam.project((x, y, CAM.ROBOT_TOP_CM)) for x, y in fl][::-1]
+    got, miss, nxt = CS.order_by_anchors(np.roll(truth, 2, axis=0), fl, px, paired=False)
+    assert np.allclose(got, truth, atol=0.11) and nxt > CS.SIDE_ORDER_MARGIN * max(miss, 1.0)
+
+
+def test_side_calibration_on_the_fake_board(conf, tmp_path):
+    w = CS.FakeWorld()
+    over = CS.Grabber("overhead", CS.FakeSource(w, "overhead", 25.0))
+    side = CS.Grabber("side", CS.FakeSource(w, "side", 15.0, seed=2))
+    over.start()
+    side.start()
+    S = CS.Setup(over, side, w, str(tmp_path / "logs"), fake=True)
+    S.grab()
+    S.fit_check(S.corners, 262, save=True)
+    st = S.side_grab()
+    assert "Numbered like the overhead's" in st["side_found"]
+    assert np.allclose(st["side_corners"]["corners"], CS.board_corners_px(side.src.cam), atol=2.0)
+    st = S.side_fit(st["side_corners"]["corners"], save=True)
+    path, words = SC.side_calib()
+    assert path == st["side_saved"]["path"] and os.path.exists(path)
+    import e02_camera as CAM
+    cam = CAM.load_camera(path)
+    for x, y in ((10, 10), (61, 61), (110, 100)):                  # the fitted side camera against the true one
+        a, b = cam.project((x, y, 0.0)), side.src.cam.project((x, y, 0.0))
+        assert np.hypot(a[0] - b[0], a[1] - b[1]) < 3.0
+    d = json.load(open(path))
+    assert d["offset_cm"] == [0.0, 0.0] and "camera_setup" in d
+    over.stopping = side.stopping = True
