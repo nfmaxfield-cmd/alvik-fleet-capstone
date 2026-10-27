@@ -356,3 +356,130 @@ def test_brick_watch_ignores_hands_and_moving_robots_and_confirms_a_still_brick(
     covered = G2.points_in_polygon(np2.array(brick), np2.array(ob["points"]))
     d_out = [float(G2.points_to_polygon(np2.array([p]), np2.array(ob["points"]))[0]) for p, c in zip(brick, covered) if not c]
     assert covered.all(), d_out                            # the brick's footprint is inside the reported outline
+
+
+# ---------------------------------------------------------------------------- item 6: run modes
+
+import missions as MS   # noqa: E402
+
+SCHOOL = os.path.join(FLEET, "examples", "school_map.json")
+
+
+def test_instruction_lists():
+    spots = {"A": [10, 10], "B": [20, 20], "C": [30, 30]}
+    v = MS.instructions("go to A · wait 5 s · go to C · repeat 3x", spots)
+    assert v == [{"spot": "A"}, {"wait_s": 5.0}, {"spot": "C"}] * 3
+    assert MS.instructions("go to b; wait 2", spots) == [{"spot": "B"}, {"wait_s": 2.0}]
+    with pytest.raises(ValueError):
+        MS.instructions("go to Z", spots)
+    with pytest.raises(ValueError):
+        MS.instructions("dance", spots)
+
+
+def test_mow_lanes_cover_the_table_and_slide_round_a_brick():
+    m = FM.load(SCHOOL)
+    v, notes = MS.mow(m)
+    ys = sorted({p["goto"][1] for p in v})
+    assert ys[0] == pytest.approx(MS.least_open_room(m) + 1.0, abs=0.1) and all(b - a <= 12.0 + 1e-6 for a, b in zip(ys, ys[1:]))
+    assert any("not 10" in n for n in notes)              # the inset raised to the planner's room from open sides
+    # a brick on a lane end: the end slides along its lane, the plan still covers every lane
+    m2 = dict(m, robots=[r for r in m["robots"] if r["name"] == "Center"],
+              tasks={"Center": {"visit": v, "park": False}})
+    end = v[1]["goto"]
+    m2["obstacles"] = [{"id": "b", "shape": "circle", "center": [end[0], end[1]], "radius": 5.0, "source": "camera"}]
+    plan = P.make_plan(m2)
+    assert plan["summary"]["min_static_clearance_cm"] >= -1e-6
+    lane_ys = {round(st["to"][1], 1) for st in plan["robots"]["Center"]["steps"] if st["type"] == "drive"}
+    for y in ys:
+        assert any(abs(y - ly) < 0.2 for ly in lane_ys), y
+
+
+def test_chicken_swerves_at_15_and_never_under_8():
+    m = FM.load(SCHOOL)
+    m = dict(m, robots=[{"name": "Left", "start": [20, 38, 0]}, {"name": "Center", "start": [140, 62, 0]},
+                        {"name": "Right", "start": [132, 38, 180]}])
+    ch = MS.chicken(m)
+    sw = [v["goto"] for v in ch["Left"] if v.get("label", "").endswith("swerve")]
+    swr = [v["goto"] for v in ch["Right"] if v.get("label", "").endswith("swerve")]
+    front_gap = math.dist(sw[0], swr[0]) - 2 * 4.75
+    assert front_gap == pytest.approx(15.0, abs=0.01) and len(sw) == 2
+    m["tasks"] = {k: {"visit": v, "park": True} for k, v in ch.items()}
+    m["mission"] = {"planner": {"separation_cm": MS.SETTINGS["chicken_min_cm"]}}
+    plan = P.make_plan(m)
+    assert plan["summary"]["min_separation_cm"] >= 8.0 - 1e-6
+
+
+def test_show_keeps_its_beats():
+    m = FM.load(SCHOOL)
+    sh, end, figs = MS.show(m)
+    mm = dict(m, tasks={k: {"visit": v, "park": True} for k, v in sh.items()},
+              mission={"planner": {"separation_cm": 8.0}})
+    plan = P.make_plan(mm)
+    sm = MS.summary(mm, plan)
+    assert sm["beats"] >= 30 and sm["beat_late_median_s"] <= 0.1 and sm["beats_late_over_0_5s"] <= 4
+    assert sm["closest_cm"] >= 8.0 and [f["name"] for f in figs][0] == "Line up"
+
+
+def test_mondays_routine_plans():
+    m = FM.load(SCHOOL)
+    mm = MS.monday(m)
+    assert mm["mission"]["planner"]["priority_first"] == "Center"
+    plan = P.make_plan(mm, t_limit_s=40)
+    assert plan["priority_order"][0] == "Center"
+    assert plan["summary"]["min_separation_cm"] >= 8.0 - 1e-6
+    labels = {st.get("label") for r in plan["robots"].values() for st in r["steps"]}
+    for lab in ("chicken 1 swerve", "chicken 2 swerve", "roam", "follow the leader", "mow lane 1 start", "split"):
+        assert lab in labels, lab
+    for r in mm["robots"]:
+        last = plan["robots"][r["name"]]["steps"][-1]
+        assert last["type"] == "park" and last["to"][:2] == pytest.approx(r["park"][:2], abs=0.05)
+    # Left and Right park only once Center has mowed its last lane
+    t_last_lane = max(st["t_end"] for st in plan["robots"]["Center"]["steps"] if "mow lane" in (st.get("label") or ""))
+    for n in ("Left", "Right"):
+        park_steps = [st for st in plan["robots"][n]["steps"] if st["phase"] == "park" or st["type"] == "park"]
+        assert park_steps[-1]["t_start"] >= t_last_lane - 1e-6
+
+
+# ---------------------------------------------------------------------------- Phase 2: Mission Control
+
+def test_mission_control_api(tmp_path):
+    import threading
+    import urllib.request
+    import urllib.error
+    import json as J
+    import mission_control as MC
+    s = MC.Session(str(tmp_path / "mc"), SCHOOL)
+    srv, url = MC.serve(s, port=0)
+    th = threading.Thread(target=srv.serve_forever, daemon=True)
+    th.start()
+    try:
+        def call(path, body=None, host="127.0.0.1"):
+            req = urllib.request.Request(url.rstrip("/") + path, data=None if body is None else J.dumps(body).encode(),
+                                         headers={"Content-Type": "application/json", "Host": host})
+            try:
+                with urllib.request.urlopen(req) as r:
+                    return r.status, J.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, J.loads(e.read())
+        page = urllib.request.urlopen(url).read().decode()
+        assert "Mission Control" in page and "Details" in page
+        c, st = call("/api/state")
+        assert c == 200 and st["map"]["floor"]["x_max"] == 152
+        # every setting group is there to see and edit (Nick: nothing locked)
+        assert set(st["defaults"]) == {"planner", "mission", "run", "warmup"}
+        assert st["defaults"]["mission"]["chicken_swerve_cm"] == 15.0 and st["defaults"]["mission"]["chicken_min_cm"] == 8.0
+        c, st = call("/api/settings", {"mission": {"chicken_rounds": 1}})
+        assert c == 200 and st["settings"]["mission"]["chicken_rounds"] == 1
+        c, st = call("/api/map", {"spots": {"A": [30, 40], "B": [120, 40]}})
+        assert c == 200 and set(st["map"]["spots"]) == {"A", "B"}
+        c, r = call("/api/mission", {"mode": "spots", "lists": {"Center": "go to A, wait 1 s, go to B"}})
+        assert c == 200 and r["preview"]["makespan_s"] > 0 and "Center" in r["preview"]["frames"]
+        assert r["preview"]["summary"]["closest_cm"] >= 8.0
+        c, e = call("/api/mission", {"mode": "spots", "lists": {"Center": "go to Z"}})
+        assert c == 400 and "no spot Z" in e["error"]
+        c, _ = call("/api/map", {"spots": {}}, host="evil.example")
+        assert c == 403
+        c, e = call("/api/run/pause", {"on": True})
+        assert c == 400                                   # nothing running
+    finally:
+        srv.shutdown()

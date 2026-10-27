@@ -126,7 +126,7 @@ def normalize(m):
     f = out["floor"]
     if not (f["x_max"] > f["x_min"] and f["y_max"] > f["y_min"]):
         raise MapError("floor: x_max must exceed x_min and y_max exceed y_min")
-    for k in ("notes",):
+    for k in ("notes", "mission"):          # mission: missions.py's name, settings and planner settings (passed on)
         if k in m:
             out[k] = m[k]
 
@@ -325,7 +325,7 @@ def _norm_tasks(t, board_names, rn, spots=None):
             visit.append({"goto": list(spots[nm]), "spot": nm})
         elif isinstance(it, dict) and "goto" in it:
             g = {"goto": _pt(it["goto"], "robot %s goto" % rn)}
-            for k in ("spot", "label"):
+            for k in ("spot", "label", "lane", "end"):
                 if k in it:
                     g[k] = it[k]
             visit.append(g)
@@ -334,6 +334,9 @@ def _norm_tasks(t, board_names, rn, spots=None):
             if w < 0:
                 raise MapError("robot %s: wait_s must be >= 0" % rn)
             visit.append({"wait_s": w, **({"label": str(it["label"])} if it.get("label") else {})})
+        elif isinstance(it, dict) and "until_s" in it:
+            # stand still until this time (s from the mission's start): a show's beat targets (missions.py)
+            visit.append({"until_s": float(it["until_s"]), **({"label": str(it["label"])} if it.get("label") else {})})
         elif isinstance(it, dict) and "probe" in it:
             # a slow straight creep (the warm-up's side feel): from (x0, y0) towards (x1, y1), which may be past the
             # table's edge; it ends at the first edge-guard trip or front-sensor stop (tools/fleet/warmup.py)

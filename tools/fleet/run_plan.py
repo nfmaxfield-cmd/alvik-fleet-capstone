@@ -481,7 +481,23 @@ class Coordinator:
                 self.on_failed(b, i, st["info"], (x, y, th), float(v[14]) if v[14] else 0.0)
 
     # -- outgoing -------------------------------------------------------------
+    def pause(self, on):
+        """Pause (Mission Control, or SIGUSR1): every robot halts where it is and no step is released; resume
+        (SIGUSR2): a re-plan from where they stand, then on as before."""
+        if on and not getattr(self, "paused", False):
+            self.paused = True
+            self.halt_all()
+            self.say("paused: every robot halted where it is")
+            self.log("pause")
+        elif not on and getattr(self, "paused", False):
+            self.paused = False
+            self.say("resumed: re-planning from where they stand")
+            self.log("resume")
+            self.request_replan("resume after a pause")
+
     def release(self):
+        if getattr(self, "paused", False):
+            return
         t = now()
         for n in self.names:
             b = self.bots[n]
@@ -675,7 +691,8 @@ class Coordinator:
         if improving:
             over["replan_first_safe"] = False     # the background search for a shorter plan: the full search
         try:
-            dec = P.obstacle_decide(self.m, self.plan, states, [ob] if ob else [], over=over)
+            dec = P.obstacle_decide(self.m, self.plan, states, [ob] if ob else [], over=over,
+                                    t_now=t_event - self.plan_start)
         except Exception as e:      # noqa: BLE001  (never leave robots driving on a planner bug)
             self.say("re-plan failed (%s): stopping everyone" % e)
             self.halt_all()
@@ -1013,6 +1030,10 @@ class Coordinator:
                 break
             self.finish_replan()
             self.tracker_watch()
+            pr = getattr(self, "pause_req", None)
+            if pr is not None:
+                self.pause_req = None
+                self.pause(pr)
             if self.pending_replan and now() >= self.pending_replan[1] and self.planning is None:
                 self.pending_replan = None
                 self.handle_obstacle(None)
@@ -1337,6 +1358,13 @@ def main(argv=None):
     coord.first_makespan = plan["summary"]["makespan_s"]
     coord.started = now()
     code = 0
+    try:
+        import signal
+        if hasattr(signal, "SIGUSR1"):        # Mission Control's Pause / Resume
+            signal.signal(signal.SIGUSR1, lambda *_: setattr(coord, "pause_req", True))
+            signal.signal(signal.SIGUSR2, lambda *_: setattr(coord, "pause_req", False))
+    except ValueError:
+        pass                                  # not the main thread (tests)
     try:
         start_robots(coord, link, args, source)
         coord.started = now()

@@ -321,6 +321,21 @@ same.
 | Carry-on horizon while the first safe re-plan is made (planner.py replan_first_budget_s) | 0.5 s | `bench_replan.py` and dry runs with brick drops at 0.25 / 0.5 / 1.0 s: robots held, seconds lost to holds, closest approach | Sim | open |
 | Extra room from an open (drop) side (fleetmap.py OPEN_MARGIN_CM) | 3 cm | The school table's warm-up and a run at 2 / 3 / 5 cm: edge-guard trips per hour against time lost | Board (school) | open |
 | The robots' own four-sided border (run_plan.py BORDER_CM) | 6 cm | Dry runs with camera offsets of 2 / 5 / 8 cm, then the school table: border stops per hour against edge-guard trips at 5 / 6 / 8 cm | Sim, then Board | open |
+| Warm-up feels per side length (warmup.py PROBE_SPACING_CM) | one per 40 cm | The school warm-up at 20 / 40 / 60 cm: barrier stretches found against warm-up minutes | Board (school) | open |
+| Front-sensor stop near the marked line = barrier (warmup.py BARRIER_NEAR_CM) | within 6 cm | From the school warm-up's contacts: offsets of barrier stops against the marked line | Board (school) | open |
+| Wheel / gyro scale flagged (warmup.py SCALE_FLAG) | 3 % | The school warm-up's spread of camera / stored ratios over 3 robots | Board (school) | open |
+| Feel creep speed (planner.py probe_cms) | 3 cm/s | 2 / 3 / 5 cm/s against the stop distance past the edge on the school table | Board (school) | open |
+| Brick watch rate and confirmation (brickwatch.py CHECK_HZ, CONFIRM_CHECKS) | 4 Hz, 3 checks | Recorded drops at 2 / 4 / 8 Hz x 2 / 3 / 5 checks: time to confirm against false objects per hour | Sim, then Logs (video) | open |
+| Robot mask round each robot in the brick watch (brickwatch.py ROBOT_MASK_SCALE) | 1.6 robot sizes | Drop dry runs: false objects at robots' trailing edges at 1.3 / 1.6 / 2.0 | Sim | open |
+| Monday: Left and Right's routine ends before Center (missions.py LR_SLACK_S) | 30 s | 15 / 30 / 45 s: plans found, Left / Right lateness and idle time at the end | Sim (planner only) | open |
+| Monday: the mower's band widened in time (missions.py BAND_PAD_S) | 5 s | 0 / 5 / 15 s: plans found and their waits | Sim (planner only) | open |
+| Monday: Left and Right play this far from the mower (missions.py MOWER_CLEAR_CM) | 30 cm | 20 / 30 / 40 cm against waits for the mower in the plan and the dry run | Sim | open |
+
+Chosen with no DOE (school engine, items 4-6): warm-up CORNER_IN_CM 13 and PROBE_START_CM 14 (planner-safe, in view),
+CORNER_PAUSE_S 2, OBJECT_CM 8 (Nick edits each zone), WHEEL_MIN_CM 10 (which drives the check uses), run_plan
+TRACK_LOST_S 1 (picks frames for a person); brick watch STILL_CM 3 and GROW_CM 1 (geometry / a hand moves far more);
+missions chicken_run_cm 45, chicken_aside_cm 20, CHICKEN_MIN_RUN_CM 10, roam_hop_cm 30 (looks), park_gap_cm 24 and
+FOLLOW_STEP_CM 25 (geometry: two turn circles + the separation).
 
 Chosen with no DOE: border.h's 5 cm half-width beside a partly open stretch (the Alvik's 4.75 cm half width: geometry);
 the WiFi join time split between two networks at power-on (the background retry keeps alternating, so it only sets how

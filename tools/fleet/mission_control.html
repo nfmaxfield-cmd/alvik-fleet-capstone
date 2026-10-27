@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mission Control</title>
+<style>
+:root{--ground:#F6F7F9;--panel:#FFFFFF;--border:#E4E7EC;--ink:#101828;--muted:#5B6474;--accent:#2952CC;--accent-ink:#1E3E9E;
+--green:#12805C;--green-bg:#E7F5EE;--warn:#B54708;--warn-bg:#FFFAEB;--warn-border:#FEC84B;--red:#B42318;
+--left:#2952CC;--center:#C2410C;--right:#7A3EC8;--table:#FBFBFC;--line:#D0D5DD}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);font-family:Inter,system-ui,-apple-system,"Segoe UI",Arial,sans-serif;color:var(--ink);font-size:14px}
+header{height:64px;background:var(--panel);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:24px;padding:0 32px;flex-wrap:wrap}
+.logo{display:flex;align-items:center;gap:10px}.logo b{width:28px;height:28px;border-radius:8px;background:var(--ink);color:#fff;font-size:13px;display:flex;align-items:center;justify-content:center}
+.pill{font-size:13px;color:var(--muted);border:1px solid var(--border);border-radius:999px;padding:4px 12px}
+.status{font-size:13px;display:flex;align-items:center;gap:6px;color:var(--green)}.status i{width:8px;height:8px;border-radius:50%;background:currentColor}
+.status.warn{color:var(--warn)}.status.idle{color:var(--muted)}
+.grow{flex:1}
+label.sw{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);cursor:pointer}
+nav.steps{display:flex;gap:8px;padding:16px 32px;flex-wrap:wrap;font-size:13px}
+nav.steps button{font:inherit;padding:6px 12px;border-radius:999px;color:var(--muted);background:var(--panel);border:1px solid var(--border);cursor:pointer}
+nav.steps button.done{color:var(--green);background:var(--green-bg);border-color:var(--green-bg)}
+nav.steps button.on{color:#fff;background:var(--accent);border-color:var(--accent);font-weight:600}
+main{display:flex;flex-wrap:wrap;gap:24px;padding:0 32px 32px}
+section.left{flex:999 1 640px;min-width:0;display:flex;flex-direction:column;gap:16px}
+aside{flex:1 1 340px;max-width:420px;display:flex;flex-direction:column;gap:12px}
+h1{margin:0;font-size:24px;font-weight:600}h2{margin:0;font-size:18px;font-weight:600}h3{margin:0 0 6px;font-size:15px;font-weight:600}
+.sub{margin:6px 0 0;color:var(--muted)}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px}
+.card.sel{border:2px solid var(--accent)}
+.card.warnc{background:var(--warn-bg);border-color:var(--warn-border)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.between{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+button.b{font:500 14px inherit;font-family:inherit;padding:10px 16px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--ink);cursor:pointer}
+button.p{font:600 15px inherit;font-family:inherit;padding:12px 18px;border-radius:10px;border:none;background:var(--accent);color:#fff;cursor:pointer}
+button.p:disabled,button.b:disabled{opacity:.5;cursor:default}
+button.stop{background:var(--red)}
+button.dash{border-style:dashed;background:transparent}
+input,select,textarea{font:14px inherit;font-family:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink)}
+input.n{width:84px}textarea{width:100%;min-height:52px}
+.lbl{font-size:13px;color:var(--muted)}
+.muted{color:var(--muted)}.small{font-size:12.5px}
+table.kv{border-collapse:collapse;width:100%;font-size:13px}table.kv td{padding:5px 4px;border-bottom:1px solid #F0F1F3;vertical-align:middle}
+table.kv td:first-child{color:var(--muted);word-break:break-word}table.kv input,table.kv select{width:100%;padding:5px 8px}
+details.more{border-top:1px solid var(--border);padding-top:10px}details.more summary{cursor:pointer;font-weight:500}
+.eng{display:none}body.details .eng{display:block}
+svg.table{width:100%;height:auto;display:block;background:#fff;border-radius:8px}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:middle}
+.err{color:var(--red);font-size:13px;min-height:18px}
+.log{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;max-height:260px;overflow:auto;white-space:pre-wrap;color:var(--ink)}
+.kpis{display:flex;gap:12px;flex-wrap:wrap}.kpi{background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 14px;min-width:130px}
+.kpi b{display:block;font-size:20px}.kpi span{font-size:12.5px;color:var(--muted)}
+.modes{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
+.modes button{text-align:left;font:inherit;padding:12px;border-radius:10px;border:1px solid var(--border);background:#fff;cursor:pointer}
+.modes button.on{border:2px solid var(--accent);padding:11px}
+.modes button b{display:block;margin-bottom:2px}
+.frames li{margin:4px 0}
+.hidden{display:none !important}
+@media (max-width:720px){header,nav.steps,main{padding-left:16px;padding-right:16px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"><b>M</b><span style="font-weight:600;font-size:16px">Mission Control</span></div>
+  <span class="pill" id="wsname">School table</span>
+  <div class="grow"></div>
+  <span class="status idle" id="status"><i></i><span>Ready</span></span>
+  <label class="sw"><input type="checkbox" id="details"> Details</label>
+</header>
+<nav class="steps" aria-label="Steps" id="steps"></nav>
+<main id="main"></main>
+<script>
+"use strict";
+const STEPS = ["Connect", "Workspace", "Warm-up", "Mission", "Run", "Review"];
+const COL = {Left: "#2952CC", Center: "#C2410C", Right: "#7A3EC8"};
+const SIDES = ["x_min", "x_max", "y_min", "y_max"];
+const SIDE_WORDS = {x_min: "Left side", x_max: "Right side", y_min: "Bottom side (audience)", y_max: "Top side"};
+let S = null, screen = 0, done = new Set(), mode = "monday", conn = "sim", spotMode = null, zoneStart = null;
+let playT = 0, playing = false, timer = null, pollT = null;
+
+function $(id) { return document.getElementById(id); }
+function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c])); }
+function fmt(t) { t = Math.max(0, Math.round(t)); return Math.floor(t / 60) + ":" + String(t % 60).padStart(2, "0"); }
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+async function load() { S = await api("/api/state"); render(); }
+
+// ---------------------------------------------------------------- the table picture
+function tableSVG(opt) {
+  const f = opt.floor || S.map.floor, pad = 8, W = 760;
+  const x0 = f.x_min - pad, x1 = f.x_max + pad, y0 = f.y_min - pad, y1 = f.y_max + pad;
+  const k = W / (x1 - x0), H = (y1 - y0) * k;
+  const X = x => ((x - x0) * k).toFixed(1), Y = y => ((y1 - y) * k).toFixed(1);
+  let o = `<svg class="table" viewBox="0 0 ${W} ${H.toFixed(0)}" role="img" aria-label="${esc(opt.label || "The table seen from above")}" ${opt.id ? `id="${opt.id}"` : ""}>`;
+  o += `<rect x="${X(f.x_min)}" y="${Y(f.y_max)}" width="${((f.x_max - f.x_min) * k).toFixed(1)}" height="${((f.y_max - f.y_min) * k).toFixed(1)}" fill="var(--table)" stroke="#98A2B3" stroke-dasharray="6 5"/>`;
+  const sides = (opt.sides !== undefined ? opt.sides : S.map.sides) || {};
+  for (const sd of SIDES) {
+    const v = sides[sd]; if (!v) continue;
+    const lo = sd[0] === "x" ? f.y_min : f.x_min, hi = sd[0] === "x" ? f.y_max : f.x_max;
+    const bar = v.kind === "barrier" ? [[lo, hi]] : v.kind === "partial" ? (v.barrier || []) : [];
+    const opn = []; let a = lo;
+    for (const [b0, b1] of (v.kind === "barrier" ? [[lo, hi]] : bar)) { if (b0 > a) opn.push([a, b0]); a = Math.max(a, b1); }
+    if (a < hi && v.kind !== "barrier") opn.push([a, hi]);
+    const seg = (s0, s1, st) => { const line = f[sd]; const p = sd[0] === "x" ? [X(line), Y(s0), X(line), Y(s1)] : [X(s0), Y(line), X(s1), Y(line)];
+      o += `<line x1="${p[0]}" y1="${p[1]}" x2="${p[2]}" y2="${p[3]}" ${st} stroke-linecap="round"/>`; };
+    bar.forEach(s => seg(s[0], s[1], 'stroke="#101828" stroke-width="4"'));
+    opn.forEach(s => seg(s[0], s[1], v.kind === "unknown" ? 'stroke="#98A2B3" stroke-width="3" stroke-dasharray="2 5"' : 'stroke="#D92D20" stroke-width="3" stroke-dasharray="7 5"'));
+  }
+  for (const z of (opt.keepouts || S.map.keepouts || [])) {
+    const pend = z.status === "proposed";
+    o += `<polygon points="${z.polygon.map(p => X(p[0]) + "," + Y(p[1])).join(" ")}" fill="#D92D20" fill-opacity="${pend ? .08 : .16}" stroke="#D92D20" stroke-width="1.5" ${pend ? 'stroke-dasharray="4 3"' : ""}/>`;
+  }
+  for (const ob of (opt.obstacles || [])) {
+    if (ob.points) o += `<polygon points="${ob.points.map(p => X(p[0]) + "," + Y(p[1])).join(" ")}" fill="#5B6474" fill-opacity=".35" stroke="#5B6474"/>`;
+    else if (ob.center) o += `<circle cx="${X(ob.center[0])}" cy="${Y(ob.center[1])}" r="${(ob.radius * k).toFixed(1)}" fill="#5B6474" fill-opacity=".35"/>`;
+  }
+  for (const [n, pts] of Object.entries(opt.paths || {})) {
+    if (pts.length > 1) o += `<polyline points="${pts.map(p => X(p[0]) + "," + Y(p[1])).join(" ")}" fill="none" stroke="${COL[n] || "#5B6474"}" stroke-width="${opt.pathW || 1.6}" stroke-opacity="${opt.pathOp || .45}" stroke-linejoin="round"/>`;
+  }
+  const spots = opt.spots !== undefined ? opt.spots : (S.map.spots || {});
+  for (const [nm, p] of Object.entries(spots)) {
+    o += `<circle cx="${X(p[0])}" cy="${Y(p[1])}" r="11" fill="#fff" stroke="#101828" stroke-width="2"/><text x="${X(p[0])}" y="${(+Y(p[1]) + 4.5).toFixed(1)}" text-anchor="middle" font-size="13" font-weight="700" fill="#101828">${esc(nm)}</text>`;
+  }
+  for (const [n, p] of Object.entries(opt.robots || {})) {
+    const r = 4.75 * k, h = (p[2] || 0) * Math.PI / 180;
+    o += `<g><circle cx="${X(p[0])}" cy="${Y(p[1])}" r="${r.toFixed(1)}" fill="${COL[n] || "#5B6474"}" fill-opacity=".9" stroke="#fff" stroke-width="2"/>` +
+      `<line x1="${X(p[0])}" y1="${Y(p[1])}" x2="${X(p[0] + 4.75 * Math.cos(h))}" y2="${Y(p[1] + 4.75 * Math.sin(h))}" stroke="#fff" stroke-width="2"/></g>`;
+  }
+  o += `<text x="${X(f.x_min + (f.x_max - f.x_min) / 2)}" y="${(H - 4).toFixed(0)}" text-anchor="middle" font-size="11" fill="#5B6474">audience side</text>`;
+  return o + "</svg>";
+}
+function svgToFloor(svg, ev) {
+  const f = S.map.floor, pad = 8, W = 760, k = W / (f.x_max - f.x_min + 2 * pad), rc = svg.getBoundingClientRect();
+  const sx = (ev.clientX - rc.left) * (W / rc.width), sy = (ev.clientY - rc.top) * (W / rc.width);
+  return [+(sx / k + f.x_min - pad).toFixed(1), +((f.y_max + pad) - sy / k).toFixed(1)];
+}
+
+// ---------------------------------------------------------------- settings tables (every setting, any view)
+function settingsTable(group, keys) {
+  const cur = S.settings[group] || {}, def = S.defaults[group] || {};
+  const ks = keys || Object.keys(def);
+  let o = `<table class="kv" data-group="${group}">`;
+  for (const k of ks) {
+    const v = k in cur ? cur[k] : def[k];
+    const inp = typeof def[k] === "boolean" ? `<select data-k="${k}"><option ${v ? "selected" : ""}>true</option><option ${!v ? "selected" : ""}>false</option></select>`
+      : `<input data-k="${k}" value="${esc(v)}" aria-label="${esc(k)}">`;
+    o += `<tr><td>${esc(k)}</td><td>${inp}</td></tr>`;
+  }
+  return o + `</table><div class="row" style="margin-top:8px"><button class="b" data-save="${group}">Save ${esc(group)} settings</button></div>`;
+}
+function wireSettings(root) {
+  root.querySelectorAll("[data-save]").forEach(b => b.onclick = async () => {
+    const g = b.dataset.save, def = S.defaults[g], out = {};
+    root.querySelectorAll(`table[data-group="${g}"] [data-k]`).forEach(i => {
+      const k = i.dataset.k, d = def[k];
+      out[k] = typeof d === "boolean" ? i.value === "true" : typeof d === "number" ? Number(i.value) : i.value;
+    });
+    try { S = await api("/api/settings", {[g]: out}); flash("Saved"); } catch (e) { flash(e.message, true); }
+  });
+}
+function more(title, inner, open) { return `<details class="more" ${open || document.body.classList.contains("details") ? "open" : ""}><summary>${esc(title)}</summary><div style="margin-top:10px">${inner}</div></details>`; }
+function flash(t, bad) { const e = $("err"); if (e) { e.textContent = t; e.style.color = bad ? "var(--red)" : "var(--green)"; } }
+
+// ---------------------------------------------------------------- screens
+function render() {
+  $("wsname").textContent = (S.map.notes && S.map.notes.length < 40) ? S.map.notes : "School table";
+  $("steps").innerHTML = STEPS.map((s, i) => `<button class="${i === screen ? "on" : done.has(i) ? "done" : ""}" data-i="${i}">${i + 1} ${s}${done.has(i) && i !== screen ? " ✓" : ""}</button>`).join("");
+  $("steps").querySelectorAll("button").forEach(b => b.onclick = () => { screen = +b.dataset.i; render(); });
+  const run = S.run;
+  const st = $("status");
+  if (run && run.running) { st.className = "status warn"; st.lastChild.textContent = run.paused ? "Paused" : `Running ${run.kind} · ${fmt(run.elapsed_s)}`; }
+  else { st.className = "status"; st.lastChild.textContent = `${S.map.robots.length} robots ready`; }
+  [connect, workspace, warmup, mission, runScreen, review][screen]();
+}
+function page(left, right) { $("main").innerHTML = `<section class="left">${left}<div class="err" id="err"></div></section><aside>${right}</aside>`; wireSettings($("main")); }
+
+function connect() {
+  page(`<div><h1>Connect</h1><p class="sub">Choose the robots or the simulator. The simulator runs the same plans on simulated Alviks.</p></div>
+    <div class="card"><div class="modes">
+      <button class="${conn === "sim" ? "on" : ""}" data-c="sim"><b>Simulator</b><span class="small muted">Dry run on this computer</span></button>
+      <button class="${conn === "robots" ? "on" : ""}" data-c="robots"><b>Robots</b><span class="small muted">Left, Center, Right on the room's WiFi</span></button>
+    </div></div>
+    <div class="card">${tableSVG({robots: Object.fromEntries(S.map.robots.map(r => [r.name, r.start]))})}
+      <div class="legend" style="margin-top:8px">${S.map.robots.map(r => `<span><span class="dot" style="background:${COL[r.name]}"></span>${esc(r.name)} at (${r.start[0]}, ${r.start[1]})</span>`).join("")}</div>
+      <p class="small muted" style="margin:6px 0 0">Robots drawn where the map puts them to start; the table seen from above, audience side at the bottom.</p></div>`,
+    `<div class="card"><h2>Robots</h2>${S.map.robots.map(r => `<div class="between" style="padding:8px 0;border-bottom:1px solid #F0F1F3"><b><span class="dot" style="background:${COL[r.name]}"></span>${esc(r.name)}</b><span class="muted small">${conn === "sim" ? "simulated" : "firmware 2026-10-27a expected"}</span></div>`).join("")}
+      <p class="small muted">${conn === "robots" ? "Robots: flash firmware 2026-10-27a (second WiFi network, four-sided border). Mission Control starts run_plan.py, which checks each robot's firmware and calibration before anything moves." : "Simulator: no robots needed."}</p>
+      ${more("More", settingsTable("run", ["edge_guard", "border_cm", "timeout_s"]))}</div>
+      <button class="p" id="go">Continue to workspace</button>`);
+  $("main").querySelectorAll("[data-c]").forEach(b => b.onclick = () => { conn = b.dataset.c; render(); });
+  $("go").onclick = () => { done.add(0); screen = 1; render(); };
+}
+
+function workspace() {
+  const f = S.map.floor, sides = S.map.sides || {};
+  const sideRows = SIDES.map(sd => { const v = sides[sd] || {kind: "unknown"};
+    return `<div style="display:grid;grid-template-columns:1fr 120px;gap:6px;align-items:center;margin:4px 0"><span class="lbl">${SIDE_WORDS[sd]}</span>
+      <select data-side="${sd}">${["unknown", "open", "barrier", "partial"].map(k => `<option ${v.kind === k ? "selected" : ""}>${k}</option>`).join("")}</select>
+      ${v.kind === "partial" ? `<input data-span="${sd}" style="grid-column:1/3" value="${esc((v.barrier || []).map(b => b.join("-")).join(", "))}" aria-label="barrier stretches along the ${SIDE_WORDS[sd]}">` : ""}</div>`; }).join("");
+  const zones = (S.map.keepouts || []);
+  page(`<div><h1>Mark the working area</h1><p class="sub">The table's size and what each side is. Spots are where robots can be sent; no-go zones are kept clear.</p></div>
+    <div class="card">${tableSVG({id: "ws"})}
+      <p class="small muted" style="margin:8px 0 0">Solid dark = barrier, red dashes = open edge, grey dots = not felt yet (kept away from like an open edge). ${spotMode ? "<b>Click the table to place it.</b>" : ""}</p></div>
+    <div class="row"><button class="b" id="addspot">+ Spot</button><button class="b" id="addzone">+ No-go zone</button><button class="b" id="savews">Save workspace</button></div>`,
+    `<div class="card"><h2>Workspace</h2>
+      <div class="row" style="margin:10px 0"><label class="lbl">Length (cm) <input class="n" id="len" value="${(f.x_max - f.x_min).toFixed(1)}"></label>
+      <label class="lbl">Width (cm) <input class="n" id="wid" value="${(f.y_max - f.y_min).toFixed(1)}"></label></div>
+      ${sideRows}
+      <h3 style="margin-top:12px">Spots</h3>${Object.entries(S.map.spots || {}).map(([n, p]) => `<div class="between" style="padding:6px 0;border-bottom:1px solid #F0F1F3"><b>${esc(n)}</b><span class="muted">(${p[0]}, ${p[1]}) cm <button class="b" style="padding:4px 8px" data-delspot="${esc(n)}" aria-label="Delete spot ${esc(n)}">×</button></span></div>`).join("") || '<p class="muted small">None yet</p>'}
+      <h3 style="margin-top:12px">No-go zones</h3>${zones.map(z => `<div class="between" style="padding:6px 0;border-bottom:1px solid #F0F1F3"><span>${esc(z.name)} <span class="small muted">${esc(z.status || "")}</span></span><span>${z.status === "proposed" ? `<button class="b" style="padding:4px 8px" data-okzone="${esc(z.name)}">Keep</button>` : ""}<button class="b" style="padding:4px 8px" data-delzone="${esc(z.name)}" aria-label="Delete ${esc(z.name)}">×</button></span></div>`).join("") || '<p class="muted small">None</p>'}
+      ${more("More", `<p class="small muted">Extra room kept from open sides: <input class="n" id="om" value="${S.map.open_margin_cm ?? 3}"> cm (planner's least room from an open side: ${S.least_open_room_cm ?? "-"} cm)</p>
+        <h3>Robot start spots</h3>${S.map.robots.map(r => `<div class="row small" style="margin:4px 0"><b style="width:60px">${esc(r.name)}</b><input class="n" data-rs="${r.name}" data-j="0" value="${r.start[0]}"><input class="n" data-rs="${r.name}" data-j="1" value="${r.start[1]}"><input class="n" data-rs="${r.name}" data-j="2" value="${r.start[2]}"></div>`).join("")}
+        <h3>Planner</h3>${settingsTable("planner")}`)}
+    </div><button class="p" id="go">Continue to warm-up</button>`);
+  const svg = $("ws");
+  svg.onclick = async ev => {
+    const p = svgToFloor(svg, ev);
+    if (spotMode === "spot") {
+      const used = Object.keys(S.map.spots || {}); const nm = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").find(c => !used.includes(c));
+      await saveMap({spots: {...(S.map.spots || {}), [nm]: p}}); spotMode = null;
+    } else if (spotMode === "zone") {
+      if (!zoneStart) { zoneStart = p; flash("Now click the opposite corner"); return; }
+      const [a, b] = [zoneStart, p]; zoneStart = null; spotMode = null;
+      const ko = [...(S.map.keepouts || []), {name: "no-go " + ((S.map.keepouts || []).length + 1), status: "confirmed", source: "user",
+        polygon: [[Math.min(a[0], b[0]), Math.min(a[1], b[1])], [Math.max(a[0], b[0]), Math.min(a[1], b[1])], [Math.max(a[0], b[0]), Math.max(a[1], b[1])], [Math.min(a[0], b[0]), Math.max(a[1], b[1])]]}];
+      await saveMap({keepouts: ko});
+    }
+  };
+  $("addspot").onclick = () => { spotMode = "spot"; render(); };
+  $("addzone").onclick = () => { spotMode = "zone"; zoneStart = null; flash("Click one corner of the zone, then the opposite corner"); };
+  $("main").querySelectorAll("[data-delspot]").forEach(b => b.onclick = () => { const sp = {...S.map.spots}; delete sp[b.dataset.delspot]; saveMap({spots: sp}); });
+  $("main").querySelectorAll("[data-delzone]").forEach(b => b.onclick = () => saveMap({keepouts: S.map.keepouts.filter(z => z.name !== b.dataset.delzone)}));
+  $("main").querySelectorAll("[data-okzone]").forEach(b => b.onclick = () => saveMap({keepouts: S.map.keepouts.map(z => z.name === b.dataset.okzone ? {...z, status: "confirmed"} : z)}));
+  $("main").querySelectorAll("[data-side]").forEach(s => s.onchange = () => wsSave());
+  $("savews").onclick = () => wsSave();
+  $("go").onclick = async () => { await wsSave(); done.add(1); screen = 2; render(); };
+}
+async function saveMap(d) { try { S = await api("/api/map", d); render(); } catch (e) { flash(e.message, true); } }
+async function wsSave() {
+  const L = +$("len").value, Wd = +$("wid").value, f = S.map.floor;
+  const sides = {};
+  document.querySelectorAll("[data-side]").forEach(s => { const sd = s.dataset.side, k = s.value, o = {kind: k};
+    if (k === "partial") { const sp = document.querySelector(`[data-span="${sd}"]`);
+      const txt = sp ? sp.value : ""; o.barrier = txt.split(",").map(x => x.trim()).filter(Boolean).map(x => x.split("-").map(Number));
+      if (!o.barrier.length) o.barrier = [[(sd[0] === "x" ? f.y_min : f.x_min), (sd[0] === "x" ? f.y_min : f.x_min) + 20]]; }
+    sides[sd] = o; });
+  const robots = S.map.robots.map(r => ({...r, start: [0, 1, 2].map(j => { const i = document.querySelector(`[data-rs="${r.name}"][data-j="${j}"]`); return i ? +i.value : r.start[j]; })}));
+  const om = $("om") ? +$("om").value : S.map.open_margin_cm;
+  await saveMap({floor: {x_min: f.x_min, y_min: f.y_min, x_max: f.x_min + L, y_max: f.y_min + Wd}, sides, robots, open_margin_cm: om});
+}
+
+function warmup() {
+  const res = S.warmup, run = S.run && S.run.kind === "warmup" ? S.run : null;
+  const pv = S.preview && S.preview.title === "Warm-up" ? S.preview : null;
+  page(`<div><h1>Warm-up</h1><p class="sub">The robots creep into each corner and pause, then feel each side: the edge sensor stopping a robot means an open edge, the front sensor a barrier. About ${pv ? fmt(pv.makespan_s) : "a minute"}.</p></div>
+    <div class="card">${tableSVG({paths: pv ? pv.paths : {}, robots: run && run.robots ? run.robots : {}})}
+      <p class="small muted" style="margin:8px 0 0">${run ? "Live: where the camera sees each robot." : pv ? "The planned warm-up: each robot's route in its colour." : "Plan the warm-up to see the routes."}</p></div>
+    ${res ? `<div class="card"><h2>What the robots found</h2><ul>${res.words.map(w => `<li>${esc(w)}</li>`).join("")}</ul>
+      ${res.zones.length ? `<h3>Proposed no-go zones</h3>${res.zones.map((z, i) => `<label class="row small"><input type="checkbox" data-zk="${esc(z.name)}" checked> keep ${esc(z.name)}: ${esc(z.note)}</label>`).join("")}` : ""}
+      <h3 style="margin-top:12px">Pictures to check (${res.frames.length}, about ${res.check_s} s)</h3><ol class="frames small">${res.frames.map(fr => `<li><b>${fmt(fr.t_run || 0)}</b> ${esc(fr.question)}</li>`).join("")}</ol>
+      <div class="row"><label class="row small"><input type="checkbox" id="mv"> move sides to where they were found</label><button class="p" id="apply">Use these answers</button></div></div>
+      <div class="card eng"><h2>How the robots mapped the table</h2>${res.svg}<p class="small muted">Lines: each robot's path seen by the camera. Red circles: open edges found; filled: barriers; dashed: something on the table. Source: ${esc(res.folder)}</p></div>` : ""}`,
+    `<div class="card"><h2>Steps</h2><div class="row" style="margin-top:8px"><button class="b" id="wplan">Plan warm-up</button>
+      <button class="p" id="wrun" ${run && run.running ? "disabled" : ""}>Run warm-up (${conn === "sim" ? "simulator" : "robots"})</button>
+      <button class="b" id="wan" ${S.last_runs.warmup ? "" : "disabled"}>Read the results</button></div>
+      ${run ? `<p class="small">${run.running ? "Running " + fmt(run.elapsed_s) : "Finished"}</p><div class="log">${esc((run.messages || []).slice(-8).map(m => m[1]).join("\n"))}</div>` : ""}
+      ${more("More", settingsTable("warmup") + (conn === "sim" ? `<h3 style="margin-top:10px">Simulator: the real table</h3>` + settingsTable("run", ["sim_true_sides", "sim_true_objects"]) : ""))}</div>
+      <button class="p" id="go">Continue to mission</button>`);
+  $("wplan").onclick = async () => { try { flash("Planning..."); await api("/api/warmup/plan", {}); await load(); flash("Planned"); } catch (e) { flash(e.message, true); } };
+  $("wrun").onclick = async () => { try { await api("/api/run/start", {kind: "warmup", dry: conn === "sim"}); startPoll(); await load(); } catch (e) { flash(e.message, true); } };
+  $("wan").onclick = async () => { try { flash("Reading..."); await api("/api/warmup/analyze", {}); await load(); flash("Done"); } catch (e) { flash(e.message, true); } };
+  if ($("apply")) $("apply").onclick = async () => { const keep = [...document.querySelectorAll("[data-zk]")].filter(c => c.checked).map(c => c.dataset.zk);
+    try { S = await api("/api/warmup/apply", {keep_zones: keep, move_sides: $("mv").checked}); flash("The workspace now has these sides and zones"); render(); } catch (e) { flash(e.message, true); } };
+  $("go").onclick = () => { done.add(2); screen = 3; render(); };
+}
+
+const MODES = [["monday", "Monday routine", "Show, then mowing beside Chicken, Follow and Roam, then park"], ["mow", "Lawnmower", "One full pass, lanes 12 cm apart"],
+  ["spots", "Go to spots", "Instruction lists per robot"], ["chicken", "Chicken", "Left and Right, twice"], ["follow", "Follow the leader", "Left leads, Right follows"],
+  ["roam", "Roam", "Random spots"], ["show", "Show", "The opening dance"]];
+function mission() {
+  const pv = S.preview && S.preview.title !== "Warm-up" ? S.preview : null;
+  const spots = Object.keys(S.map.spots || {});
+  page(`<div><h1>${pv ? esc(MODES.find(m => m[0] === String(pv.title).toLowerCase())?.[1] || pv.title) : "Choose a mission"}</h1><p class="sub">Preview plays the plan on the table. Every move waits for the moves it could meet.</p></div>
+    <div class="card">${previewBlock(pv)}</div>`,
+    `<h2>Mission</h2><div class="modes">${MODES.map(m => `<button class="${mode === m[0] ? "on" : ""}" data-m="${m[0]}"><b>${m[1]}</b><span class="small muted">${m[2]}</span></button>`).join("")}</div>
+     ${mode === "spots" ? `<div class="card"><p class="small muted">Spots: ${spots.join(", ") || "none (add them in Workspace)"}. Example: go to A · wait 5 s · go to C · repeat 3x</p>${S.map.robots.map(r => `<label class="lbl">${esc(r.name)}<textarea data-list="${r.name}" placeholder="go to A, wait 5 s, go to C"></textarea></label>`).join("")}</div>` : ""}
+     ${mode === "roam" || mode === "mow" ? `<label class="lbl">Robot <select id="robot">${S.map.robots.map(r => `<option ${r.name === "Center" ? "selected" : ""}>${r.name}</option>`).join("")}</select></label>` : ""}
+     ${pv ? `<div class="card"><h3>Sequence</h3>${actsList(pv)}${pv.notes.length ? `<ul class="small muted">${pv.notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}</div>` : ""}
+     <div class="card">${more("More", "<h3>Mission</h3>" + settingsTable("mission") + "<h3 style='margin-top:10px'>Planner</h3>" + settingsTable("planner"))}</div>
+     <div class="row"><button class="b" id="plan" style="flex:1">Plan and preview</button><button class="p" id="go" style="flex:1" ${pv ? "" : "disabled"}>Go to run</button></div>`);
+  $("main").querySelectorAll("[data-m]").forEach(b => b.onclick = () => { mode = b.dataset.m; render(); });
+  $("plan").onclick = async () => {
+    const body = {mode};
+    if (mode === "spots") body.lists = Object.fromEntries([...document.querySelectorAll("[data-list]")].map(t => [t.dataset.list, t.value]));
+    if ($("robot")) body.robot = $("robot").value;
+    try { flash("Planning... (Monday takes about 30 s)"); $("plan").disabled = true; await api("/api/mission", body); await load(); playT = 0; flash("Planned"); } catch (e) { flash(e.message, true); $("plan").disabled = false; }
+  };
+  $("go").onclick = () => { done.add(3); screen = 4; render(); };
+  wirePreview(pv);
+}
+function actsList(pv) {
+  const by = {};
+  pv.acts.forEach(a => { (by[a.label] = by[a.label] || {label: a.label, t: a.t, robots: new Set()}).robots.add(a.robot); by[a.label].t = Math.min(by[a.label].t, a.t); });
+  const rows = Object.values(by).sort((a, b) => a.t - b.t).filter(a => !/^(mow lane \d+)/.test(a.label) || a.label === "mow lane 1");
+  return `<ol class="small" style="padding-left:18px;margin:0">${rows.map(a => `<li><b>${esc(a.label.replace("mow lane 1", "mowing"))}</b> <span class="muted">${fmt(a.t)} · ${[...a.robots].join(", ")}</span></li>`).join("")}</ol>`;
+}
+function previewBlock(pv) {
+  if (!pv) return `${tableSVG({})}<p class="small muted">Choose a mission and press Plan and preview.</p>`;
+  const sm = pv.summary;
+  return `<div id="pvsvg">${tableSVG({paths: pv.paths, robots: poseAt(pv, playT), obstacles: pv.obstacles, keepouts: pv.keepouts})}</div>
+    <div class="row" style="margin-top:10px"><button class="b" id="play" aria-label="Play preview" style="width:44px;padding:10px 0">${playing ? "❚❚" : "▶"}</button>
+      <input type="range" id="slider" min="0" max="${pv.makespan_s}" step="${pv.step_s}" value="${playT}" style="flex:1;min-width:200px" aria-label="Time in the plan">
+      <span class="small muted" id="tlabel">${fmt(playT)} of ${fmt(pv.makespan_s)}</span></div>
+    <div class="legend" style="margin-top:8px">${Object.keys(pv.frames).map(n => `<span><span class="dot" style="background:${COL[n]}"></span>${n}</span>`).join("")}</div>
+    <div class="kpis" style="margin-top:10px"><div class="kpi"><b>${fmt(sm.makespan_s)}</b><span>Finishes in</span></div><div class="kpi"><b>${sm.closest_cm.toFixed(1)} cm</b><span>Closest approach (bodies)</span></div>
+      ${sm.beats ? `<div class="kpi"><b>${sm.beats_late_over_0_5s} of ${sm.beats}</b><span>Show moves over 0.5 s late</span></div>` : ""}<div class="kpi eng"><b>${pv.planning_time_s} s</b><span>Planning time</span></div></div>
+    <p class="small muted" style="margin:8px 0 0">The planned routes, with each robot where the plan has it at the slider's time; measured from the plan (planner.py), not the robots.</p>`;
+}
+function poseAt(pv, t) { const i = Math.min(Math.round(t / pv.step_s), Object.values(pv.frames)[0].length - 1); return Object.fromEntries(Object.entries(pv.frames).map(([n, fr]) => [n, fr[Math.min(i, fr.length - 1)]])); }
+function wirePreview(pv) {
+  if (!pv) return;
+  const upd = () => { $("pvsvg").innerHTML = tableSVG({paths: pv.paths, robots: poseAt(pv, playT), obstacles: pv.obstacles, keepouts: pv.keepouts}); $("tlabel").textContent = `${fmt(playT)} of ${fmt(pv.makespan_s)}`; $("slider").value = playT; };
+  $("slider").oninput = e => { playT = +e.target.value; upd(); };
+  $("play").onclick = () => { playing = !playing; $("play").textContent = playing ? "❚❚" : "▶";
+    clearInterval(timer); if (playing) timer = setInterval(() => { playT += 0.5; if (playT >= pv.makespan_s) { playT = pv.makespan_s; playing = false; clearInterval(timer); } if ($("slider")) upd(); }, 100); };
+}
+
+function runScreen() {
+  const run = S.run && S.run.kind !== "warmup" ? S.run : null, pv = S.preview && S.preview.title !== "Warm-up" ? S.preview : null;
+  page(`<div class="between"><div><h1>${pv ? esc(MODES.find(m => m[0] === String(pv.title).toLowerCase())?.[1] || pv.title) : "Run"}</h1><p class="sub">${run ? `${fmt(run.elapsed_s)} in${pv ? " · planned " + fmt(pv.makespan_s) : ""}` : "Not started"}</p></div>
+      <div class="row"><button class="p" id="start" ${run && run.running ? "disabled" : ""}>Run (${conn === "sim" ? "simulator" : "robots"})</button>
+      <button class="b" id="pause" ${run && run.running ? "" : "disabled"}>${run && run.paused ? "Resume" : "Pause"}</button><button class="p stop" id="stop" ${run && run.running ? "" : "disabled"}>Stop</button></div></div>
+    <div class="card">${tableSVG({paths: pv ? pv.paths : {}, pathOp: .25, robots: run ? run.robots : {}, obstacles: pv ? pv.obstacles : []})}
+      <p class="small muted" style="margin:8px 0 0">Where the camera sees each robot now (${conn === "sim" ? "simulated camera" : "overhead camera"}), over the planned routes.</p></div>`,
+    `${S.map.robots.map(r => `<div class="card"><div class="between"><b><span class="dot" style="background:${COL[r.name]}"></span>${esc(r.name)}</b><span class="small muted">${run && run.robots[r.name] ? `(${run.robots[r.name][0].toFixed(0)}, ${run.robots[r.name][1].toFixed(0)})` : ""}</span></div><span class="small muted">${esc(run && run.doing && run.doing[r.name] || (run && run.running ? "driving" : "waiting"))}</span></div>`).join("")}
+     <details class="card" ${document.body.classList.contains("details") ? "open" : ""}><summary style="cursor:pointer;font-weight:500">Event log</summary><div class="log" id="log">${run ? esc((run.messages || []).map(m => `[${m[0]}] ${m[1]}`).join("\n")) : ""}</div></details>
+     <div class="card">${more("More", settingsTable("run"))}</div>
+     <button class="p" id="go" ${run && !run.running ? "" : "disabled"}>Review</button>`);
+  $("start").onclick = async () => { try { await api("/api/run/start", {kind: "mission", dry: conn === "sim"}); startPoll(); await load(); } catch (e) { flash(e.message, true); } };
+  $("pause").onclick = async () => { try { await api("/api/run/pause", {on: !(run && run.paused)}); await load(); } catch (e) { flash(e.message, true); } };
+  $("stop").onclick = async () => { try { await api("/api/run/stop", {}); await load(); } catch (e) { flash(e.message, true); } };
+  $("go").onclick = () => { done.add(4); screen = 5; render(); };
+  const lg = $("log"); if (lg) lg.scrollTop = lg.scrollHeight;
+}
+function startPoll() { clearInterval(pollT); pollT = setInterval(async () => { const r = await api("/api/run"); S.run = r; if (screen === 4 || screen === 2) render(); if (!r.running) { clearInterval(pollT); load(); } }, 1000); }
+
+async function review() {
+  page(`<div><h1>Review</h1><p class="sub">The last run: what happened against the plan.</p></div><div id="rv" class="card">Loading...</div>`,
+    `<div class="card"><h2>Next</h2><p class="small muted">Change the mission or the workspace and run again; every run is kept in its own folder.</p><button class="b" id="again">Back to mission</button></div>`);
+  $("again").onclick = () => { screen = 3; render(); };
+  let r;
+  try { r = await api("/api/review"); } catch (e) { $("rv").innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
+  const s = r.run_plan_summary || {}, sim = r.sim_report || (s.simulator || {});
+  const re = s.replans || [];
+  const kp = [[s.duration_s ? fmt(s.duration_s) : "-", "Took"], [s.planned_makespan_s ? fmt(s.planned_makespan_s) : "-", "Planned"],
+    [sim.min_body_gap_cm != null ? sim.min_body_gap_cm.toFixed(1) + " cm" : "-", "Closest two robots (simulator truth)"],
+    [sim.min_open_edge_cm != null ? sim.min_open_edge_cm.toFixed(1) + " cm" : "-", "Closest to an open edge"], [String(re.length), "Re-plans"]];
+  $("rv").innerHTML = `<div class="kpis">${kp.map(k => `<div class="kpi"><b>${esc(k[0])}</b><span>${esc(k[1])}</span></div>`).join("")}</div>
+    <div style="margin-top:12px">${tableSVG({paths: r.tracks, pathOp: .8, pathW: 2, obstacles: (sim.events || []).filter(e => e.kind === "brick").map(e => ({points: e.points}))})}</div>
+    <p class="small muted">Each robot's path as the camera saw it (${esc(r.folder)}); grey: the brick that was dropped.</p>
+    <div class="eng"><h3>Re-plans</h3><ul class="small">${re.map(x => `<li>${x.t_run} s, ${esc(x.source)}: ${x.cpu_s} s to compute${x.kept === false ? ", not kept" : ""}</li>`).join("") || "<li>none</li>"}</ul>
+    <h3>Simulator events</h3><ul class="small">${(sim.events || []).map(e => `<li>${esc(JSON.stringify(e).slice(0, 160))}</li>`).join("") || "<li>none</li>"}</ul></div>`;
+}
+
+$("details").onchange = e => { document.body.classList.toggle("details", e.target.checked); render(); };
+load().then(() => { if (S.run && S.run.running) startPoll(); });
+</script>
+</body>
+</html>

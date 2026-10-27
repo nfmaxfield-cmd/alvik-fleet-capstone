@@ -84,6 +84,7 @@ DEFAULT_SETTINGS = {
                                     # 1.0 s over the 20-re-plan bench and dry runs with brick drops (robots held,
                                     # seconds lost to holds, closest approach); docs/doe-backlog.md
     "skip_unreachable": False,  # drop tasks that cannot be reached instead of failing
+    "priority_first": "",       # a robot planned first in every order (right of way: Monday's mower); "" = none
     "probe_cms": 3.0,           # warm-up side feel: creep speed (chosen: the approach speed, approach_cms, which the
                                 # front sensor's 15 Hz and the edge guard's 3 checks were set for; DOE note: 2 / 3 / 5 cm/s
                                 # against the stop distance past the edge on the school table; docs/doe-backlog.md)
@@ -396,7 +397,8 @@ class Job:
     """What one robot has to do in this plan."""
 
     def __init__(self, name, start, visits, park, park_pose, start_tick=0, lead=None, frozen=None,
-                 task_offset=0, any_order=False):
+                 task_offset=0, any_order=False, clock0=0.0):
+        self.clock0 = float(clock0)       # the mission's clock at this plan's start (s): until_s items count from it
         self.name = name
         self.start = list(start)          # [x, y, rad]
         self.visits = list(visits)        # board names or {"goto": [...]}
@@ -535,11 +537,37 @@ def _travel(pose, goal, grid, s, task, what):
     return out
 
 
+def _slide_on_lane(item, grid, step_cm=1.0):
+    """A mow lane's end that is not free (a brick, a no-go zone): move it along its lane towards the lane's other end
+    to the first point where the robot can turn. None if the whole lane is blocked. The route between lane ends then
+    goes round the obstacle (the lanes "go round it")."""
+    x0, y0, x1, y1 = item["lane"]
+    a, b = ((x0, y0), (x1, y1)) if item.get("end", 1) == 0 else ((x1, y1), (x0, y0))   # from this end inwards
+    L = math.dist(a, b)
+    n = int(L / step_cm)
+    for k in range(1, n + 1):
+        q = (a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n)
+        if grid.turnable(q):
+            out = dict(item)
+            out["goto"] = [round(q[0], 2), round(q[1], 2)] + list(item["goto"][2:])
+            out["slid_cm"] = round(k * L / n, 1)
+            return out
+    return None
+
+
+ESCAPE_TOL_CM = 0.5      # chosen: pose noise at a stop (the camera's ~0.3-0.5 cm while still). No DOE: the safety
+                         # margin (1.5 cm) still stands between the turn circle and anything
+
+
 def _escape(job, grid, world, body, s):
     """A robot that is too close to something to turn backs away (or drives
     on) in a straight line until it can turn. Returns steps."""
     p = job.start
     if grid.turnable(p):
+        return []
+    # a robot a hair inside the limit (its pose noise at a point planned right at the limit: Monday dry run M1, Center
+    # 0.12 cm past it at a lane end, heading along the edge, where no straight move ever got it back) may turn there
+    if grid.point_clear(p) >= grid.turn_thr - ESCAPE_TOL_CM:
         return []
     # the same robot at the same spot on the same map gets the same answer: kept on the grid (a re-plan asked it up
     # to 48 times, one third of its time)
@@ -593,11 +621,36 @@ def build_prims(job, order, grid, world, docks, s, body, warnings, allow_skip=Tr
         out += _escape(Job(job.name, pose, [], False, pose), grid, world, body, s)
         if out:
             pose = out[-1]["to"]
+    t_frozen = sum(p["dur"] for _, p in job.frozen) if job.frozen else 0
+    beat_next = None
     for pos, k in enumerate(order):
         item = job.visits[k]
         task = job.task_offset + pos
+        if isinstance(item, dict) and "until_s" in item:
+            # stand still until the mission's clock reaches until_s (a show's beat target). The clock: the mission's
+            # time at this plan's start (job.clock0) + the steps before (scheduler waits for other robots come on top:
+            # missions.summary reports any lateness)
+            now_s = job.clock0 + (job.start_tick + t_frozen + sum(p["dur"] for p in out)) * s.tick_s
+            left = item["until_s"] - now_s
+            beat_next = item["until_s"]        # the next move's own start is measured against this beat
+            if left > s.tick_s / 2:
+                w = wait_prim(pose, _ticks(left, s), s, phase="pause", task=task)
+                w["until_s"] = item["until_s"]
+                if item.get("label"):
+                    w["label"] = item["label"]
+                out.append(w)
+            continue
+        if isinstance(item, dict) and "lane" in item and not grid.turnable(item["goto"]):
+            item = _slide_on_lane(item, grid)
+            if item is None:
+                warnings.append("robot %s: mow lane end in a no-go area and nothing free along its lane: lane end "
+                                "skipped" % job.name)
+                continue
         try:
             ps, pose2 = _visit_prims(item, pose, task, grid, docks, s, body)
+            if beat_next is not None and ps:
+                ps[0]["beat_s"] = beat_next
+                beat_next = None
         except PlanError as e:
             if s.skip_unreachable and allow_skip:
                 warnings.append("robot %s skips task %d: %s" % (job.name, task + 1, e))
@@ -856,7 +909,7 @@ class Planner:
     def candidate_orders(self, job, keep=3):
         n = len(job.visits)
         base = list(range(n))
-        if not job.any_order or n < 2 or any(isinstance(v, dict) and ("wait_s" in v or "probe" in v)
+        if not job.any_order or n < 2 or any(isinstance(v, dict) and ("wait_s" in v or "probe" in v or "until_s" in v)
                                              for v in job.visits):
             return [base]           # an instruction list with waits keeps its order
         pts = [job.hold()[:2]] + [self._goal_xy(v) for v in job.visits] + [job.park_pose[:2]]
@@ -927,7 +980,8 @@ class Planner:
         s, body = self.s, self.body
         R = body.r_turn + s.separation_cm + _slack(body, s) - s.safety_margin_cm
         mine = [np.array(start_pose[:2])] + [np.array(self._goal_xy(v), float) for v in job.visits
-                                             if not (isinstance(v, dict) and ("wait_s" in v or "probe" in v))]
+                                             if not (isinstance(v, dict) and ("wait_s" in v or "probe" in v
+                                                                              or "until_s" in v))]
         mine += [np.array(v["probe"][:2], float) for v in job.visits if isinstance(v, dict) and "probe" in v]
         if job.park:
             mine.append(np.array(job.park_pose[:2], float))
@@ -1118,8 +1172,10 @@ class Planner:
         # a robot in the middle of a docking (backing out, say) has a fixed
         # next move and is in front of a board others may need: it goes first
         busy = {j.name: 1 if j.lead else 0 for j in jobs}
-        orders = sorted(itertools.permutations(names),
-                        key=lambda o: [(-busy[n], -work[n]) for n in o])[: self.s.max_orders]
+        perms = itertools.permutations(names)
+        if self.s.priority_first in names:          # right of way: that robot is planned first, the others after it
+            perms = (o for o in perms if o[0] == self.s.priority_first)
+        orders = sorted(perms, key=lambda o: [(-busy[n], -work[n]) for n in o])[: self.s.max_orders]
         tried = []
         best = None
         t_first = [None]      # when the first safe plan was found (the rest of the time looks for a shorter one)
@@ -1346,6 +1402,10 @@ def to_steps(sched, after, s, t0=0.0, committed=0, front_ray=None, gap_cm=1.0, b
             st.pop("front_clear_cm", None)
         if p.get("label"):
             st["label"] = p["label"]
+        if p.get("until_s") is not None:
+            st["until_s"] = p["until_s"]
+        if p.get("beat_s") is not None:
+            st["beat_s"] = p["beat_s"]          # a show move meant to start on this beat (mission clock, s)
         if i < committed:
             st["committed"] = True
         out.append(st)
@@ -1413,6 +1473,9 @@ def make_plan(m, jobs=None, over=None, t0_s=0.0, replan_of=None, events=None, t_
               stop_at_first=False):
     """Plan from a map (its robots' start spots and tasks), or from given jobs."""
     m = FM.normalize(m)
+    mp = {k: v for k, v in ((m.get("mission") or {}).get("planner") or {}).items() if k in DEFAULT_SETTINGS}
+    if mp:
+        over = {**mp, **(over or {})}          # a mission's own planner settings (missions.py), unless overridden
     pl = Planner(m, over)
     pl.allow_strand = bool(allow_strand)
     s, body = pl.s, pl.body
@@ -1652,7 +1715,7 @@ def obstacle_event(m, plan, states, new_obstacles, over=None):
     return obstacle_replan(obstacle_decide(m, plan, states, new_obstacles, over))
 
 
-def obstacle_decide(m, plan, states, new_obstacles, over=None):
+def obstacle_decide(m, plan, states, new_obstacles, over=None, t_now=None):
     """The quick half of obstacle_event: who stops at once, who carries on and
     for how many steps. Returns a decision dict: "events" (per robot action
     and reason), "keep" (robot -> number of its remaining steps it carries
@@ -1801,7 +1864,9 @@ def obstacle_decide(m, plan, states, new_obstacles, over=None):
         if not changed:
             break
     return {"m": m, "m2": m2, "plan": plan, "states": states, "s": s, "rest": rest, "keep": keep,
-            "events": events, "first_step": {n: states[n]["step"] for n in names}, "budget_ticks": budget_ticks}
+            "events": events, "first_step": {n: states[n]["step"] for n in names}, "budget_ticks": budget_ticks,
+            # the mission's clock at this re-plan (until_s items: a show's beats); t_now = plan time of the event
+            "clock0": float(plan.get("mission_t0_s", 0.0) or 0.0) + float(t_now or 0.0)}
 
 
 def obstacle_replan(dec):
@@ -1833,7 +1898,7 @@ def obstacle_replan(dec):
                 lead = _visit_tail(hold, pend["lead_board"], d, pend["task_offset"], s, pend["lead_phase"])
             jobs.append(Job(n, st["pose"], pend["visits"], pend["park"], FM.pose_in(r_map["park"]),
                             start_tick=budget_ticks, lead=lead, frozen=frozen, task_offset=pend["task_offset"],
-                            any_order=tasks["any_order"]))
+                            any_order=tasks["any_order"], clock0=dec.get("clock0", 0.0)))
             continue
         if not later:
             jobs.append(Job(n, st["pose"], [], False, hold, start_tick=budget_ticks, frozen=frozen))
@@ -1855,12 +1920,13 @@ def obstacle_replan(dec):
         remaining = seq_visits[task_i - off:]
         jobs.append(Job(n, st["pose"], remaining, tasks["park"], FM.pose_in(r_map["park"]),
                         start_tick=budget_ticks, lead=lead, frozen=frozen, task_offset=task_i,
-                        any_order=tasks["any_order"]))
+                        any_order=tasks["any_order"], clock0=dec.get("clock0", 0.0)))
     over2 = dict(s)
     over2["skip_unreachable"] = True
     newplan = make_plan(m2, jobs=jobs, over=over2, replan_of=plan.get("plan_id"), events=events,
                         t_limit_s=0.45 * s.replan_budget_s, allow_strand=True,
                         stop_at_first=bool(s.replan_first_safe))
+    newplan["mission_t0_s"] = round(dec.get("clock0", 0.0), 2)
     for n in newplan.get("stranded", []):
         ev = next(e for e in events if e["robot"] == n)
         ev["reason"] += "; no safe route yet, stays put until the next re-plan"
