@@ -1,5 +1,7 @@
 # Mission Control and the school demo: build brief (2026-10-27 00:10)
 
+Scope (Nick, 2026-10-27 00:08): all of it, engine first.
+
 Source: the Mission Control plan doc (https://claude.ai/artifact/4ZHA1JETwR1UtR76aZGmMF), the mockup
 (https://claude.ai/artifact/ByAd3Gf8eEj5ARiDrVsHn7), and Nick's answers up to 2026-10-27 00:03. This file is the brief
 the build works from.
@@ -24,9 +26,9 @@ the build works from.
 | Platform | Computer only (desktop browser); simple and clean, few options up front, depth behind "More"/Details |
 | Audience | Nick now; designed to illustrate a handover to a plant operator |
 | Music | **None** for Monday |
-| Chicken | Turn away at **15 cm**, never under **8 cm** (8 = two half-widths + ~3 cm camera error, rounded up; DOE on the board) |
-| Operator view (Details off) | **All settings locked**: operators pick missions, spots, Run/Pause/Stop only |
-| Re-plans | **Send the first safe plan at once**; keep searching in the background and swap in a shorter plan only if found (and safe to swap) |
+| Chicken | Swerve at **15 cm**, never under **8 cm** (8 = two half-widths + ~3 cm camera error, rounded up; DOE on the board). Confirmed by Nick 2026-10-27 00:08 |
+| Operator view (Details off) | **Nothing is locked or switched off** (Nick, 2026-10-27 00:08). Settings may be out of sight (behind More / Details, deeper menus), but every setting must be viewable and editable from any view |
+| Re-plans | **Send the first safe plan at once**; keep searching in the background and swap in a shorter plan only if found (and safe to swap). Confirmed by Nick 2026-10-27 00:08 |
 | Warm-up | Explore-style, user-confirmed: robots **creep cautiously into each corner and pause** (those frames confirm the corners), **feel each side**: open edge, barrier, or partly both; things bumped away from a side become **no-go zones** for Nick to confirm/delete; frames where the tracker lost a robot go to the check too. Nick's confirming/editing time: **90 s or less** (about 15 frames). Confirmed frames are kept as labelled data for the detector later (not trained on for Monday). |
 | Board | General shape everywhere: the table's rectangle + each side's kind (open / barrier / partial) + no-go zones. Nothing may assume two boards. |
 | Firmware | Virtual border from the rectangle and each side's kind (all four sides), shipped together with the second WiFi network (home + school) so Nick flashes once |
