@@ -52,6 +52,12 @@ Answered ones move to the bottom with the answer and date.
 33. Should a robot seen only by its lights be allowed to move? (Now: kept out at L0, the safe choice.)
 34. The taped-marks test (T1) to settle which camera carries the ~5 cm constant offset?
 35. Robots' white lights staying on while the ladder watches: OK?
+36. 15:26-15:27: how did you wake the robots (the wake script on the Pi?), and could it still have been running when
+    the ladder started at 15:27? (For 20 s the planner heard no robot at all.)
+37. Should the ladder redo L0 and L1 automatically whenever a robot has restarted (about 4 min)?
+38. Light search: use the side camera alone, or both cameras taking the stronger signal?
+39. Leave turn-around points out of the 3 cm gate? (Right would pass L3; it changes what Phase 0 measures.)
+40. Did the room light change between 15:04 and 15:20? (The side picture brightened from 39 to 58 with its exposure locked.)
 
 ### Robots and sessions
 8. What stands just beyond the home board's x = 0 edge at about y = 30-60? (Your 07:45 "yes" to this one was read as
