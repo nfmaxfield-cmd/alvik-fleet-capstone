@@ -243,8 +243,13 @@ def _track(x0, y0, x1, y1, n=6, dt=0.1):
 def test_a_spin_that_carries_the_robot_into_the_band_holds():
     r = _border_stub()
     r.turn_start_xy = {"Right": (8.6, 69.0)}                  # 16:12:54: a 5.4 s spin from 8.6 cm
-    why = E.Runner.border_check(r, "Right", _track(7.5, 69.0, 4.8, 69.0))
+    # (2026-10-27 edge fixes: the spin check takes the median of the last second from the history, as the watchdog
+    # has it; the 5.4 s spin is given whole, the window its last 0.6 s)
+    full = _track(8.6, 69.0, 4.8, 69.0, n=55, dt=0.1)
+    r.history = types.SimpleNamespace(since=lambda t0, t1=None: [q for q in full if q[0] >= t0])
+    why = E.Runner.border_check(r, "Right", [q for q in full if q[0] >= full[-1][0] - 0.6])
     assert "while it turned on its spot" in why
+    r.history = None
     assert E.Runner.border_check(r, "Right", _track(8.4, 69.0, 7.4, 69.0)) == ""   # a 1.2 cm swing: no
     r.turn_start_xy = {"Right": (40.0, 60.0)}
     assert E.Runner.border_check(r, "Right", _track(40.0, 60.0, 35.0, 60.0)) == ""  # outside the band

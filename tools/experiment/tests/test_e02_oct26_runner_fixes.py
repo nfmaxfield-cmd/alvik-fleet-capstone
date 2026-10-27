@@ -554,13 +554,13 @@ def test_a_border_holds_rescue_backs_the_robot_out():
     r.mark = lambda t: r.marks.append(t)
     r.alert = lambda *a: None
     r.backed = []
-    r.back_out = lambda robot, within_s=60.0: r.backed.append(robot) or True
+    r.back_out = lambda robot, within_s=60.0, inward_ok=False: r.backed.append((robot, inward_ok)) or True
     r.camera_edge_room = lambda robot: 12.0
     r.edge_stop_t, r.last_go = {}, {}
     r.tracker = None
     r.exploring = False
     assert E.Runner.self_rescue(r, "Right", "border", "7 cm from an open edge, moving towards it") is True
-    assert r.backed == ["Right"] and r.st["rescues"][-1][4] is True
+    assert r.backed == [("Right", True)] and r.st["rescues"][-1][4] is True   # 2026-10-27 fix 4: inward allowed
 
 
 # =============================================================================== coordinator: found by its lights

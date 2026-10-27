@@ -255,7 +255,96 @@ def spin_allowance_cm(turn_deg):
     return 2.0 * TURN_SWING_CM * math.sin(math.radians(a) / 2.0) + TURN_SPIN_DRIFT_CM
 
 
-EDGE_BACKOUT_S = 30.0         # (until 2026-10-26: a backwards drive this soon after the robot's own edge stop was a
+# --- 2026-10-27 edge fixes (docs/build-reports/e02-oct27-edge-fixes.md; Nick approved items 1-4 at 07:45) -------------
+# Fix 1, who's who: the camera's spot for the followed robot came within 13.6 cm of set-aside Right in run 4 (stage 2)
+# and from then on followed Right as "Left"; Left drove back unseen and was sent to the x = 122 edge.
+ID_NEAR_CM = 20.0             # Nick's "about 20 cm": a followed spot this near a parked / set-aside robot's centre opens
+# an identity doubt. DOE note: yes, logs: the tracker's swaps against the gap to the nearest parked robot (every
+# session's track.csv + positions); tonight's one swap was at 13.6 cm, robots side by side are about 12 cm apart
+ID_MOVE_CM = 15.0             # chosen: the doubt is settled by the robot's own odometry (RAW x, y) once its wheels have
+# taken it this far since the doubt opened (shorter moves: the camera spot's own 1-2 cm noise and the nose offset
+# swamp the comparison). DOE note: no for the length itself; the next sweep row (agreement spread) sets ID_AGREE_FRAC
+ID_AGREE_FRAC = 0.3           # chosen: the camera's spot must have moved within this share of the wheels' distance (an
+# uncalibrated U run's wheels are 2-3 % off, the spot 1-2 cm; run 4's swap: wheels 15 cm, spot 3 cm). DOE note: yes,
+# logs: |camera move - wheel move| / wheel move over every 15 cm of every route (track.csv + raw.csv), p99.9
+ID_FIX_AGREE_CM = 15.0        # chosen: with a doubt still open when the runner next takes a camera fix, the robot's own
+# pose must agree with the camera this well (an uncalibrated U run ends up to 16 cm off by its own count: tonight's
+# Left "back at start 15.9 cm off, robot thought 1.1"); worse: everyone stops and its lights say who it is (Nick:
+# "Even if all the bots need to stop for a moment to confirm, that would be okay"). Run 4: 110 cm. DOE note: yes,
+# logs: own pose against camera at every route end (e02.csv against track.csv)
+ASIDE_FAR_CM = 25.0           # Nick's "25 cm or more": a route whose far point (or any corner where it stops and turns)
+# is nearer a set-aside robot's centre than this is not run (tonight run 4's far point was 20.6-20.9 cm from Right).
+# DOE note: no, Nick's margin; it rests on ID_NEAR_CM's DOE
+# Fix 2, camera holds near edges ignore one-picture jumps (stage 2: Right held by a 5 cm one-picture jump, 16.3 -> 11.3;
+# Left's 00:43 hold by three detector pictures on a spot 5 cm away, (11.3, 97.6), inside a lock at (16, 100)).
+EDGE_JUMP_CM = 3.0            # chosen: in the drive check (border_check), a picture this far from the median of its 5
+# neighbours (2 each side) is a jump and takes their median instead (a robot at 10 cm/s moves 1.4 cm between pictures
+# at the Pi's worst 7 a second; tonight's jumps were 4.1-5.0 cm). DOE note: yes, logs: picture-to-neighbours spread
+# while driving (track.csv, lock pictures only) against the jumps' sizes; the drive-at-the-line DOE checks it hides no
+# real approach
+SPIN_MEDIAN_S = 1.0           # chosen: a turn on its spot is judged on the median of the last 1 s of pictures (at least
+# 3), and its start on the median of the 1 s before it (until now: the last 3 pictures against one picture). Left's
+# 00:43 jump lasted 3 pictures (0.2 s) in a 9-picture second. A slipping spin drifts about 1 cm/s (15:45 Right), so
+# the half-window lag costs about 0.5 cm. DOE note: yes, logs: replay every session's turns with 0.6 / 1.0 / 1.5 s
+# windows: false holds removed against the 15:45 slipping spins still held
+SPIN_MEDIAN_N = 9             # chosen: ... and the window reaches back to hold at least this many pictures (self-review
+# of this build: at 7 pictures a second Left's 00:43 second held only 8 pictures, 4 of them the jumped spot, and the
+# median dipped to 13.8 cm, 0.4 cm inside the turn's allowance; with 9, a jump of up to 4 pictures is always a
+# minority). DOE note: same replay as SPIN_MEDIAN_S, with N = 5 / 9 / 13
+# Fix 3: after an edge find that felt a barrier (its find not used), the robot's own pose is used until the camera agrees
+# (stage 2: Right's kept camera spot was its nose at the y = 0 line while it had backed to y = 13; two watchdog stops and
+# a camera fix 9 cm off followed).
+OWN_AGREE_CM = 3.0            # Nick's 3 cm: the camera (median of its last 3 pictures) and the robot's own pose this close
+# end it. DOE note: no; the camera's noise at the finds is 0.7-0.8 cm per axis (sensor trust), so 3 cm is ~3 sd
+OWN_TRUST_MAX_S = 90.0        # chosen: at most this long (a route out and back is 60-70 s); after it the camera is used
+# again as before, logged. DOE note: yes, logs: how long the spot takes to come back to the body after an edge stop
+# (track.csv against own poses, every edge stop)
+# Fix 4: a border rescue whose last forward drive went AWAY from the near edges drives on inward instead of reversing it
+# (stage 2: Right's `go 4` heading 52 deg, away from x = 0 and y = 0, was "reversed" into its own 10 cm border).
+RESCUE_NEAR_CM = 20.0         # chosen: the open edges that count are those within this of its centre (BORDER_CM + 5).
+# DOE note: no, the border's band plus the spot's offset
+RESCUE_INWARD_COS = 0.5       # chosen: inward = its heading points at least 60 deg off along every near edge (cosine
+# with each near edge's inward direction >= 0) and at least this much inward for one of them. DOE note: no, geometry
+
+
+def median_xy(smp):
+    """Per-axis median (x, y) of (t, x, y, ...) samples (an even count: the mean of the middle two)."""
+    xs, ys = sorted(q[1] for q in smp), sorted(q[2] for q in smp)
+    n = len(xs)
+    if n % 2:
+        return xs[n // 2], ys[n // 2]
+    return 0.5 * (xs[n // 2 - 1] + xs[n // 2]), 0.5 * (ys[n // 2 - 1] + ys[n // 2])
+
+
+def recent_median(smp):
+    """Fix 2: the median (x, y) of the samples' last SPIN_MEDIAN_S, reaching back to at least SPIN_MEDIAN_N pictures
+    (samples oldest first, ending at the moment judged). None if under 3."""
+    if len(smp) < 3:
+        return None
+    win = [q for q in smp if q[0] >= smp[-1][0] - SPIN_MEDIAN_S]
+    if len(win) < SPIN_MEDIAN_N:
+        win = smp[-SPIN_MEDIAN_N:]
+    return median_xy(win)
+
+
+def drop_jumps(smp, jump_cm=None, half=2):
+    """Fix 2: each picture more than jump_cm from the median of its neighbours (half each side, itself left out) takes
+    that median instead; a straight drive's pictures are left as they are."""
+    jump_cm = EDGE_JUMP_CM if jump_cm is None else jump_cm
+    if len(smp) < 3:
+        return list(smp)
+    out = []
+    for i, q in enumerate(smp):
+        nb = smp[max(0, i - half):i] + smp[i + 1:i + 1 + half]
+        mx, my = median_xy(nb)
+        if math.hypot(q[1] - mx, q[2] - my) > jump_cm:
+            out.append((q[0], mx, my) + tuple(q[3:]))
+        else:
+            out.append(q)
+    return out
+
+
+EDGE_BACKOUT_S = 30.0        # (until 2026-10-26: a backwards drive this soon after the robot's own edge stop was a
 # back-out. Now "right after" = no turn or forward drive has run since, however long a hold took: backing_out)
 FIX_HELD_AFTER_GO_S = 5.0     # chosen: this soon after a drive, a "held" tracker spot is not sent as a camera fix until
 # the camera has really seen the robot again (15:45: a held spot 15 cm off was sent to Left). DOE note: no
@@ -530,6 +619,8 @@ class Listener:
         self.msgs = []                        # (t, robot, text)
         self.lab = None                       # e02_live.LiveLab, fed every RAW row
         self.tilt = {}                        # robot -> deque of (t_recv, pitch, roll) from RAW (item 4)
+        self.odo = {}                         # robot -> deque of (t_recv, x_cm, y_cm) from RAW: its own odometry, in
+                                              # its run's own frame (fix 1, 2026-10-27: moves, not positions, compare)
 
     def __call__(self, name, kind, rtype, vals):
         t = time.time()
@@ -560,6 +651,9 @@ class Listener:
                     pr = (num(rec.get("pitch_deg")), num(rec.get("roll_deg")))
                     if None not in pr:
                         self.tilt.setdefault(name, deque(maxlen=TILT_KEEP)).append((t, pr[0], pr[1]))
+                    ox, oy = num(rec.get("x_cm")), num(rec.get("y_cm"))
+                    if ox is not None and oy is not None:
+                        self.odo.setdefault(name, deque(maxlen=400)).append((t, ox, oy, rec.get("run")))
                     run = rec.get("run")
                     lst = self.raw[run]
                     if len(lst) < 40000:
@@ -1656,6 +1750,17 @@ class Runner:
         p = self.settle(t_from=t_seen, min_s=0.3)
         if p is None:
             return None
+        p = self.identity_at_fix(robot, p)          # fix 1 (2026-10-27): a doubt from passing a parked robot
+        if p is None:
+            return None
+        kept = self.own_pose_kept(robot, cam_xy=p)  # fix 3 (2026-10-27): after a barrier-kept find
+        if kept is not None:
+            self.st.setdefault("fix_own_kept", []).append([round(time.time(), 1), robot, [round(p[0], 1), round(p[1], 1)],
+                                                           [round(kept[0], 1), round(kept[1], 1)]])
+            self.say("    %s: no camera fix: the camera (%.1f, %.1f) is %.1f cm from its own pose (%.1f, %.1f) after "
+                     "the barrier; its own pose is used" % (robot, p[0], p[1], math.hypot(p[0] - kept[0], p[1] - kept[1]),
+                                                             kept[0], kept[1]), quiet=True)
+            return kept
         h0, meas = (self.heads.get(robot) or [None, False])[:2]
         own = self.own_pose(robot) if getattr(self, "listener", None) is not None else None
         guessed = False
@@ -1780,7 +1885,11 @@ class Runner:
             self.expect_leg(text, timeout)
         if verb == "turn":
             w_ = self.tracker.where() if following else None
-            self.__dict__.setdefault("turn_start_xy", {})[robot] = (w_[1], w_[2]) if w_ else None
+            # fix 2 (2026-10-27): the start is the median of the last SPIN_MEDIAN_S of pictures, not one picture
+            h_ = self.history.since(time.time() - 3.0 * SPIN_MEDIAN_S) if following and self.history is not None \
+                else []
+            self.__dict__.setdefault("turn_start_xy", {})[robot] = recent_median(h_) if len(h_) >= 3 else \
+                ((w_[1], w_[2]) if w_ else None)
             try:
                 self.__dict__.setdefault("turn_deg", {})[robot] = abs(float(text.split()[1]))
             except (IndexError, ValueError):
@@ -3157,10 +3266,11 @@ class Runner:
             self.st.save()
         return ok, why
 
-    def back_out(self, robot, within_s=60.0):
+    def back_out(self, robot, within_s=60.0, inward_ok=False):
         """Reverse the robot's last forward drive (that way was clear a moment ago): a camera fix if the camera sees
-        it, then `go -d` (at most BACK_MAX_CM: backing is blind). True if it backed."""
-        last = None
+        it, then `go -d` (at most BACK_MAX_CM: backing is blind). True if it backed. inward_ok (the rescue, fix 4):
+        a last drive that went away from the near edges is driven on instead (drive_was_inward)."""
+        last, last_rec = None, None
         with self.listener.cv:
             for t, nm, rec in reversed(self.listener.recs["LEG"]):
                 if nm != robot or t < time.time() - within_s:
@@ -3168,18 +3278,54 @@ class Runner:
                 if (rec.get("state") or rec.get("result")) in ("done", "failed") and rec.get("kind") == "go":
                     v = num(rec.get("value"))
                     if v is not None and v > 0:
-                        last = v
+                        last, last_rec = v, rec
                         break
         if last is None:
             return False
         d = min(last + 2.0, BACK_MAX_CM)
-        self.say("  %s is at an open edge: backing out the way it came (%.0f cm) ..." % (robot, d))
+        inward = Runner.drive_was_inward(self, robot, last_rec) if inward_ok else ""
+        if inward:
+            # fix 4 (2026-10-27 00:57, Right): its last forward drive went away from the near edges (heading 52 deg
+            # at the corner of x = 0 and y = 0); reversing it took it into its own 10 cm border. It drives on inward
+            self.say("  %s is near an open edge, but its last drive went away from it (%s): it drives on inward "
+                     "(%.0f cm) ..." % (robot, inward, d))
+            self.st.setdefault("rescue_inward", []).append([round(time.time(), 1), robot, inward, round(d, 1)])
+        else:
+            self.say("  %s is at an open edge: backing out the way it came (%.0f cm) ..." % (robot, d))
         if not self.begin_moves(robot, "backing out"):
             return False
         self.fix_now(robot)
-        state, info = self.send_leg(robot, "go %.1f" % -d, d / DRIVE_CMS_GUESS * 2.5 + 6.0)
+        state, info = self.send_leg(robot, "go %.1f" % (d if inward else -d), d / DRIVE_CMS_GUESS * 2.5 + 6.0)
         self.moves.pop(robot, None)
         return state in ("done", "dup")
+
+    def drive_was_inward(self, robot, rec):
+        """Fix 4: words if the forward drive in LEG record rec pointed inward from every open edge within
+        RESCUE_NEAR_CM of the robot (its own heading at the drive against each edge's inward direction: none below 0,
+        one at least RESCUE_INWARD_COS), else '' (unknown heading or position, no near edge, or not inward)."""
+        bd = getattr(self, "board", None)
+        if bd is None or getattr(self, "exploring", False) or not rec:
+            return ""
+        th = num(rec.get("th_deg"))
+        if th is None:
+            return ""
+        w = self.tracker.where() if (getattr(self, "tracker", None) is not None and
+                                     self.tracker.active == robot) else None
+        xy = (w[1], w[2]) if w else (num(rec.get("x_cm")), num(rec.get("y_cm")))
+        if None in xy:
+            return ""
+        hx, hy = math.cos(math.radians(th)), math.sin(math.radians(th))
+        near = []
+        for ax, val in bd.open_edges():
+            dd = ST.inward_cm(bd, ax, val, xy[0] if ax == "x" else xy[1])
+            if dd >= RESCUE_NEAR_CM:
+                continue
+            # the edge's inward direction: which way along x (or y) its inward distance grows
+            sgn = 1.0 if ST.inward_cm(bd, ax, val, (xy[0] if ax == "x" else xy[1]) + 1.0) > dd else -1.0
+            near.append(("%s = %.0f" % (ax, val), sgn * (hx if ax == "x" else hy)))
+        if not near or min(c for _, c in near) < 0 or max(c for _, c in near) < RESCUE_INWARD_COS:
+            return ""
+        return "heading %.0f deg, inward from %s" % (th, " and ".join(n for n, _ in near))
 
     def retry_find(self, robot, park=True, placed=False):
         """One try at getting a robot back with nobody's hands: a fresh picture of the floor, a turn on its spot,
@@ -3659,6 +3805,150 @@ class Runner:
         if None in (x, y, th) or not self.board.on_board(x, y, margin=-5.0):
             return None                     # off the board: not a pose it can have (unknown pose, power cycle)
         return (x, y, th)
+
+    ID_ODO_FRESH_S = 1.0      # RAW rows older than this are not "now" (a robot streams them 10-40 a second while it
+    # drives a route). DOE note: no, a staleness guard
+
+    def identity_tick(self, robot, now=None):
+        """Fix 1 (2026-10-27, run 4: the camera followed set-aside Right as "Left" from the far point on). Watchdog,
+        every tick, for the followed robot: when its camera spot (median of the last 3 pictures) comes within
+        ID_NEAR_CM of another robot's parked / set-aside centre, a doubt opens. Its own odometry (RAW) then settles it:
+        once its wheels have moved ID_MOVE_CM, the camera spot must have moved the same within ID_AGREE_FRAC
+        (confirmed: the doubt closes). Words if they disagree (the caller stops everyone; its lights say who it is),
+        else ''. A doubt its wheels cannot settle (no RAW: idle legs) is settled at the next camera fix
+        (identity_at_fix)."""
+        now = time.time() if now is None else now
+        hist = getattr(self, "history", None)
+        smp = hist.since(now - 1.0) if hist is not None else []
+        if len(smp) < 3:
+            return ""
+        cx, cy = median_xy(smp[-3:])
+        doubts = self.__dict__.setdefault("id_doubt", {})
+        lis = getattr(self, "listener", None)
+        od = list((getattr(lis, "odo", None) or {}).get(robot) or [])
+        odo = od[-1] if od and now - od[-1][0] <= self.ID_ODO_FRESH_S else None
+        d = doubts.get(robot)
+        if d is None:
+            near = None
+            for n, q in (self.st.get("positions") or {}).items():
+                if n == robot or not q or q[0] is None or q[1] is None:
+                    continue
+                g = math.hypot(cx - q[0], cy - q[1])
+                if g < ID_NEAR_CM and (near is None or g < near[1]):
+                    near = (n, g)
+            if near is None:
+                return ""
+            doubts[robot] = dict(t=now, cam=(cx, cy), near=near[0], gap=near[1], odo0=odo)
+            self.st.setdefault("identity_doubts", []).append([round(now, 1), robot, near[0], round(near[1], 1),
+                                                              [round(cx, 1), round(cy, 1)], "open"])
+            self.say("    %s: the camera's spot is %.0f cm from %s's spot: who is who is checked (its wheels against "
+                     "the camera)" % (robot, near[1], near[0]), quiet=True)
+            return ""
+        if odo is None:
+            return ""
+        if d["odo0"] is None or (len(d["odo0"]) > 3 and len(odo) > 3 and d["odo0"][3] != odo[3]):
+            d["odo0"], d["cam"] = odo, (cx, cy)        # its RAW starts now (or a new run's frame): count from here
+            return ""
+        wheels = math.hypot(odo[1] - d["odo0"][1], odo[2] - d["odo0"][2])
+        if wheels < ID_MOVE_CM:
+            return ""
+        cam = math.hypot(cx - d["cam"][0], cy - d["cam"][1])
+        doubts.pop(robot, None)
+        ok = abs(cam - wheels) <= ID_AGREE_FRAC * wheels
+        self.st.setdefault("identity_doubts", []).append([round(now, 1), robot, d["near"], round(d["gap"], 1),
+                                                          [round(cx, 1), round(cy, 1)],
+                                                          "wheels agree" if ok else "wheels disagree",
+                                                          round(wheels, 1), round(cam, 1)])
+        if ok:
+            self.say("    %s: its wheels moved %.0f cm and the camera's spot %.0f cm: it is %s" % (
+                robot, wheels, cam, robot), quiet=True)
+            return ""
+        self.mark("e02 identity doubt %s" % robot)
+        return ("after passing %s, its wheels moved %.0f cm but the camera's spot moved %.0f cm: the camera may be "
+                "following %s" % (d["near"], wheels, cam, d["near"]))
+
+    def identity_at_fix(self, robot, p):
+        """Fix 1: a camera fix while a doubt is still open (identity_tick could not settle it): its own pose must
+        agree within ID_FIX_AGREE_CM; otherwise everyone stops and it is found by its lights (the lost hold: on its
+        own first, Nick if that fails) before the fix. Returns the position to use (p, or the camera's after the
+        find), or None (not found)."""
+        d = (getattr(self, "id_doubt", None) or {}).get(robot)
+        if d is None:
+            return p
+        own = self.own_latest_xy(robot)
+        gap = None if own is None else math.hypot(own[0] - p[0], own[1] - p[1])
+        self.id_doubt.pop(robot, None)
+        if gap is not None and gap <= ID_FIX_AGREE_CM:
+            self.st.setdefault("identity_doubts", []).append([round(time.time(), 1), robot, d["near"],
+                                                              round(d["gap"], 1), [round(p[0], 1), round(p[1], 1)],
+                                                              "own pose agrees", round(gap, 1)])
+            return p
+        why = ("after passing %s, the camera puts it at (%.0f, %.0f), %s: the camera may be following %s" % (
+            d["near"], p[0], p[1], "its own pose is not known" if gap is None else
+            "%.0f cm from its own pose (%.0f, %.0f)" % (gap, own[0], own[1]), d["near"]))
+        self.st.setdefault("identity_doubts", []).append([round(time.time(), 1), robot, d["near"], round(d["gap"], 1),
+                                                          [round(p[0], 1), round(p[1], 1)], "own pose disagrees",
+                                                          None if gap is None else round(gap, 1)])
+        self.mark("e02 identity doubt %s" % robot)
+        self.say("  %s: %s. Everyone stops while its lights say where it is." % (robot, why))
+        ans = self.hold_for_nick(robot, "lost", why)
+        if ans not in ("c", "a") or robot in self.held_out:
+            return None
+        return self.settle(min_s=0.3)
+
+    def own_latest_xy(self, robot):
+        """The robot's own newest (x, y) in the board's frame: its last leg, its last find, or the end of its last
+        firmware route (E02 record), whichever came last. None if none (or own_pose says its pose is untrusted)."""
+        lis = getattr(self, "listener", None)
+        if lis is None:
+            return None
+        best = None
+        try:
+            own = self.own_pose(robot)
+        except Exception:
+            own = None
+        r = lis.latest("LEG", robot)
+        f = lis.latest("FIND", robot)
+        t_own = max(r[0] if r else 0.0, f[0] if f else 0.0)
+        if own is not None:
+            best = (t_own, own[0], own[1])
+        e = lis.latest("E02", robot)
+        if e and (best is None or e[0] > best[0]):
+            ex, ey = num(e[1].get("end_x")), num(e[1].get("end_y"))
+            if ex is not None and ey is not None and (self.board is None or self.board.on_board(ex, ey, margin=-5.0)):
+                best = (e[0], ex, ey)
+        return None if best is None else (best[1], best[2])
+
+    def own_pose_kept(self, robot, cam_xy=None, now=None):
+        """Fix 3 (2026-10-27): after a barrier-kept find, is the camera still not to be used for this robot? Ends
+        (False) once the camera (cam_xy, else the median of its last 3 pictures) agrees with its own pose within
+        OWN_AGREE_CM, or after OWN_TRUST_MAX_S. Returns its own (x, y) while kept, else None."""
+        ou = getattr(self, "own_until", None) or {}
+        t0 = ou.get(robot)
+        if t0 is None:
+            return None
+        now = time.time() if now is None else now
+        if now - t0 > OWN_TRUST_MAX_S:
+            ou.pop(robot, None)
+            self.st.setdefault("own_pose_kept", []).append([round(now, 1), robot, "expired"])
+            self.say("    %s: the camera has not agreed with its own pose in %.0f s: the camera is used again" % (
+                robot, OWN_TRUST_MAX_S), quiet=True)
+            return None
+        own = self.own_latest_xy(robot)
+        if own is None:
+            return None
+        if cam_xy is None and self.tracker is not None and self.tracker.active == robot and self.history is not None:
+            smp = self.history.since(now - 1.0)
+            if len(smp) >= 3:
+                cam_xy = median_xy(smp[-3:])
+        if cam_xy is not None and math.hypot(cam_xy[0] - own[0], cam_xy[1] - own[1]) <= OWN_AGREE_CM:
+            ou.pop(robot, None)
+            self.st.setdefault("own_pose_kept", []).append([round(now, 1), robot, "agreed",
+                                                            round(math.hypot(cam_xy[0] - own[0], cam_xy[1] - own[1]), 1)])
+            self.say("    %s: the camera agrees with its own pose again (%.1f cm): camera used" % (
+                robot, math.hypot(cam_xy[0] - own[0], cam_xy[1] - own[1])), quiet=True)
+            return None
+        return own
 
     def own_path(self, robot, until, n=BLIND_RETRACE_LEGS):
         """Where the robot's own pose was at the end of each of its last n finished drives before `until` (the start
@@ -7647,6 +7937,12 @@ class Runner:
                      "edge. Its find is not used; it keeps its camera position (the find would have moved it %.1f cm)."
                      % (robot, ", ".join("%s = %.0f" % b_ for b_ in barrier), math.hypot(bx - pose[0], by - pose[1])))
             self.mark("e02 %s %s edge find barrier" % (order, robot))
+            # fix 3 (2026-10-27 00:53, Right): the camera's spot after an edge stop is the nose at the line, not the
+            # body; its own pose is used until the camera agrees within OWN_AGREE_CM (own_pose_kept)
+            self.__dict__.setdefault("own_until", {})[robot] = time.time()
+            self.st.setdefault("own_pose_kept", []).append([round(time.time(), 1), robot, "start"])
+            self.say("    %s: its own pose is used until the camera agrees with it within %.0f cm (the camera's spot "
+                     "after an edge stop rides on its nose)." % (robot, OWN_AGREE_CM))
             self.st.save()
             out.update(ok=True, result="ok", words="felt a barrier where an open edge should be: kept its camera "
                        "position", t1=t1, barrier=True)
@@ -7862,7 +8158,7 @@ class Runner:
                         good = self.edge_clear_before_turn(robot, explore=bool(getattr(self, "exploring", False)))
                         steps.append("straight out from the edge: %s" % ("clear" if good else "not clear"))
                     else:
-                        good = self.back_out(robot, within_s=900.0)
+                        good = self.back_out(robot, within_s=900.0, inward_ok=True)
                         steps.append("its last forward drive reversed: %s" % ("done" if good else "no drive known"))
                     room = self.camera_edge_room(robot)
                     ok = bool(good) and (room is None or room >= EDGE_TURN_CM - 0.5)
@@ -8436,7 +8732,16 @@ class Runner:
         s0 = (getattr(self, "turn_start_xy", None) or {}).get(robot)
         if s0 is None or len(smp) < 3:
             return ""
-        xs, ys = sorted(q[1] for q in smp[-3:])[1], sorted(q[2] for q in smp[-3:])[1]
+        # fix 2 (2026-10-27 00:43, Left): the median of the last SPIN_MEDIAN_S of pictures (until now the last 3: three
+        # detector pictures on a spot 5 cm away held a 4.7 deg turn), without detector spots past an edge's line
+        hist = getattr(self, "history", None)
+        win = [q for q in (hist.since(smp[-1][0] - 3.0 * SPIN_MEDIAN_S) if hist is not None else [])
+               if q[0] <= smp[-1][0]]
+        win = Runner.trusted_edge_samples(self, win if len(win) >= len(smp) else smp)
+        m = recent_median(win)
+        if m is None:
+            return ""
+        xs, ys = m
         a = self.border_frame(s0[0], s0[1])
         b = self.border_frame(xs, ys)
         if a is None or b is None:
@@ -8454,6 +8759,24 @@ class Runner:
                         "it; the border is %.0f cm)" % (d0 - d, d, bcm))
         return ""
 
+    def trusted_edge_samples(self, smp):
+        """Fix 2 (2026-10-27): the samples without those the tracker's detector alone placed past an open edge's line
+        (at an edge it locks on the dark nose against the dark floor: -5 to -7 cm "past the line" with the body on the
+        board, stage 1 and 2 video). Sources from src_log (the picture's time); a lock or both is kept."""
+        sl = getattr(self, "src_log", None)
+        if not sl or not smp:
+            return list(smp)
+        src = {round(t, 3): s_ for t, s_ in list(sl)}
+        out = []
+        for q in smp:
+            if src.get(round(q[0], 3)) == "detector":
+                f = self.border_frame(q[1], q[2])
+                if f is not None and min(ST.inward_cm(f[0], ax, v, f[1] if ax == "x" else f[2])
+                                         for ax, v in f[0].open_edges()) < 0:
+                    continue
+            out.append(q)
+        return out
+
     def border_check(self, robot, smp, bcm=None):
         """Words if the robot is within BORDER_CM of an open edge and moving towards it, else ''. smp: the tracker's
         recent (t, x, y, ...) samples."""
@@ -8464,6 +8787,9 @@ class Runner:
         t_end = getattr(self, "seek_end", {}).get(robot)
         if t_end is not None:
             smp = [q for q in smp if q[0] > t_end]
+        # fix 2 (2026-10-27 00:54, Right): no detector spot past an edge's line, and one- or two-picture jumps take
+        # their neighbours' median (a 5 cm one-picture jump, 16.3 -> 11.3, held Right and it was left out)
+        smp = drop_jumps(Runner.trusted_edge_samples(self, smp))
         if len(smp) < 3:
             return ""
         driving = robot in self.leg_live or (self.moves.get(robot) or {}).get("run", "-") not in ("-", None)
@@ -8677,10 +9003,21 @@ class Runner:
                     self.hold_for_nick(robot, "lost", why_l)
                     continue
                 self.camera_still_check(robot, last_still)
+                # fix 1 (2026-10-27, run 4): the followed spot passed a parked / set-aside robot; its wheels disagree
+                # with the camera: everyone stops and its lights say who it is (the lost hold finds it first)
+                why_i = self.identity_tick(robot)
+                if why_i:
+                    self.watchdog_fired = True
+                    self.watch_stop = "identity"
+                    self.hold_for_nick(robot, "lost", why_i)
+                    continue
                 smp = self.history.since(time.time() - 0.6)
                 if len(smp) < 3 or time.time() - smp[-1][0] > 1.0:
                     continue
-                why_b = self.border_check(robot, smp)
+                # fix 3 (2026-10-27): after a barrier-kept find the camera's spot is not used for its edge checks
+                # until it agrees with the robot's own pose; the robot's own border and edge sensors guard it
+                own_kept = self.own_pose_kept(robot) is not None
+                why_b = "" if own_kept else self.border_check(robot, smp)
                 if getattr(self.a, "home", False):
                     self.border_shadow(robot, smp, bool(why_b))
                 if not why_b and self.speed_guard_check(robot, smp, last):
@@ -8720,7 +9057,7 @@ class Runner:
                     # home leg pushed Center for 7 s); the open edges are the border's job (the guard) meanwhile
                     why = ST.hazard(smp_w, None, parked, robot_cm=robot_cm)
                 else:
-                    edge_cm = -1e9 if robot == getattr(self, "edge_touch", None) else self.watch_edge_cm
+                    edge_cm = -1e9 if robot == getattr(self, "edge_touch", None) or own_kept else self.watch_edge_cm
                     if self.backing_out(robot):
                         edge_cm = -1e9       # fix 4: backing straight out after its own edge stop: always allowed
                     jump = None
@@ -8926,12 +9263,14 @@ class Runner:
         out, back = self.board.route_floor(route, (sx, sy))
         pts = [(sx, sy)] + [tuple(q) for q in out] + [tuple(q) for q in back]
         lim = PL.WATCH_ROBOT_CM + ASIDE_ROUTE_MARGIN_CM
+        stops = [tuple(q) for q in out] + [tuple(q) for q in back[:-1]]   # fix 1 (2026-10-27): far point, corners
         best = None
         for n in aside:
             q = self.st["positions"][n]
             d = PL.dist_to_path((q[0], q[1]), pts)
-            if d < lim and (best is None or d < best[1]):
-                best = (n, d)
+            ds = min((math.hypot(q[0] - w[0], q[1] - w[1]) for w in stops), default=math.inf)
+            if (d < lim or ds < ASIDE_FAR_CM) and (best is None or min(d, ds) < best[1]):
+                best = (n, min(d, ds))
         return best
 
     def do_run(self, r):
