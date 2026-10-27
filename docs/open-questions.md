@@ -39,6 +39,14 @@ Answered ones move to the bottom with the answer and date.
     Monday?
 26. Ladder default: run straight on while steps pass (stop at a FAIL), or wait for Enter before each step
     (`ladder pause`)?
+27. Where can the school camera go (straight overhead, or a stand at the side), and how high? (An angled camera without
+    its height in the calibration failed 4 of 4 simulated Mondays.)
+28. If a robot dies or is lifted mid-run: should the other two carry on and park, or everything stop (as now)?
+29. If re-plans find no routes: acceptable fallback = drop the rest of Left and Right's play, Center finishes mowing,
+    everyone parks?
+30. Add run_plan's refusal of any plan under 8 cm now? (The sweep found a planner bug that planned two robots into
+    each other; fixed, but this is the safety net.)
+31. 3 more seeds for the conditions that held, before calling them safe (about 2 h of machine time)?
 
 ### Robots and sessions
 8. What stands just beyond the home board's x = 0 edge at about y = 30-60? (Your 07:45 "yes" to this one was read as
