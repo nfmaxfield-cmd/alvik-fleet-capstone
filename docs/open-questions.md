@@ -7,10 +7,6 @@ Answered ones move to the bottom with the answer and date.
 
 ### School demo (Monday)
 4. Should Mission Control become a tab on the live page now (it is a separate page, port 8095)?
-14. Phase 0 gate: "within about 3 cm" read as each robot's 95th percentile from its lines (one camera jump does not fail
-    a run). Or did you mean the maximum?
-17. Fix 3: after a barrier find the camera's edge watch is off for that robot for up to one route (90 s); its own
-    border and edge sensors stay on. Acceptable, or limit it to a few seconds?
 18. Should the inward rescue also apply to the other back-out ("try again on its own" step)? Same weakness.
 25. Ladder L4: with robots parked where they were left, the square is usually 42 cm instead of 62. A fair test for
     Monday?
@@ -42,6 +38,12 @@ Answered ones move to the bottom with the answer and date.
 13. Should creep steps change? 12 of 23 stalled (faster creep, or end on the front sensor instead of the wheel count).
 
 ## Answered
+- 2026-10-27 18:26:
+  - Warm-up results are kept and used for that day's runs (Nick: "they're allowed to retain that data").
+  - Q14 pass mark: 95 of 100 camera readings within 3 cm; also analyse whether misses come as one-off frames or runs of
+    several in a row.
+  - Q17: limit the own-pose window after a barrier find to about 10 s.
+  - Q16: Nick thought he flashed firmware; the 15:31 check showed 2026-10-25c on all three, so it did not take.
 - 2026-10-27 16:43:
   - School table: a little more than 2 ft x 4 ft, not more than 2.5 ft x 4.5 ft (about 61-76 x 122-137 cm); exact size
     on Thursday.
