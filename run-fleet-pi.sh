@@ -15,6 +15,14 @@
 #                                          down, take it away; it prints what it would report (nothing is sent)
 #     ./run-fleet-pi.sh brick              hand-and-brick check: test 2 with the brick watch on
 #     ./run-fleet-pi.sh stop               stop the recorder and upload today's Phase 0 logs and video
+# The remote ladder (nobody at the board; robots left anywhere on it, 30 cm in, 40 cm apart): cautious to bold,
+# each step only after the one before passed; Ctrl+C stops every robot (tools/fleet/ladder.py):
+#     ./run-fleet-pi.sh ladder             L0 status .. L5 cross, from the first step not passed yet; stops at a FAIL
+#     ./run-fleet-pi.sh ladder pause       the same, waiting for Enter before each step
+#     ./run-fleet-pi.sh L3                 one step (L0 status, L1 calibrate, L2 turns, L3 straight, L4 square,
+#                                          L5 cross, L6 brick: `L6 attended`, only with someone at the board)
+#     ./run-fleet-pi.sh turncheck Center   the camera-measured turn check alone (replaces `turn` and the ruler)
+#     ./run-fleet-pi.sh ladder-status      what has passed, where each robot is
 # The first test starts the recorder (both cameras, to the USB drive) in a tmux session called fleet; it keeps
 # recording until `stop`. Each test starts the camera bridge, runs the plan, then prints the line check (GATE).
 set -u
@@ -32,6 +40,17 @@ DAY=$(date +%Y%m%d)
 SAFE=(--send "set safe_edge 3" --send "set edge_dir 0" --send "set edge_thr 150" --send "set edge_n 3"
       --send "set edge_bot_cm 11" --send "set bumper_cm 0")
 WHAT="${1:-}"; shift || true
+
+# the ladder's connection: the robots, the recorder's pictures, the calibration (the simulated board in dry runs:
+# FLEET_DRY=1, LADDER_DRY_ARGS e.g. "--turn-err Center=18 --seed 7")
+ladder() {
+  if [ "$DRY" = 1 ]; then
+    python3 tools/fleet/ladder.py "$@" --dry ${LADDER_DRY_ARGS:-}
+  else
+    start_recorder
+    python3 tools/fleet/ladder.py "$@" $IPS --stream 127.0.0.1:8000 --calib "$CALIB"
+  fi
+}
 
 rec_running() { tmux has-session -t fleet 2>/dev/null && tmux list-windows -t fleet -F '#W' | grep -qx rec; }
 
@@ -94,6 +113,24 @@ run_test() {   # run_test NAME MAP [bridge options]
 }
 
 case "$WHAT" in
+  ladder)
+    case "${1:-}" in
+      pause) ladder run --pause ;;
+      from) ladder run --from "${2:-L0}" ;;
+      *) ladder run ;;
+    esac ;;
+  L0|L1|L2|L3|L4|L5|L6|l0|l1|l2|l3|l4|l5|l6)
+    A=""; [ "${1:-}" = attended ] && A="--attended"
+    [ "${1:-}" = ignore ] && A="--ignore ${2:-}"     # L0 ignore Center: heard on the WiFi, not on the board
+    ladder step "$WHAT" $A ;;
+  turncheck)
+    ladder turncheck "${1:-Center}" ;;
+  ladder-status)   # (no recorder needed)
+    D=""; [ "$DRY" = 1 ] && D="--dry"
+    python3 tools/fleet/ladder.py status $D ;;
+  ladder-reset)
+    D=""; [ "$DRY" = 1 ] && D="--dry"
+    python3 tools/fleet/ladder.py reset $D ;;
   setup)
     if rec_running; then
       echo "The recorder is running (tmux session fleet) and holds the cameras. Stop it first with:"
@@ -130,11 +167,11 @@ case "$WHAT" in
   stop)
     OUT="$(cat /tmp/fleet_rec_out 2>/dev/null || echo "$HOME/recordings")"
     tmux kill-window -t fleet:bridge 2>/dev/null || true
-    for d in $(ls -td logs/$DAY-*-p0-* 2>/dev/null); do
+    for d in $(ls -td logs/$DAY-*-p0-* logs/$DAY-ladder 2>/dev/null); do
       python3 tools/pi/upload_session.py --recordings "$OUT" --logs-only --session "$d" --tag "p0-$(basename "$d")" || true
     done
     python3 tools/pi/upload_session.py --recordings "$OUT" --stop-recorder --no-logs --tag "p0-$DAY-recording" || true
     tmux kill-session -t fleet 2>/dev/null || true ;;
   *)
-    sed -n '2,18p' "$0"; exit 1 ;;
+    sed -n '2,27p' "$0"; exit 1 ;;
 esac

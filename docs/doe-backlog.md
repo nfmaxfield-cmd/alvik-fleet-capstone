@@ -355,6 +355,22 @@ Chosen with no DOE: the Phase 0 gate (3 cm at the 95th percentile: a pass mark),
 distance / straightness (1 s, 5 cm, 2 deg: guards), MAX_BACKLOG_S 0.3 s (a guard), the Phase 0 spots 30 cm in (keeps
 the camera out of the edge zone), 3 runs per test.
 
+## Remote ladder (2026-10-27, built)
+
+Plan: [2026-10-27 session plan](session-plans/2026-10-27.md), "Remote ladder". Code: `tools/fleet/ladder.py` (each
+number's comment says the same).
+
+| Setting | Chosen | DOE | Where | Status |
+|---|---|---|---|---|
+| Turn check: each quarter turn within (ladder TURN_TOL_DEG) / all four within (TOTAL_TOL_DEG) | 6 deg / 8 deg | 4 / 6 / 8 deg against repeated turn checks of a healthy robot (false FAILs) and the turn error that later breaks the line check (L3/L4 p95). Dry runs: camera vs truth within 2.5 deg | Board | open |
+| Heading crawl length (CRAWL_CM) | 10 cm out and back | 6 / 10 cm: heading spread over repeated crawls of a standing robot against time taken | Board | open |
+| Cautious speed (SLOW_CMS: L3, the slow L4 and L5, drives to a start) | 5 cm/s | 5 / 7.5 / 10 cm/s against the line check's p95 and camera-guard stops | Board | open |
+| Cautious spacing for the cross (WIDE_SEP_CM) | 10 cm (planner default 5) | 5 / 10 / 15 cm: who-is-who unsure moments against the closest the camera saw them | Board | open |
+
+Chosen with no DOE: 25 cm edge refusal (Nick's rule), calibration room 30 / 35 cm (the firmware's needs), 20 cm from a
+test's lines to a parked robot (safety room), test layouts 30 cm in (25 if nothing fits), the 15 cm lead-in to a
+start spot, the start check 4 cm / 6 deg, the 25 cm straight in L3, minimum battery 25 %.
+
 ## Already set by data
 
 - **Line edge cue edge_thr 150** (e02.py SAFETY_SETTINGS): plywood reads 52-84 in every E02 session, the two real

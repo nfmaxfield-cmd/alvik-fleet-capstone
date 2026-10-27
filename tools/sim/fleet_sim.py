@@ -164,6 +164,35 @@ class LiveRobot(R.Robot):
         if lag > 0.001:
             time.sleep(lag)
 
+    def handle_command(self, raw, running):
+        """home_lab.ino's `led <r> <g> <b> [ms]` (firmware 2026-10-22a: both lights steady for ms, not blocking;
+        refused during a run), which the robot model has none of; everything else as robot.py. 2026-10-27: the
+        remote ladder (tools/fleet/ladder.py) finds robots by their lights in the simulated overhead pictures."""
+        verb = raw.strip().split(" ")[0].lower()
+        if verb != "led":
+            return super().handle_command(raw, running)
+        self.last_rx = self.millis()
+        if running:
+            self.send("M,busy: send stop first")
+            return False
+        parts = (raw.split() + ["1", "1", "1", "2000"])[1:5]
+        try:
+            on = any(int(float(v)) for v in parts[:3])
+            ms = max(50.0, min(20000.0, float(parts[3])))
+        except ValueError:
+            on, ms = True, 2000.0
+        self.led_until = time.time() + ms / 1000.0 if on else 0.0
+        self.send("M,%s: led %s for %d ms" % (self.name, " ".join(parts[:3]), ms))
+        return False
+
+    def lights(self):
+        """(left, right) rgb 0-1 as the camera sees them: the `led` command's white while it lasts, else the run's
+        own lights (robot.py set_leds)."""
+        if time.time() < getattr(self, "led_until", 0.0):
+            return (1.0, 1.0, 1.0), (1.0, 1.0, 1.0)
+        led = self.leds[-1] if self.leds else (0, (0, 0, 0), (0, 0, 0))
+        return tuple(led[1]), tuple(led[2])
+
     def firmware_loop(self, sim):
         """home_lab.ino loop(): read commands, start what was asked for, announce ourselves."""
         last_hello = -1e9
@@ -256,6 +285,14 @@ class FleetSim:
         fw = config.firmware_version()
         now = time.time()
         self.robots = {}
+        starts = {}
+        if getattr(args, "starts", None):     # --starts FILE: {name: [x, y, heading deg]} instead of the map's spots
+            with open(args.starts) as f:
+                starts = json.load(f)
+        turn_err = {}
+        for te in getattr(args, "turn_err", None) or []:
+            n, _, pct = te.partition("=")
+            turn_err[n] = float(pct)
         for k, rr in enumerate(self.m["robots"]):
             name = rr["name"]
             ip = "127.0.0.%d" % (2 + k)
@@ -264,9 +301,14 @@ class FleetSim:
                            self.rng.randrange(0x1000, 0x10000), ip)
             rb.idle_until(now)
             e = args.start_noise
-            rb.x = rr["start"][0] + self.rng.uniform(-e, e)
-            rb.y = rr["start"][1] + self.rng.uniform(-e, e)
-            rb.th = math.radians(rr["start"][2] + self.rng.uniform(-3 * e, 3 * e))
+            st = starts.get(name, rr["start"])
+            rb.x = st[0] + self.rng.uniform(-e, e)
+            rb.y = st[1] + self.rng.uniform(-e, e)
+            rb.th = math.radians(st[2] + self.rng.uniform(-3 * e, 3 * e))
+            if name in turn_err:
+                # --turn-err NAME=PCT: its real turns are PCT % bigger than its gyro says (Center, 2026-10-26 night:
+                # 15-20 deg off a quarter turn). The gyro under-reads by 1 / (1 + PCT / 100)
+                rb.gyro_scale = 1.0 / (1.0 + turn_err[name] / 100.0) - 1.0
             rb._record()
             rb.fw_yaw_sign = 0 if args.uncalibrated else 1
             rb.world_polys = self.static_polys       # shared list: a dropped brick shows up for everyone
@@ -441,7 +483,7 @@ class FleetSim:
         n = 0
         while not self.stop.is_set():
             t_cap = time.time()
-            poses = [(rb.x, rb.y, rb.th) for rb in self.robots.values() if not rb.lifted]
+            poses = [(rb.x, rb.y, rb.th) + tuple(rb.lights()) for rb in self.robots.values() if not rb.lifted]
             boxes, hand = [], None
             if getattr(a, "live_brick", False) and self.t_plan0 is not None:
                 spec = a.brick
@@ -679,7 +721,7 @@ class FleetSim:
             while time.time() - self.t_start < self.args.max_s:
                 time.sleep(0.2)
                 with self.lock:
-                    if len(self.followed) == len(self.robots):
+                    if len(self.followed) == len(self.robots) and not getattr(self.args, "persist", False):
                         break
         except KeyboardInterrupt:
             pass
@@ -769,8 +811,18 @@ def main(argv=None):
     ap.add_argument("--live-brick", action="store_true",
                     help="--serve-live: the brick is only shown in the pictures (a hand puts it down)")
     ap.add_argument("--max-s", type=float, default=600.0)
+    ap.add_argument("--starts", help="JSON {name: [x, y, heading deg]}: where the robots really start (default: the "
+                                     "map's start spots)")
+    ap.add_argument("--turn-err", action="append", default=[], metavar="NAME=PCT",
+                    help="that robot's real turns are PCT %% bigger than its gyro says (repeatable)")
+    ap.add_argument("--persist", action="store_true",
+                    help="keep running after the follow runs end (until --max-s or SIGTERM): one board for several "
+                         "programs in a row (the remote ladder's dry runs)")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args(argv)
+    if args.persist:
+        import signal
+        signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))   # kill: report first
     sim = FleetSim(args)
     rep = sim.run()
     print(json.dumps({k: v for k, v in rep.items() if k not in ("dockings", "events")}, indent=1))

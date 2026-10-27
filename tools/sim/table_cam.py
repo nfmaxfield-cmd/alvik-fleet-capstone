@@ -74,12 +74,15 @@ class TableCamera:
         self._fill(img, [(px + 5.5 * math.cos(t), py + 5.5 * math.sin(t), z) for t in a], (112, 142, 196))
 
     def render(self, robots=(), boxes=(), hand=None):
-        """Grey picture: robots [(x, y, th_rad)], boxes [polygon], hand (palm_xy, from_xy) or None."""
+        """Grey picture: robots [(x, y, th_rad)] or [(x, y, th_rad, left rgb, right rgb)] (their lights, 0-1; dark
+        when left out), boxes [polygon], hand (palm_xy, from_xy) or None."""
         img = self.bg.copy()
         for poly in boxes:
             self.draw_box(img, poly)
-        for x, y, th in robots:
-            self.R.draw_robot(img, x, y, th, 0.0, (0, 0, 0), (0, 0, 0))
+        for r in robots:
+            x, y, th = r[:3]
+            ll, lr = (r[3], r[4]) if len(r) >= 5 else ((0, 0, 0), (0, 0, 0))
+            self.R.draw_robot(img, x, y, th, 0.0, ll, lr)
         if hand is not None:
             self.draw_hand(img, hand[0], hand[1])
         self.R.add_noise(img)

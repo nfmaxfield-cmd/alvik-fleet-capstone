@@ -289,13 +289,14 @@ class Bridge:
         if t - self.last_head_t[n] < HEADING_EVERY_S:
             return None
         import e02_steer as ST
-        a, b = self.trk.own_at(n, t - HEADING_WINDOW_S), self.trk.own_at(n, t)
+        win = getattr(self.args, "heading_window_s", None) or HEADING_WINDOW_S
+        a, b = self.trk.own_at(n, t - win), self.trk.own_at(n, t)
         if a is None or b is None:
             return None
         dx, dy = b[1] - a[1], b[2] - a[2]
         if math.hypot(dx, dy) < HEADING_MIN_CM or abs(wrap180(b[3] - a[3])) > STRAIGHT_DEG:
             return None
-        smp = self.trk.history(n, t - HEADING_WINDOW_S, t)
+        smp = self.trk.history(n, t - win, t)
         h = ST.heading_from_track(smp, min_cm=HEADING_MIN_CM) if len(smp) >= 5 else None
         if h is None:
             return None
@@ -387,6 +388,9 @@ def main(argv=None):
                          "it; the camera checks the position, the first straight drive's travel heading corrects the "
                          "rest) or the outline's square (camera: NOT reliable yet: on simulated pictures single "
                          "pictures were up to 37 deg off away from the picture's middle, a perspective effect)")
+    ap.add_argument("--heading-window-s", type=float, default=HEADING_WINDOW_S,
+                    help="camera spots this far back make a travel heading (default %(default)s s). At 5 cm/s, 1 s "
+                         "covers under HEADING_MIN_CM and no heading is ever sent: the remote ladder's slow runs use 2")
     ap.add_argument("--no-travel-heading", action="store_true",
                     help="position-only fixes once the robot has its pose (the A/B check of the travel heading)")
     ap.add_argument("--margin-cm", type=float, default=8.0, help="a robot's centre may be this far past an open side")

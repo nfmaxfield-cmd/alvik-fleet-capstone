@@ -1428,6 +1428,8 @@ def main(argv=None):
         if hasattr(signal, "SIGUSR1"):        # Mission Control's Pause / Resume
             signal.signal(signal.SIGUSR1, lambda *_: setattr(coord, "pause_req", True))
             signal.signal(signal.SIGUSR2, lambda *_: setattr(coord, "pause_req", False))
+        if hasattr(signal, "SIGHUP"):         # the SSH link to the Pi dropped (the remote ladder): stop every robot
+            signal.signal(signal.SIGHUP, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     except ValueError:
         pass                                  # not the main thread (tests)
     try:
