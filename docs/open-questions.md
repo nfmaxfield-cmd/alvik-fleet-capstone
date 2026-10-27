@@ -6,46 +6,14 @@ Answered ones move to the bottom with the answer and date.
 ## Open
 
 ### School demo (Monday)
-1. What size is the school table? Monday's mission is fitted to an assumed 152 x 76 cm.
-2. Are the build's routine changes OK: start on the Show's line-up spots (Center at the left end), Show about 54 s,
-   Roam and Follow about 46 s each with Follow last? Or keep full 60 s blocks and let Left and Right finish after
-   Center?
-3. Chicken runs are short (10-24 cm) while Center mows. Keep that, or do Chicken before the mowing starts?
 4. Should Mission Control become a tab on the live page now (it is a separate page, port 8095)?
-5. The school WiFi name and password (they go only in your own `secrets.h`, never on GitHub). Firmware 2026-10-27a
-   waits on it.
-6. Connect the brick watch to the real camera and test it with your hands on the home board?
-7. A time for the 45-minute board test (Phase 0: the planner on real robots). Plan and steps ready:
-   [session plan 2026-10-27](session-plans/2026-10-27.md) (about 60 attended minutes with the bench checks).
 14. Phase 0 gate: "within about 3 cm" read as each robot's 95th percentile from its lines (one camera jump does not fail
     a run). Or did you mean the maximum?
-15. If Center's turns stay 15-20 deg off after calibrating, should Monday count on two robots? (Dry run: a robot like
-    that cannot hold its lines even with camera fixes; the new camera guard stops it.)
-16. If `check` shows 2026-10-26a or 27a on a robot: did you flash it last night, and from which commit?
 17. Fix 3: after a barrier find the camera's edge watch is off for that robot for up to one route (90 s); its own
     border and edge sensors stay on. Acceptable, or limit it to a few seconds?
 18. Should the inward rescue also apply to the other back-out ("try again on its own" step)? Same weakness.
-19. A 2-minute who's-who check on the board today: drive one robot to stop about 13 cm from a parked one and watch
-    for "who is who is checked" then "it is Left"?
-20. Should the new DOE notes go into docs/doe-backlog.md too?
-21. Was the overhead camera raised or lowered this morning? If so, its new lens height (yesterday 262 cm) for the
-    camera setup page.
-22. If the flash check recommends a darker exposure, use it from today on (check the first test's camera fixes are
-    still accepted), or keep automatic?
-23. Is the board's 0,0 corner physically marked, so corner 1 can be confirmed by eye?
-24. Which robot was at the bottom of the overhead picture at 10:07? Its top showed almost no contrast against the
-    board (0-3 grey levels against 14-24 for the others).
 25. Ladder L4: with robots parked where they were left, the square is usually 42 cm instead of 62. A fair test for
     Monday?
-26. Ladder default: run straight on while steps pass (stop at a FAIL), or wait for Enter before each step
-    (`ladder pause`)?
-27. Where can the school camera go (straight overhead, or a stand at the side), and how high? (An angled camera without
-    its height in the calibration failed 4 of 4 simulated Mondays.)
-28. If a robot dies or is lifted mid-run: should the other two carry on and park, or everything stop (as now)?
-29. If re-plans find no routes: acceptable fallback = drop the rest of Left and Right's play, Center finishes mowing,
-    everyone parks?
-30. Add run_plan's refusal of any plan under 8 cm now? (The sweep found a planner bug that planned two robots into
-    each other; fixed, but this is the safety net.)
 31. 3 more seeds for the conditions that held, before calling them safe (about 2 h of machine time)?
 32. Does the moved side camera see the whole board? A robot outside its picture can't be helped while the overhead
     is washed out (fix: move it further back, or a third camera).
@@ -74,6 +42,27 @@ Answered ones move to the bottom with the answer and date.
 13. Should creep steps change? 12 of 23 stalled (faster creep, or end on the front sensor instead of the wheel count).
 
 ## Answered
+- 2026-10-27 16:43:
+  - School table: a little more than 2 ft x 4 ft, not more than 2.5 ft x 4.5 ft (about 61-76 x 122-137 cm); exact size
+    on Thursday.
+  - School WiFi: SSID "ISE"; Nick enters the password himself into secrets.h when flashing (not stored here).
+  - School cameras: set up like the home lab, one overhead and one at an angle; the system should calibrate itself.
+  - A robot that dies (battery) mid-run is treated as a brick (an obstacle where it stopped) and the others carry on.
+  - The 8 cm safety net: yes; narrow it this week if possible.
+  - Monday: no brick drop. A short choreographed run, now with 2 robots: lawnmower from each side, meet in the middle,
+    circle each other, back off, then Chicken.
+  - Board-test time: unknown this week.
+  - Monday robots: 2 (Q15). Q2 and Q3 (the 3-robot routine's timing and Chicken during mowing) no longer apply.
+  - Firmware flashed last night: no; all three still run 2026-10-25c (the 15:31 check) (Q16).
+  - Who's who: should take under 2 minutes (Q19).
+  - DOE notes also go into docs/doe-backlog.md (Q20).
+  - Overhead camera height about the same as before (Q21).
+  - Exposure: keep automatic (Q22).
+  - 0,0 corner: not marked; use the checkered rectangle (Q23).
+  - Which robot was low-contrast at 10:07: unknown (Q24).
+  - Ladder default: run straight on (Q26).
+  - Robots should not die (battery), but a dying robot is a brick for the others (Q28).
+  - Re-plan fallback (drop play, finish, park): yes, but avoid needing it (Q29).
 - 2026-10-27 07:45: build fixes 1-4 from last night (yes; who's who may stop all robots to confirm); Nick saw Center
   drive off (yes, E1's 00:27:28 sidestep); Center and Left were still at the x = 122 edge (yes: bench `turn 90` check
   for Center first); the Pi has cooling (yes; which kind still open, question 10).
