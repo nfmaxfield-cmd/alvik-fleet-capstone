@@ -946,7 +946,10 @@ class Planner:
         start_pose = job.hold()
         best = None
         for prims in prims_options:
-            sch = schedule(prims, start_pose, t0, others, s, body) if prims else []
+            # no steps left (finished, or nothing to do): still checked, standing where it is for good. Skipping the
+            # check let a robot planned earlier drive through it (Monday sweep 2026-10-27: plans at 0.0 cm, a parked
+            # Right driven into by Center's lanes until its front sensor stopped it 2.8 cm away)
+            sch = schedule(prims, start_pose, t0, others, s, body)
             if sch is not None:
                 end = sch[-1][0] + sch[-1][1]["dur"] if sch else t0
                 if best is None or end < best[0]:

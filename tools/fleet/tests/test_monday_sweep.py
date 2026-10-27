@@ -64,3 +64,14 @@ def test_second_replan_keeps_the_visits_after_a_carried_on_step():
     labels = [v.get("label") for v in plan2["robots"]["Right"]["visit_order"] if isinstance(v, dict)]
     for lab in ("feel right side at 19", "feel right side at 57", "feel top side at 133"):
         assert lab in labels, (lab, labels)
+
+
+def test_a_robot_with_nothing_left_to_do_is_not_driven_through():
+    """A robot with no visits (finished, or parked early) was given an empty timeline without checking that standing
+    where it is clears the others: with the first pass's 3 s hold, a robot planned before it drove straight through
+    it (plan min separation 0.0 cm). Monday sweep 2026-10-27 (angled camera, sides moved): Center's lanes into the
+    parked Right, stopped only by Center's front sensor at 2.8 cm."""
+    m = WS.blank_map((0, 0, 152, 76), [("A", [30.0, 38.0, 0.0]), ("B", [76.0, 38.0, 90.0])])
+    m["tasks"] = {"A": {"visit": [{"goto": [122.0, 38.0]}], "park": False}, "B": {"visit": [], "park": False}}
+    plan = P.make_plan(m, t_limit_s=20)
+    assert plan["summary"]["min_separation_cm"] >= plan["settings"]["separation_cm"] - 1e-6
