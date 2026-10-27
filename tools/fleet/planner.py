@@ -1933,6 +1933,10 @@ def obstacle_replan(dec):
             if keep[n] == 0 and nxt["phase"] == "dwell" and st.get("dwell_left_s") is not None and lead:
                 lead[0]["dur"] = _ticks(max(st["dwell_left_s"], s.tick_s), s)
             task_i += 1
+        # a step carried on through the last re-plan (frozen there) keeps its task number from before that plan's own
+        # visits: task_i < off. Its task is done by the time this plan starts, so every visit of the last plan remains
+        # (Monday sweep 2026-10-27: seq_visits[-1:] kept only the last visit and dropped a warm-up robot's side feels)
+        task_i = max(task_i, off)
         remaining = seq_visits[task_i - off:]
         jobs.append(Job(n, st["pose"], remaining, tasks["park"], FM.pose_in(r_map["park"]),
                         start_tick=budget_ticks, lead=lead, frozen=frozen, task_offset=task_i,
