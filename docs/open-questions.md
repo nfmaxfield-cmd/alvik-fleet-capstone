@@ -22,6 +22,12 @@ Answered ones move to the bottom with the answer and date.
 15. If Center's turns stay 15-20 deg off after calibrating, should Monday count on two robots? (Dry run: a robot like
     that cannot hold its lines even with camera fixes; the new camera guard stops it.)
 16. If `check` shows 2026-10-26a or 27a on a robot: did you flash it last night, and from which commit?
+17. Fix 3: after a barrier find the camera's edge watch is off for that robot for up to one route (90 s); its own
+    border and edge sensors stay on. Acceptable, or limit it to a few seconds?
+18. Should the inward rescue also apply to the other back-out ("try again on its own" step)? Same weakness.
+19. A 2-minute who's-who check on the board today: drive one robot to stop about 13 cm from a parked one and watch
+    for "who is who is checked" then "it is Left"?
+20. Should the new DOE notes go into docs/doe-backlog.md too?
 
 ### Robots and sessions
 8. What stands just beyond the home board's x = 0 edge at about y = 30-60? (Your 07:45 "yes" to this one was read as
