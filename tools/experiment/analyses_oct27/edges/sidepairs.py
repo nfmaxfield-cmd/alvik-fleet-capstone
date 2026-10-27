@@ -5,7 +5,7 @@ robot's track.csv spot (not 'held') put into the side picture by the robot-made 
 outline within 20 px of that spot (20 px: about 5-8 cm on the floor; chosen). Rows: stage, t, robot, x, y, u, v, miss_px."""
 import sys, os, csv, json, bisect
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, '..', '..', 'analyses_oct26', 'twocam'))
+sys.path.append(os.path.join(HERE, '..', '..', 'analyses_oct26', 'twocam'))   # appended: its vid.py and remote.py must not shadow this folder's
 import numpy as np, cv2
 import det, model
 import vid, frametimes as FT
