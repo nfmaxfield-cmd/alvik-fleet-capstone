@@ -101,3 +101,25 @@ closest approach), styled like the mockup (Inter, ground #F6F7F9, white panels, 
   the line it was read from)). Short drives in open space pass with a loose heading; anything risky (near an edge,
   near another robot, Chicken, a long leg) first confirms the heading with a short crawl watched by the camera. The
   ladder's fixed 10 deg (14:5x) is the stop-gap until then.
+
+## One system (Nick, 2026-10-27 18:26-18:36): decided
+
+Nick: "I'm worried that we're spending too much time on band-aids ... instead of building the software used to craft
+runs." Decided: the fleet planner + Mission Control is the only system; the old e02 runner gets no more fixes and its
+data collection moves into Mission Control (every run logs positions from both cameras, moves, timings, battery,
+temperature). Everything must run on the Pi (the laptop only if needed; it must succeed on the Pi before Monday).
+
+### Monday (2 robots, short presentation): the default mission, editable in Mission Control
+1. Each robot starts at its own end of the table and mows its half in lanes along the SHORT side (stop-and-turn:
+   drive the lane, 90 deg, 12 cm over, 90 deg, back), working towards the centre line.
+2. They meet at the centre line mid-mow, circle each other 1.5 times on a true curve (a new arc move in firmware and
+   planner), which leaves them on swapped sides, then carry on mowing in their direction (no backing off).
+3. At the end of their mowing they turn towards each other and play Chicken (swerve at 15 cm, never under 8 cm).
+4. They spread out, equally spaced on the table, and do a small built-in dance (spins, wiggles, lights) until switched
+   off. (The Arduino factory demo is gone with our firmware; the new firmware gets its own.)
+Table: a little more than 2 x 4 ft, at most 2.5 x 4.5 ft (61-76 x 122-137 cm); exact on Thursday; the mission fits
+any size in that range. A robot that dies is a brick; the other carries on. Safety net: refuse any plan under 8 cm.
+Also runnable from one command without the page (safety net for Monday).
+
+### Blocks
+mow a region (short lanes, stop-and-turn), go to a spot, meet, circle (arc), Chicken, park/spread out, dance, wait.
