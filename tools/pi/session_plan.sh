@@ -18,7 +18,9 @@ ROBOTS="--no-side --robot 192.168.1.250 --robot 192.168.1.252 --robot 192.168.1.
 # E02_PLAN_EXTRA (2026-10-27): runner options for every stage, e.g. E02_PLAN_EXTRA="--robots Left,Right" leaves a robot
 # out (switched off, off the board) without a plan of its own. run-e02-pi.sh passes it on.
 if [ -n "${E02_PLAN_EXTRA:-}" ]; then ROBOTS="$ROBOTS $E02_PLAN_EXTRA"; echo "Every stage also gets: $E02_PLAN_EXTRA"; fi
-CAL="--classic-setup --calib tools/experiment/data/overhead_floorcal_roam1.json"
+# the overhead calibration saved by the camera setup page (./run-fleet-pi.sh setup), else roam1 (said on the screen)
+CALFILE="$(python3 tools/pi/setup_conf.py calib)"
+CAL="--classic-setup --calib $CALFILE"
 DAY=$(date +%Y%m%d-%H%M)
 stage() {
   local n="$1"; shift
@@ -40,7 +42,7 @@ if [ "${1:-}" = "right" ]; then
 fi
 if [ "${1:-}" = "right-explore" ]; then
   EXTRA="--robots Right --fit-max-rms-cm 2.5 --battery-watch-s 300"
-  stage R2 $EXTRA --calib tools/experiment/data/overhead_floorcal_roam1.json --hours 0.5   # the fallback if explore fails (still explore: no --classic-setup)
+  stage R2 $EXTRA --calib $CALFILE --hours 0.5   # the fallback if explore fails (still explore: no --classic-setup)
 fi
 if [ "${1:-}" = "edges" ]; then
   # Nick, 2026-10-26 22:49: both boards taken off for edge data (Monday's school table has none) and footage for

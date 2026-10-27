@@ -59,7 +59,10 @@ cam_dev() {   # cam_dev overhead|side: the number, or a plain message and stop
 }
 if [ -n "${OVERHEAD_DEV:-}" ]; then OD="$OVERHEAD_DEV"; echo "Overhead camera: /dev/video$OD (OVERHEAD_DEV, by hand)."
 else OD="$(cam_dev overhead)" || exit 1; echo "Overhead camera: /dev/video$OD (found by its name)."; fi
-CAM_ARGS="--device $OD --names overhead --fps 25 --label E02 --no-lock"
+# the overhead exposure saved by the camera setup page's flash check (none saved: the camera's automatic, as before)
+EXPO="$(python3 tools/pi/setup_conf.py exposure)"
+EXPO_ARG=""; [ -n "$EXPO" ] && EXPO_ARG="--overhead-exposure $EXPO"
+CAM_ARGS="--device $OD --names overhead --fps 25 --label E02 --no-lock $EXPO_ARG"
 if [ "$SIDE" = 1 ]; then
   if [ -n "${SIDE_DEV:-}" ]; then SD="$SIDE_DEV"
   else SD="$(cam_dev side)" || exit 1; fi
@@ -69,7 +72,7 @@ if [ "$SIDE" = 1 ]; then
     exit 1
   fi
   if [ "$SD" = "$OD" ]; then echo "The overhead and side cameras are both /dev/video$SD. Stopped."; exit 1; fi
-  CAM_ARGS="--device $OD,$SD --names overhead,side --fps 25 --label E02 --no-lock"
+  CAM_ARGS="--device $OD,$SD --names overhead,side --fps 25 --label E02 --no-lock $EXPO_ARG"
   echo "Recording the side camera too (/dev/video$SD); the runner uses the overhead only."
 fi
 

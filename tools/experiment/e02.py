@@ -399,7 +399,17 @@ SAFETY_SETTINGS = (("safe_edge", 3.0), ("edge_dir", 0.0), ("edge_thr", 150.0), (
                    ("bumper_cm", 0.0), ("e02_face_cm", 0.0), ("e02_back_max_cm", 10.0),
                    ("e02_cms", 10.0))   # back_max and cms: undo explore's raise and crawl
 SAFETY_CMDS = ["set %s %g" % kv for kv in SAFETY_SETTINGS]
-DEFAULT_CALIB = os.path.join(HERE, "data", "overhead_floorcal_roam1.json")   # roam1 board corners, camera unmoved
+DEFAULT_CALIB = os.path.join(HERE, "data", "overhead_floorcal_roam1.json")   # roam1 board corners
+try:   # 2026-10-27: on the Pi, the calibration saved by the camera setup page (tools/pi/camera_setup.py) comes first
+    import importlib.util as _ilu
+    _spec = _ilu.spec_from_file_location("setup_conf", os.path.join(TOOLS, "pi", "setup_conf.py"))
+    _SC = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_SC)
+    DEFAULT_CALIB = _SC.overhead_calib(relative=False)[0]
+except Exception:
+    pass
+
+
 def stretch_rms_against(obs, fitted, prior):
     """(rms cm, rms deg) of these stretches against fixed values (the pooled fit's, else the prior)."""
     w = fitted.get("wheel_scale") or prior["wheel_scale"]
@@ -4389,8 +4399,8 @@ class Runner:
             if not a.make_calibration:
                 cal = CAM.find_calibration(a.calib, a.project, self.dir)
                 if cal is None and os.path.exists(DEFAULT_CALIB):
-                    self.say("No floor calibration in the studio project: using the one made from roam1's board corners "
-                             "(%s; the overhead camera has not moved since)." % DEFAULT_CALIB)
+                    self.say("No floor calibration in the studio project: using the stored overhead calibration "
+                             "(%s: the camera setup page's if one was saved on this Pi, else roam1's)." % DEFAULT_CALIB)
                     cal = DEFAULT_CALIB
             if cal and not self.confirm_calibration(cal, img):
                 self.say("The board outline does not line up with this calibration (%s)." % cal)

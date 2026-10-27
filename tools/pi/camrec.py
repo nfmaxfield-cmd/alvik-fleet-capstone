@@ -1094,6 +1094,9 @@ def main(argv=None):
     ap.add_argument("--seconds", type=float, default=0, help="stop after this long (0 = until Ctrl+C)")
     ap.add_argument("--notes-port", type=int, default=5007, help="UDP port for notes sent by run_sheet.py (0 = off)")
     ap.add_argument("--exposure", type=control_arg, help="manual exposure (V4L2 units, usually 100 us), or auto")
+    ap.add_argument("--overhead-exposure", type=control_arg,
+                    help="manual exposure for the camera named overhead only (--names); the others keep --exposure / "
+                         "--lock / --no-lock. Set by tools/pi/camera_setup.py's flash check (tools/pi/setup_conf.py)")
     ap.add_argument("--focus", type=control_arg, help="manual focus (focus_absolute units), or auto")
     ap.add_argument("--wb", type=control_arg, help="manual white balance (K), or auto")
     ap.add_argument("--lock", dest="lock", action="store_true", default=True,
@@ -1135,8 +1138,14 @@ def main(argv=None):
                focus=args.focus if args.focus is not None else dflt,
                wb=args.wb if args.wb is not None else dflt)
     controls = [None] * len(caps)
+
+    def exposure_for(i):
+        """--overhead-exposure for the camera named overhead, else the common exposure setting."""
+        if getattr(args, "overhead_exposure", None) is not None and i < len(args.names) and args.names[i] == "overhead":
+            return args.overhead_exposure
+        return ctl["exposure"]
     if not multi:
-        controls[0] = apply_controls(caps[0], devices[0], ctl["exposure"], ctl["focus"], ctl["wb"], fps=args.fps)
+        controls[0] = apply_controls(caps[0], devices[0], exposure_for(0), ctl["focus"], ctl["wb"], fps=args.fps)
     else:
         # both cameras' warm-up and frame-rate check at the same time (each ~4 s), each with its own values
         print_lock = threading.Lock()
@@ -1148,7 +1157,7 @@ def main(argv=None):
                 with print_lock:
                     print("\n".join(tag_line(ln, tag) for ln in str(s).split("\n")))
             try:
-                controls[i] = apply_controls(caps[i], devices[i], ctl["exposure"], ctl["focus"], ctl["wb"],
+                controls[i] = apply_controls(caps[i], devices[i], exposure_for(i), ctl["focus"], ctl["wb"],
                                              fps=args.fps, log=log)
             except Exception as e:
                 controls[i] = dict(error=str(e))

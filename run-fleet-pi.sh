@@ -3,6 +3,8 @@
 # from the overhead camera through the camera bridge (tools/fleet/cam_bridge.py). Plan: docs/session-plans/2026-10-27.md
 #
 # In a terminal ON THE PI (SSH from the laptop), one of:
+#     ./run-fleet-pi.sh setup              camera setup page (after moving a camera): overhead corners, side picture,
+#                                          the lights' flash check; http://100.122.222.75:8096. Stop the recorder first
 #     ./run-fleet-pi.sh rec                start the recorder only (its picture: http://<the Pi>:8000 in a browser)
 #     ./run-fleet-pi.sh check              every robot's firmware and battery (nothing moves)
 #     ./run-fleet-pi.sh turn Center        Center turns 90 deg once (repeat it 4 times: it should face the same way)
@@ -19,7 +21,11 @@ set -u
 cd "$(dirname "$0")"
 REPO="$(pwd)"
 IPS="--robot 192.168.1.250 --robot 192.168.1.252 --robot 192.168.1.253"
-CALIB="tools/experiment/data/overhead_floorcal_roam1.json"
+# the overhead calibration and exposure saved by the camera setup page (./run-fleet-pi.sh setup, 2026-10-27);
+# roam1 and the camera's automatic exposure when nothing was saved (setup_conf.py says which on the screen)
+CALIB="$(python3 tools/pi/setup_conf.py calib)"
+EXPO="$(python3 tools/pi/setup_conf.py exposure)"
+EXPO_ARG=""; [ -n "$EXPO" ] && EXPO_ARG="--overhead-exposure $EXPO"
 DAY=$(date +%Y%m%d)
 # the robots' edge guard (both cues) and the bare body, as e02.py's SAFETY_SETTINGS: safe_edge is not saved on the
 # robot, so every power-on starts with it OFF. Sent to every robot before each test.
@@ -54,7 +60,7 @@ start_recorder() {
     CAMS="--device $OD --names overhead"; echo "Recording the overhead camera (/dev/video$OD) to $OUT (no side camera found)"
   fi
   python3 tools/pi/launcher.py --handoff >/dev/null 2>&1 || true
-  tmux new-session -d -s fleet -n rec "cd '$REPO' && python3 tools/pi/camrec.py $CAMS --fps 25 --label P0 --no-lock --cores 1 --out '$OUT'; read -r -p 'Recorder stopped. Press Enter.'"
+  tmux new-session -d -s fleet -n rec "cd '$REPO' && python3 tools/pi/camrec.py $CAMS --fps 25 --label P0 --no-lock $EXPO_ARG --cores 1 --out '$OUT'; read -r -p 'Recorder stopped. Press Enter.'"
   echo "Recorder starting (8 s) ..."; sleep 8
 }
 
@@ -88,6 +94,14 @@ run_test() {   # run_test NAME MAP [bridge options]
 }
 
 case "$WHAT" in
+  setup)
+    if rec_running; then
+      echo "The recorder is running (tmux session fleet) and holds the cameras. Stop it first with:"
+      echo "    tmux kill-window -t fleet:rec"
+      echo "then run ./run-fleet-pi.sh setup again."; exit 1
+    fi
+    if tmux has-session -t e02 2>/dev/null; then echo "An E02 session is running on this Pi (tmux e02). Stop it first. Stopped."; exit 1; fi
+    python3 tools/pi/camera_setup.py "$@" ;;
   rec)
     start_recorder
     echo "Recorder running. Its picture: http://100.122.222.75:8000 (Tailscale) in the laptop's browser" ;;
@@ -122,5 +136,5 @@ case "$WHAT" in
     python3 tools/pi/upload_session.py --recordings "$OUT" --stop-recorder --no-logs --tag "p0-$DAY-recording" || true
     tmux kill-session -t fleet 2>/dev/null || true ;;
   *)
-    sed -n '2,16p' "$0"; exit 1 ;;
+    sed -n '2,18p' "$0"; exit 1 ;;
 esac

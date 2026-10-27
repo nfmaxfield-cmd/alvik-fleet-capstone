@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Camera setup</title>
+<style>
+:root{--bg:#f6f5f2;--card:#fff;--ink:#1d1d1b;--mute:#66645e;--line:#dddad3;--acc:#1f6feb;--ok:#1a7f37;--warn:#b35900;--bad:#c62828}
+@media (prefers-color-scheme:dark){:root{--bg:#161615;--card:#21211f;--ink:#ecebe7;--mute:#a19f98;--line:#3a3935;--acc:#5b9bff;--ok:#4cc068;--warn:#f0a040;--bad:#ff6b6b}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,sans-serif}
+main{max-width:1320px;margin:0 auto;padding:16px}
+h1{font-size:22px;margin:4px 0 2px}h2{font-size:18px;margin:0 0 6px}
+.sub{color:var(--mute);margin:0 0 14px}
+section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:0 0 16px}
+.row{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
+.col{flex:1 1 560px;min-width:0}
+canvas,img.pic{max-width:100%;height:auto;border:1px solid var(--line);border-radius:6px;display:block;background:#000}
+canvas{cursor:crosshair;touch-action:none}
+.cap{color:var(--mute);font-size:13px;margin:4px 0 0}
+button{font:inherit;padding:7px 14px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
+button.main{background:var(--acc);border-color:var(--acc);color:#fff}button:disabled{opacity:.5;cursor:default}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+.msg{padding:8px 10px;border-radius:7px;background:var(--bg);margin:8px 0}
+.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+input[type=number]{width:90px;font:inherit;padding:5px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)}
+table{border-collapse:collapse;width:100%;font-size:14px}th,td{border-bottom:1px solid var(--line);padding:5px 6px;text-align:right}
+th:first-child,td:first-child{text-align:left}
+.grid4{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-top:10px}
+.set{border:1px solid var(--line);border-radius:8px;padding:8px;position:relative}
+.set.rec{border:2px solid var(--ok)}
+.badge{display:inline-block;background:var(--ok);color:#fff;font-size:12px;border-radius:10px;padding:1px 8px;margin-left:6px}
+.fps{font-variant-numeric:tabular-nums}
+.fine{font-size:12px;color:var(--mute)}
+</style></head><body><main>
+<h1>Camera setup</h1>
+<p class="sub" id="top">Loading...</p>
+
+<section id="s1">
+<h2>1. Overhead camera: the board's corners</h2>
+<div class="msg" id="found"></div>
+<div class="row">
+ <div class="col">
+  <canvas id="cv" width="640" height="480"></canvas>
+  <p class="cap">The overhead camera's picture, taken when this page started. Red points: the board corners used for the calibration (1 = the floor's 0,0 corner; 2 along x; 3; 4 along y).</p>
+  <div class="bar">
+   <button id="regrab">New picture + find corners again</button>
+   <button id="click4">Click 4 corners in order</button>
+   <button id="turn">Move the numbering one corner round</button>
+   <label>Lens height <input type="number" id="height" step="1"> cm</label>
+  </div>
+  <p><b>Check that corner 1 (0,0) is the same corner of the board as before.</b> The corners are numbered by where they are in the picture (1 = bottom-right), so if the camera was turned a lot, 1 can land on a different corner of the board and every spot on the maps would move. The check picture marks the old 0,0 in orange; if 1 is on a different board corner, press "Move the numbering one corner round" until it is right.</p>
+  <p class="fine">Drag any red point onto its board corner. Lens height: the camera lens above the floor; 262 cm is yesterday's measurement. If you moved the camera up or down, measure it and type it in (blank = let the fit guess it).</p>
+ </div>
+ <div class="col">
+  <img class="pic" id="checkimg" alt="check picture" style="display:none">
+  <p class="cap" id="checkcap">The check picture appears here after Check.</p>
+  <div class="bar"><button id="check">Check</button><button class="main" id="save" disabled>Save this calibration</button></div>
+  <div class="msg" id="checkmsg">Check fits a calibration from the 4 points and draws it; nothing is saved until Save.</div>
+ </div>
+</div>
+</section>
+
+<section id="s2">
+<h2>2. Side camera</h2>
+<div class="row">
+ <div class="col">
+  <canvas id="cvs" width="640" height="480"></canvas>
+  <p class="cap">The side camera's picture, live (refreshed every second). Frame rate: <span class="fps" id="sfps">-</span>.</p>
+ </div>
+ <div class="col">
+  <p>The side camera does <b>not</b> need calibrating today. Its calibration is refitted from the robots as they drive (docs/build-plans/two-camera-geometry.md), so just check it still sees the whole board.</p>
+  <p class="fine">Optional: click its 4 board corners in the same order as the overhead's (1 = the 0,0 corner, 2 along x, 3, 4 along y) and save them. They are stored on their own (~/.config/mirlt/side_corners_...json) and nothing uses them yet.</p>
+  <div class="bar"><button id="sclick">Click 4 corners</button><button id="ssave" disabled>Save side corners</button></div>
+  <div class="msg" id="smsg">-</div>
+ </div>
+</div>
+</section>
+
+<section id="s3">
+<h2>3. Flash check: which exposure makes the robots' lights stand out</h2>
+<p>Put the robots on the board, switched on and standing still. The check makes every robot light up white for 1.5 s, four times, while the overhead camera takes pictures at four exposure settings: its own automatic value, then 1/2, 1/4 and 1/8 of it (about 25 s in all). A shorter exposure darkens the board but not the lights, so the lights stand out more; too short and the dark robot tops fade into a dark board, which the tracker needs to see.</p>
+<p class="fine">This is a small design of experiment: one factor (exposure) at four levels, one run each, three robots as repeats. The levels (halving steps) and the rule for recommending one (every robot's top must differ from the board by at least 32 grey levels, twice the tracker's own threshold of 16; then the setting whose weakest light stands out most) are chosen, not derived. A second round of finer levels around the winner, and the tracker's lock-on rate on footage at each level, would be the proper follow-up DOE.</p>
+<div class="bar"><button class="main" id="flash">Run the flash check</button><span id="prog"></span></div>
+<div id="lag" class="msg" style="display:none"></div>
+<div id="doe"></div>
+<div class="msg" id="expo"></div>
+<div class="bar"><button id="clearexp">Clear the saved exposure (back to the camera's automatic)</button></div>
+</section>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let S=null, corners=null, dragging=-1, clicking=false, clicked=[], img=new Image(), simg=new Image(), sclicking=false, sclicked=[], lastDoe="";
+async function api(p,b){const r=await fetch(p,b===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);return j}
+function fmt(x,d=0){return x===null||x===undefined||Number.isNaN(x)?'-':Number(x).toFixed(d)}
+function draw(){const c=$('cv'),g=c.getContext('2d');if(img.complete&&img.naturalWidth){c.width=img.naturalWidth;c.height=img.naturalHeight;g.drawImage(img,0,0)}
+ const pts=clicking?clicked:(corners||[]);g.lineWidth=2;g.strokeStyle='#00dc00';
+ if(pts.length>1){g.beginPath();pts.forEach((p,i)=>i?g.lineTo(p[0],p[1]):g.moveTo(p[0],p[1]));if(pts.length==4)g.closePath();g.stroke()}
+ pts.forEach((p,i)=>{g.beginPath();g.arc(p[0],p[1],7,0,7);g.strokeStyle='#ff2020';g.lineWidth=2;g.stroke();g.fillStyle='#ff2020';g.font='bold 15px system-ui';g.fillText(String(i+1),p[0]+9,p[1]-9)})}
+function pos(c,e){const r=c.getBoundingClientRect();return[(e.clientX-r.left)*c.width/r.width,(e.clientY-r.top)*c.height/r.height]}
+$('cv').addEventListener('pointerdown',e=>{const p=pos($('cv'),e);
+ if(clicking){clicked.push(p.map(v=>Math.round(v*10)/10));if(clicked.length==4){clicking=false;corners=clicked;clicked=[];$('click4').textContent='Click 4 corners in order';doCheck()}draw();return}
+ if(!corners)return;let best=-1,bd=1e9;corners.forEach((q,i)=>{const d=Math.hypot(q[0]-p[0],q[1]-p[1]);if(d<bd){bd=d;best=i}});
+ if(bd<40){dragging=best;$('cv').setPointerCapture(e.pointerId)}});
+$('cv').addEventListener('pointermove',e=>{if(dragging<0)return;const p=pos($('cv'),e);corners[dragging]=p.map(v=>Math.round(v*10)/10);draw()});
+$('cv').addEventListener('pointerup',e=>{if(dragging>=0){dragging=-1;doCheck()}});
+$('turn').onclick=()=>{if(!corners)return;corners=corners.slice(1).concat([corners[0]]);draw();doCheck()};
+$('click4').onclick=()=>{clicking=!clicking;clicked=[];$('click4').textContent=clicking?'Cancel clicking (click corner 1: the 0,0 corner)':'Click 4 corners in order';draw()};
+$('regrab').onclick=async()=>{$('found').textContent='Taking a new picture...';try{S=await api('/api/grab',{});corners=S.corners;img.src='/img/still.jpg?'+Date.now();show()}catch(e){$('found').textContent='Could not: '+e.message}};
+async function doCheck(save){$('checkmsg').textContent=(save?'Saving':'Fitting')+' (a few seconds on the Pi)...';$('save').disabled=true;
+ try{S=await api(save?'/api/save':'/api/check',{corners:corners,height_cm:$('height').value});const k=S.check;
+  $('checkimg').src='/img/check.jpg?'+Date.now();$('checkimg').style.display='block';
+  $('checkcap').textContent='The new calibration drawn on the same picture: a '+S.grid_cm+' cm grid over the board (pink every 50 cm), the board outline in green and 0,0 at the floor origin; the orange outline is the calibration the launchers used until now ('+S.old.path.split('/').pop()+'). The green outline should sit on the board edges and the grid squares look even.';
+  let w='Fit: corners off by '+fmt(k.err_cm,2)+' cm on average, '+fmt(k.max_err_cm,2)+' cm at worst.';
+  if(k.moved_px!==null)w+=' The corners moved up to '+fmt(k.moved_px,0)+' px from the old calibration\'s.';
+  if(k.mirrored)w+=' <span class="warn">The fit says the picture is mirrored: check corner 1 is the 0,0 corner and the order goes 1, 2 along x.</span>';
+  if(S.saved&&save)w+='<br><b class="ok">Saved: '+S.saved.path+'</b>. run-fleet-pi.sh, session_plan.sh and e02.py now use it (through '+S.saved.pointer+').';
+  else w+='<br>If the green outline and grid sit right, press Save.';
+  $('checkmsg').innerHTML=w;$('save').disabled=false}catch(e){$('checkmsg').innerHTML='<span class="bad">Could not fit: '+e.message+'</span>'}}
+$('check').onclick=()=>doCheck(false);$('save').onclick=()=>doCheck(true);
+function drawSide(){const c=$('cvs'),g=c.getContext('2d');if(simg.complete&&simg.naturalWidth){c.width=simg.naturalWidth;c.height=simg.naturalHeight;g.drawImage(simg,0,0)}
+ const pts=sclicked.length?sclicked:((S&&S.side_corners)?S.side_corners.corners:[]);pts.forEach((p,i)=>{g.beginPath();g.arc(p[0],p[1],7,0,7);g.strokeStyle='#ff2020';g.lineWidth=2;g.stroke();g.fillStyle='#ff2020';g.font='bold 15px system-ui';g.fillText(String(i+1),p[0]+9,p[1]-9)})}
+simg.onload=drawSide;img.onload=draw;
+$('cvs').addEventListener('pointerdown',e=>{if(!sclicking)return;sclicked.push(pos($('cvs'),e).map(v=>Math.round(v*10)/10));if(sclicked.length==4){sclicking=false;$('ssave').disabled=false;$('sclick').textContent='Click 4 corners'}drawSide()});
+$('sclick').onclick=()=>{sclicking=true;sclicked=[];$('ssave').disabled=true;$('sclick').textContent='Click corner 1 (0,0) ...'};
+$('ssave').onclick=async()=>{try{S=await api('/api/side_corners',{corners:sclicked});$('smsg').textContent='Saved (not used yet): '+S.side_corners.path;sclicked=[];$('ssave').disabled=true}catch(e){$('smsg').textContent='Could not: '+e.message}};
+$('flash').onclick=async()=>{try{S=await api('/api/flash',{});show()}catch(e){$('prog').innerHTML='<span class="bad">'+e.message+'</span>'}};
+$('clearexp').onclick=async()=>{S=await api('/api/exposure',{value:null});show()};
+async function saveExp(v){S=await api('/api/exposure',{value:v});show()}
+function frac(f){return f==1?'automatic':'1/'+Math.round(1/f)+' of automatic'}
+function doeHtml(d){if(!d.rows.length)return'';let h='<div class="grid4">';
+ d.rows.forEach((r,i)=>{const R=r.res,rec=d.state=='done'&&d.rec===i;
+  h+='<div class="set'+(rec?' rec':'')+'"><b>Exposure '+r.exposure+'</b> ('+frac(r.fraction)+')'+(rec?'<span class="badge">recommended</span>':'')+
+  '<img class="pic" src="/img/'+r.jpg+'.jpg?'+lastDoe+'" alt="lights on at exposure '+r.exposure+'">'+
+  '<p class="cap">Overhead picture with the lights on at this exposure, each robot ringed; underneath, each robot close up with its lights off, then on.</p>';
+  if(!R.robots.length)h+='<p class="warn">'+(R.why||'no lights seen')+'</p>';
+  else{h+='<table><tr><th>Robot (left to right)</th><th>light on-off</th><th>light vs board</th><th>top vs board</th></tr>';
+   R.robots.forEach((b,k)=>h+='<tr><td>'+(k+1)+'</td><td>'+fmt(b.light)+'</td><td>'+fmt(b.light_vs_board)+'</td><td>'+fmt(b.top)+'</td></tr>');
+   h+='</table>'}
+  h+='<p class="fine">Board brightness '+fmt(R.board)+' of 255; '+fmt(R.burnt_pct,1)+' % of the board burnt out (250+). Robots found: '+R.robots.length+' of 3.</p>';
+  if(d.state=='done')h+='<button onclick="saveExp('+r.exposure+')">Save '+r.exposure+' as the overhead exposure</button>';
+  h+='</div>'});
+ h+='</div><p class="cap">Numbers are grey levels (0-255) measured in the overhead camera\'s pictures taken during this check: "light on-off" is how much brighter each robot\'s lights are when on than off (the "LED-on minus LED-off" contrast); "light vs board" is the lit light against the plain board; "top vs board" is how far the robot\'s top differs from the board round it with the lights off, which is what the tracker follows.</p>';
+ return h}
+function show(){if(!S)return;
+ $('top').innerHTML=(S.fake?'<b class="warn">DRY RUN: simulated cameras and robots.</b> ':'')+'Frame rates now: overhead <span class="fps">'+fmt(S.fps.overhead,1)+'</span> pictures/s, side <span class="fps">'+(S.side?fmt(S.fps.side,1):'not open')+'</span> pictures/s (counted over the last 3 s as this page reads them; 25 asked). Logs: '+S.out;
+ $('found').innerHTML=S.found+'<br><span class="fine">Calibration in use until you save: '+S.old.words+'</span>';
+ if($('height').value===''&&!$('height').dataset.set){$('height').value=S.height_cm;$('height').dataset.set=1}
+ $('sfps').textContent=S.side?fmt(S.fps.side,1)+' pictures/s':'side camera not open';
+ if(!S.side)$('smsg').textContent='The side camera is not open (not found by name, or busy). It is not needed for today.';
+ else if(!S.side_corners)$('smsg').textContent='No side corners saved (optional).';
+ const d=S.doe;$('flash').disabled=d.state=='running';
+ $('prog').innerHTML=d.state=='idle'?'':(d.state=='failed'?'<span class="bad">'+d.progress+'</span>':d.progress);
+ const key=JSON.stringify([d.state,d.rows.length,d.rec]);if(key!==lastDoe){lastDoe=String(Date.now());$('doe').innerHTML=doeHtml(d)+(d.words?'<div class="msg"><b>'+d.words+'</b></div>':'');lastDoe=key;}
+ if(d.lag){$('lag').style.display='block';$('lag').innerHTML='<b>Do both cameras see the same moment?</b> The side camera saw the lights come on '+fmt(Math.abs(d.lag.median*1000))+' ms '+(d.lag.median>=0?'after':'before')+' the overhead (median of '+d.lag.values.length+' flashes: '+d.lag.values.map(v=>fmt(v*1000)).join(', ')+' ms). Frame rates during the check: overhead '+fmt(d.lag.over_fps,1)+', side '+fmt(d.lag.side_fps,1)+' pictures/s.<br><span class="fine">Measured from the time this page read each picture (not the camera\'s own clock), so each number is good to about one picture of the slower camera (40 ms at 25/s, 67 ms at 15/s): one flash is not enough, the median of the four is the number to use. The two-camera notes measured 0-80 ms, once 400 ms.</span>'}
+ else if(d.state=='done'){$('lag').style.display='block';$('lag').textContent=S.side?'The side camera\'s lag could not be measured (it did not see the lights clearly).':'Side camera not open: no lag measured.'}
+ const e=S.exposure;$('expo').innerHTML=e.value?'Saved overhead exposure: <b>'+e.value+'</b> (saved '+e.saved+'). The recorder (run-fleet-pi.sh, run-e02-pi.sh) uses it from its next start; the side camera keeps its automatic.':'No overhead exposure saved: the recorder leaves the camera on its own automatic exposure, as before.'}
+async function poll(){try{S=await api('/api/state');if(!corners&&S.corners){corners=S.corners;img.src='/img/still.jpg?'+Date.now()}show()}catch(e){$('top').innerHTML='<span class="bad">The setup page on the Pi is not answering (stopped?)</span>'}
+ if(S&&S.side)simg.src='/img/side.jpg?'+Date.now()}
+poll();setInterval(poll,1000);
+</script></body></html>
