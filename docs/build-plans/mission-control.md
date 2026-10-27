@@ -88,3 +88,6 @@ closest approach), styled like the mockup (Inter, ground #F6F7F9, white panels, 
   off, the camera ignoring it) and make the page say so when the picture does not change. Same check: robot 3 (bottom
   of the picture) showed 0-3 grey levels top-vs-board against 14-24 for the others; side camera 8 ms ahead of the
   overhead (median of 4 flashes), side 29.1 / overhead 25.0 pictures a second.
+- **A live page for planner runs** (Nick, 11:19: the ladder only had the camera feed, not the live lab): Mission
+  Control's Run screen connected to the real robots (robots ringed on the overhead picture, planned lines, step
+  results, battery, edge distance), so the ladder, the board tests and Monday all use the same page.
