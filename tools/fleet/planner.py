@@ -74,6 +74,15 @@ DEFAULT_SETTINGS = {
     "max_orders": 24,           # priority orders tried at most
     "stop_horizon_s": 2.0,      # obstacle event: stop a robot that would reach it within this
     "replan_budget_s": 2.0,     # obstacle event: time allowed for the new plan
+    # Re-plans (Nick, 2026-10-27 00:08): send the first safe plan at once, keep searching in the background and swap
+    # in a shorter plan only if one is found (run_plan.py's improvement try). With replan_first_safe the search stops
+    # at its first safe plan, and the robots carrying on are only told to drive replan_first_budget_s ahead (the new
+    # plan is usually ready in 0.03 s; when the search takes longer they hold at that point until it is).
+    "replan_first_safe": True,
+    "replan_first_budget_s": 0.5,   # chosen: above the median first-plan time (0.015-0.03 s) with room for this
+                                    # machine being busy; below it, robots hold more often. DOE note: 0.25 / 0.5 /
+                                    # 1.0 s over the 20-re-plan bench and dry runs with brick drops (robots held,
+                                    # seconds lost to holds, closest approach); docs/doe-backlog.md
     "skip_unreachable": False,  # drop tasks that cannot be reached instead of failing
 }
 
@@ -92,7 +101,10 @@ def settings(over=None):
     for k, v in (over or {}).items():
         if k not in DEFAULT_SETTINGS:
             raise PlanError("unknown setting %r" % k)
-        s[k] = type(DEFAULT_SETTINGS[k])(v)
+        if isinstance(DEFAULT_SETTINGS[k], bool) and isinstance(v, str):
+            s[k] = v.strip().lower() in ("1", "true", "yes", "on")
+        else:
+            s[k] = type(DEFAULT_SETTINGS[k])(v)
     return s
 
 
@@ -1047,8 +1059,9 @@ class Planner:
                 break
         return scheds
 
-    def plan(self, jobs, t_limit_s=60.0):
-        """Plan all jobs. Returns (schedules, info)."""
+    def plan(self, jobs, t_limit_s=60.0, stop_at_first=False):
+        """Plan all jobs. Returns (schedules, info). stop_at_first: return the first safe plan found (re-plans:
+        replan_first_safe); the shorter-plan search is left to a later improvement try."""
         t_begin = time.perf_counter()
         self.deadline = t_begin + t_limit_s
         names = [j.name for j in jobs]
@@ -1081,6 +1094,8 @@ class Planner:
             nonlocal best
             for od in ords:
                 for hold_s in holds:
+                    if stop_at_first and best is not None:
+                        return
                     if (best is not None or self.allow_strand) and time.perf_counter() - t_begin > t_limit_s:
                         return
                     sc = self._plan_order(jobs, od, vo, prim_cache, hold_s=hold_s)
@@ -1095,7 +1110,7 @@ class Planner:
 
         run(visit_orders, orders)
         # robots whose visits may be reordered: try their other good orders
-        for _ in range(2):
+        for _ in range(0 if stop_at_first else 2):
             improved = False
             for n in names:
                 for alt in cand[n][1:]:
@@ -1132,7 +1147,7 @@ class Planner:
         if best is None:
             raise PlanError("no priority order gave a plan without robots meeting: the routes may be too "
                             "crowded (try fewer robots at once, a smaller separation, or other start spots)")
-        refined = self._refine(jobs, best[1], prim_cache, t_begin + t_limit_s * 1.5)
+        refined = best[1] if stop_at_first else self._refine(jobs, best[1], prim_cache, t_begin + t_limit_s * 1.5)
         best = (score(refined), refined, best[2], best[3])
         info = {"priority_order": best[2], "visit_orders": best[3], "orders_tried": tried, "stranded": sorted(stranded),
                 "planning_time_s": round(time.perf_counter() - t_begin, 3),
@@ -1345,7 +1360,8 @@ def pose_at(plan, name, t):
     return FM.pose_in(steps[-1]["to"])
 
 
-def make_plan(m, jobs=None, over=None, t0_s=0.0, replan_of=None, events=None, t_limit_s=60.0, allow_strand=False):
+def make_plan(m, jobs=None, over=None, t0_s=0.0, replan_of=None, events=None, t_limit_s=60.0, allow_strand=False,
+              stop_at_first=False):
     """Plan from a map (its robots' start spots and tasks), or from given jobs."""
     m = FM.normalize(m)
     pl = Planner(m, over)
@@ -1355,7 +1371,7 @@ def make_plan(m, jobs=None, over=None, t0_s=0.0, replan_of=None, events=None, t_
         jobs = jobs_from_map(m)
     if not jobs:
         raise PlanError("no robots in the map")
-    scheds, info = pl.plan(jobs, t_limit_s=t_limit_s)
+    scheds, info = pl.plan(jobs, t_limit_s=t_limit_s, stop_at_first=stop_at_first)
     names = [j.name for j in jobs]
     sc = {n: scheds[n] for n in names}
     front_ray = _front_ray_fn(m, body)
@@ -1394,7 +1410,7 @@ def make_plan(m, jobs=None, over=None, t0_s=0.0, replan_of=None, events=None, t_
     fin = [r["finish_s"] for r in robots.values()]
     plan["summary"] = {"makespan_s": max(fin) if fin else 0.0, "sum_finish_s": round(sum(fin), 2),
                        "planning_time_s": info["planning_time_s"], "first_plan_s": info.get("first_plan_s"),
-                       "orders_tried": len(info["orders_tried"]),
+                       "orders_tried": len(info["orders_tried"]), "first_safe_only": bool(stop_at_first),
                        "order_results": info["orders_tried"][:30], **rep}
     plan["plan_id"] = plan_id(plan)
     return plan
@@ -1550,6 +1566,12 @@ def states_at(plan, t):
     return out
 
 
+def carry_on_s(s):
+    """How far ahead (s) the robots that carry on are allowed to drive while the new plan is computed: the first-safe
+    budget when the re-plan stops at its first safe plan, else the whole re-plan budget."""
+    return float(s.replan_first_budget_s) if s.replan_first_safe else float(s.replan_budget_s)
+
+
 def obstacle_event(m, plan, states, new_obstacles, over=None):
     """Something new is on the floor. Decide which robots stop at once and
     which carry on (obstacle_decide), then plan the rest of everyone's tasks
@@ -1590,7 +1612,8 @@ def obstacle_decide(m, plan, states, new_obstacles, over=None):
                      extra=[FM._norm_obstacle(o, i) for i, o in enumerate(new_obstacles)])
     w_new.box = (-1e9, 1e9, -1e9, 1e9)    # only the new obstacles count here
     names = list(plan["robots"])
-    budget_ticks = _ticks(s.replan_budget_s, s)
+    budget_s = carry_on_s(s)
+    budget_ticks = _ticks(budget_s, s)
     events = []
     rest = {}
     for n in names:
@@ -1646,7 +1669,7 @@ def obstacle_decide(m, plan, states, new_obstacles, over=None):
             continue
         # steps up to the first step end at or after the replan budget
         t, k = 0.0, 0
-        while k < len(seq) and t < s.replan_budget_s:
+        while k < len(seq) and t < budget_s:
             if hits(seq[k][1]):
                 break
             t += seq[k][1]["dur"] * s.tick_s
@@ -1775,7 +1798,8 @@ def obstacle_replan(dec):
     over2 = dict(s)
     over2["skip_unreachable"] = True
     newplan = make_plan(m2, jobs=jobs, over=over2, replan_of=plan.get("plan_id"), events=events,
-                        t_limit_s=0.45 * s.replan_budget_s, allow_strand=True)
+                        t_limit_s=0.45 * s.replan_budget_s, allow_strand=True,
+                        stop_at_first=bool(s.replan_first_safe))
     for n in newplan.get("stranded", []):
         ev = next(e for e in events if e["robot"] == n)
         ev["reason"] += "; no safe route yet, stays put until the next re-plan"

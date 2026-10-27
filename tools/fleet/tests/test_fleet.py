@@ -342,7 +342,7 @@ def test_obstacle_event_stops_the_robot_that_would_hit_it(demo_plan):
     for n, r in newplan["robots"].items():
         for st in r["steps"]:
             if not st.get("committed") and st["type"] != "wait":
-                assert st["t_start"] >= demo_plan["settings"]["replan_budget_s"] - 1e-6
+                assert st["t_start"] >= P.carry_on_s(P.settings(demo_plan["settings"])) - 1e-6
                 break
     m2 = FM.normalize(dict(m, obstacles=[ob]))
     rep = P.verify(m2, newplan)

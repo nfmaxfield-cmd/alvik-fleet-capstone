@@ -604,6 +604,8 @@ class Coordinator:
         over = dict(self.plan["settings"])
         if budget is not None:
             over["replan_budget_s"] = budget
+        if improving:
+            over["replan_first_safe"] = False     # the background search for a shorter plan: the full search
         try:
             dec = P.obstacle_decide(self.m, self.plan, states, [ob] if ob else [], over=over)
         except Exception as e:      # noqa: BLE001  (never leave robots driving on a planner bug)
@@ -697,8 +699,10 @@ class Coordinator:
             if lost and not any(("skips" in w and n in w) for w in newplan.get("warnings", [])):
                 self.say("WARNING: the new plan dropped %s's visit to %s without saying why" % (n, ", ".join(lost)))
                 self.log("lost_task", robot=n, boards=lost, plan=self.plan_no + 1)
-        self.say("new plan in %.2f s (budget %.1f s); everyone done about %.0f s after the event"
-                 % (cpu, over["replan_budget_s"], newplan["summary"]["makespan_s"]))
+        self.say("new plan in %.2f s (%s); everyone done about %.0f s after the event"
+                 % (cpu, "first safe plan, robots told %.1f s ahead; a shorter one is searched for next"
+                    % P.carry_on_s(P.settings(over)) if newplan["summary"].get("first_safe_only")
+                    else "budget %.1f s" % over["replan_budget_s"], newplan["summary"]["makespan_s"]))
         old = {n: (list(self.bots[n].ids), [dict(x) for x in self.bots[n].stat]) for n in self.names}
         if ob:
             self.m["obstacles"].append(FM._norm_obstacle(ob, len(self.m["obstacles"])))
@@ -708,7 +712,11 @@ class Coordinator:
         self.plan_start = t_event
         self.save_plan()
         self.next_retry = now() + self.args.retry_s if newplan.get("stranded") else math.inf
-        if ob is not None and self.args.improve_after_s > 0:
+        if newplan["summary"].get("first_safe_only") and not newplan.get("stranded"):
+            # the first safe plan went out at once: the search for a shorter one starts now, in the background
+            # (Nick, 2026-10-27 00:08); it is swapped in only if everyone finishes sooner (the improvement try)
+            self.improve_at = now()
+        elif ob is not None and self.args.improve_after_s > 0:
             self.improve_at = t_event + over["replan_budget_s"] + self.args.improve_after_s
         self.next_deferred()
 
