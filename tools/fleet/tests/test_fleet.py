@@ -812,3 +812,19 @@ def test_dry_run_end_to_end_backing_in(tmp_path):
     assert not sim["collision"], why
     assert len(sim["dockings"]) == 6 and sim["dock_gap_error_cm_max"] < 0.4, why
     assert not s["boards_not_visited"], why
+
+
+def test_fast_turn_check_matches_the_exact_one():
+    """Re-plan speed-up (2026-10-26): Grid.turnable decides from the grid when it is clearly above or below the
+    threshold; it must give the exact check's answer everywhere, on a plain grid and on one with robot circles."""
+    m = FM.normalize(dict(demo_map(), obstacles=[{"id": "post", "shape": "circle", "center": [60, 74], "radius": 6,
+                                                   "source": "user"}]))
+    pl = P.Planner(m)
+    circ = [(np.array([40.0, 50.0]), 9.0), (np.array([90.0, 30.0]), 12.0)]
+    w2 = FM.World(m, extra=[{"id": "robot", "shape": "circle", "center": c.tolist(), "radius": r} for c, r in circ])
+    rng = np.random.default_rng(3)
+    for g in (pl.grid, P.Grid(w2, pl.body, pl.s, base=pl.grid, circles=circ)):
+        x0, x1, y0, y1 = g.world.box
+        for _ in range(3000):
+            p = (rng.uniform(x0 - 3, x1 + 3), rng.uniform(y0 - 3, y1 + 3))
+            assert g.turnable(p) == (g.point_clear(p) >= g.turn_thr - 1e-9)

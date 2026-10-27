@@ -39,6 +39,22 @@ if [ "${1:-}" = "right-explore" ]; then
   EXTRA="--robots Right --fit-max-rms-cm 2.5 --battery-watch-s 300"
   stage R2 $EXTRA --calib tools/experiment/data/overhead_floorcal_roam1.json --hours 0.5   # the fallback if explore fails (still explore: no --classic-setup)
 fi
+if [ "${1:-}" = "edges" ]; then
+  # Nick, 2026-10-26 22:49: both boards taken off for edge data (Monday's school table has none) and footage for
+  # the two-camera work (start with --with-side). All four sides are open edges from the start (--no-boards: every
+  # find feels for two edges; the stored calibration, no explore, which assumes two boards). Nobody is there: a
+  # robot that goes off stays off.
+  #   E1, 15 min (chosen; a check, not a measurement): the robots on their own sensors (U, C): do edge finds work
+  #       with no boards at all before the cameras' conditions join.
+  #   E2, until the batteries run out: all conditions; every run starts with an edge find.
+  #   Holds: nobody answers at night, and an unanswered hold waits --answer-timeout-min before the robot rescues
+  #   itself (default 30 min, set for when Nick is there). 3 min here (chosen convenience setting, not measured; no
+  #   DOE needed: it decides how long the night idles per hold, not anything measured), so 4 open edges' border holds
+  #   don't eat the night.
+  NB="$CAL --no-boards --answer-timeout-min 3"
+  stage E1 $NB --own-sensor-only --hours 0.25
+  stage E2 $NB --hours 4 --hard-cap-min 0
+fi
 if [ -z "${1:-}" ]; then
   stage 1 $CAL --own-sensor-only --hours 0.25
   stage 2 $CAL --hours 0.75
@@ -47,7 +63,7 @@ if [ -z "${1:-}" ]; then
   stage 4 $CAL --hours 4 --hard-cap-min 0
 fi
 echo; echo "=== Plan done: uploading the recording ==="
-for d in $(ls -td logs/e02-* 2>/dev/null | grep -v dryrun | head -$([ -n "${1:-}" ] && echo 1 || echo 4)); do
+for d in $(ls -td logs/e02-* 2>/dev/null | grep -v dryrun | head -$(case "${1:-}" in "") echo 4;; edges) echo 2;; *) echo 1;; esac)); do
   python3 tools/pi/upload_session.py --recordings "$OUT" --logs-only --session "$d" || true
 done
 python3 tools/pi/upload_session.py --recordings "$OUT" --stop-recorder --no-logs --tag "e02-pi-plan-$DAY-recording"

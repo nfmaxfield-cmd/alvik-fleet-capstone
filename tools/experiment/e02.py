@@ -2305,7 +2305,10 @@ class Runner:
         b = self.board
         ux, uy = math.cos(math.radians(heading)), math.sin(math.radians(heading))
         best = None
+        gone = getattr(b, "missing", ())
         for what, axis, v in (("the y-board", "x", b.yboard_cm), ("the x-board", "y", b.xboard_cm)):
+            if what[4] in gone:
+                continue                      # a board found gone (or --no-boards): nothing there to read
             d = (v - p[0]) / ux if axis == "x" and abs(ux) > 1e-6 else ((v - p[1]) / uy if axis == "y" and abs(uy) > 1e-6
                                                                       else -1)
             if d > 0 and (best is None or d < best[0]):
@@ -4113,9 +4116,17 @@ class Runner:
         self.make_tracker()
         st.save()
         # 3. the blocked boards
-        if not st.get("board"):
+        if not st.get("board") and getattr(a, "no_boards", False):
+            xs, ys = (int(v) for v in (a.board_sides or "1,1").split(","))
+            b = PL.Board(xboard_side=xs, yboard_side=ys)
+            b.missing = {"x", "y"}
+            st["board"] = b.to_dict()
+            self.say("No boards (--no-boards): all four sides are open edges; every find feels for two edges.")
+        elif not st.get("board"):
             self.find_boards(img)
         self.board = PL.Board.from_dict(st["board"])
+        if getattr(a, "no_boards", False):
+            self.board.missing = {"x", "y"}
         if st.get("find_stage_cm"):
             self.board.find_stage_cm = float(st["find_stage_cm"])    # a free find corner chosen earlier (--resume)
         self.tracker_area()
@@ -4201,9 +4212,10 @@ class Runner:
         if self.tracker is None or self.board is None:
             return
         b = self.board
-        self.tracker.set_area((b.x0, b.y0, b.x1, b.y1),
-                              walls=[("y", b.xboard_cm + b.uy * PL.ROBOT_HALF_CM),
-                                     ("x", b.yboard_cm + b.ux * PL.ROBOT_HALF_CM)])
+        gone = getattr(b, "missing", ())
+        walls = [w for k, w in (("x", ("y", b.xboard_cm + b.uy * PL.ROBOT_HALF_CM)),
+                                ("y", ("x", b.yboard_cm + b.ux * PL.ROBOT_HALF_CM))) if k not in gone]
+        self.tracker.set_area((b.x0, b.y0, b.x1, b.y1), walls=walls)
 
     def keep_tracker_stats(self, tr):
         """A tracker about to be replaced (explore's end, a recalibration): add its counts to the session's, so the
@@ -4342,9 +4354,12 @@ class Runner:
         if self.feed.last_img is None:
             return
         img = self.feed.last_img
+        refs = self.st["setup"].get("board_lines_image") or {}
         for which in ("x", "y"):
+            if which in getattr(self.board, "missing", ()) or which not in refs:
+                continue                      # no board there (--no-boards, or found gone): nothing to re-measure
             m = CAM.measure_board_line(img, self.cam, self.board, which)
-            ref0 = self.st["setup"]["board_lines_image"][which]
+            ref0 = refs[which]
             if ref0.get("from_edge"):
                 continue
             ref = ref0["value"]
@@ -10123,6 +10138,9 @@ def main(argv=None):
     ap.add_argument("--edge-find", action="store_true", help="every find against any two boundaries (boards or open "
                     "edges, no camera) instead of `run find` against the two boards; also used on its own once a "
                     "board is found missing")
+    ap.add_argument("--no-boards", action="store_true", help="no boards at all: all four sides are open edges from "
+                    "the start (Nick, 2026-10-26 22:49: the boards taken off for edge data; Monday's school table has "
+                    "none). Implies --classic-setup (explore assumes two boards), --edge-find and --skip-find-check")
     ap.add_argument("--switches-back", nargs="?", const="all", default=None, metavar="ROBOTS",
                     help="the robots wear the one attachment with the switches at the BACK (Nick, 2026-10-25): sets "
                          "sw_on 1, sw_back 1, e02_find_reverse 1, e02_back_face_cm 6.10 (read back), so every find "
@@ -10227,6 +10245,10 @@ def main(argv=None):
         state["setup"]["dry_run"] = a.dry_run
         state["setup"]["args"] = vars(a)
         state.save()
+    if getattr(a, "no_boards", False):
+        a.classic_setup = True
+        a.edge_find = True
+        a.skip_find_check = True
     if a.dry_run:
         a.auto = not a.web_ask            # --web-ask in a dry run: the questions go on the live page (tests it)
         a.pi = "127.0.0.1"
@@ -10570,6 +10592,10 @@ def start_sim(state, sdir):
         # --dry-bricks-now: the bricks stand there from the start (objects past an open edge, boards out from the
         # plywood: explore's creep test)
         open(os.path.join(simdir, "BRICKS_ON"), "w").close()
+    if (state["setup"].get("args") or {}).get("no_boards"):
+        # --no-boards: the simulator's boards go at once (both sides open edges, as on the real table tonight)
+        for which in ("x", "y"):
+            open(os.path.join(simdir, "REMOVE_BOARD_" + which), "w").close()
     rb = (state["setup"].get("args") or {}).get("dry_remove_board") or ""
     if rb:
         # the remove-a-board test in the simulator: the board goes after this many seconds, the runner not told

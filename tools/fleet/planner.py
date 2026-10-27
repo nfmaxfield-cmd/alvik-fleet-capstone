@@ -191,6 +191,22 @@ class Grid:
         return float(self.world.clearance(np.asarray(p, float)[None, :2])[0])
 
     def turnable(self, p):
+        """Can the robot turn on the spot at p? Decided from the grid when the nearest cell's clearance is clearly
+        above or below the threshold (clearance changes by at most the distance moved, and a point is at most
+        0.71 cell from its cell's centre); the exact check only near the threshold. Same answers as the exact check
+        (re-plan speed-up, 2026-10-26: the exact check was two thirds of a re-plan's time)."""
+        x, y = float(p[0]), float(p[1])
+        i = int((x - self.x0) // self.c)
+        j = int((y - self.y0) // self.c)
+        if 0 <= i < self.nx and 0 <= j < self.ny:
+            cl = float(self.clear[j * self.nx + i])
+            slack = 0.7072 * self.c + 1e-6
+            # a grid made from a base grid plus circles only refreshed cells near the circles; elsewhere the circles
+            # are at least turn_thr + 2 cm away, so "clearly above" holds up to that (cell <= 2.8 cm)
+            if cl >= self.turn_thr + slack and slack < 2.0:
+                return True
+            if cl < self.turn_thr - slack:
+                return False
         return self.point_clear(p) >= self.turn_thr - 1e-9
 
     def los(self, a, b):
@@ -478,6 +494,23 @@ def _escape(job, grid, world, body, s):
     p = job.start
     if grid.turnable(p):
         return []
+    # the same robot at the same spot on the same map gets the same answer: kept on the grid (a re-plan asked it up
+    # to 48 times, one third of its time)
+    cache = grid.__dict__.setdefault("_escape_cache", {})
+    key = (id(world), tuple(round(float(v), 6) for v in p[:3]))
+    if key not in cache:
+        try:
+            cache[key] = ("ok", _escape_search(job, grid, world, body, s))
+        except PlanError as e:
+            cache[key] = ("err", str(e))
+    kind, val = cache[key]
+    if kind == "err":
+        raise PlanError(val)
+    return copy.deepcopy(val)
+
+
+def _escape_search(job, grid, world, body, s):
+    p = job.start
     here = world.shape_clearance(body.corners([p])[0])
     need = min(s.safety_margin_cm, here) - 1e-6
     fwd = np.array([math.cos(p[2]), math.sin(p[2])])
@@ -1038,6 +1071,7 @@ class Planner:
                         key=lambda o: [(-busy[n], -work[n]) for n in o])[: self.s.max_orders]
         tried = []
         best = None
+        t_first = [None]      # when the first safe plan was found (the rest of the time looks for a shorter one)
 
         def score(sc):
             ends = [sc[n][-1][0] + sc[n][-1][1]["dur"] if sc[n] else 0 for n in names]
@@ -1055,6 +1089,8 @@ class Planner:
                                   "visit_orders": {k: list(v) for k, v in vo.items()},
                                   "makespan_s": round(sc_[0] * self.s.tick_s, 1) if sc_ else None})
                     if sc and (best is None or sc_ < best[0]):
+                        if best is None:
+                            t_first[0] = time.perf_counter() - t_begin
                         best = (sc_, sc, list(od), {k: list(v) for k, v in vo.items()})
 
         run(visit_orders, orders)
@@ -1099,7 +1135,8 @@ class Planner:
         refined = self._refine(jobs, best[1], prim_cache, t_begin + t_limit_s * 1.5)
         best = (score(refined), refined, best[2], best[3])
         info = {"priority_order": best[2], "visit_orders": best[3], "orders_tried": tried, "stranded": sorted(stranded),
-                "planning_time_s": round(time.perf_counter() - t_begin, 3)}
+                "planning_time_s": round(time.perf_counter() - t_begin, 3),
+                "first_plan_s": None if t_first[0] is None else round(t_first[0], 3)}
         return best[1], info
 
 
@@ -1356,7 +1393,8 @@ def make_plan(m, jobs=None, over=None, t0_s=0.0, replan_of=None, events=None, t_
     rep = verify(m, plan)
     fin = [r["finish_s"] for r in robots.values()]
     plan["summary"] = {"makespan_s": max(fin) if fin else 0.0, "sum_finish_s": round(sum(fin), 2),
-                       "planning_time_s": info["planning_time_s"], "orders_tried": len(info["orders_tried"]),
+                       "planning_time_s": info["planning_time_s"], "first_plan_s": info.get("first_plan_s"),
+                       "orders_tried": len(info["orders_tried"]),
                        "order_results": info["orders_tried"][:30], **rep}
     plan["plan_id"] = plan_id(plan)
     return plan
