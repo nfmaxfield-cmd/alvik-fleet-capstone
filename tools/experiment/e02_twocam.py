@@ -87,6 +87,12 @@ SIDE_HIDDEN = 1.0       # a robot predicted within this many body widths of the 
                         # it, not missed (its top sticks out further up the picture than its middle). Chosen, last
                         # night's footage: Left at the picture's top edge. No DOE: geometry
 UNKNOWN_EXTRA_RANGE = (4.0, 14.0)   # tune_unknown keeps the filled-in floor's margin within these (14: MotionTracker's)
+DARK_MEAN = 50.0        # a side picture darker than this on average (0-255) is brightened before tracking. Real run
+DARK_TARGET = 80.0      # 2026-10-27 13:01: the recorder's exposure lock left the side picture at mean 20 (79 under auto
+DARK_GAIN_MAX = 5.0     # exposure); its robots stood only 7-10 grey levels from the floor, under the tracker's 16, so it
+                        # found nothing. Brightened x4 (to mean 80, the setup page's side picture) all three were found.
+                        # Chosen; DOE note: target 60 / 80 / 110 against the side's seen-rate and false outlines on
+                        # recorded dark footage (noise is brightened too)
 
 
 def stretch_at(cam, x, y, z):
@@ -190,6 +196,8 @@ class TwoCamTracker(MT.MultiTracker):
         self.bias_n = 0
         self.light_spots = []                  # the last picture's lights (x, y) on the floor, for the record
         self.counts = {}
+        self.side_gain = 1.0                   # side pictures are multiplied by this (dark picture: set_side_background)
+        self.side_mean = None
 
     # --- set-up ------------------------------------------------------------------------------------------
     def set_background(self, frames, robots=None):
@@ -199,7 +207,15 @@ class TwoCamTracker(MT.MultiTracker):
 
     def set_side_background(self, frames, robots=None):
         if self.side is not None and frames:
-            self.side.set_background(frames, robots)
+            m = float(np.median([float(np.mean(f)) for f in frames]))
+            self.side_mean = round(m, 1)
+            self.side_gain = 1.0 if m >= DARK_MEAN else float(min(DARK_GAIN_MAX, DARK_TARGET / max(m, 1.0)))
+            self.side.set_background([self._side_img(f) for f in frames], robots)
+
+    def _side_img(self, img):
+        if self.side_gain == 1.0:
+            return img
+        return cv2.convertScaleAbs(img, alpha=self.side_gain)
 
     def add(self, name, x, y, heading=None, t=None):
         super().add(name, x, y, heading, t)
@@ -217,7 +233,7 @@ class TwoCamTracker(MT.MultiTracker):
             return None
         self.side_t = t
         self.side_n += 1
-        return self.side.push(img, t)
+        return self.side.push(self._side_img(img), t)
 
     # --- geometry of the side camera ---------------------------------------------------------------------
     def _side_xy(self, c):
@@ -460,6 +476,7 @@ class TwoCamTracker(MT.MultiTracker):
         with self.lock:
             return dict(robots={n: dict(c) for n, c in self.counts.items()}, side_bias_cm=[round(b, 2) for b in self.bias],
                         side_bias_n=self.bias_n, side_lag_s=self.side_lag, side_pictures=self.side_n,
+                        side_brightness=self.side_mean, side_gain=round(self.side_gain, 2),
                         unknown_margin=dict(overhead=round(self.UNKNOWN_EXTRA, 1),
                                             side=None if self.side is None else round(self.side.UNKNOWN_EXTRA, 1)))
 

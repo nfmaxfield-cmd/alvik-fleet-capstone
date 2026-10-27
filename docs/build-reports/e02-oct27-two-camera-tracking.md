@@ -176,3 +176,105 @@ overhead pixels (142, 276), (222, 283), (387, 72) taken to the floor. "Washed ou
 board's outline towards 193 at 12 % of its distance from the board's median. Scripts (scratch):
 `realrun.py over|two|washover|washtwo`, `fig.py`, `overlay.py`. Not committed, because they read the scratch
 download.
+
+## Fix after the real L0 at 13:01: all three robots reported "body unseen"
+
+**Premise.** The first real ladder run with both cameras (13:01, `./run-fleet-pi.sh ladder pause`) found all three
+robots by their lights, then said neither camera could see any of their bodies. In both pictures a person sees all
+three robots clearly.
+
+**Data.** The real 13:01 pictures (both cameras) were replayed through the ladder's own camera code in real time,
+with tracking started where the live run started it (13:01:24.8, from the robots' failure times in state.json).
+
+| Replay of the 13:01 pictures | Left | Right | Center |
+|---|---|---|---|
+| Old code, this machine's speed | seen (overhead) | seen (overhead) | lights only |
+| Old code, tracker slowed to Pi speed (3.5x) | unseen | unseen | unseen |
+| New code, Pi speed (3.5x) | seen (both) | seen (side) | seen (side) |
+| New code, this machine's speed | seen (both) | seen (side) | seen (side) |
+
+<sub>Pi speed: each tracked picture also busy-waits for 2.5 times its own processing time, holding Python's lock (a
+pessimistic stand-in: on the Pi, OpenCV's work runs partly in parallel). 3.5x is the ratio of earlier Pi
+measurements, 26-73 ms a picture, to this machine's ~14 ms.</sub>
+
+Two causes, both confirmed on the replay:
+1. **The tracking fell behind the camera.** The ladder tracked every picture in the thread that reads the stream
+   (about 21 a second from the overhead camera, 25-29 from the side camera). At Pi speed the work was more than one
+   core could do, so pictures queued up, and the check asked for sightings from the last 0.9 s of clock time, while
+   the tracker was still working through pictures from seconds earlier. The old code at Pi speed reproduces the live
+   result exactly: Left had 298 overhead sightings, but none recent enough.
+2. **The side camera's picture was too dark to track.** The recorder locks the side camera's exposure. The lock read
+   as matched straight away (pictures from before the change were still waiting in the camera's buffer). The picture
+   then settled at a mean of 20 of 255, against 79 under automatic exposure, and the recorder's own log warned
+   "PICTURE VERY DARK". The robots then stood only 7-10 grey levels from the floor, under the tracker's threshold of
+   16, so the side camera found nothing. The setup page's side picture (mean 83) was taken before this lock, which
+   is why it looked fine.
+
+![Side picture as recorded and brightened](../screenshots/2026-10-27/l0-1301-fix-problem-side-picture-dark-no-outlines-then-brightened.png)
+The real 13:01 side picture: as recorded, no robot outlines are found; brightened 4x, all three are found (green rings).
+
+**What changed.**
+- **Ladder camera (`tools/fleet/ladder.py`, Eye).** One thread per camera now reads the stream and keeps only the
+  newest picture. A separate tracking thread per camera takes the newest picture when it is due and drops the rest.
+  Rates are capped at 12 a second for the overhead and 10 for the side camera.
+- **Checks use the tracker's own time.** `still()` and `seen_by()` look back from the newest picture the tracker has
+  worked through, not from the clock. If tracking is more than 0.5 s behind, L0 says "camera tracking is N s behind
+  the camera".
+- **New log, `tracking_times.csv`.** Every step folder gets one: each tracked picture's camera, time, cost in ms, how
+  far behind it was and how many pictures were dropped. L0 also prints one line per camera.
+- **Dark side pictures are brightened.** In `e02_twocam`, a side picture with a mean under 50 is multiplied up to a
+  mean of 80 (at most 5x) before tracking. The factor is printed in L0 and saved in `summary()`.
+- **Recorder exposure lock (`camrec.py`).** The lock now drops 6 buffered pictures before each brightness reading,
+  so the exposure is actually matched. This only takes effect when the recorder is restarted.
+- **Faster side-camera tracking.** A robot's size in the side picture is now kept per 1 cm square of floor, not
+  projected again for every outline. That projection was a third of the side camera's cost: 29 ms a picture fell to
+  13 ms on this machine. SciPy also loads when the camera starts, not inside the first tracked picture.
+- **Cores (`run-fleet-pi.sh`).** The plan follows the e02 runner. The recorder runs on cores 0-1 (it records two
+  cameras), and the ladder with its tracking runs on cores 2-3 (`taskset`).
+
+**CPU budget, 4-core Pi 4** (this machine's cost per picture x 3.5, the stated Pi slowdown):
+
+| | Pictures tracked a second | Cost a picture (Pi, est.) | Share of one core |
+|---|---|---|---|
+| Overhead | 12 (cap) | ~45-50 ms | ~0.55-0.6 |
+| Side | 10 (cap) | ~45-50 ms | ~0.45-0.5 |
+| Total | | | ~1.0-1.1 |
+
+<sub>At 10 cm/s, the ladder's fastest leg, 12 pictures a second leaves under 1 cm between pictures. Chosen; DOE note:
+8 / 12 / 16 a second against the Pi's measured cost and lag (tracking_times.csv) and the line check's p95.</sub>
+
+Both trackers run in the ladder's one Python process, so the Python parts share one core and the OpenCV and NumPy
+parts can use the second. At Pi speed in the replay the tracking reached 9.4 (overhead) and 7.9 (side) pictures a
+second, never more than 0.23 s behind. When it is short of CPU, it now drops pictures instead of falling behind.
+For L0 (nothing moves) that is enough. Moving each camera's tracking into its own process (as e02_trackproc does) is
+**not done**. It is the next step if the real tracking_times.csv shows under ~8 pictures a second, or lag over
+0.3 s, while robots drive.
+
+**Conclusion.** With both fixes, the real 13:01 pictures give all three robots seen at Pi speed: Left by both cameras,
+Right and Center by the side camera.
+
+![Replay after the fix](../screenshots/2026-10-27/l0-1301-fix-feature-replay-all-three-seen-both-cameras.png)
+After the fix, on the real 13:01 pictures: a ring where the tracker puts each robot, in both cameras' pictures.
+
+**What's next.** Run L0 for real. Read the new `tracking_times.csv` in the L0 step folder (cost, lag and drops on
+the real Pi) and the side camera's brightening line. Restart the recorder so the exposure-lock fix and the core
+pinning apply.
+
+**New tests that may now be necessary.**
+- Unit tests for the Eye's drop-stale threads, using a fake stream and a slow tracker. The replay harness did this,
+  but it is not in the suite.
+- A recorder test where the fake camera's buffer holds pictures from before the change.
+- A dry run with the simulated side camera made dark, to check brightening in the ladder end to end.
+
+**Possible inaccuracies.**
+- **The 3.5x Pi slowdown** is a ratio of earlier Pi measurements, not measured on this code. The busy-wait stand-in
+  holds Python's lock, which is harsher than the Pi.
+- **The brightening target (80) and limit (5x)** are chosen. Brightening raises the noise too, so false outlines on
+  a dark picture are untested beyond this one recording.
+- **Right's side position** is (89.7, 44.3), about 4.5 cm from where the overhead put it offline (85.9, 42.0). That
+  matches the side camera's unexplained ~5 cm offset from 26 Oct. The offset is learned only while both cameras see
+  a whole robot standing still, and here only Left was. L1's crawl measures headings from motion, so L0 is not
+  affected, but Right's L0 spot may be off by that much.
+- **The recorder fix** (dropping buffered pictures) is untested on the real camera.
+- **Center's overhead outline** is still partial (washed out). Center relies on the side camera; when it is hidden
+  from the side, it falls back to its lights.

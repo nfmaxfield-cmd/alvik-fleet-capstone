@@ -132,23 +132,45 @@ class LadderStop(Exception):
 # ---------------------------------------------------------------------------------------------------- the camera
 class Eye:
     """The overhead camera's pictures (the recorder's /live) in a thread, the side camera's too when it is calibrated
-    (two-camera tracking, 2026-10-27: e02_twocam.TwoCamTracker), a tracker on every robot, lights finding."""
+    (two-camera tracking, 2026-10-27: e02_twocam.TwoCamTracker), a tracker on every robot, lights finding.
+
+    Reading and tracking are apart (real run 2026-10-27 13:01: the reading thread also tracked every picture, ~23 a
+    second from both cameras, and on the Pi it fell seconds behind, so `still` never found 4 recent sightings and all
+    three robots were reported unseen): one reading thread per camera keeps only the NEWEST picture; one tracking
+    thread per camera takes the newest picture when it is due (OVERHEAD_HZ / e02_twocam.SIDE_HZ) and drops the ones it
+    had no time for. Every tracked picture's cost and how far behind it was go to tracking_times.csv in the step
+    folder (log_to)."""
+    OVERHEAD_HZ = 12.0      # chosen: overhead pictures tracked a second (the camera sends ~21-25). At 10 cm/s, the
+                            # ladder's fastest leg, that is under 1 cm between pictures; Pi budget: 12 x ~45 ms = about
+                            # half of one core. DOE note: 8 / 12 / 16 a second against the Pi's measured cost and lag
+                            # (tracking_times.csv) and the line check's p95
+    BEHIND_S = 0.5          # tracking more than this behind the newest picture is reported in plain words
 
     def __init__(self, stream, calib, rect, side_stream=None, side_calib=None, lights=True):
         import e02_camera as CAM
         import sources as S
+        try:
+            import scipy.optimize  # noqa: F401  (loaded now, not inside the first tracked picture: ~0.6 s here, more on the Pi)
+        except Exception:
+            pass
         self.CAM = CAM
         self.cam = CAM.load_camera(calib)
         self.rect = rect
         self.frames = deque(maxlen=90)
         self.trk = None
         self.lock = threading.Lock()
+        self.cv = threading.Condition()
         self.closed = False
         self.n = 0
         self.lights = lights
         self.side_cam, self.side_lag, self.side_bias = None, None, (0.0, 0.0)
         self.side_frames = deque(maxlen=30)
         self.side_n = 0
+        self.newest = {"overhead": None, "side": None}       # (img, t, t_arrived, n)
+        self.done = {"overhead": None, "side": None}         # (t, t_arrived) of the last picture tracked
+        self.cost = {"overhead": deque(maxlen=300), "side": deque(maxlen=300)}   # (cost ms, behind s, dropped)
+        self.tlog = None
+        self.tlog_lock = threading.Lock()
         self.side_words = "no side camera calibration: the overhead camera alone (and the robots' lights)"
         if side_calib and side_stream:
             import e02_twocam as TW
@@ -156,9 +178,11 @@ class Eye:
             self.side_words = "side camera %s (lag %.3f s), calibration %s" % (side_stream, self.side_lag, side_calib)
             self.side_src = S.StreamSource(side_stream, log=lambda s: None)
             threading.Thread(target=self._run_side, daemon=True).start()
+            threading.Thread(target=self._track, args=("side",), daemon=True).start()
         self.src = S.StreamSource(stream, log=lambda s: None)
         self.th = threading.Thread(target=self._run, daemon=True)
         self.th.start()
+        threading.Thread(target=self._track, args=("overhead",), daemon=True).start()
 
     def _run(self):
         try:
@@ -169,32 +193,127 @@ class Eye:
                 with self.lock:
                     self.frames.append((fr.img, t))
                     self.n += 1
-                trk = self.trk
-                if trk is not None:
-                    trk.push(fr.img, t)
+                with self.cv:
+                    self.newest["overhead"] = (fr.img, t, fr.t_arrived, self.n)
+                    self.cv.notify_all()
         except Exception as e:      # the stream ended
             self.error = str(e)
 
     def _run_side(self):
-        min_lag = None
         try:
             for fr in self.side_src:
                 if self.closed:
                     break
-                lag = fr.t_arrived - fr.t_pi
-                min_lag = lag if min_lag is None else min(min_lag, lag)
                 t = fr.t_pi - 0.04
                 with self.lock:
                     self.side_frames.append((fr.img, t))
                     self.side_n += 1
-                trk = self.trk
-                if trk is not None and lag - min_lag <= 0.3:     # behind (pictures queued): skip
-                    trk.push_side(fr.img, t)
+                with self.cv:
+                    self.newest["side"] = (fr.img, t, fr.t_arrived, self.side_n)
+                    self.cv.notify_all()
         except Exception as e:
             self.side_error = str(e)
 
+    def _track(self, cam):
+        """Tracks the newest picture of camera cam when one is due; the ones in between are dropped."""
+        import e02_twocam as TW
+        every = 1.0 / (self.OVERHEAD_HZ if cam == "overhead" else TW.SIDE_HZ)
+        last_t, last_n, seen_t = None, None, None
+        while not self.closed:
+            with self.cv:
+                self.cv.wait_for(lambda: self.closed or (self.newest[cam] is not None
+                                                         and self.newest[cam][1] not in (last_t, seen_t)), timeout=0.5)
+                item = self.newest[cam]
+            trk = self.trk
+            if self.closed or item is None or item[1] in (last_t, seen_t):
+                continue
+            img, t, t_arr, n = item
+            if trk is None:
+                last_t, last_n = t, n
+                continue
+            if last_t is not None and t - last_t < 0.8 * every:
+                # not due yet: wait for the next picture (0.8: a camera sending 25 a second gives every 2nd picture at
+                # the 12-a-second cap, 12.5 a second, not every 3rd)
+                seen_t = t
+                continue
+            c0 = time.perf_counter()
+            try:
+                if cam == "overhead":
+                    trk.push(img, t)
+                else:
+                    trk.side_t = None                             # the rate is kept here (push_side's own gate off)
+                    trk.push_side(img, t)
+            except Exception as e:                                # a tracking error must not kill the thread
+                self.track_error = "%s: %s" % (cam, e)
+            cost = (time.perf_counter() - c0) * 1000.0
+            behind = time.time() - t_arr                          # this machine's clock only: waited + tracked
+            dropped = 0 if last_n is None else max(0, n - last_n - 1)
+            last_t, last_n = t, n
+            self.done[cam] = (t, t_arr)
+            self.cost[cam].append((cost, behind, dropped))
+            with self.tlog_lock:
+                if self.tlog is not None:
+                    try:
+                        self.tlog.write("%s,%.3f,%.3f,%.1f,%.3f,%d\n" % (cam, t, time.time(), cost, behind, dropped))
+                    except (OSError, ValueError):
+                        self.tlog = None
+
+    def log_to(self, folder):
+        """Every tracked picture from now on: camera, picture time, done time, cost ms, behind s, pictures dropped."""
+        with self.tlog_lock:
+            if self.tlog is not None:
+                try:
+                    self.tlog.close()
+                except OSError:
+                    pass
+            self.tlog = None
+            try:
+                new = not os.path.exists(os.path.join(folder, "tracking_times.csv"))
+                self.tlog = open(os.path.join(folder, "tracking_times.csv"), "a", buffering=1)
+                if new:
+                    self.tlog.write("camera,t_picture,t_done,cost_ms,behind_s,dropped\n")
+            except OSError:
+                self.tlog = None
+
+    def tracking_words(self):
+        """One line per camera: pictures tracked a second, cost a picture (median / 90th percentile), how far behind."""
+        out = []
+        for cam in ("overhead", "side"):
+            c = list(self.cost[cam])[-120:]
+            if len(c) < 3:
+                continue
+            ms = np.array([q[0] for q in c])
+            bh = np.array([q[1] for q in c])
+            dr = sum(q[2] for q in c)
+            out.append("%s camera tracking: %.0f ms a picture (90%%: %.0f ms), %.2f s behind at most, %d pictures "
+                       "dropped of %d" % (cam, np.median(ms), np.percentile(ms, 90), float(bh.max()), dr, dr + len(c)))
+        return out
+
+    def behind(self):
+        """Seconds the overhead tracking is behind the newest picture it was given (0 when caught up)."""
+        nw, d = self.newest["overhead"], self.done["overhead"]
+        if nw is None:
+            return 0.0
+        if d is None:
+            return time.time() - nw[2] if self.trk is not None else 0.0
+        return max(0.0, nw[1] - d[0])
+
+    def trk_time(self):
+        """The time of the newest picture the tracker has worked through (either camera), or None."""
+        ts = [d[0] for d in self.done.values() if d is not None]
+        return max(ts) if ts else None
+
     def close(self):
         self.closed = True
+        with self.cv:
+            self.cv.notify_all()
+        with self.tlog_lock:
+            if self.tlog is not None:
+                try:
+                    self.tlog.close()
+                except OSError:
+                    pass
+                self.tlog = None
         self.src.closed = True
         if getattr(self, "side_src", None) is not None:
             self.side_src.closed = True
@@ -260,6 +379,7 @@ class Eye:
             trk.set_side_background(self.latest_side(5), robots=[(x, y) for x, y in spots.values()])
         for n, (x, y) in spots.items():
             trk.add(n, x, y)
+        self.done = {"overhead": None, "side": None}
         self.trk = trk
         time.sleep(0.8)
 
@@ -267,14 +387,19 @@ class Eye:
         """Where the camera sees it standing still: the median of its sure spots over the last s, or None. body_only:
         only spots where a camera saw its body (not its lights alone): L0's check."""
         t_end = time.time() + timeout
+        self.still_why = ""
         while time.time() < t_end:
-            h = self.trk.history(name, time.time() - s - 0.1, body_only=body_only) if self.trk else []
+            ref = self.trk_time()           # the tracker's own newest picture: a slow tracker is not "unseen"
+            h = self.trk.history(name, ref - s - 0.1, ref, body_only=body_only) if self.trk and ref else []
             if len(h) >= 4 and h[-1][0] - h[0][0] >= 0.6 * s:
                 xs, ys = np.array([q[1] for q in h]), np.array([q[2] for q in h])
                 mx, my = float(np.median(xs)), float(np.median(ys))
                 if float(np.max(np.hypot(xs - mx, ys - my))) <= spread_cm:
                     return mx, my
             time.sleep(0.15)
+        b = self.behind()
+        if b > self.BEHIND_S:
+            self.still_why = "camera tracking is %.1f s behind the camera" % b
         return None
 
     def seen_by(self, name, s=1.5):
@@ -283,7 +408,8 @@ class Eye:
             return None
         with self.trk.lock:
             tr = self.trk.tracks.get(name)
-            hs = [q[4] for q in tr.hist if q[0] >= time.time() - s and len(q) > 4 and q[4]] if tr else []
+            ref = self.trk_time() or time.time()
+            hs = [q[4] for q in tr.hist if q[0] >= ref - s and len(q) > 4 and q[4]] if tr else []
         return max(set(hs), key=hs.count) if hs else None
 
 
@@ -769,9 +895,15 @@ class Ladder:
                 say("  %s: its lights were not seen anywhere on the board." % n)
                 continue
             lights[n] = q
+        eye.log_to(sub)
         eye.start_tracking(lights)
+        if eye.trk.side is not None and eye.trk.side_gain > 1.0:
+            say("  side camera picture is dark (mean %.0f of 255): brightened %.1fx for tracking"
+                % (eye.trk.side_mean, eye.trk.side_gain))
         for n, q in lights.items():
             p = eye.still(n, timeout=4.0, body_only=True)
+            if p is None and eye.still_why:
+                say("  %s: %s" % (n, eye.still_why))
             if p is None:
                 # NEITHER camera sees its body (2026-10-27 11:20: the overhead alone could not, on the washed-out board;
                 # the side camera now looks too): it cannot be followed, so it never moves today, but it is on every
@@ -800,6 +932,8 @@ class Ladder:
             if h is None:
                 r.pop("h", None)
             self.save()
+        for w in eye.tracking_words():
+            say("  " + w)
         return found
 
     def others_of(self, n):

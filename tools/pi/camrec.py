@@ -521,6 +521,10 @@ def apply_controls(cap, device, exposure="lock", focus="lock", wb="lock", warmup
                 if cap_exp:
                     hi = min(hi, int(cap_exp))        # never longer than a frame: that would drop the fps
                 for _ in range(4):
+                    # pictures taken before the change wait in the camera's buffer: dropped first (real run
+                    # 2026-10-27 13:01: the side picture read as matched at once, then settled at 21 of 255, 79 wanted)
+                    for _k in range(6):
+                        cap.read()
                     st = frame_stats(cap, 5)
                     if not st or abs(st["brightness"] / target - 1) <= 0.12 or st["brightness"] >= 250:
                         break

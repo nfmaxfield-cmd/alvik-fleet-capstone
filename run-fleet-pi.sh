@@ -52,7 +52,10 @@ ladder() {
     python3 tools/fleet/ladder.py "$@" --dry ${LADDER_DRY_ARGS:-}
   else
     start_recorder
-    python3 tools/fleet/ladder.py "$@" $IPS --stream 127.0.0.1:8000 --calib "$CALIB" $SIDE_ARG
+    # cores (the e02 runner's plan, run-e02-pi.sh): the recorder on cores 0-1, the ladder and its tracking on 2-3
+    local PIN=""
+    if [ "$(nproc)" -ge 4 ] && command -v taskset >/dev/null; then PIN="taskset -c 2,3"; fi
+    $PIN python3 tools/fleet/ladder.py "$@" $IPS --stream 127.0.0.1:8000 --calib "$CALIB" $SIDE_ARG
   fi
 }
 
@@ -78,12 +81,12 @@ start_recorder() {
   mkdir -p "$OUT"
   echo "$OUT" > /tmp/fleet_rec_out
   if [ -n "$SD" ] && [ "$SD" != "$OD" ]; then
-    CAMS="--device $OD,$SD --names overhead,side"; echo "Recording both cameras (overhead /dev/video$OD, side /dev/video$SD) to $OUT"
+    CAMS="--device $OD,$SD --names overhead,side"; REC_CORES="--cores 0,1"; echo "Recording both cameras (overhead /dev/video$OD, side /dev/video$SD) to $OUT"
   else
-    CAMS="--device $OD --names overhead"; echo "Recording the overhead camera (/dev/video$OD) to $OUT (no side camera found)"
+    CAMS="--device $OD --names overhead"; REC_CORES="--cores 1"; echo "Recording the overhead camera (/dev/video$OD) to $OUT (no side camera found)"
   fi
   python3 tools/pi/launcher.py --handoff >/dev/null 2>&1 || true
-  tmux new-session -d -s fleet -n rec "cd '$REPO' && python3 tools/pi/camrec.py $CAMS --fps 25 --label P0 --no-lock $EXPO_ARG --side-exposure lock --cores 1 --out '$OUT'; read -r -p 'Recorder stopped. Press Enter.'"
+  tmux new-session -d -s fleet -n rec "cd '$REPO' && python3 tools/pi/camrec.py $CAMS --fps 25 --label P0 --no-lock $EXPO_ARG --side-exposure lock $REC_CORES --out '$OUT'; read -r -p 'Recorder stopped. Press Enter.'"
   echo "Recorder starting (8 s) ..."; sleep 8
 }
 

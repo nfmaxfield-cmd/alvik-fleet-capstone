@@ -431,8 +431,17 @@ class MotionTracker:
         """A robot's width in pixels at floor spot (x, y): self.rpx (the board's middle) unless size_per_spot."""
         if not self.size_per_spot:
             return self.rpx
-        s = self.cam.px_per_cm(x, y, self.z)
-        return ROBOT_CM * s if np.isfinite(s) and s > 0 else self.rpx
+        # kept per 1 cm square of floor (it changes ~1 % per cm): one projection each was a third of the side
+        # camera's tracking cost on the ladder (2026-10-27 13:01 replay: ~900 projections per 60 pictures)
+        cache = self.__dict__.setdefault("_rpx_cache", {})
+        key = (int(math.floor(x)), int(math.floor(y)))
+        r = cache.get(key)
+        if r is None:
+            s = self.cam.px_per_cm(key[0] + 0.5, key[1] + 0.5, self.z)
+            r = ROBOT_CM * s if np.isfinite(s) and s > 0 else self.rpx
+            if len(cache) < 50000:
+                cache[key] = r
+        return r
 
     def _px(self, x, y):
         u, v = self.cam.project((x, y, self.z))
