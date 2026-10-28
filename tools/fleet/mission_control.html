@@ -76,7 +76,7 @@ const STEPS = ["Connect", "Workspace", "Warm-up", "Mission", "Run", "Review"];
 const COL = {Left: "#2952CC", Center: "#C2410C", Right: "#7A3EC8"};
 const SIDES = ["x_min", "x_max", "y_min", "y_max"];
 const SIDE_WORDS = {x_min: "Left side", x_max: "Right side", y_min: "Bottom side (audience)", y_max: "Top side"};
-let S = null, screen = 0, done = new Set(), mode = "monday", conn = "sim", spotMode = null, zoneStart = null;
+let S = null, screen = 0, done = new Set(), mode = "program", prog = null, conn = "sim", spotMode = null, zoneStart = null;
 let playT = 0, playing = false, timer = null, pollT = null;
 
 function $(id) { return document.getElementById(id); }
@@ -210,6 +210,7 @@ function workspace() {
     `<div class="card"><h2>Workspace</h2>
       <div class="row" style="margin:10px 0"><label class="lbl">Length (cm) <input class="n" id="len" value="${(f.x_max - f.x_min).toFixed(1)}"></label>
       <label class="lbl">Width (cm) <input class="n" id="wid" value="${(f.y_max - f.y_min).toFixed(1)}"></label></div>
+      <div class="row small" style="margin:-4px 0 8px"><span class="muted">Monday's table:</span>${(S.table_sizes || []).map(t => `<button class="b" style="padding:4px 8px" data-ts="${t[0]}x${t[1]}">${t[0]} x ${t[1]}</button>`).join("")}</div>
       ${sideRows}
       <h3 style="margin-top:12px">Spots</h3>${Object.entries(S.map.spots || {}).map(([n, p]) => `<div class="between" style="padding:6px 0;border-bottom:1px solid #F0F1F3"><b>${esc(n)}</b><span class="muted">(${p[0]}, ${p[1]}) cm <button class="b" style="padding:4px 8px" data-delspot="${esc(n)}" aria-label="Delete spot ${esc(n)}">×</button></span></div>`).join("") || '<p class="muted small">None yet</p>'}
       <h3 style="margin-top:12px">No-go zones</h3>${zones.map(z => `<div class="between" style="padding:6px 0;border-bottom:1px solid #F0F1F3"><span>${esc(z.name)} <span class="small muted">${esc(z.status || "")}</span></span><span>${z.status === "proposed" ? `<button class="b" style="padding:4px 8px" data-okzone="${esc(z.name)}">Keep</button>` : ""}<button class="b" style="padding:4px 8px" data-delzone="${esc(z.name)}" aria-label="Delete ${esc(z.name)}">×</button></span></div>`).join("") || '<p class="muted small">None</p>'}
@@ -238,6 +239,7 @@ function workspace() {
   $("main").querySelectorAll("[data-okzone]").forEach(b => b.onclick = () => saveMap({keepouts: S.map.keepouts.map(z => z.name === b.dataset.okzone ? {...z, status: "confirmed"} : z)}));
   $("main").querySelectorAll("[data-side]").forEach(s => s.onchange = () => wsSave());
   $("savews").onclick = () => wsSave();
+  $("main").querySelectorAll("[data-ts]").forEach(b => b.onclick = () => { const [w, l] = b.dataset.ts.split("x"); $("len").value = l; $("wid").value = w; wsSave(); });
   $("go").onclick = async () => { await wsSave(); done.add(1); screen = 2; render(); };
 }
 async function saveMap(d) { try { S = await api("/api/map", d); render(); } catch (e) { flash(e.message, true); } }
@@ -279,15 +281,65 @@ function warmup() {
   $("go").onclick = () => { done.add(2); screen = 3; render(); };
 }
 
-const MODES = [["monday", "Monday routine", "Show, then mowing beside Chicken, Follow and Roam, then park"], ["mow", "Lawnmower", "One full pass, lanes 12 cm apart"],
+const MODES = [["program", "Monday (blocks)", "2 robots: mow, meet, circle, mow on, Chicken, spread out, dance"],
+  ["monday", "Old 3-robot routine", "Show, then mowing beside Chicken, Follow and Roam, then park"], ["mow", "Lawnmower", "One full pass, lanes 12 cm apart"],
   ["spots", "Go to spots", "Instruction lists per robot"], ["chicken", "Chicken", "Left and Right, twice"], ["follow", "Follow the leader", "Left leads, Right follows"],
   ["roam", "Roam", "Random spots"], ["show", "Show", "The opening dance"]];
+// ---------------------------------------------------------------- blocks (one system, 2026-10-28)
+const BLOCK_HELP = {"mow-region": "robot · from, to (share of the table's length, 0-1) · direction + or -",
+  "go-to-spot": "robot · spot=A, or at=x y (shares of the table) · heading (deg, optional)",
+  "meet": "2 robots · at=x y (shares) · r_cm (the circle's radius)", "circle": "2 robots · turns · way anticlockwise / clockwise",
+  "chicken": "2 robots · swerve_cm · min_cm · rounds", "spread-out": "robots · y (share of the width)",
+  "dance": "robots · seconds (0 = until switched off)", "wait": "robots · seconds"};
+function blockParams(b) { return Object.entries(b).filter(([k]) => !["block", "robot", "robots"].includes(k)).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join(" ") : v}`).join(", "); }
+function parseParams(txt) {
+  const o = {};
+  for (const part of txt.split(",").map(x => x.trim()).filter(Boolean)) {
+    const [k, v0] = part.split("=").map(x => x.trim()); if (!k || v0 === undefined) throw new Error(`"${part}": use name=value`);
+    const ws = v0.split(/\s+/);
+    o[k] = ws.length > 1 ? ws.map(Number) : (v0 !== "" && !isNaN(+v0) ? +v0 : v0);
+  }
+  return o;
+}
+function readProgram() {
+  const rows = [...document.querySelectorAll("[data-brow]")];
+  const blocks = rows.map(r => { const kind = r.querySelector("[data-bk]").value, who = r.querySelector("[data-bw]").value.split(",").map(x => x.trim()).filter(Boolean);
+    const b = {block: kind, ...parseParams(r.querySelector("[data-bp]").value)};
+    if (["mow-region", "go-to-spot"].includes(kind)) b.robot = who[0]; else b.robots = who; return b; });
+  const robots = [...new Set(blocks.flatMap(b => b.robots || [b.robot]).filter(Boolean))];
+  return {...prog, robots, blocks};
+}
+function blocksEditor() {
+  prog = prog || S.program;
+  const rows = prog.blocks.map((b, i) => `<div data-brow="${i}" class="card" style="padding:10px;margin:6px 0">
+    <div class="row"><b style="width:22px">${i + 1}</b><select data-bk aria-label="Block ${i + 1}">${S.blocks.map(k => `<option ${k === b.block ? "selected" : ""}>${k}</option>`).join("")}</select>
+      <input data-bw style="width:120px" value="${esc((b.robots || [b.robot]).join(", "))}" aria-label="Robots for block ${i + 1}">
+      <span class="grow"></span><button class="b" style="padding:4px 8px" data-bup="${i}" aria-label="Move block ${i + 1} up">↑</button><button class="b" style="padding:4px 8px" data-bdn="${i}" aria-label="Move block ${i + 1} down">↓</button><button class="b" style="padding:4px 8px" data-bdel="${i}" aria-label="Delete block ${i + 1}">×</button></div>
+    <input data-bp style="width:100%;margin-top:6px" value="${esc(blockParams(b))}" aria-label="Settings for block ${i + 1}">
+    <div class="small muted" style="margin-top:4px">${esc(BLOCK_HELP[b.block] || "")}</div></div>`).join("");
+  return `<div class="card"><div class="between"><h3>Blocks</h3><span class="small muted">${esc(prog.name || "")}</span></div>
+    <p class="small muted" style="margin:0 0 6px">Each block runs after the one before, for its robots. Places are shares of the table (0 to 1), so the mission fits any table size.</p>
+    ${rows}<div class="row" style="margin-top:8px"><button class="b dash" id="badd">+ Block</button>
+    <label class="lbl">Robots <select id="bpair">${[["Left", "Right"], ["Left", "Center"], ["Center", "Right"]].map(p => `<option ${prog.robots.join() === p.join() ? "selected" : ""}>${p.join(", ")}</option>`).join("")}</select></label>
+    <button class="b" id="bdef">Monday's default</button></div></div>`;
+}
+function wireBlocks() {
+  const mv = (i, d) => { prog = readProgram(); const b = prog.blocks.splice(i, 1)[0]; prog.blocks.splice(Math.max(0, Math.min(prog.blocks.length, i + d)), 0, b); render(); };
+  document.querySelectorAll("[data-bup]").forEach(b => b.onclick = () => mv(+b.dataset.bup, -1));
+  document.querySelectorAll("[data-bdn]").forEach(b => b.onclick = () => mv(+b.dataset.bdn, 1));
+  document.querySelectorAll("[data-bdel]").forEach(b => b.onclick = () => { prog = readProgram(); prog.blocks.splice(+b.dataset.bdel, 1); render(); });
+  document.querySelectorAll("[data-bk]").forEach(sel => sel.onchange = () => { try { prog = readProgram(); render(); } catch (e) { flash(e.message, true); } });
+  $("badd").onclick = () => { prog = readProgram(); prog.blocks.push({block: "wait", robots: prog.robots, seconds: 2}); render(); };
+  $("bdef").onclick = async () => { const r = await api("/api/program/default", {robots: $("bpair").value.split(", ")}); prog = r.program; render(); };
+}
+
 function mission() {
   const pv = S.preview && S.preview.title !== "Warm-up" ? S.preview : null;
   const spots = Object.keys(S.map.spots || {});
   page(`<div><h1>${pv ? esc(MODES.find(m => m[0] === String(pv.title).toLowerCase())?.[1] || pv.title) : "Choose a mission"}</h1><p class="sub">Preview plays the plan on the table. Every move waits for the moves it could meet.</p></div>
     <div class="card">${previewBlock(pv)}</div>`,
     `<h2>Mission</h2><div class="modes">${MODES.map(m => `<button class="${mode === m[0] ? "on" : ""}" data-m="${m[0]}"><b>${m[1]}</b><span class="small muted">${m[2]}</span></button>`).join("")}</div>
+     ${mode === "program" ? blocksEditor() : ""}
      ${mode === "spots" ? `<div class="card"><p class="small muted">Spots: ${spots.join(", ") || "none (add them in Workspace)"}. Example: go to A · wait 5 s · go to C · repeat 3x</p>${S.map.robots.map(r => `<label class="lbl">${esc(r.name)}<textarea data-list="${r.name}" placeholder="go to A, wait 5 s, go to C"></textarea></label>`).join("")}</div>` : ""}
      ${mode === "roam" || mode === "mow" ? `<label class="lbl">Robot <select id="robot">${S.map.robots.map(r => `<option ${r.name === "Center" ? "selected" : ""}>${r.name}</option>`).join("")}</select></label>` : ""}
      ${pv ? `<div class="card"><h3>Sequence</h3>${actsList(pv)}${pv.notes.length ? `<ul class="small muted">${pv.notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}</div>` : ""}
@@ -298,9 +350,11 @@ function mission() {
     const body = {mode};
     if (mode === "spots") body.lists = Object.fromEntries([...document.querySelectorAll("[data-list]")].map(t => [t.dataset.list, t.value]));
     if ($("robot")) body.robot = $("robot").value;
-    try { flash("Planning... (Monday takes about 30 s)"); $("plan").disabled = true; await api("/api/mission", body); await load(); playT = 0; flash("Planned"); } catch (e) { flash(e.message, true); $("plan").disabled = false; }
+    if (mode === "program") { try { prog = readProgram(); body.program = prog; } catch (e) { flash(e.message, true); return; } }
+    try { flash("Planning... (Monday takes about 10-30 s)"); $("plan").disabled = true; await api("/api/mission", body); await load(); playT = 0; flash("Planned"); } catch (e) { flash(e.message, true); $("plan").disabled = false; }
   };
   $("go").onclick = () => { done.add(3); screen = 4; render(); };
+  if (mode === "program") wireBlocks();
   wirePreview(pv);
 }
 function actsList(pv) {

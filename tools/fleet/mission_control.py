@@ -46,6 +46,8 @@ import workspace as WS    # noqa: E402
 PAGE = os.path.join(HERE, "mission_control.html")
 PORT = 8095
 PREVIEW_STEP_S = 0.25     # the preview's sampling of the plan (the slider's resolution). No DOE: display only
+TABLE_SIZES = [[61, 122], [70, 130], [76, 137]]   # Monday's table: at least 2 x 4 ft, at most 2.5 x 4.5 ft (Nick,
+                                                  # 16:43); exact size Thursday. The Workspace screen's quick choices
 
 # run settings (every one shown and editable on the page)
 RUN_DEFAULTS = {
@@ -161,6 +163,14 @@ class Session:
             except ValueError:
                 pass
         self.mission = None          # the mission map (tasks) last made
+        self.program = None          # the block program on the Mission screen (default: Monday's, missions.py)
+        pp = os.path.join(self.dir, "program.json")
+        if os.path.exists(pp):
+            try:
+                with open(pp) as f:
+                    self.program = json.load(f)
+            except ValueError:
+                self.program = None
         self.plan = None
         self.preview = None
         self.warm_map = None
@@ -188,6 +198,8 @@ class Session:
                "defaults": {"planner": dict(P.DEFAULT_SETTINGS), "mission": dict(MS.SETTINGS), "run": dict(RUN_DEFAULTS),
                             "warmup": {k: getattr(WU, k) for k in WARMUP_KNOBS}},
                "least_open_room_cm": round(MS.least_open_room(m), 2) if m.get("sides") else None,
+               "program": self.program or MS.monday_program(), "blocks": list(MS.BLOCKS),
+               "table_sizes": TABLE_SIZES,
                "mission": (self.mission or {}).get("mission"), "preview": self.preview,
                "warmup": self.warm_result, "run": self.run.status() if self.run else None,
                "last_runs": self.last_runs}
@@ -240,7 +252,14 @@ class Session:
         s = MS.settings(self.settings["mission"])
         m = FM.normalize(self.map)
         start = {r["name"]: r["start"] for r in m["robots"]}
-        if mode == "monday":
+        if mode == "program":
+            # blocks (one system, 2026-10-28): Monday's default, or Nick's edit of it
+            prog = d.get("program") or self.program or MS.monday_program()
+            self.program = prog
+            with open(os.path.join(self.dir, "program.json"), "w") as f:
+                json.dump(prog, f, indent=1)
+            mm = MS.build(m, prog, s)
+        elif mode == "monday":
             mm = MS.monday(m, s, seed=int(d.get("seed", 1)))
         else:
             mm = dict(m)
@@ -274,6 +293,10 @@ class Session:
         P.save_plan(plan, os.path.join(self.dir, "plan.json"))
         self.preview = preview(mm, plan, title=(mm.get("mission") or {}).get("name", mode))
         return {"preview": self.preview}
+
+    def default_program(self, robots=None):
+        self.program = MS.monday_program(tuple(robots) if robots else ("Left", "Right"))
+        return {"program": self.program}
 
     # -- runs --------------------------------------------------------------
     def start_run(self, d):
@@ -358,8 +381,15 @@ def preview(mm, plan, title=""):
             if lab and lab != cur:
                 acts.append({"robot": name, "label": lab, "t": st["t_start"]})
                 cur = lab
-    paths = {name: [[round(st["to"][0], 1), round(st["to"][1], 1)] for st in r["steps"]
-                    if st["type"] in ("drive", "approach")] for name, r in plan["robots"].items()}
+    paths = {}
+    for name, r in plan["robots"].items():
+        pts = [[round(v, 1) for v in r["start"][:2]]]
+        for st in r["steps"]:
+            if st["type"] in ("drive", "approach"):
+                pts.append([round(st["to"][0], 1), round(st["to"][1], 1)])
+            elif st["type"] == "arc":           # a true curve: drawn through points along it
+                pts += [[round(q[0], 1), round(q[1], 1)] for q in P.step_poses(st, 6)[1:]]
+        paths[name] = pts
     starts = {name: r["start"][:2] for name, r in plan["robots"].items()}
     sm = MS.summary(mm, plan)
     return {"title": title, "step_s": PREVIEW_STEP_S, "makespan_s": T, "frames": frames, "paths": paths,
@@ -444,6 +474,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, S.state())
                 if path == "/api/mission":
                     return self._send(200, S.make_mission(d))
+                if path == "/api/program/default":
+                    return self._send(200, S.default_program(d.get("robots")))
                 if path == "/api/run/start":
                     return self._send(200, S.start_run(d))
                 if path == "/api/run/pause":

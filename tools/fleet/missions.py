@@ -542,6 +542,298 @@ def _monday(m, s=None, seed=1, k_user=1.0):
     return out
 
 
+# ============================================================================ blocks (one system, 2026-10-28)
+# Nick (2026-10-27 18:36): "the software used to craft runs": a mission is a list of blocks, each for one or more
+# robots, editable on Mission Control's Mission screen. Blocks: mow-region (short lanes, stop-and-turn), go-to-spot,
+# meet, circle (a true arc), chicken, spread-out (park), dance, wait. Places are given as fractions of the table
+# (0..1 along x and y), so the same mission fits any table (Monday: 61 x 122 to 76 x 137 cm; exact size Thursday).
+# A block applies to its robots in turn; build() turns the list into planner tasks per robot (visit items), keeping
+# track of where each robot ends, so the next block starts from there.
+
+BLOCKS = ("mow-region", "go-to-spot", "meet", "circle", "chicken", "spread-out", "dance", "wait")
+
+CIRCLE_R_CM = 15.0       # chosen: the circle's radius: two robots 180 deg apart on it are 30 cm centre to centre (bodies
+                         # ~20 cm), and pieces two apart (60 deg) stay clear, so both drive it together without waits.
+                         # 12 cm made neighbouring pieces meet (the planner held one robot back). DOE note: 12 / 15 / 18 cm
+                         # on the board: the camera's closest approach and radial error against how it looks
+MEET_RUN_IN_CM = 12.0    # chosen: the straight run-in to a circle's entry point (camera heading before the circle,
+                         # Nick's "confirm before anything risky"). No DOE beyond the run-in's own (confirm_cms row)
+MEET_SLACK_S = 3.0       # chosen: the meet time is planned this long after the later robot's estimated arrival (the
+                         # estimate leaves out waits for the other robot). DOE note: 1 / 3 / 6 s against the plan's
+                         # waits at the meet (planner only)
+CHICKEN_RUN_IN_CM = 12.0  # chosen: Chicken's ready spot is reached on a straight run-in along the chicken line (the
+                          # heading confirmed before driving at the other robot). No DOE (as MEET_RUN_IN_CM)
+
+
+def _frac(m, fx, fy):
+    f = m["floor"]
+    return f["x_min"] + fx * (f["x_max"] - f["x_min"]), f["y_min"] + fy * (f["y_max"] - f["y_min"])
+
+
+def lanes_x(m, s):
+    """Lane positions across the table's length (lanes run along the short side, x = const for a long-x table), as
+    mow(along="short") makes them, with the planner's room from open sides."""
+    s = settings(s)
+    f = m["floor"]
+    inset = s["mow_inset_cm"]
+    need = least_open_room(m)
+    if m.get("sides") and need > inset:
+        inset = need + 1.0
+    W, H = f["x_max"] - f["x_min"], f["y_max"] - f["y_min"]
+    long_x = W >= H
+    lo, hi = ((f["x_min"], f["x_max"]) if long_x else (f["y_min"], f["y_max"]))
+    lo, hi = lo + inset, hi - inset
+    out, v = [], lo
+    while v <= hi + 1e-6:
+        out.append(round(v, 2))
+        v += s["mow_lane_cm"]
+    if hi - out[-1] > s["mow_lane_cm"] / 2:
+        out.append(round(hi, 2))
+    a0, a1 = ((f["y_min"] + inset, f["y_max"] - inset) if long_x else (f["x_min"] + inset, f["x_max"] - inset))
+    return out, (a0, a1), long_x, inset
+
+
+def mow_region(m, s, fx0, fx1, direction, start_xy):
+    """The lanes whose position lies in [fx0, fx1) of the table's length (fx1 = 1 includes the last), visited in
+    increasing (direction +1) or decreasing (-1) position, each lane driven end to end, alternating, starting from the
+    end nearest start_xy: stop-and-turn (drive the lane, 90 deg, the lane gap over, 90 deg, back). Returns visits."""
+    lanes, (a0, a1), long_x, _ = lanes_x(m, s)
+    f = m["floor"]
+    L0, L1 = (f["x_min"], f["x_max"]) if long_x else (f["y_min"], f["y_max"])
+    p0, p1 = L0 + fx0 * (L1 - L0), L0 + fx1 * (L1 - L0)
+    mine = [v for v in lanes if p0 - 1e-6 <= v < p1 - 1e-6 or (fx1 >= 1.0 and v >= p0 - 1e-6)]
+    mine = sorted(mine, reverse=direction < 0)
+    if not mine:
+        return []
+    out = []
+    cur = start_xy
+    for k, c in enumerate(mine):
+        def pt(e):
+            return (c, e) if long_x else (e, c)
+        ends = (a0, a1) if math.dist(cur, pt(a0)) <= math.dist(cur, pt(a1)) else (a1, a0)
+        line = [*pt(ends[0]), *pt(ends[1])]
+        for j, e in enumerate(ends):
+            x, y = pt(e)
+            out.append(_g(x, y, label="mow lane %d %s" % (lanes.index(c) + 1, "start" if j == 0 else "end"), lane=line,
+                          end=j))
+        cur = pt(ends[1])
+    return out
+
+
+def _last_xy(visits, default):
+    for v in reversed(visits):
+        if "goto" in v:
+            return tuple(v["goto"][:2])
+        if "arc" in v:
+            a = v["arc"]
+            ang = math.radians(a["a0_deg"] + a["sweep_deg"])
+            return a["c"][0] + a["r"] * math.cos(ang), a["c"][1] + a["r"] * math.sin(ang)
+    return default
+
+
+def monday_program(robots=("Left", "Right")):
+    """Monday's default (Nick, 2026-10-27 18:26-18:36): 2 robots, a short presentation.
+    1. Each starts at its own end of the table and mows towards the centre line in lanes along the SHORT side
+       (stop-and-turn), working towards the centre line.
+    2. They meet at the centre line mid-mow and circle each other 1.5 times on a true curve, which leaves them on
+       swapped sides; then each carries on mowing in its direction (no backing off).
+    3. At the end of their mowing they turn towards each other and play Chicken (swerve at 15 cm, never under 8 cm).
+    4. They spread out, equally spaced on the table, and dance until switched off.
+    Claude's reading of "mid-mow" (an assumption, flagged in the build report): each robot mows the outer quarter at its
+    end, they meet and circle, and each then mows the inner quarter on the other side, going on in its own direction,
+    so every lane is mowed once and they end facing each other across the middle for Chicken."""
+    a, b = robots
+    return {"name": "Monday, 2 robots", "robots": [a, b],
+            "starts": {a: {"at": [0.0, 0.0], "face": "+y"}, b: {"at": [1.0, 0.0], "face": "+y"}},
+            "blocks": [
+                {"block": "mow-region", "robot": a, "from": 0.0, "to": 0.25, "direction": "+"},
+                {"block": "mow-region", "robot": b, "from": 0.75, "to": 1.0, "direction": "-"},
+                {"block": "meet", "robots": [a, b], "at": [0.5, 0.5], "r_cm": CIRCLE_R_CM},
+                {"block": "circle", "robots": [a, b], "turns": 1.5, "way": "anticlockwise"},
+                {"block": "mow-region", "robot": a, "from": 0.5, "to": 0.75, "direction": "+"},
+                {"block": "mow-region", "robot": b, "from": 0.25, "to": 0.5, "direction": "-"},
+                {"block": "chicken", "robots": [a, b], "swerve_cm": 15.0, "min_cm": 8.0, "rounds": 1},
+                {"block": "spread-out", "robots": [a, b]},
+                {"block": "dance", "robots": [a, b], "seconds": 0},
+            ]}
+
+
+def _robots_of(bl):
+    if "robots" in bl:
+        return list(bl["robots"])
+    return [bl["robot"]] if bl.get("robot") else []
+
+
+def build(m, program, s=None):
+    """A mission program (blocks) -> a mission map: every robot's start (the program's "starts": fractions of the table,
+    snapped to the first lane end near it), its tasks (visit items) and the mission's notes. Robots not in the program
+    are left out of the map (Monday: 2 of the 3)."""
+    s = settings(s)
+    m = FM.normalize(copy.deepcopy(m))
+    names = list(program.get("robots") or [r["name"] for r in m["robots"]])
+    known = {r["name"]: r for r in m["robots"]}
+    for n in names:
+        if n not in known:
+            raise ValueError("the program uses %s, which the map does not have (robots: %s)" % (n, ", ".join(known)))
+    f = m["floor"]
+    room = least_open_room(m) + 1.0
+    visits = {n: [] for n in names}
+    starts = {}
+    notes = []
+    lanes, (a0, a1), long_x, inset = lanes_x(m, s)
+    # starts: the program's "at" (fractions), moved in to the first lane end there; facing along the short side
+    for n in names:
+        st = (program.get("starts") or {}).get(n)
+        if st:
+            x, y = _frac(m, *st["at"])
+            x = min(max(x, f["x_min"] + inset), f["x_max"] - inset)
+            y = min(max(y, f["y_min"] + inset), f["y_max"] - inset)
+            h = {"+y": 90.0, "-y": 270.0, "+x": 0.0, "-x": 180.0}.get(st.get("face", "+y"), 90.0)
+            starts[n] = [round(x, 2), round(y, 2), h]
+        else:
+            starts[n] = list(known[n]["start"])
+    t_est = {n: 0.0 for n in names}           # each robot's own time so far (no waits), for meet times
+    mm_ = FM.normalize(dict(m, robots=[dict(known[n], start=starts[n], park=starts[n]) for n in names], tasks={}))
+
+    def advance(n, items):
+        """add items to robot n, keeping its time estimate."""
+        start = starts[n] if not visits[n] else None
+        here = _pose_after(n)
+        visits[n].extend(items)
+        moving = [v for v in items if "goto" in v or "arc" in v]
+        if moving:
+            try:
+                t_est[n] += plan_s(mm_, moving, here)
+            except P.PlanError:
+                t_est[n] += est_s([v["goto"][:2] for v in moving if "goto" in v], here, P.settings())
+        for v in items:
+            if "wait_s" in v:
+                t_est[n] += v["wait_s"]
+            if "until_s" in v:
+                t_est[n] = max(t_est[n], v["until_s"])
+        return start
+
+    def _pose_after(n):
+        xy = _last_xy(visits[n], tuple(starts[n][:2]))
+        h = starts[n][2]
+        for v in reversed(visits[n]):
+            if "goto" in v and len(v["goto"]) > 2:
+                h = v["goto"][2]
+                break
+            if "arc" in v:
+                a = v["arc"]
+                h = a["a0_deg"] + a["sweep_deg"] + (90.0 if a["sweep_deg"] >= 0 else -90.0)
+                break
+            if "goto" in v:
+                break
+        return (xy[0], xy[1], h)
+
+    circle = {}
+    for k, bl in enumerate(program["blocks"]):
+        kind = bl.get("block")
+        who = _robots_of(bl)
+        for n in who:
+            if n not in names:
+                raise ValueError("block %d (%s) names %s, who is not in this mission" % (k + 1, kind, n))
+        if kind == "mow-region":
+            n = who[0]
+            items = mow_region(m, s, float(bl.get("from", 0.0)), float(bl.get("to", 1.0)),
+                               -1 if str(bl.get("direction", "+")).startswith("-") else 1, _pose_after(n)[:2])
+            if not items:
+                notes.append("block %d: no lane of the table lies in %s's region %.2f-%.2f" % (k + 1, n, bl.get("from", 0),
+                                                                                             bl.get("to", 1)))
+            advance(n, items)
+        elif kind == "go-to-spot":
+            n = who[0]
+            if bl.get("spot"):
+                sp = (m.get("spots") or {}).get(str(bl["spot"]).upper())
+                if not sp:
+                    raise ValueError("block %d: there is no spot %s" % (k + 1, bl["spot"]))
+                x, y = sp[:2]
+            else:
+                x, y = _frac(m, *bl["at"])
+            g = _g(x, y, bl.get("heading"), label=bl.get("label") or "go to spot")
+            advance(n, [g])
+        elif kind == "wait":
+            for n in who:
+                advance(n, [{"wait_s": float(bl.get("seconds", 1.0)), "label": "wait"}])
+        elif kind == "meet":
+            if len(who) != 2:
+                raise ValueError("block %d: meet is for 2 robots" % (k + 1))
+            c = _frac(m, *bl.get("at", [0.5, 0.5]))
+            r = float(bl.get("r_cm", CIRCLE_R_CM))
+            # each robot goes to the circle's point on its own side (along the table's length), facing round it
+            pos = {n: _pose_after(n) for n in who}
+            left, right = sorted(who, key=lambda n: pos[n][0] if long_x else pos[n][1])
+            way = 1.0       # anticlockwise; the circle block may turn the other way: then the entries face the other way
+            nxt = next((b2 for b2 in program["blocks"][k + 1:] if b2.get("block") == "circle"), None)
+            if nxt and str(nxt.get("way", "anticlockwise")).startswith("clock"):
+                way = -1.0
+            ent = {left: 180.0 if long_x else 270.0, right: 0.0 if long_x else 90.0}
+            circle = {"c": [round(c[0], 2), round(c[1], 2)], "r": r, "entry": ent, "way": way, "sync": "meet%d" % k}
+            for n in who:
+                ang = math.radians(ent[n])
+                ex, ey = c[0] + r * math.cos(ang), c[1] + r * math.sin(ang)
+                hd = (ent[n] + 90.0 * way) % 360.0
+                advance(n, [_g(ex, ey, hd, label="meet", run_in_cm=MEET_RUN_IN_CM)])
+            t_meet = max(t_est[n] for n in who) + MEET_SLACK_S
+            for n in who:
+                advance(n, [{"until_s": round(t_meet, 1), "label": "meet"}, {"sync": circle["sync"], "label": "meet"}])
+            notes.append("meet at (%.0f, %.0f), about %.0f s in" % (c[0], c[1], t_meet))
+        elif kind == "circle":
+            if not circle:
+                raise ValueError("block %d: circle needs a meet block before it" % (k + 1))
+            turns = float(bl.get("turns", 1.5))
+            for n in who:
+                advance(n, [{"arc": {"c": circle["c"], "r": circle["r"], "a0_deg": circle["entry"][n],
+                                     "sweep_deg": round(360.0 * turns * circle["way"], 3)}, "label": "circle"}])
+            notes.append("circle %.1f times, r %.0f cm (%s)" % (turns, circle["r"],
+                                                                "anticlockwise" if circle["way"] > 0 else "clockwise"))
+            circle = {}
+        elif kind == "chicken":
+            if len(who) != 2:
+                raise ValueError("block %d: chicken is for 2 robots" % (k + 1))
+            pos = {n: _pose_after(n) for n in who}
+            a, b = sorted(who, key=lambda n: pos[n][0])          # a comes from the low-x side
+            s1 = dict(s, chicken_swerve_cm=float(bl.get("swerve_cm", s["chicken_swerve_cm"])),
+                      chicken_min_cm=float(bl.get("min_cm", s["chicken_min_cm"])),
+                      chicken_rounds=int(bl.get("rounds", 1)))
+            W = f["x_max"] - f["x_min"]
+            # the ready spots leave room behind them for the straight run-in (its start must be turnable)
+            s1["chicken_run_cm"] = min(s["chicken_run_cm"], W / 2.0 - room - CHICKEN_RUN_IN_CM)
+            Hh = (f["y_max"] - f["y_min"]) / 2.0
+            s1["chicken_aside_cm"] = min(s["chicken_aside_cm"], Hh - room)
+            ch = chicken(m, a=a, b=b, s=s1, centre=_frac(m, *bl.get("at", [0.5, 0.5])))
+            for n in who:
+                for v in ch[n]:
+                    if "goto" in v and v.get("label", "").endswith("ready"):
+                        v["run_in_cm"] = CHICKEN_RUN_IN_CM
+                advance(n, ch[n])
+            notes.append("Chicken: swerve at %.0f cm, never under %.0f cm (run %.0f cm, aside %.0f cm)"
+                         % (s1["chicken_swerve_cm"], s1["chicken_min_cm"], s1["chicken_run_cm"], s1["chicken_aside_cm"]))
+        elif kind == "spread-out":
+            pos = {n: _pose_after(n) for n in who}
+            order = sorted(who, key=lambda n: pos[n][0] if long_x else pos[n][1])
+            N = len(order)
+            fy = float(bl.get("y", 0.5))
+            for i, n in enumerate(order):
+                fx = (i + 1) / (N + 1)
+                x, y = _frac(m, fx, fy) if long_x else _frac(m, fy, fx)
+                advance(n, [_g(x, y, float(bl.get("heading", 90.0)), label="spread out")])
+        elif kind == "dance":
+            for n in who:
+                advance(n, [{"dance": float(bl.get("seconds", 0)), "label": "dance"}])
+        else:
+            raise ValueError("block %d: unknown block %r (blocks: %s)" % (k + 1, kind, ", ".join(BLOCKS)))
+    out = copy.deepcopy(m)
+    out["robots"] = [dict(known[n], start=starts[n], park=list(_pose_after(n))) for n in names]
+    out["tasks"] = {n: {"visit": visits[n], "park": False} for n in names}
+    out["mission"] = {"name": program.get("name", "mission"), "program": program, "settings": s,
+                      "notes": notes, "estimate_s": {n: round(t, 1) for n, t in t_est.items()},
+                      "planner": {"separation_cm": s["separation_cm"]}}
+    return FM.normalize(out)
+
+
 def planner_over(mm):
     """Planner settings a mission map asks for."""
     pm = (mm.get("mission") or {}).get("planner") or {}
