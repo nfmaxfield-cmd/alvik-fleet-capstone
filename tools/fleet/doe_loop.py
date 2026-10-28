@@ -975,7 +975,11 @@ class DoeLoop(LD.Ladder):
             n = act[k % len(act)]
             i = self.st["doe"]["i"].get(n, 0)
             try:
-                self.find_all(sub)
+                self.frames_on("find")          # kept: a robot unseen here can be replayed afterwards (16:41)
+                try:
+                    self.find_all(sub)
+                finally:
+                    self.frames_off()
                 if getattr(self.a, "keep_going", False):
                     self.keep_going_back(act)
                 if n in self.st["kept_out"]:

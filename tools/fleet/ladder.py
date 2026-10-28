@@ -447,6 +447,28 @@ class Eye:
                     out[q[4]] = out.get(q[4], 0) + 1
         return out
 
+    def why_unseen(self, name):
+        """Each camera's last verdict on the robot, in words (16:41 on 28 Oct: Right "kept out" with no reason per
+        camera and no pictures kept to look at afterwards)."""
+        if not self.trk:
+            return "no tracker"
+        with self.trk.lock:
+            tr = self.trk.tracks.get(name)
+            if tr is None:
+                return "not tracked"
+            out = []
+            for c in ("overhead", "side"):
+                ob = getattr(tr, "obs", {}).get(c)
+                if ob is None:
+                    out.append("%s: no picture judged" % c)
+                elif ob[3] == "seen":
+                    out.append("%s: saw it (outline %s px, a robot is ~%.0f)" % (c, ob[5] if len(ob) > 5 else "?",
+                                                                               self.trk.area))
+                else:
+                    out.append("%s: %s (%s)" % (c, ob[3], ob[4] if len(ob) > 4 else ""))
+            counts = self.trk.counts.get(name, {})
+        return "; ".join(out) + "; so far %s" % ", ".join("%s %d" % kv for kv in counts.items() if kv[1])
+
     def seen_by(self, name, s=1.5):
         """Which camera saw it over the last s: 'both', 'overhead', 'side', 'lights' (the most frequent), or None."""
         if not self.trk:
@@ -976,6 +998,7 @@ class Ladder:
                     "the overhead camera cannot (the side camera is not in use: %s)" % eye.side_words
                 say("  %s: its lights are at (%.1f, %.1f), but %s see its body there (too little contrast with the "
                     "board): kept out, parked there; the others go round it." % (n, q[0], q[1], cams))
+                say("    why, camera by camera: %s" % eye.why_unseen(n))
                 r = self.st["robots"].setdefault(n, {})
                 r.update(x=round(q[0], 2), y=round(q[1], 2), t=round(time.time(), 1), body_unseen=True)
                 r.pop("h", None)

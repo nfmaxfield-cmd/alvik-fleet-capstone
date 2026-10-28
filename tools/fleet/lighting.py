@@ -126,9 +126,10 @@ def measure(img, cam, rect=(0.0, 0.0, CAM.BOARD_W_CM, CAM.BOARD_L_CM), spots=Non
             name, 100 * clipped, ADVICE.get(name, ADVICE["overhead"]))
     elif expected and (minc is None or minc < WASHED_CONTRAST or found < expected):
         verdict = "washed out"
-        words = "%s camera washed out: the robots stand only %s grey levels from the board (it needs %.0f+), %d of %d " \
-                "found: %s" % (name, "?" if minc is None else "%.0f" % minc, WASHED_CONTRAST, found, expected,
-                               ADVICE.get(name, ADVICE["overhead"]))
+        words = ("%s camera washed out: no robot stands out from the board (%d of %d found): %s" % (
+            name, found, expected, ADVICE.get(name, ADVICE["overhead"]))) if minc is None else (
+            "%s camera washed out: the robots stand only %.0f grey levels from the board (it needs %.0f+), %d of %d "
+            "found: %s" % (name, minc, WASHED_CONTRAST, found, expected, ADVICE.get(name, ADVICE["overhead"])))
     elif minc is not None and minc < LOW_CONTRAST:
         verdict = "low"
         words = "%s camera: the robots stand %.0f grey levels from the board (fine from %.0f): it works, with little " \
