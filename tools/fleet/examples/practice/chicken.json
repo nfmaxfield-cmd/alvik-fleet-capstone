@@ -1,0 +1,4 @@
+{"name": "Practice 3: Chicken pass", "robots": ["Left", "Right"],
+ "starts": {"Left": {"at": [0.0, 0.0], "face": "+y"}, "Right": {"at": [1.0, 0.0], "face": "+y"}},
+ "blocks": [
+  {"block": "chicken", "robots": ["Left", "Right"], "swerve_cm": 15.0, "min_cm": 8.0, "pass_gap_cm": 10.0, "rounds": 1}]}

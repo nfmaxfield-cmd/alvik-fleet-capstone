@@ -35,6 +35,9 @@ def main(argv=None):
     ap.add_argument("--find-s", type=float, default=8.0, help="wait this long for the robots to answer first")
     ap.add_argument("--repeat", type=int, default=1, help="send it this many times, --wait-s apart")
     ap.add_argument("--out", help="log folder (default logs/<date-time>-cmd)")
+    ap.add_argument("--then", action="append", default=[], metavar="CMD",
+                    help="another command after the first, --wait-s later (repeatable; e.g. the settings read-back: "
+                         "\"set gyro_scale 1.075\" --then \"get gyro_scale\")")
     a = ap.parse_args(argv)
     cmd = " ".join(a.command)
     out = a.out or os.path.join(REPO, "logs", time.strftime("%Y%m%d-%H%M%S") + "-cmd")
@@ -63,6 +66,11 @@ def main(argv=None):
                 link.send_name(n, cmd)
             print("Sent %r to %s%s" % (cmd, ", ".join(targets), "" if a.repeat == 1 else " (%d of %d)" % (k + 1, a.repeat)),
                   flush=True)
+            time.sleep(a.wait_s)
+        for c in a.then:
+            for n in targets:
+                link.send_name(n, c)
+            print("Sent %r to %s" % (c, ", ".join(targets)), flush=True)
             time.sleep(a.wait_s)
         if cmd != "status":
             for n in targets:

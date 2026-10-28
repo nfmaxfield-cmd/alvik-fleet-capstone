@@ -471,6 +471,15 @@ with a random sign (Nick's brief), gyro errors 6.5-8.5 % round Nick's 7.5 % with
 330 s (machine time), the standstill rule (as the Monday sweep). A picture identical to the one before is frozen
 (cam_bridge same_picture): a definition.
 
+## Practice day (2026-10-28, session plan docs/session-plans/2026-10-28.md)
+
+| Number (where) | Value chosen | Experiment that would set it | Needs | Status |
+|---|---|---|---|---|
+| Battery to start a practice run (session plan) | 50 % | Turn and straight errors against battery from the DOE loop's uploaded logs (no board time) | Logs | open |
+| Camera setup pass marks (session plan 3.2) | board fit < 1 px, table corners < 5 px, lens height within 5 cm of a tape | The taped-marks test (question 34): camera position error per setup result sets the marks | Board | open |
+| `stopall` copies (stop_all.py STOP_REPEATS, STOP_GAP_S) | 3 x 0.2 s | No DOE: a repeated `stop` is harmless | - | set |
+| Practice dance length (examples/practice/dance.json) | 10 s | No DOE: display only | - | set |
+
 ## Already set by data
 
 - **Line edge cue edge_thr 150** (e02.py SAFETY_SETTINGS): plywood reads 52-84 in every E02 session, the two real

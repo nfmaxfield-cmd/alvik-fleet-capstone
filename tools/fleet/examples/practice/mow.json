@@ -1,0 +1,4 @@
+{"name": "Practice 1: Left mows its end (one region)", "robots": ["Left"],
+ "starts": {"Left": {"at": [0.0, 0.0], "face": "+y"}},
+ "blocks": [
+  {"block": "mow-region", "robot": "Left", "from": 0.0, "to": 0.25, "direction": "+"}]}

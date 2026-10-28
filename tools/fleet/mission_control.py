@@ -220,7 +220,7 @@ class Session:
                             "warmup": {k: getattr(WU, k) for k in WARMUP_KNOBS}},
                "least_open_room_cm": round(MS.least_open_room(m), 2) if m.get("sides") else None,
                "program": self.program or MS.monday_program(), "blocks": list(MS.BLOCKS),
-               "table_sizes": TABLE_SIZES, "setup": self.setup_state(),
+               "table_sizes": TABLE_SIZES, "setup": self.setup_state(), "surface": self.surface(),
                "mission": (self.mission or {}).get("mission"), "preview": self.preview,
                "warmup": self.warm_result, "run": self.run.status() if self.run else None,
                "last_runs": self.last_runs}
@@ -519,12 +519,29 @@ class Session:
         if getattr(self, "setup_job", None) and self.setup_job.get("running"):
             raise ValueError("the setup is already running")
         fake = d.get("conn", "sim") != "robots"
-        table = "%gx%g" % (self.map["floor"]["x_max"] - self.map["floor"]["x_min"],
-                           self.map["floor"]["y_max"] - self.map["floor"]["y_min"])
+        table = self.surface(d.get("surface"))
         job = {"running": True, "steps": [], "fake": fake, "error": None}
         self.setup_job = job
         threading.Thread(target=self._setup, args=(job, fake, table, d), daemon=True).start()
         return self.setup_state()
+
+    def surface(self, given=None):
+        """The surface whose 4 corners the cameras see, "LxW" cm, long side along x (session plan 2026-10-28): at home
+        the 122 x 122 plywood, with Monday's smaller table marked on it from the 0,0 corner; at school the table
+        itself. The chessboard solve pairs these corners with this size, so it must be the surface's, not the
+        mission table's (a 122 x 61 table with the plywood's 4 corners gave a wrong or refused calibration). Given:
+        saved in the map ("surface_cm") for next time; else the saved one; else the table's size."""
+        if given:
+            a, b = (float(v) for v in str(given).lower().replace(" ", "").split("x"))
+            if min(a, b) <= 0:
+                raise ValueError("the surface's size must be two lengths in cm, e.g. 122x122")
+            self.map["surface_cm"] = [max(a, b), min(a, b)]
+            self.save_map()
+        sc = self.map.get("surface_cm")
+        if sc:
+            return "%gx%g" % (sc[0], sc[1])
+        f = self.map["floor"]
+        return "%gx%g" % (f["x_max"] - f["x_min"], f["y_max"] - f["y_min"])
 
     def setup_state(self):
         j = getattr(self, "setup_job", None) or {}

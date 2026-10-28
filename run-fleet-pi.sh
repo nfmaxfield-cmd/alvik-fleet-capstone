@@ -36,6 +36,12 @@
 #     ./run-fleet-pi.sh monday [61x122] [Left,Right] [farm]   Monday's default mission on the table of that size (put
 #                                          each robot at its own end first); runs in tmux "monday"; Ctrl+C stops every
 #                                          robot; uploads at the end. farm: each camera tracked in its own process
+#     ./run-fleet-pi.sh practice mow|circle|chicken|dance [61x122]   ONE block of Monday's mission alone (tmux
+#                                          "practice"; tools/fleet/examples/practice/*.json); as `monday` otherwise
+#     ./run-fleet-pi.sh stopall            STOP EVERYTHING: Ctrl+C to every fleet run in tmux, Mission Control's Stop,
+#                                          and `stop` straight to every robot (works while a run holds the robots)
+#     ./run-fleet-pi.sh settings [Left]    bench: send gyro_scale 1.075 and wheel_scale 0.979, read them back
+#     ./run-fleet-pi.sh dance Left         bench: the dance alone where it stands, about 8 s (firmware 2026-10-28a)
 #     ./run-fleet-pi.sh mc                 Mission Control on the Pi (also the Mission Control tab at :8091, which runs
 #                                          this in tmux "mc"); its own address http://100.122.222.75:8095 still works
 #     ./run-fleet-pi.sh mc-stop            close Mission Control opened from the tab (a run of its own stops first)
@@ -208,11 +214,18 @@ case "$WHAT" in
     if tmux has-session -t doe 2>/dev/null; then
       tmux send-keys -t doe C-c; echo "Sent Ctrl+C to the DOE loop: every robot stops; it then uploads (watch: tmux capture-pane -p -t doe | tail -20)."
     else echo "No DOE loop running."; fi ;;
-  monday)
-    TABLE="61x122"; ROB="Left,Right"; EXTRA=""
+  monday|practice)
+    TABLE="61x122"; ROB="Left,Right"; EXTRA=""; TS="monday"; PROG=""
+    if [ "$WHAT" = practice ]; then
+      # one block of Monday's mission alone (session plan 2026-10-28): mow | circle | chicken | dance
+      B="${1:-}"; PF="tools/fleet/examples/practice/$B.json"
+      [ -n "$B" ] && [ -f "$PF" ] || { echo "Which block? ./run-fleet-pi.sh practice mow|circle|chicken|dance [61x122]"; exit 1; }
+      shift; TS="practice"; PROG="--program $PF"
+      ROB="$(python3 -c "import json,sys; print(','.join(json.load(open(sys.argv[1]))['robots']))" "$PF")"
+    fi
     for x in "$@"; do case "$x" in [0-9]*x[0-9]*) TABLE="$x" ;; *,*) ROB="$x" ;; farm) EXTRA="$EXTRA --farm --rings" ;; esac; done
     if [ "$DRY" = 1 ]; then
-      python3 tools/fleet/mission_run.py --table "$TABLE" --robots "$ROB" --dry ${MONDAY_DRY_ARGS:-}
+      python3 tools/fleet/mission_run.py --table "$TABLE" --robots "$ROB" $PROG --dry ${MONDAY_DRY_ARGS:-}
     else
       python3 tools/fleet/diskguard.py preflight || exit 1
       start_recorder
@@ -220,9 +233,13 @@ case "$WHAT" in
       # cores: the recorder on 0-1, the camera bridge's workers on 1-2 (--farm), the bridge and run_plan on 3
       PIN=""; if [ "$(nproc)" -ge 4 ] && command -v taskset >/dev/null; then PIN="taskset -c 2,3"; fi
       # in tmux (session "monday"), so a dropped WiFi or a closed window does not stop the run half-way
-      tmux kill-session -t monday 2>/dev/null || true
-      tmux new-session -s monday "cd '$REPO' && $PIN python3 tools/fleet/mission_run.py --table '$TABLE' --robots '$ROB' --calib '$CALIB' ${SIDECAL:+--side-calib '$SIDECAL'} --upload --recordings '$OUT' $EXTRA; read -r -p 'Mission ended. Press Enter.'"
-      echo "If the window closed: tmux attach -t monday   (Ctrl+C in it stops every robot)"
+      for s in monday practice doe ladder ladder2; do
+        [ "$s" = "$TS" ] && continue
+        tmux has-session -t $s 2>/dev/null && { echo "A run is going in tmux session $s: stop it first (./run-fleet-pi.sh stopall). Stopped."; exit 1; }
+      done
+      tmux kill-session -t "$TS" 2>/dev/null || true
+      tmux new-session -s "$TS" "cd '$REPO' && $PIN python3 tools/fleet/mission_run.py --table '$TABLE' --robots '$ROB' $PROG --calib '$CALIB' ${SIDECAL:+--side-calib '$SIDECAL'} --upload --recordings '$OUT' $EXTRA; read -r -p 'Mission ended. Press Enter.'"
+      echo "If the window closed: tmux attach -t $TS   (Ctrl+C in it stops every robot)"
     fi ;;
   mc)
     if python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8095/api/run', timeout=2)" 2>/dev/null; then
@@ -264,6 +281,15 @@ case "$WHAT" in
     echo "Recorder running. Its picture: http://100.122.222.75:8000 (Tailscale) in the laptop's browser" ;;
   check)
     python3 tools/fleet/robot_cmd.py $IPS --wait-s 3 status ;;
+  stopall)         # everything that drives the robots stops, and `stop` straight to each robot (works mid-run)
+    python3 tools/fleet/stop_all.py $IPS ;;
+  settings)        # the settings read-back on the bench: send each robot its driving corrections, read them back
+    R="${1:-all}"
+    python3 tools/fleet/robot_cmd.py $IPS --to "$R" --wait-s 1.5 "set gyro_scale 1.075" --then "set wheel_scale 0.979" \
+      --then "get gyro_scale" --then "get wheel_scale" ;;
+  dance)           # the dance alone, where the robot stands, for about 8 s (firmware 2026-10-28a `run dance`), then stop
+    R="${1:-Left}"
+    python3 tools/fleet/robot_cmd.py $IPS --to "$R" --wait-s 8 "run dance" ;;
   turn)
     R="${1:-Center}"
     python3 tools/fleet/robot_cmd.py $IPS --to "$R" --wait-s 6 "turn 90" ;;
@@ -293,5 +319,5 @@ case "$WHAT" in
     python3 tools/pi/upload_session.py --recordings "$OUT" --stop-recorder --no-logs --tag "p0-$DAY-recording" || true
     tmux kill-session -t fleet 2>/dev/null || true ;;
   *)
-    sed -n '2,49p' "$0"; exit 1 ;;
+    sed -n '2,55p' "$0"; exit 1 ;;
 esac

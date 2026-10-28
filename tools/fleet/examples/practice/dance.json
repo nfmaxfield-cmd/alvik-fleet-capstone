@@ -1,0 +1,5 @@
+{"name": "Practice 4: spread out and dance (10 s)", "robots": ["Left", "Right"],
+ "starts": {"Left": {"at": [0.0, 0.0], "face": "+y"}, "Right": {"at": [1.0, 0.0], "face": "+y"}},
+ "blocks": [
+  {"block": "spread-out", "robots": ["Left", "Right"]},
+  {"block": "dance", "robots": ["Left", "Right"], "seconds": 10}]}

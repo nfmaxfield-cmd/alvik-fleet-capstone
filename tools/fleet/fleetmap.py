@@ -127,7 +127,8 @@ def normalize(m):
     f = out["floor"]
     if not (f["x_max"] > f["x_min"] and f["y_max"] > f["y_min"]):
         raise MapError("floor: x_max must exceed x_min and y_max exceed y_min")
-    for k in ("notes", "mission"):          # mission: missions.py's name, settings and planner settings (passed on)
+    for k in ("notes", "mission", "surface_cm"):   # mission: missions.py's name, settings and planner settings (passed
+        # on); surface_cm: the surface the cameras' setup sees (Mission Control, 2026-10-28: the home plywood)
         if k in m:
             out[k] = m[k]
 

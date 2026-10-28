@@ -1,0 +1,5 @@
+{"name": "Practice 2: meet and circle", "robots": ["Left", "Right"],
+ "starts": {"Left": {"at": [0.0, 0.0], "face": "+y"}, "Right": {"at": [1.0, 0.0], "face": "+y"}},
+ "blocks": [
+  {"block": "meet", "robots": ["Left", "Right"], "at": [0.5, 0.5], "r_cm": 15.0},
+  {"block": "circle", "robots": ["Left", "Right"], "turns": 1.5, "way": "anticlockwise"}]}

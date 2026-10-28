@@ -228,15 +228,19 @@ function setup() {
       <li>Both cameras on, the recorder stopped (the setup page needs the cameras).</li>
       <li>The robots on the table, switched on (their lights are flashed).</li>
       <li>The printed corner piece A (squares of 3.5 cm) flat in the table's <b>0,0 corner</b>: its white-dot corner in the table's corner, the 5-square side along the table's long side. No robot on it.</li>
+      <li>The surface the cameras see, below: the whole board whose 4 corners are in the pictures (at home the 122 x 122 plywood, even when the mission's table is smaller; at school the table).</li>
       <li>When the setup asks, take the chessboard away and press <b>Chessboard taken away</b>: the warm-up starts then.</li></ol></div>
     <div class="card"><h2>Progress</h2><div class="log" id="slog">${esc((j.steps || []).map(x => x.join("  ")).join("\n")) || "Not started"}</div>
       ${j.wait_board ? `<p><button class="p" id="bway">Chessboard taken away</button></p>` : ""}
       ${j.error ? `<p class="err">${esc(j.error)}</p>` : ""}</div>`,
     `<div class="card"><h2>Setup</h2><p class="small muted">${conn === "robots" ? "The Pi's cameras" : "Simulated cameras (the setup page's own fake board and robots)"}</p>
+      <label class="lbl">Surface the cameras see, length x width (cm) <input id="surf" value="${esc(S.surface || "")}" aria-label="Surface the cameras see, length x width in cm"></label>
+      <p class="small muted" style="margin:4px 0 8px">The mission's table starts at its 0,0 corner (the corner piece's corner); its long side along the piece's 5-square side.</p>
+      <label class="small" style="display:flex;gap:8px;align-items:flex-start;margin:0 0 8px"><input type="checkbox" id="swarm" checked style="margin-top:2px"> <span>then the warm-up (the robots feel the table's sides; leave it off when the table is only marked on a bigger board)</span></label>
       <button class="p" id="sgo" ${j.running ? "disabled" : ""}>${j.running ? "Running..." : "Set up (flash check, chessboard, warm-up)"}</button>
       ${more("More", `<p class="small muted">Each part can be run alone on the camera setup page (port 8096): <code>./run-fleet-pi.sh setup</code>.</p>`)}</div>
       <button class="b" id="go">Continue to workspace</button>`);
-  $("sgo").onclick = async () => { try { S.setup = await api("/api/setup/start", {conn}); render(); clearInterval(setupPoll);
+  $("sgo").onclick = async () => { try { S.setup = await api("/api/setup/start", {conn, surface: $("surf").value.trim(), warmup: $("swarm").checked}); render(); clearInterval(setupPoll);
     setupPoll = setInterval(async () => { S.setup = await api("/api/setup"); if (screen === 1) render(); if (!S.setup.running) { clearInterval(setupPoll); load(); } }, 1500); } catch (e) { flash(e.message, true); } };
   $("go").onclick = () => { done.add(1); screen = 2; render(); };
   if ($("bway")) $("bway").onclick = async () => { try { S.setup = await api("/api/setup/board_away", {}); render(); } catch (e) { flash(e.message, true); } };
