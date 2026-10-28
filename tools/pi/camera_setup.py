@@ -959,6 +959,8 @@ class Setup:
         if self.fake and isinstance(self.over.src, FakeSource):
             self.over.src.world.checker = True
             time.sleep(0.5)
+        if self.fake:
+            table = None                   # the simulated cameras show their own 122 x 122 board, whatever the table
         table = table or (CAM.BOARD_W_CM, CAM.BOARD_L_CM)
         out = {}
         for which, grabber in (("overhead", self.over), ("side", self.side)):
@@ -999,6 +1001,9 @@ class Setup:
                 if save:
                     path = SC.new_calib_path() if which == "overhead" else SC.new_side_calib_path()
                     path = path.replace(".json", "_checker.json")
+                    if self.fake:
+                        # simulated cameras: kept in the logs folder, never made the calibrations in use
+                        path = os.path.join(self.out, os.path.basename(path))
                     d = cam.to_dict()
                     d["camera_setup"] = dict(made=time.strftime("%Y-%m-%d %H:%M:%S"), how="chessboard corner piece",
                                              height_cm=r["height_cm"], board_err_px=r["board_err_px"],
@@ -1006,10 +1011,12 @@ class Setup:
                     if which == "side":
                         d["lag_s"] = (self.doe.get("lag") or {}).get("s") if isinstance(self.doe.get("lag"), dict) \
                             else self.doe.get("lag")
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
                     with open(path, "w") as fh:
                         json.dump(d, fh, indent=1)
-                    (SC.save_calib_pointer if which == "overhead" else SC.save_side_pointer)(path)
-                    shutil.copy(path, self.out)
+                    if not self.fake:
+                        (SC.save_calib_pointer if which == "overhead" else SC.save_side_pointer)(path)
+                        shutil.copy(path, self.out)
                     r["saved"] = path
             out[which] = {k: v for k, v in r.items() if k != "model"}
         with self.lock:
@@ -1158,7 +1165,10 @@ def make_handler(S):
                     return self._send(200, S.start_flash())
                 if p in ("/api/checker", "/api/checker_save"):
                     tb = body.get("table")
-                    tb = tuple(float(x) for x in str(tb).lower().split("x")) if tb else None
+                    if isinstance(tb, (list, tuple)):
+                        tb = tuple(float(x) for x in tb)
+                    else:
+                        tb = tuple(float(x) for x in str(tb).lower().split("x")) if tb else None
                     return self._send(200, S.checker(save=p == "/api/checker_save", table=tb))
                 if p == "/api/exposure":
                     v = body.get("value")

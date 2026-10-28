@@ -73,6 +73,10 @@ def now_tag():
     return dt.datetime.now().strftime("%Y%m%d-%H%M%S")
 
 
+START_IN_CM = 12.0     # a start spot carried to a new table size stays this far inside it (a robot's half-width and
+                       # room to turn). No DOE: geometry
+
+
 class Run:
     """run_plan.py in a subprocess (robots or the simulator), its session folder, Pause / Resume / Stop."""
 
@@ -226,9 +230,22 @@ class Session:
     def set_map(self, d):
         m = copy.deepcopy(self.map)
         m["tasks"] = {}
+        f0 = dict(m["floor"])
+        old_start = {r["name"]: list(r["start"]) for r in m.get("robots", [])}
         for k in ("floor", "sides", "spots", "keepouts", "robots", "open_margin_cm", "notes"):
             if k in d:
                 m[k] = d[k]
+        f1 = m["floor"]
+        if "floor" in d and any(abs(f0[k] - f1[k]) > 1e-6 for k in ("x_min", "y_min", "x_max", "y_max")):
+            # a new table size: start spots the operator did not move go with the table (same share of it), kept
+            # START_IN_CM inside (a corner start on a smaller table was left boxed in at its edge, 28 Oct screenshots)
+            for r in m.get("robots", []):
+                if [round(v, 6) for v in r["start"][:2]] != [round(v, 6) for v in old_start.get(r["name"], [None, None])[:2]]:
+                    continue
+                for j, (a, b) in enumerate((("x_min", "x_max"), ("y_min", "y_max"))):
+                    share = (r["start"][j] - f0[a]) / max(1e-6, f0[b] - f0[a])
+                    v = f1[a] + share * (f1[b] - f1[a])
+                    r["start"][j] = round(min(f1[b] - START_IN_CM, max(f1[a] + START_IN_CM, v)), 1)
         self.map = FM.normalize(m)
         self.save_map()
 
@@ -414,8 +431,11 @@ class Session:
             if isinstance(cal, tuple):
                 cal = cal[0]
         jpg = grab_jpeg("127.0.0.1", port)
+        if not hasattr(self, "last_frames"):
+            self.last_frames = {}
         if jpg is None:
-            return None
+            # the run ended (the simulator's cameras gone, or the recorder stopped): its last ringed picture
+            return self.last_frames.get(cam)
         img = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
         try:
             sys.path.insert(0, os.path.join(os.path.dirname(HERE), "experiment"))
@@ -447,6 +467,8 @@ class Session:
                     cv2.putText(img, n, (int(u) + rr + 2, int(v)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, col.get(n, (0, 200, 255)),
                                 2, cv2.LINE_AA)
         ok, out = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        if ok:
+            self.last_frames[cam] = out.tobytes()
         return out.tobytes() if ok else None
 
     def mapping(self):
@@ -762,13 +784,21 @@ def main(argv=None):
     s = Session(a.dir, a.map, a.port)
     srv, url = serve(s, a.port, a.listen, a.allow_host)
     print("Mission Control: %s  (Ctrl+C to stop)" % url, flush=True)
+
+    def _term(*_):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, _term)       # (killed or closed: the robots stop as with Ctrl+C)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         if s.run and s.run.alive():
-            s.run.stop()
+            s.run.stop()                         # every robot stops (run_plan's own Ctrl+C)
+            for _ in range(150):
+                if not s.run.alive():
+                    break
+                time.sleep(0.1)
 
 
 if __name__ == "__main__":

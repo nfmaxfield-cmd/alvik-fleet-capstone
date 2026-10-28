@@ -291,7 +291,7 @@ function warmup() {
       <div class="row"><label class="row small"><input type="checkbox" id="mv"> move sides to where they were found</label><button class="p" id="apply">Use these answers</button></div></div>
       <div class="card eng"><h2>How the robots mapped the table</h2>${res.svg}<p class="small muted">Lines: each robot's path seen by the camera. Red circles: open edges found; filled: barriers; dashed: something on the table. Source: ${esc(res.folder)}</p></div>` : ""}`,
     `<div class="card"><h2>Steps</h2><div class="row" style="margin-top:8px"><button class="b" id="wplan">Plan warm-up</button>
-      <button class="p" id="wrun" ${run && run.running ? "disabled" : ""}>Run warm-up (${conn === "sim" ? "simulator" : "robots"})</button>
+      <button class="p" id="wrun" ${run && run.running ? "disabled" : ""}>Run warm-up (${conn === "robots" ? "robots" : "simulator"})</button>
       <button class="b" id="wan" ${S.last_runs.warmup ? "" : "disabled"}>Read the results</button></div>
       ${run ? `<p class="small">${run.running ? "Running " + fmt(run.elapsed_s) : "Finished"}</p><div class="log">${esc((run.messages || []).slice(-8).map(m => m[1]).join("\n"))}</div>` : ""}
       ${more("More", settingsTable("warmup") + (conn === "sim" ? `<h3 style="margin-top:10px">Simulator: the real table</h3>` + settingsTable("run", ["sim_true_sides", "sim_true_objects"]) : ""))}</div>
@@ -410,10 +410,10 @@ function wirePreview(pv) {
 function runScreen() {
   const run = S.run && S.run.kind !== "warmup" ? S.run : null, pv = S.preview && S.preview.title !== "Warm-up" ? S.preview : null;
   page(`<div class="between"><div><h1>${pv ? esc(MODES.find(m => m[0] === String(pv.title).toLowerCase())?.[1] || pv.title) : "Run"}</h1><p class="sub">${run ? `${fmt(run.elapsed_s)} in${pv ? " · planned " + fmt(pv.makespan_s) : ""}` : "Not started"}</p></div>
-      <div class="row"><button class="p" id="start" ${run && run.running ? "disabled" : ""}>Run (${conn === "sim" ? "simulator" : "robots"})</button>
+      <div class="row"><button class="p" id="start" ${run && run.running ? "disabled" : ""}>Run (${conn === "robots" ? "robots" : "simulator"})</button>
       <button class="b" id="pause" ${run && run.running ? "" : "disabled"}>${run && run.paused ? "Resume" : "Pause"}</button><button class="p stop" id="stop" ${run && run.running ? "" : "disabled"}>Stop</button></div></div>
     <div class="card">${tableSVG({paths: pv ? pv.paths : {}, pathOp: .25, robots: run ? run.robots : {}, obstacles: pv ? pv.obstacles : []})}
-      <p class="small muted" style="margin:8px 0 0">Where the camera sees each robot now (${conn === "sim" ? "simulated camera" : "overhead camera"}), over the planned routes.</p></div>
+      <p class="small muted" style="margin:8px 0 0">Where the camera sees each robot now (${conn === "robots" ? "overhead camera" : "simulated camera"}), over the planned routes.</p></div>
     ${run && run.mode && run.mode !== "sim" ? `<div class="card"><h3>The cameras now</h3><div class="row" style="align-items:flex-start">
       <figure style="margin:0;flex:1 1 300px"><img id="camo" alt="The overhead camera's picture with each robot ringed" src="/api/frame?cam=overhead&t=${Date.now()}" style="width:100%;border-radius:8px"><figcaption class="small muted">Overhead camera (${run.mode === "robots" ? "the Pi's" : "simulated"}): each robot ringed in its colour where the camera bridge has it, planned routes as thin lines.</figcaption></figure>
       <figure style="margin:0;flex:1 1 300px"><img id="cams" alt="The side camera's picture with each robot ringed" src="/api/frame?cam=side&t=${Date.now()}" style="width:100%;border-radius:8px" onerror="this.parentElement.style.display='none'"><figcaption class="small muted">Side camera, the same rings.</figcaption></figure></div></div>
