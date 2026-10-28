@@ -503,7 +503,15 @@ class Session:
 
     def setup_state(self):
         j = getattr(self, "setup_job", None) or {}
-        return {k: j.get(k) for k in ("running", "steps", "fake", "error", "checker", "flash")}
+        return {k: j.get(k) for k in ("running", "steps", "fake", "error", "checker", "flash", "wait_board")}
+
+    def setup_board_away(self):
+        """Nick took the chessboard away: the setup goes on to the warm-up."""
+        j = getattr(self, "setup_job", None)
+        if not j or not j.get("wait_board"):
+            raise ValueError("the setup is not waiting for the chessboard")
+        j["board_away"] = True
+        return self.setup_state()
 
     def _setup(self, job, fake, table, d):
         import urllib.request
@@ -561,6 +569,18 @@ class Session:
                     page.wait(timeout=10)
                 except subprocess.TimeoutExpired:
                     page.kill()
+        if not job["error"] and d.get("warmup", True) and not fake:
+            # the robots would drive over the chessboard: the warm-up waits for Nick to take it away (10 min at most)
+            step("   take the chessboard away, then press \"Chessboard taken away\"")
+            job["wait_board"] = True
+            for _ in range(1200):
+                if job.get("board_away"):
+                    break
+                time.sleep(0.5)
+            job["wait_board"] = False
+            if not job.get("board_away"):
+                job["error"] = "the chessboard was not taken away within 10 minutes: warm-up not started"
+                step(job["error"])
         if not job["error"] and d.get("warmup", True):
             step("4. the warm-up (corners and sides); then check its pictures on the Warm-up screen")
             try:
@@ -753,6 +773,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, S.start_run(d))
                 if path == "/api/setup/start":
                     return self._send(200, S.setup_start(d))
+                if path == "/api/setup/board_away":
+                    return self._send(200, S.setup_board_away())
                 if path == "/api/run/pause":
                     return self._send(200, S.pause(bool(d.get("on", True))))
                 if path == "/api/run/stop":

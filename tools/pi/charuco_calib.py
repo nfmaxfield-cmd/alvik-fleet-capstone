@@ -44,8 +44,9 @@ BOARD_OFFSET_CM = (0.0, 0.0)   # the print's bottom-left corner at the table's 0
 # across on a letter sheet: ArUco markers do not read at that size (simulated overhead at 4.2 px/cm: none found). A
 # plain chessboard's corners do (findChessboardCornersSB works down to ~8 px squares). So the corner piece is a plain
 # chessboard; its direction comes from where it lies: it marks the table's 0,0 corner, and the table's long side is x.
-CHECK_SQUARES = (5, 7)  # chosen: 5 x 7 squares (4 x 6 inner corners, letter size at 3.8 cm). DOE note: as SQUARES
-CHECK_CM = 3.8          # 5 x 3.8 = 19 cm, 7 x 3.8 = 26.6 cm on a 21.6 x 27.9 sheet
+CHECK_SQUARES = (5, 7)  # chosen: 5 x 7 squares (4 x 6 inner corners). DOE note: as SQUARES
+CHECK_CM = 3.5          # 5 x 3.5 = 17.5 cm, 7 x 3.5 = 24.5 cm: inside a letter or A4 sheet's printable area at actual size
+                        # (3.8 cm left 0.3 cm for the printer's margins: "fit to page" would shrink the squares)
 MIN_CORNERS = 6         # a picture with fewer board corners found is not used. No DOE: solvePnP needs a few points
 
 
@@ -85,7 +86,16 @@ def checker_png(path, dpi=300, margin_cm=0.5):
             if (i + j) % 2 == 0:
                 x0, y0 = px(margin_cm + i * CHECK_CM), px(margin_cm + j * CHECK_CM)
                 img[y0:px(margin_cm + (j + 1) * CHECK_CM), x0:px(margin_cm + (i + 1) * CHECK_CM)] = 0
-    cv2.imwrite(path, img)
+    try:
+        # with its resolution stored (a .pdf or a .png), so "actual size" prints the squares at CHECK_CM
+        from PIL import Image
+        im = Image.fromarray(img)
+        if path.lower().endswith(".pdf"):
+            im.save(path, "PDF", resolution=float(dpi))
+        else:
+            im.save(path, dpi=(dpi, dpi))
+    except ImportError:
+        cv2.imwrite(path, img)
     return path
 
 
@@ -246,7 +256,7 @@ def render_board(model, b=None, size=None, base=None, offset=BOARD_OFFSET_CM, px
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("what", choices=["print", "solve"])
+    ap.add_argument("what", choices=["print", "print-charuco", "solve"])
     ap.add_argument("--out", required=True)
     ap.add_argument("--image")
     ap.add_argument("--intrinsics")
@@ -255,6 +265,11 @@ def main(argv=None):
     ap.add_argument("--name", default="overhead")
     a = ap.parse_args(argv)
     if a.what == "print":
+        # the chessboard corner piece the setup uses: print at actual size (100 %), check a square measures CHECK_CM
+        print(checker_png(a.out))
+        print("print at actual size (100 %%, not 'fit to page'); each square must measure %.1f cm" % CHECK_CM)
+        return 0
+    if a.what == "print-charuco":
         print(print_png(a.out))
         return 0
     img = cv2.imread(a.image, cv2.IMREAD_GRAYSCALE)
