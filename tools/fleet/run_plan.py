@@ -1084,6 +1084,54 @@ class Coordinator:
         self.plan = self.without(self.plan, [b.name])
         self.handle_obstacle(ob)
 
+    LIVE_EVERY_S = 0.5    # live.json for Mission Control's Run screen. No DOE: a display rate
+
+    def write_live(self, final=False):
+        """live.json: each robot now (camera spot, own pose, battery, what it is doing, its last step's result,
+        how far its middle is from the nearest open side), for Mission Control's Run screen."""
+        t = now()
+        if not final and t - getattr(self, "_live_t", 0.0) < self.LIVE_EVERY_S:
+            return
+        self._live_t = t
+        f = self.m["floor"]
+        sides = self.m.get("sides") or {}
+        rob = {}
+        for n, b in self.bots.items():
+            cam = getattr(b, "last_cam", None)
+            p = cam if cam else (list(b.pose) if b.pose else None)
+            edge = None
+            if p:
+                ds = []
+                for sd, v in (("x_min", p[0] - f["x_min"]), ("x_max", f["x_max"] - p[0]), ("y_min", p[1] - f["y_min"]),
+                              ("y_max", f["y_max"] - p[1])):
+                    if (sides.get(sd) or {"kind": "barrier" if not sides else "unknown"})["kind"] != "barrier":
+                        ds.append(v)
+                edge = round(min(ds), 1) if ds else None
+            doing, last = "", ""
+            if n in self.names:
+                steps = self.steps(n)
+                for i, st in enumerate(b.stat):
+                    if st["status"] in ACTIVE:
+                        doing = steps[i].get("label") or steps[i]["type"]
+                        break
+                fin = [st for st in b.stat if st["status"] in ("done", "failed")]
+                if fin:
+                    lastst = max(fin, key=lambda q: q.get("t_done", 0.0) or 0.0)
+                    last = "%s %s" % (lastst["status"], (lastst.get("info") or "")[:60])
+            rob[n] = {"cam": cam, "own": [round(v, 2) for v in b.pose] if b.pose else None, "battery": b.battery,
+                      "doing": doing, "last": last, "edge_cm": edge, "out": b.out,
+                      "done": sum(st["status"] == "done" for st in b.stat), "steps": len(b.stat)}
+        live = {"t": round(t, 2), "t_run": round(t - self.t_run, 1) if self.t_run_started() else None,
+                "plan_no": self.plan_no, "replans": len(self.replans), "result": self.abort or ("done" if final else None),
+                "robots": rob}
+        try:
+            tmp = os.path.join(self.outdir, "live.json.tmp")
+            with open(tmp, "w") as fh:
+                json.dump(live, fh)
+            os.replace(tmp, os.path.join(self.outdir, "live.json"))
+        except OSError:
+            pass
+
     def silence_watch(self):
         lim = getattr(self.args, "silent_s", EC.SILENT_S)
         if not lim or not self.t_run_started():
@@ -1361,6 +1409,7 @@ class Coordinator:
             if self.abort:
                 break
             self.status_poll()
+            self.write_live()
             self.finish_replan()
             self.tracker_watch()
             pr = getattr(self, "pause_req", None)
@@ -1383,6 +1432,7 @@ class Coordinator:
             self.resend()
             if self.finished() and self.planning is None:
                 self.say("all robots done")
+                self.write_live(final=True)
                 break
             if now() - self.t_run > timeout_s:
                 self.say("timed out; stopping everyone")

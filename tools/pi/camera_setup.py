@@ -483,6 +483,7 @@ class FakeWorld:
     ROBOTS = ((30.0, 40.0, 0.3), (75.0, 90.0, 2.0), (95.0, 25.0, -1.2))
 
     def __init__(self, side_lag_s=0.04):
+        self.checker = False           # the chessboard corner piece lies in the 0,0 corner (part 3)
         self.led_until = 0.0
         self.side_lag_s = side_lag_s
         self.lock = threading.Lock()
@@ -579,7 +580,13 @@ class FakeSource:
         self.next_t = max(self.next_t + 1.0 / self.fps, time.monotonic())
         t = time.monotonic() - (self.world.side_lag_s if self.which == "side" else 0.0)
         g = self.exposure / self.auto
-        img = self.base * g + (self.leds * g if self.world.lit(t) else 0.0)
+        base = self.base
+        if self.world.checker:
+            if getattr(self, "_chk", None) is None:
+                import charuco_calib as CC
+                self._chk = CC.render_checker(self.cam, base=np.clip(self.base, 0, 255).astype(np.uint8)).astype(np.float32)
+            base = self._chk
+        img = base * g + (self.leds * g if self.world.lit(t) else 0.0)
         img = img + self.rng.normal(0, 2.0, img.shape).astype(np.float32)
         return True, np.clip(img, 0, 255).astype(np.uint8)
 
@@ -943,6 +950,72 @@ class Setup:
             except Exception:
                 pass
 
+    # ---- part 3: the chessboard corner piece (one system, 2026-10-28; tools/pi/charuco_calib.py)
+    def checker(self, save=False, table=None):
+        """Both cameras' poses (and lens heights) from the chessboard lying in the 0,0 corner and the table's 4
+        corners in each picture: the shared 0,0, axes and handedness. Each camera's lens (K) from its calibration in
+        use. save: both written as calibrations and made the ones in use."""
+        import charuco_calib as CC
+        if self.fake and isinstance(self.over.src, FakeSource):
+            self.over.src.world.checker = True
+            time.sleep(0.5)
+        table = table or (CAM.BOARD_W_CM, CAM.BOARD_L_CM)
+        out = {}
+        for which, grabber in (("overhead", self.over), ("side", self.side)):
+            if not grabber:
+                continue
+            f = None
+            for _ in range(40):
+                f, _ = grabber.latest()
+                if f is not None:
+                    break
+                time.sleep(0.1)
+            if f is None:
+                out[which] = {"ok": False, "why": "no picture"}
+                continue
+            cv2.imwrite(os.path.join(self.out, "checker_%s.png" % which), f)
+            corners, why = CAM.find_board_corners(f)
+            if corners is None:
+                corners = self.corners if which == "overhead" else (self.side_corners or {}).get("corners")
+            if corners is None:
+                out[which] = {"ok": False, "why": "the table's corners were not found in the %s picture (%s): do part 1 "
+                                                  "or 2 first" % (which, why)}
+                continue
+            if which == "overhead":
+                cam0 = self.overhead_cam()
+            else:
+                sp = SC.side_calib()[0]
+                cam0 = _fake_side() if self.fake and not sp else (CAM.load_camera(sp) if sp else None)
+            if cam0 is None:
+                out[which] = {"ok": False, "why": "no lens model for the %s camera yet" % which}
+                continue
+            r = CC.solve_checker(f, np.array(cam0.K, float), np.array(cam0.dist, float).ravel(), tuple(cam0.image_size),
+                                 table, corners, name=which)
+            if r.get("ok"):
+                cam = CAM.CameraModel.from_dict(r["model"])
+                pic = draw_grid(f, cam, r["corners_px"])
+                self.jpgs["checker_" + which] = _jpg(pic)
+                cv2.imwrite(os.path.join(self.out, "checker_%s_check.png" % which), pic)
+                if save:
+                    path = SC.new_calib_path() if which == "overhead" else SC.new_side_calib_path()
+                    path = path.replace(".json", "_checker.json")
+                    d = cam.to_dict()
+                    d["camera_setup"] = dict(made=time.strftime("%Y-%m-%d %H:%M:%S"), how="chessboard corner piece",
+                                             height_cm=r["height_cm"], board_err_px=r["board_err_px"],
+                                             table_err_px=r["table_err_px"], fake=self.fake)
+                    if which == "side":
+                        d["lag_s"] = (self.doe.get("lag") or {}).get("s") if isinstance(self.doe.get("lag"), dict) \
+                            else self.doe.get("lag")
+                    with open(path, "w") as fh:
+                        json.dump(d, fh, indent=1)
+                    (SC.save_calib_pointer if which == "overhead" else SC.save_side_pointer)(path)
+                    shutil.copy(path, self.out)
+                    r["saved"] = path
+            out[which] = {k: v for k, v in r.items() if k != "model"}
+        with self.lock:
+            self.checker_res = out
+        return self.state()
+
     def save_exposure(self, value):
         info = {}
         with self.lock:
@@ -973,7 +1046,8 @@ class Setup:
                          rec=self.doe.get("rec"), lag=self.doe.get("lag"), base=self.doe.get("base"),
                          rows=[dict(exposure=r["exposure"], fraction=r["fraction"], jpg=r["jpg"], res=r["result"],
                                     seen_at_s=r["seen_at_s"]) for r in self.doe.get("rows", [])]),
-                exposure=dict(value=v, saved=d.get("saved")), still_t=0 if self.still is None else id(self.still))
+                exposure=dict(value=v, saved=d.get("saved")), still_t=0 if self.still is None else id(self.still),
+                checker=getattr(self, "checker_res", None))
 
 
 def board_corners_px(cam):
@@ -1082,6 +1156,10 @@ def make_handler(S):
                     return self._send(200, S.side_fit(body.get("corners"), save=p == "/api/side_save"))
                 if p == "/api/flash":
                     return self._send(200, S.start_flash())
+                if p in ("/api/checker", "/api/checker_save"):
+                    tb = body.get("table")
+                    tb = tuple(float(x) for x in str(tb).lower().split("x")) if tb else None
+                    return self._send(200, S.checker(save=p == "/api/checker_save", table=tb))
                 if p == "/api/exposure":
                     v = body.get("value")
                     return self._send(200, S.save_exposure(None if v in (None, "") else float(v)))
