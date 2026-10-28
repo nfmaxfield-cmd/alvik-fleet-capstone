@@ -705,6 +705,11 @@ def disk_precheck(out, n_cams, seconds=0, log=print, free=None):
 
 
 # ------------------------------------------------------------------ one camera's recording
+def now_bright(rec, t_wall):
+    """Time for this camera's brightness line in events.csv?"""
+    return not rec.bright or t_wall - rec.bright[-1][0] >= rec.BRIGHT_EVERY_S
+
+
 class CamRec:
     """One camera: its video.avi, frames.csv, events.csv and meta.json, its own
     preview / live web server, and frame-rate and lost-frame checks. `cap` is an
@@ -730,6 +735,8 @@ class CamRec:
         self._intervals = []
         self.stopped = None
         self.t_first = self.t_last = None
+        self.ring = None             # --shm (2026-10-28): each decoded picture, grey, in shared memory for the trackers
+        self.bright = []             # (t_wall, mean grey) every BRIGHT_EVERY_S: the room's light through the session
 
     def first_frame(self):
         """Read one frame (not recorded: it was stamped late) for the picture size."""
@@ -749,6 +756,26 @@ class CamRec:
         f = self.fps_real
         f = f if f and 0 < f < 1000 else self.fps_requested
         return min(f, self.steady_fps) if self.steady_fps else f
+
+    BRIGHT_EVERY_S = 10.0   # the picture's mean grey (meta.json frame_check.brightness) this often (the side picture went dark at times on
+                            # 27 Oct with its exposure locked; the analysis can then see when). No DOE: a log period
+
+    def share(self, name):
+        """--shm: a ring of this camera's grey pictures in shared memory (tools/experiment/e02_shmframes.py), named
+        `name`, for the camera bridge's workers (tools/fleet/trackfarm.py): the picture is decoded once, here."""
+        exp = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "experiment")
+        if exp not in sys.path:
+            sys.path.insert(0, exp)
+        import e02_shmframes as SF
+        try:
+            old = SF.FrameRing.attach(name)      # left over from a recorder that did not close it
+            old.owner = True
+            old.close()
+        except (FileNotFoundError, ValueError):
+            pass
+        self.ring = SF.FrameRing.create(slots=64, height=self.h, width=self.w, name=name)
+        self.log(f"{self.tag}pictures shared as {name} (64 x {self.w} x {self.h})")
+        return self.ring
 
     def serve(self):
         if not self.port:
@@ -828,6 +855,19 @@ class CamRec:
                     self.fcsv.writerow([self.n, f"{t_wall:.4f}", f"{t_mono:.4f}", f"{cam_ms:.1f}"])
             if self.live.clients:
                 self.live.put(frame, self.n, t_wall)   # same number and time as frames.csv
+            if self.ring is None and getattr(self, "shm_name", None):
+                try:
+                    self.share(self.shm_name)
+                except Exception as e:      # noqa: BLE001  (recording goes on without it)
+                    self.log(f"! {self.tag}no shared pictures ({e}): the trackers read /live instead")
+                    self.shm_name = None
+            if self.ring is not None or now_bright(self, t_wall):
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+                if self.ring is not None:
+                    self.ring.write(gray, t_wall, t_pi=t_wall, pi_frame=self.n)
+                if now_bright(self, t_wall):
+                    m = float(gray[::8, ::8].mean())
+                    self.bright.append((t_wall, round(m, 1)))
             # lost frames: a gap of more than 1.5 frame times (camera's own timestamps when it gives them)
             if not self.replay:
                 if cam_ms > 0 and last_cam is not None and cam_ms > last_cam:
@@ -897,6 +937,7 @@ class CamRec:
                     frames=self.n, gaps=self.gaps, missed_estimate=self.missed,
                     missed_pct=round(100.0 * self.missed / max(1, self.n + self.missed), 2),
                     low_rate_windows=self.low_windows,
+                    brightness=[[round(t, 1), m] for t, m in self.bright[-400:]],
                     ok=(measured is None or measured >= 0.9 * exp) and self.missed <= 0.01 * max(1, self.n))
 
     def close(self, t0):
@@ -928,13 +969,16 @@ class CamRec:
             if not self.replay and not fc["ok"]:
                 self.log(f"! {self.tag}{fc['measured_fps']} fps recorded ({fc['expected_fps']:g} expected), "
                          f"about {fc['missed_estimate']} frames lost ({fc['missed_pct']}%)")
+        if self.ring is not None:
+            self.ring.close()
+            self.ring = None
         return fc
 
 
 # ------------------------------------------------------------------ a session: one or more cameras
 def run_session(caps, devices, names=None, out="~/recordings", label="", seconds=0, fps=30, port=8000,
                 notes_port=5007, record=True, replays=None, controls=None, stdin_notes=True, log=print,
-                stop=None, flush_s=0.5, disk_check_s=10.0, extra_meta=None):
+                stop=None, flush_s=0.5, disk_check_s=10.0, extra_meta=None, shm=False):
     """Record one or more open cameras. One camera: ~/recordings/<date-time>_<label>/
     as always. Several: that folder holds cam0/, cam1/, ... (each a normal recording
     folder) and session.json. Cameras run as threads of this one process, so t_mono
@@ -955,6 +999,7 @@ def run_session(caps, devices, names=None, out="~/recordings", label="", seconds
     for i, (cap, dev) in enumerate(zip(caps, devices)):
         tag = f"cam{i}{' (' + names[i] + ')' if names[i] else ''}: " if multi else ""
         c = CamRec(cap, dev, i, names[i], (port + i) if port else 0, fps, replays[i], log, tag)
+        c.shm_name = ("mirlt-" + (names[i] or "cam%d" % i)) if shm else None
         if not c.first_frame():
             for cc in cams:
                 cc.cap.release()
@@ -1184,6 +1229,9 @@ def main(argv=None):
     ap.add_argument("--no-lock", dest="lock", action="store_false", help="leave the camera's automatics alone")
     ap.add_argument("--cores", default="", help="run on these cores only, e.g. 1 (run-e02-pi.sh: the recorder on core "
                                                 "1, the tracker process on 2-3, the runner on 0; 2026-10-25)")
+    ap.add_argument("--shm", action="store_true",
+                    help="also put each camera's grey pictures in shared memory (mirlt-<name>) for the camera bridge's "
+                         "workers (cam_bridge.py --farm): decoded once, no JPEG for the trackers (2026-10-28)")
     args = ap.parse_args(argv)
     if args.cores:
         try:
@@ -1255,7 +1303,7 @@ def main(argv=None):
             t.join()
     run_session(caps, devices, names=args.names, out=args.out, label=args.label, seconds=args.seconds,
                 fps=args.fps, port=args.port, notes_port=args.notes_port, record=not args.no_record,
-                controls=controls)
+                controls=controls, shm=args.shm)
 
 
 if __name__ == "__main__":

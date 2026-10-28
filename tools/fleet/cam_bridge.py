@@ -169,6 +169,9 @@ class Bridge:
         self.send = send
         self.out = log_dir
         T = make_tracker_class()
+        if getattr(args, "farm", False):
+            import trackfarm as TF
+            T = TF.make_fusion_class(T)
         cx, cy = (rect[0] + rect[2]) / 2.0, (rect[1] + rect[3]) / 2.0
         side_cam, side_lag, side_bias = getattr(args, "side", None) or (None, None, (0.0, 0.0))
         import e02_twocam as TW
@@ -244,6 +247,28 @@ class Bridge:
                          % (len(self.floor_frames), ", ".join(self.starts)))
             return
         self.trk.push(img, t)
+        self.after_picture(img, t)
+
+    def on_record(self, rec, img=None):
+        """--farm (trackfarm.py): one camera worker's outlines for one picture, instead of the picture itself. The
+        overhead's records go on as on_frame's did after its picture work; the side's are only fused."""
+        self.trk.apply(rec)
+        if rec["cam"] != "overhead":
+            return
+        self.frames += 1
+        if self.t_first is None:
+            self.t_first = rec["t"]
+        if not self.ready:
+            self.ready = True
+            self.say("camera workers running (each camera's floor memory taken in its own process): %s"
+                     % ", ".join(self.starts))
+            if self.args.brick_watch and img is not None:
+                import brickwatch as BW
+                self.bw = BW.BrickWatch(self.cam, self.rect, send=self.on_obstacle, log=self.say)
+                self.bw.start([img], [(x, y) for x, y, _ in self.starts.values()])
+        self.after_picture(img, rec["t"])
+
+    def after_picture(self, img, t):
         sts = self.trk.states()
         for n, st in sts.items():
             c = self.counts[n]
@@ -269,7 +294,7 @@ class Bridge:
                 th, sth = None, None
                 if not self.has_pose[n] and not self.moved[n] and self.args.start_heading == "map":
                     th, sth = h0, START_SIGMA_DEG          # as placed: the start check then only checks the position
-                elif not self.has_pose[n] and not self.moved[n]:
+                elif not self.has_pose[n] and not self.moved[n] and img is not None:
                     oh = outline_heading(self.trk, self.trk.frame, st["x"], st["y"], h0)
                     if oh is not None:
                         self.start_heads[n].append(oh)
@@ -305,7 +330,7 @@ class Bridge:
                     self.say("%s: %s" % (robot, what))
         if self.trk.events:
             self._ev_t = self.trk.events[-1][0]
-        if self.bw is not None:
+        if self.bw is not None and img is not None:
             spots = [(st["x"], st["y"]) for st in sts.values()]
             self.bw.check(img, spots, t)
         if time.time() - self.status_t >= STATUS_EVERY_S:
@@ -373,6 +398,8 @@ class Bridge:
         s = dict(frames=self.frames, skipped_behind=getattr(self, "skipped", 0), robots=self.counts, obstacles=len(self.obstacles),
                  duration_s=None if self.t_first is None else round(time.time() - self.t_first, 1),
                  two_camera=self.trk.summary())
+        if getattr(self, "farm_info", None):
+            s["farm"] = self.farm_info
         with open(os.path.join(self.out, "bridge_summary.json"), "w") as f:
             json.dump(s, f, indent=1)
         return s
@@ -471,6 +498,18 @@ def main(argv=None):
     ap.add_argument("--out", help="log folder (default logs/<date-time>-bridge)")
     ap.add_argument("--max-s", type=float, default=0, help="stop after this long (0: until Ctrl+C)")
     ap.add_argument("--wait-calib-s", type=float, default=20.0, help="wait this long for --calib to appear (dry runs)")
+    g = ap.add_argument_group("tracking spread over the cores (trackfarm.py, one system 2026-10-28)")
+    g.add_argument("--farm", action="store_true",
+                   help="each camera tracked in its own process on its own core, windows round the robots, still "
+                        "pictures skipped; this process only fuses (who is who, fixes)")
+    g.add_argument("--overhead-ring", default="", help="--farm: the recorder's shared pictures (camrec.py --shm) for the "
+                                                       "overhead camera (none: the worker decodes --stream itself)")
+    g.add_argument("--side-ring", default="", help="--farm: the same for the side camera")
+    g.add_argument("--cores", default="overhead=1,side=2", help="--farm: core of each camera's worker (the recorder "
+                                                               "runs on core 0; this bridge and run_plan on 3)")
+    g.add_argument("--half", action="store_true", help="--farm: track at half size (320 x 240)")
+    g.add_argument("--no-roi", action="store_true", help="--farm: full pictures every time (no windows)")
+    g.add_argument("--no-still-skip", action="store_true", help="--farm: track every picture even when all stand still")
     args = ap.parse_args(argv)
 
     t0 = time.time()
@@ -513,6 +552,8 @@ def main(argv=None):
         " (OBSERVE ONLY: nothing is sent)" if args.observe else "", out), flush=True)
     import signal
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))   # kill / tmux: save first
+    if args.farm:
+        return run_farm(args, br, rx, t0, rect, starts)
     import sources as S
     if args.side is not None:
         br.side_feed = SideFeed(br.trk, args.side_stream)
@@ -548,6 +589,102 @@ def main(argv=None):
         src.closed = True
         if br.side_feed is not None:
             br.side_feed.close()
+        s = br.summary()
+        br.close()
+        print("Camera bridge stopped: %s" % json.dumps(s["robots"]), flush=True)
+    return 0
+
+
+def run_farm(args, br, rx, t0, rect, starts):
+    """The bridge with the camera work in two worker processes (trackfarm.run_worker): poll both, fuse in arrival
+    order (each record carries its picture's Pi time), send the fusion's snapshot back after each record."""
+    import multiprocessing as mp
+    import trackfarm as TF
+    cores = dict(kv.split("=") for kv in args.cores.split(",") if "=" in kv)
+    ncpu = os.cpu_count() or 1
+    cfgs = [dict(kind="overhead", calib=args.calib, ring=args.overhead_ring, stream=args.stream)]
+    if args.side is not None:
+        cfgs.append(dict(kind="side", calib=args.side_calib, ring=args.side_ring, stream=args.side_stream,
+                         max_hz=10.0))
+    conns, procs = {}, []
+    ctx = mp.get_context("spawn")
+    for c in cfgs:
+        c.update(rect=list(rect), starts={n: [x, y] for n, (x, y, _) in starts.items()}, margin_cm=args.margin_cm,
+                 half=args.half, roi=not args.no_roi, still_skip=not args.no_still_skip,
+                 core=(int(cores[c["kind"]]) % ncpu) if c["kind"] in cores else None, capture_s=CAPTURE_S,
+                 lights=not getattr(args, "no_lights", False))
+        a, b = ctx.Pipe()
+        p = ctx.Process(target=TF.run_worker, args=(b, c), daemon=True)
+        p.start()
+        conns[c["kind"]] = a
+        procs.append(p)
+    print("Camera workers: %s" % ", ".join("%s on core %s (%s)" % (c["kind"], c["core"], "shared pictures " + c["ring"]
+                                                                   if c["ring"] else "stream " + c["stream"])
+                                           for c in cfgs), flush=True)
+    ring = None
+    if args.brick_watch and args.overhead_ring:
+        import e02_shmframes as SF
+        try:
+            ring = SF.FrameRing.attach(args.overhead_ring)
+        except (FileNotFoundError, ValueError):
+            ring = None
+    times = {c["kind"]: [] for c in cfgs}
+    tt_f = open(os.path.join(br.out, "tracking_times.csv"), "w", newline="")
+    tt_w = csv.writer(tt_f)
+    tt_w.writerow(["t_pi", "camera", "ms", "mode", "behind_s"])
+    try:
+        while True:
+            busy = False
+            while True:
+                try:
+                    data, _ = rx.recvfrom(65536)
+                except (BlockingIOError, OSError):
+                    break
+                try:
+                    msg = json.loads(data.decode("utf-8", "replace"))
+                except ValueError:
+                    continue
+                if isinstance(msg, dict) and msg.get("type") == "pose":
+                    br.on_pose(msg)
+            for kind, c in conns.items():
+                while c.poll():
+                    busy = True
+                    rec = c.recv()
+                    if "error" in rec:
+                        print("camera worker %s: %s" % (kind, rec["error"]), flush=True)
+                        continue
+                    img = None
+                    if ring is not None and kind == "overhead":
+                        got = ring.read(ring.newest())
+                        img = got[0] if got else None
+                    br.on_record(rec, img)
+                    tt_w.writerow(["%.4f" % rec["t"], kind, rec.get("ms"), rec.get("mode"), rec.get("behind_s")])
+                    times[kind].append(rec.get("ms") or 0.0)
+                    c.send({"snap": br.trk.snapshot(rec["t"])})
+            if not busy:
+                time.sleep(0.003)
+            if args.max_s and time.time() - t0 > args.max_s:
+                break
+            if not any(p.is_alive() for p in procs):
+                print("camera workers stopped", flush=True)
+                break
+    except KeyboardInterrupt:
+        pass
+    finally:
+        for c in conns.values():
+            try:
+                c.send({"stop": True})
+            except (BrokenPipeError, OSError):
+                pass
+        for p in procs:
+            p.join(timeout=3)
+            if p.is_alive():
+                p.terminate()
+        tt_f.close()
+        if ring is not None:
+            ring.close()
+        br.farm_info = {k: {"records": len(v), "median_ms": round(float(np.median(v)), 2) if v else None}
+                        for k, v in times.items()}
         s = br.summary()
         br.close()
         print("Camera bridge stopped: %s" % json.dumps(s["robots"]), flush=True)
