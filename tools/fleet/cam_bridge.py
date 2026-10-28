@@ -402,7 +402,9 @@ class Bridge:
             self.last_still_head[n] = h
 
     def summary(self):
-        s = dict(frames=self.frames, skipped_behind=getattr(self, "skipped", 0), robots=self.counts, obstacles=len(self.obstacles),
+        s = dict(frames=self.frames, skipped_behind=getattr(self, "skipped", 0), frozen_skipped=getattr(self, "frozen", 0),
+                 side_frozen_skipped=getattr(self.side_feed, "frozen", 0) if getattr(self, "side_feed", None) else 0,
+                 robots=self.counts, obstacles=len(self.obstacles),
                  duration_s=None if self.t_first is None else round(time.time() - self.t_first, 1),
                  two_camera=self.trk.summary())
         if getattr(self, "farm_info", None):
