@@ -227,7 +227,7 @@ function setup() {
     <div class="card"><h2>Before you press it</h2><ol class="small">
       <li>Both cameras on, the recorder stopped (the setup page needs the cameras).</li>
       <li>The robots on the table, switched on (their lights are flashed).</li>
-      <li>The printed chessboard (squares of 3.5 cm) flat in the table's <b>0,0 corner</b>: its short edge along the table's long side, its corner in the table's corner. No robot on it.</li>
+      <li>The printed corner piece A (squares of 3.5 cm) flat in the table's <b>0,0 corner</b>: its white-dot corner in the table's corner, the 5-square side along the table's long side. No robot on it.</li>
       <li>When the setup asks, take the chessboard away and press <b>Chessboard taken away</b>: the warm-up starts then.</li></ol></div>
     <div class="card"><h2>Progress</h2><div class="log" id="slog">${esc((j.steps || []).map(x => x.join("  ")).join("\n")) || "Not started"}</div>
       ${j.wait_board ? `<p><button class="p" id="bway">Chessboard taken away</button></p>` : ""}

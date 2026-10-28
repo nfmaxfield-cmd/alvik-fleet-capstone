@@ -21,6 +21,11 @@ Answered ones move to the bottom with the answer and date.
 38. Light search: use the side camera alone, or both cameras taking the stronger signal?
 39. Leave turn-around points out of the 3 cm gate? (Right would pass L3; it changes what Phase 0 measures.)
 40. Did the room light change between 15:04 and 15:20? (The side picture brightened from 39 to 58 with its exposure locked.)
+42. Should the cameras find the dock's position themselves? Options: keep as built (bump check only, dock position by
+    tape); glue a 4 x 4 piece of 20-25 mm squares on the plywood just behind the dock (Claude's pick: no dock
+    reprint); or deepen the dock's back to about 9.5 cm (dock grows 16 -> 22 cm).
+43. Card and paper thickness for the dock pocket (assumed 0.45 mm card, 0.10 mm paper): measure 10 sheets of each
+    with a ruler?
 
 ### Robots and sessions
 8. What stands just beyond the home board's x = 0 edge at about y = 30-60? (Your 07:45 "yes" to this one was read as
