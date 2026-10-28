@@ -74,3 +74,23 @@ def test_live_stall_stale_and_side_only_hooks():
         assert cam.render(robot) is not a
     finally:
         TC.TableCamera.render, TC.SideCamera.render = o_t, o_s
+
+
+def test_dance_started_report_lost_is_taken_from_follow():
+    """15 % packet loss (sweep 2026-10-28): the dance's 'started' report was lost and run_plan waited until the time
+    limit. A FOLLOW record naming it as the current step now starts it (and a dance until switched off is done)."""
+    import run_plan as RP
+    c = object.__new__(RP.Coordinator)
+    c.log = lambda *a, **k: None
+    c.say = lambda s: None
+    c.plan_start = 0.0
+    steps = [{"type": "turn"}, {"type": "dance"}]
+    c.steps = lambda name: steps
+    b = RP.Bot("Right")
+    b.id_index = {75: 0, 76: 1}
+    b.stat = [{"status": "done"}, {"status": "acked"}]
+    b.note_clock = lambda t, ms: None
+    # FOLLOW: run, ms, step_id (cur), state, queued, last_done, last_failed, x, y, th, sd, th_sd, used, rejected, front
+    v = ["run", "1000", "76", "nopose", "0", "75", "0", "40.7", "30.7", "-113.7", "0.3", "1", "0", "0", "150"]
+    c.on_follow(b, 5.0, v)
+    assert b.stat[1]["status"] == "done" and getattr(b, "dancing", False)

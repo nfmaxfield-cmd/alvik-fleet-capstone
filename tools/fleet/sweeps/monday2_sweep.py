@@ -52,6 +52,21 @@ TIMEOUT_S = 330.0         # a run is stopped after this (plans are 115-137 s): m
 KEEP_SIZE = "61x122"
 
 
+def code_version():
+    """the commit and whether missions.py / mission_run.py differ from it (a run records what it ran)"""
+    try:
+        head = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=REPO, text=True).strip()
+        dirty = subprocess.check_output(["git", "status", "--porcelain", "tools/fleet/missions.py",
+                                         "tools/fleet/mission_run.py", "tools/fleet/run_plan.py",
+                                         "tools/fleet/planner.py"], cwd=REPO, text=True).split()
+        return head + ("+changes:" + ",".join(x for x in dirty if x != "M") if dirty else "")
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+CODE = None
+
+
 def draw(name, size, seed):
     key = "gyro" if name.startswith("gyro ") else name    # corrected / uncorrected: the same robots (paired)
     return random.Random("%s|%s|%d" % (key, size, seed))
@@ -101,8 +116,7 @@ CONDS = ["base", "lost 5%", "lost 15%", "washed out", "side camera only", "stall
          "stale 2.5 s", "wheels 3-5% off", "gyro 7.5% off, uncorrected", "gyro 7.5% off, corrected",
          "robot dies", "restart mid-run"]
 # the safety-net DOE's noisy conditions (the ones that move the camera's spots or the robots off their lines)
-DOE_CONDS = ["base", "lost 15%", "washed out", "side camera only", "stale 2.5 s", "wheels 3-5% off",
-             "gyro 7.5% off, uncorrected"]
+DOE_CONDS = ["base", "washed out", "side camera only", "stale 2.5 s", "gyro 7.5% off, uncorrected"]
 
 
 def slug(s):
@@ -131,7 +145,7 @@ def run_cmd(root, name, size, seed, level):
               "--setting", "chicken_min_cm=%g" % level]
     cmd = ["nice", "-n", "10", "unshare", "-n", sys.executable, NS, "--table", size, "--dry", "--seed", str(seed),
            "--session", d, "--no-frames", "--timeout-s", "%.0f" % TIMEOUT_S] + a
-    meta = dict(condition=name, size=size, seed=seed, level=level, words=w, cmd=cmd)
+    meta = dict(condition=name, size=size, seed=seed, level=level, words=w, cmd=cmd, code=CODE)
     return d, cmd, meta
 
 
@@ -251,6 +265,9 @@ def metrics(d):
     out["edge_long_cm"] = round(long_[0], 2)
     out["edge_long_during"] = label_at(ev, long_[1], long_[2])
     out["edge_short_cm"] = round(short[0], 2)
+    out["edge_short_during"] = label_at(ev, short[1], short[2])
+    out["edge_by_side"] = {sd: dict(cm=round(v[0], 2), robot=v[1], t=round(v[2] - t0, 1), during=label_at(ev, v[1], v[2]))
+                           for sd, v in edge.items()}     # body corners (truth), not the centre
     out["edge_cm"] = round(min(long_[0], short[0]), 2)
     # standing still: both robots at once, run against the plan
     k = max(1, int(round(STILL_WIN_S / 0.05)))
@@ -399,6 +416,9 @@ def main(argv=None):
         json.dump(rows, open(os.path.join(a.out, "results.json"), "w"), indent=1)
         log("collected %d runs" % len(rows))
         return 0
+    global CODE
+    CODE = code_version()
+    log("code %s" % CODE)
     todo = [j for j in jobs_for(a) if not os.path.exists(os.path.join(folder_of(a.out, *j), "metrics.json"))]
     log("%d runs to do" % len(todo))
     running = []      # (proc, folder, meta, t0, tries, fh)
@@ -435,6 +455,7 @@ def main(argv=None):
             except Exception as e:          # noqa: BLE001
                 m = dict(meta, error=repr(e)[:300])
             m["wall_s"] = round(time.time() - t0, 1)
+            m["code"] = meta.get("code")
             m["tries"] = tries + 1
             m["load_at_start"] = meta.get("load_at_start")
             if str(m.get("result", "")).startswith("start-up failed") and tries == 0:

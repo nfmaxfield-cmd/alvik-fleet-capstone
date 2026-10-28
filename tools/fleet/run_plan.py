@@ -634,6 +634,13 @@ class Coordinator:
                 st["status"] = "failed"
                 st["info"] = "failed (STEP record lost)"
                 self.on_failed(b, i, st["info"], (x, y, th), float(v[14]) if v[14] else 0.0)
+        # its "started" report lost over WiFi: the step it is running now has started (Monday sweep 2026-10-28: the
+        # dance's "started" was lost at 15 % packet loss, and a dance until switched off never reports "done", so
+        # run_plan waited on it until the time limit and stopped everyone)
+        i = b.id_index.get(cur) if cur > 0 else None
+        if i is not None and b.stat[i]["status"] in ("sent", "acked"):
+            self.on_step(b, t, ["STEP", str(cur), "started", str(ms), str(x), str(y), str(th), v[14] or "0",
+                                "(seen in FOLLOW)"])
 
     # -- outgoing -------------------------------------------------------------
     def pause(self, on):
