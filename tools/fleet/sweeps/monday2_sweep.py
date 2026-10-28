@@ -388,6 +388,8 @@ def main(argv=None):
                     help="start a second run only under this 1-minute load (one run of ours is ~0.7-1.0: the machine "
                          "otherwise idle)")
     ap.add_argument("--keep-all", action="store_true")
+    ap.add_argument("--start-for-s", type=float, default=0,
+                    help="start new runs only for this long, then finish the running ones and stop (bounded chunks)")
     a = ap.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)
     logf = open(os.path.join(a.out, "sweep_log.txt"), "a")
@@ -441,7 +443,10 @@ def main(argv=None):
                                                                                          PYTHONHASHSEED="0"))
         running.append((p, d, meta, time.time(), tries, fh, j))
         log("start %s %s seed %d gap %g %s" % (j[0], j[1], j[2], j[3], meta["words"]))
+    t_begin = time.time()
     while todo or running:
+        if a.start_for_s and time.time() - t_begin > a.start_for_s:
+            todo = []
         while todo and len(running) < a.jobs and (not running or os.getloadavg()[0] < a.max_load):
             start(todo.pop(0))
             time.sleep(8)          # stagger the start-ups (planning + imports are the heavy part)

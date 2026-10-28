@@ -416,7 +416,7 @@ firmware 2026-10-28a.
 
 | Setting | Chosen | DOE | Where | Status |
 |---|---|---|---|---|
-| The safety net: refuse a plan under (engine_checks MIN_GAP_CM, run_plan --min-gap-cm) | 8 cm (Nick) | 8 / 7 / 6 cm: the camera's closest approach over 10 Chickens and 10 crossings against the plan's (Nick wants to narrow it this week) | Board | open |
+| The safety net: refuse a plan under (engine_checks MIN_GAP_CM, run_plan --min-gap-cm) | 8 cm (Nick) | 8 / 6.5 / 5 cm: the camera's closest approach over 10 Chickens and 10 crossings against the plan's (Nick wants to narrow it this week) | Sim, then Board | simulator half done (2026-10-28, [safety-gap-doe.md](results/safety-gap-doe.md)): real closest never more than 1.35 cm short of the plan or under the net (worst 5.0 cm at 5, 6.4 at 6.5); the uncorrected gyro falls through every level. Recommended 6.5 cm after a 10 min board check; board half open |
 | Distance-sensor readings in a row before a stop (firmware obs_n, run_plan --obstacle-readings) | 2 (Nick) | 1 / 2 / 3 against phantom stops on empty plywood (5 in the 27 Oct ladder) and the stop distance from a real brick at 10 cm/s (~0.7 cm per reading); the DOE loop's sensor_runs.csv answers the phantom half without robot time | Logs, then Board | phantom half done on the 27 Oct logs (2026-10-28, [ladder report, follow-up](build-reports/e02-oct27-ladder-run.md#logs-only-follow-up-2026-10-28-overnight-line-check-misses-and-the-phantom-stops)): 1 / 2 / 3 in a row would have stopped on 5 / 4 / 2 of the 5 phantom stops; the 3 Left stops come from a fault-like centre-right zone (under 12 cm in 32-40 % of Left's readings, 0-5 % elsewhere). Brick half (stop distance) open |
 | A robot not heard for this long is out (engine_checks SILENT_S) | 4 s | 3 / 4 / 6 s in the simulator with 5 % and 15 % packet loss and 1-4 s WiFi drops, against false "out" calls and the others' standstill | Sim | open |
 | Today's warm-up ratio applied to the corrections only within (WARMUP_SCALE_MAX) | 5 % | The warm-up's measured ratio against L2's turn check on the same robots over 3 days | Logs | open |
@@ -453,6 +453,23 @@ a loop; the rest is the system's room; the logs' share can be derived from the n
 run_plan's 0.5 GB last resort, frames on the card stopping at 2 GB (follows from the 1 GB floor), frames on the USB
 drive stopping at 5 GB plus the frames saved so far (the upload's copy), the 2 s frames check (under 2 MB of frames
 between checks). Measured, to re-measure (Logs): frames 2.9 GB an hour (one 29 min session, both cameras and clips).
+
+## Monday 2-robot sweep (2026-10-28, simulator)
+
+Write-ups: [monday-2robot-sweep.md](results/monday-2robot-sweep.md), [safety-gap-doe.md](results/safety-gap-doe.md).
+Sweep settings (tools/fleet/sweeps/monday2_sweep.py), not robot settings, except the last two rows.
+
+| Number (where) | Value chosen | Experiment that would set it | Needs | Status |
+|---|---|---|---|---|
+| A frozen / stalled camera: how long and how often (monday2_sweep.py, live_stall_s, LIVE_STALL_EVERY_S) | 1 / 2.5 s every 20 s | Measure first: the Pi's tracking_times.csv and the bridge's frozen-picture count on the school WiFi; then stall length x spacing in the simulator | Logs, then Sim | open |
+| Restarting robot's silence (BOOT_S) | 2-6 s drawn | Time a real power-cycle and a sleep wake to the first CLOCK record (no DOE: a measurement) | Board | open |
+| Out robot's padding (run_plan out_obstacle: 1 cm + the planner's 1.5 cm) | 2.5 cm | 2.5 / 5 / 8 cm in the simulator's dead/restart runs: closest approach against "no route" stops on the four table sizes (after Nick's answer, question 44) | Sim | open |
+| Settings read-back rounds (engine_checks READBACK_TRIES) | 6 (was 3) | No DOE: a retry count (6 rounds leave ~1 in 2,000 per setting at 15 % loss each way) | - | set |
+
+Chosen with no DOE (sweep only): the death / restart time 10-110 s (OUT_T, spread over every block), wheel errors 3-5 %
+with a random sign (Nick's brief), gyro errors 6.5-8.5 % round Nick's 7.5 % with the fleet's stored 1.075, TIMEOUT_S
+330 s (machine time), the standstill rule (as the Monday sweep). A picture identical to the one before is frozen
+(cam_bridge same_picture): a definition.
 
 ## Already set by data
 

@@ -1,0 +1,1381 @@
+{
+"pre_chicken_fix": [
+{
+"condition": "lost 15%",
+"size": "61x122",
+"seed": 1,
+"level": 8.0,
+"words": "",
+"result": "done",
+"finished": true,
+"took_s": 115.19,
+"planned_s": 127.1,
+"plan_closest_cm": 12.04,
+"replans": 0,
+"robots_out": [],
+"plans_refused": 0,
+"sensor_stops": 0,
+"reached": {
+"Right": [
+"mow",
+"meet",
+"circle",
+"chicken 1 ready",
+"chicken 1 swerve",
+"chicken 1 aside",
+"spread out"
+],
+"Left": [
+"mow",
+"meet",
+"circle",
+"chicken 1 ready",
+"chicken 1 swerve",
+"chicken 1 aside",
+"spread out"
+]
+},
+"time_ratio": 0.906,
+"line_p95_cm": {
+"Left": 0.82,
+"Right": 0.73
+},
+"cam_truth_p95_cm": {
+"Left": 0.71,
+"Right": 0.83
+},
+"line_misses": {
+"Left": {
+"misses": 0,
+"single": 0,
+"runs": 0,
+"in_runs": 0,
+"longest": 0,
+"longest_s": 0.0
+},
+"Right": {
+"misses": 0,
+"single": 0,
+"runs": 0,
+"in_runs": 0,
+"longest": 0,
+"longest_s": 0.0
+}
+},
+"sure_share_pct": {
+"Left": 100.0,
+"Right": 99.8
+},
+"closest_cm": 12.01,
+"closest_t": 65.7,
+"closest_during": {
+"Left": "mow lane 7 start",
+"Right": "mow lane 5 start"
+},
+"contact": false,
+"edge_long_cm": 4.25,
+"edge_long_during": "mow lane 2 start",
+"edge_short_cm": 3.7,
+"edge_cm": 3.7,
+"both_still_s": 5.9,
+"both_still_plan_s": 2.6,
+"both_still_extra_s": 3.3,
+"longest_both_still_s": 5.8,
+"longest_both_still_plan_s": 2.4,
+"circle": {
+"Left": {
+"p95_cm": 0.93,
+"max_cm": 0.97,
+"s": 17.3,
+"complete": false
+},
+"Right": {
+"p95_cm": 0.78,
+"max_cm": 0.79,
+"s": 19.3,
+"complete": true
+}
+},
+"events": [],
+"wall_s": 166.2,
+"tries": 1,
+"load_at_start": [
+5.5439453125,
+4.96923828125,
+2.90185546875
+],
+"mission": "pre-fix Chicken (before ceffc31: each robot played its half alone)"
+},
+{
+"condition": "lost 15%",
+"size": "76x137",
+"seed": 1,
+"level": 8.0,
+"words": "",
+"result": "done",
+"finished": true,
+"took_s": 127.58,
+"planned_s": 136.5,
+"plan_closest_cm": 12.02,
+"replans": 0,
+"robots_out": [],
+"plans_refused": 0,
+"sensor_stops": 0,
+"reached": {
+"Right": [
+"mow",
+"meet",
+"circle",
+"chicken 1 ready",
+"chicken 1 swerve",
+"chicken 1 aside",
+"spread out"
+],
+"Left": [
+"mow",
+"meet",
+"circle",
+"chicken 1 ready",
+"chicken 1 swerve",
+"spread out"
+]
+},
+"time_ratio": 0.935,
+"line_p95_cm": {
+"Left": 0.51,
+"Right": 1.89
+},
+"cam_truth_p95_cm": {
+"Left": 0.83,
+"Right": 0.83
+},
+"line_misses": {
+"Left": {
+"misses": 0,
+"single": 0,
+"runs": 0,
+"in_runs": 0,
+"longest": 0,
+"longest_s": 0.0
+},
+"Right": {
+"misses": 1,
+"single": 1,
+"runs": 0,
+"in_runs": 0,
+"longest": 1,
+"longest_s": 0.0
+}
+},
+"sure_share_pct": {
+"Left": 100.0,
+"Right": 99.9
+},
+"closest_cm": 12.03,
+"closest_t": 63.8,
+"closest_during": {
+"Left": "circle",
+"Right": "mow lane 5 start"
+},
+"contact": false,
+"edge_long_cm": 4.74,
+"edge_long_during": "mow lane 6 end",
+"edge_short_cm": 4.53,
+"edge_cm": 4.53,
+"both_still_s": 5.5,
+"both_still_plan_s": 2.1,
+"both_still_extra_s": 3.4,
+"longest_both_still_s": 3.9,
+"longest_both_still_plan_s": 2.0,
+"circle": {
+"Left": {
+"p95_cm": 0.59,
+"max_cm": 0.6,
+"s": 18.9,
+"complete": true
+},
+"Right": {
+"p95_cm": 0.83,
+"max_cm": 0.84,
+"s": 19.5,
+"complete": false
+}
+},
+"events": [
+"tracker_lost"
+],
+"sim_events": [],
+"hung": [],
+"wall_s": 166.3,
+"tries": 1,
+"load_at_start": [
+2.2900390625,
+4.23291015625,
+2.99462890625
+],
+"mission": "pre-fix Chicken (before ceffc31: each robot played its half alone)"
+},
+{
+"condition": "lost 5%",
+"size": "61x122",
+"seed": 1,
+"level": 8.0,
+"words": "",
+"result": "done",
+"finished": true,
+"took_s": 115.24,
+"planned_s": 127.1,
+"plan_closest_cm": 12.04,
+"replans": 0,
+"robots_out": [],
+"plans_refused": 0,
+"sensor_stops": 0,
+"reached": {
+"Right": [
+"mow",
+"meet",
+"circle",
+"chicken 1 ready",
+"chicken 1 swerve",
+"spread out"
+],
+"Left": [
+"mow",
+"meet",
+"circle",
+"chicken 1 ready",
+"chicken 1 swerve",
+"chicken 1 aside",
+"spread out"
+]
+},
+"time_ratio": 0.907,
+"line_p95_cm": {
+"Left": 0.73,
+"Right": 1.34
+},
+"cam_truth_p95_cm": {
+"Left": 0.75,
+"Right": 1.35
+},
+"line_misses": {
+"Left": {
+"misses": 0,
+"single": 0,
+"runs": 0,
+"in_runs": 0,
+"longest": 0,
+"longest_s": 0.0
+},
+"Right": {
+"misses": 0,
+"single": 0,
+"runs": 0,
+"in_runs": 0,
+"longest": 0,
+"longest_s": 0.0
+}
+},
+"sure_share_pct": {
+"Left": 100.0,
+"Right": 100.0
+},
+"closest_cm": 12.11,
+"closest_t": 66.0,
+"closest_during": {
+"Left": "mow lane 7 start",
+"Right": "mow lane 5 start"
+},
+"contact": false,
+"edge_long_cm": 4.51,
+"edge_long_during": "mow lane 2 start",
+"edge_short_cm": 3.36,
+"edge_cm": 3.36,
+"both_still_s": 7.0,
+"both_still_plan_s": 2.6,
+"both_still_extra_s": 4.4,
+"longest_both_still_s": 5.8,
+"longest_both_still_plan_s": 2.4,
+"circle": {
+"Left": {
+"p95_cm": 0.7,
+"max_cm": 0.72,
+"s": 18.6,
+"complete": true
+},
+"Right": {
+"p95_cm": 0.61,
+"max_cm": 0.62,
+"s": 16.8,
+"complete": false
+}
+},
+"events": [],
+"sim_events": [],
+"hung": [],
+"wall_s": 144.2,
+"tries": 1,
+"load_at_start": [
+0.3994140625,
+0.60546875,
+0.3740234375
+],
+"mission": "pre-fix Chicken (before ceffc31: each robot played its half alone)"
+},
+{
+"condition": "lost 5%",
+"size": "76x137",
+"seed": 1,
+"level": 8.0,
+"words": "",
+"result": "done",
+"finished": true,
+"took_s": 127.26,
+"planned_s": 136.5,
+"plan_closest_cm": 12.02,
+"replans": 0,
+"robots_out": [],
+"plans_refused": 0,
+"sensor_stops": 0,
+"reached": {
+"Right": [
+"mow",
+"meet",
+"circle",
+"chicken 1 ready",
+"chicken 1 swerve",
+"chicken 1 aside",
+"spread out"
+],
+"Left": [
+"mow",
+"meet",
+"circle",
+"chicken 1 ready",
+"chicken 1 swerve",
+"chicken 1 aside",
+"spread out"
+]
+},
+"time_ratio": 0.932,
+"line_p95_cm": {
+"Left": 0.72,
+"Right": 1.69
+},
+"cam_truth_p95_cm": {
+"Left": 0.78,
+"Right": 0.84
+},
+"line_misses": {
+"Left": {
+"misses": 0,
+"single": 0,
+"runs": 0,
+"in_runs": 0,
+"longest": 0,
+"longest_s": 0.0
+},
+"Right": {
+"misses": 4,
+"single": 2,
+"runs": 1,
+"in_runs": 2,
+"longest": 2,
+"longest_s": 0.07
+}
+},
+"sure_share_pct": {
+"Left": 100.0,
+"Right": 99.9
+},
+"closest_cm": 12.05,
+"closest_t": 63.2,
+"closest_during": {
+"Left": "circle",
+"Right": "circle"
+},
+"contact": false,
+"edge_long_cm": 4.9,
+"edge_long_during": "mow lane 2 start",
+"edge_short_cm": 4.26,
+"edge_cm": 4.26,
+"both_still_s": 6.0,
+"both_still_plan_s": 2.1,
+"both_still_extra_s": 3.9,
+"longest_both_still_s": 4.8,
+"longest_both_still_plan_s": 2.0,
+"circle": {
+"Left": {
+"p95_cm": 0.83,
+"max_cm": 0.84,
+"s": 18.5,
+"complete": false
+},
+"Right": {
+"p95_cm": 0.87,
+"max_cm": 0.88,
+"s": 19.3,
+"complete": true
+}
+},
+"events": [],
+"sim_events": [],
+"hung": [],
+"wall_s": 160.2,
+"tries": 1,
+"load_at_start": [
+5.03125,
+3.9091796875,
+2.208984375
+],
+"mission": "pre-fix Chicken (before ceffc31: each robot played its half alone)"
+},
+{
+"condition": "base",
+"size": "61x122",
+"seed": 1,
+"level": 8.0,
+"words": "",
+"result": "done",
+"finished": true,
+"took_s": 115.22,
+"planned_s": 127.1,
+"plan_closest_cm": 12.04,
+"replans": 0,
+"robots_out": [],
+"plans_refused": 0,
+"sensor_stops": 0,
+"reached": {
+"Right": [
+"mow",
+"meet",
+"circle",
+"chicken 1 ready",
+"chicken 1 swerve",
+"chicken 1 aside",
+"spread out"
+],
+"Left": [
+"mow",
+"meet",
+"circle",
+"chicken 1 ready",
+"chicken 1 swerve",
+"chicken 1 aside",
+"spread out"
+]
+},
+"time_ratio": 0.907,
+"line_p95_cm": {
+"Left": 0.66,
+"Right": 1.24
+},
+"cam_truth_p95_cm": {
+"Left": 0.71,
+"Right": 1.08
+},
+"line_misses": {
+"Left": {
+"misses": 0,
+"single": 0,
+"runs": 0,
+"in_runs": 0,
+"longest": 0,
+"longest_s": 0.0
+},
+"Right": {
+"misses": 0,
+"single": 0,
+"runs": 0,
+"in_runs": 0,
+"longest": 0,
+"longest_s": 0.0
+}
+},
+"sure_share_pct": {
+"Left": 100.0,
+"Right": 100.0
+},
+"closest_cm": 12.02,
+"closest_t": 66.0,
+"closest_during": {
+"Left": "mow lane 7 start",
+"Right": "mow lane 5 start"
+},
+"contact": false,
+"edge_long_cm": 4.66,
+"edge_long_during": "mow lane 2 start",
+"edge_short_cm": 4.21,
+"edge_cm": 4.21,
+"both_still_s": 7.1,
+"both_still_plan_s": 2.6,
+"both_still_extra_s": 4.5,
+"longest_both_still_s": 5.9,
+"longest_both_still_plan_s": 2.4,
+"circle": {
+"Left": {
+"p95_cm": 0.75,
+"max_cm": 0.77,
+"s": 18.6,
+"complete": true
+},
+"Right": {
+"p95_cm": 0.56,
+"max_cm": 0.57,
+"s": 18.9,
+"complete": true
+}
+},
+"events": [],
+"sim_events": [],
+"hung": [],
+"wall_s": 146.1,
+"tries": 1,
+"load_at_start": [
+0.28955078125,
+0.591796875,
+0.3671875
+],
+"mission": "pre-fix Chicken (before ceffc31: each robot played its half alone)"
+},
+{
+"condition": "base",
+"size": "76x137",
+"seed": 1,
+"level": 8.0,
+"words": "",
+"result": "done",
+"finished": true,
+"took_s": 127.21,
+"planned_s": 136.5,
+"plan_closest_cm": 12.02,
+"replans": 0,
+"robots_out": [],
+"plans_refused": 0,
+"sensor_stops": 0,
+"reached": {
+"Right": [
+"mow",
+"meet",
+"circle",
+"chicken 1 ready",
+"chicken 1 swerve",
+"chicken 1 aside",
+"spread out"
+],
+"Left": [
+"mow",
+"meet",
+"circle",
+"chicken 1 ready",
+"chicken 1 swerve",
+"chicken 1 aside",
+"spread out"
+]
+},
+"time_ratio": 0.932,
+"line_p95_cm": {
+"Left": 0.44,
+"Right": 1.31
+},
+"cam_truth_p95_cm": {
+"Left": 0.76,
+"Right": 0.83
+},
+"line_misses": {
+"Left": {
+"misses": 0,
+"single": 0,
+"runs": 0,
+"in_runs": 0,
+"longest": 0,
+"longest_s": 0.0
+},
+"Right": {
+"misses": 7,
+"single": 0,
+"runs": 2,
+"in_runs": 7,
+"longest": 5,
+"longest_s": 0.27
+}
+},
+"sure_share_pct": {
+"Left": 100.0,
+"Right": 99.9
+},
+"closest_cm": 12.03,
+"closest_t": 65.4,
+"closest_during": {
+"Left": "circle",
+"Right": "mow lane 5 start"
+},
+"contact": false,
+"edge_long_cm": 4.84,
+"edge_long_during": "mow lane 7 start",
+"edge_short_cm": 5.24,
+"edge_cm": 4.84,
+"both_still_s": 6.0,
+"both_still_plan_s": 2.1,
+"both_still_extra_s": 3.9,
+"longest_both_still_s": 4.8,
+"longest_both_still_plan_s": 2.0,
+"circle": {
+"Left": {
+"p95_cm": 0.64,
+"max_cm": 0.66,
+"s": 18.7,
+"complete": true
+},
+"Right": {
+"p95_cm": 0.74,
+"max_cm": 0.75,
+"s": 19.2,
+"complete": true
+}
+},
+"events": [],
+"sim_events": [],
+"hung": [],
+"wall_s": 160.3,
+"tries": 1,
+"load_at_start": [
+2.33154296875,
+3.0302734375,
+1.65673828125
+],
+"mission": "pre-fix Chicken (before ceffc31: each robot played its half alone)"
+}
+],
+"before_this_nights_fixes": [
+{
+"condition": "lost 15%",
+"size": "76x137",
+"seed": 2,
+"level": 8.0,
+"words": "",
+"result": "start-up failed",
+"finished": false,
+"took_s": 15.57,
+"planned_s": 141.6,
+"plan_closest_cm": 11.07,
+"replans": 0,
+"robots_out": [],
+"plans_refused": 0,
+"sensor_stops": 0,
+"reached": {},
+"time_ratio": 0.11,
+"line_p95_cm": {
+"Left": 1.58,
+"Right": 2.6
+},
+"cam_truth_p95_cm": {
+"Left": 1.16,
+"Right": 2.48
+},
+"line_misses": {
+"Left": {
+"misses": 0,
+"single": 0,
+"runs": 0,
+"in_runs": 0,
+"longest": 0,
+"longest_s": 0.0
+},
+"Right": {
+"misses": 0,
+"single": 0,
+"runs": 0,
+"in_runs": 0,
+"longest": 0,
+"longest_s": 0.0
+}
+},
+"sure_share_pct": {
+"Left": 100.0,
+"Right": 100.0
+},
+"no_truth": true,
+"wall_s": 38.0,
+"code": "756e703",
+"tries": 2,
+"load_at_start": [
+1.6474609375,
+1.66748046875,
+1.888671875
+],
+"first_try_refused": "start-up failed",
+"folder": "lost15_76x137-s2_samepackets/metrics.json"
+},
+{
+"condition": "lost 15%",
+"size": "61x122",
+"seed": 2,
+"level": 8.0,
+"words": "",
+"result": "start-up failed",
+"finished": false,
+"took_s": 15.57,
+"planned_s": 128.8,
+"plan_closest_cm": 11.07,
+"replans": 0,
+"robots_out": [],
+"plans_refused": 0,
+"sensor_stops": 0,
+"reached": {},
+"time_ratio": 0.121,
+"line_p95_cm": {
+"Left": 1.7,
+"Right": 2.28
+},
+"cam_truth_p95_cm": {
+"Left": 1.28,
+"Right": 2.16
+},
+"line_misses": {
+"Left": {
+"misses": 0,
+"single": 0,
+"runs": 0,
+"in_runs": 0,
+"longest": 0,
+"longest_s": 0.0
+},
+"Right": {
+"misses": 0,
+"single": 0,
+"runs": 0,
+"in_runs": 0,
+"longest": 0,
+"longest_s": 0.0
+}
+},
+"sure_share_pct": {
+"Left": 100.0,
+"Right": 100.0
+},
+"no_truth": true,
+"wall_s": 34.0,
+"code": "756e703",
+"tries": 2,
+"load_at_start": [
+1.74365234375,
+1.740234375,
+1.93115234375
+],
+"first_try_refused": "start-up failed",
+"folder": "lost15_61x122-s2_samepackets/metrics.json"
+},
+{
+"condition": "lost 15%",
+"size": "61x122",
+"seed": 1,
+"level": 8.0,
+"words": "",
+"result": "timeout",
+"finished": false,
+"took_s": 331.21,
+"planned_s": 128.8,
+"plan_closest_cm": 11.07,
+"replans": 0,
+"robots_out": [],
+"plans_refused": 0,
+"sensor_stops": 0,
+"reached": {
+"Right": [
+"mow",
+"meet",
+"circle",
+"chicken 1 ready",
+"chicken 1 swerve",
+"chicken 1 aside"
+],
+"Left": [
+"mow",
+"meet",
+"circle",
+"chicken 1 ready",
+"chicken 1 swerve",
+"chicken 1 aside"
+]
+},
+"time_ratio": 2.572,
+"line_p95_cm": {
+"Left": 0.62,
+"Right": 0.71
+},
+"cam_truth_p95_cm": {
+"Left": 0.69,
+"Right": 0.78
+},
+"line_misses": {
+"Left": {
+"misses": 0,
+"single": 0,
+"runs": 0,
+"in_runs": 0,
+"longest": 0,
+"longest_s": 0.0
+},
+"Right": {
+"misses": 0,
+"single": 0,
+"runs": 0,
+"in_runs": 0,
+"longest": 0,
+"longest_s": 0.0
+}
+},
+"sure_share_pct": {
+"Left": 100.0,
+"Right": 99.9
+},
+"closest_cm": 11.07,
+"closest_t": 109.4,
+"closest_during": {
+"Left": "chicken 1 swerve",
+"Right": "chicken 1 swerve"
+},
+"contact": false,
+"edge_long_cm": 4.91,
+"edge_long_during": "mow lane 8 start",
+"edge_short_cm": 5.18,
+"edge_short_during": null,
+"edge_by_side": {
+"y_min": {
+"cm": 4.99,
+"robot": "Right",
+"t": 2.8,
+"during": "mow lane 9 start"
+},
+"y_max": {
+"cm": 4.91,
+"robot": "Right",
+"t": 11.5,
+"during": "mow lane 8 start"
+},
+"x_min": {
+"cm": 5.18,
+"robot": "Left",
+"t": 4.6,
+"during": null
+},
+"x_max": {
+"cm": 5.51,
+"robot": "Left",
+"t": 75.8,
+"during": "chicken 1 ready"
+}
+},
+"edge_cm": 4.91,
+"both_still_s": 12.9,
+"both_still_plan_s": 4.5,
+"both_still_extra_s": 8.4,
+"longest_both_still_s": 5.9,
+"longest_both_still_plan_s": 2.4,
+"circle": {
+"Left": {
+"p95_cm": 0.77,
+"max_cm": 0.78,
+"s": 16.5,
+"complete": true
+},
+"Right": {
+"p95_cm": 1.03,
+"max_cm": 1.04,
+"s": 19.5,
+"complete": true
+}
+},
+"events": [],
+"code": "ceffc31",
+"folder": "lost15_61x122-s1_timeout/metrics.json"
+},
+{
+"condition": "stale 2.5 s",
+"size": "61x122",
+"seed": 1,
+"level": 8.0,
+"words": "",
+"result": "camera and Right's own pose disagree by 9.4 cm for 1.0 s (fixes refused so far: 11): stopping everyone",
+"finished": false,
+"took_s": 9.98,
+"planned_s": 128.8,
+"plan_closest_cm": 11.07,
+"replans": 0,
+"robots_out": [],
+"plans_refused": 0,
+"sensor_stops": 0,
+"reached": {
+"Right": [
+"mow"
+],
+"Left": [
+"mow"
+]
+},
+"time_ratio": 0.077,
+"line_p95_cm": {
+"Left": 1.55,
+"Right": 2.43
+},
+"cam_truth_p95_cm": {
+"Left": 1.28,
+"Right": 5.83
+},
+"line_misses": {
+"Left": {
+"misses": 0,
+"single": 0,
+"runs": 0,
+"in_runs": 0,
+"longest": 0,
+"longest_s": 0.0
+},
+"Right": {
+"misses": 0,
+"single": 0,
+"runs": 0,
+"in_runs": 0,
+"longest": 0,
+"longest_s": 0.0
+}
+},
+"sure_share_pct": {
+"Left": 100.0,
+"Right": 100.0
+},
+"closest_cm": 69.6,
+"closest_t": 7.6,
+"closest_during": {
+"Left": "mow lane 2 start",
+"Right": "mow lane 9 end"
+},
+"contact": false,
+"edge_long_cm": 4.27,
+"edge_long_during": "mow lane 9 end",
+"edge_short_cm": 4.23,
+"edge_short_during": "mow lane 1 end",
+"edge_by_side": {
+"y_min": {
+"cm": 5.0,
+"robot": "Right",
+"t": 2.8,
+"during": "mow lane 9 start"
+},
+"y_max": {
+"cm": 4.27,
+"robot": "Right",
+"t": 8.6,
+"during": "mow lane 9 end"
+},
+"x_min": {
+"cm": 4.23,
+"robot": "Left",
+"t": 4.7,
+"during": "mow lane 1 end"
+},
+"x_max": {
+"cm": 5.91,
+"robot": "Right",
+"t": 0.6,
+"during": null
+}
+},
+"edge_cm": 4.23,
+"both_still_s": 1.2,
+"both_still_plan_s": 4.5,
+"both_still_extra_s": -3.3,
+"longest_both_still_s": 1.2,
+"longest_both_still_plan_s": 2.4,
+"circle": {},
+"events": [],
+"sim_events": [],
+"hung": [],
+"wall_s": 38.1,
+"code": "756e703",
+"tries": 1,
+"load_at_start": [
+1.29931640625,
+1.5732421875,
+1.7998046875
+],
+"folder": "stale_before_bridge_fix/61x122-s1/metrics.json"
+},
+{
+"condition": "stale 2.5 s",
+"size": "76x137",
+"seed": 1,
+"level": 8.0,
+"words": "",
+"result": "camera and Right's own pose disagree by 15.3 cm for 1.0 s (fixes refused so far: 12): stopping everyone",
+"finished": false,
+"took_s": 10.08,
+"planned_s": 141.6,
+"plan_closest_cm": 11.07,
+"replans": 0,
+"robots_out": [],
+"plans_refused": 0,
+"sensor_stops": 0,
+"reached": {
+"Right": [
+"mow"
+],
+"Left": [
+"mow"
+]
+},
+"time_ratio": 0.071,
+"line_p95_cm": {
+"Left": 1.54,
+"Right": 2.75
+},
+"cam_truth_p95_cm": {
+"Left": 8.24,
+"Right": 12.83
+},
+"line_misses": {
+"Left": {
+"misses": 0,
+"single": 0,
+"runs": 0,
+"in_runs": 0,
+"longest": 0,
+"longest_s": 0.0
+},
+"Right": {
+"misses": 4,
+"single": 0,
+"runs": 2,
+"in_runs": 4,
+"longest": 2,
+"longest_s": 0.07
+}
+},
+"sure_share_pct": {
+"Left": 100.0,
+"Right": 98.5
+},
+"closest_cm": 82.92,
+"closest_t": 9.0,
+"closest_during": {
+"Left": "mow lane 2 start",
+"Right": "mow lane 10 end"
+},
+"contact": false,
+"edge_long_cm": 4.95,
+"edge_long_during": "mow lane 10 start",
+"edge_short_cm": 4.23,
+"edge_short_during": "mow lane 1 end",
+"edge_by_side": {
+"y_min": {
+"cm": 4.95,
+"robot": "Right",
+"t": 3.0,
+"during": "mow lane 10 start"
+},
+"y_max": {
+"cm": 5.07,
+"robot": "Left",
+"t": 6.2,
+"during": "mow lane 1 end"
+},
+"x_min": {
+"cm": 4.23,
+"robot": "Left",
+"t": 6.2,
+"during": "mow lane 1 end"
+},
+"x_max": {
+"cm": 5.91,
+"robot": "Right",
+"t": 0.5,
+"during": null
+}
+},
+"edge_cm": 4.23,
+"both_still_s": 1.2,
+"both_still_plan_s": 5.4,
+"both_still_extra_s": -4.2,
+"longest_both_still_s": 1.2,
+"longest_both_still_plan_s": 3.3,
+"circle": {},
+"events": [],
+"sim_events": [],
+"hung": [],
+"wall_s": 38.1,
+"code": "756e703",
+"tries": 1,
+"load_at_start": [
+1.25830078125,
+1.5390625,
+1.78076171875
+],
+"folder": "stale_before_bridge_fix/76x137-s1/metrics.json"
+},
+{
+"condition": "lost 15%",
+"size": "61x122",
+"seed": 1,
+"level": 8.0,
+"words": "",
+"result": "done",
+"finished": true,
+"took_s": 121.67,
+"planned_s": 128.8,
+"plan_closest_cm": 11.07,
+"replans": 0,
+"robots_out": [],
+"plans_refused": 0,
+"sensor_stops": 0,
+"reached": {
+"Right": [
+"mow",
+"meet",
+"circle",
+"chicken 1 ready",
+"chicken 1 swerve",
+"chicken 1 aside",
+"spread out"
+],
+"Left": [
+"mow",
+"meet",
+"circle",
+"chicken 1 ready",
+"chicken 1 swerve",
+"chicken 1 aside",
+"spread out"
+]
+},
+"time_ratio": 0.945,
+"line_p95_cm": {
+"Left": 0.57,
+"Right": 0.62
+},
+"cam_truth_p95_cm": {
+"Left": 0.69,
+"Right": 0.79
+},
+"line_misses": {
+"Left": {
+"misses": 0,
+"single": 0,
+"runs": 0,
+"in_runs": 0,
+"longest": 0,
+"longest_s": 0.0
+},
+"Right": {
+"misses": 0,
+"single": 0,
+"runs": 0,
+"in_runs": 0,
+"longest": 0,
+"longest_s": 0.0
+}
+},
+"sure_share_pct": {
+"Left": 100.0,
+"Right": 100.0
+},
+"closest_cm": 11.01,
+"closest_t": 110.0,
+"closest_during": {
+"Left": "chicken 1 swerve",
+"Right": "chicken 1 swerve"
+},
+"contact": false,
+"edge_long_cm": 4.7,
+"edge_long_during": "mow lane 2 start",
+"edge_short_cm": 4.22,
+"edge_short_during": "mow lane 1 end",
+"edge_by_side": {
+"y_min": {
+"cm": 5.0,
+"robot": "Right",
+"t": 2.7,
+"during": "mow lane 9 start"
+},
+"y_max": {
+"cm": 4.7,
+"robot": "Left",
+"t": 8.0,
+"during": "mow lane 2 start"
+},
+"x_min": {
+"cm": 4.22,
+"robot": "Left",
+"t": 4.9,
+"during": "mow lane 1 end"
+},
+"x_max": {
+"cm": 5.65,
+"robot": "Left",
+"t": 75.8,
+"during": "chicken 1 ready"
+}
+},
+"edge_cm": 4.22,
+"both_still_s": 13.5,
+"both_still_plan_s": 4.5,
+"both_still_extra_s": 9.0,
+"longest_both_still_s": 6.5,
+"longest_both_still_plan_s": 2.4,
+"circle": {
+"Left": {
+"p95_cm": 0.78,
+"max_cm": 0.8,
+"s": 18.5,
+"complete": false
+},
+"Right": {
+"p95_cm": 0.68,
+"max_cm": 0.69,
+"s": 19.1,
+"complete": true
+}
+},
+"events": [],
+"sim_events": [],
+"hung": [],
+"wall_s": 158.1,
+"code": "756e703",
+"tries": 1,
+"load_at_start": [
+0.4482421875,
+1.3984375,
+1.95361328125
+],
+"folder": "lost15_before_startup_fixes/61x122-s1/metrics.json"
+},
+{
+"condition": "lost 15%",
+"size": "76x137",
+"seed": 1,
+"level": 8.0,
+"words": "",
+"result": "done",
+"finished": true,
+"took_s": 134.27,
+"planned_s": 141.6,
+"plan_closest_cm": 11.07,
+"replans": 0,
+"robots_out": [],
+"plans_refused": 0,
+"sensor_stops": 0,
+"reached": {
+"Left": [
+"mow",
+"meet",
+"circle",
+"chicken 1 ready",
+"chicken 1 swerve",
+"chicken 1 aside",
+"spread out"
+],
+"Right": [
+"mow",
+"meet",
+"circle",
+"chicken 1 ready",
+"chicken 1 swerve",
+"chicken 1 aside"
+]
+},
+"time_ratio": 0.948,
+"line_p95_cm": {
+"Left": 0.66,
+"Right": 1.13
+},
+"cam_truth_p95_cm": {
+"Left": 0.77,
+"Right": 0.89
+},
+"line_misses": {
+"Left": {
+"misses": 0,
+"single": 0,
+"runs": 0,
+"in_runs": 0,
+"longest": 0,
+"longest_s": 0.0
+},
+"Right": {
+"misses": 0,
+"single": 0,
+"runs": 0,
+"in_runs": 0,
+"longest": 0,
+"longest_s": 0.0
+}
+},
+"sure_share_pct": {
+"Left": 100.0,
+"Right": 99.7
+},
+"closest_cm": 11.16,
+"closest_t": 122.2,
+"closest_during": {
+"Left": "chicken 1 swerve",
+"Right": "chicken 1 ready"
+},
+"contact": false,
+"edge_long_cm": 4.85,
+"edge_long_during": "mow lane 6 end",
+"edge_short_cm": 4.23,
+"edge_short_during": null,
+"edge_by_side": {
+"y_min": {
+"cm": 5.01,
+"robot": "Right",
+"t": 3.1,
+"during": "mow lane 10 start"
+},
+"y_max": {
+"cm": 4.85,
+"robot": "Left",
+"t": 81.9,
+"during": "mow lane 6 end"
+},
+"x_min": {
+"cm": 4.23,
+"robot": "Left",
+"t": 6.3,
+"during": null
+},
+"x_max": {
+"cm": 5.46,
+"robot": "Left",
+"t": 109.1,
+"during": "chicken 1 ready"
+}
+},
+"edge_cm": 4.23,
+"both_still_s": 9.9,
+"both_still_plan_s": 5.4,
+"both_still_extra_s": 4.5,
+"longest_both_still_s": 5.1,
+"longest_both_still_plan_s": 3.3,
+"circle": {
+"Left": {
+"p95_cm": 0.75,
+"max_cm": 0.75,
+"s": 18.5,
+"complete": false
+},
+"Right": {
+"p95_cm": 0.7,
+"max_cm": 0.71,
+"s": 19.1,
+"complete": true
+}
+},
+"events": [],
+"first_try_refused": "Settings not confirmed by the robot after 3 tries: Right bd_k_y1 sent 1, says None. Nothing was moved.",
+"tries": 2,
+"code": "ceffc31",
+"folder": "lost15_before_startup_fixes/76x137-s1/metrics.json"
+}
+]
+}
