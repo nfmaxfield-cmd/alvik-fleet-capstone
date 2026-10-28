@@ -122,7 +122,11 @@ def run(args):
     os.makedirs(out, exist_ok=True)
     with open(os.path.join(out, "mission_cmd.json"), "w") as f:
         json.dump({"argv": sys.argv, "args": vars(args)}, f, indent=1)
-    mm, plan, mp, pp = build(args, out)
+    if args.mission:
+        # a mission made elsewhere (Mission Control's warm-up): its map and plan as they are
+        mp, pp = os.path.abspath(args.mission), os.path.abspath(args.plan)
+    else:
+        mm, plan, mp, pp = build(args, out)
     if args.plan_only:
         return 0
     sess = os.path.join(out, "run")
@@ -290,6 +294,8 @@ def main(argv=None):
     ap.add_argument("--map", help="Mission Control's workspace map (sides, zones from the warm-up)")
     ap.add_argument("--program", help="a block program (Mission Control's program.json); default: Monday's")
     ap.add_argument("--robots", default="Left,Right", help="Monday's two robots (default Left,Right)")
+    ap.add_argument("--mission", help="a mission map made elsewhere (Mission Control's warm-up), with --plan")
+    ap.add_argument("--plan", help="with --mission: its plan")
     ap.add_argument("--session", help="the session folder (default logs/<date-time>-mission)")
     ap.add_argument("--plan-only", action="store_true", help="build and plan, then stop (nothing moves)")
     ap.add_argument("--min-gap-cm", type=float, default=EC.MIN_GAP_CM)

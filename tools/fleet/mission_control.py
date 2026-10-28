@@ -60,6 +60,11 @@ RUN_DEFAULTS = {
     "sim_true_objects": "",           # simulator only: boxes on the table the map does not know, "x,y,w,h; ..."
     "sim_brick": "",                  # simulator only: a brick drop, "auto@T" or "x,y[,angle]@T" (s after the start)
     "sim_brick_camera": True,         # simulator only: the brick is seen through the camera's what-changed watch
+    "sim_washout": False,             # simulator through the cameras: the overhead's board washed out (27 Oct 11:20)
+    "sim_drop_pct": 0.0,              # simulator through the cameras: lost packets, % each way
+    "sim_dead": "",                   # simulator through the cameras: "Right@60": that robot dies 60 s in
+    "farm": False,                    # robots: each camera tracked in its own process (trackfarm.py)
+    "upload": False,                  # robots: upload the run's logs (a release with a tag of its own)
 }
 WARMUP_KNOBS = ("PROBE_SPACING_CM", "CORNER_PAUSE_S", "BARRIER_NEAR_CM", "SCALE_FLAG", "MAX_FRAMES")
 
@@ -95,8 +100,20 @@ class Run:
 
     def status(self):
         st = {"kind": self.kind, "folder": self.folder, "running": self.alive(), "paused": self.paused,
-              "elapsed_s": round(time.time() - self.t0, 1), "exit": self.p.poll()}
-        tr = os.path.join(self.folder, "cam_track.csv")
+              "elapsed_s": round(time.time() - self.t0, 1), "exit": self.p.poll(), "mode": getattr(self, "mode", "sim")}
+        if getattr(self, "session", None) and os.path.isdir(self.session):
+            # mission_run.py: run_plan's session is in run/ (the camera bridge in bridge/, frames/, cpu.csv beside it)
+            folder = self.session
+        else:
+            folder = self.folder
+        lj = os.path.join(folder, "live.json")
+        if os.path.exists(lj):
+            try:
+                with open(lj) as f:
+                    st["live"] = json.load(f)
+            except ValueError:
+                pass
+        tr = os.path.join(folder, "cam_track.csv")
         last = {}
         if os.path.exists(tr):
             with open(tr) as f:
@@ -110,7 +127,7 @@ class Run:
                         pass
         st["robots"] = last
         msgs, labels = [], {}
-        cj = os.path.join(self.folder, "coordinator.jsonl")
+        cj = os.path.join(folder, "coordinator.jsonl")
         if os.path.exists(cj):
             with open(cj) as f:
                 for ln in f.readlines()[-400:]:
@@ -124,7 +141,7 @@ class Run:
                         labels[e["robot"]] = e.get("label")
         st["messages"] = msgs[-40:]
         st["doing"] = labels
-        sm = os.path.join(self.folder, "run_plan_summary.json")
+        sm = os.path.join(folder, "run_plan_summary.json")
         if os.path.exists(sm):
             try:
                 with open(sm) as f:
@@ -199,7 +216,7 @@ class Session:
                             "warmup": {k: getattr(WU, k) for k in WARMUP_KNOBS}},
                "least_open_room_cm": round(MS.least_open_room(m), 2) if m.get("sides") else None,
                "program": self.program or MS.monday_program(), "blocks": list(MS.BLOCKS),
-               "table_sizes": TABLE_SIZES,
+               "table_sizes": TABLE_SIZES, "setup": self.setup_state(),
                "mission": (self.mission or {}).get("mission"), "preview": self.preview,
                "warmup": self.warm_result, "run": self.run.status() if self.run else None,
                "last_runs": self.last_runs}
@@ -304,6 +321,9 @@ class Session:
             raise ValueError("a run is going: stop it first")
         kind = d.get("kind", "mission")
         dry = bool(d.get("dry", True))
+        conn = d.get("conn") or ("sim" if dry else "robots")
+        if conn in ("sim-cameras", "robots"):
+            return self.start_cam_run(kind, conn, d)
         rs = dict(self.settings["run"])
         rs.update(d.get("run") or {})
         if kind == "warmup":
@@ -336,6 +356,201 @@ class Session:
         self.last_runs[kind] = folder
         return self.run.status()
 
+    def start_cam_run(self, kind, conn, d):
+        """The run through the cameras (mission_run.py): the robots on the Pi, or the simulator's two cameras through
+        the same camera bridge (the chain the Pi runs). Mission Control's run and `./run-fleet-pi.sh monday` are then
+        the same program."""
+        rs = dict(self.settings["run"])
+        rs.update(d.get("run") or {})
+        folder = os.path.join(self.dir, "runs", "%s-%s-%s" % (now_tag(), kind, conn))
+        cmd = [sys.executable, os.path.join(HERE, "mission_run.py"), "--session", folder,
+               "--timeout-s", str(rs["timeout_s"]), "--border-cm", str(rs["border_cm"])]
+        if kind == "warmup":
+            if not self.warm_map:
+                self.warmup_plan()
+            cmd += ["--mission", os.path.join(self.dir, "warm_map.json"), "--plan", os.path.join(self.dir, "warm_plan.json"),
+                    "--border-cm", "0"]
+        else:
+            if self.program is None:
+                self.program = MS.monday_program()
+            pp = os.path.join(self.dir, "program.json")
+            with open(pp, "w") as f:
+                json.dump(self.program, f, indent=1)
+            cmd += ["--map", self.map_path, "--program", pp, "--robots", ",".join(self.program.get("robots", []))]
+        if conn == "sim-cameras":
+            cmd += ["--dry"]
+            if rs.get("sim_washout"):
+                cmd += ["--washout"]
+            if float(rs.get("sim_drop_pct") or 0):
+                cmd += ["--drop-pct", str(rs["sim_drop_pct"])]
+            if rs.get("sim_dead"):
+                cmd += ["--dead", str(rs["sim_dead"])]
+        else:
+            if rs.get("farm"):
+                cmd += ["--farm"]
+            if rs.get("upload"):
+                cmd += ["--upload"]
+        self.run = Run(kind, folder, cmd)
+        self.run.session = os.path.join(folder, "run")
+        self.run.mode = conn
+        self.last_runs[kind] = os.path.join(folder, "run")
+        return self.run.status()
+
+    def frame(self, cam="overhead"):
+        """The newest picture of a camera with the robots ringed and the planned paths drawn (the Run screen):
+        the recorder's /live on the Pi, or the simulator's cameras."""
+        import cv2
+        import numpy as np
+        run = self.run
+        mode = getattr(run, "mode", "sim") if run else "sim"
+        if mode == "sim-cameras":
+            port = 8765 if cam == "overhead" else 8766
+            cal = os.path.join(run.session, "sim", "table_camera.json" if cam == "overhead" else "side_camera.json")
+        else:
+            port = 8000 if cam == "overhead" else 8001
+            sys.path.insert(0, os.path.join(os.path.dirname(HERE), "pi"))
+            import setup_conf as SCF
+            cal = SCF.overhead_calib(relative=False) if cam == "overhead" else (SCF.side_calib() or None)
+            if isinstance(cal, tuple):
+                cal = cal[0]
+        jpg = grab_jpeg("127.0.0.1", port)
+        if jpg is None:
+            return None
+        img = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(HERE), "experiment"))
+            import e02_camera as CAM
+            model = CAM.load_camera(cal) if cal and os.path.exists(cal) else None
+        except Exception:     # noqa: BLE001
+            model = None
+        if model is not None and run is not None:
+            col = {"Left": (204, 82, 41), "Center": (12, 65, 194), "Right": (200, 62, 122)}      # BGR of the page's colours
+            plan_p = os.path.join(os.path.dirname(run.session), "plan.json") if getattr(run, "session", None) else None
+            if plan_p and os.path.exists(plan_p):
+                with open(plan_p) as f:
+                    plan = json.load(f)
+                for n, r in plan["robots"].items():
+                    pts = [r["start"][:2]] + [st["to"][:2] for st in r["steps"] if st["type"] in ("drive", "arc")]
+                    px = [model.project((x, y, 0.0)) for x, y in pts]
+                    px = [(int(u), int(v)) for u, v in px if np.isfinite(u) and np.isfinite(v)]
+                    if len(px) > 1:
+                        cv2.polylines(img, [np.array(px, np.int32)], False, col.get(n, (120, 120, 120)), 1, cv2.LINE_AA)
+            live = (run.status().get("live") or {}).get("robots", {})
+            for n, r in live.items():
+                p = r.get("cam") or r.get("own")
+                if not p:
+                    continue
+                u, v = model.project((p[0], p[1], 4.0 if cam == "overhead" else 1.85))
+                if np.isfinite(u) and np.isfinite(v):
+                    rr = int(max(8, 6.5 * model.px_per_cm(p[0], p[1], 4.0)))
+                    cv2.circle(img, (int(u), int(v)), rr, col.get(n, (0, 200, 255)), 2, cv2.LINE_AA)
+                    cv2.putText(img, n, (int(u) + rr + 2, int(v)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, col.get(n, (0, 200, 255)),
+                                2, cv2.LINE_AA)
+        ok, out = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        return out.tobytes() if ok else None
+
+    def mapping(self):
+        """The engineer's mapping view for the current or last run: each robot's camera track in its colour over the
+        table, contacts from the warm-up if there were any (mapview.py)."""
+        import mapview as MV
+        run = self.run
+        folder = getattr(run, "session", None) or (run.folder if run else None) or self.last_runs.get("mission")
+        if not folder:
+            raise ValueError("no run yet")
+        m = FM.normalize(self.mission or self.map)
+        return {"svg": MV.svg(m, self.warm_result or {}, MV.read_track(folder)), "folder": folder}
+
+    # -- one-button setup (Nick 12:56 and 18:36): the flash check, the chessboard corner piece, then the warm-up -----
+    SETUP_PORT = 8096
+
+    def setup_start(self, d):
+        """Runs the camera setup page (tools/pi/camera_setup.py; --fake in the simulator) headless: its flash check
+        first (side camera delay, which lights are which robot), then the chessboard in the 0,0 corner for both
+        cameras' poses, lens heights and 0,0, saved as the calibrations in use; then the warm-up (Nick confirms its
+        ~15 pictures in 90 s on the Warm-up screen). Nothing is locked: each part can also be run alone on the setup
+        page (port 8096)."""
+        if getattr(self, "setup_job", None) and self.setup_job.get("running"):
+            raise ValueError("the setup is already running")
+        fake = d.get("conn", "sim") != "robots"
+        table = "%gx%g" % (self.map["floor"]["x_max"] - self.map["floor"]["x_min"],
+                           self.map["floor"]["y_max"] - self.map["floor"]["y_min"])
+        job = {"running": True, "steps": [], "fake": fake, "error": None}
+        self.setup_job = job
+        threading.Thread(target=self._setup, args=(job, fake, table, d), daemon=True).start()
+        return self.setup_state()
+
+    def setup_state(self):
+        j = getattr(self, "setup_job", None) or {}
+        return {k: j.get(k) for k in ("running", "steps", "fake", "error", "checker", "flash")}
+
+    def _setup(self, job, fake, table, d):
+        import urllib.request
+
+        def call(path, body=None, timeout=60):
+            req = urllib.request.Request("http://127.0.0.1:%d%s" % (self.SETUP_PORT, path),
+                                         data=None if body is None else json.dumps(body).encode(),
+                                         headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read().decode())
+
+        def step(text):
+            job["steps"].append([time.strftime("%H:%M:%S"), text])
+        page = None
+        try:
+            cmd = [sys.executable, os.path.join(os.path.dirname(HERE), "pi", "camera_setup.py"), "--port",
+                   str(self.SETUP_PORT), "--out", os.path.join(self.dir, "setup-" + now_tag())]
+            if fake:
+                cmd.append("--fake")
+            step("camera setup page starting%s" % (" (simulated cameras)" if fake else ""))
+            page = subprocess.Popen(cmd, cwd=REPO, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+            for _ in range(60):
+                try:
+                    call("/api/state", timeout=2)
+                    break
+                except OSError:
+                    time.sleep(0.5)
+            step("1. the overhead picture's table corners")
+            call("/api/grab", {})
+            step("2. the flash check: the side camera's delay, each robot's lights")
+            call("/api/flash", {})
+            for _ in range(240):
+                st = call("/api/state")
+                if st["doe"]["state"] != "running":
+                    break
+                time.sleep(1.0)
+            job["flash"] = {"state": st["doe"]["state"], "words": st["doe"].get("words"), "lag": st["doe"].get("lag")}
+            step("   " + (st["doe"].get("words") or st["doe"]["state"])[:200])
+            if st.get("side"):
+                call("/api/side_grab", {})
+            step("3. the chessboard in the 0,0 corner: both cameras' poses and lens heights")
+            st = call("/api/checker_save", {"table": table}, timeout=120)
+            job["checker"] = st.get("checker")
+            for which, r in (st.get("checker") or {}).items():
+                step("   %s: %s" % (which, ("lens %.1f cm up, board fit %.2f px, table corners within %.1f px, saved"
+                                           % (r["height_cm"], r["board_err_px"], r["table_err_px"])) if r.get("ok")
+                                  else r.get("why")))
+        except Exception as e:     # noqa: BLE001
+            job["error"] = str(e)
+            step("stopped: %s" % e)
+        finally:
+            if page is not None:
+                page.send_signal(signal.SIGINT)
+                try:
+                    page.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    page.kill()
+        if not job["error"] and d.get("warmup", True):
+            step("4. the warm-up (corners and sides); then check its pictures on the Warm-up screen")
+            try:
+                with self.lock:
+                    self.warmup_plan()
+                    self.start_run({"kind": "warmup", "conn": d.get("run_conn") or ("sim" if fake else "robots"),
+                                    "dry": fake})
+            except Exception as e:     # noqa: BLE001
+                job["error"] = str(e)
+                step("warm-up not started: %s" % e)
+        job["running"] = False
+
     def pause(self, on):
         if not self.run or not self.run.alive():
             raise ValueError("nothing is running")
@@ -362,6 +577,33 @@ class Session:
         import mapview as MV
         out["tracks"] = {n: pts[::3] for n, pts in MV.read_track(folder).items()}
         return out
+
+
+def grab_jpeg(host, port, timeout=2.0):
+    """One JPEG from a /live multipart stream (the recorder's, or the simulator's), or None."""
+    import socket as _s
+    try:
+        c = _s.create_connection((host, port), timeout=timeout)
+    except OSError:
+        return None
+    try:
+        c.sendall(b"GET /live HTTP/1.0\r\nHost: x\r\n\r\n")
+        buf = b""
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            chunk = c.recv(65536)
+            if not chunk:
+                break
+            buf += chunk
+            a = buf.find(b"\xff\xd8")
+            b = buf.find(b"\xff\xd9", a + 2) if a >= 0 else -1
+            if a >= 0 and b > a:
+                return buf[a:b + 2]
+        return None
+    except OSError:
+        return None
+    finally:
+        c.close()
 
 
 def preview(mm, plan, title=""):
@@ -440,6 +682,15 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/review":
                 with S.lock:
                     return self._send(200, S.review())
+            if path == "/api/frame":
+                from urllib.parse import parse_qs
+                cam = (parse_qs(urlparse(self.path).query).get("cam") or ["overhead"])[0]
+                b = S.frame(cam)
+                return self._send(200, b, "image/jpeg") if b else self._send(404, {"error": "no picture"})
+            if path == "/api/mapping":
+                return self._send(200, S.mapping())
+            if path == "/api/setup":
+                return self._send(200, S.setup_state())
             return self._send(404, {"error": "not found"})
         except Exception as e:  # noqa: BLE001
             return self._send(400, {"error": str(e)})
@@ -478,6 +729,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, S.default_program(d.get("robots")))
                 if path == "/api/run/start":
                     return self._send(200, S.start_run(d))
+                if path == "/api/setup/start":
+                    return self._send(200, S.setup_start(d))
                 if path == "/api/run/pause":
                     return self._send(200, S.pause(bool(d.get("on", True))))
                 if path == "/api/run/stop":
