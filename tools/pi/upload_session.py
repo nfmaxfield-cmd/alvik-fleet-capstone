@@ -8,7 +8,9 @@ What goes up, as assets of one release (tag e02-session-<date-time>):
 An interrupted upload can be run again: parts already in the release are skipped.
 
 The GitHub token is read from ~/.config/mirlt/github_token (a fine-grained token for this repository with
-"Contents: read and write"; set up once, see docs/pi-run.md). Nothing is deleted on the Pi. The laptop's
+"Contents: read and write"; set up once, see docs/pi-run.md). Nothing of the session is deleted on the Pi (2026-10-28:
+the zips it makes in .upload-tmp, copies, are removed once GitHub has them; ~/.local/state/mirlt/uploads/<session>.json
+records what went up, for tools/pi/clean_uploaded.py). The laptop's
 mark-the-robot page (tools/label/mark_robot.py) uploads its marks with the same token file and code (on Windows the
 file is C:/Users/<you>/.config/mirlt/github_token; docs/how-to/mark-the-robot.md sets it up).
 
@@ -237,6 +239,27 @@ def check_token():
     print("Token works: this computer can upload to %s." % REPO_SLUG)
 
 
+def drop_copy(z):
+    """The zip in .upload-tmp is a copy of files still on the Pi; once GitHub has it, it only takes room (the
+    2026-10-27 DOE loop's frames zip was 1.42 GB)."""
+    try:
+        os.remove(z)
+    except OSError:
+        pass
+
+
+def write_manifest(name, d):
+    """~/.local/state/mirlt/uploads/<session>.json: which release has this session (clean_uploaded.py reads it).
+    Outside the session folder, so the folder stays exactly as uploaded."""
+    try:
+        folder = os.path.join(STATE_DIR, "uploads")
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, name + ".json"), "w") as f:
+            json.dump(d, f, indent=1)
+    except OSError:
+        pass
+
+
 def _folder_bytes(folder, small_only=False, big_only=False):
     n = 0
     for root, _, files in os.walk(folder):
@@ -311,12 +334,17 @@ def _main():
     have = {x["name"] for x in rel.get("assets", [])}
     tmp = os.path.join(os.path.dirname(a.recordings.rstrip("/")), ".upload-tmp")
     os.makedirs(tmp, exist_ok=True)
+    sent = {}
     if not a.no_logs:
         z = zip_folder(sess, os.path.join(tmp, "logs-%s.zip" % name), exclude=tuple(a.exclude))
         upload(rel, os.path.basename(z), z, tok, have=have)
+        sent[os.path.basename(z)] = os.path.getsize(z)
+        drop_copy(z)
     if rec:
         z = zip_folder(rec, os.path.join(tmp, "rec-%s-small.zip" % os.path.basename(rec)), small_only=True)
         upload(rel, os.path.basename(z), z, tok, have=have)
+        sent[os.path.basename(z)] = os.path.getsize(z)
+        drop_copy(z)
         for root, _, files in os.walk(rec):
             for fn in sorted(files):
                 p = os.path.join(root, fn)
@@ -328,8 +356,12 @@ def _main():
                 for start in range(0, size, PART_BYTES):
                     part = "%s.part-%s%s" % (stem, chr(97 + k // 26), chr(97 + k % 26))
                     upload(rel, part, p, tok, start, min(PART_BYTES, size - start), have=have)
+                    sent[part] = min(PART_BYTES, size - start)
                     k += 1
     link = "https://github.com/%s/releases/tag/%s" % (REPO_SLUG, tag)
+    write_manifest(name, dict(tag=tag, session=os.path.abspath(sess), logs=not a.no_logs,
+                              recording=os.path.abspath(rec) if rec else "", exclude=list(a.exclude), assets=sent,
+                              t=round(time.time(), 1)))
     PROGRESS.set(state="done", link=link, done_bytes=PROGRESS.d.get("total_bytes", 0), current="")
     print("All up: " + link, flush=True)
 

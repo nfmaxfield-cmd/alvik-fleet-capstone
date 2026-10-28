@@ -322,8 +322,33 @@ class Coordinator:
     def log(self, event, **kw):
         rec = {"t": round(now(), 3), "event": event}
         rec.update(kw)
-        self.log_f.write(json.dumps(rec) + "\n")
-        self.log_f.flush()
+        try:
+            self.log_f.write(json.dumps(rec) + "\n")
+            self.log_f.flush()
+        except OSError as e:
+            # 2026-10-27 22:03: the card filled and this flush crashed run_plan mid-drive. Now: the run ends as on a
+            # FAIL (the loop below sees abort, halts everyone; the link's close sends stop), no crash
+            if not self.__dict__.get("abort"):
+                self.abort = "the Pi's disk is full (%s): stopping everyone" % e
+                print("[%s]" % self.abort, flush=True)
+
+    def disk_watch(self):
+        """Every 5 s: the card's free space; under diskguard.CARD_HARD_GB the run ends (every robot halted). The loop
+        around run_plan (DOE loop, mission_run) stops first at CARD_STOP_GB; this is the last resort inside a drive."""
+        t = now()
+        if t < self.__dict__.get("_disk_next", 0.0):
+            return
+        self._disk_next = t + 5.0
+        try:
+            import diskguard as DG
+        except ImportError:
+            return
+        g = DG.free_gb(self.outdir)
+        if g is not None and g < DG.CARD_HARD_GB and not self.abort:
+            self.abort = "the Pi's card is nearly full (%.2f GB free, under %.1f GB): stopping everyone" % (
+                g, DG.CARD_HARD_GB)
+            self.say(self.abort)
+            self.halt_all()
 
     def say(self, msg):
         t0 = getattr(self, "t_run", None)
@@ -1420,6 +1445,10 @@ class Coordinator:
             self.silence_watch()
             if self.abort:
                 break
+            self.disk_watch()
+            if self.abort:
+                self.halt_all()
+                break
             self.status_poll()
             self.write_live()
             self.finish_replan()
@@ -1972,6 +2001,14 @@ def main(argv=None):
                 raise SystemExit("plan.json is from before 2026-10-18b (approach steps without handover_cm): plan again.")
     outdir = args.session or os.path.join("logs", dt.datetime.now().strftime("%Y%m%d-%H%M%S") + ("-dryrun" if args.dry_run else "-plan"))
     os.makedirs(outdir, exist_ok=True)
+    try:                                        # 2026-10-28: not started on a nearly full card (nothing moved yet)
+        import diskguard as DG
+        _g = DG.free_gb(outdir)
+        if _g is not None and _g < DG.CARD_HARD_GB:
+            raise SystemExit("NOT STARTED: the Pi's card has only %.2f GB free (runs need %.1f GB). Nothing moved. "
+                             "Free space first: ./run-fleet-pi.sh space" % (_g, DG.CARD_HARD_GB))
+    except ImportError:
+        pass
     if assigned:
         P.append_home(plan, assigned)
         for r, d in assigned.items():

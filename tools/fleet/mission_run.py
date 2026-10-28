@@ -19,9 +19,12 @@ What it does, in order (each step logged in the session folder, logs/<date-time>
      re-planned from where the camera has the robots at the start;
   5. the record (item 6): run_plan's logs (both cameras' positions, every move and its timing, battery, messages),
      the Pi's temperature and throttling (cpu.csv, perf.csv: the heat tracker), the pictures at the tracking rate and
-     a clip 5 s either side of every stop (frames/), the line check, mission_summary.json; --upload: a release with
-     a tag of its own (upload_session.py --unique-tag).
-Ctrl+C stops every robot (run_plan's own stop).
+     a clip 5 s either side of every stop (frames: on the USB drive, <drive>/fleet-frames/<session>/frames, since
+     2026-10-28; no drive: <session>/frames), the line check, mission_summary.json; --upload: a release with a tag of
+     its own (upload_session.py --unique-tag), the frames as their own asset (rec-frames-small.zip).
+Ctrl+C stops every robot (run_plan's own stop). Free space (diskguard.py, 2026-10-28): not started when the card is
+under its floor; frame saving stops under the frames' floor; under the card's floor during the run, run_plan is sent
+Ctrl+C (every robot stops) and the run ends as it would on Ctrl+C, with the upload.
 """
 import argparse
 import datetime as dt
@@ -44,6 +47,7 @@ import missions as MS        # noqa: E402
 import planner as P          # noqa: E402
 import workspace as WS       # noqa: E402
 import engine_checks as EC   # noqa: E402
+import diskguard as DG       # noqa: E402
 
 PY = sys.executable
 EDGE_GUARD = ["set safe_edge 3", "set edge_dir 0", "set edge_thr 150", "set edge_n 3", "set edge_bot_cm 11",
@@ -121,11 +125,34 @@ def start_bridge(args, out, mp, cal, scal, stream, side_stream):
     return subprocess.Popen(cmd, stdout=f, stderr=subprocess.STDOUT, cwd=REPO), f
 
 
+def space_watch(guard, child, said, stop_evt):
+    """While run_plan drives: the card under its floor -> Ctrl+C to run_plan (every robot stops), once."""
+    while not stop_evt.wait(DG.CHECK_S * 2):
+        st = guard.state()
+        if st["stop"] and child.poll() is None:
+            said.append(st["why"])
+            say("THE PI'S CARD IS NEARLY FULL: %s. Stopping every robot (as Ctrl+C); the logs are closed and "
+                "uploaded next. Before the next run: ./run-fleet-pi.sh space" % st["why"])
+            child.send_signal(signal.SIGINT)
+            return
+
+
 def run(args):
     tag = "mission" + ("-dry" if args.dry else "")
     out = os.path.abspath(args.session or os.path.join(REPO, "logs", dt.datetime.now().strftime("%Y%m%d-%H%M%S") +
                                                        "-" + tag))
     os.makedirs(out, exist_ok=True)
+    frames_dir = None if args.no_frames else DG.frames_dir_for(out)[0]
+    fake = None
+    if args.dry and args.sim_free:
+        fake = dict((k, float(v)) for k, v in (kv.split("=") for kv in args.sim_free.split(",")))
+    guard = DG.Guard(card=out, frames_dir=frames_dir, fake=fake)
+    say(guard.words(frames_on=not args.no_frames))
+    st0 = guard.state()
+    if st0["stop"]:
+        say("NOT STARTED: %s. Nothing moved. Free space first: ./run-fleet-pi.sh space, then "
+            "./run-fleet-pi.sh clean-uploaded" % st0["why"])
+        return 3
     with open(os.path.join(out, "mission_cmd.json"), "w") as f:
         json.dump({"argv": sys.argv, "args": vars(args)}, f, indent=1)
     if args.mission:
@@ -189,13 +216,15 @@ def run(args):
         say("(cpu log not started: %s)" % e)
     br, brf = start_bridge(args, out, mp, cal, scal, stream, side_stream)
     say("camera bridge starting (it learns the empty floor round the robots: keep hands out of the picture)")
-    if not args.no_frames:
+    if not args.no_frames and not st0["frames_ok"]:
+        say("FRAMES NOT SAVED: %s" % st0["why_frames"])
+    elif not args.no_frames:
         try:
             import doe_loop as DL
             streams = [("overhead", stream, 12.0)] + ([("side", side_stream, 10.0)] if scal else [])
             if args.dry:
                 time.sleep(0.1)
-            frames = DL.Frames(out, streams)
+            frames = DL.Frames(out, streams, frames_dir=frames_dir, guard=guard)
             tail = DL.Tail(os.path.join(sess, "coordinator.jsonl"), frames)
             tail.start()
             frames.active(True, "mission")
@@ -206,6 +235,9 @@ def run(args):
     code = 1
     # (rp_shim.py stands in for run_plan.py on a dry run and takes run_plan's arguments)
     child = subprocess.Popen(launcher + (rp[1:] if args.dry else rp), cwd=REPO)
+    import threading
+    disk_said, disk_stop = [], threading.Event()
+    threading.Thread(target=space_watch, args=(guard, child, disk_said, disk_stop), daemon=True).start()
     try:
         code = child.wait()
     except KeyboardInterrupt:
@@ -216,6 +248,7 @@ def run(args):
         except subprocess.TimeoutExpired:
             child.kill()
     finally:
+        disk_stop.set()
         for p, f in ((br, brf),):
             try:
                 p.send_signal(signal.SIGINT)
@@ -234,9 +267,19 @@ def run(args):
             except Exception:     # noqa: BLE001
                 pass
     summ = summarise(out, sess, frames, cond)
+    if disk_said:
+        summ["ended_by"] = "the card nearly full: " + disk_said[0]
+        try:
+            with open(os.path.join(out, "mission_summary.json"), "w") as f:
+                json.dump(summ, f, indent=1, default=str)
+        except OSError:
+            pass
     if args.upload and not args.dry:
         up = [PY, os.path.join(TOOLS, "pi", "upload_session.py"), "--recordings", args.recordings, "--session", out,
               "--tag", "mission-" + os.path.basename(out), "--unique-tag", "--logs-only"]
+        if frames_dir and os.path.isdir(frames_dir):
+            # the frames as their own asset (rec-frames-small.zip), as the DOE loop's; not inside the logs zip
+            up += ["--recording-dir", frames_dir, "--exclude", "frames"]
         say("uploading: " + " ".join(up[1:]))
         subprocess.call(up, cwd=REPO)
     say("result: %s; saved in %s" % (summ.get("result"), out))
@@ -295,8 +338,11 @@ def summarise(out, sess, frames, cond):
         s["reached"] = done
     except (OSError, ValueError):
         pass
-    with open(os.path.join(out, "mission_summary.json"), "w") as f:
-        json.dump(s, f, indent=1, default=str)
+    try:
+        with open(os.path.join(out, "mission_summary.json"), "w") as f:
+            json.dump(s, f, indent=1, default=str)
+    except OSError as e:
+        say("(mission_summary.json not written: %s)" % e)
     return s
 
 
@@ -331,6 +377,8 @@ def main(argv=None):
     g.add_argument("--drop-pct", type=float, default=0.0, help="lost packets, %% each way")
     g.add_argument("--dead", help="NAME@T: that robot dies T s into the run (silent, still)")
     g.add_argument("--seed", type=int, default=1)
+    g.add_argument("--sim-free", default="", help="simulated free space (GB), e.g. card=0.8,drive=50: the guard's "
+                                                  "refusal / frames stop")
     g.add_argument("--sim-cond", help="a JSON file of sim_shim.py conditions (sweeps/sim_shim.py), added to the above")
     g.add_argument("--sim-arg", action="append", default=[], metavar="ARG",
                    help="one more fleet_sim.py argument, e.g. --sim-arg=--turn-err=Left=7.5 (repeatable)")

@@ -443,6 +443,17 @@ LONG_LEG_CM 40 and RISK_ROOM_CM 6 (geometry), STILL_CMS 0.3 cm/s and STILL_GREY 
 margin), the brightness line every 10 s (a log period), PLAN_LIMIT_S 60 s and BRIDGE_START_S 5 s (limits), the
 Monday mission's quarters (Claude's reading of "mid-mow": Nick's call).
 
+## Free space on the Pi (2026-10-28, built)
+
+Write-up: [e02-oct28-disk-full.md](build-reports/e02-oct28-disk-full.md). Code: `tools/fleet/diskguard.py` (each
+number's comment says the same).
+
+Chosen with no DOE (safety margins, not robot questions): the card's 1 GB floor where long runs end (logs grow 0.4 MB
+a loop; the rest is the system's room; the logs' share can be derived from the next sessions' folders, logs only),
+run_plan's 0.5 GB last resort, frames on the card stopping at 2 GB (follows from the 1 GB floor), frames on the USB
+drive stopping at 5 GB plus the frames saved so far (the upload's copy), the 2 s frames check (under 2 MB of frames
+between checks). Measured, to re-measure (Logs): frames 2.9 GB an hour (one 29 min session, both cameras and clips).
+
 ## Already set by data
 
 - **Line edge cue edge_thr 150** (e02.py SAFETY_SETTINGS): plywood reads 52-84 in every E02 session, the two real

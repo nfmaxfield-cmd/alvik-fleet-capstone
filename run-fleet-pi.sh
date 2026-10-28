@@ -39,6 +39,12 @@
 #     ./run-fleet-pi.sh mc                 Mission Control on the Pi (also the Mission Control tab at :8091, which runs
 #                                          this in tmux "mc"); its own address http://100.122.222.75:8095 still works
 #     ./run-fleet-pi.sh mc-stop            close Mission Control opened from the tab (a run of its own stops first)
+# Free space (2026-10-28: the 21:34 DOE loop filled the card at 22:03). Frames go to the USB drive; every long run
+# checks the card and the drive before it starts and between loops, and ends cleanly before the card fills:
+#     ./run-fleet-pi.sh space              free space on the card and the USB drive, and the biggest folders
+#     ./run-fleet-pi.sh clean-uploaded     lists the sessions whose upload GitHub CONFIRMS (exact sizes); deletes
+#                                          nothing. Then `./run-fleet-pi.sh clean-uploaded --yes` deletes exactly those
+#                                          (--frames-only: keep every logs folder, delete only frames and upload copies)
 # The first test starts the recorder (both cameras, to the USB drive) in a tmux session called fleet; it keeps
 # recording until `stop`. Each test starts the camera bridge, runs the plan, then prints the line check (GATE).
 set -u
@@ -160,6 +166,8 @@ case "$WHAT" in
       echo "Stop it first if you want a new one: ./run-fleet-pi.sh doe-stop"; exit 1
     fi
     for s in ladder ladder2; do tmux has-session -t $s 2>/dev/null && { echo "A ladder is running (tmux session $s): stop it first (tmux kill-session -t $s)."; exit 1; }; done
+    # where the frames go and how much room there is; not started when the card is under its floor
+    python3 tools/fleet/diskguard.py preflight || exit 1
     [ "$DRY" = 1 ] || { [ "$FULL" = 1 ] || REC_EXTRA="--no-record"; start_recorder; }
     tmux new-session -d -s doe -x 200 -y 50 "cd '$REPO' && FLEET_DRY=$DRY DOE_DRY_ARGS='${DOE_DRY_ARGS:-}' ./run-fleet-pi.sh doe-run $HRS; FLEET_DRY=$DRY ./run-fleet-pi.sh doe-finish; read -r -p 'DOE loop finished. Press Enter.'"
     # the loop's whole screen (run_plan's lines too) to a file; doe-finish moves it into the DOE folder (screen.txt)
@@ -188,8 +196,10 @@ case "$WHAT" in
     OUT="$(cat /tmp/fleet_rec_out 2>/dev/null || echo "$HOME/recordings")"
     if rec_running; then tmux send-keys -t fleet:rec C-c; echo "Stopping the recorder ..."; sleep 6; fi
     [ -z "$D" ] && { echo "No DOE folder found."; exit 1; }
+    # the frames: on the USB drive since 2026-10-28 (frames_where.txt in the folder says where), else $D/frames
+    FR="$(python3 tools/fleet/diskguard.py where "$D")"
     python3 tools/pi/upload_session.py --recordings "$OUT" --session "$D" --tag "doe-$(basename "$D")" --unique-tag \
-      --exclude frames --recording-dir "$D/frames" || echo "Upload failed: the files stay in $D (run ./run-fleet-pi.sh doe-finish again)" ;;
+      --exclude frames --recording-dir "$FR" || echo "Upload failed: the files stay in $D and $FR (run ./run-fleet-pi.sh doe-finish again)" ;;
   doe-status)
     D=""; [ "$DRY" = 1 ] && D="--dry"
     python3 tools/fleet/doe_loop.py status $D
@@ -204,6 +214,7 @@ case "$WHAT" in
     if [ "$DRY" = 1 ]; then
       python3 tools/fleet/mission_run.py --table "$TABLE" --robots "$ROB" --dry ${MONDAY_DRY_ARGS:-}
     else
+      python3 tools/fleet/diskguard.py preflight || exit 1
       start_recorder
       OUT="$(cat /tmp/fleet_rec_out 2>/dev/null || echo "$HOME/recordings")"
       # cores: the recorder on 0-1, the camera bridge's workers on 1-2 (--farm), the bridge and run_plan on 3
@@ -230,6 +241,10 @@ case "$WHAT" in
   mc-stop)
     if tmux has-session -t mc 2>/dev/null; then tmux send-keys -t mc C-c; echo "Mission Control is closing."
     else echo "Mission Control was not opened from the tab (tmux mc): if it runs in a terminal, Ctrl+C there."; fi ;;
+  space)           # free space on the card and the USB drive, the biggest folders (nothing changed)
+    python3 tools/fleet/diskguard.py space ;;
+  clean-uploaded)  # only what GitHub confirms (exact sizes); a list first, deletes only with --yes
+    python3 tools/pi/clean_uploaded.py "$@" ;;
   ladder-status)   # (no recorder needed)
     D=""; [ "$DRY" = 1 ] && D="--dry"
     python3 tools/fleet/ladder.py status $D ;;
@@ -278,5 +293,5 @@ case "$WHAT" in
     python3 tools/pi/upload_session.py --recordings "$OUT" --stop-recorder --no-logs --tag "p0-$DAY-recording" || true
     tmux kill-session -t fleet 2>/dev/null || true ;;
   *)
-    sed -n '2,43p' "$0"; exit 1 ;;
+    sed -n '2,49p' "$0"; exit 1 ;;
 esac

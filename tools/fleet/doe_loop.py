@@ -33,7 +33,11 @@ Nick starts it and walks away. It runs until every robot is out (battery, a FAIL
     python3 tools/fleet/doe_loop.py run [--hours 4] [--dry ...]
     python3 tools/fleet/doe_loop.py status [--dir logs/<...>-doe]
 Everything goes to logs/<date-time>-doe/ (drives.csv, turns.csv, sensor_runs.csv, battery.csv, events.csv,
-messages.csv, cpu.csv, perf.csv, frames/, one folder per loop). run-fleet-pi.sh doe starts it in tmux.
+messages.csv, cpu.csv, perf.csv, one folder per loop). run-fleet-pi.sh doe starts it in tmux.
+Frames (2026-10-28, after the 21:34 loop filled the card): on the USB drive, <drive>/fleet-frames/<date-time>-doe/frames
+(frames_where.txt in the session folder says where; no drive: logs/<...>-doe/frames). Free space (diskguard.py): checked
+before the start and between loops, and the frames' every 2 s; under the frames floor frame saving stops, under the
+card's floor the loop ends cleanly (robots stopped, logs closed, the upload starts).
 """
 import argparse
 import csv
@@ -51,6 +55,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import ladder as LD   # noqa: E402
 from ladder import say, LadderStop, edge_dist, segs_clear   # noqa: E402
+import diskguard as DG   # noqa: E402
 
 import numpy as np    # noqa: E402
 
@@ -112,9 +117,12 @@ class CamFrames(threading.Thread):
         self.n_in, self.n_kept, self.mb = 0, 0, 0.0
         self.perf = perf
         self.arrivals = []        # (t_arrived, age_s), for perf.csv
+        self.saving = True        # False: frame saving stopped for good (free space under the floor)
 
     def set_active(self, on, label=""):
         with self.lock:
+            if not self.saving:
+                return
             if not on and self.active:
                 self._flush()
             if on and (not self.active or label != self.label):
@@ -158,6 +166,8 @@ class CamFrames(threading.Thread):
                     pf = h.get("x-frame", k)
                     k += 1
                     self.n_in += 1
+                    if not self.saving:
+                        continue
                     self.saver.add(body, t, pf)
                     self.arrivals.append((arrived, max(0.0, arrived - t)))
                     with self.lock:
@@ -173,6 +183,16 @@ class CamFrames(threading.Thread):
                 if self.closed:
                     break
                 time.sleep(1.0)
+
+    def stop_saving(self):
+        """No more pictures kept (the part so far is written while there is still room)."""
+        with self.lock:
+            self._flush()
+            self.active = False
+            self.saving = False
+
+    def saved_bytes(self):
+        return self.mb * 1e6 + float(self.saver.summary().get("mb") or 0.0) * 1e6
 
     def perf_row(self, now):
         """(pictures a second over the last 2 s, mean age, max age) of this camera's arrivals."""
@@ -192,16 +212,23 @@ class CamFrames(threading.Thread):
             self.src.close()
         except Exception:
             pass
-        self.saver.close()
+        try:
+            self.saver.close()
+        except OSError as e:
+            say("  (frame saving, %s: %s)" % (self.cam, e))
 
 
 class Frames:
     """Both cameras' frame saving, perf.csv every 2 s (the overhead's pictures a second and their age: the heat
-    tracker joins it to cpu.csv)."""
+    tracker joins it to cpu.csv; since 2026-10-28 also the free space on the card and the frames' drive, GB).
+    frames_dir: where the pictures go (diskguard.frames_dir_for: the USB drive); default <folder>/frames.
+    guard (diskguard.Guard): checked with every perf row; under the frames floor, frame saving stops for good."""
 
-    def __init__(self, folder, streams):
-        self.dir = os.path.join(folder, "frames")
+    def __init__(self, folder, streams, frames_dir=None, guard=None):
+        self.dir = frames_dir or os.path.join(folder, "frames")
         os.makedirs(self.dir, exist_ok=True)
+        self.guard = guard
+        self.stopped = None           # (clock, why) once frame saving was stopped for lack of room
         self.cams = []
         for cam, stream, hz in streams:
             if stream:
@@ -211,7 +238,7 @@ class Frames:
         self.closed = False
         self.perf = open(os.path.join(folder, "perf.csv"), "a", buffering=1)
         if self.perf.tell() == 0:
-            self.perf.write("t,fps_handled,age_mean_s,age_max_s,side_fps\n")
+            self.perf.write("t,fps_handled,age_mean_s,age_max_s,side_fps,card_free_gb,frames_free_gb\n")
         threading.Thread(target=self._perf, daemon=True).start()
 
     def _perf(self):
@@ -221,17 +248,44 @@ class Frames:
             rows = {c.cam: c.perf_row(now) for c in self.cams}
             o = rows.get("overhead", (0.0, None, None))
             s = rows.get("side", (0.0, None, None))
+            self.check_space()
+            cg, fg = DG.perf_cols(self.guard)
             try:
-                self.perf.write("%.2f,%.1f,%s,%s,%.1f\n" % (now, o[0], "" if o[1] is None else "%.3f" % o[1],
-                                                            "" if o[2] is None else "%.3f" % o[2], s[0]))
+                self.perf.write("%.2f,%.1f,%s,%s,%.1f,%s,%s\n" % (
+                    now, o[0], "" if o[1] is None else "%.3f" % o[1], "" if o[2] is None else "%.3f" % o[2], s[0],
+                    cg, fg))
             except ValueError:
                 return
+            except OSError:
+                pass
+
+    def saved_bytes(self):
+        return sum(c.saved_bytes() for c in self.cams)
+
+    def check_space(self):
+        """Frame saving stops for good when the frames' drive (or the card) is under its floor. Returns the state."""
+        if self.guard is None:
+            return None
+        st = self.guard.state(self.saved_bytes())
+        if not st["frames_ok"] and self.stopped is None:
+            self.stop_saving(st.get("why_frames", "no room"))
+        return st
+
+    def stop_saving(self, why):
+        if self.stopped is not None:
+            return
+        self.stopped = (time.strftime("%H:%M:%S"), why)
+        for c in self.cams:
+            c.stop_saving()
+        say("  FRAME SAVING STOPPED: %s. The loop goes on; its logs are small." % why)
 
     def active(self, on, label=""):
         for c in self.cams:
             c.set_active(on, label)
 
     def event(self, kind, text, t=None, robot=""):
+        if self.stopped is not None:
+            return
         for c in self.cams:
             c.saver.event(kind, text, t=t, robot=robot)
 
@@ -245,8 +299,12 @@ class Frames:
             pass
 
     def words(self):
-        return "; ".join("%s: %d pictures in, %d kept at the tracking rate (%.0f MB), clips %s" % (
+        w = "; ".join("%s: %d pictures in, %d kept at the tracking rate (%.0f MB), clips %s" % (
             c.cam, c.n_in, c.n_kept, c.mb, c.saver.summary()) for c in self.cams)
+        w += " (in %s)" % self.dir
+        if self.stopped:
+            w += "; frame saving stopped at %s: %s" % self.stopped
+        return w
 
 
 class Tail(threading.Thread):
@@ -425,6 +483,11 @@ class DoeLoop(LD.Ladder):
         self.files = {}
         self.sim_events = parse_sim_events(getattr(a, "sim_event", []) or [])
         self.t_start = time.time()
+        self.guard = None
+        self.frames_dir = None
+        self.sim_fall = 0.0
+        self.ended = None             # "disk": the loop ended because the card was nearly full
+        self.row_err = False
 
     # -- csv files ----------------------------------------------------------------------------------------------
     def row(self, name, d):
@@ -432,13 +495,22 @@ class DoeLoop(LD.Ladder):
         if f is None:
             p = os.path.join(self.dir, name + ".csv")
             new = not os.path.exists(p)
-            fh = open(p, "a", newline="", buffering=1)
+            try:
+                fh = open(p, "a", newline="", buffering=1)
+            except OSError as e:
+                say("  (could not open %s.csv: %s)" % (name, e))
+                return
             w = csv.DictWriter(fh, fieldnames=list(d.keys()), extrasaction="ignore")
             if new:
                 w.writeheader()
             f = self.files[name] = (fh, w)
-        f[1].writerow(d)
-        f[0].flush()
+        try:
+            f[1].writerow(d)
+            f[0].flush()
+        except OSError as e:                 # (a full disk: the guard ends the loop before this; never a crash)
+            if not self.row_err:
+                say("  (could not write %s.csv: %s)" % (name, e))
+            self.row_err = True
 
     def event(self, kind, robot, text, clip=True):
         say("  [%s] %s: %s" % (kind, robot, text))
@@ -762,12 +834,57 @@ class DoeLoop(LD.Ladder):
         streams = [("overhead", self.stream, LD.Eye.OVERHEAD_HZ)]
         if self.side_stream:
             streams.append(("side", self.side_stream, SIDE_HZ))
+        fake = None
+        if self.a.dry and getattr(self.a, "sim_free", ""):
+            fake = dict((k, float(v)) for k, v in (kv.split("=") for kv in self.a.sim_free.split(",")))
+            self.sim_fall = fake.pop("fall", 0.0)
         if not self.a.no_frames:
-            self.frames = Frames(self.dir, streams)
+            self.frames_dir, _ = DG.frames_dir_for(self.dir)
+        self.guard = DG.Guard(card=self.dir, frames_dir=self.frames_dir, fake=fake)
+        say(self.guard.words(frames_on=not self.a.no_frames))
+        st = self.guard.state()
+        if not self.a.no_frames:
+            if st["frames_ok"] and not st["stop"]:
+                self.frames = Frames(self.dir, streams, frames_dir=self.frames_dir, guard=self.guard)
+            else:
+                say("  FRAMES NOT SAVED: %s." % (st.get("why_frames") or st["why"]))
+                self.event("disk", "Pi", "frames not saved from the start: %s" % (st.get("why_frames") or st["why"]),
+                           clip=False)
+
+    def space_check(self, k):
+        """Between loops: the frames' floor (frame saving stops) and the card's (the loop ends). True: end now."""
+        if self.guard is None:
+            return False
+        if self.sim_fall:
+            self.guard.fall(self.sim_fall)
+            say("  (dry run: simulated free space now card %.1f GB, drive %.1f GB)" % (
+                self.guard.fake.get("card", -1), self.guard.fake.get("drive", -1)))
+        st = self.frames.check_space() if self.frames is not None else self.guard.state()
+        if self.frames is not None and self.frames.stopped and not getattr(self, "_frames_said", False):
+            self._frames_said = True
+            self.event("disk", "Pi", "frame saving stopped before loop %d: %s" % (k, self.frames.stopped[1]), clip=False)
+        if st["stop"]:
+            self.ended = "disk"
+            self.event("disk", "Pi", "the loop ends before loop %d: %s" % (k, st["why"]), clip=False)
+            say("")
+            say("=" * 100)
+            say("THE PI'S CARD IS NEARLY FULL (%.2f GB free): the DOE loop ends here, cleanly, before it can fill." % (
+                st["card_gb"]))
+            say("Every robot is stopped where it is; the logs are closed next; the upload starts after that.")
+            say("Before the next run, see what uses the space:  ./run-fleet-pi.sh space")
+            say("=" * 100)
+            return True
+        return False
 
     def run(self, start=None, pause=False):
         say("DOE loop: %s (time cap %.1f h)" % (self.dir, self.a.hours))
         self.start_logs()
+        st = self.guard.state()
+        if st["stop"]:
+            self.ended = "disk"
+            say("\nNOT STARTED: %s. Nothing moved. Free space first (./run-fleet-pi.sh space, then "
+                "./run-fleet-pi.sh clean-uploaded)." % st["why"])
+            return False
         t_end = self.t_start + self.a.hours * 3600.0
         if not self.st["passed"].get("L0"):
             if not self.run_step("L0", in_order=True):
@@ -784,6 +901,8 @@ class DoeLoop(LD.Ladder):
             act = self.active("L1")
             if not act:
                 say("\nEvery robot is out: the DOE loop ends.")
+                break
+            if self.space_check(k):
                 break
             sub = self.sub("loop%03d" % k)
             say("")
@@ -841,6 +960,12 @@ class DoeLoop(LD.Ladder):
             say("Frames: %s" % self.frames.words())
             self.frames.close()
             self.frames = None
+        if self.guard is not None:
+            st = self.guard.state()
+            say("Free space at the end: the card %s GB%s." % (
+                "?" if st["card_gb"] is None else "%.2f" % st["card_gb"],
+                "" if st["frames_gb"] is None or st["frames_on_card"] else ", the frames' USB drive %.1f GB"
+                % st["frames_gb"]))
         if self.cpu is not None:
             try:
                 self.cpu.stop()
@@ -923,7 +1048,7 @@ def write_summary(folder):
         out.append("Turn checks: %d turns, mean error %+.2f deg, largest %.1f deg." % (
             len(tu), float(np.mean([num(r["error_deg"]) for r in tu])), max(abs(num(r["error_deg"])) for r in tu)))
     for r in ev:
-        if r["kind"] in ("parked", "restarted", "setting resent"):
+        if r["kind"] in ("parked", "restarted", "setting resent", "disk"):
             out.append("- %s %s %s: %s" % (r["clock"], r["kind"], r["robot"], r["text"]))
     with open(os.path.join(folder, "summary.md"), "w") as f:
         f.write("\n".join(out) + "\n")
@@ -996,6 +1121,8 @@ def main(argv=None):
     ap.add_argument("--turn-err", action="append", default=[])
     ap.add_argument("--sim-calibrated", action="store_true")
     ap.add_argument("--sim-event", action="append", default=[], help="--dry: restart:NAME@LOOP, battery:NAME=PCT@LOOP")
+    ap.add_argument("--sim-free", default="", help="--dry: simulated free space, e.g. card=2.6,drive=6.2,fall=0.5 "
+                                                   "(GB; fall: less before every loop): shows the guard's clean stop")
     a = ap.parse_args(argv)
     if a.what == "status":
         return status(a.dir or latest_dir(a.dry))

@@ -217,10 +217,16 @@ class Session:
     def close(self):
         with self.lock:
             for f, _ in self.writers.values():
-                f.close()
+                try:
+                    f.close()
+                except OSError as e:          # a full disk (2026-10-27 22:03): the robots were already sent stop
+                    print(f"[closing a log: {e}]")
             self.writers.clear()
             if self.clock_file:
-                self.clock_file[0].close()
+                try:
+                    self.clock_file[0].close()
+                except OSError as e:
+                    print(f"[closing a log: {e}]")
                 self.clock_file = None
 
     def find(self, key):

@@ -56,6 +56,7 @@ for p in (HERE, TOOLS, os.path.join(TOOLS, "experiment"), os.path.join(TOOLS, "l
         sys.path.append(p)
 
 import numpy as np   # noqa: E402
+import diskguard as DG   # noqa: E402   (free space: a step is not started with the card under its floor)
 
 PY = sys.executable
 
@@ -1635,6 +1636,10 @@ class Ladder:
             names = [n for n in names if n in self.a.robots.split(",")]
         if step != "L0" and not names:
             raise LadderStop("no robot is left for %s" % step)
+        st = DG.Guard(card=self.dir).state()       # 2026-10-28: the DOE loop that filled the card
+        if st["stop"]:
+            raise LadderStop("%s is not started: %s. Nothing moved. Free space first: ./run-fleet-pi.sh space, then "
+                             "./run-fleet-pi.sh clean-uploaded" % (step, st["why"]))
         say("")
         say("=" * 100)
         say("%s  %s%s" % (step, TITLES[step], ("  [%s]" % ", ".join(names)) if step != "L0" else ""))
