@@ -357,6 +357,14 @@ class MotionTracker:
     START_NEAR_CM = 12.0        # the lock starts on the detector's outline within this of the place handed over
     START_WAIT_S = 1.0          # ... waiting at most this long for it, then on the place handed over
     PIN_CM = 3.0                # during a turn on its spot the lock may not move further than this
+    HYST_LOW = None             # outlines grown from their sure part down to this share of the threshold (_grow);
+                                # None: off (a plain threshold, as before 2026-10-28)
+    LIGHT_SEED = False          # _grow: the robots' lit LEDs also start an outline
+    HYST_GROW = 0.35            # _grow: an outline grows at most this many robot widths past its sure part
+    HYST_UNKNOWN_ONLY = True    # _grow only over filled-in floor (where the extra margin hides a robot's real edges):
+                                # on floor it has seen, the plain threshold already finds 98-99 % (27-28 Oct replay),
+                                # and growing there took in the lamp's shadow beside the robot (27 Oct night: the
+                                # overhead's seen-rate fell from 97 % to 73 %)
     SIZE_PER_SPOT = False       # True: a robot's size in pixels is taken at each outline's own spot, not once at the
                                 # board's middle (a steep side camera: its scale changes 2-3x near to far; 2026-10-24)
 
@@ -543,6 +551,35 @@ class MotionTracker:
         lim = np.where(self.known > 0, self.thr, self.thr + self.UNKNOWN_EXTRA).astype(np.float32)
         return d, (d > lim).astype(np.uint8) * 255
 
+    def _grow(self, d, strong, g=None):
+        """Outlines grown from their sure part (2026-10-28, the 16:29 DOE loop): a pixel counts when it differs from
+        the floor by more than HYST_LOW x the threshold AND touches a sure outline (over the threshold, plus the
+        filled-in floor's margin where the floor under a robot was filled in). Why: on the washed-out board the
+        robots' tops stand only 20-25 grey levels from the floor; where a robot stood when tracking began (its floor
+        filled in, margin 13-14) only part of its top passed 30, so its outline was a piece, off its middle; the
+        first heading crawl then read 12-18 cm for 10 (replay of 28 Oct and 27 Oct). A stray pixel of board noise
+        never starts an outline (it must touch a sure one); a ghost where a robot left still needs the full margin
+        to start. Lights (LIGHT_SEED: bright spots on a robot's top) also start one."""
+        weak = (d > self.HYST_LOW * self.thr).astype(np.uint8)
+        if self.HYST_UNKNOWN_ONLY and self.known is not None:
+            weak &= (self.known == 0).astype(np.uint8)      # grown only over filled-in floor (see HYST_UNKNOWN_ONLY)
+        seeds = strong > 0
+        # growth only within HYST_GROW robot widths of a sure pixel: a robot's top grows back to its edges, but not
+        # along the plywood's grain (27 Oct night replay, unbounded: outlines twice a robot, the overhead's seen-rate
+        # fell from 97 % to 72 %)
+        r = max(1, int(round(self.HYST_GROW * (self.rpx if not self.size_per_spot else math.sqrt(self.area_min)))))
+        if self.LIGHT_SEED and g is not None:
+            seeds = seeds | ((d > 30.0) & (g - self.offset >= 235.0))
+        weak &= cv2.dilate(seeds.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)))
+        weak |= seeds.astype(np.uint8)
+        n, lab = cv2.connectedComponents(weak, connectivity=8)
+        if n <= 1:
+            return strong
+        keep = np.zeros(n, bool)
+        keep[np.unique(lab[seeds])] = True
+        keep[0] = False
+        return (keep[lab] * 255).astype(np.uint8)
+
     def _shape_ok(self, area, w, h, rpx=None):
         a, r = (self.area, self.rpx) if rpx is None else (rpx ** 2, rpx)
         lo, hi = sorted((w, h))
@@ -555,7 +592,9 @@ class MotionTracker:
         g = self.frame if g is None else g
         if g is None or self.bg is None:
             return []
-        _, mask = self._diff(g)
+        d, mask = self._diff(g)
+        if self.HYST_LOW is not None:
+            mask = self._grow(d, mask, g)
         cut = self._cut_mask(mask.shape) if getattr(self, "walls", None) else None
         if cut is not None:
             mask &= cut

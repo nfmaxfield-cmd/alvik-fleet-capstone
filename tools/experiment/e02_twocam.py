@@ -100,6 +100,17 @@ DARK_GAIN_MAX = 5.0     # exposure); its robots stood only 7-10 grey levels from
                         # recorded dark footage (noise is brightened too)
 
 
+HYST_LOW = 1.0          # chosen (2026-10-28): on filled-in floor (where a robot stood when tracking began) a pixel over the
+                        # plain threshold counts when it touches a sure outline; the filled-in floor's extra margin
+                        # (13-14) is only needed to START one (e02_camera MotionTracker._grow). Replays of 27-28 Oct
+                        # (tools/analysis/cam_replay.py, overhead body seen-rate, 27 Oct / 28 Oct): off 96.7 / 77.6 %
+                        # (on the start floor 81 / 54 %); 1.0: 98.8 / 97.0 % (99 / 97 %); 0.7: 95.2 / 99.5 %; grown
+                        # over all floor at 0.6: 73 / 93 % (the lamp's shadow joined the outline). First heading crawl
+                        # error (fused, median / max): off 3.4 / 5.7 and 1.2 / 4.4 cm; 1.0: 2.4 / 3.3 and 0.7 / 3.6 cm.
+                        # Lights as seeds: no change (identical). DOE note: 0.85 / 1.0 on the board under the lamp and
+                        # in daylight, against L0's body seen-rate and the first crawl's distance
+
+
 def stretch_at(cam, x, y, z):
     """(1 / cos(angle from straight down), unit floor vector along the line of sight) of camera cam at floor spot (x,
     y), height z: how much a spot error stretches along the line of sight there."""
@@ -187,10 +198,12 @@ class TwoCamTracker(MT.MultiTracker):
                  side_lag_s=SIDE_LAG_S, lights=True, side_bias=(0.0, 0.0), **kw):
         super().__init__(cam, board_center=board_center, board_rect=board_rect, margin_cm=margin_cm, **kw)
         self.name = "overhead"
+        self.HYST_LOW = HYST_LOW
         rect = board_rect or (0.0, 0.0, 2 * board_center[0], 2 * board_center[1])
         self.side = None
         if side_cam is not None:
             self.side = View(self, "side", side_cam, rect, margin_cm, SIDE_Z_CM, True)
+            self.side.HYST_LOW = HYST_LOW
         self.side_lag = float(side_lag_s)
         self.side_every = 1.0 / SIDE_HZ
         self.side_t = None

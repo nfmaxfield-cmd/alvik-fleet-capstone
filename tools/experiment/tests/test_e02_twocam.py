@@ -81,11 +81,19 @@ def three():
     return {"Left": [30.0, 40.0, 0.3], "Center": [75.0, 90.0, 2.0], "Right": [95.0, 30.0, -1.2]}
 
 
-def test_washed_out_overhead_alone_does_not_see_the_bodies(cams):
-    """The 11:20 failure, reproduced: the board as bright as the robots' tops."""
+def test_washed_out_overhead_alone_does_not_see_the_bodies(cams, monkeypatch):
+    """The 11:20 failure, reproduced: the board as bright as the robots' tops. Without outline growth (as built
+    then) next to nothing is seen; with it (HYST_LOW, 2026-10-28) what the overhead alone sees is only a piece of a
+    body (under BIAS_AREA of a robot), which the two-camera rules do not trust when the side camera has the robot."""
+    monkeypatch.setattr(TW, "HYST_LOW", None)
     _, log = run(cams, three(), side=False, frames=40)
     late = [r for r in log if r[0] >= 20]
     assert sum(r[2] == "seen" for r in late) <= 0.1 * len(late)      # (a stray piece of a body now and then)
+    monkeypatch.setattr(TW, "HYST_LOW", 1.0)
+    trk, log = run(cams, three(), side=False, frames=40)
+    for n in ("Left", "Center", "Right"):
+        ob = trk.tracks[n].obs.get("overhead")
+        assert ob is None or ob[3] != "seen" or ob[5] < TW.BIAS_AREA * trk.area
 
 
 def test_side_camera_sees_them_when_the_overhead_cannot(cams):
