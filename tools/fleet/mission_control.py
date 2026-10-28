@@ -320,7 +320,7 @@ class Session:
             mm["mission"] = {"name": mode, "settings": s, "planner": {"separation_cm": s["separation_cm"]}}
         over = dict((mm.get("mission") or {}).get("planner") or {})
         over.update(self.settings["planner"])
-        plan = P.make_plan(mm, over=over, t_limit_s=float(d.get("t_limit_s", 60)))
+        plan = MS.plan_synced(mm, over=over, t_limit_s=float(d.get("t_limit_s", 60)))
         self.mission, self.plan = mm, plan
         with open(os.path.join(self.dir, "mission.json"), "w") as f:
             json.dump(mm, f, indent=1)

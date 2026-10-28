@@ -173,3 +173,44 @@ Mission Control started from the page under systemd's environment.
 started some other way (a renamed copy, `python -m`) would not show. The 2 s refresh and the 24 screen lines are
 chosen, not derived (display only; no DOE needed).
 
+
+## Chicken played together (2026-10-28, question 41)
+
+**Premise.** Nick could not see the game of Chicken in Monday's default mission. The preview drawn part by part showed
+why: each robot ran its half of Chicken when it got there (61 x 122: Left swerved at 82 s, Right at 103 s). Asked
+fix: both wait for each other at their ready spots, then run at each other together (swerve 15 cm, never under 8 cm).
+
+**Cause, two parts.** (1) The chicken block had no wait for the other robot (the meet block before the circle has
+one). (2) Adding one was not enough: an `until_s` wait is measured on a robot's own timeline without the waits the
+planner adds for the other robot (planner.build_prims), so a robot that yielded on the way (13-15 s here) still set
+off that much late. **Fix:** each Chicken round now has the meet's wait and sync mark; `missions.plan_synced` plans,
+lengthens the earlier robot's wait by how early it set off, and plans again until each group sets off within 0.6 s
+(one extra plan on every table). Mission Control and `mission_run.py` (so `./run-fleet-pi.sh monday`) both plan
+through it. A wait to set off together is no longer scored as a late show beat.
+
+**Data.** Plans (planner.py) and simulator runs (`mission_run.py --table T --dry`: both simulated cameras through the
+camera bridge; times on the run's own clock):
+
+| Table | Plan: both set off / closest (plan) | Simulator: result, took / planned | Both swerve at | Closest bodies (simulator truth) | Closest to an open edge |
+|---|---|---|---|---|---|
+| 61 x 122 | 103.8 s / 11.1 cm | done, 121 / 129 s | 107.5 s | 11.2 cm, no contact | 4.8 cm |
+| 70 x 130 | 109.8 s / 10.3 cm | done, 128 / 135 s | 113.7 s | 10.1 cm, no contact | 3.9 cm |
+| 76 x 137 | 115.7 s / 11.1 cm | done, 134 / 142 s | 120.4 s | 11.3 cm, no contact | 3.8 cm |
+
+![Both robots in Chicken at the same time](../screenshots/2026-10-28/mc-preview-parts-6-fixed-chicken-together-swerve.png)
+
+The preview 1:46 into Monday on 61 x 122: "Now: Left chicken, Right chicken", both at their swerve points.
+
+**Conclusion.** Chicken is now played together on all three table sizes, in the plan and in the simulator through
+the cameras, never under 8 cm (closest 10.1 cm). The mission is about 2 s longer on 61 x 122 (2:09 planned).
+**Monday sweep runs made before this commit had the old Chicken.** The 70 x 130 closest (10.1 cm at 62 s) is not
+in Chicken.
+
+**Next.** On the robots: watch that both start the run-in together (run_plan holds each robot's step after the sync
+until the other has reached its own).
+
+**New tests:** `test_chicken_is_played_together` on the three tables (sets off within 0.6 s, swerves within 1 s,
+never under 8 cm). Fleet suite: 124 passed, 7 skipped.
+**Possible inaccuracies:** the 0.6 s tolerance and the 5 plans at most are chosen, not derived (no DOE needed:
+display and planning budget); the simulator's robots keep time better than real ones, so on the board the sync
+step (not the plan's timing) is what keeps them together.

@@ -86,7 +86,7 @@ def build(args, out):
     over = {"separation_cm": max(float(((mm.get("mission") or {}).get("planner") or {}).get("separation_cm", 8.0)),
                                  args.min_gap_cm)}
     t0 = time.time()
-    plan = P.make_plan(mm, over=over, t_limit_s=PLAN_LIMIT_S)
+    plan = MS.plan_synced(mm, over=over, t_limit_s=PLAN_LIMIT_S, log=say)
     gap = EC.plan_gap(plan, mm, gate_cm=args.min_gap_cm)
     bad = EC.gate_words(gap, args.min_gap_cm)
     mp, pp = os.path.join(out, "mission.json"), os.path.join(out, "plan.json")

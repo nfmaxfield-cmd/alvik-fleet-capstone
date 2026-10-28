@@ -21,9 +21,6 @@ Answered ones move to the bottom with the answer and date.
 38. Light search: use the side camera alone, or both cameras taking the stronger signal?
 39. Leave turn-around points out of the 3 cm gate? (Right would pass L3; it changes what Phase 0 measures.)
 40. Did the room light change between 15:04 and 15:20? (The side picture brightened from 39 to 58 with its exposure locked.)
-41. Monday's Chicken is not played together: each robot runs its half when it gets there (61 x 122: Left swerves at
-    82 s, Right at 103 s; Left is dancing by then). Fix: make both wait for each other at the ready spots (as "meet"
-    does) before the run-in. Build it? (It changes the mission the Monday sweeps are simulating.)
 
 ### Robots and sessions
 8. What stands just beyond the home board's x = 0 edge at about y = 30-60? (Your 07:45 "yes" to this one was read as
@@ -40,6 +37,9 @@ Answered ones move to the bottom with the answer and date.
 13. Should creep steps change? 12 of 23 stalled (faster creep, or end on the front sensor instead of the wheel count).
 
 ## Answered
+- 2026-10-28: Q41 (Chicken not played together): fixed. Both robots wait for each other at their ready spots, then run
+  Chicken together (swerve 15 cm, never under 8 cm); see docs/build-reports/e02-oct28-one-system.md, "Chicken
+  played together". Monday sweep runs made before that commit had the old, one-at-a-time Chicken.
 - 2026-10-28: Q4 (Mission Control as a tab): yes. Built as the tabs on the start page, http://100.122.222.75:8091
   (Live lab | Mission Control | Start/Stop); see docs/build-reports/e02-oct28-one-system.md, "One address".
 - 2026-10-27 18:26:

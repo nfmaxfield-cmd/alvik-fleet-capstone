@@ -808,7 +808,19 @@ def build(m, program, s=None):
                 for v in ch[n]:
                     if "goto" in v and v.get("label", "").endswith("ready"):
                         v["run_in_cm"] = CHICKEN_RUN_IN_CM
-                advance(n, ch[n])
+            # each round: both reach their ready spots, wait for each other there (as the meet block does), then run
+            # at each other together. Without this each robot played its half when it got there (Nick 2026-10-28:
+            # Chicken could not be seen; on 61 x 122 Left swerved at 82 s, Right at 103 s)
+            per = 4                                   # ready, wait, swerve, aside (chicken())
+            for rd in range(len(ch[a]) // per):
+                for n in who:
+                    advance(n, [ch[n][rd * per]])
+                t_ready = max(t_est[n] for n in who) + MEET_SLACK_S
+                for n in who:
+                    lab = ch[n][rd * per]["label"]
+                    advance(n, [{"until_s": round(t_ready, 1), "label": lab},
+                                {"sync": "chicken%d_%d" % (k, rd), "label": lab}] + ch[n][rd * per + 1:(rd + 1) * per])
+                notes.append("Chicken round %d: both ready about %.0f s in" % (rd + 1, t_ready))
             notes.append("Chicken: swerve at %.0f cm, never under %.0f cm (run %.0f cm, aside %.0f cm)"
                          % (s1["chicken_swerve_cm"], s1["chicken_min_cm"], s1["chicken_run_cm"], s1["chicken_aside_cm"]))
         elif kind == "spread-out":
@@ -896,3 +908,64 @@ def main(argv=None):
 
 if __name__ == "__main__":
     main()
+
+
+SYNC_TOL_S = 0.6        # the robots of a meet / Chicken round set off within this of each other in the plan (the plan's
+                        # 0.1 s ticks and a 0.5 s wait round it). No DOE: a display and timing tolerance
+SYNC_ROUNDS = 5         # plans at most (each lengthens the earlier robots' waits by how early they set off)
+
+
+def plan_synced(mm, over=None, t_limit_s=60.0, log=None):
+    """Plan a mission whose robots must set off together ({"until_s"} then {"sync"} items: the meet before the
+    circle, each Chicken round), then check the plan. An until_s wait is measured on the robot's own timeline
+    without the waits the planner adds for the other robots (planner.build_prims), so a robot that yielded on the
+    way (13 s for Left on 70 x 130 before Chicken) sets off that much later than the other, and each played its part
+    alone. Each robot of a late group gets its own wait lengthened by how far it set off before the group's last
+    robot, and the mission is planned again (SYNC_ROUNDS at most). Returns the plan; mm's until_s values change."""
+    plan = None
+    for _ in range(SYNC_ROUNDS):
+        plan = P.make_plan(mm, over=over, t_limit_s=t_limit_s)
+        late = {}
+        for sid, who in _sync_steps(plan).items():
+            go = {n: t for n, (t, _) in who.items()}
+            if len(go) >= 2 and max(go.values()) - min(go.values()) > SYNC_TOL_S:
+                late[sid] = {n: max(go.values()) - t for n, t in go.items()}
+        if not late:
+            return _no_sync_beats(plan)
+        for sid, add in late.items():
+            for n, d in add.items():
+                vs = mm["tasks"][n]["visit"]
+                for i, v in enumerate(vs):
+                    if v.get("sync") == sid and i > 0 and "until_s" in vs[i - 1]:
+                        vs[i - 1]["until_s"] = round(vs[i - 1]["until_s"] + d, 1)
+            if log:
+                log("%s: planned to set off %.1f s apart; the earlier robot's wait lengthened, planning again"
+                    % (sid, max(add.values())))
+    return _no_sync_beats(plan)
+
+
+def _no_sync_beats(plan):
+    """A wait to set off together (meet, Chicken) is not a show's beat: the robots go when both are there, so its
+    step is not scored as late against the until_s the builder guessed (summary's beats_late_over_0_5s)."""
+    for r in plan["robots"].values():
+        for st in r["steps"]:
+            if st.get("sync"):
+                st.pop("beat_s", None)
+    return plan
+
+
+def _sync_steps(plan):
+    """{sync id: {robot: (time its next step starts, time it arrived: end of its last move before the waits)}}"""
+    out = {}
+    for n, r in plan["robots"].items():
+        steps = r["steps"]
+        for i, st in enumerate(steps):
+            if not st.get("sync"):
+                continue
+            j = i - 1
+            while j >= 0 and steps[j]["type"] == "wait":
+                j -= 1
+            arrived = steps[j]["t_end"] if j >= 0 else 0.0
+            nxt = next((x for x in steps[i + 1:] if x["type"] != "wait"), steps[i])
+            out.setdefault(st["sync"], {})[n] = (nxt["t_start"], arrived)
+    return out
