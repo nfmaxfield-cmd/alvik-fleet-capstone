@@ -7,8 +7,9 @@ of robots apart, re-plans round a dropped brick, and run_plan.py drives it:
   mow            one full pass of lanes (MOW_LANE_CM apart, MOW_INSET_CM in from every side, or the planner's least
                  room from an open side if that is more); lanes carry their line, so a lane end inside a new obstacle
                  slides along its lane and the route round the obstacle is planned (planner.py, "lane" items)
-  chicken        two robots drive at each other and swerve when their fronts are chicken_swerve_cm apart; the plan's
-                 closest approach is checked against chicken_min_cm
+  chicken        two robots drive at each other, swerve (an angled jog) when their fronts are chicken_swerve_cm apart
+                 and drive on past each other, bodies chicken_pass_gap_cm apart, to swapped ends; the plan's closest
+                 approach is checked against chicken_min_cm
   follow         a leader drives a loop; the follower takes the same points one behind
   roam           random spots for about the given time
   show           the opening dance: formations on beat targets ("until_s"), all three
@@ -47,8 +48,24 @@ SETTINGS = {
                                   # the board: closest approach measured by the camera over 10 chickens)
     "chicken_run_cm": 45.0,       # chosen: each robot starts this far from the middle (a run of ~25 cm at cruise
                                   # speed before the swerve: long enough to look like a dare). No DOE (looks)
-    "chicken_aside_cm": 20.0,     # chosen: the swerve drives this far sideways (clears the other robot's body
-                                  # circle with room). No DOE (geometry)
+    "chicken_pass_gap_cm": 10.0,  # Nick (2026-10-28 03:5x): the bodies pass about 10 cm apart side to side; each robot
+                                  # sidesteps (pass gap + body width) / 2 = 9.75 cm, each to its own left, so they pass
+                                  # on opposite sides. DOE note: worth one on the board (8 / 10 / 12 cm against the
+                                  # camera's measured gap and how close it looks to the audience), but under min_cm + 1
+                                  # the planner makes one robot wait for the other to pass (no longer a game of Chicken)
+    "chicken_jog_deg": 70.0,      # chosen (Claude, 2026-10-28): the swerve is an angled jog: turn this far towards its
+                                  # own side on the spot, drive the diagonal (10.4 cm) to the pass line, turn back,
+                                  # drive on. With the fronts 15 cm apart the planner's 9 cm (8 cm + 1 cm between its
+                                  # samples, steps judged against the other robot's same and neighbouring steps) holds
+                                  # only from about 60 deg: 45 deg comes to 5.9 cm, 55 to 8.4, 60 to 9.1, 65 and 70 to
+                                  # 10.0 (the pass gap itself; chicken_shape). 70 rather than 65: 65 falls to 9.5 cm if
+                                  # the first pass piece grows by 1 cm, 70 keeps 10. A true arc (planner/firmware arc
+                                  # move) does not fit: an S-curve came to 0-5 cm, a jog with an arc back to 5-8 cm,
+                                  # and arcs tighter than about 9 cm radius ask the outer wheel for more than the
+                                  # motor's 70 rpm. A steeper jog is used by itself when min_cm needs it. DOE note: not
+                                  # worth one for looks (the geometry sets it); the lever for a shallower, smoother
+                                  # swerve is swerve_cm: at 20 cm 50 deg clears 9.4 cm, at 25 cm 45 deg clears 10 cm
+                                  # (a DOE on swerve_cm 15 / 20 / 25 would be a looks judgement by Nick, not a measure)
     "chicken_rounds": 2,          # Nick (brief): twice
     "follow_s": 60.0,             # Nick (brief): 60 s
     "roam_s": 60.0,               # Nick (brief): 60 s
@@ -64,9 +81,15 @@ SETTINGS = {
 ROLE_OF = {"Left": "A", "Center": "B", "Right": "C"}
 
 
+RETIRED_SETTINGS = {"chicken_aside_cm"}   # 2026-10-28: Chicken passes now (chicken_pass_gap_cm); an old saved value
+                                          # (Mission Control's settings.json) is skipped, not refused
+
+
 def settings(over=None):
     s = dict(SETTINGS)
     for k, v in (over or {}).items():
+        if k in RETIRED_SETTINGS:
+            continue
         if k not in SETTINGS:
             raise ValueError("unknown mission setting %r" % k)
         s[k] = type(SETTINGS[k])(v)
@@ -204,28 +227,186 @@ def mow(m, s=None, robot_start=None, along="long"):
 
 # ---------------------------------------------------------------------------- chicken
 
-def chicken(m, a="Left", b="Right", s=None, t0=0.0, centre=None):
-    """Two robots drive at each other along the table's middle line and swerve (each to its own left) when their
-    fronts are chicken_swerve_cm apart; then back to their ends for the next round. Returns {robot: visits}, and the
-    swerve points (for the closest-approach check)."""
+CHICKEN_JOG_MAX_DEG = 90.0   # the steepest jog chicken_shape tries (90: a straight sidestep). No DOE: geometry
+CHICKEN_PULL_OUT_CM = 3.0    # chosen: after turning back onto its pass line each robot drives this short piece before
+                             # the rest of the pass. The planner keeps apart steps that only touch in time, and the other
+                             # robot's turn back (a full turn circle on its own pass line) against a first piece of
+                             # 12-15 cm came to 8.0 cm; 2-4 cm keep 10 cm at 70 deg. Costs one 0.2 s settle. No DOE:
+                             # geometry (planner only)
+CHICKEN_CLEAR_MARGIN_CM = 0.5  # chosen: the jog must clear the planner's floor by this much (goto points are rounded to
+                               # 0.01 cm and steps to 0.1 s ticks). No DOE: numerical
+
+
+def chicken_shape(m, s=None):
+    """The swerve's shape for these settings: each robot's sidestep (its centre line moves this far to its own side,
+    so the bodies pass chicken_pass_gap_cm apart), the jog angle, and the closest two bodies come during the swerve
+    when both jog together (each move against the other robot's move at the same time, as the planner judges them:
+    whole swept areas). The jog starts at chicken_jog_deg and is made steeper, 5 deg at a time, until that clears
+    the floor (the larger of chicken_min_cm and the planner's separation_cm, plus the planner's 1 cm between samples);
+    below that the planner would make one robot wait and they would not swerve together. Returns a dict with
+    sidestep_cm, jog_deg, swerve_clear_cm, pass_clear_cm (the bodies' gap side by side), floor_cm and notes."""
+    import numpy as np
+    import geometry as G
+    s = settings(s)
+    mm = FM.normalize(m)
+    body = FM.body_of(mm)
+    pl = P.Planner(mm)
+    floor = max(s["chicken_min_cm"], s["separation_cm"]) + P._slack(body, pl.s)
+    side = (s["chicken_pass_gap_cm"] + body.width) / 2.0
+    meet = s["chicken_swerve_cm"] / 2.0 + body.front
+
+    def mirror(Q):
+        R_ = Q.copy()
+        R_[:, :2] *= -1.0
+        R_[:, 2] += math.pi
+        return R_
+
+    f = np.linspace(0.0, 1.0, 25)
+
+    def line(p, q, h):
+        return np.column_stack([p[0] + f * (q[0] - p[0]), p[1] + f * (q[1] - p[1]), np.full(len(f), h)])
+
+    def clear(th):
+        # one robot's swerve, as the planner cuts it into steps (centre of the chicken line at 0, 0, driving +x); the
+        # other robot does the same mirrored. The planner keeps apart any two steps whose times overlap or touch, so
+        # each step is judged against the other robot's same step and the ones either side of it
+        S = (-meet, 0.0)
+        E = (-meet + (side / math.tan(th) if th < math.radians(89.9) else 0.0), side)
+        steps = [line((S[0] - pl.s.chunk_cm, 0.0), S, 0.0),                           # the run at each other
+                 np.column_stack([np.full(len(f), S[0]), np.full(len(f), S[1]), f * th]),  # turn out
+                 line(S, E, th),                                                         # the diagonal
+                 np.column_stack([np.full(len(f), E[0]), np.full(len(f), E[1]), (1 - f) * th]),  # turn back
+                 line(E, (E[0] + CHICKEN_PULL_OUT_CM, side), 0.0),                       # the short first piece
+                 line((E[0] + CHICKEN_PULL_OUT_CM, side), (E[0] + CHICKEN_PULL_OUT_CM + pl.s.chunk_cm, side), 0.0)]
+        out = math.inf
+        for i, A in enumerate(steps):
+            for j in range(max(0, i - 1), min(len(steps), i + 2)):
+                Bm = mirror(steps[j])
+                out = min(out, float(np.min(G.body_gaps(body, np.repeat(A, len(Bm), 0), np.tile(Bm, (len(A), 1))))))
+        return out
+    notes = []
+    th = s["chicken_jog_deg"]
+    c = clear(math.radians(th))
+    while c < floor + CHICKEN_CLEAR_MARGIN_CM and th < CHICKEN_JOG_MAX_DEG:
+        th = min(CHICKEN_JOG_MAX_DEG, th + 5.0)
+        c = clear(math.radians(th))
+    if th != s["chicken_jog_deg"]:
+        notes.append("Chicken: the jog is %.0f deg, not %.0f: at %.0f deg the two robots would come under %.1f cm "
+                     "swerving together" % (th, s["chicken_jog_deg"], s["chicken_jog_deg"],
+                                            floor + CHICKEN_CLEAR_MARGIN_CM))
+    pass_clear = 2 * side - body.width
+    if c < floor or pass_clear < floor - 1e-6:
+        notes.append("Chicken: with swerve %.0f cm, pass gap %.0f cm and never under %.0f cm, the robots cannot swerve "
+                     "and pass at the same time; the planner makes one wait for the other (raise the pass gap or the "
+                     "swerve distance)" % (s["chicken_swerve_cm"], s["chicken_pass_gap_cm"], s["chicken_min_cm"]))
+    return {"sidestep_cm": side, "jog_deg": th, "swerve_clear_cm": round(c, 2), "pass_clear_cm": round(pass_clear, 2),
+            "floor_cm": round(floor, 2), "notes": notes}
+
+
+CHICKEN_OLD_ASIDE_CM = 20.0   # the old routine's swerve (passing=False): drive this far sideways and stop, as before
+                              # 2026-10-28 (it was chicken_aside_cm). No DOE (geometry)
+
+
+def chicken(m, a="Left", b="Right", s=None, t0=0.0, centre=None, swap=False, passing=True):
+    """Two robots drive at each other along a line through `centre` (the table's middle by default) and, when their
+    fronts are chicken_swerve_cm apart, each swerves to its own left (an angled jog, chicken_shape) onto its own
+    pass line, so they pass on opposite sides with the bodies chicken_pass_gap_cm apart, then drives on straight to
+    about where the other one started (they swap ends). The next round starts from the swapped ends (swap=True: the
+    first round does too, a starting at the high-x end). Returns {robot: visits}; each round's items are labelled
+    "chicken k ready" (ready spot, then a short wait), "chicken k swerve" (the run at each other, ending at the swerve
+    point), "chicken k sidestep" (the jog: a turn on the spot and the diagonal) and "chicken k pass" (turn back, drive
+    on past). passing=False: the swerve before 2026-10-28 (the old 3-robot routine, missions.monday): each goes
+    CHICKEN_OLD_ASIDE_CM sideways and stops, and the next round starts from the same ends."""
     s = settings(s)
     cx, cy = centre or _centre(m)
     body = FM.body_of(FM.normalize(m))
-    half = body.front
-    meet = s["chicken_swerve_cm"] / 2.0 + half       # each centre this far from the middle at the swerve
+    meet = s["chicken_swerve_cm"] / 2.0 + body.front      # each centre this far from the middle at the swerve
     R = s["chicken_run_cm"]
-    out = {a: [], b: []}
-    # each swerves to its own left (they pass on opposite sides), unless a side has no room or another robot stands
-    # there: then both swerve to the side with room
+    if not passing:
+        return _chicken_aside(m, a, b, s, cx, cy, meet, R)
+    sh = chicken_shape(m, s)
+    side, th = sh["sidestep_cm"], math.radians(sh["jog_deg"])
+    fwd = side / math.tan(th) if th < math.radians(89.9) else 0.0
+    # the pass lines sit either side of the chicken line; if another robot stands near one (the old 3-robot routine),
+    # or a line has no room, the chicken line moves across (2 cm at a time, up to the sidestep) until both fit
     others = [r["start"][:2] for r in FM.normalize(m)["robots"] if r["name"] not in (a, b)]
     pl = P.Planner(m)
-    asd = s["chicken_aside_cm"]
+
+    def ok(y):
+        pts = [(cx + u * R, y + u * side) for u in (-1, 1)] + [(cx - u * (meet - fwd), y + u * side) for u in (-1, 1)]
+        return all(pl.grid.turnable([x, yy]) and all(math.dist((x, yy), o) > 2 * 6.8 + s["chicken_min_cm"]
+                                                        for o in others) for x, yy in pts)
+    for dy in [0.0] + [k * 2.0 * sg for k in range(1, int(side // 2) + 2) for sg in (1, -1)]:
+        if ok(cy + dy):
+            cy += dy
+            break
+    out = {a: [], b: []}
+    for k in range(int(s["chicken_rounds"])):
+        lab = "chicken %d" % (k + 1)
+        for n, u0 in ((a, 1.0), (b, -1.0)):
+            u = -u0 if (k % 2 == 1) != swap else u0      # +1: drives towards +x (starts at the low-x end)
+            h = 0.0 if u > 0 else 180.0
+            y_pass = cy + u * side                       # its own left: +y facing +x, -y facing -x
+            out[n] += [_g(cx - u * R, cy, h, label=lab + " ready"), {"wait_s": 0.5, "label": lab + " ready"},
+                       _g(cx - u * meet, cy, label=lab + " swerve"),
+                       _g(cx - u * (meet - fwd), y_pass, label=lab + " sidestep"),
+                       _g(cx - u * (meet - fwd - CHICKEN_PULL_OUT_CM), y_pass, h, label=lab + " pass"),
+                       _g(cx + u * R, y_pass, h, label=lab + " pass")]
+    return out
+
+
+def chicken_mission(m, a="Left", b="Right", s=None):
+    """Chicken on its own (Mission Control's Chicken mode, `missions.py chicken`): chicken()'s rounds with the same
+    wait and sync mark at the ready spots as Monday's block, so both robots set off together (passing needs that:
+    plan it with plan_synced). Returns {robot: visits}."""
+    s = settings(s)
+    ch = chicken(m, a, b, s=s)
+    start = {r["name"]: r["start"] for r in FM.normalize(m)["robots"]}
+    rounds = {n: {} for n in (a, b)}
+    for n in (a, b):
+        for v in ch[n]:
+            rounds[n].setdefault(int(re.match(r"chicken (\d+)", v["label"]).group(1)), []).append(v)
+    out = {a: [], b: []}
+    t_est = {a: 0.0, b: 0.0}
+    pose = {n: tuple(start[n][:3]) for n in (a, b)}
+    for rd in sorted(rounds[a]):
+        for n in (a, b):
+            rdy = rounds[n][rd][0]
+            try:
+                t_est[n] += plan_s(m, [rdy], pose[n])
+            except P.PlanError:
+                t_est[n] += est_s([rdy["goto"][:2]], pose[n])
+            pose[n] = tuple(rdy["goto"][:3])
+        t_ready = max(t_est.values()) + MEET_SLACK_S
+        for n in (a, b):
+            rest = rounds[n][rd][1:]
+            lab = rounds[n][rd][0]["label"]
+            out[n] += [rounds[n][rd][0], {"until_s": round(t_ready, 1), "label": lab},
+                       {"sync": "chicken_%d" % rd, "label": lab}] + rest
+            moving = [v for v in rest if "goto" in v]
+            try:
+                t_est[n] = t_ready + plan_s(m, moving, pose[n])
+            except P.PlanError:
+                t_est[n] = t_ready + est_s([v["goto"][:2] for v in moving], pose[n])
+            last = moving[-1]["goto"]
+            pose[n] = (last[0], last[1], last[2] if len(last) > 2 else pose[n][2])
+    return out
+
+
+def _chicken_aside(m, a, b, s, cx, cy, meet, R):
+    """The swerve before 2026-10-28, kept for the old 3-robot routine: each swerves to its own left, unless a side has
+    no room or another robot stands there (then both to the side with room), drives CHICKEN_OLD_ASIDE_CM sideways and
+    stops."""
+    others = [r["start"][:2] for r in FM.normalize(m)["robots"] if r["name"] not in (a, b)]
+    pl = P.Planner(m)
+    asd = CHICKEN_OLD_ASIDE_CM
 
     def ok(x, y):
         return pl.grid.turnable([x, y]) and all(math.dist((x, y), o) > 2 * 6.8 + s["chicken_min_cm"] for o in others)
     sa, sb = 1.0, -1.0
     if not (ok(cx - meet, cy + sa * asd) and ok(cx + meet, cy + sb * asd)):
         sa = sb = 1.0 if ok(cx - meet, cy + asd) and ok(cx + meet, cy + asd) else -1.0
+    out = {a: [], b: []}
     for k in range(int(s["chicken_rounds"])):
         lab = "chicken %d" % (k + 1)
         out[a] += [_g(cx - R, cy, 0.0, label=lab + " ready"), {"wait_s": 0.5, "label": lab + " ready"},
@@ -482,7 +663,9 @@ def _monday(m, s=None, seed=1, k_user=1.0):
                          "makes them wait for it" % (k + 1, t))
             rng_x = (f["x_min"] + room, f["x_max"] - room)
         c = ((rng_x[0] + rng_x[1]) / 2.0, cy)
-        ch = chicken(m, s=s1, centre=c)
+        # the old routine keeps the old swerve (aside and stop): passing needs both robots to set off together, and
+        # this routine has no sync waits (Center mows with right of way); Monday's blocks pass (missions.build)
+        ch = chicken(m, s=s1, centre=c, passing=False)
         for n in seqs:
             for v in ch[n]:
                 if v.get("label"):
@@ -637,7 +820,9 @@ def monday_program(robots=("Left", "Right")):
        (stop-and-turn), working towards the centre line.
     2. They meet at the centre line mid-mow and circle each other 1.5 times on a true curve, which leaves them on
        swapped sides; then each carries on mowing in its direction (no backing off).
-    3. At the end of their mowing they turn towards each other and play Chicken (swerve at 15 cm, never under 8 cm).
+    3. At the end of their mowing they turn towards each other and play Chicken (swerve at 15 cm, never under 8 cm):
+       each swerves a little to its own side and they drive on past each other, bodies about 10 cm apart, to swapped
+       ends (Nick, 2026-10-28 03:52).
     4. They spread out, equally spaced on the table, and dance until switched off.
     Claude's reading of "mid-mow" (an assumption, flagged in the build report): each robot mows the outer quarter at its
     end, they meet and circle, and each then mows the inner quarter on the other side, going on in its own direction,
@@ -652,7 +837,8 @@ def monday_program(robots=("Left", "Right")):
                 {"block": "circle", "robots": [a, b], "turns": 1.5, "way": "anticlockwise"},
                 {"block": "mow-region", "robot": a, "from": 0.5, "to": 0.75, "direction": "+"},
                 {"block": "mow-region", "robot": b, "from": 0.25, "to": 0.5, "direction": "-"},
-                {"block": "chicken", "robots": [a, b], "swerve_cm": 15.0, "min_cm": 8.0, "rounds": 1},
+                {"block": "chicken", "robots": [a, b], "swerve_cm": 15.0, "min_cm": 8.0, "pass_gap_cm": 10.0,
+                 "rounds": 1},
                 {"block": "spread-out", "robots": [a, b]},
                 {"block": "dance", "robots": [a, b], "seconds": 0},
             ]}
@@ -797,13 +983,20 @@ def build(m, program, s=None):
             a, b = sorted(who, key=lambda n: pos[n][0])          # a comes from the low-x side
             s1 = dict(s, chicken_swerve_cm=float(bl.get("swerve_cm", s["chicken_swerve_cm"])),
                       chicken_min_cm=float(bl.get("min_cm", s["chicken_min_cm"])),
+                      chicken_pass_gap_cm=float(bl.get("pass_gap_cm", s["chicken_pass_gap_cm"])),
+                      chicken_jog_deg=float(bl.get("jog_deg", s["chicken_jog_deg"])),
                       chicken_rounds=int(bl.get("rounds", 1)))
             W = f["x_max"] - f["x_min"]
-            # the ready spots leave room behind them for the straight run-in (its start must be turnable)
+            # the ready spots leave room behind them for the straight run-in (its start must be turnable); the pass
+            # ends at about the other robot's ready spot, so the same room holds there
             s1["chicken_run_cm"] = min(s["chicken_run_cm"], W / 2.0 - room - CHICKEN_RUN_IN_CM)
-            Hh = (f["y_max"] - f["y_min"]) / 2.0
-            s1["chicken_aside_cm"] = min(s["chicken_aside_cm"], Hh - room)
-            ch = chicken(m, a=a, b=b, s=s1, centre=_frac(m, *bl.get("at", [0.5, 0.5])))
+            shape = chicken_shape(m, s1)
+            ctr = _frac(m, *bl.get("at", [0.5, 0.5]))
+            if min(ctr[1] - f["y_min"], f["y_max"] - ctr[1]) - room < shape["sidestep_cm"] - 1e-6:
+                raise ValueError("block %d: Chicken's pass lines (%.1f cm either side of its line, for a %.0f cm pass "
+                                 "gap) do not fit the table's width here" % (k + 1, shape["sidestep_cm"],
+                                                                            s1["chicken_pass_gap_cm"]))
+            ch = chicken(m, a=a, b=b, s=s1, centre=ctr)
             for n in who:
                 for v in ch[n]:
                     if "goto" in v and v.get("label", "").endswith("ready"):
@@ -811,18 +1004,24 @@ def build(m, program, s=None):
             # each round: both reach their ready spots, wait for each other there (as the meet block does), then run
             # at each other together. Without this each robot played its half when it got there (Nick 2026-10-28:
             # Chicken could not be seen; on 61 x 122 Left swerved at 82 s, Right at 103 s)
-            per = 4                                   # ready, wait, swerve, aside (chicken())
-            for rd in range(len(ch[a]) // per):
+            rounds = {}
+            for n in who:
+                for v in ch[n]:
+                    rounds.setdefault(n, {}).setdefault(int(re.match(r"chicken (\d+)", v["label"]).group(1)), []).append(v)
+            for rd in sorted(rounds[a]):
                 for n in who:
-                    advance(n, [ch[n][rd * per]])
+                    advance(n, [rounds[n][rd][0]])                 # the ready spot
                 t_ready = max(t_est[n] for n in who) + MEET_SLACK_S
                 for n in who:
-                    lab = ch[n][rd * per]["label"]
+                    lab = rounds[n][rd][0]["label"]
                     advance(n, [{"until_s": round(t_ready, 1), "label": lab},
-                                {"sync": "chicken%d_%d" % (k, rd), "label": lab}] + ch[n][rd * per + 1:(rd + 1) * per])
-                notes.append("Chicken round %d: both ready about %.0f s in" % (rd + 1, t_ready))
-            notes.append("Chicken: swerve at %.0f cm, never under %.0f cm (run %.0f cm, aside %.0f cm)"
-                         % (s1["chicken_swerve_cm"], s1["chicken_min_cm"], s1["chicken_run_cm"], s1["chicken_aside_cm"]))
+                                {"sync": "chicken%d_%d" % (k, rd - 1), "label": lab}] + rounds[n][rd][1:])
+                notes.append("Chicken round %d: both ready about %.0f s in" % (rd, t_ready))
+            notes += shape["notes"]
+            notes.append("Chicken: swerve at %.0f cm, never under %.0f cm; each jogs %.0f deg to its own side, %.1f cm "
+                         "over, and they pass with the bodies %.0f cm apart to swapped ends (run %.0f cm)"
+                         % (s1["chicken_swerve_cm"], s1["chicken_min_cm"], shape["jog_deg"], shape["sidestep_cm"],
+                            s1["chicken_pass_gap_cm"], s1["chicken_run_cm"]))
         elif kind == "spread-out":
             pos = {n: _pose_after(n) for n in who}
             order = sorted(who, key=lambda n: pos[n][0] if long_x else pos[n][1])
@@ -890,7 +1089,7 @@ def main(argv=None):
             v, notes = mow(m, s, robot_start=start.get(a.robot))
             mm["tasks"] = {a.robot: {"visit": v, "park": True}}
         elif a.mode == "chicken":
-            mm["tasks"] = {k: {"visit": v, "park": True} for k, v in chicken(m, s=s).items()}
+            mm["tasks"] = {k: {"visit": v, "park": True} for k, v in chicken_mission(m, s=s).items()}
         elif a.mode == "follow":
             mm["tasks"] = {k: {"visit": v, "park": True} for k, v in follow(m, s=s).items()}
         elif a.mode == "roam":
@@ -921,7 +1120,51 @@ def plan_synced(mm, over=None, t_limit_s=60.0, log=None):
     without the waits the planner adds for the other robots (planner.build_prims), so a robot that yielded on the
     way (13 s for Left on 70 x 130 before Chicken) sets off that much later than the other, and each played its part
     alone. Each robot of a late group gets its own wait lengthened by how far it set off before the group's last
-    robot, and the mission is planned again (SYNC_ROUNDS at most). Returns the plan; mm's until_s values change."""
+    robot, and the mission is planned again (SYNC_ROUNDS at most). Returns the plan; mm's until_s values change.
+
+    Since Chicken passes (2026-10-28) the whole mission only plans when its robots set off together: the planner
+    places one robot first, and if the other is late (it gave way on the way) the first one's pass ends beside the
+    late one's ready spot and no plan is found (13 s of searching on 61 x 122). So each group is lined up first on the
+    mission cut just after its sync mark (meet, then each Chicken round, in order), and only then is the whole
+    mission planned."""
+    _presync(mm, over, t_limit_s, log)
+    return _sync_loop(mm, over, t_limit_s, log)
+
+
+def _sync_ids(mm):
+    """Sync marks in the order the robots reach them."""
+    out = []
+    for t in (mm.get("tasks") or {}).values():
+        for v in t.get("visit", []):
+            if isinstance(v, dict) and v.get("sync") and v["sync"] not in out:
+                out.append(v["sync"])
+    return out
+
+
+def _presync(mm, over, t_limit_s, log):
+    """Line up each sync group's waits on the mission cut just after its sync mark (see plan_synced). A cut that does
+    not plan is left alone (the whole mission is then planned as it is)."""
+    for sid in _sync_ids(mm):
+        cut = copy.deepcopy(mm)
+        for t in cut["tasks"].values():
+            vs = t.get("visit", [])
+            i = next((k for k, v in enumerate(vs) if isinstance(v, dict) and v.get("sync") == sid), None)
+            if i is not None:
+                t["visit"] = vs[:i + 1]
+                t["park"] = False
+        try:
+            _sync_loop(cut, over, t_limit_s, log)
+        except P.PlanError:
+            if log:
+                log("%s: the mission cut there did not plan; planning the whole mission as it is" % sid)
+            return
+        for n, t in mm["tasks"].items():
+            for a, b in zip(t.get("visit", []), cut["tasks"][n].get("visit", [])):
+                if isinstance(a, dict) and "until_s" in a and "until_s" in b:
+                    a["until_s"] = b["until_s"]
+
+
+def _sync_loop(mm, over=None, t_limit_s=60.0, log=None):
     plan = None
     for _ in range(SYNC_ROUNDS):
         plan = P.make_plan(mm, over=over, t_limit_s=t_limit_s)

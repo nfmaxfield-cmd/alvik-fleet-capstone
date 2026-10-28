@@ -302,7 +302,7 @@ class Session:
                 v, notes = MS.mow(m, s, robot_start=start.get(robot))
                 mm["tasks"] = {robot: {"visit": v, "park": True}}
             elif mode == "chicken":
-                mm["tasks"] = {k: {"visit": v, "park": True} for k, v in MS.chicken(m, s=s).items()}
+                mm["tasks"] = {k: {"visit": v, "park": True} for k, v in MS.chicken_mission(m, s=s).items()}
             elif mode == "follow":
                 mm["tasks"] = {k: {"visit": v, "park": True} for k, v in MS.follow(m, s=s).items()}
             elif mode == "roam":
@@ -686,7 +686,7 @@ def preview(mm, plan, title=""):
     for name, r in plan["robots"].items():
         cur = None
         for st in r["steps"]:
-            lab = (st.get("label") or "").split(" lane")[0].split(" ready")[0].split(" swerve")[0].split(" aside")[0]
+            lab = (st.get("label") or "").split(" lane")[0].split(" ready")[0].split(" swerve")[0].split(" sidestep")[0].split(" pass")[0].split(" aside")[0]
             if lab and lab != cur:
                 acts.append({"robot": name, "label": lab, "t": st["t_start"]})
                 cur = lab
@@ -714,7 +714,7 @@ def block_of(label):
     for head in ("mow", "chicken", "meet", "circle", "spread out", "dance", "roam", "follow"):
         if lab.startswith(head):
             return head
-    for tail in (" ready", " swerve", " aside", " start", " end"):
+    for tail in (" ready", " swerve", " sidestep", " pass", " aside", " start", " end"):
         if lab.endswith(tail):
             lab = lab[: -len(tail)]
     return lab or "move"

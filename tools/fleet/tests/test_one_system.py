@@ -30,7 +30,7 @@ def plans():
     out = {}
     for W, H in TABLES:
         mm = MS.build(table(W, H), MS.monday_program())
-        out[(W, H)] = (mm, P.make_plan(mm))
+        out[(W, H)] = (mm, MS.plan_synced(mm))          # as Mission Control and mission_run.py plan it
     return out
 
 

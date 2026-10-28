@@ -330,13 +330,13 @@ function warmup() {
 
 const MODES = [["program", "Monday (blocks)", "2 robots: mow, meet, circle, mow on, Chicken, spread out, dance"],
   ["monday", "Old 3-robot routine", "Show, then mowing beside Chicken, Follow and Roam, then park"], ["mow", "Lawnmower", "One full pass, lanes 12 cm apart"],
-  ["spots", "Go to spots", "Instruction lists per robot"], ["chicken", "Chicken", "Left and Right, twice"], ["follow", "Follow the leader", "Left leads, Right follows"],
+  ["spots", "Go to spots", "Instruction lists per robot"], ["chicken", "Chicken", "Left and Right pass each other, twice"], ["follow", "Follow the leader", "Left leads, Right follows"],
   ["roam", "Roam", "Random spots"], ["show", "Show", "The opening dance"]];
 // ---------------------------------------------------------------- blocks (one system, 2026-10-28)
 const BLOCK_HELP = {"mow-region": "robot · from, to (share of the table's length, 0-1) · direction + or -",
   "go-to-spot": "robot · spot=A, or at=x y (shares of the table) · heading (deg, optional)",
   "meet": "2 robots · at=x y (shares) · r_cm (the circle's radius)", "circle": "2 robots · turns · way anticlockwise / clockwise",
-  "chicken": "2 robots · swerve_cm · min_cm · rounds", "spread-out": "robots · y (share of the width)",
+  "chicken": "2 robots · swerve_cm (fronts apart when they swerve) · min_cm (never closer) · pass_gap_cm (bodies apart as they pass) · rounds · jog_deg (optional)", "spread-out": "robots · y (share of the width)",
   "dance": "robots · seconds (0 = until switched off)", "wait": "robots · seconds"};
 function blockParams(b) { return Object.entries(b).filter(([k]) => !["block", "robot", "robots"].includes(k)).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join(" ") : v}`).join(", "); }
 function parseParams(txt) {

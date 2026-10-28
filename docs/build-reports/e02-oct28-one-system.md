@@ -214,3 +214,89 @@ never under 8 cm). Fleet suite: 124 passed, 7 skipped.
 **Possible inaccuracies:** the 0.6 s tolerance and the 5 plans at most are chosen, not derived (no DOE needed:
 display and planning budget); the simulator's robots keep time better than real ones, so on the board the sync
 step (not the plan's timing) is what keeps them together.
+
+## Chicken: swerve and pass (2026-10-28)
+
+**Premise.** Nick (03:52): "they should drive past each other. It looks like they are going to drive into each other
+but then they swerve a little and keep going straight, passing each other." Before this, each robot swerved 20 cm
+sideways and stopped. Nick's numbers: swerve when the fronts are 15 cm apart, the bodies pass about 10 cm apart
+(each robot moves its line 9.75 cm to its own side), never under 8 cm, and each drives on to about the other's
+ready spot (they swap ends), then spreads out and dances.
+
+**What changed.** The swerve is an **angled jog**: turn 70 deg on the spot towards its own side, drive 10.4 cm on the
+diagonal onto its pass line, turn back, drive a 3 cm piece, then drive on straight past the other robot. Why not a
+curve: the planner keeps apart any two steps whose times overlap *or touch*, judged on each step's whole swept area,
+so with the fronts only 15 cm apart nothing may move forward much before it has moved sideways:
+
+| Swerve shape at 15 cm (planner's own rule) | Closest two bodies |
+|---|---|
+| S-curve on two arcs (the firmware's arc move), 45-90 deg | 0.0-4.9 cm |
+| jog, then arc back onto the straight (r 9-12 cm) | 4.0-7.8 cm |
+| jog 45 / 55 / 60 deg | 5.9 / 8.4 / 9.1 cm |
+| **jog 70 deg, 3 cm first piece (chosen)** | **10.0 cm** (the pass gap itself) |
+
+<sub>Closest two bodies: the smallest distance between the two robots' outlines (9.5 x 9.5 cm squares) over each step
+and the other robot's same and neighbouring steps, from `missions.chicken_shape`. The planner needs 9 cm (8 cm plus
+1 cm it allows between its 0.1 s samples).</sub>
+
+The 3 cm piece exists because the other robot's turn back (a full turn circle on its own pass line) against a
+12-15 cm first piece came to 8.0 cm. Arcs tighter than about 9 cm radius would also ask the outer wheel for more than
+the motor's 70 rpm. Settings in Mission Control's chicken block: `swerve_cm`, `min_cm`, **`pass_gap_cm`** (new,
+10 cm) and optional `jog_deg`. `chicken_aside_cm` is retired; an old saved value is skipped. If a jog angle or
+`min_cm` would break the 9 cm rule, the jog is made steeper by itself and the mission's notes say so.
+
+**A second change it needed.** Passing only plans when both robots set off together: the planner places one robot
+first, and if the other was late (it gave way earlier: 13 s on 61 x 122) the first one's pass ended beside the late
+one's ready spot, and no plan was found. `plan_synced` now lines up each group (the meet, then each Chicken round) on
+the mission cut just after its sync mark, before planning the whole mission. Planning takes 20-30 s here (was about
+10 s).
+
+**Data.** Simulator (`mission_run.py --table T --dry --farm`: both simulated cameras through the camera bridge; times
+on the run's clock; closest bodies and edges from the simulator's truth):
+
+| Table | Result, took / planned | Both set off | Both swerve at | Closest bodies in Chicken | Closest bodies, whole run | Closest to an open edge (body) |
+|---|---|---|---|---|---|---|
+| 61 x 122 | done, 126 / 134 s | 105.9 / 105.9 s | 108.6 / 108.6 s | 9.72 cm | 9.72 cm (in Chicken), no contact | 3.8 cm (Left, 4.6 s, mowing) |
+| 70 x 130 | done, 133 / 140 s | 112.1 / 112.1 s | 115.2 / 115.2 s | 9.71 cm | 9.71 cm (in Chicken), no contact | 4.9 cm (Left, 8.6 s, mowing) |
+| 76 x 137 | done, 140 / 147 s | 118.0 / 118.0 s | 121.6 / 121.6 s | 9.99 cm | 8.81 cm (64 s, circle), no contact | 4.8 cm (Left, 66.8 s, mowing) |
+
+<sub>Edge figures are from the body's nearest corner, not its centre. Left / Right in the "set off" and "swerve"
+columns.</sub>
+
+In the plans, every table's Chicken closest is 10.0 cm, with no waits once they swerve, each robot ends on the
+other's side and the mission is 4-5 s longer (61 x 122: 2:14 planned).
+
+![Both robots on their jog](../screenshots/2026-10-28/chicken-pass-1-both-jog-to-own-side-108s.png)
+
+The preview 1:49 into Monday on 61 x 122: the fronts reached 15 cm and both robots turn towards their own side.
+
+![Side by side, mid-pass](../screenshots/2026-10-28/chicken-pass-2-mid-pass-side-by-side-111s.png)
+
+At 1:52 they pass side by side on their own pass lines, bodies 10 cm apart (the discs drawn are larger than the
+robots' bodies).
+
+![Just after the pass](../screenshots/2026-10-28/chicken-pass-3-just-after-pass-swapped-ends-114s.png)
+
+At 1:54 each drives on towards the other's end, before spreading out.
+
+**Conclusion.** On all three table sizes the robots now set off together, swerve at the same moment, pass on
+opposite sides about 10 cm apart and swap ends. They never come under 8 cm (closest 8.81 cm, in the circle; 9.71 cm
+in Chicken). The swerve is a steep jog rather than a curve, because at a 15 cm swerve distance a curve cannot keep
+them 8 cm apart. **Monday sweep runs made before this commit had the old Chicken.** The old 3-robot routine keeps the
+old swerve (it has no set-off-together waits).
+
+**Next.** On the board: whether a 70 deg jog reads as a swerve from the audience's side; if not, the lever is
+`swerve_cm` (at 20 cm a 50 deg jog keeps 9.4 cm; at 25 cm, 45 deg keeps 10 cm). Time Monday's planning on the Pi:
+20-30 s here may be 2-3 times longer there.
+
+**New tests that may now be necessary.** `test_chicken_robots_pass_each_other` on the three tables (ends swapped,
+pass lines 19.5 cm apart, no waits once they swerve, 9-10.5 cm while passing, never under 8) and
+`test_chicken_shape_and_settings` were added. Fleet suite: 138 passed, 7 skipped. Still missing: the plan with a
+robot dying mid-pass (the survivor's re-plan from beside the other's line); Chicken with `rounds` = 2 in the blocks
+(the second round starts from the swapped ends: planned in code, not run); a timing test of planning on the Pi.
+
+**Possible inaccuracies.** The 70 deg angle, the 3 cm piece and the 0.5 cm margin are chosen from planner geometry,
+not measured. The simulator keeps its line better than real robots: the camera's p95 error (0.7-0.8 cm) is close to
+the 0.3 cm difference between the 10 cm pass gap and the planner's 9 cm floor. "Both swerve at" is when the turn
+step started on each robot (run_plan's step log), not when the camera saw them turn. The edge distances come from a
+blank table with every side treated as open.
