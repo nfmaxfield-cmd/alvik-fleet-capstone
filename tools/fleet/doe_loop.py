@@ -1122,7 +1122,7 @@ def write_summary(folder):
         out.append("Turn checks: %d turns, mean error %+.2f deg, largest %.1f deg." % (
             len(tu), float(np.mean([num(r["error_deg"]) for r in tu])), max(abs(num(r["error_deg"])) for r in tu)))
     for r in ev:
-        if r["kind"] in ("parked", "restarted", "setting resent", "disk"):
+        if r["kind"] in ("parked", "restarted", "setting resent", "disk", "held", "would have parked"):
             out.append("- %s %s %s: %s" % (r["clock"], r["kind"], r["robot"], r["text"]))
     with open(os.path.join(folder, "summary.md"), "w") as f:
         f.write("\n".join(out) + "\n")

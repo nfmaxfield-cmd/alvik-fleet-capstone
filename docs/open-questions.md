@@ -35,6 +35,17 @@ Answered ones move to the bottom with the answer and date.
 47. Lane 1's lane-end turn comes 2.3-3.0 cm from the x = 0 edge in a few runs (median 4.6): add a short straight run-in
     before lane 1, or move lane 1 1-2 cm in?
 
+48. A robot whose turn check is HELD every round (one camera's evidence, or a misread heading) never drives. Hold
+    forever (as now), or set it aside after 3 holds in a row? The dry run shows why it matters: a robot whose turns
+    are really 12 % off (36 deg over 4 turns) is held every round, never parked. (e02-oct28-overhead-contrast)
+49. Thursday's daytime DOE loop: normal mode (it tests the new holds and re-checks), or keep-going (nothing set aside)?
+    The plan uses normal mode.
+50. Let L0 nudge each robot 3 cm forward and back before measuring, so its start floor is seen? It removes the last
+    0.4-3.6 cm of first-crawl error, but L0 then moves robots.
+51. Turn check crawl 15 cm instead of 10 (headings misread by up to 14 deg on 10 cm)? Needs 5 cm more room per robot.
+52. Should L0 STOP when the lighting check says both cameras are washed out, or only warn (as now)?
+53. The find step's frames are now kept (about 25 s a loop on the USB drive): OK?
+
 ### Robots and sessions
 8. What stands just beyond the home board's x = 0 edge at about y = 30-60? (Your 07:45 "yes" to this one was read as
    "yes, mark that side as partly blocked"; say if you meant something else.)
@@ -50,6 +61,9 @@ Answered ones move to the bottom with the answer and date.
 13. Should creep steps change? 12 of 23 stalled (faster creep, or end on the front sensor instead of the wheel count).
 
 ## Answered
+- 2026-10-28 18:0x: Q22 (exposure) updated: automatic, EXCEPT the overhead steps its exposure down while the board is
+  washed out (clips), says so on screen and logs it, then returns to automatic; on by default (camrec WashoutGuard,
+  docs/build-reports/e02-oct28-overhead-contrast.md). Neither night's board clipped so far, so it has not acted yet.
 - 2026-10-28 (Claude, overnight): Q31 done in the simulator for the 2-robot mission: 3 seeds of every condition on
   two tables (four for the main ones), docs/results/monday-2robot-sweep.md.
 - 2026-10-28: Q41 (Chicken not played together): fixed. Both robots wait for each other at their ready spots, then run
@@ -78,7 +92,7 @@ Answered ones move to the bottom with the answer and date.
   - Who's who: should take under 2 minutes (Q19).
   - DOE notes also go into docs/doe-backlog.md (Q20).
   - Overhead camera height about the same as before (Q21).
-  - Exposure: keep automatic (Q22).
+  - Exposure: keep automatic (Q22; updated 2026-10-28 18:0x, see above).
   - 0,0 corner: not marked; use the checkered rectangle (Q23).
   - Which robot was low-contrast at 10:07: unknown (Q24).
   - Ladder default: run straight on (Q26).
