@@ -698,7 +698,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
         host = (self.headers.get("Host") or "").split(":")[0]
-        if host not in ("127.0.0.1", "localhost"):
+        if host not in ("127.0.0.1", "localhost") + tuple(getattr(self, "allow_hosts", ())):
             return self._send(403, {"error": "refused: changes must come from the Mission Control page"})
         n = int(self.headers.get("Content-Length") or 0)
         try:
@@ -743,10 +743,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(500, {"error": "%s: %s" % (type(e).__name__, e)})
 
 
-def serve(session, port=PORT):
-    H = type("H", (Handler,), {"session": session})
-    srv = ThreadingHTTPServer(("127.0.0.1", port), H)
-    return srv, "http://127.0.0.1:%d/" % srv.server_address[1]
+def serve(session, port=PORT, listen="127.0.0.1", allow_hosts=()):
+    H = type("H", (Handler,), {"session": session, "allow_hosts": tuple(allow_hosts)})
+    srv = ThreadingHTTPServer((listen, port), H)
+    return srv, "http://%s:%d/" % (listen if listen != "0.0.0.0" else (list(allow_hosts) or ["127.0.0.1"])[0],
+                                   srv.server_address[1])
 
 
 def main(argv=None):
@@ -754,9 +755,12 @@ def main(argv=None):
     ap.add_argument("--dir", required=True, help="folder for map.json, missions, plans and runs")
     ap.add_argument("--map", help="start from this map (copied into --dir)")
     ap.add_argument("--port", type=int, default=PORT)
+    ap.add_argument("--listen", default="127.0.0.1", help="address to serve on (the Pi: 0.0.0.0, reached over Tailscale)")
+    ap.add_argument("--allow-host", action="append", default=[],
+                    help="a Host name besides 127.0.0.1 from which the page may change things (the Pi's Tailscale address)")
     a = ap.parse_args(argv)
     s = Session(a.dir, a.map, a.port)
-    srv, url = serve(s, a.port)
+    srv, url = serve(s, a.port, a.listen, a.allow_host)
     print("Mission Control: %s  (Ctrl+C to stop)" % url, flush=True)
     try:
         srv.serve_forever()
