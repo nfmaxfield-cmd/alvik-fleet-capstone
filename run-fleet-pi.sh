@@ -28,6 +28,11 @@
 #     ./run-fleet-pi.sh doe [hours] [full-video]   start it (full-video: the recorder keeps its whole video too)
 #     ./run-fleet-pi.sh doe-status         drives so far, battery, who is out
 #     ./run-fleet-pi.sh doe-stop           stop it (every robot stops), then it uploads as when it finishes
+# One system (2026-10-28): Monday's mission and Mission Control, the same program (tools/fleet/mission_run.py):
+#     ./run-fleet-pi.sh monday [61x122] [Left,Right] [farm]   Monday's default mission on the table of that size (put
+#                                          each robot at its own end first); runs in tmux "monday"; Ctrl+C stops every
+#                                          robot; uploads at the end. farm: each camera tracked in its own process
+#     ./run-fleet-pi.sh mc                 Mission Control on the Pi: http://100.122.222.75:8095 in the laptop's browser
 # The first test starts the recorder (both cameras, to the USB drive) in a tmux session called fleet; it keeps
 # recording until `stop`. Each test starts the camera bridge, runs the plan, then prints the line check (GATE).
 set -u
@@ -92,7 +97,10 @@ start_recorder() {
   fi
   python3 tools/pi/launcher.py --handoff >/dev/null 2>&1 || true
   # REC_EXTRA: the DOE loop's --no-record (pictures served, no video saved: the loop saves its own frames)
-  tmux new-session -d -s fleet -n rec "cd '$REPO' && python3 tools/pi/camrec.py $CAMS --fps 25 --label P0 --no-lock $EXPO_ARG --side-exposure lock $REC_CORES ${REC_EXTRA:-} --out '$OUT'; read -r -p 'Recorder stopped. Press Enter.'"
+  # the side camera on automatic exposure (Nick, Q22: keep automatic; locked, it went dark at 13:01 and again later
+  # as the room's light changed; the trackers follow the exposure's drift and brighten a dark side picture);
+  # --shm: each camera's grey picture in shared memory for the camera bridge's workers (cam_bridge.py --farm)
+  tmux new-session -d -s fleet -n rec "cd '$REPO' && python3 tools/pi/camrec.py $CAMS --fps 25 --label P0 --no-lock $EXPO_ARG --side-exposure auto --shm $REC_CORES ${REC_EXTRA:-} --out '$OUT'; read -r -p 'Recorder stopped. Press Enter.'"
   echo "Recorder starting (8 s) ..."; sleep 8
 }
 
@@ -184,6 +192,25 @@ case "$WHAT" in
     if tmux has-session -t doe 2>/dev/null; then
       tmux send-keys -t doe C-c; echo "Sent Ctrl+C to the DOE loop: every robot stops; it then uploads (watch: tmux capture-pane -p -t doe | tail -20)."
     else echo "No DOE loop running."; fi ;;
+  monday)
+    TABLE="61x122"; ROB="Left,Right"; EXTRA=""
+    for x in "$@"; do case "$x" in [0-9]*x[0-9]*) TABLE="$x" ;; *,*) ROB="$x" ;; farm) EXTRA="$EXTRA --farm --rings" ;; esac; done
+    if [ "$DRY" = 1 ]; then
+      python3 tools/fleet/mission_run.py --table "$TABLE" --robots "$ROB" --dry ${MONDAY_DRY_ARGS:-}
+    else
+      start_recorder
+      OUT="$(cat /tmp/fleet_rec_out 2>/dev/null || echo "$HOME/recordings")"
+      # cores: the recorder on 0-1, the camera bridge's workers on 1-2 (--farm), the bridge and run_plan on 3
+      PIN=""; if [ "$(nproc)" -ge 4 ] && command -v taskset >/dev/null; then PIN="taskset -c 2,3"; fi
+      # in tmux (session "monday"), so a dropped WiFi or a closed window does not stop the run half-way
+      tmux kill-session -t monday 2>/dev/null || true
+      tmux new-session -s monday "cd '$REPO' && $PIN python3 tools/fleet/mission_run.py --table '$TABLE' --robots '$ROB' --calib '$CALIB' ${SIDECAL:+--side-calib '$SIDECAL'} --upload --recordings '$OUT' $EXTRA; read -r -p 'Mission ended. Press Enter.'"
+      echo "If the window closed: tmux attach -t monday   (Ctrl+C in it stops every robot)"
+    fi ;;
+  mc)
+    [ "$DRY" = 1 ] || start_recorder
+    echo "Mission Control: http://100.122.222.75:8095 in the laptop's browser (Ctrl+C here stops it)"
+    python3 tools/fleet/mission_control.py --dir logs/mission-control --listen 0.0.0.0 --allow-host 100.122.222.75 ;;
   ladder-status)   # (no recorder needed)
     D=""; [ "$DRY" = 1 ] && D="--dry"
     python3 tools/fleet/ladder.py status $D ;;
@@ -232,5 +259,5 @@ case "$WHAT" in
     python3 tools/pi/upload_session.py --recordings "$OUT" --stop-recorder --no-logs --tag "p0-$DAY-recording" || true
     tmux kill-session -t fleet 2>/dev/null || true ;;
   *)
-    sed -n '2,32p' "$0"; exit 1 ;;
+    sed -n '2,37p' "$0"; exit 1 ;;
 esac

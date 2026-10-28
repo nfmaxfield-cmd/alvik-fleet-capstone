@@ -72,7 +72,7 @@ svg.table{width:100%;height:auto;display:block;background:#fff;border-radius:8px
 <main id="main"></main>
 <script>
 "use strict";
-const STEPS = ["Connect", "Workspace", "Warm-up", "Mission", "Run", "Review"];
+const STEPS = ["Connect", "Setup", "Workspace", "Warm-up", "Mission", "Run", "Review"];
 const COL = {Left: "#2952CC", Center: "#C2410C", Right: "#7A3EC8"};
 const SIDES = ["x_min", "x_max", "y_min", "y_max"];
 const SIDE_WORDS = {x_min: "Left side", x_max: "Right side", y_min: "Bottom side (audience)", y_max: "Top side"};
@@ -175,7 +175,7 @@ function render() {
   const st = $("status");
   if (run && run.running) { st.className = "status warn"; st.lastChild.textContent = run.paused ? "Paused" : `Running ${run.kind} · ${fmt(run.elapsed_s)}`; }
   else { st.className = "status"; st.lastChild.textContent = `${S.map.robots.length} robots ready`; }
-  [connect, workspace, warmup, mission, runScreen, review][screen]();
+  [connect, setup, workspace, warmup, mission, runScreen, review][screen]();
 }
 function page(left, right) { $("main").innerHTML = `<section class="left">${left}<div class="err" id="err"></div></section><aside>${right}</aside>`; wireSettings($("main")); }
 
@@ -183,17 +183,40 @@ function connect() {
   page(`<div><h1>Connect</h1><p class="sub">Choose the robots or the simulator. The simulator runs the same plans on simulated Alviks.</p></div>
     <div class="card"><div class="modes">
       <button class="${conn === "sim" ? "on" : ""}" data-c="sim"><b>Simulator</b><span class="small muted">Dry run on this computer</span></button>
-      <button class="${conn === "robots" ? "on" : ""}" data-c="robots"><b>Robots</b><span class="small muted">Left, Center, Right on the room's WiFi</span></button>
+      <button class="${conn === "sim-cameras" ? "on" : ""}" data-c="sim-cameras"><b>Simulator through the cameras</b><span class="small muted">The simulated overhead and side cameras through the camera bridge, as on the Pi</span></button>
+      <button class="${conn === "robots" ? "on" : ""}" data-c="robots"><b>Robots</b><span class="small muted">On the room's WiFi, the Pi's two cameras</span></button>
     </div></div>
     <div class="card">${tableSVG({robots: Object.fromEntries(S.map.robots.map(r => [r.name, r.start]))})}
       <div class="legend" style="margin-top:8px">${S.map.robots.map(r => `<span><span class="dot" style="background:${COL[r.name]}"></span>${esc(r.name)} at (${r.start[0]}, ${r.start[1]})</span>`).join("")}</div>
       <p class="small muted" style="margin:6px 0 0">Robots drawn where the map puts them to start; the table seen from above, audience side at the bottom.</p></div>`,
-    `<div class="card"><h2>Robots</h2>${S.map.robots.map(r => `<div class="between" style="padding:8px 0;border-bottom:1px solid #F0F1F3"><b><span class="dot" style="background:${COL[r.name]}"></span>${esc(r.name)}</b><span class="muted small">${conn === "sim" ? "simulated" : "firmware 2026-10-27a expected"}</span></div>`).join("")}
-      <p class="small muted">${conn === "robots" ? "Robots: flash firmware 2026-10-27a (second WiFi network, four-sided border). Mission Control starts run_plan.py, which checks each robot's firmware and calibration before anything moves." : "Simulator: no robots needed."}</p>
+    `<div class="card"><h2>Robots</h2>${S.map.robots.map(r => `<div class="between" style="padding:8px 0;border-bottom:1px solid #F0F1F3"><b><span class="dot" style="background:${COL[r.name]}"></span>${esc(r.name)}</b><span class="muted small">${conn !== "robots" ? "simulated" : "firmware 2026-10-28a expected"}</span></div>`).join("")}
+      <p class="small muted">${conn === "robots" ? "Robots: firmware 2026-10-28a (the arc and the dance; the school's network). Before anything moves the engine checks each robot's firmware, battery (25 % floor), restarts (calibrates again), and reads back every setting it sends." : "Simulator: no robots needed."}</p>
       ${more("More", settingsTable("run", ["edge_guard", "border_cm", "timeout_s"]))}</div>
       <button class="p" id="go">Continue to workspace</button>`);
   $("main").querySelectorAll("[data-c]").forEach(b => b.onclick = () => { conn = b.dataset.c; render(); });
   $("go").onclick = () => { done.add(0); screen = 1; render(); };
+}
+
+// ---------------------------------------------------------------- one-button setup (flash check, chessboard, warm-up)
+let setupPoll = null;
+function setup() {
+  const j = S.setup || {};
+  page(`<div><h1>Set up the cameras</h1><p class="sub">One button: the flash check, then the chessboard in the 0,0 corner for both cameras, then the warm-up. About 3 minutes.</p></div>
+    <div class="card"><h2>Before you press it</h2><ol class="small">
+      <li>Both cameras on, the recorder stopped (the setup page needs the cameras).</li>
+      <li>The robots on the table, switched on (their lights are flashed).</li>
+      <li>The printed chessboard flat in the table's <b>0,0 corner</b>: its short edge along the table's long side, its corner in the table's corner.</li>
+      <li>Then take the chessboard away before the warm-up starts.</li></ol></div>
+    <div class="card"><h2>Progress</h2><div class="log" id="slog">${esc((j.steps || []).map(x => x.join("  ")).join("\n")) || "Not started"}</div>
+      ${j.error ? `<p class="err">${esc(j.error)}</p>` : ""}</div>`,
+    `<div class="card"><h2>Setup</h2><p class="small muted">${conn === "robots" ? "The Pi's cameras" : "Simulated cameras (the setup page's own fake board and robots)"}</p>
+      <button class="p" id="sgo" ${j.running ? "disabled" : ""}>${j.running ? "Running..." : "Set up (flash check, chessboard, warm-up)"}</button>
+      ${more("More", `<p class="small muted">Each part can be run alone on the camera setup page (port 8096): <code>./run-fleet-pi.sh setup</code>.</p>`)}</div>
+      <button class="b" id="go">Continue to workspace</button>`);
+  $("sgo").onclick = async () => { try { S.setup = await api("/api/setup/start", {conn}); render(); clearInterval(setupPoll);
+    setupPoll = setInterval(async () => { S.setup = await api("/api/setup"); if (screen === 1) render(); if (!S.setup.running) { clearInterval(setupPoll); load(); } }, 1500); } catch (e) { flash(e.message, true); } };
+  $("go").onclick = () => { done.add(1); screen = 2; render(); };
+  const lg = $("slog"); if (lg) lg.scrollTop = lg.scrollHeight;
 }
 
 function workspace() {
@@ -240,7 +263,7 @@ function workspace() {
   $("main").querySelectorAll("[data-side]").forEach(s => s.onchange = () => wsSave());
   $("savews").onclick = () => wsSave();
   $("main").querySelectorAll("[data-ts]").forEach(b => b.onclick = () => { const [w, l] = b.dataset.ts.split("x"); $("len").value = l; $("wid").value = w; wsSave(); });
-  $("go").onclick = async () => { await wsSave(); done.add(1); screen = 2; render(); };
+  $("go").onclick = async () => { await wsSave(); done.add(2); screen = 3; render(); };
 }
 async function saveMap(d) { try { S = await api("/api/map", d); render(); } catch (e) { flash(e.message, true); } }
 async function wsSave() {
@@ -268,17 +291,17 @@ function warmup() {
       <div class="row"><label class="row small"><input type="checkbox" id="mv"> move sides to where they were found</label><button class="p" id="apply">Use these answers</button></div></div>
       <div class="card eng"><h2>How the robots mapped the table</h2>${res.svg}<p class="small muted">Lines: each robot's path seen by the camera. Red circles: open edges found; filled: barriers; dashed: something on the table. Source: ${esc(res.folder)}</p></div>` : ""}`,
     `<div class="card"><h2>Steps</h2><div class="row" style="margin-top:8px"><button class="b" id="wplan">Plan warm-up</button>
-      <button class="p" id="wrun" ${run && run.running ? "disabled" : ""}>Run warm-up (${conn === "sim" ? "simulator" : "robots"})</button>
+      <button class="p" id="wrun" ${run && run.running ? "disabled" : ""}>Run warm-up (${conn === "robots" ? "robots" : "simulator"})</button>
       <button class="b" id="wan" ${S.last_runs.warmup ? "" : "disabled"}>Read the results</button></div>
       ${run ? `<p class="small">${run.running ? "Running " + fmt(run.elapsed_s) : "Finished"}</p><div class="log">${esc((run.messages || []).slice(-8).map(m => m[1]).join("\n"))}</div>` : ""}
       ${more("More", settingsTable("warmup") + (conn === "sim" ? `<h3 style="margin-top:10px">Simulator: the real table</h3>` + settingsTable("run", ["sim_true_sides", "sim_true_objects"]) : ""))}</div>
       <button class="p" id="go">Continue to mission</button>`);
   $("wplan").onclick = async () => { try { flash("Planning..."); await api("/api/warmup/plan", {}); await load(); flash("Planned"); } catch (e) { flash(e.message, true); } };
-  $("wrun").onclick = async () => { try { await api("/api/run/start", {kind: "warmup", dry: conn === "sim"}); startPoll(); await load(); } catch (e) { flash(e.message, true); } };
+  $("wrun").onclick = async () => { try { await api("/api/run/start", {kind: "warmup", dry: conn !== "robots", conn}); startPoll(); await load(); } catch (e) { flash(e.message, true); } };
   $("wan").onclick = async () => { try { flash("Reading..."); await api("/api/warmup/analyze", {}); await load(); flash("Done"); } catch (e) { flash(e.message, true); } };
   if ($("apply")) $("apply").onclick = async () => { const keep = [...document.querySelectorAll("[data-zk]")].filter(c => c.checked).map(c => c.dataset.zk);
     try { S = await api("/api/warmup/apply", {keep_zones: keep, move_sides: $("mv").checked}); flash("The workspace now has these sides and zones"); render(); } catch (e) { flash(e.message, true); } };
-  $("go").onclick = () => { done.add(2); screen = 3; render(); };
+  $("go").onclick = () => { done.add(3); screen = 4; render(); };
 }
 
 const MODES = [["program", "Monday (blocks)", "2 robots: mow, meet, circle, mow on, Chicken, spread out, dance"],
@@ -353,7 +376,7 @@ function mission() {
     if (mode === "program") { try { prog = readProgram(); body.program = prog; } catch (e) { flash(e.message, true); return; } }
     try { flash("Planning... (Monday takes about 10-30 s)"); $("plan").disabled = true; await api("/api/mission", body); await load(); playT = 0; flash("Planned"); } catch (e) { flash(e.message, true); $("plan").disabled = false; }
   };
-  $("go").onclick = () => { done.add(3); screen = 4; render(); };
+  $("go").onclick = () => { done.add(4); screen = 5; render(); };
   if (mode === "program") wireBlocks();
   wirePreview(pv);
 }
@@ -387,26 +410,34 @@ function wirePreview(pv) {
 function runScreen() {
   const run = S.run && S.run.kind !== "warmup" ? S.run : null, pv = S.preview && S.preview.title !== "Warm-up" ? S.preview : null;
   page(`<div class="between"><div><h1>${pv ? esc(MODES.find(m => m[0] === String(pv.title).toLowerCase())?.[1] || pv.title) : "Run"}</h1><p class="sub">${run ? `${fmt(run.elapsed_s)} in${pv ? " · planned " + fmt(pv.makespan_s) : ""}` : "Not started"}</p></div>
-      <div class="row"><button class="p" id="start" ${run && run.running ? "disabled" : ""}>Run (${conn === "sim" ? "simulator" : "robots"})</button>
+      <div class="row"><button class="p" id="start" ${run && run.running ? "disabled" : ""}>Run (${conn === "robots" ? "robots" : "simulator"})</button>
       <button class="b" id="pause" ${run && run.running ? "" : "disabled"}>${run && run.paused ? "Resume" : "Pause"}</button><button class="p stop" id="stop" ${run && run.running ? "" : "disabled"}>Stop</button></div></div>
     <div class="card">${tableSVG({paths: pv ? pv.paths : {}, pathOp: .25, robots: run ? run.robots : {}, obstacles: pv ? pv.obstacles : []})}
-      <p class="small muted" style="margin:8px 0 0">Where the camera sees each robot now (${conn === "sim" ? "simulated camera" : "overhead camera"}), over the planned routes.</p></div>`,
-    `${S.map.robots.map(r => `<div class="card"><div class="between"><b><span class="dot" style="background:${COL[r.name]}"></span>${esc(r.name)}</b><span class="small muted">${run && run.robots[r.name] ? `(${run.robots[r.name][0].toFixed(0)}, ${run.robots[r.name][1].toFixed(0)})` : ""}</span></div><span class="small muted">${esc(run && run.doing && run.doing[r.name] || (run && run.running ? "driving" : "waiting"))}</span></div>`).join("")}
+      <p class="small muted" style="margin:8px 0 0">Where the camera sees each robot now (${conn === "robots" ? "overhead camera" : "simulated camera"}), over the planned routes.</p></div>
+    ${run && run.mode && run.mode !== "sim" ? `<div class="card"><h3>The cameras now</h3><div class="row" style="align-items:flex-start">
+      <figure style="margin:0;flex:1 1 300px"><img id="camo" alt="The overhead camera's picture with each robot ringed" src="/api/frame?cam=overhead&t=${Date.now()}" style="width:100%;border-radius:8px"><figcaption class="small muted">Overhead camera (${run.mode === "robots" ? "the Pi's" : "simulated"}): each robot ringed in its colour where the camera bridge has it, planned routes as thin lines.</figcaption></figure>
+      <figure style="margin:0;flex:1 1 300px"><img id="cams" alt="The side camera's picture with each robot ringed" src="/api/frame?cam=side&t=${Date.now()}" style="width:100%;border-radius:8px" onerror="this.parentElement.style.display='none'"><figcaption class="small muted">Side camera, the same rings.</figcaption></figure></div></div>
+      <div class="card eng"><h3>How the robots mapped the table</h3><div id="mapv">Loading...</div><p class="small muted">Each robot's path as the camera bridge saw it this run, in its colour (mapview.py).</p></div>` : ""}`,
+    `${(pv ? Object.keys(pv.frames) : S.map.robots.map(r => r.name)).map(n => { const lv = run && run.live && run.live.robots ? run.live.robots[n] : null;
+      return `<div class="card"><div class="between"><b><span class="dot" style="background:${COL[n]}"></span>${esc(n)}</b><span class="small muted">${run && run.robots[n] ? `(${run.robots[n][0].toFixed(0)}, ${run.robots[n][1].toFixed(0)})` : ""}</span></div>
+      <span class="small muted">${esc(lv && lv.out ? "OUT: " + lv.out : (lv && lv.doing) || (run && run.doing && run.doing[n]) || (run && run.running ? "driving" : "waiting"))}</span>
+      ${lv ? `<div class="row small" style="margin-top:6px;gap:14px"><span>Battery <b>${lv.battery ?? "-"} %</b></span><span>Edge <b>${lv.edge_cm ?? "-"} cm</b></span><span>Steps <b>${lv.done}/${lv.steps}</b></span></div><div class="small muted">${esc(lv.last || "")}</div>` : ""}</div>`; }).join("")}
      <details class="card" ${document.body.classList.contains("details") ? "open" : ""}><summary style="cursor:pointer;font-weight:500">Event log</summary><div class="log" id="log">${run ? esc((run.messages || []).map(m => `[${m[0]}] ${m[1]}`).join("\n")) : ""}</div></details>
      <div class="card">${more("More", settingsTable("run"))}</div>
      <button class="p" id="go" ${run && !run.running ? "" : "disabled"}>Review</button>`);
-  $("start").onclick = async () => { try { await api("/api/run/start", {kind: "mission", dry: conn === "sim"}); startPoll(); await load(); } catch (e) { flash(e.message, true); } };
+  $("start").onclick = async () => { try { await api("/api/run/start", {kind: "mission", dry: conn !== "robots", conn}); startPoll(); await load(); } catch (e) { flash(e.message, true); } };
   $("pause").onclick = async () => { try { await api("/api/run/pause", {on: !(run && run.paused)}); await load(); } catch (e) { flash(e.message, true); } };
   $("stop").onclick = async () => { try { await api("/api/run/stop", {}); await load(); } catch (e) { flash(e.message, true); } };
-  $("go").onclick = () => { done.add(4); screen = 5; render(); };
+  $("go").onclick = () => { done.add(5); screen = 6; render(); };
   const lg = $("log"); if (lg) lg.scrollTop = lg.scrollHeight;
+  if ($("mapv")) api("/api/mapping").then(r => { $("mapv").innerHTML = r.svg; }).catch(() => {});
 }
-function startPoll() { clearInterval(pollT); pollT = setInterval(async () => { const r = await api("/api/run"); S.run = r; if (screen === 4 || screen === 2) render(); if (!r.running) { clearInterval(pollT); load(); } }, 1000); }
+function startPoll() { clearInterval(pollT); pollT = setInterval(async () => { const r = await api("/api/run"); S.run = r; if (screen === 5 || screen === 3) render(); if (!r.running) { clearInterval(pollT); load(); } }, 1000); }
 
 async function review() {
   page(`<div><h1>Review</h1><p class="sub">The last run: what happened against the plan.</p></div><div id="rv" class="card">Loading...</div>`,
     `<div class="card"><h2>Next</h2><p class="small muted">Change the mission or the workspace and run again; every run is kept in its own folder.</p><button class="b" id="again">Back to mission</button></div>`);
-  $("again").onclick = () => { screen = 3; render(); };
+  $("again").onclick = () => { screen = 4; render(); };
   let r;
   try { r = await api("/api/review"); } catch (e) { $("rv").innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
   const s = r.run_plan_summary || {}, sim = r.sim_report || (s.simulator || {});

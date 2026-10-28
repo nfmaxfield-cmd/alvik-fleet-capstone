@@ -2,6 +2,7 @@
 overhead camera, the check picture, the config files the launchers read (and their fallback), the flash check's
 measurements and recommendation, the lag onset, camrec's --overhead-exposure, and the page's API on --fake."""
 import json
+import math
 import os
 import subprocess
 import sys
@@ -260,3 +261,27 @@ def test_side_calibration_on_the_fake_board(conf, tmp_path):
     d = json.load(open(path))
     assert d["offset_cm"] == [0.0, 0.0] and "camera_setup" in d
     over.stopping = side.stopping = True
+
+
+# ------------------------------------------------------------------ part 3: the chessboard corner piece (2026-10-28)
+def test_checker_gives_both_cameras_pose_and_height(tmp_path, monkeypatch):
+    """The fake overhead (roam1 moved) and the fake side camera each see the chessboard in the 0,0 corner: the solved
+    poses put floor points where the true cameras do, and the lens heights come out right."""
+    import charuco_calib as CC
+    w = CS.FakeWorld()
+    w.checker = True
+    for which in ("overhead", "side"):
+        src = CS.FakeSource(w, which, fps=1000, seed=2)
+        ok, f = src.read()
+        true = src.cam
+        corners = CS.board_corners_px(true).tolist()
+        loop = corners[1:] + corners[:1]                 # any start
+        r = CC.solve_checker(f, np.array(true.K, float), np.array(true.dist, float).ravel(), tuple(true.image_size),
+                             (CS.CAM.BOARD_W_CM, CS.CAM.BOARD_L_CM), loop, name=which)
+        assert r["ok"], r
+        cam = CS.CAM.CameraModel.from_dict(r["model"])
+        assert abs(r["height_cm"] - true.center[2]) < 3.0
+        for x, y in ((0, 0), (61, 61), (120, 5), (5, 120), (118, 118)):
+            fx, fy = cam.to_floor(*true.project((x, y, 0)))
+            assert math.hypot(fx - x, fy - y) < 1.5, (which, x, y, fx, fy)
+        assert np.allclose(r["corners_px"][0], corners[0], atol=1e-6)        # it found which corner is 0,0

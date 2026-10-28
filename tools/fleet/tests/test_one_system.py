@@ -161,3 +161,18 @@ def test_firmware_host_compiles():
     assert '#define FW_VERSION "2026-10-28a"' in src
     ex = open(os.path.join(REPO, "firmware", "home_lab", "secrets.example.h")).read()
     assert '#define WIFI_SSID2     "ISE"' in ex and "type-the-school-password-here" in ex
+
+
+def test_mission_control_plans_the_block_program(tmp_path):
+    import mission_control as MC
+    S = MC.Session(str(tmp_path))
+    S.set_map({"floor": {"x_min": 0, "y_min": 0, "x_max": 130, "y_max": 70}})
+    st = S.state()
+    assert st["program"]["robots"] == ["Left", "Right"] and [b["block"] for b in st["program"]["blocks"]][3] == "circle"
+    r = S.make_mission({"mode": "program", "program": st["program"]})
+    pv = r["preview"]
+    assert set(pv["frames"]) == {"Left", "Right"} and pv["summary"]["closest_cm"] >= 8.0
+    assert len(pv["paths"]["Left"]) > 20                     # the circle drawn through points along it
+    assert os.path.exists(os.path.join(str(tmp_path), "program.json"))
+    two = S.default_program(["Center", "Right"])["program"]
+    assert two["robots"] == ["Center", "Right"]

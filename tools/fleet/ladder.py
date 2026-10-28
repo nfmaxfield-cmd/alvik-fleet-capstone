@@ -1368,8 +1368,12 @@ class Ladder:
         m["spots"] = {}
         for n, q in (via or {}).items():           # in through the corner: the last leg runs along the start heading
             if n in need:
-                m["spots"]["in-" + n] = list(q)
-                m["tasks"][n]["visit"] = [{"spot": "in-" + n}]
+                # as a run-in (planner.py, one system 2026-10-28): the straight last leg is part of the target, so a
+                # re-plan on the way keeps it (14:30 L4: a re-plan dropped the corner and Left reached its start on
+                # an 8 cm drive plus a 57 deg turn); its end checks the camera heading against the robot's
+                x, y, h = need[n]
+                m["tasks"][n] = {"visit": [{"goto": [round(x, 2), round(y, 2), round(h, 2)],
+                                            "run_in_cm": round(math.dist(q[:2], (x, y)), 2)}], "park": False}
         r = self.run_planned("drive-" + tag, m, {n: at[n] for n in need}, sub, gate=False)
         if r["summary"].get("result") != "done":
             raise LadderStop("the drive to %s's start did not finish (%s). Look at %s/bridge.txt and the live picture"
