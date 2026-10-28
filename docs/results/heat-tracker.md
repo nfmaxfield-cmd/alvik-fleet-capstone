@@ -11,8 +11,16 @@ pictures a second (-1 to +1; near 0 = no link, or temperature barely varied).
 | e02-20261026-095541 | none (bare Pi) | 84.2 / 86.2 | 68 | 4 / 80 / 17 % | 24.9 / 17.9 / 17.6 | 0.24 | -0.24 |
 | e02-20261027-001136 | unknown | 80.8 / 85.2 | 11 | 63 / 37 / 0 % | 18.3 / 15.9 / - | 0.22 | -0.22 |
 | e02-20261027-002947 | unknown | 84.2 / 86.2 | 30 | 0 / 85 / 15 % | - / 13.8 / 12.4 | 0.28 | -0.24 |
+| 20261027-213425-doe | unknown | 74.0 / 79.4 | 0 | 100 / 0 / 0 % | 25.0 / - / - | 0.07 | 0.01 |
 
 ## Readings (newest first)
+- **20261027-213425-doe (DOE loop, 29 min, cooling not in the logs):** the Pi stayed at 69-79 C (median 74) at the full
+  1800 MHz clock the whole run, never under the soft limit or throttling (the logged "soft limit has happened" flag is
+  left over from earlier since boot). Cooler than the 26-27 Oct sessions (80-86 C), with the tracking now split into a
+  process per camera. The session ended at 22:03 because the Pi's card was full, not from heat.
+  ![Pi temperature and camera speed, DOE loop](heat/20261027-213425-doe.png)
+  The Pi's temperature and the pictures the camera handled each second, over the session; data: the session's cpu.csv
+  and perf.csv.
 - **e02-20261027-001136 (E1) and e02-20261027-002947 (E2), cooling not in the logs:** E1 started
   cooler (median 80.8 C, no flag 63 % of the time); E2 followed straight on and sat at 84-86 C, under the soft limit 85 %
   of the time and throttling 15 %. These are the first sessions that log the Pi's real clock (`arm_mhz`), and it
