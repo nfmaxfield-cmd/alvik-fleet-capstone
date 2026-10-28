@@ -868,7 +868,10 @@ def flash_length_checks(rec, sync_video_times, sync_ms=300.0, max_blink_ms=220.0
 # every camera fix after that is off by the same amount. Dock v5 (hardware/dock/build_dock_v5.py, 2026-10-25): a
 # strip of 2 x 6 squares of 15 mm (3.0 cm along the dock, 9.0 cm across it) on the base at the bottom of the U. Only
 # ECC translation tracking uses it (no chessboard finder, no pose), so a rectangle works; the patch around it is a
-# rectangle too, so the docked robot beside it stays out of the patch. (Docks v1-v4: a 4 cm square tile.)
+# rectangle too, so the docked robot beside it stays out of the patch. (Docks v1-v4: a 4 cm square tile.) Dock v6
+# (2026-10-28): the same pattern, size and place, now PRINTED (docs/hardware/checker-pieces-letter.pdf, piece E, on stiff
+# card in a 0.6 mm pocket; tools/pi/checker_pieces.py): its top 0.05 mm lower than the 3D-printed strip's, so the
+# numbers below stand. Tested on synthetic pictures: a 0.5 px camera bump reads 0.45-0.51 px.
 
 DOCK_TILE_CENTER_CM = 1.84 + 0.4  # marker centre behind the bump faces (build_dock_v5 STRIP_CX_MM 18.4 behind the
                                   # U's inner face, + the bumps' 4 mm)

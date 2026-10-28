@@ -30,7 +30,9 @@ ROBOT_TOP_L_CM = 9.60
 ROBOT_TOP_Z_CM = 3.72
 # The dock's marker strip (hardware/dock/build_dock_v5.py STRIP_LEN_MM x STRIP_DEP_MM, printed size), lying in the
 # base's recess, its top at the base's height (WALL_H_MM 22). Measure the print with calipers and pass the measured
-# length (mark_robot.py --strip-mm): prints come out 0.1-0.3 % off.
+# length (mark_robot.py --strip-mm): prints come out 0.1-0.3 % off. Dock v6 (2026-10-28): the strip is the PAPER dock
+# piece E of docs/hardware/checker-pieces-letter.pdf (same 90 x 30 mm, cut on its own edge): measure its long side
+# with a ruler along the squares' edges (a cut edge can be 0.5 mm off; the 7 square edges along it are the printer's).
 STRIP_LONG_CM = 9.00
 STRIP_SHORT_CM = 3.00
 STRIP_Z_CM = 2.20

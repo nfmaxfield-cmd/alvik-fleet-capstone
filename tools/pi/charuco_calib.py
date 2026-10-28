@@ -10,7 +10,7 @@ add points across the whole table, so the far end is not an extrapolation. Out: 
 a floor calibration file per camera (the studio form e02_camera.load_camera reads), and how well the two cameras
 agree on the table's corners.
 
-    python3 tools/pi/charuco_calib.py print --out board.png          # the board to print (letter, 300 dpi)
+    python3 tools/pi/charuco_calib.py print --out pieces.pdf         # the checker pieces PDF (checker_pieces.py; .png: the corner piece alone)
     python3 tools/pi/charuco_calib.py solve --image over.png --intrinsics overhead_floorcal.json \\
         --table 122x61 [--corners u,v;u,v;u,v;u,v] --out overhead_charuco.json
 
@@ -47,6 +47,8 @@ BOARD_OFFSET_CM = (0.0, 0.0)   # the print's bottom-left corner at the table's 0
 CHECK_SQUARES = (5, 7)  # chosen: 5 x 7 squares (4 x 6 inner corners). DOE note: as SQUARES
 CHECK_CM = 3.5          # 5 x 3.5 = 17.5 cm, 7 x 3.5 = 24.5 cm: inside a letter or A4 sheet's printable area at actual size
                         # (3.8 cm left 0.3 cm for the printer's margins: "fit to page" would shrink the squares)
+CHECK_MARGIN_CM = 0.5   # the white margin round the squares (checker_pieces.py piece A, and the 2026-10-28 PDF): the
+                        # paper's corner sits in the table's corner, so the squares start this far in on both sides
 MIN_CORNERS = 6         # a picture with fewer board corners found is not used. No DOE: solvePnP needs a few points
 
 
@@ -100,15 +102,11 @@ def checker_png(path, dpi=300, margin_cm=0.5):
 
 
 def render_checker(model, size=None, base=None, px_per_cm=20):
-    """The chessboard lying in the 0,0 corner as camera `model` sees it (tests, fake cameras)."""
-    nx, ny = CHECK_SQUARES
-    tex = np.full((int(ny * CHECK_CM * px_per_cm), int(nx * CHECK_CM * px_per_cm)), 255, np.uint8)
-    q = CHECK_CM * px_per_cm
-    for j in range(ny):
-        for i in range(nx):
-            if (i + j) % 2 == 0:
-                tex[int(j * q):int((j + 1) * q), int(i * q):int((i + 1) * q)] = 0
-    w_cm, h_cm = nx * CHECK_CM, ny * CHECK_CM
+    """The corner piece (checker_pieces.py piece A: white margin, white dot in the 0,0 square) lying with its paper
+    corner in the table's 0,0 corner as camera `model` sees it (tests, fake cameras)."""
+    import checker_pieces as CP
+    tex = CP.piece_texture(CP.CORNER, px_per_cm / 10.0)
+    w_cm, h_cm = tex.shape[1] / px_per_cm, tex.shape[0] / px_per_cm
     src = np.float32([[0, 0], [tex.shape[1], 0], [tex.shape[1], tex.shape[0]], [0, tex.shape[0]]])
     floor = [(0, h_cm), (w_cm, h_cm), (w_cm, 0), (0, 0)]
     dst = np.float32([model.project((x, y, 0.0)) for x, y in floor])
@@ -138,10 +136,17 @@ def solve_checker(img, K, dist, image_size, table, table_corners_px, name="overh
     table's long side: the labelling whose floor-to-picture mapping puts the board's corners on CHECK_CM squares).
     Returns as solve(), plus "corners_px": the table's corners in floor order (0,0 / L,0 / L,W / 0,W)."""
     from cameras import CameraModel
+    import checker_pieces as CP
     L, W = table
+    m = CHECK_MARGIN_CM
     c, pat = detect_checker(img)
     if c is None:
         return {"ok": False, "why": "the chessboard was not found: is all of it in the picture, flat, evenly lit?"}
+    # the white dot (2026-10-28 pieces): which corner square is the piece's 0,0; None on a print without the dot
+    piece = CP.detect_piece(img, CP.CORNER)
+    dot_px = None
+    if piece.get("found") and piece.get("oriented"):
+        dot_px = piece["corners"][0]
     loop = [tuple(map(float, q)) for q in table_corners_px]
     cen = c.mean(0)
     k0 = int(np.argmin([math.hypot(u - cen[0], v - cen[1]) for u, v in loop]))
@@ -151,7 +156,7 @@ def solve_checker(img, K, dist, image_size, table, table_corners_px, name="overh
         Hm = cv2.getPerspectiveTransform(np.float32([[0, 0], [L, 0], [L, W], [0, W]]), np.float32(order))
         fl = cv2.perspectiveTransform(c.reshape(-1, 1, 2), np.linalg.inv(Hm)).reshape(-1, 2)
         # the board's corners on the floor under this labelling: on a grid of CHECK_CM from the corner?
-        g = fl / CHECK_CM
+        g = (fl - m) / CHECK_CM
         gi = np.round(g)
         # the board's short side lies along x: inner corners 1..4 along x and 1..6 along y (this also settles a
         # square table, where the long-side rule cannot)
@@ -159,10 +164,18 @@ def solve_checker(img, K, dist, image_size, table, table_corners_px, name="overh
             gi[:, 1].max() == CHECK_SQUARES[1] - 1
         err = float(np.median(np.abs(g - gi))) + (0.0 if shape_ok else 1.0)
         if best is None or err < best[0]:
-            best = (err, order, fl)
-    err, order, fl = best
-    grid = np.round(fl / CHECK_CM)
-    obj = np.column_stack([grid * CHECK_CM, np.zeros(len(grid))])
+            best = (err, order, fl, Hm)
+    err, order, fl, Hm = best
+    grid = np.round((fl - m) / CHECK_CM)
+    obj = np.column_stack([grid * CHECK_CM + m, np.zeros(len(grid))])
+    dot_agrees = None
+    if dot_px is not None:
+        # the piece's own first inner corner (next to the dot) must be the one nearest the table's 0,0 corner
+        d = cv2.perspectiveTransform(np.float64(dot_px).reshape(1, 1, 2), np.linalg.inv(Hm)).reshape(2)
+        dot_agrees = bool(np.hypot(d[0] - (m + CHECK_CM), d[1] - (m + CHECK_CM)) < CHECK_CM / 2)
+        if not dot_agrees:
+            return {"ok": False, "why": "the corner piece is turned: put the corner square with the white dot in the "
+                                        "table's 0,0 corner, the 5-square side along x", "dot_agrees": False}
     if err > 0.2:
         return {"ok": False, "why": "the chessboard is not lying in a table corner square to its sides (grid error %.2f)"
                 % err}
@@ -182,7 +195,7 @@ def solve_checker(img, K, dist, image_size, table, table_corners_px, name="overh
     return {"ok": True, "model": model.to_dict(), "height_cm": round(float(C[2]), 1),
             "nadir_cm": [round(float(C[0]), 1), round(float(C[1]), 1)], "board_corners": n,
             "board_err_px": round(float(np.median(e[:n])), 2), "table_err_px": round(float(np.max(e[n:])), 2),
-            "corners_px": [list(map(float, q)) for q in order]}
+            "corners_px": [list(map(float, q)) for q in order], "dot_agrees": dot_agrees}
 
 
 def detect(img, b=None):
@@ -265,7 +278,12 @@ def main(argv=None):
     ap.add_argument("--name", default="overhead")
     a = ap.parse_args(argv)
     if a.what == "print":
-        # the chessboard corner piece the setup uses: print at actual size (100 %), check a square measures CHECK_CM
+        # the checker pieces (the corner piece the setup uses is piece A): print at actual size (100 %)
+        if a.out.lower().endswith(".pdf"):
+            import checker_pieces as CP
+            print(CP.make_pdf(a.out))
+            print("print at actual size (100 %, not 'fit to page'); each 5 cm bar must measure 5 cm")
+            return 0
         print(checker_png(a.out))
         print("print at actual size (100 %%, not 'fit to page'); each square must measure %.1f cm" % CHECK_CM)
         return 0

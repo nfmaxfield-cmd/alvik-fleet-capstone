@@ -140,8 +140,9 @@ the robot sits a little off its measured height.</sub>
 
 **Dock v6** (`stl/dock_v6.stl`, 161 × 145 × 22 mm, one print, bottom down, brim on): v5 with the crowns at dock
 X −45.9 (under the cover's pads), two spring pockets per prong, the wire groove under the prong's middle, the wider
-mouth. Bumps, post stations, marker strip, pocket and firmware numbers: as v5. All post-station checks pass. Attachment
-and marker strip: v5's files, unchanged.
+mouth. Bumps, post stations, marker strip, pocket and firmware numbers: as v5. All post-station checks pass. Attachment:
+v5's file, unchanged. Marker (2026-10-28): the printed dock piece E of `docs/hardware/checker-pieces-letter.pdf` (the
+same 90 x 30 mm pattern) glued on stiff card in the same pocket, now 0.6 mm deep; `marker_strip_v5.stl` is not needed.
 
 ## Conclusion: battery fit and charge levels
 
@@ -197,7 +198,8 @@ standing, so moving is 18.4-19.5 %/h and standing 13.1-15.8. They agree with the
 
 1. **Nick, before printing:** measure the battery cover and weigh the caster (Appendix B, step 0); tell Claude if a
    number is off by more than 1 mm (the carrier and crowns move with it).
-2. **Order and print** (Appendix F): dock v6, pad carrier v6, attachment v5, marker strip v5. Pick the springs (penny
+2. **Order and print** (Appendix F): dock v6, pad carrier v6, attachment v5; print the checker pieces PDF (piece E is
+   the dock's marker). Pick the springs (penny
    test), fit the carrier and contacts, paper-stack check.
 3. **Bench test 1 (charge curve) and the sleep-drain test.** The levels pick both up by themselves. Then
    `python tools/dock/charge_policy_sim.py --compare --learned` decides plain, top-up or rest.
@@ -301,7 +303,9 @@ You should see lines starting `ok`, one starting `WARN`, and none starting `FAIL
 1. `dock_v6.stl`: bottom down, brim on, black.
 2. `pad_carrier_v6.stl`: as exported, no support.
 3. `attachment_v5.stl`: upside down as exported, supports on.
-4. `marker_strip_v5.stl`: white; filament change (M600) at 1.2 mm.
+4. The marker: not a 3D print any more. Print `docs/hardware/checker-pieces-letter.pdf` at actual size, cut out piece E
+   (90 x 30 mm, on its grey edge line), glue it flat on cereal-box card, cut the card to the same edge, press it into the
+   pocket on top of the base, long side across the dock.
 
 **Picking the springs** (four alike, two per plate; kitchen scale, zeroed; a flat stick). Choose from the assortment
 springs about 3 mm across (2.5-3.0) and 5-7 mm long; the box's chart lists both. Stand one spring upright on the

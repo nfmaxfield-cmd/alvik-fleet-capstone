@@ -10,8 +10,11 @@ writes
     stl/pad_carrier_v6.stl     the pad carrier: a 2.4 mm plate stuck to the battery cover with thin double-sided tape
                                (no drilling, the cover's screw stays free), two pads of the same 1/4 in brass strip, lanes
                                for the crowns, wire channels on its top face to the back edge
-    (attachment: attachment_v5.stl, unchanged; marker strip: marker_strip_v5.stl, unchanged)
-    preview/dock_v6.png, docked_v6.png (sections), contact_v6.png (one contact from the side and end on: the two springs),
+    (attachment: attachment_v5.stl, unchanged. Marker: the PRINTED dock piece E of docs/hardware/checker-pieces-letter.pdf,
+    90 x 30 mm, glued on stiff card into a 0.6 mm pocket on top of the base (2026-10-28; marker_strip_v5.stl no longer
+    needed))
+    preview/dock_v6.png, dock_v6_piece.png (the base from above with the dock piece in its pocket, and a cut through the
+    pocket), docked_v6.png (sections), contact_v6.png (one contact from the side and end on: the two springs),
     lift_v6.png (lift on the caster while backing in: v5 against v6), carrier_v6.png, carrier_on_photo_v6.png (the
     carrier drawn over Nick's photo of the underside, to check it sits on the battery cover)
 and prints a check report (ok / WARN / FAIL) and the numbers for the firmware and the map.
@@ -160,6 +163,13 @@ POST_H_MM = V5.POST_H_MM
 MARK_DIA_MM = V5.MARK_DIA_MM
 STRIP_CELL_MM, STRIP_N = V5.STRIP_CELL_MM, V5.STRIP_N
 STRIP_T_MM, STRIP_CLEAR_MM, STRIP_X0_MM = V5.STRIP_T_MM, V5.STRIP_CLEAR_MM, V5.STRIP_X0_MM
+# Nick, 2026-10-27 22:03 ("one that will fit on the new dock"): the marker is now the printed dock piece (checker
+# pieces PDF, piece E: the same 2 x 6 squares of 15 mm, 90 x 30 mm, cut on its own edge), glued on stiff card into
+# the same 90.8 x 30.8 mm pocket, now 0.6 mm deep instead of v5's 1.0 mm (the 1.2 mm printed strip stood 0.2 proud).
+# Paper is flatter, blacker and its size is the printer's (0.1-0.3 %), with no filament change.
+POCKET_DEPTH_CARD_MM = 0.6            # CHOSEN (a fit, no DOE): paper 0.1 + cereal-box card 0.4-0.5 + glue: flush to
+                                      # 0.2 proud. A thicker card stands proud; nothing slides over the base's top
+CARD_STACK_MM = (0.10, 0.45)          # ASSUMED: plain paper, cereal-box card (measure: 10 sheets of each with a rule)
 
 # derived
 X_AXLE_DOCKED_MM = V5.X_AXLE_DOCKED_MM                                    # -65.0
@@ -368,8 +378,10 @@ def dock_v6_solid():
     body = body.cut(box(CAVITY_X_MM[0], CAVITY_X_MM[1], -CAVITY_HALF_Y_MM, CAVITY_HALF_Y_MM, -1, CAVITY_TOP_Z_MM))
     body = body.cut(box(CAVITY_X_MM[1] - 1, BASE_D_MM + 2, -CHANNEL_HALF_W_MM, CHANNEL_HALF_W_MM, -1, CHANNEL_H_MM))
     rx, ry = STRIP_DEP_MM + 2 * STRIP_CLEAR_MM, STRIP_LEN_MM + 2 * STRIP_CLEAR_MM
-    body = body.cut(box(STRIP_X0_MM, STRIP_X0_MM + rx, -ry / 2, ry / 2, H - STRIP_T_MM + 0.2, H + 1))
-    body = body.cut(c.Workplane("XY").workplane(offset=H - STRIP_T_MM).center(STRIP_CX_MM, ry / 2).circle(4).extrude(5))
+    # the dock piece's pocket (paper on card, glued), and a finger notch at one end to lift it out if replaced
+    body = body.cut(box(STRIP_X0_MM, STRIP_X0_MM + rx, -ry / 2, ry / 2, H - POCKET_DEPTH_CARD_MM, H + 1))
+    body = body.cut(c.Workplane("XY").workplane(offset=H - POCKET_DEPTH_CARD_MM - 0.4).center(STRIP_CX_MM, ry / 2)
+                    .circle(4).extrude(5))
     for (x, y) in SCREW_HOLES:
         body = body.cut(c.Workplane("XY").center(x, y).circle(V2.SCREW_HOLE_DIA_MM / 2).extrude(H + 1))
         body = body.cut(c.Workplane("XY").workplane(offset=H - V2.SCREW_CSK_DIA_MM / 2).center(x, y)
@@ -433,11 +445,12 @@ def lift_curve_v6(s_list, off=0.0, dz=0.0):
 
 
 def known_lengths():
-    """As v5 (the dock is the system's known length), with v6's mouth."""
+    """As v5 (the dock is the system's known length), with v6's mouth and the printed dock piece."""
     out = []
     for name, v, how in V5.known_lengths():
         if name.startswith("side stations"):
             v = 2 * (HALF_OUT_MM + V2.POST_STANDOFF_MM)
+        name = name.replace("marker strip", "dock piece E (printed)").replace("marker square", "dock piece square")
         out.append((name, v, how))
     return out
 
@@ -589,7 +602,22 @@ def checks(att, carrier, dock):
     plate_z, strip_z = (L.PLATE_UNDER_Z_MM + L.PLATE_T_MM) / 10.0, WALL_H_MM / 10.0
     shift = d_far * (plate_z / (H_cam - plate_z) - strip_z / (H_cam - strip_z)) * 10.0
     gap = STRIP_X0_MM + STRIP_CLEAR_MM - (X_AXLE_DOCKED_MM - L.PLATE_X_MM[0])
-    rule(gap - shift >= 2.0, "marker: unchanged from v5, %.0f mm stay clear of the docked robot's light plate" % (gap - shift))
+    rule(gap - shift >= 2.0, "marker (printed dock piece, same place as v5's strip): %.0f mm stay clear of the docked "
+         "robot's light plate" % (gap - shift))
+    if os.path.join(REPO, "tools", "pi") not in sys.path:
+        sys.path.append(os.path.join(REPO, "tools", "pi"))
+    import checker_pieces as CP
+    pw, ph = CP.cut_mm(CP.DOCK)
+    rule(abs(pw - STRIP_LEN_MM) < 1e-6 and abs(ph - STRIP_DEP_MM) < 1e-6 and CP.DOCK["sq"] == STRIP_CELL_MM,
+         "dock piece E (checker_pieces.py) %.0f x %.0f mm, %.0f mm squares: fits the %.1f x %.1f mm pocket with %.1f mm "
+         "all round" % (pw, ph, CP.DOCK["sq"], STRIP_LEN_MM + 2 * STRIP_CLEAR_MM, STRIP_DEP_MM + 2 * STRIP_CLEAR_MM,
+                        STRIP_CLEAR_MM))
+    stack = sum(CARD_STACK_MM)
+    rule(-0.1 <= stack - POCKET_DEPTH_CARD_MM <= 0.3, "pocket %.1f mm deep: paper + card %.2f mm sit %.2f mm %s the top"
+         % (POCKET_DEPTH_CARD_MM, stack, abs(stack - POCKET_DEPTH_CARD_MM),
+            "above" if stack >= POCKET_DEPTH_CARD_MM else "below"))
+    rule(WALL_H_MM - POCKET_DEPTH_CARD_MM - CAVITY_TOP_Z_MM >= 3.0, "cavity roof %.1f mm thick under the pocket"
+         % (WALL_H_MM - POCKET_DEPTH_CARD_MM - CAVITY_TOP_Z_MM))
     with patched(D, BUMPER_Z0_MM=V3.REAR_BAR_Z0_MM, BUMPER_Z1_MM=V3.REAR_BAR_Z1_MM):
         with patched(V2, POST_H_MM=POST_H_MM, BACK_FACE_X_MM=BASE_D_MM, SIDE_FACE_Y_MM=HALF_OUT_MM,
                      SIDE_POST_XC_MM=side_post_xc()):
@@ -823,6 +851,64 @@ def carrier_on_photo_png(path):
 
 
 # =============================================================================== main
+def piece_png(dock, path):
+    """The base from above with the dock piece in its pocket (the outline cut 0.3 mm under the top), and a cut across
+    the pocket: the plastic, the card, the paper."""
+    plt = _plt()
+    from matplotlib.patches import Rectangle
+    import numpy as np
+    H = WALL_H_MM
+    fig, (ax, ax2) = plt.subplots(1, 2, figsize=(12, 5.2), dpi=110, gridspec_kw={"width_ratios": [1.5, 1.0]})
+    flat = B.cq().Workplane("XY").add(dock.val())
+    for e in flat.section(H - 0.3).edges().vals():
+        pts = np.array([[p.x, p.y] for p in (e.positionAt(t) for t in np.linspace(0, 1, 24))])
+        ax.plot(pts[:, 0], pts[:, 1], color="#24384f", lw=0.9)
+    x0, y0 = STRIP_X0_MM + STRIP_CLEAR_MM, -STRIP_LEN_MM / 2
+    nx, ny = STRIP_N                    # 6 across the dock (y), 2 along it (x)
+    for k in range(ny):
+        for i in range(nx):
+            ax.add_patch(Rectangle((x0 + k * STRIP_CELL_MM, y0 + i * STRIP_CELL_MM), STRIP_CELL_MM, STRIP_CELL_MM,
+                                   fc="k" if (i + k) % 2 == 0 else "w", ec="#999", lw=0.3))
+    ax.add_patch(Rectangle((x0, y0), STRIP_DEP_MM, STRIP_LEN_MM, fc="none", ec="#e8590c", lw=1.2))
+    ax.annotate("dock piece E: %.0f x %.0f mm\n(pocket %.1f x %.1f, %.1f deep)" % (
+        STRIP_LEN_MM, STRIP_DEP_MM, STRIP_LEN_MM + 2 * STRIP_CLEAR_MM, STRIP_DEP_MM + 2 * STRIP_CLEAR_MM,
+        POCKET_DEPTH_CARD_MM), xy=(x0 + STRIP_DEP_MM, 30), xytext=(-95, 45), fontsize=9, color="#e8590c",
+        arrowprops=dict(arrowstyle="->", color="#e8590c"))
+    ax.text(-60, 0, "robot backs in\nfrom here", ha="center", va="center", fontsize=9, color="#555")
+    ax.set_aspect("equal")
+    ax.set_xlim(-120, 75)
+    ax.grid(True, lw=0.3)
+    ax.set_xlabel("dock x mm (into the dock from the bumps' wall)")
+    ax.set_ylabel("y mm")
+    ax.set_title("Dock v6 from above (cut 0.3 mm under the top)", fontsize=10)
+    # cut across the pocket, along x at y = 0 (scaled up)
+    pa, pp = CARD_STACK_MM[1], CARD_STACK_MM[0]
+    ax2.add_patch(Rectangle((-2, H - 3), STRIP_X0_MM + 2, 3, fc="#9fb3c8", ec="#24384f"))
+    ax2.add_patch(Rectangle((STRIP_X0_MM + STRIP_DEP_MM + 2 * STRIP_CLEAR_MM, H - 3),
+                            BASE_D_MM - STRIP_X0_MM - STRIP_DEP_MM - 2 * STRIP_CLEAR_MM, 3, fc="#9fb3c8", ec="#24384f"))
+    ax2.add_patch(Rectangle((STRIP_X0_MM, H - 3), STRIP_DEP_MM + 2 * STRIP_CLEAR_MM, 3 - POCKET_DEPTH_CARD_MM,
+                            fc="#9fb3c8", ec="#24384f"))
+    ax2.add_patch(Rectangle((x0, H - POCKET_DEPTH_CARD_MM), STRIP_DEP_MM, pa, fc="#c8a26b", ec="#7a5a2a",
+                            label="stiff card %.2f mm" % pa))
+    ax2.add_patch(Rectangle((x0, H - POCKET_DEPTH_CARD_MM + pa), STRIP_DEP_MM, pp, fc="#f8f8f8", ec="#333",
+                            label="printed paper %.2f mm" % pp))
+    ax2.axhline(H, color="#888", ls="--", lw=0.8)
+    ax2.text(BASE_D_MM - 0.5, H + 0.12, "top of the base, %.0f mm" % H, ha="right", fontsize=8, color="#555")
+    ax2.set_xlim(-2, BASE_D_MM + 1)
+    ax2.set_ylim(H - 2.2, H + 0.9)
+    ax2.legend(loc="lower center", fontsize=8)
+    ax2.set_xlabel("dock x mm")
+    ax2.set_ylabel("height mm (stretched)")
+    d = pa + pp - POCKET_DEPTH_CARD_MM
+    ax2.set_title("Cut through the pocket: %.1f mm deep; the piece's top\n%.2f mm %s the base's top" % (
+        POCKET_DEPTH_CARD_MM, abs(d), "above" if d >= 0 else "below"), fontsize=10)
+    fig.text(0.5, 0.01, "Measured from the CAD model (build_dock_v6.py); the card and paper thicknesses are assumed, not "
+             "measured.", ha="center", fontsize=8.5)
+    fig.tight_layout(rect=(0, 0.03, 1, 1))
+    fig.savefig(path)
+    plt.close(fig)
+
+
 def on_bed(shape, flip=False):
     s = shape.rotate((0, 0, 0), (1, 0, 0), 180) if flip else shape
     b = s.val().BoundingBox()
@@ -841,7 +927,7 @@ def main(argv=None):
     carrier = carrier_v6_solid()
     dock = dock_v6_solid()
     ok, lines = checks(att, carrier, dock)
-    print("dock v6, pad carrier v6 (attachment v5 and marker strip v5 unchanged):")
+    print("dock v6, pad carrier v6 (attachment v5 unchanged; marker: the printed dock piece E):")
     print("\n".join(lines))
     if "--no-path" not in argv:
         res = path_clear(att, dock)
@@ -863,8 +949,10 @@ def main(argv=None):
     lift_png(os.path.join(B.PNG, "lift_v6.png"))
     if os.path.exists(PHOTO):
         carrier_on_photo_png(os.path.join(B.PNG, "carrier_on_photo_v6.png"))
-    print("\nwrote %s/{dock_v6, pad_carrier_v6}.stl (attachment_v5.stl, marker_strip_v5.stl: build_dock_v5.py)" % B.STL)
-    print("      %s/{dock_v6, carrier_v6, docked_v6, contact_v6, lift_v6, carrier_on_photo_v6}.png" % B.PNG)
+    piece_png(dock, os.path.join(B.PNG, "dock_v6_piece.png"))
+    print("\nwrote %s/{dock_v6, pad_carrier_v6}.stl (attachment_v5.stl: build_dock_v5.py; the marker is printed: "
+          "docs/hardware/checker-pieces-letter.pdf, piece E)" % B.STL)
+    print("      %s/{dock_v6, dock_v6_piece, carrier_v6, docked_v6, contact_v6, lift_v6, carrier_on_photo_v6}.png" % B.PNG)
     print("\nfirmware and map numbers (unchanged from v5):")
     for l in V3.firmware_lines():
         print("  " + l)
