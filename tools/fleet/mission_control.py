@@ -379,6 +379,11 @@ class Session:
         the same program."""
         rs = dict(self.settings["run"])
         rs.update(d.get("run") or {})
+        if conn == "robots":
+            busy = self.others_driving()
+            if busy:
+                raise ValueError("%s is driving the robots on this Pi: a robot run can start when it has ended (the "
+                                 "Live lab tab shows it and stops it). The simulator can run meanwhile." % busy)
         folder = os.path.join(self.dir, "runs", "%s-%s-%s" % (now_tag(), kind, conn))
         cmd = [sys.executable, os.path.join(HERE, "mission_run.py"), "--session", folder,
                "--timeout-s", str(rs["timeout_s"]), "--border-cm", str(rs["border_cm"])]
@@ -412,6 +417,26 @@ class Session:
         self.run.mode = conn
         self.last_runs[kind] = os.path.join(folder, "run")
         return self.run.status()
+
+    def others_driving(self):
+        """What else drives the robots on this Pi (an E02 session, the DOE loop, Monday's mission from a terminal, the
+        ladder), in words, or "" (the start page's process scan, tools/pi/launcher.py; simulator runs do not count).
+        Two programs sending the same robots moves would fight; Mission Control's own run is checked by start_run."""
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(HERE), "pi"))
+            import launcher as LA
+            p = self.proc_scan() if getattr(self, "proc_scan", None) else LA.scan_procs()
+        except Exception:     # noqa: BLE001  (no /proc: nothing known to be running)
+            return ""
+        dry = set(p.get("dry") or [])
+        words = []
+        if p.get("runner"):
+            words.append("An E02 session")
+        for k, w in (("doe", "The DOE loop"), ("mission", "Monday's mission"), ("ladder", "The ladder"),
+                     ("plan_run", "A planner test (run_plan)")):
+            if any(x not in dry for x in p.get(k) or []):
+                words.append(w)
+        return " and ".join(words)
 
     def frame(self, cam="overhead"):
         """The newest picture of a camera with the robots ringed and the planned paths drawn (the Run screen):
@@ -677,10 +702,63 @@ def preview(mm, plan, title=""):
     starts = {name: r["start"][:2] for name, r in plan["robots"].items()}
     sm = MS.summary(mm, plan)
     return {"title": title, "step_s": PREVIEW_STEP_S, "makespan_s": T, "frames": frames, "paths": paths,
-            "starts": starts, "acts": acts, "summary": sm, "closest_pair": plan["summary"].get("closest_pair"),
+            "starts": starts, "acts": acts, "segs": block_segments(plan), "summary": sm, "closest_pair": plan["summary"].get("closest_pair"),
             "warnings": plan.get("warnings", []), "planning_time_s": plan["summary"].get("planning_time_s"),
             "notes": (mm.get("mission") or {}).get("notes", []), "figures": (mm.get("mission") or {}).get("figures", []),
             "floor": mm["floor"], "obstacles": mm.get("obstacles", []), "keepouts": mm.get("keepouts", [])}
+
+
+def block_of(label):
+    """A step's label -> the routine's part it belongs to ("mow lane 3 end" -> mow, "chicken 1 swerve" -> chicken)."""
+    lab = (label or "").strip().lower()
+    for head in ("mow", "chicken", "meet", "circle", "spread out", "dance", "roam", "follow"):
+        if lab.startswith(head):
+            return head
+    for tail in (" ready", " swerve", " aside", " start", " end"):
+        if lab.endswith(tail):
+            lab = lab[: -len(tail)]
+    return lab or "move"
+
+
+def block_segments(plan):
+    """Each robot's route cut into the routine's parts (Nick 2026-10-28: the Chicken part was lost in one line): per
+    robot [{block, t0, t1, pts}], in order. A step with no label belongs to the part its next labelled step reaches
+    (the drive towards a lane's start is mowing); a part met again later is "<part> on" (mow, then mow on)."""
+    out = {}
+    for name, r in plan["robots"].items():
+        steps = r["steps"]
+        nxt, labs = None, [None] * len(steps)
+        for i in range(len(steps) - 1, -1, -1):
+            if steps[i].get("label"):
+                nxt = steps[i]["label"]
+            labs[i] = nxt
+        prev = None
+        for i in range(len(steps)):          # trailing unlabelled steps (the park's approach): the part before
+            if labs[i] is None:
+                labs[i] = prev
+            prev = labs[i]
+        cur = [round(v, 1) for v in r["start"][:2]]
+        segs, seen = [], {}
+        for st, lab in zip(steps, labs):
+            b = block_of(lab)
+            if not segs or segs[-1]["kind"] != b:
+                seen[b] = seen.get(b, 0) + 1
+                nm = b if seen[b] == 1 else ("%s on" % b if seen[b] == 2 else "%s %d" % (b, seen[b]))
+                segs.append({"block": nm, "kind": b, "t0": round(st["t_start"], 2), "t1": round(st["t_start"], 2),
+                             "pts": [list(cur)]})
+            sg = segs[-1]
+            sg["t1"] = round(st.get("t_end", st["t_start"] + st.get("duration_s", 0.0)), 2)
+            if st["type"] in ("drive", "approach"):
+                cur = [round(st["to"][0], 1), round(st["to"][1], 1)]
+                sg["pts"].append(cur)
+            elif st["type"] == "arc":
+                pts = [[round(q[0], 1), round(q[1], 1)] for q in P.step_poses(st, 6)[1:]]
+                sg["pts"] += pts
+                cur = pts[-1] if pts else cur
+        for sg in segs:
+            sg.pop("kind")
+        out[name] = segs
+    return out
 
 
 def clean(o):

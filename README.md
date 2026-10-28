@@ -19,6 +19,15 @@ his repos carry no license.
 Every task expected to run over 10 minutes: estimate + questions to Nick first, and a row in `TIME.md` in the
 tower-defense-rpg repo (beside its `USAGE.md`), the one time record for all of Nick's projects.
 
+## On the Pi: one address
+
+**http://100.122.222.75:8091** (Tailscale; on the home WiFi also `http://<the Pi>.local:8091`) is the one address to
+bookmark. It is the start page service (always on; `tools/pi/launcher.py`, PIN), now with three tabs: **Live lab**
+(an E02 session's live page and its questions; a DOE loop's or Monday mission's own screen, with Stop, while one runs),
+**Mission Control** (opened from the tab on demand) and **Start/Stop**. The old addresses still work: 8090 (live page
+during an E02 session), 8095 (Mission Control), 8000 / 8001 (camera pictures). After a `git pull` on the Pi the page
+runs the new code only once restarted: `sudo systemctl restart mirlt-launcher`. Details: [docs/pi-run.md](docs/pi-run.md).
+
 ## Goal
 
 How much does adding sensors improve an Alvik's locational accuracy? A series

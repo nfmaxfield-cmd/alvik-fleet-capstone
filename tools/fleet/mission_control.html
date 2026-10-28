@@ -119,7 +119,29 @@ function tableSVG(opt) {
     if (ob.points) o += `<polygon points="${ob.points.map(p => X(p[0]) + "," + Y(p[1])).join(" ")}" fill="#5B6474" fill-opacity=".35" stroke="#5B6474"/>`;
     else if (ob.center) o += `<circle cx="${X(ob.center[0])}" cy="${Y(ob.center[1])}" r="${(ob.radius * k).toFixed(1)}" fill="#5B6474" fill-opacity=".35"/>`;
   }
-  for (const [n, pts] of Object.entries(opt.paths || {})) {
+  if (opt.segs) {
+    // the routine's parts, each in its own line style with its name at its start; the part each robot is in at the
+    // slider's time drawn strong, the rest faint (Nick 2026-10-28: the game of Chicken was lost in one line)
+    const labels = [];
+    for (const [n, segs] of Object.entries(opt.segs)) {
+      const cur = curSeg(segs, opt.t || 0);
+      segs.forEach((sg, i) => {
+        const on = i === cur, st = BLOCK_STYLE[sg.block.split(" ")[0]] || BLOCK_STYLE.move;
+        if (sg.pts.length > 1) o += `<polyline points="${sg.pts.map(p => X(p[0]) + "," + Y(p[1])).join(" ")}" fill="none" stroke="${COL[n] || "#5B6474"}" stroke-width="${on ? st.w + 1.4 : st.w}" stroke-opacity="${on ? .95 : .3}" stroke-dasharray="${st.dash}" stroke-linejoin="round" stroke-linecap="round"/>`;
+        else o += `<circle cx="${X(sg.pts[0][0])}" cy="${Y(sg.pts[0][1])}" r="${on ? 9 : 7}" fill="none" stroke="${COL[n] || "#5B6474"}" stroke-opacity="${on ? .95 : .35}" stroke-width="1.5" stroke-dasharray="2 3"/>`;
+        const p0 = sg.pts[0];
+        labels.push({on, x: +X(p0[0]) + 5, y: +Y(p0[1]) - 5, w: sg.block.length * (on ? 7.2 : 6.2),
+          t: `font-size="${on ? 12 : 10.5}" font-weight="${on ? 700 : 500}" fill="${COL[n] || "#5B6474"}" fill-opacity="${on ? 1 : .75}" stroke="#fff" stroke-width="3" paint-order="stroke">${esc(sg.block)}`});
+      });
+    }
+    // the parts now under way are named first; a faint name that would overlap one already placed is left out
+    const placed = [];
+    labels.sort((a, b) => b.on - a.on).forEach(l => {
+      if (!l.on && placed.some(q => l.x < q.x + q.w && q.x < l.x + l.w && Math.abs(l.y - q.y) < 13)) return;
+      placed.push(l); o += `<text x="${l.x.toFixed(1)}" y="${l.y.toFixed(1)}" ${l.t}</text>`;
+    });
+  }
+  for (const [n, pts] of Object.entries(opt.segs ? {} : (opt.paths || {}))) {
     if (pts.length > 1) o += `<polyline points="${pts.map(p => X(p[0]) + "," + Y(p[1])).join(" ")}" fill="none" stroke="${COL[n] || "#5B6474"}" stroke-width="${opt.pathW || 1.6}" stroke-opacity="${opt.pathOp || .45}" stroke-linejoin="round"/>`;
   }
   const spots = opt.spots !== undefined ? opt.spots : (S.map.spots || {});
@@ -391,19 +413,30 @@ function actsList(pv) {
 function previewBlock(pv) {
   if (!pv) return `${tableSVG({})}<p class="small muted">Choose a mission and press Plan and preview.</p>`;
   const sm = pv.summary;
-  return `<div id="pvsvg">${tableSVG({paths: pv.paths, robots: poseAt(pv, playT), obstacles: pv.obstacles, keepouts: pv.keepouts})}</div>
+  return `<div id="pvsvg">${tableSVG({paths: pv.paths, segs: pv.segs, t: playT, robots: poseAt(pv, playT), obstacles: pv.obstacles, keepouts: pv.keepouts})}</div>
     <div class="row" style="margin-top:10px"><button class="b" id="play" aria-label="Play preview" style="width:44px;padding:10px 0">${playing ? "❚❚" : "▶"}</button>
       <input type="range" id="slider" min="0" max="${pv.makespan_s}" step="${pv.step_s}" value="${playT}" style="flex:1;min-width:200px" aria-label="Time in the plan">
       <span class="small muted" id="tlabel">${fmt(playT)} of ${fmt(pv.makespan_s)}</span></div>
-    <div class="legend" style="margin-top:8px">${Object.keys(pv.frames).map(n => `<span><span class="dot" style="background:${COL[n]}"></span>${n}</span>`).join("")}</div>
+    <div class="legend" style="margin-top:8px" id="pvnow">${pv.segs ? `<span>Now:</span>${nowWords(pv, playT)}` : Object.keys(pv.frames).map(n => `<span><span class="dot" style="background:${COL[n]}"></span>${n}</span>`).join("")}</div>
+    ${pv.segs ? `<div class="legend" style="margin-top:6px">${blockLegend(pv)}</div>` : ""}
     <div class="kpis" style="margin-top:10px"><div class="kpi"><b>${fmt(sm.makespan_s)}</b><span>Finishes in</span></div><div class="kpi"><b>${sm.closest_cm.toFixed(1)} cm</b><span>Closest approach (bodies)</span></div>
       ${sm.beats ? `<div class="kpi"><b>${sm.beats_late_over_0_5s} of ${sm.beats}</b><span>Show moves over 0.5 s late</span></div>` : ""}<div class="kpi eng"><b>${pv.planning_time_s} s</b><span>Planning time</span></div></div>
-    <p class="small muted" style="margin:8px 0 0">The planned routes, with each robot where the plan has it at the slider's time; measured from the plan (planner.py), not the robots.</p>`;
+    <p class="small muted" style="margin:8px 0 0">The planned routes, each part of the routine in its own line style with its name where it starts; the part each robot is in at the slider's time is drawn strong. From the plan (planner.py), not the robots.</p>`;
+}
+const BLOCK_STYLE = {mow: {dash: "none", w: 1.6}, meet: {dash: "2 4", w: 1.8}, circle: {dash: "none", w: 2.4},
+  chicken: {dash: "9 4", w: 2.2}, spread: {dash: "1 3 7 3", w: 1.8}, dance: {dash: "2 3", w: 1.6}, move: {dash: "4 3", w: 1.6}};
+function curSeg(segs, t) { let c = 0; segs.forEach((sg, i) => { if (sg.t0 <= t) c = i; }); return c; }
+function nowWords(pv, t) { return pv.segs ? Object.entries(pv.segs).map(([n, sg]) => `<span><span class="dot" style="background:${COL[n]}"></span>${n}: <b>${esc(sg[curSeg(sg, t)].block)}</b></span>`).join("") : ""; }
+function blockLegend(pv) {
+  if (!pv.segs) return "";
+  const seen = []; Object.values(pv.segs).forEach(sg => sg.forEach(x => { const k = x.block.split(" ")[0]; if (!seen.includes(k)) seen.push(k); }));
+  return seen.map(k => { const st = BLOCK_STYLE[k] || BLOCK_STYLE.move;
+    return `<span><svg width="28" height="10" style="vertical-align:middle"><line x1="1" y1="5" x2="27" y2="5" stroke="#5B6474" stroke-width="${st.w + .4}" stroke-dasharray="${st.dash}" stroke-linecap="round"/></svg> ${esc(k === "spread" ? "spread out" : k)}</span>`; }).join("");
 }
 function poseAt(pv, t) { const i = Math.min(Math.round(t / pv.step_s), Object.values(pv.frames)[0].length - 1); return Object.fromEntries(Object.entries(pv.frames).map(([n, fr]) => [n, fr[Math.min(i, fr.length - 1)]])); }
 function wirePreview(pv) {
   if (!pv) return;
-  const upd = () => { $("pvsvg").innerHTML = tableSVG({paths: pv.paths, robots: poseAt(pv, playT), obstacles: pv.obstacles, keepouts: pv.keepouts}); $("tlabel").textContent = `${fmt(playT)} of ${fmt(pv.makespan_s)}`; $("slider").value = playT; };
+  const upd = () => { $("pvsvg").innerHTML = tableSVG({paths: pv.paths, segs: pv.segs, t: playT, robots: poseAt(pv, playT), obstacles: pv.obstacles, keepouts: pv.keepouts}); if (pv.segs) $("pvnow").innerHTML = `<span>Now:</span>${nowWords(pv, playT)}`; $("tlabel").textContent = `${fmt(playT)} of ${fmt(pv.makespan_s)}`; $("slider").value = playT; };
   $("slider").oninput = e => { playT = +e.target.value; upd(); };
   $("play").onclick = () => { playing = !playing; $("play").textContent = playing ? "❚❚" : "▶";
     clearInterval(timer); if (playing) timer = setInterval(() => { playT += 0.5; if (playT >= pv.makespan_s) { playT = pv.makespan_s; playing = false; clearInterval(timer); } if ($("slider")) upd(); }, 100); };

@@ -77,9 +77,29 @@ the last session (runs done, how it ended, the upload link), free space, the cam
 and the robots' batteries (from the running session, or **Ask the robots now** while idle). It will not start a
 second session while one runs or uploads, or without the overhead camera.
 
-**The two addresses.** Port **8091** is always the start page. Port **8090** (the live page's address) shows the
-start page while nothing runs, the live page during a session, and the start page again during the upload. The live
-page has a "start page / Stop" link at the top.
+**The one address (2026-10-28).** Port **8091** is the page to bookmark: `http://100.122.222.75:8091`. It has three
+tabs, in Mission Control's look, and a bar at the top saying what is running on the Pi (an E02 session, a DOE loop,
+Monday's mission, the ladder, Mission Control, the cameras):
+- **Live lab**: during an E02 session, its live page (questions are asked there) and, one click over, the Lab page.
+  During a DOE loop, Monday's mission (`./run-fleet-pi.sh monday`) or the ladder in tmux: that run's own screen (its
+  last lines, every 2 s) and a **Stop** button (Ctrl+C in its window: every robot stops, then it saves and uploads).
+  With the cameras on: their pictures behind a "Show the pictures" button. Nothing running: says so.
+- **Mission Control**: the Mission Control page itself. If it is not open, an **Open Mission Control** button runs
+  `./run-fleet-pi.sh mc` on the Pi in tmux session `mc` (so it keeps going when the browser closes; it starts the
+  camera recorder too if nothing runs it). It opens beside a DOE loop or Monday's mission, but will not start a robot
+  run of its own until that has ended (the simulator still runs). To close it: `./run-fleet-pi.sh mc-stop`.
+- **Start/Stop**: this start page (also at `http://100.122.222.75:8091/start`). During a DOE loop or Monday's mission
+  it says "A robot run is going", locks Start and offers Stop for that run.
+
+The old addresses all still work: port **8090** shows the tabs while nothing runs and the live page during an E02
+session; **8095** is Mission Control while it is open; **8000** / **8001** are the cameras' pictures.
+
+**After a `git pull` on the Pi**, the page runs the new code only after a restart. In the SSH window to the Pi, type
+this and press Enter (it may ask for the Pi's password):
+```
+sudo systemctl restart mirlt-launcher
+```
+Nothing should print. Then reload the page in the browser.
 
 **Access.** Only from the home WiFi and Tailscale, and only with the PIN. The PIN is stored on the Pi only (as a
 salted hash in `~/.config/mirlt/launcher.json`). To change it: `python3 tools/pi/launcher.py --set-pin` in a

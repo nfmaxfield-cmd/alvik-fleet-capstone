@@ -56,6 +56,8 @@ HANDOFF_GRACE_S = 120   # chosen: after a hand-off, 8090 stays free this long fo
                         # well above the start time works)
 START_TIMEOUT_S = 180   # run-e02-pi.sh's own work before it hands over to tmux (apt check, git pull, 8 s recorder)
 STOP_WAIT_S = 120       # after Stop, the page says "still stopping" past this (the runner's own backstop is 90 s)
+MC_PORT = 8095          # Mission Control (tools/fleet/mission_control.py)
+MC_START_S = 60         # the Mission Control tab says "starting" this long after its button (the recorder's 8 s first)
 PIN_FAILS = 5           # wrong PINs from one address before a 60 s pause (chosen)
 COOKIE = "mirlt_launch"
 TAILSCALE = ipaddress.ip_network("100.64.0.0/10")
@@ -159,9 +161,14 @@ def build_args(opt, unfinished=None):
 
 
 # ------------------------------------------------------------------------------------------------ what runs now
+FLEET_KINDS = ("doe", "mission", "ladder", "plan_run")     # programs that drive the fleet's robots (run-fleet-pi.sh)
+FLEET_WORDS = dict(doe="DOE loop", mission="Mission", ladder="Ladder", plan_run="Planner test (run_plan)")
+
+
 def scan_procs(proc="/proc"):
-    """{'runner': [pid], 'upload': [pid], 'recorder': [pid], 'plan': [pid]} from every process's command line."""
-    out = dict(runner=[], upload=[], recorder=[], plan=[])
+    """{'runner': [pid], 'upload': [pid], 'recorder': [pid], 'plan': [pid], 'doe': .., 'mission': .., 'ladder': ..,
+    'plan_run': .., 'mc': .., 'dry': [pids of simulator runs]} from every process's command line."""
+    out = dict(runner=[], upload=[], recorder=[], plan=[], doe=[], mission=[], ladder=[], plan_run=[], mc=[], dry=[])
     try:
         pids = [p for p in os.listdir(proc) if p.isdigit()]
     except OSError:
@@ -175,6 +182,8 @@ def scan_procs(proc="/proc"):
         kind = classify(argv)
         if kind:
             out[kind].append(int(p))
+            if kind in FLEET_KINDS and ("--dry" in argv or "--dry-run" in argv):
+                out["dry"].append(int(p))
     return out
 
 
@@ -193,6 +202,17 @@ def classify(argv):
             return None if "--list" in argv else "recorder"
         if b == "session_plan.sh":
             return "plan"
+        # the fleet's programs (run-fleet-pi.sh; Mission Control tab, 2026-10-28)
+        if b == "doe_loop.py":
+            return "doe" if "run" in argv else None              # `doe_loop.py status` is a quick look
+        if b == "mission_run.py":
+            return "mission"
+        if b == "ladder.py":
+            return "ladder" if ("run" in argv or "step" in argv or "turncheck" in argv) else None
+        if b == "run_plan.py":
+            return "plan_run"
+        if b == "mission_control.py":
+            return "mc"
     return None
 
 
@@ -421,6 +441,8 @@ class Launcher:
         self.idle_bind = None         # (host, port) for the 8090 server
         self.handler = None
         self._cache = {}
+        self.mc_port = MC_PORT
+        self.mc_starting = None
 
     # --- what is going on --------------------------------------------------------------------------------------
     def _cached(self, key, ttl, fn):
@@ -453,9 +475,78 @@ class Launcher:
             return "running"
         if p["upload"]:
             return "uploading"
+        if self.fleet_runs(p):
+            return "fleet"
         if p["plan"] or p["recorder"]:
             return "busy"
         return "idle"
+
+    # --- the fleet's runs (DOE loop, Monday's mission, ladder; Mission Control) --------------------------------
+    def fleet_runs(self, p=None):
+        """What drives the fleet's robots now: [dict(kind, words, tmux, dry, pids)]. A run_plan started by one of the
+        others (the DOE loop's, the mission's) is part of it, not a run of its own."""
+        p = p or self.procs()
+        out = []
+        dry = set(p.get("dry") or [])
+        for k in ("doe", "mission", "ladder"):
+            pids = p.get(k) or []
+            if not pids:
+                continue
+            sess = None
+            for name in {"doe": ("doe",), "mission": ("monday",), "ladder": ("ladder", "ladder2")}[k]:
+                if self.tmux("has-session", "-t", name)[0] == 0:
+                    sess = name
+                    break
+            words = FLEET_WORDS[k]
+            if k == "mission":
+                words = "Monday's mission (./run-fleet-pi.sh monday)" if sess else "Mission Control's run"
+            out.append(dict(kind=k, words=words, tmux=sess, dry=all(x in dry for x in pids), pids=pids))
+        if not out and p.get("plan_run"):
+            out.append(dict(kind="plan_run", words=FLEET_WORDS["plan_run"], tmux=None,
+                            dry=all(x in dry for x in p["plan_run"]), pids=p["plan_run"]))
+        return out
+
+    def run_screen(self, sess, n=24):
+        """The last n lines of a run's tmux window (what Nick would see attached to it)."""
+        rc, out = self.tmux("capture-pane", "-p", "-t", sess)
+        if rc != 0:
+            return []
+        return [ln.rstrip() for ln in out.splitlines() if ln.strip()][-n:]
+
+    def mc_up(self):
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:%d/api/run" % self.mc_port, timeout=1.0) as r:
+                run = json.loads(r.read().decode() or "{}")
+            return dict(up=True, run=dict(kind=run.get("kind"), running=run.get("running"), mode=run.get("mode"),
+                                          elapsed_s=run.get("elapsed_s")) if run else None)
+        except Exception:
+            return dict(up=False, run=None)
+
+    def mc_start(self):
+        """Opens Mission Control (./run-fleet-pi.sh mc in tmux session mc): the same program as from a terminal."""
+        with self.lock:
+            if self.mc_up()["up"]:
+                return True, "Mission Control is already open."
+            if self.mc_starting and time.time() - self.mc_starting < MC_START_S:
+                return True, "Mission Control is starting."
+            if self.tmux("has-session", "-t", "mc")[0] == 0:
+                self.tmux("kill-session", "-t", "mc")          # a closed one's window, waiting for Enter
+            script = os.path.join(self.repo, "run-fleet-pi.sh")
+            rc, out = self.tmux("new-session", "-d", "-s", "mc", "cd '%s' && bash '%s' mc; read -r -p "
+                                "'Mission Control closed. Press Enter.'" % (self.repo, script))
+            if rc != 0:
+                return False, "Could not start Mission Control (tmux): %s" % out.strip()
+            self.mc_starting = time.time()
+            return True, "Mission Control is starting (about 10 s; the camera recorder first, if it is not running)."
+
+    def mc_stop(self):
+        with self.lock:
+            if self.tmux("has-session", "-t", "mc")[0] != 0:
+                return False, ("Mission Control was not opened from this page: close it with Ctrl+C in its terminal "
+                               "window.") if self.mc_up()["up"] else "Mission Control is not open."
+            self.tmux("send-keys", "-t", "mc", "C-c")
+            self.mc_starting = None
+            return True, "Mission Control is closing (a run of its own is stopped first: every robot stops)."
 
     def live_status(self):
         """The runner's live page (status.json): robots' battery; None if it does not answer."""
@@ -488,6 +579,18 @@ class Launcher:
                 out["stop_slow"] = time.time() - self.stop_t > STOP_WAIT_S
         if p["plan"]:
             out["plan"] = True
+        fl = self.fleet_runs(p)
+        for f in fl:
+            f["screen"] = self._cached("screen-" + f["tmux"], 2.0, lambda s=f["tmux"]: self.run_screen(s)) \
+                if f["tmux"] else []
+            f.pop("pids", None)
+        out["fleet"] = fl
+        mc = self._cached("mc", 2.0, self.mc_up)
+        out["mc"] = dict(mc, port=self.mc_port, starting=bool(self.mc_starting and not mc["up"]
+                                                              and time.time() - self.mc_starting < MC_START_S))
+        if mc["up"]:
+            self.mc_starting = None
+        out["recorder"] = bool(p["recorder"])
         dirs = session_dirs(self.repo, self.include_dry)
         out["last"] = session_summary(dirs[-1]) if dirs else None
         if out["last"] and up and up.get("session") == out["last"]["name"]:
@@ -519,6 +622,9 @@ class Launcher:
             return "A session is running. Stop it first (or let it finish)."
         if ph == "uploading":
             return "The last session is still uploading. Wait for the upload to finish (its progress is above)."
+        if ph == "fleet":
+            return ("%s is driving the robots. An E02 session can start when it has ended (Stop is above)."
+                    % " and ".join(f["words"] for f in self.fleet_runs()))
         if ph == "busy":
             return ("The camera recorder (or a plan) is still running without a runner. Stop it first: the Stop "
                     "button ends it.")
@@ -582,10 +688,26 @@ class Launcher:
         self.tick()
 
     # --- stop --------------------------------------------------------------------------------------------------
+    def stop_fleet(self, p):
+        """Ctrl+C in the fleet run's own tmux window (as ./run-fleet-pi.sh doe-stop): every robot stops, then it
+        saves and uploads as when it finishes."""
+        fl = self.fleet_runs(p)
+        for f in fl:
+            if f["tmux"]:
+                rc, out = self.tmux("send-keys", "-t", f["tmux"], "C-c")
+                if rc != 0:
+                    return False, "Could not reach its window (tmux %s): %s" % (f["tmux"], out.strip())
+                return True, "Stop sent to the %s: every robot stops, then it saves and uploads." % f["words"]
+        if any(f["kind"] == "mission" for f in fl):
+            return False, "That run was started from Mission Control: stop it on Mission Control's Run screen."
+        return False, "It runs in a terminal window, not from here: press Ctrl+C in that window."
+
     def stop(self):
         with self.lock:
             p = self.procs()
             ph = self.phase(p)
+            if ph == "fleet":
+                return self.stop_fleet(p)
             if ph == "starting":
                 return False, "It is still starting. Wait a few seconds, then Stop."
             if ph == "stopping":
@@ -601,6 +723,8 @@ class Launcher:
             if ph == "busy":
                 if p["recorder"]:
                     rc, out = self.tmux("send-keys", "-t", "e02:rec", "C-c")
+                    if rc != 0:                                    # the fleet's recorder (run-fleet-pi.sh)
+                        rc, out = self.tmux("send-keys", "-t", "fleet:rec", "C-c")
                     if rc != 0:
                         return False, "Could not reach the recorder's window (tmux e02:rec): %s" % out.strip()
                     return True, "Stop sent to the recorder: it saves the video and closes."
@@ -683,7 +807,7 @@ def make_handler(L, conf, fails=None):
                 self.send_response(code)
                 self.send_header("Content-Type", ctype)
                 self.send_header("Cache-Control", "no-store")
-                self.send_header("X-Frame-Options", "DENY")
+                self.send_header("X-Frame-Options", "SAMEORIGIN")   # the tabs' page frames its own pages
                 self.send_header("Content-Length", str(len(body)))
                 for k, v in extra:
                     self.send_header(k, v)
@@ -716,6 +840,8 @@ def make_handler(L, conf, fails=None):
                 return self._send(403, "Only from the home network or Tailscale.", "text/plain")
             path = self.path.split("?")[0]
             if path in ("/", "/index.html"):
+                return self._send(200, SHELL, "text/html; charset=utf-8")
+            if path == "/start":
                 return self._send(200, PAGE, "text/html; charset=utf-8")
             if path == "/api/status":
                 if not self._authed():
@@ -766,6 +892,14 @@ def make_handler(L, conf, fails=None):
                     return self._send(400, dict(ok=False, words="Not confirmed."))
                 ok, words = L.stop()
                 return self._send(200 if ok else 409, dict(ok=ok, words=words))
+            if path == "/api/mc/start":
+                ok, words = L.mc_start()
+                return self._send(200 if ok else 409, dict(ok=ok, words=words))
+            if path == "/api/mc/stop":
+                if not d.get("confirm"):
+                    return self._send(400, dict(ok=False, words="Not confirmed."))
+                ok, words = L.mc_stop()
+                return self._send(200 if ok else 409, dict(ok=ok, words=words))
             if path == "/api/batteries":
                 ok, words = L.check_batteries()
                 return self._send(200 if ok else 409, dict(ok=ok, words=words))
@@ -787,12 +921,11 @@ PAGE = r"""<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Robot sessions</title>
 <style>
-:root{--bg:#f4f5f2;--card:#fff;--ink:#1d2321;--soft:#5d6763;--line:#d9ddd8;--go:#1f7a4d;--go-ink:#fff;
---stop:#b3261e;--warn:#9a5b00;--warn-bg:#fff4dc;--bad-bg:#fde8e6;--ok-bg:#e5f3ea;--accent:#24515f;--sel:#24515f;--sel-ink:#fff}
-@media (prefers-color-scheme:dark){:root{--bg:#141817;--card:#1d2321;--ink:#e9ecea;--soft:#a3ada8;--line:#333c38;
---go:#2f9a64;--stop:#d0453a;--warn:#e0a54a;--warn-bg:#3a2e17;--bad-bg:#3d1f1c;--ok-bg:#183326;--accent:#8cc3d1;--sel:#8cc3d1;--sel-ink:#10201f}}
+/* Mission Control's look (2026-10-28: the start page is a tab beside it) */
+:root{--bg:#F6F7F9;--card:#fff;--ink:#101828;--soft:#5B6474;--line:#E4E7EC;--go:#12805C;--go-ink:#fff;
+--stop:#B42318;--warn:#B54708;--warn-bg:#FFFAEB;--bad-bg:#FEF3F2;--ok-bg:#E7F5EE;--accent:#2952CC;--sel:#2952CC;--sel-ink:#fff}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 main{max-width:980px;margin:0 auto;padding:16px}
 header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:4px 0 14px}
 h1{font-size:1.45rem;margin:0}
@@ -805,7 +938,7 @@ h1{font-size:1.45rem;margin:0}
 .dot{width:14px;height:14px;border-radius:50%;background:var(--soft);flex:none}
 .idle .dot{background:var(--go)} .running .dot{background:#2a7fd4;animation:p 1.6s infinite}
 .starting .dot,.stopping .dot,.uploading .dot{background:var(--warn);animation:p 1.2s infinite}
-.busy .dot{background:var(--warn)}
+.busy .dot{background:var(--warn)} .fleet .dot{background:#2a7fd4;animation:p 1.6s infinite}
 @keyframes p{50%{opacity:.35}}
 .sub{color:var(--soft);margin:6px 0 0}
 .row{margin:14px 0 0}
@@ -873,7 +1006,7 @@ pre{white-space:pre-wrap;font-size:.8rem;background:var(--bg);padding:8px;border
     <div id="failMsg"></div>
     <button class="big stop hidden" id="stopBtn">Stop the session</button>
     <div class="confirm hidden" id="stopConfirm">
-      <strong>Stop the session now?</strong>
+      <strong>Stop it now?</strong>
       <p class="sub">Every robot stops where it is, everything is saved, then the logs and video upload. A later
       session can carry on the runs that are left.</p>
       <div class="two"><button class="big stop" id="stopYes">Yes, stop</button><button class="big plain" id="stopNo">Keep running</button></div>
@@ -968,7 +1101,9 @@ $('pinGo').onclick=async()=>{const r=await api('/api/login',{pin:$('pin').value}
 $('pin').addEventListener('keydown',e=>{if(e.key==='Enter')$('pinGo').click()});
 function ago(t){const s=Math.round(Date.now()/1000-t);if(s<90)return s+' s ago';if(s<5400)return Math.round(s/60)+' min ago';if(s<172800)return Math.round(s/3600)+' h ago';return Math.round(s/86400)+' days ago'}
 function gb(x){return x==null?'?':(x>=100?Math.round(x):x)+' GB'}
-const WORDS={idle:'Idle: ready to start',starting:'Starting ...',running:'Running',stopping:'Stopping ...',uploading:'Uploading',busy:'Busy'};
+const WORDS={idle:'Idle: ready to start',starting:'Starting ...',running:'Running',stopping:'Stopping ...',uploading:'Uploading',busy:'Busy',fleet:'A robot run is going'};
+const fleetW=s=>(s.fleet||[]).map(f=>f.words+(f.dry?' (simulator)':'')).join(' and ');
+const fleetStop=s=>(s.fleet||[]).some(f=>f.tmux);
 function render(s){S=s;$('host').textContent=s.host;
   if(lastPhase!==null&&lastPhase!==s.phase&&Date.now()-msgT>1500)msg('startMsg','','');
   if(msgT&&Date.now()-msgT>20000){msg('startMsg','','');msgT=0}
@@ -981,14 +1116,16 @@ function render(s){S=s;$('host').textContent=s.host;
   if(s.phase==='starting'&&s.starting)sub=s.starting.words+' ('+s.starting.s+' s so far: checks, then the recorder, then the runner).';
   if(s.phase==='running')sub=(s.live_up?'The live page is up: watch it and answer its questions there.':'The runner is starting its live page ...')+(s.live_phase?' Now: '+s.live_phase+'.':'')+(s.question?' It is asking: "'+s.question+'"':'');
   if(s.phase==='stopping')sub=s.stop_slow?('Still stopping after '+s.stop_s+' s. The runner ends by itself within about 90 s more; if not, look at its window on the Pi (tmux attach -t e02).'):('Every robot is being stopped and the session saved ('+s.stop_s+' s). The upload starts next.');
+  if(s.phase==='fleet')sub=fleetW(s)+' is running.'+(fleetStop(s)?' Stop below presses Ctrl+C in its window: every robot stops, then it saves and uploads.':' Stop it where it was started.');
   if(s.phase==='busy')sub=s.plan?'A plan of sessions is running (started from a terminal).':'The camera recorder is running without a runner. Stop ends it.';
   if(s.phase==='idle')sub=s.tmux?'The last session\'s windows are still open on the Pi; Start closes them.':'Nothing is running.';
   $('stateSub').textContent=sub;
   const live=(s.phase==='running'||s.phase==='stopping');
   $('liveLink').classList.toggle('hidden',!live);$('liveLink').href=location.protocol+'//'+location.hostname+':'+s.live_port+'/';
-  $('stopBtn').classList.toggle('hidden',!(s.phase==='running'||s.phase==='busy')||!$('stopConfirm').classList.contains('hidden'));
-  if(!(s.phase==='running'||s.phase==='busy'))$('stopConfirm').classList.add('hidden');
-  $('stopBtn').textContent=s.phase==='busy'?'Stop the recorder':'Stop the session';
+  const canStop=s.phase==='running'||s.phase==='busy'||(s.phase==='fleet'&&fleetStop(s));
+  $('stopBtn').classList.toggle('hidden',!canStop||!$('stopConfirm').classList.contains('hidden'));
+  if(!canStop)$('stopConfirm').classList.add('hidden');
+  $('stopBtn').textContent=s.phase==='busy'?'Stop the recorder':s.phase==='fleet'?'Stop the '+fleetW(s):'Stop the session';
   const u=s.upload;const upNow=s.phase==='uploading'&&u&&u.state==='uploading';
   $('upWrap').classList.toggle('hidden',!upNow);
   if(upNow){const pc=u.total_bytes?Math.min(99,Math.round(100*u.done_bytes/u.total_bytes)):0;$('upBar').style.width=pc+'%';
@@ -996,7 +1133,7 @@ function render(s){S=s;$('host').textContent=s.host;
   else if(s.phase==='uploading'){$('upWrap').classList.remove('hidden');$('upBar').style.width='2%';$('upWords').textContent='Packing the logs ...'}
   const LOCK={starting:'A session is starting.',running:'A session is running: a second one can\'t start until it ends.',
     stopping:'The session is stopping; it uploads next.',uploading:'The last session is uploading: a new one can start when the upload is done.',
-    busy:'The recorder or a plan is still running.'};
+    busy:'The recorder or a plan is still running.',fleet:'A robot run (DOE loop, mission or ladder) is driving the robots.'};
   $('startCard').classList.remove('hidden');const locked=s.phase!=='idle';
   $('startBody').classList.toggle('hidden',locked&&$('startConfirm').classList.contains('hidden'));
   $('lockMsg').classList.toggle('hidden',!locked);$('lockMsg').textContent=locked?('Start is locked. '+(LOCK[s.phase]||'')):'';
@@ -1035,6 +1172,192 @@ async function tick(){const r=await api('/api/status').catch(()=>null);
 paintSeg();tick();setInterval(()=>{if(!document.hidden)tick()},2000);
 </script></body></html>
 """.replace("__EXTRAS__", json.dumps(EXTRA_FLAGS))
+
+
+# ------------------------------------------------------------------------------------------------ the tabs (one address)
+# Nick, 2026-10-28 (open question 4): one address for everything. This page (8091, always on) holds three tabs, each
+# the existing page as it is: Live lab (the E02 runner's live page on 8090 during a session; a fleet run's own screen
+# and the cameras during a DOE loop or Monday's mission), Mission Control (8095, opened from here on demand) and
+# Start/Stop (the start page above, at /start). The bar at the top says what is running on the Pi, whichever tab is open.
+SHELL = r"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Robot lab</title>
+<style>
+:root{--ground:#F6F7F9;--panel:#FFFFFF;--border:#E4E7EC;--ink:#101828;--muted:#5B6474;--accent:#2952CC;
+--green:#12805C;--green-bg:#E7F5EE;--warn:#B54708;--warn-bg:#FFFAEB;--warn-border:#FEC84B;--red:#B42318;--line:#D0D5DD}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--ground);font-family:Inter,system-ui,-apple-system,"Segoe UI",Arial,sans-serif;color:var(--ink);
+font-size:14px;display:flex;flex-direction:column}
+header{min-height:64px;background:var(--panel);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px 24px;
+padding:10px 32px;flex-wrap:wrap;flex:none}
+.logo{display:flex;align-items:center;gap:10px}.logo b{width:28px;height:28px;border-radius:8px;background:var(--ink);color:#fff;
+font-size:13px;display:flex;align-items:center;justify-content:center}
+nav{display:flex;gap:8px;flex-wrap:wrap}
+nav button{font:inherit;font-size:13px;padding:6px 14px;border-radius:999px;color:var(--muted);background:var(--panel);
+border:1px solid var(--border);cursor:pointer;display:flex;align-items:center;gap:6px}
+nav button.on{color:#fff;background:var(--accent);border-color:var(--accent);font-weight:600}
+nav button i{width:7px;height:7px;border-radius:50%;background:var(--green);display:none}
+nav button.live i{display:inline-block}
+.grow{flex:1}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{font-size:13px;display:flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:999px;padding:4px 12px;
+color:var(--muted);background:var(--panel)}
+.chip i{width:8px;height:8px;border-radius:50%;background:currentColor}
+.chip.run{color:var(--green);border-color:var(--green-bg);background:var(--green-bg)}
+.chip.ask{color:var(--warn);border-color:var(--warn-border);background:var(--warn-bg);cursor:pointer}
+.pane{flex:1;min-height:0;display:none}
+.pane.on{display:flex;flex-direction:column}
+iframe{border:0;width:100%;flex:1;min-height:70vh;background:var(--ground)}
+.wrap{padding:24px 32px 32px;display:flex;flex-direction:column;gap:16px;overflow:auto}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px;max-width:1100px}
+.card.warnc{background:var(--warn-bg);border-color:var(--warn-border)}
+h2{margin:0;font-size:18px;font-weight:600}h3{margin:0 0 6px;font-size:15px;font-weight:600}
+.sub{margin:6px 0 0;color:var(--muted)}
+.small{font-size:12.5px;color:var(--muted)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+button.b{font:500 14px inherit;font-family:inherit;padding:10px 16px;border-radius:8px;border:1px solid var(--line);background:#fff;
+color:var(--ink);cursor:pointer}
+button.p{font:600 15px inherit;font-family:inherit;padding:12px 18px;border-radius:10px;border:none;background:var(--accent);color:#fff;
+cursor:pointer}
+button.stop{background:var(--red);color:#fff;border:none}
+button:disabled{opacity:.5;cursor:default}
+.sw{display:flex;gap:6px;padding:10px 32px 0;flex:none}
+.sw button{font:inherit;font-size:13px;padding:5px 12px;border-radius:8px;border:1px solid var(--border);background:var(--panel);
+color:var(--muted);cursor:pointer}
+.sw button.on{border-color:var(--accent);color:var(--accent);font-weight:600}
+pre{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;white-space:pre-wrap;background:#F9FAFB;border:1px solid var(--border);
+border-radius:8px;padding:10px;margin:10px 0 0;max-height:340px;overflow:auto}
+.cams{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-top:10px}
+.cams img{width:100%;border-radius:8px;background:#111;display:block;min-height:120px}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;max-width:1100px}
+.err{color:var(--red);font-size:13px;min-height:18px}
+.hidden{display:none!important}
+@media (max-width:720px){header,.wrap,.sw{padding-left:16px;padding-right:16px}iframe{min-height:80vh}}
+</style></head><body>
+<header>
+  <div class="logo"><b>R</b><span style="font-weight:600;font-size:16px">Robot lab</span></div>
+  <nav aria-label="Tabs">
+    <button data-t="live" id="t-live"><i></i>Live lab</button>
+    <button data-t="mc" id="t-mc"><i></i>Mission Control</button>
+    <button data-t="start" id="t-start"><i></i>Start/Stop</button>
+  </nav>
+  <div class="grow"></div>
+  <div class="chips" id="chips"><span class="chip"><i></i>Asking the Pi ...</span></div>
+</header>
+
+<section class="pane" id="p-live">
+  <div class="sw hidden" id="liveSw"><button data-v="/" class="on">Live view (questions come here)</button><button data-v="/lab">Lab</button></div>
+  <iframe id="liveFrame" class="hidden" title="The session's live page"></iframe>
+  <div class="wrap" id="liveBody"></div>
+</section>
+<section class="pane" id="p-mc">
+  <iframe id="mcFrame" class="hidden" title="Mission Control"></iframe>
+  <div class="wrap" id="mcBody"></div>
+</section>
+<section class="pane" id="p-start">
+  <iframe id="startFrame" src="/start" title="Start and stop sessions"></iframe>
+</section>
+
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const host=location.protocol+'//'+location.hostname;
+let S=null, tab=null, liveSub='/', camsOn=false, msg='';
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function api(path,body){return fetch(path,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json','X-Mirlt':'1'},
+  body:body===undefined?undefined:JSON.stringify(body),cache:'no-store',credentials:'same-origin'}).then(async r=>{let j={};try{j=await r.json()}catch(e){};j._code=r.status;return j})}
+function mins(s){s=Math.max(0,Math.round(s));return s<90?s+' s':s<5400?Math.round(s/60)+' min':(s/3600).toFixed(1)+' h'}
+function setFrame(el,url){if(url){if(el.dataset.u!==url){el.src=url;el.dataset.u=url}el.classList.remove('hidden')}
+  else{if(el.dataset.u){el.removeAttribute('src');el.dataset.u=''}el.classList.add('hidden')}}
+function show(t){tab=t;try{history.replaceState(null,'','#'+t)}catch(e){}
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));
+  document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('on',p.id==='p-'+t));
+  if(t!=='live')camsOn=false;
+  render()}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>show(b.dataset.t));
+$('liveSw').onclick=e=>{const b=e.target.closest('button');if(!b)return;liveSub=b.dataset.v;
+  $('liveSw').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));render()};
+const e02Live=s=>s&&(s.phase==='running'||s.phase==='stopping');
+function chips(s){
+  if(!s)return '<span class="chip"><i></i>Enter the PIN (Start/Stop tab)</span>';
+  const c=[];
+  if(e02Live(s))c.push(['run','E02 session '+(s.phase==='stopping'?'stopping':'running')+(s.live_phase?': '+s.live_phase:'')]);
+  if(s.phase==='starting')c.push(['run','E02 session starting']);
+  if(s.question)c.push(['ask','The runner is asking a question']);
+  (s.fleet||[]).forEach(f=>c.push(['run',f.words+(f.dry?' (simulator)':'')]));
+  if(s.mc&&s.mc.up)c.push([s.mc.run&&s.mc.run.running?'run':'',s.mc.run&&s.mc.run.running?'Mission Control: '+(s.mc.run.mode==='robots'?'robots':'simulator')+' run':'Mission Control open']);
+  if(s.phase==='uploading')c.push(['run','Uploading']);
+  if(s.recorder)c.push(['','Cameras recording']);
+  if(!c.length)c.push(['','Nothing running']);
+  return c.map(([k,w])=>`<span class="chip ${k}"${k==='ask'?' data-go="live"':''}><i></i>${esc(w)}</span>`).join('')}
+$('chips').onclick=e=>{const c=e.target.closest('[data-go]');if(c)show(c.dataset.go)};
+function camsCard(s){
+  if(!s.recorder)return '';
+  return `<div class="card"><div class="row" style="justify-content:space-between"><h3 style="margin:0">Cameras</h3>
+    <button class="b" id="camBtn">${camsOn?'Hide the pictures':'Show the pictures'}</button></div>
+    ${camsOn?`<div class="cams"><img src="${host}:8000/stream" alt="overhead camera"><img src="${host}:8001/stream" alt="side camera"></div>`:''}
+    <p class="small">The recorder's own preview of each camera (overhead :8000, side :8001), as recorded. Shown only while open: it costs the Pi some work.</p></div>`}
+function liveBody(s){
+  if(!s)return '<div class="card"><h2>Enter the PIN first</h2><p class="sub">On the Start/Stop tab. Then this tab shows what is running.</p></div>';
+  let h='';
+  const fl=s.fleet||[];
+  fl.forEach((f,i)=>{
+    h+=`<div class="card"><h2>${esc(f.words)}${f.dry?' (simulator)':''}</h2>`;
+    if(f.kind==='mission'&&!f.tmux)h+=`<p class="sub">Started from Mission Control: watch it and stop it on its Run screen.</p><div class="row" style="margin-top:10px"><button class="p" data-go="mc">Open the Mission Control tab</button></div>`;
+    else if(f.tmux){h+=`<p class="sub">Its screen on the Pi (tmux session <b>${esc(f.tmux)}</b>), last lines, every 2 s:</p><pre>${esc((f.screen||[]).join('\n'))||'(nothing on its screen yet)'}</pre>
+      <div class="row" style="margin-top:12px"><button class="b stop" data-stop="1">Stop the ${esc(f.words)}</button><span class="small">Ctrl+C in its window: every robot stops, then it saves and uploads.</span></div>`}
+    else h+=`<p class="sub">Started in a terminal window on the Pi: stop it there with Ctrl+C.</p>`;
+    h+='</div>'});
+  if(s.phase==='uploading')h+=`<div class="card"><h2>The last session is uploading</h2><p class="sub">Its progress is on the Start/Stop tab.</p></div>`;
+  if(s.phase==='starting')h+=`<div class="card"><h2>An E02 session is starting</h2><p class="sub">Its live page appears here once the runner is up.</p></div>`;
+  if(s.mc&&s.mc.up&&s.mc.run&&s.mc.run.running&&!fl.some(f=>f.kind==='mission'))h+=`<div class="card"><h2>Mission Control: ${s.mc.run.mode==='robots'?'robots':'simulator'} run (${esc(s.mc.run.kind||'')}), ${mins(s.mc.run.elapsed_s||0)}</h2><p class="sub">Watch it on Mission Control's Run screen.</p><div class="row" style="margin-top:10px"><button class="p" data-go="mc">Open the Mission Control tab</button></div></div>`;
+  if(!h)h=`<div class="card"><h2>Nothing is running</h2><p class="sub">This tab shows the live page during an E02 session, and a DOE loop's or Monday mission's own screen while one runs.</p></div>
+    <div class="grid3"><div class="card"><h3>An E02 session</h3><p class="sub">Start it on the Start/Stop tab; its live page and questions then show here.</p><div class="row" style="margin-top:10px"><button class="b" data-go="start">Start/Stop tab</button></div></div>
+    <div class="card"><h3>A mission</h3><p class="sub">Plan it, try it in the simulator and run it on the robots in Mission Control.</p><div class="row" style="margin-top:10px"><button class="b" data-go="mc">Mission Control tab</button></div></div>
+    <div class="card"><h3>From a terminal on the Pi</h3><p class="sub"><code>./run-fleet-pi.sh monday</code> or <code>./run-fleet-pi.sh doe</code>: they show here while they run, with a Stop button.</p></div></div>`;
+  return h+camsCard(s)+(msg?`<div class="err">${esc(msg)}</div>`:'')}
+function mcBody(s){
+  if(!s)return '<div class="card"><h2>Enter the PIN first</h2><p class="sub">On the Start/Stop tab.</p></div>';
+  if(s.mc.starting)return '<div class="card"><h2>Mission Control is starting ...</h2><p class="sub">About 10 s (the camera recorder first, if it is not running). It opens here by itself.</p></div>';
+  const busy=(s.fleet||[]).map(f=>f.words).join(' and ');
+  return `<div class="card"><h2>Mission Control is not open</h2>
+   <p class="sub">Opening it runs <code>./run-fleet-pi.sh mc</code> on the Pi (in tmux session <b>mc</b>, so it keeps going when this page closes). It starts the camera recorder too if nothing runs it yet (video to the USB drive until <code>./run-fleet-pi.sh stop</code>); during an E02 session it opens for planning and the simulator only.</p>
+   ${busy?`<p class="sub"><b>Now running: ${esc(busy)}.</b> Mission Control can open beside it; it will not start a robot run until that has ended.</p>`:''}
+   <div class="row" style="margin-top:12px"><button class="p" id="mcGo">Open Mission Control</button></div>${msg?`<div class="err">${esc(msg)}</div>`:''}</div>`}
+function render(){
+  const s=S;$('chips').innerHTML=chips(s);
+  $('t-live').classList.toggle('live',!!s&&(e02Live(s)||(s.fleet||[]).length>0));
+  $('t-mc').classList.toggle('live',!!s&&s.mc&&s.mc.up);
+  // Live lab: the runner's own page during an E02 session; otherwise this page's own panel
+  const e02=e02Live(s)&&s.live_up;
+  $('liveSw').classList.toggle('hidden',!e02);
+  setFrame($('liveFrame'),e02&&tab==='live'?host+':'+s.live_port+liveSub:null);
+  $('liveBody').classList.toggle('hidden',!!e02);
+  if(!e02&&tab==='live')$('liveBody').innerHTML=liveBody(s);
+  // Mission Control: its own page once it answers
+  const mcUp=!!s&&s.mc&&s.mc.up;
+  setFrame($('mcFrame'),mcUp?host+':'+s.mc.port+'/':null);
+  $('mcBody').classList.toggle('hidden',mcUp);
+  if(!mcUp&&tab==='mc')$('mcBody').innerHTML=mcBody(s);
+  const mg=$('mcGo');if(mg)mg.onclick=async()=>{mg.disabled=true;const r=await api('/api/mc/start',{});msg=r.ok?'':(r.words||'Could not start it.');tick()};
+  const cb=$('camBtn');if(cb)cb.onclick=()=>{camsOn=!camsOn;render()};
+  document.querySelectorAll('#liveBody [data-go]').forEach(b=>b.onclick=()=>show(b.dataset.go));
+  document.querySelectorAll('#liveBody [data-stop]').forEach(b=>b.onclick=async()=>{
+    if(!confirm('Stop it now? Every robot stops where it is, then it saves and uploads.'))return;
+    const r=await api('/api/stop',{confirm:true});msg=r.words||'';tick()});
+}
+async function tick(){const r=await api('/api/status').catch(()=>null);
+  if(!r){$('chips').innerHTML='<span class="chip ask"><i></i>The Pi does not answer</span>';return}
+  if(r._code===401){S=null;if(tab!=='start')show('start');else render();return}
+  const first=!S;S=r;
+  if(first&&!location.hash.slice(1)){show(e02Live(r)||(r.fleet||[]).length?'live':r.mc&&r.mc.up?'mc':'start');return}
+  render()}
+show(['live','mc','start'].includes(location.hash.slice(1))?location.hash.slice(1):'start');
+tick();setInterval(()=>{if(!document.hidden)tick()},2000);
+</script></body></html>
+"""
 
 
 # ------------------------------------------------------------------------------------------------ command line

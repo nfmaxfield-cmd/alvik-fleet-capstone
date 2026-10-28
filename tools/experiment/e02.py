@@ -361,14 +361,17 @@ BATTERY_WARN, BATTERY_STOP = 40, 15
 LEVELS_EVERY_S = 300.0      # chosen: refit the battery and the charge levels at most every 5 min (the battery reads in
                             # whole %; about 1 % per 4 min while standing). No DOE: it only sets how fresh the display is
 EXPECTED_FW = "2026-10-26a"
-OK_FW = ("2026-10-22b", "2026-10-25a", "2026-10-25b", "2026-10-25c", "2026-10-26a", "2026-10-27a")   # 25a adds the robot's own virtual
+OK_FW = ("2026-10-22b", "2026-10-25a", "2026-10-25b", "2026-10-25c", "2026-10-26a", "2026-10-27a", "2026-10-28a")   # 25a adds the robot's own virtual
                                                         # border and `sleep`; 25b the back switches and the reverse find;
                                                         # 25c refuses go / turn legs before a compass check; 26a numbered,
                                                         # acknowledged commands (e02_link.py), `dup` before any refusal,
                                                         # and the tilt stop; 22b still runs (plain commands, no tilt stop);
                                                         # 27a (school build) adds the four-sided border (bd_*, off unless
-                                                        # bd_on 1: this runner leaves it off) and a second WiFi network
-BORDER_FW = ("2026-10-25a", "2026-10-25b", "2026-10-25c", "2026-10-26a", "2026-10-27a")   # the robot's own virtual border and `sleep`
+                                                        # bd_on 1: this runner leaves it off) and a second WiFi network;
+                                                        # 28a (one system) adds the arc step, the dance and the boot ID
+                                                        # on top of 27a (refused here until 2026-10-28: the one-address
+                                                        # build's dry E02 session stopped on it)
+BORDER_FW = ("2026-10-25a", "2026-10-25b", "2026-10-25c", "2026-10-26a", "2026-10-27a", "2026-10-28a")   # the robot's own virtual border and `sleep`
 # --switches-back (Nick, 2026-10-25: "one attachment in total with switches in the back"): these too, sent and read
 # back with the safety settings and again before every find (a robot switched off and on loses them; it would then
 # find nose first, which still works). The find then backs into each board (firmware 2026-10-25b, e02.h REVERSE
@@ -378,8 +381,8 @@ BORDER_FW = ("2026-10-25a", "2026-10-25b", "2026-10-25c", "2026-10-26a", "2026-1
 # backing cap (e02_find_keep_cm 2) is left as it is: the look before backing is what keeps a robot off an edge where
 # a board was taken away (firmware e02.h REVERSE FIND; build report e02-oct25-backing-unc.md, item B).
 BACK_SETTINGS = (("sw_on", 1.0), ("sw_back", 1.0), ("e02_find_reverse", 1.0), ("e02_back_face_cm", 6.10))
-BACK_FW = ("2026-10-25b", "2026-10-25c", "2026-10-26a", "2026-10-27a")
-TILT_FW = ("2026-10-26a", "2026-10-27a")    # firmware that stops itself on a tilt (motion.h TILT) and refuses legs while tilted
+BACK_FW = ("2026-10-25b", "2026-10-25c", "2026-10-26a", "2026-10-27a", "2026-10-28a")
+TILT_FW = ("2026-10-26a", "2026-10-27a", "2026-10-28a")    # firmware that stops itself on a tilt (motion.h TILT) and refuses legs while tilted
 # Backups (Nick, 2026-10-23: "build in backup plans in case our session goes poorly ... get as much data as possible
 # before stopping for a rebuild"). Chosen numbers; a DOE would not help much here (they trade data for Nick's time).
 HEADING_LONG_ROOM_CM = 30.0   # a 15 cm heading drive only this far (or more) from an open edge

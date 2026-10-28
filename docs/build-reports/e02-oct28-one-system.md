@@ -117,3 +117,59 @@ pose and height for both cameras). The fleet and Pi suites: 178 passed, 7 skippe
   wanders.
 - The firmware's arc and dance were compiled against stand-in headers only.
 - The 0.15 cm circle error is the simulator's motion model; the real robot's wheels and gyro will be worse.
+
+## One address: Mission Control as a tab (2026-10-28, open question 4)
+
+**Premise.** Nick wants one address for everything on the Pi. The start page (8091) is the only page that is always
+on (systemd, PIN), so it now holds three tabs, each the existing page unchanged: **Live lab | Mission Control |
+Start/Stop**. Bookmark: **http://100.122.222.75:8091**. A bar at the top says what runs on the Pi, whichever tab is open.
+
+**What each tab shows** (screenshots `docs/screenshots/2026-10-28/one-address-*.png`):
+
+| On the Pi | Live lab | Mission Control | Start/Stop |
+|---|---|---|---|
+| Nothing running | "Nothing is running", where to start each thing | Mission Control's page; if closed, **Open Mission Control** (runs `./run-fleet-pi.sh mc` in tmux `mc`) | Start page as before |
+| E02 session | its live page (questions) and the Lab page, one click apart | opens for planning and the simulator; robot runs refused | Running, Stop |
+| DOE loop / Monday's mission / ladder (tmux) | the run's own screen (last lines, every 2 s), **Stop** (Ctrl+C in its window), camera pictures on request | opens beside it; its robot run refused until the other ends | "A robot run is going", Start locked, Stop for that run |
+| Mission Control's own run | "watch and stop it on the Mission Control tab" | its Run screen | Start locked |
+
+Before this, the start page took a DOE loop or Monday run for "the recorder running without a runner", and its Stop
+would have stopped the recorder under the running loop. It now knows the fleet's programs (doe_loop, mission_run,
+ladder, run_plan, Mission Control; simulator runs marked as such).
+
+**Problems found while building, fixed.**
+- The E02 runner refused firmware 2026-10-28a (the one-system build's), so after Monday's flash no E02 session would
+  have started ("this session needs 2026-10-22b ... or 2026-10-27a"). 28a only adds the arc, the dance and the boot
+  ID to 27a: now accepted (e02.py OK_FW, BORDER_FW, BACK_FW, TILT_FW). Found by the dry E02 session run for the
+  screenshots.
+- The live page's "start page / Stop" link opened the tabs inside the tab: it now opens in the whole window.
+
+**Mission Control's preview, part by part** (the coordinator's addition: Nick could not see the game of Chicken).
+Each part of the routine is drawn in its own line style with its name where it starts; the part each robot is in at
+the slider's time is drawn strong, and "Now: Left chicken, Right mow on" sits under the slider
+(`mc-preview-parts-*.png`). It showed why Chicken was hard to see: **the two robots never play it together.** On
+61 x 122, Left swerves at 82 s while Right is still mowing; Right swerves at 103 s while Left dances. The chicken
+block has no wait for the other robot (the meet block has one). Not changed here (it changes the mission the Monday
+sweeps simulate): open question 41.
+
+**Tests.** 7 new launcher tests (the fleet's programs recognised; a DOE loop shown, Start locked, Stopped through its
+tmux window; Mission Control's run not stopped from here; simulator runs marked; Mission Control opened in tmux once;
+the tabs page framing /start and its buttons behind the PIN) and 2 Mission Control tests (robot run refused while
+the DOE loop drives; Monday's preview cut into its parts, Chicken with its own path). Pi and fleet suites: 185
+passed, 9 skipped; E02 runner tests 87 passed, 1 skipped. Screenshots: the real page code with a stand-in Pi (the
+process list and tmux screens stubbed, the DOE screen text made up), a real Mission Control and a real dry E02 session.
+
+**Not tested on the Pi.** The service picking up the new code (needs `sudo systemctl restart mirlt-launcher` after
+`git pull`); tmux started from the systemd service for Mission Control (the same way it starts E02 sessions);
+Mission Control inside the tab over Tailscale and on the phone; `hostname -I` addresses added to Mission Control's
+allowed hosts; the camera pictures in the Live lab tab (the recorder's /stream).
+
+**Next.** On the Pi: `git pull`, `sudo systemctl restart mirlt-launcher`, open http://100.122.222.75:8091, press
+Open Mission Control once. Answer question 41.
+
+**New tests that may now be necessary:** a launcher end-to-end with a real dry DOE loop in tmux (Stop from the page);
+Mission Control started from the page under systemd's environment.
+**Possible inaccuracies:** the fleet runs are recognised by their program names on the Pi's process list; a run
+started some other way (a renamed copy, `python -m`) would not show. The 2 s refresh and the 24 screen lines are
+chosen, not derived (display only; no DOE needed).
+

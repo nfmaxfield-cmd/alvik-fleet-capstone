@@ -2,6 +2,10 @@
 # Phase 0 on the Pi (2026-10-27): the fleet planner (tools/fleet/run_plan.py) on the real robots, with camera fixes
 # from the overhead camera through the camera bridge (tools/fleet/cam_bridge.py). Plan: docs/session-plans/2026-10-27.md
 #
+# ONE ADDRESS for everything (2026-10-28): http://100.122.222.75:8091 in the laptop's or phone's browser (the start
+# page, always on). Tabs: Live lab (an E02 session's live page; a DOE loop's or Monday mission's own screen and Stop
+# while one runs) | Mission Control (opened from there on demand: the same as `mc` below) | Start/Stop.
+#
 # In a terminal ON THE PI (SSH from the laptop), one of:
 #     ./run-fleet-pi.sh setup              camera setup page (after moving a camera): overhead corners, side picture,
 #                                          the lights' flash check; http://100.122.222.75:8096. Stop the recorder first
@@ -32,7 +36,9 @@
 #     ./run-fleet-pi.sh monday [61x122] [Left,Right] [farm]   Monday's default mission on the table of that size (put
 #                                          each robot at its own end first); runs in tmux "monday"; Ctrl+C stops every
 #                                          robot; uploads at the end. farm: each camera tracked in its own process
-#     ./run-fleet-pi.sh mc                 Mission Control on the Pi: http://100.122.222.75:8095 in the laptop's browser
+#     ./run-fleet-pi.sh mc                 Mission Control on the Pi (also the Mission Control tab at :8091, which runs
+#                                          this in tmux "mc"); its own address http://100.122.222.75:8095 still works
+#     ./run-fleet-pi.sh mc-stop            close Mission Control opened from the tab (a run of its own stops first)
 # The first test starts the recorder (both cameras, to the USB drive) in a tmux session called fleet; it keeps
 # recording until `stop`. Each test starts the camera bridge, runs the plan, then prints the line check (GATE).
 set -u
@@ -208,9 +214,22 @@ case "$WHAT" in
       echo "If the window closed: tmux attach -t monday   (Ctrl+C in it stops every robot)"
     fi ;;
   mc)
-    [ "$DRY" = 1 ] || start_recorder
-    echo "Mission Control: http://100.122.222.75:8095 in the laptop's browser (Ctrl+C here stops it)"
-    python3 tools/fleet/mission_control.py --dir logs/mission-control --listen 0.0.0.0 --allow-host 100.122.222.75 ;;
+    if python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8095/api/run', timeout=2)" 2>/dev/null; then
+      echo "Mission Control is already open: http://100.122.222.75:8091 (Mission Control tab) or http://100.122.222.75:8095"; exit 0
+    fi
+    # the recorder (its pictures for the robots' runs); in a subshell, so that an E02 session holding the cameras
+    # leaves Mission Control open for planning and the simulator instead of stopping here
+    if [ "$DRY" != 1 ]; then
+      ( start_recorder ) || echo "(No recorder: Mission Control opens for planning and the simulator only; robot runs need the cameras.)"
+    fi
+    # the addresses the page may make changes from (its Host check): Tailscale, the Pi's name on the WiFi, its WiFi number
+    HOSTS="--allow-host 100.122.222.75 --allow-host $(hostname).local"
+    for ip in $(hostname -I 2>/dev/null); do case "$ip" in *.*.*.*) HOSTS="$HOSTS --allow-host $ip" ;; esac; done
+    echo "Mission Control: http://100.122.222.75:8091 (Mission Control tab), or http://100.122.222.75:8095 (Ctrl+C here stops it)"
+    python3 tools/fleet/mission_control.py --dir logs/mission-control --listen 0.0.0.0 $HOSTS ;;
+  mc-stop)
+    if tmux has-session -t mc 2>/dev/null; then tmux send-keys -t mc C-c; echo "Mission Control is closing."
+    else echo "Mission Control was not opened from the tab (tmux mc): if it runs in a terminal, Ctrl+C there."; fi ;;
   ladder-status)   # (no recorder needed)
     D=""; [ "$DRY" = 1 ] && D="--dry"
     python3 tools/fleet/ladder.py status $D ;;
@@ -259,5 +278,5 @@ case "$WHAT" in
     python3 tools/pi/upload_session.py --recordings "$OUT" --stop-recorder --no-logs --tag "p0-$DAY-recording" || true
     tmux kill-session -t fleet 2>/dev/null || true ;;
   *)
-    sed -n '2,37p' "$0"; exit 1 ;;
+    sed -n '2,43p' "$0"; exit 1 ;;
 esac

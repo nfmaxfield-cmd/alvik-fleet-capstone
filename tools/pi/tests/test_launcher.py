@@ -193,6 +193,7 @@ class World:
         self.p = dict(runner=[], upload=[], recorder=[], plan=[])
         self.tmux_calls = []
         self.has_session = False
+        self.sessions = set()          # other tmux sessions that exist (doe, monday, mc ...)
 
     def procs(self):
         return {k: list(v) for k, v in self.p.items()}
@@ -200,7 +201,9 @@ class World:
     def tmux(self, *a, **k):
         self.tmux_calls.append(a)
         if a[0] == "has-session":
-            return (0 if self.has_session else 1), ""
+            return (0 if (self.has_session and a[2] == "e02") or a[2] in self.sessions else 1), ""
+        if a[0] == "capture-pane":
+            return 0, "drive 12 of 40: Left 7.5 cm/s out 25 cm ... ok\n\n"
         return 0, ""
 
 
@@ -378,7 +381,7 @@ def req(url, body=None, cookie="", hdr=True):
 
 def test_pin_protects_everything_but_the_page(web):
     L, w, base = web
-    with urllib.request.urlopen(base + "/") as x:
+    with urllib.request.urlopen(base + "/start") as x:
         assert b"Robot sessions" in x.read()
     assert req(base + "/api/status")[0] == 401
     assert req(base + "/api/start", dict(confirm=True))[0] == 401
@@ -457,3 +460,81 @@ def test_idle_port_is_handed_over_and_taken_back(tmp_path):
     w.p["runner"] = [1]                                 # a runner without a hand-off: let go at once
     L.tick()
     assert not _listening(port)
+
+
+# ---------------------------------------------------------------- one address: the tabs (2026-10-28)
+def test_classify_fleet_programs():
+    assert LA.classify(["python3", "tools/fleet/doe_loop.py", "run", "--hours", "4"]) == "doe"
+    assert LA.classify(["python3", "tools/fleet/doe_loop.py", "status"]) is None
+    assert LA.classify(["/usr/bin/python3", "/r/tools/fleet/mission_run.py", "--table", "61x122"]) == "mission"
+    assert LA.classify(["python3", "tools/fleet/ladder.py", "run", "--pause"]) == "ladder"
+    assert LA.classify(["python3", "tools/fleet/ladder.py", "status"]) is None
+    assert LA.classify(["python3", "tools/fleet/run_plan.py", "--map", "m.json"]) == "plan_run"
+    assert LA.classify(["python3", "tools/fleet/mission_control.py", "--dir", "x"]) == "mc"
+
+
+def test_a_doe_loop_shows_and_stops_from_the_page(tmp_path):
+    w = World()
+    L = make_launcher(tmp_path, w)
+    w.p.update(doe=[11], plan_run=[12], recorder=[13])       # the loop, its run_plan, the fleet's recorder
+    w.sessions = {"doe", "fleet"}
+    assert L.phase() == "fleet"
+    s = L.status()
+    assert [f["kind"] for f in s["fleet"]] == ["doe"] and s["fleet"][0]["tmux"] == "doe"
+    assert s["fleet"][0]["screen"][0].startswith("drive 12 of 40") and s["recorder"]
+    ok, why = L.start({})
+    assert not ok and "DOE loop is driving the robots" in why                     # no E02 session beside it
+    ok, words = L.stop()
+    assert ok and ("send-keys", "-t", "doe", "C-c") in w.tmux_calls and "DOE loop" in words
+
+
+def test_mission_control_run_is_stopped_on_its_own_screen(tmp_path):
+    w = World()
+    L = make_launcher(tmp_path, w)
+    w.p.update(mission=[21])                                    # started by Mission Control: no tmux monday
+    s = L.status()
+    assert s["phase"] == "fleet" and s["fleet"][0]["words"] == "Mission Control's run"
+    ok, why = L.stop()
+    assert not ok and "Mission Control" in why and not any(c[0] == "send-keys" for c in w.tmux_calls)
+    w.sessions = {"monday"}                                     # ./run-fleet-pi.sh monday
+    assert L.status()["fleet"][0]["words"].startswith("Monday's mission")
+    assert L.stop()[0] and ("send-keys", "-t", "monday", "C-c") in w.tmux_calls
+
+
+def test_simulator_runs_are_marked(tmp_path):
+    w = World()
+    L = make_launcher(tmp_path, w)
+    w.p.update(mission=[31], dry=[31])
+    assert L.status()["fleet"][0]["dry"] is True
+
+
+def test_mission_control_opens_in_tmux_on_demand(tmp_path):
+    w = World()
+    L = make_launcher(tmp_path, w)
+    L.mc_port = _free_port()                                     # nothing answers there: not open
+    s = L.status()
+    assert s["mc"]["up"] is False and s["mc"]["starting"] is False
+    ok, words = L.mc_start()
+    assert ok and "starting" in words
+    new = [c for c in w.tmux_calls if c[0] == "new-session"][0]
+    assert new[1:4] == ("-d", "-s", "mc") and "run-fleet-pi.sh' mc" in new[4]
+    L._cache.clear()
+    assert L.status()["mc"]["starting"] is True
+    assert L.mc_start()[0] and len([c for c in w.tmux_calls if c[0] == "new-session"]) == 1   # not twice
+    assert not L.mc_stop()[0]                                    # no tmux mc in this stand-in world
+    w.sessions = {"mc"}
+    assert L.mc_stop()[0] and ("send-keys", "-t", "mc", "C-c") in w.tmux_calls
+
+
+def test_tabs_page_and_mc_buttons_need_the_pin(web):
+    L, w, base = web
+    with urllib.request.urlopen(base + "/") as x:
+        body = x.read()
+        assert x.headers.get("X-Frame-Options") == "SAMEORIGIN"             # the tabs frame /start
+    assert b"Mission Control" in body and b"Live lab" in body and b'src="/start"' in body
+    assert req(base + "/api/mc/start", {})[0] == 401
+    cookie = req(base + "/api/login", dict(pin="4321"))[2].split(";")[0]
+    L.mc_port = _free_port()
+    code, d, _ = req(base + "/api/mc/start", {}, cookie=cookie)
+    assert code == 200 and d["ok"]
+    assert req(base + "/api/mc/stop", {}, cookie=cookie)[0] == 400             # not confirmed
