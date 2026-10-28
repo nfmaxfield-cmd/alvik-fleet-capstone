@@ -177,6 +177,68 @@ def install(sim, cond, seed):
                     return []
                 return orig_check(self, frame, robots, t)
             BW.BrickWatch.check = check
+    # ---- the live cameras (--serve-live, the camera bridge's pictures; Monday 2-robot sweep, 2026-10-28)
+    ls = float(cond.get("live_stall_s", 0.0) or 0.0)
+    side_only = bool(cond.get("side_only"))
+    if ls > 0 or side_only:
+        import table_cam as TC
+        l_every = float(cond.get("live_stall_every_s", 20.0))
+        l_first = float(cond.get("live_stall_first_s", 7.0))
+        l_mode = cond.get("live_stall_mode", "stall")
+
+        def stall_left(now):
+            """seconds left of the current stall (0: not stalled)"""
+            if ls <= 0 or sim.t_plan0 is None:
+                return 0.0
+            t = now - sim.t_plan0 - l_first
+            if t < 0:
+                return 0.0
+            ph = t % l_every
+            return ls - ph if ph < ls else 0.0
+        o_tr, o_sr = TC.TableCamera.render, TC.SideCamera.render
+
+        def t_render(self, robots=(), boxes=(), hand=None):
+            left = stall_left(time.time())
+            if left > 0:
+                if l_mode == "stall":
+                    time.sleep(left)             # no picture from either camera until it ends (one loop renders both)
+                elif getattr(self, "_stale", None) is not None:
+                    return self._stale           # "stale": the last picture again, with a new time stamp
+            img = o_tr(self, () if side_only else robots, boxes, hand)   # side_only: the overhead sees no robot
+            self._stale = img
+            return img
+
+        def s_render(self, robots=()):
+            if l_mode == "stale" and stall_left(time.time()) > 0 and getattr(self, "_stale", None) is not None:
+                return self._stale
+            img = o_sr(self, robots)
+            self._stale = img
+            return img
+        TC.TableCamera.render = t_render
+        TC.SideCamera.render = s_render
+    # ---- a robot restarts mid-run (power dip, a sleep check-in): it stops, is silent while it boots, then answers
+    # with a new boot ID, uncalibrated, every setting back to its factory value (as LiveRobot's `simctl restart`)
+    rs = cond.get("restart")
+    if rs:
+        rbr = sim.robots[rs["name"]]
+        rst = {"done": False}
+        orig_adv_r = rbr.advance
+
+        def advance_r(dt_ms, busy=False):
+            if not rst["done"] and sim.t_plan0 is not None and time.time() - sim.t_plan0 >= float(rs["t"]):
+                rst["done"] = True
+                now = time.time()
+                sim.drops.append((rbr.name, now, now + float(rs.get("boot_s", 3.0))))
+                rbr.abort_reason = "restarted"
+                rbr.boot_id = (rbr.boot_id * 7 + 0x1357) % 0xF000 + 0x1000
+                rbr.fw_yaw_sign = 0
+                import config as SCFG
+                for k, v in SCFG.firmware_params():
+                    rbr.params[k] = v
+                sim.event(dict(kind="robot_restart", robot=rbr.name, t=round(now - sim.t_plan0, 2),
+                               boot_s=rs.get("boot_s", 3.0)))
+            orig_adv_r(dt_ms, busy)
+        rbr.advance = advance_r
     # ---- one robot out
     out = cond.get("robot_out")
     if out:

@@ -76,7 +76,13 @@ def build(args, out):
             prog = json.load(f)
     else:
         prog = MS.monday_program(tuple(robots))
-    mm = MS.build(m, prog)
+    sets = dict(kv.split("=", 1) for kv in args.setting)
+    if "chicken_min_cm" in sets:
+        # the program's own chicken min_cm (Monday's says 8) gives way to an explicit --setting (safety-net DOE)
+        for bl in prog.get("blocks", []):
+            if bl.get("block") == "chicken":
+                bl["min_cm"] = float(sets["chicken_min_cm"])
+    mm = MS.build(m, prog, s=sets or None)
     over = {"separation_cm": max(float(((mm.get("mission") or {}).get("planner") or {}).get("separation_cm", 8.0)),
                                  args.min_gap_cm)}
     t0 = time.time()
@@ -139,6 +145,7 @@ def run(args):
         rp += ["--send", c]
     for ip in args.robot:
         rp += ["--robot", ip]
+    rp += list(args.rp_arg)
     cond = {}
     if args.dry:
         cal = os.path.join(sess, "sim", "table_camera.json")
@@ -155,6 +162,10 @@ def run(args):
         if args.dead:
             n, _, t = args.dead.partition("@")
             cond["robot_out"] = {"name": n, "t": float(t or 60), "mode": "dead"}
+        if args.sim_cond:
+            with open(args.sim_cond) as f:
+                cond.update(json.load(f))
+        rp += ["--sim-arg=%s" % a for a in args.sim_arg]
         if cond:
             cp = os.path.join(out, "sim_cond.json")
             with open(cp, "w") as f:
@@ -320,6 +331,13 @@ def main(argv=None):
     g.add_argument("--drop-pct", type=float, default=0.0, help="lost packets, %% each way")
     g.add_argument("--dead", help="NAME@T: that robot dies T s into the run (silent, still)")
     g.add_argument("--seed", type=int, default=1)
+    g.add_argument("--sim-cond", help="a JSON file of sim_shim.py conditions (sweeps/sim_shim.py), added to the above")
+    g.add_argument("--sim-arg", action="append", default=[], metavar="ARG",
+                   help="one more fleet_sim.py argument, e.g. --sim-arg=--turn-err=Left=7.5 (repeatable)")
+    ap.add_argument("--rp-arg", action="append", default=[], metavar="ARG",
+                    help="one more run_plan.py argument, e.g. --rp-arg=--send --rp-arg='set gyro_scale 1.075'")
+    ap.add_argument("--setting", action="append", default=[], metavar="NAME=VALUE",
+                    help="a mission setting (missions.SETTINGS), e.g. separation_cm=6.5 (repeatable)")
     args = ap.parse_args(argv)
     return run(args)
 
