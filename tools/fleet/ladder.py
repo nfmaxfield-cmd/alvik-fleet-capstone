@@ -593,6 +593,23 @@ def edge_words(rect, x, y):
     return "%.0f cm from the %s edge" % (d[k], k)
 
 
+def misread_heading(rows, total):
+    """The turn number k whose OFF error the next turn undoes (opposite sign, the two within TURN_TOL_DEG together,
+    the total within TOTAL_TOL_DEG), or 0. Each turn is the difference of two camera headings, so ONE misread heading
+    shows as two opposite errors in a row; a robot that really turns wrong shows the error once and in the total.
+    Replays of 27-28 Oct: a single 10 cm crawl's heading is off by up to 5-14 deg on either camera alone; the two FAILs
+    (Center +7.9 then -5.6; Right -10.6 then +6.0) were this pattern."""
+    if abs(total) > TOTAL_TOL_DEG:
+        return 0
+    e = [r["error_deg"] for r in rows]
+    for k in range(len(e) - 1):
+        if abs(e[k]) > TURN_TOL_DEG and e[k] * e[k + 1] < 0 and abs(e[k] + e[k + 1]) <= TURN_TOL_DEG:
+            return k + 1
+    if len(e) >= 2 and abs(e[-1]) > TURN_TOL_DEG and e[-1] * e[-2] < 0 and abs(e[-1] + e[-2]) <= TURN_TOL_DEG:
+        return len(e)
+    return 0
+
+
 def line_fit_heading(pts, p_from, p_to):
     """Direction of the straight line through the camera's spots (principal axis), pointing from p_from to p_to."""
     a = np.array([[q[1], q[2]] for q in pts], float)
@@ -1211,18 +1228,22 @@ class Ladder:
         signs = {1 if r["camera_deg"] > 0 else -1 for r in rows}
         evid = [d0.get("evidence", "both")] + [r["crawl"].get("evidence", "both") for r in rows]
         one_camera = any(e != "both" for e in evid)
+        misread = misread_heading(rows, total)
         ok = all(abs(r["error_deg"]) <= TURN_TOL_DEG for r in rows) and abs(total) <= TOTAL_TOL_DEG and len(signs) == 1
         q = eye.still(n) or p
         self.set_pose(n, q[0], q[1], heads[-1], "turn check crawl")
         res = dict(robot=n, turns=rows, total_error_deg=round(total, 1), start_heading=round(h0, 1),
                    pass_=ok, tol_turn_deg=TURN_TOL_DEG, tol_total_deg=TOTAL_TOL_DEG, evidence=evid,
-                   one_camera=one_camera)
+                   one_camera=one_camera, misread=misread, recheck=bool(not ok and (one_camera or misread)))
         with open(os.path.join(sub, "turncheck-%s.json" % n), "w") as f:
             json.dump(res, f, indent=1)
         say("    after 4 turns it faces %+.1f deg from where it started (allowed %.0f); each turn allowed %.0f deg "
             "-> %s%s" % (total, TOTAL_TOL_DEG, TURN_TOL_DEG, "PASS" if ok else "FAIL",
                          "" if not one_camera else " (headings from one camera in %d of 5 crawls: %s)" % (
                              sum(e != "both" for e in evid), ", ".join(evid))))
+        if not ok and misread:
+            say("    turn %d's error is undone by the next turn's (%s): one heading was misread, not a bad turn" % (
+                misread, ", ".join("%+.1f" % r["error_deg"] for r in rows)))
         return ok, res
 
     def L2(self, sub, names):
@@ -1237,7 +1258,7 @@ class Ladder:
             if good:
                 self.st["passed"]["L2:%s" % n] = round(time.time())
                 ok.append(n)
-            elif res.get("one_camera") or getattr(res.get("exc"), "evidence", "both") != "both":
+            elif res.get("recheck") or getattr(res.get("exc"), "evidence", "both") != "both":
                 # never set aside on one camera's evidence (Nick, 2026-10-28): held, not kept out
                 say("  %s: HELD, not kept out: the FAIL rests on one camera's view (%s). It stays in; check it again "
                     "when both cameras see it." % (n, ", ".join(res.get("evidence") or [res["exc"].evidence])))

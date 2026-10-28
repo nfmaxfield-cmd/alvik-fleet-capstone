@@ -733,18 +733,21 @@ class DoeLoop(LD.Ladder):
                 ", ".join("%+.1f" % r["error_deg"] for r in res["turns"]), res["total_error_deg"])
             if res.get("one_camera"):
                 return self.hold(n, why, ", ".join(res.get("evidence") or []))
+            if res.get("misread"):
+                return self.hold(n, why + "; turn %d's error is undone by the next" % res["misread"],
+                                 "a misread heading, not a bad turn", one=False)
             self.park(n, why)
         return ok
 
-    def hold(self, n, why, evidence):
+    def hold(self, n, why, evidence, one=True):
         """Never set aside on one camera's evidence (Nick, 2026-10-28): the robot stays in, skips this loop's drive,
         and is turn checked again at its next turn. Returns False (no drive now)."""
         self.st["doe"].setdefault("turn_due", {})[n] = True
         self.st["robots"].get(n, {}).pop("h", None)
         self.last_held = n
         self.save()
-        self.event("held", n, "%s; seen by one camera only (%s): held, not set aside; checked again next time" % (
-            why, evidence))
+        self.event("held", n, "%s; %s: held, not set aside; checked again next time" % (
+            why, ("seen by one camera only (%s)" % evidence) if one else evidence))
         return False
 
     # -- one drive ----------------------------------------------------------------------------------------------

@@ -161,3 +161,11 @@ def test_crawl_rechecks_once_before_failing(monkeypatch):
     with pytest.raises(LD.LadderStop) as e:
         L.crawl("Left", (50.0, 50.0), None)
     assert e.value.evidence == "side" and "15.0 cm" in str(e.value)
+
+
+def test_misread_heading_pattern():
+    rows = lambda es: [dict(error_deg=e) for e in es]
+    assert LD.misread_heading(rows([3.9, -1.8, 7.9, -5.6]), 4.3) == 3          # Center, 28 Oct 16:38
+    assert LD.misread_heading(rows([-10.6, 6.0, -0.0, 2.1]), -2.6) == 1        # Right, 27 Oct
+    assert LD.misread_heading(rows([7.9, 7.5, 6.8, 8.0]), 30.2) == 0           # really turns wrong
+    assert LD.misread_heading(rows([1.0, -0.5, 0.3, 9.0]), 9.8) == 0           # total over 8: a real FAIL
