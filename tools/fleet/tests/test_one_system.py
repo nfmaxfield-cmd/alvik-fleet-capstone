@@ -160,7 +160,7 @@ def test_firmware_host_compiles():
     src = open(os.path.join(REPO, "firmware", "home_lab", "home_lab.ino")).read()
     assert '#define FW_VERSION "2026-10-28a"' in src
     ex = open(os.path.join(REPO, "firmware", "home_lab", "secrets.example.h")).read()
-    assert '#define WIFI_SSID2     "ISE"' in ex and "type-the-school-password-here" in ex
+    assert '#define WIFI_SSID2     "type-the-exact-school-network-name-here"' in ex and "type-the-school-password-here" in ex
 
 
 def test_mission_control_plans_the_block_program(tmp_path):

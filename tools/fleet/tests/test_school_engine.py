@@ -197,8 +197,8 @@ def test_firmware_version_and_second_network_placeholders():
     ino = open(os.path.join(FW, "home_lab.ino")).read()
     assert '#define FW_VERSION "2026-10-28a"' in ino and "2026-10-27a:" in ino     # (27a's notes kept)
     ex = open(os.path.join(FW, "secrets.example.h")).read()
-    # the school's network (Nick, 16:43: SSID "ISE"); its password stays a placeholder he types into his secrets.h
-    assert '#define WIFI_SSID2     "ISE"' in ex and '#define WIFI_PASSWORD2 "type-the-school-password-here"' in ex
+    # the school's network (its name contains "ISE"; Nick, 2026-10-28 09:25: exact name to confirm); its password stays a placeholder he types into his secrets.h
+    assert '#define WIFI_SSID2     "type-the-exact-school-network-name-here"' in ex and '#define WIFI_PASSWORD2 "type-the-school-password-here"' in ex
     net = open(os.path.join(FW, "net.h")).read()
     assert "#ifdef WIFI_SSID2" in net and "beginNet(netIndex)" in net
 
