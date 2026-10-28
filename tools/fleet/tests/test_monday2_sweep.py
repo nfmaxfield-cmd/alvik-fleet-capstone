@@ -94,3 +94,14 @@ def test_dance_started_report_lost_is_taken_from_follow():
     v = ["run", "1000", "76", "nopose", "0", "75", "0", "40.7", "30.7", "-113.7", "0.3", "1", "0", "0", "150"]
     c.on_follow(b, 5.0, v)
     assert b.stat[1]["status"] == "done" and getattr(b, "dancing", False)
+
+
+def test_bridge_skips_a_frozen_repeated_picture():
+    import numpy as np
+    import cam_bridge as CB
+    a = np.random.default_rng(1).integers(0, 255, (48, 64), dtype=np.uint8)
+    assert CB.same_picture(a, a.copy())                       # a frozen camera's picture sent again
+    b = a.copy()
+    b[3, 4] ^= 1
+    assert not CB.same_picture(a, b)                          # one grey level apart: a new picture
+    assert not CB.same_picture(a, None)

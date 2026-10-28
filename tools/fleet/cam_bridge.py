@@ -74,6 +74,13 @@ MAX_BACKLOG_S = 0.3     # chosen: a picture that reaches the bridge this much la
 STILL_S = 1.0           # --observe: a robot still this long gets its outline heading printed (the turn check)
 
 
+def same_picture(a, b):
+    """A picture identical to the one before it, pixel for pixel: a frozen camera re-sending its last picture with a
+    new time stamp (Monday sweep 2026-10-28: such a picture puts a moving robot where it was, and the camera guard
+    stopped every run within 10 s). A real camera's noise makes two real pictures differ. No DOE: a definition"""
+    return a is not None and b is not None and a.shape == b.shape and np.array_equal(a, b)
+
+
 def wrap180(a):
     return (a + 180.0) % 360.0 - 180.0
 
@@ -426,10 +433,15 @@ class SideFeed(threading.Thread):
 
     def run(self):
         min_lag = None
+        prev = None
         try:
             for fr in self.src:
                 lag = fr.t_arrived - fr.t_pi
                 min_lag = lag if min_lag is None else min(min_lag, lag)
+                if same_picture(fr.img, prev):
+                    self.frozen = getattr(self, "frozen", 0) + 1
+                    continue
+                prev = fr.img
                 self.n += 1
                 self.buf.append((fr.img, fr.t_pi - CAPTURE_S))
                 if self.ready and lag - min_lag <= MAX_BACKLOG_S and self.trk.side is not None:
@@ -561,11 +573,15 @@ def main(argv=None):
         br.side_feed.start()
         print("Side camera: %s (lag %.3f s)" % (args.side_stream, args.side[1]), flush=True)
     src = S.StreamSource(args.stream, log=lambda s: print(s, flush=True))
-    min_lag, skipped = None, 0
+    min_lag, skipped, prev = None, 0, None
     try:
         for fr in src:
             lag = fr.t_arrived - fr.t_pi            # clock offset + transit + queue (the offset cancels below)
             min_lag = lag if min_lag is None else min(min_lag, lag)
+            if same_picture(fr.img, prev):
+                br.frozen = getattr(br, "frozen", 0) + 1
+                continue
+            prev = fr.img
             if br.ready and lag - min_lag > MAX_BACKLOG_S:
                 skipped += 1
                 br.skipped = skipped
