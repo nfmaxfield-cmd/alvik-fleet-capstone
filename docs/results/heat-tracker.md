@@ -14,7 +14,7 @@ pictures a second (-1 to +1; near 0 = no link, or temperature barely varied).
 | 20261027-213425-doe | unknown | 74.0 / 79.4 | 0 | 100 / 0 / 0 % | 25.0 / - / - | 0.07 | 0.01 |
 
 ## Readings (newest first)
-- **20261027-213425-doe (DOE loop, 29 min, cooling not in the logs):** the Pi stayed at 69-79 C (median 74) at the full
+- **20261027-213425-doe (DOE loop, 29 min, cooling not in the logs):** the Pi warmed from 44 C to a median 74 C (top 79 C) at the full
   1800 MHz clock the whole run, never under the soft limit or throttling (the logged "soft limit has happened" flag is
   left over from earlier since boot). Cooler than the 26-27 Oct sessions (80-86 C), with the tracking now split into a
   process per camera. The session ended at 22:03 because the Pi's card was full, not from heat.
