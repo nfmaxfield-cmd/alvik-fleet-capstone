@@ -1127,8 +1127,10 @@ class Ladder:
         h = line_fit_heading(pts, p0, p1)
         moved = math.dist(p0, p1)
         if h is None or not (0.6 * CRAWL_CM <= moved <= 1.4 * CRAWL_CM):
-            raise LadderStop("the camera saw %s crawl %.1f cm (it was sent %.0f cm): the camera or its wheels are "
+            err = LadderStop("the camera saw %s crawl %.1f cm (it was sent %.0f cm): the camera or its wheels are "
                              "wrong" % (n, moved, CRAWL_CM))
+            err.heading = None if h is None else (wrap180(h + 180.0) if sign < 0 else h)   # (doe_loop --keep-going)
+            raise err
         if sign < 0:
             h = wrap180(h + 180.0)
         # the camera's pose as a fix (firmware e02.h `fix`, idle: replaces its pose): its own heading starts from the

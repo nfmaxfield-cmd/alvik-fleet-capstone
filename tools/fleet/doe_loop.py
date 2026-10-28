@@ -519,8 +519,17 @@ class DoeLoop(LD.Ladder):
         if clip and self.frames is not None:
             self.frames.event("other", "%s: %s" % (kind, text), robot=robot)
 
-    def park(self, n, why):
-        """Out of the loop for good: it stays where it is (stopped), on every later map as an obstacle."""
+    def park(self, n, why, safety=False):
+        """Out of the loop for good: it stays where it is (stopped), on every later map as an obstacle.
+        --keep-going (Nick, 2026-10-28 18:00, "without any stops, just to see what happens"): only a SAFETY park
+        (battery floor, not answering, a restart that could not be recalibrated, settings that will not read back,
+        both cameras lost it, the firmware's own edge / border stop) parks; any other (turn check, heading crawl,
+        line check, one camera's evidence) is logged as "would have parked" and the robot carries on."""
+        if getattr(self.a, "keep_going", False) and not safety:
+            self.st["doe"].setdefault("would_park", []).append(dict(t=round(time.time(), 1), robot=n, why=why))
+            self.save()
+            self.event("would have parked", n, why)
+            return
         if n in self.st["kept_out"]:
             return
         try:
@@ -593,7 +602,7 @@ class DoeLoop(LD.Ladder):
             g = self.got.get(n, {})
             fw = bench.fw.get(n)
             if fw is None:
-                self.park(n, "not answering (asleep, off or out of WiFi) at the check before %s" % why)
+                self.park(n, "not answering (asleep, off or out of WiFi) at the check before %s" % why, safety=True)
                 continue
             boot, up = g.get("boot"), g.get("uptime_s")
             self.row("battery", dict(t=round(time.time(), 1), clock=time.strftime("%H:%M:%S"), robot=n,
@@ -608,7 +617,7 @@ class DoeLoop(LD.Ladder):
                 d["uptime"][n] = up
             self.save()
             if fw[1] < LD.MIN_BATTERY:
-                self.park(n, "battery %d%% (under %d%%)" % (fw[1], LD.MIN_BATTERY))
+                self.park(n, "battery %d%% (under %d%%)" % (fw[1], LD.MIN_BATTERY), safety=True)
                 continue
             if restarted:
                 self.event("restarted", n, "boot id %s -> %s (uptime %.0f s): wake, edge guard and corrections again, "
@@ -632,7 +641,7 @@ class DoeLoop(LD.Ladder):
             say("  %s restarted: calibrating it again (alone) ..." % n)
             self.L1(sub, [n])        # (no tracking-rate frames: a calibration is not tracked; clips still work)
             if not self.st["passed"].get("L1:%s" % n):
-                self.park(n, "restarted, and calibrating it again failed")
+                self.park(n, "restarted, and calibrating it again failed", safety=True)
                 fine = [m for m in fine if m != n]
             else:
                 self.st["doe"].setdefault("turn_due", {})[n] = True     # a fresh calibration: turn check it first
@@ -667,7 +676,7 @@ class DoeLoop(LD.Ladder):
             self.ask(bench, [n])
             b = bad(self.got.get(n, {}))
             if b:
-                self.park(n, "its %s does not read back as sent, twice" % ", ".join(b))
+                self.park(n, "its %s does not read back as sent, twice" % ", ".join(b), safety=True)
                 return False
         return True
 
@@ -691,6 +700,17 @@ class DoeLoop(LD.Ladder):
                 self.bench.send(n, "simctl restart" if kind == "restart" else "simctl battery %s" % val)
                 time.sleep(0.5)
 
+    def keep_going_back(self, names):
+        """--keep-going: a robot find_all kept out because neither camera saw its BODY, but whose lights it found, is
+        not set aside: "would have parked" is logged and it stays in (cam_bridge follows its lights; a robot lost by
+        both cameras and its lights is still parked, as a robot found nowhere is)."""
+        for m in names:
+            why = self.st["kept_out"].get(m, "")
+            if why.startswith("no camera can see its body"):
+                self.st["kept_out"].pop(m, None)
+                self.save()
+                self.park(m, why + " (keep-going: it stays in)")
+
     # -- one turn check -----------------------------------------------------------------------------------------
     def turn(self, sub, n, k):
         self.frames_on("turncheck-%s" % n)
@@ -698,7 +718,7 @@ class DoeLoop(LD.Ladder):
             ok, res = self.turncheck(n, sub)
         except LadderStop as e:
             self.frames_off()
-            self.park(n, "turn check could not finish: %s" % e)
+            self.park(n, "turn check could not finish: %s" % e, safety=lost_words(str(e)))
             return False
         self.frames_off()
         for r in res["turns"]:
@@ -723,8 +743,16 @@ class DoeLoop(LD.Ladder):
                 h, _ = self.crawl(n, self.eye.still(n) or p, None)
             except LadderStop as e:
                 self.frames_off()
-                self.park(n, "heading crawl: %s" % e)
-                return None
+                self.park(n, "heading crawl: %s" % e, safety=lost_words(str(e)))
+                h = getattr(e, "heading", None)
+                if not getattr(self.a, "keep_going", False) or lost_words(str(e)):
+                    return None
+                if h is None:
+                    # keep-going, no heading at all from the crawl: no drive this time (it tries again next turn)
+                    self.event("no heading", n, "no camera heading from the crawl: drive %d not tried this loop" %
+                               (i + 1), clip=False)
+                    return "no heading"
+                say("  %s: keep-going: the crawl's camera heading %.1f deg is used anyway" % (n, h))
             self.frames_off()
             q = self.eye.still(n) or p
             self.set_pose(n, q[0], q[1], h, "crawl")
@@ -813,11 +841,14 @@ class DoeLoop(LD.Ladder):
                 i + 1, os.path.relpath(r["sess"], LD.REPO)), clip=False)
             return "skipped"
         if res != "done":
-            self.park(n, "drive %d did not finish (%s); look at %s" % (i + 1, res, os.path.relpath(r["sess"], LD.REPO)))
+            self.park(n, "drive %d did not finish (%s); look at %s" % (i + 1, res, os.path.relpath(r["sess"], LD.REPO)),
+                      safety=lost_words(str(res)))
             return "fail"
         if c.get("p95_cm") is None or c["p95_cm"] > SAFETY_P95_CM or e is None:
-            self.park(n, "drive %d: %s" % (i + 1, "the camera lost it" if e is None or c.get("p95_cm") is None else
-                                            "p95 %.1f cm, over the %.0f cm safety limit" % (c["p95_cm"], SAFETY_P95_CM)))
+            lost = e is None or c.get("p95_cm") is None
+            self.park(n, "drive %d: %s" % (i + 1, "the camera lost it" if lost else
+                                            "p95 %.1f cm, over the %.0f cm safety limit" % (c["p95_cm"], SAFETY_P95_CM)),
+                      safety=lost)
             return "fail"
         return "done"
 
@@ -921,13 +952,15 @@ class DoeLoop(LD.Ladder):
             i = self.st["doe"]["i"].get(n, 0)
             try:
                 self.find_all(sub)
+                if getattr(self.a, "keep_going", False):
+                    self.keep_going_back(act)
                 if n in self.st["kept_out"]:
-                    raise LadderStop("the camera cannot see it now")
+                    raise LadderStop("the camera cannot see it now: lost by both cameras (and its lights)")
                 if i % TURN_EVERY == 0 or self.st["doe"].get("turn_due", {}).pop(n, False):
                     if not self.check(sub, [n], "%s's turn check" % n):
                         raise LadderStop(None)
                     say("  %s: turn check (drive %d is next)" % (n, i + 1))
-                    if not self.turn(sub, n, k):
+                    if not self.turn(sub, n, k) and n in self.st["kept_out"]:
                         raise LadderStop(None)
                 if not self.check(sub, [n], "%s's drive" % n):
                     raise LadderStop(None)
@@ -937,7 +970,7 @@ class DoeLoop(LD.Ladder):
                 idle_rounds = idle_rounds + 1 if out == "skipped" else 0
             except LadderStop as e:
                 if e.args and e.args[0]:
-                    self.park(n, str(e))
+                    self.park(n, str(e), safety=lost_words(str(e)))
             k += 1
             self.st["doe"]["loops"] = k
             self.save()
@@ -978,6 +1011,16 @@ class DoeLoop(LD.Ladder):
                 pass
         self.files = {}
         write_summary(self.dir)
+
+
+LOST_WORDS = ("lost", "edge", "border", "battery", "restart", "not answering")
+
+
+def lost_words(text):
+    """A failure that is about safety, not measurement (--keep-going still parks it): both cameras lost it, the
+    firmware's own edge / border stop, battery, a restart, no answer."""
+    t = (text or "").lower()
+    return any(w in t for w in LOST_WORDS)
 
 
 def stop_children(sig=signal.SIGINT):
@@ -1121,6 +1164,9 @@ def main(argv=None):
     ap.add_argument("--turn-err", action="append", default=[])
     ap.add_argument("--sim-calibrated", action="store_true")
     ap.add_argument("--sim-event", action="append", default=[], help="--dry: restart:NAME@LOOP, battery:NAME=PCT@LOOP")
+    ap.add_argument("--keep-going", action="store_true",
+                    help="never park a robot on a failed turn check, heading crawl, line check or one camera's "
+                         "evidence: log \"would have parked\" and carry on (safety stops still park)")
     ap.add_argument("--sim-free", default="", help="--dry: simulated free space, e.g. card=2.6,drive=6.2,fall=0.5 "
                                                    "(GB; fall: less before every loop): shows the guard's clean stop")
     a = ap.parse_args(argv)

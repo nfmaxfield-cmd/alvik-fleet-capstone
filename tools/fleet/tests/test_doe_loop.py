@@ -219,3 +219,51 @@ def test_summary_table(tmp_path):
     D.write_summary(str(tmp_path))
     s = open(os.path.join(str(tmp_path), "summary.md")).read()
     assert "| 5 | 25 | 1 | 1.20 | 0 | 0 | 3 | 1 | 1 / 1 |" in s
+
+
+def _loop_stub(tmp_path, keep):
+    L = D.DoeLoop.__new__(D.DoeLoop)
+    L.a = types.SimpleNamespace(keep_going=keep)
+    L.st = {"kept_out": {}, "doe": {}}
+    L.bench, L.frames, L.files, L.row_err = None, None, {}, False
+    L.dir = str(tmp_path)
+    L.save = lambda: None
+    L.keep_out = lambda n, why: L.st["kept_out"].__setitem__(n, why)
+    return L
+
+
+def test_keep_going_parks_only_for_safety(tmp_path):
+    """--keep-going (Nick 2026-10-28 18:00): a turn-check FAIL, a crawl's wrong distance or a line check is logged as
+    "would have parked" and the robot stays in; battery, lost by both cameras, edge stops still park."""
+    L = _loop_stub(tmp_path, True)
+    L.park("Center", "turn check FAIL (errors +3.9, -1.8, +7.9, -5.6, total +4.3 deg)")
+    L.park("Left", "heading crawl: the camera saw Left crawl 15.0 cm (it was sent 10 cm): the camera or its wheels "
+                   "are wrong", safety=D.lost_words("the camera saw Left crawl 15.0 cm"))
+    L.park("Right", "drive 3: p95 9.1 cm, over the 8 cm safety limit")
+    assert L.st["kept_out"] == {}
+    assert [w["robot"] for w in L.st["doe"]["would_park"]] == ["Center", "Left", "Right"]
+    L.park("Right", "battery 22% (under 25%)", safety=True)
+    L.park("Left", "drive 2: the camera lost it", safety=D.lost_words("the camera lost it"))
+    assert set(L.st["kept_out"]) == {"Right", "Left"}
+    ev = open(os.path.join(str(tmp_path), "events.csv")).read()
+    assert ev.count("would have parked") == 3 and ev.count(",parked,") == 2
+    # without it, everything parks as before
+    M = _loop_stub(tmp_path / "x", False)
+    os.makedirs(M.dir, exist_ok=True)
+    M.park("Center", "turn check FAIL")
+    assert "Center" in M.st["kept_out"]
+
+
+def test_keep_going_body_unseen_stays_in(tmp_path):
+    L = _loop_stub(tmp_path, True)
+    L.st["kept_out"]["Right"] = "no camera can see its body (only its lights)"
+    L.st["kept_out"]["Left"] = "not found by its lights"
+    L.keep_going_back(["Right", "Left"])
+    assert "Right" not in L.st["kept_out"] and "Left" in L.st["kept_out"]
+
+
+def test_lost_words():
+    assert D.lost_words("the camera lost Left after turn 2")
+    assert D.lost_words("drive 1 did not finish (edge stop)")
+    assert not D.lost_words("the camera saw Left crawl 15.0 cm (it was sent 10 cm): the camera or its wheels are wrong")
+    assert not D.lost_words("turn check FAIL (errors +3.9)")
