@@ -447,6 +447,11 @@ class Coordinator:
             if rtype == "STEP" and len(vals) >= 9:
                 self.on_step(b, t, vals)
             elif rtype == "FOLLOW" and len(vals) >= 17:
+                if b.run_exp is None and b.ended is None:
+                    # its RUNINFO lost over WiFi: FOLLOW records only come from a follow run (Monday sweep 2026-10-28:
+                    # at 15 % packet loss the start-up said "did not start their follow run" for a robot that had)
+                    b.run_id, b.run_exp = vals[0], "follow"
+                    self.log("follow_seen", robot=name, run=vals[0], why="RUNINFO not heard; FOLLOW records are")
                 self.on_follow(b, t, vals)
 
     def site_check(self, b, t, vals):

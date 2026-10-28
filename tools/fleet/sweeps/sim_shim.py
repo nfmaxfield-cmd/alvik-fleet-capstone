@@ -80,7 +80,7 @@ def install(sim, cond, seed):
     if pct > 0:
         sim.drop_pct = lambda direction: pct
         for k, rb in enumerate(sim.robots.values()):
-            rb.radio.drop_rng = random.Random(seed * 1000 + 17 * k + 3)
+            rb.radio.drop_rng = random.Random((seed + 7919 * int(cond.get("retry", 0))) * 1000 + 17 * k + 3)
     # ---- camera stalls (everyone at once)
     st = float(cond.get("cam_stall_s", 0.0) or 0.0)
     every = float(cond.get("cam_stall_every_s", 20.0))

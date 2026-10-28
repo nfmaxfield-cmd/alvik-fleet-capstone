@@ -127,7 +127,7 @@ def folder_of(root, name, size, seed, level):
     return os.path.join(root, "runs", "gap%s" % slug("%g" % level), slug(name), "%s-s%d" % (size, seed))
 
 
-def run_cmd(root, name, size, seed, level):
+def run_cmd(root, name, size, seed, level, retry=0):
     d = folder_of(root, name, size, seed, level)
     os.makedirs(d, exist_ok=True)
     c, a, w = cond_args(name, size, seed)
@@ -136,6 +136,8 @@ def run_cmd(root, name, size, seed, level):
         with open(cfg, "w") as f:
             json.dump({"robot": {"radius_scale_err_pct_by_robot": c.pop("_wheel")}}, f)
         a += ["--sim-arg=--config=%s" % cfg]
+    if retry and "drop_pct" in c:
+        c["retry"] = retry           # pressed again: the WiFi's losses are not the same packets the second time
     if c:
         with open(os.path.join(d, "cond.json"), "w") as f:
             json.dump(c, f)
@@ -425,7 +427,7 @@ def main(argv=None):
     first_try = {}
 
     def start(j, tries=0):
-        d, cmd, meta = run_cmd(a.out, *j)
+        d, cmd, meta = run_cmd(a.out, *j, retry=tries)
         if tries:
             for fn in os.listdir(d):
                 if fn not in ("cond.json", "sim_config.json"):

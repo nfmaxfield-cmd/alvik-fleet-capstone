@@ -43,8 +43,11 @@ WARMUP_SCALE_MAX = 0.05    # chosen: a warm-up wheel or gyro ratio further than 
                            # camera made a false +6.9 % in the Monday sweep); it is reported instead. DOE note: the
                            # warm-up's measured ratio against L2's turn check on the same robots, 3 days (does a 3-5 %
                            # ratio repeat?)
-READBACK_TRIES = 3         # read back every setting sent, resend a mismatch, up to this many rounds (Center's lost
-                           # wheel_scale `set` at 14:12). No DOE: a retry count
+READBACK_TRIES = 6         # read back every setting sent, resend a mismatch, up to this many rounds (Center's lost
+                           # wheel_scale `set` at 14:12). 3 until 2026-10-28: at 15 % packet loss each way a `get` and its
+                           # answer both arrive 72 % of the time, so a missing answer stayed missing after 3 rounds often
+                           # enough that simulated Monday starts were refused (docs/results/monday-2robot-sweep.md); 6 rounds
+                           # leave about 1 in 2,000 per setting, at most ~9 s. No DOE: a retry count
 
 
 def conf_dir():
