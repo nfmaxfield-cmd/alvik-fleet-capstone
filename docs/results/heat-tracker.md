@@ -12,8 +12,15 @@ pictures a second (-1 to +1; near 0 = no link, or temperature barely varied).
 | e02-20261027-001136 | unknown | 80.8 / 85.2 | 11 | 63 / 37 / 0 % | 18.3 / 15.9 / - | 0.22 | -0.22 |
 | e02-20261027-002947 | unknown | 84.2 / 86.2 | 30 | 0 / 85 / 15 % | - / 13.8 / 12.4 | 0.28 | -0.24 |
 | 20261027-213425-doe | unknown | 74.0 / 79.4 | 0 | 100 / 0 / 0 % | 25.0 / - / - | 0.07 | 0.01 |
+| 20261028-162951-doe | unknown | 74.5 / 78.9 | 0 | 100 / 0 / 0 % | 24.5 / - / - | 0.15 | -0.10 |
 
 ## Readings (newest first)
+- **20261028-162951-doe (DOE loop, 12 min, cooling not in the logs):** median 74.5 C, top 78.9 C, full clock, no soft
+  limit or throttling; the same as the 27 Oct loop. Too short to say more: the loop ended at 16:42 because every robot
+  was set aside (the overhead camera saw the robots' bodies in only 3 of 29 checks), not from heat.
+  ![Pi temperature and camera speed, DOE loop 28 Oct](heat/20261028-162951-doe.png)
+  The Pi's temperature and the pictures the camera handled each second, over the session; data: the session's cpu.csv
+  and perf.csv.
 - **20261027-213425-doe (DOE loop, 29 min, cooling not in the logs):** the Pi warmed from 44 C to a median 74 C (top 79 C) at the full
   1800 MHz clock the whole run, never under the soft limit or throttling (the logged "soft limit has happened" flag is
   left over from earlier since boot). Cooler than the 26-27 Oct sessions (80-86 C), with the tracking now split into a
