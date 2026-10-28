@@ -176,3 +176,17 @@ def test_mission_control_plans_the_block_program(tmp_path):
     assert os.path.exists(os.path.join(str(tmp_path), "program.json"))
     two = S.default_program(["Center", "Right"])["program"]
     assert two["robots"] == ["Center", "Right"]
+
+
+def test_mission_control_table_resize_carries_starts_and_board_wait(tmp_path):
+    import mission_control as MC
+    S = MC.Session(str(tmp_path))
+    S.set_map({"floor": {"x_min": 0, "y_min": 0, "x_max": 122, "y_max": 122}})
+    S.set_map({"floor": {"x_min": 0, "y_min": 0, "x_max": 122, "y_max": 61}})
+    for r in S.map["robots"]:                 # every start spot inside the smaller table, room to turn
+        assert MC.START_IN_CM - 1e-6 <= r["start"][0] <= 122 - MC.START_IN_CM + 1e-6
+        assert MC.START_IN_CM - 1e-6 <= r["start"][1] <= 61 - MC.START_IN_CM + 1e-6
+    with pytest.raises(ValueError):
+        S.setup_board_away()                  # not waiting
+    S.setup_job = {"running": True, "steps": [], "wait_board": True}
+    assert S.setup_board_away()["wait_board"] and S.setup_job["board_away"]

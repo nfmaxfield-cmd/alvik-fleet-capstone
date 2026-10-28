@@ -205,9 +205,10 @@ function setup() {
     <div class="card"><h2>Before you press it</h2><ol class="small">
       <li>Both cameras on, the recorder stopped (the setup page needs the cameras).</li>
       <li>The robots on the table, switched on (their lights are flashed).</li>
-      <li>The printed chessboard flat in the table's <b>0,0 corner</b>: its short edge along the table's long side, its corner in the table's corner.</li>
-      <li>Then take the chessboard away before the warm-up starts.</li></ol></div>
+      <li>The printed chessboard (squares of 3.5 cm) flat in the table's <b>0,0 corner</b>: its short edge along the table's long side, its corner in the table's corner. No robot on it.</li>
+      <li>When the setup asks, take the chessboard away and press <b>Chessboard taken away</b>: the warm-up starts then.</li></ol></div>
     <div class="card"><h2>Progress</h2><div class="log" id="slog">${esc((j.steps || []).map(x => x.join("  ")).join("\n")) || "Not started"}</div>
+      ${j.wait_board ? `<p><button class="p" id="bway">Chessboard taken away</button></p>` : ""}
       ${j.error ? `<p class="err">${esc(j.error)}</p>` : ""}</div>`,
     `<div class="card"><h2>Setup</h2><p class="small muted">${conn === "robots" ? "The Pi's cameras" : "Simulated cameras (the setup page's own fake board and robots)"}</p>
       <button class="p" id="sgo" ${j.running ? "disabled" : ""}>${j.running ? "Running..." : "Set up (flash check, chessboard, warm-up)"}</button>
@@ -216,6 +217,7 @@ function setup() {
   $("sgo").onclick = async () => { try { S.setup = await api("/api/setup/start", {conn}); render(); clearInterval(setupPoll);
     setupPoll = setInterval(async () => { S.setup = await api("/api/setup"); if (screen === 1) render(); if (!S.setup.running) { clearInterval(setupPoll); load(); } }, 1500); } catch (e) { flash(e.message, true); } };
   $("go").onclick = () => { done.add(1); screen = 2; render(); };
+  if ($("bway")) $("bway").onclick = async () => { try { S.setup = await api("/api/setup/board_away", {}); render(); } catch (e) { flash(e.message, true); } };
   const lg = $("slog"); if (lg) lg.scrollTop = lg.scrollHeight;
 }
 
