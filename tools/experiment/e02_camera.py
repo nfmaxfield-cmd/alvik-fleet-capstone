@@ -560,16 +560,25 @@ class MotionTracker:
         first heading crawl then read 12-18 cm for 10 (replay of 28 Oct and 27 Oct). A stray pixel of board noise
         never starts an outline (it must touch a sure one); a ghost where a robot left still needs the full margin
         to start. Lights (LIGHT_SEED: bright spots on a robot's top) also start one."""
-        weak = (d > self.HYST_LOW * self.thr).astype(np.uint8)
-        if self.HYST_UNKNOWN_ONLY and self.known is not None:
-            weak &= (self.known == 0).astype(np.uint8)      # grown only over filled-in floor (see HYST_UNKNOWN_ONLY)
-        seeds = strong > 0
-        # growth only within HYST_GROW robot widths of a sure pixel: a robot's top grows back to its edges, but not
-        # along the plywood's grain (27 Oct night replay, unbounded: outlines twice a robot, the overhead's seen-rate
-        # fell from 97 % to 72 %)
         r = max(1, int(round(self.HYST_GROW * (self.rpx if not self.size_per_spot else math.sqrt(self.area_min)))))
+        H, W = strong.shape
+        y0, y1, x0, x1 = 0, H, 0, W
+        if self.HYST_UNKNOWN_ONLY and self.known is not None:
+            # only round filled-in floor (a few robot-sized disks): the work stays small (Pi budget, 2026-10-28)
+            bx, by, bw, bh = cv2.boundingRect((self.known == 0).astype(np.uint8))
+            if bw == 0 or bh == 0:
+                return strong
+            m = 2 * r + 2
+            y0, y1, x0, x1 = max(0, by - m), min(H, by + bh + m), max(0, bx - m), min(W, bx + bw + m)
+        dd, st = d[y0:y1, x0:x1], strong[y0:y1, x0:x1]
+        weak = (dd > self.HYST_LOW * self.thr).astype(np.uint8)
+        if self.HYST_UNKNOWN_ONLY and self.known is not None:
+            weak &= (self.known[y0:y1, x0:x1] == 0).astype(np.uint8)   # grown only over filled-in floor
+        seeds = st > 0
         if self.LIGHT_SEED and g is not None:
-            seeds = seeds | ((d > 30.0) & (g - self.offset >= 235.0))
+            seeds = seeds | ((dd > 30.0) & (g[y0:y1, x0:x1] - self.offset >= 235.0))
+        # growth only within HYST_GROW robot widths of a sure pixel: a robot's top grows back to its edges, but not
+        # along the plywood's grain (27 Oct night replay, unbounded: outlines twice a robot)
         weak &= cv2.dilate(seeds.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)))
         weak |= seeds.astype(np.uint8)
         n, lab = cv2.connectedComponents(weak, connectivity=8)
@@ -578,7 +587,9 @@ class MotionTracker:
         keep = np.zeros(n, bool)
         keep[np.unique(lab[seeds])] = True
         keep[0] = False
-        return (keep[lab] * 255).astype(np.uint8)
+        out = strong.copy()
+        out[y0:y1, x0:x1] = np.maximum(st, (keep[lab] * 255).astype(np.uint8))
+        return out
 
     def _shape_ok(self, area, w, h, rpx=None):
         a, r = (self.area, self.rpx) if rpx is None else (rpx ** 2, rpx)
