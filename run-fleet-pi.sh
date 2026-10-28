@@ -29,8 +29,9 @@
 #     ./run-fleet-pi.sh doe-status         drives so far, battery, who is out
 #     ./run-fleet-pi.sh doe-stop           stop it (every robot stops), then it uploads as when it finishes
 # One system (2026-10-28): Monday's mission and Mission Control, the same program (tools/fleet/mission_run.py):
-#     ./run-fleet-pi.sh monday [61x122] [Left,Right]   Monday's default mission on the table of that size (put each
-#                                          robot at its own end first); Ctrl+C stops every robot; uploads at the end
+#     ./run-fleet-pi.sh monday [61x122] [Left,Right] [farm]   Monday's default mission on the table of that size (put
+#                                          each robot at its own end first); runs in tmux "monday"; Ctrl+C stops every
+#                                          robot; uploads at the end. farm: each camera tracked in its own process
 #     ./run-fleet-pi.sh mc                 Mission Control on the Pi: http://100.122.222.75:8095 in the laptop's browser
 # The first test starts the recorder (both cameras, to the USB drive) in a tmux session called fleet; it keeps
 # recording until `stop`. Each test starts the camera bridge, runs the plan, then prints the line check (GATE).
@@ -201,8 +202,10 @@ case "$WHAT" in
       OUT="$(cat /tmp/fleet_rec_out 2>/dev/null || echo "$HOME/recordings")"
       # cores: the recorder on 0-1, the camera bridge's workers on 1-2 (--farm), the bridge and run_plan on 3
       PIN=""; if [ "$(nproc)" -ge 4 ] && command -v taskset >/dev/null; then PIN="taskset -c 2,3"; fi
-      $PIN python3 tools/fleet/mission_run.py --table "$TABLE" --robots "$ROB" --calib "$CALIB" ${SIDECAL:+--side-calib "$SIDECAL"} \
-        --upload --recordings "$OUT" $EXTRA
+      # in tmux (session "monday"), so a dropped WiFi or a closed window does not stop the run half-way
+      tmux kill-session -t monday 2>/dev/null || true
+      tmux new-session -s monday "cd '$REPO' && $PIN python3 tools/fleet/mission_run.py --table '$TABLE' --robots '$ROB' --calib '$CALIB' ${SIDECAL:+--side-calib '$SIDECAL'} --upload --recordings '$OUT' $EXTRA; read -r -p 'Mission ended. Press Enter.'"
+      echo "If the window closed: tmux attach -t monday   (Ctrl+C in it stops every robot)"
     fi ;;
   mc)
     [ "$DRY" = 1 ] || start_recorder
@@ -256,5 +259,5 @@ case "$WHAT" in
     python3 tools/pi/upload_session.py --recordings "$OUT" --stop-recorder --no-logs --tag "p0-$DAY-recording" || true
     tmux kill-session -t fleet 2>/dev/null || true ;;
   *)
-    sed -n '2,36p' "$0"; exit 1 ;;
+    sed -n '2,37p' "$0"; exit 1 ;;
 esac

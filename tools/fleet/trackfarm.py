@@ -17,8 +17,9 @@ Now, each step a setting so each can be measured (tools/fleet/bench_trackfarm.py
       cameras' verdicts, the lights, the fixes) stays in the bridge's process: the workers send each picture's
       outlines with the Pi-clock time it was taken, and the bridge matches the two cameras by those times (as
       e02_twocam does inside one process);
-  (e) still pictures skipped: while every robot is seen for sure, its own pose (run_plan's echo) says it is not
-      moving, and the windows did not change, a camera tracks only one picture in STILL_EVERY.
+  (e) still pictures skipped (a setting, off by default: STILL_SKIP): while every robot is seen for sure, its own pose
+      (run_plan's echo) says it is not moving, and the windows did not change, a camera tracks one picture in
+      STILL_EVERY.
 
 The image work is e02_camera.MotionTracker's own (floor memory, outlines, learning), moved to the worker; the
 fusion is e02_twocam.TwoCamTracker's own (_fuse_view, _decide), fed with the workers' outlines instead of pictures.
@@ -51,6 +52,9 @@ STILL_EVERY = 5        # chosen: with every robot still and seen, track one pict
 STILL_CMS = 0.3        # a robot's own pose moving slower than this over STILL_WINDOW_S is still. No DOE: pose noise
 STILL_WINDOW_S = 0.5
 STILL_GREY = 2.0       # ... and its window's mean grey change since the last tracked picture under this. No DOE: noise
+STILL_SKIP = False     # (e) off by default: on the 27 Oct L0 replay it cut the Pi cost to ~11 ms a picture but the
+                       # side-only robot (Center) got spots up to 6.7 cm off its standing spot (full tracker: 0.75 cm).
+                       # DOE note: on / off against spread about the standing spot and the cost (bench_trackfarm.py real)
 HALF = False           # (c) track at half size. DOE note: 320 x 240 against 640 x 480 on the replay: position error
                        # against the full-size tracker and the cost per picture (bench_trackfarm.py measures both)
 
@@ -104,7 +108,7 @@ def make_engine_class(base_kind):
         outlines are kept for the fusion, not assigned here. Windows (ROI) between full scans."""
 
         def __init__(self, cam, board_rect, margin_cm, z_cm, size_per_spot, roi=True, roi_every=ROI_EVERY,
-                     still_skip=True):
+                     still_skip=STILL_SKIP):
             cx, cy = (board_rect[0] + board_rect[2]) / 2.0, (board_rect[1] + board_rect[3]) / 2.0
             super().__init__(cam, board_center=(cx, cy), board_rect=board_rect, margin_cm=margin_cm, z_cm=z_cm,
                              size_per_spot=size_per_spot)
@@ -251,7 +255,8 @@ def make_engine_class(base_kind):
                     for _, (u0, v0, u1, v1) in wins:
                         # a margin of 3 px so the blur and the morphology see past the window's edge
                         a0, b0 = max(0, u0 - 3), max(0, v0 - 3)
-                        a1, b1 = min(self.bg.shape[1], u1 + 3), min(self.bg.shape[0], v1 + 3)
+                        # (the full picture's size: self.bg is the previous window's crop inside this loop)
+                        a1, b1 = min(saved[0].shape[1], u1 + 3), min(saved[0].shape[0], v1 + 3)
                         g = cv2.GaussianBlur(img[b0:b1, a0:a1], (3, 3), 0).astype(np.float32)
                         motion = (np.abs(g - self.prev[b0:b1, a0:a1]) > self.MOTION_THR).astype(np.uint8)
                         self.prev[b0:b1, a0:a1] = g
@@ -259,6 +264,7 @@ def make_engine_class(base_kind):
                         self.known = saved[1][b0:b1, a0:a1]
                         self.cut = cut_full[b0:b1, a0:a1] if cut_full is not None else None
                         self.px_off = (a0, b0)
+                        self.in_window = True
                         cs = [c for c in self.candidates(g, motion) if self.on_area(c["x"], c["y"])]
                         for c in cs:                     # back to picture coordinates
                             c["u"] += a0
@@ -267,12 +273,13 @@ def make_engine_class(base_kind):
                 finally:
                     self.bg, self.known, self.cut = saved
                     self.px_off = (0, 0)
+                    self.in_window = False
                 self.last_cands = cands
                 self.out_cands = cands
 
         def _cut_mask(self, shape):
             cut = getattr(self, "cut", None)
-            if cut is not None and self.px_off != (0, 0):
+            if cut is not None and getattr(self, "in_window", False):
                 return cut                               # a window's crop of the full mask (_roi_push)
             if cut is not None and cut.shape != shape:
                 self.cut = None
@@ -313,7 +320,7 @@ class CamWorker:
     """One camera's tracking: pictures in (a FrameRing, a stream, or step() calls), outlines out. Runs inline (tests,
     the bench) or as its own process (run_worker)."""
 
-    def __init__(self, kind, cam, board_rect, margin_cm=8.0, starts=None, half=HALF, roi=True, still_skip=True,
+    def __init__(self, kind, cam, board_rect, margin_cm=8.0, starts=None, half=HALF, roi=True, still_skip=STILL_SKIP,
                  roi_every=ROI_EVERY, side_gain="auto", lights=True, floor_frames=5):
         import e02_twocam as TW
         import e02_camera as CAM
@@ -365,6 +372,7 @@ class CamWorker:
                     self.side_gain = 1.0 if mean >= TW.DARK_MEAN else float(min(TW.DARK_GAIN_MAX,
                                                                               TW.DARK_TARGET / max(mean, 1.0)))
                 self.eng.set_background([self.prep(f) for f in self.first], robots=list(self.starts.values()))
+            self.cost.append((t, (time.thread_time() - c0) * 1000.0, "setup"))
             return None
         g = self.prep(img)
         mode = self.eng.step(g, t)
@@ -403,7 +411,7 @@ def run_worker(conn, cfg):
     else:
         cam = CAM.load_camera(cfg["calib"])
     w = CamWorker(cfg["kind"], cam, tuple(cfg["rect"]), cfg.get("margin_cm", 8.0), cfg.get("starts"),
-                  half=cfg.get("half", HALF), roi=cfg.get("roi", True), still_skip=cfg.get("still_skip", True),
+                  half=cfg.get("half", HALF), roi=cfg.get("roi", True), still_skip=cfg.get("still_skip", STILL_SKIP),
                   roi_every=cfg.get("roi_every", ROI_EVERY), side_gain=cfg.get("side_gain", "auto"),
                   lights=cfg.get("lights", True))
     src = None

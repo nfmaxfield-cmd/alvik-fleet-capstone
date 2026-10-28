@@ -431,7 +431,8 @@ firmware 2026-10-28a.
 | Full-picture scan every (trackfarm ROI_EVERY) | 8 pictures | 4 / 8 / 16 against the cost per picture and the time to find a new object (brick drops) and identity swaps (crossings) | Sim + Logs | open |
 | Window half-size round each robot (ROI_SCALE) | 2.2 robot widths | 1.6 / 2.2 / 3.0 against "missed" verdicts in windowed pictures (replay) and the cost | Logs | open |
 | With every robot still, track one picture in (STILL_EVERY) | 5 | 3 / 5 / 10 against how late a robot that starts moving is first seen moving (replay) | Logs | open |
-| Track at half size (HALF) | off | 320 x 240 against 640 x 480 on the replay: position error against the full-size tracker and the cost (bench_trackfarm.py measures both) | Logs | open |
+| Track at half size (HALF) | off | 320 x 240 against 640 x 480 on the replay: position error against the full-size tracker and the cost (bench_trackfarm.py measures both). First run, 27 Oct L0: Pi ~14 ms against ~17-21 ms a picture, but Right seen 31 % and p95 5.5 cm off | Logs | open |
+| Skip pictures while every robot stands still (trackfarm STILL_SKIP, cam_bridge --still-skip) | off | on / off on the L0 replay and a still stretch of a dry run: spread about the standing spot and the cost. First run: Pi ~11 ms against ~17-21 ms a picture, but the side-only robot's spots jumped up to 6.7 cm (0.75 cm with every picture) | Logs | open |
 | The chessboard corner piece (charuco_calib CHECK_SQUARES, CHECK_CM) | 5 x 7 squares of 3.8 cm (letter) | Nick's own: 3 board sizes against pose accuracy (the lens heights against a tape, the two cameras' spot of the same robot) | Board | open |
 
 Chosen with no DOE: the battery floor 25 % (a floor), the 10 s own-pose window after a barrier find (Nick), 3 read-back

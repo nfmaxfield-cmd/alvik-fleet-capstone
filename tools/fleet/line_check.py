@@ -59,7 +59,16 @@ def load_lines(session):
             for st in r["steps"]:
                 if st["type"] == "drive":
                     lines.setdefault(n, []).append((tuple(st["from"][:2]), tuple(st["to"][:2])))
-                elif st["type"] in ("turn", "wait", "park"):
+                elif st["type"] == "arc" and st.get("arc"):
+                    # an arc (one system, 28 Oct) as chords of 3 deg: under 0.01 cm off a 15 cm circle
+                    a = st["arc"]
+                    cx, cy, rr = a["c"][0], a["c"][1], a["r"]
+                    a0, sw = math.radians(a["a0_deg"]), math.radians(a["sweep_deg"])
+                    k = max(1, int(math.ceil(abs(math.degrees(sw)) / 3.0)))
+                    pts = [(cx + rr * math.cos(a0 + sw * j / k), cy + rr * math.sin(a0 + sw * j / k))
+                           for j in range(k + 1)]
+                    lines.setdefault(n, []).extend(zip(pts[:-1], pts[1:]))
+                elif st["type"] in ("turn", "wait", "park", "dance"):
                     p = tuple(st["to"][:2]) if st.get("to") else None
                     if p:
                         lines.setdefault(n, []).append((p, p))
@@ -220,8 +229,10 @@ def draw(png, lines, track, res):
         r = res["robots"].get(n, {}).get("camera", {})
         ax.scatter([p[1] for p in pts], [p[2] for p in pts], s=3, color=col.get(n, "#101828"), zorder=2,
                    label="%s: p95 %.2f cm from its lines" % (n, r.get("p95_cm") or float("nan")))
-    ax.set_xlim(0, 122)
-    ax.set_ylim(0, 122)
+    xs = [q[0] for segs in lines.values() for ab in segs for q in ab] + [122.0]
+    ys = [q[1] for segs in lines.values() for ab in segs for q in ab] + [0.0]
+    ax.set_xlim(0, max(xs) + 10)
+    ax.set_ylim(0, max(max(ys) + 10, 60))
     ax.set_aspect("equal")
     ax.set_xlabel("x, cm (roam1 floor frame)")
     ax.set_ylabel("y, cm")

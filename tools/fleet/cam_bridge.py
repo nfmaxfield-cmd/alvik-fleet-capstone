@@ -509,7 +509,8 @@ def main(argv=None):
                                                                "runs on core 0; this bridge and run_plan on 3)")
     g.add_argument("--half", action="store_true", help="--farm: track at half size (320 x 240)")
     g.add_argument("--no-roi", action="store_true", help="--farm: full pictures every time (no windows)")
-    g.add_argument("--no-still-skip", action="store_true", help="--farm: track every picture even when all stand still")
+    g.add_argument("--still-skip", action="store_true",
+                   help="--farm: skip most pictures while every robot stands still (off: see trackfarm.STILL_SKIP)")
     args = ap.parse_args(argv)
 
     t0 = time.time()
@@ -610,7 +611,7 @@ def run_farm(args, br, rx, t0, rect, starts):
     ctx = mp.get_context("spawn")
     for c in cfgs:
         c.update(rect=list(rect), starts={n: [x, y] for n, (x, y, _) in starts.items()}, margin_cm=args.margin_cm,
-                 half=args.half, roi=not args.no_roi, still_skip=not args.no_still_skip,
+                 half=args.half, roi=not args.no_roi, still_skip=args.still_skip,
                  core=(int(cores[c["kind"]]) % ncpu) if c["kind"] in cores else None, capture_s=CAPTURE_S,
                  lights=not getattr(args, "no_lights", False))
         a, b = ctx.Pipe()

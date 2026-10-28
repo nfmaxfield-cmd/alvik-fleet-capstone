@@ -193,7 +193,8 @@ def run(args):
     time.sleep(BRIDGE_START_S)
     say("the robots start now. To stop them at any moment: Ctrl+C")
     code = 1
-    child = subprocess.Popen(launcher + rp, cwd=REPO)
+    # (rp_shim.py stands in for run_plan.py on a dry run and takes run_plan's arguments)
+    child = subprocess.Popen(launcher + (rp[1:] if args.dry else rp), cwd=REPO)
     try:
         code = child.wait()
     except KeyboardInterrupt:

@@ -67,6 +67,11 @@ BIAS_MAX_CM = 8.0       # filter; capped at 8 cm (the 26 Oct offset was 4.7 cm)
 BIAS_STILL_CMS = 0.5    # learned only while the robot is told nothing (predicted speed under this)...
 BIAS_AREA = 0.7         # ...and the overhead's outline is at least this share of a whole robot (a washed-out top shows
                         # in pieces: dry run 2026-10-27, a 4.5 cm offset learned from the front of the robots alone)
+PIECE_GATE_CM = 5.0     # chosen (one system, 28 Oct): when the side looked and did not see it, an overhead piece is taken
+                        # only this near where the last sure sighting + its own pose put it (Monday dry run, washed-out
+                        # 61 x 122 table: a piece 5.9 cm off a robot turning on its start spot stopped the run; pieces
+                        # of a whole robot sit up to ~4.5 cm off its middle, 27 Oct). DOE note: 4 / 5 / 6 cm against
+                        # Left's losses at the side picture's edge and wrong fixes on the washed-out replay
 BIAS_MIN_N = 30         # chosen: the learned offset is used once this many pictures made it (the file's until then).
                         # No DOE: a filter's start
 LIGHT_THR = 30.0        # chosen: a light is this much brighter than the floor memory... (flash check on the real board:
@@ -389,6 +394,12 @@ class TwoCamTracker(MT.MultiTracker):
             # did not see it, the piece is all there is, as with the overhead alone (last night's footage: dropping it
             # there lost Left, at the side picture's edge, twice as often as the overhead alone did)
             so = False
+        elif so and len(o) > 5 and o[5] < BIAS_AREA * self.area and self.side is not None and not ss:
+            pc, pp = self._carry(tr, o, t), self._predict(tr, t)
+            if math.hypot(pc[0] - pp[0], pc[1] - pp[1]) > PIECE_GATE_CM:
+                so = False                     # a piece far from where it should be (PIECE_GATE_CM): not taken
+                why = "only a piece of it seen by the overhead, %.1f cm from where it should be" % math.hypot(
+                    pc[0] - pp[0], pc[1] - pp[1])
         if so and ss:
             po, ps = self._carry(tr, o, t), self._carry(tr, s, t)
             st, _ = stretch_at(self.side.cam, po[0], po[1], SIDE_Z_CM)

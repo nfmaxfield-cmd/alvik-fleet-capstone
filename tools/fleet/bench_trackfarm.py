@@ -3,7 +3,6 @@
 simulated pictures, and check the positions against the full-picture tracker on the same pictures.
 
     python3 tools/fleet/bench_trackfarm.py real --l0 <folder with cam0.avi, rec/, setup/> --out DIR
-    python3 tools/fleet/bench_trackfarm.py sim --truth <dry run>/sim/truth.csv --map <map.json> --out DIR [--washout]
     python3 tools/fleet/bench_trackfarm.py procs --l0 ... --out DIR      # the process split at Pi speed
 
 Rows (each adds one step):
@@ -14,7 +13,9 @@ Rows (each adds one step):
   e  + still pictures skipped (b and e together; c off)
   d  the process split: each camera's worker in its own process on its own core (procs)
 Cost per picture: CPU time of the camera's own work (thread time), on this machine and x PI_FACTOR for the Pi.
-Accuracy: each robot's tracked spot against row A's, picture by picture (both "seen").
+Accuracy: each robot's tracked spot against row A's, picture by picture (both "seen"), and its spread about its
+standing spot. Moving robots: the Monday dry runs (mission_run.py --dry --farm) check the farm against the
+simulator's truth.
 """
 import argparse
 import csv
@@ -66,63 +67,10 @@ def real_data(d):
     sd = load_avi(os.path.join(d, "rec", "20261027-130102_P0", "cam1", "video.avi"),
                   os.path.join(d, "rec", "20261027-130102_P0", "cam1", "frames.csv"), T0, T1)
     spots = {"Left": (73.6, 77.59), "Right": (87.05, 41.55), "Center": (37.75, 45.44)}
+    # the robots stood still through this L0 (nothing was driving): their own poses, as run_plan would echo them, say so
+    odo = {n: [(t, x, y, 0.0) for t in np.arange(T0 - 1, T1 + 1, 0.1)] for n, (x, y) in spots.items()}
     return dict(cam=cam, scam=scam, side_lag=0.04, rect=(0, 0, 122, 122), ov=ov, sd=sd, spots=spots, tb=1793120498,
-                truth=None, odo=None)
-
-
-def sim_data(truth_csv, map_path, washout=False, seconds=60.0, fps=25.0, t_from=0.0):
-    """Pictures of a simulated run (its true poses, tools/sim/table_cam.py's two cameras), robots moving."""
-    import table_cam as TC
-    import e02_camera as CAM
-    import fleetmap as FM
-    m = FM.load(map_path)
-    f = m["floor"]
-    rect = (f["x_min"], f["y_min"], f["x_max"], f["y_max"])
-    rows = {}
-    for r in csv.DictReader(open(truth_csv)):
-        rows.setdefault(r["robot"], []).append((float(r["t"]), float(r["x_cm"]), float(r["y_cm"]),
-                                                math.radians(float(r["heading_deg"]))))
-    t0 = min(v[0][0] for v in rows.values()) + t_from
-    tc = TC.TableCamera(rect, seed=12, px_per_cm=4.2)
-    out = os.path.join("/tmp", "bench_trackfarm_%d" % os.getpid())
-    os.makedirs(out, exist_ok=True)
-    tc.true_model(os.path.join(out, "ov.json"))
-    if washout:
-        tc = TC.washed_out(tc)
-    sc = TC.SideCamera(rect, seed=18)
-    sc.true_model(os.path.join(out, "side.json"))
-    cam = CAM.load_camera(os.path.join(out, "ov.json"))
-    scam = CAM.load_camera(os.path.join(out, "side.json"))
-
-    def at(name, t):
-        s = rows[name]
-        lo, hi = 0, len(s) - 1
-        if t <= s[0][0]:
-            return s[0][1:]
-        if t >= s[-1][0]:
-            return s[-1][1:]
-        while hi - lo > 1:
-            mid = (lo + hi) // 2
-            if s[mid][0] <= t:
-                lo = mid
-            else:
-                hi = mid
-        a, b = s[lo], s[hi]
-        k = (t - a[0]) / max(1e-6, b[0] - a[0])
-        return a[1] + k * (b[1] - a[1]), a[2] + k * (b[2] - a[2]), a[3] + k * math.remainder(b[3] - a[3], 2 * math.pi)
-    ov, sd, truth = [], [], []
-    n = int(seconds * fps)
-    for k in range(n):
-        t = t0 + k / fps
-        poses = [at(nm, t) for nm in rows]
-        img = tc.render([(x, y, th) for x, y, th in poses])
-        ov.append((img, t))
-        sd.append((sc.render([(x, y, th) for x, y, th in poses]), t + 0.04))
-        truth.append((t, {nm: p for nm, p in zip(rows, poses)}))
-    spots = {nm: at(nm, t0)[:2] for nm in rows}
-    odo = {nm: [(t, *at(nm, t)) for t in np.arange(t0 - 1, t0 + seconds + 1, 0.1)] for nm in rows}
-    return dict(cam=cam, scam=scam, side_lag=0.04, rect=rect, ov=ov, sd=sd, spots=spots, tb=t0 + 5 / fps - 1e-6,
-                truth=truth, odo=odo)
+                truth=None, odo=odo)
 
 
 def jpeg_decode_ms(frames, k=40):
@@ -263,18 +211,16 @@ def compare(base, other):
     return res
 
 
-def against_truth(run, truth):
-    tm = {round(t, 4): d for t, d in truth}
-    errs = {}
-    for t, d in run["pos"]:
-        tr = tm.get(round(t, 4))
-        if tr is None:
-            continue
-        for n, (x, y, st) in d.items():
-            if st == "seen":
-                errs.setdefault(n, []).append(math.hypot(x - tr[n][0], y - tr[n][1]))
-    return {n: dict(median_cm=round(sorted(v)[len(v) // 2], 3), p95_cm=round(sorted(v)[int(0.95 * (len(v) - 1))], 3))
-            for n, v in errs.items()}
+def spread(run):
+    """Per robot: how far its 'seen' spots lie from its median spot (the L0 robots stood still): p95 and max, cm."""
+    out = {}
+    for n in (run["pos"][0][1] if run["pos"] else {}):
+        P = np.array([(d[n][0], d[n][1]) for _, d in run["pos"] if d[n][2] == "seen"])
+        if len(P):
+            dd = np.hypot(*(P - np.median(P, axis=0)).T)
+            out[n] = dict(p95_cm=round(float(np.percentile(dd, 95)), 2), max_cm=round(float(dd.max()), 2),
+                          seen=int(len(P)), of=len(run["pos"]))
+    return out
 
 
 def med(v):
@@ -285,7 +231,7 @@ def p90(v):
     return round(float(np.percentile(v, 90)), 2) if v else None
 
 
-def table(D, label):
+def table(D, label, only=None):
     dec_o = jpeg_decode_ms(D["ov"])
     dec_s = jpeg_decode_ms(D["sd"])
     rows = []
@@ -298,6 +244,8 @@ def table(D, label):
     res = {"label": label, "pi_factor": PI_FACTOR, "jpeg_decode_ms": {"overhead": dec_o, "side": dec_s}, "rows": []}
     out = [A]
     for name, kw in variants:
+        if only and not any(name.startswith(o) for o in only):
+            continue
         R = run_farm(D, **kw)
         out.append(R)
         rows.append((name, R, 0.0, 0.0))
@@ -308,7 +256,7 @@ def table(D, label):
                    overhead_pi_ms=round((med(co) + do) * PI_FACTOR, 1), side_pi_ms=round((med(cs) + ds) * PI_FACTOR, 1),
                    fusion_ms=med(R["cost"].get("fusion", [])), modes=R.get("modes"),
                    vs_full=compare(A, R) if R is not A else None,
-                   vs_truth=against_truth(R, D["truth"]) if D.get("truth") else None,
+                   spread=spread(R),
                    counts=R.get("counts"))
         res["rows"].append(row)
     return res
@@ -409,25 +357,18 @@ def _slow_worker(conn, cfg):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("what", choices=["real", "sim", "procs"])
-    ap.add_argument("--l0")
-    ap.add_argument("--truth")
-    ap.add_argument("--map")
-    ap.add_argument("--washout", action="store_true")
-    ap.add_argument("--seconds", type=float, default=40.0)
-    ap.add_argument("--from-s", type=float, default=0.0, help="sim: start this far into the run")
+    ap.add_argument("what", choices=["real", "procs"])
+    ap.add_argument("--l0", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--only", default="", help="rows to run besides A, e.g. b,e")
     a = ap.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)
-    if a.what in ("real", "procs") and a.l0:
-        D = real_data(a.l0)
-    else:
-        D = sim_data(a.truth, a.map, washout=a.washout, seconds=a.seconds, t_from=a.from_s)
+    D = real_data(a.l0)
     if a.what == "procs":
         res = {"procs": procs(D, a.out)}
     else:
-        res = table(D, a.what + (" washed out" if a.washout else ""))
-    path = os.path.join(a.out, "bench_%s%s.json" % (a.what, "_washout" if a.washout else ""))
+        res = table(D, a.what, [x for x in a.only.split(",") if x])
+    path = os.path.join(a.out, "bench_%s%s.json" % (a.what, "_" + a.only.replace(",", "") if a.only else ""))
     with open(path, "w") as f:
         json.dump(res, f, indent=1)
     print(json.dumps(res, indent=1)[:6000])
