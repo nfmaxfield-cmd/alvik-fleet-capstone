@@ -96,7 +96,15 @@ rec_running() { tmux has-session -t fleet 2>/dev/null && tmux list-windows -t fl
 DRY="${FLEET_DRY:-0}"
 start_recorder() {
   if [ "$DRY" = 1 ]; then tmux has-session -t fleet 2>/dev/null || tmux new-session -d -s fleet -n idle "sleep 100000"; return 0; fi
-  if rec_running; then echo "Recorder already running (tmux session fleet)."; return 0; fi
+  if rec_running; then
+    # the window alone is not enough (16:24, 28 Oct: window open, no pictures from 8000, the DOE loop stopped at L0):
+    # one picture from each camera within 3 s, else the recorder window is restarted
+    local want_side=""; [ -n "$SIDECAL" ] && want_side="--side"
+    if python3 tools/pi/rec_alive.py $want_side; then echo "Recorder already running (tmux session fleet), pictures coming."; return 0; fi
+    echo "Restarting the recorder window (Ctrl+C to it, then a fresh start) ..."
+    tmux send-keys -t fleet:rec C-c 2>/dev/null; sleep 4
+    rec_running && tmux kill-window -t fleet:rec 2>/dev/null; sleep 1
+  fi
   if tmux has-session -t e02 2>/dev/null; then
     echo "An E02 session is running on this Pi (tmux e02). Stop it first. Stopped."; exit 1
   fi
@@ -120,8 +128,12 @@ start_recorder() {
   # the side camera on automatic exposure (Nick, Q22: keep automatic; locked, it went dark at 13:01 and again later
   # as the room's light changed; the trackers follow the exposure's drift and brighten a dark side picture);
   # --shm: each camera's grey picture in shared memory for the camera bridge's workers (cam_bridge.py --farm)
-  tmux new-session -d -s fleet -n rec "cd '$REPO' && python3 tools/pi/camrec.py $CAMS --fps 25 --label P0 --no-lock $EXPO_ARG --side-exposure auto --shm $REC_CORES ${REC_EXTRA:-} --out '$OUT'; read -r -p 'Recorder stopped. Press Enter.'"
+  local REC_NEW="tmux new-session -d -s fleet -n rec"
+  tmux has-session -t fleet 2>/dev/null && REC_NEW="tmux new-window -t fleet -n rec"
+  $REC_NEW "cd '$REPO' && python3 tools/pi/camrec.py $CAMS --fps 25 --label P0 --no-lock $EXPO_ARG --side-exposure auto --shm $REC_CORES ${REC_EXTRA:-} --out '$OUT'; read -r -p 'Recorder stopped. Press Enter.'"
   echo "Recorder starting (8 s) ..."; sleep 8
+  local ws=""; [ -n "$SD" ] && [ "$SD" != "$OD" ] && ws="--side"
+  python3 tools/pi/rec_alive.py $ws --timeout 6 || echo "WARNING: the recorder started, but pictures are still missing. Look at its window: tmux attach -t fleet (leave: Ctrl+B, then D)."
 }
 
 run_test() {   # run_test NAME MAP [bridge options]
