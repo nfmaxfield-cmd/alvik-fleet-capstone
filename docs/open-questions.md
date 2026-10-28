@@ -66,7 +66,7 @@ Answered ones move to the bottom with the answer and date.
 - 2026-10-27 16:43:
   - School table: a little more than 2 ft x 4 ft, not more than 2.5 ft x 4.5 ft (about 61-76 x 122-137 cm); exact size
     on Thursday.
-  - School WiFi: SSID "ISE"; Nick enters the password himself into secrets.h when flashing (not stored here).
+  - School WiFi: the name CONTAINS "ISE" (Nick, 2026-10-28 09:25; Claude had taken it as the whole name; exact name still to confirm); Nick enters the password himself into secrets.h when flashing (not stored here).
   - School cameras: set up like the home lab, one overhead and one at an angle; the system should calibrate itself.
   - A robot that dies (battery) mid-run is treated as a brick (an obstacle where it stopped) and the others carry on.
   - The 8 cm safety net: yes; narrow it this week if possible.
