@@ -37,11 +37,15 @@
 #include "look.h"
 #include "e02.h"
 #include "ota.h"
+#include "dance.h"
 
 Arduino_Alvik alvik;
 
 // Bump this whenever the firmware changes, so every logged run says which code it ran.
-#define FW_VERSION "2026-10-27a"
+#define FW_VERSION "2026-10-28a"
+// 2026-10-28a (one system, Monday): the arc step (follow C: round a circle, wheels + gyro on the own pose, pose.h
+//              driveArc), the dance (follow Z and `run dance`: spins, wiggles, lights until stopped; dance.h), front
+//              stops counted in sensor readings (obs_n), the boot ID in `status`, `run dance` from the console
 // 2026-10-27a: the four-sided virtual border (border.h: the table's rectangle and each side's kind, bd_*; in e02 runs
 //              and, new, in the step follower, where it stops only the step), and a second WiFi network (WIFI_SSID2 in
 //              secrets.h, tried after the first, alternating)
@@ -84,9 +88,10 @@ void goToSleep(uint32_t minutes) {
 // "gyro" (12) stands still measuring the gyro's drift (corr.h), started with `run gyro`;
 // "find" (13) and "e02" (14) are the E02 accuracy experiment (e02.h), started with `run find` / `run e02`.
 const char* EXP_NAMES[] = {"stream", "turn", "lap", "grid", "demo", "straight", "survey", "follow", "calib", "dock",
-                           "touch", "posts", "gyro", "find", "e02"};
+                           "touch", "posts", "gyro", "find", "e02", "dance"};
 const int N_EXP = 7;
-const int N_NAMES = 15;
+const int N_NAMES = 16;
+const int EXP_DANCE = 15;    // `run dance` (2026-10-28a): dance where it stands until stop (dance.h)
 const int EXP_SURVEY = 6;
 const int EXP_FOLLOW = 7;
 const int EXP_CALIB = 8;
@@ -127,8 +132,8 @@ void showSelection(bool running) {
 }
 
 void printHelp() {
-  net::sendLine("M,commands: run stream|turn|lap|grid|demo|straight|survey|follow|dock|touch|posts|gyro|find|e02  stop  corr [reset|tape|save <name> <value>]  calibrate  clock  name <Left|Center|Right>  set <name> <value>  get <name>  params  route <SLRE...>  status  identify  lights  help");
-  net::sendLine("M,during run follow: fs <id> <T|D|A|W> ...  fix <t_ms> <x> <y> <th> <sigma>  fpose <x> <y> <th>  hold [id]  halt  (tools/fleet/run_plan.py sends these)");
+  net::sendLine("M,commands: run stream|turn|lap|grid|demo|straight|survey|follow|dock|touch|posts|gyro|find|e02|dance  stop  corr [reset|tape|save <name> <value>]  calibrate  clock  name <Left|Center|Right>  set <name> <value>  get <name>  params  route <SLRE...>  status  identify  lights  help");
+  net::sendLine("M,during run follow: fs <id> <T|D|A|W|C|Z> ...  fix <t_ms> <x> <y> <th> <sigma>  fpose <x> <y> <th>  hold [id]  halt  (tools/fleet/run_plan.py sends these)");
   net::sendLine("M,E02: fix <x> <y> <heading|-> <t_wall> (camera fix: idle or K replaces, KC blends e02_fix_k)  go <cm> [id]  turn <deg> [id] (idle, or in run e02 with e02_mode 1)  mark|e02 start|far|end [id]");
   net::sendLine("M,sleep <min> (deep sleep, checks in every <min>; 0 = until reset)  wake  border [clear] (the virtual border)");
   net::sendLine("M,before calibrate: set calib_dir_limits <deg> <cm> ... caps its roll per direction (deg from where it faces, left +; next calibration only; off = none)");
@@ -266,8 +271,9 @@ bool handleCommand(const String& raw, bool running) {
     return false;
   }
   if (verb == "ping" || verb == "status") {
-    net::logf("M,status %s (firmware %s): %s, selected %s, battery %d%%, WiFi %d dBm", net::name, FW_VERSION,
-              running ? "running" : "idle", EXP_NAMES[gSelected],
+    // the boot ID (2026-10-28a): a new one = the robot restarted (calibration and `set`s lost); run_plan checks it
+    net::logf("M,status %s (firmware %s, boot %04X): %s, selected %s, battery %d%%, WiFi %d dBm", net::name, FW_VERSION,
+              gBootId, running ? "running" : "idle", EXP_NAMES[gSelected],
               alvik.get_battery_charge(), (int)WiFi.RSSI());
     return false;
   }
@@ -316,7 +322,7 @@ bool handleCommand(const String& raw, bool running) {
   if (verb == "run") {
     if (running) { net::sendLine("M,busy: send stop first"); return false; }
     int i = expIndex(rest);
-    if (i < 0) { net::sendLine("M,run what? stream, turn, lap, grid, demo, straight, survey, follow, dock, touch, posts, gyro, find or e02"); return false; }
+    if (i < 0) { net::sendLine("M,run what? stream, turn, lap, grid, demo, straight, survey, follow, dock, touch, posts, gyro, find, e02 or dance"); return false; }
     gSelected = i;
     gPending = i;
     return false;
@@ -655,6 +661,7 @@ void runExperiment(int i, bool fromButton) {
     case EXP_GYRO: runGyro(); break;
     case EXP_FIND: runFind(); break;
     case EXP_E02: runE02(); break;
+    case EXP_DANCE: dance::run(0); break;
   }
   alvik.brake();
   if (i == EXP_DOCK || i == EXP_TOUCH || i == EXP_POSTS || i == EXP_FIND || i == EXP_E02) gFrontLimitCm = -1;   // they ran with the front stop off

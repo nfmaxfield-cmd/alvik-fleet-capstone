@@ -32,6 +32,8 @@ bool gFrontPath = false;  // straight drives: check all five zones inside the ro
 float gFrontEndBase = -1; // follow drives (>= 0): gFrontLimitCm = min(this, distance left in the step + front_end_cm)
 float gFrontTripCm = 0;   // the reading that tripped it
 unsigned long gFrontLowSince = 0;   // soft mode: when the reading first went below the limit (0 = it isn't)
+int gFrontLowN = 0;                 // soft mode with obs_n: new sensor readings in a row below the limit
+float gFrontPrev[5] = {-1, -1, -1, -1, -1};   // the last five zone readings seen (a change = a new sensor reading)
 
 // Nearest thing ahead INSIDE the robot's own path: each of the five front
 // zones' reading taken at the zone's direction (ZONE_DEG, an assumption to be
@@ -108,16 +110,27 @@ bool shouldAbort() {
     if (lim > 0) {
       float dL, dCL, dC, dCR, dR;
       alvik.get_distance(dL, dCL, dC, dCR, dR);
+      // a new sensor reading: any zone changed (the library hands back the last frame until the next arrives)
+      bool fresh = dL != gFrontPrev[0] || dCL != gFrontPrev[1] || dC != gFrontPrev[2] || dCR != gFrontPrev[3] ||
+                   dR != gFrontPrev[4];
+      gFrontPrev[0] = dL; gFrontPrev[1] = dCL; gFrontPrev[2] = dC; gFrontPrev[3] = dCR; gFrontPrev[4] = dR;
       if (gFrontPath) dC = frontInPath();
+      int needN = (int)P("obs_n");
       if (dC > 0 && dC < lim) {
         if (!gFrontSoft) gAbortReason = "obstacle ahead";
-        else {
+        else if (needN > 0) {
+          // obs_n (2026-10-28a): this many NEW readings in a row too close (27 Oct: single zones flicked between
+          // 10-16 cm and 70-150 cm on empty plywood from one reading to the next and stopped 4 of 5 planner drives)
+          if (fresh) gFrontLowN++;
+          if (gFrontLowN >= needN) { gStepStop = "obstacle"; gFrontTripCm = dC; }
+        } else {
           // soft mode (survey, follow): one noisy frame is not enough; it must stay too close
           if (!gFrontLowSince) gFrontLowSince = millis() | 1;
           if (millis() - gFrontLowSince >= (unsigned long)P("front_confirm_ms")) { gStepStop = "obstacle"; gFrontTripCm = dC; }
         }
       } else {
         gFrontLowSince = 0;
+        gFrontLowN = 0;
       }
     }
   }

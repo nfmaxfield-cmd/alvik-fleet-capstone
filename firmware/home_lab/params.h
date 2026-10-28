@@ -96,6 +96,10 @@ Param PARAMS[] = {
   {"fuse_from_cm",    10,   "approach: average readings below this (reading + wheel distance = board position)"},
   {"follow_log_hz",   10,   "follow: FOLLOW records per second"},
   {"follow_quiet_ms", 1500, "follow: say so when nothing has come from the laptop for this long"},
+  // firmware 2026-10-28a (one system): front stops counted in sensor readings; the arc step; the dance
+  {"obs_n",            0,   "follow/survey: a front stop needs this many readings in a row too close (new readings, ~15 a second; 0 = front_confirm_ms as before)"},
+  {"arc_kr",           2,   "follow arc (step C): heading correction towards the circle, deg per cm off its radius (at most 20 deg)"},
+  {"dance_rpm",       30,   "dance (step Z, `run dance`): wheel speed for its spins and wiggles"},
 
   // --- sensor stream ---
   {"stream_hz",       20,   "sensor stream rate"},

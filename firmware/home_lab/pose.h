@@ -277,6 +277,46 @@ int driveLine(float x0, float y0, float x1, float y1, float h, float vmax, bool 
   return DRIVE_OK;
 }
 
+// Drive round a circle on the own pose (follow step C, firmware 2026-10-28a; Monday's circle, Nick 2026-10-27: "a true
+// curve"): centre (cx, cy), radius r cm, from angle a0 round the centre through sweep deg (+ = anticlockwise), at
+// vmax cm/s along the circle. Steering: the turn rate v / r fed forward (both wheels run, the outer faster), plus
+// drive_kh x the heading error to the circle's tangent, which leans arc_kr deg per cm of radial error back towards
+// the circle (at most 20 deg). Progress is the robot's own angle round the centre, unwrapped from a0, so a sweep of
+// more than 360 deg works (the laptop sends 30 deg pieces). cont: the next step carries on round the same circle, so
+// it neither slows down at the end nor brakes. Front check: the caller's (a turn's: the centre zone).
+int driveArc(float cx, float cy, float r, float a0, float sweep, float vmax, bool cont) {
+  float sg = sweep >= 0 ? 1.0f : -1.0f;
+  float end = a0 + sweep;
+  float phi = atan2f(pose::y - cy, pose::x - cx) / pose::DEG2RAD;
+  float prog = a0 + wrap180(phi - a0), prev = phi;
+  float kr = P("arc_kr"), kh = P("drive_kh"), acc = P("drive_accel");
+  unsigned long t0 = millis(), last = t0;
+  unsigned long limit = 3000 + (unsigned long)(fabsf(sweep) * pose::DEG2RAD * r / fmaxf(vmax, 1.0f) * 2500.0f);
+  float v = cont ? vmax : 0;
+  while (true) {
+    if (shouldAbort()) return gAbortReason.length() ? DRIVE_ABORT : DRIVE_STEPSTOP;
+    unsigned long now = millis();
+    float dt = (now - last) / 1000.0f;
+    last = now;
+    phi = atan2f(pose::y - cy, pose::x - cx) / pose::DEG2RAD;
+    prog += wrap180(phi - prev);
+    prev = phi;
+    float rem = sg * (end - prog) * pose::DEG2RAD * r;          // cm still to go round the circle
+    if (rem <= v * 0.03f + 0.05f) break;
+    if (now - t0 > limit) { alvik.brake(); gFail = "arc timed out"; return DRIVE_TIMEOUT; }
+    float e = sqrtf((pose::x - cx) * (pose::x - cx) + (pose::y - cy) * (pose::y - cy)) - r;   // + = outside
+    float h = phi + sg * 90.0f + sg * constrain(kr * e, -20.0f, 20.0f);
+    float herr = wrap180(h - pose::th());
+    float vt = cont ? vmax : fminf(vmax, sqrtf(2.0f * acc * fmaxf(rem, 0.0f)) + 2.0f);
+    v = fminf(vt, v + acc * dt + 0.5f);
+    float w = sg * (v / r) / pose::DEG2RAD + constrain(kh * herr, -60.0f, 60.0f);
+    setDrive(v, w);
+    delay(5);
+  }
+  if (!cont) alvik.brake();
+  return DRIVE_OK;
+}
+
 // Turn in place to floor heading h (deg) with the IMU turn (imuTurnTo).
 bool turnToFloor(float h) {
   return imuTurnTo(wrap180(h - pose::thOff)).ok;

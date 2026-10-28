@@ -85,6 +85,22 @@ DEFAULT_SETTINGS = {
                                     # seconds lost to holds, closest approach); docs/doe-backlog.md
     "skip_unreachable": False,  # drop tasks that cannot be reached instead of failing
     "priority_first": "",       # a robot planned first in every order (right of way: Monday's mower); "" = none
+    # Run-ins (one system, 2026-10-28): a goto with run_in_cm ends with a straight drive of that length along its
+    # heading, at confirm_cms (phase "confirm": the camera reads the heading off it and run_plan checks it before the
+    # risky part). Planned from wherever the robot is, so a re-plan keeps it (14:30 L4: a re-plan dropped the ladder's
+    # 15 cm lead-in and Left reached its start on an 8 cm drive plus a 57 deg turn).
+    "confirm_cms": 5.0,         # chosen: the ladder's crawl speed (CRAWL_CMS), more pictures per cm. DOE note: 3 / 5 /
+                                # 7.5 cm/s against the camera heading's spread at the run-in's end (Logs: ladder L4
+                                # drives) and the time Monday's 8 run-ins add; docs/doe-backlog.md
+    # Arcs (Monday's circle, Nick 2026-10-27 18:26: "circle each other 1.5 times on a true curve"): a drive along a circle
+    # (firmware follow step C: wheels and gyro steer on the robot's own pose). Long arcs are cut into pieces so the
+    # step order rules ("after") can keep two robots circling each other apart even when one runs late.
+    "arc_cms": 8.0,             # chosen: a little under cruise_cms (the inner wheel slows, the outer speeds up; at r 15 cm
+                                # the wheels run at 8 x (1 +/- 4.45/15) = 5.6 / 10.4 cm/s). DOE note: 6 / 8 / 10 cm/s on
+                                # the board: the camera's radial error round the circle against the time it takes
+    "arc_piece_deg": 30.0,      # chosen: an arc step is at most this many degrees (6-8 cm at r 12-15: about one
+                                # drive chunk). Two robots circling 180 deg apart at r 15 keep pieces two apart clear of
+                                # each other, so they can run together. No DOE: geometry (it only sets step size)
     "probe_cms": 3.0,           # warm-up side feel: creep speed (chosen: the approach speed, approach_cms, which the
                                 # front sensor's 15 Hz and the edge guard's 3 checks were set for; DOE note: 2 / 3 / 5 cm/s
                                 # against the stop distance past the edge on the school table; docs/doe-backlog.md)
@@ -368,6 +384,12 @@ def prim_poses(p, s, step=None):
     a = np.array(p["from"], float)
     b = np.array(p["to"], float)
     out = np.empty((len(t), 3))
+    if p["type"] == "arc":
+        return _arc_poses(p, f)
+    if p["type"] == "dance":
+        out[:, 0], out[:, 1] = a[0], a[1]
+        out[:, 2] = a[2] + 2 * math.pi * np.clip(t / max(p["move_s"], 1e-6), 0, 1)
+        return out
     if p["type"] in ("turn", "park"):
         d = p["turn"] if p.get("turn") is not None else G.wrap(b[2] - a[2])
         out[:, 0], out[:, 1] = a[0], a[1]
@@ -379,9 +401,46 @@ def prim_poses(p, s, step=None):
     return out
 
 
+def _arc_poses(p, f):
+    """Poses along an arc step at fractions f (array) of its sweep."""
+    arc = p["arc"]
+    cx, cy, r, a0, sw = arc["c"][0], arc["c"][1], arc["r"], arc["a0"], arc["sweep"]
+    ang = a0 + np.asarray(f, float) * sw
+    out = np.empty((np.size(ang), 3))
+    out[:, 0] = cx + r * np.cos(ang)
+    out[:, 1] = cy + r * np.sin(ang)
+    out[:, 2] = ang + math.copysign(math.pi / 2, sw)
+    return out
+
+
+def arc_prims(c, r, a0, sweep, s, phase="arc", task=None, speed=None):
+    """A drive round the circle (centre c, radius r cm) from angle a0 (rad, where the robot is on the circle) through
+    sweep (rad, + = anticlockwise), cut into pieces of at most arc_piece_deg. Each piece: type "arc", heading along
+    the circle."""
+    v = speed or s.arc_cms
+    n = max(1, int(math.ceil(abs(math.degrees(sweep)) / s.arc_piece_deg - 1e-9)))
+    out = []
+    for k in range(n):
+        a = a0 + sweep * k / n
+        sw = sweep / n
+        arc = {"c": [float(c[0]), float(c[1])], "r": float(r), "a0": a, "sweep": sw}
+        frm = _arc_poses({"arc": arc}, [0.0])[0]
+        to = _arc_poses({"arc": arc}, [1.0])[0]
+        L = abs(sw) * r
+        p = prim("arc", frm, to, s, speed=v, move_s=L / v, settle=s.drive_settle_s if k == n - 1 else 0.0,
+                 phase=phase, task=task)
+        p["arc"] = arc
+        out.append(p)
+    return out
+
+
 def pose_in_prim(p, t, s):
     """Pose at time t (s) after the step began."""
     f = min(1.0, max(0.0, t / p["move_s"])) if p["move_s"] > 0 else 1.0
+    if p["type"] == "arc":
+        return list(_arc_poses(p, [f])[0])
+    if p["type"] == "dance":
+        return [p["from"][0], p["from"][1], p["from"][2] + 2 * math.pi * f]
     a, b = p["from"], p["to"]
     if p["type"] in ("turn", "park"):
         d = p["turn"] if p.get("turn") is not None else G.wrap(b[2] - a[2])
@@ -434,7 +493,30 @@ def _visit_prims(item, pose, task, grid, docks, s, body):
         return [w], pose
     if "probe" in item:
         return _probe_prims(item, pose, task, grid, s)
+    if "arc" in item:
+        return _arc_visit(item, pose, task, grid, s, body)
+    if "dance" in item:
+        sec = float(item["dance"]) or DANCE_PLAN_S
+        p = prim("dance", pose, pose, s, move_s=sec, phase="dance", task=task)
+        p["dance_ms"] = int(round(float(item["dance"]) * 1000))      # 0 = until switched off
+        if item.get("label"):
+            p["label"] = item["label"]
+        return [p], pose
+    if "sync" in item:
+        w = wait_prim(pose, 1, s, phase="sync", task=task)
+        w["sync"] = str(item["sync"])
+        if item.get("label"):
+            w["label"] = item["label"]
+        return [w], pose
     g = item["goto"]
+    if item.get("run_in_cm") and len(g) > 2:
+        ri = _run_in_prims(item, pose, task, grid, s)
+        if ri is not None:
+            out = [p for p in ri if not (p["type"] == "turn" and abs(p["turn"]) < math.radians(0.5))]
+            if item.get("label") and out:
+                for p in out:
+                    p.setdefault("label", item["label"])
+            return out, (out[-1]["to"] if out else pose)
     out += _travel(pose, g, grid, s, task, "point (%.1f, %.1f)" % (g[0], g[1]))
     pose = out[-1]["to"] if out else pose
     if len(g) > 2:
@@ -443,6 +525,94 @@ def _visit_prims(item, pose, task, grid, docks, s, body):
     if item.get("label") and out:
         out[-1]["label"] = item["label"]
     return out, (out[-1]["to"] if out else pose)
+
+
+DANCE_PLAN_S = 10.0       # a dance "until switched off" is planned as this long, then the robot holds its turn circle for
+                          # good (occupancy). No DOE: only the plan's own length
+ARC_ON_CM = 1.5           # a robot within this of the circle (radius), heading within ARC_ON_DEG of the way round, is
+ARC_ON_DEG = 15.0         # on it (a re-plan mid-circle): it carries on from where it is. No DOE: geometry
+
+
+def _arc_visit(item, pose, task, grid, s, body):
+    """{"arc": {"c": [x, y], "r": cm, "a0_deg": where on the circle it starts, "sweep_deg": + anticlockwise}}: travel to
+    the start point facing along the circle (unless already on it), then the arc in pieces. The arc's whole body path
+    must keep the safety margin from everything on the map (else PlanError: re-plans skip it)."""
+    a = item["arc"]
+    c = np.array(a["c"], float)
+    r = float(a["r"])
+    sw = math.radians(float(a["sweep_deg"]))
+    a0 = math.radians(float(a["a0_deg"]))
+    tang = a0 + math.copysign(math.pi / 2, sw)
+    start = c + r * np.array([math.cos(a0), math.sin(a0)])
+    out = []
+    rel = np.array(pose[:2], float) - c
+    on = abs(float(np.hypot(*rel)) - r) <= ARC_ON_CM and \
+        abs(math.degrees(G.wrap(math.atan2(rel[1], rel[0]) - a0))) <= 3.0 and \
+        abs(math.degrees(G.wrap(pose[2] - tang))) <= ARC_ON_DEG
+    if not on:
+        out += _travel(pose, start, grid, s, task, "circle start (%.1f, %.1f)" % (start[0], start[1]))
+        p0 = out[-1]["to"] if out else pose
+        if abs(G.wrap(tang - p0[2])) >= math.radians(0.5):
+            out.append(turn_prim(p0, tang, s, phase="travel", task=task))
+    ap = arc_prims(c, r, a0, sw, s, task=task)
+    world = grid.world
+    for p_ in ap:
+        P_ = _arc_poses(p_, np.linspace(0, 1, 7))
+        hull = G.convex_hull(body.corners(P_).reshape(-1, 2))
+        if world.shape_clearance(hull) < s.safety_margin_cm - 1e-6:
+            raise PlanError("the circle round (%.1f, %.1f), r %.1f cm, runs into something or off the table"
+                            % (c[0], c[1], r))
+    for p_ in ap:
+        if item.get("label"):
+            p_["label"] = item["label"]
+    return out + ap, ap[-1]["to"]
+
+
+RUN_IN_MIN_CM = 6.0      # a run-in shorter than this gives the camera no heading (cam_bridge needs 5 cm of travel in its
+                         # window): shrunk run-ins stop here. No DOE: the camera's own need
+RUN_IN_ON_LINE_CM = 1.0  # a robot this close to the run-in's line (sideways), within RUN_IN_ON_LINE_DEG of its heading,
+RUN_IN_ON_LINE_DEG = 10.0  # is already on it (a re-plan mid run-in): it just drives the rest. No DOE: geometry
+
+
+def _run_in_prims(item, pose, task, grid, s):
+    """Travel to the run-in's start, face the goal's heading, drive the run-in straight at confirm_cms (phase
+    "confirm") to the goal. A robot already on the run-in line drives the rest. The run-in shrinks (2 cm at a time,
+    not under RUN_IN_MIN_CM) where its start has no room to turn. None: no run-in fits (the caller plans as usual)."""
+    g = item["goto"]
+    h = math.radians(g[2])
+    u = np.array([math.cos(h), math.sin(h)])
+    goal = np.array(g[:2], float)
+    L = float(item["run_in_cm"])
+    rel = np.array(pose[:2], float) - goal
+    along = float(np.dot(rel, u))            # negative: behind the goal
+    side = abs(float(rel[0] * u[1] - rel[1] * u[0]))
+    if -L - 0.5 <= along <= 0.05 and side <= RUN_IN_ON_LINE_CM and \
+            abs(math.degrees(G.wrap(h - pose[2]))) <= RUN_IN_ON_LINE_DEG:
+        out = []
+        if abs(G.wrap(h - pose[2])) >= math.radians(0.5):
+            out.append(turn_prim(pose, h, s, phase="confirm", task=task))
+        out += drive_prims(pose, goal, s, speed=s.confirm_cms, phase="confirm", task=task, heading=h)
+        for p in out:
+            p["run_in"] = True
+        return out
+    while L >= RUN_IN_MIN_CM - 1e-9:
+        pre = goal - L * u
+        if grid.turnable(pre) and grid.los(pre, goal):
+            break
+        L -= 2.0
+    else:
+        return None
+    try:
+        out = _travel(pose, pre, grid, s, task, "run-in start (%.1f, %.1f)" % (pre[0], pre[1]))
+    except PlanError:
+        return None
+    p0 = out[-1]["to"] if out else pose
+    if abs(G.wrap(h - p0[2])) >= math.radians(0.5):
+        out.append(turn_prim(p0, h, s, phase="travel", task=task))
+    ri = drive_prims([pre[0], pre[1], h], goal, s, speed=s.confirm_cms, phase="confirm", task=task, heading=h)
+    for p in ri:
+        p["run_in"] = True
+    return out + ri
 
 
 def _probe_prims(item, pose, task, grid, s):
@@ -714,8 +884,10 @@ INF_TICK = 10 ** 9
 def _pkey(pr):
     """Key that identifies a step's swept area by its geometry."""
     t = pr.get("turn")
+    arc = pr.get("arc")
     return (pr["type"], tuple(np.round(pr["from"], 4)), tuple(np.round(pr["to"], 4)), round(pr["move_s"], 4),
-            pr["dur"], None if t is None else round(t, 5))
+            pr["dur"], None if t is None else round(t, 5),
+            None if arc is None else (round(arc["c"][0], 4), round(arc["c"][1], 4), round(arc["sweep"], 5)))
 
 
 def _sweep_samples(pr, s):
@@ -753,9 +925,13 @@ def occupancy(sched, start_pose, s, body, hold_forever=True, hold_until=None):
         out.append(Occ(t0, t0 + pr["dur"], _sweep_samples(pr, s), body, _pkey(pr)))
     if sched and hold_forever:
         P = np.array([sched[-1][1]["to"]], float)
+        key = ("pose",) + tuple(np.round(P[0], 6))
+        if sched[-1][1]["type"] == "dance":           # dancing until switched off: its whole turn circle, for good
+            P = _sweep_samples(sched[-1][1], s)
+            key = ("dance",) + tuple(np.round(P[0], 6))
         end = sched[-1][0] + sched[-1][1]["dur"]
         stop = INF_TICK if hold_until is None else max(end, hold_until)
-        out.append(Occ(end, stop, P, body, ("pose",) + tuple(np.round(P[0], 6))))
+        out.append(Occ(end, stop, P, body, key))
     return out
 
 
@@ -829,7 +1005,11 @@ def schedule(prims, start_pose, t_start, others, s, body, wait_early=False):
     stand_ok = []
     for k in range(K + 1):
         P = pose_at[k][None]
-        stand_ok.append(table(Occ(0, 0, P, body, ("pose",) + tuple(np.round(P[0], 6))), 0, skip_initial=(k == 0)))
+        key = ("pose",) + tuple(np.round(P[0], 6))
+        if k == K and K and prims[-1]["type"] == "dance":      # dancing for good: its turn circle
+            P = _sweep_samples(prims[-1], s)
+            key = ("dance",) + tuple(np.round(P[0], 6))
+        stand_ok.append(table(Occ(0, 0, P, body, key), 0, skip_initial=(k == 0)))
     stand_ok[0][0] = True
     reach_in = np.zeros(n, bool)
     reach_in[0] = True
@@ -909,7 +1089,8 @@ class Planner:
     def candidate_orders(self, job, keep=3):
         n = len(job.visits)
         base = list(range(n))
-        if not job.any_order or n < 2 or any(isinstance(v, dict) and ("wait_s" in v or "probe" in v or "until_s" in v)
+        if not job.any_order or n < 2 or any(isinstance(v, dict) and ("wait_s" in v or "probe" in v or "until_s" in v
+                                                                       or "arc" in v or "dance" in v or "sync" in v)
                                              for v in job.visits):
             return [base]           # an instruction list with waits keeps its order
         pts = [job.hold()[:2]] + [self._goal_xy(v) for v in job.visits] + [job.park_pose[:2]]
@@ -984,7 +1165,14 @@ class Planner:
         R = body.r_turn + s.separation_cm + _slack(body, s) - s.safety_margin_cm
         mine = [np.array(start_pose[:2])] + [np.array(self._goal_xy(v), float) for v in job.visits
                                              if not (isinstance(v, dict) and ("wait_s" in v or "probe" in v
-                                                                              or "until_s" in v))]
+                                                                              or "until_s" in v or "arc" in v
+                                                                              or "dance" in v or "sync" in v))]
+        for v in job.visits:     # the circle's points: its start and its end
+            if isinstance(v, dict) and "arc" in v:
+                a = v["arc"]
+                for ang in (a["a0_deg"], a["a0_deg"] + a["sweep_deg"]):
+                    mine.append(np.array(a["c"], float) + a["r"] * np.array([math.cos(math.radians(ang)),
+                                                                               math.sin(math.radians(ang))]))
         mine += [np.array(v["probe"][:2], float) for v in job.visits if isinstance(v, dict) and "probe" in v]
         if job.park:
             mine.append(np.array(job.park_pose[:2], float))
@@ -1179,6 +1367,12 @@ class Planner:
         if self.s.priority_first in names:          # right of way: that robot is planned first, the others after it
             perms = (o for o in perms if o[0] == self.s.priority_first)
         orders = sorted(perms, key=lambda o: [(-busy[n], -work[n]) for n in o])[: self.s.max_orders]
+        # a re-plan tries the plan it replaces' order first (one system, 2026-10-28: a re-plan mid-circle tried the other
+        # order first, 2.5 s per try for nothing, and ran out of time with both robots stranded; the old order: 0.5 s)
+        pref = tuple(n for n in (getattr(self, "prefer_order", None) or []) if n in names)
+        if len(pref) == len(names) and pref in orders:
+            orders.remove(pref)
+            orders.insert(0, pref)
         tried = []
         best = None
         t_first = [None]      # when the first safe plan was found (the rest of the time looks for a shorter one)
@@ -1274,6 +1468,32 @@ def dependencies(scheds, body, s):
     return {n: [sorted([[r, j] for r, j in d.items()]) for d in after[n]] for n in names}
 
 
+def _sync_after(sc, after):
+    """Meet points ({"sync": id} items, Monday's meet before the circle): each robot's step after its sync step waits
+    for every other robot with the same sync id to reach its own sync step, so they set off together whoever is
+    late (the plan times them together; this keeps it so on the robots)."""
+    marks = {}
+    for n, sch in sc.items():
+        for i, (_, p) in enumerate(sch):
+            if p.get("sync"):
+                marks.setdefault(p["sync"], {})[n] = i
+    for sid, who in marks.items():
+        for n, i in who.items():
+            if i + 1 >= len(after[n]):
+                continue
+            for o, j in who.items():
+                if o == n:
+                    continue
+                # only as the plan has it (the other reaches its meet first): an order against the plan's own could
+                # wait for a step that itself waits for this robot
+                if sc[o][j][0] + sc[o][j][1]["dur"] > sc[n][i + 1][0]:
+                    continue
+                lst = [a for a in after[n][i + 1] if a[0] != o]
+                prev = [a for a in after[n][i + 1] if a[0] == o]
+                k = max([j] + [a[1] for a in prev])
+                after[n][i + 1] = sorted(lst + [[o, k]])
+
+
 def verify(m, plan, step_s=0.02):
     """Independent check of a plan: closest approach of every pair of robots
     (sampled every step_s), and clearance of every step's swept area from
@@ -1316,8 +1536,10 @@ def verify(m, plan, step_s=0.02):
                 continue   # checked below against everything but the target board
             if st["phase"] in ("probe", "probe_back"):
                 continue   # a warm-up side feel goes to the edge on purpose (the edge guard / front sensor end it)
-            if st["type"] in ("turn", "park"):
+            if st["type"] in ("turn", "park", "dance"):
                 c = float(world.clearance(np.array(p["from"][:2])[None])[0]) - body.r_turn
+            elif st["type"] == "arc":
+                c = min(world.shape_clearance(q) for q in body.corners(_arc_poses(p, np.linspace(0, 1, 7))))
             elif st["type"] == "drive":
                 c = world.shape_clearance(body.drive_sweep(p["from"][:2], p["to"][:2], p["from"][2]))
             else:
@@ -1362,7 +1584,15 @@ def to_steps(sched, after, s, t0=0.0, committed=0, front_ray=None, gap_cm=1.0, b
         st = {"i": i, "type": p["type"], "phase": p["phase"], "from": _deg(p["from"]), "to": _deg(p["to"]),
               "t_start": round(tk * s.tick_s, 2), "t_end": round((tk + p["dur"]) * s.tick_s, 2),
               "move_s": round(p["move_s"], 3), "board": p["board"], "task": p["task"], "after": after[i]}
-        if p["type"] in ("drive", "approach"):
+        if p["type"] == "arc":
+            st["speed"] = p["speed"]
+            a = p["arc"]
+            st["arc"] = {"c": [round(a["c"][0], 3), round(a["c"][1], 3)], "r": round(a["r"], 3),
+                         "a0_deg": round(math.degrees(a["a0"]), 3), "sweep_deg": round(math.degrees(a["sweep"]), 3)}
+        elif p["type"] == "dance":
+            st["speed"] = None
+            st["dance_ms"] = p.get("dance_ms", 0)
+        elif p["type"] in ("drive", "approach"):
             st["speed"] = p["speed"]
             st["reverse"] = p["reverse"]
         elif p["type"] in ("turn", "park"):
@@ -1376,6 +1606,10 @@ def to_steps(sched, after, s, t0=0.0, committed=0, front_ray=None, gap_cm=1.0, b
             if p["type"] in ("drive", "approach"):
                 # driving straight at a thing only brings it closer: the least is at the end
                 st["front_min_cm"] = front_ray(p["to"])
+            elif p["type"] == "arc":
+                seen = [front_ray(q) for q in _arc_poses(p, np.linspace(0, 1, 7))]
+                seen = [v for v in seen if v is not None]
+                st["front_min_cm"] = min(seen) if seen else None
             elif p["type"] in ("turn", "park"):
                 d = p["turn"] if p.get("turn") is not None else G.wrap(p["to"][2] - p["from"][2])
                 k = max(1, int(math.ceil(abs(math.degrees(d)) / 5.0)))
@@ -1405,6 +1639,10 @@ def to_steps(sched, after, s, t0=0.0, committed=0, front_ray=None, gap_cm=1.0, b
             st.pop("front_clear_cm", None)
         if p.get("label"):
             st["label"] = p["label"]
+        if p.get("run_in"):
+            st["run_in"] = True
+        if p.get("sync"):
+            st["sync"] = p["sync"]
         if p.get("until_s") is not None:
             st["until_s"] = p["until_s"]
         if p.get("beat_s") is not None:
@@ -1472,9 +1710,25 @@ def step_to_prim(st):
          "dur_s": st["t_end"] - st["t_start"]}
     if st.get("label"):
         p["label"] = st["label"]
+    if st["type"] == "arc":
+        a = st["arc"]
+        p["arc"] = {"c": list(a["c"]), "r": a["r"], "a0": math.radians(a["a0_deg"]), "sweep": math.radians(a["sweep_deg"])}
+    if st["type"] == "dance":
+        p["dance_ms"] = st.get("dance_ms", 0)
+    if st.get("sync"):
+        p["sync"] = st["sync"]
     if st["phase"] == "probe" and st.get("front_min_cm") is not None:
         p["front_cm"] = st["front_min_cm"]
     return p
+
+
+def step_poses(st, n=20):
+    """Poses [x, y, rad] (n+1, 3) along a plan step, start to end."""
+    p = step_to_prim(st)
+    p["dur"] = 1
+    if p["move_s"] <= 0:
+        return np.array([p["from"]], float)
+    return np.array([pose_in_prim(p, p["move_s"] * k / n, None) for k in range(n + 1)], float)
 
 
 def pose_at(plan, name, t):
@@ -1489,7 +1743,7 @@ def pose_at(plan, name, t):
 
 
 def make_plan(m, jobs=None, over=None, t0_s=0.0, replan_of=None, events=None, t_limit_s=60.0, allow_strand=False,
-              stop_at_first=False):
+              stop_at_first=False, prefer_order=None):
     """Plan from a map (its robots' start spots and tasks), or from given jobs."""
     m = FM.normalize(m)
     mp = {k: v for k, v in ((m.get("mission") or {}).get("planner") or {}).items() if k in DEFAULT_SETTINGS}
@@ -1497,6 +1751,7 @@ def make_plan(m, jobs=None, over=None, t0_s=0.0, replan_of=None, events=None, t_
         over = {**mp, **(over or {})}          # a mission's own planner settings (missions.py), unless overridden
     pl = Planner(m, over)
     pl.allow_strand = bool(allow_strand)
+    pl.prefer_order = prefer_order
     s, body = pl.s, pl.body
     if jobs is None:
         jobs = jobs_from_map(m)
@@ -1507,6 +1762,7 @@ def make_plan(m, jobs=None, over=None, t0_s=0.0, replan_of=None, events=None, t_
     sc = {n: scheds[n] for n in names}
     front_ray = _front_ray_fn(m, body)
     after = dependencies(sc, body, s)
+    _sync_after(sc, after)
     robots = {}
     for j in jobs:
         steps = to_steps(sc[j.name], after[j.name], s, committed=len(j.frozen), front_ray=front_ray,
@@ -1680,6 +1936,28 @@ def _remaining_core(st, p, pose, s, dwell_left_s):
     if st["type"] in ("turn", "park"):
         return turn_prim(pose, p["to"][2], s, kind=st["type"], phase=st["phase"], board=st.get("board"),
                          task=st.get("task"))
+    if st["type"] == "arc":
+        # the rest of the arc, from where the robot is on the circle now
+        a = p["arc"]
+        cur = math.atan2(pose[1] - a["c"][1], pose[0] - a["c"][0])
+        end = a["a0"] + a["sweep"]
+        rem = G.wrap(end - cur)
+        if a["sweep"] > 0 and rem < -math.pi / 2:
+            rem += 2 * math.pi
+        if a["sweep"] < 0 and rem > math.pi / 2:
+            rem -= 2 * math.pi
+        if (rem > 0) != (a["sweep"] > 0) or abs(rem) < math.radians(0.5):
+            return wait_prim(pose, 1, s, phase=st["phase"], task=st.get("task"))
+        arc = {"c": list(a["c"]), "r": a["r"], "a0": cur, "sweep": rem}
+        v = st.get("speed") or s.arc_cms
+        out = prim("arc", [pose[0], pose[1], pose[2]], _arc_poses({"arc": arc}, [1.0])[0], s, speed=v,
+                   move_s=abs(rem) * a["r"] / v, settle=s.drive_settle_s, phase=st["phase"], task=st.get("task"))
+        out["arc"] = arc
+        return out
+    if st["type"] == "dance":
+        out = prim("dance", pose, pose, s, move_s=p["move_s"], phase=st["phase"], task=st.get("task"))
+        out["dance_ms"] = p.get("dance_ms", 0)
+        return out
     left = dwell_left_s if dwell_left_s is not None else (st["t_end"] - st["t_start"])
     return wait_prim(pose, _ticks(max(left, s.tick_s), s), s, phase=st["phase"], board=st.get("board"),
                      task=st.get("task"))
@@ -1777,7 +2055,10 @@ def obstacle_decide(m, plan, states, new_obstacles, over=None, t_now=None):
         if p["type"] in ("drive", "approach"):
             poly = body.drive_sweep(p["from"][:2], p["to"][:2], p["from"][2])
             return w_new.shape_clearance(poly) < s.safety_margin_cm
-        if p["type"] in ("turn", "park"):
+        if p["type"] == "arc":
+            return any(w_new.shape_clearance(q) < s.safety_margin_cm
+                       for q in body.corners(_arc_poses(p, np.linspace(0, 1, 7))))
+        if p["type"] in ("turn", "park", "dance"):
             return float(w_new.clearance(np.array(p["from"][:2])[None])[0]) < body.r_turn + s.safety_margin_cm
         return w_new.shape_clearance(body.corners([p["from"]])[0]) < s.safety_margin_cm
 
@@ -1941,6 +2222,13 @@ def obstacle_replan(dec):
         # (Monday sweep 2026-10-27: seq_visits[-1:] kept only the last visit and dropped a warm-up robot's side feels)
         task_i = max(task_i, off)
         remaining = seq_visits[task_i - off:]
+        if nxt["type"] == "arc" and remaining and isinstance(remaining[0], dict) and "arc" in remaining[0]:
+            # part of the circle is done: the rest of it, from where the next arc step starts (not the whole circle again)
+            left = [stp for stp in later if stp["type"] == "arc" and stp.get("task") == nxt.get("task")]
+            it = copy.deepcopy(remaining[0])
+            it["arc"]["a0_deg"] = left[0]["arc"]["a0_deg"]
+            it["arc"]["sweep_deg"] = round(sum(x["arc"]["sweep_deg"] for x in left), 3)
+            remaining = [it] + remaining[1:]
         jobs.append(Job(n, st["pose"], remaining, tasks["park"], FM.pose_in(r_map["park"]),
                         start_tick=budget_ticks, lead=lead, frozen=frozen, task_offset=task_i,
                         any_order=tasks["any_order"], clock0=dec.get("clock0", 0.0)))
@@ -1948,7 +2236,7 @@ def obstacle_replan(dec):
     over2["skip_unreachable"] = True
     newplan = make_plan(m2, jobs=jobs, over=over2, replan_of=plan.get("plan_id"), events=events,
                         t_limit_s=0.45 * s.replan_budget_s, allow_strand=True,
-                        stop_at_first=bool(s.replan_first_safe))
+                        stop_at_first=bool(s.replan_first_safe), prefer_order=plan.get("priority_order"))
     newplan["mission_t0_s"] = round(dec.get("clock0", 0.0), 2)
     for n in newplan.get("stranded", []):
         ev = next(e for e in events if e["robot"] == n)

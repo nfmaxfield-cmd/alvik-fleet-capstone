@@ -60,9 +60,21 @@ import alvik_console as AC  # noqa: E402
 import fleetmap as FM       # noqa: E402
 import session_checks as SC  # noqa: E402
 import planner as P         # noqa: E402
+import engine_checks as EC  # noqa: E402
 
 MIN_FIRMWARE = "2026-10-18b"
 BORDER4_FIRMWARE = "2026-10-27a"     # the four-sided virtual border (border.h) and the second WiFi network
+OBS_N_FIRMWARE = "2026-10-28a"       # obs_n (front stops counted in sensor readings), the arc and dance steps, boot ID
+                                     # in `status`
+OBSTACLE_READINGS = 2   # Nick (brief 2026-10-28): a distance-sensor stop needs 2 consecutive readings (firmware obs_n;
+                        # before: 100 ms, front_confirm_ms, about 1-2 readings). DOE note: 1 / 2 / 3 readings on the
+                        # board against phantom stops on empty plywood (5 in the 27 Oct ladder runs) and the stop
+                        # distance from a real brick at 10 cm/s (each reading ~66 ms = 0.7 cm); docs/doe-backlog.md
+OWN_POSE_WINDOW_S = 10.0   # Nick (2026-10-27 18:26, Q17): after a side feel finds a barrier, the robot's own pose stands
+                           # (the camera guard leaves it alone) for at most this long. No DOE: Nick's limit
+STATUS_EVERY_S = 20.0   # during a run, ask every robot's `status` this often (battery). No DOE: a polling period
+PING_EVERY_S = 2.0      # start-up: re-ping the robots not heard yet this often (15:27: one lost ping, 20 s of silence).
+                        # No DOE: a retry period
 BORDER_CM = 6.0     # chosen: the robots' own border holds their centre this far inside an open side: the body's half
                     # width (4.75 cm) plus 1.25 cm. The planner keeps the centre r_turn + safety + open margin (about
                     # 11 cm) inside, so it trips only on a pose error of about 5 cm. DOE note: 5 / 6 / 8 cm on the
@@ -179,8 +191,18 @@ def border_commands(m, border_cm):
     return ["set %s %g" % (k, p[k]) for k in order] + ["set border_cm %g" % p["border_cm"], "set bd_on 1"]
 
 
-def step_command(sid, st):
+def step_command(sid, st, wait_ms=None):
     t = st["type"]
+    if t == "arc":
+        # firmware 2026-10-28a follow step C: round the circle centre (cx, cy), radius r, from angle a0 through sweep
+        # (deg, + anticlockwise), at speed cm/s along the circle; fmin as for a turn
+        a = st["arc"]
+        return "fs %d C %.2f %.2f %.2f %.2f %.2f %.2f %s" % (sid, a["c"][0], a["c"][1], a["r"], a["a0_deg"],
+                                                             a["sweep_deg"], st["speed"], _f(st.get("front_min_cm")))
+    if t == "dance":
+        return "fs %d Z %d" % (sid, int(st.get("dance_ms", 0)))     # 0 = until switched off
+    if t == "wait" and wait_ms is not None:
+        return "fs %d W %d" % (sid, int(wait_ms))
     if t in ("turn", "park"):
         return "fs %d T %.2f %s" % (sid, st["to"][2], _f(st.get("front_min_cm")))
     if t == "drive":
@@ -234,6 +256,13 @@ class Bot:
         self.calib_look = None  # its last CALIB_LOOK record (spin / roll / reason: what it skipped for lack of room)
         self.said = []
         self.resends = 0
+        self.battery = None     # % from its status / RUNINFO
+        self.boot = None        # boot ID (CLOCK records, RUNINFO run ids, status from 2026-10-28a)
+        self.boot_start = None  # its boot ID when this run started (a new one mid-run: it restarted)
+        self.last_heard = None  # laptop time of its latest record of any kind
+        self.params = {}        # PARAM rows of its current run, and `get` answers: name -> value
+        self.out = None         # why it is out of this run (silent, restarted): a fixed obstacle for the others
+        self.own_until = 0.0    # the camera guard leaves it alone until then (after a barrier find)
 
     def note_clock(self, t_recv, ms):
         o = t_recv - ms / 1000.0
@@ -302,6 +331,29 @@ class Coordinator:
         print("[%6.1f] %s" % (t, msg), flush=True)
         self.log("message", text=msg)
 
+    def message_row(self, t, name, text):
+        """Every M line a robot says (status, led replies, awake, ...), to messages.csv (none were kept before)."""
+        if getattr(self, "_msg_f", None) is None:
+            self._msg_f = open(os.path.join(self.outdir, "messages.csv"), "a", newline="")
+            self._msg_w = csv.writer(self._msg_f)
+            if self._msg_f.tell() == 0:
+                self._msg_w.writerow(["t", "robot", "text"])
+        self._msg_w.writerow(["%.3f" % t, name, text])
+        self._msg_f.flush()
+
+    def note_boot(self, b, boot, how):
+        if not boot:
+            return
+        if b.boot and boot != b.boot:
+            self.log("boot_changed", robot=b.name, old=b.boot, new=boot, how=how)
+            if self.t_run_started() and b.boot_start and boot != b.boot_start and not b.out:
+                self.retire(b, "restarted mid-run (boot %s, was %s): it lost its calibration and its steps" % (boot,
+                                                                                                          b.boot_start))
+        b.boot = boot
+
+    def t_run_started(self):
+        return getattr(self, "t_run", None) is not None and self.plan_start is not None
+
     def save_plan(self):
         P.save_plan(self.plan, os.path.join(self.outdir, "plan_%d.json" % self.plan_no))
 
@@ -321,20 +373,59 @@ class Coordinator:
             b = self.bots.get(name)
             if b is None:
                 continue
+            b.last_heard = t
+            if b.out:
+                if not getattr(b, "back_said", False):
+                    b.back_said = True
+                    self.say("%s is talking again (%s); it stays out of this run, as a fixed obstacle" % (name, b.out))
+                    self.log("robot_back", robot=name, why=b.out)
+                continue
             if kind == "M":
                 b.said.append((t, vals))
+                self.message_row(t, name, vals)
                 low = vals.lower()
-                if low.startswith("status "):
+                st_ = EC.parse_status(vals) if low.startswith("status ") else None
+                if st_:
+                    b.firmware = st_["firmware"]
+                    b.battery = st_["battery"]
+                    if st_["boot"]:
+                        self.note_boot(b, st_["boot"], "status")
+                elif low.startswith("status "):
                     k = vals.find("(firmware ")
                     if k >= 0:
-                        b.firmware = vals[k + 10:vals.find(")", k)]
+                        b.firmware = vals[k + 10:vals.find(")", k)].split(",")[0]
+                if " = " in vals and not low.startswith("status"):
+                    nm, _, rest = vals.partition(" = ")
+                    try:
+                        b.params[nm.strip()] = float(rest.split()[0])
+                    except (ValueError, IndexError):
+                        pass
                 if "not calibrated" in low:
                     b.calibrated = False
                 if self.plan_start is not None and ("follow:" in low or "turn timed out" in low or "stopped" in low):
                     self.say("%s: %s" % (name, vals))
                 continue
+            if rtype == "CLOCK" and len(vals) >= 3:
+                self.note_boot(b, vals[2].strip().upper(), "clock")
+                continue
+            if rtype == "PARAM" and len(vals) >= 3:
+                try:
+                    b.params[vals[1]] = float(vals[2])
+                except ValueError:
+                    pass
+                continue
             if rtype == "RUNINFO" and len(vals) >= 2:
                 b.run_id, b.run_exp = vals[0], vals[1]
+                bt = EC.boot_of_run(vals[0])
+                if bt:
+                    self.note_boot(b, bt, "runinfo")
+                if len(vals) >= 6:
+                    try:
+                        b.battery = int(float(vals[5]))
+                    except ValueError:
+                        pass
+                if vals[1] == "follow":
+                    b.params = {}          # this run's PARAM rows follow
                 if len(vals) >= 10 and vals[1] != "calib":     # a calib run logs its sign before checking it
                     b.calibrated = vals[9].strip() not in ("0", "")
                 continue
@@ -415,12 +506,22 @@ class Coordinator:
             if st["status"] in ("sent", "acked"):
                 st["status"] = "started"
                 st["t_started"] = t
+                stp = self.steps(b.name)[i]
+                if stp["type"] == "dance" and not stp.get("dance_ms"):
+                    # dancing until switched off (Monday's end): its part of the plan is done once it starts
+                    st["status"] = "done"
+                    st["t_done"] = t
+                    st["info"] = "dancing until switched off"
+                    b.dancing = True
+                    self.say("%s is dancing (until it is switched off)" % b.name)
         elif state == "done":
             if st["status"] != "done":
                 st["status"] = "done"
                 st["t_done"] = t
                 st["info"] = info
                 stp = self.steps(b.name)[i]
+                if stp.get("phase") == "confirm" and stp["type"] == "drive":
+                    self.confirm_check(b, i, (x, y, th))
                 if stp["type"] == "home":
                     self.say("%s is home in dock %s (%s)" % (b.name, stp.get("dock"), info))
                     self.dockings.append(dict(robot=b.name, home=stp.get("dock"), info=info,
@@ -468,6 +569,9 @@ class Coordinator:
         t = now()
         for b in self.bots.values():
             cam, ct = getattr(b, "last_cam", None), getattr(b, "cam_t", None)
+            if b.out or t < b.own_until:      # out of the run; or its own pose stands after a barrier find (10 s)
+                b.guard_since = None
+                continue
             if cam is None or b.pose is None or ct is None or t - ct > 0.3 or t - b.pose_t > 0.3:
                 b.guard_since = None
                 continue
@@ -575,7 +679,12 @@ class Coordinator:
                 b.next_id += 1
                 b.ids[i] = sid
                 b.id_index[sid] = i
-                st.update(status="sent", t_sent=t, text=step_command(sid, stp), sends=1)
+                wms = None
+                if stp["type"] == "wait" and stp.get("until_s") is not None:
+                    # a wait for a mission time (a beat, a meet): only what is left of it now, so a robot that
+                    # arrives late does not wait the whole planned wait on top
+                    wms = max(0, int(round((self.plan_start + stp["t_end"] - t) * 1000)))
+                st.update(status="sent", t_sent=t, text=step_command(sid, stp, wms), sends=1)
                 self.send(n, st["text"])
                 self.log("step_sent", robot=n, id=sid, i=i, plan=self.plan_no, text=st["text"])
                 break           # the next one goes once this one is acked
@@ -624,7 +733,7 @@ class Coordinator:
         t = now()
         for b in self.bots.values():
             ev = b.fix
-            if ev is None or b.offset is None or t - b.fix_sent_t < 1.0 / self.args.fix_hz:
+            if b.out or ev is None or b.offset is None or t - b.fix_sent_t < 1.0 / self.args.fix_hz:
                 continue
             ms = int(round((ev["t"] - b.offset) * 1000))
             th = ev.get("th")
@@ -737,6 +846,8 @@ class Coordinator:
         t_event = now()
         states = self.states(cause)
         over = dict(self.plan["settings"])
+        gate = getattr(self.args, "min_gap_cm", EC.MIN_GAP_CM) or 0.0
+        over["separation_cm"] = max(float(over.get("separation_cm", 0.0)), gate)    # re-plans are made at the gate
         if budget is not None:
             over["replan_budget_s"] = budget
         if improving:
@@ -783,6 +894,26 @@ class Coordinator:
             return
         newplan, events = job["result"]
         cpu = job["cpu"]
+        outs = [n for n in newplan["robots"] if self.bots[n].out]
+        if outs:                     # a robot went out while this was being computed: it is not in the new plan
+            newplan = self.without(newplan, outs)
+            events = [e for e in events if e["robot"] not in outs]
+        gate = getattr(self.args, "min_gap_cm", EC.MIN_GAP_CM) or 0.0
+        if gate:
+            gap = EC.plan_gap(newplan, self.m, gate_cm=gate)
+            bad = EC.gate_words(gap, gate)
+            if bad:
+                self.log("plan_refused", why=bad, gap=gap, improving=improving)
+                if improving:
+                    self.say("improvement try refused: %s" % bad)
+                    return self.next_deferred()
+                self.say("new plan refused: %s; everyone holds, planning again in %.0f s" % (bad, self.args.retry_s))
+                self.n_refused = getattr(self, "n_refused", 0) + 1
+                self.halt_all()
+                self.replans.append({"t_run": round(t_event - self.t_run, 2), "source": "refused", "why": bad,
+                                     "cpu_s": round(cpu, 3)})
+                self.pending_replan = ("plan refused under the safety net", now() + self.args.retry_s)
+                return
         if cause:
             for e in events:
                 if e["robot"] == cause:
@@ -887,6 +1018,97 @@ class Coordinator:
         for b in self.bots.values():
             self.control(b, "halt")
 
+    # -- a robot out of the run (silent, restarted): a fixed obstacle; the others re-plan and carry on ----------
+    def out_obstacle(self, b):
+        """Where a robot that went out may be: its body at its last pose, plus the area of every step it had been
+        sent and not reported done (it may still drive what it buffered), 1 cm bigger all round."""
+        import numpy as np
+        import geometry as G
+        body = FM.body_of(self.m)
+        pose = b.pose or (tuple(b.last_cam[:2]) + (b.last_cam[2] or 0.0,) if getattr(b, "last_cam", None) else None)
+        if pose is None:
+            pose = tuple(FM.pose_out(FM.pose_in(self.plan["robots"][b.name]["start"]))) \
+                if b.name in self.plan["robots"] else (0.0, 0.0, 0.0)
+        pts = [body.corners([[pose[0], pose[1], math.radians(pose[2])]])[0]]
+        steps = self.plan["robots"].get(b.name, {}).get("steps", [])
+        for i, st in enumerate(b.stat):
+            if st["status"] not in ACTIVE or i >= len(steps):
+                continue
+            stp = steps[i]
+            fr, to = FM.pose_in(stp["from"]), FM.pose_in(stp["to"])
+            if stp["type"] in ("drive", "approach"):
+                pts.append(body.drive_sweep(fr[:2], to[:2], fr[2]))
+            elif stp["type"] == "arc":
+                pts += list(body.corners(P.step_poses(stp, 24)))
+            elif stp["type"] in ("turn", "park", "dance"):
+                a = np.linspace(0, 2 * math.pi, 16, endpoint=False)
+                pts.append(np.c_[fr[0] + body.r_turn * np.cos(a), fr[1] + body.r_turn * np.sin(a)])
+        hull = G.convex_hull(np.vstack(pts))
+        c = hull.mean(0)
+        hull = hull + 1.0 * (hull - c) / np.maximum(np.linalg.norm(hull - c, axis=1)[:, None], 1e-6)
+        return {"id": "out-%s" % b.name, "shape": "polygon", "points": hull.round(2).tolist(), "source": "robot_out",
+                "time": FM.now_iso()}
+
+    @staticmethod
+    def without(plan, names):
+        """A copy of a plan with these robots taken out (their steps, and every "after" that waits for them)."""
+        if not names:
+            return plan
+        import copy
+        out = copy.deepcopy(plan)
+        for n in names:
+            out["robots"].pop(n, None)
+        for r in out["robots"].values():
+            for st in r["steps"]:
+                st["after"] = [a for a in st.get("after", []) if a[0] not in names]
+        out["stranded"] = [n for n in out.get("stranded", []) if n not in names]
+        return out
+
+    def retire(self, b, why):
+        """Nick (2026-10-27 16:43): a robot that dies mid-run is a brick; the others carry on."""
+        if b.out:
+            return
+        b.out = why
+        ob = self.out_obstacle(b)
+        self.say("%s is out: %s. It is now a fixed obstacle where it stopped; the others re-plan and carry on" % (b.name,
+                                                                                                             why))
+        self.log("robot_out", robot=b.name, why=why, obstacle=ob, pose=list(b.pose) if b.pose else None)
+        self.control(b, "halt")              # if it can still hear: stop at once
+        self.names = [n for n in self.names if n != b.name]
+        self.outs = getattr(self, "outs", []) + [dict(robot=b.name, why=why, t_run=round(now() - self.t_run, 2)
+                                                      if self.t_run_started() else None)]
+        if not self.names:
+            self.abort = "every robot is out (%s)" % why
+            self.say(self.abort)
+            return
+        self.plan = self.without(self.plan, [b.name])
+        self.handle_obstacle(ob)
+
+    def silence_watch(self):
+        lim = getattr(self.args, "silent_s", EC.SILENT_S)
+        if not lim or not self.t_run_started():
+            return
+        t = now()
+        for n in list(self.names):
+            b = self.bots[n]
+            if b.last_heard is not None and t - b.last_heard > lim:
+                self.retire(b, "nothing heard from it for %.1f s (battery dead or WiFi gone)" % (t - b.last_heard))
+
+    def status_poll(self):
+        t = now()
+        if t - getattr(self, "_status_t", 0.0) < STATUS_EVERY_S:
+            return
+        self._status_t = t
+        floor = getattr(self.args, "battery_floor", EC.BATTERY_FLOOR_PCT)
+        for n in self.names:
+            b = self.bots[n]
+            self.send(n, "status")
+            if b.battery is not None and floor and b.battery < floor and not getattr(b, "low_said", False):
+                b.low_said = True
+                self.say("%s's battery is at %d %%, under the %d %% floor: it finishes this run; charge it before the "
+                         "next" % (n, b.battery, floor))
+                self.log("battery_low", robot=n, battery=b.battery)
+
     def request_replan(self, why):
         if self.pending_replan is None:
             self.pending_replan = (why, now() + 0.3)
@@ -918,7 +1140,11 @@ class Coordinator:
             return
         if info.startswith("obstacle"):
             self.n_sensor_obstacles += 1
+            if stp.get("phase") == "probe":
+                # a side feel found a barrier: its own pose stands for OWN_POSE_WINDOW_S (Nick, Q17: about 10 s)
+                b.own_until = now() + OWN_POSE_WINDOW_S
             ob = self.sensor_obstacle(b, pose, front, info)
+            self.sensor_agreement(b, ob, info)
             if ob is None:
                 self.say("%s: its distance sensor saw another robot ahead (%s); re-planning" % (b.name, info))
                 self.handle_obstacle(None, cause=b.name)
@@ -1028,6 +1254,55 @@ class Coordinator:
         return {"id": "seen-by-%s-%d" % (b.name, self.n_sensor_obstacles), "shape": "polygon",
                 "points": hull.round(2).tolist(), "source": "distance_sensor", "time": FM.now_iso()}
 
+    def sensor_agreement(self, b, ob, info):
+        """Does the camera agree with a distance-sensor stop? Yes when its outline is near something the camera
+        already reported (a brick it saw, another robot's spot); else it is the sensor's word alone. Logged and
+        counted (the DOE on obs_n 1 / 2 / 3 needs it); the stop is handled the same either way (safety first)."""
+        import numpy as np
+        by = None
+        if ob is None:
+            by = "another robot (its spot is where the sensor saw something)"
+        else:
+            pts = np.array(ob["points"], float)
+            for o in self.m.get("obstacles", []):
+                if o.get("source") in ("camera", "brickwatch"):
+                    c = np.array(o.get("center") or np.mean(np.array(o.get("points") or [[0, 0]]), 0))
+                    if float(np.min(np.hypot(pts[:, 0] - c[0], pts[:, 1] - c[1]))) < 8.0:
+                        by = "the camera's obstacle %s" % o.get("id")
+        self.sensor_stops = getattr(self, "sensor_stops", []) + [dict(robot=b.name, info=info, camera=by,
+                                                                      t_run=round(now() - self.t_run, 2))]
+        self.log("sensor_stop", robot=b.name, info=info, camera_agrees=by)
+
+    def confirm_check(self, b, i, own):
+        """The end of a run-in (phase "confirm"): the camera has just watched the robot drive straight, so its
+        heading is known. Nick (14:53): the heading error that matters is the sideways drift it causes before the
+        next camera correction; anything risky confirms its heading first. Off by more than allowed: its pose is set
+        from the camera (fpose) before it goes on."""
+        steps = self.steps(b.name)
+        if i + 1 < len(steps) and steps[i + 1].get("phase") == "confirm":
+            return                                     # the run-in goes on
+        cam, ct = getattr(b, "last_cam", None), getattr(b, "cam_t", None)
+        if cam is None or cam[2] is None or ct is None or now() - ct > 0.6:
+            self.log("confirm_check", robot=b.name, i=i, result="no camera heading")
+            return
+        line = sum(math.dist(st["from"][:2], st["to"][:2]) for st in steps[max(0, i - 3):i + 1]
+                   if st.get("phase") == "confirm" and st["type"] == "drive")
+        nxt = next((st for st in steps[i + 1:] if st["type"] in ("drive", "arc")), None)
+        L = math.dist(nxt["from"][:2], nxt["to"][:2]) if nxt else 0.0
+        drift = EC.RISKY_DRIFT_CM
+        allowed = EC.allowed_heading_deg(L, drift, line)
+        err = abs((cam[2] - own[2] + 180.0) % 360.0 - 180.0)
+        ok = err <= allowed
+        self.log("confirm_check", robot=b.name, i=i, cam=cam, own=list(own), err_deg=round(err, 2),
+                 allowed_deg=round(allowed, 2), line_cm=round(line, 1), next_cm=round(L, 1), ok=ok)
+        self.confirms = getattr(self, "confirms", []) + [dict(robot=b.name, err_deg=round(err, 2),
+                                                              allowed_deg=round(allowed, 2), ok=ok)]
+        if not ok:
+            self.say("%s: its heading is %.1f deg off the camera's after the run-in (allowed %.1f for the next %.0f cm):"
+                     " pose set from the camera" % (b.name, err, allowed, L))
+            self.send(b.name, "fpose %.2f %.2f %.2f %.2f %.2f" % (cam[0], cam[1], cam[2], 0.5,
+                                                                 max(1.0, math.degrees(math.atan2(1.0, max(line, 1.0))))))
+
     def waiting_for(self, n):
         """Why robot n's next step has not been sent (for the status line)."""
         b = self.bots[n]
@@ -1069,7 +1344,7 @@ class Coordinator:
             self.drain()
             self.fixes()
             for b in self.bots.values():
-                if b.ended and not self.abort:
+                if b.ended and not self.abort and not b.out:
                     if SC.run_outcome(b.ended) == SC.CALIB_LIMITED:   # (follow runs hold instead: firmware older than
                         #                                                 2026-10-18c's step-only edge stop)
                         self.abort = "limited: %s's edge guard stopped it before an open plywood edge" % b.name
@@ -1082,6 +1357,10 @@ class Coordinator:
             self.cam_guard()
             if self.abort:
                 break
+            self.silence_watch()
+            if self.abort:
+                break
+            self.status_poll()
             self.finish_replan()
             self.tracker_watch()
             pr = getattr(self, "pause_req", None)
@@ -1123,7 +1402,7 @@ class Coordinator:
     def missed_boards(self):
         """Boards in each robot's tasks (map.json) it never reported docking at."""
         out = {}
-        for n in self.names:
+        for n in self.bots:
             want = [v for v in self.m["tasks"].get(n, {}).get("visit", []) if isinstance(v, str)]
             got = [d["board"] for d in self.dockings if d["robot"] == n]
             miss = list(want)
@@ -1145,7 +1424,14 @@ class Coordinator:
                                         for n, b in self.bots.items()},
                 "replans": self.replans, "dockings_reported": self.dockings,
                 "boards_not_visited": self.missed_boards(),
-                "sensor_obstacles": self.n_sensor_obstacles}
+                "sensor_obstacles": self.n_sensor_obstacles,
+                "sensor_stops": getattr(self, "sensor_stops", []),
+                "robots_out": getattr(self, "outs", []),
+                "plans_refused": getattr(self, "n_refused", 0),
+                "confirm_checks": getattr(self, "confirms", []),
+                "battery": {n: b.battery for n, b in self.bots.items()},
+                "boot": {n: b.boot for n, b in self.bots.items()},
+                "start_checks": getattr(self, "start_checks", {})}
 
 
 # ----------------------------------------------------------------------------
@@ -1162,75 +1448,167 @@ def wait_for(cond, timeout, coord, poll=0.05):
     return False
 
 
-def start_robots(coord, link, args, source):
+def _say(msg):
+    print(msg, flush=True)
+
+
+def find_robots(coord, link, args):
+    """Wait for every robot, re-pinging the ones not heard yet every PING_EVERY_S (15:27: one lost ping and run_plan
+    heard nobody for 20 s). Says which were heard at all: none heard is a link problem, not a robot problem."""
     names = coord.names
     print("Waiting for robots: %s ..." % ", ".join(names))
-    if not wait_for(lambda: set(names) <= set(link.robots()), args.find_s, coord):
-        missing = sorted(set(names) - set(link.robots()))
-        raise SystemExit("Not heard from: %s. Are they on, on this WiFi, and named as in the map?" % ", ".join(missing))
+    t0 = time.time()
+    last_ping = t0
+    while time.time() - t0 < args.find_s:
+        coord.drain()
+        if set(names) <= set(link.robots()):
+            return
+        if time.time() - last_ping >= PING_EVERY_S:
+            last_ping = time.time()
+            link.send_all("ping")
+            for ip in args.robot or []:
+                link.send_ip(ip, "ping")
+        time.sleep(0.05)
+    heard = sorted(link.robots())
+    missing = sorted(set(names) - set(heard))
+    if not heard:
+        raise SystemExit("Not heard from: %s. No robot answered at all in %.0f s (pinged every %.0f s): a link "
+                         "problem (this computer's WiFi, or another program talking to the robots), not a robot "
+                         "problem." % (", ".join(missing), args.find_s, PING_EVERY_S))
+    raise SystemExit("Not heard from: %s (heard: %s). Are they on, on this WiFi, and named as in the map?"
+                     % (", ".join(missing), ", ".join(heard)))
+
+
+def read_status(coord, link, names, wait_s=5.0):
+    """status from every robot (firmware, battery, boot ID); re-asked once halfway."""
     for n in names:
-        link.send_name(n, "stop")          # a follow run left over from an earlier run_plan would refuse a new one
-    time.sleep(1.5)
-    for cmd in getattr(args, "send", None) or []:      # e.g. set safe_edge 1 (tools/site/setup.py's edge approaches)
-        for n in names:
-            link.send_name(n, cmd)
-        time.sleep(0.3)
-    for n in names:
+        coord.bots[n].firmware = None
         link.send_name(n, "status")
-    wait_for(lambda: all(coord.bots[n].firmware for n in names), 5, coord)
+    t0 = time.time()
+    asked = False
+    while time.time() - t0 < wait_s:
+        coord.drain()
+        if all(coord.bots[n].firmware and coord.bots[n].battery is not None and coord.bots[n].boot for n in names):
+            return
+        if not asked and time.time() - t0 > wait_s / 2:
+            asked = True
+            for n in names:
+                if not (coord.bots[n].firmware and coord.bots[n].battery is not None):
+                    link.send_name(n, "status")
+        time.sleep(0.05)
+
+
+def calibrate(coord, link, args, names):
+    """The calibration run on these robots (all at once; about 65 s each)."""
     for n in names:
-        fw = coord.bots[n].firmware
-        if not fw:
-            print("  %s did not say its firmware version (status lost?); carrying on" % n)
-        elif fw < MIN_FIRMWARE:
-            raise SystemExit("%s runs firmware %s; the step follower needs %s or later. Flash it first."
-                             % (n, fw, MIN_FIRMWARE))
-    # the robots' own four-sided border from the workspace map (firmware 2026-10-27a, border.h)
-    if coord.m.get("sides") and getattr(args, "border_cm", 0) > 0:
-        bd = border_commands(coord.m, args.border_cm)
-        for n in names:
-            fw = coord.bots[n].firmware
+        coord.bots[n].last_runend = None
+        link.send_name(n, "calibrate")
+    print("Calibrating %s (about 65 s, all at once: each needs a 25 cm circle to spin in and, in some direction, "
+          "35 cm of clear floor from its back to roll)..." % ", ".join(names))
+    if not wait_for(lambda: all((getattr(coord.bots[n], "last_runend", None) or (None,))[0] == "calib" for n in names),
+                    120, coord):
+        print("  not every calibration run reported its end; carrying on")
+    time.sleep(1.0)
+    coord.drain()
+    done = []
+    for n in names:
+        b = coord.bots[n]
+        le = getattr(b, "last_runend", None)
+        oc = SC.calib_outcome(le[1] if le and le[0] == "calib" else None, b.calib_look)
+        if oc == SC.CALIB_LIMITED:    # not a failure: it did what the space allowed
+            lk = b.calib_look or {}
+            what = []
+            if lk.get("spin") == "skipped":
+                what.append("no spin (something inside its circle)")
+            if lk.get("roll") == "edge":
+                what.append("roll cut short at a plywood edge (kept)")
+            elif lk.get("roll") == "skipped" or not lk.get("roll"):
+                what.append("no roll (stopped at a plywood edge too soon)" if lk.get("result") == "edge"
+                            else "no roll (no room in any direction)")
+            print("  %s: calibrated, %s: %s" % (n, SC.calib_outcome_text(le[1], lk), "; ".join(what)))
+            done.append(n)
+        elif oc == SC.CALIB_FAILED:
+            print("  %s: calibration did not finish (%s)" % (n, le[1] if le and le[0] == "calib" else "no end record"))
+        else:
+            done.append(n)
+    for n in done:
+        coord.day.note_calibrated(n, coord.bots[n].boot)
+        coord.bots[n].calibrated = None
+    coord.day.save()
+    return done
+
+
+def send_settings(coord, link, args, names):
+    """Every `set` this run needs, per robot: the --send commands (the edge guard), the stored driving corrections
+    (real robots), the four-sided border, obs_n. Returns {robot: {param: value}} to read back."""
+    want = {n: {} for n in names}
+    notes = []
+    for n in names:
+        b = coord.bots[n]
+        cmds = list(getattr(args, "send", None) or [])
+        if args.corrections:
+            cmds += EC.corrections_cmds(n, coord.day, notes)
+        fw = b.firmware or ""
+        if coord.m.get("sides") and getattr(args, "border_cm", 0) > 0:
             if fw and fw < BORDER4_FIRMWARE:
                 print("  %s runs firmware %s: no four-sided border on the robot (needs %s); the planner's margins "
                       "and the edge guard still apply" % (n, fw, BORDER4_FIRMWARE))
-                continue
-            for c in bd:
-                link.send_name(n, c)
-                time.sleep(0.02)
-    if args.calibrate:
-        for n in names:
-            link.send_name(n, "calibrate")
-        print("Calibrating (about 65 s each, all at once: each needs a 25 cm circle to spin in and, in some direction, "
-              "35 cm of clear floor from its back to roll)...")
-        if not wait_for(lambda: all(getattr(coord.bots[n], "last_runend", (None,))[0] == "calib" for n in names), 120, coord):
-            print("  not every calibration run reported its end; carrying on")
-        time.sleep(1.0)
+            else:
+                cmds += border_commands(coord.m, args.border_cm)
+        if args.obstacle_readings and fw >= OBS_N_FIRMWARE:
+            cmds.append("set obs_n %d" % args.obstacle_readings)
+        elif args.obstacle_readings and fw:
+            notes.append("%s runs firmware %s: its front stop is time-based (100 ms, about 1-2 readings), not %d "
+                         "readings (needs %s)" % (n, fw, args.obstacle_readings, OBS_N_FIRMWARE))
+        for c in cmds:
+            link.send_name(n, c)
+            kv = EC.parse_setting(c)
+            if kv:
+                want[n][kv[0]] = kv[1]
+            time.sleep(0.02)
+    for x in notes:
+        print("  " + x)
+    coord.sent_settings = want
+    return want
+
+
+def read_back(coord, link, want, tries=EC.READBACK_TRIES):
+    """Compare each robot's PARAM rows (its follow run's start) with what was sent; ask (`get`) for any missing,
+    resend (`set`) any that differ. Returns {robot: [(param, sent, got)]} still wrong."""
+    bad = {}
+    for k in range(tries):
         coord.drain()
-        for n in names:
+        bad = {}
+        for n, kv in want.items():
             b = coord.bots[n]
-            le = getattr(b, "last_runend", None)
-            oc = SC.calib_outcome(le[1] if le and le[0] == "calib" else None, b.calib_look)
-            if oc == SC.CALIB_LIMITED:    # not a failure: it did what the space allowed
-                lk = b.calib_look or {}
-                what = []
-                if lk.get("spin") == "skipped":
-                    what.append("no spin (something inside its circle)")
-                if lk.get("roll") == "edge":
-                    what.append("roll cut short at a plywood edge (kept)")
-                elif lk.get("roll") == "skipped" or not lk.get("roll"):
-                    what.append("no roll (stopped at a plywood edge too soon)" if lk.get("result") == "edge"
-                                else "no roll (no room in any direction)")
-                print("  %s: calibrated, %s: %s" % (n, SC.calib_outcome_text(le[1], lk), "; ".join(what)))
-            elif oc == SC.CALIB_FAILED:
-                print("  %s: calibration did not finish (%s)" % (n, le[1] if le and le[0] == "calib" else "no end record"))
-        if not args.yes and not args.dry_run:
-            input("Calibrated. Put every robot on its start spot, then press Enter: ")
+            for name, v in kv.items():
+                got = b.params.get(name)
+                if not EC.setting_matches(v, got):
+                    bad.setdefault(n, []).append((name, v, got))
+        if not bad:
+            return {}
+        for n, lst in bad.items():
+            for name, v, got in lst:
+                if got is not None:                     # a different value: the set was lost or overwritten
+                    link.send_name(n, "set %s %g" % (name, v))
+                    coord.n_setting_resent = getattr(coord, "n_setting_resent", 0) + 1
+                    print("  %s: %s reads %g, sent %g: sent again" % (n, name, got, v))
+                    coord.log("setting_resent", robot=n, name=name, sent=v, got=got, round=k + 1)
+                coord.bots[n].params.pop(name, None)
+                link.send_name(n, "get %s" % name)
+                time.sleep(0.02)
+        wait_for(lambda: all(coord.bots[n].params.get(name) is not None for n, lst in bad.items()
+                             for name, _, _ in lst), 1.5, coord)
+    coord.drain()
+    return {n: [(nm, v, coord.bots[n].params.get(nm)) for nm, v, _ in lst
+                if not EC.setting_matches(v, coord.bots[n].params.get(nm))] for n, lst in bad.items()
+            if any(not EC.setting_matches(v, coord.bots[n].params.get(nm)) for nm, v, _ in lst)}
+
+
+def start_follow(coord, link, names):
     for n in names:
         coord.bots[n].ended = None
         coord.bots[n].run_exp = None
-        if args.calibrate:
-            coord.bots[n].calibrated = None
-    # start the follow runs
     for attempt in range(3):
         for n in names:
             if coord.bots[n].run_exp != "follow":
@@ -1238,7 +1616,88 @@ def start_robots(coord, link, args, source):
         if wait_for(lambda: all(coord.bots[n].run_exp == "follow" or coord.bots[n].calibrated is False for n in names),
                     4, coord):
             break
+
+
+def replan_from(coord, poses, why):
+    """Plan again with each robot starting where the camera has it (Mission Control, Monday's command, and robots the
+    engine itself moved for a calibration)."""
+    import copy
+    m2 = copy.deepcopy(coord.m)
+    for r in m2["robots"]:
+        if r["name"] in poses:
+            r["start"] = [round(v, 2) for v in poses[r["name"]]]
+    over = dict(coord.plan.get("settings") or {})
+    plan = P.make_plan(m2, over=over)
+    coord.m = FM.normalize(m2)
+    coord.plan = plan
+    coord._install(plan, keep={}, first={}, old=None)
+    coord.plan_no += 1
+    coord.save_plan()
+    coord.first_makespan = plan["summary"]["makespan_s"]
+    print("  planned again from where the camera has them (%s): done in %.0f s" % (why, plan["summary"]["makespan_s"]))
+    coord.log("replan_from_camera", why=why, poses=poses, makespan_s=plan["summary"]["makespan_s"])
+
+
+def start_robots(coord, link, args, source):
+    names = coord.names
+    find_robots(coord, link, args)
+    for n in names:
+        link.send_name(n, "stop")          # a follow run left over from an earlier run_plan would refuse a new one
+    time.sleep(1.5)
+    coord.drain()
+    # ---- status: firmware, battery, boot ID (every run: a resumed ladder step or a second Monday run checks it too)
+    read_status(coord, link, names)
+    if not all(coord.bots[n].boot for n in names):
+        wait_for(lambda: all(coord.bots[n].boot for n in names), 3.0, coord)     # CLOCK records carry it
+    for n in names:
+        b = coord.bots[n]
+        fw = b.firmware
+        if not fw:
+            print("  %s did not say its firmware version (status lost?); carrying on" % n)
+        elif fw < MIN_FIRMWARE:
+            raise SystemExit("%s runs firmware %s; the step follower needs %s or later. Flash it first."
+                             % (n, fw, MIN_FIRMWARE))
+    low = [(n, coord.bots[n].battery) for n in names
+           if coord.bots[n].battery is not None and args.battery_floor and coord.bots[n].battery < args.battery_floor]
+    coord.start_checks = {n: {"firmware": coord.bots[n].firmware, "battery": coord.bots[n].battery,
+                              "boot": coord.bots[n].boot} for n in names}
+    if low:
+        raise SystemExit("Battery under the %d %% floor: %s. Charge %s first (nothing was moved)."
+                         % (args.battery_floor, ", ".join("%s %d %%" % x for x in low),
+                            "it" if len(low) == 1 else "them"))
+    print("  " + "; ".join("%s: firmware %s, battery %s %%, boot %s" % (n, coord.bots[n].firmware,
+                                                                       coord.bots[n].battery, coord.bots[n].boot)
+                           for n in names))
+    # ---- restarts: a new boot ID since the robot's last calibration today
+    need_cal = list(names) if args.calibrate else []
+    for n in names:
+        rs = coord.day.restarted(n, coord.bots[n].boot)
+        prev = coord.day.robot(n).get("calibrated_boot")
+        coord.start_checks[n]["restarted"] = bool(rs and prev)
+        if rs and prev:
+            print("  %s has restarted since its calibration today (boot %s, then %s): calibration and corrections "
+                  "again" % (n, prev, coord.bots[n].boot))
+            coord.log("restarted", robot=n, old=prev, new=coord.bots[n].boot)
+            if args.recalibrate == "auto" and n not in need_cal:
+                need_cal.append(n)
+    want = send_settings(coord, link, args, names)
+    moved = []
+    if need_cal and args.recalibrate != "no":
+        moved = calibrate(coord, link, args, need_cal)
+        if args.calibrate and not args.yes and not args.dry_run and not args.replan_from_camera:
+            input("Calibrated. Put every robot on its start spot, then press Enter: ")
+            moved = []
+    # ---- the follow runs; a robot that says "not calibrated" is calibrated now (auto), then started again
+    start_follow(coord, link, names)
     bad = [n for n in names if coord.bots[n].calibrated is False]
+    if bad and args.recalibrate == "auto":
+        print("  not calibrated since power-on: %s" % ", ".join(bad))
+        moved += calibrate(coord, link, args, bad)
+        for n in bad:
+            link.send_name(n, "stop")
+        time.sleep(0.5)
+        start_follow(coord, link, bad)
+        bad = [n for n in names if coord.bots[n].calibrated is False]
     if bad:
         raise SystemExit("Not calibrated since power-on: %s. Lift each off its spot, send `calibrate` (console) or "
                          "use --calibrate, put it back, and start again." % ", ".join(bad))
@@ -1248,11 +1707,23 @@ def start_robots(coord, link, args, source):
     # wait until each follow loop is up (its FOLLOW records arrive)
     if not wait_for(lambda: all(coord.bots[n].follow for n in names), 8, coord):
         raise SystemExit("No FOLLOW records from: %s" % ", ".join(n for n in names if not coord.bots[n].follow))
+    # ---- read back every setting sent (its PARAM rows), resend what differs
+    wait_for(lambda: all(all(k in coord.bots[n].params for k in want[n]) for n in names), 1.5, coord)
+    wrong = read_back(coord, link, want)
+    coord.start_checks["settings_resent"] = getattr(coord, "n_setting_resent", 0)
+    if wrong:
+        raise SystemExit("Settings not confirmed by the robot after %d tries: %s. Nothing was moved."
+                         % (EC.READBACK_TRIES, "; ".join("%s %s" % (n, ", ".join("%s sent %g, says %s" % x for x in lst))
+                                                         for n, lst in wrong.items())))
+    print("  settings read back: %s" % ", ".join("%s %d ok" % (n, len(want[n])) for n in names))
     # where are they?
     starts = {n: coord.plan["robots"][n]["start"] for n in names}
     if source.live:
         print("Waiting for camera fixes...")
         seen = {}
+        for _ in range(200):          # what queued up meanwhile (a calibration: a minute of fixes) is old: drop it
+            if not source.poll():
+                break
 
         def got():
             for ev in source.poll():
@@ -1261,16 +1732,31 @@ def start_robots(coord, link, args, source):
             return set(seen) == set(names)
         wait_for(got, args.fix_wait_s, coord)
         for n in names:
-            ev = seen.get(n)
-            if ev is None:
+            if seen.get(n) is None:
                 raise SystemExit("No camera fix for %s: is the position source running?" % n)
+        off = {n: math.hypot(seen[n]["x"] - starts[n][0], seen[n]["y"] - starts[n][1]) for n in names}
+        offh = {n: abs((seen[n]["th"] - starts[n][2] + 180) % 360 - 180) for n in names}
+        if (args.replan_from_camera or moved) and any(off[n] > args.place_tol_cm or offh[n] > 5.0 for n in names):
+            replan_from(coord, {n: (seen[n]["x"], seen[n]["y"], seen[n]["th"]) for n in names},
+                        "after a calibration" if moved else "Mission Control: start where they stand")
+            starts = {n: coord.plan["robots"][n]["start"] for n in names}
+        for n in names:
+            ev = seen[n]
             s = starts[n]
             d = math.hypot(ev["x"] - s[0], ev["y"] - s[1])
             dh = abs((ev["th"] - s[2] + 180) % 360 - 180)
-            print("  %s: camera puts it %.1f cm / %.1f deg from its start spot" % (n, d, dh))
-            if (d > args.place_tol_cm or dh > args.place_tol_deg) and not args.yes:
+            if args.place_tol_deg is not None:
+                tol_deg, how = args.place_tol_deg, "fixed"
+            else:
+                hc = EC.start_heading_check(coord.plan, n, coord.m, dh, float(ev.get("line_cm") or EC.START_LINE_CM))
+                tol_deg, how = (hc["allowed_deg"] if hc["allowed_deg"] is not None else 180.0), hc["words"]
+            print("  %s: camera puts it %.1f cm / %.1f deg from its start spot (heading allowed %.1f: %s)"
+                  % (n, d, dh, tol_deg, how))
+            coord.start_checks[n].update(place_cm=round(d, 2), heading_deg=round(dh, 2),
+                                         heading_allowed_deg=round(tol_deg, 2), heading_rule=how)
+            if (d > args.place_tol_cm or dh > tol_deg) and not args.yes:
                 raise SystemExit("%s is not on its start spot (%.1f cm, %.1f deg off; allowed %.1f cm, %.1f deg)."
-                                 % (n, d, dh, args.place_tol_cm, args.place_tol_deg))
+                                 % (n, d, dh, args.place_tol_cm, tol_deg))
             coord.bots[n].fix = ev
     else:
         if not args.yes and not args.dry_run:
@@ -1293,6 +1779,23 @@ def start_robots(coord, link, args, source):
     nopose = [n for n in names if coord.bots[n].follow.get("state") in (None, "nopose")]
     if nopose:
         raise SystemExit("No pose on: %s" % ", ".join(nopose))
+    # ---- the safety net: refuse a plan under the gate (Nick, 16:43: 8 cm)
+    if args.min_gap_cm:
+        gap = EC.plan_gap(coord.plan, coord.m, gate_cm=args.min_gap_cm)
+        coord.start_checks["plan_gap"] = gap
+        bad = EC.gate_words(gap, args.min_gap_cm)
+        if bad:
+            raise SystemExit("Plan refused: %s. Nothing was moved." % bad)
+        print("  plan's closest approach %.1f cm (safety net %.1f cm)" % (gap["closest_cm"], args.min_gap_cm))
+    for n in names:
+        b = coord.bots[n]
+        b.boot_start = b.boot
+        r = coord.day.robot(n)
+        r.update(boot=b.boot, battery=b.battery, firmware=b.firmware, seen_t=round(time.time(), 1),
+                 sent=want.get(n, {}))
+        if b.boot and not r.get("calibrated_boot"):
+            r["calibrated_boot"] = b.boot      # it ran follow: its compass check is done since this boot
+    coord.day.save()
     print("Robots ready: " + ", ".join("%s at %.1f,%.1f,%.0f" % (n, *coord.bots[n].pose) for n in names))
 
 
@@ -1316,8 +1819,31 @@ def main(argv=None):
     ap.add_argument("--timeout-s", type=float, default=400.0)
     ap.add_argument("--find-s", type=float, default=20.0)
     ap.add_argument("--place-tol-cm", type=float, default=2.0)
-    ap.add_argument("--place-tol-deg", type=float, default=5.0)
+    ap.add_argument("--place-tol-deg", type=float, default=None,
+                    help="a fixed start heading tolerance (deg); default: scaled by the first leg's length and risk "
+                         "(engine_checks.start_heading_check)")
     ap.add_argument("--calibrate", action="store_true", help="send calibrate to every robot first")
+    ap.add_argument("--recalibrate", choices=("auto", "no"), default="auto",
+                    help="auto (default): calibrate a robot that restarted since its calibration today (a new boot ID) "
+                         "or says it is not calibrated, then carry on; no: stop and say so")
+    ap.add_argument("--replan-from-camera", action="store_true",
+                    help="plan again from where the camera has the robots when they are off their start spots "
+                         "(Mission Control, Monday's command); without it, a robot off its spot stops the start")
+    ap.add_argument("--battery-floor", type=int, default=EC.BATTERY_FLOOR_PCT,
+                    help="refuse to start a robot under this battery %% (default %(default)s; 0 = off)")
+    ap.add_argument("--silent-s", type=float, default=EC.SILENT_S,
+                    help="a robot not heard for this long mid-run is out: a fixed obstacle, the others re-plan "
+                         "(default %(default)s; 0 = off)")
+    ap.add_argument("--min-gap-cm", type=float, default=EC.MIN_GAP_CM,
+                    help="refuse any plan bringing two robots closer than this (default %(default)s; 0 = off)")
+    ap.add_argument("--obstacle-readings", type=int, default=OBSTACLE_READINGS, choices=(0, 1, 2, 3),
+                    help="distance-sensor readings in a row that stop a step (firmware obs_n, 2026-10-28a; 0 = "
+                         "leave the robot's own setting; default %(default)s)")
+    ap.add_argument("--corrections", choices=("auto", "yes", "no"), default="auto",
+                    help="send each robot's stored driving corrections (gyro_scale, wheel_scale, gyro_drift_dps: "
+                         "e02_fit.PRIOR, corrections.json, today's warm-up); auto = real robots only")
+    ap.add_argument("--day-state", help="the day's robot state file (default ~/.config/mirlt/day/<date>.json; dry "
+                                        "runs: one in the session folder)")
     ap.add_argument("--yes", action="store_true", help="don't ask before starting")
     ap.add_argument("--send", action="append", default=[], metavar="COMMAND",
                     help="console command for every robot before its follow run starts, e.g. \"set safe_edge 1\" "
@@ -1375,7 +1901,9 @@ def main(argv=None):
                              % (plan.get("map_hash"), FM.map_hash(m)))
     else:
         print("Planning...")
-        plan = P.make_plan(m)
+        sep = float(((m.get("mission") or {}).get("planner") or {}).get("separation_cm", P.DEFAULT_SETTINGS["separation_cm"]))
+        over = {"separation_cm": max(sep, args.min_gap_cm)} if args.min_gap_cm else None
+        plan = P.make_plan(m, over=over)
     for n in plan["robots"]:
         for st in plan["robots"][n]["steps"]:
             if st["type"] == "approach" and "handover_cm" not in st:
@@ -1413,7 +1941,13 @@ def main(argv=None):
     link = AC.Link(outdir, robot_ips)
     link.session.quiet = True
     args.homes = assigned
+    # auto: real robots only. The simulated robots (a dry run, or the ladder's / DOE loop's dry runs, whose robots are on
+    # 127.0.0.x) keep factory values: their gyros are true, and the stored 1.075 made every simulated turn 7.5 % too big
+    # (ladder dry run, L3 p95 3.2-4.0 cm instead of 0.5-1.0)
+    simulated = args.dry_run or (bool(args.robot) and all(ip.startswith("127.") for ip in args.robot))
+    args.corrections = (args.corrections == "yes") or (args.corrections == "auto" and not simulated)
     coord = Coordinator(args, m, plan, link, source, outdir)
+    coord.day = EC.DayState(args.day_state or (os.path.join(outdir, "day_state.json") if args.dry_run else None))
     coord.pose_dest = None
     if args.poses_to:
         h, _, pt = args.poses_to.rpartition(":")
@@ -1444,7 +1978,13 @@ def main(argv=None):
         coord.abort = coord.__dict__.get("abort") or "start-up failed"
         code = 1
     finally:
-        link.close()          # sends stop to every robot (ends the follow runs) and closes the files
+        # sends stop to every robot (ends the follow runs) and closes the files; a finished run leaves the robots that
+        # are dancing until switched off (Monday's end) dancing
+        dancing = [n for n, b in coord.bots.items() if getattr(b, "dancing", False) and not b.out] \
+            if coord.__dict__.get("abort") is None and hasattr(coord, "bots") else []
+        if dancing and not args.dry_run:
+            print("Left dancing until switched off: %s" % ", ".join(dancing))
+        link.close(spare=dancing if not args.dry_run else ())
         source.close()
         summ = coord.summary() if hasattr(coord, "dockings") else {"result": coord.__dict__.get("abort")}
         if sim is not None:

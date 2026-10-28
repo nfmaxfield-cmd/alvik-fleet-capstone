@@ -349,10 +349,17 @@ class Link:
                             session.clock_sent[tok] = (name, t_send)
                     time.sleep(0.05)
 
-    def close(self):
-        """Stop every robot, wait for their end records, close the files."""
+    def close(self, spare=()):
+        """Stop every robot, wait for their end records, close the files. spare: robots left as they are (Monday's
+        dance: it goes on until the robot is switched off; run_plan only spares robots whose run ended in a dance)."""
         if self.session.robots:
-            self.send_all("stop")   # never leave robots driving when the program closes
+            if spare:
+                with self.session.lock:
+                    names = [n for n in self.session.robots if n not in spare]
+                for n in names:
+                    self.send_name(n, "stop")
+            else:
+                self.send_all("stop")   # never leave robots driving when the program closes
             time.sleep(1.2)         # let a stopped run's end flash and RUNEND record arrive
         self.stop.set()
         for t in self.threads:

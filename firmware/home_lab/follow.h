@@ -8,6 +8,10 @@
 //   fs <id> D <x0> <y0> <x1> <y1> <h> <cms> <rev> <fmin>     straight drive (rev 1 = backwards)
 //   fs <id> A <x0> <y0> <x1> <y1> <h> <cms> <handover> <gap> <max_travel> <fmin>   approach a board
 //   fs <id> W <ms>                                           wait (a dwell; 0 = just keep the order)
+//   fs <id> C <cx> <cy> <r> <a0> <sweep> <cms> <fmin>        round the circle centre (cx, cy), radius r, from angle a0
+//                                                            through sweep deg (+ anticlockwise) (2026-10-28a)
+//   fs <id> Z <ms>                                           dance where it stands for ms (0 = until stopped;
+//                                                            dance.h, 2026-10-28a)
 //   fs <id> K <wall_x> <wall_y> <h> <max_travel> <back>      home dock (dock.h): creep in facing h until both
 //                                                            nose switches click; own pose reset from the dock
 //                                                            (wall_x, wall_y: middle of the back wall's inner face);
@@ -40,6 +44,7 @@
 #include "pose.h"
 #include "dock.h"
 #include "border.h"
+#include "dance.h"
 
 extern String gRunId;
 
@@ -47,8 +52,9 @@ namespace follow {
 
 struct Step {
   uint16_t id;
-  char type;                 // T, D, A, W
+  char type;                 // T, D, A, W, K, P, C (arc: x0 y0 = centre, x1 = radius, y1 = a0, h = sweep), Z (dance)
   uint8_t rev;
+  bool cont;                 // C: the next queued step goes on round the same circle (no slowing, no brake)
   float x0, y0, x1, y1, h, speed;
   float fmin;                // < 0: none
   float handover, gap, maxTravel;
@@ -183,6 +189,14 @@ void command(const String& verb, const String& rest) {
       ok = ok && !(isNaN(s.handover) || isNaN(s.gap) || isNaN(s.maxTravel));
       if (n >= 12 && !isNaN(num(tok[11]))) s.fmin = num(tok[11]);
     }
+  } else if (s.type == 'C' && n >= 8) {
+    s.x0 = num(tok[2]); s.y0 = num(tok[3]); s.x1 = num(tok[4]); s.y1 = num(tok[5]); s.h = num(tok[6]);
+    s.speed = num(tok[7]);
+    ok = !(isNaN(s.x0) || isNaN(s.y0) || isNaN(s.x1) || isNaN(s.y1) || isNaN(s.h) || isNaN(s.speed) || s.speed <= 0 ||
+           s.x1 <= 0);
+    if (n >= 9 && !isNaN(num(tok[8]))) s.fmin = num(tok[8]);
+  } else if (s.type == 'Z' && n >= 3) {
+    s.waitMs = strtoul(tok[2], nullptr, 10);
   } else if (s.type == 'W' && n >= 3) {
     s.waitMs = strtoul(tok[2], nullptr, 10);
   } else if (s.type == 'K' && n >= 7) {
@@ -317,6 +331,21 @@ bool runStep(const Step& s) {
       gFrontLimitCm = 0;
       return waitMs(s.waitMs);
     }
+    case 'C': {
+      // round a circle (pose.h driveArc); well off the circle's heading at the start: square up first
+      gFrontLimitCm = frontLimit(s.fmin, false);
+      float tang = s.y1 + (s.h >= 0 ? 90.0f : -90.0f);
+      if (fabsf(wrap180(tang - pose::th())) > 20.0f && !turnToFloor(tang)) return false;
+      float d0 = pose::dist;
+      int r = driveArc(s.x0, s.y0, s.x1, s.y1, s.h, s.speed, s.cont);
+      travel = pose::dist - d0;
+      return r == DRIVE_OK;
+    }
+    case 'Z':
+      gFrontLimitCm = 0;
+      if (!dance::run(s.waitMs)) return false;
+      snprintf(info, sizeof(info), "danced %lu ms", (unsigned long)s.waitMs);
+      return true;
     case 'K':
     case 'P': {
       // dock / touch: it is meant to touch what is ahead; square up first if it is off the heading
@@ -353,7 +382,7 @@ bool runStep(const Step& s) {
 
 const char* stateName(char t) {
   return t == 'T' ? "turn" : t == 'D' ? "drive" : t == 'A' ? "approach" : t == 'W' ? "wait" : t == 'K' ? "dock"
-       : t == 'P' ? "touch" : "?";
+       : t == 'P' ? "touch" : t == 'C' ? "arc" : t == 'Z' ? "dance" : "?";
 }
 
 void run() {
@@ -395,16 +424,23 @@ void run() {
     Step s = q[qHead];
     qHead = (qHead + 1) % NQ;
     qLen--;
+    s.cont = false;
+    if (s.type == 'C' && qLen > 0) {     // the next step goes on round the same circle, the same way: no stop between
+      const Step& nx = q[qHead];
+      s.cont = nx.type == 'C' && fabsf(nx.x0 - s.x0) < 0.05f && fabsf(nx.y0 - s.y0) < 0.05f &&
+               fabsf(nx.x1 - s.x1) < 0.05f && (nx.h >= 0) == (s.h >= 0);
+    }
     curId = s.id;
     rawlog::step = s.id;       // RAW step = the step id while it runs (0 between steps)
     state = stateName(s.type);
     travel = 0;
     gStepStop = "";
     gFail = "";
+    gFrontLowN = 0;            // obs_n counts readings within this step
     border::reset();           // the border's reference starts again with every step (a re-plan may drive it back in)
     report(s.id, "started", "");
     bool ok = runStep(s);
-    alvik.brake();
+    if (!(ok && s.cont)) alvik.brake();
     gFrontLimitCm = 0;
     gFrontPath = false;
     gFrontEndBase = -1;

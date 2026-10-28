@@ -913,10 +913,20 @@ class Robot(FollowMixin, DockMixin, E02Mixin):
         elif not self.step_stop:
             lim = self.front_limit if self.front_limit >= 0 else self.P("safe_front_cm")
             if lim > 0:
-                dc = self.front_in_path() if self.front_path else self.tof()[2]
+                zones = tuple(self.tof())
+                fresh = zones != getattr(self, "front_prev", None)      # motion.h (2026-10-28a): a new reading
+                self.front_prev = zones
+                dc = self.front_in_path() if self.front_path else zones[2]
+                need_n = int(self.P("obs_n"))
                 if 0 < dc < lim:
                     if not self.front_soft:
                         self.abort_reason = "obstacle ahead"
+                    elif need_n > 0:
+                        if fresh:
+                            self.front_low_n = getattr(self, "front_low_n", 0) + 1
+                        if getattr(self, "front_low_n", 0) >= need_n:
+                            self.step_stop = "obstacle"
+                            self.front_trip = dc
                     else:
                         if not self.front_low_since:
                             self.front_low_since = self.millis() | 1
@@ -925,6 +935,7 @@ class Robot(FollowMixin, DockMixin, E02Mixin):
                             self.front_trip = dc
                 else:
                     self.front_low_since = 0
+                    self.front_low_n = 0
         if self.radio is not None:
             cmd = self.radio.poll(self)
             if cmd and self.handle_command(cmd, True):

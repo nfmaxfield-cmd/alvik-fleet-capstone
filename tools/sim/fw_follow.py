@@ -563,6 +563,19 @@ class FollowMixin:
                 ok = ok and not any(isnan(s[k]) for k in ("handover", "gap", "max_travel"))
                 if n >= 12 and not isnan(num(tok[11])):
                     s["fmin"] = num(tok[11])
+        elif typ == "C" and n >= 8:
+            # follow.h (2026-10-28a): fs <id> C <cx> <cy> <r> <a0> <sweep> <cms> <fmin>
+            for k, key in enumerate(("cx", "cy", "r", "a0", "sweep", "speed")):
+                s[key] = num(tok[2 + k])
+            ok = not any(isnan(s[k]) for k in ("cx", "cy", "r", "a0", "sweep", "speed")) and s["speed"] > 0 \
+                and s["r"] > 0
+            if n >= 9 and not isnan(num(tok[8])):
+                s["fmin"] = num(tok[8])
+        elif typ == "Z" and n >= 3:
+            try:
+                s["dance_ms"] = int(tok[2])
+            except ValueError:
+                ok = False
         elif typ == "W" and n >= 3:
             try:
                 s["wait_ms"] = int(tok[2])
@@ -669,9 +682,85 @@ class FollowMixin:
         self.f_travel = pose.dist - d0
         return True
 
+    def drive_arc(self, s, cont=False):
+        """pose.h driveArc() (firmware 2026-10-28a): round the circle on the own pose. Heading: the circle's tangent
+        plus arc_kr deg per cm of radial error (towards the circle), turn rate fed forward (v / r). Progress: the
+        robot's angle round the centre, unwrapped from the step's a0; it stops at a0 + sweep. cont: the next queued
+        step carries on round the same circle (no slowing at the end)."""
+        P, pose = self.P, self.pose
+        cx, cy, r, sw, vmax = s["cx"], s["cy"], s["r"], s["sweep"], s["speed"]
+        sg = 1.0 if sw >= 0 else -1.0
+        end = s["a0"] + sw
+        phi0 = math.degrees(math.atan2(pose.y - cy, pose.x - cx))
+        prog = s["a0"] + wrap180(phi0 - s["a0"])
+        prev = phi0
+        kr, kh, acc = P("arc_kr"), P("drive_kh"), P("drive_accel")
+        t0 = last = self.millis()
+        limit = 3000 + int(abs(sw) * DEG2RAD * r / max(vmax, 1.0) * 2500.0)
+        v = vmax if cont else 0.0
+        while True:
+            if self.should_abort():
+                return False
+            now = self.millis()
+            dt = (now - last) / 1000.0
+            last = now
+            phi = math.degrees(math.atan2(pose.y - cy, pose.x - cx))
+            prog += wrap180(phi - prev)
+            prev = phi
+            rem = sg * (end - prog) * DEG2RAD * r              # cm still to go round the circle
+            if rem <= v * 0.03 + 0.05:
+                break
+            if now - t0 > limit:
+                self.brake()
+                self.fail = "arc timed out"
+                return False
+            e = math.hypot(pose.x - cx, pose.y - cy) - r       # + = outside the circle
+            h = phi + sg * 90.0 + sg * max(-20.0, min(20.0, kr * e))
+            herr = wrap180(h - pose.th())
+            vt = vmax if cont else min(vmax, math.sqrt(2.0 * acc * max(rem, 0.0)) + 2.0)
+            v = min(vt, v + acc * dt + 0.5)
+            w = sg * math.degrees(v / r) + max(-60.0, min(60.0, kh * herr))
+            self.set_drive(v, w)
+            self.loop_delay(5)
+        if not cont:
+            self.brake()
+        return True
+
+    def dance(self, ms):
+        """follow step Z (firmware 2026-10-28a dance.h): spins, wiggles and lights where it stands, for ms (0 = until
+        stopped). The simulator turns; the lights are not drawn."""
+        t0 = self.millis()
+        moves = [(150.0, 2400), (0.0, 300), (-90.0, 350), (90.0, 350), (-90.0, 350), (90.0, 350), (0.0, 300),
+                 (-150.0, 2400), (0.0, 600)]
+        k = 0
+        while ms <= 0 or self.millis() - t0 < ms:
+            w, d = moves[k % len(moves)]
+            k += 1
+            self.set_drive(0.0, w)
+            t1 = self.millis()
+            while self.millis() - t1 < d:
+                if self.should_abort():
+                    self.brake()
+                    return False
+                self.loop_delay(5)
+        self.brake()
+        return True
+
     def run_step(self, s):
         self.f_info = ""
         t = s["type"]
+        if t == "C":
+            self.front_limit = self.front_limit_for(s["fmin"])
+            if abs(wrap180(s["a0"] + (90.0 if s["sweep"] >= 0 else -90.0) - self.pose.th())) > 20.0:
+                if not self.turn_to_floor(s["a0"] + (90.0 if s["sweep"] >= 0 else -90.0)):
+                    return False
+            d0 = self.pose.dist
+            ok = self.drive_arc(s, cont=s.get("cont", False))
+            self.f_travel = self.pose.dist - d0
+            return ok
+        if t == "Z":
+            self.front_limit = 0.0
+            return self.dance(s.get("dance_ms", 0))
         if t == "T":
             self.front_limit = self.front_limit_for(s["fmin"])
             return self.turn_to_floor(s["h"])
@@ -749,17 +838,23 @@ class FollowMixin:
                 self.loop_delay(5)
                 continue
             s = self.f_q.pop(0)
+            nx = self.f_q[0] if self.f_q else None
+            s["cont"] = bool(s["type"] == "C" and nx is not None and nx["type"] == "C" and
+                             abs(nx["cx"] - s["cx"]) < 0.05 and abs(nx["cy"] - s["cy"]) < 0.05 and
+                             abs(nx["r"] - s["r"]) < 0.05 and (nx["sweep"] >= 0) == (s["sweep"] >= 0))
             self.f_cur = s["id"]
             self.step = s["id"]
             self.f_state = {"T": "turn", "D": "drive", "A": "approach", "W": "wait", "K": "dock",
-                            "P": "touch"}.get(s["type"], "?")
+                            "P": "touch", "C": "arc", "Z": "dance"}.get(s["type"], "?")
             self.f_travel = 0.0
             self.step_stop = ""
             self.fail = ""
             self.bd_reset()
             self.f_report(s["id"], "started", "")
+            self.front_low_n = 0                       # obs_n counts readings within this step (follow.h)
             ok = self.run_step(s)
-            self.brake()
+            if not (ok and s.get("cont")):
+                self.brake()
             self.front_limit = 0.0
             self.front_path = False
             self.front_end_base = -1.0

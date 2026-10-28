@@ -6,11 +6,12 @@
 #define WIFI_SSID     "your-network-name"
 #define WIFI_PASSWORD "your-network-password"
 
-// Optional (firmware 2026-10-27a): a second network, e.g. the school's. The robot tries the first one, then this one,
-// and keeps alternating until one answers, so one flash works at home and at school. Leave these two lines out (or
-// commented) to use only the first network. PLACEHOLDERS: fill in from the school's network details.
-// #define WIFI_SSID2     "school-network-name"
-// #define WIFI_PASSWORD2 "school-network-password"
+// Second network (firmware 2026-10-27a): the school's. The robot tries the first one, then this one, and keeps
+// alternating until one answers, so one flash works at home and at school. The school's network is "ISE" (Nick,
+// 2026-10-27 16:43). Type its password in place of the placeholder below, in YOUR secrets.h only (never in this
+// file: it is in the public repo). Delete or comment out both lines to use only the first network.
+#define WIFI_SSID2     "ISE"
+#define WIFI_PASSWORD2 "type-the-school-password-here"
 
 // Optional. By default the robot broadcasts its logs to every computer on
 // your network, so you don't need your laptop's IP. If your router blocks

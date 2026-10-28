@@ -120,6 +120,42 @@ def stats(v, gate):
                 within_gate_pct=round(100.0 * sum(1 for d in v if d <= gate) / len(v), 1))
 
 
+MISS_GAP_S = 0.25    # two misses further apart in time than this are separate (camera pictures come 8-14 a second, so
+                     # one dropped picture between two misses still joins them). No DOE: a definition
+
+
+def misses(d, ts, gate):
+    """Nick (2026-10-27 18:26, Q14): the pass mark is 95 of 100 camera readings within the gate; also whether the
+    misses come as one-off pictures or runs of several in a row. d, ts: each reading's distance and time, in time
+    order. Returns dict(misses, single, runs, in_runs, longest, longest_s)."""
+    out = dict(misses=0, single=0, runs=0, in_runs=0, longest=0, longest_s=0.0)
+    run, t_first, t_prev = 0, None, None
+
+    def close():
+        if run == 1:
+            out["single"] += 1
+        elif run > 1:
+            out["runs"] += 1
+            out["in_runs"] += run
+        if run > out["longest"]:
+            out["longest"] = run
+            out["longest_s"] = round((t_prev - t_first) if t_first is not None else 0.0, 2)
+    for v, t in zip(d, ts):
+        if v > gate:
+            out["misses"] += 1
+            if run and t - t_prev <= MISS_GAP_S:
+                run += 1
+            else:
+                close()
+                run, t_first = 1, t
+            t_prev = t
+        elif run and t - t_prev > MISS_GAP_S or (run and v <= gate):
+            close()
+            run = 0
+    close()
+    return out
+
+
 def closest_pair(track, r_body=4.75):
     names = sorted(track)
     best = None
@@ -150,6 +186,7 @@ def check(session, bridge, truth=None, gate=GATE_CM, png=None):
         cam = track.get(n, [])
         d = [min(seg_dist((x, y), a, b) for a, b in lines[n]) for _, x, y in cam]
         r = dict(camera=stats(d, gate), sure_share_pct=round(100.0 * len(cam) / max(1, len(allrows.get(n, []))), 1))
+        r["camera"]["misses"] = misses(d, [q[0] for q in cam], gate) if d else None
         if tru and n in tru:
             ts = [q for q in tru[n] if (t0 is None or q[0] >= t0) and (t1 is None or q[0] <= t1)]
             r["truth"] = stats([min(seg_dist((x, y), a, b) for a, b in lines[n]) for _, x, y in ts], gate)
@@ -213,6 +250,11 @@ def main(argv=None):
                    n, c.get("n"), c.get("median_cm"), c.get("p95_cm"), c.get("max_cm"), c.get("within_gate_pct"),
                    a.gate_cm, r["sure_share_pct"], "PASS" if r["pass"] else "FAIL")
         print(line)
+        ms = c.get("misses")
+        if ms and ms["misses"]:
+            print("       misses over %.0f cm: %d (%d one-off pictures, %d runs of several in a row holding %d; longest "
+                  "%d pictures, %.2f s)" % (a.gate_cm, ms["misses"], ms["single"], ms["runs"], ms["in_runs"],
+                                            ms["longest"], ms["longest_s"]))
         if "truth" in r:
             print("       simulator truth: p95 %s cm from its lines; camera spot vs truth median %s / p95 %s cm"
                   % (r["truth"].get("p95_cm"), r["camera_vs_truth"].get("median_cm"), r["camera_vs_truth"].get("p95_cm")))

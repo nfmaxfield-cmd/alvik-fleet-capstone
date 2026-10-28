@@ -296,8 +296,9 @@ SPIN_MEDIAN_N = 9             # chosen: ... and the window reaches back to hold 
 # a camera fix 9 cm off followed).
 OWN_AGREE_CM = 3.0            # Nick's 3 cm: the camera (median of its last 3 pictures) and the robot's own pose this close
 # end it. DOE note: no; the camera's noise at the finds is 0.7-0.8 cm per axis (sensor trust), so 3 cm is ~3 sd
-OWN_TRUST_MAX_S = 90.0        # chosen: at most this long (a route out and back is 60-70 s); after it the camera is used
-# again as before, logged. DOE note: yes, logs: how long the spot takes to come back to the body after an edge stop
+OWN_TRUST_MAX_S = 10.0        # Nick (2026-10-27 18:26, Q17): about 10 s (was 90, a whole route); after it the camera is
+# used again as before, logged. The fleet engine has the same window after a side feel finds a barrier (run_plan.py
+# OWN_POSE_WINDOW_S). DOE note: yes, logs: how long the spot takes to come back to the body after an edge stop
 # (track.csv against own poses, every edge stop)
 # Fix 4: a border rescue whose last forward drive went AWAY from the near edges drives on inward instead of reversing it
 # (stage 2: Right's `go 4` heading 52 deg, away from x = 0 and y = 0, was "reversed" into its own 10 cm border).

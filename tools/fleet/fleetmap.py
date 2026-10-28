@@ -70,7 +70,8 @@ HOME_DOCK_DEFAULTS = {"pocket_w_cm": _dp_cm("POCKET_W_MM", 10.32), "pocket_depth
                       "mouth_cm": 15.0}
 # mouth_cm: where a robot going home stops, facing in: its axle this far in front of the dock mouth
 
-OBSTACLE_SOURCES = ("camera", "distance_sensor", "edge_guard", "user")   # edge_guard: an open plywood edge
+OBSTACLE_SOURCES = ("camera", "distance_sensor", "edge_guard", "user", "robot_out")   # edge_guard: an open plywood edge;
+                                                                                   # robot_out: a robot that went silent
 
 # General workspace (school demo, 2026-10-27; docs/build-plans/mission-control.md): the table's rectangle (floor) plus
 # each side's kind, named spots and no-go zones. Nothing assumes boards. A map without "sides" keeps the old meaning
@@ -327,7 +328,7 @@ def _norm_tasks(t, board_names, rn, spots=None):
             visit.append({"goto": list(spots[nm]), "spot": nm})
         elif isinstance(it, dict) and "goto" in it:
             g = {"goto": _pt(it["goto"], "robot %s goto" % rn)}
-            for k in ("spot", "label", "lane", "end"):
+            for k in ("spot", "label", "lane", "end", "run_in_cm", "risky"):
                 if k in it:
                     g[k] = it[k]
             visit.append(g)
@@ -339,6 +340,24 @@ def _norm_tasks(t, board_names, rn, spots=None):
         elif isinstance(it, dict) and "until_s" in it:
             # stand still until this time (s from the mission's start): a show's beat targets (missions.py)
             visit.append({"until_s": float(it["until_s"]), **({"label": str(it["label"])} if it.get("label") else {})})
+        elif isinstance(it, dict) and "arc" in it:
+            # a drive round a circle (Monday's circle; planner.py _arc_visit): {"arc": {"c": [x, y], "r": cm, "a0_deg":
+            # where on the circle it starts, "sweep_deg": + anticlockwise}}
+            a = it["arc"]
+            try:
+                arc = {"c": [float(a["c"][0]), float(a["c"][1])], "r": float(a["r"]), "a0_deg": float(a["a0_deg"]),
+                       "sweep_deg": float(a["sweep_deg"])}
+            except (KeyError, TypeError, ValueError, IndexError):
+                raise MapError("robot %s: arc needs c [x, y], r, a0_deg and sweep_deg" % rn)
+            if arc["r"] <= 0:
+                raise MapError("robot %s: arc radius must be > 0" % rn)
+            visit.append({"arc": arc, **({"label": str(it["label"])} if it.get("label") else {})})
+        elif isinstance(it, dict) and "dance" in it:
+            # dance where it stands (firmware follow step Z): seconds, 0 = until switched off
+            visit.append({"dance": float(it["dance"]), **({"label": str(it["label"])} if it.get("label") else {})})
+        elif isinstance(it, dict) and "sync" in it:
+            # a meet point: the next step waits for every robot with the same sync id (planner._sync_after)
+            visit.append({"sync": str(it["sync"]), **({"label": str(it["label"])} if it.get("label") else {})})
         elif isinstance(it, dict) and "probe" in it:
             # a slow straight creep (the warm-up's side feel): from (x0, y0) towards (x1, y1), which may be past the
             # table's edge; it ends at the first edge-guard trip or front-sensor stop (tools/fleet/warmup.py)
