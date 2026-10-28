@@ -408,6 +408,40 @@ standstill rule STILL_WIN_S 0.5 / STILL_CM 0.25 / STILL_DEG 2 (applied to plan a
 reported), OUT_T_S 100 (one moment; the outcome is the same in kind after the show), REF_RANGE_CM 262 (the home
 camera's height, where the simulator's 0.3 cm noise comes from).
 
+## One system (2026-10-28, built)
+
+Write-up: [e02-oct28-one-system.md](build-reports/e02-oct28-one-system.md). Code comments carry the same notes:
+`tools/fleet/engine_checks.py`, `run_plan.py`, `planner.py`, `missions.py`, `trackfarm.py`, `tools/pi/charuco_calib.py`,
+firmware 2026-10-28a.
+
+| Setting | Chosen | DOE | Where | Status |
+|---|---|---|---|---|
+| The safety net: refuse a plan under (engine_checks MIN_GAP_CM, run_plan --min-gap-cm) | 8 cm (Nick) | 8 / 7 / 6 cm: the camera's closest approach over 10 Chickens and 10 crossings against the plan's (Nick wants to narrow it this week) | Board | open |
+| Distance-sensor readings in a row before a stop (firmware obs_n, run_plan --obstacle-readings) | 2 (Nick) | 1 / 2 / 3 against phantom stops on empty plywood (5 in the 27 Oct ladder) and the stop distance from a real brick at 10 cm/s (~0.7 cm per reading); the DOE loop's sensor_runs.csv answers the phantom half without robot time | Logs, then Board | open |
+| A robot not heard for this long is out (engine_checks SILENT_S) | 4 s | 3 / 4 / 6 s in the simulator with 5 % and 15 % packet loss and 1-4 s WiFi drops, against false "out" calls and the others' standstill | Sim | open |
+| Today's warm-up ratio applied to the corrections only within (WARMUP_SCALE_MAX) | 5 % | The warm-up's measured ratio against L2's turn check on the same robots over 3 days | Logs | open |
+| Allowed drift before the next camera heading: ordinary / risky leg (OPEN_DRIFT_CM, RISKY_DRIFT_CM) | 3 / 1.5 cm | 1 / 1.5 / 2 cm (risky) against confirm crawls that fail (time) and Chicken's closest approach by the camera | Sim, then Board | open |
+| Distance to the next camera heading (NEXT_FIX_CM) | 10 cm | Logs: distance from each drive's start to its first fix with a heading (ladder L3/L4, DOE loop drives) | Logs | open |
+| Line a start heading is read from, when not known (START_LINE_CM) | 10 cm | Logs: the line lengths behind the start headings of ladder L3-L5 against their first-leg cross-track error | Logs | open |
+| Run-in speed (planner confirm_cms) | 5 cm/s | 3 / 5 / 7.5 cm/s against the camera heading's spread at the run-in's end and the time Monday's run-ins add | Logs, then Board | open |
+| Arc speed (planner arc_cms) | 8 cm/s | 6 / 8 / 10 cm/s on the board: the camera's radial error round the circle against the time | Board | open |
+| The circle's radius (missions CIRCLE_R_CM) | 15 cm | 12 / 15 / 18 cm: closest approach and radial error by the camera, and how it looks | Board | open |
+| The arc's steering towards the circle (firmware arc_kr) | 2 deg per cm | 1 / 2 / 4 deg per cm against the radial error (the simulator holds 0.15 cm with 2) | Sim, then Board | open |
+| The meet time's slack after the later robot's arrival (MEET_SLACK_S) | 3 s | 1 / 3 / 6 s against the plan's waits at the meet | Sim (planner only) | open |
+| Full-picture scan every (trackfarm ROI_EVERY) | 8 pictures | 4 / 8 / 16 against the cost per picture and the time to find a new object (brick drops) and identity swaps (crossings) | Sim + Logs | open |
+| Window half-size round each robot (ROI_SCALE) | 2.2 robot widths | 1.6 / 2.2 / 3.0 against "missed" verdicts in windowed pictures (replay) and the cost | Logs | open |
+| With every robot still, track one picture in (STILL_EVERY) | 5 | 3 / 5 / 10 against how late a robot that starts moving is first seen moving (replay) | Logs | open |
+| Track at half size (HALF) | off | 320 x 240 against 640 x 480 on the replay: position error against the full-size tracker and the cost (bench_trackfarm.py measures both) | Logs | open |
+| The chessboard corner piece (charuco_calib CHECK_SQUARES, CHECK_CM) | 5 x 7 squares of 3.8 cm (letter) | Nick's own: 3 board sizes against pose accuracy (the lens heights against a tape, the two cameras' spot of the same robot) | Board | open |
+
+Chosen with no DOE: the battery floor 25 % (a floor), the 10 s own-pose window after a barrier find (Nick), 3 read-back
+rounds and the 2 s re-ping (retry counts), the 20 s status poll and 0.5 s live.json (display rates), the run-in's 6 cm
+least and its 1 cm / 10 deg "already on the line" (geometry), arc pieces of 30 deg and ARC_ON 1.5 cm / 15 deg
+(geometry), the dance planned as 10 s then held for good (the plan's own length), MISS_GAP_S 0.25 s (a definition),
+LONG_LEG_CM 40 and RISK_ROOM_CM 6 (geometry), STILL_CMS 0.3 cm/s and STILL_GREY 2 (noise), ROI_MOVE_S 0.25 s (a
+margin), the brightness line every 10 s (a log period), PLAN_LIMIT_S 60 s and BRIDGE_START_S 5 s (limits), the
+Monday mission's quarters (Claude's reading of "mid-mow": Nick's call).
+
 ## Already set by data
 
 - **Line edge cue edge_thr 150** (e02.py SAFETY_SETTINGS): plywood reads 52-84 in every E02 session, the two real
