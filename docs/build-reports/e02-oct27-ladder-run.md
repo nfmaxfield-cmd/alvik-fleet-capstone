@@ -219,3 +219,106 @@ Scripts were in scratch: the AVI parts indexed by their `00dc` chunks; frame num
 the restart anchor; robot spots projected with the 12:58 calibrations (`overhead_floorcal_20261027-125803.json`,
 `side_floorcal_20261027-125812.json`). The overhead light change is the median of 18-25 pictures with the lights on
 minus 18-40 with them off, as `locate_light` does it. The videos were deleted after use.
+
+## Logs-only follow-up (2026-10-28 overnight): line-check misses and the phantom stops
+
+**Premise.** Two of Nick's questions, answered from the same logs (release `p0-20261027-ladder-pm`, no robot time):
+(1) in each drive's line check, are the camera readings over 3 cm single pictures or runs of consecutive pictures?
+(2) would the new distance-sensor rule (firmware 2026-10-28a, `obs_n` = 2: two NEW readings in a row inside the path
+and too close, counted from each step's start) have avoided each of the five phantom stops? Script:
+`tools/analysis/ladder_misses_phantoms.py <unzipped 20261027-ladder>` (it also draws the two charts).
+
+### Data
+
+**1. Line-check misses, the five planner drives (934 camera readings).**
+
+![Misses per drive](../screenshots/2026-10-28/ladder-misses-per-drive-single-vs-runs.png)
+
+Each dot is one camera reading's distance from the robot's planned lines, coloured by what the robot was doing; only Right's L3 crosses the 3 cm line, and mostly at its turn-around point.
+
+| Drive | Readings | p95 | Over 3 cm | One-off pictures | In runs | Longest run |
+|---|---|---|---|---|---|---|
+| L3 Left | 72 | 0.91 cm | 0 | 0 | 0 | - |
+| L3 Center | 348 | 1.88 | 0 | 0 | 0 | - |
+| L3 Right | 228 | 3.11 | 15 | 4 | 11 (one run) | 11 pictures, 0.88 s |
+| L4 room (Center) | 201 | 2.29 | 0 | 0 | 0 | - |
+| L4 start (Left, 14:30) | 85 | 1.62 | 0 | 0 | 0 | - |
+
+<sub>A run = misses less than 0.25 s apart (line_check MISS_GAP_S); pictures came every 0.08 s (median). The 15:27 L4
+folder has camera readings but no drive (start-up failed), so it is left out.</sub>
+
+Right's 15 misses: the run of 11 (3.12-3.68 cm) is the turn on the spot at the turn-around point (66, 60), 10.3-11.2 s;
+one single picture 0.2 s later is the tail of the same stretch (3.45 cm, as the next drive began, with one reading
+under 3 cm between); the other three singles are its first turn (3.10 cm) and the parking turn (3.11, 3.08 cm). Every
+miss is at a turn or within 0.2 s of one; none while driving a line away from a turn. The distance builds up over
+several seconds before the turn-around (1.5 cm at 8 s to 3.6 cm at 11 s), so these are not camera glitches.
+
+**2. The five phantom stops, replayed.**
+
+![Readings round each stop](../screenshots/2026-10-28/ladder-phantom-stops-readings-around-each-stop.png)
+
+Each dot is one new distance-sensor reading (the nearest thing inside the robot's path); red ones are under the 12 cm
+limit. Left's stops sit in long trains of red readings; Center's sit in readings hovering just above the line.
+
+| Stop (robot clock) | Robot, step | New readings in the stopped step before the stop | Under 12 cm | With 2 in a row (`obs_n` 2) | With 3 in a row |
+|---|---|---|---|---|---|
+| 14:25:12.4 | Left, L3 | 7 (0.34 s) | 3 | **still stops**, 0.2 s earlier (11.1 then 11.3 cm) | avoided (in the 1 s logged after) |
+| 14:25:15.6 | Left, L3 (re-planned drive) | 1 (6 ms) | 1 | **still stops**, 0.06 s later | still stops, 0.12 s later |
+| 14:27:06.5 | Center, L3 | 13 (0.66 s) | 1 | **avoided** | avoided |
+| 14:29:57.2 | Center, L4 room | 1 (6 ms) | 1 | **still stops**, 0.8 s later (the robot stood still then) | avoided |
+| 14:30:31.8 | Left, L4 start (the 14:30 refusal) | 2 (0.11 s) | 1 | **still stops**, 0.05 s later | still stops, 0.11 s later |
+
+<sub>Replay of firmware/home_lab/motion.h shouldAbort() + frontInPath(): a reading is new when any zone changed; the
+in-path distance takes each zone at 22 / 11 / 0 / -11 / -22 deg within path_half_cm 5.25; limit 12 cm (follow_look_cm;
+the five trips read 11.0-11.9). The trip reading is the one whose in-path distance equals the reported trip value.
+After a stop the robot stood still, so "later" uses a standing robot's readings as if it had driven on.</sub>
+
+Per robot over the whole afternoon (every new reading, L0 standing and L3/L4 driving): Left's centre-right zone read
+under 12 cm in **32 % (standing) and 40 % (driving)** of its readings; every other zone on every robot, 0-5 %.
+
+### Conclusion
+
+- **Misses come as one stretch, not as scattered single pictures:** one run of 11 pictures (0.88 s) at Right's
+  turn-around, plus 4 borderline singles at turns. Every miss is at a turn on the spot; the four other drives had none.
+- **Two in a row would have avoided 1 of the 5 phantom stops** (Center, 14:27) and delayed one by 0.8 s. The three
+  Left stops would still have happened: Left's centre-right zone reads 10-12 cm in trains of readings, not single
+  flickers. *Claude's reading: a fault on Left's sensor (its centre-right zone sees something at ~11 cm a third of the
+  time, standing or driving), not random noise; three in a row would still not cure it.*
+- Two stops came 6 ms into a new drive, after one new reading. With the old 100 ms rule that is only possible if the
+  timer started in the step before. *Claude's reading: firmware 2026-10-25c did not restart the front-stop timer at a
+  step's start (`gFrontLowSince` is reset only while a limit is set); 2026-10-28a's `obs_n` count does restart at each
+  step, but the old timer path (obs_n 0) still carries over.*
+- Center's readings hover at 12.4-15 cm in several zones while driving on empty plywood: 0.4-3 cm above the limit.
+
+### What's next
+
+1. **Left's distance sensor:** look at its window (smudge, scratch, a cable or part in the lower right of its view);
+   then 2 min standing on empty plywood, Left against Right: share of centre-right readings under 12 cm (now 32 %
+   against 4.5 %). If it stays, Left's centre-right zone needs ignoring or a higher bar.
+2. **Firmware (not changed here):** reset `gFrontLowSince` at each step's start in follow.h, beside `gFrontLowN = 0`
+   (one line; matters only with obs_n 0).
+3. **The line check at turns:** the Phase 0 question 39 stands (leave turn-on-the-spot samples out of the 3 cm gate);
+   these logs say that would leave Right's L3 with 0 misses over 3 cm while driving lines.
+4. The `obs_n` DOE row (1 / 2 / 3): from these logs 2 avoids 1 of 5 stops and 3 avoids 3 of 5; the real-brick half
+   (stop distance) still needs board time.
+
+### Sweep 1: new tests that may now be needed
+
+- Left's sensor, standing still and driving, before and after cleaning its window (above).
+- Center's sensor on empty plywood: why several zones read 13-15 cm (floor seen by a nose-down sensor?), with the
+  robot on a level spot and on the board's seam.
+- After the firmware line: a dry run (simulator) where a reading under the limit comes just before a step ends, then
+  the next drive starts: no stop on its first reading.
+- The line check with turns left out, on every later real run (Phase 0 gate re-read).
+
+### Sweep 2: possible inaccuracies in what this relied on
+
+- **The limit is taken as 12 cm throughout.** Near a step's end the firmware lowers it to the distance left + 2 cm,
+  which raw.csv does not record; a lower limit would only make fewer readings count.
+- **The zone directions** (22 / 11 / 0 / -11 / -22 deg) are the firmware's own assumption ("to be checked"); Center's
+  readings sit within 1 cm of the limit, so a different angle could flip the Center verdicts both ways.
+- **Matching raw.csv to the stop:** the trip reading is matched by value (0.1 cm) nearest the report; the raw rows'
+  times did not line up with a 100 ms confirm in 3 of 5 stops (see the timer reading above), so the timing inside a
+  step is uncertain by about one reading (60 ms).
+- **"As if it drove on"** uses readings from a robot that had stopped; a moving robot may see different readings.
+- **One afternoon, one board:** 2,600-3,200 new readings per robot, most of them standing.
