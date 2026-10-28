@@ -488,6 +488,7 @@ class DoeLoop(LD.Ladder):
         self.sim_fall = 0.0
         self.ended = None             # "disk": the loop ended because the card was nearly full
         self.row_err = False
+        self.last_held = None
 
     # -- csv files ----------------------------------------------------------------------------------------------
     def row(self, name, d):
@@ -718,6 +719,8 @@ class DoeLoop(LD.Ladder):
             ok, res = self.turncheck(n, sub)
         except LadderStop as e:
             self.frames_off()
+            if not lost_words(str(e)) and getattr(e, "evidence", "both") != "both":
+                return self.hold(n, "turn check could not finish: %s" % e, e.evidence)
             self.park(n, "turn check could not finish: %s" % e, safety=lost_words(str(e)))
             return False
         self.frames_off()
@@ -726,9 +729,23 @@ class DoeLoop(LD.Ladder):
                                    own_deg=r["own_deg"], error_deg=r["error_deg"], total_error_deg=res["total_error_deg"],
                                    pass_=ok, battery_pct=(self.bench.fw.get(n) or ("", ""))[1] if self.bench else ""))
         if not ok:
-            self.park(n, "turn check FAIL (errors %s, total %+.1f deg)" % (
-                ", ".join("%+.1f" % r["error_deg"] for r in res["turns"]), res["total_error_deg"]))
+            why = "turn check FAIL (errors %s, total %+.1f deg)" % (
+                ", ".join("%+.1f" % r["error_deg"] for r in res["turns"]), res["total_error_deg"])
+            if res.get("one_camera"):
+                return self.hold(n, why, ", ".join(res.get("evidence") or []))
+            self.park(n, why)
         return ok
+
+    def hold(self, n, why, evidence):
+        """Never set aside on one camera's evidence (Nick, 2026-10-28): the robot stays in, skips this loop's drive,
+        and is turn checked again at its next turn. Returns False (no drive now)."""
+        self.st["doe"].setdefault("turn_due", {})[n] = True
+        self.st["robots"].get(n, {}).pop("h", None)
+        self.last_held = n
+        self.save()
+        self.event("held", n, "%s; seen by one camera only (%s): held, not set aside; checked again next time" % (
+            why, evidence))
+        return False
 
     # -- one drive ----------------------------------------------------------------------------------------------
     def drive(self, sub, n, i, k):
@@ -743,6 +760,10 @@ class DoeLoop(LD.Ladder):
                 h, _ = self.crawl(n, self.eye.still(n) or p, None)
             except LadderStop as e:
                 self.frames_off()
+                if not lost_words(str(e)) and getattr(e, "evidence", "both") != "both" and \
+                        not getattr(self.a, "keep_going", False):
+                    self.hold(n, "heading crawl: %s" % e, e.evidence)
+                    return "held"
                 self.park(n, "heading crawl: %s" % e, safety=lost_words(str(e)))
                 h = getattr(e, "heading", None)
                 if not getattr(self.a, "keep_going", False) or lost_words(str(e)):
@@ -960,8 +981,11 @@ class DoeLoop(LD.Ladder):
                     if not self.check(sub, [n], "%s's turn check" % n):
                         raise LadderStop(None)
                     say("  %s: turn check (drive %d is next)" % (n, i + 1))
+                    self.last_held = None
                     if not self.turn(sub, n, k) and n in self.st["kept_out"]:
                         raise LadderStop(None)
+                    if self.last_held == n and not getattr(self.a, "keep_going", False):
+                        raise LadderStop(None)          # held: no drive this loop, turn checked again next time
                 if not self.check(sub, [n], "%s's drive" % n):
                     raise LadderStop(None)
                 out = self.drive(sub, n, i, k)

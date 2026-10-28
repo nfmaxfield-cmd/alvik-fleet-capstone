@@ -267,3 +267,43 @@ def test_lost_words():
     assert D.lost_words("drive 1 did not finish (edge stop)")
     assert not D.lost_words("the camera saw Left crawl 15.0 cm (it was sent 10 cm): the camera or its wheels are wrong")
     assert not D.lost_words("turn check FAIL (errors +3.9)")
+
+
+def test_one_camera_turn_fail_is_held_not_parked(tmp_path):
+    """Never set aside on one camera's evidence (Nick, 2026-10-28): a turn-check FAIL whose headings came from one
+    camera is held (turn check due again, no drive this loop); with both cameras it parks as before."""
+    L = _loop_stub(tmp_path, False)
+    L.st["robots"] = {"Center": {"h": 10.0}}
+    L.frames_on = L.frames_off = lambda *a: None
+    res = dict(turns=[dict(turn=1, camera_deg=97.9, own_deg=89.7, error_deg=7.9)], total_error_deg=4.3,
+               one_camera=True, evidence=["side", "side", "both", "side", "side"])
+    L.turncheck = lambda n, sub: (False, res)
+    L.row = lambda *a, **k: None
+    assert L.turn(str(tmp_path), "Center", 2) is False
+    assert "Center" not in L.st["kept_out"] and L.st["doe"]["turn_due"]["Center"] and L.last_held == "Center"
+    assert "h" not in L.st["robots"]["Center"]
+    res2 = dict(res, one_camera=False, evidence=["both"] * 5)
+    L.turncheck = lambda n, sub: (False, res2)
+    L.last_held = None
+    L.turn(str(tmp_path), "Center", 3)
+    assert "Center" in L.st["kept_out"]
+
+
+def test_one_camera_crawl_fail_is_held(tmp_path, monkeypatch):
+    L = _loop_stub(tmp_path, False)
+    L.st["robots"] = {"Left": {"x": 88.0, "y": 42.0}}
+    L.frames_on = L.frames_off = lambda *a: None
+    L.pos = lambda n: (88.0, 42.0)
+    L.heading = lambda n: None
+    L.need_bench = L.need_eye = lambda *a: None
+    L.eye = types.SimpleNamespace(still=lambda n: None)
+
+    def crawl(n, p, h):
+        e = LD.LadderStop("the camera saw Left crawl 15.0 cm (it was sent 10 cm): the camera or its wheels are wrong")
+        e.evidence, e.heading = "side", -88.0
+        raise e
+    L.crawl = crawl
+    assert L.drive(str(tmp_path), "Left", 1, 4) == "held"
+    assert "Left" not in L.st["kept_out"]
+    ev = open(os.path.join(str(tmp_path), "events.csv")).read()
+    assert "held" in ev and "one camera only (side)" in ev

@@ -434,6 +434,19 @@ class Eye:
             self.still_why = "camera tracking is %.1f s behind the camera" % b
         return None
 
+    def sources(self, name, t0, t1):
+        """{camera word: sightings} of the robot's sure body sightings between t0 and t1 (tracker time):
+        'both', 'overhead', 'side' (and 'lights')."""
+        out = {}
+        if not self.trk:
+            return out
+        with self.trk.lock:
+            tr = self.trk.tracks.get(name)
+            for q in (tr.hist if tr else []):
+                if t0 <= q[0] <= t1 and q[3] == "seen" and len(q) > 4 and q[4]:
+                    out[q[4]] = out.get(q[4], 0) + 1
+        return out
+
     def seen_by(self, name, s=1.5):
         """Which camera saw it over the last s: 'both', 'overhead', 'side', 'lights' (the most frequent), or None."""
         if not self.trk:
@@ -1103,8 +1116,13 @@ class Ladder:
         return bool(done)
 
     # -- L2: the turn check --------------------------------------------------------------------------
-    def crawl(self, n, p0, h_known):
-        """Out and back CRAWL_CM, the camera watching: (heading deg, details) or raises LadderStop."""
+    def crawl(self, n, p0, h_known, retry=True):
+        """Out and back CRAWL_CM, the camera watching: (heading deg, details) or raises LadderStop.
+        A distance off by more than 40 % is crawled AGAIN once before it counts (2026-10-28): the first crawl starts
+        where the robot stood when tracking began, on floor that was filled in, and its outline there is a piece,
+        off its middle. Replays of 27-28 Oct: first crawls read 12-18 cm on the overhead and 10-13 cm on the side for
+        9.8 cm; later crawls of the same robots read 9.5-12.2 cm. The error says which camera(s) saw it
+        (err.evidence: 'both' or one camera's name)."""
         bench, eye = self.bench, self.eye
         sign = 1
         if h_known is not None:
@@ -1126,10 +1144,19 @@ class Ladder:
         pts = eye.trk.history(n, t0, t1)
         h = line_fit_heading(pts, p0, p1)
         moved = math.dist(p0, p1)
+        src = eye.sources(n, t0 - 1.0, t1) if hasattr(eye, "sources") else {}
+        body = {k: v for k, v in src.items() if k in ("both", "overhead", "side")}
+        tot = sum(body.values())
+        evidence = "both" if tot and body.get("both", 0) >= 0.5 * tot else (max(body, key=body.get) if body else "lights")
+        if (h is None or not (0.6 * CRAWL_CM <= moved <= 1.4 * CRAWL_CM)) and retry:
+            say("    %s: the camera saw it crawl %.1f cm for %.0f (%s): crawling again to re-check" % (
+                n, moved, CRAWL_CM, "both cameras" if evidence == "both" else "%s only" % evidence))
+            return self.crawl(n, p2, h_known if h is None else (wrap180(h + 180.0) if sign < 0 else h), retry=False)
         if h is None or not (0.6 * CRAWL_CM <= moved <= 1.4 * CRAWL_CM):
             err = LadderStop("the camera saw %s crawl %.1f cm (it was sent %.0f cm): the camera or its wheels are "
                              "wrong" % (n, moved, CRAWL_CM))
             err.heading = None if h is None else (wrap180(h + 180.0) if sign < 0 else h)   # (doe_loop --keep-going)
+            err.evidence = evidence
             raise err
         if sign < 0:
             h = wrap180(h + 180.0)
@@ -1138,6 +1165,7 @@ class Ladder:
         bench.send(n, "fix %.2f %.2f %.2f %.3f" % (p2[0], p2[1], h, time.time()))
         time.sleep(0.3)
         return h, dict(crawl_cm=round(moved, 2), back_off_cm=round(math.dist(p0, p2), 2), pictures=len(pts),
+                       evidence=evidence, sources=src,
                        end=[round(p2[0], 2), round(p2[1], 2)], own_th_before_fix=r2[3])
 
     def turncheck(self, n, sub):
@@ -1181,15 +1209,20 @@ class Ladder:
             bench.send(n, "set e02_cms %.1f" % NORMAL_CMS)
         total = wrap180(heads[-1] - heads[0])
         signs = {1 if r["camera_deg"] > 0 else -1 for r in rows}
+        evid = [d0.get("evidence", "both")] + [r["crawl"].get("evidence", "both") for r in rows]
+        one_camera = any(e != "both" for e in evid)
         ok = all(abs(r["error_deg"]) <= TURN_TOL_DEG for r in rows) and abs(total) <= TOTAL_TOL_DEG and len(signs) == 1
         q = eye.still(n) or p
         self.set_pose(n, q[0], q[1], heads[-1], "turn check crawl")
         res = dict(robot=n, turns=rows, total_error_deg=round(total, 1), start_heading=round(h0, 1),
-                   pass_=ok, tol_turn_deg=TURN_TOL_DEG, tol_total_deg=TOTAL_TOL_DEG)
+                   pass_=ok, tol_turn_deg=TURN_TOL_DEG, tol_total_deg=TOTAL_TOL_DEG, evidence=evid,
+                   one_camera=one_camera)
         with open(os.path.join(sub, "turncheck-%s.json" % n), "w") as f:
             json.dump(res, f, indent=1)
         say("    after 4 turns it faces %+.1f deg from where it started (allowed %.0f); each turn allowed %.0f deg "
-            "-> %s" % (total, TOTAL_TOL_DEG, TURN_TOL_DEG, "PASS" if ok else "FAIL"))
+            "-> %s%s" % (total, TOTAL_TOL_DEG, TURN_TOL_DEG, "PASS" if ok else "FAIL",
+                         "" if not one_camera else " (headings from one camera in %d of 5 crawls: %s)" % (
+                             sum(e != "both" for e in evid), ", ".join(evid))))
         return ok, res
 
     def L2(self, sub, names):
@@ -1200,10 +1233,14 @@ class Ladder:
                 good, res = self.turncheck(n, sub)
             except LadderStop as e:
                 say("    %s: %s" % (n, e))
-                good, res = False, dict(error=str(e))
+                good, res = False, dict(error=str(e), exc=e)
             if good:
                 self.st["passed"]["L2:%s" % n] = round(time.time())
                 ok.append(n)
+            elif res.get("one_camera") or getattr(res.get("exc"), "evidence", "both") != "both":
+                # never set aside on one camera's evidence (Nick, 2026-10-28): held, not kept out
+                say("  %s: HELD, not kept out: the FAIL rests on one camera's view (%s). It stays in; check it again "
+                    "when both cameras see it." % (n, ", ".join(res.get("evidence") or [res["exc"].evidence])))
             else:
                 why = res.get("error") or "turns off (%s; total %+.1f deg)" % (
                     ", ".join("%+.1f" % r["error_deg"] for r in res["turns"]), res["total_error_deg"])

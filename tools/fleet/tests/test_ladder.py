@@ -134,3 +134,30 @@ def test_sim_lights_starts_and_turn_error(tmp_path):
     finally:
         for rb in sim.robots.values():
             rb.radio.sock.close()
+
+
+def test_crawl_rechecks_once_before_failing(monkeypatch):
+    """2026-10-28: a first crawl that reads 15 cm for 10 (the start spot's floor was filled in: a piece of the robot,
+    off its middle) is crawled again; the second reading (10.4 cm) counts. Two bad readings raise, naming the
+    camera(s) that saw it."""
+    import types
+    monkeypatch.setattr(LD.time, "sleep", lambda s: None)
+    L = LD.Ladder.__new__(LD.Ladder)
+    L.rect = (0.0, 0.0, 122.0, 122.0)
+    L.others_of = lambda n: {}
+    sent = []
+    L.bench = types.SimpleNamespace(leg=lambda n, t, to: ("done", 0, 0, 0.0, ""), send=lambda n, c: sent.append(c))
+
+    def eye_for(stills):
+        it = iter(stills)
+        return types.SimpleNamespace(
+            still=lambda n: next(it),
+            trk=types.SimpleNamespace(history=lambda n, a, b: [(i, 50.0 + i, 50.0) for i in range(8)]),
+            sources=lambda n, a, b: {"side": 30, "both": 2})
+    L.eye = eye_for([(65.0, 50.0), (50.0, 50.0), (60.4, 50.0), (50.0, 50.0)])
+    h, d = L.crawl("Left", (50.0, 50.0), None)
+    assert d["crawl_cm"] == pytest.approx(10.4) and d["evidence"] == "side" and abs(h) < 1e-6
+    L.eye = eye_for([(65.0, 50.0), (50.0, 50.0), (65.0, 50.0), (50.0, 50.0)])
+    with pytest.raises(LD.LadderStop) as e:
+        L.crawl("Left", (50.0, 50.0), None)
+    assert e.value.evidence == "side" and "15.0 cm" in str(e.value)
