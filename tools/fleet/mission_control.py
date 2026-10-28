@@ -496,6 +496,49 @@ class Session:
             self.last_frames[cam] = out.tobytes()
         return out.tobytes() if ok else None
 
+    def lighting(self):
+        """The lighting check (lighting.py) on each camera's newest picture: does each camera see the robots against
+        the board? Plain words per camera ("overhead camera washed out: ... close the blinds ..."), and the
+        recorder's exposure changes (camrec WashoutGuard) since it started."""
+        import cv2
+        import numpy as np
+        import lighting as LG
+        sys.path.insert(0, os.path.join(os.path.dirname(HERE), "experiment"))
+        import e02_camera as CAM
+        run = self.run
+        sim = getattr(run, "mode", "") == "sim-cameras" if run else False
+        out = dict(cameras=[], exposure=[], t=round(time.time(), 1))
+        n_rob = len((self.map or {}).get("robots") or []) or None
+        for cam in ("overhead", "side"):
+            if sim:
+                port = 8765 if cam == "overhead" else 8766
+                cal = os.path.join(run.session, "sim", "table_camera.json" if cam == "overhead" else "side_camera.json")
+            else:
+                port = 8000 if cam == "overhead" else 8001
+                sys.path.insert(0, os.path.join(os.path.dirname(HERE), "pi"))
+                import setup_conf as SCF
+                cal = SCF.overhead_calib(relative=False) if cam == "overhead" else (SCF.side_calib() or None)
+                if isinstance(cal, tuple):
+                    cal = cal[0]
+            jpg = grab_jpeg("127.0.0.1", port)
+            if jpg is None or not cal or not os.path.exists(cal):
+                out["cameras"].append(dict(camera=cam, verdict="no picture", words="%s camera: no picture (%s)" % (
+                    cam, "is the recorder running?" if jpg is None else "no calibration saved")))
+                continue
+            img = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_GRAYSCALE)
+            m = LG.measure(img, CAM.load_camera(cal), z=CAM.ROBOT_TOP_CM if cam == "overhead" else
+                           0.5 * CAM.ROBOT_TOP_CM, name=cam, n_robots=n_rob)
+            out["cameras"].append(m)
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(HERE), "pi"))
+            import camrec as CR
+            with open(CR.EXPOSURE_LOG) as f:
+                out["exposure"] = [ln.strip().split(",", 1) for ln in f.readlines()[-5:]]
+        except Exception:      # noqa: BLE001  (no recorder change yet)
+            pass
+        self.last_lighting = out
+        return out
+
     def mapping(self):
         """The engineer's mapping view for the current or last run: each robot's camera track in its colour over the
         table, contacts from the warm-up if there were any (mapview.py)."""
@@ -824,6 +867,8 @@ class Handler(BaseHTTPRequestHandler):
                 cam = (parse_qs(urlparse(self.path).query).get("cam") or ["overhead"])[0]
                 b = S.frame(cam)
                 return self._send(200, b, "image/jpeg") if b else self._send(404, {"error": "no picture"})
+            if path == "/api/lighting":
+                return self._send(200, clean(S.lighting()))
             if path == "/api/mapping":
                 return self._send(200, S.mapping())
             if path == "/api/setup":

@@ -999,6 +999,49 @@ class Ladder:
             say("  " + w)
         return found
 
+    def lighting_check(self, sub, spots):
+        """Before anything moves (Nick, 2026-10-28): does each camera see the robots against the board? lighting.py
+        on the newest picture of each camera, at the robots' spots; plain words per camera, lighting.json in sub, and
+        the recorder's exposure changes (its washout guard) so far. Says; never stops on its own (a robot neither
+        camera sees is still kept out by find_all)."""
+        eye = self.eye
+        if eye is None or not spots:
+            return None
+        try:
+            import lighting as LG
+            out = []
+            with eye.lock:
+                o = list(eye.frames)[-1][0] if eye.frames else None
+                sd = list(eye.side_frames)[-1][0] if eye.side_frames else None
+            if o is not None:
+                out.append(LG.measure(o, eye.cam, rect=self.rect, spots=spots, name="overhead"))
+            if sd is not None and eye.side_cam is not None:
+                out.append(LG.measure(sd, eye.side_cam, rect=self.rect, spots=spots, z=0.5 * eye.CAM.ROBOT_TOP_CM,
+                                      name="side"))
+            say("Lighting check (before anything moves):")
+            for m in out:
+                say("  %s%s" % ("" if m["verdict"] == "ok" else "WARNING: ", m["words"]))
+            if out and all(m["verdict"] == "washed out" for m in out):
+                say("  Neither camera sees the robots well: expect robots kept out below. Fix the light, then run "
+                    "this step again.")
+            try:
+                sys.path.insert(0, os.path.join(TOOLS, "pi"))
+                import camrec as CR
+                with open(CR.EXPOSURE_LOG) as f:
+                    for ln in f.readlines()[-3:]:
+                        say("  recorder: %s" % ln.strip().split(",", 1)[-1])
+            except Exception:      # noqa: BLE001  (no exposure change logged)
+                pass
+            with open(os.path.join(sub, "lighting.json"), "w") as f:
+                json.dump(out, f, indent=1)
+            self.st["lighting"] = {m["camera"]: dict(verdict=m["verdict"], min_contrast=m["min_contrast"])
+                                   for m in out}
+            self.save()
+            return out
+        except Exception as e:      # noqa: BLE001  (a check must never stop the ladder)
+            say("  (lighting check not done: %s)" % e)
+            return None
+
     def others_of(self, n):
         return {m: self.pos(m) for m in self.st["robots"] if m != n and self.pos(m)}
 
@@ -1042,6 +1085,7 @@ class Ladder:
         say("Finding each robot by its lights (nothing moves) ...")
         heard = sorted(bench.robots(), key=lambda q: PREFER.index(q) if q in PREFER else 9)
         found = self.find_all(sub, heard)        # every robot heard, kept out or not: the planner must know where
+        self.lighting_check(sub, [self.pos(n) for n in heard if self.pos(n) is not None])
         ignore = [q.strip() for q in (self.a.ignore or "").split(",") if q.strip()]
         lost = [n for n in heard if self.pos(n) is None and n not in ignore]
         for n in ignore:

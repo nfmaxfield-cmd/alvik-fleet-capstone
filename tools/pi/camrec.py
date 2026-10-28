@@ -704,6 +704,135 @@ def disk_precheck(out, n_cams, seconds=0, log=print, free=None):
     return free, want, fit
 
 
+# ------------------------------------------------------------------ washed-out board: exposure stepped down
+class WashoutGuard:
+    """The overhead camera's exposure stays automatic (Nick, Q22), EXCEPT when the board is washed out (Nick,
+    2026-10-28 18:0x: "lower the overhead's exposure automatically, but only when the board is washed out, and say
+    so on screen"; on by default). Washed out = the board itself clips: more than SAT_SHARE of the picture's
+    middle (where the board is) at SAT_LEVEL or brighter, CHECKS_TO_ACT checks in a row. Then the exposure goes to
+    manual at STEP x its current value (again, while it stays washed out, down to MIN_FRACTION of where it began).
+    Once the middle has been under RESTORE_SHARE for RESTORE_S, the camera goes back to automatic. Every change is
+    printed and written to the camera's events.csv.
+
+    Measured (replay of 27 and 28 Oct, docs/build-reports/e02-oct28-overhead-contrast.md): neither night's board
+    clipped (board ~193, under 0.01 % of it at 250+), so the guard would not have acted on 28 Oct: the robots' tops
+    were 199 against a 193 board there because the light came from the window, not because the camera was too bright.
+    Lowering an exposure that does not clip lowers the robots' contrast in proportion: it only helps a board that
+    clips. The callbacks keep it testable: exposure() -> current value or None, manual(v) -> bool, auto() -> bool."""
+
+    CHECK_S = 2.0           # chosen: a check every 2 s. No DOE: a period (the room's light changes over minutes)
+    SAT_LEVEL = 250         # grey level counted as clipped (JPEG noise keeps a clipped area at 250-255). No DOE
+    SAT_SHARE = 0.02        # chosen: washed out when over 2 % of the middle clips. DOE note: 0.5 / 2 / 5 % against
+                            # the overhead's body seen-rate and robot-vs-board contrast (lighting check) under the lamp
+                            # and in daylight, on a board that clips (none of the footage so far clips)
+    RESTORE_SHARE = 0.002   # chosen: back to automatic once under 0.2 % for RESTORE_S. No DOE: a hysteresis guard
+    RESTORE_S = 60.0        # (long, so the exposure does not swing with a passing cloud)
+    CHECKS_TO_ACT = 2       # two checks in a row (4 s): not for one bright moment (a hand, a reflection)
+    STEP = 0.8              # chosen: each step 80 % of the exposure. DOE note: 0.7 / 0.8 / 0.9 against the steps
+                            # needed to stop clipping and the robots' contrast after it
+    MIN_FRACTION = 0.3      # never below 30 % of the exposure it started from (the picture would go dark)
+
+    def __init__(self, exposure, manual, auto, log=print, mark=None, name="overhead"):
+        self.exposure, self.manual, self.auto = exposure, manual, auto
+        self.log, self.mark, self.name = log, mark, name
+        self.t_next = 0.0
+        self.washed_n = 0
+        self.start_value = None      # the automatic exposure when it first stepped down
+        self.value = None            # manual value in use (None: automatic)
+        self.clear_since = None
+        self.changes = []            # (t_wall, text)
+
+    @staticmethod
+    def clipped_share(gray, level=SAT_LEVEL):
+        h, w = gray.shape[:2]
+        mid = gray[h // 6:h - h // 6:2, w // 6:w - w // 6:2]
+        return float((mid >= level).mean())
+
+    def _say(self, t_wall, text):
+        self.changes.append((round(t_wall, 2), text))
+        self.log(text)
+        if self.mark is not None:
+            try:
+                self.mark(text, t_wall)
+            except Exception:       # noqa: BLE001  (logging must never stop the camera)
+                pass
+
+    def check(self, gray, t_wall):
+        """Called with every picture; acts at most every CHECK_S. Returns the clipped share when it checked."""
+        if t_wall < self.t_next:
+            return None
+        self.t_next = t_wall + self.CHECK_S
+        sh = self.clipped_share(gray)
+        if sh > self.SAT_SHARE:
+            self.washed_n += 1
+            self.clear_since = None
+            if self.washed_n >= self.CHECKS_TO_ACT:
+                self.washed_n = 0
+                cur = self.value if self.value is not None else self.exposure()
+                if cur is None:
+                    self._say(t_wall, "%s camera washed out (%.1f %% of the board clips) but its exposure cannot be "
+                                      "read: left automatic" % (self.name, 100 * sh))
+                    return sh
+                if self.start_value is None:
+                    self.start_value = float(cur)
+                new = max(round(float(cur) * self.STEP), round(self.start_value * self.MIN_FRACTION), 1)
+                if new >= cur:
+                    self._say(t_wall, "%s camera still washed out (%.1f %% clips) at the lowest exposure allowed "
+                                      "(%g): close the blinds or turn off the lamp above the table" % (
+                                          self.name, 100 * sh, cur))
+                    return sh
+                if self.manual(new):
+                    was = "automatic, %g" % cur if self.value is None else "%g" % cur
+                    self.value = new
+                    self._say(t_wall, "%s camera washed out (%.1f %% of the board clips): exposure lowered to %g "
+                                      "(was %s)" % (self.name, 100 * sh, new, was))
+                else:
+                    self._say(t_wall, "%s camera washed out (%.1f %% clips): could not lower its exposure" % (
+                        self.name, 100 * sh))
+        else:
+            self.washed_n = 0
+            if self.value is not None and sh < self.RESTORE_SHARE:
+                self.clear_since = self.clear_since or t_wall
+                if t_wall - self.clear_since >= self.RESTORE_S:
+                    if self.auto():
+                        self._say(t_wall, "%s camera no longer washed out for %.0f s: exposure back to automatic "
+                                          "(was %g)" % (self.name, self.RESTORE_S, self.value))
+                        self.value, self.start_value, self.clear_since = None, None, None
+            elif sh >= self.RESTORE_SHARE:
+                self.clear_since = None
+        return sh
+
+
+def washout_guard_for(rec, log=print):
+    """A WashoutGuard working the camera of CamRec rec through its OpenCV capture (v4l2-ctl as a fall back)."""
+    c = Controls(rec.cap, rec.device, log=lambda *a: None)
+
+    def exposure():
+        try:
+            v = float(rec.cap.get(cv2.CAP_PROP_EXPOSURE))
+            return v if v > 0 else None
+        except Exception:       # noqa: BLE001
+            return None
+
+    def manual(v):
+        return c.set("auto_exposure", AE_MANUAL, alt=AE_MANUAL_OLD) and c.set("exposure", v)
+
+    def auto():
+        return c.set("auto_exposure", AE_AUTO)
+    def mark(text, t_wall):
+        rec.mark(text, t_wall)
+        try:            # for the ladder / DOE loop / Mission Control screens (camrec runs in its own tmux window)
+            with open(EXPOSURE_LOG, "a") as f:
+                f.write("%.2f,%s\n" % (t_wall, text.replace(",", ";")))
+        except OSError:
+            pass
+    return WashoutGuard(exposure, manual, auto, log=lambda t: log(f"! {rec.tag}{t}"), mark=mark,
+                        name=rec.name or "overhead")
+
+
+EXPOSURE_LOG = os.path.join(os.environ.get("TMPDIR", "/tmp"), "mirlt_exposure_changes.csv")   # t_wall,text per change
+
+
 # ------------------------------------------------------------------ one camera's recording
 def now_bright(rec, t_wall):
     """Time for this camera's brightness line in events.csv?"""
@@ -861,8 +990,15 @@ class CamRec:
                 except Exception as e:      # noqa: BLE001  (recording goes on without it)
                     self.log(f"! {self.tag}no shared pictures ({e}): the trackers read /live instead")
                     self.shm_name = None
-            if self.ring is not None or now_bright(self, t_wall):
+            guard = getattr(self, "washout", None)
+            if self.ring is not None or now_bright(self, t_wall) or (guard is not None and t_wall >= guard.t_next):
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+                if guard is not None:
+                    try:
+                        guard.check(gray, t_wall)
+                    except Exception as e:      # noqa: BLE001  (the recording goes on)
+                        self.log(f"! {self.tag}washout guard: {e}")
+                        self.washout = None
                 if self.ring is not None:
                     self.ring.write(gray, t_wall, t_pi=t_wall, pi_frame=self.n)
                 if now_bright(self, t_wall):
@@ -978,7 +1114,7 @@ class CamRec:
 # ------------------------------------------------------------------ a session: one or more cameras
 def run_session(caps, devices, names=None, out="~/recordings", label="", seconds=0, fps=30, port=8000,
                 notes_port=5007, record=True, replays=None, controls=None, stdin_notes=True, log=print,
-                stop=None, flush_s=0.5, disk_check_s=10.0, extra_meta=None, shm=False):
+                stop=None, flush_s=0.5, disk_check_s=10.0, extra_meta=None, shm=False, washout=()):
     """Record one or more open cameras. One camera: ~/recordings/<date-time>_<label>/
     as always. Several: that folder holds cam0/, cam1/, ... (each a normal recording
     folder) and session.json. Cameras run as threads of this one process, so t_mono
@@ -1000,6 +1136,8 @@ def run_session(caps, devices, names=None, out="~/recordings", label="", seconds
         tag = f"cam{i}{' (' + names[i] + ')' if names[i] else ''}: " if multi else ""
         c = CamRec(cap, dev, i, names[i], (port + i) if port else 0, fps, replays[i], log, tag)
         c.shm_name = ("mirlt-" + (names[i] or "cam%d" % i)) if shm else None
+        if names[i] and names[i] in washout and not c.replay:
+            c.washout = washout_guard_for(c, log)   # the board washed out: exposure stepped down (WashoutGuard)
         if not c.first_frame():
             for cc in cams:
                 cc.cap.release()
@@ -1229,6 +1367,9 @@ def main(argv=None):
     ap.add_argument("--no-lock", dest="lock", action="store_false", help="leave the camera's automatics alone")
     ap.add_argument("--cores", default="", help="run on these cores only, e.g. 1 (run-e02-pi.sh: the recorder on core "
                                                 "1, the tracker process on 2-3, the runner on 0; 2026-10-25)")
+    ap.add_argument("--washout-guard", choices=["on", "off"], default="on",
+                    help="the overhead camera on automatic exposure: lower its exposure while the board clips, "
+                         "back to automatic after (WashoutGuard; on by default, Nick 2026-10-28)")
     ap.add_argument("--shm", action="store_true",
                     help="also put each camera's grey pictures in shared memory (mirlt-<name>) for the camera bridge's "
                          "workers (cam_bridge.py --farm): decoded once, no JPEG for the trackers (2026-10-28)")
@@ -1303,7 +1444,9 @@ def main(argv=None):
             t.join()
     run_session(caps, devices, names=args.names, out=args.out, label=args.label, seconds=args.seconds,
                 fps=args.fps, port=args.port, notes_port=args.notes_port, record=not args.no_record,
-                controls=controls, shm=args.shm)
+                controls=controls, shm=args.shm,
+                washout=(("overhead",) if args.washout_guard == "on" and exposure_for(
+                    args.names.index("overhead") if "overhead" in args.names else 0) in (None, "auto") else ()))
 
 
 if __name__ == "__main__":

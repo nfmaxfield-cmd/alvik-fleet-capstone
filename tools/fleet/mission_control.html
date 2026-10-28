@@ -221,6 +221,18 @@ function connect() {
 
 // ---------------------------------------------------------------- one-button setup (flash check, chessboard, warm-up)
 let setupPoll = null;
+function lightingCard() {
+  const L = S.lighting;
+  const rows = L ? L.cameras.map(c => `<div class="small" style="margin:4px 0;color:${c.verdict === "ok" ? "var(--green)" : c.verdict === "low" ? "var(--warn)" : "var(--red)"}"><b>${esc(c.verdict === "ok" ? "OK" : c.verdict === "low" ? "Low" : c.verdict === "no picture" ? "No picture" : "Washed out")}</b> · ${esc(c.words)}</div>`).join("") : `<p class="small muted">Not checked yet.</p>`;
+  const ex = L && L.exposure && L.exposure.length ? `<p class="small muted" style="margin-top:6px">Exposure changes: ${L.exposure.map(e => esc(e[1])).join("; ")}</p>` : "";
+  return `<div class="card ${L && L.cameras.some(c => c.verdict !== "ok") ? "warnc" : ""}" id="lightc"><h2>Lighting</h2><p class="small muted">Does each camera see the robots against the board? Measured on each camera's newest picture: how far the robots stand from the board in grey levels (fine from 26, washed out under 18).</p>${rows}${ex}
+    <button class="b" id="lightgo">Check the lighting</button></div>`;
+}
+function wireLighting() {
+  if (!$("lightgo")) return;
+  $("lightgo").onclick = async () => { $("lightgo").disabled = true; $("lightgo").textContent = "Checking..."; try { S.lighting = await api("/api/lighting"); render(); } catch (e) { flash(e.message, true); render(); } };
+}
+
 function setup() {
   const j = S.setup || {};
   page(`<div><h1>Set up the cameras</h1><p class="sub">One button: the flash check, then the chessboard in the 0,0 corner for both cameras, then the warm-up. About 3 minutes.</p></div>
@@ -239,7 +251,9 @@ function setup() {
       <label class="small" style="display:flex;gap:8px;align-items:flex-start;margin:0 0 8px"><input type="checkbox" id="swarm" checked style="margin-top:2px"> <span>then the warm-up (the robots feel the table's sides; leave it off when the table is only marked on a bigger board)</span></label>
       <button class="p" id="sgo" ${j.running ? "disabled" : ""}>${j.running ? "Running..." : "Set up (flash check, chessboard, warm-up)"}</button>
       ${more("More", `<p class="small muted">Each part can be run alone on the camera setup page (port 8096): <code>./run-fleet-pi.sh setup</code>.</p>`)}</div>
+      ${lightingCard()}
       <button class="b" id="go">Continue to workspace</button>`);
+  wireLighting();
   $("sgo").onclick = async () => { try { S.setup = await api("/api/setup/start", {conn, surface: $("surf").value.trim(), warmup: $("swarm").checked}); render(); clearInterval(setupPoll);
     setupPoll = setInterval(async () => { S.setup = await api("/api/setup"); if (screen === 1) render(); if (!S.setup.running) { clearInterval(setupPoll); load(); } }, 1500); } catch (e) { flash(e.message, true); } };
   $("go").onclick = () => { done.add(1); screen = 2; render(); };
@@ -457,13 +471,14 @@ function runScreen() {
       <figure style="margin:0;flex:1 1 300px"><img id="camo" alt="The overhead camera's picture with each robot ringed" src="/api/frame?cam=overhead&t=${Date.now()}" style="width:100%;border-radius:8px"><figcaption class="small muted">Overhead camera (${run.mode === "robots" ? "the Pi's" : "simulated"}): each robot ringed in its colour where the camera bridge has it, planned routes as thin lines.</figcaption></figure>
       <figure style="margin:0;flex:1 1 300px"><img id="cams" alt="The side camera's picture with each robot ringed" src="/api/frame?cam=side&t=${Date.now()}" style="width:100%;border-radius:8px" onerror="this.parentElement.style.display='none'"><figcaption class="small muted">Side camera, the same rings.</figcaption></figure></div></div>
       <div class="card eng"><h3>How the robots mapped the table</h3><div id="mapv">Loading...</div><p class="small muted">Each robot's path as the camera bridge saw it this run, in its colour (mapview.py).</p></div>` : ""}`,
-    `${(pv ? Object.keys(pv.frames) : S.map.robots.map(r => r.name)).map(n => { const lv = run && run.live && run.live.robots ? run.live.robots[n] : null;
+    `${run && run.running ? "" : lightingCard()}${(pv ? Object.keys(pv.frames) : S.map.robots.map(r => r.name)).map(n => { const lv = run && run.live && run.live.robots ? run.live.robots[n] : null;
       return `<div class="card"><div class="between"><b><span class="dot" style="background:${COL[n]}"></span>${esc(n)}</b><span class="small muted">${run && run.robots[n] ? `(${run.robots[n][0].toFixed(0)}, ${run.robots[n][1].toFixed(0)})` : ""}</span></div>
       <span class="small muted">${esc(lv && lv.out ? "OUT: " + lv.out : (lv && lv.doing) || (run && run.doing && run.doing[n]) || (run && run.running ? "driving" : "waiting"))}</span>
       ${lv ? `<div class="row small" style="margin-top:6px;gap:14px"><span>Battery <b>${lv.battery ?? "-"} %</b></span><span>Edge <b>${lv.edge_cm ?? "-"} cm</b></span><span>Steps <b>${lv.done}/${lv.steps}</b></span></div><div class="small muted">${esc(lv.last || "")}</div>` : ""}</div>`; }).join("")}
      <details class="card" ${document.body.classList.contains("details") ? "open" : ""}><summary style="cursor:pointer;font-weight:500">Event log</summary><div class="log" id="log">${run ? esc((run.messages || []).map(m => `[${m[0]}] ${m[1]}`).join("\n")) : ""}</div></details>
      <div class="card">${more("More", settingsTable("run"))}</div>
      <button class="p" id="go" ${run && !run.running ? "" : "disabled"}>Review</button>`);
+  wireLighting();
   $("start").onclick = async () => { try { await api("/api/run/start", {kind: "mission", dry: conn !== "robots", conn}); startPoll(); await load(); } catch (e) { flash(e.message, true); } };
   $("pause").onclick = async () => { try { await api("/api/run/pause", {on: !(run && run.paused)}); await load(); } catch (e) { flash(e.message, true); } };
   $("stop").onclick = async () => { try { await api("/api/run/stop", {}); await load(); } catch (e) { flash(e.message, true); } };
