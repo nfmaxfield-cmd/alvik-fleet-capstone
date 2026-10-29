@@ -236,3 +236,6 @@ One line per picture: what it shows (feature or problem), and where it comes fro
 - `2026-10-29/turn-pause-feature-mc-preview-61x122-step-away-after-circle.png`: **feature.** Monday's preview on 61 x 122 at 0:50: Right stands 3.5 cm further out from the circle while Left mows the lane beside it (13 cm apart by plan, was 9.5). Same report.
 - `2026-10-29/turn-pause-feature-robot-gap-time-p95-before-and-after.png`: **feature.** Simulator dry runs, before / step away only / step away + turn pause: closest after the circle 7.9-8.7 -> 11.0-11.5 cm on 61 x 122 and 76 x 137, mission time, line check p95. Same report.
 
+
+## 2026-10-29 (daytime sessions and small fixes: build-reports/e02-oct29-daytime-sessions.md)
+- `2026-10-29/daytime-problem-lighting-22-grey-labelled-washed-out-now-low.png`: **problem** (fixed). The lighting check on a simulated overhead picture, robots 22 grey levels from the board and one of three not found: before, "washed out" (its own rule says washed out is under 18); now "low", with "only 2 of 3 robots found". Report e02-oct29-daytime-sessions (fix 2).

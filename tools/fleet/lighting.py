@@ -124,16 +124,23 @@ def measure(img, cam, rect=(0.0, 0.0, CAM.BOARD_W_CM, CAM.BOARD_L_CM), spots=Non
         verdict = "washed out"
         words = "%s camera washed out: %.0f %% of the board is white (clipped): %s" % (
             name, 100 * clipped, ADVICE.get(name, ADVICE["overhead"]))
-    elif expected and (minc is None or minc < WASHED_CONTRAST or found < expected):
+    elif expected and (minc is None or minc < WASHED_CONTRAST):
+        # the label follows the stated thresholds (29 Oct): washed out only under WASHED_CONTRAST (or nothing stands
+        # out at all). Before, a robot not found also said "washed out", so 22 grey levels was labelled washed out
         verdict = "washed out"
         words = ("%s camera washed out: no robot stands out from the board (%d of %d found): %s" % (
             name, found, expected, ADVICE.get(name, ADVICE["overhead"]))) if minc is None else (
             "%s camera washed out: the robots stand only %.0f grey levels from the board (it needs %.0f+), %d of %d "
             "found: %s" % (name, minc, WASHED_CONTRAST, found, expected, ADVICE.get(name, ADVICE["overhead"])))
-    elif minc is not None and minc < LOW_CONTRAST:
+    elif minc is not None and (minc < LOW_CONTRAST or found < expected):
         verdict = "low"
-        words = "%s camera: the robots stand %.0f grey levels from the board (fine from %.0f): it works, with little " \
-                "margin; less light on the board would help" % (name, minc, LOW_CONTRAST)
+        words = "%s camera: the robots stand %.0f grey levels from the board (fine from %.0f, washed out under %.0f)" \
+                % (name, minc, LOW_CONTRAST, WASHED_CONTRAST)
+        if found < expected:
+            words += ", but only %d of %d robots found: check every robot is in this camera's picture" % (found,
+                                                                                                         expected)
+        if minc < LOW_CONTRAST:
+            words += ": it works, with little margin; less light on the board would help"
     else:
         verdict = "ok"
         words = "%s camera: fine (robots %s grey levels from the board, %d of %d found)" % (
