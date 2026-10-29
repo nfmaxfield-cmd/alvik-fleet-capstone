@@ -1689,7 +1689,7 @@ class Ladder:
         (a spin needs straighten.SPIN_EDGE_CM, 7 cm, from every edge), then crawls into open space. Returns the
         heading it should now face (for the crawl's room check), or None (nothing done)."""
         import straighten as STR
-        r = self.st["robots"].get(n) or {}
+        r = ((getattr(self, "st", None) or {}).get("robots") or {}).get(n) or {}
         hl = r.get("facing")
         at = r.get("facing_at") or [None, None]
         if hl is None or not r.get("facing_sure") or p0 is None or at[0] is None or \
