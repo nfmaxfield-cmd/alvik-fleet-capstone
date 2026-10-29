@@ -86,7 +86,7 @@ def test_unconfirmed_registry_expires_confirms_and_counts():
     t[0] = 115.0
     assert u.expired() == ["a"]
     u.drop("a", "expired")
-    assert u.items == {} and u.near([[6, 2]]) == []
+    assert u.items == {} and u.near([[6, 2]]) == ["a"]        # a second stop there still confirms it
     u.add({"id": "b", "points": sq}, "Right")
     u.confirm("b", "a second stop")
     assert u.summary() == {"added": 2, "expired": 1, "confirmed": 1}
@@ -102,7 +102,8 @@ class FakeCoord:
                   "live_obstacles"):
             setattr(self, k, types.MethodType(getattr(RP.Coordinator, k), self))
         self.args = types.SimpleNamespace(unconfirmed_s=unconfirmed_s)
-        self.m = {"obstacles": [], "floor": {"x_min": 0, "y_min": 0, "x_max": 122, "y_max": 61}}
+        self.m = {"obstacles": [], "floor": {"x_min": 0, "y_min": 0, "x_max": 122, "y_max": 61}, "robots": [],
+                  "boards": []}
         self.plan = {}
         self.planning = None
         self.improve_at = None
@@ -241,3 +242,22 @@ def test_floor_check_skips_a_robot_with_another_in_front():
     assert nm == "Right" and abs(d - math.hypot(20, 2)) < 1e-6
     bots["Right"].pose = (20.0, 45.0, 0.0)                         # beside it, 25 cm away: not in front
     assert RP.floor_blocked(coord, "Left") is None
+
+
+def test_a_dropped_obstacle_met_again_is_confirmed(monkeypatch):
+    """A real brick no camera sees: the first stop's obstacle is dropped (no plan), the robot meets the brick again:
+    the second stop confirms it, and it stays (a later no plan stops everyone, as before)."""
+    import run_plan as RP
+    monkeypatch.setattr(RP, "now", lambda: 10.0)
+    c = FakeCoord()
+    b = types.SimpleNamespace(name="Left")
+    c.sensor_stops.append({"camera": None})
+    first = _ob(1)
+    c.mark_unconfirmed(b, first)
+    assert c.no_plan_drop(first, "Left", "no route") is True
+    again = _ob(2, x=51.0)
+    c.mark_unconfirmed(b, again)
+    assert again.get("confirmed") == "a second stop" and "unconfirmed" not in again
+    assert [o["id"] for o in c.m["obstacles"]] == ["seen-by-Left-1"]          # the dropped one is back, confirmed
+    c.m["obstacles"].append(dict(again))
+    assert c.no_plan_drop(None, "Left", "no route") is False

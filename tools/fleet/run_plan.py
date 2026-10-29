@@ -1215,8 +1215,20 @@ class Coordinator:
         by = (getattr(self, "sensor_stops", None) or [{}])[-1].get("camera")
         near = u.near(ob["points"])
         if by or near:
+            on_map = {o.get("id") for o in self.m.get("obstacles", [])}
+            back = []
             for k in near:
                 u.confirm(k, by or "a second stop by %s" % b.name)
+                rec = next((h for h in u.history if h["id"] == k), None)
+                if k not in on_map and rec is not None:
+                    # the earlier stop's outline had expired or been dropped: it comes back, confirmed (simulator,
+                    # 29 Oct: without it the dance spot was planned on the brick corner the first stop had seen)
+                    self.m["obstacles"].append(FM._norm_obstacle({"id": k, "shape": "polygon", "points": rec["points"],
+                                                                  "source": "distance_sensor"},
+                                                                 len(self.m["obstacles"])))
+                    back.append(k)
+            if back:
+                self.m = FM.normalize(self.m)
             ob["confirmed"] = by or "a second stop"
             if near:
                 self.say("%s: stopped again where an earlier stop was: the obstacle is confirmed and stays on the map"
@@ -1332,6 +1344,7 @@ class Coordinator:
         elif rtype == "FOLLOW" and len(vals) >= 17:
             # its own pose while out (it may have driven its buffered steps: a circle turns it right round); the
             # rejoin takes its heading from here when the camera gives none
+            boot = EC.boot_of_run(vals[0]) or None    # its follow run's id carries its boot ID (no status needed)
             try:
                 ms, x, y, th = int(float(vals[1])), float(vals[7]), float(vals[8]), float(vals[9])
                 b.note_clock(t, ms)
@@ -1365,8 +1378,16 @@ class Coordinator:
         for b in self.bots.values():
             if not b.out or not self.rejoinable(b):
                 continue
-            if b.last_heard is None or t - b.last_heard > 0.5:
-                b.back_t = None                  # quiet again
+            if b.last_heard is None or getattr(b, "back_t", None) is None:
+                continue
+            if t - b.last_heard > 0.5:
+                # a robot that restarted is idle and says little (a CLOCK record now and then): ask it, its answer
+                # counts as heard. Quiet for 3 s even so: it went quiet again
+                if t - b.last_heard > 3.0:
+                    b.back_t = None
+                elif t - getattr(b, "status_asked_t", 0.0) > 1.0:
+                    self.send(b.name, "status")
+                    b.status_asked_t = t
                 continue
             if getattr(b, "back_t", None) is None or t - b.back_t < self.REJOIN_HEARD_S:
                 continue
@@ -1445,14 +1466,22 @@ class Coordinator:
             if o.name in self.names:
                 self.control(o, "halt")
         self.log("recheck_start", robot=n, boot=getattr(b, "boot_back", None))
+        # its part of the plan, back for the checks (the facing check reads its start), starting where the camera has it
+        cam = getattr(b, "last_cam", None) or [None, None, None]
+        entry = dict(b.out_entry)
+        if cam[0] is not None:
+            entry["start"] = [cam[0], cam[1], cam[2] if cam[2] is not None else
+                              (b.pose[2] if b.pose else b.out_entry["start"][2])]
+        self.plan["robots"][n] = entry
         try:
             ok, words = recheck_robot(self, self.link, self.args, n, self.source)
         except SystemExit as e:
             ok, words = False, str(e)
         except Exception as e:      # noqa: BLE001  (a failed re-check keeps it out; it never stops the others)
-            ok, words = False, "the re-check failed (%s)" % e
+            ok, words = False, "the re-check failed (%s: %s)" % (type(e).__name__, e)
         self.log("recheck_done", robot=n, ok=ok, words=words)
         if not ok:
+            self.plan["robots"].pop(n, None)
             b.rejoin_failed = words
             self.say("%s stays out: %s. The others re-plan and carry on" % (n, words))
             self.handle_obstacle(None)

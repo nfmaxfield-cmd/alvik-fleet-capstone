@@ -157,8 +157,11 @@ class Unconfirmed:
         return best
 
     def near(self, points):
-        """ids of the unconfirmed obstacles whose outline comes within near_cm of these points."""
-        return [k for k, v in self.items.items() if self._dist(points, v["points"]) < self.near_cm]
+        """ids of the sensor obstacles of this run (on the map now, or already expired or dropped) whose outline comes
+        within near_cm of these points. An expired or dropped one counts too: a real brick the robot meets again after
+        its first stop was dropped is confirmed by the second stop (simulator, 29 Oct: without this a brick no camera
+        saw was dropped and met 30 times, and touched)."""
+        return [h["id"] for h in self.history if self._dist(points, h["points"]) < self.near_cm]
 
     def add(self, ob, robot):
         rec = dict(id=ob["id"], robot=robot, t=self.now(), points=[list(p) for p in ob["points"]], end=None)
