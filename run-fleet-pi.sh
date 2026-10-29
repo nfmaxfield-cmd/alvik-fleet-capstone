@@ -34,6 +34,8 @@
 #                                          check or one camera's evidence, only for safety: "would have parked" is logged)
 #     ./run-fleet-pi.sh doe-status         drives so far, battery, who is out
 #     ./run-fleet-pi.sh doe-stop           stop it (every robot stops), then it uploads as when it finishes
+#     ./run-fleet-pi.sh reupload-frames 20261029-074342-doe   send a DOE loop's frames to its release again (after a
+#                                          failed upload; a zip over 1.9 GB goes in parts, parts already up are skipped)
 # One system (2026-10-28): Monday's mission and Mission Control, the same program (tools/fleet/mission_run.py):
 #     ./run-fleet-pi.sh monday [61x122] [Left,Right] [farm]   Monday's default mission on the table of that size (put
 #                                          each robot at its own end first); runs in tmux "monday"; Ctrl+C stops every
@@ -222,6 +224,17 @@ case "$WHAT" in
     FR="$(python3 tools/fleet/diskguard.py where "$D")"
     python3 tools/pi/upload_session.py --recordings "$OUT" --session "$D" --tag "doe-$(basename "$D")" --unique-tag \
       --exclude frames --recording-dir "$FR" || echo "Upload failed: the files stay in $D and $FR (run ./run-fleet-pi.sh doe-finish again)" ;;
+  reupload-frames)   # (2026-10-29) a session's frames again, into the release its logs went to; nothing deleted
+    N="${1:-}"; [ -z "$N" ] && { echo "Which session? e.g. ./run-fleet-pi.sh reupload-frames 20261029-074342-doe"; exit 1; }
+    D="logs/$N"; [ -d "$D" ] || { echo "No folder $D on the Pi."; exit 1; }
+    FR="$(python3 tools/fleet/diskguard.py where "$D")"
+    [ -d "$FR" ] || { echo "The frames folder $FR is not there (is the USB drive plugged in?)."; exit 1; }
+    OUT="$(cat /tmp/fleet_rec_out 2>/dev/null || echo "$HOME/recordings")"
+    TAG="${2:-doe-$N}"; case "$N" in *-mission*) TAG="${2:-mission-$N}" ;; esac
+    echo "Uploading the frames in $FR to release $TAG (zipping first: a few minutes per GB) ..."
+    python3 tools/pi/upload_session.py --recordings "$OUT" --session "$D" --tag "$TAG" --no-logs --recording-dir "$FR" \
+      && echo "Done. The frames stay on the drive until ./run-fleet-pi.sh clean-uploaded --yes." \
+      || echo "Upload failed: run the same command again (parts already up are skipped)." ;;
   doe-status)
     D=""; [ "$DRY" = 1 ] && D="--dry"
     python3 tools/fleet/doe_loop.py status $D

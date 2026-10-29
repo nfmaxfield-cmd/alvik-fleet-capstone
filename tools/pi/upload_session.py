@@ -5,7 +5,10 @@ What goes up, as assets of one release (tag e02-session-<date-time>):
   - logs-<session>.zip: the runner's session folder (logs/e02-<date-time>), everything in it;
   - rec-<folder>-small.zip: the recording's small files (frames.csv, events.csv, meta.json, ...);
   - each video, split into parts under 1.9 GB (GitHub's limit is 2 GB a file): <file>.part-aa, -ab, ...
-An interrupted upload can be run again: parts already in the release are skipped.
+  - a zip over 1.9 GB goes up the same way (2026-10-29: a DOE loop's frames zip, 3.35 GB, was refused with HTTP 422):
+    rec-frames-small.zip.part-aa, -ab, ...; join them on the laptop with cat rec-frames-small.zip.part-* > x.zip
+An interrupted upload can be run again: parts already in the release (whole, the right size) are skipped; a
+half-uploaded part is deleted and sent again.
 
 The GitHub token is read from ~/.config/mirlt/github_token (a fine-grained token for this repository with
 "Contents: read and write"; set up once, see docs/pi-run.md). Nothing of the session is deleted on the Pi (2026-10-28:
@@ -37,6 +40,7 @@ TOKEN_PATH = os.path.expanduser("~/.config/mirlt/github_token")
 STATE_DIR = os.path.expanduser(os.environ.get("MIRLT_STATE_DIR", "~/.local/state/mirlt"))
 PROGRESS_PATH = os.path.join(STATE_DIR, "upload.json")   # the start page (tools/pi/launcher.py) shows it
 PART_BYTES = 1900 * 1024 * 1024
+MAX_ASSET_BYTES = 2 * 1024 ** 3 - 1     # GitHub: release assets must be under 2 GB (HTTP 422 otherwise)
 SMALL_BYTES = 50 * 1024 * 1024    # files up to this size go in the small-files zip
 CHUNK = 4 * 1024 * 1024
 
@@ -148,12 +152,47 @@ class _Slice:
         self.f.close()
 
 
+def _asset_ok(a, n):
+    """An asset GitHub has whole: fully uploaded and the size sent (a cut-off upload leaves a 'starter' asset)."""
+    if not isinstance(a, dict):
+        return True                                   # (a name only: older callers)
+    return a.get("state", "uploaded") == "uploaded" and ("size" not in a or int(a["size"]) == n)
+
+
+def _assets(rel, tok):
+    """{name: asset} of the release as GitHub has it now."""
+    try:
+        r = api("GET", rel["url"], tok) if rel.get("url") else rel
+    except (urllib.error.URLError, OSError):
+        r = rel
+    return {x["name"]: x for x in (r.get("assets") or [])}
+
+
+def _drop_asset(a, tok):
+    """Delete a broken asset (half-uploaded, wrong size), so its name can be uploaded again."""
+    if isinstance(a, dict) and a.get("url"):
+        try:
+            api("DELETE", a["url"], tok)
+            print("  %s: a broken copy was on GitHub (%s, %s bytes): deleted, sending it again" % (
+                a.get("name"), a.get("state", "?"), a.get("size", "?")), flush=True)
+        except (urllib.error.URLError, OSError) as e:
+            print("  %s: could not delete its broken copy (%s)" % (a.get("name"), e), flush=True)
+
+
 def upload(rel, name, path, tok, start=0, n=None, have=()):
+    """One asset: bytes [start, start + n) of path. Skipped when GitHub already has it whole (2026-10-29: a retry
+    never resends a part that is up); a broken copy of it is deleted first. On HTTP 422 the release is read again:
+    GitHub may have it after all (the answer was lost), or a half-upload holds the name."""
     n = os.path.getsize(path) - start if n is None else n
-    if name in have:
+    if n > MAX_ASSET_BYTES:
+        raise SystemExit("%s is %.2f GB: GitHub takes at most 2 GB a file (upload_file splits it)" % (name, n / 1e9))
+    have = have if isinstance(have, dict) else {k: {"name": k} for k in have}
+    if name in have and _asset_ok(have[name], n):
         print("  %s: already up, skipped" % name, flush=True)
         PROGRESS.sent(n)
         return
+    if name in have:
+        _drop_asset(have[name], tok)
     PROGRESS.set(current=name)
     done0 = PROGRESS.d.get("done_bytes", 0)
     url = rel["upload_url"].split("{")[0] + "?name=" + urllib.request.quote(name)
@@ -164,15 +203,48 @@ def upload(rel, name, path, tok, start=0, n=None, have=()):
             print("  %s: %.0f MB ..." % (name, n / 1e6), flush=True)
             api("POST", url, tok, src, "application/octet-stream", n)
             print("  %s: up (%.0f s)" % (name, time.time() - t0), flush=True)
+            have[name] = {"name": name, "state": "uploaded", "size": n}
             return
         except (urllib.error.URLError, OSError) as e:
             print("  %s: failed (%s), trying again" % (name, e), flush=True)
             PROGRESS.set(done_bytes=done0, last_error=str(e)[:200])
+            if isinstance(e, urllib.error.HTTPError) and e.code == 422:
+                now = _assets(rel, tok)
+                if name in now and _asset_ok(now[name], n):
+                    print("  %s: GitHub has it after all" % name, flush=True)
+                    have[name] = now[name]
+                    PROGRESS.set(done_bytes=done0 + n)
+                    return
+                if name in now:
+                    _drop_asset(now[name], tok)
             time.sleep(10)
         finally:
             src.close()
     PROGRESS.set(state="failed", error="Upload of %s failed 3 times" % name)
     raise SystemExit("Upload of %s failed 3 times: run this again later (finished parts are skipped)." % name)
+
+
+def part_names(name, size):
+    """[(asset name, start, n)]: the file whole when it fits under PART_BYTES, else <name>.part-aa, -ab, ..."""
+    if size <= PART_BYTES:
+        return [(name, 0, size)]
+    out = []
+    for k, start in enumerate(range(0, size, PART_BYTES)):
+        out.append(("%s.part-%s%s" % (name, chr(97 + k // 26), chr(97 + k % 26)), start, min(PART_BYTES, size - start)))
+    return out
+
+
+def upload_file(rel, name, path, tok, have, sent):
+    """A zip or a video, split into parts over PART_BYTES (2026-10-29: the 20261029-074342 DOE loop's frames zip was
+    3.35 GB and GitHub refused it, HTTP 422). Join on the laptop: cat <name>.part-* > <name>."""
+    size = os.path.getsize(path)
+    parts = part_names(name, size)
+    if len(parts) > 1:
+        print("  %s: %.2f GB, sent as %d parts (join them: cat %s.part-* > %s)" % (name, size / 1e9, len(parts), name,
+                                                                                  name), flush=True)
+    for part, start, n in parts:
+        upload(rel, part, path, tok, start, n, have=have)
+        sent[part] = n
 
 
 def zip_folder(folder, out, small_only=False, exclude=()):
@@ -331,27 +403,26 @@ def _main():
                  t_start=time.time(), link="", error="")
     rel = release_for(tag, tok, "Session %s, uploaded from the Pi at the end of the session (tools/pi/upload_session.py)."
                       " Video parts: join them in order (cat video.avi.part-* > video.avi)." % name)
-    have = {x["name"] for x in rel.get("assets", [])}
+    have = {x["name"]: x for x in rel.get("assets", [])}
     tmp = os.path.join(os.path.dirname(a.recordings.rstrip("/")), ".upload-tmp")
     os.makedirs(tmp, exist_ok=True)
     sent = {}
     if not a.no_logs:
         z = zip_folder(sess, os.path.join(tmp, "logs-%s.zip" % name), exclude=tuple(a.exclude))
-        upload(rel, os.path.basename(z), z, tok, have=have)
-        sent[os.path.basename(z)] = os.path.getsize(z)
+        upload_file(rel, os.path.basename(z), z, tok, have, sent)
         drop_copy(z)
     if rec:
         z = zip_folder(rec, os.path.join(tmp, "rec-%s-small.zip" % os.path.basename(rec)), small_only=True)
-        upload(rel, os.path.basename(z), z, tok, have=have)
-        sent[os.path.basename(z)] = os.path.getsize(z)
+        upload_file(rel, os.path.basename(z), z, tok, have, sent)
         drop_copy(z)
         for root, _, files in os.walk(rec):
             for fn in sorted(files):
                 p = os.path.join(root, fn)
-                size = os.path.getsize(p)
-                if size <= SMALL_BYTES:
+                if os.path.getsize(p) <= SMALL_BYTES:
                     continue
                 stem = os.path.relpath(p, rec).replace(os.sep, "_")
+                # videos always go as parts (<stem>.part-aa, even when under 1.9 GB), as before 2026-10-29
+                size = os.path.getsize(p)
                 k = 0
                 for start in range(0, size, PART_BYTES):
                     part = "%s.part-%s%s" % (stem, chr(97 + k // 26), chr(97 + k % 26))

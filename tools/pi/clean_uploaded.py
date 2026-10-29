@@ -139,20 +139,36 @@ def parts_ok(folder, assets):
     return True, ""
 
 
+def asset_size(assets, name):
+    """The size GitHub has for name: the asset itself, or (2026-10-29: zips over 1.9 GB go up in parts) the sum of
+    name.part-aa, -ab, ... when every part there is, in order. None when it is not there."""
+    if name in assets:
+        return assets[name]
+    total, k = 0, 0
+    while True:
+        part = "%s.part-%s%s" % (name, chr(97 + k // 26), chr(97 + k % 26))
+        if part not in assets:
+            break
+        total += assets[part]
+        k += 1
+    return total if k else None
+
+
 def check_frames(fd, assets, say=print):
     """(confirmed, why) for a frames folder against one release's assets."""
     name = "rec-%s-small.zip" % os.path.basename(fd.rstrip("/"))
-    if name not in assets:
+    have = asset_size(assets, name)
+    if have is None:
         return False, "%s is not in the release" % name
     raw = DG.folder_bytes(fd)
-    if raw > 3 * assets[name] + 1e6 or raw < assets[name] / 3:
-        return False, "%s on GitHub is %d bytes; the folder (%d bytes) cannot make that" % (name, assets[name], raw)
+    if raw > 3 * have + 1e6 or raw < have / 3:
+        return False, "%s on GitHub is %d bytes; the folder (%d bytes) cannot make that" % (name, have, raw)
     say("    rebuilding %s in memory to compare its size (%.1f GB: about a minute a GB on the Pi) ..." % (
         name, raw / 1e9))
     z = zip_size(fd, small_only=True)
-    if z != assets[name]:
+    if z != have:
         return False, "%s: GitHub has %d bytes, the folder makes %d now (changed since the upload)" % (
-            name, assets[name], z)
+            name, have, z)
     return parts_ok(fd, assets)
 
 
@@ -170,12 +186,13 @@ def check_session(name, sess, fd, rels, say=print):
         assets = rels[tag]
         if sess is not None and not logs_ok:
             lz = "logs-%s.zip" % name
-            if lz not in assets:
+            lz_size = asset_size(assets, lz)
+            if lz_size is None:
                 why.append("%s is not in %s" % (lz, tag))
             else:
                 excl = [tuple(man["exclude"])] if man.get("tag") == tag and "exclude" in man else [(), ("frames",)]
                 for ex in excl:
-                    if zip_size(sess, exclude=ex) == assets[lz]:
+                    if zip_size(sess, exclude=ex) == lz_size:
                         logs_ok = True
                         used.append(tag)
                         if frames_inside and "frames" not in ex:
@@ -183,7 +200,7 @@ def check_session(name, sess, fd, rels, say=print):
                         break
                 if not logs_ok:
                     why.append("%s: GitHub has %d bytes, the folder makes another size now (changed since the "
-                               "upload)" % (lz, assets[lz]))
+                               "upload)" % (lz, lz_size))
         if has_frames and not frames_ok:
             ok, w = check_frames(fd, assets, say)
             if ok:
@@ -207,6 +224,9 @@ def zip_copies(rels):
     for tag, assets in rels.items():
         for n, s in assets.items():
             by.setdefault((n, s), tag)
+            if n.endswith(".part-aa"):                  # a zip sent in parts: its copy is the parts' sum
+                base = n[:-len(".part-aa")]
+                by.setdefault((base, asset_size(assets, base)), tag)
     out = []
     for dd in sorted(dirs):
         if not os.path.isdir(dd):
