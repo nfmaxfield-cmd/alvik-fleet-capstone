@@ -2367,6 +2367,7 @@ def restart_follow(coord, link, names):
     for n in names:
         b = coord.bots[n]
         b.follow, b.pose, b.fposed_t = {}, None, None
+        b.controls = []          # a halt from a failed correction: the run it was for has ended
 
 
 def straighten_start(coord, link, args, source, names, fres):
