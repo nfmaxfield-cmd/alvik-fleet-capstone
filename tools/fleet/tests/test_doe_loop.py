@@ -190,13 +190,18 @@ def test_check_restart_battery_and_settings(tmp_path, monkeypatch):
     assert ("Center", "wake") in L.bench.sent and ("Center", "set wheel_scale 0.9790") in L.bench.sent
     assert ("Right", "set wheel_scale 0.9790") in L.bench.sent
     assert sorted(fine) == ["Center", "Right"]
-    # a setting that will not stick parks the robot; a silent robot is woken, then parked
+    # a setting that will not stick parks the robot; a silent robot is woken, then HELD (2026-10-29 16:2x: not
+    # parked for good): it is checked again at its next turn and rejoins when it answers
     robots["Right"]["params"]["gyro_scale"] = 1.0
     robots["Right"]["lose_set"] = True
     robots["Center"]["silent"] = True
     assert L.check(str(tmp_path), ["Right", "Center"], "loop 2") == []
-    assert "does not read back" in L.st["kept_out"]["Right"] and "not answering" in L.st["kept_out"]["Center"]
+    assert "does not read back" in L.st["kept_out"]["Right"] and "Center" not in L.st["kept_out"]
+    assert L.st["doe"]["silent"]["Center"] == 1 and L.st["doe"]["turn_due"]["Center"]
     assert ("Center", "wake") in L.bench.sent
+    robots["Center"]["silent"] = False
+    assert L.check(str(tmp_path), ["Center"], "loop 3") == ["Center"]
+    assert "Center" not in L.st["doe"]["silent"]
     rows = list(csv.DictReader(open(os.path.join(str(tmp_path), "battery.csv"))))
     assert {r["robot"] for r in rows} == {"Left", "Right", "Center"} and rows[0]["boot"] == "A1B2"
 

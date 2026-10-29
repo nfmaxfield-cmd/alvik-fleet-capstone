@@ -609,8 +609,21 @@ class DoeLoop(LD.Ladder):
             g = self.got.get(n, {})
             fw = bench.fw.get(n)
             if fw is None:
-                self.park(n, "not answering (asleep, off or out of WiFi) at the check before %s" % why, safety=True)
+                # held, not parked for good (Nick, 2026-10-29 16:2x, rules audit rec 7 / open question 61): it skips
+                # this loop and is checked again at its next turn; heard again on a new boot ID, the restart path below
+                # calibrates it again first. (Before: parked for the rest of the run, 29 Oct 10:25 Center, a WiFi gap.)
+                try:
+                    bench.send(n, "stop")
+                except Exception:      # noqa: BLE001  (it is not answering anyway)
+                    pass
+                sil = self.st["doe"].setdefault("silent", {})
+                sil[n] = sil.get(n, 0) + 1
+                self.hold(n, "not answering (asleep, off or out of WiFi) at the check before %s" % why,
+                          "held where it is (%d time%s in a row); checked again at its next turn, and it rejoins when it "
+                          "answers" % (sil[n], "" if sil[n] == 1 else "s"), one=False)
                 continue
+            if self.st["doe"].get("silent", {}).pop(n, None):
+                self.event("answering again", n, "it rejoins the loop (it was held for not answering)")
             boot, up = g.get("boot"), g.get("uptime_s")
             self.row("battery", dict(t=round(time.time(), 1), clock=time.strftime("%H:%M:%S"), robot=n,
                                      battery_pct=fw[1], boot=boot or "", uptime_s="" if up is None else round(up, 1),

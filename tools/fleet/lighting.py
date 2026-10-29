@@ -14,7 +14,8 @@ What it measures, per camera, from one picture (no tracking needed):
     (Mission Control's Setup screen, before L0);
   - found: a robot counts as found when at least FOUND_SHARE of its middle stands out by more than the tracker's
     threshold (16): enough for an outline.
-Verdicts: "ok", "low" (it works, with little margin) or "washed out" (said in plain words, with what to do).
+Verdicts, per camera (2026-10-29 16:2x): the side camera warns only when it does not find a robot ("not found");
+the overhead says "low" under OVERHEAD_LOW grey levels and "washed out" only when the board itself clips.
 
     python3 tools/fleet/lighting.py <picture.jpg> <camera calibration .json> [--spot x,y ...]
 """
@@ -37,12 +38,19 @@ import e02_camera as CAM  # noqa: E402
 THR = 16.0              # the tracker's threshold (MotionTracker thr_min): a pixel this far from the floor counts
 FOUND_SHARE = 0.3       # chosen: a robot is "found" when 30 % of its middle passes THR (a robot's outline must cover at
                         # least 0.3 of its area to be robot-shaped, MotionTracker._shape_ok). No DOE: follows from it
-WASHED_CONTRAST = 18.0  # chosen from the 27-28 Oct replays, this module's measure on the overhead (median per robot)
-LOW_CONTRAST = 26.0     # against how often the overhead saw that robot's body: 28 Oct daylight: Center 12 -> 60 %,
-                        # Right 19 -> 71 %, Left 28 -> 99.7 %; 27 Oct lamp: Center 23.5 -> 84 %, Right 28 -> 97 %, Left
-                        # 37 -> 99.6 %. Under WASHED_CONTRAST: "washed out"; under LOW_CONTRAST: "low" (27 Oct's Center
-                        # was already there). DOE note: on the board, lamp / daylight / both, contrast against the
-                        # overhead's body seen-rate at L0 (the check's own log, lighting.json, is the data)
+# Per camera (Nick, 2026-10-29 16:2x, rules audit rec 5). The old marks (washed out under 18, low under 26, both cameras)
+# were fitted on 28 Oct to 6 overhead robot-nights, on the tracker before its fix (01f45dd), and never on the side camera.
+# Re-derived from the five DOE releases (5 overhead and 6 side robot-sessions after the fix; audit, finding 5):
+#   side camera: saw the driven robot in 97.7-99.8 % of pictures at every contrast logged (16-45): no contrast mark can
+#     be derived, so it warns only when it does not find a robot (FOUND_SHARE of its middle past THR);
+#   overhead: every robot-session under 30 grey levels lost the robot 5-22 % of the time, at 33 it lost 0.6 %; none of
+#     16.5-33 made it unusable (77 % seen at worst). So "low" under OVERHEAD_LOW, and "washed out" only when the board
+#     itself clips (CLIP_SHARE).
+OVERHEAD_LOW = 30.0     # chosen from 11 points (above); DOE note: on the board, lamp / daylight / blinds, the overhead's
+                        # contrast per board region against its seen rate there (the sunny strip x = 30-45 cm is where it
+                        # loses robots, more than the contrast at the start spot says). L0's lighting.json is the data
+WASHED_CONTRAST = 18.0  # (before 29 Oct 16:2x, both cameras: washed out under this; kept for old lighting.json readers)
+LOW_CONTRAST = OVERHEAD_LOW
 CLIP_SHARE = 0.02       # a board with more than 2 % at 250+ is washed out (camrec.WashoutGuard.SAT_SHARE)
 
 ADVICE = {"overhead": "close the blinds or turn off the lamp above the table",
@@ -120,33 +128,41 @@ def measure(img, cam, rect=(0.0, 0.0, CAM.BOARD_W_CM, CAM.BOARD_L_CM), spots=Non
     found = sum(r["found"] for r in robots)
     clipped = float((board_px >= 250).mean())
     minc = min([r["contrast"] for r in robots], default=None)
+    v = verdict_for(name, clipped, minc, found, expected)
+    verdict, words = v
+    return dict(camera=name, board=round(float(np.median(board_px)), 1), clipped=round(clipped, 4), robots=robots,
+                found=found, expected=expected, min_contrast=minc, verdict=verdict, words=words)
+
+
+def verdict_for(name, clipped, minc, found, expected):
+    """(verdict, words) per camera (2026-10-29 16:2x). Verdicts: "ok", "low" (overhead: it works, little margin),
+    "washed out" (overhead: the board clips), "not found" (side: a robot is missing)."""
+    adv = ADVICE.get(name, ADVICE["overhead"])
+    c = "?" if minc is None else "%.0f" % minc
+    if name == "side":
+        if expected and found < expected:
+            return "not found", ("side camera: only %d of %d robots found (%s grey levels from the board): check "
+                                 "every robot is in its picture; if they are, %s" % (found, expected, c, adv))
+        note = " (%.0f %% of the board is white, but the robots stand out)" % (100 * clipped) \
+            if clipped > CLIP_SHARE else ""
+        return "ok", "side camera: fine (%d of %d robots found, %s grey levels from the board)%s" % (
+            found, expected, c, note)
     if clipped > CLIP_SHARE:
-        verdict = "washed out"
-        words = "%s camera washed out: %.0f %% of the board is white (clipped): %s" % (
-            name, 100 * clipped, ADVICE.get(name, ADVICE["overhead"]))
-    elif expected and (minc is None or minc < WASHED_CONTRAST):
-        # the label follows the stated thresholds (29 Oct): washed out only under WASHED_CONTRAST (or nothing stands
-        # out at all). Before, a robot not found also said "washed out", so 22 grey levels was labelled washed out
-        verdict = "washed out"
-        words = ("%s camera washed out: no robot stands out from the board (%d of %d found): %s" % (
-            name, found, expected, ADVICE.get(name, ADVICE["overhead"]))) if minc is None else (
-            "%s camera washed out: the robots stand only %.0f grey levels from the board (it needs %.0f+), %d of %d "
-            "found: %s" % (name, minc, WASHED_CONTRAST, found, expected, ADVICE.get(name, ADVICE["overhead"])))
-    elif minc is not None and (minc < LOW_CONTRAST or found < expected):
-        verdict = "low"
-        words = "%s camera: the robots stand %.0f grey levels from the board (fine from %.0f, washed out under %.0f)" \
-                % (name, minc, LOW_CONTRAST, WASHED_CONTRAST)
+        return "washed out", "%s camera washed out: %.0f %% of the board is white (clipped): %s" % (
+            name, 100 * clipped, adv)
+    if expected and minc is None:
+        return "low", "%s camera: no robot stands out from the board (0 of %d found): %s" % (name, expected, adv)
+    if minc is not None and (minc < OVERHEAD_LOW or found < expected):
+        words = "%s camera: the robots stand %.0f grey levels from the board (fine from %.0f)" % (name, minc,
+                                                                                             OVERHEAD_LOW)
         if found < expected:
             words += ", but only %d of %d robots found: check every robot is in this camera's picture" % (found,
                                                                                                          expected)
-        if minc < LOW_CONTRAST:
-            words += ": it works, with little margin; less light on the board would help"
-    else:
-        verdict = "ok"
-        words = "%s camera: fine (robots %s grey levels from the board, %d of %d found)" % (
-            name, "?" if minc is None else "%.0f" % minc, found, expected)
-    return dict(camera=name, board=round(float(np.median(board_px)), 1), clipped=round(clipped, 4), robots=robots,
-                found=found, expected=expected, min_contrast=minc, verdict=verdict, words=words)
+        if minc < OVERHEAD_LOW:
+            words += ": it works, but may lose a robot now and then (the side camera covers it); less light on the " \
+                     "board would help"
+        return "low", words
+    return "ok", "%s camera: fine (robots %s grey levels from the board, %d of %d found)" % (name, c, found, expected)
 
 
 def main():

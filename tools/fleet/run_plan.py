@@ -64,15 +64,17 @@ import session_checks as SC  # noqa: E402
 import planner as P         # noqa: E402
 import engine_checks as EC  # noqa: E402
 import calib_room as CR     # noqa: E402   (calibration room and roll caps, 2026-10-29)
+import front_stop as FSTOP  # noqa: E402   (3 readings, the floor check, unconfirmed obstacles: 2026-10-29 16:2x)
 
 MIN_FIRMWARE = "2026-10-18b"
 BORDER4_FIRMWARE = "2026-10-27a"     # the four-sided virtual border (border.h) and the second WiFi network
 OBS_N_FIRMWARE = "2026-10-28a"       # obs_n (front stops counted in sensor readings), the arc and dance steps, boot ID
                                      # in `status`
-OBSTACLE_READINGS = 2   # Nick (brief 2026-10-28): a distance-sensor stop needs 2 consecutive readings (firmware obs_n;
-                        # before: 100 ms, front_confirm_ms, about 1-2 readings). DOE note: 1 / 2 / 3 readings on the
-                        # board against phantom stops on empty plywood (5 in the 27 Oct ladder runs) and the stop
-                        # distance from a real brick at 10 cm/s (each reading ~66 ms = 0.7 cm); docs/doe-backlog.md
+OBSTACLE_READINGS = FSTOP.STOP_READINGS   # 3: Nick, 2026-10-29 16:2x (rules audit rec 1), for every robot. Was 2 (Nick,
+                        # brief 2026-10-28). Replay of the five DOE releases (tools/analysis/front_stop_replay.py): 164
+                        # false stops in 232 drives with 2 in a row at 12 cm, 10 with 3, 0 with 3 and Left at 10 cm. Cost:
+                        # one more reading (~66 ms, 0.5-0.8 cm nearer a real brick; tools/sim/brick_reach.py). DOE note:
+                        # 2 / 3 readings on the board (front_stop.py STOP_READINGS); docs/doe-backlog.md
 OWN_POSE_WINDOW_S = 10.0   # Nick (2026-10-27 18:26, Q17): after a side feel finds a barrier, the robot's own pose stands
                            # (the camera guard leaves it alone) for at most this long. No DOE: Nick's limit
 STATUS_EVERY_S = 20.0   # during a run, ask every robot's `status` this often (battery). No DOE: a polling period
@@ -376,7 +378,9 @@ class Coordinator:
             self.log("boot_changed", robot=b.name, old=b.boot, new=boot, how=how)
             if self.t_run_started() and b.boot_start and boot != b.boot_start and not b.out:
                 self.retire(b, "restarted mid-run (boot %s, was %s): it lost its calibration and its steps" % (boot,
-                                                                                                          b.boot_start))
+                                                                                                          b.boot_start),
+                            kind="restarted")
+                b.boot_back = boot
         b.boot = boot
 
     def t_run_started(self):
@@ -403,10 +407,7 @@ class Coordinator:
                 continue
             b.last_heard = t
             if b.out:
-                if not getattr(b, "back_said", False):
-                    b.back_said = True
-                    self.say("%s is talking again (%s); it stays out of this run, as a fixed obstacle" % (name, b.out))
-                    self.log("robot_back", robot=name, why=b.out)
+                self.out_heard(b, t, kind, rtype, vals)
                 continue
             if kind == "M":
                 b.said.append((t, vals))
@@ -469,6 +470,8 @@ class Coordinator:
                 if len(vals) >= 15:
                     b.calib_look.update(spin=vals[12], roll=vals[13], reason=vals[14])
                 continue
+            if rtype == "RAW" and getattr(self, "floor_raw", None) is not None and name in self.floor_raw:
+                self.floor_feed(b, vals)
             if rtype == "RAW" and self.change is not None:
                 self.site_check(b, t, vals)
                 continue
@@ -481,6 +484,22 @@ class Coordinator:
                     b.run_id, b.run_exp = vals[0], "follow"
                     self.log("follow_seen", robot=name, run=vals[0], why="RUNINFO not heard; FOLLOW records are")
                 self.on_follow(b, t, vals)
+
+    def floor_feed(self, b, vals):
+        """One RAW row for the floor check: the five front zones, when the robot stands still (no step, no speed)."""
+        cols = self.link.session.headers.get("RAW") or []
+        if not cols:
+            return
+        row = dict(zip(cols, vals))
+        try:
+            if abs(float(row.get("v_cms") or 0.0)) > 0.3 or abs(float(row.get("w_dps") or 0.0)) > 3.0:
+                return
+            if str(row.get("step", "0")).strip() not in ("0", "", "-1"):
+                return
+            z = tuple(float(row[c]) for c in ("dL_cm", "dCL_cm", "dC_cm", "dCR_cm", "dR_cm"))
+        except (ValueError, KeyError, TypeError):
+            return
+        self.floor_raw[b.name].append(z)
 
     def site_check(self, b, t, vals):
         """Change check on one RAW row, at the robot's own latest pose (FOLLOW, at most 0.3 s old)."""
@@ -947,6 +966,8 @@ class Coordinator:
             if isinstance(job["error"], P.PlanError) and improving:
                 self.say("improvement try found no plan (%s)" % job["error"])
                 return self.next_deferred()
+            if self.no_plan_drop(ob, cause, job["error"]):
+                return
             self.say("no new plan (%s): stopping everyone" % job["error"])
             self.halt_all()
             self.abort = "no plan"
@@ -957,6 +978,23 @@ class Coordinator:
         if outs:                     # a robot went out while this was being computed: it is not in the new plan
             newplan = self.without(newplan, outs)
             events = [e for e in events if e["robot"] not in outs]
+        if newplan.get("stranded") and not improving and self.no_plan_drop(
+                ob, cause, "no route for %s" % ", ".join(newplan["stranded"])):
+            return
+        rj = getattr(self, "rejoin_pending", None)
+        if rj and not improving:
+            self.rejoin_pending = None
+            if newplan.get("stranded"):
+                # the program cannot take it back from here (a dry run, 29 Oct: Left went silent in the circle while
+                # Right carried on mowing alone; together, neither had a route): it stays where it is as a fixed
+                # obstacle and the others carry on, as before rejoining existed
+                b = self.bots[rj]
+                b.rejoin_failed = "no plan fits it back in (%s left without a route)" % ", ".join(newplan["stranded"])
+                self.log("rejoin_undone", robot=rj, stranded=newplan["stranded"])
+                self.say("%s could not be fitted back into the plan (%s): it stays where it is, as a fixed obstacle; "
+                         "the others carry on" % (rj, b.rejoin_failed))
+                self.retire(b, "heard again, but %s" % b.rejoin_failed, kind="out")
+                return
         gate = getattr(self.args, "min_gap_cm", EC.MIN_GAP_CM) or 0.0
         if gate:
             gap = EC.plan_gap(newplan, self.m, gate_cm=gate)
@@ -1123,25 +1161,309 @@ class Coordinator:
         out["stranded"] = [n for n in out.get("stranded", []) if n not in names]
         return out
 
-    def retire(self, b, why):
-        """Nick (2026-10-27 16:43): a robot that dies mid-run is a brick; the others carry on."""
+    def retire(self, b, why, kind="out"):
+        """Nick (2026-10-27 16:43): a robot that dies mid-run is a brick; the others carry on. kind "silent" or
+        "restarted" (Nick, 2026-10-29 16:2x): it is held, not out for good: when it is heard again it rejoins
+        (rejoin_watch). What it needs for that is kept: its part of the plan and its steps' states."""
         if b.out:
             return
+        import copy
         b.out = why
+        b.out_kind = kind
+        b.out_entry = copy.deepcopy(self.plan["robots"].get(b.name)) if b.name in self.plan["robots"] else None
+        b.out_ids, b.out_stat = list(b.ids), [dict(x) for x in b.stat]
+        b.back_t = None
+        b.out_t = now()
         ob = self.out_obstacle(b)
-        self.say("%s is out: %s. It is now a fixed obstacle where it stopped; the others re-plan and carry on" % (b.name,
-                                                                                                             why))
+        if self.rejoinable(b):
+            self.say("%s is held: %s. It is a fixed obstacle where it stopped until it is heard again (then it rejoins); "
+                     "the others re-plan and carry on" % (b.name, why))
+        else:
+            self.say("%s is out: %s. It is now a fixed obstacle where it stopped; the others re-plan and carry on"
+                     % (b.name, why))
         self.log("robot_out", robot=b.name, why=why, obstacle=ob, pose=list(b.pose) if b.pose else None)
         self.control(b, "halt")              # if it can still hear: stop at once
         self.names = [n for n in self.names if n != b.name]
         self.outs = getattr(self, "outs", []) + [dict(robot=b.name, why=why, t_run=round(now() - self.t_run, 2)
                                                       if self.t_run_started() else None)]
         if not self.names:
+            if self.rejoinable(b):
+                self.say("every robot is held: waiting up to %.0f s for %s to be heard again" % (self.REJOIN_WAIT_S,
+                                                                                               b.name))
+                self.plan = self.without(self.plan, [b.name])
+                return
             self.abort = "every robot is out (%s)" % why
             self.say(self.abort)
             return
         self.plan = self.without(self.plan, [b.name])
         self.handle_obstacle(ob)
+
+    # -- unconfirmed sensor obstacles (Nick, 2026-10-29 16:2x; front_stop.py) -------------------------------------
+    # The robot always stops. What its sensor alone saw is on the map as "unconfirmed": it expires after
+    # --unconfirmed-s (15 s) unless the camera or a second stop at the same place confirms it, and is dropped (the plan
+    # made again) rather than the run ending with "no plan". The 5 "no plan" ends of 29 Oct each followed a false stop.
+    def unconf(self):
+        u = self.__dict__.get("_unconf")
+        if u is None:
+            u = self._unconf = FSTOP.Unconfirmed(now, expire_s=getattr(self.args, "unconfirmed_s", FSTOP.UNCONFIRMED_S))
+        return u
+
+    def mark_unconfirmed(self, b, ob):
+        if ob is None or not getattr(self.args, "unconfirmed_s", FSTOP.UNCONFIRMED_S):
+            return
+        u = self.unconf()
+        by = (getattr(self, "sensor_stops", None) or [{}])[-1].get("camera")
+        near = u.near(ob["points"])
+        if by or near:
+            for k in near:
+                u.confirm(k, by or "a second stop by %s" % b.name)
+            ob["confirmed"] = by or "a second stop"
+            if near:
+                self.say("%s: stopped again where an earlier stop was: the obstacle is confirmed and stays on the map"
+                         % b.name)
+            self.log("obstacle_confirmed", id=ob["id"], robot=b.name, by=by or "second stop", also=near)
+            return
+        u.add(ob, b.name)
+        ob["unconfirmed"] = True
+        self.say("%s: no camera sees it: mapped as unconfirmed (it leaves the map in %.0f s unless the camera or a "
+                 "second stop confirms it)" % (b.name, u.expire_s))
+        self.log("obstacle_unconfirmed", id=ob["id"], robot=b.name, expires_s=u.expire_s, points=ob["points"])
+
+    def drop_obstacles(self, ids, how):
+        u = self.unconf()
+        before = len(self.m.get("obstacles", []))
+        self.m["obstacles"] = [o for o in self.m.get("obstacles", []) if o.get("id") not in ids]
+        if len(self.m["obstacles"]) != before:
+            self.m = FM.normalize(self.m)
+        for k in ids:
+            u.drop(k, how)
+        self.log("unconfirmed_" + how.split()[0], ids=list(ids))
+
+    def unconfirmed_watch(self):
+        u = self.__dict__.get("_unconf")
+        if u is None or not u.items:
+            return
+        for o in self.m.get("obstacles", []):
+            if o.get("source") not in ("camera", "brickwatch"):
+                continue
+            pts = o.get("points") or ([o["center"]] if o.get("center") else [])
+            for k in u.near(pts):
+                if k in u.items:
+                    u.confirm(k, "the camera (%s)" % o.get("id"))
+                    self.say("obstacle %s: the camera sees it too: confirmed, it stays on the map" % k)
+                    self.log("obstacle_confirmed", id=k, by="camera %s" % o.get("id"))
+        gone = u.expired()
+        if not gone:
+            return
+        self.drop_obstacles(gone, "expired")
+        self.say("%s: unconfirmed for %.0f s (no camera, no second stop): taken off the map"
+                 % (", ".join(gone), u.expire_s))
+        if self.plan.get("stranded"):
+            self.next_retry = now()
+        elif self.planning is None and self.improve_at is None and not self.abort:
+            self.improve_at = now()     # the room it freed may give a shorter plan (kept only if everyone ends sooner)
+
+    def no_plan_drop(self, ob, cause, err):
+        """A re-plan found no plan: with unconfirmed obstacles on the map (or the new one unconfirmed), drop them and
+        plan again instead of stopping everyone. True when it did."""
+        if not getattr(self.args, "unconfirmed_s", FSTOP.UNCONFIRMED_S):
+            return False
+        u = self.unconf()
+        on_map = {o.get("id") for o in self.m.get("obstacles", [])}
+        ids = [k for k in u.items if k in on_map]
+        new_unc = bool(ob and ob.get("unconfirmed") and ob.get("id") in u.items)
+        if new_unc:
+            ids.append(ob["id"])
+        if not ids:
+            return False
+        self.drop_obstacles(ids, "dropped (no plan)")
+        self.no_plan_drops = getattr(self, "no_plan_drops", 0) + 1
+        self.say("no plan with %s on the map (%s): %s, planning again" % (
+            "an unconfirmed obstacle" if len(ids) == 1 else "%d unconfirmed obstacles" % len(ids), err,
+            "dropped it" if len(ids) == 1 else "dropped them"))
+        self.handle_obstacle(None if new_unc else ob, cause=cause)
+        return True
+
+    def live_obstacles(self):
+        u = self.__dict__.get("_unconf")
+        t = now()
+        out = []
+        for o in self.m.get("obstacles", []):
+            d = {k: o[k] for k in ("id", "points", "center", "radius", "source") if k in o}
+            if u is not None and o.get("id") in u.items:
+                d["unconfirmed"] = True
+                d["expires_in_s"] = round(max(0.0, u.expire_s - (t - u.items[o["id"]]["t"])), 1)
+            out.append(d)
+        return out
+
+    # -- a silent or restarted robot rejoins (Nick, 2026-10-29 16:2x; rules audit rec 7) ----------------------------
+    REJOIN_HEARD_S = 1.0   # chosen: heard steadily this long before it rejoins (not a flicker of the WiFi). No DOE: the
+                           # simulator's silent-then-back runs (5 s, 2-6 s restarts) check it works; a flapping link
+                           # is capped by REJOIN_MAX
+    REJOIN_CAM_S = 0.6     # its camera position no older than this (fixes come ~10 a second). No DOE: plumbing
+    REJOIN_MAX = 3         # chosen: rejoins per robot per run; after the 3rd its next silence keeps it out (a link that
+                           # keeps dropping). No DOE: a stop to a loop
+    REJOIN_BOOT_WAIT_S = 4.0  # its boot ID (status, CLOCK, RUNINFO) not heard in this long: it is checked as restarted
+    REJOIN_WAIT_S = 30.0   # chosen: when everyone else is done (or every robot is held), the run waits this long for a
+                           # held robot before it ends. No DOE: a policy (the run's length against a robot left behind)
+
+    def rejoin_on(self):
+        return not getattr(self.args, "no_rejoin", False)
+
+    def rejoinable(self, b):
+        return (self.rejoin_on() and getattr(b, "out_kind", None) in ("silent", "restarted") and
+                getattr(b, "rejoins_n", 0) < self.REJOIN_MAX and not getattr(b, "rejoin_failed", None) and
+                getattr(b, "out_entry", None) is not None)
+
+    def out_heard(self, b, t, kind, rtype, vals):
+        """A record from a robot that is out of the run: its boot ID (did it restart?), and since when it is heard."""
+        boot = None
+        if kind == "M" and vals.lower().startswith("status "):
+            st_ = EC.parse_status(vals)
+            if st_:
+                b.firmware, b.battery, boot = st_["firmware"], st_["battery"], st_["boot"]
+        elif rtype == "CLOCK" and len(vals) >= 3:
+            boot = vals[2].strip().upper()
+        elif rtype == "RUNINFO" and len(vals) >= 2:
+            boot = EC.boot_of_run(vals[0])
+            b.run_id, b.run_exp = vals[0], vals[1]
+        elif rtype == "RUNEND" and len(vals) >= 2 and vals[0] == b.run_id and b.run_exp == "follow":
+            b.ended = vals[1]
+        elif rtype == "FOLLOW" and len(vals) >= 17:
+            # its own pose while out (it may have driven its buffered steps: a circle turns it right round); the
+            # rejoin takes its heading from here when the camera gives none
+            try:
+                ms, x, y, th = int(float(vals[1])), float(vals[7]), float(vals[8]), float(vals[9])
+                b.note_clock(t, ms)
+                if vals[3] != "nopose":
+                    b.pose, b.pose_t = (x, y, th), t
+                    b.follow_back_t = t
+            except (ValueError, IndexError):
+                pass
+        if boot:
+            b.boot_back = boot
+        if getattr(b, "back_t", None) is None:
+            b.back_t = t
+            self.log("robot_back", robot=b.name, why=b.out, rejoins=self.rejoinable(b))
+            if self.rejoinable(b):
+                self.say("%s is talking again: checking it (boot ID, camera) before it rejoins" % b.name)
+                self.send(b.name, "status")
+                b.status_asked_t = t
+            elif not getattr(b, "back_said", False):
+                b.back_said = True
+                self.say("%s is talking again (%s); it stays out of this run, as a fixed obstacle" % (b.name, b.out))
+
+    def rejoin_watch(self):
+        if not self.rejoin_on() or not self.t_run_started() or self.planning is not None:
+            return
+        t = now()
+        if not self.names and not any(b.out and self.rejoinable(b) and t - getattr(b, "out_t", 0.0) < self.REJOIN_WAIT_S
+                                      for b in self.bots.values()):
+            self.abort = "every robot is out (none heard again within %.0f s)" % self.REJOIN_WAIT_S
+            self.say(self.abort)
+            return
+        for b in self.bots.values():
+            if not b.out or not self.rejoinable(b):
+                continue
+            if b.last_heard is None or t - b.last_heard > 0.5:
+                b.back_t = None                  # quiet again
+                continue
+            if getattr(b, "back_t", None) is None or t - b.back_t < self.REJOIN_HEARD_S:
+                continue
+            boot0 = b.boot_start or b.boot
+            if getattr(b, "boot_back", None) is None:
+                if t - getattr(b, "status_asked_t", 0.0) > 1.0:
+                    self.send(b.name, "status")
+                    b.status_asked_t = t
+                if t - b.back_t < self.REJOIN_BOOT_WAIT_S:
+                    continue
+            same = getattr(b, "boot_back", None) is not None and b.boot_back == boot0 and b.ended is None and \
+                b.out_kind == "silent"
+            cam = getattr(b, "last_cam", None)
+            if cam is None or t - (getattr(b, "cam_t", None) or 0.0) > self.REJOIN_CAM_S:
+                if not getattr(b, "rejoin_cam_said", False):
+                    b.rejoin_cam_said = True
+                    self.say("%s: heard again, but no camera sees it: it stays held until one does" % b.name)
+                continue
+            if same:
+                self.rejoin(b, "heard again on the same boot (%s) after %s" % (b.boot_back, b.out.split(";")[0]))
+            else:
+                self.recheck(b)
+            return
+
+    def rejoin(self, b, why):
+        """Back into the plan: its steps as they were when it went out (nothing to wait for), its pose from the camera,
+        its out-obstacle off the map; then everyone re-plans from where they are."""
+        n = b.name
+        cam = b.last_cam
+        own_fresh = b.pose is not None and now() - (getattr(b, "follow_back_t", None) or 0.0) < 1.0
+        th = cam[2] if cam[2] is not None else (b.pose[2] if own_fresh else None)
+        if th is None and getattr(b, "out_kind", None) == "silent" and now() - (getattr(b, "back_t", None) or now()) < 5.0:
+            return                              # its own pose (FOLLOW) not heard yet: try again in a moment
+        if th is None:
+            b.rejoin_failed = "no heading (no camera heading, no pose of its own)"
+            self.say("%s cannot rejoin: %s; it stays out" % (n, b.rejoin_failed))
+            return
+        self.control(b, "halt")                 # whatever it still had queued is dropped
+        self.send(n, "fpose %.2f %.2f %.2f 1.0 3.0" % (cam[0], cam[1], th))
+        b.pose, b.pose_t = (cam[0], cam[1], th), now()
+        entry = b.out_entry
+        for st in entry["steps"]:
+            st["after"] = []
+        self.plan["robots"][n] = entry
+        stat = [dict(x) for x in b.out_stat]
+        for x in stat:
+            if x["status"] in ACTIVE:
+                x["status"], x["info"] = "failed", "halted: rejoined"
+        b.ids, b.stat = list(b.out_ids), stat
+        b.id_index = {sid: i for i, sid in enumerate(b.ids) if sid is not None}
+        self.m["obstacles"] = [o for o in self.m.get("obstacles", []) if o.get("id") != "out-%s" % n]
+        self.m = FM.normalize(self.m)
+        self.names = [x for x in self.bots if x in self.names or x == n]
+        was = b.out
+        b.out = b.out_kind = None
+        b.back_t = b.boot_back = None
+        b.back_said = b.rejoin_cam_said = False
+        b.boot_start = b.boot = b.boot or b.boot_start
+        b.rejoins_n = getattr(b, "rejoins_n", 0) + 1
+        rec = dict(robot=n, why=why, was=was, t_run=round(now() - self.t_run, 2), cam=list(cam))
+        self.rejoins = getattr(self, "rejoins", []) + [rec]
+        self.log("robot_rejoined", **rec)
+        self.say("%s rejoins (%s): its pose set from the camera (%.1f, %.1f); everyone re-plans from where they are"
+                 % (n, why, cam[0], cam[1]))
+        self.rejoin_pending = n
+        self.handle_obstacle(None)
+
+    def recheck(self, b):
+        """A robot that restarted (a new boot ID, or its follow run ended) while out: everyone else holds while it is
+        checked as at the start (status, battery, its settings, calibration if it lost it, the facing check, its follow
+        run, the floor check). Passed: it rejoins and everyone re-plans. Failed: it stays out, said why."""
+        n = b.name
+        self.say("%s restarted or its run ended (boot %s, was %s): everyone holds while it is checked again"
+                 % (n, getattr(b, "boot_back", None) or "?", b.boot_start or b.boot))
+        for o in self.bots.values():
+            if o.name in self.names:
+                self.control(o, "halt")
+        self.log("recheck_start", robot=n, boot=getattr(b, "boot_back", None))
+        try:
+            ok, words = recheck_robot(self, self.link, self.args, n, self.source)
+        except SystemExit as e:
+            ok, words = False, str(e)
+        except Exception as e:      # noqa: BLE001  (a failed re-check keeps it out; it never stops the others)
+            ok, words = False, "the re-check failed (%s)" % e
+        self.log("recheck_done", robot=n, ok=ok, words=words)
+        if not ok:
+            b.rejoin_failed = words
+            self.say("%s stays out: %s. The others re-plan and carry on" % (n, words))
+            self.handle_obstacle(None)
+            return
+        b.boot_start = b.boot
+        b.out_kind = "silent"
+        if getattr(b, "last_cam", None) is None:
+            b.rejoin_failed = "no camera position after the re-check"
+            self.handle_obstacle(None)
+            return
+        self.rejoin(b, "restarted, checked again: %s" % words)
 
     LIVE_EVERY_S = 0.5    # live.json for Mission Control's Run screen. No DOE: a display rate
 
@@ -1179,10 +1501,11 @@ class Coordinator:
                     last = "%s %s" % (lastst["status"], (lastst.get("info") or "")[:60])
             rob[n] = {"cam": cam, "own": [round(v, 2) for v in b.pose] if b.pose else None, "battery": b.battery,
                       "doing": doing, "last": last, "edge_cm": edge, "out": b.out,
-                      "done": sum(st["status"] == "done" for st in b.stat), "steps": len(b.stat)}
+                      "done": sum(st["status"] == "done" for st in b.stat), "steps": len(b.stat),
+                      "held": bool(b.out) and self.rejoinable(b), "stop_cm": getattr(b, "stop_cm", None)}
         live = {"t": round(t, 2), "t_run": round(t - self.t_run, 1) if self.t_run_started() else None,
                 "plan_no": self.plan_no, "replans": len(self.replans), "result": self.abort or ("done" if final else None),
-                "robots": rob}
+                "robots": rob, "obstacles": self.live_obstacles()}
         try:
             tmp = os.path.join(self.outdir, "live.json.tmp")
             with open(tmp, "w") as fh:
@@ -1199,7 +1522,8 @@ class Coordinator:
         for n in list(self.names):
             b = self.bots[n]
             if b.last_heard is not None and t - b.last_heard > lim:
-                self.retire(b, "nothing heard from it for %.1f s (battery dead or WiFi gone)" % (t - b.last_heard))
+                self.retire(b, "nothing heard from it for %.1f s (battery dead or WiFi gone)" % (t - b.last_heard),
+                            kind="silent")
 
     def status_poll(self):
         t = now()
@@ -1254,6 +1578,7 @@ class Coordinator:
                 b.own_until = now() + OWN_POSE_WINDOW_S
             ob = self.sensor_obstacle(b, pose, front, info)
             self.sensor_agreement(b, ob, info)
+            self.mark_unconfirmed(b, ob)
             if ob is None:
                 self.say("%s: its distance sensor saw another robot ahead (%s); re-planning" % (b.name, info))
                 self.handle_obstacle(None, cause=b.name)
@@ -1732,6 +2057,11 @@ class Coordinator:
     def finished(self):
         if self.plan.get("stranded"):
             return False
+        if any(b.out and self.rejoinable(b) and now() - getattr(b, "out_t", 0.0) < self.REJOIN_WAIT_S
+               for b in self.bots.values()):
+            return False             # a held robot may still rejoin (rejoin_watch)
+        if not self.names:
+            return False
         return all(all(st["status"] == "done" for st in self.bots[n].stat) for n in self.names)
 
     def run(self, timeout_s):
@@ -1761,6 +2091,10 @@ class Coordinator:
             if self.abort:
                 break
             self.silence_watch()
+            if self.abort:
+                break
+            self.unconfirmed_watch()
+            self.rejoin_watch()
             if self.abort:
                 break
             self.disk_watch()
@@ -1837,6 +2171,11 @@ class Coordinator:
                 "sensor_stops": getattr(self, "sensor_stops", []),
                 "robots_out": getattr(self, "outs", []),
                 "plans_refused": getattr(self, "n_refused", 0),
+                "front_stop": {"readings": getattr(self.args, "obstacle_readings", None),
+                               "stop_cm": {n: getattr(b, "stop_cm", None) for n, b in self.bots.items()},
+                               "unconfirmed": self.unconf().summary() if "_unconf" in self.__dict__ else {"added": 0},
+                               "no_plan_drops": getattr(self, "no_plan_drops", 0)},
+                "rejoins": getattr(self, "rejoins", []),
                 "confirm_checks": getattr(self, "confirms", []),
                 "battery": {n: b.battery for n, b in self.bots.items()},
                 "boot": {n: b.boot for n, b in self.bots.items()},
@@ -2084,6 +2423,166 @@ def read_back(coord, link, want, tries=EC.READBACK_TRIES):
             if any(not EC.setting_matches(v, coord.bots[n].params.get(nm)) for nm, v, _ in lst)}
 
 
+def floor_check(coord, link, args, names):
+    """The floor check (Nick, 2026-10-29 16:2x; front_stop.py): each robot stands still while its five front zones are
+    read (FLOOR_SAMPLE_S); its stop limit (follow_look_cm) becomes the lowest of 12 cm, its own ceiling (Left 10 cm,
+    engine_checks.ROBOT_SETTINGS) and its floor's 3-in-a-row level less --floor-margin-cm, never under 8 cm. Every
+    connect (the floor moved 15 -> 12 cm after a restart on 29 Oct, and drive to drive within one boot). Said in plain
+    words, logged (floor_check events, floor_check.json, the summary's start_checks)."""
+    if getattr(args, "floor_check", "on") == "off":
+        return {}
+    own = getattr(EC, "ROBOT_SETTINGS", {}) or {}
+    coord.floor_raw = {n: [] for n in names}
+    t0 = time.time()
+    print("Floor check: each robot stands still while its distance sensor reads the floor (%.1f s) ..."
+          % FSTOP.FLOOR_SAMPLE_S)
+    while time.time() - t0 < FSTOP.FLOOR_SAMPLE_S:
+        coord.drain()
+        time.sleep(0.03)
+    rows, coord.floor_raw = coord.floor_raw, None
+    want, out = {}, {}
+    sent = getattr(coord, "sent_settings", {}) or {}
+    for n in names:
+        b = coord.bots[n]
+        ceiling = float((own.get(n) or {}).get("follow_look_cm", FSTOP.FLOOR_CAP_CM))
+        fl = FSTOP.floor_level(rows.get(n) or [])
+        ahead = floor_blocked(coord, n)
+        if ahead and fl.get("floor_cm") is not None:
+            fl = dict(fl, floor_cm=None, why="%s is %.0f cm in front of it (it would be read as the floor)" % ahead)
+        lim, rule = FSTOP.stop_limit(fl.get("floor_cm"), ceiling, getattr(args, "floor_margin_cm",
+                                                                           FSTOP.FLOOR_MARGIN_CM))
+        words = FSTOP.limit_words(n, fl, lim, rule, ceiling, getattr(args, "floor_margin_cm", FSTOP.FLOOR_MARGIN_CM))
+        coord.say("floor check: " + words)          # (said: Mission Control's event log shows it)
+        coord.log("floor_check", robot=n, limit_cm=lim, rule=rule, ceiling_cm=ceiling, floor=fl, words=words)
+        b.stop_cm = lim
+        out[n] = dict(limit_cm=lim, rule=rule, ceiling_cm=ceiling, floor_cm=fl.get("floor_cm"),
+                      lowest_cm=fl.get("lowest_cm"), median_cm=fl.get("median_cm"), readings=fl.get("n"),
+                      zones=fl.get("zones"), why=fl.get("why"), words=words)
+        cur = (sent.get(n) or {}).get("follow_look_cm", b.params.get("follow_look_cm", FSTOP.FLOOR_CAP_CM))
+        if cur is None or abs(float(cur) - lim) > 0.05:
+            link.send_name(n, "set follow_look_cm %.1f" % lim)
+            want[n] = {"follow_look_cm": lim}
+            sent.setdefault(n, {})["follow_look_cm"] = lim
+        if rule == "minimum":
+            coord.say("WARNING: %s's floor reads very near (%.1f cm): its stop limit is the lowest allowed, %.1f cm. "
+                      "Look at its sensor and what is in front of it" % (n, fl["floor_cm"], lim))
+    if want:
+        time.sleep(0.1)
+        for n in want:
+            coord.bots[n].params.pop("follow_look_cm", None)
+            link.send_name(n, "get follow_look_cm")
+        wait_for(lambda: all(coord.bots[n].params.get("follow_look_cm") is not None for n in want), 1.5, coord)
+        wrong = read_back(coord, link, want)
+        if wrong:
+            raise SystemExit("The floor check's stop limit was not confirmed by %s. Nothing was moved."
+                             % ", ".join(wrong))
+    if hasattr(coord, "start_checks"):
+        for n, v in out.items():
+            coord.start_checks.setdefault(n, {})["stop_limit"] = {k: v[k] for k in ("limit_cm", "rule", "floor_cm",
+                                                                                   "ceiling_cm")}
+    try:
+        old = {}
+        p = os.path.join(coord.outdir, "floor_check.json")
+        if os.path.exists(p):
+            with open(p) as f:
+                old = json.load(f) or {}
+        old.setdefault("checks", []).append(dict(t=round(time.time(), 2), robots=out, margin_cm=getattr(
+            args, "floor_margin_cm", FSTOP.FLOOR_MARGIN_CM), readings_in_a_row=FSTOP.STOP_READINGS))
+        with open(p, "w") as f:
+            json.dump(old, f, indent=1)
+    except (OSError, ValueError):
+        pass
+    return out
+
+
+def floor_blocked(coord, n):
+    """(name, distance) of another robot or a known obstacle within FLOOR_ROBOT_AHEAD_CM in front of robot n (+-35 deg
+    of its heading): the zones would read it as the floor. None when nothing is."""
+    b = coord.bots[n]
+    st = (coord.plan.get("robots") or {}).get(n, {}).get("start")
+    pose = b.pose or (tuple(st[:3]) if st else None)
+    if pose is None:
+        return None
+    hx, hy = math.cos(math.radians(pose[2])), math.sin(math.radians(pose[2]))
+    others = []
+    for o in coord.bots.values():
+        if o.name == n:
+            continue
+        ost = (coord.plan.get("robots") or {}).get(o.name, {}).get("start")
+        op = o.pose or (getattr(o, "last_cam", None) and tuple(o.last_cam[:2])) or (tuple(ost[:2]) if ost else None)
+        if op:
+            others.append((o.name, op[0], op[1]))
+    for ob in coord.m.get("obstacles", []):
+        for p in (ob.get("points") or ([ob["center"]] if ob.get("center") else [])):
+            others.append(("an obstacle", p[0], p[1]))
+    best = None
+    for nm, x, y in others:
+        dx, dy = x - pose[0], y - pose[1]
+        d = math.hypot(dx, dy)
+        if d < 1e-6 or d > FSTOP.FLOOR_ROBOT_AHEAD_CM:
+            continue
+        if (dx * hx + dy * hy) / d >= math.cos(math.radians(35.0)) and (best is None or d < best[1]):
+            best = (nm, d)
+    return best
+
+
+def recheck_robot(coord, link, args, n, source):
+    """A robot that restarted mid-run, checked again before it rejoins (Coordinator.recheck): status (battery),
+    its settings (read back), calibration if it says it is not calibrated, the facing check (its heading), its follow
+    run, the floor check. (ok, words)."""
+    b = coord.bots[n]
+    link.send_name(n, "stop")
+    time.sleep(0.5)
+    b.ended = None
+    b.boot = None
+    read_status(coord, link, [n])
+    if not b.boot:
+        wait_for(lambda: b.boot, 3.0, coord)
+    if b.battery is not None and args.battery_floor and b.battery < args.battery_floor:
+        return False, "its battery is at %d %%, under the %d %% floor" % (b.battery, args.battery_floor)
+    prev = dict(getattr(coord, "sent_settings", {}) or {})
+    want = send_settings(coord, link, args, [n])
+    coord.sent_settings = dict(prev, **want)
+    did = []
+    heading = None
+    if getattr(args, "facing_check", False) and getattr(source, "live", False):
+        try:
+            import facing as FC
+            try:
+                res = FC.run_plan_check(coord, link, args, [n], straighten=True, tag="facing-rejoin-%s" % n)
+            except TypeError:
+                res = FC.run_plan_check(coord, link, args, [n])
+            heading = ((res or {}).get("headings") or {}).get(n) if isinstance(res, dict) else None
+            did.append("facing checked")
+        except SystemExit as e:
+            return False, "the facing check: %s" % e
+    start_follow(coord, link, [n])
+    if b.calibrated is False:
+        if args.recalibrate == "no":
+            return False, "not calibrated since its restart (--recalibrate no)"
+        done = calibrate(coord, link, args, [n], source)
+        if n not in done:
+            return False, "its calibration did not finish (or it had no room to spin)"
+        did.append("calibrated")
+        link.send_name(n, "stop")
+        time.sleep(0.5)
+        start_follow(coord, link, [n])
+    if b.run_exp != "follow" or b.calibrated is False:
+        return False, "its follow run did not start"
+    if not wait_for(lambda: b.follow, 8, coord):
+        return False, "no FOLLOW records"
+    wait_for(lambda: all(k in b.params for k in want[n]), 1.5, coord)
+    wrong = read_back(coord, link, {n: want[n]})
+    if wrong:
+        return False, "its settings were not confirmed (%s)" % ", ".join("%s sent %g, says %s" % x for x in wrong[n])
+    did.append("settings read back")
+    floor_check(coord, link, args, [n])
+    did.append("floor checked")
+    if heading is not None and getattr(b, "last_cam", None):
+        b.last_cam = [b.last_cam[0], b.last_cam[1], round(float(heading), 1)]
+    return True, "boot %s: %s" % (b.boot, ", ".join(did))
+
+
 def start_follow(coord, link, names):
     for n in names:
         coord.bots[n].ended = None
@@ -2205,6 +2704,7 @@ def start_robots(coord, link, args, source):
                          % (EC.READBACK_TRIES, "; ".join("%s %s" % (n, ", ".join("%s sent %g, says %s" % x for x in lst))
                                                          for n, lst in wrong.items())))
     print("  settings read back: %s" % ", ".join("%s %d ok" % (n, len(want[n])) for n in names))
+    floor_check(coord, link, args, names)
     # where are they?
     starts = {n: coord.plan["robots"][n]["start"] for n in names}
     if straight:
@@ -2525,6 +3025,19 @@ def main(argv=None):
     ap.add_argument("--obstacle-readings", type=int, default=OBSTACLE_READINGS, choices=(0, 1, 2, 3),
                     help="distance-sensor readings in a row that stop a step (firmware obs_n, 2026-10-28a; 0 = "
                          "leave the robot's own setting; default %(default)s)")
+    ap.add_argument("--floor-check", choices=("on", "off"), default="on",
+                    help="at start-up each robot stands while its front zones read the floor; its stop limit becomes "
+                         "the lowest of 12 cm, its own ceiling (Left 10) and its floor less --floor-margin-cm, not "
+                         "under 8 cm (front_stop.py; default %(default)s)")
+    ap.add_argument("--floor-margin-cm", type=float, default=FSTOP.FLOOR_MARGIN_CM,
+                    help="the floor check: the limit sits this far under the floor's level (default %(default)s)")
+    ap.add_argument("--unconfirmed-s", type=float, default=FSTOP.UNCONFIRMED_S,
+                    help="a distance-sensor obstacle the camera (or a second stop) did not confirm leaves the map "
+                         "after this long, and before a re-plan gives up with no plan (default %(default)s; 0 = "
+                         "every one stays, as before)")
+    ap.add_argument("--no-rejoin", action="store_true",
+                    help="a robot that went silent or restarted stays out for the rest of the run (before "
+                         "2026-10-29); default: it rejoins when heard again (same boot) or after a re-check")
     ap.add_argument("--corrections", choices=("auto", "yes", "no"), default="auto",
                     help="send each robot's stored driving corrections (gyro_scale, wheel_scale, gyro_drift_dps: "
                          "e02_fit.PRIOR, corrections.json, today's warm-up); auto = real robots only")

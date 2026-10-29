@@ -37,13 +37,12 @@ def picture(board, top, clip=0.0, seed=0, spots=SPOTS):
     return g.astype(np.uint8), cam
 
 
-@pytest.mark.parametrize("top,verdict", [(235, "ok"), (213, "low"), (200, "washed out")])
+@pytest.mark.parametrize("top,verdict", [(235, "ok"), (213, "low"), (200, "low")])
 def test_verdict_follows_the_robots_contrast(top, verdict):
+    """29 Oct 16:2x: the overhead is "low" under 30 grey levels, never "washed out" for contrast alone."""
     g, cam = picture(190, top)
     m = LG.measure(g, cam, spots=SPOTS)
     assert m["verdict"] == verdict, m
-    if verdict == "washed out":
-        assert "close the blinds or turn off the lamp above the table" in m["words"]
 
 
 def test_finds_the_robots_itself_and_a_clipping_board():
@@ -58,9 +57,9 @@ def test_finds_the_robots_itself_and_a_clipping_board():
     assert m["verdict"] == "washed out" and "clipped" in m["words"]
 
 
-@pytest.mark.parametrize("contrast,verdict", [(16, "washed out"), (19, "low"), (22, "low"), (25, "low"), (27, "ok")])
+@pytest.mark.parametrize("contrast,verdict", [(16, "low"), (22, "low"), (27, "low"), (29, "low"), (32, "ok")])
 def test_label_matches_the_stated_thresholds(contrast, verdict):
-    """29 Oct: washed out is under 18, low 18-25, fine from 26 (the card's own words)."""
+    """29 Oct 16:2x (rules audit rec 5): the overhead is low under 30, fine from 30; washed out only when it clips."""
     g, cam = picture(190, 190 + contrast)
     m = LG.measure(g, cam, spots=SPOTS)
     assert m["verdict"] == verdict, m
@@ -73,3 +72,25 @@ def test_a_robot_not_found_at_22_is_low_not_washed_out():
     m = LG.measure(g, cam, n_robots=3)
     assert m["found"] == 2 and m["verdict"] == "low", m
     assert "only 2 of 3 robots found" in m["words"] and "washed out" not in m["words"].split("(")[0]
+
+
+@pytest.mark.parametrize("contrast", [17, 22, 45])
+def test_side_camera_is_fine_whenever_it_finds_every_robot(contrast):
+    """The side camera saw robots 97.7-99.8 % of the time at every contrast logged (16-45): no contrast warning."""
+    g, cam = picture(190, 190 + contrast)
+    m = LG.measure(g, cam, spots=SPOTS, name="side")
+    assert m["verdict"] == "ok" and "fine" in m["words"], m
+
+
+def test_side_camera_warns_only_when_a_robot_is_not_found():
+    g, cam = picture(190, 230, spots=SPOTS[:2])
+    m = LG.measure(g, cam, n_robots=3, name="side")
+    assert m["verdict"] == "not found" and "only 2 of 3 robots found" in m["words"], m
+
+
+def test_overhead_washed_out_only_when_the_board_clips():
+    g, cam = picture(240, 250, clip=0.05)
+    assert LG.measure(g, cam, spots=SPOTS)["verdict"] == "washed out"
+    g, cam = picture(190, 200)
+    m = LG.measure(g, cam, spots=SPOTS)
+    assert m["verdict"] == "low" and "washed out" not in m["words"], m

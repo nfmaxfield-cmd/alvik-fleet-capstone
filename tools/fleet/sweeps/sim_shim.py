@@ -261,6 +261,61 @@ def install(sim, cond, seed):
         rb.advance = advance
         if mode == "dead":
             rb._physics = lambda h, still: orig_phys(h, True if state["done"] else still)
+    # ---- the floor in the front zones, and false stops (false-stops build, 2026-10-29)
+    floor_and_phantoms(sim, cond, seed)
+
+
+def floor_and_phantoms(sim, cond, seed):
+    """floor   {"Left": {"zone": 3, "cm": 11.4, "sd": 0.3}}: that zone reads the plywood floor at about cm whenever
+               nothing nearer is in view (the 29 Oct logs: Left's centre-right zone, 11-12 cm standing). The floor
+               check reads it at start-up.
+    phantom    {"name": "Left" | "all", "readings": 4, "cm": 9.0, "zone": 3, "every": 1}: after every `every`-th turn,
+               the next drive's first `readings` new readings in that zone are this low (nothing is there: a false
+               stop with 3 in a row needs readings >= 3); with "long_every": k, "long_readings": 5, every k-th turn's is that
+               long instead. Each one is logged as a sim event (phantom)."""
+    fl = cond.get("floor") or {}
+    ph = cond.get("phantom")
+    for name, rb in sim.robots.items():
+        f1 = fl.get(name)
+        p1 = ph if ph and ph.get("name") in (name, "all") else None
+        if not f1 and not p1:
+            continue
+        rng = random.Random(seed * 131 + sum(map(ord, name)))
+        st = {"frame": None, "vals": None, "prev": "idle", "left": 0, "armed": None, "turns": 0}
+
+        def tof(rb=rb, orig=rb.tof, f1=f1, p1=p1, st=st, rng=rng):
+            v = orig()
+            fr = getattr(rb, "_tof_ms", None)
+            if fr is not None and fr == st["frame"] and st["vals"] is not None:
+                return st["vals"]
+            st["frame"] = fr
+            v = list(v)
+            if f1:
+                k = int(f1.get("zone", 3))
+                v[k] = min(v[k], max(0.5, rng.gauss(float(f1["cm"]), float(f1.get("sd", 0.3)))))
+            if p1:
+                s = getattr(rb, "f_state", "idle") or "idle"
+                cur = getattr(rb, "f_cur", 0)
+                if s == "drive" and st["prev"] == "turn" and st["armed"] != cur:
+                    st["armed"] = cur
+                    st["turns"] += 1
+                    if (st["turns"] - 1) % max(1, int(p1.get("every", 1))) == 0:
+                        st["left"] = int(p1.get("readings", 4))
+                    le = int(p1.get("long_every", 0) or 0)
+                    if le and st["turns"] % le == 0:
+                        st["left"] = int(p1.get("long_readings", 5))    # now and then a long one: a stop even at 3
+                    if st["left"] and sim.t_plan0 is not None:
+                        sim.event(dict(kind="phantom", robot=rb.name, step=cur, readings=st["left"],
+                                       t=round(time.time() - sim.t_plan0, 2)))
+                if s != "idle":
+                    st["prev"] = s
+                if st["left"] > 0:
+                    k = int(p1.get("zone", 3))
+                    v[k] = min(v[k], float(p1.get("cm", 9.0)))
+                    st["left"] -= 1
+            st["vals"] = v
+            return v
+        rb.tof = tof
 
 
 def main(argv=None):

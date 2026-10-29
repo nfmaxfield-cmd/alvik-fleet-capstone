@@ -119,7 +119,11 @@ function tableSVG(opt) {
     o += `<polygon points="${z.polygon.map(p => X(p[0]) + "," + Y(p[1])).join(" ")}" fill="#D92D20" fill-opacity="${pend ? .08 : .16}" stroke="#D92D20" stroke-width="1.5" ${pend ? 'stroke-dasharray="4 3"' : ""}/>`;
   }
   for (const ob of (opt.obstacles || [])) {
-    if (ob.points) o += `<polygon points="${ob.points.map(p => X(p[0]) + "," + Y(p[1])).join(" ")}" fill="#5B6474" fill-opacity=".35" stroke="#5B6474"/>`;
+    if (ob.points && ob.unconfirmed) {
+      // only a robot's distance sensor saw it (2026-10-29): dashed, with a "?"; it leaves the map unless confirmed
+      const cx = ob.points.reduce((a, p) => a + p[0], 0) / ob.points.length, cy = ob.points.reduce((a, p) => a + p[1], 0) / ob.points.length;
+      o += `<polygon points="${ob.points.map(p => X(p[0]) + "," + Y(p[1])).join(" ")}" fill="#DC6803" fill-opacity=".12" stroke="#DC6803" stroke-width="1.5" stroke-dasharray="4 3"/><text x="${X(cx)}" y="${Y(cy) + 4}" text-anchor="middle" font-size="12" font-weight="600" fill="#B54708">?${ob.expires_in_s != null ? " " + Math.round(ob.expires_in_s) + "s" : ""}</text>`;
+    } else if (ob.points) o += `<polygon points="${ob.points.map(p => X(p[0]) + "," + Y(p[1])).join(" ")}" fill="#5B6474" fill-opacity=".35" stroke="#5B6474"/>`;
     else if (ob.center) o += `<circle cx="${X(ob.center[0])}" cy="${Y(ob.center[1])}" r="${(ob.radius * k).toFixed(1)}" fill="#5B6474" fill-opacity=".35"/>`;
   }
   if (opt.segs) {
@@ -238,9 +242,9 @@ function connect() {
 let setupPoll = null;
 function lightingCard() {
   const L = S.lighting;
-  const rows = L ? L.cameras.map(c => `<div class="small" style="margin:4px 0;color:${c.verdict === "ok" ? "var(--green)" : c.verdict === "low" ? "var(--warn)" : "var(--red)"}"><b>${esc(c.verdict === "ok" ? "OK" : c.verdict === "low" ? "Low" : c.verdict === "no picture" ? "No picture" : "Washed out")}</b> · ${esc(c.words)}</div>`).join("") : `<p class="small muted">Not checked yet.</p>`;
+  const rows = L ? L.cameras.map(c => `<div class="small" style="margin:4px 0;color:${c.verdict === "ok" ? "var(--green)" : c.verdict === "low" ? "var(--warn)" : "var(--red)"}"><b>${esc(c.verdict === "ok" ? "OK" : c.verdict === "low" ? "Low" : c.verdict === "no picture" ? "No picture" : c.verdict === "not found" ? "Robot not found" : "Washed out")}</b> · ${esc(c.words)}</div>`).join("") : `<p class="small muted">Not checked yet.</p>`;
   const ex = L && L.exposure && L.exposure.length ? `<p class="small muted" style="margin-top:6px">Exposure changes: ${L.exposure.map(e => esc(e[1])).join("; ")}</p>` : "";
-  return `<div class="card ${L && L.cameras.some(c => c.verdict !== "ok") ? "warnc" : ""}" id="lightc"><h2>Lighting</h2><p class="small muted">Does each camera see the robots against the board? Measured on each camera's newest picture: how far the robots stand from the board in grey levels (fine from 26, washed out under 18).</p>${rows}${ex}
+  return `<div class="card ${L && L.cameras.some(c => c.verdict !== "ok") ? "warnc" : ""}" id="lightc"><h2>Lighting</h2><p class="small muted">Does each camera see the robots against the board? Measured on each camera's newest picture: overhead: how far the robots stand from the board in grey levels (fine from 30; "washed out" only when the board itself is white); side camera: whether it finds every robot.</p>${rows}${ex}
     <button class="b" id="lightgo">Check the lighting</button></div>`;
 }
 function wireLighting() {
@@ -480,16 +484,16 @@ function runScreen() {
   page(`<div class="between"><div><h1>${pv ? esc(MODES.find(m => m[0] === String(pv.title).toLowerCase())?.[1] || pv.title) : "Run"}</h1><p class="sub">${run ? `${fmt(run.elapsed_s)} in${pv ? " · planned " + fmt(pv.makespan_s) : ""}` : "Not started"}</p></div>
       <div class="row"><button class="p" id="start" ${run && run.running ? "disabled" : ""}>Run (${conn === "robots" ? "robots" : "simulator"})</button>
       <button class="b" id="pause" ${run && run.running ? "" : "disabled"}>${run && run.paused ? "Resume" : "Pause"}</button><button class="p stop" id="stop" ${run && run.running ? "" : "disabled"}>Stop</button></div></div>
-    <div class="card">${tableSVG({paths: pv ? pv.paths : {}, pathOp: .25, robots: run ? run.robots : {}, obstacles: pv ? pv.obstacles : []})}
-      <p class="small muted" style="margin:8px 0 0">Where the camera sees each robot now (${conn === "robots" ? "overhead camera" : "simulated camera"}), over the planned routes.</p></div>
+    <div class="card">${tableSVG({paths: pv ? pv.paths : {}, pathOp: .25, robots: run ? run.robots : {}, obstacles: (pv ? pv.obstacles : []).concat((run && run.live && run.live.obstacles) || [])})}
+      <p class="small muted" style="margin:8px 0 0">Where the camera sees each robot now (${conn === "robots" ? "overhead camera" : "simulated camera"}), over the planned routes. Grey: obstacles on the planner's map; dashed orange with "?": something only a robot's distance sensor saw (unconfirmed: it leaves the map after 15 s unless the camera or a second stop there confirms it).</p></div>
     ${run && run.mode && run.mode !== "sim" ? `<div class="card"><h3>The cameras now</h3><div class="row" style="align-items:flex-start">
       <figure style="margin:0;flex:1 1 300px"><img id="camo" alt="The overhead camera's picture with each robot ringed" src="/api/frame?cam=overhead&t=${Date.now()}" style="width:100%;border-radius:8px"><figcaption class="small muted">Overhead camera (${run.mode === "robots" ? "the Pi's" : "simulated"}): each robot ringed in its colour where the camera bridge has it, planned routes as thin lines.</figcaption></figure>
       <figure style="margin:0;flex:1 1 300px"><img id="cams" alt="The side camera's picture with each robot ringed" src="/api/frame?cam=side&t=${Date.now()}" style="width:100%;border-radius:8px" onerror="this.parentElement.style.display='none'"><figcaption class="small muted">Side camera, the same rings.</figcaption></figure></div></div>
       <div class="card eng"><h3>How the robots mapped the table</h3><div id="mapv">Loading...</div><p class="small muted">Each robot's path as the camera bridge saw it this run, in its colour (mapview.py).</p></div>` : ""}`,
     `${run && run.running ? "" : lightingCard()}${(pv ? Object.keys(pv.frames) : S.map.robots.map(r => r.name)).map(n => { const lv = run && run.live && run.live.robots ? run.live.robots[n] : null;
       return `<div class="card"><div class="between"><b><span class="dot" style="background:${COL[n]}"></span>${esc(n)}</b><span class="small muted">${run && run.robots[n] ? `(${run.robots[n][0].toFixed(0)}, ${run.robots[n][1].toFixed(0)})` : ""}</span></div>
-      <span class="small muted">${esc(lv && lv.out ? "OUT: " + lv.out : (lv && lv.doing) || (run && run.doing && run.doing[n]) || (run && run.running ? "driving" : "waiting"))}</span>
-      ${lv ? `<div class="row small" style="margin-top:6px;gap:14px"><span>Battery <b>${lv.battery ?? "-"} %</b></span><span>Edge <b>${lv.edge_cm ?? "-"} cm</b></span><span>Steps <b>${lv.done}/${lv.steps}</b></span></div><div class="small muted">${esc(lv.last || "")}</div>` : ""}</div>`; }).join("")}
+      <span class="small muted">${esc(lv && lv.out ? (lv.held ? "HELD (rejoins when heard again): " : "OUT: ") + lv.out : (lv && lv.doing) || (run && run.doing && run.doing[n]) || (run && run.running ? "driving" : "waiting"))}</span>
+      ${lv ? `<div class="row small" style="margin-top:6px;gap:14px"><span>Battery <b>${lv.battery ?? "-"} %</b></span><span>Edge <b>${lv.edge_cm ?? "-"} cm</b></span><span>Steps <b>${lv.done}/${lv.steps}</b></span>${lv.stop_cm != null ? `<span title="Its distance sensor stops it for anything in its path nearer than this (floor check at start-up)">Stops at <b>${lv.stop_cm} cm</b></span>` : ""}</div><div class="small muted">${esc(lv.last || "")}</div>` : ""}</div>`; }).join("")}
      <details class="card" ${document.body.classList.contains("details") ? "open" : ""}><summary style="cursor:pointer;font-weight:500">Event log</summary><div class="log" id="log">${run ? esc((run.messages || []).map(m => `[${m[0]}] ${m[1]}`).join("\n")) : ""}</div></details>
      <div class="card">${more("More", settingsTable("run"))}</div>
      <button class="p" id="go" ${run && !run.running ? "" : "disabled"}>Review</button>`);
