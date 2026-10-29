@@ -49,9 +49,10 @@ Answered ones move to the bottom with the answer and date.
 54. A robot near an edge (or another robot) is now driven back to open space by the DOE loop on its own, slowly
     (5 cm/s), on a planned path the cameras watch, in normal and keep-going mode alike. OK in normal mode too, or
     keep-going only? (e02-oct28-keep-going-run)
-55. Monday's start takes each robot's heading as placed: the camera checks the spot, not which way it faces. A robot
-    put down backwards drives the wrong way for about 1 s (8-15 cm) before the guard stops everyone (Center, 28 Oct).
-    Add a start check by its lights (they are at its front), or rely on careful placing for Monday?
+55. ANSWERED 2026-10-29 (Nick 07:3x: build a facing check): every Monday / Mission Control start and every DOE find
+    step measures which way each robot faces from its own two lights (they sit across the robot, left and right);
+    over 15 deg off its start heading nothing moves, in plain words (docs/build-reports/e02-oct29-facing-check.md).
+    Needs firmware 2026-10-29a flashed to tell front from back every time.
 56. After a calibration that run_plan itself runs (a robot that restarted), the camera bridge has no start heading
     and the run fails to start; the second start works. Build a proper fix after Monday (the bridge vouches for a robot
     back on its start spot), or now?
@@ -74,6 +75,11 @@ Answered ones move to the bottom with the answer and date.
     since it is Monday's robot?
 64. The overhead camera loses robots on a strip at x = 30-45 cm of the home board in daylight (sun patch or glare?):
     blinds closed for the next daytime session, or does it matter only at home (Monday is at school)?
+65. Facing check: a robot 15-45 deg off its start heading stops the start now. Give it one small turn on the spot
+    before the run instead (it moves, but saves walking to the table)? (e02-oct29-facing-check)
+66. Center's lights read 24 deg off its 10 cm crawl in loops 0-2 on 28 Oct (both cameras agreed with each other). A
+    still photo of Center from above with a ruler along its side would say which is right. (e02-oct29-facing-check)
+67. The facing check takes 6-8 s for two robots (planned 4-5). OK before Monday's run? (e02-oct29-facing-check)
 
 ### Robots and sessions
 8. What stands just beyond the home board's x = 0 edge at about y = 30-60? (Your 07:45 "yes" to this one was read as
