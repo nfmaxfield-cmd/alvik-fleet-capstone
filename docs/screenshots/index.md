@@ -229,3 +229,10 @@ One line per picture: what it shows (feature or problem), and where it comes fro
 - `2026-10-28/lanes-moved-in-feature-mc-preview-monday-61x122-lanes-17cm.png`: **feature.** Mission Control's preview of Monday's default on 61 x 122 with the lanes 17 cm in from every edge (was 10, raised to 12.2): 2:01 planned, closest 9.5 cm. Report e02-oct28-keep-going-run, "Lanes moved in".
 - `2026-10-28/lanes-moved-in-feature-mc-mission-settings-inset-17-edge-room-17.png`: **feature.** The Mission settings on Mission Control: `mow_inset_cm` 17 and the new `edge_room_cm` 17 (Chicken's run-in starts). Same section.
 - `2026-10-28/lanes-moved-in-edge-and-robot-gap-by-lane-margin.png`: **feature** (left) and **problem** (right). Simulator dry runs: the body's closest to an open edge went from 4.0-4.2 cm to 9.5-9.8 cm; the two robots' closest came to 7.9 cm in 2 of 6 runs (61 x 122 and 76 x 137, seed 3), just under the 8 cm net. Same section.
+
+## 2026-10-29 (turn pause, step away, 8 cm lock: build-reports/e02-oct29-turn-pause.md)
+- `2026-10-29/turn-pause-feature-mc-8cm-lock-old-saved-5cm-raised.png`: **feature.** Mission Control opened on a settings.json saved before today with the planner's 5 cm: raised to 8 cm on loading, the red "8 cm lock" line says so. Report e02-oct29-turn-pause.
+- `2026-10-29/turn-pause-feature-mc-8cm-lock-typed-5-saved-as-8.png`: **feature.** Typing 5 into the planner's `separation_cm` and pressing "Save planner settings": saved as 8, with the message. Same report.
+- `2026-10-29/turn-pause-feature-mc-preview-61x122-step-away-after-circle.png`: **feature.** Monday's preview on 61 x 122 at 0:50: Right stands 3.5 cm further out from the circle while Left mows the lane beside it (13 cm apart by plan, was 9.5). Same report.
+- `2026-10-29/turn-pause-feature-robot-gap-time-p95-before-and-after.png`: **feature.** Simulator dry runs, before / step away only / step away + turn pause: closest after the circle 7.9-8.7 -> 11.0-11.5 cm on 61 x 122 and 76 x 137, mission time, line check p95. Same report.
+

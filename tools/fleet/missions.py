@@ -120,7 +120,71 @@ def settings(over=None):
         if k not in SETTINGS:
             raise ValueError("unknown mission setting %r" % k)
         s[k] = type(SETTINGS[k])(v)
+    gap_lock_settings(s)
     return s
+
+
+# ---------------------------------------------------------------------------- the 8 cm lock (Nick, 2026-10-29 07:3x)
+# No 2-robot mission runs with a robot gap under the 8 cm safety net (engine_checks.MIN_GAP_CM) or the mission's own
+# chicken_min_cm, from any screen or saved file: Mission Control's "Save planner settings" used to write the planner's
+# own default 5 cm over the mission's 8. A lower value anywhere (mission settings, planner settings, a saved
+# settings.json, mission_run --setting, run_plan --min-gap-cm) is raised, with a message saying so. The one way under it
+# is the simulator's safety-net DOE (mission_run --dry --below-net-doe, run_plan --dry-run --below-net-doe).
+GAP_KEYS_MISSION = ("separation_cm", "chicken_min_cm")
+_BELOW_NET_DOE = [False]
+
+
+def below_net_doe(on=True):
+    """The simulator's safety-net DOE only (5 / 6.5 / 8 cm): lets a gap under the net through in this process."""
+    _BELOW_NET_DOE[0] = bool(on)
+
+
+def gap_floor(s=None):
+    """The least robot gap any 2-robot mission may plan or run with: the net, or chicken_min_cm if that is more."""
+    import engine_checks as EC
+    cm = float((s or {}).get("chicken_min_cm", SETTINGS["chicken_min_cm"]))
+    return max(EC.MIN_GAP_CM, cm)
+
+
+def gap_lock_settings(s, where="mission settings"):
+    """Raise separation_cm / chicken_min_cm in a mission settings dict to the net, in place; the messages."""
+    if _BELOW_NET_DOE[0]:
+        return []
+    import engine_checks as EC
+    out = []
+    for k in GAP_KEYS_MISSION:
+        if k in s and float(s[k]) < EC.MIN_GAP_CM:
+            out.append("%s: %s %.1f cm raised to %.1f cm (no 2-robot mission runs under the %.0f cm safety net)"
+                       % (where, k, float(s[k]), EC.MIN_GAP_CM, EC.MIN_GAP_CM))
+            s[k] = type(SETTINGS[k])(EC.MIN_GAP_CM)
+    if "separation_cm" in s and float(s["separation_cm"]) < float(s.get("chicken_min_cm", 0.0)):
+        out.append("%s: separation_cm %.1f cm raised to chicken_min_cm, %.1f cm" % (where, float(s["separation_cm"]),
+                                                                                   float(s["chicken_min_cm"])))
+        s["separation_cm"] = float(s["chicken_min_cm"])
+    return out
+
+
+def gap_lock_planner(over, floor=None, n_robots=2, where="planner settings"):
+    """Raise a planner settings dict's separation_cm to the floor (2 or more robots), in place; the messages. A
+    missing separation_cm is set too (the planner's own default is 5 cm)."""
+    if n_robots < 2 or _BELOW_NET_DOE[0]:
+        return []
+    floor = gap_floor() if floor is None else max(floor, gap_floor())
+    v = over.get("separation_cm")
+    if v is None:
+        over["separation_cm"] = floor
+        return []
+    if float(v) < floor - 1e-9:
+        over["separation_cm"] = floor
+        return ["%s: separation_cm %.1f cm raised to %.1f cm (no 2-robot mission runs under the %.0f cm safety net)"
+                % (where, float(v), floor, floor)]
+    return []
+
+
+def mission_robots(mm):
+    """How many robots a mission map moves (robots with tasks)."""
+    t = mm.get("tasks") or {}
+    return sum(1 for n, v in t.items() if (v or {}).get("visit")) or len(mm.get("robots") or [])
 
 
 # ---------------------------------------------------------------------------- estimates and helpers
@@ -873,6 +937,62 @@ def monday_program(robots=("Left", "Right")):
             ]}
 
 
+STEP_AWAY_GAP_CM = 13.0  # chosen (Nick, 2026-10-29: "about 11 cm or more"): after the circle, the robot that waits for
+                         # the other's first lane stands at least this far (body to body, by plan) from that lane. The
+                         # simulator drifted 1.1-1.6 cm under the plan there (7.9 cm against 9.0-9.5, 28 Oct), so 13
+                         # keeps about 11. DOE note: worth one on the board: 11 / 13 / 15 cm against the camera's
+                         # closest approach in that stretch (the extra step's time is free: it is inside the wait)
+STEP_AWAY_MIN_CM = 3.0   # chosen: a step shorter than this is lengthened to it (a drive of 1-2 cm is mostly the
+                         # robot's stop error). No DOE: below the 2-3 cm real tracking error it would not show
+
+
+def _step_away(m, s, rest, who, exits, long_x):
+    """After the circle (Monday: the robots leave it on swapped sides and each goes on mowing): if their first lanes
+    are too close for both to mow at once, the planner keeps one standing where it left the circle while the other
+    mows its first lane. That spot was 9.0-9.5 cm (body to body) from the lane by plan on 61 x 122 and 76 x 137, and
+    7.9 cm in 2 of 6 simulator runs (28 Oct 21:27). The robot standing in the way (its circle exit nearest the other's
+    first lane) steps away from that lane first, to STEP_AWAY_GAP_CM, and waits there. Returns dict(robot, goto, note)
+    or None (no conflict, or already far enough)."""
+    if len(who) != 2:
+        return None
+    first, nlanes = {}, {}
+    for n in who:
+        bl = next((b for b in rest if b.get("block") == "mow-region" and b.get("robot") == n), None)
+        if bl is None:
+            return None
+        items = mow_region(m, s, float(bl.get("from", 0.0)), float(bl.get("to", 1.0)),
+                           -1 if str(bl.get("direction", "+")).startswith("-") else 1, exits[n])
+        if not items:
+            return None
+        first[n] = items[0]["goto"][0] if long_x else items[0]["goto"][1]
+        nlanes[n] = len(items) // 2
+    body = float((m.get("robot") or {}).get("width_cm", 9.5))
+    sep = max(s["separation_cm"], s["chicken_min_cm"])
+    a, b = who
+    if abs(first[a] - first[b]) >= body + sep + 1.0:
+        return None                                  # both can mow at once: nobody waits
+    ax = 0 if long_x else 1
+
+    def off(n):            # n's exit from the other's first lane, along the table's length
+        o = [x for x in who if x != n][0]
+        return exits[n][ax] - first[o]
+    w = min(who, key=lambda n: abs(off(n)))
+    need = STEP_AWAY_GAP_CM + body - abs(off(w))
+    if need <= 0:
+        return None
+    step = max(need, STEP_AWAY_MIN_CM)
+    sign = 1.0 if off(w) >= 0 else -1.0
+    f = m["floor"]
+    lo, hi = (f["x_min"], f["x_max"]) if long_x else (f["y_min"], f["y_max"])
+    v = min(max(exits[w][ax] + sign * step, lo + s["mow_inset_cm"]), hi - s["mow_inset_cm"])
+    xy = [v, exits[w][1]] if long_x else [exits[w][0], v]
+    gap = abs(v - first[[x for x in who if x != w][0]]) - body
+    return {"robot": w, "goto": _g(round(xy[0], 2), round(xy[1], 2), label="step away"),
+            "note": "after the circle %s steps %.1f cm away from %s's first lane and waits there (bodies %.1f cm apart "
+                    "by plan, was %.1f)" % (w, abs(v - exits[w][ax]), [x for x in who if x != w][0], gap,
+                                             abs(off(w)) - body)}
+
+
 def _robots_of(bl):
     if "robots" in bl:
         return list(bl["robots"])
@@ -1007,6 +1127,10 @@ def build(m, program, s=None):
             notes.append("circle %.1f times, r %.0f cm (%s)" % (turns, circle["r"],
                                                                 "anticlockwise" if circle["way"] > 0 else "clockwise"))
             circle = {}
+            sa = _step_away(m, s, program["blocks"][k + 1:], who, {n: _pose_after(n)[:2] for n in who}, long_x)
+            if sa:
+                advance(sa["robot"], [sa["goto"]])
+                notes.append(sa["note"])
         elif kind == "chicken":
             if len(who) != 2:
                 raise ValueError("block %d: chicken is for 2 robots" % (k + 1))
@@ -1166,6 +1290,12 @@ def plan_synced(mm, over=None, t_limit_s=60.0, log=None):
         # them; without this a caller with no over planned at the planner's default 5 cm, which with the lanes and
         # Chicken 17 cm in found no plan on 76 x 137 (2026-10-28 21:40) although the real paths plan it
         over = planner_over(mm)
+    # the 8 cm lock: whatever planner settings came with the call (Mission Control's saved planner screen held the
+    # planner's own 5 cm), a mission with 2 or more robots plans at the net or the mission's chicken_min_cm
+    over = dict(over)
+    ms = (mm.get("mission") or {}).get("settings") or {}
+    for w in gap_lock_planner(over, gap_floor(ms), mission_robots(mm)):
+        (log or (lambda x: print(x, file=sys.stderr)))(w)
     _presync(mm, over, t_limit_s, log)
     return _sync_loop(mm, over, t_limit_s, log)
 

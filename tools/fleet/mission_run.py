@@ -81,11 +81,27 @@ def build(args, out):
     else:
         prog = MS.monday_program(tuple(robots))
     sets = dict(kv.split("=", 1) for kv in args.setting)
+    # the 8 cm lock (2026-10-29): no 2-robot mission under the net from the command line either (the simulator's
+    # safety-net DOE: --dry --below-net-doe)
+    raised = MS.gap_lock_settings(dict((k, float(v)) for k, v in sets.items() if k in MS.GAP_KEYS_MISSION),
+                                  where="--setting")
+    for w in raised:
+        say("8 cm LOCK: " + w)
+    for k in MS.GAP_KEYS_MISSION:
+        if k in sets and not MS._BELOW_NET_DOE[0]:
+            sets[k] = str(max(float(sets[k]), MS.gap_floor()))
     if "chicken_min_cm" in sets:
         # the program's own chicken min_cm (Monday's says 8) gives way to an explicit --setting (safety-net DOE)
         for bl in prog.get("blocks", []):
             if bl.get("block") == "chicken":
                 bl["min_cm"] = float(sets["chicken_min_cm"])
+    if not MS._BELOW_NET_DOE[0]:
+        for bl in prog.get("blocks", []):
+            # a program's own Chicken min_cm (Mission Control's program.json, a saved edit) is held to the net too
+            if bl.get("block") == "chicken" and "min_cm" in bl and float(bl["min_cm"]) < MS.gap_floor():
+                say("8 cm LOCK: the program's Chicken min_cm %.1f cm raised to %.1f cm" % (float(bl["min_cm"]),
+                                                                                        MS.gap_floor()))
+                bl["min_cm"] = MS.gap_floor()
     mm = MS.build(m, prog, s=sets or None)
     over = {"separation_cm": max(float(((mm.get("mission") or {}).get("planner") or {}).get("separation_cm", 8.0)),
                                  args.min_gap_cm)}
@@ -137,7 +153,24 @@ def space_watch(guard, child, said, stop_evt):
             return
 
 
+def gap_args(args):
+    """The 8 cm lock on the command line: --min-gap-cm under the net is raised for a 2-robot mission (the simulator's
+    safety-net DOE: --dry --below-net-doe)."""
+    if args.below_net_doe:
+        if not args.dry:
+            raise SystemExit("--below-net-doe is for the simulator only (--dry): nothing was moved")
+        MS.below_net_doe(True)
+        say("SIMULATOR DOE: robot gaps under the 8 cm safety net allowed for this dry run only")
+        return
+    n = len([r for r in args.robots.split(",") if r.strip()])
+    if n >= 2 and args.min_gap_cm < MS.gap_floor():
+        say("8 cm LOCK: --min-gap-cm %.1f raised to %.1f cm (no 2-robot mission runs under the safety net)"
+            % (args.min_gap_cm, MS.gap_floor()))
+        args.min_gap_cm = MS.gap_floor()
+
+
 def run(args):
+    gap_args(args)
     tag = "mission" + ("-dry" if args.dry else "")
     out = os.path.abspath(args.session or os.path.join(REPO, "logs", dt.datetime.now().strftime("%Y%m%d-%H%M%S") +
                                                        "-" + tag))
@@ -168,6 +201,10 @@ def run(args):
           "--poses-to", "127.0.0.1:5011", "--replan-from-camera", "--timeout-s", str(args.timeout_s),
           "--border-cm", str(args.border_cm), "--min-gap-cm", str(args.min_gap_cm),
           "--place-tol-cm", "4"]
+    if not args.no_turn_pause:
+        rp += ["--turn-pause"]         # after each turn, stand until the cameras agree (2026-10-29)
+    if args.below_net_doe:
+        rp += ["--below-net-doe"]
     for c in EDGE_GUARD:
         rp += ["--send", c]
     for ip in args.robot:
@@ -384,6 +421,11 @@ def main(argv=None):
                    help="one more fleet_sim.py argument, e.g. --sim-arg=--turn-err=Left=7.5 (repeatable)")
     ap.add_argument("--rp-arg", action="append", default=[], metavar="ARG",
                     help="one more run_plan.py argument, e.g. --rp-arg=--send --rp-arg='set gyro_scale 1.075'")
+    ap.add_argument("--no-turn-pause", action="store_true",
+                    help="drive straight on after each turn (before 2026-10-29); default: stand until the cameras "
+                         "agree with the robot's own pose (run_plan --turn-pause)")
+    g.add_argument("--below-net-doe", action="store_true",
+                   help="simulator only: allow robot gaps under the 8 cm safety net (the safety-net DOE)")
     ap.add_argument("--setting", action="append", default=[], metavar="NAME=VALUE",
                     help="a mission setting (missions.SETTINGS), e.g. separation_cm=6.5 (repeatable)")
     args = ap.parse_args(argv)

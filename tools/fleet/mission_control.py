@@ -65,6 +65,8 @@ RUN_DEFAULTS = {
     "sim_dead": "",                   # simulator through the cameras: "Right@60": that robot dies 60 s in
     "farm": False,                    # robots: each camera tracked in its own process (trackfarm.py)
     "upload": False,                  # robots: upload the run's logs (a release with a tag of its own)
+    "turn_pause": True,               # after each turn on the spot, stand until the cameras agree with the robot's own
+                                      # pose, then drive (run_plan --turn-pause, 2026-10-29)
 }
 WARMUP_KNOBS = ("PROBE_SPACING_CM", "CORNER_PAUSE_S", "BARRIER_NEAR_CM", "SCALE_FLAG", "MAX_FRAMES")
 
@@ -183,6 +185,8 @@ class Session:
                     self.settings[k].update(saved.get(k) or {})
             except ValueError:
                 pass
+        self.gap_notices = []
+        self.lock_gaps("the saved settings.json")
         self.mission = None          # the mission map (tasks) last made
         self.program = None          # the block program on the Mission screen (default: Monday's, missions.py)
         pp = os.path.join(self.dir, "program.json")
@@ -207,6 +211,21 @@ class Session:
         with open(os.path.join(self.dir, "settings.json"), "w") as f:
             json.dump(self.settings, f, indent=1)
 
+    def lock_gaps(self, where):
+        """The 8 cm lock (Nick, 2026-10-29): no robot gap under the safety net (or the mission's chicken_min_cm) on
+        the planner or mission screens, or in settings.json. A lower value is raised, saved, and said on the page
+        (gap_notices) and in the terminal. The planner screen's separation_cm shows the net, not the planner's own 5."""
+        out = MS.gap_lock_settings(self.settings["mission"], where="%s, mission settings" % where)
+        floor = MS.gap_floor(MS.settings(self.settings["mission"]))
+        out += MS.gap_lock_planner(self.settings["planner"], floor, where="%s, planner settings" % where) \
+            if "separation_cm" in self.settings["planner"] else []
+        self.gap_notices = out
+        for w in out:
+            print("8 cm LOCK: " + w, flush=True)
+        if out:
+            self.save_settings()
+        return out
+
     def apply_warmup_knobs(self):
         for k, v in self.settings["warmup"].items():
             if k in WARMUP_KNOBS:
@@ -216,14 +235,15 @@ class Session:
     def state(self):
         m = self.map
         out = {"map": m, "words": WS.words(m), "settings": self.settings,
-               "defaults": {"planner": dict(P.DEFAULT_SETTINGS), "mission": dict(MS.SETTINGS), "run": dict(RUN_DEFAULTS),
+               "defaults": {"planner": dict(P.DEFAULT_SETTINGS, separation_cm=MS.gap_floor()), "mission": dict(MS.SETTINGS),
+                            "run": dict(RUN_DEFAULTS),
                             "warmup": {k: getattr(WU, k) for k in WARMUP_KNOBS}},
                "least_open_room_cm": round(MS.least_open_room(m), 2) if m.get("sides") else None,
                "program": self.program or MS.monday_program(), "blocks": list(MS.BLOCKS),
                "table_sizes": TABLE_SIZES, "setup": self.setup_state(), "surface": self.surface(),
                "mission": (self.mission or {}).get("mission"), "preview": self.preview,
                "warmup": self.warm_result, "run": self.run.status() if self.run else None,
-               "last_runs": self.last_runs}
+               "last_runs": self.last_runs, "gap_notices": list(getattr(self, "gap_notices", []))}
         return out
 
     # -- workspace ---------------------------------------------------------
@@ -253,7 +273,9 @@ class Session:
     def warmup_plan(self):
         self.apply_warmup_knobs()
         self.warm_map = WU.plan_tasks(self.map)
-        plan = P.make_plan(self.warm_map, over=self.settings["planner"] or None)
+        over = dict(self.settings["planner"])
+        MS.gap_lock_planner(over, n_robots=MS.mission_robots(self.warm_map))     # the 8 cm lock
+        plan = P.make_plan(self.warm_map, over=over or None)
         with open(os.path.join(self.dir, "warm_map.json"), "w") as f:
             json.dump(self.warm_map, f, indent=1)
         P.save_plan(plan, os.path.join(self.dir, "warm_plan.json"))
@@ -320,13 +342,18 @@ class Session:
             mm["mission"] = {"name": mode, "settings": s, "planner": {"separation_cm": s["separation_cm"]}}
         over = dict((mm.get("mission") or {}).get("planner") or {})
         over.update(self.settings["planner"])
+        # the 8 cm lock: the planner screen's values never take a 2-robot mission under the net (plan_synced holds it
+        # too; said here so the page shows it)
+        said = MS.gap_lock_planner(over, MS.gap_floor(s), MS.mission_robots(mm), where="planner settings")
+        if said:
+            self.gap_notices = said
         plan = MS.plan_synced(mm, over=over, t_limit_s=float(d.get("t_limit_s", 60)))
         self.mission, self.plan = mm, plan
         with open(os.path.join(self.dir, "mission.json"), "w") as f:
             json.dump(mm, f, indent=1)
         P.save_plan(plan, os.path.join(self.dir, "plan.json"))
         self.preview = preview(mm, plan, title=(mm.get("mission") or {}).get("name", mode))
-        return {"preview": self.preview}
+        return {"preview": self.preview, "gap_notices": list(self.gap_notices)}
 
     def default_program(self, robots=None):
         self.program = MS.monday_program(tuple(robots) if robots else ("Left", "Right"))
@@ -359,6 +386,8 @@ class Session:
                "--improve-budget-s", str(rs["improve_budget_s"])]
         for c in [x.strip() for x in str(rs.get("edge_guard", "")).split(";") if x.strip()]:
             cmd += ["--send", c]
+        if rs.get("turn_pause", True) and kind != "warmup":
+            cmd += ["--turn-pause"]
         if dry:
             cmd += ["--dry-run"]
             if rs.get("sim_true_sides"):
@@ -399,6 +428,8 @@ class Session:
             with open(pp, "w") as f:
                 json.dump(self.program, f, indent=1)
             cmd += ["--map", self.map_path, "--program", pp, "--robots", ",".join(self.program.get("robots", []))]
+        if not rs.get("turn_pause", True) or kind == "warmup":
+            cmd += ["--no-turn-pause"]
         if conn == "sim-cameras":
             cmd += ["--dry"]
             if rs.get("sim_washout"):
@@ -897,6 +928,7 @@ class Handler(BaseHTTPRequestHandler):
                     for k in S.settings:
                         S.settings[k].update((d.get(k) or {}))
                     S.save_settings()
+                    S.lock_gaps("saved from the page")      # the 8 cm lock: raised, saved again, said on the page
                     return self._send(200, S.state())
                 if path == "/api/warmup/plan":
                     return self._send(200, S.warmup_plan())

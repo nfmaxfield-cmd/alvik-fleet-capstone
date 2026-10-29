@@ -43,8 +43,12 @@ def test_job_order_ends_first_then_doe_then_middle_sizes():
 def test_mission_run_settings_lower_the_safety_net(tmp_path):
     import mission_run as MR
     d = str(tmp_path / "m")
-    MR.main(["--table", "61x122", "--plan-only", "--session", d, "--min-gap-cm", "6.5",
-             "--setting", "separation_cm=6.5", "--setting", "chicken_min_cm=6.5"])
+    import missions as MS
+    try:
+        MR.main(["--table", "61x122", "--plan-only", "--dry", "--below-net-doe", "--session", d, "--min-gap-cm", "6.5",
+                 "--setting", "separation_cm=6.5", "--setting", "chicken_min_cm=6.5"])
+    finally:
+        MS.below_net_doe(False)
     prog = json.load(open(os.path.join(d, "program.json")))
     assert [b["min_cm"] for b in prog["blocks"] if b["block"] == "chicken"] == [6.5]
     mm = json.load(open(os.path.join(d, "mission.json")))

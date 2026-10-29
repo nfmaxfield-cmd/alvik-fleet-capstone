@@ -143,7 +143,7 @@ def run_cmd(root, name, size, seed, level, retry=0):
             json.dump(c, f)
         a += ["--sim-cond", os.path.join(d, "cond.json")]
     if abs(level - 8.0) > 1e-9:
-        a += ["--min-gap-cm", "%g" % level, "--setting", "separation_cm=%g" % level,
+        a += ["--below-net-doe", "--min-gap-cm", "%g" % level, "--setting", "separation_cm=%g" % level,
               "--setting", "chicken_min_cm=%g" % level]
     cmd = ["nice", "-n", "10", "unshare", "-n", sys.executable, NS, "--table", size, "--dry", "--seed", str(seed),
            "--session", d, "--no-frames", "--timeout-s", "%.0f" % TIMEOUT_S] + a

@@ -712,6 +712,8 @@ class Coordinator:
                 nb = stp.get("not_before_s")
                 if nb is not None and t < self.plan_start + nb:
                     break
+                if not self.turn_pause_open(b, i, t):
+                    break                                  # standing after a turn until the cameras agree
                 sid = b.next_id
                 b.next_id += 1
                 b.ids[i] = sid
@@ -767,6 +769,14 @@ class Coordinator:
             if b is not None:
                 b.fix = ev
                 self.cam_seen(b, ev)
+                # for the pause after a turn: (frame time, arrived, x, y, which camera); the camera bridge says
+                # "cam_bridge:both" / ":overhead" / ":side" / ":lights"; the simulator's direct fixes say nothing
+                # (truth plus noise: counted as both)
+                src = str(ev.get("src") or "both").split(":")[-1]
+                h = b.__dict__.setdefault("cam_hist", [])
+                h.append((float(ev.get("t", now())), now(), float(ev["x"]), float(ev["y"]), src))
+                if len(h) > 40:
+                    del h[:-30]
         t = now()
         for b in self.bots.values():
             ev = b.fix
@@ -1388,6 +1398,115 @@ class Coordinator:
             self.send(b.name, "fpose %.2f %.2f %.2f %.2f %.2f" % (cam[0], cam[1], cam[2], 0.5,
                                                                  max(1.0, math.degrees(math.atan2(1.0, max(line, 1.0))))))
 
+    # -- the pause after a turn (Nick, 2026-10-28 21:27 / 2026-10-29 07:3x): after a turn on the spot the robot stands
+    # until a fresh camera fix (both cameras' if they both see it) agrees with its own pose, then drives. The camera's
+    # correction is taken while it stands still, not after a drift (the camera is 0.18-0.27 s behind at most; the worst
+    # real moments, 2-3 cm p95, were at the turn-arounds).
+    TURN_PAUSE_MIN_DEG = 20.0   # chosen: turns smaller than this are heading trims (the planner's line-ups); no pause.
+                                # DOE note: not worth one (Monday's turns are 70-180 deg; the trims under 5 deg)
+    TURN_PAUSE_TOL_CM = 1.5     # chosen: the camera's spot (the mean of the newest fixes, up to 3) and the robot's own
+                                # pose within this. A robot standing still wobbles 0.5-1.5 cm in the camera (28 Oct);
+                                # the line check's gate is 3 cm. DOE note: worth one: 1.0 / 1.5 / 2.5 cm against the
+                                # pause's length and the line check's p95 on the leg after each turn (board, Left and
+                                # Right, 10 lane turns each)
+    TURN_PAUSE_ONE_CAM_S = 1.0  # chosen: with no fix from both cameras this long after the turn, one camera's fix is
+                                # taken (the other cannot see it: the side camera's far end, a washed-out overhead).
+                                # DOE note: worth one with the timeout: 0.5 / 1 / 2 s against how often a two-camera
+                                # fix would still have come (bridge_track.csv src per picture after each turn)
+    TURN_PAUSE_MAX_S = 3.0      # chosen: then it drives anyway, as before this pause existed (logged; the camera guard
+                                # still stops everyone on a 6 cm disagreement). The camera is 0.18-0.27 s behind and
+                                # the robot takes a fix every 0.1 s, so an agreeing pose comes in 0.5-1 s. DOE note:
+                                # worth one with ONE_CAM_S: 2 / 3 / 5 s against the timeouts' share and their cause
+    TURN_BOTH_LATELY_S = 2.0    # chosen: "the other camera cannot see it" = no two-camera fix in this long before the turn
+                                # ended (the robot was on one camera already). No DOE beyond ONE_CAM_S's (the same
+                                # bridge_track.csv count answers both)
+    TURN_POSE_AFTER_S = 0.2    # the robot's own pose must be reported this long after the fix arrived (it took the
+                                # fix: fixes go out every 0.1 s, FOLLOW records every 0.1 s). No DOE: plumbing
+
+    def turn_before(self, n, i):
+        """The turn on the spot that step i of robot n drives after (only waits between), or None."""
+        steps = self.steps(n)
+        if steps[i]["type"] not in ("drive", "arc", "approach"):
+            return None
+        j = i - 1
+        while j >= 0 and steps[j]["type"] == "wait":
+            j -= 1
+        if j < 0 or steps[j]["type"] != "turn":
+            return None
+        a = (steps[j]["to"][2] - steps[j]["from"][2] + 180.0) % 360.0 - 180.0
+        return j if abs(a) >= self.TURN_PAUSE_MIN_DEG else None
+
+    def turn_pause_open(self, b, i, t):
+        """May step i (a drive after a turn) be sent? Logs each pause (turn_pause) and adds it to the summary."""
+        if not getattr(self.args, "turn_pause", False) or not self.source.live or b.out:
+            return True
+        j = self.turn_before(b.name, i)
+        if j is None:
+            return True
+        tj = b.stat[j]
+        if tj["status"] != "done":
+            return False                           # the turn first (the drive is not queued behind it)
+        t_done = tj.get("t_done") or t
+        key = (self.plan_no, i)
+        pz = getattr(b, "tpause", None)
+        if pz is None or pz["key"] != key:
+            pz = b.tpause = dict(key=key, t_block=t, t_done=t_done, waited=False)
+        allh = getattr(b, "cam_hist", [])
+        # both cameras saw it in the 2 s before the turn ended: wait up to ONE_CAM_S for a two-camera fix. If only one
+        # camera has been seeing it (a washed-out overhead, the side camera's blind end), take that camera's fix at
+        # once: waiting for the other only cost 1 s at every turn (washed-out dry run, 29 Oct: 13-15 s per robot)
+        both_lately = any(f[4] == "both" and t_done - self.TURN_BOTH_LATELY_S <= f[0] for f in allh)
+        hist = [f for f in allh if f[0] >= t_done]
+        # only fixes the robot had time to take before its newest own pose (fixes keep coming every 0.1 s)
+        pt = b.pose_t if b.pose is not None else -1e9
+        hist = [f for f in hist if f[1] + self.TURN_POSE_AFTER_S <= pt]
+        both = [f for f in hist if f[4] == "both"]
+        how, use = None, []
+        if both:
+            how, use = "both", both
+        elif hist and (t - t_done >= self.TURN_PAUSE_ONE_CAM_S or not both_lately):
+            how, use = "one camera (%s)" % hist[-1][4], hist
+        d = None
+        if use:
+            use = use[-3:]
+            cx, cy = sum(f[2] for f in use) / len(use), sum(f[3] for f in use) / len(use)
+            d = math.hypot(cx - b.pose[0], cy - b.pose[1])
+        ok = d is not None and d <= self.TURN_PAUSE_TOL_CM
+        timed_out = t - t_done >= self.TURN_PAUSE_MAX_S
+        if not ok and not timed_out:
+            pz["waited"] = True
+            return False
+        extra = t - pz["t_block"]          # the time this pause added (the drive was otherwise ready to go)
+        rec = dict(robot=b.name, i=i, plan=self.plan_no, label=self.steps(b.name)[i].get("label", ""),
+                   since_turn_s=round(t - t_done, 3), added_s=round(extra, 3), how=how or "no fix",
+                   d_cm=None if d is None else round(d, 2), fixes=len(hist), result="agreed" if ok else "timed out",
+                   t_run=round(t - self.t_run, 2) if self.t_run else None)
+        self.log("turn_pause", **rec)
+        tp = self.__dict__.setdefault("turn_pauses", [])
+        tp.append(rec)
+        if not ok:
+            self.say("%s: after its turn the camera did not agree within %.1f cm in %.0f s (%s, %s): driving on, as "
+                     "before the pause" % (b.name, self.TURN_PAUSE_TOL_CM, self.TURN_PAUSE_MAX_S, rec["how"],
+                                           "no fix" if d is None else "%.1f cm apart" % d))
+        b.tpause = None
+        return True
+
+    def turn_pause_summary(self):
+        out = {}
+        for r in getattr(self, "turn_pauses", []):
+            o = out.setdefault(r["robot"], dict(pauses=0, added_s=0.0, both=0, one_camera=0, timed_out=0,
+                                                longest_s=0.0))
+            o["pauses"] += 1
+            o["added_s"] = round(o["added_s"] + r["added_s"], 2)
+            o["longest_s"] = max(o["longest_s"], r["added_s"])
+            if r["result"] == "timed out":
+                o["timed_out"] += 1
+            elif r["how"] == "both":
+                o["both"] += 1
+            else:
+                o["one_camera"] += 1
+        return out
+
     def waiting_for(self, n):
         """Why robot n's next step has not been sent (for the status line)."""
         b = self.bots[n]
@@ -1410,6 +1529,8 @@ class Coordinator:
             nb = stp.get("not_before_s")
             if nb is not None and now() < self.plan_start + nb:
                 return "step %d not before %.1f s" % (i, nb)
+            if getattr(b, "tpause", None) and b.tpause["key"] == (self.plan_no, i):
+                return "step %d: standing after its turn until the camera agrees" % i
             return "step %d ready" % i
         return "done"
 
@@ -1522,7 +1643,9 @@ class Coordinator:
                 "confirm_checks": getattr(self, "confirms", []),
                 "battery": {n: b.battery for n, b in self.bots.items()},
                 "boot": {n: b.boot for n, b in self.bots.items()},
-                "start_checks": getattr(self, "start_checks", {})}
+                "start_checks": getattr(self, "start_checks", {}),
+                "turn_pause": {"on": bool(getattr(self.args, "turn_pause", False)) and self.source.live,
+                               "robots": self.turn_pause_summary()}}
 
 
 # ----------------------------------------------------------------------------
@@ -1718,6 +1841,9 @@ def replan_from(coord, poses, why):
         if r["name"] in poses:
             r["start"] = [round(v, 2) for v in poses[r["name"]]]
     over = dict(coord.plan.get("settings") or {})
+    gate = getattr(coord.args, "min_gap_cm", EC.MIN_GAP_CM) or 0.0
+    if len(coord.plan.get("robots") or {}) >= 2:
+        over["separation_cm"] = max(float(over.get("separation_cm", 0.0)), gate)   # at the net (the 8 cm lock)
     plan = P.make_plan(m2, over=over)
     coord.m = FM.normalize(m2)
     coord.plan = plan
@@ -1897,6 +2023,23 @@ def start_robots(coord, link, args, source):
     print("Robots ready: " + ", ".join("%s at %.1f,%.1f,%.0f" % (n, *coord.bots[n].pose) for n in names))
 
 
+def gap_lock(args, n_robots):
+    """The 8 cm lock (2026-10-29): a run with 2 or more robots has its safety net at 8 cm at least (re-plans are made at
+    it, and the start refuses a plan under it). Under it only in the simulator's safety-net DOE (--dry-run
+    --below-net-doe)."""
+    if n_robots < 2 or args.min_gap_cm >= EC.MIN_GAP_CM:
+        return
+    if args.below_net_doe and args.dry_run:
+        if not getattr(args, "_doe_said", False):
+            args._doe_said = True
+            print("SIMULATOR DOE: safety net %.1f cm, under the %.0f cm net (dry run only)" % (args.min_gap_cm,
+                                                                                          EC.MIN_GAP_CM))
+        return
+    print("8 cm LOCK: --min-gap-cm %.1f raised to %.1f cm (no 2-robot run under the safety net%s)"
+          % (args.min_gap_cm, EC.MIN_GAP_CM, "; --below-net-doe is for --dry-run only" if args.below_net_doe else ""))
+    args.min_gap_cm = EC.MIN_GAP_CM
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--map", required=True)
@@ -1953,6 +2096,14 @@ def main(argv=None):
                          "click). Repeatable; 'all' = every robot. Also sends 'set sw_on 1'.")
     ap.add_argument("--site-map", help="locked site map (tools/site/setup.py): warn when the robots' front sensors "
                                        "keep disagreeing with a landmark on it (tools/site/change.py)")
+    ap.add_argument("--below-net-doe", action="store_true",
+                    help="with --dry-run only: let --min-gap-cm stay under the 8 cm safety net (the simulator's "
+                         "safety-net DOE); otherwise a 2-robot plan always runs with the net at 8 cm or more")
+    ap.add_argument("--turn-pause", action="store_true",
+                    help="after each turn on the spot, stand until a fresh camera fix (both cameras', or one when the "
+                         "other cannot see it) agrees with the robot's own pose within %.1f cm, at most %.0f s, then "
+                         "drive (Monday's mission and Mission Control's runs: mission_run.py passes it)"
+                         % (Coordinator.TURN_PAUSE_TOL_CM, Coordinator.TURN_PAUSE_MAX_S))
     ap.add_argument("--cam-guard-cm", type=float, default=Coordinator.CAM_GUARD_CM,
                     help="stop everyone when a robot's own pose and the camera disagree by more than this for 1 s "
                          "(0 = off; default %(default)s)")
@@ -1991,6 +2142,7 @@ def main(argv=None):
         args.send = list(args.send) + ["set sw_on 1", "set sw_back 1",
                                        "set e02_back_face_cm %.2f" % FM.back_face_cm(FM.normalize(m))]
         print("Switches at the back (map robot.back_bumper_cm): every board visit and home dock backs in")
+    gap_lock(args, len([n for n, v in (m.get("tasks") or {}).items() if (v or {}).get("visit")]) or len(m["robots"]))
     if args.plan:
         with open(args.plan, encoding="utf-8") as f:
             plan = json.load(f)
@@ -2002,6 +2154,7 @@ def main(argv=None):
         sep = float(((m.get("mission") or {}).get("planner") or {}).get("separation_cm", P.DEFAULT_SETTINGS["separation_cm"]))
         over = {"separation_cm": max(sep, args.min_gap_cm)} if args.min_gap_cm else None
         plan = P.make_plan(m, over=over)
+    gap_lock(args, len(plan["robots"]))
     for n in plan["robots"]:
         for st in plan["robots"][n]["steps"]:
             if st["type"] == "approach" and "handover_cm" not in st:
@@ -2119,6 +2272,10 @@ def print_summary(s):
         if s.get("boards_not_visited"):
             print("NOT VISITED: %s" % s["boards_not_visited"])
         print("Camera fixes sent %s; used/ignored on the robots %s" % (s["fixes_sent"], s["fixes_used_rejected"]))
+    tp = (s.get("turn_pause") or {}).get("robots") or {}
+    for n, o in sorted(tp.items()):
+        print("Pause after turns, %s: %d pauses added %.1f s (longest %.1f s); both cameras %d, one camera %d, timed "
+              "out %d" % (n, o["pauses"], o["added_s"], o["longest_s"], o["both"], o["one_camera"], o["timed_out"]))
     for r in s.get("replans", []):
         print("  re-plan at %.1f s (%s): %.2f s to compute%s" % (r["t_run"], r["source"], r["cpu_s"],
                                                                 "" if r.get("kept", True) else ", not kept"))

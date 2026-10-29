@@ -182,7 +182,8 @@ function wireSettings(root) {
       const k = i.dataset.k, d = def[k];
       out[k] = typeof d === "boolean" ? i.value === "true" : typeof d === "number" ? Number(i.value) : i.value;
     });
-    try { S = await api("/api/settings", {[g]: out}); flash("Saved"); } catch (e) { flash(e.message, true); }
+    try { S = await api("/api/settings", {[g]: out}); const gn = S.gap_notices || [];
+      render(); flash(gn.length ? "Saved, with the 8 cm lock: " + gn.join("; ") : "Saved", gn.length > 0); } catch (e) { flash(e.message, true); }
   });
 }
 function more(title, inner, open) { return `<details class="more" ${open || document.body.classList.contains("details") ? "open" : ""}><summary>${esc(title)}</summary><div style="margin-top:10px">${inner}</div></details>`; }
@@ -199,7 +200,10 @@ function render() {
   else { st.className = "status"; st.lastChild.textContent = `${S.map.robots.length} robots ready`; }
   [connect, setup, workspace, warmup, mission, runScreen, review][screen]();
 }
-function page(left, right) { $("main").innerHTML = `<section class="left">${left}<div class="err" id="err"></div></section><aside>${right}</aside>`; wireSettings($("main")); }
+function page(left, right) {
+  const gn = (S && S.gap_notices) || [];   // the 8 cm lock: a robot gap under the net was raised (2026-10-29)
+  const lock = gn.length ? `<p class="err" id="gaplock" style="color:var(--red)">8 cm lock: ${gn.map(esc).join("; ")}</p>` : "";
+  $("main").innerHTML = `<section class="left">${lock}${left}<div class="err" id="err"></div></section><aside>${right}</aside>`; wireSettings($("main")); }
 
 function connect() {
   page(`<div><h1>Connect</h1><p class="sub">Choose the robots or the simulator. The simulator runs the same plans on simulated Alviks.</p></div>
