@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monday Run Sheet</title>
+<style>
+  :root { --ink: #101828; --muted: #5B6474; --line: #C9CED6; --soft: #F2F4F7; --accent: #2952CC; --warn: #B42318; }
+  @page { size: letter; margin: 0.45in; }
+  * { box-sizing: border-box; }
+  body { background: #fff; color: var(--ink); font: 9.5pt/1.3 "Segoe UI", Arial, Helvetica, sans-serif; margin: 0 auto;
+         max-width: 7.5in; padding: 16px; }
+  h1 { font-size: 16pt; margin: 0 0 2px; }
+  h2 { font-size: 11pt; margin: 9px 0 3px; padding: 2px 6px; background: var(--soft); border-left: 4px solid var(--accent); }
+  h3 { font-size: 10.5pt; margin: 8px 0 3px; }
+  p { margin: 3px 0; }
+  ol, ul { margin: 3px 0; padding-left: 20px; }
+  li { margin: 1px 0; }
+  code { font: 9.5pt Consolas, "Courier New", monospace; }
+  pre { font: 9.5pt Consolas, "Courier New", monospace; border: 1px solid var(--line); background: var(--soft);
+        padding: 2px 8px; margin: 2px 0 3px; white-space: pre-wrap; word-break: break-all; }
+  table { border-collapse: collapse; width: 100%; margin: 4px 0; }
+  th, td { border: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; }
+  th { background: var(--soft); }
+  .sub { color: var(--muted); margin-bottom: 6px; }
+  .box { border: 1.5px solid var(--ink); padding: 5px 8px; margin: 6px 0; }
+  .warn { border-color: var(--warn); }
+  .tag { display: inline-block; font-size: 8pt; font-weight: 700; border: 1px solid currentColor; padding: 0 4px; border-radius: 3px; }
+  .built { color: var(--accent); }
+  .unk { color: var(--warn); }
+  .see { color: var(--muted); font-size: 9pt; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+  .check li { list-style: none; margin-left: -16px; }
+  .check li::before { content: "\2610  "; }
+  .pb { break-before: page; }
+  .keep { break-inside: avoid; }
+  @media (max-width: 600px) { .cols { grid-template-columns: 1fr; } body { padding: 16px; } table { font-size: 9pt; } }
+  @media print { body { padding: 0; max-width: none; } a { color: inherit; text-decoration: none; } }
+</style>
+</head>
+<body>
+
+<h1>Monday run sheet: the school demo, 2 Nov 2026</h1>
+<p class="sub">Left and Right run Monday's default mission in Mission Control: mow, meet, circle, mow on, Chicken, spread out, dance (about 2 minutes). <b>Arrive 45 minutes early</b>: setup is about 30.</p>
+
+<div class="box warn keep">
+<b>Stop everything:</b> the red <b>Stop</b> button on Mission Control's Run screen first. Then, Pi window:
+<pre>./run-fleet-pi.sh stopall</pre>
+If a robot still moves: pick it up and switch it off. (At school, stopall's direct stop may not reach the robots: it calls their home addresses.)
+</div>
+
+<div class="cols">
+<div class="box keep">
+<b><span class="tag built">BEING BUILT</span> (nothing for you to do)</b>
+<ul>
+<li>The robots straighten themselves up before the run (a turn and a short drive onto their crosses).</li>
+<li>Left's sensor stop limit goes to 10 cm.</li>
+<li>Side camera only: a 5 cm start allowance; robots drive through a camera blind spot on their own wheels.</li>
+</ul>
+<p><b>If not in by Monday:</b> place each robot within <b>2 cm</b> of its cross, straight across. Over 3 cm off stops the start after about 20 s with <code>No camera fix for Left: is the position source running?</code> (the spot, not the camera). Nudge it onto the cross and press <b>Run (robots)</b> again.</p>
+</div>
+<div class="box keep">
+<b><span class="tag unk">STILL UNKNOWN</span></b>
+<ul>
+<li>The school network's exact name and password (it has "ISE" in it), typed into <code>secrets.h</code> and the Pi before Monday.</li>
+<li>Whether the school network lets the robots and the Pi talk. If not: no robot is heard; the backup is your phone's hotspot (a decision still to make).</li>
+<li>Firmware <b>2026-10-29a</b> on Left, Right and Center (the facing check needs it).</li>
+</ul>
+</div>
+</div>
+
+<h2>0. What to pack</h2>
+<div class="cols">
+<ul class="check">
+<li>The Pi and its power supply</li>
+<li>The USB drive (into the Pi <b>before</b> switching it on)</li>
+<li>Both cameras, their mounts and USB cables</li>
+<li>The laptop and its charger</li>
+<li>Left, Right, and Center (spare), charged to 90 %+</li>
+</ul>
+<ul class="check">
+<li>The USB-C <b>data</b> cable</li>
+<li>Printed checker corner piece A (flat)</li>
+<li>Tape and a tape measure</li>
+<li>A power strip or extension lead</li>
+<li>This sheet</li>
+</ul>
+</div>
+
+<h2>1. Setup at school (12 min)</h2>
+<h3>1.1 The network (the robots and the Pi on the same network)</h3>
+<ol>
+<li>USB drive and both cameras into the Pi. Pi into the power strip. Wait 2 minutes.</li>
+<li>Laptop: join the school WiFi (or the hotspot, if that was decided). Taskbar <b>Tailscale</b> icon: <b>Connected</b>.</li>
+<li><b>Window: PowerShell on the laptop.</b> Windows key, type <code>powershell</code>, <b>Enter</b>. Type, then <b>Enter</b>:
+<pre>ssh st1maxfini@100.122.222.75</pre>
+Pi's password (nothing shows), <b>Enter</b>. You should see a line ending in <code>$</code>: this is the <b>Pi window</b>. No answer in 30 s: wait 2 more minutes, try again.</li>
+<li>Switch on Left, Right, Center. Wait 30 s. Pi window, one at a time:
+<pre>cd ~/alvik-fleet-capstone</pre>
+<pre>./run-fleet-pi.sh check</pre>
+You should see <code>Robots heard: Center, Left, Right</code> and <code>Left: firmware 2026-10-29a, battery NN%</code> for each. <b>Heard: none</b>: switch one off and on, wait 30 s, again; still none = the network blocks them. Battery under 60 %: use Center instead.</li>
+</ol>
+<h3>1.2 Cameras, like at home</h3>
+<p><b>Overhead</b> roughly above the table's middle, the whole table plus a hand's width in the picture. <b>Side</b> high at one end or side, looking down across the table, seeing all of it. No cables in the pictures.</p>
+<h3>1.3 Code and Mission Control</h3>
+<ol>
+<li>Pi window:<pre>git pull</pre>You should see <code>Already up to date.</code> If it lists changed files, also:
+<pre>sudo systemctl restart mirlt-launcher</pre><pre>./run-fleet-pi.sh mc-stop</pre></li>
+<li>Laptop browser: address bar, type <code>100.122.222.75:8091</code>, <b>Enter</b>. Click <b>Mission Control</b> (if closed: <b>Open Mission Control</b>).</li>
+<li><b>1 Connect:</b> click the <b>Robots</b> card. The pill at the top must say <b>Mode: Robots</b> (after any page reload, click <b>Robots</b> again).</li>
+</ol>
+<h3>1.4 Table size and start spots</h3>
+<ol>
+<li>Measure the table: length ______ cm, width ______ cm.</li>
+<li><b>3 Workspace:</b> type them into <b>Length (cm)</b> and <b>Width (cm)</b>. Click <b>Save workspace</b>.</li>
+<li>Click <b>More</b>. Under <b>Robot start spots</b> type (x, y, facing), then <b>Save workspace</b>:
+<table>
+<tr><th>Robot</th><th>x</th><th>y</th><th>facing</th></tr>
+<tr><td>Left</td><td>17</td><td>17</td><td>90</td></tr>
+<tr><td>Center</td><td>half the length (64 for 128)</td><td>17</td><td>90</td></tr>
+<tr><td>Right</td><td>length minus 17 (111 for 128)</td><td>17</td><td>90</td></tr>
+</table></li>
+<li>Tape three crosses (lines about 15 cm): all <b>17 cm in from the long side nearest the audience</b>; Left's 17 cm from the left end, Right's 17 cm from the right end, Center's at half the length. Corner <b>0,0</b> = audience side meets the left end.</li>
+</ol>
+
+<h2>2. Camera setup, lighting, warm-up (10 min) &mdash; warm-up ON</h2>
+<ol>
+<li>Corner piece A flat in the <b>0,0 corner</b>: white-dot square in the corner, <b>5-square side along the audience side</b>. Left, Right, Center on their crosses, switched on.</li>
+<li>Pi window (the setup needs the cameras; <code>can't find window</code> is fine):<pre>tmux kill-window -t fleet:rec</pre></li>
+<li><b>2 Setup:</b> <b>Surface the cameras see</b> = the table size as <code>LENGTHxWIDTH</code> (e.g. <code>128x72</code>). <b>then the warm-up</b> stays <b>ticked</b>. Click <b>Set up (flash check, chessboard, warm-up)</b>. About 2 min.</li>
+<li>Wait for <code>take the chessboard away, then press "Chessboard taken away"</code>. Before it: <code>overhead: lens ... saved</code> and <code>side: lens ... saved</code>. Good = both <code>saved</code>, board fit under 1 px, table corners within 5 px. (A flash-check line saying no lights were seen is expected on a new network.)</li>
+<li><b>Don't press the button yet.</b> Pi window:<pre>./run-fleet-pi.sh rec</pre>You should see <code>Recorder running.</code></li>
+<li>Lift corner piece A off the table. Under <b>Lighting</b>, click <b>Check the lighting</b>:
+<table>
+<tr><th>It says</th><th>Do this</th></tr>
+<tr><td><code>fine</code> on both</td><td>Go on</td></tr>
+<tr><td><code>low ...</code> / <code>it works, with little margin</code></td><td>Go on; dim the light over the table if you can</td></tr>
+<tr><td><code>only 2 of 3 robots found ...</code></td><td>Move that camera so all three are in its picture; redo from step 2</td></tr>
+<tr><td><code>overhead camera washed out</code></td><td>Close blinds / lamp above the table off; check again. Still washed out: go on</td></tr>
+<tr><td><code>side camera washed out</code></td><td>Close blinds, or move the lamp so it doesn't shine across; check again</td></tr>
+<tr><td><code>no picture (is the recorder running?)</code></td><td>Step 5 again</td></tr>
+<tr><td><code>no picture (no calibration saved)</code></td><td>Setup did not save: steps 1-4 again</td></tr>
+</table></li>
+<li>Hands off. Click <b>Chessboard taken away</b>. Warm-up, 1-1.5 min: each robot creeps to its corners, feels the sides, returns to its cross.</li>
+<li><b>4 Warm-up:</b> <b>Read the results</b> (one line per side, e.g. <code>left side: open edge, 3.4 cm further in than marked</code>). Leave <b>move sides to where they were found</b> <b>unticked</b>. Click <b>Use these answers</b>.</li>
+</ol>
+
+<h2>3. Place the robots, plan, run</h2>
+<ol>
+<li>Lift <b>Center</b> off the table, leave it on, out of the way (the spare).</li>
+<li>Left and Right on their crosses (tape sticks out evenly all round), <b>front (distance sensor) facing away from the audience</b>, straight across. The robots straighten themselves up <span class="tag built">BEING BUILT</span>.</li>
+<li><b>5 Mission:</b> <b>Monday's default</b>, then <b>Plan and preview</b> (10-30 s). <b>Finishes in</b> about 2:00 (1:56 on 61&times;122, 2:16 on 76&times;137); <b>Closest approach</b> about 10.0 cm.</li>
+<li><b>Go to run</b>. Pill: <b>Mode: Robots</b>. At the table, hand ready. Click <b>Run (robots)</b>.</li>
+</ol>
+<p><b>Spare:</b> after <b>Monday's default</b>, set <b>Robots</b> to <code>Left, Center</code> (Center on Right's cross) or <code>Center, Right</code>.</p>
+<p><b>What the audience sees:</b> (1) lights flash one side at a time (which way each faces); (2) each robot straightens up; (3) both mow their end in short lanes, a short pause after each turn; (4) they meet in the middle and circle each other 1.5 times, ending swapped; (5) one steps aside, each mows the other's inner part; (6) <b>Chicken</b>: straight at each other, both swerve at 15 cm, pass about 10 cm apart; (7) spread out and dance until switched off.</p>
+<p><b>Stop at once</b> if a robot heads for an edge under about 5 cm away without turning, the two are within about 5 cm and closing, or one spins without stopping.</p>
+
+<h2>4. If something goes wrong</h2>
+<table>
+<tr><th style="width:52%">What you see</th><th>What to do</th></tr>
+<tr><td><code>Robots heard: none</code> / <code>Not heard from: Left</code></td><td>Switch it off and on, wait 30 s, <code>./run-fleet-pi.sh check</code>. None at all: network</td></tr>
+<tr><td><code>No camera fix for Left: is the position source running?</code></td><td>Left is off its cross (or the cameras lost it). Nudge it on; <b>Run (robots)</b> again</td></tr>
+<tr><td><code>Left is facing the wrong way ... turn it round</code> (until the straighten-up is in)</td><td>Turn it round; <b>Run (robots)</b> again</td></tr>
+<tr><td><code>Left is turned about 18 deg ... (its start allows 15)</code> (until the straighten-up is in)</td><td>Straighten it; <b>Run (robots)</b> again</td></tr>
+<tr><td><code>No camera fix with a heading for Left: it was calibrated just now ...</code></td><td>Back on its cross; <b>Run (robots)</b> again</td></tr>
+<tr><td><code>Not calibrated since power-on</code></td><td>Pi: <code>./run-fleet-pi.sh calibrate</code> (65 s each, hands clear), robots back on crosses, run</td></tr>
+<tr><td><code>Settings not confirmed ...</code> / <code>did not start their follow run</code></td><td><code>./run-fleet-pi.sh stopall</code>, robot off and on, wait 30 s, run</td></tr>
+<tr><td><code>Plan refused ... under 8 cm</code> / <code>no plan</code> / <code>no priority order gave a plan</code></td><td><b>Monday's default</b>, <b>Plan and preview</b>, robots on crosses, run</td></tr>
+<tr><td>Run ends mid-mission with <code>no plan</code> (stopped for nothing)</td><td>The same as above</td></tr>
+<tr><td><code>... is driving the robots on this Pi</code></td><td><code>./run-fleet-pi.sh stopall</code>, wait 1 min, try again</td></tr>
+<tr><td>Setup: <code>the chessboard was not found</code></td><td>All of piece A in both pictures, flat, no glare; Set up again</td></tr>
+<tr><td>Setup: <code>the corner piece is turned</code></td><td>White dot in the corner, 5-square side along the audience side</td></tr>
+<tr><td>Setup: <code>the table's corners were not found</code></td><td>Clear the table's corners; Set up again</td></tr>
+<tr><td><code>... ON THE PI'S CARD (no USB drive found ...)</code></td><td>Plug in the USB drive, <code>./run-fleet-pi.sh rec</code>, run again</td></tr>
+<tr><td>A robot goes silent mid-run</td><td>The other carries on round it. Let it finish</td></tr>
+<tr><td>Heading for an edge / closing in</td><td>Red <b>Stop</b>; pick it up if it still moves</td></tr>
+<tr><td>The dance doesn't stop</td><td>Expected: switch each robot off (or its <b>x</b> button)</td></tr>
+</table>
+
+<h2>5. After</h2>
+<ol>
+<li><b>Start the video upload straight away</b> (it runs while you pack). Pi window:<pre>./run-fleet-pi.sh stop</pre>Leave the Pi on and the window open until it says it has finished. Must unplug sooner: tell me, it can be finished from home. Each run's logs already went up.</li>
+<li>Switch every robot off (this ends the dance). Center too.</li>
+<li>Tell me the time of each run.</li>
+</ol>
+
+<h2 class="pb">6. Rehearsal at home, the night before (10 min, full 122&times;122 plywood)</h2>
+<ul class="check">
+<li><b>1 min</b> Pi window: <code>cd ~/alvik-fleet-capstone</code>, then <code>git pull</code>.</li>
+<li><b>1 min</b> <code>./run-fleet-pi.sh check</code>: all three <code>firmware 2026-10-29a</code>, battery 90 %+.</li>
+<li><b>1 min</b> <code>nmcli connection show</code>: a <code>school</code> (or hotspot) line is listed.</li>
+<li><b>1 min</b> Mission Control, <b>Robots</b>, <b>Mode: Robots</b>. <b>6 Run</b>, <b>More</b>: <b>upload</b> = <b>true</b> (else set it, <b>Save run settings</b>).</li>
+<li><b>1 min</b> <b>3 Workspace</b>: 122 and 122, <b>Save workspace</b>; <b>More</b>: Left 17 17 90, Center 61 17 90, Right 105 17 90, <b>Save workspace</b>. Three crosses to match.</li>
+<li><b>4 min</b> Section 2, steps 1-8, as at school (surface <code>122x122</code>, warm-up ticked).</li>
+<li><b>1 min</b> <b>5 Mission</b>: <b>Monday's default</b>, <b>Plan and preview</b>: it plans. Don't run (122&times;122 is untested). Robots off. Pack.</li>
+</ul>
+<p class="see">Anything that did not match this sheet: tell me Sunday night. Full detail, data and the flash steps: 2026-11-02-monday-run-sheet.md.</p>
+
+</body>
+</html>
