@@ -11,7 +11,8 @@ the build works from.
 - A new table with **no boards**, an overhead camera at an unknown, roughly-overhead spot, a bright room, the room's
   own network. The laptop runs everything. People catch falls; still: no collisions, ever.
 - Routine: **Show** (choreographed, about 45 s, all three, **no music**) → split: **Center mows** (one full pass,
-  lanes 12 cm apart, 10 cm in from every edge; right of way) while **Left and Right** do **Chicken** twice, **Follow
+  lanes 12 cm apart, 17 cm in from every edge (was 10: moved in by Nick 2026-10-28 21:27 so the body's nearest
+  corner stays 7 cm or more from an open edge, turns included; `mow_inset_cm`); right of way) while **Left and Right** do **Chicken** twice, **Follow
   the leader** 60 s, **Roam** 60 s → when Center finishes, all three **park in a row**.
 - Nick wants to **drop a brick on the table mid-run** and have the robots react: the camera spots it, the robot that
   would meet it stops, the others keep driving, routes and the mowing lanes go round it.
@@ -111,7 +112,9 @@ temperature). Everything must run on the Pi (the laptop only if needed; it must 
 
 ### Monday (2 robots, short presentation): the default mission, editable in Mission Control
 1. Each robot starts at its own end of the table and mows its half in lanes along the SHORT side (stop-and-turn:
-   drive the lane, 90 deg, 12 cm over, 90 deg, back), working towards the centre line.
+   drive the lane, 90 deg, 12 cm over, 90 deg, back), working towards the centre line. Lanes and lane ends 17 cm in
+   from the edges, and Chicken's run-in starts too (`mow_inset_cm`, `edge_room_cm`; 2026-10-28 21:27, was 10 / 12.2):
+   the body's nearest corner stays 10 cm from an open edge by plan, 7 cm with the robots' 2-3 cm real tracking error.
 2. They meet at the centre line mid-mow, circle each other 1.5 times on a true curve (a new arc move in firmware and
    planner), which leaves them on swapped sides, then carry on mowing in their direction (no backing off).
 3. At the end of their mowing they turn towards each other and play Chicken (swerve at 15 cm, never under 8 cm).

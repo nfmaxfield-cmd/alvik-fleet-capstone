@@ -199,3 +199,82 @@ ran it: `e02_twocam.TwoCamTracker` with the loop's calibrations (27 Oct 12:58), 
 overhead picture. Seeds: Right (45.6, 93.8), Left (97.8, 42.9), Center (4.5, 22.3), from state.json; Center also from
 (6.7, 20.3) and (10.0, 22.5). `tools/analysis/cam_replay.py` (committed) gave the per-camera counts for loop 19's turn
 check. Frames came from `rec-frames-small.zip` by range requests (about 240 MB of 1.55 GB).
+
+## Lanes moved in (28 Oct 21:27, simulator only)
+
+**Premise.** On the real robots tracking is within 2-3 cm of the line 95 % of the time (Right's 11 drives tonight), and
+the worst moments are the turn-arounds. In the Monday 2-robot sweep the body's nearest corner came 3.8-4.9 cm from an
+open edge while mowing, and 2.3-3.0 cm in the worst runs, at Left's turn on the spot at the end of lane 1 (x = 0 end).
+Nick approved moving the lanes in. Target: the body's nearest corner at least 7 cm from any open edge everywhere in the
+mission, turns included.
+
+**What changed** (tools/fleet/missions.py):
+
+| Setting | Before | Now | Sets |
+|---|---|---|---|
+| `mow_inset_cm` | 10 (raised to 12.2 by the planner's room from open sides) | **17** | the lane line (first and last lanes) and the turn-around point (each lane end) |
+| `edge_room_cm` (new) | 12.2 (planner's room + 1 cm) | **17** | Chicken's run-in starts and the ends its pass drives on to (a turn on the spot happens there too) |
+
+17, not the 13 cm first suggested: a turn on the spot swings the 9.5 cm square's corners 6.72 cm from its middle, so
+the lane needs 6.72 + 7 + 3 (real tracking) = 16.7 cm. At 13 cm the turn leaves 6.3 cm even with perfect tracking. Swerve 15 cm,
+pass gap 10 cm, the 8 cm net, lane spacing 12 cm and the 15 cm circle are unchanged. Chicken's run gets shorter on 61 x 122:
+36.8 cm before, 32 cm now. A Mission Control settings.json saved before today (holding 10) no longer overrides the new value.
+
+**Data.** Monday's default, `mission_run.py --dry` (the same path as `FLEET_DRY=1 ./run-fleet-pi.sh monday <size>`),
+seeds 1 and 3 per table. Body = the 9.5 cm square's corners, simulator truth every 0.05 s.
+
+| Table | Seed | Finished | Time (plan) | Closest robots | Closest body to an open edge, and where |
+|---|---|---|---|---|---|
+| 61 x 122 | 1 | yes | 113 s (121) | 8.7 cm | 9.8 cm: Left, x = 0 end, turn at lane 1's end |
+| 61 x 122 | 3 | yes | 113 s (121) | **7.9 cm** | 9.6 cm: Left, y = 61 side, turn at lane 6's start |
+| 70 x 130 | 1 | yes | 123 s (130) | 9.8 cm | 9.7 cm: Left, x = 0 end, turn at lane 1's end |
+| 70 x 130 | 3 | yes | 122 s (130) | 10.6 cm | 9.6 cm: Left, y = 70 side, turn at lane 5's end |
+| 76 x 137 | 1 | yes | 128 s (135) | 8.5 cm | 9.8 cm: Left, y = 76 side, turn at lane 7's start |
+| 76 x 137 | 3 | yes | 128 s (135) | **7.9 cm** | 9.5 cm: Left, y = 76 side, turn at lane 7's start |
+| 61 x 122, before (12.2) | 3 | yes | 125 s (134) | 10.3 cm | 4.2 cm: Left, x = 0 end, turn at lane 1's end |
+| 61 x 122, 13 cm | 3 | yes | 122 s (130) | 10.6 cm | 5.6 cm: Left, y = 61 side, turn at lane 6's start |
+
+<sub>Line check p95 0.5-1.0 cm in every run. By plan, the closest any body comes to an edge is 10.2-10.3 cm on all three
+tables (the circle on 61 x 122 is 10.2), against 5.5 cm before (Chicken's run-in starts and lane 1's turn).</sub>
+
+![Edge and robot gap by lane margin](../screenshots/2026-10-28/lanes-moved-in-edge-and-robot-gap-by-lane-margin.png)
+
+Left panel: the closest a body came to an open edge rose from about 4 cm to about 9.6 cm. Right panel: the closest the two
+robots came fell, to 7.9 cm in 2 of 6 runs.
+
+![Mission Control preview, 61 x 122](../screenshots/2026-10-28/lanes-moved-in-feature-mc-preview-monday-61x122-lanes-17cm.png)
+
+Mission Control's Mission screen with the new lanes on 61 x 122: the first lane now starts 17 cm from each end and each long side.
+
+**Conclusion.** In the simulator the edge target holds with room to spare: 9.5-9.8 cm, all at lane-end turns. With
+3 cm more real tracking error that comes to about 7 cm. Times are 7-8 s shorter. **New problem:** after the circle,
+one robot waits at the circle's exit while the other mows a lane next to it. On 61 x 122 that lane is now 19 cm from
+the waiting robot (65 against 46); on 76 x 137 it is 18.5 cm (65 against 83.5). The plan allows 9.5 / 9.0 cm (the
+planner's floor is 9), and simulator drift brought it to 7.9 cm, just under the 8 cm net. Before, the lane grid happened
+to give 10 cm there. Centring the lane grid on the table did not help (plan 9.66 cm on 61 x 122, unchanged on 76 x 137).
+
+Fixed along the way, each with a test: the plan-time cache was keyed on a map's `id()`, so a later table could reuse an
+earlier table's planner. A robot left out of the mission (Center) still moved the Chicken line through its map start
+spot. `plan_synced` without settings planned at the planner's 5 cm, not the mission's 8.
+
+**What's next.** (1) Decide the post-circle closeness (question below). (2) On Thursday's table, measure the turn-arounds
+with the camera (the board DOE below). (3) Fleet suite: 182 passed, 7 skipped.
+
+Question for Nick: the robots' closest pass after the circle is now 9.0-9.5 cm by plan (7.9 cm in 2 simulator runs). The
+options are to raise the planner's floor for Monday from 9 to about 11 cm (more waiting), to make the waiting robot
+step away from the circle's exit, or to accept it, since the 8 cm net stops the robots on the real camera. Claude
+leans towards stepping away from the exit, but has not built it.
+
+### Sweep 1: new tests that may now be necessary
+- Board: lane margin DOE (14 / 17 / 20 cm) against the camera's closest body-to-edge at turn-arounds. It would also show
+  whether lane ends can sit nearer than the lane line, because the stop error along a lane is smaller in the simulator.
+- Simulator: the full Monday sweep conditions (lost packets, stalls, dead robot) at 17 cm, three seeds. Only the base
+  condition was run here.
+- Board: Chicken with the shorter run (32 cm on 61 x 122). Does it still read as "driving at each other"?
+
+### Sweep 2: possible inaccuracies in what this relied on
+- 3 cm of tracking error is the real p95 from one robot's 11 drives (Right, tonight), measured against the camera that
+  steered it. Turns on the spot were not part of that measure.
+- 17 cm is chosen, not derived from a test. The 6.72 cm swing assumes the body is a 9.5 cm square centred on the turn point.
+- Only two seeds per table, base condition. The 7.9 cm moments both come from seed 3.
+- The old/13 cm comparisons were run on today's code (with the fixes above), not the exact earlier code.

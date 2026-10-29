@@ -74,6 +74,51 @@ def test_monday_mows_every_lane_once(plans):
     assert sorted(seen) == sorted(round(x, 2) for x in lanes)
 
 
+@pytest.mark.parametrize("size", TABLES)
+def test_monday_lanes_17_in_and_body_7_from_every_edge(plans, size):
+    """Lanes moved in (Nick 2026-10-28 21:27): the lane line and the turn-around points 17 cm in, and by plan the
+    body's nearest corner at least 10 cm from every edge (7 cm with 3 cm of real tracking error), including each turn
+    on the spot at a lane end and at Chicken's run-in starts."""
+    import numpy as np
+    mm, plan = plans[size]
+    W, H = size
+    lanes, (a0, a1), long_x, inset = MS.lanes_x(mm, None)
+    assert inset == 17.0 and lanes[0] == 17.0 and lanes[-1] <= W - 17.0 and (a0, a1) == (17.0, H - 17.0)
+    body = FM.body_of(mm)
+    worst = math.inf
+    for r in plan["robots"].values():
+        for st in r["steps"]:
+            if st["type"] == "dance":
+                continue
+            for q in P.step_poses(st, 12):
+                c = body.corners(np.array([q[:3]]))[0]
+                worst = min(worst, c[:, 0].min(), W - c[:, 0].max(), c[:, 1].min(), H - c[:, 1].max())
+    assert worst >= 10.0, worst
+
+
+def test_old_saved_lane_inset_gives_way_and_others_are_kept():
+    assert MS.settings({"mow_inset_cm": 10.0})["mow_inset_cm"] == 17.0      # a settings.json saved before 21:27
+    assert MS.settings({"mow_inset_cm": 14.0})["mow_inset_cm"] == 14.0      # a value someone typed in
+
+
+def test_chicken_line_ignores_robots_left_out_of_the_mission():
+    # Center is in the map but not in Monday's mission: its start spot must not move the chicken line
+    for starts in ([("Left", [20, 20, 90]), ("Center", [60, 20, 90]), ("Right", [100, 20, 90])],
+                   [("Left", [20, 15, 90]), ("Center", [50, 15, 90]), ("Right", [80, 15, 90])]):
+        mm = MS.build(WS.blank_map((0, 0, 137, 76), starts), MS.monday_program())
+        ys = {v["goto"][1] for v in mm["tasks"]["Left"]["visit"] if v.get("label") == "chicken 1 ready" and "goto" in v}
+        assert ys == {38.0}
+
+
+def test_plan_time_cache_is_per_map():
+    a, b = table(122, 61), table(137, 76)
+    v = [{"goto": [60.0, 30.0]}]
+    ta = MS.plan_s(a, v, (20, 20, 90))
+    MS.plan_s(b, v, (20, 20, 90))
+    assert MS.plan_s(a, v, (20, 20, 90)) == pytest.approx(ta)
+    assert MS._PL["m"] is a
+
+
 def test_build_rejects_bad_programs():
     m = table(122, 61)
     with pytest.raises(ValueError):

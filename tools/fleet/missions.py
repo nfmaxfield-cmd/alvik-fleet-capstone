@@ -41,8 +41,26 @@ import planner as P     # noqa: E402
 # named settings (every one editable from any view: Nick, 2026-10-27 00:08)
 SETTINGS = {
     "mow_lane_cm": 12.0,          # Nick (brief): lanes 12 cm apart
-    "mow_inset_cm": 10.0,         # Nick (brief): 10 cm in from every edge (raised to the planner's least room from an
-                                  # open side, 11.2 cm, where that is more: said in the summary)
+    "mow_inset_cm": 17.0,         # Nick (2026-10-28 21:27): lanes moved in from the edges (was 10, his brief, which the
+                                  # planner's least room from an open side raised to 12.2 on a blank table). One value
+                                  # sets both the lane line (the first and last lanes' distance from the short ends)
+                                  # and the turn-around point (each lane end's distance from the long sides). Target:
+                                  # the body's nearest corner at least 7 cm from any open edge, including the turn on
+                                  # the spot at each lane end, where the 9.5 cm square's corners swing 6.72 cm from its
+                                  # middle: 6.72 + 7 + 3 cm (the robots' real tracking, within 2-3 cm of the line 95 %
+                                  # of the time, 28 Oct) = 16.7, rounded up. 13 cm would leave 6.3 cm at the turn even
+                                  # with perfect tracking. Chosen, not derived from a test: DOE note: a board DOE of
+                                  # lane margin (e.g. 14 / 17 / 20 cm) against the camera's closest body-to-edge at the
+                                  # turn-arounds would set it (and show whether the lane ends can sit nearer than the
+                                  # lane line: along a lane the stop error is smaller than across it in the simulator)
+    "edge_room_cm": 17.0,         # Nick (2026-10-28 21:27, "everywhere in the mission"): the same target as
+                                  # mow_inset_cm for the spots the blocks pick themselves: Chicken's run-in starts (the
+                                  # robot turns on the spot there to face along the Chicken line) and the ends its pass
+                                  # drives on to. Before: the planner's least room + 1 cm (12.2 cm), which left the body
+                                  # 5.5 cm from the short ends at the turn by plan. Shortens Chicken's run on 61 x 122
+                                  # from 36.8 to 32 cm (swerve 15, pass gap 10 unchanged). Chosen from 2-3 cm real p95
+                                  # plus the turn-around swing (6.72 + 7 + 3, rounded up): DOE note: a board DOE of
+                                  # lane margin vs closest body-to-edge (as mow_inset_cm) would set both together
     "chicken_swerve_cm": 15.0,    # Nick (2026-10-27 00:08): swerve when the fronts are 15 cm apart
     "chicken_min_cm": 8.0,        # Nick: never under 8 cm (two half-widths + ~3 cm camera error, rounded up; DOE on
                                   # the board: closest approach measured by the camera over 10 chickens)
@@ -85,10 +103,19 @@ RETIRED_SETTINGS = {"chicken_aside_cm"}   # 2026-10-28: Chicken passes now (chic
                                           # (Mission Control's settings.json) is skipped, not refused
 
 
+SUPERSEDED_DEFAULTS = {"mow_inset_cm": (10.0,)}   # 2026-10-28 21:27: lanes moved in (10 -> 17). Mission Control's
+                                                   # "Save mission settings" writes every value on the screen, so a
+                                                   # settings.json saved before today holds the old default 10; that
+                                                   # value counts as not set (the new default applies). Any other
+                                                   # value someone typed in is kept
+
+
 def settings(over=None):
     s = dict(SETTINGS)
     for k, v in (over or {}).items():
         if k in RETIRED_SETTINGS:
+            continue
+        if k in SUPERSEDED_DEFAULTS and float(v) in SUPERSEDED_DEFAULTS[k]:
             continue
         if k not in SETTINGS:
             raise ValueError("unknown mission setting %r" % k)
@@ -104,11 +131,13 @@ _PL = {}
 def plan_s(m, visits, start):
     """Time (s) the planner's own steps take for these visits from start (x, y, heading deg), without waits for
     other robots (exact for the steps; est_s is the quick rough figure)."""
-    key = id(m)
-    if key not in _PL:
+    # the cache holds the map itself: keyed on id(m) alone, a later build's map could get a freed map's id and its
+    # times came from the earlier table's planner (found 2026-10-28 21:45: Monday on 76 x 137 planned or not
+    # depending on which table was built before it in the same process)
+    if _PL.get("m") is not m:
         _PL.clear()
-        _PL[key] = P.Planner(m)
-    pl = _PL[key]
+        _PL.update(m=m, pl=P.Planner(m))
+    pl = _PL["pl"]
     job = P.Job("x", [start[0], start[1], math.radians(start[2] if len(start) > 2 else 0.0)], list(visits), False,
                 [start[0], start[1], 0.0])
     pr = P.build_prims(job, list(range(len(visits))), pl.grid, pl.world, pl.docks, pl.s, pl.body, [])
@@ -862,7 +891,9 @@ def build(m, program, s=None):
         if n not in known:
             raise ValueError("the program uses %s, which the map does not have (robots: %s)" % (n, ", ".join(known)))
     f = m["floor"]
-    room = least_open_room(m) + 1.0
+    # the least room from a robot's centre to an open side at the spots the blocks pick themselves (Chicken's run-in
+    # starts and the ends its pass drives on to): edge_room_cm, or the planner's least room + 1 cm if that is more
+    room = max(least_open_room(m) + 1.0, s["edge_room_cm"])
     visits = {n: [] for n in names}
     starts = {}
     notes = []
@@ -996,7 +1027,10 @@ def build(m, program, s=None):
                 raise ValueError("block %d: Chicken's pass lines (%.1f cm either side of its line, for a %.0f cm pass "
                                  "gap) do not fit the table's width here" % (k + 1, shape["sidestep_cm"],
                                                                             s1["chicken_pass_gap_cm"]))
-            ch = chicken(m, a=a, b=b, s=s1, centre=ctr)
+            # only this mission's robots: a robot the program leaves out (Monday: Center) is not on the table, but its
+            # start spot in the map moved the chicken line 6 cm off the middle (76 x 137, 2026-10-28 21:55), and with
+            # the lanes 17 cm in that line found no plan
+            ch = chicken(dict(m, robots=[r for r in m["robots"] if r["name"] in names]), a=a, b=b, s=s1, centre=ctr)
             for n in who:
                 for v in ch[n]:
                     if "goto" in v and v.get("label", "").endswith("ready"):
@@ -1127,6 +1161,11 @@ def plan_synced(mm, over=None, t_limit_s=60.0, log=None):
     late one's ready spot and no plan is found (13 s of searching on 61 x 122). So each group is lined up first on the
     mission cut just after its sync mark (meet, then each Chicken round, in order), and only then is the whole
     mission planned."""
+    if over is None:
+        # the mission's own planner settings (Monday: separation 8 cm), as mission_run.py and Mission Control pass
+        # them; without this a caller with no over planned at the planner's default 5 cm, which with the lanes and
+        # Chicken 17 cm in found no plan on 76 x 137 (2026-10-28 21:40) although the real paths plan it
+        over = planner_over(mm)
     _presync(mm, over, t_limit_s, log)
     return _sync_loop(mm, over, t_limit_s, log)
 

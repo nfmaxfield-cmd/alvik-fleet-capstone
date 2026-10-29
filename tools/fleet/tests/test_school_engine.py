@@ -379,10 +379,15 @@ def test_instruction_lists():
 
 def test_mow_lanes_cover_the_table_and_slide_round_a_brick():
     m = FM.load(SCHOOL)
+    # lanes 17 cm in (Nick 2026-10-28 21:27; was 10, raised to the planner's room + 1 = 12.2)
     v, notes = MS.mow(m)
     ys = sorted({p["goto"][1] for p in v})
-    assert ys[0] == pytest.approx(MS.least_open_room(m) + 1.0, abs=0.1) and all(b - a <= 12.0 + 1e-6 for a, b in zip(ys, ys[1:]))
-    assert any("not 10" in n for n in notes)              # the inset raised to the planner's room from open sides
+    assert ys[0] == pytest.approx(17.0, abs=0.01) and all(b - a <= 12.0 + 1e-6 for a, b in zip(ys, ys[1:]))
+    assert not any("not 17" in n for n in notes)
+    # an inset under the planner's room from open sides is still raised to it (plus 1 cm)
+    v8, notes8 = MS.mow(m, {"mow_inset_cm": 8.0})
+    ys8 = sorted({p["goto"][1] for p in v8})
+    assert ys8[0] == pytest.approx(MS.least_open_room(m) + 1.0, abs=0.1) and any("not 8" in n for n in notes8)
     # a brick on a lane end: the end slides along its lane, the plan still covers every lane
     m2 = dict(m, robots=[r for r in m["robots"] if r["name"] == "Center"],
               tasks={"Center": {"visit": v, "park": False}})
