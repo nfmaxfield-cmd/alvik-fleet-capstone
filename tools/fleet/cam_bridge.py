@@ -71,6 +71,19 @@ STATUS_EVERY_S = 2.0
 MAX_BACKLOG_S = 0.3     # chosen: a picture that reaches the bridge this much later than the quickest ones (the bridge
                         # fell behind: pictures queue in the stream) is skipped, so fixes never trail by a queue.
                         # The robot takes fixes up to 1 s old (params.h fix_max_age_ms). No DOE: a guard
+MOVED_OWN_CM = 1.0      # "moved off its start" = it was told to move: its own pose (wheels + gyro, run_plan's echo)
+                        # went this far from its first own pose, or it reported a step running. Nick approved 29 Oct
+                        # 16:2x (rules audit, recommendation 3): until then a camera spot 3 cm off its start spot
+                        # counted as moved, and all 5 refused start-ups on 29 Oct were the side camera's ~3 cm offset
+                        # on a robot that had not moved. A robot put down off its spot is not "moved": run_plan's start
+                        # check (5 cm side camera alone, 4 cm otherwise) or Monday's straightening handles it. No DOE:
+                        # a definition (1 cm is over the own pose's standing wobble, 0)
+MOVING_STATES = ("turn", "drive", "arc", "approach", "dance", "dock", "touch")   # FOLLOW states of a running step
+RELEARN_CM = 2.0        # a robot first seen this far from the start spot it was given stands partly on floor the floor
+                        # memory took as empty (29 Oct dry runs: put 8 cm off, read 1.4 cm short of where it was): its
+                        # floor there is forgotten and filled in from round it, up to RELEARN_MAX times. Chosen; no DOE
+                        # (the dry runs show it: read error 1.4 cm -> under 0.5 cm)
+RELEARN_MAX = 3
 STILL_S = 1.0           # --observe: a robot still this long gets its outline heading printed (the turn check)
 
 
@@ -194,6 +207,7 @@ class Bridge:
         self.has_pose = {n: False for n in starts}       # the robot has a pose of its own (run_plan's echo)
         self.moved = {n: False for n in starts}
         self.moved_n = {}
+        self.relearned = {n: [] for n in starts}         # where its floor memory was re-learned (robot put off its spot)
         self.start_heads = {n: deque(maxlen=START_FRAMES) for n in starts}
         self.last_head_t = {n: 0.0 for n in starts}
         self.counts = {n: dict(seen=0, unsure=0, predicted=0, lost=0, fixes=0, headings=0) for n in starts}
@@ -225,7 +239,16 @@ class Bridge:
         self.trk.own_pose(n, msg["x"], msg["y"], msg["th"], msg["t"])
         if not self.has_pose[n]:
             self.has_pose[n] = True
+            self.own_first = getattr(self, "own_first", {})
+            self.own_first[n] = (msg["x"], msg["y"])
             self.event("own_pose_first", robot=n, x=msg["x"], y=msg["y"], th=msg["th"])
+        if not self.moved[n]:
+            x0, y0 = getattr(self, "own_first", {}).get(n, (msg["x"], msg["y"]))
+            st = str(msg.get("state") or "")
+            if math.hypot(msg["x"] - x0, msg["y"] - y0) > MOVED_OWN_CM or st in MOVING_STATES:
+                self.moved[n] = True
+                self.event("moved", robot=n, how="own pose %.1f cm from its first, state %s"
+                           % (math.hypot(msg["x"] - x0, msg["y"] - y0), st))
 
     def on_frame(self, img, t):
         self.frames += 1
@@ -290,14 +313,10 @@ class Bridge:
                 c[st.get("src") or "overhead"] = c.get(st.get("src") or "overhead", 0) + 1
             if new_obs:
                 sx, sy, h0 = self.starts[n]
-                if math.hypot(st["x"] - sx, st["y"] - sy) > 3.0:
-                    # moved off its start spot: three sightings in a row say so (2026-10-27 dry run: one stray first
-                    # sighting 3.6 cm off took the start heading away, and run_plan never got a fix it could start from)
-                    self.moved_n[n] = self.moved_n.get(n, 0) + 1
-                    if self.moved_n[n] >= 3 or self.has_pose[n]:
-                        self.moved[n] = True
-                else:
-                    self.moved_n[n] = 0
+                if not self.has_pose[n]:
+                    self.relearn(n, st)
+                # (moved off its start only by its own motion: on_pose; a camera spot off its start spot is not a
+                # move: rules audit recommendation 3, Nick 29 Oct 16:2x)
                 th, sth = None, None
                 if not self.has_pose[n] and not self.moved[n] and self.args.start_heading == "map":
                     th, sth = h0, START_SIGMA_DEG          # as placed: the start check then only checks the position
@@ -346,6 +365,30 @@ class Bridge:
             self.say("%.0f pictures/s%s; %s" % (rate, "" if self.trk.side is None else " (+ side)", "; ".join(
                 "%s %s%s %d fixes" % (n, sts[n]["status"], (" by " + sts[n]["src"]) if sts[n].get("src") else "",
                                       self.counts[n]["fixes"]) for n in sts)))
+
+    def relearn(self, n, st):
+        """A robot first seen RELEARN_CM or more from the spot it was given (put down off its start spot: Monday's start
+        straightens it): its floor memory there held part of the robot, which pulled its outline back towards the
+        spot. Forget the floor round where it is seen and fill it in from round it (both cameras)."""
+        sx, sy, _ = self.starts[n]
+        x, y = st["x"], st["y"]
+        done = self.relearned[n]
+        if len(done) >= RELEARN_MAX or math.hypot(x - sx, y - sy) < RELEARN_CM:
+            return
+        if done and math.hypot(x - done[-1][0], y - done[-1][1]) < 1.0:
+            return
+        try:
+            self.trk.robot_at(x, y, 1.4)
+            if getattr(self.trk, "side", None) is not None:
+                self.trk.side.robot_at(x, y, 1.4)
+        except Exception as e:      # noqa: BLE001 (a tracker without it: as before)
+            self.event("relearn_failed", robot=n, why=str(e))
+            return
+        done.append((round(x, 2), round(y, 2)))
+        self.event("relearn", robot=n, x=round(x, 2), y=round(y, 2), off_cm=round(math.hypot(x - sx, y - sy), 2))
+        if len(done) == 1:
+            self.say("%s is %.1f cm from the spot it was given: its floor memory there is taken again"
+                     % (n, math.hypot(x - sx, y - sy)))
 
     def on_obstacle(self, ob):
         self.obstacles.append(ob)
