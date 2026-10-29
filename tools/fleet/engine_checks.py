@@ -147,6 +147,19 @@ def corrections_cmds(name, day=None, notes=None):
             "set wheel_scale %.4f" % c["wheel_scale"]]
 
 
+# Per-robot settings sent at every connect (no flash; lost at power-off), after the corrections. Nick, 29 Oct 15:41
+# (question 59): Left's distance-sensor stop limit 10 cm instead of the firmware's 12. Its centre-right zone reads the
+# plywood floor just under 12 cm (29 Oct 09:22: 124 stops in 121 drives, nothing there); a replay of 29 Oct's logs at
+# 12 / 11 / 10 cm is in docs/build-reports/e02-oct29-start-straighten-blind-strip.md. DOE: 10 / 11 / 12 cm on the
+# board, phantom stops per drive against where a brick in its path is first stopped for.
+ROBOT_SETTINGS = {"Left": {"follow_look_cm": 10}}
+
+
+def robot_settings_cmds(name):
+    """The `set` commands for this robot's own settings (ROBOT_SETTINGS), [] for others."""
+    return ["set %s %g" % (k, v) for k, v in sorted((ROBOT_SETTINGS.get(name) or {}).items())]
+
+
 _STATUS = re.compile(r"status (\S+) \(firmware ([^,)]+)(?:, boot ([0-9A-Fa-f]{4}))?\): (\w+).*?battery (-?\d+)%")
 
 
