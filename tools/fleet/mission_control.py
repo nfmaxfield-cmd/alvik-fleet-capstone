@@ -157,6 +157,34 @@ class Run:
         return st
 
 
+# -- which mode the Connect screen opens on (Nick, 2026-10-29): "Robots" on the Pi when the real cameras answer, the
+# simulator for dry runs (FLEET_DRY=1, --dry) and off the Pi. The page says which, and why, in its header.
+REAL_CAMERA_PORTS = (8000, 8001)    # the recorder's overhead and side /live streams (camrec.py) on the Pi
+
+
+def _port_answers(port, host="127.0.0.1", timeout=0.3):
+    import socket as _s
+    try:
+        _s.create_connection((host, port), timeout=timeout).close()
+        return True
+    except OSError:
+        return False
+
+
+def conn_default(dry=None, probe=_port_answers):
+    """{"mode": "robots" | "sim", "why": plain words}. dry: forced dry (--dry or FLEET_DRY=1)."""
+    if dry is None:
+        dry = os.environ.get("FLEET_DRY", "0") == "1"
+    if dry:
+        return {"mode": "sim", "why": "dry run (FLEET_DRY=1): the simulator"}
+    up = [p for p in REAL_CAMERA_PORTS if probe(p)]
+    if up:
+        cams = " and ".join("overhead" if p == 8000 else "side" for p in up)
+        return {"mode": "robots", "why": "real cameras answering on this Pi (%s): the robots" % cams}
+    return {"mode": "sim", "why": "no real camera answering here (not the Pi, or its recorder is not running): the "
+                                  "simulator"}
+
+
 class Session:
     def __init__(self, folder, map_path=None, port=PORT):
         self.dir = os.path.abspath(folder)
@@ -243,8 +271,18 @@ class Session:
                "table_sizes": TABLE_SIZES, "setup": self.setup_state(), "surface": self.surface(),
                "mission": (self.mission or {}).get("mission"), "preview": self.preview,
                "warmup": self.warm_result, "run": self.run.status() if self.run else None,
-               "last_runs": self.last_runs, "gap_notices": list(getattr(self, "gap_notices", []))}
+               "last_runs": self.last_runs, "gap_notices": list(getattr(self, "gap_notices", [])),
+               "conn_default": self.conn_default()}
         return out
+
+    def conn_default(self):
+        """The Connect screen's starting mode, worked out again every 5 s (the recorder may still be starting when
+        the page first loads); the page follows it until the operator picks a mode."""
+        t = time.time()
+        if getattr(self, "_conn_default", None) is None or t - self._conn_default_t > 5.0:
+            self._conn_default = conn_default(dry=True if getattr(self, "force_dry", False) else None)
+            self._conn_default_t = t
+        return self._conn_default
 
     # -- workspace ---------------------------------------------------------
     def set_map(self, d):
@@ -974,8 +1012,12 @@ def main(argv=None):
     ap.add_argument("--listen", default="127.0.0.1", help="address to serve on (the Pi: 0.0.0.0, reached over Tailscale)")
     ap.add_argument("--allow-host", action="append", default=[],
                     help="a Host name besides 127.0.0.1 from which the page may change things (the Pi's Tailscale address)")
+    ap.add_argument("--dry", action="store_true", help="open on the simulator even where real cameras answer "
+                                                       "(FLEET_DRY=1 does the same)")
     a = ap.parse_args(argv)
     s = Session(a.dir, a.map, a.port)
+    s.force_dry = a.dry
+    print("Connect screen opens on: %s" % s.conn_default()["why"], flush=True)
     srv, url = serve(s, a.port, a.listen, a.allow_host)
     print("Mission Control: %s  (Ctrl+C to stop)" % url, flush=True)
 

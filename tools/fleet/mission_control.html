@@ -64,6 +64,7 @@ svg.table{width:100%;height:auto;display:block;background:#fff;border-radius:8px
 <header>
   <div class="logo"><b>M</b><span style="font-weight:600;font-size:16px">Mission Control</span></div>
   <span class="pill" id="wsname">School table</span>
+  <span class="pill" id="connmode" title="Which mode runs go to (chosen on the Connect screen)">Mode: Simulator</span>
   <div class="grow"></div>
   <span class="status idle" id="status"><i></i><span>Ready</span></span>
   <label class="sw"><input type="checkbox" id="details"> Details</label>
@@ -77,6 +78,8 @@ const COL = {Left: "#2952CC", Center: "#C2410C", Right: "#7A3EC8"};
 const SIDES = ["x_min", "x_max", "y_min", "y_max"];
 const SIDE_WORDS = {x_min: "Left side", x_max: "Right side", y_min: "Bottom side (audience)", y_max: "Top side"};
 let S = null, screen = 0, done = new Set(), mode = "program", prog = null, conn = "sim", spotMode = null, zoneStart = null;
+let connPicked = false;   // the Connect screen follows the server's default (robots on the Pi with real cameras) until a mode is picked
+const CONN_WORDS = {sim: "Simulator", "sim-cameras": "Simulator through the cameras", robots: "Robots"};
 let playT = 0, playing = false, timer = null, pollT = null;
 
 function $(id) { return document.getElementById(id); }
@@ -88,7 +91,7 @@ async function api(path, body) {
   if (!r.ok) throw new Error(j.error || r.statusText);
   return j;
 }
-async function load() { S = await api("/api/state"); render(); }
+async function load() { S = await api("/api/state"); if (!connPicked && S.conn_default) conn = S.conn_default.mode; render(); }
 
 // ---------------------------------------------------------------- the table picture
 function tableSVG(opt) {
@@ -198,6 +201,11 @@ function render() {
   const st = $("status");
   if (run && run.running) { st.className = "status warn"; st.lastChild.textContent = run.paused ? "Paused" : `Running ${run.kind} · ${fmt(run.elapsed_s)}`; }
   else { st.className = "status"; st.lastChild.textContent = `${S.map.robots.length} robots ready`; }
+  const cm = $("connmode");
+  cm.textContent = "Mode: " + (CONN_WORDS[conn] || conn) + (conn === "robots" ? " (real cameras)" : "");
+  cm.style.background = conn === "robots" ? "var(--red)" : "";
+  cm.style.color = conn === "robots" ? "#fff" : "";
+  cm.style.fontWeight = "600";
   [connect, setup, workspace, warmup, mission, runScreen, review][screen]();
 }
 function page(left, right) {
@@ -206,7 +214,10 @@ function page(left, right) {
   $("main").innerHTML = `<section class="left">${lock}${left}<div class="err" id="err"></div></section><aside>${right}</aside>`; wireSettings($("main")); }
 
 function connect() {
-  page(`<div><h1>Connect</h1><p class="sub">Choose the robots or the simulator. The simulator runs the same plans on simulated Alviks.</p></div>
+  const cd = S.conn_default || {};
+  const why = connPicked ? `You chose <b>${esc(CONN_WORDS[conn])}</b>.` : `Opened on <b>${esc(CONN_WORDS[conn])}</b>: ${esc(cd.why || "")}.`;
+  page(`<div><h1>Connect</h1><p class="sub">Choose the robots or the simulator. The simulator runs the same plans on simulated Alviks.</p>
+    <p id="connwhy" style="margin:6px 0 0;font-size:14px">${why}</p></div>
     <div class="card"><div class="modes">
       <button class="${conn === "sim" ? "on" : ""}" data-c="sim"><b>Simulator</b><span class="small muted">Dry run on this computer</span></button>
       <button class="${conn === "sim-cameras" ? "on" : ""}" data-c="sim-cameras"><b>Simulator through the cameras</b><span class="small muted">The simulated overhead and side cameras through the camera bridge, as on the Pi</span></button>
@@ -219,7 +230,7 @@ function connect() {
       <p class="small muted">${conn === "robots" ? "Robots: firmware 2026-10-28a (the arc and the dance; the school's network). Before anything moves the engine checks each robot's firmware, battery (25 % floor), restarts (calibrates again), and reads back every setting it sends." : "Simulator: no robots needed."}</p>
       ${more("More", settingsTable("run", ["edge_guard", "border_cm", "timeout_s"]))}</div>
       <button class="p" id="go">Continue to workspace</button>`);
-  $("main").querySelectorAll("[data-c]").forEach(b => b.onclick = () => { conn = b.dataset.c; render(); });
+  $("main").querySelectorAll("[data-c]").forEach(b => b.onclick = () => { conn = b.dataset.c; connPicked = true; render(); });
   $("go").onclick = () => { done.add(0); screen = 1; render(); };
 }
 
