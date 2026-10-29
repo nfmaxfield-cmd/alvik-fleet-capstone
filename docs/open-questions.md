@@ -81,6 +81,24 @@ Answered ones move to the bottom with the answer and date.
     still photo of Center from above with a ruler along its side would say which is right. (e02-oct29-facing-check)
 67. The facing check takes 6-8 s for two robots (planned 4-5). OK before Monday's run? (e02-oct29-facing-check)
 
+68. Distance-sensor stops: switch every robot to 3 readings in a row before Monday (plus Left at 10 cm)? Replay of
+    29 Oct: phantom stops 69 % of Left's drives now, 0 % with both; costs about 2 cm of reach for a real brick.
+    (e02-oct29-rules-audit)
+69. Where did the side camera's 13-24 grey levels come from on 29 Oct? The five DOE releases only have 21-45 at L0.
+    (e02-oct29-rules-audit)
+70. May a distance-sensor obstacle the camera did not confirm expire on its own (about 15 s), and be dropped rather
+    than end the mission with "no plan"? The stop itself always stays. All 5 "no plan" ends on 29 Oct followed a
+    phantom stop. (e02-oct29-rules-audit)
+71. Should the camera bridge count a robot as moved off its start only when it has been told to move, not by a 3 cm
+    camera distance (5 start-ups refused on 29 Oct with the side camera alone)? (e02-oct29-rules-audit)
+72. Monday: should a robot that goes silent for 4 s rejoin when it is heard again, instead of staying out for the
+    whole run? (e02-oct29-rules-audit)
+73. Lower your DOE-loop room rules from 25 cm (edge) / 30 cm (robots) to 20 / 25 cm, now that robots are driven to
+    open space and calibrate in 12 / 21 cm? (e02-oct29-rules-audit)
+74. Is Center in Monday's run? Its centre-left zone gives phantom stops in 41 % of its drives too. (e02-oct29-rules-audit)
+75. Should the lighting check sample where the robots will drive (the x = 30-45 strip), not only where they stand?
+    (e02-oct29-rules-audit)
+
 ### Robots and sessions
 8. What stands just beyond the home board's x = 0 edge at about y = 30-60? (Your 07:45 "yes" to this one was read as
    "yes, mark that side as partly blocked"; say if you meant something else.)
