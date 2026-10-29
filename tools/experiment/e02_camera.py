@@ -930,6 +930,56 @@ class MotionTracker:
         src = np.clip(self.bg, 0, 255).astype(np.uint8)
         filled = cv2.inpaint(src, (self.known == 0).astype(np.uint8) * 255, 5, cv2.INPAINT_TELEA)
         self.bg[self.known == 0] = filled[self.known == 0].astype(np.float32)
+        unk = (self.known == 0).astype(np.uint8)
+        n, lab = cv2.connectedComponents(unk)
+        for k in range(1, n):                             # every filled-in patch (the full fill above redid them all)
+            self._fill_at_edge(src, (lab == k).astype(np.uint8))
+
+    def _board_mask(self, shape):
+        """The plywood itself (floor height, no margin): 255 on the board. None when there is no board area."""
+        if self.board_rect is None:
+            return None
+        if getattr(self, "board_m", None) is None or self.board_m.shape != shape:
+            x0, y0, x1, y1 = self.board_rect
+            n = 12
+            pts = [(x0 + (x1 - x0) * k / n, y0) for k in range(n)] + [(x1, y0 + (y1 - y0) * k / n) for k in range(n)] + \
+                  [(x1 - (x1 - x0) * k / n, y1) for k in range(n)] + [(x0, y1 - (y1 - y0) * k / n) for k in range(n)]
+            du, dv = getattr(self, "px_shift", (0.0, 0.0))
+            px = [self.cam.project((px_, py_, 0.0)) for px_, py_ in pts]
+            m = np.zeros(shape, np.uint8)
+            if all(np.isfinite(u) and np.isfinite(v) for u, v in px):
+                cv2.fillPoly(m, [np.array([[int(round(u + du)), int(round(v + dv))] for u, v in px], np.int32)], 255)
+            else:
+                m[:] = 255
+            self.board_m = m
+        return self.board_m
+
+    def _fill_at_edge(self, src, disk):
+        """A filled-in disk that crosses the board's edge (2026-10-28 19:34, Center 10 cm from x = 0): the plain fill
+        mixed the dark floor beyond the edge into the plywood under the robot, so plain plywood there read as "robot"
+        and the outline's middle sat ~5 cm towards the edge. The plywood part is filled from plywood only, the part
+        beyond the edge from beyond the edge only (in a window round the disk). Disks inside the board: unchanged."""
+        bm = self._board_mask(self.bg.shape)
+        if bm is None or not disk.any():
+            return
+        on = bm > 0
+        d = disk > 0
+        if not (on[d].any() and (~on[d]).any()):
+            return                                       # wholly on (or off) the board: the plain fill is right
+        vs, us = np.nonzero(d)
+        pad = 14
+        v0, v1 = max(0, vs.min() - pad), min(d.shape[0], vs.max() + pad + 1)
+        u0, u1 = max(0, us.min() - pad), min(d.shape[1], us.max() + pad + 1)
+        unk = d[v0:v1, u0:u1]
+        on_w = on[v0:v1, u0:u1]
+        s = src[v0:v1, u0:u1]
+        for part in (on_w, ~on_w):
+            todo = unk & part
+            if not todo.any() or not (part & ~unk).any():
+                continue                                 # nothing to fill, or nothing of this side seen to fill from
+            f = cv2.inpaint(s, ((unk | ~part).astype(np.uint8)) * 255, 5, cv2.INPAINT_TELEA)
+            win = self.bg[v0:v1, u0:u1]
+            win[todo] = f[todo].astype(np.float32)
 
     def robot_at(self, x, y, scale=1.2):
         """A robot stands at (x, y) on what the floor memory thinks is floor (it was there when the picture was
