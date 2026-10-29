@@ -67,6 +67,9 @@ RUN_DEFAULTS = {
     "upload": False,                  # robots: upload the run's logs (a release with a tag of its own)
     "turn_pause": True,               # after each turn on the spot, stand until the cameras agree with the robot's own
                                       # pose, then drive (run_plan --turn-pause, 2026-10-29)
+    "straighten": True,               # a robot off its start pose is turned on the spot or driven to its spot, then
+                                      # checked again, instead of a stop (run_plan --straighten, 2026-10-29 15:41).
+                                      # Not for the warm-up (it starts where the robots stand, as before)
 }
 WARMUP_KNOBS = ("PROBE_SPACING_CM", "CORNER_PAUSE_S", "BARRIER_NEAR_CM", "SCALE_FLAG", "MAX_FRAMES")
 
@@ -468,6 +471,8 @@ class Session:
             cmd += ["--map", self.map_path, "--program", pp, "--robots", ",".join(self.program.get("robots", []))]
         if not rs.get("turn_pause", True) or kind == "warmup":
             cmd += ["--no-turn-pause"]
+        if not rs.get("straighten", True) or kind == "warmup":
+            cmd += ["--no-straighten"]
         if conn == "sim-cameras":
             cmd += ["--dry"]
             if rs.get("sim_washout"):

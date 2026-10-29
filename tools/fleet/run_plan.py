@@ -1626,13 +1626,17 @@ class Coordinator:
         return ok, words
 
     # -- driving blind (Nick 2026-10-29 15:41, question 3b) -------------------------------------------------------
-    BLIND_AFTER_S = 0.4       # no camera fix for this long = no camera sees it (fixes come ~10 a second). No DOE: a
-                              # definition
-    BLIND_MAX_CM = 25.0       # the farthest a robot may drive with no camera seeing it, on its own wheels and gyro.
-                              # Nick: 25-30 cm. 29 Oct logs (wheel_scale 0.979, gyro_scale 1.075): blind error p95
-                              # ~0.08 cm per cm driven (report). DOE: 15 / 25 / 35 cm against blind stops and the error
+    BLIND_AFTER_S = 0.6       # no camera fix for this long = no camera sees it (fixes come ~10 a second; the longest
+                              # gap in any 29 Oct drive was 0.57 s, rules audit; 0.4 s gave spurious blind starts on
+                              # a loaded dry-run machine). No DOE: a definition
+    BLIND_MAX_CM = 30.0       # the farthest a robot may drive with no camera seeing it, on its own wheels and gyro.
+                              # Nick: 25-30 cm. 30: Monday's diagonal to the meet crosses a 15 cm strip in 27 cm
+                              # (dry run, both cameras blind at x = 30-45: stopped at 25 cm). 29 Oct logs: blind error p95 3.8 cm after 25 cm (median 1.5), 4.4
+                              # after 40 (BLIND_ERR_*). DOE: 15 / 25 / 35 cm against blind stops and the error
                               # at reappearance (board, the sun's strip)
-    BLIND_ERR_PER_CM = 0.08   # the blind pose's p95 error per cm driven blind (29 Oct replay: report, sweep 2)
+    BLIND_ERR_BASE_CM = 2.0   # the blind pose's p95 error, from 29 Oct's logs (dead reckoning from wheel_scale 0.979 /
+    BLIND_ERR_PER_CM = 0.07   # gyro_scale 1.075 against both cameras, 22,000 stretches): p95 2.2 cm after 5 cm, 3.8 after
+                              # 25, 4.4 after 40 = about 2.0 + 0.07 per cm driven blind (report, appendix)
     BLIND_EDGE_CM = 5.0       # while blind, its body must stay this far from an edge even if its pose is off by the
                               # p95 blind error: else everyone stops. Chosen (the edge guard sees an edge ahead at 11 cm
                               # only forwards). DOE: 3 / 5 / 8 cm against blind stops near lane ends
@@ -1684,7 +1688,7 @@ class Coordinator:
                 self.say("%s: no camera sees it: driving on its own wheels and gyro (at most %.0f cm)"
                          % (b.name, self.BLIND_MAX_CM))
             body_edge = min(b.pose[0] - rect[0], rect[2] - b.pose[0], b.pose[1] - rect[1], rect[3] - b.pose[1]) - 4.75
-            err = self.BLIND_ERR_PER_CM * bl["dist"]
+            err = self.BLIND_ERR_BASE_CM + self.BLIND_ERR_PER_CM * bl["dist"]
             why = None
             if bl["dist"] > self.BLIND_MAX_CM:
                 why = "it drove %.0f cm with no camera seeing it (the limit is %.0f cm)" % (bl["dist"], self.BLIND_MAX_CM)

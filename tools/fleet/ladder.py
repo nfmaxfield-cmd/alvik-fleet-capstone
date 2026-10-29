@@ -1190,6 +1190,8 @@ class Ladder:
             return h, None
         r["facing"] = meas.get("heading")
         r["facing_how"] = meas.get("how")
+        r["facing_sure"] = bool(meas.get("sure"))
+        r["facing_at"] = [r.get("x"), r.get("y")]       # where it stood (turn_from_edge: only while it is still there)
         fh = meas.get("heading")
         if fh is None:
             say("  %s: which way it faces is not known from its lights (%s)" % (n, meas.get("how")))
@@ -1241,7 +1243,7 @@ class Ladder:
             say("Lighting check (before anything moves):")
             for m in out:
                 say("  %s%s" % ("" if m["verdict"] == "ok" else "WARNING: ", m["words"]))
-            if out and all(m["verdict"] == "washed out" for m in out):
+            if out and all(m["verdict"] in ("washed out", "not found") for m in out):
                 say("  Neither camera sees the robots well: expect robots kept out below. Fix the light, then run "
                     "this step again.")
             try:
@@ -1610,6 +1612,8 @@ class Ladder:
         (err.evidence: 'both' or one camera's name)."""
         bench, eye = self.bench, self.eye
         sign = 1
+        if h_known is None:
+            h_known = self.turn_from_edge(n, p0)
         if h_known is not None:
             others = list(self.others_of(n).values())
 
@@ -1677,6 +1681,41 @@ class Ladder:
         return h, dict(crawl_cm=round(moved, 2), back_off_cm=round(math.dist(p0, p2), 2), pictures=len(pts),
                        evidence=evidence, sources=src,
                        end=[round(p2[0], 2), round(p2[1], 2)], own_th_before_fix=r2[3])
+
+    def turn_from_edge(self, n, p0):
+        """Facing an edge under straighten.EDGE_AHEAD_CM (12 cm) with no known heading (Nick, 29 Oct 15:41): the
+        firmware's edge guard refuses a forward crawl towards it, and backing is blind. The facing check's heading
+        from its lights (when sure) says which way it faces: it turns on the spot towards the board's middle first
+        (a spin needs straighten.SPIN_EDGE_CM, 7 cm, from every edge), then crawls into open space. Returns the
+        heading it should now face (for the crawl's room check), or None (nothing done)."""
+        import straighten as STR
+        r = self.st["robots"].get(n) or {}
+        hl = r.get("facing")
+        at = r.get("facing_at") or [None, None]
+        if hl is None or not r.get("facing_sure") or p0 is None or at[0] is None or \
+                math.dist(at, p0[:2]) > 3.0:
+            return None                         # not measured, not sure, or measured somewhere else
+        ahead = STR.ahead_to_edge(self.rect, p0[0], p0[1], hl) - STR.BODY_HALF_CM
+        if ahead >= STR.EDGE_AHEAD_CM:
+            return None
+        room = edge_dist(self.rect, *p0)
+        if room < STR.SPIN_EDGE_CM:
+            raise LadderStop("%s faces %s %.1f cm away and its middle is %.1f cm from an edge: no room to turn on the "
+                             "spot (%.0f cm) and backing is blind: it needs moving by hand"
+                             % (n, STR.side_words(self.rect, hl), ahead, room, STR.SPIN_EDGE_CM))
+        mid = ((self.rect[0] + self.rect[2]) / 2.0, (self.rect[1] + self.rect[3]) / 2.0)
+        want = math.degrees(math.atan2(mid[1] - p0[1], mid[0] - p0[0]))
+        turn = wrap180(want - hl)
+        say("    %s faces %s with its nose %.1f cm from it (its lights: %.0f deg): it turns %.0f deg on the spot "
+            "towards open space before its crawl (no backing)" % (n, STR.side_words(self.rect, hl), max(0.0, ahead),
+                                                                  hl, turn))
+        self.log_event("turn_from_edge", robot=n, facing=hl, ahead_cm=round(ahead, 1), turn=round(turn, 1))
+        res = self.bench.leg(n, "turn %.1f" % turn, 20)
+        if res[0] != "done":
+            raise LadderStop("%s's turn away from the edge did not finish: %s (%s)" % (n, res[0], res[4]))
+        r["facing"] = wrap180(hl + turn)
+        r["facing_sure"] = False                # (a gyro turn since: the crawl measures it again)
+        return wrap180(hl + turn)
 
     def refind(self, n, p0, along_cm, h_known):
         """Not seen standing still after a crawl leg (19:43, 28 Oct: Right, "the camera lost Right during its crawl",
