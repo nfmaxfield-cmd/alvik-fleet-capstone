@@ -408,10 +408,13 @@ def towards_words(h, rect):
     return "towards the y = %g %s (%.0f deg)" % (round(y1 if s > 0 else y0, 1), "side" if abs(x1 - x0) >= abs(y1 - y0) else "end", h)
 
 
-def run_plan_check(coord, link, args, names, say=print):
+def run_plan_check(coord, link, args, names, say=print, straighten=False, tag="facing"):
     """run_plan.py's start (Monday, Mission Control's Run and Setup): every robot's facing against its start heading in
     the plan, before its follow run starts (`led` is refused during one). Raises SystemExit (nothing has moved) when a
-    robot faces the wrong way, sideways, or cannot be measured. Writes facing.json in the session folder."""
+    robot faces the wrong way, sideways, or cannot be measured. Writes facing.json in the session folder.
+    straighten (run_plan --straighten, 2026-10-29): a robot that faces the wrong way is not a stop: its measured heading
+    is kept (res["headings"]) for the start's correction; only a robot that cannot be measured (or whose two cameras
+    disagree twice) stops the start. tag: the file name (facing.json, facing-recheck-1.json ...)."""
     import json
     import e02_camera as CAM
     t0 = time.time()
@@ -466,7 +469,37 @@ def run_plan_check(coord, link, args, names, say=print):
             % (2.0 + 3.0 * len(names)))
         tols = {n: float(args.facing_tol_deg) for n in names}
         res = check(names, send, acked, grab, cams, assumed=assumed, firmware=fw, rect=rect, tol=tols,
-                    say=say, targets=targets)
+                    say=(lambda w: None) if straighten else say, targets=targets)
+        if straighten:
+            res["headings"] = {}
+            ok = True
+            for n in names:
+                r = res["robots"][n]
+                meas = r["meas"]
+                h = meas.get("heading")
+                if h is None and meas.get("axis") is not None:
+                    # old firmware, front and back not told apart: the end of its lights' line nearer its start heading
+                    a = float(meas["axis"])
+                    h = a if abs(wrap180(a - assumed[n])) <= 90 else wrap180(a + 180.0)
+                    say("  %s: its lights' line is at %.0f deg, but front and back could not be told apart (%s): taken "
+                        "as %.0f deg, the end nearer its start heading. Check by eye that its front (the distance "
+                        "sensor) faces %s." % (n, a, meas.get("how"), h, targets[n]))
+                elif h is None:
+                    say("  %s: could not tell which way it faces (%s). Is it on the board with its lights on top? "
+                        "Nothing moved." % (n, meas.get("how")))
+                    ok = False
+                    continue
+                elif not meas.get("sure"):
+                    say("  %s: the two cameras disagree on which way it faces, twice (%s). Nothing moved: look at it, "
+                        "then start again." % (n, meas.get("how")))
+                    ok = False
+                    continue
+                res["headings"][n] = float(h)
+                off = wrap180(float(h) - assumed[n])
+                say("  %s faces %.0f deg (%s): %.0f deg off its start heading%s" % (
+                    n, h, meas.get("how"), abs(off), "" if abs(off) <= 3.0 else
+                    " (backwards)" if abs(off) > 135 else ""))
+            res["ok"] = ok
         for w in identity_words(res["robots"], {n: starts[n][:2] for n in names}):
             say("  " + w)
             res["ok"] = False
@@ -475,16 +508,19 @@ def run_plan_check(coord, link, args, names, say=print):
             say("  (%s: firmware %s; 2026-10-29a lights one side at a time, so front and back are told apart every "
                 "time: flash it)" % (", ".join(old), ", ".join(sorted(set(str(fw.get(n)) for n in old)))))
         try:
-            with open(os.path.join(getattr(coord, "outdir", None) or ".", "facing.json"), "w") as f:
+            with open(os.path.join(getattr(coord, "outdir", None) or ".", tag + ".json"), "w") as f:
                 json.dump(dict(res, assumed=assumed, allowed_deg=tols), f, indent=1, default=str)
         except OSError:
             pass
         coord.log("facing_check", ok=res["ok"], seconds=res["seconds"],
                   robots={n: dict(heading=r["meas"].get("heading"), off=(r["verdict"] or {}).get("off"),
                                   how=r["meas"].get("how")) for n, r in res["robots"].items()})
-        coord.start_checks["facing"] = {n: dict(heading=r["meas"].get("heading"), off=(r["verdict"] or {}).get("off"),
+        coord.start_checks[tag] = {n: dict(heading=r["meas"].get("heading"), off=(r["verdict"] or {}).get("off"),
                                                 ok=(r["verdict"] or {}).get("ok", False)) for n, r in res["robots"].items()}
         say("  facing check done in %.1f s" % res["seconds"])
+        if not res["ok"] and straighten:
+            raise SystemExit("Facing check: a robot could not be measured (above), so it cannot be straightened. "
+                             "Nothing moved%s." % ("" if tag == "facing" else " since its correction"))
         if not res["ok"]:
             raise SystemExit("Facing check: not every robot faces its start direction (above). Nothing moved. Put "
                              "it right and start again.")

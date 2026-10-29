@@ -16,7 +16,8 @@ What it does, in order (each step logged in the session folder, logs/<date-time>
   3. the cameras: the camera bridge (cam_bridge.py; --farm: each camera tracked in its own process) on the recorder's
      pictures (real) or the simulator's two cameras (dry);
   4. the run: run_plan.py with every engine check (battery, restarts, settings read back, silent robots, the 8 cm net),
-     re-planned from where the camera has the robots at the start;
+     each robot straightened at the start: its measured pose (camera position, the facing check's heading) against
+     its start pose; off: a turn on the spot or a drive to its spot, then the facing check again (straighten.py);
   5. the record (item 6): run_plan's logs (both cameras' positions, every move and its timing, battery, messages),
      the Pi's temperature and throttling (cpu.csv, perf.csv: the heat tracker), the pictures at the tracking rate and
      a clip 5 s either side of every stop (frames: on the USB drive, <drive>/fleet-frames/<session>/frames, since
@@ -247,6 +248,10 @@ def run(args):
     if not args.no_facing_check:
         rp += ["--facing-check", "--facing-calib", cal, "--facing-stream", stream,
                "--facing-tol-deg", str(args.facing_tol_deg)]
+        if not args.no_straighten:
+            # start straightening (Nick, 2026-10-29 15:41): a robot off its start pose is turned or driven to its spot,
+            # the camera watching, and checked again, instead of a stop (straighten.py)
+            rp += ["--straighten"]
         if scal:
             rp += ["--facing-side-calib", scal, "--facing-side-stream", side_stream]
     # the record: cpu.csv, frames (tracked pictures and clips)
@@ -416,6 +421,9 @@ def main(argv=None):
                     help="skip the facing check (which way each robot faces, from its lights, before anything moves)")
     ap.add_argument("--facing-tol-deg", type=float, default=15.0,
                     help="the facing check: a robot more than this off its start heading stops the start")
+    ap.add_argument("--no-straighten", action="store_true",
+                    help="a robot off its start pose stops the start (before 2026-10-29 15:41); default: it is turned "
+                         "on the spot or driven to its spot, then checked again (run_plan --straighten)")
     ap.add_argument("--no-frames", action="store_true", help="no tracked pictures or clips")
     ap.add_argument("--upload", action="store_true", help="upload the session (a release with a tag of its own)")
     ap.add_argument("--recordings", default=os.path.expanduser("~/recordings"))

@@ -45,6 +45,7 @@ import os
 import queue
 import re
 import socket
+import statistics
 import subprocess
 import sys
 import threading
@@ -655,6 +656,10 @@ class Coordinator:
         if state != "nopose":
             b.pose, b.pose_t = (x, y, th), t
             self.echo_pose(b, t, ms, x, y, th, state)
+            ph = b.__dict__.setdefault("pose_hist", [])       # (laptop time of the pose, x, y, th): blind_watch
+            ph.append(((ms / 1000.0 + b.offset) if b.offset is not None else t, x, y, th))
+            if len(ph) > 120:
+                del ph[:-80]
         # done reports lost over WiFi: the robot runs its steps in order, so everything up to last_done is done
         for sid, i in b.id_index.items():
             st = b.stat[i]
@@ -786,6 +791,11 @@ class Coordinator:
                 continue
             ms = int(round((ev["t"] - b.offset) * 1000))
             th = ev.get("th")
+            if getattr(self.args, "straighten", False) and (getattr(b, "fposed_t", None) is None or
+                                                            t < b.fposed_t + self.STRAIGHT_TH_DROP_S):
+                # the start's heading is the facing check's, sent by fpose: the bridge's first fixes carry the map's
+                # start heading (it takes the robot as placed), which may be the wrong way round
+                th = None
             self.send(b.name, "fix %d %.2f %.2f %s %.2f %.2f" % (ms, ev["x"], ev["y"], "-" if th is None else "%.2f" % th,
                                                                 ev.get("sigma", 0.5), ev.get("sigma_th", 1.5)))
             b.fix, b.fix_sent_t = None, t
@@ -1211,6 +1221,8 @@ class Coordinator:
             self.pending_replan = (why, now() + 0.3)
 
     def on_failed(self, b, i, info, pose, front):
+        if getattr(self, "straightening", False):
+            return                  # the start's correction: a failed step is that correction failing (straighten)
         stp = self.steps(b.name)[i]
         self.log("step_failed", robot=b.name, i=i, info=info)
         if b.ended or info.startswith(("robot lifted", "stop command", "cancel button")):
@@ -1552,6 +1564,167 @@ class Coordinator:
         return "done"
 
     # -- main loop ------------------------------------------------------------
+    # -- the start's correction (straighten.py, Nick 2026-10-29 15:41) ------------------------------------------
+    STRAIGHT_TH_DROP_S = 1.5  # after an fpose, the bridge's fixes carry no heading this long (it learns the robot's own
+                              # pose from the echo, then sends only headings it measured from travel). No DOE: a guard
+
+    def run_correction(self, plan_st, timeout_s):
+        """Drive the start's correction steps (straighten.plan_all) with the camera watching (fixes, the camera guard,
+        the turn pause), apart from the mission plan. Returns (ok, words)."""
+        main = self.plan
+        robots = {}
+        for n in self.names:
+            r = plan_st["robots"].get(n) or {"steps": []}
+            steps = [dict(st) for st in r["steps"]]
+            a = plan_st["after"].get(n)
+            if steps and a and plan_st["robots"][a]["steps"]:
+                steps[0]["after"] = [(a, len(plan_st["robots"][a]["steps"]) - 1)]
+            robots[n] = {"start": list(main["robots"][n]["start"]), "steps": steps}
+        self.plan = {"plan_id": "%s-straighten" % main.get("plan_id"), "robots": robots,
+                     "summary": {"makespan_s": 0.0}, "settings": main.get("settings") or {}}
+        self._install(self.plan, keep={}, first={}, old=None)
+        self.straightening = True
+        self.plan_start = self.t_run = now()
+        self.log("straighten_run", steps={n: [st.get("why") for st in r["steps"]] for n, r in robots.items()})
+        ok, words = False, "timed out after %.0f s" % timeout_s
+        try:
+            while now() - self.t_run < timeout_s:
+                self.drain()
+                self.fixes()
+                for b in self.bots.values():
+                    if b.ended and not self.abort:
+                        self.abort = "%s's follow run ended (%s)" % (b.name, b.ended)
+                self.cam_guard()
+                lim = getattr(self.args, "silent_s", EC.SILENT_S)
+                for b in self.bots.values():
+                    if lim and b.last_heard is not None and now() - b.last_heard > lim and not self.abort:
+                        self.abort = "nothing heard from %s for %.1f s" % (b.name, now() - b.last_heard)
+                if self.abort:
+                    self.halt_all()
+                    words = self.abort
+                    break
+                failed = [(n, st) for n in self.names for st in self.bots[n].stat if st["status"] == "failed"]
+                if failed:
+                    self.halt_all()
+                    words = "; ".join("%s's %s did not finish (%s)" % (n, "step", st.get("info") or "failed")
+                                      for n, st in failed)
+                    break
+                self.release()
+                self.resend()
+                if all(all(st["status"] == "done" for st in self.bots[n].stat) for n in self.names):
+                    ok, words = True, "done in %.1f s" % (now() - self.t_run)
+                    break
+                time.sleep(0.01)
+            else:
+                self.halt_all()
+        finally:
+            self.straightening = False
+            self.plan = main
+            self._install(main, keep={}, first={}, old=None)
+            self.plan_start = self.t_run = None
+        self.log("straighten_done", ok=ok, words=words)
+        return ok, words
+
+    # -- driving blind (Nick 2026-10-29 15:41, question 3b) -------------------------------------------------------
+    BLIND_AFTER_S = 0.4       # no camera fix for this long = no camera sees it (fixes come ~10 a second). No DOE: a
+                              # definition
+    BLIND_MAX_CM = 25.0       # the farthest a robot may drive with no camera seeing it, on its own wheels and gyro.
+                              # Nick: 25-30 cm. 29 Oct logs (wheel_scale 0.979, gyro_scale 1.075): blind error p95
+                              # ~0.08 cm per cm driven (report). DOE: 15 / 25 / 35 cm against blind stops and the error
+                              # at reappearance (board, the sun's strip)
+    BLIND_ERR_PER_CM = 0.08   # the blind pose's p95 error per cm driven blind (29 Oct replay: report, sweep 2)
+    BLIND_EDGE_CM = 5.0       # while blind, its body must stay this far from an edge even if its pose is off by the
+                              # p95 blind error: else everyone stops. Chosen (the edge guard sees an edge ahead at 11 cm
+                              # only forwards). DOE: 3 / 5 / 8 cm against blind stops near lane ends
+    REACQUIRE_CM = 2.5        # seen again after driving blind: its pose is reset to the camera's (fpose) when they
+                              # disagree by more than this (the robot's fix gate would refuse a fix 3 cm+ off a pose it
+                              # is sure of, and the camera guard stop everyone at 6 cm). Chosen; DOE: 1.5 / 2.5 / 4 cm
+    REACQUIRE_MAX_CM = 12.0   # ... but not over this: the camera may have the wrong robot; the camera guard decides
+
+    def pose_at(self, b, t):
+        ph = getattr(b, "pose_hist", None) or []
+        best = None
+        for q in ph:
+            if best is None or abs(q[0] - t) < abs(best[0] - t):
+                best = q
+        return best
+
+    def blind_watch(self):
+        """A robot no camera sees drives on on its own wheels and gyro (the firmware does). Capped: BLIND_MAX_CM driven
+        blind, or its body nearer an edge than BLIND_EDGE_CM allowing for the blind error, stops everyone. Seen again:
+        its pose is set to the camera's when they disagree (REACQUIRE_CM); the plan's steps are positions on the board,
+        so it steers back onto its planned line and goes on with the pattern."""
+        if not self.source.live or not self.t_run or getattr(self, "straightening", False):
+            return
+        t = now()
+        f = self.m["floor"]
+        rect = (f["x_min"], f["y_min"], f["x_max"], f["y_max"])
+        for b in self.bots.values():
+            if b.out or b.pose is None:
+                continue
+            ct = getattr(b, "cam_t", None)
+            bl = getattr(b, "blind", None)
+            if ct is not None and t - ct <= self.BLIND_AFTER_S:
+                if bl is not None:
+                    b.blind = None
+                    self.blind_end(b, bl)
+                continue
+            if ct is None:
+                continue                       # never seen yet (the start handles that)
+            if bl is None:
+                p0 = self.pose_at(b, ct) or (ct,) + tuple(b.pose)
+                b.blind = bl = dict(t0=ct, start=list(p0[1:3]), last=list(b.pose[:2]), dist=math.hypot(
+                    b.pose[0] - p0[1], b.pose[1] - p0[2]), said=False)
+                self.log("blind_start", robot=b.name, own=list(b.pose), last_cam=getattr(b, "last_cam", None),
+                         t_run=round(t - self.t_run, 2))
+            bl["dist"] += math.hypot(b.pose[0] - bl["last"][0], b.pose[1] - bl["last"][1])
+            bl["last"] = list(b.pose[:2])
+            if bl["dist"] >= 5.0 and not bl["said"]:
+                bl["said"] = True
+                self.say("%s: no camera sees it: driving on its own wheels and gyro (at most %.0f cm)"
+                         % (b.name, self.BLIND_MAX_CM))
+            body_edge = min(b.pose[0] - rect[0], rect[2] - b.pose[0], b.pose[1] - rect[1], rect[3] - b.pose[1]) - 4.75
+            err = self.BLIND_ERR_PER_CM * bl["dist"]
+            why = None
+            if bl["dist"] > self.BLIND_MAX_CM:
+                why = "it drove %.0f cm with no camera seeing it (the limit is %.0f cm)" % (bl["dist"], self.BLIND_MAX_CM)
+            elif body_edge - err < self.BLIND_EDGE_CM:
+                why = ("with no camera seeing it, its body may be %.1f cm from an edge (its own pose %.1f cm, less the "
+                       "blind error %.1f cm; it must keep %.0f cm)" % (body_edge - err, body_edge, err,
+                                                                       self.BLIND_EDGE_CM))
+            if why:
+                self.abort = "%s: %s: stopping everyone" % (b.name, why)
+                self.log("blind_stop", robot=b.name, dist_cm=round(bl["dist"], 2), own=list(b.pose),
+                         body_edge_cm=round(body_edge, 2))
+                self.say(self.abort)
+                self.halt_all()
+                return
+
+    def blind_end(self, b, bl):
+        """Seen again after driving blind: how far its own pose was off, and the reset when needed."""
+        h = getattr(b, "cam_hist", None) or []
+        if not h:
+            return
+        tf, _, cx, cy, src = h[-1]
+        own = self.pose_at(b, tf)
+        if own is None:
+            return
+        d = math.hypot(cx - own[1], cy - own[2])
+        rec = dict(robot=b.name, dist_cm=round(bl["dist"], 2), blind_s=round(tf - bl["t0"], 2), err_cm=round(d, 2),
+                   cam=[round(cx, 2), round(cy, 2)], own=[round(own[1], 2), round(own[2], 2)], src=src,
+                   t_run=round(now() - self.t_run, 2) if self.t_run else None)
+        if self.REACQUIRE_CM < d <= self.REACQUIRE_MAX_CM and b.pose is not None:
+            # the camera's spot moved on by what the robot did since that picture
+            nx, ny = cx + (b.pose[0] - own[1]), cy + (b.pose[1] - own[2])
+            self.send(b.name, "fpose %.2f %.2f %.2f %.2f %.2f" % (nx, ny, b.pose[2], 1.0, 3.0))
+            rec["reset"] = [round(nx, 2), round(ny, 2)]
+            self.say("%s: seen again after %.0f cm with no camera; its own pose was %.1f cm off: set to the camera's, "
+                     "and it steers back onto its planned line" % (b.name, bl["dist"], d))
+        elif bl["dist"] >= 5.0:
+            self.say("%s: seen again after %.0f cm with no camera; its own pose was %.1f cm off" % (b.name, bl["dist"], d))
+        self.log("blind_end", **rec)
+        self.__dict__.setdefault("blinds", []).append(rec)
+
     def finished(self):
         if self.plan.get("stranded"):
             return False
@@ -1578,6 +1751,9 @@ class Coordinator:
             if self.abort:
                 break
             self.cam_guard()
+            if self.abort:
+                break
+            self.blind_watch()
             if self.abort:
                 break
             self.silence_watch()
@@ -1661,6 +1837,8 @@ class Coordinator:
                 "battery": {n: b.battery for n, b in self.bots.items()},
                 "boot": {n: b.boot for n, b in self.bots.items()},
                 "start_checks": getattr(self, "start_checks", {}),
+                "straighten": getattr(self, "straighten_record", None),
+                "blind": getattr(self, "blinds", []),
                 "turn_pause": {"on": bool(getattr(self.args, "turn_pause", False)) and self.source.live,
                                "robots": self.turn_pause_summary()}}
 
@@ -1841,6 +2019,10 @@ def send_settings(coord, link, args, names):
         cmds = list(getattr(args, "send", None) or [])
         if args.corrections:
             cmds += EC.corrections_cmds(n, coord.day, notes)
+        own = EC.robot_settings_cmds(n)          # its own settings (Left's 10 cm stop limit, question 59): every run
+        if own:
+            cmds += own
+            notes.append("%s: its own settings: %s" % (n, ", ".join(c[4:] for c in own)))
         fw = b.firmware or ""
         if coord.m.get("sides") and getattr(args, "border_cm", 0) > 0:
             if fw and fw < BORDER4_FIRMWARE:
@@ -1985,9 +2167,11 @@ def start_robots(coord, link, args, source):
             moved = []
     # ---- the facing check (Nick, 2026-10-29): which way each robot faces, from its lights, before its follow run
     # (`led` is refused during one) and after any calibration (its roll turns the robot). facing.py
+    straight = bool(getattr(args, "straighten", False) and getattr(args, "facing_check", False) and source.live)
+    fres = None
     if getattr(args, "facing_check", False):
         import facing as FC
-        FC.run_plan_check(coord, link, args, names)
+        fres = FC.run_plan_check(coord, link, args, names, straighten=straight)
     # ---- the follow runs; a robot that says "not calibrated" is calibrated now (auto), then started again
     start_follow(coord, link, names)
     bad = [n for n in names if coord.bots[n].calibrated is False]
@@ -2019,7 +2203,11 @@ def start_robots(coord, link, args, source):
     print("  settings read back: %s" % ", ".join("%s %d ok" % (n, len(want[n])) for n in names))
     # where are they?
     starts = {n: coord.plan["robots"][n]["start"] for n in names}
-    if source.live:
+    if straight:
+        # start straightening (Nick, 2026-10-29 15:41): measured pose against the start pose; a turn on the spot, or a
+        # drive to its spot, then a re-check, instead of a stop (straighten.py)
+        straighten_start(coord, link, args, source, names, fres)
+    elif source.live:
         print("Waiting for camera fixes...")
         seen = {}
         for _ in range(200):          # what queued up meanwhile (a calibration: a minute of fixes) is old: drop it
@@ -2028,6 +2216,10 @@ def start_robots(coord, link, args, source):
 
         def got():
             for ev in source.poll():
+                if ev.get("robot") in moved:
+                    # its calibration roll moved it, which the camera bridge cannot know (it counts a robot as moved
+                    # only by its own pose since 29 Oct 16:2x): the map's start heading it sends is not vouched for
+                    continue
                 if ev.get("type") == "fix" and ev.get("robot") in starts and ev.get("th") is not None:
                     seen[ev["robot"]] = ev     # (the start check needs a heading: position-only fixes wait)
             return set(seen) == set(names)
@@ -2058,13 +2250,16 @@ def start_robots(coord, link, args, source):
             else:
                 hc = EC.start_heading_check(coord.plan, n, coord.m, dh, float(ev.get("line_cm") or EC.START_LINE_CM))
                 tol_deg, how = (hc["allowed_deg"] if hc["allowed_deg"] is not None else 180.0), hc["words"]
-            print("  %s: camera puts it %.1f cm / %.1f deg from its start spot (heading allowed %.1f: %s)"
-                  % (n, d, dh, tol_deg, how))
-            coord.start_checks[n].update(place_cm=round(d, 2), heading_deg=round(dh, 2),
+            # only the side camera sees it (Nick, 29 Oct, question 60): it reads ~3 cm off, so 5 cm is allowed
+            side_only = str(ev.get("src") or "").endswith(":side")
+            tol_cm = max(args.place_tol_cm, SIDE_ONLY_PLACE_CM) if side_only else args.place_tol_cm
+            print("  %s: camera puts it %.1f cm / %.1f deg from its start spot (allowed %.1f cm%s; heading allowed "
+                  "%.1f: %s)" % (n, d, dh, tol_cm, ", side camera alone" if side_only else "", tol_deg, how))
+            coord.start_checks[n].update(place_cm=round(d, 2), heading_deg=round(dh, 2), place_allowed_cm=tol_cm,
                                          heading_allowed_deg=round(tol_deg, 2), heading_rule=how)
-            if (d > args.place_tol_cm or dh > tol_deg) and not args.yes:
+            if (d > tol_cm or dh > tol_deg) and not args.yes:
                 raise SystemExit("%s is not on its start spot (%.1f cm, %.1f deg off; allowed %.1f cm, %.1f deg)."
-                                 % (n, d, dh, args.place_tol_cm, tol_deg))
+                                 % (n, d, dh, tol_cm, tol_deg))
             coord.bots[n].fix = ev
     else:
         if not args.yes and not args.dry_run:
@@ -2105,6 +2300,155 @@ def start_robots(coord, link, args, source):
             r["calibrated_boot"] = b.boot      # it ran follow: its compass check is done since this boot
     coord.day.save()
     print("Robots ready: " + ", ".join("%s at %.1f,%.1f,%.0f" % (n, *coord.bots[n].pose) for n in names))
+
+
+SIDE_ONLY_PLACE_CM = 5.0   # the start check's allowance when only the side camera sees the robot (question 60, Nick
+                           # 29 Oct 15:41; as cam_bridge.MOVED_SIDE_CM, where the DOE note is)
+
+
+def camera_positions(coord, names, wait_s, settle_s=0.8):
+    """Where the camera has each robot, standing: the median of its fixes over the last settle_s (position only), and
+    whether only the side camera saw it. {name: (x, y)}, {name: side_only}. SystemExit when one is not seen."""
+    t0 = now()
+    for b in coord.bots.values():
+        b.__dict__.setdefault("cam_hist", [])
+    got = {}
+    while now() - t0 < wait_s:
+        coord.drain()
+        coord.fixes()
+        for n in names:
+            h = [f for f in coord.bots[n].cam_hist if f[1] >= t0]
+            if h and h[-1][1] - h[0][1] >= settle_s and len(h) >= 4:
+                use = [f for f in h if f[1] >= h[-1][1] - settle_s]
+                got[n] = ((float(statistics.median([f[2] for f in use])),
+                           float(statistics.median([f[3] for f in use]))), all(f[4] == "side" for f in use))
+        if set(got) == set(names) and now() - t0 >= settle_s:
+            break
+        time.sleep(0.03)
+    miss = [n for n in names if n not in got]
+    if miss:
+        raise SystemExit("No camera fix for %s: no camera finds %s on the board. Nothing moved."
+                         % (", ".join(miss), "it" if len(miss) == 1 else "them"))
+    return {n: got[n][0] for n in names}, {n: got[n][1] for n in names}
+
+
+def set_poses(coord, link, poses):
+    """fpose each robot (x, y, heading), then wait until its FOLLOW record carries it."""
+    for n, (x, y, h) in poses.items():
+        link.send_name(n, "fpose %.2f %.2f %.2f 1.0 2.0" % (x, y, h))
+        coord.bots[n].fposed_t = now()
+    for attempt in range(3):
+        def ok():
+            for n, (x, y, h) in poses.items():
+                b = coord.bots[n]
+                if b.pose is None or b.pose_t < b.fposed_t or math.hypot(b.pose[0] - x, b.pose[1] - y) > 2.0 or \
+                        abs((b.pose[2] - h + 180) % 360 - 180) > 5.0:
+                    return False
+            return True
+        if wait_for(ok, 2.0, coord):
+            return
+        for n, (x, y, h) in poses.items():
+            link.send_name(n, "fpose %.2f %.2f %.2f 1.0 2.0" % (x, y, h))
+            coord.bots[n].fposed_t = now()
+    raise SystemExit("No pose on: %s (fpose not taken)" % ", ".join(poses))
+
+
+def restart_follow(coord, link, names):
+    """End the follow runs (the facing check's `led` is refused during one), for the re-check."""
+    for n in names:
+        link.send_name(n, "stop")
+    wait_for(lambda: all(coord.bots[n].ended for n in names), 3.0, coord)
+    time.sleep(0.3)
+    coord.drain()
+    for n in names:
+        b = coord.bots[n]
+        b.follow, b.pose, b.fposed_t = {}, None, None
+
+
+def straighten_start(coord, link, args, source, names, fres):
+    """Monday's start: each robot's measured pose (camera position, the facing check's heading) against its start pose
+    in the plan. Off: it turns on the spot, or drives to its spot and turns (straighten.py), the camera watching; then
+    the facing check again. Stops only when a robot cannot be found, cannot be corrected safely, or is still off after
+    two corrections."""
+    import straighten as ST
+    import facing as FC
+    f = coord.m["floor"]
+    rect = (f["x_min"], f["y_min"], f["x_max"], f["y_max"])
+    starts = {n: tuple(float(v) for v in coord.plan["robots"][n]["start"][:3]) for n in names}
+    heads = dict(fres["headings"])
+    record = coord.straighten_record = {"tries": [], "result": None}
+    tries = 0
+    print("Start straightening: each robot's measured pose against its start pose")
+    while True:
+        pos, side_only = camera_positions(coord, names, args.fix_wait_s)
+        meas = {n: (pos[n][0], pos[n][1], heads[n]) for n in names}
+        set_poses(coord, link, meas)
+        for n in names:
+            coord.bots[n].fix = None
+        entry = {"measured": {n: [round(v, 2) for v in meas[n]] for n in names},
+                 "side_only": side_only, "start": {n: list(starts[n]) for n in names}}
+        record["tries"].append(entry)
+        if tries == 0:
+            for n in names:
+                d = math.hypot(meas[n][0] - starts[n][0], meas[n][1] - starts[n][1])
+                coord.start_checks[n].update(place_cm=round(d, 2), heading_deg=round(abs(ST.wrap180(
+                    meas[n][2] - starts[n][2])), 2), heading_rule="measured (facing check); straightened if off")
+        else:
+            res = [ST.recheck(n, meas[n], starts[n], side_only[n]) for n in names]
+            for ok, w in res:
+                print("  " + w)
+            entry["recheck"] = [w for _, w in res]
+            if all(ok for ok, _ in res):
+                break
+        try:
+            pl = ST.plan_all(meas, starts, rect, side_only)
+        except ST.Refuse as e:
+            record["result"] = "refused: %s" % e
+            raise SystemExit("Start straightening: %s" % e)
+        need = [n for n in names if pl["robots"][n]["steps"]]
+        for w in pl["words"]:
+            print("  " + w)
+        if not need:
+            if tries:
+                print("  every robot is within its re-check allowance: ready")
+            break
+        if tries >= ST.TRIES:
+            record["result"] = "still off after %d corrections: %s" % (tries, ", ".join(need))
+            raise SystemExit("Start straightening: %s still off its start pose after %d corrections (above). Stopped: "
+                             "put %s on its start spot facing its start direction and start again."
+                             % (", ".join(need), tries, "it" if len(need) == 1 else "them"))
+        tries += 1
+        entry["steps"] = {n: [st.get("why") for st in pl["robots"][n]["steps"]] for n in need}
+        timeout = 15.0 + sum(ST.est_s(pl["robots"][n]["steps"]) for n in need)
+        ok, words = coord.run_correction(pl, timeout)
+        entry["run"] = words
+        for n in need:
+            r = pl["robots"][n]
+            w = ST.done_words(n, r, rect, starts[n][2]) if ok else \
+                "%s: the correction did not finish (%s)" % (n, words)
+            print("  " + w)
+            entry.setdefault("words", []).append(w)
+        if not ok and coord.abort:
+            record["result"] = "stopped: %s" % coord.abort
+            raise SystemExit("Start straightening stopped: %s" % coord.abort)
+        if not ok and tries >= ST.TRIES:
+            record["result"] = "correction failed twice: %s" % words
+            raise SystemExit("Start straightening: the correction failed twice (%s). Stopped." % words)
+        # re-check: the facing check again (the follow runs end for it), then the follow runs again
+        restart_follow(coord, link, names)
+        fr = FC.run_plan_check(coord, link, args, names, straighten=True, tag="facing-recheck-%d" % tries)
+        heads = dict(fr["headings"])
+        start_follow(coord, link, names)
+        if not wait_for(lambda: all(coord.bots[n].follow for n in names), 8, coord):
+            raise SystemExit("No FOLLOW records after the re-check from: %s"
+                             % ", ".join(n for n in names if not coord.bots[n].follow))
+    record["result"] = "ready after %d correction(s)" % tries
+    coord.log("straighten", **record)
+    for n in names:
+        b = coord.bots[n]
+        b.fix = None
+        b.last_cam = [round(meas[n][0], 2), round(meas[n][1], 2), round(meas[n][2], 1)]
+        print("  %s: ready at (%.1f, %.1f) facing %.0f deg" % (n, *meas[n]))
 
 
 def gap_lock(args, n_robots):
@@ -2151,6 +2495,10 @@ def main(argv=None):
                     help="before anything moves, measure which way each robot faces from its lights (both cameras) "
                          "and stop when one is more than --facing-tol-deg off its start heading (facing.py)")
     ap.add_argument("--facing-tol-deg", type=float, default=15.0)
+    ap.add_argument("--straighten", action="store_true",
+                    help="with --facing-check and camera fixes: a robot off its start pose is turned on the spot or "
+                         "driven to its spot (the camera watching), then checked again, instead of stopping the start "
+                         "(straighten.py; Monday and Mission Control: mission_run.py passes it)")
     ap.add_argument("--facing-stream", default="127.0.0.1:8000", help="the overhead camera's pictures")
     ap.add_argument("--facing-side-stream", default="", help="the side camera's pictures ('' = overhead alone)")
     ap.add_argument("--facing-calib", default="", help="the overhead camera's calibration")
@@ -2285,6 +2633,9 @@ def main(argv=None):
         for w in args.wifi_drop:
             cmd += ["--wifi-drop", w]
         cmd += args.sim_arg
+        if getattr(args, "straighten", False) and "--persist" not in cmd:
+            cmd += ["--persist"]
+            args.sim_persist = True  # the re-check ends the follow runs and starts them again: the simulator must not end
         print("Starting the simulated robots: " + " ".join(cmd[1:]))
         sim = subprocess.Popen(cmd, stdout=open(os.path.join(outdir, "sim_stdout.txt"), "w"), stderr=subprocess.STDOUT)
         time.sleep(1.5)
@@ -2339,6 +2690,8 @@ def main(argv=None):
         source.close()
         summ = coord.summary() if hasattr(coord, "dockings") else {"result": coord.__dict__.get("abort")}
         if sim is not None:
+            if getattr(args, "sim_persist", False):
+                sim.terminate()            # (--persist: it reports on SIGTERM)
             try:
                 sim.wait(timeout=15)
             except subprocess.TimeoutExpired:

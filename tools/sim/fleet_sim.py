@@ -554,6 +554,19 @@ class FleetSim:
         while not self.stop.is_set():
             t_cap = time.time()
             poses = [(rb.x, rb.y, rb.th) + tuple(rb.lights()) for rb in self.robots.values() if not rb.lifted]
+            side_poses = poses
+            strip = getattr(a, "live_blind_strip", None)
+            if strip:
+                # --live-blind-strip X0:X1 (29 Oct daytime: the overhead lost robots at x = 30-45 cm in the sun): the
+                # overhead does not see a robot whose middle is on the strip, body or lights; :both, nor the side
+                x0s, x1s, both = strip
+                poses = [p for p in poses if not (x0s <= p[0] <= x1s)]
+                if both:
+                    side_poses = [p for p in side_poses if not (x0s <= p[0] <= x1s)]
+            bias = getattr(a, "live_side_bias", None)
+            if bias:
+                # --live-side-bias DX,DY: the side camera reads every robot this far off (29 Oct: about 3 cm, side alone)
+                side_poses = [(p[0] + bias[0], p[1] + bias[1]) + tuple(p[2:]) for p in side_poses]
             boxes, hand = [], None
             if getattr(a, "live_brick", False) and self.t_plan0 is not None:
                 spec = a.brick
@@ -571,7 +584,7 @@ class FleetSim:
                 n += 1
                 side_jpg = None
                 if sc is not None:
-                    ok2, side_jpg = cv2.imencode(".jpg", sc.render(poses), [cv2.IMWRITE_JPEG_QUALITY, 90])
+                    ok2, side_jpg = cv2.imencode(".jpg", sc.render(side_poses), [cv2.IMWRITE_JPEG_QUALITY, 90])
                 with cond:
                     latest[0] = (jpg.tobytes(), n, t_cap + 0.04)     # stamped one picture late, as camrec.py (e02_sim.py)
                     if side_jpg is not None:
@@ -579,7 +592,7 @@ class FleetSim:
                         side_latest[0] = (side_jpg.tobytes(), n, t_cap + 0.04 + a.live_side_lag)
                     cond.notify_all()
                 if n == 1 and sc is not None:
-                    cv2.imwrite(os.path.join(a.out, "live_first_side.png"), sc.render(poses))
+                    cv2.imwrite(os.path.join(a.out, "live_first_side.png"), sc.render(side_poses))
                 if n == 1 or (hand is not None and boxes and not getattr(self, "_live_hand_png", False)):
                     cv2.imwrite(os.path.join(a.out, "live_first.png" if n == 1 else "live_hand_brick.png"), img)
                     if n > 1:
@@ -851,6 +864,12 @@ def parse_brick(s):
     return {"where": (x, y, a[0] if a else 0.0), "t": t}
 
 
+def parse_strip(v):
+    """'30:45' or '30:45:both' -> (30.0, 45.0, both?)"""
+    q = v.split(":")
+    return float(q[0]), float(q[1]), len(q) > 2 and q[2] == "both"
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--map", required=True)
@@ -897,6 +916,11 @@ def main(argv=None):
                                                                        "much later than the overhead's, s")
     ap.add_argument("--live-washout", action="store_true",
                     help="--serve-live: the board washed out under the lamp for the overhead camera (2026-10-27 11:20)")
+    ap.add_argument("--live-blind-strip", type=parse_strip, metavar="X0:X1[:both]",
+                    help="--serve-live: the overhead camera does not see robots whose middle is at x0 <= x <= x1 "
+                         "(29 Oct daytime: the sun's strip at x = 30-45 cm); ':both': nor does the side camera")
+    ap.add_argument("--live-side-bias", type=lambda v: tuple(float(q) for q in v.split(",")), metavar="DX,DY",
+                    help="--live-side: the side camera reads every robot this far off, cm (29 Oct: about 3 cm alone)")
     ap.add_argument("--max-s", type=float, default=600.0)
     ap.add_argument("--starts", help="JSON {name: [x, y, heading deg]}: where the robots really start (default: the "
                                      "map's start spots)")
