@@ -12,7 +12,7 @@ Left's turn check, the stills) and the simulator. The Pi and the robots were not
 
 | What the screen said | What it was | Kind |
 |---|---|---|
-| Center: "camera and own pose disagree" (drives 2-4) | Center's heading was 190 deg wrong, so it drove backwards | loop design |
+| Center: "camera and own pose disagree" (drives 2-4) | Center's heading was 190 deg wrong, so it drove the wrong way | loop design |
 | Center: "5 cm from the x = 0 edge" | really 9-10 cm in; the tracker misread a robot standing at an edge | tracker |
 | Left: "no end of the leg in 20 s", then "backing blind refused" | its "done" message was lost on the WiFi; the ladder did not ask | loop design |
 | Right: "the camera lost Right during its crawl" | both cameras saw it; its spot hopped 1.4 cm between them | tracker + camera (lamp) |
@@ -24,7 +24,7 @@ Left's turn check, the stills) and the simulator. The Pi and the robots were not
 None of these were the robots' wheels, gyros or sensors. Every turn check that ran passed: 16 turns, mean error
 +1.3 deg, largest 4.5 deg.
 
-**Center drove backwards three times.** Drive 1 met an obstacle reading at 5 s, was re-planned, and finished facing
+**Center drove the wrong way three times.** Drive 1 met an obstacle reading at 5 s, was re-planned, and finished facing
 -150 deg by its own gyro (its turns were fine: 4 of 4 within 4.3 deg minutes earlier). That re-planned drive left no
 long straight for the camera to measure a heading from, so the loop kept the heading it had before the drive, 41 deg.
 Drive 2 started Center believing 41 deg while it faced 210 deg. It turned and drove "forwards along 45 deg", and both
@@ -40,7 +40,7 @@ Grey dashed arrows are where each drive was planned to go. Coloured lines are wh
 
 It was not a camera identity mix-up: Center was the only robot moving, both cameras agreed on where it went, and
 the bridge saw it with both cameras in 122 of 131 pictures of drive 4. "Side camera only" at L0-L2 was the washed-out
-overhead (Center was the faintest robot on the board).
+overhead.
 
 Each wrong-way drive moved Center 8-15 cm (11.6, 15.2 and 8.4 cm) before the 1 s guard stopped it. It ended with its
 middle at x = 11.8 by the drive's camera bridge, 9-10 cm by the overhead picture. It was driving physically forwards,
