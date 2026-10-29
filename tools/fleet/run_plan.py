@@ -982,19 +982,23 @@ class Coordinator:
                 ob, cause, "no route for %s" % ", ".join(newplan["stranded"])):
             return
         rj = getattr(self, "rejoin_pending", None)
-        if rj and not improving:
+        if rj and not improving and now() > rj[1]:
+            self.rejoin_pending = rj = None
+        if rj and not improving and newplan.get("stranded"):
+            # within REJOIN_TRIAL_S of a rejoin, robots left without a route undo it (dry run 70 x 130: the rejoin's
+            # own plan was fine, the next re-plan, after a false stop, left both robots without a route for good)
+            rj = rj[0]
             self.rejoin_pending = None
-            if newplan.get("stranded"):
-                # the program cannot take it back from here (a dry run, 29 Oct: Left went silent in the circle while
-                # Right carried on mowing alone; together, neither had a route): it stays where it is as a fixed
-                # obstacle and the others carry on, as before rejoining existed
-                b = self.bots[rj]
-                b.rejoin_failed = "no plan fits it back in (%s left without a route)" % ", ".join(newplan["stranded"])
-                self.log("rejoin_undone", robot=rj, stranded=newplan["stranded"])
-                self.say("%s could not be fitted back into the plan (%s): it stays where it is, as a fixed obstacle; "
-                         "the others carry on" % (rj, b.rejoin_failed))
-                self.retire(b, "heard again, but %s" % b.rejoin_failed, kind="out")
-                return
+            # the program cannot take it back from here (a dry run, 29 Oct: Left went silent in the circle while
+            # Right carried on mowing alone; together, neither had a route): it stays where it is as a fixed
+            # obstacle and the others carry on, as before rejoining existed
+            b = self.bots[rj]
+            b.rejoin_failed = "no plan fits it back in (%s left without a route)" % ", ".join(newplan["stranded"])
+            self.log("rejoin_undone", robot=rj, stranded=newplan["stranded"])
+            self.say("%s could not be fitted back into the plan (%s): it stays where it is, as a fixed obstacle; "
+                     "the others carry on" % (rj, b.rejoin_failed))
+            self.retire(b, "heard again, but %s" % b.rejoin_failed, kind="out")
+            return
         gate = getattr(self.args, "min_gap_cm", EC.MIN_GAP_CM) or 0.0
         if gate:
             gap = EC.plan_gap(newplan, self.m, gate_cm=gate)
@@ -1316,6 +1320,10 @@ class Coordinator:
     REJOIN_MAX = 3         # chosen: rejoins per robot per run; after the 3rd its next silence keeps it out (a link that
                            # keeps dropping). No DOE: a stop to a loop
     REJOIN_BOOT_WAIT_S = 4.0  # its boot ID (status, CLOCK, RUNINFO) not heard in this long: it is checked as restarted
+    REJOIN_TRIAL_S = 30.0  # chosen: for this long after a rejoin, a re-plan that leaves robots without a route undoes it
+                           # (the returning robot becomes a fixed obstacle again). No DOE: a guard against a deadlock
+    REJOIN_STALL_S = 20.0  # chosen: after a rejoin, no step done by anyone this long undoes it (a stuck joint plan).
+                           # Monday's steps finish every 1-3 s. No DOE: a guard against a deadlock
     REJOIN_WAIT_S = 30.0   # chosen: when everyone else is done (or every robot is held), the run waits this long for a
                            # held robot before it ends. No DOE: a policy (the run's length against a robot left behind)
 
@@ -1366,10 +1374,29 @@ class Coordinator:
                 b.back_said = True
                 self.say("%s is talking again (%s); it stays out of this run, as a fixed obstacle" % (b.name, b.out))
 
+    def rejoin_stall(self, t):
+        """After a rejoin: no step finished by anyone for REJOIN_STALL_S (and no re-plan running) = the joint plan is
+        stuck (dry run 70 x 130: Left waited for Right, which had finished and was dancing): the returning robot
+        becomes a fixed obstacle again and the others re-plan, as before rejoining existed."""
+        rj = getattr(self, "rejoined", None)
+        if not rj or rj not in self.names or self.planning is not None:
+            return
+        last = max([st.get("t_done") or 0.0 for b in self.bots.values() for st in b.stat] +
+                   [getattr(self, "rejoined_t", 0.0)])
+        if t - last < self.REJOIN_STALL_S:
+            return
+        b = self.bots[rj]
+        self.rejoined = None
+        b.rejoin_failed = "nothing moved on for %.0f s after it rejoined" % (t - last)
+        self.log("rejoin_undone", robot=rj, why=b.rejoin_failed)
+        self.say("%s: %s: it stays where it is, as a fixed obstacle; the others carry on" % (rj, b.rejoin_failed))
+        self.retire(b, "heard again, but %s" % b.rejoin_failed, kind="out")
+
     def rejoin_watch(self):
         if not self.rejoin_on() or not self.t_run_started() or self.planning is not None:
             return
         t = now()
+        self.rejoin_stall(t)
         if not self.names and not any(b.out and self.rejoinable(b) and t - getattr(b, "out_t", 0.0) < self.REJOIN_WAIT_S
                                       for b in self.bots.values()):
             self.abort = "every robot is out (none heard again within %.0f s)" % self.REJOIN_WAIT_S
@@ -1452,7 +1479,8 @@ class Coordinator:
         self.log("robot_rejoined", **rec)
         self.say("%s rejoins (%s): its pose set from the camera (%.1f, %.1f); everyone re-plans from where they are"
                  % (n, why, cam[0], cam[1]))
-        self.rejoin_pending = n
+        self.rejoin_pending = (n, now() + self.REJOIN_TRIAL_S)
+        self.rejoined, self.rejoined_t = n, now()
         self.handle_obstacle(None)
 
     def recheck(self, b):
