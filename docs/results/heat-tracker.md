@@ -14,8 +14,26 @@ pictures a second (-1 to +1; near 0 = no link, or temperature barely varied).
 | 20261027-213425-doe | unknown | 74.0 / 79.4 | 0 | 100 / 0 / 0 % | 25.0 / - / - | 0.07 | 0.01 |
 | 20261028-162951-doe | unknown | 74.5 / 78.9 | 0 | 100 / 0 / 0 % | 24.5 / - / - | 0.15 | -0.10 |
 | 20261028-191750-doe | unknown | 70.6 / 75.5 | 0 | 100 / 0 / 0 % | 25.0 / - / - | 0.11 | 0.04 |
+| 20261029-074342-doe | unknown | 79.4 / 83.3 | 19 | 97 / 3 / 0 % | 25.0 / 22.5 / - | 0.20 | -0.35 |
+| 20261029-092216-doe | unknown | 74.0 / 77.4 | 0 | 100 / 0 / 0 % | 25.0 / - / - | 0.11 | -0.02 |
 
 ## Readings (newest first)
+- **20261029-092216-doe (DOE loop in keep-going mode, 09:22-12:23, 3 h, daytime, cooling not in the logs):** median
+  74.0 C, top 77.4 C, no soft limit or throttling in 3 hours, and the camera handled a median 25.0 pictures a second
+  throughout (rho -0.02: no link). Cooler than the same morning's loop by 5 C with more driving (Left 121 drives).
+  The loop ended because no robot had room for a drive (build-reports/e02-oct29-daytime-sessions.md), not from heat.
+  ![Pi temperature and camera speed, DOE loop 29 Oct 09:22](heat/20261029-092216-doe.png)
+  The Pi's temperature and the pictures the camera handled each second, over the session; data: the session's cpu.csv
+  and perf.csv.
+- **20261029-074342-doe (DOE loop in keep-going mode, 07:43-08:44, 1 h, morning sun, cooling not in the logs):** the
+  hottest DOE loop so far: it climbed from 61 C to 80 C in 20 minutes and sat at 79-83 C after minute 40 (median 79.4 C,
+  19 minutes at 80 C or more), under the soft temperature limit 3 % of the time, never throttling. Under the soft
+  limit the camera handled a median 22.5 pictures a second against 25.0 without it (rho -0.35: the hotter, the
+  slightly slower). The 09:22 loop on the same Pi ran 5 C cooler; whether the morning sun was on the Pi is not in the
+  logs (question in the report).
+  ![Pi temperature and camera speed, DOE loop 29 Oct 07:43](heat/20261029-074342-doe.png)
+  The Pi's temperature and the pictures the camera handled each second, over the session; data: the session's cpu.csv
+  and perf.csv.
 - **20261028-191750-doe (DOE loop in keep-going mode, 27 min, 19:17-19:44, cooling not in the logs):** median 70.6 C,
   top 75.5 C, full clock the whole run, no soft limit or throttling; the coolest DOE loop so far (27 Oct 74 C, 28 Oct
   16:29 74.5 C), at night with the room lamp on. The camera handled a median 25.0 pictures a second. The loop ended at

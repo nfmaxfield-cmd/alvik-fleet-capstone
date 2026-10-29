@@ -32,6 +32,7 @@ Answered ones move to the bottom with the answer and date.
     under" move with it or stay at 8? (safety-gap-doe.md; 5 cm needs the board DOE)
 46. Left's distance sensor: its centre-right zone reads under 12 cm in about a third of its readings (others 0-5 %) and
     caused all three of Left's phantom stops. Look at its window? Until then, ignore that zone on Left? (ladder report)
+    29 Oct: it reads the plywood floor ahead (every robot's does, at 11-18 cm), Left's nearest; superseded by 59.
 47. Lane 1's lane-end turn comes 2.3-3.0 cm from the x = 0 edge in a few runs (median 4.6): add a short straight run-in
     before lane 1, or move lane 1 1-2 cm in?
 
@@ -58,6 +59,21 @@ Answered ones move to the bottom with the answer and date.
     the router, or checking Center, since it is the spare?
 58. Night sessions: is there a light setting that gives the overhead 18+ grey levels (the ceiling light only, the lamp
     off)? Under the table lamp tonight it was 16.
+
+59. Monday, Left's phantom stops (about 1 a drive in today's 3 h loop, all on its centre-right zone reading the floor
+    at about 11 cm; 5 "no plan" ends): set Left's stop limit to 10 cm (`set follow_look_cm 10`, Left only; today's
+    replay: 0 phantom stops; real obstacles seen 2 cm later), ignore its centre-right zone (firmware change), or leave
+    it? Claude's pick: 10 cm on Left after a 10 min board check with a brick. (e02-oct29-daytime-sessions)
+60. The camera bridge refuses to start a robot that only the side camera sees (its spot is ~3 cm off, the "moved" rule
+    is 3 cm): 5 start-ups failed today on the overhead's blind strip (x = 30-45 cm, daylight). Allow more for side-only
+    sightings (e.g. 5 cm), after a logs replay, before Monday?
+61. The DOE loop parks a robot for good when it misses one status check; Center answered again 2 minutes later and
+    stayed out for 2 hours. Re-check it at the next loop instead?
+62. Was the morning sun on the Pi at 07:43 (that loop ran 5 C hotter than the 09:22 one, 19 min at 80 C+)?
+63. Right has not driven since 28 Oct night (kept out today: 27 cm from the edge). Give it the next session's drives,
+    since it is Monday's robot?
+64. The overhead camera loses robots on a strip at x = 30-45 cm of the home board in daylight (sun patch or glare?):
+    blinds closed for the next daytime session, or does it matter only at home (Monday is at school)?
 
 ### Robots and sessions
 8. What stands just beyond the home board's x = 0 edge at about y = 30-60? (Your 07:45 "yes" to this one was read as
