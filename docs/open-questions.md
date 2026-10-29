@@ -45,6 +45,19 @@ Answered ones move to the bottom with the answer and date.
 51. Turn check crawl 15 cm instead of 10 (headings misread by up to 14 deg on 10 cm)? Needs 5 cm more room per robot.
 52. Should L0 STOP when the lighting check says both cameras are washed out, or only warn (as now)?
 53. The find step's frames are now kept (about 25 s a loop on the USB drive): OK?
+54. A robot near an edge (or another robot) is now driven back to open space by the DOE loop on its own, slowly
+    (5 cm/s), on a planned path the cameras watch, in normal and keep-going mode alike. OK in normal mode too, or
+    keep-going only? (e02-oct28-keep-going-run)
+55. Monday's start takes each robot's heading as placed: the camera checks the spot, not which way it faces. A robot
+    put down backwards drives the wrong way for about 1 s (8-15 cm) before the guard stops everyone (Center, 28 Oct).
+    Add a start check by its lights (they are at its front), or rely on careful placing for Monday?
+56. After a calibration that run_plan itself runs (a robot that restarted), the camera bridge has no start heading
+    and the run fails to start; the second start works. Build a proper fix after Monday (the bridge vouches for a robot
+    back on its start spot), or now?
+57. Center's WiFi read -71 to -72 dBm all evening (Left and Right -62 to -64), and it lost one answer. Worth moving
+    the router, or checking Center, since it is the spare?
+58. Night sessions: is there a light setting that gives the overhead 18+ grey levels (the ceiling light only, the lamp
+    off)? Under the table lamp tonight it was 16.
 
 ### Robots and sessions
 8. What stands just beyond the home board's x = 0 edge at about y = 30-60? (Your 07:45 "yes" to this one was read as

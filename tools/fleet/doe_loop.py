@@ -838,7 +838,9 @@ class DoeLoop(LD.Ladder):
         self.frames_on("room-" + n)
         try:
             if self.heading(n) is None:
+                say("  %s: heading not known: heading crawl first (forwards first: the edge guard watches it)" % n)
                 h, _ = self.crawl(n, p, None)
+                say("    heading %.1f deg (camera)" % h)
                 p2 = self.eye.still(n) or p
                 self.set_pose(n, p2[0], p2[1], h, "crawl (room)")
                 p = p2
