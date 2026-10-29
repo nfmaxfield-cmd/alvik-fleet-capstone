@@ -62,6 +62,7 @@ import fleetmap as FM       # noqa: E402
 import session_checks as SC  # noqa: E402
 import planner as P         # noqa: E402
 import engine_checks as EC  # noqa: E402
+import calib_room as CR     # noqa: E402   (calibration room and roll caps, 2026-10-29)
 
 MIN_FIRMWARE = "2026-10-18b"
 BORDER4_FIRMWARE = "2026-10-27a"     # the four-sided virtual border (border.h) and the second WiFi network
@@ -1728,13 +1729,75 @@ def read_status(coord, link, names, wait_s=5.0):
         time.sleep(0.05)
 
 
-def calibrate(coord, link, args, names):
+def calib_poses(coord, names, source=None, wait_s=2.0):
+    """{robot: (x, y, heading or None, how)} for the roll caps: the camera's fixes when a live source sends them within
+    wait_s, else the plan's start spots (where the robots were put)."""
+    poses = {}
+    if source is not None and getattr(source, "live", False):
+        t_end = time.time() + wait_s
+        while time.time() < t_end and len(poses) < len(coord.names):
+            for ev in source.poll():
+                if ev.get("type") == "fix" and ev.get("robot") in coord.names and ev.get("x") is not None:
+                    poses[ev["robot"]] = (float(ev["x"]), float(ev["y"]),
+                                          None if ev.get("th") is None else float(ev["th"]), "camera")
+            time.sleep(0.05)
+    for n in coord.names:
+        if n not in poses:
+            st = (coord.plan.get("robots") or {}).get(n, {}).get("start")
+            if st:
+                poses[n] = (float(st[0]), float(st[1]), float(st[2]) if len(st) > 2 else None, "plan start")
+    return poses
+
+
+def calib_caps(coord, link, names, source=None):
+    """Before calibrating (2026-10-29): each robot's room to spin, and its roll capped per direction towards open
+    space (`set calib_dir_limits`), from where it stands, the floor and the other robots (those calibrating at the
+    same time keep to their own half of the floor between them). Returns the robots without room to spin (not
+    calibrated: they need moving in)."""
+    f = coord.m["floor"]
+    rect = (f["x_min"], f["y_min"], f["x_max"], f["y_max"])
+    poses = calib_poses(coord, names, source)
+    no_room = []
+    for n in names:
+        if n not in poses:
+            print("  %s: where it stands is not known: its roll is not capped (its edge guard still stops it at an "
+                  "edge)" % n)
+            continue
+        x, y, h, how = poses[n]
+        others = {m: poses[m][:2] for m in poses if m != n}
+        ok, why = CR.spin_room((x, y), rect, others)
+        if not ok:
+            print("  %s: no room to calibrate where it stands (%s, %s): not calibrated. Move it in (%.0f cm from every "
+                  "edge, %.0f cm from the other robots) and start again." % (n, why, how, CR.ROOM_EDGE_CM,
+                                                                             CR.ROOM_ROBOT_CM))
+            no_room.append(n)
+            continue
+        fixed = [others[m] for m in others if m not in names]
+        moving = [others[m] for m in others if m in names]
+        cp = CR.caps((x, y), h, rect, fixed=fixed, moving=moving, unc=CR.HEADING_UNC_LOOSE_DEG)
+        link.send_name(n, CR.caps_cmd(cp))
+        print("  %s at (%.1f, %.1f) (%s): %s" % (n, x, y, how, CR.caps_words(cp, h, CR.HEADING_UNC_LOOSE_DEG)))
+        coord.log("calib_caps", robot=n, x=x, y=y, h=h, how=how, caps=cp)
+    time.sleep(0.2)
+    return no_room
+
+
+def calibrate(coord, link, args, names, source=None):
     """The calibration run on these robots (all at once; about 65 s each)."""
+    try:
+        no_room = calib_caps(coord, link, names, source)
+    except Exception as e:      # noqa: BLE001  (the caps only make the roll safer: never stop a run for them)
+        print("  (roll caps not worked out: %s; the edge guard still stops a roll at an edge)" % e)
+        no_room = []
+    names = [n for n in names if n not in no_room]
+    if not names:
+        return []
     for n in names:
         coord.bots[n].last_runend = None
         link.send_name(n, "calibrate")
-    print("Calibrating %s (about 65 s, all at once: each needs a 25 cm circle to spin in and, in some direction, "
-          "35 cm of clear floor from its back to roll)..." % ", ".join(names))
+    print("Calibrating %s (about 65 s, all at once: each needs %.0f cm from every edge and %.0f cm from the other "
+          "robots to spin; its roll goes towards open space, or is skipped where there is none)..."
+          % (", ".join(names), CR.ROOM_EDGE_CM, CR.ROOM_ROBOT_CM))
     if not wait_for(lambda: all((getattr(coord.bots[n], "last_runend", None) or (None,))[0] == "calib" for n in names),
                     120, coord):
         print("  not every calibration run reported its end; carrying on")
@@ -1916,7 +1979,7 @@ def start_robots(coord, link, args, source):
     want = send_settings(coord, link, args, names)
     moved = []
     if need_cal and args.recalibrate != "no":
-        moved = calibrate(coord, link, args, need_cal)
+        moved = calibrate(coord, link, args, need_cal, source)
         if args.calibrate and not args.yes and not args.dry_run and not args.replan_from_camera:
             input("Calibrated. Put every robot on its start spot, then press Enter: ")
             moved = []
@@ -1925,7 +1988,7 @@ def start_robots(coord, link, args, source):
     bad = [n for n in names if coord.bots[n].calibrated is False]
     if bad and args.recalibrate == "auto":
         print("  not calibrated since power-on: %s" % ", ".join(bad))
-        moved += calibrate(coord, link, args, bad)
+        moved += calibrate(coord, link, args, bad, source)
         for n in bad:
             link.send_name(n, "stop")
         time.sleep(0.5)

@@ -643,7 +643,8 @@ class DoeLoop(LD.Ladder):
             fine.append(n)
         for n in recal:
             self.st["passed"].pop("L1:%s" % n, None)
-            self.st["robots"].get(n, {}).pop("h", None)
+            # (its heading is kept until L1 has calibrated it: a restart does not move it, and with its heading the
+            # roll caps point the roll at open space; L1 forgets the heading after the roll, 2026-10-29)
             self.save()
             say("  %s restarted: calibrating it again (alone) ..." % n)
             self.L1(sub, [n])        # (no tracking-rate frames: a calibration is not tracked; clips still work)
@@ -662,10 +663,11 @@ class DoeLoop(LD.Ladder):
         calibrated it again (65 s, its roll moved it, the camera bridge then had no start heading) and drive 1 failed
         to start ("No camera fix for Right")."""
         try:
-            import engine_checks as EC
-            day = EC.DayState()
+            day = self.day_record()      # (dry runs: their own record, never the real robots', 2026-10-29)
             n_ok = 0
             for n in names:
+                if n in (self.st.get("calib") or {}):
+                    continue             # L1 wrote it itself (a full calibration), or kept the morning's (its time stays)
                 boot = self.got.get(n, {}).get("boot") or self.st["doe"]["boot"].get(n)
                 if boot and self.st["passed"].get("L1:%s" % n):
                     day.note_calibrated(n, boot)
@@ -773,6 +775,13 @@ class DoeLoop(LD.Ladder):
             if res.get("misread"):
                 return self.hold(n, why + "; turn %d's error is undone by the next" % res["misread"],
                                  "a misread heading, not a bad turn", one=False)
+            if self.recal_after_quick_check(sub, n):
+                # the quick check of a calibration kept from earlier today failed: calibrated fully now (2026-10-29)
+                self.st["doe"].setdefault("turn_due", {})[n] = True
+                self.save()
+                self.event("recalibrated", n, "%s with its calibration kept from earlier today: calibrated fully "
+                           "now; turn checked again at its next turn" % why, clip=False)
+                return False
             self.park(n, why)
         return ok
 
@@ -1345,6 +1354,11 @@ def main(argv=None):
     ap.add_argument("--turn-err", action="append", default=[])
     ap.add_argument("--sim-calibrated", action="store_true")
     ap.add_argument("--sim-event", action="append", default=[], help="--dry: restart:NAME@LOOP, battery:NAME=PCT@LOOP")
+    ap.add_argument("--full", action="store_true", help="L1: a full calibration even for a robot calibrated today on "
+                                                        "this power-on")
+    ap.add_argument("--day-state", default="", help="today's calibration record (default: ladder.py's)")
+    ap.add_argument("--sim-place", action="append", default=[], metavar="NAME=X,Y,DEG", help="--dry: as ladder.py")
+    ap.add_argument("--sim-from", default="", help="--dry: as ladder.py (a second session on the same board)")
     ap.add_argument("--keep-going", action="store_true",
                     help="never park a robot on a failed turn check, heading crawl, line check or one camera's "
                          "evidence: log \"would have parked\" and carry on (safety stops still park)")

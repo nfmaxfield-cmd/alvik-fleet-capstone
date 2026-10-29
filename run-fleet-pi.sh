@@ -12,14 +12,19 @@
 #     ./run-fleet-pi.sh rec                start the recorder only (its picture: http://<the Pi>:8000 in a browser)
 #     ./run-fleet-pi.sh check              every robot's firmware and battery (nothing moves)
 #     ./run-fleet-pi.sh turn Center        Center turns 90 deg once (repeat it 4 times: it should face the same way)
-#     ./run-fleet-pi.sh calibrate          every robot on the board calibrates (about 65 s; needs room round each)
+#     ./run-fleet-pi.sh calibrate          every robot on the board calibrates, one at a time (about 65 s each), or
+#                                          keeps its calibration from earlier today on the same power-on (boot ID);
+#                                          the camera checks its spin room (12 cm from every edge, 21 cm from the
+#                                          others) and points its roll at open space. `calibrate full`: always a
+#                                          full calibration. `calibrate blind`: the old way (no camera, all at once)
 #     ./run-fleet-pi.sh one [Left]         test 1: one robot drives a square twice (put it on spot A first)
 #     ./run-fleet-pi.sh cross              test 2: Left and Right cross paths 4 times (on A and B first)
 #     ./run-fleet-pi.sh watch              brick watch only, robots standing on A and B: wave a hand, put a brick
 #                                          down, take it away; it prints what it would report (nothing is sent)
 #     ./run-fleet-pi.sh brick              hand-and-brick check: test 2 with the brick watch on
 #     ./run-fleet-pi.sh stop               stop the recorder and upload today's Phase 0 logs and video
-# The remote ladder (nobody at the board; robots left anywhere on it, 30 cm in, 40 cm apart): cautious to bold,
+# The remote ladder (nobody at the board; robots left anywhere on it, 12 cm in and 21 cm apart to calibrate, 30 cm in
+# and 40 cm apart to save the DOE loop moving them in first): cautious to bold,
 # each step only after the one before passed; Ctrl+C stops every robot (tools/fleet/ladder.py):
 #     ./run-fleet-pi.sh ladder             L0 status .. L5 cross, from the first step not passed yet; stops at a FAIL
 #     ./run-fleet-pi.sh ladder pause       the same, waiting for Enter before each step
@@ -322,8 +327,12 @@ case "$WHAT" in
   turn)
     R="${1:-Center}"
     python3 tools/fleet/robot_cmd.py $IPS --to "$R" --wait-s 6 "turn 90" ;;
-  calibrate)
-    python3 tools/fleet/robot_cmd.py $IPS --wait-s 75 calibrate ;;
+  calibrate)       # (2026-10-29) through the ladder: the camera's room check and roll caps; kept when done today
+    case "${1:-}" in
+      full) ladder calibrate --full ;;
+      blind) python3 tools/fleet/robot_cmd.py $IPS --wait-s 75 calibrate ;;
+      *) ladder calibrate ;;
+    esac ;;
   one)
     R="${1:-Left}"
     M="logs/p0-one-$R.json"

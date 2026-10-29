@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """The remote ladder (MIRLT, 2026-10-27): Phase 0 run from the laptop over SSH, with nobody at the board.
 
-Nick leaves the robots switched on, spread out on the plywood (no boards, every side an open edge), at least 30 cm
-from the edges and 40 cm apart, where and facing whichever way they happen to be. Nobody can move them. His
+Nick leaves the robots switched on, spread out on the plywood (no boards, every side an open edge), at least 12 cm
+from the edges and 21 cm apart (calibration room, 2026-10-29; 30 cm and 40 cm give the later steps room to drive), where and facing whichever way they happen to be. Nobody can move them. His
 instruction: "start cautious and grow increasingly more bold. I'll be available at my laptop to review as needed."
 
 The steps, each run only after the one before it passed, each ending with PASS or FAIL and what to look at:
 
   L0  status    firmware and battery of every robot; the edge guard switched on; the camera's pictures arrive; each
-                robot found by its lights (nothing moves). A robot within 25 cm of an edge is kept out.
+                robot found by its lights (nothing moves). None is kept out for being near an edge (L1 handles it).
   L1  calibrate each robot alone (the planner needs a calibration since power-on), after the camera checked it has
-                room (30 cm to every edge, 35 cm to every other robot).
+                room to spin (12 cm to every edge, 21 cm to every other robot: calib_room.py); its roll is capped per
+                direction towards open space. A robot calibrated today on this power-on (same boot ID) keeps it.
+                A robot without that room is driven to open space first (compass wiggle, crawl, slow drive).
   L2  turns     the turn check (replaces the ruler): the camera measures four `turn 90`s. Headings come from short
                 out-and-back crawls the camera watches (one still picture cannot tell a square robot's heading).
                 A robot whose turns are off is kept out of every later step (it stays parked: the others go round it).
@@ -26,6 +28,8 @@ The steps, each run only after the one before it passed, each ending with PASS o
     python3 tools/fleet/ladder.py step L2 [--robots Left]         one step (its predecessor must have passed)
     python3 tools/fleet/ladder.py turncheck Left                  the camera-measured turn check alone (bench a2)
     python3 tools/fleet/ladder.py status                          what has passed so far, where the robots are
+    python3 tools/fleet/ladder.py calibrate [--full]              calibrate every robot found (kept when calibrated
+                                                                  today on this power-on; --full: always)
     python3 tools/fleet/ladder.py stop                            (dry runs) stop the simulated board
 
 run-fleet-pi.sh calls it (`./run-fleet-pi.sh ladder`, `./run-fleet-pi.sh L2`, ...). Ctrl+C (or a dropped SSH link)
@@ -57,14 +61,17 @@ for p in (HERE, TOOLS, os.path.join(TOOLS, "experiment"), os.path.join(TOOLS, "l
 
 import numpy as np   # noqa: E402
 import diskguard as DG   # noqa: E402   (free space: a step is not started with the card under its floor)
+import calib_room as CR  # noqa: E402   (calibration room, roll caps, keep-or-calibrate: 2026-10-29)
 
 PY = sys.executable
 
 # ---------------------------------------------------------------------------------------------- chosen numbers
 EDGE_REFUSE_CM = 25.0   # Nick (2026-10-27): the turn check refuses a robot the camera puts within 25 cm of an edge;
                         # used for every step: a robot nearer than this is never moved today. No DOE: a safety rule
-CALIB_EDGE_CM = 30.0    # calibration room: the session plan's "30 cm in from every edge" (its roll is ~35 cm from
-CALIB_GAP_CM = 35.0     # its back, the edge guard stops it at a plywood edge). No DOE: the firmware's own needs
+CALIB_EDGE_CM = CR.ROOM_EDGE_CM   # 12 cm (was 30): calibration room is spin room only (2026-10-29, Nick: "calibrate
+CALIB_GAP_CM = CR.ROOM_ROBOT_CM   # with less space"); 21 cm (was 35) to another robot's middle. The roll is capped
+                                  # per direction towards open space instead (calib_room.py says how the numbers
+                                  # follow from the body; its DOE notes)
 CRAWL_CM = 10.0         # chosen: a heading crawl's length, forward then back to where it was (e02_back_max_cm is
                         # 10 cm: backing is blind to the edge guard). DOE note: 6 / 10 cm (camera heading spread on a
                         # still-standing robot's repeated crawls against the time it takes); docs/doe-backlog.md
@@ -556,6 +563,7 @@ class Bench:
         self.runs = {}          # name -> {run_id: exp}
         self.runend = {}        # name -> (exp, result, t)
         self.calib_look = {}
+        self.boot = {}          # name -> boot ID from its CLOCK answer (firmware 2026-10-28a: a new one = restarted)
         self.msgs = deque(maxlen=400)
         self.link.session.listeners.append(self._listen)
 
@@ -584,12 +592,27 @@ class Bench:
                 self.runend[name] = (self.runs.get(name, {}).get(vals[0]), vals[1], t)
             elif rtype == "CALIB_LOOK" and len(vals) >= 10:
                 lk = dict(result=vals[9])
+                try:
+                    lk.update(heading_deg=float(vals[3]), roll_cm=float(vals[8]))
+                except ValueError:
+                    pass
                 if len(vals) >= 15:
-                    lk.update(spin=vals[12], roll=vals[13], reason=vals[14])
+                    lk.update(caps=vals[11], spin=vals[12], roll=vals[13], reason=vals[14])
                 self.calib_look[name] = lk
+            elif rtype == "CLOCK" and len(vals) >= 3 and vals[2].strip():
+                self.boot[name] = vals[2].strip()
 
     def robots(self):
         return self.link.robots()
+
+    def boots(self, names, s=3.0):
+        """{name: boot ID} from each robot's `clock` answer (asked once, waited for up to s)."""
+        for n in names:
+            self.boot.pop(n, None)
+            self.send(n, "clock boot")
+            time.sleep(0.02)
+        self.wait(lambda: all(n in self.boot for n in names), s)
+        return {n: self.boot.get(n) for n in names}
 
     def send(self, name, cmd):
         return self.link.send_name(name, cmd)
@@ -929,7 +952,7 @@ class Ladder:
     def dry_board(self):
         """The simulator as the board: three robots at random spots and headings (30 cm in, 40 cm apart), Center's
         turns --turn-err off; it keeps running between steps (fleet_sim --persist) until `ladder.py stop`."""
-        sd = os.path.join(self.dir, "sim")
+        sd = os.path.join(getattr(self.a, "sim_from", "") or self.dir, "sim")
         os.makedirs(sd, exist_ok=True)
         self.ips = ["127.0.0.2", "127.0.0.3", "127.0.0.4"]
         self.stream = "127.0.0.1:8765"
@@ -944,6 +967,8 @@ class Ladder:
                 return
             except (OSError, ValueError):
                 pass
+        if getattr(self.a, "sim_from", ""):
+            raise LadderStop("--sim-from %s: no simulated board is running there" % self.a.sim_from)
         rng = random.Random(self.a.seed)
         names = ["Left", "Center", "Right"]
         while True:
@@ -951,6 +976,9 @@ class Ladder:
             if all(math.dist(pts[i], pts[j]) >= 40 for i in range(3) for j in range(i + 1, 3)):
                 break
         starts = {n: [round(p[0], 1), round(p[1], 1), round(rng.uniform(-180, 180), 1)] for n, p in zip(names, pts)}
+        for pl in getattr(self.a, "sim_place", None) or []:      # --sim-place Right=107,61,0
+            nm, _, v = pl.partition("=")
+            starts[nm] = [float(x) for x in v.split(",")[:3]]
         m = base_map((0, 0, 122, 122), "remote ladder dry board", {}, NORMAL_CMS)
         m["robots"] = [{"name": n, "start": starts[n]} for n in names]
         mp, sp = os.path.join(sd, "board_map.json"), os.path.join(sd, "starts.json")
@@ -1207,11 +1235,14 @@ class Ladder:
             ed = edge_dist(self.rect, *p)
             near = [(m, math.dist(p, q)) for m, q in found.items() if m != n and math.dist(p, q) < 30]
             why = ""
-            if ed < EDGE_REFUSE_CM:
-                why = "%s (it must be %.0f cm in)" % (edge_words(self.rect, *p), EDGE_REFUSE_CM)
-                self.keep_out(n, why)
+            # 2026-10-29 (calibration room): L0 keeps no robot out for being near an edge (was: under 25 cm). L1
+            # calibrates it where it stands when it has room to spin (CALIB_EDGE_CM), else drives it to open space first
+            # (compass check, crawl, slow drive); the DOE loop moves one under EDGE_REFUSE_CM in before it drives
             say("  %s at (%.1f, %.1f), %s%s" % (n, p[0], p[1], edge_words(self.rect, *p),
-                                                 "  -> kept out: too near the edge" if why else ""))
+                                                 "  (no room to spin: L1 drives it to open space first)"
+                                                 if ed < CALIB_EDGE_CM else
+                                                 "  (room to calibrate; under %.0f cm it is moved in before it drives)"
+                                                 % EDGE_REFUSE_CM if ed < EDGE_REFUSE_CM else ""))
             for m, d in near:
                 say("  note: %s and %s are only %.0f cm apart (centres)" % (n, m, d))
             res[n] = "ok" if not why else "kept out"
@@ -1224,56 +1255,257 @@ class Ladder:
                     "" if ok else "No robot can go on. Check they are switched on and on the board, then run L0 again.")
         return bool(ok)
 
-    def L1(self, sub, names):
-        bench, eye = self.need_bench(sub), self.need_eye()
+    def L1(self, sub, names, force=None):
+        """Calibrate each robot alone, or keep today's calibration (calib_room.decide). force: always a full one
+        (default: --full)."""
         self.find_all(sub, names)
-        done = []
-        for n in names:
-            p = self.pos(n)
-            others = self.others_of(n)
-            ed = edge_dist(self.rect, *p)
-            close = [(m, math.dist(p, q)) for m, q in others.items() if math.dist(p, q) < CALIB_GAP_CM]
-            if ed < CALIB_EDGE_CM or close:
-                why = edge_words(self.rect, *p) if ed < CALIB_EDGE_CM else "%s is %.0f cm away" % close[0]
-                say("  %s: no room to calibrate (%s; it needs %.0f cm to every edge and %.0f cm to every robot): kept "
-                    "out" % (n, why, CALIB_EDGE_CM, CALIB_GAP_CM))
-                self.keep_out(n, "no room to calibrate: " + why)
-                continue
-            say("  %s: calibrating alone (about 65 s) at (%.1f, %.1f) ..." % (n, p[0], p[1]))
-            t0 = time.time()
-            bench.runend.pop(n, None)
-            bench.calib_look.pop(n, None)
-            bench.send(n, "calibrate")
-            fin = bench.wait(lambda: n in bench.runend and bench.runend[n][0] == "calib", 120)
-            import session_checks as SC
-            le = bench.runend.get(n)
-            oc = SC.calib_outcome(le[1] if fin else None, bench.calib_look.get(n))
-            q = eye.still(n, timeout=6.0)
-            if q is None:
-                lq = eye.find_lights(bench, n, others=list(others.values()))
-                if lq is not None:
-                    eye.trk.add(n, *lq)
-                    q = eye.still(n, timeout=4.0)
-            if q is not None:
-                self.set_pose(n, *q)
-                self.st["robots"][n].pop("h", None)
-            moved = math.dist(p, q) if q else None
-            txt = SC.calib_outcome_text(le[1], bench.calib_look.get(n)) if fin else "no end record in 120 s"
-            say("    %s: %s in %.0f s; the camera has it %s" % (
-                n, txt, time.time() - t0, "at (%.1f, %.1f), %.1f cm from where it started" % (q[0], q[1], moved)
-                if q else "nowhere (lost)"))
-            if oc == SC.CALIB_FAILED or q is None or edge_dist(self.rect, *q) < EDGE_REFUSE_CM:
-                self.keep_out(n, "calibration: %s" % (txt if oc == SC.CALIB_FAILED else "camera lost it or it is "
-                                                      "now too near an edge"))
-                continue
-            self.st["passed"]["L1:%s" % n] = round(time.time())
-            done.append(n)
-            self.save()
-        self.result("L1", bool(done), "calibrated: %s" % (", ".join(done) or "none"),
+        force = bool(getattr(self.a, "full", False)) if force is None else force
+        boots = self.need_bench(sub).boots(names)
+        done, later = self.calibrate_each(sub, names, force, boots)
+        if later:                               # blocked by a robot that may have moved away since: once more
+            say("  once more, now the others have moved: %s" % ", ".join(later))
+            self.find_all(sub)
+            d2, _ = self.calibrate_each(sub, later, force, boots, defer=False)
+            done += d2
+        kept = [n for n in done if (self.st.get("calib") or {}).get(n, {}).get("how") == "kept"]
+        self.result("L1", bool(done), "calibrated: %s%s" % (", ".join(done) or "none",
+                                                             " (kept from earlier today: %s)" % ", ".join(kept)
+                                                             if kept else ""),
                     "the CALIB lines in %s; the live picture" % sub,
                     "" if done else "No robot calibrated. Look at the reasons above: a robot without room cannot be "
                                     "moved to where it has room today.")
         return bool(done)
+
+    def calibrate_each(self, sub, names, force, boots, defer=True):
+        """calibrate_one on each; ([calibrated], [put off: its way to open space was blocked by another robot]).
+        defer: a robot whose crawl or drive to open space another robot blocked is tried again after the rest."""
+        done, later = [], []
+        for n in names:
+            r = self.calibrate_one(sub, n, force=force, boot=boots.get(n), defer=defer)
+            if r == "later":
+                later.append(n)
+            elif r:
+                done.append(n)
+        return done, later
+
+    def day_record(self):
+        return CR.day_state(dry=bool(getattr(self.a, "dry", False)), path=getattr(self.a, "day_state", None) or None)
+
+    ROLL_HEADING_MIN_CM = 6.0   # chosen: as a heading crawl's (0.6 x CRAWL_CM). DOE note: from the calibration runs,
+    ROLL_WINDOW_S = 14.0        # the roll heading against the next crawl's; window: the turn, the roll and back
+                                # (15 cm at the library's speed, 1 s stills) end within ~12 s of RUNEND (+1 s settle)
+
+    def roll_heading(self, n, q, t_end, lk):
+        """The heading the robot faces after its calibration (it turned to its roll heading and rolled out and back
+        along it): the line through the camera's spots in the roll's last ROLL_WINDOW_S, pointing from where it stands
+        to the spot furthest out. (deg, cm out) or None (no roll, too short, or not seen)."""
+        try:
+            if not t_end or not lk or float(lk.get("roll_cm") or 0.0) < self.ROLL_HEADING_MIN_CM:
+                return None
+            pts = self.eye.trk.history(n, t_end - self.ROLL_WINDOW_S, t_end)
+            if len(pts) < 8:
+                return None
+            tip = max(pts, key=lambda r: math.hypot(r[1] - q[0], r[2] - q[1]))
+            out = math.hypot(tip[1] - q[0], tip[2] - q[1])
+            if out < self.ROLL_HEADING_MIN_CM or out > float(lk["roll_cm"]) * 1.5 + 3.0:
+                return None
+            h = line_fit_heading(pts, q, (tip[1], tip[2]))
+            return None if h is None else (wrap180(h), out)
+        except Exception:     # noqa: BLE001  (a heading is a bonus: the crawl measures it otherwise)
+            return None
+
+    def recal_after_quick_check(self, sub, n):
+        """The quick check (its first turn check after a KEPT calibration) failed: calibrate it fully once, now.
+        True: calibrated again (check it again)."""
+        rec = (self.st.get("calib") or {}).get(n) or {}
+        if rec.get("how") != "kept" or rec.get("recal"):
+            return False
+        say("  %s: its turn check failed with the calibration kept from earlier today: the quick check says "
+            "calibrate it fully, now, then check its turns again." % n)
+        rec["recal"] = round(time.time())
+        self.save()
+        ok = self.calibrate_one(sub, n, force=True)
+        if ok:
+            self.st["calib"][n]["recal"] = rec["recal"]
+            self.save()
+        return ok
+
+    # a robot without room to spin is driven to open space first (2026-10-29: Right kept out all of the 09:22 run at
+    # 27 cm from x = 122 under the old 30 cm rule; under the new 12 cm one it would still be kept out nearer the edge)
+    OPEN_EDGE_CM = 32.0     # chosen: as the DOE loop's ROOM_TARGET_CM (7 cm past the 25 cm drive rule, so camera wobble
+    OPEN_ROBOT_CM = 38.0    # does not bring it back under); robots: its ROOM_TARGET_ROBOT_CM. DOE note: as there
+    COMPASS_ONLY = ["set calib_spin_deg 0", "set calib_roll_cm 0", "set calib_roll_min_cm 99"]   # e02.py's own way:
+    COMPASS_BACK = ["set calib_spin_deg 720", "set calib_roll_cm 15", "set calib_roll_min_cm 5"]  # the wiggle alone;
+    #                                                                       then back to the firmware's defaults
+
+    def open_spot(self, n, p):
+        """The nearest spot OPEN_EDGE_CM from every edge and OPEN_ROBOT_CM from every other robot (a slight pull to the
+        board's middle), or None."""
+        others = [q for q in self.others_of(n).values() if q is not None]
+        mid = ((self.rect[0] + self.rect[2]) / 2.0, (self.rect[1] + self.rect[3]) / 2.0)
+        best = None
+        for x in np.arange(self.rect[0] + self.OPEN_EDGE_CM, self.rect[2] - self.OPEN_EDGE_CM + 0.01, 2.0):
+            for y in np.arange(self.rect[1] + self.OPEN_EDGE_CM, self.rect[3] - self.OPEN_EDGE_CM + 0.01, 2.0):
+                q = (float(x), float(y))
+                if any(math.dist(q, o) < self.OPEN_ROBOT_CM for o in others):
+                    continue
+                sc = math.dist(p, q) + 0.1 * math.dist(q, mid)
+                if best is None or sc < best[0]:
+                    best = (sc, q)
+        return None if best is None else best[1]
+
+    def compass_only(self, sub, n):
+        """The calibration with no spin and no roll: the compass wiggle alone (a few degrees each way on the spot), so
+        the robot may drive. True when it ended done (or limited)."""
+        bench = self.need_bench(sub)
+        for c in self.COMPASS_ONLY:
+            bench.send(n, c)
+            time.sleep(0.05)
+        bench.runend.pop(n, None)
+        bench.calib_look.pop(n, None)
+        bench.send(n, "calibrate")
+        fin = bench.wait(lambda: n in bench.runend and bench.runend[n][0] == "calib", 60)
+        for c in self.COMPASS_BACK:
+            bench.send(n, c)
+            time.sleep(0.05)
+        import session_checks as SC
+        oc = SC.calib_outcome(bench.runend[n][1] if fin else None, bench.calib_look.get(n))
+        return fin and oc != SC.CALIB_FAILED
+
+    def calibrate_in_open_space(self, sub, n, boot, why, defer=False):
+        """No room to spin where it stands: the compass check alone, a heading crawl, a slow planned drive to open
+        space with camera fixes, then the full calibration there. True: calibrated."""
+        p = self.pos(n)
+        q = self.open_spot(n, p)
+        if q is None:
+            say("  %s: no room to calibrate where it stands (%s), and no open spot %.0f cm from every edge and %.0f cm "
+                "from the others to drive it to. Kept out." % (n, why, self.OPEN_EDGE_CM, self.OPEN_ROBOT_CM))
+            self.keep_out(n, "no room to calibrate (%s) and no open spot to drive to" % why)
+            return False
+        say("  %s: no room to calibrate where it stands (%s). It is driven to open space first: (1) the compass check "
+            "alone, a small wiggle on the spot (no spin, no roll), so it may drive; (2) a short crawl so the camera "
+            "knows which way it faces; (3) a slow drive to (%.0f, %.0f); (4) the full calibration there."
+            % (n, why, q[0], q[1]))
+        if not self.compass_only(sub, n):
+            self.keep_out(n, "no room to calibrate (%s), and its compass check did not finish" % why)
+            return False
+        say("    compass check done")
+        try:
+            if self.heading(n) is None:
+                h, _ = self.crawl(n, self.eye.still(n) or p, None)
+                p2 = self.eye.still(n) or p
+                self.set_pose(n, p2[0], p2[1], h, "crawl (to open space)")
+                say("    heading %.1f deg (camera)" % h)
+            mid = ((self.rect[0] + self.rect[2]) / 2.0, (self.rect[1] + self.rect[3]) / 2.0)
+            th = math.degrees(math.atan2(mid[1] - q[1], mid[0] - q[0])) if math.dist(q, mid) > 1.0 else \
+                math.degrees(math.atan2(q[1] - p[1], q[0] - p[0]))
+            ends = self.drive_to(sub, "open-space-%s" % n, {n: (q[0], q[1], th)}, cms=SLOW_CMS)
+        except LadderStop as e:
+            self.forget_heading(n, "the drive to open space did not finish")
+            if defer and "obstacle" in str(e):
+                say("    %s: its way out is blocked (%s): tried again after the others have calibrated or moved"
+                    % (n, e))
+                return "later"
+            say("    %s: the move to open space did not finish: %s. Kept out." % (n, e))
+            self.keep_out(n, "no room to calibrate (%s); the drive to open space did not finish: %s" % (why, e))
+            return False
+        e = ends.get(n) or {}
+        say("    %s is in open space at (%.1f, %.1f): calibrating it there" % (n, e.get("x", q[0]), e.get("y", q[1])))
+        self.find_all(sub)                       # (the drive closed the camera and the robots' link: look again)
+        return self.calibrate_one(sub, n, force=True, boot=boot, moved=True)
+
+    def calibrate_one(self, sub, n, force=False, boot=None, moved=False, defer=False):
+        """One robot: keep today's calibration, or calibrate fully with its roll capped towards open space
+        (calib_room.py); a robot without room to spin is driven to open space first (once). True: it is calibrated
+        (passed L1:n). Says every step in plain words."""
+        bench, eye = self.need_bench(sub), self.need_eye()
+        p = self.pos(n)
+        if p is None:
+            self.keep_out(n, "not on the camera: cannot check its room to calibrate")
+            return False
+        if boot is None:
+            boot = bench.boots([n]).get(n)
+        others = self.others_of(n)
+        day = self.day_record()
+        how, words = CR.decide(n, boot, day, force)
+        rec = self.st.setdefault("calib", {})
+        if how == "keep":                       # (a kept calibration needs no room: nothing moves)
+            say("  %s: %s" % (n, words))
+            r = day.robot(n)
+            rec[n] = dict(how="kept", boot=boot, t=r.get("calibrated_t"), kept_t=round(time.time()))
+            self.st["passed"]["L1:%s" % n] = round(time.time())
+            self.save()
+            return True
+        ok, why = CR.spin_room(p, self.rect, others)
+        if not ok:
+            if moved:
+                say("  %s: still no room to calibrate after its drive (%s). Kept out." % (n, why))
+                self.keep_out(n, "no room to calibrate even after the drive to open space: " + why)
+                return False
+            return self.calibrate_in_open_space(sub, n, boot, why, defer=defer)
+        say("  %s: %s" % (n, "in open space now: full calibration (about 65 s)" if moved else words))
+        h = self.heading(n)
+        hw = ((self.st["robots"].get(n) or {}).get("h_how") or "").lower()
+        unc = CR.HEADING_UNC_LOOSE_DEG if ("lights" in hw or "facing" in hw) else CR.HEADING_UNC_DEG
+        cp = CR.caps(p, h, self.rect, fixed=[q for q in others.values() if q is not None], unc=unc)
+        say("    room to roll (camera: (%.1f, %.1f), %s; heading %s): %s" % (
+            p[0], p[1], edge_words(self.rect, *p), "not known" if h is None else "%.0f deg (%s)" % (h, hw or "?"),
+            CR.caps_words(cp, h, unc)))
+        bench.send(n, CR.caps_cmd(cp))
+        time.sleep(0.15)
+        say("    calibrating alone (about 65 s) ...")
+        t0 = time.time()
+        bench.runend.pop(n, None)
+        bench.calib_look.pop(n, None)
+        bench.send(n, "calibrate")
+        fin = bench.wait(lambda: n in bench.runend and bench.runend[n][0] == "calib", 120)
+        import session_checks as SC
+        le = bench.runend.get(n)
+        lk = bench.calib_look.get(n)
+        oc = SC.calib_outcome(le[1] if fin else None, lk)
+        q = eye.still(n, timeout=6.0)
+        if q is None:
+            lq = eye.find_lights(bench, n, others=list(others.values()))
+            if lq is not None:
+                eye.trk.add(n, *lq)
+                q = eye.still(n, timeout=4.0)
+        if q is not None:
+            self.set_pose(n, *q)
+            self.st["robots"][n].pop("h", None)       # it turned to its roll heading: its heading is not known now
+            hr = self.roll_heading(n, q, fin and bench.runend[n][2], lk)
+            if hr is not None:                        # ... unless the camera watched it roll: it faces that way now
+                self.set_pose(n, q[0], q[1], hr[0], "calibration roll (camera, %.0f cm)" % hr[1])
+                say("    the camera watched its %.0f cm roll: it now faces %.0f deg (%s on the board)" % (
+                    hr[1], hr[0], CR.compass_words(hr[0])))
+        moved = math.dist(p, q) if q else None
+        txt = SC.calib_outcome_text(le[1], lk) if fin else "no end record in 120 s"
+        say("    %s: %s in %.0f s; the camera has it %s" % (
+            n, txt, time.time() - t0, "at (%.1f, %.1f), %.1f cm from where it started" % (q[0], q[1], moved)
+            if q else "nowhere (lost)"))
+        if lk and lk.get("roll_cm") is not None:
+            rolled = float(lk.get("roll_cm") or 0.0)
+            hd = lk.get("heading_deg")
+            if rolled > 0:
+                say("    its roll: %.1f cm at %+.0f deg from where it faced%s" % (
+                    rolled, hd or 0.0, "" if h is None else ", %s on the board" % CR.compass_words(h + (hd or 0.0))))
+            else:
+                say("    its roll: skipped (no direction had room for %.0f cm): calibrated, limited" % CR.ROLL_MIN_CM)
+        if oc == SC.CALIB_FAILED or q is None or edge_dist(self.rect, *q) < CALIB_EDGE_CM:
+            self.keep_out(n, "calibration: %s" % (txt if oc == SC.CALIB_FAILED else "camera lost it or it is "
+                                                  "now too near an edge"))
+            return False
+        self.st["passed"]["L1:%s" % n] = round(time.time())
+        rec[n] = dict(how="full", boot=boot, t=round(time.time()), caps=cp, roll=lk)
+        self.save()
+        if boot:
+            try:
+                day.note_calibrated(n, boot)
+                day.save()
+                say("    noted: %s calibrated today at %s, boot %s (kept on this power-on until a restart)" % (
+                    n, time.strftime("%H:%M"), boot))
+            except OSError as e:
+                say("    (today's calibration record not written: %s)" % e)
+        return True
 
     # -- L2: the turn check --------------------------------------------------------------------------
     def crawl(self, n, p0, h_known, retry=True):
@@ -1451,6 +1683,13 @@ class Ladder:
             except LadderStop as e:
                 say("    %s: %s" % (n, e))
                 good, res = False, dict(error=str(e), exc=e)
+            if not good and res.get("turns") and not (res.get("recheck") or res.get("one_camera") or
+                                                      res.get("misread")) and self.recal_after_quick_check(sub, n):
+                try:
+                    good, res = self.turncheck(n, sub)
+                except LadderStop as e:
+                    say("    %s: %s" % (n, e))
+                    good, res = False, dict(error=str(e), exc=e)
             if good:
                 self.st["passed"]["L2:%s" % n] = round(time.time())
                 ok.append(n)
@@ -1526,7 +1765,7 @@ class Ladder:
         if os.path.exists(os.path.join(sess, "coordinator.jsonl")) and os.path.exists(os.path.join(sess, "bridge",
                                                                                                     "track.csv")):
             import line_check as LC
-            tru = os.path.join(self.dir, "sim", "truth.csv") if self.a.dry else None
+            tru = os.path.join(getattr(self.a, "sim_from", "") or self.dir, "sim", "truth.csv") if self.a.dry else None
             try:
                 chk = LC.check(sess, os.path.join(sess, "bridge"), truth=tru, gate=GATE_CM,
                                png=os.path.join(sess, "line_check.png"))
@@ -1940,6 +2179,33 @@ class Ladder:
             "./run-fleet-pi.sh L6 attended).")
         return True
 
+    def calibrate_all(self):
+        """./run-fleet-pi.sh calibrate [full]: every robot heard and seen, each alone: kept when calibrated today on
+        this power-on (unless --full), else a full calibration with its roll capped towards open space."""
+        sub = self.sub("calibrate")
+        bench = self.need_bench(sub)
+        names = sorted(bench.robots(), key=lambda q: PREFER.index(q) if q in PREFER else 9)
+        if self.a.robots:
+            names = [n for n in names if n in self.a.robots.split(",")]
+        say("Calibration%s: %s" % (" (full, as asked)" if self.a.full else "", ", ".join(names) or "no robot heard"))
+        for n in names:
+            bench.send(n, "stop")
+        time.sleep(0.5)
+        found = self.find_all(sub, names)
+        boots = bench.boots(names)
+        done, later = self.calibrate_each(sub, [n for n in names if n in found], self.a.full, boots)
+        if later:
+            say("  once more, now the others have moved: %s" % ", ".join(later))
+            self.find_all(sub, names)
+            done += self.calibrate_each(sub, later, self.a.full, boots, defer=False)[0]
+        miss = [n for n in names if n not in done]
+        say("")
+        say("Calibrated: %s%s" % (", ".join(done) or "none", "; not calibrated: %s" % ", ".join(
+            "%s (%s)" % (n, self.st["kept_out"].get(n, "not seen by the camera")) for n in miss) if miss else ""))
+        if not self.a.full and done:
+            say("(To calibrate anyway, even a robot calibrated earlier today: ./run-fleet-pi.sh calibrate full)")
+        return bool(done) and not miss
+
     def status(self):
         say("Ladder folder: %s" % self.dir)
         for s in STEPS:
@@ -1957,7 +2223,7 @@ class Ladder:
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("what", choices=["run", "step", "turncheck", "status", "stop", "reset"])
+    ap.add_argument("what", choices=["run", "step", "turncheck", "status", "stop", "reset", "calibrate"])
     ap.add_argument("arg", nargs="?", help="step: L0..L6; turncheck: the robot")
     ap.add_argument("--from", dest="start", help="run: start at this step")
     ap.add_argument("--pause", action="store_true", help="run: wait for Enter before each step")
@@ -1980,6 +2246,14 @@ def main(argv=None):
     ap.add_argument("--seed", type=int, default=7, help="--dry: where the simulated robots start")
     ap.add_argument("--turn-err", action="append", default=[], metavar="NAME=PCT", help="--dry: a robot's turns off")
     ap.add_argument("--sim-calibrated", action="store_true", help="--dry: the robots start calibrated (quick tests)")
+    ap.add_argument("--full", action="store_true", help="L1 / calibrate: a full calibration even for a robot "
+                                                        "calibrated today on this power-on")
+    ap.add_argument("--day-state", default="", help="today's calibration record (default ~/.config/mirlt/day/<date>"
+                                                    ".json; dry runs: ~/.config/mirlt/day-dry/<date>.json)")
+    ap.add_argument("--sim-place", action="append", default=[], metavar="NAME=X,Y,DEG",
+                    help="--dry: put that robot there instead of a random spot (repeatable)")
+    ap.add_argument("--sim-from", default="", help="--dry: use the simulated board already running in that "
+                                                   "folder (the same robots, the same power-on: a second session)")
     a = ap.parse_args(argv)
 
     def hup(*_):
@@ -2010,6 +2284,9 @@ def main(argv=None):
             return 0 if ok else 1
         if a.what == "step":
             ok = L.run_step((a.arg or "L0").upper())
+            return 0 if ok else 1
+        if a.what == "calibrate":
+            ok = L.calibrate_all()
             return 0 if ok else 1
         ok = L.run(a.start.upper() if a.start else None, a.pause)
         return 0 if ok else 1
