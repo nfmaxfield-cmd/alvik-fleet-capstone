@@ -100,6 +100,7 @@ def _bare_loop(tmp_path, sim_free):
     L.find_all = lambda sub: None
     L.drive = lambda *a: L.moved.append(a) or "done"
     L.turn = lambda *a: L.moved.append(a) or True
+    L.ensure_room = lambda *a: True        # (room making: tests in test_doe_loop.py)
     L.start_logs_real = L.start_logs
     return L
 

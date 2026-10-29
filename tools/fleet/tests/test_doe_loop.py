@@ -384,3 +384,15 @@ def test_lost_during_a_turn_check_crawl_is_held_not_parked(tmp_path):
     L.turncheck = tc
     assert L.turn(str(tmp_path), "Right", 19) is False
     assert "Right" not in L.st["kept_out"] and "stop" in sent and L.st["doe"]["turn_due"]["Right"]
+
+
+def test_l1_calibration_is_written_to_run_plans_day_record(tmp_path, monkeypatch):
+    """19:23, 28 Oct: run_plan's day record still had Right's morning boot id, so it calibrated Right again inside
+    drive 1 and the drive failed to start."""
+    import engine_checks as EC
+    monkeypatch.setenv("MIRLT_CONF_DIR", str(tmp_path))
+    L = _loop(tmp_path, {"Right": _good(boot="6384")})
+    L.got = {"Right": {"boot": "6384"}}
+    L.note_calibrated(["Right"])
+    day = EC.DayState()
+    assert day.restarted("Right", "6384") is False

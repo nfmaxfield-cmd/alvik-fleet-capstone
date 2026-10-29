@@ -647,6 +647,7 @@ class DoeLoop(LD.Ladder):
             self.save()
             say("  %s restarted: calibrating it again (alone) ..." % n)
             self.L1(sub, [n])        # (no tracking-rate frames: a calibration is not tracked; clips still work)
+            self.note_calibrated([n])
             if not self.st["passed"].get("L1:%s" % n):
                 self.park(n, "restarted, and calibrating it again failed", safety=True)
                 fine = [m for m in fine if m != n]
@@ -654,6 +655,25 @@ class DoeLoop(LD.Ladder):
                 self.st["doe"].setdefault("turn_due", {})[n] = True     # a fresh calibration: turn check it first
                 self.save()
         return fine
+
+    def note_calibrated(self, names):
+        """run_plan's record of today (engine_checks.DayState): each robot calibrated by L1 here, at its boot id now.
+        19:23, 28 Oct: the day record still had Right's morning boot id, so run_plan took it for a restart,
+        calibrated it again (65 s, its roll moved it, the camera bridge then had no start heading) and drive 1 failed
+        to start ("No camera fix for Right")."""
+        try:
+            import engine_checks as EC
+            day = EC.DayState()
+            n_ok = 0
+            for n in names:
+                boot = self.got.get(n, {}).get("boot") or self.st["doe"]["boot"].get(n)
+                if boot and self.st["passed"].get("L1:%s" % n):
+                    day.note_calibrated(n, boot)
+                    n_ok += 1
+            if n_ok:
+                day.save()
+        except Exception as e:                  # the record only saves a calibration: never stop the loop for it
+            say("  (today's calibration record not written: %s)" % e)
 
     def correction_cmds(self, n):
         e = self.expect(n)
@@ -1064,6 +1084,7 @@ class DoeLoop(LD.Ladder):
         self.check(sub, names, "L1")                # the first boot ids (the restart reference), battery, settings
         if not any(self.st["passed"].get("L1:%s" % n) for n in self.active()):
             self.run_step("L1", in_order=True)
+            self.note_calibrated(self.active("L1"))
         k = self.st["doe"]["loops"]
         idle_rounds = 0
         while time.time() < t_end:

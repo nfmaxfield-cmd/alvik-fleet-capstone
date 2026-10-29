@@ -1824,6 +1824,13 @@ def start_robots(coord, link, args, source):
         wait_for(got, args.fix_wait_s, coord)
         for n in names:
             if seen.get(n) is None:
+                if n in moved:
+                    # 19:23, 28 Oct (DOE loop, Right drive 1): the calibration's roll moved it off its start spot, so
+                    # the camera bridge no longer vouches for the start heading and no fix with a heading comes
+                    raise SystemExit("No camera fix with a heading for %s: it was calibrated just now and its roll "
+                                     "moved it. It IS calibrated now: put it back on its start spot facing its start "
+                                     "direction if it is off it, and start the run again (no calibration this time)."
+                                     % n)
                 raise SystemExit("No camera fix for %s: is the position source running?" % n)
         off = {n: math.hypot(seen[n]["x"] - starts[n][0], seen[n]["y"] - starts[n][1]) for n in names}
         offh = {n: abs((seen[n]["th"] - starts[n][2] + 180) % 360 - 180) for n in names}
