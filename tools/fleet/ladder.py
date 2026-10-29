@@ -103,6 +103,20 @@ START_TOL_DEG = 10.0    # was 6 (chosen from dry runs, ~1 deg spread). Real L4 2
 # heading within the first leg. DOE note: yes, 6 / 8 / 10 deg against how often good starts are refused and the line
 # check's p95 on the first leg. Previous comment: chosen: run_plan's 5 deg plus the heading's spread from one 15 cm leg (dry runs: ~1 deg).
                         # The test's first straight drive corrects the rest (a 10 deg start passed). No DOE: a check
+MIN_TRAVEL_CM = 3.0     # chosen: the camera must see a straight leg's spots travel at least this far before its line
+                        # gives a heading (the direction comes from the camera's own travel; standing still the
+                        # spots wobble 0.5-1.5 cm). No DOE: a floor well above the wobble, well under any leg
+LEG_QUIET_S = 6.0       # chosen: a crawl leg or quarter turn takes 2-3 s (10 cm at 5 cm/s, or 90 deg, plus the edge
+                        # guard's 0.35 s): no end heard 6 s after it was sent, the robot is asked whether it is still
+                        # going. DOE note: from leg.csv, each leg's time from sent to `done` over a session (the
+                        # longest real one plus a margin); a smaller value only costs one `status` question
+CRAWL_MIN_EDGE_CM = 10.0  # chosen: a crawl's tip (its middle) at least this far from an edge or 12 cm + this from
+                          # another robot's middle: the body's back 5 cm in. No DOE: a safety room
+REFIND_WAIT_S = 4.0     # chosen: a robot not seen standing still after a crawl leg is waited for this much longer...
+REFIND_SPREAD_CM = 2.0  # ... with its spots allowed this spread (the 1.2 cm rule's 1.4 cm hops passed), then looked for
+REFIND_NEAR_CM = 12.0   # by its lights within this of where it should be. DOE note: all three from the frames kept
+                        # round each crawl (seconds to "still" and spread per camera source, lamp / daylight); a
+                        # larger spread lowers the crawl's precision by about the same amount
 GATE_CM = 3.0           # line check: each robot's 95th percentile within 3 cm of its planned lines (Phase 0's gate)
 MIN_BATTERY = 25        # chosen: below this a robot is kept out (a run at 20 % sagged on 2026-10-25). No DOE
 MIN_FIRMWARE = "2026-10-18b"
@@ -422,17 +436,26 @@ class Eye:
         self.still_why = ""
         while time.time() < t_end:
             ref = self.trk_time()           # the tracker's own newest picture: a slow tracker is not "unseen"
-            h = self.trk.history(name, ref - s - 0.1, ref, body_only=body_only) if self.trk and ref else []
-            if len(h) >= 4 and h[-1][0] - h[0][0] >= 0.6 * s:
-                xs, ys = np.array([q[1] for q in h]), np.array([q[2] for q in h])
-                mx, my = float(np.median(xs)), float(np.median(ys))
-                if float(np.max(np.hypot(xs - mx, ys - my))) <= spread_cm:
-                    return mx, my
+            h = self.hist_src(name, ref - s - 0.1, ref, body_only=body_only) if self.trk and ref else []
+            p = still_spot(h, s, spread_cm)
+            if p is not None:
+                return p
             time.sleep(0.15)
         b = self.behind()
         if b > self.BEHIND_S:
             self.still_why = "camera tracking is %.1f s behind the camera" % b
         return None
+
+    def hist_src(self, name, t0, t1, body_only=False):
+        """[(t, x, y, source)] of its sure sightings between t0 and t1 (tracker time), in time order; source: 'both',
+        'overhead', 'side', 'lights' (None on a one-camera tracker)."""
+        with self.trk.lock:
+            tr = self.trk.tracks.get(name)
+            out = [(q[0], q[1], q[2], q[4] if len(q) > 4 else None) for q in (tr.hist if tr else [])
+                   if t0 <= q[0] <= t1 and q[3] == "seen"
+                   and (not body_only or (len(q) > 4 and q[4] in ("overhead", "side", "both")))]
+        out.sort(key=lambda q: q[0])
+        return out
 
     def sources(self, name, t0, t1):
         """{camera word: sightings} of the robot's sure body sightings between t0 and t1 (tracker time):
@@ -523,6 +546,8 @@ class Bench:
         import alvik_console as AC
         import re
         self.re_fw = re.compile(r"status (\S+) \(firmware ([^)]+)\).*battery (\d+)%")
+        self.re_state = re.compile(r"status (\S+) \(firmware [^)]+\)[^:]*: (running|idle)")
+        self.state = {}         # name -> (t, "running" | "idle"): its last `status` answer
         self.link = AC.Link(outdir, ips)
         self.link.session.quiet = True
         self.lock = threading.Lock()
@@ -543,6 +568,9 @@ class Bench:
                 m = self.re_fw.search(text)
                 if m:
                     self.fw[m.group(1)] = (m.group(2), int(m.group(3)))
+                m = self.re_state.search(text)
+                if m:
+                    self.state[name] = (t, m.group(2))
                 return
             if rtype == "LEG" and len(vals) >= 10:
                 try:
@@ -575,7 +603,11 @@ class Bench:
         return cond()
 
     def leg(self, name, text, timeout):
-        """An idle leg (`go <cm>` / `turn <deg>`): sends it, waits for its end. (result, x, y, th, info)."""
+        """An idle leg (`go <cm>` / `turn <deg>`): sends it, waits for its end. (result, x, y, th, info).
+        Its end record can be lost on the WiFi (19:22, 28 Oct: Left's `go 10` ended in 3 s, the next leg started 9.8 cm
+        on, but no `done` arrived and the turn check waited 20 s and gave up). From LEG_QUIET_S after its start, the
+        robot is asked for its `status` every 2 s: "idle" means the leg has ended; it is then taken as done, with no
+        pose (the caller has the camera's), and the info says the end was not heard."""
         kind = text.split()[0]
         t0 = time.time()
         n0 = len(self.legs.get(name, []))
@@ -584,9 +616,26 @@ class Bench:
         def recs():
             with self.lock:
                 return [r for r in self.legs.get(name, [])[n0:] if r[1] == kind]
+
+        def ended():
+            return any(r[3] in ("done", "failed", "refused", "dup") for r in recs())
         if not self.wait(lambda: recs(), 1.5):
             self.send(name, text)           # nothing heard: lost on the way (an answer lost would show `started`)
-        if not self.wait(lambda: any(r[3] in ("done", "failed", "refused", "dup") for r in recs()), timeout):
+        t_ask = t0 + LEG_QUIET_S
+        while time.time() < t0 + timeout:
+            if self.wait(ended, max(0.1, min(t_ask, t0 + timeout) - time.time())):
+                break
+            if time.time() >= t_ask and time.time() < t0 + timeout:
+                asked = time.time()
+                self.send(name, "status")
+                if self.wait(lambda: self.state.get(name, (0, ""))[0] >= asked, 1.5):
+                    if ended():
+                        break
+                    if self.state[name][1] == "idle" and recs():
+                        return ("done", None, None, None, "its end was not heard (lost on the WiFi): the robot says "
+                                "it is idle after %.1f s" % (time.time() - t0))
+                t_ask = time.time() + 2.0
+        if not ended():
             return ("timeout", None, None, None, "no end of the leg in %.0f s" % (time.time() - t0))
         r = [q for q in recs() if q[3] in ("done", "failed", "refused", "dup")][-1]
         return (r[3], r[4], r[5], r[6], r[7])
@@ -613,6 +662,33 @@ def edge_words(rect, x, y):
          "y = %.0f" % rect[1]: y - rect[1], "y = %.0f" % rect[3]: rect[3] - y}
     k = min(d, key=d.get)
     return "%.0f cm from the %s edge" % (d[k], k)
+
+
+def still_spot(h, s=0.8, spread_cm=1.2):
+    """Where a robot stands still from its sightings h [(t, x, y, source)] over the last s: the median, when every
+    spot is within spread_cm of it, or else when the spots of ONE source are (both cameras first, then the source with
+    the most spots). None when neither holds.
+    Why by source (19:43, 28 Oct, Right "lost during its crawl"): standing still under the lamp, its spot hopped
+    between the two cameras' mix (51.6, 85.6) and the side camera alone (50.4, 84.7), 1.4 cm apart, as the washed-out
+    overhead's outline came and went; every 0.8 s held both, so the 1.2 cm rule failed for the whole 6 s, though
+    each source on its own was still within 0.5 cm."""
+    def ok(g):
+        if len(g) < 4 or g[-1][0] - g[0][0] < 0.6 * s:
+            return None
+        xs, ys = np.array([q[1] for q in g]), np.array([q[2] for q in g])
+        mx, my = float(np.median(xs)), float(np.median(ys))
+        return (mx, my) if float(np.max(np.hypot(xs - mx, ys - my))) <= spread_cm else None
+    p = ok(h)
+    if p is not None:
+        return p
+    groups = {}
+    for q in h:
+        groups.setdefault(q[3] if len(q) > 3 else None, []).append(q)
+    for src in sorted(groups, key=lambda k: (k != "both", -len(groups[k]))):
+        p = ok(groups[src])
+        if p is not None:
+            return p
+    return None
 
 
 def misread_heading(rows, total):
@@ -1210,21 +1286,46 @@ class Ladder:
         bench, eye = self.bench, self.eye
         sign = 1
         if h_known is not None:
-            tip = (p0[0] + CRAWL_CM * math.cos(math.radians(h_known)), p0[1] + CRAWL_CM * math.sin(math.radians(h_known)))
-            others = self.others_of(n).values()
-            if edge_dist(self.rect, *tip) < EDGE_REFUSE_CM - 5 or any(math.dist(tip, o) < 22 for o in others):
+            others = list(self.others_of(n).values())
+
+            def room(sg):
+                tip = (p0[0] + sg * CRAWL_CM * math.cos(math.radians(h_known)),
+                       p0[1] + sg * CRAWL_CM * math.sin(math.radians(h_known)))
+                return min([edge_dist(self.rect, *tip)] + [math.dist(tip, o) - 12.0 for o in others])
+            if room(1) < EDGE_REFUSE_CM - 5:
                 sign = -1                         # forward would go towards an edge or a robot: back first
+                if room(-1) < CRAWL_MIN_EDGE_CM and room(1) < CRAWL_MIN_EDGE_CM:
+                    raise LadderStop("%s has no room to crawl %.0f cm either way (%s): it needs moving by hand" % (
+                        n, CRAWL_CM, edge_words(self.rect, *p0)))
+                if room(1) > room(-1):
+                    sign = 1                      # backing has even less room: forward (the edge guard watches it)
+        # where the camera sees it now, as a position-only fix (its own heading kept): the firmware's blind-backing
+        # allowance (e02_back_max_cm since the last camera fix) starts full from a camera sighting (19:22, 28 Oct:
+        # Left's crawl stopped after its forward leg, and the next crawl's back leg was refused, 10 cm already used)
+        bench.send(n, "fix %.2f %.2f - %.3f" % (p0[0], p0[1], time.time()))
+        time.sleep(0.2)
         t0 = time.time()
         r1 = bench.leg(n, "go %.1f" % (sign * CRAWL_CM), 20)
-        p1 = eye.still(n)
+        if r1[0] != "done":
+            if r1[0] == "failed" and sign > 0:
+                # stopped on the way (the edge guard, its front sensor): back only as far as the camera saw it go,
+                # along the floor it has just crossed
+                q = eye.still(n)
+                back = min(CRAWL_CM, math.dist(p0, q)) if q is not None else 0.0
+                if back >= 1.0:
+                    bench.leg(n, "go %.1f" % -back, 20)
+            else:
+                bench.send(n, "stop")   # never back blind after a leg whose end is unknown
+            raise LadderStop("%s's crawl did not finish: %s (%s)" % (n, r1[0], r1[4]))
+        p1 = eye.still(n) or self.refind(n, p0, sign * CRAWL_CM, h_known)
         r2 = bench.leg(n, "go %.1f" % (-sign * CRAWL_CM), 20)
-        p2 = eye.still(n)
+        p2 = eye.still(n) or self.refind(n, p0, 0.0, h_known)
         t1 = time.time()
-        if r1[0] != "done" or r2[0] != "done":
-            bad = r1 if r1[0] != "done" else r2
-            raise LadderStop("%s's crawl did not finish: %s (%s)" % (n, bad[0], bad[4]))
+        if r2[0] != "done":
+            raise LadderStop("%s's crawl did not finish: %s (%s)" % (n, r2[0], r2[4]))
         if p1 is None or p2 is None:
-            raise LadderStop("the camera lost %s during its crawl" % n)
+            raise LadderStop("the camera lost %s during its crawl (still not found after waiting and looking for its "
+                             "lights)" % n)
         pts = eye.trk.history(n, t0, t1)
         h = line_fit_heading(pts, p0, p1)
         moved = math.dist(p0, p1)
@@ -1252,6 +1353,32 @@ class Ladder:
                        evidence=evidence, sources=src,
                        end=[round(p2[0], 2), round(p2[1], 2)], own_th_before_fix=r2[3])
 
+    def refind(self, n, p0, along_cm, h_known):
+        """Not seen standing still after a crawl leg (19:43, 28 Oct: Right, "the camera lost Right during its crawl",
+        parked, though both cameras saw it all along): nothing is moving, so wait longer with a looser spread, then
+        look for its lights where it should be and start its track there again. (x, y) or None (then it is lost)."""
+        eye, bench = self.eye, self.bench
+        say("    %s: not seen standing still: holding (nothing moves) and looking again ..." % n)
+        p = eye.still(n, timeout=REFIND_WAIT_S, spread_cm=REFIND_SPREAD_CM)
+        if p is not None:
+            say("    %s: found again at (%.1f, %.1f)" % (n, p[0], p[1]))
+            return p
+        if h_known is None:
+            exp, near = p0, abs(along_cm) + REFIND_NEAR_CM
+        else:
+            exp = (p0[0] + along_cm * math.cos(math.radians(h_known)), p0[1] + along_cm * math.sin(math.radians(h_known)))
+            near = REFIND_NEAR_CM
+        q = eye.find_lights(bench, n, others=list(self.others_of(n).values()), keeper=self.keeper)
+        if q is None or math.dist(q, exp) > near:
+            say("    %s: its lights %s" % (n, "were not seen" if q is None else
+                                            "are %.0f cm from where it should be" % math.dist(q, exp)))
+            return None
+        eye.trk.add(n, q[0], q[1])
+        p = eye.still(n, timeout=REFIND_WAIT_S, spread_cm=REFIND_SPREAD_CM)
+        say("    %s: its lights at (%.1f, %.1f)%s" % (n, q[0], q[1], "" if p is None else
+                                                       ": tracked again at (%.1f, %.1f)" % p))
+        return p
+
     def turncheck(self, n, sub):
         bench, eye = self.need_bench(sub), self.need_eye()
         p = self.pos(n)
@@ -1277,9 +1404,11 @@ class Ladder:
                 if r[0] != "done":
                     raise LadderStop("%s's turn %d did not finish: %s (%s)" % (n, k + 1, r[0], r[4]))
                 own_turn = wrap180(r[3] - heads[-1]) if r[3] is not None else None   # its gyro, from the fix
-                pk = eye.still(n)
+                last_end = (rows[-1]["crawl"]["end"] if rows else d0["end"])
+                pk = eye.still(n) or self.refind(n, tuple(last_end), 0.0, None)
                 if pk is None:
-                    raise LadderStop("the camera lost %s after turn %d" % (n, k + 1))
+                    raise LadderStop("the camera lost %s after turn %d (still not found after waiting and looking "
+                                     "for its lights)" % (n, k + 1))
                 hk, dk = self.crawl(n, pk, wrap180(heads[-1] + (own_turn if own_turn is not None else 90.0)))
                 cam_turn = wrap180(hk - heads[-1])
                 heads.append(hk)
@@ -1459,10 +1588,19 @@ class Ladder:
                         break
                 ta, tb = leg[0][0], leg[-1][1]
                 pts = [q for q in tr if ta <= q[0] <= tb]
-                hc = line_fit_heading(pts, leg[0][3], leg[-1][4]) if len(pts) >= 8 else None
                 length = math.dist(leg[0][3], leg[-1][4])
+                mv = math.degrees(math.atan2(leg[-1][4][1] - leg[0][3][1], leg[-1][4][0] - leg[0][3][0]))
+                hc, opposite = None, False
+                if len(pts) >= 8:
+                    # pointed the way the CAMERA saw it travel, not the way the plan said (2026-10-28 19:29: Center's
+                    # heading was 190 deg off, it drove 216 deg for a planned 45, and the plan's direction turned
+                    # the camera's line round to 34 deg: the wrong heading was "confirmed" and used for two more
+                    # drives, each one backwards towards the x = 0 edge)
+                    went = (pts[-1][1] - pts[0][1], pts[-1][2] - pts[0][2])
+                    if math.hypot(*went) >= MIN_TRAVEL_CM:
+                        hc = line_fit_heading(pts, (0.0, 0.0), went)
+                        opposite = abs(wrap180(hc - mv)) > 90.0
                 if hc is not None:
-                    mv = math.degrees(math.atan2(leg[-1][4][1] - leg[0][3][1], leg[-1][4][0] - leg[0][3][0]))
                     if abs(wrap180(mv - leg[0][2])) > 90:      # a backwards leg: it faces the other way
                         hc = wrap180(hc + 180.0)
                     # its own heading where that leg ended and at its very end, from the steps' `done` reports
@@ -1474,8 +1612,19 @@ class Ladder:
                     h = wrap180(hc + turn_after)
                     how = "camera line through its last %.0f cm straight (%d pictures) %+.1f deg its gyro turned " \
                           "after" % (length, len(pts), turn_after)
-            out[n] = dict(x=x, y=y, h=h, how=how)
+                    if opposite:
+                        how += "; it travelled the OPPOSITE way to its plan (its own heading was about 180 deg off)"
+            out[n] = dict(x=x, y=y, h=h, how=how, opposite=opposite if drives else False)
         return out
+
+    def forget_heading(self, n, why):
+        """Its heading is not known any more: the next move starts with a camera-watched heading crawl."""
+        r = self.st["robots"].get(n)
+        if r is not None and "h" in r:
+            r.pop("h", None)
+            r["h_how"] = "unknown: " + why
+            r["h_t"] = round(time.time(), 1)
+            self.save()
 
     def drive_to(self, sub, tag, targets, cms=SLOW_CMS, via=None):
         """Plan each robot in targets {name: (x, y, heading)} from where the camera has it to its target pose (the
@@ -1511,6 +1660,8 @@ class Ladder:
             if e is None:
                 raise LadderStop("the camera did not see %s at the end of its drive" % n)
             self.set_pose(n, e["x"], e["y"], e["h"], e["how"])
+            if e["h"] is None:
+                self.forget_heading(n, "no camera line from its drive (%s)" % e["how"])
             say("    %s ended at (%.1f, %.1f), heading %s: %s" % (n, e["x"], e["y"],
                                                                    "?" if e["h"] is None else "%.1f" % e["h"], e["how"]))
         return {**ends, **{n: dict(x=at[n][0], y=at[n][1], h=at[n][2], how="already there")

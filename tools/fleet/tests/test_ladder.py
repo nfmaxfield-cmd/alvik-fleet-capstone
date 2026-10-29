@@ -6,6 +6,7 @@ The ladder's dry runs themselves (each step against the simulated board, ~25 min
 docs/session-plans/2026-10-27.md, "Remote ladder".
 """
 import math
+import time
 import os
 import sys
 
@@ -169,3 +170,112 @@ def test_misread_heading_pattern():
     assert LD.misread_heading(rows([-10.6, 6.0, -0.0, 2.1]), -2.6) == 1        # Right, 27 Oct
     assert LD.misread_heading(rows([7.9, 7.5, 6.8, 8.0]), 30.2) == 0           # really turns wrong
     assert LD.misread_heading(rows([1.0, -0.5, 0.3, 9.0]), 9.8) == 0           # total over 8: a real FAIL
+
+
+def _drive_session(tmp, travel_deg, plan_deg=45.0, cm=12.0):
+    """One straight drive step planned along plan_deg; the camera sees the robot travel along travel_deg."""
+    import json
+    sess = tmp / "s"
+    os.makedirs(sess / "bridge")
+    x0, y0 = 50.0, 50.0
+    x1, y1 = x0 + cm * math.cos(math.radians(plan_deg)), y0 + cm * math.sin(math.radians(plan_deg))
+    with open(sess / "coordinator.jsonl", "w") as f:
+        f.write(json.dumps(dict(t=100.0, event="step_sent", robot="C", id=1, text="fs 1 D %.2f %.2f %.2f %.2f %.2f 7.5 "
+                                                                                   "0 -" % (x0, y0, x1, y1, plan_deg))) + "\n")
+        f.write(json.dumps(dict(t=100.1, event="step_report", robot="C", id=1, state="started", th=plan_deg)) + "\n")
+        f.write(json.dumps(dict(t=102.0, event="step_report", robot="C", id=1, state="done", th=plan_deg)) + "\n")
+    with open(sess / "bridge" / "track.csv", "w") as f:
+        f.write("t,robot,x,y,status,sent_th,why,src\n")
+        for k in range(20):
+            d = cm * k / 19.0
+            f.write("%.3f,C,%.2f,%.2f,seen,,,both\n" % (100.1 + 0.1 * k, x0 + d * math.cos(math.radians(travel_deg)),
+                                                        y0 + d * math.sin(math.radians(travel_deg))))
+    with open(sess / "follow.csv", "w") as f:
+        f.write("robot,t_recv,th_deg\nC,101.0,%.1f\n" % plan_deg)
+    return str(sess)
+
+
+def test_end_poses_heading_is_the_way_the_camera_saw_it_go(tmp_path):
+    """28 Oct 19:29: Center believed 45 deg and drove 216 deg (its heading 190 deg off); the line fit was pointed the
+    plan's way and gave 34 deg, so the wrong heading was kept for two more drives. Now: the camera's own travel."""
+    e = LD.Ladder.end_poses(None, _drive_session(tmp_path, travel_deg=216.0), ["C"])["C"]
+    assert abs(LD.wrap180(e["h"] - 216.0)) < 1.0 and e["opposite"] and "OPPOSITE" in e["how"]
+    e = LD.Ladder.end_poses(None, _drive_session(tmp_path / "b", travel_deg=47.0), ["C"])["C"]
+    assert abs(e["h"] - 47.0) < 1.0 and not e["opposite"]
+
+
+def test_still_spot_by_camera_source():
+    """28 Oct 19:43: Right standing still hopped 1.4 cm between the two cameras' mix and the side camera alone; the
+    1.2 cm rule failed for 6 s and Right was parked as "lost". Each source alone is still."""
+    h = [(0.1 * k, 51.6, 85.6, "both") if k % 3 else (0.1 * k, 50.4, 84.7, "side") for k in range(9)]
+    p = LD.still_spot(h, 0.8, 1.2)
+    assert p is not None and math.dist(p, (51.6, 85.6)) < 0.1
+    moving = [(0.1 * k, 50.0 + k, 85.0, "both") for k in range(9)]
+    assert LD.still_spot(moving, 0.8, 1.2) is None
+
+
+class _LegBench(LD.Bench):
+    """Bench.leg against a robot whose leg end record is lost: it answers `status` idle."""
+
+    def __init__(self, lose_end, idle=True):
+        import threading
+        from collections import deque
+        self.lock = threading.Lock()
+        self.legs, self.state, self.fw, self.msgs = {}, {}, {}, deque()
+        self.lose_end, self.idle, self.sent = lose_end, idle, []
+
+    def send(self, name, cmd):
+        self.sent.append(cmd)
+        t = time.time()
+        if cmd.startswith("go"):
+            self.legs.setdefault(name, []).append((t, "go", 10.0, "started", 0, 0, 0, ""))
+            if not self.lose_end:
+                self.legs[name].append((t, "go", 10.0, "done", 1.0, 2.0, 3.0, "front=50"))
+        elif cmd == "status":
+            self.state[name] = (time.time() + 0.01, "idle" if self.idle else "running")
+
+
+def test_leg_end_record_lost_is_asked_for(monkeypatch):
+    """28 Oct 19:22: Left's `go 10` ended, its `done` was lost on the WiFi, the turn check timed out after 20 s and
+    the crawl's back leg was then refused. The robot is now asked: idle means the leg ended."""
+    import time as _t
+    monkeypatch.setattr(LD, "LEG_QUIET_S", 0.2)
+    b = _LegBench(lose_end=True)
+    t0 = _t.time()
+    r = b.leg("Left", "go 10", 5)
+    assert r[0] == "done" and r[1] is None and "not heard" in r[4] and _t.time() - t0 < 3.0 and "status" in b.sent
+    b = _LegBench(lose_end=True, idle=False)
+    r = b.leg("Left", "go 10", 1.0)
+    assert r[0] == "timeout"
+    b = _LegBench(lose_end=False)
+    r = b.leg("Left", "go 10", 5)
+    assert r[0] == "done" and r[1] == 1.0 and "status" not in b.sent
+
+
+def test_crawl_fixes_position_first_and_never_backs_after_an_unknown_leg(monkeypatch):
+    import types
+    monkeypatch.setattr(LD.time, "sleep", lambda s: None)
+    L = LD.Ladder.__new__(LD.Ladder)
+    L.rect = (0.0, 0.0, 122.0, 122.0)
+    L.others_of = lambda n: {}
+    sent, legs = [], []
+
+    def leg(n, t, to):
+        legs.append(t)
+        return ("timeout", None, None, None, "no end of the leg in 20 s")
+    L.bench = types.SimpleNamespace(leg=leg, send=lambda n, c: sent.append(c))
+    L.eye = types.SimpleNamespace(still=lambda n: (50.0, 50.0))
+    with pytest.raises(LD.LadderStop):
+        L.crawl("Left", (50.0, 50.0), None)
+    assert sent[0].startswith("fix 50.00 50.00 - ") and legs == ["go 10.0"] and "stop" in sent
+
+
+def test_crawl_with_no_room_either_way_is_refused():
+    L = LD.Ladder.__new__(LD.Ladder)
+    L.rect = (0.0, 0.0, 122.0, 122.0)
+    L.others_of = lambda n: {"Right": (14.0, 20.0)}
+    L.bench = L.eye = None
+    # 8 cm from x = 0, facing the edge; backing would come within 12 cm of Right's middle
+    with pytest.raises(LD.LadderStop) as e:
+        L.crawl("Center", (8.0, 20.0), 180.0)
+    assert "no room to crawl" in str(e.value)

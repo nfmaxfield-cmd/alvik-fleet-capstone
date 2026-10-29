@@ -183,6 +183,16 @@ class LiveRobot(R.Robot):
             elif len(parts) >= 3 and parts[1] == "battery":
                 self.battery = float(parts[2])
                 self.send("M,%s: battery set to %s%% (simulated)" % (self.name, parts[2]))
+            elif len(parts) >= 5 and parts[1] == "move":
+                # (2026-10-28 keep-going run) the robot is somewhere else than it was: drifted by aborted drives, or
+                # nudged. Only its TRUE pose moves; its own pose and heading are left as they were
+                self.x, self.y, self.th = float(parts[2]), float(parts[3]), math.radians(float(parts[4]))
+                self.send("M,%s: moved to %s %s %s (simulated)" % (self.name, parts[2], parts[3], parts[4]))
+            elif len(parts) >= 2 and parts[1] == "lose-leg-end":
+                # (19:22, 28 Oct, Left) the next leg's `done` / `failed` record is lost on the WiFi
+                self.lose_leg_end = int(parts[2]) if len(parts) >= 3 else 1
+                self.send("M,%s: the next %d leg end record(s) will be lost (simulated)" % (self.name,
+                                                                                        self.lose_leg_end))
             return False
         if verb != "led":
             return super().handle_command(raw, running)
@@ -199,6 +209,13 @@ class LiveRobot(R.Robot):
         self.led_until = time.time() + ms / 1000.0 if on else 0.0
         self.send("M,%s: led %s for %d ms" % (self.name, " ".join(parts[:3]), ms))
         return False
+
+    def send(self, text):
+        if getattr(self, "lose_leg_end", 0) > 0 and ",LEG," in text and (",done," in text or ",failed," in text):
+            self.lose_leg_end -= 1
+            self.lines.append([self.ms, text])          # kept in its own log, never sent
+            return
+        super().send(text)
 
     def lights(self):
         """(left, right) rgb 0-1 as the camera sees them: the `led` command's white while it lasts, else the run's

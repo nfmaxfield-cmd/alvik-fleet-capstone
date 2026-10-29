@@ -93,6 +93,12 @@ STATUS_WAIT_S = 4.0     # chosen: how long the check waits for every answer (rou
 PARAM_TOL = 0.0006      # a read-back value "matches" within this (the firmware prints 3 decimals). No DOE
 PARAMS = ("gyro_scale", "wheel_scale", "gyro_drift_dps")
 FACTORY = dict(gyro_scale=1.0, wheel_scale=1.0, gyro_drift_dps=0.0)
+ROOM_ROBOT_CM = 30.0    # chosen: a robot whose middle is nearer than this to another's makes room before a turn check
+                        # or drive (a turn check's crawl tip keeps 22 cm; PARKED_CLEAR_CM is 30). No DOE: a safety room
+ROOM_TARGET_CM = 32.0   # chosen: making room drives it to a spot this far from every edge (7 cm past the 25 cm rule,
+ROOM_TARGET_ROBOT_CM = 38.0   # so camera wobble does not bring it back under) and this far from the others' middles.
+                        # DOE note: 28 / 32 / 36 cm against how often a robot needs room again within its next 3 drives
+                        # (events.csv "room made") and the minutes the moves take
 
 
 # ---------------------------------------------------------------------------------------------- frame saving
@@ -698,7 +704,8 @@ class DoeLoop(LD.Ladder):
         for kind, n, val, at in self.sim_events:
             if at == k and self.bench is not None:
                 say("  (dry run: simulated %s for %s%s)" % (kind, n, "" if val is None else " = %s" % val))
-                self.bench.send(n, "simctl restart" if kind == "restart" else "simctl battery %s" % val)
+                self.bench.send(n, "simctl restart" if kind == "restart" else "simctl lose-leg-end" if
+                                kind == "lose-leg-end" else "simctl %s %s" % (kind, (val or "").replace(",", " ")))
                 time.sleep(0.5)
 
     def keep_going_back(self, names):
@@ -721,6 +728,16 @@ class DoeLoop(LD.Ladder):
             self.frames_off()
             if not lost_words(str(e)) and getattr(e, "evidence", "both") != "both":
                 return self.hold(n, "turn check could not finish: %s" % e, e.evidence)
+            if "during its crawl" in str(e) or "after turn" in str(e):
+                # not seen after a crawl leg even by its lights (the crawl waited and looked): it stands still, so
+                # it is stopped and held, not parked; the next loop's find step looks for it again (19:43, 28 Oct:
+                # Right parked here though both cameras saw it all along)
+                try:
+                    self.bench.send(n, "stop")
+                except Exception:
+                    pass
+                return self.hold(n, "turn check could not finish: %s" % e, "stopped where it stands; the next "
+                                 "find step looks for it again", one=False)
             self.park(n, "turn check could not finish: %s" % e, safety=lost_words(str(e)))
             return False
         self.frames_off()
@@ -750,6 +767,81 @@ class DoeLoop(LD.Ladder):
             why, ("seen by one camera only (%s)" % evidence) if one else evidence))
         return False
 
+    # -- room before a turn check or a drive (Nick, 2026-10-28 evening) -----------------------------------------
+    def room_target(self, n, p):
+        """The nearest spot ROOM_TARGET_CM from every edge and ROOM_TARGET_ROBOT_CM from every other robot (a little
+        preference for the board's middle), or None."""
+        others = list(self.others_of(n).values())
+        mid = ((self.rect[0] + self.rect[2]) / 2.0, (self.rect[1] + self.rect[3]) / 2.0)
+        best = None
+        for x in np.arange(self.rect[0] + ROOM_TARGET_CM, self.rect[2] - ROOM_TARGET_CM + 0.01, 2.0):
+            for y in np.arange(self.rect[1] + ROOM_TARGET_CM, self.rect[3] - ROOM_TARGET_CM + 0.01, 2.0):
+                q = (float(x), float(y))
+                if any(math.dist(q, o) < ROOM_TARGET_ROBOT_CM for o in others):
+                    continue
+                s = math.dist(p, q) + 0.1 * math.dist(q, mid)
+                if best is None or s < best[0]:
+                    best = (s, q)
+        return None if best is None else best[1]
+
+    def has_room(self, n, p):
+        """(True, "") or (False, words): EDGE_REFUSE_CM from every edge and ROOM_ROBOT_CM from every other robot."""
+        if edge_dist(self.rect, *p) < LD.EDGE_REFUSE_CM:
+            return False, LD.edge_words(self.rect, *p)
+        for m, q in self.others_of(n).items():
+            if math.dist(p, q) < ROOM_ROBOT_CM:
+                return False, "%.0f cm from %s" % (math.dist(p, q), m)
+        return True, ""
+
+    def ensure_room(self, sub, n, k):
+        """Before a turn check or a drive: a robot nearer than EDGE_REFUSE_CM to an edge, or ROOM_ROBOT_CM to another
+        robot, drives itself back towards open space first, on a planned path the cameras watch (run_plan with the
+        camera bridge, as every drive), instead of being parked (19:27 Left 24 cm from x = 122, 19:34 Center at
+        x = 0: both parked, and the loop ended at 19:44 with all three out for "could not finish"). With its heading
+        unknown, a heading crawl comes first (forwards first: the edge guard watches forward legs). True: it has
+        room now. False: it could not be moved this time (held; tried again at its next turn)."""
+        self.need_bench(sub)
+        self.need_eye()
+        p = self.eye.still(n) or self.pos(n)
+        if p is None:
+            return True                       # (not seen: the turn check / drive reports that itself)
+        ok, words = self.has_room(n, p)
+        if ok:
+            return True
+        q = self.room_target(n, p)
+        if q is None:
+            self.event("held", n, "%s, and no open spot %.0f cm from every edge and %.0f cm from the other robots: "
+                       "held here" % (words, ROOM_TARGET_CM, ROOM_TARGET_ROBOT_CM), clip=False)
+            return False
+        say("  %s is %s (a turn check or a drive needs %.0f cm from an edge, %.0f from another robot): driving it "
+            "to open space at (%.0f, %.0f) first" % (n, words, LD.EDGE_REFUSE_CM, ROOM_ROBOT_CM, q[0], q[1]))
+        self.frames_on("room-" + n)
+        try:
+            if self.heading(n) is None:
+                h, _ = self.crawl(n, p, None)
+                p2 = self.eye.still(n) or p
+                self.set_pose(n, p2[0], p2[1], h, "crawl (room)")
+                p = p2
+            mid = ((self.rect[0] + self.rect[2]) / 2.0, (self.rect[1] + self.rect[3]) / 2.0)
+            th = math.degrees(math.atan2(mid[1] - q[1], mid[0] - q[0])) if math.dist(q, mid) > 1.0 else \
+                math.degrees(math.atan2(q[1] - p[1], q[0] - p[0]))
+            self.set_pose(n, p[0], p[1])
+            ends = self.drive_to(sub, "room-%s-%d" % (n, k), {n: (q[0], q[1], th)}, cms=LD.SLOW_CMS)
+        except LadderStop as e:
+            self.frames_off()
+            self.forget_heading(n, "the drive to open space did not finish")
+            if lost_words(str(e)) and "the turn check needs it" not in str(e):
+                self.park(n, "making room: %s" % e, safety=True)
+                return False
+            self.event("held", n, "making room did not finish (%s): held, tried again next time" % e, clip=False)
+            return False
+        self.frames_off()
+        e = ends.get(n) or {}
+        self.event("room made", n, "moved from %s to (%.1f, %.1f): %.0f cm from the nearest edge" % (
+            words, e.get("x", q[0]), e.get("y", q[1]), edge_dist(self.rect, e.get("x", q[0]), e.get("y", q[1]))),
+            clip=False)
+        return True
+
     # -- one drive ----------------------------------------------------------------------------------------------
     def drive(self, sub, n, i, k):
         speed, length = SPEEDS[i % len(SPEEDS)], LENGTHS[(i // len(SPEEDS)) % len(LENGTHS)]
@@ -763,6 +855,14 @@ class DoeLoop(LD.Ladder):
                 h, _ = self.crawl(n, self.eye.still(n) or p, None)
             except LadderStop as e:
                 self.frames_off()
+                if "during its crawl" in str(e):
+                    try:
+                        self.bench.send(n, "stop")
+                    except Exception:
+                        pass
+                    self.hold(n, "heading crawl: %s" % e, "stopped where it stands; the next find step looks for it "
+                              "again", one=False)
+                    return "held"
                 if not lost_words(str(e)) and getattr(e, "evidence", "both") != "both" and \
                         not getattr(self.a, "keep_going", False):
                     self.hold(n, "heading crawl: %s" % e, e.evidence)
@@ -835,6 +935,20 @@ class DoeLoop(LD.Ladder):
                 e = None
         if e:
             self.set_pose(n, e["x"], e["y"], e["h"], e["how"])
+            # the heading it ends with must come from this drive, never from before it (19:27-19:32, 28 Oct: drive 1
+            # was re-planned round a sensor stop, ended facing -150 deg by its gyro with no camera line, and drive 2
+            # started from the 41 deg it had before drive 1: three drives backwards towards the x = 0 edge)
+            why = None
+            if e["h"] is None:
+                why = "no camera line from drive %d (%s)" % (i + 1, e["how"])
+            elif res != "done":
+                why = "drive %d did not finish (%s)" % (i + 1, res)
+            if why:
+                self.forget_heading(n, why)
+                self.event("heading unknown", n, why + ": a camera-watched heading crawl comes first next time",
+                           clip=False)
+            elif e.get("opposite"):
+                self.event("heading corrected", n, e["how"], clip=False)
         bs = {}
         try:
             bs = json.load(open(os.path.join(r["sess"], "bridge", "bridge_summary.json")))
@@ -974,6 +1088,7 @@ class DoeLoop(LD.Ladder):
                 continue
             n = act[k % len(act)]
             i = self.st["doe"]["i"].get(n, 0)
+            out = None
             try:
                 self.frames_on("find")          # kept: a robot unseen here can be replayed afterwards (16:41)
                 try:
@@ -984,9 +1099,13 @@ class DoeLoop(LD.Ladder):
                     self.keep_going_back(act)
                 if n in self.st["kept_out"]:
                     raise LadderStop("the camera cannot see it now: lost by both cameras (and its lights)")
-                if i % TURN_EVERY == 0 or self.st["doe"].get("turn_due", {}).pop(n, False):
+                if i % TURN_EVERY == 0 or self.st["doe"].get("turn_due", {}).get(n, False):
                     if not self.check(sub, [n], "%s's turn check" % n):
                         raise LadderStop(None)
+                    if not self.ensure_room(sub, n, k):
+                        out = "no room"
+                        raise LadderStop(None)          # held: tried again at its next turn
+                    self.st["doe"].get("turn_due", {}).pop(n, None)
                     say("  %s: turn check (drive %d is next)" % (n, i + 1))
                     self.last_held = None
                     if not self.turn(sub, n, k) and n in self.st["kept_out"]:
@@ -995,13 +1114,16 @@ class DoeLoop(LD.Ladder):
                         raise LadderStop(None)          # held: no drive this loop, turn checked again next time
                 if not self.check(sub, [n], "%s's drive" % n):
                     raise LadderStop(None)
+                if not self.ensure_room(sub, n, k):
+                    out = "no room"
+                    raise LadderStop(None)
                 out = self.drive(sub, n, i, k)
                 if out in ("done", "fail"):
                     self.st["doe"]["i"][n] = i + 1
-                idle_rounds = idle_rounds + 1 if out == "skipped" else 0
             except LadderStop as e:
                 if e.args and e.args[0]:
                     self.park(n, str(e), safety=lost_words(str(e)))
+            idle_rounds = idle_rounds + 1 if out in ("skipped", "no room") else 0
             k += 1
             self.st["doe"]["loops"] = k
             self.save()
@@ -1049,8 +1171,11 @@ LOST_WORDS = ("lost", "edge", "border", "battery", "restart", "not answering")
 
 def lost_words(text):
     """A failure that is about safety, not measurement (--keep-going still parks it): both cameras lost it, the
-    firmware's own edge / border stop, battery, a restart, no answer."""
+    firmware's own edge / border stop, battery, a restart, no answer. Not: a robot that stands too near an edge for a
+    turn check (nothing moved; 19:27 and 19:34, 28 Oct, parked Left and Center for it): the loop makes room instead."""
     t = (text or "").lower()
+    if "the turn check needs it" in t or "has no room to crawl" in t:
+        return False
     return any(w in t for w in LOST_WORDS)
 
 
@@ -1130,12 +1255,14 @@ def write_summary(folder):
 
 
 def parse_sim_events(items):
-    """restart:Center@2, battery:Left=24@3 -> [(kind, robot, value, loop)]."""
+    """restart:Center@2, battery:Left=24@3, move:Left=99,42,4@2 (its true pose: x, y, heading deg),
+    lose-leg-end:Left@1 (its next leg's end record is lost) -> [(kind, robot, value, loop)]."""
     out = []
     for s in items:
-        m = re.match(r"(restart|battery):(\w+)(?:=([\d.]+))?@(\d+)$", s.strip())
+        m = re.match(r"(restart|battery|move|lose-leg-end):(\w+)(?:=([-\d.,]+))?@(\d+)$", s.strip())
         if not m:
-            raise SystemExit("--sim-event %s: use restart:NAME@LOOP or battery:NAME=PCT@LOOP" % s)
+            raise SystemExit("--sim-event %s: use restart:NAME@LOOP, battery:NAME=PCT@LOOP, move:NAME=X,Y,DEG@LOOP or "
+                             "lose-leg-end:NAME@LOOP" % s)
         out.append((m.group(1), m.group(2), m.group(3), int(m.group(4))))
     return out
 
