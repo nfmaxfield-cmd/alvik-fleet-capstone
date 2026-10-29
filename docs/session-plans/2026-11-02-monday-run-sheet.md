@@ -426,3 +426,44 @@ replace this; until then, 2 cm on the cross works.
 | Placement | within 2 cm of the cross | No: from the 3 cm rule above; goes away with the straighten-up |
 | Stop when | within about 5 cm of an edge, or robots within 5 cm and closing | No: a safety call for the person at the table |
 | Warm-up start spots | 17 cm in; Center at half the length | No: geometry, so the mission's crosses serve the warm-up |
+
+## Appendix C. Board check: the distance-sensor stop (10 min, at home before Monday)
+
+Added by the false-stops build (29 Oct, `docs/build-reports/e02-oct29-false-stops.md`). It checks three changes on
+the real robots: every robot now needs **3 readings in a row** before its distance sensor stops it; at the start each
+robot's **floor check** sets its stop limit (Left 10 cm or lower, Right 12 cm or lower, never under 8 cm); and a stop
+that only the sensor saw is marked **unconfirmed** and leaves the map after 15 s. Do it on the home plywood, Left and
+Right charged, firmware flashed. You need the brick and the tape measure.
+
+1. **1 min. Laptop browser.** Go to `100.122.222.75:8091`, click **Mission Control**, then **1 Connect**, then
+   **Robots**. The pill at the top says **Mode: Robots**.
+2. **1 min. 3 Workspace.** Type `122` into **Length (cm)** and `61` into **Width (cm)**, click **Save workspace**.
+   Click **More**. Under **Robot start spots** type Left `17 17 90` and Right `105 17 90`, click **Save workspace**.
+3. **1 min. On the plywood.** Tape two crosses 17 cm in from the edge nearest you: one 17 cm from the left end, one
+   17 cm from the right end. Put Left on the left cross and Right on the right cross, both facing away from you.
+4. **1 min. 5 Mission.** Click **Monday's default**, then **Plan and preview**, then **Go to run**. Click **Run
+   (robots)**. Click **Event log** to open it.
+5. **Within 30 s, in the Event log:** two lines start with `floor check:`. Write down each robot's numbers:
+
+   | Robot | "the floor reads ... cm" | "stop limit ... cm" |
+   |---|---|---|
+   | Left | | |
+   | Right | | |
+
+   You should see Left's stop limit **10.0 or lower** and Right's **12.0 or lower**, neither under **8.0**. If a line
+   says **the lowest allowed**, click the red **Stop**, look in front of that robot (anything within 30 cm?) and wipe
+   its sensor window, then start again from step 4.
+6. **2 min. While they mow (no brick yet).** Watch the Event log for a line with `obstacle` and `ahead`. You should
+   see **none**. Count them here: ____ . One is acceptable if the run carries on; two or more: note which robot.
+7. **1 min. The brick.** When Right turns at the end of its second lane, put the brick flat across its next lane,
+   long side across, about **25 cm in front of Right**. Right stops. The Event log says
+   `Right: obstacle X cm ahead; zones ...`: write X here: ____ cm. You should see **about 9.5-11 cm** (the simulator:
+   10.0, from 9.6 to 10.8). With the tape measure, brick to Right's front while it stands: about **10-11 cm**. For
+   Left the same test gives **about 7.5-9.5 cm** on the log line (the simulator: 8.2) and about 8-9 cm by tape.
+8. **The next line** says either `no camera sees it: mapped as unconfirmed` or that the camera confirmed it. Leave the
+   brick. Right should drive round it. If it stops at the brick again, the log says `stopped again where an earlier
+   stop was: the obstacle is confirmed`; that is right too.
+9. **1 min.** When both robots dance, click **Stop**, switch them off, take the brick away.
+
+**Pass:** step 5's limits in range, step 6 none (or one, and the run carried on), step 7 between **7 and 12 cm** and
+the robot never touched the brick. **Anything else:** tell me the numbers you wrote; the run's logs upload on their own.

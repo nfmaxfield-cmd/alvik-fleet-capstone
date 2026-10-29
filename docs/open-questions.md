@@ -68,8 +68,6 @@ Answered ones move to the bottom with the answer and date.
 60. The camera bridge refuses to start a robot that only the side camera sees (its spot is ~3 cm off, the "moved" rule
     is 3 cm): 5 start-ups failed today on the overhead's blind strip (x = 30-45 cm, daylight). Allow more for side-only
     sightings (e.g. 5 cm), after a logs replay, before Monday?
-61. The DOE loop parks a robot for good when it misses one status check; Center answered again 2 minutes later and
-    stayed out for 2 hours. Re-check it at the next loop instead?
 62. Was the morning sun on the Pi at 07:43 (that loop ran 5 C hotter than the 09:22 one, 19 min at 80 C+)?
 63. Right has not driven since 28 Oct night (kept out today: 27 cm from the edge). Give it the next session's drives,
     since it is Monday's robot?
@@ -81,23 +79,22 @@ Answered ones move to the bottom with the answer and date.
     still photo of Center from above with a ruler along its side would say which is right. (e02-oct29-facing-check)
 67. The facing check takes 6-8 s for two robots (planned 4-5). OK before Monday's run? (e02-oct29-facing-check)
 
-68. Distance-sensor stops: switch every robot to 3 readings in a row before Monday (plus Left at 10 cm)? Replay of
-    29 Oct: phantom stops 69 % of Left's drives now, 0 % with both; costs about 2 cm of reach for a real brick.
-    (e02-oct29-rules-audit)
 69. Where did the side camera's 13-24 grey levels come from on 29 Oct? The five DOE releases only have 21-45 at L0.
     (e02-oct29-rules-audit)
-70. May a distance-sensor obstacle the camera did not confirm expire on its own (about 15 s), and be dropped rather
-    than end the mission with "no plan"? The stop itself always stays. All 5 "no plan" ends on 29 Oct followed a
-    phantom stop. (e02-oct29-rules-audit)
 71. Should the camera bridge count a robot as moved off its start only when it has been told to move, not by a 3 cm
     camera distance (5 start-ups refused on 29 Oct with the side camera alone)? (e02-oct29-rules-audit)
-72. Monday: should a robot that goes silent for 4 s rejoin when it is heard again, instead of staying out for the
-    whole run? (e02-oct29-rules-audit)
 73. Lower your DOE-loop room rules from 25 cm (edge) / 30 cm (robots) to 20 / 25 cm, now that robots are driven to
     open space and calibrate in 12 / 21 cm? (e02-oct29-rules-audit)
 74. Is Center in Monday's run? Its centre-left zone gives phantom stops in 41 % of its drives too. (e02-oct29-rules-audit)
 75. Should the lighting check sample where the robots will drive (the x = 30-45 strip), not only where they stand?
     (e02-oct29-rules-audit)
+76. The floor check can take a robot under its ceiling on its own (Left to 9.1 cm in one 27 Oct drive). Accept limits
+    under Left's 10 cm, or make 10 a floor too? (e02-oct29-false-stops)
+77. A robot heard again came back into Monday's program in only 1 of 6 simulator tries; otherwise it stays a
+    fixed obstacle. Re-plan the rest of the program for both robots together (a planner change, 1-2 h): before Monday
+    or after? (e02-oct29-false-stops)
+78. A second stop at the same place confirms an obstacle (your rule). Count it only when the robot was already moving
+    at one of the two stops (false stops happen while standing after a turn)? (e02-oct29-false-stops)
 
 ### Robots and sessions
 8. What stands just beyond the home board's x = 0 edge at about y = 30-60? (Your 07:45 "yes" to this one was read as
@@ -114,6 +111,18 @@ Answered ones move to the bottom with the answer and date.
 13. Should creep steps change? 12 of 23 stalled (faster creep, or end on the front sensor instead of the wheel count).
 
 ## Answered
+- 2026-10-29 16:2x (Nick approved the rules audit's recs; built in docs/build-reports/e02-oct29-false-stops.md):
+  - Q68: every robot now needs 3 distance-sensor readings in a row before a stop (with Left at 10 cm: 0 false stops
+    in the 232 replayed drives; a real brick is met 0.7 cm nearer by Right, 2.7 cm by Left, simulator). Plus a floor
+    check at every connect: the stop limit is the lowest of 12 cm, the robot's own ceiling (Left 10) and its floor
+    reading less 1 cm, never under 8 cm.
+  - Q70: yes. A sensor-only obstacle is marked unconfirmed, leaves the map after 15 s unless the camera or a second
+    stop confirms it, and is dropped (the plan made again) rather than ending with "no plan" or no route. The stop
+    itself always stays.
+  - Q72: yes. A robot silent for over 4 s is held; heard again on the same boot it rejoins (pose from the camera,
+    everyone re-plans); after a restart it is checked again first. In the simulator it came back into Monday's program
+    in 1 of 6 tries; otherwise it stays a fixed obstacle, as before. See Q77.
+  - Q61: yes. The DOE loop holds a robot that misses its check and checks it again at its next turn.
 - 2026-10-28 18:0x: Q22 (exposure) updated: automatic, EXCEPT the overhead steps its exposure down while the board is
   washed out (clips), says so on screen and logs it, then returns to automatic; on by default (camrec WashoutGuard,
   docs/build-reports/e02-oct28-overhead-contrast.md). Neither night's board clipped so far, so it has not acted yet.
