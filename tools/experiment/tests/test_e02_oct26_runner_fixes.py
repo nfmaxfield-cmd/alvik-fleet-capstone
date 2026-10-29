@@ -334,7 +334,8 @@ def test_firmware_version_and_the_tilt_parameters():
     fw = os.path.join(os.path.dirname(os.path.dirname(HERE)), "..", "firmware", "home_lab")
     ino = open(os.path.join(fw, "home_lab.ino")).read()
     assert '#define FW_VERSION "2026-10-26a"' in ino or '#define FW_VERSION "2026-10-27a"' in ino \
-        or '#define FW_VERSION "2026-10-28a"' in ino   # 27a: school build; 28a: one system
+        or '#define FW_VERSION "2026-10-28a"' in ino \
+        or '#define FW_VERSION "2026-10-29a"' in ino   # 27a: school build; 28a: one system
     p = open(os.path.join(fw, "params.h")).read()
     assert '{"tilt_stop_deg",    5,' in p and '{"tilt_ms",        300,' in p
     n = open(os.path.join(fw, "net.h")).read()

@@ -42,7 +42,9 @@
 Arduino_Alvik alvik;
 
 // Bump this whenever the firmware changes, so every logged run says which code it ran.
-#define FW_VERSION "2026-10-28a"
+#define FW_VERSION "2026-10-29a"
+// 2026-10-29a (the facing check, tools/fleet/facing.py): `led <r> <g> <b> <ms> L|R` lights ONE side's light (the other
+//              dark), so the cameras can tell the left light from the right one and so which way the robot faces
 // 2026-10-28a (one system, Monday): the arc step (follow C: round a circle, wheels + gyro on the own pose, pose.h
 //              driveArc), the dance (follow Z and `run dance`: spins, wiggles, lights until stopped; dance.h), front
 //              stops counted in sensor readings (obs_n), the boot ID in `status`, `run dance` from the console
@@ -191,17 +193,21 @@ bool handleCommand(const String& raw, bool running) {
     return false;
   }
   if (verb == "led") {
-    // led <r> <g> <b> [ms]: both LEDs this colour (0/1 each) for ms (default 2000), then back to normal. Does
+    // led <r> <g> <b> [ms] [L|R]: both LEDs this colour (0/1 each) for ms (default 2000), then back to normal. Does
     // not block (2026-10-22a): the laptop finds a robot by a steady light at any camera frame rate, and the
     // dance flashes on its beat. Ignored during a run (its own lights are part of the data).
+    // L or R (2026-10-29a, the facing check): that side's LED alone, the other dark.
     if (running) { net::sendLine("M,busy: send stop first"); return false; }
     int r = 1, g = 1, bl = 1;
     long ms = 2000;
-    sscanf(raw.c_str(), "%*s %d %d %d %ld", &r, &g, &bl, &ms);
-    alvik.left_led.set_color(r ? 1 : 0, g ? 1 : 0, bl ? 1 : 0);
-    alvik.right_led.set_color(r ? 1 : 0, g ? 1 : 0, bl ? 1 : 0);
+    char side[4] = "";
+    sscanf(raw.c_str(), "%*s %d %d %d %ld %3s", &r, &g, &bl, &ms, side);
+    bool onlyL = side[0] == 'L' || side[0] == 'l', onlyR = side[0] == 'R' || side[0] == 'r';
+    alvik.left_led.set_color(!onlyR && r ? 1 : 0, !onlyR && g ? 1 : 0, !onlyR && bl ? 1 : 0);
+    alvik.right_led.set_color(!onlyL && r ? 1 : 0, !onlyL && g ? 1 : 0, !onlyL && bl ? 1 : 0);
     gLedUntil = millis() + (unsigned long)constrain(ms, 50L, 20000L);
-    net::logf("M,%s: led %d %d %d for %ld ms", net::name, r, g, bl, ms);
+    net::logf("M,%s: led %d %d %d for %ld ms%s", net::name, r, g, bl, ms,
+              onlyL ? ", left only" : (onlyR ? ", right only" : ""));
     return false;
   }
   if (verb == "identify") {

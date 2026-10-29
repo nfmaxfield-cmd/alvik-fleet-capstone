@@ -260,9 +260,9 @@ def test_runner_safety_settings_go_with_every_find_and_route():
         assert c in cmds
     assert E.EXPECTED_FW == "2026-10-26a" and {"2026-10-22b", "2026-10-25a", "2026-10-25b", "2026-10-25c"} <= \
         set(E.OK_FW)                                                            # older still run
-    assert set(E.BORDER_FW) == {"2026-10-25a", "2026-10-25b", "2026-10-25c", "2026-10-26a", "2026-10-27a", "2026-10-28a"}
-    assert set(E.BACK_FW) == {"2026-10-25b", "2026-10-25c", "2026-10-26a", "2026-10-27a", "2026-10-28a"}   # each has everything 25b had
-    assert E.TILT_FW == ("2026-10-26a", "2026-10-27a", "2026-10-28a")
+    assert set(E.BORDER_FW) == {"2026-10-25a", "2026-10-25b", "2026-10-25c", "2026-10-26a", "2026-10-27a", "2026-10-28a", "2026-10-29a"}
+    assert set(E.BACK_FW) == {"2026-10-25b", "2026-10-25c", "2026-10-26a", "2026-10-27a", "2026-10-28a", "2026-10-29a"}   # each has everything 25b had
+    assert E.TILT_FW == ("2026-10-26a", "2026-10-27a", "2026-10-28a", "2026-10-29a")
     assert "2026-10-28a" in E.OK_FW                                               # the one-system build's firmware
     assert "2026-10-27a" in E.OK_FW                                               # the school build's firmware
 

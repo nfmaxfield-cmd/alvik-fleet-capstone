@@ -43,7 +43,8 @@
 #                                          failed upload; a zip over 1.9 GB goes in parts, parts already up are skipped)
 # One system (2026-10-28): Monday's mission and Mission Control, the same program (tools/fleet/mission_run.py):
 #     ./run-fleet-pi.sh monday [61x122] [Left,Right] [farm]   Monday's default mission on the table of that size (put
-#                                          each robot at its own end first); runs in tmux "monday"; Ctrl+C stops every
+#                                          each robot at its own end first; a facing check by their lights stops the
+#                                          start, nothing moving, if one faces over 15 deg off: facing.py); runs in tmux "monday"; Ctrl+C stops every
 #                                          robot; uploads at the end. farm: each camera tracked in its own process
 #     ./run-fleet-pi.sh practice mow|circle|chicken|dance [61x122]   ONE block of Monday's mission alone (tmux
 #                                          "practice"; tools/fleet/examples/practice/*.json); as `monday` otherwise

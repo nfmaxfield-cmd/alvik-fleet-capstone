@@ -200,14 +200,24 @@ class LiveRobot(R.Robot):
         if running:
             self.send("M,busy: send stop first")
             return False
-        parts = (raw.split() + ["1", "1", "1", "2000"])[1:5]
+        words = raw.split()
+        args = words[1:5]
+        parts = args + ["1", "1", "1", "2000"][len(args):]
+        side = words[5].upper()[:1] if len(words) >= 6 else ""
+        if side not in ("L", "R") or not getattr(self, "one_side_led", True):
+            side = ""                                   # one_side_led False: firmware before 2026-10-29a (both lit)
         try:
-            on = any(int(float(v)) for v in parts[:3])
+            col = tuple(1.0 if int(float(v)) else 0.0 for v in parts[:3])
             ms = max(50.0, min(20000.0, float(parts[3])))
         except ValueError:
-            on, ms = True, 2000.0
-        self.led_until = time.time() + ms / 1000.0 if on else 0.0
-        self.send("M,%s: led %s for %d ms" % (self.name, " ".join(parts[:3]), ms))
+            col, ms = (1.0, 1.0, 1.0), 2000.0
+        # as the firmware: this colour (dark too: `led 0 0 0` holds both dark) for ms, then back to normal;
+        # 2026-10-29a: L / R lights that side alone (the facing check, tools/fleet/facing.py)
+        self.led_until = time.time() + ms / 1000.0
+        off = (0.0, 0.0, 0.0)
+        self.led_col = (off if side == "R" else col, off if side == "L" else col)
+        self.send("M,%s: led %s for %d ms%s" % (self.name, " ".join(parts[:3]), ms,
+                                                {"L": ", left only", "R": ", right only"}.get(side, "")))
         return False
 
     def send(self, text):
@@ -221,7 +231,7 @@ class LiveRobot(R.Robot):
         """(left, right) rgb 0-1 as the camera sees them: the `led` command's white while it lasts, else the run's
         own lights (robot.py set_leds)."""
         if time.time() < getattr(self, "led_until", 0.0):
-            return (1.0, 1.0, 1.0), (1.0, 1.0, 1.0)
+            return getattr(self, "led_col", ((1.0, 1.0, 1.0), (1.0, 1.0, 1.0)))
         led = self.leds[-1] if self.leds else (0, (0, 0, 0), (0, 0, 0))
         return tuple(led[1]), tuple(led[2])
 
@@ -315,6 +325,8 @@ class FleetSim:
             self.cfg.dock.docks = [[d["x"], d["y"], d["heading"]] for d in self.m["home_docks"]]
         params = config.firmware_params()
         fw = config.firmware_version()
+        if getattr(args, "old_led", False):
+            fw = "2026-10-28a"            # the firmware before `led ... L|R` (the facing check's old-firmware path)
         now = time.time()
         self.robots = {}
         starts = {}
@@ -332,6 +344,7 @@ class FleetSim:
             rb = LiveRobot(name, self.cfg, random.Random(self.rng.random()), params, fw, t_boot,
                            self.rng.randrange(0x1000, 0x10000), ip)
             rb.idle_until(now)
+            rb.one_side_led = not getattr(args, "old_led", False)
             e = args.start_noise
             st = starts.get(name, rr["start"])
             rb.x = st[0] + self.rng.uniform(-e, e)
@@ -892,6 +905,8 @@ def main(argv=None):
     ap.add_argument("--persist", action="store_true",
                     help="keep running after the follow runs end (until --max-s or SIGTERM): one board for several "
                          "programs in a row (the remote ladder's dry runs)")
+    ap.add_argument("--old-led", action="store_true",
+                    help="robots on firmware 2026-10-28a: `led ... L|R` lights both (the facing check's fallback)")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args(argv)
     if args.persist:

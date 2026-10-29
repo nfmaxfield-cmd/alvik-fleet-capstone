@@ -1346,6 +1346,7 @@ def main(argv=None):
     ap.add_argument("--side-stream", default="127.0.0.1:8001")
     ap.add_argument("--side-calib", default="")
     ap.add_argument("--no-lights", action="store_true")
+    ap.add_argument("--no-facing", action="store_true", help="no facing check in the find steps (facing.py)")
     ap.add_argument("--sim-washout", action="store_true")
     ap.add_argument("--sim-no-side", action="store_true")
     ap.add_argument("--dir")

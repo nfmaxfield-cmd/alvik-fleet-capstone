@@ -242,6 +242,13 @@ def run(args):
         scal = "" if args.no_side else (args.side_calib or SCF.side_calib() or "")
         stream, side_stream = args.stream, args.side_stream
         launcher = [PY]
+    # the facing check (2026-10-29): run_plan measures which way each robot faces from its lights before anything
+    # moves, through both cameras (facing.py)
+    if not args.no_facing_check:
+        rp += ["--facing-check", "--facing-calib", cal, "--facing-stream", stream,
+               "--facing-tol-deg", str(args.facing_tol_deg)]
+        if scal:
+            rp += ["--facing-side-calib", scal, "--facing-side-stream", side_stream]
     # the record: cpu.csv, frames (tracked pictures and clips)
     cpu = frames = tail = None
     try:
@@ -405,6 +412,10 @@ def main(argv=None):
     ap.add_argument("--farm", action="store_true", help="each camera tracked in its own process (trackfarm.py)")
     ap.add_argument("--rings", action="store_true", help="--farm: the recorder shares its pictures (camrec.py --shm)")
     ap.add_argument("--half", action="store_true", help="--farm: track at half size")
+    ap.add_argument("--no-facing-check", action="store_true",
+                    help="skip the facing check (which way each robot faces, from its lights, before anything moves)")
+    ap.add_argument("--facing-tol-deg", type=float, default=15.0,
+                    help="the facing check: a robot more than this off its start heading stops the start")
     ap.add_argument("--no-frames", action="store_true", help="no tracked pictures or clips")
     ap.add_argument("--upload", action="store_true", help="upload the session (a release with a tag of its own)")
     ap.add_argument("--recordings", default=os.path.expanduser("~/recordings"))

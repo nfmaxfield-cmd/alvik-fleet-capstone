@@ -121,6 +121,13 @@ CRAWL_MIN_EDGE_CM = 10.0  # chosen: a crawl's tip (its middle) at least this far
                           # another robot's middle: the body's back 5 cm in. No DOE: a safety room
 REFIND_WAIT_S = 4.0     # chosen: a robot not seen standing still after a crawl leg is waited for this much longer...
 REFIND_SPREAD_CM = 2.0  # ... with its spots allowed this spread (the 1.2 cm rule's 1.4 cm hops passed), then looked for
+FACING_DROP_DEG = 30.0  # chosen: a kept heading further than this from what the robot's lights say is dropped (a heading
+                        # crawl measures it again). 28 Oct: the lights' error was 0.4-3.7 deg (side camera) and ~10
+                        # (overhead, washed out); Center's kept heading was 190 deg wrong. DOE note: the find steps'
+                        # measured-minus-kept differences over a loop (facing_events.jsonl, state.json): the limit must
+                        # clear the spread of agreeing robots
+FACING_AGREE_DEG = 10.0 # chosen: two cameras this close make a lights heading good enough to drive by without the side
+                        # camera's own reading. DOE note: as above, against the next drive's camera line
 REFIND_NEAR_CM = 12.0   # by its lights within this of where it should be. DOE note: all three from the frames kept
                         # round each crawl (seconds to "still" and spread per camera source, lamp / daylight); a
                         # larger spread lowers the crawl's precision by about the same amount
@@ -216,6 +223,8 @@ class Eye:
         self.closed = False
         self.n = 0
         self.lights = lights
+        self.facing_on = True              # the facing check in every find (facing.py); --no-facing turns it off
+        self.facing = {}                   # name -> its last facing measure
         self.side_cam, self.side_lag, self.side_bias = None, None, (0.0, 0.0)
         self.side_frames = deque(maxlen=30)
         self.side_n = 0
@@ -391,31 +400,68 @@ class Eye:
         with self.lock:
             return [im for im, _ in list(self.side_frames)[-k:]]
 
+    def collect2(self, s):
+        """(overhead pictures, side pictures) taken over the next s seconds."""
+        t0 = time.time()
+        time.sleep(s)
+        with self.lock:
+            return ([im for im, t in self.frames if t >= t0 - 0.05],
+                    [im for im, t in self.side_frames if t >= t0 - 0.05])
+
     def find_lights(self, bench, name, others=(), tries=2, keeper=None):
         """Its lights (`led 1 1 1 2500`, steady white): the one spot that got brighter. (x, y) of the lights (near
-        its front) or None. keeper: the ladder's lights keeper, paused meanwhile (its steady lights would leave nothing
-        to change), and this robot's lights put out first."""
+        its middle: they sit across the robot) or None. keeper: the ladder's lights keeper, paused meanwhile (its steady
+        lights would leave nothing to change), and this robot's lights put out first. The facing check (2026-10-29,
+        facing.py) follows when the white lights were found: its left light alone, then its right one, so which way
+        it faces goes to self.facing[name] (dict: heading or None, sure, how)."""
         if keeper is not None:
             keeper.pause(True)
         try:
             for _ in range(tries):
-                if keeper is not None:
-                    bench.send(name, "led 0 0 0 3000")      # dark before (the keeper had them on)
+                if keeper is not None or self.facing_on:
+                    bench.send(name, "led 0 0 0 3000")      # dark before (the keeper had them on; the facing check
+                                                            # needs both lights dark, not the idle colour)
                     time.sleep(0.4)
-                before = self.collect(0.8)
+                before, before_s = self.collect2(0.8)
                 bench.send(name, "led 1 1 1 2500")
                 time.sleep(0.5)
                 during = self.collect(1.0)
-                time.sleep(1.3)
                 if len(before) < 2 or len(during) < 2:
+                    time.sleep(1.3)
                     continue
                 f = self.CAM.locate_light(self.cam, before, during, board_rect=self.rect, margin_cm=8.0)
                 if f and all(math.hypot(f["x"] - o[0], f["y"] - o[1]) > 12.0 for o in others):
+                    if self.facing_on:
+                        self.measure_facing(bench, name, before, before_s, (f["x"], f["y"]))
+                    else:
+                        time.sleep(1.3)
                     return f["x"], f["y"]
+                time.sleep(1.3)
             return None
         finally:
             if keeper is not None:
                 keeper.pause(False)
+
+    def measure_facing(self, bench, name, dark_o, dark_s, near):
+        """Which way it faces (facing.py): its left light alone, then its right one (firmware 2026-10-29a; older: its
+        idle state, the left light in its experiment's colour), against the dark pictures before. About 1.8 s."""
+        import facing as FC
+        fw = (bench.fw.get(name) or ("",))[0]
+        new = FC.new_firmware(fw)
+        bench.send(name, "led 1 1 1 1500 L")
+        time.sleep(FC.SETTLE_S)
+        first = self.collect2(FC.COLLECT_S)
+        bench.send(name, "led 1 1 1 1500 R" if new else "led 0 0 0 60")
+        time.sleep(FC.SETTLE_S)
+        second = self.collect2(FC.COLLECT_S)
+        bench.send(name, "led 0 0 0 60")                    # back to normal (the keeper lights it again)
+        per = {"overhead": FC.one_camera(self.cam, dark_o, first[0], second[0], not new, self.rect, near)}
+        if self.side_cam is not None and len(dark_s) >= 2:
+            per["side"] = FC.one_camera(self.side_cam, dark_s, first[1], second[1], not new, self.rect, near)
+        meas = FC.combine(per)
+        meas["cameras"] = {c: {k: v for k, v in r.items() if k != "pair"} for c, r in per.items()}
+        meas["firmware"] = fw
+        self.facing[name] = meas
 
     def start_tracking(self, spots):
         """Floor memory from the last pictures (each camera's) with every robot's floor filled in from around it; a
@@ -1045,6 +1091,7 @@ class Ladder:
         if self.eye is None:
             self.eye = Eye(self.stream, self.calib, self.rect, side_stream=self.side_stream,
                            side_calib=self.side_calib, lights=not self.a.no_lights)
+            self.eye.facing_on = not getattr(self.a, "no_facing", False)
             t0 = time.time()
             while (self.eye.n < 5 or (self.eye.side_cam is not None and self.eye.side_n < 5)) and time.time() - t0 < 15:
                 time.sleep(0.2)
@@ -1116,15 +1163,61 @@ class Ladder:
             old = self.st["robots"].get(n)
             if old and "h" in old and math.hypot(old["x"] - p[0], old["y"] - p[1]) < 2.5:
                 h = old["h"]                    # it has not moved since its heading was measured
-            led = math.degrees(math.atan2(q[1] - p[1], q[0] - p[0]))
             r = self.st["robots"].setdefault(n, {})
-            r.update(x=round(p[0], 2), y=round(p[1], 2), t=round(time.time(), 1), lights_dir=round(led, 1))
+            r.update(x=round(p[0], 2), y=round(p[1], 2), t=round(time.time(), 1))
+            r.pop("lights_dir", None)           # (the old guess: body middle -> lights; they sit across the middle)
+            h, how = self.facing_heading(n, h, eye.facing.get(n))
             if h is None:
                 r.pop("h", None)
+                if how:
+                    r["h_how"] = how
+            elif how:
+                r.update(h=round(wrap180(h), 2), h_how=how, h_t=round(time.time(), 1))
             self.save()
         for w in eye.tracking_words():
             say("  " + w)
         return found
+
+    def facing_heading(self, n, h, meas):
+        """The facing check in the find step (facing.py, 2026-10-29: Center kept a heading 190 deg wrong for three
+        drives on 28 Oct). Returns (heading to use or None, words for h_how or None).
+        A kept heading the lights contradict (over FACING_DROP_DEG) is dropped: the next move starts with a heading
+        crawl. No kept heading and a sure measure with the side camera in it (or both cameras within
+        FACING_AGREE_DEG): the measured heading is used."""
+        import facing as FC
+        r = self.st["robots"].setdefault(n, {})
+        if not meas:
+            return h, None
+        r["facing"] = meas.get("heading")
+        r["facing_how"] = meas.get("how")
+        fh = meas.get("heading")
+        if fh is None:
+            say("  %s: which way it faces is not known from its lights (%s)" % (n, meas.get("how")))
+            return h, None
+        if h is not None:
+            d = abs(FC.wrap180(fh - h))
+            if d > FACING_DROP_DEG:
+                say("  %s: its lights say it faces %.0f deg, but the loop had %.0f deg (%.0f off): that heading is "
+                    "dropped; it is measured again before it moves" % (n, fh, h, d))
+                self.log_event("facing_disagrees", robot=n, facing=fh, kept=h)
+                return None, "unknown: its lights said %.0f deg, the kept heading %.0f" % (fh, h)
+            say("  %s faces %.0f deg by its lights (kept heading %.0f: agrees)" % (n, fh, h))
+            return h, None
+        cams = meas.get("cameras") or {}
+        side_ok = (cams.get("side") or {}).get("heading") is not None
+        tight = meas.get("spread") is not None and meas["spread"] <= FACING_AGREE_DEG
+        if meas.get("sure") and (side_ok or tight):
+            say("  %s faces %.0f deg by its lights (%s): used as its heading" % (n, fh, meas.get("how")))
+            return fh, "its lights (facing check: %s)" % meas.get("how")
+        say("  %s faces about %.0f deg by its lights (%s): not sure enough to drive by" % (n, fh, meas.get("how")))
+        return None, None
+
+    def log_event(self, kind, **kw):
+        try:
+            with open(os.path.join(self.dir, "facing_events.jsonl"), "a") as f:
+                f.write(json.dumps(dict(kw, kind=kind, t=round(time.time(), 1))) + "\n")
+        except (OSError, TypeError, ValueError):
+            pass
 
     def lighting_check(self, sub, spots):
         """Before anything moves (Nick, 2026-10-28): does each camera see the robots against the board? lighting.py
@@ -2238,6 +2331,8 @@ def main(argv=None):
     ap.add_argument("--side-calib", default="", help="the side camera's floor calibration (setup page); none: the "
                                                       "overhead camera alone")
     ap.add_argument("--no-lights", action="store_true", help="no lights-as-markers fallback (and no steady lights)")
+    ap.add_argument("--no-facing", action="store_true",
+                    help="no facing check in the find step (which way each robot faces, from its lights: facing.py)")
     ap.add_argument("--sim-washout", action="store_true", help="--dry: the simulated board washed out under the lamp "
                                                                "for the overhead camera (11:20), the side camera on")
     ap.add_argument("--sim-no-side", action="store_true", help="--dry: no simulated side camera")

@@ -1983,6 +1983,11 @@ def start_robots(coord, link, args, source):
         if args.calibrate and not args.yes and not args.dry_run and not args.replan_from_camera:
             input("Calibrated. Put every robot on its start spot, then press Enter: ")
             moved = []
+    # ---- the facing check (Nick, 2026-10-29): which way each robot faces, from its lights, before its follow run
+    # (`led` is refused during one) and after any calibration (its roll turns the robot). facing.py
+    if getattr(args, "facing_check", False):
+        import facing as FC
+        FC.run_plan_check(coord, link, args, names)
     # ---- the follow runs; a robot that says "not calibrated" is calibrated now (auto), then started again
     start_follow(coord, link, names)
     bad = [n for n in names if coord.bots[n].calibrated is False]
@@ -2142,6 +2147,14 @@ def main(argv=None):
     ap.add_argument("--place-tol-deg", type=float, default=None,
                     help="a fixed start heading tolerance (deg); default: scaled by the first leg's length and risk "
                          "(engine_checks.start_heading_check)")
+    ap.add_argument("--facing-check", action="store_true",
+                    help="before anything moves, measure which way each robot faces from its lights (both cameras) "
+                         "and stop when one is more than --facing-tol-deg off its start heading (facing.py)")
+    ap.add_argument("--facing-tol-deg", type=float, default=15.0)
+    ap.add_argument("--facing-stream", default="127.0.0.1:8000", help="the overhead camera's pictures")
+    ap.add_argument("--facing-side-stream", default="", help="the side camera's pictures ('' = overhead alone)")
+    ap.add_argument("--facing-calib", default="", help="the overhead camera's calibration")
+    ap.add_argument("--facing-side-calib", default="", help="the side camera's calibration")
     ap.add_argument("--calibrate", action="store_true", help="send calibrate to every robot first")
     ap.add_argument("--recalibrate", choices=("auto", "no"), default="auto",
                     help="auto (default): calibrate a robot that restarted since its calibration today (a new boot ID) "
