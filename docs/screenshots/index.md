@@ -239,3 +239,4 @@ One line per picture: what it shows (feature or problem), and where it comes fro
 
 ## 2026-10-29 (daytime sessions and small fixes: build-reports/e02-oct29-daytime-sessions.md)
 - `2026-10-29/daytime-problem-lighting-22-grey-labelled-washed-out-now-low.png`: **problem** (fixed). The lighting check on a simulated overhead picture, robots 22 grey levels from the board and one of three not found: before, "washed out" (its own rule says washed out is under 18); now "low", with "only 2 of 3 robots found". Report e02-oct29-daytime-sessions (fix 2).
+- `2026-10-29/daytime-feature-chicken-swerve-and-pass-no-turn-pause-61x122.png`: **feature.** Monday's default in the simulator (61 x 122, seed 1) after taking Chicken's jog and pass out of the turn pause: each robot drives off the moment its jog turn and its turn back end (green), while ordinary turns still stand 0.3-0.7 s for the cameras (grey). Report e02-oct29-daytime-sessions (fix 1).

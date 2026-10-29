@@ -107,6 +107,27 @@ def test_no_pause_for_trims_without_the_flag_or_without_a_camera():
     assert c.turn_pause_open(b, 1, RP.now())
 
 
+def test_chicken_swerve_and_pass_are_not_paused():
+    """Nick, 29 Oct: Chicken swerves and keeps going past the other robot (no stand at the jog or the turn back)."""
+    run_in = dict(DRIVE, label="chicken 1 swerve", task=18)
+    jog_turn = dict(TURN, task=19)
+    jog_a = dict(DRIVE, label=None, task=19)                   # a goal cut in two: only its last piece is labelled
+    jog_b = dict(DRIVE, label="chicken 2 sidestep", task=19)
+    back_turn = dict(TURN, task=20)
+    passing = dict(DRIVE, label="chicken 2 pass", task=20)
+    after = dict(TURN, task=22)
+    lane = dict(DRIVE, label="mow lane 1 end", task=22)
+    steps = [run_in, jog_turn, jog_a, jog_b, back_turn, passing, after, lane]
+    c, b = _coord(steps)
+    assert c.turn_before("Left", 2) is None                    # the jog
+    assert c.turn_before("Left", 5) is None                    # the turn back and on past
+    assert c.turn_before("Left", 7) == 6                       # an ordinary drive after a turn still stands
+    b.stat[1].update(status="done", t_done=RP.now())
+    assert c.turn_pause_open(b, 2, RP.now()) and not c.logged  # sent at once, no pause logged
+    # Monday's own plan steps: the pieces of the jog and the pass, by their goal
+    assert c.chicken_keep_going(steps, 2) and not c.chicken_keep_going(steps, 0)
+
+
 def test_mission_control_runs_pass_the_turn_pause(tmp_path):
     import mission_control as MC
     S = MC.Session(str(tmp_path / "mc"))

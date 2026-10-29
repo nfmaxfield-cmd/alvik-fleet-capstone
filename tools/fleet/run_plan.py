@@ -43,6 +43,7 @@ import json
 import math
 import os
 import queue
+import re
 import socket
 import subprocess
 import sys
@@ -1434,7 +1435,22 @@ class Coordinator:
         if j < 0 or steps[j]["type"] != "turn":
             return None
         a = (steps[j]["to"][2] - steps[j]["from"][2] + 180.0) % 360.0 - 180.0
-        return j if abs(a) >= self.TURN_PAUSE_MIN_DEG else None
+        if abs(a) < self.TURN_PAUSE_MIN_DEG:
+            return None
+        if self.chicken_keep_going(steps, i):
+            return None
+        return j
+
+    # Chicken's swerve and pass are not paused (Nick, 2026-10-29): the robot swerves and keeps going past the other.
+    # The goal a step belongs to is its "task"; the planner puts the goal's label on the goal's last step only, so the
+    # drive straight after the jog's turn may carry no label of its own.
+    CHICKEN_KEEP_GOING = re.compile(r"^chicken \d+ (sidestep|pass)$")
+
+    def chicken_keep_going(self, steps, i):
+        """Is step i part of Chicken's jog (sidestep) or its turn back and pass?"""
+        task = steps[i].get("task")
+        same = [s for s in steps if task is not None and s.get("task") == task] or [steps[i]]
+        return any(self.CHICKEN_KEEP_GOING.match(s.get("label") or "") for s in same)
 
     def turn_pause_open(self, b, i, t):
         """May step i (a drive after a turn) be sent? Logs each pause (turn_pause) and adds it to the summary."""
