@@ -1583,7 +1583,12 @@ class Robot(FollowMixin, DockMixin, E02Mixin):
             elif exp == "demo":
                 self.run_demo()
             elif exp == "calib":
-                self.run_calib()
+                if getattr(self, "calib_fail", 0) > 0:      # fleet_sim --calib-fail: this calibration fails
+                    self.calib_fail -= 1
+                    self.wait_ms(1500)
+                    self.fail = "simulated calibration failure"
+                else:
+                    self.run_calib()
             elif exp == "survey":
                 self.run_survey()
             elif exp == "follow":

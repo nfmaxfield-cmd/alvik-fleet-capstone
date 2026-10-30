@@ -166,3 +166,95 @@ def test_dry_monday_robots_put_down_far_off_backwards_and_sideways(tmp_path, tab
         assert int(rej) <= 2, (n, used, rej)
     for n in starts:
         assert "%s: ready at" % n in out
+
+
+# ---------------------------------------------------------------------------- no stops, no sit-outs (Nick 10:08)
+
+def test_a_failed_recheck_is_retried_later_never_out_for_good():
+    c = RP.Coordinator.__new__(RP.Coordinator)
+
+    class A:
+        pass
+    c.args = A()
+    c.logged, c.said = [], []
+    c.log = lambda ev, **k: c.logged.append(ev)
+    c.say = c.said.append
+    b = RP.Bot("Center")
+    b.out, b.out_kind, b.out_entry = "held at the start: calibration failed", "restarted", {"steps": []}
+    for k, want in enumerate((10.0, 20.0, 40.0, 60.0, 60.0)):
+        t = RP.now()
+        c.retry_later(b, "its re-check did not pass")
+        assert b.retry_at - t == pytest.approx(want, abs=0.5)
+        assert c.rejoinable(b)                                    # still to be tried again
+    assert any("checked again in 60 s" in w for w in c.warnings)
+
+
+def test_hold_at_start_warns_and_keeps_the_others():
+    c = RP.Coordinator.__new__(RP.Coordinator)
+    c.log = lambda ev, **k: None
+    sent = []
+
+    class L:
+        def send_name(self, n, t):
+            sent.append((n, t))
+    RP.hold_at_start(c, L(), "Center", "its follow run did not start")
+    RP.hold_at_start(c, L(), "Center", "again")                  # once only
+    assert c.start_aside == {"Center": "its follow run did not start"}
+    assert RP.live_names(c, ["Left", "Center", "Right"]) == ["Left", "Right"]
+    assert sent == [("Center", "stop")] and len(c.warnings) == 1
+
+
+def test_doe_loop_retries_every_set_aside_robot_each_loop():
+    import doe_loop as DL
+    d = DL.DoeLoop.__new__(DL.DoeLoop)
+    d.st = {"kept_out": {"Center": "DOE loop: calibration failed", "Right": "DOE loop: lost"},
+            "passed": {"L1:Right": True}, "doe": {}}
+    ev, l1 = [], []
+    d.event = lambda kind, robot, text, **k: ev.append((kind, robot))
+    d.save = lambda: None
+    d.sub = lambda name: name
+    d.note_calibrated = lambda names: None
+
+    def L1(sub, names):
+        l1.append(list(names))
+        d.st["passed"]["L1:Center"] = True
+    d.L1 = L1
+    d.retry_outs(4)
+    assert d.st["kept_out"] == {} and l1 == [["Center"]]          # Center never passed L1: it runs L1 again
+    assert ("retried", "Center") in ev and ("retried", "Right") in ev
+    assert d.st["doe"]["turn_due"] == {"Center": True, "Right": True}
+
+
+def test_compass_only_calibration_sends_no_spin_and_zero_caps_then_restores():
+    c = RP.Coordinator.__new__(RP.Coordinator)
+    c.log = lambda ev, **k: None
+    b = RP.Bot("Left")
+    b.boot = "AB12"
+    b.last_runend = ("calib", "done")
+    b.calib_look = {"result": "no_room", "spin": "off", "roll": "skipped", "reason": "no room"}
+    c.bots, c.names = {"Left": b}, ["Left"]
+
+    class Day:
+        def note_calibrated(self, n, boot):
+            pass
+
+        def save(self):
+            pass
+    c.day = Day()
+    c.drain = lambda: None
+    sent = []
+
+    class L:
+        def send_name(self, n, t):
+            sent.append(t)
+            if t == "calibrate":
+                b.last_runend = ("calib", "done")
+    RP.time_sleep_saved = RP.time.sleep
+    try:
+        RP.time.sleep = lambda s: None
+        done = RP.calibrate(c, L(), None, ["Left"], None, compass_only=True)
+    finally:
+        RP.time.sleep = RP.time_sleep_saved
+    assert done == ["Left"]
+    assert sent[0] == "set calib_spin_deg 0" and sent[1].startswith("set calib_dir_limits 0 0.0 45 0.0")
+    assert sent[-1] == "set calib_spin_deg 720"

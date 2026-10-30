@@ -213,6 +213,11 @@ class LiveRobot(R.Robot):
             col, ms = (1.0, 1.0, 1.0), 2000.0
         # as the firmware: this colour (dark too: `led 0 0 0` holds both dark) for ms, then back to normal;
         # 2026-10-29a: L / R lights that side alone (the facing check, tools/fleet/facing.py)
+        if col != (0.0, 0.0, 0.0) and getattr(self, "dark_lights", 0) > 0:
+            # --dark-lights NAME:N (2026-10-30): its next N lit `led` commands answer but show nothing (glare, a light
+            # covered: 30 Oct 10:02, Center "0" lit pictures)
+            self.dark_lights -= 1
+            col = (0.0, 0.0, 0.0)
         self.led_until = time.time() + ms / 1000.0
         off = (0.0, 0.0, 0.0)
         self.led_col = (off if side == "R" else col, off if side == "L" else col)
@@ -360,6 +365,20 @@ class FleetSim:
             if self.true_sides:
                 rb.hang_cm = 0.0                     # over an open part of the table's edge: it hangs there
             rb.radio = Radio(self, name, ip, args.laptop)
+            for spec in getattr(args, "dark_lights", None) or []:
+                n_, _, k_ = spec.partition(":")
+                if n_ == name:
+                    rb.dark_lights = int(k_ or 1000000)
+            for spec in getattr(args, "calib_fail", None) or []:
+                n_, _, k_ = spec.partition(":")
+                if n_ == name:
+                    rb.calib_fail = int(k_ or 1)
+            for spec in getattr(args, "silent", None) or []:
+                # --silent NAME@T:DUR: no WiFi either way from T s after the simulator starts, for DUR s
+                n_, _, rest = spec.partition("@")
+                t_, _, d_ = rest.partition(":")
+                if n_ == name:
+                    self.drops.append((name, now + float(t_), now + float(t_) + float(d_ or 30.0)))
             if args.tof_robots:
                 rb.others = (lambda me: (lambda: [self.outline(o) for o in self.robots.values() if o is not me]))(rb)
             self.robots[name] = rb
@@ -885,6 +904,12 @@ def main(argv=None):
     ap.add_argument("--fix-delay", type=float, default=0.1, help="camera latency, s")
     ap.add_argument("--start-noise", type=float, default=0.5, help="placement error on the start spots, cm (x3 for deg)")
     ap.add_argument("--uncalibrated", action="store_true", help="robots need a calibrate first")
+    ap.add_argument("--dark-lights", action="append", default=[], metavar="NAME[:N]",
+                    help="that robot's next N lit `led` commands show nothing (default: all)")
+    ap.add_argument("--calib-fail", action="append", default=[], metavar="NAME[:N]",
+                    help="that robot's first N calibration runs fail (default 1)")
+    ap.add_argument("--silent", action="append", default=[], metavar="NAME@T:DUR",
+                    help="no WiFi to or from that robot from T s after the simulator starts, for DUR s")
     ap.add_argument("--tof-robots", type=int, default=1, help="1: the front sensor sees the other robots")
     ap.add_argument("--brick-camera", action="store_true",
                     help="the brick is seen by the simulated overhead camera through the brick watch (a hand puts it "

@@ -475,6 +475,17 @@ class Eye:
                 if f and all(math.hypot(f["x"] - o[0], f["y"] - o[1]) > 12.0 for o in others):
                     if self.facing_on:
                         self.measure_facing(bench, name, before, before_s, (f["x"], f["y"]))
+                        for k in range(2):
+                            # its left / right light not read (30 Oct 10:02, Center: "too few pictures (19 dark, 0,
+                            # 12)"): measured again with fresh dark pictures, before anything gives up on it
+                            m_ = self.facing.get(name) or {}
+                            if m_.get("heading") is not None or m_.get("axis") is not None:
+                                break
+                            say("  %s: its lights were not read (%s): measured again" % (name, m_.get("how")))
+                            bench.send(name, "led 0 0 0 3000")
+                            time.sleep(0.4 + 0.3 * k)
+                            before, before_s = self.collect2(0.8)
+                            self.measure_facing(bench, name, before, before_s, (f["x"], f["y"]))
                     else:
                         time.sleep(1.3)
                     return f["x"], f["y"]

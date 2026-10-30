@@ -493,6 +493,10 @@ def _pick_segment(rect, p, length, parked, clear, parked_clear, a_extra):
 
 
 # ---------------------------------------------------------------------------------------------- the loop
+RETRY_ALL_WAIT_S = 20.0   # every robot held, or none with room: the loop waits this long, then tries them all again.
+                          # Chosen; no DOE (a patience)
+
+
 class DoeLoop(LD.Ladder):
     def __init__(self, a):
         if not a.dir:
@@ -542,6 +546,35 @@ class DoeLoop(LD.Ladder):
                                 text=text))
         if clip and self.frames is not None:
             self.frames.event("other", "%s: %s" % (kind, text), robot=robot)
+
+    def retry_outs(self, k):
+        """Nick (2026-10-30 10:08): no robot is ever permanently OUT. Every robot set aside (parked, kept out) is tried
+        again at the start of every loop: back in the active list, through the loop's checks (answering, battery,
+        restart -> calibration), the find step (its lights, wherever it is) and the room check (moved to open space);
+        one that never passed L1 (its calibration) runs L1 again first."""
+        outs = dict(self.st.get("kept_out") or {})
+        if not outs:
+            return
+        rec = self.st["doe"].setdefault("retried", {})
+        for n, why in outs.items():
+            rec[n] = rec.get(n, 0) + 1
+            self.st["kept_out"].pop(n, None)
+            self.st["doe"].setdefault("turn_due", {})[n] = True
+            self.event("retried", n, "was set aside (%s): tried again at loop %d (time %d)" % (why, k, rec[n]))
+        self.save()
+        need_l1 = [n for n in outs if not self.st["passed"].get("L1:%s" % n)]
+        if need_l1:
+            try:
+                sub = self.sub("retry-L1-%03d" % k)
+                self.L1(sub, need_l1)
+                self.note_calibrated([n for n in need_l1 if self.st["passed"].get("L1:%s" % n)])
+            except LadderStop as e:
+                for n in need_l1:
+                    if not self.st["passed"].get("L1:%s" % n):
+                        self.st["kept_out"][n] = "L1 again: %s" % e
+                self.save()
+            except Exception as e:      # noqa: BLE001  (a retry never ends the loop)
+                self.event("warning", "-", "retrying L1 for %s: %s" % (", ".join(need_l1), e))
 
     def park(self, n, why, safety=False):
         """Out of the loop for good: it stays where it is (stopped), on every later map as an obstacle.
@@ -1145,10 +1178,19 @@ class DoeLoop(LD.Ladder):
         k = self.st["doe"]["loops"]
         idle_rounds = 0
         while time.time() < t_end:
+            self.retry_outs(k)
             act = self.active("L1")
             if not act:
-                say("\nEvery robot is out: the DOE loop ends.")
-                break
+                # every robot held this loop (none passed its checks): not the end (Nick 30 Oct 10:08); they are all
+                # tried again next loop, after a short wait
+                say("\nWARNING: no robot passed its checks this loop: every one is tried again in %.0f s."
+                    % RETRY_ALL_WAIT_S)
+                self.event("warning", "-", "no robot passed its checks; all tried again")
+                time.sleep(RETRY_ALL_WAIT_S)
+                k += 1
+                self.st["doe"]["loops"] = k
+                self.save()
+                continue
             if self.space_check(k):
                 break
             sub = self.sub("loop%03d" % k)
@@ -1206,8 +1248,11 @@ class DoeLoop(LD.Ladder):
             self.st["doe"]["loops"] = k
             self.save()
             if idle_rounds >= 2 * max(1, len(act)):
-                say("\nNo robot has room for a drive (every one skipped twice): the DOE loop ends.")
-                break
+                say("\nWARNING: no robot has had room for a drive (every one skipped twice): the loop carries on; each "
+                    "is moved to open space again at its next turn.")
+                self.event("warning", "-", "no robot had room for a drive twice in a row")
+                idle_rounds = 0
+                time.sleep(RETRY_ALL_WAIT_S)
         else:
             say("\nThe time cap (%.1f h) is reached: the DOE loop ends." % self.a.hours)
         return True

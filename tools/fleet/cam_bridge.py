@@ -89,6 +89,7 @@ SEED_SCALE = 1.4        # a robot found by its lights (run_plan's seed): its flo
 SEED_SAME_CM = 1.0      # a seed this near the last one (and its heading within 5 deg) is the same seed sent again
 SEED_CLEAR_CM = 14.0    # the spot the bridge had the robot on is re-learned from the newest picture only when no robot
                         # (seeded or other) is within this (a body and a half). No DOE: a guard
+BIND_TRIES = 15         # the pose port busy: tried once a second this many times. No DOE: a patience
 STILL_S = 1.0           # --observe: a robot still this long gets its outline heading printed (the turn check)
 
 
@@ -676,10 +677,17 @@ def main(argv=None):
         except OSError:
             pass
     rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        rx.bind(("127.0.0.1", args.pose_port))
-    except OSError as e:
-        raise SystemExit("Port %d is in use (another camera bridge still running?): %s" % (args.pose_port, e))
+    for k in range(BIND_TRIES):
+        try:
+            rx.bind(("127.0.0.1", args.pose_port))
+            break
+        except OSError as e:
+            # an earlier bridge still closing (Mission Control's run right after another): wait for it, then give up
+            if k == BIND_TRIES - 1:
+                raise SystemExit("Port %d is in use (another camera bridge still running?): %s" % (args.pose_port, e))
+            print("WARNING: port %d is in use (an earlier camera bridge still closing?): trying again in 1 s"
+                  % args.pose_port, flush=True)
+            time.sleep(1.0)
     rx.setblocking(False)
     br = Bridge(args, cam, rect, starts, send, out)
     br.event("start", calib=args.calib, map=args.map, starts=starts, observe=args.observe, brick_watch=args.brick_watch)

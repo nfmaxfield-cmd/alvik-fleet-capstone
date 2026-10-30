@@ -68,6 +68,7 @@ IDLE_MIN = 0.25         # old firmware: the idle light's spot must be at least t
                         # (28 Oct: 0.56 overhead, 0.75 side for a real one; under 0.1 for noise). DOE note: from the
                         # find steps of a session on old firmware, real idle lights against robots selected `follow`
 LED_Z_CM = 3.7          # the lights' height = the robot's top (e02_camera.ROBOT_TOP_CM)
+MEASURE_RETRIES = 2     # a robot whose lights were not read is measured again this many times. No DOE: retries
 REPEAT_DARK_MS = 15000  # every robot's lights held dark this long while the others are measured (renewed per robot)
 
 
@@ -349,6 +350,15 @@ def check(names, send, acked, grab, cams, assumed=None, near=None, firmware=None
 
     for n in dark_ok:
         meas = measure(n)
+        for k in range(MEASURE_RETRIES):
+            # its lights not seen (too few pictures in the window: 30 Oct 10:02, Center "0" lit pictures; or a lost
+            # `led`): measured again, a little longer each time, before anything gives up (Nick 10:08: no stops)
+            if meas is not None and (meas.get("heading") is not None or meas.get("axis") is not None):
+                break
+            say("  %s: its lights were not read (%s): measuring it again (%d of %d)" % (
+                n, (meas or {}).get("how", "no answer to `led`"), k + 1, MEASURE_RETRIES))
+            time.sleep(0.3 * (k + 1))
+            meas = measure(n)
         if meas is not None and meas.get("heading") is not None and not meas.get("sure"):
             again = measure(n)                            # the cameras disagreed: once more
             if again is not None and again.get("sure"):
@@ -482,18 +492,20 @@ def run_plan_check(coord, link, args, names, say=print, straighten=False, tag="f
                     a = float(meas["axis"])
                     h = a if abs(wrap180(a - assumed[n])) <= 90 else wrap180(a + 180.0)
                     say("  %s: its lights' line is at %.0f deg, but front and back could not be told apart (%s): taken "
-                        "as %.0f deg, the end nearer its start heading. Check by eye that its front (the distance "
-                        "sensor) faces %s." % (n, a, meas.get("how"), h, targets[n]))
+                        "as %.0f deg, the end nearer its start heading, checked by a short watched crawl"
+                        % (n, a, meas.get("how"), h))
+                    res.setdefault("unsure", []).append(n)
                 elif h is None:
-                    say("  %s: could not tell which way it faces (%s). Is it on the board with its lights on top? "
-                        "Nothing moved." % (n, meas.get("how")))
-                    ok = False
+                    say("  WARNING: %s: which way it faces is not known from its lights (%s): it is found by a short "
+                        "watched crawl instead" % (n, meas.get("how")))
+                    res.setdefault("unknown", []).append(n)
                     continue
                 elif not meas.get("sure"):
-                    say("  %s: the two cameras disagree on which way it faces, twice (%s). Nothing moved: look at it, "
-                        "then start again." % (n, meas.get("how")))
-                    ok = False
-                    continue
+                    # the cameras disagree twice: the weighted heading (the side camera counts more) is kept for now
+                    # and confirmed by a short watched crawl before anything else moves it
+                    say("  WARNING: %s: the two cameras disagree on which way it faces, twice (%s): taken as %.0f deg "
+                        "for now, checked by a short watched crawl" % (n, meas.get("how"), h))
+                    res.setdefault("unsure", []).append(n)
                 res["headings"][n] = float(h)
                 off = wrap180(float(h) - assumed[n])
                 say("  %s faces %.0f deg (%s): %.0f deg off its start heading%s" % (

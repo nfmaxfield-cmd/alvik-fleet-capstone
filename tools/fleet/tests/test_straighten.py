@@ -58,9 +58,27 @@ def test_facing_an_edge_under_12_cm_turns_first_never_backs():
     assert all(not s.get("reverse") for s in r["steps"])
 
 
-def test_too_near_an_edge_to_spin_stops_with_words():
-    with pytest.raises(ST.Refuse, match="cannot turn"):
-        ST.plan_one("Left", (17, 6.0, 90), (17, 17, 90), RECT)
+def test_too_near_an_edge_to_spin_drives_away_first_then_corrects():
+    # Nick 30 Oct 10:08 (no stops): facing away from the edge it drives straight off it first; facing the edge it backs
+    # straight off it; standing along the edge (no straight way off it) is still refused, with words
+    r = ST.plan_one("Left", (17, 6.0, 90), (17, 17, 90), RECT)
+    assert r["steps"][0]["why"] == "away from the edge" and not r["steps"][0]["reverse"]
+    assert r["steps"][0]["to"][1] >= ST.SPIN_EDGE_CM + ST.ESCAPE_EXTRA_CM - 0.01
+    r = ST.plan_one("Left", (17, 6.0, -90), (17, 17, 90), RECT)
+    assert r["steps"][0]["reverse"] and r["steps"][0]["to"][1] >= ST.SPIN_EDGE_CM
+    assert all(s["type"] != "turn" or s["from"][1] >= ST.SPIN_EDGE_CM for s in r["steps"])   # every turn with room
+    r = ST.plan_one("Left", (17, 6.0, 0), (17, 17, 90), RECT)      # along the edge: a gentle arc off it first
+    assert r["steps"][0]["type"] == "arc" and ST.edge_dist(RECT, *r["steps"][0]["to"][:2]) >= ST.SPIN_EDGE_CM
+    r = ST.plan_one("Left", (18.3, 5.2, 179), (17, 17, 90), RECT)   # facing the near corner: backs along it, then arcs
+    assert [s["type"] for s in r["steps"][:2]] == ["drive", "arc"] and r["steps"][0]["reverse"]
+
+
+def test_robots_on_each_others_way_one_moves_aside_first():
+    p = ST.plan_all({"Left": (40, 17, 90), "Right": (25, 17, 90)}, {"Left": (17, 17, 90), "Right": (45, 17, 90)}, RECT)
+    m1 = [n for n, r in p["robots"].items() if r.get("detour")][0]
+    m2 = "Right" if m1 == "Left" else "Left"
+    assert isinstance(p["after"][m2], tuple) and p["robots"][m1]["waits"]
+    assert any("moves aside" in w for w in p["words"])
 
 
 def test_two_robots_whose_ways_cross_go_one_after_the_other():

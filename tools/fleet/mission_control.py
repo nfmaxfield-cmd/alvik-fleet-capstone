@@ -508,6 +508,8 @@ class Session:
                 cmd += ["--drop-pct", str(rs["sim_drop_pct"])]
             if rs.get("sim_dead"):
                 cmd += ["--dead", str(rs["sim_dead"])]
+            for a in rs.get("sim_args") or []:      # the simulator's own faults (tests: robots put down anywhere, ...)
+                cmd += ["--sim-arg=%s" % a]
         else:
             if rs.get("farm"):
                 cmd += ["--farm"]

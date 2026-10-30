@@ -113,11 +113,46 @@ def plan_one(name, pose, start, rect, side_only=False):
         return out
     out["need"] = True
     room = edge_dist(rect, x, y)
-    if room < SPIN_EDGE_CM:
-        raise Refuse("%s is %.1f cm from the edge (its middle; a turn on the spot needs %.0f cm): it cannot turn "
-                     "where it is. Nothing moved. Move it in by hand onto its start spot and start again."
-                     % (name, room, SPIN_EDGE_CM))
     pose_now = [x, y, h]
+    esc = None
+    if room < SPIN_EDGE_CM:
+        # too near an edge to turn on the spot (Nick 30 Oct 10:08: no stops): first a short straight drive away from
+        # the nearest edge, forwards when its front points away from it, backwards when its back does (a back-up of
+        # a few cm straight away from an edge the camera has just placed it at); then the usual correction
+        esc = edge_escape(rect, x, y, h)
+        arc = arc_escape_backing(rect, x, y, h) if esc is None else None
+        if arc is not None:
+            sts, (ex, ey, eh), words = arc
+            out["steps"] += sts
+            out["words"].append("%s is %.1f cm from the edge and stands along it (a turn on the spot needs %.0f cm): it "
+                                "first %s" % (name, room, SPIN_EDGE_CM, words))
+            pose_now[0], pose_now[1], pose_now[2] = ex, ey, eh
+            x, y, h = ex, ey, eh
+            off_cm = math.hypot(sx - x, sy - y)
+            off_deg = wrap180(h - sh)
+            drive = off_cm > tol
+            turn_only = not drive and abs(off_deg) > TURN_DEG
+            ahead = ahead_to_edge(rect, x, y, h) - BODY_HALF_CM
+            out["escape"] = [round(ex, 2), round(ey, 2)]
+        elif esc is None:
+            raise Refuse("%s is %.1f cm from the edge (its middle; a turn on the spot needs %.0f cm) and stands along "
+                         "it, so no straight drive takes it away: it cannot turn where it is"
+                         % (name, room, SPIN_EDGE_CM))
+    if room < SPIN_EDGE_CM and esc is not None:
+        d, rev, (ex, ey) = esc
+        out["steps"].append({"type": "drive", "from": [round(x, 2), round(y, 2), round(h, 2)],
+                             "to": [round(ex, 2), round(ey, 2), round(h, 2)], "speed": DRIVE_CMS, "reverse": rev,
+                             "front_min_cm": None, "phase": "straighten", "why": "away from the edge"})
+        out["words"].append("%s is %.1f cm from the edge (a turn on the spot needs %.0f cm): it first %s %.1f cm "
+                            "straight away from it" % (name, room, SPIN_EDGE_CM, "backs" if rev else "drives", d))
+        pose_now[0], pose_now[1] = ex, ey
+        x, y = ex, ey
+        off_cm = math.hypot(sx - x, sy - y)
+        drive = off_cm > tol
+        ahead = ahead_to_edge(rect, x, y, h) - BODY_HALF_CM
+        out["escape"] = [round(ex, 2), round(ey, 2)]
+    if room < SPIN_EDGE_CM and not drive:
+        out["words"].append("%s: then turns to its start heading" % name)
 
     def turn_to(hh, why):
         if abs(wrap180(hh - pose_now[2])) <= TURN_DEG:
@@ -152,6 +187,167 @@ def plan_one(name, pose, start, rect, side_only=False):
         out["words"].append("%s was %.0f deg off%s: it turns on the spot to face %s"
                             % (name, abs(off_deg), " (backwards)" if abs(off_deg) > 135 else "", side_words(rect, sh)))
     return out
+
+
+ESCAPE_EXTRA_CM = 2.0    # an edge escape ends this far past SPIN_EDGE_CM from the edge (camera error). No DOE: a guard
+ESCAPE_COS = 0.35       # its front (or back) must point at least this much away from the nearest edge (cos of the
+                        # angle to the inward normal; 0.35 = within 70 deg) for a straight drive to gain room. No DOE
+
+
+def edge_escape(rect, x, y, h):
+    """A straight drive (cm, reverse?, end point) that takes a robot standing under SPIN_EDGE_CM from an edge to
+    SPIN_EDGE_CM + ESCAPE_EXTRA_CM from every edge, along its heading; None when it stands along the edge."""
+    x0, y0, x1, y1 = rect
+    want = SPIN_EDGE_CM + ESCAPE_EXTRA_CM
+    c, s_ = math.cos(math.radians(h)), math.sin(math.radians(h))
+    best = None
+    for sign in (1.0, -1.0):
+        dx, dy = sign * c, sign * s_
+        need = 0.0
+        ok = True
+        for d0, comp in ((x - x0, dx), (x1 - x, -dx), (y - y0, dy), (y1 - y, -dy)):
+            if d0 < want:
+                if comp < ESCAPE_COS:
+                    ok = False
+                    break
+                need = max(need, (want - d0) / comp)
+        if not ok:
+            continue
+        ex, ey = x + dx * need, y + dy * need
+        if edge_dist(rect, ex, ey) < want - 0.01:
+            continue
+        cand = (round(need, 2), sign < 0, (ex, ey))
+        if best is None or (cand[1] is False and best[1] is True):    # forwards preferred (the edge guard sees ahead)
+            best = cand
+    return best
+
+
+ARC_R_CM = (30.0, 20.0)    # the arc off an edge a robot stands along: radius tried first, then the tighter one. Chosen:
+                           # the outer rear corner dips (r + 4.75) - sqrt(4.75^2 + (r + 4.75)^2) toward the edge, 0.3 cm
+                           # at 30, 0.5 at 20 (a spin on the spot: 2 cm). DOE: worth one on the board (20 / 30 / 40 cm
+                           # against the end spot's error) only if robots are often parked along an edge
+ARC_CMS = 5.0
+
+
+def arc_escape(rect, x, y, h):
+    """A forward arc that takes a robot standing along an edge (under SPIN_EDGE_CM from it, a straight drive gaining
+    nothing) SPIN_EDGE_CM + ESCAPE_EXTRA_CM in from every edge: (step, end pose, words) or None."""
+    x0, y0, x1, y1 = rect
+    want = SPIN_EDGE_CM + ESCAPE_EXTRA_CM
+    cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+    lx, ly = -math.sin(math.radians(h)), math.cos(math.radians(h))      # its left
+    floor_ok = min(BODY_HALF_CM + 0.3, edge_dist(rect, x, y) - 0.05)       # its wheels stay on the board
+    side = 1.0 if (cx - x) * lx + (cy - y) * ly >= 0 else -1.0           # arc towards the middle of the board
+    for r in ARC_R_CM:
+        c = (x + side * r * lx, y + side * r * ly)
+        a0 = h - 90.0 * side
+        for th in range(10, 91, 2):
+            sweep = side * th
+            ok = True
+            for k in range(0, th + 1, 2):
+                a = math.radians(a0 + side * k)
+                px, py = c[0] + r * math.cos(a), c[1] + r * math.sin(a)
+                if edge_dist(rect, px, py) < floor_ok:
+                    ok = False
+                    break
+            if not ok:
+                break
+            a = math.radians(a0 + sweep)
+            ex, ey = c[0] + r * math.cos(a), c[1] + r * math.sin(a)
+            if edge_dist(rect, ex, ey) >= want:
+                eh = wrap180(h + sweep)
+                st = {"type": "arc", "arc": {"c": [round(c[0], 2), round(c[1], 2)], "r": r, "a0_deg": round(a0, 2),
+                                             "sweep_deg": round(sweep, 1)},
+                      "from": [round(x, 2), round(y, 2), round(h, 2)], "to": [round(ex, 2), round(ey, 2), round(eh, 2)],
+                      "speed": ARC_CMS, "front_min_cm": None, "phase": "straighten", "why": "arc off the edge"}
+                return st, (ex, ey, eh), "arcs %d deg %s (radius %.0f cm) off it" % (
+                    th, "left" if side > 0 else "right", r)
+    return None
+
+
+def arc_escape_backing(rect, x, y, h):
+    """arc_escape, after backing straight along the edge first (0, 10 or 20 cm) when it faces a corner: [steps], end
+    pose, words; or None."""
+    for back in (0.0, 10.0, 20.0):
+        bx, by = x - back * math.cos(math.radians(h)), y - back * math.sin(math.radians(h))
+        if back and edge_dist(rect, bx, by) < BODY_HALF_CM + 0.1:      # its wheels stay on the board
+            break
+        got = arc_escape(rect, bx, by, h)
+        if got is None:
+            continue
+        st, end, words = got
+        steps = [st]
+        if back:
+            steps.insert(0, {"type": "drive", "from": [round(x, 2), round(y, 2), round(h, 2)],
+                             "to": [round(bx, 2), round(by, 2), round(h, 2)], "speed": DRIVE_CMS, "reverse": True,
+                             "front_min_cm": None, "phase": "straighten", "why": "back along the edge"})
+            words = "backs %.0f cm along it, then %s" % (back, words)
+        return steps, end, words
+    return None
+
+
+def via_points(rect, a_from, a_to, b_at, others_clear, step=6.0):
+    """A point v such that a drive a_from -> v -> a_to stays the 8 cm net clear of b_at (b standing) and both legs pass
+    others_clear(seg) (a function). The nearest such detour first; None if none on a 6 cm grid."""
+    x0, y0, x1, y1 = rect
+    gap = 2 * BODY_HALF_CM + NET_CM
+    m = SPIN_EDGE_CM + ESCAPE_EXTRA_CM
+    cands = []
+    xs = [x0 + m + k * step for k in range(int((x1 - x0 - 2 * m) / step) + 1)]
+    ys = [y0 + m + k * step for k in range(int((y1 - y0 - 2 * m) / step) + 1)]
+    for vx in xs:
+        for vy in ys:
+            v = (vx, vy)
+            if not away_clear(a_from, v, b_at, gap) or seg_point_dist(v, a_to, b_at) < gap:
+                continue
+            if not others_clear((a_from, v)) or not others_clear((v, a_to)):
+                continue
+            cands.append((math.dist(a_from, v) + math.dist(v, a_to), v))
+    return min(cands)[1] if cands else None
+
+
+def away_clear(a_from, v, b, gap):
+    """A drive a_from -> v keeps gap from b standing; a robot that already stands within gap of b passes when it only
+    moves away from b (its distance grows all along a straight drive that starts moving away) and ends gap clear."""
+    if math.dist(a_from, b) >= gap:
+        return seg_point_dist(a_from, v, b) >= gap
+    return ((v[0] - a_from[0]) * (a_from[0] - b[0]) + (v[1] - a_from[1]) * (a_from[1] - b[1]) >= 0 and
+            math.dist(v, b) >= gap)
+
+
+def park_points(rect, step=6.0):
+    m = SPIN_EDGE_CM + ESCAPE_EXTRA_CM
+    x0, y0, x1, y1 = rect
+    return [(x0 + m + i * step, y0 + m + j * step) for i in range(int((x1 - x0 - 2 * m) / step) + 1)
+            for j in range(int((y1 - y0 - 2 * m) / step) + 1)]
+
+
+def go_steps(pose, to_xy, final_h, why):
+    """From pose (x, y, h): turn to face to_xy, drive there forwards, and turn to final_h (None: no last turn)."""
+    x, y, h = pose
+    bx, by = to_xy
+    steps = []
+    hd = math.degrees(math.atan2(by - y, bx - x)) if math.hypot(bx - x, by - y) > 0.5 else h
+    if abs(wrap180(hd - h)) > TURN_DEG:
+        steps.append({"type": "turn", "from": [round(x, 2), round(y, 2), round(h, 2)],
+                      "to": [round(x, 2), round(y, 2), round(hd, 2)], "front_min_cm": None, "phase": "straighten",
+                      "why": "face its way " + why})
+    if math.hypot(bx - x, by - y) > 0.5:
+        steps.append({"type": "drive", "from": [round(x, 2), round(y, 2), round(hd, 2)],
+                      "to": [round(bx, 2), round(by, 2), round(hd, 2)], "speed": DRIVE_CMS, "reverse": False,
+                      "front_min_cm": None, "phase": "straighten", "why": why})
+    if final_h is not None and abs(wrap180(final_h - hd)) > TURN_DEG:
+        steps.append({"type": "turn", "from": [round(bx, 2), round(by, 2), round(hd, 2)],
+                      "to": [round(bx, 2), round(by, 2), round(final_h, 2)], "front_min_cm": None,
+                      "phase": "straighten", "why": "its start heading"})
+    return steps, hd
+
+
+def detour_steps(name, start_pose, via, start):
+    """turn, drive to via, turn, drive to the start spot, turn to the start heading (all forwards)."""
+    a, hd = go_steps(start_pose, via, None, "round the other robot")
+    b, _ = go_steps((via[0], via[1], hd), start[:2], start[2], "to its start spot")
+    return a + b
 
 
 def done_words(name, r, rect, start_h):
@@ -212,15 +408,71 @@ def plan_all(poses, starts, rect, side_only=None):
                 elif clear(b, a, pb, pos_a) and clear(a, b, pa, st_b):
                     after[a] = b
                 else:
-                    raise Refuse("%s and %s are too near each other to drive to their start spots safely (the 8 cm "
-                                 "net). Nothing moved. Put them on their start spots by hand and start again." % (a, b))
+                    # a detour for one of them (Nick 30 Oct: no stops): a goes round b (standing) by a via point, then
+                    # b drives straight once a is on its spot; else the other way round
+                    done = False
+                    for m1, m2 in ((a, b), (b, a)):
+                        if res[m1].get("escape"):
+                            continue
+                        v = via_points(rect, tuple(poses[m1][:2]), tuple(starts[m1][:2]), tuple(poses[m2][:2]),
+                                       lambda seg: True)
+                        if v is None or not clear(m2, m1, res[m2]["path"], tuple(starts[m1][:2])):
+                            continue
+                        res[m1]["steps"] = detour_steps(m1, poses[m1], v, starts[m1])
+                        res[m1]["path"] = (tuple(poses[m1][:2]), tuple(starts[m1][:2]))
+                        res[m1]["detour"] = [round(v[0], 1), round(v[1], 1)]
+                        words.append("%s and %s would pass within the 8 cm net: %s goes round by (%.0f, %.0f) first, "
+                                     "then %s" % (a, b, m1, v[0], v[1], m2))
+                        after[m2] = m1
+                        done = True
+                        break
+                    for m1, m2 in (() if done else ((a, b), (b, a))):
+                        # both start spots taken by the other: m1 parks out of the way first, m2 goes to its spot, then
+                        # m1 goes from its parking spot (three moves, each waiting for the one before)
+                        if res[m1].get("escape") or res[m2].get("escape"):
+                            continue
+                        pm1, pm2 = tuple(poses[m1][:2]), tuple(poses[m2][:2])
+                        sm1, sm2 = tuple(starts[m1][:2]), tuple(starts[m2][:2])
+                        best = None
+                        for v in park_points(rect):
+                            if not away_clear(pm1, v, pm2, gap) or seg_point_dist(pm2, sm2, v) < gap or \
+                                    seg_point_dist(v, sm1, sm2) < gap:
+                                continue
+                            c = math.dist(pm1, v) + math.dist(v, sm1)
+                            if best is None or c < best[0]:
+                                best = (c, v)
+                        if best is None:
+                            continue
+                        v = best[1]
+                        first, hv = go_steps(poses[m1], v, None, "out of %s's way" % m2)
+                        rest, _ = go_steps((v[0], v[1], hv), sm1, starts[m1][2], "to its start spot")
+                        res[m1]["steps"] = first + rest
+                        res[m1]["path"] = (pm1, sm1)
+                        res[m1]["detour"] = [round(v[0], 1), round(v[1], 1)]
+                        res[m1]["waits"] = [(len(first), m2, len(res[m2]["steps"]) - 1)]
+                        after[m2] = (m1, len(first) - 1)
+                        words.append("%s and %s stand on each other's way: %s first moves aside to (%.0f, %.0f), %s "
+                                     "goes to its spot, then %s goes to its own" % (a, b, m1, v[0], v[1], m2, m1))
+                        done = True
+                        break
+                    if not done:
+                        raise Refuse("%s and %s are too near each other to drive to their start spots safely (the 8 "
+                                     "cm net), and no detour was found" % (a, b))
                 continue
             mover, stander = (a, b) if pa is not None else (b, a)
             if not clear(mover, stander, res[mover]["path"], tuple(poses[stander][:2])):
-                raise Refuse("%s's way to its start spot passes within the 8 cm net of %s. Nothing moved. Put %s on its "
-                             "start spot by hand and start again." % (mover, stander, mover))
+                v = None if res[mover].get("escape") else via_points(
+                    rect, tuple(poses[mover][:2]), tuple(starts[mover][:2]), tuple(poses[stander][:2]),
+                    lambda seg: True)
+                if v is None:
+                    raise Refuse("%s's way to its start spot passes within the 8 cm net of %s, and no detour was found"
+                                 % (mover, stander))
+                res[mover]["steps"] = detour_steps(mover, poses[mover], v, starts[mover])
+                res[mover]["detour"] = [round(v[0], 1), round(v[1], 1)]
+                words.append("%s's way to its start spot passes within the 8 cm net of %s: it goes round by (%.0f, "
+                             "%.0f)" % (mover, stander, v[0], v[1]))
     for b, a in after.items():
-        if res[b]["steps"]:
+        if res[b]["steps"] and not isinstance(a, tuple):
             words.append("%s waits until %s has reached its spot (their ways would come within the 8 cm net)" % (b, a))
     return dict(robots=res, after=after, words=words)
 
@@ -260,21 +512,20 @@ def _selftest():
     r = plan_one("Left", (17, 9, -90), (17, 17, 90), rect)
     assert r["steps"][0]["type"] == "turn" and "no backing" in " ".join(r["words"]), r
     assert all(not s.get("reverse") for s in r["steps"])
-    # under 7 cm from an edge: refuse
-    try:
-        plan_one("Left", (17, 5, 90), (17, 17, 90), rect)
-        raise AssertionError("no refuse")
-    except Refuse:
-        pass
+    # under 7 cm from an edge facing in: drives away from it first; along the edge: refuse
+    r = plan_one("Left", (17, 5, 90), (17, 17, 90), rect)
+    assert r["steps"][0]["why"] == "away from the edge" and not r["steps"][0]["reverse"], r
+    r = plan_one("Left", (17, 5, -90), (17, 17, 90), rect)
+    assert r["steps"][0]["why"] == "away from the edge" and r["steps"][0]["reverse"], r
+    r = plan_one("Left", (17, 5, 0), (17, 17, 90), rect)        # along the edge: an arc off it first
+    assert r["steps"][0]["type"] == "arc" and r["steps"][0]["arc"]["sweep_deg"] > 0, r
+    assert edge_dist(rect, *r["steps"][0]["to"][:2]) >= SPIN_EDGE_CM
     # two robots: ways crossing within the net -> one after the other
     p = plan_all({"Left": (50, 30, 90), "Right": (30, 45, 0)}, {"Left": (17, 17, 90), "Right": (80, 45, 90)}, rect)
     assert p["after"] == {"Right": "Left"}, p
-    # swapping along one line: no safe order -> refuse
-    try:
-        plan_all({"Left": (40, 17, 90), "Right": (25, 17, 90)}, {"Left": (17, 17, 90), "Right": (45, 17, 90)}, rect)
-        raise AssertionError("no refuse")
-    except Refuse:
-        pass
+    # swapping along one line: one goes round the other by a detour
+    p = plan_all({"Left": (40, 17, 90), "Right": (25, 17, 90)}, {"Left": (17, 17, 90), "Right": (45, 17, 90)}, rect)
+    assert any(r.get("detour") for r in p["robots"].values()) and p["after"], p
     assert abs(ahead_to_edge(rect, 17, 17, 90) - 44) < 1e-9
     print("straighten selftest: ok")
 
