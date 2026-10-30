@@ -192,10 +192,19 @@ class SideCamera:
             self._poly(img, [(a, b, h) for a, b in corners], 222.0)
             for k, lat in enumerate((1.0, -1.0)):
                 led = r[3 + k] if len(r) >= 5 else (0, 0, 0)
-                lx, ly = x + c * (half - 2.0) - s * lat * 2.6, y + s * (half - 2.0) + c * lat * 2.6
+                # 2.55 cm either side: the same spot the overhead's renderer draws them (camera.py: shell_w / 2 - 1.3),
+                # so both simulated cameras see one light at one place (corners-only setup, 2026-10-29; was 2.6)
+                lx, ly = x + c * (half - 2.0) - s * lat * 2.55, y + s * (half - 2.0) + c * lat * 2.55
                 u, v = self.project((lx, ly, h))
                 lvl = float(np.max(led))
-                cv2.circle(img, (int(round(u)), int(round(v))), 2, 70.0 + 185.0 * lvl, -1, cv2.LINE_AA)
+                # a 2 px disc blended at its sub-pixel spot (corners-only setup, 2026-10-29): drawn at whole pixels
+                # (cv2.circle does not anti-alias a float picture) two lights 13 px apart read up to 5 % off
+                x0i, y0i = int(math.floor(u)) - 4, int(math.floor(v)) - 4
+                yy, xx = np.mgrid[y0i:y0i + 9, x0i:x0i + 9]
+                cover = np.clip(2.5 - np.hypot(xx + 0.5 - u - 0.5, yy + 0.5 - v - 0.5), 0.0, 1.0).astype(np.float32)
+                ys, xs = slice(max(0, y0i), max(0, min(self.H, y0i + 9))), slice(max(0, x0i), max(0, min(self.W, x0i + 9)))
+                cv = cover[ys.start - y0i:ys.stop - y0i, xs.start - x0i:xs.stop - x0i]
+                img[ys, xs] = img[ys, xs] * (1 - cv) + (70.0 + 185.0 * lvl) * cv
         img += self.rng.normal(0, self.noise_sd, img.shape).astype(np.float32)
         return np.clip(img, 0, 255).astype(np.uint8)
 

@@ -42,6 +42,7 @@ import planner as P       # noqa: E402
 import missions as MS     # noqa: E402
 import warmup as WU       # noqa: E402
 import workspace as WS    # noqa: E402
+import setup_job as SJ    # noqa: E402
 
 PAGE = os.path.join(HERE, "mission_control.html")
 PORT = 8095
@@ -233,6 +234,7 @@ class Session:
         self.warm_result = None
         self.run = None
         self.last_runs = {}          # kind -> folder
+        self.corner = SJ.CornerSetup(self)   # the corners-only setup (2026-10-29): Setup screen, tools/fleet/setup_job.py
 
     # -- files -------------------------------------------------------------
     def save_map(self):
@@ -275,7 +277,8 @@ class Session:
                "mission": (self.mission or {}).get("mission"), "preview": self.preview,
                "warmup": self.warm_result, "run": self.run.status() if self.run else None,
                "last_runs": self.last_runs, "gap_notices": list(getattr(self, "gap_notices", [])),
-               "conn_default": self.conn_default()}
+               "conn_default": self.conn_default(), "corner_setup": self.corner.state(),
+               "setup_way": self.corner.way}
         return out
 
     def conn_default(self):
@@ -685,6 +688,9 @@ class Session:
         def step(text):
             job["steps"].append([time.strftime("%H:%M:%S"), text])
         page = None
+        # the old chessboard way opens the cameras itself: the recorder is stopped first and started again after (the
+        # warm-up and the run read its pictures; Nick's run sheet found the clash, 29 Oct)
+        rec_was = (not fake) and SJ.stop_recorder(say=step)
         try:
             cmd = [sys.executable, os.path.join(os.path.dirname(HERE), "pi", "camera_setup.py"), "--port",
                    str(self.SETUP_PORT), "--out", os.path.join(self.dir, "setup-" + now_tag())]
@@ -728,6 +734,9 @@ class Session:
                     page.wait(timeout=10)
                 except subprocess.TimeoutExpired:
                     page.kill()
+            if not fake and (rec_was or d.get("warmup", True)):
+                ok, w = SJ.start_recorder(say=step)
+                step("   " + w)
         if not job["error"] and d.get("warmup", True) and not fake:
             # the robots would drive over the chessboard: the warm-up waits for Nick to take it away (10 min at most)
             step("   take the chessboard away, then press \"Chessboard taken away\"")
@@ -947,6 +956,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, S.mapping())
             if path == "/api/setup":
                 return self._send(200, S.setup_state())
+            if path == "/api/setup/corner":
+                return self._send(200, clean(S.corner.state()))
+            if path == "/api/setup/picture":
+                from urllib.parse import parse_qs
+                cam = (parse_qs(urlparse(self.path).query).get("cam") or ["overhead"])[0]
+                b = S.corner.picture(cam)
+                return self._send(200, b, "image/jpeg") if b else self._send(404, {"error": "no picture"})
             return self._send(404, {"error": "not found"})
         except Exception as e:  # noqa: BLE001
             return self._send(400, {"error": str(e)})
@@ -986,6 +1002,13 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, S.default_program(d.get("robots")))
                 if path == "/api/run/start":
                     return self._send(200, S.start_run(d))
+                if path == "/api/setup/pictures":
+                    return self._send(200, clean(S.corner.pictures(d)))
+                if path == "/api/setup/measure":
+                    return self._send(200, clean(S.corner.measure(d)))
+                if path == "/api/setup/way":
+                    S.corner.keep(way="chessboard" if d.get("way") == "chessboard" else "corners")
+                    return self._send(200, {"setup_way": S.corner.way})
                 if path == "/api/setup/start":
                     return self._send(200, S.setup_start(d))
                 if path == "/api/setup/board_away":

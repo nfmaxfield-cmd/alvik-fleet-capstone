@@ -252,28 +252,71 @@ function wireLighting() {
   $("lightgo").onclick = async () => { $("lightgo").disabled = true; $("lightgo").textContent = "Checking..."; try { S.lighting = await api("/api/lighting"); render(); } catch (e) { flash(e.message, true); render(); } };
 }
 
+// ---------------------------------------------------------------- the corners-only setup (Nick, 2026-10-29 20:20-20:27)
+// The user does nothing but click the table's 4 corners, 1 2 3 4, in the overhead picture and the same 1-4 in the side
+// picture; the robots' lights, a 10 cm roll each and their bodies measure the rest (tools/fleet/setup_job.py).
+let clicks = {overhead: [], side: []}, picStamp = 0, setupRobots = null, cornerPoll = null, setupWarm = true, setupSize = "";
+const CORNER_WORDS = ["1 (0,0): where the audience side meets the left end", "2: the audience side's other end (1 to 2 is x)", "3: the corner opposite 1", "4: the left end's far corner (1 to 4 is y)"];
+function picCard(cam) {
+  const C = S.corner_setup || {}, p = (C.pictures || {})[cam];
+  if (!p) return "";
+  const [w, h] = p.size, pts = clicks[cam] || [];
+  const marks = pts.map((q, i) => `<g><circle cx="${q[0]}" cy="${q[1]}" r="${w / 70}" fill="none" stroke="#D92D20" stroke-width="${w / 320}"/><circle cx="${q[0]}" cy="${q[1]}" r="${w / 420}" fill="#D92D20"/><text x="${q[0] + w / 55}" y="${q[1] - w / 70}" font-size="${w / 28}" font-weight="700" fill="#D92D20" stroke="#fff" stroke-width="${w / 260}" paint-order="stroke">${i + 1}</text></g>`).join("")
+    + (pts.length > 1 ? `<polyline points="${pts.concat(pts.length === 4 ? [pts[0]] : []).map(q => q.join(",")).join(" ")}" fill="none" stroke="#D92D20" stroke-width="${w / 400}" stroke-dasharray="${w / 80} ${w / 120}" opacity=".8"/>` : "");
+  const next = pts.length < 4 ? `Click corner ${CORNER_WORDS[pts.length]}` : "All 4 clicked";
+  return `<div class="card"><div class="between"><h3>${cam === "overhead" ? "Overhead camera" : "Side camera"}</h3><span class="small muted">${pts.length} of 4</span></div>
+    <div style="position:relative;line-height:0"><img src="/api/setup/picture?cam=${cam}&t=${picStamp}" alt="${cam} camera picture: click the table's corners" style="width:100%;border-radius:8px;display:block" draggable="false">
+    <svg data-pic="${cam}" viewBox="0 0 ${w} ${h}" style="position:absolute;inset:0;width:100%;height:100%;cursor:crosshair" role="img" aria-label="${cam} corners clicked">${marks}</svg></div>
+    <div class="between" style="margin-top:8px"><span class="small" style="color:${pts.length < 4 ? "var(--accent)" : "var(--green)"}">${esc(next)}</span>
+    <span class="row"><button class="b" style="padding:4px 10px" data-undo="${cam}">Undo</button><button class="b" style="padding:4px 10px" data-clear="${cam}">Clear</button></span></div></div>`;
+}
 function setup() {
-  const j = S.setup || {};
-  page(`<div><h1>Set up the cameras</h1><p class="sub">One button: the flash check, then the chessboard in the 0,0 corner for both cameras, then the warm-up. About 3 minutes.</p></div>
-    <div class="card"><h2>Before you press it</h2><ol class="small">
-      <li>Both cameras on, the recorder stopped (the setup page needs the cameras).</li>
-      <li>The robots on the table, switched on (their lights are flashed).</li>
-      <li>The printed corner piece A (squares of 3.5 cm) flat in the table's <b>0,0 corner</b>: its white-dot corner in the table's corner, the 5-square side along the table's long side. No robot on it.</li>
-      <li>The surface the cameras see, below: the whole board whose 4 corners are in the pictures (at home the 122 x 122 plywood, even when the mission's table is smaller; at school the table).</li>
-      <li>When the setup asks, take the chessboard away and press <b>Chessboard taken away</b>: the warm-up starts then.</li></ol></div>
-    <div class="card"><h2>Progress</h2><div class="log" id="slog">${esc((j.steps || []).map(x => x.join("  ")).join("\n")) || "Not started"}</div>
-      ${j.wait_board ? `<p><button class="p" id="bway">Chessboard taken away</button></p>` : ""}
-      ${j.error ? `<p class="err">${esc(j.error)}</p>` : ""}</div>`,
-    `<div class="card"><h2>Setup</h2><p class="small muted">${conn === "robots" ? "The Pi's cameras" : "Simulated cameras (the setup page's own fake board and robots)"}</p>
-      <label class="lbl">Surface the cameras see, length x width (cm) <input id="surf" value="${esc(S.surface || "")}" aria-label="Surface the cameras see, length x width in cm"></label>
-      <p class="small muted" style="margin:4px 0 8px">The mission's table starts at its 0,0 corner (the corner piece's corner); its long side along the piece's 5-square side.</p>
-      <label class="small" style="display:flex;gap:8px;align-items:flex-start;margin:0 0 8px"><input type="checkbox" id="swarm" checked style="margin-top:2px"> <span>then the warm-up (the robots feel the table's sides; leave it off when the table is only marked on a bigger board)</span></label>
-      <button class="p" id="sgo" ${j.running ? "disabled" : ""}>${j.running ? "Running..." : "Set up (flash check, chessboard, warm-up)"}</button>
-      ${more("More", `<p class="small muted">Each part can be run alone on the camera setup page (port 8096): <code>./run-fleet-pi.sh setup</code>.</p>`)}</div>
+  const C = S.corner_setup || {}, j = S.setup || {}, way = S.setup_way || "corners";
+  const names = S.map.robots.map(r => r.name);
+  if (!setupRobots) setupRobots = new Set(names);
+  const pics = C.pictures || {}, have = Object.keys(pics);
+  const ready = (clicks.overhead || []).length === 4 && (!pics.side || [0, 4].includes((clicks.side || []).length));
+  const res = C.result || null, tr = C.truth || null;
+  const line = C.line ? `<p style="margin:8px 0 0;font-size:15px;color:${res && res.ok && !(res.agree || []).length ? "var(--green)" : "var(--warn)"}"><b>${esc(C.line)}</b></p>` : "";
+  const truth = tr ? `<div class="eng small muted" style="margin-top:6px">Simulator truth: table ${tr.true_size.join(" x ")} cm, measured ${tr.size.join(" x ")} (off ${tr.size_err.join(", ")} cm); ${Object.entries(tr.cameras).map(([c, v]) => `${c}: lens ${v.lens_err_cm} cm off, tilt ${v.tilt_err_deg} deg, floor ${v.floor_err_cm_median} cm median / ${v.floor_err_cm_max} worst`).join("; ")}</div>` : "";
+  const old = way === "chessboard";
+  page(`<div><h1>Set up the cameras</h1><p class="sub">Click the table's 4 corners in each picture. The robots measure the rest: their lights flash, each rolls 10 cm and back. About 1-2 minutes.</p></div>
+    ${old ? `<div class="card warnc"><h2>The chessboard way (More)</h2><p class="small">Corner piece A in the 0,0 corner; the setup stops the recorder, opens the cameras, and starts the recorder again after.</p></div>` : ""}
+    <div class="card"><h2>1. Robots</h2><p class="small muted" style="margin:4px 0 8px">On the table, switched on, anywhere 15 cm or more from the edges. They flash and move 10 cm while it measures.</p>
+      <div class="row">${names.map(n => `<label class="small" style="display:flex;gap:6px;align-items:center;border:1px solid var(--border);border-radius:8px;padding:6px 10px"><input type="checkbox" data-rob="${esc(n)}" ${setupRobots.has(n) ? "checked" : ""}><span class="dot" style="background:${COL[n]}"></span>${esc(n)}</label>`).join("")}</div></div>
+    <div class="card"><div class="between"><h2>2. Corners, 1 to 4, in each picture</h2><button class="b" id="spics">${have.length ? "New pictures" : "Take pictures"}</button></div>
+      <p class="small muted" style="margin:6px 0 0">The same 4 table corners in the same order in both pictures: 1 is 0,0 (where the audience side meets the left end), 1 to 2 runs along the audience side (x), 3 is opposite 1, 4 is next to 1 (y). ${(C.last_corners || {}).overhead ? `<button class="b" style="padding:3px 8px" id="slast">Use last time's corners</button>` : ""}</p></div>
+    ${have.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px">${picCard("overhead")}${picCard("side")}</div>` : ""}
+    <div class="card"><h2>3. Measure</h2><div class="log" id="slog">${esc((C.steps || []).map(x => x.join("  ")).join("\n")) || (old ? esc((j.steps || []).map(x => x.join("  ")).join("\n")) || "Not started" : "Not started")}</div>${line}${truth}
+      ${C.error ? `<p class="err">${esc(C.error)}</p>` : ""}${old && j.wait_board ? `<p><button class="p" id="bway">Chessboard taken away</button></p>` : ""}${old && j.error ? `<p class="err">${esc(j.error)}</p>` : ""}</div>`,
+    `<div class="card"><h2>Setup</h2><p class="small muted">${conn === "robots" ? "The Pi's cameras (the recorder's pictures; started here if it is not running)" : "The simulator: its table (the workspace's size), its two cameras, its robots"}</p>
+      <label class="small" style="display:flex;gap:8px;align-items:flex-start;margin:0 0 8px"><input type="checkbox" id="swarm" ${setupWarm ? "checked" : ""} style="margin-top:2px"> <span>then the warm-up: the robots feel the table's real edges, and the mission plans with what they find (leave it off when the table is only marked on a bigger board)</span></label>
+      ${old ? `<label class="lbl">Surface the cameras see, length x width (cm) <input id="surf" value="${esc(S.surface || "")}"></label><button class="p" id="sgo" ${j.running ? "disabled" : ""}>${j.running ? "Running..." : "Set up (flash check, chessboard, warm-up)"}</button>`
+        : `<button class="p" id="smeasure" ${ready && !C.running ? "" : "disabled"}>${C.running ? "Measuring..." : "Measure (robots flash and move)"}</button>
+      <p class="small muted" style="margin:6px 0 0">${ready ? "Hands off the table." : "Take the pictures, then click 4 corners in each."}</p>`}
+      ${more("More", `<label class="lbl">Table size override, length x width (cm); empty = measured <input id="ssize" placeholder="measured" value="${esc(setupSize)}"></label>
+        <p class="small muted">Only when the measure is known to be wrong; normally leave empty. The measured size: ${S.surface ? esc(S.surface) + " cm" : "not yet"}.</p>
+        <label class="lbl">Setup way <select id="sway"><option value="corners" ${!old ? "selected" : ""}>Corners only (the robots measure)</option><option value="chessboard" ${old ? "selected" : ""}>Chessboard corner piece A (dropped for now)</option></select></label>`)}</div>
       ${lightingCard()}
       <button class="b" id="go">Continue to workspace</button>`);
   wireLighting();
-  $("sgo").onclick = async () => { try { S.setup = await api("/api/setup/start", {conn, surface: $("surf").value.trim(), warmup: $("swarm").checked}); render(); clearInterval(setupPoll);
+  $("swarm").onchange = () => { setupWarm = $("swarm").checked; };
+  if ($("ssize")) $("ssize").oninput = () => { setupSize = $("ssize").value; };
+  document.querySelectorAll("[data-rob]").forEach(b => b.onchange = () => { b.checked ? setupRobots.add(b.dataset.rob) : setupRobots.delete(b.dataset.rob); });
+  document.querySelectorAll("svg[data-pic]").forEach(sv => sv.onclick = ev => {
+    const cam = sv.dataset.pic, vb = sv.viewBox.baseVal, rc = sv.getBoundingClientRect();
+    if ((clicks[cam] || []).length >= 4) return;
+    clicks[cam] = (clicks[cam] || []).concat([[+((ev.clientX - rc.left) * vb.width / rc.width).toFixed(1), +((ev.clientY - rc.top) * vb.height / rc.height).toFixed(1)]]);
+    render(); });
+  document.querySelectorAll("[data-undo]").forEach(b => b.onclick = () => { clicks[b.dataset.undo] = (clicks[b.dataset.undo] || []).slice(0, -1); render(); });
+  document.querySelectorAll("[data-clear]").forEach(b => b.onclick = () => { clicks[b.dataset.clear] = []; render(); });
+  if ($("slast")) $("slast").onclick = () => { const L = C.last_corners || {}; clicks = {overhead: (L.overhead || []).slice(), side: (L.side || []).slice()}; render(); };
+  $("spics").onclick = async () => { $("spics").disabled = true; $("spics").textContent = "Taking pictures..."; try { S.corner_setup = await api("/api/setup/pictures", {conn}); picStamp = Date.now(); clicks = {overhead: [], side: []}; render(); } catch (e) { flash(e.message, true); render(); } };
+  if ($("smeasure")) $("smeasure").onclick = async () => { try {
+    S.corner_setup = await api("/api/setup/measure", {conn, corners: clicks, robots: [...setupRobots], warmup: $("swarm").checked, size: ($("ssize") || {}).value || ""}); render(); clearInterval(cornerPoll);
+    cornerPoll = setInterval(async () => { S.corner_setup = await api("/api/setup/corner"); if (screen === 1) render(); if (!S.corner_setup.running) { clearInterval(cornerPoll); load(); } }, 1500); } catch (e) { flash(e.message, true); } };
+  $("sway").onchange = async () => { try { const r = await api("/api/setup/way", {way: $("sway").value}); S.setup_way = r.setup_way; render(); } catch (e) { flash(e.message, true); } };
+  if ($("sgo")) $("sgo").onclick = async () => { try { S.setup = await api("/api/setup/start", {conn, surface: $("surf").value.trim(), warmup: $("swarm").checked}); render(); clearInterval(setupPoll);
     setupPoll = setInterval(async () => { S.setup = await api("/api/setup"); if (screen === 1) render(); if (!S.setup.running) { clearInterval(setupPoll); load(); } }, 1500); } catch (e) { flash(e.message, true); } };
   $("go").onclick = () => { done.add(1); screen = 2; render(); };
   if ($("bway")) $("bway").onclick = async () => { try { S.setup = await api("/api/setup/board_away", {}); render(); } catch (e) { flash(e.message, true); } };
