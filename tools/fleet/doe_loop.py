@@ -93,6 +93,12 @@ STATUS_WAIT_S = 4.0     # chosen: how long the check waits for every answer (rou
 PARAM_TOL = 0.0006      # a read-back value "matches" within this (the firmware prints 3 decimals). No DOE
 PARAMS = ("gyro_scale", "wheel_scale", "gyro_drift_dps")
 FACTORY = dict(gyro_scale=1.0, wheel_scale=1.0, gyro_drift_dps=0.0)
+A_INWARD_CM = 5.0       # chosen (2026-10-30): a drive's A (its start and park spot) keeps this much more than CLEAR_CM
+                        # from every edge. 29 Oct night: each drive ended 1-4 cm past A, away from the middle (B lies
+                        # towards it), and the next A was picked as near the robot as possible, so Left and Right crept
+                        # 1.5-2 cm a drive to the 25 cm rule, then needed "making room" (and its blind crawl). DOE
+                        # note: yes, 0 / 3 / 5 / 8 cm against how often a robot needs making room within 10 drives
+                        # (events.csv) and the extra seconds driving to A
 ROOM_ROBOT_CM = 30.0    # chosen: a robot whose middle is nearer than this to another's makes room before a turn check
                         # or drive (a turn check's crawl tip keeps 22 cm; PARKED_CLEAR_CM is 30). No DOE: a safety room
 ROOM_TARGET_CM = 32.0   # chosen: making room drives it to a spot this far from every edge (7 cm past the 25 cm rule,
@@ -453,9 +459,18 @@ def sensor_runs(sess, robot, low=LOW_CM):
     return summ, rows
 
 
-def pick_segment(rect, p, length, parked, clear=CLEAR_CM, parked_clear=PARKED_CLEAR_CM):
+def pick_segment(rect, p, length, parked, clear=CLEAR_CM, parked_clear=PARKED_CLEAR_CM, a_in=A_INWARD_CM):
     """A straight A->B of the given length, both ends and the line CLEAR_CM from every edge and every parked robot,
-    A as near the robot as possible (a little preference for the board's middle). (A, B) or None."""
+    A as near the robot as possible (a little preference for the board's middle). (A, B) or None.
+    A, where the robot parks after the drive, keeps a_in more from every edge when a line allows it (2026-10-30)."""
+    for a_extra in ((a_in, 0.0) if a_in > 0 else (0.0,)):
+        seg = _pick_segment(rect, p, length, parked, clear, parked_clear, a_extra)
+        if seg is not None:
+            return seg
+    return None
+
+
+def _pick_segment(rect, p, length, parked, clear, parked_clear, a_extra):
     best = None
     mid = ((rect[0] + rect[2]) / 2.0, (rect[1] + rect[3]) / 2.0)
     for ang in range(0, 180, 15):
@@ -469,6 +484,8 @@ def pick_segment(rect, p, length, parked, clear=CLEAR_CM, parked_clear=PARKED_CL
                 if parked and segs_clear([(a, b)], parked, parked_clear) < parked_clear:
                     continue
                 for A, B in ((a, b), (b, a)):
+                    if a_extra > 0 and edge_dist(rect, *A) < clear + a_extra:
+                        continue
                     s = math.dist(p, A) + 0.15 * math.dist((cx, cy), mid)
                     if best is None or s < best[0]:
                         best = (s, A, B)
@@ -802,6 +819,7 @@ class DoeLoop(LD.Ladder):
         """Never set aside on one camera's evidence (Nick, 2026-10-28): the robot stays in, skips this loop's drive,
         and is turn checked again at its next turn. Returns False (no drive now)."""
         self.st["doe"].setdefault("turn_due", {})[n] = True
+        LD.note_hint(self.st["robots"].get(n, {}), "held: " + why)
         self.st["robots"].get(n, {}).pop("h", None)
         self.last_held = n
         self.save()
@@ -861,7 +879,7 @@ class DoeLoop(LD.Ladder):
         try:
             if self.heading(n) is None:
                 say("  %s: heading not known: heading crawl first (forwards first: the edge guard watches it)" % n)
-                h, _ = self.crawl(n, p, None)
+                h, _ = self.crawl(n, p, None, **self.hint_for(n, p))
                 say("    heading %.1f deg (camera)" % h)
                 p2 = self.eye.still(n) or p
                 self.set_pose(n, p2[0], p2[1], h, "crawl (room)")
@@ -896,7 +914,8 @@ class DoeLoop(LD.Ladder):
             self.need_eye()
             self.frames_on("crawl-" + n)
             try:
-                h, _ = self.crawl(n, self.eye.still(n) or p, None)
+                q0 = self.eye.still(n) or p
+                h, _ = self.crawl(n, q0, None, **self.hint_for(n, q0))
             except LadderStop as e:
                 self.frames_off()
                 if "during its crawl" in str(e):
@@ -972,7 +991,21 @@ class DoeLoop(LD.Ladder):
                                           low_in_a_row=q["run"], avoided_by_2=q["avoided_2"],
                                           avoided_by_3=q["avoided_3"]))
         e = None
-        if r["check"] is not None:
+        sc = ((r["summary"].get("start_checks") or {}).get(n) or {})
+        # (not when run_plan calibrated it first: its roll moves and turns it, found by the dry run of 30 Oct 07:19,
+        # whose next drive the camera guard stopped at 7.1 cm; nor after a start straightening)
+        still = res == "start-up failed" and not sum(int(v or 0) for v in (r["summary"].get("steps_sent") or {}).values()) \
+            and not sc.get("restarted") and not r["summary"].get("straighten") \
+            and (sc.get("heading_deg") is None or sc.get("heading_allowed_deg") is None or
+                 sc["heading_deg"] <= sc["heading_allowed_deg"])
+        if still:
+            # nothing was sent, so nothing moved: its spot and heading are what they were (29 Oct 21:59-22:10: four
+            # start-ups refused on the side camera's offset; each one dropped the heading, and the heading crawls that
+            # followed walked Right to the x = 0 edge). The robot's own pose may be gone (run_plan's follow mode starts
+            # without one): the next crawl or drive gives it one
+            self.event("heading kept", n, "drive %d did not start (%s); nothing was sent, so it has not moved: its "
+                       "heading %.1f deg is kept" % (i + 1, res, h), clip=False)
+        elif r["check"] is not None:
             try:
                 e = self.end_poses(r["sess"], [n])[n]
             except (OSError, KeyError, ValueError):
@@ -1361,6 +1394,8 @@ def main(argv=None):
     ap.add_argument("--no-lights", action="store_true")
     ap.add_argument("--no-facing", action="store_true", help="no facing check in the find steps (facing.py)")
     ap.add_argument("--sim-washout", action="store_true")
+    ap.add_argument("--sim-side-bias", default="", metavar="DX,DY",
+                    help="--dry: the simulated side camera reads every robot this far off (29 Oct night: about -5,5)")
     ap.add_argument("--sim-no-side", action="store_true")
     ap.add_argument("--dir")
     ap.add_argument("--dry", action="store_true")

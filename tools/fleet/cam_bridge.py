@@ -522,6 +522,20 @@ def starts_from(args):
     return rect, out
 
 
+def with_side_bias(side, text):
+    """(side camera tuple with its offset replaced by text "x,y" cm, words). A text that does not read keeps the
+    file's offset. The remote ladder and DOE loop pass the offset their own tracker learned (2026-10-30: each bridge
+    started from the file's (0, 0) while the night's offset was 4-8 cm)."""
+    try:
+        bx, by = (float(v) for v in text.split(","))
+    except ValueError:
+        return side, "--side-bias %r not read (x,y in cm): the calibration file's offset" % text
+    if not (math.isfinite(bx) and math.isfinite(by)):
+        return side, "--side-bias %r not read (x,y in cm): the calibration file's offset" % text
+    return (side[0], side[1], (bx, by)), ("Side camera offset to start from: (%.2f, %.2f) cm, learned this session "
+                                          "(the calibration file's: (%.2f, %.2f))" % (bx, by, *side[2]))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--map", help="map.json: the table and each robot's start spot (where it stands now)")
@@ -550,6 +564,9 @@ def main(argv=None):
     ap.add_argument("--side-stream", default="127.0.0.1:8001", help="the side camera's /live (camera 1 of the recorder)")
     ap.add_argument("--side-calib", default="", help="the side camera's floor calibration (setup page): both cameras "
                                                       "follow the robots (e02_twocam); none: the overhead alone")
+    ap.add_argument("--side-bias", default="",
+                    help="x,y cm: the side camera's offset against the overhead to start from (the remote ladder and "
+                         "DOE loop pass what their own tracker learned; default: the side calibration file's)")
     ap.add_argument("--no-lights", action="store_true", help="no lights-as-markers fallback")
     ap.add_argument("--margin-cm", type=float, default=8.0, help="a robot's centre may be this far past an open side")
     ap.add_argument("--out", help="log folder (default logs/<date-time>-bridge)")
@@ -586,6 +603,9 @@ def main(argv=None):
             args.side = TW.load_side(args.side_calib)
         except (OSError, ValueError) as e:
             print("Side camera calibration not read (%s): the overhead camera alone." % e, flush=True)
+        if args.side is not None and args.side_bias:
+            args.side, words = with_side_bias(args.side, args.side_bias)
+            print(words, flush=True)
     out = args.out or os.path.join(REPO, "logs", dt.datetime.now().strftime("%Y%m%d-%H%M%S") + "-bridge")
     os.makedirs(out, exist_ok=True)
     tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

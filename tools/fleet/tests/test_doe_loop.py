@@ -303,7 +303,7 @@ def test_one_camera_crawl_fail_is_held(tmp_path, monkeypatch):
     L.need_bench = L.need_eye = lambda *a: None
     L.eye = types.SimpleNamespace(still=lambda n: None)
 
-    def crawl(n, p, h):
+    def crawl(n, p, h, **kw):
         e = LD.LadderStop("the camera saw Left crawl 15.0 cm (it was sent 10 cm): the camera or its wheels are wrong")
         e.evidence, e.heading = "side", -88.0
         raise e
@@ -364,7 +364,7 @@ def test_near_an_edge_it_drives_to_open_space_instead_of_parking(tmp_path):
 def test_making_room_with_heading_unknown_crawls_first_and_a_failed_move_is_held(tmp_path):
     L = _room_stub(tmp_path, (5.0, 22.0), heading=None)
     crawled = []
-    L.crawl = lambda n, p, h: crawled.append(p) or (-150.0, {})
+    L.crawl = lambda n, p, h, **kw: crawled.append(p) or (-150.0, {})
 
     def drive_to(sub, tag, targets, cms=5.0, via=None):
         raise D.LadderStop("the drive to room-Left-3's start did not finish (camera and Left's own pose disagree)")

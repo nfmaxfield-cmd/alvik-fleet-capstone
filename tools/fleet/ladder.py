@@ -119,6 +119,39 @@ LEG_QUIET_S = 6.0       # chosen: a crawl leg or quarter turn takes 2-3 s (10 cm
                         # longest real one plus a margin); a smaller value only costs one `status` question
 CRAWL_MIN_EDGE_CM = 10.0  # chosen: a crawl's tip (its middle) at least this far from an edge or 12 cm + this from
                           # another robot's middle: the body's back 5 cm in. No DOE: a safety room
+ROBOT_BORDER_IN_CM = 19.5   # where the robot's OWN virtual border stops its middle: run_plan sends it from the drive's
+                            # map floor, and the DOE loop's floor is the board less 13.5 cm (doe_loop.FLOOR_INSET_CM),
+                            # plus run_plan.BORDER_CM 6. The border stays on the robot after the drive, so every later
+                            # crawl meets it there (29 Oct 21:36 Center, 22:15 Left: "failed (virtual border)", both
+                            # parked). Not chosen: follows from those two numbers (a ladder map's floor is the whole
+                            # board, its border 6 cm in: this is the stricter of the two)
+CRAWL_BORDER_MARGIN_CM = 2.0  # chosen: a crawl's tip keeps this much more than ROBOT_BORDER_IN_CM from every edge (the
+                              # camera's spot error once the side camera's offset is taken out: the night's replay,
+                              # side camera alone, median 1.5 cm; plus half a cm).
+                              # DOE note: yes, 2 / 3 / 5 cm against crawls refused for no room and crawls stopped by
+                              # the border, from leg.csv + border.csv over a night session; docs/doe-backlog.md
+CRAWL_BORDER_EDGE_CM = 0.5   # chosen: crawl_sign's last resort keeps the tip half a cm outside the border line
+                             # itself (when neither way has the margin below). No DOE: the margin is the number to
+                             # tune; this only picks between two ways that both lack it
+CRAWL_ALONG_CM = 3.0    # a crawl that ends no more than this nearer the nearest edge is "along or away from" it: the
+                        # firmware's border lets a leg go unless it closes on the border by half the distance driven
+                        # (border.h MOSTLY 0.5: 5 cm of 10); 3 cm keeps 40 % of that in hand. DOE note: no, it follows
+                        # from the firmware's rule; change it with MOSTLY
+HINT_SPREAD_DEG = 30.0  # chosen: a heading the loop had before it was dropped (a HINT, not a measure) is trusted to
+                        # +-30 deg for choosing which way a crawl goes (29 Oct night: dropped headings were 1-2 deg from
+                        # the robot's own; the worst unfinished drive, Right's drive 7, ended 27 deg off). A known
+                        # heading: +-10. DOE note: yes, 15 / 30 / 45 deg against crawls refused for no room (wider)
+                        # and crawls that met the border (narrower), from the next night's leg.csv; docs/doe-backlog.md
+KNOWN_SPREAD_DEG = 10.0  # chosen: as above for a heading the loop still holds (camera line or crawl, ~1-5 deg). No DOE:
+                         # the margin above covers it
+CHECK_SPREAD_DEG = 3.0   # chosen: inside a turn check each crawl's heading is the last crawl's camera heading plus what
+                         # the gyro turned (29 Oct night: 40 turns, mean error +0.5 deg; Left's p95 under 5): +-3 deg.
+                         # DOE note: from turns.csv, the |error| p90 of the robots in the check against crawls refused
+                         # for no room inside a check; docs/doe-backlog.md
+HINT_NEAR_CM = 10.0     # chosen: a hint is used only while the camera has the robot within this of where the hint
+                        # was noted (29 Oct night: the find step's spot and the drive's end spot differ by 3-7 cm when
+                        # only the side camera saw one of them). DOE note: from state.json's hints against the next
+                        # crawl's measured heading; docs/doe-backlog.md
 REFIND_WAIT_S = 4.0     # chosen: a robot not seen standing still after a crawl leg is waited for this much longer...
 REFIND_SPREAD_CM = 2.0  # ... with its spots allowed this spread (the 1.2 cm rule's 1.4 cm hops passed), then looked for
 FACING_DROP_DEG = 30.0  # chosen: a kept heading further than this from what the robot's lights say is dropped (a heading
@@ -364,6 +397,15 @@ class Eye:
         """The time of the newest picture the tracker has worked through (either camera), or None."""
         ts = [d[0] for d in self.done.values() if d is not None]
         return max(ts) if ts else None
+
+    def learned_bias(self):
+        """(x, y) the side camera's offset against the overhead as the tracker has learned it (e02_twocam: robots
+        standing still that both cameras see), or None until it has learned it from BIAS_MIN_N pictures."""
+        import e02_twocam as TW
+        trk = self.trk
+        if trk is None or self.side_cam is None or getattr(trk, "bias_n", 0) < TW.BIAS_MIN_N:
+            return None
+        return float(trk.bias[0]), float(trk.bias[1])
 
     def close(self):
         self.closed = True
@@ -682,13 +724,20 @@ class Bench:
         n0 = len(self.legs.get(name, []))
         self.send(name, text)
 
+        resent = []
+
         def recs():
+            # the copy sent again is refused while the first one runs (its `queued` / `started` answers were lost, not
+            # the command: 29 Oct 21:45, Right's turn check ended on "refused (a leg is running)" while its leg went
+            # on): that refusal is not this leg's end
             with self.lock:
-                return [r for r in self.legs.get(name, [])[n0:] if r[1] == kind]
+                return [r for r in self.legs.get(name, [])[n0:] if r[1] == kind and
+                        not (resent and r[3] == "refused" and "a leg is running" in str(r[7]))]
 
         def ended():
             return any(r[3] in ("done", "failed", "refused", "dup") for r in recs())
         if not self.wait(lambda: recs(), 1.5):
+            resent.append(time.time())
             self.send(name, text)           # nothing heard: lost on the way (an answer lost would show `started`)
         t_ask = t0 + LEG_QUIET_S
         while time.time() < t0 + timeout:
@@ -700,7 +749,9 @@ class Bench:
                 if self.wait(lambda: self.state.get(name, (0, ""))[0] >= asked, 1.5):
                     if ended():
                         break
-                    if self.state[name][1] == "idle" and recs():
+                    with self.lock:
+                        heard = bool(self.legs.get(name, [])[n0:])     # (a refusal of the copy: it was running)
+                    if self.state[name][1] == "idle" and (recs() or heard):
                         return ("done", None, None, None, "its end was not heard (lost on the WiFi): the robot says "
                                 "it is idle after %.1f s" % (time.time() - t0))
                 t_ask = time.time() + 2.0
@@ -731,6 +782,24 @@ def edge_words(rect, x, y):
          "y = %.0f" % rect[1]: y - rect[1], "y = %.0f" % rect[3]: rect[3] - y}
     k = min(d, key=d.get)
     return "%.0f cm from the %s edge" % (d[k], k)
+
+
+def side_bias_args(b):
+    """cam_bridge's --side-bias for the offset b (x, y), in one word: "--side-bias", "-4.40,3.70" would read the
+    minus as an option and stop the bridge (the first dry run of 2026-10-30: every drive "No camera fix")."""
+    return ["--side-bias=%.2f,%.2f" % (b[0], b[1])]
+
+
+def note_hint(r, why):
+    """Before a robot's heading is dropped (r: its state.json record), keep it as a hint with where the robot was
+    (Ladder.heading_hint). 29 Oct night: 20 heading crawls started with no heading at all, forwards whichever way the
+    robot faced; two of them ended the run (Left at its virtual border, Right at the plywood edge)."""
+    if r.get("h") is None:
+        return
+    r["h_hint"] = r["h"]
+    r["h_hint_at"] = [r.get("x"), r.get("y")] if r.get("x") is not None else None
+    r["h_hint_why"] = why
+    r["h_hint_t"] = round(time.time(), 1)
 
 
 def still_spot(h, s=0.8, spread_cm=1.2):
@@ -1041,6 +1110,8 @@ class Ladder:
             cmd += ["--live-side", "8766", "--live-side-calib-out", self.side_calib_dry]
         if self.a.sim_washout:
             cmd.append("--live-washout")
+        if getattr(self.a, "sim_side_bias", "") and not self.a.sim_no_side:
+            cmd += ["--live-side-bias=" + self.a.sim_side_bias]     # the side camera reads every robot this far off
         for te in self.a.turn_err:
             cmd += ["--turn-err", te]
         p = subprocess.Popen(cmd, stdout=open(os.path.join(sd, "sim_stdout.txt"), "a"), stderr=subprocess.STDOUT,
@@ -1091,6 +1162,9 @@ class Ladder:
         if self.eye is None:
             self.eye = Eye(self.stream, self.calib, self.rect, side_stream=self.side_stream,
                            side_calib=self.side_calib, lights=not self.a.no_lights)
+            kb = self.kept_bias()
+            if kb is not None and self.eye.side_cam is not None:
+                self.eye.side_bias = kb             # this session's learned offset, not the file's (note_bias)
             self.eye.facing_on = not getattr(self.a, "no_facing", False)
             t0 = time.time()
             while (self.eye.n < 5 or (self.eye.side_cam is not None and self.eye.side_n < 5)) and time.time() - t0 < 15:
@@ -1111,8 +1185,34 @@ class Ladder:
             self.keeper.stop()
             self.keeper = None
         if self.eye is not None:
+            self.note_bias()
             self.eye.close()
             self.eye = None
+
+    def note_bias(self):
+        """The side camera's offset the eye has learned, kept (state.json "side_bias") for the next eye and handed to
+        the camera bridge of every drive (run_planned). 29 Oct night: the offset was 4-8 cm (09:22 that day: 1.4 cm
+        median); each new tracker started from the calibration file's (0, 0) and learned it again only while both
+        cameras saw a robot standing still, so a robot only the side camera saw was put 4-6 cm off: four start-ups
+        refused, the two cameras "disagreeing" by 6.6 cm (no fix at all), a 10 cm crawl read as 14.3 cm."""
+        eye = self.eye
+        try:
+            b = eye.learned_bias() if eye is not None else None
+        except Exception:          # noqa: BLE001  (a note only)
+            b = None
+        if b is None:
+            return None
+        self.st["side_bias"] = dict(x=round(b[0], 2), y=round(b[1], 2), t=round(time.time(), 1))
+        eye.side_bias = (b[0], b[1])
+        self.save()
+        return b
+
+    def kept_bias(self):
+        """The side camera's offset kept from this session's trackers (note_bias), or None."""
+        sb = (getattr(self, "st", None) or {}).get("side_bias")
+        if not sb or sb.get("x") is None:
+            return None
+        return float(sb["x"]), float(sb["y"])
 
     def sub(self, step):
         d = os.path.join(self.dir, time.strftime("%H%M%S") + "-" + step)
@@ -1163,6 +1263,11 @@ class Ladder:
             old = self.st["robots"].get(n)
             if old and "h" in old and math.hypot(old["x"] - p[0], old["y"] - p[1]) < 2.5:
                 h = old["h"]                    # it has not moved since its heading was measured
+            elif old and old.get("h") is not None:
+                # dropped (moved 2.5 cm or more by the camera: 29 Oct night, mostly the drive's end spot from the side
+                # camera alone against the find step's from both): kept as a hint for which way its crawl goes
+                note_hint(old, "the camera has it %.1f cm from where its heading was measured" % math.hypot(
+                    old["x"] - p[0], old["y"] - p[1]))
             r = self.st["robots"].setdefault(n, {})
             r.update(x=round(p[0], 2), y=round(p[1], 2), t=round(time.time(), 1))
             r.pop("lights_dir", None)           # (the old guess: body middle -> lights; they sit across the middle)
@@ -1176,6 +1281,7 @@ class Ladder:
             self.save()
         for w in eye.tracking_words():
             say("  " + w)
+        self.note_bias()
         return found
 
     def facing_heading(self, n, h, meas):
@@ -1487,7 +1593,8 @@ class Ladder:
         say("    compass check done")
         try:
             if self.heading(n) is None:
-                h, _ = self.crawl(n, self.eye.still(n) or p, None)
+                q0 = self.eye.still(n) or p
+                h, _ = self.crawl(n, q0, None, **self.hint_for(n, q0))
                 p2 = self.eye.still(n) or p
                 self.set_pose(n, p2[0], p2[1], h, "crawl (to open space)")
                 say("    heading %.1f deg (camera)" % h)
@@ -1603,35 +1710,104 @@ class Ladder:
         return True
 
     # -- L2: the turn check --------------------------------------------------------------------------
-    def crawl(self, n, p0, h_known, retry=True):
+    def crawl_sign(self, n, p0, h, spread):
+        """Which way a crawl goes (1 forwards first, -1 backwards first) for a robot at p0 facing about h (+-spread
+        deg), or raises LadderStop (no room either way). A way is fine when, at the heading's either end and middle,
+        its 10 cm tip stays CRAWL_MIN_EDGE_CM + 12 cm from every other robot's middle and EITHER ROBOT_BORDER_IN_CM +
+        CRAWL_BORDER_MARGIN_CM from every edge (outside the robot's own virtual border, which stays on after a DOE drive
+        at 19.5 cm) OR it comes no more than CRAWL_ALONG_CM nearer the nearest edge (moving away from, or along, the
+        border: the firmware lets that go, border.h) and stays CRAWL_MIN_EDGE_CM in. Forwards is preferred (the edge
+        guard watches it); backwards is blind. 29 Oct 21:36 / 22:15: Center and Left crawled forwards into their own
+        border with a heading the loop had (Center's was 3.5 deg, straight at x = 122) and were parked."""
+        others = list(self.others_of(n).values())
+        e0 = edge_dist(self.rect, *p0)
+        need = ROBOT_BORDER_IN_CM + CRAWL_BORDER_MARGIN_CM
+
+        def fine(sg):
+            for a in (h - spread, h, h + spread):
+                tip = (p0[0] + sg * CRAWL_CM * math.cos(math.radians(a)),
+                       p0[1] + sg * CRAWL_CM * math.sin(math.radians(a)))
+                e1 = edge_dist(self.rect, *tip)
+                if not (e1 >= need or (e0 - e1 <= CRAWL_ALONG_CM and e1 >= CRAWL_MIN_EDGE_CM)):
+                    return False
+                if any(math.dist(tip, o) - 12.0 < CRAWL_MIN_EDGE_CM for o in others):
+                    return False
+            return True
+        if fine(1):
+            return 1
+        if fine(-1):
+            return -1
+        # neither has the margin: the way whose tip stays outside the border itself at every heading in the spread
+        # (the border cannot stop it there), the roomier one first. 29 Oct 22:12: Left's turn check crawled to 21.6 cm
+        # from y = 0 and back, fine; with the margin alone that check could not have finished
+        def worst(sg):
+            out = []
+            for a in (h - spread, h, h + spread):
+                tip = (p0[0] + sg * CRAWL_CM * math.cos(math.radians(a)),
+                       p0[1] + sg * CRAWL_CM * math.sin(math.radians(a)))
+                if any(math.dist(tip, o) - 12.0 < CRAWL_MIN_EDGE_CM for o in others):
+                    return -1e9
+                out.append(edge_dist(self.rect, *tip))
+            return min(out)
+        best = max((1, -1), key=worst)
+        if worst(best) >= ROBOT_BORDER_IN_CM + CRAWL_BORDER_EDGE_CM:
+            return best
+        return None
+
+    def crawl_way(self, n, p0, h, spread, may_turn=True):
+        """(sign, heading it faces then): crawl_sign, and when neither way is fine, a turn on the spot towards the
+        board's middle first (a turn is never stopped by the border; it needs straighten.SPIN_EDGE_CM from every edge)
+        when that leaves a fine way. Raises LadderStop when nothing does."""
+        sg = self.crawl_sign(n, p0, h, spread)
+        if sg is not None:
+            return sg, h
+        import straighten as STR
+        mid = ((self.rect[0] + self.rect[2]) / 2.0, (self.rect[1] + self.rect[3]) / 2.0)
+        want = math.degrees(math.atan2(mid[1] - p0[1], mid[0] - p0[0]))
+        sg = self.crawl_sign(n, p0, want, spread) if may_turn and edge_dist(self.rect, *p0) >= STR.SPIN_EDGE_CM \
+            else None
+        if sg is None:
+            raise LadderStop("%s has no room to crawl %.0f cm either way (%s; facing about %.0f deg): it needs moving "
+                             "by hand" % (n, CRAWL_CM, edge_words(self.rect, *p0), h))
+        turn = wrap180(want - h)
+        say("    %s: facing about %.0f deg, a %.0f cm crawl either way would come too near an edge or its own virtual "
+            "border: it turns %.0f deg on the spot towards the middle first" % (n, h, CRAWL_CM, turn))
+        res = self.bench.leg(n, "turn %.1f" % turn, 20)
+        if res[0] != "done":
+            raise LadderStop("%s's turn towards the middle did not finish: %s (%s)" % (n, res[0], res[4]))
+        return sg, want
+
+    def crawl(self, n, p0, h_known, retry=True, hint=None, may_turn=True, hint_spread=None, known_spread=None):
         """Out and back CRAWL_CM, the camera watching: (heading deg, details) or raises LadderStop.
         A distance off by more than 40 % is crawled AGAIN once before it counts (2026-10-28): the first crawl starts
         where the robot stood when tracking began, on floor that was filled in, and its outline there is a piece,
         off its middle. Replays of 27-28 Oct: first crawls read 12-18 cm on the overhead and 10-13 cm on the side for
         9.8 cm; later crawls of the same robots read 9.5-12.2 cm. The error says which camera(s) saw it
-        (err.evidence: 'both' or one camera's name)."""
+        (err.evidence: 'both' or one camera's name).
+        hint (2026-10-30): a heading the loop had, or had until it was dropped, used ONLY to choose which way the crawl
+        goes (crawl_sign) and, when it backs first, as the heading of the fix that gives a robot without a pose one
+        (the firmware refuses a position-only fix then, and every blind back leg after the first)."""
         bench, eye = self.bench, self.eye
         sign = 1
         if h_known is None:
             h_known = self.turn_from_edge(n, p0)
-        if h_known is not None:
-            others = list(self.others_of(n).values())
-
-            def room(sg):
-                tip = (p0[0] + sg * CRAWL_CM * math.cos(math.radians(h_known)),
-                       p0[1] + sg * CRAWL_CM * math.sin(math.radians(h_known)))
-                return min([edge_dist(self.rect, *tip)] + [math.dist(tip, o) - 12.0 for o in others])
-            if room(1) < EDGE_REFUSE_CM - 5:
-                sign = -1                         # forward would go towards an edge or a robot: back first
-                if room(-1) < CRAWL_MIN_EDGE_CM and room(1) < CRAWL_MIN_EDGE_CM:
-                    raise LadderStop("%s has no room to crawl %.0f cm either way (%s): it needs moving by hand" % (
-                        n, CRAWL_CM, edge_words(self.rect, *p0)))
-                if room(1) > room(-1):
-                    sign = 1                      # backing has even less room: forward (the edge guard watches it)
+        h_dir, spread = (h_known, KNOWN_SPREAD_DEG if known_spread is None else known_spread) if h_known is not None \
+            else (hint, HINT_SPREAD_DEG if hint_spread is None else hint_spread)
+        if h_dir is not None:
+            sign, h_turned = self.crawl_way(n, p0, h_dir, spread, may_turn=may_turn)
+            if h_turned != h_dir:
+                h_dir = h_turned
+                if h_known is not None:
+                    h_known = h_turned
         # where the camera sees it now, as a position-only fix (its own heading kept): the firmware's blind-backing
         # allowance (e02_back_max_cm since the last camera fix) starts full from a camera sighting (19:22, 28 Oct:
-        # Left's crawl stopped after its forward leg, and the next crawl's back leg was refused, 10 cm already used)
-        bench.send(n, "fix %.2f %.2f - %.3f" % (p0[0], p0[1], time.time()))
+        # Left's crawl stopped after its forward leg, and the next crawl's back leg was refused, 10 cm already used).
+        # Backing first, the fix carries the heading too: a robot with no pose (a run_plan that ended before its first
+        # fix leaves it so) refuses a position-only fix and so any back leg (29 Oct 22:12-22:16, Right)
+        if sign < 0 and h_dir is not None:
+            bench.send(n, "fix %.2f %.2f %.2f %.3f" % (p0[0], p0[1], h_dir, time.time()))
+        else:
+            bench.send(n, "fix %.2f %.2f - %.3f" % (p0[0], p0[1], time.time()))
         time.sleep(0.2)
         t0 = time.time()
         r1 = bench.leg(n, "go %.1f" % (sign * CRAWL_CM), 20)
@@ -1648,6 +1824,17 @@ class Ladder:
             raise LadderStop("%s's crawl did not finish: %s (%s)" % (n, r1[0], r1[4]))
         p1 = eye.still(n) or self.refind(n, p0, sign * CRAWL_CM, h_known)
         r2 = bench.leg(n, "go %.1f" % (-sign * CRAWL_CM), 20)
+        if r2[0] == "refused" and "backing blind" in str(r2[4]) and sign > 0 and p1 is not None:
+            # the robot has no pose (its position-only fix was refused), so its blind-backing allowance never refilled
+            # and it would stay 10 cm on: three such crawls walked Right 30 cm to the x = 0 edge (29 Oct 22:11-22:16).
+            # Its forward leg, which the camera watched, gives its heading: that fix gives it a pose, and it backs
+            h1 = line_fit_heading(eye.trk.history(n, t0, time.time()), p0, p1)
+            if h1 is not None:
+                say("    %s: its back leg was refused (no pose on the robot): the camera's heading from its forward leg "
+                    "(%.0f deg) is sent with its spot, and it backs" % (n, h1))
+                bench.send(n, "fix %.2f %.2f %.2f %.3f" % (p1[0], p1[1], h1, time.time()))
+                time.sleep(0.3)
+                r2 = bench.leg(n, "go %.1f" % (-sign * CRAWL_CM), 20)
         p2 = eye.still(n) or self.refind(n, p0, 0.0, h_known)
         t1 = time.time()
         if r2[0] != "done":
@@ -1665,7 +1852,8 @@ class Ladder:
         if (h is None or not (0.6 * CRAWL_CM <= moved <= 1.4 * CRAWL_CM)) and retry:
             say("    %s: the camera saw it crawl %.1f cm for %.0f (%s): crawling again to re-check" % (
                 n, moved, CRAWL_CM, "both cameras" if evidence == "both" else "%s only" % evidence))
-            return self.crawl(n, p2, h_known if h is None else (wrap180(h + 180.0) if sign < 0 else h), retry=False)
+            return self.crawl(n, p2, h_known if h is None else (wrap180(h + 180.0) if sign < 0 else h), retry=False,
+                              hint=hint, may_turn=may_turn, hint_spread=hint_spread, known_spread=known_spread)
         if h is None or not (0.6 * CRAWL_CM <= moved <= 1.4 * CRAWL_CM):
             err = LadderStop("the camera saw %s crawl %.1f cm (it was sent %.0f cm): the camera or its wheels are "
                              "wrong" % (n, moved, CRAWL_CM))
@@ -1760,7 +1948,9 @@ class Ladder:
         say("  %s at (%.1f, %.1f): heading crawl (%.0f cm out and back) ..." % (n, p[0], p[1], CRAWL_CM))
         rows = []
         try:
-            h0, d0 = self.crawl(n, p, None)
+            # the heading the loop has (or had) chooses which way the first crawl goes (29 Oct 21:36: Center's 3.5 deg
+            # was known, but the crawl went forwards blind, at x = 122, into its own virtual border, and was parked)
+            h0, d0 = self.crawl(n, p, None, **self.hint_for(n, p))
             heads = [h0]
             say("    start heading %.1f deg (camera, %d pictures)" % (h0, d0["pictures"]))
             for k in range(4):
@@ -1773,7 +1963,9 @@ class Ladder:
                 if pk is None:
                     raise LadderStop("the camera lost %s after turn %d (still not found after waiting and looking "
                                      "for its lights)" % (n, k + 1))
-                hk, dk = self.crawl(n, pk, wrap180(heads[-1] + (own_turn if own_turn is not None else 90.0)))
+                # (no turn towards the middle inside the check: it would add to the turn being measured)
+                hk, dk = self.crawl(n, pk, wrap180(heads[-1] + (own_turn if own_turn is not None else 90.0)),
+                                    may_turn=False, known_spread=CHECK_SPREAD_DEG)
                 cam_turn = wrap180(hk - heads[-1])
                 heads.append(hk)
                 err = abs(cam_turn) - 90.0
@@ -1866,6 +2058,9 @@ class Ladder:
             bcmd += ["--heading-window-s", "%.1f" % max(1.0, 2.0 * 5.0 / cms)]
         if self.side_calib:
             bcmd += ["--side-stream", self.side_stream, "--side-calib", self.side_calib]
+            kb = self.kept_bias()
+            if kb is not None:
+                bcmd += side_bias_args(kb)      # the offset learned so far, not the file's (note_bias)
         if self.a.no_lights:
             bcmd += ["--no-lights"]
         bcmd += list(bridge_extra)
@@ -1992,10 +2187,32 @@ class Ladder:
         """Its heading is not known any more: the next move starts with a camera-watched heading crawl."""
         r = self.st["robots"].get(n)
         if r is not None and "h" in r:
+            note_hint(r, why)
             r.pop("h", None)
             r["h_how"] = "unknown: " + why
             r["h_t"] = round(time.time(), 1)
             self.save()
+
+    def hint_for(self, n, p=None):
+        """crawl()'s keyword arguments for n at p: its heading as a hint, with the spread it is trusted to (a heading
+        the loop holds: KNOWN_SPREAD_DEG; one it dropped: HINT_SPREAD_DEG)."""
+        r = ((getattr(self, "st", None) or {}).get("robots") or {}).get(n) or {}
+        return dict(hint=self.heading_hint(n, p),
+                    hint_spread=KNOWN_SPREAD_DEG if r.get("h") is not None else HINT_SPREAD_DEG)
+
+    def heading_hint(self, n, p=None):
+        """The heading the loop has for n (known), or the one it had before it was dropped (a hint) while the camera
+        has the robot within HINT_NEAR_CM of where that was noted. For choosing which way a crawl goes only (crawl);
+        never a measured heading. None when there is neither."""
+        r = ((getattr(self, "st", None) or {}).get("robots") or {}).get(n) or {}
+        if r.get("h") is not None:
+            return r["h"]
+        hh, at = r.get("h_hint"), r.get("h_hint_at")
+        if hh is None or not at:
+            return None
+        if p is not None and math.dist(at, p[:2]) > HINT_NEAR_CM:
+            return None
+        return hh
 
     def drive_to(self, sub, tag, targets, cms=SLOW_CMS, via=None):
         """Plan each robot in targets {name: (x, y, heading)} from where the camera has it to its target pose (the
@@ -2070,7 +2287,8 @@ class Ladder:
                 say("  %s: heading not known (it moved since L2): heading crawl first" % n)
                 self.need_bench(sub)
                 self.need_eye()
-                h, _ = self.crawl(n, self.eye.still(n) or p, None)
+                q0 = self.eye.still(n) or p
+                h, _ = self.crawl(n, q0, None, **self.hint_for(n, q0))
                 q = self.eye.still(n) or p
                 self.set_pose(n, q[0], q[1], h, "crawl")
                 p = q
@@ -2372,6 +2590,8 @@ def main(argv=None):
     ap.add_argument("--no-lights", action="store_true", help="no lights-as-markers fallback (and no steady lights)")
     ap.add_argument("--no-facing", action="store_true",
                     help="no facing check in the find step (which way each robot faces, from its lights: facing.py)")
+    ap.add_argument("--sim-side-bias", default="", metavar="DX,DY",
+                    help="--dry: the simulated side camera reads every robot this far off (29 Oct night: about -5,5)")
     ap.add_argument("--sim-washout", action="store_true", help="--dry: the simulated board washed out under the lamp "
                                                                "for the overhead camera (11:20), the side camera on")
     ap.add_argument("--sim-no-side", action="store_true", help="--dry: no simulated side camera")
