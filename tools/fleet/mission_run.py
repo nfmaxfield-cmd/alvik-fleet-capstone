@@ -239,8 +239,21 @@ def run(args):
         launcher = [PY, os.path.join(HERE, "sweeps", "rp_shim.py")]     # sim_shim's conditions (drops, a dead robot)
     else:
         import setup_conf as SCF
-        cal = args.calib or SCF.overhead_calib(relative=False)
-        scal = "" if args.no_side else (args.side_calib or SCF.side_calib() or "")
+        # setup_conf returns (path, words): take the path, print the words (2026-10-29 20:46 on the Pi: the tuple
+        # went to the camera bridge and the robots' run never started)
+        if args.calib:
+            cal = args.calib
+        else:
+            cal, words = SCF.overhead_calib(relative=False)
+            say(words)
+        if args.no_side:
+            scal = ""
+        elif args.side_calib:
+            scal = args.side_calib
+        else:
+            scal, words = SCF.side_calib()
+            scal = scal or ""
+            say(words)
         stream, side_stream = args.stream, args.side_stream
         launcher = [PY]
     # the facing check (2026-10-29): run_plan measures which way each robot faces from its lights before anything
