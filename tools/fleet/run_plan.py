@@ -1431,7 +1431,8 @@ class Coordinator:
         b.out_kind = "restarted"
         b.back_t = None
         b.boot_back = None
-        b.out_t = now()
+        # (out_t is NOT renewed: when everyone else is done, the run waits REJOIN_WAIT_S from when it was set aside,
+        # so a robot that never passes cannot keep the run going for ever: a warning and a failure, not a hang)
         self.warnings = getattr(self, "warnings", []) + ["%s: %s; checked again in %.0f s" % (b.name, why, wait)]
         self.log("warning", text="%s: %s; checked again in %.0f s" % (b.name, why, wait))
         self.say("WARNING: %s: %s; it stays held and is checked again in %.0f s" % (b.name, why, wait))
@@ -1591,6 +1592,12 @@ class Coordinator:
         self.rejoin_pending = (n, now() + self.REJOIN_TRIAL_S)
         self.rejoined, self.rejoined_t = n, now()
         self.handle_obstacle(None)
+        if self.planning is not None:
+            # it sends no step of its old plan before the new plan is in: that plan began where it stood when it went
+            # out (a robot held since the start: its start spot), not where it is (30 Oct simulator: Right drove its
+            # old first leg head-on towards Left, bodies 3.9 cm, before the re-plan came)
+            first = next((i for i, x in enumerate(b.stat) if x["status"] == "unsent"), len(b.stat))
+            self.limit[n] = min(self.limit.get(n, first), first)
 
     def recheck(self, b):
         """A robot that restarted (a new boot ID, or its follow run ended) while out: everyone else holds while it is
@@ -2482,12 +2489,24 @@ class Coordinator:
     def finished(self):
         if self.plan.get("stranded"):
             return False
-        if any(b.out and self.rejoinable(b) and now() - getattr(b, "out_t", 0.0) < self.REJOIN_WAIT_S
-               for b in self.bots.values()):
-            return False             # a held robot may still rejoin (rejoin_watch)
         if not self.names:
             return False
-        return all(all(st["status"] == "done" for st in self.bots[n].stat) for n in self.names)
+        undone = [n for n in self.names if not all(st["status"] == "done" for st in self.bots[n].stat)]
+        if undone:
+            if any(getattr(self.bots[n], "retry_n", 0) == 0 for n in undone):
+                self.others_done_t = None       # (a robot trying to rejoin does not restart the wait)
+            return False
+        if getattr(self, "others_done_t", None) is None:
+            self.others_done_t = now()
+        # everyone running is done: a held robot may still rejoin (rejoin_watch), for REJOIN_WAIT_S at most from now
+        # (each retry of it renews its own out time; the run must still end: 30 Oct simulator, a run that never did)
+        held = [b for b in self.bots.values() if b.out and self.rejoinable(b)]
+        if held and now() - self.others_done_t < self.REJOIN_WAIT_S:
+            return False
+        if held:
+            self.warnings = getattr(self, "warnings", []) + ["%s never joined this run (still held: %s)" % (
+                ", ".join(b.name for b in held), "; ".join(str(b.out) for b in held))]
+        return True
 
     def run(self, timeout_s):
         self.plan_start = self.t_run = now()
@@ -3186,10 +3205,10 @@ def calibrate_robust(coord, link, args, names, source, auto=True):
             link.send_name(n, "stop")
         time.sleep(1.0)
         done += calibrate(coord, link, args, left, source)
-        left = [n for n in names if n not in done]
+    left = [n for n in names if n not in done]
     if left:
-        warn(coord, "%s: no room to spin, or the calibration failed twice: the compass check alone (a few degrees' wiggle; no spin, no roll); "
-                    "its stored gyro and wheel scales are used" % ", ".join(left))
+        warn(coord, "%s: no room to spin, or the calibration failed twice: the compass check alone (a few degrees' "
+                    "wiggle; no spin, no roll); its stored gyro and wheel scales are used" % ", ".join(left))
         for n in left:
             link.send_name(n, "stop")
         time.sleep(0.5)
@@ -3697,6 +3716,7 @@ def straighten_start(coord, link, args, source, names, fres, auto=False):
     record = coord.straighten_record = {"tries": [], "result": None}
     tries = 0
     max_tries = ST.TRIES + (1 if auto else 0)
+    stay = set()              # robots that start from where they stand (their start spot cannot be reached safely)
     print("Start straightening: each robot's measured pose against its start pose")
     meas = {}
     while True:
@@ -3799,7 +3819,12 @@ def straighten_start(coord, link, args, source, names, fres, auto=False):
                         pl["after"].pop(m, None)
                 except ST.Refuse:
                     continue
-                hold_at_start(coord, link, n, "it cannot be corrected safely where it stands (%s)" % e)
+                # it starts from where it stands (the plan is made again from there, the held robots as obstacles):
+                # its start spot is taken, or no safe way leads there
+                warn(coord, "%s cannot reach its start spot safely (%s): it starts from where it stands (the plan made "
+                            "again from there)" % (n, e))
+                stay.add(n)
+                starts[n] = tuple(meas[n])
                 pl["robots"][n] = {"steps": [], "words": [], "path": None, "need": False}
                 break
             if pl is None:
@@ -3870,6 +3895,10 @@ def straighten_start(coord, link, args, source, names, fres, auto=False):
             for n in quiet:
                 hold_at_start(coord, link, n, "no FOLLOW records after the re-check")
     record["result"] = "ready after %d correction(s)" % tries
+    if stay:
+        record["result"] += "; from where they stand: %s" % ", ".join(sorted(stay))
+        start_where_they_stand(coord, link, live_names(coord, names), {n: meas[n] for n in live_names(coord, names)
+                                                                       if n in meas})
     coord.log("straighten", **record)
     for n in live_names(coord, names):
         if n not in meas:
@@ -3884,8 +3913,14 @@ def start_where_they_stand(coord, link, names, meas):
     """Robots still off after the corrections start from where they stand: the plan made again from there (as Mission
     Control's 'start where they stand'); if no plan comes, the plan as it is (the follower drives from where each
     robot is to its first step's end)."""
+    poses = {n: meas[n] for n in names if n in meas}
+    for n in (getattr(coord, "start_aside", None) or {}):
+        p_ = (getattr(coord, "facing_at", None) or {}).get(n)
+        if p_ is not None:                       # a held robot is planned from where it stands (then retired there)
+            poses[n] = (p_[0], p_[1], p_[2] if p_[2] is not None else (p_[4] if p_[4] is not None else 0.0))
+            coord.bots[n].last_cam = [p_[0], p_[1], poses[n][2]]
     try:
-        replan_from(coord, {n: meas[n] for n in names}, "the start's corrections did not reach the start spots")
+        replan_from(coord, poses, "the start's corrections did not reach the start spots")
     except Exception as e:      # noqa: BLE001
         warn(coord, "no plan from where they stand (%s): the plan as made; each robot drives from where it is" % e)
 
