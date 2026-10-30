@@ -1,7 +1,7 @@
 # Monday run sheet: the school demo, 2 Nov 2026
 
 **Premise.** Monday: Left and Right run Monday's default mission in Mission Control on the school table: mow, meet,
-circle, mow on, Chicken, spread out, dance. About 2 minutes of driving. Build B (approved). Print copy:
+circle, mow on, Chicken, spread out, dance, Left and Right mirroring each other. About 2 minutes of driving. Build B (approved). Print copy:
 [2026-11-02-monday-run-sheet.html](2026-11-02-monday-run-sheet.html) (letter paper: 3 pages for the school, a 4th with the rehearsal).
 
 **Arrive 45 minutes before you present.** Setup is about 30 minutes. The rest is spare.
@@ -30,7 +30,12 @@ pick it up and switch it off.
 - **The robots straighten themselves up before the run:** a turn on the spot and a short drive onto their start spot.
 - **Left's distance-sensor stop limit goes to 10 cm** (it was stopping for the floor at 12 cm, about once a drive).
 - **Only the side camera sees a robot:** a 5 cm start allowance, and robots drive through a camera blind spot on their
-  own wheels.
+  own wheels (up to 40 cm, Nick 29 Oct 20:06).
+- **Left and Right mirror each other** (Nick, 29 Oct 20:06): they mow mirror-image lanes and reach each matching point
+  together. When one falls behind (a pause, a correction, a late start), the late one speeds up and the other slows
+  down, between 5 and 10 cm/s; if that is not enough, the one ahead waits a moment where it stands. Mission Control's
+  Run screen has a **Mirroring** card (how far apart they reached the last matching point; target 0.5 s and 3 cm), and
+  the Event log says `mirroring: ...` each time it re-times or waits. Nothing for you to do.
 
 **If they are not in by Monday,** the start is stricter. A robot turned more than 15 deg stops the start with words
 saying which way to turn it (the facing check). A robot more than **3 cm** off its start spot (as the camera
@@ -216,7 +221,8 @@ the size into **Table size override**, click **Measure** again. **The old chessb
 ### 3.2 Plan, then run
 
 1. **5 Mission:** click **Monday's default**, then **Plan and preview** (10-30 s). You should see **Finishes in**
-   about 2:00 (1:56 on 61 x 122, 2:04 on 128 x 72, 2:16 on 76 x 137) and **Closest approach (bodies)** about 10.0 cm.
+   about 1:50 (1:47 on 61 x 122, 1:54 on 70 x 130, 2:00 on 76 x 137; mirrored lanes, 29 Oct 20:06) and **Closest
+   approach (bodies)** about 10.0 cm.
    Optional: the **play** button under the table shows the whole routine.
 2. Click **Go to run**. Check the pill says **Mode: Robots**.
 3. Stand at the table, a hand ready to catch. Click **Run (robots)**.
@@ -228,10 +234,11 @@ Monday's default planned on a 128 x 72 table (simulator): 2:04, closest 10.0 cm.
 **What the audience sees, in order:**
 1. The robots' lights flash, one side at a time, a few seconds (the facing check: which way each robot faces).
 2. Each robot straightens up on its cross (being built), then stands a moment.
-3. Both mow their own end in short lanes across the table: drive, quarter turn, 12 cm over, back. A short pause after
-   each turn (they wait for the cameras to agree).
+3. Both mow their own end in short lanes across the table, as mirror images of each other: drive, quarter turn, 10-13 cm
+   over, back. A short pause after each turn (they wait for the cameras to agree). Sometimes one slows down or stands
+   a moment so the other catches up: that is the mirroring, not a fault.
 4. They meet in the middle and circle each other 1.5 times, ending on swapped sides.
-5. One steps a few cm aside; then each mows the inner part of the other's side.
+5. Each mows the inner part of the other's side, again as mirror images (nobody steps aside any more).
 6. **Chicken:** they line up facing each other and drive straight at each other; at 15 cm both swerve and pass about
    10 cm apart.
 7. They spread out and dance (spins, wiggles, coloured lights) until switched off.
@@ -248,6 +255,8 @@ steps done.
 
 | What you see | What to do |
 |---|---|
+| `mirroring: Right waits where it is for Left ...` or `mirroring: ... its next leg at 10.0 cm/s` | Nothing: one robot is catching up with the other. Normal, several times a run |
+| `mirroring: Right waited 8 s for Left at a mirrored point: it carries on (not mirrored until they meet again)` | Nothing, unless Left has stopped: then see the other rows (Left's own line in the Event log says why). They line up again at the meet or Chicken |
 | `Robots heard: none`, or `Not heard from: Left (heard: ...)` | Switch that robot off and on, wait 30 s, `./run-fleet-pi.sh check`. None heard at all: a network problem (question 1) |
 | `No camera fix for Left: is the position source running?` | Left is off its cross (more than 3 cm, until the straighten-up is in) or the cameras lost it. Nudge it onto its cross; **Run (robots)** again |
 | `Left is facing the wrong way (about 179 deg off): turn it round ...` (until the straighten-up is in) | Turn it round; **Run (robots)** again. Nothing moved |
@@ -441,7 +450,8 @@ Right charged, firmware flashed. You need the brick and the tape measure.
    | Left | | |
    | Right | | |
 
-   You should see Left's stop limit **10.0 or lower** and Right's **12.0 or lower**, neither under **8.0**. If a line
+   You should see Left's stop limit **between 9.0 and 10.0** and Right's **12.0 or lower**, Right not under **8.0**
+   (Left never goes under 9.0: Nick, 29 Oct 20:06). If a line
    says **the lowest allowed**, click the red **Stop**, look in front of that robot (anything within 30 cm?) and wipe
    its sensor window, then start again from step 4.
 6. **2 min. While they mow (no brick yet).** Watch the Event log for a line with `obstacle` and `ahead`. You should

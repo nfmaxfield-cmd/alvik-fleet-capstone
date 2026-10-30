@@ -71,6 +71,9 @@ RUN_DEFAULTS = {
     "straighten": True,               # a robot off its start pose is turned on the spot or driven to its spot, then
                                       # checked again, instead of a stop (run_plan --straighten, 2026-10-29 15:41).
                                       # Not for the warm-up (it starts where the robots stand, as before)
+    "mirror": True,                   # a mirrored mission (Monday: Left and Right) is re-timed so they reach matching
+                                      # points together: the late one speeds up, the leader slows or waits (run_plan's
+                                      # mirror sync, 2026-10-29 20:06). Off: every leg at its planned speed
 }
 WARMUP_KNOBS = ("PROBE_SPACING_CM", "CORNER_PAUSE_S", "BARRIER_NEAR_CM", "SCALE_FLAG", "MAX_FRAMES")
 
@@ -432,6 +435,8 @@ class Session:
             cmd += ["--send", c]
         if rs.get("turn_pause", True) and kind != "warmup":
             cmd += ["--turn-pause"]
+        if not rs.get("mirror", True):
+            cmd += ["--no-mirror"]
         if dry:
             cmd += ["--dry-run"]
             if rs.get("sim_true_sides"):
@@ -476,6 +481,8 @@ class Session:
             cmd += ["--no-turn-pause"]
         if not rs.get("straighten", True) or kind == "warmup":
             cmd += ["--no-straighten"]
+        if not rs.get("mirror", True):
+            cmd += ["--no-mirror"]
         if conn == "sim-cameras":
             cmd += ["--dry"]
             if rs.get("sim_washout"):

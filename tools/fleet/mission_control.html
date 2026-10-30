@@ -522,6 +522,15 @@ function wirePreview(pv) {
     clearInterval(timer); if (playing) timer = setInterval(() => { playT += 0.5; if (playT >= pv.makespan_s) { playT = pv.makespan_s; playing = false; clearInterval(timer); } if ($("slider")) upd(); }, 100); };
 }
 
+function mirrorCard(run) {
+  // mirroring (2026-10-29): how far apart Left and Right reached their last matching point (run_plan live.json "mirror")
+  const mi = run && run.live && run.live.mirror; if (!mi) return "";
+  const l = mi.last, ok = q => q && q.time_err_s <= 0.5 && q.pos_err_cm <= 3;
+  return `<div class="card"><div class="between"><b>Mirroring</b><span class="small muted">${esc(mi.robots.join(" and "))}</span></div>
+    ${l ? `<div class="row small" style="margin-top:6px;gap:14px"><span>Last matching point <b>${esc(l.label || l.key)}</b></span><span>Apart <b style="color:${ok(l) ? "#12805C" : "#B42318"}">${l.time_err_s.toFixed(2)} s, ${l.pos_err_cm.toFixed(1)} cm</b></span><span>Worst so far <b>${(mi.worst_s ?? 0).toFixed(2)} s, ${(mi.worst_cm ?? 0).toFixed(1)} cm</b></span><span>Points <b>${mi.n}</b></span></div>` : `<div class="small muted">No matching point reached yet.</div>`}
+    <p class="small muted" style="margin:6px 0 0">How far apart in time, and how far from each other's mirror image (across the table's middle line), the two robots reached each matching point; target 0.5 s and 3 cm. Measured by ${conn === "robots" ? "the cameras" : "the simulated cameras"} (each robot's own pose when a camera has no fresh spot).</p></div>`;
+}
+
 function runScreen() {
   const run = S.run && S.run.kind !== "warmup" ? S.run : null, pv = S.preview && S.preview.title !== "Warm-up" ? S.preview : null;
   page(`<div class="between"><div><h1>${pv ? esc(MODES.find(m => m[0] === String(pv.title).toLowerCase())?.[1] || pv.title) : "Run"}</h1><p class="sub">${run ? `${fmt(run.elapsed_s)} in${pv ? " · planned " + fmt(pv.makespan_s) : ""}` : "Not started"}</p></div>
@@ -537,6 +546,7 @@ function runScreen() {
       return `<div class="card"><div class="between"><b><span class="dot" style="background:${COL[n]}"></span>${esc(n)}</b><span class="small muted">${run && run.robots[n] ? `(${run.robots[n][0].toFixed(0)}, ${run.robots[n][1].toFixed(0)})` : ""}</span></div>
       <span class="small muted">${esc(lv && lv.out ? (lv.held ? "HELD (rejoins when heard again): " : "OUT: ") + lv.out : (lv && lv.doing) || (run && run.doing && run.doing[n]) || (run && run.running ? "driving" : "waiting"))}</span>
       ${lv ? `<div class="row small" style="margin-top:6px;gap:14px"><span>Battery <b>${lv.battery ?? "-"} %</b></span><span>Edge <b>${lv.edge_cm ?? "-"} cm</b></span><span>Steps <b>${lv.done}/${lv.steps}</b></span>${lv.stop_cm != null ? `<span title="Its distance sensor stops it for anything in its path nearer than this (floor check at start-up)">Stops at <b>${lv.stop_cm} cm</b></span>` : ""}</div><div class="small muted">${esc(lv.last || "")}</div>` : ""}</div>`; }).join("")}
+     ${mirrorCard(run)}
      <details class="card" ${document.body.classList.contains("details") ? "open" : ""}><summary style="cursor:pointer;font-weight:500">Event log</summary><div class="log" id="log">${run ? esc((run.messages || []).map(m => `[${m[0]}] ${m[1]}`).join("\n")) : ""}</div></details>
      <div class="card">${more("More", settingsTable("run"))}</div>
      <button class="p" id="go" ${run && !run.running ? "" : "disabled"}>Review</button>`);

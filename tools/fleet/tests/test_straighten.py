@@ -122,7 +122,7 @@ def _drive(c, b, xs, y, t0, seen_until):
 def test_blind_drive_is_allowed_up_to_the_cap_then_stops_everyone():
     c, b = _coord()
     t0 = RP.now()
-    k = _drive(c, b, [30 + 1.0 * i for i in range(40)], 30.0, t0, t0 + 0.2)   # 10 cm/s, blind after 0.2 s
+    k = _drive(c, b, [30 + 1.0 * i for i in range(55)], 30.0, t0, t0 + 0.2)   # 10 cm/s, blind after 0.2 s (cap 40 cm)
     assert k is not None and c.abort and "no camera seeing it" in c.abort
     blind_cm = 30 + k - 32
     assert c.BLIND_MAX_CM <= blind_cm + 1.5 <= c.BLIND_MAX_CM + 3

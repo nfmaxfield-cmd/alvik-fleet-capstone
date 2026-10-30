@@ -480,6 +480,21 @@ with a random sign (Nick's brief), gyro errors 6.5-8.5 % round Nick's 7.5 % with
 | `stopall` copies (stop_all.py STOP_REPEATS, STOP_GAP_S) | 3 x 0.2 s | No DOE: a repeated `stop` is harmless | - | set |
 | Practice dance length (examples/practice/dance.json) | 10 s | No DOE: display only | - | set |
 
+## Mirroring (2026-10-29 evening, built; docs/build-reports/e02-oct29-mirroring.md)
+
+| Number (where) | Value now | Experiment that would set it | Needs | Status |
+|---|---|---|---|---|
+| Mirrored legs' planned speed (missions mirror_cruise_cms) | 8 cm/s | 7 / 8 / 9 cm/s with a 3 s pause and a 5 s late start: lane-end mirror error against mission length | Simulator, then board | open |
+| Fastest re-timed leg (mirror_max_cms) | 10 cm/s (Nick) | 10 / 11.5 / 13 cm/s: line check p95 on the re-timed legs | Board | open (Nick's band; only if 10 proves too slow to catch up) |
+| Leader's wait tolerance (run_plan MIRROR_HOLD_TOL_S) | 0.1 s | 0.1 / 0.25 / 0.5 s: lane-end time error and number of waits | Simulator | open (0.25 left 0.53 s once) |
+| Turn pause in the time to go (MIRROR_TURN_PAUSE_EST_S) | 0.5 s | not worth one: re-measured every step | - | ruled out |
+| Longest wait for the partner (mirror_wait_max_s) | 8 s | not worth one: only bounds a wait | - | ruled out |
+| Innermost lane pair apart (missions mirror_centre_gap) | 26.4 cm (2 x 6.72 turn radius + 13) | 22.5 / 26.4 / 30 cm: camera's closest approach while both turn at the inner lanes | Board | open (22.5 gave 9.0-9.4 cm in the simulator) |
+| "Was moving" at a sensor stop (run_plan MOVING_CM) | 2 cm | 1 / 2 / 4 cm over the five releases' sensor stops | Logs | open |
+| Held robot's outline (out_obstacle) | 8 cm net less 1.5 cm margin | none: Nick's rule (open question 44) | - | set by decision |
+| Left's lowest stop limit (front_stop ROBOT_MIN_CM) | 9 cm (Nick) | brick test at 9 / 10 cm on Left (run sheet appendix C) | Board | open |
+| Blind cap (run_plan BLIND_MAX_CM) | 40 cm (Nick) | 25 / 30 / 40 cm at the sun's hour: blind stops, error when seen again | Board | open |
+
 ## Already set by data
 
 - **Line edge cue edge_thr 150** (e02.py SAFETY_SETTINGS): plywood reads 52-84 in every E02 session, the two real

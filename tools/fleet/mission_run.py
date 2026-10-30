@@ -204,6 +204,8 @@ def run(args):
           "--place-tol-cm", "4"]
     if not args.no_turn_pause:
         rp += ["--turn-pause"]         # after each turn, stand until the cameras agree (2026-10-29)
+    if args.no_mirror:
+        rp += ["--no-mirror"]          # mirrored legs at their planned speed, no waits (the points still measured)
     if args.below_net_doe:
         rp += ["--below-net-doe"]
     for c in EDGE_GUARD:
@@ -361,6 +363,16 @@ def summarise(out, sess, frames, cond):
              robots_out=rs.get("robots_out"), plans_refused=rs.get("plans_refused"),
              sensor_stops=len(rs.get("sensor_stops") or []), confirm_checks=rs.get("confirm_checks"),
              battery=rs.get("battery"), start_checks=rs.get("start_checks"))
+    mir = rs.get("mirror") or {}
+    if mir.get("on"):
+        s["mirror"] = {k: mir.get(k) for k in ("lane_ends", "all_points", "holds", "retimed_legs", "target_s",
+                                                "target_cm")}
+        le = mir.get("lane_ends") or {}
+        if le.get("time_s"):
+            say("mirroring: %d lane ends, time apart max %.2f s (median %.2f), position max %.1f cm (median %.1f); "
+                "%d within %.1f s and %.0f cm" % (le["time_s"]["n"], le["time_s"]["max"], le["time_s"]["median"],
+                                                   le["pos_cm"]["max"], le["pos_cm"]["median"], le["within_target"],
+                                                   mir.get("target_s") or 0.5, mir.get("target_cm") or 3.0))
     sim = rs.get("simulator") or {}
     if sim:
         s["sim"] = {k: sim.get(k) for k in ("min_body_gap_cm", "min_body_gap_at", "collision", "min_open_edge_cm",
@@ -460,6 +472,9 @@ def main(argv=None):
                    help="simulator only: allow robot gaps under the 8 cm safety net (the safety-net DOE)")
     ap.add_argument("--setting", action="append", default=[], metavar="NAME=VALUE",
                     help="a mission setting (missions.SETTINGS), e.g. separation_cm=6.5 (repeatable)")
+    ap.add_argument("--no-mirror", action="store_true",
+                    help="Left and Right are not re-timed to mirror each other (before 2026-10-29 20:06); default: the "
+                         "late one speeds up and the leader slows down (5-10 cm/s) or waits (run_plan's mirror sync)")
     args = ap.parse_args(argv)
     return run(args)
 

@@ -329,9 +329,15 @@ def _norm_tasks(t, board_names, rn, spots=None):
             visit.append({"goto": list(spots[nm]), "spot": nm})
         elif isinstance(it, dict) and "goto" in it:
             g = {"goto": _pt(it["goto"], "robot %s goto" % rn)}
-            for k in ("spot", "label", "lane", "end", "run_in_cm", "risky"):
+            for k in ("spot", "label", "lane", "end", "run_in_cm", "risky", "mirror"):
                 if k in it:
                     g[k] = it[k]
+            if it.get("cruise_cms") is not None:
+                # its own drive speed (missions.py mirrored legs, 2026-10-29): 1-15 cm/s
+                v = float(it["cruise_cms"])
+                if not 1.0 <= v <= 15.0:
+                    raise MapError("robot %s: cruise_cms %.1f is outside 1-15 cm/s" % (rn, v))
+                g["cruise_cms"] = v
             visit.append(g)
         elif isinstance(it, dict) and "wait_s" in it:
             w = float(it["wait_s"])

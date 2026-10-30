@@ -25,9 +25,6 @@ Answered ones move to the bottom with the answer and date.
     reprint); or deepen the dock's back to about 9.5 cm (dock grows 16 -> 22 cm).
 43. Card and paper thickness for the dock pocket (assumed 0.45 mm card, 0.10 mm paper): measure 10 sheets of each
     with a ruler?
-44. A robot that dies or restarts is now passed at 3.2-6.9 cm (bodies) in 9 of 24 simulated runs: it is a fixed obstacle
-    with 2.5 cm round it, and the 8 cm net covers live robots only. Keep it a brick (as now), or keep it 8 cm away like
-    a live robot (fewer routes on small tables)? (monday-2robot-sweep.md)
 45. Safety net: go to 6.5 cm for Monday after a 10 min board check (5 Chickens, 2 circles), and should Chicken's "never
     under" move with it or stay at 8? (safety-gap-doe.md; 5 cm needs the board DOE)
 46. Left's distance sensor: its centre-right zone reads under 12 cm in about a third of its readings (others 0-5 %) and
@@ -131,6 +128,13 @@ Answered ones move to the bottom with the answer and date.
   - The run sheet's recorder clash (setup needed the recorder stopped, the warm-up needed it running): the setup now
     reads the recorder's pictures and starts it when it is not running; the old chessboard way stops and restarts it
     itself.
+- 2026-10-29 20:06-20:08 (Nick approved; built in docs/build-reports/e02-oct29-mirroring.md):
+  - Q44: a moving robot keeps the same 8 cm from a held or parked robot as from a live one (the held robot's outline
+    grows by 6.5 cm, on top of the planner's 1.5 cm margin).
+  - Straightening report Q1-Q3: blind cap 40 cm; a robot under 9 cm from an edge at the start still turns (from the
+    7 cm rule, no refusal); the 3 deg tolerance and the 8 s re-check stay.
+  - False-stops report Q1 and Q3: Left's stop limit never under 9 cm; a second stop at the same place confirms only
+    if the robot was moving at one of the two.
 - 2026-10-29 16:2x (Nick approved the rules audit's recs; built in docs/build-reports/e02-oct29-false-stops.md):
   - Q68: every robot now needs 3 distance-sensor readings in a row before a stop (with Left at 10 cm: 0 false stops
     in the 232 replayed drives; a real brick is met 0.7 cm nearer by Right, 2.7 cm by Left, simulator). Plus a floor

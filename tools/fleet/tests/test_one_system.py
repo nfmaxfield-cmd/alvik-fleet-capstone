@@ -65,7 +65,8 @@ def test_monday_circle_together_and_swapped(plans):
 
 def test_monday_mows_every_lane_once(plans):
     mm, plan = plans[(130, 70)]
-    lanes, _, _, _ = MS.lanes_x(mm, None)
+    # Monday mirrors (2026-10-29 20:06): its lanes are the symmetric ones
+    lanes, _, _, _ = MS.lanes_x(mm, None, mirror=bool(mm["mission"].get("mirror")))
     seen = []
     for r in mm["tasks"].values():
         for v in r["visit"]:
@@ -82,7 +83,7 @@ def test_monday_lanes_17_in_and_body_7_from_every_edge(plans, size):
     import numpy as np
     mm, plan = plans[size]
     W, H = size
-    lanes, (a0, a1), long_x, inset = MS.lanes_x(mm, None)
+    lanes, (a0, a1), long_x, inset = MS.lanes_x(mm, None, mirror=bool(mm["mission"].get("mirror")))
     assert inset == 17.0 and lanes[0] == 17.0 and lanes[-1] <= W - 17.0 and (a0, a1) == (17.0, H - 17.0)
     body = FM.body_of(mm)
     worst = math.inf

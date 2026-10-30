@@ -5,7 +5,8 @@ docs/build-reports/e02-oct29-rules-audit.md, recs 1, 2, 4):
   1. 3 readings in a row before a stop, for every robot (run_plan OBSTACLE_READINGS, firmware obs_n).
   2. The floor check: while a robot stands still at connect, its five front zones are read for a few seconds; its stop
      limit (firmware follow_look_cm) is set a margin below the lowest level the floor reached for 3 readings in a row,
-     never above its ceiling (12 cm; Left 10 cm, engine_checks.ROBOT_SETTINGS) and never below 8 cm.
+     never above its ceiling (12 cm; Left 10 cm, engine_checks.ROBOT_SETTINGS) and never below 8 cm (Left: 9 cm,
+     ROBOT_MIN_CM, Nick 2026-10-29 20:06).
   3. Unconfirmed obstacles: the robot always stops; what its sensor saw goes on the planner's map as "unconfirmed"
      unless the camera or a second stop at the same place confirms it. Unconfirmed obstacles expire after
      UNCONFIRMED_S, and are dropped (the plan made again) rather than the run ending with "no plan".
@@ -34,6 +35,17 @@ FLOOR_CAP_CM = 12.0      # firmware params.h follow_look_cm default: no robot's 
 FLOOR_MIN_CM = 8.0       # Nick: "never below about 8 cm". Below it the robot stops for a brick with under ~6 cm left
                          # after braking (safe_front_cm 7 is the turns' limit). DOE: the board's brick test at 8 / 10 /
                          # 12 cm answers how near is still safe
+ROBOT_MIN_CM = {"Left": 9.0}   # Nick (2026-10-29 20:06, question 1 of the false-stops report): Left's stop limit is never
+                               # below 9 cm (the floor check may lower it from 10 to 9, not further). Others: FLOOR_MIN_CM.
+                               # In the simulator 9 cm left 7.5 cm (6.7-8.4) to a brick. DOE: the board's brick test at
+                               # 9 / 10 cm on Left (Monday run sheet, appendix C)
+
+
+def robot_min_cm(name):
+    """The lowest stop limit the floor check may give this robot."""
+    return max(FLOOR_MIN_CM, float(ROBOT_MIN_CM.get(name, FLOOR_MIN_CM)))
+
+
 FLOOR_MARGIN_CM = 1.0    # chosen (audit rec 4: 1 cm): the limit sits this far under the floor's 3-in-a-row level. Replay:
                          # see the build report's margin table (0.5 / 1 / 1.5 / 2 cm). DOE: worth one, on the board: the
                          # floor check then 10 standing turns per robot, margin 0.5 / 1 / 2 cm, false stops counted
@@ -156,15 +168,19 @@ class Unconfirmed:
                 best = min(best, math.hypot(a[0] - b[0], a[1] - b[1]))
         return best
 
-    def near(self, points):
+    def near(self, points, moving=None):
         """ids of the sensor obstacles of this run (on the map now, or already expired or dropped) whose outline comes
         within near_cm of these points. An expired or dropped one counts too: a real brick the robot meets again after
         its first stop was dropped is confirmed by the second stop (simulator, 29 Oct: without this a brick no camera
-        saw was dropped and met 30 times, and touched)."""
-        return [h["id"] for h in self.history if self._dist(points, h["points"]) < self.near_cm]
+        saw was dropped and met 30 times, and touched). moving (Nick, 2026-10-29 20:06): True / False for the new stop:
+        an earlier stop counts only if the robot was moving at one of the two (two standing stops after turns are the
+        false-stop pattern). None: any earlier stop counts (as before)."""
+        return [h["id"] for h in self.history if self._dist(points, h["points"]) < self.near_cm and
+                (moving is None or moving or h.get("moving") in (True, None))]
 
-    def add(self, ob, robot):
-        rec = dict(id=ob["id"], robot=robot, t=self.now(), points=[list(p) for p in ob["points"]], end=None)
+    def add(self, ob, robot, moving=None):
+        rec = dict(id=ob["id"], robot=robot, t=self.now(), points=[list(p) for p in ob["points"]], end=None,
+                   moving=moving)
         self.items[ob["id"]] = rec
         self.history.append(rec)
         return rec

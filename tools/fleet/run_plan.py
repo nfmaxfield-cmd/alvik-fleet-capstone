@@ -558,6 +558,7 @@ class Coordinator:
             if st["status"] in ("sent", "acked"):
                 st["status"] = "started"
                 st["t_started"] = t
+                st["pose_started"] = (x, y, th)
                 stp = self.steps(b.name)[i]
                 if stp["type"] == "dance" and not stp.get("dance_ms"):
                     # dancing until switched off (Monday's end): its part of the plan is done once it starts
@@ -571,6 +572,7 @@ class Coordinator:
                 st["status"] = "done"
                 st["t_done"] = t
                 st["info"] = info
+                self.mirror_arrived(b, i, t)
                 stp = self.steps(b.name)[i]
                 if stp.get("phase") == "confirm" and stp["type"] == "drive":
                     self.confirm_check(b, i, (x, y, th))
@@ -686,6 +688,7 @@ class Coordinator:
                 st["status"] = "done"
                 st["t_done"] = t
                 st["info"] = st.get("info") or "(seen in FOLLOW)"
+                self.mirror_arrived(b, i, t)
             if sid == last_failed and st["status"] in ACTIVE:
                 st["status"] = "failed"
                 st["info"] = "failed (STEP record lost)"
@@ -740,6 +743,9 @@ class Coordinator:
                     break
                 if not self.turn_pause_open(b, i, t):
                     break                                  # standing after a turn until the cameras agree
+                m_ok, m_v = self.mirror_gate(b, i, t)
+                if not m_ok:
+                    break                                  # the leader waits for its mirror partner (mirroring)
                 sid = b.next_id
                 b.next_id += 1
                 b.ids[i] = sid
@@ -749,7 +755,10 @@ class Coordinator:
                     # a wait for a mission time (a beat, a meet): only what is left of it now, so a robot that
                     # arrives late does not wait the whole planned wait on top
                     wms = max(0, int(round((self.plan_start + stp["t_end"] - t) * 1000)))
-                st.update(status="sent", t_sent=t, text=step_command(sid, stp, wms), sends=1)
+                if m_v is not None:
+                    stp = dict(stp, speed=m_v)            # re-timed for mirroring: this drive's speed only
+                st.update(status="sent", t_sent=t, text=step_command(sid, stp, wms), sends=1,
+                          speed_sent=m_v if m_v is not None else stp.get("speed"))
                 self.send(n, st["text"])
                 self.log("step_sent", robot=n, id=sid, i=i, plan=self.plan_no, text=st["text"])
                 break           # the next one goes once this one is acked
@@ -1146,9 +1155,18 @@ class Coordinator:
                 pts.append(np.c_[fr[0] + body.r_turn * np.cos(a), fr[1] + body.r_turn * np.sin(a)])
         hull = G.convex_hull(np.vstack(pts))
         c = hull.mean(0)
-        hull = hull + 1.0 * (hull - c) / np.maximum(np.linalg.norm(hull - c, axis=1)[:, None], 1e-6)
+        # Nick (2026-10-29 20:06, open question 44): a moving robot keeps the same 8 cm from a held or parked robot as
+        # from a live one. The planner keeps safety_margin_cm from an obstacle, so the outline grows by the rest of the
+        # net (8 - 1.5 = 6.5 cm). Before: 1 cm, and Right passed a held Left at 3.4-5.9 cm (false-stops report)
+        sep = max(float(getattr(self.args, "min_gap_cm", EC.MIN_GAP_CM) or EC.MIN_GAP_CM), EC.MIN_GAP_CM)
+        grow = max(1.0, sep - float((self.plan.get("settings") or {}).get("safety_margin_cm", 1.5)))
+        # a true offset (each corner rounded by a disc of that radius, 16 points), not a push out from the middle,
+        # which along the sides gave only 70 % of it
+        a_ = np.linspace(0, 2 * math.pi, 16, endpoint=False)
+        disc = np.c_[np.cos(a_), np.sin(a_)] * (grow / math.cos(math.pi / 16))
+        hull = G.convex_hull((hull[:, None, :] + disc[None, :, :]).reshape(-1, 2))
         return {"id": "out-%s" % b.name, "shape": "polygon", "points": hull.round(2).tolist(), "source": "robot_out",
-                "time": FM.now_iso()}
+                "time": FM.now_iso(), "gap_cm": round(grow, 2)}
 
     @staticmethod
     def without(plan, names):
@@ -1212,12 +1230,33 @@ class Coordinator:
             u = self._unconf = FSTOP.Unconfirmed(now, expire_s=getattr(self.args, "unconfirmed_s", FSTOP.UNCONFIRMED_S))
         return u
 
+    MOVING_CM = 2.0     # chosen: a robot "was moving" at a sensor stop when the step it stopped in had taken it this far
+                        # (a drive or an arc). The false stops of 29 Oct came standing after a turn, at the drive's
+                        # start (0-1 cm). DOE note: worth one in the logs: 1 / 2 / 4 cm against the five releases'
+                        # sensor stops (how many false stops each would count as moving)
+
+    def was_moving(self, b, i, pose):
+        """Nick (2026-10-29 20:06): a second stop at the same place confirms an obstacle only if the robot was moving at
+        one of the two stops. Moving: step i is a drive or arc and took it MOVING_CM or more before the stop."""
+        stp = self.steps(b.name)[i] if i < len(self.steps(b.name)) else {}
+        if stp.get("type") not in ("drive", "arc", "approach"):
+            return False
+        p0 = b.stat[i].get("pose_started") if i < len(b.stat) else None
+        if p0 is None:
+            p0 = stp.get("from")
+        return p0 is not None and math.hypot(pose[0] - p0[0], pose[1] - p0[1]) >= self.MOVING_CM
+
     def mark_unconfirmed(self, b, ob):
         if ob is None or not getattr(self.args, "unconfirmed_s", FSTOP.UNCONFIRMED_S):
             return
         u = self.unconf()
         by = (getattr(self, "sensor_stops", None) or [{}])[-1].get("camera")
-        near = u.near(ob["points"])
+        near = u.near(ob["points"], moving=ob.get("moving"))
+        if not by and not near and u.near(ob["points"]):
+            self.say("%s: stopped again where an earlier stop was, but it was standing both times (a reading after a "
+                     "turn, not a drive into something): not confirmed" % b.name)
+            self.log("obstacle_not_confirmed", id=ob["id"], robot=b.name, why="standing at both stops",
+                     also=u.near(ob["points"]))
         if by or near:
             on_map = {o.get("id") for o in self.m.get("obstacles", [])}
             back = []
@@ -1239,7 +1278,7 @@ class Coordinator:
                          % b.name)
             self.log("obstacle_confirmed", id=ob["id"], robot=b.name, by=by or "second stop", also=near)
             return
-        u.add(ob, b.name)
+        u.add(ob, b.name, moving=ob.get("moving"))
         ob["unconfirmed"] = True
         self.say("%s: no camera sees it: mapped as unconfirmed (it leaves the map in %.0f s unless the camera or a "
                  "second stop confirms it)" % (b.name, u.expire_s))
@@ -1563,6 +1602,12 @@ class Coordinator:
         live = {"t": round(t, 2), "t_run": round(t - self.t_run, 1) if self.t_run_started() else None,
                 "plan_no": self.plan_no, "replans": len(self.replans), "result": self.abort or ("done" if final else None),
                 "robots": rob, "obstacles": self.live_obstacles()}
+        mp = getattr(self, "mirror_points", None)
+        if self.mirror_cfg():
+            live["mirror"] = {"robots": self.mirror_cfg()["robots"], "n": len(mp or []),
+                              "last": mp[-1] if mp else None,
+                              "worst_s": max((q["time_err_s"] for q in mp), default=None) if mp else None,
+                              "worst_cm": max((q["pos_err_cm"] for q in mp), default=None) if mp else None}
         try:
             tmp = os.path.join(self.outdir, "live.json.tmp")
             with open(tmp, "w") as fh:
@@ -1635,6 +1680,8 @@ class Coordinator:
                 b.own_until = now() + OWN_POSE_WINDOW_S
             ob = self.sensor_obstacle(b, pose, front, info)
             self.sensor_agreement(b, ob, info)
+            if ob is not None:
+                ob["moving"] = self.was_moving(b, i, pose)
             self.mark_unconfirmed(b, ob)
             if ob is None:
                 self.say("%s: its distance sensor saw another robot ahead (%s); re-planning" % (b.name, info))
@@ -1918,6 +1965,236 @@ class Coordinator:
                 o["one_camera"] += 1
         return out
 
+    # -- mirroring (Nick, 2026-10-29 20:06-20:08): Left and Right mirror each other across the table's middle line ------
+    # Both follow a shared timeline of mirrored points (missions.build gives each mirrored goto a key its partner's
+    # mirror image shares: plan steps "mirror" = the point, "mirror_leg" = the steps driving to it). When they drift out
+    # of step (one corrected, paused or slowed), each drive towards the next matching point is sent at a speed that
+    # brings both there together: the target time comes from each robot's own time to go and its partner's time to
+    # go to the matching spot; the late one speeds up and the leader slows down, within the mission's
+    # mirror_min_cms-mirror_max_cms (Nick: 5-10 cm/s). If speed alone cannot close the gap, the leader waits at the
+    # point where it stands before its next leg. Every matching point is logged (time and position mirror error).
+    MIRROR_TURN_PAUSE_EST_S = 0.5   # chosen: the turn pause's expected length per turn of 20 deg or more, in the time to
+                                    # go (simulator 0.25-1.0 s, turn-pause report). DOE note: not worth one; the time to
+                                    # go is re-measured at every step, so an error here is corrected one step later
+    MIRROR_HOLD_TOL_S = 0.1         # chosen: the leader waits until even its slowest drive would bring it no more than
+                                    # this early. 0.25 left the first lane after the circle 0.53 s apart (61 x 122 dry
+                                    # run, 29 Oct: the wait ends early, then the time-to-go estimates' own error adds
+                                    # to it). DOE note: 0.1 / 0.25 / 0.5 s in the simulator against the lane-end time
+                                    # error and the number of waits
+    MIRROR_SAY_S = 1.0              # the event log names a re-timing when the two are more than this apart (smaller ones
+                                    # are logged only). No DOE: wording
+
+    def mirror_cfg(self):
+        mc = ((self.m.get("mission") or {}).get("mirror") or {})
+        if len(mc.get("robots") or []) != 2:
+            return None
+        return mc
+
+    def mirror_partner(self, n):
+        mc = self.mirror_cfg()
+        if not mc or n not in mc["robots"]:
+            return None
+        p = [x for x in mc["robots"] if x != n][0]
+        if p not in self.names or self.bots[p].out or self.bots[n].out:
+            return None
+        return p
+
+    def mirror_xy(self, x, y):
+        mc = self.mirror_cfg()
+        a = float(mc["at_cm"])
+        return (2 * a - x, y) if mc.get("axis", "x") == "x" else (x, 2 * a - y)
+
+    def _m_adjustable(self, stp):
+        return (stp["type"] == "drive" and stp.get("mirror_leg") and stp.get("phase") != "confirm" and
+                not stp.get("reverse") and stp.get("speed"))
+
+    def _m_dur(self, stp, v=None):
+        """A step's planned time (s) at drive speed v (its own speed if None); waits the planner put in for the other
+        robot count 0 (the "after" order makes them), a wait for a mission time counts what is left of it."""
+        d = float(stp["t_end"] - stp["t_start"])
+        if stp["type"] == "wait":
+            if stp.get("phase") in ("dwell", "pause"):
+                if stp.get("until_s") is not None and self.plan_start is not None:
+                    return max(0.0, self.plan_start + stp["t_end"] - now())
+                return d
+            return 0.0
+        if stp["type"] == "drive" and v and stp.get("speed"):
+            mv = float(stp.get("move_s") or 0.0)
+            d = d - mv + mv * float(stp["speed"]) / float(v)
+        if stp["type"] == "turn" and getattr(self.args, "turn_pause", False) and self.source.live and \
+                abs(stp.get("turn_deg") or 0.0) >= self.TURN_PAUSE_MIN_DEG:
+            d += self.MIRROR_TURN_PAUSE_EST_S
+        return d
+
+    def _m_left(self, b, i, stp, st, t):
+        """What is left of a step that was sent: from the robot's own pose when it has started (a drive: the distance
+        to its end at the speed it was sent; a turn: the angle left), else its whole time at the sent speed."""
+        v = st.get("speed_sent") or stp.get("speed")
+        full = self._m_dur(stp, v)
+        if st["status"] != "started" or b.pose is None:
+            return full
+        if stp["type"] == "drive" and v:
+            rem = math.dist(b.pose[:2], stp["to"][:2])
+            return rem / float(v) + 0.2
+        if stp["type"] == "turn":
+            a = abs((stp["to"][2] - b.pose[2] + 180.0) % 360.0 - 180.0)
+            return a / float(self.plan["settings"].get("turn_dps", 60.0)) + 0.3
+        return max(0.0, full - (t - (st.get("t_started") or t)))
+
+    def _m_key_index(self, n, key):
+        for j, stp in enumerate(self.steps(n)):
+            if stp.get("mirror") == key:
+                return j
+        return None
+
+    def mirror_eta(self, n, iK, t, i_new=None):
+        """(fixed s, adjustable drive cm, arrived at) for robot n to reach its step iK: time that no speed changes (steps
+        sent, turns, settles) and the drive length still to be sent (from step i_new on: the one being sent now).
+        arrived: the time it finished iK if it already has."""
+        b = self.bots[n]
+        steps = self.steps(n)
+        if b.stat[iK]["status"] == "done":
+            return 0.0, 0.0, b.stat[iK].get("t_done") or t
+        fixed, D = 0.0, 0.0
+        for j in range(0, iK + 1):
+            st, stp = b.stat[j], steps[j]
+            if st["status"] == "done":
+                continue
+            if st["status"] in ACTIVE:
+                fixed += self._m_left(b, j, stp, st, t)
+            elif self._m_adjustable(stp):
+                L = math.dist(stp["from"][:2], stp["to"][:2])
+                D += L
+                fixed += self._m_dur(stp) - float(stp.get("move_s") or 0.0)
+            else:
+                fixed += self._m_dur(stp)
+        return fixed, D, None
+
+    def mirror_gate(self, b, i, t):
+        """May step i of robot b go now, and at what speed (None: as planned)? (ok, speed)."""
+        stp = self.steps(b.name)[i]
+        if not stp.get("mirror_leg") or getattr(self, "straightening", False) or getattr(self.args, "no_mirror", False):
+            return True, None
+        p = self.mirror_partner(b.name)
+        if p is None:
+            return True, None
+        mc = self.mirror_cfg()
+        steps = self.steps(b.name)
+        iK = next((j for j in range(i, len(steps)) if steps[j].get("mirror")), None)
+        if iK is None:
+            return True, None
+        key = steps[iK]["mirror"]
+        jK = self._m_key_index(p, key)
+        if jK is None:
+            return True, None
+        vmin, vmax = float(mc.get("min_cms", 5.0)), float(mc.get("max_cms", 10.0))
+        vnom = float(mc.get("cruise_cms", 8.0))
+        fn, Dn, _ = self.mirror_eta(b.name, iK, t)
+        fp, Dp, arr_p = self.mirror_eta(p, jK, t)
+
+        def rng(f, D):
+            return (t + f + D / vmax, t + f + D / vmin, t + f + D / vnom) if D > 0 else (t + f,) * 3
+        lo_n, hi_n, nom_n = rng(fn, Dn)
+        if arr_p is not None:
+            lo_p = hi_p = nom_p = arr_p
+        else:
+            lo_p, hi_p, nom_p = rng(fp, Dp)
+        lo, hi = max(lo_n, lo_p), min(hi_n, hi_p)
+        target = min(max((nom_n + nom_p) / 2.0, lo), hi) if lo <= hi else lo
+        # hold: even its slowest leaves it early, and it stands at a point (the first step of a leg)
+        first_of_leg = i == 0 or steps[i - 1].get("mirror") or steps[i - 1].get("mirror_leg") != stp.get("mirror_leg")
+        ms = self.__dict__.setdefault("mirror_state", {})
+        hk = (self.plan_no, b.name, key)
+        if hi_n < target - self.MIRROR_HOLD_TOL_S and first_of_leg:
+            h = ms.setdefault(hk, {"t0": t, "said": False})
+            if t - h["t0"] < float(mc.get("wait_max_s", 8.0)):
+                if not h["said"]:
+                    h["said"] = True
+                    self.say("mirroring: %s waits where it is for %s (about %.1f s; even at %.0f cm/s it would reach "
+                             "the next matching point early)" % (b.name, p, target - hi_n, vmin))
+                    self.log("mirror_hold", robot=b.name, partner=p, key=key, i=i, wait_s=round(target - hi_n, 2))
+                return False, None
+            if not h.get("gave_up"):
+                h["gave_up"] = True
+                self.say("%s waited %.0f s for %s at a mirrored point: it carries on (not mirrored until they meet "
+                         "again)" % (b.name, t - h["t0"], p))
+                self.log("mirror_give_up", robot=b.name, partner=p, key=key, waited_s=round(t - h["t0"], 2))
+            return True, None
+        h = ms.get(hk)
+        if h is not None and "added_s" not in h:
+            h["added_s"] = round(t - h["t0"], 2)
+            self.__dict__.setdefault("mirror_holds", []).append(dict(robot=b.name, key=key, s=h["added_s"],
+                                                                     t_run=round(t - self.t_run, 2)))
+        if not self._m_adjustable(stp):
+            return True, None
+        if Dn <= 0:
+            return True, None
+        room = target - t - fn
+        v = vmax if room <= 0 else min(vmax, max(vmin, Dn / room))
+        v = round(v, 2)
+        gap = nom_n - nom_p
+        rec = dict(robot=b.name, partner=p, i=i, key=key, speed=v, planned=stp["speed"], behind_s=round(gap, 2),
+                   target_in_s=round(target - t, 2), partner_in_s=round((arr_p or nom_p) - t, 2))
+        self.log("mirror_retime", **rec)
+        rt = self.__dict__.setdefault("mirror_retimes", {})
+        rt[b.name] = rt.get(b.name, 0) + (1 if abs(v - float(stp["speed"])) > 0.05 else 0)
+        last = ms.get(("said", b.name))
+        if abs(gap) > self.MIRROR_SAY_S and (last is None or t - last > 5.0):
+            ms[("said", b.name)] = t
+            self.say("mirroring: at the planned speed %s would reach the next matching point %.1f s %s %s: its next "
+                     "leg at %.1f cm/s (planned %.0f)" % (b.name, abs(gap), "after" if gap > 0 else "before", p, v,
+                                                          stp["speed"]))
+        return True, v
+
+    def mirror_arrived(self, b, i, t):
+        """Robot b finished step i: if it is a mirrored point, keep its time and position; once both have it, the time
+        and position mirror error (positions from the camera when it has a fresh spot for both, else their own)."""
+        stp = self.steps(b.name)[i] if i < len(self.steps(b.name)) else {}
+        key = stp.get("mirror")
+        mc = self.mirror_cfg()
+        if not key or not mc or b.name not in mc["robots"]:
+            return
+        arr = self.__dict__.setdefault("mirror_arr", {})
+        cam = getattr(b, "last_cam", None)
+        fresh = cam is not None and getattr(b, "cam_t", None) is not None and t - b.cam_t <= 0.4
+        arr.setdefault(key, {})[b.name] = dict(t=t, own=list(b.pose[:2]) if b.pose else list(stp["to"][:2]),
+                                               cam=list(cam[:2]) if fresh else None, label=stp.get("label", ""))
+        if len(arr[key]) != 2 or arr[key].get("_done"):
+            return
+        a, c = mc["robots"]
+        A, C = arr[key][a], arr[key][c]
+        use = "cam" if A["cam"] and C["cam"] else "own"
+        mx, my = self.mirror_xy(*C[use])
+        perr = math.hypot(A[use][0] - mx, A[use][1] - my)
+        terr = abs(A["t"] - C["t"])
+        rec = dict(key=key, label=A["label"] or C["label"], time_err_s=round(terr, 3), pos_err_cm=round(perr, 2),
+                   pos_from=use, first=a if A["t"] <= C["t"] else c, t_run=round(max(A["t"], C["t"]) - self.t_run, 2),
+                   lane_end="mow lane" in (A["label"] or C["label"] or ""),
+                   ok=terr <= float(mc.get("tol_s", 0.5)) and perr <= float(mc.get("tol_cm", 3.0)))
+        arr[key]["_done"] = True
+        self.log("mirror_point", **rec)
+        self.__dict__.setdefault("mirror_points", []).append(rec)
+
+    def mirror_summary(self):
+        mc = self.mirror_cfg()
+        pts = getattr(self, "mirror_points", [])
+        if not mc:
+            return {"on": False}
+
+        def stats(xs):
+            if not xs:
+                return None
+            xs = sorted(xs)
+            return {"max": round(xs[-1], 3), "median": round(statistics.median(xs), 3), "n": len(xs)}
+        lane = [q for q in pts if q["lane_end"]]
+        return {"on": True, "robots": mc["robots"], "target_s": mc.get("tol_s"), "target_cm": mc.get("tol_cm"),
+                "points": pts, "lane_ends": {"time_s": stats([q["time_err_s"] for q in lane]),
+                                             "pos_cm": stats([q["pos_err_cm"] for q in lane]),
+                                             "within_target": sum(1 for q in lane if q["ok"])},
+                "all_points": {"time_s": stats([q["time_err_s"] for q in pts]),
+                               "pos_cm": stats([q["pos_err_cm"] for q in pts])},
+                "holds": getattr(self, "mirror_holds", []), "retimed_legs": getattr(self, "mirror_retimes", {})}
+
     def waiting_for(self, n):
         """Why robot n's next step has not been sent (for the status line)."""
         b = self.bots[n]
@@ -2011,11 +2288,12 @@ class Coordinator:
     BLIND_AFTER_S = 0.6       # no camera fix for this long = no camera sees it (fixes come ~10 a second; the longest
                               # gap in any 29 Oct drive was 0.57 s, rules audit; 0.4 s gave spurious blind starts on
                               # a loaded dry-run machine). No DOE: a definition
-    BLIND_MAX_CM = 30.0       # the farthest a robot may drive with no camera seeing it, on its own wheels and gyro.
-                              # Nick: 25-30 cm. 30: Monday's diagonal to the meet crosses a 15 cm strip in 27 cm
-                              # (dry run, both cameras blind at x = 30-45: stopped at 25 cm). 29 Oct logs: blind error p95 3.8 cm after 25 cm (median 1.5), 4.4
-                              # after 40 (BLIND_ERR_*). DOE: 15 / 25 / 35 cm against blind stops and the error
-                              # at reappearance (board, the sun's strip)
+    BLIND_MAX_CM = 40.0       # the farthest a robot may drive with no camera seeing it, on its own wheels and gyro.
+                              # Nick (2026-10-29 20:06, question 1 of the straightening report): 40 cm (was 30). At 30
+                              # a lane inside a strip both cameras lose (x = 30-45) stopped Monday at 74-84 s. 29 Oct
+                              # logs: blind error p95 3.8 cm after 25 cm (median 1.5), 4.4 after 40 (BLIND_ERR_*), still
+                              # under the 6 cm camera guard. DOE: 25 / 30 / 40 cm on the board at the sun's hour,
+                              # against blind stops and the error when seen again
     BLIND_ERR_BASE_CM = 2.0   # the blind pose's p95 error, from 29 Oct's logs (dead reckoning from wheel_scale 0.979 /
     BLIND_ERR_PER_CM = 0.07   # gyro_scale 1.075 against both cameras, 22,000 stretches): p95 2.2 cm after 5 cm, 3.8 after
                               # 25, 4.4 after 40 = about 2.0 + 0.07 per cm driven blind (report, appendix)
@@ -2240,7 +2518,8 @@ class Coordinator:
                 "straighten": getattr(self, "straighten_record", None),
                 "blind": getattr(self, "blinds", []),
                 "turn_pause": {"on": bool(getattr(self.args, "turn_pause", False)) and self.source.live,
-                               "robots": self.turn_pause_summary()}}
+                               "robots": self.turn_pause_summary()},
+                "mirror": self.mirror_summary()}
 
 
 # ----------------------------------------------------------------------------
@@ -2507,7 +2786,8 @@ def floor_check(coord, link, args, names):
         if ahead and fl.get("floor_cm") is not None:
             fl = dict(fl, floor_cm=None, why="%s is %.0f cm in front of it (it would be read as the floor)" % ahead)
         lim, rule = FSTOP.stop_limit(fl.get("floor_cm"), ceiling, getattr(args, "floor_margin_cm",
-                                                                           FSTOP.FLOOR_MARGIN_CM))
+                                                                           FSTOP.FLOOR_MARGIN_CM),
+                                     lo_cm=FSTOP.robot_min_cm(n))
         words = FSTOP.limit_words(n, fl, lim, rule, ceiling, getattr(args, "floor_margin_cm", FSTOP.FLOOR_MARGIN_CM))
         coord.say("floor check: " + words)          # (said: Mission Control's event log shows it)
         coord.log("floor_check", robot=n, limit_cm=lim, rule=rule, ceiling_cm=ceiling, floor=fl, words=words)
@@ -3114,6 +3394,9 @@ def main(argv=None):
     ap.add_argument("--below-net-doe", action="store_true",
                     help="with --dry-run only: let --min-gap-cm stay under the 8 cm safety net (the simulator's "
                          "safety-net DOE); otherwise a 2-robot plan always runs with the net at 8 cm or more")
+    ap.add_argument("--no-mirror", action="store_true",
+                    help="a mirrored mission (Monday: Left and Right) without the mirror sync: every leg at its planned "
+                         "speed, no waits for the partner (the matching points are still measured)")
     ap.add_argument("--turn-pause", action="store_true",
                     help="after each turn on the spot, stand until a fresh camera fix (both cameras', or one when the "
                          "other cannot see it) agrees with the robot's own pose within %.1f cm, at most %.0f s, then "

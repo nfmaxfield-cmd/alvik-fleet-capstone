@@ -263,6 +263,53 @@ def install(sim, cond, seed):
             rb._physics = lambda h, still: orig_phys(h, True if state["done"] else still)
     # ---- the floor in the front zones, and false stops (false-stops build, 2026-10-29)
     floor_and_phantoms(sim, cond, seed)
+    # ---- a robot held still for a while, and a robot nudged off its own pose (mirroring build, 2026-10-29)
+    holds_and_nudges(sim, cond)
+
+
+def holds_and_nudges(sim, cond):
+    """hold   [{"name": "Left", "t": 50, "s": 3}]: the first step the robot starts at or after t s (after the plan's first
+              step) stands s seconds before it runs: a robot paused mid-mowing; t 0: a robot that starts s late. Logged
+              as a sim event (hold).
+    nudge  [{"name": "Left", "t": 10, "cm": 2.5}]: at t s its TRUE pose moves cm back along its heading, its own pose
+              not: the camera's fixes then correct it by cm (a position reset), and it drives the extra cm. Logged
+              (nudge)."""
+    holds = cond.get("hold") or []
+    for h in holds:
+        rb = sim.robots[h["name"]]
+        st = {"done": False}
+        orig = rb.run_step
+
+        def run_step(s_, rb=rb, h=h, st=st, orig=orig):
+            if not st["done"] and sim.t_plan0 is not None and time.time() - sim.t_plan0 >= float(h["t"]):
+                st["done"] = True
+                sim.event(dict(kind="hold", robot=rb.name, t=round(time.time() - sim.t_plan0, 2), s=float(h["s"]),
+                               step=s_.get("id")))
+                end = time.time() + float(h["s"])
+                rb.set_wheels_speed(0.0, 0.0)
+                while time.time() < end:
+                    # should_abort() runs the firmware's tick (FOLLOW records, the radio): a held robot keeps
+                    # talking, it only does not move (without it the robot went silent and was taken as dead)
+                    if rb.should_abort() and rb.abort_reason:
+                        break
+                    rb.loop_delay(10)
+            return orig(s_)
+        rb.run_step = run_step
+    for nd in cond.get("nudge") or []:
+        rb = sim.robots[nd["name"]]
+        stn = {"done": False}
+        orig_adv = rb.advance
+
+        def advance(dt_ms, busy=False, rb=rb, nd=nd, stn=stn, orig_adv=orig_adv):
+            if not stn["done"] and sim.t_plan0 is not None and time.time() - sim.t_plan0 >= float(nd["t"]):
+                stn["done"] = True
+                cm = float(nd.get("cm", 2.5))
+                rb.x -= cm * math.cos(rb.th)
+                rb.y -= cm * math.sin(rb.th)
+                sim.event(dict(kind="nudge", robot=rb.name, t=round(time.time() - sim.t_plan0, 2), cm=cm,
+                               true=[round(rb.x, 2), round(rb.y, 2)]))
+            orig_adv(dt_ms, busy)
+        rb.advance = advance
 
 
 def floor_and_phantoms(sim, cond, seed):

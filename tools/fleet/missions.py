@@ -94,6 +94,27 @@ SETTINGS = {
                                   # 8 cm separation, rounded up (20 cm failed to plan: neighbours turning on their
                                   # spots came 6.6 cm apart). Geometry, no DOE
     "separation_cm": 8.0,         # the plan's closest two bodies for these missions: chicken_min_cm, for every pair
+    # Mirroring (Nick, 2026-10-29 20:06-20:08): Left and Right mirror each other across the table's middle line (x =
+    # the centre) on every mirrored leg (mowing, the walk to the meet, spreading out); run_plan's mirror sync re-times
+    # them when they drift out of step (the leader slows, the late one speeds up, within mirror_min / max_cms; if speed
+    # cannot close the gap the leader waits at its next point). The circle and Chicken stay synced moments (they are
+    # point-symmetric, not mirrored: each robot circles / swerves the same way round)
+    "mirror_cruise_cms": 8.0,     # chosen: the mirrored legs' planned speed. It must sit inside Nick's 5-10 cm/s band
+                                  # (accuracy worsens above 10: p95 about 3.5 cm at 13) with room both ways: at 10 (the
+                                  # planner's cruise) a late robot could not speed up at all. 8 gives the late one +25 %
+                                  # and the leader -37 %. Costs about 6-9 s on Monday's mowing. DOE note: worth one in
+                                  # the simulator then the board: 7 / 8 / 9 cm/s against the lane-end mirror error after
+                                  # a 3 s pause and the mission's length
+    "mirror_min_cms": 5.0,        # Nick (2026-10-29 20:06): the slowest a re-timed leg is sent at. No DOE: his band
+    "mirror_max_cms": 10.0,       # Nick: the fastest (accuracy worsens above 10 cm/s). No DOE: his band (a board DOE of
+                                  # 10 / 11.5 / 13 cm/s against the line check p95 would show whether 11 is still fine)
+    "mirror_tol_s": 0.5,          # Nick (agreed 2026-10-29): the robots reach matching points within 0.5 s of each other
+    "mirror_tol_cm": 3.0,         # ... and within 3 cm of each other's mirrored position (the report's target)
+    "mirror_wait_max_s": 8.0,     # chosen: the longest the leader waits at one point for the late robot when speed alone
+                                  # cannot close the gap; past it the leader carries on (mirroring is given up until
+                                  # the next synced moment, said in the event log). Covers Monday's injected cases (3 s
+                                  # pause, 5 s late start) with room. DOE note: not worth one (it only bounds a wait);
+                                  # the simulator's late-start runs show how long the waits are
 }
 
 ROLE_OF = {"Left": "A", "Center": "B", "Right": "C"}
@@ -846,9 +867,31 @@ def _frac(m, fx, fy):
     return f["x_min"] + fx * (f["x_max"] - f["x_min"]), f["y_min"] + fy * (f["y_max"] - f["y_min"])
 
 
-def lanes_x(m, s):
+MIRROR_LANE_STRETCH_CM = 1.0   # mirrored lanes: each half's lanes are spread evenly, at most mow_lane_cm + this apart
+                               # (Monday: 10.1-12.3 cm; 8 lanes on 61 x 122 as before). No DOE: looks (coverage)
+
+
+MIRROR_TURN_R_CM = 6.72   # the 9.5 cm square's corner radius about its middle: two robots turning on the spot at the
+                          # innermost lanes at the same moment (mirrored, they do) swing their corners this far out
+
+
+def mirror_centre_gap(m):
+    """Mirrored lanes: the innermost pair (one each side of the middle line) this far apart, centre to centre, so both
+    robots mow them at once and even while both turn on the spot at their lane ends the bodies stay STEP_AWAY_GAP_CM
+    apart by plan (the step-away's 13 cm, about 11 measured). With lanes 12 cm apart the first inner lanes were 2-3 cm
+    apart and one robot had to wait (the step-away), which no mirror can have. A first version kept 13 cm only with
+    the robots standing square: turning together their corners came 9.0-9.4 cm apart in the simulator (29 Oct).
+    The strip between them is where the robots circle."""
+    body = float((m.get("robot") or {}).get("width_cm", 9.5))
+    r = max(MIRROR_TURN_R_CM, body / math.sqrt(2.0))
+    return 2.0 * r + STEP_AWAY_GAP_CM
+
+
+def lanes_x(m, s, mirror=False):
     """Lane positions across the table's length (lanes run along the short side, x = const for a long-x table), as
-    mow(along="short") makes them, with the planner's room from open sides."""
+    mow(along="short") makes them, with the planner's room from open sides. mirror=True (Nick, 2026-10-29: Left and Right
+    mirror each other): the lanes are symmetric about the middle line: each half's lanes spread evenly from the first
+    lane (inset from the end) to the innermost one (mirror_centre_gap / 2 from the middle)."""
     s = settings(s)
     f = m["floor"]
     inset = s["mow_inset_cm"]
@@ -859,25 +902,46 @@ def lanes_x(m, s):
     long_x = W >= H
     lo, hi = ((f["x_min"], f["x_max"]) if long_x else (f["y_min"], f["y_max"]))
     lo, hi = lo + inset, hi - inset
+    a0, a1 = ((f["y_min"] + inset, f["y_max"] - inset) if long_x else (f["x_min"] + inset, f["x_max"] - inset))
+    if mirror:
+        c = (lo + hi) / 2.0
+        inner = c - mirror_centre_gap(m) / 2.0
+        span = inner - lo
+        if span <= 0:
+            half = [lo] if lo < c else []
+        else:
+            n = int(math.ceil(span / (s["mow_lane_cm"] + MIRROR_LANE_STRETCH_CM) - 1e-9)) + 1
+            half = [lo + span * k / (n - 1) for k in range(n)]
+        out = [round(v, 2) for v in half] + [round(2 * c - v, 2) for v in reversed(half)]
+        return out, (a0, a1), long_x, inset
     out, v = [], lo
     while v <= hi + 1e-6:
         out.append(round(v, 2))
         v += s["mow_lane_cm"]
     if hi - out[-1] > s["mow_lane_cm"] / 2:
         out.append(round(hi, 2))
-    a0, a1 = ((f["y_min"] + inset, f["y_max"] - inset) if long_x else (f["x_min"] + inset, f["x_max"] - inset))
     return out, (a0, a1), long_x, inset
 
 
-def mow_region(m, s, fx0, fx1, direction, start_xy):
+def mow_region(m, s, fx0, fx1, direction, start_xy, mirror=False):
     """The lanes whose position lies in [fx0, fx1) of the table's length (fx1 = 1 includes the last), visited in
     increasing (direction +1) or decreasing (-1) position, each lane driven end to end, alternating, starting from the
-    end nearest start_xy: stop-and-turn (drive the lane, 90 deg, the lane gap over, 90 deg, back). Returns visits."""
-    lanes, (a0, a1), long_x, _ = lanes_x(m, s)
+    end nearest start_xy: stop-and-turn (drive the lane, 90 deg, the lane gap over, 90 deg, back). Returns visits.
+    mirror=True: the symmetric lanes (lanes_x mirror), and a region in one half of the table takes exactly the mirror
+    images of the lanes its mirrored region takes in the other half (a lane on a region's edge cannot fall to one side
+    only)."""
+    lanes, (a0, a1), long_x, _ = lanes_x(m, s, mirror=mirror)
     f = m["floor"]
     L0, L1 = (f["x_min"], f["x_max"]) if long_x else (f["y_min"], f["y_max"])
     p0, p1 = L0 + fx0 * (L1 - L0), L0 + fx1 * (L1 - L0)
     mine = [v for v in lanes if p0 - 1e-6 <= v < p1 - 1e-6 or (fx1 >= 1.0 and v >= p0 - 1e-6)]
+    if mirror and (fx1 <= 0.5 + 1e-9 or fx0 >= 0.5 - 1e-9):
+        c = (L0 + L1) / 2.0
+        hi_side = fx0 >= 0.5 - 1e-9
+        q0, q1 = (1.0 - fx1, 1.0 - fx0) if hi_side else (fx0, fx1)      # the region as seen in the low half
+        P0, P1 = L0 + q0 * (L1 - L0), L0 + q1 * (L1 - L0)
+        low = [v for v in lanes if v < c and (P0 - 1e-6 <= v < P1 - 1e-6 or (q1 >= 0.5 - 1e-9 and v >= P0 - 1e-6))]
+        mine = [round(2 * c - v, 2) for v in low] if hi_side else low
     mine = sorted(mine, reverse=direction < 0)
     if not mine:
         return []
@@ -886,11 +950,14 @@ def mow_region(m, s, fx0, fx1, direction, start_xy):
     for k, c in enumerate(mine):
         def pt(e):
             return (c, e) if long_x else (e, c)
-        ends = (a0, a1) if math.dist(cur, pt(a0)) <= math.dist(cur, pt(a1)) else (a1, a0)
+        # rounded: two mirrored robots equally far from both ends (Monday's circle exits sit on the middle of the
+        # table's width) must break the tie the same way (float noise sent one up and the other down, 29 Oct)
+        ends = (a0, a1) if round(math.dist(cur, pt(a0)), 3) <= round(math.dist(cur, pt(a1)), 3) else (a1, a0)
         line = [*pt(ends[0]), *pt(ends[1])]
         for j, e in enumerate(ends):
             x, y = pt(e)
-            out.append(_g(x, y, label="mow lane %d %s" % (lanes.index(c) + 1, "start" if j == 0 else "end"), lane=line,
+            k_lane = min(range(len(lanes)), key=lambda q: abs(lanes[q] - c))
+            out.append(_g(x, y, label="mow lane %d %s" % (k_lane + 1, "start" if j == 0 else "end"), lane=line,
                           end=j))
         cur = pt(ends[1])
     return out
@@ -921,7 +988,7 @@ def monday_program(robots=("Left", "Right")):
     end, they meet and circle, and each then mows the inner quarter on the other side, going on in its own direction,
     so every lane is mowed once and they end facing each other across the middle for Chicken."""
     a, b = robots
-    return {"name": "Monday, 2 robots", "robots": [a, b],
+    return {"name": "Monday, 2 robots", "robots": [a, b], "mirror": [a, b],
             "starts": {a: {"at": [0.0, 0.0], "face": "+y"}, b: {"at": [1.0, 0.0], "face": "+y"}},
             "blocks": [
                 {"block": "mow-region", "robot": a, "from": 0.0, "to": 0.25, "direction": "+"},
@@ -946,7 +1013,7 @@ STEP_AWAY_MIN_CM = 3.0   # chosen: a step shorter than this is lengthened to it 
                          # robot's stop error). No DOE: below the 2-3 cm real tracking error it would not show
 
 
-def _step_away(m, s, rest, who, exits, long_x):
+def _step_away(m, s, rest, who, exits, long_x, mirror=False):
     """After the circle (Monday: the robots leave it on swapped sides and each goes on mowing): if their first lanes
     are too close for both to mow at once, the planner keeps one standing where it left the circle while the other
     mows its first lane. That spot was 9.0-9.5 cm (body to body) from the lane by plan on 61 x 122 and 76 x 137, and
@@ -961,7 +1028,7 @@ def _step_away(m, s, rest, who, exits, long_x):
         if bl is None:
             return None
         items = mow_region(m, s, float(bl.get("from", 0.0)), float(bl.get("to", 1.0)),
-                           -1 if str(bl.get("direction", "+")).startswith("-") else 1, exits[n])
+                           -1 if str(bl.get("direction", "+")).startswith("-") else 1, exits[n], mirror=mirror)
         if not items:
             return None
         first[n] = items[0]["goto"][0] if long_x else items[0]["goto"][1]
@@ -1017,7 +1084,34 @@ def build(m, program, s=None):
     visits = {n: [] for n in names}
     starts = {}
     notes = []
-    lanes, (a0, a1), long_x, inset = lanes_x(m, s)
+    # mirroring (Nick, 2026-10-29 20:06): the program's "mirror": [a, b] makes those two mirror each other across the
+    # table's middle line: symmetric lanes, and every point they drive to on a mirrored block (mow-region, meet,
+    # spread-out) carries a key it shares with its mirror image (mirror_key), at mirror_cruise_cms
+    mir = program.get("mirror")
+    if mir is None and len(names) == 2 and program.get("blocks") == monday_program(tuple(names))["blocks"]:
+        # Monday's default saved before mirroring (Mission Control's program.json from before 2026-10-29 20:06 has no
+        # "mirror"): the unedited default mirrors too. An edited program mirrors only if it says so
+        mir = list(names)
+    mpair = [n for n in (mir or []) if n in names]
+    mpair = mpair if len(mpair) == 2 else []
+    lanes, (a0, a1), long_x, inset = lanes_x(m, s, mirror=bool(mpair))
+    cmid = ((f["x_min"] + f["x_max"]) / 2.0) if long_x else ((f["y_min"] + f["y_max"]) / 2.0)
+    mcount = {n: {} for n in names}
+
+    def mtag(n, items):
+        """the mirror key and speed on robot n's goto items (n one of the mirror pair)"""
+        if n not in mpair:
+            return items
+        for v in items:
+            if "goto" not in v:
+                continue
+            x, y = v["goto"][0], v["goto"][1]
+            cx_, cy_ = (min(x, 2 * cmid - x), y) if long_x else (x, min(y, 2 * cmid - y))
+            base = "%.1f,%.1f" % (cx_, cy_)
+            k_ = mcount[n][base] = mcount[n].get(base, 0) + 1
+            v["mirror"] = "%s#%d" % (base, k_)
+            v["cruise_cms"] = s["mirror_cruise_cms"]
+        return items
     # starts: the program's "at" (fractions), moved in to the first lane end there; facing along the short side
     for n in names:
         st = (program.get("starts") or {}).get(n)
@@ -1075,7 +1169,9 @@ def build(m, program, s=None):
         if kind == "mow-region":
             n = who[0]
             items = mow_region(m, s, float(bl.get("from", 0.0)), float(bl.get("to", 1.0)),
-                               -1 if str(bl.get("direction", "+")).startswith("-") else 1, _pose_after(n)[:2])
+                               -1 if str(bl.get("direction", "+")).startswith("-") else 1, _pose_after(n)[:2],
+                               mirror=n in mpair)
+            mtag(n, items)
             if not items:
                 notes.append("block %d: no lane of the table lies in %s's region %.2f-%.2f" % (k + 1, n, bl.get("from", 0),
                                                                                              bl.get("to", 1)))
@@ -1112,7 +1208,7 @@ def build(m, program, s=None):
                 ang = math.radians(ent[n])
                 ex, ey = c[0] + r * math.cos(ang), c[1] + r * math.sin(ang)
                 hd = (ent[n] + 90.0 * way) % 360.0
-                advance(n, [_g(ex, ey, hd, label="meet", run_in_cm=MEET_RUN_IN_CM)])
+                advance(n, mtag(n, [_g(ex, ey, hd, label="meet", run_in_cm=MEET_RUN_IN_CM)]))
             t_meet = max(t_est[n] for n in who) + MEET_SLACK_S
             for n in who:
                 advance(n, [{"until_s": round(t_meet, 1), "label": "meet"}, {"sync": circle["sync"], "label": "meet"}])
@@ -1127,7 +1223,8 @@ def build(m, program, s=None):
             notes.append("circle %.1f times, r %.0f cm (%s)" % (turns, circle["r"],
                                                                 "anticlockwise" if circle["way"] > 0 else "clockwise"))
             circle = {}
-            sa = _step_away(m, s, program["blocks"][k + 1:], who, {n: _pose_after(n)[:2] for n in who}, long_x)
+            sa = _step_away(m, s, program["blocks"][k + 1:], who, {n: _pose_after(n)[:2] for n in who}, long_x,
+                            mirror=bool(mpair) and set(who) == set(mpair))
             if sa:
                 advance(sa["robot"], [sa["goto"]])
                 notes.append(sa["note"])
@@ -1188,7 +1285,7 @@ def build(m, program, s=None):
             for i, n in enumerate(order):
                 fx = (i + 1) / (N + 1)
                 x, y = _frac(m, fx, fy) if long_x else _frac(m, fy, fx)
-                advance(n, [_g(x, y, float(bl.get("heading", 90.0)), label="spread out")])
+                advance(n, mtag(n, [_g(x, y, float(bl.get("heading", 90.0)), label="spread out")]))
         elif kind == "dance":
             for n in who:
                 advance(n, [{"dance": float(bl.get("seconds", 0)), "label": "dance"}])
@@ -1197,9 +1294,19 @@ def build(m, program, s=None):
     out = copy.deepcopy(m)
     out["robots"] = [dict(known[n], start=starts[n], park=list(_pose_after(n))) for n in names]
     out["tasks"] = {n: {"visit": visits[n], "park": False} for n in names}
+    if mpair:
+        notes.append("%s and %s mirror each other across the middle line (x = %.1f cm): symmetric lanes, the innermost "
+                     "pair %.1f cm apart; mirrored legs at %.0f cm/s, re-timed between %.0f and %.0f cm/s"
+                     % (mpair[0], mpair[1], cmid, mirror_centre_gap(m), s["mirror_cruise_cms"], s["mirror_min_cms"],
+                        s["mirror_max_cms"]))
     out["mission"] = {"name": program.get("name", "mission"), "program": program, "settings": s,
                       "notes": notes, "estimate_s": {n: round(t, 1) for n, t in t_est.items()},
                       "planner": {"separation_cm": s["separation_cm"]}}
+    if mpair:
+        out["mission"]["mirror"] = {"robots": mpair, "axis": "x" if long_x else "y", "at_cm": round(cmid, 3),
+                                    "min_cms": s["mirror_min_cms"], "max_cms": s["mirror_max_cms"],
+                                    "cruise_cms": s["mirror_cruise_cms"], "tol_s": s["mirror_tol_s"],
+                                    "tol_cm": s["mirror_tol_cm"], "wait_max_s": s["mirror_wait_max_s"]}
     return FM.normalize(out)
 
 

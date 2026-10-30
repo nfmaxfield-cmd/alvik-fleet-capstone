@@ -140,9 +140,13 @@ def test_mission_control_runs_pass_the_turn_pause(tmp_path):
 
 @pytest.mark.parametrize("size", [(122, 61), (130, 70), (137, 76)])
 def test_waiting_robot_steps_away_after_the_circle(size):
+    """Without mirroring (a program with no "mirror"): the lanes 12 cm apart put the first inner lanes too close, so one
+    robot steps away. Monday mirrors (2026-10-29 20:06): see test_mirrored_monday_needs_no_step_away."""
     W, H = size
     m = WS.blank_map((0, 0, W, H), [("Left", [20, 20, 90]), ("Center", [60, 20, 90]), ("Right", [100, 20, 90])])
-    mm = MS.build(m, MS.monday_program(("Left", "Right")))
+    prog = MS.monday_program(("Left", "Right"))
+    prog["mirror"] = []           # explicitly not mirrored (a program without the key is Monday's saved default)
+    mm = MS.build(m, prog)
     note = [n for n in mm["mission"]["notes"] if "steps" in n and "away" in n]
     assert len(note) == 1
     who = [n for n in ("Left", "Right") if any(v.get("label") == "step away" for v in mm["tasks"][n]["visit"])]
@@ -155,6 +159,22 @@ def test_waiting_robot_steps_away_after_the_circle(size):
     first_other = next(v for v in mm["tasks"][o]["visit"] if str(v.get("label", "")).startswith("mow lane"))
     gap = abs(vis[k]["goto"][0] - first_other["goto"][0]) - 9.5
     assert gap >= MS.STEP_AWAY_GAP_CM - 1e-6
+
+
+@pytest.mark.parametrize("size", [(122, 61), (130, 70), (137, 76)])
+def test_mirrored_monday_needs_no_step_away(size):
+    """Mirrored lanes: the innermost pair is mirror_centre_gap apart, so after the circle both mow at once with the
+    bodies STEP_AWAY_GAP_CM apart and nobody waits or steps away."""
+    W, H = size
+    m = WS.blank_map((0, 0, W, H), [("Left", [20, 20, 90]), ("Center", [60, 20, 90]), ("Right", [100, 20, 90])])
+    mm = MS.build(m, MS.monday_program(("Left", "Right")))
+    assert not [n for n in mm["mission"]["notes"] if "steps" in n and "away" in n]
+    firsts = []
+    for n in ("Left", "Right"):
+        vis = mm["tasks"][n]["visit"]
+        k = next(i for i, v in enumerate(vis) if "arc" in v)
+        firsts.append(next(v for v in vis[k:] if str(v.get("label", "")).startswith("mow lane"))["goto"][0])
+    assert abs(firsts[0] - firsts[1]) - 9.5 >= MS.STEP_AWAY_GAP_CM - 1e-6
 
 
 # ---------------------------------------------------------------------------- 3. the 8 cm lock

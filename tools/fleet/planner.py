@@ -475,7 +475,18 @@ class Job:
 
 
 def _visit_prims(item, pose, task, grid, docks, s, body):
-    """Steps to do one task from `pose`. Returns (prims, end pose)."""
+    """Steps to do one task from `pose`. Returns (prims, end pose). An item may carry "cruise_cms" (its own drive
+    speed: Monday's mirrored legs, missions.MIRROR) and "mirror" (the key it shares with its mirror partner's item):
+    every step it makes gets "mirror_leg" and its last step "mirror" (run_plan's mirror sync re-times on them)."""
+    if isinstance(item, dict) and (item.get("cruise_cms") or item.get("mirror")):
+        s2 = S(dict(s, cruise_cms=float(item["cruise_cms"]))) if item.get("cruise_cms") else s
+        it = {k: v for k, v in item.items() if k not in ("cruise_cms", "mirror")}
+        out, end = _visit_prims(it, pose, task, grid, docks, s2, body)
+        if item.get("mirror") and out:
+            for p_ in out:
+                p_["mirror_leg"] = item["mirror"]
+            out[-1]["mirror"] = item["mirror"]
+        return out, end
     out = []
     if isinstance(item, str):
         d = docks[item]
@@ -1639,6 +1650,9 @@ def to_steps(sched, after, s, t0=0.0, committed=0, front_ray=None, gap_cm=1.0, b
             st.pop("front_clear_cm", None)
         if p.get("label"):
             st["label"] = p["label"]
+        for k in ("mirror", "mirror_leg"):
+            if p.get(k):
+                st[k] = p[k]
         if p.get("run_in"):
             st["run_in"] = True
         if p.get("sync"):
@@ -1717,6 +1731,9 @@ def step_to_prim(st):
         p["dance_ms"] = st.get("dance_ms", 0)
     if st.get("sync"):
         p["sync"] = st["sync"]
+    for k in ("mirror", "mirror_leg"):
+        if st.get(k):
+            p[k] = st[k]
     if st["phase"] == "probe" and st.get("front_min_cm") is not None:
         p["front_cm"] = st["front_min_cm"]
     return p
@@ -1920,7 +1937,7 @@ def _remaining_prim(st, pose, s, dwell_left_s=None):
     """The rest of a step that is under way, from the robot's pose now (keeping its label and a feel's front check)."""
     p = step_to_prim(st)
     out = _remaining_core(st, p, pose, s, dwell_left_s)
-    for k in ("label", "front_cm"):
+    for k in ("label", "front_cm", "mirror", "mirror_leg"):
         if k in p:
             out[k] = p[k]
     return out
