@@ -441,6 +441,11 @@ def run_worker(conn, cfg):
                     return
                 if "snap" in m:
                     w.snapshot(m["snap"])
+                if "robot_at" in m:              # the bridge's seed (a robot found by its lights, cam_bridge.on_seed)
+                    try:
+                        w.eng.robot_at(*m["robot_at"])
+                    except Exception:            # noqa: BLE001  (before its floor memory: nothing to forget)
+                        pass
             if ring is not None:
                 n = ring.newest()
                 if n <= last:

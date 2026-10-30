@@ -501,6 +501,12 @@ def run_plan_check(coord, link, args, names, say=print, straighten=False, tag="f
                     " (backwards)" if abs(off) > 135 else ""))
             res["ok"] = ok
         for w in identity_words(res["robots"], {n: starts[n][:2] for n in names}):
+            if straighten:
+                # robots may be put down anywhere (Nick, 30 Oct: "the user only clicks corners 1-4; the robots
+                # self-correct"): who is who comes from which robot lit its light, so a robot nearer another's start
+                # spot is driven to its own (straighten.py keeps their ways 8 cm apart, or refuses), not a stop
+                say("  (note) " + w.split(": are ")[0] + ": it drives to its own start spot")
+                continue
             say("  " + w)
             res["ok"] = False
         old = [n for n in names if not new_firmware(fw.get(n))]

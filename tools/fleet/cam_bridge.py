@@ -84,6 +84,11 @@ RELEARN_CM = 2.0        # a robot first seen this far from the start spot it was
                         # floor there is forgotten and filled in from round it, up to RELEARN_MAX times. Chosen; no DOE
                         # (the dry runs show it: read error 1.4 cm -> under 0.5 cm)
 RELEARN_MAX = 3
+SEED_SCALE = 1.4        # a robot found by its lights (run_plan's seed): its floor is forgotten this far round (robot
+                        # widths, as relearn). The lights' middle is within ~1 cm of the robot's. No DOE (relearn's)
+SEED_SAME_CM = 1.0      # a seed this near the last one (and its heading within 5 deg) is the same seed sent again
+SEED_CLEAR_CM = 14.0    # the spot the bridge had the robot on is re-learned from the newest picture only when no robot
+                        # (seeded or other) is within this (a body and a half). No DOE: a guard
 STILL_S = 1.0           # --observe: a robot still this long gets its outline heading printed (the turn check)
 
 
@@ -249,6 +254,59 @@ class Bridge:
                 self.moved[n] = True
                 self.event("moved", robot=n, how="own pose %.1f cm from its first, state %s"
                            % (math.hypot(msg["x"] - x0, msg["y"] - y0), st))
+
+    def on_seed(self, msg):
+        """run_plan's facing check found this robot by its own lights (anywhere on the board, 2026-10-30): follow it
+        from there, not from the map's start spot. The bridge's floor memory was taken with the robot where it really
+        stands (so its body is in that memory) and with its START spot masked as a robot: the floor where it stands
+        is forgotten and filled in from round it, and the start spot, now empty, is learned from the newest picture.
+        A robot that already has a pose of its own (run_plan's echo) is followed by that instead: seeds are ignored."""
+        n = msg.get("robot")
+        if n not in self.starts:
+            return
+        try:
+            x, y = float(msg["x"]), float(msg["y"])
+            th = None if msg.get("th") is None else float(msg["th"])
+        except (KeyError, TypeError, ValueError):
+            return
+        if not (math.isfinite(x) and math.isfinite(y)):
+            return
+        if self.has_pose[n]:
+            self.event("seed_ignored", robot=n, x=x, y=y, why="it has its own pose")
+            return
+        last = getattr(self, "seeds", {}).get(n)
+        if last is not None and math.hypot(x - last[0], y - last[1]) < SEED_SAME_CM and (
+                th is None or last[2] is None or abs(wrap180(th - last[2])) < 5.0):
+            return                                   # the same seed again (UDP: run_plan sends each a few times)
+        self.seeds = getattr(self, "seeds", {})
+        self.seeds[n] = (x, y, th)
+        sx, sy, sh = self.starts[n]
+        tr = self.trk.tracks.get(n) if hasattr(self.trk, "tracks") else None
+        old = (tr.x, tr.y) if tr is not None else (sx, sy)
+        self.starts[n] = (x, y, sh if th is None else th)
+        t = getattr(self.trk, "frame_t", None) or time.time()
+        self.trk.add(n, x, y, heading=self.starts[n][2], t=t)
+        self.last_obs[n] = None
+        self.start_heads[n].clear()
+        self.relearned[n] = [(round(x, 2), round(y, 2))]
+        self.moved[n] = False
+        views = [self.trk] + ([self.trk.side] if getattr(self.trk, "side", None) is not None else [])
+        far = math.hypot(old[0] - x, old[1] - y) >= RELEARN_CM
+        others = [(o[0], o[1]) for m, o in self.starts.items() if m != n]
+        for v in views:
+            try:
+                v.robot_at(x, y, SEED_SCALE)
+                if far and all(math.hypot(old[0] - ox, old[1] - oy) > SEED_CLEAR_CM for ox, oy in others + [(x, y)]):
+                    v.refresh_spot(old[0], old[1], 1.4)
+            except Exception as e:      # noqa: BLE001  (a tracker without it: the track still moves)
+                self.event("seed_view_failed", robot=n, why=str(e))
+        if getattr(self.args, "farm", False):
+            self.farm_out = getattr(self, "farm_out", [])
+            self.farm_out.append({"robot_at": [x, y, SEED_SCALE], "robot": n})
+        self.event("seed", robot=n, x=round(x, 2), y=round(y, 2), th=th, was=[round(old[0], 2), round(old[1], 2)],
+                   how=msg.get("how"))
+        self.say("%s found by its lights at (%.1f, %.1f)%s, %.1f cm from where the bridge had it: followed from there"
+                 % (n, x, y, "" if th is None else " facing %.0f deg" % th, math.hypot(old[0] - x, old[1] - y)))
 
     def on_frame(self, img, t):
         self.frames += 1
@@ -662,6 +720,8 @@ def main(argv=None):
                     continue
                 if isinstance(msg, dict) and msg.get("type") == "pose":
                     br.on_pose(msg)
+                elif isinstance(msg, dict) and msg.get("type") == "seed":
+                    br.on_seed(msg)
             br.on_frame(fr.img, fr.t_pi - CAPTURE_S)
             if args.max_s and time.time() - t0 > args.max_s:
                 break
@@ -728,6 +788,15 @@ def run_farm(args, br, rx, t0, rect, starts):
                     continue
                 if isinstance(msg, dict) and msg.get("type") == "pose":
                     br.on_pose(msg)
+                elif isinstance(msg, dict) and msg.get("type") == "seed":
+                    br.on_seed(msg)
+            for m in getattr(br, "farm_out", None) or []:
+                for c in conns.values():          # a seed: each worker forgets its floor where the robot stands
+                    try:
+                        c.send(m)
+                    except (BrokenPipeError, OSError):
+                        pass
+            br.farm_out = []
             for kind, c in conns.items():
                 while c.poll():
                     busy = True

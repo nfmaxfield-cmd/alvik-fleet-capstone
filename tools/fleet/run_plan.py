@@ -469,6 +469,13 @@ class Coordinator:
                 b.calib_look = dict(result=vals[9])
                 if len(vals) >= 15:
                     b.calib_look.update(spin=vals[12], roll=vals[13], reason=vals[14])
+                # what its own front sensor saw (firmware look.h): why a roll was skipped, in numbers (30 Oct: both
+                # robots "no roll" on a 126 cm board the laptop's caps allowed 15 cm on)
+                for k, i in (("near_cm", 2), ("heading_deg", 3), ("room_cm", 5), ("cap_cm", 6), ("live_cm", 7),
+                             ("roll_cm", 8), ("room8", 10), ("caps", 11)):
+                    if len(vals) > i:
+                        b.calib_look[k] = vals[i]
+                self.log("calib_look", robot=name, **b.calib_look)
                 continue
             if rtype == "RAW" and getattr(self, "floor_raw", None) is not None and name in self.floor_raw:
                 self.floor_feed(b, vals)
@@ -824,6 +831,13 @@ class Coordinator:
                 # the start's heading is the facing check's, sent by fpose: the bridge's first fixes carry the map's
                 # start heading (it takes the robot as placed), which may be the wrong way round
                 th = None
+            if th is None and b.pose is None:
+                # a robot with no pose (its follow run has none yet: before the start's fpose) refuses a position-only
+                # fix (2026-10-30 09:52, Right: 76 of 77 refused while the start waited for Left). Not sent: the start
+                # gives it its pose (fpose) from the camera's position and the facing check's heading
+                b.fix = None
+                b.fix_held = getattr(b, "fix_held", 0) + 1
+                continue
             self.send(b.name, "fix %d %.2f %.2f %s %.2f %.2f" % (ms, ev["x"], ev["y"], "-" if th is None else "%.2f" % th,
                                                                 ev.get("sigma", 0.5), ev.get("sigma_th", 1.5)))
             b.fix, b.fix_sent_t = None, t
@@ -2498,6 +2512,7 @@ class Coordinator:
                 "resends": {n: b.resends for n, b in self.bots.items()},
                 "steps_sent": {n: b.next_id - 1 for n, b in self.bots.items()},
                 "fixes_sent": {n: b.fix_sent for n, b in self.bots.items()},
+                "fixes_held_no_pose": {n: getattr(b, "fix_held", 0) for n, b in self.bots.items()},
                 "fixes_used_rejected": {n: (b.follow.get("fixes_used"), b.follow.get("fixes_rejected"))
                                         for n, b in self.bots.items()},
                 "replans": self.replans, "dockings_reported": self.dockings,
@@ -2590,11 +2605,19 @@ def calib_poses(coord, names, source=None, wait_s=2.0):
     """{robot: (x, y, heading or None, how)} for the roll caps: the camera's fixes when a live source sends them within
     wait_s, else the plan's start spots (where the robots were put)."""
     poses = {}
-    if source is not None and getattr(source, "live", False):
+    lit = getattr(coord, "facing_at", None) or {}
+    for n in names:
+        if n in lit:
+            # where its lights are (the facing check, anywhere on the board) and the heading they gave; before 30 Oct
+            # the camera's fix or the plan's start spot was used, and a robot put down elsewhere got the plan's
+            x, y, h, how, _ = lit[n]
+            poses[n] = (x, y, h, how)
+    if source is not None and getattr(source, "live", False) and len(poses) < len(coord.names):
         t_end = time.time() + wait_s
         while time.time() < t_end and len(poses) < len(coord.names):
             for ev in source.poll():
-                if ev.get("type") == "fix" and ev.get("robot") in coord.names and ev.get("x") is not None:
+                if ev.get("type") == "fix" and ev.get("robot") in coord.names and ev.get("x") is not None and \
+                        ev["robot"] not in poses:
                     poses[ev["robot"]] = (float(ev["x"]), float(ev["y"]),
                                           None if ev.get("th") is None else float(ev["th"]), "camera")
             time.sleep(0.05)
@@ -2633,10 +2656,39 @@ def calib_caps(coord, link, names, source=None):
         moving = [others[m] for m in others if m in names]
         cp = CR.caps((x, y), h, rect, fixed=fixed, moving=moving, unc=CR.HEADING_UNC_LOOSE_DEG)
         link.send_name(n, CR.caps_cmd(cp))
-        print("  %s at (%.1f, %.1f) (%s): %s" % (n, x, y, how, CR.caps_words(cp, h, CR.HEADING_UNC_LOOSE_DEG)))
+        print("  %s at (%.1f, %.1f) (%s): %s (the most it may roll; its own front sensor must also see room)"
+              % (n, x, y, how, CR.caps_words(cp, h, CR.HEADING_UNC_LOOSE_DEG)))
         coord.log("calib_caps", robot=n, x=x, y=y, h=h, how=how, caps=cp)
     time.sleep(0.2)
     return no_room
+
+
+def calib_roll_words(n, lk):
+    """Why the robot's own look skipped (or shortened) its roll, from its CALIB_LOOK numbers, in plain words. The
+    laptop's caps only LIMIT the roll; the robot rolls only where its front sensor also saw room: calib_roll_min_cm (5)
+    + safe_front_cm (7) + calib_margin_cm (3) = 15 cm clear ahead. A sensor that reads the floor (Left's floor reads
+    10.6-15 cm standing, the floor check of 29 Oct) sees 'something' at that distance all round."""
+    try:
+        room8 = [float(v) for v in str(lk.get("room8") or "").split(";") if v != ""]
+    except ValueError:
+        room8 = []
+    if not room8 and lk.get("room_cm") in (None, ""):
+        return ""
+    seen = [r for r in room8 if r >= 0]
+    near = [r for r in seen if r < 15.0]
+    bits = []
+    if room8:
+        bits.append("its front sensor saw something %s cm ahead at 0, 45, ... 315 deg" % "/".join(
+            "-" if r < 0 else ("clear" if r >= 900 else "%.0f" % r) for r in room8))
+    if lk.get("live_cm") not in (None, "", "0.0", "0"):
+        bits.append("%s cm in its lane after turning" % lk.get("live_cm"))
+    if lk.get("caps"):
+        bits.append("laptop caps %s" % lk.get("caps"))
+    w = "%s's own look: %s." % (n, "; ".join(bits))
+    if seen and len(near) == len(seen):
+        w += (" Something under 15 cm in every direction it looked: on an open board that is most likely its sensor "
+              "reading the floor (a roll needs 15 cm clear ahead)")
+    return w
 
 
 def calibrate(coord, link, args, names, source=None):
@@ -2676,6 +2728,9 @@ def calibrate(coord, link, args, names, source=None):
                 what.append("no roll (stopped at a plywood edge too soon)" if lk.get("result") == "edge"
                             else "no roll (no room in any direction)")
             print("  %s: calibrated, %s: %s" % (n, SC.calib_outcome_text(le[1], lk), "; ".join(what)))
+            why = calib_roll_words(n, lk)
+            if why:
+                print("    " + why)
             done.append(n)
         elif oc == SC.CALIB_FAILED:
             print("  %s: calibration did not finish (%s)" % (n, le[1] if le and le[0] == "calib" else "no end record"))
@@ -3012,16 +3067,32 @@ def start_robots(coord, link, args, source):
     if getattr(args, "facing_check", False):
         import facing as FC
         fres = FC.run_plan_check(coord, link, args, names, straighten=straight)
+        if source.live:
+            after_facing(coord, fres, names)       # the bridge follows each robot from its lights, wherever it stands
     # ---- the follow runs; a robot that says "not calibrated" is calibrated now (auto), then started again
     start_follow(coord, link, names)
     bad = [n for n in names if coord.bots[n].calibrated is False]
     if bad and args.recalibrate == "auto":
         print("  not calibrated since power-on: %s" % ", ".join(bad))
-        moved += calibrate(coord, link, args, bad, source)
+        cal_done = calibrate(coord, link, args, bad, source)
+        moved += cal_done
         for n in bad:
             link.send_name(n, "stop")
         time.sleep(0.5)
-        start_follow(coord, link, bad)
+        if straight and cal_done:
+            # the calibration's spin and roll turned and moved them (the roll ends where it began, but facing the way
+            # it rolled): measure again before straightening, and tell the bridge where they are now (30 Oct)
+            print("  calibrated: the facing check again (the calibration turned them)")
+            for n in names:
+                link.send_name(n, "stop")
+            wait_for(lambda: all(coord.bots[n].run_exp != "follow" or coord.bots[n].ended for n in names), 2.0, coord)
+            time.sleep(0.3)
+            coord.drain()
+            fres = FC.run_plan_check(coord, link, args, names, straighten=True, tag="facing-after-calibration")
+            after_facing(coord, fres, names)
+            start_follow(coord, link, names)
+        else:
+            start_follow(coord, link, bad)
         bad = [n for n in names if coord.bots[n].calibrated is False]
     if bad:
         raise SystemExit("Not calibrated since power-on: %s. Lift each off its spot, send `calibrate` (console) or "
@@ -3205,6 +3276,64 @@ def restart_follow(coord, link, names):
         b = coord.bots[n]
         b.follow, b.pose, b.fposed_t = {}, None, None
         b.controls = []          # a halt from a failed correction: the run it was for has ended
+
+
+LIGHTS_AHEAD_CM = 1.0     # the lights' middle sits 0.4-1.5 cm ahead of the robot's middle (facing.py, 28 Oct find
+                          # steps): the robot's middle is taken this far behind it. No DOE: the bridge's tracker
+                          # re-centres on the outline within a picture or two
+SEED_SENDS = 3            # each seed goes this many times (UDP), 0.1 s apart; the bridge drops repeats
+
+
+def facing_poses(fres, names):
+    """{robot: (x, y, heading or None, how)} from a facing check: where its lights are (anywhere on the board) and the
+    heading they gave. heading None when front and back were not told apart (or the cameras disagreed)."""
+    out = {}
+    for n in names:
+        r = ((fres or {}).get("robots") or {}).get(n) or {}
+        meas = r.get("meas") or {}
+        mid = meas.get("mid")
+        if not mid:
+            continue
+        h = meas.get("heading") if meas.get("sure") else None
+        hh = ((fres or {}).get("headings") or {}).get(n, h)
+        x, y = float(mid[0]), float(mid[1])
+        if hh is not None:
+            x -= LIGHTS_AHEAD_CM * math.cos(math.radians(hh))
+            y -= LIGHTS_AHEAD_CM * math.sin(math.radians(hh))
+        out[n] = (round(x, 2), round(y, 2), None if h is None else float(h), "lights (facing check)",
+                  None if hh is None else float(hh))
+    return out
+
+
+def after_facing(coord, fres, names):
+    """After a facing check: keep where each robot's lights are (the calibration's roll caps use it) and tell the
+    camera bridge (cam_bridge.on_seed), which otherwise looks for each robot round its map start spot only and never
+    finds one put down elsewhere (2026-10-30 09:52: 'No camera fix for Left'). Robots with a pose of their own are
+    followed by it; the bridge ignores their seeds."""
+    fp = facing_poses(fres, names)
+    coord.facing_at = dict(getattr(coord, "facing_at", None) or {}, **fp)
+    dest = getattr(coord, "pose_dest", None)
+    if dest is None or not fp:
+        return fp
+    for k in range(SEED_SENDS):
+        for n, (x, y, h, how, hh) in fp.items():
+            msg = {"type": "seed", "robot": n, "x": x, "y": y, "th": hh, "how": how, "t": round(now(), 3)}
+            try:
+                coord.pose_sock.sendto(json.dumps(msg).encode(), dest)
+            except OSError:
+                pass
+        if k < SEED_SENDS - 1:
+            time.sleep(0.1)
+    coord.log("bridge_seed", robots={n: list(v[:2]) + [v[4]] for n, v in fp.items()})
+    starts = (coord.plan.get("robots") or {})
+    for n, (x, y, h, how, hh) in fp.items():
+        st = (starts.get(n) or {}).get("start")
+        if st:
+            d = math.hypot(x - st[0], y - st[1])
+            if d > 3.0:
+                print("  %s: its lights are at (%.1f, %.1f), %.1f cm from its start spot: the camera bridge follows it "
+                      "from there" % (n, x, y, d))
+    return fp
 
 
 def straighten_start(coord, link, args, source, names, fres):
@@ -3574,7 +3703,8 @@ def print_summary(s):
         print("Steps sent %s; resent %s" % (s["steps_sent"], s["resends"]))
         if s.get("boards_not_visited"):
             print("NOT VISITED: %s" % s["boards_not_visited"])
-        print("Camera fixes sent %s; used/ignored on the robots %s" % (s["fixes_sent"], s["fixes_used_rejected"]))
+        print("Camera fixes sent %s; used/ignored on the robots %s; held (the robot had no pose yet) %s"
+              % (s["fixes_sent"], s["fixes_used_rejected"], s.get("fixes_held_no_pose")))
     tp = (s.get("turn_pause") or {}).get("robots") or {}
     for n, o in sorted(tp.items()):
         print("Pause after turns, %s: %d pauses added %.1f s (longest %.1f s); both cameras %d, one camera %d, timed "
