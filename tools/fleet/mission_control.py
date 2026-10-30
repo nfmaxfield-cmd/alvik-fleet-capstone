@@ -493,7 +493,10 @@ class Session:
             cmd += ["--map", self.map_path, "--program", pp, "--robots", ",".join(self.program.get("robots", []))]
         if not rs.get("turn_pause", True) or kind == "warmup":
             cmd += ["--no-turn-pause"]
-        if not rs.get("straighten", True) or kind == "warmup":
+        if not rs.get("straighten", True):
+            # the warm-up straightens too (Nick, 2026-10-30 09:50: "they should be able to self-correct"): its facing
+            # check stopped a real warm-up over Left facing backwards and Right sideways; now each is turned or driven
+            # to its start like Monday's run
             cmd += ["--no-straighten"]
         if not rs.get("mirror", True):
             cmd += ["--no-mirror"]
