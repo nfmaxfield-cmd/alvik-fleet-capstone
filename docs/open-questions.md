@@ -118,6 +118,18 @@ Answered ones move to the bottom with the answer and date.
 82. A numbering that goes round clockwise (1 -> 2 along the audience side, 4 on the wrong end) is refused with words
     ("swap 2 and 4") rather than renumbered: the robots would turn the wrong way in a mirrored frame. Refuse (as built),
     or quietly swap 2 and 4 and say so? (same report)
+83. The robots' own virtual border, sent from each DOE drive's map, stays on after the drive at 19.5 cm from the edge
+    (the planner's floor is the board less 13.5 cm, plus 6). Crawls, turn checks and "making room" work 20-25 cm from
+    the edge, so they now steer round it. Keep it there, or send DOE drives the border from the board itself (6 cm in,
+    as Monday's map)? (e02-oct30-overnight)
+84. A turn check is allowed 25 cm from an edge; with the border at 19.5 cm one of its four crawls must back. Raise the
+    turn check's room to 30 cm (the same as the new park spot A)? (same report)
+85. Under the lamp the overhead saw the robots at 11 grey levels from the board (fine from 30) and lost Right more than
+    half the time. Can the lamp be moved, dimmed or diffused for night sessions, or the board darkened? (same report)
+86. The robots ran firmware 2026-10-28a last night, so the facing check (2026-10-29a) could not tell front from back.
+    Flash 2026-10-29a before the next session? (same report)
+87. Right drove 27 deg off its own heading in drive 7 (21:40) after a 176 deg turn on the spot; its 90 deg turns were
+    fine. A taped check of one long turn on Right? (same report)
 
 ## Answered
 - 2026-10-29 20:20-20:27 (Nick: "the user does nothing but select corners"; built in

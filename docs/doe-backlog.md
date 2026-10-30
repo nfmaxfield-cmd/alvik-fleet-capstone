@@ -42,6 +42,10 @@ a decision.
 | Slow turns near an open edge (e02.py TURN_SLOW_ROOM_CM, TURN_SLOW_RPM; fix 5) | within 20 cm: turn_max_rpm 20 (of 40), timeout 9 s | Turns at 20 / 30 / 40 rpm near the edge: body sweep, overshoot and gyro error against turn time | Board | open |
 | Check drive after a turn near an edge (e02.py TURN_CONFIRM_ROOM_CM, HEADING_CHECK_CM; fix 5) | within 25 cm, the first drive after a turn is 4 cm | Logs: how far the first drive after a turn went off its planned heading in every session, by distance to the edge | Logs | open |
 | Spin check (e02.py TURN_SPIN_DRIFT_CM; fix 5) | a turn whose centre moved 2.5 cm towards the edge inside the border holds | Logs: centre drift during healthy turns (track.csv) against Right's 15:45 spins (1.9-2.2 cm between pictures, more over a spin) | Logs | open |
+| A drive's park spot further in (doe_loop.py A_INWARD_CM; [overnight](build-reports/e02-oct30-overnight.md)) | A at 30 cm from the edges (25 + 5) when a line allows it | 0 / 3 / 5 / 8 cm over two night loops: drives before a robot needs "making room" (events.csv) against the extra seconds driving to A | Board (or simulator with the night's side offset) | open |
+| Crawl margin past the robots' own border (ladder.py CRAWL_BORDER_MARGIN_CM; overnight) | 2 cm (tip 21.5 cm from the edge) | 1 / 2 / 3 / 5 cm against crawls refused for no room and crawls stopped by the border, from leg.csv + border.csv over a night session (the 29 Oct replay: 2 cm sends 17 of 68 crawls backwards first) | Logs + board | open |
+| A dropped heading's spread and reach (ladder.py HINT_SPREAD_DEG, HINT_NEAR_CM; overnight) | +-30 deg, within 10 cm | 15 / 30 / 45 deg and 5 / 10 / 15 cm: each hint against the crawl's measured heading that follows (state.json h_hint, leg.csv) | Logs (next session) | open |
+| A turn check's crawl spread (ladder.py CHECK_SPREAD_DEG; overnight) | +-3 deg | the absolute error's p90 in turns.csv per robot (29 Oct night: Left 3.6, Right 7.2) against checks stopped for no room | Logs | open |
 
 ## Camera and tracking
 
