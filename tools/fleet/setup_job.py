@@ -227,6 +227,7 @@ class CornerSetup:
                 self.say("not heard: %s (left out)" % ", ".join(missing))
             if not names:
                 raise RuntimeError("no robot answered: are they switched on and on this network?")
+            self.S.warm_robots = list(names)          # the warm-up drives only the robots that answered
             fw = {}
             for n in names:
                 bench.send(n, "status")

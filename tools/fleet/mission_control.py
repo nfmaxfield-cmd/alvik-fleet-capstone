@@ -319,7 +319,7 @@ class Session:
     # -- warm-up -----------------------------------------------------------
     def warmup_plan(self):
         self.apply_warmup_knobs()
-        self.warm_map = WU.plan_tasks(self.map)
+        self.warm_map = WU.plan_tasks(self.warm_source())
         over = dict(self.settings["planner"])
         MS.gap_lock_planner(over, n_robots=MS.mission_robots(self.warm_map))     # the 8 cm lock
         plan = P.make_plan(self.warm_map, over=over or None)
@@ -328,6 +328,20 @@ class Session:
         P.save_plan(plan, os.path.join(self.dir, "warm_plan.json"))
         self.preview = preview(self.warm_map, plan, title="Warm-up")
         return {"preview": self.preview}
+
+    def warm_source(self):
+        """The map the warm-up plans on: only the robots that will drive (the ones setup heard, else the mission
+        program's robots, else every robot in the map). A robot in the map but switched off (Center, the spare)
+        made the robots' warm-up wait for it and end as "start-up failed" (30 Oct 09:37, Pi)."""
+        want = list(getattr(self, "warm_robots", None) or [])
+        if not want:
+            prog = self.program if self.program is not None else MS.monday_program()
+            want = list(prog.get("robots") or [])
+        m = copy.deepcopy(self.map)
+        keep = [r for r in m.get("robots", []) if r["name"] in want]
+        if keep:
+            m["robots"] = keep
+        return m
 
     def warmup_analyze(self, folder=None):
         self.apply_warmup_knobs()
