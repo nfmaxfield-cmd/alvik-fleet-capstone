@@ -9,7 +9,7 @@ circle, mow on, Chicken, spread out, dance. About 2 minutes of driving. Build B 
 | Stage | What | Time |
 |---|---|---|
 | 1 | Power, network, cameras, code, Mission Control | 12 min |
-| 2 | Camera setup, lighting check, warm-up | 10 min |
+| 2 | Camera setup (click corners), lighting check, warm-up | 5 min |
 | 3 | Place the robots, plan | 3 min |
 | 4 | The run | 2-3 min |
 | 5 | After: upload, robots off | 3 min |
@@ -58,8 +58,8 @@ again (nothing moved, nothing to reset). Data: appendix B.
 - [ ] The laptop and its charger
 - [ ] Left and Right, plus Center (the spare; it also helps in the warm-up). All three charged to 90 % or more
 - [ ] The USB-C **data** cable (a charge-only cable cannot flash or talk to a robot)
-- [ ] Printed checker corner piece A, flat, not creased
-- [ ] Tape (for the start crosses) and a tape measure
+- [ ] Tape (for the start crosses) and a tape measure (the setup measures the table itself; the tape is for the
+      crosses and a check)
 - [ ] A power strip or extension lead (Pi, laptop, cameras' chargers if any)
 - [ ] This sheet, printed
 
@@ -131,12 +131,54 @@ sudo systemctl restart mirlt-launcher
 3. **1 Connect:** click the **Robots** card. The pill at the top must say **Mode: Robots**. (If you reload the page,
    click the **Robots** card again: the page forgets your pick.)
 
-### 1.4 The table's size, and the start spots
+### 1.4 The start crosses
 
-1. Measure the table: **length** (long side) and **width**, in cm. Write them here: ______ x ______
-2. **3 Workspace:** type the length into **Length (cm)** and the width into **Width (cm)**. Click **Save workspace**.
-3. Click **More** (right-hand side). Under **Robot start spots**, type these three rows (x, y, facing), then click
-   **Save workspace** again:
+Tape three crosses on the table, each line about 15 cm long: all three **17 cm in from the long side nearest the
+audience**; Left's **17 cm from the left short end**, Right's **17 cm from the right short end**, Center's at **half
+the length** (measure it with the tape, or put it by eye now and move it after step 2.6 tells you the length). The long
+side nearest the audience is the **audience side** (y = 0); the corner where it meets the left short end is **0,0**.
+
+## 2. Camera setup, lighting check, warm-up (5 min)
+
+**Changed 29 Oct evening (your decision, 20:20-20:27): you only click corners.** No corner piece, no typing the table's
+size, no stopping the recorder. The robots measure the table: their lights flash, each rolls 10 cm out and back.
+
+1. Put **Left, Right and Center on their crosses**, switched on, facing away from the audience (section 3.1 says how).
+2. **2 Setup:** under **1. Robots**, all three ticked. Leave **then the warm-up** **ticked** (the table's edges are real:
+   the robots feel all four sides, and the mission plans with what they find).
+3. Click **Take pictures**. About 10 s (it starts the recorder by itself if it is not running). You should see the
+   overhead and the side pictures.
+4. In **each** picture click the table's 4 corners **in this order** (a red number appears on each):
+   - **1**: where the audience side meets the **left** end (this is 0,0)
+   - **2**: the audience side's **other** end (1 to 2 is x, along the audience side)
+   - **3**: the corner **opposite 1**
+   - **4**: the **left** end's far corner (1 to 4 is y)
+
+   Click on the table's very corner. A wrong click: **Undo**. The same table corner must be 1 in both pictures.
+5. Hands off the table. Click **Measure (robots flash and move)**. About 1 minute, then the warm-up about 1 minute:
+   each robot flashes its left light, then its right; each rolls 10 cm and back; then they creep into the corners and
+   feel the sides, and go back to their crosses.
+6. **Read the result line**, e.g. `Your table measures 128 x 72 cm (checks: lights 128.3 x 72.1; roll ...). Cameras:
+   overhead 255 cm up, tilted 3 deg, side 170 cm up, tilted 28 deg; they agree on the robots within 0.6 cm.`
+   - **Good:** the size within about 2 cm of your tape, the cameras agree within 2 cm.
+   - A line starting **WARNING** says which check disagreed and what was left out; go on unless it says the cameras
+     are not lined up (then click **New pictures** and the corners again).
+   - Below it, one line per side, e.g. `left side: open edge, 3.0 cm further in than marked`, then
+     `the warm-up's sides are in the map: the mission plans with them`. Nothing to click.
+7. Under **Lighting**, click **Check the lighting**:
+
+| It says | Do this |
+|---|---|
+| `overhead camera: fine (...)` and `side camera: fine (...)` | Go on |
+| `... low (...)`, `it works, with little margin` | Go on; if you can, dim the light over the table |
+| `... only 2 of 3 robots found: check every robot is in this camera's picture` | Move that camera so all three robots are in its picture, then step 3 again |
+| `overhead camera washed out: ...` | Close the blinds or turn off the lamp above the table; **Check the lighting** again. If it stays washed out: go on (the side camera carries it) |
+| `side camera washed out: ...` | Close the blinds, or move the lamp so it does not shine across the table; check again |
+| `no picture (is the recorder running?)` | Pi window `./run-fleet-pi.sh rec`, then check again |
+| `no picture (no calibration saved)` | The setup did not save: steps 3-5 again |
+
+8. **3 Workspace:** the **Length** and **Width** now show the measured size. Click **More**. Under **Robot start
+   spots** type these three rows (x, y, facing), then click **Save workspace**:
 
 | Robot | x | y | facing |
 |---|---|---|---|
@@ -144,73 +186,18 @@ sudo systemctl restart mirlt-launcher
 | Center | half the length (e.g. 64 for 128) | 17 | 90 |
 | Right | length minus 17 (e.g. 111 for 128) | 17 | 90 |
 
-Why: the warm-up then starts Left and Right on the same crosses as the mission. (My choice, made today; the default
-spots are 20 % and 80 % along, which would need two more crosses.)
+![Corners clicked in both pictures](../screenshots/2026-10-29/corners-setup-feature-mc-setup-4-corners-clicked-each-view-sim.png)
 
-4. Tape three crosses on the table, each line about 15 cm long: all three **17 cm in from the long side nearest the
-   audience**; Left's **17 cm from the left short end**, Right's **17 cm from the right short end**, Center's at
-   **half the length**. The long side nearest the audience is the **audience side** (y = 0); the corner where it
-   meets the left short end is **0,0**.
+The Setup screen with the 4 corners clicked in each picture (simulator, 137 x 76).
 
-![Workspace, 128 x 72, start spots typed](../screenshots/2026-10-29/run-sheet-feature-mc-3-workspace-128x72-start-spots-typed.png)
+![The result line](../screenshots/2026-10-29/corners-setup-feature-mc-setup-result-line-warmup-sides-sim-137x76.png)
 
-The Workspace screen with **More** open: the size typed, the three start spots typed (simulator; the sides show
-"open" because a warm-up had already run).
+After **Measure**: the robots' steps, the result line and the warm-up's sides (simulator; the WARNING there is the
+simulator's robot body, which always reads small).
 
-## 2. Camera setup, lighting check, warm-up (10 min)
-
-The warm-up is **on** at school: the table's edges are real, so the robots feel all four sides.
-
-1. Put **corner piece A** flat in the **0,0 corner**: its white-dot square in the corner, its **5-square side along
-   the audience side**. Put **Left, Right and Center on their crosses** (section 3.1 says how), switched on.
-2. The setup needs the cameras to itself. Pi window:
-
-```
-tmux kill-window -t fleet:rec
-```
-
-(`can't find window: rec` is fine.)
-
-3. **2 Setup:** in **Surface the cameras see**, type the table's size as `LENGTHxWIDTH` (e.g. `128x72`). Leave
-   **then the warm-up** **ticked**. Click **Set up (flash check, chessboard, warm-up)**. About 2 minutes; the robots'
-   lights flash.
-4. **Wait for the line** `take the chessboard away, then press "Chessboard taken away"`. Before it, you should see:
-   - `overhead: lens NNN cm up, board fit 0.xx px, table corners within N.N px, saved`
-   - `side: lens NNN cm up, board fit 0.xx px, table corners within N.N px, saved`
-   - **Good:** both say `saved`, board fit under 1 px, table corners within 5 px.
-   - The flash check's own line may say no lights were seen: expected on a new network (it calls the robots' home
-     addresses); the chessboard part does not need it.
-5. **Do not press the button yet.** Start the recorder again (the warm-up needs its pictures). Pi window:
-
-```
-./run-fleet-pi.sh rec
-```
-
-You should see `Recorder running.`
-
-6. **Lift the corner piece off the table.** Still don't press the button. On the right of **2 Setup**, under
-   **Lighting**, click **Check the lighting**:
-
-| It says | Do this |
-|---|---|
-| `overhead camera: fine (...)` and `side camera: fine (...)` | Go on |
-| `... low (...)`, `it works, with little margin` | Go on; if you can, dim the light over the table |
-| `... only 2 of 3 robots found: check every robot is in this camera's picture` | Move that camera so all three robots are in its picture, then repeat step 2 onwards |
-| `overhead camera washed out: ...` | Close the blinds or turn off the lamp above the table; **Check the lighting** again. If it stays washed out: go on (the side camera carries it; being built) |
-| `side camera washed out: ...` | Close the blinds, or move the lamp so it does not shine across the table; check again |
-| `no picture (is the recorder running?)` | Step 5 again |
-| `no picture (no calibration saved)` | The setup did not save: steps 1-4 again |
-
-7. Hands off the table. Click **Chessboard taken away**. The warm-up runs, about 1-1.5 minutes: each robot creeps into
-   its corners, pauses, and feels the sides, then goes back to its cross.
-8. **4 Warm-up:** click **Read the results**. You should see one line per side, e.g. `left side: open edge, 3.4 cm
-   further in than marked`, and a list of pictures to check. Leave **move sides to where they were found** **unticked**
-   (the 3 cm is the edge sensor stopping early, not the table). Click **Use these answers**.
-
-![Warm-up results](../screenshots/2026-10-29/run-sheet-feature-mc-4-warmup-results-sim-cameras.png)
-
-The Warm-up screen after **Read the results**, from a simulator run on 128 x 72: four open edges found, 15 pictures
-listed.
+**If the measure is known to be wrong** (the tape says otherwise by more than 3 cm): **More** under **Setup**, type
+the size into **Table size override**, click **Measure** again. **The old chessboard way** is still there under
+**More**, **Setup way** (it stops and restarts the recorder itself).
 
 ## 3. Placing the robots, and the run (3 min + the run)
 
@@ -271,9 +258,10 @@ steps done.
 | `Plan refused ... under 8 cm`, `no plan`, or `no priority order gave a plan` | **5 Mission:** **Monday's default**, **Plan and preview**, robots on their crosses, run again |
 | The run ends mid-mission with `no plan` (a robot stopped for nothing) | The same: **Monday's default**, **Plan and preview**, robots on their crosses, run again (Left's 10 cm limit, being built, should end this) |
 | `... is driving the robots on this Pi` | Pi window `./run-fleet-pi.sh stopall`, wait 1 minute, try again |
-| Setup: `the chessboard was not found` | All of corner piece A in both pictures, flat, no glare; Set up again |
-| Setup: `the corner piece is turned` | White-dot square in the corner, 5-square side along the audience side |
-| Setup: `the table's corners were not found` | Clear the table's corners (bags, cables); Set up again |
+| Setup: `... corners go round the table the other way ... swap 2 and 4` | In that picture, **Clear**, then click 1, 2, 3, 4 again with 2 on the audience side's other end |
+| Setup: `The two pictures are numbered differently` | **Clear** the side picture; click its 1 on the same table corner as the overhead's 1 |
+| Setup: `No robot's lights were seen` / `no robot answered` | Robots on the table and switched on; `./run-fleet-pi.sh check`; **Measure** again |
+| Setup: `no picture from the overhead camera` | Pi window `./run-fleet-pi.sh rec`; **Take pictures** again |
 | `Frames go to ... ON THE PI'S CARD (no USB drive found ...)` | The USB drive is not in: plug it in, `./run-fleet-pi.sh rec`, run again |
 | A robot goes silent mid-run (WiFi) | The other carries on round it (a silent robot counts as a brick). Let it finish |
 | A robot heads for an edge, or the two close in | Red **Stop** (or Pi window `./run-fleet-pi.sh stopall`); pick it up if it still moves |
@@ -309,9 +297,10 @@ Do it on the full 122 x 122 plywood (all four edges are real). Robots charged; f
 - [ ] **1 min.** Pi window: `nmcli connection show`. A line named `school` (or `hotspot`) is listed (appendix A).
 - [ ] **1 min.** Laptop browser `100.122.222.75:8091`, **Mission Control**, **1 Connect**, **Robots**. Pill: **Mode:
       Robots**. **6 Run**, **More**: **upload** says **true** (if not: set it, **Save run settings**).
-- [ ] **1 min.** **3 Workspace:** `122` and `122`, **Save workspace**; **More**: Left `17 17 90`, Center `61 17 90`,
-      Right `105 17 90`, **Save workspace**. Three crosses on the plywood to match.
-- [ ] **4 min.** Section 2, steps 1-8, exactly as at school (surface `122x122`, warm-up ticked).
+- [ ] **1 min.** Three crosses on the plywood: 17 cm in from the edge nearest you, 17 cm from each end, one in the
+      middle (61 cm).
+- [ ] **3 min.** Section 2, steps 1-8, exactly as at school (warm-up ticked). The result line should say about
+      `122 x 122`; the start spots are Left `17 17 90`, Center `61 17 90`, Right `105 17 90`.
 - [ ] **1 min.** **5 Mission:** **Monday's default**, **Plan and preview**: it plans and shows a finish time.
       Don't run it: 122 x 122 is outside every simulator test. Robots off. Pack (section 0).
 
@@ -390,8 +379,9 @@ replace this; until then, 2 cm on the cross works.
 
 ## Sweep 1: new tests that may now be necessary
 
-- Pi, at home: Mission Control's setup with the warm-up ticked, the recorder restarted during the "take the chessboard
-  away" wait (section 2, step 5). Never tried on the Pi; the warm-up has not run on real robots at all.
+- Pi, at home: Mission Control's corners-only setup with the warm-up ticked (section 2). Never tried on the Pi or real
+  robots; the warm-up has not run on real robots at all. (The recorder clash is fixed: the setup reads the recorder's
+  pictures and starts it when it is not running.)
 - Simulator: the straighten-up (being built) with each robot 4, 6 and 10 cm off and 20-40 deg turned, on all three
   table sizes; and the warm-up's start with the same offsets (does the straighten-up cover the warm-up too?).
 - Pi: `./run-fleet-pi.sh stopall` and the setup's flash check on a network where the robots are not at 192.168.1.250,
@@ -403,8 +393,9 @@ replace this; until then, 2 cm on the cross works.
 ## Sweep 2: possible inaccuracies in what this sheet relies on
 
 - Every Mission Control screen here is the simulator's; on the Pi the Setup and Run screens show real pictures.
-- The setup, lighting check and warm-up order (recorder stopped, then restarted during the chessboard wait) is read
-  from the code, not run on the Pi. If the warm-up starts without pictures it will stop with a camera message.
+- The corners-only setup was run in the simulator only (and its maths on 28 Oct's real pictures): its size came
+  within 0.3 cm of the plywood on real pictures, but the light spacing (7.08 cm) was set from those same pictures
+  (docs/build-reports/e02-oct29-corners-only-setup.md).
 - The 3 cm limit and the 2 / 4 / 6 cm results come from one simulator seed with perfect placement; real camera wobble
   (0.5-1.5 cm standing, about 3 cm with the side camera alone) eats into the 3 cm.
 - Timings (1:56 / 2:04 / 2:16) are the plan's; real runs took 5-10 % longer in earlier dry runs and longer on the

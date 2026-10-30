@@ -110,7 +110,27 @@ Answered ones move to the bottom with the answer and date.
 12. Is a speed-sweep test (4 / 7 / 10 / 13 cm/s) worth board time? It separates camera timing from wheel slip.
 13. Should creep steps change? 12 of 23 stalled (faster creep, or end on the front sensor instead of the wheel count).
 
+79. The light spacing (7.08 cm, from 28 Oct's pictures of the plywood) is the setup's ruler: a 2 % error in it is a 2 %
+    error in the table's size (2.7 cm on 137). One ruler measurement across a lit robot's two lights, from straight
+    above, would replace it. Can you measure it (centre to centre, mm)? (e02-oct29-corners-only-setup)
+80. On 28-29 Oct the cameras (plywood calibration) saw the 10 cm crawls 7.8 % longer than the wheels said (60 crawls,
+    wheel_scale 0.979). So the setup's roll check will likely disagree with the lights and be left out with a warning.
+    A tape check of one robot's `go 10` would say which is right (the wheels' 0.979, or about 1.05). (same report)
+81. A click is not snapped onto the corner it is on (snapping picked up plywood grain on real pictures). Would you click
+    each corner 5 times once at home, so the click error and a better snap can be measured? (same report)
+82. A numbering that goes round clockwise (1 -> 2 along the audience side, 4 on the wrong end) is refused with words
+    ("swap 2 and 4") rather than renumbered: the robots would turn the wrong way in a mirrored frame. Refuse (as built),
+    or quietly swap 2 and 4 and say so? (same report)
+
 ## Answered
+- 2026-10-29 20:20-20:27 (Nick: "the user does nothing but select corners"; built in
+  docs/build-reports/e02-oct29-corners-only-setup.md):
+  - Mission Control's queued items "Corner numbering decided automatically" (the user selects 1-4), "Lens height and
+    camera pose from geometry" (built: from the corners, the lens model and the robots), "Checkerboard calibration"
+    (dropped for now; its code kept behind More).
+  - The run sheet's recorder clash (setup needed the recorder stopped, the warm-up needed it running): the setup now
+    reads the recorder's pictures and starts it when it is not running; the old chessboard way stops and restarts it
+    itself.
 - 2026-10-29 16:2x (Nick approved the rules audit's recs; built in docs/build-reports/e02-oct29-false-stops.md):
   - Q68: every robot now needs 3 distance-sensor readings in a row before a stop (with Left at 10 cm: 0 false stops
     in the 232 replayed drives; a real brick is met 0.7 cm nearer by Right, 2.7 cm by Left, simulator). Plus a floor

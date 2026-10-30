@@ -80,7 +80,6 @@ If a robot still moves: pick it up and switch it off. (At school, stopall's dire
 </ul>
 <ul class="check">
 <li>The USB-C <b>data</b> cable</li>
-<li>Printed checker corner piece A (flat)</li>
 <li>Tape and a tape measure</li>
 <li>A power strip or extension lead</li>
 <li>This sheet</li>
@@ -109,40 +108,35 @@ You should see <code>Robots heard: Center, Left, Right</code> and <code>Left: fi
 <li>Laptop browser: address bar, type <code>100.122.222.75:8091</code>, <b>Enter</b>. Click <b>Mission Control</b> (if closed: <b>Open Mission Control</b>).</li>
 <li><b>1 Connect:</b> click the <b>Robots</b> card. The pill at the top must say <b>Mode: Robots</b> (after any page reload, click <b>Robots</b> again).</li>
 </ol>
-<h3>1.4 Table size and start spots</h3>
+<h3>1.4 Start crosses</h3>
+<p>Three crosses (lines about 15 cm), all <b>17 cm in from the long side nearest the audience</b>: Left's 17 cm from the left end, Right's 17 cm from the right end, Center's at half the length. Corner <b>0,0</b> = audience side meets the left end.</p>
+
+<h2>2. Camera setup, lighting, warm-up (5 min) &mdash; you only click corners</h2>
 <ol>
-<li>Measure the table: length ______ cm, width ______ cm.</li>
-<li><b>3 Workspace:</b> type them into <b>Length (cm)</b> and <b>Width (cm)</b>. Click <b>Save workspace</b>.</li>
-<li>Click <b>More</b>. Under <b>Robot start spots</b> type (x, y, facing), then <b>Save workspace</b>:
+<li>Left, Right, Center on their crosses, switched on, facing away from the audience.</li>
+<li><b>2 Setup:</b> all three robots ticked; <b>then the warm-up</b> stays <b>ticked</b>.</li>
+<li>Click <b>Take pictures</b> (about 10 s; it starts the recorder itself).</li>
+<li>In <b>each</b> picture click the table's corners in order: <b>1</b> audience side &times; left end (0,0); <b>2</b> the audience side's other end; <b>3</b> opposite 1; <b>4</b> the left end's far corner. Same corner = same number in both. Wrong click: <b>Undo</b>.</li>
+<li>Hands off. Click <b>Measure (robots flash and move)</b>. About 1 min (lights flash; each robot rolls 10 cm and back), then the warm-up about 1 min.</li>
+<li>Read the line <code>Your table measures L x W cm ...; they agree on the robots within N cm</code>. Good = size within about 2 cm of the tape, cameras within 2 cm. Then one line per side and <code>the warm-up's sides are in the map</code>: nothing to click.</li>
+<li>Under <b>Lighting</b>, click <b>Check the lighting</b>:
+<table>
+<tr><th>It says</th><th>Do this</th></tr>
+<tr><td><code>fine</code> on both</td><td>Go on</td></tr>
+<tr><td><code>low ...</code> / <code>it works, with little margin</code></td><td>Go on; dim the light over the table if you can</td></tr>
+<tr><td><code>only 2 of 3 robots found ...</code></td><td>Move that camera so all three are in its picture; redo from step 3</td></tr>
+<tr><td><code>overhead camera washed out</code></td><td>Close blinds / lamp above the table off; check again. Still washed out: go on</td></tr>
+<tr><td><code>side camera washed out</code></td><td>Close blinds, or move the lamp so it doesn't shine across; check again</td></tr>
+<tr><td><code>no picture (is the recorder running?)</code></td><td>Pi window <code>./run-fleet-pi.sh rec</code>, check again</td></tr>
+<tr><td><code>no picture (no calibration saved)</code></td><td>Setup did not save: steps 3-5 again</td></tr>
+</table></li>
+<li><b>3 Workspace:</b> the measured size is filled in. <b>More</b>, <b>Robot start spots</b> (x, y, facing), then <b>Save workspace</b>:
 <table>
 <tr><th>Robot</th><th>x</th><th>y</th><th>facing</th></tr>
 <tr><td>Left</td><td>17</td><td>17</td><td>90</td></tr>
 <tr><td>Center</td><td>half the length (64 for 128)</td><td>17</td><td>90</td></tr>
 <tr><td>Right</td><td>length minus 17 (111 for 128)</td><td>17</td><td>90</td></tr>
 </table></li>
-<li>Tape three crosses (lines about 15 cm): all <b>17 cm in from the long side nearest the audience</b>; Left's 17 cm from the left end, Right's 17 cm from the right end, Center's at half the length. Corner <b>0,0</b> = audience side meets the left end.</li>
-</ol>
-
-<h2>2. Camera setup, lighting, warm-up (10 min) &mdash; warm-up ON</h2>
-<ol>
-<li>Corner piece A flat in the <b>0,0 corner</b>: white-dot square in the corner, <b>5-square side along the audience side</b>. Left, Right, Center on their crosses, switched on.</li>
-<li>Pi window (the setup needs the cameras; <code>can't find window</code> is fine):<pre>tmux kill-window -t fleet:rec</pre></li>
-<li><b>2 Setup:</b> <b>Surface the cameras see</b> = the table size as <code>LENGTHxWIDTH</code> (e.g. <code>128x72</code>). <b>then the warm-up</b> stays <b>ticked</b>. Click <b>Set up (flash check, chessboard, warm-up)</b>. About 2 min.</li>
-<li>Wait for <code>take the chessboard away, then press "Chessboard taken away"</code>. Before it: <code>overhead: lens ... saved</code> and <code>side: lens ... saved</code>. Good = both <code>saved</code>, board fit under 1 px, table corners within 5 px. (A flash-check line saying no lights were seen is expected on a new network.)</li>
-<li><b>Don't press the button yet.</b> Pi window:<pre>./run-fleet-pi.sh rec</pre>You should see <code>Recorder running.</code></li>
-<li>Lift corner piece A off the table. Under <b>Lighting</b>, click <b>Check the lighting</b>:
-<table>
-<tr><th>It says</th><th>Do this</th></tr>
-<tr><td><code>fine</code> on both</td><td>Go on</td></tr>
-<tr><td><code>low ...</code> / <code>it works, with little margin</code></td><td>Go on; dim the light over the table if you can</td></tr>
-<tr><td><code>only 2 of 3 robots found ...</code></td><td>Move that camera so all three are in its picture; redo from step 2</td></tr>
-<tr><td><code>overhead camera washed out</code></td><td>Close blinds / lamp above the table off; check again. Still washed out: go on</td></tr>
-<tr><td><code>side camera washed out</code></td><td>Close blinds, or move the lamp so it doesn't shine across; check again</td></tr>
-<tr><td><code>no picture (is the recorder running?)</code></td><td>Step 5 again</td></tr>
-<tr><td><code>no picture (no calibration saved)</code></td><td>Setup did not save: steps 1-4 again</td></tr>
-</table></li>
-<li>Hands off. Click <b>Chessboard taken away</b>. Warm-up, 1-1.5 min: each robot creeps to its corners, feels the sides, returns to its cross.</li>
-<li><b>4 Warm-up:</b> <b>Read the results</b> (one line per side, e.g. <code>left side: open edge, 3.4 cm further in than marked</code>). Leave <b>move sides to where they were found</b> <b>unticked</b>. Click <b>Use these answers</b>.</li>
 </ol>
 
 <h2>3. Place the robots, plan, run</h2>
@@ -169,8 +163,9 @@ You should see <code>Robots heard: Center, Left, Right</code> and <code>Left: fi
 <tr><td><code>Plan refused ... under 8 cm</code> / <code>no plan</code> / <code>no priority order gave a plan</code></td><td><b>Monday's default</b>, <b>Plan and preview</b>, robots on crosses, run</td></tr>
 <tr><td>Run ends mid-mission with <code>no plan</code> (stopped for nothing)</td><td>The same as above</td></tr>
 <tr><td><code>... is driving the robots on this Pi</code></td><td><code>./run-fleet-pi.sh stopall</code>, wait 1 min, try again</td></tr>
-<tr><td>Setup: <code>the chessboard was not found</code></td><td>All of piece A in both pictures, flat, no glare; Set up again</td></tr>
-<tr><td>Setup: <code>the corner piece is turned</code></td><td>White dot in the corner, 5-square side along the audience side</td></tr>
+<tr><td>Setup: <code>... swap 2 and 4</code></td><td><b>Clear</b> that picture; click 1-4 again, 2 on the audience side's other end</td></tr>
+<tr><td>Setup: <code>numbered differently</code></td><td><b>Clear</b> the side picture; its 1 on the overhead's 1</td></tr>
+<tr><td>Setup: <code>No robot's lights were seen</code> / <code>no robot answered</code></td><td>Robots on and on the table; <code>./run-fleet-pi.sh check</code>; Measure again</td></tr>
 <tr><td>Setup: <code>the table's corners were not found</code></td><td>Clear the table's corners; Set up again</td></tr>
 <tr><td><code>... ON THE PI'S CARD (no USB drive found ...)</code></td><td>Plug in the USB drive, <code>./run-fleet-pi.sh rec</code>, run again</td></tr>
 <tr><td>A robot goes silent mid-run</td><td>The other carries on round it. Let it finish</td></tr>
@@ -191,8 +186,8 @@ You should see <code>Robots heard: Center, Left, Right</code> and <code>Left: fi
 <li><b>1 min</b> <code>./run-fleet-pi.sh check</code>: all three <code>firmware 2026-10-29a</code>, battery 90 %+.</li>
 <li><b>1 min</b> <code>nmcli connection show</code>: a <code>school</code> (or hotspot) line is listed.</li>
 <li><b>1 min</b> Mission Control, <b>Robots</b>, <b>Mode: Robots</b>. <b>6 Run</b>, <b>More</b>: <b>upload</b> = <b>true</b> (else set it, <b>Save run settings</b>).</li>
-<li><b>1 min</b> <b>3 Workspace</b>: 122 and 122, <b>Save workspace</b>; <b>More</b>: Left 17 17 90, Center 61 17 90, Right 105 17 90, <b>Save workspace</b>. Three crosses to match.</li>
-<li><b>4 min</b> Section 2, steps 1-8, as at school (surface <code>122x122</code>, warm-up ticked).</li>
+<li><b>1 min</b> Three crosses: 17 cm in from the near edge, 17 cm from each end, one at 61 cm.</li>
+<li><b>3 min</b> Section 2, steps 1-8, as at school (warm-up ticked). Result about <code>122 x 122</code>; spots Left 17 17 90, Center 61 17 90, Right 105 17 90.</li>
 <li><b>1 min</b> <b>5 Mission</b>: <b>Monday's default</b>, <b>Plan and preview</b>: it plans. Don't run (122&times;122 is untested). Robots off. Pack.</li>
 </ul>
 <p class="see">Anything that did not match this sheet: tell me Sunday night. Full detail, data and the flash steps: 2026-11-02-monday-run-sheet.md.</p>

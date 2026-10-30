@@ -66,16 +66,21 @@ closest approach), styled like the mockup (Inter, ground #F6F7F9, white panels, 
 
 ## Queued for the next build (Nick, 2026-10-27 09:55)
 
-- **Corner numbering decided automatically.** Nick: "Why does it matter which corner is which? That should be
+- **DONE differently (Nick, 2026-10-29 20:20-20:27; docs/build-reports/e02-oct29-corners-only-setup.md): the user
+  selects corners 1-4 in each picture** ("Does it matter? The user will select 1 2 3 4"); a clockwise numbering or two
+  pictures numbered differently is caught before anything moves. Was: **Corner numbering decided automatically.** Nick: "Why does it matter which corner is which? That should be
   determined automatically when the robots start moving." The floor frame's 0,0 only has to stay the same from day
   to day (saved spots and zones, the side camera's model, comparing sessions). Plan: 0,0 = the board corner nearest
   the side camera, found from the two-camera geometry; the frame's handedness (mirror) checked from the first robot
   turn (the gyro's left against the camera's left). The page's "Move the numbering" button goes; a mismatch with
   the saved frame is reported, not asked.
-- **Lens height and camera pose from geometry, not a tape.** Each camera's position and tilt (lens height included)
+- **DONE 2026-10-29 (corners-only setup):** each camera's pose (height, tilt) from its 4 corners, its lens model and the
+  scale from the robots' lights (roll and body as checks); the side camera lined up on the overhead by the lights. Was:
+  **Lens height and camera pose from geometry, not a tape.** Each camera's position and tilt (lens height included)
   solved from the board's 4 corners in its picture and its lens model; the two cameras cross-check each other (and
   later, the robots' tops at a known 4 cm). Removes the lens-height box from the setup page.
-- **Checkerboard calibration** (Nick, 09:56; changed 09:59 to "a small checkerboard piece ... just one in the
+- **DROPPED FOR NOW (Nick, 2026-10-29: "Drop for now, revisit when we print checkerboards")**: the corner piece's
+  code stays behind Mission Control's Setup, More, "Setup way: chessboard". Was: **Checkerboard calibration** (Nick, 09:56; changed 09:59 to "a small checkerboard piece ... just one in the
   corner so the two cameras know how to align the image"): one small pattern (letter size, known square size,
   ChArUco so it has a direction, flat on a stiff backing) placed in a corner while both cameras take pictures, then
   removed before runs. It is the shared anchor: 0,0, the axes and the mirror, the same in both cameras. The board's
