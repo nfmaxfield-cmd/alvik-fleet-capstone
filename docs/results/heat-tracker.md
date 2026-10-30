@@ -17,8 +17,20 @@ pictures a second (-1 to +1; near 0 = no link, or temperature barely varied).
 | 20261029-074342-doe | unknown | 79.4 / 83.3 | 19 | 97 / 3 / 0 % | 25.0 / 22.5 / - | 0.20 | -0.35 |
 | 20261029-092216-doe | unknown | 74.0 / 77.4 | 0 | 100 / 0 / 0 % | 25.0 / - / - | 0.11 | -0.02 |
 | 20261029-211053-doe | unknown | 80.8 / 83.3 | 40 | 88 / 12 / 0 % | 24.5 / 23.5 / - | 0.27 | -0.32 |
+| 20261030-100153-doe | unknown | 81.3 / 84.2 | 167 | 81 / 19 / 0 % | 25.0 / 24.5 / - | 0.25 | -0.33 |
 
 ## Readings (newest first)
+- **20261030-100153-doe (DOE loop in keep-going mode, 10:01-14:01, the full 4 h, daytime, cooling not in the logs):**
+  the hottest and longest DOE loop so far: 80 C within 3 minutes, then 77-84 C for four hours (median 81.3 C, 167
+  minutes at 80 C or more), under the soft temperature limit 19 % of the time, never throttling. Under the soft limit
+  the camera handled a median 24.5 pictures a second against 25.0 without it (rho -0.33: the hotter, the slightly
+  slower, the same pattern as the 07:43 and 21:10 loops). Yesterday's 09:22 daytime loop on the same Pi ran 7 C cooler;
+  what cooling it had is not in the logs (open question 62). The loop ended at its 4 h time cap
+  (build-reports/e02-oct30-daytime-doe.md), not from heat. The tracker's default cooling label "none (bare Pi)" was
+  changed to "unknown" because nobody recorded it.
+  ![Pi temperature and camera speed, DOE loop 30 Oct 10:01](heat/20261030-100153-doe.png)
+  The Pi's temperature and the pictures the camera handled each second, over the session; data: the session's cpu.csv
+  and perf.csv.
 - **20261029-211053-doe (DOE loop in keep-going mode, 21:10-22:16, 65 min, night under the room lamp, cooling not in
   the logs):** the hottest DOE loop so far by median: it reached 80 C within 4 minutes and stayed at 78-83 C for the
   rest (median 80.8 C, 40 minutes at 80 C or more), under the soft temperature limit 12 % of the time, never
