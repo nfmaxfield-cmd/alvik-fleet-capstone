@@ -563,10 +563,16 @@ class DoeLoop(LD.Ladder):
             self.event("retried", n, "was set aside (%s): tried again at loop %d (time %d)" % (why, k, rec[n]))
         self.save()
         need_l1 = [n for n in outs if not self.st["passed"].get("L1:%s" % n)]
+        # set aside because it has no compass check (it restarted unseen, or a kept calibration is not on the robot:
+        # "refused (no compass check since power-on: send calibrate first)"): a full calibration now
+        recal = [n for n, why in outs.items() if "compass check" in why or "calibrat" in why]
+        for n in recal:
+            if n not in need_l1:
+                need_l1.append(n)
         if need_l1:
             try:
                 sub = self.sub("retry-L1-%03d" % k)
-                self.L1(sub, need_l1)
+                self.L1(sub, need_l1, force=bool(recal) or None)
                 self.note_calibrated([n for n in need_l1 if self.st["passed"].get("L1:%s" % n)])
             except LadderStop as e:
                 for n in need_l1:

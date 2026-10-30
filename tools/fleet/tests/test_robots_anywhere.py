@@ -215,14 +215,20 @@ def test_doe_loop_retries_every_set_aside_robot_each_loop():
     d.sub = lambda name: name
     d.note_calibrated = lambda names: None
 
-    def L1(sub, names):
-        l1.append(list(names))
+    def L1(sub, names, force=None):
+        l1.append((list(names), force))
         d.st["passed"]["L1:Center"] = True
     d.L1 = L1
     d.retry_outs(4)
-    assert d.st["kept_out"] == {} and l1 == [["Center"]]          # Center never passed L1: it runs L1 again
+    assert d.st["kept_out"] == {} and l1 == [(["Center"], True)]  # Center never passed L1 (calibration failed): full L1
     assert ("retried", "Center") in ev and ("retried", "Right") in ev
     assert d.st["doe"]["turn_due"] == {"Center": True, "Right": True}
+    # set aside for "no compass check" (it lost its calibration unseen): a full calibration at the retry
+    d.st["kept_out"] = {"Left": "DOE loop: turn check could not finish: refused (no compass check since power-on)"}
+    d.st["passed"]["L1:Left"] = True
+    l1.clear()
+    d.retry_outs(5)
+    assert l1 == [(["Left"], True)]
 
 
 def test_compass_only_calibration_sends_no_spin_and_zero_caps_then_restores():

@@ -1043,11 +1043,12 @@ class Coordinator:
             # Right carried on mowing alone; together, neither had a route): it stays where it is as a fixed
             # obstacle and the others carry on, as before rejoining existed
             b = self.bots[rj]
-            b.rejoin_failed = "no plan fits it back in (%s left without a route)" % ", ".join(newplan["stranded"])
+            why = "no plan fits it back in (%s left without a route)" % ", ".join(newplan["stranded"])
             self.log("rejoin_undone", robot=rj, stranded=newplan["stranded"])
-            self.say("%s could not be fitted back into the plan (%s): it stays where it is, as a fixed obstacle; "
-                     "the others carry on" % (rj, b.rejoin_failed))
-            self.retire(b, "heard again, but %s" % b.rejoin_failed, kind="out")
+            self.say("%s could not be fitted back into the plan (%s): it is held where it is, as a fixed obstacle; "
+                     "the others carry on, and it is tried again later (the others will have moved on)" % (rj, why))
+            self.retire(b, "heard again, but %s" % why, kind="restarted")
+            self.retry_later(b, why)
             return
         gate = getattr(self.args, "min_gap_cm", EC.MIN_GAP_CM) or 0.0
         if gate:
@@ -2328,12 +2329,13 @@ class Coordinator:
             while now() - self.t_run < timeout_s:
                 self.drain()
                 self.fixes()
-                for b in self.bots.values():
+                moving = [self.bots[n] for n in self.names]      # (a robot held at the start is not in it)
+                for b in moving:
                     if b.ended and not self.abort:
                         self.abort = "%s's follow run ended (%s)" % (b.name, b.ended)
                 self.cam_guard()
                 lim = getattr(self.args, "silent_s", EC.SILENT_S)
-                for b in self.bots.values():
+                for b in moving:
                     if lim and b.last_heard is not None and now() - b.last_heard > lim and not self.abort:
                         self.abort = "nothing heard from %s for %.1f s" % (b.name, now() - b.last_heard)
                 if self.abort:
@@ -2745,6 +2747,11 @@ def calib_caps(coord, link, names, source=None):
         x, y, h, how = poses[n]
         others = {m: poses[m][:2] for m in poses if m != n}
         ok, why = CR.spin_room((x, y), rect, others)
+        if not ok and getattr(coord, "self_correct", False):
+            print("  %s: no room to spin where it stands (%s, %s): its calibration is the compass check alone (a few "
+                  "degrees' wiggle)" % (n, why, how))
+            no_room.append(n)
+            continue
         if not ok:
             print("  %s: no room to calibrate where it stands (%s, %s): not calibrated. Move it in (%.0f cm from every "
                   "edge, %.0f cm from the other robots) and start again." % (n, why, how, CR.ROOM_EDGE_CM,
@@ -2807,6 +2814,7 @@ def calibrate(coord, link, args, names, source=None, compass_only=False):
         except Exception as e:      # noqa: BLE001  (the caps only make the roll safer: never stop a run for them)
             print("  (roll caps not worked out: %s; the edge guard still stops a roll at an edge)" % e)
             no_room = []
+    coord.calib_no_room = list(no_room)
     names = [n for n in names if n not in no_room]
     if not names:
         return []
@@ -3171,21 +3179,24 @@ def calibrate_robust(coord, link, args, names, source, auto=True):
     done = calibrate(coord, link, args, names, source)
     if not auto:
         return done
-    left = [n for n in names if n not in done]
+    left = [n for n in names if n not in done and n not in (getattr(coord, "calib_no_room", None) or [])]
     if left:
-        warn(coord, "%s: calibration did not finish (or no room to spin): calibrating again" % ", ".join(left))
+        warn(coord, "%s: calibration did not finish: calibrating again" % ", ".join(left))
         for n in left:
             link.send_name(n, "stop")
         time.sleep(1.0)
         done += calibrate(coord, link, args, left, source)
         left = [n for n in names if n not in done]
     if left:
-        warn(coord, "%s: calibration failed twice: the compass check alone (a few degrees' wiggle; no spin, no roll); "
+        warn(coord, "%s: no room to spin, or the calibration failed twice: the compass check alone (a few degrees' wiggle; no spin, no roll); "
                     "its stored gyro and wheel scales are used" % ", ".join(left))
         for n in left:
             link.send_name(n, "stop")
         time.sleep(0.5)
-        done += calibrate(coord, link, args, left, source, compass_only=True)
+        for n in left:
+            # one at a time: robots this short of room may stand within each other's wiggle (simulator, robots put 14
+            # cm apart: bodies came to 2.6 cm with both wiggling at once)
+            done += calibrate(coord, link, args, [n], source, compass_only=True)
     return done
 
 
@@ -3758,8 +3769,21 @@ def straighten_start(coord, link, args, source, names, fres, auto=False):
             if all(ok for ok, _ in res):
                 break
         st_all = {n: starts[n] for n in names}
+        # robots held at the start stand where they are: every correction keeps the 8 cm net from them (30 Oct
+        # simulator: Left's correction passed 3.5 cm from Right, held, before this)
+        stand = {}
+        for n, _why in (getattr(coord, "start_aside", None) or {}).items():
+            b = coord.bots.get(n)
+            p_ = (getattr(coord, "facing_at", None) or {}).get(n) or (getattr(b, "last_cam", None) if b else None)
+            if p_:
+                stand[n] = (float(p_[0]), float(p_[1]), float(p_[2] if len(p_) > 2 and p_[2] is not None else 0.0))
+        meas_all = dict(meas, **stand)
+        st_all = dict(st_all, **stand)
         try:
-            pl = ST.plan_all(meas, st_all, rect, side_only)
+            pl = ST.plan_all(meas_all, st_all, rect, dict(side_only, **{n: False for n in stand}))
+            for n in stand:
+                pl["robots"].pop(n, None)
+                pl["after"].pop(n, None)
         except ST.Refuse as e:
             if not auto:
                 record["result"] = "refused: %s" % e
@@ -3769,7 +3793,10 @@ def straighten_start(coord, link, args, source, names, fres, auto=False):
             for n in reversed(names):
                 st2 = dict(st_all, **{n: meas[n]})            # it stays: its start "is" where it stands
                 try:
-                    pl = ST.plan_all(meas, st2, rect, side_only)
+                    pl = ST.plan_all(meas_all, st2, rect, dict(side_only, **{m: False for m in stand}))
+                    for m in stand:
+                        pl["robots"].pop(m, None)
+                        pl["after"].pop(m, None)
                 except ST.Refuse:
                     continue
                 hold_at_start(coord, link, n, "it cannot be corrected safely where it stands (%s)" % e)
