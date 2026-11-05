@@ -15,7 +15,8 @@ New at 11:00 on 5 Nov (build e04):
   the Pi window say which (`PHASE A STARTS FROM DEFAULTS` or `... FROM ITS SAVED VALUES`). In phase A an uncalibrated
   robot's turns can be several degrees off: the camera keeps it off the edges (it corrects the heading before any
   drive that would come too close).
-- **Robots must be on firmware 2026-11-05a.** A robot on older firmware is **refused** with a line saying so (it is
+- **Robots must be on firmware 2026-11-05a or newer** (the repo has 2026-11-05b since the home free-roam build; either
+  is fine). A robot on older firmware is **refused** with a line saying so (it is
   not moved, and the others keep out of its way). Reflash it (section 11 or 12), then start again.
 - **Robots are no longer renamed** at school: each keeps its own name (AL-xxxx); Alpha / Bravo exist only inside the
   run.
@@ -276,7 +277,8 @@ and step 5 again.
 This one cable flash per robot also switches on WiFi flashing for every later flash (section 12), so after it Nick
 can update the robots from home through the Pi.
 
-Every robot must be on 2026-11-05a before a run (older firmware is refused). The new firmware adds `save`, `unsave`,
+Every robot must be on 2026-11-05a or newer before a run (older firmware is refused; the repo's firmware is
+2026-11-05b today). The new firmware adds `save`, `unsave`,
 `saved` and `id`, and its start-up line says which values came from saved storage. Whoever has the robots and the
 laptop with the Arduino IDE and the robots' `secrets.h` does this (Nick, or Jay-Sun for the borrowed robots). One
 robot at a time, about 5 minutes each. Nothing is lost: the saved values stay on the robot through the reflash.
@@ -304,7 +306,7 @@ The start-up line in the Serial Monitor (step 6 below) then also says `AL-xxxx: 
 5. Arduino IDE: **File, Open**, `alvik-fleet-capstone-main/firmware/home_lab/home_lab.ino`. **Tools, Board**:
    `Arduino Nano ESP32`. **Tools, Port**: the one that appeared. Press **Upload** (the right arrow). Wait for
    `Done uploading`.
-6. **Tools, Serial Monitor**, set `115200`. You should see `home_lab 2026-11-05a ready` and a line
+6. **Tools, Serial Monitor**, set `115200`. You should see `home_lab 2026-11-05b ready` (the repo's version today) and a line
    `AL-xxxx calibration at power-on: wheel_scale 0.9xxx (saved), gyro_scale 1.0xxx (saved), gyro_drift_dps ...
    (saved)` (or `(default)` for a robot never calibrated).
 7. The next robot: steps 4-6.
@@ -406,7 +408,7 @@ python3 tools/pi/ota_push.py push --name AL-1DC0 --bin ~/home_lab.ino.bin
 You should see `AL-1DC0 at 192.168.1.xxx, firmware 2026-..., idle. Sending home_lab.ino.bin ...`, then it asks for
 the robot's WiFi update password: type the OTA_PASSWORD that was in `secrets.h` when this robot was **last** flashed
 (Jay-Sun's, the first time; nothing shows while you type), press **Enter**. A progress bar runs; the robot's lights turn blue, then green, and it
-restarts. At the end: `DONE: AL-1DC0 now runs firmware 2026-11-05a (was ...)`.
+restarts. At the end: `DONE: AL-1DC0 now runs firmware 2026-11-05b (was ...)` (the version you built).
 `NOT FLASHED`: the line says the likely reason (wrong password, updates off, robot asleep); the robot still runs its
 old firmware, nothing is broken.
 
