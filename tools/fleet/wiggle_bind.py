@@ -47,7 +47,7 @@ for p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recognit
 
 import calib_run as CR   # noqa: E402
 
-VERSION = "2026-11-05b"
+VERSION = "2026-11-09a"
 say = CR.say
 
 
@@ -213,8 +213,17 @@ def bind_for_run(site, slots, link, eye, ips=(), wake_min=3.0, dry=False, folder
             time.sleep(0.05)
     # the WiFi name (firmware 2026-11-05a `id`; older: the name it answered with) before the wiggle: the pins use it
     wifi = {rb.ip: CR.wifi_name_of(link, rb) for rb in robots}
-    for rb in robots:
-        CR.compass_check(link, rb, log=log)
+    cc = {rb.name: CR.compass_check(link, rb, log=log)[0] for rb in robots}
+    # (11-09, school: Jay-Sun's AL-5554 answered on the WiFi, refused its compass check and stopped a one-robot tour)
+    # auto mode: a robot that refuses its compass check is left out of this run, said plainly, while another remains
+    bad = [rb for rb in robots if not cc.get(rb.name)]
+    if auto and bad and len(bad) < len(robots):
+        for rb in bad:
+            log("  LEFT OUT of this run: %s (at %s) refused its compass check; the run carries on without it. It is "
+                "not driven. Switch it off if it is not meant to be here" % (rb.name, rb.ip))
+        robots = [rb for rb in robots if cc.get(rb.name)]
+        found = {n: ip for n, ip in found.items() if cc.get(n)}
+        slots = auto_slots(site, len(found))
     for rb in robots:
         # (11-05h, Nick 20:46) the robot-side safety layers on and read back before the wiggle moves anything
         ok, words = CR.arm_safety(rb, se, log=log)
