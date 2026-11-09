@@ -34,7 +34,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-VERSION = "2026-11-09e11"   # e11: run/stops.csv (Jay-Sun: each stop findable), visit_order.json in the bundle
+VERSION = "2026-11-09b"   # 11-09b: stops.csv robot_wifi + tag_id, binding.json + frames_where.txt in the bundle. e11: run/stops.csv (Jay-Sun: each stop findable), visit_order.json in the bundle
 PAIR_S = 0.07          # as tag_bridge.PAIR_S: two cameras' reads this close in time are one moment
 
 CAM_COLS = ["t", "t_iso", "robot", "x_cm", "y_cm", "heading_deg", "sigma_cm", "sigma_deg", "pm95_cm", "cams", "n_reads",
@@ -271,7 +271,29 @@ def export_all(mission, say=print):
 
 
 STOP_COLS = ["robot", "n", "point", "arrive_unix", "arrive_iso", "dwell_start_unix", "dwell_end_unix", "dwell_end_iso",
-             "dwell_s", "cam_x_cm", "cam_y_cm", "plus_minus_cm", "n_fixes", "source", "own_x_cm", "own_y_cm"]
+             "dwell_s", "cam_x_cm", "cam_y_cm", "plus_minus_cm", "n_fixes", "source", "own_x_cm", "own_y_cm",
+             "robot_wifi", "tag_id"]   # (11-09b, Jay-Sun: the run's slot name, e.g. Alpha, is not the robot: its WiFi name too)
+
+
+def robot_ids(mission):
+    """(11-09b) {run name (slot or alias): (WiFi name, roof tag id)} from the wiggle binding (bind/binding.json)."""
+    out = {}
+    for p in (os.path.join(mission, "bind", "binding.json"), os.path.join(mission, "binding.json")):
+        try:
+            with open(p) as f:
+                rec = json.load(f)
+        except (OSError, ValueError):
+            continue
+        for r in rec.get("robots") or []:
+            w, t = r.get("wifi_name") or r.get("name_before") or "", r.get("tag_id")
+            for k in (r.get("slot"), r.get("name_before")):
+                if k:
+                    out[str(k)] = (w, t)
+        for a, sl in (rec.get("aliases") or {}).items():
+            if str(sl) in out:
+                out.setdefault(str(a), out[str(sl)])
+        break
+    return out
 
 
 def stops(mission):
@@ -284,6 +306,7 @@ def stops(mission):
     if not os.path.exists(src):
         return None, 0
     rows, k = [], {}
+    ids = robot_ids(os.path.abspath(mission))
     with open(src, errors="replace") as f:
         for ln in f:
             if '"point_confidence"' not in ln:
@@ -304,7 +327,8 @@ def stops(mission):
                          "dwell_end_unix": "%.3f" % float(t1), "dwell_end_iso": iso(float(t1)),
                          "dwell_s": e.get("dwell_s"), "cam_x_cm": e.get("x"), "cam_y_cm": e.get("y"),
                          "plus_minus_cm": e.get("plus_minus_cm"), "n_fixes": e.get("n_fixes"),
-                         "source": e.get("source"), "own_x_cm": e.get("own_x"), "own_y_cm": e.get("own_y")})
+                         "source": e.get("source"), "own_x_cm": e.get("own_x"), "own_y_cm": e.get("own_y"),
+                         "robot_wifi": (ids.get(r) or ("", ""))[0], "tag_id": (ids.get(r) or ("", ""))[1]})
     if not rows:
         return None, 0
     out = os.path.join(run, "stops.csv")
@@ -344,6 +368,8 @@ BUNDLE_FILES = [
     ("sync_marks.jsonl", "start / end marks and Mission Control's marks (Pi clock)"),
     ("pose_timeline.csv", "camera and own poses on one timeline"),
     ("tags.json", "roof tag ids"),
+    ("bind/binding.json", "which robot (WiFi name, e.g. AL-1DC0) was which run name (e.g. Alpha) and roof tag (11-09b)"),
+    ("frames_where.txt", "where this run's camera pictures are (the USB stick when it is plugged in) (11-09b)"),
 ]
 NEVER = ("rfid", "jay", ".zip")      # nothing from Jay-Sun's RFID capture or the tools/rfid outputs goes in
 
