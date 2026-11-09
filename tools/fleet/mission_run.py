@@ -419,6 +419,13 @@ def build(args, out):
         args.speed_ = sp
         say("speeds pinned for this site: drive %.0f cm/s, turn %.0f deg/s, final approach %.0f cm/s" % (
             sp["cruise_cms"], sp["turn_dps"], sp["confirm_cms"]))
+    if getattr(args, "visit_order", "") and getattr(args, "visit_chunk_cm", None) is not None:
+        # (Nick 9 Nov, after the first tour stepped every ~10 cm) a visit tour's drives cut into pieces of at most this
+        # (0 = each leg in one go); the planner's 15 cm pieces (camera re-checks between them) stay the default elsewhere
+        ck = float(args.visit_chunk_cm)
+        over["chunk_cm"] = 10000.0 if ck <= 0 else max(5.0, ck)
+        say("VISIT DRIVES: %s" % ("each leg in one go (no stops between points)" if ck <= 0 else
+                                  "pieces of at most %.0f cm" % over["chunk_cm"]))
     over["motion"] = args.motion       # (5 Nov) stop-turn-drive (default) or curves at the corners
     if args.motion == "curves":
         say("motion: curves at the corners where there is room (--motion stopturn: stop and turn at every corner)")
@@ -1838,6 +1845,9 @@ def main(argv=None):
                     help="(e11) with --visit-order: the driving speed, cm/s (default: the site's; school 10)")
     ap.add_argument("--visit-dwell-s", type=float, default=None,
                     help="(e11) with --visit-order: the stop at each point, s (default %g, Jay-Sun's tours)" % 8.0)
+    ap.add_argument("--visit-chunk-cm", type=float, default=None,
+                    help="(Nick 9 Nov) with --visit-order: drives cut into pieces of at most this, cm; 0 = each leg in one "
+                         "go (default: the planner's 15 cm)")
     ap.add_argument("--visit-keep-unreadable", action="store_true",
                     help="(e11) with --visit-order: keep points the camera cannot read (default: flagged and skipped)")
     g.add_argument("--practice-real", action="store_true",

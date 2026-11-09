@@ -53,6 +53,8 @@ ADV_DEFAULTS = {
     "show_all_screens": False,     # the old screens (Connect ... Production), kept
     "visit_speed_cms": 10.0,       # (e11, Jay-Sun's Experiment A tours) Visit points in an order: driving speed
     "visit_dwell_s": 8.0,          # ... and the stop at each point (his numbers, 9 Nov)
+    "visit_chunk_cm": 0.0,         # (Nick 9 Nov) a tour's drives in pieces of at most this (0: each leg in one go, smooth)
+    "visit_keep_unreadable": "on", # (Nick 9 Nov) a tour tries points the camera may not read (on) or skips them (off)
     "visit_order": "on",           # (e11, Nick 9 Nov) the Start screen's "Visit points in your order" picker (off: hidden)
     "practice_path": "real",       # (e11, 9 Nov) practice on the real path (robots answer with WiFi names, the real
                                    # launcher and camera models: mission_run --practice-real) or "dry" (before e11)
@@ -679,7 +681,8 @@ class Starter:
         if kind == "visit" and vo and vo.get("order"):
             d["order"], d["keep_unreadable"] = vo["order"], vo["keep"]      # (e11) Nick's order
             d["extra"] = list(d["extra"]) + ["--visit-speed-cms", "%g" % float(self.adv.get("visit_speed_cms") or 10.0),
-                                             "--visit-dwell-s", "%g" % float(self.adv.get("visit_dwell_s") or 8.0)]
+                                             "--visit-dwell-s", "%g" % float(self.adv.get("visit_dwell_s") or 8.0),
+                                             "--visit-chunk-cm", "%g" % float(self.adv.get("visit_chunk_cm") or 0.0)]
         if kind == "freeroam":
             d["kind"] = "roam"
             d["motion"] = self.adv.get("roam_motion", "curves")   # (Nick 9 Nov)
