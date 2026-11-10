@@ -1087,12 +1087,15 @@ async function savePrefs(d) { try { S.start = await api("/api/start/prefs", d); 
 function startScreen() {
   const T = S.start; const a = T.advanced || {}; const st = T.status || {}; const going = !!st.running;
   const where = T.where || {};
+  const cd = T.code || {};      // (e12) Mission Control's own code changed after a git pull
+  const codeBanner = cd.changed ? `<div class="card warnc" id="codebanner"><b>New code on the Pi</b><p style="margin:6px 0 10px">${esc(cd.words || "")}</p><button class="p" id="restartmc" ${going || cd.running ? "disabled" : ""}>${going || cd.running ? "Restart after the run ends" : "Restart Mission Control now"}</button></div>` : "";
   const mode = `<div class="mode ${T.practice ? "practice" : "robots"}"><span>${esc(T.mode_words)}</span><span class="small" style="font-weight:400">${esc(where.words || "")}</span></div>`;
   const seen = `<div class="card seen"><div><b>Place</b><span>${esc(placeName(where))}</span></div><div><b>Robots</b><span id="srobots">${esc(T.robots.words)}</span></div><div><b>Area</b><span>${esc(T.area)}</span></div>${T.map ? `<div><b>Table</b><span>${esc(T.map)}</span></div>` : ""}</div>`;
   const corners = T.corners_needed ? `<div class="corners"><b>One thing to do first: click the table's corners</b><p style="margin:6px 0 12px">${esc(T.corners_needed)} It takes a minute and is only needed once here.</p><button class="p" id="gocorners">Show me the picture to click</button></div>` : "";
   const bigs = `<div class="bigs">${T.buttons.map(b => `<button data-run="${b.kind}" ${(!b.ok || going) ? "disabled" : ""} title="${esc(b.ok ? b.sub : b.why)}"><b>${esc(b.title)}</b><span>${esc(b.ok ? b.sub : b.why)}</span></button>`).join("")}</div>`;
   const stat = st.kind ? `<div class="card statusbox"><div class="between"><h2>${esc(st.title)}${st.practice ? " (practice)" : ""}</h2><span class="muted small">${st.elapsed_s != null ? fmt(st.elapsed_s) : ""}</span></div>
     <p style="margin:6px 0;font-size:15px">${esc(st.words || "")}${st.points ? " Points done: " + esc(String(st.points)) + "." : ""}</p>
+    ${(st.edge_parked || []).length ? `<div class="corners" style="border-color:var(--red);color:var(--red)"><b>A robot was left at the table's edge: someone must move it before the next run</b>${st.edge_parked.map(w => `<p style="margin:6px 0">${esc(w)}</p>`).join("")}</div>` : ""}
     ${(st.questions || []).map(q => `<div class="corners question" data-q="${esc(q.id)}"><b>A question from the run (${esc(q.robot)} is held until you answer)</b><p style="margin:6px 0 12px">${esc(q.text)}</p><div class="row">${(q.choices || []).map(c => `<button class="p" data-qid="${esc(q.id)}" data-choice="${esc(c)}">${esc(c)}</button>`).join(" ")}</div></div>`).join("")}
     ${(st.lines || []).length ? `<div class="log" style="max-height:180px">${esc(st.lines.join("\n"))}</div>` : ""}
     ${going ? `<div class="row" style="margin-top:10px"><button class="stopall" id="stopbig">STOP every robot</button></div>` : `<p class="small muted" style="margin:8px 0 0">${T.advanced.sleep_when_done && !st.practice && !st.refused && !st.sleep_words ? "The robots were sent to sleep (Advanced: sleep when a run ends)." : ""} Its folder: ${esc(st.folder || "")}</p>`}</div>` : "";
@@ -1128,7 +1131,7 @@ function startScreen() {
       ${advTick("show_all_screens", a, "Show all the older screens (Connect ... Production)")}
     </div></details>`;
   const P = T.prefs; const prefs = P ? (P.values.quiz_done ? prefsCard(P) : quizCard(P)) : "";
-  $("main").innerHTML = `<section class="left" style="flex-basis:100%;max-width:1100px">${mode}${seen}${corners}${P && !P.values.quiz_done ? prefs : ""}${stat}${bigs}${visitPickCard()}<div class="err" id="err"></div>${P && P.values.quiz_done ? prefs : ""}${adv}</section>`;
+  $("main").innerHTML = `<section class="left" style="flex-basis:100%;max-width:1100px">${codeBanner}${mode}${seen}${corners}${P && !P.values.quiz_done ? prefs : ""}${stat}${bigs}${visitPickCard()}<div class="err" id="err"></div>${P && P.values.quiz_done ? prefs : ""}${adv}</section>`;
   wireStart();
   if (P) wirePrefs();
 }
@@ -1210,6 +1213,8 @@ function wireStart() {
   wireVisitPick();
   document.querySelectorAll("[data-qid]").forEach(b => b.onclick = async () => { try { S.start = await api("/api/start/answer", {id: b.dataset.qid, choice: b.dataset.choice}); flash("Answer sent: " + b.dataset.choice); render(); } catch (e) { flash(e.message, true); } });
   if ($("gocorners")) $("gocorners").onclick = () => { screen = isTags() ? 7 : 1; render(); };
+  if ($("restartmc")) $("restartmc").onclick = async () => {    // (e12) only when no run is going (the server checks too)
+    try { const r = await api("/api/restart", {}); flash(r.words || "Restarting"); setTimeout(() => location.reload(), 6000); } catch (e) { flash(e.message, true); } };
   const box = $("advbox"); if (box) { box.open = !!window._advOpen; box.ontoggle = () => { window._advOpen = box.open; }; }
   document.querySelectorAll("[data-adv]").forEach(e => e.onchange = () => saveAdv({[e.dataset.adv]: e.value}));
   document.querySelectorAll("[data-advb]").forEach(e => e.onchange = () => saveAdv({[e.dataset.advb]: e.checked}));

@@ -48,7 +48,8 @@ for p in (HERE, TOOLS):
 import freeroam_core as FC   # noqa: E402
 
 PY = sys.executable
-VERSION = "freeroam-runner-2026-11-09e11"   # e11 (9 Nov school): --alias WIFI=SLOT (names in the run only), --practice-real
+VERSION = "freeroam-runner-2026-11-10e12"   # e12 (10 Nov): the bridge's "camera" messages (no pictures) said and logged; one robot held at an edge parked and shown, the others roam on; orderly shutdown
+VERSION_E11 = "freeroam-runner-2026-11-09e11"   # e11 (9 Nov school): --alias WIFI=SLOT (names in the run only), --practice-real
 VERSION_D = "freeroam-runner-2026-11-07d"   # 11-07d: a robot at an edge makes no proof drive (the run 2 incident d)
 VERSION_C = "freeroam-runner-2026-11-07c"   # 11-07c (e10 Phase C): the start's proof drive (start_discovery.py), the proven
                                           # workspace (proven_workspace.py, saved per site), --no-discovery,
@@ -512,6 +513,19 @@ class Runner:
                                                              if ev.get("type") == "fix"]
             evs = [e for due, e in self.cam_held if due <= now]
             self.cam_held = [(due, e) for due, e in self.cam_held if due > now]
+        # (e12) the bridge's frame watch: no new picture from a camera (or pictures again): said loudly, an event;
+        # the robots then run on the lost-by-the-camera rules as they are (bubble, find-me, hold) until fixes return
+        for ev in evs:
+            if ev.get("type") == "camera":
+                w = str(ev.get("words") or "CAMERA %s: %s" % (ev.get("cam"), ev.get("state")))
+                print(w, flush=True)
+                self.camera_pictures = ev.get("state") != "no_pictures"
+                try:
+                    for r in c.R.values():
+                        c.event(r, "camera " + str(ev.get("state")), w)
+                        break
+                except Exception:   # noqa: BLE001
+                    pass
         # (e09, B1) obstacles from the bridge's brick watch: kept out by every robot
         for ev in evs:
             if ev.get("type") == "obstacle" and ev.get("center") is not None:
@@ -756,6 +770,10 @@ class Runner:
                                   lost=r.lost is not None) for n, r in c.R.items()},
                   counts=c.counts, tracking=self.layer.summary(),
                   filters={n: (r.fp.summary() if r.fp is not None else None) for n, r in c.R.items()})
+        ep = list(getattr(c, "edge_parked", None) or [])
+        st["edge_parked"] = [q["words"] for q in ep]       # (e12) robots parked at an edge: someone must move them
+        if ep:
+            write_edge_parked(self.dir, ep)
         tmp = os.path.join(self.dir, "state.json.tmp")
         with open(tmp, "w") as f:
             json.dump(st, f, indent=1, default=str)
@@ -775,6 +793,18 @@ class Runner:
         self.source.close()
         self.tables.close()
         self.track.close()
+
+
+def write_edge_parked(folder, ep):
+    """(e12) edge_parked.json in the run's folder: Mission Control's status box reads it (each robot left at an edge,
+    where, why, and that someone must move it before the next run)."""
+    try:
+        tmp = os.path.join(folder, "edge_parked.json.tmp")
+        with open(tmp, "w") as f:
+            json.dump({"robots": ep, "words": [q["words"] for q in ep]}, f, indent=1, default=str)
+        os.replace(tmp, os.path.join(folder, "edge_parked.json"))
+    except OSError:
+        pass
 
 
 def stop_leads(a, names):
@@ -864,6 +894,12 @@ def dry_board(a, outdir, names):
         if all(math.dist(pts[i], pts[j]) >= 40 for i in range(len(pts)) for j in range(i + 1, len(pts))):
             break
     starts = {n: [round(p[0], 1), round(p[1], 1), round(rng.uniform(-180, 180), 1)] for n, p in zip(names, pts)}
+    for spec in getattr(a, "sim_start", None) or []:
+        # (e12) --sim-start NAME=X,Y,HEADING: that robot starts there (e.g. at an edge, facing out: the rehearsal of
+        # one robot stuck at an edge while the others roam)
+        n_, _, v_ = spec.partition("=")
+        if n_ in starts:
+            starts[n_] = [float(q) for q in v_.split(",")][:3]
     sd = os.path.join(outdir, "sim")
     os.makedirs(sd, exist_ok=True)
     m = {"format": "alvik-fleet-map", "version": 1, "floor": {"x_min": x0, "x_max": x1, "y_min": y0, "y_max": y1},
@@ -1009,14 +1045,30 @@ def status(folder):
     if not os.path.exists(p):
         say("%s: starting (no state yet)." % folder)
         return 0
-    st = json.load(open(p))
-    mins = (st["now"] - st["t0"]) / 60.0 if st.get("t0") else 0.0
+    try:
+        with open(p) as f:
+            st = json.load(f)
+    except (OSError, ValueError) as e:
+        say("%s: its state.json could not be read (%s): it may be being written; try again." % (folder, e))
+        return 0
+    robots = st.get("robots") if isinstance(st.get("robots"), dict) else {}
+    if "t0" not in st and not any(isinstance(r, dict) and "mode" in r for r in robots.values()):
+        # (e12, 10 Nov: KeyError 'mode') the start-up's ladder (L0 + L1) keeps ITS state.json in the same folder until
+        # the free roam writes its own: the run is still starting (or stopped during the start)
+        say("Free roam %s: starting (the start-up checks: finding the robots, their headings, the camera). Robots so "
+            "far: %s" % (os.path.basename(folder), ", ".join(sorted(robots)) or "none yet"))
+        return 0
+    mins = (st["now"] - st["t0"]) / 60.0 if st.get("t0") and st.get("now") else 0.0
     say("Free roam %s: %.0f min%s" % (os.path.basename(folder), mins, "; ENDED: %s" % st["ended"] if st.get("ended")
                                        else ""))
-    for n, r in st["robots"].items():
-        say("  %-7s %-8s battery %s%%  moves %d  %s%s" % (n, r["mode"], r["battery"], r["moves"],
+    for n, r in robots.items():
+        r = r if isinstance(r, dict) else {}
+        say("  %-7s %-8s battery %s%%  moves %s  %s%s" % (n, r.get("mode", "?"), r.get("battery", "?"),
+                                                       r.get("moves", "?"),
                                                        "firmware %s" % r["fw"] if r.get("fw") else "",
                                                        ("  out: %s" % r["out"]) if r.get("out") else ""))
+    for w in st.get("edge_parked") or []:
+        say("  " + str(w))                 # (e12) a robot parked at an edge: someone must move it
     cn = st.get("counts", {})
     say("  reflex events %s; fallbacks %s; full stops (trophy breaks) %s" % (
         cn.get("reflex"), cn.get("fallback"), cn.get("breaks")))
@@ -1118,6 +1170,8 @@ def main(argv=None):
                          "(refused on the robots)")
     ap.add_argument("--sim-fw", action="append", default=[], metavar="NAME=VERSION")
     ap.add_argument("--sim-silent", action="append", default=[], metavar="NAME@T:DUR")
+    ap.add_argument("--sim-start", action="append", default=[], metavar="NAME=X,Y,HEADING",
+                    help="(e12) --dry: that robot starts there (e.g. 3,60,180: at the x = 0 edge, facing out)")
     ap.add_argument("--sim-wifi-drop", action="append", default=[], metavar="NAME@T:DUR")
     ap.add_argument("--discovery-strict", action="store_true",
                     help="(e10's way, kept off) a camera discovery cannot prove is switched off and only felt ground "
@@ -1270,17 +1324,32 @@ def main(argv=None):
         if frames is not None:
             say("Frames: %s" % frames.words())
             frames.close()
-        if getattr(a, "_ladder", None) is not None and a.dry:
+        if getattr(a, "_ladder", None) is not None:
+            # (e12, 9 Nov home 12:52: "FATAL: exception not rethrown" right after "L0 found no robot") the start-up
+            # ladder's camera threads (its Eye, lights keeper: OpenCV in threads) were left running at exit: stopped
             try:
-                a._ladder.stop_dry()
-            except Exception:
+                a._ladder.drop_eye()
+            except Exception:  # noqa: BLE001
                 pass
+            if a.dry:
+                try:
+                    a._ladder.stop_dry()
+                except Exception:
+                    pass
         if sim is not None:
             try:
                 os.killpg(sim.pid, signal.SIGTERM)
                 sim.wait(timeout=20)
             except Exception:
                 pass
+        ep = list(getattr(getattr(runner, "ctrl", None), "edge_parked", None) or [])
+        if ep:
+            # (e12, Nick 10 Nov) a robot left at an edge: said loudly at the very end, where the person looks
+            say("\n" + "!" * 100)
+            for q in ep:
+                say("!! " + q["words"])
+            say("!" * 100)
+            run_info["edge_parked"] = ep
         run_info.update(ended=why, finished=dt.datetime.now().isoformat(timespec="seconds"))
         json.dump(run_info, open(os.path.join(outdir, "run.json"), "w"), indent=1)
         try:
@@ -1293,4 +1362,6 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _code = main()
+    import orderly_exit as OX      # (e12) no thread torn down inside OpenCV at exit (the 9 Nov abort)
+    OX.finish(_code)

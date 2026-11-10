@@ -22,6 +22,7 @@ import copy
 import datetime as dt
 import json
 import math
+import glob
 import os
 import signal
 import subprocess
@@ -1382,6 +1383,14 @@ class Handler(BaseHTTPRequestHandler):
                                                                keep_unreadable=bool(d.get("keep_unreadable")))))
                 if path == "/api/visit/preset":
                     return self._send(200, clean({"presets": S.start.save_visit_preset(d.get("name"), d.get("order"))}))
+                if path == "/api/restart":
+                    # (e12) a fresh Mission Control on the new code: only when no run is going
+                    if run_going(S):
+                        return self._send(409, {"error": "a run is going: Mission Control restarts after it ends, "
+                                                         "never mid-run"})
+                    restart_self(S)
+                    return self._send(200, {"restarting": True, "words": "Mission Control is restarting on the new "
+                                                                         "code: the page reloads in a few seconds"})
                 if path == "/api/start/stop":
                     return self._send(200, clean(S.start.stop_all()))
                 if path == "/api/start/answer":
@@ -1579,6 +1588,79 @@ def detect_where(SD, sim_room=""):
     return w
 
 
+# ---------------------------------------------------------------------------------------------- (e12) new code after git pull
+VERSION = "2026-11-10a"   # 2026-11-10a (e12, Nick 10 Nov): notices its own code changed after `git pull` and offers a
+                          # restart on the page when no run is going (never mid-run). No version string before
+CODE_CHECK_S = 5.0        # chosen: how often the code is looked at (a git call and a few hundred stat calls). No DOE
+
+
+def code_stamp(repo=None):
+    """(git HEAD, newest change time of the code Mission Control and its runs load: tools/**/*.py and the pages)."""
+    repo = repo or os.path.dirname(os.path.dirname(HERE))
+    head = ""
+    try:
+        head = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True, text=True,
+                              timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    newest = 0.0
+    for pat in ("tools/fleet/*.py", "tools/fleet/*.html", "tools/sim/*.py", "tools/pi/*.py", "tools/experiment/*.py",
+                "tools/recognition/*.py"):
+        for f in glob.glob(os.path.join(repo, pat)):
+            try:
+                newest = max(newest, os.path.getmtime(f))
+            except OSError:
+                pass
+    return head, newest
+
+
+class CodeWatch:
+    """The code as it was when Mission Control started, against the code now (git pull)."""
+
+    def __init__(self, repo=None):
+        self.repo = repo
+        self.at_start = code_stamp(repo)
+        self.t, self.now = 0.0, self.at_start
+
+    def status(self, running):
+        if time.time() - self.t > CODE_CHECK_S:
+            self.t, self.now = time.time(), code_stamp(self.repo)
+        changed = self.now != self.at_start
+        out = {"changed": changed, "running": bool(running), "head_start": self.at_start[0][:8],
+               "head_now": self.now[0][:8]}
+        if changed:
+            how = ("git pull: %s -> %s" % (out["head_start"] or "?", out["head_now"] or "?")
+                   if out["head_start"] != out["head_now"] else "files changed")
+            out["words"] = ("Mission Control's code changed on the Pi (%s) after it started: the page and new runs "
+                            "still use the OLD code until it restarts. %s" % (
+                                how,
+                                "A run is going: restart AFTER it ends (never mid-run)." if running else
+                                "No run is going: press Restart Mission Control now (about 5 seconds)."))
+        return out
+
+
+def run_going(S):
+    try:
+        return bool(S.start.busy() or (S.run is not None and S.run.alive()) or S.calib.running())
+    except Exception:  # noqa: BLE001  (unsure: treat as going, never restart mid-run)
+        return True
+
+
+def restart_self(S, delay_s=0.7):
+    """Replace this process with a fresh Mission Control on the same arguments (after the answer has gone)."""
+    def go():
+        time.sleep(delay_s)
+        try:
+            srv = getattr(S, "server", None)
+            if srv is not None:
+                srv.server_close()
+        except OSError:
+            pass
+        sys.stdout.flush()
+        os.execv(sys.executable, [sys.executable] + list(sys.argv))
+    threading.Thread(target=go, daemon=True).start()
+
+
 def serve(session, port=PORT, listen="127.0.0.1", allow_hosts=()):
     H = type("H", (Handler,), {"session": session, "allow_hosts": tuple(allow_hosts)})
     srv = ThreadingHTTPServer((listen, port), H)
@@ -1628,6 +1710,8 @@ def main(argv=None):
         threading.Thread(target=idle_sleeper, args=(s,), daemon=True).start()
     print("Connect screen opens on: %s" % s.conn_default()["why"], flush=True)
     srv, url = serve(s, a.port, a.listen, a.allow_host)
+    s.server = srv
+    s.code_watch = CodeWatch()                 # (e12) the code as it is now: a git pull later is noticed
     print("Mission Control: %s  (Ctrl+C to stop)" % url, flush=True)
 
     def _term(*_):

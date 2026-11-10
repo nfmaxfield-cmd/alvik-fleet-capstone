@@ -58,6 +58,8 @@ experiments measure that offset; nothing here assumes it.
 
 Needs OpenCV: sudo apt install -y python3-opencv
 """
+VERSION = "2026-11-10a"   # 2026-11-10a (e12): orderly exit (no thread torn down inside OpenCV at exit). No version string before
+
 import argparse
 import csv
 import datetime as dt
@@ -1531,5 +1533,24 @@ def main(argv=None):
                     args.names.index("overhead") if "overhead" in args.names else 0) in (None, "auto") else ()))
 
 
+def _orderly_exit(code=0, wait_s=3.0):
+    """(2026-11-10, e12) The threads were asked to stop: wait up to wait_s for them, flush, then exit normally when none
+    is left, or with os._exit when a camera / writer / picture-server thread is still inside OpenCV, so the interpreter's
+    shutdown never tears a thread down in native code (glibc "FATAL: exception not rethrown"). As
+    tools/fleet/orderly_exit.py; MIRLT_ORDERLY_EXIT=0: as before."""
+    if os.environ.get("MIRLT_ORDERLY_EXIT", "1") == "0":
+        sys.exit(code)
+    me, end = threading.current_thread(), time.time() + wait_s
+    for t in [t for t in threading.enumerate() if t is not me]:
+        t.join(max(0.0, end - time.time()))
+    left = [t for t in threading.enumerate() if t is not me and t.is_alive()]
+    sys.stdout.flush()
+    sys.stderr.flush()
+    if not left:
+        sys.exit(code)
+    os._exit(code)
+
+
 if __name__ == "__main__":
-    main()
+    _r = main()
+    _orderly_exit(_r if isinstance(_r, int) else 0)

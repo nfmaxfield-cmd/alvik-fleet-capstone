@@ -27,6 +27,8 @@ Started by run-fleet-pi.sh; the dry runs start it against tools/sim/fleet_sim.py
 Writes to --out (default logs/<date-time>-bridge): track.csv (every picture: each robot's spot and status),
 events.jsonl (status changes, headings sent, obstacles), bridge_summary.json.
 """
+VERSION = "2026-11-10a"   # 2026-11-10a (e12): frame_watch (no new picture from the overhead camera: said loudly, an event, a message to the run); orderly exit. No version string before
+
 import argparse
 import csv
 import datetime as dt
@@ -746,14 +748,17 @@ def main(argv=None):
         print("Side camera: %s (lag %.3f s)" % (args.side_stream, args.side[1]), flush=True)
     src = S.StreamSource(args.stream, log=lambda s: print(s, flush=True))
     min_lag, skipped, prev = None, 0, None
+    fwatch = frame_watch_for(br, send_to(args))
     try:
         for fr in src:
             lag = fr.t_arrived - fr.t_pi            # clock offset + transit + queue (the offset cancels below)
             min_lag = lag if min_lag is None else min(min_lag, lag)
             if same_picture(fr.img, prev):
                 br.frozen = getattr(br, "frozen", 0) + 1
-                continue
+                continue                            # (e12) a repeated (frozen) picture is not a new one
             prev = fr.img
+            if fwatch is not None:
+                fwatch.saw("overhead")
             if br.ready and lag - min_lag > MAX_BACKLOG_S:
                 skipped += 1
                 br.skipped = skipped
@@ -778,12 +783,43 @@ def main(argv=None):
         pass
     finally:
         src.closed = True
+        if fwatch is not None:
+            fwatch.close()
         if br.side_feed is not None:
             br.side_feed.close()
         s = br.summary()
         br.close()
         print("Camera bridge stopped: %s" % json.dumps(s["robots"]), flush=True)
     return 0
+
+
+def send_to(args):
+    """(e12) a sender to the run's fix port (--to), for frame_watch's messages."""
+    import socket as _so
+    tx = _so.socket(_so.AF_INET, _so.SOCK_DGRAM)
+    h, _, p = str(args.to).rpartition(":")
+    dest = (h or "127.0.0.1", int(p))
+
+    def send(msg):
+        try:
+            tx.sendto(json.dumps(msg).encode(), dest)
+        except OSError:
+            pass
+    return send
+
+
+def frame_watch_for(br, send):
+    """(e12) frame_watch.FrameWatch for the overhead camera (None when switched off: MIRLT_FRAME_WATCH=0)."""
+    import frame_watch as FW
+    if not FW.enabled():
+        return None
+    ev = getattr(br, "event", None)
+    if ev is None:
+        def ev(kind, **kw):
+            kw.update(kind=kind, t=round(time.time(), 3))
+            br.ev_f.write(json.dumps(kw, default=str) + "\n")
+            br.ev_f.flush()
+    return FW.FrameWatch(["overhead"], send=send, event=ev, say=lambda s: print(s, flush=True))
 
 
 def run_farm(args, br, rx, t0, rect, starts):
@@ -823,6 +859,7 @@ def run_farm(args, br, rx, t0, rect, starts):
     tt_f = open(os.path.join(br.out, "tracking_times.csv"), "w", newline="")
     tt_w = csv.writer(tt_f)
     tt_w.writerow(["t_pi", "camera", "ms", "mode", "behind_s"])
+    fwatch = frame_watch_for(br, send_to(args))
     try:
         while True:
             busy = False
@@ -857,6 +894,8 @@ def run_farm(args, br, rx, t0, rect, starts):
                     if ring is not None and kind == "overhead":
                         got = ring.read(ring.newest())
                         img = got[0] if got else None
+                    if fwatch is not None:
+                        fwatch.saw(kind)               # (e12) a picture was read (the workers read the stream)
                     br.on_record(rec, img)
                     tt_w.writerow(["%.4f" % rec["t"], kind, rec.get("ms"), rec.get("mode"), rec.get("behind_s")])
                     times[kind].append(rec.get("ms") or 0.0)
@@ -871,6 +910,8 @@ def run_farm(args, br, rx, t0, rect, starts):
     except KeyboardInterrupt:
         pass
     finally:
+        if fwatch is not None:
+            fwatch.close()
         for c in conns.values():
             try:
                 c.send({"stop": True})
@@ -892,4 +933,6 @@ def run_farm(args, br, rx, t0, rect, starts):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _code = main()
+    import orderly_exit as OX      # (e12) no thread torn down inside OpenCV / apriltag at exit
+    OX.finish(_code)

@@ -810,6 +810,9 @@ class Starter:
                 end_now = True
         if end_now:
             self.on_run_end(refused=bool(out.get("refused")) or self.nothing_moved(out.get("folder")))
+        ep = self.edge_parked_words(out.get("folder"))
+        if ep:
+            out["edge_parked"] = ep          # (e12) robots left at an edge: someone must move them before the next run
         self.deferred_sleep_due()
         ds = getattr(self, "deferred_sleep", None)
         if ds and not running:
@@ -817,6 +820,20 @@ class Starter:
                                   "run starts before then." % time.strftime("%H:%M", time.localtime(ds["at"])))
             out["words"] = "%s %s" % (out.get("words") or "", out["sleep_words"])
         return out
+
+    def edge_parked_words(self, folder):
+        """(e12, Nick 10 Nov) The newest edge_parked.json under the run's folder (free roam writes it when it parks a
+        robot at an edge): one line per robot, naming it, where it is, and that someone must move it."""
+        if not folder or not os.path.isdir(folder):
+            return []
+        ps = sorted(glob.glob(os.path.join(folder, "**", "edge_parked.json"), recursive=True), key=os.path.getmtime)
+        if not ps:
+            return []
+        try:
+            with open(ps[-1]) as f:
+                return [str(w) for w in json.load(f).get("words") or []]
+        except (OSError, ValueError):
+            return []
 
     # (e11, Nick 9 Nov) a refused or failed start where nothing moved: no sleep at once (a sleeping robot needs a
     # power-cycle); put to sleep after DEFERRED_SLEEP_MIN minutes idle with no new run
@@ -929,7 +946,18 @@ class Starter:
                 "prefs": self.prefs_state(),
                 "attended_only": bool((self.S.site or {}).get("attended_only")),
                 "typed": self.typed_values(), "sites": self.site_choices(),
-                "corners_needed": self.corners_needed()}
+                "corners_needed": self.corners_needed(), "code": self.code_state()}
+
+    def code_state(self):
+        """(e12) Mission Control's own code changed since it started (mission_control.CodeWatch), or None."""
+        cw = getattr(self.S, "code_watch", None)
+        if cw is None:
+            return None
+        try:
+            going = bool(self.busy() or (self.S.run is not None and self.S.run.alive()) or self.S.calib.running())
+        except Exception:  # noqa: BLE001  (unsure: treat as going, never restart mid-run)
+            going = True
+        return cw.status(going)
 
     def corners_needed(self):
         """Corner clicking only when there is truly no other way: a tag site whose cameras read no reference tile

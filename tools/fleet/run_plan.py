@@ -36,6 +36,8 @@ Position source (--fixes): where camera poses come from (data-formats.md,
 runs against it with --fixes udp; at the end it prints the simulator's ground
 truth: docking errors, closest robots, contact.
 """
+VERSION = "2026-11-10a"   # 2026-11-10a (e12): the bridge's "camera" messages (no pictures / pictures again) said and logged. No version before
+
 import argparse
 import csv
 import datetime as dt
@@ -129,7 +131,7 @@ class UdpSource:
                 break
             try:
                 msg = json.loads(data.decode("utf-8", "replace"))
-                if isinstance(msg, dict) and msg.get("type") in ("fix", "obstacle"):
+                if isinstance(msg, dict) and msg.get("type") in ("fix", "obstacle", "camera"):   # (e12) camera: no pictures
                     out.append(msg)
             except ValueError:
                 self.bad += 1
@@ -1030,6 +1032,13 @@ class Coordinator:
 
     def fixes(self):
         for ev in self.source.poll():
+            if ev.get("type") == "camera":
+                # (e12) the bridge's frame watch: no new picture from a camera (or pictures again). Said loudly and
+                # logged; the robots it no longer sees are held by the lost-robot rules as they are
+                self.say(str(ev.get("words") or "CAMERA %s: %s" % (ev.get("cam"), ev.get("state"))))
+                self.log("camera_" + str(ev.get("state")), cam=ev.get("cam"), age_s=ev.get("age_s"),
+                         gap_s=ev.get("gap_s"))
+                continue
             if ev.get("type") == "obstacle":
                 oid = ev.get("id") or "camera-%d" % len(self.obstacles_seen)
                 if oid in self.obstacles_seen:

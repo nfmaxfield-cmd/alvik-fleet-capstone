@@ -34,6 +34,8 @@ Writes to --out: track.csv (as cam_bridge's, for line_check.py), tag_poses.csv (
 sigma, size check, picture position), tag_obs.csv (every read's corners: the site fit's input), ref_watch.csv,
 events.jsonl, bridge_summary.json.
 """
+VERSION = "2026-11-10a"   # 2026-11-10a (e12): frame_watch (no pictures from a camera: said loudly, an event, a message to the run); workers joined before the summary; orderly exit. No version string before
+
 import argparse
 import csv
 import datetime as dt
@@ -100,6 +102,7 @@ class CamFeed(threading.Thread):
         self.n = 0
         self.skipped = 0
         self.stop = False
+        self.on_frame = None      # (e12) called with the camera's name for every picture (frame_watch.FrameWatch.saw)
 
     def run(self):
         k = 0
@@ -117,6 +120,8 @@ class CamFeed(threading.Thread):
                         self.latest = (pf, float(h.get("x-time", arrived)), body, arrived)
                         self.n += 1
                         self.cond.notify_all()
+                    if self.on_frame is not None:
+                        self.on_frame(self.name)           # (e12) frame_watch: a new picture came
             except (OSError, ConnectionError, KeyError, ValueError) as e:
                 if self.stop:
                     return
@@ -727,6 +732,12 @@ def main(argv=None):
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     import cv2
     feeds = {c: CamFeed(c, streams[c]) for c in models}
+    fwatch = None
+    import frame_watch as FW
+    if FW.enabled():      # (e12) no pictures from a camera: said loudly, an event, a message to the run
+        fwatch = FW.FrameWatch(list(models), send=send, event=br.event, say=lambda s_: print(s_, flush=True))
+        for f in feeds.values():
+            f.on_frame = fwatch.saw
     for f in feeds.values():
         f.start()
     stop = threading.Event()
@@ -766,10 +777,14 @@ def main(argv=None):
         pass
     finally:
         stop.set()
+        if fwatch is not None:
+            fwatch.close()
         for f in feeds.values():
             f.close()
         for w in ws:
-            w.join(timeout=2)
+            w.join(timeout=8)         # (e12) a worker finishes its picture (detection) before the summary
+        for f in feeds.values():
+            f.join(timeout=2)
         s = br.summary()
         br.close()
         print("Tag bridge stopped: %s" % json.dumps(s["robots"]), flush=True)
@@ -777,4 +792,6 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _code = main()
+    import orderly_exit as OX      # (e12) no thread torn down inside OpenCV / apriltag at exit
+    OX.finish(_code)
