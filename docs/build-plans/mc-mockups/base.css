@@ -1,0 +1,15 @@
+:root{--bg:#F6F7F9;--card:#fff;--ink:#14171c;--mute:#5b6472;--line:#dfe3e8;--blue:#2449c9;--red:#b42318;--green:#0e7a4f;--amber:#b45309}
+body{margin:0;font:15px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--ink)}
+.top{display:flex;align-items:center;gap:14px;padding:12px 24px;background:#fff;border-bottom:1px solid var(--line)}
+.logo{background:#111;color:#fff;border-radius:6px;padding:2px 8px;font-weight:700}.stop{margin-left:auto;background:var(--red);color:#fff;border:0;border-radius:8px;padding:8px 22px;font-weight:700}
+.wrap{max-width:1180px;margin:18px auto;padding:0 18px}.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:14px}
+h1{font-size:22px;margin:0 0 6px}h2{font-size:17px;margin:0 0 8px}.m{color:var(--mute);font-size:13px}
+.btn{border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 14px;font-weight:600}.p{background:var(--blue);color:#fff;border-color:var(--blue)}
+.dis{opacity:.45}.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.pill{border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:13px;background:#fff}
+.ok{color:var(--green)}.warn{color:var(--amber)}.bad{color:var(--red)}
+.steps{display:flex;gap:6px}.st{flex:1;padding:10px;border-radius:10px;border:1px solid var(--line);background:#fff;font-size:13px}.st b{display:block;font-size:14px}.st.on{border-color:var(--blue);box-shadow:0 0 0 2px #2449c933}.st.done{background:#eef7f1}
+.choice{border:1.5px solid var(--line);border-radius:10px;padding:12px;flex:1;min-width:170px}.choice.sel{border-color:var(--blue);background:#eef2fd}
+table{border-collapse:collapse;width:100%;font-size:13px}td,th{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}
+.map{height:150px;border:2px dashed #9aa4b2;border-radius:8px;background:repeating-linear-gradient(90deg,#f1f3f6 0 20px,#eceff3 20px 40px);position:relative}
+.map .ra{position:absolute;left:0;top:0;bottom:0;width:58%;background:#2449c91a;border-right:2px solid #2449c9}.map .r{position:absolute;width:12px;height:12px;border-radius:3px}

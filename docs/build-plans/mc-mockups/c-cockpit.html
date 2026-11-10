@@ -1,0 +1,13 @@
+<!doctype html><meta charset=utf-8><link rel=stylesheet href=base.css><title>Direction C: cockpit</title>
+<div class=top><span class=logo>M</span><b>Mission Control</b><span class=pill>School conference table</span><span class=pill>Running: Visit points 2 / 4</span><button class=stop>STOP</button></div>
+<div class=wrap style="max-width:1280px;display:grid;grid-template-columns:1.5fr 1fr;gap:14px">
+<div><div class=card><h2>Table now</h2><div class=map style="height:260px"><div class=ra></div><div class=r style="left:20%;top:30%;background:#2449c9"></div><div class=r style="left:40%;top:55%;background:#c2410c"></div><div class=r style="left:53%;top:25%;background:#0e7a4f"></div></div><p class=m>Blue band: readable area. Squares: robots where the system believes they are; their colour ring = the source that placed them.</p></div>
+<div class=card><h2>Run</h2><p>Alpha at P05 (stop 5 of 8 s) · Bravo driving to P11 · Charlie <b class=warn>waiting for a hand at the x = 0 edge</b></p></div></div>
+<div><div class=card><h2>What the system knows</h2>
+<table><tr><th>Robot</th><th>Seen by</th><th>Source now</th><th>±</th><th>Battery</th></tr>
+<tr><td><span class=dot style="background:#2449c9"></span>Alpha</td><td>overhead</td><td class=ok>roof tag</td><td>0.3 cm</td><td>82 %</td></tr>
+<tr><td><span class=dot style="background:#c2410c"></span>Bravo</td><td>overhead</td><td class=warn>motion (tag unread 2 s)</td><td>1.4 cm</td><td>64 %</td></tr>
+<tr><td><span class=dot style="background:#0e7a4f"></span>Charlie</td><td>—</td><td class=bad>odometry only 6 s</td><td>3.1 cm</td><td>71 %</td></tr></table>
+<p class=m style="margin-top:8px">Cameras: overhead 14 pictures/s ✓ · side: switched off · laptop webcam: sees no robot (left out)<br>Clock: Pi and camera agree (0.02 s) · Readable area 220 × 168 cm (learned from 9 runs) · Pi 71 °C, card 3.1 GB free</p></div>
+<div class=card><h2>Ask / do</h2><p class=m>Charlie needs a hand: move it 10 cm in, it rejoins by itself.</p></div></div>
+</div>

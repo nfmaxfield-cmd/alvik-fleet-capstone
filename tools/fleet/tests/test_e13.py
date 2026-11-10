@@ -506,3 +506,25 @@ def test_readability_is_kept_per_tag_where_the_evidence_differs(tmp_path):
     assert r.readmap_tag() is m
     src = open(os.path.join(FLEET, "calib_run.py")).read()
     assert "readability_per_tag" in src and "readmap_tag%s.json" in src
+
+
+def test_a_dim_room_is_said_from_the_brightness_and_parking_never_holds_the_end(tmp_path):
+    import threading
+    import calib_run as CR
+    cls = next(v for v in vars(CR).values() if isinstance(v, type) and hasattr(v, "light_words"))
+    r = cls.__new__(cls)
+    r.parent, r.folder = None, str(tmp_path)
+    (tmp_path / "bridge").mkdir()
+    rows = ["t,camera,mean_grey"] + ["%d,overhead,%.1f" % (k, 120.0) for k in range(40)] + \
+        ["%d,overhead,%.1f" % (40 + k, 70.0) for k in range(12)]       # the lights went out
+    (tmp_path / "bridge" / "brightness.csv").write_text("\n".join(rows) + "\n")
+    w = r.light_words()
+    assert w.startswith("the room got darker: the camera's brightness dropped from 120 to 70")
+    (tmp_path / "bridge" / "brightness.csv").write_text("\n".join(rows[:41]) + "\n")
+    assert r.light_words() == ""                                            # steady light: nothing said
+    r._ending, r.stop_flag = True, threading.Event()                        # parking after the run's end
+    import pytest
+    with pytest.raises(CR.RunEnd):
+        r.hold_never_give_up()
+    src = open(os.path.join(FLEET, "calib_run.py")).read()
+    assert 'tries > 6 and os.environ.get("MIRLT_CALIB_GIVEUP", "0") == "1"' in src

@@ -661,6 +661,21 @@ check of the derived rule.
 | Camera self-check limit (camera_selfcheck, ref_tags BUMP_PX) | 3 px median, not chosen here (the bump watch's) | no new DOE: the bump watch's own row | - | - |
 | Card floor at school (site card_stop_gb) | 0.55 GB (Nick 9 Nov) | no: Nick's number for a shared 7 GB card | - | ruled out |
 
+## e13's chosen numbers (2026-11-10, built; docs/build-reports/e13-nov10-readable-area-discovery.md)
+
+| Number (where) | Value now | Experiment that would set it | Needs | Status |
+|---|---|---|---|---|
+| Heading doubt with no pictures (safety_rules NOPIC_HEAD_UNC_DEG) | 3 deg, CHOSEN | yes, from the logs: own heading vs the camera's course after each blind stretch (freeroam lost.csv, run_plan blind_end rows), the 95th percentile by stretch length | Logs | open |
+| Slow at this share of a robot's no-pictures limit (NOPIC_SLOW_SHARE) | 0.5, CHOSEN | yes, small (Sim): 0.3 / 0.5 / 0.8 against edge margins kept and moving time lost, fastsim with nopic outages of 5-30 s | Sim | open |
+| "No pictures" = this many times the stream's 99th-percentile gap (frame_watch GAP_FACTOR) | 3, CHOSEN (floor 0.3 s) | no DOE; a logs check: the longest gap between pictures in normal runs (bridge brightness.csv times, the 5-minute file roll-over) against 3 x p99 | Logs | open |
+| Camera discovery: "sees the robot" = changed area this many times the still pictures' largest change (camera_discovery SEEN_K) | 3, CHOSEN | yes (Sim, then Board): 2 / 3 / 5 against missed and false "sees" with real light flicker, the side camera at a slant, a robot at the picture's edge | Sim + Board | open |
+| Discovery's margin with no camera model (CM_PER_PX_UNKNOWN) | 0.5 cm a pixel, CHOSEN | no: a bound (any real camera here is finer) | - | ruled out |
+| Readable area too small to use (freeroam READABLE_MIN_CM2) | 6,400 cm2, CHOSEN | no: a floor (a run that cannot move is worse than one that may lose a robot) | - | ruled out |
+| Camera check's first wait (camera_feed WAIT_S) | 12 s, CHOSEN | no DOE; a logs check: the bridge's start to its first picture in real runs (bridge.txt) | Logs | open |
+| A school run folder is finished after this long quiet (school_pull SCHOOL_QUIET_MIN) | 15 min, CHOSEN | no: every run writes at least once a minute | - | ruled out |
+| Robots sleep this long after a run (idle_after_run IDLE_MIN) | 10 min, Nick's number | no: Nick's choice | - | ruled out |
+| Trained detector on every Nth picture (tag_bridge ML_EVERY) | 3, CHOSEN | no DOE: a load cap; set from the Pi's measured ms a pass and the heat tracker | Pi | open |
+
 ## Already set by data
 
 - **Line edge cue edge_thr 150** (e02.py SAFETY_SETTINGS): plywood reads 52-84 in every E02 session, the two real

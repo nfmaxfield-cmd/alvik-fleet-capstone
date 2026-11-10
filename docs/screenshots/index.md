@@ -540,3 +540,24 @@ One line per picture: what it shows (feature or problem), and where it comes fro
 - `2026-11-10/e12-feature-no-pictures-warning.png`: **feature.** Terminal: frame_watch saying a camera sent no new picture for 3 s and when pictures came back (simulated clock). Build e12
 - `2026-11-10/e12-problem-freeroam-status-keyerror-fixed.png`: **problem.** Terminal: `freeroam-status` on the real 9 Nov 12:52 folder: KeyError 'mode' with the old code, the plain "starting" line with e12. Build e12
 - `2026-11-10/e12-problem-school-free-roam-robots-lost-past-readable-area.png`: **problem.** Terminal: the school free roam practised on the real path (curves, 2 robots, 6 min): both robots drove past the camera's readable area (x about 254 cm), were lost and stood for the last 4 minutes. Open (e12 report). Build e12
+- `2026-11-10/e13-feature-school-free-roam-stays-in-readable-area-chart.png`: **feature.** Chart: school free roam practice (real path, 3 robots, curves, 6 min), each robot's x over time, e12 code (two robots past the readable area, standing lost) against e13 (all inside, moving). Build e13
+- `2026-11-10/e13-feature-needs-a-hand-terminal.png`: **feature.** Terminal: home free roam practice, Right put down at the edge: NEEDS A HAND at once, said again each minute, never parked, still waiting at the end. Build e13
+- `2026-11-10/e13-feature-no-pictures-limit-by-risk-chart.png`: **feature.** Chart: the no-pictures limit per robot against its distance to the edge, for speeds and headings (safety_rules.no_picture_limit). Build e13
+- `2026-11-10/e13-feature-camera-discovery-terminal.png`: **feature.** Terminal: camera discovery in the simulator rig (no roof tags): derived clear space, coverage map, extra blind camera left out, renamed and missing typed cameras said. Build e13
+- `2026-11-10/e13-problem-stalled-camera-blamed-on-the-tag-fixed.png`: **problem.** Terminal: the 10 Nov 11:48 school calibration case (a stalled stream reported as "no roof tag is seen") as e13 says it: the camera is sending no pictures. Build e13
+- `2026-11-10/e13-feature-autolabel-frame.png`: **feature.** Picture: a simulated run's frame auto-labelled from the roof-tag reads (centre ring and heading line per robot). Build e13
+- `2026-11-10/e13-feature-corner-tags-prefill-confirm.png`: **feature.** Mission Control (practice): the corner tags pre-fill the corners; the person confirms them on both pictures before Measure fits. Build e13
+- `2026-11-10/e13-feature-corner-confirmed-then-measured.png`: **feature.** Mission Control (practice): after "These are the corners", Measure fitted the table (396.1 x 167.6 cm). Build e13
+- `2026-11-10/e13-mockup-a-guided.png`: **feature.** Mockup: Mission Control redesign direction A, guided steps (ideas only). Build e13
+- `2026-11-10/e13-mockup-b-single.png`: **feature.** Mockup: direction B, one page that reads top to bottom (ideas only). Build e13
+- `2026-11-10/e13-mockup-c-cockpit.png`: **feature.** Mockup: direction C, cockpit with the live "what the system knows" panel (ideas only). Build e13
+- `2026-11-10/audit-01-start-screen.png`: **problem.** Mission Control audit (practice): the Start screen; the run buttons come before "Visit points in your order", the quiz above them, the camera picture broken. Build e13
+- `2026-11-10/audit-02-start-screen-everything-open.png`: **problem.** Audit: the Start screen with every section open. Build e13
+- `2026-11-10/audit-03-start-screen-phone.png`: **problem.** Audit: the Start screen at phone width. Build e13
+- `2026-11-10/audit-04-details-on.png`: **problem.** Audit: Details on: a second set of tabs doing the same things another way. Build e13
+- `2026-11-10/audit-20-details-start.png`: **problem.** Audit: Details, Start tab. Build e13
+- `2026-11-10/audit-21-details-1-connect.png`: **problem.** Audit: Details, 1 Connect. Build e13
+- `2026-11-10/audit-22-details-2-cameras---table.png`: **problem.** Audit: Details, 2 Cameras & table (post-run export on the setup screen; Measure away from its pictures). Build e13
+- `2026-11-10/audit-23-details-3-production.png`: **problem.** Audit: Details, 3 Production. Build e13
+- `2026-11-10/audit-24-details-4-run.png`: **problem.** Audit: Details, 4 Run (engineering fields at the same level as the run's choices). Build e13
+- `2026-11-10/audit-25-details-5-review.png`: **problem.** Audit: Details, 5 Review. Build e13
