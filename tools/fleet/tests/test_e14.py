@@ -542,3 +542,118 @@ def test_a_recovery_with_no_reliable_spot_heads_for_the_readability_map(monkeypa
     assert t is not None and t[0] < 120 and not r.S.problems(t, t, buf=3.0, edge_buf=3.0)
     src = open(CR.__file__).read()
     assert "no reliable spot known, and the readability map has no readable spot" in src
+
+
+# -------------------------------------------------------------------------------------------- the picture goes dark
+def test_dark_watch_says_dark_and_back_with_the_time_it_took(tmp_path):
+    import dark_watch as DW
+    sent, said = [], []
+    w = DW.DarkWatch(send=sent.append, say=said.append, out=str(tmp_path), state_file=str(tmp_path / "dark.json"))
+    t = 0.0
+    for _ in range(40):
+        t += 0.25
+        w.saw("overhead", 91.0, t)
+    for _ in range(4):                                    # the dim room (70 of 91): not dark
+        t += 0.25
+        assert w.saw("overhead", 70.0, t) is None
+    t += 0.25
+    assert w.saw("overhead", 2.0, t) == "dark" and sent[-1]["state"] == "dark"
+    assert DW.is_dark_now(path=str(tmp_path / "dark.json"))
+    while t < 60:                                         # black for about a minute, then the auto-exposure catches up
+        t += 0.25
+        w.saw("overhead", 3.0 if t < 50 else 80.0, t)
+    assert sent[-1]["state"] == "light_back" and 38 <= sent[-1]["adapt_s"] <= 40   # dark at 11.25 s, back at 50 s
+    assert not DW.is_dark_now(path=str(tmp_path / "dark.json"))
+    rows = (tmp_path / "dark_events.csv").read_text().splitlines()
+    assert rows[0].startswith("camera,t_dark,adapt_s") and len(rows) == 2
+
+
+def test_exposure_nudge_with_a_stubbed_v4l2_ctl():
+    import camera_exposure as CE
+    calls = []
+
+    def run(cmd):
+        calls.append(cmd)
+        if "--get-ctrl=exposure_absolute" in cmd:
+            return 0, "exposure_absolute: 166\n"
+        if "--get-ctrl=gain" in cmd:
+            return 0, "gain: 64\n"
+        return 0, ""
+    n = CE.Nudger(lambda c: "/dev/video0", run=run, log=lambda s: None)
+    assert n.dark("overhead", 5.0, 91.0)
+    sets = [c[-1] for c in n.sent]
+    assert sets[:2] == ["--set-ctrl=exposure_auto=1", "--set-ctrl=exposure_absolute=%d" % round(166 * CE.EXPOSURE_MAX_X)]
+    assert n.back("overhead") and n.sent[-1][-1] == "--set-ctrl=exposure_auto=3"
+    assert not CE.enabled()                               # off by default
+
+
+def test_the_idle_sleeper_does_not_count_dark_time(monkeypatch, tmp_path):
+    import idle_after_run as IA
+    monkeypatch.setenv("MIRLT_CONF_DIR", str(tmp_path))
+    monkeypatch.setenv("MIRLT_IDLE_SLEEP_MIN", "0.02")    # 1.2 s
+    darks = iter([True, True, True] + [False] * 100)
+    slept = []
+    t0 = time.time()
+    IA.wait(t0, sleep_fn=slept.append, dark=lambda: next(darks))
+    assert slept and time.time() - t0 >= 1.2 + 1.0       # the dark stretches did not count
+
+
+def test_a_calibration_holds_while_the_picture_is_dark(monkeypatch):
+    import calib_run as CR
+    r = CR.CalibRun.__new__(CR.CalibRun)
+    r.name, r.stop_flag = "AL-EB54", threading.Event()
+    r.ev, r.set_status, r.robots = (lambda *a, **k: None), (lambda **k: None), []
+    monkeypatch.setattr(CR, "say", lambda s: None)
+    st = {"n": 0}
+
+    class Eye:
+        def is_dark(self):
+            st["n"] += 1
+            return st["n"] < 6
+    r.eye = Eye()
+    monkeypatch.setattr(CR.time, "sleep", lambda s: None)
+    assert r.wait_light("test") >= 0 and st["n"] >= 6      # held until the picture was back, then carried on
+
+
+def test_a_wildly_uncertain_run_barely_moves_the_pool(tmp_path):
+    """School 17:02: one run's wheel_scale came out 0.73 +- 0.20 (dim light, interrupted legs). Such a run's legs must
+    never move the pooled value much."""
+    import numpy as np
+    import calib_pool as CP
+    import calib_run as CR
+    rng = np.random.default_rng(5)
+    rolls = [L for L in CR.ROLLS_A for _ in (0, 1)]
+    d = str(tmp_path)
+    for k in range(2):
+        CP.add(d, "AL-EB54", _synthetic_legs(rng, CR.TURNS_A, [CR.STILL_S], rolls, session="good%d" % k))
+    good = CP.fit(d, "AL-EB54", now=0)
+    bad = _synthetic_legs(rng, [], [], rolls, session="bad")
+    for r in bad:
+        r["cam"] = 0.73 * r["counted"] + rng.normal(0, 8.0)          # the bad run: far off and scattered
+    CP.add(d, "AL-EB54", bad)
+    pooled = CP.fit(d, "AL-EB54", now=0)
+    assert abs(pooled["wheel_scale"] - good["wheel_scale"]) < 3 * good["se_wheel_scale"]
+    assert pooled["run_weights_wheel"]["bad"] < 0.05
+
+
+def test_parking_at_the_start_does_not_mark_the_whole_run_as_ending():
+    """School 16:22 and 17:02 (top bug): stage() parks first; park() set _ending for the rest of the run, so a roof tag
+    unread mid-curve or on Tour C1's first step ended the run as if it were parking at the end."""
+    import calib_run as CR
+    seen = []
+
+    class R:
+        S = type("S", (), {"park_label": "P01"})()
+        _ending = False
+
+        def set_status(self, **kw):
+            pass
+
+        def _park(self, phase):
+            seen.append(self._ending)
+            return "ok"
+
+    r = R()
+    assert CR.CalibRun.park(r, "stage") == "ok" and seen == [False] and r._ending is False
+    CR.CalibRun.park(r, "park")
+    assert seen[-1] is True and r._ending is False

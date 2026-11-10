@@ -36,7 +36,7 @@ Position source (--fixes): where camera poses come from (data-formats.md,
 runs against it with --fixes udp; at the end it prints the simulator's ground
 truth: docking errors, closest robots, contact.
 """
-VERSION = "2026-11-10e14"   # e14: a visit point whose tag was lost on the way is moved to the end of the robot's list once, then skipped (defer_current_point; MIRLT_RETRY_LOST=again the old way); the spot where it was lost kept as evidence. 2026-11-10e13 (e13): never give up blind (no BLIND_MAX_CM cap: it stops only when blind error + body + stop could reach an edge; MIRLT_BLIND_RULE=cap the old caps); no pictures: each blind robot's risk-based limit (safety_rules.no_picture_limit; MIRLT_NOPIC_RULE=off: e12's rules alone).
+VERSION = "2026-11-10e14b"   # e14b: a dark picture pauses every robot until the camera has adjusted (dark_watch). e14: a visit point whose tag was lost on the way is moved to the end of the robot's list once, then skipped (defer_current_point; MIRLT_RETRY_LOST=again the old way); the spot where it was lost kept as evidence. 2026-11-10e13 (e13): never give up blind (no BLIND_MAX_CM cap: it stops only when blind error + body + stop could reach an edge; MIRLT_BLIND_RULE=cap the old caps); no pictures: each blind robot's risk-based limit (safety_rules.no_picture_limit; MIRLT_NOPIC_RULE=off: e12's rules alone).
 VERSION_B = "2026-11-10b"   # 2026-11-10b (e12 item 9): a lock-only fix never resets a pose (MIRLT_LOCK_GUARD=0: as before); a dwell broken by a halt where the robot did not move keeps its start (MIRLT_DWELL_KEEP=0). 2026-11-10a (e12): the bridge's "camera" messages (no pictures / pictures again) said and logged. No version before
 LOCK_GUARD = __import__("os").environ.get("MIRLT_LOCK_GUARD", "1") != "0"
 DWELL_KEEP = __import__("os").environ.get("MIRLT_DWELL_KEEP", "1") != "0"
@@ -1081,6 +1081,14 @@ class Coordinator:
                 # (e13) from here each robot's own risk-based limit (blind_watch: safety_rules.no_picture_limit)
                 self.nopic_since = (getattr(self, "nopic_since", None) or now()) if ev.get("state") == "no_pictures" \
                     else None
+                # (e14, school 17:2x) a picture gone dark: every robot holds still (the run's own pause) until the
+                # camera has adjusted; nothing ends; it carries on by itself
+                if ev.get("state") == "dark" and not getattr(self, "dark_paused", False):
+                    self.dark_paused = True
+                    self.pause_req = True
+                elif ev.get("state") == "light_back" and getattr(self, "dark_paused", False):
+                    self.dark_paused = False
+                    self.pause_req = False
                 continue
             if ev.get("type") == "obstacle":
                 oid = ev.get("id") or "camera-%d" % len(self.obstacles_seen)

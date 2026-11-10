@@ -27,7 +27,7 @@ import subprocess
 import sys
 import time
 
-VERSION = "idle-after-run-2026-11-10e13"
+VERSION = "idle-after-run-2026-11-10e14"   # e14: dark-picture time does not count (dark_watch)
 IDLE_MIN = 10.0          # Nick's number (10 Nov); no DOE (his choice of how long a person may take between runs)
 HERE = os.path.dirname(os.path.abspath(__file__))
 SLEEP_PY = os.path.join(os.path.dirname(HERE), "pi", "robot_sleep.py")
@@ -164,10 +164,21 @@ def log(line):
         pass
 
 
-def wait(after, sleep_fn=None):
+def wait(after, sleep_fn=None, dark=None):
+    """(e14) Time while a camera's picture is dark (dark_watch.is_dark_now) does not count towards the idle minutes."""
+    if dark is None:
+        try:
+            import dark_watch as DW
+            dark = DW.is_dark_now
+        except Exception:  # noqa: BLE001
+            dark = lambda: False  # noqa: E731
     t_end = after + idle_min() * 60.0
     while time.time() < t_end:
+        t0 = time.time()
         time.sleep(min(30.0, max(0.5, t_end - time.time())))
+        if dark():
+            t_end += time.time() - t0
+            log("the picture is dark (the camera adjusting to the light): this time does not count")
         if (_load().get("last_start") or 0) > after:
             log("no sleep: a new run started")
             return False

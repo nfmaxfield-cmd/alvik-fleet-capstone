@@ -61,7 +61,7 @@ for p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recognit
 
 import numpy as np   # noqa: E402
 
-VERSION = "2026-11-10e14b"   # e14b (10 Nov 16:40-17:00): calibration evidence pooled across runs (calib_pool: every measured leg of the robot on this site, finished or not, weighted by age and battery; a run starts from the pooled values, measures only what is still uncertain, saves once the pooled +- is no wider than one finished run's; MIRLT_CALIB_POOL=0 each run on its own); parking after the tour never gives up (school 16:22: MIRLT_PARK_GIVEUP=1 the e13 end); a recovery with no reliable spot heads for the readability map; the setup order said at the start. e14 (10 Nov): every robot found by its own small move at the start (motion_find: anywhere on the table, with or without a tag that reads; one found where its tag does not read drives itself back, never giving up; MIRLT_CAMERA_DISCOVERY=off the wiggle alone); calibration on any surface (its own spots inside the readable area when the site has no proven stickers: --spots / MIRLT_CALIB_SPOTS / calibration.spots); the readability evidence chosen and kept by light and tag (readmap_store; MIRLT_READMAP_STORE=0 the old readmap.json); a tour point whose tag was just lost goes to the end of the tour once, then is skipped (MIRLT_RETRY_LOST=again the old aim-again); the battery floor from the site / Mission Control said at the start; LOW-BATTERY CALIBRATION under 40 %; --sim-dark, --sim-extra-camera, --sim-light, --sim-start X,Y. VERSION_10I = "2026-11-10i"   # 11-10i: the binding looks over longer windows and waits for a fresh read after each wiggle half (a tag that reads only now and then, school 15:00). 11-10h: the never-give-up hold makes find-me wiggles (when its turning circle + error is clear) so the motion detector can find it and the recovery bring it back (Nick 14:32: motion, not hands). 11-10e13 (e13): never give up (the recovery drives blind while its bubble + stop cannot reach the edge margin, no 8 cm / 40 cm caps: MIRLT_BLIND_RULE=cap; a lost tag holds with no time limit, asks for a hand; cam_pose_sure and every unguarded camera pose wait the same way; MIRLT_CALIB_GIVEUP=1 the 30 s end), readability per tag, TURN DID NOT SETTLE, stop resent after the curve phase, the motion detector on in its bridge; the camera check before binding (camera_feed: no pictures is said as that, never the robot or tag); tracked for the sleep after a run.
+VERSION = "2026-11-10e14d"   # e14d: a robot brought back is bound by its tag's first read at the motion detector's spot (rehearsal c7f: the pin check wiggle at a dim border ended the run). the "while parking" end fixed at its root: staging at the start parked with park("stage"), which set _ending for the whole run (school 16:22 and 17:02); now only the run's own end parks as ending, and it is cleared after. The pool weights each run's legs by that run's own noise and drops outlier legs (school 17:02: wheel_scale 0.73 +- 0.20). e14c (17:2x, Nick at school): a dark picture holds the robot (no legs, no recovery drives, no wiggles, no end, no sleep) until the camera has adjusted (dark_watch); --sim-blackout. e14b (10 Nov 16:40-17:00): calibration evidence pooled across runs (calib_pool: every measured leg of the robot on this site, finished or not, weighted by age and battery; a run starts from the pooled values, measures only what is still uncertain, saves once the pooled +- is no wider than one finished run's; MIRLT_CALIB_POOL=0 each run on its own); parking after the tour never gives up (school 16:22: MIRLT_PARK_GIVEUP=1 the e13 end); a recovery with no reliable spot heads for the readability map; the setup order said at the start. e14 (10 Nov): every robot found by its own small move at the start (motion_find: anywhere on the table, with or without a tag that reads; one found where its tag does not read drives itself back, never giving up; MIRLT_CAMERA_DISCOVERY=off the wiggle alone); calibration on any surface (its own spots inside the readable area when the site has no proven stickers: --spots / MIRLT_CALIB_SPOTS / calibration.spots); the readability evidence chosen and kept by light and tag (readmap_store; MIRLT_READMAP_STORE=0 the old readmap.json); a tour point whose tag was just lost goes to the end of the tour once, then is skipped (MIRLT_RETRY_LOST=again the old aim-again); the battery floor from the site / Mission Control said at the start; LOW-BATTERY CALIBRATION under 40 %; --sim-dark, --sim-extra-camera, --sim-light, --sim-start X,Y. VERSION_10I = "2026-11-10i"   # 11-10i: the binding looks over longer windows and waits for a fresh read after each wiggle half (a tag that reads only now and then, school 15:00). 11-10h: the never-give-up hold makes find-me wiggles (when its turning circle + error is clear) so the motion detector can find it and the recovery bring it back (Nick 14:32: motion, not hands). 11-10e13 (e13): never give up (the recovery drives blind while its bubble + stop cannot reach the edge margin, no 8 cm / 40 cm caps: MIRLT_BLIND_RULE=cap; a lost tag holds with no time limit, asks for a hand; cam_pose_sure and every unguarded camera pose wait the same way; MIRLT_CALIB_GIVEUP=1 the 30 s end), readability per tag, TURN DID NOT SETTLE, stop resent after the curve phase, the motion detector on in its bridge; the camera check before binding (camera_feed: no pictures is said as that, never the robot or tag); tracked for the sleep after a run.
 VERSION_10G = "2026-11-10g"     # 11-10g: a standing robot is never given up for sparse tag reads: it is measured over longer windows (Nick 13:34; dim light). 11-10f: the start waits for the camera fix after the wiggle (dim light, ~7 fps: refused at once, school 13:25). 11-10e: a run ended for poor tag reads DOES try to park again (Nick 12:48: never give up on getting back to where it is seen); it drives only with a camera fix (cam_pose_sure waits for one). 11-10d: no crash parking with no camera fix (RunEnd, caught: "Could not park"). 11-10c: Phase A waits for the camera fix instead of crashing on None (school 12:35). 11-10b (e12, Nick 10 Nov): the curve phase (phase R: constant-curvature arcs left and right at free roam's radii and two speeds, fitted from the camera, arc_k_scale / arc_d_scale saved when they agree; --arc-phase auto/on/off), points in your order (--visit-order), the proven workspace for the tours' room, the camera self-check at the start. VERSION_10A was:
 VERSION_10A = "2026-11-10a"     # 11-10a: a leftover camera reader holding port 5011 is stopped first (stale_bridge.py). 11-05i (9 Nov, school): a tripped stop mid-tour crashed the run (TypeError: ev() got two
                              # values for kind); the trip event now says stop_kind. VERSION_H was:
@@ -780,6 +780,8 @@ class Eye:
                 # the tag after LOST_HOLD_S and holds as before
                 say(str(msg.get("words") or "CAMERA %s: %s" % (msg.get("cam"), msg.get("state"))))
                 self.camera_state = (msg.get("state"), time.time())
+                if msg.get("state") == "dark":
+                    self.dark_t = time.time()            # (e14) the picture went dark: a camera problem
                 continue
             if msg.get("type") != "fix":
                 continue
@@ -819,6 +821,11 @@ class Eye:
                 self.nrows = getattr(self, "nrows", 0) + 1
                 if self.nrows % 50 == 0:
                     self.f.flush()
+
+    def is_dark(self):
+        """(e14) The bridge says the picture is dark (the camera adjusting to the light)."""
+        st = getattr(self, "camera_state", None)
+        return bool(st and st[0] == "dark")
 
     def loose_last(self, tid):
         """(e13) The newest motion / lock-on sighting of this tag's robot (t, x, y, src) or None."""
@@ -1041,6 +1048,23 @@ class SimEye(Eye):
         else:
             un.discard(name)
         return out
+
+    def blackout(self, t, dur):
+        """(e14) The picture black from t s after the camera starts, for dur s: no tag reads, and the bridge's "dark"
+        then (after dark_watch's SETTLE_S) "light_back" messages, as the tag bridge's DarkWatch sends them."""
+        self.gaps.append((float(t), float(dur)))
+
+        def run():
+            import dark_watch as DW
+            while time.time() - self.t_made < t and not self.stop_.is_set():
+                time.sleep(0.1)
+            say("THE PICTURE WENT DARK on camera overhead (simulated blackout): the camera is adjusting to the light")
+            self.camera_state, self.dark_t = ("dark", time.time()), time.time()
+            while time.time() - self.t_made < t + dur + DW.SETTLE_S and not self.stop_.is_set():
+                time.sleep(0.1)
+            say("THE PICTURE IS BACK on camera overhead after %.0f s (simulated)" % dur)
+            self.camera_state = ("light_back", time.time())
+        threading.Thread(target=run, daemon=True).start()
 
     def truth_now(self):
         return dict(getattr(self, "truth", {}) or {})
@@ -1536,6 +1560,7 @@ class CalibRun:
             if getattr(self, "_ending", False) and k >= 3 and PARK_GIVEUP:
                 # (e13) parking after the run's end: the end is not held forever
                 raise RunEnd("no camera fix of the roof tag while parking: the robot stays where it is")
+            self.wait_light("waiting for its camera fix")       # (e14)
             cam = self.cam_pose(min(STILL_MEASURE_MAX_S, MEASURE_S * (2 ** k)))
             if cam is not None:
                 return cam
@@ -1582,6 +1607,40 @@ class CalibRun:
             self._lost_last = self.eye.last(self.tag)       # (11-05c) the last read before it was lost
             return True
         return False
+
+    def dark_recent(self, within_s=120.0):
+        e = getattr(self, "eye", None)
+        if e is None:
+            return False
+        return (hasattr(e, "is_dark") and e.is_dark()) or time.time() - float(getattr(e, "dark_t", 0) or 0) < within_s
+
+    def wait_light(self, where=""):
+        """(e14, Nick at school 17:2x: the room lights went out, the picture went black, the run ended and the robot
+        was put to sleep; minutes later the camera had adjusted) While the bridge says the picture is dark: every robot
+        holds still and safe, nothing ends, the run carries on by itself when the picture is back. Returns seconds."""
+        e = getattr(self, "eye", None)
+        if e is None or not hasattr(e, "is_dark") or not e.is_dark():
+            return 0.0
+        t0 = time.time()
+        w = ("THE PICTURE WENT DARK: the camera is adjusting to the light (room lights off?). %s holds still and safe%s; "
+             "it carries on by itself when the picture is back" % (getattr(self, "name", "the robot"),
+                                                                    (" (" + where + ")") if where else ""))
+        say("!! " + w)
+        self.set_status(words=w)
+        self.ev("dark_hold", where=where)
+        for rb in getattr(self, "robots", None) or ([self.rb] if getattr(self, "rb", None) else []):
+            rb.link.send(rb.ip, "stop")
+        while e.is_dark():
+            if self.stop_flag.is_set():
+                raise RunEnd("stopped (Ctrl+C or Mission Control's Stop) while the picture was dark")
+            time.sleep(0.2)
+        d = time.time() - t0
+        say("  the picture is back after %.0f s: carrying on" % d)
+        self.ev("dark_back", held_s=round(d, 1))
+        host = getattr(self, "parent", None) or self
+        host.dark_held = getattr(host, "dark_held", 0.0) + d
+        time.sleep(1.0)                 # the tag reads again
+        return d
 
     def hold_until_seen(self):
         giveup = os.environ.get("MIRLT_CALIB_GIVEUP", "0") == "1" or getattr(self.a, "lost_giveup", False)
@@ -1643,6 +1702,37 @@ class CalibRun:
             return ""
         return ""
 
+    def wiggle_seen(self):
+        """(e14) The find-me wiggle with every camera watching (motion_find.locate_wiggle on the pictures, as the
+        robot finding does): (x, y) where it was seen, True when it wiggled and nobody saw it, None when there are no
+        pictures to watch (the plain wiggle then). Switch: MIRLT_CAMERA_DISCOVERY=off."""
+        import motion_find as MF
+        if not MF.enabled() or getattr(self, "rb", None) is None:
+            return None
+        if getattr(self, "_mcams", None) is None:
+            try:
+                self._mcams, _cl = self.motion_cams()
+            except Exception:  # noqa: BLE001
+                self._mcams = []
+        if not self._mcams:
+            return None
+        import camera_discovery as CD
+
+        def turn_ticks(deg, on_tick, n):
+            r = CD.leg_turner({self.rb.name: self.rb}, TURN_DPS)(self.rb.name, deg, on_tick, n)
+            if isinstance(r, dict):
+                self.odo_step(r)
+            return r
+        try:
+            w = MF.locate_wiggle(self._mcams, turn_ticks)
+        except Exception as e:  # noqa: BLE001
+            say("  (the wiggle was not watched: %s)" % e)
+            return None
+        if w is None:
+            return True
+        self.ev("hold_seen_by_pictures", x=round(w["where"][0], 1), y=round(w["where"][1], 1), sigma=w["sigma"])
+        return tuple(w["where"])
+
     def hold_never_give_up(self):
         """(e13) Held where it stopped, still and safe, with no time limit (standing still, its risk does not grow):
         NEEDS A HAND said loudly at once and every HOLD_SAY_S (terminal, status, events); the roof tag seen again ->
@@ -1657,6 +1747,9 @@ class CalibRun:
         wig_t, wig_wait, wig_n = time.time(), 3.0, 0     # (11-10h) first find-me wiggle 3 s in, then less often
         self.ev("hold", why="roof tag lost while driving; held with no time limit (e13)")
         while not self.stop_flag.is_set():
+            if hasattr(self.eye, "is_dark") and self.eye.is_dark():
+                self.wait_light("held where it stopped")     # (e14) a dark picture: no wiggles, no hand, just wait
+                continue
             if self.eye.age(self.tag) < 0.3:
                 d = time.time() - t0
                 self.holds.append(d)
@@ -1692,11 +1785,15 @@ class CalibRun:
                             wig_n, getattr(self, "name", "the robot")))
                     self.ev("hold_find_me", n=wig_n)
                     t_w = time.time()
-                    for d in (RECOVER_WIGGLE_DEG, -2 * RECOVER_WIGGLE_DEG, RECOVER_WIGGLE_DEG):
-                        r = self.rb.leg("turn", d)
-                        self.odo_step(r)
+                    seen_by_pics = self.wiggle_seen()     # (e14) the wiggle watched in every camera's pictures
+                    if seen_by_pics is None:
+                        for d in (RECOVER_WIGGLE_DEG, -2 * RECOVER_WIGGLE_DEG, RECOVER_WIGGLE_DEG):
+                            r = self.rb.leg("turn", d)
+                            self.odo_step(r)
                     tried_from = None if wig_n % 3 == 0 else tried_from   # a fresh try now and then
                     lf2 = self.eye.loose_last(self.tag) if hasattr(self.eye, "loose_last") else None
+                    if seen_by_pics and seen_by_pics is not True:
+                        lf2 = (time.time(), seen_by_pics[0], seen_by_pics[1], "pictures")
                     if lf2 is not None and lf2[0] >= t_w and self.a.lost_policy == "recover":
                         tried_from = lf2[1:3]
                         say("  the motion detector saw the wiggle at %.0f, %.0f: driving back from there" % lf2[1:3])
@@ -1814,6 +1911,8 @@ class CalibRun:
         def bub_now(extra=0.0):
             return self.bubble(blind_cm + extra, blind_deg, after + extra) + lat0
         while not seen() and not self.stop_flag.is_set():
+            if self.wait_light("its recovery"):              # (e14) never drive blind because the picture went dark
+                continue
             bub = bub_now()
             spots = sorted(self.reliable, key=lambda q: math.dist(q, (x, y)))
             tgt = next((q for q in spots if math.dist(q, (x, y)) > 1.0), None)
@@ -1904,6 +2003,8 @@ class CalibRun:
 
     def drive_leg(self, kind, value, label, phase, tour=0, corrected=False, cam0=None):
         """One leg, measured: commanded `kind value`, the robot's own record, the camera before and after."""
+        if self.wait_light("before its next leg"):           # (e14) no leg while the picture is dark
+            cam0 = self.cam_pose_sure()                      # where the camera has it now the picture is back
         if cam0 is None:
             cam0 = self.cam_pose()
             if cam0 is None:
@@ -2208,9 +2309,21 @@ class CalibRun:
         return SAFE_FRAC_UNCAL
 
     def park(self, phase):
-        """Back to its park spot (P11 for the first robot) by the camera (safety), facing the park heading."""
+        """Back to its park spot (P11 for the first robot) by the camera (safety), facing the park heading. (e14, the
+        school's 16:22 and 17:02 runs: stage() parks the robot at its spot at the START with park("stage"), which set
+        _ending and never cleared it, so every hold for the rest of the run, the curve phase's and Tour C1's first step
+        included, said "the roof tag is not read while parking" and ended the run) _ending is set only for the run's
+        own end (phase "park") and cleared when parking returns."""
         self.set_status(words="Returning to park at %s" % self.S.park_label)
-        self._ending = True        # (e13) parking after the run. (e14, school 16:22, AL-EB54 at P16: the tour's last point
+        was = getattr(self, "_ending", False)
+        self._ending = phase == "park"
+        try:
+            return self._park(phase)
+        finally:
+            self._ending = was
+
+    def _park(self, phase):
+        # (e13) parking after the run. (e14, school 16:22, AL-EB54 at P16: the tour's last point
         # lost the tag and parking ended the run at once, the robot left where it was) parking is still the run: a lost
         # tag holds with the never-give-up hold and the motion-based return like any leg; MIRLT_PARK_GIVEUP=1: e13's end
         cam = self.goto(self.S.park_label, phase, 0, odometry=False)
@@ -3253,7 +3366,8 @@ class CalibRun:
             pre = dict(pre or {})
             for n_, t_ in pre.items():
                 # (e14) bound by its own stroke: the roof tag whose reads moved with it (motion_find)
-                self.pin_notes[n_] = "found by motion: tag %d moved with its own stroke" % t_
+                bb_ = ((getattr(self, "motion_found", {}) or {}).get("robots", {}).get(n_) or {}).get("bound_by")
+                self.pin_notes[n_] = "found by motion: " + (bb_ or "tag %d moved with its own stroke" % t_)
                 say("  %s: %s" % (n_, self.pin_notes[n_]))
             rest = [rb for rb in self.robots if rb.name not in pre]
             b0 = dict(pre)
@@ -3676,7 +3790,15 @@ class CalibRun:
             say("NOTE: %s starts its calibration at %d %% battery (under %d %%): a LOW-BATTERY CALIBRATION; its values "
                 "are taken on a weak battery and the report says so" % (self.name, b0, LOW_BATTERY_NOTE_PCT))
         cam = self.cam_pose_sure()      # (11-10f, school 13:25: refused 2 s after the wiggle in dim light, ~7 fps)
-        cam = self.heading_check(cam)
+        while True:
+            try:
+                cam = self.heading_check(cam)
+                break
+            except RunEnd:
+                if not self.dark_recent() or self.stop_flag.is_set():
+                    raise
+                self.wait_light("its heading check")       # (e14) the picture went dark during it: again once back
+                cam = self.cam_pose_sure()
         self.reanchor(cam, "start")
         result = "finished"
         try:
@@ -3691,6 +3813,9 @@ class CalibRun:
         except RunEnd as e:
             result = "ended: %s" % e
             say("ENDED: %s" % e)
+            if self.dark_recent() and not self.stop_flag.is_set():
+                # (e14) never end and sleep while the picture is dark: wait for it, then park as usual
+                self.wait_light("before parking")
         except BindError:
             raise
         self.pool_after()                  # (e14) this run's legs kept, finished or not; pooled values saved when sure
@@ -4182,6 +4307,9 @@ def main(argv=None):
     g.add_argument("--sim-dark", action="append", default=[], metavar="X,Y,R[,FACTOR]",
                    help="(e14) simulator: a dark patch (no tag reads there; the pictures FACTOR as bright, default 0.35)")
     g.add_argument("--sim-extra-camera", action="store_true", help="(e14) simulator: one more camera, looking away")
+    g.add_argument("--sim-blackout", action="append", default=[], metavar="T:DUR",
+                   help="(e14) simulator: the picture goes black T s after the camera starts, for DUR s (no tag reads; "
+                        "the bridge's dark / light_back messages)")
     g.add_argument("--sim-light", type=float, default=None, help="(e14) simulator: the overhead camera's mean grey "
                    "(school: 91 lit, 70 lights off): the readability evidence is chosen and kept for it")
     g.add_argument("--quick-full-tour", action="store_true", help="with --quick: phase A's turns, rolls and still period "
@@ -4339,6 +4467,9 @@ def main(argv=None):
                 eye = SimEye(folder, FIX_PORT + 100, cam, simtags, tag_h=tag_h, correct=not a.no_height,
                              seed=a.seed, gaps=a.sim_gap)
                 eye.darks = []
+                for bo in a.sim_blackout:        # (e14) a sudden blackout that recovers
+                    t_, _, d_ = bo.partition(":")
+                    eye.blackout(float(t_), float(d_))
                 for d_ in a.sim_dark:            # (e14) dark patches
                     v_ = [float(q) for q in d_.split(",")]
                     eye.darks.append((v_[0], v_[1], v_[2], v_[3] if len(v_) > 3 else 0.35))

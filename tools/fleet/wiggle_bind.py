@@ -47,7 +47,7 @@ for p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recognit
 
 import calib_run as CR   # noqa: E402
 
-VERSION = "2026-11-10e14"   # e14: every robot found by its own small move first (motion_find.run_finding: anywhere on
+VERSION = "2026-11-10e14d"   # e14d: a robot brought back is bound by its tag's first read where the motion detector had it (said in its note). Before: "2026-11-10e14"   # e14: every robot found by its own small move first (motion_find.run_finding: anywhere on
 #   the table, with or without a tag that reads; brought back to where tags read; a robot with no tag that reads kept
 #   as "tagless" with its motion position and heading); the wiggle only for robots the finding did not bind.
 #   MIRLT_CAMERA_DISCOVERY=off: the wiggle alone (before e14). e13: the camera check (camera_feed) before binding
@@ -306,7 +306,8 @@ def bind_for_run(site, slots, link, eye, ips=(), wake_min=3.0, dry=False, folder
             tagless[n_] = dict(seen_cm=f_.get("now") or f_.get("where"), heading=f_.get("heading_now", f_.get(
                 "heading")), sigma=f_.get("sigma"))
         for n_, t_ in pre.items():
-            notes[n_] = "found by motion: tag %d moved with its own stroke" % t_
+            notes[n_] = "found by motion: " + ((mres["robots"].get(n_) or {}).get("bound_by") or
+                                               "tag %d moved with its own stroke" % t_)
             log("  %s: %s" % (n_, notes[n_]))
     rest = [rb for rb in robots if rb.name not in pre and rb.name not in tagless]
     b = dict(pre)

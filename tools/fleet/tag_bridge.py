@@ -34,7 +34,7 @@ Writes to --out: track.csv (as cam_bridge's, for line_check.py), tag_poses.csv (
 sigma, size check, picture position), tag_obs.csv (every read's corners: the site fit's input), ref_watch.csv,
 events.jsonl, bridge_summary.json.
 """
-VERSION = "2026-11-10e14"   # e14: a robot with no roof tag that reads (found by motion at the start) is followed by the motion detector from where it was found: --seed-motion NAME=X,Y,TH and run_plan's "seed" messages (on_seed). 2026-11-10e13 (e13): frames.json (new pictures per camera, reference tags read) for the camera check before binding (camera_feed.py).
+VERSION = "2026-11-10e14b"   # e14b: a picture gone dark (pictures still coming) is said as the camera adjusting to the light and sent to the run as "dark" / "light_back" (dark_watch; exposure nudge camera_exposure, off). e14: a robot with no roof tag that reads (found by motion at the start) is followed by the motion detector from where it was found: --seed-motion NAME=X,Y,TH and run_plan's "seed" messages (on_seed). 2026-11-10e13 (e13): frames.json (new pictures per camera, reference tags read) for the camera check before binding (camera_feed.py).
 VERSION_A = "2026-11-10a"   # 2026-11-10a (e12): frame_watch (no pictures from a camera: said loudly, an event, a message to the run); workers joined before the summary; orderly exit. No version string before
 
 import argparse
@@ -283,6 +283,18 @@ class Bridge:
                 self.motion = None
                 self.event("motion_error", why="the motion detector could not start: %s" % e)
         self.frames = {c: 0 for c in cams}
+        try:
+            # (e14, Nick at school 17:2x) a picture gone dark while pictures still come: a camera problem, said; the
+            # run holds every robot until it is back (dark_watch); optional exposure nudge (camera_exposure, off)
+            import dark_watch as DW
+            import camera_exposure as CE
+            nud = CE.Nudger(lambda c: os.environ.get("MIRLT_CAM_DEV_" + c.upper()) or ("/dev/video0" if c == "overhead"
+                                                                                        else None),
+                            log=self.say) if CE.enabled() else None
+            self.darkw = DW.DarkWatch(send=self.send, event=self.event, say=self.say, out=out, nudge=nud)
+        except Exception as e:  # noqa: BLE001
+            self.darkw = None
+            self.event("dark_watch_error", why=str(e))
         import camera_feed as CF      # (e13) new pictures per camera (frames.json): checked before any binding
         self.feed = CF.FeedStats(out, list(cams))
         self.ml = None                # (e13) the trained detector (ml_init; off by default)
@@ -484,6 +496,11 @@ class Bridge:
             self.light_check(cam_name, grey, t)
         except Exception:  # noqa: BLE001  (the brightness log never stops the fixes)
             pass
+        if getattr(self, "darkw", None) is not None:
+            try:
+                self.darkw.saw(cam_name, float(grey[::8, ::8].mean()), t)
+            except Exception:  # noqa: BLE001
+                pass
         if self.refw:
             try:
                 self.ref_check(cam_name, grey, t)

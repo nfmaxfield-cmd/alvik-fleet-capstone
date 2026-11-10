@@ -691,6 +691,11 @@ check of the derived rule.
 | Another light's evidence falls to 61 % over (readmap_store LIGHT_SCALE) | 8 grey levels, CHOSEN | yes (Board): the same Visit tour at 3 light levels (lights on, half, off): read rate per cell against grey | Board | open |
 | Another tag's evidence, relative to this tag's (readmap_store OTHER_TAG_W) | 0.5, CHOSEN | yes (Logs): per-tag read rates at the same cells from the calibrations of tags 2, 3, 4 | Logs | open |
 | One session's tries per cell (readmap_store SESSION_CAP) | 10, CHOSEN | no: a cap so one long session cannot outvote many | - | ruled out |
+| A dark picture: its light drop against the camera's time to adapt (dark_watch dark_events.csv), with and without the exposure nudge (camera_exposure, MIRLT_EXPOSURE_NUDGE) | not measured (school 10 Nov 17:2x: lights off, "a couple of minutes", the TV's light left) | yes (Board): lights off / half / on in ABBA order, 4 drops each with the nudge off and on; response: adapt_s and the first tag read after it | Board | open |
+| Dark = under this share of the camera's normal brightness (dark_watch DARK_FRAC; DARK_ABS 12 grey) | 35 %, CHOSEN (the dim room's 77 % is not dark) | yes (Logs): brightness.csv of the school's dark and dim sessions against tag reads | Logs | open |
+| Back = this share of the normal, steady this long (dark_watch RECOVER_FRAC, SETTLE_S) | 60 %, 2 s, CHOSEN | yes, with the row above (auto-exposure overshoot) | Board | open |
+| The exposure nudge's caps (camera_exposure EXPOSURE_MAX_X, GAIN_UP) | 8x, 1.5x, CHOSEN | yes, with the row above (motion blur against reads) | Board | open |
+| A leg's weight by age in the calibration pool (calib_pool AGE_HALF_DAYS) | 7 days, CHOSEN | yes (Logs): the same robot's fits a day, a week and a month apart | Logs | open |
 | A calibration started under this battery is marked "low-battery" (calib_run LOW_BATTERY_NOTE_PCT) | 40 %, CHOSEN (the coordinator's) | yes (Board): the calibration against battery (90 / 60 / 35 %, one robot, the same day): do wheel_scale and gyro_scale move with battery? | Board | open |
 
 ## Already set by data

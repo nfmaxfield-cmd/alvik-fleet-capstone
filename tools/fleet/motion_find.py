@@ -40,7 +40,7 @@ for _p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recogni
 
 import numpy as np   # noqa: E402
 
-VERSION = "motion-find-2026-11-10e14b"   # e14b: tagless only on proven-readable spots (Laplace rate); a target reached with no read or blocked by a robot is not tried again (rehearsal: it circled a target in a dim patch; held beside a parked robot)
+VERSION = "motion-find-2026-11-10e14d"   # e14d: a robot brought back is bound by its tag's first read where the motion detector had it (rehearsal c7f); a spot is proven readable on its own cell's evidence only; bring-back targets keep the site's planning margins. e14b: tagless only on proven-readable spots (Laplace rate); a target reached with no read or blocked by a robot is not tried again (rehearsal: it circled a target in a dim patch; held beside a parked robot)
 
 # ---------------------------------------------------------------------------------------------- numbers (and why)
 STEP_CM = 5.0            # one bring-back step (calib_run RECOVER_STEP_CM, chosen there; DOE row there). Each step is
@@ -691,6 +691,11 @@ def run_finding(robots, eye, cams, S, rm, confirmed, guesses=None, log=say, ev=l
             if t is None:
                 res["tagless"].append(n)
                 continue
+            # (e14d, rehearsal c7f) its tag first read where the motion detector had it, while it alone was moving:
+            # that binds it (a pin check wiggle at the readable area's dim border saw the tag stand still and ended
+            # the run)
+            pre[n] = int(t)
+            f["bound_by"] = "brought back: tag %d first read where the motion detector had it" % int(t)
             # the evidence: where it was found its tag did not read (3 tries, as a skipped point)
             fx, fy = bb.failed[0]
             for m in [rm] + ([rm_tag(t)] if rm_tag else []):

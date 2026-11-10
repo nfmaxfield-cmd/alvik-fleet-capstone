@@ -38,7 +38,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-VERSION = "calib-pool-2026-11-10e14"
+VERSION = "calib-pool-2026-11-10e14b"   # e14b: each run weighted by its own noise, outlier legs dropped (school 17:02)
 FILE = "calib_pool.json"
 AGE_HALF_DAYS = 7.0      # CHOSEN: a leg counts half after a week (tyres wear, a gyro warms differently; the school's
                          # calibrations a day apart agree to about 0.003 in wheel_scale). DOE row (e14)
@@ -144,6 +144,52 @@ def wls(X, y, w, floor):
     return beta, np.linalg.inv(A) * s2, math.sqrt(s2)
 
 
+OUTLIER_K = 5.0          # CHOSEN: a leg further than this many robust sigmas from the pooled fit is left out (said
+                         # in the count). No DOE: a guard (school 17:02: wheel_scale 0.73 +- 0.20 from bad legs)
+
+
+NOISY_X = 2.0            # CHOSEN: a run counts as noisy only when its own scatter is over twice the typical run's (a
+                         # run with a handful of legs scatters by chance; equal runs stay at weight 1). No DOE: a guard
+
+
+def session_weights(X, y, w, rows, floor):
+    """(e14, school 17:02: one run's wheel_scale 0.73 +- 0.20, from dim light and interrupted legs) Each run's legs are
+    weighted by that run's OWN noise: its residual sigma against its own fit. A run over NOISY_X times the typical
+    run's sigma gets weight (typical / its)^2, so a run whose legs scatter widely barely moves the pooled value; a run
+    with too few legs to judge keeps weight 1. Returns {session: weight}."""
+    by = {}
+    for k, r in enumerate(rows):
+        by.setdefault(r.get("session"), []).append(k)
+    sig = {}
+    for sess, ix in by.items():
+        if len(ix) >= X.shape[1] + 2:
+            try:
+                sig[sess] = wls(X[ix], y[ix], w[ix], floor)[2]
+            except np.linalg.LinAlgError:
+                pass
+    if not sig:
+        return {sess: 1.0 for sess in by}
+    typ = float(np.median(list(sig.values())))
+    return {sess: ((typ / sig[sess]) ** 2 if sess in sig and sig[sess] > NOISY_X * typ else 1.0) for sess in by}
+
+
+def _robust(X, y, w, floor, rows):
+    """Each run weighted by its own noise, then legs far from the pooled fit dropped, then WLS again:
+    (beta, cov, sigma, legs dropped, {session: weight})."""
+    w = np.asarray(w, float)
+    sw = session_weights(X, y, w, rows, floor)
+    w2 = np.array([wi * sw.get(r.get("session"), 1.0) for wi, r in zip(w, rows)])
+    beta, cov, s = wls(X, y, w2, floor)
+    res = (y - X @ beta) * np.sqrt(w2)
+    keep = np.abs(res) <= OUTLIER_K * s
+    dropped = int((~keep).sum())
+    if dropped and keep.sum() >= X.shape[1] + 1:
+        beta, cov, s = wls(X[keep], y[keep], w2[keep], floor)
+    else:
+        dropped = 0
+    return beta, cov, s, dropped, {k: round(v, 4) for k, v in sw.items()}
+
+
 def fit(folder, wifi, now=None, extra=()):
     """The pooled values for this robot: {gyro_scale, gyro_drift_dps, wheel_scale, coast_cm, se_*, n_*, offset,
     weights, words}; empty {} when nothing is pooled. extra: rows not saved yet (this run's)."""
@@ -158,7 +204,8 @@ def fit(folder, wifi, now=None, extra=()):
     if len(g) >= 3 and any(r["kind"] == "still" for r in g):
         X = np.array([[r["raw"], -r["dt"]] for r in g])
         y = np.array([r["cam"] for r in g])
-        beta, cov, s = wls(X, y, wts, 0.05)
+        beta, cov, s, out_g, sw_g = _robust(X, y, wts, 0.05, g)
+        out["outliers_gyro"], out["run_weights_gyro"] = out_g, sw_g
         out.update(gyro_scale=float(beta[0]), gyro_drift_dps=float(beta[1]), se_gyro_scale=float(math.sqrt(cov[0, 0])),
                    se_gyro_drift_dps=float(math.sqrt(cov[1, 1])), sigma_turn_deg=s,
                    n_turns=sum(1 for r in g if r["kind"] == "turn"), n_still=sum(1 for r in g if r["kind"] == "still"))
@@ -169,11 +216,12 @@ def fit(folder, wifi, now=None, extra=()):
         c = np.array([r["cam"] for r in rl])
         w = np.array([age_w(r["t"], now) * battery_w(r.get("battery")) for r in rl])
         if len(b) >= 4 and np.ptp(b) > 10:
-            beta, cov, s = wls(np.stack([b, np.ones_like(b)], 1), c, w, 0.1)
+            beta, cov, s, out_r, sw_r = _robust(np.stack([b, np.ones_like(b)], 1), c, w, 0.1, rl)
             out.update(wheel_scale=float(beta[0]), coast_cm=float(beta[1]), se_wheel_scale=float(math.sqrt(cov[0, 0])))
         else:
-            beta, cov, s = wls(b[:, None], c, w, 0.1)
+            beta, cov, s, out_r, sw_r = _robust(b[:, None], c, w, 0.1, rl)
             out.update(wheel_scale=float(beta[0]), coast_cm=0.0, se_wheel_scale=float(math.sqrt(cov[0, 0])))
+        out["outliers_wheel"], out["run_weights_wheel"] = out_r, sw_r
         out.update(sigma_roll_cm=s, n_rolls=len(rl), counted_cm=float(b.sum()))
         out["weights"]["wheel"] = [round(float(w.min()), 3), round(float(w.max()), 3)]
     offs = e.get("offsets") or []

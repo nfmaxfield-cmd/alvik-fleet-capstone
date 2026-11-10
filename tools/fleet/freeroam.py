@@ -48,7 +48,7 @@ for p in (HERE, TOOLS):
 import freeroam_core as FC   # noqa: E402
 
 PY = sys.executable
-VERSION = "freeroam-runner-2026-11-10e14"   # e14 (10 Nov): the battery floor from MIRLT_MIN_BATTERY, else Mission Control's Advanced, else the site file, said at the start
+VERSION = "freeroam-runner-2026-11-10e14b"   # e14b: a dark picture holds every robot until the camera has adjusted. e14 (10 Nov): the battery floor from MIRLT_MIN_BATTERY, else Mission Control's Advanced, else the site file, said at the start
 VERSION_E13 = "freeroam-runner-2026-11-10e13"   # e13 (10 Nov): --readable-map (school: plan only where the camera reads tags; MIRLT_ROAM_READABLE=0 the old whole table)
 VERSION_E12 = "freeroam-runner-2026-11-10e12"   # e12 (10 Nov): the bridge's "camera" messages (no pictures) said and logged; one robot held at an edge parked and shown, the others roam on; orderly shutdown
 VERSION_E11 = "freeroam-runner-2026-11-09e11"   # e11 (9 Nov school): --alias WIFI=SLOT (names in the run only), --practice-real
@@ -612,6 +612,12 @@ class Runner:
                 print(w, flush=True)
                 self.camera_pictures = ev.get("state") != "no_pictures"
                 c.on_camera_state(ev.get("state"))      # (e13) each robot's own risk-based limit from here
+                if ev.get("state") == "dark":
+                    # (e14, school 17:2x) the picture went dark: held at once (as if its no-pictures limit had passed)
+                    c.on_camera_state("no_pictures")
+                    c.nopic_since = c.t - 1e6
+                elif ev.get("state") == "light_back":
+                    c.on_camera_state("pictures")
                 try:
                     for r in c.R.values():
                         c.event(r, "camera " + str(ev.get("state")), w)
