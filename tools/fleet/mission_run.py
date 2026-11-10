@@ -1099,9 +1099,38 @@ def learn_readmap(args, out, sess):
         return
     nf, ns = OB.learn_from_logs(rm, out)
     rm.save(p)
+    # (e13, school 13:1x lights off: tag 4 read at (41, 104) in every picture, the other tags 0 reads at P11 / P15, mean
+    # grey 70 against 91 on 9 Nov) readability depends on the light: this run's evidence is ALSO kept under its
+    # brightness (the bridge's brightness.csv median), readmap_light.json beside it: {grey: the map's cells}
+    try:
+        g = run_brightness(out)
+        if g is not None:
+            lp = os.path.join(sess, "readmap_light.json")
+            d = {}
+            if os.path.exists(lp):
+                with open(lp) as f:
+                    d = json.load(f)
+            d["%.0f" % g] = rm.to_json()
+            with open(lp, "w") as f:
+                json.dump(d, f)
+            say("READABILITY kept under this run's light too: mean grey %.0f (readmap_light.json)" % g)
+    except (OSError, ValueError):
+        pass
     bl = OB.blind_cells(rm)
     say("READABILITY learned from this run: %d camera fixes, %d stops; %d cm2 readable, %d spot%s still blind%s" % (
         nf, ns, rm.area_cm2(), len(bl), "" if len(bl) == 1 else "s", "" if args.dry else " (kept for the next run)"))
+
+
+def run_brightness(out):
+    """(e13) The run's light: the median mean grey of the overhead camera in bridge/brightness.csv (None if absent)."""
+    import csv as _csv
+    p = os.path.join(out, "bridge", "brightness.csv")
+    if not os.path.exists(p):
+        return None
+    with open(p, newline="") as f:
+        v = sorted(float(r["mean_grey"]) for r in _csv.DictReader(f) if r.get("mean_grey") and
+                   r.get("camera", "overhead") == "overhead")
+    return v[len(v) // 2] if v else None
 
 
 def resolve_experiment(args):
@@ -1594,7 +1623,19 @@ def run(args):
         try:
             import shutil
             shutil.copy(os.path.join(sess, "readmap.json"), os.path.join(args.site_["conf_dir"], "readmap.json"))
-        except OSError:
+            # (e13) the light-keyed maps merged into the site's: one per brightness seen (newest wins at that grey)
+            lp_ = os.path.join(sess, "readmap_light.json")
+            if os.path.exists(lp_):
+                sp_ = os.path.join(args.site_["conf_dir"], "readmap_light.json")
+                site_l = {}
+                if os.path.exists(sp_):
+                    with open(sp_) as f_:
+                        site_l = json.load(f_)
+                with open(lp_) as f_:
+                    site_l.update(json.load(f_))
+                with open(sp_, "w") as f_:
+                    json.dump(site_l, f_)
+        except (OSError, ValueError):
             pass
     with open(os.path.join(out, "mission_summary.json"), "w") as f:
         json.dump(summ, f, indent=1, default=str)

@@ -137,7 +137,8 @@ def _drive(c, b, xs, y, t0, seen_until):
     return None
 
 
-def test_blind_drive_is_allowed_up_to_the_cap_then_stops_everyone():
+def test_blind_drive_is_allowed_up_to_the_cap_then_stops_everyone(monkeypatch):
+    monkeypatch.setenv("MIRLT_BLIND_RULE", "cap")   # (e13) the old caps are the switch now
     c, b = _coord()
     t0 = RP.now()
     k = _drive(c, b, [30 + 1.0 * i for i in range(55)], 30.0, t0, t0 + 0.2)   # 10 cm/s, blind after 0.2 s (cap 40 cm)
@@ -147,7 +148,8 @@ def test_blind_drive_is_allowed_up_to_the_cap_then_stops_everyone():
     assert ("all", "halt") in c.sent
 
 
-def test_blind_near_an_edge_stops_sooner():
+def test_blind_near_an_edge_stops_sooner(monkeypatch):
+    monkeypatch.setenv("MIRLT_BLIND_RULE", "cap")   # (e13) the old caps are the switch now
     c, b = _coord()
     t0 = RP.now()
     k = _drive(c, b, [30 + 1.0 * i for i in range(40)], 61.0 - 4.75 - 8.0, t0, t0 + 0.2)   # body 8 cm from y = 61

@@ -67,7 +67,7 @@ write (new in e13 where marked). Colour words, never colour alone.
 | Part | Shows | From |
 |---|---|---|
 | Robot row | name (and WiFi name), seen by which cameras, **source now** (roof tag / lock-on / motion / detector / odometry only, and for how long), position +- (95 %), battery % and its trend, state (moving, stopped at P05 3 of 8 s, waiting for a hand, held: no pictures) | `sources.csv` (e13), the run's `state.json` / `motion.csv`, `battery.csv`, `edge_parked.json` (e13 needs-a-hand) |
-| Camera strip | each camera found: new pictures a second, last picture age, its role (found vs typed), robots it sees, light level; "sending no pictures" in red with the recorder hint | `bridge/frames.json` (e13), `coverage.json` (e13 discovery) |
+| Camera strip | each camera found: new pictures a second (and its drop: 13.5-15 a second in normal light, about 7 with the room lights off, school 10 Nov), last picture age, its role (found vs typed), robots it sees, **brightness** (mean grey, and "the room got darker" when it falls by the bridge's 15 % lighting limit: 91 -> 70 on 10 Nov), "sending no pictures" in red with the recorder hint | `bridge/frames.json`, `bridge/brightness.csv`, `coverage.json` (e13) |
 | Readable area | the shaded area on the map, cm2, and how it was learned (seed, runs) | `readmap_start.json`, the site's `readmap.json` |
 | Clock | Pi vs camera clock difference, internet time set or not | `clock.csv`, the sync card's status |
 | Tags | roof tags read per robot this minute; reference tags read (camera not bumped) | `tag_poses.csv`, `ref_watch.csv` |

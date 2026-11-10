@@ -112,6 +112,8 @@ PAUSE_S = 0.15          # between moves (the robot's own step queue; no visible 
 EMPTY_MOVE_PAUSE_S = 0.5    # (e10) CHOSEN: after a move with nothing to send, pick again this soon (DOE: no)
 # dead reckoning (lost by the camera)
 LOST_AFTER_S = 0.6      # no camera fix this long = lost (run_plan.BLIND_AFTER_S). Not chosen here
+LOST_GAPS = 4.0         # (e13) ... and never under 4 of the robot's own measured gaps between fixes (lost_after). CHOSEN:
+                        # three missed pictures in a row are not yet "lost"; DOE row (the dark-room rate, e13)
 BLIND_BASE = 2.0        # bubble p95 = 2.0 cm + 0.07 cm per cm driven blind: MEASURED, 29 Oct logs, 22,000 stretches,
 BLIND_PER_CM = 0.07     # straight drives up to 40 cm (run_plan.BLIND_ERR_*). Beyond 40 cm extrapolated
 BLIND_TURN_FRAC = 0.03  # heading error 3 % of the degrees turned blind (the e03 rerun: 0.85-0.90 deg per turn after the
@@ -932,7 +934,21 @@ class Controller:
         if r.cam is None:
             return False
         arr = r.cam_arr if r.cam_arr is not None else r.cam[0]
-        return self.t - arr < LOST_AFTER_S and self.t - r.cam[0] < LOST_AFTER_S + self.cam_delay_hi
+        la = self.lost_after(r)
+        return self.t - arr < la and self.t - r.cam[0] < la + self.cam_delay_hi
+
+    def lost_after(self, r):
+        """(e13, school 13:1x lights off: the camera fell to ~7 pictures a second) how long with no fix means lost: at
+        least LOST_AFTER_S, and never under LOST_GAPS times this robot's own measured gap between fixes (its last 40;
+        90th percentile), so a slower camera in the dark does not call a robot lost between two of its pictures."""
+        h = r.cam_hist
+        if len(h) < 10:
+            return LOST_AFTER_S
+        hh = h[-41:]
+        gaps = sorted(b[0] - a[0] for a, b in zip(hh, hh[1:]) if b[0] > a[0])
+        if not gaps:
+            return LOST_AFTER_S
+        return max(LOST_AFTER_S, LOST_GAPS * gaps[min(len(gaps) - 1, int(0.9 * len(gaps)))])
 
     def own_at(self, r, t):
         """The robot's own pose (x, y, th) at time t, from its FOLLOW records (interpolated); None if t is older than

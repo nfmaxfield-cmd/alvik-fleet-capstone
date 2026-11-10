@@ -627,3 +627,31 @@ def test_click_aim_learned_only_from_clicks_the_robot_had_not_driven_away_from(t
         PC.residual("A", 0, 0, 0, 0, 0, 1, driven_cm=0.5, res_cm=1.0 + 0.1 * k)
         PC.residual("A", 0, 0, 0, 0, 0, 1, driven_cm=80.0, res_cm=20.0)        # after a long blind drive: not the aim
     assert abs(PC.learn_aim() - 1.9) < 1e-6
+
+
+def test_run_plan_blind_robot_drives_past_the_old_40_cm_cap_in_the_open_and_stops_near_an_edge(monkeypatch):
+    sys.path.insert(0, HERE)
+    import test_straighten as TS
+    import run_plan as RP
+    monkeypatch.delenv("MIRLT_BLIND_RULE", raising=False)
+    c, b = TS._coord()
+    c.m = {"floor": {"x_min": 0.0, "y_min": 0.0, "x_max": 300.0, "y_max": 160.0}}
+    t0 = RP.now()
+    k = TS._drive(c, b, [30 + 1.0 * i for i in range(120)], 80.0, t0, t0 + 0.2)   # 117 cm blind down the middle
+    assert k is None and not c.abort and b.blind["dist"] > 100
+    c2, b2 = TS._coord()
+    k2 = TS._drive(c2, b2, [30 + 1.0 * i for i in range(60)], 61.0 - 4.75 - 8.0, t0, t0 + 0.2)   # body 8 cm from y = 61
+    assert k2 is not None and c2.abort and "could reach an edge" in c2.abort
+
+
+def test_lost_after_follows_the_measured_fix_rate_and_brightness_is_read(tmp_path):
+    c = FC.Controller(["A"], (0, 0, 300, 160), lambda *a: None, lambda *a: None)
+    r = c.R["A"]
+    r.cam_hist = [(k * 0.08, 100.0, 80.0) for k in range(40)]          # 12 a second
+    assert c.lost_after(r) == FC.LOST_AFTER_S
+    r.cam_hist = [(k * 0.3, 100.0, 80.0) for k in range(40)]           # a dark room: 3 a second
+    assert abs(c.lost_after(r) - FC.LOST_GAPS * 0.3) < 1e-6
+    import mission_run as MR
+    (tmp_path / "bridge").mkdir()
+    (tmp_path / "bridge" / "brightness.csv").write_text("t,camera,mean_grey\n1,overhead,70\n2,overhead,71\n3,side,90\n")
+    assert MR.run_brightness(str(tmp_path)) in (70.0, 71.0)
