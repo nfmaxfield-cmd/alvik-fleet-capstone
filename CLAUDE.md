@@ -22,9 +22,15 @@
   direction checks the tag's heading). (2) When evidence disagrees, the evidence wins: adapt, log what was learned,
   carry on; stop only when safety can't be kept. (3) Fuse every available signal (tag pose, motion in the picture,
   wheel odometry, gyro, accelerometer, front and line sensors); a disagreement between sources is information, not a
-  reason to drop one. Exception: Jay-Sun's RFID data is never an input. (4) Degrade gracefully: a lost tag, a missing
+  reason to drop one. RFID: see "Jay-Sun's RFID data" below. (4) Degrade gracefully: a lost tag, a missing
   camera or an unreadable area narrows what a run does instead of ending it. (5) The simulator deliberately breaks the
   guesses (tags turned, wrong camera names, a missing camera, clock skew, surface marks, robots restarting, dark
   patches) so tests catch rigidity before the real table does. "Discover, don't pre-map" above is this rule's surface
   case. Switches kept under "Keep features, switch them off" are decided automatically by default and live out of a
   new user's way.
+- **Jay-Sun's RFID data (Nick, 2026-11-10; Jay-Sun agreed):** Nick's project and Jay-Sun's thesis are two separate
+  projects sharing hardware and most of the software; each may use the other's data, as long as neither interferes with
+  the other's experiments. RFID data may be an input to Nick's own runs and analyses, but only behind a switch that is
+  OFF for every run made for Jay-Sun's experiments (tours, experiment routes), so his runs never use his own RFID data.
+  Raw RFID data never goes in this public repo (keep it private); Jay-Sun keeps full access to all raw data. Whether RFID
+  improves accuracy is an open question to test against camera truth, not an assumption.
