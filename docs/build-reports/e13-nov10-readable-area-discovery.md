@@ -52,6 +52,23 @@ on its own cap or battery rules").
 
 ![needs a hand](../screenshots/2026-11-10/e13-feature-needs-a-hand-terminal.png)
 
+**What "never give up" means (Nick, 12:51; CLAUDE.md), built in all three drivers.** A robot that has lost the
+camera keeps moving on what it has left for as long as its whole possible error (the dead-reckoning bubble, grown with
+every cm and degree driven blind, + half the body's diagonal + its stop at that speed) cannot reach an edge along the
+path; only then it stops, holds safely and asks for a hand; it carries on when a source returns. No fixed caps:
+
+| Driver | Before (now `MIRLT_BLIND_RULE=cap`) | e13 |
+|---|---|---|
+| Free roam (freeroam_core) | eased to a stop and wiggled at an 8 cm bubble (16 cm on curves) | `blind_stop`: edge distance - bubble < half diagonal + stop; plans carry the bubble in their margins as before |
+| Missions / Visit points (run_plan blind watch; the planner has no cap of its own) | stopped after 40 cm blind, or body - error under 5 cm from an edge | stops only when blind error + half diagonal + stop (at its measured blind speed) reaches the edge distance; the old circle-past-the-edge check stays |
+| Calibration recovery | stopped at an 8 cm bubble or 40 cm blind | each step only while bubble + stop stays inside the edge margin; then the never-give-up hold |
+
+Fast simulator (test, one seed): Center's camera cut for 60 s on a 300 x 300 cm board. **From the middle: it drove 275
+cm blind** (bubble then about 21 cm) and kept 65 cm from every edge; with the old cap, 88 cm. **Started 22 cm from an
+edge facing it: it never came closer than 22 cm** (it moved 63 cm, inward). No falls or hangs either way. Measured
+(simulator). The blind error per cm (0.07) was measured on drives up to 40 cm; beyond that it is extrapolated
+(Sweep 2).
+
 **The calibration never gives up either** (coordinator, from today's school calibration 20261110-121215, AL-EB54 with
 tag 4: after "go 63 P11" the tag was lost, the recovery reached its 8 cm bubble, wiggled, held, then "ENDED: the camera
 lost the roof tag for over 30 s"). Now a lost tag holds with **no time limit** (standing still, the robot gets no
@@ -198,7 +215,7 @@ directions with mockups (A guided steps, B one page top to bottom, C cockpit), t
 
 ### Tests
 
-`tools/fleet/tests/test_e13.py`: 30. Full fleet suite, final code: see the end of this report.
+`tools/fleet/tests/test_e13.py`: 31. Full fleet suite, final code: see the end of this report.
 
 ## Conclusion
 
@@ -223,7 +240,7 @@ directions with mockups (A guided steps, B one page top to bottom, C cockpit), t
 
 ## Appendix: switches added (all decided automatically; the old way kept)
 
-`MIRLT_ROAM_READABLE=0`, `MIRLT_STRAY_RETURN=0`, `MIRLT_EDGE_PARK=1`, `MIRLT_CALIB_GIVEUP=1`, `MIRLT_CALIB_MOTION=0`, `MIRLT_IDLE_SLEEP_MIN=0`, `MIRLT_NOPIC_RULE=off`,
+`MIRLT_ROAM_READABLE=0`, `MIRLT_STRAY_RETURN=0`, `MIRLT_EDGE_PARK=1`, `MIRLT_CALIB_GIVEUP=1`, `MIRLT_CALIB_MOTION=0`, `MIRLT_BLIND_RULE=cap`, `MIRLT_IDLE_SLEEP_MIN=0`, `MIRLT_NOPIC_RULE=off`,
 `MIRLT_FRAME_WATCH_GAP=fixed`, `MIRLT_FEED_CHECK=0`, `MIRLT_CAMERA_DISCOVERY=on` (new step, off), `MIRLT_CAMERA_NAMES=typed`,
 `MIRLT_CORNER_CONFIRM=auto`, `MIRLT_ML_DETECTOR=auto` (new source, off).
 
@@ -232,6 +249,8 @@ directions with mockups (A guided steps, B one page top to bottom, C cockpit), t
 - School free roam on the robots: none past x 220 cm; stray returns counted (events).
 - A real robot put at the home edge, then moved in by hand: REJOINED within a few seconds; and the real-path
   simulator's move injection traced.
+- The blind rule on the robots: cover a roof tag for 60 s in the middle of a free roam, then near an edge; the blind
+  distance and the reacquire jump (lost.csv) against the bubble.
 - A real calibration with the tag covered by hand for a minute mid-leg: NEEDS A HAND, then carries on when uncovered;
   and one with the robot carried out of zone 1-2 and back.
 - The 11:54 run's screen.txt and raw lines: was the robot still following before "turn -90"?
@@ -255,6 +274,9 @@ directions with mockups (A guided steps, B one page top to bottom, C cockpit), t
   detector's 5 px closing from the labelling detector: the live bridge's detector may join blobs differently.
 - The stray return assumes unreadable ground next to readable ground is table (the proven workspace's SEEN cells): true
   at school (the camera sees the whole table, it just cannot read tags there).
+- The blind rule drives far blind (275 cm in the test) on a bubble whose growth (0.07 cm per cm) was measured only up to
+  40 cm; a robot with a bad gyro or slipping wheels drifts faster than that model says, and only the camera's return
+  shows it (the reacquire jump is logged).
 - The calibration's hold has no time limit: an unattended calibration whose robot is lost waits (awake) until Stop.
 - The "still following" explanation of the 11:54 timeout is a hypothesis from the code, not from that run's logs.
 - The battery floor as the end of a hand wait drains a waiting robot to 10 % (about 19 % an hour awake, e12).

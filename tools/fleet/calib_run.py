@@ -61,7 +61,7 @@ for p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recognit
 
 import numpy as np   # noqa: E402
 
-VERSION = "2026-11-10e13"   # 11-10e13 (e13): never give up (a lost tag holds with no time limit, asks for a hand; cam_pose_sure and every unguarded camera pose wait the same way; MIRLT_CALIB_GIVEUP=1 the 30 s end), readability per tag, TURN DID NOT SETTLE, stop resent after the curve phase, the motion detector on in its bridge; the camera check before binding (camera_feed: no pictures is said as that, never the robot or tag); tracked for the sleep after a run.
+VERSION = "2026-11-10e13"   # 11-10e13 (e13): never give up (the recovery drives blind while its bubble + stop cannot reach the edge margin, no 8 cm / 40 cm caps: MIRLT_BLIND_RULE=cap; a lost tag holds with no time limit, asks for a hand; cam_pose_sure and every unguarded camera pose wait the same way; MIRLT_CALIB_GIVEUP=1 the 30 s end), readability per tag, TURN DID NOT SETTLE, stop resent after the curve phase, the motion detector on in its bridge; the camera check before binding (camera_feed: no pictures is said as that, never the robot or tag); tracked for the sleep after a run.
 VERSION_10G = "2026-11-10g"     # 11-10g: a standing robot is never given up for sparse tag reads: it is measured over longer windows (Nick 13:34; dim light). 11-10f: the start waits for the camera fix after the wiggle (dim light, ~7 fps: refused at once, school 13:25). 11-10e: a run ended for poor tag reads DOES try to park again (Nick 12:48: never give up on getting back to where it is seen); it drives only with a camera fix (cam_pose_sure waits for one). 11-10d: no crash parking with no camera fix (RunEnd, caught: "Could not park"). 11-10c: Phase A waits for the camera fix instead of crashing on None (school 12:35). 11-10b (e12, Nick 10 Nov): the curve phase (phase R: constant-curvature arcs left and right at free roam's radii and two speeds, fitted from the camera, arc_k_scale / arc_d_scale saved when they agree; --arc-phase auto/on/off), points in your order (--visit-order), the proven workspace for the tours' room, the camera self-check at the start. VERSION_10A was:
 VERSION_10A = "2026-11-10a"     # 11-10a: a leftover camera reader holding port 5011 is stopped first (stale_bridge.py). 11-05i (9 Nov, school): a tripped stop mid-tour crashed the run (TypeError: ev() got two
                              # values for kind); the trip event now says stop_kind. VERSION_H was:
@@ -106,7 +106,11 @@ HOLD_SAY_S = 60.0        # (e13) the NEEDS A HAND line is said again this often 
 RECOVER_STEP_CM = 5.0    # chosen: one blind step (at FINAL_CMS); the check is redone before each. DOE note: 3 / 5 / 10
                          # cm against recoveries that end in a hold and the time to be seen again
 RECOVER_MAX_CM = 40.0    # chosen: at most this far blind in a recovery (run_plan's BLIND_MAX_CM, Nick 29 Oct)
-RECOVER_BUBBLE_CAP = 8.0  # chosen (free roam's BUBBLE_CAP): over this, stop and wiggle, then the old hold
+RECOVER_BUBBLE_CAP = 8.0  # BEFORE e13 (now the switch MIRLT_BLIND_RULE=cap): over this, stop and wiggle, then the hold.
+BLIND_RULE = os.environ.get("MIRLT_BLIND_RULE", "edge")   # (e13, Nick 12:51 "never give up", CLAUDE.md) "edge": a robot
+                         # driving blind goes on while its whole possible error (the bubble grown with every cm and degree
+                         # blind + the body + its stop) cannot reach an edge along the step; no fixed bubble or distance
+                         # cap. "cap": RECOVER_BUBBLE_CAP 8 cm and RECOVER_MAX_CM 40 cm as before
 BLIND_BASE_CM = 2.0      # the bubble: MEASURED 29 Oct (run_plan BLIND_ERR_*): p95 2.0 cm + 0.07 cm per cm blind,
 BLIND_PER_CM = 0.07      # calibrated robots (wheel_scale / gyro_scale fitted)
 BLIND_PER_CM_UNCAL = BLIND_PER_CM + (0.10 - 0.04)   # uncalibrated (phase A from the defaults, staging): + the
@@ -1621,11 +1625,19 @@ class CalibRun:
             step = min(RECOVER_STEP_CM, math.dist(tgt, (x, y)))
             nx, ny = x + step * math.cos(math.radians(th)), y + step * math.sin(math.radians(th))
             bub2 = bub_now(step)
-            if bub2 > RECOVER_BUBBLE_CAP or blind_cm + step > RECOVER_MAX_CM:
+            if BLIND_RULE == "cap" and (bub2 > RECOVER_BUBBLE_CAP or blind_cm + step > RECOVER_MAX_CM):
                 outcome = "the bubble would pass %.0f cm" % RECOVER_BUBBLE_CAP
                 break
-            if not clear((x, y), (nx, ny), bub2):
-                outcome = "the next step's bubble would reach a margin"
+            stop_ = 0.0
+            if BLIND_RULE != "cap":
+                try:
+                    import safety_rules as SR_
+                    stop_ = float(SR_.stop_cm(FINAL_CMS))      # (e13) its stop at the step's speed, measured
+                except Exception:  # noqa: BLE001
+                    stop_ = 1.4
+            if not clear((x, y), (nx, ny), bub2 + stop_):
+                outcome = ("the next step's possible error (bubble %.1f cm + its stop %.1f cm) could reach the edge "
+                           "margin" % (bub2, stop_))
                 break
             r = self.rb.leg("go", step, on_tick=lambda: seen() or self.stop_flag.is_set())
             self.odo_step(r)

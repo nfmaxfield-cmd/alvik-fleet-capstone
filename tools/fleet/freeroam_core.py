@@ -49,7 +49,7 @@ if _HERE not in sys.path:
 import safety_rules as SR   # noqa: E402  (e08 Phase A: the rules shared with run_plan and observe)
 import fused_pose as FP     # noqa: E402  (e09 Phase B: one filter per robot, fed by the tracking layer and RAW)
 
-VERSION = "freeroam-2026-11-10e13"   # e13 (10 Nov): stray return (a robot outside the readable area comes back along ground it drove); never give up (a robot held at an edge waits, says it needs a hand and rejoins: EDGE_PARK off); risk-based no-pictures limit per robot
+VERSION = "freeroam-2026-11-10e13"   # e13 (10 Nov): never give up blind (BLIND_RULE edge: a lost robot drives on while its bubble + body + stop cannot reach an edge; BUBBLE_CAP behind MIRLT_BLIND_RULE=cap); stray return (a robot outside the readable area comes back along ground it drove); never give up (a robot held at an edge waits, says it needs a hand and rejoins: EDGE_PARK off); risk-based no-pictures limit per robot
 VERSION_E12 = "freeroam-2026-11-10a"   # 11-10a (e12): the curve-fit maths moved into module functions (fit_arc_points, arc_summary, arc_agree) so the calibration's curve phase uses the very same (free roam's own fitting and saving unchanged); a robot held at an edge for EDGE_PARK_S is parked and said loudly, the others roam on (MIRLT_EDGE_PARK=0: before)
 VERSION_E = "freeroam-2026-11-07e"   # 11-07e (Nick 7 Nov): a robot put down at or over an edge first tries the e08 tilt recovery, a person asked only if that fails (MIRLT_START_EDGE_MODE=wait: always wait)
 VERSION_D = "freeroam-2026-11-07d"   # 11-07d (e10, the 7 Nov run 2 incident): the queue watch (every tick, off plan or a queued piece breaking the edge rule from where the robot really is: re-aimed or stopped, heading re-set), the surface-mark verdict less the uncertainty, the start check (held at an edge)
@@ -116,7 +116,11 @@ BLIND_BASE = 2.0        # bubble p95 = 2.0 cm + 0.07 cm per cm driven blind: MEA
 BLIND_PER_CM = 0.07     # straight drives up to 40 cm (run_plan.BLIND_ERR_*). Beyond 40 cm extrapolated
 BLIND_TURN_FRAC = 0.03  # heading error 3 % of the degrees turned blind (the e03 rerun: 0.85-0.90 deg per turn after the
                         # fit, 6 deg on a 173 deg turn before it): CHOSEN between the two, its lateral effect added
-BUBBLE_CAP = 8.0        # chosen: over this the robot eases to a stop and wiggles (find me). DOE: yes, 6 / 8 / 12 cm
+BUBBLE_CAP = 8.0        # BEFORE e13 (now MIRLT_BLIND_RULE=cap): over this the robot eased to a stop and wiggled
+BLIND_RULE = os.environ.get("MIRLT_BLIND_RULE", "edge")   # (e13, Nick 12:51 "never give up", CLAUDE.md) "edge": a lost
+                        # robot keeps moving on odometry and gyro while its bubble (grown per cm and degree blind) + half
+                        # its body + its stop cannot reach an edge (blind_stop); the plans carry the bubble in their edge
+                        # margins along the whole path. No fixed bubble cap. "cap": BUBBLE_CAP as before
 REACQUIRE_CM = 2.5      # seen again: its pose is set to the camera's when they differ by more (run_plan). Not chosen
 REACQUIRE_MAX_CM = 12.0  # ... over this, 3 agreeing fixes first (the camera may have the wrong robot)
 WIGGLE_DEG = 20.0       # find-me wiggle: +-20 deg on the spot. Chosen; no DOE (any visible motion works)
@@ -3035,7 +3039,8 @@ class Controller:
         Returns (kind, cell, k, L, v, side, traj) or None."""
         m0 = self.margin0(r)
         grow = BLIND_PER_CM if r.lost is not None else 0.0
-        find_me = r.lost is not None and r.bubble > BUBBLE_CAP
+        find_me = r.lost is not None and (r.bubble > BUBBLE_CAP if BLIND_RULE == "cap" else
+                                          self.blind_stop(r, (x, y), max(v0, 5.0)))
         # starting closer to an edge than a curve may go (after a stop there): curves that never get closer to it
         ea = EDGE_AWAY and edge_dist(self.rect, x, y) < (LOOP_EDGE if self.edge_rule == "fixed" else
                                                           self.turn_need(r) - (r.bubble if r.lost else 0.0)) + 3.0 + \
@@ -4177,10 +4182,12 @@ class Controller:
                 self.unsure_step(r)
             elif r.mode == "idle" and t >= r.busy_until and self.pos(r) is not None and not r.silent and r.curve and \
                     not r.lost_hold and not (r.battery is not None and r.battery <= self.floor) and \
-                    not (r.lost is not None and r.bubble > 2 * BUBBLE_CAP):
+                    not (r.lost is not None and (r.bubble > 2 * BUBBLE_CAP if BLIND_RULE == "cap" else
+                                                 self.blind_stop(r, self.pos(r), 5.0))):
                 self.start_curve(r)                    # (11-05d) never waits: from the coast or the stand
             elif r.mode == "idle" and t >= r.busy_until and self.pos(r) is not None and not r.silent:
-                if r.lost is not None and r.bubble > BUBBLE_CAP:
+                if r.lost is not None and (r.bubble > BUBBLE_CAP if BLIND_RULE == "cap" else
+                                           self.blind_stop(r, self.pos(r), 5.0)):
                     self.find_me(r)
                 elif r.battery is not None and r.battery <= self.floor:
                     r.out_why = "battery %d %%" % r.battery
@@ -4251,10 +4258,12 @@ class Controller:
             if r.move.get("curve"):
                 # (11-05d) a curve robot's plans carry the bubble in their edge margins and it loops in its own disc
                 # when the bubble passes BUBBLE_CAP (find-me loop): it eases to a stop only when far more lost
-                if p and r.bubble > 2 * BUBBLE_CAP:
+                if p and (r.bubble > 2 * BUBBLE_CAP if BLIND_RULE == "cap" else
+                          self.blind_stop(r, p, r.move.get("v", 5.0) * max(r.scale, 0.0))):
                     self.ease_stop(r, "bubble %.1f cm" % r.bubble)
-            elif p and (r.bubble > BUBBLE_CAP or edge_dist(self.rect, *p) - r.bubble < TURN_EDGE_CC) and \
-                    r.move["kind"] not in ("wiggle", "probe", "probe return"):
+            elif p and ((r.bubble > BUBBLE_CAP or edge_dist(self.rect, *p) - r.bubble < TURN_EDGE_CC)
+                        if BLIND_RULE == "cap" else self.blind_stop(r, p, r.move.get("v", 5.0) * max(r.scale, 0.0))) \
+                    and r.move["kind"] not in ("wiggle", "probe", "probe return"):
                 # (e10) a probe goes out of the camera's view on purpose, and its return retraces the strip it proved
                 self.ease_stop(r, "bubble %.1f cm" % r.bubble)
         # stuck: driving, wheels on, no camera travel
@@ -4299,6 +4308,15 @@ class Controller:
                     mv["n"], t - mv["t0"], est, mv["kind"], r.scale, r.own[4] if r.own else "-"))
                 self.halt(r, "move timed out")
                 self.end_move(r)
+
+    def blind_stop(self, r, p, v=5.0):
+        """(e13, CLAUDE.md "never give up") True when this lost robot's whole possible error could reach an edge: its
+        bubble (grown with every cm and degree blind) + half its body + its stop at speed v, against its distance to the
+        nearest edge (or unproven ground). Until then it keeps moving on its own wheels and gyro."""
+        if p is None or r.lost is None:
+            return False
+        self.counts["blind_checks"] = self.counts.get("blind_checks", 0) + 1
+        return edge_dist(self.rect, *p) - r.bubble < HALF + SR.stop_cm(max(0.0, v) if v and v > 0.3 else None)
 
     def ease_stop(self, r, why):
         self.why_zero(r, "lost: eases to a stop (%s)" % why)

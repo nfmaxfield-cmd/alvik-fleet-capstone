@@ -36,7 +36,7 @@ Position source (--fixes): where camera poses come from (data-formats.md,
 runs against it with --fixes udp; at the end it prints the simulator's ground
 truth: docking errors, closest robots, contact.
 """
-VERSION = "2026-11-10e13"   # 2026-11-10e13 (e13): no pictures: each blind robot's risk-based limit (safety_rules.no_picture_limit; MIRLT_NOPIC_RULE=off: e12's rules alone).
+VERSION = "2026-11-10e13"   # 2026-11-10e13 (e13): never give up blind (no BLIND_MAX_CM cap: it stops only when blind error + body + stop could reach an edge; MIRLT_BLIND_RULE=cap the old caps); no pictures: each blind robot's risk-based limit (safety_rules.no_picture_limit; MIRLT_NOPIC_RULE=off: e12's rules alone).
 VERSION_B = "2026-11-10b"   # 2026-11-10b (e12 item 9): a lock-only fix never resets a pose (MIRLT_LOCK_GUARD=0: as before); a dwell broken by a halt where the robot did not move keeps its start (MIRLT_DWELL_KEEP=0). 2026-11-10a (e12): the bridge's "camera" messages (no pictures / pictures again) said and logged. No version before
 LOCK_GUARD = __import__("os").environ.get("MIRLT_LOCK_GUARD", "1") != "0"
 DWELL_KEEP = __import__("os").environ.get("MIRLT_DWELL_KEEP", "1") != "0"
@@ -3748,6 +3748,18 @@ class Coordinator:
                 # reaches past an edge: it stops; only a move that shrinks that (the straight recovery inwards) follows
                 why = "with no camera seeing it, its possible-locations circle (body + %.1f cm blind error) reaches " \
                       "%.1f cm past an edge" % (err, ov)
+            elif os.environ.get("MIRLT_BLIND_RULE", "edge") != "cap":
+                # (e13, Nick 12:51 "never give up", CLAUDE.md) no blind-distance cap: it drives on while its whole
+                # possible error (the blind error + half the body's diagonal + its stop at its blind speed, measured)
+                # cannot reach an edge; BLIND_MAX_CM / BLIND_EDGE_CM are the switch MIRLT_BLIND_RULE=cap
+                import safety_rules as SRb_
+                v_b = bl["dist"] / max(0.2, t - bl["t0"])
+                e_mid = min(b.pose[0] - rect[0], rect[2] - b.pose[0], b.pose[1] - rect[1], rect[3] - b.pose[1])
+                need = err + SRb_.HALF_DIAG_CM + SRb_.stop_cm(v_b if v_b > 0.3 else None)
+                if e_mid < need:
+                    why = ("with no camera seeing it, its possible error (blind %.1f cm + body %.1f + stop %.1f) could "
+                           "reach an edge %.1f cm away" % (err, SRb_.HALF_DIAG_CM, need - err - SRb_.HALF_DIAG_CM,
+                                                           e_mid))
             elif bl["dist"] > self.BLIND_MAX_CM:
                 why = "it drove %.0f cm with no camera seeing it (the limit is %.0f cm)" % (bl["dist"], self.BLIND_MAX_CM)
             elif body_edge - err < self.BLIND_EDGE_CM:

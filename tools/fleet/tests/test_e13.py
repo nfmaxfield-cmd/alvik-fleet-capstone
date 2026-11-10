@@ -528,3 +528,38 @@ def test_a_dim_room_is_said_from_the_brightness_and_parking_never_holds_the_end(
         r.hold_never_give_up()
     src = open(os.path.join(FLEET, "calib_run.py")).read()
     assert 'tries > 6 and os.environ.get("MIRLT_CALIB_GIVEUP", "0") == "1"' in src
+
+
+# -------------------------------------------------------------------------------------------- never give up: the blind rule
+def _blind_run(rule, start, gap, board=(0, 0, 300, 300)):
+    import freeroam_fastsim as S
+    old = FC.BLIND_RULE
+    FC.BLIND_RULE = rule
+    try:
+        sim = S.Sim(4, 0.03, dead_robot=False, pi_freeze=False, dropouts=False, board=board,
+                    starts={"Center": start}, cam_gaps=[("Center", gap[0], gap[1])])
+        c, track = sim.ctrl, []
+        orig = c.tick
+
+        def tick(t):
+            b = sim.bots["Center"]
+            track.append((t, b.x, b.y))
+            return orig(t)
+        c.tick = tick
+        sim.run()
+    finally:
+        FC.BLIND_RULE = old
+    blind = [q for q in track if gap[0] <= q[0] <= gap[0] + gap[1]]
+    d = sum(math.dist(a[1:], b[1:]) for a, b in zip(blind, blind[1:]))
+    emin = min(min(x - board[0], board[2] - x, y - board[1], board[3] - y) for _, x, y in blind)
+    return d, emin, sim.stats["falls"]
+
+
+def test_blind_robot_far_from_edges_drives_on_and_one_near_an_edge_never_closes_in():
+    d_edge, e1, f1 = _blind_run("edge", (150, 150, 0), (30.0, 60.0))
+    d_cap, _, _ = _blind_run("cap", (150, 150, 0), (30.0, 60.0))
+    assert d_edge > 2 * d_cap and d_edge > 150 and f1 == 0          # 60 s with no camera: it kept roaming
+    _d, e2, f2 = _blind_run("edge", (22, 150, 180), (0.5, 60.0))
+    assert e2 >= 21.0 and f2 == 0                                      # near the edge: never closer than it started
+    for f in ("calib_run.py", "run_plan.py"):
+        assert 'MIRLT_BLIND_RULE", "edge"' in open(os.path.join(FLEET, f)).read(), f
