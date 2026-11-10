@@ -19,8 +19,23 @@ pictures a second (-1 to +1; near 0 = no link, or temperature barely varied).
 | 20261029-211053-doe | unknown | 80.8 / 83.3 | 40 | 88 / 12 / 0 % | 24.5 / 23.5 / - | 0.27 | -0.32 |
 | 20261030-100153-doe | unknown | 81.3 / 84.2 | 167 | 81 / 19 / 0 % | 25.0 / 24.5 / - | 0.25 | -0.33 |
 | 20261102-145816-doe | unknown | 70.1 / 77.9 | 0 | 100 / 0 / 0 % | 25.0 / - / - | 0.04 | 0.01 |
+| 20261109-161714-visit-robots | school Pi: case cover on, no fan or heatsink | 84.2 / 86.2 | 7 | 2 / 77 / 21 % | 15.0 / 15.0 / 14.5 | 0.12 | -0.16 |
+| 20261109-172014-visit-robots | school Pi: case cover on, no fan or heatsink | 83.8 / 85.2 | 7 | 18 / 79 / 2 % | 15.0 / 15.0 / 15.0 | 0.11 | -0.09 |
+| 20261109-174313-visit-robots | school Pi: case cover on, no fan or heatsink | 84.2 / 86.2 | 7 | 5 / 81 / 14 % | 15.0 / 15.0 / 14.5 | 0.11 | -0.21 |
+| 20261109-175636-visit-robots | school Pi: case cover on, no fan or heatsink | 84.2 / 86.2 | 8 | 0 / 85 / 15 % | - / 14.5 / 14.0 | 0.12 | -0.18 |
+| 20261109-180738-visit-robots | school Pi: case cover on, no fan or heatsink | 84.7 / 86.2 | 8 | 0 / 76 / 24 % | - / 13.5 / 13.5 | 0.12 | -0.02 |
+| 20261109-182111-visit-robots | school Pi: case cover on, no fan or heatsink | 84.7 / 86.2 | 9 | 2 / 70 / 28 % | 15.0 / 14.0 / 13.5 | 0.12 | -0.23 |
+| 20261109-183445-visit-robots | school Pi: case cover on, no fan or heatsink | 84.7 / 86.2 | 8 | 0 / 74 / 26 % | - / 14.0 / 13.5 | 0.12 | 0.00 |
 
 ## Readings (newest first)
+- **20261109-161714 ... 183445 (Jay-Sun's 7 school Visit-points tours, 16:17-18:43, one robot, school Pi with its case
+  cover on, no fan or heatsink):** the Pi ran hot the whole time: median 83.8-84.7 C, peak 86.2 C, every minute of every
+  tour at 80 C or over. It sat at the firmware's soft temperature limit 70-85 % of the time and was throttled (clock
+  capped) 2-28 % of the time, more in the later tours (21-28 % from 18:07 on, against 2 % in the first tour). The
+  camera still handled 13.5-15 pictures a second and picture age stayed about 0.12 s (95 %), so the tours were not
+  harmed; the correlation between temperature and pictures a second is weak (rho -0.23 to 0.00). Claude's reading: the
+  school Pi has no thermal headroom left; a heavier load (3 robots, the detector, two cameras) would likely throttle
+  harder. Next: a heatsink and small fan (or the cover off) at school, and compare with the same tour.
 - **20261105-155001-freeroam (home free roam, 15:54-19:54, 4 h, three robots, cooling unknown):** not in the table:
   the free roam does not log cpu.csv, so `heat_tracker.py` stops with "no cpu.csv" and there is no temperature to
   read. perf.csv alone: the camera handled 25.0 pictures a second (median) throughout, picture age 0.02 s, with 5-minute
