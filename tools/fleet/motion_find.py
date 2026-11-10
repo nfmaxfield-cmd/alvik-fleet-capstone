@@ -204,7 +204,8 @@ class BringBack:
       stop() -> True when Stop / Ctrl+C was pressed"""
 
     def __init__(self, name, pose, sigma, step, turn, wiggle, problems, readable, tag_near, hold, stop=lambda: False,
-                 log=say, ev=lambda kind, **kw: None, cells=None, stop_cm=1.4, uncal=True, ok_rate=0.6, proven=None):
+                 log=say, ev=lambda kind, **kw: None, cells=None, stop_cm=1.4, uncal=True, ok_rate=0.6, proven=None,
+                 target_ok=None):
         self.name = name
         self.x, self.y = float(pose[0]), float(pose[1])
         self.th = None if pose[2] is None else float(pose[2])
@@ -219,6 +220,9 @@ class BringBack:
         # camera model's guess is not evidence (10 Nov rehearsal: a dim patch the model calls readable made a robot
         # WITH a tag look tagless after two spots). None given: the map's rate (the rig and tests)
         self.proven = proven
+        # target_ok(x, y): a spot fit to drive TO (the site's planning margins: 13 cm from the edge at school); the
+        # never-give-up rule only governs the way there (rehearsal: a robot sought tags 10 cm from the edge)
+        self.target_ok = target_ok
         self.stop_cm, self.ok_rate = stop_cm, ok_rate
         self.per = BLIND_PER_CM_UNCAL if uncal else BLIND_PER_CM
         self.tf = TURN_FRAC_UNCAL if uncal else 0.03
@@ -248,7 +252,7 @@ class BringBack:
             if any(math.hypot(cx - fx, cy - fy) < FAILED_R_CM for fx, fy in self.failed + self.tried) or \
                     any(math.hypot(cx - bx, cy - by) < 1.0 for bx, by in self.blocked):
                 continue
-            if self.problems((cx, cy), (cx, cy), 0.0):
+            if self.problems((cx, cy), (cx, cy), 0.0) or (self.target_ok is not None and not self.target_ok(cx, cy)):
                 continue
             pv = self.proven(cx, cy) if self.proven else None
             # spots the evidence shows readable first, then the nearest
@@ -624,13 +628,10 @@ def run_finding(robots, eye, cams, S, rm, confirmed, guesses=None, log=say, ev=l
                 rm.add(w_[0], w_[1], True)    # its tag read there just now, at this light: evidence
 
     def proven(x, y):
-        """The read rate the EVIDENCE shows round (x, y) (its cell and the 8 round it, 3+ tries), else None."""
-        i0, j0 = rm.ij(x, y)
-        n_ = r_ = 0.0
-        for i in (i0 - 1, i0, i0 + 1):
-            for j in (j0 - 1, j0, j0 + 1):
-                n_ += rm.tries.get((i, j), 0)
-                r_ += rm.reads.get((i, j), 0)
+        """The read rate the EVIDENCE shows in (x, y)'s own cell (3+ tries), else None. Not its neighbours' (practice:
+        a robot just past the camera's reach was called tagless on the evidence of the cell beside it)."""
+        k = rm.ij(x, y)
+        n_, r_ = float(rm.tries.get(k, 0)), float(rm.reads.get(k, 0))
         return ((r_ + 1.0) / (n_ + 2.0)) if n_ >= 3 else None    # (Laplace: 3 of 3 reads is 0.8, not certain)
     try:
         for n, f in res["robots"].items():
@@ -678,7 +679,8 @@ def run_finding(robots, eye, cams, S, rm, confirmed, guesses=None, log=say, ev=l
                            wiggle=lambda turn_ticks=turn_ticks: locate_wiggle(cams, turn_ticks),
                            problems=site_problems(S), readable=lambda x, y: rm.rate(x, y), tag_near=tag_near,
                            hold=hold, stop=stop, log=log, ev=ev, cells=cells, stop_cm=float(SR_.stop_cm(final_cms)),
-                           uncal=True, proven=proven)
+                           uncal=True, proven=proven,
+                           target_ok=lambda x, y: not [q for q in S.problems((x, y), (x, y)) if "camera's view" not in q])
             x, y, th, t = bb.run()
             f["now"] = [round(x, 1), round(y, 1)]
             f["heading_now"] = th
