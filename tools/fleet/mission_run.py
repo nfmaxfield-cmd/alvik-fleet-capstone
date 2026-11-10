@@ -457,6 +457,11 @@ def build(args, out):
 
 
 def start_bridge(args, out, mp, cal, scal, stream, side_stream):
+    try:                       # (11-10a, 9 Nov school) a camera reader left by an earlier run holds its port
+        import stale_bridge as SB
+        SB.clear((5011,), log=say)
+    except Exception as e:     # noqa: BLE001  (never stops a run)
+        say("(leftover camera reader check skipped: %s)" % e)
     if getattr(args, "tracking_", "lights") == "tags":
         # the AprilTag robots (2026-11-02): tag_bridge.py, both cameras, the tags' own ids and heights
         cmd = ["nice", "-n", "5", PY, os.path.join(HERE, "tag_bridge.py"), "--tags", args.tags_json,

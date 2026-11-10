@@ -61,7 +61,7 @@ for p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recognit
 
 import numpy as np   # noqa: E402
 
-VERSION = "2026-11-05i"     # 11-05i (9 Nov, school): a tripped stop mid-tour crashed the run (TypeError: ev() got two
+VERSION = "2026-11-10a"     # 11-10a: a leftover camera reader holding port 5011 is stopped first (stale_bridge.py). 11-05i (9 Nov, school): a tripped stop mid-tour crashed the run (TypeError: ev() got two
                              # values for kind); the trip event now says stop_kind. VERSION_H was:
 VERSION_H = "2026-11-05h"     # 11-05h: stop lead per speed (school 19:34: the scale fit was right; a fixed ~0.3 / 0.5 cm
                             # overrun per leg at 5 / 10 cm/s read as "+1 cm/m after the fit"). Shared observe checks.
@@ -2627,6 +2627,11 @@ def start_sim(a, S, folder):
 def start_bridge(a, site, folder):
     """The tag bridge on the recorder's pictures with the setup's camera model, every roof tag of the site (listed and
     spare ids) under the name tag<id>, its fixes to us."""
+    try:                       # (11-10a, 9 Nov school) a camera reader left by an earlier run holds its port
+        import stale_bridge as SB
+        SB.clear((5011,), log=say)
+    except Exception as e:     # noqa: BLE001  (never stops a run)
+        say("(leftover camera reader check skipped: %s)" % e)
     tg = dict(site.get("tags") or {})
     ids = sorted(set(int(v) for v in (tg.get("ids") or {}).values()) | set(int(v) for v in tg.get("spares") or []))
     hs = [float(v) for v in (tg.get("heights_cm") or {}).values() if v]
