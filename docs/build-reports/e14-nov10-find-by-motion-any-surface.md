@@ -296,7 +296,7 @@ refused). On top of the coordinator's 7f041c8 (scan skips bcm2835 / rpi- / pispb
 ### Tests
 
 `tools/fleet/tests/test_e14.py`: 41. Two e12/e13 tests pinned to the old ways' switches. Full fleet suite on the final
-head: FULL_SUITE.
+head (36f4070, the last code commit; only this line changed after it): **862 passed, 9 skipped** in 15.9 min (baseline 821 / 9).
 
 ## Conclusion
 
