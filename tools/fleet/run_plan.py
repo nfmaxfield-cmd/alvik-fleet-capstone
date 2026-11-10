@@ -36,7 +36,8 @@ Position source (--fixes): where camera poses come from (data-formats.md,
 runs against it with --fixes udp; at the end it prints the simulator's ground
 truth: docking errors, closest robots, contact.
 """
-VERSION = "2026-11-10b"   # 2026-11-10b (e12 item 9): a lock-only fix never resets a pose (MIRLT_LOCK_GUARD=0: as before); a dwell broken by a halt where the robot did not move keeps its start (MIRLT_DWELL_KEEP=0). 2026-11-10a (e12): the bridge's "camera" messages (no pictures / pictures again) said and logged. No version before
+VERSION = "2026-11-10e13"   # 2026-11-10e13 (e13): no pictures: each blind robot's risk-based limit (safety_rules.no_picture_limit; MIRLT_NOPIC_RULE=off: e12's rules alone).
+VERSION_B = "2026-11-10b"   # 2026-11-10b (e12 item 9): a lock-only fix never resets a pose (MIRLT_LOCK_GUARD=0: as before); a dwell broken by a halt where the robot did not move keeps its start (MIRLT_DWELL_KEEP=0). 2026-11-10a (e12): the bridge's "camera" messages (no pictures / pictures again) said and logged. No version before
 LOCK_GUARD = __import__("os").environ.get("MIRLT_LOCK_GUARD", "1") != "0"
 DWELL_KEEP = __import__("os").environ.get("MIRLT_DWELL_KEEP", "1") != "0"
 
@@ -314,6 +315,7 @@ class Coordinator:
         self.q = queue.Queue()
         link.session.listeners.append(self._listen)
         self.log_f = open(os.path.join(outdir, "coordinator.jsonl"), "a")
+        self.outdir_ = outdir                    # (e13) sources.csv goes here
         self.plan_no = 0
         self.plan_start = None
         self.replans = []
@@ -1057,13 +1059,28 @@ class Coordinator:
         self.log("control", robot=b.name, text=text)
 
     def fixes(self):
-        for ev in self.source.poll():
+        evs_ = self.source.poll()
+        try:                                         # (e13) which sources tracked each robot, each second
+            sl = self.__dict__.get("srclog")
+            if sl is None:
+                import source_log as SL_
+                sl = self.srclog = SL_.SourceLog(self.outdir_, list(self.bots))
+            for ev in evs_:
+                if ev.get("type") == "fix":
+                    sl.add(ev.get("robot"), ev.get("src") or "camera")
+            sl.tick(time.time())
+        except Exception:  # noqa: BLE001  (the log never stops the run)
+            pass
+        for ev in evs_:
             if ev.get("type") == "camera":
                 # (e12) the bridge's frame watch: no new picture from a camera (or pictures again). Said loudly and
                 # logged; the robots it no longer sees are held by the lost-robot rules as they are
                 self.say(str(ev.get("words") or "CAMERA %s: %s" % (ev.get("cam"), ev.get("state"))))
                 self.log("camera_" + str(ev.get("state")), cam=ev.get("cam"), age_s=ev.get("age_s"),
                          gap_s=ev.get("gap_s"))
+                # (e13) from here each robot's own risk-based limit (blind_watch: safety_rules.no_picture_limit)
+                self.nopic_since = (getattr(self, "nopic_since", None) or now()) if ev.get("state") == "no_pictures" \
+                    else None
                 continue
             if ev.get("type") == "obstacle":
                 oid = ev.get("id") or "camera-%d" % len(self.obstacles_seen)
@@ -3737,6 +3754,25 @@ class Coordinator:
                 why = ("with no camera seeing it, its body may be %.1f cm from an edge (its own pose %.1f cm, less the "
                        "blind error %.1f cm; it must keep %.0f cm)" % (body_edge - err, body_edge, err,
                                                                        self.BLIND_EDGE_CM))
+            if why is None and getattr(self, "nopic_since", None) is not None and \
+                    os.environ.get("MIRLT_NOPIC_RULE", "risk") != "off":
+                # (e13, Nick 10 Nov: derived, risk-based; replaces e12's fixed 3 s) the camera sends no pictures: this
+                # robot's own limit from its blind speed (measured: its dead-reckoned distance over the blind time), its
+                # heading, its blind error and the room to the edge rule's clearance; over it, the same hold as above
+                import safety_rules as SR_
+                v_ = bl["dist"] / max(0.2, t - bl["t0"])
+                lim = SR_.no_picture_limit(b.pose[0], b.pose[1], b.pose[2] if len(b.pose) > 2 else None, v_, err, rect,
+                                           tracking="tags")
+                if not bl.get("nopic_logged"):
+                    bl["nopic_logged"] = True
+                    self.log("picture_limit", robot=b.name, gap_s=round(t - ct, 2), limit_s=lim["limit_s"],
+                             room_cm=lim["room_cm"], closing_cms=lim["closing_cms"], words=lim["words"])
+                    self.say("%s: NO CAMERA PICTURES: its limit %s (%s)" % (
+                        b.name, "none while it stands" if lim["limit_s"] == float("inf") else "%.1f s" % lim["limit_s"],
+                        lim["words"]))
+                if t - ct >= lim["limit_s"]:
+                    why = "no camera pictures for %.1f s, over its own limit of %.1f s (%s)" % (
+                        t - ct, lim["limit_s"], lim["words"])
             if why and not bl.get("recovered") and self.recover_blind(b, bl, why):
                 continue                       # (11-05h) driving straight back to where it was read
             if why and self.holds_one() and not getattr(self, "straightening", False):

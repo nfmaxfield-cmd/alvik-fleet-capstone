@@ -27,7 +27,9 @@ import os
 
 import numpy as np
 
-VERSION = "proven-workspace-2026-11-07a"
+VERSION = "proven-workspace-2026-11-10e13"   # e13 (10 Nov): limit_to() a readable area (school free roam plans
+                                            # only where the camera reads tags); field(raw=True) ignores the limit
+VERSION_A = "proven-workspace-2026-11-07a"
 
 CELL_CM = 2.5           # CHOSEN: a quarter of a body; the planner's edge distances are then within ~1.8 cm (conservative)
 GROW_CM = 20.0          # CHOSEN: the area searched past the typed board on each side (a board bigger than typed can be
@@ -60,6 +62,10 @@ class ProvenWorkspace(tuple):
         self._field_v = -1
         self.events = []                 # (what, detail) for the run's log
         self.probe_cells = 0
+        self.allow = None                # (e13) None: no limit; else a bool grid: the cells the camera has proven
+                                         # READABLE (school: roof tags read there). Proven ground outside it is real
+                                         # table, kept for turning and returning, but never planned into
+        self._rfield, self._rfield_v = None, -1
 
     # -- the grid -------------------------------------------------------------------------------------------------
     def ij(self, x, y):
@@ -77,8 +83,58 @@ class ProvenWorkspace(tuple):
         my = (ys - h >= r[1] - 1e-9) & (ys + h <= r[3] + 1e-9)
         return np.outer(mx, my)
 
-    def proven_mask(self):
-        return (self.g == SEEN) | (self.g == FELT) | (self.g == PROBE)
+    def proven_mask(self, raw=False):
+        m = (self.g == SEEN) | (self.g == FELT) | (self.g == PROBE)
+        if self.allow is not None and not raw:
+            m = m & self.allow
+        return m
+
+    # -- (e13) the readable area ------------------------------------------------------------------------------------
+    def limit_to(self, readable_fn, why="readable"):
+        """Plan only where readable_fn(x, y) is True for the cell's centre (the readability map: the camera reads roof
+        tags there). Returns the readable proven area in cm2. Ground outside stays SEEN / FELT (it is table) and counts
+        in field(raw=True), which the stray return uses to turn and to come back."""
+        a = np.zeros((self.nx, self.ny), dtype=bool)
+        for i in range(self.nx):
+            for j in range(self.ny):
+                try:
+                    a[i, j] = bool(readable_fn(*self.centre(i, j)))
+                except Exception:      # noqa: BLE001
+                    a[i, j] = False
+        self.allow = a
+        self.events.append(("limited", "planning limited to the %s area: %d cm2 of proven ground" % (
+            why, round(float(self.proven_mask().sum()) * self.cell * self.cell))))
+        self._changed()
+        return round(float(self.proven_mask().sum()) * self.cell * self.cell)
+
+    def unlimit(self):
+        self.allow = None
+        self._changed()
+
+    @property
+    def limited(self):
+        return self.allow is not None
+
+    def allowed(self, x, y):
+        if self.allow is None:
+            return True
+        i, j = self.ij(x, y)
+        return 0 <= i < self.nx and 0 <= j < self.ny and bool(self.allow[i, j])
+
+    def nearest_allowed(self, x, y, min_room_cm=0.0):
+        """The centre of the nearest cell that is proven AND readable with at least min_room_cm to its limit (None if
+        none)."""
+        f = self.field()
+        ok = f >= min_room_cm
+        if not ok.any():
+            ok = f > 0
+            if not ok.any():
+                return None
+        i, j = np.nonzero(ok)
+        cx = self[0] + (i + 0.5) * self.cell
+        cy = self[1] + (j + 0.5) * self.cell
+        k = int(np.argmin((cx - x) ** 2 + (cy - y) ** 2))
+        return float(cx[k]), float(cy[k])
 
     def provisional(self, x0, y0, x1, y1, radius):
         """A probe's corridor: UNKNOWN cells within radius of the segment become PROBE (counted as proven while the
@@ -225,24 +281,33 @@ class ProvenWorkspace(tuple):
         return int(k.sum())
 
     # -- the planner's distance ----------------------------------------------------------------------------------
-    def field(self):
+    def field(self, raw=False):
         """Per cell: the distance (cm) from its centre to the nearest cell that is not proven (minus half a cell: to
-        that cell's near side, roughly), 0 or less outside."""
-        if self._field is not None and self._field_v == self.version:
+        that cell's near side, roughly), 0 or less outside. raw (e13): ignoring the readable limit (the table itself)."""
+        if raw:
+            if self.allow is None:
+                return self.field()
+            if self._rfield is not None and self._rfield_v == self.version:
+                return self._rfield
+        elif self._field is not None and self._field_v == self.version:
             return self._field
         from scipy import ndimage
-        pm = self.proven_mask()
+        pm = self.proven_mask(raw=raw)
         pad = np.zeros((self.nx + 2, self.ny + 2), dtype=bool)
         pad[1:-1, 1:-1] = pm
         d = ndimage.distance_transform_edt(pad, sampling=self.cell)[1:-1, 1:-1]
         f = np.where(pm, d - 0.5 * self.cell, -self.cell)
+        if raw:
+            self._rfield, self._rfield_v = f.astype(np.float64), self.version
+            return self._rfield
         self._field, self._field_v = f.astype(np.float64), self.version
         return self._field
 
-    def edge_dist(self, x, y):
+    def edge_dist(self, x, y, raw=False):
         """Distance (cm) from (x, y) to the nearest unproven ground (negative outside the proven area). Bilinear between
-        cell centres, so it moves smoothly with the robot."""
-        f = self.field()
+        cell centres, so it moves smoothly with the robot. raw (e13): to the table's own unproven ground, ignoring the
+        readable limit."""
+        f = self.field(raw=raw)
         fx = (x - self[0]) / self.cell - 0.5
         fy = (y - self[1]) / self.cell - 0.5
         i0, j0 = int(math.floor(fx)), int(math.floor(fy))
@@ -309,7 +374,8 @@ class ProvenWorkspace(tuple):
         a = self.cell * self.cell
         return dict(seen_cm2=round(float((self.g == SEEN).sum()) * a), felt_cm2=round(float((self.g == FELT).sum()) * a),
                     drop_cm2=round(float((self.g == DROP).sum()) * a),
-                    proven_cm2=round(float(self.proven_mask().sum()) * a))
+                    proven_cm2=round(float(self.proven_mask().sum()) * a),
+                    readable_limit=self.allow is not None)
 
     def summary(self):
         b = self.board

@@ -19,10 +19,19 @@ import os
 import threading
 import time
 
-VERSION = "2026-11-10a"
-NO_PICTURE_S = 3.0      # chosen: 3 s with no new picture (the recorder gives 15-30 a second, so 3 s is 45+ missing
-                        # pictures). Not checked against real logs here. DOE: no; a log check of the longest gap between
-                        # pictures in normal runs (the 5-minute file roll-over included) would confirm it is never reached
+VERSION = "2026-11-10e13"   # e13 (10 Nov, Nick: derived, risk-based thresholds): the camera's "no pictures" is now a
+#                             gap longer than this stream's own normal gaps (derived from the pictures it sent), not a
+#                             fixed 3 s; what each ROBOT does is decided by the run from its own risk
+#                             (safety_rules.no_picture_limit). MIRLT_FRAME_WATCH_GAP=fixed: e12's 3 s. 2026-11-10a: e12
+NO_PICTURE_S = 3.0      # e12's fixed 3 s: now only (a) the switch MIRLT_FRAME_WATCH_GAP=fixed and (b) the start-up limit
+                        # until GAP_MIN_N gaps have been measured (the stream is connecting)
+GAP_FACTOR = 3.0        # (e13) "no pictures" = no picture for GAP_FACTOR x this stream's 99th-percentile gap between
+                        # pictures (its last GAP_WINDOW gaps): a stream that normally hiccups for 0.2 s is called silent
+                        # after 0.6 s. CHOSEN; DOE row (docs/doe-backlog.md, e13): the factor against false "no
+                        # pictures" in real runs' logs (the 5-minute file roll-over included)
+GAP_FLOOR_S = 0.3       # (e13) never under this (half the runs' 0.6 s "lost" definition). CHOSEN, no DOE (a floor)
+GAP_WINDOW = 300        # gaps kept per camera (10-20 s of pictures). Not a tuning number
+GAP_MIN_N = 50          # gaps measured before the derived limit is used
 REPEAT_S = 10.0         # chosen: said again this often while it lasts. No DOE (a reminder)
 CHECK_S = 0.5           # how often the thread looks. No DOE
 
@@ -32,10 +41,12 @@ def enabled():
 
 
 class FrameWatch:
-    def __init__(self, cams, send=None, event=None, say=print, gap_s=NO_PICTURE_S, clock=time.time, thread=True):
+    def __init__(self, cams, send=None, event=None, say=print, gap_s=None, clock=time.time, thread=True):
         self.cams = list(cams)
         self.send, self.event, self.say_ = send, event, say
-        self.gap_s, self.clock = float(gap_s), clock
+        self.fixed = gap_s is not None or os.environ.get("MIRLT_FRAME_WATCH_GAP", "derived") == "fixed"
+        self.gap_s, self.clock = float(gap_s if gap_s is not None else NO_PICTURE_S), clock
+        self.intervals = {c: [] for c in self.cams}   # (e13) the gaps between this camera's pictures
         t = clock()
         self.last = {c: t for c in self.cams}       # the start counts as a picture (the stream is connecting)
         self.out = {}                               # camera -> (since, last said)
@@ -51,6 +62,10 @@ class FrameWatch:
         now = self.clock()
         back = None
         with self.lock:
+            if cam in self.last and cam not in self.out:
+                iv = self.intervals.setdefault(cam, [])
+                iv.append(now - self.last[cam])
+                del iv[:-GAP_WINDOW]
             self.last[cam] = now
             if cam in self.out:
                 since, _ = self.out.pop(cam)
@@ -60,13 +75,22 @@ class FrameWatch:
             self._tell(cam, "pictures", "CAMERA %s: pictures again after %.1f s with none; the robots carry on as their "
                                         "rules allow" % (cam, back), gap_s=round(back, 2))
 
+    def limit_s(self, cam):
+        """(e13) This camera's "no pictures" limit: GAP_FACTOR x its 99th-percentile gap between pictures (at least
+        GAP_FLOOR_S); e12's fixed NO_PICTURE_S until GAP_MIN_N gaps are measured, or with the switch."""
+        iv = self.intervals.get(cam) or []
+        if self.fixed or len(iv) < GAP_MIN_N:
+            return self.gap_s
+        q = sorted(iv)[min(len(iv) - 1, int(0.99 * len(iv)))]
+        return max(GAP_FLOOR_S, GAP_FACTOR * q)
+
     def check(self):
         now = self.clock()
         tell = []
         with self.lock:
             for c, t in self.last.items():
                 age = now - t
-                if age < self.gap_s:
+                if age < self.limit_s(c):
                     continue
                 st = self.out.get(c)
                 if st is None:
@@ -76,11 +100,13 @@ class FrameWatch:
                     self.out[c] = (st[0], now)
                     tell.append((c, age, False))
         for c, age, first in tell:
-            self._tell(c, "no_pictures", "CAMERA %s: NO NEW PICTURE FOR %.0f S%s. Robots the camera no longer sees are "
-                                         "held or stopped by the run's safety rules; they carry on when pictures come "
-                                         "back. Check the camera's cable and the recorder (./run-fleet-pi.sh status)" % (
-                                             c.upper(), age, "" if first else " (STILL NONE)"), age_s=round(age, 1),
-                       first=first)
+            lim = self.limit_s(c)
+            self._tell(c, "no_pictures", "CAMERA %s: NO NEW PICTURE FOR %.1f S%s (its normal gaps call for one within "
+                                         "%.1f s). Each robot is slowed or held by its own risk (speed, heading, room to "
+                                         "the edge); they carry on when pictures come back. Check the camera's cable and "
+                                         "the recorder (./run-fleet-pi.sh status)" % (
+                                             c.upper(), age, "" if first else " (STILL NONE)", lim),
+                       age_s=round(age, 1), first=first, limit_s=round(lim, 2))
         return [c for c, _a, _f in tell]
 
     def none_now(self):

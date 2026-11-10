@@ -46,6 +46,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+VERSION = "fastsim-2026-11-10e13"   # e13: nopic (a whole-camera picture outage). No version string before
 import freeroam_core as FC   # noqa: E402
 
 DT = 0.05
@@ -162,7 +163,7 @@ class Sim:
                  fws=None, v_min=None, edge_physics=False, own_off=(), silent=(), held=None, cam_misplace=(),
                  phantoms=0.0, ctrl_kw=None, own_start=None, board=None, camera="names", scene=None, layer_kw=None,
                  sensors=False, pushes=(), bricks=(), cam_gaps=(), discover=False, workspace=False, cam_fault=None,
-                 tag_yaw=None, cover=None, bottom_zone=False, saved_ws=None, hdg_fault=None):
+                 tag_yaw=None, cover=None, bottom_zone=False, saved_ws=None, hdg_fault=None, nopic=None):
         # (e09, Phase B) board: another table (the school's); camera "names" (the camera names every fix, as before) or
         # "detections" (fastsim_sources: tags / motion / lock-on / lights sightings with no names except tags and
         # locks, through the ONE tracking layer: names CAN swap); scene: dark / glare patches, tag read limit, two
@@ -281,6 +282,13 @@ class Sim:
                     d = self.rng.uniform(2, 25)
                     self.gaps[n].append((t, t + d))
                     t += d + self.rng.expovariate(1 / 480.0)
+        # (e13) nopic (t0, dur): the camera sends NO pictures for dur s from t0 (every robot unseen; the bridge's frame
+        # watch message to the controller at the start and the end)
+        self.nopic = tuple(nopic) if nopic else None
+        self.nopic_said = 0
+        if self.nopic:
+            for n in names:
+                self.gaps[n].append((self.nopic[0], self.nopic[0] + self.nopic[1]))
         for (nm, t0, dur) in cam_gaps:          # (e09) a camera gap for one robot (rehearsal c: 40 s)
             self.gaps[nm].append((t0, t0 + dur))
         self.cam_gaps = list(cam_gaps)
@@ -1278,6 +1286,12 @@ class Sim:
         next_tick = 0.0
         while self.t < T:
             self.t += DT
+            if self.nopic and self.nopic_said == 0 and self.t >= self.nopic[0] + 0.5:
+                self.nopic_said = 1                 # (e13) the frame watch notices after its own gap limit
+                c.on_camera_state("no_pictures", self.t)
+            elif self.nopic and self.nopic_said == 1 and self.t >= self.nopic[0] + self.nopic[1]:
+                self.nopic_said = 2
+                c.on_camera_state("pictures", self.t)
             if self.freeze_at is not None and self.t >= self.freeze_at:
                 self.frozen_until = self.t + 4.0
                 c.event(None, "pi frozen (sim)", "the controller sends nothing for 4 s")

@@ -13,7 +13,7 @@ Per run type (Nick's decisions 1-3):
 Practice: with no real camera (or Mission Control --dry) every button runs the simulator instead, with the guesses
 broken on purpose (turned roof tags, a dark patch, the camera's clock off, a robot restarting), as the rehearsals do.
 """
-VERSION = "2026-11-10a"    # 2026-11-10a (e12): Advanced "Curves in the calibration" (calib_curves) passed to calib_run
+VERSION = "2026-11-10e13"   # e13: robots waiting for a hand (needs_hand) in the status. 2026-11-10a # 2026-11-10a (e12): Advanced "Curves in the calibration" (calib_curves) passed to calib_run
                            # (--arc-phase, --roam-motion); robots left at an edge in the status (edge_parked). No version
                            # string before this.
 import glob
@@ -813,6 +813,9 @@ class Starter:
         ep = self.edge_parked_words(out.get("folder"))
         if ep:
             out["edge_parked"] = ep          # (e12) robots left at an edge: someone must move them before the next run
+        nh = self.edge_parked_words(out.get("folder"), key="needs_hand") if running else []
+        if nh:
+            out["needs_hand"] = nh           # (e13) robots waiting for a hand now: they rejoin once moved in
         self.deferred_sleep_due()
         ds = getattr(self, "deferred_sleep", None)
         if ds and not running:
@@ -821,7 +824,7 @@ class Starter:
             out["words"] = "%s %s" % (out.get("words") or "", out["sleep_words"])
         return out
 
-    def edge_parked_words(self, folder):
+    def edge_parked_words(self, folder, key="words"):
         """(e12, Nick 10 Nov) The newest edge_parked.json under the run's folder (free roam writes it when it parks a
         robot at an edge): one line per robot, naming it, where it is, and that someone must move it."""
         if not folder or not os.path.isdir(folder):
@@ -831,7 +834,7 @@ class Starter:
             return []
         try:
             with open(ps[-1]) as f:
-                return [str(w) for w in json.load(f).get("words") or []]
+                return [str(w) for w in json.load(f).get(key) or []]
         except (OSError, ValueError):
             return []
 

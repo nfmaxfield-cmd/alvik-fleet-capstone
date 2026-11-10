@@ -48,7 +48,8 @@ for p in (HERE, TOOLS):
 import freeroam_core as FC   # noqa: E402
 
 PY = sys.executable
-VERSION = "freeroam-runner-2026-11-10e12"   # e12 (10 Nov): the bridge's "camera" messages (no pictures) said and logged; one robot held at an edge parked and shown, the others roam on; orderly shutdown
+VERSION = "freeroam-runner-2026-11-10e13"   # e13 (10 Nov): --readable-map (school: plan only where the camera reads tags; MIRLT_ROAM_READABLE=0 the old whole table)
+VERSION_E12 = "freeroam-runner-2026-11-10e12"   # e12 (10 Nov): the bridge's "camera" messages (no pictures) said and logged; one robot held at an edge parked and shown, the others roam on; orderly shutdown
 VERSION_E11 = "freeroam-runner-2026-11-09e11"   # e11 (9 Nov school): --alias WIFI=SLOT (names in the run only), --practice-real
 VERSION_D = "freeroam-runner-2026-11-07d"   # 11-07d: a robot at an edge makes no proof drive (the run 2 incident d)
 VERSION_C = "freeroam-runner-2026-11-07c"   # 11-07c (e10 Phase C): the start's proof drive (start_discovery.py), the proven
@@ -70,6 +71,8 @@ TICK_S = 0.05           # the controller's loop (20 a second; the camera bridge 
 SAFE = ["set safe_edge 3", "set edge_dir 0", "set edge_thr 150", "set edge_n 3", "set edge_bot_cm 11",
         "set bumper_cm 0"]                 # the robots' edge guard (ladder.SAFE; not kept over a power-off)
 DISK_CHECK_S = 60.0
+READABLE_MIN_CM2 = 2 * 2 * 40.0 * 40.0   # (e13) under this much readable ground (two robots' 40 cm squares, twice) the
+                        # limit is ignored and said: a run that could not move is worse. Chosen; no DOE (a floor)
 
 
 def _fnum(v):
@@ -217,7 +220,34 @@ class Runner:
         if not getattr(self.a, "careful", False):
             ws.events.append(("saved", ws.merge_saved(p)))
         self.ws_path = p
+        self.limit_readable(ws)
         return ws
+
+    def limit_readable(self, ws):
+        """(e13, e12's school practice: robots roamed past x 254 cm where the camera cannot read and stood lost) At a
+        roof-tag site the planner's ground is the proven workspace AND the area the camera has proven readable (the
+        run's readability map: the camera model's seed, earlier runs' reads and stops). Switch MIRLT_ROAM_READABLE=0
+        (the whole proven table, before e13). An empty or tiny readable area is said and ignored (degrade, not stop)."""
+        rp = getattr(self.a, "readable_map", "") or ""
+        if not rp or os.environ.get("MIRLT_ROAM_READABLE", "1") == "0":
+            return None
+        try:
+            import observe as OB
+            with open(rp) as f:
+                rm = OB.ReadMap.from_json(json.load(f))
+        except (OSError, ValueError, KeyError) as e:
+            say("(the readability map %s could not be read (%s): the whole proven table is used)" % (rp, e))
+            return None
+        area = ws.limit_to(lambda x, y: rm.readable(x, y)[0], "readable")
+        if area < READABLE_MIN_CM2:
+            ws.unlimit()
+            say("!! THE READABLE AREA IS ONLY %d cm2 (under %d): the whole proven table is used; robots may be lost "
+                "where the camera cannot read" % (area, READABLE_MIN_CM2))
+            return None
+        say("FREE ROAM AREA: only where the camera reads roof tags (%d cm2; readability map %s). A robot that strays "
+            "out comes back along the ground it drove." % (area, os.path.basename(rp)))
+        self.readable_cm2 = area
+        return area
 
     def discover(self, live):
         """(e10, C1) The proof drive on every robot that joined (start_discovery.py), then what it found is used: the
@@ -492,6 +522,9 @@ class Runner:
         kind = src.split(":")[-1]
         th = ev.get("th")
         th = None if th is None else float(th)
+        if kind == "ml":
+            # (e13) the trained detector (tag_bridge --ml, off by default): an outline with no name, as motion
+            return TL.Det("ml", float(ev["t"]), ev["x"], ev["y"], th, None, ev.get("sigma"))
         if src.startswith("tag_bridge") or kind == "tags":
             return TL.Det("tags", float(ev["t"]), ev["x"], ev["y"], th, ev.get("robot"), ev.get("sigma"))
         if kind == "lock":
@@ -513,6 +546,18 @@ class Runner:
                                                              if ev.get("type") == "fix"]
             evs = [e for due, e in self.cam_held if due <= now]
             self.cam_held = [(due, e) for due, e in self.cam_held if due > now]
+        try:                                         # (e13) which sources tracked each robot, each second
+            sl = self.__dict__.get("srclog")
+            if sl is None:
+                import source_log as SL_
+                sl = self.srclog = SL_.SourceLog(self.dir, list(c.R))
+            for ev in evs:
+                if ev.get("type") == "fix":
+                    sl.add(ev.get("robot"), ev.get("src") or ("lights" if not getattr(self.a, "external_bridge", False)
+                                                              else "tag_bridge"))
+            sl.tick(time.time())
+        except Exception:  # noqa: BLE001  (the log never stops the run)
+            pass
         # (e12) the bridge's frame watch: no new picture from a camera (or pictures again): said loudly, an event;
         # the robots then run on the lost-by-the-camera rules as they are (bubble, find-me, hold) until fixes return
         for ev in evs:
@@ -520,6 +565,7 @@ class Runner:
                 w = str(ev.get("words") or "CAMERA %s: %s" % (ev.get("cam"), ev.get("state")))
                 print(w, flush=True)
                 self.camera_pictures = ev.get("state") != "no_pictures"
+                c.on_camera_state(ev.get("state"))      # (e13) each robot's own risk-based limit from here
                 try:
                     for r in c.R.values():
                         c.event(r, "camera " + str(ev.get("state")), w)
@@ -772,8 +818,10 @@ class Runner:
                   filters={n: (r.fp.summary() if r.fp is not None else None) for n, r in c.R.items()})
         ep = list(getattr(c, "edge_parked", None) or [])
         st["edge_parked"] = [q["words"] for q in ep]       # (e12) robots parked at an edge: someone must move them
-        if ep:
-            write_edge_parked(self.dir, ep)
+        nh = c.needs_hand() if hasattr(c, "needs_hand") else []
+        st["needs_hand"] = [q["words"] for q in nh]        # (e13) robots waiting for a hand now (they rejoin when moved)
+        if ep or nh or os.path.exists(os.path.join(self.dir, "edge_parked.json")):
+            write_edge_parked(self.dir, ep, nh)
         tmp = os.path.join(self.dir, "state.json.tmp")
         with open(tmp, "w") as f:
             json.dump(st, f, indent=1, default=str)
@@ -795,13 +843,15 @@ class Runner:
         self.track.close()
 
 
-def write_edge_parked(folder, ep):
+def write_edge_parked(folder, ep, nh=()):
     """(e12) edge_parked.json in the run's folder: Mission Control's status box reads it (each robot left at an edge,
-    where, why, and that someone must move it before the next run)."""
+    where, why, and that someone must move it before the next run). (e13) nh: robots waiting for a hand NOW (they rejoin
+    by themselves once moved in; the list empties when they do)."""
     try:
         tmp = os.path.join(folder, "edge_parked.json.tmp")
         with open(tmp, "w") as f:
-            json.dump({"robots": ep, "words": [q["words"] for q in ep]}, f, indent=1, default=str)
+            json.dump({"robots": ep, "words": [q["words"] for q in ep], "needs_hand": [q["words"] for q in nh],
+                       "needs_hand_robots": list(nh)}, f, indent=1, default=str)
         os.replace(tmp, os.path.join(folder, "edge_parked.json"))
     except OSError:
         pass
@@ -1069,6 +1119,8 @@ def status(folder):
                                                        ("  out: %s" % r["out"]) if r.get("out") else ""))
     for w in st.get("edge_parked") or []:
         say("  " + str(w))                 # (e12) a robot parked at an edge: someone must move it
+    for w in st.get("needs_hand") or []:
+        say("  !! " + str(w))              # (e13) waiting for a hand now: it rejoins once moved in
     cn = st.get("counts", {})
     say("  reflex events %s; fallbacks %s; full stops (trophy breaks) %s" % (
         cn.get("reflex"), cn.get("fallback"), cn.get("breaks")))
@@ -1140,6 +1192,8 @@ def main(argv=None):
                     help="(e10, C3) robots (--robot IP, --robots names) and a camera bridge already set up by another "
                          "runner (mission_run at a roof-tag site): no ladder start, the bridge's fixes on --fix-port")
     ap.add_argument("--board", default="", help="(e10) x0,y0,x1,y1 cm: the board's outline (--external-bridge)")
+    ap.add_argument("--readable-map", default="", help="(e13) the run's readability map (observe.ReadMap JSON): plan "
+                    "only where the camera reads roof tags (MIRLT_ROAM_READABLE=0: the whole proven table)")
     ap.add_argument("--alias", action="append", default=[], metavar="ANSWERS_AS=RUN_NAME",
                     help="(e11, 9 Nov) a robot that answers with its WiFi name (e.g. AL-1DC0) is called RUN_NAME (its "
                          "slot, e.g. Alpha) in this run: the site keeps the robots' names (tags.rename_to_slot false)")
@@ -1350,6 +1404,14 @@ def main(argv=None):
                 say("!! " + q["words"])
             say("!" * 100)
             run_info["edge_parked"] = ep
+        nh = list(getattr(getattr(runner, "ctrl", None), "needs_hand", lambda: [])() or [])
+        if nh:
+            # (e13) still waiting for a hand when the run ended (its cap, or the others' batteries)
+            say("\n" + "!" * 100)
+            for q in nh:
+                say("!! STILL WAITING FOR A HAND AT THE END: " + q["words"])
+            say("!" * 100)
+            run_info["needs_hand"] = nh
         run_info.update(ended=why, finished=dt.datetime.now().isoformat(timespec="seconds"))
         json.dump(run_info, open(os.path.join(outdir, "run.json"), "w"), indent=1)
         try:
@@ -1362,6 +1424,8 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    _code = main()
+    import idle_after_run as IA     # (e13) robots asleep 10 min after the run ends if no new run starts
+    with (IA.track("freeroam") if sys.argv[1:2] == ["run"] else IA.contextlib.nullcontext()):
+        _code = main()
     import orderly_exit as OX      # (e12) no thread torn down inside OpenCV at exit (the 9 Nov abort)
     OX.finish(_code)

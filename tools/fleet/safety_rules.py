@@ -27,7 +27,9 @@ import math
 import os
 import time
 
-VERSION = "2026-11-07a"
+VERSION = "2026-11-10e13"   # e13 (10 Nov, Nick "derived, risk-based thresholds"): no_picture_limit, the time a robot may go
+#                              without camera pictures, from its speed, heading, uncertainty and the edge room. 2026-11-07a: e08
+VERSION_A = "2026-11-07a"
 
 # =============================================================================================== switches
 # (CLAUDE.md "keep features, switch them off") each old rule stays, behind a switch decided here by default and out of a
@@ -136,7 +138,66 @@ def edge_room_cm(caller, tracking=None, speed=13.0, unc_cm=None, rule=None):
 
 
 def edge_dist(rect, x, y):
+    f = getattr(rect, "edge_dist", None)          # (e13) a proven workspace: its own distance
+    if f is not None:
+        return f(x, y)
     return min(x - rect[0], rect[2] - x, y - rect[1], rect[3] - y)
+
+
+# =============================================================================================== (e13) no pictures
+NOPIC_BLIND_PER_CM = 0.07   # the dead-reckoning error grows 0.07 cm per cm driven blind: MEASURED (29 Oct logs, 22,000
+                            # stretches; run_plan BLIND_ERR_PER_CM, freeroam_core BLIND_PER_CM). Not chosen here
+NOPIC_HEAD_UNC_DEG = 3.0    # its heading's doubt with no picture: 3 deg (the e03 rerun: 0.85-0.9 deg per turn after the
+                            # fit, up to 6 on a long turn before it). CHOSEN; DOE row (docs/doe-backlog.md, e13)
+NOPIC_STILL_CMS = 0.3       # under this a robot stands (freeroam's speed-zero line). Not chosen here
+NOPIC_SLOW_SHARE = 0.5      # at this share of its limit a moving robot is slowed to half speed (its limit then doubles);
+                            # at the whole limit it is held. CHOSEN; DOE row (e13)
+
+
+def _out_dir(rect, x, y, d=1.0):
+    """The unit direction towards the nearest edge (minus the gradient of edge_dist), numerically."""
+    gx = edge_dist(rect, x + d, y) - edge_dist(rect, x - d, y)
+    gy = edge_dist(rect, x, y + d) - edge_dist(rect, x, y - d)
+    n = math.hypot(gx, gy)
+    if n < 1e-9:
+        return 0.0, 0.0
+    return -gx / n, -gy / n
+
+
+def no_picture_limit(x, y, heading_deg, speed_cms, unc_cm, rect, tracking="tags", head_unc_deg=None, leads=None):
+    """(e13, Nick 10 Nov: thresholds from the actual risk, not a fixed 3 s) How long this robot may go with no camera
+    picture before it could have drifted to the edge rule's clearance:
+        room    = distance to the nearest edge (or unproven / unreadable ground) - clearance_cm(uncertainty now, speed,
+                  tracking, its stop)
+        closing = speed x (cos of its heading towards that edge, at least sin(heading doubt)) + speed x 0.07 (the
+                  blind error's growth per cm driven)
+        limit   = room / closing; a robot standing still: no limit (inf); room <= 0: 0 (act at once).
+    The action follows the same risk: slowed to half speed at NOPIC_SLOW_SHARE of the limit, held at the limit.
+    Returns dict(limit_s, slow_s, room_cm, closing_cms, edge_cm, words)."""
+    hu = NOPIC_HEAD_UNC_DEG if head_unc_deg is None else float(head_unc_deg)
+    v = abs(float(speed_cms or 0.0))
+    e = edge_dist(rect, x, y)
+    clr = clearance_cm(max(0.0, unc_cm or 0.0), v if v >= NOPIC_STILL_CMS else None, tracking, stops_here=True,
+                       leads=leads)
+    room = e - clr
+    if v < NOPIC_STILL_CMS:
+        lim = float("inf") if room > 0 else 0.0
+        return dict(limit_s=lim, slow_s=lim, room_cm=round(room, 1), closing_cms=0.0, edge_cm=round(e, 1),
+                    words="standing %.0f cm from the edge (%.0f cm of room): %s" % (
+                        e, room, "no limit while it stands" if room > 0 else "no room: held at once"))
+    ox, oy = _out_dir(rect, x, y)
+    if heading_deg is None:
+        towards = 1.0                     # heading not known: as if straight at the edge
+    else:
+        h = math.radians(heading_deg)
+        towards = max(math.cos(h) * ox + math.sin(h) * oy, math.sin(math.radians(hu)))
+    closing = v * towards + v * NOPIC_BLIND_PER_CM
+    lim = max(0.0, room) / closing if closing > 1e-6 else float("inf")
+    return dict(limit_s=round(lim, 2), slow_s=round(lim * NOPIC_SLOW_SHARE, 2), room_cm=round(room, 1),
+                closing_cms=round(closing, 2), edge_cm=round(e, 1),
+                words="%.0f cm/s, %s, %.0f cm from the edge (%.0f cm of room after its %.1f cm clearance): limit %.1f s" % (
+                    v, "heading %.0f deg towards it" % math.degrees(math.acos(max(-1.0, min(1.0, towards))))
+                    if heading_deg is not None else "heading unknown", e, room, clr, lim))
 
 
 def path_margin(points, rect, unc_cm, speed=None, tracking="lights", unc_per_cm=0.0, stop_at_end=True, leads=None,

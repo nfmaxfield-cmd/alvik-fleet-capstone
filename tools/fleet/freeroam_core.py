@@ -49,7 +49,8 @@ if _HERE not in sys.path:
 import safety_rules as SR   # noqa: E402  (e08 Phase A: the rules shared with run_plan and observe)
 import fused_pose as FP     # noqa: E402  (e09 Phase B: one filter per robot, fed by the tracking layer and RAW)
 
-VERSION = "freeroam-2026-11-10a"   # 11-10a (e12): the curve-fit maths moved into module functions (fit_arc_points, arc_summary, arc_agree) so the calibration's curve phase uses the very same (free roam's own fitting and saving unchanged); a robot held at an edge for EDGE_PARK_S is parked and said loudly, the others roam on (MIRLT_EDGE_PARK=0: before)
+VERSION = "freeroam-2026-11-10e13"   # e13 (10 Nov): stray return (a robot outside the readable area comes back along ground it drove); never give up (a robot held at an edge waits, says it needs a hand and rejoins: EDGE_PARK off); risk-based no-pictures limit per robot
+VERSION_E12 = "freeroam-2026-11-10a"   # 11-10a (e12): the curve-fit maths moved into module functions (fit_arc_points, arc_summary, arc_agree) so the calibration's curve phase uses the very same (free roam's own fitting and saving unchanged); a robot held at an edge for EDGE_PARK_S is parked and said loudly, the others roam on (MIRLT_EDGE_PARK=0: before)
 VERSION_E = "freeroam-2026-11-07e"   # 11-07e (Nick 7 Nov): a robot put down at or over an edge first tries the e08 tilt recovery, a person asked only if that fails (MIRLT_START_EDGE_MODE=wait: always wait)
 VERSION_D = "freeroam-2026-11-07d"   # 11-07d (e10, the 7 Nov run 2 incident): the queue watch (every tick, off plan or a queued piece breaking the edge rule from where the robot really is: re-aimed or stopped, heading re-set), the surface-mark verdict less the uncertainty, the start check (held at an edge)
 VERSION_C = "freeroam-2026-11-07c"   # 11-07c (e10 Phase C): proven workspace, probe ahead, corner shuffle, empty moves end, pictures 1/min
@@ -230,12 +231,22 @@ COURSE_MIN_CM = 3.0     # ... when they spread at least this far (else the filte
 COURSE_ERR_DEG = 10.0   # its own heading this far off the camera's course (for COURSE_ERR_S): the rest of the piece and
 COURSE_ERR_S = 0.5      # the queued ones are checked from where it really is, the way it really goes. Chosen; DOE
 COURSE_RESET_DEG = 15.0 # its own heading this far from the camera's course while off plan: re-set (fpose), stop, re-plan
-EDGE_PARK = os.environ.get("MIRLT_EDGE_PARK", "1") != "0"   # (e12, Nick 10 Nov) a robot held at an edge (put down there
+NOPIC_RULE = os.environ.get("MIRLT_NOPIC_RULE", "risk") != "off"   # (e13) no pictures: each robot's risk-based limit
+                        # (slowed, then held); "off": as e12 (the lost-robot rules alone after the bridge's message)
+STRAY_RETURN = os.environ.get("MIRLT_STRAY_RETURN", "1") != "0"   # (e13) a robot outside the readable area comes back
+                        # (only where the workspace is limited to it: school free roam). 0 = before e13 (lost there)
+EDGE_PARK = os.environ.get("MIRLT_EDGE_PARK", "0") == "1"   # (e13, Nick 10 Nov "robots never give up"): OFF by default.
+                        # A robot held at an edge now stays in the run: still and safe, it says loudly that it needs a
+                        # hand (NEEDS A HAND: event, state, Mission Control) and keeps checking; moved in, it rejoins by
+                        # itself; held, its own battery floor still parks it (so the run can end). MIRLT_EDGE_PARK=1:
+                        # e12's park after EDGE_PARK_S, kept as the switch.
+                        # (e12, Nick 10 Nov) a robot held at an edge (put down there
                         # and not moved in; tilted with no safe way out; unsure near an edge and held) for EDGE_PARK_S is
                         # PARKED for the rest of the run: it stays still where it is (kept out by the others), it counts
                         # as out (so the run is never held up waiting for it: home ends when the others park), and it is
                         # said loudly at once, in the state, at the end and on Mission Control. 0 = before e12 (held,
                         # retried and asked for the whole run)
+NEED_HAND_SAY_S = 60.0  # (e13) the NEEDS A HAND line is said again this often while it lasts: display only, no DOE
 EDGE_PARK_S = 60.0      # chosen: three of the recovery's 20 s retry cycles (RECOVER_RETRY_S) with no way out. DOE: yes, a
                         # small one (30 / 60 / 120 s against robots freed by a later retry vs minutes stood waiting), from
                         # the recovery.csv of real runs
@@ -762,6 +773,8 @@ class Controller:
                 return
         r.cam = (t, x, y, th)
         r.cam_arr = arr
+        if self.ws is not None and getattr(self.ws, "limited", False) and self.ws.edge_dist(x, y) >= HALF:
+            r.last_in = (x, y)                 # (e13) the last camera fix well inside the readable area
         self.fp_fix(r, t, x, y, th, sigma, src)
         if r.curve and r.move is not None and r.move.get("curve") and r.move["phase"] == "drive":
             r.arc_pts.append((x, y))
@@ -2002,7 +2015,7 @@ class Controller:
             self.menu.use(cell, r.name)
         p, h = self.pos(r), self.heading(r)
         h1 = wrap180(h + turn)
-        rev = kind in ("back off", "reverse", "shuffle back", "probe return")
+        rev = kind in ("back off", "reverse", "shuffle back", "probe return", "stray return back")
         mv = dict(kind=kind, cell=cell, turn=turn, L=L, v=v, t0=self.t, p0=p, h0=h, h1=h1, end=tr.end,
                   phase="turn", n=r.n_moves + 1, drive_id=None, turn_id=None, t_drive=None, adj_scale=1.0, rev=rev)
         if abs(turn) >= 3.0:
@@ -3337,14 +3350,18 @@ class Controller:
                 return False
         else:
             p = (r.cam[1], r.cam[2])
-        e = edge_dist(self.rect, *p)
+        # (e13) where the workspace is limited to the readable area, the start check judges the table's own edge; a
+        # robot outside the readable area is the stray return's (it comes back), not a robot at an edge
+        lim = self.ws is not None and getattr(self.ws, "limited", False)
+        ed = (lambda x_, y_: self.ws.edge_dist(x_, y_, raw=True)) if lim else (lambda x_, y_: edge_dist(self.rect, x_, y_))
+        e = ed(*p)
         h = r.cam[3] if (r.cam is not None and r.cam[3] is not None) else (self.heading(r) if r.own is not None else None)
         if h is None:
             ec = e - HALF                    # heading unknown: the body's circle
         else:
             hr = math.radians(h)
-            ec = min(edge_dist(self.rect, p[0] + a * math.cos(hr) - b * math.sin(hr),
-                               p[1] + a * math.sin(hr) + b * math.cos(hr))
+            ec = min(ed(p[0] + a * math.cos(hr) - b * math.sin(hr),
+                        p[1] + a * math.sin(hr) + b * math.cos(hr))
                      for a in (-BODY / 2, BODY / 2) for b in (-BODY / 2, BODY / 2))
         held = r.__dict__.get("start_held")
         rec = r.__dict__.get("start_recovering")
@@ -3667,7 +3684,7 @@ class Controller:
         kind, cell, turn, L, v, tr = res
         p, h = self.pos(r), self.heading(r)
         h1 = wrap180(h + turn)
-        rev = kind in ("back off", "reverse", "shuffle back", "probe return")
+        rev = kind in ("back off", "reverse", "shuffle back", "probe return", "stray return back")
         mv = dict(kind=kind, cell=None, turn=turn, L=L, v=v, t0=self.t, p0=p, h0=h, h1=h1, end=tr.end,
                   phase="turn", n=r.n_moves + 1, drive_id=None, turn_id=None, t_drive=None, adj_scale=1.0, rev=rev)
         if abs(turn) >= 3.0:
@@ -3818,6 +3835,139 @@ class Controller:
         r.move, r.traj = mv, tr
         self.pump(r)
 
+    # -- (e13) no pictures: a limit per robot from its risk ----------------------------------------------------------
+    def on_camera_state(self, state, t=None):
+        """The bridge's frame watch: "no_pictures" (no new picture from the camera) or "pictures" (back)."""
+        t = self.t if t is None else t
+        if state == "no_pictures":
+            if self.__dict__.get("nopic_since") is None:
+                self.nopic_since = t
+        else:
+            self.nopic_since = None
+            for r in self.R.values():
+                if r.__dict__.get("nopic") is not None:
+                    self.nopic_release(r, "pictures again")
+
+    def nopic_release(self, r, why):
+        st = r.nopic
+        r.nopic = None
+        if st and st.get("held"):
+            r.busy_until = self.t + 0.5
+            self.close_break(r)
+        if st and st.get("slowed") and r.new_fw and r.mode == "move":
+            self.control(r, "fspd 1.00", "fspd")
+        self.log("picture_limit", dict(t=round(self.t, 2), robot=r.name, gap_s="", limit_s="", room_cm="",
+                                       closing_cms="", action="released: " + why))
+
+    def no_picture_watch(self, r):
+        """(e13, replaces e12's fixed 3 s) While the camera sends no pictures: this robot's own limit
+        (safety_rules.no_picture_limit: its speed, heading, uncertainty and the room to the edge rule's clearance; a
+        robot standing in the middle has none, one driving at an edge almost none). At NOPIC_SLOW_SHARE of it a moving
+        robot is slowed to half speed, at the limit it is held (halted) until pictures come back. Every limit used is
+        logged (picture_limit.csv) and said once per gap per robot."""
+        since = self.__dict__.get("nopic_since")
+        if since is None or r.mode in ("out", "gone", "start"):
+            return
+        last = r.cam_arr if r.cam_arr is not None else (r.cam[0] if r.cam is not None else since)
+        gap = self.t - min(last, self.t)          # since its last camera fix
+        p, h = self.pos(r), self.heading(r)
+        if p is None:
+            return
+        v = (r.move.get("v", 0.0) * max(0.0, r.scale)) if (r.mode == "move" and r.move is not None and
+                                                           r.move.get("phase") != "turn") else 0.0
+        lim = SR.no_picture_limit(p[0], p[1], h, v, self.unc(r), self.rect, tracking=self.tracking)
+        st = r.__dict__.get("nopic")
+        if st is None:
+            st = r.nopic = dict(t0=self.t, said=False, slowed=False, held=False, min_limit=lim["limit_s"])
+        st["min_limit"] = min(st["min_limit"], lim["limit_s"])
+        act = None
+        if gap >= lim["limit_s"] and not st["held"] and r.mode == "move":
+            act = "held"
+            st["held"] = True
+            self.halt(r, "no camera pictures for %.1f s, over its limit of %.1f s (%s)" % (gap, lim["limit_s"],
+                                                                                         lim["words"]))
+            self.end_move(r)
+            self.trophy_break(r, "no camera pictures: held until they come back")
+        elif gap >= lim["slow_s"] and not st["slowed"] and not st["held"] and r.mode == "move" and r.new_fw:
+            act = "slowed"
+            st["slowed"] = True
+            self.control(r, "fspd 0.50", "fspd")
+        if st["held"] or (r.mode != "move" and gap >= 0.0 and lim["limit_s"] != float("inf")):
+            r.busy_until = max(r.busy_until, self.t + 0.5)       # no new move until pictures come back
+            if r.mode != "move" and not st["held"]:
+                st["held"] = True
+                act = act or "held"
+        if act is not None or not st["said"]:
+            st["said"] = True
+            self.counts["nopic_" + (act or "watched")] = self.counts.get("nopic_" + (act or "watched"), 0) + 1
+            self.log("picture_limit", dict(t=round(self.t, 2), robot=r.name, gap_s=round(gap, 2),
+                                           limit_s=lim["limit_s"], room_cm=lim["room_cm"],
+                                           closing_cms=lim["closing_cms"], action=act or "watched"))
+            self.event(r, "no pictures", "NO CAMERA PICTURES for %.1f s: %s's limit %s (%s)%s" % (
+                gap, r.name, "none" if lim["limit_s"] == float("inf") else "%.1f s" % lim["limit_s"], lim["words"],
+                {"held": ": HELD until pictures come back", "slowed": ": slowed to half speed"}.get(act, "")))
+
+    # -- (e13) the readable area: a robot that strays out comes back --------------------------------------------
+    def strayed(self, r):
+        """True when the workspace is limited to the readable area (school) and r's middle is outside it while still
+        on table ground (the table's own edge is the edge rules' job, not this)."""
+        ws = self.ws
+        if not STRAY_RETURN or ws is None or not getattr(ws, "limited", False):
+            return False
+        p = self.pos(r)
+        if p is None:
+            return False
+        return ws.edge_dist(*p) < 0.0 and ws.edge_dist(*p, raw=True) >= HALF * 0.5
+
+    def stray_return(self, r):
+        """(e13) Back into the readable area along ground the robot has just driven: towards its last camera fix well
+        inside (else the nearest readable spot). Straight back (reversing) when it faces away from there, else a turn
+        on the spot when the table round it is proven (raw field: seen or felt, the readable limit ignored) and then
+        forward. Slow (BACK_V); the others' plans and the keep-outs are kept; the edge rule uses the raw table. Returns
+        a stop-turn move or None (tried again in a second)."""
+        ws = self.ws
+        p, h = self.pos(r), self.heading(r)
+        if p is None or h is None:
+            return None
+        tgt = r.__dict__.get("last_in") or ws.nearest_allowed(p[0], p[1], HALF)
+        if tgt is None:
+            return None
+        L = math.dist(p, tgt)
+        if L < 1.0:
+            tgt = ws.nearest_allowed(p[0], p[1], HALF + 2.0) or tgt
+            L = math.dist(p, tgt)
+        L = min(L + 2.0, 120.0)                # a little past the target: well inside
+        brg = math.degrees(math.atan2(tgt[1] - p[1], tgt[0] - p[0]))
+        back = abs(wrap180(brg - (h + 180.0))) <= 30.0
+        cands = []
+        if back:
+            cands.append(("stray return back", 0.0, wrap180(h + 180.0)))
+        if ws.edge_dist(*p, raw=True) >= HALF + 1.0:      # its turning circle on table it has proven
+            cands.append(("stray return", wrap180(brg - h), brg))
+        self.counts["stray_tries"] = self.counts.get("stray_tries", 0) + 1
+        for kind, turn, hd in cands:
+            for L_ in (L, 0.6 * L):
+                tr = Traj.move(self.t + 0.2, p, hd, 0.0, L_, BACK_V, m0=self.margin0(r))
+                xs = [p[0] + math.cos(math.radians(hd)) * L_ * k / 10.0 for k in range(11)]
+                ys = [p[1] + math.sin(math.radians(hd)) * L_ * k / 10.0 for k in range(11)]
+                if min(ws.edge_dist(x_, y_, raw=True) for x_, y_ in zip(xs, ys)) < HALF + 0.5 + (
+                        r.bubble if r.lost else 0.0) * 0.5:
+                    continue
+                if not self.keepout_ok(r, tr):
+                    continue
+                if any(clearance_profile(tr, o.traj, now=self.t)[-1] < REFLEX_CC for o in self.others(r)):
+                    continue
+                if kind == "stray return back":
+                    tr = Traj.move(self.t + 0.2, p, wrap180(h + 180.0), 0.0, L_, BACK_V, m0=self.margin0(r))
+                self.counts["stray_returns"] = self.counts.get("stray_returns", 0) + 1
+                self.event(r, "stray return", "outside the area the camera reads at %.0f, %.0f: comes back %.0f cm "
+                           "towards %.0f, %.0f (%s), at %.0f cm/s" % (
+                               p[0], p[1], L_, tgt[0], tgt[1], "reversing along its track" if turn == 0.0 and
+                               kind.endswith("back") else "turning on the spot first", BACK_V))
+                self.fallback(r, 0, kind, "back into the readable area")
+                return kind, None, turn, L_, BACK_V, tr
+        return None
+
     # -- (e12) one robot at an edge never holds up the others ---------------------------------------------------
     def edge_stuck_why(self, r):
         """Why r stands held at an edge waiting for a person (None: it is not)."""
@@ -3833,9 +3983,10 @@ class Controller:
         return None
 
     def edge_park_watch(self, r):
-        """Every half second: a robot held at an edge (edge_stuck_why) for EDGE_PARK_S in a row is parked there (True)."""
+        """Every half second: a robot held at an edge (edge_stuck_why) for EDGE_PARK_S in a row is parked there (True).
+        (e13) With EDGE_PARK off (the default): never parked by a timer; need_hand_watch instead."""
         if not EDGE_PARK:
-            return False
+            return self.need_hand_watch(r)
         why = self.edge_stuck_why(r)
         if why is None:
             r.edge_stuck_since = None
@@ -3847,6 +3998,58 @@ class Controller:
             return False
         self.park_at_edge(r, why)
         return True
+
+    def need_hand_watch(self, r):
+        """(e13, Nick 10 Nov: robots never give up) A robot held at an edge stays in the run, still and safe (its start
+        check, recovery or unsure step keep checking it as before). The moment it is held it says LOUDLY that it needs a
+        hand (event NEEDS A HAND, repeated every NEED_HAND_SAY_S while it lasts, in self.need_hand for the state file and
+        Mission Control); once moved back in (the checks pass: the camera sees it inside, or its pose clears the edge
+        rule) it rejoins by itself and that is said. Its own battery floor still parks it (True), so a home run whose
+        other robots are out can end by the battery or the time cap, never held open by it."""
+        why = self.edge_stuck_why(r)
+        nh = self.__dict__.setdefault("need_hand", {})
+        rec = nh.get(r.name)
+        if why is None:
+            r.edge_stuck_since = None
+        elif r.__dict__.get("edge_stuck_since") is None:
+            r.edge_stuck_since = self.t
+        if why is not None and rec is None and r.__dict__.get("unsure") is not None and \
+                not r.__dict__.get("start_held") and self.t - r.edge_stuck_since < 2 * self.UNSURE_RECHECK_S:
+            return False       # unsure: it checks again itself first (twice its own re-check time), then asks
+        if why is None:
+            if rec is not None:
+                nh.pop(r.name, None)
+                self.counts["hand_rejoined"] = self.counts.get("hand_rejoined", 0) + 1
+                self.event(r, "REJOINED", "%s was moved in and rejoins the run by itself (it waited %.0f s for a hand)"
+                           % (r.name, self.t - rec["t0"]))
+            return False
+        p = self.pos(r)
+        if rec is None:
+            d, side = self.edge_side(p) if p is not None else (None, "an edge")
+            words = ("%s NEEDS A HAND%s: %s. It stays still and safe and keeps checking; move it a hand's width (10 cm) "
+                     "onto the board and it rejoins by itself. The others carry on." % (
+                         r.name, (" at %.0f, %.0f (%.0f cm from %s)" % (p[0], p[1], d, side)) if p is not None else "",
+                         why))
+            rec = dict(robot=r.name, x=round(p[0], 1) if p else None, y=round(p[1], 1) if p else None,
+                       edge_cm=round(d, 1) if d is not None else None, side=side, why=why, t0=round(self.t, 1),
+                       said=self.t, words=words)
+            nh[r.name] = rec
+            self.counts["need_hand"] = self.counts.get("need_hand", 0) + 1
+            self.event(r, "NEEDS A HAND", words)
+        elif self.t - rec["said"] >= NEED_HAND_SAY_S:
+            rec["said"] = self.t
+            self.event(r, "NEEDS A HAND", "still waiting (%.0f s): %s" % (self.t - rec["t0"], rec["words"]))
+        if r.battery is not None and r.battery <= self.floor:
+            nh.pop(r.name, None)
+            r.out_why = "battery %d %% while waiting for a hand at the edge" % r.battery
+            self.close_question(r, "its battery reached the floor")
+            self.parked(r)                 # sleeps (park_sleep) where it stands: its own battery rule
+            return True
+        return False
+
+    def needs_hand(self):
+        """(e13) [record] of robots now waiting for a hand at an edge."""
+        return list((self.__dict__.get("need_hand") or {}).values())
 
     def edge_side(self, p):
         """(distance to the nearest edge of the typed board, words for that edge)."""
@@ -3945,12 +4148,22 @@ class Controller:
             if half:
                 self.edge_watch(r)                     # (e08, A2) sure / unsure near an edge
                 self.felt_mark(r)                      # (e10, C2) the proven workspace grows under its wheels
+                if NOPIC_RULE and self.__dict__.get("nopic_since") is not None:
+                    self.no_picture_watch(r)           # (e13) no pictures: this robot's own risk-based limit
                 if self.edge_park_watch(r):            # (e12) held at an edge too long: parked, the others go on
                     continue
             if r.mode == "idle" and t >= r.busy_until and self.pos(r) is not None and not r.silent and \
                     not self.start_check(r):
                 pass                                   # (e10, run 2 incident d) put down over or at an edge: held
                                                        # (before anything else, the unsure-near-an-edge step too)
+            elif r.mode == "idle" and t >= r.busy_until and not r.silent and self.pos(r) is not None and \
+                    not getattr(r, "tilted", False) and self.strayed(r):
+                res_s = self.stray_return(r)           # (e13) outside the readable area: back along ground it drove
+                if res_s is not None:
+                    r.coast = None
+                    self.stopturn_move(r, res_s)
+                else:
+                    r.busy_until = t + 1.0
             elif r.mode == "idle" and t >= r.busy_until and r.__dict__.get("probe_ret") and not r.silent and \
                     self.pos(r) is not None and not getattr(r, "tilted", False):
                 res_r = self.probe_return(r)           # (e10, C2) back from a probe first, lost or not (the camera
@@ -4024,6 +4237,15 @@ class Controller:
         # lost by the camera
         if r.lost is None and r.cam is not None and not self.fresh(r):
             self.start_lost(r)
+        if r.mode == "move" and r.move is not None and r.move.get("kind") not in ("stray return", "stray return back",
+                                                                               "probe", "probe return") \
+                and STRAY_RETURN and self.strayed(r):
+            # (e13, e12's school practice: robots roamed past x 254 cm, where the camera cannot read, and stood lost)
+            self.ease_stop(r, "outside the area the camera reads") if r.lost is not None else \
+                self.halt(r, "outside the area the camera reads: comes back first")
+            if r.lost is None:
+                self.end_move(r)
+            return
         if r.lost is not None and r.mode == "move" and r.move is not None:
             p = self.pos(r)
             if r.move.get("curve"):

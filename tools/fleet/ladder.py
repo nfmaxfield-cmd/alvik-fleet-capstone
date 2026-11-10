@@ -37,6 +37,7 @@ stops every robot. Everything is kept in logs/<date>-ladder/ (state.json: what p
 folder per step). --dry runs it all against the simulator (tools/sim/fleet_sim.py --persist --serve-live: the
 simulated overhead camera, robots at random spots and headings; --turn-err for a robot whose turns are off).
 """
+VERSION = "ladder-2026-11-10e13"   # e13: run from the command line, its robots are put to sleep 10 min after it ends with no new run (idle_after_run). No version string before
 import argparse
 import csv
 import datetime as dt
@@ -2678,4 +2679,8 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    import idle_after_run as IA     # (e13) robots asleep 10 min after the run ends if no new run starts
+    with (IA.track("ladder") if sys.argv[1:2] and sys.argv[1] in ("run", "step", "turncheck", "calibrate") else
+          IA.contextlib.nullcontext()):
+        _rc = main()
+    sys.exit(_rc)
