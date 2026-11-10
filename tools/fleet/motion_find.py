@@ -229,6 +229,7 @@ class BringBack:
         self.steps = self.sightings = self.wiggles = self.holds = 0
         self._since_wiggle = 0
         self.p_miss = 1.0
+        self._inward_left, self._last_tgt = None, None
 
     def n_inside(self):
         return len(self.failed) - 1
@@ -321,6 +322,15 @@ class BringBack:
             if self.stop():
                 raise StopAsked("stopped (Ctrl+C or Mission Control's Stop) while %s was driving back" % self.name)
             t = self.tag_near(self.x, self.y, TAG_NEAR_CM + self.bubble())
+            if t is not None and self._inward_left is None and self._last_tgt is not None and \
+                    math.hypot(self._last_tgt[0] - self.x, self._last_tgt[1] - self.y) > STEP_CM:
+                # (rehearsal: the tag first read at the very border of a dim patch, and the heading check's 6 cm nudge
+                # took it back out) on into the readable ground by the heading check's nudge + its error sum
+                import camera_discovery as CD
+                self._inward_left = int(math.ceil((CD.nudge_cm() + self.bubble()) / STEP_CM))
+            if t is not None and self._inward_left:
+                self._inward_left -= 1
+                t = None
             if t is not None:
                 self.ev("bring_back_end", robot=self.name, tag=t, at=[round(self.x, 1), round(self.y, 1)],
                         steps=self.steps, sightings=self.sightings, wiggles=self.wiggles, holds=self.holds,
@@ -332,7 +342,8 @@ class BringBack:
                 if not self.find_heading():
                     self._hold("its heading is not known and a stroke to find it is not clear here")
                 continue
-            tgt = self.target()
+            tgt = self.target() if not (self._inward_left and self._last_tgt) else self._last_tgt
+            self._last_tgt = tgt
             if tgt is None:
                 self._hold("no spot where tags read is known that it can reach (it may carry no tag, or the light may be "
                            "too low for its tag: add light, or check its roof)")

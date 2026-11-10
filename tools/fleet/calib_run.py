@@ -2531,7 +2531,10 @@ class CalibRun:
             return b[-1] if b else (self.battery[0][1] if self.battery else None)
         # phase A's legs only, as the per-run fit uses: they are driven on wheels + gyro alone; staging, parking and the
         # tours' legs may be aimed or corrected from the camera (rehearsal: pooling them widened the wheel's +- 3x)
-        return CP.raw_rows([r for r in getattr(self, "rows", []) if r.get("phase") == "A"],
+        rows = [r for r in getattr(self, "rows", []) if r.get("phase") == "A"]
+        if self.stop_flag.is_set() and rows:
+            rows = rows[:-1]       # the leg Stop cut short is not a measurement (rehearsal: it widened the wheel's +- 4x)
+        return CP.raw_rows(rows,
                            values_at, battery_at, os.path.basename(self.folder.rstrip("/")), _unwrap_turn)
 
     def pool_after(self):
