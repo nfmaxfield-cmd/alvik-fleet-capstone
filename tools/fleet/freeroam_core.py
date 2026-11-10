@@ -49,7 +49,7 @@ if _HERE not in sys.path:
 import safety_rules as SR   # noqa: E402  (e08 Phase A: the rules shared with run_plan and observe)
 import fused_pose as FP     # noqa: E402  (e09 Phase B: one filter per robot, fed by the tracking layer and RAW)
 
-VERSION = "freeroam-2026-11-10e13"   # e13 (10 Nov): never give up blind (BLIND_RULE edge: a lost robot drives on while its bubble + body + stop cannot reach an edge; BUBBLE_CAP behind MIRLT_BLIND_RULE=cap); stray return (a robot outside the readable area comes back along ground it drove); never give up (a robot held at an edge waits, says it needs a hand and rejoins: EDGE_PARK off); risk-based no-pictures limit per robot
+VERSION = "freeroam-2026-11-10e13b"   # e13b (10 Nov, Nick 13:34): a standing robot (its own odometry shows no motion since its last fix) keeps that fix: never lost while it stands, sparse reads confirm it (MIRLT_STAND_TRUST=0: before); the lost threshold grows only for a camera slower than about 2.5 pictures a second (1.5 x the longest recent gap). e13 (10 Nov): never give up blind (BLIND_RULE edge: a lost robot drives on while its bubble + body + stop cannot reach an edge; BUBBLE_CAP behind MIRLT_BLIND_RULE=cap); stray return (a robot outside the readable area comes back along ground it drove); never give up (a robot held at an edge waits, says it needs a hand and rejoins: EDGE_PARK off); risk-based no-pictures limit per robot
 VERSION_E12 = "freeroam-2026-11-10a"   # 11-10a (e12): the curve-fit maths moved into module functions (fit_arc_points, arc_summary, arc_agree) so the calibration's curve phase uses the very same (free roam's own fitting and saving unchanged); a robot held at an edge for EDGE_PARK_S is parked and said loudly, the others roam on (MIRLT_EDGE_PARK=0: before)
 VERSION_E = "freeroam-2026-11-07e"   # 11-07e (Nick 7 Nov): a robot put down at or over an edge first tries the e08 tilt recovery, a person asked only if that fails (MIRLT_START_EDGE_MODE=wait: always wait)
 VERSION_D = "freeroam-2026-11-07d"   # 11-07d (e10, the 7 Nov run 2 incident): the queue watch (every tick, off plan or a queued piece breaking the edge rule from where the robot really is: re-aimed or stopped, heading re-set), the surface-mark verdict less the uncertainty, the start check (held at an edge)
@@ -112,8 +112,13 @@ PAUSE_S = 0.15          # between moves (the robot's own step queue; no visible 
 EMPTY_MOVE_PAUSE_S = 0.5    # (e10) CHOSEN: after a move with nothing to send, pick again this soon (DOE: no)
 # dead reckoning (lost by the camera)
 LOST_AFTER_S = 0.6      # no camera fix this long = lost (run_plan.BLIND_AFTER_S). Not chosen here
-LOST_GAPS = 4.0         # (e13) ... and never under 4 of the robot's own measured gaps between fixes (lost_after). CHOSEN:
-                        # three missed pictures in a row are not yet "lost"; DOE row (the dark-room rate, e13)
+STAND_TRUST = os.environ.get("MIRLT_STAND_TRUST", "1") != "0"   # (e13, Nick 13:34) a standing robot keeps its fix
+STAND_CM = 1.0          # ... "not moved" = its own odometry moved under this since the fix: the camera's own noise (~1 cm),
+STAND_DEG = 2.0         # and under 2 deg turned (the gyro's drift over a minute is far less). Not tuning numbers: below
+                        # what a camera fix could tell apart anyway
+LOST_GAPS = 1.5         # (e13) ... and never under 1.5 x the robot's longest recent gap between fixes (lost_after).
+                        # CHOSEN (4 x the 90th percentile held a trapped robot 66 s in the 1 s-late-camera stress test);
+                        # DOE row (the dark-room rate, e13)
 BLIND_BASE = 2.0        # bubble p95 = 2.0 cm + 0.07 cm per cm driven blind: MEASURED, 29 Oct logs, 22,000 stretches,
 BLIND_PER_CM = 0.07     # straight drives up to 40 cm (run_plan.BLIND_ERR_*). Beyond 40 cm extrapolated
 BLIND_TURN_FRAC = 0.03  # heading error 3 % of the degrees turned blind (the e03 rerun: 0.85-0.90 deg per turn after the
@@ -934,13 +939,28 @@ class Controller:
         if r.cam is None:
             return False
         arr = r.cam_arr if r.cam_arr is not None else r.cam[0]
-        la = self.lost_after(r)
+        if STAND_TRUST and self.standing(r):
+            return True                      # (e13, Nick 13:34) it has not moved since that fix: the fix still holds
+        la = self.lost_after(r)              # (e13) longer only when this robot's own fixes come slower than that
         return self.t - arr < la and self.t - r.cam[0] < la + self.cam_delay_hi
+
+    def standing(self, r):
+        """(e13; coordinator from Nick 13:34 "if it finds it and doesn't move it, can't it trust that it knows where it
+        is?") True when the robot is not driving and its own wheels and gyro (FOLLOW, current) show it has not moved
+        since its last camera fix: that fix still holds and its error sum does not grow while it stands; sparse reads
+        (a dark room's slow camera) only confirm it. Switch: MIRLT_STAND_TRUST=0 (every fix ages as before)."""
+        if r.cam is None or r.own is None or self.t - r.own[0] > 1.0 or r.mode == "move" or r.move is not None:
+            return False
+        oa = self.own_at(r, r.cam[0])
+        if oa is None:
+            return False
+        return math.hypot(r.own[1] - oa[0], r.own[2] - oa[1]) < STAND_CM and abs(wrap180(r.own[3] - oa[2])) < STAND_DEG
 
     def lost_after(self, r):
         """(e13, school 13:1x lights off: the camera fell to ~7 pictures a second) how long with no fix means lost: at
-        least LOST_AFTER_S, and never under LOST_GAPS times this robot's own measured gap between fixes (its last 40;
-        90th percentile), so a slower camera in the dark does not call a robot lost between two of its pictures."""
+        least LOST_AFTER_S, and never under LOST_GAPS times this robot's longest recent gap between fixes (its last 40),
+        so a camera much slower in the dark (under about 2.5 pictures a second) does not call a robot lost between two
+        of its pictures; at 7 a second LOST_AFTER_S already covers it."""
         h = r.cam_hist
         if len(h) < 10:
             return LOST_AFTER_S
@@ -948,7 +968,7 @@ class Controller:
         gaps = sorted(b[0] - a[0] for a, b in zip(hh, hh[1:]) if b[0] > a[0])
         if not gaps:
             return LOST_AFTER_S
-        return max(LOST_AFTER_S, LOST_GAPS * gaps[min(len(gaps) - 1, int(0.9 * len(gaps)))])
+        return max(LOST_AFTER_S, LOST_GAPS * gaps[-1])
 
     def own_at(self, r, t):
         """The robot's own pose (x, y, th) at time t, from its FOLLOW records (interpolated); None if t is older than

@@ -1099,8 +1099,8 @@ def learn_readmap(args, out, sess):
         return
     nf, ns = OB.learn_from_logs(rm, out)
     rm.save(p)
-    # (e13, school 13:1x lights off: tag 4 read at (41, 104) in every picture, the other tags 0 reads at P11 / P15, mean
-    # grey 70 against 91 on 9 Nov) readability depends on the light: this run's evidence is ALSO kept under its
+    # (e13, school 13:1x lights off: mean grey 70 against 91 on 9 Nov, about 7 pictures a second; the one robot, tag 4 at
+    # (41, 104), read in every picture) readability depends on the light: this run's evidence is ALSO kept under its
     # brightness (the bridge's brightness.csv median), readmap_light.json beside it: {grey: the map's cells}
     try:
         g = run_brightness(out)

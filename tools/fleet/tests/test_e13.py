@@ -649,9 +649,29 @@ def test_lost_after_follows_the_measured_fix_rate_and_brightness_is_read(tmp_pat
     r = c.R["A"]
     r.cam_hist = [(k * 0.08, 100.0, 80.0) for k in range(40)]          # 12 a second
     assert c.lost_after(r) == FC.LOST_AFTER_S
-    r.cam_hist = [(k * 0.3, 100.0, 80.0) for k in range(40)]           # a dark room: 3 a second
-    assert abs(c.lost_after(r) - FC.LOST_GAPS * 0.3) < 1e-6
+    r.cam_hist = [(k * 0.3, 100.0, 80.0) for k in range(40)]           # 3 a second: 0.6 s already covers it
+    assert c.lost_after(r) == FC.LOST_AFTER_S
+    r.cam_hist = [(k * 1.0, 100.0, 80.0) for k in range(40)]           # a very dark room: 1 a second
+    assert abs(c.lost_after(r) - FC.LOST_GAPS * 1.0) < 1e-6
     import mission_run as MR
     (tmp_path / "bridge").mkdir()
     (tmp_path / "bridge" / "brightness.csv").write_text("t,camera,mean_grey\n1,overhead,70\n2,overhead,71\n3,side,90\n")
     assert MR.run_brightness(str(tmp_path)) in (70.0, 71.0)
+
+
+def test_a_standing_robot_keeps_its_fix_a_moving_one_does_not(monkeypatch):
+    """(e13b, Nick 13:34) no motion on its own odometry since the fix: the fix holds, however old; moved 3 cm: lost."""
+    c = FC.Controller(["A"], (0, 0, 300, 160), lambda *a: None, lambda *a: None)
+    r = c.R["A"]
+    c.t = 100.0
+    r.cam = (90.0, 100.0, 80.0, 0.0)
+    r.cam_arr = 90.0
+    r.own_hist = [(80.0 + 0.5 * k, 50.0, 50.0, 0.0) for k in range(41)]
+    r.own = (100.0, 50.0, 50.0, 0.0, "idle", 0)
+    r.mode, r.move = "idle", None
+    assert c.standing(r) and c.fresh(r)
+    r.own = (100.0, 53.0, 50.0, 0.0, "idle", 0)                        # its wheels moved it 3 cm since the fix
+    assert not c.standing(r) and not c.fresh(r)
+    r.own = (100.0, 50.0, 50.0, 0.0, "idle", 0)
+    monkeypatch.setattr(FC, "STAND_TRUST", False)
+    assert not c.fresh(r)

@@ -202,13 +202,17 @@ still gives up (the coordinator's 11-10d "Could not park"), so a run's end is ne
 brightness file; not rehearsed with the lights dimmed in the simulator.
 
 **Light changes what the camera reads** (coordinator, school 13:1x, room lights off: mean grey about 70 against 91 on
-9 Nov; about 7 pictures a second against 13.5-15; tag 4 at (41, 104) cm read in every picture, the other tags at the
-middle and far spots never; the 4 reference tags fine). Built: (a) every tags run now also keeps its learned
+9 Nov; about 7 pictures a second against 13.5-15; the one robot on the table, tag 4 at (41, 104) cm, read in every
+picture; no evidence yet about the middle and far spots in low light, since no robot stood there). Built: (a) every tags run now also keeps its learned
 readability under its own brightness (the overhead's median mean grey from bridge/brightness.csv) in
 `readmap_light.json`, merged into the site's; **not yet used** to choose the map at a run's start (the run does not
 know its light before the bridge runs; the camera self-check's pictures could give it: next step). (b) Free roam's
-"lost" now waits at least 4 of the robot's own measured gaps between fixes (`lost_after`), so a camera at 3 pictures a
-second does not call robots lost between pictures; the blind rule itself is distance-based (the bubble per cm), the
+"lost" now waits at least 1.5 x the robot's longest recent gap between fixes (`lost_after`; it only grows for a camera
+slower than about 2.5 pictures a second: a first try, 4 x the 90th-percentile gap, held a trapped robot 66 s in the
+late-camera stress test and was cut back), and (Nick 13:34, via the coordinator) a robot whose own odometry shows no
+motion since its last fix keeps that fix however old (`standing`; MIRLT_STAND_TRUST=0 switches it off): its error sum
+does not grow while it stands and sparse reads only confirm it (test: a standing robot stays fresh, 3 cm of its own
+wheels make it lost); the blind rule itself is distance-based (the bubble per cm), the
 no-pictures limit uses the measured gap since the last fix, and frame_watch's limit is the stream's own measured gaps,
 so none of them assumes a rate. run_plan's 0.6 s "blind" and the calibration's 1.0 s lost hold still assume one (next
 step). (c) The live panel's design shows each camera's brightness and pictures a second (redesign plan, section 3).
@@ -317,8 +321,8 @@ directions with mockups (A guided steps, B one page top to bottom, C cockpit), t
 - The blind rule drives far blind (275 cm in the test) on a bubble whose growth (0.07 cm per cm) was measured only up to
   40 cm; a robot with a bad gyro or slipping wheels drifts faster than that model says, and only the camera's return
   shows it (the reacquire jump is logged).
-- The dark-room numbers (grey 70, 7 pictures a second, which tags read) are the coordinator's summary of one 188 s
-  bridge run; the light-keyed maps are stored but not yet chosen by light at a run's start.
+- The dark-room numbers (grey 70, 7 pictures a second, tag 4 read at the near spot) are the coordinator's summary of
+  one 188 s bridge run with one robot; the light-keyed maps are stored but not yet chosen by light at a run's start.
 - The click's aim (3.9 cm) is derived from an assumption (a click anywhere on the roof, uniformly) until real clicks
   measure it; a careful person clicks much better, so the first headings will be stated more doubtful than they are.
 - The calibration's hold has no time limit: an unattended calibration whose robot is lost waits (awake) until Stop.
