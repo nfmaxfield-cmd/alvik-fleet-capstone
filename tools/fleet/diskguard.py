@@ -28,6 +28,8 @@ REPO = os.path.dirname(os.path.dirname(HERE))
 GB = 1e9
 
 # ---------------------------------------------------------------------------------------------- chosen numbers
+CARD_STOP_DEFAULT_GB = 1.0   # (e12) the default floor; the site file's card_stop_gb (school 0.55) replaces it and
+                             # MIRLT_CARD_STOP_GB still overrides both (card_stop_gb() below)
 CARD_STOP_GB = float(os.environ.get("MIRLT_CARD_STOP_GB", "1.0"))   # (9 Nov, school: a 7 GB card shared with
                         # Jay-Sun's work had 0.63 GB free) MIRLT_CARD_STOP_GB lowers it for a short run; never under
                         # CARD_HARD_GB below. Was: 1.0, chosen: under this on the card, a long run (DOE loop, Monday mission, ladder) ends between
@@ -50,6 +52,37 @@ CHECK_S = 2.0           # chosen: the frames' own check runs with perf.csv (ever
                         # far under any floor
 FRAMES_GB_PER_H = 2.9   # measured, not chosen: 2026-10-27 21:34-22:03, both cameras' tracking-rate frames and clips
                         # zipped to 1.42 GB in 29 min. A 4 h loop: ~12 GB of frames, ~24 GB with the upload's copy
+
+
+VERSION = "2026-11-10a"   # 2026-11-10a (e12, Nick 10 Nov): the card floor per site (card_stop_gb in the site file, school
+                          # 0.55; MIRLT_CARD_STOP_GB still overrides, default 1.0): no `tmux set-environment` needed.
+                          # No version string before
+
+
+def card_stop_gb(site=None):
+    """(e12) The card floor (GB) for the site in use: MIRLT_CARD_STOP_GB when set (the old override, kept), else the
+    site file's card_stop_gb, else 1.0. Never under CARD_HARD_GB (run_plan's own last resort). (value, where from)."""
+    env = os.environ.get("MIRLT_CARD_STOP_GB", "").strip()
+    if env:
+        try:
+            return max(CARD_HARD_GB, float(env)), "MIRLT_CARD_STOP_GB"
+        except ValueError:
+            pass
+    try:
+        if site is None:
+            if HERE not in sys.path:
+                sys.path.insert(0, HERE)
+            import sites as SI
+            site = SI.load(None)
+        v = (site or {}).get("card_stop_gb")
+        if v is not None:
+            return max(CARD_HARD_GB, float(v)), "the site file (%s)" % (site or {}).get("name", "?")
+    except Exception:  # noqa: BLE001  (no site, a broken file: the default)
+        pass
+    return CARD_STOP_DEFAULT_GB, "the default"
+
+
+CARD_STOP_GB, CARD_STOP_FROM = card_stop_gb()    # (e12) resolved once when imported (each run is its own process)
 
 
 # (2026-11-03, risk review #6) the numbers above were measured with two cameras at 640 x 480. The frames saved and the
@@ -250,7 +283,7 @@ class Guard:
                         self.frames_floor(), "" if self.frames_on_card else ", plus room for that copy"))
         if c is not None and c < self.card_stop_gb:
             s["stop"] = True
-            s["why"] = "the Pi's card has only %.2f GB free (long runs end under %.0f GB, before it fills)" % (
+            s["why"] = "the Pi's card has only %.2f GB free (long runs end under %g GB, before it fills)" % (
                 c, self.card_stop_gb)
         self.last = s
         return s
@@ -270,7 +303,7 @@ class Guard:
                          "upload's copy; a 4 h loop needs about %.0f GB there)." % (
                              self.frames_dir, self.frames_gb() or 0.0, self.drive_frames_gb,
                              8 * FRAMES_GB_PER_H * self.scale))
-        parts.append("The Pi's card: %s GB free (the run ends cleanly under %.0f GB)." % (
+        parts.append("The Pi's card: %s GB free (the run ends cleanly under %g GB)." % (
             "?" if c is None else "%.1f" % c, self.card_stop_gb))
         return " ".join(parts)
 
@@ -320,7 +353,7 @@ def space(k=10, out=print):
     logs = os.path.join(REPO, "logs")
     c, ct = free_gb(logs), total_gb(logs)
     out("The Pi's card (logs/, the repo, the system): %.1f GB free of %.0f GB%s" % (
-        c or 0, ct or 0, "   << UNDER THE %.0f GB FLOOR: long runs will not start" % CARD_STOP_GB
+        c or 0, ct or 0, "   << UNDER THE %g GB FLOOR (%s): long runs will not start" % (CARD_STOP_GB, CARD_STOP_FROM)
         if c is not None and c < CARD_STOP_GB else ""))
     d = drive_mount()
     if d:

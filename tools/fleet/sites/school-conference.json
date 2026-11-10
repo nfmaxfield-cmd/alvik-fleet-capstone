@@ -1,6 +1,8 @@
 {
  "title": "School conference table (66 x 156 in), second Pi, two borrowed Alviks",
  "_note": "Robot names and tag ids are Claude's picks (2 Nov 2026): change them here before reflashing if Nick wants others. No WiFi password goes in this file or anywhere in the repo.",
+ "card_stop_gb": 0.55,
+ "_note_card_stop_gb": "(e12, 10 Nov) the Pi's card floor here: long runs end under this many GB free (the 7 GB card shared with Jay-Sun's work; 9 Nov: 0.63 GB free). Was set with tmux set-environment MIRLT_CARD_STOP_GB 0.55; that variable still overrides this when set.",
  "robots": [
   {
    "name": "Alpha",

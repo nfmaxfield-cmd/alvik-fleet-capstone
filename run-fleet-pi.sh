@@ -427,6 +427,11 @@ case "$WHAT" in
       echo "Close it:         ./run-fleet-pi.sh mc-stop"
       exit 0
     fi
+    # (e12, Nick 10 Nov) the USB stick (ext4, label FLEET) holds the frames and video: said loudly when it is missing
+    if ! bash tools/pi/mount_fleet.sh --check >/dev/null 2>&1; then
+      echo "!! WARNING: the USB stick FLEET is NOT mounted: frames and video would go to the Pi's small card."
+      echo "!! Plug it in, then type: tools/pi/mount_fleet.sh   (it asks for the Pi's password; docs/how-to/usb-stick.md)"
+    fi
     # (e07) where am I: home, school or a new area, from the cameras plugged in and this computer (site_detect.py);
     # the recorder then takes that site's picture size. Mission Control checks again with the pictures (corner tiles,
     # the measured table) and says what it decided. A site chosen with `site <name> pin` always wins.

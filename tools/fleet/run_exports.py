@@ -23,6 +23,7 @@ offset per boot). A robot that restarts mid-run starts a new segment anchored on
 import argparse
 import csv
 import datetime as dt
+import glob
 import json
 import math
 import os
@@ -31,10 +32,11 @@ import sys
 import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(os.path.dirname(HERE))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-VERSION = "2026-11-09b"   # 11-09b: stops.csv robot_wifi + tag_id, binding.json + frames_where.txt in the bundle. e11: run/stops.csv (Jay-Sun: each stop findable), visit_order.json in the bundle
+VERSION = "2026-11-10a"   # 11-10a (e12): `latest` also finds runs started from the command line (logs/*-mission). 11-09b: stops.csv robot_wifi + tag_id, binding.json + frames_where.txt in the bundle. e11: run/stops.csv (Jay-Sun: each stop findable), visit_order.json in the bundle
 PAIR_S = 0.07          # as tag_bridge.PAIR_S: two cameras' reads this close in time are one moment
 
 CAM_COLS = ["t", "t_iso", "robot", "x_cm", "y_cm", "heading_deg", "sigma_cm", "sigma_deg", "pm95_cm", "cams", "n_reads",
@@ -441,6 +443,47 @@ def bundle(mission, out_zip=None):
     return out_zip, names
 
 
+def _has_stops(d):
+    """A production run (stops at points), not a feel-out or a warm-up: run/stops.csv with rows, or the coordinator's
+    point_confidence lines (runs before e11)."""
+    for p in glob.glob(os.path.join(d, "**", "stops.csv"), recursive=True):
+        try:
+            with open(p) as f:
+                if sum(1 for _ in f) > 1:
+                    return True
+        except OSError:
+            pass
+    for p in glob.glob(os.path.join(d, "**", "coordinator.jsonl"), recursive=True):
+        try:
+            with open(p) as f:
+                if any('"point_confidence"' in ln for ln in f):
+                    return True
+        except OSError:
+            pass
+    return False
+
+
+def latest_run(site=None, repo=None, dry=False):
+    """(e12, Nick 10 Nov) (folder, where) of the newest school run with stops: Mission Control's
+    <mc_dir>/runs/<...> (the site's mc_dir, default logs/mission-control-<site>) and the command line's
+    logs/<date-time>-mission (mission_run without --session; -mission-dry with dry=True), by when they last changed."""
+    repo = repo or REPO
+    site = site or os.environ.get("MIRLT_SITE") or "school-conference"
+    mc = os.path.join(repo, "logs", "mission-control-" + site)
+    try:
+        import sites as SI
+        mc = SI.load(site).get("mc_dir") or mc
+    except (Exception, SystemExit):  # noqa: BLE001  (an unknown site name: the default folder)
+        pass
+    cands = [(d, "Mission Control") for d in glob.glob(os.path.join(mc, "runs", "*"))]
+    cands += [(d, "command line") for d in glob.glob(os.path.join(repo, "logs", "*-mission" + ("-dry" if dry else "")))]
+    cands = [(d, w) for d, w in cands if os.path.isdir(os.path.join(d, "run")) and _has_stops(d)]
+    if not cands:
+        raise SystemExit("no school run with stops at points under %s/runs or logs/*-mission: give the run's folder "
+                         "instead of 'latest'" % mc)
+    return max(cands, key=lambda q: os.path.getmtime(q[0]))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("mission", help="the mission folder (logs/...-mission or Mission Control's runs/<...>), or latest "
@@ -448,11 +491,10 @@ def main(argv=None):
     ap.add_argument("--bundle", action="store_true", help="also the raw-files zip for Jay-Sun (in the mission folder)")
     a = ap.parse_args(argv)
     if a.mission == "latest":
-        # the newest production run of the school site's Mission Control (as tools/rfid/school_rfid.py's latest)
-        sys.path.insert(0, os.path.join(os.path.dirname(HERE), "rfid"))
-        import school_rfid as SR
-        a.mission = SR.latest_run()
-        print("the newest run: %s" % a.mission)
+        # (e12) the newest school run with stops at points, started from Mission Control (its runs/ folder) OR from the
+        # command line (./run-fleet-pi.sh visit: mission_run's logs/<date-time>-mission)
+        a.mission, where = latest_run()
+        print("the newest run (%s): %s" % (where, a.mission))
     m = os.path.abspath(a.mission)
     if os.path.basename(m) == "run":
         m = os.path.dirname(m)
