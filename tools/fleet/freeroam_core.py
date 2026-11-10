@@ -235,6 +235,8 @@ COURSE_MIN_CM = 3.0     # ... when they spread at least this far (else the filte
 COURSE_ERR_DEG = 10.0   # its own heading this far off the camera's course (for COURSE_ERR_S): the rest of the piece and
 COURSE_ERR_S = 0.5      # the queued ones are checked from where it really is, the way it really goes. Chosen; DOE
 COURSE_RESET_DEG = 15.0 # its own heading this far from the camera's course while off plan: re-set (fpose), stop, re-plan
+HEADING_CLICKS = os.environ.get("MIRLT_HEADING_CLICKS", "1") != "0"   # (e13, Nick 13:01) after a click, a straight drive
+                        # and a second click give the heading; 0 = the gyro's heading kept
 NOPIC_RULE = os.environ.get("MIRLT_NOPIC_RULE", "risk") != "off"   # (e13) no pictures: each robot's risk-based limit
                         # (slowed, then held); "off": as e12 (the lost-robot rules alone after the bridge's message)
 STRAY_RETURN = os.environ.get("MIRLT_STRAY_RETURN", "1") != "0"   # (e13) a robot outside the readable area comes back
@@ -779,6 +781,37 @@ class Controller:
         r.cam_arr = arr
         if self.ws is not None and getattr(self.ws, "limited", False) and self.ws.edge_dist(x, y) >= HALF:
             r.last_in = (x, y)                 # (e13) the last camera fix well inside the readable area
+        if r.__dict__.get("hd_drive") is not None and (th is not None or (src or "").split(":")[-1] in ("tags", "")):
+            # (e13) the camera reads it again (with a heading): no second click needed
+            r.hd_drive = None
+            r.place_asked = None
+            fn = getattr(self, "place_cancel_fn", None)
+            if fn is not None:
+                try:
+                    fn(r.name)
+                except Exception:  # noqa: BLE001
+                    pass
+            self.event(r, "heading from the camera", "the camera reads it again: the second click is not needed")
+        pl = r.__dict__.get("place")
+        if pl is not None:
+            # (e13) the first camera fix after a click: the click's residual (its own driving since, by its wheels, added)
+            r.place = None
+            dx = dy = 0.0
+            if pl.get("own") is not None and r.own is not None:
+                dx, dy = r.own[1] - pl["x"], r.own[2] - pl["y"]
+            res = math.hypot(x - (pl["x"] + dx), y - (pl["y"] + dy))
+            self.counts["place_residuals"] = self.counts.get("place_residuals", 0) + 1
+            self.log("place", dict(t=round(self.t, 2), robot=r.name, how=pl["how"], click_x=round(pl["x"], 2),
+                                   click_y=round(pl["y"], 2), cam_x=round(x, 2), cam_y=round(y, 2),
+                                   residual_cm=round(res, 2), after_s=round(self.t - pl["t"], 1),
+                                   driven_cm=round(math.hypot(dx, dy), 1)))
+            pl["driven_cm"] = math.hypot(dx, dy)
+            fn = getattr(self, "place_residual_fn", None)
+            if fn is not None:
+                try:
+                    fn(r.name, pl, x, y, res)
+                except Exception:  # noqa: BLE001
+                    pass
         self.fp_fix(r, t, x, y, th, sigma, src)
         if r.curve and r.move is not None and r.move.get("curve") and r.move["phase"] == "drive":
             r.arc_pts.append((x, y))
@@ -1044,7 +1077,7 @@ class Controller:
             return
         L = r.lost
         lat = L["after_turn"] * math.sin(math.radians(BLIND_TURN_FRAC * L["turn"]))
-        r.bubble = BLIND_BASE + BLIND_PER_CM * L["drive"] + lat
+        r.bubble = L.get("base", BLIND_BASE) + BLIND_PER_CM * L["drive"] + lat     # (e13) base: a click's accuracy
 
     def start_lost(self, r, why="camera lost it"):
         p = self.pos(r)
@@ -4161,6 +4194,9 @@ class Controller:
                     not self.start_check(r):
                 pass                                   # (e10, run 2 incident d) put down over or at an edge: held
                                                        # (before anything else, the unsure-near-an-edge step too)
+            elif r.mode == "idle" and r.__dict__.get("hd_drive") is not None and not r.silent:
+                self.ask_heading_click(r)              # (e13) its heading from a second click: it waits for it
+                r.busy_until = t + 0.5
             elif r.mode == "idle" and t >= r.busy_until and not r.silent and self.pos(r) is not None and \
                     not getattr(r, "tilted", False) and self.strayed(r):
                 res_s = self.stray_return(r)           # (e13) outside the readable area: back along ground it drove
@@ -4188,6 +4224,8 @@ class Controller:
             elif r.mode == "idle" and t >= r.busy_until and self.pos(r) is not None and not r.silent:
                 if r.lost is not None and (r.bubble > BUBBLE_CAP if BLIND_RULE == "cap" else
                                            self.blind_stop(r, self.pos(r), 5.0)):
+                    if BLIND_RULE != "cap":
+                        self.ask_place(r)              # (e13, Nick 12:56) a person clicks it on a picture
                     self.find_me(r)
                 elif r.battery is not None and r.battery <= self.floor:
                     r.out_why = "battery %d %%" % r.battery
@@ -4308,6 +4346,114 @@ class Controller:
                     mv["n"], t - mv["t0"], est, mv["kind"], r.scale, r.own[4] if r.own else "-"))
                 self.halt(r, "move timed out")
                 self.end_move(r)
+
+    # -- (e13, Nick 12:56) a person clicks the held robot on a camera's picture ----------------------------------------
+    def ask_place(self, r):
+        """Held because its error sum could reach an edge: ask for a click (once per hold; place_fn set by the host:
+        the request file for Mission Control and the terminal's line). Said loudly either way."""
+        if r.__dict__.get("place_asked"):
+            return
+        r.place_asked = self.t
+        p = self.pos(r)
+        self.counts["place_asked"] = self.counts.get("place_asked", 0) + 1
+        self.event(r, "NEEDS A HAND", "%s holds: its possible error could reach an edge. Click it on any camera's "
+                   "picture in Mission Control (or put it on a sticker and click that point on the map): it moves again "
+                   "from there" % r.name)
+        fn = getattr(self, "place_fn", None)
+        if fn is not None:
+            try:
+                fn(r.name, p)
+            except Exception:  # noqa: BLE001
+                pass
+
+    def heading_drive_cm(self, r, p, sig, v=5.0):
+        """(e13, Nick 13:01) How far it may drive straight to show its heading: as far as the fresh error sum (sig, grown
+        0.07 cm per cm driven) + half the body + its stop stay inside the edge rule in ANY direction (its heading is
+        the unknown): L = (edge distance - sig - half diagonal - stop) / (1 + 0.07). The longer, the better the heading
+        (+- atan(sig sqrt 2 / L))."""
+        e = edge_dist(self.rect, *p)
+        L = (e - sig - HALF - SR.stop_cm(v)) / (1.0 + BLIND_PER_CM)
+        for o in self.others(r):             # never into another robot's spot: the circles kept apart
+            q = self.pos(o)
+            if q is not None:
+                L = min(L, math.dist(p, q) - 2 * HALF - PLAN_GAP - sig)
+        return max(0.0, L)
+
+    def ask_heading_click(self, r):
+        hd = r.__dict__.get("hd_drive")
+        if hd is None or hd.get("asked"):
+            return
+        hd["asked"] = self.t
+        r.place_asked = self.t
+        self.event(r, "NEEDS A HAND", "%s drove %.0f cm straight to show its heading: click it again on a picture "
+                   "(or confirm the motion detector's spot): the line between the clicks is its heading" % (
+                       r.name, hd["L"]))
+        fn = getattr(self, "place_fn", None)
+        if fn is not None:
+            try:
+                fn(r.name, hd["p0"], stage="heading", first=hd["p0"], drive_cm=hd["L"], sigma_cm=hd["sig"])
+            except TypeError:
+                fn(r.name, hd["p0"])
+            except Exception:  # noqa: BLE001
+                pass
+
+    def on_place(self, name, ans):
+        """A person's click (place_click answer: x, y, sigma_cm, heading or None): the robot's position is set there and
+        its error sum restarts at the click's own accuracy; the heading too if the nose was clicked (else its gyro's
+        heading, whose doubt keeps growing slowly). The next camera fix's residual is logged by the host."""
+        r = self.R.get(name)
+        if r is None:
+            return
+        x, y, sig = float(ans["x"]), float(ans["y"]), float(ans["sigma_cm"])
+        h = ans.get("heading")
+        h = float(h) if h is not None else self.heading(r)
+        if ans.get("stage") == "heading":
+            r.hd_drive = None
+            if ans.get("heading") is not None:
+                self.event(r, "heading from two clicks", "%.0f deg +- %.1f (clicks %.1f cm apart)" % (
+                    h, ans.get("heading_pm") or 0.0, ans.get("drive_seen_cm") or 0.0))
+                self.counts["heading_clicks"] = self.counts.get("heading_clicks", 0) + 1
+        own0 = (r.own[1], r.own[2]) if r.own is not None else None
+        r.place = dict(t=self.t, x=x, y=y, own=own0, how=ans.get("how", "click"))
+        self.out(r, "fpose %.2f %.2f %.2f %.2f %.2f" % (x, y, h, max(1.0, sig), 3.0 if ans.get("heading") is not None
+                                                        else 10.0))
+        if r.own is not None:
+            r.own = (r.own[0], x, y, h) + tuple(r.own[4:])
+        if r.lost is not None:
+            r.lost.update(base=sig, drive=0.0, turn=0.0, after_turn=0.0, at=(x, y))
+        r.bubble = sig
+        r.pc = None
+        try:
+            if r.fp is not None:
+                self.fp_fix(r, self.t, x, y, ans.get("heading"), sig, "click")
+        except Exception:  # noqa: BLE001
+            pass
+        r.place_asked = None
+        r.busy_until = self.t
+        if r.stopped_hard:
+            self.close_break(r)
+        if ans.get("stage", "position") == "position" and HEADING_CLICKS:
+            # (Nick 13:01) its heading: a straight drive as long as is safe, then a second click
+            L = self.heading_drive_cm(r, (x, y), sig)
+            if L >= 2.0 * sig:               # shorter, the two clicks could not tell a heading at all (+- > 35 deg)
+                tr = Traj.move(self.t + 0.2, (x, y), h, 0.0, L, BACK_V, m0=self.margin0(r))
+                if all(clearance_profile(tr, o.traj, now=self.t)[-1] >= REFLEX_CC for o in self.others(r)):
+                    r.hd_drive = dict(p0=(x, y), L=L, sig=sig, t=self.t)
+                    mv = dict(kind="heading drive", cell=None, turn=0.0, L=L, v=BACK_V, t0=self.t, p0=(x, y), h0=h,
+                              h1=h, end=tr.end, phase="turn", n=r.n_moves + 1, drive_id=None, turn_id=None,
+                              t_drive=None, adj_scale=1.0, rev=False)
+                    mv["drive_id"] = self.send_step(r, "fs %%d D %.2f %.2f %.2f %.2f %.2f %.2f 0 -" % (
+                        x, y, tr.end[0], tr.end[1], h, BACK_V))
+                    r.move, r.traj, r.mode = mv, tr, "move"
+                    r.n_moves += 1
+                    self.event(r, "heading drive", "%.1f cm straight (the most its fresh +- %.1f cm and body allow): "
+                               "its heading will be +- %.0f deg from the two clicks" % (
+                                   L, sig, math.degrees(math.atan(sig * math.sqrt(2) / L))))
+                    self.pump(r)
+        self.counts["placed"] = self.counts.get("placed", 0) + 1
+        self.event(r, "placed by a click", "%s set at %.1f, %.1f (+- %.1f cm%s, %s): it moves again with a new running "
+                   "total" % (r.name, x, y, sig, ", heading %.0f deg" % h if ans.get("heading") is not None else "",
+                              ans.get("how", "click")))
 
     def blind_stop(self, r, p, v=5.0):
         """(e13, CLAUDE.md "never give up") True when this lost robot's whole possible error could reach an edge: its

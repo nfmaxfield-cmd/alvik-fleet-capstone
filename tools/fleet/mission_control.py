@@ -1322,6 +1322,13 @@ class Handler(BaseHTTPRequestHandler):
                 if not S.tag:
                     return self._send(404, {"error": "Visit points in an order needs a site with roof tags"})
                 return self._send(200, clean(S.start.visit_points(cam)))
+            if path == "/api/place":                   # (e13) held robots waiting for a person's click
+                return self._send(200, clean(S.start.place_state()))
+            if path == "/api/place/picture":           # (e13) the picture of the first click, beside the live one
+                from urllib.parse import parse_qs
+                q_ = parse_qs(urlparse(self.path).query)
+                b = S.start.place_picture((q_.get("robot") or [""])[0], (q_.get("cam") or ["overhead"])[0])
+                return self._send(200, b, "image/jpeg") if b else self._send(404, {"error": "no picture"})
             if path == "/api/frame":
                 from urllib.parse import parse_qs
                 cam = (parse_qs(urlparse(self.path).query).get("cam") or ["overhead"])[0]
@@ -1478,6 +1485,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, S.setup_start(d))
                 if path == "/api/setup/board_away":
                     return self._send(200, S.setup_board_away())
+                if path == "/api/place/click":          # (e13) the click (or a known point) for a held robot
+                    return self._send(200, clean(S.start.place_click(d, who=self.client_address[0])))
                 if path.startswith("/api/tags/") or path.startswith("/api/sync") or path in ("/api/production",
                                                                                          "/api/production/experiment"):
                     if not S.tag:

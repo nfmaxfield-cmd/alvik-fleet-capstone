@@ -69,6 +69,32 @@ edge facing it: it never came closer than 22 cm** (it moved 63 cm, inward). No f
 (simulator). The blind error per cm (0.07) was measured on drives up to 40 cm; beyond that it is extrapolated
 (Sweep 2).
 
+**Where the error sum could reach an edge: a person shows the run where it is** (Nick 12:56 and 13:01, CLAUDE.md). The
+held robot asks: NEEDS A HAND in the terminal with Mission Control's address, and a card in Mission Control with each
+camera's live picture, the robot's name and its last known spot ringed. One click on the robot is projected through
+that camera's model at roof height (`place_click.py`, reusing e11's webcam-click model lookup); its position is set and
+its error sum restarts at the click's own accuracy, **derived**: one pixel's worth of table there (0.2 cm at the school
+camera) combined with the person's aim, taken as a click anywhere on the 9.5 cm roof (9.5 / sqrt 12 each way, 3.9 cm)
+until 10 logged clicks with a residual measure it (only clicks the robot had not driven 2 cm away from count). The
+Alvik is a cube, so the **heading** comes from two clicks: after the first, it drives straight as far as its fresh error
+sum + body + stop stay inside the edge rule in any direction (L = (edge distance - sigma - half diagonal - stop) / 1.07,
+and clear of the other robots), stops, and the person clicks it again (the card shows each camera's picture at the first
+click beside the live one); the line between the clicks is its heading, +- atan(sigma sqrt 2 / L). When the motion
+detector saw the drive's end (an unclaimed sighting at the drive's length), its spot is offered as the second click to
+confirm. If no camera shows it: put it on a sticker and pick that point. Every click is logged (`clicks.csv` in the
+questions folder: who, when, camera, pixel, table spot, sigma, and the residual at the next camera fix with how far it
+drove meanwhile). Switch `MIRLT_HEADING_CLICKS=0` (one click, the gyro's heading kept).
+
+Fast simulator, scripted clicks (1 px off the truth; test): Center blind near the x = 0 edge asked; first click sigma
+3.88 cm (0.21 cm a pixel + the derived aim); heading drive 32 cm; the second click's heading matched the robot's true
+heading (28.1 vs 28.1 deg; +- atan(3.88 x 1.41 / 32) = 9.7 deg stated); it moved on; the residual at the next camera
+fix 2.2 cm after 26 cm driven. Mission Control card (practice, staged request; the ring is the request's spot, not the
+practice room's robot):
+
+![second click](../screenshots/2026-11-10/e13-feature-click-heading-second-click-card.png)
+
+Free roam only: missions (run_plan) and the calibration hold and ask for a hand but do not take a click yet.
+
 **The calibration never gives up either** (coordinator, from today's school calibration 20261110-121215, AL-EB54 with
 tag 4: after "go 63 P11" the tag was lost, the recovery reached its 8 cm bubble, wiggled, held, then "ENDED: the camera
 lost the roof tag for over 30 s"). Now a lost tag holds with **no time limit** (standing still, the robot gets no
@@ -215,7 +241,7 @@ directions with mockups (A guided steps, B one page top to bottom, C cockpit), t
 
 ### Tests
 
-`tools/fleet/tests/test_e13.py`: 31. Full fleet suite, final code: see the end of this report.
+`tools/fleet/tests/test_e13.py`: 33. Full fleet suite, final code: see the end of this report.
 
 ## Conclusion
 
@@ -240,7 +266,7 @@ directions with mockups (A guided steps, B one page top to bottom, C cockpit), t
 
 ## Appendix: switches added (all decided automatically; the old way kept)
 
-`MIRLT_ROAM_READABLE=0`, `MIRLT_STRAY_RETURN=0`, `MIRLT_EDGE_PARK=1`, `MIRLT_CALIB_GIVEUP=1`, `MIRLT_CALIB_MOTION=0`, `MIRLT_BLIND_RULE=cap`, `MIRLT_IDLE_SLEEP_MIN=0`, `MIRLT_NOPIC_RULE=off`,
+`MIRLT_ROAM_READABLE=0`, `MIRLT_STRAY_RETURN=0`, `MIRLT_EDGE_PARK=1`, `MIRLT_CALIB_GIVEUP=1`, `MIRLT_CALIB_MOTION=0`, `MIRLT_BLIND_RULE=cap`, `MIRLT_HEADING_CLICKS=0`, `MIRLT_IDLE_SLEEP_MIN=0`, `MIRLT_NOPIC_RULE=off`,
 `MIRLT_FRAME_WATCH_GAP=fixed`, `MIRLT_FEED_CHECK=0`, `MIRLT_CAMERA_DISCOVERY=on` (new step, off), `MIRLT_CAMERA_NAMES=typed`,
 `MIRLT_CORNER_CONFIRM=auto`, `MIRLT_ML_DETECTOR=auto` (new source, off).
 
@@ -249,6 +275,8 @@ directions with mockups (A guided steps, B one page top to bottom, C cockpit), t
 - School free roam on the robots: none past x 220 cm; stray returns counted (events).
 - A real robot put at the home edge, then moved in by hand: REJOINED within a few seconds; and the real-path
   simulator's move injection traced.
+- Click-to-locate on the Pi with a person: the click's residual against the camera when the tag reads again (10+
+  clicks to replace the derived aim), and the two-click heading against the camera's heading.
 - The blind rule on the robots: cover a roof tag for 60 s in the middle of a free roam, then near an edge; the blind
   distance and the reacquire jump (lost.csv) against the bubble.
 - A real calibration with the tag covered by hand for a minute mid-leg: NEEDS A HAND, then carries on when uncovered;
@@ -277,6 +305,8 @@ directions with mockups (A guided steps, B one page top to bottom, C cockpit), t
 - The blind rule drives far blind (275 cm in the test) on a bubble whose growth (0.07 cm per cm) was measured only up to
   40 cm; a robot with a bad gyro or slipping wheels drifts faster than that model says, and only the camera's return
   shows it (the reacquire jump is logged).
+- The click's aim (3.9 cm) is derived from an assumption (a click anywhere on the roof, uniformly) until real clicks
+  measure it; a careful person clicks much better, so the first headings will be stated more doubtful than they are.
 - The calibration's hold has no time limit: an unattended calibration whose robot is lost waits (awake) until Stop.
 - The "still following" explanation of the 11:54 timeout is a hypothesis from the code, not from that run's logs.
 - The battery floor as the end of a hand wait drains a waiting robot to 10 % (about 19 % an hour awake, e12).

@@ -824,6 +824,83 @@ class Starter:
             out["words"] = "%s %s" % (out.get("words") or "", out["sleep_words"])
         return out
 
+    # -- (e13, Nick 12:56) a held robot placed by a person's click -----------------------------------------------
+    def place_model(self, cam):
+        """The camera model Visit points uses for its webcam clicks (the setup's fit; the practice room's in practice)."""
+        S = self.S
+        sys.path.insert(0, os.path.join(os.path.dirname(HERE), "experiment"))
+        import e02_camera as CAM
+        pr = self.practice()
+        dirs = ([S.tag.sim_cal_dir()] if (pr and S.tag) else []) + ([S.tag.cal_dir] if S.tag else [])
+        if pr:
+            lr = (getattr(S, "last_runs", {}) or {}).values()
+            dirs = [os.path.join(os.path.dirname(r_), "tagcal") for r_ in lr if r_] + dirs
+        for d_ in dirs:
+            p_ = os.path.join(d_, cam + ".json")
+            if os.path.exists(p_):
+                return CAM.load_camera(p_)
+        return None
+
+    def place_state(self):
+        import place_click as PC
+        site = self.S.site or {}
+        z = float((site.get("tags") or {}).get("height_cm") or 6.0)
+        rq = PC.open_requests()
+        cams = {}
+        for cam in ("overhead", "side"):
+            m = None
+            try:
+                m = self.place_model(cam)
+            except Exception:  # noqa: BLE001
+                m = None
+            if m is None:
+                continue
+            last = {}
+            for q in rq:
+                if q.get("last"):
+                    u, v = m.project((q["last"][0], q["last"][1], z))
+                    if u == u and v == v:
+                        last[q["robot"]] = [round(float(u), 1), round(float(v), 1)]
+            cams[cam] = {"size": [int(v) for v in m.image_size], "last_px": last}
+        pts = {}
+        try:
+            import sticker_points as SP
+            pts = {k: list(v)[:2] for k, v in (SP.points_cm(site)[0] or {}).items()}
+        except Exception:  # noqa: BLE001
+            pts = {}
+        return {"requests": rq, "cams": cams, "points": pts, "z_cm": z}
+
+    def place_click(self, d, who=""):
+        import place_click as PC
+        robot, cam = str(d.get("robot")), str(d.get("cam") or "overhead")
+        if d.get("point"):
+            pts = self.place_state()["points"]
+            if d["point"] not in pts:
+                raise ValueError("no point %s on this table" % d["point"])
+            return PC.point(robot, d["point"], pts[d["point"]], who=who)
+        if d.get("accept"):
+            return PC.accept_suggest(robot, who=who)          # the motion detector's spot, confirmed by the person
+        m = self.place_model(cam)
+        if m is None:
+            raise ValueError("no camera model for %s: click the map's point instead" % cam)
+        z = float(((self.S.site or {}).get("tags") or {}).get("height_cm") or 6.0)
+        try:                                                  # the picture clicked: shown beside the next one
+            b = self.S.frame(cam) or (self.S.tag.picture_jpeg(cam) if self.S.tag else None)
+            if b:
+                with open(os.path.join(PC.qdir(), "place-%s-first-%s.jpg" % (robot, cam)), "wb") as f:
+                    f.write(b)
+        except Exception:  # noqa: BLE001
+            pass
+        return PC.click(robot, cam, m, float(d["u"]), float(d["v"]), z, who=who)
+
+    def place_picture(self, robot, cam):
+        import place_click as PC
+        p = os.path.join(PC.qdir(), "place-%s-first-%s.jpg" % (robot, cam))
+        if os.path.exists(p):
+            with open(p, "rb") as f:
+                return f.read()
+        return None
+
     def edge_parked_words(self, folder, key="words"):
         """(e12, Nick 10 Nov) The newest edge_parked.json under the run's folder (free roam writes it when it parks a
         robot at an edge): one line per robot, naming it, where it is, and that someone must move it."""

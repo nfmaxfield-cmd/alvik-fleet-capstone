@@ -561,3 +561,4 @@ One line per picture: what it shows (feature or problem), and where it comes fro
 - `2026-11-10/audit-23-details-3-production.png`: **problem.** Audit: Details, 3 Production. Build e13
 - `2026-11-10/audit-24-details-4-run.png`: **problem.** Audit: Details, 4 Run (engineering fields at the same level as the run's choices). Build e13
 - `2026-11-10/audit-25-details-5-review.png`: **problem.** Audit: Details, 5 Review. Build e13
+- `2026-11-10/e13-feature-click-heading-second-click-card.png`: **feature.** Mission Control (practice, staged request): a held robot's card after its heading drive: each camera's picture at the first click beside the live one, the motion detector's spot offered to confirm. Build e13

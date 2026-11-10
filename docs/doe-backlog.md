@@ -674,6 +674,7 @@ check of the derived rule.
 | Camera check's first wait (camera_feed WAIT_S) | 12 s, CHOSEN | no DOE; a logs check: the bridge's start to its first picture in real runs (bridge.txt) | Logs | open |
 | A school run folder is finished after this long quiet (school_pull SCHOOL_QUIET_MIN) | 15 min, CHOSEN | no: every run writes at least once a minute | - | ruled out |
 | Robots sleep this long after a run (idle_after_run IDLE_MIN) | 10 min, Nick's number | no: Nick's choice | - | ruled out |
+| A person's click aim on a robot (place_click: 9.5 / sqrt 12 x sqrt 2 = 3.9 cm until measured) | derived from a uniform-click assumption | no DOE: a logs measure, built in (learn_aim: the 95th percentile of logged residuals of clicks the robot had not driven away from, once 10 exist) | Logs (10+ clicks) | open |
 | Trained detector on every Nth picture (tag_bridge ML_EVERY) | 3, CHOSEN | no DOE: a load cap; set from the Pi's measured ms a pass and the heat tracker | Pi | open |
 
 ## Already set by data

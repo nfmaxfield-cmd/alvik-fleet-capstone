@@ -563,3 +563,67 @@ def test_blind_robot_far_from_edges_drives_on_and_one_near_an_edge_never_closes_
     assert e2 >= 21.0 and f2 == 0                                      # near the edge: never closer than it started
     for f in ("calib_run.py", "run_plan.py"):
         assert 'MIRLT_BLIND_RULE", "edge"' in open(os.path.join(FLEET, f)).read(), f
+
+
+def test_a_held_robot_is_placed_by_scripted_clicks_and_its_heading_comes_from_a_safe_drive(tmp_path, monkeypatch):
+    """Nick 12:56 / 13:01: blind and held near an edge -> asked; a click (projected through the camera model at roof
+    height) sets it and restarts its error sum at the click's derived accuracy; it drives straight as far as that sum
+    and its body allow, a second click gives its heading (+- atan(sigma sqrt 2 / drive)); it moves again; clicks and
+    the residual at the next camera fix are logged."""
+    import freeroam_fastsim as S
+    import place_click as PC
+    import tag_cam as TCAM
+    monkeypatch.setenv("MIRLT_QUESTIONS_DIR", str(tmp_path))
+    board = (0, 0, 200, 160)
+    cam = TCAM.TagCamera((100, 80, 180), (100.01, 80, 0), size=(1280, 960), hfov_deg=74, table=board)
+    model = cam.true_model()
+    sim = S.Sim(5, 0.04, dead_robot=False, pi_freeze=False, dropouts=False, board=board,
+                starts={"Center": (30, 80, 180)}, cam_gaps=[("Center", 2.0, 60.0)])
+    c = sim.ctrl
+    asked, done, heads = [], [], []
+    c.place_fn = lambda n, p, **kw: (asked.append((c.t, kw.get("stage", "position"))), PC.request(n, p, **kw))
+    c.place_residual_fn = lambda n, pl, x, y, res: (done.append(res), PC.residual(
+        n, pl["t"], pl["x"], pl["y"], x, y, c.t, driven_cm=pl.get("driven_cm"), res_cm=res))
+    orig_ev = c.event
+    c.event = lambda r, k, w: (heads.append(w) if k == "heading from two clicks" else None, orig_ev(r, k, w))[1]
+    orig = c.tick
+    clicked = set()
+
+    def tick(t):
+        b = sim.bots["Center"]
+        for (t0, stage) in asked:
+            if stage not in clicked and t > t0 + 2.0:
+                u, v = model.project((b.x, b.y, 6.0))
+                PC.click("Center", "overhead", model, u + 1.0, v - 1.0, 6.0, who="test")
+                clicked.add(stage)
+                if stage == "heading":
+                    c.truth_th = b.th                                   # its true heading after the drive (deg)
+        a = PC.take_answer("Center")
+        if a is not None:
+            c.on_place("Center", a)
+        return orig(t)
+    c.tick = tick
+    sim.run()
+    stages = [s_ for _, s_ in asked]
+    assert stages[:2] == ["position", "heading"], stages
+    assert c.counts.get("placed", 0) >= 2 and c.counts.get("heading_clicks") == 1
+    rows = list(__import__("csv").DictReader(open(tmp_path / "clicks.csv")))
+    c2 = next(r for r in rows if r["how"].startswith("click 2"))
+    clk = next(r for r in rows if r["how"] == "click")
+    assert 0.3 < float(clk["sigma_cm"]) < 5.0 and float(clk["px_cm"]) < 0.5 and clk["who"] == "test"
+    h = float(c2["heading_deg"])
+    err = abs((h - c.truth_th + 180) % 360 - 180)
+    assert err < 15.0, (h, c.truth_th)                                # the drive was long enough to tell its heading
+    assert heads and "+-" in heads[0]
+    assert done and any(r["residual_cm"] and r["driven_cm"] for r in rows)
+    # (only clicks it had not driven away from teach the aim: learn_aim)
+
+
+def test_click_aim_learned_only_from_clicks_the_robot_had_not_driven_away_from(tmp_path, monkeypatch):
+    import place_click as PC
+    monkeypatch.setenv("MIRLT_QUESTIONS_DIR", str(tmp_path))
+    assert PC.learn_aim() is None
+    for k in range(PC.CLICKS_TO_LEARN):
+        PC.residual("A", 0, 0, 0, 0, 0, 1, driven_cm=0.5, res_cm=1.0 + 0.1 * k)
+        PC.residual("A", 0, 0, 0, 0, 0, 1, driven_cm=80.0, res_cm=20.0)        # after a long blind drive: not the aim
+    assert abs(PC.learn_aim() - 1.9) < 1e-6

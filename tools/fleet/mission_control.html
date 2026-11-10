@@ -1245,6 +1245,40 @@ $("stopall").onclick = async () => { if (S && S.start) return stopAll(); try { a
 
 $("details").onchange = e => { document.body.classList.toggle("details", e.target.checked); render(); };
 load().then(() => { if (S.run && S.run.running) stPoll(); });
+
+// (e13, Nick 12:56) a held robot: its possible error could reach an edge. The person clicks it on any camera's live
+// picture (and optionally its nose); or puts it on a sticker and picks that point. The run takes it from there.
+let placeState = null;
+async function placePoll() {
+  try {
+    const r = await fetch("/api/place"); if (!r.ok) return;
+    placeState = await r.json(); placeRender();
+  } catch (e) { /* the page carries on */ }
+}
+function placeRender() {
+  let box = document.getElementById("placebox");
+  if (!box) { box = document.createElement("div"); box.id = "placebox"; box.style.cssText = "max-width:1180px;margin:10px auto;padding:0 18px"; document.body.insertBefore(box, document.body.children[1] || null); }
+  const P = placeState || {}; const rq = P.requests || [];
+  if (!rq.length) { box.innerHTML = ""; return; }
+  const cams = Object.entries(P.cams || {});
+  box.innerHTML = rq.map(q => `<div class="card" style="border:2px solid var(--red)" data-robot="${esc(q.robot)}"><h2 style="color:var(--red)">${esc(q.robot)} needs a hand: click it in a picture</h2>
+    <p class="small" style="margin:4px 0 8px">${q.stage === "heading" ? `It drove ${esc(q.drive_cm)} cm straight after your first click. Click the middle of its roof again in a live picture: the line between your two clicks is its heading (+- about ${Math.round(Math.atan((q.sigma_cm || 1) * Math.SQRT2 / Math.max(1, q.drive_cm || 1)) * 180 / Math.PI)} deg). The first picture is on the left of each pair.` : `It holds: ${esc(q.why || "its possible error could reach an edge")}. Click the middle of ${esc(q.robot)}'s roof in any picture. The orange ring is where the run last had it.`}</p>
+    ${q.suggest ? `<div class="row"><span class="small">Offered: ${esc(q.suggest.src)} saw it at ${q.suggest.x}, ${q.suggest.y} cm.</span> <button class="p pacc">Yes, that is where it is</button></div>` : ""}
+    <div class="row" style="align-items:flex-start;margin-top:6px">${cams.length ? cams.map(([c, m]) => { const lp = (m.last_px || {})[q.robot]; return `<div style="display:flex;gap:8px;flex:1 1 100%;align-items:flex-start">${q.stage === "heading" ? `<figure style="margin:0;flex:1 1 0"><img src="/api/place/picture?robot=${encodeURIComponent(q.robot)}&cam=${esc(c)}&t=${Math.round(q.t)}" alt="${esc(c)} picture at the first click" style="width:100%;border-radius:8px;display:block;opacity:.85" onerror="this.parentElement.style.display='none'"><figcaption class="small muted">${esc(c)}: at your first click</figcaption></figure>` : ""}<figure style="margin:0;flex:1 1 0"><div style="position:relative;line-height:0"><img class="pimg" data-cam="${esc(c)}" data-w="${m.size[0]}" data-h="${m.size[1]}" src="/api/frame?cam=${esc(c)}&t=${Date.now()}" onerror="if(!this.dataset.f){this.dataset.f=1;this.src='/api/tags/picture?cam=${esc(c)}&t='+Date.now();}" alt="${esc(c)} live picture: click ${esc(q.robot)}" style="width:100%;border-radius:8px;cursor:crosshair;display:block"><svg viewBox="0 0 ${m.size[0]} ${m.size[1]}" preserveAspectRatio="none" style="position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none">${lp ? `<circle cx="${lp[0]}" cy="${lp[1]}" r="24" fill="none" stroke="#e8590c" stroke-width="6" stroke-dasharray="10 6"/>` : ""}</svg></div><figcaption class="small muted">${esc(c)}${q.stage === "heading" ? ": now (click here)" : ""}</figcaption></figure></div>`; }).join("") : `<p class="small">No camera model here: use a point below.</p>`}</div>
+    <div class="row" style="margin-top:8px"><span class="small">No camera shows it? Put it on a sticker, then pick it:</span> <select class="ppoint"><option value="">point...</option>${Object.keys(P.points || {}).map(k => `<option>${esc(k)}</option>`).join("")}</select> <button class="b pgo">It is on that point</button></div></div>`).join("");
+  box.querySelectorAll(".card").forEach(card => {
+    const robot = card.dataset.robot;
+    if (card.querySelector(".pacc")) card.querySelector(".pacc").onclick = async () => { try { await api("/api/place/click", {robot, accept: true}); flash(`${robot}: the offered spot confirmed`); placePoll(); } catch (e) { flash(e.message, true); } };
+    card.querySelectorAll("img.pimg").forEach(im => { im.onclick = async ev => {
+      const b = im.getBoundingClientRect(); const u = (ev.clientX - b.left) / b.width * (+im.dataset.w), v = (ev.clientY - b.top) / b.height * (+im.dataset.h);
+      const body = {robot, cam: im.dataset.cam, u, v};
+      try { const r = await api("/api/place/click", body); flash(`${robot} set at ${r.x}, ${r.y} cm (+- ${r.sigma_cm} cm): it moves again`); placePoll(); } catch (e) { flash(e.message, true); }
+    }; });
+    card.querySelector(".pgo").onclick = async () => { const pt = card.querySelector(".ppoint").value; if (!pt) return;
+      try { const r = await api("/api/place/click", {robot, point: pt}); flash(`${robot} set on ${pt}: it moves again`); placePoll(); } catch (e) { flash(e.message, true); } };
+  });
+}
+setInterval(placePoll, 2000); placePoll();
 </script>
 </body>
 </html>

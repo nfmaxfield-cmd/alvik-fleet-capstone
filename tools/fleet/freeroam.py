@@ -185,6 +185,10 @@ class Runner:
                                       wiggle=None if old else (lambda n, why: self.ctrl.identity_wiggle(
                                           self.ctrl.R[n], why)))
         self.ctrl.fix_fn = self.fix_to_robot
+        self.ctrl.place_fn = self.ask_place          # (e13, Nick 12:56) a held robot: a person clicks it on a picture
+        self.ctrl.place_residual_fn = self.place_residual
+        self.ctrl.place_cancel_fn = lambda n: __import__("place_click").cancel(n)
+        self.place_poll_t = 0.0
         self.disc_drv = None                 # (e10, C1) the start's proof drive while it runs
         self.cam_fix = None                  # (e10) the calibration the discovery chose (None: as configured)
         self.cam_mirror = False
@@ -339,6 +343,43 @@ class Runner:
                 json.dump(ws.summary(), f, indent=1, default=str)
         except OSError as e:
             say("(the workspace could not be saved: %s)" % e)
+
+    # -- (e13) a person's click on a held robot ---------------------------------------------------------------------
+    def ask_place(self, name, last, stage="position", first=None, drive_cm=None, sigma_cm=None):
+        import place_click as PC
+        PC.request(name, last, run=os.path.basename(self.dir.rstrip("/")),
+                   why="its possible error could reach an edge" if stage == "position" else
+                   "it drove %.0f cm straight to show its heading: click it again" % (drive_cm or 0),
+                   stage=stage, first=first, drive_cm=drive_cm, sigma_cm=sigma_cm)
+        import socket as _s
+        say("!! %s NEEDS A HAND: click it on a camera's picture in Mission Control (http://%s:%d, the card at the top), "
+            "or put it on a sticker and click that point on the map; it moves again from there" % (
+                name, _s.gethostname(), 8095))
+
+    def place_poll(self):
+        if time.time() - self.place_poll_t < 0.5:
+            return
+        self.place_poll_t = time.time()
+        import place_click as PC
+        for n, r in self.ctrl.R.items():
+            if r.__dict__.get("place_asked") is None:
+                continue
+            hd = r.__dict__.get("hd_drive")
+            if hd is not None and hd.get("asked") and not hd.get("suggested"):
+                # (Nick 13:01) the motion detector / lock-on saw the drive's end: offered as the second click
+                for u in list(getattr(self.layer, "unclaimed", []) or []):
+                    d_ = math.hypot(u["x"] - hd["p0"][0], u["y"] - hd["p0"][1])
+                    if abs(d_ - hd["L"]) <= max(3.0, 2 * hd["sig"]):         # (the layer keeps only recent ones)
+                        PC.set_suggest(n, u["x"], u["y"], "the motion detector", 1.0)
+                        hd["suggested"] = True
+                        break
+            a = PC.take_answer(n)
+            if a is not None:
+                self.ctrl.on_place(n, a)
+
+    def place_residual(self, name, pl, x, y, res):
+        import place_click as PC
+        PC.residual(name, pl["t"], pl["x"], pl["y"], x, y, self.ctrl.t, driven_cm=pl.get("driven_cm"), res_cm=res)
 
     # -- out ---------------------------------------------------------------------------------------------------
     def send(self, name, text):
@@ -546,6 +587,10 @@ class Runner:
                                                              if ev.get("type") == "fix"]
             evs = [e for due, e in self.cam_held if due <= now]
             self.cam_held = [(due, e) for due, e in self.cam_held if due > now]
+        try:
+            self.place_poll()                         # (e13) a person's click on a held robot
+        except Exception:  # noqa: BLE001
+            pass
         try:                                         # (e13) which sources tracked each robot, each second
             sl = self.__dict__.get("srclog")
             if sl is None:
