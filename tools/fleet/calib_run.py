@@ -61,7 +61,7 @@ for p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recognit
 
 import numpy as np   # noqa: E402
 
-VERSION = "2026-11-10h"   # 11-10h: the never-give-up hold makes find-me wiggles (when its turning circle + error is clear) so the motion detector can find it and the recovery bring it back (Nick 14:32: motion, not hands). 11-10e13 (e13): never give up (the recovery drives blind while its bubble + stop cannot reach the edge margin, no 8 cm / 40 cm caps: MIRLT_BLIND_RULE=cap; a lost tag holds with no time limit, asks for a hand; cam_pose_sure and every unguarded camera pose wait the same way; MIRLT_CALIB_GIVEUP=1 the 30 s end), readability per tag, TURN DID NOT SETTLE, stop resent after the curve phase, the motion detector on in its bridge; the camera check before binding (camera_feed: no pictures is said as that, never the robot or tag); tracked for the sleep after a run.
+VERSION = "2026-11-10i"   # 11-10i: the binding looks over longer windows and waits for a fresh read after each wiggle half (a tag that reads only now and then, school 15:00). 11-10h: the never-give-up hold makes find-me wiggles (when its turning circle + error is clear) so the motion detector can find it and the recovery bring it back (Nick 14:32: motion, not hands). 11-10e13 (e13): never give up (the recovery drives blind while its bubble + stop cannot reach the edge margin, no 8 cm / 40 cm caps: MIRLT_BLIND_RULE=cap; a lost tag holds with no time limit, asks for a hand; cam_pose_sure and every unguarded camera pose wait the same way; MIRLT_CALIB_GIVEUP=1 the 30 s end), readability per tag, TURN DID NOT SETTLE, stop resent after the curve phase, the motion detector on in its bridge; the camera check before binding (camera_feed: no pictures is said as that, never the robot or tag); tracked for the sleep after a run.
 VERSION_10G = "2026-11-10g"     # 11-10g: a standing robot is never given up for sparse tag reads: it is measured over longer windows (Nick 13:34; dim light). 11-10f: the start waits for the camera fix after the wiggle (dim light, ~7 fps: refused at once, school 13:25). 11-10e: a run ended for poor tag reads DOES try to park again (Nick 12:48: never give up on getting back to where it is seen); it drives only with a camera fix (cam_pose_sure waits for one). 11-10d: no crash parking with no camera fix (RunEnd, caught: "Could not park"). 11-10c: Phase A waits for the camera fix instead of crashing on None (school 12:35). 11-10b (e12, Nick 10 Nov): the curve phase (phase R: constant-curvature arcs left and right at free roam's radii and two speeds, fitted from the camera, arc_k_scale / arc_d_scale saved when they agree; --arc-phase auto/on/off), points in your order (--visit-order), the proven workspace for the tours' room, the camera self-check at the start. VERSION_10A was:
 VERSION_10A = "2026-11-10a"     # 11-10a: a leftover camera reader holding port 5011 is stopped first (stale_bridge.py). 11-05i (9 Nov, school): a tripped stop mid-tour crashed the run (TypeError: ev() got two
                              # values for kind); the trip event now says stop_kind. VERSION_H was:
@@ -986,21 +986,38 @@ def bind_by_wiggle(robots, eye, wiggle_deg=90.0, pause_s=1.0, log=say, moved_deg
         before = {}
         t0 = time.time()
         time.sleep(1.0)
-        for i in eye.seen_ids(2.0):
-            rs = eye.window(i, t0, time.time())
-            if rs:
-                before[i] = rs[-1][3]
+        # (11-10i, school 15:00: AL-EB54 at P15, where tag 4 reads only now and then, was refused after 2 s) a standing
+        # robot cannot drift: look over longer windows (2, 4, 8, 15 s) before calling the table empty
+        for w in (2.0, 4.0, 8.0, STILL_MEASURE_MAX_S):
+            if w > 2.0:
+                log("  no roof tag read yet: looking over %.0f s (a tag far from the camera reads only now and then)"
+                    % w)
+                time.sleep(w - 2.0)
+            for i in eye.seen_ids(w):
+                rs = eye.window(i, time.time() - w, time.time())
+                if rs:
+                    before[i] = rs[-1][3]
+            if before:
+                break
         if not before:
             feed_refusal(eye)                  # (e13) a camera sending no pictures is said as that, never the robot's
             raise BindError("no roof tag is seen by the camera (nothing to bind %s to). Check that the robot is in "
                             "zones 1-2 and its tag faces up, and that the camera's picture is sharp." % rb.name)
+        def fresh(since, wait):
+            # (11-10i) each tag's newest heading read after `since`, waiting (standing still) up to `wait` s for one
+            t_end = time.time() + wait
+            while time.time() < t_end and any((eye.last(i) or (0,))[0] < since for i in before):
+                time.sleep(0.1)
+            return {i: (eye.last(i) or (0, 0, 0, before[i]))[3] for i in before}
         r1 = rb.leg("turn", wiggle_deg_)
-        mid = {i: (eye.last(i) or (0, 0, 0, before[i]))[3] for i in before}
-        time.sleep(pause_s)
-        mid2 = {i: (eye.last(i) or (0, 0, 0, before[i]))[3] for i in before}
+        t_r1 = time.time()
+        mid = fresh(t_r1, pause_s)
+        time.sleep(max(0.0, pause_s - (time.time() - t_r1)))
+        mid2 = fresh(t_r1, STILL_MEASURE_MAX_S)
         r2 = rb.leg("turn", -wiggle_deg_)
+        t_r2 = time.time()
         time.sleep(0.6)
-        after = {i: (eye.last(i) or (0, 0, 0, before[i]))[3] for i in before}
+        after = fresh(t_r2, STILL_MEASURE_MAX_S)
         if r1["result"] != "done" or r2["result"] != "done":
             raise BindError("%s did not do its wiggle (%s %s / %s %s)" % (rb.name, r1["result"], r1["info"],
                                                                          r2["result"], r2["info"]))
