@@ -61,7 +61,7 @@ for p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recognit
 
 import numpy as np   # noqa: E402
 
-VERSION = "2026-11-10e13"   # 11-10e13 (e13): the camera check before binding (camera_feed: no pictures is said as that, never the robot or tag); tracked for the sleep after a run.
+VERSION = "2026-11-10e13"   # 11-10e13 (e13): never give up (a lost tag holds with no time limit, asks for a hand; cam_pose_sure and every unguarded camera pose wait the same way; MIRLT_CALIB_GIVEUP=1 the 30 s end), readability per tag, TURN DID NOT SETTLE, stop resent after the curve phase, the motion detector on in its bridge; the camera check before binding (camera_feed: no pictures is said as that, never the robot or tag); tracked for the sleep after a run.
 VERSION_10G = "2026-11-10g"     # 11-10g: a standing robot is never given up for sparse tag reads: it is measured over longer windows (Nick 13:34; dim light). 11-10f: the start waits for the camera fix after the wiggle (dim light, ~7 fps: refused at once, school 13:25). 11-10e: a run ended for poor tag reads DOES try to park again (Nick 12:48: never give up on getting back to where it is seen); it drives only with a camera fix (cam_pose_sure waits for one). 11-10d: no crash parking with no camera fix (RunEnd, caught: "Could not park"). 11-10c: Phase A waits for the camera fix instead of crashing on None (school 12:35). 11-10b (e12, Nick 10 Nov): the curve phase (phase R: constant-curvature arcs left and right at free roam's radii and two speeds, fitted from the camera, arc_k_scale / arc_d_scale saved when they agree; --arc-phase auto/on/off), points in your order (--visit-order), the proven workspace for the tours' room, the camera self-check at the start. VERSION_10A was:
 VERSION_10A = "2026-11-10a"     # 11-10a: a leftover camera reader holding port 5011 is stopped first (stale_bridge.py). 11-05i (9 Nov, school): a tripped stop mid-tour crashed the run (TypeError: ev() got two
                              # values for kind); the trip event now says stop_kind. VERSION_H was:
@@ -1378,6 +1378,9 @@ class CalibRun:
         k = 0
         while True:
             # (11-10g) standing still it cannot drift: a longer window each time, never giving up (Ctrl+C / Stop ends)
+            if getattr(self, "_ending", False) and k >= 3:
+                # (e13) parking after the run's end: the end is not held forever
+                raise RunEnd("no camera fix of the roof tag while parking: the robot stays where it is")
             cam = self.cam_pose(min(STILL_MEASURE_MAX_S, MEASURE_S * (2 ** k)))
             if cam is not None:
                 return cam
@@ -1387,7 +1390,7 @@ class CalibRun:
             if self.stop_flag.is_set():
                 raise RunEnd("stopped (Ctrl+C or Mission Control's Stop)")
             if self.eye.age(self.tag) > 5.0:
-                self.hold_until_seen()
+                self.hold_until_seen()     # (e13) the never-give-up hold: NEEDS A HAND, motion sightings re-tried
             k += 1
 
     def odo_step(self, r):
@@ -1456,11 +1459,43 @@ class CalibRun:
                 nxt += LOST_GIVEUP_S
             time.sleep(0.1)
 
+    def light_words(self):
+        """(e13, school 12:45: the room lights went out) "the room got darker: the camera's brightness dropped from A to
+        B (-P %)" from the bridge's brightness.csv (its first rows against its last few), or "" when it did not drop by
+        the bridge's own LIGHT_WARN_FRAC."""
+        try:
+            import tag_bridge as TB
+            frac = float(TB.Bridge.LIGHT_WARN_FRAC)
+        except Exception:  # noqa: BLE001
+            frac = 0.15
+        host = getattr(self, "parent", None) or self
+        for d_ in (getattr(self, "folder", ""), getattr(host, "folder", "")):
+            p_ = os.path.join(d_ or "", "bridge", "brightness.csv")
+            if not d_ or not os.path.exists(p_):
+                continue
+            try:
+                with open(p_, newline="") as f:
+                    rows = [float(r["mean_grey"]) for r in csv.DictReader(f) if r.get("mean_grey")]
+            except (OSError, ValueError, KeyError):
+                return ""
+            if len(rows) < 20:
+                return ""
+            b0 = sorted(rows[:30])[len(rows[:30]) // 2]
+            b1 = sorted(rows[-10:])[5]
+            if b0 > 0 and (b0 - b1) / b0 >= frac:
+                return ("the room got darker: the camera's brightness dropped from %.0f to %.0f (-%.0f %%). Turn the "
+                        "lights back on" % (b0, b1, 100.0 * (b0 - b1) / b0))
+            return ""
+        return ""
+
     def hold_never_give_up(self):
         """(e13) Held where it stopped, still and safe, with no time limit (standing still, its risk does not grow):
         NEEDS A HAND said loudly at once and every HOLD_SAY_S (terminal, status, events); the roof tag seen again ->
         carry on; the bridge's motion detector (or lock-on) sighting it -> its position is known again: the recovery is
         tried once more from there, towards where the tag read well. Only Stop (or Ctrl+C) ends it."""
+        if getattr(self, "_ending", False):
+            # parking after the run ended: the run's end (report, upload, sleep) is not held up; it stays where it is
+            raise RunEnd("the roof tag is not read while parking: the robot stays where it is")
         t0 = time.time()
         said = -1e9
         tried_from = None
@@ -1492,8 +1527,9 @@ class CalibRun:
                 said = time.time()
                 w = ("%s NEEDS A HAND: the camera lost its roof tag %.0f s ago and it is held, still and safe, where it "
                      "stopped. Move it a hand's width back towards the middle of zones 1-2 (or wipe / turn its tag to "
-                     "the camera): it carries on by itself once the tag is read. Stop ends the calibration." % (
-                         getattr(self, "name", "the robot"), time.time() - t0))
+                     "the camera): it carries on by itself once the tag is read. Stop ends the calibration.%s" % (
+                         getattr(self, "name", "the robot"), time.time() - t0,
+                         (" " + self.light_words() + ".") if self.light_words() else ""))
                 say("!! " + w)
                 self.set_status(words=w)
                 self.ev("needs_a_hand", held_s=round(time.time() - t0, 1))
@@ -1700,6 +1736,17 @@ class CalibRun:
             # robot is standing still, so its position cannot drift: measure over a longer window each time instead of
             # ending the run (dim light: ~7 pictures a second and only some reads)
             tries += 1
+            if tries > 6 and os.environ.get("MIRLT_CALIB_GIVEUP", "0") == "1":
+                raise RunEnd("the camera reads the roof tag only now and then after the %s %.0f leg: the robot "
+                             "stopped where it is (more light on the table helps)" % (kind, value))
+            if tries == 7:
+                # (e13, school 12:45: the room lights went out, tag reads became intermittent and the run ended) a dim
+                # room is a reason to stand still safely and ask for light, never to end the run
+                lw = self.light_words()
+                say("!! %s: the camera reads its roof tag only now and then after the %s %.0f leg%s. It holds, still "
+                    "and safe, and carries on once the tag reads steadily." % (
+                        getattr(self, "name", "the robot"), kind, value, (": " + lw) if lw else ""))
+                self.ev("intermittent_reads", leg="%s %.0f" % (kind, value), light=lw)
             dur = min(STILL_MEASURE_MAX_S, MEASURE_S * (2 ** tries))
             if tries in (1, 3) or tries % 5 == 0:
                 say("  the robot stands still: the camera reads its tag only now and then, so it is measured over %.0f s"
@@ -1826,9 +1873,7 @@ class CalibRun:
         camera pose at the end."""
         tx, ty = self.S.aim(lab) if (isinstance(lab, str) and lab in self.S.points) else lab
         nm = name or str(lab)
-        cam = cam or self.cam_pose()
-        if cam is None:
-            cam = self.cam_pose_sure()      # (11-10d) a fix or RunEnd, never None (school 12:45: crashed parking)
+        cam = cam or self.cam_pose_sure()          # (e13) never None (11-10c's crash, elsewhere)
         corrected = False
         d = self.D if (odometry and self.D is not None) else cam
         near = isinstance(lab, str) and lab in self.S.points and self.S.near_edge(lab)
@@ -1925,6 +1970,7 @@ class CalibRun:
     def park(self, phase):
         """Back to its park spot (P11 for the first robot) by the camera (safety), facing the park heading."""
         self.set_status(words="Returning to park at %s" % self.S.park_label)
+        self._ending = True        # (e13) parking after the run: a lost tag ends the parking, not a wait with no end
         cam = self.goto(self.S.park_label, phase, 0, odometry=False)
         x, y = self.S.points[self.S.park_label]
         ax, ay = self.S.aim(self.S.park_label)
@@ -2442,10 +2488,7 @@ class CalibRun:
         k, L = sg / R, math.radians(ARC_SWEEP_DEG[R]) * R
         row = dict(round=rnd, use=use, radius_cm=R, side="left" if sg > 0 else "right", k=round(k, 5), L_cm=round(L, 1),
                    v_cms=round(v, 2), result="", why="", n=0, k_ratio=None, length_ratio=None, R_fit=None)
-        cam = self.cam_pose()
-        if cam is None:
-            self.hold_until_seen()
-            cam = self.cam_pose()
+        cam = self.cam_pose_sure()                 # (e13) never None
         hp = self.arc_plan_heading(cam, k, L, v)
         if hp is None:
             c = self.arc_centre()
@@ -2880,9 +2923,7 @@ class CalibRun:
     def stage(self):
         """(5 Nov) Drive to its own spot by the camera (safety) if it is more than AT_SPOT_CM from it, facing the park
         heading; the other robots are kept out."""
-        cam = self.cam_pose()
-        if cam is None:
-            raise RunEnd("the camera does not see %s's tag where it stands" % self.name)
+        cam = self.cam_pose_sure()                 # (e13, never give up) waits, asking for a hand, not an end
         x, y = self.S.points[self.S.park_label]
         if self.D is None:
             self.reanchor(cam, "start")
@@ -2908,9 +2949,7 @@ class CalibRun:
         self.hwatch = OB.HeadingWatch(0.0)       # (11-05h) checked again on every straight leg from here on
         if abs(use) >= 1.0:
             time.sleep(1.5)
-            c1 = self.cam_pose()
-            if c1 is None:
-                raise RunEnd("the camera lost the tag after the heading check: nothing else moved")
+            c1 = self.cam_pose_sure()              # (e13, never give up)
         return c1
 
     def readmap(self):
