@@ -76,6 +76,9 @@ def _read(path):
         return ""
 
 
+NOT_CAMERAS = ("bcm2835", "rpi-", "pispbe", "rp1-cfe", "unicam")   # the Pi's built-in video devices (no picture)
+
+
 def scan(sysfs=None):
     """Every camera the Pi sees: [dict(dev=N, name, port, nodes=[N, ...])], one per camera (its picture node first).
     The picture node is the one whose sysfs 'index' is 0 (the others only send information)."""
@@ -106,6 +109,8 @@ def scan(sysfs=None):
                 port = _read(os.path.join(base, "port"))      # tests: a plain file
         except OSError:
             pass
+        if not port and name.lower().startswith(NOT_CAMERAS):
+            continue        # (11-10, school 18:12) the Pi's own codec / ISP / decoder nodes are not cameras
         by_cam.setdefault((name, port) if port else (name, "dev%d" % n), []).append((idx, n))
     cams = []
     for (name, port), nodes in by_cam.items():
