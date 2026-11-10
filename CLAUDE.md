@@ -39,4 +39,10 @@
   likely the robot has drifted near an edge given its speed, heading and uncertainty), never fixed arbitrary times;
   where a fixed number is unavoidable, it is marked "chosen" with a DOE note. Robots never "give up" on a robot: one
   held at an edge waits for help and rejoins when moved; it is never dropped from the run by a timer.
+  **What "never give up" means (Nick, 2026-11-10 12:51):** a robot that has lost the camera (or any source) keeps moving
+  on what it has left (its own odometry and gyro, motion, lock-on) for as long as the sum of its possible error could
+  NOT carry any part of its body off an edge: its position uncertainty bubble, grown with every cm and degree driven
+  blind, plus its body and stopping distance, stays inside the edge rule along the whole planned path. It stops only
+  when that sum could reach an edge, then holds safely and asks for a hand, and carries on when a source returns. No
+  fixed blind-distance caps (e.g. "stop after 8 cm") and no timers.
 
