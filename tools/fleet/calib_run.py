@@ -61,7 +61,7 @@ for p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recognit
 
 import numpy as np   # noqa: E402
 
-VERSION = "2026-11-10e13"   # 11-10e13 (e13): never give up (the recovery drives blind while its bubble + stop cannot reach the edge margin, no 8 cm / 40 cm caps: MIRLT_BLIND_RULE=cap; a lost tag holds with no time limit, asks for a hand; cam_pose_sure and every unguarded camera pose wait the same way; MIRLT_CALIB_GIVEUP=1 the 30 s end), readability per tag, TURN DID NOT SETTLE, stop resent after the curve phase, the motion detector on in its bridge; the camera check before binding (camera_feed: no pictures is said as that, never the robot or tag); tracked for the sleep after a run.
+VERSION = "2026-11-10h"   # 11-10h: the never-give-up hold makes find-me wiggles (when its turning circle + error is clear) so the motion detector can find it and the recovery bring it back (Nick 14:32: motion, not hands). 11-10e13 (e13): never give up (the recovery drives blind while its bubble + stop cannot reach the edge margin, no 8 cm / 40 cm caps: MIRLT_BLIND_RULE=cap; a lost tag holds with no time limit, asks for a hand; cam_pose_sure and every unguarded camera pose wait the same way; MIRLT_CALIB_GIVEUP=1 the 30 s end), readability per tag, TURN DID NOT SETTLE, stop resent after the curve phase, the motion detector on in its bridge; the camera check before binding (camera_feed: no pictures is said as that, never the robot or tag); tracked for the sleep after a run.
 VERSION_10G = "2026-11-10g"     # 11-10g: a standing robot is never given up for sparse tag reads: it is measured over longer windows (Nick 13:34; dim light). 11-10f: the start waits for the camera fix after the wiggle (dim light, ~7 fps: refused at once, school 13:25). 11-10e: a run ended for poor tag reads DOES try to park again (Nick 12:48: never give up on getting back to where it is seen); it drives only with a camera fix (cam_pose_sure waits for one). 11-10d: no crash parking with no camera fix (RunEnd, caught: "Could not park"). 11-10c: Phase A waits for the camera fix instead of crashing on None (school 12:35). 11-10b (e12, Nick 10 Nov): the curve phase (phase R: constant-curvature arcs left and right at free roam's radii and two speeds, fitted from the camera, arc_k_scale / arc_d_scale saved when they agree; --arc-phase auto/on/off), points in your order (--visit-order), the proven workspace for the tours' room, the camera self-check at the start. VERSION_10A was:
 VERSION_10A = "2026-11-10a"     # 11-10a: a leftover camera reader holding port 5011 is stopped first (stale_bridge.py). 11-05i (9 Nov, school): a tripped stop mid-tour crashed the run (TypeError: ev() got two
                              # values for kind); the trip event now says stop_kind. VERSION_H was:
@@ -1503,6 +1503,7 @@ class CalibRun:
         t0 = time.time()
         said = -1e9
         tried_from = None
+        wig_t, wig_wait, wig_n = time.time(), 3.0, 0     # (11-10h) first find-me wiggle 3 s in, then less often
         self.ev("hold", why="roof tag lost while driving; held with no time limit (e13)")
         while not self.stop_flag.is_set():
             if self.eye.age(self.tag) < 0.3:
@@ -1527,11 +1528,44 @@ class CalibRun:
                 finally:
                     self._hold_depth = 0
                 continue
+            # (11-10h, Nick 14:32: "motion should be used for finding and getting it back, not moving it by hand") a
+            # robot standing still is invisible to the motion detector: it makes a small find-me wiggle on the spot
+            # (only when its whole turning circle plus its position's possible error is clear of every edge, outlet and
+            # keep-out), so the motion detector can see it and the recovery above can bring it back
+            if time.time() - wig_t >= wig_wait and getattr(self, "_hold_depth", 0) == 0:
+                hs = getattr(self, "_hold_spot", None)
+                if hs is not None and not self.S.problems(hs[:2], hs[:2], buf=hs[2], edge_buf=hs[2]):
+                    wig_n += 1
+                    if wig_n == 1 or wig_n % 5 == 0:
+                        say("  find-me wiggle %d: so the motion detector can see %s" % (
+                            wig_n, getattr(self, "name", "the robot")))
+                    self.ev("hold_find_me", n=wig_n)
+                    t_w = time.time()
+                    for d in (RECOVER_WIGGLE_DEG, -2 * RECOVER_WIGGLE_DEG, RECOVER_WIGGLE_DEG):
+                        r = self.rb.leg("turn", d)
+                        self.odo_step(r)
+                    tried_from = None if wig_n % 3 == 0 else tried_from   # a fresh try now and then
+                    lf2 = self.eye.loose_last(self.tag) if hasattr(self.eye, "loose_last") else None
+                    if lf2 is not None and lf2[0] >= t_w and self.a.lost_policy == "recover":
+                        tried_from = lf2[1:3]
+                        say("  the motion detector saw the wiggle at %.0f, %.0f: driving back from there" % lf2[1:3])
+                        self.ev("hold_motion_seen", x=round(lf2[1], 1), y=round(lf2[2], 1), by="wiggle")
+                        th = (self.D or (0, 0, 0))[2]
+                        self._hold_depth = 1
+                        try:
+                            self.recover((lf2[1], lf2[2], th), 0.0, 0.0, "seen by the motion detector (find-me wiggle)")
+                        finally:
+                            self._hold_depth = 0
+                        wig_t = time.time()
+                        continue
+                    wig_wait = min(HOLD_SAY_S, wig_wait * 2)     # less often while nothing sees it
+                wig_t = time.time()
             if time.time() - said >= HOLD_SAY_S:
                 said = time.time()
-                w = ("%s NEEDS A HAND: the camera lost its roof tag %.0f s ago and it is held, still and safe, where it "
-                     "stopped. Move it a hand's width back towards the middle of zones 1-2 (or wipe / turn its tag to "
-                     "the camera): it carries on by itself once the tag is read. Stop ends the calibration.%s" % (
+                w = ("%s NEEDS A HAND: the camera lost its roof tag %.0f s ago and it is held where it stopped; it "
+                     "wiggles now and then so the motion detector can find it and bring it back. If nothing sees it, "
+                     "move it a hand's width back towards the middle of zones 1-2 (or wipe / turn its tag to the "
+                     "camera): it carries on by itself once the tag is read. Stop ends the calibration.%s" % (
                          getattr(self, "name", "the robot"), time.time() - t0,
                          (" " + self.light_words() + ".") if self.light_words() else ""))
                 say("!! " + w)
@@ -1667,6 +1701,7 @@ class CalibRun:
             rec.update(outcome="stopped: %s" % outcome, blind_cm=round(blind_cm, 1))
             say("  recovery stopped (%s): a small find-me wiggle, then the old hold" % outcome)
             bub = bub_now()
+            self._hold_spot = (x, y, bub)          # (11-10h) the hold's find-me wiggles use the same clearance check
             if clear((x, y), (x, y), bub):
                 for d in (RECOVER_WIGGLE_DEG, -2 * RECOVER_WIGGLE_DEG, RECOVER_WIGGLE_DEG):
                     if seen():
