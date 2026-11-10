@@ -58,7 +58,7 @@ experiments measure that offset; nothing here assumes it.
 
 Needs OpenCV: sudo apt install -y python3-opencv
 """
-VERSION = "2026-11-10a"   # 2026-11-10a (e12): orderly exit (no thread torn down inside OpenCV at exit). No version string before
+VERSION = "2026-11-10e14"   # e14 (school 18:12: "Could not open camera 10" stopped the whole recorder): a camera that cannot be opened, or opens and sends nothing, is left out and said plainly; the others record on their own ports (MIRLT_REC_ALL_OR_NONE=1: the old stop for the no-picture case). 2026-11-10a (e12): orderly exit (no thread torn down inside OpenCV at exit). No version string before
 
 import argparse
 import csv
@@ -1194,7 +1194,7 @@ class CamRec:
 # ------------------------------------------------------------------ a session: one or more cameras
 def run_session(caps, devices, names=None, out="~/recordings", label="", seconds=0, fps=30, port=8000,
                 notes_port=5007, record=True, replays=None, controls=None, stdin_notes=True, log=print,
-                stop=None, flush_s=0.5, disk_check_s=10.0, extra_meta=None, shm=False, washout=()):
+                stop=None, flush_s=0.5, disk_check_s=10.0, extra_meta=None, shm=False, washout=(), slots=None):
     """Record one or more open cameras. One camera: ~/recordings/<date-time>_<label>/
     as always. Several: that folder holds cam0/, cam1/, ... (each a normal recording
     folder) and session.json. Cameras run as threads of this one process, so t_mono
@@ -1211,14 +1211,23 @@ def run_session(caps, devices, names=None, out="~/recordings", label="", seconds
     stop = stop or threading.Event()
     out = os.path.expanduser(out)
     host = socket.gethostname()
-    cams = []
+    cams, dropped = [], []
     for i, (cap, dev) in enumerate(zip(caps, devices)):
-        tag = f"cam{i}{' (' + names[i] + ')' if names[i] else ''}: " if multi else ""
-        c = CamRec(cap, dev, i, names[i], (port + i) if port else 0, fps, replays[i], log, tag)
+        k = slots[i] if slots else i      # (e14) a camera's place in --device: its port stays port + that place
+        tag = f"cam{k}{' (' + names[i] + ')' if names[i] else ''}: " if (multi or slots) else ""
+        c = CamRec(cap, dev, k, names[i], (port + k) if port else 0, fps, replays[i], log, tag)
         c.shm_name = ("mirlt-" + (names[i] or "cam%d" % i)) if shm else None
         if names[i] and names[i] in washout and not c.replay:
             c.washout = washout_guard_for(c, log)   # the board washed out: exposure stepped down (WashoutGuard)
         if not c.first_frame():
+            if multi and os.environ.get("MIRLT_REC_ALL_OR_NONE", "0") != "1" and (
+                    len(cams) + (n - i - 1)) > 0:
+                # (e14) one camera that opened but sends nothing never stops the others (said plainly)
+                cap.release()
+                log(f"!! CAMERA {names[i] or dev} (/dev/video{dev}) opened but sent no picture: left out; the other "
+                    f"camera{'s' if n > 2 else ''} go on recording")
+                dropped.append(i)
+                continue
             for cc in cams:
                 cc.cap.release()
             cap.release()
@@ -1233,6 +1242,9 @@ def run_session(caps, devices, names=None, out="~/recordings", label="", seconds
         if str(dev).isdigit() and c.fps_real and c.fps_real < 0.9 * fps:
             log(f"! {tag}the camera says it runs at {c.fps_real:g} fps, {fps} asked")
         cams.append(c)
+    if dropped:
+        controls = [x for j, x in enumerate(controls) if j not in dropped]
+        extra_meta = [x for j, x in enumerate(extra_meta) if j not in dropped]
 
     for c in cams:
         if c.serve():
@@ -1479,13 +1491,30 @@ def main(argv=None):
     if not args.no_record:
         disk_precheck(args.out, len(devices), args.seconds, width=args.width, height=args.height, fps=args.fps)
 
-    caps = []
-    for d in devices:
-        def fail(msg, caps=caps):
-            for c in caps:
-                c.release()
-            sys.exit(msg)
-        caps.append(open_camera(d, args.width, args.height, args.fps, args.buffers, args.pixfmt, fail))
+    caps, slots, failed = [], [], []
+    for i, d in enumerate(devices):
+        why = []
+        cap = open_camera(d, args.width, args.height, args.fps, args.buffers, args.pixfmt, fail=why.append)
+        if cap is None or why:
+            # (e14, school 18:12: "Could not open camera 10" stopped the whole recorder, the overhead too) one camera
+            # that cannot be opened never stops the others: said plainly, the rest recorded
+            nm = args.names[i] if i < len(args.names) else "cam%d" % i
+            failed.append((nm, d, why[0] if why else "not opened"))
+            continue
+        caps.append(cap)
+        slots.append(i)
+    if not caps:
+        sys.exit("No camera could be opened: " + "; ".join("%s (/dev/video%s): %s" % f for f in failed))
+    for nm, d, why in failed:
+        print("!! CAMERA %s (/dev/video%s) COULD NOT BE OPENED: %s. Recording the other camera%s: %s (its picture "
+              "stays on its own port)." % (nm.upper(), d, why, "" if len(caps) == 1 else "s", ", ".join(
+                  "%s (/dev/video%s)" % (args.names[i] if i < len(args.names) else "cam%d" % i, devices[i])
+                  for i in slots)), flush=True)
+    if failed:
+        devices = [devices[i] for i in slots]
+        if args.names:
+            args.names = [args.names[i] for i in slots]
+        multi = len(devices) > 1
     dflt = "lock" if args.lock else None
     ctl = dict(exposure=args.exposure if args.exposure is not None else dflt,
                focus=args.focus if args.focus is not None else dflt,
@@ -1528,7 +1557,7 @@ def main(argv=None):
             t.join()
     run_session(caps, devices, names=args.names, out=args.out, label=args.label, seconds=args.seconds,
                 fps=args.fps, port=args.port, notes_port=args.notes_port, record=not args.no_record,
-                controls=controls, shm=args.shm,
+                controls=controls, shm=args.shm, slots=slots if failed else None,
                 washout=(("overhead",) if args.washout_guard == "on" and exposure_for(
                     args.names.index("overhead") if "overhead" in args.names else 0) in (None, "auto") else ()))
 

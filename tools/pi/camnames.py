@@ -24,6 +24,11 @@ import os
 import re
 import sys
 
+VERSION = "2026-11-10e14"   # e14 (school 18:12): a camera picked by the fallback (a name not found) must be a USB
+                            # capture camera (real_camera: a USB port, and VIDIOC_QUERYCAP not saying codec / no capture);
+                            # scan leaves out a node the kernel says is no capture device. 11-10 (7f041c8): the Pi's
+                            # own bcm2835 / rpi- / pispbe / rp1-cfe / unicam nodes skipped by name. No version string before
+
 def _site():
     """The site in use (tools/fleet/sites.py) or None (no site module)."""
     try:
@@ -77,6 +82,39 @@ def _read(path):
 
 
 NOT_CAMERAS = ("bcm2835", "rpi-", "pispbe", "rp1-cfe", "unicam")   # the Pi's built-in video devices (no picture)
+DEV_DIR = os.environ.get("MIRLT_V4L_DEV", "/dev")      # (e14) where /dev/videoN live (tests: a folder with none)
+VIDIOC_QUERYCAP = 0x80685600     # _IOR('V', 0, struct v4l2_capability): 104 bytes
+CAP_VIDEO_CAPTURE, CAP_VIDEO_CAPTURE_MPLANE = 0x1, 0x1000
+CAP_M2M, CAP_M2M_MPLANE, CAP_DEVICE_CAPS = 0x8000, 0x4000, 0x80000000
+
+
+def capture_caps(dev, dev_dir=None):
+    """(e14, school 18:12: /dev/video10, bcm2835-codec-decode, was picked as the side camera) True when /dev/videoN is a
+    video CAPTURE device and not a memory-to-memory one (a codec, the ISP): the kernel's own answer (VIDIOC_QUERYCAP,
+    the node's device_caps). None when it cannot be asked (no such node here, no permission: tests, a laptop)."""
+    path = os.path.join(dev_dir or DEV_DIR, "video%d" % int(dev))
+    try:
+        import fcntl
+        import struct
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    except (OSError, ImportError):
+        return None
+    try:
+        buf = bytearray(104)
+        fcntl.ioctl(fd, VIDIOC_QUERYCAP, buf)
+        caps, dcaps = struct.unpack_from("<II", buf, 84)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    c = dcaps if caps & CAP_DEVICE_CAPS else caps
+    return bool(c & (CAP_VIDEO_CAPTURE | CAP_VIDEO_CAPTURE_MPLANE)) and not (c & (CAP_M2M | CAP_M2M_MPLANE))
+
+
+def real_camera(c):
+    """(e14) May a fallback pick this one as a camera: it hangs off a USB port, and the kernel does not say it is no
+    capture device (capture False)."""
+    return bool(c.get("usb", bool(c.get("port")))) and c.get("capture") is not False
 
 
 def scan(sysfs=None):
@@ -118,8 +156,12 @@ def scan(sysfs=None):
         pic = [n for i, n in nodes if i == 0]
         if not pic:
             continue                     # only information nodes
+        cap = capture_caps(pic[0])
+        if cap is False:
+            continue                     # (e14) the kernel says it is no capture device (a codec, the ISP)
         cams.append(dict(dev=pic[0], name=name, port="" if port.startswith("dev") else port,
-                         nodes=sorted(n for _, n in nodes)))
+                         nodes=sorted(n for _, n in nodes), usb=bool(port) and not port.startswith("dev"),
+                         capture=cap))
     cams.sort(key=lambda c: c["dev"])
     return cams
 
@@ -207,7 +249,11 @@ def resolve(role, cams=None, conf=None):
     _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "fleet"))
     import observe as OB
     want = {r: (conf.get(r) or {}).get("name", "") for r in ROLES}
-    m, w = OB.pick_cameras([(c["dev"], c["name"]) for c in cams], want)
+    # (e14, school 18:12) a fallback picks only a real capture camera on a USB port: never the Pi's own video nodes
+    real = [c for c in cams if real_camera(c)]
+    if not real:
+        return dev, words + " (and nothing else plugged in is a USB capture camera)"
+    m, w = OB.pick_cameras([(c["dev"], c["name"]) for c in real], want)
     if role in m:
         c = next(c for c in cams if c["dev"] == m[role])
         return c["dev"], "%s camera: %s at /dev/video%d (picked from what is plugged in: %s)" % (

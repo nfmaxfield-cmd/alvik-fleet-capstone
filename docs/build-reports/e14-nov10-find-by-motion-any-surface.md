@@ -262,9 +262,40 @@ Tests with temp folders (oldest first, links readable, the running run kept, the
 
 ![move](../screenshots/2026-11-10/e14-feature-card-low-runs-moved-to-usb-terminal.png)
 
+**J. A codec node taken as the side camera** (school 18:12: `rec` said "overhead /dev/video0, side /dev/video10";
+/dev/video10 is bcm2835-codec-decode; camrec could not open it and the whole recorder stopped: no pictures, :8000
+refused). On top of the coordinator's 7f041c8 (scan skips bcm2835 / rpi- / pispbe / rp1-cfe / unicam by name):
+- (a) the fallback ("a wanted name not found: the first unclaimed camera") now picks only a real camera: one on a USB
+  port, and not one the kernel says is no capture device (VIDIOC_QUERYCAP's device_caps: capture, not
+  memory-to-memory; asked read-only, non-blocking). `scan` leaves out a node the kernel says is no capture device.
+  So an unlisted platform node (a future Pi's ISP with a new name) is never picked either.
+- (c) camrec: a camera that cannot be opened, or opens and sends no picture, is left out and said plainly ("!! CAMERA
+  SIDE (/dev/video10) COULD NOT BE OPENED: ... Recording the other camera: overhead (/dev/video0)"); the others record,
+  each on its own port (the overhead keeps :8000). Only when no camera opens does it stop, naming each.
+  `MIRLT_REC_ALL_OR_NONE=1` the old stop for the no-picture case.
+- (d) Tests: a fake sysfs with the C920e (USB 1.2, two nodes), four bcm2835 nodes and an unlisted platform node, and
+  home's names in force (the school's case): the overhead is the C920e, the side stays unpicked (on the old code it
+  was the platform node); the kernel's "no capture" leaves a node out; camrec with /dev/video10 failing records the
+  overhead and says so, and with both failing stops naming both.
+- (b) **What set a side camera name on the school Pi** (read from the code; the Pi's files are not here, so this is
+  Claude's reading): nothing in e12, e13 or e14 writes `cameras.json` or changes `camera_names`. The only writers are
+  `camnames.py --set` and `--init` (`--init` writes the site's own names, side "" at school), and site files change
+  only through `./run-fleet-pi.sh site <name>` / `school-setup`. `resolve` keeps the side off whenever its name is
+  "", so a name was in force. Two ways fit what was seen exactly (the overhead, named "USB 2.0 Camera", resolved to
+  the C920e by the same fallback): (1) the site in use was **home** (`~/.config/mirlt/site` missing or saying home:
+  `rec` reads it through `sites.py env`, and home's built-in names are "USB 2.0 Camera" and "EMEET SmartCam C950"),
+  or (2) a `cameras.json` in the school's folder with home's names (an earlier `--set` or an `--init` run while home
+  was in use). Before 7f041c8 the codec nodes were also in `scan`'s list, so the fallback found an "unclaimed
+  camera" to give the side. To tell which on the Pi: `python3 tools/fleet/sites.py; cat ~/.config/mirlt/site;
+  python3 tools/pi/camnames.py; cat ~/.config/mirlt/sites/school-conference/cameras.json`.
+- Found on the way: four tests in `tools/pi/tests/test_launcher.py` fail on main before and after this change (they
+  expect the strict names; e06's fallback changed that). Not in the fleet suite; left for a decision.
+
+![camera](../screenshots/2026-11-10/e14-problem-codec-node-picked-as-side-camera-fixed-terminal.png)
+
 ### Tests
 
-`tools/fleet/tests/test_e14.py`: 39. Two e12/e13 tests pinned to the old ways' switches. Full fleet suite on the final
+`tools/fleet/tests/test_e14.py`: 41. Two e12/e13 tests pinned to the old ways' switches. Full fleet suite on the final
 head: FULL_SUITE.
 
 ## Conclusion
@@ -282,6 +313,7 @@ head: FULL_SUITE.
 - The dim room's slow detection was mostly the tracker's own loop (slow pictures, bigger windows); measured windows
   cut it 364 -> 56 ms a picture in the simulator with the same reads. A SIGTERM no longer aborts the bridge.
 - A full card with a USB drive plugged in no longer refuses a run: old runs move to the drive, nothing deleted.
+- A codec node is never taken as a camera, and one camera failing no longer stops the recorder for the others.
 - Not done: detector training (blocked download); free roam with a tagless robot.
 
 ## What's next
@@ -299,7 +331,7 @@ head: FULL_SUITE.
 
 `MIRLT_CAMERA_DISCOVERY=off|e13`, `MIRLT_CLEAR_SPACE_OK=1`, `--clear-space`, `--spots` / `MIRLT_CALIB_SPOTS`,
 `MIRLT_READMAP_STORE=0`, `MIRLT_RETRY_LOST=again`, `MIRLT_CALIB_POOL=0`, `MIRLT_PARK_GIVEUP=1`, `MIRLT_EXPOSURE_NUDGE=1` (off: the nudge), `MIRLT_TAG_ROI=max`, `MIRLT_FIX_GAP_RULE=fixed`,
-`MIRLT_SIGTERM_RAISE=1`, `MIRLT_MOVE_RUNS=0`; Advanced "Battery floor";
+`MIRLT_SIGTERM_RAISE=1`, `MIRLT_MOVE_RUNS=0`, `MIRLT_REC_ALL_OR_NONE=1`; Advanced "Battery floor";
 simulator: `--sim-blackout T:DUR`, `--sim-dark`, `--sim-extra-camera`, `--sim-light`, `--sim-start X,Y`, `--sim-tagless`, `--readmap-store`.
 
 ## Sweep 1: new tests that may now be needed
@@ -313,6 +345,11 @@ simulator: `--sim-blackout T:DUR`, `--sim-dark`, `--sim-extra-camera`, `--sim-li
 - Pooling on the robots: two calibrations stopped early, then one more; the pooled values against a full run.
 - A real calibration with the tour's last point losing its tag: parking holds and returns.
 - Battery floor from Mission Control's Advanced reaching a tmux-started calibration.
+- The school Pi: `detect_bench.py --frames` on saved dim frames, cool and hot; a dim Visit with the measured windows
+  (fixes a second against MIRLT_TAG_ROI=max).
+- `./run-fleet-pi.sh space --move` on the school Pi with FLEET plugged in; then `jay-bundle` and the replay page on a
+  moved run (through its link), and the same with the stick unplugged (the link dangles: said, not a crash?).
+- `rec` on the school Pi after the camera fix: `python3 tools/pi/camnames.py` lists the C920e only.
 
 ## Sweep 2: possible inaccuracies in what the work relied on
 
@@ -329,6 +366,11 @@ simulator: `--sim-blackout T:DUR`, `--sim-dark`, `--sim-extra-camera`, `--sim-li
   kept under the run's median.
 - Pooling assumes the robot's wheels and gyro do not change between runs beyond the age weighting; a firmware or tyre
   change would need the pool cleared (not automatic).
+- The detection benchmark's pictures are drawn (Gaussian noise); a real dim picture's noise is different, so the
+  measured windows' gain and the smoothing's harm are simulator results until detect_bench runs on real frames.
+- What set the school's side camera name is read from the code, not from the Pi's files.
+- Moved runs are found through links; a tool that skips links (os.walk without followlinks) would miss them: the
+  bundle, readability learning and replay use glob / isdir, which follow them (checked in the test), others not checked.
 - The full-run threshold uses phase A's rolls only (not the tour legs a finished run also fits), so it is a little
   looser than a real finished run.
 - run_plan's deferral moves a point's goto and dwell together; a point shared by two robots' lists is deferred per robot.

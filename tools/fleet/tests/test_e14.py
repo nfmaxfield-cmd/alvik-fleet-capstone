@@ -893,3 +893,82 @@ def test_move_switch_and_margin():
             del os.environ["MIRLT_MOVE_RUNS"]
         else:
             os.environ["MIRLT_MOVE_RUNS"] = old
+
+
+# ------------------------------------------------- school 18:12: /dev/video10 (bcm2835-codec-decode) taken as the side
+def _school_sysfs(root):
+    """The school Pi: the C920e on USB port 1.2 (picture node 0, information node 1), the Pi's own codec / ISP nodes
+    (bcm2835-*, on the platform bus, no USB port), and one platform node with an unlisted name."""
+    plat = os.path.join(root, "_platform", "soc", "codec")
+    os.makedirs(plat)
+    nodes = [(0, "HD Pro Webcam C920e", 0, "1.2"), (1, "HD Pro Webcam C920e", 1, "1.2"),
+             (10, "bcm2835-codec-decode", 0, None), (11, "bcm2835-codec-encode", 0, None),
+             (12, "bcm2835-codec-isp", 0, None), (18, "bcm2835-isp", 0, None), (31, "some-new-isp", 0, None)]
+    for n, name, idx, port in nodes:
+        d = os.path.join(root, "video%d" % n)
+        os.makedirs(d)
+        with open(os.path.join(d, "name"), "w") as f:
+            f.write(name + "\n")
+        with open(os.path.join(d, "index"), "w") as f:
+            f.write("%d\n" % idx)
+        if port:
+            iface = os.path.join(root, "_usb", "1-%s:1.0" % port)
+            os.makedirs(iface, exist_ok=True)
+            os.symlink(iface, os.path.join(d, "device"))
+        else:
+            os.symlink(plat, os.path.join(d, "device"))
+    return root
+
+
+def test_the_fallback_never_picks_a_pi_video_node_as_a_camera(tmp_path, monkeypatch):
+    if os.path.join(TOOLS, "pi") not in sys.path:
+        sys.path.insert(0, os.path.join(TOOLS, "pi"))
+    import camnames as C
+    monkeypatch.setattr(C, "DEV_DIR", str(tmp_path / "nodev"))          # the kernel cannot be asked here
+    cams = C.scan(_school_sysfs(str(tmp_path / "sys")))
+    assert [c["dev"] for c in cams] == [0, 31]                         # bcm2835-* left out by name (7f041c8)
+    assert cams[0]["usb"] and not cams[1]["usb"]
+    # the school's case: a side name set (home's EMEET), not plugged in: the side stays unpicked
+    conf = {"overhead": {"name": "USB 2.0 Camera", "port": ""}, "side": {"name": "EMEET SmartCam C950", "port": ""}}
+    assert C.resolve("overhead", cams, conf)[0] == 0                   # the one real camera, whatever its name
+    dev, words = C.resolve("side", cams, conf)
+    assert dev is None, words                                          # never video31 (no USB port) nor a codec
+    # the kernel's answer when it can be asked: a USB node that is no capture device is left out of the scan
+    monkeypatch.setattr(C, "capture_caps", lambda d, dev_dir=None: False if d == 0 else None)
+    assert [c["dev"] for c in C.scan(str(tmp_path / "sys"))] == [31]
+
+
+def test_one_camera_that_cannot_open_never_stops_the_recorder(tmp_path, monkeypatch, capsys):
+    """School 18:12: camrec --device 0,10 --names overhead,side; /dev/video10 could not be opened and the whole recorder
+    stopped. Now the overhead records on its own port and the side's failure is said plainly."""
+    sys.path.insert(0, os.path.join(TOOLS, "pi", "tests"))
+    sys.path.insert(0, os.path.join(TOOLS, "pi"))
+    import camrec
+    from test_camrec_dual import FakeCapture
+    seen = {}
+
+    def opener(device, width, height, fps, buffers=4, pixfmt="MJPG", fail=None):
+        if str(device) == "10":
+            return fail("Could not open camera 10. Find the right number with: python3 tools/pi/camrec.py --list")
+        return FakeCapture(30)
+    monkeypatch.setattr(camrec, "open_camera", opener)
+    monkeypatch.setattr(camrec, "apply_controls", lambda *a, **k: {})
+    monkeypatch.setattr(camrec, "disk_precheck", lambda *a, **k: None)
+    orig = camrec.run_session
+
+    def rs(caps, devices, **kw):
+        seen.update(devices=list(devices), names=kw.get("names"), slots=kw.get("slots"))
+        kw.update(port=0, notes_port=0, stdin_notes=False, disk_check_s=0)
+        return orig(caps, devices, **kw)
+    monkeypatch.setattr(camrec, "run_session", rs)
+    camrec.main(["--device", "0,10", "--names", "overhead,side", "--seconds", "1", "--out", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert seen["devices"] == ["0"] and seen["names"] == ["overhead"] and seen["slots"] == [0]
+    assert "CAMERA SIDE (/dev/video10) COULD NOT BE OPENED" in out and "overhead (/dev/video0)" in out
+    folder = [d for d in os.listdir(tmp_path) if os.path.isdir(tmp_path / d)]
+    assert folder, "the overhead was recorded"
+    # every camera failing still stops, saying which
+    monkeypatch.setattr(camrec, "open_camera", lambda d, *a, fail=None, **k: fail("Could not open camera %s" % d))
+    with pytest.raises(SystemExit) as e:
+        camrec.main(["--device", "0,10", "--names", "overhead,side", "--seconds", "1", "--out", str(tmp_path)])
+    assert "overhead (/dev/video0)" in str(e.value) and "side (/dev/video10)" in str(e.value)
