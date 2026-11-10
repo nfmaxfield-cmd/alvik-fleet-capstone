@@ -420,3 +420,89 @@ def test_school_pull_copies_never_deletes_and_uploads_once(tmp_path):
     assert "0 run folder(s) uploaded" in out2 and (got / "run" / "stops.csv").read_text() == "b\n"
     assert list((home / "school-runs" / ".replaced").rglob("stops.csv"))      # the replaced copy kept
     assert (run / "rfid_raw.csv").exists() and (run / "run" / "stops.csv").exists()   # the school end untouched
+
+
+# -------------------------------------------------------------------------------------------- 2b. the calibration never gives up
+class _Eye:
+    def __init__(self):
+        self.ages, self.loose_ = [], None
+
+    def age(self, tag):
+        return self.ages.pop(0) if self.ages else 99.0
+
+    def loose_last(self, tag):
+        return self.loose_
+
+
+def test_calibration_hold_has_no_time_limit_asks_for_a_hand_and_takes_motion_sightings(monkeypatch):
+    import threading
+    import time
+    import calib_run as CR
+    cls = next(v for v in vars(CR).values() if isinstance(v, type) and hasattr(v, "hold_never_give_up"))
+    r = cls.__new__(cls)
+    r.tag, r.name, r.holds, r.D = 4, "AL-EB54", [], (100.0, 50.0, 90.0)
+    r.stop_flag = threading.Event()
+    r.a = type("A", (), {"lost_policy": "recover"})()
+    evs, said, tried = [], [], []
+    r.ev = lambda kind, **kw: evs.append(kind)
+    r.set_status = lambda **kw: None
+    r.recover = lambda est, *a: tried.append(est)
+    monkeypatch.setattr(CR, "say", said.append)
+    monkeypatch.setattr(CR, "HOLD_SAY_S", 0.2)
+    e = _Eye()
+    r.eye = e
+    e.loose_ = (time.time() + 0.6, 120.0, 60.0, "tag_bridge:motion")   # the motion detector sees it
+    t = threading.Thread(target=lambda: setattr(r, "res", r.hold_until_seen()))
+    t.start()
+    time.sleep(0.9)
+    assert t.is_alive()                                              # not ended by a timer
+    e.ages = [0.1]                                                   # the tag reads again
+    t.join(5)
+    assert not t.is_alive() and r.res > 0.8
+    assert tried and tried[0][:2] == (120.0, 60.0)                   # the way back tried from the motion sighting
+    assert "needs_a_hand" in evs and any("NEEDS A HAND" in s for s in said)
+    monkeypatch.setenv("MIRLT_CALIB_GIVEUP", "1")                   # the switch: e12's 30 s end
+    monkeypatch.setattr(CR, "LOST_GIVEUP_S", 0.2)
+    import pytest
+    with pytest.raises(CR.RunEnd):
+        r.hold_until_seen()
+
+
+def test_eye_keeps_motion_and_lock_sightings_apart_and_survives_a_null_heading():
+    import calib_run as CR
+    src = open(os.path.join(FLEET, "calib_run.py")).read()
+    assert 'msg.get("th") is None' in src and "def loose_last" in src and '"--board"' in src
+
+
+def test_a_turn_that_hunts_is_said_as_not_settled_and_a_robot_still_following_is_named():
+    import calib_run as CR
+    rb = CR.Robot.__new__(CR.Robot)
+    rb.name = "AL-EB54"
+    link = type("L", (), {})()
+    link.lines = [(0, "AL-EB54", "ip", "D,FOLLOW,run,1,2,R,0,0,0,10.0,20.0,-98.4,0.0,0.0,0,0,0.0,0.0,1")] * 5
+    rb.link = link
+    d = rb.leg_diag(0, 7)
+    assert d["follow_rows"] == 5 and d["leg_records"] == 0 and "still FOLLOWING" in d["words"]
+    assert abs(d["own_th"] - (-98.4)) < 1e-6
+    src = open(os.path.join(FLEET, "calib_run.py")).read()
+    assert "TURN DID NOT SETTLE" in src and 'link.send(rb.ip, "stop")\n            if link.wait_for' in src
+
+
+def test_readability_is_kept_per_tag_where_the_evidence_differs(tmp_path):
+    import calib_run as CR
+    import observe as OB
+    cls = next(v for v in vars(CR).values() if isinstance(v, type) and hasattr(v, "readmap_tag"))
+    r = cls.__new__(cls)
+    r.tag, r.parent = 4, None
+    r.S = type("S", (), {"L": 396.0, "W": 168.0})()
+    r.a = type("A", (), {"dry": False})()
+    r.site = {"conf_dir": str(tmp_path)}
+    old = OB.ReadMap(396.0, 168.0)
+    for _ in range(8):
+        old.add(150, 80, False)                                      # tag 4 lost here in earlier runs
+    old.save(str(tmp_path / "readmap_tag4.json"))
+    m = r.readmap_tag()
+    assert m.tries[m.ij(150, 80)] == 4 and not m.readable(150, 80)[0]
+    assert r.readmap_tag() is m
+    src = open(os.path.join(FLEET, "calib_run.py")).read()
+    assert "readability_per_tag" in src and "readmap_tag%s.json" in src

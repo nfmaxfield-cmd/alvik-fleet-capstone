@@ -93,7 +93,12 @@ LOST_HOLD_S = 1.0        # chosen (cautious): the tag unseen this long while dri
                          # is 10 cm blind at most. DOE note: 0.5 / 1 / 2 s against holds per tour and how far it drives
                          # blind (the camera's dropout lengths from camera_track.csv)
 STILL_MEASURE_MAX_S = 15.0  # chosen (11-10g): the longest window a standing robot's tag is measured over; DOE: against reads a second
-LOST_GIVEUP_S = 30.0     # chosen: held this long and still not seen -> the run ends where it is (said plainly)
+LOST_GIVEUP_S = 30.0     # BEFORE e13 (now the switch MIRLT_CALIB_GIVEUP=1): held this long and still not seen -> the run
+                         # ended where it was. e13 (Nick 10 Nov: robots never give up; the school calibration 20261110-121215
+                         # ended this way after "go 63 P11"): a robot standing still does not get riskier with time, so the
+                         # hold has no time limit: it stays still and safe, asks for a hand loudly, takes the motion
+                         # detector's sightings (the tag bridge's motion source) and tries the recovery again from there
+HOLD_SAY_S = 60.0        # (e13) the NEEDS A HAND line is said again this often while it holds: display only, no DOE
 # (11-05c, Nick 5 Nov 16:30/16:34) lost-tag RECOVERY instead of stop-and-hold (the old hold: --lost-policy hold /
 # site calibration.lost_policy "hold"). Straight legs with turns on the spot only (school runs never use curves):
 # turn towards the nearest spot where the tag read reliably, drive there in short steps, each checked so the whole
@@ -590,7 +595,35 @@ class Robot:
                     out["start"] = pose
                 return out
         out["result"] = "timeout"
+        out["diag"] = self.leg_diag(k, lid)        # (e13) what did come back: FOLLOW rows, LEG records, its pose
         return out
+
+    def leg_diag(self, k0, lid):
+        """(e13) After a leg timed out: what the robot did send meanwhile. A robot still FOLLOWING (its FOLLOW rows
+        coming, no LEG record for this leg) is said as that, not as a plain timeout."""
+        rows = [ln for ln in list(self.link.lines[k0:]) if ln[1] == self.name]
+        fol = [ln[3] for ln in rows if ln[3].startswith("D,FOLLOW")]
+        legs = [ln[3] for ln in rows if ln[3].startswith("D,LEG")]
+        mine = [l_ for l_ in legs if (",%d," % lid) in l_]
+        th = None
+        for l_ in reversed(fol):
+            try:
+                th = float(l_.split(",")[11])            # FOLLOW: ..., x, y, th, ... (follow.h)
+                break
+            except (IndexError, ValueError):
+                continue
+        words = []
+        if fol and not mine:
+            words.append("the robot was still FOLLOWING (%d FOLLOW rows during the leg, no LEG record for leg %d): the "
+                         "idle leg was not run as a leg" % (len(fol), lid))
+        elif not mine:
+            words.append("no LEG record for leg %d reached the calibration (%d lines from the robot meanwhile)" % (
+                lid, len(rows)))
+        else:
+            words.append("leg %d was %s but never ended" % (lid, mine[-1].split(",")[4] if len(mine[-1].split(",")) > 4
+                                                            else "seen"))
+        return {"follow_rows": len(fol), "leg_records": len(mine), "lines": len(rows), "own_th": th,
+                "words": "; ".join(words)}
 
     def _index_after(self, match, k):
         for i in range(k, len(self.link.lines)):
@@ -604,6 +637,7 @@ class Eye:
     """The newest camera reads per tag id: {id: (t, x, y, th)} (the turning point's frame is applied by the run)."""
 
     def __init__(self, folder, port=FIX_PORT):
+        self.loose = {}                    # (e13) tag id -> (t, x, y, src): motion / lock-on sightings
         self.latest = {}
         self.hist = {}
         self.lock = threading.Lock()
@@ -652,6 +686,14 @@ class Eye:
             if tid is None:
                 continue
             t = time.time()
+            if msg.get("th") is None or str(msg.get("src") or "").split(":")[-1] in ("motion", "lock", "ml"):
+                # (e13) a motion / lock-on sighting (position only): kept apart, never taken as a tag read
+                try:
+                    with self.lock:
+                        self.loose[tid] = (t, float(msg["x"]), float(msg["y"]), str(msg.get("src") or ""))
+                except (KeyError, TypeError, ValueError, AttributeError):
+                    pass
+                continue
             th = float(msg.get("th", 0.0)) - (getattr(self, "sim_yaw_by", {}) or {}).get(tid, getattr(self, "sim_yaw", 0.0)) \
                 + getattr(self, "yaw_off", {}).get(tid, 0.0)   # (11-05f) heading check
             rec = (t, float(msg["x"]), float(msg["y"]), ((th + 180.0) % 360.0) - 180.0)
@@ -673,6 +715,11 @@ class Eye:
                 self.nrows = getattr(self, "nrows", 0) + 1
                 if self.nrows % 50 == 0:
                     self.f.flush()
+
+    def loose_last(self, tid):
+        """(e13) The newest motion / lock-on sighting of this tag's robot (t, x, y, src) or None."""
+        with self.lock:
+            return getattr(self, "loose", {}).get(tid)
 
     def seen_ids(self, within_s=1.5):
         now = time.time()
@@ -1379,6 +1426,9 @@ class CalibRun:
         return False
 
     def hold_until_seen(self):
+        giveup = os.environ.get("MIRLT_CALIB_GIVEUP", "0") == "1" or getattr(self.a, "lost_giveup", False)
+        if not giveup:
+            return self.hold_never_give_up()     # (e13) the 11-10g wait, plus the motion detector's sightings re-tried
         t0 = time.time()
         self.ev("hold", why="roof tag lost for over %.1f s while driving" % LOST_HOLD_S)
         self.set_status(words="HOLDING: the camera lost the roof tag; waiting for it (up to %.0f s)" % LOST_GIVEUP_S)
@@ -1395,7 +1445,7 @@ class CalibRun:
             if self.stop_flag.is_set():
                 raise RunEnd("stopped (Ctrl+C or Mission Control's Stop)")
             if time.time() - t0 > nxt:
-                if getattr(self.a, "lost_giveup", False):
+                if giveup:
                     raise RunEnd("the camera lost the roof tag for over %.0f s: the robot stopped where it is (not "
                                  "parked)" % LOST_GIVEUP_S)
                 say("  STILL HOLDING after %.0f s: the camera cannot see %s's roof tag. It is stopped and safe. Move "
@@ -1405,6 +1455,50 @@ class CalibRun:
                                 getattr(self, "name", "the robot"))
                 nxt += LOST_GIVEUP_S
             time.sleep(0.1)
+
+    def hold_never_give_up(self):
+        """(e13) Held where it stopped, still and safe, with no time limit (standing still, its risk does not grow):
+        NEEDS A HAND said loudly at once and every HOLD_SAY_S (terminal, status, events); the roof tag seen again ->
+        carry on; the bridge's motion detector (or lock-on) sighting it -> its position is known again: the recovery is
+        tried once more from there, towards where the tag read well. Only Stop (or Ctrl+C) ends it."""
+        t0 = time.time()
+        said = -1e9
+        tried_from = None
+        self.ev("hold", why="roof tag lost while driving; held with no time limit (e13)")
+        while not self.stop_flag.is_set():
+            if self.eye.age(self.tag) < 0.3:
+                d = time.time() - t0
+                self.holds.append(d)
+                say("  seen again after %.1f s: carrying on" % d)
+                if d > 5.0:
+                    self.ev("hand_rejoined", held_s=round(d, 1))
+                return d
+            lf = self.eye.loose_last(self.tag) if hasattr(self.eye, "loose_last") else None
+            if lf is not None and time.time() - lf[0] < 0.5 and self.a.lost_policy == "recover" and \
+                    (tried_from is None or math.dist(tried_from, lf[1:3]) > 3.0) and \
+                    getattr(self, "_hold_depth", 0) == 0:
+                tried_from = lf[1:3]
+                say("  the motion detector sees it at %.0f, %.0f (no heading): trying the way back from there" %
+                    lf[1:3])
+                self.ev("hold_motion_seen", x=round(lf[1], 1), y=round(lf[2], 1))
+                th = (self.D or (0, 0, 0))[2]
+                self._hold_depth = 1
+                try:
+                    self.recover((lf[1], lf[2], th), 0.0, 0.0, "seen by the motion detector while held")
+                finally:
+                    self._hold_depth = 0
+                continue
+            if time.time() - said >= HOLD_SAY_S:
+                said = time.time()
+                w = ("%s NEEDS A HAND: the camera lost its roof tag %.0f s ago and it is held, still and safe, where it "
+                     "stopped. Move it a hand's width back towards the middle of zones 1-2 (or wipe / turn its tag to "
+                     "the camera): it carries on by itself once the tag is read. Stop ends the calibration." % (
+                         getattr(self, "name", "the robot"), time.time() - t0))
+                say("!! " + w)
+                self.set_status(words=w)
+                self.ev("needs_a_hand", held_s=round(time.time() - t0, 1))
+            time.sleep(0.1)
+        raise RunEnd("stopped (Ctrl+C or Mission Control's Stop) while the robot was held waiting for a hand")
 
     # ------------------------------------------------------------------------------------------------- recovery (11-05c)
     def bubble(self, blind_cm, blind_deg, after_cm=None):
@@ -1636,20 +1730,32 @@ class CalibRun:
             self.watch_heading(row, value)
         try:
             # (11-05h) where it was blind (the estimate) counts as a miss; where the leg ended seen, as a read
-            rm_ = self.readmap()
-            if interrupted and kind == "go" and cam0 is not None:
-                hx = math.radians(cam0[2])                      # where the leg was taking it (it went blind there)
-                for _ in range(3):
-                    rm_.add(cam0[0] + value * math.cos(hx), cam0[1] + value * math.sin(hx), False)
-            rm_.add(cam1[0], cam1[1], True)
+            for rm_ in (self.readmap(), self.readmap_tag()):    # (e13) the site's map and this tag's own
+                if interrupted and kind == "go" and cam0 is not None:
+                    hx = math.radians(cam0[2])                  # where the leg was taking it (it went blind there)
+                    for _ in range(3):
+                        rm_.add(cam0[0] + value * math.cos(hx), cam0[1] + value * math.sin(hx), False)
+                rm_.add(cam1[0], cam1[1], True)
         except Exception:  # noqa: BLE001
             pass
         if interrupted:
             # (11-05c) a leg the camera lost and the robot was stopped in (then recovered or held): not in the fit
             row["interrupted"] = True
             self.ev("leg_interrupted", n=self.leg_n, phase=phase, label=label, policy=self.a.lost_policy)
+        if r["result"] == "timeout" and kind == "turn":
+            # (e13, the 10 Nov 11:54 school calibration: "turn -90" timed out; the camera saw -98.4 deg; it hunted ~40 s)
+            ct = wrap180(cam1[2] - cam0[2]) if (cam0 is not None and cam1 is not None) else None
+            dg = r.get("diag") or {}
+            w = ("TURN DID NOT SETTLE: asked %.0f deg; the camera saw it turn %s; its own heading (gyro) said %s; %s" % (
+                value, "%.1f deg" % ct if ct is not None else "nothing (tag not read)",
+                "%.1f deg" % dg["own_th"] if dg.get("own_th") is not None else "nothing (no pose came back)",
+                dg.get("words") or "no end report"))
+            self.ev("turn_not_settled", asked=value, camera_deg=ct, own_th=dg.get("own_th"), diag=dg)
+            raise RunEnd(w)
         if r["result"] in ("refused", "timeout"):
-            raise RunEnd("the robot %s the %s %.0f leg (%s): stopped" % (r["result"], kind, value, r["info"]))
+            dg = (r.get("diag") or {}).get("words")
+            raise RunEnd("the robot %s the %s %.0f leg (%s)%s: stopped" % (r["result"], kind, value, r["info"],
+                                                                           ("; " + dg) if dg else ""))
         if interrupted and self.a.lost_policy == "recover" and getattr(self, "_goto_depth", 0) > 0:
             raise Recovered(cam1)
         return cam1, r, row
@@ -1657,8 +1763,9 @@ class CalibRun:
     def leg_row(self, phase, tour, kind, label, value, r, c0, c1, t0, t1, corrected, held):
         self.leg_n += 1
         b0, b1 = r["start"], r["end"]
-        if b0 is None or b1 is None:
-            b0 = b1 = (0, 0, 0, 0)
+        no_pose = b0 is None or b1 is None
+        if no_pose:
+            b0 = b1 = (0, 0, 0, 0)             # (e13) written as blanks below: no pose came back, not a pose of 0
         dt_ = (b1[3] - b0[3]) / 1000.0
         cam_len = math.hypot(c1[0] - c0[0], c1[1] - c0[1])
         bel_len = math.hypot(b1[0] - b0[0], b1[1] - b0[1])
@@ -1676,7 +1783,8 @@ class CalibRun:
             terr = wrap180(c1[2] - (c0[2] + value))      # the end heading's error (unambiguous, +-180 turns too)
         row = [phase, tour, self.leg_n, kind, label, "%.2f" % value, r["result"], r["info"], "%.3f" % t0, "%.3f" % t1,
                "%.2f" % c0[0], "%.2f" % c0[1], "%.2f" % c0[2], "%.2f" % c1[0], "%.2f" % c1[1], "%.2f" % c1[2],
-               "%.2f" % b0[0], "%.2f" % b0[1], "%.2f" % b0[2], "%.2f" % b1[0], "%.2f" % b1[1], "%.2f" % b1[2],
+               *(["", "", "", "", "", ""] if no_pose else
+                 ["%.2f" % b0[0], "%.2f" % b0[1], "%.2f" % b0[2], "%.2f" % b1[0], "%.2f" % b1[1], "%.2f" % b1[2]]),
                "%.3f" % dt_, "%.2f" % cam_len, "%.2f" % bel_len, "%.2f" % cam_turn, "%.2f" % bel_turn,
                _f(along), _f(cross), _f(terr), _f(miss), int(bool(corrected)), "%.1f" % held,
                "%.1f" % self.S.edge_dist(c1[:2]), "%.1f" % self.S.keepout_dist(c1[:2])[0],
@@ -1869,6 +1977,17 @@ class CalibRun:
                 continue
             rm = self.readmap()
             ok_, why_ = rm.readable(*self.S.points[lab])
+            rt_ = self.readmap_tag()
+            if rt_.tries.get(rt_.ij(*self.S.points[lab]), 0) >= 3:
+                # (e13: tag 2 read at P11 in the 9 Nov tours, tag 4 lost it on 10 Nov) where this tag's own evidence
+                # exists it decides: readability kept per tag where it differs from the site's
+                okt, whyt = rt_.readable(*self.S.points[lab])
+                if okt != ok_:
+                    self.ev("readability_per_tag", point=lab, tag=self.tag, site=ok_, this_tag=okt)
+                    say("  %s: for tag %s the evidence differs from the site's (%s; site: %s): this tag's is used" % (
+                        lab, self.tag, whyt, why_))
+                ok_, why_ = okt, "tag %s: %s" % (self.tag, whyt)
+                rm = rt_
             if not ok_ and rm.tries.get(rm.ij(*self.S.points[lab]), 0) >= 3:
                 # (11-05h, Observe then trust) learned in this run: the camera does not read the tag there (the typed
                 # view limit stays a first guess): left out of the tours, said, the run carries on
@@ -1881,9 +2000,9 @@ class CalibRun:
                 self.ev("skip_point", point=lab, why=e.why)
                 say("  %s skipped: %s; the tour goes on" % (lab, e.why))
                 self.skipped_pts = set(getattr(self, "skipped_pts", set())) | {lab}
-                hx_ = self.readmap()
-                for _ in range(3):
-                    hx_.add(*self.S.points[lab], False)
+                for hx_ in (self.readmap(), self.readmap_tag()):
+                    for _ in range(3):
+                        hx_.add(*self.S.points[lab], False)
                 cam = e.cam or self.cam_pose()
                 continue
             x, y = self.S.points[lab]
@@ -2304,9 +2423,16 @@ class CalibRun:
                     break
         else:
             out.update(result="timeout", why="no end report", t1=time.time())
-        k2 = link.mark()
-        link.send(rb.ip, "stop")                    # the follow run ends; idle legs again
-        link.wait_for(lambda n, l: n == name and ("finished" in l or "nothing running" in l), k2, 2.0)
+        # the follow run ends; idle legs again. (e13, the 10 Nov 11:54 school calibration: a turn leg timed out with no
+        # LEG record at all) a lost `stop` left the robot following, and idle legs are not run as legs then: `stop` is
+        # sent again until the robot says so (or its FOLLOW rows stop coming), at most 5 times
+        for _try in range(5):
+            k2 = link.mark()
+            link.send(rb.ip, "stop")
+            if link.wait_for(lambda n, l: n == name and ("finished" in l or "nothing running" in l), k2, 2.0):
+                break
+            if not link.wait_for(lambda n, l: n == name and l.startswith("D,FOLLOW"), link.mark(), 0.6):
+                break
         time.sleep(0.2)
         return out
 
@@ -2806,6 +2932,26 @@ class CalibRun:
                     say("(readability seed: %s; every spot taken as readable until the run learns otherwise)" % e)
         return host.rm
 
+    def readmap_tag(self):
+        """(e13) This robot's roof tag's own readability evidence (a point may read for one tag and not another): no
+        seed of its own (a weak 50/50), earlier runs' reads of this tag at this site carried in (readmap_tag<id>.json,
+        half weight). Used where it has 3+ tries at a point; saved at the end beside the site's map."""
+        host = getattr(self, "parent", None) or self
+        maps = host.__dict__.setdefault("rm_tags", {})
+        if self.tag not in maps:
+            import observe as OB
+            m = OB.ReadMap(self.S.L, self.S.W)
+            folder = getattr(self.a, "state_dir", "") if self.a.dry else ((self.site or {}).get("conf_dir") or "")
+            p = os.path.join(folder, "readmap_tag%s.json" % self.tag) if folder else ""
+            if p and os.path.exists(p):
+                try:
+                    with open(p) as f:
+                        m.merge_history(OB.ReadMap.from_json(json.load(f)))
+                except (OSError, ValueError, KeyError):
+                    pass
+            maps[self.tag] = m
+        return maps[self.tag]
+
     def after_trip(self, r, cam0):
         """(11-05h, Nick 20:46) A leg stopped by the robot's tilt stop or its edge guard's drop: that spot is a
         discovered edge (a keep-out for the rest of the run), the robot backs straight away from it (never forward:
@@ -3233,6 +3379,11 @@ def start_bridge(a, site, folder):
         raise RunEnd("no camera model at %s: run Measure first (Mission Control, Setup). Nothing moved." % cal)
     cmd = [PY, os.path.join(HERE, "tag_bridge.py"), "--tags", tp, "--cam", "overhead=%s,%s" % (a.stream, cal),
            "--out", os.path.join(folder, "bridge"), "--to", "127.0.0.1:%d" % FIX_PORT, "--wait-calib-s", "60"]
+    tb = site.get("table") or {}
+    if tb.get("length_cm") and tb.get("width_cm") and os.environ.get("MIRLT_CALIB_MOTION", "1") != "0":
+        # (e13, school 10 Nov 12:12: the tag lost after "go 63 P11") the bridge's motion detector on: seeded by the tag
+        # reads, it keeps following the robot where the tag stops reading; the hold uses its sightings to find it again
+        cmd += ["--board", "0,0,%g,%g" % (float(tb["length_cm"]), float(tb["width_cm"]))]
     f = open(os.path.join(folder, "bridge.txt"), "w")
     return subprocess.Popen(cmd, stdout=f, stderr=subprocess.STDOUT, cwd=REPO), cal, h
 
@@ -3509,6 +3660,13 @@ def main(argv=None):
         if getattr(run, "rm", None) is not None:
             # (11-10b, e12 item 2) where the camera read the roof tag in this run: kept for the next run's seed
             kept = save_readmap(run.rm, folder, site, dry=bool(a.dry), state_dir=a.state_dir)
+            for tg_, m_ in (getattr(run, "rm_tags", None) or {}).items():   # (e13) each tag's own evidence
+                for d_ in ([folder] + ([a.state_dir] if a.dry else [(site or {}).get("conf_dir") or ""])):
+                    if d_:
+                        try:
+                            m_.save(os.path.join(d_, "readmap_tag%s.json" % tg_))
+                        except OSError:
+                            pass
             if kept[1:]:
                 say("Readability kept for the next run: %s" % os.path.join(kept[-1], "readmap.json"))
     import calib_report as CR
