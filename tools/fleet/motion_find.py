@@ -40,7 +40,7 @@ for _p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recogni
 
 import numpy as np   # noqa: E402
 
-VERSION = "motion-find-2026-11-10e14"
+VERSION = "motion-find-2026-11-10e14b"   # e14b: tagless only on proven-readable spots (Laplace rate); a target reached with no read or blocked by a robot is not tried again (rehearsal: it circled a target in a dim patch; held beside a parked robot)
 
 # ---------------------------------------------------------------------------------------------- numbers (and why)
 STEP_CM = 5.0            # one bring-back step (calib_run RECOVER_STEP_CM, chosen there; DOE row there). Each step is
@@ -223,6 +223,8 @@ class BringBack:
         self.per = BLIND_PER_CM_UNCAL if uncal else BLIND_PER_CM
         self.tf = TURN_FRAC_UNCAL if uncal else 0.03
         self.failed = [(self.x, self.y)]          # where it stood and its tag did not read
+        self.tried = []                           # targets reached with no read (seed-readable, not proven)
+        self.blocked = []                         # targets another robot or a keep-out stands in the way of
         self.track = [(round(self.x, 1), round(self.y, 1), "found")]
         self.steps = self.sightings = self.wiggles = self.holds = 0
         self._since_wiggle = 0
@@ -242,7 +244,8 @@ class BringBack:
         for (cx, cy) in (self.cells or []):
             if self.readable(cx, cy) < self.ok_rate:
                 continue
-            if any(math.hypot(cx - fx, cy - fy) < FAILED_R_CM for fx, fy in self.failed):
+            if any(math.hypot(cx - fx, cy - fy) < FAILED_R_CM for fx, fy in self.failed + self.tried) or \
+                    any(math.hypot(cx - bx, cy - by) < 1.0 for bx, by in self.blocked):
                 continue
             if self.problems((cx, cy), (cx, cy), 0.0):
                 continue
@@ -344,12 +347,25 @@ class BringBack:
                 self.th = wrap180(self.th + d)
                 self.blind_deg += abs(d)
                 continue
-            step = min(STEP_CM, math.hypot(tgt[0] - self.x, tgt[1] - self.y) + 0.5)
+            dist = math.hypot(tgt[0] - self.x, tgt[1] - self.y)
+            if dist < 2.0:
+                # reached the target and no tag read: not that spot again (rehearsal: it circled a target 0.5 cm at a
+                # time in a dim patch, its steps too short for the motion detector)
+                self.tried.append(tgt)
+                continue
+            step = min(STEP_CM, dist + 0.5)
             h = math.radians(self.th)
             nxt = (self.x + step * math.cos(h), self.y + step * math.sin(h))
-            if self.problems((self.x, self.y), nxt, self.bubble(step) + self.stop_cm):
-                self._hold("the next step's error sum (%.1f cm) + its stop (%.1f cm) could reach an edge" % (
-                    self.bubble(step), self.stop_cm))
+            why = self.problems((self.x, self.y), nxt, self.bubble(step) + self.stop_cm)
+            if why and not str(why[0]).startswith("the table's edge"):
+                # another robot or a keep-out in the way (rehearsal: a spot beside a parked robot): another spot, no hold
+                self.blocked.append(tgt)
+                self.log("  %s: the way to %.0f, %.0f is blocked (%s): another spot" % (self.name, tgt[0], tgt[1],
+                                                                                       why[0]))
+                continue
+            if why:
+                self._hold("the next step's error sum (%.1f cm) + its stop (%.1f cm) could reach an edge (%s)" % (
+                    self.bubble(step), self.stop_cm, why[0]))
                 continue
             s = self.step_f(step)
             self.steps += 1
@@ -370,10 +386,10 @@ class BringBack:
                         self.failed.append((self.x, self.y))
                     if self.p_miss < TAGLESS_P:
                         self.ev("tagless", robot=self.name, at=[round(self.x, 1), round(self.y, 1)], p=self.p_miss)
-                        self.log("  %s: NO ROOF TAG READS ON IT: it stood on %d readable spots with no tag read (a tag "
-                                 "on it would have been missed at all of them with a chance under %.0f %%): it runs on "
-                                 "motion, lock-on and its own odometry" % (self.name, self.n_inside(),
-                                                                          100 * TAGLESS_P))
+                        self.log("  %s: NO ROOF TAG READS ON IT: it stood on %d spot%s where tags are proven to read, "
+                                 "with no tag read (a tag on it would have been missed at all of them with a chance "
+                                 "under %.0f %%): it runs on motion, lock-on and its own odometry" % (
+                                     self.name, self.n_inside(), "" if self.n_inside() == 1 else "s", 100 * TAGLESS_P))
                         return self.x, self.y, self.th, None
             if time.time() - said > 20.0:
                 said = time.time()
@@ -604,7 +620,7 @@ def run_finding(robots, eye, cams, S, rm, confirmed, guesses=None, log=say, ev=l
             for j in (j0 - 1, j0, j0 + 1):
                 n_ += rm.tries.get((i, j), 0)
                 r_ += rm.reads.get((i, j), 0)
-        return (r_ / n_) if n_ >= 3 else None
+        return ((r_ + 1.0) / (n_ + 2.0)) if n_ >= 3 else None    # (Laplace: 3 of 3 reads is 0.8, not certain)
     try:
         for n, f in res["robots"].items():
             if not f["found"]:

@@ -61,7 +61,7 @@ for p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recognit
 
 import numpy as np   # noqa: E402
 
-VERSION = "2026-11-10e14"   # e14 (10 Nov): every robot found by its own small move at the start (motion_find: anywhere on the table, with or without a tag that reads; one found where its tag does not read drives itself back, never giving up; MIRLT_CAMERA_DISCOVERY=off the wiggle alone); calibration on any surface (its own spots inside the readable area when the site has no proven stickers: --spots / MIRLT_CALIB_SPOTS / calibration.spots); the readability evidence chosen and kept by light and tag (readmap_store; MIRLT_READMAP_STORE=0 the old readmap.json); a tour point whose tag was just lost goes to the end of the tour once, then is skipped (MIRLT_RETRY_LOST=again the old aim-again); the battery floor from the site / Mission Control said at the start; LOW-BATTERY CALIBRATION under 40 %; --sim-dark, --sim-extra-camera, --sim-light, --sim-start X,Y. VERSION_10I = "2026-11-10i"   # 11-10i: the binding looks over longer windows and waits for a fresh read after each wiggle half (a tag that reads only now and then, school 15:00). 11-10h: the never-give-up hold makes find-me wiggles (when its turning circle + error is clear) so the motion detector can find it and the recovery bring it back (Nick 14:32: motion, not hands). 11-10e13 (e13): never give up (the recovery drives blind while its bubble + stop cannot reach the edge margin, no 8 cm / 40 cm caps: MIRLT_BLIND_RULE=cap; a lost tag holds with no time limit, asks for a hand; cam_pose_sure and every unguarded camera pose wait the same way; MIRLT_CALIB_GIVEUP=1 the 30 s end), readability per tag, TURN DID NOT SETTLE, stop resent after the curve phase, the motion detector on in its bridge; the camera check before binding (camera_feed: no pictures is said as that, never the robot or tag); tracked for the sleep after a run.
+VERSION = "2026-11-10e14b"   # e14b (10 Nov 16:40-17:00): calibration evidence pooled across runs (calib_pool: every measured leg of the robot on this site, finished or not, weighted by age and battery; a run starts from the pooled values, measures only what is still uncertain, saves once the pooled +- is no wider than one finished run's; MIRLT_CALIB_POOL=0 each run on its own); parking after the tour never gives up (school 16:22: MIRLT_PARK_GIVEUP=1 the e13 end); a recovery with no reliable spot heads for the readability map; the setup order said at the start. e14 (10 Nov): every robot found by its own small move at the start (motion_find: anywhere on the table, with or without a tag that reads; one found where its tag does not read drives itself back, never giving up; MIRLT_CAMERA_DISCOVERY=off the wiggle alone); calibration on any surface (its own spots inside the readable area when the site has no proven stickers: --spots / MIRLT_CALIB_SPOTS / calibration.spots); the readability evidence chosen and kept by light and tag (readmap_store; MIRLT_READMAP_STORE=0 the old readmap.json); a tour point whose tag was just lost goes to the end of the tour once, then is skipped (MIRLT_RETRY_LOST=again the old aim-again); the battery floor from the site / Mission Control said at the start; LOW-BATTERY CALIBRATION under 40 %; --sim-dark, --sim-extra-camera, --sim-light, --sim-start X,Y. VERSION_10I = "2026-11-10i"   # 11-10i: the binding looks over longer windows and waits for a fresh read after each wiggle half (a tag that reads only now and then, school 15:00). 11-10h: the never-give-up hold makes find-me wiggles (when its turning circle + error is clear) so the motion detector can find it and the recovery bring it back (Nick 14:32: motion, not hands). 11-10e13 (e13): never give up (the recovery drives blind while its bubble + stop cannot reach the edge margin, no 8 cm / 40 cm caps: MIRLT_BLIND_RULE=cap; a lost tag holds with no time limit, asks for a hand; cam_pose_sure and every unguarded camera pose wait the same way; MIRLT_CALIB_GIVEUP=1 the 30 s end), readability per tag, TURN DID NOT SETTLE, stop resent after the curve phase, the motion detector on in its bridge; the camera check before binding (camera_feed: no pictures is said as that, never the robot or tag); tracked for the sleep after a run.
 VERSION_10G = "2026-11-10g"     # 11-10g: a standing robot is never given up for sparse tag reads: it is measured over longer windows (Nick 13:34; dim light). 11-10f: the start waits for the camera fix after the wiggle (dim light, ~7 fps: refused at once, school 13:25). 11-10e: a run ended for poor tag reads DOES try to park again (Nick 12:48: never give up on getting back to where it is seen); it drives only with a camera fix (cam_pose_sure waits for one). 11-10d: no crash parking with no camera fix (RunEnd, caught: "Could not park"). 11-10c: Phase A waits for the camera fix instead of crashing on None (school 12:35). 11-10b (e12, Nick 10 Nov): the curve phase (phase R: constant-curvature arcs left and right at free roam's radii and two speeds, fitted from the camera, arc_k_scale / arc_d_scale saved when they agree; --arc-phase auto/on/off), points in your order (--visit-order), the proven workspace for the tours' room, the camera self-check at the start. VERSION_10A was:
 VERSION_10A = "2026-11-10a"     # 11-10a: a leftover camera reader holding port 5011 is stopped first (stale_bridge.py). 11-05i (9 Nov, school): a tripped stop mid-tour crashed the run (TypeError: ev() got two
                              # values for kind); the trip event now says stop_kind. VERSION_H was:
@@ -1533,7 +1533,7 @@ class CalibRun:
         k = 0
         while True:
             # (11-10g) standing still it cannot drift: a longer window each time, never giving up (Ctrl+C / Stop ends)
-            if getattr(self, "_ending", False) and k >= 3:
+            if getattr(self, "_ending", False) and k >= 3 and PARK_GIVEUP:
                 # (e13) parking after the run's end: the end is not held forever
                 raise RunEnd("no camera fix of the roof tag while parking: the robot stays where it is")
             cam = self.cam_pose(min(STILL_MEASURE_MAX_S, MEASURE_S * (2 ** k)))
@@ -1648,8 +1648,8 @@ class CalibRun:
         NEEDS A HAND said loudly at once and every HOLD_SAY_S (terminal, status, events); the roof tag seen again ->
         carry on; the bridge's motion detector (or lock-on) sighting it -> its position is known again: the recovery is
         tried once more from there, towards where the tag read well. Only Stop (or Ctrl+C) ends it."""
-        if getattr(self, "_ending", False):
-            # parking after the run ended: the run's end (report, upload, sleep) is not held up; it stays where it is
+        if getattr(self, "_ending", False) and PARK_GIVEUP:
+            # (MIRLT_PARK_GIVEUP=1, e13's way) parking after the run ended: the run's end (report, upload, sleep) is not held up; it stays where it is
             raise RunEnd("the roof tag is not read while parking: the robot stays where it is")
         t0 = time.time()
         said = -1e9
@@ -1735,6 +1735,30 @@ class CalibRun:
         after = blind_cm if after_cm is None else after_cm
         return BLIND_BASE_CM + per * blind_cm + after * math.sin(math.radians(min(60.0, tf * blind_deg)))
 
+    def map_target(self, at, bub=0.0):
+        """(e14) The nearest cell middle the readability map (this tag's where it has evidence, else the run's) calls
+        readable, at least a cell away from where the tag was lost, whose middle is clear of the edges and keep-outs
+        with the error sum; None if there is none."""
+        try:
+            rm = self.readmap()
+            rt = self.readmap_tag()
+        except Exception:  # noqa: BLE001
+            return None
+        lost = getattr(self, "last_lost_at", None) or at
+        best = None
+        for i in range(rm.nx):
+            for j in range(rm.ny):
+                c = rm.centre(i, j)
+                m = rt if rt.tries.get((i, j), 0) >= 3 else rm
+                if not m.readable(*c)[0] or math.dist(c, lost) < rm.cell:
+                    continue
+                if self.S.problems(c, c, buf=bub, edge_buf=bub):
+                    continue
+                d = math.dist(c, at)
+                if best is None or d < best[0]:
+                    best = (d, c)
+        return None if best is None else best[1]
+
     def lost_estimate(self, cam0, r, kind, speed):
         """Where the robot is after the tag was lost in a leg, and how far / how much it moved blind: the last camera
         read (its turning point) moved on along the leg by what it drove since (this leg's speed x the time since that
@@ -1794,7 +1818,16 @@ class CalibRun:
             spots = sorted(self.reliable, key=lambda q: math.dist(q, (x, y)))
             tgt = next((q for q in spots if math.dist(q, (x, y)) > 1.0), None)
             if tgt is None:
-                outcome = "no reliable spot known"
+                # (e14, school 16:22: "recovery stopped (no reliable spot known)") no spot where the tag read well in
+                # this run yet: the nearest spot the readability map (this tag's, at today's light) says reads,
+                # clear of the edges and keep-outs; the motion detector's sightings on the way come through the hold
+                tgt = self.map_target((x, y), bub)
+                if tgt is not None and not rec.get("map_target"):
+                    rec["map_target"] = [round(tgt[0], 1), round(tgt[1], 1)]
+                    say("  no spot where the tag read well yet: heading for %.0f, %.0f, where the readability map "
+                        "says tags read" % tgt)
+            if tgt is None:
+                outcome = "no reliable spot known, and the readability map has no readable spot it can reach"
                 break
             want = wrap180(math.degrees(math.atan2(tgt[1] - y, tgt[0] - x)) - th)
             if abs(want) > 3.0:
@@ -2041,7 +2074,7 @@ class CalibRun:
         d = dict(phase=phase, tour=tour, kind=kind, label=label, value=value, result=r["result"], dt=dt_,
                  cam0=c0, cam1=c1, bel0=b0, bel1=b1, cam_len=cam_len, bel_len=bel_len, cam_turn=cam_turn,
                  bel_turn=bel_turn, along=along, cross=cross, turn_err=terr, miss=miss, corrected=corrected,
-                 speed=getattr(self, "_speed", None))
+                 speed=getattr(self, "_speed", None), t0=t0, interrupted=bool(getattr(self, "_lost_stop", False)))
         self.rows.append(d)
         return d
 
@@ -2170,14 +2203,16 @@ class CalibRun:
     def safe_frac(self):
         """(5 Nov 11:00) The share of a leg's length taken as its possible error in the safety checks: SAFE_FRAC once
         the robot's values are fitted (phase C) or it started from saved values, else SAFE_FRAC_UNCAL."""
-        if getattr(self, "fit", None) is not None or getattr(self, "baseline", "") == "saved":
+        if getattr(self, "fit", None) is not None or getattr(self, "baseline", "") in ("saved", "pooled"):
             return SAFE_FRAC
         return SAFE_FRAC_UNCAL
 
     def park(self, phase):
         """Back to its park spot (P11 for the first robot) by the camera (safety), facing the park heading."""
         self.set_status(words="Returning to park at %s" % self.S.park_label)
-        self._ending = True        # (e13) parking after the run: a lost tag ends the parking, not a wait with no end
+        self._ending = True        # (e13) parking after the run. (e14, school 16:22, AL-EB54 at P16: the tour's last point
+        # lost the tag and parking ended the run at once, the robot left where it was) parking is still the run: a lost
+        # tag holds with the never-give-up hold and the motion-based return like any leg; MIRLT_PARK_GIVEUP=1: e13's end
         cam = self.goto(self.S.park_label, phase, 0, odometry=False)
         x, y = self.S.points[self.S.park_label]
         ax, ay = self.S.aim(self.S.park_label)
@@ -2337,7 +2372,8 @@ class CalibRun:
                                               "the robot's current values", self.phase_a_values))
         cam = self.cam_pose_sure()
         rest = [self.eye.measure(self.tag)]
-        for k, t in enumerate(TURNS_A):
+        nd = getattr(self, "pool_needs", None) or {"turns": True, "still": True, "rolls": True}
+        for k, t in enumerate(TURNS_A if nd["turns"] else ()):
             cam, r, row = self.drive_leg("turn", float(t), "turn %+d" % t, "A", 0, cam0=cam)
             m = self.eye.measure(self.tag, 0.4)
             if m:
@@ -2350,7 +2386,15 @@ class CalibRun:
             say("  tag offset from the turning point: %.1f cm ahead, %.1f cm left (%.1f cm, fit +- %.1f cm)" % (
                 off[1][0], off[1][1], math.hypot(*off[1]), off[2]))
             self.ev("tag_offset", **self.fit_offset)
-        self.still(STILL_S, "A")
+        if not nd["turns"]:
+            say("  turns: not driven (the pooled gyro values are already as sure as a finished run's; the tag offset "
+                "%.1f, %.1f cm from the pool)" % tuple(self.offset))
+        if nd["still"]:
+            self.still(STILL_S, "A")
+        else:
+            say("  still period: not needed (the pooled gyro drift is already as sure as a finished run's)")
+        if not nd["rolls"]:
+            say("  rolls: not driven (the pooled wheel_scale is already as sure as a finished run's)")
         # rolls: towards -x from P11 (open table, away from the middle outlet and the camera's far limit)
         self.set_status(words="Phase A: straight rolls %s cm out and back" % " / ".join("%.0f" % v for v in
                                                                                    sorted(set(ROLLS_A))))
@@ -2360,12 +2404,12 @@ class CalibRun:
                                                                        cam[1] + far * math.sin(math.radians(h))),
                                                                 buf=SAFE_FRAC * far,
                                                                 edge_buf=self.safe_frac() * far)), ROLL_DIRS[0])
-        if hd != ROLL_DIRS[0]:
+        if hd != ROLL_DIRS[0] and nd["rolls"]:
             say("  rolls towards %+.0f deg (more room there from %s)" % (hd, self.S.park_label))
-        t = wrap180(hd - cam[2])
-        for t_ in ((t / 2.0, t / 2.0) if abs(t) > MAX_TURN_DEG else (t,)):
+        t = wrap180(hd - cam[2]) if nd["rolls"] else 0.0
+        for t_ in ((t / 2.0, t / 2.0) if abs(t) > MAX_TURN_DEG else (t,) if abs(t) > 0 else ()):
             cam, _, _ = self.drive_leg("turn", t_, "face roll", "A", 0, cam0=cam)
-        for L in ROLLS_A:
+        for L in (ROLLS_A if nd["rolls"] else ()):
             for leg in ("out", "back"):
                 end = (cam[0] + L * math.cos(math.radians(cam[2])), cam[1] + L * math.sin(math.radians(cam[2])))
                 prob = self.S.problems(cam[:2], end, buf=SAFE_FRAC * L, edge_buf=self.safe_frac() * L)
@@ -2392,6 +2436,23 @@ class CalibRun:
         over = [(r["bel_len"], r["cam_len"], r.get("speed") or SPEED_CMS, r["value"]) for r in A
                 if r["kind"] == "go" and r["result"] == "done" and r["value"] >= 4.0 and r.get("speed")]
         fit = fit_values(turns, still, rolls, self.phase_a_values, overrun_rows=over)    # the values phase A ran with
+        if POOL_ON():
+            # (e14) the values from every leg pooled (this run's legs added), each with its pooled +-; saved when its +-
+            # is no wider than one finished run's would be (calib_pool.verdict, derived)
+            import calib_pool as CP
+            fit["this_run"] = {k: fit.get(k) for k in PARAMS}
+            fit["this_run_verdict"] = dict(fit.get("verdict") or {})
+            pooled = CP.fit(self.pool_dir(), self.wifi_name(), extra=self.pool_rows())
+            if pooled:
+                for k in PARAMS:
+                    if k in pooled:
+                        fit[k], fit["se_" + k] = pooled[k], pooled["se_" + k]
+                fit["verdict"] = CP.verdict(pooled)
+                fit["pooled"] = {k: v for k, v in pooled.items() if not isinstance(v, dict)}
+                fit["full_run_se"] = CP.full_run_se(pooled)
+                say("  pooled with %d earlier legs: %s" % (
+                    sum(pooled.get(n_, 0) for n_ in ("n_turns", "n_still", "n_rolls")) - len(self.pool_rows()),
+                    CP.words(pooled, fit["full_run_se"])))
         fit["old"] = dict(self.before)
         fit["phase_a_values"] = dict(self.phase_a_values)
         fit["baseline"] = getattr(self, "baseline", "saved")
@@ -2420,6 +2481,7 @@ class CalibRun:
         fit["saved"] = self.save_on_robot(new, rb)
         self.record_calibrated(fit)
         self.fit = fit
+        self.fit_t = time.time()
         with open(os.path.join(self.folder, "fit.json"), "w") as f:
             json.dump(fit, f, indent=1, default=str)
         self.ev("fit", **{k: v for k, v in fit.items() if not isinstance(v, dict)})
@@ -2447,6 +2509,64 @@ class CalibRun:
                 wifi, e.get("first", "?"), e.get("last", "?"))
         return "defaults", "the first calibration of %s on this site (not in %s): an uncalibrated baseline" % (
             wifi or self.rb.name + " (WiFi name not known)", CALIBRATED_FILE)
+
+    # ------------------------------------------------------------------------------------------------- (e14) the pool
+    def pool_dir(self):
+        return getattr(self.a, "state_dir", "") if self.a.dry else ((self.site or {}).get("conf_dir") or "")
+
+    def wifi_name(self):
+        return (getattr(self, "wifi", {}) or {}).get(self.rb.name) or self.rb.name
+
+    def pool_rows(self):
+        """This run's legs as the pool keeps them (raw, with the values in force and the battery then)."""
+        import calib_pool as CP
+        fit_t = getattr(self, "fit_t", None)
+        after = (getattr(self, "fit", None) or {}).get("new") or self.phase_a_values
+
+        def values_at(t):
+            return after if (fit_t is not None and t >= fit_t) else self.phase_a_values
+
+        def battery_at(t):
+            b = [v for (tb, v) in self.battery if tb <= t]
+            return b[-1] if b else (self.battery[0][1] if self.battery else None)
+        # phase A's legs only, as the per-run fit uses: they are driven on wheels + gyro alone; staging, parking and the
+        # tours' legs may be aimed or corrected from the camera (rehearsal: pooling them widened the wheel's +- 3x)
+        return CP.raw_rows([r for r in getattr(self, "rows", []) if r.get("phase") == "A"],
+                           values_at, battery_at, os.path.basename(self.folder.rstrip("/")), _unwrap_turn)
+
+    def pool_after(self):
+        """(e14) Keep this run's legs in the pool, whether it finished or not; when it did not reach its fit and the
+        pooled values are now as sure as a finished run's, set and save them on the robot."""
+        if not POOL_ON():
+            return
+        import calib_pool as CP
+        try:
+            off = getattr(self, "fit_offset", None)
+            w = CP.add(self.pool_dir(), self.wifi_name(), self.pool_rows(),
+                       offset=(off["offset_cm"][0], off["offset_cm"][1], off["rms_cm"]) if off else None,
+                       session=os.path.basename(self.folder.rstrip("/")))
+            say("POOL: %s" % w)
+            self.ev("pooled", words=w)
+            if getattr(self, "fit", None) is not None:
+                return
+            pooled = CP.fit(self.pool_dir(), self.wifi_name())
+            v = CP.verdict(pooled) if pooled else {}
+            say("POOL after this run (it ended before its fit): %s" % CP.words(pooled))
+            if pooled and all(v.get(k) == "ok" for k in PARAMS):
+                new = {k: round(pooled[k], 4) for k in PARAMS}
+                rb = {}
+                for k in PARAMS:
+                    ok, got = self.rb.set_checked(k, new[k])
+                    rb[k] = {"sent": new[k], "read": got, "ok": ok}
+                sv = self.save_on_robot(new, rb)
+                fit = {"new": new, "saved": sv, "baseline": "pooled", "pooled": True}
+                self.record_calibrated(fit)
+                self.pool_saved = True
+                say("POOL: the pooled values are as sure as a finished run's: set and saved on %s (%s)" % (
+                    self.name, ", ".join("%s %.4f" % kv for kv in new.items())))
+                self.ev("pool_saved", values=new, saved=sv)
+        except Exception as e:  # noqa: BLE001  (the pool never stops the end of a run)
+            say("(calibration pool not updated: %s)" % e)
 
     def record_calibrated(self, fit):
         """This robot counts as calibrated once its fitted values were saved on it (save or corr save, checked)."""
@@ -3502,12 +3622,39 @@ class CalibRun:
                        "how": "read with get before anything was sent"}, f, indent=1)
         say("%s's current values (saved first): %s" % (self.name, self.before))
         self.baseline, words = self.baseline_mode()
+        self.pooled, self.pool_needs = {}, None
+        if POOL_ON():
+            # (e14, Nick 16:40) every leg this robot drove here before, finished runs or not: the pooled values
+            import calib_pool as CP
+            wifi = (getattr(self, "wifi", {}) or {}).get(self.rb.name) or self.rb.name
+            self.pooled = CP.fit(self.pool_dir(), wifi)
+            say("POOLED CALIBRATION for %s: %s" % (wifi, CP.words(self.pooled)))
+            if self.pooled and all(k in self.pooled for k in PARAMS) and all(
+                    BOUNDS[k][0] <= self.pooled[k] <= BOUNDS[k][1] for k in PARAMS):
+                self.baseline = "pooled"
+                words = "the pooled values from %d earlier run%s here (finished or not)" % (
+                    self.pooled.get("n_runs", 0), "" if self.pooled.get("n_runs") == 1 else "s")
+                self.pool_needs = CP.needs(self.pooled)
+                say("  this run measures only what is still uncertain: %s" % ", ".join(
+                    k for k, v in self.pool_needs.items() if v) or "nothing (a check tour only)")
         self.baseline_words = words
-        say("PHASE A STARTS FROM %s: %s" % ("DEFAULTS 1 / 1 / 0" if self.baseline == "defaults" else "ITS SAVED VALUES",
+        say("PHASE A STARTS FROM %s: %s" % ("DEFAULTS 1 / 1 / 0" if self.baseline == "defaults" else
+                                            "THE POOLED VALUES" if self.baseline == "pooled" else "ITS SAVED VALUES",
                                             words))
         self.set_status(baseline=self.baseline, baseline_words=words)
         self.ev("baseline", mode=self.baseline, words=words, before=self.before)
         self.phase_a_values = dict(self.before)
+        if self.baseline == "pooled":
+            for k in PARAMS:
+                ok, got = self.rb.set_checked(k, round(self.pooled[k], 4))
+                if not ok:
+                    for kk in PARAMS:
+                        self.rb.set_checked(kk, self.before[kk])
+                    raise RunEnd("%s did not take %s %.4f (read %s): its own values put back, nothing moved" % (
+                        self.name, k, self.pooled[k], got))
+            self.phase_a_values = {k: round(self.pooled[k], 4) for k in PARAMS}
+            if self.pooled.get("offset") and not (self.pool_needs or {}).get("offset"):
+                self.offset = tuple(self.pooled["offset"])
         if self.baseline == "defaults":
             for k in PARAMS:
                 ok, got = self.rb.set_checked(k, BASELINE_DEFAULTS[k])
@@ -3543,7 +3690,9 @@ class CalibRun:
             say("ENDED: %s" % e)
         except BindError:
             raise
-        if getattr(self, "fit", None) is None and self.phase_a_values != self.before:
+        self.pool_after()                  # (e14) this run's legs kept, finished or not; pooled values saved when sure
+        if getattr(self, "fit", None) is None and self.phase_a_values != self.before and \
+                not getattr(self, "pool_saved", False):
             # ended before phase B: the robot gets its own values back (the defaults were only for phase A)
             for k in PARAMS:
                 self.rb.set_checked(k, self.before[k])
@@ -3586,6 +3735,32 @@ class CalibRun:
 WORKSPACE_ON = os.environ.get("MIRLT_CALIB_WORKSPACE", "1") != "0"   # (11-10b) switch: 0 = the typed table only
 READMAP_SEED = os.environ.get("MIRLT_CALIB_READMAP", "1") != "0"   # (11-10b) switch: 0 = every spot taken as readable
                                                                     # until the run learns otherwise (before e12)
+
+
+def setup_order_words(site, conf_dir=None):  # conf_dir: Mission Control's folder (tests)
+    """(e14, Nick 16:40: the standard setup order for any surface) 1 the table's corners (the rectangle: 4 corners,
+    pre-filled by the corner tags or the camera's Measure, confirmed by the person), 2 the clear space round each robot,
+    3 each robot moves and is identified and named. Step 4 (each robot's path) is Mission Control's (redesign plan)."""
+    t = (site or {}).get("table") or {}
+    md = conf_dir or (site or {}).get("mc_dir") or ""
+    ok = ""
+    try:
+        with open(os.path.join(md, "tag_setup.json")) as f:     # Mission Control's setup (tag_job: corners_ok)
+            c = json.load(f).get("corners_ok") or {}
+        if c.get("t"):
+            ok = "confirmed %s" % time.strftime("%d %b %H:%M", time.localtime(c["t"]))
+    except (OSError, ValueError):
+        pass
+    return ("SETUP ORDER: 1 the table's 4 corners (%.0f x %.0f cm; %s), 2 clear space round each robot, 3 each robot "
+            "moves and is found and named" % (float(t.get("length_cm") or 0), float(t.get("width_cm") or 0),
+                                              ok or "the camera's measure or the typed table, not confirmed on this "
+                                              "computer: Mission Control, Setup, confirms the corner tags"))
+
+
+def POOL_ON():
+    """(e14) Calibration evidence pooled across runs (calib_pool.py); MIRLT_CALIB_POOL=0: each run on its own."""
+    import calib_pool as CP
+    return CP.enabled()
 
 
 def OBS_READ_OK():
@@ -3721,6 +3896,7 @@ class Deferred(SkipPoint):
     at once."""
 
 
+PARK_GIVEUP = os.environ.get("MIRLT_PARK_GIVEUP", "0") == "1"   # (e14) 1: parking ends at a lost tag (e13's way)
 RETRY_LOST = os.environ.get("MIRLT_RETRY_LOST", "defer")   # (e14) "defer" (default) / "again" (before e14: up to 4)
 
 
@@ -4073,6 +4249,7 @@ def main(argv=None):
     os.makedirs(folder, exist_ok=True)
     a.state_dir = a.state_dir or (os.path.join(folder, "sim") if a.dry else (site.get("conf_dir") or ""))
     say("Calibration run %s, session %s" % (VERSION, folder))
+    say(setup_order_words(site))      # (e14, Nick 16:40) corners -> clear space -> robots found and named
     try:
         import engine_checks as EC_
         say("BATTERY FLOOR: %s" % EC_.battery_floor_used(site=site)[1])      # (e14) the floor used, and where from

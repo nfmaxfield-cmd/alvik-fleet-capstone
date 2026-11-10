@@ -292,7 +292,7 @@ def write(folder, run, a):
         bm = getattr(run, "baseline", None) or (getattr(run, "status", {}) or {}).get("baseline")
         L.append("**Phase A started from %s**: %s." % (
             "the defaults (wheel_scale 1, gyro_scale 1, gyro_drift_dps 0)" if bm == "defaults" else
-            "the robot's own values", bw))
+            "the pooled values (every earlier run's legs, calib_pool)" if bm == "pooled" else "the robot's own values", bw))
         L.append("")
     if fit:
         L.append("**Fit from phase A** (%d turns, %d still periods, %d straight legs; 95 %% +- = 1.96 x SE):" % (

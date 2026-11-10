@@ -1375,6 +1375,8 @@ def run(args):
         say("NOTE: sticker %s is missing on the table: its point is still visited by its typed coordinates (nothing "
             "here needs to see the sticker)" % lab)
     if args.tracking_ == "tags" and not args.plan_only:
+        import calib_run as CR_
+        say(CR_.setup_order_words(args.site_))   # (e14, Nick 16:40) corners -> clear space -> robots found and named
         code_ = wiggle_first(args, out)
         if code_:
             return code_

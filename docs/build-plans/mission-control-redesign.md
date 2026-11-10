@@ -84,6 +84,32 @@ camera shows it. Picture: `../screenshots/2026-11-10/e13-feature-click-heading-s
 it belongs in the "Ask / do" box; in A and B as a banner above the steps. Open design points: the card on a phone (two
 pictures per camera are small: one camera at a time with a switch), and a sound when it appears.
 
+## 3c. The setup order for any surface (Nick, 10 Nov 16:40: the chosen flow; build e14)
+
+The standard order, whichever visual direction is chosen:
+
+1. **Table corners.** The rectangle's 4 corners, pre-filled by the corner tags or the camera's Measure; the person
+   confirms or clicks (built: e13's corner confirm). *Future idea, not in this build (Nick 16:45):* any number of
+   corners, an irregular surface as a polygon.
+2. **Clear space.** The person confirms each robot has the derived clearance for its finding stroke (built e14: the
+   Start button asks it with the derived cm and inches; "not sure" makes each robot wiggle on the spot instead).
+3. **Robots found and named.** Each robot moves in turn; motion and roof tags say which is which and where (built
+   e14: `motion_find.py`, in the calibration, the missions and school free roam; the run's first lines say "SETUP
+   ORDER: 1 ... 2 ... 3").
+4. **Each robot's path (chosen flow, not built).** The person selects a robot (each in its own colour on the camera
+   picture and on the map, with its WiFi name and roof tag, or "no tag") and gives it its path: points clicked on the
+   map or on the webcam picture, or a preset (in order, reversed, Jay-Sun custom). The page warns when two robots'
+   paths come too close in space AND time (the planner's own separation, 18 cm centre to centre, at the times the
+   plan gives), naming the two robots, the points and the time, with two ways out: change an order, or let the
+   planner make one robot wait. Then Start.
+
+![step 4 mockup](../screenshots/2026-11-10/e14-mockup-step4-each-robots-path.png)
+
+The mockup shows step 4 in direction A's step bar; in B it is one section of the page, in C the left column. What it
+needs from the code: e11's "Visit points in your order" per robot (`--visit-order NAME:P01,...;NAME2:...` exists), the
+binding's colours and WiFi names (exists), and a plan-time crossing check (the planner's closest approach per pair
+with its time: `planner` reports the closest approach already; per pair and time is new).
+
 ## 4. Recommendation (Claude's reading) and the choice for Nick
 
 Claude's reading: **B now, then C's panel added to B** (about 1 day + 2 days). B fixes the "backwards" order with the

@@ -412,3 +412,133 @@ def test_no_tag_is_concluded_only_where_evidence_shows_tags_read():
     t.join(5)
     b2, _st2 = _bb(tag_near=lambda x, y, r: None, proven=lambda x, y: 0.9 if y > 60 else None)
     assert b2.run()[3] is None                                   # proven readable spots: tagless
+
+
+# -------------------------------------------------------------------------------------------- A. pooled calibration
+def _synthetic_legs(rng, turns, still_s, rolls, true=(1.03, 0.30, 0.97, 0.15), vals=(1.0, 0.0, 1.0), t0=0.0, batt=90,
+                    session="s"):
+    """Legs as the firmware model makes them: a turn ends when its belief reaches the command (belief = gs x raw - gd x
+    t), the camera sees g x raw - d x t (+ 0.5 deg noise); a roll ends at cmd / ws counted cm, the camera sees w x
+    counted + coast (+ 0.2 cm)."""
+    import calib_run as CR
+    g, d, w, coast = true
+    gs, gd, ws = vals
+    rows = []
+    for k, T in enumerate(turns):
+        t = abs(T) / CR.TURN_DPS
+        raw = (T + gd * t) / gs
+        rows.append(dict(kind="turn", raw=raw, dt=t, cam=g * raw - d * t + rng.normal(0, 0.5), t=t0 + k, battery=batt,
+                         session=session))
+    for S in still_s:
+        raw = (d * S) / g + rng.normal(0, 0.5) / g          # the true heading stays; the gyro reads its drift
+        rows.append(dict(kind="still", raw=raw, dt=S, cam=0.0, t=t0, battery=batt, session=session))
+    for L in rolls:
+        c = L / ws
+        rows.append(dict(kind="roll", counted=c, cam=w * c + coast + rng.normal(0, 0.2), t=t0, battery=batt,
+                         session=session))
+    return rows
+
+
+def test_three_partial_runs_pooled_reach_one_full_runs_values(tmp_path):
+    import numpy as np
+    import calib_pool as CP
+    import calib_run as CR
+    full_rolls = [L for L in CR.ROLLS_A for _ in (0, 1)]
+    fulls, pools = [], []
+    for seed in range(30):
+        rng = np.random.default_rng(seed)
+        d1 = tmp_path / ("full%d" % seed)
+        CP.add(str(d1), "AL-EB54", _synthetic_legs(rng, CR.TURNS_A, [CR.STILL_S], full_rolls, session="full"))
+        fulls.append(CP.fit(str(d1), "AL-EB54", now=0))
+        d3 = tmp_path / ("pool%d" % seed)
+        thirds = [CR.TURNS_A[k::3] for k in range(3)]
+        rolls3 = [full_rolls[k::3] for k in range(3)]
+        for k in range(3):        # three runs ended early, each a third of phase A, with different values in force
+            vals = [(1.0, 0.0, 1.0), (1.02, 0.25, 0.98), (1.03, 0.3, 0.97)][k]
+            CP.add(str(d3), "AL-EB54", _synthetic_legs(rng, thirds[k], [CR.STILL_S / 3], rolls3[k], vals=vals,
+                                                       session="p%d" % k))
+        pools.append(CP.fit(str(d3), "AL-EB54", now=0))
+    for k in ("gyro_scale", "gyro_drift_dps", "wheel_scale"):
+        f = np.array([x[k] for x in fulls])
+        p = np.array([x[k] for x in pools])
+        spread = f.std()
+        assert abs(p.mean() - f.mean()) <= spread, (k, p.mean(), f.mean(), spread)
+        # as steady as one run, within sqrt(3): three still periods a third as long each carry three times the reading
+        # noise of one (the drift, and the gyro scale through it)
+        assert p.std() <= 1.8 * spread, (k, p.std(), spread)
+    assert pools[0]["n_runs"] == 3
+
+
+def test_pool_weights_by_age_and_battery_and_decides_what_to_measure(tmp_path):
+    import numpy as np
+    import calib_pool as CP
+    import calib_run as CR
+    rng = np.random.default_rng(1)
+    d = str(tmp_path)
+    assert CP.needs({}) == {"turns": True, "still": True, "rolls": True, "offset": True}
+    CP.add(d, "AL-1", _synthetic_legs(rng, CR.TURNS_A, [CR.STILL_S], [L for L in CR.ROLLS_A for _ in (0, 1)]), offset=(0.3, -0.1, 0.1))
+    p = CP.fit(d, "AL-1", now=0)
+    v = CP.verdict(p)
+    assert all(x == "ok" for x in v.values()), v                    # one full run's worth: as good as a finished run
+    assert CP.needs(p) == {"turns": False, "still": False, "rolls": False, "offset": False}
+    assert abs(p["offset"][0] - 0.3) < 1e-9
+    assert CP.age_w(0, now=7 * 86400) == pytest.approx(0.5) and CP.battery_w(20) == pytest.approx(0.5)
+    half = CP.fit(d, "AL-1", now=0)
+    rng2 = np.random.default_rng(2)
+    d2 = str(tmp_path / "b")
+    CP.add(d2, "AL-1", _synthetic_legs(rng2, CR.TURNS_A[:4], [], []))
+    assert CP.verdict(CP.fit(d2, "AL-1", now=0))["gyro_scale"] == "not measured yet"   # no still period yet
+
+
+def test_the_setup_order_is_said_with_the_corners_state(tmp_path):
+    import calib_run as CR
+    site = {"table": {"length_cm": 396.2, "width_cm": 167.6}, "mc_dir": str(tmp_path)}
+    w = CR.setup_order_words(site)
+    assert w.startswith("SETUP ORDER: 1 the table's 4 corners (396 x 168 cm; ") and "not confirmed" in w
+    (tmp_path / "tag_setup.json").write_text(json.dumps({"corners_ok": {"corners": {}, "t": 1794340000}}))
+    assert "confirmed " in CR.setup_order_words(site) and "2 clear space" in CR.setup_order_words(site)
+
+
+# -------------------------------------------------------------------------------------------- school 16:22: parking
+def test_parking_after_the_tour_holds_and_comes_back_instead_of_ending(monkeypatch):
+    """School 16:22 (AL-EB54, tag 4): the tour's last point lost the tag; parking (_ending) ended the run at once and
+    left the robot. Now parking holds with the never-give-up hold (find-me wiggles, motion) until the tag reads."""
+    import calib_run as CR
+    r = CR.CalibRun.__new__(CR.CalibRun)
+    r.tag, r.name, r.holds, r.D = 4, "AL-EB54", [], (150.0, 120.0, 90.0)
+    r.stop_flag = threading.Event()
+    r.a = type("A", (), {"lost_policy": "recover"})()
+    r._ending = True
+    evs = []
+    r.ev = lambda kind, **kw: evs.append(kind)
+    r.set_status = lambda **kw: None
+    monkeypatch.setattr(CR, "say", lambda s: None)
+    ages = [9.0] * 5 + [0.1]
+
+    class Eye:
+        def age(self, tag):
+            return ages.pop(0) if len(ages) > 1 else ages[0]
+
+        def loose_last(self, tag):
+            return None
+    r.eye = Eye()
+    assert r.hold_never_give_up() >= 0                        # held, then the tag read: no RunEnd
+    monkeypatch.setattr(CR, "PARK_GIVEUP", True)
+    with pytest.raises(CR.RunEnd):
+        r.hold_never_give_up()
+
+
+def test_a_recovery_with_no_reliable_spot_heads_for_the_readability_map(monkeypatch):
+    import calib_run as CR
+    import observe as OB
+    import sites as SI
+    r = CR.CalibRun.__new__(CR.CalibRun)
+    r.S = CR.Site(SI.load("school-conference"))
+    rm, rt = OB.ReadMap(r.S.L, r.S.W), OB.ReadMap(r.S.L, r.S.W)
+    rm.seed(lambda x, y: 0.9 if x < 120 else 0.1, "test")
+    r.readmap, r.readmap_tag = (lambda: rm), (lambda: rt)
+    r.last_lost_at = (190.0, 120.0)
+    t = r.map_target((190.0, 120.0), 3.0)
+    assert t is not None and t[0] < 120 and not r.S.problems(t, t, buf=3.0, edge_buf=3.0)
+    src = open(CR.__file__).read()
+    assert "no reliable spot known, and the readability map has no readable spot" in src

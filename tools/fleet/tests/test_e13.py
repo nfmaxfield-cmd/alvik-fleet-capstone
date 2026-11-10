@@ -509,9 +509,10 @@ def test_readability_is_kept_per_tag_where_the_evidence_differs(tmp_path, monkey
     assert "readability_per_tag" in src and "readmap_tag%s.json" in src
 
 
-def test_a_dim_room_is_said_from_the_brightness_and_parking_never_holds_the_end(tmp_path):
+def test_a_dim_room_is_said_from_the_brightness_and_parking_never_holds_the_end(tmp_path, monkeypatch):
     import threading
     import calib_run as CR
+    monkeypatch.setattr(CR, "PARK_GIVEUP", True)     # (e14) e13's parking end, kept on its switch MIRLT_PARK_GIVEUP=1
     cls = next(v for v in vars(CR).values() if isinstance(v, type) and hasattr(v, "light_words"))
     r = cls.__new__(cls)
     r.parent, r.folder = None, str(tmp_path)
