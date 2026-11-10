@@ -390,3 +390,25 @@ def test_a_found_robot_with_a_heading_starts_exactly_where_it_was_found():
     except Exception:  # noqa: BLE001  (the split needs more of a run; the homes come first)
         pytest.skip("observed_split needs a fuller run here")
     assert home_at["Charlie"] == [100.3, 120.7, 47.0]
+
+
+def test_no_tag_is_concluded_only_where_evidence_shows_tags_read():
+    """10 Nov rehearsal: a dim patch the camera model calls readable made a robot WITH a tag look tagless after two
+    spots. Only spots the evidence proves readable count; with none, it keeps looking (and asks for light)."""
+    stop = threading.Event()
+    b, st = _bb(tag_near=lambda x, y, r: None, proven=lambda x, y: None, stop=stop.is_set)
+    out = {}
+
+    def go():
+        try:
+            out["r"] = b.run()
+        except Exception as e:  # noqa: BLE001
+            out["e"] = e
+    t = threading.Thread(target=go)
+    t.start()
+    time.sleep(2.5)
+    assert t.is_alive() and "r" not in out                    # not called tagless on the camera model's word
+    stop.set()
+    t.join(5)
+    b2, _st2 = _bb(tag_near=lambda x, y, r: None, proven=lambda x, y: 0.9 if y > 60 else None)
+    assert b2.run()[3] is None                                   # proven readable spots: tagless

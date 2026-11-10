@@ -204,7 +204,7 @@ class BringBack:
       stop() -> True when Stop / Ctrl+C was pressed"""
 
     def __init__(self, name, pose, sigma, step, turn, wiggle, problems, readable, tag_near, hold, stop=lambda: False,
-                 log=say, ev=lambda kind, **kw: None, cells=None, stop_cm=1.4, uncal=True, ok_rate=0.6):
+                 log=say, ev=lambda kind, **kw: None, cells=None, stop_cm=1.4, uncal=True, ok_rate=0.6, proven=None):
         self.name = name
         self.x, self.y = float(pose[0]), float(pose[1])
         self.th = None if pose[2] is None else float(pose[2])
@@ -214,6 +214,11 @@ class BringBack:
         self.problems, self.readable, self.tag_near, self.hold = problems, readable, tag_near, hold
         self.stop, self.log, self.ev = stop, log, ev
         self.cells = cells             # [(x, y)] candidate spots (the readability map's cell middles)
+        # proven(x, y) -> the read rate EVIDENCE shows there at this light (other runs, this run's legs, the other
+        # robots' tags read just now), or None where there is none. Only proven spots count towards "no tag": the
+        # camera model's guess is not evidence (10 Nov rehearsal: a dim patch the model calls readable made a robot
+        # WITH a tag look tagless after two spots). None given: the map's rate (the rig and tests)
+        self.proven = proven
         self.stop_cm, self.ok_rate = stop_cm, ok_rate
         self.per = BLIND_PER_CM_UNCAL if uncal else BLIND_PER_CM
         self.tf = TURN_FRAC_UNCAL if uncal else 0.03
@@ -241,8 +246,11 @@ class BringBack:
                 continue
             if self.problems((cx, cy), (cx, cy), 0.0):
                 continue
-            cand.append((math.hypot(cx - self.x, cy - self.y), (cx, cy)))
-        return min(cand)[1] if cand else None
+            pv = self.proven(cx, cy) if self.proven else None
+            # spots the evidence shows readable first, then the nearest
+            cand.append((0 if (pv is not None and pv >= self.ok_rate) else 1, math.hypot(cx - self.x, cy - self.y),
+                         (cx, cy)))
+        return min(cand)[2] if cand else None
 
     def sighted(self, s, why):
         self.x, self.y = float(s["where"][0]), float(s["where"][1])
@@ -323,7 +331,8 @@ class BringBack:
                 continue
             tgt = self.target()
             if tgt is None:
-                self._hold("no spot where tags read is known that it can reach")
+                self._hold("no spot where tags read is known that it can reach (it may carry no tag, or the light may be "
+                           "too low for its tag: add light, or check its roof)")
                 continue
             want = wrap180(math.degrees(math.atan2(tgt[1] - self.y, tgt[0] - self.x)) - self.th)
             if abs(want) > 3.0:
@@ -351,8 +360,9 @@ class BringBack:
                 self.blind_cm += step
                 self.after += step
                 self.track.append((round(self.x, 1), round(self.y, 1), "dead reckoning"))
-            r_ = self.readable(self.x, self.y)
-            if r_ >= self.ok_rate and self.tag_near(self.x, self.y, TAG_NEAR_CM + self.bubble()) is None:
+            r_ = self.proven(self.x, self.y) if self.proven else self.readable(self.x, self.y)
+            if r_ is not None and r_ >= self.ok_rate and \
+                    self.tag_near(self.x, self.y, TAG_NEAR_CM + self.bubble()) is None:
                 time.sleep(TAG_WAIT_S)               # a read takes a picture or two (7 a second in dim light)
                 if self.tag_near(self.x, self.y, TAG_NEAR_CM + self.bubble()) is None:
                     if all(math.hypot(self.x - fx, self.y - fy) >= FAILED_R_CM for fx, fy in self.failed):
@@ -580,6 +590,21 @@ def run_finding(robots, eye, cams, S, rm, confirmed, guesses=None, log=say, ev=l
     ev("found_by_motion", robots=res["robots"], modes=modes, cameras=res["coverage"].get("cameras"))
     pre = {n: int(f["tag"]) for n, f in res["robots"].items() if f["found"] and f["tag"] is not None}
     res["tagless"] = []
+    for n, t in pre.items():
+        w_ = (res["robots"][n] or {}).get("where")
+        if w_:
+            for _ in range(3):
+                rm.add(w_[0], w_[1], True)    # its tag read there just now, at this light: evidence
+
+    def proven(x, y):
+        """The read rate the EVIDENCE shows round (x, y) (its cell and the 8 round it, 3+ tries), else None."""
+        i0, j0 = rm.ij(x, y)
+        n_ = r_ = 0.0
+        for i in (i0 - 1, i0, i0 + 1):
+            for j in (j0 - 1, j0, j0 + 1):
+                n_ += rm.tries.get((i, j), 0)
+                r_ += rm.reads.get((i, j), 0)
+        return (r_ / n_) if n_ >= 3 else None
     try:
         for n, f in res["robots"].items():
             if not f["found"]:
@@ -626,7 +651,7 @@ def run_finding(robots, eye, cams, S, rm, confirmed, guesses=None, log=say, ev=l
                            wiggle=lambda turn_ticks=turn_ticks: locate_wiggle(cams, turn_ticks),
                            problems=site_problems(S), readable=lambda x, y: rm.rate(x, y), tag_near=tag_near,
                            hold=hold, stop=stop, log=log, ev=ev, cells=cells, stop_cm=float(SR_.stop_cm(final_cms)),
-                           uncal=True)
+                           uncal=True, proven=proven)
             x, y, th, t = bb.run()
             f["now"] = [round(x, 1), round(y, 1)]
             f["heading_now"] = th
