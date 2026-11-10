@@ -675,3 +675,42 @@ def test_a_standing_robot_keeps_its_fix_a_moving_one_does_not(monkeypatch):
     r.own = (100.0, 50.0, 50.0, 0.0, "idle", 0)
     monkeypatch.setattr(FC, "STAND_TRUST", False)
     assert not c.fresh(r)
+
+
+def _launcher(tmp_path, sessions, children):
+    """run-fleet-pi.sh calib with tmux and pgrep stubbed: sessions that exist, whether their pane has a child process."""
+    import subprocess
+    bin_ = tmp_path / "bin"
+    bin_.mkdir()
+    st = tmp_path / "sessions"
+    st.write_text("\n".join(sessions) + "\n")
+    calls = tmp_path / "tmux.calls"
+    (bin_ / "tmux").write_text('''#!/bin/sh
+echo "$@" >> %s
+case "$1" in
+  has-session) grep -qx "$3" %s && exit 0; exit 1 ;;
+  list-panes) echo 4242 ;;
+  kill-session) grep -vx "$3" %s > %s.n; mv %s.n %s ;;
+esac
+exit 0
+''' % ((calls,) + (st,) * 5))
+    (bin_ / "pgrep").write_text("#!/bin/sh\n%s\n" % ("echo 4243" if children else "exit 1"))
+    for f in ("tmux", "pgrep"):
+        os.chmod(bin_ / f, 0o755)
+    env = dict(os.environ, PATH="%s:%s" % (bin_, os.environ["PATH"]))
+    root = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+    p = subprocess.run(["bash", os.path.join(root, "run-fleet-pi.sh"), "calib"], cwd=root, env=env,
+                       capture_output=True, text=True, timeout=60)
+    return p.stdout + p.stderr, calls.read_text() if calls.exists() else ""
+
+
+def test_launcher_closes_an_ended_calibration_window_and_starts_anew(tmp_path):
+    """(e13, school 10 Nov) the old calib session waits at "Press Enter": closed by its name, the new run starts; a
+    calib run still going (its window's shell has a child) is left alone."""
+    out, calls = _launcher(tmp_path, ["calib"], children=False)
+    assert "the previous run had ended; its window is closed" in out.lower()
+    assert "kill-session -t calib" in calls and "new-session -d -s calib" in calls
+    (tmp_path / "bin").rename(tmp_path / "bin1")
+    (tmp_path / "tmux.calls").unlink()
+    out, calls = _launcher(tmp_path, ["calib"], children=True)
+    assert "already running" in out and "kill-session -t calib" not in calls and "new-session" not in calls

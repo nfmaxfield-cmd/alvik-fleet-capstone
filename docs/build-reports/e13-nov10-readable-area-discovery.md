@@ -258,7 +258,7 @@ directions with mockups (A guided steps, B one page top to bottom, C cockpit), t
 
 ### Tests
 
-`tools/fleet/tests/test_e13.py`: 36. Full fleet suite, final code: see the end of this report.
+`tools/fleet/tests/test_e13.py`: 37 (the last: `./run-fleet-pi.sh calib` with the old session at "Press Enter" closes it by name and starts anew; calib, freeroam, doe, visit and the missions do the same, coordinator from the school session). Full fleet suite, final code: see the end of this report.
 
 ## Conclusion
 

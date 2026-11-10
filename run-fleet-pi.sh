@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# (2026-11-10 e13) calib, freeroam, doe, visit and the missions close a session whose run has ended (its window waiting
+# at "Press Enter", found by the session's name: session_ended) before starting, instead of refusing the new run.
 # Phase 0 on the Pi (2026-10-27): the fleet planner (tools/fleet/run_plan.py) on the real robots, with camera fixes
 # from the overhead camera through the camera bridge (tools/fleet/cam_bridge.py). Plan: docs/session-plans/2026-10-27.md
 #
@@ -158,6 +160,25 @@ ladder() {
 
 rec_running() { tmux has-session -t fleet 2>/dev/null && tmux list-windows -t fleet -F '#W' | grep -qx rec; }
 
+# (e13, 10 Nov school: `calib` refused a new run because session "calib" still existed, its run long over and its
+# window waiting at "Calibration run ended. Press Enter."; Nick saw only the old output 25 minutes later) a session
+# whose run has ended: it exists, but the shell in its window has no child process left (the run's python3, or the
+# launcher it ran, has exited; `read` is the shell's own). Found by the session's name and its pane's own process id,
+# never by a process name pattern.
+session_ended() {
+  local s="$1" pid
+  tmux has-session -t "$s" 2>/dev/null || return 1
+  pid=$(tmux list-panes -t "$s" -F '#{pane_pid}' 2>/dev/null | head -1)
+  [ -n "$pid" ] || return 1
+  [ -z "$(pgrep -P "$pid" 2>/dev/null)" ]
+}
+close_if_ended() {     # closes the named session when its run has ended (said plainly); nothing otherwise
+  if session_ended "$1"; then
+    tmux kill-session -t "$1" 2>/dev/null || true
+    echo "The previous run had ended; its window is closed (tmux session $1)."
+  fi
+}
+
 # FLEET_DRY=1 ./run-fleet-pi.sh one|cross|brick: the same steps against the simulator (tools/sim/fleet_sim.py serves a
 # simulated overhead camera); no recorder, no robots. How the launcher was tested.
 DRY="${FLEET_DRY:-0}"
@@ -248,6 +269,8 @@ case "$WHAT" in
   doe)
     HRS=4; FULL=0; KEEP="keep-going"; MINB=25     # (e08, Nick 7 Nov Q7) keep going is the default; "park" = the old way
     for x in "$@"; do case "$x" in full-video) FULL=1 ;; keep-going) KEEP="keep-going" ;; park|no-keep-going) KEEP="park" ;; low-battery) MINB=5 ;; [0-9]*) HRS="$x" ;; esac; done
+    close_if_ended doe
+    for s in ladder ladder2; do close_if_ended $s; done
     if tmux has-session -t doe 2>/dev/null; then
       echo "A DOE loop is already running (tmux session doe). Watch it: tmux capture-pane -p -t doe | tail -40"
       echo "Stop it first if you want a new one: ./run-fleet-pi.sh doe-stop"; exit 1
@@ -321,6 +344,7 @@ case "$WHAT" in
     # (e08) attended: a person stays with the robots (the run may ask about a robot near an edge); old-rules: every rule
     # before e08 (fixed edges, 2 s pose rule, permanent keep-outs, out when silent / no heading, no tilt recovery, 5 deg)
     for x in "$@"; do case "$x" in full-video) FULL=1 ;; hold) LOST="$LOST --lost-mode hold" ;; stopturn) LOST="$LOST --motion stopturn" ;; curves) LOST="$LOST --motion curves" ;; attended|--attended) LOST="$LOST --attended" ;; old-rules) LOST="$LOST --edge-rule fixed --pose-rule wait2s --keepout-rule permanent --silent-out --heading-out --no-tilt-recovery"; RULEENV="MIRLT_TILT_RULE=old MIRLT_EDGE_RULE=fixed" ;; old-tracking) LOST="$LOST --old-tracking --pose-source blend" ;; filter) LOST="$LOST --pose-source ekf" ;; gyro-heading) LOST="$LOST --gyro-heading" ;; sleep-parked) LOST="$LOST --sleep-parked" ;; no-brick-watch) LOST="$LOST --no-brick-watch" ;; probe) LOST="$LOST --probe-ahead" ;; no-discovery) LOST="$LOST --no-discovery" ;; typed-board) LOST="$LOST --typed-board" ;; careful) LOST="$LOST --careful" ;; [0-9]*) HRS="$x" ;; esac; done
+    for s in freeroam doe monday practice ladder ladder2 calib; do close_if_ended $s; done
     if tmux has-session -t freeroam 2>/dev/null; then
       echo "A free roam is already running (tmux session freeroam). Its progress: ./run-fleet-pi.sh freeroam-status"
       echo "Stop it first if you want a new one: ./run-fleet-pi.sh freeroam-stop"; exit 1
@@ -394,6 +418,7 @@ case "$WHAT" in
       # in tmux (session "monday"), so a dropped WiFi or a closed window does not stop the run half-way
       for s in monday practice doe ladder ladder2; do
         [ "$s" = "$TS" ] && continue
+        close_if_ended $s
         tmux has-session -t $s 2>/dev/null && { echo "A run is going in tmux session $s: stop it first (./run-fleet-pi.sh stopall). Stopped."; exit 1; }
       done
       tmux kill-session -t "$TS" 2>/dev/null || true
@@ -474,6 +499,7 @@ case "$WHAT" in
     else
       python3 tools/fleet/diskguard.py preflight || exit 1
       start_recorder
+      for s in calib freeroam doe; do close_if_ended $s; done    # (e13) an ended run's window, not a running run
       tmux kill-session -t visit 2>/dev/null || true
       tmux new-session -s visit "cd '$REPO' && MIRLT_ATTENDED=1 python3 tools/fleet/mission_run.py --tracking tags --robots auto --split auto --motion stopturn --visit-order '$ORD' $VX --feel-table skip; read -r -p 'Visit ended. Press Enter.'"
       echo "If the window closed: tmux attach -t visit   (Ctrl+C in it stops every robot)"
@@ -514,6 +540,7 @@ case "$WHAT" in
   calib)           # (2026-11-04) the calibration run (zones 1-2), in tmux session calib; `calib dry`: the simulator
     if [ "${1:-}" = dry ]; then python3 tools/fleet/calib_run.py --dry "${@:2}"
     else
+      close_if_ended calib          # (e13) its run ended, the window waiting at "Press Enter": closed, a new run starts
       tmux has-session -t calib 2>/dev/null && { echo "A calibration run is already running: tmux attach -t calib (leave: Ctrl+B, then D)"; exit 0; }
       # (e08, A10, Nick 6 Nov) the robots sleep as soon as the run ends (as from the Start screen); `calib awake`
       # keeps the old way (awake; Mission Control's idle sleeper puts them to sleep after 30 minutes with no run)
