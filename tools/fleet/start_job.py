@@ -430,7 +430,7 @@ class Starter:
                 xs = [float(c[0]) for c in rm["cells"] if c[2] >= 0.6]
                 if xs and L:
                     x1 = max(xs) + float(rm.get("cell_cm", 20)) / 2.0
-                    return "Using the area the camera can see: about %.0f of the table's %.0f cm length" % (min(x1, L), L)
+                    return "Using the area the camera can see: about %.0f cm of the table's %.0f cm length" % (min(x1, L), L)
             except (TypeError, ValueError, IndexError, KeyError):
                 pass
         return "Using the area the camera can see (found again at the start of every run)"
