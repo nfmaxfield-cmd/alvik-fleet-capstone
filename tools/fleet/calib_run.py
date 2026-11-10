@@ -61,7 +61,7 @@ for p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recognit
 
 import numpy as np   # noqa: E402
 
-VERSION = "2026-11-10b"     # 11-10b (e12, Nick 10 Nov): the curve phase (phase R: constant-curvature arcs left and right at free roam's radii and two speeds, fitted from the camera, arc_k_scale / arc_d_scale saved when they agree; --arc-phase auto/on/off), points in your order (--visit-order), the proven workspace for the tours' room, the camera self-check at the start. VERSION_10A was:
+VERSION = "2026-11-10c"     # 11-10c: Phase A waits for the camera fix instead of crashing on None (school 12:35). 11-10b (e12, Nick 10 Nov): the curve phase (phase R: constant-curvature arcs left and right at free roam's radii and two speeds, fitted from the camera, arc_k_scale / arc_d_scale saved when they agree; --arc-phase auto/on/off), points in your order (--visit-order), the proven workspace for the tours' room, the camera self-check at the start. VERSION_10A was:
 VERSION_10A = "2026-11-10a"     # 11-10a: a leftover camera reader holding port 5011 is stopped first (stale_bridge.py). 11-05i (9 Nov, school): a tripped stop mid-tour crashed the run (TypeError: ev() got two
                              # values for kind); the trip event now says stop_kind. VERSION_H was:
 VERSION_H = "2026-11-05h"     # 11-05h: stop lead per speed (school 19:34: the scale fit was right; a fixed ~0.3 / 0.5 cm
@@ -1305,6 +1305,20 @@ class CalibRun:
             del self.reliable[:-200]
         return p
 
+    def cam_pose_sure(self):
+        """(11-10c, school 12:35: Phase A's roll setup got None from cam_pose after the still period and crashed) the
+        camera pose, waiting for the tag when it is momentarily not seen (the robot is standing still)."""
+        for _ in range(3):
+            cam = self.cam_pose()
+            if cam is not None:
+                return cam
+            say("  the camera has no fix of the roof tag right now (the robot stands still): waiting for it")
+            self.hold_until_seen()
+        cam = self.cam_pose(MEASURE_S * 3)
+        if cam is None:
+            raise RunEnd("the camera keeps losing the roof tag where the robot stands: nothing else moved")
+        return cam
+
     def odo_step(self, r):
         """After a leg: the robot's own motion added to both odometry tracks (raw and corrected)."""
         if r.get("start") is None or r.get("end") is None or self.D is None:
@@ -1872,7 +1886,7 @@ class CalibRun:
             self.S.park_label, "defaults 1 / 1 / 0" if getattr(self, "baseline", "") == "defaults" else "saved values"))
         say("Phase A: baseline with %s %s" % ("the defaults" if getattr(self, "baseline", "") == "defaults" else
                                               "the robot's current values", self.phase_a_values))
-        cam = self.cam_pose()
+        cam = self.cam_pose_sure()
         rest = [self.eye.measure(self.tag)]
         for k, t in enumerate(TURNS_A):
             cam, r, row = self.drive_leg("turn", float(t), "turn %+d" % t, "A", 0, cam0=cam)
@@ -1891,7 +1905,7 @@ class CalibRun:
         # rolls: towards -x from P11 (open table, away from the middle outlet and the camera's far limit)
         self.set_status(words="Phase A: straight rolls %s cm out and back" % " / ".join("%.0f" % v for v in
                                                                                    sorted(set(ROLLS_A))))
-        cam = self.cam_pose()
+        cam = self.cam_pose_sure()
         far = max(ROLLS_A)
         hd = next((h for h in ROLL_DIRS if not self.S.problems(cam[:2], (cam[0] + far * math.cos(math.radians(h)),
                                                                        cam[1] + far * math.sin(math.radians(h))),
