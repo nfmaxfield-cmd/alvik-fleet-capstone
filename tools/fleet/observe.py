@@ -29,7 +29,7 @@ import json
 import math
 import os
 
-VERSION = "2026-11-07a"   # 11-07a (e08): tilt limits from safety_rules (re-picked from the 5 / 6 Nov logs), trip
+VERSION = "2026-11-10a"   # 11-10a (e12): blind_cells (the spots learned blind, for the site's blind_areas.json). 11-07a (e08): tilt limits from safety_rules (re-picked from the 5 / 6 Nov logs), trip
                           # keep-outs marked confirmed (the one keep-out rule)
 import sys as _sys
 if os.path.dirname(os.path.abspath(__file__)) not in _sys.path:
@@ -299,6 +299,71 @@ def tag_px(model_project, x, y, z, tag_cm):
     except (TypeError, IndexError):
         return None
     return min(a, b)
+
+
+BLIND_MIN_TRIES = 3     # (e12) a cell is "learned blind" after this many tries with its rate under READ_OK. Chosen
+                        # (calib_run's own skip rule uses 3 tries). DOE: no (a reporting threshold)
+
+
+def blind_cells(rm, min_tries=BLIND_MIN_TRIES, ok=READ_OK):
+    """(e12) The cells the robots' runs found the camera does not read in practice: [[x0, y0, x1, y1, tries, reads]]."""
+    out = []
+    for (i, j), n in sorted(rm.tries.items()):
+        if n >= min_tries and rm.rate(*rm.centre(i, j)) < ok:
+            x0, y0 = rm.x0 + i * rm.cell, rm.y0 + j * rm.cell
+            out.append([round(x0, 1), round(y0, 1), round(x0 + rm.cell, 1), round(y0 + rm.cell, 1), n,
+                        rm.reads.get((i, j), 0)])
+    return out
+
+
+LEARN_READS_PER_CELL = 20   # (e12) a run's camera fixes counted per cell at most (a robot standing in one cell for minutes
+                            # must not swamp the map). Chosen; no DOE (a cap)
+LEARN_STOP_READS = 10       # (e12) a stop with camera fixes counts as this many reads at most. Chosen; no DOE
+
+
+def learn_from_logs(rm, folder):
+    """(e12, 9 Nov school evidence: the seed flagged P03, P05, P12, P13, P15, P18, P19, P20 unreadable, but in 7 tours
+    every one of the 20 stops had camera fixes) The run's own evidence into the map, so it can overturn the cautious
+    seed: every camera_track.csv fix is a read where it was (at most LEARN_READS_PER_CELL per cell), every stops.csv stop
+    with n_fixes > 0 is up to LEARN_STOP_READS reads at the camera's spot, a stop with none a try that did not read, at
+    its point. Returns (fixes used, stops used)."""
+    import csv as _csv
+    import glob as _glob
+    per, nf, ns = {}, 0, 0
+    for p in _glob.glob(os.path.join(folder, "**", "camera_track.csv"), recursive=True):
+        try:
+            with open(p, newline="") as f:
+                for row in _csv.DictReader(f):
+                    try:
+                        x, y = float(row.get("x_cm") or row.get("x")), float(row.get("y_cm") or row.get("y"))
+                    except (TypeError, ValueError):
+                        continue
+                    k = rm.ij(x, y)
+                    if per.get(k, 0) >= LEARN_READS_PER_CELL:
+                        continue
+                    per[k] = per.get(k, 0) + 1
+                    rm.add(x, y, True)
+                    nf += 1
+        except OSError:
+            continue
+    for p in _glob.glob(os.path.join(folder, "**", "stops.csv"), recursive=True):
+        try:
+            with open(p, newline="") as f:
+                for row in _csv.DictReader(f):
+                    try:
+                        n = int(float(row.get("n_fixes") or 0))
+                        x, y = float(row.get("cam_x_cm") or row.get("own_x_cm")), float(row.get("cam_y_cm") or
+                                                                                         row.get("own_y_cm"))
+                    except (TypeError, ValueError):
+                        continue
+                    if n > 0:
+                        rm.add(x, y, True, n=min(n, LEARN_STOP_READS))
+                    else:
+                        rm.add(x, y, False)
+                    ns += 1
+        except OSError:
+            continue
+    return nf, ns
 
 
 def seed_from_cameras(rm, cams, tag_cm, z_cm, px_min=TAG_PX_MIN):

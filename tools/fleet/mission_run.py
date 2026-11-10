@@ -32,6 +32,8 @@ Ctrl+C stops every robot (run_plan's own stop). Free space (diskguard.py, 2026-1
 under its floor; frame saving stops under the frames' floor; under the card's floor during the run, run_plan is sent
 Ctrl+C (every robot stops) and the run ends as it would on Ctrl+C, with the upload.
 """
+VERSION = "2026-11-10a"   # 2026-11-10a (e12): the camera self-check at the start of a tags run (camera_selfcheck.py; --no-camera-check). No version string before
+
 import argparse
 import datetime as dt
 import json
@@ -462,6 +464,14 @@ def start_bridge(args, out, mp, cal, scal, stream, side_stream):
         SB.clear((5011,), log=say)
     except Exception as e:     # noqa: BLE001  (never stops a run)
         say("(leftover camera reader check skipped: %s)" % e)
+    if getattr(args, "tracking_", "lights") == "tags" and not args.dry and not getattr(args, "no_camera_check", False):
+        # (e12, Nick 10 Nov; Observe, then trust) the camera model checked against the reference tags before the robots
+        # move; refitted (Measure) when it disagrees, what changed said and logged (camera_selfcheck.json)
+        try:
+            import camera_selfcheck as CSC
+            CSC.run(args.site_ or {}, out=out, log=say)
+        except Exception as e:  # noqa: BLE001  (never stops a run: the model it has is used)
+            say("(camera self-check skipped: %s)" % e)
     if getattr(args, "tracking_", "lights") == "tags":
         # the AprilTag robots (2026-11-02): tag_bridge.py, both cameras, the tags' own ids and heights
         cmd = ["nice", "-n", "5", PY, os.path.join(HERE, "tag_bridge.py"), "--tags", args.tags_json,
@@ -1062,6 +1072,26 @@ def run_readmap(args, out):
     return rm
 
 
+def learn_readmap(args, out, sess):
+    """(e12) The run's readability map (sess/readmap.json, else the start map rebuilt) with this run's camera_track.csv
+    fixes and stops.csv stops added (observe.learn_from_logs), saved back into the session (the site keeps it below)."""
+    import observe as OB
+    p = os.path.join(sess, "readmap.json")
+    rm = None
+    if os.path.exists(p):
+        with open(p) as f:
+            rm = OB.ReadMap.from_json(json.load(f))
+    if rm is None:
+        rm = run_readmap(args, None)
+    if rm is None:
+        return
+    nf, ns = OB.learn_from_logs(rm, out)
+    rm.save(p)
+    bl = OB.blind_cells(rm)
+    say("READABILITY learned from this run: %d camera fixes, %d stops; %d cm2 readable, %d spot%s still blind%s" % (
+        nf, ns, rm.area_cm2(), len(bl), "" if len(bl) == 1 else "s", "" if args.dry else " (kept for the next run)"))
+
+
 def resolve_experiment(args):
     """--experiment / --swap-halves (2026-11-03): args.experiment_, args.swap_, args.swap_words_. The shakedown is the
     no-camera run unless a tracking was chosen."""
@@ -1498,6 +1528,13 @@ def run(args):
             except Exception:     # noqa: BLE001
                 pass
     sync_mark(out, "end", args)
+    if (args.site_ or {}).get("conf_dir") and getattr(args, "tracking_", "") == "tags":
+        # (e12, 9 Nov school: every stop of 7 tours had camera fixes where the seed said "unreadable") the run's own
+        # camera fixes and stops go into the map before it is kept, so the evidence overturns the cautious seed
+        try:
+            learn_readmap(args, out, sess)
+        except Exception as e:  # noqa: BLE001  (never stops the end of a run)
+            say("(readability not learned from this run's logs: %s)" % e)
     if not args.dry and (args.site_ or {}).get("conf_dir") and os.path.exists(os.path.join(sess, "readmap.json")):
         # (11-05h) the site keeps where tags read (merged at half weight into the next run's start map)
         try:
@@ -1709,6 +1746,8 @@ def main(argv=None):
     ap.add_argument("--split", choices=["auto", "halves"], default="auto",
                     help="(11-05h) how the points are shared: auto (the site's production.split, else over the area the "
                          "cameras read, between the robots found) or halves (the site's fixed zones, the old way)")
+    ap.add_argument("--no-camera-check", action="store_true", help="(e12) do not check the camera model against the "
+                    "reference tags at the start (MIRLT_CAMERA_SELFCHECK=0 too; =check: checked, never refitted)")
     ap.add_argument("--mission", help="a mission map made elsewhere (Mission Control's warm-up), with --plan")
     ap.add_argument("--plan", help="with --mission: its plan")
     ap.add_argument("--session", help="the session folder (default logs/<date-time>-mission)")

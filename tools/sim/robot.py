@@ -131,6 +131,10 @@ def ray_polys(px, py, dx, dy, polys, best):
     return best
 
 
+ARC_ERR_MIN_K = 1 / 70.0   # (2026-11-10, e12) --arc-err acts only on curves tighter than radius 70 cm (straight legs and their
+                           # small steering corrections stay as they were). Chosen; no DOE (a simulator model switch)
+
+
 class Robot(FollowMixin, DockMixin, E02Mixin):
     def __init__(self, name, cfg, rng, params, fw_version, t_boot, boot_id, ip):
         self.name, self.cfg, self.rng = name, cfg, rng
@@ -351,6 +355,12 @@ class Robot(FollowMixin, DockMixin, E02Mixin):
             sR = math.radians(dR) * self.rR * (1 - sr - extra)
             ds = (sL + sR) / 2
             dth = (sR - sL) / self.track
+            ae = getattr(self, "arc_err", 0.0)
+            if ae and not opposite and abs(ds) > 1e-9 and abs(dth / ds) > ARC_ERR_MIN_K:
+                # (2026-11-10, e12) --arc-err: on a curve the body really travels less (or more) than its wheels
+                # count while turning the same angle, so its true curvature is (1 + arc_err) x what its own pose
+                # (wheels + gyro) shows: the error the calibration's curve phase must find (arc_k_scale/arc_d_scale)
+                ds /= (1.0 + ae)
             x_before, y_before = self.x, self.y
             self.x += ds * math.cos(self.th + dth / 2)
             self.y += ds * math.sin(self.th + dth / 2)

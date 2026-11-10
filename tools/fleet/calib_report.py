@@ -17,6 +17,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
+VERSION = "2026-11-10a"   # 2026-11-10a (e12): the curve phase's section (arcs, fits, saved or not). No version before
 PARAMS = ("wheel_scale", "gyro_scale", "gyro_drift_dps")
 
 
@@ -378,6 +379,25 @@ def write(folder, run, a):
             "%.1f, %.1f" % tuple(rr["with_cm"]) if rr else "not visited", "%.1f, %.1f" % tuple(rr["without_cm"])
             if rr else "-", "%.1f" % four["run_in"][p] if four.get("run_in") and p in four["run_in"] else "-"))
     L.append("")
+    ar = getattr(run, "arc_result", None)
+    if ar:
+        # (2026-11-10a, e12) the curve phase
+        L.append("### Curves (the curve phase)")
+        L.append("")
+        if not ar.get("on"):
+            L.append("Not driven: %s." % ar.get("why"))
+        else:
+            L.append("Why it ran: %s. %s." % (ar.get("why"), ar.get("words") or "no decision"))
+            L.append("")
+            L.append("| use | radius cm | side | cm/s | result | camera reads | curvature x | length x |")
+            L.append("|---|---|---|---|---|---|---|---|")
+            for r_ in ar.get("rows") or getattr(run, "arc_rows", []):
+                L.append("| %s | %g | %s | %.1f | %s | %s | %s | %s |" % (
+                    r_.get("use"), r_.get("radius_cm"), r_.get("side"), r_.get("v_cms") or 0, r_.get("result"),
+                    r_.get("n"), _fmt(r_.get("k_ratio"), "%.3f"), _fmt(r_.get("length_ratio"), "%.3f")))
+            L.append("")
+            L.append("Measured: each arc's circle fitted to the camera's reads (free roam's own fit); x1.000 = as asked.")
+        L.append("")
     for fn, words in ch:
         L.append("![%s](%s)" % (fn, fn))
         L.append("")

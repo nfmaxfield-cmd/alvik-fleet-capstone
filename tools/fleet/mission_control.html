@@ -996,6 +996,7 @@ function wireSync() {
 let stPoll = null;
 const ADV_CHOICES = {
   roam_motion: [["curves", "Smooth curves, never stopping (default)"], ["stopturn", "Straight lines: stop and turn on the spot"]],
+  calib_curves: [["auto", "Automatic: robots that will drive curves (firmware 2026-11-05c+, free roam on curves)"], ["on", "Always (robots on firmware 2026-11-05c+)"], ["off", "Never (straight legs only, as before)"]],
   visit_order: [["on", "Shown on the Start screen (e11)"], ["off", "Hidden: Visit points shares the points out"]],
   practice_path: [["real", "The school's own path, simulated robots (e11, default)"], ["dry", "The simulator's own path (before e11)"]],
   corner_clicks: [["auto", "Only when no corner tile is seen (automatic)"], ["on", "Always click the corners"], ["off", "Never"]],
@@ -1116,6 +1117,7 @@ function startScreen() {
       <label>Stop lead in missions${advSel("stop_lead", a)}</label>
       <label>Experiment routes${advSel("experiment", a)}</label>
       <label>Free roam driving${advSel("roam_motion", a)}</label>
+      <label>Curves in the calibration${advSel("calib_curves", a)}</label>
       <label>Practice runs take${advSel("practice_path", a)}</label>
       <label>Visit points in your order${advSel("visit_order", a)}</label>
       <label>Free roam minutes (school)<input data-advn="roam_min" value="${esc(a.roam_min)}"></label>

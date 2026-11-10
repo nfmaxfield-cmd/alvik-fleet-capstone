@@ -61,7 +61,8 @@ for p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recognit
 
 import numpy as np   # noqa: E402
 
-VERSION = "2026-11-10a"     # 11-10a: a leftover camera reader holding port 5011 is stopped first (stale_bridge.py). 11-05i (9 Nov, school): a tripped stop mid-tour crashed the run (TypeError: ev() got two
+VERSION = "2026-11-10b"     # 11-10b (e12, Nick 10 Nov): the curve phase (phase R: constant-curvature arcs left and right at free roam's radii and two speeds, fitted from the camera, arc_k_scale / arc_d_scale saved when they agree; --arc-phase auto/on/off), points in your order (--visit-order), the proven workspace for the tours' room, the camera self-check at the start. VERSION_10A was:
+VERSION_10A = "2026-11-10a"     # 11-10a: a leftover camera reader holding port 5011 is stopped first (stale_bridge.py). 11-05i (9 Nov, school): a tripped stop mid-tour crashed the run (TypeError: ev() got two
                              # values for kind); the trip event now says stop_kind. VERSION_H was:
 VERSION_H = "2026-11-05h"     # 11-05h: stop lead per speed (school 19:34: the scale fit was right; a fixed ~0.3 / 0.5 cm
                             # overrun per leg at 5 / 10 cm/s read as "+1 cm/m after the fit"). Shared observe checks.
@@ -188,6 +189,33 @@ READ_PX = 8.0            # simulator: a tag is read when its shorter side in the
                          # (9.5 px at x = 78 in) and not the far corner tags 21/22 (6.6 px), as Jay-Sun saw
 
 
+# ------------------------------------------------------------------------------------------------ (11-10b) the curve phase
+# Nick 10 Nov ("curve section in the calibration run"): robots that will drive curves (firmware 2026-11-05c or newer AND
+# free roam's driving is curves) drive constant-curvature arcs (firmware follow step R, as free roam does) after phase B,
+# on wheels + gyro alone (no camera fix sent during an arc), in the middle of the area the camera reads best, every arc
+# checked first so its whole swept path, with its blind bubble, keeps the derived edge clearance (safety_rules); each
+# arc fitted from the camera (freeroam_core.fit_arc_points, free roam's own maths) and arc_k_scale / arc_d_scale set and
+# saved on the robot when the fits agree (freeroam_core.arc_agree: free roam's arc_save rule). Free roam's own in-run
+# fitting stays as it is and refines these. Switch: --arc-phase auto (default) / on / off; site calibration.arc_phase;
+# Mission Control Advanced "Curves in the calibration".
+ARC_FW = "2026-11-05c"   # follow step R (freeroam_core.ARC_FW). Not chosen
+ARC_RADII_CM = (12.0, 25.0, 50.0)   # free roam's menu (freeroam_core.K_BINS). Not chosen here
+ARC_SWEEP_DEG = {12.0: 120.0, 25.0: 90.0, 50.0: 60.0}   # chosen: each arc's turn (25, 39, 52 cm of path): over the
+                         # fit's 35 deg floor, short enough to fit beside the others in the middle. DOE: yes (backlog)
+ARC_SPEEDS = (5.0, 10.0)  # chosen: the calibration's two speeds (final approach, cruise); the tight curve capped by its
+                         # outer wheel (freeroam_core.v_cap: radius 12 at 9.0 cm/s). DOE: yes (backlog: 5 / 7.5 / 10 / 12)
+ARC_ROUNDS = 2           # chosen: 12 arcs a round (3 radii x left/right x 2 speeds), 2 rounds = 24, so free roam's
+                         # agreement rule (15 fits) holds with a few arcs lost. DOE: yes (backlog: how many are needed)
+ARC_VERIFY = 3           # chosen: after saving, one arc per radius again to show the error is gone (not used in the fit)
+ARC_FIT_MIN_K = 1 / 60.0  # chosen: the calibration also fits radius 50 (free roam fits radius 40 and tighter only)
+ARC_K_ALLOW = 0.15       # chosen: each arc's room is checked as if it really turned 15 % tighter or wider and ran 15 %
+                         # longer (the sim error is 6 %; free roam's fits stay in 0.6-1.6). DOE: no, a safety allowance
+ARC_HEAD_STEP_DEG = 15.0  # chosen: start headings tried in this step, the smallest turn first. No DOE (a search step)
+ARC_SAMPLE_CM = 2.0      # the room check's spacing along the arc. Chosen (under a quarter of the body). No DOE
+ARC_CAM_DELAY_S = 0.0    # the camera reads are matched to the arc by their own picture time ("t"); this is only the
+                         # fallback shift for reads without it. Not chosen (no fallback needed in the sim or tag bridge)
+
+
 def loopback_up():
     """In a fresh network namespace (unshare -rn) the loopback starts down (sweeps/rp_shim.py's way)."""
     import fcntl
@@ -270,7 +298,24 @@ class Site:
 
     def edge_dist(self, p):
         x, y = p
-        return min(x, y, self.L - x, self.W - y)
+        d = min(x, y, self.L - x, self.W - y)
+        ws = getattr(self, "ws", None)
+        if ws is not None:
+            # (11-10b, e12) the proven workspace: drops and unproven ground found by earlier runs here count as edges
+            d = min(d, ws.edge_dist(x, y))
+        return d
+
+    def use_workspace(self, site, folder=None):
+        """(11-10b, e12) The site's proven workspace (proven_workspace.py, saved by free roam and discovery): the typed
+        table seen as a whole, plus the felt cells and drops earlier runs saved (used only on the same outline). Words."""
+        import proven_workspace as PW
+        ws = PW.ProvenWorkspace((0.0, 0.0, self.L, self.W))
+        ws.see()
+        p = PW.site_path(folder or (site.get("conf_dir") or "~/.config/mirlt"), site.get("name") or "school-conference")
+        words = ws.merge_saved(p)
+        if "added" in words and not words.endswith("0 felt cells and 0 drop cells"):
+            self.ws = ws
+        return words
 
     def keepout_dist(self, p):
         best = (1e9, "")
@@ -589,6 +634,12 @@ class Eye:
                 msg = json.loads(data.decode())
             except ValueError:
                 continue
+            if msg.get("type") == "camera":
+                # (11-10b, e12) the bridge's frame watch: no new picture (or pictures again), said loudly; a leg loses
+                # the tag after LOST_HOLD_S and holds as before
+                say(str(msg.get("words") or "CAMERA %s: %s" % (msg.get("cam"), msg.get("state"))))
+                self.camera_state = (msg.get("state"), time.time())
+                continue
             if msg.get("type") != "fix":
                 continue
             msg = self.transform(msg)
@@ -601,7 +652,15 @@ class Eye:
             th = float(msg.get("th", 0.0)) - (getattr(self, "sim_yaw_by", {}) or {}).get(tid, getattr(self, "sim_yaw", 0.0)) \
                 + getattr(self, "yaw_off", {}).get(tid, 0.0)   # (11-05f) heading check
             rec = (t, float(msg["x"]), float(msg["y"]), ((th + 180.0) % 360.0) - 180.0)
+            try:
+                ft = float(msg.get("t")) if msg.get("t") is not None else t - ARC_CAM_DELAY_S
+            except (TypeError, ValueError):
+                ft = t - ARC_CAM_DELAY_S
             with self.lock:
+                fh = self.__dict__.setdefault("fhist", {}).setdefault(tid, [])   # (11-10b) by the picture's own time
+                fh.append((ft,) + rec[1:])
+                if len(fh) > 4000:
+                    del fh[:1000]
                 self.latest[tid] = rec
                 self.hist.setdefault(tid, []).append(rec)
                 if len(self.hist[tid]) > 4000:
@@ -628,6 +687,11 @@ class Eye:
     def window(self, tid, t0, t1):
         with self.lock:
             return [r for r in self.hist.get(tid, []) if t0 <= r[0] <= t1]
+
+    def frame_window(self, tid, t0, t1):
+        """(11-10b) The reads whose PICTURES were taken between t0 and t1 (host clock): (t, x, y, th)."""
+        with self.lock:
+            return [r for r in self.__dict__.get("fhist", {}).get(tid, []) if t0 <= r[0] <= t1]
 
     def measure(self, tid, dur=MEASURE_S):
         """Average pose over the next dur s (circular mean heading). None if fewer than 3 reads."""
@@ -831,7 +895,7 @@ class SimEye(Eye):
             x, y = self.cam.flat(x, y, self.h)
         return {"type": "fix", "robot": "tag%d" % self.sim_tags[name], "x": x + self.rng.gauss(0, sd),
                 "y": y + self.rng.gauss(0, sd), "th": th + self.rng.gauss(0, 0.8 + 0.002 * rng_cm), "sigma": sd,
-                "source": "sim one camera"}
+                "source": "sim one camera", "t": msg.get("t")}
 
 
 # =============================================================================================== binding
@@ -1161,6 +1225,14 @@ class CalibRun:
         if getattr(a, "view_x_max", None):
             self.S.view_x = float(a.view_x_max)   # (11-05g) the tag reads only this far up the table in this light
         self.site = site
+        if WORKSPACE_ON:
+            try:
+                w_ = self.S.use_workspace(site, os.path.join(a.state_dir, "..") if a.dry and getattr(a, "state_dir", "")
+                                          else None)
+                if parent is None:
+                    say("PROVEN WORKSPACE: %s" % w_)
+            except Exception as e:  # noqa: BLE001  (the typed table as before)
+                say("(proven workspace not used: %s)" % e)
         self.events = open(os.path.join(folder, "events.jsonl"), "a")
         self.status = {"version": VERSION, "phase": "starting", "robot": None, "tag": None, "words": "Starting",
                        "started": time.time(), "dry": bool(a.dry), "result": None, "folder": folder}
@@ -2013,6 +2085,374 @@ class CalibRun:
             self.tour("C", k + 1, order + [self.S.park_label])
             self.tours_c.append(name)
 
+    # ------------------------------------------------------------------------------------------------- the curve phase (11-10b)
+    def arc_wanted(self):
+        """(on, words) for this robot. --arc-phase / site calibration.arc_phase "off" or "on"; "auto" (the default): on
+        when its firmware drives curves (ARC_FW or newer) AND free roam here drives curves (roam_motion_for)."""
+        mode = (getattr(self.a, "arc_phase", None) or "auto").lower()
+        host = getattr(self, "parent", None) or self
+        fw = (getattr(host, "fw", None) or {}).get(self.rb.name, "")
+        if mode == "off":
+            return False, "switched off (--arc-phase off, or the site's calibration.arc_phase / Mission Control's " \
+                          "Advanced 'Curves in the calibration')"
+        if not fw or fw < ARC_FW:
+            return False, "its firmware %s cannot drive curves (they need %s or newer)" % (fw or "(not said)", ARC_FW)
+        if mode == "on":
+            return True, "switched on (firmware %s)" % fw
+        motion, src = roam_motion_for(self.a, self.site)
+        if motion != "curves":
+            return False, "free roam here drives straight lines (%s), so it never curves: not needed" % src
+        return True, "free roam here drives curves (%s) and its firmware %s drives them" % (src, fw)
+
+    @staticmethod
+    def arc_path(x0, y0, h0, k, L, step=ARC_SAMPLE_CM):
+        """[(x, y, s)] along a constant-curvature piece from (x0, y0) heading h0 (deg), curvature k (1/cm, + = left),
+        length L: the firmware's driveCurve circle (centre to the left for k > 0)."""
+        n = max(2, int(math.ceil(L / step)))
+        hr = math.radians(h0)
+        out = []
+        if abs(k) < 1e-6:
+            return [(x0 + L * i / n * math.cos(hr), y0 + L * i / n * math.sin(hr), L * i / n) for i in range(n + 1)]
+        R, sg = 1.0 / abs(k), (1.0 if k > 0 else -1.0)
+        cx, cy = x0 - math.sin(hr) * sg * R, y0 + math.cos(hr) * sg * R
+        a0 = math.atan2(y0 - cy, x0 - cx)
+        for i in range(n + 1):
+            s_ = L * i / n
+            a = a0 + sg * s_ / R
+            out.append((cx + R * math.cos(a), cy + R * math.sin(a), s_))
+        return out
+
+    def arc_room(self, x0, y0, h0, k, L, v):
+        """(worst margin cm, why) for the whole arc: >= 0 = clear. Checked as if it really turned ARC_K_ALLOW tighter or
+        wider and ran that much longer; at every sample its middle keeps the larger of the site's edge margin and the
+        DERIVED clearance (safety_rules.clearance_cm: half diagonal + its blind bubble so far + the stop at this speed),
+        the keep-out clearance (outlets, tiles, parked robots) plus the bubble, stays inside the camera's view, and
+        only where the camera reads tags (this run's readability map)."""
+        import safety_rules as SR
+        rm = self.readmap()
+        worst, why = 1e9, ""
+        for kk in (k * (1 - ARC_K_ALLOW), k, k * (1 + ARC_K_ALLOW)):
+            for x, y, s_ in self.arc_path(x0, y0, h0, kk, L * (1 + ARC_K_ALLOW)):
+                unc = self.bubble(s_, math.degrees(abs(kk) * s_))
+                need = max(self.S.edge - 0.5, SR.clearance_cm(unc, speed=v, tracking="tags"))
+                e = self.S.edge_dist((x, y))
+                for m, w in ((e - need, "the edge (%.1f cm from it at %.0f, %.0f; %.1f needed)" % (e, x, y, need)),
+                             (self.S.keepout_dist((x, y))[0] - (KEEPOUT_CLEAR_CM + unc - 0.5),
+                              "%s" % self.S.keepout_dist((x, y))[1]),
+                             (self.S.view_x - (x + unc), "the edge of the camera's view"),
+                             (0.0 if rm.readable(x, y)[0] else -1.0, "a spot the camera does not read (%.0f, %.0f)" % (
+                                 x, y))):
+                    if m < worst:
+                        worst, why = m, w
+        return worst, why
+
+    def arc_centre(self):
+        """The middle of the area the camera reads best: the readable spot furthest from the site's edge margin, the
+        keep-outs, the view limit and every cell the camera does not read (this run's readability map). (x, y, margin)."""
+        rm = self.readmap()
+        bad = [rm.centre(i, j) for i in range(rm.nx) for j in range(rm.ny) if not rm.readable(*rm.centre(i, j))[0]]
+        best = None
+        for x in range(0, int(self.S.L) + 1, 5):
+            for y in range(0, int(self.S.W) + 1, 5):
+                p = (float(x), float(y))
+                m = min(self.S.edge_dist(p) - self.S.edge, self.S.keepout_dist(p)[0] - KEEPOUT_CLEAR_CM,
+                        self.S.view_x - x, min([math.hypot(x - b[0], y - b[1]) for b in bad] or [1e9]))
+                if m > 0 and (best is None or m > best[2]):
+                    best = (p[0], p[1], m)
+        return best
+
+    def arc_plan_heading(self, cam, k, L, v):
+        """The start heading needing the smallest turn on the spot from where it stands that gives the arc room, or
+        None: (heading, margin)."""
+        cands = sorted(((wrap180(cam[2] + d), abs(d)) for d in np.arange(-180.0, 180.0, ARC_HEAD_STEP_DEG)),
+                       key=lambda q: q[1])
+        for h, _ in cands:
+            m, _w = self.arc_room(cam[0], cam[1], h, k, L, v)
+            if m >= 0:
+                return h, m
+        return None
+
+    def arc_turn_to(self, cam, h):
+        t = wrap180(h - cam[2])
+        for t_ in ((t / 2.0, t / 2.0) if abs(t) > MAX_TURN_DEG else (t,)):
+            if abs(t_) >= 2.0:
+                cam, _, _ = self.drive_leg("turn", t_, "curve aim", "R", 0, True, cam0=cam)
+        return cam
+
+    def drive_arc(self, cam, k, L, v):
+        """One R piece on wheels + gyro alone: `run follow`, its own pose set to the camera's (fpose), `fs <id> R ...`,
+        a heartbeat (fspd 1.00) every 0.5 s, `stop` at its end (or when the camera loses the tag, it comes within 3 cm
+        of the edge margin by the camera, or Stop is pressed). dict(result, why, t0, t1, own0, own1)."""
+        rb, link, name = self.rb, self.link, self.rb.name
+        out = {"result": None, "why": "", "t0": None, "t1": None, "own0": None, "own1": None}
+        k0 = link.mark()
+        link.send(rb.ip, "run follow")
+        if not link.wait_for(lambda n, l: n == name and "follow: ready" in l, k0, 8.0):
+            link.send(rb.ip, "stop")
+            out.update(result="no follow", why="it did not start following (run follow)")
+            return out
+        link.send(rb.ip, "fpose %.2f %.2f %.2f 1.0 3.0" % (cam[0], cam[1], cam[2]))
+        time.sleep(0.25)
+        self.arc_sid = getattr(self, "arc_sid", 0) + 1
+        sid = self.arc_sid
+        cmd = "fs %d R %.2f %.2f %.2f %.5f %.2f %.2f -" % (sid, cam[0], cam[1], cam[2], k, L, v)
+        rx = re.compile(r"^D,STEP,[^,]*,(\d+),(\w+),(\d+),(-?[0-9.]+),(-?[0-9.]+),(-?[0-9.]+),[^,]*,?(.*)$")
+        fx = re.compile(r"^D,FOLLOW,[^,]*,\d+,\d+,\w+,\d+,\d+,\d+,(-?[0-9.]+),(-?[0-9.]+),(-?[0-9.]+),")
+        k1 = link.mark()
+        t_end = time.time() + 8.0 + L / max(v, 1.0) * 3.0
+        last_send = last_hb = 0.0
+        acked = False
+        while time.time() < t_end:
+            now = time.time()
+            if not acked and now - last_send > 1.0:
+                link.send(rb.ip, cmd)
+                last_send = now
+            if now - last_hb > 0.5:
+                link.send(rb.ip, "fspd 1.00")       # the heartbeat (follow_wd_ms); scale 1 changes nothing
+                last_hb = now
+            r = link.wait_for(lambda n, l: (rx.match(l) or fx.match(l)) if n == name else None, k1, 0.2)
+            if r and r.re is fx:
+                with link.cond:
+                    k1 = rb._index_after(r, k1)
+                out["own_last"] = (float(r.group(1)), float(r.group(2)), float(r.group(3)))
+                continue
+            if r:
+                with link.cond:
+                    k1 = rb._index_after(r, k1)
+                if int(r.group(1)) == sid:
+                    st = r.group(2)
+                    pose = (float(r.group(4)), float(r.group(5)), float(r.group(6)), int(r.group(3)))
+                    if st in ("queued", "dup", "started"):
+                        acked = True
+                    if st == "started":
+                        out["t0"], out["own0"] = time.time(), pose
+                    elif st in ("done", "failed", "dropped", "bad", "full"):
+                        out.update(result=st, why=r.group(7) or "", t1=time.time(), own1=pose)
+                        if out["t0"] is None:
+                            out["t0"], out["own0"] = out["t1"], pose
+                        break
+            if out["t0"] is not None:
+                stop_why = None
+                lc = self.eye.last(self.tag)
+                if self.stop_flag.is_set():
+                    stop_why = "stopped by hand"
+                elif self.eye.age(self.tag) > LOST_HOLD_S:
+                    stop_why = "the camera lost the roof tag for over %.1f s" % LOST_HOLD_S
+                elif lc and self.S.edge_dist(lc[1:3]) < self.S.edge - 3.0:
+                    stop_why = "the camera saw it %.1f cm from the edge (margin %.0f)" % (
+                        self.S.edge_dist(lc[1:3]), self.S.edge)
+                if stop_why:
+                    link.send(rb.ip, "stop")
+                    out.update(result="stopped", why=stop_why, t1=time.time())
+                    break
+        else:
+            out.update(result="timeout", why="no end report", t1=time.time())
+        k2 = link.mark()
+        link.send(rb.ip, "stop")                    # the follow run ends; idle legs again
+        link.wait_for(lambda n, l: n == name and ("finished" in l or "nothing running" in l), k2, 2.0)
+        time.sleep(0.2)
+        return out
+
+    def one_arc(self, rnd, R, sg, v, use):
+        """Plan (heading, or the middle first), turn, drive, measure and fit one arc. The row (also in arcs.csv)."""
+        import freeroam_core as FC
+        k, L = sg / R, math.radians(ARC_SWEEP_DEG[R]) * R
+        row = dict(round=rnd, use=use, radius_cm=R, side="left" if sg > 0 else "right", k=round(k, 5), L_cm=round(L, 1),
+                   v_cms=round(v, 2), result="", why="", n=0, k_ratio=None, length_ratio=None, R_fit=None)
+        cam = self.cam_pose()
+        if cam is None:
+            self.hold_until_seen()
+            cam = self.cam_pose()
+        hp = self.arc_plan_heading(cam, k, L, v)
+        if hp is None:
+            c = self.arc_centre()
+            if c is not None and math.hypot(c[0] - cam[0], c[1] - cam[1]) > 3.0:
+                say("    to the curve phase's middle (%.0f, %.0f) for room" % (c[0], c[1]))
+                cam = self.goto((c[0], c[1]), "R", 0, cam=cam, odometry=False, name="the curve phase's middle")
+                hp = self.arc_plan_heading(cam, k, L, v)
+        if hp is None:
+            row.update(result="skipped", why="no start heading gives it room here or in the middle (%s)" %
+                       self.arc_room(cam[0], cam[1], cam[2], k, L, v)[1])
+            return self.arc_log(row)
+        cam = self.arc_turn_to(cam, hp[0])
+        m, w = self.arc_room(cam[0], cam[1], cam[2], k, L, v)
+        if m < 0:                                   # the turn ended off the planned heading: once more
+            hp = self.arc_plan_heading(cam, k, L, v)
+            if hp is None:
+                row.update(result="skipped", why="after the turn: %s" % w)
+                return self.arc_log(row)
+            cam = self.arc_turn_to(cam, hp[0])
+            if self.arc_room(cam[0], cam[1], cam[2], k, L, v)[0] < 0:
+                row.update(result="skipped", why="after the turn: %s" % w)
+                return self.arc_log(row)
+        row.update(cam0=[round(q, 2) for q in cam], margin_cm=round(m, 1))
+        d = self.drive_arc(cam, k, L, v)
+        row.update(result=d["result"], why=d["why"], own0=d["own0"], own1=d["own1"])
+        time.sleep(SETTLE_S)
+        cam1 = self.cam_pose()
+        if cam1 is None:
+            # the camera lost the tag on the arc: the robot's own pose (in the camera's frame since the fpose) is the
+            # estimate; the calibration's recovery drives it back towards where the tag read well, bubble-checked
+            own = d.get("own_last") or d.get("own1")
+            last = self.eye.last(self.tag)
+            if own is not None and self.a.lost_policy == "recover":
+                blind = math.hypot(own[0] - last[1], own[1] - last[2]) * 1.2 if last else L
+                self.recover((own[0], own[1], own[2]), blind, math.degrees(abs(k) * blind), "a curve (radius %g)" % R)
+            else:
+                self.hold_until_seen()
+            cam1 = self.cam_pose()
+            if cam1 is None:
+                self.hold_until_seen()
+                cam1 = self.cam_pose()
+            row["why"] = (row.get("why") or "") + "; the tag was lost on it"
+        self.reanchor(cam1, "after a curve")
+        row["cam1"] = [round(q, 2) for q in cam1] if cam1 else None
+        if d["own0"] and d["own1"] and self.Draw is not None:
+            self.Draw = compose(self.Draw, relative(d["own0"], d["own1"]))
+        if d["result"] == "done" and d["t0"] is not None:
+            ox, oy = self.offset
+            pts = []
+            for (_t, x, y, th) in self.eye.frame_window(self.tag, d["t0"], d["t1"]):
+                c, s_ = math.cos(math.radians(th)), math.sin(math.radians(th))
+                pts.append((x - (c * ox - s_ * oy), y - (s_ * ox + c * oy)))
+            row["n"] = len(pts)
+            f = FC.fit_arc_points(pts, k, L, min_k=ARC_FIT_MIN_K)
+            if f is not None:
+                row.update(k_ratio=round(f[0], 4), length_ratio=round(f[1], 4), R_fit=round(f[2], 2))
+                if pts:
+                    row["edge_cm_min"] = round(min(self.S.edge_dist(p_) for p_ in pts), 1)
+            else:
+                row["why"] = "not fitted (too few camera reads: %d)" % len(pts)
+        return self.arc_log(row)
+
+    def arc_log(self, row):
+        self.arc_rows.append(row)
+        new = not os.path.exists(os.path.join(self.folder, "arcs.csv"))
+        cols = ["round", "use", "radius_cm", "side", "k", "L_cm", "v_cms", "result", "why", "n", "k_ratio",
+                "length_ratio", "R_fit", "margin_cm", "edge_cm_min", "cam0", "cam1", "own0", "own1"]
+        with open(os.path.join(self.folder, "arcs.csv"), "a", newline="") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(cols)
+            w.writerow([json.dumps(row.get(c)) if isinstance(row.get(c), (list, tuple)) else row.get(c, "")
+                        for c in cols])
+        say("    arc %s r %g %s at %.1f cm/s: %s%s" % (row["use"], row["radius_cm"], row["side"], row["v_cms"],
+                                                     row["result"] or "?", (": curvature x%.3f, length x%.3f" % (
+                                                         row["k_ratio"], row["length_ratio"])) if row.get("k_ratio")
+                                                     else (" (%s)" % row["why"] if row.get("why") else "")))
+        self.ev("arc", **row)
+        return row
+
+    def phase_r(self):
+        """(11-10b) The curve phase: ARC_ROUNDS x (3 radii x left / right x 2 speeds) arcs, fitted, the arc scales
+        saved when the fits agree (free roam's rule), then ARC_VERIFY arcs with the new values. Writes arcs.csv and
+        arcs.json. Never ends the run by itself: a phase that cannot fit says why and the tours go on."""
+        import freeroam_core as FC
+        self.arc_rows = []
+        on, why = self.arc_wanted()
+        self.arc_result = {"on": on, "why": why}
+        self.ev("arc_phase", on=on, why=why)
+        if not on:
+            say("CURVE PHASE for %s: not driven: %s" % (self.name, why))
+            self.set_status(arc_phase="not driven: " + why)
+            return self.arc_result
+        say("CURVE PHASE for %s: %s" % (self.name, why))
+        self.set_status(phase="R", words="Curve phase: arcs left and right, radius 12, 25 and 50 cm, at 5 and 10 cm/s",
+                        arc_phase="driving")
+        cur = (self.rb.get("arc_k_scale"), self.rb.get("arc_d_scale"))
+        if None in cur:
+            self.arc_result.update(on=False, why="it did not answer get arc_k_scale / arc_d_scale")
+            say("  CURVE PHASE skipped: " + self.arc_result["why"])
+            return self.arc_result
+        coast = self.rb.get("arc_coast_ms")
+        self.rb.set_checked("arc_coast_ms", 0.0)    # brake at each arc's end (no coast round the same curve)
+        fits = []
+        try:
+            c = self.arc_centre()
+            self.arc_result["centre"] = [round(c[0], 1), round(c[1], 1), round(c[2], 1)] if c else None
+            if c is None:
+                raise RunEnd("no spot on the table has room for the curves and reads well")
+            say("  the curve phase's middle (where the camera reads best, furthest from edges, outlets and blind "
+                "spots): %.0f, %.0f (%.0f cm of room)" % c)
+            self.goto((c[0], c[1]), "R", 0, odometry=False, name="the curve phase's middle")
+            n = 0
+            for rnd in range(1, ARC_ROUNDS + 1):
+                for v in ARC_SPEEDS:
+                    for R in ARC_RADII_CM:
+                        for sg in (1.0, -1.0):
+                            if self.stop_flag.is_set():
+                                raise RunEnd("stopped")
+                            n += 1
+                            if n % BATTERY_CHECK_EVERY == 0:
+                                self.check_battery()
+                            self.set_status(words="Curve phase: arc %d of %d (radius %g %s, %.1f cm/s)" % (
+                                n, ARC_ROUNDS * 12, R, "left" if sg > 0 else "right", min(v, FC.v_cap(1 / R))))
+                            row = self.one_arc(rnd, R, sg, min(v, FC.v_cap(1 / R)), "fit")
+                            if row.get("k_ratio"):
+                                fits.append((row["k_ratio"], row["length_ratio"]))
+            res = FC.arc_summary(fits)
+            out = {"before": {"arc_k_scale": cur[0], "arc_d_scale": cur[1]}, "fits": len(fits),
+                   "arcs": sum(1 for r_ in self.arc_rows if r_["use"] == "fit")}
+            if res is None:
+                out.update(saved=False, words="only %d arcs fitted: nothing to decide" % len(fits))
+            else:
+                kr, kh, dr, dh, nn = res
+                ok, ks, ds = FC.arc_agree(res, cur)
+                out.update(k_ratio=round(kr, 4), k_ci=round(kh, 4), length_ratio=round(dr, 4), length_ci=round(dh, 4),
+                           new={"arc_k_scale": round(ks, 4), "arc_d_scale": round(ds, 4)}, agree=ok)
+                w = ("%d arcs fitted: it turns x%.3f (+-%.3f) the curvature asked and runs x%.3f (+-%.3f) the length; "
+                     "arc_k_scale %.4f -> %.4f, arc_d_scale %.4f -> %.4f" % (nn, kr, kh, dr, dh, cur[0], ks, cur[1], ds))
+                set_ok = False
+                if ok and self.a.save_on_robot:
+                    o1, g1 = self.rb.set_checked("arc_k_scale", round(ks, 4))
+                    o2, g2 = self.rb.set_checked("arc_d_scale", round(ds, 4))
+                    sv = None
+                    if o1 and o2:
+                        k_ = self.link.mark()
+                        self.link.send(self.rb.ip, "save")
+                        sv = self.link.wait_for(lambda n_, l: l if n_ == self.rb.name and (
+                            "saved on the robot" in l or "unknown command" in l or "refused" in l) else None, k_, 4.0)
+                    set_ok = bool(o1 and o2)
+                    saved = bool(sv and "saved on the robot" in sv)
+                    out.update(saved=saved, readback={"arc_k_scale": g1, "arc_d_scale": g2})
+                    w += ": SET%s" % (" and SAVED on the robot (save)" if saved else
+                                      " but NOT saved (%s)" % (sv or "no answer to save" if o1 and o2 else
+                                                               "they did not read back"))
+                elif ok:
+                    out.update(saved=False)
+                    w += ": NOT set (saving on the robot is switched off: --no-save)"
+                else:
+                    out.update(saved=False)
+                    w += ": NOT set (free roam's rule: %d+ arcs, both within +-%.2f, new values 0.8-1.25)" % (
+                        FC.ARC_FIT_MIN, FC.ARC_FIT_CI)
+                out["words"] = w
+                if set_ok:
+                    chk = []
+                    for R in ARC_RADII_CM[:ARC_VERIFY]:
+                        sg = 1.0 if len(chk) % 2 == 0 else -1.0
+                        row = self.one_arc(0, R, sg, min(ARC_SPEEDS[-1], FC.v_cap(1 / R)), "check")
+                        if row.get("k_ratio"):
+                            chk.append((row["k_ratio"], row["length_ratio"]))
+                    if chk:
+                        out["check"] = {"n": len(chk), "k_ratio": round(float(np.median([c[0] for c in chk])), 4),
+                                        "length_ratio": round(float(np.median([c[1] for c in chk])), 4)}
+                        out["words"] += "; with the new values %d check arcs ran x%.3f curvature, x%.3f length" % (
+                            len(chk), out["check"]["k_ratio"], out["check"]["length_ratio"])
+            self.arc_result.update(out)
+            say("  CURVES: " + out.get("words", ""))
+        except RunEnd as e:
+            if self.stop_flag.is_set():
+                raise
+            self.arc_result.update(words="the curve phase stopped: %s (the tours go on)" % e)
+            say("  CURVE PHASE STOPPED: %s; the tours go on" % e)
+        finally:
+            if coast is not None:
+                self.rb.set_checked("arc_coast_ms", coast)
+            with open(os.path.join(self.folder, "arcs.json"), "w") as f:
+                json.dump(dict(self.arc_result, rows=self.arc_rows), f, indent=1, default=str)
+        self.set_status(arc_phase=self.arc_result.get("words") or self.arc_result.get("why"))
+        return self.arc_result
+
     # ------------------------------------------------------------------------------------------------- the whole run
     def start_robot(self):
         self.set_status(phase="find", words="Finding the robot on the WiFi (waking it if it sleeps)")
@@ -2298,6 +2738,15 @@ class CalibRun:
             import observe as OB
             host.rm = OB.ReadMap(self.S.L, self.S.W)
             host.rm.seed(lambda x_, y_: 0.9, "taken as readable until the run learns otherwise")
+            if READMAP_SEED:
+                # (11-10b, e12 item 2; Observe then trust) the camera model's cautious guess as the first guess, then
+                # what earlier runs here learned (the site's readmap.json, half weight): blind areas learned per site
+                try:
+                    host.rm_words = seed_readmap(host.rm, self.site, getattr(self, "sim_cam", None), getattr(
+                        self.a, "cal_used", None), dry=bool(self.a.dry), state_dir=getattr(self.a, "state_dir", ""))
+                    say("READABILITY: %s" % host.rm_words)
+                except Exception as e:  # noqa: BLE001  (never stops a run: the old seed stays)
+                    say("(readability seed: %s; every spot taken as readable until the run learns otherwise)" % e)
         return host.rm
 
     def after_trip(self, r, cam0):
@@ -2418,6 +2867,7 @@ class CalibRun:
             self.stage()
             self.phase_a()
             self.phase_b()
+            self.phase_r()          # (11-10b) the curve phase (only for robots that will drive curves; --arc-phase)
             self.phase_c()
         except LowBattery as e:
             result = "low battery: %s" % e
@@ -2465,6 +2915,84 @@ class CalibRun:
                 "no run, or by hand: python3 tools/pi/robot_sleep.py sleep" % (self.name, _idle_min()))
         self.ev("end", result=result, parked=parked, slept=self.slept)
         return result
+
+
+WORKSPACE_ON = os.environ.get("MIRLT_CALIB_WORKSPACE", "1") != "0"   # (11-10b) switch: 0 = the typed table only
+READMAP_SEED = os.environ.get("MIRLT_CALIB_READMAP", "1") != "0"   # (11-10b) switch: 0 = every spot taken as readable
+                                                                    # until the run learns otherwise (before e12)
+
+
+def seed_readmap(rm, site, sim_cam=None, cal=None, dry=False, state_dir=""):
+    """(11-10b, e12 item 2) The calibration's readability map: the camera model's guess (a tag reads where it is at least
+    READ_PX (simulator) / observe.TAG_PX_MIN pixels in the picture at its worst heading), then earlier runs' reads at this
+    site (readmap.json in the site's folder; a dry run's own sim folder), half weight. Returns words."""
+    import observe as OB
+    words = []
+    tg = (site or {}).get("tags") or {}
+    z, tcm = float(tg.get("height_cm") or 6.19), float(tg.get("tag_cm") or 8.0)
+    if dry and sim_cam is not None:
+        def fn(x, y):
+            px = [sim_cam.tag_px(x, y, z, tcm, th) for th in range(0, 360, 45)]
+            return 0.9 if all(p_ is not None and p_ >= READ_PX * 1.05 for p_ in px) else 0.1
+        rm.seed(fn, "the simulated camera: a tag needs %.0f px at every heading" % READ_PX)
+        words.append("seeded from the simulated camera")
+    elif cal and os.path.exists(cal):
+        import e02_camera as CAM
+        m = CAM.load_camera(cal)
+        OB.seed_from_cameras(rm, [(lambda P, m=m: [tuple(m.project(tuple(q))) for q in P], tuple(m.image_size))], tcm, z)
+        words.append("seeded from the camera model (%s)" % os.path.basename(cal))
+    folder = state_dir if dry else ((site or {}).get("conf_dir") or "")
+    hp = os.path.join(folder, "readmap.json") if folder else ""
+    if hp and os.path.exists(hp):
+        with open(hp) as f:
+            if rm.merge_history(OB.ReadMap.from_json(json.load(f))):
+                words.append("earlier runs' reads here carried in (readmap.json, half weight)")
+    bl = OB.blind_cells(rm)
+    words.append("%d cm2 readable; %d spot%s learned blind" % (rm.area_cm2(), len(bl), "" if len(bl) == 1 else "s"))
+    return "; ".join(words)
+
+
+def save_readmap(rm, folder, site, dry=False, state_dir=""):
+    """(11-10b) This run's readability map into the session, and into the site's folder for the next run's seed (a dry
+    run: its own sim folder, never the Pi's), with blind_areas.json (the spots learned blind) beside it."""
+    import observe as OB
+    out = []
+    dirs = [folder, state_dir if dry else ((site or {}).get("conf_dir") or "")]
+    for d_ in dirs:
+        if not d_:
+            continue
+        try:
+            os.makedirs(d_, exist_ok=True)
+            rm.save(os.path.join(d_, "readmap.json"))
+            with open(os.path.join(d_, "blind_areas.json"), "w") as f:
+                json.dump({"cells": OB.blind_cells(rm), "cell_cm": rm.cell, "how": "tries >= %d, read rate under %.0f %%" % (
+                    OB.BLIND_MIN_TRIES, 100 * OB.READ_OK)}, f, indent=1)
+            out.append(d_)
+        except OSError:
+            pass
+    return out
+
+
+def roam_motion_for(a, site):
+    """(11-10b) How free roam drives at this site: (curves | stopturn, where that came from). --roam-motion (Mission
+    Control passes its Advanced 'Free roam driving'), else Mission Control's saved Advanced for this site
+    (<mc_dir>/advanced.json roam_motion), else the site file's roam_motion, else free roam's default (curves)."""
+    m = (getattr(a, "roam_motion", "") or "").strip().lower()
+    if m in ("curves", "stopturn"):
+        return m, "as given to this run"
+    md = (site or {}).get("mc_dir")
+    if md:
+        try:
+            with open(os.path.join(md, "advanced.json")) as f:
+                m = str(json.load(f).get("roam_motion") or "").lower()
+            if m in ("curves", "stopturn"):
+                return m, "Mission Control's Advanced 'Free roam driving'"
+        except (OSError, ValueError):
+            pass
+    m = str((site or {}).get("roam_motion") or "").lower()
+    if m in ("curves", "stopturn"):
+        return m, "the site file's roam_motion"
+    return "curves", "free roam's default"
 
 
 def start_cpu_log(folder, procs, find):
@@ -2617,6 +3145,9 @@ def start_sim(a, S, folder):
             cmd += ["--stop-coast", "%s=%s" % (n_, a.sim_coast)]
     for sv in getattr(a, "sim_saved", []) or []:
         cmd += ["--saved", sv]
+    if getattr(a, "sim_arc_err", 0.0):
+        cmd += ["--arc-err", "*=%g" % a.sim_arc_err]     # (11-10b) a deliberate curve error for the curve phase
+    cmd += ["--persist"]       # (11-10b) the curve phase's follow runs must not end the simulator (it ends with the run)
     f = open(os.path.join(folder, "sim", "fleet_sim.txt"), "w")
     p = subprocess.Popen(cmd, stdout=f, stderr=subprocess.STDOUT, cwd=REPO)
     time.sleep(3.0)
@@ -2682,6 +3213,14 @@ def main(argv=None):
                          "wait; keep_going: the experiments' policy (default: the site's calibration.lost_policy, else "
                          "recover)" % LOST_HOLD_S)
     ap.add_argument("--tours", type=int, default=TOURS_C, help="phase C tours (1-3)")
+    ap.add_argument("--visit-order", "--tour-order", dest="tour_order", default="",
+                    help="(11-10b) the tours' points in your order, e.g. P01,P05,P11 (as mission_run --visit-order): "
+                         "phase A's tour and phase C's first tour in this order, then reversed, then shuffled")
+    ap.add_argument("--arc-phase", choices=["auto", "on", "off"], default=None,
+                    help="(11-10b) the curve phase after the fit: auto (default: the site's calibration.arc_phase, else "
+                         "on for robots on firmware %s+ when free roam here drives curves), on, off" % ARC_FW)
+    ap.add_argument("--roam-motion", default="", help="(11-10b) how free roam drives here (curves / stopturn), for "
+                    "--arc-phase auto (default: Mission Control's Advanced for this site, else the site file, else curves)")
     ap.add_argument("--count", type=int, default=0, help="keep waking until this many robots answer (up to --wake-min; "
                                                          "0: the first to answer and any other within 2 s)")
     ap.add_argument("--no-save", action="store_true", help="do not save the fitted values on the robot (the site's "
@@ -2729,6 +3268,8 @@ def main(argv=None):
     ap.add_argument("--stream", default="127.0.0.1:8000")
     ap.add_argument("--calib", default="", help="the camera model (default: the site's tagcal/overhead.json)")
     ap.add_argument("--no-focus", action="store_true", help="do not set the camera's focus first")
+    ap.add_argument("--no-camera-check", action="store_true", help="(11-10b) do not check the camera model against "
+                    "the reference tags at the start (MIRLT_CAMERA_SELFCHECK=0 too)")
     ap.add_argument("--quick", action="store_true", help="simulator: fewer turns, a shorter still period, 1 tour of "
                                                           "6 points (code checks)")
     g = ap.add_argument_group("simulator")
@@ -2736,6 +3277,8 @@ def main(argv=None):
     g.add_argument("--quick-full-tour", action="store_true", help="with --quick: phase A's turns, rolls and still period "
                    "short, but every tour the whole P01-P20 (the edges and the parked robots are what is checked)")
     g.add_argument("--seed", type=int, default=1)
+    g.add_argument("--sim-arc-err", type=float, default=6.0, help="(11-10b) simulator: every robot really turns this "
+                   "%% tighter on curves than its own pose shows (the curve phase must find it); 0 = none")
     g.add_argument("--sim-name", default="AL-1DC0")
     g.add_argument("--sim-tag", type=int, default=2)
     g.add_argument("--sim-also", action="append", default=[], metavar="NAME:TAG:POINT[:HEADING]",
@@ -2785,6 +3328,9 @@ def main(argv=None):
         a.sleep_at_end = bool(cal_conf.get("sleep_at_end", False))
     if a.stop_lead is None:        # (11-05h) the site's calibration.stop_lead, else auto
         a.stop_lead = str(cal_conf.get("stop_lead") or "auto")
+    if a.arc_phase is None:        # (11-10b) the site's calibration.arc_phase, else auto
+        a.arc_phase = str(cal_conf.get("arc_phase") or "auto").lower()
+        a.arc_phase = a.arc_phase if a.arc_phase in ("auto", "on", "off") else "auto"
     if a.lost_policy is None:      # (11-05c) the site's calibration.lost_policy, else recover
         a.lost_policy = str(cal_conf.get("lost_policy") or "recover")
     a.pins = a.pins and bool((site.get("tags") or {}).get("pin", True))
@@ -2806,6 +3352,16 @@ def main(argv=None):
         run.S_quick = True
         z = run.S.zone12()
         run.S.zone12 = lambda: ["P10", "P14", "P17", "P12", "P20", "P13"] if z else z
+    if a.tour_order:
+        # (11-10b) points in your order: every tour uses them (unknown names refused before anything moves)
+        order = [q.strip().upper() for q in a.tour_order.replace(";", ",").replace(" ", ",").split(",") if q.strip()]
+        bad = [q for q in order if q not in run.S.points]
+        if bad:
+            raise SystemExit("--visit-order: no such point here: %s (points: %s). Nothing moved." % (
+                ", ".join(bad), ", ".join(sorted(run.S.points))))
+        run.S_quick = True                    # the robots of a multi-robot run take the same order (run() copies it)
+        run.S.zone12 = lambda: list(order)
+        say("TOURS IN YOUR ORDER: %s" % " ".join(order))
     procs = []
 
     def stop(*_):
@@ -2849,7 +3405,15 @@ def main(argv=None):
         else:
             if not a.no_focus:
                 set_focus()
+            if not a.no_camera_check:
+                # (11-10b, e12) the camera model checked against the reference tags first; refitted when it disagrees
+                try:
+                    import camera_selfcheck as CSC
+                    CSC.run(site, out=folder, log=say)
+                except Exception as e:  # noqa: BLE001  (never stops a run: the model it has is used)
+                    say("(camera self-check skipped: %s)" % e)
             bp, cal, tag_h = start_bridge(a, site, folder)
+            a.cal_used = cal                       # (11-10b) the readability seed's camera model
             procs.append(bp)
             cam_c = cam_centre_from_model(cal)
             eye_factory = lambda: Eye(folder, FIX_PORT)    # noqa: E731
@@ -2880,6 +3444,11 @@ def main(argv=None):
                 o.close()
         for f in (run.legs_f, run.raw_f, run.cor_f, run.events):
             f.close()
+        if getattr(run, "rm", None) is not None:
+            # (11-10b, e12 item 2) where the camera read the roof tag in this run: kept for the next run's seed
+            kept = save_readmap(run.rm, folder, site, dry=bool(a.dry), state_dir=a.state_dir)
+            if kept[1:]:
+                say("Readability kept for the next run: %s" % os.path.join(kept[-1], "readmap.json"))
     import calib_report as CR
     try:
         words = CR.write_multi(folder, run, a) if getattr(run, "subs", None) else CR.write(folder, run, a)

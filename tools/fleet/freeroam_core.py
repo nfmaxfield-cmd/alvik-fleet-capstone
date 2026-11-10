@@ -49,7 +49,8 @@ if _HERE not in sys.path:
 import safety_rules as SR   # noqa: E402  (e08 Phase A: the rules shared with run_plan and observe)
 import fused_pose as FP     # noqa: E402  (e09 Phase B: one filter per robot, fed by the tracking layer and RAW)
 
-VERSION = "freeroam-2026-11-07e"   # 11-07e (Nick 7 Nov): a robot put down at or over an edge first tries the e08 tilt recovery, a person asked only if that fails (MIRLT_START_EDGE_MODE=wait: always wait)
+VERSION = "freeroam-2026-11-10a"   # 11-10a (e12): the curve-fit maths moved into module functions (fit_arc_points, arc_summary, arc_agree) so the calibration's curve phase uses the very same (free roam's own fitting and saving unchanged); a robot held at an edge for EDGE_PARK_S is parked and said loudly, the others roam on (MIRLT_EDGE_PARK=0: before)
+VERSION_E = "freeroam-2026-11-07e"   # 11-07e (Nick 7 Nov): a robot put down at or over an edge first tries the e08 tilt recovery, a person asked only if that fails (MIRLT_START_EDGE_MODE=wait: always wait)
 VERSION_D = "freeroam-2026-11-07d"   # 11-07d (e10, the 7 Nov run 2 incident): the queue watch (every tick, off plan or a queued piece breaking the edge rule from where the robot really is: re-aimed or stopped, heading re-set), the surface-mark verdict less the uncertainty, the start check (held at an edge)
 VERSION_C = "freeroam-2026-11-07c"   # 11-07c (e10 Phase C): proven workspace, probe ahead, corner shuffle, empty moves end, pictures 1/min
 VERSION_B = "freeroam-2026-11-07b"     # 11-07b (e09 Phase B): the filter's pose and uncertainty for the planner and the
@@ -229,6 +230,15 @@ COURSE_MIN_CM = 3.0     # ... when they spread at least this far (else the filte
 COURSE_ERR_DEG = 10.0   # its own heading this far off the camera's course (for COURSE_ERR_S): the rest of the piece and
 COURSE_ERR_S = 0.5      # the queued ones are checked from where it really is, the way it really goes. Chosen; DOE
 COURSE_RESET_DEG = 15.0 # its own heading this far from the camera's course while off plan: re-set (fpose), stop, re-plan
+EDGE_PARK = os.environ.get("MIRLT_EDGE_PARK", "1") != "0"   # (e12, Nick 10 Nov) a robot held at an edge (put down there
+                        # and not moved in; tilted with no safe way out; unsure near an edge and held) for EDGE_PARK_S is
+                        # PARKED for the rest of the run: it stays still where it is (kept out by the others), it counts
+                        # as out (so the run is never held up waiting for it: home ends when the others park), and it is
+                        # said loudly at once, in the state, at the end and on Mission Control. 0 = before e12 (held,
+                        # retried and asked for the whole run)
+EDGE_PARK_S = 60.0      # chosen: three of the recovery's 20 s retry cycles (RECOVER_RETRY_S) with no way out. DOE: yes, a
+                        # small one (30 / 60 / 120 s against robots freed by a later retry vs minutes stood waiting), from
+                        # the recovery.csv of real runs
 FARC_MIN_S = 0.6        # a re-aim (farc) only with this much of the running piece left (else the queued piece may have
                         # started on the robot by the time the farc arrives: halted instead)
 START_EDGE_CM = HALF + 1.0          # (d) the proof drive (its first move a turn on the spot) needs the middle this far in
@@ -262,6 +272,52 @@ def loop_centre(x, y, h, side):
 def v_cap(k):
     """The fastest a curve of curvature k can be driven (its outer wheel at WHEEL_TOP)."""
     return WHEEL_TOP / (1.0 + HALF_TRACK * abs(k))
+
+
+def fit_arc_points(pts, k, L, min_k=1 / 40.0, min_sweep_deg=35.0, min_pts=12):
+    """(11-10a, moved out of FreeRoam.arc_fit unchanged, so the calibration's curve phase uses the same maths) The
+    camera's spots along one finished curve piece fitted with a circle (its last 80 %: the start bends from the last
+    piece): (k ratio = fitted curvature / asked, length ratio = the camera's arc (angle swept x radius) / asked, fitted
+    radius) or None when the piece is too straight, too short or the fit is not believable. min_k: free roam 1/40
+    (radius 40 cm or tighter); the calibration passes its own (it drives radius 50 too)."""
+    if abs(k) < min_k or abs(k * L) < math.radians(min_sweep_deg) or len(pts) < min_pts:
+        return None
+    P = np.array(pts[len(pts) // 5:], float)
+    A = np.c_[2 * P[:, 0], 2 * P[:, 1], np.ones(len(P))]
+    sol, *_ = np.linalg.lstsq(A, (P ** 2).sum(1), rcond=None)
+    cx, cy = sol[0], sol[1]
+    R = math.sqrt(max(1e-6, sol[2] + cx * cx + cy * cy))
+    if not (2.0 < R < 200.0):
+        return None
+    Q = np.array(pts, float)
+    ang = np.unwrap(np.arctan2(Q[:, 1] - cy, Q[:, 0] - cx))
+    kr = (1.0 / R) / abs(k)
+    dr = abs(ang[-1] - ang[0]) * R / L
+    if not (0.6 < kr < 1.6 and 0.6 < dr < 1.6):
+        return None
+    return kr, dr, R
+
+
+def arc_summary(fits):
+    """(median k ratio, its 95 % half-width, median length ratio, its half-width, n) of [(k ratio, length ratio)], or
+    None under 3 fits. (11-10a: FreeRoam.arc_result's maths, shared.)"""
+    if len(fits) < 3:
+        return None
+    a = np.array(fits)
+    n = len(a)
+    hw = lambda v: 1.2533 * 1.96 * float(np.std(v)) / math.sqrt(n)     # noqa: E731 (median's standard error)
+    return float(np.median(a[:, 0])), hw(a[:, 0]), float(np.median(a[:, 1])), hw(a[:, 1]), n
+
+
+def arc_agree(res, cur=(1.0, 1.0), min_n=None, ci=None):
+    """(11-10a: arc_save's agreement rule, shared) (ok, new arc_k_scale, new arc_d_scale): ok when there are min_n
+    (ARC_FIT_MIN) fits, both medians' 95 % half-widths are under ci (ARC_FIT_CI) and the new values stay in 0.8-1.25."""
+    kr, kh, dr, dh, n = res
+    min_n = ARC_FIT_MIN if min_n is None else min_n
+    ci = ARC_FIT_CI if ci is None else ci
+    ks, ds = cur[0] / kr, cur[1] / dr
+    ok = n >= min_n and kh <= ci and dh <= ci and 0.8 <= ks <= 1.25 and 0.8 <= ds <= 1.25
+    return ok, ks, ds
 
 
 def edge_dist(rect, x, y):
@@ -3538,33 +3594,19 @@ class Controller:
         length asked. Logged (arcfit.csv); medians are saved on the robot when it parks (arc_save)."""
         pts, r.arc_pts = r.arc_pts, []
         k, L = mv["k"], mv["L"]
-        if abs(k) < 1 / 40.0 or abs(k * L) < math.radians(35) or len(pts) < 12 or "bend" in mv["kind"]:
+        if "bend" in mv["kind"]:
             return
-        P = np.array(pts[len(pts) // 5:], float)
-        A = np.c_[2 * P[:, 0], 2 * P[:, 1], np.ones(len(P))]
-        sol, *_ = np.linalg.lstsq(A, (P ** 2).sum(1), rcond=None)
-        cx, cy = sol[0], sol[1]
-        R = math.sqrt(max(1e-6, sol[2] + cx * cx + cy * cy))
-        if not (2.0 < R < 200.0):
+        f = fit_arc_points(pts, k, L)
+        if f is None:
             return
-        Q = np.array(pts, float)
-        ang = np.unwrap(np.arctan2(Q[:, 1] - cy, Q[:, 0] - cx))
-        kr = (1.0 / R) / abs(k)
-        dr = abs(ang[-1] - ang[0]) * R / L
-        if not (0.6 < kr < 1.6 and 0.6 < dr < 1.6):
-            return
+        kr, dr, R = f
         r.arc_fits.append((kr, dr))
         self.log("arcfit", dict(t=round(self.t, 2), robot=r.name, k=round(k, 5), L=round(L, 1), v=round(mv["v"], 2),
                                 R_fit=round(R, 2), k_ratio=round(kr, 4), length_ratio=round(dr, 4), n=len(pts)))
 
     def arc_result(self, r):
         """(median k ratio, its 95 % half-width, median length ratio, its half-width, n) or None."""
-        if len(r.arc_fits) < 3:
-            return None
-        a = np.array(r.arc_fits)
-        n = len(a)
-        hw = lambda v: 1.2533 * 1.96 * float(np.std(v)) / math.sqrt(n)     # noqa: E731 (median's standard error)
-        return float(np.median(a[:, 0])), hw(a[:, 0]), float(np.median(a[:, 1])), hw(a[:, 1]), n
+        return arc_summary(r.arc_fits)
 
     def adj_watch_curve(self, a, ev):
         o = self.R[ev["other"]]
@@ -3776,6 +3818,66 @@ class Controller:
         r.move, r.traj = mv, tr
         self.pump(r)
 
+    # -- (e12) one robot at an edge never holds up the others ---------------------------------------------------
+    def edge_stuck_why(self, r):
+        """Why r stands held at an edge waiting for a person (None: it is not)."""
+        if r.mode in ("out", "gone"):
+            return None
+        if r.__dict__.get("start_held") and not r.__dict__.get("start_ok"):
+            return "it was put down at the board's edge and has not been moved in"
+        rc = r.__dict__.get("recover")
+        if rc is not None and rc.get("hold_until"):
+            return "it tilted at the board's edge and found no safe way back"
+        if r.__dict__.get("unsure") is not None and r.mode == "idle":
+            return "the run cannot tell whether it is clear of the edge and holds it there"
+        return None
+
+    def edge_park_watch(self, r):
+        """Every half second: a robot held at an edge (edge_stuck_why) for EDGE_PARK_S in a row is parked there (True)."""
+        if not EDGE_PARK:
+            return False
+        why = self.edge_stuck_why(r)
+        if why is None:
+            r.edge_stuck_since = None
+            return False
+        if r.__dict__.get("edge_stuck_since") is None:
+            r.edge_stuck_since = self.t
+            return False
+        if self.t - r.edge_stuck_since < EDGE_PARK_S:
+            return False
+        self.park_at_edge(r, why)
+        return True
+
+    def edge_side(self, p):
+        """(distance to the nearest edge of the typed board, words for that edge)."""
+        b = getattr(self.rect, "board", None) or self.rect
+        x0, y0, x1, y1 = (float(v) for v in tuple(b)[:4])
+        sides = [(p[0] - x0, "the x = %.0f edge" % x0), (x1 - p[0], "the x = %.0f edge" % x1),
+                 (p[1] - y0, "the y = %.0f edge" % y0), (y1 - p[1], "the y = %.0f edge" % y1)]
+        return min(sides)
+
+    def park_at_edge(self, r, why):
+        p = self.pos(r)
+        r.mode, r.out_why = "out", "held at an edge (%s)" % why
+        if p is not None:
+            r.traj = Traj.stand(self.t, *p, m=self.margin0(r) + 1.0)
+        r.move = None
+        self.out(r, "stop")
+        self.close_question(r, "parked at the edge for the rest of the run")
+        d, side = self.edge_side(p) if p is not None else (None, "an edge")
+        dw = edge_dist(self.rect, *p) if p is not None else None
+        ws_words = ("; %.0f cm from the edge of the ground proven safe" % dw) if (
+            dw is not None and d is not None and abs(dw - d) > 3.0) else ""
+        words = ("%s IS PARKED AT THE BOARD'S EDGE%s: %s for %.0f s. It stays still for the rest of this run and the "
+                 "others carry on. SOMEONE MUST MOVE IT a hand's width onto the board before the next run." % (
+                     r.name, (" at %.0f, %.0f (%.0f cm from %s%s)" % (p[0], p[1], d, side, ws_words))
+                     if p is not None else "", why, self.t - (r.__dict__.get("edge_stuck_since") or self.t)))
+        rec = dict(robot=r.name, x=round(p[0], 1) if p else None, y=round(p[1], 1) if p else None,
+                   edge_cm=round(d, 1) if d is not None else None, side=side, why=why, t=round(self.t, 1), words=words)
+        self.__dict__.setdefault("edge_parked", []).append(rec)
+        self.counts["edge_parked"] = self.counts.get("edge_parked", 0) + 1
+        self.event(r, "PARKED AT AN EDGE", words)
+
     def parked(self, r):
         p = self.pos(r)
         r.mode = "out"
@@ -3797,8 +3899,7 @@ class Controller:
             return
         kr, kh, dr, dh, n = res
         cur = r.arc_scales or (1.0, 1.0)
-        ks, ds = cur[0] / kr, cur[1] / dr
-        ok = n >= ARC_FIT_MIN and kh <= ARC_FIT_CI and dh <= ARC_FIT_CI and 0.8 <= ks <= 1.25 and 0.8 <= ds <= 1.25
+        ok, ks, ds = arc_agree(res, cur)
         words = ("curves' calibration from %d pieces: curvature x%.3f (+-%.3f), length x%.3f (+-%.3f) of what was asked"
                  "; arc_k_scale %.4f -> %.4f, arc_d_scale %.4f -> %.4f%s" % (
                      n, kr, kh, dr, dh, cur[0], ks, cur[1], ds, "" if r.arc_scales else " (its values in use were "
@@ -3844,6 +3945,8 @@ class Controller:
             if half:
                 self.edge_watch(r)                     # (e08, A2) sure / unsure near an edge
                 self.felt_mark(r)                      # (e10, C2) the proven workspace grows under its wheels
+                if self.edge_park_watch(r):            # (e12) held at an edge too long: parked, the others go on
+                    continue
             if r.mode == "idle" and t >= r.busy_until and self.pos(r) is not None and not r.silent and \
                     not self.start_check(r):
                 pass                                   # (e10, run 2 incident d) put down over or at an edge: held

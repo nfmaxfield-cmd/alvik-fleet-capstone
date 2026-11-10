@@ -541,6 +541,12 @@ class FleetSim:
                     rb.gyro_scale = 1.0 / gs_ - 1.0
                     rb.gyro_bias = gd_ / gs_ * self.cfg.imu.yaw_sign
                     rb.true_cal = {"wheel_scale": ws_, "gyro_scale": gs_, "gyro_drift_dps": gd_}
+            for ae_ in getattr(args, "arc_err", None) or []:
+                # --arc-err NAME=PCT (2026-11-10, e12): on curves its true curvature is PCT % more than its own pose
+                # shows (and its length that much less): the calibration's curve phase must find and save it
+                n_, _, v_ = ae_.partition("=")
+                if n_ in (name, "*"):
+                    rb.arc_err = float(v_) / 100.0
             for sc_ in getattr(args, "stop_coast", None) or []:
                 # --stop-coast NAME=TAU_S (11-05h, school 5 Nov 19:34): the wheels run down this slowly after a brake,
                 # so a leg ends past where the robot said `done` (AL-1DC0: 0.3 cm at 5 cm/s, 0.5 cm at 10 cm/s)
@@ -1209,6 +1215,9 @@ def main(argv=None):
     ap.add_argument("--stop-coast", action="append", default=[], metavar="NAME=TAU_S",
                     help="that robot's wheels run down with this time constant after a brake (default the model's "
                          "brake_tau_s); 0.08 reproduces AL-1DC0's overrun at school, 5 Nov")
+    ap.add_argument("--arc-err", action="append", default=[], metavar="NAME=PCT",
+                    help="(2026-11-10) on curves that robot (or * = every robot) really turns PCT %% tighter than its "
+                         "own pose shows (the curve phase of calib_run.py finds it)")
     ap.add_argument("--saved", action="append", default=[], metavar="NAME=WS,GS,GD",
                     help="that robot has these corrections saved on it (loaded at its power-on)")
     ap.add_argument("--asleep", action="append", default=[], metavar="NAME:MIN[:FRAC]",

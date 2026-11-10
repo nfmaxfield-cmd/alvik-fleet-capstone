@@ -646,6 +646,21 @@ loop and ladder 25, calibration room 12 / 21, the 6 cm virtual border, EDGE_MARG
 derived rule replaces them; the old numbers stay as switches. The home free roam EDGE_CC row's sweep becomes the
 check of the derived rule.
 
+## Curves in the calibration, and e12's other chosen numbers (2026-11-10, built; docs/build-reports/e12-nov10-curves-calibration.md)
+
+| Number (where) | Value now | Experiment that would set it | Needs | Status |
+|---|---|---|---|---|
+| Which radii the curve phase drives (calib_run ARC_RADII_CM) | 12, 25, 50 cm (free roam's menu), not chosen here | yes: is the arc error the same at every radius? Fit arc_k_scale / arc_d_scale per radius on the board (3 robots x 3 radii x 8 arcs); if the ratios differ by more than their +-, the firmware needs a scale per radius (or a slip model), not one number | Board | open |
+| The curve phase's speeds (ARC_SPEEDS) | 5 and 10 cm/s (r 12 capped at 9.0), CHOSEN | yes: 5 / 7.5 / 10 / 12 cm/s x the 3 radii, 6 arcs each, on the board: does the ratio change with speed (inner-wheel slip at low wheel speed)? Free roam's menu drives all four speeds | Board | open |
+| Battery level's effect on the arcs | not modelled | yes: the same 12-arc round at 90 %, 60 % and 30 % battery (one robot, one evening): if the ratios move with battery, calibrate at the battery free roam usually runs at, or refit in free roam (it already refines) | Board | open |
+| How many arcs are needed (ARC_ROUNDS, freeroam_core ARC_FIT_MIN / ARC_FIT_CI) | 2 rounds = 24 arcs; save at 15+ fits within +-0.03, CHOSEN (free roam's rule) | yes, from the logs: bootstrap the first n arcs of real curve phases (n = 6 ... 24) and see when the median settles within +-0.01 of the 24-arc value; the simulator's arc noise is not the real one | Logs (after 2-3 real curve phases) | open |
+| Each arc's turn (ARC_SWEEP_DEG) | 120 / 90 / 60 deg for radius 12 / 25 / 50, CHOSEN | yes (Sim then Board): longer arcs fit better but need more room; fit spread against sweep 60-180 deg | Sim, then Board | open |
+| The arcs' room allowance (ARC_K_ALLOW) | 15 %, CHOSEN | no: a safety allowance (the simulator's error is 6 %; free roam's fits stay within 0.6-1.6) | - | ruled out |
+| No new picture for this long = "no pictures" (frame_watch NO_PICTURE_S) | 3 s, CHOSEN | no DOE; a logs check: the longest gap between pictures in normal runs (bridge pictures per second, the 5-minute file roll-over) must stay under it | Logs | open |
+| A robot held at an edge this long is parked (freeroam_core EDGE_PARK_S) | 60 s, CHOSEN (three of the recovery's 20 s retries) | yes, small: 30 / 60 / 120 s against robots freed by a later retry and minutes stood waiting, from recovery.csv of real runs and the fast simulator's hung cases | Logs + Sim | open |
+| Camera self-check limit (camera_selfcheck, ref_tags BUMP_PX) | 3 px median, not chosen here (the bump watch's) | no new DOE: the bump watch's own row | - | - |
+| Card floor at school (site card_stop_gb) | 0.55 GB (Nick 9 Nov) | no: Nick's number for a shared 7 GB card | - | ruled out |
+
 ## Already set by data
 
 - **Line edge cue edge_thr 150** (e02.py SAFETY_SETTINGS): plywood reads 52-84 in every E02 session, the two real

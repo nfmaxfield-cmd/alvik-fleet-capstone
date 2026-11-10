@@ -13,6 +13,9 @@ Per run type (Nick's decisions 1-3):
 Practice: with no real camera (or Mission Control --dry) every button runs the simulator instead, with the guesses
 broken on purpose (turned roof tags, a dark patch, the camera's clock off, a robot restarting), as the rehearsals do.
 """
+VERSION = "2026-11-10a"    # 2026-11-10a (e12): Advanced "Curves in the calibration" (calib_curves) passed to calib_run
+                           # (--arc-phase, --roam-motion); robots left at an edge in the status (edge_parked). No version
+                           # string before this.
 import glob
 import json
 import os
@@ -60,6 +63,8 @@ ADV_DEFAULTS = {
                                    # launcher and camera models: mission_run --practice-real) or "dry" (before e11)
     "roam_motion": "curves",       # (Nick 9 Nov) free roam's driving: curves (the default) or stopturn (straight lines,
                                    # stop and turn on the spot), at home and at school
+    "calib_curves": "auto",        # (e12, Nick 10 Nov) the calibration's curve phase: auto (robots on firmware 2026-11-05c+
+                                   # when free roam drives curves), on, off (calib_run --arc-phase)
 }
 
 
@@ -663,6 +668,9 @@ class Starter:
                 d["extra"] = ex
             if self.adv.get("min_firmware") == "none":
                 d["min_firmware"] = ""
+            # (e12) the curve phase: Advanced "Curves in the calibration", decided by free roam's driving when auto
+            d["extra"] = list(d.get("extra") or []) + ["--arc-phase", str(self.adv.get("calib_curves") or "auto"),
+                                                       "--roam-motion", str(self.adv.get("roam_motion") or "curves")]
             st = S.calib.start(d)
             return {"started": kind, "calib": st}
         extra = []
