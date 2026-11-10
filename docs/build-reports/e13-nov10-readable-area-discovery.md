@@ -212,7 +212,8 @@ slower than about 2.5 pictures a second: a first try, 4 x the 90th-percentile ga
 late-camera stress test and was cut back), and (Nick 13:34, via the coordinator) a robot whose own odometry shows no
 motion since its last fix keeps that fix however old (`standing`; MIRLT_STAND_TRUST=0 switches it off): its error sum
 does not grow while it stands and sparse reads only confirm it (test: a standing robot stays fresh, 3 cm of its own
-wheels make it lost); the blind rule itself is distance-based (the bubble per cm), the
+wheels make it lost) missions (run_plan) already grow the blind error only with distance driven, and the
+calibration's 11-10g (coordinator) measures a standing robot over longer windows, now with e13's hold behind it; the blind rule itself is distance-based (the bubble per cm), the
 no-pictures limit uses the measured gap since the last fix, and frame_watch's limit is the stream's own measured gaps,
 so none of them assumes a rate. run_plan's 0.6 s "blind" and the calibration's 1.0 s lost hold still assume one (next
 step). (c) The live panel's design shows each camera's brightness and pictures a second (redesign plan, section 3).
@@ -257,7 +258,7 @@ directions with mockups (A guided steps, B one page top to bottom, C cockpit), t
 
 ### Tests
 
-`tools/fleet/tests/test_e13.py`: 35. Full fleet suite, final code: see the end of this report.
+`tools/fleet/tests/test_e13.py`: 36. Full fleet suite, final code: see the end of this report.
 
 ## Conclusion
 
