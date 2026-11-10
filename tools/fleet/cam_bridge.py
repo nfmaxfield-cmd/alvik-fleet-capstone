@@ -27,7 +27,7 @@ Started by run-fleet-pi.sh; the dry runs start it against tools/sim/fleet_sim.py
 Writes to --out (default logs/<date-time>-bridge): track.csv (every picture: each robot's spot and status),
 events.jsonl (status changes, headings sent, obstacles), bridge_summary.json.
 """
-VERSION = "2026-11-10a"   # 2026-11-10a (e12): frame_watch (no new picture from the overhead camera: said loudly, an event, a message to the run); orderly exit. No version string before
+VERSION = "2026-11-10e14"   # e14 (school 17:46, the tag bridge's SIGTERM abort): once on the way out, SIGTERM and Ctrl+C only set a flag (orderly_exit.quiet_shutdown), never a raise inside a join or close. 2026-11-10a (e12): frame_watch (no new picture from the overhead camera: said loudly, an event, a message to the run); orderly exit. No version string before
 
 import argparse
 import csv
@@ -51,6 +51,7 @@ for p in (HERE, os.path.join(TOOLS, "experiment"), os.path.join(TOOLS, "live"), 
 
 import cv2              # noqa: E402
 import numpy as np      # noqa: E402
+import orderly_exit as _OX  # noqa: E402  (e14) quiet_shutdown
 
 CAPTURE_S = 0.04        # the recorder stamps a picture about one picture after it was taken (25 a second; the same
                         # allowance as e02_sim.py and track_live.py's default). No DOE: measured by
@@ -739,6 +740,8 @@ def main(argv=None):
         " (OBSERVE ONLY: nothing is sent)" if args.observe else "", out), flush=True)
     import signal
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))   # kill / tmux: save first
+    # (e14) kept raising here: the picture loop runs on this thread (no thread join in it) and may wait on the
+    # stream; once on the way out, quiet_shutdown stops any further raise
     if args.farm:
         return run_farm(args, br, rx, t0, rect, starts)
     import sources as S
@@ -782,6 +785,7 @@ def main(argv=None):
     except KeyboardInterrupt:
         pass
     finally:
+        _OX.quiet_shutdown()           # (e14, school 17:46) nothing raised inside the joins and closes below
         src.closed = True
         if fwatch is not None:
             fwatch.close()
@@ -910,6 +914,7 @@ def run_farm(args, br, rx, t0, rect, starts):
     except KeyboardInterrupt:
         pass
     finally:
+        _OX.quiet_shutdown()           # (e14, school 17:46) nothing raised inside the joins and closes below
         if fwatch is not None:
             fwatch.close()
         for c in conns.values():

@@ -16,6 +16,9 @@ A detection: tag id, its 4 corners in pixels (the printed tag's top-left, top-ri
 "top" edge is the one the sheet marks FRONT, so the robot's nose), its centre, its size in pixels and a read score.
 
     python3 tools/fleet/tagcore.py --selftest      # draws tags, finds them (each family the OpenCV here has)
+
+Changelog: 2026-11-10e14 (school 17:46, a slow detector in dim light): WindowTracker.speed_px_s, each window's speed
+allowance from the tag's own measured speed, a miss searched again with the full allowance (MIRLT_TAG_ROI=max: as before). No version string before.
 """
 import math
 import os
@@ -24,6 +27,7 @@ import time
 
 import numpy as np
 
+VERSION = "2026-11-10e14"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 try:
@@ -345,6 +349,16 @@ DOWNSCALE_RETRY = 0.5    # (2026-11-05) a wanted tag missing after the full pict
                          # minute on the school table in room light
 
 
+ROI_RULE = os.environ.get("MIRLT_TAG_ROI", "measured")   # (e14) "measured" (default): each tag's window allows
+                         # its own measured speed (speed_px_s), and a miss is searched again with the full allowance;
+                         # "max": every window allows max_speed_px_s (as before). detect_bench.py, simulated school
+                         # camera, 4 standing tags, a picture every 0.43 s: dim 373 -> 58 ms a picture, lit 39 -> 14,
+                         # the same reads (report e14)
+ROI_SPEED_X = 3.0        # (e14) the measured speed's margin (a robot that starts moving). CHOSEN; DOE row (e14)
+ROI_MIN_PX_S = 40.0      # (e14) the least allowance (about 5 cm/s near the school camera). CHOSEN; DOE row (e14)
+ROI_HIST = 6             # (e14) reads kept per tag for its speed. Not tuned
+
+
 class WindowTracker:
     """Per camera: where each tag was last read, so the next picture is searched in small windows; the whole picture
     every FULL_EVERY pictures while any wanted tag is missing. predict(tag_id) -> (u, v, radius_px) may come from the
@@ -355,6 +369,19 @@ class WindowTracker:
         self.last = {}          # id -> (u, v, size_px, t)
         self.since_full = 10 ** 9
         self.windows = self.fulls = 0
+
+    def speed_px_s(self, i, max_speed_px_s):
+        """(e14) The speed allowance for tag i's window: max_speed_px_s, or (ROI_RULE "measured", MIRLT_TAG_ROI) the
+        tag's own measured speed in the picture over its last reads x ROI_SPEED_X, at least ROI_MIN_PX_S: a standing
+        tag's window stays small however slowly the pictures come (school 17:46: as fixes slowed, every window grew
+        towards its cap and each picture took longer)."""
+        if ROI_RULE != "measured":
+            return max_speed_px_s
+        h = getattr(self, "hist", {}).get(i) or []
+        if len(h) < 3:
+            return max_speed_px_s
+        sp = [math.hypot(b[0] - a[0], b[1] - a[1]) / (b[2] - a[2]) for a, b in zip(h, h[1:]) if b[2] > a[2]]
+        return min(max_speed_px_s, max(ROI_MIN_PX_S, ROI_SPEED_X * max(sp))) if sp else max_speed_px_s
 
     def step(self, grey, t, cam=None, predict=None, max_speed_px_s=300.0):
         found = {}
@@ -370,12 +397,23 @@ class WindowTracker:
                 u, v, size, t_last = last
                 r = 0.0
             dt = 0.0 if last is None else max(0.0, t - last[3])
-            half = WINDOW_TAGS * size / 2.0 + min(max_speed_px_s * dt, 4 * size) + r * 0.25
-            self.windows += 1
-            for d in self.det.detect_window(grey, u, v, half, cam=cam, t=t):
-                if d.id == i:
-                    found[i] = d
+            sp = self.speed_px_s(i, max_speed_px_s)
+            half = WINDOW_TAGS * size / 2.0 + min(sp * dt, 4 * size) + r * 0.25
+            full_half = WINDOW_TAGS * size / 2.0 + min(max_speed_px_s * dt, 4 * size) + r * 0.25
+            tries = [half, full_half] if full_half > half + 1.0 else [half]
+            for h_ in tries:
+                # (e14) a measured-speed window that missed: the same picture again with the full allowance (a robot
+                # that has just started to move is never lost to the smaller window)
+                self.windows += 1
+                for d in self.det.detect_window(grey, u, v, h_, cam=cam, t=t):
+                    if d.id == i:
+                        found[i] = d
+                        break
+                if i in found:
                     break
+                if h_ is not half or len(tries) == 1:
+                    break
+                self.roi_retries = getattr(self, "roi_retries", 0) + 1
         missing = [i for i in self.ids if i not in found]
         self.since_full += 1
         if missing and self.since_full >= self.full_every:
@@ -397,6 +435,9 @@ class WindowTracker:
         for i, d in found.items():
             c = d.center
             self.last[i] = (float(c[0]), float(c[1]), d.size_px, t)
+            hh = self.__dict__.setdefault("hist", {}).setdefault(i, [])
+            hh.append((float(c[0]), float(c[1]), t))
+            del hh[:-ROI_HIST]
         return found
 
 

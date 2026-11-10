@@ -34,7 +34,7 @@ Writes to --out: track.csv (as cam_bridge's, for line_check.py), tag_poses.csv (
 sigma, size check, picture position), tag_obs.csv (every read's corners: the site fit's input), ref_watch.csv,
 events.jsonl, bridge_summary.json.
 """
-VERSION = "2026-11-10e14b"   # e14b: a picture gone dark (pictures still coming) is said as the camera adjusting to the light and sent to the run as "dark" / "light_back" (dark_watch; exposure nudge camera_exposure, off). e14: a robot with no roof tag that reads (found by motion at the start) is followed by the motion detector from where it was found: --seed-motion NAME=X,Y,TH and run_plan's "seed" messages (on_seed). 2026-11-10e13 (e13): frames.json (new pictures per camera, reference tags read) for the camera check before binding (camera_feed.py).
+VERSION = "2026-11-10e14c"   # e14c (school 17:46): SIGTERM sets a stop flag and the bridge leaves through its orderly path (never a raise inside a join: the C++ abort); every picture's detection time, search, brightness and reads in detect_times.csv; the Pi's heat and throttle flags in pi_health.csv and the status line; windows sized by each tag's measured speed (tagcore). e14b: a picture gone dark (pictures still coming) is said as the camera adjusting to the light and sent to the run as "dark" / "light_back" (dark_watch; exposure nudge camera_exposure, off). e14: a robot with no roof tag that reads (found by motion at the start) is followed by the motion detector from where it was found: --seed-motion NAME=X,Y,TH and run_plan's "seed" messages (on_seed). 2026-11-10e13 (e13): frames.json (new pictures per camera, reference tags read) for the camera check before binding (camera_feed.py).
 VERSION_A = "2026-11-10a"   # 2026-11-10a (e12): frame_watch (no pictures from a camera: said loudly, an event, a message to the run); workers joined before the summary; orderly exit. No version string before
 
 import argparse
@@ -316,6 +316,14 @@ class Bridge:
         self.obs_w = csv.writer(self.obs_f)
         self.obs_w.writerow(["t", "cam", "id", "u0", "v0", "u1", "v1", "u2", "v2", "u3", "v3"])
         self.ev_f = open(os.path.join(out, "events.jsonl"), "a")
+        # (e14, school 17:46: 122 -> 421 ms a picture in a dim room) every picture's detection time, its search
+        # (windows / whole-picture searches so far), its brightness and the tags found; the Pi's heat and throttle
+        # flags every few seconds (pi_health.csv)
+        self.dt_f = open(os.path.join(out, "detect_times.csv"), "w", newline="")
+        self.dt_w = csv.writer(self.dt_f)
+        self.dt_w.writerow(["t", "cam", "ms", "windows", "full_searches", "grey", "found", "mode"])   # mode: the window rule
+        import pi_health as PH
+        self.health = PH.Logger(out)
         self.event("start", tags=tags, cams=list(cams), robots=self.ids, roofs=self.roofs)
         # the reference tags' watch (2026-11-03): a bumped camera
         self.refw = {}
@@ -507,8 +515,17 @@ class Bridge:
             except Exception as e:      # noqa: BLE001  (the watch never stops the fixes)
                 self.event("ref_watch_error", cam=cam_name, why=str(e))
         t0 = time.perf_counter()
-        found = self.trk[cam_name].step(grey, t, cam=cam_name, predict=self.predict(cam_name, t))
-        self.ms[cam_name].append((time.perf_counter() - t0) * 1000.0)
+        trk = self.trk[cam_name]
+        mode = "roi " + TC.ROI_RULE                      # (e14) the window rule in force (tagcore MIRLT_TAG_ROI)
+        found = trk.step(grey, t, cam=cam_name, predict=self.predict(cam_name, t))
+        ms_ = (time.perf_counter() - t0) * 1000.0
+        self.ms[cam_name].append(ms_)
+        try:
+            with self.lock:
+                self.dt_w.writerow(["%.4f" % t, cam_name, "%.1f" % ms_, trk.windows, trk.fulls,
+                                    "%.1f" % float(grey[::8, ::8].mean()), len(found), mode])
+        except (OSError, ValueError):
+            pass
         H, S = float(self.tags["height_cm"]), float(self.tags["tag_cm"])
         cam = self.cams[cam_name]
         out = []
@@ -703,7 +720,12 @@ class Bridge:
             parts.append("%s %s, %d fixes" % (n, "at (%.0f, %.0f) facing %.0f" % la[:3] if la else "not seen yet",
                                                c["fixes"]))
         ms = "; ".join("%s %.0f ms" % (c, np.median(v[-30:])) for c, v in self.ms.items() if v)
-        self.say("%s; %s" % ("; ".join(parts), ms))
+        try:
+            self.health.tick({c: float(np.median(v[-30:])) for c, v in self.ms.items() if v})
+            hw = self.health.words()
+        except Exception:  # noqa: BLE001  (the heat log never stops the fixes)
+            hw = ""
+        self.say("%s; %s%s" % ("; ".join(parts), ms, "; Pi " + hw if hw else ""))
 
     def summary(self):
         s = {"frames": self.frames, "robots": self.counts,
@@ -725,7 +747,8 @@ class Bridge:
         return s
 
     def close(self):
-        for fh in (self.track_f, self.pose_f, self.obs_f, self.fix_f, self.ev_f, getattr(self, "refw_f", None)):
+        for fh in (self.track_f, self.pose_f, self.obs_f, self.fix_f, self.ev_f, getattr(self, "refw_f", None),
+                   getattr(self, "dt_f", None)):
             if fh is None:
                 continue
             try:
@@ -830,8 +853,8 @@ def main(argv=None):
         tags.get("family"), tags.get("tag_cm"), tags.get("height_cm"),
         ", ".join("%s=%d" % kv for kv in tags["ids"].items()), ", ".join(models), a.to,
         " (OBSERVE ONLY)" if a.observe else "", out), flush=True)
-    import signal
-    signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
+    import orderly_exit as OX
+    term = OX.stop_on_signals(("SIGTERM",))   # (e14, school 17:46) a flag, never a raise (the old raise: switch)
     import cv2
     feeds = {c: CamFeed(c, streams[c]) for c in models}
     fwatch = None
@@ -877,9 +900,13 @@ def main(argv=None):
             br.status(time.time())
             if a.max_s and time.time() - t0 > a.max_s:
                 break
+            if term.is_set():
+                print("Tag bridge: asked to stop (SIGTERM): finishing the pictures in hand", flush=True)
+                break
     except KeyboardInterrupt:
         pass
     finally:
+        OX.quiet_shutdown(term)        # (e14) nothing raised inside the joins below
         stop.set()
         if fwatch is not None:
             fwatch.close()

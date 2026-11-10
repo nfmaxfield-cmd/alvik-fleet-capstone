@@ -72,7 +72,8 @@ write (new in e13 where marked). Colour words, never colour alone.
 | Clock | Pi vs camera clock difference, internet time set or not | `clock.csv`, the sync card's status |
 | Tags | roof tags read per robot this minute; reference tags read (camera not bumped) | `tag_poses.csv`, `ref_watch.csv` |
 | Detector | off / on with the model's date, detections a second | `sources.csv` ml column (e13) |
-| Pi | temperature, card and stick space, the sleep timer after the run (e13: "robots asleep at 14:32 if no new run") | heat tracker rows, diskguard, `run_activity.json` (e13) |
+| Tag detection (e14) | per camera: ms a picture now (median of the last 30) and its trend, **fixes a second per robot**, the window rule in force; in amber "detection is slow: N ms a picture (fixes every X s; the run counts a fix as seen for Y s)" when the measured fix interval stretches the run's seen-time beyond its 0.6 s; school 17:46: 122 -> 421 ms in a dim room | `bridge/detect_times.csv` (e14), the run's `slow_fixes` event (e14) |
+| Pi | temperature, **throttle flags now and since boot** (under-voltage, frequency capped, throttled, soft temperature limit: in red when "now"), card and stick space, the sleep timer after the run (e13: "robots asleep at 14:32 if no new run") | `bridge/pi_health.csv` (e14), heat tracker rows, diskguard, `run_activity.json` (e13) |
 
 ## 3b. Asking a person for a hand: the click card (built in e13, to fold into whichever direction)
 

@@ -15,6 +15,7 @@ on the Pi's SD card (the card), next to the logs. Now:
     python3 tools/fleet/diskguard.py space                 # free space and the biggest folders (run-fleet-pi.sh space)
     python3 tools/fleet/diskguard.py preflight             # the start-up line; exit 1 when the card is under its floor
     python3 tools/fleet/diskguard.py where <session>       # the session's frames folder (doe-finish)
+    python3 tools/fleet/diskguard.py space --move          # (e14) move old run folders to the USB drive now
 
 MIRLT_DRIVE=<folder> stands in for the USB drive (tests, dry runs); MIRLT_FAKE_FREE="card=0.8,drive=3" fakes the free
 space (GB) the guard reads (tests, the dry run that shows the clean stop).
@@ -22,6 +23,7 @@ space (GB) the guard reads (tests, the dry run that shows the clean stop).
 import os
 import shutil
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -54,7 +56,10 @@ FRAMES_GB_PER_H = 2.9   # measured, not chosen: 2026-10-27 21:34-22:03, both cam
                         # zipped to 1.42 GB in 29 min. A 4 h loop: ~12 GB of frames, ~24 GB with the upload's copy
 
 
-VERSION = "2026-11-10a"   # 2026-11-10a (e12, Nick 10 Nov): the card floor per site (card_stop_gb in the site file, school
+VERSION = "2026-11-10e14"   # e14 (school 18:07: a visit refused with the card at 0.52 GB while the USB drive had 22.4
+                          # GB free): finished run folders MOVED to the drive (never deleted), oldest first, with a
+                          # link left where each was (move_old_runs; preflight does it by itself under the floor;
+                          # `space --move`; MIRLT_MOVE_RUNS=0: as before). 2026-11-10a (e12, Nick 10 Nov): the card floor per site (card_stop_gb in the site file, school
                           # 0.55; MIRLT_CARD_STOP_GB still overrides, default 1.0): no `tmux set-environment` needed.
                           # No version string before
 
@@ -321,6 +326,129 @@ def _human(n):
     return "%.1f GB" % (n / GB) if n >= 0.1 * GB else "%.0f MB" % (n / 1e6)
 
 
+# ------------------------------------------------------------------------- (e14) old run folders moved to the USB drive
+MOVED_DIR = "fleet-logs"       # <drive>/fleet-logs/<run folder>: where moved run folders go
+MOVED_LOG = "moved_to_drive.csv"
+RECENT_S = 30 * 60      # CHOSEN: a folder written in the last 30 min is never moved (a running run writes perf.csv every
+                        # 2 s; a run held for a hand still writes its status). No DOE: a guard
+DAY_S = 24 * 3600
+
+
+def run_folders(logs):
+    """The run folders directly under logs (real folders, not links already moved): [(newest write, bytes, path)],
+    oldest first."""
+    out = []
+    try:
+        names = os.listdir(logs)
+    except OSError:
+        return out
+    for n in names:
+        p = os.path.join(logs, n)
+        if os.path.islink(p) or not os.path.isdir(p):
+            continue
+        newest = os.path.getmtime(p)
+        for root, _, files in os.walk(p):
+            for fn in files:
+                try:
+                    newest = max(newest, os.path.getmtime(os.path.join(root, fn)))
+                except OSError:
+                    pass
+        out.append((newest, folder_bytes(p), p))
+    return sorted(out)
+
+
+def margin_gb(rows, now):
+    """DERIVED: room for another day like the last one: the median run folder's size x the runs written in the last
+    24 h (at least one run; at least the biggest recent run)."""
+    if not rows:
+        return 0.0
+    sizes = sorted(b for _, b, _ in rows)
+    med = sizes[len(sizes) // 2]
+    day = [b for t, b, _ in rows if now - t <= DAY_S]
+    return max(med * max(1, len(day)), max(day) if day else 0) / GB
+
+
+def _copy_verified(src, dst):
+    shutil.copytree(src, dst, symlinks=True)
+    n_src = sum(len(f) for _, _, f in os.walk(src))
+    n_dst = sum(len(f) for _, _, f in os.walk(dst))
+    if n_src != n_dst or folder_bytes(src) != folder_bytes(dst):
+        shutil.rmtree(dst, ignore_errors=True)
+        raise OSError("the copy of %s does not match it (files %d / %d)" % (src, n_src, n_dst))
+
+
+def move_old_runs(logs=None, drive=None, floor_gb=None, now=None, out=print, keep=(), card_free=None,
+                  drive_free=None, force=False, check_fs=True):
+    """(e14, school 18:07) When the card is under its floor (or force: `space --move`, under floor + margin) and a USB
+    drive has room: finished run folders under logs/ are MOVED to <drive>/fleet-logs/, oldest first, until the card is
+    back above floor + margin (margin_gb). Each is copied, checked (files and bytes), then removed from the card, and
+    a link left where it was (logs/<name> -> the drive), so the bundle, the readability learning, the pooling and the
+    replay page find it as before; logs/moved_to_drive.csv lists every move. Never moved: a folder written in the last
+    RECENT_S (a running run), anything in keep, anything outside logs/ (code, ~/.config/mirlt). Nothing is deleted
+    that has not been copied and checked. card_free / drive_free: callables (tests). Returns [(name, bytes, dest)]."""
+    if os.environ.get("MIRLT_MOVE_RUNS", "1") == "0":
+        return []
+    logs = logs or os.path.join(REPO, "logs")
+    drive = drive or drive_mount()
+    floor = CARD_STOP_GB if floor_gb is None else float(floor_gb)
+    now = time.time() if now is None else now
+    card_free = card_free or (lambda: free_gb(logs))
+    if drive is None or (check_fs and same_fs(logs, drive)):
+        return []
+    drive_free = drive_free or (lambda: free_gb(drive))
+    rows = run_folders(logs)
+    marg = margin_gb(rows, now)
+    want = floor + marg
+    c = card_free()
+    if c is None or (c >= floor and not force) or c >= want:
+        return []
+    keep = {os.path.abspath(k) for k in keep}
+    dest_root = os.path.join(drive, MOVED_DIR)
+    moved = []
+    out("CARD LOW: %.2f GB free (floor %g GB): moving finished run folders to the USB drive (%s), oldest first, until "
+        "%.2f GB free (the floor plus room for another day like the last: %.2f GB). Nothing is deleted." % (
+            c, floor, dest_root, want, marg))
+    for t, b, p in rows:
+        if card_free() >= want:
+            break
+        if now - t < RECENT_S or os.path.abspath(p) in keep:
+            continue
+        df = drive_free()
+        if df is None or df - b / GB < DRIVE_FRAMES_GB:
+            out("  the USB drive is too full for more (%.1f GB free): stopped" % (df or 0))
+            break
+        name = os.path.basename(p)
+        dst = os.path.join(dest_root, name)
+        k = 1
+        while os.path.exists(dst):
+            k += 1
+            dst = os.path.join(dest_root, "%s-%d" % (name, k))
+        try:
+            os.makedirs(dest_root, exist_ok=True)
+            _copy_verified(p, dst)
+            with open(os.path.join(dst, "moved_from.txt"), "w") as f:
+                f.write("%s\nmoved %s from the Pi's card (diskguard %s)\n" % (p, time.strftime("%Y-%m-%d %H:%M"), VERSION))
+            shutil.rmtree(p)
+            os.symlink(dst, p)
+        except OSError as e:
+            out("  %s not moved: %s" % (name, e))
+            continue
+        moved.append((name, b, dst))
+        try:
+            lp = os.path.join(logs, MOVED_LOG)
+            new = not os.path.exists(lp)
+            with open(lp, "a") as f:
+                if new:
+                    f.write("moved_at,folder,bytes,to\n")
+                f.write("%s,%s,%d,%s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), name, b, dst))
+        except OSError:
+            pass
+        out("  moved %s (%s) -> %s" % (name, _human(b), dst))
+    out("CARD: %.2f GB free after moving %d folder%s (%s)." % (
+        card_free() or 0, len(moved), "" if len(moved) == 1 else "s", _human(sum(m[1] for m in moved))))
+    return moved
+
+
 def biggest(folder, k=10):
     """The k biggest folders directly under folder: [(bytes, path)]."""
     out = []
@@ -349,8 +477,14 @@ def rec_out():
     return os.path.join(d, "recordings") if d else os.path.expanduser("~/recordings")
 
 
-def space(k=10, out=print):
+def space(k=10, out=print, move=False):
     logs = os.path.join(REPO, "logs")
+    if move:
+        if drive_mount() is None:
+            out("space --move: no USB drive found under /media/%s: nothing moved" % os.environ.get("USER", "<user>"))
+        elif not move_old_runs(logs, force=True, out=out):
+            out("space --move: nothing to move (the card has room enough, or no finished run folder is old enough)")
+        out("")
     c, ct = free_gb(logs), total_gb(logs)
     out("The Pi's card (logs/, the repo, the system): %.1f GB free of %.0f GB%s" % (
         c or 0, ct or 0, "   << UNDER THE %g GB FLOOR (%s): long runs will not start" % (CARD_STOP_GB, CARD_STOP_FROM)
@@ -381,8 +515,9 @@ def space(k=10, out=print):
         for n, q in rows:
             out("  %9s  %s" % (_human(n), os.path.basename(q)))
     out("")
-    out("To free the card: ./run-fleet-pi.sh clean-uploaded   (lists what is confirmed on GitHub; deletes nothing "
-        "until you add --yes)")
+    out("To free the card: ./run-fleet-pi.sh space --move   (moves finished run folders to the USB drive, a link "
+        "left in logs/; nothing deleted), or ./run-fleet-pi.sh clean-uploaded   (lists what is confirmed on GitHub; "
+        "deletes nothing until you add --yes)")
     return 0
 
 
@@ -413,8 +548,15 @@ def preflight(session=None, out=print):
     else:
         frames = os.path.join(session or os.path.join(REPO, "logs", "<session>"), "frames")
     g = Guard(frames_dir=frames)        # (free_gb and same_fs read the nearest folder that exists)
-    out(g.words())
     s = g.state()
+    if s["stop"] and d and "card" not in g.fake:
+        # (e14, school 18:07) under the floor with a USB drive plugged in: old run folders moved there first
+        try:
+            move_old_runs(g.card, d, g.card_stop_gb, out=out, keep=[session] if session else ())
+        except Exception as e:  # noqa: BLE001  (moving never stops the start-up check itself)
+            out("(moving old run folders to the USB drive failed: %s)" % e)
+        s = g.state()
+    out(g.words())
     if s["stop"]:
         out("NOT STARTED: %s. See what is using it: ./run-fleet-pi.sh space" % s["why"])
         return 1
@@ -427,7 +569,7 @@ def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     what = argv[0] if argv else "space"
     if what == "space":
-        return space()
+        return space(move="--move" in argv[1:])
     if what == "preflight":
         return preflight(argv[1] if len(argv) > 1 else None)
     if what == "where":

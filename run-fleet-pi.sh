@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# (2026-11-10 e14) `space --move`: finished run folders moved to the USB drive (diskguard.move_old_runs; a link left
+# in logs/, nothing deleted); every preflight does the same by itself when the card is under its floor (school 18:07).
 # (2026-11-10 e13) calib, freeroam, doe, visit and the missions close a session whose run has ended (its window waiting
 # at "Press Enter", found by the session's name: session_ended) before starting, instead of refusing the new run.
 # Phase 0 on the Pi (2026-10-27): the fleet planner (tools/fleet/run_plan.py) on the real robots, with camera fixes
@@ -94,6 +96,7 @@
 # Free space (2026-10-28: the 21:34 DOE loop filled the card at 22:03). Frames go to the USB drive; every long run
 # checks the card and the drive before it starts and between loops, and ends cleanly before the card fills:
 #     ./run-fleet-pi.sh space              free space on the card and the USB drive, and the biggest folders
+#     ./run-fleet-pi.sh space --move       (e14) move finished run folders to the USB drive (a link left; nothing deleted)
 #     ./run-fleet-pi.sh uploads            the last 10 sessions: ✓ uploaded / ✗ not, and their size here (quick)
 #     ./run-fleet-pi.sh clean-uploaded     lists the sessions GitHub has (quick: the release has every file the upload
 #                                          sent; seconds, low priority); deletes nothing. Then `... clean-uploaded --yes`
@@ -507,8 +510,9 @@ case "$WHAT" in
   mc-stop)
     if tmux has-session -t mc 2>/dev/null; then tmux send-keys -t mc C-c; sleep 3; tmux send-keys -t mc Enter 2>/dev/null; echo "Mission Control is closing (a run of its own stops first)."
     else echo "Mission Control is not running in tmux session mc: if it runs in a terminal window, Ctrl+C there."; fi ;;
-  space)           # free space on the card and the USB drive, the biggest folders (nothing changed)
-    python3 tools/fleet/diskguard.py space ;;
+  space)           # free space on the card and the USB drive, the biggest folders; --move (e14): finished run folders
+                   # moved to the USB drive (a link left in logs/, nothing deleted)
+    shift; python3 tools/fleet/diskguard.py space "$@" ;;
   clean-uploaded)  # only what GitHub has (quick check; --thorough: exact sizes); a list first, deletes only with --yes
     python3 tools/pi/clean_uploaded.py "$@" ;;
   uploads)         # (2026-11-05) the last 10 sessions, uploaded or not (quick check; nothing deleted)

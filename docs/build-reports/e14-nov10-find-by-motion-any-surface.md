@@ -208,9 +208,63 @@ read was brought back until tag 2 first read at the motion detector's spot, and 
 the dim border, saw the tag stand still and ended the run ("PIN CHECK FAILED"). The first read at the tracked spot,
 while that robot alone moved, is the binding evidence now; the note says so.
 
+**G. A slow tag detector in dim light** (school 17:46, a standalone tag bridge, TV light only: 122 -> 421 ms a
+picture over a minute; tag 4 standing still got 2.3 fixes a second).
+- Logged with every run: `bridge/detect_times.csv` (each picture's ms, windows and whole-picture searches so far, mean
+  grey, tags found, the window rule) and `bridge/pi_health.csv` every 5 s (temperature, `vcgencmd get_throttled` flags
+  now and since boot, the detection ms); the status line adds "Pi 84 C, NOW throttled". Both are in the "what the
+  system knows" panel design (`mission-control-redesign.md`, section 3: a Tag detection row, the Pi row).
+- Risk maths: a slow detector is treated like a slow camera. run_plan's "seen" time (was a fixed 0.6 s at six
+  places) is now each robot's measured fix interval: at least 0.6 s, else 1.5 x the 90th-percentile gap of its last
+  40 fixes (free roam's e13 rule; the percentile so one lost-tag gap does not stretch it); said once as `slow_fixes`.
+  At 2.3 fixes a second: 0.65 s. `MIRLT_FIX_GAP_RULE=fixed` the old 0.6 s. Free roam already did this (e13).
+- The cause, found in the benchmark (measured, simulator): the tracker's window round each tag allows the robot's
+  travel since the last picture at 300 px/s, so slow pictures make every window bigger, each picture slower, and
+  the next picture later: a loop. `detect_bench.py` (the bridge's own tracker on the school camera's simulated
+  pictures, 4 standing tags; also takes saved real frames with `--frames`): a picture every 0.43 s in dim light took
+  **364 ms** (the school's 421), at 0.1 s 85 ms. Speed-ups measured, each against the tracker before e14:
+
+| Speed-up | dim, 0.43 s | lit, 0.43 s | reads | Verdict |
+|---|---|---|---|---|
+| each window sized by the tag's own measured speed (x3, at least 40 px/s; a miss searched again full size) | 364 -> **56 ms** | 44 -> 14 ms | the same | **on** (`MIRLT_TAG_ROI=max` the old) |
+| smoothing each search area in a dim picture | 364 -> 22 ms | - | **loses the mid-range tags** (5, 6: 100 % -> 0) | not used |
+| whole-picture search on a half-size picture in the dark (decimate) | - | - | **loses every tag** | not used |
+| whole-picture search without its enlargement in the dark | 364 -> 458 ms | - | the same | not used |
+| fewer threads (OpenCV on 1) | 364 -> 467 ms | - | the same | not used here (a 2-core machine; the throttled Pi may differ: run detect_bench there) |
+| whole-picture search less often for a long-missing tag | 364 -> 363 ms | - | the same | not used (the windows are the cost) |
+
+  A moving robot (stands, then 13 cm/s), 4 seeds x lit/dim: the measured windows read exactly the same pictures as
+  the old ones (229 of 320). Centre jitter unchanged (0.126 px dim). **Claude's reading:** the Pi's heat (84 C)
+  likely adds to this, but the loop alone reproduces the school's numbers; detect_bench on the school Pi with saved
+  frames would split the two.
+
+![bench](../screenshots/2026-11-10/e14-feature-detection-time-measured-windows-chart.png)
+
+**H. SIGTERM ended the bridge in a C++ abort** (school 17:46, `timeout 60`). The handler raised KeyboardInterrupt
+wherever the main thread was; it landed inside `w.join(timeout=8)` while the native detector threads ran ("terminate
+called without an active exception"). Now SIGTERM sets a flag (`orderly_exit.stop_on_signals`); the main loop
+leaves through its orderly path, and from the first line of the shutdown SIGTERM and Ctrl+C only set the flag
+(`quiet_shutdown`, also in the camera bridge's two shutdowns). Test: a real bridge on a stream of dim pictures, SIGTERM
+sent during detection and again eight times while it shuts down: exit 0, its summary, no traceback. With the old
+handler (`MIRLT_SIGTERM_RAISE=1`) the same test fails with the school's traceback, KeyboardInterrupt inside
+`w.join(timeout=8)` (measured: the test catches it).
+
+**I. The card full, the USB drive empty** (school 18:07: `visit` refused, card 0.52 GB, floor 0.55; FLEET 22.4 GB
+free; nothing is ever "uploaded" at school). `diskguard.move_old_runs`: when the card is under its floor and a USB
+drive is plugged in, every start-up check (`preflight`) MOVES finished run folders from `logs/` to
+`<drive>/fleet-logs/`, oldest first: each is copied, checked (file count and bytes), removed from the card, and a link
+left where it was, so the bundle, the readability learning, the pooling and the replay page find it unchanged
+(`logs/moved_to_drive.csv` lists them; `moved_from.txt` in each). It stops at the floor plus a DERIVED margin: room
+for another day like the last (the median run's size x the runs of the last 24 h). Never moved: a folder written in
+the last 30 min (a running run), the session about to start, anything outside `logs/` (code, `~/.config/mirlt`); the
+drive keeps its 5 GB floor. `./run-fleet-pi.sh space --move` does it by hand. `MIRLT_MOVE_RUNS=0` the old refusal.
+Tests with temp folders (oldest first, links readable, the running run kept, the drive too full: nothing touched).
+
+![move](../screenshots/2026-11-10/e14-feature-card-low-runs-moved-to-usb-terminal.png)
+
 ### Tests
 
-`tools/fleet/tests/test_e14.py`: 32. Two e12/e13 tests pinned to the old ways' switches. Full fleet suite on the final
+`tools/fleet/tests/test_e14.py`: 39. Two e12/e13 tests pinned to the old ways' switches. Full fleet suite on the final
 head: FULL_SUITE.
 
 ## Conclusion
@@ -225,6 +279,9 @@ head: FULL_SUITE.
 - The school's "while parking" end (16:22, 17:02) came from staging, not parking; fixed at its root.
 - A dark picture is now a camera problem: every run holds and carries on by itself (simulated 60 s blackout).
 - A run with wide, scattered legs (17:02's wheel 0.73 +- 0.20) no longer moves the pool much.
+- The dim room's slow detection was mostly the tracker's own loop (slow pictures, bigger windows); measured windows
+  cut it 364 -> 56 ms a picture in the simulator with the same reads. A SIGTERM no longer aborts the bridge.
+- A full card with a USB drive plugged in no longer refuses a run: old runs move to the drive, nothing deleted.
 - Not done: detector training (blocked download); free roam with a tagless robot.
 
 ## What's next
@@ -234,12 +291,15 @@ head: FULL_SUITE.
 - `python3 tools/fleet/calib_pool.py show AL-EB54` on the school Pi after the next calibration (it pools from then on;
   today's earlier partial runs are not in it: their legs.csv could be imported, a small script).
 - Nick's choice of the Mission Control direction, then step 4.
+- On the school Pi: `python3 tools/fleet/detect_bench.py --frames <saved dim frames>` cool and hot, and one dim
+  Visit with `bridge/detect_times.csv` and `pi_health.csv` read (the heat's share of the slow detection).
 - Training on the laptop (PyTorch there).
 
 ## Appendix: switches (all decided automatically; the old way kept)
 
 `MIRLT_CAMERA_DISCOVERY=off|e13`, `MIRLT_CLEAR_SPACE_OK=1`, `--clear-space`, `--spots` / `MIRLT_CALIB_SPOTS`,
-`MIRLT_READMAP_STORE=0`, `MIRLT_RETRY_LOST=again`, `MIRLT_CALIB_POOL=0`, `MIRLT_PARK_GIVEUP=1`, `MIRLT_EXPOSURE_NUDGE=1` (off: the nudge); Advanced "Battery floor";
+`MIRLT_READMAP_STORE=0`, `MIRLT_RETRY_LOST=again`, `MIRLT_CALIB_POOL=0`, `MIRLT_PARK_GIVEUP=1`, `MIRLT_EXPOSURE_NUDGE=1` (off: the nudge), `MIRLT_TAG_ROI=max`, `MIRLT_FIX_GAP_RULE=fixed`,
+`MIRLT_SIGTERM_RAISE=1`, `MIRLT_MOVE_RUNS=0`; Advanced "Battery floor";
 simulator: `--sim-blackout T:DUR`, `--sim-dark`, `--sim-extra-camera`, `--sim-light`, `--sim-start X,Y`, `--sim-tagless`, `--readmap-store`.
 
 ## Sweep 1: new tests that may now be needed

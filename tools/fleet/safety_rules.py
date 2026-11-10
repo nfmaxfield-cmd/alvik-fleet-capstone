@@ -27,7 +27,7 @@ import math
 import os
 import time
 
-VERSION = "2026-11-10e13"   # e13 (10 Nov, Nick "derived, risk-based thresholds"): no_picture_limit, the time a robot may go
+VERSION = "2026-11-10e14"   # e14 (school 17:46, a slow tag detector in dim light): fresh_fix_s, how old a fix may be and still count as seen, from the robot's measured fix interval (MIRLT_FIX_GAP_RULE=fixed: 0.6 s as before); between_fixes_cm. e13 (10 Nov, Nick "derived, risk-based thresholds"): no_picture_limit, the time a robot may go
 #                              without camera pictures, from its speed, heading, uncertainty and the edge room. 2026-11-07a: e08
 VERSION_A = "2026-11-07a"
 
@@ -346,6 +346,36 @@ SURE_TOL_CM = 3.0        # own pose and camera within this of each other (3 came
                          # yes (replay the 5 / 6 Nov logs: the share of "unsure" moments at 2 / 3 / 5 cm against the
                          # incidents caught)
 SURE_CAM_AGE_S = 0.6     # a camera fix older than this (beyond the measured delay) is not fresh (freeroam LOST_AFTER_S)
+
+FIX_GAP_RULE = os.environ.get("MIRLT_FIX_GAP_RULE", "derived")   # (e14) "derived" | "fixed" (SURE_CAM_AGE_S alone)
+FIX_GAP_FACTOR = 1.5     # (e14) = freeroam_core.LOST_GAPS (e13): a robot is unseen only after 1.5 x its longest recent gap
+FIX_GAP_N = 40           # ... between fixes (its last 40). Not chosen here
+FIX_GAP_PCT = 0.9        # (e14) the gap used: the 90th percentile of those (CHOSEN: one long loss among 40 is ignored,
+                         # a detector that is slow on every picture is not). DOE row (e14)
+
+
+def fresh_fix_s(arrivals, base=SURE_CAM_AGE_S):
+    """(e14, school 17:46: in the dim room the tag detector took 122-421 ms a picture and a standing tag got 2.3 fixes a
+    second) How old a camera fix may be and still count as "the camera sees it now": a slow detector is treated like a
+    slow camera, from this robot's MEASURED fix interval: max(base, FIX_GAP_FACTOR x the 90th percentile gap between its
+    last FIX_GAP_N fix arrivals). The same rule as free roam's lost_after (e13). arrivals: fix arrival times, oldest first.
+    MIRLT_FIX_GAP_RULE=fixed: base alone (as before e14)."""
+    if FIX_GAP_RULE == "fixed":
+        return base
+    a = [float(x) for x in (arrivals or [])][-(FIX_GAP_N + 1):]
+    if len(a) < 10:
+        return base
+    gaps = sorted(b - c for c, b in zip(a, a[1:]) if b > c)
+    if not gaps:
+        return base
+    # the 90th percentile, not the longest: one lost-tag gap (seconds) must not make every later loss count as seen
+    return max(base, FIX_GAP_FACTOR * gaps[int(FIX_GAP_PCT * (len(gaps) - 1))])
+
+
+def between_fixes_cm(speed_cms, interval_s):
+    """(e14) The position error a robot gathers between two fixes, driving on its own wheels and gyro: speed x the
+    measured interval x NOPIC_BLIND_PER_CM (the blind error's growth). 5 cm/s at 0.43 s: 0.15 cm; at 2 s: 0.7 cm."""
+    return abs(float(speed_cms or 0.0)) * max(0.0, float(interval_s or 0.0)) * NOPIC_BLIND_PER_CM
 
 
 def edge_judgement(margin_cm, cam_fresh, disagree_cm, edge_sensed=None, tilted=False):

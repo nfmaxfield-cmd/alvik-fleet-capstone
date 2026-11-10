@@ -657,3 +657,239 @@ def test_parking_at_the_start_does_not_mark_the_whole_run_as_ending():
     assert CR.CalibRun.park(r, "stage") == "ok" and seen == [False] and r._ending is False
     CR.CalibRun.park(r, "park")
     assert seen[-1] is True and r._ending is False
+
+
+# ------------------------------------------------------------------------------- school 17:46: slow detection, SIGTERM
+def _mjpeg_server(pictures, fps=7.0):
+    """A camera stream as camrec serves it (multipart JPEG, X-Frame / X-Time), looping over pictures."""
+    import socket
+    import cv2
+    bodies = [cv2.imencode(".jpg", p, [cv2.IMWRITE_JPEG_QUALITY, 85])[1].tobytes() for p in pictures]
+    srv = socket.socket()
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(4)
+    stop = threading.Event()
+
+    def serve(c):
+        try:
+            c.recv(4096)
+            c.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n")
+            k = 0
+            while not stop.is_set():
+                b = bodies[k % len(bodies)]
+                c.sendall(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\nX-Frame: %d\r\nX-Time: %.4f"
+                          b"\r\n\r\n" % (len(b), k, time.time()) + b + b"\r\n")
+                k += 1
+                time.sleep(1.0 / fps)
+        except OSError:
+            pass
+        finally:
+            c.close()
+
+    def accept():
+        srv.settimeout(0.5)
+        while not stop.is_set():
+            try:
+                c, _ = srv.accept()
+            except OSError:
+                continue
+            threading.Thread(target=serve, args=(c,), daemon=True).start()
+    threading.Thread(target=accept, daemon=True).start()
+    return srv.getsockname()[1], lambda: (stop.set(), srv.close())
+
+
+def test_sigterm_during_detection_leaves_through_the_orderly_path(tmp_path):
+    """School 17:46: `timeout 60 tag_bridge.py` ended with a KeyboardInterrupt raised inside w.join, then a C++ abort.
+    Now SIGTERM sets a flag: the bridge finishes the picture in hand, writes its summary and exits 0."""
+    import signal
+    import subprocess
+    import detect_bench as DB
+    import tag_cam as TCAM
+    pics = DB.sim_pictures(4, 0.3)
+    cam = TCAM.TagCamera((-114.3, 83.8, 145.0), (150.0, 83.8, 0.0), size=(1280, 960), hfov_deg=70.4,
+                         table=(0, 0, 396.2, 167.6))
+    cal = tmp_path / "overhead.json"
+    cam.true_model().save(str(cal))
+    tags = tmp_path / "tags.json"
+    tags.write_text(json.dumps({"family": "tag25h9", "tag_cm": 8.0, "roof_cm": 9.5, "height_cm": 6.0,
+                                "ids": {"tag4": 4, "tag2": 2, "tag7": 7}}))
+    port, close = _mjpeg_server(pics)
+    out = tmp_path / "bridge"
+    p = subprocess.Popen([sys.executable, os.path.join(FLEET, "tag_bridge.py"), "--tags", str(tags), "--cam",
+                          "overhead=127.0.0.1:%d,%s" % (port, cal), "--out", str(out), "--to", "127.0.0.1:59997",
+                          "--max-s", "60", "--no-ref-watch", "--observe"],
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=REPO, text=True)
+    try:
+        t0 = time.time()
+        dt = out / "detect_times.csv"
+        while time.time() - t0 < 40 and not (dt.exists() and len(dt.read_text().splitlines()) > 6):
+            time.sleep(0.2)
+        assert dt.exists() and len(dt.read_text().splitlines()) > 6, "no pictures detected"
+        p.send_signal(signal.SIGTERM)                      # while the worker is detecting
+        for _ in range(8):                                 # and again while it shuts down (inside its joins)
+            time.sleep(0.05)
+            if p.poll() is None:
+                p.send_signal(signal.SIGTERM)
+        text, _ = p.communicate(timeout=30)
+    finally:
+        if p.poll() is None:
+            p.kill()
+        close()
+    assert p.returncode == 0, text[-2000:]
+    assert "Tag bridge stopped" in text and "Traceback" not in text and "terminate called" not in text, text[-2000:]
+    rows = dt.read_text().splitlines()
+    assert rows[0].startswith("t,cam,ms,windows,full_searches,grey,found,mode")
+    assert (out / "pi_health.csv").exists()
+
+
+def test_stop_on_signals_sets_a_flag_and_never_raises():
+    import signal
+    import orderly_exit as OX
+    old = signal.getsignal(signal.SIGTERM)
+    try:
+        ev = OX.stop_on_signals(("SIGTERM",))
+        os.kill(os.getpid(), signal.SIGTERM)
+        time.sleep(0.05)
+        assert ev.is_set()
+    finally:
+        signal.signal(signal.SIGTERM, old)
+
+
+def test_a_slow_detector_counts_as_a_slow_camera():
+    """2.3 fixes a second (school 17:46): a fix counts as seen for 1.5 x the 90th-percentile gap; one long loss among
+    fast fixes does not stretch it; the old fixed 0.6 s on its switch."""
+    import safety_rules as SR
+    slow = [k * 0.43 for k in range(30)]
+    assert abs(SR.fresh_fix_s(slow) - 1.5 * 0.43) < 0.01
+    fast = [k * 0.1 for k in range(30)]
+    fast += [fast[-1] + 5.0 + k * 0.1 for k in range(10)]
+    assert SR.fresh_fix_s(fast) == SR.SURE_CAM_AGE_S
+    old = SR.FIX_GAP_RULE
+    try:
+        SR.FIX_GAP_RULE = "fixed"
+        assert SR.fresh_fix_s(slow) == SR.SURE_CAM_AGE_S
+    finally:
+        SR.FIX_GAP_RULE = old
+    assert abs(SR.between_fixes_cm(5.0, 0.43) - 0.1505) < 1e-6
+
+
+def test_pi_health_reads_throttle_flags_and_logs(tmp_path):
+    import pi_health as PH
+    th = tmp_path / "temp"
+    th.write_text("84012\n")
+    r = PH.read(run=lambda cmd: (0, "throttled=0x50005\n"), thermal=str(th))
+    assert r["temp_c"] == 84.0 and r["now"] == ["under-voltage", "throttled"]
+    assert r["since_boot"] == ["under-voltage", "throttled"]
+    lg = PH.Logger(str(tmp_path), run=lambda cmd: (0, "throttled=0x80008\n"), thermal=str(th))
+    lg.tick({"overhead": 421.0})
+    assert "soft temperature limit" in lg.words()
+    assert "overhead=421" in (tmp_path / "pi_health.csv").read_text()
+    assert PH.read(run=lambda cmd: (127, ""), thermal=str(tmp_path / "none"))["temp_c"] is None
+
+
+def test_measured_windows_are_smaller_and_lose_no_reads():
+    """detect_bench's finding as a test: standing tags in dim light, a picture every 0.43 s: the measured-speed window
+    reads every picture the full window reads, with fewer pixels searched; a robot that starts moving is still read."""
+    import tagcore as TC
+    import tag_cam as TCAM
+    cam = TCAM.TagCamera((-114.3, 83.8, 145.0), (150.0, 83.8, 0.0), size=(1280, 960), hfov_deg=70.4, seed=3,
+                         gain=0.3, noise=5.5, table=(0, 0, 396.2, 167.6))
+    pics, x = [], 60.0
+    for k in range(24):
+        if k >= 14:
+            x += 13.0 * 0.43
+        pics.append(cam.render([dict(x=x, y=100.0, th=0.0, z=6.0, family=TC.TAG_FAMILY, id=4, tag_cm=8.0, roof_cm=9.5,
+                                     vx=13.0 if k >= 14 else 0.0, vy=0.0)], t=k * 0.43))
+    res = {}
+    old = TC.ROI_RULE
+    try:
+        for rule in ("max", "measured"):
+            TC.ROI_RULE = rule
+            det = TC.TagDetector(TC.TAG_FAMILY, ids=[4])
+            halves = []
+            orig = det.detect_window
+            det.detect_window = lambda g, cx, cy, h, **kw: (halves.append(h), orig(g, cx, cy, h, **kw))[1]
+            trk = TC.WindowTracker(det, [4])
+            reads = [4 in trk.step(g, k * 0.43) for k, g in enumerate(pics)]
+            res[rule] = (reads, halves)
+    finally:
+        TC.ROI_RULE = old
+    assert res["measured"][0] == res["max"][0] and sum(res["max"][0]) >= 15
+    standing = lambda hs: sorted(hs)[len(hs) // 4]
+    assert standing(res["measured"][1]) < 0.7 * standing(res["max"][1])
+
+
+# ------------------------------------------------------------------- school 18:07: the card full, the USB drive empty
+def test_old_run_folders_move_to_the_usb_drive_never_deleted(tmp_path):
+    """Card under its floor, drive with room: finished run folders moved oldest first (copied, checked, a link left
+    where each was) until the card is above floor + margin; a folder written in the last 30 min (a running run) and
+    the session about to start are never moved; nothing outside logs/ is touched."""
+    import glob
+    import diskguard as DG
+    logs, drive = tmp_path / "logs", tmp_path / "usb"
+    logs.mkdir()
+    drive.mkdir()
+    now = time.time()
+    for k in range(6):
+        d = logs / ("2026111%d-1200-visit" % k)
+        (d / "run").mkdir(parents=True)
+        (d / "run" / "stops.csv").write_bytes(b"x" * 100_000)
+        (d / "perf.csv").write_bytes(b"y" * 100_000)
+        t = now - (6 - k) * 3600 * 5 if k < 5 else now - 60          # the last one: a running run
+        for f in [d / "perf.csv", d / "run" / "stops.csv", d / "run", d]:
+            os.utime(f, (t, t))
+    cfg = tmp_path / "conf"
+    cfg.mkdir()
+    (cfg / "calib_pool.json").write_text("{}")
+    moved_bytes = [0]
+    card = lambda: 0.0003 + moved_bytes[0] / 1e9                   # GB: 0.3 MB free, floor 0.5 MB
+    said = []
+
+    def out(s):
+        said.append(s)
+        if s.startswith("  moved "):
+            moved_bytes[0] += 200_000
+    keep = logs / "20261114-1200-visit"
+    moved = DG.move_old_runs(str(logs), str(drive), floor_gb=0.0005, now=now, out=out, keep=[str(keep)],
+                             card_free=card, drive_free=lambda: 50.0, check_fs=False)
+    names = [m[0] for m in moved]
+    assert names and names == sorted(names)                         # oldest first
+    assert "20261114-1200-visit" not in names and "20261115-1200-visit" not in names
+    for n in names:
+        link = logs / n
+        assert link.is_symlink() and (link / "run" / "stops.csv").read_bytes() == b"x" * 100_000
+        assert (drive / DG.MOVED_DIR / n / "moved_from.txt").exists()
+    assert (logs / "20261115-1200-visit").is_dir() and not (logs / "20261115-1200-visit").is_symlink()
+    assert glob.glob(str(logs / "*" / "run" / "stops.csv")).__len__() == 6         # every run still found
+    assert (logs / DG.MOVED_LOG).read_text().count("\n") == len(names) + 1
+    assert (cfg / "calib_pool.json").exists()
+    assert any("CARD LOW" in s for s in said) and any("Nothing is deleted" in s for s in said)
+    # the card above its floor: nothing moves (unless asked: space --move)
+    assert DG.move_old_runs(str(logs), str(drive), floor_gb=0.0001, now=now, out=said.append,
+                            card_free=lambda: 0.0003, drive_free=lambda: 50.0, check_fs=False) == []
+    # the drive too full: stops, nothing lost
+    logs2 = tmp_path / "logs2"
+    (logs2 / "a").mkdir(parents=True)
+    (logs2 / "a" / "f").write_bytes(b"z" * 1000)
+    os.utime(logs2 / "a" / "f", (now - 7200, now - 7200))
+    os.utime(logs2 / "a", (now - 7200, now - 7200))
+    assert DG.move_old_runs(str(logs2), str(drive), floor_gb=1.0, now=now, out=said.append, card_free=lambda: 0.1,
+                            drive_free=lambda: 1.0, check_fs=False) == []
+    assert (logs2 / "a" / "f").exists() and not (logs2 / "a").is_symlink()
+
+
+def test_move_switch_and_margin():
+    import diskguard as DG
+    now = 1e6
+    rows = [(now - 3 * DG.DAY_S, 10 * 10 ** 6, "a"), (now - 3600, 20 * 10 ** 6, "b"), (now - 600, 30 * 10 ** 6, "c")]
+    assert abs(DG.margin_gb(rows, now) - 0.04) < 1e-9            # median 20 MB x 2 runs today
+    old = os.environ.get("MIRLT_MOVE_RUNS")
+    os.environ["MIRLT_MOVE_RUNS"] = "0"
+    try:
+        assert DG.move_old_runs("/nonexistent", "/nonexistent", card_free=lambda: 0.0) == []
+    finally:
+        if old is None:
+            del os.environ["MIRLT_MOVE_RUNS"]
+        else:
+            os.environ["MIRLT_MOVE_RUNS"] = old

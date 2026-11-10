@@ -36,7 +36,7 @@ Position source (--fixes): where camera poses come from (data-formats.md,
 runs against it with --fixes udp; at the end it prints the simulator's ground
 truth: docking errors, closest robots, contact.
 """
-VERSION = "2026-11-10e14b"   # e14b: a dark picture pauses every robot until the camera has adjusted (dark_watch). e14: a visit point whose tag was lost on the way is moved to the end of the robot's list once, then skipped (defer_current_point; MIRLT_RETRY_LOST=again the old way); the spot where it was lost kept as evidence. 2026-11-10e13 (e13): never give up blind (no BLIND_MAX_CM cap: it stops only when blind error + body + stop could reach an edge; MIRLT_BLIND_RULE=cap the old caps); no pictures: each blind robot's risk-based limit (safety_rules.no_picture_limit; MIRLT_NOPIC_RULE=off: e12's rules alone).
+VERSION = "2026-11-10e14c"   # e14c (school 17:46): how old a fix may be and still count as seen comes from each robot's measured fix interval (blind_after; a slow detector treated like a slow camera; MIRLT_FIX_GAP_RULE=fixed the 0.6 s). e14b: a dark picture pauses every robot until the camera has adjusted (dark_watch). e14: a visit point whose tag was lost on the way is moved to the end of the robot's list once, then skipped (defer_current_point; MIRLT_RETRY_LOST=again the old way); the spot where it was lost kept as evidence. 2026-11-10e13 (e13): never give up blind (no BLIND_MAX_CM cap: it stops only when blind error + body + stop could reach an edge; MIRLT_BLIND_RULE=cap the old caps); no pictures: each blind robot's risk-based limit (safety_rules.no_picture_limit; MIRLT_NOPIC_RULE=off: e12's rules alone).
 VERSION_B = "2026-11-10b"   # 2026-11-10b (e12 item 9): a lock-only fix never resets a pose (MIRLT_LOCK_GUARD=0: as before); a dwell broken by a halt where the robot did not move keeps its start (MIRLT_DWELL_KEEP=0). 2026-11-10a (e12): the bridge's "camera" messages (no pictures / pictures again) said and logged. No version before
 LOCK_GUARD = __import__("os").environ.get("MIRLT_LOCK_GUARD", "1") != "0"
 DWELL_KEEP = __import__("os").environ.get("MIRLT_DWELL_KEEP", "1") != "0"
@@ -635,7 +635,7 @@ class Coordinator:
         p0 = getattr(b, "step_pose0", {}).get(i)
         wheel = math.hypot(b.pose[0] - p0[0], b.pose[1] - p0[1]) if (p0 and b.pose) else None
         h = getattr(b, "cam_hist", None) or []
-        moved, fresh = None, bool(h and getattr(b, "cam_t", None) is not None and t - b.cam_t <= self.BLIND_AFTER_S)
+        moved, fresh = None, bool(h and getattr(b, "cam_t", None) is not None and t - b.cam_t <= self.blind_after(b))
         if fresh:
             before = [q for q in h if q[1] <= st["t_started"]]
             q0 = before[-1] if before else h[0]
@@ -1210,7 +1210,7 @@ class Coordinator:
         for b in self.bots.values():
             if b.out or b.pose is None or getattr(b, "cam_t", None) is None:
                 continue
-            rm.add(b.pose[0], b.pose[1], t - b.cam_t <= self.BLIND_AFTER_S)
+            rm.add(b.pose[0], b.pose[1], t - b.cam_t <= self.blind_after(b))
 
     TRACK_EVERY_S = 0.2       # cam_track.csv: one camera pose per robot this often (the mapping view's lines)
     TRACK_LOST_S = 1.0        # chosen: no camera pose for this long = the tracker lost the robot (10 fixes missed at
@@ -1731,7 +1731,7 @@ class Coordinator:
         for b in self.bots.values():
             if b.out or b.pose is None or getattr(b, "last_cam", None) is None:
                 continue
-            fresh = t - (getattr(b, "cam_t", None) or -1e9) <= SR.SURE_CAM_AGE_S
+            fresh = t - (getattr(b, "cam_t", None) or -1e9) <= self.blind_after(b, SR.SURE_CAM_AGE_S)
             cam = b.last_cam
             dis = math.hypot(b.pose[0] - cam[0], b.pose[1] - cam[1]) if fresh else None
             if self.fp_live(b):
@@ -3001,7 +3001,7 @@ class Coordinator:
         cam, ct = getattr(b, "last_cam", None), getattr(b, "cam_t", None)
         f = self.m["floor"]
         others = [o.pose[:2] for o in self.bots.values() if o is not b and not o.out and o.pose is not None]
-        fresh = cam is not None and ct is not None and now() - ct <= self.BLIND_AFTER_S
+        fresh = cam is not None and ct is not None and now() - ct <= self.blind_after(b)
         how, L_, why_ = OB.back_out_plan(OB.BACK_OFF_CM, trail=getattr(b, "trail", None), bubble_cm=1.0,
                                          cam=(cam[0], cam[1], cam[2] if cam[2] is not None else th) if fresh else None,
                                          cam_age_s=0.0 if fresh else None,
@@ -3082,7 +3082,7 @@ class Coordinator:
             return True
         if bo["kind"] == "recover":
             self.log("recover_end", robot=b.name, result=state, info=info,
-                     seen=getattr(b, "cam_t", None) is not None and now() - b.cam_t <= self.BLIND_AFTER_S)
+                     seen=getattr(b, "cam_t", None) is not None and now() - b.cam_t <= self.blind_after(b))
             if state == "done" and getattr(b, "cam_t", None) is not None and now() - b.cam_t <= 1.5:
                 self.say("%s: seen again after its straight recovery: re-planning from where everyone is" % b.name)
                 self.handle_obstacle(None, cause=b.name)
@@ -3708,6 +3708,19 @@ class Coordinator:
         return ok, words
 
     # -- driving blind (Nick 2026-10-29 15:41, question 3b) -------------------------------------------------------
+    def blind_after(self, b, base=None):
+        """(e14, school 17:46: a slow tag detector in dim light, 2.3 fixes a second) How old this robot's newest fix may
+        be and it still counts as seen: from its MEASURED fix interval (safety_rules.fresh_fix_s: at least
+        BLIND_AFTER_S, else 1.5 x its longest recent gap between fix arrivals). MIRLT_FIX_GAP_RULE=fixed: 0.6 s."""
+        import safety_rules as SR
+        h = getattr(b, "cam_hist", None) or []
+        v = SR.fresh_fix_s([q[1] for q in h], self.BLIND_AFTER_S if base is None else base)
+        if v > (self.BLIND_AFTER_S if base is None else base) + 1e-6 and not getattr(b, "_slow_fix_said", False):
+            b._slow_fix_said = True
+            self.log("slow_fixes", robot=b.name, fresh_s=round(v, 2),
+                     words="fixes come slowly (the detector or camera): a fix counts as seen for %.2f s" % v)
+        return v
+
     BLIND_AFTER_S = 0.6       # no camera fix for this long = no camera sees it (fixes come ~10 a second; the longest
                               # gap in any 29 Oct drive was 0.57 s, rules audit; 0.4 s gave spurious blind starts on
                               # a loaded dry-run machine). No DOE: a definition
@@ -3751,7 +3764,7 @@ class Coordinator:
                 continue                       # (11-05h) a robot recovering / backing off is handled by its report
             ct = getattr(b, "cam_t", None)
             bl = getattr(b, "blind", None)
-            if ct is not None and t - ct <= self.BLIND_AFTER_S:
+            if ct is not None and t - ct <= self.blind_after(b):
                 if bl is not None:
                     b.blind = None
                     self.blind_end(b, bl)

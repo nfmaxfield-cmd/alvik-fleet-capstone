@@ -18,7 +18,7 @@ import sys
 import threading
 import time
 
-VERSION = "2026-11-10a"
+VERSION = "2026-11-10e14"   # e14 (school 17:46): stop_on_signals / quiet_shutdown: a SIGTERM sets a flag and is never raised (a KeyboardInterrupt raised inside w.join while native detector threads ran ended in "terminate called without an active exception"); MIRLT_SIGTERM_RAISE=1 the old raise. 2026-11-10a (e12): finish()
 WAIT_S = 3.0      # chosen: longer than one picture's detection on a Pi 4 (about 0.1-1 s). No DOE (a shutdown wait)
 
 
@@ -50,3 +50,37 @@ def finish(code=0, wait_s=WAIT_S, log=None):
         except Exception:  # noqa: BLE001
             pass
     os._exit(code)
+
+
+def stop_on_signals(names=("SIGTERM",)):
+    """(e14, school 17:46: `timeout 60 tag_bridge.py`) The signals named set a flag; nothing is raised. The old handler
+    raised KeyboardInterrupt from a generator lambda, wherever the main thread happened to be: once it landed inside
+    w.join(timeout=8) while the native detector threads still ran, and the process ended in a C++ abort ("terminate
+    called without an active exception"). The program's main loop checks the returned Event and leaves through its own
+    orderly path. Switch MIRLT_SIGTERM_RAISE=1: the old raise (kept, off)."""
+    import signal
+    ev = threading.Event()
+    if os.environ.get("MIRLT_SIGTERM_RAISE", "0") == "1":
+        def _raise(*_):
+            raise KeyboardInterrupt()
+        for n in names:
+            signal.signal(getattr(signal, n), _raise)
+        return ev
+    for n in names:
+        signal.signal(getattr(signal, n), lambda *_: ev.set())
+    return ev
+
+
+def quiet_shutdown(ev=None):
+    """(e14) Called first thing on the way out: from now on SIGTERM and Ctrl+C only set the flag, so nothing can be
+    raised inside a thread join or a file close while the shutdown runs."""
+    import signal
+    ev = ev if ev is not None else threading.Event()
+    if threading.current_thread() is not threading.main_thread() or os.environ.get("MIRLT_SIGTERM_RAISE", "0") == "1":
+        return ev
+    for n in ("SIGTERM", "SIGINT"):
+        try:
+            signal.signal(getattr(signal, n), lambda *_: ev.set())
+        except (ValueError, OSError):
+            pass
+    return ev

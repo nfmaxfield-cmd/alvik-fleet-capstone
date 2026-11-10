@@ -697,6 +697,10 @@ check of the derived rule.
 | The exposure nudge's caps (camera_exposure EXPOSURE_MAX_X, GAIN_UP) | 8x, 1.5x, CHOSEN | yes, with the row above (motion blur against reads) | Board | open |
 | A leg's weight by age in the calibration pool (calib_pool AGE_HALF_DAYS) | 7 days, CHOSEN | yes (Logs): the same robot's fits a day, a week and a month apart | Logs | open |
 | A calibration started under this battery is marked "low-battery" (calib_run LOW_BATTERY_NOTE_PCT) | 40 %, CHOSEN (the coordinator's) | yes (Board): the calibration against battery (90 / 60 / 35 %, one robot, the same day): do wheel_scale and gyro_scale move with battery? | Board | open |
+| A run's legs weighted by its own scatter once over this many times the typical run's (calib_pool NOISY_X); legs over this many sigmas dropped (OUTLIER_K) | 2x, 5 sigma, CHOSEN (school 17:02: wheel 0.73 +- 0.20) | yes (Logs): the pooled fit against leave-one-run-out, once a few real runs are pooled | Logs | open |
+| A fix counts as seen for 1.5 x this percentile of the robot's recent gaps between fixes (safety_rules FIX_GAP_PCT; FIX_GAP_FACTOR from e13) | 90th, CHOSEN | yes (Logs): fixes.csv of the school's dim and lit runs: the seen-time against spurious "blind" starts and late real ones | Logs | open |
+| A tag's window allows its own measured speed x this, at least this (tagcore ROI_SPEED_X, ROI_MIN_PX_S; a miss searched again full size) | 3x, 40 px/s, CHOSEN; default on (detect_bench, simulator: dim 373 -> 58 ms a picture, lit 39 -> 14, the same reads) | yes (Board): detect_bench --frames on saved school pictures, then a dim Visit run: ms a picture and fixes a second with MIRLT_TAG_ROI=max / measured | Board | open |
+| Detection speed-ups NOT switched on (detect_bench): a dim picture's whole-picture search on a half-size picture (lost the tag), smoothing each search area (5x faster but lost the mid-range tags in dim light), OpenCV on one thread (slower on this 2-core machine) | measured in the simulator only | yes (Board): detect_bench on the school Pi, cool and throttled (pi_health.csv), with saved frames | Board | open |
 
 ## Already set by data
 
