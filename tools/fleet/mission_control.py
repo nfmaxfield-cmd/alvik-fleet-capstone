@@ -1494,6 +1494,8 @@ class Handler(BaseHTTPRequestHandler):
                         return self._send(200, clean(T.set_corner_clicks(bool(d.get("on")))))
                     if path == "/api/tags/checkout":
                         return self._send(200, clean(T.checkout(conn)))
+                    if path == "/api/tags/corners_confirm":      # (e13) the person confirmed the corners found
+                        return self._send(200, clean(T.confirm_corners(d.get("corners") or {})))
                     if path == "/api/tags/measure":
                         r = T.measure(conn)
                         return self._send(200, clean(dict(r, state=S.state())))
@@ -1589,7 +1591,7 @@ def detect_where(SD, sim_room=""):
 
 
 # ---------------------------------------------------------------------------------------------- (e12) new code after git pull
-VERSION = "2026-11-10a"   # 2026-11-10a (e12, Nick 10 Nov): notices its own code changed after `git pull` and offers a
+VERSION = "2026-11-10e13"   # 2026-11-10e13 (e13): /api/tags/corners_confirm (the corner tags pre-fill, the person confirms); the needs-a-hand box. 2026-11-10a (e12, Nick 10 Nov): notices its own code changed after `git pull` and offers a
                           # restart on the page when no run is going (never mid-run). No version string before
 CODE_CHECK_S = 5.0        # chosen: how often the code is looked at (a git call and a few hundred stat calls). No DOE
 

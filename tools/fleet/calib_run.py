@@ -61,7 +61,8 @@ for p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recognit
 
 import numpy as np   # noqa: E402
 
-VERSION = "2026-11-10g"     # 11-10g: a standing robot is never given up for sparse tag reads: it is measured over longer windows (Nick 13:34; dim light). 11-10f: the start waits for the camera fix after the wiggle (dim light, ~7 fps: refused at once, school 13:25). 11-10e: a run ended for poor tag reads DOES try to park again (Nick 12:48: never give up on getting back to where it is seen); it drives only with a camera fix (cam_pose_sure waits for one). 11-10d: no crash parking with no camera fix (RunEnd, caught: "Could not park"). 11-10c: Phase A waits for the camera fix instead of crashing on None (school 12:35). 11-10b (e12, Nick 10 Nov): the curve phase (phase R: constant-curvature arcs left and right at free roam's radii and two speeds, fitted from the camera, arc_k_scale / arc_d_scale saved when they agree; --arc-phase auto/on/off), points in your order (--visit-order), the proven workspace for the tours' room, the camera self-check at the start. VERSION_10A was:
+VERSION = "2026-11-10e13"   # 11-10e13 (e13): the camera check before binding (camera_feed: no pictures is said as that, never the robot or tag); tracked for the sleep after a run.
+VERSION_10G = "2026-11-10g"     # 11-10g: a standing robot is never given up for sparse tag reads: it is measured over longer windows (Nick 13:34; dim light). 11-10f: the start waits for the camera fix after the wiggle (dim light, ~7 fps: refused at once, school 13:25). 11-10e: a run ended for poor tag reads DOES try to park again (Nick 12:48: never give up on getting back to where it is seen); it drives only with a camera fix (cam_pose_sure waits for one). 11-10d: no crash parking with no camera fix (RunEnd, caught: "Could not park"). 11-10c: Phase A waits for the camera fix instead of crashing on None (school 12:35). 11-10b (e12, Nick 10 Nov): the curve phase (phase R: constant-curvature arcs left and right at free roam's radii and two speeds, fitted from the camera, arc_k_scale / arc_d_scale saved when they agree; --arc-phase auto/on/off), points in your order (--visit-order), the proven workspace for the tours' room, the camera self-check at the start. VERSION_10A was:
 VERSION_10A = "2026-11-10a"     # 11-10a: a leftover camera reader holding port 5011 is stopped first (stale_bridge.py). 11-05i (9 Nov, school): a tripped stop mid-tour crashed the run (TypeError: ev() got two
                              # values for kind); the trip event now says stop_kind. VERSION_H was:
 VERSION_H = "2026-11-05h"     # 11-05h: stop lead per speed (school 19:34: the scale fit was right; a fixed ~0.3 / 0.5 cm
@@ -607,6 +608,7 @@ class Eye:
         self.hist = {}
         self.lock = threading.Lock()
         self.stop_ = threading.Event()
+        self.folder = folder               # (e13) the bridge's frames.json is in folder/bridge
         self.f = open(os.path.join(folder, "camera_track.csv"), "w", newline="")
         self.w = csv.writer(self.f)
         self.w.writerow(["t", "tag_id", "x_cm", "y_cm", "th_deg", "sigma_cm", "source"])
@@ -900,6 +902,22 @@ class SimEye(Eye):
 
 
 # =============================================================================================== binding
+def feed_refusal(eye, wait_s=None):
+    """(e13, the 10 Nov 11:48 school calibration: 16 s of no pictures was reported as "no roof tag is seen ... check
+    the robot") Before blaming a robot or a tag: does every camera send new pictures (camera_feed.check on the
+    bridge's frames.json)? If not: BindError with the camera's plain words. A simulated eye (no bridge) is not
+    checked."""
+    import camera_feed as CF
+    folder = getattr(eye, "folder", None)
+    bd = os.path.join(folder, "bridge") if folder else None
+    if isinstance(eye, SimEye) or not bd or not os.path.isdir(bd):
+        return
+    ok, words, _d = CF.check(bd, wait_s=CF.WAIT_S if wait_s is None else wait_s)
+    if not ok:
+        raise BindError(words)
+    say(words)
+
+
 def bind_by_wiggle(robots, eye, wiggle_deg=90.0, pause_s=1.0, log=say, moved_deg=None, expect=None, check_deg=None,
                    notes=None):
     """Each robot (in turn) does the sync wiggle; the tag whose heading follows it is bound. {name: tag id} or raises
@@ -922,6 +940,7 @@ def bind_by_wiggle(robots, eye, wiggle_deg=90.0, pause_s=1.0, log=say, moved_deg
             if rs:
                 before[i] = rs[-1][3]
         if not before:
+            feed_refusal(eye)                  # (e13) a camera sending no pictures is said as that, never the robot's
             raise BindError("no roof tag is seen by the camera (nothing to bind %s to). Check that the robot is in "
                             "zones 1-2 and its tag faces up, and that the camera's picture is sharp." % rb.name)
         r1 = rb.leg("turn", wiggle_deg_)
@@ -3455,6 +3474,11 @@ def main(argv=None):
             procs.append(bp)
             cam_c = cam_centre_from_model(cal)
             eye_factory = lambda: Eye(folder, FIX_PORT)    # noqa: E731
+            import camera_feed as CF     # (e13) every camera sending new pictures, before anything binds or moves
+            ok_, words_ = CF.check(os.path.join(folder, "bridge"))[:2]
+            say(("CAMERA CHECK: " if ok_ else "NOT STARTED: ") + words_)
+            if not ok_:
+                raise RunEnd(words_)
         run.cam_centre, run.tag_h = cam_c, tag_h
         run.set_status(cam_centre=cam_c, tag_h=tag_h, sim_true=getattr(run, "sim_true", None))
         result = run.run(eye_factory)
@@ -3512,4 +3536,7 @@ def set_focus(dev="/dev/video0"):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    import idle_after_run as IA     # (e13) robots asleep 10 min after the run ends if no new run starts
+    with IA.track("calib"):
+        _rc = main()
+    sys.exit(_rc)

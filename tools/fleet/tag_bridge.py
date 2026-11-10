@@ -34,7 +34,8 @@ Writes to --out: track.csv (as cam_bridge's, for line_check.py), tag_poses.csv (
 sigma, size check, picture position), tag_obs.csv (every read's corners: the site fit's input), ref_watch.csv,
 events.jsonl, bridge_summary.json.
 """
-VERSION = "2026-11-10a"   # 2026-11-10a (e12): frame_watch (no pictures from a camera: said loudly, an event, a message to the run); workers joined before the summary; orderly exit. No version string before
+VERSION = "2026-11-10e13"   # 2026-11-10e13 (e13): frames.json (new pictures per camera, reference tags read) for the camera check before binding (camera_feed.py).
+VERSION_A = "2026-11-10a"   # 2026-11-10a (e12): frame_watch (no pictures from a camera: said loudly, an event, a message to the run); workers joined before the summary; orderly exit. No version string before
 
 import argparse
 import csv
@@ -282,6 +283,9 @@ class Bridge:
                 self.motion = None
                 self.event("motion_error", why="the motion detector could not start: %s" % e)
         self.frames = {c: 0 for c in cams}
+        import camera_feed as CF      # (e13) new pictures per camera (frames.json): checked before any binding
+        self.feed = CF.FeedStats(out, list(cams))
+        self.ml = None                # (e13) the trained detector (ml_init; off by default)
         self.ms = {c: [] for c in cams}
         self.spread = []
         self.status_t = 0.0
@@ -391,6 +395,8 @@ class Bridge:
         if w is None or not w.due(t):
             return None
         med, shifts, verdict = w.check(grey, t)
+        if shifts:
+            self.feed.ref_read(cam_name, len(shifts))     # (e13) reference tags read: the camera is live
         self.refw_w.writerow(["%.3f" % t, cam_name, " ".join(sorted(shifts, key=int)),
                               "" if med is None else "%.2f" % med,
                               "" if not shifts else "%.2f" % max(shifts.values()), verdict or "unseen"])
@@ -451,6 +457,10 @@ class Bridge:
         """One camera's picture (t: when it was taken, Pi clock)."""
         self.frames[cam_name] += 1
         try:
+            self.feed.saw(cam_name, grey, t)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
             self.light_check(cam_name, grey, t)
         except Exception:  # noqa: BLE001  (the brightness log never stops the fixes)
             pass
@@ -498,7 +508,54 @@ class Bridge:
             self.motion_step(cam_name, grey, t, {n for n, _, u in out if u == "yes"}, out)
         except Exception as e:      # noqa: BLE001  (the motion detector never stops the tags' fixes)
             self.event("motion_error", cam=cam_name, why=str(e))
+        try:
+            self.ml_step(cam_name, grey, t)
+        except Exception as e:      # noqa: BLE001  (the trained detector never stops the tags' fixes)
+            self.event("ml_error", cam=cam_name, why=str(e))
         return out
+
+    # -- (e13) the trained detector as one more source: OFF until a trained model exists -------------------------------
+    ML_EVERY = 3            # every 3rd overhead picture (10-15 a second -> 3-5 detector passes a second; the Pi model's
+                            # ~10-25 ms a pass, estimated: docs/how-to/train-detector.md). CHOSEN; no DOE (a load cap)
+
+    def ml_init(self, conf_dir=None):
+        """MIRLT_ML_DETECTOR: "0"/unset = off (the default); "1" or "auto" = on when the trained model exists at
+        <conf dir>/detector/best.onnx (or MIRLT_ML_MODEL); said either way."""
+        self.ml = None
+        sw = os.environ.get("MIRLT_ML_DETECTOR", "0")
+        if sw not in ("1", "auto"):
+            return None
+        p = os.environ.get("MIRLT_ML_MODEL") or os.path.join(os.path.expanduser(
+            conf_dir or os.environ.get("MIRLT_CONF_DIR") or "~/.config/mirlt"), "detector", "best.onnx")
+        if not os.path.exists(p):
+            self.say("trained detector: no model at %s: not used (train it: docs/how-to/train-detector.md)" % p)
+            return None
+        sys.path.insert(0, os.path.join(os.path.dirname(HERE), "detector"))
+        import infer as INF
+        self.ml = INF.load(p)
+        self.ml_n = 0
+        self.say("trained detector ON: %s (one more source, named by the tracking layer)" % p)
+        self.event("ml_on", model=p)
+        return self.ml
+
+    def ml_step(self, cam_name, grey, t):
+        if getattr(self, "ml", None) is None or cam_name != (self.motion_cam or "overhead"):
+            return
+        self.ml_n += 1
+        if self.ml_n % self.ML_EVERY:
+            return
+        import cv2 as cv2_
+        import infer as INF
+        cam = self.cams[cam_name]
+        H = float(self.tags["height_cm"])
+        for d in INF.predict(self.ml, cv2_.cvtColor(grey, cv2_.COLOR_GRAY2BGR)):
+            if d.get("cls") != "alvik":
+                continue
+            x, y = cam.to_floor(float(d["x"]), float(d["y"]), H)
+            if not (np.isfinite(x) and np.isfinite(y)):
+                continue
+            self.send({"type": "fix", "robot": None, "t": round(t, 4), "x": round(float(x), 2), "y": round(float(y), 2),
+                       "th": None, "sigma": 1.5, "src": "tag_bridge:ml", "score": round(float(d.get("score", 0)), 3)})
 
     LOCK_STILL_S = 0.4      # CHOSEN: its own pose has not moved this long: standing still, its look can be taken
 
@@ -599,6 +656,7 @@ class Bridge:
                                  "%.2f" % sth, f.cam, "%.2f" % spread])
 
     def status(self, t):
+        self.feed.write()                  # (e13) frames.json about once a second, pictures or not
         if time.time() - self.status_t < STATUS_EVERY_S:
             return
         self.status_t = time.time()
@@ -724,6 +782,7 @@ def main(argv=None):
                 lock=not a.no_lock and os.environ.get("MIRLT_TAG_LOCK", "1") != "0",   # (e10) Mission Control preferences
                 motion=not a.no_motion and os.environ.get("MIRLT_TAG_MOTION", "1") != "0",
                 board=[float(v) for v in a.board.split(",")] if a.board else None)
+    br.ml_init()                       # (e13) the trained detector: off unless MIRLT_ML_DETECTOR=1/auto and a model
     print("Tag bridge: %s tags (%s cm, %s cm up) on %s; cameras %s; fixes to %s%s. Logs: %s" % (
         tags.get("family"), tags.get("tag_cm"), tags.get("height_cm"),
         ", ".join("%s=%d" % kv for kv in tags["ids"].items()), ", ".join(models), a.to,

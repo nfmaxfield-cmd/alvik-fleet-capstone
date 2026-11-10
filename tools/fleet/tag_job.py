@@ -16,6 +16,7 @@
   production  production.program from the orders; planned like any program (missions.build, the 8 cm net)
   sync        the session id, the Pi's clock status, Start / End marks, the pose timeline, the comparison
 """
+VERSION = "tag-job-2026-11-10e13"   # e13: corner tags pre-fill the corners, confirmed by the person (corner_confirm; MIRLT_CORNER_CONFIRM=auto: as before); Measure works with no roof tag when the corners are known. No version string before
 import copy
 import json
 import os
@@ -251,7 +252,43 @@ class TagJob:
         return os.path.join(self.s.dir, "practice-room", "tagcal")
 
     # -- measure ----------------------------------------------------------------------------------------------
-    def measure(self, conn):
+    # -- (e13) corner tags pre-fill the corner clicks; the person confirms them ----------------------------------
+    def corner_confirm_mode(self):
+        """"confirm" (e13, Nick 10 Nov: the corner tags PRE-FILL the corners and the person confirms them on the picture)
+        or "auto" (before e13: the corner tags used with no confirm). MIRLT_CORNER_CONFIRM, else the site's
+        corner_confirm, else confirm. The camera self-check's refit at a run's start passes confirm=False (nobody is
+        at the page then; it is the old automatic way, as before)."""
+        return os.environ.get("MIRLT_CORNER_CONFIRM") or str(self.site.get("corner_confirm") or "confirm")
+
+    def corners_from_refs(self, refs):
+        """{camera: {"1": [u, v], ...}}: the corner tiles' middles (ref_tags CORNER_IDS: ids 20-23 = corners 1-4)."""
+        import numpy as np
+        cids = {str(v): k for k, v in ((self.ref_cfg or {}).get("corners") or {}).items()}
+        out = {}
+        for c, got in (refs or {}).items():
+            for i, cs in got.items():
+                if str(i) in cids:
+                    out.setdefault(c, {})[str(cids[str(i)])] = [round(float(v), 1) for v in np.mean(np.asarray(cs), 0)]
+        return out
+
+    def confirm_corners(self, proposal):
+        """The person confirmed the corners found (the proposal as shown): kept; the next Measure uses them."""
+        self.d["corners_ok"] = {"corners": proposal, "t": time.time()}
+        self.save()
+        return {"confirmed": True}
+
+    def _confirmed(self, proposal, tol_px=6.0):
+        ok = (self.d.get("corners_ok") or {}).get("corners") or {}
+        if not ok or set(ok) != set(proposal):
+            return False
+        for c, pts in proposal.items():
+            for k, uv in pts.items():
+                q = (ok.get(c) or {}).get(k)
+                if q is None or abs(q[0] - uv[0]) > tol_px or abs(q[1] - uv[1]) > tol_px:
+                    return False
+        return True
+
+    def measure(self, conn, confirm=None):
         import tag_setup as TSU
         import production as PR
         streams = self.streams(conn)
@@ -261,9 +298,20 @@ class TagJob:
         if self.ref_cfg:
             import ref_tags as RT
             refs = RT.read_refs(pics, self.ref_cfg)
-        if not reads and not (refs and any(refs.values())):
-            raise ValueError("no robot's tag was read: put the robots on the table where both cameras see them (their "
-                             "homes near the middle), check the camera check-out, then Measure again")
+        clicked = any(((self.d["clicks"].get(c) or {}).get("corners")) for c in self.d["clicks"])
+        if not reads and not (refs and any(refs.values())) and not clicked:
+            # (e13) no roof tags is not a refusal when the corners are known (reference tags or clicks)
+            raise ValueError("no robot's tag and no reference tag was read, and no corner is clicked: click the "
+                             "table's corners in the pictures (or put the reference tiles out), then Measure again")
+        if confirm is None:
+            confirm = self.corner_confirm_mode() == "confirm"
+        prop = self.corners_from_refs(refs) if (refs and any(refs.values())) else {}
+        if confirm and prop and not self.corner_clicks_on() and not self._confirmed(prop):
+            self.d["corners_proposed"] = {"corners": prop, "t": time.time(), "conn": conn}
+            self.save()
+            return {"confirm_corners": prop, "words": [
+                "The corner tags were found: check that each numbered dot sits on the table's corner in the picture, "
+                "then press 'These are the corners' (or click them yourself)."]}
         sizes = {c: [int(p[-1][1].shape[1]), int(p[-1][1].shape[0])] for c, p in pics.items() if p}
         if self.corner_clicks_on():
             corners = {c: dict((self.d["clicks"].get(c) or {}).get("corners") or {}) for c in sizes}

@@ -8,6 +8,7 @@ Used by the sizing tests (tools/fleet/tag_sizing.py), the camera check-out's tes
 (tools/sim/fleet_sim.py --tag-cams), so the real detector (tools/fleet/tagcore.py) reads every simulated picture.
 The camera's true model (tools/recognition/cameras.py's CameraModel) is what a perfect setup would measure.
 """
+VERSION = "tag-cam-2026-11-10e13"   # e13: cfg plain_roofs (robots with no roof tag). No version string before
 import math
 import os
 import sys
@@ -489,6 +490,9 @@ def serve_live(sim, cfg, out_dir):
                                 "started" % (c.name, float(b.get("deg", 1.0)), b.get("axis", "x"), rel))
                 b["done"] = True
         covered = set()
+        pr = cfg.get("plain_roofs")             # (e13) robots with NO roof tag (a plain white roof) for the whole run
+        if pr:
+            covered |= {ids[n_] for n_ in (ids if pr is True else pr) if n_ in ids}
         for g in cfg.get("gaps") or []:
             if g["t"] <= rel < g["t"] + g["dur"] and g["robot"] in ids:
                 covered.add(ids[g["robot"]])

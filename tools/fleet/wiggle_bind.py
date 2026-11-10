@@ -47,7 +47,8 @@ for p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recognit
 
 import calib_run as CR   # noqa: E402
 
-VERSION = "2026-11-09a"
+VERSION = "2026-11-10e13"   # e13: the camera check (camera_feed) before binding; camera discovery hook
+VERSION_A = "2026-11-09a"
 say = CR.say
 
 
@@ -353,6 +354,7 @@ def run_for_mission(site, slots, folder, stream="127.0.0.1:8000", calib="", ips=
         link = CR.Link(folder)
         eye = CR.Eye(folder, CR.FIX_PORT)
         time.sleep(2.0)
+        CR.feed_refusal(eye)        # (e13) every camera sending new pictures before the binding blames anything else
         return bind_for_run(site, slots, link, eye, ips=ips, folder=folder, log=log, rename_ok=rename_ok,
                             use_pins=use_pins)
     finally:

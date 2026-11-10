@@ -702,6 +702,15 @@ function checkoutCard() {
   return `<div class="card ${c && c.verdict !== "PASS" ? "warnc" : ""}"><div class="between"><h2>Camera check-out</h2><button class="b" id="cogo">Check the cameras</button></div>
     <p class="small muted">Each camera: picture size and rate, sharpness (a tag's edge width), exposure (washed out? the tag's black against white), how much of the table it sees, and whether a tag is big enough to read at the farthest point it covers (from the sizing tests: 2.9 px a cell).</p>${rows}</div>`;
 }
+// (e13, Nick 10 Nov) the corner tags PRE-FILL the corners; the person confirms them on the picture before Measure fits
+let cornerProp = null;
+function cornerConfirmCard() {
+  const cams = Object.keys(cornerProp || {});
+  return `<div class="card warnc" id="corncard"><h2>Are these the table's corners?</h2>
+    <p class="small" style="margin:4px 0 8px">The corner tags were found. Each numbered dot should sit on that corner of the table (1 is 0,0; 1 to 2 along the length; 1-2-3-4 round counter-clockwise seen from above). Nothing is measured until you confirm.</p>
+    <div class="row" style="align-items:flex-start">${cams.map(c => `<figure style="margin:0;flex:1 1 320px"><div style="position:relative;line-height:0"><img class="cornpic" src="/api/tags/picture?cam=${c}&t=${tagStamp}" alt="${esc(c)} camera picture with the corners found" style="width:100%;border-radius:8px;display:block"><svg viewBox="0 0 1280 960" preserveAspectRatio="none" style="position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none">${Object.entries(cornerProp[c]).map(([k, uv]) => `<circle cx="${uv[0]}" cy="${uv[1]}" r="26" fill="none" stroke="#e8590c" stroke-width="8"/><text x="${uv[0] + 30}" y="${uv[1] - 20}" font-size="64" font-weight="700" fill="#e8590c">${esc(k)}</text>`).join("")}</svg></div><figcaption class="small muted">${esc(c)}: corners ${esc(Object.keys(cornerProp[c]).join(", "))} found</figcaption></figure>`).join("")}</div>
+    <div class="row" style="margin-top:10px"><button class="p" id="cornok">These are the corners: measure</button><button class="b" id="cornno">No: I will click them</button></div></div>`;
+}
 function tagPicCard(cam) {
   const T = tagState(), cl = (T.clicks || {})[cam] || {corners: {}, stickers: {}}, have = (T.pictures || {})[cam];
   const lab = (S.site.cameras || {})[cam] || cam;
@@ -762,7 +771,7 @@ function camerasTable() {
       <label class="lbl">number <input id="tlabel" class="n" value="${esc(tagPick.label)}"></label><span class="small muted">(the number goes up by one after each sticker)</span></div>
       <label class="lbl small" style="margin-top:6px"><input type="checkbox" id="tcc" ${cc ? "checked" : ""}> Click the corners by hand too ${rc ? "(off at this site: the reference tags give them; on adds your clicks as extra evidence)" : ""}</label></div>
     <div class="row" style="align-items:flex-start">${["overhead", "side"].map(c => `<div style="flex:1 1 360px">${tagPicCard(c)}</div>`).join("")}</div>`,
-    `<div class="card"><h2>Measure</h2><p class="small muted">Reads ${rc ? "the reference tags on the table and " : ""}the robots' tags (${esc(tags.family || "")}, ${tags.tag_cm || "?"} cm, roof ${tags.height_cm != null ? tags.height_cm + " cm up" : "<b style='color:var(--red)'>height not measured yet</b>"}), fits both cameras, the table's size and every sticker's spot, and makes the workspace: the table, the stickers as production points, the homes${rc ? ", the reference tiles as keep-out areas" : ""}.</p>
+    `${cornerProp ? cornerConfirmCard() : ""}<div class="card"><h2>Measure</h2><p class="small muted">Reads ${rc ? "the reference tags on the table and " : ""}the robots' tags (${esc(tags.family || "")}, ${tags.tag_cm || "?"} cm, roof ${tags.height_cm != null ? tags.height_cm + " cm up" : "<b style='color:var(--red)'>height not measured yet</b>"}), fits both cameras, the table's size and every sticker's spot, and makes the workspace: the table, the stickers as production points, the homes${rc ? ", the reference tiles as keep-out areas" : ""}.</p>
       <button class="p" id="tmeasure">Measure</button>
       ${r ? `<div style="margin-top:10px"><div class="kpis"><div class="kpi"><b>${r.size_cm[0].toFixed(1)} x ${r.size_cm[1].toFixed(1)}</b><span>table (cm)</span></div><div class="kpi"><b>${Object.keys(r.stickers || {}).length}</b><span>production points</span></div><div class="kpi"><b>${r.reads}</b><span>tag reads</span></div></div>
         ${roofCard(r.roof_tags)}
@@ -797,7 +806,10 @@ function camerasTable() {
     const along = {}; if (rc) Object.values(rc.sides || {}).forEach(v => { if ($("tal_" + v) && $("tal_" + v).value.trim()) along[v] = +$("tal_" + v).value; });
     try { S.tag.typed = await api("/api/tags/typed", {table: {length_cm: $("tl").value, width_cm: $("tw").value}, stickers: stk, distances: dist, along}); flash("Saved"); render(); } catch (e) { flash(e.message, true); } };
   $("tcc").onchange = async () => { try { await api("/api/tags/corner_clicks", {on: $("tcc").checked}); await load(); } catch (e) { flash(e.message, true); } };
-  $("tmeasure").onclick = async () => { $("tmeasure").disabled = true; $("tmeasure").textContent = "Measuring (about 10-30 s)..."; try { const r = await api("/api/tags/measure", {conn}); S = r.state; Object.assign(COL, S.site.colours || {}); done.add(7); render(); } catch (e) { flash(e.message, true); render(); } };
+  $("tmeasure").onclick = async () => { $("tmeasure").disabled = true; $("tmeasure").textContent = "Measuring (about 10-30 s)..."; try { const r = await api("/api/tags/measure", {conn}); S = r.state; Object.assign(COL, S.site.colours || {}); if (r.confirm_corners) { cornerProp = r.confirm_corners; tagStamp = Date.now(); } else { cornerProp = null; done.add(7); } render(); } catch (e) { flash(e.message, true); render(); } };
+  if ($("cornok")) $("cornok").onclick = async () => { try { await api("/api/tags/corners_confirm", {corners: cornerProp}); cornerProp = null; $("tmeasure").click(); } catch (e) { flash(e.message, true); } };
+  if ($("cornno")) $("cornno").onclick = async () => { try { await api("/api/tags/corner_clicks", {on: true}); cornerProp = null; flash("Click the 4 corners in each picture, then Measure"); await load(); } catch (e) { flash(e.message, true); } };
+  document.querySelectorAll("img.cornpic").forEach(im => { im.onload = () => { const sv = im.nextElementSibling; if (sv) sv.setAttribute("viewBox", `0 0 ${im.naturalWidth} ${im.naturalHeight}`); }; });
   $("trefit").onclick = async () => { try { S.tag.refit = await api("/api/tags/refit", {}); if (S.tag.refit.running) await load(); else render(); } catch (e) { flash(e.message, true); } };
   wireRefit();
   $("tuse").onclick = async () => { try { S.tag.refit = await api("/api/tags/refit", {use: true}); flash("The refit's camera models are in use from the next run"); render(); } catch (e) { flash(e.message, true); } };
@@ -1095,6 +1107,7 @@ function startScreen() {
   const bigs = `<div class="bigs">${T.buttons.map(b => `<button data-run="${b.kind}" ${(!b.ok || going) ? "disabled" : ""} title="${esc(b.ok ? b.sub : b.why)}"><b>${esc(b.title)}</b><span>${esc(b.ok ? b.sub : b.why)}</span></button>`).join("")}</div>`;
   const stat = st.kind ? `<div class="card statusbox"><div class="between"><h2>${esc(st.title)}${st.practice ? " (practice)" : ""}</h2><span class="muted small">${st.elapsed_s != null ? fmt(st.elapsed_s) : ""}</span></div>
     <p style="margin:6px 0;font-size:15px">${esc(st.words || "")}${st.points ? " Points done: " + esc(String(st.points)) + "." : ""}</p>
+    ${(st.needs_hand || []).length ? `<div class="corners needhand" style="border-color:var(--red);color:var(--red)"><b>A robot at the table's edge needs a hand now: move it a hand's width onto the board and it rejoins by itself</b>${st.needs_hand.map(w => `<p style="margin:6px 0">${esc(w)}</p>`).join("")}</div>` : ""}
     ${(st.edge_parked || []).length ? `<div class="corners" style="border-color:var(--red);color:var(--red)"><b>A robot was left at the table's edge: someone must move it before the next run</b>${st.edge_parked.map(w => `<p style="margin:6px 0">${esc(w)}</p>`).join("")}</div>` : ""}
     ${(st.questions || []).map(q => `<div class="corners question" data-q="${esc(q.id)}"><b>A question from the run (${esc(q.robot)} is held until you answer)</b><p style="margin:6px 0 12px">${esc(q.text)}</p><div class="row">${(q.choices || []).map(c => `<button class="p" data-qid="${esc(q.id)}" data-choice="${esc(c)}">${esc(c)}</button>`).join(" ")}</div></div>`).join("")}
     ${(st.lines || []).length ? `<div class="log" style="max-height:180px">${esc(st.lines.join("\n"))}</div>` : ""}

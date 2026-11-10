@@ -32,7 +32,7 @@ Ctrl+C stops every robot (run_plan's own stop). Free space (diskguard.py, 2026-1
 under its floor; frame saving stops under the frames' floor; under the card's floor during the run, run_plan is sent
 Ctrl+C (every robot stops) and the run ends as it would on Ctrl+C, with the upload.
 """
-VERSION = "2026-11-10a"   # 2026-11-10a (e12): the camera self-check at the start of a tags run (camera_selfcheck.py; --no-camera-check). No version string before
+VERSION = "2026-11-10e13"   # 2026-11-10e13 (e13): school free roam planned inside the readable area (--readable-map); the camera check before a tags run (camera_feed); --sim-plain-roofs; tracked for the sleep 10 min after a run. 2026-11-10a (e12): the camera self-check at the start of a tags run (camera_selfcheck.py; --no-camera-check). No version string before
 
 import argparse
 import datetime as dt
@@ -783,6 +783,18 @@ def wiggle_first(args, out):
     tc = os.path.join((args.site_ or {}).get("conf_dir") or os.path.expanduser("~/.config/mirlt"), "tagcal")
     say("WIGGLE FIRST: each robot wiggles in turn; the roof tag that turns with it is its tag, and it is given its "
         "slot (%s)" % ", ".join(slots))
+    if os.environ.get("MIRLT_CAMERA_DISCOVERY", "off") == "on":
+        # (e13, Nick's design 10 Nov) camera discovery inside robot finding: every camera, each robot's stroke, the
+        # coverage map (coverage.json). OFF on the robots until Nick has seen it once (report question)
+        try:
+            import camera_discovery as CDI
+            CDI.run_real(args.site_ or {}, os.path.join(out, "cameras"), ips=args.robot, log=say,
+                         # a terminal asks the person; with no terminal (Mission Control) MIRLT_CLEAR_SPACE_OK=1 says it
+                         confirm=None if sys.stdin.isatty() else (
+                             lambda w: os.environ.get("MIRLT_CLEAR_SPACE_OK") == "1"))
+        except (Exception, SystemExit) as e:   # noqa: BLE001
+            say("NOT STARTED: camera discovery did not finish: %s" % e)
+            return 5
     try:
         import calib_run as CRN
         rec = WB.run_for_mission(args.site_, slots, os.path.join(out, "bind"), stream=args.stream,
@@ -1233,6 +1245,9 @@ def run(args):
               "--dir", sess, "--motion", roam_motion]   # (Nick 9 Nov) curves (default) or stopturn, from the Start screen's Advanced
         for k_, v_ in sorted((getattr(args, "aliases_", None) or {}).items()):
             rp += ["--alias", "%s=%s" % (k_, v_)]      # (e11, 9 Nov school: "No robot answered") AL-1DC0 is Alpha
+        if os.path.exists(os.path.join(out, "readmap_start.json")):
+            # (e13) plan only where the camera reads tags (e12's practice: robots roamed past x 254 cm and stood lost)
+            rp += ["--readable-map", os.path.join(out, "readmap_start.json")]
         say("FREE ROAM DRIVING: %s" % ("straight lines (stopturn: stop and turn on the spot)" if roam_motion ==
                                        "stopturn" else "curves"))
         for ip in args.robot:
@@ -1292,6 +1307,8 @@ def run(args):
                                                  "axis": ax_ or "x"})
         if mmap.get("spots"):
             tcfg["stickers"] = {k: v[:2] for k, v in mmap["spots"].items()}
+        if getattr(args, "sim_plain_roofs", False):
+            tcfg["plain_roofs"] = True         # (e13) runs without roof tags: every robot's roof plain white
         for g in args.tag_gap:
             n_, _, rest = g.partition("@")
             t_, _, d_ = rest.partition(":")
@@ -1424,6 +1441,19 @@ def run(args):
         say("no camera bridge (tracking none)")
     elif args.tracking_ == "tags":
         say("tag bridge starting (each robot found by its roof tag, wherever it is)")
+        if not args.dry and br is not None:
+            # (e13, 10 Nov 11:48 school: a stalled stream was reported as "no roof tag is seen") every camera sending
+            # new pictures before anything moves; else said plainly and refused (MIRLT_FEED_CHECK=0: no check)
+            import camera_feed as CF
+            ok_, words_ = CF.check(os.path.join(out, "bridge"))[:2]
+            say(("CAMERA CHECK: " if ok_ else "NOT STARTED: ") + words_)
+            if not ok_:
+                try:
+                    br.send_signal(signal.SIGINT)
+                    br.wait(timeout=10)
+                except Exception:  # noqa: BLE001
+                    pass
+                return 5
     else:
         say("camera bridge starting (it learns the empty floor round the robots: keep hands out of the picture)")
     if args.tracking_ == "none":
@@ -1825,6 +1855,8 @@ def main(argv=None):
                                                              "process (2026-11-03): the run ends at once; its folder's "
                                                              "tagcal_refit/status.json says when it is done")
     g.add_argument("--cam-size", default="1280x960", help="tags: the simulated cameras' picture size")
+    g.add_argument("--sim-plain-roofs", action="store_true",
+                   help="(e13) tags: the simulated robots carry NO roof tag (plain white roofs) for the whole run")
     g.add_argument("--tag-gap", action="append", default=[], metavar="NAME@T:DUR",
                    help="tags: that robot's tag covered (unreadable) from T s after the plan starts for DUR s")
     g.add_argument("--cam-low-res", action="append", default=[], metavar="CAM=WxH",
@@ -1913,4 +1945,7 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    import idle_after_run as IA     # (e13) robots asleep 10 min after the run ends if no new run starts
+    with IA.track("mission", dry=IA.is_dry(sys.argv[1:]) or "--plan-only" in sys.argv[1:]):
+        _rc = main()
+    sys.exit(_rc)

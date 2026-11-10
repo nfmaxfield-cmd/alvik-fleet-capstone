@@ -36,7 +36,8 @@ for _p in (HERE, os.path.join(TOOLS, "recognition"), os.path.join(TOOLS, "experi
 
 import numpy as np   # noqa: E402
 
-VERSION = "2026-11-10a"
+VERSION = "2026-11-10e13"   # e13: the unattended refit keeps the corner tags without the new confirm step (measure confirm=False)
+VERSION_A = "2026-11-10a"
 PICTURE_S = 2.0          # chosen: pictures read for the check (30-50 at 15-25 a second; the tags stand still). No DOE
 REFIT_PX = None          # None: ref_tags.BUMP_PX (3 px), the bump watch's limit. Not chosen here
 
@@ -155,7 +156,7 @@ def _refit(site):
     import tag_job as TJ
     mc = (site or {}).get("mc_dir") or os.path.join(REPO, "logs", "mission-control-%s" % (site or {}).get("name"))
     os.makedirs(mc, exist_ok=True)
-    return TJ.TagJob(_Session(mc), site).measure("robots")
+    return TJ.TagJob(_Session(mc), site).measure("robots", confirm=False)   # (e13) unattended: the corner tags as before
 
 
 def _model_summary(cal_dir):
