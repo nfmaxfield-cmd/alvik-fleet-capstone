@@ -74,6 +74,16 @@ write (new in e13 where marked). Colour words, never colour alone.
 | Detector | off / on with the model's date, detections a second | `sources.csv` ml column (e13) |
 | Pi | temperature, card and stick space, the sleep timer after the run (e13: "robots asleep at 14:32 if no new run") | heat tracker rows, diskguard, `run_activity.json` (e13) |
 
+## 3b. Asking a person for a hand: the click card (built in e13, to fold into whichever direction)
+
+When a robot holds because its error sum could reach an edge, a red card goes to the top of every screen: the robot's
+name, why it holds, each camera's live picture with its last known spot ringed; one click on the robot places it; after
+its safe straight drive the card shows each camera's picture at the first click beside the live one for the second
+click (its heading), and offers the motion detector's spot to confirm; "put it on a sticker" picks a point when no
+camera shows it. Picture: `../screenshots/2026-11-10/e13-feature-click-heading-second-click-card.png`. In direction C
+it belongs in the "Ask / do" box; in A and B as a banner above the steps. Open design points: the card on a phone (two
+pictures per camera are small: one camera at a time with a switch), and a sound when it appears.
+
 ## 4. Recommendation (Claude's reading) and the choice for Nick
 
 Claude's reading: **B now, then C's panel added to B** (about 1 day + 2 days). B fixes the "backwards" order with the
