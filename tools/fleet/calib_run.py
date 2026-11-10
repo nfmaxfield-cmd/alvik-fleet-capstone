@@ -61,7 +61,7 @@ for p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recognit
 
 import numpy as np   # noqa: E402
 
-VERSION = "2026-11-10f"     # 11-10f: the start waits for the camera fix after the wiggle (dim light, ~7 fps: refused at once, school 13:25). 11-10e: a run ended for poor tag reads DOES try to park again (Nick 12:48: never give up on getting back to where it is seen); it drives only with a camera fix (cam_pose_sure waits for one). 11-10d: no crash parking with no camera fix (RunEnd, caught: "Could not park"). 11-10c: Phase A waits for the camera fix instead of crashing on None (school 12:35). 11-10b (e12, Nick 10 Nov): the curve phase (phase R: constant-curvature arcs left and right at free roam's radii and two speeds, fitted from the camera, arc_k_scale / arc_d_scale saved when they agree; --arc-phase auto/on/off), points in your order (--visit-order), the proven workspace for the tours' room, the camera self-check at the start. VERSION_10A was:
+VERSION = "2026-11-10g"     # 11-10g: a standing robot is never given up for sparse tag reads: it is measured over longer windows (Nick 13:34; dim light). 11-10f: the start waits for the camera fix after the wiggle (dim light, ~7 fps: refused at once, school 13:25). 11-10e: a run ended for poor tag reads DOES try to park again (Nick 12:48: never give up on getting back to where it is seen); it drives only with a camera fix (cam_pose_sure waits for one). 11-10d: no crash parking with no camera fix (RunEnd, caught: "Could not park"). 11-10c: Phase A waits for the camera fix instead of crashing on None (school 12:35). 11-10b (e12, Nick 10 Nov): the curve phase (phase R: constant-curvature arcs left and right at free roam's radii and two speeds, fitted from the camera, arc_k_scale / arc_d_scale saved when they agree; --arc-phase auto/on/off), points in your order (--visit-order), the proven workspace for the tours' room, the camera self-check at the start. VERSION_10A was:
 VERSION_10A = "2026-11-10a"     # 11-10a: a leftover camera reader holding port 5011 is stopped first (stale_bridge.py). 11-05i (9 Nov, school): a tripped stop mid-tour crashed the run (TypeError: ev() got two
                              # values for kind); the trip event now says stop_kind. VERSION_H was:
 VERSION_H = "2026-11-05h"     # 11-05h: stop lead per speed (school 19:34: the scale fit was right; a fixed ~0.3 / 0.5 cm
@@ -91,6 +91,7 @@ MEASURE_S = 1.2          # chosen: ~12 reads at 10 a second. DOE note: 0.6 / 1.2
 LOST_HOLD_S = 1.0        # chosen (cautious): the tag unseen this long while driving -> stop and hold. At 10 cm/s that
                          # is 10 cm blind at most. DOE note: 0.5 / 1 / 2 s against holds per tour and how far it drives
                          # blind (the camera's dropout lengths from camera_track.csv)
+STILL_MEASURE_MAX_S = 15.0  # chosen (11-10g): the longest window a standing robot's tag is measured over; DOE: against reads a second
 LOST_GIVEUP_S = 30.0     # chosen: held this long and still not seen -> the run ends where it is (said plainly)
 # (11-05c, Nick 5 Nov 16:30/16:34) lost-tag RECOVERY instead of stop-and-hold (the old hold: --lost-policy hold /
 # site calibration.lost_policy "hold"). Straight legs with turns on the spot only (school runs never use curves):
@@ -1308,16 +1309,20 @@ class CalibRun:
     def cam_pose_sure(self):
         """(11-10c, school 12:35: Phase A's roll setup got None from cam_pose after the still period and crashed) the
         camera pose, waiting for the tag when it is momentarily not seen (the robot is standing still)."""
-        for _ in range(3):
-            cam = self.cam_pose()
+        k = 0
+        while True:
+            # (11-10g) standing still it cannot drift: a longer window each time, never giving up (Ctrl+C / Stop ends)
+            cam = self.cam_pose(min(STILL_MEASURE_MAX_S, MEASURE_S * (2 ** k)))
             if cam is not None:
                 return cam
-            say("  the camera has no fix of the roof tag right now (the robot stands still): waiting for it")
-            self.hold_until_seen()
-        cam = self.cam_pose(MEASURE_S * 3)
-        if cam is None:
-            raise RunEnd("the camera keeps losing the roof tag where the robot stands: nothing else moved")
-        return cam
+            if k in (0, 2) or k % 5 == 0:
+                say("  the camera has no steady fix of the roof tag right now (the robot stands still, so it cannot "
+                    "drift): measuring over a longer window")
+            if self.stop_flag.is_set():
+                raise RunEnd("stopped (Ctrl+C or Mission Control's Stop)")
+            if self.eye.age(self.tag) > 5.0:
+                self.hold_until_seen()
+            k += 1
 
     def odo_step(self, r):
         """After a leg: the robot's own motion added to both odometry tracks (raw and corrected)."""
@@ -1359,15 +1364,28 @@ class CalibRun:
         self.ev("hold", why="roof tag lost for over %.1f s while driving" % LOST_HOLD_S)
         self.set_status(words="HOLDING: the camera lost the roof tag; waiting for it (up to %.0f s)" % LOST_GIVEUP_S)
         say("HOLD: the roof tag was lost while driving; the robot stopped. Waiting for the camera to see it again ...")
-        while time.time() - t0 < LOST_GIVEUP_S:
+        nxt = LOST_GIVEUP_S
+        while True:
+            # (11-10g, Nick: never give up) the robot is stopped, so waiting is safe: it waits for the camera (or Stop),
+            # saying so every LOST_GIVEUP_S, instead of ending the run (switch: --lost-giveup ends it as before)
             if self.eye.age(self.tag) < 0.3:
                 d = time.time() - t0
                 self.holds.append(d)
                 say("  seen again after %.1f s: carrying on" % d)
                 return d
+            if self.stop_flag.is_set():
+                raise RunEnd("stopped (Ctrl+C or Mission Control's Stop)")
+            if time.time() - t0 > nxt:
+                if getattr(self.a, "lost_giveup", False):
+                    raise RunEnd("the camera lost the roof tag for over %.0f s: the robot stopped where it is (not "
+                                 "parked)" % LOST_GIVEUP_S)
+                say("  STILL HOLDING after %.0f s: the camera cannot see %s's roof tag. It is stopped and safe. Move "
+                    "it where the camera sees it, or add light; Ctrl+C or Stop ends the run" % (
+                        time.time() - t0, getattr(self, "name", "the robot")))
+                self.set_status(words="NEEDS A HAND: the camera cannot see %s's roof tag (stopped, safe)" %
+                                getattr(self, "name", "the robot"))
+                nxt += LOST_GIVEUP_S
             time.sleep(0.1)
-        raise RunEnd("the camera lost the roof tag for over %.0f s: the robot stopped where it is (not parked)"
-                     % LOST_GIVEUP_S)
 
     # ------------------------------------------------------------------------------------------------- recovery (11-05c)
     def bubble(self, blind_cm, blind_deg, after_cm=None):
@@ -1564,13 +1582,20 @@ class CalibRun:
             cam1 = self.cam_pose()
         tries = 0
         while cam1 is None:
-            # (11-05d, school 18:33) one read ends the hold but the pose needs 3 in MEASURE_S: hold again (bounded)
+            # (11-05d, school 18:33) one read ends the hold but the pose needs 3 in MEASURE_S: hold again.
+            # (11-10g, Nick 13:34: "if it finds it and doesn't move it, can't it trust that it knows where it is?") the
+            # robot is standing still, so its position cannot drift: measure over a longer window each time instead of
+            # ending the run (dim light: ~7 pictures a second and only some reads)
             tries += 1
-            if tries > 6:
-                raise RunEnd("the camera reads the roof tag only now and then after the %s %.0f leg: the robot "
-                             "stopped where it is (more light on the table helps)" % (kind, value))
-            held += self.hold_until_seen()
-            cam1 = self.cam_pose()
+            dur = min(STILL_MEASURE_MAX_S, MEASURE_S * (2 ** tries))
+            if tries in (1, 3) or tries % 5 == 0:
+                say("  the robot stands still: the camera reads its tag only now and then, so it is measured over %.0f s"
+                    " (the robot cannot drift while it stands)" % dur)
+            if self.stop_flag.is_set():
+                raise RunEnd("stopped (Ctrl+C or Mission Control's Stop)")
+            if self.eye.age(self.tag) > 5.0:
+                held += self.hold_until_seen()
+            cam1 = self.cam_pose(dur)
         if cam0 is None:
             interrupted = True          # (11-05d) no start pose: the leg cannot be measured, kept out of the fit
             cam0 = cam1
@@ -3218,6 +3243,8 @@ def main(argv=None):
     ap.add_argument("--binding", choices=["wiggle", "fixed", "auto"], default="auto",
                     help="wiggle: bind the roof tag that follows each robot's wiggle (new); fixed: the site's tags.ids "
                          "(the old way); auto: the site's tags.binding, else wiggle")
+    ap.add_argument("--lost-giveup", action="store_true",
+                    help="(11-10g) the old way: a hold that does not see the tag for LOST_GIVEUP_S ends the run")
     ap.add_argument("--lost-policy", choices=["recover", "hold", "keep_going"], default=None,
                     help="recover (default, 5 Nov 16:30): the tag lost > %.1f s while driving -> stop, then slowly back "
                          "towards where it read well in short bubble-checked straight steps; hold: the old stop and "

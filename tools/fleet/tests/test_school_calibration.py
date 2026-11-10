@@ -326,5 +326,13 @@ def test_cautious_hold_and_keep_going_switch(tmp_path, monkeypatch):
     run.a.lost_policy = "hold"
     run.eye = E(99.0)
     monkeypatch.setattr(CR, "LOST_GIVEUP_S", 0.3)
+    run.a.lost_giveup = True                     # (11-10g) the old way behind its switch: the hold ends the run
     with pytest.raises(CR.RunEnd):
         run.hold_until_seen()
+    # (11-10g, never give up) by default the hold keeps waiting (the robot is stopped) until seen or Stop
+    import threading
+    run.a.lost_giveup = False
+    run.stop_flag = threading.Event()
+    threading.Timer(0.8, run.stop_flag.set).start()
+    with pytest.raises(CR.RunEnd, match="stopped"):
+        run.hold_until_seen()                    # waited past 2 x LOST_GIVEUP_S, ended only by Stop
