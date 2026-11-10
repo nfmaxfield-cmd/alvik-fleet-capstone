@@ -61,7 +61,7 @@ for p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recognit
 
 import numpy as np   # noqa: E402
 
-VERSION = "2026-11-10c"     # 11-10c: Phase A waits for the camera fix instead of crashing on None (school 12:35). 11-10b (e12, Nick 10 Nov): the curve phase (phase R: constant-curvature arcs left and right at free roam's radii and two speeds, fitted from the camera, arc_k_scale / arc_d_scale saved when they agree; --arc-phase auto/on/off), points in your order (--visit-order), the proven workspace for the tours' room, the camera self-check at the start. VERSION_10A was:
+VERSION = "2026-11-10d"     # 11-10d: no crash parking with no camera fix (RunEnd, caught: "Could not park"); a run ended for poor tag reads is not driven back (school 12:45, lights out). 11-10c: Phase A waits for the camera fix instead of crashing on None (school 12:35). 11-10b (e12, Nick 10 Nov): the curve phase (phase R: constant-curvature arcs left and right at free roam's radii and two speeds, fitted from the camera, arc_k_scale / arc_d_scale saved when they agree; --arc-phase auto/on/off), points in your order (--visit-order), the proven workspace for the tours' room, the camera self-check at the start. VERSION_10A was:
 VERSION_10A = "2026-11-10a"     # 11-10a: a leftover camera reader holding port 5011 is stopped first (stale_bridge.py). 11-05i (9 Nov, school): a tripped stop mid-tour crashed the run (TypeError: ev() got two
                              # values for kind); the trip event now says stop_kind. VERSION_H was:
 VERSION_H = "2026-11-05h"     # 11-05h: stop lead per speed (school 19:34: the scale fit was right; a fixed ~0.3 / 0.5 cm
@@ -1676,8 +1676,7 @@ class CalibRun:
         nm = name or str(lab)
         cam = cam or self.cam_pose()
         if cam is None:
-            self.hold_until_seen()
-            cam = self.cam_pose()
+            cam = self.cam_pose_sure()      # (11-10d) a fix or RunEnd, never None (school 12:45: crashed parking)
         corrected = False
         d = self.D if (odometry and self.D is not None) else cam
         near = isinstance(lab, str) and lab in self.S.points and self.S.near_edge(lab)
@@ -2900,7 +2899,7 @@ class CalibRun:
         parked = None
         if self.stop_flag.is_set():
             say("Stopped by hand (Ctrl+C, `stop` or Mission Control's Stop): NOT driven back to park")
-        elif "camera lost" not in str(result):
+        elif "camera lost" not in str(result) and "only now and then" not in str(result):
             try:
                 parked = self.park("park")
             except (RunEnd, LowBattery) as e:
