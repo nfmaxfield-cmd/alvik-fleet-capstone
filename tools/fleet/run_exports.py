@@ -36,7 +36,7 @@ REPO = os.path.dirname(os.path.dirname(HERE))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-VERSION = "2026-11-10a"   # 11-10a (e12): `latest` also finds runs started from the command line (logs/*-mission). 11-09b: stops.csv robot_wifi + tag_id, binding.json + frames_where.txt in the bundle. e11: run/stops.csv (Jay-Sun: each stop findable), visit_order.json in the bundle
+VERSION = "2026-11-10b"   # 11-10b (e12 item 9): stops.csv gains "interrupted" (appended). 11-10a (e12): `latest` also finds runs started from the command line (logs/*-mission). 11-09b: stops.csv robot_wifi + tag_id, binding.json + frames_where.txt in the bundle. e11: run/stops.csv (Jay-Sun: each stop findable), visit_order.json in the bundle
 PAIR_S = 0.07          # as tag_bridge.PAIR_S: two cameras' reads this close in time are one moment
 
 CAM_COLS = ["t", "t_iso", "robot", "x_cm", "y_cm", "heading_deg", "sigma_cm", "sigma_deg", "pm95_cm", "cams", "n_reads",
@@ -274,7 +274,8 @@ def export_all(mission, say=print):
 
 STOP_COLS = ["robot", "n", "point", "arrive_unix", "arrive_iso", "dwell_start_unix", "dwell_end_unix", "dwell_end_iso",
              "dwell_s", "cam_x_cm", "cam_y_cm", "plus_minus_cm", "n_fixes", "source", "own_x_cm", "own_y_cm",
-             "robot_wifi", "tag_id"]   # (11-09b, Jay-Sun: the run's slot name, e.g. Alpha, is not the robot: its WiFi name too)
+             "robot_wifi", "tag_id",   # (11-09b, Jay-Sun: the run's slot name, e.g. Alpha, is not the robot: its WiFi name too)
+             "interrupted"]            # (e12 item 9) 1: the dwell was broken by a halt and the robot did not move (kept as one)
 
 
 def robot_ids(mission):
@@ -330,7 +331,8 @@ def stops(mission):
                          "dwell_s": e.get("dwell_s"), "cam_x_cm": e.get("x"), "cam_y_cm": e.get("y"),
                          "plus_minus_cm": e.get("plus_minus_cm"), "n_fixes": e.get("n_fixes"),
                          "source": e.get("source"), "own_x_cm": e.get("own_x"), "own_y_cm": e.get("own_y"),
-                         "robot_wifi": (ids.get(r) or ("", ""))[0], "tag_id": (ids.get(r) or ("", ""))[1]})
+                         "robot_wifi": (ids.get(r) or ("", ""))[0], "tag_id": (ids.get(r) or ("", ""))[1],
+                         "interrupted": int(e.get("interrupted") or 0)})
     if not rows:
         return None, 0
     out = os.path.join(run, "stops.csv")

@@ -641,11 +641,26 @@ class FleetSim:
                            "x": rb.x + rng.gauss(0, a.fix_sigma), "y": rb.y + rng.gauss(0, a.fix_sigma),
                            "th": math.degrees(rb.th) + rng.gauss(0, a.fix_sigma_deg),
                            "sigma": a.fix_sigma, "sigma_th": a.fix_sigma_deg}
+                    lk = self.lock_latch(rb, rng)
+                    if lk is not None:
+                        msg = dict(msg, x=lk[0], y=lk[1], th=None, sigma=1.2, sigma_th=9.0, src="tag_bridge:lock")
                     sent.append((now + a.fix_delay, msg))
             while sent and sent[0][0] <= now:
                 self.send_json(sent.popleft()[1])
             self.events_due(now)
             time.sleep(0.005)
+
+    def lock_latch(self, rb, rng):
+        """(2026-11-10, e12 item 9) --lock-latch X,Y,R[,SHARE]: within R cm of (X, Y) the roof tag reads weakly and the
+        tag bridge's lock latches onto a fixed feature AT (X, Y): that share of the robot's fixes (default 0.7) come as
+        lock fixes there (position only, heading null, src tag_bridge:lock), the rest are true tag reads. The 9 Nov P15
+        case: the lock said (186.2, 154.4) while the robot stood at (180, 151)."""
+        for spec in getattr(self.args, "lock_latch", None) or []:
+            q = [float(v) for v in spec.split(",")]
+            share = q[3] if len(q) > 3 else 0.7
+            if math.hypot(rb.x - q[0], rb.y - q[1]) <= q[2] and rng.random() < share:
+                return q[0], q[1]
+        return None
 
     HAND_BEFORE_S, HAND_AFTER_S = 1.2, 0.6      # the hand is in the picture this long before / after the brick lands
 
@@ -1215,6 +1230,9 @@ def main(argv=None):
     ap.add_argument("--stop-coast", action="append", default=[], metavar="NAME=TAU_S",
                     help="that robot's wheels run down with this time constant after a brake (default the model's "
                          "brake_tau_s); 0.08 reproduces AL-1DC0's overrun at school, 5 Nov")
+    ap.add_argument("--lock-latch", action="append", default=[], metavar="X,Y,R[,SHARE]",
+                    help="(2026-11-10) near (X, Y) a share of the fixes are a lock latched onto that fixed spot (no "
+                         "heading, src tag_bridge:lock): the 9 Nov P15 case")
     ap.add_argument("--arc-err", action="append", default=[], metavar="NAME=PCT",
                     help="(2026-11-10) on curves that robot (or * = every robot) really turns PCT %% tighter than its "
                          "own pose shows (the curve phase of calib_run.py finds it)")

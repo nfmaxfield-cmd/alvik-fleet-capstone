@@ -36,7 +36,9 @@ Position source (--fixes): where camera poses come from (data-formats.md,
 runs against it with --fixes udp; at the end it prints the simulator's ground
 truth: docking errors, closest robots, contact.
 """
-VERSION = "2026-11-10a"   # 2026-11-10a (e12): the bridge's "camera" messages (no pictures / pictures again) said and logged. No version before
+VERSION = "2026-11-10b"   # 2026-11-10b (e12 item 9): a lock-only fix never resets a pose (MIRLT_LOCK_GUARD=0: as before); a dwell broken by a halt where the robot did not move keeps its start (MIRLT_DWELL_KEEP=0). 2026-11-10a (e12): the bridge's "camera" messages (no pictures / pictures again) said and logged. No version before
+LOCK_GUARD = __import__("os").environ.get("MIRLT_LOCK_GUARD", "1") != "0"
+DWELL_KEEP = __import__("os").environ.get("MIRLT_DWELL_KEEP", "1") != "0"
 
 import argparse
 import csv
@@ -806,6 +808,19 @@ class Coordinator:
                               # of timing at 10 cm/s. DOE note: 4 / 6 / 8 cm x 0.5 / 1 / 2 s on the board's Phase 0
                               # runs (false stops against the distance driven blind); docs/doe-backlog.md
 
+    LOCK_AGREE_CM = 3.0       # (e12 item 9) a lock fix counts as the camera only within this of a roof-tag read made in
+    LOCK_AGREE_S = 2.0        # the last LOCK_AGREE_S. Both chosen (the tag's +- at the far corner is 3-5 cm; a robot at
+                              # dwell moves nothing in 2 s). No DOE: a guard
+
+    def lock_trusted(self, b, cam, t):
+        """(e12 item 9) Is this camera spot good enough to reset the robot's pose? A roof-tag read: yes. A lock-only fix
+        (tag_bridge's lock bank: position only, heading null): only when a tag read in the last LOCK_AGREE_S agrees."""
+        if not str(getattr(b, "last_cam_src", "")).endswith(":lock"):
+            return True
+        lt = getattr(b, "last_tag", None)
+        return bool(lt and t - lt[0] <= self.LOCK_AGREE_S and math.hypot(cam[0] - lt[1], cam[1] - lt[2]) <=
+                    self.LOCK_AGREE_CM)
+
     def cam_guard(self):
         """Stop everyone when a robot's own pose and the camera disagree for long (its fixes are being refused)."""
         lim = getattr(self.args, "cam_guard_cm", self.CAM_GUARD_CM)
@@ -840,6 +855,17 @@ class Coordinator:
                 b.guard_since = t
                 self.log("cam_guard_start", robot=b.name, d_cm=round(d, 2), dth_deg=round(dth, 1), cam=cam,
                          own=list(b.pose))
+            elif t - b.guard_since >= self.CAM_GUARD_S and LOCK_GUARD and not self.lock_trusted(b, cam, t):
+                # (e12 item 9, Jay-Sun's 9 Nov tour at P15: a lock fix 7 cm off moved the robot's pose and broke its
+                # dwell) a lock-only fix never resets a pose: declined and logged; the robot keeps its own pose
+                if not getattr(b, "lock_declined_t", None) or t - b.lock_declined_t > 5.0:
+                    b.lock_declined_t = t
+                    self.log("cam_guard_lock_declined", robot=b.name, d_cm=round(d, 2), cam=cam, own=list(b.pose),
+                             last_tag=getattr(b, "last_tag", None))
+                    self.say("%s: the camera's lock (no roof-tag read) disagrees with its own pose by %.1f cm: not "
+                             "trusted, its pose kept (it resets only from a roof-tag read)" % (b.name, d))
+                b.guard_since = None
+                continue
             elif t - b.guard_since >= self.CAM_GUARD_S and self.holds_one() and not \
                     getattr(self, "straightening", False):
                 # its own pose has drifted from the camera's: that robot alone is halted and its pose set from the
@@ -1170,6 +1196,9 @@ class Coordinator:
         t = now()
         b.last_cam = [round(float(ev["x"]), 2), round(float(ev["y"]), 2),
                       None if ev.get("th") is None else round(float(ev["th"]), 1)]
+        b.last_cam_src = str(ev.get("src") or "")              # (e12 item 9) "tag_bridge:lock" = the lock's guess
+        if not b.last_cam_src.endswith(":lock"):
+            b.last_tag = (t, float(ev["x"]), float(ev["y"]))    # the newest roof-tag (or other non-lock) read
         if getattr(b, "lost_since", None) is not None:
             self.log("tracker_back", robot=b.name, t_run=round(t - self.t_run, 2) if self.t_run else None,
                      lost_s=round(t - b.lost_since, 2), cam=b.last_cam)
@@ -2291,19 +2320,42 @@ class Coordinator:
                 self.__dict__.setdefault("done_labels", set()).add(lab)
             return
         if state == "started":
-            b.dwell = dict(point=lab[3:], t0=t)
+            d = getattr(b, "dwell", None)
+            tag = getattr(b, "last_tag", None)
+            if DWELL_KEEP and d and d["point"] == lab[3:] and t - d["t0"] < self.DWELL_KEEP_S and self.dwell_still(b, d):
+                # (e12 item 9, 9 Nov P15) the same stop again after a halt, and the robot did not move: one stop, its
+                # dwell from the first start (not a short second one), marked interrupted
+                d["interrupted"] = True
+                self.log("dwell_kept", robot=b.name, point=d["point"], t0=round(d["t0"], 3), restarted=round(t, 3))
+            else:
+                b.dwell = dict(point=lab[3:], t0=t, pose=list(b.pose) if b.pose else None,
+                               tag=tag if (tag and t - tag[0] < 2.0) else None)
         elif state == "done":
             self.__dict__.setdefault("done_labels", set()).add(lab)
             d = getattr(b, "dwell", None)
             t0 = d["t0"] if d and d["point"] == lab[3:] else t - float(stp.get("t_end", 0) - stp.get("t_start", 0))
             b.dwell = None
-            self.record_point(b, lab[3:], t0, t)
+            self.record_point(b, lab[3:], t0, t, interrupted=bool(d and d.get("interrupted")))
 
-    def record_point(self, b, point, t0, t1):
+    DWELL_STILL_CM = 2.0      # (e12 item 9) "did not move" during an interrupted dwell: the roof-tag reads (else its own
+                              # pose) within this. Chosen (Nick's "about 2 cm"). No DOE
+    DWELL_KEEP_S = 60.0       # ... and the stop restarted within this of its first start. Chosen. No DOE
+
+    def dwell_still(self, b, d):
+        """(e12 item 9) The robot stayed put since the dwell started: its newest roof-tag read within DWELL_STILL_CM of
+        the one at the start when both exist (a lock fix does not count), else its own pose."""
+        tag, t = getattr(b, "last_tag", None), now()
+        if d.get("tag") and tag and t - tag[0] < 2.0:
+            return math.hypot(tag[1] - d["tag"][1], tag[2] - d["tag"][2]) <= self.DWELL_STILL_CM
+        if d.get("pose") and b.pose:
+            return math.hypot(b.pose[0] - d["pose"][0], b.pose[1] - d["pose"][1]) <= self.DWELL_STILL_CM
+        return False
+
+    def record_point(self, b, point, t0, t1, interrupted=False):
         lg = [f for f in (getattr(b, "fix_log", None) or []) if t0 - 0.05 <= f["t"] <= t1 + 0.05]
         own = list(b.pose) if b.pose else None
         rec = dict(robot=b.name, point=point, t_run=round(t1 - self.t_run, 2) if self.t_run else None,
-                   dwell_s=round(t1 - t0, 2), n_fixes=len(lg), t_abs=round(t1, 3))
+                   dwell_s=round(t1 - t0, 2), n_fixes=len(lg), t_abs=round(t1, 3), interrupted=int(bool(interrupted)))
         if lg:
             xs, ys = [f["x"] for f in lg], [f["y"] for f in lg]
             x, y = statistics.median(xs), statistics.median(ys)

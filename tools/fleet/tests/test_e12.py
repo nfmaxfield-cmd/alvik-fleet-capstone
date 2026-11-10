@@ -127,7 +127,8 @@ def test_camera_selfcheck_compare_verdict_and_off(monkeypatch):
     assert r["result"] == "unknown" and "Measure" in r["words"]
 
 
-def test_calibration_uses_the_proven_workspace_and_refuses_unknown_points(tmp_path):
+def test_calibration_uses_the_proven_workspace_and_refuses_unknown_points(tmp_path, monkeypatch):
+    monkeypatch.setenv("MIRLT_SITE", os.environ.get("MIRLT_SITE", "home"))   # calib_run.main sets it: restored after
     import calib_run as CR
     import proven_workspace as PW
     import sites as SI
@@ -338,3 +339,97 @@ def test_run_evidence_overturns_the_cautious_seed_next_run(tmp_path):
     assert nxt.readable(150.0, 84.0)[0], nxt.readable(150.0, 84.0)
     assert not nxt.readable(300.0, 150.0)[0]                      # nothing seen there: the seed still stands
     assert "learn_readmap(args, out, sess)" in open(os.path.join(FLEET, "mission_run.py")).read()
+
+
+# -------------------------------------------------------------------------------------------- 9. the P15 lock (9 Nov)
+def _coord():
+    import run_plan as RP
+    c = RP.Coordinator.__new__(RP.Coordinator)
+    c.args = types.SimpleNamespace(cam_guard_cm=6.0)
+    c.source = types.SimpleNamespace(live=True)
+    said, logs, sent, ctl = [], [], [], []
+    c.say, c.log = said.append, (lambda ev, **kw: logs.append((ev, kw)))
+    c.send = lambda n, t: sent.append(t)
+    c.control = lambda b, t: ctl.append(t)
+    c.holds_one = lambda: True
+    c.keep_going = lambda: False
+    c.pose_at = lambda b, t: None
+    b = RP.Bot.__new__(RP.Bot)
+    b.name, b.out, b.own_until, b.backoff, b.pose_t = "Alpha", False, 0.0, None, 0.0
+    c.bots = {"Alpha": b}
+    return RP, c, b, said, logs, sent
+
+
+def _fix(c, b, x, y, src, th=None):
+    c.cam_seen(b, {"x": x, "y": y, "th": th, "src": src})
+
+
+def test_a_lock_only_fix_never_resets_the_pose_but_a_tag_read_does(monkeypatch):
+    RP, c, b, said, logs, sent = _coord()
+    t0 = time.time()
+    # the robot stands at (180.4, 151.9) by its own pose and by a tag read; the lock then says (186.2, 154.4)
+    b.pose, b.pose_t = (180.4, 151.9, 90.0), t0
+    b.last_tag = (t0 - 5.0, 180.4, 151.9)                  # the last tag read is old (weak reads near P15)
+    b.last_cam, b.last_cam_src, b.cam_t = [186.16, 154.41, None], "tag_bridge:lock", t0
+    b.guard_since = t0 - 1.5
+    c.cam_guard()
+    assert b.pose[:2] == (180.4, 151.9) and not any(s.startswith("fpose") for s in sent)
+    assert logs and logs[-1][0] == "cam_guard_lock_declined"
+    # a roof-tag read 7 cm off is believed as before (the guard's own job)
+    b.last_cam, b.last_cam_src, b.cam_t, b.guard_since = [186.16, 154.41, 90.0], "tag_bridge:overhead", time.time(), \
+        time.time() - 1.5
+    b.pose_t = time.time()
+    c.cam_guard()
+    assert b.pose[0] == 186.16 and any(s.startswith("fpose") for s in sent)
+    # the switch: the old way believes the lock too
+    monkeypatch.setattr(RP, "LOCK_GUARD", False)
+    b.pose, b.pose_t, b.guard_resets = (180.4, 151.9, 90.0), time.time(), []
+    b.last_cam, b.last_cam_src, b.cam_t, b.guard_since = [186.16, 154.41, None], "tag_bridge:lock", time.time(), \
+        time.time() - 1.5
+    c.cam_guard()
+    assert b.pose[0] == 186.16
+
+
+def test_a_lock_agreeing_with_a_recent_tag_read_is_trusted():
+    RP, c, b, *_ = _coord()
+    t = time.time()
+    b.last_cam_src, b.last_tag = "tag_bridge:lock", (t - 0.5, 180.0, 151.0)
+    assert c.lock_trusted(b, [181.0, 152.0, None], t) and not c.lock_trusted(b, [186.2, 154.4, None], t)
+
+
+def test_an_interrupted_dwell_where_the_robot_stayed_is_one_full_stop(tmp_path):
+    RP, c, b, said, logs, sent = _coord()
+    rec = []
+    c.record_point = lambda b_, p, t0, t1, interrupted=False: rec.append((p, round(t1 - t0, 1), interrupted))
+    b.pose, b.last_tag = (180.4, 151.9, 90.0), (time.time(), 180.4, 151.9)
+    stp = {"label": "at P15", "type": "wait"}
+    t0 = time.time()
+    c.point_step(b, stp, "started", t0)
+    b.last_tag = (time.time(), 180.9, 152.3)                 # it stayed within 2 cm (tag reads)
+    c.point_step(b, stp, "started", t0 + 4.0)               # the halt and the replanned W 4000
+    c.point_step(b, stp, "done", t0 + 8.0)
+    assert rec == [("P15", 8.0, True)]
+    # moved 7 cm (a real move): a new dwell
+    rec.clear()
+    c.point_step(b, stp, "started", t0)
+    b.last_tag = (time.time(), 187.4, 151.9)
+    c.point_step(b, stp, "started", t0 + 4.0)
+    c.point_step(b, stp, "done", t0 + 8.0)
+    assert rec == [("P15", 4.0, False)]
+    import run_exports as RE
+    assert RE.STOP_COLS[-1] == "interrupted"
+
+
+def test_simulator_lock_latches_on_a_fixed_spot():
+    import fleet_sim as FS
+    import random
+    sim = FS.FleetSim.__new__(FS.FleetSim) if hasattr(FS, "FleetSim") else None
+    src = open(os.path.join(TOOLS, "sim", "fleet_sim.py")).read()
+    assert "def lock_latch(self, rb, rng)" in src and '"--lock-latch"' in src
+    if sim is None:
+        return
+    sim.args = types.SimpleNamespace(lock_latch=["186.2,154.4,15,1.0"])
+    near = types.SimpleNamespace(x=180.0, y=151.0)
+    far = types.SimpleNamespace(x=100.0, y=100.0)
+    rng = random.Random(1)
+    assert sim.lock_latch(near, rng) == (186.2, 154.4) and sim.lock_latch(far, rng) is None

@@ -1528,20 +1528,6 @@ def run(args):
             except Exception:     # noqa: BLE001
                 pass
     sync_mark(out, "end", args)
-    if (args.site_ or {}).get("conf_dir") and getattr(args, "tracking_", "") == "tags":
-        # (e12, 9 Nov school: every stop of 7 tours had camera fixes where the seed said "unreadable") the run's own
-        # camera fixes and stops go into the map before it is kept, so the evidence overturns the cautious seed
-        try:
-            learn_readmap(args, out, sess)
-        except Exception as e:  # noqa: BLE001  (never stops the end of a run)
-            say("(readability not learned from this run's logs: %s)" % e)
-    if not args.dry and (args.site_ or {}).get("conf_dir") and os.path.exists(os.path.join(sess, "readmap.json")):
-        # (11-05h) the site keeps where tags read (merged at half weight into the next run's start map)
-        try:
-            import shutil
-            shutil.copy(os.path.join(sess, "readmap.json"), os.path.join(args.site_["conf_dir"], "readmap.json"))
-        except OSError:
-            pass
     summ = summarise(out, sess, frames, cond)
     try:
         # the experiment (2026-11-03): id, orders, swap, seed, pinned speeds; the sync wiggle's times per robot
@@ -1565,6 +1551,21 @@ def run(args):
             summ["exports"] = RX.export_all(out, say=say)
     except Exception as e:     # noqa: BLE001  (an export never stops the run's end)
         say("(experiment record / exports not made: %s)" % e)
+    if (args.site_ or {}).get("conf_dir") and getattr(args, "tracking_", "") == "tags":
+        # (e12, 9 Nov school: every stop of 7 tours had camera fixes where the seed said "unreadable") the run's own
+        # camera fixes and stops (camera_track.csv, stops.csv: written by the exports just above) go into the map
+        # before it is kept, so the evidence overturns the cautious seed
+        try:
+            learn_readmap(args, out, sess)
+        except Exception as e:  # noqa: BLE001  (never stops the end of a run)
+            say("(readability not learned from this run's logs: %s)" % e)
+    if not args.dry and (args.site_ or {}).get("conf_dir") and os.path.exists(os.path.join(sess, "readmap.json")):
+        # (11-05h) the site keeps where tags read (merged at half weight into the next run's start map)
+        try:
+            import shutil
+            shutil.copy(os.path.join(sess, "readmap.json"), os.path.join(args.site_["conf_dir"], "readmap.json"))
+        except OSError:
+            pass
     with open(os.path.join(out, "mission_summary.json"), "w") as f:
         json.dump(summ, f, indent=1, default=str)
     if args.tracking_ == "tags":
