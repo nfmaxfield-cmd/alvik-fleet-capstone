@@ -46,7 +46,7 @@
   when that sum could reach an edge, then holds safely and asks for a hand, and carries on when a source returns. No
   fixed blind-distance caps (e.g. "stop after 8 cm") and no timers.
   When it holds, it asks the person (Mission Control, and the terminal) to click the robot on a picture from any camera
-  that shows it (Nick, 12:56). The click sets its position (two clicks, centre then nose, also set its heading),
+  that shows it (Nick, 12:56). The click sets its position (heading: the robot is a cube, so no nose click; after the first click it drives a short way straight forward, as far as its fresh error sum allows, and the person clicks it again on a second picture: the line between the two clicks is its heading),
   resets its error sum to about the click's own accuracy, and it starts moving again with a new running total. A robot
   no camera shows: the person puts it on a known point and clicks that point on the map instead.
 
