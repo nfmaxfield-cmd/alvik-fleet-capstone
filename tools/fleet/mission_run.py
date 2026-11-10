@@ -32,7 +32,7 @@ Ctrl+C stops every robot (run_plan's own stop). Free space (diskguard.py, 2026-1
 under its floor; frame saving stops under the frames' floor; under the card's floor during the run, run_plan is sent
 Ctrl+C (every robot stops) and the run ends as it would on Ctrl+C, with the upload.
 """
-VERSION = "2026-11-10e13"   # 2026-11-10e13 (e13): school free roam planned inside the readable area (--readable-map); the camera check before a tags run (camera_feed); --sim-plain-roofs; tracked for the sleep 10 min after a run. 2026-11-10a (e12): the camera self-check at the start of a tags run (camera_selfcheck.py; --no-camera-check). No version string before
+VERSION = "2026-11-10e14"   # e14: robot finding by motion inside the binding (dry: the simulator's own cameras drawn from its true poses); the readable area chosen by light and tag (readmap_store; free roam where every tag of the run reads: readmap_roam.json), each run's own evidence kept with its light; the battery floor from the site / Mission Control passed to run_plan; --sim-light, --readmap-store, --sim-tagless; e13's separate discovery step behind MIRLT_CAMERA_DISCOVERY=e13. 2026-11-10e13 (e13): school free roam planned inside the readable area (--readable-map); the camera check before a tags run (camera_feed); --sim-plain-roofs; tracked for the sleep 10 min after a run. 2026-11-10a (e12): the camera self-check at the start of a tags run (camera_selfcheck.py; --no-camera-check). No version string before
 
 import argparse
 import datetime as dt
@@ -132,7 +132,10 @@ def observed_split(args, robots, out):
             seen[n] = list(pts[lab])
     home_at = {}
     for n in robots:
-        if n in seen:
+        if n in seen and len(seen[n]) >= 3 and seen[n][2] is not None:
+            # (e14) a robot found by motion and brought somewhere (no tag that reads): it starts exactly there
+            home_at[n] = [float(seen[n][0]), float(seen[n][1]), float(seen[n][2])]
+        elif n in seen:
             x, y = seen[n][:2]
             near = min(pts, key=lambda l: math.dist(pts[l], (x, y)))
             home_at[n] = [pts[near][0], pts[near][1], face] if math.dist(pts[near], (x, y)) <= 12.0 else [x, y, face]
@@ -482,6 +485,7 @@ def start_bridge(args, out, mp, cal, scal, stream, side_stream):
             cmd += ["--board", "%g,%g,%g,%g" % (fl_["x_min"], fl_["y_min"], fl_["x_max"], fl_["y_max"])]
         except (OSError, KeyError, ValueError, TypeError):
             pass
+        cmd += tagless_args(args)[1]             # (e14) robots with no tag: the motion detector starts them there
         if scal:
             cmd += ["--cam", "side=%s,%s" % (side_stream, scal)]
         f = open(os.path.join(out, "bridge.txt"), "w")
@@ -776,6 +780,15 @@ def wiggle_first(args, out):
     if args.dry and not getattr(args, "sim_bind", False):
         say("TAGS: simulator: the robots carry their slot names and tags (no wiggle-first binding in a dry run; "
             "--sim-bind runs it)")
+        tl_ = [n_.strip() for n_ in (getattr(args, "sim_tagless", "") or "").split(",") if n_.strip()]
+        if tl_:
+            # (e14) the robots with no roof tag are found by motion first, as on the robots
+            names_ = [r.strip() for r in args.robots.split(",") if r.strip()]
+            try:
+                dry_find(args, out, names_, set(tl_))
+            except (Exception, SystemExit) as e:   # noqa: BLE001
+                say("NOT STARTED: the robots with no roof tag could not be found by motion: %s" % e)
+                return 5
         return 0
     if args.dry:
         return dry_bind(args, out)
@@ -783,9 +796,10 @@ def wiggle_first(args, out):
     tc = os.path.join((args.site_ or {}).get("conf_dir") or os.path.expanduser("~/.config/mirlt"), "tagcal")
     say("WIGGLE FIRST: each robot wiggles in turn; the roof tag that turns with it is its tag, and it is given its "
         "slot (%s)" % ", ".join(slots))
-    if os.environ.get("MIRLT_CAMERA_DISCOVERY", "off") == "on":
+    if os.environ.get("MIRLT_CAMERA_DISCOVERY", "on") == "e13":
         # (e13, Nick's design 10 Nov) camera discovery inside robot finding: every camera, each robot's stroke, the
-        # coverage map (coverage.json). OFF on the robots until Nick has seen it once (report question)
+        # coverage map (coverage.json). e14: the finding runs INSIDE the binding (wiggle_bind.bind_for_run, on by
+        # default; MIRLT_CAMERA_DISCOVERY=off switches it off); e13's separate step kept behind =e13
         try:
             import camera_discovery as CDI
             CDI.run_real(args.site_ or {}, os.path.join(out, "cameras"), ips=args.robot, log=say,
@@ -798,7 +812,8 @@ def wiggle_first(args, out):
     try:
         import calib_run as CRN
         rec = WB.run_for_mission(args.site_, slots, os.path.join(out, "bind"), stream=args.stream,
-                                 calib=args.calib or os.path.join(tc, "overhead.json"), ips=args.robot)
+                                 calib=args.calib or os.path.join(tc, "overhead.json"), ips=args.robot,
+                                 rm=run_readmap(args, None))
     except (Exception, SystemExit) as e:   # noqa: BLE001  (BindError, RunEnd, the port in use)
         say("NOT STARTED: the wiggle-first binding did not finish: %s. To run with the typed tag ids instead: "
             "--binding fixed (or the site's tags.binding \"fixed\")." % e)
@@ -882,12 +897,117 @@ def take_binding(args, rec):
     """(11-05h) What the binding observed, for the plan: the robots found (auto), where each stands, each tag's
     heading offset."""
     if getattr(args, "auto_robots", False):
-        args.robots = ",".join(sorted(rec["slots"], key=lambda n: list(rec["slots"]).index(n)))
-        say("ROBOTS FOUND: %d (%s)" % (len(rec["slots"]), args.robots))
+        args.robots = ",".join(sorted(rec["slots"], key=lambda n: list(rec["slots"]).index(n)) +
+                               sorted(rec.get("tagless") or {}))       # (e14) robots with no tag that reads too
+        say("ROBOTS FOUND: %d (%s)" % (len(args.robots.split(",")), args.robots))
+    take_tagless(args, rec.get("tagless") or {})
     args.seen_ = {r["slot"]: r["seen_cm"] for r in rec.get("robots") or [] if r.get("seen_cm")}
     if rec.get("yaw_off"):
         say("TAG HEADINGS (observed by the nudge): %s" % ", ".join("%s %+.0f deg" % kv for kv in sorted(
             rec["yaw_off"].items())))
+
+
+def take_tagless(args, tagless):
+    """(e14) Robots found by motion with no roof tag that reads: {slot: {seen_cm, heading, sigma}}: run_plan starts each
+    from there (--start-pose) and the tag bridge's motion detector follows it from there (--seed-motion)."""
+    args.tagless_ = dict(getattr(args, "tagless_", None) or {}, **{k: v for k, v in tagless.items() if v.get("seen_cm")})
+    for sl, tl in sorted(args.tagless_.items()):
+        say("NO ROOF TAG on %s: found by motion at %.1f, %.1f%s; it runs on motion, lock-on and its own odometry" % (
+            sl, tl["seen_cm"][0], tl["seen_cm"][1],
+            (", facing %.0f deg" % tl["heading"]) if tl.get("heading") is not None else " (heading not known)"))
+
+
+def tagless_args(args):
+    """(e14) run_plan's --start-pose and the tag bridge's --seed-motion for the robots with no tag that reads."""
+    sp, sm = [], []
+    for sl, tl in sorted((getattr(args, "tagless_", None) or {}).items()):
+        x, y = tl["seen_cm"][:2]
+        h = tl.get("heading")
+        sm += ["--seed-motion", "%s=%.2f,%.2f%s" % (sl, x, y, "" if h is None else ",%.1f" % h)]
+        if h is not None:
+            sp += ["--start-pose", "%s=%.2f,%.2f,%.1f" % (sl, x, y, h)]
+    return sp, sm
+
+
+def dry_find(args, out, names, tagless):
+    """(e14, practice on the real path) The robots with no roof tag found by motion before the run, as on the robots
+    (wiggle_bind's finding): a simulator of the robots where the run's simulator will start them, the simulated
+    cameras' pictures, each robot's stroke; their found poses go to the run (take_tagless). Not renamed, not bound."""
+    import argparse as _ap
+    import calib_run as CRN
+    import motion_find as MF
+    homes = dry_homes(args, names)
+    ids = dict(args.tags_.get("ids") or {})
+    folder = os.path.join(out, "find")
+    os.makedirs(folder, exist_ok=True)
+    CRN.loopback_up()
+    S = CRN.Site(args.site_)
+    sims = ["%s:%d:%s" % (n, ids.get(n, 0), homes[n]) for n in names]
+    sa = _ap.Namespace(sim_name=names[0], sim_also=sims[1:], seed=args.seed, sim_max_s=600, sim_start=homes[names[0]],
+                       sim_true="1,1,0", sim_true_also="", sim_sleep="0.2:0.05", sim_fw=[])
+    sp, ips = CRN.start_sim(sa, S, folder)
+    link = CRN.Link(folder)
+    simtags = {n: (-1 if n in tagless else ids.get(n, 0)) for n in names}
+    bc = _BindCam(args)
+    eye = CRN.SimEye(folder, CRN.FIX_PORT + 100, bc, simtags, seed=args.seed)
+    try:
+        time.sleep(1.0)
+        found = CRN.discover(link, ips, 1.0, True, count=len(names))
+        robots = {n: CRN.Robot(link, n, ip) for n, ip in found.items()}
+        for rb in robots.values():
+            # as the binding does: woken robots restart and refuse to move until their compass check and their edge
+            # guard (lost at every power-off)
+            link.send(rb.ip, "wake")
+            for c_ in guard_cmds(args):
+                link.send(rb.ip, c_)
+                time.sleep(0.05)
+            CRN.compass_check(link, rb, log=say)
+        cams = MF.SimPictures(eye.truth_now, simtags, (S.L, S.W), tagcams=bc.cams,
+                              darks=[(d[0], d[1], d[2], d[3], "rect", 0.35) for d in bc.dark],
+                              unread=eye.unread_now).caminfos()
+        truth = eye.truth_now()
+        import camera_discovery as CD
+        ok = {n for n, p_ in truth.items() if min(p_[0], p_[1], S.L - p_[0], S.W - p_[1]) >= CD.clearance(None)[
+            "radius_cm"]}
+        _pre, res = MF.run_finding(robots, eye, cams, S, run_readmap(args, None) or _flat_rm(S), ok, log=say,
+                                   folder=folder)
+        time.sleep(0.5)
+        truth_end = eye.truth_now()            # where the simulated robots really are now (the run starts them there)
+    finally:
+        eye.close()
+        link.close()
+        sp.terminate()
+        try:
+            sp.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            sp.kill()
+    tl = {}
+    for n in tagless:
+        f = (res.get("robots") or {}).get(n) or {}
+        if f.get("found"):
+            tl[n] = dict(seen_cm=f.get("now") or f.get("where"), heading=f.get("heading_now", f.get("heading")),
+                         sigma=f.get("sigma"))
+    args.sim_homes_ = dict(homes)            # the run's simulator starts them where they were found
+    for n in tl:
+        if n in truth_end:
+            # a robot driven by its finding (brought back, or to a second readable spot) starts where it really is
+            args.seen_ = dict(getattr(args, "seen_", None) or {})
+            args.seen_[n] = [round(v, 2) for v in truth_end[n]]
+    for k, n in enumerate(sorted(tl)):
+        args.tags_.setdefault("ids", {})[n] = 900 + k if n not in ids else ids[n]
+    take_tagless(args, tl)
+    missing = [n for n in tagless if n not in tl]
+    if missing:
+        say("NOT FOUND BY MOTION: %s (no tag, and no camera saw it move): left out of this practice" % ", ".join(
+            missing))
+    return tl
+
+
+def _flat_rm(S):
+    import observe as OB
+    rm = OB.ReadMap(S.L, S.W)
+    rm.seed(lambda x_, y_: 0.9, "no camera model: taken as readable")
+    return rm
 
 
 def dry_homes(args, names):
@@ -982,11 +1102,22 @@ def dry_bind(args, out):
                        sim_true="1,1,0", sim_true_also="", sim_sleep="0.2:0.05", sim_fw=[])
     sp, ips = CRN.start_sim(sa, S, folder)
     link = CRN.Link(folder)
-    eye = CRN.SimEye(folder, CRN.FIX_PORT + 100, _BindCam(args), {n: ids[n] for n in names}, seed=args.seed)
+    plain = set(n for n in names if getattr(args, "sim_plain_roofs", False)) | set(
+        (getattr(args, "sim_tagless", "") or "").replace(" ", "").split(",")) - {""}
+    simtags = {n: (-1 if n in plain else ids[n]) for n in names}
+    bc = _BindCam(args)
+    eye = CRN.SimEye(folder, CRN.FIX_PORT + 100, bc, simtags, seed=args.seed)
+    cams = []
+    import motion_find as MF
+    if MF.enabled():
+        # (e14) robot finding by motion: the mission simulator's own cameras drawn from the simulator's true poses
+        darks = [(d[0], d[1], d[2], d[3], "rect", 0.35) for d in bc.dark]
+        cams = MF.SimPictures(eye.truth_now, simtags, (S.L, S.W), tagcams=bc.cams, darks=darks,
+                              unread=eye.unread_now).caminfos()
     try:
         time.sleep(1.0)
         rec = WB.bind_for_run(args.site_, ["auto"] if args.auto_robots else names, link, eye, ips=ips, wake_min=2.0,
-                              dry=True, folder=folder, log=say)
+                              dry=True, folder=folder, log=say, cams=cams, rm=run_readmap(args, None))
     except (Exception, SystemExit) as e:     # noqa: BLE001
         say("NOT STARTED: the wiggle-first binding (simulator) did not finish: %s" % e)
         return 5
@@ -1072,6 +1203,42 @@ def run_readmap(args, out):
         return None
     OB.seed_from_cameras(rm, cams, tcm, z)
     cd = site.get("conf_dir")
+    import readmap_store as RS
+    sd = store_dir(args)
+    if RS.enabled() and sd:
+        # (e14) the evidence chosen for the light now and the run's tags (readmap_store): a dim session never shrinks
+        # the lit map; one session's failures never overwrite many sessions' successes
+        g = light_now(args)
+        RS.import_old(sd, OB.ReadMap)
+        words = RS.choose(sd, rm, g, None)
+        args.readmap_words_ = "READABILITY at the start: %s" % words
+        if out:
+            say(args.readmap_words_)
+            ids = sorted(set(int(v) for v in ((getattr(args, "tags_", None) or {}).get("ids") or {}).values()))
+            per = []
+            for t in ids:
+                m_ = OB.ReadMap(L, W)
+                OB.seed_from_cameras(m_, cams, tcm, z)
+                w_ = RS.choose(sd, m_, g, t)
+                per.append((t, m_, w_))
+            if len(per) >= 1 and any(RS.load(sd).get("sessions") and str(s_.get("tag")) == str(t_)
+                                     for t_, _m, _w in per for s_ in RS.load(sd)["sessions"]):
+                # free roam keeps every robot where EVERY tag of the run reads at this light (one shared workspace)
+                rr = OB.ReadMap(L, W)
+                for i in range(rr.nx):
+                    for j in range(rr.ny):
+                        c_ = rr.centre(i, j)
+                        rr.prior[(i, j)] = (min(m_.rate(*c_) for _t, m_, _w in per), 100.0,
+                                            "every tag of the run at this light (readmap_store)")
+                rr.save(os.path.join(out, "readmap_roam.json"))
+                for t_, _m, w_ in per:
+                    say("  tag %d: %s" % (t_, w_))
+                say("  free roam stays where every tag of this run reads at this light (readmap_roam.json)")
+        if out:
+            rm.save(os.path.join(out, "readmap_start.json"))
+            with open(os.path.join(out, "readmap_light_used.json"), "w") as f:
+                json.dump({"grey": g, "words": words, "store": RS.path_for(sd)}, f)
+        return rm
     if cd and not args.dry and os.path.exists(os.path.join(cd, "readmap.json")):
         try:
             with open(os.path.join(cd, "readmap.json")) as f:
@@ -1082,6 +1249,23 @@ def run_readmap(args, out):
     if out:
         rm.save(os.path.join(out, "readmap_start.json"))
     return rm
+
+
+def store_dir(args):
+    """(e14) Where the readability store lives: the site's folder on the Pi; a dry run only with --readmap-store."""
+    if getattr(args, "dry", False):
+        return getattr(args, "readmap_store", "") or ""
+    return (args.site_ or {}).get("conf_dir") or ""
+
+
+def light_now(args):
+    """(e14) The light at the start: --sim-light in a dry run, else a few pictures from the recorder's stream."""
+    if getattr(args, "sim_light", None) is not None:
+        return float(args.sim_light)
+    if getattr(args, "dry", False):
+        return None
+    import readmap_store as RS
+    return RS.grey_now(getattr(args, "stream", "127.0.0.1:8000"))
 
 
 def learn_readmap(args, out, sess):
@@ -1099,6 +1283,19 @@ def learn_readmap(args, out, sess):
         return
     nf, ns = OB.learn_from_logs(rm, out)
     rm.save(p)
+    import readmap_store as RS
+    sd = store_dir(args)
+    if RS.enabled() and sd:
+        # (e14) this run's OWN evidence (against its start map), kept as one session with its light
+        try:
+            with open(os.path.join(out, "readmap_start.json")) as f:
+                base = OB.ReadMap.from_json(json.load(f))
+            g = float(args.sim_light) if getattr(args, "sim_light", None) is not None else run_brightness(out)
+            say("READABILITY: this run's own evidence %s" % RS.add_session(
+                sd, rm, RS.evidence(rm, RS.snapshot(base)), grey=g, tag="*", kind="mission",
+                sid=os.path.basename(out)))
+        except (OSError, ValueError, KeyError) as e:
+            say("(readability store not added to: %s)" % e)
     # (e13, school 13:1x lights off: mean grey 70 against 91 on 9 Nov, about 7 pictures a second; the one robot, tag 4 at
     # (41, 104), read in every picture) readability depends on the light: this run's evidence is ALSO kept under its
     # brightness (the bridge's brightness.csv median), readmap_light.json beside it: {grey: the map's cells}
@@ -1210,6 +1407,16 @@ def run(args):
           "--poses-to", "127.0.0.1:5011", "--replan-from-camera", "--timeout-s", str(args.timeout_s),
           "--border-cm", str(args.border_cm), "--min-gap-cm", str(args.min_gap_cm),
           "--place-tol-cm", "4"]
+    try:
+        # (e14) the battery floor from Mission Control's Advanced or the site file too (MIRLT_MIN_BATTERY still wins):
+        # a run started from Mission Control or tmux gets it with no environment variable
+        import engine_checks as EC_
+        bf, bw = EC_.battery_floor_used(site=args.site_)
+        rp += ["--battery-floor", str(bf)]
+        say("BATTERY FLOOR: %s" % bw)
+    except Exception as e:  # noqa: BLE001
+        say("(battery floor: run_plan's own default: %s)" % e)
+    rp += tagless_args(args)[0]         # (e14) robots with no tag that reads start where the motion finding put them
     if args.tracking_ == "none":
         # no camera at all (2026-11-03): run_plan's own "none" source (each robot gets its start pose once, then wheels
         # and gyro); nothing waits for a camera (no facing check, no turn pause, no re-plan from the camera)
@@ -1274,7 +1481,10 @@ def run(args):
               "--dir", sess, "--motion", roam_motion]   # (Nick 9 Nov) curves (default) or stopturn, from the Start screen's Advanced
         for k_, v_ in sorted((getattr(args, "aliases_", None) or {}).items()):
             rp += ["--alias", "%s=%s" % (k_, v_)]      # (e11, 9 Nov school: "No robot answered") AL-1DC0 is Alpha
-        if os.path.exists(os.path.join(out, "readmap_start.json")):
+        if os.path.exists(os.path.join(out, "readmap_roam.json")):
+            # (e14) where EVERY tag of this run reads at today's light
+            rp += ["--readable-map", os.path.join(out, "readmap_roam.json")]
+        elif os.path.exists(os.path.join(out, "readmap_start.json")):
             # (e13) plan only where the camera reads tags (e12's practice: robots roamed past x 254 cm and stood lost)
             rp += ["--readable-map", os.path.join(out, "readmap_start.json")]
         say("FREE ROAM DRIVING: %s" % ("straight lines (stopturn: stop and turn on the spot)" if roam_motion ==
@@ -1338,6 +1548,8 @@ def run(args):
             tcfg["stickers"] = {k: v[:2] for k, v in mmap["spots"].items()}
         if getattr(args, "sim_plain_roofs", False):
             tcfg["plain_roofs"] = True         # (e13) runs without roof tags: every robot's roof plain white
+        elif getattr(args, "sim_tagless", ""):
+            tcfg["plain_roofs"] = [n_.strip() for n_ in args.sim_tagless.split(",") if n_.strip()]   # (e14)
         for g in args.tag_gap:
             n_, _, rest = g.partition("@")
             t_, _, d_ = rest.partition(":")
@@ -1968,6 +2180,11 @@ def main(argv=None):
                          "go (default: the planner's 15 cm)")
     ap.add_argument("--visit-keep-unreadable", action="store_true",
                     help="(e11) with --visit-order: keep points the camera cannot read (default: flagged and skipped)")
+    g.add_argument("--sim-light", type=float, default=None, help="(e14) simulator: the overhead camera's mean grey "
+                   "(the school: 91 lit, 70 with the room lights off): the readable area is chosen for it")
+    g.add_argument("--readmap-store", default="", help="(e14) simulator: a folder for the readability store (a dry "
+                   "run never touches the Pi's)")
+    g.add_argument("--sim-tagless", default="", help="(e14) simulator: these robots carry no roof tag (NAME,NAME)")
     g.add_argument("--practice-real", action="store_true",
                    help="(e11, 9 Nov) practice on the REAL path (implies --dry): simulated robots that answer with WiFi "
                         "names (AL-xxxx) under aliases, the real launcher arguments, real CameraModel camera models")

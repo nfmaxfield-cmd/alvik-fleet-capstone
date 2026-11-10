@@ -488,7 +488,8 @@ def test_a_turn_that_hunts_is_said_as_not_settled_and_a_robot_still_following_is
     assert "TURN DID NOT SETTLE" in src and 'link.send(rb.ip, "stop")\n            if link.wait_for' in src
 
 
-def test_readability_is_kept_per_tag_where_the_evidence_differs(tmp_path):
+def test_readability_is_kept_per_tag_where_the_evidence_differs(tmp_path, monkeypatch):
+    monkeypatch.setenv("MIRLT_READMAP_STORE", "0")      # (e14) e13's readmap_tag<id>.json, kept on its switch
     import calib_run as CR
     import observe as OB
     cls = next(v for v in vars(CR).values() if isinstance(v, type) and hasattr(v, "readmap_tag"))

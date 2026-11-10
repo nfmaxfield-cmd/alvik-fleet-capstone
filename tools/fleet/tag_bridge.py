@@ -34,7 +34,7 @@ Writes to --out: track.csv (as cam_bridge's, for line_check.py), tag_poses.csv (
 sigma, size check, picture position), tag_obs.csv (every read's corners: the site fit's input), ref_watch.csv,
 events.jsonl, bridge_summary.json.
 """
-VERSION = "2026-11-10e13"   # 2026-11-10e13 (e13): frames.json (new pictures per camera, reference tags read) for the camera check before binding (camera_feed.py).
+VERSION = "2026-11-10e14"   # e14: a robot with no roof tag that reads (found by motion at the start) is followed by the motion detector from where it was found: --seed-motion NAME=X,Y,TH and run_plan's "seed" messages (on_seed). 2026-11-10e13 (e13): frames.json (new pictures per camera, reference tags read) for the camera check before binding (camera_feed.py).
 VERSION_A = "2026-11-10a"   # 2026-11-10a (e12): frame_watch (no pictures from a camera: said loudly, an event, a message to the run); workers joined before the summary; orderly exit. No version string before
 
 import argparse
@@ -345,11 +345,31 @@ class Bridge:
                 except Exception:   # noqa: BLE001
                     pass
 
+    def on_seed(self, msg):
+        """(e14) Where a robot with no roof tag that reads was found by motion (the run's start, or run_plan's "seed"
+        message): its motion track starts there at the next picture. A robot read by its tag ignores it (the tag
+        re-seats its track anyway)."""
+        n = msg.get("robot")
+        if n not in self.counts or self.motion is None:
+            return
+        try:
+            self.__dict__.setdefault("seeds", {})[n] = (float(msg["x"]), float(msg["y"]),
+                                                       None if msg.get("th") is None else float(msg["th"]))
+        except (KeyError, TypeError, ValueError):
+            return
+
     def motion_step(self, cam_name, grey, t, read, out):
         """(e10, C3) The motion detector's picture: robots read by their tag re-seat its track there (or start it);
         robots neither the tag nor the lock-on gave a fix just now get its sure sighting as a fix."""
         if self.motion is None or cam_name != self.motion_cam:
             return
+        for n, (x, y, h) in list((getattr(self, "seeds", None) or {}).items()):
+            # (e14) a robot found by motion (no tag that reads): its track starts where it was found
+            if n not in self.motion_added:
+                self.motion.add(n, x, y, heading=h, t=t)
+                self.motion_added.add(n)
+                self.event("motion_seeded", robot=n, x=round(x, 1), y=round(y, 1))
+            del self.seeds[n]
         here = {n: (p.x, p.y, p.heading) for n, p, u in out if u == "yes"}
         for n, (x, y, h) in here.items():
             st = self.motion.state(n)
@@ -731,6 +751,8 @@ def main(argv=None):
     ap.add_argument("--no-ref-watch", action="store_true", help="do not watch the reference tags (a bumped camera)")
     ap.add_argument("--no-lock", action="store_true", help="(e09) no lock-on: tags only, as before e09")
     ap.add_argument("--no-motion", action="store_true", help="(e10) no motion detector (tags and lock-on only, as e09)")
+    ap.add_argument("--seed-motion", action="append", default=[], metavar="NAME=X,Y[,TH]",
+                    help="(e14) a robot with no roof tag that reads: the motion detector follows it from here")
     ap.add_argument("--board", default="", help="(e10) x0,y0,x1,y1 cm: the table (the motion detector's area; without "
                     "it the motion detector stays off)")
     ap.add_argument("--ref-fit", default="", help="the setup's site_fit.json (default: beside the first camera model)")
@@ -783,6 +805,10 @@ def main(argv=None):
                 motion=not a.no_motion and os.environ.get("MIRLT_TAG_MOTION", "1") != "0",
                 board=[float(v) for v in a.board.split(",")] if a.board else None)
     br.ml_init()                       # (e13) the trained detector: off unless MIRLT_ML_DETECTOR=1/auto and a model
+    for sd_ in a.seed_motion:          # (e14) robots with no tag that reads, found by motion before the run
+        n_, _, v_ = sd_.partition("=")
+        q_ = [float(x_) for x_ in v_.split(",")]
+        br.on_seed({"robot": n_, "x": q_[0], "y": q_[1], "th": q_[2] if len(q_) > 2 else None})
     print("Tag bridge: %s tags (%s cm, %s cm up) on %s; cameras %s; fixes to %s%s. Logs: %s" % (
         tags.get("family"), tags.get("tag_cm"), tags.get("height_cm"),
         ", ".join("%s=%d" % kv for kv in tags["ids"].items()), ", ".join(models), a.to,
@@ -825,6 +851,8 @@ def main(argv=None):
                 msg = json.loads(data.decode("utf-8", "replace"))
                 if isinstance(msg, dict) and msg.get("type") == "pose":
                     br.on_pose(msg)
+                elif isinstance(msg, dict) and msg.get("type") == "seed" and msg.get("how") == "motion find":
+                    br.on_seed(msg)          # (e14) only the motion finding's seeds (the lights' seeds are cam_bridge's)
             except (BlockingIOError, OSError):
                 time.sleep(0.01)
             except ValueError:

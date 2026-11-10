@@ -61,7 +61,7 @@ for p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recognit
 
 import numpy as np   # noqa: E402
 
-VERSION = "2026-11-10i"   # 11-10i: the binding looks over longer windows and waits for a fresh read after each wiggle half (a tag that reads only now and then, school 15:00). 11-10h: the never-give-up hold makes find-me wiggles (when its turning circle + error is clear) so the motion detector can find it and the recovery bring it back (Nick 14:32: motion, not hands). 11-10e13 (e13): never give up (the recovery drives blind while its bubble + stop cannot reach the edge margin, no 8 cm / 40 cm caps: MIRLT_BLIND_RULE=cap; a lost tag holds with no time limit, asks for a hand; cam_pose_sure and every unguarded camera pose wait the same way; MIRLT_CALIB_GIVEUP=1 the 30 s end), readability per tag, TURN DID NOT SETTLE, stop resent after the curve phase, the motion detector on in its bridge; the camera check before binding (camera_feed: no pictures is said as that, never the robot or tag); tracked for the sleep after a run.
+VERSION = "2026-11-10e14"   # e14 (10 Nov): every robot found by its own small move at the start (motion_find: anywhere on the table, with or without a tag that reads; one found where its tag does not read drives itself back, never giving up; MIRLT_CAMERA_DISCOVERY=off the wiggle alone); calibration on any surface (its own spots inside the readable area when the site has no proven stickers: --spots / MIRLT_CALIB_SPOTS / calibration.spots); the readability evidence chosen and kept by light and tag (readmap_store; MIRLT_READMAP_STORE=0 the old readmap.json); a tour point whose tag was just lost goes to the end of the tour once, then is skipped (MIRLT_RETRY_LOST=again the old aim-again); the battery floor from the site / Mission Control said at the start; LOW-BATTERY CALIBRATION under 40 %; --sim-dark, --sim-extra-camera, --sim-light, --sim-start X,Y. VERSION_10I = "2026-11-10i"   # 11-10i: the binding looks over longer windows and waits for a fresh read after each wiggle half (a tag that reads only now and then, school 15:00). 11-10h: the never-give-up hold makes find-me wiggles (when its turning circle + error is clear) so the motion detector can find it and the recovery bring it back (Nick 14:32: motion, not hands). 11-10e13 (e13): never give up (the recovery drives blind while its bubble + stop cannot reach the edge margin, no 8 cm / 40 cm caps: MIRLT_BLIND_RULE=cap; a lost tag holds with no time limit, asks for a hand; cam_pose_sure and every unguarded camera pose wait the same way; MIRLT_CALIB_GIVEUP=1 the 30 s end), readability per tag, TURN DID NOT SETTLE, stop resent after the curve phase, the motion detector on in its bridge; the camera check before binding (camera_feed: no pictures is said as that, never the robot or tag); tracked for the sleep after a run.
 VERSION_10G = "2026-11-10g"     # 11-10g: a standing robot is never given up for sparse tag reads: it is measured over longer windows (Nick 13:34; dim light). 11-10f: the start waits for the camera fix after the wiggle (dim light, ~7 fps: refused at once, school 13:25). 11-10e: a run ended for poor tag reads DOES try to park again (Nick 12:48: never give up on getting back to where it is seen); it drives only with a camera fix (cam_pose_sure waits for one). 11-10d: no crash parking with no camera fix (RunEnd, caught: "Could not park"). 11-10c: Phase A waits for the camera fix instead of crashing on None (school 12:35). 11-10b (e12, Nick 10 Nov): the curve phase (phase R: constant-curvature arcs left and right at free roam's radii and two speeds, fitted from the camera, arc_k_scale / arc_d_scale saved when they agree; --arc-phase auto/on/off), points in your order (--visit-order), the proven workspace for the tours' room, the camera self-check at the start. VERSION_10A was:
 VERSION_10A = "2026-11-10a"     # 11-10a: a leftover camera reader holding port 5011 is stopped first (stale_bridge.py). 11-05i (9 Nov, school): a tripped stop mid-tour crashed the run (TypeError: ev() got two
                              # values for kind); the trip event now says stop_kind. VERSION_H was:
@@ -89,6 +89,9 @@ DWELL_S = 3.0            # Nick / Jay-Sun: 3 s stop at each point
 SETTLE_S = 0.4           # chosen: after a leg ends, wait this long, then average the camera over MEASURE_S
 MEASURE_S = 1.2          # chosen: ~12 reads at 10 a second. DOE note: 0.6 / 1.2 / 2.4 s against the per-leg error's
                          # spread with the robot standing still (still period)
+LOW_BATTERY_NOTE_PCT = 40   # (e14, the coordinator 10 Nov) a calibration started under this is marked a "low-battery
+                         # calibration" in its report (values taken on a weak battery). Chosen; DOE row: calibration
+                         # against battery (docs/doe-backlog.md)
 LOST_HOLD_S = 1.0        # chosen (cautious): the tag unseen this long while driving -> stop and hold. At 10 cm/s that
                          # is 10 cm blind at most. DOE note: 0.5 / 1 / 2 s against holds per tour and how far it drives
                          # blind (the camera's dropout lengths from camera_track.csv)
@@ -251,17 +254,32 @@ def wrap180(a):
     return (a + 180.0) % 360.0 - 180.0
 
 
+OWN_SPOTS_N = 20         # (e14) the calibration's own spots: as many as the school's stickers (P01-P20). Not chosen here
+OWN_SPOTS_MIN_CM = 25.0  # CHOSEN (e14): spots at least this far apart, so every tour leg is a measurable length (the
+                         # rolls' shortest is 20 cm). DOE row (e14): 15 / 25 / 40 cm against the fit's +- per tour minute
+OWN_SPOTS_GRID_CM = 5.0  # the candidates' grid (a search step, under the robot's half body). Not tuned; no DOE
+OWN_SPOTS_KEEPOUT_EXTRA = 5.0   # CHOSEN (e14): spots this much further from a keep-out than the legs' own clearance,
+                         # so the point's leg error does not bring it inside. No DOE (a margin over a margin)
+EDGE_STAGE_ROOM = 8.0    # a spot this much further in than the edge margin needs no near-edge staging (Site.near_edge)
+
+
 # =============================================================================================== the site
 class Site:
     """The school site's table, points, keep-outs (outlets and reference tiles), edge margin and the camera's view."""
 
-    def __init__(self, site, park_label="P11"):
+    def __init__(self, site, park_label="P11", spots=None):
         import sticker_points as SP
         import production as PR
         self.site = site
         t = site.get("table") or {}
         self.L, self.W = float(t.get("length_cm", 396.2)), float(t.get("width_cm", 167.6))
-        pts, zones, _w = SP.points_cm(site)
+        # (e14, Nick 15:23: "if I clicked calibration on a new surface, it wouldn't know what to do?") the typed
+        # stickers only where they are present and proven; otherwise the run makes its own spots (make_own_spots)
+        self.spots_mode, self.spots_why = spots_mode(site, spots)
+        if self.spots_mode == "stickers":
+            pts, zones, _w = SP.points_cm(site)
+        else:
+            pts, zones = {}, {}
         self.points = {k: tuple(v) for k, v in pts.items()}
         self.zones = zones
         self.edge = float(site.get("edge_in_cm", 13.0))
@@ -279,6 +297,58 @@ class Site:
         hp = (site.get("homes") or {})
         self.park_label = park_label
         self.park_face = float(hp.get("face_deg", 90.0))
+
+    def make_own_spots(self, readable, n_max=OWN_SPOTS_N):
+        """(e14) The calibration's own spots, when the site has no proven stickers: inside the table the cameras
+        measured, where the readability map says tags read (readable(x, y) -> bool), clear of the edges (the edge
+        margin + EDGE_STAGE_ROOM, so no point needs the near-edge staging) and of every keep-out it knows (reference
+        tiles, outlets, drops the proven workspace found); spread out (each new spot the candidate furthest from the
+        ones taken, so the legs between them vary in length and heading), at least OWN_SPOTS_MIN_CM apart. Labelled
+        S01, S02 ... in a serpentine order along the table (the tours' order). Returns words."""
+        m = self.edge + EDGE_STAGE_ROOM
+        g = OWN_SPOTS_GRID_CM
+        cand = []
+        x = m
+        while x <= self.L - m + 1e-6:
+            y = m
+            while y <= self.W - m + 1e-6:
+                if self.edge_dist((x, y)) >= m and self.keepout_dist((x, y))[0] >= KEEPOUT_CLEAR_CM + OWN_SPOTS_KEEPOUT_EXTRA \
+                        and readable(x, y):
+                    cand.append((round(x, 1), round(y, 1)))
+                y += g
+            x += g
+        if not cand:
+            self.points, self.zones = {}, {}
+            return "no spot where the camera reads tags, clear of the edges and keep-outs, was found"
+        cx = sum(c[0] for c in cand) / len(cand)
+        cy = sum(c[1] for c in cand) / len(cand)
+        taken = [min(cand, key=lambda c: math.hypot(c[0] - cx, c[1] - cy))]
+        while len(taken) < n_max:
+            best = max(cand, key=lambda c: min(math.hypot(c[0] - t_[0], c[1] - t_[1]) for t_ in taken))
+            if min(math.hypot(best[0] - t_[0], best[1] - t_[1]) for t_ in taken) < OWN_SPOTS_MIN_CM:
+                break
+            taken.append(best)
+        centre = taken[0]
+        # the tours' order: a serpentine along the table (columns of OWN_SPOTS_MIN_CM)
+        order = sorted(taken, key=lambda c: (int(c[0] // OWN_SPOTS_MIN_CM),
+                                             c[1] if int(c[0] // OWN_SPOTS_MIN_CM) % 2 == 0 else -c[1]))
+        self.points = {"S%02d" % (k + 1): c for k, c in enumerate(order)}
+        self.zones = {k: 1 for k in self.points}
+        self.own_centre = next(k for k, c in self.points.items() if c == centre)
+        return ("%d spots of its own (no proven stickers: %s), %.0f cm or more apart, at least %.0f cm from the edges, "
+                "where the camera reads tags (%d candidates on a %.0f cm grid)" % (
+                    len(self.points), self.spots_why, OWN_SPOTS_MIN_CM, m, len(cand), g))
+
+    def own_park_spots(self, n=3):
+        """(e14) Park spots among its own spots: the one nearest the middle of the readable area first (rolls there have
+        the most room), then the ones furthest from the spots already taken."""
+        if not self.points:
+            return ()
+        out = [getattr(self, "own_centre", None) or next(iter(self.points))]
+        while len(out) < min(n, len(self.points)):
+            out.append(max((k for k in self.points if k not in out), key=lambda k: min(
+                math.hypot(self.points[k][0] - self.points[o][0], self.points[k][1] - self.points[o][1]) for o in out)))
+        return tuple(out)
 
     def set_parked(self, poses):
         """(5 Nov) the other robots standing still: {name: (x, y)} where the camera sees them, each kept out as a
@@ -377,6 +447,36 @@ class Site:
             if out:
                 break
         return out
+
+
+def spots_mode(site, override=None):
+    """(e14) ("stickers" | "own", why). The calibration's spots: the typed stickers when they are present AND proven
+    (a points file of stickers, not the grid site_detect makes for a new area, every point on the table), else its own
+    (make_own_spots). Switch: --spots, else MIRLT_CALIB_SPOTS, else the site's calibration.spots: auto (default) /
+    stickers / own."""
+    import sticker_points as SP
+    v = (override or os.environ.get("MIRLT_CALIB_SPOTS") or ((site or {}).get("calibration") or {}).get("spots")
+         or "auto").lower()
+    pt = (site or {}).get("points") or {}
+    pf = SP.points_file(site)
+    if v == "own":
+        return "own", "asked for (spots: own)"
+    if not pf or not os.path.exists(pf):
+        return "own", "the site has no points file"
+    if "not stickers" in str(pt.get("_note", "")) or pt.get("kind") == "grid":
+        return "own", "the site's points are a grid made for a new area, not stickers"
+    try:
+        pts, _z, _w = SP.points_cm(site)
+    except Exception as e:  # noqa: BLE001
+        return "own", "the points file could not be read (%s)" % e
+    t = (site or {}).get("table") or {}
+    L, W = float(t.get("length_cm") or 0), float(t.get("width_cm") or 0)
+    off = [k for k, (x, y) in pts.items() if L and W and not (0 < x < L and 0 < y < W)]
+    if not pts:
+        return "own", "the points file is empty"
+    if off and v != "stickers":
+        return "own", "the stickers %s lie off the table measured (%.0f x %.0f cm): not proven" % (", ".join(off), L, W)
+    return "stickers", ("the typed stickers (%d, all on the table)" % len(pts)) if v == "auto" else "asked for (spots: stickers)"
 
 
 def solid(why):
@@ -818,6 +918,8 @@ def four_point(cam_c, h, points):
     out = {}
     C = np.asarray(cam_c, float)
     for p in JAY_IN:
+        if p not in points:
+            continue                     # (e14) its own spots (no stickers): Jay-Sun's four points are not here
         x, y = points[p]
         k = C[2] / (C[2] - h)
         fx, fy = C[0] + (x - C[0]) * k, C[1] + (y - C[1]) * k
@@ -924,9 +1026,37 @@ class SimEye(Eye):
             time.sleep(0.1)
 
     def transform(self, msg):
+        """(e14) The simulator's true pose of every robot is kept (truth_now: the simulated cameras' pictures for robot
+        finding by motion are drawn from it), and which robots' tags were NOT read just now (unread_now: drawn with a
+        plain roof)."""
+        name = msg.get("robot")
+        try:
+            self.__dict__.setdefault("truth", {})[name] = (float(msg["x"]), float(msg["y"]), float(msg["th"]))
+        except (KeyError, TypeError, ValueError):
+            pass
+        out = self._transform(msg)
+        un = self.__dict__.setdefault("unread_set", set())
+        if out is None:
+            un.add(name)
+        else:
+            un.discard(name)
+        return out
+
+    def truth_now(self):
+        return dict(getattr(self, "truth", {}) or {})
+
+    def unread_now(self):
+        return set(getattr(self, "unread_set", set()) or set())
+
+    def _transform(self, msg):
         name = msg.get("robot")
         if name not in self.sim_tags:
             return None
+        if self.sim_tags.get(name) is None or int(self.sim_tags[name]) < 0:
+            return None                  # (e14) a robot with no roof tag (a plain roof): never read
+        for (dx, dy, dr, _f) in getattr(self, "darks", []) or []:
+            if math.hypot(float(msg["x"]) - dx, float(msg["y"]) - dy) <= dr:
+                return None              # (e14) a dark patch: the tag does not read there (the motion may still see it)
         el = time.time() - self.t_made
         if any(t <= el < t + d for t, d in self.gaps):
             return None
@@ -1309,7 +1439,11 @@ class CalibRun:
     def __init__(self, a, site, folder, park_label=None, parent=None):
         os.makedirs(folder, exist_ok=True)
         self.a, self.folder, self.parent = a, folder, parent
-        self.S = Site(site, park_label or PARK_SPOTS[0])
+        self.S = Site(site, park_label or PARK_SPOTS[0], spots=getattr(a, "spots", None))
+        if parent is not None and parent.S.spots_mode == "own":
+            # (e14) one robot of several: the run's own spots, made once
+            self.S.points, self.S.zones = dict(parent.S.points), dict(parent.S.zones)
+            self.S.own_centre = getattr(parent.S, "own_centre", None)
         if getattr(a, "view_x_max", None):
             self.S.view_x = float(a.view_x_max)   # (11-05g) the tag reads only this far up the table in this light
         self.site = site
@@ -1632,6 +1766,7 @@ class CalibRun:
         find-me wiggle, then the old hold (last resort). Returns the seconds it took."""
         t0 = time.time()
         x, y, th = est
+        self.last_lost_at = (x, y)                 # (e14) where the tag was lost: evidence for a deferred point
         rec = dict(t0=round(t0, 2), why=why, start=[round(x, 1), round(y, 1)], uncalibrated=self.safe_frac() > SAFE_FRAC,
                    steps=0, blind_cm=round(blind_cm, 1))
         say("RECOVER: the roof tag was lost (%s): dead reckoning slowly towards where it last read well" % why)
@@ -1912,7 +2047,10 @@ class CalibRun:
 
     # ------------------------------------------------------------------------------------------------- moving
     def goto(self, lab, phase, tour, cam=None, odometry=True, depth=0, name=None):
-        """(11-05c) _goto, aimed again from the camera after a lost-tag recovery (at most 4 times)."""
+        """(11-05c) _goto, aimed again from the camera after a lost-tag recovery (at most 4 times). (e14, the simulator
+        rehearsal 10 Nov: P04 tried four times in a row) a tour point whose tag was just lost on the way is NOT aimed at
+        again at once: Deferred (the tour moves it to its end, then skips it if it fails again); parking and detours
+        keep the old aim-again (MIRLT_RETRY_LOST=again: the old way for tour points too)."""
         self._goto_depth = getattr(self, "_goto_depth", 0) + 1
         try:
             for k in range(4):
@@ -1921,6 +2059,11 @@ class CalibRun:
                 except Recovered as e:
                     if self._goto_depth > 1:
                         raise                      # the outermost goto aims again
+                    if RETRY_LOST != "again" and isinstance(lab, str) and lab in self.S.points and \
+                            lab != self.S.park_label and getattr(self, "_in_tour", False):
+                        raise Deferred(e.cam, "the camera lost the roof tag on the way to %s (near %s)" % (
+                            lab, "%.0f, %.0f" % tuple(self.last_lost_at) if getattr(self, "last_lost_at", None)
+                            else "where it was"))
                     say("  after the recovery: aiming at %s again from where the camera sees it" % (name or lab))
                     cam, odometry = e.cam, False
             if lab in self.S.points and lab != self.S.park_label:
@@ -2063,7 +2206,7 @@ class CalibRun:
         b = st["battery"]
         self.battery.append((time.time(), b))
         self.status["battery"] = b
-        floor = EC.battery_floor()
+        floor = EC.battery_floor_used(site=self.site)[0]     # (e14) the site's / Mission Control's floor too
         if b < floor:
             raise LowBattery("battery %d %% is under the floor %d %% (engine_checks.battery_floor)" % (b, floor))
         return b
@@ -2074,7 +2217,19 @@ class CalibRun:
         cam = self.cam_pose()
         if cam is not None:
             self.D = tuple(cam)             # each tour starts from where the camera has it (the raw track does not)
-        for j, lab in enumerate(order):
+        order = list(order)
+        deferred = set()
+        self._in_tour = True
+        try:
+            return self._tour(phase, k, order, cam, deferred)
+        finally:
+            self._in_tour = False
+
+    def _tour(self, phase, k, order, cam, deferred):
+        j = -1
+        while j + 1 < len(order):
+            j += 1
+            lab = order[j]
             if self.stop_flag.is_set():
                 raise RunEnd("stopped")
             self.set_status(words="Phase %s tour %d: point %s (%d of %d)" % (phase, k, lab, j + 1, len(order)),
@@ -2106,6 +2261,28 @@ class CalibRun:
                 continue
             try:
                 cam = self.goto(lab, phase, k, cam=cam)
+            except Deferred as e:
+                # (e14) not re-tried at once: the spot where the tag was lost is evidence; the point goes to the end of
+                # the tour once, and is skipped (with the reason) if the tag is lost on the way again
+                lost = getattr(self, "last_lost_at", None)
+                if lost is not None:
+                    for hx_ in (self.readmap(), self.readmap_tag()):
+                        hx_.add(lost[0], lost[1], False)
+                if lab not in deferred:
+                    deferred.add(lab)
+                    order.append(lab)
+                    self.ev("point_deferred", point=lab, why=e.why, lost_at=lost)
+                    say("  %s moved to the end of this tour: %s (not tried again at once)" % (lab, e.why))
+                    cam = e.cam or self.cam_pose()
+                    continue
+                self.ev("skip_point", point=lab, why=e.why + "; a second time, at the end of the tour")
+                say("  %s skipped: %s, a second time (it was moved to the end of the tour once)" % (lab, e.why))
+                self.skipped_pts = set(getattr(self, "skipped_pts", set())) | {lab}
+                for hx_ in (self.readmap(), self.readmap_tag()):
+                    for _ in range(3):
+                        hx_.add(*self.S.points[lab], False)
+                cam = e.cam or self.cam_pose()
+                continue
             except SkipPoint as e:
                 self.ev("skip_point", point=lab, why=e.why)
                 say("  %s skipped: %s; the tour goes on" % (lab, e.why))
@@ -2805,7 +2982,133 @@ class CalibRun:
         self.ev("compass_check", robot=rb.name, ok=ok, how=how)
         return ok
 
-    def bind(self, found):
+    # ------------------------------------------------------------------------------------------------- (e14) finding
+    def motion_cams(self):
+        """(e14) Every camera for robot finding by motion: the simulator's pictures (drawn from its true poses) in a
+        dry run; on the Pi every camera found (the recorder's streams, then /dev/video cameras it does not hold), the
+        first with the setup's camera model. Returns ([CamInfo], [closers])."""
+        import camera_discovery as CD
+        if self.a.dry:
+            import motion_find as MF
+            cam = getattr(self, "sim_cam", None)
+            spec = [dict(name="overhead", pos=tuple(cam.C) if cam is not None else (-114.3, self.S.W / 2.0, 145.0),
+                         look=tuple(getattr(self.a, "sim_look", None) or (150.0, self.S.W / 2.0, 0.0)), hfov=70.4)]
+            sp = MF.SimPictures(self.eye.truth_now, getattr(self, "sim_tags", {}) or {}, (self.S.L, self.S.W),
+                                cams=spec, darks=getattr(self.eye, "darks", []) or [], unread=self.eye.unread_now,
+                                extra_blind=bool(getattr(self.a, "sim_extra_camera", False)))
+            return sp.caminfos(), []
+        from cameras import CameraModel
+        cal = getattr(self.a, "cal_used", None)
+        model = CameraModel.load(cal) if cal and os.path.exists(cal) else None
+        found = CD.find_cameras()
+        grabs = [CD.Grabber(c["src"]) for c in found]
+        cams = [CD.CamInfo(c["name"], g.grab, model if (k == 0 and c["kind"] == "stream") else None)
+                for k, (c, g) in enumerate(zip(found, grabs))]
+        return cams, [g.close for g in grabs]
+
+    def clear_space_ok(self, words):
+        """(e14) Did the person confirm the clear space for the strokes? --clear-space yes / no; auto: a dry run yes,
+        MIRLT_CLEAR_SPACE_OK=1 (Mission Control's Calibrate card ticks it) yes, a terminal asks, else no (every robot
+        then wiggles on the spot instead: only its own footprint)."""
+        v = str(getattr(self.a, "clear_space", "auto") or "auto")
+        if v in ("yes", "no"):
+            return v == "yes"
+        if self.a.dry and hasattr(getattr(self, "eye", None), "truth_now"):
+            # the simulator's person looks at the table: robots with that much room from every edge (the truth)
+            R = float(getattr(self, "_clear_r", 19.0))
+            return {n for n, p_ in self.eye.truth_now().items() if min(p_[0], p_[1], self.S.L - p_[0],
+                                                                       self.S.W - p_[1]) >= R}
+        if self.a.dry or os.environ.get("MIRLT_CLEAR_SPACE_OK") == "1":
+            return True
+        if sys.stdin is not None and sys.stdin.isatty():
+            try:
+                return input("Has every robot that much clear space round it? (y/n) ").strip().lower().startswith("y")
+            except EOFError:
+                return False
+        return False
+
+    def find_by_motion(self, found):
+        """(e14, Nick 10 Nov) Each robot found by its own small move, anywhere on the table, with or without a roof tag
+        that reads (motion_find.py); a robot found where its tag does not read drives itself back (never give up).
+        Returns {wifi name: tag id} for the robots whose tag moved with their own stroke (bound by it)."""
+        import motion_find as MF
+        import camera_discovery as CD
+        if not MF.enabled() or self.a.binding == "fixed":
+            return {}
+        self.set_status(phase="find", words="Finding each robot by its own small move (the motion detector)")
+        try:
+            cams, closers = self.motion_cams()
+        except Exception as e:  # noqa: BLE001  (finding by motion never stops a run: the wiggle binding follows)
+            say("(robot finding by motion skipped: no cameras opened: %s)" % e)
+            return {}
+        try:
+            if not cams:
+                say("(robot finding by motion skipped: no camera found)")
+                return {}
+            cpp = None
+            m0 = next((c.model for c in cams if c.model is not None), None)
+            if m0 is not None:
+                try:
+                    cpp = 1.0 / float(m0.px_per_cm(self.S.L / 2.0, self.S.W / 2.0, 4.0))
+                except Exception:  # noqa: BLE001
+                    cpp = None
+            cl = CD.clearance(cpp)
+            say("CLEAR SPACE (finding each robot by its own small move): " + cl["words"])
+            self._clear_r = cl["radius_cm"]
+            ok = self.clear_space_ok(cl["words"])
+            if isinstance(ok, set):
+                rest_ = sorted(set(rb.name for rb in self.robots) - ok)
+                say("  clear space confirmed for %s; %s %s on the spot instead (only its own footprint)" % (
+                    ", ".join(sorted(ok)) or "no robot", ", ".join(rest_) or "none",
+                    "wiggles" if len(rest_) == 1 else "wiggle"))
+            elif not ok:
+                say("  the clear space was not confirmed: each robot WIGGLES on the spot instead of a stroke (+-%.0f "
+                    "deg: only its own footprint)" % CD.WIGGLE_DEG)
+            robots = {rb.name: rb for rb in self.robots}
+            for rb in self.robots:
+                rb.set("e02_cms", CD.DISC_SPEED)
+            # a pose guess from a pinned roof tag read where it stands: a stroke only where that guess shows it clear
+            pins = load_pins(self.site, state_path(self.a, PINS_FILE)) if getattr(self.a, "pins", True) else {}
+            wf = getattr(self, "wifi", {}) or {}
+            guesses = {}
+            for rb in self.robots:
+                t = (pins.get(wf.get(rb.name)) or {}).get("tag")
+                l_ = self.eye.last(int(t)) if t is not None else None
+                if l_ is not None and time.time() - l_[0] < 3.0:
+                    guesses[rb.name] = (l_[1], l_[2], l_[3])
+            def rm_tag(t):
+                old = getattr(self, "tag", None)
+                self.tag = t
+                try:
+                    return self.readmap_tag()
+                finally:
+                    if old is None:
+                        del self.tag
+                    else:
+                        self.tag = old
+            pre, res = MF.run_finding(robots, self.eye, cams, self.S, self.readmap(),
+                                      ok if isinstance(ok, set) else (True if ok else set()), guesses, log=say,
+                                      ev=self.ev, stop=self.stop_flag.is_set, hold_say_s=HOLD_SAY_S,
+                                      turn_dps=TURN_DPS, final_cms=FINAL_CMS, folder=self.folder, rm_tag=rm_tag)
+            res["clearance"] = cl
+            self.motion_found = res
+            if res.get("tagless"):
+                say("  NOT CALIBRATED: %s (no roof tag reads on %s: the calibration measures by the tag)" % (
+                    ", ".join(res["tagless"]), "it" if len(res["tagless"]) == 1 else "them"))
+                self.robots = [rb for rb in self.robots if rb.name not in res["tagless"]]
+                if not self.robots:
+                    raise RunEnd("no robot here has a roof tag that reads (found by motion: %s); the calibration "
+                                 "measures by the tag" % ", ".join(res["tagless"]))
+            return pre
+        finally:
+            for c in closers:
+                try:
+                    c()
+                except Exception:  # noqa: BLE001
+                    pass
+            self.S.set_parked({})
+
+    def bind(self, found, pre=None):
         self.set_status(phase="bind", words="Binding: each robot does the sync wiggle; the tag that follows it is its")
         if self.a.binding == "fixed":
             names = [site_name_for(self.site, n, ip) for n, ip in found.items()]
@@ -2824,13 +3127,25 @@ class CalibRun:
                 say("Pinned (robot_pins.json): %s: a %.0f deg check wiggle each" % (", ".join(
                     "%s = tag %s" % kv for kv in expect.items()), PIN_CHECK_DEG))
             self.pin_notes = {}
-            b0 = bind_by_wiggle(self.robots, self.eye, wiggle_deg=float(w["deg"]), pause_s=float(w["pause_s"]),
-                                expect=expect, check_deg=PIN_CHECK_DEG, notes=self.pin_notes)
+            pre = dict(pre or {})
+            for n_, t_ in pre.items():
+                # (e14) bound by its own stroke: the roof tag whose reads moved with it (motion_find)
+                self.pin_notes[n_] = "found by motion: tag %d moved with its own stroke" % t_
+                say("  %s: %s" % (n_, self.pin_notes[n_]))
+            rest = [rb for rb in self.robots if rb.name not in pre]
+            b0 = dict(pre)
+            if rest:
+                b0.update(bind_by_wiggle(rest, self.eye, wiggle_deg=float(w["deg"]), pause_s=float(w["pause_s"]),
+                                         expect={k: v for k, v in expect.items() if k not in pre},
+                                         check_deg=PIN_CHECK_DEG, notes=self.pin_notes))
             if getattr(self.a, "pins", True):
                 update_pins(pp, pins, {wf.get(n): t for n, t in b0.items()})
             b = {site_name_for(self.site, n, found[n]): t for n, t in b0.items()}
             how = "wiggle (experiments.py sync wiggle, %.0f deg and back; pinned robots a %.0f deg check)" % (
                 float(w["deg"]), PIN_CHECK_DEG)
+            if pre:
+                how = ("motion (each robot's own finding stroke moved its tag)" if not rest else
+                       "motion for %s; %s" % (", ".join(sorted(pre)), how))
         notes = getattr(self, "pin_notes", {}) or {}
         wf = getattr(self, "wifi", {}) or {}
         rec = {"how": how, "robots": [{"name": site_name_for(self.site, rb.name, rb.ip), "wifi_name": rb.name,
@@ -2857,7 +3172,9 @@ class CalibRun:
         found = self.start_robot()
         self.eye = eye_factory()
         time.sleep(2.0)
-        rec = self.bind(found)
+        pre = self.find_by_motion(found)      # (e14) each robot found by its own small move; brought back if needed
+        rec = self.bind(found, pre)
+        self.apply_pending_evidence()
         self.binding = rec
         # (5 Nov) a roof tag the camera sees that no robot claimed (a robot that did not answer, switched off or
         # asleep, refused for its firmware, or a spare lying there): kept out like a parked robot, where it is now
@@ -3029,11 +3346,43 @@ class CalibRun:
                 # what earlier runs here learned (the site's readmap.json, half weight): blind areas learned per site
                 try:
                     host.rm_words = seed_readmap(host.rm, self.site, getattr(self, "sim_cam", None), getattr(
-                        self.a, "cal_used", None), dry=bool(self.a.dry), state_dir=getattr(self.a, "state_dir", ""))
+                        self.a, "cal_used", None), dry=bool(self.a.dry), state_dir=getattr(self.a, "state_dir", ""),
+                        grey=self.light_now())
                     say("READABILITY: %s" % host.rm_words)
                 except Exception as e:  # noqa: BLE001  (never stops a run: the old seed stays)
                     say("(readability seed: %s; every spot taken as readable until the run learns otherwise)" % e)
+            import readmap_store as RS
+            host.rm_base = RS.snapshot(host.rm)       # (e14) this run's own evidence is what comes after
         return host.rm
+
+    def light_now(self):
+        """(e14) The light now: --sim-light (a dry run), else the bridge's brightness.csv so far (median)."""
+        if getattr(self.a, "sim_light", None) is not None:
+            return float(self.a.sim_light)
+        import readmap_store as RS
+        host = getattr(self, "parent", None) or self
+        return RS.grey_of(getattr(host, "folder", "") or "")
+
+    def apply_pending_evidence(self):
+        """(e14) The spots where a robot was found by motion and its tag did not read: added to that tag's own map once
+        the binding knows the tag (3 tries, none read, as a skipped point)."""
+        host = getattr(self, "parent", None) or self
+        for t, spots in getattr(self, "pending_tag_evidence", []) or []:
+            if t is None:
+                continue
+            old = getattr(self, "tag", None)
+            self.tag = t
+            try:
+                m = self.readmap_tag()
+                for (fx, fy) in spots[:1]:
+                    for _ in range(3):
+                        m.add(fx, fy, False)
+            finally:
+                if old is None:
+                    del self.tag
+                else:
+                    self.tag = old
+        host.pending_tag_evidence = []
 
     def readmap_tag(self):
         """(e13) This robot's roof tag's own readability evidence (a point may read for one tag and not another): no
@@ -3046,6 +3395,13 @@ class CalibRun:
             m = OB.ReadMap(self.S.L, self.S.W)
             folder = getattr(self.a, "state_dir", "") if self.a.dry else ((self.site or {}).get("conf_dir") or "")
             p = os.path.join(folder, "readmap_tag%s.json" % self.tag) if folder else ""
+            import readmap_store as RS
+            if RS.enabled() and folder:
+                # (e14) this tag's own sessions, chosen for the light now (readmap_store)
+                w_ = RS.choose(folder, m, self.light_now(), self.tag, only_tag=True)
+                say("READABILITY for tag %s: %s" % (self.tag, w_))
+                p = ""
+                host.__dict__.setdefault("rm_tag_base", {})[self.tag] = RS.snapshot(m)
             if p and os.path.exists(p):
                 try:
                     with open(p) as f:
@@ -3163,6 +3519,12 @@ class CalibRun:
             self.phase_a_values = dict(BASELINE_DEFAULTS)
         b0 = self.check_battery()
         self.status["battery_start"] = b0
+        if b0 is not None and b0 < LOW_BATTERY_NOTE_PCT:
+            # (e14) values measured on a weak battery: the report says so (DOE row: calibration against battery)
+            self.status["low_battery_start"] = b0
+            self.ev("low_battery_calibration", battery=b0, under=LOW_BATTERY_NOTE_PCT)
+            say("NOTE: %s starts its calibration at %d %% battery (under %d %%): a LOW-BATTERY CALIBRATION; its values "
+                "are taken on a weak battery and the report says so" % (self.name, b0, LOW_BATTERY_NOTE_PCT))
         cam = self.cam_pose_sure()      # (11-10f, school 13:25: refused 2 s after the wiggle in dim light, ~7 fps)
         cam = self.heading_check(cam)
         self.reanchor(cam, "start")
@@ -3226,7 +3588,12 @@ READMAP_SEED = os.environ.get("MIRLT_CALIB_READMAP", "1") != "0"   # (11-10b) sw
                                                                     # until the run learns otherwise (before e12)
 
 
-def seed_readmap(rm, site, sim_cam=None, cal=None, dry=False, state_dir=""):
+def OBS_READ_OK():
+    import observe as OB
+    return OB.READ_OK
+
+
+def seed_readmap(rm, site, sim_cam=None, cal=None, dry=False, state_dir="", grey=None):
     """(11-10b, e12 item 2) The calibration's readability map: the camera model's guess (a tag reads where it is at least
     READ_PX (simulator) / observe.TAG_PX_MIN pixels in the picture at its worst heading), then earlier runs' reads at this
     site (readmap.json in the site's folder; a dry run's own sim folder), half weight. Returns words."""
@@ -3247,6 +3614,13 @@ def seed_readmap(rm, site, sim_cam=None, cal=None, dry=False, state_dir=""):
         words.append("seeded from the camera model (%s)" % os.path.basename(cal))
     folder = state_dir if dry else ((site or {}).get("conf_dir") or "")
     hp = os.path.join(folder, "readmap.json") if folder else ""
+    import readmap_store as RS
+    if RS.enabled() and folder:
+        # (e14) the evidence for the light now and any tag (readmap_store): never the site's readmap.json merged at
+        # full weight (10 Nov: a dim session shrank the area to 26 cm); MIRLT_READMAP_STORE=0 the old way below
+        RS.import_old(folder, OB.ReadMap)
+        words.append(RS.choose(folder, rm, grey, None))
+        hp = ""
     if hp and os.path.exists(hp):
         with open(hp) as f:
             if rm.merge_history(OB.ReadMap.from_json(json.load(f))):
@@ -3342,6 +3716,14 @@ class SkipPoint(Exception):
         self.cam, self.why = cam, why
 
 
+class Deferred(SkipPoint):
+    """(e14) A tour point whose tag was just lost on the way: moved to the end of the tour (once), not aimed at again
+    at once."""
+
+
+RETRY_LOST = os.environ.get("MIRLT_RETRY_LOST", "defer")   # (e14) "defer" (default) / "again" (before e14: up to 4)
+
+
 class Recovered(Exception):
     """(11-05c) a leg inside goto() was interrupted and recovered: the robot is elsewhere now, so the rest of that
     goto's legs (planned from before) must not run: goto() aims again from the camera."""
@@ -3417,18 +3799,43 @@ def sim_map(S, folder, names):
     return p
 
 
+def sim_xy(S, lab):
+    """(e14) A simulated robot's start: a sticker or own spot by its label, "X,Y" in cm, else the run's first park spot
+    (own spots) or the middle of the table."""
+    if lab in S.points:
+        return tuple(S.points[lab])
+    try:
+        x_, y_ = (float(v) for v in str(lab).split(","))
+        return x_, y_
+    except ValueError:
+        pass
+    if S.points:
+        return tuple(S.points.get(getattr(S, "own_centre", None) or next(iter(S.points))))
+    return S.L / 2.0, S.W / 2.0
+
+
+def sim_camera_for(S, z_cm=145.0):
+    """(e14) The simulator's one camera: the school's (behind the TV end, looking down the table) on the school's table;
+    on any other table a camera 60 cm behind its x = 0 end, as high, looking at 45 % of its length (so a new room's dry
+    run has a camera that sees its table). Returns (SchoolCamera, look_at)."""
+    if abs(S.L - 396.2) < 5 and abs(S.W - 167.6) < 5:
+        return SchoolCamera(z_cm=z_cm), (150.0, 83.8, 0.0)
+    look = (0.45 * S.L, S.W / 2.0, 0.0)
+    return SchoolCamera(z_cm=z_cm, behind_cm=60.0, y_cm=S.W / 2.0, look_at=look), look
+
+
 def start_sim(a, S, folder):
     """fleet_sim.py: one robot named from its WiFi (not in the site), on P11 facing +y, ASLEEP, with the deliberately
     wrong true values (what it really needs: --true-cal), its fixes to SimEye."""
     name = a.sim_name
     mp = sim_map(S, folder, [name] + [q.split(":")[0] for q in a.sim_also])
-    x, y = S.points[getattr(a, "sim_start", None) or "P11"]
+    x, y = sim_xy(S, getattr(a, "sim_start", None) or "P11")
     starts = os.path.join(folder, "sim", "starts.json")
-    st = {name: [x, y, 90.0]}
+    st = {name: [x, y, float(getattr(a, "sim_start_heading", 90.0) or 90.0)]}
     for spec in a.sim_also:
-        # (5 Nov) more robots: NAME:TAG:POINT[:HEADING], awake, standing on that sticker
+        # (5 Nov) more robots: NAME:TAG:POINT[:HEADING], awake, standing on that sticker (e14: or X;Y in cm)
         q = spec.split(":")
-        px, py = S.points[q[2]]
+        px, py = sim_xy(S, q[2].replace(";", ","))
         st[q[0]] = [px, py, float(q[3]) if len(q) > 3 else 90.0]
     with open(starts, "w") as f:
         json.dump(st, f)
@@ -3583,8 +3990,21 @@ def main(argv=None):
                     "the reference tags at the start (MIRLT_CAMERA_SELFCHECK=0 too)")
     ap.add_argument("--quick", action="store_true", help="simulator: fewer turns, a shorter still period, 1 tour of "
                                                           "6 points (code checks)")
+    ap.add_argument("--spots", choices=["auto", "stickers", "own"], default=None,
+                    help="(e14) where the calibration drives: auto (default; MIRLT_CALIB_SPOTS, the site's "
+                         "calibration.spots): the typed stickers when present and proven, else spots of its own inside "
+                         "the readable area; stickers; own")
+    ap.add_argument("--clear-space", choices=["auto", "yes", "no"], default="auto",
+                    help="(e14) the clear space round each robot for its finding stroke: yes (confirmed), no (each robot "
+                         "wiggles on the spot instead), auto (a terminal asks; Mission Control's Calibrate sets "
+                         "MIRLT_CLEAR_SPACE_OK=1 when ticked; a dry run: yes)")
     g = ap.add_argument_group("simulator")
     g.add_argument("--dry", action="store_true")
+    g.add_argument("--sim-dark", action="append", default=[], metavar="X,Y,R[,FACTOR]",
+                   help="(e14) simulator: a dark patch (no tag reads there; the pictures FACTOR as bright, default 0.35)")
+    g.add_argument("--sim-extra-camera", action="store_true", help="(e14) simulator: one more camera, looking away")
+    g.add_argument("--sim-light", type=float, default=None, help="(e14) simulator: the overhead camera's mean grey "
+                   "(school: 91 lit, 70 lights off): the readability evidence is chosen and kept for it")
     g.add_argument("--quick-full-tour", action="store_true", help="with --quick: phase A's turns, rolls and still period "
                    "short, but every tour the whole P01-P20 (the edges and the parked robots are what is checked)")
     g.add_argument("--seed", type=int, default=1)
@@ -3633,6 +4053,7 @@ def main(argv=None):
     if a.baseline == "auto":
         a.baseline = str(cal_conf.get("baseline") or "auto")
         a.baseline = a.baseline if a.baseline in ("auto", "defaults", "saved") else "auto"
+    a.park_spots_given = bool(a.park_spots or cal_conf.get("park_spots"))
     a.park_spots = tuple(x.strip() for x in a.park_spots.split(",") if x.strip()) if a.park_spots else \
         tuple(cal_conf.get("park_spots") or PARK_SPOTS)
     if a.sleep_at_end is None:     # (11-05h) the site's calibration.sleep_at_end, else stay awake
@@ -3652,6 +4073,11 @@ def main(argv=None):
     os.makedirs(folder, exist_ok=True)
     a.state_dir = a.state_dir or (os.path.join(folder, "sim") if a.dry else (site.get("conf_dir") or ""))
     say("Calibration run %s, session %s" % (VERSION, folder))
+    try:
+        import engine_checks as EC_
+        say("BATTERY FLOOR: %s" % EC_.battery_floor_used(site=site)[1])      # (e14) the floor used, and where from
+    except Exception as e:  # noqa: BLE001
+        say("(battery floor not read: %s)" % e)
     say("Firmware: %s. Pins: %s. Baseline: %s. Spots: %s." % (
         "robots older than %s are refused" % a.min_firmware if a.min_firmware else "not checked",
         state_path(a, PINS_FILE) if a.pins else "off (a full wiggle for every robot)",
@@ -3659,7 +4085,7 @@ def main(argv=None):
          "defaults": "defaults for every robot (asked)", "saved": "saved values for every robot (asked)"}[a.baseline],
         ", ".join(a.park_spots)))
     run = CalibRun(a, site, folder)
-    if a.quick and not a.quick_full_tour:
+    if a.quick and not a.quick_full_tour and run.S.spots_mode == "stickers":
         run.S_quick = True
         z = run.S.zone12()
         run.S.zone12 = lambda: ["P10", "P14", "P17", "P12", "P20", "P13"] if z else z
@@ -3688,13 +4114,35 @@ def main(argv=None):
     cpu = start_cpu_log(folder, {"calib": os.getpid()}, {"bridge": "tag_bridge.py", "recorder": "camrec.py"})
     if (site or {}).get("attended_only") and not a.dry:
         say("ATTENDED ONLY (Jay-Sun 5 Nov): at school the robots drive only while Jay-Sun is in the room")
+    def own_spots():
+        # (e14) no proven stickers: the run makes its own spots inside the readable area the camera gives it
+        if run.S.spots_mode != "own":
+            say("SPOTS: %s" % run.S.spots_why)
+            return
+        w_ = run.S.make_own_spots(lambda x_, y_: run.readmap().readable(x_, y_)[0])
+        say("SPOTS: " + w_)
+        if not run.S.points:
+            raise RunEnd("the calibration found no spot of its own to drive to: %s. Nothing moved" % w_)
+        if not (getattr(a, "park_spots_given", False)) or not all(q in run.S.points for q in a.park_spots):
+            a.park_spots = run.S.own_park_spots()
+        run.S.park_label = a.park_spots[0]
+        say("  its park spots: %s; the tours: %s" % (", ".join("%s (%.0f, %.0f)" % ((q,) + tuple(run.S.points[q]))
+                                                                 for q in a.park_spots), " ".join(run.S.zone12())))
+        if a.quick and not a.quick_full_tour:
+            run.S_quick = True
+            z_ = run.S.zone12()[:6]
+            run.S.zone12 = lambda: list(z_)
+        run.ev("own_spots", words=w_, spots=run.S.points, park=list(a.park_spots))
     try:
         if a.dry:
             loopback_up()
+            cam, look_ = sim_camera_for(run.S, a.cam_z_cm)
+            a.sim_look = look_
+            run.sim_cam = cam
+            own_spots()
             sp, ips = start_sim(a, run.S, folder)
             procs.append(sp)
             a.robot = a.robot or ips
-            cam = SchoolCamera(z_cm=a.cam_z_cm)
             cam_c = cam.C.tolist()
             tag_h = 6.19
             run.sim_cam = cam
@@ -3704,10 +4152,16 @@ def main(argv=None):
                 run.sim_true_by[q.split(":")[0]] = dict(zip(PARAMS, (float(v) for v in (a.sim_true_also or
                                                                                          a.sim_true).split(","))))
             simtags = {a.sim_name: a.sim_tag}
-            simtags.update({q.split(":")[0]: int(q.split(":")[1]) for q in a.sim_also})
+            simtags.update({q.split(":")[0]: (-1 if q.split(":")[1] in ("-", "none") else int(q.split(":")[1]))
+                            for q in a.sim_also})
+            run.sim_tags = simtags
             def eye_factory():
                 eye = SimEye(folder, FIX_PORT + 100, cam, simtags, tag_h=tag_h, correct=not a.no_height,
                              seed=a.seed, gaps=a.sim_gap)
+                eye.darks = []
+                for d_ in a.sim_dark:            # (e14) dark patches
+                    v_ = [float(q) for q in d_.split(",")]
+                    eye.darks.append((v_[0], v_[1], v_[2], v_[3] if len(v_) > 3 else 0.35))
                 for g in a.sim_gap_at:          # (11-05c) position-triggered tag dropouts
                     xyr, _, dur = g.partition(":")
                     gx, gy, gr = (float(v) for v in xyr.split(","))
@@ -3726,6 +4180,7 @@ def main(argv=None):
             bp, cal, tag_h = start_bridge(a, site, folder)
             a.cal_used = cal                       # (11-10b) the readability seed's camera model
             procs.append(bp)
+            own_spots()                            # (e14) its own spots when the site has no proven stickers
             cam_c = cam_centre_from_model(cal)
             eye_factory = lambda: Eye(folder, FIX_PORT)    # noqa: E731
             import camera_feed as CF     # (e13) every camera sending new pictures, before anything binds or moves
@@ -3772,6 +4227,22 @@ def main(argv=None):
                             pass
             if kept[1:]:
                 say("Readability kept for the next run: %s" % os.path.join(kept[-1], "readmap.json"))
+            try:
+                # (e14) this run's own evidence per tag, kept as sessions with the light (readmap_store)
+                import readmap_store as RS
+                sd = a.state_dir if a.dry else ((site or {}).get("conf_dir") or "")
+                if RS.enabled() and sd:
+                    g_ = float(a.sim_light) if getattr(a, "sim_light", None) is not None else RS.grey_of(folder)
+                    tags_ = getattr(run, "rm_tags", None) or {}
+                    for tg_, m_ in tags_.items():
+                        say("READABILITY for tag %s: %s" % (tg_, RS.add_session(
+                            sd, m_, RS.evidence(m_, (getattr(run, "rm_tag_base", {}) or {}).get(tg_)), grey=g_,
+                            tag=tg_, kind="calibration", sid=os.path.basename(folder))))
+                    if not tags_:
+                        say("READABILITY: %s" % RS.add_session(sd, run.rm, RS.evidence(run.rm, getattr(
+                            run, "rm_base", None)), grey=g_, tag="*", kind="calibration", sid=os.path.basename(folder)))
+            except Exception as e:  # noqa: BLE001
+                say("(readability store not added to: %s)" % e)
     import calib_report as CR
     try:
         words = CR.write_multi(folder, run, a) if getattr(run, "subs", None) else CR.write(folder, run, a)

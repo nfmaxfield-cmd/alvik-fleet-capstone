@@ -26,12 +26,62 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOLS = os.path.dirname(HERE)
 
+VERSION = "2026-11-10e14"  # e14: battery_floor_used / site_floor: the floor from Mission Control's Advanced or the site
+                           # file (MIRLT_MIN_BATTERY still first), said with where it came from. No version before
 BATTERY_FLOOR_DEFAULT = 25 # Nick's ladder floor (a run at 20 % sagged on 2026-10-25), now checked before every run, so a
                            # resumed ladder step or a second Monday run checks it too (the 15:27 L4 started Left at 23 %).
                            # No DOE: a floor below which nothing starts
 BATTERY_FLOOR_LOWEST = 5   # Nick (2 Nov 2026): a low-battery run "doesn't need to stop before 5 %". No DOE: a safety floor
                            # (the low-battery run itself is the experiment that should set the everyday floor)
 BATTERY_FLOOR_ENV = "MIRLT_MIN_BATTERY"
+
+
+def site_floor(site=None):
+    """(e14) The battery floor set for a site outside the environment: (pct, where) from Mission Control's Advanced
+    "Battery floor" (<mc_dir>/advanced.json battery_floor) or the site file's battery_floor, else (None, ""). Every run
+    reads it, whether started from Mission Control, the terminal or tmux (a plain environment variable did not reach a
+    tmux session: school 10 Nov)."""
+    if site is None:
+        try:
+            if HERE not in sys.path:
+                sys.path.insert(0, HERE)
+            import sites as SI
+            site = SI.load()
+        except BaseException:   # noqa: BLE001  (no site: no site floor)
+            return None, ""
+    md = (site or {}).get("mc_dir")
+    if md:
+        try:
+            import json as _j
+            with open(os.path.join(md, "advanced.json")) as f:
+                v = str(_j.load(f).get("battery_floor", "") or "").strip()
+            if v:
+                return max(BATTERY_FLOOR_LOWEST, int(float(v))), "Mission Control's Advanced 'Battery floor'"
+        except (OSError, ValueError, TypeError):
+            pass
+    v = (site or {}).get("battery_floor")
+    try:
+        if v is not None and str(v).strip():
+            return max(BATTERY_FLOOR_LOWEST, int(float(v))), "the site file's battery_floor"
+    except (TypeError, ValueError):
+        pass
+    return None, ""
+
+
+def battery_floor_used(run_type="default", site=None, env=None):
+    """(e14) (floor, words): the floor a run uses and why: MIRLT_MIN_BATTERY (set by hand, or tmux set-environment)
+    first, then Mission Control's Advanced, then the site file, then the run type's default."""
+    env = os.environ if env is None else env
+    raw = str(env.get(BATTERY_FLOOR_ENV, "")).strip()
+    if raw:
+        f = battery_floor(env, run_type)
+        return f, battery_floor_words(f, env)
+    f, where = site_floor(site)
+    if f is not None:
+        return f, "%d %% (%s%s)" % (f, where, "; never under %d" % BATTERY_FLOOR_LOWEST if f == BATTERY_FLOOR_LOWEST
+                                    else "")
+    f = battery_floor(env, run_type)
+    return f, ("%d %% (the default%s)" % (f, "" if run_type == "default" else " for " + run_type))
 
 
 def battery_floor(env=None, run_type="default"):

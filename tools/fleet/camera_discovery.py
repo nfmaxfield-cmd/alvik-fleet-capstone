@@ -50,7 +50,10 @@ for _p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recogni
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-VERSION = "camera-discovery-2026-11-10e13"
+VERSION = "camera-discovery-2026-11-10e14"   # e14 (10 Nov): a wiggle on the spot where a stroke is not safe (the
+#   robot's own footprint only: analyse_wiggle gives its position, no heading); each stroke's END position (end_cm), so a
+#   drive step can be followed by motion (motion_find.py); robots found by motion at the start of every run.
+#   e13: the first version (coverage, strokes, typed names a first guess)
 
 try:
     import cv2
@@ -72,6 +75,9 @@ NOISE_K = 4.0            # (tools/label/motion.py min_threshold 18, noise_factor
 MIN_AREA_FRAC = 0.2      # a change smaller than this share of a robot is noise (motion.py min_area_frac). Not chosen
 DEFAULT_ROBOT_PX = 30.0  # the robot's size in pixels until measured (motion.py default_robot_px). Not chosen here
 BG_FRAMES = 5            # pictures of the still table per camera before each robot's stroke (their median). Not tuned
+WIGGLE_DEG = 30.0        # CHOSEN (e14): the find-me wiggle on the spot (+- this, then back). A square roof turned 30 deg
+                         # changes a band round its four corners (about a third of its area at the robot's own size),
+                         # well over MIN_AREA_FRAC; 90 deg would look the same as the start (a square). DOE row (e14)
 SEEN_K = 3.0             # CHOSEN: a camera sees the robot when the changed area during its stroke is this many times
                          # the largest change in the same camera while every robot stood still (and at least
                          # MIN_AREA_FRAC of a robot). DOE row (docs/doe-backlog.md, e13)
@@ -254,6 +260,28 @@ def leg_mover(robots):
     return mover
 
 
+def leg_turner(robots, dps=60.0):
+    """(e14) The real robots' wiggle on the spot: an idle leg `turn +-deg` (calib_run.Robot.leg; the calibration's turn
+    speed, 60 deg/s), pictures taken as it turns."""
+    def turner(robot, deg, on_tick, n):
+        rb = robots[robot]
+        import threading
+        done = threading.Event()
+        res = {}
+
+        def go():
+            res["r"] = rb.leg("turn", deg, timeout=20.0)
+            done.set()
+        threading.Thread(target=go, daemon=True).start()
+        k = 0
+        while not done.wait(abs(deg) / dps / max(1, n)):
+            k += 1
+            on_tick(k)
+        on_tick(k + 1)
+        return res.get("r")
+    return turner
+
+
 def run_real(site, folder, ips=(), confirm=None, log=print):
     """On the Pi: every camera found, every robot on the WiFi, the clear-space question, the strokes, coverage.json.
     confirm(words) -> True when the person says every robot has that clear space (default: asks in the terminal)."""
@@ -357,6 +385,16 @@ def _robot_px(cam, xy=None):
     return DEFAULT_ROBOT_PX
 
 
+def _robot_px_at(cam, blobs, default):
+    """(e14) The robot's size in pixels where the largest change is (through the camera's model): a far robot in a
+    low camera is a third of DEFAULT_ROBOT_PX, and the noise floor's "need" must shrink with it."""
+    if cam.model is None or not blobs:
+        return default
+    b = max(blobs, key=lambda q: q["area"])
+    xy = _table_pt(cam, b["c"])
+    return _robot_px(cam, xy) if xy is not None else default
+
+
 def still(cams, n=BG_FRAMES):
     """Every camera's still table: the median of n pictures, the threshold from its noise (motion.py's rule), and the
     largest change between still pictures (the quiet level a robot's stroke must stand out from)."""
@@ -388,11 +426,73 @@ def stroke_record(cams, mover, robot, stroke_cm=None, frames_per_leg=6):
                 rec[c.name].append((phase, k, g))
                 c.frames += 1
     snap("pre", 0)
-    mover(robot, +L, lambda k: snap("fwd", k), frames_per_leg)
+    r1 = mover(robot, +L, lambda k: snap("fwd", k), frames_per_leg)
     snap("fwd_end", 0)
-    mover(robot, -L, lambda k: snap("back", k), frames_per_leg)
+    r2 = mover(robot, -L, lambda k: snap("back", k), frames_per_leg)
     snap("end", 0)
+    rec["_moves"] = [r1, r2]          # (e14) what the robot said about its stroke (a refusal is said, not guessed)
     return rec
+
+
+def wiggle_record(cams, turner, robot, deg=WIGGLE_DEG, frames_per_leg=6):
+    """(e14) Robot `robot` turns +deg on the spot and back (where a stroke is not safe: it needs only its own
+    footprint); every camera's pictures kept as stroke_record's ("pre", "fwd" while turning out, "fwd_end", "back",
+    "end")."""
+    rec = {c.name: [] for c in cams}
+
+    def snap(phase, k):
+        for c in cams:
+            g = c.grab()
+            if g is not None:
+                rec[c.name].append((phase, k, g))
+                c.frames += 1
+    snap("pre", 0)
+    r1 = turner(robot, +deg, lambda k: snap("fwd", k), frames_per_leg)
+    snap("fwd_end", 0)
+    r2 = turner(robot, -deg, lambda k: snap("back", k), frames_per_leg)
+    snap("end", 0)
+    rec["_moves"] = [r1, r2]
+    return rec
+
+
+def analyse_wiggle(cam, frames):
+    """(e14) One camera, one robot's wiggle on the spot -> where it stands (the middle of the area that changed while
+    it turned: a square roof turning on its middle changes symmetrically round it). No heading (a square looks the
+    same every quarter turn); seen False when nothing stood out."""
+    if cam.bg is None or not frames:
+        return dict(seen=False, why="no pictures")
+    turn = [g for ph, _k, g in frames if ph in ("fwd", "fwd_end")]
+    if not turn:
+        return dict(seen=False, why="no pictures during the wiggle")
+    rpx = _robot_px(cam)
+    blobs = [_largest(_mask(g, cam.bg, cam.thr), near_px=1.6 * rpx) for g in turn]
+    blobs = [b for b in blobs if b is not None]
+    rpx = _robot_px_at(cam, blobs, rpx)
+    need = max(MIN_AREA_FRAC * rpx * rpx * 0.5, SEEN_K * max(1, cam.quiet_area))
+    best = max([b["area"] for b in blobs] + [0])
+    contrast = round(best / max(1.0, float(cam.quiet_area)), 1)
+    if not blobs or best < need:
+        return dict(seen=False, why="no change stood out (largest %d px, needed %d)" % (best, need), contrast=contrast)
+    b = max(blobs, key=lambda q: q["area"])
+    ys, xs = np.nonzero(b["mask"])
+    mid = (0.5 * (float(np.percentile(xs, 98)) + float(np.percentile(xs, 2))),
+           0.5 * (float(np.percentile(ys, 98)) + float(np.percentile(ys, 2))))
+    body_px = float(max(np.percentile(xs, 98) - np.percentile(xs, 2), np.percentile(ys, 98) - np.percentile(ys, 2)))
+    out = dict(seen=True, how="wiggle", contrast=contrast, where_px=[round(v, 1) for v in mid],
+               body_px=round(body_px, 1), stroke_px=0.0, heading_img_deg=None, frames=len(frames))
+    xy = _table_pt(cam, mid)
+    if xy is not None:
+        out["where_cm"] = [round(xy[0], 1), round(xy[1], 1)]
+        try:
+            out["px_per_cm_model"] = round(float(cam.model.px_per_cm(xy[0], xy[1], 4.0)), 2)
+        except Exception:     # noqa: BLE001
+            pass
+    g = turn[-1]
+    hx, hy = int(round(mid[0])), int(round(mid[1]))
+    w = int(max(10, 1.5 * body_px))
+    roi = g[max(0, hy - w):hy + w, max(0, hx - w):hx + w]
+    out["light_near"] = round(float(roi.mean()), 1) if roi.size else None
+    return out
 
 
 def _match_shift(a, b, uv, body_px, stroke_px):
@@ -463,6 +563,7 @@ def analyse(cam, frames, stroke_cm, tag_det=None, tag_z=6.0):
     rpx = _robot_px(cam)
     blobs = [_largest(_mask(g, cam.bg, cam.thr), near_px=1.6 * rpx) for g in fwd]
     blobs = [b for b in blobs if b is not None]
+    rpx = _robot_px_at(cam, blobs, rpx)
     need = max(MIN_AREA_FRAC * rpx * rpx, SEEN_K * max(1, cam.quiet_area))
     best = max([b["area"] for b in blobs] + [0])
     contrast = round(best / max(1.0, float(cam.quiet_area)), 1)
@@ -497,15 +598,18 @@ def analyse(cam, frames, stroke_cm, tag_det=None, tag_z=6.0):
                 math.sin(math.radians(h_img))) if h_img is not None else mid
     # refined: the robot's own picture before the stroke found again in the picture at its forward end (template
     # matching): the displacement is the stroke itself, to a fraction of a pixel, not the changed area's drift
+    refined = False
     if pre and h_img is not None:
         disp = _match_shift(pre[0], fwd[-1], start_uv, body_px, stroke_px)
         if disp is not None and math.hypot(*disp) > 0.5 * max(1.0, stroke_px) and \
                 abs(_wrap(math.degrees(math.atan2(disp[1], disp[0])) - h_img)) < 60:
             h_img = math.degrees(math.atan2(disp[1], disp[0]))
             stroke_px = float(math.hypot(*disp))
+            refined = True
             c0 = start_uv
             c1 = (start_uv[0] + disp[0], start_uv[1] + disp[1])
-    out = dict(seen=True, contrast=contrast, where_px=[round(v, 1) for v in start_uv], body_px=round(body_px, 1),
+    out = dict(seen=True, contrast=contrast, heading_sure=refined,       # (e14) the stroke's own picture found again
+               where_px=[round(v, 1) for v in start_uv], body_px=round(body_px, 1),
                stroke_px=round(stroke_px, 1), heading_img_deg=None if h_img is None else round(h_img, 1),
                frames=len(frames))
     xy = _table_pt(cam, start_uv)
@@ -514,6 +618,7 @@ def analyse(cam, frames, stroke_cm, tag_det=None, tag_z=6.0):
         p0, p1 = _table_pt(cam, c0), _table_pt(cam, c1)
         if p0 and p1 and math.dist(p0, p1) > 0.3:
             out["heading_deg"] = round(_img_heading(p0, p1), 1)
+            out["end_cm"] = [round(p1[0], 1), round(p1[1], 1)]      # (e14) where the stroke's forward leg ended
         try:
             out["px_per_cm_model"] = round(float(cam.model.px_per_cm(xy[0], xy[1], 4.0)), 2)
         except Exception:     # noqa: BLE001
@@ -570,17 +675,36 @@ def camera_tilt(model):
         return None
 
 
-def discover(cams, robots, mover, stroke_cm=None, tag_det=None, typed=None, log=print, frames_per_leg=6):
+def discover(cams, robots, mover, stroke_cm=None, tag_det=None, typed=None, log=print, frames_per_leg=6, modes=None,
+             turner=None, on_moved=None):
     """The whole discovery: still pictures, each robot's stroke, the analysis, the coverage map. typed: {role: name}
-    (the site's camera names: a first guess, compared). Returns the record (coverage.json's content)."""
+    (the site's camera names: a first guess, compared). (e14) modes: {robot: "stroke" | "wiggle"} (default stroke; a
+    wiggle needs turner(robot, deg, on_tick, n)); on_moved(robot, mode, t0, t1): called after each robot's move (the
+    run's own tag reads decide which roof tag moved with it). Returns the record (coverage.json's content)."""
     L = nudge_cm() if stroke_cm is None else float(stroke_cm)
     rec = dict(version=VERSION, time=time.strftime("%Y-%m-%dT%H:%M:%S"), stroke_cm=L, speed_cms=DISC_SPEED,
-               cameras={}, robots={}, blind=[], notes=[])
+               cameras={}, robots={}, blind=[], notes=[], modes={})
     per = {}
     for rb in robots:
         still(cams)                       # the table as it is now (the robot before moved back)
-        fr = stroke_record(cams, mover, rb, L, frames_per_leg)
-        per[rb] = {c.name: analyse(c, fr[c.name], L, tag_det) for c in cams}
+        mode = (modes or {}).get(rb, "stroke")
+        if mode == "wiggle" and turner is None:
+            mode = "stroke"
+        rec["modes"][rb] = mode
+        t0 = time.time()
+        if mode == "wiggle":
+            fr = wiggle_record(cams, turner, rb, WIGGLE_DEG, frames_per_leg)
+            per[rb] = {c.name: analyse_wiggle(c, fr[c.name]) for c in cams}
+        else:
+            fr = stroke_record(cams, mover, rb, L, frames_per_leg)
+            per[rb] = {c.name: analyse(c, fr[c.name], L, tag_det) for c in cams}
+        refused = [m for m in (fr.get("_moves") or []) if isinstance(m, dict) and m.get("result") not in (None, "done")]
+        if refused:
+            rec.setdefault("refused", {})[rb] = "%s %s" % (refused[0].get("result"), refused[0].get("info") or "")
+        if on_moved is not None:
+            t_ = on_moved(rb, mode, t0, time.time())
+            if t_ is not None:
+                rec.setdefault("tag_moved", {})[rb] = int(t_)     # the run's own tag reads moved with it
     for c in cams:
         sees = [rb for rb in robots if per[rb][c.name].get("seen")]
         rec["cameras"][c.name] = dict(sees=sees, typed_role=c.typed_role, model=c.model is not None,
@@ -593,15 +717,21 @@ def discover(cams, robots, mover, stroke_cm=None, tag_det=None, typed=None, log=
             rec["blind"].append(c.name)
     for rb in robots:
         seen_by = [c.name for c in cams if per[rb][c.name].get("seen")]
-        best = max(seen_by, key=lambda n: per[rb][n].get("body_px", 0)) if seen_by else None
+        # (e14) the camera with the robot biggest in its picture AND a model (a position in cm) first
+        best = max(seen_by, key=lambda n: (per[rb][n].get("where_cm") is not None, per[rb][n].get("body_px", 0))) \
+            if seen_by else None
         b = per[rb][best] if best else {}
         rec["robots"][rb] = dict(cameras=seen_by, best_camera=best, heading_deg=b.get("heading_deg"),
+                                 how=rec["modes"].get(rb, "stroke"), end_cm=b.get("end_cm"),
                                  heading_img_deg=b.get("heading_img_deg"), where_cm=b.get("where_cm"),
-                                 tag_id=next((per[rb][n]["tag_id"] for n in seen_by if "tag_id" in per[rb][n]), None),
+                                 tag_id=(rec.get("tag_moved") or {}).get(rb, next(
+                                     (per[rb][n]["tag_id"] for n in seen_by if "tag_id" in per[rb][n]), None)),
                                  tag_turn_deg=next((per[rb][n]["tag_turn_deg"] for n in seen_by
                                                     if "tag_turn_deg" in per[rb][n]), None),
                                  per_camera=per[rb])
-        if not seen_by:
+        if not seen_by and (rec.get("refused") or {}).get(rb):
+            rec["notes"].append("%s: it did not make its move (the robot said: %s)" % (rb, rec["refused"][rb]))
+        elif not seen_by:
             rec["notes"].append("%s: no camera saw it move (switched off, not on the table, or out of every view)" % rb)
     # two robots too close for the motion detector: a mover's changed area reaching a neighbour's start
     for c in cams:
@@ -727,6 +857,14 @@ class SimRig:
             p[0] += cm / n * math.cos(h)
             p[1] += cm / n * math.sin(h)
             self.t += abs(cm) / n / DISC_SPEED
+            on_tick(k)
+
+    def turner(self, robot, deg, on_tick, n):
+        """(e14) The wiggle on the spot."""
+        p = self.robots[robot]
+        for k in range(1, n + 1):
+            p[2] += deg / n
+            self.t += abs(math.radians(deg / n)) * 4.5 / DISC_SPEED
             on_tick(k)
 
     def caminfos(self, models=True, typed_roles=None):

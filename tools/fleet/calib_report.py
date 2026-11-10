@@ -17,7 +17,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-VERSION = "2026-11-10a"   # 2026-11-10a (e12): the curve phase's section (arcs, fits, saved or not). No version before
+VERSION = "2026-11-10e14"   # e14: the LOW-BATTERY CALIBRATION note (started under 40 %); its own spots listed. 2026-11-10a (e12): the curve phase's section (arcs, fits, saved or not). No version before
 PARAMS = ("wheel_scale", "gyro_scale", "gyro_drift_dps")
 
 
@@ -203,6 +203,8 @@ def four_point(run, a):
     the run's own: the camera's position with correction vs the same reading taken flat on the table."""
     import calib_run as CR
     pts = run.S.points
+    if not all(p in pts for p in CR.JAY_IN):
+        return None                      # (e14) its own spots (no stickers): Jay-Sun's four points are not on this table
     h = run.tag_h or 6.19
     behind = 45 * 2.54
     out = {"jay_in": dict(CR.JAY_IN), "tag_h_cm": h}
@@ -252,6 +254,17 @@ def write(folder, run, a):
              "roof tag %s. Result: **%s**." % (st.get("version"), st.get("robot"), st.get("wifi_name"),
                                                 st.get("tag"), getattr(run, "result", st.get("result"))))
     L.append("")
+    if st.get("low_battery_start") is not None:
+        # (e14) values measured on a weak battery
+        L.append("> **LOW-BATTERY CALIBRATION**: the robot started at %s %% battery (under %d %%). Its values were "
+                 "taken on a weak battery and may not hold on a full one (DOE row: calibration against battery). "
+                 "Calibrate again on a charged battery before trusting them." % (
+                     st.get("low_battery_start"), getattr(__import__("calib_run"), "LOW_BATTERY_NOTE_PCT", 40)))
+        L.append("")
+    if getattr(run, "S", None) is not None and getattr(run.S, "spots_mode", "stickers") == "own":
+        L.append("Spots: **its own** (%s): %s." % (run.S.spots_why, ", ".join(
+            "%s (%.0f, %.0f)" % (k, v[0], v[1]) for k, v in sorted(run.S.points.items()))))
+        L.append("")
     L.append("## Premise")
     L.append("Nick (4 Nov): get enough data without calibration as a base level, use the camera only for safety (edges, "
              "keep-outs, the camera's view, parking), then fit the robot's corrections and run a series of tours "
@@ -365,13 +378,14 @@ def write(folder, run, a):
         "answered" if getattr(run, "slept", False) else "sent (no answer seen)", st.get("battery_start"),
         st.get("battery_end")))
     L.append("")
-    L.append("**Four-point check** (Jay-Sun re-checks these tomorrow): how far the camera puts the robot with and "
-             "without the tag-height correction (tag %.2f cm up), inches, away from the camera:" % four["tag_h_cm"])
-    L.append("")
-    L.append("| point | Jay-Sun (no correction) | model, camera 145 cm above the table | model, 229 cm | sticker (cm) | "
-             "this run, phase C stops: with correction (cm) | the same read without (cm) | difference (in) |")
-    L.append("|---|---|---|---|---|---|---|---|")
-    for p in four["jay_in"]:
+    if four:
+        L.append("**Four-point check** (Jay-Sun re-checks these tomorrow): how far the camera puts the robot with and "
+                 "without the tag-height correction (tag %.2f cm up), inches, away from the camera:" % four["tag_h_cm"])
+        L.append("")
+        L.append("| point | Jay-Sun (no correction) | model, camera 145 cm above the table | model, 229 cm | sticker (cm) | "
+                 "this run, phase C stops: with correction (cm) | the same read without (cm) | difference (in) |")
+        L.append("|---|---|---|---|---|---|---|---|")
+    for p in (four or {}).get("jay_in") or {}:
         rr = (four.get("run_rows") or {}).get(p)
         L.append("| %s | %.1f | %.1f | %.1f | %.1f, %.1f | %s | %s | %s |" % (
             p, four["jay_in"][p], four["model_145_in"][p], four["model_229_in"][p], run.S.points[p][0],

@@ -47,7 +47,10 @@ for p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recognit
 
 import calib_run as CR   # noqa: E402
 
-VERSION = "2026-11-10e13"   # e13: the camera check (camera_feed) before binding; camera discovery hook
+VERSION = "2026-11-10e14"   # e14: every robot found by its own small move first (motion_find.run_finding: anywhere on
+#   the table, with or without a tag that reads; brought back to where tags read; a robot with no tag that reads kept
+#   as "tagless" with its motion position and heading); the wiggle only for robots the finding did not bind.
+#   MIRLT_CAMERA_DISCOVERY=off: the wiggle alone (before e14). e13: the camera check (camera_feed) before binding
 VERSION_A = "2026-11-09a"
 say = CR.say
 
@@ -150,6 +153,8 @@ def rename(link, steps, log=say):
     return done
 
 
+PHANTOM_ID = 900       # (e14) tag ids no roof tag carries (tag25h9 has 35): a tagless robot's name in the run's tags
+
 AUTO_NAMES = ("Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot")   # (11-05h) slot names when the run takes every
 #                                                                         robot found (after the site's own names)
 
@@ -169,8 +174,26 @@ def auto_slots(site, n):
     return out
 
 
+def clear_space_ok(cl, dry_truth=None):
+    """(e14) The person's word on the finding strokes' clear space: the simulator's person looks at the truth (robots
+    with that much room from every edge); MIRLT_CLEAR_SPACE_OK=1 (Mission Control) yes; a terminal asks; else no (each
+    robot then wiggles on the spot)."""
+    if dry_truth is not None:
+        L, W, truth = dry_truth
+        return {n for n, p_ in truth.items() if min(p_[0], p_[1], L - p_[0], W - p_[1]) >= cl["radius_cm"]}
+    if os.environ.get("MIRLT_CLEAR_SPACE_OK") == "1":
+        return True
+    if sys.stdin is not None and sys.stdin.isatty():
+        try:
+            return input("Has every robot that much clear space round it? (y/n) ").strip().lower().startswith("y")
+        except EOFError:
+            return False
+    return False
+
+
 def bind_for_run(site, slots, link, eye, ips=(), wake_min=3.0, dry=False, folder=None, log=say, by=None,
-                 rename_ok=None, state_dir=None, min_firmware=None, use_pins=None, heading_check=True):
+                 rename_ok=None, state_dir=None, min_firmware=None, use_pins=None, heading_check=True, cams=None,
+                 rm=None):
     """Steps 1-5 with a Link and an Eye already open. Returns the record (dict): slots {slot: tag}, robots [...],
     aliases {name it answers with: slot} when the robots are not renamed (tags.rename_to_slot false)."""
     S = CR.Site(site)
@@ -242,8 +265,55 @@ def bind_for_run(site, slots, link, eye, ips=(), wake_min=3.0, dry=False, folder
                                                          CR.PIN_CHECK_DEG))
     time.sleep(1.0)
     notes = {}
-    b = CR.bind_by_wiggle(robots, eye, wiggle_deg=float(w["deg"]), pause_s=float(w["pause_s"]), log=log,
-                          expect=expect, check_deg=CR.PIN_CHECK_DEG, notes=notes)
+    # (e14, Nick 10 Nov) every robot found by its own small move first: anywhere on the table, with or without a tag
+    # that reads; brought back to where tags read; one carrying no tag that reads is kept as tagless (motion, lock-on,
+    # odometry track it)
+    import motion_find as MF
+    pre, tagless, mres = {}, {}, None
+    if MF.enabled() and cams:
+        import camera_discovery as CD
+        if rm is None:
+            import observe as OB
+            rm = OB.ReadMap(S.L, S.W)
+            rm.seed(lambda x_, y_: 0.9, "no map given: taken as readable until learned")
+        m0 = next((c.model for c in cams if c.model is not None), None)
+        cpp = None
+        if m0 is not None:
+            try:
+                cpp = 1.0 / float(m0.px_per_cm(S.L / 2.0, S.W / 2.0, 4.0))
+            except Exception:  # noqa: BLE001
+                cpp = None
+        cl = CD.clearance(cpp)
+        log("CLEAR SPACE (finding each robot by its own small move): " + cl["words"])
+        ok = clear_space_ok(cl, (S.L, S.W, eye.truth_now()) if (dry and hasattr(eye, "truth_now")) else None)
+        if ok is not True:
+            log("  clear space confirmed for %s; the others wiggle on the spot instead (only their own footprint)" % (
+                ", ".join(sorted(ok)) if isinstance(ok, set) and ok else "no robot"))
+        guesses = {}
+        for rb in robots:
+            t_ = expect.get(rb.name)
+            l_ = eye.last(int(t_)) if t_ is not None else None
+            if l_ is not None and time.time() - l_[0] < 3.0:
+                guesses[rb.name] = (l_[1], l_[2], l_[3])
+        try:
+            pre, mres = MF.run_finding({rb.name: rb for rb in robots}, eye, cams, S, rm,
+                                       ok if isinstance(ok, set) else (True if ok else set()), guesses, log=log,
+                                       folder=folder)
+        except MF.StopAsked as e:
+            raise CR.BindError(str(e))
+        for n_ in mres.get("tagless") or []:
+            f_ = mres["robots"][n_]
+            tagless[n_] = dict(seen_cm=f_.get("now") or f_.get("where"), heading=f_.get("heading_now", f_.get(
+                "heading")), sigma=f_.get("sigma"))
+        for n_, t_ in pre.items():
+            notes[n_] = "found by motion: tag %d moved with its own stroke" % t_
+            log("  %s: %s" % (n_, notes[n_]))
+    rest = [rb for rb in robots if rb.name not in pre and rb.name not in tagless]
+    b = dict(pre)
+    if rest:
+        b.update(CR.bind_by_wiggle(rest, eye, wiggle_deg=float(w["deg"]), pause_s=float(w["pause_s"]), log=log,
+                                   expect={k: v for k, v in expect.items() if k in {r.name for r in rest}},
+                                   check_deg=CR.PIN_CHECK_DEG, notes=notes))
     # (5 Nov 11:00) a roof tag on the table that no robot of this run claimed (a third robot, asleep or not in the
     # run): the run would not know it is there. Refused (switch tags.unclaimed: refuse / ignore)
     claimed = set(b.values())
@@ -258,6 +328,9 @@ def bind_for_run(site, slots, link, eye, ips=(), wake_min=3.0, dry=False, folder
         m = eye.measure(t, 0.6)
         if m:
             seen[n] = (m[0], m[1])
+    for n, tl in tagless.items():
+        if tl.get("seen_cm"):
+            seen[n] = tuple(tl["seen_cm"][:2])       # (e14) where the motion has it
     # (11-05h, Observe then trust) each robot's roof tag heading against its nose: a 6 cm nudge (clear both ways, the
     # other robots kept out), before any run drives on the tag's heading (school 5 Nov: AL-1DC0's tag read 180 off)
     yaw = {}
@@ -317,6 +390,8 @@ def bind_for_run(site, slots, link, eye, ips=(), wake_min=3.0, dry=False, folder
            "renamed": [{"ip": ip, "from": o, "to": n} for ip, o, n in renamed],
            "aliases": aliases,
            "yaw_off": {assign[n]: d for n, d in yaw.items() if n in assign},
+           "tagless": {assign[n]: tl for n, tl in tagless.items() if n in assign},   # (e14) found by motion, no tag
+           "found_by_motion": bool(mres),
            "auto": auto,
            "empty_slots": [s for s in slots if s not in assign.values()]}
     for p in ([os.path.join(folder, "binding.json")] if folder else []) + \
@@ -324,6 +399,11 @@ def bind_for_run(site, slots, link, eye, ips=(), wake_min=3.0, dry=False, folder
         os.makedirs(os.path.dirname(p), exist_ok=True)
         with open(p, "w") as f:
             json.dump(rec, f, indent=1)
+    if rec["tagless"]:
+        log("NO ROOF TAG on %s: %s" % (", ".join(sorted(rec["tagless"])), "; ".join(
+            "%s found by motion at %.0f, %.0f%s" % (sl, tl["seen_cm"][0], tl["seen_cm"][1],
+                                                     (" facing %.0f deg" % tl["heading"]) if tl.get("heading") is not None
+                                                     else "") for sl, tl in sorted(rec["tagless"].items()))))
     log("Bound: %s%s" % (", ".join("%s = tag %d" % kv for kv in sorted(rec["slots"].items())),
                          ("; no robot for %s" % ", ".join(rec["empty_slots"])) if rec["empty_slots"] else ""))
     return rec
@@ -335,14 +415,43 @@ def tags_with_binding(tags, rec):
     t["ids_typed"] = dict(t.get("ids") or {})
     t["ids"] = dict(rec["slots"])
     t["binding"] = "wiggle"
+    for k, sl in enumerate(sorted(rec.get("tagless") or {})):
+        # (e14) a robot with no roof tag that reads: a tag id no tag carries (PHANTOM_ID + k), so the bridge, the
+        # pictures' simulator and the run know its name; the motion detector follows it from where it was found
+        t["ids"][sl] = PHANTOM_ID + k
+    if rec.get("tagless"):
+        t["tagless"] = dict(rec["tagless"])
     if rec.get("yaw_off"):
         # (11-05h) the heading check's offsets, per tag id: the bridge corrects every heading of that tag
         t["yaw_off"] = {str(rec["slots"][sl]): d for sl, d in rec["yaw_off"].items() if sl in rec["slots"]}
     return t
 
 
+def MF_on():
+    import motion_find as MF
+    return MF.enabled()
+
+
+def real_cams(site, calib=""):
+    """(e14) Every camera the Pi can open for robot finding by motion (camera_discovery.find_cameras): the recorder's
+    streams, then /dev/video cameras it does not hold; the first stream with the setup's camera model."""
+    import camera_discovery as CD
+    from cameras import CameraModel
+    tc = os.path.join(site.get("conf_dir") or os.path.expanduser("~/.config/mirlt"), "tagcal")
+    cal = calib or os.path.join(tc, "overhead.json")
+    try:
+        model = CameraModel.load(cal) if os.path.exists(cal) else None
+    except Exception:  # noqa: BLE001
+        model = None
+    found = CD.find_cameras()
+    grabs = [CD.Grabber(c["src"]) for c in found]
+    cams = [CD.CamInfo(c["name"], g.grab, model if (k == 0 and c["kind"] == "stream") else None)
+            for k, (c, g) in enumerate(zip(found, grabs))]
+    return cams, [g.close for g in grabs]
+
+
 def run_for_mission(site, slots, folder, stream="127.0.0.1:8000", calib="", ips=(), log=say, rename_ok=None,
-                    use_pins=None):
+                    use_pins=None, rm=None):
     """mission_run's step before its bridge (real robots): a tag bridge of its own on the recorder's pictures with
     every listed and spare tag id, the binding, the bridge stopped. Returns the record."""
     import argparse
@@ -355,8 +464,13 @@ def run_for_mission(site, slots, folder, stream="127.0.0.1:8000", calib="", ips=
         eye = CR.Eye(folder, CR.FIX_PORT)
         time.sleep(2.0)
         CR.feed_refusal(eye)        # (e13) every camera sending new pictures before the binding blames anything else
-        return bind_for_run(site, slots, link, eye, ips=ips, folder=folder, log=log, rename_ok=rename_ok,
-                            use_pins=use_pins)
+        cams, closers = real_cams(site, calib) if MF_on() else ([], [])
+        try:
+            return bind_for_run(site, slots, link, eye, ips=ips, folder=folder, log=log, rename_ok=rename_ok,
+                                use_pins=use_pins, cams=cams, rm=rm)
+        finally:
+            for c in closers:
+                c()
     finally:
         for o in (eye, link):
             if o is not None:

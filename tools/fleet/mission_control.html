@@ -1137,6 +1137,7 @@ function startScreen() {
       <label>Practice runs take${advSel("practice_path", a)}</label>
       <label>Visit points in your order${advSel("visit_order", a)}</label>
       <label>Free roam minutes (school)<input data-advn="roam_min" value="${esc(a.roam_min)}"></label>
+      <label>Battery floor % (blank: 25, free roam 10; every run here)<input data-advs="battery_floor" value="${esc(a.battery_floor ?? "")}"></label>
       ${advTick("allow_half_table", a, "Experiments may use the half the camera cannot read (Dr. Sodhi agreed)")}
       ${advTick("practice_breaks", a, "Practice runs break the guesses on purpose (turned tags, dark patch, clock off, a restart)")}
       <label>Practice robots<input data-advn="practice_robots" value="${esc(a.practice_robots)}"></label>
@@ -1219,7 +1220,10 @@ function wireStart() {
       else if (T.prefs && T.prefs.values.watching !== "ask") attended = T.prefs.values.watching === "yes";
       else attended = confirm("Will you stay with the robots? (OK: the run may ask you here about a robot it is not sure about near an edge, and holds that robot until you answer. Cancel: it decides alone and never moves a robot it is unsure about outward.)");
     }
-    const body = {kind: k, attended};
+    // (e14) each robot is found by a short move first: the person says whether every robot has the derived clear space
+    let clear_space = !!T.practice;
+    if (!T.practice && T.clear_space && T.clear_space.words) clear_space = confirm(T.clear_space.words);
+    const body = {kind: k, attended, clear_space};
     if (k === "visit" && vpOrder.length) { body.order = vpOrder.join(","); body.keep_unreadable = vpKeep; }   // (e11) Nick's order
     try { await api("/api/start/run", body); flash(T.practice ? "Practice started (the simulator)" : "Started"); watchStart(); await load(); } catch (e) { flash(e.message, true); } });
   if ($("stopbig")) $("stopbig").onclick = stopAll;
@@ -1232,6 +1236,7 @@ function wireStart() {
   document.querySelectorAll("[data-adv]").forEach(e => e.onchange = () => saveAdv({[e.dataset.adv]: e.value}));
   document.querySelectorAll("[data-advb]").forEach(e => e.onchange = () => saveAdv({[e.dataset.advb]: e.checked}));
   document.querySelectorAll("[data-advn]").forEach(e => e.onchange = () => saveAdv({[e.dataset.advn]: +e.value}));
+  document.querySelectorAll("[data-advs]").forEach(e => e.onchange = () => saveAdv({[e.dataset.advs]: e.value.trim()}));   // (e14) text: blank = the default
   if ($("savetyped")) $("savetyped").onclick = async () => { try { for (const e of document.querySelectorAll("[data-typed]")) S.start = await api("/api/start/typed", {key: e.dataset.typed, value: e.value}); flash("Typed values saved"); render(); } catch (e) { flash(e.message, true); } };
   if ($("sitepin")) $("sitepin").onchange = async () => { try { const r = await api("/api/start/site", {pin: $("sitepin").value}); flash(r.words); } catch (e) { flash(e.message, true); } };
   if (S.start.status && S.start.status.running) watchStart();

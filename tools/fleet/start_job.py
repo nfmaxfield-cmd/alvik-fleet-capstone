@@ -13,7 +13,7 @@ Per run type (Nick's decisions 1-3):
 Practice: with no real camera (or Mission Control --dry) every button runs the simulator instead, with the guesses
 broken on purpose (turned roof tags, a dark patch, the camera's clock off, a robot restarting), as the rehearsals do.
 """
-VERSION = "2026-11-10e13"   # e13: robots waiting for a hand (needs_hand) in the status. 2026-11-10a # 2026-11-10a (e12): Advanced "Curves in the calibration" (calib_curves) passed to calib_run
+VERSION = "2026-11-10e14"   # e14: the clear-space question's words (clear_space) and the answer to every run (MIRLT_CLEAR_SPACE_OK / --clear-space); the Area line from the readability store (what is used, at what light, on how much evidence); Advanced "Battery floor"; practice runs keep their own readability store. e13: robots waiting for a hand (needs_hand) in the status. 2026-11-10a # 2026-11-10a (e12): Advanced "Curves in the calibration" (calib_curves) passed to calib_run
                            # (--arc-phase, --roam-motion); robots left at an edge in the status (edge_parked). No version
                            # string before this.
 import glob
@@ -63,6 +63,8 @@ ADV_DEFAULTS = {
                                    # launcher and camera models: mission_run --practice-real) or "dry" (before e11)
     "roam_motion": "curves",       # (Nick 9 Nov) free roam's driving: curves (the default) or stopturn (straight lines,
                                    # stop and turn on the spot), at home and at school
+    "battery_floor": "",           # (e14) the battery floor for every run at this site, % ("" = the default: 25, free
+                                   # roam 10); read by every run (engine_checks.battery_floor_used), tmux ones too
     "calib_curves": "auto",        # (e12, Nick 10 Nov) the calibration's curve phase: auto (robots on firmware 2026-11-05c+
                                    # when free roam drives curves), on, off (calib_run --arc-phase)
 }
@@ -412,9 +414,53 @@ class Starter:
         return None
 
     def area_words(self):
-        """What part of the table the runs use: the readable area the last run learned, else the camera model's."""
+        """What part of the table the runs use: the readable area the last run learned, else the camera model's. (e14)
+        From the readability store: chosen for the light the last run measured, saying how much evidence it rests on
+        and that other light's sessions are kept apart (10 Nov: a dim session had shrunk this to 26 cm)."""
         if not self.tags():
             return "Using the board the cameras see (the corners found at setup)"
+        try:
+            w = self.area_words_store()
+            if w:
+                return w
+        except Exception:  # noqa: BLE001  (the e12/e13 words below)
+            pass
+        return self.area_words_e13()
+
+    def area_words_store(self):
+        import observe as OB
+        import readmap_store as RS
+        if not RS.enabled():
+            return ""
+        site = self.S.site or {}
+        sd = site.get("conf_dir") or ""
+        if self.practice():
+            sd = os.path.join(self.S.dir, "practice-readmap")     # (e14) practice runs keep their own store
+        d = RS.load(sd)
+        if not d.get("sessions"):
+            return ""
+        tb = site.get("table") or {}
+        L = float(tb.get("length_cm") or d.get("L") or 0)
+        rm = OB.ReadMap(float(d.get("L") or L), float(d.get("W") or tb.get("width_cm") or 0))
+        starts = sorted(glob.glob(os.path.join(self.S.dir, "runs", "*", "readmap_start.json")), key=os.path.getmtime)
+        if starts:
+            with open(starts[-1]) as f:
+                rm.prior = OB.ReadMap.from_json(json.load(f)).prior     # the camera model's seed, as the runs use it
+        used = sorted(glob.glob(os.path.join(self.S.dir, "runs", "*", "readmap_light_used.json")), key=os.path.getmtime)
+        g = None
+        if used:
+            with open(used[-1]) as f:
+                g = json.load(f).get("grey")
+        if g is None:
+            g = next((s_.get("grey") for s_ in reversed(d["sessions"]) if s_.get("grey") is not None), None)
+        words = RS.choose(sd, rm, g, None)
+        x = RS.readable_extent(rm, L)
+        return ("Area used: where tags read at %s, about %.0f cm of the table's %.0f cm length (%s; a run in other "
+                "light uses that light's evidence, measured again at its start)" % (
+                    RS.light_words(g), x, L, words.split(": ", 1)[-1]))
+
+    def area_words_e13(self):
+        """(e12/e13) The readable area the last run learned (kept: MIRLT_READMAP_STORE=0)."""
         rm = None
         pats = sorted(glob.glob(os.path.join(self.S.dir, "runs", "*", "run", "readmap.json")), key=os.path.getmtime)
         if pats:
@@ -604,7 +650,7 @@ class Starter:
             json.dump(cur, f, indent=1)
         return self.visit_presets()
 
-    def start(self, kind, attended=False, order="", keep_unreadable=False):
+    def start(self, kind, attended=False, order="", keep_unreadable=False, clear_space=None):
         if kind not in KINDS:
             raise ValueError("no such run: %s" % kind)
         with self.lock:
@@ -624,6 +670,9 @@ class Starter:
             self.attended = bool(attended)          # (e08, A2) a person is there: runs may ask questions
             os.environ["MIRLT_ATTENDED"] = "1" if attended and not pr else "0"   # mission_run -> run_plan --attended
             os.environ.update(prefs_env(self.prefs))     # (e10, C5) the preferences reach every run this page starts
+            # (e14) the person's answer to the clear-space question reaches the run's robot finding (none: wiggles)
+            os.environ["MIRLT_CLEAR_SPACE_OK"] = "1" if clear_space else "0"
+            self.clear_space_ = bool(clear_space)
             self.visit_order_ = {"order": str(order or "").strip(), "keep": bool(keep_unreadable)} \
                 if kind == "visit" else None
             if self.tags():
@@ -671,6 +720,8 @@ class Starter:
             # (e12) the curve phase: Advanced "Curves in the calibration", decided by free roam's driving when auto
             d["extra"] = list(d.get("extra") or []) + ["--arc-phase", str(self.adv.get("calib_curves") or "auto"),
                                                        "--roam-motion", str(self.adv.get("roam_motion") or "curves")]
+            if not pr:
+                d["extra"] += ["--clear-space", "yes" if getattr(self, "clear_space_", False) else "no"]   # (e14)
             st = S.calib.start(d)
             return {"started": kind, "calib": st}
         extra = []
@@ -678,6 +729,7 @@ class Starter:
             extra += ["--sim-robots", str(n), "--sim-bind"] + self.sim_breaks(n)
             if self.adv.get("practice_path", "real") == "real":
                 extra += ["--practice-real"]       # (e11) the school's own path, simulated robots
+            extra += ["--readmap-store", os.path.join(self.S.dir, "practice-readmap")]   # (e14) practice's own store
         if self.adv.get("recover_reserve", "on") == "off":
             extra += ["--rp-arg=--recover-reserve=off"]
         if self.adv.get("surface_marks", "log") != "log":
@@ -1026,7 +1078,33 @@ class Starter:
                 "prefs": self.prefs_state(),
                 "attended_only": bool((self.S.site or {}).get("attended_only")),
                 "typed": self.typed_values(), "sites": self.site_choices(),
-                "corners_needed": self.corners_needed(), "code": self.code_state()}
+                "corners_needed": self.corners_needed(), "code": self.code_state(),
+                "clear_space": self.clear_space_words()}
+
+    def clear_space_words(self):
+        """(e14) The question asked before a run: the clear space each robot's finding stroke needs (derived:
+        camera_discovery.clearance, at the camera's own scale when it has a model)."""
+        try:
+            import camera_discovery as CD
+            cpp = None
+            try:
+                from cameras import CameraModel
+                p = os.path.join(self.S.tag.cal_dir, "overhead.json") if self.S.tag else ""
+                if p and os.path.exists(p):
+                    tb = (self.S.site or {}).get("table") or {}
+                    m = CameraModel.load(p)
+                    cpp = 1.0 / float(m.px_per_cm(float(tb.get("length_cm", 200)) / 2, float(tb.get("width_cm", 100))
+                                                  / 2, 4.0))
+            except Exception:  # noqa: BLE001
+                cpp = None
+            c = CD.clearance(cpp)
+            return {"radius_cm": c["radius_cm"], "radius_in": c["radius_in"], "words": (
+                "Each robot is found by a short move first (one at a time). Does every robot have nothing within %.0f cm "
+                "(%.1f in) of its middle: more than a hand's width from the table's edge and from the next robot? "
+                "OK: yes (each makes a %.0f cm stroke forward and back). Cancel: not sure (each only wiggles on the "
+                "spot, which needs no extra room)." % (c["radius_cm"], c["radius_in"], c["stroke_cm"]))}
+        except Exception as e:  # noqa: BLE001
+            return {"words": "", "why": str(e)}
 
     def code_state(self):
         """(e12) Mission Control's own code changed since it started (mission_control.CodeWatch), or None."""

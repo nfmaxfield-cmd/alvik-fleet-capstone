@@ -48,7 +48,8 @@ for p in (HERE, TOOLS):
 import freeroam_core as FC   # noqa: E402
 
 PY = sys.executable
-VERSION = "freeroam-runner-2026-11-10e13"   # e13 (10 Nov): --readable-map (school: plan only where the camera reads tags; MIRLT_ROAM_READABLE=0 the old whole table)
+VERSION = "freeroam-runner-2026-11-10e14"   # e14 (10 Nov): the battery floor from MIRLT_MIN_BATTERY, else Mission Control's Advanced, else the site file, said at the start
+VERSION_E13 = "freeroam-runner-2026-11-10e13"   # e13 (10 Nov): --readable-map (school: plan only where the camera reads tags; MIRLT_ROAM_READABLE=0 the old whole table)
 VERSION_E12 = "freeroam-runner-2026-11-10e12"   # e12 (10 Nov): the bridge's "camera" messages (no pictures) said and logged; one robot held at an edge parked and shown, the others roam on; orderly shutdown
 VERSION_E11 = "freeroam-runner-2026-11-09e11"   # e11 (9 Nov school): --alias WIFI=SLOT (names in the run only), --practice-real
 VERSION_D = "freeroam-runner-2026-11-07d"   # 11-07d: a robot at an edge makes no proof drive (the run 2 incident d)
@@ -1178,7 +1179,9 @@ def main(argv=None):
     ap.add_argument("what", choices=["run", "status", "report"])
     ap.add_argument("folder", nargs="?", default="")
     ap.add_argument("--hours", type=float, default=4.0, help="time cap (Nick: 4 h)")
-    ap.add_argument("--battery-floor", type=int, default=FC.BATTERY_FLOOR)
+    ap.add_argument("--battery-floor", type=int, default=None, help="(e14 default: MIRLT_MIN_BATTERY, else Mission "
+                    "Control's Advanced 'Battery floor', else the site file's battery_floor, else free roam's %d %%)"
+                    % FC.BATTERY_FLOOR)
     ap.add_argument("--lost-mode", choices=("reckon", "hold"), default="reckon",
                     help="reckon (default): dead reckoning with a growing bubble; hold: the old cautious halt")
     ap.add_argument("--no-sleep", action="store_true", default=True, help="(default since 11-05h) a parked robot is "
@@ -1339,6 +1342,15 @@ def main(argv=None):
                 "no unattended or overnight driving). With him there, start again with --attended. Nothing moved."
                 % st_.get("name"))
             return 2
+    if a.battery_floor is None:
+        try:
+            import engine_checks as EC_
+            a.battery_floor, bw_ = EC_.battery_floor_used("freeroam")
+        except Exception as e:  # noqa: BLE001
+            a.battery_floor, bw_ = FC.BATTERY_FLOOR, "%d %% (free roam's; %s)" % (FC.BATTERY_FLOOR, e)
+    else:
+        bw_ = "%d %% (--battery-floor)" % a.battery_floor
+    say("BATTERY FLOOR: %s" % bw_)
     say("Free roam: %s (seed %d, battery floor %d %%, lost: %s)" % (outdir, a.seed, a.battery_floor, a.lost_mode))
     import safety_rules as SR
     run_info = dict(version=VERSION, core=FC.VERSION, motion=a.motion, seed=a.seed, hours=a.hours, battery_floor=a.battery_floor,

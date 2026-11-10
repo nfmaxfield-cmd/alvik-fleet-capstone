@@ -1387,7 +1387,8 @@ class Handler(BaseHTTPRequestHandler):
                 if path == "/api/start/run":
                     return self._send(200, clean(S.start.start(d.get("kind"), attended=bool(d.get("attended")),
                                                                order=d.get("order") or "",
-                                                               keep_unreadable=bool(d.get("keep_unreadable")))))
+                                                               keep_unreadable=bool(d.get("keep_unreadable")),
+                                                               clear_space=d.get("clear_space"))))
                 if path == "/api/visit/preset":
                     return self._send(200, clean({"presets": S.start.save_visit_preset(d.get("name"), d.get("order"))}))
                 if path == "/api/restart":
@@ -1600,7 +1601,7 @@ def detect_where(SD, sim_room=""):
 
 
 # ---------------------------------------------------------------------------------------------- (e12) new code after git pull
-VERSION = "2026-11-10e13"   # 2026-11-10e13 (e13): /api/tags/corners_confirm (the corner tags pre-fill, the person confirms); the needs-a-hand box. 2026-11-10a (e12, Nick 10 Nov): notices its own code changed after `git pull` and offers a
+VERSION = "2026-11-10e14"   # e14: the Start button's clear-space answer passed to the run. 2026-11-10e13 (e13): /api/tags/corners_confirm (the corner tags pre-fill, the person confirms); the needs-a-hand box. 2026-11-10a (e12, Nick 10 Nov): notices its own code changed after `git pull` and offers a
                           # restart on the page when no run is going (never mid-run). No version string before
 CODE_CHECK_S = 5.0        # chosen: how often the code is looked at (a git call and a few hundred stat calls). No DOE
 

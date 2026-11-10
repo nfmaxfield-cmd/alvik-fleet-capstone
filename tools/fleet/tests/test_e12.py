@@ -93,7 +93,8 @@ def test_simulator_arc_error_tightens_true_curves_only():
 
 
 # -------------------------------------------------------------------------------------------- 2. camera self-check, blind areas
-def test_blind_cells_and_the_readability_seed_carried_per_site(tmp_path):
+def test_blind_cells_and_the_readability_seed_carried_per_site(tmp_path, monkeypatch):
+    monkeypatch.setenv("MIRLT_READMAP_STORE", "0")      # (e14) e12's readmap.json carry-over, kept on its switch
     import observe as OB
     import calib_run as CR
     rm = OB.ReadMap(200.0, 100.0)

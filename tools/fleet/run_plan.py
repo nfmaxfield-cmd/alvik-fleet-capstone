@@ -36,7 +36,7 @@ Position source (--fixes): where camera poses come from (data-formats.md,
 runs against it with --fixes udp; at the end it prints the simulator's ground
 truth: docking errors, closest robots, contact.
 """
-VERSION = "2026-11-10e13"   # 2026-11-10e13 (e13): never give up blind (no BLIND_MAX_CM cap: it stops only when blind error + body + stop could reach an edge; MIRLT_BLIND_RULE=cap the old caps); no pictures: each blind robot's risk-based limit (safety_rules.no_picture_limit; MIRLT_NOPIC_RULE=off: e12's rules alone).
+VERSION = "2026-11-10e14"   # e14: a visit point whose tag was lost on the way is moved to the end of the robot's list once, then skipped (defer_current_point; MIRLT_RETRY_LOST=again the old way); the spot where it was lost kept as evidence. 2026-11-10e13 (e13): never give up blind (no BLIND_MAX_CM cap: it stops only when blind error + body + stop could reach an edge; MIRLT_BLIND_RULE=cap the old caps); no pictures: each blind robot's risk-based limit (safety_rules.no_picture_limit; MIRLT_NOPIC_RULE=off: e12's rules alone).
 VERSION_B = "2026-11-10b"   # 2026-11-10b (e12 item 9): a lock-only fix never resets a pose (MIRLT_LOCK_GUARD=0: as before); a dwell broken by a halt where the robot did not move keeps its start (MIRLT_DWELL_KEEP=0). 2026-11-10a (e12): the bridge's "camera" messages (no pictures / pictures again) said and logged. No version before
 LOCK_GUARD = __import__("os").environ.get("MIRLT_LOCK_GUARD", "1") != "0"
 DWELL_KEEP = __import__("os").environ.get("MIRLT_DWELL_KEEP", "1") != "0"
@@ -2635,6 +2635,30 @@ class Coordinator:
         self.log("point_skipped", robot=n, point=pt, why=why)
         return pt
 
+    def defer_current_point(self, n, why):
+        """(e14, "no re-trying a point that just failed") Robot n lost its tag on the way to its current point: the
+        point is moved to the END of its list (once), said and logged, instead of being aimed at again at once; the
+        second time it is skipped with the reason. MIRLT_RETRY_LOST=again: the old way (aimed at again). Returns (label,
+        "deferred" | "skipped") or (None, None)."""
+        if os.environ.get("MIRLT_RETRY_LOST", "defer") == "again":
+            return None, None
+        k, item = self.current_task(n)
+        pt = self.point_of(item.get("label")) if isinstance(item, dict) else None
+        if pt is None:
+            return None, None
+        done = self.__dict__.setdefault("deferred_pts", {})
+        if done.get((n, pt)):
+            return self.skip_current_point(n, why + "; a second time, after it was moved to the end once"), "skipped"
+        vo = self.plan["robots"][n]["visit_order"]
+        idx = [j for j, v in enumerate(vo) if isinstance(v, dict) and j >= k and self.point_of(v.get("label")) == pt]
+        moved = [vo[j] for j in idx]
+        for j in reversed(idx):
+            del vo[j]
+        vo.extend(moved)
+        done[(n, pt)] = 1
+        self.log("point_deferred", robot=n, point=pt, why=why)
+        return pt, "deferred"
+
     def replan_trouble(self, why, ob, cause):
         """Keep going when a re-plan fails: everyone stands, the obstacle stays on the map, the robot whose step failed
         skips the point it was going to, and the plan is made again; after REPLAN_FAIL_MAX failures in a row the robot
@@ -3891,7 +3915,9 @@ class Coordinator:
         self.say("%s: %s: RECOVERING: it turns to face where the camera last read it and drives %.0f cm straight there, "
                  "forwards (clear of the edges and of the others' paths, checked)" % (b.name, why, back))
         rm = getattr(self, "readmap", None)
+        skipped_ = None
         if rm is not None:
+            rm.add(x, y, False)            # (e14) where the tag was lost: evidence
             k_, item = self.current_task(b.name)
             lab_ = self.point_of(item.get("label")) if isinstance(item, dict) else None
             xy_ = (self.m.get("spots") or {}).get(lab_[6:]) if lab_ else None
@@ -3899,9 +3925,19 @@ class Coordinator:
                 lab = self.skip_current_point(b.name, "the camera does not read tags there (%s)" %
                                               rm.readable(xy_[0], xy_[1])[1])
                 if lab:
+                    skipped_ = lab
                     self.say("%s: point %s skipped: the camera does not read tags there (learned in this run)" % (
                         b.name, lab))
             self.skip_unreadable()
+        if skipped_ is None:
+            # (e14) "try anyway" visits: a point whose tag was just lost on the way is not aimed at again at once
+            lab, how = self.defer_current_point(b.name, "the camera lost %s's roof tag on the way to it (at %.0f, %.0f)"
+                                                % (b.name, x, y))
+            if how == "deferred":
+                self.say("%s: point %s moved to the end of its list: the camera lost its tag on the way (not tried "
+                         "again at once)" % (b.name, lab))
+            elif how == "skipped":
+                self.say("%s: point %s skipped: the camera lost its tag on the way a second time" % (b.name, lab))
         return True
 
     LEAD_MIN_LEG_CM = 3.0     # (e07) legs shorter than this are sent as planned (chosen: the stop lead is a few mm)
@@ -4939,6 +4975,7 @@ def _start_robots(coord, link, args, source, straight, auto):
     if getattr(args, "facing_check", False):
         import facing as FC
         fres = FC.run_plan_check(coord, link, args, names, straighten=straight)
+        given_start_poses(coord, args, fres, names)   # (e14) robots with no tag that reads: where motion found them
         if source.live:
             after_facing(coord, fres, names)       # the bridge follows each robot from its lights, wherever it stands
     # ---- the follow runs; a robot that says "not calibrated" is calibrated now (auto), then started again
@@ -5047,6 +5084,12 @@ def _start_robots(coord, link, args, source, straight, auto):
                     seen[ev["robot"]] = ev     # (the start check needs a heading: position-only fixes wait)
             return set(seen) == set(names)
         wait_for(got, args.fix_wait_s, coord)
+        for n, (x_, y_, th_) in start_poses_given(args).items():
+            if n in names and seen.get(n) is None and th_ is not None:
+                # (e14) no tag that reads: where the motion finding put it, before the run
+                seen[n] = {"type": "fix", "robot": n, "x": x_, "y": y_, "th": th_, "src": "motion find"}
+                warn(coord, "%s has no roof tag that reads: it starts from where the motion finding put it (%.1f, %.1f, "
+                            "facing %.0f deg)" % (n, x_, y_, th_))
         for n in names:
             if seen.get(n) is None:
                 if n in moved:
@@ -5234,6 +5277,59 @@ def facing_poses(fres, names):
     return out
 
 
+def start_poses_given(args):
+    """(e14) {name: (x, y, th)} from --start-pose NAME=X,Y,TH: robots with no roof tag that reads, found by motion
+    before the run (wiggle_bind's finding)."""
+    out = {}
+    for sp in getattr(args, "start_pose", None) or []:
+        n, _, v = sp.partition("=")
+        try:
+            q = [float(x) for x in v.split(",")]
+            out[n.strip()] = (q[0], q[1], q[2] if len(q) > 2 else None)
+        except (ValueError, IndexError):
+            continue
+    return out
+
+
+def given_start_poses(coord, args, fres, names):
+    """(e14) The facing check cannot read a robot with no roof tag: where the motion finding put it and the heading
+    its stroke showed are used instead (its heading checked again by its first drives' motion, observe), and the camera
+    bridge's motion detector is seeded there (a "seed" message, how "motion find")."""
+    sp = start_poses_given(args)
+    if not sp:
+        return
+    fres = fres if isinstance(fres, dict) else {}
+    for n in names:
+        if n not in sp:
+            continue
+        x, y, th = sp[n]
+        coord.__dict__.setdefault("facing_at", {})[n] = (x, y)
+        coord.__dict__.setdefault("motion_found", {})[n] = (x, y, th)
+        if th is not None:
+            fres.setdefault("headings", {})[n] = float(th)
+            for k in ("unknown", "unsure"):
+                if n in (fres.get(k) or []):
+                    fres[k].remove(n)
+        r = (fres.get("robots") or {}).get(n)
+        if isinstance(r, dict):
+            r.setdefault("meas", {}).update(heading=th, how="motion find (no tag that reads)", sure=th is not None)
+        warn(coord, "%s has no roof tag that reads: it starts from where the motion finding put it (%.1f, %.1f%s) and "
+                    "is followed by motion, lock-on and its own odometry" % (
+                        n, x, y, ", facing %.0f deg" % th if th is not None else ""))
+    dest = getattr(coord, "pose_dest", None)
+    if dest is not None:
+        for _k in range(SEED_SENDS):
+            for n, (x, y, th) in sp.items():
+                msg = {"type": "seed", "robot": n, "x": x, "y": y, "th": th, "how": "motion find",
+                       "t": round(now(), 3)}
+                try:
+                    coord.pose_sock.sendto(json.dumps(msg).encode(), dest)
+                except OSError:
+                    pass
+            time.sleep(0.1)
+    coord.log("motion_found_start", robots={n: list(v) for n, v in sp.items()})
+
+
 def after_facing(coord, fres, names):
     """After a facing check: keep where each robot's lights are (the calibration's roll caps use it) and tell the
     camera bridge (cam_bridge.on_seed), which otherwise looks for each robot round its map start spot only and never
@@ -5347,8 +5443,9 @@ def straighten_start(coord, link, args, source, names, fres, auto=False):
             if n not in pos:
                 lit = (getattr(coord, "facing_at", None) or {}).get(n)
                 if lit is not None:
-                    warn(coord, "no camera fix for %s: its position is taken from its lights (%.1f, %.1f)"
-                         % (n, lit[0], lit[1]))
+                    warn(coord, "no camera fix for %s: its position is taken from %s (%.1f, %.1f)"
+                         % (n, "where the motion finding put it" if n in (getattr(coord, "motion_found", None) or {})
+                            else "its lights", lit[0], lit[1]))
                     pos[n], side_only[n] = (lit[0], lit[1]), False
                 else:
                     hold_at_start(coord, link, n, "no camera and none of its lights find it on the board")
@@ -5622,6 +5719,8 @@ def main(argv=None):
     ap.add_argument("--replan-from-camera", action="store_true",
                     help="plan again from where the camera has the robots when they are off their start spots "
                          "(Mission Control, Monday's command); without it, a robot off its spot stops the start")
+    ap.add_argument("--start-pose", action="append", default=[], metavar="NAME=X,Y,TH",
+                    help="(e14) a robot with no roof tag that reads: where the motion finding put it before the run")
     ap.add_argument("--battery-floor", type=int, default=EC.BATTERY_FLOOR_PCT,
                     help="refuse to start a robot under this battery %% (default %(default)s: engine_checks."
                          "battery_floor(), 25 unless MIRLT_MIN_BATTERY is set (never under 5); 0 = off)")

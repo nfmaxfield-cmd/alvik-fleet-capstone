@@ -678,6 +678,21 @@ check of the derived rule.
 | A person's click aim on a robot (place_click: 9.5 / sqrt 12 x sqrt 2 = 3.9 cm until measured) | derived from a uniform-click assumption | no DOE: a logs measure, built in (learn_aim: the 95th percentile of logged residuals of clicks the robot had not driven away from, once 10 exist) | Logs (10+ clicks) | open |
 | Trained detector on every Nth picture (tag_bridge ML_EVERY) | 3, CHOSEN | no DOE: a load cap; set from the Pi's measured ms a pass and the heat tracker | Pi | open |
 
+## e14's chosen numbers (2026-11-10, built; docs/build-reports/e14-nov10-find-by-motion-any-surface.md)
+
+| Number (where) | Value now | Experiment that would set it | Needs | Status |
+|---|---|---|---|---|
+| A motion sighting's position error (motion_find MOTION_PX_SIGMA) | 6 px, MEASURED in the simulator only (school camera drawn at 1280 x 960: median 5.9 px, p95 11.4) | yes (Board, then Logs): each finding stroke's position against the robot's tag read where the tag reads; 30 strokes over the readable area | Board | open |
+| Shortest stroke worth making for a heading (motion_find MIN_STROKE_CM) | 2 cm, CHOSEN | yes (Board): 2 / 4 / 6 cm strokes at the far end of the camera's view against the heading error (the tag's heading as truth) | Board | open |
+| A robot carries no tag that reads once the chance of missing a tag on it everywhere it stood is under (motion_find TAGLESS_P) | 1 %, CHOSEN | yes (Board): a robot with its tag covered, then uncovered: how many readable spots before each verdict, and false "tagless" calls in dim light | Board | open |
+| The find-me wiggle (camera_discovery WIGGLE_DEG) | +-30 deg, CHOSEN | yes (Board): 15 / 30 / 45 deg against detection rate at the far end and in dim light | Board | open |
+| The calibration's own spots: at least this far apart (calib_run OWN_SPOTS_MIN_CM) | 25 cm, CHOSEN | yes (Sim): 15 / 25 / 40 cm against the fit's +- per minute of tour | Sim | open |
+| Spots this much further from a keep-out than the legs' clearance (OWN_SPOTS_KEEPOUT_EXTRA) | 5 cm, CHOSEN | no: a margin over a margin | - | ruled out |
+| Another light's evidence falls to 61 % over (readmap_store LIGHT_SCALE) | 8 grey levels, CHOSEN | yes (Board): the same Visit tour at 3 light levels (lights on, half, off): read rate per cell against grey | Board | open |
+| Another tag's evidence, relative to this tag's (readmap_store OTHER_TAG_W) | 0.5, CHOSEN | yes (Logs): per-tag read rates at the same cells from the calibrations of tags 2, 3, 4 | Logs | open |
+| One session's tries per cell (readmap_store SESSION_CAP) | 10, CHOSEN | no: a cap so one long session cannot outvote many | - | ruled out |
+| A calibration started under this battery is marked "low-battery" (calib_run LOW_BATTERY_NOTE_PCT) | 40 %, CHOSEN (the coordinator's) | yes (Board): the calibration against battery (90 / 60 / 35 %, one robot, the same day): do wheel_scale and gyro_scale move with battery? | Board | open |
+
 ## Already set by data
 
 - **Line edge cue edge_thr 150** (e02.py SAFETY_SETTINGS): plywood reads 52-84 in every E02 session, the two real
