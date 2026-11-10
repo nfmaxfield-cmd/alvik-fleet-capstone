@@ -8,7 +8,8 @@ or a tag).
 The tag bridge writes <its folder>/frames.json about once a second (tag_bridge.Bridge.feed_write): per camera, the
 pictures decoded and how many were NEW (different from the one before: a frozen stream that re-sends one picture, or a
 blank one, does not count), and the reference tags read. check() waits until every camera shows new pictures rising
-(or a reference tag read), and otherwise returns the plain words to say and refuse with:
+(or a reference tag read); a camera that does not is said plainly, and when NO camera sends pictures the run is
+refused with:
 
     camera overhead is sending no pictures: is the recorder running (./run-fleet-pi.sh rec) and the USB cable in?
 
@@ -72,6 +73,10 @@ def check(folder, cams=None, wait_s=WAIT_S, clock=time.time, sleep=time.sleep):
     if not names:
         return False, words_for("overhead") + " (the camera reader never reported a picture)", d
     dead = [c for c, ok in live.items() if not ok]
+    if len(dead) < len(names):
+        # (degrade, not stop: CLAUDE.md) another camera is live: the run goes on with it, the dead one said plainly
+        return True, "WARNING: " + " ".join(words_for(c) for c in dead) + " The run carries on with %s." % ", ".join(
+            c for c in names if c not in dead), d
     return False, " ".join(words_for(c) for c in dead), d
 
 

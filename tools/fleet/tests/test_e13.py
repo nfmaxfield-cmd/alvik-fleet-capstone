@@ -246,8 +246,9 @@ def test_feed_check_frozen_blank_and_live_pictures(tmp_path):
     fs.write(force=True)
     t = [0.0]
     ok, words, d = CF.check(str(tmp_path), wait_s=1.0, clock=lambda: t[0], sleep=lambda s: t.__setitem__(0, t[0] + s))
-    assert not ok and "camera overhead is sending no pictures" in words and "side" not in words
-    assert "./run-fleet-pi.sh rec" in words and "USB cable" in words
+    assert ok and words.startswith("WARNING: camera overhead is sending no pictures")   # side is live: carry on
+    assert "./run-fleet-pi.sh rec" in words and "USB cable" in words and "carries on with side" in words
+    assert not CF.check(str(tmp_path), cams=["overhead"], wait_s=0.0)[0]           # the only camera: refused
     assert d["overhead"]["frozen"] == 9 and d["side"]["new"] == 10
     fs.ref_read("overhead", 2)                                         # a reference tag read proves it live
     fs.write(force=True)
