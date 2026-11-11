@@ -61,7 +61,7 @@ for p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recognit
 
 import numpy as np   # noqa: E402
 
-VERSION = "2026-11-10e14d"   # e14d: a robot brought back is bound by its tag's first read at the motion detector's spot (rehearsal c7f: the pin check wiggle at a dim border ended the run). the "while parking" end fixed at its root: staging at the start parked with park("stage"), which set _ending for the whole run (school 16:22 and 17:02); now only the run's own end parks as ending, and it is cleared after. The pool weights each run's legs by that run's own noise and drops outlier legs (school 17:02: wheel_scale 0.73 +- 0.20). e14c (17:2x, Nick at school): a dark picture holds the robot (no legs, no recovery drives, no wiggles, no end, no sleep) until the camera has adjusted (dark_watch); --sim-blackout. e14b (10 Nov 16:40-17:00): calibration evidence pooled across runs (calib_pool: every measured leg of the robot on this site, finished or not, weighted by age and battery; a run starts from the pooled values, measures only what is still uncertain, saves once the pooled +- is no wider than one finished run's; MIRLT_CALIB_POOL=0 each run on its own); parking after the tour never gives up (school 16:22: MIRLT_PARK_GIVEUP=1 the e13 end); a recovery with no reliable spot heads for the readability map; the setup order said at the start. e14 (10 Nov): every robot found by its own small move at the start (motion_find: anywhere on the table, with or without a tag that reads; one found where its tag does not read drives itself back, never giving up; MIRLT_CAMERA_DISCOVERY=off the wiggle alone); calibration on any surface (its own spots inside the readable area when the site has no proven stickers: --spots / MIRLT_CALIB_SPOTS / calibration.spots); the readability evidence chosen and kept by light and tag (readmap_store; MIRLT_READMAP_STORE=0 the old readmap.json); a tour point whose tag was just lost goes to the end of the tour once, then is skipped (MIRLT_RETRY_LOST=again the old aim-again); the battery floor from the site / Mission Control said at the start; LOW-BATTERY CALIBRATION under 40 %; --sim-dark, --sim-extra-camera, --sim-light, --sim-start X,Y. VERSION_10I = "2026-11-10i"   # 11-10i: the binding looks over longer windows and waits for a fresh read after each wiggle half (a tag that reads only now and then, school 15:00). 11-10h: the never-give-up hold makes find-me wiggles (when its turning circle + error is clear) so the motion detector can find it and the recovery bring it back (Nick 14:32: motion, not hands). 11-10e13 (e13): never give up (the recovery drives blind while its bubble + stop cannot reach the edge margin, no 8 cm / 40 cm caps: MIRLT_BLIND_RULE=cap; a lost tag holds with no time limit, asks for a hand; cam_pose_sure and every unguarded camera pose wait the same way; MIRLT_CALIB_GIVEUP=1 the 30 s end), readability per tag, TURN DID NOT SETTLE, stop resent after the curve phase, the motion detector on in its bridge; the camera check before binding (camera_feed: no pictures is said as that, never the robot or tag); tracked for the sleep after a run.
+VERSION = "2026-11-11e15"   # e15 (school 10 Nov 18:54): heading_check_patient (a lost tag: tried again where it reads, standing and reading longer from its measured fix interval; then the remembered turn; then the finding stroke; else "unknown"); the calibration's heading check and heading watch remember each tag's turn (tag_heading_store); a lost tag no longer ends the calibration (measured again); MIRLT_HEADING_CHECK=once the old check; MIRLT_SIM_HC_LOSS the simulator's lost tag. Before: "2026-11-10e14d"   # e14d: a robot brought back is bound by its tag's first read at the motion detector's spot (rehearsal c7f: the pin check wiggle at a dim border ended the run). the "while parking" end fixed at its root: staging at the start parked with park("stage"), which set _ending for the whole run (school 16:22 and 17:02); now only the run's own end parks as ending, and it is cleared after. The pool weights each run's legs by that run's own noise and drops outlier legs (school 17:02: wheel_scale 0.73 +- 0.20). e14c (17:2x, Nick at school): a dark picture holds the robot (no legs, no recovery drives, no wiggles, no end, no sleep) until the camera has adjusted (dark_watch); --sim-blackout. e14b (10 Nov 16:40-17:00): calibration evidence pooled across runs (calib_pool: every measured leg of the robot on this site, finished or not, weighted by age and battery; a run starts from the pooled values, measures only what is still uncertain, saves once the pooled +- is no wider than one finished run's; MIRLT_CALIB_POOL=0 each run on its own); parking after the tour never gives up (school 16:22: MIRLT_PARK_GIVEUP=1 the e13 end); a recovery with no reliable spot heads for the readability map; the setup order said at the start. e14 (10 Nov): every robot found by its own small move at the start (motion_find: anywhere on the table, with or without a tag that reads; one found where its tag does not read drives itself back, never giving up; MIRLT_CAMERA_DISCOVERY=off the wiggle alone); calibration on any surface (its own spots inside the readable area when the site has no proven stickers: --spots / MIRLT_CALIB_SPOTS / calibration.spots); the readability evidence chosen and kept by light and tag (readmap_store; MIRLT_READMAP_STORE=0 the old readmap.json); a tour point whose tag was just lost goes to the end of the tour once, then is skipped (MIRLT_RETRY_LOST=again the old aim-again); the battery floor from the site / Mission Control said at the start; LOW-BATTERY CALIBRATION under 40 %; --sim-dark, --sim-extra-camera, --sim-light, --sim-start X,Y. VERSION_10I = "2026-11-10i"   # 11-10i: the binding looks over longer windows and waits for a fresh read after each wiggle half (a tag that reads only now and then, school 15:00). 11-10h: the never-give-up hold makes find-me wiggles (when its turning circle + error is clear) so the motion detector can find it and the recovery bring it back (Nick 14:32: motion, not hands). 11-10e13 (e13): never give up (the recovery drives blind while its bubble + stop cannot reach the edge margin, no 8 cm / 40 cm caps: MIRLT_BLIND_RULE=cap; a lost tag holds with no time limit, asks for a hand; cam_pose_sure and every unguarded camera pose wait the same way; MIRLT_CALIB_GIVEUP=1 the 30 s end), readability per tag, TURN DID NOT SETTLE, stop resent after the curve phase, the motion detector on in its bridge; the camera check before binding (camera_feed: no pictures is said as that, never the robot or tag); tracked for the sleep after a run.
 VERSION_10G = "2026-11-10g"     # 11-10g: a standing robot is never given up for sparse tag reads: it is measured over longer windows (Nick 13:34; dim light). 11-10f: the start waits for the camera fix after the wiggle (dim light, ~7 fps: refused at once, school 13:25). 11-10e: a run ended for poor tag reads DOES try to park again (Nick 12:48: never give up on getting back to where it is seen); it drives only with a camera fix (cam_pose_sure waits for one). 11-10d: no crash parking with no camera fix (RunEnd, caught: "Could not park"). 11-10c: Phase A waits for the camera fix instead of crashing on None (school 12:35). 11-10b (e12, Nick 10 Nov): the curve phase (phase R: constant-curvature arcs left and right at free roam's radii and two speeds, fitted from the camera, arc_k_scale / arc_d_scale saved when they agree; --arc-phase auto/on/off), points in your order (--visit-order), the proven workspace for the tours' room, the camera self-check at the start. VERSION_10A was:
 VERSION_10A = "2026-11-10a"     # 11-10a: a leftover camera reader holding port 5011 is stopped first (stale_bridge.py). 11-05i (9 Nov, school): a tripped stop mid-tour crashed the run (TypeError: ev() got two
                              # values for kind); the trip event now says stop_kind. VERSION_H was:
@@ -978,24 +978,26 @@ def heading_nudge(rb, eye, tag, pose, problems, log=say, stop=None, settle_s=SET
     measure = measure or (lambda: eye.measure(tag))
     ok, base = OB.nudge_clear(pose, problems, OB.NUDGE_CM)
     if not ok:
-        raise RunEnd("the heading check needs %.0f cm clear both ways from where %s stands (ahead and behind, or to "
-                     "both sides): move it nearer the middle of the table and start again" % (OB.NUDGE_CM, rb.name))
+        raise _stage(RunEnd("the heading check needs %.0f cm clear both ways from where %s stands (ahead and behind, "
+                            "or to both sides): move it nearer the middle of the table and start again" % (
+                                OB.NUDGE_CM, rb.name)), "clear")
     if base:
         r = rb.leg("turn", base, on_tick=stop)
         time.sleep(settle_s)
         m = measure()
         if m is None:
-            raise RunEnd("the camera lost %s's tag during the heading check's quarter turn" % rb.name)
+            raise _stage(RunEnd("the camera lost %s's tag during the heading check's quarter turn" % rb.name), "turn")
         pose = m[:3]
     r = rb.leg("go", OB.NUDGE_CM, on_tick=stop)
     time.sleep(settle_s)
     c1 = measure()
     if c1 is None:
-        raise RunEnd("the camera lost %s's tag during the heading check: nothing else moved" % rb.name)
+        raise _stage(RunEnd("the camera lost %s's tag during the heading check: nothing else moved" % rb.name), "go",
+                     pose)
     got = OB.heading_offset(pose, c1)
     if got is None:
-        raise RunEnd("the heading check moved %s's tag only %.1f cm of %.0f (%s %s): stopped" % (
-            rb.name, math.dist(c1[:2], pose[:2]), OB.NUDGE_CM, r.get("result"), r.get("info")))
+        raise _stage(RunEnd("the heading check moved %s's tag only %.1f cm of %.0f (%s %s): stopped" % (
+            rb.name, math.dist(c1[:2], pose[:2]), OB.NUDGE_CM, r.get("result"), r.get("info"))), "short", c1[:3])
     use, raw, mv = got
     eye.yaw_off = dict(getattr(eye, "yaw_off", {}) or {})
     eye.yaw_off[tag] = wrap180(eye.yaw_off.get(tag, 0.0) + use)
@@ -1004,6 +1006,174 @@ def heading_nudge(rb, eye, tag, pose, problems, log=say, stop=None, settle_s=SET
         "tag %d corrected (observed, not typed)" % tag)
     log(words)
     return use, raw, mv, c1
+
+
+def _stage(e, stage, pose=None):
+    """(e15) Which step of the heading check ended it ("clear" not clear, "turn" lost in its quarter turn, "go" lost
+    after the nudge, "short" it hardly moved) and the last pose the camera had (the reference for a retry)."""
+    e.stage, e.pose = stage, pose
+    return e
+
+
+HC_RETRIES = 3            # (e15) a heading check whose tag was lost is tried again this many times (each standing and
+                          # reading twice as long as the one before) before the remembered offset or motion is used.
+                          # CHOSEN. DOE note: on the school table in dim light, retries 1 / 3 / 5 against checks
+                          # finished and seconds spent (the evidence: 10 Nov 18:54, the tag lost for > 3 s at (86, 90))
+HC_READS_WANTED = 6       # (e15) a retry reads the tag over a window that holds this many of its own measured fixes:
+                          # twice the 3 reads Eye.measure needs. Derived from the tag's measured fix interval (dim light,
+                          # school 17:46: 2.3 fixes a second -> 2.6 s; lit: about 0.8 s, so MEASURE_S 1.2 s rules)
+HC_FULL_SEARCHES = 2      # (e15) a retry stands long enough for the tag bridge to search the whole picture for a lost
+                          # tag this many times (tagcore.FULL_EVERY pictures each, at the tag's measured fix interval)
+
+
+def fix_interval(eye, tag, span_s=10.0, default=0.1):
+    """(e15) The tag's measured time between camera fixes over its last span_s of reads (median gap), or default."""
+    try:
+        with eye.lock:
+            rs = [r[0] for r in (eye.hist.get(int(tag)) or [])[-60:]]
+    except (AttributeError, TypeError):
+        rs = []
+    t_now = time.time()
+    rs = [t for t in rs if t_now - t <= span_s]
+    if len(rs) < 3:
+        return default
+    gaps = sorted(b - a for a, b in zip(rs, rs[1:]) if b > a)
+    return float(gaps[len(gaps) // 2]) if gaps else default
+
+
+def heading_check_patient(rb, eye, tag, pose, problems, log=say, stop=None, measure=None, remembered=None,
+                          stroke_heading=None, tries=HC_RETRIES):
+    """(e15, school 10 Nov 18:54) The heading check that does not leave the robot on its RAW tag heading:
+      1. heading_nudge as before;
+      2. the tag lost: tried again where the tag reads: it stands longer (the bridge searches the whole picture for a
+         lost tag every FULL_EVERY pictures) and the tag is read over a longer window (HC_READS_WANTED of its own
+         measured fixes), each try twice as long; a robot that stopped where its tag is not read backs the nudge out
+         to where it read and nudges the other way (backwards);
+      3. still not measured: the REMEMBERED offset (tag_heading_store, earlier runs) is used as a starting guess;
+      4. nothing remembered: the direction of the robot's own finding stroke (motion_find) against the tag's heading,
+         as a starting guess;
+      5. else unknown: the run measures it by a watched crawl before anything turns it (run_plan straighten_start).
+    eye.yaw_off[tag] holds the result (what is added to the tag's camera heading). Returns {"state": "measured" |
+    "remembered" | "motion" | "unknown", "offset": total deg or None, "how": words, "pose": the last camera pose or
+    None, "raw": seen deg, "moved": cm}. Never raises for a lost tag: only a stop asked (stop()) ends it."""
+    import observe as OB
+    import tagcore as TC
+    measure0 = measure or (lambda: eye.measure(tag))
+    eye.yaw_off = dict(getattr(eye, "yaw_off", {}) or {})
+
+    def done(state, how, p=None, raw=None, mv=None):
+        return {"state": state, "offset": eye.yaw_off.get(tag) if state != "unknown" else None, "how": how,
+                "pose": p, "raw": raw, "moved": mv, "stage": stage}
+
+    stage, ref = "none", pose
+    loss = float(getattr(eye, "sim_hc_loss", 0.0) or 0.0)
+    if loss and pose is not None and hasattr(eye, "gaps"):
+        # (e15, simulator) the school's 10 Nov 18:54: the camera loses the tag just as the heading check's nudge starts
+        eye.gaps.append((time.time() - eye.t_made + 0.3, loss))
+        eye.sim_hc_loss = 0.0
+        log("  (simulator: the camera loses the tags for %.0f s from the heading check's nudge on, as at school 10 Nov "
+            "18:54)" % loss)
+    if pose is not None:
+        try:
+            use, raw, mv, c1 = heading_nudge(rb, eye, tag, pose, problems, log=log, stop=stop, measure=measure0)
+            return done("measured", "heading check", c1, raw, mv)
+        except RunEnd as e:
+            stage, ref = getattr(e, "stage", "go"), getattr(e, "pose", None) or pose
+            log("  %s: heading check not done (%s): measured again where its tag reads (never driven on the raw tag "
+                "heading)" % (rb.name, e))
+    out_cm = OB.NUDGE_CM if stage == "go" else 0.0
+    gap = fix_interval(eye, tag)
+    for k in range(1, (tries if stage != "clear" else 0) + 1):
+        if stop is not None and stop():
+            break
+        stand = max(SETTLE_S, HC_FULL_SEARCHES * TC.FULL_EVERY * gap) * 2 ** (k - 1)
+        win = max(MEASURE_S, HC_READS_WANTED * gap) * 2 ** (k - 1)
+        log("  %s: HEADING CHECK AGAIN (%d of %d): it stands %.1f s, then its tag is read over %.1f s (its fixes came "
+            "every %.2f s)" % (rb.name, k, tries, stand, win, gap))
+        time.sleep(stand)
+        m2 = eye.measure(tag, win)
+        if m2 is not None and out_cm and ref is not None:
+            got = OB.heading_offset(ref, m2[:3])
+            if got is not None:
+                use, raw, mv = got
+                eye.yaw_off[tag] = wrap180(eye.yaw_off.get(tag, 0.0) + use)
+                log("HEADING CHECK %s (read again after %.1f s): moved %.1f cm at %.0f deg from the tag's heading: tag "
+                    "heading offset %+.0f deg%s" % (rb.name, stand, mv, raw, use, "" if abs(use) < 1 else
+                                                    "  <- the tag is turned on the robot (observed, not typed)"))
+                return done("measured", "heading check, read again after %.1f s" % stand, m2[:3], raw, mv)
+        if m2 is None and out_cm:
+            # stopped where its tag is not read: back the nudge out (the way it came was checked clear) to where it
+            # read, and measure there
+            log("  %s: its tag is not read where the nudge stopped: it backs %.0f cm to where its tag read" % (
+                rb.name, out_cm))
+            rb.leg("go", -out_cm, on_tick=stop)
+            out_cm = 0.0
+            time.sleep(stand)
+            m2 = eye.measure(tag, win)
+        if m2 is None:
+            continue
+        ref = m2[:3]
+        sign = -1.0 if k % 2 == 0 else 1.0        # every second try the other way (the far side may read better)
+        try:
+            got, c1, st = _nudge_dir(rb, eye, tag, ref, problems, sign, stand, lambda: eye.measure(tag, win), stop)
+        except RunEnd as e:
+            st, got, c1 = getattr(e, "stage", "go"), None, None
+            log("  %s: %s" % (rb.name, e))
+        if got is not None:
+            use, raw, mv = got
+            eye.yaw_off[tag] = wrap180(eye.yaw_off.get(tag, 0.0) + use)
+            log("HEADING CHECK %s (try %d, %s): moved %.1f cm at %.0f deg from the tag's heading: tag heading offset "
+                "%+.0f deg%s" % (rb.name, k, "backwards" if sign < 0 else "forwards", mv, raw, use,
+                                 "" if abs(use) < 1 else "  <- the tag is turned on the robot (observed, not typed)"))
+            return done("measured", "heading check, try %d" % k, c1, raw, mv)
+        out_cm = sign * OB.NUDGE_CM if st == "go" else 0.0
+        if st == "clear":
+            break
+    if out_cm:
+        rb.leg("go", -out_cm, on_tick=stop)          # back where its tag read
+    if remembered is not None:
+        eye.yaw_off[tag] = wrap180(float(remembered["offset_deg"]))
+        log("  %s: heading check not measured: tag %s's REMEMBERED turn %+.0f deg is used as the starting guess (%d "
+            "measurement%s, last %s); the run checks it again on its first moves" % (
+                rb.name, tag, eye.yaw_off[tag], int(remembered.get("n") or 0),
+                "" if int(remembered.get("n") or 0) == 1 else "s", remembered.get("last_seen")))
+        return done("remembered", "remembered (%s, %s)" % (remembered.get("last_seen"), remembered.get("how")))
+    if stroke_heading is not None:
+        m3 = eye.measure(tag, max(MEASURE_S, HC_READS_WANTED * gap))
+        if m3 is not None:
+            raw_tag = wrap180(m3[2] - eye.yaw_off.get(tag, 0.0))
+            eye.yaw_off[tag] = OB.snap(wrap180(float(stroke_heading) - raw_tag))
+            log("  %s: heading check not measured, nothing remembered: its finding stroke moved at %.0f deg, its tag "
+                "reads %.0f deg: tag turned %+.0f deg taken as the starting guess (motion); checked again on its "
+                "first moves" % (rb.name, stroke_heading, raw_tag, eye.yaw_off[tag]))
+            return done("motion", "the finding stroke's direction", m3[:3])
+    eye.yaw_off.pop(tag, None)
+    log("  %s: HEADING NOT KNOWN YET: its tag's turn on the robot was not measured and nothing is remembered: the run "
+        "measures it by a short watched crawl before anything turns it" % rb.name)
+    return done("unknown", "not measured")
+
+
+def _nudge_dir(rb, eye, tag, pose, problems, sign, settle_s, measure, stop=None):
+    """(e15) One nudge forwards (sign +1) or backwards (-1), clear both ways first (a quarter turn when facing an edge).
+    Returns (heading_offset result or None, the camera pose after, stage)."""
+    import observe as OB
+    ok, base = OB.nudge_clear(pose, problems, OB.NUDGE_CM)
+    if not ok:
+        return None, None, "clear"
+    if base:
+        rb.leg("turn", base, on_tick=stop)
+        time.sleep(settle_s)
+        m = measure()
+        if m is None:
+            return None, None, "turn"
+        pose = m[:3]
+    rb.leg("go", sign * OB.NUDGE_CM, on_tick=stop)
+    time.sleep(settle_s)
+    c1 = measure()
+    if c1 is None:
+        return None, None, "go"
+    got = OB.heading_offset(pose, c1, sign=sign)
+    return got, c1[:3], ("short" if got is None else "ok")
 
 
 class SimEye(Eye):
@@ -1018,6 +1188,7 @@ class SimEye(Eye):
         self.gaps = [tuple(float(v) for v in g.split(":")) for g in gaps]   # "T:DUR": the tag unread (a hand over it)
         self.rng = random.Random(seed)
         self.unread = 0
+        self.sim_hc_loss = float(os.environ.get("MIRLT_SIM_HC_LOSS", "0") or 0)   # (e15) the heading check's tag lost
         self.sim_yaw, self.sim_yaw_by = sim_yaw_spec(os.environ.get("MIRLT_SIM_TAG_YAW", ""))   # (11-05f/h) tags
         #                                                    turned on the robot: "180" every tag, or "2=180,3=90"
         super().__init__(folder, port)
@@ -3557,7 +3728,37 @@ class CalibRun:
         """(11-05f, school 5 Nov 18:54; 11-05h: the shared heading_nudge) Which way the robot really faces, against its
         roof tag's heading: a short nudge, and the direction the camera saw it move. The tag on AL-1DC0 reads 180 deg
         off its nose, so every leg was aimed backwards and the robot ended 1 cm from the TV-end edge. The nudge is
-        driven only if it is clear both ways, so a wrong heading cannot take it over an edge."""
+        driven only if it is clear both ways, so a wrong heading cannot take it over an edge.
+        (e15, school 10 Nov 18:54) A lost tag no longer ends it: heading_check_patient tries again where the tag reads,
+        then the remembered turn (tag_heading_store); a measured turn is remembered. Nothing measured and nothing
+        remembered: measured again (never give up). MIRLT_HEADING_CHECK=once: the check once, as before."""
+        import tag_heading_store as THS
+        hp = state_path(self.a, THS.FILE) if THS.enabled(self.site) else ""
+        if os.environ.get("MIRLT_HEADING_CHECK", "patient") != "once":
+            while True:
+                res = heading_check_patient(self.rb, self.eye, self.tag, cam,
+                                            lambda a, b: self.S.problems(a, b, buf=2.0, edge_buf=2.0),
+                                            stop=self.stop_flag.is_set, measure=self.cam_pose,
+                                            remembered=THS.get(hp, self.tag) if hp else None)
+                if res["state"] != "unknown":
+                    break
+                if res.get("stage") == "clear" or self.stop_flag.is_set():
+                    raise RunEnd("the heading check needs %.0f cm clear both ways from where %s stands (ahead and "
+                                 "behind, or to both sides): move it nearer the middle of the table and start again"
+                                 % (6.0, self.name) if res.get("stage") == "clear" else "stop asked")
+                say("  %s: its heading is not known yet: measured again (never give up)" % self.name)
+                cam = self.cam_pose_sure()
+            use = float(res["offset"] or 0.0)
+            self.ev("heading_check", moved_cm=res.get("moved"), seen_deg=res.get("raw"), offset_deg=use, tag=self.tag,
+                    state=res["state"], how=res["how"])
+            self.status["tag_heading_offset_deg"] = use
+            self.status["tag_heading_state"] = res["state"]
+            if res["state"] == "measured" and hp:
+                say("  " + THS.record(hp, self.tag, use, "the calibration's heading check", robot=self.rb.name)["words"])
+            import observe as OB
+            self.hwatch = OB.HeadingWatch(0.0)
+            time.sleep(1.5 if abs(use) >= 1.0 else 0.0)
+            return self.cam_pose_sure()
         use, raw, mv, c1 = heading_nudge(self.rb, self.eye, self.tag, cam,
                                          lambda a, b: self.S.problems(a, b, buf=2.0, edge_buf=2.0),
                                          stop=self.stop_flag.is_set, measure=self.cam_pose)
@@ -3723,6 +3924,10 @@ class CalibRun:
             say("  HEADING RE-LEARNED: two legs in a row moved %+.0f deg from the tag's heading: tag %d's offset is now "
                 "%+.0f deg (observed); the run carries on" % (d, self.tag, self.eye.yaw_off[self.tag]))
             self.ev("heading_relearned", tag=self.tag, change_deg=d, offset_deg=self.eye.yaw_off[self.tag])
+            import tag_heading_store as THS          # (e15) remembered for the next runs (the evidence wins)
+            if THS.enabled(self.site):
+                say("  " + THS.record(state_path(self.a, THS.FILE), self.tag, self.eye.yaw_off[self.tag],
+                                      "the calibration's heading watch (re-learned)", robot=self.rb.name)["words"])
 
     def calibrate_one(self):
         """One robot (self.rb, self.name, self.tag): its values read, phases A, B (fit, set, save), C, park at its

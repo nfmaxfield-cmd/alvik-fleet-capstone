@@ -47,7 +47,7 @@ for p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recognit
 
 import calib_run as CR   # noqa: E402
 
-VERSION = "2026-11-10e14d"   # e14d: a robot brought back is bound by its tag's first read where the motion detector had it (said in its note). Before: "2026-11-10e14"   # e14: every robot found by its own small move first (motion_find.run_finding: anywhere on
+VERSION = "2026-11-11e15"   # e15 (school 10 Nov 18:54): each tag's turn remembered across runs (tag_heading_store); a heading check that loses its tag is tried again where the tag reads (stand longer, longer window), then the remembered turn, then the finding stroke; record yaw_state / yaw_how (MIRLT_TAG_HEADING_MEMORY=0: per run only; MIRLT_HEADING_CHECK=once: the check once, as before). Before: "2026-11-10e14d"   # e14d: a robot brought back is bound by its tag's first read where the motion detector had it (said in its note). Before: "2026-11-10e14"   # e14: every robot found by its own small move first (motion_find.run_finding: anywhere on
 #   the table, with or without a tag that reads; brought back to where tags read; a robot with no tag that reads kept
 #   as "tagless" with its motion position and heading); the wiggle only for robots the finding did not bind.
 #   MIRLT_CAMERA_DISCOVERY=off: the wiggle alone (before e14). e13: the camera check (camera_feed) before binding
@@ -193,7 +193,7 @@ def clear_space_ok(cl, dry_truth=None):
 
 def bind_for_run(site, slots, link, eye, ips=(), wake_min=3.0, dry=False, folder=None, log=say, by=None,
                  rename_ok=None, state_dir=None, min_firmware=None, use_pins=None, heading_check=True, cams=None,
-                 rm=None):
+                 rm=None, heading_store=None):
     """Steps 1-5 with a Link and an Eye already open. Returns the record (dict): slots {slot: tag}, robots [...],
     aliases {name it answers with: slot} when the robots are not renamed (tags.rename_to_slot false)."""
     S = CR.Site(site)
@@ -339,7 +339,15 @@ def bind_for_run(site, slots, link, eye, ips=(), wake_min=3.0, dry=False, folder
         # the camera's view limit is a typed guess (calibration's VIEW_X_MAX_CM): a robot the camera reads where it
         # stands is inside the view (observed); only the edges, the outlets and the other robots limit the nudge
         S.view_x = max(S.view_x, max(p_[0] for p_ in seen.values()) + 2 * OB.NUDGE_CM + 10.0)
-    if heading_check:
+    # (e15, school 10 Nov 18:54) each tag's turn remembered across runs (tag_heading_store): the heading check that
+    # loses its tag is tried again where the tag reads, then the remembered turn, then the finding stroke's direction;
+    # a robot is never left on its raw tag heading without the run knowing (yaw_state "unknown": run_plan crawls first)
+    import tag_heading_store as THS
+    if heading_store is None:
+        heading_store = THS.path_for(site, state_dir) if THS.enabled(site) else ""
+    yaw_state, yaw_how = {}, {}
+    if heading_check and os.environ.get("MIRLT_HEADING_CHECK", "patient") == "once":
+        # the way before e15 (MIRLT_HEADING_CHECK=once): the heading check once; lost tag: the raw heading
         for rb in robots:
             t = b.get(rb.name)
             if t is None:
@@ -354,11 +362,47 @@ def bind_for_run(site, slots, link, eye, ips=(), wake_min=3.0, dry=False, folder
                 off, raw, mv, c1 = CR.heading_nudge(rb, eye, int(t), m[:3],
                                                     lambda a_, b_: S.problems(a_, b_, buf=2.0, edge_buf=2.0), log=log)
                 yaw[rb.name] = off
+                yaw_state[rb.name], yaw_how[rb.name] = "measured", "heading check"
                 seen[rb.name] = (c1[0], c1[1])
+                if heading_store:
+                    log("  " + THS.record(heading_store, t, off, "the binding's heading check",
+                                          robot=wifi.get(rb.ip))["words"])
             except CR.RunEnd as e:
                 log("  %s: heading check not done (%s); the run's heading watch checks it on its first drives" % (
                     rb.name, e))
         S.set_parked({})
+    elif heading_check:
+        for rb in robots:
+            t = b.get(rb.name)
+            if t is None:
+                continue
+            rem = THS.get(heading_store, t) if heading_store else None
+            stroke = ((mres or {}).get("robots", {}).get(rb.name) or {}).get("heading") if mres else None
+            m = eye.measure(t, 0.8)
+            if not m:
+                m = eye.measure(t, max(CR.MEASURE_S, CR.HC_READS_WANTED * CR.fix_interval(eye, t)))
+            if not m:
+                log("  %s: no camera pose for the heading check where it stands" % rb.name)
+            S.set_parked({o: p_ for o, p_ in seen.items() if o != rb.name})
+            res = CR.heading_check_patient(rb, eye, int(t), m[:3] if m else None,
+                                           lambda a_, b_: S.problems(a_, b_, buf=2.0, edge_buf=2.0), log=log,
+                                           remembered=rem, stroke_heading=stroke)
+            yaw_state[rb.name], yaw_how[rb.name] = res["state"], res["how"]
+            if res["offset"] is not None:
+                yaw[rb.name] = res["offset"]
+            if res.get("pose"):
+                seen[rb.name] = (res["pose"][0], res["pose"][1])
+            if res["state"] == "measured" and heading_store:
+                r_ = THS.record(heading_store, t, res["offset"], "the binding's heading check", robot=wifi.get(rb.ip))
+                log("  " + r_["words"])
+        S.set_parked({})
+    elif heading_store:
+        for rb in robots:              # no heading check asked: the remembered turn as the starting guess
+            t = b.get(rb.name)
+            rem = THS.get(heading_store, t) if t is not None else None
+            if rem:
+                yaw[rb.name] = float(rem["offset_deg"])
+                yaw_state[rb.name], yaw_how[rb.name] = "remembered", "remembered (%s)" % rem.get("last_seen")
     spins = {}
     for r in (site or {}).get("robots") or []:
         if r.get("wifi") and r["wifi"] in found:
@@ -391,6 +435,8 @@ def bind_for_run(site, slots, link, eye, ips=(), wake_min=3.0, dry=False, folder
            "renamed": [{"ip": ip, "from": o, "to": n} for ip, o, n in renamed],
            "aliases": aliases,
            "yaw_off": {assign[n]: d for n, d in yaw.items() if n in assign},
+           "yaw_state": {assign[n]: v for n, v in yaw_state.items() if n in assign},   # (e15) measured / remembered /
+           "yaw_how": {assign[n]: v for n, v in yaw_how.items() if n in assign},       # motion / unknown, and how
            "tagless": {assign[n]: tl for n, tl in tagless.items() if n in assign},   # (e14) found by motion, no tag
            "found_by_motion": bool(mres),
            "auto": auto,
@@ -425,6 +471,11 @@ def tags_with_binding(tags, rec):
     if rec.get("yaw_off"):
         # (11-05h) the heading check's offsets, per tag id: the bridge corrects every heading of that tag
         t["yaw_off"] = {str(rec["slots"][sl]): d for sl, d in rec["yaw_off"].items() if sl in rec["slots"]}
+    if rec.get("yaw_state"):
+        # (e15) how each tag's offset is known (measured this run / remembered / motion / unknown): run_plan's facing
+        # check never straightens on an unverified raw heading
+        t["yaw_state"] = {str(rec["slots"][sl]): v for sl, v in rec["yaw_state"].items() if sl in rec["slots"]}
+        t["yaw_how"] = {str(rec["slots"][sl]): v for sl, v in (rec.get("yaw_how") or {}).items() if sl in rec["slots"]}
     return t
 
 
@@ -452,7 +503,7 @@ def real_cams(site, calib=""):
 
 
 def run_for_mission(site, slots, folder, stream="127.0.0.1:8000", calib="", ips=(), log=say, rename_ok=None,
-                    use_pins=None, rm=None):
+                    use_pins=None, rm=None, heading_store=None):
     """mission_run's step before its bridge (real robots): a tag bridge of its own on the recorder's pictures with
     every listed and spare tag id, the binding, the bridge stopped. Returns the record."""
     import argparse
@@ -468,7 +519,7 @@ def run_for_mission(site, slots, folder, stream="127.0.0.1:8000", calib="", ips=
         cams, closers = real_cams(site, calib) if MF_on() else ([], [])
         try:
             return bind_for_run(site, slots, link, eye, ips=ips, folder=folder, log=log, rename_ok=rename_ok,
-                                use_pins=use_pins, cams=cams, rm=rm)
+                                use_pins=use_pins, cams=cams, rm=rm, heading_store=heading_store)
         finally:
             for c in closers:
                 c()

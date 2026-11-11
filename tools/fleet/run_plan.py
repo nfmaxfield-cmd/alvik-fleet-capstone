@@ -36,7 +36,7 @@ Position source (--fixes): where camera poses come from (data-formats.md,
 runs against it with --fixes udp; at the end it prints the simulator's ground
 truth: docking errors, closest robots, contact.
 """
-VERSION = "2026-11-10e14c"   # e14c (school 17:46): how old a fix may be and still count as seen comes from each robot's measured fix interval (blind_after; a slow detector treated like a slow camera; MIRLT_FIX_GAP_RULE=fixed the 0.6 s). e14b: a dark picture pauses every robot until the camera has adjusted (dark_watch). e14: a visit point whose tag was lost on the way is moved to the end of the robot's list once, then skipped (defer_current_point; MIRLT_RETRY_LOST=again the old way); the spot where it was lost kept as evidence. 2026-11-10e13 (e13): never give up blind (no BLIND_MAX_CM cap: it stops only when blind error + body + stop could reach an edge; MIRLT_BLIND_RULE=cap the old caps); no pictures: each blind robot's risk-based limit (safety_rules.no_picture_limit; MIRLT_NOPIC_RULE=off: e12's rules alone).
+VERSION = "2026-11-11e15"   # e15 (school 10 Nov 18:54): every facing check and re-check reads the tag CORRECTED by the turn this run knows (facing.corrected_tags: the tags file plus yaw_fix); a robot whose tag turn is unverified (not measured this run, nothing remembered; or remembered and a big turn would follow) is measured by the start's watched crawl before any straightening, and the crawl's measurement sets its yaw_fix; what is re-learned or crawled is remembered (--tag-heading-store, tag_heading_store). Before: "2026-11-10e14c"   # e14c (school 17:46): how old a fix may be and still count as seen comes from each robot's measured fix interval (blind_after; a slow detector treated like a slow camera; MIRLT_FIX_GAP_RULE=fixed the 0.6 s). e14b: a dark picture pauses every robot until the camera has adjusted (dark_watch). e14: a visit point whose tag was lost on the way is moved to the end of the robot's list once, then skipped (defer_current_point; MIRLT_RETRY_LOST=again the old way); the spot where it was lost kept as evidence. 2026-11-10e13 (e13): never give up blind (no BLIND_MAX_CM cap: it stops only when blind error + body + stop could reach an edge; MIRLT_BLIND_RULE=cap the old caps); no pictures: each blind robot's risk-based limit (safety_rules.no_picture_limit; MIRLT_NOPIC_RULE=off: e12's rules alone).
 VERSION_B = "2026-11-10b"   # 2026-11-10b (e12 item 9): a lock-only fix never resets a pose (MIRLT_LOCK_GUARD=0: as before); a dwell broken by a halt where the robot did not move keeps its start (MIRLT_DWELL_KEEP=0). 2026-11-10a (e12): the bridge's "camera" messages (no pictures / pictures again) said and logged. No version before
 LOCK_GUARD = __import__("os").environ.get("MIRLT_LOCK_GUARD", "1") != "0"
 DWELL_KEEP = __import__("os").environ.get("MIRLT_DWELL_KEEP", "1") != "0"
@@ -1192,6 +1192,8 @@ class Coordinator:
             ev = dict(ev, th=OB.wrap180(float(ev["th"]) + d))
             self.send(b.name, "fpose %.2f %.2f %.2f %.2f %.2f" % (float(ev["x"]), float(ev["y"]), float(ev["th"]),
                                                                   1.0, 3.0))
+            b.yaw_known = True               # (e15) measured this run: the facing checks use it from now on
+            remember_tag_turn(self, b.name, "run_plan's heading watch (re-learned)")
         return ev
 
     READ_EVERY_S = 0.5        # (11-05h) the readability map: each robot's spot (its own pose) and whether a camera read
@@ -5388,6 +5390,74 @@ CRAWL_CM = 3.0            # the watched crawl that finds which way a robot faces
                           # the heading's error (the facing check as truth) on the board
 CRAWL_MIN_CM = 1.5        # the camera must see it move at least this far for a heading
 CRAWL_CMS = 5.0
+CRAWL_GUARD_S = 1.0       # (e15) after a crawl that measured a tag's turn, the camera guard waits this long: the camera's
+                          # lag (~0.3 s) plus the pose history it compares with (pose_at). No DOE: the pictures from
+                          # before the new heading are not a disagreement
+
+
+def tag_file_info(coord, n):
+    """(e15) Robot n's roof tag id and the turn the run's tags file gives it (what the tag bridge already adds)."""
+    cfg = getattr(coord, "_tags_cfg", None)
+    if cfg is None:
+        cfg = {}
+        p = getattr(coord.args, "facing_tags", "") or ""
+        if p:
+            try:
+                with open(p) as f:
+                    cfg = json.load(f)
+            except (OSError, ValueError):
+                cfg = {}
+        coord._tags_cfg = cfg
+    tid = (cfg.get("ids") or {}).get(n)
+    if tid is None:
+        return None, 0.0
+    yo = cfg.get("yaw_off") or {}
+    return tid, float(yo.get(str(tid), yo.get(tid, 0.0)) or 0.0)
+
+
+def remember_tag_turn(coord, n, how):
+    """(e15) The robot's tag turn as this run now knows it (the tags file's + its yaw_fix) into the store
+    (--tag-heading-store): the evidence wins over what was remembered."""
+    path = getattr(coord.args, "tag_heading_store", "") or ""
+    tid, foff = tag_file_info(coord, n)
+    if not path or tid is None:
+        return None
+    import tag_heading_store as THS
+    b = coord.bots[n]
+    total = THS.wrap180(foff + float(getattr(b, "yaw_fix", 0.0) or 0.0))
+    try:
+        r = THS.record(path, tid, total, how, robot=n)
+    except OSError as e:
+        coord.log("tag_heading_memory", robot=n, tag=tid, error=str(e))
+        return None
+    coord.log("tag_heading_memory", robot=n, tag=tid, offset_deg=total, result=r["result"], old=r["old"], how=how)
+    if r.get("words"):
+        print("  " + r["words"])
+    return r
+
+
+def learn_turn_from_crawl(coord, n, fres, h):
+    """(e15) The watched crawl showed which way robot n faces (h, from the camera's displacement): its tag's turn is
+    the crawl's heading against the tag's RAW heading (the facing check's heading less the turn it had added), snapped
+    to a quarter turn when near one. Sets yaw_fix (on top of the tags file's turn), marks it measured, remembers it."""
+    import observe as OB
+    meas = (((fres or {}).get("robots") or {}).get(n) or {}).get("meas") or {}
+    if meas.get("heading") is None:
+        return None
+    raw = OB.wrap180(float(meas["heading"]) - float(meas.get("tag_off") or 0.0))
+    total = OB.snap(OB.wrap180(float(h) - raw))
+    tid, foff = tag_file_info(coord, n)
+    b = coord.bots[n]
+    old = OB.wrap180(foff + float(getattr(b, "yaw_fix", 0.0) or 0.0))
+    b.yaw_fix = OB.wrap180(total - foff)
+    b.yaw_known = True
+    coord.log("tag_turn_from_crawl", robot=n, tag=tid, crawl_heading=round(float(h), 1), tag_raw=round(raw, 1),
+              offset_deg=total, before=old)
+    print("  %s: TAG TURN MEASURED by the crawl: its roof tag reads %.0f deg, it moved at %.0f deg: tag %s is turned "
+          "%+.0f deg on the robot (was taken as %+.0f); every heading of it corrected from now on (observed)" % (
+              n, raw, h, tid, total, old))
+    remember_tag_turn(coord, n, "run_plan's start crawl")
+    return total
 
 
 def crawl_heading(coord, link, args, n, pos, guess, rect):
@@ -5448,6 +5518,8 @@ def straighten_start(coord, link, args, source, names, fres, auto=False):
     starts = {n: tuple(float(v) for v in coord.plan["robots"][n]["start"][:3]) for n in names}
     heads = dict(fres.get("headings") or {})
     check_crawl = set((fres.get("unknown") or []) + (fres.get("unsure") or []))
+    unverified = set(fres.get("unverified") or [])      # (e15) its tag's turn not verified: crawl before any move
+    crawled = set()
     record = coord.straighten_record = {"tries": [], "result": None}
     tries = 0
     max_tries = ST.TRIES + (1 if auto else 0)
@@ -5569,6 +5641,34 @@ def straighten_start(coord, link, args, source, names, fres, auto=False):
                 record["result"] = "refused: %s" % e
                 return
         need = [n for n in names if pl["robots"][n]["steps"] and n not in coord.start_aside]
+        first = [n for n in need if n in unverified and n not in crawled]
+        if first:
+            # (e15, school 10 Nov 18:54) never straightened on an unverified raw tag heading: which way it faces is
+            # measured first by the watched crawl, its tag's turn learned from it, then everything is planned again
+            for n in first:
+                crawled.add(n)
+                warn(coord, "%s: its roof tag's turn is not verified: a short watched crawl (%.0f cm) shows which way it "
+                            "faces before anything turns it" % (n, CRAWL_CM))
+                got = crawl_heading(coord, link, args, n, pos[n], heads[n], rect)
+                if got is None:
+                    got = crawl_heading(coord, link, args, n, pos[n], heads[n], rect)     # measured again
+                if got is None:
+                    hold_at_start(coord, link, n, "which way it faces is not known (its tag's turn is not verified, "
+                                                  "and two crawls did not show it)")
+                    continue
+                learn_turn_from_crawl(coord, n, fres, got[0])
+                heads[n], pos[n] = got[0], got[1]
+                unverified.discard(n)
+                # its own pose dead-reckoned the crawl along the unverified guess: set at once from the crawl, and the
+                # camera guard's half-second of pictures from before (taken at the old heading) not counted
+                b_ = coord.bots[n]
+                b_.guard_since = None
+                b_.own_until = max(getattr(b_, "own_until", 0.0), now() + CRAWL_GUARD_S)
+                try:
+                    set_poses(coord, link, {n: (pos[n][0], pos[n][1], heads[n])})
+                except SystemExit as e:
+                    warn(coord, "%s: its pose after the crawl not taken yet (%s): set again before it moves" % (n, e))
+            continue
         for w in pl["words"]:
             print("  " + w)
         if not need:
@@ -5617,6 +5717,8 @@ def straighten_start(coord, link, args, source, names, fres, auto=False):
         fr = FC.run_plan_check(coord, link, args, names, straighten=True, tag="facing-recheck-%d" % tries)
         after_facing(coord, fr, names)
         heads = dict(fr.get("headings") or {})
+        fres = fr                                        # (e15) its raw tag headings for a crawl's measurement
+        unverified |= set(fr.get("unverified") or []) - crawled
         for n in names:
             if n not in heads and n in own:
                 # its lights still not read: its own gyro heading after the correction (the crawl found it) is used,
@@ -5838,6 +5940,8 @@ def main(argv=None):
                     help="the robots' own four-sided border (firmware 2026-10-27a), sent when the map has side kinds "
                          "(default %(default)s; 0 = off)")
     g.add_argument("--dry-run", action="store_true")
+    g.add_argument("--tag-heading-store", default="", help="(e15) the remembered tag turns (tag_heading_store.py): what "
+                   "this run re-learns or measures by its start crawl is recorded there (mission_run passes it)")
     g.add_argument("--brick", help="auto@T or x,y[,angle]@T")
     g.add_argument("--wifi-drop", action="append", default=[], metavar="NAME@T:DUR")
     g.add_argument("--seed", type=int, default=1)

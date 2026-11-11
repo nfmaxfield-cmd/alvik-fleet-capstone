@@ -42,6 +42,12 @@ for p in (HERE, TOOLS, os.path.join(TOOLS, "experiment"), os.path.join(TOOLS, "l
 
 import numpy as np    # noqa: E402
 
+VERSION = "facing-2026-11-11e15"   # e15 (school 10 Nov 18:54): every roof-tag facing check (the start, facing-recheck-N,
+#   the rejoin) reads the tag's heading CORRECTED by its turn on the robot: the run's tags file (the binding's measurement
+#   or the remembered one) plus what this run re-learned (run_plan's yaw_fix); a robot whose turn is not verified is
+#   listed ("unverified") so straightening measures it by a crawl first, never turning it on a raw "backwards".
+#   MIRLT_FACING_RAW=1: the tags file alone, as before. No version string before
+
 TOL_DEG = 15.0          # chosen from the simulator (Monday's mission, 61 x 122, both cameras): robots put down 9, 12 and 15
                         # deg off ran the whole mission; 18 deg (Left) and 28 deg (Right) stopped it after 1 s ("camera
                         # and Left's own pose disagree by 7.9 cm"). Over it, nothing moves. Measured-vs-true error: side
@@ -482,10 +488,12 @@ def run_plan_check(coord, link, args, names, say=print, straighten=False, tag="f
             # the AprilTag robots (2026-11-02): read from their roof tags, nothing sent to the robots
             with open(tag_cfg) as fh:
                 tags = json.load(fh)
+            tags, trust = corrected_tags(coord, tags, names)       # (e15) the turn learned so far, not the raw tag
             say("Facing check: which way each robot faces, from its roof tag (nothing moves; about %.0f s) ..."
                 % TAG_LOOK_S)
             res = tag_check(names, grab, cams, tags, assumed=assumed, rect=rect, tol=tols, targets=targets,
                             say=(lambda w: None) if straighten else say)
+            res["trust"] = trust
         else:
             say("Facing check: which way each robot faces, from its lights (nothing moves; about %.0f s) ..."
                 % (2.0 + 3.0 * len(names)))
@@ -522,6 +530,11 @@ def run_plan_check(coord, link, args, names, say=print, straighten=False, tag="f
                 say("  %s faces %.0f deg (%s): %.0f deg off its start heading%s" % (
                     n, h, meas.get("how"), abs(off), "" if abs(off) <= 3.0 else
                     " (backwards)" if abs(off) > 135 else ""))
+                w = unverified_words(n, (res.get("trust") or {}).get(n), off)
+                if w:
+                    # (e15) never straightened on an unverified heading: a crawl the camera watches measures it first
+                    res.setdefault("unverified", []).append(n)
+                    say("  " + w)
             res["ok"] = ok
         for w in identity_words(res["robots"], {n: starts[n][:2] for n in names}):
             if straighten:
@@ -578,6 +591,7 @@ def tag_check(names, grab, cams, tags, assumed=None, rect=None, tol=TOL_DEG, tar
     t0 = time.time()
     time.sleep(TAG_LOOK_S)
     per = {n: {} for n in names}
+    applied = {}
     for c, cam in cams.items():
         for g in grab.between(c, t0, time.time()):
             for d in det.detect_full(g, cam=c):
@@ -586,6 +600,7 @@ def tag_check(names, grab, cams, tags, assumed=None, rect=None, tol=TOL_DEG, tar
                     continue
                 p = TG.pose_from_detection(cam, d, float(tags["height_cm"]), float(tags["tag_cm"]))
                 yo = (tags.get("yaw_off") or {}).get(str(d.id), (tags.get("yaw_off") or {}).get(d.id))
+                applied[n] = float(yo or 0.0)
                 if p is not None and yo:
                     # (11-05h) the tag is turned on its robot by this much (the heading nudge found it)
                     p.heading = wrap180(p.heading + float(yo))
@@ -612,6 +627,7 @@ def tag_check(names, grab, cams, tags, assumed=None, rect=None, tol=TOL_DEG, tar
                     "how": "its roof tag (%s)" % ", ".join(words) + ("" if spread <= TAG_AGREE_DEG else
                                                                  ", cameras %.0f deg apart" % (2 * spread)),
                     "centre": [round(float(np.mean(xs)), 2), round(float(np.mean(ys)), 2)],
+                    "tag_off": applied.get(n, 0.0),      # (e15) the turn added to the tag's raw heading
                     "mid": [round(float(np.mean(xs)) + 1.0 * _m.cos(_m.radians(hm)), 2),
                             round(float(np.mean(ys)) + 1.0 * _m.sin(_m.radians(hm)), 2)]}
         v = verdict(n, meas, (assumed or {}).get(n), tol=(tol.get(n, TOL_DEG) if isinstance(tol, dict) else tol),
@@ -621,6 +637,44 @@ def tag_check(names, grab, cams, tags, assumed=None, rect=None, tol=TOL_DEG, tar
             ok = False
             say("  " + v["words"])
     return dict(ok=ok, robots=res, seconds=round(time.time() - t_start, 1), by="tags")
+
+
+def unverified_words(n, trust, off):
+    """(e15) Words when robot n's heading must be measured by a watched crawl before straightening: its tag's turn is
+    not known ("unknown"), or only a starting guess ("remembered" / "motion") from which a turn of more than
+    SIDEWAYS_DEG would follow (a wrong remembered turn is a quarter turn or more, a hand-placed robot faces its start
+    within about SIDEWAYS_DEG). None when its heading may be used."""
+    if trust == "unknown":
+        return ("%s: its roof tag's turn on the robot is not known yet: which way it faces is measured by a short "
+                "watched crawl before anything turns it" % n)
+    if trust in ("remembered", "motion") and abs(float(off)) > SIDEWAYS_DEG:
+        return ("%s: its roof tag's turn on the robot is only %s, and a turn of %.0f deg would follow from it: which "
+                "way it faces is measured by a short watched crawl first" % (n, trust, abs(float(off))))
+    return None
+
+
+def corrected_tags(coord, tags, names):
+    """(e15, school 10 Nov 18:54) The tags block with each robot's tag turn as the run knows it NOW: the tags file's
+    yaw_off (the binding's measurement, or the remembered turn) plus what this run re-learned or measured since
+    (coord.bots[n].yaw_fix, run_plan's heading watch and start crawl). trust {name: "measured" | "remembered" | "motion"
+    | "unknown" | "typed" (a tags file with no yaw_state: before e15)}. MIRLT_FACING_RAW=1: the file alone."""
+    t = dict(tags or {})
+    yo = {str(k): float(v) for k, v in (t.get("yaw_off") or {}).items()}
+    st = {str(k): v for k, v in (t.get("yaw_state") or {}).items()}
+    trust = {}
+    raw = os.environ.get("MIRLT_FACING_RAW") == "1"
+    for n in names:
+        tid = (t.get("ids") or {}).get(n)
+        if tid is None:
+            continue
+        k = str(tid)
+        b = (getattr(coord, "bots", None) or {}).get(n)
+        extra = float(getattr(b, "yaw_fix", 0.0) or 0.0) if (b is not None and not raw) else 0.0
+        if extra:
+            yo[k] = wrap180(yo.get(k, 0.0) + extra)
+        trust[n] = "measured" if (b is not None and getattr(b, "yaw_known", False) and not raw) else st.get(k, "typed")
+    t["yaw_off"] = yo
+    return t, trust
 
 
 # ------------------------------------------------------------------------------------------------ self-test

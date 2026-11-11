@@ -32,7 +32,7 @@ Ctrl+C stops every robot (run_plan's own stop). Free space (diskguard.py, 2026-1
 under its floor; frame saving stops under the frames' floor; under the card's floor during the run, run_plan is sent
 Ctrl+C (every robot stops) and the run ends as it would on Ctrl+C, with the upload.
 """
-VERSION = "2026-11-10e14"   # e14: robot finding by motion inside the binding (dry: the simulator's own cameras drawn from its true poses); the readable area chosen by light and tag (readmap_store; free roam where every tag of the run reads: readmap_roam.json), each run's own evidence kept with its light; the battery floor from the site / Mission Control passed to run_plan; --sim-light, --readmap-store, --sim-tagless; e13's separate discovery step behind MIRLT_CAMERA_DISCOVERY=e13. 2026-11-10e13 (e13): school free roam planned inside the readable area (--readable-map); the camera check before a tags run (camera_feed); --sim-plain-roofs; tracked for the sleep 10 min after a run. 2026-11-10a (e12): the camera self-check at the start of a tags run (camera_selfcheck.py; --no-camera-check). No version string before
+VERSION = "2026-11-11e15"   # e15 (school 10 Nov 18:54): each tag's turn on its robot remembered across runs (tag_heading_store, <conf dir>/tag_headings.json; a dry run's own with --tag-heading-store): the binding's patient heading check gets it, a run with no binding starts from it, tags.json carries yaw_state (measured / remembered / motion / unknown) so run_plan never straightens on an unverified raw heading, run_plan records what it re-learns, free roam's proof drive is harvested after the run; --sim-hc-loss (the heading check's tag lost); MIRLT_TAG_HEADING_MEMORY=0 per run only. Before: "2026-11-10e14"   # e14: robot finding by motion inside the binding (dry: the simulator's own cameras drawn from its true poses); the readable area chosen by light and tag (readmap_store; free roam where every tag of the run reads: readmap_roam.json), each run's own evidence kept with its light; the battery floor from the site / Mission Control passed to run_plan; --sim-light, --readmap-store, --sim-tagless; e13's separate discovery step behind MIRLT_CAMERA_DISCOVERY=e13. 2026-11-10e13 (e13): school free roam planned inside the readable area (--readable-map); the camera check before a tags run (camera_feed); --sim-plain-roofs; tracked for the sleep 10 min after a run. 2026-11-10a (e12): the camera self-check at the start of a tags run (camera_selfcheck.py; --no-camera-check). No version string before
 
 import argparse
 import datetime as dt
@@ -813,7 +813,7 @@ def wiggle_first(args, out):
         import calib_run as CRN
         rec = WB.run_for_mission(args.site_, slots, os.path.join(out, "bind"), stream=args.stream,
                                  calib=args.calib or os.path.join(tc, "overhead.json"), ips=args.robot,
-                                 rm=run_readmap(args, None))
+                                 rm=run_readmap(args, None), heading_store=heading_store_path(args, out))
     except (Exception, SystemExit) as e:   # noqa: BLE001  (BindError, RunEnd, the port in use)
         say("NOT STARTED: the wiggle-first binding did not finish: %s. To run with the typed tag ids instead: "
             "--binding fixed (or the site's tags.binding \"fixed\")." % e)
@@ -903,7 +903,9 @@ def take_binding(args, rec):
     take_tagless(args, rec.get("tagless") or {})
     args.seen_ = {r["slot"]: r["seen_cm"] for r in rec.get("robots") or [] if r.get("seen_cm")}
     if rec.get("yaw_off"):
-        say("TAG HEADINGS (observed by the nudge): %s" % ", ".join("%s %+.0f deg" % kv for kv in sorted(
+        st_ = rec.get("yaw_state") or {}       # (e15) measured by the nudge, or remembered / motion (a starting guess)
+        say("TAG HEADINGS (from the binding): %s" % ", ".join("%s %+.0f deg (%s)" % (k_, v_, {
+            "measured": "observed by the nudge"}.get(st_.get(k_, "measured"), st_.get(k_) or "")) for k_, v_ in sorted(
             rec["yaw_off"].items())))
 
 
@@ -1095,6 +1097,8 @@ def dry_bind(args, out):
     os.makedirs(folder, exist_ok=True)
     yaw = dict(kv.split("=") for kv in (args.sim_tag_yaw.split(",") if args.sim_tag_yaw else []))
     os.environ["MIRLT_SIM_TAG_YAW"] = ",".join("%d=%s" % (ids[n], v) for n, v in yaw.items() if n in ids)
+    if getattr(args, "sim_hc_loss", 0):
+        os.environ["MIRLT_SIM_HC_LOSS"] = "%g" % float(args.sim_hc_loss)    # (e15) the heading check's tag lost
     CRN.loopback_up()
     S = CRN.Site(args.site_)
     sims = ["%s:%d:%s" % (n, ids[n], homes[n]) for n in names]
@@ -1117,12 +1121,14 @@ def dry_bind(args, out):
     try:
         time.sleep(1.0)
         rec = WB.bind_for_run(args.site_, ["auto"] if args.auto_robots else names, link, eye, ips=ips, wake_min=2.0,
-                              dry=True, folder=folder, log=say, cams=cams, rm=run_readmap(args, None))
+                              dry=True, folder=folder, log=say, cams=cams, rm=run_readmap(args, None),
+                              heading_store=heading_store_path(args, out))
     except (Exception, SystemExit) as e:     # noqa: BLE001
         say("NOT STARTED: the wiggle-first binding (simulator) did not finish: %s" % e)
         return 5
     finally:
         os.environ.pop("MIRLT_SIM_TAG_YAW", None)
+        os.environ.pop("MIRLT_SIM_HC_LOSS", None)
         eye.close()
         link.close()
         sp.terminate()
@@ -1258,6 +1264,77 @@ def store_dir(args):
     return (args.site_ or {}).get("conf_dir") or ""
 
 
+def heading_store_path(args, out=None):
+    """(e15) Where each tag's measured turn is remembered (tag_heading_store): the site's folder on the Pi; a dry run
+    its own session (nothing carried over) unless --tag-heading-store names one. "" when switched off
+    (MIRLT_TAG_HEADING_MEMORY=0 or the site's tags.heading_memory false: per run only)."""
+    import tag_heading_store as THS
+    if not THS.enabled(args.site_):
+        return ""
+    given = getattr(args, "tag_heading_store", "") or ""
+    if given:
+        return os.path.join(given, THS.FILE) if (os.path.isdir(given) or not given.endswith(".json")) else given
+    if getattr(args, "dry", False):
+        return os.path.join(out, THS.FILE) if out else ""
+    return THS.path_for(args.site_)
+
+
+def apply_tag_memory(args, out):
+    """(e15, school 10 Nov 18:54) Every robot's roof tag in the run's tags block gets its turn on the robot and how it
+    is known: the binding's measurement this run ("measured"), else the remembered one ("remembered": a starting guess,
+    checked again on its first moves), else "unknown" (run_plan measures it by a watched crawl before any straightening
+    turn or drive). Said once per robot."""
+    import tag_heading_store as THS
+    t = args.tags_ = dict(args.tags_ or {})
+    ids = dict(t.get("ids") or {})
+    tagless = set((t.get("tagless") or {}).keys())
+    st = dict(t.get("yaw_state") or {})
+    yo = {str(k): v for k, v in (t.get("yaw_off") or {}).items()}
+    how = dict(t.get("yaw_how") or {})
+    hp = heading_store_path(args, out)
+    args.heading_store_ = hp
+    names = [r.strip() for r in str(getattr(args, "robots", "") or "").split(",") if r.strip()] or list(ids)
+    words = []
+    for n in names:
+        if n not in ids or n in tagless:
+            continue
+        k = str(ids[n])
+        if k in st and st[k] != "unknown":
+            words.append("%s (tag %s): %s %+.0f deg" % (n, k, st[k], float(yo.get(k, 0.0))))
+            continue
+        rem = THS.get(hp, k) if hp else None
+        if rem is not None:
+            yo[k], st[k] = float(rem["offset_deg"]), "remembered"
+            how[k] = "remembered (%d measurement%s, last %s, %s)" % (int(rem.get("n") or 0), "" if int(
+                rem.get("n") or 0) == 1 else "s", rem.get("last_seen"), rem.get("how"))
+            words.append("%s (tag %s): REMEMBERED %+.0f deg (%s): the starting guess, checked again on its first moves"
+                         % (n, k, yo[k], how[k]))
+        elif hp or os.environ.get("MIRLT_HEADING_CHECK", "patient") != "once":
+            st[k] = "unknown"
+            how.setdefault(k, "not measured, nothing remembered")
+            words.append("%s (tag %s): NOT KNOWN YET (nothing measured or remembered): measured by a short watched "
+                         "crawl before anything turns it" % (n, k))
+    if yo:
+        t["yaw_off"] = yo
+    if st:
+        t["yaw_state"], t["yaw_how"] = st, how
+    if words:
+        say("TAG HEADINGS (each roof tag's turn on its robot%s): %s" % (
+            "; remembered in %s" % hp if hp else "; not remembered: per run only", "; ".join(words)))
+
+
+def harvest_tag_memory(args, out, sess):
+    """(e15) After a free roam: its start proof drive's measured tag turns (discovery.json) into the store."""
+    import tag_heading_store as THS
+    hp = getattr(args, "heading_store_", "") or ""
+    p = os.path.join(sess, "discovery.json")
+    if not hp or not os.path.exists(p):
+        return
+    for r in THS.harvest_discovery(hp, p, args.tags_):
+        if r.get("words"):
+            say(r["words"])
+
+
 def light_now(args):
     """(e14) The light at the start: --sim-light in a dry run, else a few pictures from the recorder's stream."""
     if getattr(args, "sim_light", None) is not None:
@@ -1381,6 +1458,7 @@ def run(args):
         if code_:
             return code_
     if args.tracking_ == "tags":
+        apply_tag_memory(args, out)     # (e15) each tag's turn: measured by the binding, else remembered, else unknown
         args.tags_json = os.path.join(out, "tags.json")
         with open(args.tags_json, "w") as f:
             json.dump(args.tags_, f, indent=1)
@@ -1663,6 +1741,8 @@ def run(args):
                "--facing-tol-deg", str(args.facing_tol_deg)]
         if args.tracking_ == "tags":
             rp += ["--facing-tags", args.tags_json]
+            if getattr(args, "heading_store_", ""):
+                rp += ["--tag-heading-store", args.heading_store_]    # (e15) what it re-learns is remembered
         if not args.no_straighten:
             # start straightening (Nick, 2026-10-29 15:41): a robot off its start pose is turned or driven to its spot,
             # the camera watching, and checked again, instead of a stop (straighten.py)
@@ -1832,6 +1912,11 @@ def run(args):
             learn_readmap(args, out, sess)
         except Exception as e:  # noqa: BLE001  (never stops the end of a run)
             say("(readability not learned from this run's logs: %s)" % e)
+    if getattr(args, "tracking_", "") == "tags":
+        try:
+            harvest_tag_memory(args, out, sess)
+        except Exception as e:  # noqa: BLE001  (never stops the end of a run)
+            say("(tag headings not taken from free roam's proof drive: %s)" % e)
     if not args.dry and (args.site_ or {}).get("conf_dir") and os.path.exists(os.path.join(sess, "readmap.json")):
         # (11-05h) the site keeps where tags read (merged at half weight into the next run's start map)
         try:
@@ -2187,6 +2272,10 @@ def main(argv=None):
     g.add_argument("--readmap-store", default="", help="(e14) simulator: a folder for the readability store (a dry "
                    "run never touches the Pi's)")
     g.add_argument("--sim-tagless", default="", help="(e14) simulator: these robots carry no roof tag (NAME,NAME)")
+    g.add_argument("--tag-heading-store", default="", help="(e15) a folder (or .json file) for the remembered tag turns "
+                   "(a dry run otherwise keeps its own, per session; on the Pi the site's folder)")
+    g.add_argument("--sim-hc-loss", type=float, default=0.0, metavar="S", help="(e15) simulator, with --sim-bind: the "
+                   "camera loses the tags for S s from the heading check's nudge on (school 10 Nov 18:54)")
     g.add_argument("--practice-real", action="store_true",
                    help="(e11, 9 Nov) practice on the REAL path (implies --dry): simulated robots that answer with WiFi "
                         "names (AL-xxxx) under aliases, the real launcher arguments, real CameraModel camera models")
