@@ -228,6 +228,10 @@ model is saved. The steps, one command per box, starting with `ssh nick@100.72.1
 The heat tracker now reads runs with `cpu.csv` but no `perf.csv` (pictures a second from `detect_times.csv`, else
 "-"). The 10 Nov 18:26-19:19 runs are in `docs/results/heat-tracker.md`.
 
+### Tests
+
+25 new tests (`test_e16_wheel_fit.py` 4, `test_e16_edge_incident.py` 17, `test_e16_home_fixes.py` 4). Three older tests pinned to the old way's switch (the all-held cap, e06's stale-camera doubt). Full fleet suite on the final code (4cc5128): **903 passed, 9 skipped** in 17.7 min (baseline 878 / 9). `tools/pi/tests/test_launcher.py` has 4 failures that happen without e16 too (not touched). Only this line changed after the run.
+
 ## Conclusion
 
 - **The school's doubled load was not today's code.** 9 Nov's code ran at load 7.5 too (18:54). In every run the
