@@ -48,7 +48,7 @@ for p in (HERE, TOOLS):
 import freeroam_core as FC   # noqa: E402
 
 PY = sys.executable
-VERSION = "freeroam-runner-2026-11-10e14b"   # e14b: a dark picture holds every robot until the camera has adjusted. e14 (10 Nov): the battery floor from MIRLT_MIN_BATTERY, else Mission Control's Advanced, else the site file, said at the start
+VERSION = "freeroam-runner-2026-11-11e16"   # e16 (home 11 Nov 08:48): each RAW row's accelerometer (ax, ay) and lift flag to the controller (on_raw_motion: a jolt while standing is a contact; a lift is evidence a person moved it). Before: "freeroam-runner-2026-11-10e14b"   # e14b: a dark picture holds every robot until the camera has adjusted. e14 (10 Nov): the battery floor from MIRLT_MIN_BATTERY, else Mission Control's Advanced, else the site file, said at the start
 VERSION_E13 = "freeroam-runner-2026-11-10e13"   # e13 (10 Nov): --readable-map (school: plan only where the camera reads tags; MIRLT_ROAM_READABLE=0 the old whole table)
 VERSION_E12 = "freeroam-runner-2026-11-10e12"   # e12 (10 Nov): the bridge's "camera" messages (no pictures) said and logged; one robot held at an edge parked and shown, the others roam on; orderly shutdown
 VERSION_E11 = "freeroam-runner-2026-11-09e11"   # e11 (9 Nov school): --alias WIFI=SLOT (names in the run only), --practice-real
@@ -488,6 +488,8 @@ class Runner:
                         c.on_raw(name, t, float(row["roll_deg"]), float(row["pitch_deg"]), float(row.get("v_cms") or 0))
                         c.on_raw_evidence(name, t, float(row.get("ax") or 0.0), _fnum(row.get("dC_cm")),
                                           _fnum(row.get("lineC")))
+                        c.on_raw_motion(name, t, _fnum(row.get("ax")), _fnum(row.get("ay")),   # (e16, 8c / 8a)
+                                        str(row.get("lifted") or "0") not in ("0", "", "-1"))
                         self.raw_to_filter(name, t, row)
             except (ValueError, IndexError):
                 continue

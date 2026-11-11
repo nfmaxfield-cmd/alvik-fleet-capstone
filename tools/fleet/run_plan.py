@@ -36,7 +36,7 @@ Position source (--fixes): where camera poses come from (data-formats.md,
 runs against it with --fixes udp; at the end it prints the simulator's ground
 truth: docking errors, closest robots, contact.
 """
-VERSION = "2026-11-11e15"   # e15 (school 10 Nov 18:54): every facing check and re-check reads the tag CORRECTED by the turn this run knows (facing.corrected_tags: the tags file plus yaw_fix); a robot whose tag turn is unverified (not measured this run, nothing remembered; or remembered and a big turn would follow) is measured by the start's watched crawl before any straightening, and the crawl's measurement sets its yaw_fix; what is re-learned or crawled is remembered (--tag-heading-store, tag_heading_store). Before: "2026-11-10e14c"   # e14c (school 17:46): how old a fix may be and still count as seen comes from each robot's measured fix interval (blind_after; a slow detector treated like a slow camera; MIRLT_FIX_GAP_RULE=fixed the 0.6 s). e14b: a dark picture pauses every robot until the camera has adjusted (dark_watch). e14: a visit point whose tag was lost on the way is moved to the end of the robot's list once, then skipped (defer_current_point; MIRLT_RETRY_LOST=again the old way); the spot where it was lost kept as evidence. 2026-11-10e13 (e13): never give up blind (no BLIND_MAX_CM cap: it stops only when blind error + body + stop could reach an edge; MIRLT_BLIND_RULE=cap the old caps); no pictures: each blind robot's risk-based limit (safety_rules.no_picture_limit; MIRLT_NOPIC_RULE=off: e12's rules alone).
+VERSION = "2026-11-11e16"   # e16 (item 7, home 11 Nov 08:45): a tilt or drop trip backs out along the robot's own recorded track as far as the derived edge rule needs (observe.track_back_target: clearance with its uncertainty and own-vs-camera doubt, the stop where it ends), checked against the other robots, instead of a fixed 10 cm; the fixed back-off where the track is unknown or blocked (MIRLT_EDGE_BACKOUT=0: always the fixed 10 cm). Before: "2026-11-11e15"   # e15 (school 10 Nov 18:54): every facing check and re-check reads the tag CORRECTED by the turn this run knows (facing.corrected_tags: the tags file plus yaw_fix); a robot whose tag turn is unverified (not measured this run, nothing remembered; or remembered and a big turn would follow) is measured by the start's watched crawl before any straightening, and the crawl's measurement sets its yaw_fix; what is re-learned or crawled is remembered (--tag-heading-store, tag_heading_store). Before: "2026-11-10e14c"   # e14c (school 17:46): how old a fix may be and still count as seen comes from each robot's measured fix interval (blind_after; a slow detector treated like a slow camera; MIRLT_FIX_GAP_RULE=fixed the 0.6 s). e14b: a dark picture pauses every robot until the camera has adjusted (dark_watch). e14: a visit point whose tag was lost on the way is moved to the end of the robot's list once, then skipped (defer_current_point; MIRLT_RETRY_LOST=again the old way); the spot where it was lost kept as evidence. 2026-11-10e13 (e13): never give up blind (no BLIND_MAX_CM cap: it stops only when blind error + body + stop could reach an edge; MIRLT_BLIND_RULE=cap the old caps); no pictures: each blind robot's risk-based limit (safety_rules.no_picture_limit; MIRLT_NOPIC_RULE=off: e12's rules alone).
 VERSION_B = "2026-11-10b"   # 2026-11-10b (e12 item 9): a lock-only fix never resets a pose (MIRLT_LOCK_GUARD=0: as before); a dwell broken by a halt where the robot did not move keeps its start (MIRLT_DWELL_KEEP=0). 2026-11-10a (e12): the bridge's "camera" messages (no pictures / pictures again) said and logged. No version before
 LOCK_GUARD = __import__("os").environ.get("MIRLT_LOCK_GUARD", "1") != "0"
 DWELL_KEEP = __import__("os").environ.get("MIRLT_DWELL_KEEP", "1") != "0"
@@ -3012,6 +3012,12 @@ class Coordinator:
         ok_ = how in ("reverse_trail", "reverse_camera")
         if ok_ and L_ < OB.BACK_OFF_CM:
             bx, by = OB.back_off_target(x, y, th, L_)
+        L_said = L_ if ok_ else OB.BACK_OFF_CM
+        tb_ = self.track_back(b, x, y, th, others) if os.environ.get("MIRLT_EDGE_BACKOUT", "1") != "0" else None
+        if tb_ is not None:
+            # (e16, item 7) back along its own track as far as the edge rule needs (derived), not a fixed 10 cm
+            bx, by = tb_["end"]
+            ok_, why_, L_said = True, tb_["words"], tb_["L"]
         if not ok_:
             self.log("trip", robot=b.name, i=i, kind=kind, info=info, obstacle=ob, back_off="refused: " + why_)
             self.say("%s: its %s stopped it (%s): kept out; backing away is NOT safe (%s): it is held where it stands"
@@ -3033,7 +3039,35 @@ class Coordinator:
         self.log("trip", robot=b.name, i=i, kind=kind, info=info, obstacle=ob, back_off=text, evidence=why_)
         self.say("%s: its %s stopped it (%s): that spot is kept out (a discovered edge); it backs straight away %.0f "
                  "cm, never forward, then the robots re-plan" % (
-                     b.name, "tilt stop" if kind == "tilt" else "edge guard's drop check", info, OB.BACK_OFF_CM))
+                     b.name, "tilt stop" if kind == "tilt" else "edge guard's drop check", info, L_said))
+
+    def track_back(self, b, x, y, th, others):
+        """(e16, item 7) The reverse along b's own recorded track to its first point that meets the derived edge rule
+        (half diagonal + its uncertainty and own-vs-camera doubt + the stop at 5 cm/s + the tracking's edge bias), as a
+        straight chord on the track (observe.track_back_target), clear of the other robots by two body circles plus
+        the camera's sigma. None: no track, or blocked (the caller's fixed back-off then)."""
+        import observe as OB
+        import safety_rules as SR
+        tr_ = getattr(b, "trail", None)
+        if tr_ is None or len(tr_.pts) < 2:
+            return None
+        f = self.m["floor"]
+        rect = (f["x_min"], f["y_min"], f["x_max"], f["y_max"])
+        trk = getattr(self.args, "edge_tracking", "lights") or "lights"
+        cam = getattr(b, "last_cam", None)
+        dis = math.hypot(x - cam[0], y - cam[1]) if cam is not None else 0.0
+        unc = (b.fp.unc_cm(now()) if self.fp_live(b) else SR.CAM_SIGMA_CM) + dis
+        need = SR.clearance_cm(unc, 5.0, trk, stops_here=True)
+        tgt = OB.track_back_target(tr_.pts, (x, y), th, lambda q: SR.edge_dist(rect, q[0], q[1]) >= need)
+        if tgt is None or tgt["L"] < 1.0:
+            return None
+        gap = 2 * SR.HALF_DIAG_CM + SR.CAM_SIGMA_CM
+        for k in range(11):
+            c = (x + (tgt["end"][0] - x) * k / 10.0, y + (tgt["end"][1] - y) * k / 10.0)
+            if any(math.dist(c, o) < gap for o in others):
+                return None
+        self.log("track_back", robot=b.name, L=tgt["L"], need=round(need, 2), cleared=tgt["cleared"])
+        return tgt
 
     def backoff_report(self, b, sid, state, info):
         bo = getattr(b, "backoff", None)

@@ -49,7 +49,7 @@ if _HERE not in sys.path:
 import safety_rules as SR   # noqa: E402  (e08 Phase A: the rules shared with run_plan and observe)
 import fused_pose as FP     # noqa: E402  (e09 Phase B: one filter per robot, fed by the tracking layer and RAW)
 
-VERSION = "freeroam-2026-11-10e13b"   # e13b (10 Nov, Nick 13:34): a standing robot (its own odometry shows no motion since its last fix) keeps that fix: never lost while it stands, sparse reads confirm it (MIRLT_STAND_TRUST=0: before); the lost threshold grows only for a camera slower than about 2.5 pictures a second (1.5 x the longest recent gap). e13 (10 Nov): never give up blind (BLIND_RULE edge: a lost robot drives on while its bubble + body + stop cannot reach an edge; BUBBLE_CAP behind MIRLT_BLIND_RULE=cap); stray return (a robot outside the readable area comes back along ground it drove); never give up (a robot held at an edge waits, says it needs a hand and rejoins: EDGE_PARK off); risk-based no-pictures limit per robot
+VERSION = "freeroam-2026-11-11e16"   # e16 (home free roam 11 Nov 08:45-08:48, commit 4732a48: Right stopped at an edge and stood; then "REJOINED ... moved in" 1 s after NEEDS A HAND with nobody there, and Center pushed it off): (7) an edge stop reverses along the robot's own recorded track as far as the derived edge rule needs (observe.track_back_target), checked against the others' reservations, then re-plans; it holds and asks only when the track is unknown or blocked (MIRLT_EDGE_BACKOUT=0: as before); (8a) "moved in" needs evidence: a lift or a sustained camera move past its own measured noise, or its own drive out (MIRLT_REJOIN_EVIDENCE=0: as before); (8b) a robot held or stuck at an edge, or rejoined and not yet driven away, is a fixed obstacle with its uncertainty (own pose against the camera) in every plan and the reflex (MIRLT_PINNED_OBSTACLE=0); (8c) contact: a standing robot the camera sees move past its noise, or whose accelerometer jolts, stops the robots near it; a driving robot whose camera progress falls far below its wheels' stops and backs off; contact.csv (MIRLT_CONTACT_WATCH=0); (8d) a question nobody answers (ASK_WAIT_S) makes the run decide by itself, as an unattended run does (MIRLT_ASK_UNATTENDED=1: keeps asking); (9b) a standing robot's doubt no longer grows with its fix's age (home: "cannot tell whether it is clear of the edge" 22 cm in; MIRLT_STAND_UNC=0). Before: "freeroam-2026-11-10e13b"   # e13b (10 Nov, Nick 13:34): a standing robot (its own odometry shows no motion since its last fix) keeps that fix: never lost while it stands, sparse reads confirm it (MIRLT_STAND_TRUST=0: before); the lost threshold grows only for a camera slower than about 2.5 pictures a second (1.5 x the longest recent gap). e13 (10 Nov): never give up blind (BLIND_RULE edge: a lost robot drives on while its bubble + body + stop cannot reach an edge; BUBBLE_CAP behind MIRLT_BLIND_RULE=cap); stray return (a robot outside the readable area comes back along ground it drove); never give up (a robot held at an edge waits, says it needs a hand and rejoins: EDGE_PARK off); risk-based no-pictures limit per robot
 VERSION_E12 = "freeroam-2026-11-10a"   # 11-10a (e12): the curve-fit maths moved into module functions (fit_arc_points, arc_summary, arc_agree) so the calibration's curve phase uses the very same (free roam's own fitting and saving unchanged); a robot held at an edge for EDGE_PARK_S is parked and said loudly, the others roam on (MIRLT_EDGE_PARK=0: before)
 VERSION_E = "freeroam-2026-11-07e"   # 11-07e (Nick 7 Nov): a robot put down at or over an edge first tries the e08 tilt recovery, a person asked only if that fails (MIRLT_START_EDGE_MODE=wait: always wait)
 VERSION_D = "freeroam-2026-11-07d"   # 11-07d (e10, the 7 Nov run 2 incident): the queue watch (every tick, off plan or a queued piece breaking the edge rule from where the robot really is: re-aimed or stopped, heading re-set), the surface-mark verdict less the uncertainty, the start check (held at an edge)
@@ -113,6 +113,8 @@ EMPTY_MOVE_PAUSE_S = 0.5    # (e10) CHOSEN: after a move with nothing to send, p
 # dead reckoning (lost by the camera)
 LOST_AFTER_S = 0.6      # no camera fix this long = lost (run_plan.BLIND_AFTER_S). Not chosen here
 STAND_TRUST = os.environ.get("MIRLT_STAND_TRUST", "1") != "0"   # (e13, Nick 13:34) a standing robot keeps its fix
+STAND_UNC = os.environ.get("MIRLT_STAND_UNC", "1") != "0"     # (e16, 9b) ... and its doubt does not grow while it
+                        # stands (0: the fix's age grows the doubt at 10 cm/s as before e16)
 STAND_CM = 1.0          # ... "not moved" = its own odometry moved under this since the fix: the camera's own noise (~1 cm),
 STAND_DEG = 2.0         # and under 2 deg turned (the gyro's drift over a minute is far less). Not tuning numbers: below
                         # what a camera fix could tell apart anyway
@@ -259,6 +261,25 @@ EDGE_PARK = os.environ.get("MIRLT_EDGE_PARK", "0") == "1"   # (e13, Nick 10 Nov 
                         # as out (so the run is never held up waiting for it: home ends when the others park), and it is
                         # said loudly at once, in the state, at the end and on Mission Control. 0 = before e12 (held,
                         # retried and asked for the whole run)
+# (e16, home 11 Nov 08:45-08:48, run 20261111-082651-freeroam) switches, decided automatically (on), the old way behind
+# each (CLAUDE.md "keep features, switch them off"):
+EDGE_BACKOUT = os.environ.get("MIRLT_EDGE_BACKOUT", "1") != "0"        # (7) an edge stop reverses along its own track
+REJOIN_EVIDENCE = os.environ.get("MIRLT_REJOIN_EVIDENCE", "1") != "0"  # (8a) "moved in" only on evidence
+PINNED_OBSTACLE = os.environ.get("MIRLT_PINNED_OBSTACLE", "1") != "0"  # (8b) held at an edge: a fixed obstacle + doubt
+CONTACT_WATCH = os.environ.get("MIRLT_CONTACT_WATCH", "1") != "0"      # (8c) pushes and collisions noticed
+ASK_UNATTENDED = os.environ.get("MIRLT_ASK_UNATTENDED", "0") == "1"    # (8d) 1 = keep asking when nobody answers
+MOVED_IN_K = 4.0        # (8a) sigmas of the robot's own camera noise a move must exceed (one-sided, ~3e-5 by chance per
+                        # check on Gaussian noise). Statistical, not a tuning; DOE: no
+CONTACT_K = 4.0         # (8c) the same test for a standing robot pushed (its camera spot moves past its own noise)
+IMPACT_K = 8.0          # (8c) an accelerometer jolt this many robust sigmas of its own standing noise. CHOSEN (the
+IMPACT_FLOOR_G = 0.05   # floor: the 3' "felt it roll" jolt is 0.03 g); DOE: yes, on raw.csv of bumps and of stands
+PROGRESS_MIN = 0.3      # (8c) a drive whose camera progress over PROGRESS_WIN_S is under this share of its wheels', on
+PROGRESS_WIN_S = 1.0    # PROGRESS_N checks in a row (half a second apart) is pushing or blocked. CHOSEN: at 0.5 and one
+PROGRESS_N = 2          # check the run-2 simulation stopped 2 free drives (camera 0.48-0.49 of the wheels while its
+                        # fixes lag a starting piece); a robot pushing a held one reads ~0. DOE: yes (0.2 / 0.3 / 0.4 x
+                        # 1-3 checks against false stops on the real logs and stops caught in the push simulation)
+ASK_WAIT_S = 30.0       # (8d) a question unanswered this long: nobody is watching. CHOSEN (a person in the room answers
+                        # in seconds); no DOE: a human's response time, not a physical quantity
 NEED_HAND_SAY_S = 60.0  # (e13) the NEEDS A HAND line is said again this often while it lasts: display only, no DOE
 EDGE_PARK_S = 60.0      # chosen: three of the recovery's 20 s retry cycles (RECOVER_RETRY_S) with no way out. DOE: yes, a
                         # small one (30 / 60 / 120 s against robots freed by a later retry vs minutes stood waiting), from
@@ -872,7 +893,8 @@ class Controller:
         r.pc = None
         r.own_hist.append((t, x, y, th))
         import observe as OB
-        r.__dict__.setdefault("trail", OB.Trail()).add(x, y, th)      # (11-05h, 4'a) its breadcrumb trail
+        if not (r.move is not None and r.move.get("track_back")):        # (e16) not its own reverse over it
+            r.__dict__.setdefault("trail", OB.Trail()).add(x, y, th)  # (11-05h, 4'a) its breadcrumb trail
         if len(r.own_hist) > 200:          # ~20 s at 10 a second: covers a camera delay of several seconds
             del r.own_hist[:50]
         if r.lost is not None and prev is not None:
@@ -1208,6 +1230,11 @@ class Controller:
         import observe as OB
         age = (self.t - (r.cam_arr if r.cam_arr is not None else r.cam[0])) if (r.cam is not None and r.lost is None) \
             else 0.0
+        if STAND_TRUST and STAND_UNC and r.lost is None and self.standing(r):
+            # (e16, 9b; home 11 Nov: Center "cannot tell whether it is clear of the edge" 22 cm from it) a robot that
+            # has not moved since its last fix cannot have gone anywhere: the fix's age adds nothing while it stands
+            # (e13b kept the fix fresh but this term still grew at 10 cm/s: 2 s without a picture = 20 cm of doubt)
+            age = 0.0
         u = OB.uncertainty_cm(PLAN_M0, r.bubble if r.lost else 0.0, age, 10.0, 0.0)
         if self.ekf_live(r):
             u = r.fp.unc_cm(self.t)                 # (e09, B2) the filter's: staleness and blind driving inside it
@@ -1328,6 +1355,11 @@ class Controller:
             else:
                 need = PLAN_CC - gap_relax
                 ob = o.traj
+            if self.pinned(o) and self.pos(o) is not None:
+                # (e16, 8b) held or stuck at an edge: a fixed obstacle where it stands, with its doubt, whatever its own
+                # reservation says (home 08:48: Center pushed a held Right off the board)
+                ob = Traj.stand(self.t, *self.pos(o), m=self.margin0(o) + self.pinned_extra(o))
+                need = max(need, REFLEX_CC)
             if not away:
                 if clearance(tr, ob, now=self.t) < need:
                     return False
@@ -1366,7 +1398,7 @@ class Controller:
         d = max(0.0, float(m.group(1))) if m else 1.0
         u = (math.cos(math.radians(h)), math.sin(math.radians(h)))
         f = (p[0] + u[0] * (BODY / 2 + d), p[1] + u[1] * (BODY / 2 + d))
-        r.back_off = dict(t=self.t, h=h)
+        r.back_off = dict(t=self.t, h=h, edge=("edge" in info or "tilted" in info) and not m)   # (e16) edge stops
         self.counts["front_stops"] += 1
         who = [o.name for o in self.R.values() if o is not r and self.pos(o) is not None and
                math.dist(self.pos(o), f) < HALF + 3.0]
@@ -1498,6 +1530,174 @@ class Controller:
                     self.log("keepouts", dict(q, what="cleared by %s's camera track" % r.name))
                     self.event(r, "keep-out cleared", "its camera track went through the keep-out at %.1f, %.1f"
                                % (q["x"], q["y"]))
+
+    def track_backout(self, r):
+        """(e16, item 7; Nick 11 Nov 08:45: "it can still back up but it's not, it's just still") A robot at an edge
+        came in over ground it has just driven: it reverses along its own recorded track (observe.track_back_target)
+        to the first point of it where the derived edge rule is met (its clearance with its error sum and the stop
+        where it ends: end_need), as one straight chord that stays on the track. The reverse is checked against the
+        others' reservations (with a held robot's doubt, 8b) and the keep-outs. A curved track gives a shorter chord
+        and it goes on from its end (the trail keeps only what is still behind it). None: no track behind it, or it is
+        blocked: the caller holds and asks (never gives up)."""
+        import observe as OB
+        p, h = self.pos(r), self.heading(r)
+        tr_ = getattr(r, "trail", None)
+        if p is None or tr_ is None or len(tr_.pts) < 2:
+            self.event(r, "no track to back out on", "its own track behind it is not recorded: it holds")
+            return None
+        need = self.end_need(r, BACK_V)
+        tgt = OB.track_back_target(tr_.pts, p, h, lambda q: edge_dist(self.rect, *q) >= need,
+                                   tol_cm=OB.TRAIL_TOL_CM + (r.bubble if r.lost else 0.0))
+        if tgt is None or tgt["L"] < 1.0:
+            self.counts["track_back_none"] = self.counts.get("track_back_none", 0) + 1
+            return None
+        L = tgt["L"]
+        tr = Traj.move(self.t + 0.2, p, wrap180(h + 180.0), 0.0, L, BACK_V, m0=self.margin0(r))
+        tr.track_back = True
+        if not self.keepout_ok(r, tr):
+            self.event(r, "track back blocked", "a keep-out lies on its own track behind it: it holds")
+            return None
+        for o in self.others(r):
+            ob = o.traj
+            if self.pinned(o):
+                ob = Traj.stand(self.t, *self.pos(o), m=self.margin0(o) + self.pinned_extra(o))
+            if clearance(tr, ob, now=self.t) < REFLEX_CC:
+                self.counts["track_back_blocked"] = self.counts.get("track_back_blocked", 0) + 1
+                self.event(r, "track back blocked", "%s is on or near its own track behind it: it holds" % o.name)
+                return None
+        k = tgt["k"]
+        tr_.pts = tr_.pts[:k + 1]          # what is still behind it once it has reversed there
+        self.counts["track_backs"] = self.counts.get("track_backs", 0) + 1
+        self.log("track_back", dict(t=round(self.t, 2), robot=r.name, x=round(p[0], 1), y=round(p[1], 1),
+                                    L_cm=L, need_cm=round(need, 2), edge_cm=round(edge_dist(self.rect, *p), 2),
+                                    cleared=int(tgt["cleared"])))
+        self.event(r, "backs out along its track", "%s (the edge rule needs %.1f cm from the edge; it is %.1f cm)" % (
+            tgt["words"], need, edge_dist(self.rect, *p)))
+        self.fallback(r, 0, "reverse", "an edge stop: back along its own track (proven table), then re-plan")
+        if not tgt["cleared"]:
+            r.back_off = dict(t=self.t, h=h, edge=True)        # not clear yet: the next chord after this one
+        return "reverse", None, 0.0, L, BACK_V, tr
+
+    # -- (e16, 8c) pushes and collisions ---------------------------------------------------------------------------
+    def contact(self, r, why, src):
+        """A contact: logged (contact.csv, event), and every robot near r (within a reflex gap plus what it covers at top
+        speed in the reflex's reaction time, plus a pinned robot's doubt) is stopped and backs away; r too if it drives."""
+        self.counts["contacts"] = self.counts.get("contacts", 0) + 1
+        p = self.pos(r)
+        reach = PLAN_CC + V_MAX * HARD_T_S
+        near = [o for o in self.R.values() if o is not r and o.mode not in ("out", "gone") and p is not None and
+                self.pos(o) is not None and math.dist(p, self.pos(o)) <= reach + self.pinned_extra(o)]
+        stopped = []
+        for o in near + [r]:
+            if o.move is not None:
+                self.halt(o, "contact at %s: %s" % (r.name, why))
+                self.end_move(o)
+                o.back_off = dict(t=self.t, h=self.heading(o), edge=False)
+                o.busy_until = self.t + 0.5
+                stopped.append(o.name)
+        self.log("contact", dict(t=round(self.t, 2), robot=r.name, src=src, why=why,
+                                 x=round(p[0], 1) if p else "", y=round(p[1], 1) if p else "",
+                                 near=";".join(o.name for o in near), stopped=";".join(stopped)))
+        self.event(r, "contact", "%s (%s); stopped: %s" % (why, src, ", ".join(stopped) or "nobody was moving"))
+
+    def contact_watch(self, r):
+        """(e16, 8c) Every half second. Standing (not commanded): its camera spot moving past its own measured noise,
+        sustained (observe.moved_in_evidence, the same test as a hand's move) is a push. Driving: its camera progress
+        over PROGRESS_WIN_S under PROGRESS_MIN of its own wheels' is pushing or blocked: it stops and backs off."""
+        if r.mode in ("out", "gone", "start") or r.cam is None or r.lost is not None or not self.fresh(r):
+            return
+        import observe as OB
+        cw = r.__dict__.setdefault("cwatch", dict(fx=[], t_idle=None))
+        if r.mode == "idle" and r.move is None:
+            if cw["t_idle"] is None:
+                cw.update(t_idle=self.t, fx=[])
+            if self.t - cw["t_idle"] < 1.0:
+                return                                 # settling after its last move
+            fx = cw["fx"]
+            if not fx or fx[-1][2] != r.cam[0]:
+                fx.append((r.cam[1], r.cam[2], r.cam[0]))
+                del fx[:-60]
+            if len(fx) >= 8:
+                ok, ev = OB.moved_in_evidence([f[:2] for f in fx[:-3]][-30:], [f[:2] for f in fx], k_sigma=CONTACT_K)
+                if ok:
+                    cw.update(t_idle=self.t, fx=[])
+                    self.contact(r, "moved while standing (nothing commanded): " + ev, "camera")
+            return
+        cw["t_idle"] = None
+        mv = r.move
+        if mv is None or mv.get("phase") != "drive" or len(r.cam_hist) < 3 or len(r.own_hist) < 3 or \
+                mv.get("t_drive") is None or self.t - mv["t_drive"] < PROGRESS_WIN_S:
+            cw["slow"] = 0
+            return
+        c1, o1 = r.cam_hist[-1], r.own_hist[-1]
+        ch = [q for q in r.cam_hist if q[0] >= c1[0] - PROGRESS_WIN_S]
+        oh = [q for q in r.own_hist if q[0] >= o1[0] - PROGRESS_WIN_S]
+        if len(ch) < 3 or len(oh) < 3 or ch[-1][0] - ch[0][0] < 0.7 * PROGRESS_WIN_S:
+            return
+        wheel = math.hypot(oh[-1][1] - oh[0][1], oh[-1][2] - oh[0][2])
+        cam = math.hypot(ch[-1][1] - ch[0][1], ch[-1][2] - ch[0][2])
+        if wheel < 4.0 * math.sqrt(2.0) * 1.0:        # its wheels' travel must clear the camera's noise (1 cm sigma)
+            return
+        cw["slow"] = cw.get("slow", 0) + 1 if cam < PROGRESS_MIN * wheel else 0
+        if cw["slow"] >= PROGRESS_N:
+            cw["slow"] = 0
+            self.contact(r, "its camera progress %.1f cm against its wheels' %.1f cm in %.1f s: pushing or blocked" % (
+                cam, wheel, PROGRESS_WIN_S), "progress")
+
+    def on_raw_motion(self, name, t, ax, ay, lifted=None):
+        """(e16, 8c, 8a) The robot's accelerometer (RAW ax, ay in g) and its own lift flag: a jolt while standing (a
+        robot or a hand hit it) is a contact; a lift is the evidence that a person moved it (moved in)."""
+        r = self.R.get(name)
+        if r is None or ax is None or ay is None:
+            return
+        if lifted:
+            r.lifted_t = self.t
+        if not CONTACT_WATCH:
+            return
+        hist = r.__dict__.setdefault("acc_hist", [])
+        if r.mode != "idle" or r.move is not None:
+            del hist[:]
+            return
+        a = math.hypot(ax, ay)
+        hist.append(a)
+        del hist[:-200]
+        if len(hist) < 30:
+            return
+        base = sorted(hist[:-1])
+        med = base[len(base) // 2]
+        dev = sorted(abs(v - med) for v in base)
+        sig = 1.4826 * dev[len(dev) // 2]
+        if abs(a - med) > max(IMPACT_K * sig, IMPACT_FLOOR_G):
+            del hist[:]
+            self.contact(r, "a jolt of %.2f g while standing (its noise %.3f g)" % (abs(a - med), sig), "accelerometer")
+
+    def pinned(self, r):
+        """(e16, 8b) Held or stuck at an edge (waiting for a hand, unsure and holding, tilted), or rejoined and not yet
+        driven away: every other robot plans round it as a fixed obstacle, with its doubt."""
+        if not PINNED_OBSTACLE or r.mode in ("gone",):
+            return False
+        if r.name in (self.__dict__.get("need_hand") or {}) or self.edge_stuck_why(r) is not None:
+            return True
+        if getattr(r, "tilted", False) or getattr(r, "held", None):
+            return True
+        rj = r.__dict__.get("rejoined_at")
+        if rj is not None:
+            p = self.pos(r)
+            if p is not None and math.dist(p, rj) <= HALF:
+                return True
+            r.rejoined_at = None
+        return False
+
+    def pinned_extra(self, r):
+        """(e16, 8b) How much wider a pinned robot is kept: its own uncertainty beyond the plan's margin, and at least
+        the distance between where its own pose and the camera put it (home 08:48: 3.4-6.8 cm), so it is kept clear
+        wherever of the two it really is."""
+        if not self.pinned(r):
+            return 0.0
+        d = 0.0
+        if r.own is not None and r.cam is not None:
+            d = math.hypot(r.own[1] - r.cam[1], r.own[2] - r.cam[2])
+        return max(0.0, self.unc(r) - PLAN_M0, d)
 
     def back_move(self, r, Ls=BACK_CM, why="its own front stop", inward=False):
         """Straight backwards (firmware rev drive: no front check; no rear sensor, so short and slow) along its
@@ -2041,7 +2241,7 @@ class Controller:
                      confirmed=True)
             self.keepouts.append(q)
             self.log("keepouts", dict(q, what="tilted robot kept clear by the others"))
-        r.back_off = dict(t=self.t, h=self.heading(r))
+        r.back_off = dict(t=self.t, h=self.heading(r), edge=True)
         r.tilted = True
 
     def start_move(self, r):
@@ -2051,8 +2251,10 @@ class Controller:
             r.back_off = None
             return self.recover_step(r)            # (e08, A3) the recovery tries, never towards the drop
         if r.back_off is not None:
-            r.back_off = None
-            res = self.back_move(r)
+            bo_, r.back_off = r.back_off, None
+            res = self.track_backout(r) if (EDGE_BACKOUT and bo_.get("edge")) else None   # (e16, 7) its own track
+            if res is None:
+                res = self.back_move(r)
             if res is None and tilted:
                 res = self.back_move(r, inward=True)       # (11-05h) tilted at the edge: any back-off that gains room
             if res is not None:
@@ -2073,6 +2275,8 @@ class Controller:
             res = self.try_probe(r)                    # (e10, C2) the probe-ahead setting (off by default)
         if res is None:
             res = self.pick(r)
+        if res is None and EDGE_BACKOUT:
+            res = self.track_backout(r)                # (e16, 7) back along its own track, then re-plan
         if res is None:
             r.busy_until = self.t + 1.0
             if not r.stopped_hard:
@@ -2090,7 +2294,8 @@ class Controller:
         h1 = wrap180(h + turn)
         rev = kind in ("back off", "reverse", "shuffle back", "probe return", "stray return back")
         mv = dict(kind=kind, cell=cell, turn=turn, L=L, v=v, t0=self.t, p0=p, h0=h, h1=h1, end=tr.end,
-                  phase="turn", n=r.n_moves + 1, drive_id=None, turn_id=None, t_drive=None, adj_scale=1.0, rev=rev)
+                  phase="turn", n=r.n_moves + 1, drive_id=None, turn_id=None, t_drive=None, adj_scale=1.0, rev=rev,
+                  track_back=bool(getattr(tr, "track_back", False)))
         if abs(turn) >= 3.0:
             mv["turn_id"] = self.send_step(r, "fs %%d T %.2f -" % h1)
         if L > 0:
@@ -2454,11 +2659,37 @@ class Controller:
     UNSURE_RECHECK_S = 2.0
     PERSON_SAYS_S = 60.0     # a person's answer stands this long at that spot (3 cm). Chosen; no DOE
 
+    def attended_live(self):
+        """(e16, 8d; home 08:4x: "Is it near the edge?" asked 5 times with nobody there) Attended, and nobody has left a
+        question unanswered for ASK_WAIT_S: else the run decides by itself, as an unattended run does
+        (MIRLT_ASK_UNATTENDED=1: as before). An answer makes it attended again."""
+        if not self.attended:
+            return False
+        if ASK_UNATTENDED:
+            return True
+        return not self.__dict__.get("nobody_answers")
+
+    def question_watch(self, r):
+        """(e16, 8d) A question open longer than ASK_WAIT_S with no answer: nobody is watching. Said once, closed, and
+        the run decides by itself from then on (until a person answers a question)."""
+        q = r.__dict__.get("question")
+        if not q or ASK_UNATTENDED or self.__dict__.get("nobody_answers"):
+            return
+        if self.t - r.__dict__.get("question_t", self.t) >= ASK_WAIT_S:
+            self.nobody_answers = True
+            self.counts["unanswered"] = self.counts.get("unanswered", 0) + 1
+            self.event(r, "nobody answered", "no answer in %.0f s: the run decides by itself (as unattended) from now "
+                       "on; an answer to a later question makes it ask again" % ASK_WAIT_S)
+            self.close_question(r, "nobody answered: the run decided by itself")
+
     def ask(self, r, text, choices):
         """A question for a person: Mission Control's question card when the run is attended, else said and logged."""
         open_q = r.__dict__.get("question")
         if open_q is not None:
             return open_q
+        if not self.attended_live():
+            self.event(r, "decides by itself", "(not asked: nobody is answering) " + text)
+            return None
         self.counts["questions"] = self.counts.get("questions", 0) + 1
         qid = None
         if self.attended and self.asks is not None:
@@ -2475,6 +2706,7 @@ class Controller:
         a = self.asks.answer(q)
         if a is not None:
             r.question = None
+            self.nobody_answers = False          # (e16, 8d) someone is there again
             self.event(r, "answer", "the person answered: %s" % a)
         return a
 
@@ -2533,7 +2765,7 @@ class Controller:
                     edge_dist(self.rect, *end_now) <= edge_dist(self.rect, *p) + 0.5:
                 self.halt(r, "unsure near an edge")
                 self.end_move(r)
-            if self.attended:
+            if self.attended_live():
                 self.ask(r, "%s may be near the board's edge (%s). Is it near the edge?" % (r.name, j["why"]),
                          ("It is near the edge", "It is clear of the edge"))
             else:
@@ -2541,12 +2773,14 @@ class Controller:
         a = self.answered(r)
         if a is not None:
             r.person_says = ("clear" if "clear" in a.lower() else "near", self.t, p)
+        self.question_watch(r)                   # (e16, 8d)
 
     def unsure_step(self, r):
         """An idle robot that is unsure near an edge and alone: one short move that goes inward by BOTH the camera and
         its own pose (backwards first: it came from there), else it holds and checks again."""
         u = r.unsure
-        if self.attended:
+        self.question_watch(r)                          # (e16, 8d) nobody answering: it decides by itself
+        if self.attended_live():
             r.busy_until = self.t + self.UNSURE_RECHECK_S
             if not r.stopped_hard:
                 self.trophy_break(r, "unsure near an edge: held while a person is asked")
@@ -2576,6 +2810,12 @@ class Controller:
                 L, "back" if rev else "forward"))
             self.pump(r)
             return
+        if EDGE_BACKOUT:
+            res_t = self.track_backout(r)       # (e16, 7/8d) back along its own track: ground it has proven
+            if res_t is not None:
+                u["tried"] += 1
+                self.stopturn_move(r, res_t)
+                return
         r.busy_until = self.t + self.UNSURE_RECHECK_S
         self.counts["unsure_holds"] = self.counts.get("unsure_holds", 0) + 1
         if not r.stopped_hard:
@@ -2794,7 +3034,8 @@ class Controller:
         return self.curve_pts(o)[0] if (o.curve and (o.move is None or o.move.get("curve"))) else self.motion(o)
 
     def need(self, a, b):
-        return REFLEX_CC + (a.bubble if a.lost else 0.0) + (b.bubble if b.lost else 0.0)
+        return REFLEX_CC + (a.bubble if a.lost else 0.0) + (b.bubble if b.lost else 0.0) + \
+            self.pinned_extra(a) + self.pinned_extra(b)          # (e16, 8b) a pinned robot's doubt
 
     def worst_for(self, r, mr, skip=(), hedge=True):
         """The worst predicted (gap - need) of r's motion mr against everyone else's: each other robot both as
@@ -2852,11 +3093,12 @@ class Controller:
                 continue
             a = actors[0]
             if a.curve and a.move is not None and a.move.get("curve"):
-                if pred_before < HARD_CC + (r.bubble if r.lost else 0) + (o.bubble if o.lost else 0) and \
-                        tm <= HARD_T_S:
+                if pred_before < HARD_CC + (r.bubble if r.lost else 0) + (o.bubble if o.lost else 0) + \
+                        self.pinned_extra(r) + self.pinned_extra(o) and tm <= HARD_T_S:
                     self.curve_stop(a, o if a is r else r, pred_before)
                 continue
-            hard = pred_before < HARD_CC + (r.bubble if r.lost else 0) + (o.bubble if o.lost else 0) and tm <= HARD_T_S
+            hard = pred_before < HARD_CC + (r.bubble if r.lost else 0) + (o.bubble if o.lost else 0) + \
+                self.pinned_extra(r) + self.pinned_extra(o) and tm <= HARD_T_S
             if hard:
                 self.apply(a, o if a is r else r, "stop", 0.0, None, pred_before, pred_before)
             else:
@@ -3181,8 +3423,10 @@ class Controller:
             return self.recover_step(r)            # (e08, A3) the recovery tries, never towards the drop
         if r.back_off is not None:
             # its own front check STOPPED it (no dodge): back straight off first, as in stop-turn (a speed-zero moment)
-            r.back_off = None
-            res = self.back_move(r)
+            bo_, r.back_off = r.back_off, None
+            res = self.track_backout(r) if (EDGE_BACKOUT and bo_.get("edge")) else None   # (e16, 7) its own track
+            if res is None:
+                res = self.back_move(r)
             if res is None and getattr(r, "tilted", False):
                 res = self.back_move(r, inward=True)       # (11-05h) tilted at the edge: any back-off that gains room
             if res is not None:
@@ -3236,6 +3480,8 @@ class Controller:
                 r.coast = None
                 self.why_zero(r, "no curve fits from a stand: stop-turn rung")
                 res2 = self.pick(r)
+                if res2 is None and EDGE_BACKOUT:
+                    res2 = self.track_backout(r)       # (e16, 7: home 08:48) back along its own track, then re-plan
                 if res2 is None:
                     r.busy_until = self.t + 1.0
                     if not r.stopped_hard:
@@ -3760,7 +4006,8 @@ class Controller:
         h1 = wrap180(h + turn)
         rev = kind in ("back off", "reverse", "shuffle back", "probe return", "stray return back")
         mv = dict(kind=kind, cell=None, turn=turn, L=L, v=v, t0=self.t, p0=p, h0=h, h1=h1, end=tr.end,
-                  phase="turn", n=r.n_moves + 1, drive_id=None, turn_id=None, t_drive=None, adj_scale=1.0, rev=rev)
+                  phase="turn", n=r.n_moves + 1, drive_id=None, turn_id=None, t_drive=None, adj_scale=1.0, rev=rev,
+                  track_back=bool(getattr(tr, "track_back", False)))
         if abs(turn) >= 3.0:
             mv["turn_id"] = self.send_step(r, "fs %%d T %.2f -" % h1)
         if L > 0:
@@ -4090,12 +4337,47 @@ class Controller:
         if why is not None and rec is None and r.__dict__.get("unsure") is not None and \
                 not r.__dict__.get("start_held") and self.t - r.edge_stuck_since < 2 * self.UNSURE_RECHECK_S:
             return False       # unsure: it checks again itself first (twice its own re-check time), then asks
+        if rec is not None and why is not None and r.move is not None:
+            rec["self_moved"] = True           # (e16, 8a) it drove by itself while still held (its own way out)
+        if rec is not None and r.cam is not None and self.fresh(r):
+            fx = rec.setdefault("fixes", [])
+            if not fx or fx[-1][2] != r.cam[0]:
+                fx.append((r.cam[1], r.cam[2], r.cam[0]))
+                del fx[:-200]
         if why is None:
             if rec is not None:
+                if REJOIN_EVIDENCE:
+                    # (e16, 8a; home 08:48: "REJOINED ... moved in" 1 s after NEEDS A HAND, nobody there) the reason it
+                    # was held went away; that alone is not a hand. Evidence: its own drive out (it freed itself and
+                    # stands clear), a lift / put-down, or the camera seeing it move past its own noise, sustained
+                    p_ = self.pos(r)
+                    clear_ = p_ is not None and edge_dist(self.rect, *p_) >= self.end_need(r)
+                    own_ = bool(rec.get("self_moved")) and clear_
+                    held_fx = [f for f in rec.get("fixes", []) if f[2] <= rec["t0"] + 2.0] or rec.get("fixes", [])[:5]
+                    new_fx = [f for f in rec.get("fixes", []) if f[2] > rec["t0"] + 2.0]
+                    import observe as OB
+                    ok_, ev_ = OB.moved_in_evidence([f[:2] for f in held_fx], [f[:2] for f in new_fx],
+                                                    k_sigma=MOVED_IN_K, lifted=bool(r.__dict__.get("lifted_t", -1e9)
+                                                                                     > rec["t0"]))
+                    if own_:
+                        nh.pop(r.name, None)
+                        self.counts["freed_itself"] = self.counts.get("freed_itself", 0) + 1
+                        self.event(r, "FREED ITSELF", "%s drove itself clear of the edge rule (%.0f s after asking for a "
+                                   "hand): the run goes on" % (r.name, self.t - rec["t0"]))
+                        return False
+                    if not (ok_ and clear_):
+                        if rec.get("why_wait") != ev_:
+                            rec["why_wait"] = ev_
+                            self.counts["rejoin_refused"] = self.counts.get("rejoin_refused", 0) + 1
+                            self.log("rejoin_check", dict(t=round(self.t, 2), robot=r.name, moved=int(ok_),
+                                                          clear=int(clear_), why=ev_))
+                        return False           # still held: no evidence a person moved it (8b keeps it pinned)
+                    rec["evidence"] = ev_
                 nh.pop(r.name, None)
                 self.counts["hand_rejoined"] = self.counts.get("hand_rejoined", 0) + 1
-                self.event(r, "REJOINED", "%s was moved in and rejoins the run by itself (it waited %.0f s for a hand)"
-                           % (r.name, self.t - rec["t0"]))
+                r.rejoined_at = self.pos(r)    # (8b) pinned until it has driven away from there
+                self.event(r, "REJOINED", "%s was moved in and rejoins the run by itself (it waited %.0f s for a hand%s)"
+                           % (r.name, self.t - rec["t0"], ("; " + rec["evidence"]) if rec.get("evidence") else ""))
             return False
         p = self.pos(r)
         if rec is None:
@@ -4106,7 +4388,7 @@ class Controller:
                          why))
             rec = dict(robot=r.name, x=round(p[0], 1) if p else None, y=round(p[1], 1) if p else None,
                        edge_cm=round(d, 1) if d is not None else None, side=side, why=why, t0=round(self.t, 1),
-                       said=self.t, words=words)
+                       said=self.t, words=words, n_moves=r.n_moves)
             nh[r.name] = rec
             self.counts["need_hand"] = self.counts.get("need_hand", 0) + 1
             self.event(r, "NEEDS A HAND", words)
@@ -4224,6 +4506,8 @@ class Controller:
                 self.felt_mark(r)                      # (e10, C2) the proven workspace grows under its wheels
                 if NOPIC_RULE and self.__dict__.get("nopic_since") is not None:
                     self.no_picture_watch(r)           # (e13) no pictures: this robot's own risk-based limit
+                if CONTACT_WATCH:
+                    self.contact_watch(r)              # (e16, 8c) pushed while standing, or blocked while driving
                 if self.edge_park_watch(r):            # (e12) held at an edge too long: parked, the others go on
                     continue
             if r.mode == "idle" and t >= r.busy_until and self.pos(r) is not None and not r.silent and \

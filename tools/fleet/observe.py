@@ -29,7 +29,7 @@ import json
 import math
 import os
 
-VERSION = "2026-11-10a"   # 11-10a (e12): blind_cells (the spots learned blind, for the site's blind_areas.json). 11-07a (e08): tilt limits from safety_rules (re-picked from the 5 / 6 Nov logs), trip
+VERSION = "2026-11-11e16"   # e16 (home 11 Nov 08:45, Nick: "it can still back up but it's not, it's just still"): track_back_target, a reverse along the robot's own recorded track (curved too: straight chords that stay on the track) as far as the edge rule needs, derived; moved_in_evidence (a held robot counts as moved in only on a lift / tilt or a sustained camera move beyond its own measured noise). Before: "2026-11-10a"   # 11-10a (e12): blind_cells (the spots learned blind, for the site's blind_areas.json). 11-07a (e08): tilt limits from safety_rules (re-picked from the 5 / 6 Nov logs), trip
                           # keep-outs marked confirmed (the one keep-out rule)
 import sys as _sys
 if os.path.dirname(os.path.abspath(__file__)) not in _sys.path:
@@ -865,6 +865,98 @@ class Trail:
             if cov >= L:
                 return True, cov
         return cov >= L, cov
+
+
+TRACK_CHORD_STEP_CM = 1.0   # (e16) a chord is checked against the track every this many cm. Not a tuning (sampling)
+
+
+def _seg_dist(p, a, b):
+    ax, ay, bx, by = a[0], a[1], b[0], b[1]
+    dx, dy = bx - ax, by - ay
+    L2 = dx * dx + dy * dy
+    t = 0.0 if L2 <= 0 else max(0.0, min(1.0, ((p[0] - ax) * dx + (p[1] - ay) * dy) / L2))
+    return math.hypot(p[0] - (ax + t * dx), p[1] - (ay + t * dy))
+
+
+def track_back_target(trail_pts, pos, heading, clear_fn, tol_cm=None, tol_deg=None):
+    """(e16, item 7; Nick 11 Nov 08:45) A robot stopped at an edge came in over ground it has just driven: reversing
+    back along its own last cm of track is reversing over positions it has proven are table. trail_pts: its recorded
+    poses (its own odometry, oldest first: Trail.pts); pos, heading: where it is now (the run's position, the heading
+    it holds); clear_fn((x, y)) -> True where the edge rule is met (the clearance with its error sum, from the caller).
+    The track is laid onto the present pose (its newest point = pos, its heading = heading). Walking back along it, the
+    reverse goes to the FIRST track point that is clear (the distance is derived from the edge rule, never picked), as
+    one straight chord that stays within tol_cm of the track and runs straight back along the heading (tol_deg: the
+    firmware's reverse is a straight drive, no turn at the edge). A curved track gives a shorter chord: the caller
+    repeats from where that ends. Returns dict(L, end, arc_cm, cleared, words) or None (no track behind it)."""
+    tol_cm = TRAIL_TOL_CM if tol_cm is None else tol_cm
+    tol_deg = TRAIL_TOL_DEG if tol_deg is None else tol_deg
+    if not trail_pts or len(trail_pts) < 2 or pos is None:
+        return None
+    x1, y1, th1 = trail_pts[-1]
+    a = math.radians(wrap180(heading - th1))
+    ca, sa = math.cos(a), math.sin(a)
+    pts = [(pos[0] + ca * (x - x1) - sa * (y - y1), pos[1] + sa * (x - x1) + ca * (y - y1)) for x, y, _ in trail_pts]
+    best, arc = None, 0.0
+    for k in range(len(pts) - 2, -1, -1):
+        arc += math.dist(pts[k + 1], pts[k])
+        q = pts[k]
+        L = math.dist(pos, q)
+        if L < 0.5:
+            continue
+        d_ang = abs(wrap180(math.degrees(math.atan2(q[1] - pos[1], q[0] - pos[0])) - (heading + 180.0)))
+        if d_ang > tol_deg:
+            break
+        ok = True
+        n = max(2, int(L / TRACK_CHORD_STEP_CM) + 1)
+        for j in range(1, n):
+            c = (pos[0] + (q[0] - pos[0]) * j / n, pos[1] + (q[1] - pos[1]) * j / n)
+            if min(_seg_dist(c, pts[i], pts[i + 1]) for i in range(k, len(pts) - 1)) > tol_cm:
+                ok = False
+                break
+        if not ok:
+            break
+        best = dict(L=round(L, 2), end=(q[0], q[1]), arc_cm=round(arc, 2), cleared=bool(clear_fn(q)), k=k)
+        if best["cleared"]:
+            break
+    if best is None:
+        return None
+    best["words"] = ("%.1f cm straight back along its own track (%s)" % (
+        best["L"], "clear of the edge rule there" if best["cleared"] else
+        "as far as a straight reverse stays on the track; it goes on from there"))
+    return best
+
+
+def moved_in_evidence(fixes_held, fixes_now, sigma_floor_cm=0.5, k_sigma=4.0, n_now=3, lifted=False):
+    """(e16, 8a; home 11 Nov 08:48: "REJOINED ... was moved in" one second after NEEDS A HAND, nobody had touched it)
+    Did a person really move a held robot? Evidence only: a lift / put-down (lifted: the robot's own accelerometer or
+    tilt said so), or the camera's spot moved further than its own measured noise allows, sustained. fixes_held: the
+    camera (x, y) seen while it was held; fixes_now: the newest ones. The noise is the held fixes' own scatter (one
+    axis, sigma; never under sigma_floor_cm, the camera's resolution); the move is the median of the last n_now fixes
+    against the median while held, and must exceed k_sigma x sqrt(2) x sigma (the difference of two noisy spots).
+    Returns (bool, words)."""
+    if lifted:
+        return True, "it was lifted and put down (its own accelerometer)"
+    if len(fixes_held) < 3 or len(fixes_now) < n_now:
+        return False, "too few camera fixes to tell (%d held, %d now)" % (len(fixes_held), len(fixes_now))
+
+    def med(v):
+        v = sorted(v)
+        return v[len(v) // 2]
+    hx, hy = med([f[0] for f in fixes_held]), med([f[1] for f in fixes_held])
+    sx = math.sqrt(sum((f[0] - hx) ** 2 for f in fixes_held) / max(1, len(fixes_held) - 1))
+    sy = math.sqrt(sum((f[1] - hy) ** 2 for f in fixes_held) / max(1, len(fixes_held) - 1))
+    sig = max(sigma_floor_cm, sx, sy)
+    last = fixes_now[-n_now:]
+    nx, ny = med([f[0] for f in last]), med([f[1] for f in last])
+    moved = math.hypot(nx - hx, ny - hy)
+    lim = k_sigma * math.sqrt(2.0) * sig
+    # every one of the last n_now fixes past the limit too: sustained, not one jump
+    each = all(math.hypot(f[0] - hx, f[1] - hy) > lim for f in last)
+    if moved > lim and each:
+        return True, "the camera saw it move %.1f cm (its noise %.1f cm: limit %.1f cm), on %d fixes in a row" % (
+            moved, sig, lim, n_now)
+    return False, "the camera has it %.1f cm from where it was held (limit %.1f cm from its noise %.1f cm)" % (
+        moved, lim, sig)
 
 
 def back_out_plan(L, trail=None, bubble_cm=0.0, cam=None, cam_age_s=None, rect=None, others=(), keepouts=(),

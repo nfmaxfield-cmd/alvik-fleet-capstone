@@ -13,7 +13,7 @@ Per run type (Nick's decisions 1-3):
 Practice: with no real camera (or Mission Control --dry) every button runs the simulator instead, with the guesses
 broken on purpose (turned roof tags, a dark patch, the camera's clock off, a robot restarting), as the rehearsals do.
 """
-VERSION = "2026-11-10e14"   # e14: the clear-space question's words (clear_space) and the answer to every run (MIRLT_CLEAR_SPACE_OK / --clear-space); the Area line from the readability store (what is used, at what light, on how much evidence); Advanced "Battery floor"; practice runs keep their own readability store. e13: robots waiting for a hand (needs_hand) in the status. 2026-11-10a # 2026-11-10a (e12): Advanced "Curves in the calibration" (calib_curves) passed to calib_run
+VERSION = "2026-11-11e16"   # e16 (9a, home 11 Nov: "No camera model here: use a point below" on Right's needs-a-hand card): the click to locate a held robot uses whatever camera-to-board model the site has: the roof-tag fit where there is one, else the lights tracking's floor calibration (setup_conf: overhead_floorcal_*.json, side_floorcal_*.json) at the robot's top (e02_camera.ROBOT_TOP_CM). Before: "2026-11-10e14"   # e14: the clear-space question's words (clear_space) and the answer to every run (MIRLT_CLEAR_SPACE_OK / --clear-space); the Area line from the readability store (what is used, at what light, on how much evidence); Advanced "Battery floor"; practice runs keep their own readability store. e13: robots waiting for a hand (needs_hand) in the status. 2026-11-10a # 2026-11-10a (e12): Advanced "Curves in the calibration" (calib_curves) passed to calib_run
                            # (--arc-phase, --roam-motion); robots left at an edge in the status (edge_parked). No version
                            # string before this.
 import glob
@@ -887,11 +887,33 @@ class Starter:
         if pr:
             lr = (getattr(S, "last_runs", {}) or {}).values()
             dirs = [os.path.join(os.path.dirname(r_), "tagcal") for r_ in lr if r_] + dirs
+        kinds = self.__dict__.setdefault("place_kinds", {})
         for d_ in dirs:
             p_ = os.path.join(d_, cam + ".json")
             if os.path.exists(p_):
+                kinds[cam] = "tags"
                 return CAM.load_camera(p_)
+        # (e16, 9a) no roof-tag model (home: lights tracking): the floor calibration the lights tracking uses, at the
+        # height of the robot's top (where the click lands on the picture)
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(HERE), "pi"))
+            import setup_conf as SCF
+            p_ = SCF.overhead_calib(relative=False)[0] if cam == "overhead" else SCF.side_calib()[0]
+            if p_ and os.path.exists(p_):
+                kinds[cam] = "floorcal"
+                return CAM.load_camera(p_)
+        except Exception:  # noqa: BLE001  (no model: the map's points, as before)
+            pass
         return None
+
+    def place_z(self, cam):
+        """(e16, 9a) The height a click is taken at: the roof tags' height on a tag model, the robot's top on a floor
+        calibration (the lights tracking's plane)."""
+        if (self.__dict__.get("place_kinds") or {}).get(cam) == "floorcal":
+            sys.path.insert(0, os.path.join(os.path.dirname(HERE), "experiment"))
+            import e02_camera as CAM
+            return float(CAM.ROBOT_TOP_CM)
+        return float(((self.S.site or {}).get("tags") or {}).get("height_cm") or 6.0)
 
     def place_state(self):
         import place_click as PC
@@ -908,9 +930,10 @@ class Starter:
             if m is None:
                 continue
             last = {}
+            zc = self.place_z(cam)
             for q in rq:
                 if q.get("last"):
-                    u, v = m.project((q["last"][0], q["last"][1], z))
+                    u, v = m.project((q["last"][0], q["last"][1], zc))
                     if u == u and v == v:
                         last[q["robot"]] = [round(float(u), 1), round(float(v), 1)]
             cams[cam] = {"size": [int(v) for v in m.image_size], "last_px": last}
@@ -935,7 +958,7 @@ class Starter:
         m = self.place_model(cam)
         if m is None:
             raise ValueError("no camera model for %s: click the map's point instead" % cam)
-        z = float(((self.S.site or {}).get("tags") or {}).get("height_cm") or 6.0)
+        z = self.place_z(cam)
         try:                                                  # the picture clicked: shown beside the next one
             b = self.S.frame(cam) or (self.S.tag.picture_jpeg(cam) if self.S.tag else None)
             if b:
