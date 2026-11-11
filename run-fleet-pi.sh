@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# (2026-11-11 e16, the Pi audit; Nick: "If it's not useful for executing the program, we can drop it") the recorder
+# saves NO video by default: it serves its pictures (tracking, the setup, Mission Control) and the runs save their own
+# frames and clips. MIRLT_VIDEO=1 (or `rec video`) keeps the whole video as before. `bench [minutes] [old|trimmed|both]`:
+# the Pi measured on a practice run (simulated robots, nothing moves) with the real camera (tools/pi/pi_bench.sh).
 # (2026-11-10 e14) `space --move`: finished run folders moved to the USB drive (diskguard.move_old_runs; a link left
 # in logs/, nothing deleted); every preflight does the same by itself when the card is under its floor (school 18:07).
 # (2026-11-10 e13) calib, freeroam, doe, visit and the missions close a session whose run has ended (its window waiting
@@ -219,6 +223,8 @@ start_recorder() {
   # the side camera on automatic exposure (Nick, Q22: keep automatic; locked, it went dark at 13:01 and again later
   # as the room's light changed; the trackers follow the exposure's drift and brighten a dark side picture);
   # --shm: each camera's grey picture in shared memory for the camera bridge's workers (cam_bridge.py --farm)
+  # (e16) no video saved unless asked: MIRLT_VIDEO=1 (or `rec video`); REC_EXTRA given by a caller is kept as it is
+  if [ "${MIRLT_VIDEO:-0}" != 1 ] && [ -z "${REC_EXTRA:-}" ]; then REC_EXTRA="--no-record"; echo "Video: not saved (the default since 11 Nov; MIRLT_VIDEO=1 keeps it). The pictures still go to the tracking."; fi
   local REC_NEW="tmux new-session -d -s fleet -n rec"
   tmux has-session -t fleet 2>/dev/null && REC_NEW="tmux new-window -t fleet -n rec"
   $REC_NEW "cd '$REPO' && python3 tools/pi/camrec.py $CAMS $CAPTURE --fps $CAPFPS --label P0 --no-lock $EXPO_ARG --side-exposure auto --shm $REC_CORES ${REC_EXTRA:-} --out '$OUT'; read -r -p 'Recorder stopped. Press Enter.'"
@@ -256,7 +262,58 @@ run_test() {   # run_test NAME MAP [bridge options]
   echo "Saved in $sess"
 }
 
+# (e16) the Pi bench: one profile for MINUTES. Nothing moves: the robots are simulated (practice on the real path), the
+# camera is real (the recorder, and a tag bridge that reads its pictures and SENDS NOTHING: --observe)
+bench_profile() {   # bench_profile NAME MINUTES OUTDIR
+  local name="$1" mins="$2" out="$3/$1" secs
+  secs=$(( mins * 60 ))
+  mkdir -p "$out"
+  if [ "$name" = old ]; then     # everything as before e16: video saved, preview always, one /live encode per client,
+    export MIRLT_VIDEO=1 MIRLT_REC_PREVIEW=always MIRLT_LIVE_SHARE=0 MIRLT_MOTION_RATE=every MIRLT_BRIDGE_POLL=1
+  else
+    unset MIRLT_VIDEO MIRLT_REC_PREVIEW MIRLT_LIVE_SHARE MIRLT_MOTION_RATE MIRLT_BRIDGE_POLL
+  fi
+  echo; echo "=== Bench: $name defaults, $mins min ($(date +%H:%M:%S)). Nothing moves. ==="
+  if rec_running; then echo "Restarting the recorder with the $name settings ..."; tmux send-keys -t fleet:rec C-c 2>/dev/null; sleep 4; tmux kill-window -t fleet:rec 2>/dev/null; sleep 1; fi
+  start_recorder
+  local TC
+  TC="$(python3 -c "import sys; sys.path.insert(0, 'tools/fleet'); import sites as S; s = S.load(None) or {}; print(s.get('conf_dir') or '')" 2>/dev/null)/tagcal"
+  local CAMS="--cam overhead=127.0.0.1:8000,$TC/overhead.json"
+  [ -f "$TC/side.json" ] && python3 tools/pi/rec_alive.py --side --timeout 3 >/dev/null 2>&1 && CAMS="$CAMS --cam side=127.0.0.1:8001,$TC/side.json"
+  echo "{\"profile\": \"$name\", \"minutes\": $mins, \"cameras\": \"$CAMS\", \"commit\": \"$(git rev-parse --short HEAD)\", \"started\": \"$(date -Iseconds)\"}" > "$out/bench.json"
+  python3 tools/pi/pi_bench.py monitor --out "$out" --every 2 --seconds "$secs" &
+  local MON=$!
+  [ -f "$TC/overhead.json" ] && nice -n 5 python3 tools/fleet/tag_bridge.py $CAMS --observe --pose-port 5111 --max-s "$secs" --out "$out/real_bridge" > "$out/real_bridge.txt" 2>&1 &
+  [ -f "$TC/overhead.json" ] || echo "(no camera model at $TC/overhead.json: the real camera's tag bridge is left out; Mission Control, Setup, Measure first)"
+  local ORD; ORD=$(python3 -c "print(','.join('P%02d' % i for i in range(1, 41)))")
+  timeout --signal=INT "$secs" python3 tools/fleet/mission_run.py --tracking tags --robots auto --split auto --sim-robots 3 --motion stopturn --visit-order "$ORD" --visit-keep-unreadable --practice-real --feel-table skip > "$out/practice.txt" 2>&1
+  wait $MON 2>/dev/null
+  local RUN; RUN=$(ls -dt logs/*-mission-dry 2>/dev/null | head -1)
+  [ -n "$RUN" ] && ln -sfn "$REPO/$RUN" "$out/practice_run"
+  python3 tools/pi/pi_bench.py report "$out" --label "$name defaults" > /dev/null
+  echo "Report: $out/report.md"
+}
+
 case "$WHAT" in
+  bench)           # (e16) ./run-fleet-pi.sh bench [minutes] [old|trimmed|both]: the Pi measured, nothing moves
+    BM=10; BP=both
+    for x in "$@"; do case "$x" in [0-9]*) BM="$x" ;; old|trimmed|both) BP="$x" ;; esac; done
+    for s in visit calib freeroam doe monday practice; do
+      if tmux has-session -t "$s" 2>/dev/null; then echo "A run is open (tmux session $s): close it first. Nothing started."; exit 1; fi
+    done
+    BOUT="logs/$(date +%Y%m%d-%H%M%S)-bench"; mkdir -p "$BOUT"
+    echo "Pi bench: $BP, $BM min each. Simulated robots on the real path, the real camera; NO ROBOT MOVES. Results: $BOUT"
+    [ "$BP" = trimmed ] || bench_profile old "$BM" "$BOUT"
+    [ "$BP" = old ] || bench_profile trimmed "$BM" "$BOUT"
+    unset MIRLT_VIDEO MIRLT_REC_PREVIEW MIRLT_LIVE_SHARE MIRLT_MOTION_RATE MIRLT_BRIDGE_POLL
+    if [ "$BP" = both ]; then
+      python3 tools/pi/pi_bench.py compare "$BOUT/old" "$BOUT/trimmed" --labels "old defaults,trimmed defaults" --out "$BOUT/compare.md" > /dev/null
+      echo; cat "$BOUT/compare.md"
+    else
+      echo; cat "$BOUT/$BP/report.md"
+    fi
+    echo; echo "Saved in $BOUT. The recorder is left running with the trimmed settings (no video)."
+    echo "To send the results: copy the table above into the chat (the full numbers are in $BOUT)." ;;
   ladder)
     case "${1:-}" in
       pause) ladder run --pause ;;
@@ -532,6 +589,7 @@ case "$WHAT" in
     if tmux has-session -t e02 2>/dev/null; then echo "An E02 session is running on this Pi (tmux e02). Stop it first. Stopped."; exit 1; fi
     python3 tools/pi/camera_setup.py "$@" ;;
   rec)
+    [ "${1:-}" = video ] && export MIRLT_VIDEO=1      # (e16) `rec video`: the whole video saved too
     start_recorder
     echo "Recorder running. Its picture: http://$PIADDR:8000 in the laptop's browser" ;;
   check)

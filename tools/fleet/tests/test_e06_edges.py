@@ -102,14 +102,18 @@ def test_shallow_side_approach_refused_by_the_invariant():
     assert c.invariant_ok(r, tr2)
 
 
-def test_clock_ratchet_stale_camera_grows_the_circle():
+def test_clock_ratchet_stale_camera_grows_the_circle(monkeypatch):
     """The clock ratchet (4 h run): every fix arrives 1.3 s stale; at 10 cm/s that is 13 cm of doubt, so a robot
-    25 cm from an edge may only move inwards."""
+    25 cm from an edge may only move inwards. (e16, 9b) Only for a robot that may have moved: one standing since its
+    fix keeps the fix's own doubt (MIRLT_STAND_UNC); this test pins the old way to keep checking the edge rule."""
     c, sent, rows = ctrl()
     r = c.R["Left"]
     place(c, "Left", 25.0, 60.0, 180.0)
     r.cam_arr = c.t - 1.3
     c.t += 0.0
+    if c.standing(r):
+        assert c.unc(r) < 2.0                       # (e16, 9b) standing: no growth
+    monkeypatch.setattr(FC, "STAND_UNC", False)
     assert c.unc(r) > 13.0
     assert not c.invariant_ok(r, c.make(r, 0.0, 6.0, 10.0))         # further towards x = 0: refused
     assert c.invariant_ok(r, c.make(r, 180.0, 20.0, 10.0))          # turn and go inwards: shrinks the overlap

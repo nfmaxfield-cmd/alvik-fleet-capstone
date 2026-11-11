@@ -58,7 +58,7 @@ experiments measure that offset; nothing here assumes it.
 
 Needs OpenCV: sudo apt install -y python3-opencv
 """
-VERSION = "2026-11-10e14"   # e14 (school 18:12: "Could not open camera 10" stopped the whole recorder): a camera that cannot be opened, or opens and sends nothing, is left out and said plainly; the others record on their own ports (MIRLT_REC_ALL_OR_NONE=1: the old stop for the no-picture case). 2026-11-10a (e12): orderly exit (no thread torn down inside OpenCV at exit). No version string before
+VERSION = "2026-11-11e16"   # e16 (Pi audit 11 Nov): the preview picture (port 8000's page, colour JPEG with the rate drawn on it) is made only while a browser watches it (MIRLT_REC_PREVIEW=always: every 2nd frame as before); /live's grey JPEG is encoded ONCE per frame and quality and shared by every client (the tag bridge, the frame saver, a facing check, Mission Control) (MIRLT_LIVE_SHARE=0: one encode per client as before); a write to a full drive stops the recording, never the live pictures (frames.csv flush guarded). Video recording itself is switched off by run-fleet-pi.sh by default (MIRLT_VIDEO=1 / full-video keeps it). Before: "2026-11-10e14"   # e14 (school 18:12: "Could not open camera 10" stopped the whole recorder): a camera that cannot be opened, or opens and sends nothing, is left out and said plainly; the others record on their own ports (MIRLT_REC_ALL_OR_NONE=1: the old stop for the no-picture case). 2026-11-10a (e12): orderly exit (no thread torn down inside OpenCV at exit). No version string before
 
 import argparse
 import csv
@@ -86,6 +86,7 @@ class Latest:
     def __init__(self):
         self.jpeg = None
         self.cond = threading.Condition()
+        self.viewers = 0          # (e16) browsers on /stream now: the preview is made only for them
 
     def put(self, jpeg):
         with self.cond:
@@ -100,6 +101,8 @@ class Latest:
 
 REC_WRITE = os.environ.get("MIRLT_REC_WRITE", "thread")   # (e10) "thread": the video file is written by its own thread
                                                            # (a slow drive never holds up /live); "inline": as before
+PREVIEW = os.environ.get("MIRLT_REC_PREVIEW", "viewer")   # (e16) "viewer": the preview JPEG only while a browser watches
+LIVE_SHARE = os.environ.get("MIRLT_LIVE_SHARE", "1") != "0"   # (e16) one /live encode per frame, shared by every client
 REC_QUEUE = 90              # (e10) CHOSEN: frames that may wait for the drive (3 s at 30 fps); beyond that the RECORDING
                             # drops a frame (counted in meta.json frame_check.rec_dropped), never the live picture
 
@@ -132,10 +135,13 @@ class AsyncRecorder:
             if item is None:
                 return
             frame, row = item
-            self.writer.write(frame)
-            with self.lock:
-                self.fcsv.writerow(row)
-            self.written += 1
+            try:
+                self.writer.write(frame)
+                with self.lock:
+                    self.fcsv.writerow(row)
+                self.written += 1
+            except OSError:
+                self.dropped += 1             # (e16) a full drive: frames dropped from the recording, never live
 
     def close(self, timeout=30.0):
         self.q.put(None)
@@ -163,6 +169,33 @@ class LiveFrames:
             if self.item is None or self.item[1] <= n_last:
                 self.cond.wait(timeout)
             return self.item
+
+    def part(self, item, quality):
+        """(e16) The multipart part of this frame at this quality: encoded once, shared by every client (the tag
+        bridge, the frame saver, a facing check and Mission Control each made their own before: one grey q95 encode
+        per client per frame, on the recorder's one core)."""
+        frame, n, t_wall = item
+        if not LIVE_SHARE:
+            return live_part(frame, n, t_wall, quality)
+        key = (n, int(quality))
+        with self.cond:
+            cache = self.__dict__.setdefault("cache", {})
+            if key in cache:
+                self.shared = getattr(self, "shared", 0) + 1
+                return cache[key]
+            lock = self.__dict__.setdefault("enc_lock", threading.Lock())
+        with lock:                      # one encoder at a time: a second client waits for the first's result
+            with self.cond:
+                if key in cache:
+                    self.shared = getattr(self, "shared", 0) + 1
+                    return cache[key]
+            p = live_part(frame, n, t_wall, quality)
+            with self.cond:
+                for k in [k for k in cache if k[0] < n - 2]:
+                    del cache[k]
+                cache[key] = p
+                self.encoded = getattr(self, "encoded", 0) + 1
+            return p
 
 
 def live_part(frame, n, t_wall, quality=95):
@@ -203,7 +236,7 @@ def make_handler(latest, live=None):
                         if item is None or item[1] <= last:
                             continue
                         frame, n, t_wall = item
-                        part = live_part(frame, n, t_wall, q)
+                        part = live.part(item, q)
                         last = n
                         if part:
                             self.wfile.write(part)
@@ -217,6 +250,8 @@ def make_handler(latest, live=None):
                 self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
+                with latest.cond:
+                    latest.viewers += 1
                 try:
                     while True:
                         jpeg = latest.wait()
@@ -224,8 +259,11 @@ def make_handler(latest, live=None):
                             continue
                         self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
                                          + str(len(jpeg)).encode() + b"\r\n\r\n" + jpeg + b"\r\n")
-                except (BrokenPipeError, ConnectionResetError):
+                except (BrokenPipeError, ConnectionResetError, OSError):
                     return
+                finally:
+                    with latest.cond:
+                        latest.viewers -= 1
             elif self.path in ("/", "/index.html"):
                 page = (b"<!doctype html><title>Alvik camera</title>"
                         b"<body style='margin:0;background:#111;display:grid;place-items:center;height:100vh'>"
@@ -1046,11 +1084,14 @@ class CamRec:
                 # carries on so the laptop's runner can keep measuring runs (Nick, 2026-10-23: storage is the
                 # bottleneck; get as much data as possible)
                 recording = False
-                if getattr(self, "arec", None) is not None:
-                    self.arec.close()
-                self.writer.release()
-                with self.lock:
-                    self.ff.flush()
+                try:                            # (e16) a full drive may refuse these too: the live picture goes on
+                    if getattr(self, "arec", None) is not None:
+                        self.arec.close()
+                    self.writer.release()
+                    with self.lock:
+                        self.ff.flush()
+                except OSError as e:
+                    self.log(f"! {self.tag}closing the recording: {e}")
                 self.stopped = self.stopped or "disk almost full (recording stopped, live picture on)"
                 self.log(f"! {self.tag}recording stopped and saved (card almost full); the live picture carries on.")
             if recording and getattr(self, "arec", None) is not None:
@@ -1115,8 +1156,13 @@ class CamRec:
                 shown_fps = n_fps / (now - t_fps)
                 n_fps, t_fps = 0, now
                 if recording:
-                    with self.lock:
-                        self.ff.flush()
+                    try:
+                        with self.lock:
+                            self.ff.flush()
+                    except OSError as e:
+                        # (e16) a full drive stops the recording, never the live pictures (the tracking stream)
+                        self.rec_stop_req = True
+                        self.log(f"! {self.tag}recording stopped: {e}; the live picture carries on")
             if now - win_t >= self.WINDOW_S:
                 rate = win_n / (now - win_t)
                 if not self.replay and rate < 0.9 * self.expected_fps():
@@ -1127,7 +1173,8 @@ class CamRec:
                                  f"({self.expected_fps():g} expected): frames are being lost. Try: the cameras on "
                                  f"different USB ports, --pixfmt MJPG, a lower --fps, or check `top`.")
                 win_n, win_t = 0, now
-            if self.port and self.n % 2 == 0:   # preview at half rate to save CPU
+            if self.port and self.n % 2 == 0 and (PREVIEW == "always" or self.latest.viewers > 0):
+                # preview at half rate to save CPU; (e16) only while a browser watches it
                 view = frame.copy()
                 tag = f"{shown_fps:4.1f} fps  {'REC ' + time.strftime('%H:%M:%S' if t_mono >= 3600 else '%M:%S', time.gmtime(t_mono)) if recording else 'preview'}"
                 if self.name:

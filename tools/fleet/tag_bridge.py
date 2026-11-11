@@ -34,7 +34,7 @@ Writes to --out: track.csv (as cam_bridge's, for line_check.py), tag_poses.csv (
 sigma, size check, picture position), tag_obs.csv (every read's corners: the site fit's input), ref_watch.csv,
 events.jsonl, bridge_summary.json.
 """
-VERSION = "2026-11-10e14c"   # e14c (school 17:46): SIGTERM sets a stop flag and the bridge leaves through its orderly path (never a raise inside a join: the C++ abort); every picture's detection time, search, brightness and reads in detect_times.csv; the Pi's heat and throttle flags in pi_health.csv and the status line; windows sized by each tag's measured speed (tagcore). e14b: a picture gone dark (pictures still coming) is said as the camera adjusting to the light and sent to the run as "dark" / "light_back" (dark_watch; exposure nudge camera_exposure, off). e14: a robot with no roof tag that reads (found by motion at the start) is followed by the motion detector from where it was found: --seed-motion NAME=X,Y,TH and run_plan's "seed" messages (on_seed). 2026-11-10e13 (e13): frames.json (new pictures per camera, reference tags read) for the camera check before binding (camera_feed.py).
+VERSION = "2026-11-11e16"   # e16 (Pi audit 11 Nov): the motion detector, ~55 % of the bridge's time (py-spy, simulated school practice), runs at full rate only while it is needed (a robot unread by its tag for SR.SURE_CAM_AGE_S, or a motion-find seed) and on every MOTION_IDLE_EVERY-th picture otherwise, keeping the empty floor learned; the tags re-seat its tracks on every picture as before (MIRLT_MOTION_RATE=every: every picture); the pose socket is read with a short timeout instead of a 100 Hz poll (MIRLT_BRIDGE_POLL=1: the poll). Before: "2026-11-10e14c"   # e14c (school 17:46): SIGTERM sets a stop flag and the bridge leaves through its orderly path (never a raise inside a join: the C++ abort); every picture's detection time, search, brightness and reads in detect_times.csv; the Pi's heat and throttle flags in pi_health.csv and the status line; windows sized by each tag's measured speed (tagcore). e14b: a picture gone dark (pictures still coming) is said as the camera adjusting to the light and sent to the run as "dark" / "light_back" (dark_watch; exposure nudge camera_exposure, off). e14: a robot with no roof tag that reads (found by motion at the start) is followed by the motion detector from where it was found: --seed-motion NAME=X,Y,TH and run_plan's "seed" messages (on_seed). 2026-11-10e13 (e13): frames.json (new pictures per camera, reference tags read) for the camera check before binding (camera_feed.py).
 VERSION_A = "2026-11-10a"   # 2026-11-10a (e12): frame_watch (no pictures from a camera: said loudly, an event, a message to the run); workers joined before the summary; orderly exit. No version string before
 
 import argparse
@@ -69,6 +69,11 @@ JUMP_CM = 25.0           # a read this far from the robot's last pose (within JU
 JUMP_S = 1.0             # Chosen: a robot at 15 cm/s goes 15 cm in a second. No DOE: a guard against a misread id
 POSE_PORT = 5011
 STATUS_EVERY_S = 2.0
+MOTION_RATE = os.environ.get("MIRLT_MOTION_RATE", "need")   # (e16) "need" | "every" (before e16)
+MOTION_IDLE_EVERY = 4    # (e16) while every robot's tag reads: one motion picture in this many (the empty floor kept
+                         # learned; a 15 / s camera gives ~4 a second). CHOSEN; DOE: yes (2 / 4 / 8 against the bridge's
+                         # CPU and the motion track's hand-over error when a tag is lost, in the tag-loss simulation)
+POLL = os.environ.get("MIRLT_BRIDGE_POLL", "0") == "1"      # (e16) 1 = the 100 Hz non-blocking poll (before e16)
 SIGMA_FLOOR_CM = 0.3     # a fix's sigma is never said to be better than this (the tag's placement over the axle,
                          # measured by Nick). No DOE: a floor
 SIGMA_DEG_FLOOR = 1.0    # the same for the heading (a hand-placed sticker on the roof)
@@ -391,11 +396,22 @@ class Bridge:
                 self.event("motion_seeded", robot=n, x=round(x, 1), y=round(y, 1))
             del self.seeds[n]
         here = {n: (p.x, p.y, p.heading) for n, p, u in out if u == "yes"}
+        seen = self.__dict__.setdefault("tag_seen_t", {})
         for n, (x, y, h) in here.items():
+            seen[n] = t
             st = self.motion.state(n)
             if n not in self.motion_added or st is None or math.hypot(st["x"] - x, st["y"] - y) > 3.0:
                 self.motion.add(n, x, y, heading=h, t=t)
                 self.motion_added.add(n)
+        if MOTION_RATE != "every":
+            # (e16) every robot read by its tag just now: the motion detector only keeps its floor learned
+            import safety_rules as SR_
+            need = any(t - seen.get(n, -1e9) > SR_.SURE_CAM_AGE_S for n in self.counts)
+            k_ = self.__dict__.get("motion_k", 0) + 1
+            self.motion_k = k_
+            if not need and k_ % MOTION_IDLE_EVERY:
+                self.motion_skipped = self.__dict__.get("motion_skipped", 0) + 1
+                return
         self.motion.push(grey, t)
         if self.observe:
             return
@@ -741,7 +757,8 @@ class Bridge:
              "ref_watch": {c: {"moved": w.moved, "last_median_px": None if not w.last or w.last[0] is None
                                else round(w.last[0], 2), "tags": sorted(w.expected, key=int)}
                            for c, w in self.refw.items()},
-             "lock": {c: lb.summary() for c, lb in self.lockbank.items()}}
+             "lock": {c: lb.summary() for c, lb in self.lockbank.items()},
+             "motion_pictures_skipped": self.__dict__.get("motion_skipped", 0)}      # (e16) every tag reading
         with open(os.path.join(self.out, "bridge_summary.json"), "w") as f:
             json.dump(s, f, indent=1, default=str)
         return s
@@ -822,7 +839,10 @@ def main(argv=None):
             if k == 14:
                 raise SystemExit("Port %d is in use (another bridge still running?): %s" % (a.pose_port, e))
             time.sleep(1.0)
-    rx.setblocking(False)
+    if POLL:
+        rx.setblocking(False)
+    else:
+        rx.settimeout(0.05)      # (e16) wait for a pose message up to 50 ms (status and stop checks run between)
     robots = [r.strip() for r in a.robots.split(",") if r.strip()] or None
     rexp = {}
     if not a.no_ref_watch:
@@ -893,6 +913,8 @@ def main(argv=None):
                     br.on_pose(msg)
                 elif isinstance(msg, dict) and msg.get("type") == "seed" and msg.get("how") == "motion find":
                     br.on_seed(msg)          # (e14) only the motion finding's seeds (the lights' seeds are cam_bridge's)
+            except socket.timeout:
+                pass                         # (e16) the timeout is the wait: no extra sleep
             except (BlockingIOError, OSError):
                 time.sleep(0.01)
             except ValueError:

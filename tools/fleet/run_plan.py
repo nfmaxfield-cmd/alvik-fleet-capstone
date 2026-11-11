@@ -36,7 +36,7 @@ Position source (--fixes): where camera poses come from (data-formats.md,
 runs against it with --fixes udp; at the end it prints the simulator's ground
 truth: docking errors, closest robots, contact.
 """
-VERSION = "2026-11-11e16"   # e16 (item 7, home 11 Nov 08:45): a tilt or drop trip backs out along the robot's own recorded track as far as the derived edge rule needs (observe.track_back_target: clearance with its uncertainty and own-vs-camera doubt, the stop where it ends), checked against the other robots, instead of a fixed 10 cm; the fixed back-off where the track is unknown or blocked (MIRLT_EDGE_BACKOUT=0: always the fixed 10 cm). Before: "2026-11-11e15"   # e15 (school 10 Nov 18:54): every facing check and re-check reads the tag CORRECTED by the turn this run knows (facing.corrected_tags: the tags file plus yaw_fix); a robot whose tag turn is unverified (not measured this run, nothing remembered; or remembered and a big turn would follow) is measured by the start's watched crawl before any straightening, and the crawl's measurement sets its yaw_fix; what is re-learned or crawled is remembered (--tag-heading-store, tag_heading_store). Before: "2026-11-10e14c"   # e14c (school 17:46): how old a fix may be and still count as seen comes from each robot's measured fix interval (blind_after; a slow detector treated like a slow camera; MIRLT_FIX_GAP_RULE=fixed the 0.6 s). e14b: a dark picture pauses every robot until the camera has adjusted (dark_watch). e14: a visit point whose tag was lost on the way is moved to the end of the robot's list once, then skipped (defer_current_point; MIRLT_RETRY_LOST=again the old way); the spot where it was lost kept as evidence. 2026-11-10e13 (e13): never give up blind (no BLIND_MAX_CM cap: it stops only when blind error + body + stop could reach an edge; MIRLT_BLIND_RULE=cap the old caps); no pictures: each blind robot's risk-based limit (safety_rules.no_picture_limit; MIRLT_NOPIC_RULE=off: e12's rules alone).
+VERSION = "2026-11-11e16"   # e16 (6a, Claude's suggestion, Nick not asked yet; school 18:26 ended "every robot is out (none heard again within 90 s)", 18:54 by the keep-going cap): 6b: every robot whose roof-tag turn is not verified is crawled at the start, even one that needs no straightening (MIRLT_CRAWL_UNKNOWN=need: e15's way). 6a: every robot held never ends the run by itself: it holds them safely, says so every minute (NEEDS A HAND) and goes on as soon as one rejoins; the cap (--all-held-max 3 / --all-held-max-s 180) and the 90 s wait are the switch MIRLT_HELD_NEVER_END=0. (item 7, home 11 Nov 08:45): a tilt or drop trip backs out along the robot's own recorded track as far as the derived edge rule needs (observe.track_back_target: clearance with its uncertainty and own-vs-camera doubt, the stop where it ends), checked against the other robots, instead of a fixed 10 cm; the fixed back-off where the track is unknown or blocked (MIRLT_EDGE_BACKOUT=0: always the fixed 10 cm). Before: "2026-11-11e15"   # e15 (school 10 Nov 18:54): every facing check and re-check reads the tag CORRECTED by the turn this run knows (facing.corrected_tags: the tags file plus yaw_fix); a robot whose tag turn is unverified (not measured this run, nothing remembered; or remembered and a big turn would follow) is measured by the start's watched crawl before any straightening, and the crawl's measurement sets its yaw_fix; what is re-learned or crawled is remembered (--tag-heading-store, tag_heading_store). Before: "2026-11-10e14c"   # e14c (school 17:46): how old a fix may be and still count as seen comes from each robot's measured fix interval (blind_after; a slow detector treated like a slow camera; MIRLT_FIX_GAP_RULE=fixed the 0.6 s). e14b: a dark picture pauses every robot until the camera has adjusted (dark_watch). e14: a visit point whose tag was lost on the way is moved to the end of the robot's list once, then skipped (defer_current_point; MIRLT_RETRY_LOST=again the old way); the spot where it was lost kept as evidence. 2026-11-10e13 (e13): never give up blind (no BLIND_MAX_CM cap: it stops only when blind error + body + stop could reach an edge; MIRLT_BLIND_RULE=cap the old caps); no pictures: each blind robot's risk-based limit (safety_rules.no_picture_limit; MIRLT_NOPIC_RULE=off: e12's rules alone).
 VERSION_B = "2026-11-10b"   # 2026-11-10b (e12 item 9): a lock-only fix never resets a pose (MIRLT_LOCK_GUARD=0: as before); a dwell broken by a halt where the robot did not move keeps its start (MIRLT_DWELL_KEEP=0). 2026-11-10a (e12): the bridge's "camera" messages (no pictures / pictures again) said and logged. No version before
 LOCK_GUARD = __import__("os").environ.get("MIRLT_LOCK_GUARD", "1") != "0"
 DWELL_KEEP = __import__("os").environ.get("MIRLT_DWELL_KEEP", "1") != "0"
@@ -47,6 +47,7 @@ import datetime as dt
 import json
 import math
 import os
+HELD_NEVER_END = os.environ.get("MIRLT_HELD_NEVER_END", "1") != "0"   # (e16, 6a) every robot held never ends the run
 import queue
 import re
 import socket
@@ -1898,10 +1899,14 @@ class Coordinator:
 
     def all_held_max(self):
         v = getattr(self.args, "all_held_max", None)
+        if v is None and HELD_NEVER_END:
+            return 0                       # (e16, 6a) never give up: no cap unless asked for
         return self.ALL_HELD_MAX if v is None else int(v)
 
     def all_held_max_s(self):
         v = getattr(self.args, "all_held_max_s", None)
+        if v is None and HELD_NEVER_END:
+            return 0.0
         return self.ALL_HELD_MAX_S if v is None else float(v)
 
     def all_held_capped(self):
@@ -2002,8 +2007,18 @@ class Coordinator:
             return
         t = now()
         self.rejoin_stall(t)
-        if not self.names and not any(b.out and self.rejoinable(b) and t - getattr(b, "out_t", 0.0) < self.REJOIN_WAIT_S
-                                      for b in self.bots.values()):
+        if not self.names and HELD_NEVER_END and any(b.out and self.rejoinable(b) for b in self.bots.values()):
+            # (e16, 6a; never give up) every robot held: the run holds them safely and waits for them, said every minute
+            if t - getattr(self, "_all_held_said", -1e9) >= 60.0:
+                self._all_held_said = t
+                held = [b.name for b in self.bots.values() if b.out and self.rejoinable(b)]
+                self.log("all_held_wait", robots=held, since_s=round(t - min(getattr(b, "out_t", t) for b in
+                                                                              self.bots.values() if b.out), 1))
+                self.say("NEEDS A HAND: every robot is held (%s), still and safe; the run waits for them and goes on as "
+                         "soon as one is heard and checked again (it never ends by itself: Ctrl+C or Stop ends it; "
+                         "MIRLT_HELD_NEVER_END=0 gives the old 90 s end)" % ", ".join(held))
+        elif not self.names and not any(b.out and self.rejoinable(b) and t - getattr(b, "out_t", 0.0) <
+                                         self.REJOIN_WAIT_S for b in self.bots.values()):
             self.abort = "every robot is out (none heard again within %.0f s)" % self.REJOIN_WAIT_S
             self.say(self.abort)
             return
@@ -5675,7 +5690,12 @@ def straighten_start(coord, link, args, source, names, fres, auto=False):
                 record["result"] = "refused: %s" % e
                 return
         need = [n for n in names if pl["robots"][n]["steps"] and n not in coord.start_aside]
-        first = [n for n in need if n in unverified and n not in crawled]
+        # (e16, 6b, Claude's suggestion, Nick not asked yet) every robot whose tag turn is not verified is crawled, even
+        # one that needs no straightening: a robot with a 180 deg tag put down backwards looks straight on its raw
+        # heading (e15's sweep 2). MIRLT_CRAWL_UNKNOWN=need: only those that need straightening (e15)
+        pool_ = need if os.environ.get("MIRLT_CRAWL_UNKNOWN", "all") == "need" else \
+            [n for n in names if n not in coord.start_aside]
+        first = [n for n in pool_ if n in unverified and n not in crawled]
         if first:
             # (e15, school 10 Nov 18:54) never straightened on an unverified raw tag heading: which way it faces is
             # measured first by the watched crawl, its tag's turn learned from it, then everything is planned again

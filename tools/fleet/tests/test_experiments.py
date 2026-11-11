@@ -309,8 +309,9 @@ def test_insert_never_lists_a_point_twice_or_a_done_point():
     assert "point 4" not in [v.get("label") for v in c.plan["robots"]["Alpha"]["visit_order"]]
 
 
-def test_both_held_loop_is_capped_and_switchable():
+def test_both_held_loop_is_capped_and_switchable(monkeypatch):
     import run_plan as RP
+    monkeypatch.setattr(RP, "HELD_NEVER_END", False)     # (e16) the cap is the switch now (MIRLT_HELD_NEVER_END=0)
     c = _coord()
     c.all_held_n = RP.Coordinator.ALL_HELD_MAX - 1
     c.retire(c.bots["Bravo"], "nothing heard", kind="silent")

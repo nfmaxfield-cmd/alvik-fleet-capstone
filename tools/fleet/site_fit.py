@@ -34,6 +34,9 @@ already placed.
     python3 tools/fleet/site_fit.py --selftest       # two simulated cameras over the 396 x 168 cm table
     python3 tools/fleet/site_fit.py --obs obs.json --out tagcal/     # a real fit: camera models + site_fit.json
 """
+VERSION = "site-fit-2026-11-11e16"   # e16 (Pi audit): the background refit after a run runs at nice 19 and one at a time
+                                     # (start_refit_bg; MIRLT_REFIT_NICE=0 / MIRLT_REFIT_ONE=0 as before). No version
+                                     # string before
 import argparse
 import json
 import math
@@ -1419,18 +1422,47 @@ def refit_status(out):
     return st
 
 
+REFIT_NICE = os.environ.get("MIRLT_REFIT_NICE", "1") != "0"   # (e16) the background refit at the lowest priority
+REFIT_ONE = os.environ.get("MIRLT_REFIT_ONE", "1") != "0"     # (e16) one background refit at a time
+REFIT_LOCK = "refit_bg.pid"
+
+
 def start_refit_bg(obs_path, tag_obs_csv, out, python=None, cwd=None):
-    """Starts the refit as its own process (it keeps going if the caller ends); returns its status."""
+    """Starts the refit as its own process (it keeps going if the caller ends); returns its status.
+    (e16, Pi audit: Jay-Sun's 10 Nov evening runs, 6-7 min apart, each started a refit of 3-13 min; they piled up,
+    about two cores of CPU no run program accounted for, while the next runs drove.) It runs at the lowest priority
+    (nice 19: it takes only CPU the run leaves; MIRLT_REFIT_NICE=0 as before), and one at a time: while one is still
+    running a new one is not started, said in its status ("skipped"; Mission Control's Refit from the last run can start
+    it later; MIRLT_REFIT_ONE=0 as before)."""
+    import shutil
     import subprocess
     import time as _t
     os.makedirs(out, exist_ok=True)
+    lock = os.path.join(os.path.dirname(os.path.abspath(obs_path)), REFIT_LOCK)
+    if REFIT_ONE:
+        try:
+            with open(lock) as f:
+                busy = int(f.read().strip() or 0)
+        except (OSError, ValueError):
+            busy = 0
+        if busy and _pid_alive(busy):
+            _write_status(out, state="skipped", pid=None, started=None, obs=obs_path, reads=tag_obs_csv,
+                          why="another run's refit (process %d) is still running: not started, so two never compete "
+                              "with a run; Refit from the last run starts it later" % busy)
+            return refit_status(out)
     t0 = round(_t.time(), 1)
     _write_status(out, state="running", pid=None, started=t0, obs=obs_path, reads=tag_obs_csv)
     log = open(os.path.join(out, "refit.txt"), "w")
-    p = subprocess.Popen([python or sys.executable, os.path.abspath(__file__), "--obs", obs_path, "--refit", tag_obs_csv,
-                          "--out", out, "--status"], stdout=log, stderr=subprocess.STDOUT, cwd=cwd or HERE,
-                         start_new_session=True)
+    nice = ["nice", "-n", "19"] if (REFIT_NICE and shutil.which("nice")) else []
+    p = subprocess.Popen(nice + [python or sys.executable, os.path.abspath(__file__), "--obs", obs_path, "--refit",
+                                 tag_obs_csv, "--out", out, "--status"], stdout=log, stderr=subprocess.STDOUT,
+                         cwd=cwd or HERE, start_new_session=True)
     log.close()
+    try:
+        with open(lock, "w") as f:
+            f.write(str(p.pid))
+    except OSError:
+        pass
     st = refit_status(out)
     if st.get("state") == "running" and not st.get("pid"):
         _write_status(out, state="running", pid=p.pid, started=t0, obs=obs_path, reads=tag_obs_csv)

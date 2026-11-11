@@ -67,3 +67,21 @@ def test_9b_a_standing_robots_doubt_does_not_grow_with_its_fixs_age():
         assert c.unc(r) > 20.0                             # the switch: as before
     finally:
         FC.STAND_UNC = old
+
+
+def test_background_refits_run_one_at_a_time_at_the_lowest_priority(tmp_path, monkeypatch):
+    import site_fit as SF
+    calls = []
+
+    class P:
+        pid = os.getpid()                   # a live process stands for the running refit
+
+    import subprocess
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: (calls.append(cmd), P())[1])
+    obs = tmp_path / "tagcal" / "obs.json"
+    obs.parent.mkdir()
+    obs.write_text("{}")
+    st = SF.start_refit_bg(str(obs), str(tmp_path / "tag_obs.csv"), str(tmp_path / "r1"))
+    assert calls and calls[0][:3] == ["nice", "-n", "19"] and st["state"] in ("running", "failed")
+    st2 = SF.start_refit_bg(str(obs), str(tmp_path / "tag_obs.csv"), str(tmp_path / "r2"))
+    assert st2["state"] == "skipped" and len(calls) == 1

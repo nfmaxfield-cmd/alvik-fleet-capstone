@@ -28,6 +28,12 @@ import math
 import os
 import sys
 
+VERSION = "heat-tracker-2026-11-11e16"   # e16: a session with cpu.csv but no perf.csv (missions with frame saving off,
+                                         # e.g. the school's 10 Nov 19:03 / 19:19) is tracked: pictures a second from the
+                                         # tag bridge's detect_times.csv when there is one, else "-" (temperature and
+                                         # throttling still counted). Before: no version string (it stopped on a
+                                         # missing perf.csv)
+
 import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -69,10 +75,29 @@ def spearman(a, b):
     return float(ra.corr(rb))
 
 
+def perf_of(folder):
+    """(e16) perf.csv; else the pictures a second from the tag bridge's detect_times.csv (one row per picture, the
+    overhead camera; ages unknown); else an empty table (pictures a second shown as "-")."""
+    pf = os.path.join(folder, "perf.csv")
+    if os.path.exists(pf):
+        return pd.read_csv(pf)
+    for dtp in (os.path.join(folder, "bridge", "detect_times.csv"), os.path.join(folder, "detect_times.csv")):
+        if os.path.exists(dtp):
+            d = pd.read_csv(dtp)
+            d = d[d["cam"] == "overhead"] if "cam" in d else d
+            if len(d):
+                t2 = (d["t"] // 2.0) * 2.0
+                g = t2.value_counts().sort_index()
+                return pd.DataFrame({"t": g.index + 1.0, "fps_handled": g.values / 2.0, "age_max_s": float("nan"),
+                                     "age_mean_s": float("nan")})
+    return pd.DataFrame({"t": [0.0], "fps_handled": [float("nan")], "age_max_s": [float("nan")],
+                         "age_mean_s": [float("nan")]})
+
+
 def summarise(folder, cooling="none (bare Pi)"):
     name = os.path.basename(os.path.normpath(folder))
     c = pd.read_csv(os.path.join(folder, "cpu.csv"))
-    p = pd.read_csv(os.path.join(folder, "perf.csv"))
+    p = perf_of(folder)
     c = c.dropna(subset=["temp_c"]).sort_values("t")
     p = p.sort_values("t")
     j = pd.merge_asof(c, p[["t", "fps_handled", "age_max_s", "age_mean_s"]], on="t", direction="nearest",

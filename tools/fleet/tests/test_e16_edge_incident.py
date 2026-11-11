@@ -317,3 +317,21 @@ def test_missions_back_out_along_the_track_as_far_as_the_rule_needs(monkeypatch)
     need = SR.clearance_cm(SR.CAM_SIGMA_CM, 5.0, "lights", stops_here=True)
     assert tgt["cleared"] and abs((121.92 - tgt["end"][1]) - need) < 1.01 and logs[0][0] == "track_back"
     assert cls.track_back(stub, b, 60.0, 119.0, 90.0, [(60.0, 110.0)]) is None        # a robot on its track
+
+
+# ------------------------------------------------------------------------------------------------------- 6a
+def test_every_robot_held_never_ends_the_run_by_default(monkeypatch):
+    import test_experiments as TE
+    import run_plan as RP
+    monkeypatch.setattr(RP, "HELD_NEVER_END", True)
+    c = TE._coord()
+    for _ in range(5):                                   # held again and again: no cap
+        c.retire(c.bots["Bravo"], "nothing heard", kind="silent")
+        c.retire(c.bots["Alpha"], "nothing heard", kind="silent")
+        assert not c.abort
+    c.t_run = RP.now() - 500.0
+    for b in c.bots.values():
+        b.out_t = RP.now() - 400.0                       # far past the old 90 s wait
+    c.planning = None
+    c.rejoin_watch()
+    assert not c.abort and any("never ends by itself" in s for s in c.said)

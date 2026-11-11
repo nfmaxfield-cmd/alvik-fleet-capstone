@@ -26,8 +26,19 @@ pictures a second (-1 to +1; near 0 = no link, or temperature barely varied).
 | 20261109-180738-visit-robots | school Pi: case cover on, no fan or heatsink | 84.7 / 86.2 | 8 | 0 / 76 / 24 % | - / 13.5 / 13.5 | 0.12 | -0.02 |
 | 20261109-182111-visit-robots | school Pi: case cover on, no fan or heatsink | 84.7 / 86.2 | 9 | 2 / 70 / 28 % | 15.0 / 14.0 / 13.5 | 0.12 | -0.23 |
 | 20261109-183445-visit-robots | school Pi: case cover on, no fan or heatsink | 84.7 / 86.2 | 8 | 0 / 74 / 26 % | - / 14.0 / 13.5 | 0.12 | 0.00 |
+| 20261110-182629-mission | none, case cover on (school Pi) | 84.2 / 85.7 | 18 | 11 / 77 / 12 % | 10.5 / 10.0 / 9.0 | 0.15 | 0.44 |
+| 20261110-185402-visit-robots | none, case cover on (school Pi) | 83.8 / 85.7 | 3 | 12 / 88 / 0 % | 0.0 / 9.5 / - | 1.27 | 0.49 |
+| 20261110-190334-visit-robots | none, case cover off (school Pi) | 81.3 / 83.8 | 9 | 84 / 16 / 0 % | - / - / - | - | - |
+| 20261110-191945-visit-robots | none, case cover off (school Pi) | 81.8 / 83.3 | 10 | 72 / 28 / 0 % | - / - / - | - | - |
 
 ## Readings (newest first)
+- **20261110-182629, 185402 (cover on) and 190334, 191945 (cover off), the school Pi's evening missions, one robot
+  (added 11 Nov by e16; the tracker now reads runs that have cpu.csv but no perf.csv):** cover on, it was throttled
+  (clock capped now) 12 % of the 18:26 run and sat at the soft limit 77 %, median 84.2 C; cover off, 0 % throttled and
+  72 % with no flag, median 81.8 C. The runs with frame saving on (18:26, 18:54) also had the recorder stall (0 % CPU
+  for 2-14 s) 45 and 6 times. Two kinds of low clock: the kernel's own clock (freq_mhz) fell to 600-900 MHz only during
+  those stalls, all cores idle; the firmware's real clock (arm_mhz) sat at 600 MHz with "throttled now" (0xe0006) in the
+  18:26 run at 84-86 C, which is heat (e16 report). 19:03 / 19:19 had no perf.csv (frame saving off): pictures a second shown as "-".
 - **20261109-161714 ... 183445 (Jay-Sun's 7 school Visit-points tours, 16:17-18:43, one robot, school Pi with its case
   cover on, no fan or heatsink):** the Pi ran hot the whole time: median 83.8-84.7 C, peak 86.2 C, every minute of every
   tour at 80 C or over. It sat at the firmware's soft temperature limit 70-85 % of the time and was throttled (clock
