@@ -61,7 +61,7 @@ for p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recognit
 
 import numpy as np   # noqa: E402
 
-VERSION = "2026-11-11e15"   # e15 (school 10 Nov 18:54): heading_check_patient (a lost tag: tried again where it reads, standing and reading longer from its measured fix interval; then the remembered turn; then the finding stroke; else "unknown"); the calibration's heading check and heading watch remember each tag's turn (tag_heading_store); a lost tag no longer ends the calibration (measured again); MIRLT_HEADING_CHECK=once the old check; MIRLT_SIM_HC_LOSS the simulator's lost tag. Before: "2026-11-10e14d"   # e14d: a robot brought back is bound by its tag's first read at the motion detector's spot (rehearsal c7f: the pin check wiggle at a dim border ended the run). the "while parking" end fixed at its root: staging at the start parked with park("stage"), which set _ending for the whole run (school 16:22 and 17:02); now only the run's own end parks as ending, and it is cleared after. The pool weights each run's legs by that run's own noise and drops outlier legs (school 17:02: wheel_scale 0.73 +- 0.20). e14c (17:2x, Nick at school): a dark picture holds the robot (no legs, no recovery drives, no wiggles, no end, no sleep) until the camera has adjusted (dark_watch); --sim-blackout. e14b (10 Nov 16:40-17:00): calibration evidence pooled across runs (calib_pool: every measured leg of the robot on this site, finished or not, weighted by age and battery; a run starts from the pooled values, measures only what is still uncertain, saves once the pooled +- is no wider than one finished run's; MIRLT_CALIB_POOL=0 each run on its own); parking after the tour never gives up (school 16:22: MIRLT_PARK_GIVEUP=1 the e13 end); a recovery with no reliable spot heads for the readability map; the setup order said at the start. e14 (10 Nov): every robot found by its own small move at the start (motion_find: anywhere on the table, with or without a tag that reads; one found where its tag does not read drives itself back, never giving up; MIRLT_CAMERA_DISCOVERY=off the wiggle alone); calibration on any surface (its own spots inside the readable area when the site has no proven stickers: --spots / MIRLT_CALIB_SPOTS / calibration.spots); the readability evidence chosen and kept by light and tag (readmap_store; MIRLT_READMAP_STORE=0 the old readmap.json); a tour point whose tag was just lost goes to the end of the tour once, then is skipped (MIRLT_RETRY_LOST=again the old aim-again); the battery floor from the site / Mission Control said at the start; LOW-BATTERY CALIBRATION under 40 %; --sim-dark, --sim-extra-camera, --sim-light, --sim-start X,Y. VERSION_10I = "2026-11-10i"   # 11-10i: the binding looks over longer windows and waits for a fresh read after each wiggle half (a tag that reads only now and then, school 15:00). 11-10h: the never-give-up hold makes find-me wiggles (when its turning circle + error is clear) so the motion detector can find it and the recovery bring it back (Nick 14:32: motion, not hands). 11-10e13 (e13): never give up (the recovery drives blind while its bubble + stop cannot reach the edge margin, no 8 cm / 40 cm caps: MIRLT_BLIND_RULE=cap; a lost tag holds with no time limit, asks for a hand; cam_pose_sure and every unguarded camera pose wait the same way; MIRLT_CALIB_GIVEUP=1 the 30 s end), readability per tag, TURN DID NOT SETTLE, stop resent after the curve phase, the motion detector on in its bridge; the camera check before binding (camera_feed: no pictures is said as that, never the robot or tag); tracked for the sleep after a run.
+VERSION = "2026-11-11e16"   # e16 (11 Nov, school 10 Nov 17:02: wheel_scale 0.73 +- 0.20 refused while the run's own drives said 0.988): a leg whose "started" report never came back (UDP) took its END pose as its start, so its own length read 0 cm against the camera's 44.5 cm; that one leg tilted the scale + coast fit. Such a leg is now marked (start_missing) and kept out of the fit and the pool, and the fit leaves out any drive whose own count missed half of what the camera saw (fit_values; the 17:02 legs now give 0.970 +- 0.004 with 0.85 cm coast). Before: "2026-11-11e15"   # e15 (school 10 Nov 18:54): heading_check_patient (a lost tag: tried again where it reads, standing and reading longer from its measured fix interval; then the remembered turn; then the finding stroke; else "unknown"); the calibration's heading check and heading watch remember each tag's turn (tag_heading_store); a lost tag no longer ends the calibration (measured again); MIRLT_HEADING_CHECK=once the old check; MIRLT_SIM_HC_LOSS the simulator's lost tag. Before: "2026-11-10e14d"   # e14d: a robot brought back is bound by its tag's first read at the motion detector's spot (rehearsal c7f: the pin check wiggle at a dim border ended the run). the "while parking" end fixed at its root: staging at the start parked with park("stage"), which set _ending for the whole run (school 16:22 and 17:02); now only the run's own end parks as ending, and it is cleared after. The pool weights each run's legs by that run's own noise and drops outlier legs (school 17:02: wheel_scale 0.73 +- 0.20). e14c (17:2x, Nick at school): a dark picture holds the robot (no legs, no recovery drives, no wiggles, no end, no sleep) until the camera has adjusted (dark_watch); --sim-blackout. e14b (10 Nov 16:40-17:00): calibration evidence pooled across runs (calib_pool: every measured leg of the robot on this site, finished or not, weighted by age and battery; a run starts from the pooled values, measures only what is still uncertain, saves once the pooled +- is no wider than one finished run's; MIRLT_CALIB_POOL=0 each run on its own); parking after the tour never gives up (school 16:22: MIRLT_PARK_GIVEUP=1 the e13 end); a recovery with no reliable spot heads for the readability map; the setup order said at the start. e14 (10 Nov): every robot found by its own small move at the start (motion_find: anywhere on the table, with or without a tag that reads; one found where its tag does not read drives itself back, never giving up; MIRLT_CAMERA_DISCOVERY=off the wiggle alone); calibration on any surface (its own spots inside the readable area when the site has no proven stickers: --spots / MIRLT_CALIB_SPOTS / calibration.spots); the readability evidence chosen and kept by light and tag (readmap_store; MIRLT_READMAP_STORE=0 the old readmap.json); a tour point whose tag was just lost goes to the end of the tour once, then is skipped (MIRLT_RETRY_LOST=again the old aim-again); the battery floor from the site / Mission Control said at the start; LOW-BATTERY CALIBRATION under 40 %; --sim-dark, --sim-extra-camera, --sim-light, --sim-start X,Y. VERSION_10I = "2026-11-10i"   # 11-10i: the binding looks over longer windows and waits for a fresh read after each wiggle half (a tag that reads only now and then, school 15:00). 11-10h: the never-give-up hold makes find-me wiggles (when its turning circle + error is clear) so the motion detector can find it and the recovery bring it back (Nick 14:32: motion, not hands). 11-10e13 (e13): never give up (the recovery drives blind while its bubble + stop cannot reach the edge margin, no 8 cm / 40 cm caps: MIRLT_BLIND_RULE=cap; a lost tag holds with no time limit, asks for a hand; cam_pose_sure and every unguarded camera pose wait the same way; MIRLT_CALIB_GIVEUP=1 the 30 s end), readability per tag, TURN DID NOT SETTLE, stop resent after the curve phase, the motion detector on in its bridge; the camera check before binding (camera_feed: no pictures is said as that, never the robot or tag); tracked for the sleep after a run.
 VERSION_10G = "2026-11-10g"     # 11-10g: a standing robot is never given up for sparse tag reads: it is measured over longer windows (Nick 13:34; dim light). 11-10f: the start waits for the camera fix after the wiggle (dim light, ~7 fps: refused at once, school 13:25). 11-10e: a run ended for poor tag reads DOES try to park again (Nick 12:48: never give up on getting back to where it is seen); it drives only with a camera fix (cam_pose_sure waits for one). 11-10d: no crash parking with no camera fix (RunEnd, caught: "Could not park"). 11-10c: Phase A waits for the camera fix instead of crashing on None (school 12:35). 11-10b (e12, Nick 10 Nov): the curve phase (phase R: constant-curvature arcs left and right at free roam's radii and two speeds, fitted from the camera, arc_k_scale / arc_d_scale saved when they agree; --arc-phase auto/on/off), points in your order (--visit-order), the proven workspace for the tours' room, the camera self-check at the start. VERSION_10A was:
 VERSION_10A = "2026-11-10a"     # 11-10a: a leftover camera reader holding port 5011 is stopped first (stale_bridge.py). 11-05i (9 Nov, school): a tripped stop mid-tour crashed the run (TypeError: ev() got two
                              # values for kind); the trip event now says stop_kind. VERSION_H was:
@@ -696,7 +696,11 @@ class Robot:
             elif res in ("done", "failed", "refused"):
                 out.update(result=res, info=r.group(9), end=pose)
                 if out["start"] is None:
+                    # (e16, school 17:02) the "started" report was lost: the end pose stands in for the start (as before,
+                    # for the odometry paths), and the leg is marked so it is never taken as a measurement of the wheels
+                    # or the gyro (its own length / turn would read 0)
                     out["start"] = pose
+                    out["start_missing"] = True
                 return out
         out["result"] = "timeout"
         out["diag"] = self.leg_diag(k, lid)        # (e13) what did come back: FOLLOW rows, LEG records, its pose
@@ -1548,6 +1552,10 @@ def stop_overrun(rows, w, ws0):
             "overrun_n": {("%g" % v): len(c) for v, c in by.items()}}
 
 
+ROLL_OWN_MIN = 0.5       # (e16) a drive whose own count is under this share of the camera's length is not a measurement
+                         # of the wheels. Not a tuning: real legs sit at 0.97-1.03 of the camera's; a lost report gives 0
+
+
 def fit_values(turn_rows, still_rows, roll_rows, old, overrun_rows=None):
     """From phase A's measured legs: wheel_scale, gyro_scale, gyro_drift_dps with 1-sigma SEs.
     turn_rows: [(belief dtheta deg, dt s, camera dtheta deg)]; still_rows: [(belief dtheta, dt)];
@@ -1573,6 +1581,13 @@ def fit_values(turn_rows, still_rows, roll_rows, old, overrun_rows=None):
         cov = np.linalg.inv(X.T @ X) * s2
         out.update(gyro_scale=float(beta[0]), gyro_drift_dps=float(beta[1]), se_gyro_scale=float(math.sqrt(cov[0, 0])),
                    se_gyro_drift_dps=float(math.sqrt(cov[1, 1])), rms_turn_deg=float(math.sqrt(np.mean(res ** 2))))
+    # (e16, school 17:02) a drive whose own count is under half what the camera saw was not measured by the robot (a
+    # lost "started" report gives 0 cm): one such leg took the fit to 0.73 +- 0.20. Left out, and counted
+    if roll_rows:
+        ok_ = [r for r in roll_rows if r[0] / ws0 >= ROLL_OWN_MIN * r[1]]
+        out["rolls_unmeasured"] = len(roll_rows) - len(ok_)
+        roll_rows = ok_
+        out["n_rolls"] = len(roll_rows)
     if roll_rows:
         # camera length = w x counted + coast: the wheels still turn a little after the leg's `done` record (the robot
         # brakes after it), the same few mm on every leg; with legs of several lengths both are found (Claude's model)
@@ -2315,6 +2330,7 @@ class CalibRun:
         self.leg_n += 1
         b0, b1 = r["start"], r["end"]
         no_pose = b0 is None or b1 is None
+        start_missing = bool(r.get("start_missing"))    # (e16) its own motion is not known: not a measurement
         if no_pose:
             b0 = b1 = (0, 0, 0, 0)             # (e13) written as blanks below: no pose came back, not a pose of 0
         dt_ = (b1[3] - b0[3]) / 1000.0
@@ -2346,7 +2362,12 @@ class CalibRun:
         d = dict(phase=phase, tour=tour, kind=kind, label=label, value=value, result=r["result"], dt=dt_,
                  cam0=c0, cam1=c1, bel0=b0, bel1=b1, cam_len=cam_len, bel_len=bel_len, cam_turn=cam_turn,
                  bel_turn=bel_turn, along=along, cross=cross, turn_err=terr, miss=miss, corrected=corrected,
-                 speed=getattr(self, "_speed", None), t0=t0, interrupted=bool(getattr(self, "_lost_stop", False)))
+                 speed=getattr(self, "_speed", None), t0=t0, interrupted=bool(getattr(self, "_lost_stop", False)),
+                 bel_ok=not (no_pose or start_missing))
+        if start_missing:
+            self.ev("leg_start_missing", n=self.leg_n, kind=kind, label=label,
+                    words="the robot's 'started' report for this leg never came: its own motion is unknown, so the leg "
+                          "is left out of the fit")
         self.rows.append(d)
         return d
 
@@ -2712,7 +2733,8 @@ class CalibRun:
 
     def phase_b(self):
         self.set_status(phase="B", words="Phase B: fitting wheel_scale, gyro_scale, gyro_drift_dps")
-        A = [r for r in self.rows if r["phase"] == "A" and not r.get("interrupted")]   # (11-05c) interrupted legs out
+        A = [r for r in self.rows if r["phase"] == "A" and not r.get("interrupted")   # (11-05c) interrupted legs out
+             and r.get("bel_ok", True)]          # (e16) a leg whose own motion is unknown (lost "started") out
         turns = [_unwrap_turn(r) for r in A if r["kind"] == "turn" and r["result"] == "done" and abs(r["value"]) >= 30]
         still = [(r["bel_turn"], r["dt"]) for r in A if r["kind"] == "still"]
         rolls = [(r["bel_len"], r["cam_len"]) for r in A if r["kind"] == "go" and r["result"] == "done"

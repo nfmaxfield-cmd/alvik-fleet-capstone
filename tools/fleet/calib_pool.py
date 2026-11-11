@@ -38,7 +38,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-VERSION = "calib-pool-2026-11-10e14b"   # e14b: each run weighted by its own noise, outlier legs dropped (school 17:02)
+VERSION = "calib-pool-2026-11-11e16"   # e16: a leg whose own motion is unknown (its "started" report lost, bel_ok False; or a drive whose own count is under half the camera's) is never pooled (school 17:02: the real cause of 0.73 +- 0.20). Before: "calib-pool-2026-11-10e14b"   # e14b: each run weighted by its own noise, outlier legs dropped (school 17:02)
 FILE = "calib_pool.json"
 AGE_HALF_DAYS = 7.0      # CHOSEN: a leg counts half after a week (tyres wear, a gyro warms differently; the school's
                          # calibrations a day apart agree to about 0.003 in wheel_scale). DOE row (e14)
@@ -99,6 +99,8 @@ def raw_rows(rows, values_at, battery_at, session, unwrap):
     for r in rows:
         if r.get("interrupted") or r.get("cam0") is None or r.get("cam1") is None:
             continue
+        if not r.get("bel_ok", True):
+            continue                       # (e16) its "started" report lost: the robot's own motion is unknown
         t = float(r.get("t0") or time.time())
         v = values_at(t)
         gs, gd, ws = float(v["gyro_scale"]), float(v["gyro_drift_dps"]), float(v["wheel_scale"])
@@ -111,6 +113,8 @@ def raw_rows(rows, values_at, battery_at, session, unwrap):
             out.append(dict(base, kind="still", raw=(float(r["bel_turn"]) + gd * float(r["dt"])) / gs,
                             dt=float(r["dt"]), cam=0.0))
         elif r.get("kind") == "go" and r.get("result") == "done" and float(r["value"]) >= MIN_ROLL_CM:
+            if float(r["bel_len"]) / ws < 0.5 * float(r["cam_len"]):
+                continue                   # (e16) not measured by the robot (calib_run.ROLL_OWN_MIN)
             out.append(dict(base, kind="roll", counted=float(r["bel_len"]) / ws, cam=float(r["cam_len"])))
     return out
 
