@@ -97,7 +97,7 @@ NEEDS A HAND: pulsing red ring on the map, red card, the alert at the top of the
 (The needs-a-hand line was written into the practice run's file by hand for this picture.)
 
 ![safety](../screenshots/2026-11-12/mc-feature-table-page-settings-drawer-safety-group.png)
-Settings: "This run" (6 lines) and the Safety group as one line, "49 switches, all decided automatically", opening
+Settings: "This run" (6 lines) and the Safety group as one line, "all switches (49 when the picture was taken), all decided automatically", opening
 into every switch with auto / old way and a search.
 
 | Nick's decision | What was built |
@@ -226,6 +226,9 @@ with fakes only.
 - The 2 xfailed are the hard simulator's known regressions. The skip count fell by one because a test that skips
   without a model now runs (unchanged here).
 - New tests: `tools/fleet/tests/test_mc_build_nov12.py`, 23.
+- e19 landed three more commits (6f040cd, 6c5b5a0, 374cbc3) while the suites ran; rebased again cleanly onto 374cbc3
+  and re-ran this build's tests with the e19, tag-free, school-engine, Start-screen and Mission Control suites:
+  124 passed, 1 skipped. The full suites were not run a third time.
 
 ## Appendix B: update the home Pi and open the new page
 
