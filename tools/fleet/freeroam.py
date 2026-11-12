@@ -882,6 +882,17 @@ class Runner:
             time.sleep(max(0.0, TICK_S - (self.AC.now() - now)))
         say("\nThe run ends: %s." % why)
         c.event(None, "end", why)
+        if os.environ.get("MIRLT_ARC_SAVE_AT_END", "1") != "0":
+            # (e17, item 6: the 4-hour run ended on its time cap with 126-176 curve fits a robot, consistent, and
+            # nothing saved: arc_save ran only when a robot parked at its battery floor) the same agreement rule at
+            # any end, for every robot still in the run (one that parked has saved already)
+            for r in c.R.values():
+                if r.mode not in ("out", "gone"):
+                    try:
+                        c.arc_save(r)
+                    except Exception:  # noqa: BLE001
+                        pass
+            time.sleep(0.3)
         return why
 
     def write_state(self, why):

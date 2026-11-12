@@ -41,6 +41,7 @@ class Rig:
         self.q = []
         self.t = 0.0
         self.steps, self.cur, self.done_ids = {}, {}, {}     # each robot's step queue, the step it runs
+        self.scale = {}              # name -> fspd scale of the running drive
         self.fw_refused = {n: 0 for n in self.names}
         self.track = {}              # name -> [(t, x, y, h)] each change of its true pose
         self.c.t = 0.0
@@ -70,12 +71,18 @@ class Rig:
             else:
                 self.off[name][0] += 0.35 * (fx - ox)
                 self.off[name][1] += 0.35 * (fy - oy)
-        elif p[0] == "fs" and len(p) >= 4 and p[2] in ("T", "D"):
+        elif p[0] == "fs" and len(p) >= 4 and p[2] in ("T", "D", "R"):
             sid = int(p[1])
             if any(q[0] == sid for q in self.steps.setdefault(name, [])) or sid in self.done_ids.setdefault(name, set()):
                 return                                 # a resend
             self.steps[name].append((sid, p))
             self.c.on_step(name, sid, "queued")
+        elif p[0] in ("fspd", "fsteer", "farc"):           # the running drive changed (the firmware acks: FSPD)
+            if p[0] == "fspd":
+                self.scale[name] = float(p[1])
+            elif p[0] == "farc" and self.cur.get(name) is not None:
+                self.cur[name]["k"] = float(p[1])
+            self.c.on_fspd(name)
         elif p[0] == "halt":
             for sid, _ in self.steps.get(name, []):
                 self.c.on_step(name, sid, "dropped", "halt")
@@ -88,12 +95,16 @@ class Rig:
         if not q:
             return
         sid, p = q.pop(0)
+        self.scale[name] = 1.0                                # every step starts at its own speed (follow.h)
         if p[2] == "T":
             h1 = float(p[3])
             turn = FC.wrap180(h1 - self.own(name)[2])        # the truth turns by what its own heading must turn
             th = self.truth[name][2]
             self.cur[name] = dict(kind="T", sid=sid, t0=self.t, t1=self.t + 0.25 + abs(turn) / 75.0, h0=th,
                                   h1=th + turn)
+        elif p[2] == "R":                                     # a curve piece: x y h k L v (driven as an arc)
+            k, L, v = float(p[6]), float(p[7]), float(p[8])
+            self.cur[name] = dict(kind="D", sid=sid, L=L, v=max(0.5, v), done=0.0, rev=False, k=k)
         else:
             x0, y0, x1, y1, h, v = (float(q_) for q_ in p[3:9])
             rev = len(p) > 9 and p[9] == "1"
@@ -136,12 +147,14 @@ class Rig:
                         self.done_ids.setdefault(n, set()).add(cu["sid"])
                         self.c.on_step(n, cu["sid"], "done")
                 elif cu is not None:
-                    step = min(cu["v"] * dt, cu["L"] - cu["done"])
+                    step = min(cu["v"] * self.scale.get(n, 1.0) * dt, cu["L"] - cu["done"])
                     th = math.radians(self.truth[n][2])
                     sg = -1.0 if cu["rev"] else 1.0
                     self.truth[n][0] += sg * step * math.cos(th)
                     self.truth[n][1] += sg * step * math.sin(th)
                     cu["done"] += step
+                    if cu.get("k"):
+                        self.truth[n][2] = FC.wrap180(self.truth[n][2] + math.degrees(cu["k"] * step))
                     if cu["done"] >= cu["L"] - 1e-6:
                         self.cur.pop(n)
                         self.done_ids.setdefault(n, set()).add(cu["sid"])

@@ -92,3 +92,27 @@ The recorder is left running with the new defaults (no video saved). Nothing els
 - `Stopped: no overhead camera found by its name`: the camera is not plugged in or not seen. Check the USB cable.
 
 What it does not do: drive any robot, change any setting on a robot, or delete anything.
+
+## (e17) Comparing the core layouts
+
+Which of the Pi's 4 cores each program uses is now a setting, `MIRLT_CORE_LAYOUT`:
+
+| Layout | Recorder | Planner (free roam, run_plan, mission_run) | Camera bridge |
+|---|---|---|---|
+| A (as up to 11 Nov) | cores 0-1 (one camera: 1) | 2-3 | 2-3 (shared with the planner) |
+| **B (the default now: Claude's guess)** | 0 | 1 | 2-3 |
+| C | any | any | any |
+
+To measure all three one after the other (about 3 x the minutes you give; nothing moves):
+
+```
+./run-fleet-pi.sh bench 10 layouts
+```
+
+The table at the end adds: pictures the real camera's bridge handled a second, the delay from picture to result at the
+bridge, and the practice run's watchdog stops. Paste it into the chat. To use a layout for every run until the Pi is
+restarted, type (for example) `export MIRLT_CORE_LAYOUT=A` before `./run-fleet-pi.sh ...`.
+
+Note: the bench's real-camera bridge is the roof-tag bridge (school). At home (no roof tags) the bench measures the
+practice run only; there the decisive numbers come from one short free roam per layout (`cpu.csv`, `camera.csv`'s
+delay, the watchdog lines).

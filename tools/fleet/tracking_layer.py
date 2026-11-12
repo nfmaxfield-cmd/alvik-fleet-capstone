@@ -262,6 +262,8 @@ class TrackingLayer:
                 jump = math.hypot(dx, dy) > OWN_JUMP_CM + OWN_MAX_CMS * dt
             if jump:
                 tr.own = [(a, b + dx, c + dy, d, e) for a, b, c, d, e in tr.own]
+                if tr.elim is not None and tr.elim.get("own0") is not None:     # (e17) the probation's start too
+                    tr.elim["own0"] = (tr.elim["own0"][0] + dx, tr.elim["own0"][1] + dy)
                 self.counts["own_resets"] = self.counts.get("own_resets", 0) + 1
                 if tr.sure is not None:     # (e17, c) a re-set is a measured correction: how far its own pose had gone
                     self.record(name, t, math.hypot(dx, dy), self._travel(tr, tr.sure[0], t))
@@ -727,22 +729,23 @@ class TrackingLayer:
             if od < ELIM_VERIFY_CM:
                 continue
             cams = [c for c in tr.cam if c[0] > e["t"] + 0.05]
-            if cams and math.hypot(cams[-1][1] - e["x"], cams[-1][2] - e["y"]) >= ELIM_FOLLOW * od:
+            moved = math.hypot(cams[-1][1] - e["x"], cams[-1][2] - e["y"]) if cams else 0.0
+            if cams and moved >= ELIM_FOLLOW * od:
                 tr.elim = None
                 self.counts["elim_confirmed"] += 1
                 self.log("tracking", dict(t=round(t, 2), robot=n, what="elimination confirmed",
                                           why="the camera followed its own drive of %.1f cm" % od))
                 continue
-            if tr.seen_t is not None and t - tr.seen_t <= self.unacc_after(n) and cams:
-                continue                     # still followed, not far enough yet to tell
+            if od < 2.0 * ELIM_VERIFY_CM and tr.seen_t is not None and t - tr.seen_t <= self.unacc_after(n):
+                continue                     # not far enough yet to tell (a still spot named each picture is no proof)
             tr.elim = None
             tr.sure = None
             self.not_robot.append(dict(x=e["x"], y=e["y"], t=t))
             self.revoked.append(dict(robot=n, t=t, x=e["x"], y=e["y"]))
             self.counts["elim_revoked"] += 1
             self.log("tracking", dict(t=round(t, 2), robot=n, what="elimination revoked",
-                                      why="the spot at %.1f, %.1f stayed while its own wheels drove %.1f cm: not it"
-                                      % (e["x"], e["y"], od)))
+                                      why="the spot at %.1f, %.1f moved %.1f cm while its own wheels drove %.1f cm: "
+                                          "not it" % (e["x"], e["y"], moved, od)))
 
     def take_revoked(self):
         o = self.revoked

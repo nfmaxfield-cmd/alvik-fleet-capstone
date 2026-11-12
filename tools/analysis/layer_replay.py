@@ -33,7 +33,8 @@ def _own_interp(rows, t):
     return (t, a[1] + f * (b[1] - a[1]), a[2] + f * (b[2] - a[2]), b[3], b[4])
 
 
-def replay(folder, lag_s=0.44, watch=False, gap_s=3.0, e17=True, t_from=None, t_to=None, at_pictures=False):
+def replay(folder, lag_s=0.44, watch=False, gap_s=3.0, e17=True, t_from=None, t_to=None, at_pictures=False,
+           keep_times=False):
     """(e17) e17=False: the layer as before e17 (no elimination, the fixed gate). Also returns, per robot, the
     longest stretch with the bridge seeing it but the layer naming nothing, how many fixes the layer named under
     another robot's bridge name (the bridge's own names as a check: they can be wrong too), and the e17 events."""
@@ -99,7 +100,8 @@ def replay(folder, lag_s=0.44, watch=False, gap_s=3.0, e17=True, t_from=None, t_
             if b - a > best[0]:
                 best = (b - a, a)
         blind[n] = dict(longest_s=round(best[0], 1), from_t=round(best[1], 2) if best[1] else None)
-    return dict(layer=TL.VERSION, e17=e17, own_resets=TL.OWN_RESETS, gaps=gaps,
+    extra = dict(named_t=got, bridge_t=seen_by_bridge) if keep_times else {}
+    return dict(extra, layer=TL.VERSION, e17=e17, own_resets=TL.OWN_RESETS, gaps=gaps,
                 counts={k: v for k, v in L.counts.items() if v}, fixes={n: len(v) for n, v in got.items()},
                 bridge_fixes={n: len(v) for n, v in seen_by_bridge.items()}, wrong_name=wrong, unnamed_longest=blind,
                 taken=taken, drift=L.summary().get("drift"),

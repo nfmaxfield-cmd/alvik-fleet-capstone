@@ -1504,7 +1504,22 @@ class Controller:
                 return tuple(t_[:2]), "back into the area the camera reads"
         b = getattr(self.rect, "board", None) or self.rect
         x0, y0, x1, y1 = (float(v) for v in tuple(b)[:4])
-        return ((x0 + x1) / 2.0, (y0 + y1) / 2.0), "toward the middle of the board"
+        mid = ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+        if edge_dist(self.rect, *p) >= EDGE_CC + CREEP_MAX_CM:
+            # already well clear of every edge: safety now means room from the others (several robots creeping to
+            # the middle would crowd it): away from the nearest robot, kept clear of the edges
+            near = [(math.dist(p, self.pos(o)), self.pos(o)) for o in self.R.values()
+                    if o is not r and self.pos(o) is not None and o.mode != "gone"]
+            if near:
+                d, q = min(near)
+                if d > 0.5:
+                    tx = p[0] + (p[0] - q[0]) / d * 20.0
+                    ty = p[1] + (p[1] - q[1]) / d * 20.0
+                    m = EDGE_CC + CREEP_MAX_CM
+                    return (min(max(tx, x0 + m), x1 - m), min(max(ty, y0 + m), y1 - m)), \
+                        "away from %s, clear of the edges" % min(
+                            (o for o in self.R.values() if o is not r and self.pos(o) == q), key=lambda o: 0).name
+        return mid, "toward the middle of the board"
 
     def creep_step(self, r, why):
         """(e17, Nick 12 Nov: "Movement should never settle at 0 ... It's okay if they fall") A small slow move toward
@@ -1523,13 +1538,29 @@ class Controller:
         L = max(CREEP_MIN_CM, min(CREEP_MAX_CM * f, max(CREEP_MIN_CM, dist)))
         v = max(CREEP_V_MIN, BACK_V * f)
         brg = math.degrees(math.atan2(tgt[1] - p[1], tgt[0] - p[0])) if dist > 0.5 else h
-        for off in (0.0, 45.0, -45.0, 90.0, -90.0):
-            b_ = wrap180(brg + off)
+        near = [(math.dist(p, self.pos(o)), self.pos(o)) for o in self.R.values()
+                if o is not r and self.pos(o) is not None and o.mode != "gone"]
+        away = None
+        if near:
+            d0, q0 = min(near)
+            if d0 > 0.5:
+                away = math.degrees(math.atan2(p[1] - q0[1], p[0] - q0[0]))
+        tries = [(brg, off) for off in (0.0, 45.0, -45.0, 90.0, -90.0, 135.0, -135.0, 180.0)]
+        if away is not None:
+            tries.append((away, None))         # last: straight away from the nearest robot, even inside a reservation
+        for base, off in tries:
+            b_ = wrap180(base + (off or 0.0))
             back = abs(wrap180(b_ - (h + 180.0))) <= 60.0
             turn = 0.0 if back else wrap180(b_ - h)
             hd = wrap180(h + 180.0) if back else wrap180(h + turn)
             tr = Traj.move(self.t + 0.2 + (turn_s(turn) if turn else 0.0), p, hd, 0.0, L, v, m0=self.margin0(r))
-            if any(clearance_profile(tr, o.traj, now=self.t)[-1] < REFLEX_CC for o in self.others(r)):
+            if off is None:
+                # its start is already inside another robot's reservation (every bearing "blocked"): moving away
+                # widens the gap to every robot, so it goes (the reflex still watches)
+                end = tr.end
+                if math.dist(end, q0) < d0 + 0.5 * L or any(math.dist(end, q) < dq - 0.1 for dq, q in near):
+                    continue
+            elif any(clearance_profile(tr, o.traj, now=self.t)[-1] < REFLEX_CC for o in self.others(r)):
                 continue
             kind = "creep back" if back else "creep"
             mv = dict(kind=kind, cell=None, turn=turn, L=L, v=v, t0=self.t, p0=p, h0=h, h1=wrap180(h + turn),
@@ -1549,7 +1580,7 @@ class Controller:
                     why, L, v, words, "reversing" if back else "turning %.0f deg first" % turn, unc))
             self.log("creep", dict(t=round(self.t, 2), robot=r.name, why=why, L_cm=round(L, 1), v=round(v, 1),
                                    unc_cm=round(unc, 1), x=round(p[0], 1), y=round(p[1], 1), tx=round(tgt[0], 1),
-                                   ty=round(tgt[1], 1), off_deg=off, back=int(back)))
+                                   ty=round(tgt[1], 1), off_deg=off if off is not None else "away", back=int(back)))
             self.why_zero(r, "creep (%s)" % why)
             self.pump(r)
             return True
@@ -4874,7 +4905,8 @@ class Controller:
                     # stands clear), a lift / put-down, or the camera seeing it move past its own noise, sustained
                     p_ = self.pos(r)
                     clear_ = p_ is not None and edge_dist(self.rect, *p_) >= self.end_need(r)
-                    own_ = bool(rec.get("self_moved")) and clear_
+                    # (e17) a move it made itself since it asked (a creep, never-still) counts as its own way out too
+                    own_ = (bool(rec.get("self_moved")) or r.n_moves > rec.get("n_moves", r.n_moves)) and clear_
                     held_fx = [f for f in rec.get("fixes", []) if f[2] <= rec["t0"] + 2.0] or rec.get("fixes", [])[:5]
                     new_fx = [f for f in rec.get("fixes", []) if f[2] > rec["t0"] + 2.0]
                     import observe as OB
