@@ -25,12 +25,12 @@ Changelog
                  (audit 8) each switch takes only its two choices or auto (normalize; a typed "Auto" no longer turns a
                  switch on), refusals said at the start; missions, calibration and the frame watch read through here.
   2026-11-12e20  learned camera trust (e20): MIRLT_CAMERA_TRUST, MIRLT_ODO_LEARN_TRUST, MIRLT_DETECTOR_ROUTE,
-                 MIRLT_MOTION_HEADING.
+                 MIRLT_MOTION_HEADING; MIRLT_PAIR_STAND_PART (a close pair standing apart is parted).
 """
 import os
 import sys
 
-VERSION = "safety-group-2026-11-12e20"   # e20: MIRLT_CAMERA_TRUST, MIRLT_ODO_LEARN_TRUST, MIRLT_DETECTOR_ROUTE, MIRLT_MOTION_HEADING. Before: "safety-group-2026-11-12e19"   # e19: the Fable audit's switches (see the changelog). Before: "safety-group-2026-11-12e18b"   # e18b: five switches from the replay (ELIM_PAIR_GUARD, FAR_NAMED_CORRECT, RESEED_HEADING_KEEP, TRUST_FLEET, CURVE_SCALE_SAVE)
+VERSION = "safety-group-2026-11-12e20"   # e20: MIRLT_CAMERA_TRUST, MIRLT_ODO_LEARN_TRUST, MIRLT_DETECTOR_ROUTE, MIRLT_MOTION_HEADING, MIRLT_PAIR_STAND_PART. Before: "safety-group-2026-11-12e19"   # e19: the Fable audit's switches (see the changelog). Before: "safety-group-2026-11-12e18b"   # e18b: five switches from the replay (ELIM_PAIR_GUARD, FAR_NAMED_CORRECT, RESEED_HEADING_KEEP, TRUST_FLEET, CURVE_SCALE_SAVE)
 
 # Each row: env name, default (automatic), the old way's value, the areas it touches, what it does (plain words),
 # the build that added it. "areas": F free roam, M missions (run_plan, School Visit tours), C calibration, T tracking
@@ -112,9 +112,10 @@ SWITCHES = [
     ("MIRLT_CAMERA_TRUST", "learn", "e19", "T F",
      "(Nick 12 Nov: any camera at any angle, the system works out which is best for what) Each camera earns a trust "
      "score per job (position, heading, telling robots apart), per board square and per lighting, from checks against "
-     "the robots' own wheels and gyro, other cameras, roof tags and heading from motion; a camera is refused only where its "
-     "own evidence says it is wrong, and can earn trust back; kept per site. e19: the whole-camera watch's one verdict for "
-     "every camera", "e20"),
+     "the robots' own wheels and gyro, other cameras, roof tags and heading from motion; a camera is refused where its own "
+     "evidence says it is wrong, and can earn trust back; kept per site. The whole-camera watch's verdict still stands for a "
+     "camera-wide fault (and counts as evidence), but a wrong-way sighting lying on another robot no longer counts toward it (its false alarm). "
+     "e19: the whole-camera watch alone", "e20"),
     ("MIRLT_ODO_LEARN_TRUST", "trust", "e19", "F",
      "(Nick 12 Nov) A robot's odometry record learns only from cameras trusted for position where the check was made, "
      "each check weighted by that trust. e19: every accepted fix teaches it", "e20"),
@@ -127,6 +128,10 @@ SWITCHES = [
      "line of sightings gives its heading, with a precision from that camera's measured noise across the line and the "
      "distance driven; it is a heading source, evidence for the cameras' trust, and it settles a heading in doubt without "
      "a crawl when it is precise enough. 0: e19 (the crawl)", "e20"),
+    ("MIRLT_PAIR_STAND_PART", "1", "0", "T",
+     "Two robots that passed close and then BOTH stand still beyond the close-pass distance count as parted, so who is "
+     "who is checked (kept, swapped or a wiggle) instead of neither taking a camera fix until one moves 22 cm away (hard "
+     "simulator: two lost robots stood 17 cm apart for 105 s). 0: e19 (parted only past 22 cm)", "e20"),
     ("MIRLT_POSE_RULE", "widen", "wait2s", "F M", "Own pose vs camera disagreement widens the doubt at once", "e08"),
     # -- edges ---------------------------------------------------------------------------------------------------------
     ("MIRLT_EDGE_RULE", "derived", "fixed", "F M C",

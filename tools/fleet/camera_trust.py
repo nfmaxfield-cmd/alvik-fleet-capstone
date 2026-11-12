@@ -23,7 +23,9 @@ A check AGREES when the camera's answer lies within the 99 % band of the two err
            disagrees (a consensus against it). Two cameras alone that disagree: no evidence (which one moved cannot be
            told). A camera's POSITION state is distrusted when either its motion or its frame score is
   position (the whole picture, e19's whole-camera watch): a robot that drove by its own wheels and a sighting of this
-           camera that moved the same way agrees; the watch's "none moved as they did" verdict disagrees
+           camera that moved the same way agrees; the watch's "none moved as they did" verdict disagrees (and stands as
+           e19's verdict for the cameras in the picture: a camera-wide fault). A wrong-way sighting that lies on another
+           robot is no evidence (it may be that robot's own)
   heading  |camera heading - the robot's own gyro heading| <= HEAD_K x sqrt(camera sigma^2 + own heading sigma^2), only
            while its own heading is sure (camera-confirmed, little turning since)
   identity a roof tag naming the robot the layer named (school), an out-and-back / wiggle that named it, against a
