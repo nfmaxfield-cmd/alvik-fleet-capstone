@@ -39,6 +39,7 @@ team's.
 | The run's own record | no stop | `stop.json` in the run folder |
 
 - Two practice Visit points runs at school, STOP pressed 40-80 s in: both confirmed **1 s** after STOP, nothing forced.
+  A practice home free roam: **4 s**.
 - The test `test_stop_reaches_the_driver_even_when_the_leader_does_not_pass_it_on` **fails on the old `Run.stop`**
   (checked against main's `mission_control.py`) and passes now. Its fake leader blocks Ctrl+C the way a busy or slow
   mission_run would; I could not reproduce the audit's 4-minute run on a quiet machine (STOP worked in 5-10 s there
@@ -214,7 +215,17 @@ with fakes only.
 
 ## Appendix A: test runs
 
-See the end of this file (filled in after the full suites).
+| Suite | e18 baseline (given) | This build, before the rebase | After rebasing onto e19 1-2 (59ab9b8) |
+|---|---|---|---|
+| `tools/fleet/tests` | 991 passed, 11 skipped | 1012 passed, 10 skipped, 2 xfailed, 1 failed (`test_school_engine::test_mission_control_api` read the old page at `/`: fixed to read `/classic`) | **1021 passed, 10 skipped, 2 xfailed, 1 failed** |
+| `tools/pi/tests` | 4 known `test_launcher.py` failures | 132 passed, 5 failed (the 4 known + `test_camrec_no_stall` free-roam parts, a timing test that passes alone and on main: load) | **133 passed, 4 failed (the 4 known)** |
+
+- The one fleet failure after the rebase, `test_risk_fixes.py::test_stopall_reaches_robots_heard_on_the_wifi`, fails
+  the same way on origin/main 59ab9b8 without this build (e19 2/14 stopped remembering loopback addresses, which that
+  test uses). Not touched here; for the e19 build.
+- The 2 xfailed are the hard simulator's known regressions. The skip count fell by one because a test that skips
+  without a model now runs (unchanged here).
+- New tests: `tools/fleet/tests/test_mc_build_nov12.py`, 23.
 
 ## Appendix B: update the home Pi and open the new page
 
