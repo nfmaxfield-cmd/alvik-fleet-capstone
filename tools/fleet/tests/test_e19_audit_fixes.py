@@ -215,3 +215,76 @@ def test_pool_rows_and_workspace_saves_record_their_source(tmp_path):
     ws.save(p, source=dict(run="R1", dry=True))
     ws.save(p, source=dict(run="R2", dry=False))
     assert [(s["run"], s["dry"]) for s in json.load(open(p))["saved_by"]] == [("R1", True), ("R2", False)]
+
+
+# ------------------------------------------------- 5 (audit H5): a hung robot never holds the creep token for good
+BOARD = (0.0, 0.0, 122.24, 121.92)
+
+
+def _two_unaccounted():
+    import freeroam_core as FC
+    sent = []
+    c = FC.Controller(["Left", "Right"], BOARD, lambda n, s: sent.append((n, s)), lambda *a: None)
+    c.never_still = True
+    c.t = 100.0
+    for n, (x, y) in (("Left", (6.0, 60.0)), ("Right", (110.0, 15.0))):
+        r = c.R[n]
+        r.mode = "idle"
+        r.own = (c.t, x, y, 0.0)
+        r.own_hist = [(c.t - 1.0, x, y, 0.0), (c.t, x, y, 0.0)]
+        c.start_lost(r, "test")
+        r.bubble = 3.0
+    return c
+
+
+def test_a_free_robot_creeps_while_a_hung_robot_holds_the_token():
+    """Audit H5: with two robots unaccounted, hung Left re-crept in vain before its token ran out and so held it for
+    good; free Right was refused 5,794 of 5,912 ticks (311 s). Now a stuck holder (tilted, recovering, or its last
+    moves did not move) releases the token at once."""
+    c = _two_unaccounted()
+    L, R = c.R["Left"], c.R["Right"]
+    L.tilted = True                                           # hung at the x = 0 edge
+    L.move = dict(kind="creep back", L=2.0, v=2.0, turn=0.0)  # its last creep, sent and going nowhere
+    c.creep_token = ("Left", c.t + 600.0)
+    R.still_since = c.t - 3.0 * c.still_pause(R) + 0.01        # inside its third pause
+    called = []
+    c.creep_step = lambda r, why: called.append(r.name) or False
+    c.never_still_watch(R)
+    assert called == ["Right"]
+
+
+def test_a_robot_whose_moves_do_not_move_is_stuck_and_never_takes_the_token():
+    c = _two_unaccounted()
+    L, R = c.R["Left"], c.R["Right"]
+    L.nomove_n = c.STUCK_N                                    # its last moves "did not move" (fast_done)
+    L.move = dict(kind="creep", L=2.0, v=2.0, turn=0.0)
+    c.creep_token = ("Left", c.t + 600.0)
+    R.still_since = c.t - c.still_pause(R) - 0.01
+    called = []
+    c.creep_step = lambda r, why: called.append(r.name) or False
+    c.never_still_watch(R)
+    assert called == ["Right"]
+    # the stuck robot's own creep does not take the token
+    L.move = None
+    L.still_since = c.t - 10.0
+    c.creep_token = None
+
+    def step(r, why):
+        r.move = dict(kind="creep", L=2.0, v=2.0, turn=0.0)
+        return True
+    c.creep_step = step
+    c.never_still_watch(L)
+    assert c.__dict__.get("creep_token") is None
+
+
+def test_a_live_creep_still_holds_the_token_for_its_length():
+    """The token's purpose stays: one unaccounted robot creeps at a time while its creep is really under way."""
+    c = _two_unaccounted()
+    L, R = c.R["Left"], c.R["Right"]
+    L.move = dict(kind="creep", L=2.0, v=2.0, turn=0.0)
+    c.creep_token = ("Left", c.t + 3.0)
+    R.still_since = c.t - c.still_pause(R) - 0.01
+    called = []
+    c.creep_step = lambda r, why: called.append(r.name) or False
+    c.never_still_watch(R)
+    assert called == []

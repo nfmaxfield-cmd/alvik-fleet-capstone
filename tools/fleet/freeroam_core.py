@@ -51,7 +51,7 @@ import safety_group as SG   # noqa: E402  (e18: every safety switch's automatic 
 import odo_trust as OT      # noqa: E402  (e18, 5: each robot's measured odometry trust, the blind-drive allowance)
 import fused_pose as FP     # noqa: E402  (e09 Phase B: one filter per robot, fed by the tracking layer and RAW)
 
-VERSION = "freeroam-2026-11-12e18b"   # e18b (the replay of all 10 home runs): a standing robot named all along beyond its 6 cm fix gate is corrected from the camera (MIRLT_FAR_NAMED_CORRECT); a standing re-seed keeps its own heading unless the camera's is better (MIRLT_RESEED_HEADING_KEEP); curve scales logged, not saved, until Nick decides (MIRLT_CURVE_SCALE_SAVE); the trust record pooled for the fleet (odo_trust, MIRLT_TRUST_FLEET). e18 (Nick 12 Nov decisions): (1) the tracking layer's out-and-back identity drive, made only where no body can touch (outback); (3) a creep with its heading in doubt beside a robot the camera has waits for room or goes straight away when no heading can close the gap; beside one it does not have, half steps at the slowest speed away from where it was last believed to be (MIRLT_DOUBT_NEIGHBOUR); (4) a lost / stray / needs-a-hand robot goes first (reflex priority) to the nearest readable point nobody uses, and a standing robot in its way makes room (MIRLT_LOST_PRIORITY); (5) each robot's odometry trust (odo_trust: shadow dead reckoning against the camera, its own record) gives its lost bubble and allows blind legs (curves through unreadable ground, blind_excursion) only where the predicted error keeps every margin with a way back; checked against the error found when seen again (MIRLT_BLIND_ALLOW); (6) every calibration correction (curves, straight drives) saved at any end by the agreement rules (save_corrections, MIRLT_SAVE_CAL_AT_END). Every safety switch read through safety_group. Before: "freeroam-2026-11-12e17"   # e17 (home 11 Nov, the 08:26 and 08:58 runs): (1d) a camera position the tracking layer named by elimination or a wiggle is a CORRECTION: its pose set from the camera at once (fpose, never rejected by its filter), said "CORRECTED", never "moved in" / REJOINED, and a held robot rejoins on it (MIRLT_CAMERA_CORRECT=0: as e16); (1e) a re-seed is projected to now and never lands while the robot turns (the Pi's copy of its heading is ~0.3 s old: 13-15 deg median jump when it landed mid-turn, MIRLT_RESEED_TURN=0: as before); (2) no driving blind on late fixes: each robot's measured fix age and drift against the room its path has (MIRLT_LATE_FIX=0); after an off-plan heading re-set the next move waits for a short crawl the camera confirms (MIRLT_HEADING_CONFIRM=0); (6) each robot's drift per cm measured from its own corrections. Before: "freeroam-2026-11-11e16"
+VERSION = "freeroam-2026-11-12e19"   # e19 (the Fable audit, 12 Nov): H5 the creep token stands only while its holder's creep is under way; a stuck robot (tilted, recovering, its last moves did not move: stuck()) never holds or takes it. Before: "freeroam-2026-11-12e18b"   # e18b (the replay of all 10 home runs): a standing robot named all along beyond its 6 cm fix gate is corrected from the camera (MIRLT_FAR_NAMED_CORRECT); a standing re-seed keeps its own heading unless the camera's is better (MIRLT_RESEED_HEADING_KEEP); curve scales logged, not saved, until Nick decides (MIRLT_CURVE_SCALE_SAVE); the trust record pooled for the fleet (odo_trust, MIRLT_TRUST_FLEET). e18 (Nick 12 Nov decisions): (1) the tracking layer's out-and-back identity drive, made only where no body can touch (outback); (3) a creep with its heading in doubt beside a robot the camera has waits for room or goes straight away when no heading can close the gap; beside one it does not have, half steps at the slowest speed away from where it was last believed to be (MIRLT_DOUBT_NEIGHBOUR); (4) a lost / stray / needs-a-hand robot goes first (reflex priority) to the nearest readable point nobody uses, and a standing robot in its way makes room (MIRLT_LOST_PRIORITY); (5) each robot's odometry trust (odo_trust: shadow dead reckoning against the camera, its own record) gives its lost bubble and allows blind legs (curves through unreadable ground, blind_excursion) only where the predicted error keeps every margin with a way back; checked against the error found when seen again (MIRLT_BLIND_ALLOW); (6) every calibration correction (curves, straight drives) saved at any end by the agreement rules (save_corrections, MIRLT_SAVE_CAL_AT_END). Every safety switch read through safety_group. Before: "freeroam-2026-11-12e17"   # e17 (home 11 Nov, the 08:26 and 08:58 runs): (1d) a camera position the tracking layer named by elimination or a wiggle is a CORRECTION: its pose set from the camera at once (fpose, never rejected by its filter), said "CORRECTED", never "moved in" / REJOINED, and a held robot rejoins on it (MIRLT_CAMERA_CORRECT=0: as e16); (1e) a re-seed is projected to now and never lands while the robot turns (the Pi's copy of its heading is ~0.3 s old: 13-15 deg median jump when it landed mid-turn, MIRLT_RESEED_TURN=0: as before); (2) no driving blind on late fixes: each robot's measured fix age and drift against the room its path has (MIRLT_LATE_FIX=0); after an off-plan heading re-set the next move waits for a short crawl the camera confirms (MIRLT_HEADING_CONFIRM=0); (6) each robot's drift per cm measured from its own corrections. Before: "freeroam-2026-11-11e16"
 VERSION_E16 = "freeroam-2026-11-11e16"   # e16 (home free roam 11 Nov 08:45-08:48, commit 4732a48: Right stopped at an edge and stood; then "REJOINED ... moved in" 1 s after NEEDS A HAND with nobody there, and Center pushed it off): (7) an edge stop reverses along the robot's own recorded track as far as the derived edge rule needs (observe.track_back_target), checked against the others' reservations, then re-plans; it holds and asks only when the track is unknown or blocked (MIRLT_EDGE_BACKOUT=0: as before); (8a) "moved in" needs evidence: a lift or a sustained camera move past its own measured noise, or its own drive out (MIRLT_REJOIN_EVIDENCE=0: as before); (8b) a robot held or stuck at an edge, or rejoined and not yet driven away, is a fixed obstacle with its uncertainty (own pose against the camera) in every plan and the reflex (MIRLT_PINNED_OBSTACLE=0); (8c) contact: a standing robot the camera sees move past its noise, or whose accelerometer jolts, stops the robots near it; a driving robot whose camera progress falls far below its wheels' stops and backs off; contact.csv (MIRLT_CONTACT_WATCH=0); (8d) a question nobody answers (ASK_WAIT_S) makes the run decide by itself, as an unattended run does (MIRLT_ASK_UNATTENDED=1: keeps asking); (9b) a standing robot's doubt no longer grows with its fix's age (home: "cannot tell whether it is clear of the edge" 22 cm in; MIRLT_STAND_UNC=0). Before: "freeroam-2026-11-10e13b"   # e13b (10 Nov, Nick 13:34): a standing robot (its own odometry shows no motion since its last fix) keeps that fix: never lost while it stands, sparse reads confirm it (MIRLT_STAND_TRUST=0: before); the lost threshold grows only for a camera slower than about 2.5 pictures a second (1.5 x the longest recent gap). e13 (10 Nov): never give up blind (BLIND_RULE edge: a lost robot drives on while its bubble + body + stop cannot reach an edge; BUBBLE_CAP behind MIRLT_BLIND_RULE=cap); stray return (a robot outside the readable area comes back along ground it drove); never give up (a robot held at an edge waits, says it needs a hand and rejoins: EDGE_PARK off); risk-based no-pictures limit per robot
 VERSION_E12 = "freeroam-2026-11-10a"   # 11-10a (e12): the curve-fit maths moved into module functions (fit_arc_points, arc_summary, arc_agree) so the calibration's curve phase uses the very same (free roam's own fitting and saving unchanged); a robot held at an edge for EDGE_PARK_S is parked and said loudly, the others roam on (MIRLT_EDGE_PARK=0: before)
 VERSION_E = "freeroam-2026-11-07e"   # 11-07e (Nick 7 Nov): a robot put down at or over an edge first tries the e08 tilt recovery, a person asked only if that fails (MIRLT_START_EDGE_MODE=wait: always wait)
@@ -1784,6 +1784,15 @@ class Controller:
             self.ask_room(r, p, tgt)                    # (e18, 4) a lost robot first: the one in its way moves
         return False
 
+    STUCK_N = 2              # (e19, H5) this many moves in a row that did not move = stuck (one can be the camera's
+                             # noise). Chosen; DOE: no (any small count works: it only decides who may take the token)
+
+    def stuck(self, r):
+        """(e19, audit H5/H6) r cannot move now: tilted, inside a tilt recovery, or its last STUCK_N moves did not
+        move (fast_done's verdict: the camera and its own sensors saw no motion)."""
+        return bool(getattr(r, "tilted", False) or r.__dict__.get("recover") is not None or
+                    r.__dict__.get("nomove_n", 0) >= self.STUCK_N)
+
     def never_still_watch(self, r):
         """(e17) Every tick: a robot that has stood idle longer than still_pause (held at an edge, unsure, needing a
         hand, waiting for a heading check's room, put down at an edge, tilted with no way back, outside the readable
@@ -1817,15 +1826,22 @@ class Controller:
             # middle together, the camera saw two spots follow two own poses alike, and the reacquire's motion check
             # took the other robot's spot (a swap in both e17 and e18 runs)
             un = [o for o in self.R.values() if o.mode not in ("out", "gone", "start") and self.unaccounted_why(o)]
-            if len(un) >= 2:
+            if len(un) >= 2 and not self.stuck(r):
+                # (e19, audit H5: the hard simulator's 311 s stand, skew seed 2: Right refused in 5,794 of 5,912 ticks
+                # because hung Left re-crept in vain and so held the token for good) the token stands only while its
+                # holder's creep is really under way: a holder that is stuck (tilted, recovering, or its last moves did
+                # not move), idle again, or out releases it at once
                 tok = self.__dict__.get("creep_token")
-                if tok is not None and tok[0] != r.name and self.t < tok[1]:
+                holder = self.R.get(tok[0]) if tok is not None else None
+                if tok is not None and tok[0] != r.name and self.t < tok[1] and holder is not None and \
+                        not self.stuck(holder) and holder.move is not None and \
+                        str(holder.move.get("kind", "")).startswith("creep"):
                     return
-                # only robots that can creep now take turns (a held, silent or battery-floor robot never creeps: the
-                # e18 stress re-run found Center starved 22 min behind a held Left); and none waits more than three
-                # of its pauses for its turn
+                # only robots that can creep now take turns (a held, silent, battery-floor or stuck robot never takes
+                # a turn: the e18 stress re-run found Center starved 22 min behind a held Left); and none waits more
+                # than three of its pauses for its turn
                 able = [o for o in un if o.mode == "idle" and o.move is None and not o.silent and
-                        not getattr(o, "held", None) and self.pos(o) is not None and
+                        not getattr(o, "held", None) and self.pos(o) is not None and not self.stuck(o) and
                         not (o.battery is not None and o.battery <= self.floor)]
                 first = min(able or [r], key=lambda o: (o.__dict__.get("creep_last", -1e9), o.rank))
                 if first is not r and self.t - r.still_since < 3.0 * self.still_pause(r):
@@ -1833,7 +1849,7 @@ class Controller:
         if self.creep_step(r, why):
             r.still_since = None
             r.creep_last = self.t
-            if r.move is not None:
+            if r.move is not None and not self.stuck(r):           # (e19, H5) a stuck robot never takes the token
                 mv = r.move
                 self.creep_token = (r.name, self.t + turn_s(mv.get("turn", 0.0)) + drive_s(mv.get("L", 0.0),
                                                                                          mv.get("v", 2.0)) +
@@ -3625,7 +3641,9 @@ class Controller:
             if out["blind_ok"] and r.lost is not None:
                 self.grow_bubble(r)
             r.fast_n = 0
+            r.nomove_n = 0                      # (e19, H5) moving again: not stuck
             return False
+        r.nomove_n = r.__dict__.get("nomove_n", 0) + 1
         self.counts["fast_done"] = self.counts.get("fast_done", 0) + 1
         p = self.pos(r) or (mv["p0"][0], mv["p0"][1])
         fm = r.__dict__.setdefault("fmem", OB.FailMemory())
