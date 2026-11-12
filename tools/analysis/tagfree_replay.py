@@ -18,8 +18,18 @@ minutes apart; these robots were mostly standing, "unsure near an edge"), so the
     python3 tools/analysis/tagfree_replay.py --run <run folder> --labels <labels folder> --model detector-v1.onnx \
         --only <rec>_overhead_t7,<rec>_overhead_t8 --out replay.json
 
+    python3 tools/analysis/tagfree_replay.py --trust --run <run folder> --labels <labels> --model detector-v1.onnx \
+        --only <rec>_overhead_t1,...,<rec>_overhead_t8 --out trust.json
+
+--trust (e20): every picture through EVERY camera's detector (no camera is named in the rules), each detection matched
+to a robot by its OWN pose (the layer's widest gate), its heading checked against the robot's own heading where the run
+itself had confirmed that heading (the label's heading_known: its travel direction agreed with its own heading); the
+camera's learned heading trust (camera_trust.TrustBook) is then compared with what the labels say each camera's heading
+error is. The labels are used ONLY for that comparison, never for the learning.
+
 Changelog
   2026-11-12a  first version
+  2026-11-12e20  --trust: learned camera trust from the pictures (camera_trust)
 """
 import argparse
 import bisect
@@ -35,7 +45,7 @@ for p in (os.path.join(TOOLS, "fleet"), os.path.join(TOOLS, "detector")):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-VERSION = "tagfree-replay-2026-11-12a"
+VERSION = "tagfree-replay-2026-11-12e20"   # e20: --trust. Before: "tagfree-replay-2026-11-12a"
 RIGHT_CM = 6.0           # CHOSEN: a fix this near a label is that robot (a robot's half width + the label's noise)
 STEP_S = 0.5
 
@@ -75,7 +85,97 @@ def read_labels(rec_dir):
     return rows, frames
 
 
+def trust_replay(a):
+    """(e20) The learned camera trust on the real pictures (see the module doc)."""
+    import cv2
+    import infer as INF
+    import tagfree as TF
+    import tracking_layer as TL
+    import camera_trust as CT
+    model = INF.load(a.model, threads=1)
+    own = read_own(a.run)
+    names = sorted(own)
+    board = (0.0, 0.0, 122.24, 121.92)
+    book = CT.TrustBook("replay-home-2026-11-11", board=board, seed=1)
+    rows = []
+    gate = TL.GATE_MAX_CM
+    for rec in a.only.split(","):
+        recs = {}
+        for cam in ("overhead", "side"):
+            d = os.path.join(a.labels, rec.replace("_overhead_", "_%s_" % cam))
+            if not os.path.isdir(d):
+                continue
+            H = json.load(open(os.path.join(d, "floor_calibration.json")))["H_floor_to_image"]
+            rl, fr = read_labels(d)
+            recs[cam] = (d, TF.homography_to_floor(H), rl, fr)
+        for cam, (d, to_f, rl, fr) in sorted(recs.items()):
+            for k in sorted(rl):
+                labs = rl[k]
+                t = float(labs[0]["t_wall"])
+                img = cv2.imread(os.path.join(d, "labels", "frames", fr[k]))
+                if img is None:
+                    continue
+                dets = [q for q in model(img) if q.get("cls", "alvik") == "alvik"]
+                for lab in labs:
+                    n = lab["obj"]
+                    o = own_at(own, n, t)
+                    if o is None:
+                        continue
+                    best = None
+                    for q in dets:
+                        x, y = to_f(float(q["x"]), float(q["y"]))
+                        e = math.hypot(x - o[1], y - o[2])
+                        if e <= gate and (best is None or e < best[0]):
+                            best = (e, q, x, y)
+                    if best is None or best[1].get("heading_deg") is None:
+                        continue
+                    _, q, x, y = best
+                    th_det = TF.floor_heading(to_f, float(q["x"]), float(q["y"]), float(q["heading_deg"]))
+                    sure = lab.get("heading_known") == "1"
+                    err_own = abs(TF.wrap180(th_det - o[3]))
+                    tight = CT.HEAD_K * math.hypot(TF.SIGMA_DET0_DEG, 2.0)       # its own heading as sure as it is
+                    if sure:
+                        book.observe(cam, "ml", "heading", x, y, err_own <= tight, 1.0, None, t,
+                                     "its own heading (confirmed by its travel)")
+                    th_true = None
+                    if lab.get("heading_known") == "1":
+                        th_true = TF.floor_heading(to_f, float(lab["x_px"]), float(lab["y_px"]),
+                                                   float(lab["heading_deg"]))
+                    rows.append(dict(rec=rec, cam=cam, t=round(t, 2), robot=n, sure=int(sure),
+                                     err_own=round(err_own, 1),
+                                     err_true=None if th_true is None else round(abs(TF.wrap180(th_det - th_true)), 1),
+                                     state=book.state(cam, "ml", "heading", area=None)))
+    res = dict(version=VERSION, camera_trust=CT.VERSION, model=os.path.basename(a.model), recordings=a.only.split(","),
+               words=book.plain_words(), trust=book.summary(), rows=rows)
+    per = {}
+    for cam in sorted({r["cam"] for r in rows}):
+        v = sorted(r["err_true"] for r in rows if r["cam"] == cam and r["err_true"] is not None)
+        s = book.score(cam, "ml", "heading", area=None)
+        rng = __import__("random").Random(1)
+        picks = [book.choose(sorted({r["cam"] for r in rows}), "ml", "heading", 60, 60, rng=rng) for _ in range(1000)]
+        per[cam] = dict(state=s["state"], agree=s["agree"], checks=s["checks"], lower=s["lower"], upper=s["upper"],
+                        label_err_median=v[len(v) // 2] if v else None,
+                        label_err_p95=v[int(0.95 * (len(v) - 1))] if v else None, n_label=len(v),
+                        heading_calls_share=round(picks.count(cam) / 1000.0, 3))
+    res["per_camera"] = per
+    print(json.dumps(dict(per_camera=per, words=res["words"]), indent=1))
+    if a.out:
+        json.dump(res, open(a.out, "w"), indent=1, default=str)
+    return res
+
+
 def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+    if "--trust" in argv:
+        ap = argparse.ArgumentParser()
+        ap.add_argument("--trust", action="store_true")
+        ap.add_argument("--run", required=True)
+        ap.add_argument("--labels", required=True)
+        ap.add_argument("--model", required=True)
+        ap.add_argument("--only", required=True)
+        ap.add_argument("--out", default="")
+        return trust_replay(ap.parse_args(argv))
     import cv2
     import infer as INF
     import tagfree as TF

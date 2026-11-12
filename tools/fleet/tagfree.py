@@ -39,6 +39,12 @@ Changelog
                share of its core over the last window) and share_now in its summary. The core share is a setting for
                the bench (docs/how-to/pi-bench-core-share.md): MIRLT_DETECTOR_DUTY (0.10 or 10 = 10 %), else
                ~/.config/mirlt/detector/share.json {"duty": 0.25}, else DUTY (0.25, unchanged). Nothing else changes.
+  2026-11-12e20  (camera trust) every detection says its camera; each call RUNS the camera most likely to answer that
+               question (position / heading / telling robots apart) for that robot's square (camera_trust.TrustBook.choose:
+               Thompson sampling), the next one only where it found nothing near the robot; calls counted per camera. A
+               detector heading is used only from a camera TRUSTED for heading there (learned from its headings against
+               each robot's sure gyro heading), never because of its name (MIRLT_DETECTOR_ROUTE=e19: the first camera
+               first, the heading flag per camera, as before). SimDetector: ml_cams=[...] several cameras with faults.
 """
 import math
 import os
@@ -46,7 +52,7 @@ import random
 import threading
 import time
 
-VERSION = "tagfree-2026-11-12e19"   # e19 (audit 9, Nick): a heading is handed on only past the detector's measured 95 % error and the robot's own doubt; the 45 deg cap is a risk limit from its clearance (MIRLT_TAGFREE_HAND=risk; e18 the old rule). Before: "tagfree-2026-11-12b" (Mission Control's read-only stats hook), "tagfree-2026-11-12a"
+VERSION = "tagfree-2026-11-12e20"   # e20: calls routed by learned camera trust, headings only from cameras trusted for heading (MIRLT_DETECTOR_ROUTE). Before: "tagfree-2026-11-12e19"   # e19 (audit 9, Nick): a heading is handed on only past the detector's measured 95 % error and the robot's own doubt; the 45 deg cap is a risk limit from its clearance (MIRLT_TAGFREE_HAND=risk; e18 the old rule). Before: "tagfree-2026-11-12b" (Mission Control's read-only stats hook), "tagfree-2026-11-12a"
 
 SWITCH_ENV = "MIRLT_TAGFREE"          # auto (default) | 1 | 0
 MODEL_ENVS = ("MIRLT_DETECTOR_MODEL", "MIRLT_ML_MODEL")
@@ -113,6 +119,20 @@ try:
 except Exception:  # noqa: BLE001
     HAND_RULE = "risk"
 MATCH_CM = 3.5           # as tracking_layer.CLUSTER_CM: a detection this near a fix is that fix's object
+try:
+    ROUTE = _SG.value("MIRLT_DETECTOR_ROUTE")      # (e20) "trust" | "e19"
+except Exception:  # noqa: BLE001
+    ROUTE = "trust"
+
+
+def job_of(why):
+    """(e20) The question a detector call answers, from the layer's reason for asking."""
+    w = str(why or "").lower()
+    if "heading" in w:
+        return "heading"
+    if any(k in w for k in ("unsure", "pass", "wiggle", "contested", "merged", "identity")):
+        return "identity"
+    return "position"
 
 
 def wrap180(a):
@@ -269,6 +289,8 @@ class DetectorSource:
         self._job = None
         self._ev = threading.Event()
         self.core = core
+        self.book = None                      # (e20) the run's camera_trust.TrustBook (attach() sets it from the layer)
+        self.calls_by_cam = {}                # (e20, 3) pictures run per camera
         if not self.sync:
             threading.Thread(target=self._worker, daemon=True, name="tagfree-detector").start()
 
@@ -283,7 +305,7 @@ class DetectorSource:
             now = self.clock()
             if not self.budget.allow(now):
                 return []
-            res = self._run(region, now)
+            res = self._run(region, now, why)
             if res[1] == self.given:
                 return []                     # the same pictures as last time: already in
             self.given = res[1]
@@ -297,7 +319,7 @@ class DetectorSource:
             out = res[2]
         if not busy and self.budget.allow(self.clock()):
             with self._lock:
-                self._job = region
+                self._job = (region, why)
             self._ev.set()
         return out
 
@@ -311,9 +333,11 @@ class DetectorSource:
             self._ev.wait()
             self._ev.clear()
             with self._lock:
-                region = self._job
+                job = self._job
+            region, why = job if isinstance(job, tuple) and len(job) == 2 and not isinstance(job[0], (int, float)) \
+                else (job, None)
             try:
-                res = self._run(region, self.clock())
+                res = self._run(region, self.clock(), why)
                 with self._lock:
                     self.result = res
             except Exception:  # noqa: BLE001  (a failing detector never stops the run)
@@ -360,31 +384,45 @@ class DetectorSource:
             if not (math.isfinite(x) and math.isfinite(y)):
                 continue
             th = None
-            if cam.heading and d.get("heading_deg") is not None:
+            # (e20) every camera's heading is read (its trust decides whether it is used); e19: the flag per camera
+            if (cam.heading or (ROUTE != "e19" and self.book is not None)) and d.get("heading_deg") is not None:
                 th = floor_heading(cam.to_floor, float(d["x"]), float(d["y"]), float(d["heading_deg"]))
-            out.append(TL.Det("ml", pt, x, y, th, None, cam.sigma, score=float(d.get("score", 1.0))))
+            out.append(TL.Det("ml", pt, x, y, th, None, cam.sigma, score=float(d.get("score", 1.0)), cam=cam.name))
         return out
 
-    def _run(self, region, now):
+    def order(self, region, why=None):
+        """(e20, 3) The cameras in the order to try: the one most likely to answer this question for this robot's
+        square first (Thompson sampling on its learned score), then the rest as configured. e19 / no book: as configured."""
+        if ROUTE == "e19" or self.book is None or len(self.cams) < 2:
+            return list(self.cams)
+        x, y = (region[0], region[1]) if region is not None else (None, None)
+        name = self.book.choose([c.name for c in self.cams], "ml", job_of(why), x, y)
+        return [c for c in self.cams if c.name == name] + [c for c in self.cams if c.name != name]
+
+    def _run(self, region, now, why=None):
         t0 = time.perf_counter()
         out, pts = [], {}
         first = True
         self.n_run = getattr(self, "n_run", 0) + 1
-        for cam in self.cams:
+        cams = self.order(region, why)
+        ref_first = cams[0] is self.cams[0]
+        for cam in cams:
             calib = False
             if not first:
                 # the side camera only where the overhead found nothing near the robot asked for, position only;
                 # (e19, item 12) and every SIDE_CAL_EVERY-th call everywhere, to MEASURE its offset from the overhead
                 found = region is not None and any(math.hypot(d.x - region[0], d.y - region[1]) <= region[2]
                                                    for d in out)
-                calib = SIDE_LEARN and not self.side_off and bool(out) and self.n_run % SIDE_CAL_EVERY == 0
+                calib = SIDE_LEARN and not self.side_off and bool(out) and self.n_run % SIDE_CAL_EVERY == 0 and \
+                    ref_first
                 if self.side_off or region is None or (found and not calib):
                     continue
             got = self._detect(cam)
             if got is not None:
+                self.calls_by_cam[cam.name] = self.calls_by_cam.get(cam.name, 0) + 1
                 dets = self._to_dets(cam, got[0], got[1])
-                if not first:
-                    if calib:
+                if cam is not self.cams[0]:
+                    if not first and calib:
                         self._side_learn(out, dets)
                         if found:
                             pts[cam.name] = got[0]
@@ -392,8 +430,9 @@ class DetectorSource:
                     off = self.side_offset()
                     if off is not None:
                         import tracking_layer as TL
-                        dets = [TL.Det(d.src, d.t, d.x - off[0], d.y - off[1], d.th, d.name, d.sigma, score=d.score)
-                                for d in dets]
+                        dets = [TL.Det(d.src, d.t, d.x - off[0], d.y - off[1], d.th, d.name, d.sigma, score=d.score,
+                                       cam=d.cam) for d in dets]
+                if not first:
                     dets = [d for d in dets if region is None or math.hypot(d.x - region[0], d.y - region[1]) <= region[2]]
                     self.counts["side_used"] += 1 if dets else 0
                 out += dets
@@ -432,6 +471,7 @@ class DetectorSource:
     def summary(self):
         off = self.side_offset()
         return dict(version=VERSION, counts=dict(self.counts), load=self.budget.summary(), side_off=self.side_off,
+                    calls_by_cam=dict(self.calls_by_cam),
                     sync=self.sync, core=self.core, side_pairs=len(self.__dict__.get("side_pairs") or []),
                     side_offset_cm=[round(v, 2) for v in off] if off else None)
 
@@ -611,6 +651,7 @@ class TagFree:
             if f["src"] != "ml" and f.get("th") is not None:
                 continue                          # a heading of its own (the bridge's travel heading): left as it is
             near = [d for d in ml_dets if d.th is not None and math.hypot(d.x - f["x"], d.y - f["y"]) < MATCH_CM]
+            near = [d for d in near if self._heading_usable(n, d, t)]       # (e20) only cameras trusted for heading
             if not near:
                 if f["src"] == "ml":
                     f["th"] = None                # a side-camera sighting: position only
@@ -650,6 +691,35 @@ class TagFree:
                 f["th"] = None                    # agrees within its noise: the robot's own heading is kept
             if self.fuser.take_new_doubt(n):
                 self._doubt(n, t, own_th, d.th)
+
+    def _heading_usable(self, n, d, t):
+        """(e20) The detector's heading of this camera: checked against the robot's own gyro heading while that is sure
+        (evidence for the camera's heading trust: camera_trust), and used only when the camera is TRUSTED for heading at
+        that square. e19 / no book / a detection with no camera: used as before (the camera's heading flag)."""
+        book = getattr(self.source, "book", None)
+        if ROUTE == "e19" or book is None or d.cam is None:
+            return True
+        c = self.ctrl
+        r = getattr(c, "R", {}).get(n) if c is not None else None
+        if r is not None and r.own is not None and r.__dict__.get("hd_confirm") is None and \
+                n not in self.big_asked:
+            tr = self.layer.T.get(n)
+            turning = False
+            if tr is not None and len(tr.own) >= 2 and tr.own[-1][0] > tr.own[-2][0] and tr.own[-1][3] is not None \
+                    and tr.own[-2][3] is not None:
+                turning = abs(wrap180(tr.own[-1][3] - tr.own[-2][3])) / (tr.own[-1][0] - tr.own[-2][0]) > TURN_MAX_DPS
+            own_th = tr.own[-1][3] if tr is not None and tr.own else None
+            try:
+                hsd = float(c.head_sd(r))
+                import freeroam_core as FC
+                sure = hsd <= FC.HD_CONFIRM_DEG       # its own heading judges a camera only while it is sure
+            except Exception:  # noqa: BLE001
+                hsd, sure = 2.0, True
+            if not turning and own_th is not None and sure:
+                import camera_trust as CT
+                ok = abs(wrap180(d.th - own_th)) <= CT.HEAD_K * math.hypot(SIGMA_DET0_DEG, hsd)
+                book.observe(d.cam, "ml", "heading", d.x, d.y, ok, 1.0, d.light, t, "its own gyro heading")
+        return book.state(d.cam, "ml", "heading", d.x, d.y, d.light) == "trusted"
 
     def _risk(self, n):
         """(e19) (own heading doubt at 95 %, room to an edge or a neighbour less its position doubt) from the
@@ -721,6 +791,8 @@ def attach(layer, source=None, ctrl=None, mode=None, model_path=None, say=None, 
                     _tl().ML_TOTAL_HZ, "only while no roof tag names the robot" if mode == "auto" else "for every robot"))
     layer.ml_fn = source
     layer.ml_on = True
+    if getattr(layer, "book", None) is not None and hasattr(source, "book") and source.book is None:
+        source.book = layer.book                  # (e20) routing and heading trust from the run's camera trust
     orig = layer.feed
     orig_ml = layer._ml_on_demand
 
@@ -840,9 +912,75 @@ class SimDetector:
         self.tag_seen = {}
         self.auto = True
         self.last_t = None
+        self.book = None                      # (e20) set by attach() from the layer's camera trust
+        self.calls_by_cam = {}
 
     def _in(self, key, x, y):
         return any(r[0] <= x <= r[2] and r[1] <= y <= r[3] for r in self.scene.get(key) or ())
+
+    def _call_cams(self, name, t, why, region):
+        """(e20) ml_cams=[dict(name, sigma, th_sigma, th_any (heading not learnt: anywhere), th_bias, recall, cover
+        rect, dark [rects] (recall x 0.3), bump (t0, deg): its picture turned about the board's middle from t0)] and
+        ml_swap (t0, t1, a, b): two cameras' names swapped (each picture through the other's calibration: mirrored).
+        One call runs the camera routed for this question (the book's choice; else the first), the next one only where
+        it found nothing near the robot. Every detection says its camera."""
+        import tracking_layer as TL
+        s = self.sim
+        cams = list(self.scene["ml_cams"])
+        book = getattr(self, "book", None)
+        if book is not None and ROUTE != "e19" and len(cams) > 1:
+            x, y = (region[0], region[1]) if region is not None else (None, None)
+            first = book.choose([c["name"] for c in cams], "ml", job_of(why), x, y)
+            cams = [c for c in cams if c["name"] == first] + [c for c in cams if c["name"] != first]
+        B = s.board
+        cx, cy = 0.5 * (B[0] + B[2]), 0.5 * (B[1] + B[3])
+        sw = self.scene.get("ml_swap")
+        out = []
+        for k, c in enumerate(cams):
+            if k > 0 and region is not None and any(math.hypot(d.x - region[0], d.y - region[1]) <= region[2]
+                                                     for d in out):
+                break
+            if k > 0 and region is None:
+                break
+            self.calls_by_cam[c["name"]] = self.calls_by_cam.get(c["name"], 0) + 1
+            for b in s.bots.values():
+                if b.dead or (hasattr(s, "in_cover") and not s.in_cover(b.x, b.y)):
+                    continue
+                cv = c.get("cover")
+                if cv and not (cv[0] <= b.x <= cv[2] and cv[1] <= b.y <= cv[3]):
+                    continue
+                p = float(c.get("recall", SIM_P["standing"]))
+                dark = any(r[0] <= b.x <= r[2] and r[1] <= b.y <= r[3] for r in c.get("dark") or ())
+                if dark:
+                    p *= 0.3
+                if self.rng.random() >= p:
+                    continue
+                sg = float(c.get("sigma", SIM_XY_SIGMA))
+                x, y = b.x + self.rng.gauss(0, sg), b.y + self.rng.gauss(0, sg)
+                if c.get("th_any"):
+                    th = self.rng.uniform(-180.0, 180.0)
+                else:
+                    th = wrap180(b.th + self.rng.gauss(0.0, float(c.get("th_sigma", SIM_TH_SIGMA))) +
+                                 float(c.get("th_bias", 0.0)))
+                bm = c.get("bump")
+                label = c["name"]
+                if bm and t >= bm[0]:
+                    a_ = math.radians(bm[1])
+                    x, y = (cx + (x - cx) * math.cos(a_) - (y - cy) * math.sin(a_),
+                            cy + (x - cx) * math.sin(a_) + (y - cy) * math.cos(a_))
+                    th = wrap180(th + bm[1])
+                if sw and sw[0] <= t < sw[1] and label in (sw[2], sw[3]):
+                    if label == sw[2]:                 # through the other's calibration: mirrored left-right ...
+                        x, th = B[0] + B[2] - x, wrap180(180.0 - th)
+                    else:                              # ... and the other one top-bottom
+                        y, th = B[1] + B[3] - y, wrap180(-th)
+                    label = sw[3] if label == sw[2] else sw[2]
+                out.append(TL.Det("ml", t, x, y, th, None, sg, cam=label, light="dark" if dark else None))
+        if getattr(s, "cam_fault", None) or getattr(s, "cam_correct", None) is not None:
+            for d in out:
+                d.x, d.y = s.cam_map(d.x, d.y)
+        self.counts["dets"] += len(out)
+        return out
 
     def __call__(self, name, t, why, region):
         import tracking_layer as TL
@@ -862,6 +1000,8 @@ class SimDetector:
         self.last_t = t
         self.counts["ran"] += 1
         self.budget.done(t, float(self.scene.get("ml_ms", 25.0)))
+        if self.scene.get("ml_cams"):
+            return self._call_cams(name, t, why, region)          # (e20) several cameras, routed
         out = []
         B = s.board
         for b in s.bots.values():
@@ -900,4 +1040,4 @@ class SimDetector:
         return out
 
     def summary(self):
-        return dict(counts=dict(self.counts), load=self.budget.summary())
+        return dict(counts=dict(self.counts), load=self.budget.summary(), calls_by_cam=dict(self.calls_by_cam))

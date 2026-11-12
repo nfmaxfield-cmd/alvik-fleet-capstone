@@ -27,6 +27,8 @@ watch writes RUN_FOLDER/pi_monitor.csv, one row every EVERY_S, until the run (it
   det_calls, det_ms_p50, det_ms_p95, det_share_pct, det_cap_pct, det_refused, det_side_off
                                 the detector (tagfree's own numbers via monitor_feed.json): calls so far, ms a call,
                                 its share of its core over the last 4 s against its cap, calls refused for load
+  det_calls_by_cam              (e20) the detector's pictures run per camera so far, "overhead=12;side=3": which camera
+                                its routing (learned camera trust) sends each question to
 Nothing here can stop or slow a run: every read is guarded, the process runs at low priority (nice 10).
 
 Warnings (health()) come from the run's own data or the Pi's documented limits, never a typed-in number:
@@ -45,6 +47,7 @@ Warnings (health()) come from the run's own data or the Pi's documented limits, 
 
 Changelog
   2026-11-12a  first version (Mission Control build)
+  2026-11-12e20  det_calls_by_cam appended (the detector's pictures run per camera, from its routing by camera trust)
 """
 import argparse
 import csv
@@ -58,7 +61,7 @@ import subprocess
 import sys
 import time
 
-VERSION = "pi-monitor-2026-11-12a"
+VERSION = "pi-monitor-2026-11-12e20"   # e20: det_calls_by_cam. Before: "pi-monitor-2026-11-12a"
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOLS = os.path.dirname(HERE)
 for _p in (os.path.join(TOOLS, "fleet"), os.path.join(TOOLS, "experiment")):
@@ -83,7 +86,8 @@ NAME = "pi_monitor.csv"
 COLS = ["t", "clock", "core0", "core1", "core2", "core3", "load1", "temp_c", "throttled", "throttle_now",
         "throttle_since_boot", "mem_avail_mb", "mem_total_mb", "disk_free_gb", "lag_overhead_s", "lag_side_s",
         "held_overhead_s", "held_side_s", "loop_work_ms_p50", "loop_work_ms_p95", "loop_work_ms_max", "loop_period_ms",
-        "det_calls", "det_ms_p50", "det_ms_p95", "det_share_pct", "det_cap_pct", "det_refused", "det_side_off"]
+        "det_calls", "det_ms_p50", "det_ms_p95", "det_share_pct", "det_cap_pct", "det_refused", "det_side_off",
+        "det_calls_by_cam"]          # (e20) appended: the detector's pictures run per camera, "cam=n;cam=n" (routing)
 
 
 # ------------------------------------------------------------------------------------------------ readings
@@ -255,6 +259,8 @@ class Sampler:
         r["det_share_pct"] = None if dt.get("share_now") is None else round(100.0 * dt["share_now"], 1)
         r["det_cap_pct"] = None if ld.get("duty") is None else round(100.0 * ld["duty"], 1)
         r["det_refused"], r["det_side_off"] = ld.get("refused_for_load"), dt.get("side_off")
+        cb = dt.get("calls_by_cam") or {}
+        r["det_calls_by_cam"] = ";".join("%s=%d" % (k, v) for k, v in sorted(cb.items())) if cb else None
         return r
 
 
