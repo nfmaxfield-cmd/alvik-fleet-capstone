@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mission Control: Two Doors</title><meta name="description" content="Option 3: an operator page and a separate engineer console.">
+<!-- Mission Control redesign proposal, option 3. Static mockup: self-contained, no network. Numbers and robots are
+     illustrative (school conference table, its real sticker sheet). See proposal.md beside this file. -->
+<style>
+:root{--bg:#F6F7F9;--panel:#FFFFFF;--line:#E4E7EC;--ink:#101828;--muted:#5B6474;--accent:#2952CC;--accent-ink:#FFFFFF;
+--green:#12805C;--green-bg:#E7F6EF;--amber:#B54708;--amber-bg:#FEF3E2;--red:#B42318;--red-bg:#FDECEA;
+--table:#EEE9DF;--table-edge:#9C8F7A;--read:#D7EFE2;--hatch:#C9BFAE;--sticker:#8A8F99;
+--r1:#2952CC;--r2:#C2410C;--r3:#7A3EC8;--shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.08)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0F1217;--panel:#171B22;--line:#2A303A;--ink:#E6E9EF;
+--muted:#9AA3B2;--accent:#7C9BFF;--accent-ink:#0F1217;--green:#3CCB8F;--green-bg:#123326;--amber:#F5A524;--amber-bg:#3A2A0E;
+--red:#FF6B5E;--red-bg:#3D1714;--table:#24272D;--table-edge:#6B6457;--read:#173328;--hatch:#3B3830;--sticker:#7C8492;
+--r1:#7C9BFF;--r2:#FB923C;--r3:#C08BFF;--shadow:none}}
+:root[data-theme="dark"]{--bg:#0F1217;--panel:#171B22;--line:#2A303A;--ink:#E6E9EF;--muted:#9AA3B2;--accent:#7C9BFF;
+--accent-ink:#0F1217;--green:#3CCB8F;--green-bg:#123326;--amber:#F5A524;--amber-bg:#3A2A0E;--red:#FF6B5E;--red-bg:#3D1714;
+--table:#24272D;--table-edge:#6B6457;--read:#173328;--hatch:#3B3830;--sticker:#7C8492;--r1:#7C9BFF;--r2:#FB923C;--r3:#C08BFF;
+--shadow:none}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif}
+button{font:inherit;color:inherit;cursor:pointer}
+.mock{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;padding:6px 16px;background:repeating-linear-gradient(45deg,var(--amber-bg),var(--amber-bg) 10px,var(--panel) 10px,var(--panel) 20px);border-bottom:1px solid var(--line);font-size:12.5px}
+.mock b{color:var(--amber)}
+.mock .seg button{border:1px solid var(--line);background:var(--panel);padding:2px 9px;border-radius:999px;font-size:12.5px}
+.mock .seg button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.seg{display:inline-flex;gap:4px;flex-wrap:wrap}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
+.muted{color:var(--muted)} .small{font-size:13px} .tiny{font-size:11.5px}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:999px;border:1px solid var(--line);font-size:12.5px;white-space:nowrap}
+.pill.ok{color:var(--green);border-color:var(--green);background:var(--green-bg)}
+.pill.warn{color:var(--amber);border-color:var(--amber);background:var(--amber-bg)}
+.pill.bad{color:var(--red);border-color:var(--red);background:var(--red-bg)}
+.stop{background:var(--red);color:#fff;border:0;border-radius:10px;padding:10px 22px;font-weight:700;letter-spacing:.04em}
+.primary{background:var(--accent);color:var(--accent-ink);border:0;border-radius:10px;padding:10px 18px;font-weight:600}
+.ghost{background:transparent;border:1px solid var(--line);border-radius:10px;padding:8px 14px}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%}
+svg.map{width:100%;height:auto;display:block;touch-action:manipulation}
+svg.map text{font-family:inherit}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--muted);margin-top:6px}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.sw{display:inline-block;width:14px;height:10px;border-radius:2px;border:1px solid var(--line)}
+.caption{font-size:12.5px;color:var(--muted);margin:6px 0 0}
+.source{font-size:11.5px;color:var(--muted)}
+.meter{height:8px;border-radius:4px;background:var(--line);overflow:hidden}
+.meter i{display:block;height:100%;background:var(--green)}
+.meter.low i{background:var(--amber)}
+.alert{border:2px solid var(--red);background:var(--red-bg);border-radius:12px;padding:12px 14px}
+.alert h3{margin:0 0 4px;color:var(--red);font-size:16px}
+.cam{background:#2B2E33;border-radius:8px;overflow:hidden;cursor:crosshair}
+.safety summary{cursor:pointer;list-style:none}
+.safety summary::-webkit-details-marker{display:none}
+.srow{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:7px 0;border-top:1px solid var(--line)}
+.srow .v{font-size:12px;white-space:nowrap}
+.sgroup{margin:10px 0 2px;font-weight:600;font-size:13px}
+.hand{animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.35}}
+.hidden{display:none!important}
+@media (max-width:600px){.stop{padding:9px 14px}}
+
+.top{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+.doors button{border:1px solid var(--line);background:var(--bg);padding:6px 14px}
+.doors button:first-child{border-radius:10px 0 0 10px}.doors button:last-child{border-radius:0 10px 10px 0}
+.doors button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.op{max-width:1100px;margin:0 auto;padding:14px 16px 40px;display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px}
+.eng{max-width:1400px;margin:0 auto;padding:12px 16px 40px;display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:12px}
+.panel{padding:12px}
+.panel h3{margin:0 0 8px;font-size:14px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+table.k{width:100%;border-collapse:collapse;font-size:12.5px}
+table.k th,table.k td{text-align:left;padding:5px 6px;border-top:1px solid var(--line);white-space:nowrap}
+table.k th{color:var(--muted);font-weight:500}
+.layers label{font-size:12.5px;margin-right:10px;white-space:nowrap}
+.bigstart{width:100%;padding:18px;font-size:19px;border-radius:14px}
+.scroll{overflow-x:auto}
+@media (max-width:900px){.op,.eng{grid-template-columns:1fr}}
+</style></head><body>
+
+<div id="strip"></div>
+<header class="top"><b>Mission Control</b><span class="seg doors"><button data-d="op" class="on">Operator</button><button data-d="eng">Engineer</button></span><span style="flex:1"></span><span class="pill ok">School · Robots (real)</span><button class="stop">STOP</button></header>
+<main id="op" class="op"><section class="card panel"><div id="opmap"></div><p class="caption" id="opcap">Each square is a robot; the wider its ring, the less sure the system is of where it is.</p><div class="source">Measured: fused position and 95 % error per robot, 4 a second.</div></section>
+<aside style="display:flex;flex-direction:column;gap:10px"><div id="ophand"></div><div class="card panel" id="opmain"></div><div id="opcards" style="display:flex;flex-direction:column;gap:8px"></div></aside></main>
+<main id="eng" class="eng hidden"><section style="display:flex;flex-direction:column;gap:12px">
+<div class="card panel"><h3>Live map · every layer</h3><div class="layers"><label><input type="checkbox" checked> certainty rings</label><label><input type="checkbox" checked> blind allowance</label><label><input type="checkbox" checked> creeps</label><label><input type="checkbox" checked> readable area</label><label><input type="checkbox"> camera coverage</label><label><input type="checkbox"> fix sources</label><label><input type="checkbox"> plan and re-plans</label></div><div id="engmap" style="margin-top:6px"></div>
+<p class="caption">The same map as the operator's, with layers an engineer can switch on.</p></div>
+<div class="card panel scroll"><h3>What the system knows · per robot</h3><table class="k" id="ktab"></table><div class="source" style="margin-top:6px">From sources.csv, fused_pose, battery.csv and the run's live.json (1 s refresh).</div></div>
+<div class="card panel scroll"><h3>Cameras and Pi</h3><table class="k"><tr><th>camera</th><th>pictures/s</th><th>tag detect</th><th>brightness</th><th>last picture</th></tr><tr><td>overhead (C920e)</td><td>14.2</td><td>56 ms</td><td>91 (normal)</td><td>0.07 s ago</td></tr></table>
+<table class="k" style="margin-top:8px"><tr><th>Pi</th><th>temp</th><th>throttled</th><th>card</th><th>USB stick</th><th>robots sleep</th></tr><tr><td>rfidthesis</td><td>61 °C</td><td>no (never since boot)</td><td>41 GB free</td><td>112 GB free</td><td>10 min after the run</td></tr></table></div></section>
+<section style="display:flex;flex-direction:column;gap:12px"><div class="card panel"><h3>Settings in force for this run</h3><div class="small" style="margin-bottom:8px">Every value the run uses, grouped; anything not on its automatic default is flagged, and the same list is written into the run's folder.</div>
+<div id="engsafety"></div>
+<details style="margin-top:8px"><summary><b>Tracking</b> <span class="muted small">9 · all automatic</span></summary></details>
+<details style="margin-top:8px"><summary><b>Run</b> <span class="muted small">12 · 1 typed: speed 10 cm/s</span></summary></details>
+<details style="margin-top:8px"><summary><b>Calibration</b> <span class="muted small">7 · all automatic</span></summary></details>
+<details style="margin-top:8px"><summary><b>Practice and simulator</b> <span class="muted small">14 · used in practice only</span></summary></details>
+<details style="margin-top:8px"><summary><b>Typed values</b> <span class="muted small">3 first guesses · cameras disagree with 0</span></summary></details></div></section></main>
+
+<script>
+// ---------- data (school conference table: the site's sticker sheet; robots and numbers are illustrative) ----------
+const TABLE={w:396,h:168,read_x:216};
+const ST={"P01":[30,32],"P02":[76,54],"P03":[18,83],"P04":[64,13],"P05":[16,126],"P06":[52,111],"P07":[82,140],"P08":[42,58],"P09":[43,95],"P10":[84,70],"P11":[150,83],"P12":[178,103],"P13":[137,28],"P14":[118,55],"P15":[180,150],"P16":[118,154],"P17":[112,116],"P18":[147,134],"P19":[170,18],"P20":[176,50],"P21":[215,106],"P22":[244,83],"P23":[278,102],"P24":[228,19],"P25":[277,67],"P26":[227,52],"P27":[240,151],"P28":[215,134],"P29":[262,124],"P30":[276,152],"P31":[313,48],"P32":[310,83],"P33":[321,20],"P34":[350,64],"P35":[377,23],"P36":[352,39],"P37":[347,107],"P38":[378,95],"P39":[370,122],"P40":[318,137]};
+const ROBOTS=[
+ {id:"AL-1DC0",col:"var(--r1)",route:["P03","P09","P06","P17","P10","P08","P03"],speed:7,battery:82},
+ {id:"AL-2B7F",col:"var(--r2)",route:["P20","P26","P25","P22","P21","P12","P20"],speed:6,battery:74,allow:150},
+ {id:"AL-EB54",col:"var(--r3)",creep:{from:[385,157],to:[352,128]},battery:61}];
+const SIG_CAM=1.8, SIG_PER_CM=0.07, HALF_DIAG=7;
+const SAFETY=[
+ ["Never still and holds",[
+  ["MIRLT_NEVER_STILL","Held, unsure, lost or needs-a-hand robots keep making small slow moves toward safety","1","0","e17-e18"],
+  ["MIRLT_HELD_NEVER_END","A held robot never ends a mission by itself","1","0","e16"],
+  ["MIRLT_EDGE_PARK","Park a robot held at an edge for the rest of the run","0","1","e13"],
+  ["MIRLT_PARK_GIVEUP","Parking after a calibration gives up on a lost tag","0","1","e14"],
+  ["MIRLT_CALIB_GIVEUP","A calibration with a lost roof tag ends after 30 s","0","1","e13"],
+  ["MIRLT_ASK_UNATTENDED","Keep asking a person when nobody answers","0","1","e16"]]],
+ ["Edges",[
+  ["MIRLT_EDGE_RULE","One derived edge clearance on the whole swept path","derived","fixed","e08"],
+  ["MIRLT_CAM_EDGE_BIAS","Add the lights camera's measured 5 cm edge bias","on","off","e08"],
+  ["MIRLT_EDGE_BACKOUT","An edge stop reverses along the robot's own track","1","0","e16"],
+  ["MIRLT_START_EDGE","Check a robot put down at an edge before it starts","1","0","e10"],
+  ["MIRLT_START_EDGE_MODE","... and it frees itself first","recover","wait","e10"],
+  ["MIRLT_MARK_UNC","A line-sensor trip near an edge counts as an edge","1","0","e10"],
+  ["MIRLT_QUEUE_WATCH","Queued curve pieces re-checked from the real position","1","0","e10"],
+  ["MIRLT_PINNED_OBSTACLE","A robot held at an edge is an obstacle for the others","1","0","e16"],
+  ["MIRLT_CONTACT_WATCH","Pushes and collisions noticed","1","0","e16"],
+  ["MIRLT_TILT_RULE","Tilt stop at 4 deg (from the 5-6 Nov logs)","logs","old","e08"],
+  ["MIRLT_KEEPOUT_RULE","Sensor-only keep-outs fade after 15 s","fade","permanent","e08"]]],
+ ["Driving without the camera",[
+  ["MIRLT_BLIND_RULE","Drive on while the whole possible error cannot reach an edge","edge","cap","e13"],
+  ["MIRLT_BLIND_ALLOW","Blind legs allowed from each robot's own odometry record","1","0","e18"],
+  ["MIRLT_NOPIC_RULE","No pictures: each robot's risk-based limit","risk","off","e13"],
+  ["MIRLT_FIX_GAP_RULE","How old a fix may be, from each robot's measured gap","derived","fixed","e14"],
+  ["MIRLT_STAND_TRUST","A standing robot keeps its fix","1","0","e13"],
+  ["MIRLT_STAND_UNC","... and its doubt does not grow while it stands","1","0","e16"],
+  ["MIRLT_LATE_FIX","Late fixes slow a drive to what its drift allows","1","0","e17"],
+  ["MIRLT_STRAY_RETURN","A robot outside the readable area comes back first","1","0","e13"],
+  ["MIRLT_FRAME_WATCH","Say when a camera stops sending pictures","1","0","e13"],
+  ["MIRLT_LOST_PRIORITY","A lost robot goes first to the nearest readable point","1","0","e18"],
+  ["MIRLT_EMPTY_TO_READABLE","A robot with no readable points goes to one","1","0","e17"]]],
+ ["Which robot is which",[
+  ["MIRLT_ELIMINATE","A sighting nobody else can claim names the missing robot","1","0","e17"],
+  ["MIRLT_OUTBACK_ID","Short out-and-back drive to tell two robots apart","1","0","e18"],
+  ["MIRLT_IDENTITY","Close passes resolved by a wiggle","wiggle","predict","e09"],
+  ["MIRLT_GATE_RECORD","Each robot's gate grows with its drift record","1","0","e17"],
+  ["MIRLT_OWN_RESET_RULE","An own-pose re-set found by its own velocity","velocity","speed","e17"],
+  ["MIRLT_CAMERA_CORRECT","A named sighting corrects the pose at once","1","0","e17"],
+  ["MIRLT_RESEED_TURN","A re-seed never lands mid-turn","1","0","e17"],
+  ["MIRLT_REJOIN_EVIDENCE","REJOINED only on evidence","1","0","e16"],
+  ["MIRLT_CAMERA_WATCH","Camera turn directions checked against the robots'","1","0","e10"],
+  ["MIRLT_POSE_RULE","Own pose vs camera disagreement widens the doubt at once","widen","wait2s","e08"],
+  ["MIRLT_HEADING_CONFIRM","A short camera-measured crawl after a heading re-set","1","0","e17"],
+  ["MIRLT_HEADING_CLICKS","After a click: straight drive, second click gives heading","1","0","e13"],
+  ["MIRLT_DOUBT_NEIGHBOUR","Heading in doubt beside another robot: wait or creep away","1","0","e18"]]],
+ ["Saving what a run learned",[
+  ["MIRLT_ARC_SAVE_AT_END","Curve calibration saved at any run end","1","0","e17"],
+  ["MIRLT_SAVE_CAL_AT_END","Every calibration correction saved at every ending","1","0","e18"]]]];
+const N_SAFETY=SAFETY.reduce((a,g)=>a+g[1].length,0);
+
+// ---------- helpers ----------
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const Y=y=>TABLE.h-y;     // table y (from the near edge) -> svg y
+function routePts(r){return r.route.map(p=>ST[p]);}
+function polyLen(pts){let L=0;for(let i=1;i<pts.length;i++)L+=Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]);return L;}
+function along(pts,s){for(let i=1;i<pts.length;i++){const a=pts[i-1],b=pts[i],d=Math.hypot(b[0]-a[0],b[1]-a[1]);if(s<=d){const f=d?s/d:0;return{x:a[0]+(b[0]-a[0])*f,y:a[1]+(b[1]-a[1])*f,h:Math.atan2(b[1]-a[1],b[0]-a[0]),seg:i};}s-=d;}const z=pts[pts.length-1];return{x:z[0],y:z[1],h:0,seg:pts.length-1};}
+function slice(pts,s0,s1){const out=[];const a=along(pts,s0);out.push([a.x,a.y]);let acc=0;for(let i=1;i<pts.length;i++){const d=Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]);acc+=d;if(acc>s0&&acc<s1)out.push(pts[i]);}const b=along(pts,s1);out.push([b.x,b.y]);return out;}
+function pstr(pts){return pts.map(p=>p[0].toFixed(1)+","+Y(p[1]).toFixed(1)).join(" ");}
+
+// ---------- the map: static layers ----------
+let MAPN=0;function mapSVG(o){o=o||{};const W=TABLE.w,H=TABLE.h,rx=TABLE.read_x,hid="hatch"+(++MAPN);
+ let s=`<svg class="map" viewBox="-14 -12 ${W+28} ${H+30}" role="img" aria-label="The table from above with the robots">
+ <defs><pattern id="${hid}" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="var(--table)"/><line x1="0" y1="0" x2="0" y2="6" stroke="var(--hatch)" stroke-width="2"/></pattern></defs>
+ <rect x="0" y="0" width="${W}" height="${H}" fill="url(#${hid})" stroke="var(--table-edge)" stroke-width="1.2" rx="2"/>
+ <rect x="0" y="0" width="${rx}" height="${H}" fill="var(--read)"/>
+ <line x1="${rx}" y1="0" x2="${rx}" y2="${H}" stroke="var(--green)" stroke-dasharray="3 3" stroke-width=".8"/>
+ <text x="4" y="-3" font-size="7" fill="var(--muted)">Camera reads roof tags here (learned from runs)</text>
+ <text x="${rx+4}" y="-3" font-size="7" fill="var(--muted)">Blind area: wheels + gyro only</text>
+ <text x="${W/2}" y="${H+12}" font-size="7" fill="var(--muted)" text-anchor="middle">near edge (0, 0 at the bottom left)  ·  396 x 168 cm</text>`;
+ s+=`<g id="routes"></g><g id="stickers">`;
+ for(const [k,p] of Object.entries(ST)){s+=`<g class="stk" data-p="${k}" style="cursor:${o.pick?'pointer':'default'}"><circle cx="${p[0]}" cy="${Y(p[1])}" r="${o.pick?4:2.2}" fill="var(--panel)" stroke="var(--sticker)" stroke-width=".8"/>${o.labels!==false?`<text x="${p[0]}" y="${Y(p[1])+(o.pick?10:8)}" font-size="${o.pick?5.5:4.6}" fill="var(--sticker)" text-anchor="middle">${k.slice(1)}</text>`:""}</g>`;}
+ s+=`</g><g id="trails"></g><g id="allow"></g><g id="bots"></g></svg>`;return s;}
+
+// ---------- the map: live layer (robots, certainty, blind allowance, creeping, needs a hand) ----------
+const SIM={t:0,state:"running",hand:false,trail:[],creepPos:null,creepT:0,log:[],seen:{}};
+function botState(r,t){
+ if(r.creep){ // never still: small slow moves toward its best guess of safety
+  if(!SIM.creepPos){SIM.creepPos=[...r.creep.from];}
+  const tgt=r.creep.to, p=SIM.creepPos; const d=Math.hypot(tgt[0]-p[0],tgt[1]-p[1]);
+  const sig=SIM.hand?9.4:7.2;
+  return {x:p[0],y:p[1],h:Math.atan2(tgt[1]-p[1],tgt[0]-p[0]),sig,blind:true,creep:true,doing:SIM.hand?"needs a hand":"unsure near an edge",dist:d};}
+ const pts=routePts(r),L=polyLen(pts),s=(t*r.speed)%L,a=along(pts,s);
+ let sig=SIG_CAM,blind=false,bl=0;
+ if(r.allow){ // walk back along the route to measure the blind distance so far
+  let back=0;for(let q=s;q>0;q-=1){const b=along(pts,q);if(b.x<TABLE.read_x)break;back+=1;}
+  if(a.x>=TABLE.read_x){blind=true;bl=back;sig=SIG_CAM+SIG_PER_CM*back;}
+ }
+ return {x:a.x,y:a.y,h:a.h,sig,blind,bl,s,L,pts,doing:blind?"driving blind":"driving"};}
+function stepCreep(dt){const r=ROBOTS[2];if(!SIM.creepPos)SIM.creepPos=[...r.creep.from];SIM.creepT+=dt;
+ if(SIM.creepT>1.3){SIM.creepT=0;const p=SIM.creepPos,tg=r.creep.to;const d=Math.hypot(tg[0]-p[0],tg[1]-p[1]);
+  if(d<3){SIM.creepPos=[...r.creep.from];SIM.trail=[];return;}
+  const st=Math.min(2,d);SIM.trail.push([...p]);if(SIM.trail.length>14)SIM.trail.shift();
+  p[0]+=(tg[0]-p[0])/d*st;p[1]+=(tg[1]-p[1])/d*st;}}
+function drawBots(root,o){o=o||{};const g=$("#bots",root),al=$("#allow",root),tr=$("#trails",root),rt=$("#routes",root);if(!g)return;
+ let s="",a="",t="",rs="";const states=[];
+ ROBOTS.forEach((r,i)=>{const b=botState(r,SIM.t);states.push(b);
+  if(SIM.state==="before"){ // found by wiggle, standing at their start; planned routes shown
+   const p=r.creep?r.creep.to:ST[r.route[0]];b.x=p[0];b.y=p[1];b.sig=SIG_CAM;b.blind=false;b.doing="found by its wiggle";}
+  if(r.route&&o.routes!==false) rs+=`<polyline points="${pstr(routePts(r))}" fill="none" stroke="${r.col}" stroke-width="1" stroke-dasharray="${SIM.state==='after'?'none':'2 2'}" opacity="${SIM.state==='after'?.9:.55}"/>`;
+  if(SIM.state==="after"){b.x=r.creep?r.creep.to[0]:ST[r.route[0]][0];b.y=r.creep?r.creep.to[1]:ST[r.route[0]][1];b.sig=SIG_CAM;b.blind=false;b.doing="asleep";}
+  // blind allowance: the stretch ahead it may still drive before its possible error could reach an edge
+  if(SIM.state==="running"&&r.allow&&b.blind!==undefined&&!o.noAllow){
+   const used=b.bl||0,left=Math.max(0,r.allow-used);
+   if(b.blind){const s0=b.s,ahead=slice(b.pts,s0,Math.min(b.L,s0+left));
+    a+=`<polyline points="${pstr(ahead)}" fill="none" stroke="var(--green)" stroke-width="4" stroke-linecap="round" opacity=".35"/>`;
+    const end=along(b.pts,Math.min(b.L,s0+left));a+=`<line x1="${end.x-3}" y1="${Y(end.y)-3}" x2="${end.x+3}" y2="${Y(end.y)+3}" stroke="var(--green)" stroke-width="1.2"/><line x1="${end.x-3}" y1="${Y(end.y)+3}" x2="${end.x+3}" y2="${Y(end.y)-3}" stroke="var(--green)" stroke-width="1.2"/>`;}
+   b.left=left;}
+  // never-still creep trail
+  if(r.creep&&SIM.state==="running"){SIM.trail.forEach((p,k)=>{t+=`<circle cx="${p[0]}" cy="${Y(p[1])}" r="${.6+k*.05}" fill="${r.col}" opacity="${.15+k*.05}"/>`;});
+   t+=`<line x1="${b.x}" y1="${Y(b.y)}" x2="${r.creep.to[0]}" y2="${Y(r.creep.to[1])}" stroke="${r.col}" stroke-width=".7" stroke-dasharray="1.5 2" opacity=".8"/>`;}
+  // certainty ring: body half-diagonal + its 95 % error; dashed while blind
+  const R=HALF_DIAG+b.sig, hand=SIM.hand&&r.creep&&SIM.state==="running";
+  s+=`<g data-bot="${i}" style="cursor:pointer">`;
+  if(hand) s+=`<circle class="hand" cx="${b.x}" cy="${Y(b.y)}" r="${R+5}" fill="none" stroke="var(--red)" stroke-width="2"/>`;
+  s+=`<circle cx="${b.x}" cy="${Y(b.y)}" r="${R}" fill="${r.col}" fill-opacity=".10" stroke="${r.col}" stroke-width=".9" ${b.blind?'stroke-dasharray="2 1.6"':''}/>`;
+  s+=`<g transform="translate(${b.x} ${Y(b.y)}) rotate(${-b.h*180/Math.PI})"><rect x="-4.7" y="-4.7" width="9.4" height="9.4" rx="1.6" fill="${r.col}"/><path d="M2 -2.6 L4.6 0 L2 2.6" fill="none" stroke="var(--panel)" stroke-width="1.1"/></g>`;
+  if(o.labels!==false) s+=`<text x="${b.x}" y="${Y(b.y)-R-2.5}" font-size="6" font-weight="600" fill="${hand?'var(--red)':r.col}" text-anchor="middle">${r.id}${hand?' · NEEDS A HAND':''}</text>`;
+  s+=`</g>`;});
+ g.innerHTML=s;al.innerHTML=a;tr.innerHTML=t;rt.innerHTML=rs;return states;}
+
+// ---------- robot card text (shared) ----------
+function botWords(r,b){const w=[];
+ const src=b.creep?"no camera: wheels + gyro":b.blind?"no camera: wheels + gyro":"roof tag, overhead camera";
+ return {src,sig:b.sig,doing:b.doing,left:b.left};}
+
+// ---------- safety group (e18): all switches decided automatically ----------
+function safetyHTML(o){o=o||{};const changed=o.changed||{};const nCh=Object.keys(changed).length;
+ let s=`<details class="safety" ${o.open?'open':''}><summary><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><div><b>Safety</b> <span class="muted small">${N_SAFETY} switches</span></div>${nCh?`<span class="pill warn">${nCh} set by hand</span>`:`<span class="pill ok">all decided automatically</span>`}</div>
+ <div class="tiny muted" style="margin-top:3px">Nothing to set for a normal run. Each switch keeps the old way one tap away (keep features, switch them off). Source: e18's Safety group draft (tools/fleet/safety_group.py, not yet on main).</div></summary>`;
+ if(o.search) s+=`<input class="ssearch" placeholder="Find a switch (e.g. blind, edge, never still)" style="width:100%;margin:10px 0 2px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink)">`;
+ SAFETY.forEach(([grp,rows])=>{s+=`<div class="sgroup">${grp} <span class="muted small">(${rows.length})</span></div>`;
+  rows.forEach(([k,txt,auto,old,since])=>{const ch=changed[k];
+   s+=`<div class="srow" data-k="${k.toLowerCase()} ${txt.toLowerCase()}"><div><div class="small">${txt}</div><div class="mono muted">${k} · since ${since}</div></div>
+   <div class="v">${ch!==undefined?`<span class="pill warn">by hand: ${ch}</span>`:`<span class="pill ok">auto · ${auto}</span>`}${o.edit?` <button class="ghost tiny" style="padding:2px 8px">${ch!==undefined?'back to auto':'old way: '+old}</button>`:''}</div></div>`;});});
+ return s+`</details>`;}
+function wireSafety(root){const q=$(".ssearch",root);if(q)q.oninput=()=>{const v=q.value.toLowerCase();$$(".srow",root).forEach(r=>r.classList.toggle("hidden",v&&!r.dataset.k.includes(v)));};}
+
+// ---------- the click card (needs a hand): one click places it, a second gives its heading ----------
+function camSVG(step){const rx=step===2?232:218, ry=step===2?62:70;
+ return `<svg viewBox="0 0 320 180" style="width:100%;display:block"><rect width="320" height="180" fill="#2B2E33"/>
+ <polygon points="30,30 300,22 312,170 8,172" fill="#5A5E66"/><polygon points="168,26 300,22 312,170 160,171" fill="#4A4E55"/>
+ ${[[60,40],[280,34],[34,150],[290,150]].map(p=>`<rect x="${p[0]-7}" y="${p[1]-7}" width="14" height="14" fill="#fff"/><rect x="${p[0]-4}" y="${p[1]-4}" width="5" height="5" fill="#000"/>`).join("")}
+ ${step===2?`<circle cx="218" cy="70" r="6" fill="none" stroke="#FFD34D" stroke-width="1.5"/><text x="226" y="66" font-size="9" fill="#FFD34D">1st click</text>`:''}
+ <rect x="${rx-7}" y="${ry-7}" width="14" height="14" rx="2" fill="#C08BFF"/><text x="10" y="14" font-size="10" fill="#ddd">Overhead camera, live · ${step===2?'after its 6 cm straight drive':'last known spot ringed'}</text>
+ ${step===1?`<circle cx="230" cy="64" r="22" fill="none" stroke="#FF6B5E" stroke-dasharray="4 3" stroke-width="1.5"/>`:''}</svg>`;}
+function handCard(el,onDone){let step=1;
+ function render(){el.innerHTML=`<div class="alert"><h3>NEEDS A HAND · AL-EB54</h3>
+ <div class="small">Its possible error (±9 cm) could reach the far edge, so it is creeping toward the middle in 2 cm steps and asks for one click. ${step===1?'<b>Click the purple robot in the picture.</b>':'<b>It drove 6 cm straight. Click it again: the line between your clicks is its heading (± about 13°).</b>'}</div>
+ <div class="cam" style="margin-top:8px">${camSVG(step)}</div>
+ <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;align-items:center"><span class="small muted">No camera shows it?</span><button class="ghost small">Put it on a sticker…</button><button class="ghost small">Motion saw it at 386, 154: yes, that is it</button></div></div>`;
+ $(".cam",el).onclick=()=>{if(step===1){step=2;render();}else{onDone&&onDone();}};}
+ render();}
+
+// ---------- mockup strip: state + theme (also driven by the URL hash for screenshots) ----------
+function mockStrip(title,states){return `<div class="mock" role="note"><b>MOCKUP</b><span>${title} · Mission Control redesign proposal, not the real page</span>
+ <span class="seg" id="mstate">${states.map(s=>`<button data-s="${s[0]}">${s[1]}</button>`).join("")}</span>
+ <span class="seg" id="mtheme"><button data-t="auto">Auto</button><button data-t="light">Light</button><button data-t="dark">Dark</button></span></div>`;}
+function hashOpts(){const o={};location.hash.slice(1).split("&").forEach(kv=>{const [k,v]=kv.split("=");if(k)o[k]=v;});return o;}
+function setTheme(t){if(t==="auto")document.documentElement.removeAttribute("data-theme");else document.documentElement.setAttribute("data-theme",t);$$("#mtheme button").forEach(b=>b.classList.toggle("on",b.dataset.t===t));}
+function wireStrip(apply){$$("#mstate button").forEach(b=>b.onclick=()=>apply(b.dataset.s));$$("#mtheme button").forEach(b=>b.onclick=()=>setTheme(b.dataset.t));
+ const h=hashOpts();setTheme(h.theme||"auto");apply(h.state||"running");}
+function loop(tick){let last=performance.now();const h=hashOpts();if(h.t){SIM.t=+h.t;for(let i=0;i<+h.t;i+=0.1)stepCreep(0.1);}
+ function f(now){const dt=Math.min(.1,(now-last)/1000);last=now;if(SIM.state==="running"&&!h.freeze){SIM.t+=dt*2.5;stepCreep(dt*2.5);}tick();requestAnimationFrame(f);}requestAnimationFrame(f);}
+
+
+function robotCards(states,compact){return ROBOTS.map((r,i)=>{const b=states[i];const hand=SIM.hand&&r.creep&&SIM.state==="running";
+ const allow=r.allow&&SIM.state==="running"&&b.blind?`<div class="tiny muted" style="margin-top:6px">Blind allowance: <b>${Math.round(b.left)} of ${r.allow} cm</b> left before its possible error could reach an edge</div><div class="meter ${b.left<40?'low':''}" style="margin-top:3px"><i style="width:${Math.max(3,b.left/r.allow*100)}%"></i></div>`:"";
+ const creep=r.creep&&SIM.state==="running"?`<div class="tiny" style="margin-top:6px;color:var(--r3)">Never still: creeping toward the middle in 2 cm steps, pausing about 1 s for a fresh fix</div>`:"";
+ const src=SIM.state!=="running"?(SIM.state==="before"?"found by its wiggle, roof tag read":"asleep since the run ended"):(b.blind?"no camera here: its own wheels and gyro":"roof tag, overhead camera (14 a second)");
+ return `<div class="card rc" style="padding:10px 12px;${hand?'border-color:var(--red)':''}"><div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><b><span class="dot" style="background:${r.col}"></span> ${r.id}</b><span class="small ${hand?'':'muted'}" style="${hand?'color:var(--red);font-weight:600':''}">${hand?'NEEDS A HAND':b.doing}</span></div>
+ <div class="small" style="margin-top:4px">Where: ${Math.round(b.x)}, ${Math.round(b.y)} cm <b>± ${b.sig.toFixed(1)} cm</b></div>
+ ${compact?'':`<div class="tiny muted">${src} · battery ${r.battery} %</div>`}${allow}${creep}</div>`;}).join("");}
+
+document.getElementById("strip").innerHTML=mockStrip("Option 3: Two doors",[["before","Before"],["running","Running"],["hand","Needs a hand"],["after","After"]]);
+$("#opmap").innerHTML=mapSVG({labels:false});$("#engmap").innerHTML=mapSVG({labels:true});
+$("#engsafety").innerHTML=safetyHTML({open:true,search:true,edit:true,changed:{"MIRLT_EDGE_PARK":"1"}});wireSafety($("#engsafety"));
+let door=hashOpts().door||"op";
+function setDoor(d){door=d;$$(".doors button").forEach(b=>b.classList.toggle("on",b.dataset.d===d));$("#op").classList.toggle("hidden",d!=="op");$("#eng").classList.toggle("hidden",d!=="eng");}
+$$(".doors button").forEach(b=>b.onclick=()=>setDoor(b.dataset.d));setDoor(door);
+function apply(s){SIM.hand=s==="hand";SIM.state=s==="hand"?"running":s;$$("#mstate button").forEach(b=>b.classList.toggle("on",b.dataset.s===s));
+ if(SIM.hand)handCard($("#ophand"),()=>{SIM.hand=false;$("#ophand").innerHTML="";});else $("#ophand").innerHTML="";
+ $("#opmain").innerHTML=SIM.state==="before"?`<div class="small muted">Last run here: Visit points, Experiment 1 (yesterday 17:40)</div><button class="primary bigstart" style="margin-top:8px">Start: Experiment 2, reversed</button><button class="ghost" style="width:100%;margin-top:8px">Choose another run…</button><div class="small" style="margin-top:10px"><span class="pill ok">Room check 6 of 6</span> <span class="pill ok">uploads when done</span></div>`
+ :SIM.state==="after"?`<b>Experiment 2 ended</b><div class="small">40 of 40 points · uploaded · robots asleep</div><button class="primary bigstart" style="margin-top:8px">Start: Experiment 3, zig-zag</button>`
+ :`<b>Experiment 2, reversed</b><div class="small" id="opprog"></div><div class="small muted" style="margin-top:6px">Uploads when done · Safety: 1 switch set by hand (engineer)</div>`;}
+wireStrip(apply);
+loop(()=>{const a=drawBots($("#opmap")),st=drawBots($("#engmap"));$("#opcards").innerHTML=robotCards(a,true);
+ if($("#opprog"))$("#opprog").textContent=`${Math.min(40,14+Math.floor(SIM.t/6))} of 40 points`;
+ $("#ktab").innerHTML=`<tr><th>robot</th><th>source now</th><th>± 95 %</th><th>blind cm</th><th>allowance left</th><th>creeps</th><th>fixes/s</th><th>battery</th><th>state</th></tr>`+ROBOTS.map((r,i)=>{const b=st[i];return `<tr><td><span class="dot" style="background:${r.col}"></span> ${r.id}</td><td>${b.blind?'wheels + gyro':'roof tag'}</td><td>${b.sig.toFixed(1)} cm</td><td>${b.blind?Math.round(b.bl||0):0}</td><td>${r.allow?(b.blind?Math.round(b.left)+' cm':'full ('+r.allow+' cm)'):'-'}</td><td>${r.creep?Math.floor(SIM.t/1.3):0}</td><td>${b.blind?'0':'13.8'}</td><td>${r.battery} %</td><td>${SIM.hand&&r.creep?'<b style="color:var(--red)">needs a hand</b>':b.doing}</td></tr>`;}).join("");});
+
+</script></body></html>
