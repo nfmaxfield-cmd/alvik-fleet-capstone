@@ -40,12 +40,16 @@ Changelog
   2026-11-12e18  first version.
   2026-11-12e18b the fleet record and session-only curves (the replay); the prior from the replay's blind stretches.
   2026-11-12e19  (audit 12) refits off the control loop (ASYNC, set by the runners). (Nick) the prior from calibration-run data: 2.0 + 0.07 cm per cm (MIRLT_TRUST_PRIOR=replay: e18b's).
+  2026-11-12e20  (Nick 12 Nov, e19's open problem) every sample and check carries a WEIGHT, the trust of the camera it was
+                 made against (camera_trust.py, for position at that square); the fit and the model's check (k_cal) are
+                 weighted. A weight of 0 is never added (the caller refuses it: MIRLT_ODO_LEARN_TRUST). All weights 1:
+                 exactly as e19.
 """
 import json
 import math
 import os
 
-VERSION = "odo-trust-2026-11-12e19"   # e19: the prior from calibration-run data (2.0 + 0.07 cm/cm; MIRLT_TRUST_PRIOR=replay e18b's 2.3 + 0.28)
+VERSION = "odo-trust-2026-11-12e20"   # e20: samples and checks weighted by the camera's trust. Before: "odo-trust-2026-11-12e19"   # e19: the prior from calibration-run data (2.0 + 0.07 cm/cm; MIRLT_TRUST_PRIOR=replay e18b's 2.3 + 0.28)
 try:
     import safety_group as _SG
     FLEET = _SG.flag("MIRLT_TRUST_FLEET")
@@ -95,9 +99,9 @@ SPOT_V = 1.0               # cm/s: turning slower than this is a turn on the spo
 CAM_AVG_N = 3              # fixes averaged for a shadow's start (the camera's own noise / sqrt 3)
 
 
-def _qreg(rows, tau):
+def _qreg(rows, tau, w=None):
     """Quantile regression e = b + a s + cs ws + cc wc (all >= 0) at quantile tau, by linear programming (scipy);
-    None when scipy is missing or it fails."""
+    None when scipy is missing or it fails. (e20) w: each row's weight (None: all 1)."""
     try:
         import numpy as np
         from scipy.optimize import linprog
@@ -106,8 +110,9 @@ def _qreg(rows, tau):
     n = len(rows)
     X = np.array([[1.0, r[0], r[1], r[2]] for r in rows])
     e = np.array([r[3] for r in rows])
+    W = np.ones(n) if w is None else np.asarray(w, dtype=float)
     # variables: b a cs cc (>= 0), u+ (n), u- (n)
-    c = np.r_[np.zeros(4), tau * np.ones(n), (1 - tau) * np.ones(n)]
+    c = np.r_[np.zeros(4), tau * W, (1 - tau) * W]
     A = np.hstack([X, np.eye(n), -np.eye(n)])
     try:
         res = linprog(c, A_eq=A, b_eq=e, bounds=[(0, None)] * (4 + 2 * n), method="highs")
@@ -118,11 +123,24 @@ def _qreg(rows, tau):
     return tuple(float(v) for v in res.x[:4])
 
 
-def _q(vals, q):
-    v = sorted(vals)
-    if not v:
+def _q(vals, q, w=None):
+    """The q quantile (as e19: the value at int(q n) of the sorted list); (e20) with weights w, the value where the
+    weights summed in order first pass q x their total (all weights 1: the e19 value)."""
+    if w is None or all(x == 1.0 for x in w):
+        v = sorted(vals)
+        if not v:
+            return None
+        return v[min(len(v) - 1, int(q * len(v)))]
+    pairs = sorted((a, b) for a, b in zip(vals, w) if b > 0)
+    if not pairs:
         return None
-    return v[min(len(v) - 1, int(q * len(v)))]
+    tot = sum(b for _, b in pairs)
+    acc = 0.0
+    for a, b in pairs:
+        acc += b
+        if acc > q * tot:
+            return a
+    return pairs[-1][0]
 
 
 class Trust:
@@ -226,8 +244,15 @@ class Trust:
         self._last_anchor_s = -1e9
         self._inc = []
 
-    def fix(self, t, x, y, th_own, stood=False):
-        """A camera fix (picture time t) the run accepted; th_own: its own heading now (a shadow starts with it)."""
+    def fix(self, t, x, y, th_own, stood=False, w=1.0):
+        """A camera fix (picture time t) the run accepted; th_own: its own heading now (a shadow starts with it).
+        (e20) w: the trust of the camera that made it (its samples carry it; 0: the fix teaches nothing)."""
+        self._w = float(w)
+        if w <= 0.0:
+            # nothing learnt from it; shadows that have run past the longest stretch are dropped as a fix would drop
+            # them (else a refused spell let them reach 58 cm and their samples came in far beyond the 40 cm table)
+            self._shadows = [sh for sh in self._shadows if sh["s"] <= STRETCHES_CM[-1] + 5.0]
+            return
         self._fixes.append((t, float(x), float(y)))
         del self._fixes[:-CAM_AVG_N]
         self.n_seen += 1
@@ -281,11 +306,14 @@ class Trust:
         n = self._n_added
         self._n_added += 1
         hold = (n % HOLDOUT_EVERY) == HOLDOUT_EVERY - 1
+        w = float(self.__dict__.get("_w", 1.0))
         rec = dict(t=round(t, 2), s=round(s, 2), ts=round(ts, 1), tc=round(tc, 1), ws=round(ws, 1), wc=round(wc, 1),
                    e=round(e, 2), hold=int(hold), run=RUN)
+        if w != 1.0:
+            rec["w"] = round(w, 3)                        # (e20) the camera's trust (absent: 1, as e19)
         if hold:
             pred = self.radius_raw(s, ts, tc, ws, wc)
-            self.check(pred * self.k_cal, e, kind="held-out sample", t=t, raw=pred)
+            self.check(pred * self.k_cal, e, kind="held-out sample", t=t, raw=pred, w=w)
         self.samples.append(rec)
         del self.samples[:-SAMPLES_KEEP]
 
@@ -330,7 +358,8 @@ class Trust:
         fs = self._rows_of([self] if self.own_record or not self._pooled() else
                            [t for t in self.fleet.values() if t.name not in _apart(self.fleet)])
         rows = [(q["s"], q["ws"], q["wc"], q["e"]) for q in fs]
-        n_prior = PRIOR_N if len(fs) < PRIOR_UNTIL else 0
+        wts = [float(q.get("w", 1.0)) for q in fs]          # (e20) the camera's trust of each sample
+        n_prior = PRIOR_N if sum(wts) < PRIOR_UNTIL else 0      # (e20) the samples' weight, not their number
         # (e18b) each turn term keeps its prior rows until there are PRIOR_UNTIL samples WITH that kind of turning (a
         # record of straight legs alone said nothing about turns, and the fit then set the turn terms to 0)
         spot_prior = sum(1 for q in fs if q["ws"] > 0) < PRIOR_UNTIL
@@ -342,7 +371,8 @@ class Trust:
                 rows.append((L, 90.0 * L, 0.0, PRIOR_BASE_CM + PRIOR_PER_CM * L + 90.0 * L * PRIOR_SPOT * math.pi / 180))
             if curve_prior and n_prior:
                 rows.append((L, 0.0, 90.0 * L, PRIOR_BASE_CM + PRIOR_PER_CM * L + 90.0 * L * PRIOR_CURVE * math.pi / 180))
-        sol = _qreg(rows, FIT_Q)
+        wts = wts + [1.0] * (len(rows) - len(wts))           # the prior's rows weigh 1
+        sol = _qreg(rows, FIT_Q, None if all(x == 1.0 for x in wts) else wts)
         if sol is None:
             base, per, cs, cc = PRIOR_BASE_CM, PRIOR_PER_CM, PRIOR_SPOT * math.pi / 180, PRIOR_CURVE * math.pi / 180
         else:
@@ -416,17 +446,23 @@ class Trust:
         return out
 
     # -- the model's own check -----------------------------------------------------------------------------------------
-    def check(self, pred, act, kind="seen again", t=None, raw=None):
-        """Predicted (with the k_cal in force) against the error found; k_cal re-set from all checks."""
+    def check(self, pred, act, kind="seen again", t=None, raw=None, w=1.0):
+        """Predicted (with the k_cal in force) against the error found; k_cal re-set from all checks. (e20) w: the trust
+        of the camera the error was found by (the k_cal quantile is weighted; all 1: as e19)."""
         raw = (pred / self.k_cal) if raw is None else raw
-        self.cal.append(dict(t=t, pred=round(pred, 2), raw=round(raw, 3), act=round(act, 2), k=round(self.k_cal, 3),
-                             kind=kind, within=int(act <= pred)))
+        row = dict(t=t, pred=round(pred, 2), raw=round(raw, 3), act=round(act, 2), k=round(self.k_cal, 3),
+                   kind=kind, within=int(act <= pred))
+        if w != 1.0:
+            row["w"] = round(float(w), 3)
+        self.cal.append(row)
         del self.cal[:-CAL_KEEP]
         ratios = [q["act"] / max(1e-6, q["raw"]) for q in self.cal]
+        ws = [float(q.get("w", 1.0)) for q in self.cal]
         if len(ratios) < K_MIN_N:
-            self.k_cal = max(1.0, _q(ratios, CAL_TARGET) if len(ratios) >= 5 else max(ratios))
+            self.k_cal = max(1.0, _q(ratios, CAL_TARGET, ws) if len(ratios) >= 5 else max(
+                r for r, x in zip(ratios, ws) if x > 0) if any(x > 0 for x in ws) else 1.0)
         else:
-            self.k_cal = max(K_MIN, _q(ratios, CAL_TARGET))
+            self.k_cal = max(K_MIN, _q(ratios, CAL_TARGET, ws))
         return self.cal[-1]
 
     def coverage(self):

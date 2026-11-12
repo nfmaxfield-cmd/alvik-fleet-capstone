@@ -50,8 +50,9 @@ import safety_rules as SR   # noqa: E402  (e08 Phase A: the rules shared with ru
 import safety_group as SG   # noqa: E402  (e18: every safety switch's automatic default in one place)
 import odo_trust as OT      # noqa: E402  (e18, 5: each robot's measured odometry trust, the blind-drive allowance)
 import fused_pose as FP     # noqa: E402  (e09 Phase B: one filter per robot, fed by the tracking layer and RAW)
+import camera_trust as CT   # noqa: E402  (e20: learned camera trust, heading from motion)
 
-VERSION = "freeroam-2026-11-12e19"   # e19 (the Fable audit, 12 Nov): 7/10 ONE owner of wheel_scale (MIRLT_WHEEL_OWNER=pool), curves live from this session's fleet estimate (MIRLT_CURVE_LIVE, curve_live). H4 a correction beyond the robot's stated doubt (stated_doubt: its record from calibration-run data, MIRLT_BLIND_BUBBLE=record for every loss) needs motion proof (MIRLT_MOTION_PROOF: named far proves itself by an out-and-back, proof_watch; an unconfirmed correction permits no reverse toward an edge and does not widen the gate until its own move confirms it); after a restart its pose is sent and a heading check asked (on_restart / boot_watch); camera_test_step while the camera is not trusted. H6 a hung robot is never given up on (MIRLT_HANG_RECOVERY): the opposite of what tilted it first (tilt_cause), forward tries with the tilt stop raised when its nose points inward (recover_forward), growing rounds one derived pause apart, the fail memory per round, the tilt keep-out at the nearest edge, no refused creeps while tilted. H5 the creep token stands only while its holder's creep is under way; a stuck robot (tilted, recovering, its last moves did not move: stuck()) never holds or takes it. Before: "freeroam-2026-11-12e18b"   # e18b (the replay of all 10 home runs): a standing robot named all along beyond its 6 cm fix gate is corrected from the camera (MIRLT_FAR_NAMED_CORRECT); a standing re-seed keeps its own heading unless the camera's is better (MIRLT_RESEED_HEADING_KEEP); curve scales logged, not saved, until Nick decides (MIRLT_CURVE_SCALE_SAVE); the trust record pooled for the fleet (odo_trust, MIRLT_TRUST_FLEET). e18 (Nick 12 Nov decisions): (1) the tracking layer's out-and-back identity drive, made only where no body can touch (outback); (3) a creep with its heading in doubt beside a robot the camera has waits for room or goes straight away when no heading can close the gap; beside one it does not have, half steps at the slowest speed away from where it was last believed to be (MIRLT_DOUBT_NEIGHBOUR); (4) a lost / stray / needs-a-hand robot goes first (reflex priority) to the nearest readable point nobody uses, and a standing robot in its way makes room (MIRLT_LOST_PRIORITY); (5) each robot's odometry trust (odo_trust: shadow dead reckoning against the camera, its own record) gives its lost bubble and allows blind legs (curves through unreadable ground, blind_excursion) only where the predicted error keeps every margin with a way back; checked against the error found when seen again (MIRLT_BLIND_ALLOW); (6) every calibration correction (curves, straight drives) saved at any end by the agreement rules (save_corrections, MIRLT_SAVE_CAL_AT_END). Every safety switch read through safety_group. Before: "freeroam-2026-11-12e17"   # e17 (home 11 Nov, the 08:26 and 08:58 runs): (1d) a camera position the tracking layer named by elimination or a wiggle is a CORRECTION: its pose set from the camera at once (fpose, never rejected by its filter), said "CORRECTED", never "moved in" / REJOINED, and a held robot rejoins on it (MIRLT_CAMERA_CORRECT=0: as e16); (1e) a re-seed is projected to now and never lands while the robot turns (the Pi's copy of its heading is ~0.3 s old: 13-15 deg median jump when it landed mid-turn, MIRLT_RESEED_TURN=0: as before); (2) no driving blind on late fixes: each robot's measured fix age and drift against the room its path has (MIRLT_LATE_FIX=0); after an off-plan heading re-set the next move waits for a short crawl the camera confirms (MIRLT_HEADING_CONFIRM=0); (6) each robot's drift per cm measured from its own corrections. Before: "freeroam-2026-11-11e16"
+VERSION = "freeroam-2026-11-12e20"   # e20 (camera trust): every fix says its camera (on_fix cam=); the odometry record learns only from a camera trusted for position there, weighted by that trust (MIRLT_ODO_LEARN_TRUST); heading from motion on every camera (camera_trust.MotionHeading: a camera's straight-drive line with its measured noise across it) as evidence for the cameras, a heading source handed with the next fix, and a heading in doubt settled without a crawl when it is precise enough (MIRLT_MOTION_HEADING). Before: "freeroam-2026-11-12e19"   # e19 (the Fable audit, 12 Nov): 7/10 ONE owner of wheel_scale (MIRLT_WHEEL_OWNER=pool), curves live from this session's fleet estimate (MIRLT_CURVE_LIVE, curve_live). H4 a correction beyond the robot's stated doubt (stated_doubt: its record from calibration-run data, MIRLT_BLIND_BUBBLE=record for every loss) needs motion proof (MIRLT_MOTION_PROOF: named far proves itself by an out-and-back, proof_watch; an unconfirmed correction permits no reverse toward an edge and does not widen the gate until its own move confirms it); after a restart its pose is sent and a heading check asked (on_restart / boot_watch); camera_test_step while the camera is not trusted. H6 a hung robot is never given up on (MIRLT_HANG_RECOVERY): the opposite of what tilted it first (tilt_cause), forward tries with the tilt stop raised when its nose points inward (recover_forward), growing rounds one derived pause apart, the fail memory per round, the tilt keep-out at the nearest edge, no refused creeps while tilted. H5 the creep token stands only while its holder's creep is under way; a stuck robot (tilted, recovering, its last moves did not move: stuck()) never holds or takes it. Before: "freeroam-2026-11-12e18b"   # e18b (the replay of all 10 home runs): a standing robot named all along beyond its 6 cm fix gate is corrected from the camera (MIRLT_FAR_NAMED_CORRECT); a standing re-seed keeps its own heading unless the camera's is better (MIRLT_RESEED_HEADING_KEEP); curve scales logged, not saved, until Nick decides (MIRLT_CURVE_SCALE_SAVE); the trust record pooled for the fleet (odo_trust, MIRLT_TRUST_FLEET). e18 (Nick 12 Nov decisions): (1) the tracking layer's out-and-back identity drive, made only where no body can touch (outback); (3) a creep with its heading in doubt beside a robot the camera has waits for room or goes straight away when no heading can close the gap; beside one it does not have, half steps at the slowest speed away from where it was last believed to be (MIRLT_DOUBT_NEIGHBOUR); (4) a lost / stray / needs-a-hand robot goes first (reflex priority) to the nearest readable point nobody uses, and a standing robot in its way makes room (MIRLT_LOST_PRIORITY); (5) each robot's odometry trust (odo_trust: shadow dead reckoning against the camera, its own record) gives its lost bubble and allows blind legs (curves through unreadable ground, blind_excursion) only where the predicted error keeps every margin with a way back; checked against the error found when seen again (MIRLT_BLIND_ALLOW); (6) every calibration correction (curves, straight drives) saved at any end by the agreement rules (save_corrections, MIRLT_SAVE_CAL_AT_END). Every safety switch read through safety_group. Before: "freeroam-2026-11-12e17"   # e17 (home 11 Nov, the 08:26 and 08:58 runs): (1d) a camera position the tracking layer named by elimination or a wiggle is a CORRECTION: its pose set from the camera at once (fpose, never rejected by its filter), said "CORRECTED", never "moved in" / REJOINED, and a held robot rejoins on it (MIRLT_CAMERA_CORRECT=0: as e16); (1e) a re-seed is projected to now and never lands while the robot turns (the Pi's copy of its heading is ~0.3 s old: 13-15 deg median jump when it landed mid-turn, MIRLT_RESEED_TURN=0: as before); (2) no driving blind on late fixes: each robot's measured fix age and drift against the room its path has (MIRLT_LATE_FIX=0); after an off-plan heading re-set the next move waits for a short crawl the camera confirms (MIRLT_HEADING_CONFIRM=0); (6) each robot's drift per cm measured from its own corrections. Before: "freeroam-2026-11-11e16"
 VERSION_E16 = "freeroam-2026-11-11e16"   # e16 (home free roam 11 Nov 08:45-08:48, commit 4732a48: Right stopped at an edge and stood; then "REJOINED ... moved in" 1 s after NEEDS A HAND with nobody there, and Center pushed it off): (7) an edge stop reverses along the robot's own recorded track as far as the derived edge rule needs (observe.track_back_target), checked against the others' reservations, then re-plans; it holds and asks only when the track is unknown or blocked (MIRLT_EDGE_BACKOUT=0: as before); (8a) "moved in" needs evidence: a lift or a sustained camera move past its own measured noise, or its own drive out (MIRLT_REJOIN_EVIDENCE=0: as before); (8b) a robot held or stuck at an edge, or rejoined and not yet driven away, is a fixed obstacle with its uncertainty (own pose against the camera) in every plan and the reflex (MIRLT_PINNED_OBSTACLE=0); (8c) contact: a standing robot the camera sees move past its noise, or whose accelerometer jolts, stops the robots near it; a driving robot whose camera progress falls far below its wheels' stops and backs off; contact.csv (MIRLT_CONTACT_WATCH=0); (8d) a question nobody answers (ASK_WAIT_S) makes the run decide by itself, as an unattended run does (MIRLT_ASK_UNATTENDED=1: keeps asking); (9b) a standing robot's doubt no longer grows with its fix's age (home: "cannot tell whether it is clear of the edge" 22 cm in; MIRLT_STAND_UNC=0). Before: "freeroam-2026-11-10e13b"   # e13b (10 Nov, Nick 13:34): a standing robot (its own odometry shows no motion since its last fix) keeps that fix: never lost while it stands, sparse reads confirm it (MIRLT_STAND_TRUST=0: before); the lost threshold grows only for a camera slower than about 2.5 pictures a second (1.5 x the longest recent gap). e13 (10 Nov): never give up blind (BLIND_RULE edge: a lost robot drives on while its bubble + body + stop cannot reach an edge; BUBBLE_CAP behind MIRLT_BLIND_RULE=cap); stray return (a robot outside the readable area comes back along ground it drove); never give up (a robot held at an edge waits, says it needs a hand and rejoins: EDGE_PARK off); risk-based no-pictures limit per robot
 VERSION_E12 = "freeroam-2026-11-10a"   # 11-10a (e12): the curve-fit maths moved into module functions (fit_arc_points, arc_summary, arc_agree) so the calibration's curve phase uses the very same (free roam's own fitting and saving unchanged); a robot held at an edge for EDGE_PARK_S is parked and said loudly, the others roam on (MIRLT_EDGE_PARK=0: before)
 VERSION_E = "freeroam-2026-11-07e"   # 11-07e (Nick 7 Nov): a robot put down at or over an edge first tries the e08 tilt recovery, a person asked only if that fails (MIRLT_START_EDGE_MODE=wait: always wait)
@@ -339,6 +340,11 @@ LATE_SLOW_MIN = 0.2     # (e17, 2) CHOSEN: under 0.2 of its speed it waits for a
                         # the drift record's percentile (stops per hour vs closest approach to an edge)
 LATE_REC_MIN = 3        # (e17) corrections needed before a robot's own drift rate replaces the measured prior
                         # (BLIND_PER_CM 0.07 cm per cm, 29 Oct). Chosen
+ODO_LEARN = SG.value("MIRLT_ODO_LEARN_TRUST")   # (e20) "trust": the odometry record learns only from trusted cameras
+MOTION_HEADING = SG.flag("MIRLT_MOTION_HEADING")  # (e20) heading from motion on every camera
+MH_FRESH_S = 30.0       # (e20) a motion heading counts for a heading in doubt only if measured after the doubt began and
+                        # within this long (CHOSEN: under the gyro's measured drift a heading stays good to 1-2 deg for
+                        # half a minute of driving; DOE: no, HEAD_SD_PER_90 already bounds it by the turns since)
 HD_CONFIRM_DEG = 5.0    # (e17) CHOSEN: the heading the crawl checks is good to this (half COURSE_ERR_DEG). DOE: yes
 HD_CONFIRM_MAX_CM = 12.0   # (e17) CHOSEN: the crawl's longest (it is derived from the camera's noise, up to this)
 MOVED_IN_K = 4.0        # (8a) sigmas of the robot's own camera noise a move must exceed (one-sided, ~3e-5 by chance per
@@ -778,6 +784,8 @@ class Controller:
         self.blind_allow = BLIND_ALLOW
         self.params = {}                 # (e18, 6) host: {robot: {param: value}} read back with `get` (wheel_scale ...)
         self.excursions = []             # (e18, 5) every blind leg asked: allowed / shortened / refused, and its check
+        self.camtrust = None             # (e20) the site's camera_trust.TrustBook (the runner / simulator sets it)
+        self.mheading = CT.MotionHeading()   # (e20, 2) heading from motion, per robot and camera
 
     # -- I/O ---------------------------------------------------------------------------------------------------
     def out(self, r, text):
@@ -844,13 +852,15 @@ class Controller:
             r.bat_logged = (pct, t)
             self.log("battery", dict(t=round(t, 1), robot=name, pct=pct))
 
-    def on_fix(self, name, t, x, y, th=None, arrival=None, sigma=None, src=None, how=None):
+    def on_fix(self, name, t, x, y, th=None, arrival=None, sigma=None, src=None, how=None, cam=None, light=None):
         """A camera fix stamped t (the picture's time on the camera's clock), arrived at `arrival` (this controller's
         clock; None: it counts as arriving now with no delay, as the tests and older callers give it). (11-05c) The
-        delay is measured online; the fix is compared with the robot's own pose AT THE PICTURE'S TIME, never now."""
+        delay is measured online; the fix is compared with the robot's own pose AT THE PICTURE'S TIME, never now.
+        (e20) cam: the camera that made it (None: not known, as before e20); light: its lighting key."""
         r = self.R.get(name)
         if r is None:
             return
+        r.fix_cam = (CT.cam_of(src, cam), (src or "motion").split(":")[-1] or "motion", light)
         if arrival is not None:
             lead = t - arrival
             # (11-05h, home run 5 Nov) not the all-time max: a few odd fixes stamped ahead of their arrival ratcheted
@@ -958,6 +968,9 @@ class Controller:
             del r.cam_hist[:20]
         if oa is not None and r.lost is None:
             self.heading_check(r, x, y)            # (e08, A5) its own heading against the camera's motion
+        if MOTION_HEADING and not self.__dict__.get("mh_by_layer"):
+            self.motion_heading(r, t, x, y)        # (e20, 2) heading from this camera's motion (the layer feeds every
+                                                   # camera's sighting instead when it can: mh_by_layer)
 
     def on_follow(self, name, t, state, x, y, th, cur=0, last_done=None, last_failed=None):
         r = self.R.get(name)
@@ -2115,6 +2128,8 @@ class Controller:
         other robots' gap (its heading is what is in doubt). No room: the next move is planned as before, said."""
         hc = r.hd_confirm
         p = self.pos(r)
+        if hc.get("stage") is None and self.mh_settles(r, hc):
+            return                                  # (e20, 2) its own driving since the doubt already measured it
         if hc.get("stage") is None:
             if not self.fresh(r) or r.cam is None:
                 r.busy_until = self.t + 0.3
@@ -2217,6 +2232,121 @@ class Controller:
         hc["t_end"] = self.t
         r.busy_until = self.t + 0.2
 
+    # -- (e20) learned camera trust and heading from motion -------------------------------------------------------------
+    def learn_weight(self, r, x, y):
+        """(e20, Nick: the odometry record must not learn from a camera that is not trusted for that job and area) The
+        weight of the camera that made r's last fix for teaching r's odometry record: 1 when no camera is named (as e19)
+        or MIRLT_ODO_LEARN_TRUST=e19; else its trust for position at (x, y) (0 unless trusted)."""
+        fc = r.__dict__.get("fix_cam")
+        if ODO_LEARN == "e19" or self.camtrust is None or not fc or fc[0] is None:
+            return 1.0
+        return self.camtrust.teach_weight(fc[0], fc[1], "position", x, y, fc[2])
+
+    def motion_heading(self, r, t, x, y, cam=None, method=None, light=None):
+        """(e20, 2) Heading from motion on every camera: while r drives straight on its own command (forward or back), the
+        camera's line of sightings gives its heading (camera_trust.MotionHeading, its precision from that camera's
+        measured noise across the line and the distance). Each finished stretch is (a) evidence for that camera's
+        heading trust against its own gyro heading while that is sure, (b) a heading source: kept for the next fix when
+        the camera is trusted for heading there, and (c) what settles a heading in doubt without a crawl."""
+        fc = (cam, method or "motion", light) if cam is not None else (r.__dict__.get("fix_cam") or (None, "motion", None))
+        cam = fc[0] or "camera"
+        key = cam if fc[1] in ("motion", None) else "%s/%s" % (cam, fc[1])
+        mv = r.move
+        sign = 0
+        if mv is not None and mv.get("phase") == "drive" and r.lost is None and (
+                not mv.get("curve") or abs(mv.get("k", 0.0)) < 1e-3) and r.own is not None and r.own[4] == "drive":
+            sign = -1 if mv.get("rev") else 1
+        claim = CT.CLAIM_POS_CM.get(fc[1], 1.0)
+        res = self.mheading.feed(r.name, key, t, x, y, sign, r.own[3] if r.own is not None else None, claim)
+        if res is None:
+            return None
+        res["light"] = fc[2]
+        res["cam"] = cam
+        self.counts["motion_headings"] = self.counts.get("motion_headings", 0) + 1
+        own = self.own_at(r, res["t"])
+        hsd = self.head_sd(r)
+        book = self.camtrust
+        st = "legacy"
+        if book is not None and fc[0] is not None:
+            # usable only from a camera trusted for heading AND for position there (a motion heading is made of its
+            # positions: a mirrored or bumped picture is caught by the position checks first)
+            st = book.state(fc[0], "motion-heading", "heading", x, y, fc[2])
+            if st == "trusted" and book.state(fc[0], fc[1], "position", x, y, fc[2]) != "trusted":
+                st = "unproven"
+        if own is not None and own[2] is not None:
+            err = wrap180(res["th"] - own[2])
+            res["err_own"] = round(err, 1)
+            tight = CT.HEAD_K * math.hypot(res["sigma"], HEAD_SD0)    # its own heading as sure as it ever is
+            loose = CT.HEAD_K * math.hypot(res["sigma"], hsd)         # ... as sure as it is now
+            if book is not None and fc[0] is not None and r.__dict__.get("hd_confirm") is None:
+                # an agreement inside the tight band is evidence for the camera whatever the gyro's doubt (a wrong
+                # camera lands there about 2 x tight / 360 of the time); a disagreement is evidence against it only
+                # while its own heading is SURE (doubt within what the crawl calls confirmed, HD_CONFIRM_DEG)
+                if abs(err) <= tight:
+                    book.observe(fc[0], "motion-heading", "heading", x, y, True, 1.0, fc[2], self.t,
+                                 "its own gyro heading")
+                elif hsd <= HD_CONFIRM_DEG and abs(err) > loose:
+                    book.observe(fc[0], "motion-heading", "heading", x, y, False, 1.0, fc[2], self.t,
+                                 "its own gyro heading")
+            if st == "trusted" and abs(err) <= tight and res["sigma"] <= HD_CONFIRM_DEG / 2.0 and \
+                    r.__dict__.get("hd_confirm") is None:
+                # a free heading check from its own driving (never still): its heading is confirmed as by a crawl
+                r.turn_since_head = 0.0
+                self.counts["heading_confirmed_by_motion"] = self.counts.get("heading_confirmed_by_motion", 0) + 1
+        res["state"] = st
+        if st == "trusted" and book is not None:  # (an unnamed camera, as before e20: nothing changes)
+            r.mh = dict(res, t_ctrl=self.t)
+        self.log("motion_heading", dict(t=round(self.t, 2), robot=r.name, cam=cam, th=res["th"], sigma=res["sigma"],
+                                        L=res["L"], n=res["n"], err_own=res.get("err_own"), state=st))
+        return res
+
+    def mh_settles(self, r, hc):
+        """(e20, 2) A heading in doubt settled by a motion heading measured after the doubt began, from a camera trusted
+        for heading there, precise enough for what the crawl would measure (sigma under HD_CONFIRM_DEG / 2, the crawl's
+        own design): confirmed (within HD_CONFIRM_DEG of its own) or set from it. Returns True when settled."""
+        if not MOTION_HEADING:
+            return False
+        mh = r.__dict__.get("mh")
+        if mh is None or mh["t_ctrl"] < hc["t"] or self.t - mh["t_ctrl"] > MH_FRESH_S or \
+                mh["sigma"] > HD_CONFIRM_DEG / 2.0 or mh.get("state") != "trusted":
+            return False
+        own = r.own[3] if r.own is not None else None
+        if own is None:
+            return False
+        # its own heading has turned since the stretch: the stretch's error carried to now
+        o_then = self.own_at(r, mh["t"])
+        err = wrap180(mh["th"] - (o_then[2] if o_then is not None and o_then[2] is not None else own))
+        r.hd_confirm = None
+        self.counts["hd_settled_by_motion"] = self.counts.get("hd_settled_by_motion", 0) + 1
+        if abs(err) <= HD_CONFIRM_DEG:
+            self.counts["hd_confirmed"] = self.counts.get("hd_confirmed", 0) + 1
+            self.event(r, "heading confirmed", "by its own driving: camera %s saw it go %.0f deg over %.0f cm (+-%.1f deg), "
+                       "its own heading %.1f off; no crawl needed" % (mh["cam"], mh["th"], mh["L"], mh["sigma"], err))
+            return True
+        p = self.pos(r)
+        h = wrap180(own + err)
+        if p is not None:
+            self.out(r, "fpose %.2f %.2f %.2f 1.0 %.2f" % (p[0], p[1], h, max(1.0, mh["sigma"])))
+            r.fpose_t = self.t
+        self.counts["hd_confirm_set"] = self.counts.get("hd_confirm_set", 0) + 1
+        self.event(r, "heading set", "by its own driving: camera %s saw it go %.0f deg over %.0f cm (+-%.1f deg), its "
+                   "own heading was %.0f deg off: set from the camera; no crawl needed" % (
+                       mh["cam"], mh["th"], mh["L"], mh["sigma"], err))
+        return True
+
+    def mh_for_fix(self, name, max_age=1.0):
+        """(e20, 2) (heading, sigma) to send with this robot's next fix: a fresh motion heading of a camera trusted for
+        heading (its stretch ended within max_age s), moved on by its own turn since; else None."""
+        r = self.R.get(name)
+        mh = r.__dict__.get("mh") if r is not None else None
+        if not MOTION_HEADING or mh is None or self.t - mh["t_ctrl"] > max_age or mh.get("sent"):
+            return None
+        o_then = self.own_at(r, mh["t"])
+        if r.own is None or o_then is None or o_then[2] is None:
+            return None
+        mh["sent"] = True
+        return wrap180(mh["th"] + wrap180(r.own[3] - o_then[2])), mh["sigma"]
+
     # -- (e18, Nick 12 Nov decision 5) each robot's odometry trust and the blind-drive allowance ------------------
     def trust_fix(self, r, t, x, y, oa):
         """An accepted camera fix: its trust record's shadows are checked against it; standing, the scatter of its
@@ -2224,7 +2354,11 @@ class Controller:
         tru = self.trust.get(r.name)
         if tru is None:
             return
-        tru.fix(t, x, y, oa[2] if oa is not None else self.heading(r))
+        w = self.learn_weight(r, x, y)
+        if w <= 0.0:
+            self.counts["odo_learn_refused"] = self.counts.get("odo_learn_refused", 0) + 1
+            return                                  # (e20) a camera not trusted for position here teaches nothing
+        tru.fix(t, x, y, oa[2] if oa is not None else self.heading(r), w=w)
         if self.t - r.__dict__.get("noise_t", -1e9) >= 5.0 and self.standing(r) and r.own is not None:
             # only pictures taken after its own pose last moved (a fix ~0.5 s old may still show it driving)
             t_still = r.own_hist[0][0] if r.own_hist else t
@@ -2258,7 +2392,17 @@ class Controller:
         tru = self.trust[r.name]
         pred = self.lost_radius(r)
         ex = r.__dict__.get("excursion")
-        chk = tru.check(pred, act, kind="excursion" if ex is not None else "seen again", t=self.t)
+        cpos = r.cam[1:3] if r.cam is not None else (None, None)
+        w = self.learn_weight(r, *cpos)
+        if w <= 0.0:
+            # (e20, e19's open problem) the error was "found" by a camera not trusted for position there: the record does
+            # not learn from it (a missing or mirrored camera widened k_cal x7 in e19's reading)
+            self.counts["blind_checks_refused"] = self.counts.get("blind_checks_refused", 0) + 1
+            self.event(r, "blind check not learnt", "after its blind stretch the camera found %.1f cm, but camera %s is "
+                       "not trusted for position there: its odometry record does not learn from it" % (
+                           act, (r.__dict__.get("fix_cam") or ("?",))[0]))
+            return
+        chk = tru.check(pred, act, kind="excursion" if ex is not None else "seen again", t=self.t, w=w)
         self.counts["blind_checked"] = self.counts.get("blind_checked", 0) + 1
         if not chk["within"]:
             self.counts["blind_outside"] = self.counts.get("blind_outside", 0) + 1

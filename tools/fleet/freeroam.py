@@ -48,7 +48,7 @@ for p in (HERE, TOOLS):
 import freeroam_core as FC   # noqa: E402
 
 PY = sys.executable
-VERSION = "freeroam-runner-2026-11-12e19"   # e19 (the Fable audit H1, H2, H4, 10, 11): the layer gets the robots' stated doubt (proof_fn) and says the whole-camera verdict; a restart re-establishes pose and heading, the follow run always started again (no 20-restart cap); camera test drives while the camera is not trusted. (H1, H2): a dry run has its own settings folder (dry_conf_dir); every pooled fit and workspace save records its source; a real run checks the settings for dry-run data first (dry_check.at_real_start). H1: stop to every robot FIRST at every ending (the time cap, all out, Stop / Ctrl+C / SIGTERM, an error), then each save in its own try (a full card cannot keep stop or the later steps from running); a second signal while ending is said and ignored. Before: "freeroam-runner-2026-11-12e18"   # e18 (Nick 12 Nov decisions 2, 5, 6): the Safety group said at the start and written into run.json; each robot's odometry trust record loaded from the Pi's store (odo_trust.json) and saved at every end and every minute; every calibration correction saved at ANY end (the time cap, Stop / Ctrl+C / SIGTERM, an error: save_corrections in the finally), the wheel and gyro scales in use read back at the start (get); the layer's out-and-back request passed to the controller. Before: "freeroam-runner-2026-11-12e17"   # e17: the layer told who is unaccounted, its corrections (how) to the controller (an fpose, never a fix the robot's filter would refuse), revoked eliminations, the board for the gate's cap, the ML hook (off). Before: "freeroam-runner-2026-11-11e16"
+VERSION = "freeroam-runner-2026-11-12e20"   # e20 (camera trust): every bridge fix says its camera (det_of: cam_bridge:<camera>); the site's learned camera trust (camera_trust.TrustBook) loaded at the start from <conf>/camera_trust/<site>.json, hooked into the layer and the controller, saved with every checkpoint and at every end, written into state.json and camera_trust.json in the run folder (Mission Control's Camera trust view); a motion heading from a trusted camera goes with the next fix. Before: "freeroam-runner-2026-11-12e19"   # e19 (the Fable audit H1, H2, H4, 10, 11): the layer gets the robots' stated doubt (proof_fn) and says the whole-camera verdict; a restart re-establishes pose and heading, the follow run always started again (no 20-restart cap); camera test drives while the camera is not trusted. (H1, H2): a dry run has its own settings folder (dry_conf_dir); every pooled fit and workspace save records its source; a real run checks the settings for dry-run data first (dry_check.at_real_start). H1: stop to every robot FIRST at every ending (the time cap, all out, Stop / Ctrl+C / SIGTERM, an error), then each save in its own try (a full card cannot keep stop or the later steps from running); a second signal while ending is said and ignored. Before: "freeroam-runner-2026-11-12e18"   # e18 (Nick 12 Nov decisions 2, 5, 6): the Safety group said at the start and written into run.json; each robot's odometry trust record loaded from the Pi's store (odo_trust.json) and saved at every end and every minute; every calibration correction saved at ANY end (the time cap, Stop / Ctrl+C / SIGTERM, an error: save_corrections in the finally), the wheel and gyro scales in use read back at the start (get); the layer's out-and-back request passed to the controller. Before: "freeroam-runner-2026-11-12e17"   # e17: the layer told who is unaccounted, its corrections (how) to the controller (an fpose, never a fix the robot's filter would refuse), revoked eliminations, the board for the gate's cap, the ML hook (off). Before: "freeroam-runner-2026-11-11e16"
 VERSION_E16 = "freeroam-runner-2026-11-11e16"   # e16 (home 11 Nov 08:48): each RAW row's accelerometer (ax, ay) and lift flag to the controller (on_raw_motion: a jolt while standing is a contact; a lift is evidence a person moved it). Before: "freeroam-runner-2026-11-10e14b"   # e14b: a dark picture holds every robot until the camera has adjusted. e14 (10 Nov): the battery floor from MIRLT_MIN_BATTERY, else Mission Control's Advanced, else the site file, said at the start
 VERSION_E13 = "freeroam-runner-2026-11-10e13"   # e13 (10 Nov): --readable-map (school: plan only where the camera reads tags; MIRLT_ROAM_READABLE=0 the old whole table)
 VERSION_E12 = "freeroam-runner-2026-11-10e12"   # e12 (10 Nov): the bridge's "camera" messages (no pictures) said and logged; one robot held at an edge parked and shown, the others roam on; orderly shutdown
@@ -202,6 +202,30 @@ class Runner:
                                           req=getattr(self.layer, "wiggle_req", None))),
                                       board=tuple(rect)[:4], ml_fn=ml_detector_fn())
         self.layer.say_fn = say                 # (e19, audit 10) the whole-camera verdict on screen
+        # (e20) the site's learned camera trust: every camera starts unproven at a new site and earns its scores; the
+        # scores of earlier runs at this site are loaded (MIRLT_CAMERA_TRUST=e19: off)
+        self.camtrust = None
+        try:
+            import camera_trust as CT
+            if TL.CAMERA_TRUST != "e19":
+                self.camtrust = CT.for_site(getattr(a, "site", "home") or "home", board=tuple(rect)[:4],
+                                            light=getattr(a, "tracking", None), conf_dir=getattr(a, "conf_dir", None))
+                self.layer.book = self.camtrust
+                self.ctrl.camtrust = self.camtrust
+                self.layer.own_sd_fn = lambda n, d: self.ctrl.trust[n].radius(d) / 2.45
+                self.camtrust.say_fn = say
+                c_ = self.ctrl
+                # (e20, 2) every camera's sighting of a named robot: heading from motion, at the picture's time
+                self.layer.member_fn = lambda n, d, t: c_.motion_heading(c_.R[n], t - c_.clock, d.x, d.y, d.cam, d.src,
+                                                                         d.light)
+                c_.mh_by_layer = True
+                self.layer.cam_sigma_fn = lambda cam, m: c_.mheading.sigma_cam(
+                    cam if m in ("motion", None) else "%s/%s" % (cam, m))
+                say("Camera trust (e20): %s" % ("; ".join(self.camtrust.plain_words()) if self.camtrust.cells else
+                                                 "a new site: every camera starts unproven and earns its trust from checks "
+                                                 "against the robots' own wheels and gyro"))
+        except Exception as e:  # noqa: BLE001  (never stops a run: the layer runs as e19)
+            say("(camera trust not started: %s)" % e)
         # (e19, audit H4) an elimination beyond the robot's own stated doubt asks for motion proof first
         self.layer.proof_fn = (lambda n, sg: self.ctrl.proof_limit(self.ctrl.R[n], sg)) if FC.MOTION_PROOF else None
         # (e17, 1c / 6) the controller's measured corrections widen the layer's gate for that robot
@@ -604,6 +628,18 @@ class Runner:
         kind = src.split(":")[-1]
         th = ev.get("th")
         th = None if th is None else float(th)
+        try:
+            import camera_trust as CT
+            cam = CT.cam_of(src, ev.get("cam"))           # (e20) cam_bridge:<camera>, or the detector's camera
+        except Exception:  # noqa: BLE001
+            cam = None
+        d = Runner._det_of(ev, src, kind, th)
+        d.cam, d.light = cam, ev.get("light")
+        return d
+
+    @staticmethod
+    def _det_of(ev, src, kind, th):
+        import tracking_layer as TL
         if kind == "ml":
             # (e13) the trained detector (tag_bridge --ml, off by default): an outline with no name, as motion
             return TL.Det("ml", float(ev["t"]), ev["x"], ev["y"], th, None, ev.get("sigma"))
@@ -705,7 +741,8 @@ class Runner:
                     self.layer.own(n, tp, oa[0], oa[1], oa[2], r.own[4] == "idle")
             for f in self.layer.feed(tp, [self.det_of(ev) for ev in batch[tp]]):
                 named.append(dict(type="fix", robot=f["robot"], t=f["t"], x=f["x"], y=f["y"], th=f["th"],
-                                  sigma=f["sigma"], src=f["src"], sigma_th=f.get("sigma_th", 3.0), how=f.get("how")))
+                                  sigma=f["sigma"], src=f["src"], sigma_th=f.get("sigma_th", 3.0), how=f.get("how"),
+                                  cam=f.get("cam"), light=f.get("light")))
         c.camera_proven = self.layer.proven
         if getattr(self.layer, "cam_test_want", None) and hasattr(c, "camera_test_step"):
             c.camera_test_step(self.layer.cam_test_want)     # (e19) the camera not trusted: a short test drive
@@ -719,7 +756,8 @@ class Runner:
             # (11-05c) the arrival time too: the controller measures the camera's delay and compares each fix with
             # the robot's own pose at the picture's time
             c.on_fix(n, float(ev["t"]), float(ev["x"]), float(ev["y"]), None if th is None else float(th),
-                     arrival=now, sigma=ev.get("sigma"), src=ev.get("src"), how=ev.get("how"))
+                     arrival=now, sigma=ev.get("sigma"), src=ev.get("src"), how=ev.get("how"), cam=ev.get("cam"),
+                     light=ev.get("light"))
             if ev.get("how"):
                 continue                              # (e17) a correction: the robot got an fpose, not a fix
             self.track.write("%.3f,%s,%.2f,%.2f,%s,%.3f\n" % (ev["t"], n, ev["x"], ev["y"], "" if th is None else
@@ -730,6 +768,10 @@ class Runner:
                 continue
             off = min(v for tt, v in o if tt > now - 30.0) if any(tt > now - 30.0 for tt, _ in o) else o[-1][1]
             ms = int(round((float(ev["t"]) - c.clock - off) * 1000))     # the picture's time on this clock
+            if th is None and hasattr(c, "mh_for_fix"):
+                mh = c.mh_for_fix(n)        # (e20, 2) a trusted camera's heading from its motion goes with the fix
+                if mh is not None:
+                    th, ev["sigma_th"] = mh[0], round(max(1.0, mh[1]), 2)
             self.send(n, "fix %d %.2f %.2f %s %.2f %.2f" % (ms, ev["x"], ev["y"], "-" if th is None else "%.2f" % th,
                                                             ev.get("sigma", 1.0), ev.get("sigma_th", 3.0)))
             self.fix_last[n] = now
@@ -997,6 +1039,16 @@ class Runner:
 
     def trust_save(self, why):
         import safety_group as SG
+        if getattr(self, "camtrust", None) is not None:
+            try:                            # (e20) the site's camera trust: every checkpoint and every end
+                p_ = self.camtrust.save(why=why)
+                if p_ and "checkpoint" not in why:
+                    say("Camera trust saved (%s): %s" % (p_, "; ".join(self.camtrust.plain_words())))
+                with open(os.path.join(self.dir, "camera_trust.json"), "w") as f:
+                    json.dump(dict(self.camtrust.summary(), words=self.camtrust.plain_words(),
+                                   motion_heading=self.ctrl.mheading.summary()), f, default=str)
+            except Exception as e:  # noqa: BLE001
+                say("(camera trust not saved: %s)" % e)
         if self.a.dry or not (SG.flag("MIRLT_SAVE_CAL_AT_END") and SG.flag("MIRLT_BLIND_ALLOW")):
             return None
         import odo_trust as OT
@@ -1014,6 +1066,9 @@ class Runner:
                   tagfree=self.tagfree.summary() if self.tagfree is not None else None,
                   filters={n: (r.fp.summary() if r.fp is not None else None) for n, r in c.R.items()},
                   odo_trust={n: t.summary() for n, t in getattr(c, "trust", {}).items()},     # (e18, 5)
+                  camera_trust=(dict(words=self.camtrust.plain_words(), calls=dict(self.camtrust.calls),
+                                     events=list(self.camtrust.events[-10:]))
+                                if getattr(self, "camtrust", None) is not None else None),          # (e20)
                   excursions=list(getattr(c, "excursions", []))[-50:],
                   corrections_saved=list(getattr(self, "saved_corrections", []) or []))
         ep = list(getattr(c, "edge_parked", None) or [])
