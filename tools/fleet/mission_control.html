@@ -45,6 +45,7 @@ table.kv td:first-child{color:var(--muted);word-break:break-word}table.kv input,
 details.more{border-top:1px solid var(--border);padding-top:10px}details.more summary{cursor:pointer;font-weight:500}
 .eng{display:none}body.details .eng{display:block}
 svg.table{width:100%;height:auto;display:block;background:#fff;border-radius:8px}
+svg.table.live{max-height:56vh}
 .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
 .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:middle}
 .err{color:var(--red);font-size:13px;min-height:18px}
@@ -76,6 +77,7 @@ button.stopall:hover{filter:brightness(1.08)}
 .prefs .why{font-size:12.5px;color:var(--muted);margin-top:3px;line-height:1.35}
 .prefs label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}.prefs label select,.prefs label input{color:var(--ink)}
 .statusbox{border-left:4px solid var(--accent);padding-left:12px}
+@keyframes pulse{50%{opacity:.3}}.handring{animation:pulse 1.2s ease-in-out infinite}
 .stopbox{margin:8px 0;padding:10px 12px;border-radius:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .stopbox.stopping{background:var(--warn-bg);border:1px solid var(--warn-border)}.stopbox.stopped{background:var(--green-bg);border:1px solid var(--green)}
 details.adv>summary{font-weight:600;cursor:pointer;color:var(--muted)}
@@ -1118,6 +1120,7 @@ function startScreen() {
     <p style="margin:6px 0;font-size:15px">${esc(st.words || "")}${st.points ? " Points done: " + esc(String(st.points)) + "." : ""}</p>
     ${st.stop ? `<div class="stopbox ${st.stop.phase}"><b>${st.stop.phase === "stopping" ? "Stopping\u2026" : "Stopped"}</b> ${(st.stop.robots || []).map(r => `<span class="pill">${esc(robotLabel(r.name))}: ${esc(r.state)}</span>`).join(" ")}${(st.stop.forced || []).length ? `<div class="small" style="color:var(--red)">${esc(st.stop.forced.join("; "))}</div>` : ""}</div>` : ""}
 
+    ${liveMapCard(st)}
     ${(st.needs_hand || []).length ? `<div class="corners needhand" style="border-color:var(--red);color:var(--red)"><b>A robot at the table's edge needs a hand now: move it a hand's width onto the board and it rejoins by itself</b>${st.needs_hand.map(w => `<p style="margin:6px 0">${esc(w)}</p>`).join("")}</div>` : ""}
     ${(st.edge_parked || []).length ? `<div class="corners" style="border-color:var(--red);color:var(--red)"><b>A robot was left at the table's edge: someone must move it before the next run</b>${st.edge_parked.map(w => `<p style="margin:6px 0">${esc(w)}</p>`).join("")}</div>` : ""}
     ${(st.questions || []).map(q => `<div class="corners question" data-q="${esc(q.id)}"><b>A question from the run (${esc(q.robot)} is held until you answer)</b><p style="margin:6px 0 12px">${esc(q.text)}</p><div class="row">${(q.choices || []).map(c => `<button class="p" data-qid="${esc(q.id)}" data-choice="${esc(c)}">${esc(c)}</button>`).join(" ")}</div></div>`).join("")}
@@ -1222,6 +1225,37 @@ function wireVisitPick() {
   }
 }
 function robotLabel(n) { return String(n || ""); }   // (12 Nov) the nickname
+// (Mission Control build, 12 Nov, 1c; the audit's F3) the live table on the Start screen: each robot by its nickname,
+// a ring for its body plus its 95 % error (dashed: no camera has it now), red when it needs a hand. /api/live.
+let LIVE = null, liveT = 0;
+async function liveLoad() { try { LIVE = await api("/api/live"); liveT = Date.now(); } catch (e) { /* the page carries on */ } }
+function liveTableSVG(L, W) {
+  const f = L.table, pad = 10; W = W || 760;
+  const k = W / (f.x_max - f.x_min + 2 * pad), H = (f.y_max - f.y_min + 2 * pad) * k + 14;
+  const X = x => ((x - f.x_min + pad) * k).toFixed(1), Y = y => ((f.y_max + pad - y) * k).toFixed(1);
+  let o = `<svg class="table live" viewBox="0 0 ${W} ${H.toFixed(0)}" role="img" aria-label="The table now, seen from above, with each robot">`;
+  o += `<rect x="${X(f.x_min)}" y="${Y(f.y_max)}" width="${((f.x_max - f.x_min) * k).toFixed(1)}" height="${((f.y_max - f.y_min) * k).toFixed(1)}" fill="var(--table)" stroke="#98A2B3" rx="4"/>`;
+  for (const [lab, p] of Object.entries(L.points || {})) o += `<circle cx="${X(p[0])}" cy="${Y(p[1])}" r="${Math.max(2.5, 1.6 * k).toFixed(1)}" fill="#fff" stroke="#98A2B3"/><text x="${X(p[0])}" y="${(+Y(p[1]) + 4 * k + 6).toFixed(1)}" font-size="9" fill="#98A2B3" text-anchor="middle">${esc(String(lab).replace(/^P/, ""))}</text>`;
+  for (const r of (L.robots || [])) {
+    if (r.x == null || r.y == null) continue;
+    const R = (7 + (r.pm_cm || 0)) * k, c = r.colour || "#5B6474", h = r.th == null ? null : -r.th;
+    if (r.needs_hand) o += `<circle class="handring" cx="${X(r.x)}" cy="${Y(r.y)}" r="${(R + 6).toFixed(1)}" fill="none" stroke="var(--red)" stroke-width="3"/>`;
+    o += `<circle cx="${X(r.x)}" cy="${Y(r.y)}" r="${R.toFixed(1)}" fill="${c}" fill-opacity=".10" stroke="${c}" stroke-width="1.5" ${r.seen ? "" : 'stroke-dasharray="5 4"'}/>`;
+    o += `<g transform="translate(${X(r.x)} ${Y(r.y)})${h == null ? "" : ` rotate(${h.toFixed(1)})`}"><rect x="${(-4.7 * k).toFixed(1)}" y="${(-4.7 * k).toFixed(1)}" width="${(9.4 * k).toFixed(1)}" height="${(9.4 * k).toFixed(1)}" rx="${(1.6 * k).toFixed(1)}" fill="${c}"/>${h == null ? "" : `<path d="M${(2 * k).toFixed(1)} ${(-2.6 * k).toFixed(1)} L${(4.6 * k).toFixed(1)} 0 L${(2 * k).toFixed(1)} ${(2.6 * k).toFixed(1)}" fill="none" stroke="#fff" stroke-width="2"/>`}</g>`;
+    o += `<text x="${X(r.x)}" y="${(+Y(r.y) - R - 5).toFixed(1)}" font-size="13" font-weight="700" fill="${r.needs_hand ? "var(--red)" : c}" text-anchor="middle" stroke="#fff" stroke-width="3" paint-order="stroke">${esc(r.name)}${r.needs_hand ? " · NEEDS A HAND" : ""}</text>`;
+  }
+  o += `<text x="${(W / 2).toFixed(0)}" y="${(H - 3).toFixed(0)}" font-size="10" fill="#98A2B3" text-anchor="middle">${(f.x_max - f.x_min).toFixed(0)} x ${(f.y_max - f.y_min).toFixed(0)} cm · 0, 0 at the bottom left</text>`;
+  return o + "</svg>";
+}
+function liveMapCard(st) {
+  if (!st || !st.kind) return "";
+  if (!LIVE || Date.now() - liveT > 2500) liveLoad().then(() => { if (screen === 9 && !document.activeElement.matches("input,select")) { const y = window.scrollY; render(); window.scrollTo(0, y); } });
+  if (!LIVE) return `<div class="card" id="livemap"><p class="small muted">Loading the live table...</p></div>`;
+  const rows = (LIVE.robots || []).map(r => `<div class="between small" style="padding:3px 0"><span><span class="dot" style="background:${r.colour}"></span><b>${esc(r.name)}</b> <span class="muted" title="Its WiFi name or address">${esc(r.ref || "")}</span></span><span class="${r.needs_hand ? "" : "muted"}" style="${r.needs_hand ? "color:var(--red);font-weight:600" : ""}">${r.needs_hand ? "NEEDS A HAND" : esc(r.doing || "")}${r.pm_cm != null ? ` · \u00b1${r.pm_cm.toFixed(1)} cm` : ""}${r.battery != null ? ` · ${esc(r.battery)} %` : ""} · ${esc(r.source)}</span></div>`).join("");
+  return `<div class="card" id="livemap" style="margin-top:10px"><h3>The table now</h3>${liveTableSVG(LIVE)}${rows || `<p class="small muted">No robot position yet: they appear once the run has found them.</p>`}
+    <p class="small" style="margin:6px 0 0">Each square is a robot, named by its nickname; the wider its ring, the less sure the run is of where it is (dashed: no camera has it now).</p>
+    <p class="small muted" style="margin:2px 0 0">Measured: each robot's position and its 95 % error, from ${esc(LIVE.source || "the run")}, refreshed every 2 s.</p></div>`;
+}
 function placeName(w) { const k = (w || {}).kind; return k === "home" ? "Home: the 4 x 4 ft board" : k === "school" ? "School: the conference table" : k === "new" ? "A new area (" + (w.site || "") + ")" : ((S.site && S.site.title) || "Home"); }
 function wireStart() {
   document.querySelectorAll("[data-run]").forEach(b => b.onclick = async () => {

@@ -278,3 +278,43 @@ def test_a_school_run_on_the_robots_passes_upload(tmp_path, monkeypatch):
     assert "--upload" in got["cmd"]
     S.start_cam_run("visit", "sim-cameras", {"extra": []})
     assert "--upload" not in got["cmd"]                 # practice: nothing uploads
+
+
+# ------------------------------------------------------------------------------------------- (c) the live map
+def test_home_free_roam_files_give_the_live_table(tmp_path):
+    import live_view as LV
+    f = tmp_path
+    now = 1000.0
+    (f / "camera_track.csv").write_text("t,robot,x_cm,y_cm,th_deg,arrived\n" + "".join(
+        "%.1f,Left,%.1f,40,370,0\n" % (now - 5 + 0.1 * i, 30 + i * 0.1) for i in range(50)) +
+        "%.1f,Center,80,60,90,0\n" % (now - 9))
+    (f / "follow.csv").write_text("robot,t_recv,run,ms,step_id,state,queued,last_done,last_failed,x_cm,y_cm,th_deg,"
+                                  "pos_sd_cm,th_sd_deg\nLeft,1,r,1,0,run,0,0,0,34,40,10,0.8,1\n"
+                                  "Center,1,r,1,0,run,0,0,0,82,61,92,3.0,2\n")
+    (f / "battery.csv").write_text("t,robot,pct\n1,Left,88\n1,Center,71\n")
+    (f / "edge_parked.json").write_text(json.dumps({"needs_hand": [{"words": "Center at the far edge: move it in"}]}))
+    rs = {r["name"]: r for r in LV.from_freeroam(str(f), {"Left": "#2952CC", "Center": "#C2410C", "Right": "#7A3EC8"},
+                                                 {"Left": "AL-1111"}, now=now)}
+    L, C = rs["Left"], rs["Center"]
+    assert L["seen"] and abs(L["x"] - 34.9) < 0.01 and L["th"] == 10.0 and L["ref"] == "AL-1111"
+    assert L["pm_cm"] == round(2.45 * 0.8, 1) and L["battery"] == "88"
+    assert not C["seen"] and C["x"] == 82.0 and "own wheels" in C["source"] and C["needs_hand"]
+    assert rs["Right"]["x"] is None                      # not known yet: listed, not drawn
+
+
+def test_a_tag_run_live_json_gives_the_live_table():
+    import live_view as LV
+    live = {"robots": {"Alpha": {"cam": [100, 50, 90], "conf": {"plus_minus_cm": 1.8, "source": "one camera"},
+                                 "battery": 90, "doing": "drive"},
+                       "Bravo": {"cam": None, "own": [200, 60, 0], "held": True,
+                                 "conf": {"plus_minus_cm": 6.0, "source": "odometry only", "since_fix_s": 4}}}}
+    rs = {r["name"]: r for r in LV.from_live(live, {}, {"Alpha": "AL-1DC0"}, ["Bravo needs a hand at the edge"])}
+    assert rs["Alpha"]["seen"] and rs["Alpha"]["pm_cm"] == 1.8 and rs["Alpha"]["ref"] == "AL-1DC0"
+    assert not rs["Bravo"]["seen"] and rs["Bravo"]["needs_hand"] and rs["Bravo"]["held"]
+
+
+def test_the_start_screen_draws_the_live_table():
+    html = open(os.path.join(FLEET, "mission_control.html")).read()
+    assert "${liveMapCard(st)}" in html and 'api("/api/live")' in html
+    src = open(os.path.join(FLEET, "mission_control.py")).read()
+    assert 'path == "/api/live"' in src
