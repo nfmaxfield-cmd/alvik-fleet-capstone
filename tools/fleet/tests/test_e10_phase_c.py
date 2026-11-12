@@ -245,7 +245,9 @@ def test_an_own_pose_reset_is_not_read_as_motion_and_a_standing_robot_is_not_a_b
         old = TL.OWN_RESETS
         TL.OWN_RESETS = resets
         try:
-            L = TL.TrackingLayer(["Left", "Right"], ("motion", "lights"))
+            # (e17) the old way pinned without e17's elimination and gate record (they would also recover it)
+            L = TL.TrackingLayer(["Left", "Right"], ("motion", "lights"), eliminate=None if resets else False,
+                                 gate_record=None if resets else False)
             L.seed("Left", 0.0, 62.0, 26.0)
             L.seed("Right", 0.0, 20.0, 90.0)
             gaps, last = 0.0, 0.0

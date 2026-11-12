@@ -189,6 +189,17 @@ SAFE = ["set safe_edge 3", "set edge_dir 0", "set edge_thr 150", "set edge_n 3",
 CORR_FILE = os.path.expanduser(os.environ.get("MIRLT_CONF_DIR", "~/.config/mirlt") + "/corrections.json")
 
 
+
+def bridge_pin():
+    """(e17) The camera bridge's cores under the core layout (MIRLT_BRIDGE_CORES, set by run-fleet-pi.sh): a taskset
+    prefix, or nothing."""
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pi"))
+        import core_layout as CL
+        return CL.bridge_prefix()
+    except Exception:  # noqa: BLE001
+        return []
+
 def corrections_for(name):
     try:
         sys.path.insert(0, os.path.join(TOOLS, "experiment"))
@@ -2068,7 +2079,7 @@ class Ladder:
         mp = os.path.join(sess, "map.json")
         with open(mp, "w") as f:
             json.dump(m, f, indent=1)
-        bcmd = ["nice", "-n", "5", PY, os.path.join(HERE, "cam_bridge.py"), "--map", mp, "--calib", self.calib,
+        bcmd = bridge_pin() + ["nice", "-n", "5", PY, os.path.join(HERE, "cam_bridge.py"), "--map", mp, "--calib", self.calib,
                 "--stream", self.stream, "--out", os.path.join(sess, "bridge")]
         for n, (x, y, h) in at.items():
             bcmd += ["--at", "%s=%.2f,%.2f,%.2f" % (n, x, y, h)]

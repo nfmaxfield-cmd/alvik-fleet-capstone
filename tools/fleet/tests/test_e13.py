@@ -95,7 +95,8 @@ def _hand_sim(push=True):
     return sim.ctrl, r
 
 
-def test_a_robot_held_at_an_edge_asks_for_a_hand_and_rejoins_when_moved_in():
+def test_a_robot_held_at_an_edge_asks_for_a_hand_and_rejoins_when_moved_in(monkeypatch):
+    monkeypatch.setattr(FC, "NEVER_STILL", False)                 # (e17) e13's hold-and-wait is the switch now
     assert not FC.EDGE_PARK                                       # e12's park is the switch now, off by default
     c, r = _hand_sim(True)
     assert c.counts.get("need_hand") == 1 and c.counts.get("hand_rejoined") == 1
@@ -572,6 +573,7 @@ def test_a_held_robot_is_placed_by_scripted_clicks_and_its_heading_comes_from_a_
     height) sets it and restarts its error sum at the click's derived accuracy; it drives straight as far as that sum
     and its body allow, a second click gives its heading (+- atan(sigma sqrt 2 / drive)); it moves again; clicks and
     the residual at the next camera fix are logged."""
+    monkeypatch.setattr(FC, "NEVER_STILL", False)      # (e17) held and waiting for the clicks: the switch's old way
     import freeroam_fastsim as S
     import place_click as PC
     import tag_cam as TCAM

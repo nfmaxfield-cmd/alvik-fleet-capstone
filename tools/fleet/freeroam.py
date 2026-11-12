@@ -48,7 +48,8 @@ for p in (HERE, TOOLS):
 import freeroam_core as FC   # noqa: E402
 
 PY = sys.executable
-VERSION = "freeroam-runner-2026-11-11e16"   # e16 (home 11 Nov 08:48): each RAW row's accelerometer (ax, ay) and lift flag to the controller (on_raw_motion: a jolt while standing is a contact; a lift is evidence a person moved it). Before: "freeroam-runner-2026-11-10e14b"   # e14b: a dark picture holds every robot until the camera has adjusted. e14 (10 Nov): the battery floor from MIRLT_MIN_BATTERY, else Mission Control's Advanced, else the site file, said at the start
+VERSION = "freeroam-runner-2026-11-12e17"   # e17: the layer told who is unaccounted, its corrections (how) to the controller (an fpose, never a fix the robot's filter would refuse), revoked eliminations, the board for the gate's cap, the ML hook (off). Before: "freeroam-runner-2026-11-11e16"
+VERSION_E16 = "freeroam-runner-2026-11-11e16"   # e16 (home 11 Nov 08:48): each RAW row's accelerometer (ax, ay) and lift flag to the controller (on_raw_motion: a jolt while standing is a contact; a lift is evidence a person moved it). Before: "freeroam-runner-2026-11-10e14b"   # e14b: a dark picture holds every robot until the camera has adjusted. e14 (10 Nov): the battery floor from MIRLT_MIN_BATTERY, else Mission Control's Advanced, else the site file, said at the start
 VERSION_E13 = "freeroam-runner-2026-11-10e13"   # e13 (10 Nov): --readable-map (school: plan only where the camera reads tags; MIRLT_ROAM_READABLE=0 the old whole table)
 VERSION_E12 = "freeroam-runner-2026-11-10e12"   # e12 (10 Nov): the bridge's "camera" messages (no pictures) said and logged; one robot held at an edge parked and shown, the others roam on; orderly shutdown
 VERSION_E11 = "freeroam-runner-2026-11-09e11"   # e11 (9 Nov school): --alias WIFI=SLOT (names in the run only), --practice-real
@@ -75,6 +76,17 @@ DISK_CHECK_S = 60.0
 READABLE_MIN_CM2 = 2 * 2 * 40.0 * 40.0   # (e13) under this much readable ground (two robots' 40 cm squares, twice) the
                         # limit is ignored and said: a run that could not move is worse. Chosen; no DOE (a floor)
 
+
+
+def bridge_pin():
+    """(e17) The camera bridge's cores under the core layout (MIRLT_BRIDGE_CORES, set by run-fleet-pi.sh): a taskset
+    prefix, or nothing."""
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pi"))
+        import core_layout as CL
+        return CL.bridge_prefix()
+    except Exception:  # noqa: BLE001
+        return []
 
 def _fnum(v):
     try:
@@ -184,7 +196,10 @@ class Runner:
                                       camera_watch=None if not old else False,
                                       log=lambda kind, row: self.tables(kind, row),
                                       wiggle=None if old else (lambda n, why: self.ctrl.identity_wiggle(
-                                          self.ctrl.R[n], why)))
+                                          self.ctrl.R[n], why, spots=getattr(self.layer, "wiggle_spots", None))),
+                                      board=tuple(rect)[:4], ml_fn=ml_detector_fn())
+        # (e17, 1c / 6) the controller's measured corrections widen the layer's gate for that robot
+        self.ctrl.record_fn = lambda n, t, d, trav: self.layer.record(n, t, d, trav)
         self.ctrl.fix_fn = self.fix_to_robot
         self.ctrl.place_fn = self.ask_place          # (e13, Nick 12:56) a held robot: a person clicks it on a picture
         self.ctrl.place_residual_fn = self.place_residual
@@ -654,6 +669,8 @@ class Runner:
             if ev.get("type") == "fix" and ev.get("robot") in c.R:
                 batch.setdefault(round(float(ev["t"]), 3), []).append(ev)
         named = []
+        for n, r in c.R.items():                      # (e17) who the run cannot account for (the layer's elimination)
+            self.layer.set_unaccounted(n, c.unaccounted_why(r))
         for tp in sorted(batch):
             for ev in batch[tp]:
                 if self.layer.T[ev["robot"]].sure is None:
@@ -665,8 +682,10 @@ class Runner:
                     self.layer.own(n, tp, oa[0], oa[1], oa[2], r.own[4] == "idle")
             for f in self.layer.feed(tp, [self.det_of(ev) for ev in batch[tp]]):
                 named.append(dict(type="fix", robot=f["robot"], t=f["t"], x=f["x"], y=f["y"], th=f["th"],
-                                  sigma=f["sigma"], src=f["src"], sigma_th=3.0))
+                                  sigma=f["sigma"], src=f["src"], sigma_th=3.0, how=f.get("how")))
         c.camera_proven = self.layer.proven
+        for rv in self.layer.take_revoked():         # (e17) an elimination the robot's own drive disproved
+            c.on_elim_revoked(rv)
         for pe in self.layer.take_parked():
             c.on_parked_moved(pe)
         for ev in named:
@@ -675,7 +694,9 @@ class Runner:
             # (11-05c) the arrival time too: the controller measures the camera's delay and compares each fix with
             # the robot's own pose at the picture's time
             c.on_fix(n, float(ev["t"]), float(ev["x"]), float(ev["y"]), None if th is None else float(th),
-                     arrival=now, sigma=ev.get("sigma"), src=ev.get("src"))
+                     arrival=now, sigma=ev.get("sigma"), src=ev.get("src"), how=ev.get("how"))
+            if ev.get("how"):
+                continue                              # (e17) a correction: the robot got an fpose, not a fix
             self.track.write("%.3f,%s,%.2f,%.2f,%s,%.3f\n" % (ev["t"], n, ev["x"], ev["y"], "" if th is None else
                                                                "%.1f" % th, now))
             o = self.offsets.get(n) or []
@@ -911,6 +932,22 @@ def write_edge_parked(folder, ep, nh=()):
         pass
 
 
+def ml_detector_fn():
+    """(e17, 4) The ML detector on demand: OFF (no model exists yet). With MIRLT_ML_ON_DEMAND=1 and a model file in
+    MIRLT_ML_MODEL, a function the tracking layer calls only for robots that are unaccounted, unsure or asked for (a
+    heading check), at a capped rate. Until a model and its bridge hook exist this returns None (the layer runs as
+    without it), said once."""
+    if os.environ.get("MIRLT_ML_ON_DEMAND", "0") != "1":
+        return None
+    path = os.environ.get("MIRLT_ML_MODEL", "")
+    if not path or not os.path.exists(path):
+        say("(MIRLT_ML_ON_DEMAND=1 but no detector model at MIRLT_ML_MODEL: the layer runs without it)")
+        return None
+    say("(MIRLT_ML_ON_DEMAND=1: model %s found, but the bridge hook that runs it on a picture is not built yet (e17 "
+        "stub): the layer runs without it)" % path)
+    return None
+
+
 def stop_leads(a, names):
     """(e08, A5) each robot's stop lead {name: {speed: cm}}: --stop-lead NAME=SPEED:CM,... else the Pi's stop_leads.json
     (calib_run keeps it by WiFi name; at home the robots' names), else none (drives as planned)."""
@@ -1098,7 +1135,7 @@ def real_start(a, outdir):
          "notes": "home free roam"}
     mp = os.path.join(outdir, "map.json")
     json.dump(m, open(mp, "w"), indent=1)
-    bcmd = [PY, os.path.join(HERE, "cam_bridge.py"), "--map", mp, "--calib", L.calib, "--stream", L.stream,
+    bcmd = bridge_pin() + [PY, os.path.join(HERE, "cam_bridge.py"), "--map", mp, "--calib", L.calib, "--stream", L.stream,
             "--out", os.path.join(outdir, "bridge")]
     for n in names:
         x, y = L.pos(n)
@@ -1124,9 +1161,10 @@ def real_start(a, outdir):
             import doe_loop as DL
             fdir, _ = DG.frames_dir_for(outdir)
             guard = DG.Guard(card=outdir, frames_dir=fdir)
-            streams = [("overhead", L.stream, LD.Eye.OVERHEAD_HZ)]
+            ho_, hs_ = DL.frames_rates(LD.Eye.OVERHEAD_HZ, DL.SIDE_HZ)     # (e17) default 4 a second (MIRLT_FRAMES_HZ)
+            streams = [("overhead", L.stream, ho_)]
             if L.side_stream:
-                streams.append(("side", L.side_stream, DL.SIDE_HZ))
+                streams.append(("side", L.side_stream, hs_))
             frames = DL.Frames(outdir, streams, frames_dir=fdir, guard=guard)
         except Exception as e:     # noqa: BLE001  (the run goes on without frames)
             say("  (frames not saved: %s)" % e)

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # (2026-11-11 e16, the Pi audit; Nick: "If it's not useful for executing the program, we can drop it") the recorder
 # saves NO video by default: it serves its pictures (tracking, the setup, Mission Control) and the runs save their own
-# frames and clips. MIRLT_VIDEO=1 (or `rec video`) keeps the whole video as before. `bench [minutes] [old|trimmed|both]`:
+# frames and clips. MIRLT_VIDEO=1 (or `rec video`) keeps the whole video as before. `bench [minutes] [old|trimmed|both|layouts]`
+# (layouts, e17: the trimmed defaults under core layouts A, B and C; MIRLT_CORE_LAYOUT=A|B|C for every run, default B):
 # the Pi measured on a practice run (simulated robots, nothing moves) with the real camera (tools/pi/pi_bench.sh).
 # (2026-11-10 e14) `space --move`: finished run folders moved to the USB drive (diskguard.move_old_runs; a link left
 # in logs/, nothing deleted); every preflight does the same by itself when the card is under its floor (school 18:07).
@@ -160,10 +161,23 @@ ladder() {
     start_recorder
     # cores (the e02 runner's plan, run-e02-pi.sh): the recorder on cores 0-1, the ladder and its tracking on 2-3
     local PIN=""
-    if [ "$(nproc)" -ge 4 ] && command -v taskset >/dev/null; then PIN="taskset -c 2,3"; fi
+    PIN="$(plan_pin)"
     $PIN python3 tools/fleet/ladder.py "$@" $IPS --stream 127.0.0.1:8000 --calib "$CALIB" $SIDE_ARG
   fi
 }
+
+# (e17) which cores each program runs on: MIRLT_CORE_LAYOUT A (recorder 0-1, planner + bridge 2-3: up to 11 Nov),
+# B (recorder 0, planner 1, bridge 2-3: the default for now, Claude's guess until the bench decides), C (unpinned).
+# tools/pi/core_layout.py holds the table; the bridge's cores go to the programs that start it (MIRLT_BRIDGE_CORES).
+core_layout() {
+  read -r CL_NAME CL_REC2 CL_REC1 CL_PLAN CL_BRIDGE < <(python3 tools/pi/core_layout.py "${MIRLT_CORE_LAYOUT:-}")
+  [ "$CL_PLAN" = - ] && CL_PLAN=""; [ "$CL_BRIDGE" = - ] && CL_BRIDGE=""; [ "$CL_REC2" = - ] && CL_REC2=""; [ "$CL_REC1" = - ] && CL_REC1=""
+  command -v taskset >/dev/null || { CL_PLAN=""; CL_BRIDGE=""; }
+  export MIRLT_BRIDGE_CORES="$CL_BRIDGE"
+}
+plan_pin() { core_layout; [ -n "$CL_PLAN" ] && echo "taskset -c $CL_PLAN"; true; }
+rec_cores() { core_layout; local c="$CL_REC1"; [ "${1:-1}" = 2 ] && c="$CL_REC2"; [ -n "$c" ] && echo "--cores $c"; true; }
+core_layout       # (e17) MIRLT_BRIDGE_CORES exported for every program this script starts
 
 rec_running() { tmux has-session -t fleet 2>/dev/null && tmux list-windows -t fleet -F '#W' | grep -qx rec; }
 
@@ -214,9 +228,9 @@ start_recorder() {
   mkdir -p "$OUT"
   echo "$OUT" > /tmp/fleet_rec_out
   if [ -n "$SD" ] && [ "$SD" != "$OD" ]; then
-    CAMS="--device $OD,$SD --names overhead,side"; REC_CORES="--cores 0,1"; echo "Recording both cameras (overhead /dev/video$OD, side /dev/video$SD) to $OUT"
+    CAMS="--device $OD,$SD --names overhead,side"; REC_CORES="$(rec_cores 2)"; echo "Recording both cameras (overhead /dev/video$OD, side /dev/video$SD) to $OUT"
   else
-    CAMS="--device $OD --names overhead"; REC_CORES="--cores 1"; echo "Recording the overhead camera (/dev/video$OD) to $OUT (no side camera found)"
+    CAMS="--device $OD --names overhead"; REC_CORES="$(rec_cores 1)"; echo "Recording the overhead camera (/dev/video$OD) to $OUT (no side camera found)"
   fi
   python3 tools/pi/launcher.py --handoff >/dev/null 2>&1 || true
   # REC_EXTRA: the DOE loop's --no-record (pictures served, no video saved: the loop saves its own frames)
@@ -273,6 +287,10 @@ bench_profile() {   # bench_profile NAME MINUTES OUTDIR
   else
     unset MIRLT_VIDEO MIRLT_REC_PREVIEW MIRLT_LIVE_SHARE MIRLT_MOTION_RATE MIRLT_BRIDGE_POLL
   fi
+  case "$name" in layout-A|layout-B|layout-C) export MIRLT_CORE_LAYOUT="${name#layout-}" ;; esac   # (e17)
+  core_layout
+  local BPIN=""; [ -n "$CL_BRIDGE" ] && BPIN="taskset -c $CL_BRIDGE"
+  local PPIN; PPIN="$(plan_pin)"
   echo; echo "=== Bench: $name defaults, $mins min ($(date +%H:%M:%S)). Nothing moves. ==="
   if rec_running; then echo "Restarting the recorder with the $name settings ..."; tmux send-keys -t fleet:rec C-c 2>/dev/null; sleep 4; tmux kill-window -t fleet:rec 2>/dev/null; sleep 1; fi
   start_recorder
@@ -280,13 +298,13 @@ bench_profile() {   # bench_profile NAME MINUTES OUTDIR
   TC="$(python3 -c "import sys; sys.path.insert(0, 'tools/fleet'); import sites as S; s = S.load(None) or {}; print(s.get('conf_dir') or '')" 2>/dev/null)/tagcal"
   local CAMS="--cam overhead=127.0.0.1:8000,$TC/overhead.json"
   [ -f "$TC/side.json" ] && python3 tools/pi/rec_alive.py --side --timeout 3 >/dev/null 2>&1 && CAMS="$CAMS --cam side=127.0.0.1:8001,$TC/side.json"
-  echo "{\"profile\": \"$name\", \"minutes\": $mins, \"cameras\": \"$CAMS\", \"commit\": \"$(git rev-parse --short HEAD)\", \"started\": \"$(date -Iseconds)\"}" > "$out/bench.json"
+  echo "{\"profile\": \"$name\", \"minutes\": $mins, \"cameras\": \"$CAMS\", \"core_layout\": \"$CL_NAME (recorder ${CL_REC2:-any}, planner ${CL_PLAN:-any}, bridge ${CL_BRIDGE:-any})\", \"commit\": \"$(git rev-parse --short HEAD)\", \"started\": \"$(date -Iseconds)\"}" > "$out/bench.json"
   python3 tools/pi/pi_bench.py monitor --out "$out" --every 2 --seconds "$secs" &
   local MON=$!
-  [ -f "$TC/overhead.json" ] && nice -n 5 python3 tools/fleet/tag_bridge.py $CAMS --observe --pose-port 5111 --max-s "$secs" --out "$out/real_bridge" > "$out/real_bridge.txt" 2>&1 &
+  [ -f "$TC/overhead.json" ] && $BPIN nice -n 5 python3 tools/fleet/tag_bridge.py $CAMS --observe --pose-port 5111 --max-s "$secs" --out "$out/real_bridge" > "$out/real_bridge.txt" 2>&1 &
   [ -f "$TC/overhead.json" ] || echo "(no camera model at $TC/overhead.json: the real camera's tag bridge is left out; Mission Control, Setup, Measure first)"
   local ORD; ORD=$(python3 -c "print(','.join('P%02d' % i for i in range(1, 41)))")
-  timeout --signal=INT "$secs" python3 tools/fleet/mission_run.py --tracking tags --robots auto --split auto --sim-robots 3 --motion stopturn --visit-order "$ORD" --visit-keep-unreadable --practice-real --feel-table skip > "$out/practice.txt" 2>&1
+  timeout --signal=INT "$secs" $PPIN python3 tools/fleet/mission_run.py --tracking tags --robots auto --split auto --sim-robots 3 --motion stopturn --visit-order "$ORD" --visit-keep-unreadable --practice-real --feel-table skip > "$out/practice.txt" 2>&1
   wait $MON 2>/dev/null
   local RUN; RUN=$(ls -dt logs/*-mission-dry 2>/dev/null | head -1)
   [ -n "$RUN" ] && ln -sfn "$REPO/$RUN" "$out/practice_run"
@@ -297,12 +315,21 @@ bench_profile() {   # bench_profile NAME MINUTES OUTDIR
 case "$WHAT" in
   bench)           # (e16) ./run-fleet-pi.sh bench [minutes] [old|trimmed|both]: the Pi measured, nothing moves
     BM=10; BP=both
-    for x in "$@"; do case "$x" in [0-9]*) BM="$x" ;; old|trimmed|both) BP="$x" ;; esac; done
+    for x in "$@"; do case "$x" in [0-9]*) BM="$x" ;; old|trimmed|both|layouts) BP="$x" ;; esac; done
     for s in visit calib freeroam doe monday practice; do
       if tmux has-session -t "$s" 2>/dev/null; then echo "A run is open (tmux session $s): close it first. Nothing started."; exit 1; fi
     done
     BOUT="logs/$(date +%Y%m%d-%H%M%S)-bench"; mkdir -p "$BOUT"
     echo "Pi bench: $BP, $BM min each. Simulated robots on the real path, the real camera; NO ROBOT MOVES. Results: $BOUT"
+    if [ "$BP" = layouts ]; then     # (e17) the trimmed defaults under each core layout: A (as up to 11 Nov), B, C
+      KEEP_LAYOUT="${MIRLT_CORE_LAYOUT:-}"
+      for L_ in A B C; do bench_profile "layout-$L_" "$BM" "$BOUT"; done
+      if [ -n "$KEEP_LAYOUT" ]; then export MIRLT_CORE_LAYOUT="$KEEP_LAYOUT"; else unset MIRLT_CORE_LAYOUT; fi
+      python3 tools/pi/pi_bench.py compare "$BOUT/layout-A" "$BOUT/layout-B" "$BOUT/layout-C" --labels "A (0-1 / 2-3 shared),B (0 / 1 / 2-3),C (unpinned)" --out "$BOUT/compare.md" > /dev/null
+      echo; cat "$BOUT/compare.md"
+      echo; echo "Saved in $BOUT."; echo "To send the results: copy the table above into the chat (the full numbers are in $BOUT)."
+      exit 0
+    fi
     [ "$BP" = trimmed ] || bench_profile old "$BM" "$BOUT"
     [ "$BP" = old ] || bench_profile trimmed "$BM" "$BOUT"
     unset MIRLT_VIDEO MIRLT_REC_PREVIEW MIRLT_LIVE_SHARE MIRLT_MOTION_RATE MIRLT_BRIDGE_POLL
@@ -355,7 +382,7 @@ case "$WHAT" in
       KG="--keep-going"; [ "${2:-}" = park ] && KG="--no-keep-going"
       python3 tools/fleet/doe_loop.py run --hours "${1:-4}" --dry $KG ${DOE_DRY_ARGS:-}
     else
-      PIN=""; if [ "$(nproc)" -ge 4 ] && command -v taskset >/dev/null; then PIN="taskset -c 2,3"; fi
+      PIN=""; PIN="$(plan_pin)"
       KG="--keep-going"; [ "${2:-}" = park ] && KG="--no-keep-going"
       $PIN python3 tools/fleet/doe_loop.py run --hours "${1:-4}" $KG $IPS --stream 127.0.0.1:8000 --calib "$CALIB" $SIDE_ARG
     fi ;;
@@ -428,7 +455,7 @@ case "$WHAT" in
     if [ "$DRY" = 1 ]; then
       python3 tools/fleet/freeroam.py run --dry --hours "$H" "$@" ${FREEROAM_DRY_ARGS:-}
     else
-      PIN=""; if [ "$(nproc)" -ge 4 ] && command -v taskset >/dev/null; then PIN="taskset -c 2,3"; fi
+      PIN=""; PIN="$(plan_pin)"
       $PIN python3 tools/fleet/freeroam.py run --hours "$H" "$@" $IPS --stream 127.0.0.1:8000 --calib "$CALIB" $SIDE_ARG
     fi ;;
   freeroam-finish)  # (inside the tmux session freeroam, after the run): recorder stopped, logs + frames uploaded
@@ -474,7 +501,7 @@ case "$WHAT" in
       start_recorder
       OUT="$(cat /tmp/fleet_rec_out 2>/dev/null || echo "$HOME/recordings")"
       # cores: the recorder on 0-1, the camera bridge's workers on 1-2 (--farm), the bridge and run_plan on 3
-      PIN=""; if [ "$(nproc)" -ge 4 ] && command -v taskset >/dev/null; then PIN="taskset -c 2,3"; fi
+      PIN=""; PIN="$(plan_pin)"
       # in tmux (session "monday"), so a dropped WiFi or a closed window does not stop the run half-way
       for s in monday practice doe ladder ladder2; do
         [ "$s" = "$TS" ] && continue

@@ -34,7 +34,7 @@ Writes to --out: track.csv (as cam_bridge's, for line_check.py), tag_poses.csv (
 sigma, size check, picture position), tag_obs.csv (every read's corners: the site fit's input), ref_watch.csv,
 events.jsonl, bridge_summary.json.
 """
-VERSION = "2026-11-11e16"   # e16 (Pi audit 11 Nov): the motion detector, ~55 % of the bridge's time (py-spy, simulated school practice), runs at full rate only while it is needed (a robot unread by its tag for SR.SURE_CAM_AGE_S, or a motion-find seed) and on every MOTION_IDLE_EVERY-th picture otherwise, keeping the empty floor learned; the tags re-seat its tracks on every picture as before (MIRLT_MOTION_RATE=every: every picture); the pose socket is read with a short timeout instead of a 100 Hz poll (MIRLT_BRIDGE_POLL=1: the poll). Before: "2026-11-10e14c"   # e14c (school 17:46): SIGTERM sets a stop flag and the bridge leaves through its orderly path (never a raise inside a join: the C++ abort); every picture's detection time, search, brightness and reads in detect_times.csv; the Pi's heat and throttle flags in pi_health.csv and the status line; windows sized by each tag's measured speed (tagcore). e14b: a picture gone dark (pictures still coming) is said as the camera adjusting to the light and sent to the run as "dark" / "light_back" (dark_watch; exposure nudge camera_exposure, off). e14: a robot with no roof tag that reads (found by motion at the start) is followed by the motion detector from where it was found: --seed-motion NAME=X,Y,TH and run_plan's "seed" messages (on_seed). 2026-11-10e13 (e13): frames.json (new pictures per camera, reference tags read) for the camera check before binding (camera_feed.py).
+VERSION = "2026-11-12e17"   # e17: detect_times.csv gains t_done (when the detection finished: the Pi bench reads the picture-to-result lag); the bridge pinned per MIRLT_BRIDGE_CORES (the core layout) by its launcher. Before: "2026-11-11e16"   # e16 (Pi audit 11 Nov): the motion detector, ~55 % of the bridge's time (py-spy, simulated school practice), runs at full rate only while it is needed (a robot unread by its tag for SR.SURE_CAM_AGE_S, or a motion-find seed) and on every MOTION_IDLE_EVERY-th picture otherwise, keeping the empty floor learned; the tags re-seat its tracks on every picture as before (MIRLT_MOTION_RATE=every: every picture); the pose socket is read with a short timeout instead of a 100 Hz poll (MIRLT_BRIDGE_POLL=1: the poll). Before: "2026-11-10e14c"   # e14c (school 17:46): SIGTERM sets a stop flag and the bridge leaves through its orderly path (never a raise inside a join: the C++ abort); every picture's detection time, search, brightness and reads in detect_times.csv; the Pi's heat and throttle flags in pi_health.csv and the status line; windows sized by each tag's measured speed (tagcore). e14b: a picture gone dark (pictures still coming) is said as the camera adjusting to the light and sent to the run as "dark" / "light_back" (dark_watch; exposure nudge camera_exposure, off). e14: a robot with no roof tag that reads (found by motion at the start) is followed by the motion detector from where it was found: --seed-motion NAME=X,Y,TH and run_plan's "seed" messages (on_seed). 2026-11-10e13 (e13): frames.json (new pictures per camera, reference tags read) for the camera check before binding (camera_feed.py).
 VERSION_A = "2026-11-10a"   # 2026-11-10a (e12): frame_watch (no pictures from a camera: said loudly, an event, a message to the run); workers joined before the summary; orderly exit. No version string before
 
 import argparse
@@ -326,7 +326,8 @@ class Bridge:
         # flags every few seconds (pi_health.csv)
         self.dt_f = open(os.path.join(out, "detect_times.csv"), "w", newline="")
         self.dt_w = csv.writer(self.dt_f)
-        self.dt_w.writerow(["t", "cam", "ms", "windows", "full_searches", "grey", "found", "mode"])   # mode: the window rule
+        self.dt_w.writerow(["t", "cam", "ms", "windows", "full_searches", "grey", "found", "mode",
+                            "t_done"])   # mode: the window rule; (e17) t_done: when its detection finished (the bench's lag)
         import pi_health as PH
         self.health = PH.Logger(out)
         self.event("start", tags=tags, cams=list(cams), robots=self.ids, roofs=self.roofs)
@@ -539,7 +540,7 @@ class Bridge:
         try:
             with self.lock:
                 self.dt_w.writerow(["%.4f" % t, cam_name, "%.1f" % ms_, trk.windows, trk.fulls,
-                                    "%.1f" % float(grey[::8, ::8].mean()), len(found), mode])
+                                    "%.1f" % float(grey[::8, ::8].mean()), len(found), mode, "%.4f" % time.time()])
         except (OSError, ValueError):
             pass
         H, S = float(self.tags["height_cm"]), float(self.tags["tag_cm"])

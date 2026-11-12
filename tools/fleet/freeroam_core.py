@@ -49,7 +49,8 @@ if _HERE not in sys.path:
 import safety_rules as SR   # noqa: E402  (e08 Phase A: the rules shared with run_plan and observe)
 import fused_pose as FP     # noqa: E402  (e09 Phase B: one filter per robot, fed by the tracking layer and RAW)
 
-VERSION = "freeroam-2026-11-11e16"   # e16 (home free roam 11 Nov 08:45-08:48, commit 4732a48: Right stopped at an edge and stood; then "REJOINED ... moved in" 1 s after NEEDS A HAND with nobody there, and Center pushed it off): (7) an edge stop reverses along the robot's own recorded track as far as the derived edge rule needs (observe.track_back_target), checked against the others' reservations, then re-plans; it holds and asks only when the track is unknown or blocked (MIRLT_EDGE_BACKOUT=0: as before); (8a) "moved in" needs evidence: a lift or a sustained camera move past its own measured noise, or its own drive out (MIRLT_REJOIN_EVIDENCE=0: as before); (8b) a robot held or stuck at an edge, or rejoined and not yet driven away, is a fixed obstacle with its uncertainty (own pose against the camera) in every plan and the reflex (MIRLT_PINNED_OBSTACLE=0); (8c) contact: a standing robot the camera sees move past its noise, or whose accelerometer jolts, stops the robots near it; a driving robot whose camera progress falls far below its wheels' stops and backs off; contact.csv (MIRLT_CONTACT_WATCH=0); (8d) a question nobody answers (ASK_WAIT_S) makes the run decide by itself, as an unattended run does (MIRLT_ASK_UNATTENDED=1: keeps asking); (9b) a standing robot's doubt no longer grows with its fix's age (home: "cannot tell whether it is clear of the edge" 22 cm in; MIRLT_STAND_UNC=0). Before: "freeroam-2026-11-10e13b"   # e13b (10 Nov, Nick 13:34): a standing robot (its own odometry shows no motion since its last fix) keeps that fix: never lost while it stands, sparse reads confirm it (MIRLT_STAND_TRUST=0: before); the lost threshold grows only for a camera slower than about 2.5 pictures a second (1.5 x the longest recent gap). e13 (10 Nov): never give up blind (BLIND_RULE edge: a lost robot drives on while its bubble + body + stop cannot reach an edge; BUBBLE_CAP behind MIRLT_BLIND_RULE=cap); stray return (a robot outside the readable area comes back along ground it drove); never give up (a robot held at an edge waits, says it needs a hand and rejoins: EDGE_PARK off); risk-based no-pictures limit per robot
+VERSION = "freeroam-2026-11-12e17"   # e17 (home 11 Nov, the 08:26 and 08:58 runs): (1d) a camera position the tracking layer named by elimination or a wiggle is a CORRECTION: its pose set from the camera at once (fpose, never rejected by its filter), said "CORRECTED", never "moved in" / REJOINED, and a held robot rejoins on it (MIRLT_CAMERA_CORRECT=0: as e16); (1e) a re-seed is projected to now and never lands while the robot turns (the Pi's copy of its heading is ~0.3 s old: 13-15 deg median jump when it landed mid-turn, MIRLT_RESEED_TURN=0: as before); (2) no driving blind on late fixes: each robot's measured fix age and drift against the room its path has (MIRLT_LATE_FIX=0); after an off-plan heading re-set the next move waits for a short crawl the camera confirms (MIRLT_HEADING_CONFIRM=0); (6) each robot's drift per cm measured from its own corrections. Before: "freeroam-2026-11-11e16"
+VERSION_E16 = "freeroam-2026-11-11e16"   # e16 (home free roam 11 Nov 08:45-08:48, commit 4732a48: Right stopped at an edge and stood; then "REJOINED ... moved in" 1 s after NEEDS A HAND with nobody there, and Center pushed it off): (7) an edge stop reverses along the robot's own recorded track as far as the derived edge rule needs (observe.track_back_target), checked against the others' reservations, then re-plans; it holds and asks only when the track is unknown or blocked (MIRLT_EDGE_BACKOUT=0: as before); (8a) "moved in" needs evidence: a lift or a sustained camera move past its own measured noise, or its own drive out (MIRLT_REJOIN_EVIDENCE=0: as before); (8b) a robot held or stuck at an edge, or rejoined and not yet driven away, is a fixed obstacle with its uncertainty (own pose against the camera) in every plan and the reflex (MIRLT_PINNED_OBSTACLE=0); (8c) contact: a standing robot the camera sees move past its noise, or whose accelerometer jolts, stops the robots near it; a driving robot whose camera progress falls far below its wheels' stops and backs off; contact.csv (MIRLT_CONTACT_WATCH=0); (8d) a question nobody answers (ASK_WAIT_S) makes the run decide by itself, as an unattended run does (MIRLT_ASK_UNATTENDED=1: keeps asking); (9b) a standing robot's doubt no longer grows with its fix's age (home: "cannot tell whether it is clear of the edge" 22 cm in; MIRLT_STAND_UNC=0). Before: "freeroam-2026-11-10e13b"   # e13b (10 Nov, Nick 13:34): a standing robot (its own odometry shows no motion since its last fix) keeps that fix: never lost while it stands, sparse reads confirm it (MIRLT_STAND_TRUST=0: before); the lost threshold grows only for a camera slower than about 2.5 pictures a second (1.5 x the longest recent gap). e13 (10 Nov): never give up blind (BLIND_RULE edge: a lost robot drives on while its bubble + body + stop cannot reach an edge; BUBBLE_CAP behind MIRLT_BLIND_RULE=cap); stray return (a robot outside the readable area comes back along ground it drove); never give up (a robot held at an edge waits, says it needs a hand and rejoins: EDGE_PARK off); risk-based no-pictures limit per robot
 VERSION_E12 = "freeroam-2026-11-10a"   # 11-10a (e12): the curve-fit maths moved into module functions (fit_arc_points, arc_summary, arc_agree) so the calibration's curve phase uses the very same (free roam's own fitting and saving unchanged); a robot held at an edge for EDGE_PARK_S is parked and said loudly, the others roam on (MIRLT_EDGE_PARK=0: before)
 VERSION_E = "freeroam-2026-11-07e"   # 11-07e (Nick 7 Nov): a robot put down at or over an edge first tries the e08 tilt recovery, a person asked only if that fails (MIRLT_START_EDGE_MODE=wait: always wait)
 VERSION_D = "freeroam-2026-11-07d"   # 11-07d (e10, the 7 Nov run 2 incident): the queue watch (every tick, off plan or a queued piece breaking the edge rule from where the robot really is: re-aimed or stopped, heading re-set), the surface-mark verdict less the uncertainty, the start check (held at an edge)
@@ -268,6 +269,27 @@ REJOIN_EVIDENCE = os.environ.get("MIRLT_REJOIN_EVIDENCE", "1") != "0"  # (8a) "m
 PINNED_OBSTACLE = os.environ.get("MIRLT_PINNED_OBSTACLE", "1") != "0"  # (8b) held at an edge: a fixed obstacle + doubt
 CONTACT_WATCH = os.environ.get("MIRLT_CONTACT_WATCH", "1") != "0"      # (8c) pushes and collisions noticed
 ASK_UNATTENDED = os.environ.get("MIRLT_ASK_UNATTENDED", "0") == "1"    # (8d) 1 = keep asking when nobody answers
+CAMERA_CORRECT = os.environ.get("MIRLT_CAMERA_CORRECT", "1") != "0"   # (e17, 1d) the layer's elimination = a correction
+RESEED_TURN = os.environ.get("MIRLT_RESEED_TURN", "1") != "0"         # (e17, 1e) no re-seed lands mid-turn; projected
+LATE_FIX = os.environ.get("MIRLT_LATE_FIX", "1") != "0"               # (e17, 2) slow or wait on late fixes
+HEADING_CONFIRM = os.environ.get("MIRLT_HEADING_CONFIRM", "1") != "0"   # (e17, 2) camera-confirmed heading after a re-set
+NEVER_STILL = os.environ.get("MIRLT_NEVER_STILL", "1") != "0"     # (e17, Nick 12 Nov standing rule) held / unsure /
+                        # needs-a-hand / lost-at-the-limit robots keep creeping toward safety and being found; 0: e16's
+                        # hold-and-wait
+CREEP_MAX_CM = 8.0      # (e17) CHOSEN: a creep step's longest (a robot's own 9.5 cm body or so) ...
+CREEP_MIN_CM = 2.0      # ... and shortest (over the camera's noise, so the camera sees it go)
+CREEP_UNC0_CM = 5.0     # CHOSEN: step and speed scale as UNC0 / (UNC0 + its uncertainty): 5 cm doubt halves them.
+                        # DOE: yes, with CREEP_MAX_CM (time to be found again vs falls per hour)
+CREEP_V_MIN = 2.0       # cm/s: the firmware's slowest drive (driveLine's 2 cm/s floor). Not chosen
+RESEED_TURN_DPS = 8.0   # (e17) a re-seed waits while its own heading turns faster than this: at the measured ~0.3 s
+                        # landing lag that is under 3 deg planted (the camera heading's own sigma). Derived; DOE: no
+RESEED_WAIT_MAX_S = 3.0  # (e17) ... at most this long (a robot circling for ever is re-seeded anyway, said). Chosen
+LATE_SLOW_MIN = 0.2     # (e17, 2) CHOSEN: under 0.2 of its speed it waits for a fix instead (fspd 0). DOE: yes, with
+                        # the drift record's percentile (stops per hour vs closest approach to an edge)
+LATE_REC_MIN = 3        # (e17) corrections needed before a robot's own drift rate replaces the measured prior
+                        # (BLIND_PER_CM 0.07 cm per cm, 29 Oct). Chosen
+HD_CONFIRM_DEG = 5.0    # (e17) CHOSEN: the heading the crawl checks is good to this (half COURSE_ERR_DEG). DOE: yes
+HD_CONFIRM_MAX_CM = 12.0   # (e17) CHOSEN: the crawl's longest (it is derived from the camera's noise, up to this)
 MOVED_IN_K = 4.0        # (8a) sigmas of the robot's own camera noise a move must exceed (one-sided, ~3e-5 by chance per
                         # check on Gaussian noise). Statistical, not a tuning; DOE: no
 CONTACT_K = 4.0         # (8c) the same test for a standing robot pushed (its camera spot moves past its own noise)
@@ -647,6 +669,8 @@ class Controller:
         self.pose_source = pose_source or FP.POSE_SOURCE
         self.gyro_heading = FP.GYRO_HEADING if gyro_heading is None else bool(gyro_heading)
         self.fix_fn = None               # host: fix_fn(name, t, x, y) forwards a fused position to the robot (gaps)
+        self.never_still = NEVER_STILL   # (e17, Nick 12 Nov) held robots creep (MIRLT_NEVER_STILL=0: they wait)
+        self.record_fn = None            # (e17) host: record_fn(name, t, d_cm, travel_cm): a measured correction
         self.pictures = []               # (B4) pictures the host should save: dict(t, robot, why)
         self.camera_proven = True        # (e09) set by the host from its tracking layer: the camera's picture has turned
                                          # the robots the way their own gyros did. Until then a camera spot never sets a
@@ -764,7 +788,7 @@ class Controller:
             r.bat_logged = (pct, t)
             self.log("battery", dict(t=round(t, 1), robot=name, pct=pct))
 
-    def on_fix(self, name, t, x, y, th=None, arrival=None, sigma=None, src=None):
+    def on_fix(self, name, t, x, y, th=None, arrival=None, sigma=None, src=None, how=None):
         """A camera fix stamped t (the picture's time on the camera's clock), arrived at `arrival` (this controller's
         clock; None: it counts as arriving now with no delay, as the tests and older callers give it). (11-05c) The
         delay is measured online; the fix is compared with the robot's own pose AT THE PICTURE'S TIME, never now."""
@@ -789,7 +813,14 @@ class Controller:
                 del self.delays[:100]
         arr = t if arrival is None else arrival
         r.pc = None
+        ages = r.__dict__.setdefault("fix_ages", [])        # (e17, 2) this robot's measured fix age at arrival
+        ages.append(max(0.0, arr - t))
+        del ages[:-100]
+        if how and CAMERA_CORRECT and str(how).startswith(("elimination", "wiggle")):
+            return self.correct_from_camera(r, t, x, y, th, arr, how, src)
         oa = self.own_at(r, t)
+        if oa is not None and math.hypot(x - oa[0], y - oa[1]) <= REACQUIRE_CM:
+            r.agree_t = t                                     # (e17, 6) own and camera agree here (drift record)
         if r.lost is None and oa is not None and r.cam_off is not None:
             off = (x - oa[0], y - oa[1])
             r.jump_n = r.jump_n + 1 if math.dist(off, r.cam_off) > REACQUIRE_MAX_CM else 0
@@ -848,7 +879,7 @@ class Controller:
             if self.pose_rule == "wait2s":
                 self.pose_agree(r, (oa[0], oa[1]), (x, y), th)      # the rule before e08 (kept behind the switch)
             else:
-                self.pose_fuse(r, (oa[0], oa[1]), (x, y), th)
+                self.pose_fuse(r, (oa[0], oa[1]), (x, y), th, t_pic=t)
         r.cam_hist.append((t, x, y))
         if len(r.cam_hist) > 80:
             del r.cam_hist[:20]
@@ -1189,6 +1220,8 @@ class Controller:
                               blind_cm=round(L["drive"], 1), blind_deg=round(L["turn"], 1),
                               bubble_cm=round(r.bubble, 2), jump_cm=round(jump, 2), within=int(within),
                               x=round(x, 1), y=round(y, 1), fix_age_s=round(arr - t, 2)))
+        if L["drive"] >= 5.0:
+            self.drift_add(r, jump, L["drive"], "seen again")        # (e17, 6)
         self.event(r, "seen again", "after %.1f s, %.1f cm and %.0f deg blind: odometry was %.1f cm off at the "
                    "picture's time (bubble %.1f; the fix was %.2f s old)"
                    % (arr - L["t0"], L["drive"], L["turn"], jump, r.bubble, arr - t))
@@ -1219,6 +1252,445 @@ class Controller:
         r.cam_arr = arr
         oa2 = self.own_at(r, t)
         r.cam_off = (x - oa2[0], y - oa2[1]) if oa2 else None
+
+    # -- (e17) observe, then trust: the camera's corrections -------------------------------------------------------
+    def own_path(self, r, ta, tb):
+        """How far its own pose went between ta and tb (cm, along its FOLLOW records)."""
+        d, prev = 0.0, None
+        for q in r.own_hist:
+            if q[0] < ta:
+                prev = q
+                continue
+            if q[0] > tb:
+                break
+            if prev is not None:
+                d += math.hypot(q[1] - prev[1], q[2] - prev[2])
+            prev = q
+        return d
+
+    def turn_rate(self, r, win=0.5):
+        """Its own heading's turn rate over the last win s (deg/s), from its FOLLOW records."""
+        h = [q for q in r.own_hist if q[0] >= self.t - win]
+        if len(h) < 2 or h[-1][0] - h[0][0] < 0.05:
+            return 0.0
+        return abs(wrap180(h[-1][3] - h[0][3])) / (h[-1][0] - h[0][0])
+
+    def drift_add(self, r, d_cm, travel_cm, why):
+        """(e17, 6) A measured correction: its own pose was d_cm off the camera after travel_cm driven since they last
+        agreed. The robot's own drift record (per cm), used by the late-fix rule; also given to the tracking layer."""
+        rec = r.__dict__.setdefault("drift_rec", [])
+        rec.append((self.t, float(d_cm), float(travel_cm), why))
+        del rec[:-40]
+        fn = getattr(self, "record_fn", None)
+        if fn is not None:
+            try:
+                fn(r.name, self.t, d_cm, travel_cm)
+            except Exception:  # noqa: BLE001
+                pass
+
+    def drift_rate(self, r):
+        """(cm of own-pose error per cm driven at its 90th percentile, corrections used); the measured prior
+        BLIND_PER_CM (29 Oct, 22,000 stretches) until LATE_REC_MIN corrections after 5 cm or more of driving."""
+        rec = [q for q in r.__dict__.get("drift_rec", []) if q[2] >= 5.0 and self.t - q[0] <= 900.0]
+        if len(rec) < LATE_REC_MIN:
+            return BLIND_PER_CM, len(rec)
+        v = sorted(q[1] / q[2] for q in rec)
+        return min(1.0, max(BLIND_PER_CM, v[min(len(v) - 1, int(0.9 * len(v)))])), len(rec)
+
+    def send_fpose(self, r, t_pic, x, y, th, sig=1.0, sig_th=3.0, why="re-seed"):
+        """(e17, 1e) Set the robot's pose from a camera spot taken at t_pic: moved on to now by its own motion since
+        (projected; before e17 the re-seed used the picture's spot as it was, ~0.5-1 s old) and never while it turns
+        (the Pi's copy of its heading is ~0.3 s old by the time the fpose lands: 13-15 deg median jump when one landed
+        mid-turn in the 11 Nov home runs; at most RESEED_WAIT_MAX_S of waiting). MIRLT_RESEED_TURN=0: at once, as
+        before (the picture's spot, the heading now)."""
+        if not RESEED_TURN:
+            h = th if th is not None else self.heading(r)
+            self.out(r, "fpose %.2f %.2f %.2f %.2f %.2f" % (x, y, h, sig, sig_th))
+            return True
+        if self.turn_rate(r) > RESEED_TURN_DPS or (r.move is not None and r.move.get("phase") == "turn" and
+                                                    not r.move.get("curve")):
+            pend = r.__dict__.get("fpose_pending")
+            r.fpose_pending = dict(t_pic=t_pic, x=x, y=y, th=th, sig=sig, sig_th=sig_th, why=why,
+                                   t0=pend["t0"] if pend else self.t)
+            if self.t - r.fpose_pending["t0"] < RESEED_WAIT_MAX_S:
+                self.counts["reseeds_deferred"] = self.counts.get("reseeds_deferred", 0) + (0 if pend else 1)
+                return False
+        r.fpose_pending = None
+        q = self.projected(r, t_pic, x, y, th) or (x, y, th)
+        h = q[2] if q[2] is not None else self.heading(r)
+        self.out(r, "fpose %.2f %.2f %.2f %.2f %.2f" % (q[0], q[1], h, sig, sig_th))
+        r.fpose_t = self.t
+        return True
+
+    def fpose_pending_watch(self, r):
+        pend = r.__dict__.get("fpose_pending")
+        if pend is not None:
+            self.send_fpose(r, pend["t_pic"], pend["x"], pend["y"], pend["th"], pend["sig"], pend["sig_th"],
+                            pend["why"])
+
+    def correct_from_camera(self, r, t, x, y, th, arr, how, src=None):
+        """(e17, 1d/1e; home 11 Nov: Left held 84 min 48 cm from where the camera saw it standing) The tracking layer
+        named this sighting by elimination (a steady sighting nobody else can claim, this robot standing and
+        unaccounted) or by its wiggle: the evidence wins. Its pose is set from the camera at once (fpose: the robot's
+        own filter would refuse a far fix), its filter re-seeded, lost / doubt cleared. Said "CORRECTED", never
+        "moved in": its wheels did not move. A large correction also asks the camera to confirm its heading."""
+        oa = self.own_at(r, t)
+        if oa is None and r.own is not None:
+            oa = r.own[1:4]
+        d = math.hypot(x - oa[0], y - oa[1]) if oa else 0.0
+        travel = self.own_path(r, r.__dict__.get("agree_t", t - 60.0), t)
+        if r.lost is not None:
+            travel = max(travel, r.lost.get("drive", 0.0))
+        self.drift_add(r, d, travel, "camera correction (%s)" % how)
+        self.send_fpose(r, t, x, y, None, 1.0, 3.0, "correction")
+        if r.own is not None:                   # its own track from now on is in the new frame: shift the history
+            q = self.projected(r, t, x, y, None) or (x, y, None)
+            dx, dy = q[0] - r.own[1], q[1] - r.own[2]
+            r.own_hist = [(a, b + dx, c + dy, e) for a, b, c, e in r.own_hist]
+            r.own = (r.own[0], q[0], q[1]) + tuple(r.own[3:])
+        r.fpose_t = self.t
+        was_lost = r.lost is not None
+        r.lost, r.bubble, r.lost_hold, r.jump_n = None, 0.0, False, 0
+        r.pc = None
+        if r.fp is not None and r.fp.started:
+            r.fp.reset(self.t, x, y, None, 1.0)
+        r.__dict__.pop("pfuse", None)           # the old disagreement is settled by the correction
+        r.__dict__.pop("pagree", None)
+        r.cam = (t, x, y, th)
+        r.cam_arr = arr
+        r.cam_off = (0.0, 0.0)
+        r.cam_hist.append((t, x, y))
+        r.agree_t = t
+        r.corrected = dict(t=self.t, d_cm=d, x=x, y=y, how=how)
+        if r.__dict__.get("place_asked") is not None or r.__dict__.get("hd_drive") is not None:
+            r.hd_drive = None
+            r.place_asked = None
+            fn = getattr(self, "place_cancel_fn", None)
+            if fn is not None:
+                try:
+                    fn(r.name)
+                except Exception:  # noqa: BLE001
+                    pass
+        if HEADING_CONFIRM and d > REACQUIRE_MAX_CM:
+            r.hd_confirm = dict(t=self.t, why="its own pose was %.0f cm off" % d, tries=0, stage=None)
+        if r.stopped_hard and (r.adj is None or r.adj["kind"] != "stop"):
+            self.close_break(r)
+        self.counts["camera_corrections"] = self.counts.get("camera_corrections", 0) + 1
+        self.log("corrections", dict(t=round(self.t, 2), robot=r.name, how=how, d_cm=round(d, 1),
+                                     travel_cm=round(travel, 1), x=round(x, 1), y=round(y, 1),
+                                     own_x=round(oa[0], 1) if oa else "", own_y=round(oa[1], 1) if oa else "",
+                                     was_lost=int(was_lost), unsure=int(r.__dict__.get("unsure") is not None)))
+        self.event(r, "CORRECTED", "the camera sees %s standing at %.0f, %.0f (%s); its own pose was %.1f cm off and "
+                   "its wheels did not move: its pose is set from the camera (a correction, not a move)" % (
+                       r.name, x, y, "the only steady sighting nobody else can claim" if how == "elimination" else
+                       "the sighting that turned when it wiggled", d))
+
+    def unaccounted_why(self, r):
+        """(e17) Why the run cannot account for r now (lost, held, unsure near an edge, needs a hand), or None: the
+        tracking layer's elimination looks for its steady sighting."""
+        if r.mode in ("out", "gone", "start"):
+            return None
+        if r.lost is not None:
+            return "lost"
+        if getattr(r, "held", None):
+            return "held: %s" % r.held.get("kind")
+        if r.__dict__.get("unsure") is not None:
+            return "unsure near an edge"
+        if r.name in (self.__dict__.get("need_hand") or {}):
+            return "needs a hand"
+        return None
+
+    def on_elim_revoked(self, ev):
+        """(e17) The layer took back an elimination (the spot stayed while r drove): r is lost again (dead reckoning,
+        the blind rule) until the camera has it."""
+        r = self.R.get(ev.get("robot"))
+        if r is None:
+            return
+        self.counts["corrections_revoked"] = self.counts.get("corrections_revoked", 0) + 1
+        self.event(r, "correction revoked", "the camera spot at %.0f, %.0f stayed while %s drove: it was not %s" % (
+            ev["x"], ev["y"], r.name, r.name))
+        if r.lost is None:
+            self.start_lost(r, "its camera spot was not it")
+
+    # -- (e17, 2) no driving blind on late fixes ------------------------------------------------------------------
+    def fix_delay(self, r):
+        a = sorted(r.__dict__.get("fix_ages", [])[-40:])
+        if len(a) < 5:
+            return max(0.2, self.cam_delay_hi)
+        return a[min(len(a) - 1, int(0.9 * len(a)))]
+
+    def late_fix_watch(self, r):
+        """(e17, 2; home 11 Nov 11:39: Left drove ~50 cm on its own guess while the fixes arrived ~1 s late) Every tick
+        while it drives: by the time the next fix lands (its own measured fix delay, 90th percentile) its own pose may
+        be off by BLIND_BASE + its drift rate (measured, per cm) x the distance driven since the newest picture. When
+        that could pass the room it has (the nearest edge less its half diagonal, the nearest robot less both), it
+        slows to what keeps it inside, and under LATE_SLOW_MIN of its speed it waits (fspd 0) for a fix; the next
+        piece is not queued meanwhile. Back to full speed when a fix makes the sum fit again."""
+        late = r.__dict__.get("late")
+        mv = r.move
+        ok = LATE_FIX and r.mode == "move" and mv is not None and r.lost is None and r.cam is not None and \
+            not r.silent and r.new_fw and mv.get("t_drive") is not None and mv.get("phase") == "drive" and \
+            not str(mv.get("kind", "")).startswith(("wiggle", "nudge", "hdconfirm", "unsure", "recover", "probe", "creep"))
+        if not ok or r.adj is not None:
+            if late is not None and (mv is None or r.mode != "move"):
+                r.late = None
+            return
+        p = self.pos(r)
+        if p is None:
+            return
+        v = max(0.5, mv["v"])
+        delay = self.fix_delay(r)
+        d_since = self.own_path(r, r.cam[0], self.t)
+        rate, n_rec = self.drift_rate(r)
+        h = math.radians(self.heading(r))
+        ahead = (p[0] + math.cos(h) * v * delay, p[1] + math.sin(h) * v * delay)
+        room = min(edge_dist(self.rect, *p), edge_dist(self.rect, *ahead)) - HALF
+        for o in self.R.values():
+            if o is r or o.mode in ("gone",):
+                continue
+            po = self.pos(o)
+            if po is not None:
+                room = min(room, math.dist(p, po) - 2 * HALF - REFLEX_GAP)
+        err_full = BLIND_BASE + rate * (d_since + v * delay)
+        if late is None and err_full <= room:
+            return
+        if late is not None and err_full <= 0.8 * room:
+            r.late = None
+            r.scale = 1.0
+            self.control(r, "fspd 1.00", "fspd")
+            self.counts["late_resumed"] = self.counts.get("late_resumed", 0) + 1
+            self.log("late_fix", dict(t=round(self.t, 2), robot=r.name, what="full speed", err_cm=round(err_full, 1),
+                                      room_cm=round(room, 1), delay_s=round(delay, 2), rate=round(rate, 3)))
+            return
+        allowed = (room - BLIND_BASE) / max(1e-6, rate) - d_since
+        scale = max(0.0, min(1.0, allowed / max(1e-6, v * delay)))
+        if scale < LATE_SLOW_MIN:
+            scale = 0.0
+            if self.never_still and late is not None and late["scale"] == 0.0 and \
+                    self.t - late.get("t0", late["t"]) >= self.still_pause(r):
+                scale = LATE_SLOW_MIN          # (e17, Nick 12 Nov) a pause, not a stop: on at its slowest
+        if late is not None and abs(scale - late["scale"]) < 0.1:
+            return
+        if late is None:
+            self.counts["late_slowed" if scale > 0 else "late_waited"] = self.counts.get(
+                "late_slowed" if scale > 0 else "late_waited", 0) + 1
+            self.event(r, "late fixes", "%s: fixes arrive %.2f s late and its own pose may be %.1f cm off by then "
+                       "(%.1f cm driven since the newest picture, drift %.2f cm per cm%s); room %.1f cm" % (
+                           "waits for a fix" if scale == 0 else "slows to %.0f %%" % (100 * scale), delay, err_full,
+                           d_since, rate, " measured over %d corrections" % n_rec if n_rec >= LATE_REC_MIN else
+                           " (prior)", room))
+        r.late = dict(t=self.t, scale=scale, t0=late.get("t0", self.t) if late else self.t)
+        r.scale = scale
+        self.control(r, "fspd %.2f" % scale, "fspd")
+        self.why_zero(r, "late fixes: waits for the camera") if scale == 0 else None
+        self.log("late_fix", dict(t=round(self.t, 2), robot=r.name, what="scale %.2f" % scale,
+                                  err_cm=round(err_full, 1), room_cm=round(room, 1), delay_s=round(delay, 2),
+                                  rate=round(rate, 3), d_since_cm=round(d_since, 1)))
+
+    # -- (e17, Nick 12 Nov) never still: creep toward safety and being found --------------------------------------
+    def still_pause(self, r):
+        """The longest a held robot stands between creeps: one fix delay (90th percentile, measured) for a picture
+        taken after it stopped, plus half a second for the camera to settle. Derived; no DOE."""
+        return self.fix_delay(r) + 0.5
+
+    def creep_target(self, r, p):
+        """Its best guess of safety AND being found: back into the readable area (its last fix well inside, or the
+        nearest readable spot) when it is outside it; else the middle of the board (furthest from every edge, where
+        every camera sees)."""
+        ws = self.ws
+        if ws is not None and getattr(ws, "limited", False) and ws.edge_dist(*p) < 0.0:
+            t_ = r.__dict__.get("last_in") or ws.nearest_allowed(p[0], p[1], HALF)
+            if t_ is not None:
+                return tuple(t_[:2]), "back into the area the camera reads"
+        b = getattr(self.rect, "board", None) or self.rect
+        x0, y0, x1, y1 = (float(v) for v in tuple(b)[:4])
+        return ((x0 + x1) / 2.0, (y0 + y1) / 2.0), "toward the middle of the board"
+
+    def creep_step(self, r, why):
+        """(e17, Nick 12 Nov: "Movement should never settle at 0 ... It's okay if they fall") A small slow move toward
+        creep_target from its best position (the camera's when fresh, else its fused / own), step and speed scaled down
+        by its uncertainty (UNC0 / (UNC0 + unc)). Reverses when the target is behind it (no turn), else turns on the
+        spot first. Keeps the reflex gap to the others' plans (other bearings tried, 45 and 90 deg off); no edge rule
+        (a fall is allowed while experimenting). Returns True when a move was sent."""
+        p = (r.cam[1], r.cam[2]) if (r.cam is not None and r.lost is None and self.fresh(r)) else self.pos(r)
+        if p is None or r.silent:
+            return False
+        h = self.heading(r)
+        tgt, words = self.creep_target(r, p)
+        dist = math.dist(p, tgt)
+        unc = r.bubble if r.lost is not None else self.unc(r)
+        f = CREEP_UNC0_CM / (CREEP_UNC0_CM + max(0.0, unc))
+        L = max(CREEP_MIN_CM, min(CREEP_MAX_CM * f, max(CREEP_MIN_CM, dist)))
+        v = max(CREEP_V_MIN, BACK_V * f)
+        brg = math.degrees(math.atan2(tgt[1] - p[1], tgt[0] - p[0])) if dist > 0.5 else h
+        for off in (0.0, 45.0, -45.0, 90.0, -90.0):
+            b_ = wrap180(brg + off)
+            back = abs(wrap180(b_ - (h + 180.0))) <= 60.0
+            turn = 0.0 if back else wrap180(b_ - h)
+            hd = wrap180(h + 180.0) if back else wrap180(h + turn)
+            tr = Traj.move(self.t + 0.2 + (turn_s(turn) if turn else 0.0), p, hd, 0.0, L, v, m0=self.margin0(r))
+            if any(clearance_profile(tr, o.traj, now=self.t)[-1] < REFLEX_CC for o in self.others(r)):
+                continue
+            kind = "creep back" if back else "creep"
+            mv = dict(kind=kind, cell=None, turn=turn, L=L, v=v, t0=self.t, p0=p, h0=h, h1=wrap180(h + turn),
+                      end=tr.end, phase="turn", n=r.n_moves + 1, drive_id=None, turn_id=None, t_drive=None,
+                      adj_scale=1.0, rev=back)
+            if abs(turn) >= 3.0:
+                mv["turn_id"] = self.send_step(r, "fs %%d T %.2f -" % wrap180(h + turn))
+            mv["drive_id"] = self.send_step(r, "fs %%d D %.2f %.2f %.2f %.2f %.2f %.2f %d -" % (
+                p[0], p[1], tr.end[0], tr.end[1], wrap180(h + turn), v, 1 if back else 0))
+            r.move, r.traj, r.mode, r.queue = mv, tr, "move", []
+            r.n_moves += 1
+            self.counts["creeps"] = self.counts.get("creeps", 0) + 1
+            last = r.__dict__.get("creep_said", -1e9)
+            if self.t - last >= 30.0:
+                r.creep_said = self.t
+                self.event(r, "creeps", "%s: %.0f cm at %.1f cm/s %s (%s; its doubt %.1f cm)" % (
+                    why, L, v, words, "reversing" if back else "turning %.0f deg first" % turn, unc))
+            self.log("creep", dict(t=round(self.t, 2), robot=r.name, why=why, L_cm=round(L, 1), v=round(v, 1),
+                                   unc_cm=round(unc, 1), x=round(p[0], 1), y=round(p[1], 1), tx=round(tgt[0], 1),
+                                   ty=round(tgt[1], 1), off_deg=off, back=int(back)))
+            self.why_zero(r, "creep (%s)" % why)
+            self.pump(r)
+            return True
+        r.busy_until = self.t + 0.5                     # every way is another robot's: a brief pause
+        return False
+
+    def never_still_watch(self, r):
+        """(e17) Every tick: a robot that has stood idle longer than still_pause (held at an edge, unsure, needing a
+        hand, waiting for a heading check's room, put down at an edge, tilted with no way back, outside the readable
+        area with no return found) creeps. Not while it waits for a heading check's measurement or a short pause the
+        run asked for itself under that pause; never one that is silent, parked, out, or at its battery floor."""
+        if not self.never_still or r.mode != "idle" or r.move is not None:
+            r.still_since = None
+            return
+        if r.__dict__.get("still_since") is None:
+            r.still_since = self.t
+            return
+        if r.silent or getattr(r, "held", None) or (r.battery is not None and r.battery <= self.floor) or \
+                self.pos(r) is None:
+            return
+        hc = r.__dict__.get("hd_confirm")
+        if hc is not None and hc.get("stage") == "measure":
+            return
+        if self.t - r.still_since < self.still_pause(r):
+            return
+        why = self.edge_stuck_why(r) or self.unaccounted_why(r) or (
+            "waits for room to check its heading" if hc is not None else "stood still")
+        if self.creep_step(r, why):
+            r.still_since = None
+
+    # -- (e17, 2) a camera-confirmed heading after a heading re-set --------------------------------------------------
+    def heading_confirm_step(self, r):
+        """After an off-plan heading re-set (or a large correction), the next move is a short slow straight crawl
+        whose direction the camera measures: within HD_CONFIRM_DEG of its own heading = confirmed; else its heading is
+        set from the camera (standing: nothing turns under the fpose) and checked again. The crawl's length is derived
+        from the camera's noise on this robot (sqrt 2 x sigma / sqrt n / tan(HD_CONFIRM_DEG / 2), n fixes averaged at
+        each end), 6-12 cm, and made only where that length in ANY direction keeps the derived edge clearance and the
+        other robots' gap (its heading is what is in doubt). No room: the next move is planned as before, said."""
+        hc = r.hd_confirm
+        p = self.pos(r)
+        if hc.get("stage") is None:
+            if not self.fresh(r) or r.cam is None:
+                r.busy_until = self.t + 0.3
+                return
+            c0 = [q for q in r.cam_hist if q[0] >= self.t - 1.5 and q[0] >= hc.get("t_idle", hc["t"])]
+            if len(c0) < 2:
+                hc.setdefault("t_idle", self.t)
+                r.busy_until = self.t + 0.3
+                return
+            sx = sum(q[1] for q in c0) / len(c0)
+            sy = sum(q[2] for q in c0) / len(c0)
+            sd = math.sqrt(sum((q[1] - sx) ** 2 + (q[2] - sy) ** 2 for q in c0) / len(c0))
+            sig = max(0.3, sd)
+            L = min(HD_CONFIRM_MAX_CM, max(6.0, math.sqrt(2.0) * sig / math.sqrt(3.0) /
+                                           math.tan(math.radians(HD_CONFIRM_DEG / 2.0))))
+            need = self.need_cm(r, BACK_V, True) + L
+            crowd = any(math.dist(self.pos(o), p) < PLAN_CC + L for o in self.R.values()
+                        if o is not r and self.pos(o) is not None and o.mode != "gone")
+            if crowd:
+                # another robot within reach of a crawl in some direction: it waits for room (they roam on); a move
+                # on a doubtful heading next to a robot is how 08:48 pushed Right off the board
+                if not hc.get("said_wait"):
+                    hc["said_wait"] = True
+                    self.counts["hd_confirm_waits"] = self.counts.get("hd_confirm_waits", 0) + 1
+                    self.event(r, "heading check waits", "its heading is in doubt (%s) and a robot is within %.0f cm: "
+                               "it stands until there is room for a %.0f cm check" % (hc["why"], PLAN_CC + L, L))
+                r.busy_until = self.t + 1.0
+                return
+            if edge_dist(self.rect, *p) < need:
+                r.hd_confirm = None
+                self.counts["hd_confirm_no_room"] = self.counts.get("hd_confirm_no_room", 0) + 1
+                self.event(r, "heading not confirmed", "no room for a %.0f cm heading check here (near an edge): the "
+                           "next move is planned as before (the edge rule with its doubt)" % L)
+                return
+            h = self.heading(r)
+            tr = Traj.move(self.t + 0.2, p, h, 0.0, L, BACK_V, m0=self.margin0(r) + L)
+            mv = dict(kind="hdconfirm", cell=None, turn=0.0, L=L, v=BACK_V, t0=self.t, p0=p, h0=h, h1=h,
+                      end=tr.end, phase="turn", n=r.n_moves + 1, drive_id=None, turn_id=None, t_drive=None,
+                      adj_scale=1.0, rev=False)
+            mv["drive_id"] = self.send_step(r, "fs %%d D %.2f %.2f %.2f %.2f %.2f %.2f 0 -" % (
+                p[0], p[1], tr.end[0], tr.end[1], h, BACK_V))
+            hc.update(stage="crawl", c0=(sx, sy), L=L, h_own=h)
+            r.move, r.traj, r.mode = mv, tr, "move"
+            r.n_moves += 1
+            self.counts["hd_confirm_crawls"] = self.counts.get("hd_confirm_crawls", 0) + 1
+            self.pump(r)
+            return
+        if hc["stage"] == "measure":
+            c1 = [q for q in r.cam_hist if q[0] >= hc["t_end"] - 0.05]
+            if len(c1) < 2 and self.t - hc["t_end"] < 3.0:
+                r.busy_until = self.t + 0.2
+                return
+            if not c1:
+                hc["stage"] = None
+                hc["tries"] += 1
+                return
+            ex = sum(q[1] for q in c1) / len(c1)
+            ey = sum(q[2] for q in c1) / len(c1)
+            moved = math.hypot(ex - hc["c0"][0], ey - hc["c0"][1])
+            hc["tries"] += 1
+            if moved < 0.5 * hc["L"]:
+                self.event(r, "heading not confirmed", "the camera saw it move only %.1f cm of %.0f" % (moved, hc["L"]))
+                if hc["tries"] >= 3:
+                    r.hd_confirm = None
+                else:
+                    hc["stage"] = None
+                return
+            cam_h = math.degrees(math.atan2(ey - hc["c0"][1], ex - hc["c0"][0]))
+            err = wrap180(cam_h - hc["h_own"])
+            self.log("heading", dict(t=round(self.t, 2), robot=r.name, kind="confirm crawl", err_deg=round(err, 1),
+                                     moved_cm=round(moved, 1), in_a_row=hc["tries"]))
+            if abs(err) <= HD_CONFIRM_DEG:
+                r.hd_confirm = None
+                self.counts["hd_confirmed"] = self.counts.get("hd_confirmed", 0) + 1
+                self.event(r, "heading confirmed", "a %.0f cm crawl: the camera saw it go %.0f deg, its own heading "
+                           "%.0f (%.1f off)" % (moved, cam_h, hc["h_own"], err))
+                return
+            h = wrap180(self.heading(r) + err)
+            self.out(r, "fpose %.2f %.2f %.2f 1.0 3.0" % (ex, ey, h))
+            r.fpose_t = self.t
+            self.counts["hd_confirm_set"] = self.counts.get("hd_confirm_set", 0) + 1
+            self.event(r, "heading set", "a %.0f cm crawl: the camera saw it go %.0f deg, its own heading said %.0f: "
+                       "its heading set from the camera and checked again" % (moved, cam_h, hc["h_own"]))
+            if hc["tries"] >= 3:
+                r.hd_confirm = None
+            else:
+                hc["stage"] = None
+                hc["t_idle"] = self.t + 0.3
+
+    def hdconfirm_over(self, r, mv, state):
+        r.move = None
+        r.mode = "idle"
+        for st in r.steps.values():
+            if st["status"] in ("queued_local", "sent", "acked", "started"):
+                st["status"] = "dropped"
+        hc = r.__dict__.get("hd_confirm")
+        if hc is None:
+            return
+        hc["stage"] = "measure"
+        hc["t_end"] = self.t
+        r.busy_until = self.t + 0.2
 
     # -- moves ---------------------------------------------------------------------------------------------------
     def others(self, r):
@@ -2023,7 +2495,7 @@ class Controller:
         r.cam_off = (0.0, 0.0)
         r.busy_until = max(r.busy_until, self.t + 1.0)
 
-    def pose_fuse(self, r, own, cam, th):
+    def pose_fuse(self, r, own, cam, th, t_pic=None):
         """(e08, A1; 6 Nov run 1: Center's move 46 was planned 1.9 s after its own pose and the camera disagreed by 4.6
         cm, under the 2 s rule, and swung its front over the edge) Own pose vs camera, both at the picture's time: the
         disagreement widens its position uncertainty AT ONCE (unc(), so every plan and the edge rule see it), the next
@@ -2045,12 +2517,18 @@ class Controller:
         self.counts["reseeds"] = self.counts.get("reseeds", 0) + 1
         h = th if th is not None else self.heading(r)
         q = self.projected(r, self.t, cam[0], cam[1], h) or (cam[0], cam[1], h)
+        if t_pic is not None:       # (e17, 6) a measured drift: ev d_cm after its own driving since they last agreed
+            self.drift_add(r, ev["d_cm"], self.own_path(r, r.__dict__.get("agree_t", t_pic - 10.0), t_pic), "re-seed")
         self.event(r, "pose re-seeded", "its own pose was %.1f cm from the camera's: uncertainty "
                    "widened at once; still off after %.0f s: pose set from the camera without stopping (observed)" % (
                        ev["d_cm"], ev["for_s"]))
         self.log("pose", dict(t=round(self.t, 2), robot=r.name, what="reseed", d_cm=ev["d_cm"],
                               unc_cm=round(self.unc(r), 2)))
-        self.out(r, "fpose %.2f %.2f %.2f %.2f %.2f" % (q[0], q[1], q[2] if q[2] is not None else h, 1.0, 3.0))
+        if RESEED_TURN and t_pic is not None:
+            # (e17, 1e) from the picture's time, projected to now, never landing mid-turn (send_fpose)
+            self.send_fpose(r, t_pic, cam[0], cam[1], th, 1.0, 3.0, "re-seed")
+        else:
+            self.out(r, "fpose %.2f %.2f %.2f %.2f %.2f" % (q[0], q[1], q[2] if q[2] is not None else h, 1.0, 3.0))
         r.cam_off = (0.0, 0.0)
 
     def on_raw_evidence(self, name, t, ax, front_cm, line_c):
@@ -2153,10 +2631,34 @@ class Controller:
         self.counts["gyro_heading_fixes"] = self.counts.get("gyro_heading_fixes", 0) + 1
         self.out(r, "fpose %.2f %.2f %.2f %.2f %.2f" % (r.own[1], r.own[2], h, 1.0, 1.0))
 
-    def identity_wiggle(self, r, why="identity"):
+    def identity_wiggle(self, r, why="identity", spots=None):
         """(e09, B1 wiggle first) The tracking layer cannot tell r from a robot it passed closely: r wiggles on its spot
-        (the find-me wiggle) so the camera's turning outline names it."""
-        if r.mode in ("out", "gone", "start") or getattr(r, "held", None):
+        (the find-me wiggle) so the camera's turning outline names it. (e17, 1b) spots: the camera's candidate spots
+        when r is unaccounted for (its own pose may be far off): it wiggles, held or not, only where a turn on the spot
+        is safe at EVERY candidate (each spot TURN_EDGE_CC in from the edges, no other robot within PLAN_CC)."""
+        if r.mode in ("out", "gone", "start"):
+            return
+        if spots:
+            # a turn on the spot sweeps only its own circle (HALF): safe where every candidate spot is TURN_EDGE_CC in
+            # from the edges and no robot the camera has now (fresh) is within two circles and the reflex gap
+            seen = [(o.cam[1], o.cam[2]) for o in self.R.values() if o is not r and o.cam is not None and
+                    o.mode != "gone" and self.fresh(o)]
+            for sx, sy in spots:
+                if edge_dist(self.rect, sx, sy) < TURN_EDGE_CC or any(
+                        0.5 < math.dist(q, (sx, sy)) < 2 * HALF + REFLEX_GAP for q in seen + [
+                            s_ for s_ in spots if s_ != (sx, sy)]):
+                    self.counts["identity_wiggle_unsafe"] = self.counts.get("identity_wiggle_unsafe", 0) + 1
+                    self.event(r, "identity wiggle", "%s: not safe at every place the camera might have it: it stands"
+                               % why)
+                    return
+            if r.move is not None:
+                self.halt(r, "identity wiggle")
+                self.end_move(r)
+            self.counts["identity_wiggles"] = self.counts.get("identity_wiggles", 0) + 1
+            self.event(r, "identity wiggle", why)
+            r.wiggle_due = 0.0
+            return self.find_me(r, safe_checked=True)
+        if getattr(r, "held", None):
             return
         if r.move is not None and r.move.get("kind") == "wiggle":
             return
@@ -2341,6 +2843,10 @@ class Controller:
         if mv.get("kind") == "nudge":
             if sid == mv.get("drive_id") and state in ("done", "failed", "dropped"):
                 self.nudge_over(r, mv, state)
+            return
+        if mv.get("kind") == "hdconfirm":                  # (e17, 2) the heading-confirm crawl ended
+            if sid == mv.get("drive_id") and state in ("done", "failed", "dropped"):
+                self.hdconfirm_over(r, mv, state)
             return
         if mv.get("curve"):
             return self.curve_step_over(r, sid, state, info)
@@ -2788,6 +3294,16 @@ class Controller:
         own = (r.own[1], r.own[2]) if r.own is not None else None
         cam = (r.cam[1], r.cam[2]) if (r.cam is not None and self.fresh(r) and self.camera_proven) else None
         p, h = self.pos(r), self.heading(r)
+        if HEADING_CONFIRM and r.__dict__.get("hd_confirm") is not None and p is not None and any(
+                math.dist(self.pos(o), p) < PLAN_CC + 6.0 for o in self.R.values()
+                if o is not r and self.pos(o) is not None and o.mode != "gone"):
+            # (e17, 2; 08:48) its heading is in doubt and a robot is near: no heading-dependent step (the reverse
+            # that went toward Right); it holds and checks again
+            r.busy_until = self.t + self.UNSURE_RECHECK_S
+            self.counts["unsure_heading_doubt_holds"] = self.counts.get("unsure_heading_doubt_holds", 0) + 1
+            if not r.stopped_hard:
+                self.trophy_break(r, "unsure near an edge with its heading in doubt and a robot near: holds")
+            return
         for rev in (True, False):
             if not SR.inward_agreed(self.rect, own, cam, h, reverse=rev):
                 continue
@@ -2971,6 +3487,8 @@ class Controller:
             self.out(r, "fpose %.2f %.2f %.2f 1.0 3.0" % (x, y, h))
             self.event(r, "heading re-set", "twice in a row it drove %.0f deg off its own heading (camera): its heading "
                        "set to %.0f" % (ev["err_deg"], h))
+            if HEADING_CONFIRM:     # (e17, 2) the next move waits for a camera-confirmed heading
+                r.hd_confirm = dict(t=self.t, why="heading re-set (%.0f deg)" % ev["err_deg"], tries=0, stage=None)
             if r.move is not None:
                 self.halt(r, "heading re-set")
                 self.end_move(r)
@@ -3620,6 +4138,8 @@ class Controller:
             # plan the next piece from where it stands
             self.counts["queue_heading_resets"] = self.counts.get("queue_heading_resets", 0) + 1
             self.out(r, "fpose %.2f %.2f %.2f 1.0 3.0" % (p[0], p[1], c))
+            if HEADING_CONFIRM:     # (e17, 2) the next move waits for a camera-confirmed heading
+                r.hd_confirm = dict(t=self.t, why="off-plan heading re-set (%.0f deg)" % herr, tries=0, stage=None)
             self.event(r, "off plan", "%s; %d queued dropped; its own heading %.0f deg, the camera sees it go %.0f: "
                        "heading re-set, stopped, re-planned from where it is" % (why, nq, own_h, c))
             self.halt(r, "off plan: heading re-set")
@@ -3744,6 +4264,8 @@ class Controller:
     def plan_next(self, r):
         """While a piece runs: the next one from its planned end, queued on the robot so they run into each other."""
         mv = r.move
+        if r.__dict__.get("late") is not None or r.__dict__.get("hd_confirm") is not None:
+            return                  # (e17, 2) slowed / waiting on late fixes, or its heading in doubt: nothing queued
         v_now = max(0.5, mv["v"] * (r.scale if r.scale > 0 else 1.0))
         if self.pose_rule != "wait2s" and mv.get("t_drive") is not None:
             # (e08, A1) the next piece is chained from this one's PLANNED end only while the robot is where the plan
@@ -4359,6 +4881,19 @@ class Controller:
                     ok_, ev_ = OB.moved_in_evidence([f[:2] for f in held_fx], [f[:2] for f in new_fx],
                                                     k_sigma=MOVED_IN_K, lifted=bool(r.__dict__.get("lifted_t", -1e9)
                                                                                      > rec["t0"]))
+                    corr = r.__dict__.get("corrected")
+                    lifted_ = bool(r.__dict__.get("lifted_t", -1e9) > rec["t0"])
+                    if CAMERA_CORRECT and corr is not None and corr["t"] >= rec["t0"] - 1.0 and not lifted_:
+                        # (e17, 1d) the camera found it where it stood all along: its pose was corrected, nobody moved
+                        # it. Never "moved in" (the home runs' 10 false REJOINED); it carries on from the camera's spot
+                        nh.pop(r.name, None)
+                        self.counts["corrected_rejoins"] = self.counts.get("corrected_rejoins", 0) + 1
+                        r.rejoined_at = self.pos(r)
+                        self.event(r, "CORRECTED", "nobody moved %s: the camera found it at %.0f, %.0f (its own pose "
+                                   "was %.0f cm off); its pose corrected, it carries on (held %.0f s%s)" % (
+                                       r.name, corr["x"], corr["y"], corr["d_cm"], self.t - rec["t0"],
+                                       ", creeping meanwhile" if rec.get("self_moved") else ""))
+                        return False
                     if own_:
                         nh.pop(r.name, None)
                         self.counts["freed_itself"] = self.counts.get("freed_itself", 0) + 1
@@ -4488,6 +5023,9 @@ class Controller:
         self.adj_watch()
         half = int(t * 2) != int((t - 0.05) * 2)
         for r in self.R.values():
+            if r.__dict__.get("fpose_pending") is not None:
+                self.fpose_pending_watch(r)            # (e17, 1e) a re-seed waiting for the turn to end
+            self.late_fix_watch(r)                     # (e17, 2) late fixes: slow or wait
             self.gap_forward(r)                        # (e09, B2) the filter's position to the robot in camera gaps
             self.gyro_watch(r)                         # (e09, B3) switch, off by default
             if getattr(r, "want_wiggle", None) is not None and r.mode == "idle" and self.pos(r) is not None:
@@ -4517,6 +5055,10 @@ class Controller:
             elif r.mode == "idle" and r.__dict__.get("hd_drive") is not None and not r.silent:
                 self.ask_heading_click(r)              # (e13) its heading from a second click: it waits for it
                 r.busy_until = t + 0.5
+            elif r.mode == "idle" and t >= r.busy_until and r.__dict__.get("hd_confirm") is not None and \
+                    not r.silent and r.lost is None and self.pos(r) is not None and not getattr(r, "tilted", False) \
+                    and r.__dict__.get("unsure") is None:
+                self.heading_confirm_step(r)           # (e17, 2) a camera-confirmed heading before the next move
             elif r.mode == "idle" and t >= r.busy_until and not r.silent and self.pos(r) is not None and \
                     not getattr(r, "tilted", False) and self.strayed(r):
                 res_s = self.stray_return(r)           # (e13) outside the readable area: back along ground it drove
@@ -4546,12 +5088,18 @@ class Controller:
                                            self.blind_stop(r, self.pos(r), 5.0)):
                     if BLIND_RULE != "cap":
                         self.ask_place(r)              # (e13, Nick 12:56) a person clicks it on a picture
-                    self.find_me(r)
+                    if self.never_still and t - r.__dict__.get("creep_t", -1e9) >= self.still_pause(r):
+                        r.creep_t = t                  # (e17) creeps toward being found, never stands
+                        if not self.creep_step(r, "lost at its blind limit"):
+                            self.find_me(r)
+                    else:
+                        self.find_me(r)
                 elif r.battery is not None and r.battery <= self.floor:
                     r.out_why = "battery %d %%" % r.battery
                     self.go_park(r, "battery %d %% (floor %d %%)" % (r.battery, self.floor))
                 elif not r.lost_hold:
                     self.start_move(r)
+            self.never_still_watch(r)                  # (e17, Nick 12 Nov) held robots creep, never settle at 0
             if r.curve and r.mode == "move" and r.move is not None and r.move.get("curve") and not r.silent:
                 self.queue_watch(r)                    # (e10, run 2 incident a, c) every tick: still on plan?
             if r.curve and r.mode == "move" and r.move is not None and r.move.get("curve") and not r.queue and \
@@ -4792,10 +5340,10 @@ class Controller:
         self.event(r, "find me", "bubble too big (%s): eases to a stop, then wiggles" % why)
         self.end_move(r)
 
-    def find_me(self, r):
+    def find_me(self, r, safe_checked=False):
         if self.t < r.wiggle_due:
             return
-        if not self.can_turn_here(r):
+        if not safe_checked and not self.can_turn_here(r):
             r.wiggle_due = self.t + 3.0
             if not r.stopped_hard:
                 self.trophy_break(r, "lost near an edge: stands until seen")

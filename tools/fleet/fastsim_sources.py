@@ -54,8 +54,11 @@ class CameraSources:
             layer_kw.setdefault("camera_watch", False)
             layer_kw.setdefault("parked_watch", False)
             layer_kw.setdefault("brick_watch", False)
+        layer_kw.setdefault("board", tuple(sim.board))
         self.layer = TL.TrackingLayer(sim.names, srcs, log=self.log, lock_seed=self.lock_seed,
                                       wiggle=self.wiggle if not old else None, **layer_kw)
+        if hasattr(sim.ctrl, "record_fn"):        # (e17) the controller's corrections widen that robot's gate
+            sim.ctrl.record_fn = lambda n, t, d, trav: self.layer.record(n, t, d, trav)
         self.locks = {}             # name -> dict(body, last_ok)
         self.next_t = 0.0
         self.q = []                 # (due, tf, fixes)
@@ -84,7 +87,11 @@ class CameraSources:
         c = self.sim.ctrl
         r = c.R.get(name)
         if r is not None and hasattr(c, "identity_wiggle"):
-            c.identity_wiggle(r, why)
+            spots = getattr(self.layer, "wiggle_spots", None)
+            if spots:
+                c.identity_wiggle(r, why, spots=spots)     # (e17) an elimination wiggle: safe at every candidate
+            else:
+                c.identity_wiggle(r, why)
 
     # -- each picture -----------------------------------------------------------------------------------------------
     def frame(self):
@@ -213,6 +220,9 @@ class CameraSources:
         # clock: the camera's delay 0.44 s, MEASURED 5 / 6 Nov; the lag left after alignment CHOSEN 0.3 s), so the
         # predictions are as wrong as on the Pi
         c = s.ctrl
+        if hasattr(c, "unaccounted_why"):
+            for n, r in c.R.items():                # (e17) who the run cannot account for
+                self.layer.set_unaccounted(n, c.unaccounted_why(r))
         lag = float(sc.get("own_lag_s", 0.3))
         for n, r in c.R.items():
             if r.own is None:
@@ -236,6 +246,9 @@ class CameraSources:
         for pe in self.layer.take_parked():
             if hasattr(c, "on_parked_moved"):
                 self.q.append((t + lat, t, [dict(parked=pe)]))
+        for rv in self.layer.take_revoked():         # (e17)
+            if hasattr(c, "on_elim_revoked"):
+                self.q.append((t + lat, t, [dict(revoked=rv)]))
         self._deliver()
 
     def _count(self, t, fixes, _unused, dets=(), truth=None):
@@ -289,7 +302,14 @@ class CameraSources:
                 if "parked" in f:
                     c.on_parked_moved(f["parked"])
                     continue
+                if "revoked" in f:
+                    c.on_elim_revoked(f["revoked"])
+                    continue
                 n = f["robot"]
+                if f.get("how"):                     # (e17) a correction: the controller sends the robot an fpose
+                    c.on_fix(n, tf + s.cam_clock, f["x"], f["y"], f["th"], arrival=s.t, sigma=f["sigma"],
+                             src=f["src"], how=f["how"])
+                    continue
                 c.on_fix(n, tf + s.cam_clock, f["x"], f["y"], f["th"], arrival=s.t, sigma=f["sigma"], src=f["src"])
                 if s.t >= s.frozen_until and c.R[n].lost is None and getattr(c.R[n], "fix_used", True):
                     c.sent(n)

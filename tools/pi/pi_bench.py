@@ -31,7 +31,7 @@ import statistics as st
 import sys
 import time
 
-VERSION = "pi-bench-2026-11-11e16"   # e16: first version (per-process and per-thread CPU, R / D tasks, clock, heat)
+VERSION = "pi-bench-2026-11-12e17"   # e17: pictures the real bridge handled a second, picture-to-result lag (detect_times t_done), the practice run's watchdog stops and message gaps, the core layout in the setup line; bench layouts A / B / C (run-fleet-pi.sh). e16: first version (per-process and per-thread CPU, R / D tasks, clock, heat)
 
 ROLES = (("camrec.py", "recorder"), ("tag_bridge.py", "tag bridge"), ("cam_bridge.py", "camera bridge"),
          ("run_plan.py", "run_plan"), ("rp_shim.py", "run_plan (practice)"), ("mission_run.py", "mission_run"),
@@ -261,11 +261,27 @@ def summarise(d):
     for r in dd:
         dc[(r["role"], r["thread"], r["wchan"])] = dc.get((r["role"], r["thread"], r["wchan"]), 0) + 1
     out["dstate_top"] = sorted(([k[0], k[1], k[2], v] for k, v in dc.items()), key=lambda q: -q[3])[:8]
-    det = []
+    det, lag, rate = [], [], []
     for f in glob.glob(os.path.join(d, "**", "detect_times.csv"), recursive=True):
         if "practice_run" in f or "-dry" in f:
             continue                     # the practice's simulated pictures: not the real camera's detection
-        det += [_f(r.get("ms")) for r in _rows(f)]
+        rows = _rows(f)
+        det += [_f(r.get("ms")) for r in rows]
+        # (e17) pictures handled a second per camera, and the picture-to-result lag (t_done, e17's bridge)
+        lag += [(_f(r.get("t_done")) or 0.0) - (_f(r.get("t")) or 0.0) for r in rows if _f(r.get("t_done"))]
+        by = {}
+        for r in rows:
+            if _f(r.get("t")) is not None:
+                by.setdefault(r.get("cam"), []).append(_f(r.get("t")))
+        for ts in by.values():
+            if len(ts) > 10 and max(ts) > min(ts):
+                rate.append(len(ts) / (max(ts) - min(ts)))
+    if lag:
+        out.update(lag_s_med=pct(lag, 50), lag_s_p90=pct(lag, 90))
+    if rate:
+        out["pictures_per_s"] = round(sum(rate) / len(rate), 2)
+    wd, gaps = _watchdog(d)
+    out.update(watchdog_stops=wd, msg_gaps_over_wd=gaps)
     det = [x for x in det if x is not None]
     if det:
         out.update(detect_ms_med=pct(det, 50), detect_ms_p95=pct(det, 95), detect_n=len(det))
@@ -287,6 +303,32 @@ def summarise(d):
         with open(info) as f:
             out["bench"] = json.load(f)
     return out
+
+
+WD_S = 1.5    # the robots' watchdog (follow_wd_ms 1500): a gap this long in what a robot hears stops it
+
+
+def _watchdog(d):
+    """(e17) In the bench's practice run: the watchdog stops its robots reported, and the gaps over WD_S between
+    lines the planner sent each robot (messages / sent logs where the run keeps them); None where nothing was found."""
+    n, gaps, seen = 0, 0, False
+    for f in glob.glob(os.path.join(d, "**", "events*.csv"), recursive=True) + \
+            glob.glob(os.path.join(d, "**", "coordinator.jsonl"), recursive=True):
+        seen = True
+        try:
+            with open(f, errors="replace") as fh:
+                n += sum(1 for line in fh if "watchdog" in line.lower())
+        except OSError:
+            pass
+    for f in glob.glob(os.path.join(d, "**", "sent.csv"), recursive=True):
+        by = {}
+        for r in _rows(f):
+            if _f(r.get("t")) is not None:
+                by.setdefault(r.get("robot"), []).append(_f(r.get("t")))
+        for ts in by.values():
+            ts.sort()
+            gaps += sum(1 for a, b in zip(ts, ts[1:]) if b - a > WD_S)
+    return (n if seen else None), (gaps if seen else None)
 
 
 def fmt(v, nd=1):
@@ -315,6 +357,11 @@ def report(d, label=""):
               "| Memory available, lowest MB | %s |" % fmt(s.get("mem_min"), 0),
               "| Tag detection per picture, median (95th pct) ms | %s (%s), %s pictures |" % (
                   fmt(s.get("detect_ms_med")), fmt(s.get("detect_ms_p95")), s.get("detect_n", 0)),
+              "| Pictures the real camera's bridge handled a second (per camera) | %s |" % fmt(s.get("pictures_per_s")),
+              "| Picture to result (fix delay at the bridge), median (90th pct) s | %s (%s) |" % (
+                  fmt(s.get("lag_s_med"), 2), fmt(s.get("lag_s_p90"), 2)),
+              "| Practice run: watchdog stops (message gaps over %.1f s) | %s (%s) |" % (
+                  WD_S, s.get("watchdog_stops", "-"), s.get("msg_gaps_over_wd", "-")),
               "| run_plan re-plan time, median (max) s | %s (%s), %s re-plans |" % (
                   fmt(s.get("plan_s_med"), 2), fmt(s.get("plan_s_max"), 2), s.get("plan_n", 0)),
               "", "The practice's simulator and its simulated-picture tag bridge are measured but left out of the "
@@ -344,7 +391,10 @@ def compare(dirs, out, labels=None):
     rows = [("1-min load, median", "load1_med", 2), ("Cores busy, median (sum %)", "busy_med", 0),
             ("Tasks waiting on a device (D), median", "d_med", 0), ("Clock lowest MHz", "freq_min", 0),
             ("Temperature max C", "temp_max", 1), ("Detection ms, median", "detect_ms_med", 1),
-            ("Re-plan time s, median", "plan_s_med", 2), ("Real-run programs' CPU (sum %)", "real_run_cpu_mean", 0)]
+            ("Re-plan time s, median", "plan_s_med", 2), ("Real-run programs' CPU (sum %)", "real_run_cpu_mean", 0),
+            ("Pictures handled a second (per camera)", "pictures_per_s", 1), ("Fix delay at the bridge s, median",
+                                                                               "lag_s_med", 2),
+            ("Fix delay s, 90th pct", "lag_s_p90", 2), ("Watchdog stops (practice)", "watchdog_stops", 0)]
     lines = ["| What | " + " | ".join(labels) + " |", "|---" * (len(labels) + 1) + "|"]
     for name, k, nd in rows:
         lines.append("| %s | %s |" % (name, " | ".join(fmt(s.get(k), nd) for s in ss)))

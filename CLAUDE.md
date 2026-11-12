@@ -28,6 +28,15 @@
   patches) so tests catch rigidity before the real table does. "Discover, don't pre-map" above is this rule's surface
   case. Switches kept under "Keep features, switch them off" are decided automatically by default and live out of a
   new user's way.
+- **Never still (Nick, 2026-11-12):** "Movement should never settle at 0. They should always be moving toward their
+  best guess at safety and being found. They can pause and reduce speeds and distances, but while we experiment, I want
+  them all doing everything they can to keep going. It's okay if they fall." A held, unsure, lost or needs-a-hand robot
+  never just stands: it keeps making small, slow moves toward its best guess of safety (away from the nearest edge by
+  its fused / camera estimate, inside the area the camera reads) and of being found (toward where the camera last read
+  it well / the readable area), step and speed scaled down by its uncertainty. Brief pauses (a fresh fix, the camera
+  settling) are allowed, an indefinite stop is not; edge-uncertainty holds must not freeze robots. Questions to a person
+  are optional extras, never a reason to stop moving. Every robot held never ends a run. The old hold-and-wait stays
+  behind a switch (MIRLT_NEVER_STILL=0).
 - **Jay-Sun's RFID data (Nick, 2026-11-10; Jay-Sun agreed):** Nick's project and Jay-Sun's thesis are two separate
   projects sharing hardware and most of the software; each may use the other's data, as long as neither interferes with
   the other's experiments. RFID data may be an input to Nick's own runs and analyses, but only behind a switch that is

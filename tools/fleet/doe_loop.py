@@ -274,6 +274,23 @@ class CamFrames(threading.Thread):
             say("  (frame saving, %s: %s)" % (self.cam, e))
 
 
+
+FRAMES_HZ_DEFAULT = "4"     # (e17, Nick 12 Nov answer to e16 Q1) pictures a second kept per camera for training/replays;
+                            # MIRLT_FRAMES_HZ=12 (or any number) sets it, MIRLT_FRAMES_HZ=before the old 12 / 10
+
+
+def frames_rates(overhead_hz, side_hz):
+    """(e17) The tracking-rate frames' rates: MIRLT_FRAMES_HZ (default 4 a second, both cameras); "before": the
+    callers' own (12 overhead / 10 side). Clips and stills around events are kept at any rate."""
+    v = os.environ.get("MIRLT_FRAMES_HZ", FRAMES_HZ_DEFAULT).strip()
+    if v.lower() in ("before", "old", ""):
+        return float(overhead_hz), float(side_hz)
+    try:
+        f = float(v)
+    except ValueError:
+        return float(overhead_hz), float(side_hz)
+    return (f, f) if f > 0 else (float(overhead_hz), float(side_hz))
+
 class Frames:
     """Both cameras' frame saving, perf.csv every 2 s (the overhead's pictures a second and their age: the heat
     tracker joins it to cpu.csv; since 2026-10-28 also the free space on the card and the frames' drive, GB).
@@ -1379,9 +1396,10 @@ class DoeLoop(LD.Ladder):
             self.cpu.start()
         except Exception as e:
             say("  (cpu log not started: %s)" % e)
-        streams = [("overhead", self.stream, LD.Eye.OVERHEAD_HZ)]
+        ho_, hs_ = frames_rates(LD.Eye.OVERHEAD_HZ, SIDE_HZ)        # (e17) default 4 a second (MIRLT_FRAMES_HZ)
+        streams = [("overhead", self.stream, ho_)]
         if self.side_stream:
-            streams.append(("side", self.side_stream, SIDE_HZ))
+            streams.append(("side", self.side_stream, hs_))
         fake = None
         if self.a.dry and getattr(self.a, "sim_free", ""):
             fake = dict((k, float(v)) for k, v in (kv.split("=") for kv in self.a.sim_free.split(",")))

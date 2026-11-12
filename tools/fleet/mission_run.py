@@ -32,7 +32,7 @@ Ctrl+C stops every robot (run_plan's own stop). Free space (diskguard.py, 2026-1
 under its floor; frame saving stops under the frames' floor; under the card's floor during the run, run_plan is sent
 Ctrl+C (every robot stops) and the run ends as it would on Ctrl+C, with the upload.
 """
-VERSION = "2026-11-11e16"   # e16 (Pi audit): the tracking-rate frames' rate is a setting (MIRLT_FRAMES_HZ: pictures a second kept per camera; default unchanged, 12 overhead / 10 side; clips and stills around events are kept at any rate). Before: "2026-11-11e15"   # e15 (school 10 Nov 18:54): each tag's turn on its robot remembered across runs (tag_heading_store, <conf dir>/tag_headings.json; a dry run's own with --tag-heading-store): the binding's patient heading check gets it, a run with no binding starts from it, tags.json carries yaw_state (measured / remembered / motion / unknown) so run_plan never straightens on an unverified raw heading, run_plan records what it re-learns, free roam's proof drive is harvested after the run; --sim-hc-loss (the heading check's tag lost); MIRLT_TAG_HEADING_MEMORY=0 per run only. Before: "2026-11-10e14"   # e14: robot finding by motion inside the binding (dry: the simulator's own cameras drawn from its true poses); the readable area chosen by light and tag (readmap_store; free roam where every tag of the run reads: readmap_roam.json), each run's own evidence kept with its light; the battery floor from the site / Mission Control passed to run_plan; --sim-light, --readmap-store, --sim-tagless; e13's separate discovery step behind MIRLT_CAMERA_DISCOVERY=e13. 2026-11-10e13 (e13): school free roam planned inside the readable area (--readable-map); the camera check before a tags run (camera_feed); --sim-plain-roofs; tracked for the sleep 10 min after a run. 2026-11-10a (e12): the camera self-check at the start of a tags run (camera_selfcheck.py; --no-camera-check). No version string before
+VERSION = "2026-11-12e17"   # e17 (Nick 12 Nov): the tracking-rate frames kept at 4 a second by default (doe_loop.frames_rates; MIRLT_FRAMES_HZ=12 or =before the old 12 / 10). Before: "2026-11-11e16"   # e16 (Pi audit): the tracking-rate frames' rate is a setting (MIRLT_FRAMES_HZ: pictures a second kept per camera; default unchanged, 12 overhead / 10 side; clips and stills around events are kept at any rate). Before: "2026-11-11e15"   # e15 (school 10 Nov 18:54): each tag's turn on its robot remembered across runs (tag_heading_store, <conf dir>/tag_headings.json; a dry run's own with --tag-heading-store): the binding's patient heading check gets it, a run with no binding starts from it, tags.json carries yaw_state (measured / remembered / motion / unknown) so run_plan never straightens on an unverified raw heading, run_plan records what it re-learns, free roam's proof drive is harvested after the run; --sim-hc-loss (the heading check's tag lost); MIRLT_TAG_HEADING_MEMORY=0 per run only. Before: "2026-11-10e14"   # e14: robot finding by motion inside the binding (dry: the simulator's own cameras drawn from its true poses); the readable area chosen by light and tag (readmap_store; free roam where every tag of the run reads: readmap_roam.json), each run's own evidence kept with its light; the battery floor from the site / Mission Control passed to run_plan; --sim-light, --readmap-store, --sim-tagless; e13's separate discovery step behind MIRLT_CAMERA_DISCOVERY=e13. 2026-11-10e13 (e13): school free roam planned inside the readable area (--readable-map); the camera check before a tags run (camera_feed); --sim-plain-roofs; tracked for the sleep 10 min after a run. 2026-11-10a (e12): the camera self-check at the start of a tags run (camera_selfcheck.py; --no-camera-check). No version string before
 
 import argparse
 import datetime as dt
@@ -68,6 +68,17 @@ DROP_CM = 74.0          # the simulator's conference table: the floor this far b
 BRIDGE_START_S = 5.0    # the camera bridge learns the empty floor round the robots before run_plan starts (as
                         # run-fleet-pi.sh). No DOE: the bridge needs 5 pictures
 
+
+
+def bridge_pin():
+    """(e17) The camera bridge's cores under the core layout (MIRLT_BRIDGE_CORES, set by run-fleet-pi.sh): a taskset
+    prefix, or nothing."""
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pi"))
+        import core_layout as CL
+        return CL.bridge_prefix()
+    except Exception:  # noqa: BLE001
+        return []
 
 def guard_cmds(args):
     """(11-05h, Nick 5 Nov 20:46) The robot-side safety layers for this run: the edge guard with the site's mode
@@ -188,7 +199,43 @@ def observed_split(args, robots, out):
             if lab not in orders.get(n, []):
                 orders.setdefault(n, []).insert(0, lab)
             skipped.pop(lab, None)
+    orders = to_readable_when_empty(orders, pts, pos, readable, robots)
     return (home_at or None), orders
+
+
+EMPTY_TO_READABLE = os.environ.get("MIRLT_EMPTY_TO_READABLE", "1") != "0"   # (e17, Nick 12 Nov answer 4)
+
+
+def to_readable_when_empty(orders, pts, pos, readable, robots):
+    """(e17; Claude's reading of Nick's 12 Nov answer: a robot left with no points it can visit in the readable area
+    does not stand or leave the run) Such a robot gets one goal: the readable point nearest to where it stands that no
+    other robot has in its list (else the nearest readable point at all), so it goes where the camera can identify it
+    again and rejoins the plan from there. Said. MIRLT_EMPTY_TO_READABLE=0: it stays where it is (before e17)."""
+    if not EMPTY_TO_READABLE or readable is None:
+        return orders
+    taken = {l for v in orders.values() for l in v}
+    for n in robots:
+        if orders.get(n):
+            continue
+        p = pos.get(n)
+        if p is None:
+            continue
+        ok = []
+        for l in pts:
+            try:
+                if readable(*pts[l][:2])[0]:
+                    ok.append(l)
+            except Exception:      # noqa: BLE001
+                continue
+        if not ok:
+            continue
+        free = [l for l in ok if l not in taken] or ok
+        lab = min(free, key=lambda l: math.dist(pts[l][:2], p[:2]))
+        orders[n] = [lab]
+        taken.add(lab)
+        say("TABLE SHARING: %s has no points of its own in the readable area: it goes to %s (the nearest readable "
+            "point), where the camera can find it, and rejoins the plan from there" % (n, lab))
+    return orders
 
 
 ROAM_DWELL_S = 0.5        # (e07) free roam at a tag site: a half-second stand at each spot (chosen: enough for the
@@ -477,7 +524,7 @@ def start_bridge(args, out, mp, cal, scal, stream, side_stream):
             say("(camera self-check skipped: %s)" % e)
     if getattr(args, "tracking_", "lights") == "tags":
         # the AprilTag robots (2026-11-02): tag_bridge.py, both cameras, the tags' own ids and heights
-        cmd = ["nice", "-n", "5", PY, os.path.join(HERE, "tag_bridge.py"), "--tags", args.tags_json,
+        cmd = bridge_pin() + ["nice", "-n", "5", PY, os.path.join(HERE, "tag_bridge.py"), "--tags", args.tags_json,
                "--cam", "overhead=%s,%s" % (stream, cal), "--out", os.path.join(out, "bridge"), "--wait-calib-s", "90",
                "--robots", args.robots]
         try:
@@ -490,7 +537,7 @@ def start_bridge(args, out, mp, cal, scal, stream, side_stream):
             cmd += ["--cam", "side=%s,%s" % (side_stream, scal)]
         f = open(os.path.join(out, "bridge.txt"), "w")
         return subprocess.Popen(cmd, stdout=f, stderr=subprocess.STDOUT, cwd=REPO), f
-    cmd = ["nice", "-n", "5", PY, os.path.join(HERE, "cam_bridge.py"), "--map", mp, "--calib", cal, "--stream", stream,
+    cmd = bridge_pin() + ["nice", "-n", "5", PY, os.path.join(HERE, "cam_bridge.py"), "--map", mp, "--calib", cal, "--stream", stream,
            "--out", os.path.join(out, "bridge"), "--wait-calib-s", "40"]
     if scal:
         cmd += ["--side-calib", scal, "--side-stream", side_stream]
@@ -1792,8 +1839,7 @@ def run(args):
                 # may cut shorter parts (school: 60 s); home keeps doe_loop's 300 s
                 DL.PART_S = float(args.site_["frames_part_s"])
                 say("frames: .avi parts of %.0f s (the site's frames_part_s)" % DL.PART_S)
-            fhz = os.environ.get("MIRLT_FRAMES_HZ", "")      # (e16) the tracking-rate frames' rate (unset: as before)
-            ho, hs = (float(fhz), float(fhz)) if fhz else (12.0, 10.0)
+            ho, hs = DL.frames_rates(12.0, 10.0)     # (e17, Nick 12 Nov) default 4 a second; MIRLT_FRAMES_HZ=12 / before
             streams = [("overhead", stream, ho)] + ([("side", side_stream, hs)] if scal else [])
             if args.dry:
                 time.sleep(0.1)
