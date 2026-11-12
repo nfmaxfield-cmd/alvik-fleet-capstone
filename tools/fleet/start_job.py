@@ -13,7 +13,7 @@ Per run type (Nick's decisions 1-3):
 Practice: with no real camera (or Mission Control --dry) every button runs the simulator instead, with the guesses
 broken on purpose (turned roof tags, a dark patch, the camera's clock off, a robot restarting), as the rehearsals do.
 """
-VERSION = "2026-11-11e16"   # e16 (9a, home 11 Nov: "No camera model here: use a point below" on Right's needs-a-hand card): the click to locate a held robot uses whatever camera-to-board model the site has: the roof-tag fit where there is one, else the lights tracking's floor calibration (setup_conf: overhead_floorcal_*.json, side_floorcal_*.json) at the robot's top (e02_camera.ROBOT_TOP_CM). Before: "2026-11-10e14"   # e14: the clear-space question's words (clear_space) and the answer to every run (MIRLT_CLEAR_SPACE_OK / --clear-space); the Area line from the readability store (what is used, at what light, on how much evidence); Advanced "Battery floor"; practice runs keep their own readability store. e13: robots waiting for a hand (needs_hand) in the status. 2026-11-10a # 2026-11-10a (e12): Advanced "Curves in the calibration" (calib_curves) passed to calib_run
+VERSION = "2026-11-12mc-a"   # (Mission Control build, 12 Nov, 1a) STOP: the StopWatch (stop_confirm.py): "stopping..." until every robot has confirmed, then "stopped" (never "ended"), its record in the run folder (stop.json); robot_refs (each nickname's WiFi name). Before: "2026-11-11e16"   # e16 (9a, home 11 Nov: "No camera model here: use a point below" on Right's needs-a-hand card): the click to locate a held robot uses whatever camera-to-board model the site has: the roof-tag fit where there is one, else the lights tracking's floor calibration (setup_conf: overhead_floorcal_*.json, side_floorcal_*.json) at the robot's top (e02_camera.ROBOT_TOP_CM). Before: "2026-11-10e14"   # e14: the clear-space question's words (clear_space) and the answer to every run (MIRLT_CLEAR_SPACE_OK / --clear-space); the Area line from the readability store (what is used, at what light, on how much evidence); Advanced "Battery floor"; practice runs keep their own readability store. e13: robots waiting for a hand (needs_hand) in the status. 2026-11-10a # 2026-11-10a (e12): Advanced "Curves in the calibration" (calib_curves) passed to calib_run
                            # (--arc-phase, --roam-motion); robots left at an edge in the status (edge_parked). No version
                            # string before this.
 import glob
@@ -217,6 +217,22 @@ def quiz_to_prefs(answers, prefs=None):
         p["robots"] = str(a["robots_names"])
     p["quiz_done"] = True
     return p
+
+
+def robot_refs(site, heard_file=None):
+    """(12 Nov, nicknames) {nickname: reference}: each robot's WiFi name (heard_robots.json, matched by its address),
+    else its address. The page shows the nickname; the reference stays visible beside it, smaller."""
+    out = {}
+    try:
+        import stop_all as SA
+        heard = SA.heard_from_file(heard_file, keep_h=24.0 * 365)
+    except Exception:  # noqa: BLE001
+        heard = {}
+    by_ip = {ip: n for n, ip in heard.items()}
+    for r in (site or {}).get("robots") or []:
+        ip = r.get("ip")
+        out[r["name"]] = by_ip.get(ip) or r.get("wifi_name") or ip or ""
+    return out
 
 
 def _alive(p):
@@ -786,20 +802,87 @@ class Starter:
         """The red Stop: every run this page started stops (its own Ctrl+C: `stop` to each of its robots), and on the
         robots a `stop` broadcast to every robot on the WiFi (stop_all.py), whatever holds them."""
         said = []
+        import stop_confirm as SC
+        jobs = self.stop_jobs()                # (12 Nov, F1) what was running, before it is stopped
         if self.job is not None and self.job.running():
             self.job.stop()
             said.append("the %s run" % TITLES.get(self.job.kind, self.job.kind))
         r = self.S.stop_run()
         if r:
             said.append("the run")
-        if not self.practice():
+        pr = self.practice()
+        if not pr:
             try:
                 subprocess.Popen([sys.executable, os.path.join(HERE, "stop_all.py")], cwd=REPO,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
                 said.append("`stop` to every robot on the WiFi")
             except OSError:
                 pass
-        return {"stopped": said or ["nothing was running"]}
+        if jobs:
+            # (Mission Control build, 12 Nov, decision 1a) "stopping..." until every robot has confirmed
+            import stop_all as SA
+
+            def send(ips):
+                SA.stop_robots(list(ips) + SA.broadcast_addrs(), broadcast=True)
+            self.stopwatch = SC.StopWatch(jobs, practice=pr, listen=None if pr else SA.listen_for_robots,
+                                          send_stop=None if pr else send, say=lambda w: print("STOP: " + w, flush=True))
+            self.stopwatch.kind = self.active
+            self.stopwatch.start()
+            threading.Thread(target=self._stop_record, args=(self.stopwatch,), daemon=True).start()
+        return {"stopped": said or ["nothing was running"],
+                "stop": self.stopwatch.state() if jobs else None}
+
+    def stop_jobs(self):
+        """(12 Nov) The process groups running now, each with its folder and the robots it drives (nickname, WiFi name
+        or address), for the StopWatch."""
+        import stop_confirm as SC
+        robots = self.robots_for_stop()
+        jobs = []
+        if self.job is not None and self.job.running():
+            jobs.append(SC.Job(self.job.kind, self.job.p.pid, self.job.folder, robots))
+        run = self.S.run
+        if run is not None and (run.alive() or SC.group_procs(run.p.pid)):
+            jobs.append(SC.Job(run.kind, run.p.pid, getattr(run, "session", None) or run.folder,
+                               [] if jobs else robots))
+        cj = getattr(self.S, "calib", None)
+        if cj is not None and cj.running():
+            jobs.append(SC.Job("calibrate", cj.p.pid, cj.folder, [] if jobs else robots))
+        return jobs
+
+    def robots_for_stop(self):
+        """[{name, ref, ip}]: the robots the run found (binding: nickname, WiFi name, address), else the site's."""
+        out = []
+        f = self.run_folder()
+        for p in ((os.path.join(f, "bind", "binding.json"), os.path.join(f, "binding.json")) if f else ()):
+            try:
+                with open(p) as fh:
+                    rec = json.load(fh)
+                for r in rec.get("robots") or []:
+                    out.append({"name": r.get("slot") or r.get("name_before"), "ref": r.get("wifi_name") or r.get("ip"),
+                                "ip": r.get("ip")})
+                if out:
+                    return out
+            except (OSError, ValueError):
+                continue
+        names = self.robots_words()[1]
+        site = {r["name"]: r for r in (self.S.site or {}).get("robots") or []}
+        refs = robot_refs(self.S.site)
+        for n in names or list(site):
+            out.append({"name": n, "ref": refs.get(n), "ip": (site.get(n) or {}).get("ip")})
+        return out
+
+    def _stop_record(self, sw):
+        """The stop's record in the run's own folder (stop.json), once every robot has confirmed: the run's log says
+        it was stopped (F1: "the run's log shows no stop")."""
+        while sw.done_t is None:
+            time.sleep(0.5)
+        folder = next((j.folder for j in sw.jobs if j.folder and os.path.isdir(j.folder)), None)
+        if folder:
+            try:
+                with open(os.path.join(folder, "stop.json"), "w") as f:
+                    json.dump(sw.state(), f, indent=1)
+            except OSError:
+                pass
 
     # -- status ---------------------------------------------------------------------------------------------------
     def status(self):
@@ -854,6 +937,14 @@ class Starter:
             w_ = self.start_failure_words(out.get("folder"))
             if w_:
                 out["words"], out["refused"] = w_, True
+        sw = getattr(self, "stopwatch", None)
+        if sw is not None and getattr(sw, "kind", None) == kind and sw.t0 >= getattr(self, "started_t", 0) - 1:
+            # (12 Nov, F1) STOP was pressed on this run: "stopping..." until every robot confirmed, then "stopped"
+            out["stop"] = sw.state()
+            out["stopping"] = out["stop"]["phase"] == "stopping"
+            out["words"] = "%s%s: %s" % (TITLES.get(kind, kind), " (practice)" if self.active_practice else "",
+                                         out["stop"]["words"])
+            out["stopped"] = not out["stopping"]
         end_now = False
         with self._end_lock:                  # the page's poll and the sleeper thread both ask: one sleep only
             if not running and self.last is None:

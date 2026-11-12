@@ -122,6 +122,13 @@ class Run:
                 pass
 
     def stop(self):
+        """(Mission Control build, 12 Nov, F1) Ctrl+C to the run's whole process group, as a terminal's Ctrl+C: what
+        drives the robots (run_plan, the simulator, the camera bridge) gets it at once, not only when mission_run
+        passes it on. MIRLT_STOP_GROUP=0: the leader only, as before."""
+        import stop_confirm as SC
+        self.stop_t = time.time()
+        if SC.group_on() and SC.signal_group(self.p.pid, signal.SIGINT):
+            return
         self.signal(signal.SIGINT)
 
     def status(self):
@@ -1612,7 +1619,7 @@ def detect_where(SD, sim_room=""):
 
 
 # ---------------------------------------------------------------------------------------------- (e12) new code after git pull
-VERSION = "2026-11-12e18"   # e18: the Safety group: one box on the Run screen (More > Safety) with every safety switch, "auto" by default (decided automatically); a switch set there goes to the runs this page starts. Before: "2026-11-10e14"   # e14: the Start button's clear-space answer passed to the run. 2026-11-10e13 (e13): /api/tags/corners_confirm (the corner tags pre-fill, the person confirms); the needs-a-hand box. 2026-11-10a (e12, Nick 10 Nov): notices its own code changed after `git pull` and offers a
+VERSION = "2026-11-12mc-a"   # (Mission Control build, 12 Nov, 1a) Run.stop: Ctrl+C to the run's whole process group (MIRLT_STOP_GROUP=0: the leader only, as before). Before: "2026-11-12e18"   # e18: the Safety group: one box on the Run screen (More > Safety) with every safety switch, "auto" by default (decided automatically); a switch set there goes to the runs this page starts. Before: "2026-11-10e14"   # e14: the Start button's clear-space answer passed to the run. 2026-11-10e13 (e13): /api/tags/corners_confirm (the corner tags pre-fill, the person confirms); the needs-a-hand box. 2026-11-10a (e12, Nick 10 Nov): notices its own code changed after `git pull` and offers a
                           # restart on the page when no run is going (never mid-run). No version string before
 CODE_CHECK_S = 5.0        # chosen: how often the code is looked at (a git call and a few hundred stat calls). No DOE
 

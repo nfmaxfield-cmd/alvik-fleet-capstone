@@ -76,6 +76,8 @@ button.stopall:hover{filter:brightness(1.08)}
 .prefs .why{font-size:12.5px;color:var(--muted);margin-top:3px;line-height:1.35}
 .prefs label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}.prefs label select,.prefs label input{color:var(--ink)}
 .statusbox{border-left:4px solid var(--accent);padding-left:12px}
+.stopbox{margin:8px 0;padding:10px 12px;border-radius:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.stopbox.stopping{background:var(--warn-bg);border:1px solid var(--warn-border)}.stopbox.stopped{background:var(--green-bg);border:1px solid var(--green)}
 details.adv>summary{font-weight:600;cursor:pointer;color:var(--muted)}
 details.adv .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-top:12px}
 details.adv label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
@@ -248,7 +250,8 @@ function render() {
   const run = S.run;
   const st = $("status");
   const ss = S.start && S.start.status;
-  if (ss && ss.running) { st.className = "status warn"; st.lastChild.textContent = `${ss.title}${ss.practice ? " (practice)" : ""} · ${fmt(ss.elapsed_s || 0)}`; }
+  if (ss && ss.stopping) { st.className = "status warn"; st.lastChild.textContent = "Stopping\u2026 " + ((ss.stop.robots || []).filter(r => r.state === "confirmed").length) + " of " + ((ss.stop.robots || []).length) + " robots confirmed"; }   // (12 Nov, F1)
+  else if (ss && ss.running) { st.className = "status warn"; st.lastChild.textContent = `${ss.title}${ss.practice ? " (practice)" : ""} · ${fmt(ss.elapsed_s || 0)}`; }
   else if (run && run.running) { st.className = "status warn"; st.lastChild.textContent = run.paused ? "Paused" : `Running ${run.kind} · ${fmt(run.elapsed_s)}`; }
   else { st.className = "status"; st.lastChild.textContent = `${S.map.robots.length} robots ready`; }
   const cm = $("connmode");
@@ -1113,11 +1116,13 @@ function startScreen() {
   const bigs = `<div class="bigs">${T.buttons.map(b => `<button data-run="${b.kind}" ${(!b.ok || going) ? "disabled" : ""} title="${esc(b.ok ? b.sub : b.why)}"><b>${esc(b.title)}</b><span>${esc(b.ok ? b.sub : b.why)}</span></button>`).join("")}</div>`;
   const stat = st.kind ? `<div class="card statusbox"><div class="between"><h2>${esc(st.title)}${st.practice ? " (practice)" : ""}</h2><span class="muted small">${st.elapsed_s != null ? fmt(st.elapsed_s) : ""}</span></div>
     <p style="margin:6px 0;font-size:15px">${esc(st.words || "")}${st.points ? " Points done: " + esc(String(st.points)) + "." : ""}</p>
+    ${st.stop ? `<div class="stopbox ${st.stop.phase}"><b>${st.stop.phase === "stopping" ? "Stopping\u2026" : "Stopped"}</b> ${(st.stop.robots || []).map(r => `<span class="pill">${esc(robotLabel(r.name))}: ${esc(r.state)}</span>`).join(" ")}${(st.stop.forced || []).length ? `<div class="small" style="color:var(--red)">${esc(st.stop.forced.join("; "))}</div>` : ""}</div>` : ""}
+
     ${(st.needs_hand || []).length ? `<div class="corners needhand" style="border-color:var(--red);color:var(--red)"><b>A robot at the table's edge needs a hand now: move it a hand's width onto the board and it rejoins by itself</b>${st.needs_hand.map(w => `<p style="margin:6px 0">${esc(w)}</p>`).join("")}</div>` : ""}
     ${(st.edge_parked || []).length ? `<div class="corners" style="border-color:var(--red);color:var(--red)"><b>A robot was left at the table's edge: someone must move it before the next run</b>${st.edge_parked.map(w => `<p style="margin:6px 0">${esc(w)}</p>`).join("")}</div>` : ""}
     ${(st.questions || []).map(q => `<div class="corners question" data-q="${esc(q.id)}"><b>A question from the run (${esc(q.robot)} is held until you answer)</b><p style="margin:6px 0 12px">${esc(q.text)}</p><div class="row">${(q.choices || []).map(c => `<button class="p" data-qid="${esc(q.id)}" data-choice="${esc(c)}">${esc(c)}</button>`).join(" ")}</div></div>`).join("")}
     ${(st.lines || []).length ? `<div class="log" style="max-height:180px">${esc(st.lines.join("\n"))}</div>` : ""}
-    ${going ? `<div class="row" style="margin-top:10px"><button class="stopall" id="stopbig">STOP every robot</button></div>` : `<p class="small muted" style="margin:8px 0 0">${T.advanced.sleep_when_done && !st.practice && !st.refused && !st.sleep_words ? "The robots were sent to sleep (Advanced: sleep when a run ends)." : ""} Its folder: ${esc(st.folder || "")}</p>`}</div>` : "";
+    ${going && !st.stopping ? `<div class="row" style="margin-top:10px"><button class="stopall" id="stopbig">STOP every robot</button></div>` : going ? `<p class="small muted" style="margin:8px 0 0">Stopping: waiting for every robot to confirm.</p>` : `<p class="small muted" style="margin:8px 0 0">${T.advanced.sleep_when_done && !st.practice && !st.refused && !st.sleep_words ? "The robots were sent to sleep (Advanced: sleep when a run ends)." : ""} Its folder: ${esc(st.folder || "")}</p>`}</div>` : "";
   const ty = T.typed || {};
   const adv = `<details class="adv card" id="advbox"><summary>Advanced (typed values and switches; nothing here is needed to run)</summary>
     <h3 style="margin-top:14px">Typed values (first guesses only: the cameras measure these, and win when they disagree; each disagreement is logged)</h3>
@@ -1216,6 +1221,7 @@ function wireVisitPick() {
     };
   }
 }
+function robotLabel(n) { return String(n || ""); }   // (12 Nov) the nickname
 function placeName(w) { const k = (w || {}).kind; return k === "home" ? "Home: the 4 x 4 ft board" : k === "school" ? "School: the conference table" : k === "new" ? "A new area (" + (w.site || "") + ")" : ((S.site && S.site.title) || "Home"); }
 function wireStart() {
   document.querySelectorAll("[data-run]").forEach(b => b.onclick = async () => {
@@ -1248,10 +1254,10 @@ function wireStart() {
   if (S.start.status && S.start.status.running) watchStart();
 }
 async function saveAdv(d) { try { S.start = await api("/api/start/advanced", d); flash("Saved"); render(); } catch (e) { flash(e.message, true); } }
-async function stopAll() { try { const r = await api("/api/start/stop", {}); flash("STOP sent: " + r.stopped.join(", ")); await load(); } catch (e) { flash(e.message, true); } }
+async function stopAll() { try { const r = await api("/api/start/stop", {}); flash("STOP sent: " + r.stopped.join(", ") + (r.stop ? ". Stopping\u2026 until every robot confirms." : "")); await load(); watchStart(); } catch (e) { flash(e.message, true); } }
 function watchStart() { if (stPoll) return; stPoll = setInterval(async () => { try { S.start = await api("/api/start"); } catch (e) { return; }
   if (screen === 9 && !document.activeElement.matches("input,select")) { const y = window.scrollY; render(); window.scrollTo(0, y); }
-  if (!S.start.status.running) { clearInterval(stPoll); stPoll = null; load(); } }, 2000); }
+  if (!S.start.status.running && !S.start.status.stopping) { clearInterval(stPoll); stPoll = null; load(); } }, 2000); }
 $("stopall").onclick = async () => { if (S && S.start) return stopAll(); try { await api("/api/run/stop", {}); flash("Stop sent"); await load(); } catch (e) { flash(e.message, true); } };
 
 $("details").onchange = e => { document.body.classList.toggle("details", e.target.checked); render(); };
