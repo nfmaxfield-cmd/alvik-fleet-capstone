@@ -3063,7 +3063,7 @@ class Coordinator:
         if ok_ and L_ < OB.BACK_OFF_CM:
             bx, by = OB.back_off_target(x, y, th, L_)
         L_said = L_ if ok_ else OB.BACK_OFF_CM
-        tb_ = self.track_back(b, x, y, th, others) if os.environ.get("MIRLT_EDGE_BACKOUT", "1") != "0" else None
+        tb_ = self.track_back(b, x, y, th, others) if __import__("safety_group").flag("MIRLT_EDGE_BACKOUT") else None
         if tb_ is not None:
             # (e16, item 7) back along its own track as far as the edge rule needs (derived), not a fixed 10 cm
             bx, by = tb_["end"]
@@ -3803,6 +3803,7 @@ class Coordinator:
             import odo_trust as OT
             sim_ = bool(getattr(self.args, "dry_run", False)) or getattr(self.args, "sim_persist", False)
             tr = (OT.load([b.name]) if not sim_ else {b.name: OT.Trust(b.name)})[b.name]
+            tr.async_fit = True         # (e19, audit 12) its refits off the coordinator's loop
             b.trust = tr
             fl = self.__dict__.setdefault("trust_fleet", {})
             fl[b.name] = tr
@@ -4068,7 +4069,7 @@ class Coordinator:
                 # reaches past an edge: it stops; only a move that shrinks that (the straight recovery inwards) follows
                 why = "with no camera seeing it, its possible-locations circle (body + %.1f cm blind error) reaches " \
                       "%.1f cm past an edge" % (err, ov)
-            elif os.environ.get("MIRLT_BLIND_RULE", "edge") != "cap":
+            elif __import__("safety_group").value("MIRLT_BLIND_RULE") != "cap":
                 # (e13, Nick 12:51 "never give up", CLAUDE.md) no blind-distance cap: it drives on while its whole
                 # possible error (the blind error + half the body's diagonal + its stop at its blind speed, measured)
                 # cannot reach an edge; BLIND_MAX_CM / BLIND_EDGE_CM are the switch MIRLT_BLIND_RULE=cap
@@ -4087,7 +4088,7 @@ class Coordinator:
                        "blind error %.1f cm; it must keep %.0f cm)" % (body_edge - err, body_edge, err,
                                                                        self.BLIND_EDGE_CM))
             if why is None and getattr(self, "nopic_since", None) is not None and \
-                    os.environ.get("MIRLT_NOPIC_RULE", "risk") != "off":
+                    __import__("safety_group").value("MIRLT_NOPIC_RULE") != "off":
                 # (e13, Nick 10 Nov: derived, risk-based; replaces e12's fixed 3 s) the camera sends no pictures: this
                 # robot's own limit from its blind speed (measured: its dead-reckoned distance over the blind time), its
                 # heading, its blind error and the room to the edge rule's clearance; over it, the same hold as above

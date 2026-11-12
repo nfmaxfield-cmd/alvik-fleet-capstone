@@ -536,8 +536,9 @@ def test_a_dim_room_is_said_from_the_brightness_and_parking_never_holds_the_end(
     import pytest
     with pytest.raises(CR.RunEnd):
         r.hold_never_give_up()
-    src = open(os.path.join(FLEET, "calib_run.py")).read()
-    assert 'tries > 6 and os.environ.get("MIRLT_CALIB_GIVEUP", "0") == "1"' in src
+    # (e19, the audit's text-only tests) the give-up stays off unless the Safety group says otherwise
+    import safety_group as SG_
+    assert SG_.flag("MIRLT_CALIB_GIVEUP") is False
 
 
 # -------------------------------------------------------------------------------------------- never give up: the blind rule
@@ -573,8 +574,10 @@ def test_blind_robot_far_from_edges_drives_on_and_one_near_an_edge_never_closes_
     assert d_edge > 2 * d_cap and d_edge > 150 and f1 == 0          # 60 s with no camera: it kept roaming
     _d, e2, f2 = _blind_run("edge", (22, 150, 180), (0.5, 60.0))
     assert e2 >= 21.0 and f2 == 0                                      # near the edge: never closer than it started
-    for f in ("calib_run.py", "run_plan.py"):
-        assert 'MIRLT_BLIND_RULE", "edge"' in open(os.path.join(FLEET, f)).read(), f
+    # (e19, the audit's text-only tests) the default reached through the Safety group, not a text in the file
+    import calib_run as CR_
+    import safety_group as SG_
+    assert CR_.BLIND_RULE == SG_.value("MIRLT_BLIND_RULE") == "edge"
 
 
 def test_a_held_robot_is_placed_by_scripted_clicks_and_its_heading_comes_from_a_safe_drive(tmp_path, monkeypatch):

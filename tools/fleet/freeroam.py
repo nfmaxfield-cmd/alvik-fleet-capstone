@@ -825,6 +825,8 @@ class Runner:
             import odo_trust as OT
             c.trust.update(OT.load(list(c.R)))            # (e18, 5) each robot's own record from earlier runs
             OT.link(c.trust)                              # (e18b, the replay) pooled as one fleet record
+        for t_ in c.trust.values():
+            t_.async_fit = True                           # (e19, audit 12) the trust refits off the 50 ms loop
         for n in live:
             c.event(c.R[n], "odometry trust", c.trust[n].words())
         for n in live:

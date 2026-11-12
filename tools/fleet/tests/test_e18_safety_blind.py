@@ -38,15 +38,15 @@ def test_every_safety_switch_the_safety_code_reads_is_in_the_one_group():
     """The Safety group is the one place: every switch read through SG in the safety code is listed, and none of the
     listed switches is read past it (a second default could drift apart)."""
     files = ["freeroam_core.py", "safety_rules.py", "tracking_layer.py", "run_plan.py", "mission_run.py",
-             "calib_run.py", "freeroam.py"]
+             "calib_run.py", "freeroam.py", "frame_watch.py", "start_discovery.py", "tagfree.py"]
     used = set()
     for f in files:
         txt = open(os.path.join(FLEET, f)).read()
         used |= set(re.findall(r'SG_?\.(?:flag|value)\("(MIRLT_[A-Z0-9_]+)"', txt))
         for env in SG.DEFAULT:
             bad = re.findall(r'os\.environ\.get\("%s"' % env, txt)
-            if f in ("freeroam_core.py", "safety_rules.py", "tracking_layer.py"):
-                assert not bad, "%s reads %s past the Safety group" % (f, env)
+            # (e19, audit 8: the check covered 3 of the 7 files; run_plan, calib_run read six switches past it)
+            assert not bad, "%s reads %s past the Safety group" % (f, env)
     assert used and used <= set(SG.DEFAULT), used - set(SG.DEFAULT)
     for env in ("MIRLT_NEVER_STILL", "MIRLT_OUTBACK_ID", "MIRLT_DOUBT_NEIGHBOUR", "MIRLT_LOST_PRIORITY",
                 "MIRLT_BLIND_ALLOW", "MIRLT_SAVE_CAL_AT_END", "MIRLT_REJOIN_EVIDENCE", "MIRLT_EDGE_BACKOUT",
@@ -205,8 +205,19 @@ def test_the_switch_keeps_the_mission_hold_still(monkeypatch):
 
 
 def test_calibration_holds_creep_too():
-    txt = open(os.path.join(FLEET, "calib_run.py")).read()
-    assert "def hold_creep" in txt and 'SG_.flag("MIRLT_NEVER_STILL")' in txt
+    """(e19, the audit: this checked that a function name existed) Behaviour: a held calibration robot creeps 2-4 cm
+    toward the readable ground the map knows (a turn toward it, then the drive), and not where it would meet a problem."""
+    import calib_run as CR
+    legs = []
+    st = types.SimpleNamespace(D=(50.0, 50.0, 0.0), map_target=lambda p, e: (50.0, 80.0), ev=lambda *a, **k: None,
+                               S=types.SimpleNamespace(problems=lambda a, b, buf=0.0, edge_buf=0.0: []),
+                               rb=types.SimpleNamespace(leg=lambda kind, v: (kind, v)), odo_step=lambda q: legs.append(q))
+    assert CR.CalibRun.hold_creep(st, (50.0, 50.0, 1.0)) is True
+    assert legs[0][0] == "turn" and abs(legs[0][1] - 90.0) < 1e-6 and legs[1][0] == "drive" and 2.0 <= legs[1][1] <= 4.0
+    st.S = types.SimpleNamespace(problems=lambda a, b, buf=0.0, edge_buf=0.0: ["an edge"])
+    legs.clear()
+    assert CR.CalibRun.hold_creep(st, (50.0, 50.0, 1.0)) is False and not legs
+    assert SG.DEFAULT["MIRLT_NEVER_STILL"] == "1"
 
 
 # -------------------------------------------------------------------- 3: a doubtful heading beside another robot

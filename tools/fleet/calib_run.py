@@ -110,7 +110,7 @@ RECOVER_STEP_CM = 5.0    # chosen: one blind step (at FINAL_CMS); the check is r
                          # cm against recoveries that end in a hold and the time to be seen again
 RECOVER_MAX_CM = 40.0    # chosen: at most this far blind in a recovery (run_plan's BLIND_MAX_CM, Nick 29 Oct)
 RECOVER_BUBBLE_CAP = 8.0  # BEFORE e13 (now the switch MIRLT_BLIND_RULE=cap): over this, stop and wiggle, then the hold.
-BLIND_RULE = os.environ.get("MIRLT_BLIND_RULE", "edge")   # (e13, Nick 12:51 "never give up", CLAUDE.md) "edge": a robot
+BLIND_RULE = __import__("safety_group").value("MIRLT_BLIND_RULE")   # (e13, Nick 12:51 "never give up", CLAUDE.md) "edge": a robot
                          # driving blind goes on while its whole possible error (the bubble grown with every cm and degree
                          # blind + the body + its stop) cannot reach an edge along the step; no fixed bubble or distance
                          # cap. "cap": RECOVER_BUBBLE_CAP 8 cm and RECOVER_MAX_CM 40 cm as before
@@ -1829,7 +1829,7 @@ class CalibRun:
         return d
 
     def hold_until_seen(self):
-        giveup = os.environ.get("MIRLT_CALIB_GIVEUP", "0") == "1" or getattr(self.a, "lost_giveup", False)
+        giveup = __import__("safety_group").flag("MIRLT_CALIB_GIVEUP") or getattr(self.a, "lost_giveup", False)
         if not giveup:
             return self.hold_never_give_up()     # (e13) the 11-10g wait, plus the motion detector's sightings re-tried
         t0 = time.time()
@@ -2294,7 +2294,7 @@ class CalibRun:
             # robot is standing still, so its position cannot drift: measure over a longer window each time instead of
             # ending the run (dim light: ~7 pictures a second and only some reads)
             tries += 1
-            if tries > 6 and os.environ.get("MIRLT_CALIB_GIVEUP", "0") == "1":
+            if tries > 6 and __import__("safety_group").flag("MIRLT_CALIB_GIVEUP"):
                 raise RunEnd("the camera reads the roof tag only now and then after the %s %.0f leg: the robot "
                              "stopped where it is (more light on the table helps)" % (kind, value))
             if tries == 7:
@@ -4290,7 +4290,7 @@ class Deferred(SkipPoint):
     at once."""
 
 
-PARK_GIVEUP = os.environ.get("MIRLT_PARK_GIVEUP", "0") == "1"   # (e14) 1: parking ends at a lost tag (e13's way)
+PARK_GIVEUP = __import__("safety_group").flag("MIRLT_PARK_GIVEUP")   # (e19, audit 8: through the Safety group)   # (e14) 1: parking ends at a lost tag (e13's way)
 RETRY_LOST = os.environ.get("MIRLT_RETRY_LOST", "defer")   # (e14) "defer" (default) / "again" (before e14: up to 4)
 
 

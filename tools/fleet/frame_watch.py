@@ -37,7 +37,12 @@ CHECK_S = 0.5           # how often the thread looks. No DOE
 
 
 def enabled():
-    return os.environ.get("MIRLT_FRAME_WATCH", "1") != "0"
+    import sys as _s
+    _d = os.path.dirname(os.path.abspath(__file__))
+    if _d not in _s.path:
+        _s.path.insert(0, _d)
+    import safety_group as SG_                    # (e19, audit 8: through the Safety group, as every run type)
+    return SG_.flag("MIRLT_FRAME_WATCH")
 
 
 class FrameWatch:

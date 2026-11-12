@@ -39,7 +39,7 @@ MIRLT_TRUST_FLEET=0: each robot's own record alone, every run's curves (the firs
 Changelog
   2026-11-12e18  first version.
   2026-11-12e18b the fleet record and session-only curves (the replay); the prior from the replay's blind stretches.
-  2026-11-12e19  (Nick) the prior from calibration-run data: 2.0 + 0.07 cm per cm (MIRLT_TRUST_PRIOR=replay: e18b's).
+  2026-11-12e19  (audit 12) refits off the control loop (ASYNC, set by the runners). (Nick) the prior from calibration-run data: 2.0 + 0.07 cm per cm (MIRLT_TRUST_PRIOR=replay: e18b's).
 """
 import json
 import math
@@ -52,6 +52,8 @@ try:
 except Exception:  # noqa: BLE001
     FLEET = True
 import time as _time
+ASYNC = False                 # (e19, audit 12) refits in a worker thread, off the control loop: every record (tests), or
+                              # a record whose async_fit the runner sets (free roam, missions on real robots)
 RUN = "%.0f" % _time.time()   # this run's id: samples carry it (curve samples count only in their own run)
 DIFFER_P = 0.01               # CHOSEN: a robot leaves the fleet record when its own samples differ at p < 0.01 (two-sided).
                               # DOE: no (a stricter or looser test only moves when, not whether)
@@ -303,6 +305,26 @@ class Trust:
         key = self._fleet_n()
         if self._fit is not None and key - self._fit_at < REFIT_N:
             return self._fit
+        last = self._fit if self._fit is not None else self.__dict__.get("_fit_last")
+        if (ASYNC or self.__dict__.get("async_fit")) and last is not None:
+            # (e19, audit finding 12: the refit, quantile fits for three robots plus the fleet split, ran inside the 50 ms
+            # control loop: 52 ms median, 604 ms worst on this machine) the loop keeps the last fit; a worker thread
+            # refits and swaps it in (one at a time per robot)
+            th = self.__dict__.get("_fit_thread")
+            if th is None or not th.is_alive():
+                import threading
+                self._fit_thread = threading.Thread(target=self._refit_bg, args=(key,), daemon=True)
+                self._fit_thread.start()
+            return last
+        return self._compute(key)
+
+    def _refit_bg(self, key):
+        try:
+            self._compute(key)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _compute(self, key):
         floor = max(1.0, 2.45 * self.cam_sd) if self.cam_sd is not None else 1.0
         self.own_record = self.differs()
         fs = self._rows_of([self] if self.own_record or not self._pooled() else
@@ -330,9 +352,10 @@ class Trust:
             cs = max(cs, PRIOR_SPOT * math.pi / 180)
         if curve_prior:
             cc = max(cc, PRIOR_CURVE * math.pi / 180)
-        self._fit = (base, min(1.0, per), min(1.0, cs * 180 / math.pi), min(1.0, cc * 180 / math.pi), len(fs))
-        self._fit_at = key
-        return self._fit
+        fit_ = (base, min(1.0, per), min(1.0, cs * 180 / math.pi), min(1.0, cc * 180 / math.pi), len(fs))
+        self._fit, self._fit_at = fit_, key           # one assignment each: the loop reads a whole fit or the old one
+        self._fit_last = fit_
+        return fit_
 
     # -- the fleet record (e18b) -----------------------------------------------------------------------------------------
     def _pooled(self):

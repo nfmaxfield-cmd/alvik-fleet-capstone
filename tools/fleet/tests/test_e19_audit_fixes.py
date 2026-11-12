@@ -754,3 +754,65 @@ def test_a_stuck_robot_never_reverses_toward_an_edge_on_its_unconfirmed_track():
               cam_delay=1.0, hdg_fault={"deg": 25, "near_cm": 14, "every_s": 60})
     s.run()
     assert s.stats.get("falls", 0) == 0
+
+
+# ------------------------------------------- 13 (audit 8, 12, the text-only tests)
+def test_a_typed_safety_value_is_one_of_its_choices_or_refused(monkeypatch, tmp_path):
+    """Audit finding 8: MIRLT_CURVE_SCALE_SAVE="Auto" read as ON (a default-off switch turned on); "Fixed" reported as
+    set but not "fixed". Now "auto" in any case is the default, a choice matches in any case, anything else is refused
+    (the default used, said at the start) and never written to safety.json."""
+    import importlib
+    import safety_group as SG
+    monkeypatch.setenv("MIRLT_CONF_DIR", str(tmp_path))
+    SG._FILE = None
+    SG._REFUSED.clear()
+    monkeypatch.setenv("MIRLT_CURVE_SCALE_SAVE", "Auto")
+    assert SG.flag("MIRLT_CURVE_SCALE_SAVE") is False
+    monkeypatch.setenv("MIRLT_CURVE_SCALE_SAVE", "auto ")
+    assert SG.flag("MIRLT_CURVE_SCALE_SAVE") is False
+    monkeypatch.setenv("MIRLT_EDGE_RULE", "Fixed")
+    assert SG.value("MIRLT_EDGE_RULE") == "fixed"
+    monkeypatch.setenv("MIRLT_EDGE_RULE", "sideways")
+    assert SG.value("MIRLT_EDGE_RULE") == "derived" and "MIRLT_EDGE_RULE" in SG.refused()
+    assert "REFUSED" in SG.start_words()
+    assert SG.env_from_settings({"MIRLT_EDGE_PARK": "yes please", "MIRLT_NEVER_STILL": "0"}) == {"MIRLT_NEVER_STILL": "0"}
+
+
+def test_missions_and_calibration_read_the_safety_box(monkeypatch, tmp_path):
+    """Audit finding 8: six switches were read straight from the environment in missions and calibration, so a value
+    saved in the Safety box (safety.json) was ignored there."""
+    import importlib
+    import safety_group as SG
+    monkeypatch.setenv("MIRLT_CONF_DIR", str(tmp_path))
+    monkeypatch.delenv("MIRLT_FRAME_WATCH", raising=False)
+    SG._FILE = None
+    SG.write_file({"MIRLT_FRAME_WATCH": "0", "MIRLT_CALIB_GIVEUP": "1"}, str(tmp_path / "safety.json"))
+    SG._FILE = None
+    import frame_watch as FW
+    assert FW.enabled() is False
+    assert SG.flag("MIRLT_CALIB_GIVEUP") is True
+    SG._FILE = None
+
+
+def test_the_trust_refit_runs_off_the_control_loop(monkeypatch):
+    """Audit finding 12: every 5 new samples the quantile fits ran inside the 50 ms loop (52 ms median, 604 ms worst
+    here). With ASYNC (set by the runners) the loop gets the last fit at once and a worker swaps the new one in."""
+    import random
+    import time as _t
+    import odo_trust as OT
+    rng = random.Random(1)
+    fl = {n: OT.Trust(n) for n in ("A", "B", "C")}
+    OT.link(fl)
+    for k in range(120):
+        for t in fl.values():
+            t.add_sample(rng.uniform(10, 40), abs(rng.gauss(0, 2.0)) + 0.1 * rng.uniform(10, 40), t=k)
+    first = fl["A"].fit()
+    for k in range(40):
+        fl["A"].add_sample(40.0, 30.0, t=200 + k)                 # A gets much worse: the fit must follow
+    monkeypatch.setattr(OT, "ASYNC", True)
+    t0 = _t.perf_counter()
+    stale = fl["A"].fit()
+    ms = 1000 * (_t.perf_counter() - t0)
+    assert stale == first and ms < 20.0
+    fl["A"]._fit_thread.join(10)
+    assert fl["A"].fit() != first

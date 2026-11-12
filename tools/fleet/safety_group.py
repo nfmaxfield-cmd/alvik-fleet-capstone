@@ -21,7 +21,9 @@ Changelog
                  calibration, a doubtful heading beside a known / unknown neighbour, lost robots first, the blind-drive
                  allowance, calibration saved at every run end) and the earlier safety switches gathered from
                  freeroam_core, safety_rules, tracking_layer, run_plan, calib_run and mission_run.
-  2026-11-12e19  the Fable audit (e19): MIRLT_HANG_RECOVERY (H6) and the e19 switches listed with "e19" in their row.
+  2026-11-12e19  the Fable audit (e19): MIRLT_HANG_RECOVERY (H6) and the e19 switches listed with "e19" in their row;
+                 (audit 8) each switch takes only its two choices or auto (normalize; a typed "Auto" no longer turns a
+                 switch on), refusals said at the start; missions, calibration and the frame watch read through here.
 """
 import os
 import sys
@@ -196,6 +198,30 @@ SWITCHES = [
 
 DEFAULT = {s[0]: s[1] for s in SWITCHES}
 OLD = {s[0]: s[2] for s in SWITCHES}
+# (e19, audit finding 8: a typed "Auto" turned five off-by-default switches ON; "Fixed" was reported as set but was not
+# "fixed") each switch takes only its automatic default or its old way (or "auto"), any case, spaces trimmed; anything
+# else is refused: the default is used and the refusal said (refused())
+CHOICES = {s[0]: (s[1], s[2]) for s in SWITCHES}
+_REFUSED = {}
+
+
+def normalize(env, v):
+    """(e19) The switch's value as one of its choices, or None for "auto" / empty / not one of them (refused)."""
+    if v is None:
+        return None
+    w = str(v).strip()
+    if w == "" or w.lower() == "auto":
+        return None
+    for c in CHOICES.get(env, ()):
+        if w.lower() == str(c).lower():
+            return c
+    _REFUSED[env] = w
+    return None
+
+
+def refused():
+    """{env: the refused value} seen so far (said at a run's start)."""
+    return dict(_REFUSED)
 _OFF = ("0", "off", "no", "false")
 _FILE = None
 
@@ -214,8 +240,8 @@ def _file():
             import json
             with open(file_path()) as f:
                 d = json.load(f)
-            _FILE = {k: str(v) for k, v in (d.get("switches") or {}).items() if k in DEFAULT and v not in (None, "",
-                                                                                                         "auto")}
+            _FILE = {k: normalize(k, v) for k, v in (d.get("switches") or {}).items() if k in DEFAULT}
+            _FILE = {k: v for k, v in _FILE.items() if v is not None}
         except (OSError, ValueError, AttributeError):
             pass
     return _FILE
@@ -244,6 +270,8 @@ def value(env, default=None):
     """The switch's value now: the environment's, else the Pi's safety.json, else the group's automatic default."""
     d = DEFAULT.get(env, default)
     v = os.environ.get(env)
+    if env in CHOICES:
+        v = normalize(env, v)                    # (e19) only its choices; "auto" and anything else: the default
     if v is None or v == "":
         v = _file().get(env)
     return d if v is None or v == "" else v
@@ -268,6 +296,14 @@ def changed():
 def start_words():
     """One line for a run's start: the group's version and any switch set away from its automatic default."""
     ch = changed()
+    ref = refused()
+    if ref:
+        return ("Safety group: REFUSED (not one of its choices, its automatic default used): %s; " % ", ".join(
+            "%s=%r" % kv for kv in sorted(ref.items()))) + (start_words_ch(ch))
+    return start_words_ch(ch)
+
+
+def start_words_ch(ch):
     if not ch:
         return "Safety group: every switch on its automatic default (%d switches; tools/fleet/safety_group.py show)" % \
             len(SWITCHES)
@@ -285,8 +321,10 @@ def env_from_settings(d):
     anything else is passed as it is. Unknown names are ignored (said by the caller)."""
     out = {}
     for k, v in (d or {}).items():
-        if k in DEFAULT and v not in (None, "", "auto"):
-            out[k] = str(v)
+        if k in DEFAULT:
+            n = normalize(k, v)                  # (e19) only its own choices pass
+            if n is not None:
+                out[k] = str(n)
     return out
 
 

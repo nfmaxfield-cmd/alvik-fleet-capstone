@@ -214,7 +214,9 @@ function settingsTable(group, keys) {
   let o = `<table class="kv" data-group="${group}">`;
   for (const k of ks) {
     const v = k in cur ? cur[k] : def[k];
-    const inp = k === "motion" ? `<select data-k="${k}"><option ${v === "stopturn" ? "selected" : ""}>stopturn</option><option ${v === "curves" ? "selected" : ""}>curves</option></select>`
+    const sq = group === "safety" ? (S.safety_info || []).find(q => q.env === k) : null;
+    const inp = sq ? `<select data-k="${k}" aria-label="${esc(k)}"><option value="auto" ${v === "auto" ? "selected" : ""}>auto (${esc(sq.default)})</option><option value="${esc(sq.default)}" ${v === sq.default ? "selected" : ""}>${esc(sq.default)}</option><option value="${esc(sq.old)}" ${v === sq.old ? "selected" : ""}>${esc(sq.old)} (old way)</option></select>`
+      : k === "motion" ? `<select data-k="${k}"><option ${v === "stopturn" ? "selected" : ""}>stopturn</option><option ${v === "curves" ? "selected" : ""}>curves</option></select>`
       : typeof def[k] === "boolean" ? `<select data-k="${k}"><option ${v ? "selected" : ""}>true</option><option ${!v ? "selected" : ""}>false</option></select>`
       : `<input data-k="${k}" value="${esc(v)}" aria-label="${esc(k)}">`;
     o += `<tr><td>${esc(k)}</td><td>${inp}</td></tr>`;

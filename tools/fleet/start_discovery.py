@@ -492,7 +492,7 @@ def corr_commands(pooled, current=None, owner=None):
     differ by more than the pool's own 95 % error bar (1.96 se); a correction inside its error bar is never saved."""
     cur = current or {}
     out = []
-    if (owner or os.environ.get("MIRLT_WHEEL_OWNER") or _owner_default()) == "pool":
+    if (owner or _owner_default()) == "pool":
         for k, p_ in (("wheel", "wheel_scale"), ("gyro", "gyro_scale")):
             pk = pooled.get(k) or {}
             if not pk.get("sure") or cur.get(p_) is None:
