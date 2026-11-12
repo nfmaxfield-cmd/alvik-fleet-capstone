@@ -1,0 +1,28 @@
+== e19base
+independent 15 deg                                15 s standing, own heading right: wrong hand-on  17.6 % (median 12 deg), check asked   0.6 %
+independent 15 deg                                60 s standing, own heading right: wrong hand-on  26.8 % (median  8 deg), check asked   1.4 %
+independent 15 deg                               300 s standing, own heading right: wrong hand-on  49.6 % (median  5 deg), check asked   2.0 %
+independent 10 deg                                15 s standing, own heading right: wrong hand-on   4.4 % (median  6 deg), check asked   0.2 %
+independent 10 deg                                60 s standing, own heading right: wrong hand-on  16.6 % (median  4 deg), check asked   1.0 %
+independent 10 deg                               300 s standing, own heading right: wrong hand-on  47.4 % (median  4 deg), check asked   1.4 %
+independent 18 deg                                15 s standing, own heading right: wrong hand-on  32.6 % (median 13 deg), check asked   0.8 %
+independent 18 deg                                60 s standing, own heading right: wrong hand-on  39.2 % (median 11 deg), check asked   1.6 %
+independent 18 deg                               300 s standing, own heading right: wrong hand-on  56.0 % (median  8 deg), check asked   2.2 %
+same error every picture (13.3 deg bias + 5 deg)  15 s standing, own heading right: wrong hand-on  83.8 % (median 11 deg), check asked   0.0 %
+same error every picture (13.3 deg bias + 5 deg)  60 s standing, own heading right: wrong hand-on  91.8 % (median 10 deg), check asked   0.0 %
+same error every picture (13.3 deg bias + 5 deg) 300 s standing, own heading right: wrong hand-on  98.4 % (median 10 deg), check asked   0.0 %
+== e19
+independent 15 deg                                15 s standing, own heading right: wrong hand-on   0.0 % (median  0 deg), check asked   0.6 %
+independent 15 deg                                60 s standing, own heading right: wrong hand-on   0.0 % (median  0 deg), check asked   1.4 %
+independent 15 deg                               300 s standing, own heading right: wrong hand-on   0.0 % (median  0 deg), check asked   2.4 %
+independent 10 deg                                15 s standing, own heading right: wrong hand-on   0.0 % (median  0 deg), check asked   0.2 %
+independent 10 deg                                60 s standing, own heading right: wrong hand-on   0.0 % (median  0 deg), check asked   1.0 %
+independent 10 deg                               300 s standing, own heading right: wrong hand-on   0.0 % (median  0 deg), check asked   1.8 %
+independent 18 deg                                15 s standing, own heading right: wrong hand-on   1.2 % (median 28 deg), check asked   0.8 %
+independent 18 deg                                60 s standing, own heading right: wrong hand-on   1.2 % (median 28 deg), check asked   1.8 %
+independent 18 deg                               300 s standing, own heading right: wrong hand-on   1.2 % (median 28 deg), check asked   2.8 %
+same error every picture (13.3 deg bias + 5 deg)  15 s standing, own heading right: wrong hand-on   5.8 % (median 27 deg), check asked   0.0 %
+same error every picture (13.3 deg bias + 5 deg)  60 s standing, own heading right: wrong hand-on   6.6 % (median 27 deg), check asked   0.0 %
+same error every picture (13.3 deg bias + 5 deg) 300 s standing, own heading right: wrong hand-on   6.6 % (median 27 deg), check asked   0.2 %
+
+[exited with code 0]

@@ -46,7 +46,7 @@ import random
 import threading
 import time
 
-VERSION = "tagfree-2026-11-12b"
+VERSION = "tagfree-2026-11-12e19"   # e19 (audit 9, Nick): a heading is handed on only past the detector's measured 95 % error and the robot's own doubt; the 45 deg cap is a risk limit from its clearance (MIRLT_TAGFREE_HAND=risk; e18 the old rule). Before: "tagfree-2026-11-12b" (Mission Control's read-only stats hook), "tagfree-2026-11-12a"
 
 SWITCH_ENV = "MIRLT_TAGFREE"          # auto (default) | 1 | 0
 MODEL_ENVS = ("MIRLT_DETECTOR_MODEL", "MIRLT_ML_MODEL")
@@ -86,6 +86,23 @@ HAND_MAX_DEG = 45.0      # CHOSEN: an offset over this is not handed on: from he
                          # far off and a detector that is wrong about that robot look the same, so the camera-measured
                          # heading check (a short crawl, e17) settles it. DOE: yes (e17's travel agreement is 23 deg at 95 %)
 HAND_MIN_N = 2           # CHOSEN: at least two agreeing detector headings before one is handed on
+# (e19, audit finding 9 + Nick: "the 45 deg limit must come from risk, not a number") MIRLT_TAGFREE_HAND "risk" (default):
+# a heading is handed on only when the disagreement cannot be explained by the detector's MEASURED heading error at 95 %
+# (DET95_DEG, the report's overhead number; once the site's own residuals exist, 1.96 x the learnt sigma, never less than
+# the report's) and the robot's own heading doubt at 95 % (2 x the controller's head_sd: 2 deg + 1.6 per 90 deg turned
+# since its heading was set) together. The detector's error on a STANDING robot is likely the same in every picture, so
+# repeated pictures do not shrink it (the audit's 20 % wrong hand-ons came from re-testing 2 sigmas of an average). The
+# 45 deg cap becomes the risk limit: a hand-on that could be wrong by that much must not be able to take the robot over
+# its clearance (to an edge or a neighbour, less its position doubt) within HAND_HORIZON_CM of driving; past that, the
+# camera-measured heading check (a short crawl) is asked instead. "e18": SIGNIF_K / HAND_MAX_DEG as before.
+DET95_DEG = 26.0         # MEASURED (detector-v1 report: overhead heading error 12 deg median, 26 deg at 95 %, never flipped)
+HAND_HORIZON_CM = 20.0   # CHOSEN: how far a robot drives on a handed-on heading before the camera's next correction can
+                         # matter (about one planned piece). DOE: yes, with the detector on real standing robots
+try:
+    import safety_group as _SG
+    HAND_RULE = _SG.value("MIRLT_TAGFREE_HAND")
+except Exception:  # noqa: BLE001
+    HAND_RULE = "risk"
 MATCH_CM = 3.5           # as tracking_layer.CLUSTER_CM: a detection this near a fix is that fix's object
 
 
@@ -454,13 +471,38 @@ class HeadingFuser:
         s = self.S.get(name)
         return s is not None and s["doubt"] is None and abs(s["off"]) > SIGNIF_K * math.sqrt(s["P"])
 
-    def advice(self, name):
+    def det95(self):
+        """(e19) The detector's heading error at 95 % (deg): the report's, or the site's own once learnt (never less)."""
+        if len(self.res) < LEARN_N:
+            return DET95_DEG
+        return max(DET95_DEG, 1.96 * self.sigma_det())
+
+    def advice(self, name, own95=None, clear_cm=None):
         """What to do with this robot's heading now: None (keep its own), "hand" (hand the fused heading on: its own is
-        measurably off by a plausible drift), "check" (far off: ask the camera-measured heading check instead)."""
+        measurably off), "check" (ask the camera-measured heading check instead). (e19, "risk") own95: the robot's own
+        heading doubt at 95 % (deg; the controller's); clear_cm: its room to an edge or a neighbour less its position
+        doubt (None: open ground)."""
         s = self.S.get(name)
-        if s is None or s["doubt"] is not None or s["n"] < HAND_MIN_N or not self.significant(name):
+        if HAND_RULE == "e18":
+            if s is None or s["doubt"] is not None or s["n"] < HAND_MIN_N or not self.significant(name):
+                return None
+            return "check" if abs(s["off"]) > HAND_MAX_DEG else "hand"
+        if s is None or s["doubt"] is not None or s["n"] < HAND_MIN_N:
             return None
-        return "check" if abs(s["off"]) > HAND_MAX_DEG else "hand"
+        o95 = 4.0 if own95 is None else float(own95)
+        bound = math.hypot(self.det95(), o95)          # what noise and its own doubt explain together
+        off = abs(s["off"])
+        if off <= bound:
+            self.counts["kept_within_noise"] = self.counts.get("kept_within_noise", 0) + 1
+            return None
+        # the risk limit (Nick: from risk, not 45): if the detector were the wrong one, the hand-on would turn the robot
+        # by `off`; over HAND_HORIZON_CM that is a sideways error of HORIZON x sin(off): it must stay inside its clearance
+        if clear_cm is None:
+            lim = 90.0
+        else:
+            lim = math.degrees(math.asin(max(0.0, min(1.0, float(clear_cm) / HAND_HORIZON_CM))))
+        self.last_limit = dict(name=name, off=round(off, 1), bound=round(bound, 1), limit=round(lim, 1))
+        return "hand" if off <= lim else "check"
 
     def take_new_doubt(self, name):
         s = self.S.get(name)
@@ -540,14 +582,15 @@ class TagFree:
                     continue
             th, sig, verdict = self.fuser.update(n, t, own_th, d.th)
             f["th_src"] = "detector+own" if own_th is not None else "detector"
-            adv = self.fuser.advice(n)
+            adv = self.fuser.advice(n, *self._risk(n))
             if adv == "check":
                 f["th"] = None
                 if n not in self.big_asked:
                     self.big_asked.add(n)
                     self.fuser.counts["checks_asked"] = self.fuser.counts.get("checks_asked", 0) + 1
-                    self._doubt(n, t, own_th, d.th, "the overhead detector puts its heading %.0f deg from its own"
-                                % abs(self.fuser.S[n]["off"]))
+                    self._doubt(n, t, own_th, d.th, "the overhead detector puts its heading %.0f deg from its own%s"
+                                % (abs(self.fuser.S[n]["off"]), "" if HAND_RULE == "e18" else
+                                   ": more than noise explains and more than its room allows (a check, not a hand-on)"))
                 continue
             if verdict == "no own" or adv == "hand":
                 f["th"] = th                      # the own heading is measurably off (or there is none): corrected
@@ -562,6 +605,26 @@ class TagFree:
                 f["th"] = None                    # agrees within its noise: the robot's own heading is kept
             if self.fuser.take_new_doubt(n):
                 self._doubt(n, t, own_th, d.th)
+
+    def _risk(self, n):
+        """(e19) (own heading doubt at 95 %, room to an edge or a neighbour less its position doubt) from the
+        controller, or (None, None) without one."""
+        c = self.ctrl
+        try:
+            r = c.R[n]
+            import freeroam_core as FC
+            own95 = 2.0 * c.head_sd(r)
+            p = c.pos(r)
+            if p is None:
+                return own95, 0.0
+            clear = FC.edge_dist(c.rect, *p) - FC.HALF
+            for o in c.R.values():
+                q = c.pos(o) if o is not r and o.mode != "gone" else None
+                if q is not None:
+                    clear = min(clear, math.dist(p, q) - 2 * FC.HALF)
+            return own95, max(0.0, clear - c.unc(r))
+        except Exception:  # noqa: BLE001
+            return None, None
 
     def _doubt(self, n, t, own_th, det_th, why=None):
         why = why or "the overhead detector disagrees with its own heading twice (own %s, detector %.0f deg)" % (

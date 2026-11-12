@@ -612,3 +612,34 @@ def test_an_unnamed_robot_pauses_while_it_is_identified_then_creeps_again():
     R.still_since = c.t - 10.0
     c.never_still_watch(R)
     assert called
+
+
+# ------------------------------------------- 9 (audit 9 + Nick): tag-free hands a heading on only past noise and doubt
+def test_a_correct_own_heading_is_not_overridden_by_detector_noise():
+    """Audit finding 9: own heading right, detector noise 15 deg at 2 pictures a second: a heading was handed on in 20 %
+    of 15 s stands (the 2-sigma test repeated on every picture). Now the disagreement must pass the detector's measured
+    95 % error (26 deg) and the robot's own doubt together."""
+    import random
+    import tagfree as TF
+    handed = 0
+    for s in range(200):
+        rng = random.Random(s)
+        f = TF.HeadingFuser()
+        for k in range(30):
+            f.update("A", 0.5 * (k + 1), 40.0, 40.0 + rng.gauss(0, 15.0))
+            if f.advice("A") == "hand":
+                handed += 1
+                break
+    assert handed <= 2
+
+
+def test_the_hand_on_limit_comes_from_the_robots_room():
+    """Nick: no fixed 45 deg. A 35 deg disagreement (past noise) is handed on in open ground, but near an edge (2 cm of
+    room over the 20 cm horizon allows ~6 deg) the camera-measured heading check is asked instead."""
+    import tagfree as TF
+    f = TF.HeadingFuser()
+    for k in range(20):
+        f.update("A", 0.5 * (k + 1), 40.0, 5.0)                      # the detector says 35 deg less, steadily
+    assert f.advice("A", own95=4.0, clear_cm=None) == "hand"
+    assert f.advice("A", own95=4.0, clear_cm=2.0) == "check"
+    assert f.advice("A", own95=40.0, clear_cm=None) is None           # its own doubt explains it: kept

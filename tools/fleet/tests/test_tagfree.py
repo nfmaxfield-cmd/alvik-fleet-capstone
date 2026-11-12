@@ -375,9 +375,11 @@ def test_the_real_model_loads_runs_on_an_empty_board_and_finds_nothing():
     assert src.budget.n == 1 and src.budget.ms_all[0] < 2000.0
 
 
-def test_a_far_off_heading_is_not_handed_on_but_settled_by_the_heading_check():
+def test_a_far_off_heading_is_not_handed_on_but_settled_by_the_heading_check(monkeypatch):
     """From headings alone a robot whose own heading is 71 deg off and a detector wrong about that robot look the same:
-    a plausible drift (30 deg) is corrected, a far one (71 deg) asks the camera-measured crawl, once."""
+    a plausible drift (30 deg) is corrected, a far one (71 deg) asks the camera-measured crawl, once. (e19: this is the
+    e18 rule, MIRLT_TAGFREE_HAND=e18; the risk rule is tested in test_e19_audit_fixes.py)"""
+    monkeypatch.setattr(TF, "HAND_RULE", "e18")
     F = TF.HeadingFuser()
     for k in range(3):
         F.update("A", k * 0.5, 70.0, 40.0)

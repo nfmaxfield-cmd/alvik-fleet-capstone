@@ -155,6 +155,11 @@ SWITCHES = [
      "e13"),
     # -- headings --------------------------------------------------------------------------------------------------------
     ("MIRLT_HEADING_CONFIRM", "1", "0", "F", "After a heading re-set, a short crawl the camera measures", "e17"),
+    ("MIRLT_TAGFREE_HAND", "risk", "e18", "F T",
+     "(audit finding 9, Nick) Tag-free hands a detector heading on only when the disagreement is more than the detector's "
+     "measured heading error (95 %: 26 deg) and the robot's own heading doubt explain; the limit for handing on (was a "
+     "fixed 45 deg) comes from the robot's room to an edge or a neighbour; past it, the camera-measured heading check is "
+     "asked. e18: 2 sigmas of the averaged offset, 45 deg", "e19"),
     ("MIRLT_HEADING_CLICKS", "1", "0", "F", "After a click, a straight drive and a second click give the heading",
      "e13"),
     ("MIRLT_DOUBT_NEIGHBOUR", "1", "0", "F",
