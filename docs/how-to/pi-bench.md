@@ -100,7 +100,7 @@ Which of the Pi's 4 cores each program uses is now a setting, `MIRLT_CORE_LAYOUT
 | Layout | Recorder | Planner (free roam, run_plan, mission_run) | Camera bridge |
 |---|---|---|---|
 | A (as up to 11 Nov) | cores 0-1 (one camera: 1) | 2-3 | 2-3 (shared with the planner) |
-| **B (the default now: Claude's guess)** | 0 | 1 | 2-3 |
+| **B (the default: Nick chose B on 12 Nov, pending the bench)** | 0 | 1 | 2-3 |
 | C | any | any | any |
 
 To measure all three one after the other (about 3 x the minutes you give; nothing moves):
@@ -108,6 +108,9 @@ To measure all three one after the other (about 3 x the minutes you give; nothin
 ```
 ./run-fleet-pi.sh bench 10 layouts
 ```
+
+(e18) Nick chose B on 12 Nov as the default, pending the bench: it stays the default until the bench's numbers say
+otherwise. A and C stay available behind `MIRLT_CORE_LAYOUT`.
 
 The table at the end adds: pictures the real camera's bridge handled a second, the delay from picture to result at the
 bridge, and the practice run's watchdog stops. Paste it into the chat. To use a layout for every run until the Pi is

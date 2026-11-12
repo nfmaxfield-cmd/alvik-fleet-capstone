@@ -140,7 +140,7 @@ def test_fastsim_firmware_mix_counts_styles_apart():
     assert z["Right"] > max(z["Left"], z["Center"])
 
 
-def test_arc_fit_finds_a_curvature_error():
+def test_arc_fit_finds_a_curvature_error(monkeypatch):
     c, _, rows = ctrl(("Left",))
     place(c, "Left", 60, 60, 0.0)
     r = c.R["Left"]
@@ -156,6 +156,10 @@ def test_arc_fit_finds_a_curvature_error():
     sent = []
     c.out_fn = lambda n_, t: sent.append(t)
     r.curve = True
+    c.arc_save(r)          # (e18) curve scales are held until Nick decides (MIRLT_CURVE_SCALE_SAVE=0): logged only
+    assert not any(t.startswith("set arc_k_scale") for t in sent)
+    import freeroam_core as FC_
+    monkeypatch.setattr(FC_, "CURVE_SCALE_SAVE", True)     # the e17 way, behind the switch
     c.arc_save(r)
     assert any(t.startswith("set arc_k_scale 0.95") for t in sent) and "save" in sent
 

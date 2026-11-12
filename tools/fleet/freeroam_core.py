@@ -47,9 +47,11 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 import safety_rules as SR   # noqa: E402  (e08 Phase A: the rules shared with run_plan and observe)
+import safety_group as SG   # noqa: E402  (e18: every safety switch's automatic default in one place)
+import odo_trust as OT      # noqa: E402  (e18, 5: each robot's measured odometry trust, the blind-drive allowance)
 import fused_pose as FP     # noqa: E402  (e09 Phase B: one filter per robot, fed by the tracking layer and RAW)
 
-VERSION = "freeroam-2026-11-12e17"   # e17 (home 11 Nov, the 08:26 and 08:58 runs): (1d) a camera position the tracking layer named by elimination or a wiggle is a CORRECTION: its pose set from the camera at once (fpose, never rejected by its filter), said "CORRECTED", never "moved in" / REJOINED, and a held robot rejoins on it (MIRLT_CAMERA_CORRECT=0: as e16); (1e) a re-seed is projected to now and never lands while the robot turns (the Pi's copy of its heading is ~0.3 s old: 13-15 deg median jump when it landed mid-turn, MIRLT_RESEED_TURN=0: as before); (2) no driving blind on late fixes: each robot's measured fix age and drift against the room its path has (MIRLT_LATE_FIX=0); after an off-plan heading re-set the next move waits for a short crawl the camera confirms (MIRLT_HEADING_CONFIRM=0); (6) each robot's drift per cm measured from its own corrections. Before: "freeroam-2026-11-11e16"
+VERSION = "freeroam-2026-11-12e18b"   # e18b (the replay of all 10 home runs): a standing robot named all along beyond its 6 cm fix gate is corrected from the camera (MIRLT_FAR_NAMED_CORRECT); a standing re-seed keeps its own heading unless the camera's is better (MIRLT_RESEED_HEADING_KEEP); curve scales logged, not saved, until Nick decides (MIRLT_CURVE_SCALE_SAVE); the trust record pooled for the fleet (odo_trust, MIRLT_TRUST_FLEET). e18 (Nick 12 Nov decisions): (1) the tracking layer's out-and-back identity drive, made only where no body can touch (outback); (3) a creep with its heading in doubt beside a robot the camera has waits for room or goes straight away when no heading can close the gap; beside one it does not have, half steps at the slowest speed away from where it was last believed to be (MIRLT_DOUBT_NEIGHBOUR); (4) a lost / stray / needs-a-hand robot goes first (reflex priority) to the nearest readable point nobody uses, and a standing robot in its way makes room (MIRLT_LOST_PRIORITY); (5) each robot's odometry trust (odo_trust: shadow dead reckoning against the camera, its own record) gives its lost bubble and allows blind legs (curves through unreadable ground, blind_excursion) only where the predicted error keeps every margin with a way back; checked against the error found when seen again (MIRLT_BLIND_ALLOW); (6) every calibration correction (curves, straight drives) saved at any end by the agreement rules (save_corrections, MIRLT_SAVE_CAL_AT_END). Every safety switch read through safety_group. Before: "freeroam-2026-11-12e17"   # e17 (home 11 Nov, the 08:26 and 08:58 runs): (1d) a camera position the tracking layer named by elimination or a wiggle is a CORRECTION: its pose set from the camera at once (fpose, never rejected by its filter), said "CORRECTED", never "moved in" / REJOINED, and a held robot rejoins on it (MIRLT_CAMERA_CORRECT=0: as e16); (1e) a re-seed is projected to now and never lands while the robot turns (the Pi's copy of its heading is ~0.3 s old: 13-15 deg median jump when it landed mid-turn, MIRLT_RESEED_TURN=0: as before); (2) no driving blind on late fixes: each robot's measured fix age and drift against the room its path has (MIRLT_LATE_FIX=0); after an off-plan heading re-set the next move waits for a short crawl the camera confirms (MIRLT_HEADING_CONFIRM=0); (6) each robot's drift per cm measured from its own corrections. Before: "freeroam-2026-11-11e16"
 VERSION_E16 = "freeroam-2026-11-11e16"   # e16 (home free roam 11 Nov 08:45-08:48, commit 4732a48: Right stopped at an edge and stood; then "REJOINED ... moved in" 1 s after NEEDS A HAND with nobody there, and Center pushed it off): (7) an edge stop reverses along the robot's own recorded track as far as the derived edge rule needs (observe.track_back_target), checked against the others' reservations, then re-plans; it holds and asks only when the track is unknown or blocked (MIRLT_EDGE_BACKOUT=0: as before); (8a) "moved in" needs evidence: a lift or a sustained camera move past its own measured noise, or its own drive out (MIRLT_REJOIN_EVIDENCE=0: as before); (8b) a robot held or stuck at an edge, or rejoined and not yet driven away, is a fixed obstacle with its uncertainty (own pose against the camera) in every plan and the reflex (MIRLT_PINNED_OBSTACLE=0); (8c) contact: a standing robot the camera sees move past its noise, or whose accelerometer jolts, stops the robots near it; a driving robot whose camera progress falls far below its wheels' stops and backs off; contact.csv (MIRLT_CONTACT_WATCH=0); (8d) a question nobody answers (ASK_WAIT_S) makes the run decide by itself, as an unattended run does (MIRLT_ASK_UNATTENDED=1: keeps asking); (9b) a standing robot's doubt no longer grows with its fix's age (home: "cannot tell whether it is clear of the edge" 22 cm in; MIRLT_STAND_UNC=0). Before: "freeroam-2026-11-10e13b"   # e13b (10 Nov, Nick 13:34): a standing robot (its own odometry shows no motion since its last fix) keeps that fix: never lost while it stands, sparse reads confirm it (MIRLT_STAND_TRUST=0: before); the lost threshold grows only for a camera slower than about 2.5 pictures a second (1.5 x the longest recent gap). e13 (10 Nov): never give up blind (BLIND_RULE edge: a lost robot drives on while its bubble + body + stop cannot reach an edge; BUBBLE_CAP behind MIRLT_BLIND_RULE=cap); stray return (a robot outside the readable area comes back along ground it drove); never give up (a robot held at an edge waits, says it needs a hand and rejoins: EDGE_PARK off); risk-based no-pictures limit per robot
 VERSION_E12 = "freeroam-2026-11-10a"   # 11-10a (e12): the curve-fit maths moved into module functions (fit_arc_points, arc_summary, arc_agree) so the calibration's curve phase uses the very same (free roam's own fitting and saving unchanged); a robot held at an edge for EDGE_PARK_S is parked and said loudly, the others roam on (MIRLT_EDGE_PARK=0: before)
 VERSION_E = "freeroam-2026-11-07e"   # 11-07e (Nick 7 Nov): a robot put down at or over an edge first tries the e08 tilt recovery, a person asked only if that fails (MIRLT_START_EDGE_MODE=wait: always wait)
@@ -113,8 +115,8 @@ PAUSE_S = 0.15          # between moves (the robot's own step queue; no visible 
 EMPTY_MOVE_PAUSE_S = 0.5    # (e10) CHOSEN: after a move with nothing to send, pick again this soon (DOE: no)
 # dead reckoning (lost by the camera)
 LOST_AFTER_S = 0.6      # no camera fix this long = lost (run_plan.BLIND_AFTER_S). Not chosen here
-STAND_TRUST = os.environ.get("MIRLT_STAND_TRUST", "1") != "0"   # (e13, Nick 13:34) a standing robot keeps its fix
-STAND_UNC = os.environ.get("MIRLT_STAND_UNC", "1") != "0"     # (e16, 9b) ... and its doubt does not grow while it
+STAND_TRUST = SG.flag("MIRLT_STAND_TRUST")   # (e13, Nick 13:34) a standing robot keeps its fix
+STAND_UNC = SG.flag("MIRLT_STAND_UNC")     # (e16, 9b) ... and its doubt does not grow while it
                         # stands (0: the fix's age grows the doubt at 10 cm/s as before e16)
 STAND_CM = 1.0          # ... "not moved" = its own odometry moved under this since the fix: the camera's own noise (~1 cm),
 STAND_DEG = 2.0         # and under 2 deg turned (the gyro's drift over a minute is far less). Not tuning numbers: below
@@ -127,7 +129,7 @@ BLIND_PER_CM = 0.07     # straight drives up to 40 cm (run_plan.BLIND_ERR_*). Be
 BLIND_TURN_FRAC = 0.03  # heading error 3 % of the degrees turned blind (the e03 rerun: 0.85-0.90 deg per turn after the
                         # fit, 6 deg on a 173 deg turn before it): CHOSEN between the two, its lateral effect added
 BUBBLE_CAP = 8.0        # BEFORE e13 (now MIRLT_BLIND_RULE=cap): over this the robot eased to a stop and wiggled
-BLIND_RULE = os.environ.get("MIRLT_BLIND_RULE", "edge")   # (e13, Nick 12:51 "never give up", CLAUDE.md) "edge": a lost
+BLIND_RULE = SG.value("MIRLT_BLIND_RULE")   # (e13, Nick 12:51 "never give up", CLAUDE.md) "edge": a lost
                         # robot keeps moving on odometry and gyro while its bubble (grown per cm and degree blind) + half
                         # its body + its stop cannot reach an edge (blind_stop); the plans carry the bubble in their edge
                         # margins along the whole path. No fixed bubble cap. "cap": BUBBLE_CAP as before
@@ -226,13 +228,13 @@ REAIM = True            # (11-05d) an overdue curve piece is re-aimed with farc 
 # the straight's PLANNED end, ran from where the robot really was, and its line-sensor stop 9 cm from the edge by the
 # camera was called a surface mark; Right ended hung over the y = 0 edge) switches, decided automatically (on), the old
 # way behind each (CLAUDE.md "keep features, switch them off"):
-QUEUE_WATCH = os.environ.get("MIRLT_QUEUE_WATCH", "1") != "0"   # (a, c) every tick the running piece is checked
+QUEUE_WATCH = SG.flag("MIRLT_QUEUE_WATCH")   # (a, c) every tick the running piece is checked
                         # against the fused position (and the camera's own fix) and its queued pieces against the edge
                         # rule from where the robot really is and the way it really goes; off plan: re-aimed or stopped
-MARK_UNC = os.environ.get("MIRLT_MARK_UNC", "1") != "0"         # (b) the surface-mark verdict uses the camera's
+MARK_UNC = SG.flag("MIRLT_MARK_UNC")         # (b) the surface-mark verdict uses the camera's
                         # edge distance minus the fused pose's uncertainty (near an edge a line trip is an edge)
-START_EDGE = os.environ.get("MIRLT_START_EDGE", "1") != "0"     # (d) a robot that starts over or at an edge: checked
-START_EDGE_MODE = os.environ.get("MIRLT_START_EDGE_MODE", "recover")   # (d; Nick 7 Nov) "recover": it first tries to
+START_EDGE = SG.flag("MIRLT_START_EDGE")     # (d) a robot that starts over or at an edge: checked
+START_EDGE_MODE = SG.value("MIRLT_START_EDGE_MODE")   # (d; Nick 7 Nov) "recover": it first tries to
                         # free itself the e08 tilt-recovery way (straight back when the camera and its own pose agree
                         # that backing is inward, then the other tries) and a person is asked only if that fails;
                         # "wait": it always waits for a person (the first e10 way, the switch)
@@ -245,13 +247,13 @@ COURSE_MIN_CM = 3.0     # ... when they spread at least this far (else the filte
 COURSE_ERR_DEG = 10.0   # its own heading this far off the camera's course (for COURSE_ERR_S): the rest of the piece and
 COURSE_ERR_S = 0.5      # the queued ones are checked from where it really is, the way it really goes. Chosen; DOE
 COURSE_RESET_DEG = 15.0 # its own heading this far from the camera's course while off plan: re-set (fpose), stop, re-plan
-HEADING_CLICKS = os.environ.get("MIRLT_HEADING_CLICKS", "1") != "0"   # (e13, Nick 13:01) after a click, a straight drive
+HEADING_CLICKS = SG.flag("MIRLT_HEADING_CLICKS")   # (e13, Nick 13:01) after a click, a straight drive
                         # and a second click give the heading; 0 = the gyro's heading kept
-NOPIC_RULE = os.environ.get("MIRLT_NOPIC_RULE", "risk") != "off"   # (e13) no pictures: each robot's risk-based limit
+NOPIC_RULE = SG.value("MIRLT_NOPIC_RULE") != "off"   # (e13) no pictures: each robot's risk-based limit
                         # (slowed, then held); "off": as e12 (the lost-robot rules alone after the bridge's message)
-STRAY_RETURN = os.environ.get("MIRLT_STRAY_RETURN", "1") != "0"   # (e13) a robot outside the readable area comes back
+STRAY_RETURN = SG.flag("MIRLT_STRAY_RETURN")   # (e13) a robot outside the readable area comes back
                         # (only where the workspace is limited to it: school free roam). 0 = before e13 (lost there)
-EDGE_PARK = os.environ.get("MIRLT_EDGE_PARK", "0") == "1"   # (e13, Nick 10 Nov "robots never give up"): OFF by default.
+EDGE_PARK = SG.flag("MIRLT_EDGE_PARK")   # (e13, Nick 10 Nov "robots never give up"): OFF by default.
                         # A robot held at an edge now stays in the run: still and safe, it says loudly that it needs a
                         # hand (NEEDS A HAND: event, state, Mission Control) and keeps checking; moved in, it rejoins by
                         # itself; held, its own battery floor still parks it (so the run can end). MIRLT_EDGE_PARK=1:
@@ -264,16 +266,16 @@ EDGE_PARK = os.environ.get("MIRLT_EDGE_PARK", "0") == "1"   # (e13, Nick 10 Nov 
                         # retried and asked for the whole run)
 # (e16, home 11 Nov 08:45-08:48, run 20261111-082651-freeroam) switches, decided automatically (on), the old way behind
 # each (CLAUDE.md "keep features, switch them off"):
-EDGE_BACKOUT = os.environ.get("MIRLT_EDGE_BACKOUT", "1") != "0"        # (7) an edge stop reverses along its own track
-REJOIN_EVIDENCE = os.environ.get("MIRLT_REJOIN_EVIDENCE", "1") != "0"  # (8a) "moved in" only on evidence
-PINNED_OBSTACLE = os.environ.get("MIRLT_PINNED_OBSTACLE", "1") != "0"  # (8b) held at an edge: a fixed obstacle + doubt
-CONTACT_WATCH = os.environ.get("MIRLT_CONTACT_WATCH", "1") != "0"      # (8c) pushes and collisions noticed
-ASK_UNATTENDED = os.environ.get("MIRLT_ASK_UNATTENDED", "0") == "1"    # (8d) 1 = keep asking when nobody answers
-CAMERA_CORRECT = os.environ.get("MIRLT_CAMERA_CORRECT", "1") != "0"   # (e17, 1d) the layer's elimination = a correction
-RESEED_TURN = os.environ.get("MIRLT_RESEED_TURN", "1") != "0"         # (e17, 1e) no re-seed lands mid-turn; projected
-LATE_FIX = os.environ.get("MIRLT_LATE_FIX", "1") != "0"               # (e17, 2) slow or wait on late fixes
-HEADING_CONFIRM = os.environ.get("MIRLT_HEADING_CONFIRM", "1") != "0"   # (e17, 2) camera-confirmed heading after a re-set
-NEVER_STILL = os.environ.get("MIRLT_NEVER_STILL", "1") != "0"     # (e17, Nick 12 Nov standing rule) held / unsure /
+EDGE_BACKOUT = SG.flag("MIRLT_EDGE_BACKOUT")        # (7) an edge stop reverses along its own track
+REJOIN_EVIDENCE = SG.flag("MIRLT_REJOIN_EVIDENCE")  # (8a) "moved in" only on evidence
+PINNED_OBSTACLE = SG.flag("MIRLT_PINNED_OBSTACLE")  # (8b) held at an edge: a fixed obstacle + doubt
+CONTACT_WATCH = SG.flag("MIRLT_CONTACT_WATCH")      # (8c) pushes and collisions noticed
+ASK_UNATTENDED = SG.flag("MIRLT_ASK_UNATTENDED")    # (8d) 1 = keep asking when nobody answers
+CAMERA_CORRECT = SG.flag("MIRLT_CAMERA_CORRECT")   # (e17, 1d) the layer's elimination = a correction
+RESEED_TURN = SG.flag("MIRLT_RESEED_TURN")         # (e17, 1e) no re-seed lands mid-turn; projected
+LATE_FIX = SG.flag("MIRLT_LATE_FIX")               # (e17, 2) slow or wait on late fixes
+HEADING_CONFIRM = SG.flag("MIRLT_HEADING_CONFIRM")   # (e17, 2) camera-confirmed heading after a re-set
+NEVER_STILL = SG.flag("MIRLT_NEVER_STILL")     # (e17, Nick 12 Nov standing rule) held / unsure /
                         # needs-a-hand / lost-at-the-limit robots keep creeping toward safety and being found; 0: e16's
                         # hold-and-wait
 CREEP_MAX_CM = 8.0      # (e17) CHOSEN: a creep step's longest (a robot's own 9.5 cm body or so) ...
@@ -281,6 +283,39 @@ CREEP_MIN_CM = 2.0      # ... and shortest (over the camera's noise, so the came
 CREEP_UNC0_CM = 5.0     # CHOSEN: step and speed scale as UNC0 / (UNC0 + its uncertainty): 5 cm doubt halves them.
                         # DOE: yes, with CREEP_MAX_CM (time to be found again vs falls per hour)
 CREEP_V_MIN = 2.0       # cm/s: the firmware's slowest drive (driveLine's 2 cm/s floor). Not chosen
+# (e18, Nick 12 Nov decisions 1-6) the Safety group's new switches (tools/fleet/safety_group.py: decided automatically,
+# the old way behind each)
+OUTBACK_ID = SG.flag("MIRLT_OUTBACK_ID")              # (1) the out-and-back identity drive (the layer asks it)
+DOUBT_NEIGHBOUR = SG.flag("MIRLT_DOUBT_NEIGHBOUR")    # (3) a doubtful heading beside a known / unknown neighbour
+LOST_PRIORITY = SG.flag("MIRLT_LOST_PRIORITY")        # (4) lost robots first; the others yield
+BLIND_ALLOW = SG.flag("MIRLT_BLIND_ALLOW")            # (5) each robot's measured odometry trust; blind legs
+SAVE_CAL_AT_END = SG.flag("MIRLT_SAVE_CAL_AT_END")    # (6) every calibration correction saved at any run end
+FAR_NAMED_CORRECT = SG.flag("MIRLT_FAR_NAMED_CORRECT")   # (replay) named all along but beyond its fix gate: corrected
+RESEED_HEADING_KEEP = SG.flag("MIRLT_RESEED_HEADING_KEEP")   # (replay) a standing re-seed keeps its own heading
+CURVE_SCALE_SAVE = SG.flag("MIRLT_CURVE_SCALE_SAVE")    # (replay; Nick to decide) curve scales logged, not saved
+FAR_AFTER_FPOSE_S = 3.0   # no named-far correction within 3 s of any fpose (the late fixes, up to ~1 s, plus the
+                          # 1 s steadiness window, then one more second of margin). Chosen; DOE: no
+FIX_GATE_CM = 6.0       # the firmware's fix gate (pose.h: 4 sigmas of ~1.5 cm): a fix further off its own pose is refused.
+                        # Not chosen here
+HEAD_SD_PER_90 = 1.6    # deg of heading doubt per 90 deg turned on the spot (the replay of 505 DOE turn checks: median
+                        # 1.2-1.9 per 90 deg). Measured; HEAD_SD0 2 deg after its heading was set. CAM_HEAD_SD tags 2 deg
+HEAD_SD0 = 2.0
+CAM_HEAD_SD = {"tags": 2.0, "": 2.0}   # ("": no source named = tags, as on_fix reads it) sources whose heading is better than a few degrees; others (lights outlines: 180 deg
+                              # ambiguous) never overwrite a standing robot's heading
+BLIND_BUBBLE = SG.value("MIRLT_BLIND_BUBBLE")         # (5) "fixed": an unplanned loss grows the bubble by the 29 Oct
+                        # numbers (its record's prediction logged and checked); "record": by its own record every time
+OB_MIN_CM_ROBOT = 2.0   # (1) Nick 12 Nov: 2-4 cm (the layer sizes it from the camera's noise; never under this)
+OB_GAP_CM = 0.5         # (1) CHOSEN: an out-and-back keeps the bodies' circles this far apart even driving straight at
+                        # another robot or candidate spot (Nick: contacts not allowed). DOE: no (a guard)
+DOUBT_DEG_UNKNOWN = 180.0   # (3) a heading in doubt with no measure of how far off: any direction. Not chosen
+CAUTIOUS_SHARE = 0.5    # (3) CHOSEN: beside a robot the camera does not confirm, a creep is this share of its step, at the
+                        # slowest speed. DOE: yes, with CREEP_MAX_CM (time to be found vs contacts in the simulator)
+ROOM_CLEAR_CM = 2.0     # (4) CHOSEN: a robot making room for a lost one clears its corridor by this much more. DOE: no
+EXC_MIN_CM = 3.0        # (5) CHOSEN: an excursion shortened below this is refused (the camera's noise is ~1 cm). DOE: no
+RATIO_MIN_CM = 10.0     # (6) CHOSEN: a straight drive this long or longer, the camera fresh at both ends, measures the
+                        # drive ratio (camera / asked). DOE: no (the agreement rule decides whether it is saved)
+CHECKPOINT_S = 60.0     # (6) CHOSEN: the corrections' evidence written out this often (a crash or power cut loses at most
+                        # a minute). DOE: no
 RESEED_TURN_DPS = 8.0   # (e17) a re-seed waits while its own heading turns faster than this: at the measured ~0.3 s
                         # landing lag that is under 3 deg planted (the camera heading's own sigma). Derived; DOE: no
 RESEED_WAIT_MAX_S = 3.0  # (e17) ... at most this long (a robot circling for ever is re-seeded anyway, said). Chosen
@@ -722,6 +757,11 @@ class Controller:
         self.clock_min = None           # the camera clock is at least this far ahead (a fix cannot arrive before it
                                         # was taken)
         self.last_clock = self.last_delay = self.last_camlog = -1e9
+        # (e18, 5) each robot's odometry trust (odo_trust.Trust): fed by its own motion and the camera, saved by the host
+        self.trust = OT.link({n: OT.Trust(n) for n in names})   # (e18b) one fleet record (MIRLT_TRUST_FLEET)
+        self.blind_allow = BLIND_ALLOW
+        self.params = {}                 # (e18, 6) host: {robot: {param: value}} read back with `get` (wheel_scale ...)
+        self.excursions = []             # (e18, 5) every blind leg asked: allowed / shortened / refused, and its check
 
     # -- I/O ---------------------------------------------------------------------------------------------------
     def out(self, r, text):
@@ -819,6 +859,8 @@ class Controller:
         if how and CAMERA_CORRECT and str(how).startswith(("elimination", "wiggle")):
             return self.correct_from_camera(r, t, x, y, th, arr, how, src)
         oa = self.own_at(r, t)
+        if FAR_NAMED_CORRECT and CAMERA_CORRECT and oa is not None and self.far_named(r, t, x, y, oa, src):
+            return self.correct_from_camera(r, t, x, y, th, arr, "named far", src)
         if oa is not None and math.hypot(x - oa[0], y - oa[1]) <= REACQUIRE_CM:
             r.agree_t = t                                     # (e17, 6) own and camera agree here (drift record)
         if r.lost is None and oa is not None and r.cam_off is not None:
@@ -872,6 +914,8 @@ class Controller:
                 except Exception:  # noqa: BLE001
                     pass
         self.fp_fix(r, t, x, y, th, sigma, src)
+        if self.blind_allow:
+            self.trust_fix(r, t, x, y, oa)            # (e18, 5) the camera against its shadow dead reckoning
         if r.curve and r.move is not None and r.move.get("curve") and r.move["phase"] == "drive":
             r.arc_pts.append((x, y))
         if oa is not None:
@@ -879,7 +923,7 @@ class Controller:
             if self.pose_rule == "wait2s":
                 self.pose_agree(r, (oa[0], oa[1]), (x, y), th)      # the rule before e08 (kept behind the switch)
             else:
-                self.pose_fuse(r, (oa[0], oa[1]), (x, y), th, t_pic=t)
+                self.pose_fuse(r, (oa[0], oa[1]), (x, y), th, t_pic=t, src_=src)
         r.cam_hist.append((t, x, y))
         if len(r.cam_hist) > 80:
             del r.cam_hist[:20]
@@ -915,7 +959,17 @@ class Controller:
         if t - getattr(r, "fpose_t", -1e9) < 0.15:
             return          # (11-05c) a record sent before our fpose reached it: the old frame
         prev = r.own
+        if prev is not None:
+            r.turn_since_head = r.__dict__.get("turn_since_head", 0.0) + abs(wrap180(th - prev[3]))
         r.own = (t, x, y, th, state, cur)
+        if self.blind_allow:
+            tru = self.trust.get(name)
+            if r.__dict__.get("fpose_t") != r.__dict__.get("trust_fpose"):
+                r.trust_fpose = r.__dict__.get("fpose_t")
+                tru.reset()                            # (e18, 5) its pose was set from elsewhere: shadows restart
+                tru._pp = None
+            if t - r.__dict__.get("raw_prev_t", -1e9) > 1.0:
+                tru.own_pose(t, x, y, th)              # no RAW: its own pose's steps along its heading
         if r.fp is not None and r.fp.started:
             if t - getattr(r, "fpose_t", -1e9) < 0.5:
                 r.fp.reset_own_turn()              # its heading was just set (fpose): no turn across it
@@ -931,8 +985,13 @@ class Controller:
         if r.lost is not None and prev is not None:
             d = math.hypot(x - prev[1], y - prev[2])
             r.lost["drive"] += d
-            r.lost["turn"] += abs(wrap180(th - prev[3]))
+            dth = abs(wrap180(th - prev[3]))
+            r.lost["turn"] += dth
             r.lost["after_turn"] += d
+            # (e18, 5) the turns split as the trust model counts them: on the spot or on a curve, and when (cm driven)
+            spot = d / max(1e-3, t - prev[0]) < OT.SPOT_V
+            r.lost["ts" if spot else "tc"] = r.lost.get("ts" if spot else "tc", 0.0) + dth
+            r.lost["ms" if spot else "mc"] = r.lost.get("ms" if spot else "mc", 0.0) + dth * r.lost["drive"]
             self.grow_bubble(r)
 
     def on_step(self, name, sid, state, info=""):
@@ -1165,14 +1224,37 @@ class Controller:
             r.bubble = max(BLIND_BASE, r.fp.unc_cm(self.t))
             return
         L = r.lost
+        if self.blind_allow and (BLIND_BUBBLE == "record" or r.__dict__.get("excursion") is not None):
+            r.bubble = self.lost_radius(r)                                      # (e18, 5) its own measured record
+            return
         lat = L["after_turn"] * math.sin(math.radians(BLIND_TURN_FRAC * L["turn"]))
         r.bubble = L.get("base", BLIND_BASE) + BLIND_PER_CM * L["drive"] + lat     # (e13) base: a click's accuracy
 
     def start_lost(self, r, why="camera lost it"):
         p = self.pos(r)
-        r.lost = dict(t0=self.t, drive=0.0, turn=0.0, after_turn=0.0, at=p, n_ok=0, last=None, chain=[])
+        r.lost = dict(t0=self.t, drive=0.0, turn=0.0, after_turn=0.0, at=p, n_ok=0, last=None, chain=[], ts=0.0,
+                      tc=0.0, ms=0.0, mc=0.0)
+        if self.blind_allow and r.cam is not None and r.own_hist:
+            # (e18, 5) it has been blind since the picture of its last fix, not since now: that stretch counts (its own
+            # path and turns since then; found by the dark-patch case: the error found was over the prediction)
+            prev = None
+            for q in r.own_hist:
+                if q[0] < r.cam[0]:
+                    prev = q
+                    continue
+                if prev is not None:
+                    d_ = math.hypot(q[1] - prev[1], q[2] - prev[2])
+                    a_ = abs(wrap180(q[3] - prev[3]))
+                    pr = r.lost.setdefault("pre", dict(drive=0.0, ts=0.0, tc=0.0, ms=0.0, mc=0.0))
+                    pr["drive"] += d_
+                    k_ = "ts" if d_ / max(1e-3, q[0] - prev[0]) < OT.SPOT_V else "tc"
+                    pr[k_] += a_
+                    pr["m" + k_[1]] += a_ * pr["drive"]
+                prev = q
         r.pc = None
         r.bubble = BLIND_BASE
+        if not self.ekf_live(r):
+            self.grow_bubble(r)                 # (e18) the stretch since its last fix counts (fixed or record)
         self.event(r, "lost", "%s at %.1f, %.1f: dead reckoning, bubble %.1f cm" % (why, p[0], p[1], r.bubble)
                    if p else why)
         if self.lost_mode == "hold" and r.mode == "move":
@@ -1222,6 +1304,8 @@ class Controller:
                               x=round(x, 1), y=round(y, 1), fix_age_s=round(arr - t, 2)))
         if L["drive"] >= 5.0:
             self.drift_add(r, jump, L["drive"], "seen again")        # (e17, 6)
+        if self.blind_allow and L["drive"] >= 2.0:
+            self.blind_check(r, jump, arr - t)                       # (e18, 5) predicted against found
         self.event(r, "seen again", "after %.1f s, %.1f cm and %.0f deg blind: odometry was %.1f cm off at the "
                    "picture's time (bubble %.1f; the fix was %.2f s old)"
                    % (arr - L["t0"], L["drive"], L["turn"], jump, r.bubble, arr - t))
@@ -1237,6 +1321,7 @@ class Controller:
                 r.own = (r.own[0], q[0], q[1], h) + tuple(r.own[4:])
             r.fpose_t = self.t
         r.lost, r.bubble = None, 0.0
+        r.excursion = None
         r.pc = None
         if self.ekf_live(r):
             if jump > REACQUIRE_CM:
@@ -1383,7 +1468,55 @@ class Controller:
         self.event(r, "CORRECTED", "the camera sees %s standing at %.0f, %.0f (%s); its own pose was %.1f cm off and "
                    "its wheels did not move: its pose is set from the camera (a correction, not a move)" % (
                        r.name, x, y, "the only steady sighting nobody else can claim" if how == "elimination" else
+                       "the sighting that went out and came back with its own drive" if "out-and-back" in str(how) else
+                       "the layer has named it all along, beyond its own filter's 6 cm gate" if how == "named far" else
                        "the sighting that turned when it wiggled", d))
+
+    def far_named(self, r, t, x, y, oa, src):
+        """(e18, the replay of all home runs: 11 Nov 08:26, Center named all along but 31 cm from its own pose for 86 s,
+        held, then a false REJOINED; its filter refused every fix past its 6 cm gate) True when the layer has named r
+        for STEADY (1 s, 3 fixes) at an offset beyond FIX_GATE_CM from its own pose that stays put (within 3 camera
+        sigmas), r standing (its own pose did not move), and no other robot's position or own pose is on that spot."""
+        off = (x - oa[0], y - oa[1])
+        far = r.__dict__.setdefault("far", [])
+        if math.hypot(*off) <= FIX_GATE_CM or not self.standing_own(r) or \
+                self.t - (r.__dict__.get("fpose_t") or -1e9) < FAR_AFTER_FPOSE_S:
+            # (e18b, found by the e17 comparison re-run, seed 2 at 1 s late fixes: a re-seed landed and 0.1 s later this
+            # rule "corrected" it again from offsets measured against its pose BEFORE the re-seed; the robot then hung
+            # 0.8 cm over the edge) offsets count only once its own pose has settled after any fpose
+            far.clear()
+            return False
+        far.append((t, off))
+        del far[:-12]
+        far[:] = [q for q in far if t - q[0] <= 1.5]
+        if len(far) < 3 or far[-1][0] - far[0][0] < 1.0:
+            return False
+        mx = sum(q[1][0] for q in far) / len(far)
+        my = sum(q[1][1] for q in far) / len(far)
+        if any(math.hypot(q[1][0] - mx, q[1][1] - my) > 3.0 * 1.5 for q in far):
+            return False
+        for o in self.R.values():
+            if o is r or o.mode == "gone":
+                continue
+            for q in ((o.own[1], o.own[2]) if o.own else None, self.pos(o)):
+                if q is not None and math.hypot(q[0] - x, q[1] - y) <= FIX_GATE_CM:
+                    return False          # another robot may be that spot: the identity rules decide, not this
+        far.clear()
+        self.counts["far_named"] = self.counts.get("far_named", 0) + 1
+        return True
+
+    def standing_own(self, r, win=1.0):
+        """Its own pose did not move (under STAND_CM, STAND_DEG) over the last win s (FOLLOW records reach that far)."""
+        h = [q for q in r.own_hist if q[0] >= self.t - win]
+        if len(h) < 3 or h[-1][0] - h[0][0] < 0.6 * win:
+            return False
+        return all(math.hypot(q[1] - h[0][1], q[2] - h[0][2]) < STAND_CM and abs(wrap180(q[3] - h[0][3])) < STAND_DEG
+                   for q in h)
+
+    def head_sd(self, r):
+        """(e18) Its own heading's doubt (deg): HEAD_SD0 after its heading was last set, plus HEAD_SD_PER_90 per 90 deg
+        turned since (the gyro's measured per-turn error)."""
+        return HEAD_SD0 + HEAD_SD_PER_90 * r.__dict__.get("turn_since_head", 0.0) / 90.0
 
     def unaccounted_why(self, r):
         """(e17) Why the run cannot account for r now (lost, held, unsure near an edge, needs a hand), or None: the
@@ -1430,7 +1563,8 @@ class Controller:
         mv = r.move
         ok = LATE_FIX and r.mode == "move" and mv is not None and r.lost is None and r.cam is not None and \
             not r.silent and r.new_fw and mv.get("t_drive") is not None and mv.get("phase") == "drive" and \
-            not str(mv.get("kind", "")).startswith(("wiggle", "nudge", "hdconfirm", "unsure", "recover", "probe", "creep"))
+            not str(mv.get("kind", "")).startswith(("wiggle", "nudge", "hdconfirm", "unsure", "recover", "probe", "creep",
+                                                     "outback", "excursion", "make room")) and not mv.get("blind")
         if not ok or r.adj is not None:
             if late is not None and (mv is None or r.mode != "move"):
                 r.late = None
@@ -1505,6 +1639,16 @@ class Controller:
         ws = self.ws
         if ws is not None and getattr(ws, "limited", False) and ws.edge_dist(*p) < 0.0:
             t_ = r.__dict__.get("last_in") or ws.nearest_allowed(p[0], p[1], HALF)
+            if t_ is not None and LOST_PRIORITY:
+                # (e18, 4) the nearest readable point no other robot is using
+                taken = [self.pos(o) for o in self.R.values() if o is not r and self.pos(o) is not None and
+                         o.mode != "gone"]
+                if any(math.dist(q, t_[:2]) < PLAN_CC for q in taken):
+                    for k in range(1, 6):
+                        c_ = ws.nearest_allowed(p[0], p[1], HALF + 4.0 * k)
+                        if c_ is not None and not any(math.dist(q, c_) < PLAN_CC for q in taken):
+                            t_ = c_
+                            break
             if t_ is not None:
                 return tuple(t_[:2]), "back into the area the camera reads"
         b = getattr(self.rect, "board", None) or self.rect
@@ -1553,6 +1697,50 @@ class Controller:
         tries = [(brg, off) for off in (0.0, 45.0, -45.0, 90.0, -90.0, 135.0, -135.0, 180.0)]
         if away is not None:
             tries.append((away, None))         # last: straight away from the nearest robot, even inside a reservation
+        doubt = self.heading_doubt(r) if DOUBT_NEIGHBOUR else None
+        dmode = ""
+        if doubt is not None and near:
+            # (e18, Nick 12 Nov decision 3) its heading is in doubt and a robot is within reach of a creep
+            d0, q0 = min(near)
+            o0 = next(o for o in self.R.values() if o is not r and self.pos(o) == q0)
+            u0, ur = self.unc(o0), self.unc(r)
+            if d0 < PLAN_CC + L + u0:
+                if self.confirmed(o0):
+                    # the camera has the neighbour: wait for room, unless a creep straight away cannot close the gap
+                    # whatever its real heading (doubt under 90 deg: going "away" never closes it; any direction: as
+                    # long as the step is shorter than the gap's spare)
+                    Ls = L if doubt < 90.0 else d0 - (2 * HALF + REFLEX_GAP) - u0 - ur
+                    if Ls >= CREEP_MIN_CM and away is not None:
+                        L = min(L, Ls)
+                        tries = [(away, 0.0)]
+                        words = "straight away from %s (the camera has it; even its worst heading keeps the gap)" % \
+                            o0.name
+                        dmode = "away"
+                        self.counts["doubt_away"] = self.counts.get("doubt_away", 0) + 1
+                    else:
+                        r.busy_until = self.t + self.still_pause(r)
+                        r.still_since = self.t              # looked again after the derived pause
+                        self.counts["doubt_waits"] = self.counts.get("doubt_waits", 0) + 1
+                        if self.t - r.__dict__.get("doubt_said", -1e9) >= 30.0:
+                            r.doubt_said = self.t
+                            self.event(r, "waits for room", "%s: its heading is in doubt and %s (the camera has it) is "
+                                       "%.0f cm away: no creep is safe on any heading; it waits for room" % (
+                                           why, o0.name, d0))
+                        self.why_zero(r, "waits for room (heading in doubt beside %s)" % o0.name)
+                        return False
+                else:
+                    # the neighbour is not confirmed: creep cautiously (half the step, the slowest speed) away from where
+                    # it was last believed to be
+                    ql = (o0.cam[1], o0.cam[2]) if o0.cam is not None else q0
+                    if math.dist(p, ql) > 0.5:
+                        aw = math.degrees(math.atan2(p[1] - ql[1], p[0] - ql[0]))
+                        L = max(CREEP_MIN_CM, CAUTIOUS_SHARE * L)
+                        v = CREEP_V_MIN
+                        tries = [(aw, 0.0), (aw, 30.0), (aw, -30.0), (aw, None)]
+                        words = "cautiously away from where %s was last believed to be (%.0f, %.0f)" % (
+                            o0.name, ql[0], ql[1])
+                        dmode = "cautious"
+                        self.counts["doubt_cautious"] = self.counts.get("doubt_cautious", 0) + 1
         for base, off in tries:
             b_ = wrap180(base + (off or 0.0))
             back = abs(wrap180(b_ - (h + 180.0))) <= 60.0
@@ -1586,11 +1774,14 @@ class Controller:
                     why, L, v, words, "reversing" if back else "turning %.0f deg first" % turn, unc))
             self.log("creep", dict(t=round(self.t, 2), robot=r.name, why=why, L_cm=round(L, 1), v=round(v, 1),
                                    unc_cm=round(unc, 1), x=round(p[0], 1), y=round(p[1], 1), tx=round(tgt[0], 1),
-                                   ty=round(tgt[1], 1), off_deg=off if off is not None else "away", back=int(back)))
+                                   ty=round(tgt[1], 1), off_deg=off if off is not None else "away", back=int(back),
+                                   doubt=dmode))
             self.why_zero(r, "creep (%s)" % why)
             self.pump(r)
             return True
         r.busy_until = self.t + 0.5                     # every way is another robot's: a brief pause
+        if self.recovering(r):
+            self.ask_room(r, p, tgt)                    # (e18, 4) a lost robot first: the one in its way moves
         return False
 
     def never_still_watch(self, r):
@@ -1610,12 +1801,43 @@ class Controller:
         hc = r.__dict__.get("hd_confirm")
         if hc is not None and hc.get("stage") == "measure":
             return
+        if self.t < r.__dict__.get("id_hold_until", -1e9):
+            return                  # (e18) a measurement pause: the layer watches its identity move (bounded)
+        if self.unaccounted_why(r) and self.t < self.__dict__.get("id_watch_until", -1e9):
+            # (e18, found by the identity batch) while ANY robot's identity move is watched, no other unaccounted robot
+            # creeps: its moving sighting read as "the one that turned" and named the wrong robot (a swap)
+            return
         if self.t - r.still_since < self.still_pause(r):
             return
         why = self.edge_stuck_why(r) or self.unaccounted_why(r) or (
             "waits for room to check its heading" if hc is not None else "stood still")
+        if self.unaccounted_why(r):
+            # (e18, found by the identity batch) two or more robots unaccounted: ONE creeps at a time (the one that crept
+            # longest ago), so every creep shows the camera which sighting is which. Before: both crept toward the
+            # middle together, the camera saw two spots follow two own poses alike, and the reacquire's motion check
+            # took the other robot's spot (a swap in both e17 and e18 runs)
+            un = [o for o in self.R.values() if o.mode not in ("out", "gone", "start") and self.unaccounted_why(o)]
+            if len(un) >= 2:
+                tok = self.__dict__.get("creep_token")
+                if tok is not None and tok[0] != r.name and self.t < tok[1]:
+                    return
+                # only robots that can creep now take turns (a held, silent or battery-floor robot never creeps: the
+                # e18 stress re-run found Center starved 22 min behind a held Left); and none waits more than three
+                # of its pauses for its turn
+                able = [o for o in un if o.mode == "idle" and o.move is None and not o.silent and
+                        not getattr(o, "held", None) and self.pos(o) is not None and
+                        not (o.battery is not None and o.battery <= self.floor)]
+                first = min(able or [r], key=lambda o: (o.__dict__.get("creep_last", -1e9), o.rank))
+                if first is not r and self.t - r.still_since < 3.0 * self.still_pause(r):
+                    return
         if self.creep_step(r, why):
             r.still_since = None
+            r.creep_last = self.t
+            if r.move is not None:
+                mv = r.move
+                self.creep_token = (r.name, self.t + turn_s(mv.get("turn", 0.0)) + drive_s(mv.get("L", 0.0),
+                                                                                         mv.get("v", 2.0)) +
+                                    self.fix_delay(r) + 0.5)
 
     # -- (e17, 2) a camera-confirmed heading after a heading re-set --------------------------------------------------
     def heading_confirm_step(self, r):
@@ -1729,6 +1951,409 @@ class Controller:
         hc["t_end"] = self.t
         r.busy_until = self.t + 0.2
 
+    # -- (e18, Nick 12 Nov decision 5) each robot's odometry trust and the blind-drive allowance ------------------
+    def trust_fix(self, r, t, x, y, oa):
+        """An accepted camera fix: its trust record's shadows are checked against it; standing, the scatter of its
+        sightings is its camera noise (the model's base)."""
+        tru = self.trust.get(r.name)
+        if tru is None:
+            return
+        tru.fix(t, x, y, oa[2] if oa is not None else self.heading(r))
+        if self.t - r.__dict__.get("noise_t", -1e9) >= 5.0 and self.standing(r) and r.own is not None:
+            # only pictures taken after its own pose last moved (a fix ~0.5 s old may still show it driving)
+            t_still = r.own_hist[0][0] if r.own_hist else t
+            for q in reversed(r.own_hist):
+                if math.hypot(q[1] - r.own[1], q[2] - r.own[2]) > 0.3 or abs(wrap180(q[3] - r.own[3])) > 1.0:
+                    t_still = q[0]
+                    break
+            h = [q for q in r.cam_hist if q[0] >= max(t - 3.0, t_still + 0.1)]
+            if len(h) >= 6:
+                r.noise_t = self.t
+                mx = sum(q[1] for q in h) / len(h)
+                my = sum(q[2] for q in h) / len(h)
+                tru.noise(math.sqrt(sum((q[1] - mx) ** 2 + (q[2] - my) ** 2 for q in h) / (2.0 * len(h))))
+
+    def lost_radius(self, r):
+        """Its possible error now (cm) after its blind stretch so far: its own record's prediction (odo_trust),
+        started from its doubt when the camera lost it (a click's accuracy when a person placed it)."""
+        L = r.lost
+        tru = self.trust[r.name]
+        pr = L.get("pre") or dict(drive=0.0, ts=0.0, tc=0.0, ms=0.0, mc=0.0)
+        # (e18) blind since the picture of its last fix, not since now: that stretch (pre) counts first
+        s_ = pr["drive"] + L.get("drive", 0.0)
+        ts, tc = pr["ts"] + L.get("ts", 0.0), pr["tc"] + L.get("tc", 0.0)
+        ms = pr["ms"] + L.get("ms", 0.0) + pr["drive"] * L.get("ts", 0.0)
+        mc = pr["mc"] + L.get("mc", 0.0) + pr["drive"] * L.get("tc", 0.0)
+        return tru.radius(s_, ts, tc, s_ * ts - ms, s_ * tc - mc, base=L.get("base"))
+
+    def blind_check(self, r, act, fix_age):
+        """Seen again: what its record predicted against the error the camera found (the model's own check)."""
+        L = r.lost
+        tru = self.trust[r.name]
+        pred = self.lost_radius(r)
+        ex = r.__dict__.get("excursion")
+        chk = tru.check(pred, act, kind="excursion" if ex is not None else "seen again", t=self.t)
+        self.counts["blind_checked"] = self.counts.get("blind_checked", 0) + 1
+        if not chk["within"]:
+            self.counts["blind_outside"] = self.counts.get("blind_outside", 0) + 1
+        pr = L.get("pre") or {}
+        row = dict(t=round(self.t, 2), robot=r.name, blind_cm=round(L.get("drive", 0.0) + pr.get("drive", 0.0), 1),
+                   spot_deg=round(L.get("ts", 0.0), 1), curve_deg=round(L.get("tc", 0.0), 1), pred_cm=round(pred, 2),
+                   act_cm=round(act, 2), within=chk["within"], k_cal=round(tru.k_cal, 3), excursion=int(ex is not None),
+                   fix_age_s=round(fix_age, 2))
+        self.log("blind_checks", row)
+        if ex is not None:
+            ex.update(act_cm=round(act, 2), pred_end_cm=round(pred, 2), within=chk["within"])
+        self.event(r, "blind check", "after %.0f cm blind its record predicted %.1f cm, the camera found %.1f cm (%s; "
+                   "model now x%.2f)" % (row["blind_cm"], pred, act, "inside" if chk["within"] else "OUTSIDE",
+                                         tru.k_cal))
+
+    def board_edge(self, x, y):
+        """Room to the board's own edge (the setup's outline): unseen ground inside it is table, not an edge."""
+        b = getattr(self.ws, "board", None) if self.ws is not None else None
+        return edge_dist(tuple(b) if b is not None else tuple(self.rect)[:4], x, y)
+
+    def seen_at(self, x, y):
+        """True where the camera reads (the workspace's proven / readable ground, a body's half width in)."""
+        if self.ws is None:
+            return True
+        return self.ws.edge_dist(x, y) >= 0.0
+
+    def blind_leg(self, r, pts, speed=None, why="planned leg", log=True):
+        """(e18, 5) May r drive this leg [(x, y[, heading])] where the camera may not see it? Its record's predicted
+        error at every point (from its doubt now) + body + stop against the board's edges, the other robots (their
+        doubt) and a way back (the leg ends where the camera reads)."""
+        tru = self.trust[r.name]
+        others = [(self.pos(o)[0], self.pos(o)[1], self.unc(o) + self.pinned_extra(o)) for o in self.R.values()
+                  if o is not r and o.mode != "gone" and self.pos(o) is not None]
+        res = tru.allow(pts, self.board_edge, self.seen_at, others, HALF, SR.stop_cm(speed), REFLEX_GAP,
+                        base=self.unc(r) if r.lost is None else r.bubble)
+        if log:
+            self.counts["blind_legs_ok" if res["ok"] else "blind_legs_refused"] = self.counts.get(
+                "blind_legs_ok" if res["ok"] else "blind_legs_refused", 0) + 1
+        return res
+
+    def blind_fallback(self, r, tr, xs, ys, mar, speed):
+        """edge_ok's last word (e18, 5): a path refused only because it crosses ground the camera does not read may
+        still go if the robot's record allows it as a blind leg (free roam's curves through an unreadable patch). The
+        path's end (or its loop disc) must keep the usual clearance where the camera reads."""
+        if not self.blind_allow or self.ws is None or r.lost is not None or r.silent or not len(xs) or \
+                r.__dict__.get("hd_confirm") is not None:
+            return False
+        if mar[-1] < 0:
+            return False
+        if all(self.seen_at(float(x), float(y)) for x, y in zip(xs, ys)):
+            return False                        # refused for another reason than unseen ground
+        p = self.pos(r)
+        pts = ([tuple(p)] if p is not None else []) + [(float(x), float(y)) for x, y in zip(xs, ys)]
+        res = self.blind_leg(r, pts, speed, log=False)
+        key = "blind_curves_ok" if res["ok"] else "blind_curves_refused"
+        self.counts[key] = self.counts.get(key, 0) + 1
+        if res["ok"]:
+            tr.blind = res
+        return res["ok"]
+
+    def excursion_begin(self, r, mv, res, kind):
+        """A move whose path the record allowed blind: watched as an excursion until the camera has it again."""
+        ex = dict(t=round(self.t, 2), robot=r.name, kind=kind, allowed=1, r_max=res["r_max"], r_end=res.get("r_end"),
+                  blind_cm=res["blind_cm"], worst_cm=res["worst_cm"], depth_cm=res.get("depth_cm"),
+                  want_cm=res.get("want_cm"), act_cm=None, within=None)
+        r.excursion = ex
+        mv["blind"] = ex
+        self.excursions.append(ex)
+        self.counts["excursions"] = self.counts.get("excursions", 0) + 1
+        self.log("excursions", dict(ex, what="started"))
+
+    def blind_excursion(self, r, target, want_cm=None, v=None, why="asked"):
+        """(e18, 5) Out to `target` (or want_cm toward it) where the camera may not see, turn round, back: allowed only
+        as deep as r's record keeps every point's predicted error inside the margins with the way back where the camera
+        reads. Returns dict(ok, depth_cm, want_cm, why, ...) (refused: ok False, nothing sent)."""
+        p, h = self.pos(r), self.heading(r)
+        if p is None or r.mode != "idle" or r.lost is not None or r.silent:
+            return dict(ok=False, why="not standing where the camera has it", depth_cm=0.0)
+        v = v or BACK_V
+        brg = math.degrees(math.atan2(target[1] - p[1], target[0] - p[0]))
+        want = float(want_cm if want_cm is not None else math.dist(p, target))
+        tru = self.trust[r.name]
+        others = [(self.pos(o)[0], self.pos(o)[1], self.unc(o) + self.pinned_extra(o)) for o in self.R.values()
+                  if o is not r and o.mode != "gone" and self.pos(o) is not None]
+        depth, res = tru.max_depth(p[0], p[1], brg, want, self.board_edge, self.seen_at, others, HALF,
+                                   SR.stop_cm(v), REFLEX_GAP, base=self.unc(r))
+        row = dict(t=round(self.t, 2), robot=r.name, kind="excursion", want_cm=round(want, 1),
+                   depth_cm=round(depth, 1), why=why, r40=round(tru.radius(40.0), 2), k_cal=round(tru.k_cal, 3))
+        if depth < EXC_MIN_CM or res is None:
+            row.update(allowed=0, what="refused")
+            self.log("excursions", row)
+            self.counts["excursions_refused"] = self.counts.get("excursions_refused", 0) + 1
+            self.excursions.append(dict(row, robot=r.name))
+            self.event(r, "blind leg refused", "%s: out %.0f cm toward %.0f, %.0f: its record (%s) allows %.1f cm" % (
+                why, want, target[0], target[1], tru.words(), depth))
+            return dict(ok=False, why="its record allows %.1f cm" % depth, depth_cm=depth, want_cm=want)
+        res = dict(res, depth_cm=round(depth, 1), want_cm=round(want, 1))
+        own = (r.own[1], r.own[2], r.own[3]) if r.own is not None else (p[0], p[1], h)
+        dx, dy = own[0] - p[0], own[1] - p[1]           # its own frame (the firmware drives in it)
+        ex_, ey_ = p[0] + depth * math.cos(math.radians(brg)), p[1] + depth * math.sin(math.radians(brg))
+        tr = Traj.move(self.t + 0.2 + turn_s(wrap180(brg - h)), p, brg, 0.0, depth, v, m0=self.margin0(r) +
+                       res["r_max"])
+        mv = dict(kind="excursion", cell=None, turn=wrap180(brg - h), L=0.0, v=v, t0=self.t, p0=p, h0=h, h1=brg,
+                  end=p, phase="turn", n=r.n_moves + 1, drive_id=None, turn_id=None, t_drive=None, adj_scale=1.0,
+                  rev=False)
+        if abs(wrap180(brg - h)) >= 3.0:
+            self.send_step(r, "fs %%d T %.2f -" % wrap180(brg + (own[2] - h)))
+        self.send_step(r, "fs %%d D %.2f %.2f %.2f %.2f %.2f %.2f 0 -" % (own[0], own[1], ex_ + dx, ey_ + dy,
+                                                                          wrap180(brg + (own[2] - h)), v))
+        self.send_step(r, "fs %%d T %.2f -" % wrap180(brg + 180.0 + (own[2] - h)))
+        mv["drive_id"] = self.send_step(r, "fs %%d D %.2f %.2f %.2f %.2f %.2f %.2f 0 -" % (
+            ex_ + dx, ey_ + dy, own[0], own[1], wrap180(brg + 180.0 + (own[2] - h)), v))
+        r.move, r.traj, r.mode = mv, tr, "move"
+        r.n_moves += 1
+        self.excursion_begin(r, mv, res, "excursion" + (" (shortened)" if depth < want - 0.5 else ""))
+        if depth < want - 0.5:
+            self.counts["excursions_shortened"] = self.counts.get("excursions_shortened", 0) + 1
+        self.event(r, "blind leg", "%s: out %.1f cm of %.0f toward %.0f, %.0f and back (its record: %s); predicted "
+                   "error at most %.1f cm" % (why, depth, want, target[0], target[1], tru.words(), res["r_max"]))
+        self.pump(r)
+        return dict(res, ok=True, depth_cm=depth, want_cm=want)
+
+    # -- (e18, Nick 12 Nov decision 1) the out-and-back identity drive -----------------------------------------------
+    def outback(self, r, why, req):
+        """The tracking layer cannot tell which candidate sighting r is and a wiggle could not either: r drives straight
+        out req["L"] cm at req["v"] and back on its own pose (the layer watches which sighting went out and came back).
+        Only where that drive cannot make bodies touch at ANY candidate (each candidate's circle grown by the drive
+        keeps OB_GAP_CM from every other candidate and every robot the camera has now): shortened to fit, refused under
+        the layer's own minimum (returns False). Falls are allowed (Nick 12 Nov), a candidate on an edge still is not
+        driven over it: the drive needs half the body + its length to the edge."""
+        if not OUTBACK_ID or r.mode in ("out", "gone", "start") or r.silent or r.own is None:
+            return False
+        spots = list(req.get("spots") or [])
+        L, v = float(req["L"]), float(req["v"])
+        seen = [(o.cam[1], o.cam[2]) for o in self.R.values() if o is not r and o.cam is not None and
+                o.mode != "gone" and self.fresh(o)]
+        room = L
+        for sx, sy in spots:
+            room = min(room, edge_dist(self.rect, sx, sy) - HALF - 0.5)
+            for q in seen + [s_ for s_ in spots if s_ != (sx, sy)]:
+                d = math.dist(q, (sx, sy))
+                if d > 0.5:
+                    room = min(room, d - 2 * HALF - OB_GAP_CM)
+        if room < OB_MIN_CM_ROBOT:
+            self.counts["outback_unsafe"] = self.counts.get("outback_unsafe", 0) + 1
+            self.event(r, "identity drive", "%s: no %.0f cm out-and-back is safe at every place the camera might have "
+                       "it (room %.1f cm)" % (why, OB_MIN_CM_ROBOT, max(0.0, room)))
+            return False
+        L = min(L, room)
+        if r.move is not None:
+            self.halt(r, "identity out-and-back")
+            self.end_move(r)
+        x, y, h = r.own[1], r.own[2], r.own[3]
+        ex, ey = x + L * math.cos(math.radians(h)), y + L * math.sin(math.radians(h))
+        p = self.pos(r) or (x, y)
+        mv = dict(kind="outback", cell=None, turn=0.0, L=0.0, v=v, t0=self.t, p0=p, h0=h, h1=h, end=p, phase="drive",
+                  n=r.n_moves + 1, drive_id=None, turn_id=None, t_drive=None, adj_scale=1.0, rev=False)
+        mv["turn_id"] = self.send_step(r, "fs %%d D %.2f %.2f %.2f %.2f %.2f %.2f 0 -" % (x, y, ex, ey, h, v))
+        mv["drive_id"] = self.send_step(r, "fs %%d D %.2f %.2f %.2f %.2f %.2f %.2f 1 -" % (ex, ey, x, y, h, v))
+        r.move, r.mode = mv, "move"
+        r.traj = Traj.stand(self.t, *p, m=self.margin0(r) + L)
+        r.n_moves += 1
+        r.busy_until = self.t + 2.0 * L / v + 1.0
+        r.id_hold_until = self.t + float(req.get("win", 2.0 * L / v + 4.0)) + self.fix_delay(r)
+        self.id_watch_until = max(self.__dict__.get("id_watch_until", -1e9), r.id_hold_until)
+        self.counts["outbacks"] = self.counts.get("outbacks", 0) + 1
+        self.event(r, "identity drive", "%s: out %.1f cm and back at %.1f cm/s, so the camera sees which sighting moves "
+                   "(its camera noise %.2f cm)" % (why, L, v, req.get("sig", 0.0)))
+        self.why_zero(r, "identity out-and-back")
+        self.pump(r)
+        return True
+
+    # -- (e18, Nick 12 Nov decision 3) a doubtful heading beside another robot ---------------------------------------
+    def heading_doubt(self, r):
+        """Degrees its heading may be off, or None when it is trusted: a heading check pending (after a large correction
+        or an off-plan re-set) is any direction."""
+        if r.__dict__.get("hd_confirm") is not None:
+            return DOUBT_DEG_UNKNOWN
+        return None
+
+    def confirmed(self, o):
+        """The camera has o now (a fresh fix, accounted for)."""
+        return o.cam is not None and o.lost is None and self.fresh(o) and self.unaccounted_why(o) is None and \
+            not o.silent
+
+    # -- (e18, Nick 12 Nov decision 4) lost robots first ----------------------------------------------------------
+    def recovering(self, r):
+        """Lost by the camera, outside the readable area, or waiting to be found: it goes first."""
+        if r.mode in ("out", "gone", "start"):
+            return False
+        return r.lost is not None or self.strayed(r) or r.name in (self.__dict__.get("need_hand") or {})
+
+    def prio(self, r):
+        """Lower is first (the robots' order); a recovering robot before everyone (MIRLT_LOST_PRIORITY)."""
+        return r.rank - 100 if (LOST_PRIORITY and self.recovering(r)) else r.rank
+
+    def ask_room(self, r, p, tgt):
+        """A recovering robot's way to being found is blocked: the standing robot nearest its line (that is not
+        recovering itself) is asked to make room (make_room_step)."""
+        if not LOST_PRIORITY or p is None or tgt is None:
+            return None
+        L = math.dist(p, tgt)
+        if L < 0.5:
+            return None
+        ux, uy = (tgt[0] - p[0]) / L, (tgt[1] - p[1]) / L
+        w = 2 * HALF + REFLEX_GAP + (r.bubble if r.lost is not None else self.unc(r))
+        best = None
+        for o in self.R.values():
+            if o is r or o.mode in ("out", "gone", "start") or self.recovering(o) or self.pos(o) is None:
+                continue
+            q = self.pos(o)
+            a = (q[0] - p[0]) * ux + (q[1] - p[1]) * uy
+            if a < -w or a > L + w:
+                continue
+            d = abs(-(q[0] - p[0]) * uy + (q[1] - p[1]) * ux)
+            if d < w + self.unc(o) and (best is None or a < best[0]):
+                best = (a, o, d)
+        if best is None:
+            return None
+        o = best[1]
+        if o.__dict__.get("make_room") is None:
+            o.make_room = dict(t=self.t, for_=r.name, a=tuple(p), b=tuple(tgt), w=w + ROOM_CLEAR_CM + self.unc(o))
+            self.counts["room_asked"] = self.counts.get("room_asked", 0) + 1
+            self.event(o, "makes room", "%s is lost / being found and its way to %.0f, %.0f passes here: %s moves out "
+                       "of its way first" % (r.name, tgt[0], tgt[1], o.name))
+        return o
+
+    def make_room_step(self, o):
+        """o steps sideways out of a recovering robot's corridor (the side it is already on), as far as the corridor's
+        half width needs; the usual plan checks (edges with its doubt, the others' reservations). True when sent."""
+        mr = o.make_room
+        if self.t - mr["t"] > 30.0:
+            o.make_room = None
+            return False
+        rr = self.R.get(mr["for_"])
+        if rr is None or not self.recovering(rr):
+            o.make_room = None
+            return False
+        p, h = self.pos(o), self.heading(o)
+        a, b = mr["a"], mr["b"]
+        L = max(1e-6, math.dist(a, b))
+        ux, uy = (b[0] - a[0]) / L, (b[1] - a[1]) / L
+        side = -(p[0] - a[0]) * uy + (p[1] - a[1]) * ux
+        sg = 1.0 if side >= 0 else -1.0
+        need = mr["w"] - abs(side)
+        if need <= 0:
+            o.make_room = None
+            return False
+        for s_ in (sg, -sg):
+            nx, ny = -uy * s_, ux * s_
+            brg = math.degrees(math.atan2(ny, nx))
+            dist_ = need + 1.0 if s_ == sg else mr["w"] + abs(side) + 1.0
+            back = abs(wrap180(brg - (h + 180.0))) <= 60.0
+            turn = 0.0 if back else wrap180(brg - h)
+            hd = wrap180(h + 180.0) if back else wrap180(h + turn)
+            tr = Traj.move(self.t + 0.2 + (turn_s(turn) if turn else 0.0), p, hd, 0.0, dist_, BACK_V,
+                           m0=self.margin0(o))
+            if not self.feasible(o, tr, ignore=(rr.name,)):
+                continue
+            kind = "make room back" if back else "make room"
+            mv = dict(kind=kind, cell=None, turn=turn, L=dist_, v=BACK_V, t0=self.t, p0=p, h0=h, h1=wrap180(h + turn),
+                      end=tr.end, phase="turn", n=o.n_moves + 1, drive_id=None, turn_id=None, t_drive=None,
+                      adj_scale=1.0, rev=back)
+            if abs(turn) >= 3.0:
+                mv["turn_id"] = self.send_step(o, "fs %%d T %.2f -" % wrap180(h + turn))
+            mv["drive_id"] = self.send_step(o, "fs %%d D %.2f %.2f %.2f %.2f %.2f %.2f %d -" % (
+                p[0], p[1], tr.end[0], tr.end[1], wrap180(h + turn), BACK_V, 1 if back else 0))
+            o.move, o.traj, o.mode = mv, tr, "move"
+            o.n_moves += 1
+            o.make_room = None
+            self.counts["room_made"] = self.counts.get("room_made", 0) + 1
+            self.pump(o)
+            return True
+        o.busy_until = self.t + 0.5
+        return False
+
+    # -- (e18, Nick 12 Nov decision 6) every calibration correction saved at any end ---------------------------------
+    def ratio_fit(self, r, kind, val):
+        """A measured ratio (camera / asked) for a straight drive or a turn on the spot."""
+        f = r.__dict__.setdefault("ratio_fits", {}).setdefault(kind, [])
+        f.append(float(val))
+        del f[:-400]
+
+    def drive_ratio(self, r, mv):
+        """(e18, 6) A straight stop-turn drive that ended: the camera's distance over its own wheels' count between the
+        first and last fix of the drive (RAW: the wheels alone, no fix fused in) -> the straight-drive ratio."""
+        if not mv.get("L") or mv["L"] < RATIO_MIN_CM or mv.get("t_drive") is None or mv.get("rev") or \
+                mv.get("blind") or mv.get("curve") or self.t - r.__dict__.get("raw_prev_t", -1e9) > 1.0:
+            return
+        h = [q for q in r.cam_hist if q[0] >= mv["t_drive"] - 0.05]
+        if len(h) < 3:
+            return
+        a, b = h[0], h[-1]
+        own = self.trust[r.name].dist(a[0], b[0])
+        if own is None or own < RATIO_MIN_CM:
+            return
+        self.ratio_fit(r, "drive", math.dist(a[1:3], b[1:3]) / own)
+
+    @staticmethod
+    def ratio_summary(vals):
+        """(median, 95 % half-width of the median, n) as arc_summary does."""
+        v = sorted(vals)
+        n = len(v)
+        if n < 3:
+            return None
+        med = v[n // 2]
+        mad = sorted(abs(x - med) for x in v)[n // 2] * 1.4826
+        return med, 1.96 * 1.2533 * mad / math.sqrt(n), n
+
+    def corrections(self, r):
+        """Every correction this run measured for r with the agreement rule's verdict: [dict(param, now, new, ok,
+        words)]. Curves: arc_k_scale / arc_d_scale (arc_save's rule); straight drives: wheel_scale; turns on the spot:
+        gyro_scale (each: at least ARC_FIT_MIN, the median's 95 % half-width under ARC_FIT_CI, the new value 0.8-1.25,
+        and its value in use heard back)."""
+        out = []
+        for kind, param in (("drive", "wheel_scale"), ("turn", "gyro_scale")):
+            vals = (r.__dict__.get("ratio_fits") or {}).get(kind) or []
+            sm = self.ratio_summary(vals)
+            if sm is None:
+                continue
+            med, hw, n = sm
+            cur = (self.params.get(r.name) or {}).get(param)
+            new = cur * med if cur is not None else None
+            ok = n >= ARC_FIT_MIN and hw <= ARC_FIT_CI and cur is not None and 0.8 <= med <= 1.25
+            out.append(dict(param=param, ratio=round(med, 4), hw=round(hw, 4), n=n, now=cur,
+                            new=round(new, 4) if new is not None else None, ok=bool(ok),
+                            words="%s from %d %s: x%.3f (+-%.3f)%s" % (
+                                param, n, "straight drives" if kind == "drive" else "turns", med, hw,
+                                "" if cur is not None else "; its value in use was not heard back")))
+        return out
+
+    def save_corrections(self, why="the run ends"):
+        """(e18, 6) At ANY end (time cap, Stop / Ctrl+C, an error): every correction this run measured, saved on each
+        robot that is still in the run by the existing agreement rules (curves: arc_save; straight drives and turns:
+        corrections()); a correction that does not agree is said and left. Returns [dict] for the run's meta; the host
+        saves the odometry records (odo_trust) itself."""
+        done = []
+        for r in self.R.values():
+            if r.mode in ("gone",):
+                continue
+            if r.mode not in ("out",) and (SAVE_CAL_AT_END or SG.flag("MIRLT_ARC_SAVE_AT_END")):
+                try:
+                    self.arc_save(r)
+                except Exception:  # noqa: BLE001
+                    pass
+            if not SAVE_CAL_AT_END:
+                continue
+            for c in self.corrections(r):
+                c.update(robot=r.name, why=why)
+                if c["ok"] and r.mode not in ("out",):
+                    self.out(r, "set %s %.4f" % (c["param"], c["new"]))
+                    self.out(r, "save")
+                    self.event(r, "calibration saved", c["words"] + ": %s %.4f -> %.4f, saved on the robot (%s)" % (
+                        c["param"], c["now"], c["new"], why))
+                else:
+                    self.event(r, "calibration", c["words"] + ": NOT saved (%s)" % (
+                        "it is out of the run" if c["ok"] else "too few, too spread or its value not heard"))
+                self.log("calibration_end", dict(c, t=round(self.t, 2)))
+                done.append(c)
+        return done
+
     # -- moves ---------------------------------------------------------------------------------------------------
     def others(self, r):
         return [o for o in self.R.values() if o is not r and o.traj is not None and o.mode != "gone"]
@@ -1803,6 +2428,8 @@ class Controller:
         else:
             # the shrink rule (observe.path_ok's, with the derived clearance): never worse, and ends better
             ok = all(m >= min(0.0, m0) - 0.5 for m in mar) and (mar[-1] >= 0 or mar[-1] > m0 + 0.5)
+        if not ok and self.blind_fallback(r, tr, xs, ys, mar, speed):
+            ok = True                                   # (e18, 5) a blind leg its own record allows
         if not ok:
             self.counts["edge_refused"] = self.counts.get("edge_refused", 0) + 1
             return False
@@ -2413,7 +3040,7 @@ class Controller:
         if r.hold_n >= 3:
             near = [o for o in self.R.values() if o is not r and o.mode in ("idle", "move") and o.hold_n >= 3 and
                     math.dist(self.pos(o), p) < 45.0]
-            if near and all(o.rank < r.rank for o in near):
+            if near and all(self.prio(o) < self.prio(r) for o in near):
                 ign = tuple(o.name for o in near)
                 q = self.pos(near[0])
                 h_a = math.degrees(math.atan2(p[1] - q[1], p[0] - q[0]))
@@ -2532,7 +3159,7 @@ class Controller:
         r.cam_off = (0.0, 0.0)
         r.busy_until = max(r.busy_until, self.t + 1.0)
 
-    def pose_fuse(self, r, own, cam, th, t_pic=None):
+    def pose_fuse(self, r, own, cam, th, t_pic=None, src_=None):
         """(e08, A1; 6 Nov run 1: Center's move 46 was planned 1.9 s after its own pose and the camera disagreed by 4.6
         cm, under the 2 s rule, and swung its front over the edge) Own pose vs camera, both at the picture's time: the
         disagreement widens its position uncertainty AT ONCE (unc(), so every plan and the edge rule see it), the next
@@ -2561,11 +3188,20 @@ class Controller:
                        ev["d_cm"], ev["for_s"]))
         self.log("pose", dict(t=round(self.t, 2), robot=r.name, what="reseed", d_cm=ev["d_cm"],
                               unc_cm=round(self.unc(r), 2)))
+        if RESEED_HEADING_KEEP and th is not None and self.standing_own(r) and \
+                CAM_HEAD_SD.get(str(src_ or "").split(":")[-1], 90.0) >= self.head_sd(r):
+            # (e18, the replay: re-seeds to standing robots jumped the heading 16-64 deg, worse in 4 of 6 checked) its own
+            # heading is better evidence than the camera's here: the re-seed sets its position only
+            th = None
+            self.counts["reseed_heading_kept"] = self.counts.get("reseed_heading_kept", 0) + 1
+        elif th is not None:
+            r.turn_since_head = 0.0
         if RESEED_TURN and t_pic is not None:
             # (e17, 1e) from the picture's time, projected to now, never landing mid-turn (send_fpose)
             self.send_fpose(r, t_pic, cam[0], cam[1], th, 1.0, 3.0, "re-seed")
         else:
-            self.out(r, "fpose %.2f %.2f %.2f %.2f %.2f" % (q[0], q[1], q[2] if q[2] is not None else h, 1.0, 3.0))
+            self.out(r, "fpose %.2f %.2f %.2f %.2f %.2f" % (q[0], q[1], self.heading(r) if th is None else
+                                                           (q[2] if q[2] is not None else h), 1.0, 3.0))
         r.cam_off = (0.0, 0.0)
 
     def on_raw_evidence(self, name, t, ax, front_cm, line_c):
@@ -2641,6 +3277,12 @@ class Controller:
         if r.fp.started and r.fp.gh.th is None and r.own is not None:
             r.fp.gh.set(r.own[3])
         r.pc = None
+        if self.blind_allow:
+            # (e18, 5) its own wheels and yaw rate drive its trust record's shadows (pure odometry, no fix fused in)
+            pt = r.__dict__.get("raw_prev_t")
+            if pt is not None and 0.0 < t - pt < 0.5 and v_cms is not None and w_dps is not None:
+                self.trust[name].motion(t, float(v_cms) * (t - pt), float(w_dps) * (t - pt))
+            r.raw_prev_t = t
 
     def gap_forward(self, r):
         """(e09, B2) In a camera gap the robot's own pose drifts by its wheels and library yaw; the filter's (wheels, raw
@@ -2668,13 +3310,15 @@ class Controller:
         self.counts["gyro_heading_fixes"] = self.counts.get("gyro_heading_fixes", 0) + 1
         self.out(r, "fpose %.2f %.2f %.2f %.2f %.2f" % (r.own[1], r.own[2], h, 1.0, 1.0))
 
-    def identity_wiggle(self, r, why="identity", spots=None):
+    def identity_wiggle(self, r, why="identity", spots=None, req=None):
         """(e09, B1 wiggle first) The tracking layer cannot tell r from a robot it passed closely: r wiggles on its spot
         (the find-me wiggle) so the camera's turning outline names it. (e17, 1b) spots: the camera's candidate spots
         when r is unaccounted for (its own pose may be far off): it wiggles, held or not, only where a turn on the spot
         is safe at EVERY candidate (each spot TURN_EDGE_CC in from the edges, no other robot within PLAN_CC)."""
         if r.mode in ("out", "gone", "start"):
-            return
+            return False
+        if req is not None and req.get("kind") == "outback":
+            return self.outback(r, why, req)           # (e18, 1) the layer's out-and-back
         if spots:
             # a turn on the spot sweeps only its own circle (HALF): safe where every candidate spot is TURN_EDGE_CC in
             # from the edges and no robot the camera has now (fresh) is within two circles and the reflex gap
@@ -2687,14 +3331,19 @@ class Controller:
                     self.counts["identity_wiggle_unsafe"] = self.counts.get("identity_wiggle_unsafe", 0) + 1
                     self.event(r, "identity wiggle", "%s: not safe at every place the camera might have it: it stands"
                                % why)
-                    return
+                    return False
             if r.move is not None:
                 self.halt(r, "identity wiggle")
                 self.end_move(r)
             self.counts["identity_wiggles"] = self.counts.get("identity_wiggles", 0) + 1
             self.event(r, "identity wiggle", why)
             r.wiggle_due = 0.0
-            return self.find_me(r, safe_checked=True)
+            self.find_me(r, safe_checked=True)
+            # (e18, found by its simulator case) it stands while the layer watches (a lost robot that roamed on after its
+            # wiggle was named from where it HAD wiggled, the correction revoked, and later a wrong elimination)
+            r.id_hold_until = self.t + 1.6 * 2.5 + self.fix_delay(r) + 0.5
+            self.id_watch_until = max(self.__dict__.get("id_watch_until", -1e9), r.id_hold_until)
+            return True
         if getattr(r, "held", None):
             return
         if r.move is not None and r.move.get("kind") == "wiggle":
@@ -2856,6 +3505,8 @@ class Controller:
         r.move, r.traj, r.mode = mv, tr, "move"
         r.n_moves += 1
         r.scale = 1.0
+        if getattr(tr, "blind", None):
+            self.excursion_begin(r, mv, tr.blind, "blind " + kind)      # (e18, 5)
         self.pump(r)
 
     def empty_move(self, r, mv, p, kind):
@@ -2911,6 +3562,8 @@ class Controller:
                                style="stopturn", curvature=""))
         if state == "done" and self.fast_done(r, mv):
             state, info = "failed", "done without moving"
+        if state == "done" and SAVE_CAL_AT_END:
+            self.drive_ratio(r, mv)                     # (e18, 6) camera against its own wheels on a straight drive
         if str(mv["kind"]).startswith("recover"):
             self.recover_result(r, mv, state, info)
         if state != "done":
@@ -3615,7 +4268,7 @@ class Controller:
         if not movers:
             return
         seen = set()
-        for r in sorted(movers, key=lambda q: -q.rank):          # lowest priority first
+        for r in sorted(movers, key=lambda q: -self.prio(q)):     # lowest priority first ((e18, 4) the lost first)
             if r.adj is not None:
                 continue
             if r.curve and r.move is not None and r.move.get("curve"):
@@ -3633,7 +4286,7 @@ class Controller:
             # who acts: the lower-priority mover (r is the lower one unless o moves and ranks lower)
             actors = [r]
             if self.moving(o) and o.adj is None and (o.move is not None):
-                actors = sorted([r, o], key=lambda q: -q.rank)      # the lower-priority mover first
+                actors = sorted([r, o], key=lambda q: -self.prio(q))   # the lower-priority mover first
             pred_before = g + self.need(r, o)
             done = False
             for a in actors:
@@ -4049,6 +4702,8 @@ class Controller:
             self.close_break(r)
         r.coast = None
         mv = self.send_piece(r, kind, cell, k, L, v, side, x, y, h1, self.t + lead)
+        if tr is not None and getattr(tr, "blind", None):
+            self.excursion_begin(r, mv, tr.blind, "blind curve")       # (e18, 5)
         r.move, r.queue, r.mode = mv, [], "move"
         r.hold_n = 0
         self.retraj_curve(r)
@@ -4333,8 +4988,10 @@ class Controller:
             res = ("loop", None, k, L, min(5.0, v_cap(k)), side, None)
             self.counts["loops"] += 1
             self.fallback(r, 4, "loop", "nothing fits: circles in its own reserved disc (never stops)")
-        kind, cell, k, L, v, side, _ = res
+        kind, cell, k, L, v, side, tr_n = res
         nx = self.send_piece(r, kind, cell, k, L, v, side, x, y, h, t_end)
+        if tr_n is not None and getattr(tr_n, "blind", None):
+            self.excursion_begin(r, nx, tr_n.blind, "blind curve (queued)")     # (e18, 5)
         r.queue.append(nx)
         self.retraj_curve(r)
         self.pump(r)
@@ -4794,6 +5451,8 @@ class Controller:
         ws = self.ws
         if not STRAY_RETURN or ws is None or not getattr(ws, "limited", False):
             return False
+        if r.__dict__.get("excursion") is not None and r.move is not None:
+            return False                       # (e18, 5) on a blind leg its record allowed
         p = self.pos(r)
         if p is None:
             return False
@@ -4836,6 +5495,7 @@ class Controller:
                 if not self.keepout_ok(r, tr):
                     continue
                 if any(clearance_profile(tr, o.traj, now=self.t)[-1] < REFLEX_CC for o in self.others(r)):
+                    self.ask_room(r, p, tgt)            # (e18, 4) the lost robot first
                     continue
                 if kind == "stray return back":
                     tr = Traj.move(self.t + 0.2, p, wrap180(h + 180.0), 0.0, L_, BACK_V, m0=self.margin0(r))
@@ -5040,6 +5700,12 @@ class Controller:
                      "not heard: taken as 1)"))
         self.log("arcfit", dict(t=round(self.t, 2), robot=r.name, k="median", L="", v="", R_fit="", k_ratio=round(kr, 4),
                                 length_ratio=round(dr, 4), n=n))
+        if ok and not CURVE_SCALE_SAVE:
+            # (e18, the coordinator's replay: the curve response moves by session for all three robots together, and
+            # Left's 1.0736 came from one session; Nick has not decided) measured and logged, not saved on the robot
+            self.event(r, "arc calibration", words + ": NOT saved (curve scales are held until Nick decides: "
+                       "MIRLT_CURVE_SCALE_SAVE=1 saves them)")
+            return
         if ok and getattr(self, "arc_save_on", True):
             self.out(r, "set arc_k_scale %.4f" % ks)
             self.out(r, "set arc_d_scale %.4f" % ds)
@@ -5092,6 +5758,11 @@ class Controller:
                     not self.start_check(r):
                 pass                                   # (e10, run 2 incident d) put down over or at an edge: held
                                                        # (before anything else, the unsure-near-an-edge step too)
+            elif r.mode == "idle" and t < r.__dict__.get("id_hold_until", -1e9):
+                pass                                   # (e18) standing while the layer watches its identity move
+            elif r.mode == "idle" and t >= r.busy_until and r.__dict__.get("make_room") is not None and not r.silent \
+                    and self.pos(r) is not None and not getattr(r, "tilted", False) and self.make_room_step(r):
+                pass                                   # (e18, 4) out of a lost robot's way first
             elif r.mode == "idle" and r.__dict__.get("hd_drive") is not None and not r.silent:
                 self.ask_heading_click(r)              # (e13) its heading from a second click: it waits for it
                 r.busy_until = t + 0.5
@@ -5209,7 +5880,10 @@ class Controller:
                     self.ease_stop(r, "bubble %.1f cm" % r.bubble)
             elif p and ((r.bubble > BUBBLE_CAP or edge_dist(self.rect, *p) - r.bubble < TURN_EDGE_CC)
                         if BLIND_RULE == "cap" else self.blind_stop(r, p, r.move.get("v", 5.0) * max(r.scale, 0.0))) \
-                    and r.move["kind"] not in ("wiggle", "probe", "probe return"):
+                    and r.move["kind"] not in ("wiggle", "probe", "probe return", "outback"):
+                # (e18) an out-and-back is checked safe at every place the camera might have it (its own pose may be far
+                # off: found by its simulator batch, where a robot whose own pose said "off the board" was eased to a
+                # stop the moment its identity drive began)
                 # (e10) a probe goes out of the camera's view on purpose, and its return retraces the strip it proved
                 self.ease_stop(r, "bubble %.1f cm" % r.bubble)
         # stuck: driving, wheels on, no camera travel
@@ -5370,6 +6044,10 @@ class Controller:
         if p is None or r.lost is None:
             return False
         self.counts["blind_checks"] = self.counts.get("blind_checks", 0) + 1
+        if r.__dict__.get("excursion") is not None:
+            # (e18, 5) a blind leg its record allowed: the board's own edges (the leg was checked against them with its
+            # predicted error at every point; unseen ground is not an edge)
+            return self.board_edge(*p) - r.bubble < HALF + SR.stop_cm(max(0.0, v) if v and v > 0.3 else None)
         return edge_dist(self.rect, *p) - r.bubble < HALF + SR.stop_cm(max(0.0, v) if v and v > 0.3 else None)
 
     def ease_stop(self, r, why):

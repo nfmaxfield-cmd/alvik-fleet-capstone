@@ -44,6 +44,7 @@ import missions as MS     # noqa: E402
 import warmup as WU       # noqa: E402
 import workspace as WS    # noqa: E402
 import setup_job as SJ    # noqa: E402
+import safety_group as SG  # noqa: E402  (e18: the Safety group, one box on the Run screen)
 
 PAGE = os.path.join(HERE, "mission_control.html")
 PORT = 8095
@@ -101,12 +102,12 @@ START_IN_CM = 12.0     # a start spot carried to a new table size stays this far
 class Run:
     """run_plan.py in a subprocess (robots or the simulator), its session folder, Pause / Resume / Stop."""
 
-    def __init__(self, kind, folder, cmd):
+    def __init__(self, kind, folder, cmd, env=None):
         self.kind, self.folder, self.cmd = kind, folder, cmd
         os.makedirs(folder, exist_ok=True)
         self.out = open(os.path.join(folder, "run_plan_stdout.txt"), "w")
         self.p = subprocess.Popen(cmd, stdout=self.out, stderr=subprocess.STDOUT, cwd=REPO,
-                                  start_new_session=True)
+                                  start_new_session=True, env=env)
         self.t0 = time.time()
         self.paused = False
 
@@ -222,7 +223,8 @@ class Session:
                                                       ("Right", [122, 18, 90])])
             self.save_map()
         self.settings = {"planner": {}, "mission": {}, "run": dict(RUN_DEFAULTS),
-                         "warmup": {k: getattr(WU, k) for k in WARMUP_KNOBS}}
+                         "warmup": {k: getattr(WU, k) for k in WARMUP_KNOBS},
+                         "safety": SG.settings_defaults()}       # (e18) every safety switch, "auto" by default
         sp = os.path.join(self.dir, "settings.json")
         if os.path.exists(sp):
             try:
@@ -324,9 +326,16 @@ class Session:
     def save_map(self):
         FM.save(self.map, self.map_path)
 
+    def safety_env(self):
+        """(e18) The run's environment: the Safety box's switches that are not "auto" (the rest decided automatically)."""
+        ch = SG.env_from_settings(self.settings.get("safety") or {})
+        return dict(os.environ, **ch) if ch else None
+
     def save_settings(self):
         with open(os.path.join(self.dir, "settings.json"), "w") as f:
             json.dump(self.settings, f, indent=1)
+        if not getattr(self, "_safety_file_off", False):
+            SG.write_file(self.settings.get("safety") or {})     # (e18) every run on this Pi uses the Safety box
 
     def lock_gaps(self, where):
         """The 8 cm lock (Nick, 2026-10-29): no robot gap under the safety net (or the mission's chicken_min_cm) on
@@ -354,7 +363,9 @@ class Session:
         out = {"map": m, "words": WS.words(m), "settings": self.settings,
                "defaults": {"planner": dict(P.DEFAULT_SETTINGS, separation_cm=MS.gap_floor()), "mission": dict(MS.SETTINGS),
                             "run": dict(RUN_DEFAULTS),
-                            "warmup": {k: getattr(WU, k) for k in WARMUP_KNOBS}},
+                            "warmup": {k: getattr(WU, k) for k in WARMUP_KNOBS},
+                            "safety": SG.settings_defaults()},
+               "safety_info": [dict(env=e, default=d, old=o, what=w) for e, d, o, _a, w, _b in SG.SWITCHES],
                "least_open_room_cm": round(MS.least_open_room(m), 2) if m.get("sides") else None,
                "program": self.program or MS.monday_program(), "blocks": list(MS.BLOCKS),
                "table_sizes": TABLE_SIZES, "setup": self.setup_state(), "surface": self.surface(),
@@ -602,7 +613,7 @@ class Session:
                 cmd += ["--brick", rs["sim_brick"]]
                 if rs.get("sim_brick_camera"):
                     cmd += ["--sim-arg=--brick-camera"]
-        self.run = Run(kind, folder, cmd)
+        self.run = Run(kind, folder, cmd, env=self.safety_env())
         self.last_runs[kind] = folder
         return self.run.status()
 
@@ -748,7 +759,7 @@ class Session:
                 cmd += ["--farm"]
             if rs.get("upload"):
                 cmd += ["--upload"]
-        self.run = Run(kind, folder, cmd)
+        self.run = Run(kind, folder, cmd, env=self.safety_env())
         self.run.session = os.path.join(folder, "run")
         self.run.mode = conn
         self.last_runs[kind] = os.path.join(folder, "run")
@@ -1601,7 +1612,7 @@ def detect_where(SD, sim_room=""):
 
 
 # ---------------------------------------------------------------------------------------------- (e12) new code after git pull
-VERSION = "2026-11-10e14"   # e14: the Start button's clear-space answer passed to the run. 2026-11-10e13 (e13): /api/tags/corners_confirm (the corner tags pre-fill, the person confirms); the needs-a-hand box. 2026-11-10a (e12, Nick 10 Nov): notices its own code changed after `git pull` and offers a
+VERSION = "2026-11-12e18"   # e18: the Safety group: one box on the Run screen (More > Safety) with every safety switch, "auto" by default (decided automatically); a switch set there goes to the runs this page starts. Before: "2026-11-10e14"   # e14: the Start button's clear-space answer passed to the run. 2026-11-10e13 (e13): /api/tags/corners_confirm (the corner tags pre-fill, the person confirms); the needs-a-hand box. 2026-11-10a (e12, Nick 10 Nov): notices its own code changed after `git pull` and offers a
                           # restart on the page when no run is going (never mid-run). No version string before
 CODE_CHECK_S = 5.0        # chosen: how often the code is looked at (a git call and a few hundred stat calls). No DOE
 

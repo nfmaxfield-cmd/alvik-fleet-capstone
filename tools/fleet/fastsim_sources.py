@@ -88,10 +88,11 @@ class CameraSources:
         r = c.R.get(name)
         if r is not None and hasattr(c, "identity_wiggle"):
             spots = getattr(self.layer, "wiggle_spots", None)
+            req = getattr(self.layer, "wiggle_req", None)
             if spots:
-                c.identity_wiggle(r, why, spots=spots)     # (e17) an elimination wiggle: safe at every candidate
-            else:
-                c.identity_wiggle(r, why)
+                # (e17) an elimination wiggle, safe at every candidate; (e18) or the out-and-back the layer asks
+                return c.identity_wiggle(r, why, spots=spots, req=req)
+            return c.identity_wiggle(r, why)
 
     # -- each picture -----------------------------------------------------------------------------------------------
     def frame(self):

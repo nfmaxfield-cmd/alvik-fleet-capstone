@@ -4,6 +4,8 @@
 # frames and clips. MIRLT_VIDEO=1 (or `rec video`) keeps the whole video as before. `bench [minutes] [old|trimmed|both|layouts]`
 # (layouts, e17: the trimmed defaults under core layouts A, B and C; MIRLT_CORE_LAYOUT=A|B|C for every run, default B):
 # the Pi measured on a practice run (simulated robots, nothing moves) with the real camera (tools/pi/pi_bench.sh).
+# (2026-11-12 e18) core layout B stays the default: Nick chose B on 12 Nov, pending the bench. Safety switches set in the
+# calling shell (MIRLT_NEVER_STILL=0 ...) are passed into the tmux sessions (tools/fleet/safety_group.py exports).
 # (2026-11-10 e14) `space --move`: finished run folders moved to the USB drive (diskguard.move_old_runs; a link left
 # in logs/, nothing deleted); every preflight does the same by itself when the card is under its floor (school 18:07).
 # (2026-11-10 e13) calib, freeroam, doe, visit and the missions close a session whose run has ended (its window waiting
@@ -441,7 +443,10 @@ case "$WHAT" in
     done
     python3 tools/fleet/diskguard.py preflight || exit 1
     [ "$DRY" = 1 ] || { [ "$FULL" = 1 ] || REC_EXTRA="--no-record"; start_recorder; }
-    tmux new-session -d -s freeroam -x 200 -y 50 "cd '$REPO' && $RULEENV FLEET_DRY=$DRY ./run-fleet-pi.sh freeroam-run $HRS $LOST; FLEET_DRY=$DRY ./run-fleet-pi.sh freeroam-finish; read -r -p 'Free roam finished. Press Enter.'"
+    # (e18) the Safety switches set in this shell go into the tmux session too (it does not inherit them)
+    SAFEENV="$(python3 tools/fleet/safety_group.py exports 2>/dev/null)"
+    [ -n "$SAFEENV" ] && echo "Safety switches set by hand for this run: $SAFEENV"
+    tmux new-session -d -s freeroam -x 200 -y 50 "cd '$REPO' && $SAFEENV $RULEENV FLEET_DRY=$DRY ./run-fleet-pi.sh freeroam-run $HRS $LOST; FLEET_DRY=$DRY ./run-fleet-pi.sh freeroam-finish; read -r -p 'Free roam finished. Press Enter.'"
     tmux pipe-pane -t freeroam "cat >> '$REPO/logs/freeroam-screen.txt'" 2>/dev/null || true
     echo "Free roam started in tmux session 'freeroam' (time cap $HRS h; each robot parks at 10 % battery)."
     echo "You can close this window and switch Tailscale: it keeps running on the Pi."
@@ -509,7 +514,7 @@ case "$WHAT" in
         tmux has-session -t $s 2>/dev/null && { echo "A run is going in tmux session $s: stop it first (./run-fleet-pi.sh stopall). Stopped."; exit 1; }
       done
       tmux kill-session -t "$TS" 2>/dev/null || true
-      tmux new-session -s "$TS" "cd '$REPO' && $PIN python3 tools/fleet/mission_run.py --table '$TABLE' --robots '$ROB' $PROG --calib '$CALIB' ${SIDECAL:+--side-calib '$SIDECAL'} --upload --recordings '$OUT' $EXTRA; read -r -p 'Mission ended. Press Enter.'"
+      tmux new-session -s "$TS" "cd '$REPO' && $(python3 tools/fleet/safety_group.py exports 2>/dev/null) $PIN python3 tools/fleet/mission_run.py --table '$TABLE' --robots '$ROB' $PROG --calib '$CALIB' ${SIDECAL:+--side-calib '$SIDECAL'} --upload --recordings '$OUT' $EXTRA; read -r -p 'Mission ended. Press Enter.'"
       echo "If the window closed: tmux attach -t $TS   (Ctrl+C in it stops every robot)"
     fi ;;
   mc)
@@ -523,7 +528,7 @@ case "$WHAT" in
     # Already inside tmux (the start page's Mission Control tab starts it in tmux mc): runs here.
     if [ -z "${TMUX:-}" ] && [ "${1:-}" != here ]; then
       tmux kill-session -t mc 2>/dev/null || true          # a closed one's window, waiting for Enter
-      tmux new-session -d -s mc "cd '$REPO' && bash ./run-fleet-pi.sh mc here; read -r -p 'Mission Control stopped. Press Enter.'"
+      tmux new-session -d -s mc "cd '$REPO' && $(python3 tools/fleet/safety_group.py exports 2>/dev/null) bash ./run-fleet-pi.sh mc here; read -r -p 'Mission Control stopped. Press Enter.'"
       echo "Mission Control is starting in tmux session mc (about 10 s) ..."
       for k in $(seq 1 30); do
         python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8095/api/run', timeout=2)" 2>/dev/null && break
@@ -588,7 +593,7 @@ case "$WHAT" in
       start_recorder
       for s in calib freeroam doe; do close_if_ended $s; done    # (e13) an ended run's window, not a running run
       tmux kill-session -t visit 2>/dev/null || true
-      tmux new-session -s visit "cd '$REPO' && MIRLT_ATTENDED=1 python3 tools/fleet/mission_run.py --tracking tags --robots auto --split auto --motion stopturn --visit-order '$ORD' $VX --feel-table skip; read -r -p 'Visit ended. Press Enter.'"
+      tmux new-session -s visit "cd '$REPO' && $(python3 tools/fleet/safety_group.py exports 2>/dev/null) MIRLT_ATTENDED=1 python3 tools/fleet/mission_run.py --tracking tags --robots auto --split auto --motion stopturn --visit-order '$ORD' $VX --feel-table skip; read -r -p 'Visit ended. Press Enter.'"
       echo "If the window closed: tmux attach -t visit   (Ctrl+C in it stops every robot)"
     fi ;;
   mc-stop)
@@ -635,7 +640,7 @@ case "$WHAT" in
       # keeps the old way (awake; Mission Control's idle sleeper puts them to sleep after 30 minutes with no run)
       SLP="--sleep-at-end"; ARGS=""
       for x in "$@"; do case "$x" in awake) SLP="" ;; *) ARGS="$ARGS $x" ;; esac; done
-      tmux new-session -d -s calib "cd '$REPO' && python3 tools/fleet/calib_run.py $IPS $SLP $ARGS; read -r -p 'Calibration run ended. Press Enter.'"
+      tmux new-session -d -s calib "cd '$REPO' && $(python3 tools/fleet/safety_group.py exports 2>/dev/null) python3 tools/fleet/calib_run.py $IPS $SLP $ARGS; read -r -p 'Calibration run ended. Press Enter.'"
       echo "Calibration run started in tmux session calib. See it: tmux attach -t calib (leave: Ctrl+B, then D)"
     fi ;;
   calib-upload)    # (2026-11-04) the newest calibration run's folder (or the one given) as a release of its own

@@ -37,6 +37,14 @@
   settling) are allowed, an indefinite stop is not; edge-uncertainty holds must not freeze robots. Questions to a person
   are optional extras, never a reason to stop moving. Every robot held never ends a run. The old hold-and-wait stays
   behind a switch (MIRLT_NEVER_STILL=0).
+- **Safety group (Nick, 2026-11-12):** every safety switch (never still, the rejoin evidence rule, the creep, edge
+  behaviour, watchdog-related rules, the blind-drive allowance, the out-and-back identity drive, ...) lives in ONE place,
+  `tools/fleet/safety_group.py` (read through `SG.flag` / `SG.value`, never a second `os.environ` default), documented
+  together in `docs/how-to/safety-group.md` and shown in Mission Control's Run > More > Safety box. Each is decided
+  automatically by default and out of a new user's way; the old behaviour stays behind it. A new safety behaviour adds
+  its switch there. Never still applies everywhere (free roam, missions, calibration). A robot may drive where the camera
+  cannot see only as far as its OWN measured odometry record allows (odo_trust: predicted error at every point keeps the
+  margins, with a way back), and that prediction is checked against the error found when it is seen again.
 - **Jay-Sun's RFID data (Nick, 2026-11-10; Jay-Sun agreed):** Nick's project and Jay-Sun's thesis are two separate
   projects sharing hardware and most of the software; each may use the other's data, as long as neither interferes with
   the other's experiments. RFID data may be an input to Nick's own runs and analyses, but only behind a switch that is

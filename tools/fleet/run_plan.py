@@ -36,7 +36,7 @@ Position source (--fixes): where camera poses come from (data-formats.md,
 runs against it with --fixes udp; at the end it prints the simulator's ground
 truth: docking errors, closest robots, contact.
 """
-VERSION = "2026-11-11e16"   # e16 (6a, Claude's suggestion, Nick not asked yet; school 18:26 ended "every robot is out (none heard again within 90 s)", 18:54 by the keep-going cap): 6b: every robot whose roof-tag turn is not verified is crawled at the start, even one that needs no straightening (MIRLT_CRAWL_UNKNOWN=need: e15's way). 6a: every robot held never ends the run by itself: it holds them safely, says so every minute (NEEDS A HAND) and goes on as soon as one rejoins; the cap (--all-held-max 3 / --all-held-max-s 180) and the 90 s wait are the switch MIRLT_HELD_NEVER_END=0. (item 7, home 11 Nov 08:45): a tilt or drop trip backs out along the robot's own recorded track as far as the derived edge rule needs (observe.track_back_target: clearance with its uncertainty and own-vs-camera doubt, the stop where it ends), checked against the other robots, instead of a fixed 10 cm; the fixed back-off where the track is unknown or blocked (MIRLT_EDGE_BACKOUT=0: always the fixed 10 cm). Before: "2026-11-11e15"   # e15 (school 10 Nov 18:54): every facing check and re-check reads the tag CORRECTED by the turn this run knows (facing.corrected_tags: the tags file plus yaw_fix); a robot whose tag turn is unverified (not measured this run, nothing remembered; or remembered and a big turn would follow) is measured by the start's watched crawl before any straightening, and the crawl's measurement sets its yaw_fix; what is re-learned or crawled is remembered (--tag-heading-store, tag_heading_store). Before: "2026-11-10e14c"   # e14c (school 17:46): how old a fix may be and still count as seen comes from each robot's measured fix interval (blind_after; a slow detector treated like a slow camera; MIRLT_FIX_GAP_RULE=fixed the 0.6 s). e14b: a dark picture pauses every robot until the camera has adjusted (dark_watch). e14: a visit point whose tag was lost on the way is moved to the end of the robot's list once, then skipped (defer_current_point; MIRLT_RETRY_LOST=again the old way); the spot where it was lost kept as evidence. 2026-11-10e13 (e13): never give up blind (no BLIND_MAX_CM cap: it stops only when blind error + body + stop could reach an edge; MIRLT_BLIND_RULE=cap the old caps); no pictures: each blind robot's risk-based limit (safety_rules.no_picture_limit; MIRLT_NOPIC_RULE=off: e12's rules alone).
+VERSION = "2026-11-12e18"   # e18 (Nick 12 Nov decisions 2, 4, 5, 6): never still in missions too: a held robot that still hears creeps (2-8 cm, scaled by its doubt, at most every derived pause) toward being found (where the camera last read it) and safety (the board's middle), inside its own held outline grown by the creep's reach so the others' plans stay valid (held_creep_watch; MIRLT_NEVER_STILL=0 the e16 hold). A lost robot first: a robot standing in its recovery's straight path steps aside (MIRLT_LOST_PRIORITY). Each robot's odometry trust (odo_trust) gives its blind error instead of the fixed 2 + 0.07 cm per cm, is checked when it is seen again, and lets a point the camera does not read stay on the list when an out-and-back from readable ground is allowed (MIRLT_BLIND_ALLOW). The trust records saved at any end (MIRLT_SAVE_CAL_AT_END). Before: "2026-11-11e16"   # e16 (6a, Claude's suggestion, Nick not asked yet; school 18:26 ended "every robot is out (none heard again within 90 s)", 18:54 by the keep-going cap): 6b: every robot whose roof-tag turn is not verified is crawled at the start, even one that needs no straightening (MIRLT_CRAWL_UNKNOWN=need: e15's way). 6a: every robot held never ends the run by itself: it holds them safely, says so every minute (NEEDS A HAND) and goes on as soon as one rejoins; the cap (--all-held-max 3 / --all-held-max-s 180) and the 90 s wait are the switch MIRLT_HELD_NEVER_END=0. (item 7, home 11 Nov 08:45): a tilt or drop trip backs out along the robot's own recorded track as far as the derived edge rule needs (observe.track_back_target: clearance with its uncertainty and own-vs-camera doubt, the stop where it ends), checked against the other robots, instead of a fixed 10 cm; the fixed back-off where the track is unknown or blocked (MIRLT_EDGE_BACKOUT=0: always the fixed 10 cm). Before: "2026-11-11e15"   # e15 (school 10 Nov 18:54): every facing check and re-check reads the tag CORRECTED by the turn this run knows (facing.corrected_tags: the tags file plus yaw_fix); a robot whose tag turn is unverified (not measured this run, nothing remembered; or remembered and a big turn would follow) is measured by the start's watched crawl before any straightening, and the crawl's measurement sets its yaw_fix; what is re-learned or crawled is remembered (--tag-heading-store, tag_heading_store). Before: "2026-11-10e14c"   # e14c (school 17:46): how old a fix may be and still count as seen comes from each robot's measured fix interval (blind_after; a slow detector treated like a slow camera; MIRLT_FIX_GAP_RULE=fixed the 0.6 s). e14b: a dark picture pauses every robot until the camera has adjusted (dark_watch). e14: a visit point whose tag was lost on the way is moved to the end of the robot's list once, then skipped (defer_current_point; MIRLT_RETRY_LOST=again the old way); the spot where it was lost kept as evidence. 2026-11-10e13 (e13): never give up blind (no BLIND_MAX_CM cap: it stops only when blind error + body + stop could reach an edge; MIRLT_BLIND_RULE=cap the old caps); no pictures: each blind robot's risk-based limit (safety_rules.no_picture_limit; MIRLT_NOPIC_RULE=off: e12's rules alone).
 VERSION_B = "2026-11-10b"   # 2026-11-10b (e12 item 9): a lock-only fix never resets a pose (MIRLT_LOCK_GUARD=0: as before); a dwell broken by a halt where the robot did not move keeps its start (MIRLT_DWELL_KEEP=0). 2026-11-10a (e12): the bridge's "camera" messages (no pictures / pictures again) said and logged. No version before
 LOCK_GUARD = __import__("os").environ.get("MIRLT_LOCK_GUARD", "1") != "0"
 DWELL_KEEP = __import__("os").environ.get("MIRLT_DWELL_KEEP", "1") != "0"
@@ -47,7 +47,21 @@ import datetime as dt
 import json
 import math
 import os
-HELD_NEVER_END = os.environ.get("MIRLT_HELD_NEVER_END", "1") != "0"   # (e16, 6a) every robot held never ends the run
+HERE_ = os.path.dirname(os.path.abspath(__file__))
+if HERE_ not in __import__("sys").path:
+    __import__("sys").path.insert(0, HERE_)
+import safety_group as SG          # noqa: E402  (e18: the safety switches' automatic defaults in one place)
+HELD_NEVER_END = SG.flag("MIRLT_HELD_NEVER_END")   # (e16, 6a) every robot held never ends the run
+NEVER_STILL = SG.flag("MIRLT_NEVER_STILL")         # (e18, Nick 12 Nov decision 2) held robots creep in missions too
+LOST_PRIORITY = SG.flag("MIRLT_LOST_PRIORITY")     # (e18, 4) a robot in a lost robot's recovery path steps aside
+BLIND_ALLOW = SG.flag("MIRLT_BLIND_ALLOW")         # (e18, 5) each robot's measured odometry trust
+SAVE_CAL_AT_END = SG.flag("MIRLT_SAVE_CAL_AT_END")  # (e18, 6) the trust records saved at any end
+CREEP_MAX_CM = 8.0       # (e18) as freeroam_core.CREEP_MAX_CM (CHOSEN there; DOE noted there)
+CREEP_MIN_CM = 2.0
+CREEP_UNC0_CM = 5.0
+CREEP_V_MIN, CREEP_V_MAX = 2.0, 5.0
+CREEP_REACH_CM = CREEP_MAX_CM   # (e18) CHOSEN: a held robot creeps within this of where it was held (its held outline is
+                                # grown by it, so the others' plans never meet it). DOE: yes, with CREEP_MAX_CM
 import queue
 import re
 import socket
@@ -552,6 +566,11 @@ class Coordinator:
             ax = row.get("ax")
             fp.raw(t, v, w, float(gz) if gz not in (None, "") else None, still,
                    float(ax) if ax not in (None, "") else None, None, tuple(ln) if len(ln) == 3 else None)
+            if BLIND_ALLOW:
+                pt = getattr(b, "raw_prev_t", None)       # (e18, 5) its wheels and yaw rate drive its trust shadows
+                if pt is not None and 0.0 < t - pt < 0.5:
+                    self.trust_of(b).motion(t, float(v) * (t - pt), float(w) * (t - pt))
+                b.raw_prev_t = t
         except (TypeError, ValueError):
             return
 
@@ -567,6 +586,15 @@ class Coordinator:
                    None if ev.get("th") is None else float(ev["th"]), ev.get("sigma"), kind, now=now())
         except (TypeError, ValueError, KeyError):
             pass
+        if BLIND_ALLOW and b.pose is not None and getattr(b, "blind", None) is None:
+            try:                                         # (e18, 5) the camera against its shadow dead reckoning
+                tf = float(ev.get("t", now()))
+                own = self.pose_at(b, tf)
+                if now() - (getattr(b, "raw_prev_t", None) or -1e9) > 1.0:
+                    self.trust_of(b).own_pose(now(), b.pose[0], b.pose[1], b.pose[2])   # no RAW: its own pose's steps
+                self.trust_of(b).fix(tf, float(ev["x"]), float(ev["y"]), own[3] if own else b.pose[2])
+            except (TypeError, ValueError, KeyError):
+                pass
 
     def fp_live(self, b):
         fp = getattr(b, "fp", None)
@@ -1608,6 +1636,8 @@ class Coordinator:
             if c and c.get("source") == "odometry only":
                 extra_pm = min(cap, self.ODO_P95_PER_CM * float(c.get("since_fix_cm") or 0.0))
         grow += extra_pm
+        if NEVER_STILL and getattr(b, "out_kind", None) in ("restarted", "silent"):
+            grow += CREEP_REACH_CM     # (e18) it creeps within this of where it was held: the others plan round it all
         # a true offset (each corner rounded by a disc of that radius, 16 points), not a push out from the middle,
         # which along the sides gave only 70 % of it
         a_ = np.linspace(0, 2 * math.pi, 16, endpoint=False)
@@ -3759,6 +3789,188 @@ class Coordinator:
         return ok, words
 
     # -- driving blind (Nick 2026-10-29 15:41, question 3b) -------------------------------------------------------
+    # -- (e18, Nick 12 Nov decisions 2, 4, 5, 6) ---------------------------------------------------------------------
+    def trust_of(self, b):
+        """Its odometry trust record (odo_trust.Trust), loaded from the store the first time (simulated robots on
+        127.0.0.x start from the prior: their record is not the real robot's)."""
+        tr = getattr(b, "trust", None)
+        if tr is None:
+            import odo_trust as OT
+            sim_ = bool(getattr(self.args, "dry_run", False)) or getattr(self.args, "sim_persist", False)
+            tr = (OT.load([b.name]) if not sim_ else {b.name: OT.Trust(b.name)})[b.name]
+            b.trust = tr
+            fl = self.__dict__.setdefault("trust_fleet", {})
+            fl[b.name] = tr
+            OT.link(fl)             # (e18b, the replay) one fleet record, a robot's own once its samples differ
+        return tr
+
+    def trust_save(self, why="the run ends"):
+        """Every robot's record into the store (not for simulated robots: a dry run's record is the simulator's)."""
+        if not (BLIND_ALLOW and SAVE_CAL_AT_END) or getattr(self.args, "dry_run", False):
+            return None
+        import odo_trust as OT
+        trs = {n: b.trust for n, b in self.bots.items() if getattr(b, "trust", None) is not None}
+        return OT.save(trs, why=why) if trs else None
+
+    def trust_checkpoint(self):
+        if now() - getattr(self, "_trust_cp", 0.0) >= 60.0:
+            self._trust_cp = now()
+            self.trust_save("checkpoint (a crash or power cut loses at most a minute)")
+
+    def blind_err(self, b, bl, record=False):
+        """Its possible error after this blind stretch: the fixed 29 Oct numbers (2 cm + 0.07 cm per cm) for an unplanned
+        loss (MIRLT_BLIND_BUBBLE=fixed, the default), its own record with record=True (the check) or
+        MIRLT_BLIND_BUBBLE=record."""
+        if not BLIND_ALLOW or SG.value("MIRLT_BLIND_BUBBLE") != "record" and not record:
+            return self.BLIND_ERR_BASE_CM + self.BLIND_ERR_PER_CM * bl["dist"]
+        d = bl["dist"]
+        ts, tc = bl.get("ts", 0.0), bl.get("tc", 0.0)
+        return self.trust_of(b).radius(d, ts, tc, d * ts - bl.get("ms", 0.0), d * tc - bl.get("mc", 0.0))
+
+    def blind_leg_allowed(self, n, xy, readable):
+        """(e18, 5) May robot n visit a point the camera does not read with an out-and-back from the nearest readable
+        ground? Its record's predicted error at every point + body + stop inside the table's edges and away from the
+        others, ending back where the camera reads. Returns the allowance (dict) or None."""
+        import odo_trust as OT  # noqa: F401
+        b = self.bots.get(n)
+        rm = getattr(self, "readmap", None)
+        if b is None or rm is None:
+            return None
+        f = self.m["floor"]
+        rect = (f["x_min"], f["y_min"], f["x_max"], f["y_max"])
+        best = None
+        for i in range(rm.nx):
+            for j in range(rm.ny):
+                c = rm.centre(i, j)
+                if rm.readable(*c)[0] and (best is None or math.dist(c, xy) < math.dist(best, xy)):
+                    best = c
+        if best is None:
+            return None
+        L = math.dist(best, xy)
+        n_ = max(2, int(L / 2.0))
+        th = math.degrees(math.atan2(xy[1] - best[1], xy[0] - best[0]))
+        pts = [(best[0] + (xy[0] - best[0]) * k / n_, best[1] + (xy[1] - best[1]) * k / n_, th) for k in range(n_ + 1)]
+        pts += [(best[0] + (xy[0] - best[0]) * k / n_, best[1] + (xy[1] - best[1]) * k / n_, th + 180.0)
+                for k in range(n_, -1, -1)]
+        others = [(o.pose[0], o.pose[1], 2.0) for o in self.bots.values() if o is not b and o.pose is not None and
+                  not o.out]
+        res = self.trust_of(b).allow(pts, lambda x, y: min(x - rect[0], rect[2] - x, y - rect[1], rect[3] - y),
+                                     lambda x, y: rm.readable(x, y)[0], others, 6.72, 2.4, 2.5)
+        res["from"] = [round(best[0], 1), round(best[1], 1)]
+        return res
+
+    def held_creep_watch(self):
+        """(e18, Nick 12 Nov decision 2: never still in missions too) A held robot that still hears (held after a blind
+        stop, a trip with no safe way back, a lost tag, a camera disagreement, at the start) never just stands: after
+        the derived pause (its fix interval + 0.5 s) it creeps 2-8 cm (scaled by its doubt) at 2-5 cm/s toward being
+        found (where the camera last read it, when no camera reads it now) or toward the board's middle (safety), never
+        further than CREEP_REACH_CM from where it was held (its held outline is grown by that, so the others' plans
+        stay valid), keeping RECOVER_GAP_CM from every other robot. MIRLT_NEVER_STILL=0: it stands (e16)."""
+        if not NEVER_STILL or not self.t_run_started() or getattr(self, "straightening", False):
+            return
+        t = now()
+        f = self.m["floor"]
+        rect = (f["x_min"], f["y_min"], f["x_max"], f["y_max"])
+        for b in self.bots.values():
+            if not b.out or getattr(b, "out_kind", None) != "restarted" or getattr(b, "rechecking", False) or \
+                    getattr(b, "backoff", None) or b.pose is None:
+                continue
+            if b.last_heard is None or t - b.last_heard > 1.0:
+                continue                         # it does not hear now: nothing to send
+            hold = getattr(b, "hold_at", None)
+            if hold is None or getattr(b, "hold_out_t", None) != getattr(b, "out_t", None):
+                b.hold_at = hold = tuple(b.pose[:2])
+                b.hold_out_t = getattr(b, "out_t", None)
+                b.creep_t = t
+            pause = self.blind_after(b) + 0.5
+            if t - getattr(b, "creep_t", t) < pause + getattr(b, "creep_dur", 0.0):
+                continue
+            x, y, th = b.pose[0], b.pose[1], b.pose[2] if len(b.pose) > 2 else 0.0
+            ct = getattr(b, "cam_t", None)
+            seen = ct is not None and t - ct <= self.blind_after(b)
+            lc = getattr(b, "last_cam", None)
+            if not seen and lc:
+                tgt, words = (lc[0], lc[1]), "toward where the camera last read it"
+            else:
+                tgt, words = ((rect[0] + rect[2]) / 2.0, (rect[1] + rect[3]) / 2.0), "toward the board's middle"
+            c = self.conf_now(b) if hasattr(self, "conf_now") else None
+            unc = float((c or {}).get("plus_minus_cm") or 2.0) if isinstance(c, dict) else 2.0
+            fr = CREEP_UNC0_CM / (CREEP_UNC0_CM + max(0.0, unc))
+            L = max(CREEP_MIN_CM, CREEP_MAX_CM * fr)
+            v = max(CREEP_V_MIN, CREEP_V_MAX * fr)
+            sent = False
+            for k, base in enumerate((tgt, hold)):
+                if math.dist((x, y), base) < 0.5:
+                    continue
+                hd = math.degrees(math.atan2(base[1] - y, base[0] - x))
+                for off in (0.0, 45.0, -45.0, 90.0, -90.0):
+                    h_ = hd + off
+                    nx, ny = x + L * math.cos(math.radians(h_)), y + L * math.sin(math.radians(h_))
+                    if math.dist((nx, ny), hold) > CREEP_REACH_CM:
+                        continue
+                    if min(nx - rect[0], rect[2] - nx, ny - rect[1], rect[3] - ny) < 6.72 + unc:
+                        continue
+                    if any(o is not b and o.pose is not None and math.hypot(nx - o.pose[0], ny - o.pose[1]) <
+                           self.RECOVER_GAP_CM for o in self.bots.values()):
+                        continue
+                    tid, sid = b.next_id, b.next_id + 1
+                    b.next_id += 2
+                    self.send(b.name, "fs %d T %.2f -" % (tid, h_))
+                    self.send(b.name, "fs %d D %.2f %.2f %.2f %.2f %.2f %.2f 0 -" % (sid, x, y, nx, ny, h_, v))
+                    b.creep_t = t
+                    b.creep_dur = L / v + 1.0
+                    b.creeps = getattr(b, "creeps", 0) + 1
+                    self.creeps_n = getattr(self, "creeps_n", 0) + 1
+                    self.log("held_creep", robot=b.name, L_cm=round(L, 1), v=round(v, 1), x=round(x, 1),
+                             y=round(y, 1), to=[round(nx, 1), round(ny, 1)], toward="target" if k == 0 else "hold",
+                             unc_cm=round(unc, 1))
+                    if t - getattr(b, "creep_said", -1e9) >= 30.0:
+                        b.creep_said = t
+                        self.say("%s (held: %s) creeps %.0f cm at %.0f cm/s %s (never still; within %.0f cm of where "
+                                 "it was held)" % (b.name, (b.out or "").split(";")[0], L, v,
+                                                   words if k == 0 else "back toward where it was held",
+                                                   CREEP_REACH_CM))
+                    sent = True
+                    break
+                if sent:
+                    break
+            if not sent:
+                b.creep_t = t                     # every way is blocked: a brief pause, then tried again
+
+    def step_aside(self, o, x, y, bx, by, err):
+        """(e18, 4) Robot o stands in a lost robot's straight recovery path: it steps sideways out of the corridor
+        (its half width + o's half diagonal), checked against the edges and the others. True when sent."""
+        if o.pose is None:
+            return False
+        f = self.m["floor"]
+        rect = (f["x_min"], f["y_min"], f["x_max"], f["y_max"])
+        L = max(1e-6, math.hypot(bx - x, by - y))
+        ux, uy = (bx - x) / L, (by - y) / L
+        side = -(o.pose[0] - x) * uy + (o.pose[1] - y) * ux
+        need = self.RECOVER_GAP_CM + err + 1.0 - abs(side)
+        if need <= 0:
+            return False
+        for sg in ((1.0 if side >= 0 else -1.0), (-1.0 if side >= 0 else 1.0)):
+            d = need if sg == (1.0 if side >= 0 else -1.0) else need + 2 * abs(side)
+            nx, ny = o.pose[0] - uy * sg * d, o.pose[1] + ux * sg * d
+            if min(nx - rect[0], rect[2] - nx, ny - rect[1], rect[3] - ny) < 6.72 + 2.0:
+                continue
+            if any(q is not o and q.pose is not None and math.hypot(nx - q.pose[0], ny - q.pose[1]) < self.RECOVER_GAP_CM
+                   for q in self.bots.values()):
+                continue
+            h_ = math.degrees(math.atan2(ny - o.pose[1], nx - o.pose[0]))
+            self.control(o, "halt")
+            tid, sid = o.next_id, o.next_id + 1
+            o.next_id += 2
+            self.send(o.name, "fs %d T %.2f -" % (tid, h_))
+            self.send(o.name, "fs %d D %.2f %.2f %.2f %.2f %.2f %.2f 0 -" % (sid, o.pose[0], o.pose[1], nx, ny, h_, 5.0))
+            self.log("step_aside", robot=o.name, d_cm=round(d, 1), to=[round(nx, 1), round(ny, 1)])
+            self.say("%s steps %.0f cm aside: a lost robot's way back to where the camera reads passes here (it goes "
+                     "first)" % (o.name, d))
+            self.request_replan("%s stepped aside for a lost robot" % o.name)
+            return True
+        return False
+
     def blind_after(self, b, base=None):
         """(e14, school 17:46: a slow tag detector in dim light, 2.3 fixes a second) How old this robot's newest fix may
         be and it still counts as seen: from its MEASURED fix interval (safety_rules.fresh_fix_s: at least
@@ -3828,14 +4040,21 @@ class Coordinator:
                     b.pose[0] - p0[1], b.pose[1] - p0[2]), said=False)
                 self.log("blind_start", robot=b.name, own=list(b.pose), last_cam=getattr(b, "last_cam", None),
                          t_run=round(t - self.t_run, 2))
-            bl["dist"] += math.hypot(b.pose[0] - bl["last"][0], b.pose[1] - bl["last"][1])
+            step_ = math.hypot(b.pose[0] - bl["last"][0], b.pose[1] - bl["last"][1])
+            bl["dist"] += step_
             bl["last"] = list(b.pose[:2])
+            if len(b.pose) > 2 and bl.get("th") is not None:      # (e18, 5) its turns, as its trust record counts them
+                dth_ = abs((b.pose[2] - bl["th"] + 180.0) % 360.0 - 180.0)
+                k_ = "ts" if step_ < 0.3 else "tc"
+                bl[k_] = bl.get(k_, 0.0) + dth_
+                bl["m" + k_[1]] = bl.get("m" + k_[1], 0.0) + dth_ * bl["dist"]
+            bl["th"] = b.pose[2] if len(b.pose) > 2 else None
             if bl["dist"] >= 5.0 and not bl["said"]:
                 bl["said"] = True
                 self.say("%s: no camera sees it: driving on its own wheels and gyro (at most %.0f cm)"
                          % (b.name, self.BLIND_MAX_CM))
             body_edge = min(b.pose[0] - rect[0], rect[2] - b.pose[0], b.pose[1] - rect[1], rect[3] - b.pose[1]) - 4.75
-            err = self.BLIND_ERR_BASE_CM + self.BLIND_ERR_PER_CM * bl["dist"]
+            err = self.blind_err(b, bl)
             why = None
             import observe as OB
             ov = OB.overlap_cm(b.pose[0], b.pose[1], err, rect)
@@ -3962,6 +4181,11 @@ class Coordinator:
                     if rec["status"] != "done" and st.get("to")][:4])
                 for q in pts:
                     if math.hypot(px - q[0], py - q[1]) < self.RECOVER_GAP_CM + err:
+                        if LOST_PRIORITY and q is pts[0] and not bl.get("asked_aside") and \
+                                self.step_aside(o, x, y, bx, by, err):
+                            bl["asked_aside"] = o.name      # (e18, 4) the lost robot first: o makes room, tried again
+                            self.log("recover_wait", robot=b.name, for_=o.name)
+                            return False
                         self.log("recover_refused", robot=b.name, why="the path of %s" % o.name,
                                  at=[round(px, 1), round(py, 1)])
                         return False
@@ -4115,6 +4339,19 @@ class Coordinator:
                     continue
                 cell = rm.ij(xy_[0], xy_[1])
                 ok_, why_ = rm.readable(xy_[0], xy_[1])
+                if not ok_ and rm.tries.get(cell, 0) >= min_tries and BLIND_ALLOW:
+                    al = self.blind_leg_allowed(n, xy_, rm.readable)    # (e18, 5) a blind out-and-back from readable
+                    if al is not None and al["ok"]:
+                        self.log("blind_leg_allowed", robot=n, point=lab_, **{k: v for k, v in al.items()
+                                                                               if k != "first_bad"})
+                        if not getattr(self, "_blind_said", {}).get((n, lab_)):
+                            self.__dict__.setdefault("_blind_said", {})[(n, lab_)] = True
+                            self.say("%s: point %s is where the camera does not read, but its odometry record allows "
+                                     "a blind out-and-back from %s (predicted error at most %.1f cm): kept" % (
+                                         n, lab_, al["from"], al["r_max"]))
+                        continue
+                    if al is not None:
+                        why_ = "%s; a blind leg there is not allowed: %s" % (why_, al["why"])
                 if not ok_ and rm.tries.get(cell, 0) >= min_tries:
                     del vo[j]
                     rec = dict(robot=n, point=lab_, why="the camera does not read tags there (learned: %s)" % why_,
@@ -4140,6 +4377,10 @@ class Coordinator:
         rec = dict(robot=b.name, dist_cm=round(bl["dist"], 2), blind_s=round(tf - bl["t0"], 2), err_cm=round(d, 2),
                    cam=[round(cx, 2), round(cy, 2)], own=[round(own[1], 2), round(own[2], 2)], src=src,
                    t_run=round(now() - self.t_run, 2) if self.t_run else None)
+        if BLIND_ALLOW and bl["dist"] >= 2.0:
+            pred = self.blind_err(b, bl, record=True)    # (e18, 5) what its record predicted against what was found
+            chk = self.trust_of(b).check(pred, d, kind="seen again (mission)", t=now())
+            rec.update(pred_cm=round(pred, 2), within=chk["within"], k_cal=round(self.trust_of(b).k_cal, 3))
         if self.REACQUIRE_CM < d <= self.REACQUIRE_MAX_CM and b.pose is not None:
             # the camera's spot moved on by what the robot did since that picture
             nx, ny = cx + (b.pose[0] - own[1]), cy + (b.pose[1] - own[2])
@@ -4236,6 +4477,8 @@ class Coordinator:
             self.unconfirmed_watch()
             self.edge_watch()
             self.gap_forward()            # (e09, B2)
+            self.held_creep_watch()       # (e18, Nick 12 Nov decision 2) never still: held robots creep
+            self.trust_checkpoint()       # (e18, 6) the odometry records written out every minute
             self.rejoin_watch()
             if self.abort:
                 break
@@ -4320,6 +4563,8 @@ class Coordinator:
                             "surface_marks": list(getattr(self, "surface_marks", []) or []),
                             "did_not_move": getattr(self, "n_fast_done", 0),
                             "skipped": list(getattr(self, "skipped", []) or [])},
+                "safety_group": SG.snapshot(), "held_creeps": getattr(self, "creeps_n", 0),
+                "odo_trust": {n: b.trust.summary() for n, b in self.bots.items() if getattr(b, "trust", None)},
                 "plan_id_first": self.first_plan_id, "plans": self.plan_no + 1, "result": self.abort or "done",
                 "duration_s": round(now() - self.started, 2),
                 "planned_makespan_s": self.first_makespan,
@@ -6132,6 +6377,10 @@ def main(argv=None):
             print("Left dancing until switched off: %s" % ", ".join(dancing))
         link.close(spare=dancing if not args.dry_run else ())
         source.close()
+        try:
+            coord.trust_save("the run ended: %s" % (coord.__dict__.get("abort") or "done"))   # (e18, 6) at ANY end
+        except Exception:  # noqa: BLE001
+            pass
         summ = coord.summary() if hasattr(coord, "dockings") else {"result": coord.__dict__.get("abort")}
         if sim is not None:
             if getattr(args, "sim_persist", False):

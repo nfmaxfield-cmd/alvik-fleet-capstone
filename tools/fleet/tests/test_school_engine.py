@@ -472,7 +472,7 @@ def test_mission_control_api(tmp_path):
         c, st = call("/api/state")
         assert c == 200 and st["map"]["floor"]["x_max"] == 152
         # every setting group is there to see and edit (Nick: nothing locked)
-        assert set(st["defaults"]) == {"planner", "mission", "run", "warmup"}
+        assert set(st["defaults"]) == {"planner", "mission", "run", "warmup", "safety"}   # (e18) the Safety group
         assert st["defaults"]["mission"]["chicken_swerve_cm"] == 15.0 and st["defaults"]["mission"]["chicken_min_cm"] == 8.0
         c, st = call("/api/settings", {"mission": {"chicken_rounds": 1}})
         assert c == 200 and st["settings"]["mission"]["chicken_rounds"] == 1

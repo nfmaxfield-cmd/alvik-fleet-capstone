@@ -216,6 +216,12 @@ function settingsTable(group, keys) {
   }
   return o + `</table><div class="row" style="margin-top:8px"><button class="b" data-save="${group}">Save ${esc(group)} settings</button></div>`;
 }
+function safetyNote() {
+  const info = S.safety_info || [];
+  return `<p class="muted" style="margin:0 0 8px">Leave a switch on <b>auto</b>: it is decided automatically. Set one to its old value only to compare: once saved, every run on this Pi uses it (free roam, missions, calibration) until it is back on auto. ` +
+    `<details><summary>What each one does</summary><ul style="margin:6px 0 0 18px">` +
+    info.map(q => `<li><b>${esc(q.env)}</b> (auto = ${esc(q.default)}, old way ${esc(q.old)}): ${esc(q.what)}</li>`).join("") + `</ul></details></p>`;
+}
 function wireSettings(root) {
   root.querySelectorAll("[data-save]").forEach(b => b.onclick = async () => {
     const g = b.dataset.save, def = S.defaults[g], out = {};
@@ -647,7 +653,7 @@ function runScreen() {
       ${lv ? `<div class="row small" style="margin-top:6px;gap:14px"><span>Battery <b>${lv.battery ?? "-"} %</b></span><span>Edge <b>${lv.edge_cm ?? "-"} cm</b></span><span>Steps <b>${lv.done}/${lv.steps}</b></span>${lv.stop_cm != null ? `<span title="Its distance sensor stops it for anything in its path nearer than this (floor check at start-up)">Stops at <b>${lv.stop_cm} cm</b></span>` : ""}</div><div class="small muted">${esc(lv.last || "")}</div>${confLine(lv.conf)}` : ""}</div>`; }).join("")}
      ${pointsCard(run && run.live)}${mirrorCard(run)}${isTags() ? syncCard(run) : ""}
      <details class="card" ${document.body.classList.contains("details") ? "open" : ""}><summary style="cursor:pointer;font-weight:500">Event log</summary><div class="log" id="log">${run ? esc((run.messages || []).map(m => `[${m[0]}] ${m[1]}`).join("\n")) : ""}</div></details>
-     <div class="card">${more("More", settingsTable("run"))}</div>
+     <div class="card">${more("More", settingsTable("run") + more("Safety (every safety switch in one place; auto = decided automatically)", safetyNote() + settingsTable("safety")))}</div>
      <button class="p" id="go" ${run && !run.running ? "" : "disabled"}>Review</button>`);
   wireLighting();
   $("start").onclick = async () => { try { const r = await api("/api/run/start", {kind: "mission", dry: conn !== "robots", conn}); if (r.feel) flash("Feeling out the table first; the production run starts by itself after it"); startPoll(); await load(); } catch (e) { flash(e.message, true); } };

@@ -32,7 +32,7 @@ Ctrl+C stops every robot (run_plan's own stop). Free space (diskguard.py, 2026-1
 under its floor; frame saving stops under the frames' floor; under the card's floor during the run, run_plan is sent
 Ctrl+C (every robot stops) and the run ends as it would on Ctrl+C, with the upload.
 """
-VERSION = "2026-11-12e17"   # e17 (Nick 12 Nov): the tracking-rate frames kept at 4 a second by default (doe_loop.frames_rates; MIRLT_FRAMES_HZ=12 or =before the old 12 / 10). Before: "2026-11-11e16"   # e16 (Pi audit): the tracking-rate frames' rate is a setting (MIRLT_FRAMES_HZ: pictures a second kept per camera; default unchanged, 12 overhead / 10 side; clips and stills around events are kept at any rate). Before: "2026-11-11e15"   # e15 (school 10 Nov 18:54): each tag's turn on its robot remembered across runs (tag_heading_store, <conf dir>/tag_headings.json; a dry run's own with --tag-heading-store): the binding's patient heading check gets it, a run with no binding starts from it, tags.json carries yaw_state (measured / remembered / motion / unknown) so run_plan never straightens on an unverified raw heading, run_plan records what it re-learns, free roam's proof drive is harvested after the run; --sim-hc-loss (the heading check's tag lost); MIRLT_TAG_HEADING_MEMORY=0 per run only. Before: "2026-11-10e14"   # e14: robot finding by motion inside the binding (dry: the simulator's own cameras drawn from its true poses); the readable area chosen by light and tag (readmap_store; free roam where every tag of the run reads: readmap_roam.json), each run's own evidence kept with its light; the battery floor from the site / Mission Control passed to run_plan; --sim-light, --readmap-store, --sim-tagless; e13's separate discovery step behind MIRLT_CAMERA_DISCOVERY=e13. 2026-11-10e13 (e13): school free roam planned inside the readable area (--readable-map); the camera check before a tags run (camera_feed); --sim-plain-roofs; tracked for the sleep 10 min after a run. 2026-11-10a (e12): the camera self-check at the start of a tags run (camera_selfcheck.py; --no-camera-check). No version string before
+VERSION = "2026-11-12e18"   # e18 (Nick 12 Nov decision 4): a robot sent to the nearest readable point (no readable points of its own) has the right of way in the plan (the planner's priority_first: the others are planned round it) (MIRLT_LOST_PRIORITY=0: as e17). Before: "2026-11-12e17"   # e17 (Nick 12 Nov): the tracking-rate frames kept at 4 a second by default (doe_loop.frames_rates; MIRLT_FRAMES_HZ=12 or =before the old 12 / 10). Before: "2026-11-11e16"   # e16 (Pi audit): the tracking-rate frames' rate is a setting (MIRLT_FRAMES_HZ: pictures a second kept per camera; default unchanged, 12 overhead / 10 side; clips and stills around events are kept at any rate). Before: "2026-11-11e15"   # e15 (school 10 Nov 18:54): each tag's turn on its robot remembered across runs (tag_heading_store, <conf dir>/tag_headings.json; a dry run's own with --tag-heading-store): the binding's patient heading check gets it, a run with no binding starts from it, tags.json carries yaw_state (measured / remembered / motion / unknown) so run_plan never straightens on an unverified raw heading, run_plan records what it re-learns, free roam's proof drive is harvested after the run; --sim-hc-loss (the heading check's tag lost); MIRLT_TAG_HEADING_MEMORY=0 per run only. Before: "2026-11-10e14"   # e14: robot finding by motion inside the binding (dry: the simulator's own cameras drawn from its true poses); the readable area chosen by light and tag (readmap_store; free roam where every tag of the run reads: readmap_roam.json), each run's own evidence kept with its light; the battery floor from the site / Mission Control passed to run_plan; --sim-light, --readmap-store, --sim-tagless; e13's separate discovery step behind MIRLT_CAMERA_DISCOVERY=e13. 2026-11-10e13 (e13): school free roam planned inside the readable area (--readable-map); the camera check before a tags run (camera_feed); --sim-plain-roofs; tracked for the sleep 10 min after a run. 2026-11-10a (e12): the camera self-check at the start of a tags run (camera_selfcheck.py; --no-camera-check). No version string before
 
 import argparse
 import datetime as dt
@@ -203,7 +203,10 @@ def observed_split(args, robots, out):
     return (home_at or None), orders
 
 
-EMPTY_TO_READABLE = os.environ.get("MIRLT_EMPTY_TO_READABLE", "1") != "0"   # (e17, Nick 12 Nov answer 4)
+import safety_group as SG   # noqa: E402  (e18: the safety switches' automatic defaults in one place)
+EMPTY_TO_READABLE = SG.flag("MIRLT_EMPTY_TO_READABLE")   # (e17, Nick 12 Nov answer 4)
+LOST_PRIORITY = SG.flag("MIRLT_LOST_PRIORITY")           # (e18, Nick 12 Nov decision 4) it goes first
+RESCUED = []             # (e18) robots this split sent to a readable point (the plan gives them the right of way)
 
 
 def to_readable_when_empty(orders, pts, pos, readable, robots):
@@ -211,6 +214,7 @@ def to_readable_when_empty(orders, pts, pos, readable, robots):
     does not stand or leave the run) Such a robot gets one goal: the readable point nearest to where it stands that no
     other robot has in its list (else the nearest readable point at all), so it goes where the camera can identify it
     again and rejoins the plan from there. Said. MIRLT_EMPTY_TO_READABLE=0: it stays where it is (before e17)."""
+    del RESCUED[:]
     if not EMPTY_TO_READABLE or readable is None:
         return orders
     taken = {l for v in orders.values() for l in v}
@@ -233,6 +237,7 @@ def to_readable_when_empty(orders, pts, pos, readable, robots):
         lab = min(free, key=lambda l: math.dist(pts[l][:2], p[:2]))
         orders[n] = [lab]
         taken.add(lab)
+        RESCUED.append(n)
         say("TABLE SHARING: %s has no points of its own in the readable area: it goes to %s (the nearest readable "
             "point), where the camera can find it, and rejoins the plan from there" % (n, lab))
     return orders
@@ -479,6 +484,11 @@ def build(args, out):
         say("VISIT DRIVES: %s" % ("each leg in one go (no stops between points)" if ck <= 0 else
                                   "pieces of at most %.0f cm" % over["chunk_cm"]))
     over["motion"] = args.motion       # (5 Nov) stop-turn-drive (default) or curves at the corners
+    if LOST_PRIORITY and RESCUED and not over.get("priority_first"):
+        # (e18, Nick 12 Nov decision 4) recovering a robot with no readable points is high priority: it is planned first,
+        # the others round it (they move out of its way)
+        over["priority_first"] = RESCUED[0]
+        say("RIGHT OF WAY: %s goes to a readable point first; the others are planned round it" % RESCUED[0])
     if args.motion == "curves":
         say("motion: curves at the corners where there is room (--motion stopturn: stop and turn at every corner)")
     t0 = time.time()

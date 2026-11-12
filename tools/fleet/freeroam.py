@@ -48,7 +48,7 @@ for p in (HERE, TOOLS):
 import freeroam_core as FC   # noqa: E402
 
 PY = sys.executable
-VERSION = "freeroam-runner-2026-11-12e17"   # e17: the layer told who is unaccounted, its corrections (how) to the controller (an fpose, never a fix the robot's filter would refuse), revoked eliminations, the board for the gate's cap, the ML hook (off). Before: "freeroam-runner-2026-11-11e16"
+VERSION = "freeroam-runner-2026-11-12e18"   # e18 (Nick 12 Nov decisions 2, 5, 6): the Safety group said at the start and written into run.json; each robot's odometry trust record loaded from the Pi's store (odo_trust.json) and saved at every end and every minute; every calibration correction saved at ANY end (the time cap, Stop / Ctrl+C / SIGTERM, an error: save_corrections in the finally), the wheel and gyro scales in use read back at the start (get); the layer's out-and-back request passed to the controller. Before: "freeroam-runner-2026-11-12e17"   # e17: the layer told who is unaccounted, its corrections (how) to the controller (an fpose, never a fix the robot's filter would refuse), revoked eliminations, the board for the gate's cap, the ML hook (off). Before: "freeroam-runner-2026-11-11e16"
 VERSION_E16 = "freeroam-runner-2026-11-11e16"   # e16 (home 11 Nov 08:48): each RAW row's accelerometer (ax, ay) and lift flag to the controller (on_raw_motion: a jolt while standing is a contact; a lift is evidence a person moved it). Before: "freeroam-runner-2026-11-10e14b"   # e14b: a dark picture holds every robot until the camera has adjusted. e14 (10 Nov): the battery floor from MIRLT_MIN_BATTERY, else Mission Control's Advanced, else the site file, said at the start
 VERSION_E13 = "freeroam-runner-2026-11-10e13"   # e13 (10 Nov): --readable-map (school: plan only where the camera reads tags; MIRLT_ROAM_READABLE=0 the old whole table)
 VERSION_E12 = "freeroam-runner-2026-11-10e12"   # e12 (10 Nov): the bridge's "camera" messages (no pictures) said and logged; one robot held at an edge parked and shown, the others roam on; orderly shutdown
@@ -197,7 +197,8 @@ class Runner:
                                       camera_watch=None if not old else False,
                                       log=lambda kind, row: self.tables(kind, row),
                                       wiggle=None if old else (lambda n, why: self.ctrl.identity_wiggle(
-                                          self.ctrl.R[n], why, spots=getattr(self.layer, "wiggle_spots", None))),
+                                          self.ctrl.R[n], why, spots=getattr(self.layer, "wiggle_spots", None),
+                                          req=getattr(self.layer, "wiggle_req", None))),
                                       board=tuple(rect)[:4], ml_fn=ml_detector_fn())
         # (e17, 1c / 6) the controller's measured corrections widen the layer's gate for that robot
         self.ctrl.record_fn = lambda n, t, d, trav: self.layer.record(n, t, d, trav)
@@ -786,6 +787,21 @@ class Runner:
                 c.event(c.R[n], "safety armed", ", ".join("%s %g" % (k, v) for k, v in want.items()))
         if not live:
             raise SystemExit("No robot's safety layers read back: nothing moved.")
+        # (e18, 6) the drive and turn calibration in use, read back so a correction measured in this run can be saved
+        for n in live:
+            for k in ("wheel_scale", "gyro_scale"):
+                self.send(n, "get %s" % k)
+                time.sleep(0.01)
+        self.pump(1.0)
+        c.params = self.params_read
+        import safety_group as SG
+        say(SG.start_words())
+        if not self.a.dry:
+            import odo_trust as OT
+            c.trust.update(OT.load(list(c.R)))            # (e18, 5) each robot's own record from earlier runs
+            OT.link(c.trust)                              # (e18b, the replay) pooled as one fleet record
+        for n in live:
+            c.event(c.R[n], "odometry trust", c.trust[n].words())
         for n in live:
             fw = self.fw.get(n) or "?"
             new = fw >= FC.FRESH_FW
@@ -883,6 +899,9 @@ class Runner:
                 if st and st.get("stop"):
                     why = "the Pi's card is nearly full (%s)" % st.get("why")
                     break
+            if now - getattr(self, "_trust_cp", self.t0) >= FC.CHECKPOINT_S:
+                self._trust_cp = now                   # (e18, 6) a crash or power cut loses at most a minute
+                self.trust_save("checkpoint")
             if now - last_say > 60.0:
                 last_say = now
                 say("[%7.1f] " % (now - self.t0) + "; ".join(
@@ -892,18 +911,38 @@ class Runner:
             time.sleep(max(0.0, TICK_S - (self.AC.now() - now)))
         say("\nThe run ends: %s." % why)
         c.event(None, "end", why)
-        if os.environ.get("MIRLT_ARC_SAVE_AT_END", "1") != "0":
-            # (e17, item 6: the 4-hour run ended on its time cap with 126-176 curve fits a robot, consistent, and
-            # nothing saved: arc_save ran only when a robot parked at its battery floor) the same agreement rule at
-            # any end, for every robot still in the run (one that parked has saved already)
-            for r in c.R.values():
-                if r.mode not in ("out", "gone"):
-                    try:
-                        c.arc_save(r)
-                    except Exception:  # noqa: BLE001
-                        pass
-            time.sleep(0.3)
+        self.end_save(why)
         return why
+
+    def end_save(self, why):
+        """(e17 item 6, e18 decision 6) Every calibration correction this run measured, saved by the agreement rules at
+        ANY end (here at the run's own end; main's finally for Stop / Ctrl+C / SIGTERM / an error), once; and every
+        robot's odometry trust record into the Pi's store. (e17: the 4-hour run ended on its time cap with 126-176
+        consistent curve fits a robot and nothing saved.)"""
+        if getattr(self, "_end_saved", False):
+            return
+        self._end_saved = True
+        c = self.ctrl
+        try:
+            done = c.save_corrections(why)
+            self.saved_corrections = done
+        except Exception as e:  # noqa: BLE001
+            say("(the calibration corrections were not saved: %s)" % e)
+        try:
+            self.pump(0.3)
+        except Exception:  # noqa: BLE001
+            time.sleep(0.3)
+        self.trust_save("the run ended: %s" % why)
+
+    def trust_save(self, why):
+        import safety_group as SG
+        if self.a.dry or not (SG.flag("MIRLT_SAVE_CAL_AT_END") and SG.flag("MIRLT_BLIND_ALLOW")):
+            return None
+        import odo_trust as OT
+        p = OT.save(self.ctrl.trust, why=why)
+        if p and "checkpoint" not in why:
+            say("Odometry trust records saved (%s): %s" % (p, "; ".join(t.words() for t in self.ctrl.trust.values())))
+        return p
 
     def write_state(self, why):
         c = self.ctrl
@@ -912,7 +951,10 @@ class Runner:
                                   lost=r.lost is not None) for n, r in c.R.items()},
                   counts=c.counts, tracking=self.layer.summary(),
                   tagfree=self.tagfree.summary() if self.tagfree is not None else None,
-                  filters={n: (r.fp.summary() if r.fp is not None else None) for n, r in c.R.items()})
+                  filters={n: (r.fp.summary() if r.fp is not None else None) for n, r in c.R.items()},
+                  odo_trust={n: t.summary() for n, t in getattr(c, "trust", {}).items()},     # (e18, 5)
+                  excursions=list(getattr(c, "excursions", []))[-50:],
+                  corrections_saved=list(getattr(self, "saved_corrections", []) or []))
         ep = list(getattr(c, "edge_parked", None) or [])
         st["edge_parked"] = [q["words"] for q in ep]       # (e12) robots parked at an edge: someone must move them
         nh = c.needs_hand() if hasattr(c, "needs_hand") else []
@@ -1431,6 +1473,7 @@ def main(argv=None):
                                   pose_source=a.pose_source or __import__("fused_pose").POSE_SOURCE,
                                   gyro_heading=bool(a.gyro_heading), old_tracking=bool(a.old_tracking),
                                   brick_watch=not a.no_brick_watch),
+                    safety_group=__import__("safety_group").snapshot(),
                     lost_mode=a.lost_mode, dry=a.dry, reflex_drill=a.reflex_drill, started=dt.datetime.now().isoformat(timespec="seconds"),
                     argv=sys.argv[1:])
     try:
@@ -1491,6 +1534,11 @@ def main(argv=None):
             except Exception:  # noqa: BLE001
                 pass
         if runner is not None:
+            if getattr(runner, "t0", None) is not None:
+                try:
+                    runner.end_save(why)       # (e18, 6) Stop / Ctrl+C / SIGTERM / an error: saved here too
+                except Exception as e:  # noqa: BLE001
+                    say("(corrections not saved at the end: %s)" % e)
             runner.write_state(why)
             runner.save_workspace()            # (e10, C2) the proven workspace, kept for this site
             runner.close()

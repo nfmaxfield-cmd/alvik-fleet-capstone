@@ -542,6 +542,8 @@ def _blind_run(rule, start, gap, board=(0, 0, 300, 300)):
         sim = S.Sim(4, 0.03, dead_robot=False, pi_freeze=False, dropouts=False, board=board,
                     starts={"Center": start}, cam_gaps=[("Center", gap[0], gap[1])])
         c, track = sim.ctrl, []
+        c.blind_allow = False       # (e18) pinned to e13's fixed blind numbers (2 + 0.07 cm per cm), which this compares;
+        #                             e18's own-record bubble is tested in test_e18_safety_blind.py
         orig = c.tick
 
         def tick(t):

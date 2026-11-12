@@ -25,18 +25,24 @@ Pure functions and small classes (no sockets, no clock of their own): tests/test
 import json
 import math
 import os
+import sys
 import time
 
-VERSION = "2026-11-10e14"   # e14 (school 17:46, a slow tag detector in dim light): fresh_fix_s, how old a fix may be and still count as seen, from the robot's measured fix interval (MIRLT_FIX_GAP_RULE=fixed: 0.6 s as before); between_fixes_cm. e13 (10 Nov, Nick "derived, risk-based thresholds"): no_picture_limit, the time a robot may go
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+import safety_group as SG    # noqa: E402  (e18: every safety switch's automatic default lives in safety_group.py)
+
+VERSION = "2026-11-12e18"   # e18: the switches read through safety_group (one place, the same defaults). Before: "2026-11-10e14"   # e14 (school 17:46, a slow tag detector in dim light): fresh_fix_s, how old a fix may be and still count as seen, from the robot's measured fix interval (MIRLT_FIX_GAP_RULE=fixed: 0.6 s as before); between_fixes_cm. e13 (10 Nov, Nick "derived, risk-based thresholds"): no_picture_limit, the time a robot may go
 #                              without camera pictures, from its speed, heading, uncertainty and the edge room. 2026-11-07a: e08
 VERSION_A = "2026-11-07a"
 
 # =============================================================================================== switches
 # (CLAUDE.md "keep features, switch them off") each old rule stays, behind a switch decided here by default and out of a
 # new user's way. Environment variables let a run (or a test) pick the old rule without code changes.
-EDGE_RULE = os.environ.get("MIRLT_EDGE_RULE", "derived")       # "derived" (e08) | "fixed" (the numbers before e08)
-POSE_RULE = os.environ.get("MIRLT_POSE_RULE", "widen")         # "widen" (e08) | "wait2s" (observe.PoseAgree as before)
-KEEPOUT_RULE = os.environ.get("MIRLT_KEEPOUT_RULE", "fade")    # "fade" (e08, unconfirmed ones expire) | "permanent"
+EDGE_RULE = SG.value("MIRLT_EDGE_RULE")       # "derived" (e08) | "fixed" (the numbers before e08)
+POSE_RULE = SG.value("MIRLT_POSE_RULE")         # "widen" (e08) | "wait2s" (observe.PoseAgree as before)
+KEEPOUT_RULE = SG.value("MIRLT_KEEPOUT_RULE")    # "fade" (e08, unconfirmed ones expire) | "permanent"
 
 # =============================================================================================== A2: the edge rule
 HALF_DIAG_CM = 6.72      # the 9.5 cm square's half diagonal: a circle round the body however it turns. Not chosen
@@ -54,7 +60,7 @@ CAM_EDGE_BIAS_CM = {"lights": 5.0, "motion": 5.0, "tags": 0.0, "none": 0.0}
                          # nose (onto the nose: outward facing the edge, inward backing or side-on), so it is added as
                          # an error, not a correction. Roof tags read the roof's middle: 0. DOE: yes (a tape-measured
                          # edge approach at 0 / 45 / 90 deg; docs/doe-backlog.md)
-CAM_BIAS_ON = os.environ.get("MIRLT_CAM_EDGE_BIAS", "on") != "off"   # switch: "off" drops the bias term
+CAM_BIAS_ON = SG.value("MIRLT_CAM_EDGE_BIAS") != "off"   # switch: "off" drops the bias term
 STOP_P95_CM = {5.0: 1.4, 7.5: 2.1, 10.0: 2.0, 13.0: 2.4}
                          # MEASURED: how far past its planned end a drive stops (the camera's end, its 0.44 s delay times
                          # the speed added back), 95th percentile by speed, the same 2,176 drives. The median is 0.1 cm
@@ -347,7 +353,7 @@ SURE_TOL_CM = 3.0        # own pose and camera within this of each other (3 came
                          # incidents caught)
 SURE_CAM_AGE_S = 0.6     # a camera fix older than this (beyond the measured delay) is not fresh (freeroam LOST_AFTER_S)
 
-FIX_GAP_RULE = os.environ.get("MIRLT_FIX_GAP_RULE", "derived")   # (e14) "derived" | "fixed" (SURE_CAM_AGE_S alone)
+FIX_GAP_RULE = SG.value("MIRLT_FIX_GAP_RULE")   # (e14) "derived" | "fixed" (SURE_CAM_AGE_S alone)
 FIX_GAP_FACTOR = 1.5     # (e14) = freeroam_core.LOST_GAPS (e13): a robot is unseen only after 1.5 x its longest recent gap
 FIX_GAP_N = 40           # ... between fixes (its last 40). Not chosen here
 FIX_GAP_PCT = 0.9        # (e14) the gap used: the 90th percentile of those (CHOSEN: one long loss among 40 is ignored,
@@ -555,7 +561,7 @@ def tilt_recovery_tries(heading_deg, inward_deg, back_inward):
 #   The third hazard (Right's nose over y = 0 for 16 min, 5 Nov) never tilted past 3.5 deg: only the line sensors caught it.
 TILT_LIMITS = {"tilt_stop_deg": 4.0, "tilt_ms": 300.0, "stand_tilt_deg": 2.5, "stand_tilt_s": 2.0}
 TILT_LIMITS_OLD = {"tilt_stop_deg": 5.0, "tilt_ms": 300.0, "stand_tilt_deg": 2.5, "stand_tilt_s": 2.0}
-TILT_RULE = os.environ.get("MIRLT_TILT_RULE", "logs")       # "logs" (e08) | "old" (5 deg)
+TILT_RULE = SG.value("MIRLT_TILT_RULE")       # "logs" (e08) | "old" (5 deg)
 
 
 def tilt_limits():

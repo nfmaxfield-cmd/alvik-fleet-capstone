@@ -6,6 +6,11 @@ layer names them and the controller gets them as the Pi's runner gives them (fre
 (how) as on_fix(..., how), the rest as fixes the robot's own filter would weigh, gated as firmware pose.h does
 (fix_gate 4 sigmas and 3 cm: a far fix is refused). Turn steps (a wiggle) are carried out (the heading changes, the
 lights spot swings round its middle, 1 cm ahead of it); drive steps are carried out straight at their speed.
+
+(e18) Optional, all off by default (the e17 tests run as before): odo {robot: (wheel_err, gyro_err, noise)}: its own pose
+drives on its wheels and gyro with these errors (a 3 % wheel error drives its own pose 3 % further than the truth; noise:
+the wheel step's and the turn step's relative random error), and raw=True feeds its wheels and yaw rate as RAW rows
+(on_raw_full); dark [rects]: the camera sees nothing there; workspace: the controller's proven workspace.
 """
 import math
 import os
@@ -25,16 +30,23 @@ BOARD = (0.0, 0.0, 122.24, 121.92)
 
 class Rig:
     def __init__(self, truth, own_off=None, eliminate=True, gate_record=True, delay=0.45, seed=1, noise=0.3,
-                 lights_off_cm=1.0, wiggle=True, fps=5.0, never_still=False):
+                 lights_off_cm=1.0, wiggle=True, fps=5.0, never_still=False, odo=None, dark=(), workspace=None,
+                 raw=False, layer_kw=None, spin_flag=True, fuse_then=False):
         self.rng = random.Random(seed)
         self.names = list(truth)
         self.truth = {n: list(v) for n, v in truth.items()}          # x, y, heading
         self.off = {n: list((own_off or {}).get(n, (0.0, 0.0, 0.0))) for n in self.names}
         self.events, self.logs, self.sent = [], [], []
-        self.c = FC.Controller(self.names, BOARD, self.out, self.log, pose_source="blend")
+        self.odo = {n: tuple((odo or {}).get(n, (0.0, 0.0, 0.0))) for n in self.names}
+        self.dark = [tuple(d) for d in dark]
+        self.raw = bool(raw)
+        self.spin_flag = bool(spin_flag)     # (e18) False: the home lights bridge (no spin flag on its sightings)
+        self.fuse_then = bool(fuse_then)     # (e18) a fix fused against its pose at the picture's time (as pose.h)
+        self.own_hist = {}
+        self.c = FC.Controller(self.names, BOARD, self.out, self.log, pose_source="blend", workspace=workspace)
         self.layer = TL.TrackingLayer(self.names, ("motion", "lock", "lights"), log=lambda k, r: self.logs.append(r),
                                       wiggle=(self.wiggle if wiggle else None), board=BOARD, eliminate=eliminate,
-                                      gate_record=gate_record, camera_watch=False)
+                                      gate_record=gate_record, camera_watch=False, **(layer_kw or {}))
         self.c.record_fn = lambda n, t, d, trav: self.layer.record(n, t, d, trav)
         self.c.never_still = never_still
         self.delay, self.noise, self.lights_off, self.fps = delay, noise, lights_off_cm, fps
@@ -66,6 +78,15 @@ class Rig:
         elif p[0] == "fix":                        # pose.fix with its gate (fix_gate 4, var ~1 cm2, sigma ~1.5)
             fx, fy = float(p[2]), float(p[3])
             ox, oy, _ = self.own(name)
+            if self.fuse_then:
+                # (e18) the firmware fuses a fix against its pose AT THE PICTURE'S TIME (pose.h keeps its history),
+                # not its pose now: before, a delayed fix pulled a driving robot's own pose back along its track
+                # (~1.5 cm a fix at 10 cm/s), and the course check read that as a 15 deg heading error
+                tf = int(p[1]) / 1000.0
+                hist = self.own_hist.get(name) or []
+                then = next((q for q in reversed(hist) if q[0] <= tf + 1e-6), None)
+                if then is not None:
+                    ox, oy = then[1], then[2]
             if math.hypot(fx - ox, fy - oy) > max(3.0, 4.0 * math.sqrt(1.0 + 1.5 ** 2)):
                 self.fw_refused[name] += 1
             else:
@@ -113,7 +134,8 @@ class Rig:
         self.c.on_step(name, sid, "started")
 
     def wiggle(self, name, why):
-        self.c.identity_wiggle(self.c.R[name], why, spots=getattr(self.layer, "wiggle_spots", None))
+        return self.c.identity_wiggle(self.c.R[name], why, spots=getattr(self.layer, "wiggle_spots", None),
+                                      req=getattr(self.layer, "wiggle_req", None))
 
     def log(self, table, row):
         if table == "events":
@@ -139,6 +161,8 @@ class Rig:
                 if cu is None:
                     self._start_next(n)
                     cu = self.cur.get(n)
+                th_before = self.truth[n][2]
+                xy_before = (self.truth[n][0], self.truth[n][1])
                 if cu is not None and cu["kind"] == "T":
                     f = min(1.0, (self.t - cu["t0"]) / max(1e-6, cu["t1"] - cu["t0"]))
                     self.truth[n][2] = FC.wrap180(cu["h0"] + f * FC.wrap180(cu["h1"] - cu["h0"]))
@@ -159,6 +183,11 @@ class Rig:
                         self.cur.pop(n)
                         self.done_ids.setdefault(n, set()).add(cu["sid"])
                         self.c.on_step(n, cu["sid"], "done")
+                self._odo_step(n, xy_before, th_before, dt, cu)
+                if self.fuse_then:
+                    oh_ = self.own_hist.setdefault(n, [])
+                    oh_.append((self.t,) + tuple(self.own(n)))
+                    del oh_[:-80]
                 tr = self.track.setdefault(n, [])
                 if not tr or tr[-1][1:] != tuple(round(v_, 3) for v_ in self.truth[n]):
                     tr.append((self.t,) + tuple(round(v_, 3) for v_ in self.truth[n]))
@@ -171,9 +200,12 @@ class Rig:
                 dets = []
                 for n in self.names:
                     tx, ty, th = self.truth[n]
+                    if any(d[0] <= tx <= d[2] and d[1] <= ty <= d[3] for d in self.dark):
+                        continue                               # (e18) the camera sees nothing on a dark patch
                     hx = tx + self.lights_off * math.cos(math.radians(th)) + self.rng.gauss(0, self.noise)
                     hy = ty + self.lights_off * math.sin(math.radians(th)) + self.rng.gauss(0, self.noise)
-                    dets.append(TL.Det("lights", self.t, hx, hy, spin=self.cur.get(n, {}).get("kind") == "T"))
+                    dets.append(TL.Det("lights", self.t, hx, hy, spin=self.spin_flag and
+                                       self.cur.get(n, {}).get("kind") == "T"))
                 for n, r in self.c.R.items():
                     self.layer.set_unaccounted(n, self.c.unaccounted_why(r))
                     o = self.c.own_at(r, self.t)
@@ -194,6 +226,35 @@ class Rig:
             self.c.tick(self.t)
             if hook is not None:
                 hook(self)
+
+    def _odo_step(self, n, xy0, th0, dt, cu):
+        """(e18) Its own pose drives on its wheels and gyro with its errors; RAW rows of what they measured."""
+        we, ge, nz = self.odo[n]
+        x1, y1, th1 = self.truth[n]
+        d = math.hypot(x1 - xy0[0], y1 - xy0[1])
+        dth = FC.wrap180(th1 - th0)
+        sg = -1.0 if (cu is not None and cu.get("rev")) else 1.0
+        if not (we or ge or nz or self.raw):
+            return
+        rd = self.odo_rng.gauss(0.0, nz) if nz else 0.0
+        rt = self.odo_rng.gauss(0.0, nz) if nz else 0.0
+        own_d = d * (1.0 + we + rd)
+        own_dth = dth * (1.0 + ge + rt)
+        ox, oy, oh = self.own(n)
+        # its own pose: the truth's step re-done on its own heading with its errors, kept as an offset from the truth
+        oh_mid = oh + 0.5 * own_dth
+        ndx, ndy = sg * own_d * math.cos(math.radians(oh_mid)), sg * own_d * math.sin(math.radians(oh_mid))
+        self.off[n][0] += ndx - (x1 - xy0[0])
+        self.off[n][1] += ndy - (y1 - xy0[1])
+        self.off[n][2] = FC.wrap180(self.off[n][2] + own_dth - dth)
+        if self.raw and dt > 0:
+            self.c.on_raw_full(n, self.t, sg * own_d / dt, own_dth / dt, None, d < 1e-6 and abs(dth) < 1e-6)
+
+    @property
+    def odo_rng(self):
+        if not hasattr(self, "_odo_rng"):
+            self._odo_rng = random.Random(4242)
+        return self._odo_rng
 
     def kinds(self, name=None):
         return [e[2] for e in self.events if name is None or e[1] == name]

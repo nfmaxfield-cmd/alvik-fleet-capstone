@@ -46,8 +46,14 @@ Sweep 2 with whether a DOE should set them.
 import itertools
 import math
 import os
+import sys
 
-VERSION = "tracking-layer-2026-11-12e17"   # e17 (home 11 Nov: Left held 84 min 48 cm from where the camera saw it standing): observe, then trust. (a) a STEADY sighting no other robot can claim, with exactly one standing robot unaccounted for, is that robot however far from its own pose (assigned by elimination, flagged how="elimination", then on probation: revoked if it stays when the robot drives); (b) two or more unaccounted, or two unclaimed steady sightings: a wiggle of one robot, the sighting that turns (spin flag, heading change or scatter past its own standing noise) is it; (c) the gate grows with each robot's MEASURED own-vs-camera record (drift per cm, recent correction sizes; the board caps it), the e09 numbers stay as the starting guess; (4) the ML detector on demand (off: no model yet). Switches MIRLT_ELIMINATE, MIRLT_GATE_RECORD, MIRLT_ML_ON_DEMAND
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+import safety_group as SG     # noqa: E402  (e18: the safety switches' defaults in one place)
+
+VERSION = "tracking-layer-2026-11-12e18b"   # e18b (the coordinator's replay of all 10 home runs, 5 Nov 14:55): the elimination counts robots in an unresolved close pass as unaccounted and refuses a spot on another robot's own pose (MIRLT_ELIM_PAIR_GUARD). e18 (Nick 12 Nov, decision 1): when two or more robots are unaccounted and a wiggle cannot tell their candidate sightings apart (none turned, both turned, or no turn on the spot is safe there), ONE robot at a time makes a short slow straight out-and-back (its length from the candidates' measured camera noise, 2-4 cm; its speed from the picture rate): the sighting that went out and came back is it (MIRLT_OUTBACK_ID=0: wiggles only, as e17). The e17 switches read through the Safety group. Before: "tracking-layer-2026-11-12e17"   # e17 (home 11 Nov: Left held 84 min 48 cm from where the camera saw it standing): observe, then trust. (a) a STEADY sighting no other robot can claim, with exactly one standing robot unaccounted for, is that robot however far from its own pose (assigned by elimination, flagged how="elimination", then on probation: revoked if it stays when the robot drives); (b) two or more unaccounted, or two unclaimed steady sightings: a wiggle of one robot, the sighting that turns (spin flag, heading change or scatter past its own standing noise) is it; (c) the gate grows with each robot's MEASURED own-vs-camera record (drift per cm, recent correction sizes; the board caps it), the e09 numbers stay as the starting guess; (4) the ML detector on demand (off: no model yet). Switches MIRLT_ELIMINATE, MIRLT_GATE_RECORD, MIRLT_ML_ON_DEMAND
 VERSION_D = "tracking-layer-2026-11-07d"   # d (Nick 7 Nov): the camera watch ON by default (e10 method: 0 false alarms in 48 rehearsal runs); MIRLT_CAMERA_WATCH=0 turns it off
 VERSION_C = "tracking-layer-2026-11-07c"   # c (e10): camera watch rebuilt (averaged checkpoints, noise-aware votes)
 # b: camera watch off by default (Nick 7 Nov: off until its false alarms are understood)
@@ -56,8 +62,8 @@ SOURCES_BY_TRACKING = {"lights": ("motion", "lock", "lights"), "tags": ("tags", 
                        "none": ()}
 OLD_SOURCES = {"lights": ("motion", "lights"), "tags": ("tags",), "none": ()}     # before e09 (the switch)
 ML_DETECTOR = os.environ.get("MIRLT_ML_DETECTOR", "0") == "1"     # the ML slot: OFF until measured
-IDENTITY = os.environ.get("MIRLT_IDENTITY", "wiggle")              # "wiggle" (e09) | "predict" (before)
-CAMERA_WATCH = os.environ.get("MIRLT_CAMERA_WATCH", "1") != "0"    # the camera watch (turn directions); ON by default (Nick 7 Nov, after e10's fix: 0 false alarms in 48 runs); 0: off (e09b had it off)
+IDENTITY = SG.value("MIRLT_IDENTITY")              # "wiggle" (e09) | "predict" (before)
+CAMERA_WATCH = SG.flag("MIRLT_CAMERA_WATCH")    # the camera watch (turn directions); ON by default (Nick 7 Nov, after e10's fix: 0 false alarms in 48 runs); 0: off (e09b had it off)
 
 GATE_CM = 6.0            # as e02_multitrack.GATE_CM: a sighting this near a prediction can be that robot ...
 GATE_GROW_CMS = 10.0     # ... plus this much per second since it was last seen for sure (e02_multitrack)
@@ -92,7 +98,7 @@ BRICK_R_CM = 6.0         # CHOSEN: the keep-out round a confirmed object (a bric
 OWN_RESETS = os.environ.get("MIRLT_OWN_RESETS", "1") != "0"   # (e10) 0: own-pose re-sets read as motion (as e09)
 OWN_JUMP_CM = 5.0        # (e10) CHOSEN: an own pose step over this ...
 OWN_MAX_CMS = 30.0       # ... plus 30 cm/s x its time (top speed 12.5 cm/s, x 2.4) is a re-set, not motion
-OWN_RESET_RULE = os.environ.get("MIRLT_OWN_RESET_RULE", "velocity")   # (e17) "velocity": a step off where its own
+OWN_RESET_RULE = SG.value("MIRLT_OWN_RESET_RULE")   # (e17) "velocity": a step off where its own
                          # recent velocity carries it by over OWN_JUMP_CM (+ the speed ramp) is a re-set, at any picture
                          # rate; "speed": the e10 rule (OWN_JUMP_CM + 30 cm/s x dt: at the home Pi's 4-5 pictures a second
                          # it read 25 of 39 re-seeds of the 08:26 run as drives, 11-12 cm a step: the dropped sightings)
@@ -119,8 +125,29 @@ CAM_MIN_TURN_DEG = 8.0   # (e10) CHOSEN: an expected chord turn under this is no
 SOURCE_SIGMA = {"tags": 0.6, "motion": 1.0, "lock": 1.2, "lights": 1.5, "ml": 1.5}   # see fused_pose.SRC_SIGMA
 
 # (e17) observe, then trust: what the camera sees standing still wins over a robot's own drifted pose
-ELIMINATE = os.environ.get("MIRLT_ELIMINATE", "1") != "0"        # (a, b) assign by elimination; 0: as e16 (gate only)
-GATE_RECORD = os.environ.get("MIRLT_GATE_RECORD", "1") != "0"    # (c) the gate from each robot's measured record
+ELIMINATE = SG.flag("MIRLT_ELIMINATE")        # (a, b) assign by elimination; 0: as e16 (gate only)
+GATE_RECORD = SG.flag("MIRLT_GATE_RECORD")    # (c) the gate from each robot's measured record
+# (e18, Nick 12 Nov decision 1) the out-and-back identity drive, after a wiggle that could not tell
+OUTBACK_ID = SG.flag("MIRLT_OUTBACK_ID")
+# (e18, the coordinator's replay of all 10 home runs: 5 Nov 14:55, Right corrected onto Left's spot 56 cm away)
+ELIM_PAIR_GUARD = SG.flag("MIRLT_ELIM_PAIR_GUARD")    # robots in a close pass still count as unaccounted, and a spot
+                         # on another robot's OWN pose is never given to an unaccounted robot by elimination
+OWN_ON_SPOT_CM = 6.0     # ... "on its own pose": within the firmware's fix gate (4 sigmas, ~6 cm: pose.h), where that
+                         # robot could simply be standing. Not chosen anew
+OB_K = 4.0               # a candidate "moved" when its far-end mean is 4 of its own camera sigmas from where it stood (as
+                         # freeroam_core.MOVED_IN_K: ~3e-5 by chance on Gaussian noise). Statistical; DOE: no
+OB_N = 3                 # pictures averaged at the far end (as STEADY_N). Not chosen anew
+OB_SD_FLOOR = 0.3        # cm: the smallest camera sigma believed (a spot standing perfectly still for a second is
+                         # rounding, not a sigma). CHOSEN; DOE: no
+OB_FAR_SHARE = 0.75      # the OB_N farthest sightings average about this share of the drive (pictures on the way out and
+                         # back included; the e18 batch: 1.5 of 2.0 cm at 5 pictures a second). Measured in the rig;
+                         # DOE: yes, on real out-and-backs (the lights spot's far-end mean against the drive)
+OB_MIN_CM = 2.0          # Nick 12 Nov: 2-4 cm. The drive is OB_K x its noise x sqrt(2 / OB_N) / OB_FAR_SHARE, inside this
+OB_MAX_CM = 4.0
+OB_V_MIN = 2.0           # cm/s: the firmware's slowest drive (driveLine's floor). Not chosen
+OB_V_MAX = 5.0           # cm/s: "slow": the slowest menu speed (freeroam_core.BACK_V). Not chosen anew
+OB_SLACK_S = 4.0         # CHOSEN: the watch runs 2 L / v + this (the command's latency, fixes up to ~1.5 s late, the two
+                         # steps' starts); it ends earlier once the moved sighting is back. DOE: no (a time-out on a watch)
 ML_ON_DEMAND = os.environ.get("MIRLT_ML_ON_DEMAND", "0") == "1"  # (4) OFF: no detector model exists yet
 STEADY_S = 1.0           # CHOSEN (Nick's "~1 s"): a sighting standing this long ...
 STEADY_N = 3             # ... seen at least this often (the home bridge handled 1-2 pictures a robot a second at 99 % CPU) ...
@@ -181,7 +208,8 @@ class Track:
 class TrackingLayer:
     def __init__(self, names, sources=("motion", "lock", "lights"), identity=None, parked_watch=True,
                  brick_watch=True, log=None, lock_seed=None, wiggle=None, cluster=True, camera_watch=None,
-                 eliminate=None, gate_record=None, board=None, ml_fn=None, ml_on_demand=None):
+                 eliminate=None, gate_record=None, board=None, ml_fn=None, ml_on_demand=None, outback=None,
+                 pair_guard=None):
         """log(kind, row); lock_seed(name, t, x, y): ask the lock-on to lock on that robot there (bridge / simulator);
         wiggle(name, why): ask the controller for an identity wiggle of that robot (None: no wiggle can be made, the
         robots keep driving on their filters until motion tells them apart)."""
@@ -222,6 +250,10 @@ class TrackingLayer:
         self.elim_wait = {}         # robot -> time the next elimination wiggle may be asked
         self.revoked = []           # [dict(robot, t, x, y)] eliminations taken back (take_revoked)
         self.wiggle_spots = None    # while an elimination wiggle is asked: the candidate spots (the run checks each)
+        self.wiggle_req = None      # (e18) while one is asked: dict(kind "wiggle" | "outback", spots, L, v)
+        self.outback_on = OUTBACK_ID if outback is None else bool(outback)
+        self.pair_guard = ELIM_PAIR_GUARD if pair_guard is None else bool(pair_guard)
+        self.id_fails = {}          # (e18) robot -> dict(wiggle=n, outback=n): tries that showed nothing
         self.frame_ts = []
         self.ml_fn = ml_fn          # (4) fn(name, t, why, (x, y, r)) -> [Det] or None: the detector, run on demand
         self.ml_on = (ML_ON_DEMAND if ml_on_demand is None else bool(ml_on_demand)) and ml_fn is not None
@@ -229,7 +261,8 @@ class TrackingLayer:
         self.ml_calls = []
         self.want_ml = {}           # name -> why (a heading check, a disagreement), from the run
         for k in ("eliminated", "elim_wiggles", "elim_wiggle_named", "elim_wiggle_none", "elim_revoked",
-                  "elim_confirmed", "elim_ambiguous", "ml_calls", "ml_dets"):
+                  "elim_confirmed", "elim_ambiguous", "ml_calls", "ml_dets", "outbacks", "outback_named",
+                  "outback_none", "outback_refused", "wiggle_refused"):
             self.counts[k] = 0
 
     # -- inputs from the robots --------------------------------------------------------------------------------------
@@ -314,8 +347,21 @@ class TrackingLayer:
                 # the chosen 0.15; an unaccounted robot's gate also covers its usual correction; the ceiling from
                 # its record and the board (the e09 25 cm is the starting guess, never narrowed)
                 per, p90 = self.drift(name)
-                gate = GATE_CM + max(GATE_PER_CM, per) * trav + GATE_ROOT_CM * math.sqrt(max(0.0, t - ts))
-                if self._unaccounted(name, t):
+                unacc = self._unaccounted(name, t)
+                root = GATE_ROOT_CM * math.sqrt(max(0.0, t - ts))
+                if unacc and trav < STAND_CM and sum(1 for v in self.flags.values() if v) >= 2:
+                    # (e18, found by the identity batch) with two or more robots flagged unaccounted, one whose own
+                    # wheels have not driven since it was last sure cannot have drifted with time: no time growth
+                    # (after ~40 s it reached 20 cm and took the OTHER unaccounted robot's sighting: a swap). Being
+                    # pushed is the elimination's / identity moves' job. With fewer (a close pass, e09's test) the e17
+                    # growth stays: it is how a standing robot beside another gets its sighting back to settle the pass
+                    root = 0.0
+                gate = GATE_CM + max(GATE_PER_CM, per) * trav + root
+                if unacc and sum(1 for v in self.flags.values() if v) < 2:
+                    # (e17) widened to its usual correction; (e18, found by the identity batch) only while it is the one
+                    # robot the run cannot account for: with two, the widened gate of one took the OTHER's sighting (its
+                    # own pose happened to lie 7 cm from it) and the elimination named the other on the leftover: a swap.
+                    # With two or more, who is who is the identity moves' job (wiggle, out-and-back)
                     gate = max(gate, GATE_CM + p90)
                 gate = min(self.gate_max(name), gate)
             else:
@@ -584,6 +630,11 @@ class TrackingLayer:
                  n not in self.wiggles and self.T[n].own]
         if not unacc:
             return out
+        # (e18) every robot the run cannot account for counts, a close pass or a wiggle included: they cannot be named
+        # here, but they can be the steady spot (5 Nov 14:55: Left and Center in an unresolved pass were left out, so
+        # Right looked like the only one and took Left's spot)
+        n_unacc = len(unacc) + (sum(1 for n in self.names if n not in named and n not in unacc and
+                                     self._unaccounted(n, t) and self.T[n].own) if self.pair_guard else 0)
         cands = []
         for sp in self.spots:
             if not self._steady(sp, t):
@@ -601,6 +652,15 @@ class TrackingLayer:
                         math.hypot(sp["mx"] - tm.sure[1], sp["my"] - tm.sure[2]) <= CLOSE_CM:
                     claim = True
                     break
+            if not claim and self.pair_guard:
+                # (e18) a spot on another robot's OWN pose is that robot's as likely as anyone's: never eliminated onto
+                # (5 Nov 14:55: Left's own pose was 0.1 cm from the spot given to Right)
+                sp["own_of"] = None
+                for m in self.names:
+                    o = self.T[m].own[-1] if self.T[m].own else None
+                    if o is not None and math.hypot(sp["mx"] - o[1], sp["my"] - o[2]) <= OWN_ON_SPOT_CM:
+                        sp["own_of"] = m
+                        break
             if not claim:
                 cands.append(sp)
         if not cands:
@@ -608,6 +668,17 @@ class TrackingLayer:
         t0 = max(sp["pts"][0][0] for sp in cands) if cands else t
         standing = [n for n in unacc if self._standing(self.T[n], max(t - STEADY_S, min(t0, t - STEADY_S)), t)]
         if not standing:
+            return out
+        if len(standing) == 1 and len(cands) == 1 and len(unacc) == 1 and self.pair_guard and (
+                n_unacc > 1 or (cands[0].get("own_of") not in (None, standing[0]))):
+            # (e18) another unaccounted robot (in a pass) or another robot's own pose on the spot: not guessed
+            self.counts["elim_refused_guard"] = self.counts.get("elim_refused_guard", 0) + 1
+            if t >= self.elim_wait.get(standing[0] + ":guard", -1e9):
+                self.elim_wait[standing[0] + ":guard"] = t + 5.0
+                self.log("tracking", dict(t=round(t, 2), robot=standing[0], what="elimination refused",
+                                          why="%s" % ("%d robots unaccounted (a close pass included)" % n_unacc
+                                                      if n_unacc > 1 else "the spot is on %s's own pose" %
+                                                      cands[0].get("own_of"))))
             return out
         if len(standing) == 1 and len(cands) == 1 and len(unacc) == 1:
             n, sp = standing[0], cands[0]
@@ -634,16 +705,59 @@ class TrackingLayer:
             return out
         tries = self.elim_wait.get(w + ":tries", 0) + 1
         self.elim_wait[w + ":tries"] = tries
-        self.elim_wig = dict(robot=w, t0=t, tries=tries, unacc=list(unacc), cands=[
-            dict(x=sp["mx"], y=sp["my"], sd0=self._sd(sp["pts"]), sig=sp["sig"], seen=[]) for sp in cands])
-        self.counts["elim_wiggles"] += 1
-        self.log("tracking", dict(t=round(t, 2), robot=w, what="wiggle asked",
-                                  why="elimination: %d robots unaccounted (%s), %d steady sightings nobody claims"
-                                  % (len(unacc), ", ".join(unacc), len(cands))))
-        self.wiggle_spots = [(c["x"], c["y"]) for c in self.elim_wig["cands"]]
-        self.wiggle_fn(w, "which of %d steady camera sightings it is" % len(cands))
-        self.wiggle_spots = None
+        cl = [dict(x=sp["mx"], y=sp["my"], sd0=self._sd(sp["pts"]), sig=sp["sig"], n0=len(sp["pts"]), seen=[])
+              for sp in cands]
+        fails = self.id_fails.setdefault(w, dict(wiggle=0, outback=0))
+        kinds = ["wiggle", "outback"] if (not self.outback_on or fails["wiggle"] <= fails["outback"]) else \
+            ["outback", "wiggle"]
+        if not self.outback_on:
+            kinds = ["wiggle"]
+        for kind in kinds:
+            req = dict(kind=kind, spots=[(c["x"], c["y"]) for c in cl])
+            if kind == "outback":
+                req.update(self._outback_size(cl))
+            self.elim_wig = dict(robot=w, t0=t, tries=tries, unacc=list(unacc), cands=cl, kind=kind, req=req)
+            self.log("tracking", dict(t=round(t, 2), robot=w, what="%s asked" % kind,
+                                      why="elimination: %d robots unaccounted (%s), %d steady sightings nobody claims%s"
+                                      % (len(unacc), ", ".join(unacc), len(cands), "" if kind == "wiggle" else
+                                         "; out and back %.1f cm at %.1f cm/s (its camera noise %.2f cm)" % (
+                                             req["L"], req["v"], req["sig"]))))
+            self.wiggle_spots = req["spots"]
+            self.wiggle_req = req
+            try:
+                ok = self.wiggle_fn(w, "which of %d steady camera sightings it is" % len(cands))
+            finally:
+                self.wiggle_spots = None
+                self.wiggle_req = None
+            if ok is False:
+                # (e18) the run refused it (no turn / drive is safe at every candidate): the other kind, at once
+                fails[kind] += 1
+                self.counts["%s_refused" % kind] += 1
+                self.elim_wig = None
+                continue
+            self.counts["elim_wiggles" if kind == "wiggle" else "outbacks"] += 1
+            return out
+        self.elim_wait[w] = t + min(ELIM_RETRY_MAX_S, WIGGLE_RETRY_S * tries)
+        self.log("tracking", dict(t=round(t, 2), robot=w, what="identity move refused",
+                                  why="no wiggle%s is safe at every candidate: not guessed; asked again in %.0f s" % (
+                                      " or out-and-back" if self.outback_on else "", self.elim_wait[w] - t)))
         return out
+
+    def _outback_size(self, cl):
+        """(e18) The out-and-back's length and speed from the candidates' MEASURED camera noise (their standing
+        scatter, the largest of them: the drive must show on whichever one it is) and the layer's measured picture gap:
+        L = OB_K x sigma x sqrt(2 / OB_N) within Nick's 2-4 cm; v = L / (OB_N x picture gap), so OB_N pictures see it at
+        the far end, within 2-5 cm/s."""
+        sig = max([max(OB_SD_FLOOR, c["sd0"]) for c in cl] or [OB_SD_FLOOR])
+        need = OB_K * sig * math.sqrt(2.0 / OB_N)          # what the far end's mean must show past its noise
+        L = min(OB_MAX_CM, max(OB_MIN_CM, need / OB_FAR_SHARE))
+        ts = self.frame_ts[-21:]
+        gaps = sorted(b - a for a, b in zip(ts, ts[1:]) if b > a)
+        gap = gaps[len(gaps) // 2] if gaps else 0.25
+        v = min(OB_V_MAX, max(OB_V_MIN, L / (2.0 * OB_N * gap)))     # OB_N pictures on the outer half of the way out
+        thr = max(0.5 * L, min(OB_FAR_SHARE * L, need))
+        return dict(L=round(L, 2), v=round(v, 2), sig=round(sig, 3), thr=round(thr, 2), gap=round(gap, 3),
+                    win=round(2.0 * L / v + OB_SLACK_S, 2))
 
     def _take(self, n, t, sp, fix, dist, how):
         tr = self.T[n]
@@ -660,7 +774,8 @@ class TrackingLayer:
         self.log("tracking", dict(t=round(t, 2), robot=n, what="named by %s" % how, d_cm=round(dist, 1) if dist
                                   is not None else "", x=round(fix.x, 1), y=round(fix.y, 1),
                                   why="a steady camera sighting nobody else can claim, %s standing and unaccounted"
-                                  % n if how == "elimination" else "the sighting that turned during its wiggle"))
+                                  % n if how == "elimination" else "the sighting that went out and back with its drive"
+                                  if "out-and-back" in how else "the sighting that turned during its wiggle"))
 
     def wiggle_started_elim(self, name, t):
         if self.elim_wig is not None and self.elim_wig["robot"] == name:
@@ -668,6 +783,8 @@ class TrackingLayer:
 
     def _elim_wiggle_watch(self, t):
         ew = self.elim_wig
+        if ew.get("kind") == "outback":
+            return self._outback_watch(t)
         if t - ew["t0"] < 0.2:
             return None
         for sp in self.spots:
@@ -694,6 +811,11 @@ class TrackingLayer:
             my = sum(q[2] for q in pts) / len(pts)
             stayed = math.hypot(mx - c["x"], my - c["y"]) <= max(WIGGLE_NEAR_CM / 2.0, 3 * c["sig"])
             if (spin or th_turn or scat) and stayed:
+                # (e18, found by its simulator case) the fix is where it is NOW: its last sightings, not the mean over
+                # the whole watch (a robot that went on after its wiggle was set back to where it had wiggled)
+                last = pts[-OB_N:]
+                mx = sum(q[1] for q in last) / len(last)
+                my = sum(q[2] for q in last) / len(last)
                 hits.append((k, mx, my, "spin" if spin else ("heading" if th_turn else "scatter %.1f cm" % sd)))
         w = ew["robot"]
         if len(hits) == 1:
@@ -708,10 +830,76 @@ class TrackingLayer:
             self.elim_wait.pop(w + ":tries", None)
             return w, fix
         self.counts["elim_wiggle_none"] += 1
+        self.id_fails.setdefault(w, dict(wiggle=0, outback=0))["wiggle"] += 1
         self.elim_wait[w] = t + min(ELIM_RETRY_MAX_S, WIGGLE_RETRY_S * ew["tries"])
+        if self.outback_on:
+            self.elim_wait[w] = t + 0.5          # (e18) the out-and-back next, at once (the wiggle could not tell)
         self.log("tracking", dict(t=round(t, 2), robot=w, what="wiggle showed nothing" if not hits else
                                   "wiggle unclear: not guessed", why="%d of %d steady sightings turned; asked again "
                                   "in %.0f s" % (len(hits), len(ew["cands"]), self.elim_wait[w] - t)))
+        return None
+
+    def _outback_watch(self, t):
+        """(e18) While one robot drives out and back: every candidate's sightings this picture. The candidate whose
+        far-end mean (its OB_N sightings furthest from where it stood) is past the threshold while every other one's is
+        under half of it, is that robot: named as by a wiggle (a correction). Decided once the moved one is back (or at
+        the window's end); none or several moved: nothing is guessed, asked again later."""
+        ew = self.elim_wig
+        req = ew["req"]
+        for sp in self.spots:
+            if sp["t"] != t:
+                continue
+            near = sorted((math.hypot(sp["mx"] - c["x"], sp["my"] - c["y"]), k) for k, c in enumerate(ew["cands"]))
+            q = sp["pts"][-1]
+            near2 = sorted((math.hypot(q[1] - c["x"], q[2] - c["y"]), k) for k, c in enumerate(ew["cands"]))
+            if near2 and near2[0][0] < max(WIGGLE_NEAR_CM, 3 * req["L"]):
+                ew["cands"][near2[0][1]]["seen"].append(q)
+        def far(c):
+            d = sorted((math.hypot(q[1] - c["x"], q[2] - c["y"]) for q in c["seen"]), reverse=True)[:OB_N]
+            return sum(d) / len(d) if len(d) >= min(OB_N, 2) else 0.0
+        fars = [far(c) for c in ew["cands"]]
+        thr = req["thr"]
+        moved = [k for k, f in enumerate(fars) if f >= thr]
+        back = False
+        if len(moved) == 1:
+            c = ew["cands"][moved[0]]
+            last = c["seen"][-OB_N:]
+            if len(last) >= 2:
+                mx = sum(q[1] for q in last) / len(last)
+                my = sum(q[2] for q in last) / len(last)
+                back = math.hypot(mx - c["x"], my - c["y"]) <= 0.5 * thr
+        if not back and t - ew["t0"] < req["win"]:
+            return None
+        self.elim_wig = None
+        w = ew["robot"]
+        # every other candidate stayed: under the threshold and clearly less than the one that moved (half the drive;
+        # e18 batch: 2.3 against a standing one's 1.0 cm of noise maxima was refused by the first "half the threshold")
+        quiet = all(f < min(thr, fars[moved[0]] - 0.5 * req["L"]) for k, f in enumerate(fars) if k not in moved) \
+            if len(moved) == 1 else False
+        if len(moved) == 1 and quiet:
+            c = ew["cands"][moved[0]]
+            sp = min(self.spots, key=lambda s_: math.hypot(s_["mx"] - c["x"], s_["my"] - c["y"])) if self.spots else None
+            if sp is not None and math.hypot(sp["mx"] - c["x"], sp["my"] - c["y"]) > WIGGLE_NEAR_CM:
+                sp = None
+            src = sp["last"].src if sp is not None and sp.get("last") is not None else "motion"
+            last = c["seen"][-OB_N:]
+            mx = sum(q[1] for q in last) / len(last)
+            my = sum(q[2] for q in last) / len(last)
+            fix = Det(src, t, mx, my, None, None, SOURCE_SIGMA.get(src, 1.0))
+            p = self.predict(w, t)
+            self._take(w, t, sp, fix, math.hypot(mx - p[0], my - p[1]) if p else None,
+                       "wiggle (out-and-back %.1f cm)" % fars[moved[0]])
+            self.counts["outback_named"] += 1
+            self.elim_wait.pop(w + ":tries", None)
+            self.id_fails.pop(w, None)
+            return w, fix
+        self.counts["outback_none"] += 1
+        self.id_fails.setdefault(w, dict(wiggle=0, outback=0))["outback"] += 1
+        self.elim_wait[w] = t + min(ELIM_RETRY_MAX_S, WIGGLE_RETRY_S * ew["tries"])
+        self.log("tracking", dict(t=round(t, 2), robot=w, what="out-and-back unclear: not guessed",
+                                  why="%d of %d candidates moved past %.1f cm (far ends %s); asked again in %.0f s" % (
+                                      len(moved), len(fars), thr, ", ".join("%.1f" % f for f in fars),
+                                      self.elim_wait[w] - t)))
         return None
 
     def _probation(self, t):
@@ -1233,6 +1421,7 @@ class TrackingLayer:
 
     def summary(self):
         return dict(version=VERSION, sources=list(self.sources), identity=self.identity, eliminate=self.eliminate,
+                    outback=self.outback_on,
                     gate_record=self.gate_record, ml_on_demand=self.ml_on,
                     drift={n: dict(zip(("per_cm", "p90_cm"), [round(v, 3) for v in self.drift(n)]),
                                    gate_max_cm=round(self.gate_max(n), 1), n=len(tr.rec)) for n, tr in self.T.items()},
