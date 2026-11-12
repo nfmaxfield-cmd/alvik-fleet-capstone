@@ -1598,6 +1598,30 @@ class Controller:
         self.cam_test_next = self.t + 1.0
         return False
 
+    def pose_unconfirmed(self, r):
+        """(e19, audit H4) Its pose rests on a camera correction or re-seed its own move has not confirmed yet, or it is
+        stuck (its last moves did not move: its wheels may turn while its body hangs)."""
+        return MOTION_PROOF and (r.__dict__.get("corr_unconf") is not None or self.stuck(r))
+
+    def reverse_ok(self, r, res):
+        """(e19, audit H4: 7 of 7 falls in the hard simulator were reverses of hung robots on a wrong pose; e19's stress
+        re-run, seed 1: a 12 cm back-out along a track shifted by a re-seed, after moves that did not move) a reverse
+        that ends nearer an edge than it starts is refused while its pose is unconfirmed (no rear sensor)."""
+        try:
+            tr = res[5]
+            rev = "back" in str(res[0]) or "reverse" in str(res[0])
+        except (IndexError, TypeError):
+            return True
+        p = self.pos(r)
+        if not rev or p is None or not self.pose_unconfirmed(r):
+            return True
+        if edge_dist(self.rect, *tr.end) < edge_dist(self.rect, *p):
+            self.counts["unconf_back_refused"] = self.counts.get("unconf_back_refused", 0) + 1
+            self.event(r, "reverse refused", "a %s toward an edge on a pose its own move has not confirmed (%s): not "
+                       "driven" % (res[0], "it is stuck" if self.stuck(r) else "after a camera correction"))
+            return False
+        return True
+
     def correction_confirmed(self, r, why):
         """(e19, H4) Its own move, seen by the camera, agrees with the corrected pose: reverses toward an edge are
         allowed again and the correction's measured drift is recorded (it may widen the gate now)."""
@@ -1943,7 +1967,7 @@ class Controller:
                             o0.name, ql[0], ql[1])
                         dmode = "cautious"
                         self.counts["doubt_cautious"] = self.counts.get("doubt_cautious", 0) + 1
-        unconf = MOTION_PROOF and r.__dict__.get("corr_unconf") is not None
+        unconf = self.pose_unconfirmed(r)
         for base, off in tries:
             b_ = wrap180(base + (off or 0.0))
             back = abs(wrap180(b_ - (h + 180.0))) <= 60.0
@@ -2998,6 +3022,8 @@ class Controller:
                 self.event(r, "track back blocked", "%s is on or near its own track behind it: it holds" % o.name)
                 return None
         k = tgt["k"]
+        if not self.reverse_ok(r, ("reverse", None, 0.0, L, BACK_V, tr)):
+            return None                    # (e19, H4) its track rests on an unconfirmed pose and leads toward an edge
         tr_.pts = tr_.pts[:k + 1]          # what is still behind it once it has reversed there
         self.counts["track_backs"] = self.counts.get("track_backs", 0) + 1
         self.log("track_back", dict(t=round(self.t, 2), robot=r.name, x=round(p[0], 1), y=round(p[1], 1),
@@ -3132,6 +3158,12 @@ class Controller:
         return max(0.0, self.unc(r) - PLAN_M0, d)
 
     def back_move(self, r, Ls=BACK_CM, why="its own front stop", inward=False):
+        res = self._back_move(r, Ls, why, inward)
+        if res is not None and not self.reverse_ok(r, res):
+            return None                    # (e19, H4) no reverse toward an edge on an unconfirmed pose
+        return res
+
+    def _back_move(self, r, Ls=BACK_CM, why="its own front stop", inward=False):
         """Straight backwards (firmware rev drive: no front check; no rear sensor, so short and slow) along its
         heading: the longest of Ls that keeps the others' reservations and the keep-outs. inward: only if it ends
         further from the edge than it starts."""
@@ -3482,6 +3514,8 @@ class Controller:
         self.event(r, "pose re-seeded", "its own pose was %.1f cm from the camera's: uncertainty "
                    "widened at once; still off after %.0f s: pose set from the camera without stopping (observed)" % (
                        ev["d_cm"], ev["for_s"]))
+        if MOTION_PROOF and ev["d_cm"] > self.proof_limit(r):
+            r.corr_unconf = dict(t=self.t, how="re-seed", d=ev["d_cm"], drift=None)   # (e19, H4) until its move confirms
         self.log("pose", dict(t=round(self.t, 2), robot=r.name, what="reseed", d_cm=ev["d_cm"],
                               unc_cm=round(self.unc(r), 2)))
         if RESEED_HEADING_KEEP and th is not None and self.standing_own(r) and \
@@ -3758,6 +3792,8 @@ class Controller:
                 res = self.back_move(r)
             if res is None and tilted:
                 res = self.back_move(r, inward=True)       # (11-05h) tilted at the edge: any back-off that gains room
+            if res is not None and not self.reverse_ok(r, res):
+                res = None                                 # (e19, H4) no reverse toward an edge on an unconfirmed pose
             if res is not None:
                 self.counts["backoffs"] += 1
                 self.fallback(r, 0, "back off", "its own front stop: backs away before anything else (never the "

@@ -743,3 +743,14 @@ def test_the_side_cameras_offset_from_the_overhead_is_measured_and_removed():
         src._side_learn(over, side)
     off = src.side_offset()
     assert off is not None and abs(off[0] - 2.5) < 0.8 and abs(off[1] + 1.0) < 0.8
+
+
+def test_a_stuck_robot_never_reverses_toward_an_edge_on_its_unconfirmed_track():
+    """Found by e19's own e17-comparison re-run (seed 1, fixes 1 s late): Left's moves did not move (hung), a re-seed
+    shifted its track, then a 12 cm back-out along that track took it over the edge. A reverse toward an edge is now
+    refused while its pose is unconfirmed or it is stuck; the run then holds or tries forward / turning moves."""
+    import freeroam_fastsim as F
+    s = F.Sim(1, 0.5, dead_robot=False, pi_freeze=True, edge_physics=True, camera="detections", sensors=True,
+              cam_delay=1.0, hdg_fault={"deg": 25, "near_cm": 14, "every_s": 60})
+    s.run()
+    assert s.stats.get("falls", 0) == 0
