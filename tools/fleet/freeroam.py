@@ -48,7 +48,7 @@ for p in (HERE, TOOLS):
 import freeroam_core as FC   # noqa: E402
 
 PY = sys.executable
-VERSION = "freeroam-runner-2026-11-12e18"   # e18 (Nick 12 Nov decisions 2, 5, 6): the Safety group said at the start and written into run.json; each robot's odometry trust record loaded from the Pi's store (odo_trust.json) and saved at every end and every minute; every calibration correction saved at ANY end (the time cap, Stop / Ctrl+C / SIGTERM, an error: save_corrections in the finally), the wheel and gyro scales in use read back at the start (get); the layer's out-and-back request passed to the controller. Before: "freeroam-runner-2026-11-12e17"   # e17: the layer told who is unaccounted, its corrections (how) to the controller (an fpose, never a fix the robot's filter would refuse), revoked eliminations, the board for the gate's cap, the ML hook (off). Before: "freeroam-runner-2026-11-11e16"
+VERSION = "freeroam-runner-2026-11-12e19"   # e19 (the Fable audit H1): stop to every robot FIRST at every ending (the time cap, all out, Stop / Ctrl+C / SIGTERM, an error), then each save in its own try (a full card cannot keep stop or the later steps from running); a second signal while ending is said and ignored. Before: "freeroam-runner-2026-11-12e18"   # e18 (Nick 12 Nov decisions 2, 5, 6): the Safety group said at the start and written into run.json; each robot's odometry trust record loaded from the Pi's store (odo_trust.json) and saved at every end and every minute; every calibration correction saved at ANY end (the time cap, Stop / Ctrl+C / SIGTERM, an error: save_corrections in the finally), the wheel and gyro scales in use read back at the start (get); the layer's out-and-back request passed to the controller. Before: "freeroam-runner-2026-11-12e17"   # e17: the layer told who is unaccounted, its corrections (how) to the controller (an fpose, never a fix the robot's filter would refuse), revoked eliminations, the board for the gate's cap, the ML hook (off). Before: "freeroam-runner-2026-11-11e16"
 VERSION_E16 = "freeroam-runner-2026-11-11e16"   # e16 (home 11 Nov 08:48): each RAW row's accelerometer (ax, ay) and lift flag to the controller (on_raw_motion: a jolt while standing is a contact; a lift is evidence a person moved it). Before: "freeroam-runner-2026-11-10e14b"   # e14b: a dark picture holds every robot until the camera has adjusted. e14 (10 Nov): the battery floor from MIRLT_MIN_BATTERY, else Mission Control's Advanced, else the site file, said at the start
 VERSION_E13 = "freeroam-runner-2026-11-10e13"   # e13 (10 Nov): --readable-map (school: plan only where the camera reads tags; MIRLT_ROAM_READABLE=0 the old whole table)
 VERSION_E12 = "freeroam-runner-2026-11-10e12"   # e12 (10 Nov): the bridge's "camera" messages (no pictures) said and logged; one robot held at an edge parked and shown, the others roam on; orderly shutdown
@@ -910,9 +910,26 @@ class Runner:
                 self.write_state(why=None)
             time.sleep(max(0.0, TICK_S - (self.AC.now() - now)))
         say("\nThe run ends: %s." % why)
+        self.stop_all(why)                     # (e19, audit H1) stop FIRST, then anything is saved
         c.event(None, "end", why)
         self.end_save(why)
         return why
+
+    def stop_all(self, why=""):
+        """(e19, audit H1) `stop` to every robot, sent FIRST at every ending (the time cap, all out, Stop / Ctrl+C /
+        SIGTERM, an error), before anything is saved: a save that fails (a full card) or hangs can no longer leave the
+        robots driving. Each send on its own; returns the robots it went to. close() sends it again later."""
+        sent = []
+        for n in list(self.names):
+            try:
+                self.link.send_name(n, "stop")
+                sent.append(n)
+            except Exception:  # noqa: BLE001
+                pass
+        if not getattr(self, "_stop_said", False):
+            self._stop_said = True
+            say("Every robot is sent stop (%s), before anything is saved." % (", ".join(sent) or "none answered"))
+        return sent
 
     def end_save(self, why):
         """(e17 item 6, e18 decision 6) Every calibration correction this run measured, saved by the agreement rules at
@@ -980,6 +997,18 @@ class Runner:
         self.source.close()
         self.tables.close()
         self.track.close()
+
+
+def ending_signals():
+    """(e19, audit H1) While a run ends: Ctrl+C, SIGTERM and SIGHUP are said and ignored (every robot has been sent
+    stop; the saving goes on) instead of raising inside a save."""
+    def late(*_):
+        say("(already ending: every robot was sent stop; saving what can be saved)")
+    for s_ in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        try:
+            signal.signal(s_, late)
+        except (ValueError, OSError):
+            pass                      # not the main thread (tests)
 
 
 def write_edge_parked(folder, ep, nh=()):
@@ -1528,6 +1557,15 @@ def main(argv=None):
         say(why)
         code = 1
     finally:
+        # (e19, audit H1) a second Ctrl+C / SIGTERM while ending no longer cuts the saving short
+        ending_signals()
+        # (e19, audit H1) stop FIRST, before anything is saved: each later step in its own try, so a full card (OSError
+        # 28) or any other failure in one step cannot keep `stop` from going out or the others from running
+        if runner is not None:
+            try:
+                runner.stop_all(why)
+            except Exception as e:  # noqa: BLE001
+                say("(stop could not be sent: %s)" % e)
         if cpu is not None:
             try:
                 cpu.stop()
@@ -1539,9 +1577,13 @@ def main(argv=None):
                     runner.end_save(why)       # (e18, 6) Stop / Ctrl+C / SIGTERM / an error: saved here too
                 except Exception as e:  # noqa: BLE001
                     say("(corrections not saved at the end: %s)" % e)
-            runner.write_state(why)
-            runner.save_workspace()            # (e10, C2) the proven workspace, kept for this site
-            runner.close()
+            for step, words in ((lambda: runner.write_state(why), "the state"),
+                                (runner.save_workspace, "the workspace"),   # (e10, C2) the proven workspace, per site
+                                (runner.close, "closing the links")):
+                try:
+                    step()
+                except Exception as e:  # noqa: BLE001
+                    say("(%s: not done at the end: %s)" % (words, e))
         if br is not None:
             try:
                 br.send_signal(signal.SIGINT)
@@ -1586,7 +1628,11 @@ def main(argv=None):
             say("!" * 100)
             run_info["needs_hand"] = nh
         run_info.update(ended=why, finished=dt.datetime.now().isoformat(timespec="seconds"))
-        json.dump(run_info, open(os.path.join(outdir, "run.json"), "w"), indent=1)
+        try:
+            with open(os.path.join(outdir, "run.json"), "w") as f_:
+                json.dump(run_info, f_, indent=1)
+        except OSError as e:
+            say("(run.json not written at the end: %s)" % e)
         try:
             import freeroam_report as FR
             say("Report: %s" % FR.make(outdir))

@@ -9,6 +9,7 @@ import json
 import math
 import os
 import re
+import shutil
 import sys
 import types
 
@@ -419,12 +420,25 @@ def test_every_correction_that_agrees_is_saved_at_the_end_and_one_that_does_not_
     assert {d["robot"]: d["ok"] for d in done} == {"A": True, "B": False}
 
 
-def test_free_roam_saves_at_every_ending_including_stop_and_errors():
-    txt = open(os.path.join(FLEET, "freeroam.py")).read()
-    fin = txt[txt.index("    finally:\n        if cpu is not None:"):]
-    assert "runner.end_save(why)" in fin.split("runner.write_state(why)")[0]     # Ctrl+C / SIGTERM / an error
-    assert "self.end_save(why)" in txt                                           # the time cap, all out
-    assert "FC.CHECKPOINT_S" in txt                                              # a crash loses at most a minute
+def test_free_roam_saves_at_every_ending_including_stop_and_errors(tmp_path):
+    """(e19, audit: this was a text-order check that fixed the order delaying `stop`) Behaviour: a simulated free roam
+    stopped by SIGTERM mid-roam sends stop first, then saves its corrections (end_save) and its state (state.json)."""
+    import subprocess
+    if not shutil.which("unshare") or subprocess.run(["unshare", "-rn", "true"]).returncode != 0:
+        pytest.skip("needs `unshare -rn`")
+    home = tmp_path / "home"
+    home.mkdir()
+    env = dict(os.environ, HOME=str(home), MPLCONFIGDIR=str(tmp_path / "mpl"))
+    env.pop("MIRLT_CONF_DIR", None)
+    out, rd = tmp_path / "rec.json", tmp_path / "run"
+    subprocess.run(["unshare", "-rn", sys.executable, os.path.join(HERE, "e19_end_harness.py"), str(out), str(rd),
+                    "plain", "3"], env=env, capture_output=True, timeout=240)
+    rec = json.load(open(out))
+    assert "roam" in rec["T"] and "end_save" in rec["T"], rec
+    stops = [t for t, n, c in rec["sent"] if c == "stop" and t >= rec["T"]["signal"]]
+    assert stops and min(stops) <= rec["T"]["end_save"]
+    assert json.load(open(rd / "state.json"))["ended"].startswith("stopped by hand")
+    assert "self.end_save(why)" in open(os.path.join(FLEET, "freeroam.py")).read()      # the time cap: see e19's test
     rp = open(os.path.join(FLEET, "run_plan.py")).read()
     assert "coord.trust_save(" in rp[rp.index("    finally:\n        # sends stop"):]
 
