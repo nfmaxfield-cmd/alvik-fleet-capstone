@@ -48,7 +48,7 @@ for p in (HERE, TOOLS):
 import freeroam_core as FC   # noqa: E402
 
 PY = sys.executable
-VERSION = "freeroam-runner-2026-11-12e19"   # e19 (the Fable audit H1): stop to every robot FIRST at every ending (the time cap, all out, Stop / Ctrl+C / SIGTERM, an error), then each save in its own try (a full card cannot keep stop or the later steps from running); a second signal while ending is said and ignored. Before: "freeroam-runner-2026-11-12e18"   # e18 (Nick 12 Nov decisions 2, 5, 6): the Safety group said at the start and written into run.json; each robot's odometry trust record loaded from the Pi's store (odo_trust.json) and saved at every end and every minute; every calibration correction saved at ANY end (the time cap, Stop / Ctrl+C / SIGTERM, an error: save_corrections in the finally), the wheel and gyro scales in use read back at the start (get); the layer's out-and-back request passed to the controller. Before: "freeroam-runner-2026-11-12e17"   # e17: the layer told who is unaccounted, its corrections (how) to the controller (an fpose, never a fix the robot's filter would refuse), revoked eliminations, the board for the gate's cap, the ML hook (off). Before: "freeroam-runner-2026-11-11e16"
+VERSION = "freeroam-runner-2026-11-12e19"   # e19 (the Fable audit H1, H2): a dry run has its own settings folder (dry_conf_dir); every pooled fit and workspace save records its source; a real run checks the settings for dry-run data first (dry_check.at_real_start). H1: stop to every robot FIRST at every ending (the time cap, all out, Stop / Ctrl+C / SIGTERM, an error), then each save in its own try (a full card cannot keep stop or the later steps from running); a second signal while ending is said and ignored. Before: "freeroam-runner-2026-11-12e18"   # e18 (Nick 12 Nov decisions 2, 5, 6): the Safety group said at the start and written into run.json; each robot's odometry trust record loaded from the Pi's store (odo_trust.json) and saved at every end and every minute; every calibration correction saved at ANY end (the time cap, Stop / Ctrl+C / SIGTERM, an error: save_corrections in the finally), the wheel and gyro scales in use read back at the start (get); the layer's out-and-back request passed to the controller. Before: "freeroam-runner-2026-11-12e17"   # e17: the layer told who is unaccounted, its corrections (how) to the controller (an fpose, never a fix the robot's filter would refuse), revoked eliminations, the board for the gate's cap, the ML hook (off). Before: "freeroam-runner-2026-11-11e16"
 VERSION_E16 = "freeroam-runner-2026-11-11e16"   # e16 (home 11 Nov 08:48): each RAW row's accelerometer (ax, ay) and lift flag to the controller (on_raw_motion: a jolt while standing is a contact; a lift is evidence a person moved it). Before: "freeroam-runner-2026-11-10e14b"   # e14b: a dark picture holds every robot until the camera has adjusted. e14 (10 Nov): the battery floor from MIRLT_MIN_BATTERY, else Mission Control's Advanced, else the site file, said at the start
 VERSION_E13 = "freeroam-runner-2026-11-10e13"   # e13 (10 Nov): --readable-map (school: plan only where the camera reads tags; MIRLT_ROAM_READABLE=0 the old whole table)
 VERSION_E12 = "freeroam-runner-2026-11-10e12"   # e12 (10 Nov): the bridge's "camera" messages (no pictures) said and logged; one robot held at an edge parked and shown, the others roam on; orderly shutdown
@@ -349,7 +349,8 @@ class Runner:
             if c.R[n].mode not in ("gone", "out"):
                 c.R[n].mode, c.R[n].out_why = "gone", "not seen by the camera at the start"
         for n, fit in res["fits"].items():
-            pooled = D.pool_fit(self.a.conf_dir, n, fit)
+            pooled = D.pool_fit(self.a.conf_dir, n, fit, source="dry" if self.a.dry else "real",  # (e19, H2) tagged
+                                run=os.path.basename(self.dir.rstrip("/")))
             for cmd in D.corr_commands(pooled, getattr(self, "corr_now", {}).get(n)):
                 if not self.a.dry:
                     self.send(n, cmd)
@@ -365,7 +366,7 @@ class Runner:
         if ws is None or not getattr(self, "ws_path", None):
             return
         try:
-            ws.save(self.ws_path)
+            ws.save(self.ws_path, source=dict(run=os.path.basename(self.dir.rstrip("/")), dry=bool(self.a.dry)))
             with open(os.path.join(self.dir, "workspace.json"), "w") as f:
                 json.dump(ws.summary(), f, indent=1, default=str)
         except OSError as e:
@@ -999,6 +1000,12 @@ class Runner:
         self.track.close()
 
 
+def dry_conf_dir():
+    """(e19, audit H2) A simulator run's own settings folder: MIRLT_DRY_CONF_DIR, else ~/.config/mirlt-dry (beside the
+    real ~/.config/mirlt, never inside it)."""
+    return os.path.abspath(os.path.expanduser(os.environ.get("MIRLT_DRY_CONF_DIR") or "~/.config/mirlt-dry"))
+
+
 def ending_signals():
     """(e19, audit H1) While a run ends: Ctrl+C, SIGTERM and SIGHUP are said and ignored (every robot has been sent
     stop; the saving goes on) instead of raising inside a save."""
@@ -1460,6 +1467,18 @@ def main(argv=None):
     outdir = a.dir or os.path.join(REPO, "logs", dt.datetime.now().strftime("%Y%m%d-%H%M%S") + "-freeroam" +
                                    ("-dryrun" if a.dry else ""))
     os.makedirs(outdir, exist_ok=True)
+    real_conf = os.path.abspath(os.path.expanduser("~/.config/mirlt"))
+    if (a.dry or a.dry_chain or (getattr(a, "sim_cmd", "") and not getattr(a, "practice_real", False))) and \
+            os.path.abspath(os.path.expanduser(a.conf_dir)) == real_conf:
+        # (e19, audit H2) a simulator run never writes the real robots' calibration pool or the site's workspace: it
+        # has its own settings folder
+        a.conf_dir = dry_conf_dir()
+        os.makedirs(a.conf_dir, exist_ok=True)
+        say("DRY RUN: its own settings folder %s (the real robots' calibration and the site's workspace are never "
+            "written by a simulator run)" % a.conf_dir)
+    elif not (a.dry or a.dry_chain or getattr(a, "sim_cmd", "")):
+        import dry_check as DC          # (e19, audit H2) dry-run data in the real settings: found and repaired, said
+        DC.at_real_start(a.conf_dir, say=say)
 
     def hup(*_):
         raise KeyboardInterrupt()

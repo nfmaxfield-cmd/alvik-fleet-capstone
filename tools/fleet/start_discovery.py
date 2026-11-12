@@ -36,7 +36,7 @@ import math
 import os
 import time
 
-VERSION = "start-discovery-2026-11-09e11"   # e11: stands wait for the camera's sightings (STAND_MAX_S)
+VERSION = "start-discovery-2026-11-12e19"   # e19 (audit H2): each pooled row records its source (dry / real) and run. Before: "start-discovery-2026-11-09e11"   # e11: stands wait for the camera's sightings (STAND_MAX_S)
 ENABLED = os.environ.get("MIRLT_DISCOVERY", "1") != "0"
 
 TURN1_DEG = 45.0          # CHOSEN: the first turn (on its spot): a small one first
@@ -436,9 +436,10 @@ def cal_path(conf_dir, robot):
     return os.path.join(os.path.expanduser(conf_dir), "robots", "%s.json" % robot)
 
 
-def pool_fit(conf_dir, robot, fit, when=None):
+def pool_fit(conf_dir, robot, fit, when=None, source=None, run=None):
     """Adds one run's fit (wheel, gyro with their standard errors) to the robot's history on the Pi and returns the
-    pooled values (inverse-variance means) and whether each is sure enough to save on the robot."""
+    pooled values (inverse-variance means) and whether each is sure enough to save on the robot. (e19, audit H2) source
+    ("dry" / "real") and run (its folder's name) are kept on the row, so a dry run's row can be found later."""
     p = cal_path(conf_dir, robot)
     try:
         with open(p) as fh:
@@ -447,6 +448,10 @@ def pool_fit(conf_dir, robot, fit, when=None):
         d = dict(robot=robot, runs=[])
     if fit:
         row = dict(fit, t=when or time.strftime("%Y-%m-%d %H:%M:%S"))
+        if source:
+            row["source"] = source
+        if run:
+            row["run"] = run
         d["runs"].append(row)
         d["runs"] = d["runs"][-30:]
     pooled = {}

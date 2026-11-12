@@ -138,6 +138,8 @@ def heard_from_file(path=None, keep_h=HEARD_KEEP_H, now=None):
 
 def remember(name, ip, path=None, now=None):
     """The link's note of a robot heard (alvik_console.Link calls it): heard_robots.json, {name: {ip, t}}."""
+    if str(ip).startswith("127."):
+        return                    # (e19, audit H2) a simulated robot (loopback) never replaces a real robot's address
     path = path or HEARD_FILE
     try:
         try:

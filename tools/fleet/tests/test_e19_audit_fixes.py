@@ -131,3 +131,87 @@ def test_a_mission_ends_the_ctrl_c_way_on_sigterm():
     finally:
         for s, h in old.items():
             signal.signal(s, h)
+
+
+# ------------------------------------------------------- 2 (audit H2): dry runs never write the real robots' settings
+def _tree(d):
+    return sorted(os.path.relpath(os.path.join(a, f), d) for a, _, fs in os.walk(d) for f in fs) if os.path.isdir(d) \
+        else []
+
+
+@needs_ns
+def test_a_dry_free_roam_leaves_the_real_settings_folder_unchanged(tmp_path):
+    """Audit H2: three dry runs added rows to ~/.config/mirlt/robots/Left.json, rewrote workspace/home.json, and (found
+    here) put the simulated robots' 127.0.0.x addresses into heard_robots.json, the emergency stop's list. Now a dry run
+    writes into its own folder (~/.config/mirlt-dry) and never remembers a loopback address."""
+    home = tmp_path / "home"
+    real = home / ".config" / "mirlt"
+    (real / "robots").mkdir(parents=True)
+    (real / "robots" / "Left.json").write_text(json.dumps({"robot": "Left", "runs": [
+        {"wheel": 1.004, "wheel_se": 0.004, "gyro": 0.998, "gyro_se": 0.004, "t": "2026-11-11 08:58:00",
+         "source": "real", "run": "20261111-085800-freeroam"}]}))
+    (real / "heard_robots.json").write_text(json.dumps({"Left": {"ip": "192.168.1.51", "t": 1.0}}))
+    before = {p: open(os.path.join(real, p)).read() for p in _tree(str(real))}
+    rec = dry_end(tmp_path, "plain", 4, home=str(home))
+    assert "roam" in rec["T"], rec["stdout"][-2000:]
+    after = {p: open(os.path.join(real, p)).read() for p in _tree(str(real))}
+    assert after == before, sorted(set(after) ^ set(before)) or [p for p in after if after[p] != before.get(p)]
+    dry = home / ".config" / "mirlt-dry"
+    assert any(p.startswith("workspace") for p in _tree(str(dry))), _tree(str(dry))
+
+
+def test_the_check_finds_untagged_dry_rows_and_the_repair_backs_up_and_never_deletes(tmp_path):
+    """Audit H2's repair. Rows written before e19 carry no source: they are judged by the run folders (a dry run's
+    discovery.json holds the same fit; else the dry run's time window). The repair copies each file first, moves dry rows
+    into runs_quarantined_dry (kept), pools again from the real rows, sets the dry-touched workspace aside and drops
+    loopback addresses from the emergency stop's list into quarantined_dry."""
+    import dry_check as DC
+    conf, logs = tmp_path / "conf", tmp_path / "logs"
+    (conf / "robots").mkdir(parents=True)
+    (conf / "workspace").mkdir()
+    real_fit = {"wheel": 1.006, "wheel_se": 0.003, "gyro": 1.001, "gyro_se": 0.003}
+    dry_fit = {"wheel": 0.951, "wheel_se": 0.002, "gyro": 0.990, "gyro_se": 0.002}
+    timed_fit = {"wheel": 0.960, "wheel_se": 0.002}
+    for name, fit, dry, t0 in (("20261111-085800-freeroam", real_fit, False, "2026-11-11T08:58:00"),
+                               ("20261112-101500-freeroam-dryrun", dry_fit, True, "2026-11-12T10:15:00"),
+                               ("20261112-110000-freeroam-dryrun", {}, True, "2026-11-12T11:00:00")):
+        (logs / name).mkdir(parents=True)
+        (logs / name / "run.json").write_text(json.dumps({"dry": dry, "started": t0, "finished": t0[:-5] + "30:00"}))
+        (logs / name / "discovery.json").write_text(json.dumps({"fits": {"Left": fit} if fit else {}}))
+        if dry:
+            (logs / name / "workspace.json").write_text("{}")
+    rows = [dict(real_fit, t="2026-11-11 09:00:01"), dict(dry_fit, t="2026-11-12 10:16:00"),
+            dict(timed_fit, t="2026-11-12 11:05:00"), {"wheel": 1.02, "wheel_se": 0.01, "t": "2026-10-01 09:00:00"}]
+    (conf / "robots" / "Left.json").write_text(json.dumps({"robot": "Left", "runs": rows, "pooled": {"x": 1}}))
+    (conf / "workspace" / "home.json").write_text(json.dumps({"board": [0, 0, 1, 1], "rle": []}))
+    (conf / "heard_robots.json").write_text(json.dumps({"Left": {"ip": "127.0.0.2", "t": 2.0},
+                                                         "Right": {"ip": "192.168.1.53", "t": 1.0}}))
+    rep = DC.check(str(conf), str(logs))
+    kinds = [q["kind"] for q in rep["robots"]["Left"]["rows"]]
+    assert kinds == ["real", "dry", "dry", "unknown"]
+    assert rep["contaminated"] and rep["workspace"]["home.json"]["dry"] and rep["heard"]["loopback"] == ["Left"]
+    n_files = len(_tree(str(conf)))
+    rep2, lines = DC.repair(str(conf), str(logs), stamp="T")
+    d = json.load(open(conf / "robots" / "Left.json"))
+    assert len(d["runs"]) == 2 and len(d["runs_quarantined_dry"]) == 2          # moved, not deleted
+    assert d["pooled"]["wheel"]["runs"] == 2 and abs(d["pooled"]["wheel"]["value"] - 1.0) < 0.02
+    bk = conf / "backup-dry-check-T"
+    assert json.load(open(bk / "robots" / "Left.json"))["runs"] == rows       # the original, byte for byte in content
+    assert (bk / "workspace" / "home.json").exists() and (conf / "workspace" / "home.json.dry-quarantined").exists()
+    h = json.load(open(conf / "heard_robots.json"))
+    assert "Left" not in h and h["quarantined_dry"]["Left"]["ip"] == "127.0.0.2" and h["Right"]["ip"] == "192.168.1.53"
+    assert len(_tree(str(conf))) >= n_files                                      # nothing deleted
+    assert not DC.check(str(conf), str(logs))["contaminated"]
+
+
+def test_pool_rows_and_workspace_saves_record_their_source(tmp_path):
+    import proven_workspace as PW
+    import start_discovery as D
+    D.pool_fit(str(tmp_path), "Left", {"wheel": 1.01, "wheel_se": 0.004}, source="dry", run="R1")
+    row = json.load(open(D.cal_path(str(tmp_path), "Left")))["runs"][-1]
+    assert row["source"] == "dry" and row["run"] == "R1"
+    ws = PW.ProvenWorkspace((0.0, 0.0, 100.0, 100.0))
+    p = PW.site_path(str(tmp_path), "home")
+    ws.save(p, source=dict(run="R1", dry=True))
+    ws.save(p, source=dict(run="R2", dry=False))
+    assert [(s["run"], s["dry"]) for s in json.load(open(p))["saved_by"]] == [("R1", True), ("R2", False)]

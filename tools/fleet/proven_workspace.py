@@ -22,12 +22,13 @@ The switch (keep features, switch them off): freeroam_core.Controller(workspace=
 as before e10.
 """
 import json
+import time
 import math
 import os
 
 import numpy as np
 
-VERSION = "proven-workspace-2026-11-10e13"   # e13 (10 Nov): limit_to() a readable area (school free roam plans
+VERSION = "proven-workspace-2026-11-12e19"   # e19 (audit H2): save() records who saved it (saved_by: run, dry). Before: "proven-workspace-2026-11-10e13"   # e13 (10 Nov): limit_to() a readable area (school free roam plans
                                             # only where the camera reads tags); field(raw=True) ignores the limit
 VERSION_A = "proven-workspace-2026-11-07a"
 
@@ -400,11 +401,21 @@ class ProvenWorkspace(tuple):
         return dict(version=VERSION, board=list(self.board), outer=list(self), cell=self.cell, nx=self.nx, ny=self.ny,
                     rle=runs)
 
-    def save(self, path):
+    def save(self, path, source=None):
+        """(e19, audit H2) source: {run, dry}, appended to the file's saved_by list (the last 50), so a save by a dry
+        run can be found later (tools/fleet/dry_check.py)."""
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        d = self.to_json()
+        try:
+            with open(path) as f:
+                d["saved_by"] = list(json.load(f).get("saved_by") or [])
+        except (OSError, ValueError, AttributeError):
+            d["saved_by"] = []
+        if source:
+            d["saved_by"] = (d["saved_by"] + [dict(source, t=time.strftime("%Y-%m-%d %H:%M:%S"))])[-50:]
         tmp = path + ".tmp"
         with open(tmp, "w") as f:
-            json.dump(self.to_json(), f)
+            json.dump(d, f)
         os.replace(tmp, path)
 
     def merge_saved(self, path):

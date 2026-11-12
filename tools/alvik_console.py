@@ -250,6 +250,8 @@ HEARD_FILE = os.environ.get("MIRLT_HEARD_FILE") or os.path.expanduser("~/.config
 def remember_robot(name, ip, path=None):
     """Every robot a link hears goes in ~/.config/mirlt/heard_robots.json ({name: {ip, t}}), so the emergency stop
     (tools/fleet/stop_all.py, 2026-11-03) reaches robots that have no fixed address. Never raises."""
+    if str(ip).startswith("127."):
+        return                    # (e19, audit H2) a simulated robot (loopback) never replaces a real robot's address
     path = path or HEARD_FILE
     try:
         try:
