@@ -993,7 +993,8 @@ class Starter:
             out["stopped"] = not out["stopping"]
         end_now = False
         with self._end_lock:                  # the page's poll and the sleeper thread both ask: one sleep only
-            if not running and self.last is None:
+            if not running and self.last is None and not out.get("stopping"):   # (12 Nov) the robots' sleep waits
+                                                                                # until every robot confirmed its stop
                 self.last = {"kind": kind, "practice": self.active_practice, "ended": time.time(),
                              "words": out.get("words"), "refused": bool(out.get("refused"))}
                 end_now = True

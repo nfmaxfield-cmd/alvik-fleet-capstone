@@ -467,8 +467,9 @@ def test_mission_control_api(tmp_path):
                     return r.status, J.loads(r.read())
             except urllib.error.HTTPError as e:
                 return e.code, J.loads(e.read())
-        page = urllib.request.urlopen(url).read().decode()
+        page = urllib.request.urlopen(url.rstrip("/") + "/classic").read().decode()   # (12 Nov) the old page, kept
         assert "Mission Control" in page and "Details" in page
+        assert "Mission Control" in urllib.request.urlopen(url).read().decode()       # the new page at /
         c, st = call("/api/state")
         assert c == 200 and st["map"]["floor"]["x_max"] == 152
         # every setting group is there to see and edit (Nick: nothing locked)

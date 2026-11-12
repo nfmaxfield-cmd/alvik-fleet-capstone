@@ -163,6 +163,30 @@ def wifi_names_said(path, n_bytes=400000):
     return out
 
 
+def tracks(folder, since_s=None, max_pts=400, now=None):
+    """{robot: [[x, y], ...]} from a run's camera_track.csv (free roam's folder, or a roof-tag run's run/): the whole
+    run, or the last since_s seconds; thinned to max_pts a robot."""
+    now = time.time() if now is None else now
+    path = None
+    for p in (os.path.join(folder or "", "camera_track.csv"), os.path.join(folder or "", "run", "camera_track.csv")):
+        if os.path.exists(p):
+            path = p
+            break
+    if not path:
+        return {}
+    rows = tail_rows(path, 400000 if since_s is None else 60000)
+    out = {}
+    for r in rows:
+        t, x, y = _f(r.get("t")), _f(r.get("x_cm")), _f(r.get("y_cm"))
+        if r.get("robot") and x is not None and y is not None and (since_s is None or (t and now - t <= since_s)):
+            out.setdefault(r["robot"], []).append([round(x, 1), round(y, 1)])
+    for k, v in out.items():
+        if len(v) > max_pts:
+            step = len(v) / float(max_pts)
+            out[k] = [v[int(i * step)] for i in range(max_pts)] + [v[-1]]
+    return out
+
+
 def freeroam_folder(starter):
     """Home free roam's own folder: the practice run's --dir, else the newest logs/*-freeroam made since the start."""
     job = getattr(starter, "job", None)
@@ -239,5 +263,11 @@ def snapshot(starter):
     for k, v in ((getattr(S, "map", None) or {}).get("spots") or {}).items():
         if isinstance(v, (list, tuple)) and len(v) >= 2:
             pts[k] = [v[0], v[1]]
+    tf = folder or (getattr(S.run, "folder", None) if S.run is not None and starter.tags() else None)
+    try:
+        tr = tracks(tf, since_s=60.0 if running else None) if kind and tf else {}
+    except Exception:  # noqa: BLE001
+        tr = {}
     return {"t": time.time(), "running": running, "kind": kind, "table": table_of(S, folder), "points": pts,
-            "robots": robots, "source": src, "version": VERSION}
+            "robots": robots, "tracks": tr, "tracks_words": "the last minute" if running else "the whole run",
+            "source": src, "version": VERSION}

@@ -96,6 +96,7 @@ details>summary{cursor:pointer}
   <aside class="rail">
     <div id="handslot"></div>
     <div id="cards" class="rail"></div>
+    <div class="card health hidden" id="logcard" style="padding:10px 12px"></div>
     <div class="card health" id="health"></div>
     <div class="err" id="err"></div>
   </aside>
@@ -106,7 +107,7 @@ details>summary{cursor:pointer}
 <script>
 "use strict";
 let S = null, T = null, LIVE = null, PH = null, PLACE = null, kind = null, order = [], keepUnreadable = true;
-let soundOn = false, audio = null, lastBeep = 0, drawerOpen = false, safetyOpen = false;
+let logOpen = false, soundOn = false, audio = null, lastBeep = 0, drawerOpen = false, safetyOpen = false;
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 const fmt = t => { t = Math.max(0, Math.round(t || 0)); return Math.floor(t / 60) + ":" + String(t % 60).padStart(2, "0"); };
@@ -152,6 +153,8 @@ function mapSVG() {
   if (order.length > 1) o += `<polyline points="${order.filter(p => pts[p]).map(p => X(pts[p][0]) + "," + Y(pts[p][1])).join(" ")}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-dasharray="5 4" opacity=".7"/>`;
   for (const [lab, p] of Object.entries(pts)) { const n = order.reduce((a, q, i) => q === lab ? a.concat(i + 1) : a, []);
     o += `<g class="stk" data-p="${esc(lab)}" style="cursor:${pick ? "pointer" : "default"}"><circle cx="${X(p[0])}" cy="${Y(p[1])}" r="${pick ? 9 : 5}" fill="${n.length ? "var(--accent)" : "var(--panel)"}" stroke="var(--sticker)" stroke-width="1.2"/>${n.length ? `<text x="${X(p[0])}" y="${(+Y(p[1]) + 4).toFixed(1)}" font-size="${n.length > 1 ? 8 : 11}" font-weight="700" fill="#fff" text-anchor="middle">${n.join(",")}</text>` : ""}<text x="${X(p[0])}" y="${(+Y(p[1]) + (pick ? 22 : 16)).toFixed(1)}" font-size="11" fill="var(--sticker)" text-anchor="middle">${esc(String(lab).replace(/^P/, ""))}</text></g>`; }
+  for (const [n, pts_] of Object.entries((st().kind && L.tracks) || {})) { const c = ((L.robots || []).find(r => r.name === n) || {}).colour || "#5B6474";
+    if (pts_.length > 1) o += `<polyline points="${pts_.map(p => X(p[0]) + "," + Y(p[1])).join(" ")}" fill="none" stroke="${c}" stroke-width="${going() ? 1.5 : 2}" stroke-opacity="${going() ? .35 : .7}" stroke-linejoin="round"/>`; }
   for (const r of (L.robots || [])) {
     if (r.x == null || r.y == null) continue;
     const R = (7 + (r.pm_cm || 0)) * k, c = r.colour || "#5B6474", h = r.th == null ? null : -r.th;
@@ -169,26 +172,33 @@ function drawMap() {
   $("maptitle").textContent = phase === "before" ? (kind === "visit" && isTags() ? "Plan: click stickers in the order to visit" : "The table") : phase === "after" ? "The table after the run" : "The table now";
   $("mapnote").textContent = LIVE && LIVE.robots && LIVE.robots.length ? `${LIVE.robots.filter(r => r.x != null).length} robot${LIVE.robots.length === 1 ? "" : "s"} on the map` : "";
   $("mapcap").textContent = phase === "before" ? (kind === "visit" && isTags() ? "Clicked stickers join the order in the bar below; leave it empty and the points are shared out." : "The robots appear here once a run has found them (each by its wiggle or its lights).")
-    : "Each square is a robot, named by its nickname; the wider its ring, the less sure the run is of where it is.";
+    : "Each square is a robot, named by its nickname; the wider its ring, the less sure the run is of where it is. " + (phase === "after" ? "Lines: where each robot drove (the camera's fixes)." : "Faint lines: where each drove in the last minute.");
   $("mapsrc").textContent = "Measured: each robot's position and its 95 % error" + (LIVE && LIVE.source ? ", from " + LIVE.source : "") + ". Stickers: the site's sticker sheet.";
   $("stickerlegend").classList.toggle("hidden", !isTags());
   document.querySelectorAll(".stk").forEach(g => g.onclick = () => { if (going() || kind !== "visit" || !isTags()) return; order.push(g.dataset.p); render(); });
 }
 
 // ------------------------------------------------------------------ the rail: needs a hand, robots, Pi health
+function questionsHTML() {   // a run that may ask (someone stays with the robots): its question holds that robot until answered
+  return (st().questions || []).map(q => `<div class="alert" style="border-color:var(--amber);background:var(--amber-bg)"><h3 style="color:var(--amber)">A question from the run (${esc(q.robot)} is held until you answer)</h3><div class="small">${esc(q.text)}</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${(q.choices || []).map(c => `<button class="primary" data-qid="${esc(q.id)}" data-choice="${esc(c)}">${esc(c)}</button>`).join("")}</div></div>`).join("")
+    + ((st().edge_parked || []).length ? `<div class="alert"><h3>A robot was left at the table's edge</h3>${st().edge_parked.map(w => `<div class="small">${esc(w)}</div>`).join("")}<div class="small" style="margin-top:4px">Someone must move it before the next run.</div></div>` : "")
+    + (T && T.corners_needed ? `<div class="alert" style="border-color:var(--amber);background:var(--amber-bg)"><h3 style="color:var(--amber)">One thing to do first: the table's corners</h3><div class="small">${esc(T.corners_needed)} It takes a minute and is only needed once here.</div><a class="ghost" href="/classic" style="display:inline-block;margin-top:8px;text-decoration:none">Open the setup (old page)</a></div>` : "");
+}
 function handHTML() {
   const rq = (PLACE && PLACE.requests) || [], words = st().needs_hand || [];
-  if (!rq.length && !words.length) return "";
+  if (!rq.length && !words.length) return questionsHTML();
   const cams = Object.entries((PLACE && PLACE.cams) || {});
   let o = rq.map(q => `<div class="alert" data-robot="${esc(q.robot)}"><h3>NEEDS A HAND · ${esc(q.robot)} <span class="tiny muted">${esc(nickRef(q.robot))}</span></h3>
     <div class="small">${q.stage === "heading" ? `It drove ${esc(q.drive_cm)} cm straight. <b>Click it again</b>: the line between your clicks is its heading.` : `${esc(q.why || "Its possible error could reach an edge")}. <b>Click the middle of its roof in the picture.</b>`}</div>
     ${q.suggest ? `<div class="small" style="margin-top:6px">${esc(q.suggest.src)} saw it at ${q.suggest.x}, ${q.suggest.y} cm. <button class="ghost small pacc">Yes, that is it</button></div>` : ""}
     ${cams.map(([c, m]) => `<div style="position:relative;margin-top:8px;line-height:0"><img class="pimg" data-cam="${esc(c)}" data-w="${m.size[0]}" data-h="${m.size[1]}" src="/api/frame?cam=${esc(c)}&t=${Date.now()}" alt="${esc(c)} live picture: click ${esc(q.robot)}" style="width:100%;border-radius:8px;cursor:crosshair"></div><div class="tiny muted" style="margin-top:2px">${esc(c)} camera, live</div>`).join("") || `<p class="small">No camera model here: put it on a sticker and pick that point below.</p>`}
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center"><span class="small muted">No camera shows it?</span><select class="ppoint"><option value="">point...</option>${Object.keys((PLACE && PLACE.points) || {}).map(k => `<option>${esc(k)}</option>`).join("")}</select><button class="ghost small pgo">It is on that point</button></div></div>`).join("");
+  o = questionsHTML() + o;
   if (!rq.length) o += `<div class="alert"><h3>A robot needs a hand</h3>${words.map(w => `<div class="small">${esc(w)}</div>`).join("")}<div class="small" style="margin-top:4px">Move it a hand's width onto the table; it rejoins by itself.</div></div>`;
   return o;
 }
 function wireHand() {
+  document.querySelectorAll("[data-qid]").forEach(b => b.onclick = async () => { try { T = await api("/api/start/answer", {id: b.dataset.qid, choice: b.dataset.choice}); flash("Answer sent: " + b.dataset.choice); render(); } catch (e) { flash(e.message, true); } });
   document.querySelectorAll("#handslot .alert[data-robot]").forEach(card => { const robot = card.dataset.robot;
     const acc = card.querySelector(".pacc"); if (acc) acc.onclick = async () => { try { await api("/api/place/click", {robot, accept: true}); flash(robot + ": the offered spot confirmed"); placeLoad(); } catch (e) { flash(e.message, true); } };
     card.querySelectorAll("img.pimg").forEach(im => im.onclick = async ev => { const b = im.getBoundingClientRect();
@@ -230,7 +240,7 @@ function healthHTML() {
 // ------------------------------------------------------------------ the run bar
 function runbarHTML() {
   const s = st(), b = (T && T.buttons) || [];
-  if (s.stopping) return `<b style="color:var(--amber)">Stopping…</b><span class="small">${(s.stop.robots || []).map(r => `<span class="pill ${r.state === "confirmed" ? "ok" : "warn"}">${esc(r.name)}: ${esc(r.state)}</span>`).join(" ")}</span><span class="small muted">${esc(s.stop.words)}</span><span class="grow"></span><button class="stop" id="stopbar">STOP again</button>`;
+  if (s.stopping) return `<b style="color:var(--amber)">Stopping…</b><span class="small">${(s.stop.robots || []).map(r => `<span class="pill ${r.state === "confirmed" ? "ok" : "warn"}">${esc(r.name)}: ${esc(r.state)}</span>`).join(" ")}</span><span class="small muted">${esc(s.stop.words)}</span><span class="grow"></span>${s.stop.can_go_on ? `<button class="ghost" id="goon" title="Only if the robots that have not answered are switched off, asleep or away">Carry on without them</button>` : ""}<button class="stop" id="stopbar">STOP again</button>`;
   if (s.running) { const pts = s.points != null ? ` · ${s.points} points` : "";
     return `<b>${esc(s.title)}${s.practice ? " (practice)" : ""}</b><span class="small">${fmt(s.elapsed_s)}${pts}</span>${uploadPill(s.upload)}<span class="small muted" style="max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((s.lines || []).slice(-1)[0] || "")}</span><span class="grow"></span><button class="ghost" id="logbtn">Log</button><button class="stop" id="stopbar">STOP every robot</button>`; }
   if (s.kind) return `<b>${esc(s.words || s.title)}</b>${uploadPill(s.upload)}${s.upload && s.upload.link ? `<a class="small" href="${esc(s.upload.link)}" target="_blank" rel="noopener">the release</a>` : ""}${s.sleep_words ? `<span class="small muted">${esc(s.sleep_words)}</span>` : ""}<span class="grow"></span><button class="ghost" id="logbtn">Log</button><button class="ghost" id="newrun">New run</button><button class="primary" id="again">Run again</button>`;
@@ -249,7 +259,8 @@ function wireRunbar() {
   if ($("again")) $("again").onclick = () => { kind = st().kind || kind; startRun(); };
   if ($("newrun")) $("newrun").onclick = () => { dismissed = st().folder || "?"; order = []; render(); };
   if ($("stopbar")) $("stopbar").onclick = stopAll;
-  if ($("logbtn")) $("logbtn").onclick = () => alert((st().lines || []).join("\n") + "\n\nFolder: " + (st().folder || ""));
+  if ($("goon")) $("goon").onclick = async () => { if (!confirm("Carry on without the robots that have not answered STOP? Only if they are switched off, asleep or away from the table.")) return; try { T = await api("/api/start/stop_go_on", {}); render(); } catch (e) { flash(e.message, true); } };
+  if ($("logbtn")) $("logbtn").onclick = () => { logOpen = !logOpen; render(); };
 }
 async function startRun() {
   if (!kind) return;
@@ -325,6 +336,9 @@ function render() {
   const hs = handHTML(); if ($("handslot").dataset.h !== hs.replace(/t=\d+/g, "")) { $("handslot").innerHTML = hs; $("handslot").dataset.h = hs.replace(/t=\d+/g, ""); wireHand(); }
   $("cards").innerHTML = cardsHTML();
   $("health").innerHTML = healthHTML();
+  $("logcard").classList.toggle("hidden", !logOpen);
+  if (logOpen) $("logcard").innerHTML = `<div style="display:flex;justify-content:space-between"><b>The run's last lines</b><button class="ghost tiny" id="logclose" style="padding:1px 8px">Close</button></div><pre class="mono" style="white-space:pre-wrap;max-height:260px;overflow:auto;margin:6px 0 0">${esc((st().lines || []).join("\n"))}</pre><div class="tiny muted">Folder: ${esc(st().folder || "")}</div>`;
+  if ($("logclose")) $("logclose").onclick = () => { logOpen = false; render(); };
   if (!(document.activeElement && document.activeElement.closest && document.activeElement.closest(".runbar"))) { $("runbar").innerHTML = runbarHTML(); wireRunbar(); }
   if (drawerOpen && !(document.activeElement && document.activeElement.closest && document.activeElement.closest("#drawer"))) { $("drawer").innerHTML = drawerHTML(); wireDrawer(); }
   soundLabel(); handCheck();

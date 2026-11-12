@@ -514,3 +514,25 @@ def test_the_bench_finds_parked_robots_and_picks_the_largest_share_inside_the_sp
     saved = B.apply(25, path=str(tmp_path / "share.json"))
     import tagfree as TF
     assert TF.duty_setting(env={}, path=saved)[0] == 0.25
+
+
+def test_tracks_show_where_each_robot_drove(tmp_path):
+    import live_view as LV
+    (tmp_path / "run").mkdir()
+    (tmp_path / "run" / "camera_track.csv").write_text("t,robot,x_cm,y_cm,th_deg,arrived\n" + "".join(
+        "%d,Alpha,%d,10,0,0\n" % (100 + i, i) for i in range(1000)))
+    tr = LV.tracks(str(tmp_path), max_pts=100)
+    assert len(tr["Alpha"]) == 101 and tr["Alpha"][-1] == [999.0, 10.0]
+    assert len(LV.tracks(str(tmp_path), since_s=60, now=1099)["Alpha"]) == 61
+
+
+def test_a_robot_that_never_answers_keeps_stopping_until_the_person_carries_on():
+    t = [0.0]
+    sw = SC.StopWatch([SC.Job("visit", None, None, [{"name": "Left", "ip": "10.0.0.6"}])], practice=False,
+                      listen=lambda s: {}, send_stop=lambda ips: None, retry_s=1.0, clock=lambda: t[0])
+    for k in range(30):
+        t[0] = float(k)
+        assert sw.step() is False                       # never "given up" by itself
+    assert sw.state()["can_go_on"] and sw.go_on("test")
+    st = sw.state()
+    assert st["phase"] == "stopped" and st["robots"][0]["state"] == "not confirmed" and "never answered" in st["words"]

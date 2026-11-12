@@ -246,6 +246,20 @@ class StopWatch:
             return True
         return False
 
+    def go_on(self, who=""):
+        """The person says to carry on without the robots that have not answered (switched off, asleep, out of the
+        WiFi). Only once every driver has ended; those robots are named in the record as not confirmed."""
+        if self.done_t is not None or self.drivers_gone_t is None:
+            return False
+        left = [r["name"] for r in self.robots.values() if r["state"] != "confirmed"]
+        for r in self.robots.values():
+            if r["state"] != "confirmed":
+                r["state"], r["words"] = "not confirmed", "no answer; you said to carry on without it"
+        self.events.append([round(self.clock() - self.t0, 1), "carried on without %s (%s)" % (", ".join(left) or
+                                                                                            "nobody", who or "page")])
+        self.done_t = self.clock()
+        return True
+
     def run(self, tick_s=0.5):
         while not self.step():
             time.sleep(tick_s)
@@ -261,12 +275,16 @@ class StopWatch:
         rs = [{k: r.get(k) for k in ("name", "ref", "state", "words", "tries", "confirmed_t")}
               for r in self.robots.values()]
         n_ok = sum(r["state"] == "confirmed" for r in rs)
-        if done:
+        if done and any(r["state"] == "not confirmed" for r in rs):
+            words = "Stopped; %s never answered (you carried on without %s)." % (
+                ", ".join(r["name"] for r in rs if r["state"] == "not confirmed"),
+                "it" if sum(r["state"] == "not confirmed" for r in rs) == 1 else "them")
+        elif done:
             words = "Stopped: %s confirmed %.0f s after STOP." % (
                 "every robot" if rs else "the run", self.done_t - self.t0)
         else:
             words = "Stopping... %d of %d robot%s confirmed (%.0f s)." % (
                 n_ok, len(rs), "" if len(rs) == 1 else "s", self.clock() - self.t0)
-        return {"phase": "stopped" if done else "stopping", "t": self.t0, "words": words, "robots": rs,
+        return {"phase": "stopped" if done else "stopping", "can_go_on": not done and self.drivers_gone_t is not None, "t": self.t0, "words": words, "robots": rs,
                 "forced": list(self.forced), "events": list(self.events)[-12:], "practice": self.practice,
                 "seconds": round((self.done_t or self.clock()) - self.t0, 1), "version": VERSION}

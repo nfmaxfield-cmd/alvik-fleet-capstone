@@ -1525,6 +1525,11 @@ class Handler(BaseHTTPRequestHandler):
                                                                          "code: the page reloads in a few seconds"})
                 if path == "/api/start/stop":
                     return self._send(200, clean(S.start.stop_all()))
+                if path == "/api/start/stop_go_on":     # (12 Nov) carry on without robots that never answered STOP
+                    sw = getattr(S.start, "stopwatch", None)
+                    if sw is None or not sw.go_on(self.client_address[0]):
+                        raise ValueError("nothing to carry on from: the run is still closing, or every robot answered")
+                    return self._send(200, clean(S.start.state()))
                 if path == "/api/start/answer":
                     # (e08, A2) a person's answer to a run's question (safety_rules.Questions)
                     import safety_rules as SR_
