@@ -432,11 +432,19 @@ def f_inv_dir(f, dx, dy):
 
 
 # ------------------------------------------------------------------------------------------------- calibration store
+def _owner_default():
+    try:
+        import safety_group as SG_
+        return SG_.value("MIRLT_WHEEL_OWNER")
+    except Exception:  # noqa: BLE001
+        return "pool"
+
+
 def cal_path(conf_dir, robot):
     return os.path.join(os.path.expanduser(conf_dir), "robots", "%s.json" % robot)
 
 
-def pool_fit(conf_dir, robot, fit, when=None, source=None, run=None):
+def pool_fit(conf_dir, robot, fit, when=None, source=None, run=None, in_use=None):
     """Adds one run's fit (wheel, gyro with their standard errors) to the robot's history on the Pi and returns the
     pooled values (inverse-variance means) and whether each is sure enough to save on the robot. (e19, audit H2) source
     ("dry" / "real") and run (its folder's name) are kept on the row, so a dry run's row can be found later."""
@@ -448,6 +456,9 @@ def pool_fit(conf_dir, robot, fit, when=None, source=None, run=None):
         d = dict(robot=robot, runs=[])
     if fit:
         row = dict(fit, t=when or time.strftime("%Y-%m-%d %H:%M:%S"))
+        for k_, p_ in (("wheel", "wheel_scale"), ("gyro", "gyro_scale")):
+            if in_use and in_use.get(p_) is not None and not fit.get("abs"):
+                row[k_ + "_in_use"] = float(in_use[p_])     # (e19, audit 7) the fit is relative to the value in use
         if source:
             row["source"] = source
         if run:
@@ -456,7 +467,10 @@ def pool_fit(conf_dir, robot, fit, when=None, source=None, run=None):
         d["runs"] = d["runs"][-30:]
     pooled = {}
     for k in ("wheel", "gyro"):
-        xs = [(r[k], r.get(k + "_se") or 0.03) for r in d["runs"] if r.get(k) and abs(r[k] - 1.0) <= CAL_MAX_DEV]
+        # (e19, audit 7) pooled as ABSOLUTE scales: a row is absolute ("abs") or relative to the value in use when it was
+        # measured (k_in_use; rows from before e19 carry none: taken as 1, the factory value)
+        xs = [((r[k] if r.get("abs") else r[k] * float(r.get(k + "_in_use") or 1.0)), r.get(k + "_se") or 0.03)
+              for r in d["runs"] if r.get(k) and abs(r[k] - 1.0) <= CAL_MAX_DEV]
         if not xs:
             continue
         w = [1.0 / max(1e-6, se * se) for _, se in xs]
@@ -471,11 +485,21 @@ def pool_fit(conf_dir, robot, fit, when=None, source=None, run=None):
     return pooled
 
 
-def corr_commands(pooled, current=None):
+def corr_commands(pooled, current=None, owner=None):
     """The robot commands that save a sure pooled fit on the robot (firmware 2026-11-05a corr save: no reflash). current:
-    the robot's present wheel_scale / gyro_scale (its M, line at power-on), multiplied by the fit."""
+    the robot's present wheel_scale / gyro_scale (its M, line at power-on), multiplied by the fit. (e19, audit 7; owner
+    "pool", the default) the pool is absolute: its value is saved only when the value in use was read back and the two
+    differ by more than the pool's own 95 % error bar (1.96 se); a correction inside its error bar is never saved."""
     cur = current or {}
     out = []
+    if (owner or os.environ.get("MIRLT_WHEEL_OWNER") or _owner_default()) == "pool":
+        for k, p_ in (("wheel", "wheel_scale"), ("gyro", "gyro_scale")):
+            pk = pooled.get(k) or {}
+            if not pk.get("sure") or cur.get(p_) is None:
+                continue
+            if abs(pk["value"] - float(cur[p_])) > 1.96 * pk["se"]:
+                out.append("corr save %s %.4f" % (p_, pk["value"]))
+        return out
     if pooled.get("wheel", {}).get("sure"):
         out.append("corr save wheel_scale %.4f" % (cur.get("wheel_scale", 1.0) * pooled["wheel"]["value"]))
     if pooled.get("gyro", {}).get("sure"):

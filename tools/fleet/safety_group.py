@@ -176,6 +176,18 @@ SWITCHES = [
      "e17"),
     # -- calibration kept --------------------------------------------------------------------------------------------------
     ("MIRLT_ARC_SAVE_AT_END", "1", "0", "F", "The curves' calibration saved at any run end (agreement rule)", "e17"),
+    ("MIRLT_WHEEL_OWNER", "pool", "e18", "F",
+     "(audit finding 7) ONE owner of wheel_scale / gyro_scale: the robot's pool on the Pi, in absolute values (each run's "
+     "fit kept with the value in use when it was measured); a run's end adds its measurement to the pool; the start saves "
+     "the pooled value on the robot only when it is sure and differs from the value in use by more than its own 95 % error "
+     "bar. e18: the start's pool and the end's saver both wrote it", "e19"),
+    ("MIRLT_CURVE_LIVE", "1", "0", "F",
+     "(Nick 12 Nov: the best, most accurate numbers) The curve scales in use are this session's fleet-wide estimate, set "
+     "live on every robot (never saved); a robot gets its own only when its pieces differ from the rest's (Mann-Whitney, "
+     "p < 0.01). 0: the scales saved on each robot", "e19"),
+    ("MIRLT_CURVE_FLASH_RESET", "1", "0", "F",
+     "(Nick 12 Nov: Left's arc_k_scale 1.0736 back to 1.0) A curve scale saved on a robot is reset to 1.0 at a real run's "
+     "start (it came from one session); the live fleet estimate replaces it. 0: kept", "e19"),
     ("MIRLT_SAVE_CAL_AT_END", "1", "0", "F M",
      "Every calibration correction a run measured (curves, straight drives, turns: each by the agreement rule; each "
      "robot's odometry record) saved at every ending: the time cap, Stop / Ctrl+C, an error (a checkpoint every minute "

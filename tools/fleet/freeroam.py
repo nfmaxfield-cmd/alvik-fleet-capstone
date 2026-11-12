@@ -354,8 +354,9 @@ class Runner:
                 c.R[n].mode, c.R[n].out_why = "gone", "not seen by the camera at the start"
         for n, fit in res["fits"].items():
             pooled = D.pool_fit(self.a.conf_dir, n, fit, source="dry" if self.a.dry else "real",  # (e19, H2) tagged
-                                run=os.path.basename(self.dir.rstrip("/")))
-            for cmd in D.corr_commands(pooled, getattr(self, "corr_now", {}).get(n)):
+                                run=os.path.basename(self.dir.rstrip("/")), in_use=self.params_read.get(n))
+            # (e19, audit 7: corr_now was never set) the values in use, read back at the start
+            for cmd in D.corr_commands(pooled, self.params_read.get(n) or getattr(self, "corr_now", {}).get(n)):
                 if not self.a.dry:
                     self.send(n, cmd)
                 c.event(c.R[n], "calibration saved", "%s (pooled over %d runs, the robot keeps it at power-off)" % (
@@ -807,6 +808,17 @@ class Runner:
                 time.sleep(0.01)
         self.pump(1.0)
         c.params = self.params_read
+        if not self.a.dry and FC.CURVE_LIVE and SG_flag("MIRLT_CURVE_FLASH_RESET"):
+            # (e19, Nick 12 Nov: Left's arc_k_scale 1.0736 reset to 1.0) a curve scale saved on a robot came from one
+            # session; this run's own fleet estimate is applied live instead (curve_live). Saved 1.0, said
+            for n in live:
+                sc = c.R[n].arc_scales
+                if sc is not None and (abs(sc[0] - 1.0) > 1e-4 or abs(sc[1] - 1.0) > 1e-4):
+                    for cmd in ("set arc_k_scale 1.0000", "set arc_d_scale 1.0000", "save"):
+                        self.send(n, cmd)
+                    c.R[n].arc_scales = (1.0, 1.0)
+                    c.event(c.R[n], "curve scales reset", "arc_k_scale %.4f, arc_d_scale %.4f saved on it -> 1.0 (Nick "
+                            "12 Nov); this run's fleet curve estimate is set live instead" % sc)
         import safety_group as SG
         say(SG.start_words())
         if not self.a.dry:
@@ -962,7 +974,19 @@ class Runner:
             done = c.save_corrections(why)
             self.saved_corrections = done
         except Exception as e:  # noqa: BLE001
+            done = []
             say("(the calibration corrections were not saved: %s)" % e)
+        # (e19, audit 7) ONE owner of wheel_scale / gyro_scale: this run's measurements join each robot's pool on the Pi
+        try:
+            import start_discovery as D
+            for q in done or []:
+                if q.get("pool"):
+                    k = "wheel" if q["param"] == "wheel_scale" else "gyro"
+                    D.pool_fit(self.a.conf_dir, q["robot"], {k: q["new"], k + "_se": max(1e-4, q["hw"] / 1.96),
+                                                             "abs": True},
+                               source="dry" if self.a.dry else "real", run=os.path.basename(self.dir.rstrip("/")))
+        except Exception as e:  # noqa: BLE001
+            say("(this run's corrections not added to the pool: %s)" % e)
         try:
             self.pump(0.3)
         except Exception:  # noqa: BLE001
@@ -1015,6 +1039,11 @@ class Runner:
         self.source.close()
         self.tables.close()
         self.track.close()
+
+
+def SG_flag(env):
+    import safety_group as SG
+    return SG.flag(env)
 
 
 def dry_conf_dir():

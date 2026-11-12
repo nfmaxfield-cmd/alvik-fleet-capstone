@@ -411,7 +411,8 @@ def test_missions_keep_an_unreadable_point_a_blind_leg_reaches():
 
 
 # --------------------------------------------------------------- 6: every calibration correction saved at any end
-def test_every_correction_that_agrees_is_saved_at_the_end_and_one_that_does_not_is_said():
+def test_every_correction_that_agrees_is_saved_at_the_end_and_one_that_does_not_is_said(monkeypatch):
+    monkeypatch.setattr(FC, "WHEEL_OWNER", "e18")      # (e19) e18's end saver; the one owner: test_e19_audit_fixes.py
     sent = []
     c = FC.Controller(["A", "B"], H.BOARD, lambda n, s: sent.append((n, s)), lambda *a: None)
     for n in ("A", "B"):

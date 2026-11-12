@@ -657,3 +657,69 @@ def test_mission_controls_stop_path_and_stop_first_work_together(tmp_path):
     assert min(stops) - t_sig < 1.0 and "end_save" in rec["T"] and "close" in rec["T"]
     assert "already ending" in rec["stdout"]
     assert json.load(open(tmp_path / "run-mcstop" / "state.json"))["ended"].startswith("stopped by hand")
+
+
+# ------------------------------------------- 10 (audit 7 + Nick): one wheel_scale owner; curves live from the fleet
+def test_a_correction_inside_its_own_error_bar_is_never_saved(tmp_path):
+    """Audit finding 7: "wheel_scale 1.0000 -> 1.0068 (+-0.013)": three corrections inside their own error bar, all
+    saved. Now the pooled value is saved only when it differs from the value in use past its 95 % error bar."""
+    import start_discovery as D
+    pooled = {"wheel": dict(value=1.0068, se=0.0066, runs=3, sure=True)}
+    assert D.corr_commands(pooled, {"wheel_scale": 1.0}, owner="pool") == []
+    big = {"wheel": dict(value=1.0300, se=0.0040, runs=3, sure=True)}
+    assert D.corr_commands(big, {"wheel_scale": 1.0}, owner="pool") == ["corr save wheel_scale 1.0300"]
+    assert D.corr_commands(big, {}, owner="pool") == []                    # its value in use not heard: not saved
+
+
+def test_the_pool_is_absolute_so_a_relative_fit_is_saved_right(tmp_path):
+    """Audit finding 7: discovery's corr_now was never set, so a fit relative to 0.98 in use was saved as if relative to
+    1. Now each row keeps the value in use; the pool and the save are absolute."""
+    import start_discovery as D
+    for k in range(3):
+        pooled = D.pool_fit(str(tmp_path), "Left", {"wheel": 1.02, "wheel_se": 0.002}, in_use={"wheel_scale": 0.98})
+    assert abs(pooled["wheel"]["value"] - 0.9996) < 1e-3
+    assert D.corr_commands(pooled, {"wheel_scale": 0.98}, owner="pool") == ["corr save wheel_scale 0.9996"]
+
+
+def test_the_end_of_run_measurement_goes_to_the_pool_not_to_the_robot():
+    import freeroam_core as FC
+    sent = []
+    c = FC.Controller(["A", "B"], BOARD, lambda n, s: sent.append((n, s)), lambda *a: None)
+    for n in ("A", "B"):
+        c.R[n].mode, c.R[n].curve = "idle", False
+    c.params = {"A": {"wheel_scale": 0.98}}
+    for k in range(30):
+        c.ratio_fit(c.R["A"], "drive", 1.02 + 0.001 * (k % 5))
+    done = c.save_corrections("the time cap")
+    assert not any(s.startswith("set wheel_scale") or s == "save" for n, s in sent)
+    assert [d["pool"] for d in done if d["robot"] == "A"] == [True]
+
+
+def _curve_ctrl(resp):
+    import freeroam_core as FC
+    sent = []
+    c = FC.Controller(list(resp), BOARD, lambda n, s: sent.append((n, s)), lambda *a: None)
+    for n in resp:
+        c.R[n].mode, c.R[n].curve, c.R[n].arc_scales = "idle", True, (1.0, 1.0)
+    import random
+    rng = random.Random(3)
+    for k in range(60):
+        n = list(resp)[k % len(resp)]
+        use = c.R[n].__dict__.get("arc_live") or (1.0, 1.0)        # the robot drives on the scale set in use
+        c.curve_live(c.R[n], (resp[n] + rng.gauss(0, 0.01)) * use[0], (1.0 + rng.gauss(0, 0.01)) * use[1])
+    return c, sent
+
+
+def test_curves_use_the_fleets_live_estimate_and_a_robot_its_own_only_when_it_differs():
+    """Nick 12 Nov: a live fleet-wide per-session curve estimate for all robots; a robot its own only when its data
+    differ significantly (Mann-Whitney, fine print in the report)."""
+    c, sent = _curve_ctrl({"Left": 1.06, "Center": 1.06, "Right": 1.06})
+    ks = {n: float(s.split()[2]) for n, s in sent if s.startswith("set arc_k_scale")}
+    assert set(ks) == {"Left", "Center", "Right"} and all(abs(v - 1 / 1.06) < 0.01 for v in ks.values())
+    assert not any(s == "save" for n, s in sent)                            # live, never saved
+    c, sent = _curve_ctrl({"Left": 1.15, "Center": 1.03, "Right": 1.03})
+    last = {}
+    for n, s in sent:
+        if s.startswith("set arc_k_scale"):
+            last[n] = float(s.split()[2])
+    assert abs(last["Left"] - 1 / 1.15) < 0.01 and abs(last["Center"] - 1 / 1.03) < 0.015

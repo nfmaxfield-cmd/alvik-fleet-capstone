@@ -51,7 +51,7 @@ import safety_group as SG   # noqa: E402  (e18: every safety switch's automatic 
 import odo_trust as OT      # noqa: E402  (e18, 5: each robot's measured odometry trust, the blind-drive allowance)
 import fused_pose as FP     # noqa: E402  (e09 Phase B: one filter per robot, fed by the tracking layer and RAW)
 
-VERSION = "freeroam-2026-11-12e19"   # e19 (the Fable audit, 12 Nov): H4 a correction beyond the robot's stated doubt (stated_doubt: its record from calibration-run data, MIRLT_BLIND_BUBBLE=record for every loss) needs motion proof (MIRLT_MOTION_PROOF: named far proves itself by an out-and-back, proof_watch; an unconfirmed correction permits no reverse toward an edge and does not widen the gate until its own move confirms it); after a restart its pose is sent and a heading check asked (on_restart / boot_watch); camera_test_step while the camera is not trusted. H6 a hung robot is never given up on (MIRLT_HANG_RECOVERY): the opposite of what tilted it first (tilt_cause), forward tries with the tilt stop raised when its nose points inward (recover_forward), growing rounds one derived pause apart, the fail memory per round, the tilt keep-out at the nearest edge, no refused creeps while tilted. H5 the creep token stands only while its holder's creep is under way; a stuck robot (tilted, recovering, its last moves did not move: stuck()) never holds or takes it. Before: "freeroam-2026-11-12e18b"   # e18b (the replay of all 10 home runs): a standing robot named all along beyond its 6 cm fix gate is corrected from the camera (MIRLT_FAR_NAMED_CORRECT); a standing re-seed keeps its own heading unless the camera's is better (MIRLT_RESEED_HEADING_KEEP); curve scales logged, not saved, until Nick decides (MIRLT_CURVE_SCALE_SAVE); the trust record pooled for the fleet (odo_trust, MIRLT_TRUST_FLEET). e18 (Nick 12 Nov decisions): (1) the tracking layer's out-and-back identity drive, made only where no body can touch (outback); (3) a creep with its heading in doubt beside a robot the camera has waits for room or goes straight away when no heading can close the gap; beside one it does not have, half steps at the slowest speed away from where it was last believed to be (MIRLT_DOUBT_NEIGHBOUR); (4) a lost / stray / needs-a-hand robot goes first (reflex priority) to the nearest readable point nobody uses, and a standing robot in its way makes room (MIRLT_LOST_PRIORITY); (5) each robot's odometry trust (odo_trust: shadow dead reckoning against the camera, its own record) gives its lost bubble and allows blind legs (curves through unreadable ground, blind_excursion) only where the predicted error keeps every margin with a way back; checked against the error found when seen again (MIRLT_BLIND_ALLOW); (6) every calibration correction (curves, straight drives) saved at any end by the agreement rules (save_corrections, MIRLT_SAVE_CAL_AT_END). Every safety switch read through safety_group. Before: "freeroam-2026-11-12e17"   # e17 (home 11 Nov, the 08:26 and 08:58 runs): (1d) a camera position the tracking layer named by elimination or a wiggle is a CORRECTION: its pose set from the camera at once (fpose, never rejected by its filter), said "CORRECTED", never "moved in" / REJOINED, and a held robot rejoins on it (MIRLT_CAMERA_CORRECT=0: as e16); (1e) a re-seed is projected to now and never lands while the robot turns (the Pi's copy of its heading is ~0.3 s old: 13-15 deg median jump when it landed mid-turn, MIRLT_RESEED_TURN=0: as before); (2) no driving blind on late fixes: each robot's measured fix age and drift against the room its path has (MIRLT_LATE_FIX=0); after an off-plan heading re-set the next move waits for a short crawl the camera confirms (MIRLT_HEADING_CONFIRM=0); (6) each robot's drift per cm measured from its own corrections. Before: "freeroam-2026-11-11e16"
+VERSION = "freeroam-2026-11-12e19"   # e19 (the Fable audit, 12 Nov): 7/10 ONE owner of wheel_scale (MIRLT_WHEEL_OWNER=pool), curves live from this session's fleet estimate (MIRLT_CURVE_LIVE, curve_live). H4 a correction beyond the robot's stated doubt (stated_doubt: its record from calibration-run data, MIRLT_BLIND_BUBBLE=record for every loss) needs motion proof (MIRLT_MOTION_PROOF: named far proves itself by an out-and-back, proof_watch; an unconfirmed correction permits no reverse toward an edge and does not widen the gate until its own move confirms it); after a restart its pose is sent and a heading check asked (on_restart / boot_watch); camera_test_step while the camera is not trusted. H6 a hung robot is never given up on (MIRLT_HANG_RECOVERY): the opposite of what tilted it first (tilt_cause), forward tries with the tilt stop raised when its nose points inward (recover_forward), growing rounds one derived pause apart, the fail memory per round, the tilt keep-out at the nearest edge, no refused creeps while tilted. H5 the creep token stands only while its holder's creep is under way; a stuck robot (tilted, recovering, its last moves did not move: stuck()) never holds or takes it. Before: "freeroam-2026-11-12e18b"   # e18b (the replay of all 10 home runs): a standing robot named all along beyond its 6 cm fix gate is corrected from the camera (MIRLT_FAR_NAMED_CORRECT); a standing re-seed keeps its own heading unless the camera's is better (MIRLT_RESEED_HEADING_KEEP); curve scales logged, not saved, until Nick decides (MIRLT_CURVE_SCALE_SAVE); the trust record pooled for the fleet (odo_trust, MIRLT_TRUST_FLEET). e18 (Nick 12 Nov decisions): (1) the tracking layer's out-and-back identity drive, made only where no body can touch (outback); (3) a creep with its heading in doubt beside a robot the camera has waits for room or goes straight away when no heading can close the gap; beside one it does not have, half steps at the slowest speed away from where it was last believed to be (MIRLT_DOUBT_NEIGHBOUR); (4) a lost / stray / needs-a-hand robot goes first (reflex priority) to the nearest readable point nobody uses, and a standing robot in its way makes room (MIRLT_LOST_PRIORITY); (5) each robot's odometry trust (odo_trust: shadow dead reckoning against the camera, its own record) gives its lost bubble and allows blind legs (curves through unreadable ground, blind_excursion) only where the predicted error keeps every margin with a way back; checked against the error found when seen again (MIRLT_BLIND_ALLOW); (6) every calibration correction (curves, straight drives) saved at any end by the agreement rules (save_corrections, MIRLT_SAVE_CAL_AT_END). Every safety switch read through safety_group. Before: "freeroam-2026-11-12e17"   # e17 (home 11 Nov, the 08:26 and 08:58 runs): (1d) a camera position the tracking layer named by elimination or a wiggle is a CORRECTION: its pose set from the camera at once (fpose, never rejected by its filter), said "CORRECTED", never "moved in" / REJOINED, and a held robot rejoins on it (MIRLT_CAMERA_CORRECT=0: as e16); (1e) a re-seed is projected to now and never lands while the robot turns (the Pi's copy of its heading is ~0.3 s old: 13-15 deg median jump when it landed mid-turn, MIRLT_RESEED_TURN=0: as before); (2) no driving blind on late fixes: each robot's measured fix age and drift against the room its path has (MIRLT_LATE_FIX=0); after an off-plan heading re-set the next move waits for a short crawl the camera confirms (MIRLT_HEADING_CONFIRM=0); (6) each robot's drift per cm measured from its own corrections. Before: "freeroam-2026-11-11e16"
 VERSION_E16 = "freeroam-2026-11-11e16"   # e16 (home free roam 11 Nov 08:45-08:48, commit 4732a48: Right stopped at an edge and stood; then "REJOINED ... moved in" 1 s after NEEDS A HAND with nobody there, and Center pushed it off): (7) an edge stop reverses along the robot's own recorded track as far as the derived edge rule needs (observe.track_back_target), checked against the others' reservations, then re-plans; it holds and asks only when the track is unknown or blocked (MIRLT_EDGE_BACKOUT=0: as before); (8a) "moved in" needs evidence: a lift or a sustained camera move past its own measured noise, or its own drive out (MIRLT_REJOIN_EVIDENCE=0: as before); (8b) a robot held or stuck at an edge, or rejoined and not yet driven away, is a fixed obstacle with its uncertainty (own pose against the camera) in every plan and the reflex (MIRLT_PINNED_OBSTACLE=0); (8c) contact: a standing robot the camera sees move past its noise, or whose accelerometer jolts, stops the robots near it; a driving robot whose camera progress falls far below its wheels' stops and backs off; contact.csv (MIRLT_CONTACT_WATCH=0); (8d) a question nobody answers (ASK_WAIT_S) makes the run decide by itself, as an unattended run does (MIRLT_ASK_UNATTENDED=1: keeps asking); (9b) a standing robot's doubt no longer grows with its fix's age (home: "cannot tell whether it is clear of the edge" 22 cm in; MIRLT_STAND_UNC=0). Before: "freeroam-2026-11-10e13b"   # e13b (10 Nov, Nick 13:34): a standing robot (its own odometry shows no motion since its last fix) keeps that fix: never lost while it stands, sparse reads confirm it (MIRLT_STAND_TRUST=0: before); the lost threshold grows only for a camera slower than about 2.5 pictures a second (1.5 x the longest recent gap). e13 (10 Nov): never give up blind (BLIND_RULE edge: a lost robot drives on while its bubble + body + stop cannot reach an edge; BUBBLE_CAP behind MIRLT_BLIND_RULE=cap); stray return (a robot outside the readable area comes back along ground it drove); never give up (a robot held at an edge waits, says it needs a hand and rejoins: EDGE_PARK off); risk-based no-pictures limit per robot
 VERSION_E12 = "freeroam-2026-11-10a"   # 11-10a (e12): the curve-fit maths moved into module functions (fit_arc_points, arc_summary, arc_agree) so the calibration's curve phase uses the very same (free roam's own fitting and saving unchanged); a robot held at an edge for EDGE_PARK_S is parked and said loudly, the others roam on (MIRLT_EDGE_PARK=0: before)
 VERSION_E = "freeroam-2026-11-07e"   # 11-07e (Nick 7 Nov): a robot put down at or over an edge first tries the e08 tilt recovery, a person asked only if that fails (MIRLT_START_EDGE_MODE=wait: always wait)
@@ -299,6 +299,13 @@ PROOF_K = 2.0           # (e19) the camera's measured sigma counted as a 95 % bo
                         # a 95 % bound. Statistical, not tuned; DOE: no
 FAR_NAMED_CORRECT = SG.flag("MIRLT_FAR_NAMED_CORRECT")   # (replay) named all along but beyond its fix gate: corrected
 RESEED_HEADING_KEEP = SG.flag("MIRLT_RESEED_HEADING_KEEP")   # (replay) a standing re-seed keeps its own heading
+CURVE_LIVE = SG.flag("MIRLT_CURVE_LIVE")    # (e19, Nick: "always use the best, most accurate numbers") the curve scales
+                        # in use are this session's fleet-wide estimate, set live (not saved); a robot its own only
+                        # when its fits differ from the rest (Mann-Whitney, p < CURVE_OWN_P)
+CURVE_OWN_P = 0.01      # (e19) as odo_trust.DIFFER_P. Chosen; DOE: no (when, not whether)
+WHEEL_OWNER = SG.value("MIRLT_WHEEL_OWNER")   # (e19, audit finding 7) "pool": ONE owner of wheel_scale / gyro_scale (the
+                        # start's pool on the Pi, absolute values); a run's end adds its measurement to the pool instead of
+                        # saving it on the robot. "e18": both savers, as before
 CURVE_SCALE_SAVE = SG.flag("MIRLT_CURVE_SCALE_SAVE")    # (replay; Nick to decide) curve scales logged, not saved
 FAR_AFTER_FPOSE_S = 3.0   # no named-far correction within 3 s of any fpose (the late fixes, up to ~1 s, plus the
                           # 1 s steadiness window, then one more second of margin). Chosen; DOE: no
@@ -2615,6 +2622,17 @@ class Controller:
                 continue
             for c in self.corrections(r):
                 c.update(robot=r.name, why=why)
+                if WHEEL_OWNER == "pool":
+                    # (e19, audit 7) ONE owner: the measurement goes to the robot's pool on the Pi (the host adds it:
+                    # freeroam.Runner.end_save); the next start saves the pooled value on the robot only when it differs
+                    # from the value in use by more than its own error bar
+                    c["pool"] = bool(c["new"] is not None and c["n"] >= ARC_FIT_MIN)
+                    self.event(r, "calibration", c["words"] + (": added to its pool on the Pi (the next start saves "
+                               "it on the robot if the pool is sure and it differs past its error bar)" if c["pool"]
+                               else ": too few, or its value in use not heard: not pooled"))
+                    self.log("calibration_end", dict(c, t=round(self.t, 2)))
+                    done.append(c)
+                    continue
                 if c["ok"] and r.mode not in ("out",):
                     self.out(r, "set %s %.4f" % (c["param"], c["new"]))
                     self.out(r, "save")
@@ -5502,8 +5520,52 @@ class Controller:
             return
         kr, dr, R = f
         r.arc_fits.append((kr, dr))
+        if CURVE_LIVE:
+            self.curve_live(r, kr, dr)
         self.log("arcfit", dict(t=round(self.t, 2), robot=r.name, k=round(k, 5), L=round(L, 1), v=round(mv["v"], 2),
                                 R_fit=round(R, 2), k_ratio=round(kr, 4), length_ratio=round(dr, 4), n=len(pts)))
+
+    def curve_live(self, r, kr, dr):
+        """(e19, Nick 12 Nov) One fitted curve piece: the robot's own response (the fit over the scale in use when it
+        drove) joins this session's fleet record; the fleet's median is applied LIVE to every robot (set, never saved)
+        once it is sure (arc_agree's rule: ARC_FIT_MIN pieces, 95 % half-width under ARC_FIT_CI) and it differs from
+        the value in use by more than its own half-width. A robot gets its own median only when its pieces differ from
+        the rest's (Mann-Whitney U, two-sided p < CURVE_OWN_P, both sides ARC_FIT_MIN pieces)."""
+        use = r.__dict__.get("arc_live") or r.arc_scales or (1.0, 1.0)
+        r.__dict__.setdefault("arc_resp", []).append((kr / use[0], dr / use[1]))
+        allr = [(o, q) for o in self.R.values() for q in o.__dict__.get("arc_resp", [])]
+        if len(allr) < ARC_FIT_MIN or len(allr) % 5:
+            return
+        for o in self.R.values():
+            if o.mode in ("gone", "out") or not o.curve:
+                continue
+            own = o.__dict__.get("arc_resp", [])
+            rest = [q for oo, q in allr if oo is not o]
+            src, pts = "the fleet's", [q for _, q in allr]
+            if len(own) >= ARC_FIT_MIN and len(rest) >= ARC_FIT_MIN:
+                try:
+                    from scipy.stats import mannwhitneyu
+                    pv = float(mannwhitneyu([q[0] for q in own], [q[0] for q in rest], alternative="two-sided").pvalue)
+                except Exception:  # noqa: BLE001
+                    pv = 1.0
+                if pv < CURVE_OWN_P:
+                    src, pts = "its own (p %.3f against the rest)" % pv, own
+            res = arc_summary(pts)
+            if res is None:
+                continue
+            fk, hk, fd, hd, n = res
+            ok, ks, ds = arc_agree(res, (1.0, 1.0))
+            cur = o.__dict__.get("arc_live") or o.arc_scales or (1.0, 1.0)
+            # the change is real only past the estimate's own half-width (in scale units: hw / f^2)
+            if not ok or (abs(ks - cur[0]) <= hk / fk ** 2 and abs(ds - cur[1]) <= hd / fd ** 2):
+                continue
+            o.arc_live = (round(ks, 4), round(ds, 4))
+            self.out(o, "set arc_k_scale %.4f" % ks)
+            self.out(o, "set arc_d_scale %.4f" % ds)
+            self.counts["curve_live_sets"] = self.counts.get("curve_live_sets", 0) + 1
+            self.event(o, "curves live", "%s curve response this session from %d pieces: curvature x%.3f (+-%.3f), "
+                       "length x%.3f (+-%.3f): arc_k_scale %.4f -> %.4f, arc_d_scale %.4f -> %.4f, set for this run "
+                       "(not saved)" % (src, n, fk, hk, fd, hd, cur[0], ks, cur[1], ds))
 
     def arc_result(self, r):
         """(median k ratio, its 95 % half-width, median length ratio, its half-width, n) or None."""

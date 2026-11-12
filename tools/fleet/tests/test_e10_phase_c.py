@@ -109,10 +109,12 @@ def test_no_camera_narrows_the_run_and_nothing_crosses_an_edge():
 
 def test_calibration_is_pooled_on_the_pi_and_saved_on_the_robot_once_sure(tmp_path):
     conf = str(tmp_path)
-    p = D.pool_fit(conf, "Left", dict(wheel=1.02, wheel_se=0.02, gyro=0.99, gyro_se=0.03))
+    p = D.pool_fit(conf, "Left", dict(wheel=1.02, wheel_se=0.02, gyro=0.99, gyro_se=0.03), in_use={"wheel_scale": 0.97})
     assert not p["wheel"]["sure"] and D.corr_commands(p) == []
     for _ in range(8):
-        p = D.pool_fit(conf, "Left", dict(wheel=1.02, wheel_se=0.02, gyro=0.99, gyro_se=0.03))
+        # (e19, audit 7) each fit keeps the value in use it was measured against (the pool is absolute)
+        p = D.pool_fit(conf, "Left", dict(wheel=1.02, wheel_se=0.02, gyro=0.99, gyro_se=0.03),
+                       in_use={"wheel_scale": 0.97})
     assert p["wheel"]["sure"] and p["wheel"]["runs"] == 9
     cmds = D.corr_commands(p, {"wheel_scale": 0.97})
     assert cmds and cmds[0].startswith("corr save wheel_scale 0.98")
