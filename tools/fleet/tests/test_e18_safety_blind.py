@@ -133,7 +133,12 @@ def test_the_out_and_back_length_follows_the_measured_camera_noise():
     small = L._outback_size([dict(sd0=0.2), dict(sd0=0.3)])
     big = L._outback_size([dict(sd0=0.9), dict(sd0=0.3)])
     huge = L._outback_size([dict(sd0=3.0)])
-    assert small["L"] == 2.0 and 2.0 < big["L"] <= 4.0 and huge["L"] == 4.0
+    if TL.OB_SOUND:
+        # (e19, audit H3) as long as the noise needs, past 4 cm; too long for any safe drive: refused (too_noisy)
+        assert small["L"] == 2.0 and 2.0 < big["L"] and huge["L"] > 4.0 and huge["too_noisy"]
+        assert big["L_need"] == big["L"] and not big["too_noisy"]
+    else:
+        assert small["L"] == 2.0 and 2.0 < big["L"] <= 4.0 and huge["L"] == 4.0
     assert 2.0 <= small["v"] <= 5.0 and small["thr"] <= small["L"]
 
 

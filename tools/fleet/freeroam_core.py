@@ -312,6 +312,8 @@ CAM_HEAD_SD = {"tags": 2.0, "": 2.0}   # ("": no source named = tags, as on_fix 
 BLIND_BUBBLE = SG.value("MIRLT_BLIND_BUBBLE")         # (5) "fixed": an unplanned loss grows the bubble by the 29 Oct
                         # numbers (its record's prediction logged and checked); "record": by its own record every time
 OB_MIN_CM_ROBOT = 2.0   # (1) Nick 12 Nov: 2-4 cm (the layer sizes it from the camera's noise; never under this)
+ID_PAUSE = SG.flag("MIRLT_ID_PAUSE")          # (e19) an unnamed robot pauses while it is being identified (bounded)
+OB_INWARD = SG.flag("MIRLT_OUTBACK_INWARD")   # (e19, Nick) near / half over an edge: an inward-only out-and-back
 OB_GAP_CM = 0.5         # (1) CHOSEN: an out-and-back keeps the bodies' circles this far apart even driving straight at
                         # another robot or candidate spot (Nick: contacts not allowed). DOE: no (a guard)
 DOUBT_DEG_UNKNOWN = 180.0   # (3) a heading in doubt with no measure of how far off: any direction. Not chosen
@@ -1992,11 +1994,19 @@ class Controller:
         return bool(getattr(r, "tilted", False) or r.__dict__.get("recover") is not None or
                     r.__dict__.get("nomove_n", 0) >= self.STUCK_N)
 
+    def id_pause_s(self, r):
+        """(e19) How long an unnamed robot pauses while it is being identified: the layer's steady time, one wiggle's
+        watch (1.6 x its length) and the fix's delay with half a second to settle. Derived; DOE: no."""
+        import tracking_layer as TL_
+        return TL_.STEADY_S + 1.6 * TL_.WIGGLE_S + self.fix_delay(r) + 0.5
+
     def never_still_watch(self, r):
         """(e17) Every tick: a robot that has stood idle longer than still_pause (held at an edge, unsure, needing a
         hand, waiting for a heading check's room, put down at an edge, tilted with no way back, outside the readable
         area with no return found) creeps. Not while it waits for a heading check's measurement or a short pause the
         run asked for itself under that pause; never one that is silent, parked, out, or at its battery floor."""
+        if not self.unaccounted_why(r):
+            r.id_pause_from = None              # (e19) accounted again: a later loss pauses again
         if not self.never_still or r.mode != "idle" or r.move is not None:
             r.still_since = None
             return
@@ -2027,6 +2037,14 @@ class Controller:
             # middle together, the camera saw two spots follow two own poses alike, and the reacquire's motion check
             # took the other robot's spot (a swap in both e17 and e18 runs)
             un = [o for o in self.R.values() if o.mode not in ("out", "gone", "start") and self.unaccounted_why(o)]
+            if ID_PAUSE and len(un) >= 2:
+                # (e19, MIRLT_ID_PAUSE; Nick's answer pending) while it is being identified it pauses: the camera needs
+                # its spot steady (STEADY_S) and one identity move watched; then never still resumes
+                if r.__dict__.get("id_pause_from") is None:
+                    r.id_pause_from = self.t
+                if self.t - r.id_pause_from < self.id_pause_s(r):
+                    self.counts["id_pauses"] = self.counts.get("id_pauses", 0) + 1
+                    return
             if len(un) >= 2 and not self.stuck(r):
                 # (e19, audit H5: the hard simulator's 311 s stand, skew seed 2: Right refused in 5,794 of 5,912 ticks
                 # because hung Left re-crept in vain and so held the token for good) the token stands only while its
@@ -2346,13 +2364,48 @@ class Controller:
         L, v = float(req["L"]), float(req["v"])
         seen = [(o.cam[1], o.cam[2]) for o in self.R.values() if o is not r and o.cam is not None and
                 o.mode != "gone" and self.fresh(o)]
+        h0 = r.own[3]
+        sign = 1
         room = L
+        if OB_INWARD and spots and any(edge_dist(self.rect, sx, sy) - HALF - 0.5 < L for sx, sy in spots):
+            # (e19, Nick 12 Nov: "half over an edge: an inward-only out-and-back: yes") near or over an edge at some
+            # candidate: a straight drive along its own heading, forward or back, that takes EVERY candidate further in
+            # (never toward an edge, never reversing toward one); its room is then only the other bodies'
+            # its heading's own doubt counts (2 x head_sd, a 95 % bound; a heading check pending: any direction)
+            dd = 180.0 if self.heading_doubt(r) is not None else min(180.0, 2.0 * self.head_sd(r))
+            sign = 0
+            for sg in (1, -1):
+                if dd >= 90.0:
+                    break
+                ok_ = True
+                for hh in (h0 - dd, h0, h0 + dd):
+                    ux, uy = sg * math.cos(math.radians(hh)), sg * math.sin(math.radians(hh))
+                    if not all(edge_dist(self.rect, sx + L * ux, sy + L * uy) >= edge_dist(self.rect, sx, sy) + 0.25 * L
+                               for sx, sy in spots):
+                        ok_ = False
+                        break
+                if ok_:
+                    sign = sg
+                    break
+            if sign:
+                self.counts["outback_inward"] = self.counts.get("outback_inward", 0) + 1
         for sx, sy in spots:
-            room = min(room, edge_dist(self.rect, sx, sy) - HALF - 0.5)
+            if not (OB_INWARD and sign and any(edge_dist(self.rect, a, b) - HALF - 0.5 < L for a, b in spots)):
+                room = min(room, edge_dist(self.rect, sx, sy) - HALF - 0.5)
             for q in seen + [s_ for s_ in spots if s_ != (sx, sy)]:
                 d = math.dist(q, (sx, sy))
                 if d > 0.5:
                     room = min(room, d - 2 * HALF - OB_GAP_CM)
+        if sign == 0:
+            room = -1.0
+        need = float(req.get("L_need") or 0.0)
+        if need and room < need:
+            # (e19, audit H3) never shortened below what the camera's noise needs: a shorter drive cannot be told from
+            # noise (the audit: named wrong in 33 of 200 at detector noise). Refused, said; the layer tries again later
+            self.counts["outback_no_room"] = self.counts.get("outback_no_room", 0) + 1
+            self.event(r, "identity drive", "%s: the camera's noise needs %.1f cm out and back; only %.1f cm of room at "
+                       "every place the camera might have it: not driven (nothing guessed)" % (why, need, max(0.0, room)))
+            return False
         if room < OB_MIN_CM_ROBOT:
             self.counts["outback_unsafe"] = self.counts.get("outback_unsafe", 0) + 1
             self.event(r, "identity drive", "%s: no %.0f cm out-and-back is safe at every place the camera might have "
@@ -2363,12 +2416,15 @@ class Controller:
             self.halt(r, "identity out-and-back")
             self.end_move(r)
         x, y, h = r.own[1], r.own[2], r.own[3]
-        ex, ey = x + L * math.cos(math.radians(h)), y + L * math.sin(math.radians(h))
+        sg_ = -1 if sign == -1 else 1
+        ex, ey = x + sg_ * L * math.cos(math.radians(h)), y + sg_ * L * math.sin(math.radians(h))
         p = self.pos(r) or (x, y)
         mv = dict(kind="outback", cell=None, turn=0.0, L=0.0, v=v, t0=self.t, p0=p, h0=h, h1=h, end=p, phase="drive",
-                  n=r.n_moves + 1, drive_id=None, turn_id=None, t_drive=None, adj_scale=1.0, rev=False, ob_L=L)
-        mv["turn_id"] = self.send_step(r, "fs %%d D %.2f %.2f %.2f %.2f %.2f %.2f 0 -" % (x, y, ex, ey, h, v))
-        mv["drive_id"] = self.send_step(r, "fs %%d D %.2f %.2f %.2f %.2f %.2f %.2f 1 -" % (ex, ey, x, y, h, v))
+                  n=r.n_moves + 1, drive_id=None, turn_id=None, t_drive=None, adj_scale=1.0, rev=sg_ < 0, ob_L=L)
+        mv["turn_id"] = self.send_step(r, "fs %%d D %.2f %.2f %.2f %.2f %.2f %.2f %d -" % (x, y, ex, ey, h, v,
+                                                                                         0 if sg_ > 0 else 1))
+        mv["drive_id"] = self.send_step(r, "fs %%d D %.2f %.2f %.2f %.2f %.2f %.2f %d -" % (ex, ey, x, y, h, v,
+                                                                                          1 if sg_ > 0 else 0))
         r.move, r.mode = mv, "move"
         r.traj = Traj.stand(self.t, *p, m=self.margin0(r) + L)
         r.n_moves += 1

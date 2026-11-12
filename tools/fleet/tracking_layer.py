@@ -155,6 +155,10 @@ OB_SD_FLOOR = 0.3        # cm: the smallest camera sigma believed (a spot standi
 OB_FAR_SHARE = 0.75      # the OB_N farthest sightings average about this share of the drive (pictures on the way out and
                          # back included; the e18 batch: 1.5 of 2.0 cm at 5 pictures a second). Measured in the rig;
                          # DOE: yes, on real out-and-backs (the lights spot's far-end mean against the drive)
+OB_SOUND = SG.flag("MIRLT_OUTBACK_SOUND")   # (e19, audit H3) the out-and-back as long as the camera's noise needs
+                         # (refused where there is no room), "moved" judged on medians at the time its own track was out
+OB_MAX_SOUND_CM = 12.0   # (e19) the longest identity drive: a body's radius (HALF ~6.7 cm) and half again. Chosen; DOE:
+                         # no (a safety bound; the room check decides first)
 OB_MIN_CM = 2.0          # Nick 12 Nov: 2-4 cm. The drive is OB_K x its noise x sqrt(2 / OB_N) / OB_FAR_SHARE, inside this
 OB_MAX_CM = 4.0
 OB_V_MIN = 2.0           # cm/s: the firmware's slowest drive (driveLine's floor). Not chosen
@@ -904,6 +908,14 @@ class TrackingLayer:
             req = dict(kind=kind, spots=[(c["x"], c["y"]) for c in cl])
             if kind == "outback":
                 req.update(self._outback_size(cl))
+                if req.get("too_noisy"):
+                    # (e19) the camera's noise needs a drive longer than any safe out-and-back: nothing guessed
+                    fails[kind] += 1
+                    self.counts["outback_too_noisy"] = self.counts.get("outback_too_noisy", 0) + 1
+                    self.log("tracking", dict(t=round(t, 2), robot=w, what="out-and-back refused",
+                                              why="the camera's noise (%.2f cm) needs %.1f cm, over %.0f cm" % (
+                                                  req["sig"], req["L"], OB_MAX_SOUND_CM)))
+                    continue
             self.elim_wig = dict(robot=w, t0=t, tries=tries, unacc=list(unacc), cands=cl, kind=kind, req=req)
             self.log("tracking", dict(t=round(t, 2), robot=w, what="%s asked" % kind,
                                       why="elimination: %d robots unaccounted (%s), %d steady sightings nobody claims%s"
@@ -938,14 +950,21 @@ class TrackingLayer:
         the far end, within 2-5 cm/s."""
         sig = max([max(OB_SD_FLOOR, c["sd0"]) for c in cl] or [OB_SD_FLOOR])
         need = OB_K * sig * math.sqrt(2.0 / OB_N)          # what the far end's mean must show past its noise
-        L = min(OB_MAX_CM, max(OB_MIN_CM, need / OB_FAR_SHARE))
+        if OB_SOUND:
+            # (e19, audit H3: capped at 4 cm, above ~0.9 cm of noise the "moved" bar fell under the 4 sigmas it is
+            # described as) as long as the noise needs, up to OB_MAX_SOUND_CM; the controller refuses it where there
+            # is no room for that length (never shortened below it: a shorter drive could not be told from noise)
+            L = max(OB_MIN_CM, need / OB_FAR_SHARE)
+        else:
+            L = min(OB_MAX_CM, max(OB_MIN_CM, need / OB_FAR_SHARE))
         ts = self.frame_ts[-21:]
         gaps = sorted(b - a for a, b in zip(ts, ts[1:]) if b > a)
         gap = gaps[len(gaps) // 2] if gaps else 0.25
         v = min(OB_V_MAX, max(OB_V_MIN, L / (2.0 * OB_N * gap)))     # OB_N pictures on the outer half of the way out
         thr = max(0.5 * L, min(OB_FAR_SHARE * L, need))
         return dict(L=round(L, 2), v=round(v, 2), sig=round(sig, 3), thr=round(thr, 2), gap=round(gap, 3),
-                    win=round(2.0 * L / v + OB_SLACK_S, 2))
+                    win=round(2.0 * L / v + OB_SLACK_S, 2), L_need=round(L, 2) if OB_SOUND else None,
+                    too_noisy=bool(OB_SOUND and L > OB_MAX_SOUND_CM))
 
     def _take(self, n, t, sp, fix, dist, how):
         tr = self.T[n]
@@ -1042,22 +1061,35 @@ class TrackingLayer:
             near2 = sorted((math.hypot(q[1] - c["x"], q[2] - c["y"]), k) for k, c in enumerate(ew["cands"]))
             if near2 and near2[0][0] < max(WIGGLE_NEAR_CM, 3 * req["L"]):
                 ew["cands"][near2[0][1]]["seen"].append(q)
-        def far(c):
-            d = sorted((math.hypot(q[1] - c["x"], q[2] - c["y"]) for q in c["seen"]), reverse=True)[:OB_N]
-            return sum(d) / len(d) if len(d) >= min(OB_N, 2) else 0.0
-        fars = [far(c) for c in ew["cands"]]
-        thr = req["thr"]
-        moved = [k for k, f in enumerate(fars) if f >= thr]
-        back = False
-        if len(moved) == 1:
-            c = ew["cands"][moved[0]]
-            last = c["seen"][-OB_N:]
-            if len(last) >= 2:
-                mx = sum(q[1] for q in last) / len(last)
-                my = sum(q[2] for q in last) / len(last)
-                back = math.hypot(mx - c["x"], my - c["y"]) <= 0.5 * thr
-        if not back and t - ew["t0"] < req["win"]:
-            return None
+        if OB_SOUND:
+            # (e19, audit H3: "the bar is applied to the 3 farthest sightings of a whole watch, which grows with the
+            # number of pictures") WHEN it was out comes from the driving robot's OWN track (its wheels); each
+            # candidate's MEDIAN distance from where it stood over the pictures around that time is its "far"; the bar
+            # is half the drive and OB_K sigmas over those pictures' count. Its own track not moving = the drive did
+            # not happen: nothing is named (a lost command). Decided at the window's end.
+            if t - ew["t0"] < req["win"]:
+                return None
+            fars, thr, own_moved = self._outback_medians(ew, t)
+            back = True
+        else:
+            def far(c):
+                d = sorted((math.hypot(q[1] - c["x"], q[2] - c["y"]) for q in c["seen"]), reverse=True)[:OB_N]
+                return sum(d) / len(d) if len(d) >= min(OB_N, 2) else 0.0
+            fars = [far(c) for c in ew["cands"]]
+            thr = req["thr"]
+            own_moved = True
+        moved = [k for k, f in enumerate(fars) if f >= thr] if own_moved else []
+        if not OB_SOUND:
+            back = False
+            if len(moved) == 1:
+                c = ew["cands"][moved[0]]
+                last = c["seen"][-OB_N:]
+                if len(last) >= 2:
+                    mx = sum(q[1] for q in last) / len(last)
+                    my = sum(q[2] for q in last) / len(last)
+                    back = math.hypot(mx - c["x"], my - c["y"]) <= 0.5 * thr
+            if not back and t - ew["t0"] < req["win"]:
+                return None
         self.elim_wig = None
         w = ew["robot"]
         # every other candidate stayed: under the threshold and clearly less than the one that moved (half the drive;
@@ -1089,6 +1121,29 @@ class TrackingLayer:
                                       len(moved), len(fars), thr, ", ".join("%.1f" % f for f in fars),
                                       self.elim_wait[w] - t)))
         return None
+
+    def _outback_medians(self, ew, t):
+        """(e19) ([median far distance per candidate], the bar, whether the driving robot's own track moved)."""
+        req = ew["req"]
+        w = ew["robot"]
+        own = [q for q in self.T[w].own if q[0] >= ew["t0"] - 0.3] if self.T[w].own else []
+        L, v = float(req["L"]), max(0.5, float(req["v"]))
+        if own:
+            o0 = own[0]
+            dists = [(math.hypot(q[1] - o0[1], q[2] - o0[2]), q[0]) for q in own]
+            dmax, t_far = max(dists)
+        else:
+            dmax, t_far = 0.0, ew["t0"] + L / v
+        own_moved = dmax >= 0.5 * L
+        half = max(0.4, 0.5 * L / v)
+        fars, ns = [], []
+        for c in ew["cands"]:
+            d = sorted(math.hypot(q[1] - c["x"], q[2] - c["y"]) for q in c["seen"] if abs(q[0] - t_far) <= half)
+            fars.append(d[len(d) // 2] if d else 0.0)
+            ns.append(len(d))
+        n = max(1, min([k for k in ns if k] or [1]))
+        thr = max(0.5 * L, OB_K * float(req["sig"]) / math.sqrt(n))
+        return fars, thr, own_moved
 
     def _probation(self, t):
         """An elimination is confirmed once the robot's own wheels drive ELIM_VERIFY_CM and the camera's sightings

@@ -1,0 +1,5 @@
+lights sd 0.4 cm a direction, 5 pictures/s: first name RIGHT 200, WRONG   0, nobody named in 90 s   0 (of 200; 1.4 out-and-backs a trial)
+lights sd 0.8 cm a direction, 5 pictures/s: first name RIGHT 200, WRONG   0, nobody named in 90 s   0 (of 200; 1.8 out-and-backs a trial)
+ml     sd 1.6 cm a direction, 2 pictures/s: first name RIGHT  94, WRONG  33, nobody named in 90 s  73 (of 200; 3.6 out-and-backs a trial)
+ml     sd 1.6 cm a direction, 4 pictures/s: first name RIGHT  76, WRONG  18, nobody named in 90 s 106 (of 200; 4.9 out-and-backs a trial)
+lights sd 1.5 cm a direction, 5 pictures/s: first name RIGHT 106, WRONG  16, nobody named in 90 s  78 (of 200; 4.8 out-and-backs a trial)

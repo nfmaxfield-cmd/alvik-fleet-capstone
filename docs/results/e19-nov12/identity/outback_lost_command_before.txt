@@ -1,0 +1,8 @@
+hz  2.0  per-axis sd 0.5 cm: named although nobody moved in   0 of 200 trials (60 s each, 760 out-and-backs as
+hz  2.0  per-axis sd 1.0 cm: named although nobody moved in   1 of 200 trials (60 s each, 640 out-and-backs as
+hz  2.0  per-axis sd 1.5 cm: named although nobody moved in  81 of 200 trials (60 s each, 577 out-and-backs as
+hz  2.0  per-axis sd 2.0 cm: named although nobody moved in 153 of 200 trials (60 s each, 366 out-and-backs as
+hz  5.0  per-axis sd 0.5 cm: named although nobody moved in   0 of 200 trials (60 s each, 800 out-and-backs as
+hz  5.0  per-axis sd 1.0 cm: named although nobody moved in   0 of 200 trials (60 s each, 800 out-and-backs as
+hz  5.0  per-axis sd 1.5 cm: named although nobody moved in  32 of 200 trials (60 s each, 732 out-and-backs as
+hz  5.0  per-axis sd 2.0 cm: named although nobody moved in 126 of 200 trials (60 s each, 530 out-and-backs as

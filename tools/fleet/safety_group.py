@@ -57,6 +57,18 @@ SWITCHES = [
     ("MIRLT_OUTBACK_ID", "1", "0", "T F",
      "Two or more robots unaccounted and the wiggle cannot tell them apart: one at a time drives a short slow straight "
      "out-and-back (2-4 cm, from the camera's measured noise) so the camera sees which sighting moved", "e18"),
+    ("MIRLT_OUTBACK_SOUND", "1", "0", "T F",
+     "(audit H3) The out-and-back is as long as the camera's measured noise needs (it may pass 4 cm; up to 12 cm), "
+     "refused where there is no room for that length (never shortened below it), and 'moved' is judged on the median of "
+     "the sightings at the time the robot's own wheels say it was out (a robot whose own track did not move names "
+     "nobody). 0: e18 (2-4 cm, the 3 farthest sightings)", "e19"),
+    ("MIRLT_OUTBACK_INWARD", "1", "0", "F",
+     "(Nick 12 Nov) A robot near or half over an edge gets an inward-only out-and-back (forward or back, whichever takes "
+     "every place the camera might have it further in). 0: e18 (refused near an edge)", "e19"),
+    ("MIRLT_ID_PAUSE", "1", "0", "F",
+     "(Nick asked 'why unnamed, fix it'; his answer pending: on by default, flip it here) With two or more robots "
+     "unaccounted, an unnamed robot pauses its never-still creeps for a few seconds (the camera's steady time plus one "
+     "identity move) ONLY while it is being identified, then never still resumes. 0: e18 (creeps go on)", "e19"),
     ("MIRLT_ELIM_PAIR_GUARD", "1", "0", "T",
      "The elimination counts robots in a close pass as unaccounted too, and never gives a spot that lies on another "
      "robot's own pose (within the 6 cm fix gate) to an unaccounted robot (5 Nov 14:55: Right corrected onto Left's spot "

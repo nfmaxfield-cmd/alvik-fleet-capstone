@@ -234,6 +234,7 @@ def _two_unaccounted():
         r.own_hist = [(c.t - 1.0, x, y, 0.0), (c.t, x, y, 0.0)]
         c.start_lost(r, "test")
         r.bubble = 3.0
+        r.id_pause_from = c.t - 100.0           # (item 8's identification pause) over: the token rules are tested here
     return c
 
 
@@ -513,3 +514,101 @@ def test_with_the_overhead_unplugged_the_side_camera_is_not_taken_as_the_overhea
     m2, _ = OB.pick_cameras([("/dev/video0", "Some Camera"), ("/dev/video2", "EMEET SmartCam C950")],
                             {"overhead": "USB 2.0 Camera", "side": "EMEET"})
     assert m2["overhead"] == "/dev/video0" and m2["side"] == "/dev/video2"
+
+
+# ------------------------------------------- 8 (audit H3 + Nick): identity: a sound out-and-back, inward-only, pause
+def _ob_trial(seed, sd, hz, src, moves=True, dur=90.0, latency=0.4):
+    """The audit's layer-alone trial (ob_real.py / ob_false.py): two unaccounted robots 30 cm apart, own poses far off;
+    the wiggle shows nothing, then the out-and-back. moves=False: the command is lost (nobody moves)."""
+    import random
+    import tracking_layer as TL
+    rng = random.Random(seed)
+    st = dict(move=None, t=0.0)
+    truth = {"A": [40.0, 60.0], "B": [70.0, 60.0]}
+    hd = {"A": rng.uniform(0, 360), "B": rng.uniform(0, 360)}
+    lay = []
+
+    def wig(name, why):
+        req = lay[0].wiggle_req
+        if req["kind"] == "wiggle":
+            return False
+        if moves:
+            st["move"] = dict(who=name, t0=st["t"] + latency, L=req["L"], v=req["v"])
+        return True
+    L = TL.TrackingLayer(["A", "B"], sources=(src,), wiggle=wig, board=(0, 0, 122, 122), brick_watch=False,
+                         parked_watch=False, camera_watch=False)
+    lay.append(L)
+    own = {"A": (20.0, 20.0), "B": (100.0, 100.0)}
+    L.set_unaccounted("A", "lost")
+    L.set_unaccounted("B", "lost")
+    t, res = 0.0, []
+    while t < dur and not res:
+        t += 1.0 / hz
+        st["t"] = t
+        pos = {}
+        for n in truth:
+            m = st["move"]
+            off = 0.0
+            if m and m["who"] == n and t >= m["t0"]:
+                s_ = (t - m["t0"]) * m["v"]
+                off = s_ if s_ <= m["L"] else max(0.0, 2 * m["L"] - s_)
+            c_, s2 = math.cos(math.radians(hd[n])), math.sin(math.radians(hd[n]))
+            pos[n] = (truth[n][0] + off * c_, truth[n][1] + off * s2)
+            L.own(n, t, own[n][0] + off * c_, own[n][1] + off * s2, hd[n], off == 0.0)
+        dets = [TL.Det(src, t, pos[n][0] + rng.gauss(0, sd), pos[n][1] + rng.gauss(0, sd), sigma=sd) for n in truth]
+        for f in L.feed(t, dets):
+            if f.get("how"):
+                res.append(math.hypot(f["x"] - truth[f["robot"]][0], f["y"] - truth[f["robot"]][1]) < 10)
+    return res
+
+
+def test_the_out_and_back_names_right_at_detector_noise():
+    """Audit H3: capped at 4 cm and judged on the 3 farthest sightings, at the detector's noise (1.6 cm, 2 pictures a
+    second) the first name was WRONG in 33 of 200 (right 94). Now: as long as the noise needs, judged on medians at the
+    time the robot's own track was out. (The full 200-trial table is in the build report.)"""
+    res = [_ob_trial(s, 1.6, 2.0, "ml") for s in range(60)]
+    right = sum(1 for r in res if r and r[0])
+    wrong = sum(1 for r in res if r and not r[0])
+    assert right >= 50 and wrong <= 4, (right, wrong)
+
+
+def test_nobody_is_named_when_the_out_and_back_command_is_lost():
+    """Audit H3: nobody moved (a lost command), noise 1.5 cm at 2 pictures a second: a robot was named in 81 of 200."""
+    named = sum(1 for s in range(40) if _ob_trial(s, 1.5, 2.0, "lights", moves=False, dur=60.0))
+    assert named == 0
+
+
+def test_a_robot_half_over_an_edge_gets_an_inward_only_out_and_back():
+    """Nick 12 Nov ("yes"): a robot near or half over an edge is not refused: it drives straight in and back (forward or
+    reverse, whichever takes every candidate spot further in), never toward the edge."""
+    import freeroam_core as FC
+    sent = []
+    c = FC.Controller(["A", "B"], BOARD, lambda n, s: sent.append((n, s)), lambda *a: None)
+    c.t = 10.0
+    r = c.R["A"]
+    r.mode = "idle"
+    r.own = (c.t, 3.0, 60.0, 180.0)                 # half over the x = 0 edge, its nose OUT (its back inward)
+    r.own_hist = [(c.t, 3.0, 60.0, 180.0)]
+    c.R["B"].mode = "gone"
+    ok = c.outback(r, "test", dict(kind="outback", L=4.0, v=2.0, spots=[(3.0, 60.0)], sig=0.5, win=8.0, L_need=4.0))
+    assert ok and r.move["rev"]                     # out by reversing (inward), back forward
+    d = [s.split() for n, s in sent if " D " in s]
+    assert float(d[0][5]) > 3.0                     # the first leg ends further in (x grows)
+
+
+def test_an_unnamed_robot_pauses_while_it_is_identified_then_creeps_again():
+    """MIRLT_ID_PAUSE (on by default; Nick to confirm): with two robots unaccounted an unnamed robot does not creep for
+    the identification's derived pause, then never still resumes."""
+    import freeroam_core as FC
+    c = _two_unaccounted()
+    R = c.R["Right"]
+    R.id_pause_from = None
+    R.still_since = c.t - 10.0
+    called = []
+    c.creep_step = lambda r, why: called.append(c.t) or False
+    c.never_still_watch(R)
+    assert not called and c.counts.get("id_pauses")
+    c.t += c.id_pause_s(R) + 0.1
+    R.still_since = c.t - 10.0
+    c.never_still_watch(R)
+    assert called
