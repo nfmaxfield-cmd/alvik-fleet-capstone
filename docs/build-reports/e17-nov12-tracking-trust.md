@@ -155,7 +155,9 @@ How much more or less each robot's curves turned than asked. Left turns 7 % more
 
 - `tools/fleet/tests/test_e17_tracking_trust.py`: 31 tests (the cases above, each switch's old way, the 08:26 replay excerpt in `tests/data/e17_home_0826_right_hold/`).
 - Two e13 tests and one e10 test are pinned to the old switches.
-- Full fleet suite: SUITE_LINE
+- Full fleet suite on the final code (2f506af): **934 passed, 9 skipped** in 17.4 min (baseline 903 / 9; +31 new).
+- `tools/pi/tests`: 133 passed. The same 4 `test_launcher.py` failures as before e17 (not touched).
+- `tools/analysis/tests`: 16 passed.
 
 ## Conclusion
 
