@@ -16,6 +16,11 @@ size is the one it was trained at.
 8-bit integers ("static quantization", calibrated on frames from the given
 labels folders). It can be faster on the Pi's ARM cores; check with
 benchmark.py and evaluate.py whether it is faster AND still accurate.
+
+    python export.py --int8-from best.onnx D:/recordings    # (dv1) 8-bit from an existing .onnx, no PyTorch needed
+
+Changelog: 2026-11-12 dv1 PyTorch imported only where needed, so quantize() and --int8-from work without it
+(train_jax.py writes the float .onnx itself).
 """
 import argparse
 import json
@@ -23,16 +28,16 @@ import os
 import sys
 
 import numpy as np
-import torch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import detcore  # noqa: E402
-from model import load_checkpoint  # noqa: E402
 
 META_KEY = "alvik_detector"
 
 
 def export(weights, out, opset=17):
+    import torch
+    from model import load_checkpoint
     model = load_checkpoint(weights)
     cfg = model.cfg
     dummy = torch.zeros(1, cfg["in_ch"], cfg["in_h"], cfg["in_w"])
@@ -60,6 +65,7 @@ def export(weights, out, opset=17):
 def check(model, path):
     """Run the same random input through PyTorch and ONNX Runtime; they should agree."""
     import onnxruntime as ort
+    import torch
     cfg = model.cfg
     x = np.random.default_rng(0).normal(0, 1, (1, cfg["in_ch"], cfg["in_h"], cfg["in_w"])).astype(np.float32)
     with torch.no_grad():
@@ -114,12 +120,25 @@ def quantize(fp32_path, out_path, labels, cfg, n_frames=100):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("weights", help="best.pt from train.py")
+    ap.add_argument("weights", nargs="?", help="best.pt from train.py")
+    ap.add_argument("--int8-from", nargs="+", metavar=("ONNX", "LABELS"),
+                    help="make only the 8-bit model from an existing float .onnx (no PyTorch), calibrated on LABELS")
     ap.add_argument("--out", help="output .onnx (default: next to the weights)")
     ap.add_argument("--opset", type=int, default=17)
     ap.add_argument("--int8", nargs="+", metavar="LABELS", help="also make an 8-bit model, calibrated on these labels folders")
     ap.add_argument("--calib-frames", type=int, default=100)
     a = ap.parse_args()
+    if a.int8_from:
+        fp, labels = a.int8_from[0], a.int8_from[1:]
+        import onnxruntime as ort
+        cfg = json.loads(ort.InferenceSession(fp, providers=["CPUExecutionProvider"]).get_modelmeta()
+                         .custom_metadata_map[META_KEY])
+        q = a.out or os.path.splitext(fp)[0] + ".int8.onnx"
+        quantize(fp, q, labels, cfg, a.calib_frames)
+        print(f"Wrote {q} ({os.path.getsize(q) / 1024:.0f} KB)")
+        return
+    if not a.weights:
+        ap.error("weights (best.pt) or --int8-from is needed")
     out = a.out or os.path.splitext(a.weights)[0] + ".onnx"
     model = export(a.weights, out, a.opset)
     diff = check(model, out)

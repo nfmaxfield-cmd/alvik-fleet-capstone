@@ -26,6 +26,15 @@ Augmentations (training only), chosen for an overhead fixed camera:
   hands can be any colour, and a handful of labelled ones would otherwise
   teach "unknown = the colours I happened to see" (that is what made the
   model call an unseen green cup a robot).
+- roof changes (detector-v1, --roof-p, off by default): in a share of the
+  frames each robot's roof is, with even odds, left alone, blurred,
+  flattened or covered by a made-up tag (roofmask.py), so the model learns
+  the robot's body and not what sits on its roof (tags at school, none at
+  home; the tag-free mode).
+
+Changelog: 2026-11-12 dv1 roof changes (roof_p, roof_frac) added; with
+roof_p 0 (the default) training is as before. Works without PyTorch too
+(numpy arrays instead of tensors), for train_jax.py.
 
 Splitting is done in detcore (whole recordings, never single frames).
 """
@@ -34,8 +43,14 @@ import random
 
 import cv2
 import numpy as np
-import torch
-from torch.utils.data import Dataset
+try:
+    import torch
+    from torch.utils.data import Dataset
+    _t = torch.from_numpy
+except ImportError:      # (dv1) numpy-only use without PyTorch, e.g. train_jax.py: arrays instead of tensors
+    torch = None
+    Dataset = object
+    _t = np.asarray
 
 import detcore
 
@@ -44,8 +59,9 @@ class AugmentConfig:
     """How strong the random changes are. Set rotate=False etc. to switch off."""
 
     def __init__(self, rotate=True, flip=True, scale=0.10, shift=0.08, photometric=True,
-                 blur_p=0.3, noise_std=6.0, jpeg_p=0.3, hue_p=0.5):
+                 blur_p=0.3, noise_std=6.0, jpeg_p=0.3, hue_p=0.5, roof_p=0.0, roof_frac=(0.6, 0.9)):
         self.rotate, self.flip, self.scale, self.shift = rotate, flip, scale, shift
+        self.roof_p, self.roof_frac = roof_p, roof_frac
         self.hue_p = hue_p
         self.photometric, self.blur_p, self.noise_std, self.jpeg_p = photometric, blur_p, noise_std, jpeg_p
 
@@ -111,11 +127,13 @@ class DetDataset(Dataset):
         if self.aug is not None:
             if self.paste is not None:
                 img, objs = self.paste.apply(i, img, objs, negs)
+            if self.aug.roof_p and random.random() < self.aug.roof_p:
+                img = self._roofs(img, objs, (sx + sy) / 2)
             img, objs, negs = self._geometric(img, objs, negs)
             img = self._photometric(img)
         objs = [o for o in objs if 0 <= o["x"] < self.in_w and 0 <= o["y"] < self.in_h]
         negs = [o for o in negs if 0 <= o["x"] < self.in_w and 0 <= o["y"] < self.in_h]
-        x = torch.from_numpy(detcore.normalize(detcore.to_channels(img, self.cfg["in_ch"])))
+        x = _t(detcore.normalize(detcore.to_channels(img, self.cfg["in_ch"])))
         item = dict(image=x, objects=objs, index=i, scale=(sx, sy))
         if self.with_maps:
             item.update(self._targets(objs, (sx + sy) / 2))
@@ -123,6 +141,21 @@ class DetDataset(Dataset):
         return item
 
     # -- augmentation -----------------------------------------------------
+
+    def _roofs(self, img, objs, scale):
+        """Each robot's roof: left alone, blurred, flattened or covered by a made-up tag, with even odds."""
+        import roofmask
+        img = img.copy()
+        rng = np.random.default_rng(random.getrandbits(32))
+        size = self.cfg.get("obj_size_px", detcore.DEFAULT_OBJ_SIZE_PX).get("alvik", 30) * scale
+        for o in objs:
+            if o["cls"] not in self.heading_classes:
+                continue
+            mode = random.choice((None,) + roofmask.MODES)
+            if mode:
+                roofmask.apply(img, o["x"], o["y"], o.get("heading"), size, mode, rng,
+                               frac=random.uniform(*self.aug.roof_frac))
+        return img
 
     def _geometric(self, img, objs, negs=()):
         a = self.aug
@@ -213,11 +246,11 @@ class DetDataset(Dataset):
                         hd_w[jy, jx] = wgt
                     else:
                         hd_w[jy, jx] = 0.0
-        out = dict(heat=torch.from_numpy(heat), off=torch.from_numpy(off), off_w=torch.from_numpy(off_w))
+        out = dict(heat=_t(heat), off=_t(off), off_w=_t(off_w))
         if self.cfg.get("heading_mode", "front") == "front":
             out.update(self._front_targets(objs, scale, xx, yy))
         else:
-            out.update(hd=torch.from_numpy(hd), hd_w=torch.from_numpy(hd_w))
+            out.update(hd=_t(hd), hd_w=_t(hd_w))
         return out
 
     def _neg_targets(self, negs, scale, neg_only, item):
@@ -237,8 +270,8 @@ class DetDataset(Dataset):
             spot |= ((xx - n["x"] / self.stride) ** 2 + (yy - n["y"] / self.stride) ** 2) <= r * r
         w[spot] = self.NEG_BOOST
         if neg_only and "fmask" in item:
-            item["fmask"] = torch.from_numpy(spot.astype(np.float32))[None]
-        return dict(negw=torch.from_numpy(w)[None])
+            item["fmask"] = _t(spot.astype(np.float32))[None]
+        return dict(negw=_t(w)[None])
 
     def _front_targets(self, objs, scale, xx, yy):
         """Front-point mode: a small blob on each robot's front point (a spot
@@ -278,15 +311,17 @@ class DetDataset(Dataset):
                         if wgt >= foff_w[jy, jx]:
                             foff[0, jy, jx], foff[1, jy, jx] = fx - jx, fy - jy
                             foff_w[jy, jx] = wgt
-        return dict(fheat=torch.from_numpy(fheat), fmask=torch.from_numpy(fmask),
-                    foff=torch.from_numpy(foff), foff_w=torch.from_numpy(foff_w))
+        return dict(fheat=_t(fheat), fmask=_t(fmask),
+                    foff=_t(foff), foff_w=_t(foff_w))
 
 
 def collate(batch):
     """Stack the tensors; keep the object lists as plain Python lists."""
     out = {}
     for k in batch[0]:
-        if isinstance(batch[0][k], torch.Tensor):
+        if torch is None and isinstance(batch[0][k], np.ndarray):
+            out[k] = np.stack([b[k] for b in batch])
+        elif torch is not None and isinstance(batch[0][k], torch.Tensor):
             out[k] = torch.stack([b[k] for b in batch])
         else:
             out[k] = [b[k] for b in batch]

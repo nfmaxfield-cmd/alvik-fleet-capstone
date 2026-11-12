@@ -36,6 +36,8 @@ Training stops when that has not improved for --patience epochs; best.pt
 keeps the best. Until the model finds anything at all (validation F1 still 0), F1
 cannot tell epochs apart, so the best epoch is the one with the lowest validation
 loss and training never stops early; it also never stops early before --min-epochs.
+
+Changelog: 2026-11-12 dv1 --roof-p (roof changes, dataset.py / roofmask.py); off by default.
 """
 import argparse
 import csv
@@ -207,6 +209,9 @@ def main():
     ap.add_argument("--no-rotate", action="store_true", help="augment without rotation")
     ap.add_argument("--hue-p", type=float, default=0.5,
                     help="share of training frames whose colours are turned round the colour wheel (0 = off)")
+    ap.add_argument("--roof-p", type=float, default=0.0,
+                    help="share of training frames whose robots' roofs are changed (blurred, flattened or a made-up "
+                         "tag pasted, roofmask.py) so the model cannot lean on the roof; 0 = off (detector-v1)")
     ap.add_argument("--select", default="pooled", choices=["pooled", "macro"],
                     help="best epoch by F1 over all objects pooled (default) or by the average of per-class F1s")
     ap.add_argument("--radius", default="8", help="match radius in frame px for validation scores (e.g. 8,hand=25)")
@@ -297,7 +302,7 @@ def main():
         print(f"hard negatives: {n_negs} rejected spots in {sum(1 for s in tr if s.get('negatives'))} training frames "
               f"({len([s for s in tr if s.get('neg_only')])} of them frames used only for that)")
 
-    aug = None if a.no_augment else AugmentConfig(rotate=not a.no_rotate, hue_p=a.hue_p)
+    aug = None if a.no_augment else AugmentConfig(rotate=not a.no_rotate, hue_p=a.hue_p, roof_p=a.roof_p)
     t0 = time.time()
     pcfg = None
     if a.paste and aug is not None:

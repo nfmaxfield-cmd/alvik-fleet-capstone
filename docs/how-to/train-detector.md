@@ -60,3 +60,34 @@ used. Without the file, or with the switch unset, nothing changes.
   Pi is an estimate: 5.3 ms a frame (320x240, one thread) on the 2-core test machine (README table); a Pi 4 is
   roughly 2-4x slower per core, so about 10-25 ms (Claude's reading, not measured; `infer.py --camera 0 --seconds 20`
   on the Pi measures it).
+
+## Runs with no tags and no video (home runs): detector-v1, 12 Nov 2026
+
+The home runs have no roof tags and keep only the event pictures (`pictures.csv` + `pictures/`, one per camera per
+event). `autolabel.py --pictures` labels those: the robot's position from the tag bridge's camera track
+(`bridge/track.csv`), its heading from the robot's own pose (`follow.csv`) kept only where the camera agrees, and the
+camera model fitted from the pictures themselves (the run folder holds no calibration). Each camera's pictures are cut
+into time blocks (one recording each), so whole stretches of time can be held out for testing.
+
+On the **laptop**, in a **PowerShell** window, in the project folder (`cd alvik-fleet-capstone`), with the run unpacked
+to `D:\home-runs\20261111-085837-freeroam`:
+
+```
+python tools/detector/autolabel.py D:\home-runs\20261111-085837-freeroam --pictures --out D:\detector-v1
+```
+
+You should see one line per camera ("182 pictures, N dropped ..., camera fit {...}") and "Labels for 16 recording(s)".
+Then train. With PyTorch (the laptop):
+
+```
+python tools/detector/train.py --labels D:\detector-v1\labels --out D:\detector-v1\model --classes alvik --heading-classes alvik --obj-size alvik=28 --in-ch 1 --roof-p 0.5 --val 20261111-085837-freeroam_overhead_t6,20261111-085837-freeroam_side_t6 --test 20261111-085837-freeroam_overhead_t7,20261111-085837-freeroam_overhead_t8,20261111-085837-freeroam_side_t7,20261111-085837-freeroam_side_t8
+```
+
+Without PyTorch (`pip install jax optax` instead): the same command with `train_jax.py` in place of `train.py`, plus
+`--epochs 40 --steps-per-epoch 15`; it writes `best.onnx` itself. The 8-bit model, from either:
+
+```
+python tools/detector/export.py --int8-from D:\detector-v1\model\best.onnx D:\detector-v1\labels\20261111-085837-freeroam_overhead_t1 D:\detector-v1\labels\20261111-085837-freeroam_side_t1
+```
+
+Results, and what they do and do not show: `docs/results/detector-v1/report.md`.

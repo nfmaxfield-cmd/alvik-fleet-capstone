@@ -26,7 +26,16 @@ detection projected back onto the table) and heading error.
 
     python3 tools/detector/autolabel.py <run folder> [<run folder> ...] --out <labels root>
     python3 tools/detector/autolabel.py --sim --out <dir>        a simulated run (pictures, tag reads, stops) end to end
+    python3 tools/detector/autolabel.py <run folder> --pictures --out <labels root>
+                                                  runs with no tags and no video (home): the event pictures, labelled
+                                                  from the camera track + the robots' own checked headings (below)
 The whole command for the real footage: docs/how-to/train-detector.md.
+
+Changelog
+  2026-11-10 e13  first version (roof-tag reads, saved video, evaluate_stops, --sim)
+  2026-11-12 dv1  --pictures: runs without tags or video (the 11 Nov home run); camera model fitted from the pictures,
+                  labels checked against a robots-removed empty board, headings kept only where the camera agrees,
+                  one recording per time block (held-out stretches of time, not random frames)
 """
 import argparse
 import bisect
@@ -48,7 +57,7 @@ for _p in (HERE, TOOLS, os.path.join(TOOLS, "fleet"), os.path.join(TOOLS, "recog
 
 import cv2  # noqa: E402
 
-VERSION = "autolabel-2026-11-10e13"
+VERSION = "autolabel-2026-11-12dv1"
 CONF_SIGMA_CM = 1.0      # a read is confident at or under the camera's 1-sigma (safety_rules.CAM_SIGMA_CM). Not chosen
 FRONT_CM = 9.5 / 3.0     # the front point: a third of a body ahead (the detector's own front-point convention, README)
 ROOF_Z_CM = 6.0          # the roof's height when the run does not say (the school tags' 6.2 cm typed). Not chosen here
@@ -389,12 +398,403 @@ def make_sim_run(folder, seed=1, n_frames=120, robots=2, plain=False, fps=10.0, 
     return folder
 
 
+# ---------------------------------------------------------------------------------------------- runs with no tags
+# (detector-v1, 12 Nov 2026) The home runs have no roof tags and no saved video: only the event pictures
+# (<run>/pictures.csv + pictures/<HHMMSS>_<robot>_<why>_<cam>.jpg, one per camera per event), the tag bridge's camera
+# track (bridge/track.csv: every robot's position each picture, from motion / lights) and each robot's own fused pose
+# (follow.csv: x, y, heading, 10 a second). No camera model is saved in the run folder either (the bridge's calibration
+# stays on the Pi), so the camera model is DISCOVERED from the pictures themselves (Observe, then trust):
+#   1. the empty board: the median of the run's pictures (robots move, the board does not); its outline gives a
+#      starting guess of the floor -> picture map (the corner order is tried all ways round and scored);
+#   2. the robots' blobs (picture minus empty board) are paired with the camera track at the picture's time and a
+#      floor -> picture homography is refitted on them (RANSAC, the pairing radius shrinking each round). It maps a
+#      robot's floor position to the centre of its visible body, which is what the detector should learn;
+#   3. a "clean" empty board is rebuilt with every labelled robot cut out (a robot parked for an hour would otherwise
+#      sit in the median), and each label is checked against it: no robot-coloured change under a label = the label
+#      disagrees with the picture, and that picture is dropped (it would teach "nothing here" on a robot or the reverse);
+#   4. heading: the robot's own heading (follow.csv), kept only where the camera confirms it: driving forward along it
+#      (camera track, within the run's own agreement spread), or standing with that heading unchanged since the last
+#      confirmed moment and its own position within the run's own spread of the camera's. Otherwise "heading unknown".
+#      (A first version also accepted driving backward and any standing robot whose position agreed: the held-out
+#      check found a robot parked for an hour at the edge labelled ~180 deg wrong that way; fixed before training.)
+PIC_TRACK_GAP_X = 2.5    # a track position is interpolated only between reads at most this many median read
+                         # intervals apart. CHOSEN (not derived); DOE: 1.5 / 2.5 / 4 against the label check's drop rate
+PIC_BODY_CM = 9.5        # an Alvik's roof, edge to edge (FRONT_CM above uses the same). Measured, not chosen
+PIC_DISC = 0.2          # the label check looks at a disc this many bodies across round the label (the roof's middle).
+                         # CHOSEN; DOE: 0.15 / 0.2 / 0.3 against the share of labels a person would call right
+PIC_AGREE_PCT = 95       # the heading check's tolerance: this percentile of the run's own travel-vs-own disagreement
+
+
+def _rows_by_robot(path, tcol, cols, keep=None):
+    out = {}
+    if not os.path.exists(path):
+        return out
+    with open(path, newline="") as f:
+        for r in csv.DictReader(f):
+            if keep is not None and not keep(r):
+                continue
+            try:
+                out.setdefault(r["robot"], []).append(tuple([float(r[tcol])] + [float(r[c]) for c in cols]))
+            except (KeyError, ValueError):
+                continue
+    for v in out.values():
+        v.sort()
+    return out
+
+
+_TIMES = {}
+
+
+def _times(rows):
+    """The rows' times (cached: the lists are long and read many times)."""
+    k = id(rows)
+    if k not in _TIMES or len(_TIMES[k][0]) != len(rows) or _TIMES[k][1] is not rows:
+        _TIMES[k] = ([r[0] for r in rows], rows)
+    return _TIMES[k][0]
+
+
+def _lin(rows, t, gap):
+    """(x, y) linearly between the reads either side of t, or None if they are more than gap apart."""
+    ts = _times(rows)
+    k = bisect.bisect_left(ts, t)
+    if k == 0 or k >= len(rows) or rows[k][0] - rows[k - 1][0] > gap:
+        return None
+    a, b = rows[k - 1], rows[k]
+    f = (t - a[0]) / max(1e-9, b[0] - a[0])
+    return a[1] + f * (b[1] - a[1]), a[2] + f * (b[2] - a[2])
+
+
+def board_quad(bg):
+    """The board's outline in an empty-board picture: 4 corners (px), or None. Only a starting guess."""
+    g = cv2.GaussianBlur(bg, (7, 7), 0)
+    _, th = cv2.threshold(g, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    th = cv2.morphologyEx(th, cv2.MORPH_OPEN, np.ones((25, 25), np.uint8))
+    n, lab, st, _ = cv2.connectedComponentsWithStats(th)
+    if n < 2:
+        return None, None
+    k = 1 + int(np.argmax(st[1:, cv2.CC_STAT_AREA]))
+    m = cv2.morphologyEx((lab == k).astype(np.uint8) * 255, cv2.MORPH_CLOSE, np.ones((25, 25), np.uint8))
+    cs, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    h = cv2.convexHull(max(cs, key=cv2.contourArea))
+    peri = cv2.arcLength(h, True)
+    for eps in np.linspace(0.005, 0.1, 40):
+        ap = cv2.approxPolyDP(h, eps * peri, True)
+        if len(ap) <= 4:
+            break
+    if len(ap) != 4:
+        return None, m
+    return ap.reshape(-1, 2).astype(np.float32), m
+
+
+def _blobs(img, bg, mask, thr):
+    d = cv2.absdiff(cv2.GaussianBlur(img, (5, 5), 0), cv2.GaussianBlur(bg, (5, 5), 0))
+    m = ((d > thr) & (mask > 0)).astype(np.uint8) * 255
+    m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
+    n, lab, st, cen = cv2.connectedComponentsWithStats(m)
+    return [cen[i] for i in range(1, n) if 150 < st[i, cv2.CC_STAT_AREA] < 4000]
+
+
+def _proj(H, x, y):
+    v = H @ np.array([x, y, 1.0])
+    return v[0] / v[2], v[1] / v[2]
+
+
+def fit_camera(greys, positions, board):
+    """Floor cm -> picture px homography from the pictures alone. greys: list of grey pictures; positions: per picture
+    {robot: (x, y) or None}; board: (x0, y0, x1, y1) in cm. Returns (H, info) or (None, info)."""
+    bg = np.median(np.stack(greys), axis=0).astype(np.uint8)
+    q, m = board_quad(bg)
+    info = dict(board_quad_px=None if q is None else q.tolist())
+    if q is None:
+        return None, info
+    mask = cv2.dilate(m, np.ones((41, 41), np.uint8))
+    noise = float(np.median(np.abs(np.stack(greys[:40]).astype(np.int16) - bg.astype(np.int16))))
+    thr = max(20.0, 8.0 * noise + 10.0)           # robot-vs-board change: well above the pictures' own noise
+    blobs = [_blobs(g, bg, mask, thr) for g in greys]
+    x0, y0, x1, y1 = board
+    W = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    best = None
+    import itertools
+    for perm in itertools.permutations(range(4)):
+        H = cv2.getPerspectiveTransform(np.float32([W[i] for i in perm]), q)
+        s = 0.0
+        for bl, pos in zip(blobs, positions):
+            for xy in pos.values():
+                if xy is None or not bl:
+                    continue
+                u = np.array(_proj(H, *xy))
+                s += min(40.0, min(float(np.hypot(*(np.array(b) - u))) for b in bl))
+        if best is None or s < best[0]:
+            best = (s, H)
+    H = best[1]
+    res = None
+    for rad in (40, 25, 15, 10, 8):
+        src, dst = [], []
+        for bl, pos in zip(blobs, positions):
+            for xy in pos.values():
+                if xy is None or not bl:
+                    continue
+                u = np.array(_proj(H, *xy))
+                d = sorted((float(np.hypot(*(np.array(b) - u))), k) for k, b in enumerate(bl))
+                if d[0][0] < rad and not (len(d) > 1 and d[1][0] < rad):     # unambiguous pairs only
+                    src.append(xy)
+                    dst.append(bl[d[0][1]])
+        if len(src) < 8:
+            break
+        H2, inl = cv2.findHomography(np.float32(src), np.float32(dst), cv2.RANSAC, 6.0)
+        if H2 is None:
+            break
+        H = H2
+        r = np.array([np.hypot(*(np.array(_proj(H, *s_)) - np.array(d_))) for s_, d_ in zip(src, dst)])
+        res = dict(radius_px=rad, pairs=len(src), inliers=int(inl.sum()), median_px=round(float(np.median(r)), 2),
+                   p90_px=round(float(np.percentile(r, 90)), 2))
+    info.update(fit=res, change_threshold=round(thr, 1))
+    return H, info
+
+
+def label_pictures_run(run, out_root, blocks=8, board=None, log=print):
+    """Labels from a run's event pictures (no tags, no video): one labels folder per camera and TIME BLOCK
+    (<run>_<cam>_t<k>, blocks of equal picture count in time order), so train.py's split by recording holds out whole
+    stretches of time. Writes floor_calibration.json (the discovered homography) into each recording, so evaluate.py
+    reports cm. Returns {recording: stats}."""
+    name = os.path.basename(os.path.normpath(run))
+    pics = []
+    with open(os.path.join(run, "pictures.csv"), newline="") as f:
+        for r in csv.DictReader(f):
+            pics.append((float(r["t"]), r["files"].split(";")))
+    pics.sort()
+    track = _rows_by_robot(os.path.join(run, "bridge", "track.csv"), "t", ["x", "y"],
+                           keep=lambda r: r.get("status") == "seen")
+    own = _rows_by_robot(os.path.join(run, "follow.csv"), "t_recv", ["x_cm", "y_cm", "th_deg"],
+                         keep=lambda r: r.get("state") not in ("nopose", ""))
+    if board is None:
+        try:
+            with open(os.path.join(run, "map.json")) as f:
+                fl = json.load(f)["floor"]
+            board = (fl["x_min"], fl["y_min"], fl["x_max"], fl["y_max"])
+        except (OSError, KeyError, ValueError):
+            board = (0.0, 0.0, 122.0, 122.0)
+    dts = [np.median(np.diff([r[0] for r in v])) for v in track.values() if len(v) > 2]
+    gap = PIC_TRACK_GAP_X * float(np.median(dts)) if dts else 1.5
+    robots = sorted(track)
+    pos = [{rb: _lin(track[rb], t, gap) for rb in robots} for t, _ in pics]
+
+    # heading check, part 1: the run's own agreement spreads (travel vs own heading; own vs camera position)
+    def own_at(rb, t):
+        v = own.get(rb) or []
+        ts = _times(v)
+        k = bisect.bisect_left(ts, t)
+        c = [j for j in (k - 1, k) if 0 <= j < len(v) and abs(v[j][0] - t) <= 0.5]
+        return v[min(c, key=lambda j: abs(v[j][0] - t))] if c else None
+
+    def travel(rb, t):
+        a, b = _lin(track[rb], t - 1.0, gap), _lin(track[rb], t + 1.0, gap)
+        if a is None or b is None or math.hypot(b[0] - a[0], b[1] - a[1]) < 4.0:    # 4 cm in 2 s: moving (chosen)
+            return None
+        return math.degrees(math.atan2(b[1] - a[1], b[0] - a[0]))
+
+    agree, offs = [], []
+    for rb in robots:
+        for t, x, y in track[rb][::20]:
+            o, tv = own_at(rb, t), travel(rb, t)
+            if o is None:
+                continue
+            offs.append(math.hypot(o[1] - x, o[2] - y))
+            if tv is not None:
+                e = abs((o[3] - tv + 180) % 360 - 180)
+                if e < 90.0:                            # driving forward (backing up, or a wrong heading: not used)
+                    agree.append(e)
+    tol_deg = float(np.percentile(agree, PIC_AGREE_PCT)) if agree else 30.0
+    tol_cm = float(np.percentile(offs, 75)) if offs else 5.0
+
+    # each robot's moments where the camera CONFIRMED its own heading: driving forward along it (fine steps)
+    verified = {}
+    for rb in robots:
+        vv = []
+        for t, x, y in track[rb][::2]:          # every other camera read (about 1 a second)
+            o, tv = own_at(rb, t), travel(rb, t)
+            if o is not None and tv is not None and abs((o[3] - tv + 180) % 360 - 180) <= tol_deg:
+                vv.append((t, o[3]))
+        verified[rb] = vv
+
+    def heading_checked(rb, t, xy):
+        """The robot's own heading at t, if the camera confirms it: driving forward along it now, or standing with
+        its heading unchanged (within the tolerance) since the last moment it was confirmed and its own position
+        agreeing with the camera's. Driving backward, or a heading that moved while standing (a re-seed, a turn on
+        the spot nobody watched), is left unknown."""
+        o, tv = own_at(rb, t), travel(rb, t)
+        if o is None:
+            return None
+        if tv is not None:
+            return o[3] if abs((o[3] - tv + 180) % 360 - 180) <= tol_deg else None
+        if math.hypot(o[1] - xy[0], o[2] - xy[1]) > tol_cm:
+            return None
+        vv = verified.get(rb) or []
+        k = bisect.bisect_right(_times(vv), t) - 1
+        if k < 0 or abs((o[3] - vv[k][1] + 180) % 360 - 180) > tol_deg:
+            return None
+        return o[3]
+
+    res = {}
+    cams = sorted({fn.rsplit("_", 1)[1][:-4] for _, fs in pics for fn in fs})
+    for cam in cams:
+        files = [next((fn for fn in fs if fn.endswith("_%s.jpg" % cam)), None) for _, fs in pics]
+        idx = [k for k, fn in enumerate(files) if fn and os.path.exists(os.path.join(run, "pictures", fn))]
+        imgs = {k: cv2.imread(os.path.join(run, "pictures", files[k])) for k in idx}
+        greys = {k: cv2.cvtColor(imgs[k], cv2.COLOR_BGR2GRAY) for k in idx}
+        H, info = fit_camera([greys[k] for k in idx], [pos[k] for k in idx], board)
+        if H is None:
+            log("%s %s: no camera model could be found from the pictures; skipped" % (name, cam))
+            continue
+        hgt, wid = greys[idx[0]].shape
+
+        def body_px(x, y):
+            a, b = np.array(_proj(H, x, y)), np.array(_proj(H, x + PIC_BODY_CM, y))
+            c = np.array(_proj(H, x, y + PIC_BODY_CM))
+            return 0.5 * (np.hypot(*(b - a)) + np.hypot(*(c - a)))
+
+        # the clean empty board: each picture's labelled robots cut out, then the median of what is left
+        stack = np.full((len(idx), hgt, wid), np.nan, np.float32)
+        for j, k in enumerate(idx):
+            g = greys[k].astype(np.float32)
+            for xy in pos[k].values():
+                if xy is not None:
+                    u, v = _proj(H, *xy)
+                    cv2.circle(g, (int(round(u)), int(round(v))), int(0.9 * body_px(*xy)), float("nan"), -1)
+            stack[j] = g
+        clean = np.nanmedian(stack, axis=0)
+        clean = np.where(np.isnan(clean), np.nanmedian(stack), clean).astype(np.float32)
+        del stack
+        # the label check's bar, from the run itself: how much an EMPTY spot of the board changes against the clean
+        # board (random spots away from every label), relative to each picture's own noise; a label must stand out
+        # above the 99th percentile of those (washed-out robots under the lamp still do; an empty spot does not)
+        rng = np.random.default_rng(0)
+        diffs = {}
+
+        def change(k, u, v, r_):
+            if k not in diffs:
+                d = np.abs(cv2.GaussianBlur(greys[k], (3, 3), 0).astype(np.float32) - cv2.GaussianBlur(clean, (3, 3), 0))
+                diffs.clear()
+                diffs[k] = (d, max(1.0, float(np.median(d))))
+            d, noise = diffs[k]
+            m = np.zeros((hgt, wid), np.uint8)
+            cv2.circle(m, (int(round(u)), int(round(v))), r_, 1, -1)
+            return float(d[m > 0].mean()) / noise
+
+        empty = []
+        for k in idx:
+            here = [_proj(H, *xy) for xy in pos[k].values() if xy is not None]
+            for _ in range(3):
+                x_, y_ = rng.uniform(board[0], board[2]), rng.uniform(board[1], board[3])
+                u, v = _proj(H, x_, y_)
+                bp = body_px(x_, y_)
+                if all(math.hypot(u - a, v - b) > 2.5 * bp for a, b in here) and 0 <= u < wid and 0 <= v < hgt:
+                    empty.append(change(k, u, v, max(2, int(PIC_DISC * bp))))
+        bar = float(np.percentile(empty, 99)) if len(empty) >= 20 else 4.0
+        info["label_bar"] = dict(empty_spots=len(empty), p99=round(bar, 2), median=round(float(np.median(empty)), 2)
+                                 if empty else None)
+        shares, rows_by_k, dropped, noheading = [], {}, [], 0
+        for k in idx:
+            t = pics[k][0]
+            objs, bad, why = [], False, ""
+            for rb in robots:
+                xy = pos[k][rb]
+                if xy is None:
+                    bad, why = True, "no camera position for %s" % rb    # a robot somewhere, unlabelled
+                    break
+                u, v = _proj(H, *xy)
+                if not (0 <= u < wid and 0 <= v < hgt):
+                    continue
+                share = change(k, u, v, max(2, int(PIC_DISC * body_px(*xy))))
+                shares.append(share)
+                if share <= bar:
+                    bad, why = True, "%s: no robot under its label (change %.1f x noise, bar %.1f)" % (rb, share, bar)
+                    break
+                th = heading_checked(rb, t, xy)
+                hd = None
+                if th is not None:
+                    hr = math.radians(th)
+                    u2, v2 = _proj(H, xy[0] + FRONT_CM * math.cos(hr), xy[1] + FRONT_CM * math.sin(hr))
+                    hd = math.degrees(math.atan2(-(v2 - v), u2 - u)) % 360.0
+                if hd is None:
+                    noheading += 1
+                objs.append((rb, u, v, hd))
+            if bad:
+                dropped.append((k, why))
+                continue
+            rows_by_k[k] = objs
+        n_blk = max(1, int(blocks))
+        order = sorted(idx, key=lambda k: pics[k][0])
+        for j, k in enumerate(order):
+            blk = 1 + min(n_blk - 1, j * n_blk // len(order))
+            rec = os.path.join(out_root, "%s_%s_t%d" % (name, cam, blk))
+            st = res.setdefault(os.path.basename(rec), dict(folder=rec, frames=0, labelled=0, dropped=0, objects=0,
+                                                             heading_unknown=0, rows=[], t0=pics[k][0]))
+            st["frames"] += 1
+            st["t1"] = pics[k][0]
+            if k not in rows_by_k:
+                st["dropped"] += 1
+                continue
+            os.makedirs(os.path.join(rec, "labels", "frames"), exist_ok=True)
+            fno = st["labelled"]
+            cv2.imwrite(os.path.join(rec, "labels", "frames", "%06d.jpg" % fno), imgs[k], [cv2.IMWRITE_JPEG_QUALITY, 95])
+            for rb, u, v, hd in rows_by_k[k]:
+                st["rows"].append([fno, "%.3f" % pics[k][0], rb, "alvik", "%.2f" % u, "%.2f" % v,
+                                   "" if hd is None else "%.1f" % hd, "0" if hd is None else "1",
+                                   "autolabel:camera-track+own-heading", "confirmed", "1.0"])
+                st["objects"] += 1
+                st["heading_unknown"] += hd is None
+            if not rows_by_k[k]:
+                st["rows"].append([fno, "%.3f" % pics[k][0], "", "none", "", "", "", "0", "autolabel:camera-track",
+                                   "confirmed", ""])
+            st["labelled"] += 1
+        for rn, st in res.items():
+            if not rn.startswith("%s_%s_" % (name, cam)) or "rows" not in st:
+                continue
+            rec = st["folder"]
+            os.makedirs(os.path.join(rec, "labels"), exist_ok=True)
+            with open(os.path.join(rec, "labels", "labels.csv"), "w", newline="") as f:
+                w = csv.writer(f)
+                w.writerow(["frame", "t_wall", "obj", "cls", "x_px", "y_px", "heading_deg", "heading_known", "source",
+                            "status", "score"])
+                w.writerows(st.pop("rows"))
+            with open(os.path.join(rec, "floor_calibration.json"), "w") as f:
+                json.dump({"H_floor_to_image": H.tolist(), "source": "fitted from the run's own pictures and camera "
+                           "track (autolabel.fit_camera); maps a robot's floor position to its visible body's centre",
+                           "fit": info}, f, indent=1)
+            meta = dict({k_: v_ for k_, v_ in st.items() if k_ != "folder"}, version=VERSION, run=os.path.abspath(run),
+                        cam=cam, camera_fit=info, heading_tol_deg=round(tol_deg, 1), own_vs_camera_tol_cm=round(tol_cm, 2),
+                        label_disc=PIC_DISC, track_gap_s=round(gap, 2))
+            with open(os.path.join(rec, "autolabel.json"), "w") as f:
+                json.dump(meta, f, indent=1)
+        log("%s %s: %d pictures, %d dropped (label disagrees with the picture), %d robots without a checked heading; "
+            "camera fit %s; label check: bar %s, labels median %.1f x noise" % (
+                name, cam, len(idx), len(dropped), noheading, info.get("fit"), info["label_bar"],
+                float(np.median(shares or [0]))))
+        for k, why in dropped:
+            log("   dropped %s: %s" % (files[k], why))
+    return res
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("runs", nargs="*", help="run folders (each with frames, bridge/tag_poses.csv, tagcal/)")
     ap.add_argument("--out", required=True, help="where the labels folders go (one per run and camera)")
     ap.add_argument("--sim", type=int, default=0, help="make this many simulated runs first and label them")
+    ap.add_argument("--pictures", action="store_true",
+                    help="runs with no tags and no video: label the event pictures (pictures.csv) from the camera "
+                         "track and the robots' own headings, camera model fitted from the pictures (detector-v1)")
+    ap.add_argument("--blocks", type=int, default=8, help="--pictures: time blocks per camera (one recording each)")
     a = ap.parse_args(argv)
+    if a.pictures:
+        tot = {}
+        for r in a.runs:
+            tot.update(label_pictures_run(r, os.path.join(a.out, "labels"), blocks=a.blocks))
+        with open(os.path.join(a.out, "autolabel_summary.json"), "w") as f:
+            json.dump(tot, f, indent=1)
+        print("Labels for %d recording(s) in %s" % (len(tot), os.path.join(a.out, "labels")))
+        return 0 if tot else 1
     runs = []
     for r in a.runs:                 # a run folder, or a folder of run folders (PowerShell does not expand *)
         if os.path.isdir(os.path.join(r, "bridge")):

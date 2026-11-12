@@ -56,6 +56,9 @@ colour) has about 77k parameters and 99 M multiply-adds per frame.
 | `model.py` | the network; `python model.py` prints sizes of a few designs |
 | `dataset.py` | training frames, augmentation, training targets (PyTorch) |
 | `train.py` | training loop (CPU or GPU), early stopping, log CSV |
+| `train_jax.py` | the same network, data, losses and schedule trained with JAX, for machines without PyTorch; writes the `.onnx` itself (detector-v1) |
+| `roofmask.py` | blurs, flattens or pastes a made-up tag on robots' roofs: training augmentation (`--roof-p`) and test copies (detector-v1) |
+| `autolabel.py` | labels from runs: roof-tag reads + video (e13), or `--pictures` for runs with only event pictures and no tags (detector-v1) |
 | `export.py` | `.pt` -> `.onnx` (optionally an 8-bit `.int8.onnx`) |
 | `infer.py` | runs the `.onnx` with ONNX Runtime: `load()` / `predict()`; no PyTorch needed (Pi) |
 | `predict_torch.py` | the same interface on the `.pt` weights (laptop) |
@@ -375,9 +378,15 @@ baselines' interfaces, the synthetic data's unknown objects (v2) and that
 different objects, and that `ultralytics` stays out of the program (the
 YOLO training tests are skipped when `ultralytics` is not installed).
 
+## Results on real pictures: detector-v1 (12 Nov 2026)
+
+The first model trained on real pictures (the 11 Nov home run, both cameras, one class `alvik` plus heading, grey
+input) is reported in `docs/results/detector-v1/report.md`, with the commands to rebuild it. The model files are not
+in git (see that report for where they are).
+
 ## Results so far (synthetic data only)
 
-No real labelled frames exist yet. Comparison run on 2026-10-18 with
+Until detector-v1 no real labelled frames existed. Comparison run on 2026-10-18 with
 `make_synthetic.py --style v1` (then the only style; 12 recordings x 150 frames, seed 0; 8 train /
 2 val / 2 test recordings, one `split.json` for every detector). Test
 recordings, threshold 0.3, radius 8 px. Every detector got a budget of about
