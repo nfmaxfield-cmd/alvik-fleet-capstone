@@ -415,12 +415,19 @@ def test_school_pull_copies_never_deletes_and_uploads_once(tmp_path):
     out = subprocess.run(["bash", sh], env=env, capture_output=True, text=True).stdout
     assert "uploaded: 20261110-101010-mission" in out
     got = home / "school-runs" / "logs" / "20261110-101010-mission"
-    assert (got / "run" / "stops.csv").exists() and not (got / "rfid_raw.csv").exists()
+    assert (got / "run" / "stops.csv").exists() and (got / "rfid_raw.csv").exists()   # 12 Nov: RFID files copied
     (run / "run" / "stops.csv").write_text("b\n")
     out2 = subprocess.run(["bash", sh], env=env, capture_output=True, text=True).stdout
     assert "0 run folder(s) uploaded" in out2 and (got / "run" / "stops.csv").read_text() == "b\n"
     assert list((home / "school-runs" / ".replaced").rglob("stops.csv"))      # the replaced copy kept
     assert (run / "rfid_raw.csv").exists() and (run / "run" / "stops.csv").exists()   # the school end untouched
+    # the old rule behind its switch: SCHOOL_COPY_RFID=0 never copies RFID files
+    home2 = tmp_path / "home2"
+    home2.mkdir()
+    env2 = dict(env, HOME=str(home2), SCHOOL_COPY_RFID="0")
+    subprocess.run(["bash", sh], env=env2, capture_output=True, text=True)
+    got2 = home2 / "school-runs" / "logs" / "20261110-101010-mission"
+    assert (got2 / "run" / "stops.csv").exists() and not (got2 / "rfid_raw.csv").exists()
 
 
 # -------------------------------------------------------------------------------------------- 2b. the calibration never gives up

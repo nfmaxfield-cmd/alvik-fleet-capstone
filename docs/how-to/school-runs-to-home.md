@@ -6,8 +6,8 @@ new school run folders every hour (logs always; pictures when the school Pi's US
 finished run to GitHub from home. The school Pi never gets a GitHub key.
 
 What the copy never does: it never deletes anything at either end; a home file replaced by a newer school version
-(a run still being written) is kept under `~/school-runs/.replaced/`. Files with "rfid" in their name are never copied
-(raw RFID data stays private). The script: `tools/pi/school_pull.sh`; its log: `~/.local/state/mirlt/school_pull.log`.
+(a run still being written) is kept under `~/school-runs/.replaced/`. Files with "rfid" in their name are copied too (since 12 Nov:
+nothing in this project needs to be private; `SCHOOL_COPY_RFID=0` turns that off). The script: `tools/pi/school_pull.sh`; its log: `~/.local/state/mirlt/school_pull.log`.
 
 The setup is done once, in four parts. Each box is one command: type it (or paste it), then press **Enter**.
 

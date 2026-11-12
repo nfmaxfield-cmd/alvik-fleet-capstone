@@ -5,7 +5,9 @@
 #
 #   NEVER deletes anything at either end: rsync without --delete; a home file replaced by a newer school version (a run
 #   still being written) is kept under ~/school-runs/.replaced/<time>/; the upload with --keep-local (no auto-clean).
-#   RFID: files with "rfid" in their name are never copied (raw RFID data stays private: CLAUDE.md).
+#   RFID (2026-11-12): files with "rfid" in their name ARE copied now (Nick and Jay-Sun, 12 Nov: nothing needs to be
+#   private). SCHOOL_COPY_RFID=0 brings back the old rule (never copied). The RFID input switch for tracking is separate
+#   and stays off for Jay-Sun's runs.
 #   Pictures (frames, recordings) are copied only when the school Pi's USB stick is mounted; they are not uploaded
 #   unless SCHOOL_UPLOAD_PICTURES=1 (the logs are).
 #   One copy at a time (flock): an hourly run that finds the last one still going leaves at once.
@@ -20,8 +22,9 @@
 # finished; CHOSEN, no DOE: every run writes its state at least once a minute). Tests only: SCHOOL_SSH (the ssh
 # command), SCHOOL_UPLOAD (the upload command).
 # The one-time setup: docs/how-to/school-runs-to-home.md.
+# Changelog: 2026-11-12a  RFID files copied by default; SCHOOL_COPY_RFID=0 restores the old exclude.
 set -u
-VERSION="2026-11-10e13"
+VERSION="2026-11-12a"
 SCHOOL_PI="${SCHOOL_PI:-nick@100.72.183.28}"
 SCHOOL_KEY="${SCHOOL_KEY:-$HOME/.ssh/school_pi}"
 SCHOOL_REPO="${SCHOOL_REPO:-alvik-fleet-capstone}"
@@ -55,7 +58,9 @@ say "school_pull $VERSION: logged in to $SCHOOL_PI"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 # a file that changed at school (a run still being written) is copied again; the home copy it replaces is KEPT under
 # $DEST/.replaced/<time>/ (nothing is ever deleted)
-RS=(rsync -a --partial --backup --backup-dir="$DEST/.replaced/$STAMP" --exclude '*rfid*' --exclude '*RFID*' --exclude '.upload-tmp' -e "${SSH[*]}")
+RFID_EX=()
+[ "${SCHOOL_COPY_RFID:-1}" = 0 ] && RFID_EX=(--exclude '*rfid*' --exclude '*RFID*')
+RS=(rsync -a --partial --backup --backup-dir="$DEST/.replaced/$STAMP" "${RFID_EX[@]}" --exclude '.upload-tmp' -e "${SSH[*]}")
 if [ "$MODE" = "--test" ]; then
   say "TEST: what would be copied (nothing is copied):"
   "${RS[@]}" --dry-run --itemize-changes "$SCHOOL_PI:$SCHOOL_REPO/logs/" "$DEST/logs/" | tail -n 20
