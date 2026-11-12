@@ -4,6 +4,7 @@ sent to the robots and when each end step ran, and writes them as JSON. Used by 
     unshare -rn python3 e19_end_harness.py OUT.json RUNDIR MODE [SECONDS]
 MODE: sigterm-diskfull  SIGTERM SECONDS after the roam starts, and every end-of-run write fails with "No space left on device"
       timecap           the run's own time cap (--hours from SECONDS)
+      mcstop            Mission Control's STOP: SIGINT, then SIGTERM 0.3 s later while ending
       plain             SIGTERM SECONDS after the roam starts, nothing fails (for the settings-folder test)
 """
 import json
@@ -70,7 +71,15 @@ else:
             time.sleep(0.1)                                     # length varies with the machine's load)
         time.sleep(secs)
         T["signal"] = time.time()
-        os.kill(os.getpid(), signal.SIGTERM)
+        if mode == "mcstop":
+            # Mission Control's STOP (c5f6d2e): Ctrl+C to the process group, then its escalation (SIGTERM) while the
+            # run is still ending
+            os.kill(os.getpid(), signal.SIGINT)
+            time.sleep(0.3)
+            T["sigterm2"] = time.time()
+            os.kill(os.getpid(), signal.SIGTERM)
+        else:
+            os.kill(os.getpid(), signal.SIGTERM)
     threading.Thread(target=fire, daemon=True).start()
 err = None
 try:

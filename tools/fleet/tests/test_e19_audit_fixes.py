@@ -643,3 +643,17 @@ def test_the_hand_on_limit_comes_from_the_robots_room():
     assert f.advice("A", own95=4.0, clear_cm=None) == "hand"
     assert f.advice("A", own95=4.0, clear_cm=2.0) == "check"
     assert f.advice("A", own95=40.0, clear_cm=None) is None           # its own doubt explains it: kept
+
+
+@needs_ns
+def test_mission_controls_stop_path_and_stop_first_work_together(tmp_path):
+    """Mission Control's STOP (c5f6d2e): Ctrl+C to the run's process group, then SIGTERM while it is still ending. The
+    run sends stop to every robot first, says and ignores the second signal, and still saves its corrections and state
+    (Mission Control's own 25 s force-stop and its robot confirmations come after)."""
+    rec = dry_end(tmp_path, "mcstop", 3)
+    t_sig = rec["T"]["signal"]
+    stops = [t for t, n, c in rec["sent"] if c == "stop" and t >= t_sig]
+    assert len({n for t, n, c in rec["sent"] if c == "stop" and t >= t_sig}) == 3
+    assert min(stops) - t_sig < 1.0 and "end_save" in rec["T"] and "close" in rec["T"]
+    assert "already ending" in rec["stdout"]
+    assert json.load(open(tmp_path / "run-mcstop" / "state.json"))["ended"].startswith("stopped by hand")
