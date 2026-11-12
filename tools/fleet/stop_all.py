@@ -138,8 +138,6 @@ def heard_from_file(path=None, keep_h=HEARD_KEEP_H, now=None):
 
 def remember(name, ip, path=None, now=None):
     """The link's note of a robot heard (alvik_console.Link calls it): heard_robots.json, {name: {ip, t}}."""
-    if str(ip).startswith("127."):
-        return                    # (e19, audit H2) a simulated robot (loopback) never replaces a real robot's address
     path = path or HEARD_FILE
     try:
         try:
@@ -147,6 +145,9 @@ def remember(name, ip, path=None, now=None):
                 d = json.load(f)
         except (OSError, ValueError):
             d = {}
+        prev = d.get(str(name)) if isinstance(d.get(str(name)), dict) else {}
+        if str(ip).startswith("127.") and prev.get("ip") and not str(prev["ip"]).startswith("127."):
+            return            # (e19, audit H2) a simulated robot (loopback) never replaces a real robot's address
         d[str(name)] = {"ip": str(ip), "t": round(time.time() if now is None else now, 1)}
         os.makedirs(os.path.dirname(path), exist_ok=True)
         tmp = "%s.%d.tmp" % (path, os.getpid())

@@ -1491,6 +1491,11 @@ def main(argv=None):
         # has its own settings folder
         a.conf_dir = dry_conf_dir()
         os.makedirs(a.conf_dir, exist_ok=True)
+        try:
+            import alvik_console as AC_         # the emergency stop's list of addresses: the dry run's own copy
+            AC_.HEARD_FILE = os.path.join(a.conf_dir, "heard_robots.json")
+        except Exception:  # noqa: BLE001
+            pass
         say("DRY RUN: its own settings folder %s (the real robots' calibration and the site's workspace are never "
             "written by a simulator run)" % a.conf_dir)
     elif not (a.dry or a.dry_chain or getattr(a, "sim_cmd", "")):
