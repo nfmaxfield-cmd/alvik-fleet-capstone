@@ -21,11 +21,12 @@ Changelog
                  calibration, a doubtful heading beside a known / unknown neighbour, lost robots first, the blind-drive
                  allowance, calibration saved at every run end) and the earlier safety switches gathered from
                  freeroam_core, safety_rules, tracking_layer, run_plan, calib_run and mission_run.
+  2026-11-12e19  the Fable audit (e19): MIRLT_HANG_RECOVERY (H6) and the e19 switches listed with "e19" in their row.
 """
 import os
 import sys
 
-VERSION = "safety-group-2026-11-12e18b"   # e18b: five switches from the replay (ELIM_PAIR_GUARD, FAR_NAMED_CORRECT, RESEED_HEADING_KEEP, TRUST_FLEET, CURVE_SCALE_SAVE)
+VERSION = "safety-group-2026-11-12e19"   # e19: the Fable audit's switches (see the changelog). Before: "safety-group-2026-11-12e18b"   # e18b: five switches from the replay (ELIM_PAIR_GUARD, FAR_NAMED_CORRECT, RESEED_HEADING_KEEP, TRUST_FLEET, CURVE_SCALE_SAVE)
 
 # Each row: env name, default (automatic), the old way's value, the areas it touches, what it does (plain words),
 # the build that added it. "areas": F free roam, M missions (run_plan, School Visit tours), C calibration, T tracking
@@ -43,6 +44,11 @@ SWITCHES = [
      "1: parking after a calibration gives up on a lost tag (e13); 0: never gives up", "e14"),
     ("MIRLT_CALIB_GIVEUP", "0", "1", "C",
      "1: a calibration whose roof tag is lost ends after 30 s (e12); 0: held, never gives up", "e13"),
+    ("MIRLT_HANG_RECOVERY", "grow", "e08", "F",
+     "A robot hung at an edge is never given up on: it first tries the opposite of what tilted it (backed over: forward "
+     "in; turned: the other way), forward tries whenever its nose points inward (the tilt stop raised for that step), and "
+     "each new round of tries is longer and wider, one derived pause after the last; a failed try is remembered only "
+     "within its round. e08: the fixed reverse / pivot tries, a 20 s hold, failures remembered for ever", "e19 (audit H6)"),
     ("MIRLT_ASK_UNATTENDED", "0", "1", "F",
      "1: keeps asking a person when nobody answers; 0: decides by itself after 30 s", "e16"),
     # -- telling robots apart, trusting the camera -------------------------------------------------------------------

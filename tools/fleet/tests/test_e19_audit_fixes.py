@@ -288,3 +288,45 @@ def test_a_live_creep_still_holds_the_token_for_its_length():
     c.creep_step = lambda r, why: called.append(r.name) or False
     c.never_still_watch(R)
     assert called == []
+
+
+# ------------------------------------------------- 6 (audit H6): a hung robot is never given up on
+def test_a_failed_recovery_try_is_forgotten_at_the_next_round():
+    """Audit H6a: a failure was remembered for ever at that spot, so every 20 s retry skipped all its tries (skew seed
+    2: "pivot_right: skipped" 54 times). Now a round counts only its own failures."""
+    import observe as OB
+    fm = OB.FailMemory()
+    fm.add(10.0, "recover:pivot_right", 1, 15.0, 3.0, 60.0)
+    assert fm.same("recover:pivot_right", 1, 15.0, 3.0, 60.0)                      # inside its round
+    assert not fm.same("recover:pivot_right", 1, 15.0, 3.0, 60.0, since=30.0)      # a later round tries it again
+
+
+def test_a_robot_that_backed_over_tries_forward_first_and_rounds_grow():
+    """Nick 12 Nov: "back itself up or do the opposite of whatever got it to tilt". Backed over (nose inward): forward
+    tries first; turned over: the pivot the other way first; each round longer (recover_scale)."""
+    import safety_rules as SR
+    t = SR.tilt_recovery_tries_e19(6.0, 0.0, False, cause="reverse")
+    assert t[0] == "forward" and "hold" == t[-1] and not any(x.startswith("reverse") for x in t)
+    t2 = SR.tilt_recovery_tries_e19(180.0, 0.0, True, cause="turn_left")
+    assert t2[0] == "pivot_right"
+    assert SR.recover_scale(1) == 1.0 < SR.recover_scale(2) < SR.recover_scale(3) <= SR.RECOVER_GROW_MAX
+
+
+def _hang_sim(seed):
+    import freeroam_fastsim as F
+    s = F.Sim(seed, 0.04, edge_physics=True, dead_robot=False, pi_freeze=False,
+              starts={"Center": (0.4, 60.0, 6.0), "Left": (90.0, 80.0, 40.0), "Right": (70.0, 30.0, -70.0)},
+              ctrl_kw=dict(start_edge=False))
+    s.run()
+    return s
+
+
+@pytest.mark.parametrize("seed", [1, 2])
+def test_a_robot_hung_after_backing_over_the_edge_is_freed_in_the_simulator(seed):
+    """Audit H6b + the simulator's fairness: a robot hung with its nose 6 deg from straight inward (it backed over) had
+    no way out (no try drove forward, and the simulator freed only reverses): hung all 144 s on c79c1df. Now its forward
+    tries (tilt stop raised for the step) and the symmetric hang model free it, with no fall."""
+    s = _hang_sim(seed)
+    b = s.bots["Center"]
+    assert not getattr(b, "hung", False) and s.stats["falls"] == 0
+    assert s.ctrl.counts.get("recovered", 0) >= 1

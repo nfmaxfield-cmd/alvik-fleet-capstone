@@ -46,7 +46,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
-VERSION = "fastsim-2026-11-10e13"   # e13: nopic (a whole-camera picture outage). No version string before
+VERSION = "fastsim-2026-11-12e19"   # e19 (audit): a hung robot is freed by a drive either way that works its on-board wheel (HANG_FWD_FREES; MIRLT_SIM_HANG_MODEL=e08 the reverse-only model). Before: "fastsim-2026-11-10e13"   # e13: nopic (a whole-camera picture outage). No version string before
 import freeroam_core as FC   # noqa: E402
 
 DT = 0.05
@@ -55,6 +55,9 @@ BOARD = (0.0, 0.0, 122.24, 121.92)
 PACKET_LOSS = 0.03
 TURN_MAX_DPS = 92.0
 V_TOP = 12.5
+HANG_FWD_FREES = os.environ.get("MIRLT_SIM_HANG_MODEL", "e19") != "e08"   # (e19, the audit: "the hang model cannot free a
+                    # robot that backed over: only a reverse frees") a drive EITHER way that works the wheel still on the
+                    # board frees it (the e08 reverse rule, made symmetric); "e08": only a reverse frees, as before
 HUNG_TILT = 6.5     # (e08 model) a robot hung with a wheel over the edge reads this tilt (6 Nov: 6.1 deg stop, 4.5 standing)
 
 
@@ -674,7 +677,7 @@ class Sim:
         if getattr(b, "hung", False):
             # (e08 model) hung with a wheel over the edge: the wheels turn (its own pose counts them) but the body
             # stays, unless the reverse line works the wheel still on the board (its end offset towards that side)
-            frees = s.get("rev") and self.frees(b, s)
+            frees = (s.get("rev") or HANG_FWD_FREES) and self.frees(b, s)
             if not frees:
                 sg_ = -1.0 if s.get("rev") else 1.0
                 b.v = min(s["v"], b.v + 20.0 * DT + 0.5)

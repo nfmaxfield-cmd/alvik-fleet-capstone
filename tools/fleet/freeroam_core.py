@@ -51,7 +51,7 @@ import safety_group as SG   # noqa: E402  (e18: every safety switch's automatic 
 import odo_trust as OT      # noqa: E402  (e18, 5: each robot's measured odometry trust, the blind-drive allowance)
 import fused_pose as FP     # noqa: E402  (e09 Phase B: one filter per robot, fed by the tracking layer and RAW)
 
-VERSION = "freeroam-2026-11-12e19"   # e19 (the Fable audit, 12 Nov): H5 the creep token stands only while its holder's creep is under way; a stuck robot (tilted, recovering, its last moves did not move: stuck()) never holds or takes it. Before: "freeroam-2026-11-12e18b"   # e18b (the replay of all 10 home runs): a standing robot named all along beyond its 6 cm fix gate is corrected from the camera (MIRLT_FAR_NAMED_CORRECT); a standing re-seed keeps its own heading unless the camera's is better (MIRLT_RESEED_HEADING_KEEP); curve scales logged, not saved, until Nick decides (MIRLT_CURVE_SCALE_SAVE); the trust record pooled for the fleet (odo_trust, MIRLT_TRUST_FLEET). e18 (Nick 12 Nov decisions): (1) the tracking layer's out-and-back identity drive, made only where no body can touch (outback); (3) a creep with its heading in doubt beside a robot the camera has waits for room or goes straight away when no heading can close the gap; beside one it does not have, half steps at the slowest speed away from where it was last believed to be (MIRLT_DOUBT_NEIGHBOUR); (4) a lost / stray / needs-a-hand robot goes first (reflex priority) to the nearest readable point nobody uses, and a standing robot in its way makes room (MIRLT_LOST_PRIORITY); (5) each robot's odometry trust (odo_trust: shadow dead reckoning against the camera, its own record) gives its lost bubble and allows blind legs (curves through unreadable ground, blind_excursion) only where the predicted error keeps every margin with a way back; checked against the error found when seen again (MIRLT_BLIND_ALLOW); (6) every calibration correction (curves, straight drives) saved at any end by the agreement rules (save_corrections, MIRLT_SAVE_CAL_AT_END). Every safety switch read through safety_group. Before: "freeroam-2026-11-12e17"   # e17 (home 11 Nov, the 08:26 and 08:58 runs): (1d) a camera position the tracking layer named by elimination or a wiggle is a CORRECTION: its pose set from the camera at once (fpose, never rejected by its filter), said "CORRECTED", never "moved in" / REJOINED, and a held robot rejoins on it (MIRLT_CAMERA_CORRECT=0: as e16); (1e) a re-seed is projected to now and never lands while the robot turns (the Pi's copy of its heading is ~0.3 s old: 13-15 deg median jump when it landed mid-turn, MIRLT_RESEED_TURN=0: as before); (2) no driving blind on late fixes: each robot's measured fix age and drift against the room its path has (MIRLT_LATE_FIX=0); after an off-plan heading re-set the next move waits for a short crawl the camera confirms (MIRLT_HEADING_CONFIRM=0); (6) each robot's drift per cm measured from its own corrections. Before: "freeroam-2026-11-11e16"
+VERSION = "freeroam-2026-11-12e19"   # e19 (the Fable audit, 12 Nov): H6 a hung robot is never given up on (MIRLT_HANG_RECOVERY): the opposite of what tilted it first (tilt_cause), forward tries with the tilt stop raised when its nose points inward (recover_forward), growing rounds one derived pause apart, the fail memory per round, the tilt keep-out at the nearest edge, no refused creeps while tilted. H5 the creep token stands only while its holder's creep is under way; a stuck robot (tilted, recovering, its last moves did not move: stuck()) never holds or takes it. Before: "freeroam-2026-11-12e18b"   # e18b (the replay of all 10 home runs): a standing robot named all along beyond its 6 cm fix gate is corrected from the camera (MIRLT_FAR_NAMED_CORRECT); a standing re-seed keeps its own heading unless the camera's is better (MIRLT_RESEED_HEADING_KEEP); curve scales logged, not saved, until Nick decides (MIRLT_CURVE_SCALE_SAVE); the trust record pooled for the fleet (odo_trust, MIRLT_TRUST_FLEET). e18 (Nick 12 Nov decisions): (1) the tracking layer's out-and-back identity drive, made only where no body can touch (outback); (3) a creep with its heading in doubt beside a robot the camera has waits for room or goes straight away when no heading can close the gap; beside one it does not have, half steps at the slowest speed away from where it was last believed to be (MIRLT_DOUBT_NEIGHBOUR); (4) a lost / stray / needs-a-hand robot goes first (reflex priority) to the nearest readable point nobody uses, and a standing robot in its way makes room (MIRLT_LOST_PRIORITY); (5) each robot's odometry trust (odo_trust: shadow dead reckoning against the camera, its own record) gives its lost bubble and allows blind legs (curves through unreadable ground, blind_excursion) only where the predicted error keeps every margin with a way back; checked against the error found when seen again (MIRLT_BLIND_ALLOW); (6) every calibration correction (curves, straight drives) saved at any end by the agreement rules (save_corrections, MIRLT_SAVE_CAL_AT_END). Every safety switch read through safety_group. Before: "freeroam-2026-11-12e17"   # e17 (home 11 Nov, the 08:26 and 08:58 runs): (1d) a camera position the tracking layer named by elimination or a wiggle is a CORRECTION: its pose set from the camera at once (fpose, never rejected by its filter), said "CORRECTED", never "moved in" / REJOINED, and a held robot rejoins on it (MIRLT_CAMERA_CORRECT=0: as e16); (1e) a re-seed is projected to now and never lands while the robot turns (the Pi's copy of its heading is ~0.3 s old: 13-15 deg median jump when it landed mid-turn, MIRLT_RESEED_TURN=0: as before); (2) no driving blind on late fixes: each robot's measured fix age and drift against the room its path has (MIRLT_LATE_FIX=0); after an off-plan heading re-set the next move waits for a short crawl the camera confirms (MIRLT_HEADING_CONFIRM=0); (6) each robot's drift per cm measured from its own corrections. Before: "freeroam-2026-11-11e16"
 VERSION_E16 = "freeroam-2026-11-11e16"   # e16 (home free roam 11 Nov 08:45-08:48, commit 4732a48: Right stopped at an edge and stood; then "REJOINED ... moved in" 1 s after NEEDS A HAND with nobody there, and Center pushed it off): (7) an edge stop reverses along the robot's own recorded track as far as the derived edge rule needs (observe.track_back_target), checked against the others' reservations, then re-plans; it holds and asks only when the track is unknown or blocked (MIRLT_EDGE_BACKOUT=0: as before); (8a) "moved in" needs evidence: a lift or a sustained camera move past its own measured noise, or its own drive out (MIRLT_REJOIN_EVIDENCE=0: as before); (8b) a robot held or stuck at an edge, or rejoined and not yet driven away, is a fixed obstacle with its uncertainty (own pose against the camera) in every plan and the reflex (MIRLT_PINNED_OBSTACLE=0); (8c) contact: a standing robot the camera sees move past its noise, or whose accelerometer jolts, stops the robots near it; a driving robot whose camera progress falls far below its wheels' stops and backs off; contact.csv (MIRLT_CONTACT_WATCH=0); (8d) a question nobody answers (ASK_WAIT_S) makes the run decide by itself, as an unattended run does (MIRLT_ASK_UNATTENDED=1: keeps asking); (9b) a standing robot's doubt no longer grows with its fix's age (home: "cannot tell whether it is clear of the edge" 22 cm in; MIRLT_STAND_UNC=0). Before: "freeroam-2026-11-10e13b"   # e13b (10 Nov, Nick 13:34): a standing robot (its own odometry shows no motion since its last fix) keeps that fix: never lost while it stands, sparse reads confirm it (MIRLT_STAND_TRUST=0: before); the lost threshold grows only for a camera slower than about 2.5 pictures a second (1.5 x the longest recent gap). e13 (10 Nov): never give up blind (BLIND_RULE edge: a lost robot drives on while its bubble + body + stop cannot reach an edge; BUBBLE_CAP behind MIRLT_BLIND_RULE=cap); stray return (a robot outside the readable area comes back along ground it drove); never give up (a robot held at an edge waits, says it needs a hand and rejoins: EDGE_PARK off); risk-based no-pictures limit per robot
 VERSION_E12 = "freeroam-2026-11-10a"   # 11-10a (e12): the curve-fit maths moved into module functions (fit_arc_points, arc_summary, arc_agree) so the calibration's curve phase uses the very same (free roam's own fitting and saving unchanged); a robot held at an edge for EDGE_PARK_S is parked and said loudly, the others roam on (MIRLT_EDGE_PARK=0: before)
 VERSION_E = "freeroam-2026-11-07e"   # 11-07e (Nick 7 Nov): a robot put down at or over an edge first tries the e08 tilt recovery, a person asked only if that fails (MIRLT_START_EDGE_MODE=wait: always wait)
@@ -290,6 +290,9 @@ DOUBT_NEIGHBOUR = SG.flag("MIRLT_DOUBT_NEIGHBOUR")    # (3) a doubtful heading b
 LOST_PRIORITY = SG.flag("MIRLT_LOST_PRIORITY")        # (4) lost robots first; the others yield
 BLIND_ALLOW = SG.flag("MIRLT_BLIND_ALLOW")            # (5) each robot's measured odometry trust; blind legs
 SAVE_CAL_AT_END = SG.flag("MIRLT_SAVE_CAL_AT_END")    # (6) every calibration correction saved at any run end
+HANG_GROW = SG.value("MIRLT_HANG_RECOVERY") != "e08"   # (e19, audit H6) a hung robot: the opposite of what tilted it
+                        # first, forward tries when its nose points inward, growing rounds one derived pause apart, the
+                        # fail memory per round ("e08": the fixed tries, then 20 s holds, failures remembered for ever)
 FAR_NAMED_CORRECT = SG.flag("MIRLT_FAR_NAMED_CORRECT")   # (replay) named all along but beyond its fix gate: corrected
 RESEED_HEADING_KEEP = SG.flag("MIRLT_RESEED_HEADING_KEEP")   # (replay) a standing re-seed keeps its own heading
 CURVE_SCALE_SAVE = SG.flag("MIRLT_CURVE_SCALE_SAVE")    # (replay; Nick to decide) curve scales logged, not saved
@@ -1810,6 +1813,8 @@ class Controller:
         hc = r.__dict__.get("hd_confirm")
         if hc is not None and hc.get("stage") == "measure":
             return
+        if HANG_GROW and getattr(r, "tilted", False) and self.tilt_recovery:
+            return                  # (e19, H6) tilted: its recovery rounds move it (a creep would be refused while tilted)
         if self.t < r.__dict__.get("id_hold_until", -1e9):
             return                  # (e18) a measurement pause: the layer watches its identity move (bounded)
         if self.unaccounted_why(r) and self.t < self.__dict__.get("id_watch_until", -1e9):
@@ -2549,6 +2554,11 @@ class Controller:
         m = _re.search(r"obstacle (-?[0-9.]+) cm", info)
         d = max(0.0, float(m.group(1))) if m else 1.0
         u = (math.cos(math.radians(h)), math.sin(math.radians(h)))
+        if "tilted" in info and HANG_GROW:
+            # (e19, H6) tilted at an edge: the drop is the nearest edge, wherever the nose points (it may have backed
+            # or turned over it): felt outward from its middle, so its forward-inward try is not blocked by its own spot
+            ia = math.radians(SR.inward_heading(self.rect, *p))
+            u = (-math.cos(ia), -math.sin(ia))
         f = (p[0] + u[0] * (BODY / 2 + d), p[1] + u[1] * (BODY / 2 + d))
         r.back_off = dict(t=self.t, h=h, edge=("edge" in info or "tilted" in info) and not m)   # (e16) edge stops
         self.counts["front_stops"] += 1
@@ -3433,7 +3443,10 @@ class Controller:
         never forward (firmware 2026-11-05d refuses anything else while it is tilted; older firmware ends its follow
         run). Until it has backed away nothing else is planned for it."""
         self.counts["tilt_trips"] = self.counts.get("tilt_trips", 0) + 1
-        self.event(r, "tilt stop", "its own tilt stop ended the step (%s): kept out ahead, backs straight away" % info)
+        r.tilt_cause = self.tilt_cause(r)        # (e19, H6) before felt(): a robot that backed over felt it BEHIND
+        self.event(r, "tilt stop", "its own tilt stop ended the step (%s): kept out %s, %s" % (
+            info, "at the nearest edge" if HANG_GROW else "ahead",
+            "drives forward away" if r.tilt_cause == "reverse" and HANG_GROW else "backs straight away"))
         self.felt(r, "obstacle 0.0 cm (tilted)")
         p = self.pos(r)
         if p is not None:
@@ -3447,6 +3460,20 @@ class Controller:
             self.log("keepouts", dict(q, what="tilted robot kept clear by the others"))
         r.back_off = dict(t=self.t, h=self.heading(r), edge=True)
         r.tilted = True
+
+    def tilt_cause(self, r):
+        """(e19, audit H6) What tilted it: "reverse" (it backed over), "turn_left" / "turn_right", "forward", or None
+        (unknown): the move running now, else the one that ended in the last 2 s."""
+        mv = r.move
+        if mv is not None:
+            d = dict(rev=bool(mv.get("rev")), turn=float(mv.get("turn") or 0.0), phase=mv.get("phase"))
+        else:
+            d = r.__dict__.get("last_mv")
+            if d is None or self.t - d["t"] > 2.0:
+                return None
+        if d.get("phase") == "turn" and abs(d.get("turn") or 0.0) >= 3.0:
+            return "turn_left" if d["turn"] > 0 else "turn_right"
+        return "reverse" if d.get("rev") else "forward"
 
     def start_move(self, r):
         res = None
@@ -3674,6 +3701,10 @@ class Controller:
 
     def end_move(self, r):
         p = self.pos(r)
+        if r.move is not None:
+            mv_ = r.move                        # (e19, H6) what it was doing, for "the opposite of what tilted it"
+            r.last_mv = dict(t=self.t, rev=bool(mv_.get("rev")), turn=float(mv_.get("turn") or 0.0),
+                             phase=mv_.get("phase"), kind=str(mv_.get("kind", "")))
         if r.move is not None and r.move.get("restore_tilt") is not None:
             # (e08, A3) a pivot ran with the tilt stop raised: back to the run's limit
             self.out(r, "set tilt_stop_deg %g" % r.move["restore_tilt"])
@@ -3732,8 +3763,13 @@ class Controller:
             back_in = SR.inward_agreed(self.rect, own, cam if cam is not None else (own if trail_ok else None), h,
                                        reverse=True)
             inward = SR.inward_heading(self.rect, *(cam or own or p))
-            rc = dict(t0=self.t, tries=SR.tilt_recovery_tries(h, inward, back_in), i=0, n=(rc or {}).get("n", 0) + 1,
-                      inward=inward, back_in=back_in, trail=trail_ok)
+            n_ = (rc or {}).get("n", 0) + 1
+            if HANG_GROW:
+                tries_ = SR.tilt_recovery_tries_e19(h, inward, back_in, cause=r.__dict__.get("tilt_cause"))
+            else:
+                tries_ = SR.tilt_recovery_tries(h, inward, back_in)
+            rc = dict(t0=self.t, tries=tries_, i=0, n=n_, inward=inward, back_in=back_in, trail=trail_ok,
+                      scale=SR.recover_scale(n_) if HANG_GROW else 1.0)
             r.recover = rc
             self.event(r, "tilt recovery", "tilted %s at %.1f, %.1f (%.1f cm from the edge): tries %s (backing goes "
                        "inward: %s, by %s)" % ("%.1f deg" % self.tilt_dev(r) if self.tilt_dev(r) is not None else "",
@@ -3752,8 +3788,9 @@ class Controller:
                                           tilt=self.tilt_dev(r) if self.tilt_dev(r) is not None else ""))
                 continue
             return
-        # nothing safe remains: hold, said (and asked when a person is there); tried again later
-        rc["hold_until"] = self.t + self.RECOVER_RETRY_S
+        # nothing safe remains: hold, said (and asked when a person is there); tried again later. (e19, H6: never give
+        # up, never still) one derived pause, then a new round with longer / wider moves
+        rc["hold_until"] = self.t + (self.still_pause(r) if HANG_GROW else self.RECOVER_RETRY_S)
         r.busy_until = self.t + 1.0
         self.counts["recover_holds"] = self.counts.get("recover_holds", 0) + 1
         self.log("recovery", dict(t=round(self.t, 2), robot=r.name, n=rc["n"], attempt="hold", result="nothing safe "
@@ -3761,7 +3798,7 @@ class Controller:
                                   tilt=self.tilt_dev(r) if self.tilt_dev(r) is not None else ""))
         if not r.stopped_hard:
             self.trophy_break(r, "tilted at the edge and no safe way out remains: holds (tries again in %.0f s)"
-                              % self.RECOVER_RETRY_S)
+                              % (rc["hold_until"] - self.t))
         self.ask(r, "%s is tilted at the board's edge and could not back away safely. Please lift it back onto the "
                  "board, or say it is fine." % r.name, ("I moved it back", "Leave it"))
 
@@ -3771,6 +3808,10 @@ class Controller:
         fm = r.__dict__.setdefault("fmem", OB.FailMemory())
         if name == "hold":
             return "hold"
+        sc = float((r.recover or {}).get("scale", 1.0))          # (e19, H6) this round's growth
+        since = (r.recover or {}).get("t0") if HANG_GROW else None   # (e19, H6) failures count from this round on
+        if name.startswith("forward"):
+            return self.recover_forward(r, name, p, h, sc, since, fm)
         if name.startswith("reverse"):
             if not r.recover.get("back_in"):
                 return None
@@ -3779,8 +3820,8 @@ class Controller:
             side = {"reverse_left": 1.0, "reverse_right": -1.0}.get(name, 0.0)
 
             def end_of(L_):
-                return p[0] - L_ * ux - side * SR.ONE_SIDE_CM * uy, p[1] - L_ * uy + side * SR.ONE_SIDE_CM * ux
-            L = self.RECOVER_L
+                return p[0] - L_ * ux - side * SR.ONE_SIDE_CM * sc * uy, p[1] - L_ * uy + side * SR.ONE_SIDE_CM * sc * ux
+            L = self.RECOVER_L * sc
             ex, ey = end_of(L)
             e0, e1 = edge_dist(self.rect, *p), edge_dist(self.rect, ex, ey)
             if e1 < EDGE_TURN_MIN + 0.5:
@@ -3795,7 +3836,7 @@ class Controller:
             # inward only: it ends further in, with its body on the board (not the general room check)
             if e1 < e0 + 1.0 or e1 < HALF + 1.0 + (r.bubble if r.lost else 0.0):
                 return None
-            if fm.same("recover:" + name, -1, L, p[0], p[1]):
+            if fm.same("recover:" + name, -1, L, p[0], p[1], since=since):
                 return None
             tr = Traj.move(self.t + 0.2, p, wrap180(h + 180.0), 0.0, math.dist(p, (ex, ey)), BACK_V,
                            m0=self.margin0(r))
@@ -3806,7 +3847,8 @@ class Controller:
             return True
         if name.startswith("pivot"):
             sg = 1.0 if name == "pivot_left" else -1.0
-            if fm.same("recover:" + name, 1, SR.PIVOT_DEG, p[0], p[1]):
+            pdeg = SR.PIVOT_DEG * sc
+            if fm.same("recover:" + name, 1, pdeg, p[0], p[1], since=since):
                 return None
             if any(math.dist(self.pos(o), p) < HARD_CC + 1.0 for o in self.R.values() if o is not r and
                    self.pos(o) is not None):
@@ -3815,11 +3857,40 @@ class Controller:
             dev = self.tilt_dev(r)
             raise_to = min(SR.RECOVER_TILT_CAP, (dev if dev is not None else lim) + SR.RECOVER_TILT_MARGIN_DEG)
             self.out(r, "set tilt_stop_deg %g" % max(lim, raise_to))
-            tr = Traj.move(self.t + 0.2, p, h, sg * SR.PIVOT_DEG, 0.0, 5.0, m0=self.margin0(r))
-            mv = self.recover_send(r, name, p, h, sg * SR.PIVOT_DEG, 0.0, tr)
+            tr = Traj.move(self.t + 0.2, p, h, sg * pdeg, 0.0, 5.0, m0=self.margin0(r))
+            mv = self.recover_send(r, name, p, h, sg * pdeg, 0.0, tr)
             mv["restore_tilt"] = lim
             return True
         return None
+
+    def recover_forward(self, r, name, p, h, sc, since, fm):
+        """(e19, audit H6: "a robot that BACKED over the edge has no way out") A forward try: straight ahead, or a
+        line ONE_SIDE_CM x the round's growth to one side (one wheel works harder), only when it ends further in with
+        its body on the board, and with the tilt stop raised to the tilt now + RECOVER_TILT_MARGIN_DEG for that step
+        only (as the pivot: the firmware refuses a forward step only while the tilt is over its stop). Returns True
+        when sent, None when not safe from here."""
+        hr = math.radians(h)
+        ux, uy = math.cos(hr), math.sin(hr)
+        side = {"forward_left": 1.0, "forward_right": -1.0}.get(name, 0.0)
+        L = self.RECOVER_L * sc
+        ex, ey = p[0] + L * ux - side * SR.ONE_SIDE_CM * sc * uy, p[1] + L * uy + side * SR.ONE_SIDE_CM * sc * ux
+        e0, e1 = edge_dist(self.rect, *p), edge_dist(self.rect, ex, ey)
+        if e1 < e0 + 1.0 or e1 < HALF + 1.0 + (r.bubble if r.lost else 0.0):
+            return None
+        if fm.same("recover:" + name, 1, L, p[0], p[1], since=since):
+            return None
+        hd = math.degrees(math.atan2(ey - p[1], ex - p[0]))
+        tr = Traj.move(self.t + 0.2, p, hd, 0.0, math.dist(p, (ex, ey)), BACK_V, m0=self.margin0(r))
+        if not self.keepout_ok(r, tr) or any(
+                clearance_profile(tr, o.traj, now=self.t)[-1] < REFLEX_CC for o in self.others(r)):
+            return None
+        lim = SR.tilt_limits()["tilt_stop_deg"]
+        dev = self.tilt_dev(r)
+        raise_to = min(SR.RECOVER_TILT_CAP, (dev if dev is not None else lim) + SR.RECOVER_TILT_MARGIN_DEG)
+        self.out(r, "set tilt_stop_deg %g" % max(lim, raise_to))
+        mv = self.recover_send(r, name, p, h, 0.0, math.dist(p, (ex, ey)), tr, rev=False, end=(ex, ey))
+        mv["restore_tilt"] = lim
+        return True
 
     def recover_send(self, r, name, p, h, turn, L, tr, rev=False, end=None):
         if r.stopped_hard and (r.adj is None or r.adj["kind"] != "stop"):
@@ -3859,6 +3930,9 @@ class Controller:
         dev = self.tilt_dev(r)
         if mv.get("rev") and (dev is None or dev <= SR.tilt_limits()["stand_tilt_deg"]):
             self.recovered(r, "backed off inward (%s)" % mv["kind"][8:])
+        elif str(mv["kind"]).startswith("recover:forward") and (dev is None or
+                                                                 dev <= SR.tilt_limits()["stand_tilt_deg"]):
+            self.recovered(r, "drove forward inward (%s)" % mv["kind"][8:])     # (e19, H6)
 
     def recovered(self, r, how):
         r.tilted = False

@@ -33,7 +33,7 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 import safety_group as SG    # noqa: E402  (e18: every safety switch's automatic default lives in safety_group.py)
 
-VERSION = "2026-11-12e18"   # e18: the switches read through safety_group (one place, the same defaults). Before: "2026-11-10e14"   # e14 (school 17:46, a slow tag detector in dim light): fresh_fix_s, how old a fix may be and still count as seen, from the robot's measured fix interval (MIRLT_FIX_GAP_RULE=fixed: 0.6 s as before); between_fixes_cm. e13 (10 Nov, Nick "derived, risk-based thresholds"): no_picture_limit, the time a robot may go
+VERSION = "2026-11-12e19"   # e19 (audit H6): tilt_recovery_tries_e19 (the opposite of what tilted it first; forward tries when the nose points inward; growing rounds, recover_scale). Before: "2026-11-12e18"   # e18: the switches read through safety_group (one place, the same defaults). Before: "2026-11-10e14"   # e14 (school 17:46, a slow tag detector in dim light): fresh_fix_s, how old a fix may be and still count as seen, from the robot's measured fix interval (MIRLT_FIX_GAP_RULE=fixed: 0.6 s as before); between_fixes_cm. e13 (10 Nov, Nick "derived, risk-based thresholds"): no_picture_limit, the time a robot may go
 #                              without camera pictures, from its speed, heading, uncertainty and the edge room. 2026-11-07a: e08
 VERSION_A = "2026-11-07a"
 
@@ -528,6 +528,49 @@ RECOVER_TILT_CAP = 9.0          # the hung-at-an-edge reading on 25 Oct was 9.7-
                                 # bench: one wheel over a 1 / 2 / 3 cm drop, which tries level it)
 PIVOT_DEG = 15.0                # the short inward pivot. Chosen: a corner moves 1.7 cm. DOE: yes, with the above
 ONE_SIDE_CM = 2.0               # the one-sided reverse's sideways offset (loads one wheel more). Chosen
+
+
+RECOVER_GROW = 0.5              # (e19, audit H6, Nick: "keep trying, growing moves") each new round of tries is this
+                                # share longer / wider than the first (round n: 1 + GROW (n - 1)), up to RECOVER_GROW_MAX.
+RECOVER_GROW_MAX = 3.0          # Both chosen; DOE: yes, with the bench above (which lengths free a hung Alvik)
+FORWARD_IN_DEG = 60.0           # (e19) a forward try only when the nose points within this of straight inward (a
+                                # forward drive then gains room). Chosen; DOE: no (the room check decides the rest)
+
+
+def recover_scale(n):
+    """(e19) Round n's growth (1 for the first round)."""
+    return min(RECOVER_GROW_MAX, 1.0 + RECOVER_GROW * max(0, int(n) - 1))
+
+
+def tilt_recovery_tries_e19(heading_deg, inward_deg, back_inward, cause=None):
+    """(e19, audit H6; Nick 12 Nov: "back itself up or do the opposite of whatever got it to tilt") The order of tries,
+    starting with the opposite of what tilted it:
+      cause "forward" (or unknown): the e08 order (reverse, the one-sided reverses, the pivot, reverse after pivot);
+      cause "reverse" (it BACKED over the edge, its nose points inward): forward tries first: "forward" straight in,
+          "forward_left" / "forward_right" with one wheel worked harder, each with the tilt stop raised for that step
+          (as the pivot: firmware 2026-11-05d refuses a forward step only while the tilt is over the stop);
+      cause "turn_left" / "turn_right": the pivot the other way first.
+    The forward tries are offered whenever the nose points within FORWARD_IN_DEG of inward. Never "hold" as the end:
+    the caller pauses one derived pause and starts a new, longer round (recover_scale)."""
+    nose_in = abs((inward_deg - heading_deg + 180.0) % 360.0 - 180.0) <= FORWARD_IN_DEG
+    swing = (inward_deg - heading_deg + 180.0) % 360.0 - 180.0
+    piv = "pivot_left" if swing > 0 else "pivot_right"
+    if cause in ("turn_left", "turn_right"):
+        piv = "pivot_right" if cause == "turn_left" else "pivot_left"
+    back = ["reverse", "reverse_left", "reverse_right"] if back_inward else []
+    fwd = ["forward", "forward_left", "forward_right"] if nose_in else []
+    if cause == "reverse":
+        tries = fwd + [piv] + back
+    elif cause in ("turn_left", "turn_right"):
+        tries = [piv] + back + fwd
+    else:
+        tries = back + fwd + [piv]
+    if back_inward:
+        tries.append("reverse_after_pivot")
+    if nose_in:
+        tries.append("forward_after_pivot")
+    tries.append("hold")
+    return tries
 
 
 def tilt_recovery_tries(heading_deg, inward_deg, back_inward):

@@ -29,7 +29,7 @@ import json
 import math
 import os
 
-VERSION = "2026-11-11e16"   # e16 (home 11 Nov 08:45, Nick: "it can still back up but it's not, it's just still"): track_back_target, a reverse along the robot's own recorded track (curved too: straight chords that stay on the track) as far as the edge rule needs, derived; moved_in_evidence (a held robot counts as moved in only on a lift / tilt or a sustained camera move beyond its own measured noise). Before: "2026-11-10a"   # 11-10a (e12): blind_cells (the spots learned blind, for the site's blind_areas.json). 11-07a (e08): tilt limits from safety_rules (re-picked from the 5 / 6 Nov logs), trip
+VERSION = "2026-11-12e19"   # e19 (audit H6): FailMemory.same(since=): a failure counts from a round's start, not for ever. Before: "2026-11-11e16"   # e16 (home 11 Nov 08:45, Nick: "it can still back up but it's not, it's just still"): track_back_target, a reverse along the robot's own recorded track (curved too: straight chords that stay on the track) as far as the edge rule needs, derived; moved_in_evidence (a held robot counts as moved in only on a lift / tilt or a sustained camera move beyond its own measured noise). Before: "2026-11-10a"   # 11-10a (e12): blind_cells (the spots learned blind, for the site's blind_areas.json). 11-07a (e08): tilt limits from safety_rules (re-picked from the 5 / 6 Nov logs), trip
                           # keep-outs marked confirmed (the one keep-out rule)
 import sys as _sys
 if os.path.dirname(os.path.abspath(__file__)) not in _sys.path:
@@ -813,9 +813,14 @@ class FailMemory:
         self.fails.append((t, kind, sign, float(length_cm or 0.0), float(x), float(y)))
         del self.fails[:-50]
 
-    def same(self, kind, sign, length_cm, x, y):
+    def same(self, kind, sign, length_cm, x, y, since=None):
+        """(e19, audit H6) since: only failures from then on count (a new round of recovery tries forgets the rounds
+        before it: the camera, its tilt or a person may have changed things; before e19 a failure was remembered for
+        ever, so every later round skipped every try)."""
         L = float(length_cm or 0.0)
-        for _, k, sg, l0, fx, fy in self.fails:
+        for t_, k, sg, l0, fx, fy in self.fails:
+            if since is not None and t_ < since:
+                continue
             if k == kind and sg == sign and math.hypot(x - fx, y - fy) <= self.SAME_SPOT_CM and \
                     abs(L - l0) <= 0.25 * max(abs(l0), 1.0):
                 return True
