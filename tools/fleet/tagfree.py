@@ -64,6 +64,15 @@ TAG_FRESH_S = 3.0        # CHOSEN: auto mode: a robot a roof tag named within th
 Z_OVERHEAD_CM = 3.7      # the robot's top (e02_camera.ROBOT_TOP_CM): the overhead sees the roof
 Z_SIDE_CM = 2.0          # CHOSEN: about half the body: the side camera sees the near wall as much as the roof
 SIGMA_OVERHEAD_CM = 1.6  # MEASURED (report): centre error median 2.0 cm / 95 % 3.7 cm -> about 1.6 cm a direction
+# (e19, item 12: "prove the 2 cm out from logs") the side camera's floor height cannot be measured from the uploaded logs
+# (the Pi's 3-D side calibration stays on the Pi; the run's own side model is a picture-fitted homography that already
+# absorbs the height). Instead its effect is MEASURED live: every SIDE_CAL_EVERY-th detector call runs the side camera
+# where the overhead found robots too, and the median side-minus-overhead offset (SIDE_CAL_N pairs or more) is removed
+# from every side-only detection. MIRLT_SIDE_OFFSET_LEARN=0: the assumed Z_SIDE_CM alone (before e19).
+SIDE_LEARN = os.environ.get("MIRLT_SIDE_OFFSET_LEARN", "1") != "0"
+SIDE_CAL_EVERY = 10      # CHOSEN: one call in ten pays for the side camera's measurement (DOE: no; the load limit rules)
+SIDE_CAL_N = 20          # CHOSEN: pairs before the offset is used (its median's error ~1.25 x 2.6 / sqrt(20) = 0.7 cm)
+SIDE_PAIR_CM = 10.0      # CHOSEN: a side and an overhead detection this close are the same robot (robots are 13 cm wide)
 SIGMA_SIDE_CM = 2.6      # DERIVED: the side camera's fit spread is 4.1 px against the overhead's 2.5 px (x 1.6)
 
 # -- heading fusion --
@@ -360,16 +369,31 @@ class DetectorSource:
         t0 = time.perf_counter()
         out, pts = [], {}
         first = True
+        self.n_run = getattr(self, "n_run", 0) + 1
         for cam in self.cams:
+            calib = False
             if not first:
-                # the side camera only where the overhead found nothing near the robot asked for, position only
-                if self.side_off or region is None or any(math.hypot(d.x - region[0], d.y - region[1]) <= region[2]
-                                                          for d in out):
+                # the side camera only where the overhead found nothing near the robot asked for, position only;
+                # (e19, item 12) and every SIDE_CAL_EVERY-th call everywhere, to MEASURE its offset from the overhead
+                found = region is not None and any(math.hypot(d.x - region[0], d.y - region[1]) <= region[2]
+                                                   for d in out)
+                calib = SIDE_LEARN and not self.side_off and bool(out) and self.n_run % SIDE_CAL_EVERY == 0
+                if self.side_off or region is None or (found and not calib):
                     continue
             got = self._detect(cam)
             if got is not None:
                 dets = self._to_dets(cam, got[0], got[1])
                 if not first:
+                    if calib:
+                        self._side_learn(out, dets)
+                        if found:
+                            pts[cam.name] = got[0]
+                            continue
+                    off = self.side_offset()
+                    if off is not None:
+                        import tracking_layer as TL
+                        dets = [TL.Det(d.src, d.t, d.x - off[0], d.y - off[1], d.th, d.name, d.sigma, score=d.score)
+                                for d in dets]
                     dets = [d for d in dets if region is None or math.hypot(d.x - region[0], d.y - region[1]) <= region[2]]
                     self.counts["side_used"] += 1 if dets else 0
                 out += dets
@@ -386,9 +410,30 @@ class DetectorSource:
                      "overhead only" % (ms, OVER_N, self.budget.budget_ms))
         return now, tuple(sorted(pts.items())), out
 
+    def _side_learn(self, over, side):
+        """(e19, item 12) Pairs of the same robot seen by both cameras in one call: the side camera's offset from the
+        overhead (each side detection with its nearest overhead one within SIDE_PAIR_CM)."""
+        prs = self.__dict__.setdefault("side_pairs", [])
+        for d in side:
+            o = min(over, key=lambda q: math.hypot(q.x - d.x, q.y - d.y)) if over else None
+            if o is not None and math.hypot(o.x - d.x, o.y - d.y) <= SIDE_PAIR_CM:
+                prs.append((d.x - o.x, d.y - o.y))
+        del prs[:-400]
+
+    def side_offset(self):
+        """(e19) The side camera's measured offset from the overhead (median of the pairs) once SIDE_CAL_N exist, else
+        None (the assumed floor height alone, Z_SIDE_CM)."""
+        prs = self.__dict__.get("side_pairs") or []
+        if not SIDE_LEARN or len(prs) < SIDE_CAL_N:
+            return None
+        xs, ys = sorted(q[0] for q in prs), sorted(q[1] for q in prs)
+        return (xs[len(xs) // 2], ys[len(ys) // 2])
+
     def summary(self):
+        off = self.side_offset()
         return dict(version=VERSION, counts=dict(self.counts), load=self.budget.summary(), side_off=self.side_off,
-                    sync=self.sync, core=self.core)
+                    sync=self.sync, core=self.core, side_pairs=len(self.__dict__.get("side_pairs") or []),
+                    side_offset_cm=[round(v, 2) for v in off] if off else None)
 
 
 # ==================================================================================================================

@@ -723,3 +723,23 @@ def test_curves_use_the_fleets_live_estimate_and_a_robot_its_own_only_when_it_di
         if s.startswith("set arc_k_scale"):
             last[n] = float(s.split()[2])
     assert abs(last["Left"] - 1 / 1.15) < 0.01 and abs(last["Center"] - 1 / 1.03) < 0.015
+
+
+# ------------------------------------------- 12: the side camera's floor height: its effect measured, not assumed
+def test_the_side_cameras_offset_from_the_overhead_is_measured_and_removed():
+    """Item 12: the assumed 2 cm floor height cannot be measured from the uploaded logs (the 3-D side model stays on the
+    Pi). Its effect is measured live: side-and-overhead pairs of one robot give the side camera's offset, removed from
+    side-only detections once 20 pairs exist."""
+    import random
+    import tagfree as TF
+    import tracking_layer as TL
+    src = TF.DetectorSource.__new__(TF.DetectorSource)
+    assert src.side_offset() is None
+    rng = random.Random(2)
+    for k in range(25):
+        x, y = rng.uniform(10, 110), rng.uniform(10, 110)
+        over = [TL.Det("ml", 0.0, x, y)]
+        side = [TL.Det("ml", 0.0, x + 2.5 + rng.gauss(0, 1.0), y - 1.0 + rng.gauss(0, 1.0))]
+        src._side_learn(over, side)
+    off = src.side_offset()
+    assert off is not None and abs(off[0] - 2.5) < 0.8 and abs(off[1] + 1.0) < 0.8
