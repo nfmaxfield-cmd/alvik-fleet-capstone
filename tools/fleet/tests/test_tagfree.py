@@ -371,3 +371,37 @@ def test_the_real_model_loads_runs_on_an_empty_board_and_finds_nothing():
     src = TF.DetectorSource(m, [cam], sync=True, clock=lambda: 1.0)
     assert src("A", 1.0, "unaccounted", None) == []
     assert src.budget.n == 1 and src.budget.ms_all[0] < 2000.0
+
+
+def test_a_far_off_heading_is_not_handed_on_but_settled_by_the_heading_check():
+    """From headings alone a robot whose own heading is 71 deg off and a detector wrong about that robot look the same:
+    a plausible drift (30 deg) is corrected, a far one (71 deg) asks the camera-measured crawl, once."""
+    F = TF.HeadingFuser()
+    for k in range(3):
+        F.update("A", k * 0.5, 70.0, 40.0)
+    assert F.advice("A") == "hand"
+    F = TF.HeadingFuser()
+    for k in range(3):
+        F.update("A", k * 0.5, 111.0, 40.0)
+    assert F.advice("A") == "check"
+
+    class Rob:
+        mode, hd_confirm = "idle", None
+
+    class Ctrl:
+        t = 0.0
+        R = {"A": Rob()}
+
+        def event(self, *a):
+            pass
+    L = TL.TrackingLayer(["A"], ("motion",), board=H.BOARD, camera_watch=False)
+    st = TF.attach(L, TF.SimDetector(), ctrl=Ctrl(), mode="1")
+    L.own("A", 0.0, 50.0, 50.0, 111.0, True)
+    fs = []
+    for k in range(4):
+        L.own("A", 0.1 + k, 50.0, 50.0, 111.0, True)
+        f = dict(robot="A", t=0.1 + k, x=50.0, y=50.0, th=None, sigma=1.6, src="ml")
+        st.after(0.1 + k, [f], [TL.Det("ml", 0.1 + k, 50.0, 50.0, 40.0)])
+        fs.append(f)
+    assert all(f["th"] is None for f in fs) and Ctrl.R["A"].hd_confirm is not None
+    assert st.fuser.counts.get("checks_asked") == 1 and st.handed == 0

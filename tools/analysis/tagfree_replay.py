@@ -196,7 +196,8 @@ def main(argv=None):
                 res["heading"].append(dict(t=round(t, 2), robot=n, det=round(abs(TF.wrap180(th_det - th_true)), 1),
                                            own=None if th_own is None else round(abs(TF.wrap180(th_own - th_true)), 1),
                                            fused=None if fh is None else round(abs(TF.wrap180(fh - th_true)), 1),
-                                           used=bool(fuser.significant(n)), verdict=verdict))
+                                           used=fuser.advice(n) == "hand", check=fuser.advice(n) == "check",
+                                           verdict=verdict))
             for c, v in src.counts.items():
                 res["by_cam"][c] = res["by_cam"].get(c, 0) + v
             del st

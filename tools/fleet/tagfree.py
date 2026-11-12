@@ -78,6 +78,10 @@ TURN_MAX_DPS = 8.0       # as e17's re-seed rule: no heading is compared while t
                          # pose reaches the layer ~0.3 s late: mid-turn that is 10-30 deg of pure timing error)
 SIGNIF_K = 2.0           # CHOSEN: a fused heading is handed on only when the offset it measures is over 2 x its own sigma
                          # (the own heading is kept otherwise: a gyro is better than the detector over minutes)
+HAND_MAX_DEG = 45.0      # CHOSEN: an offset over this is not handed on: from headings alone a robot whose own heading is
+                         # far off and a detector that is wrong about that robot look the same, so the camera-measured
+                         # heading check (a short crawl, e17) settles it. DOE: yes (e17's travel agreement is 23 deg at 95 %)
+HAND_MIN_N = 2           # CHOSEN: at least two agreeing detector headings before one is handed on
 MATCH_CM = 3.5           # as tracking_layer.CLUSTER_CM: a detection this near a fix is that fix's object
 
 
@@ -411,6 +415,14 @@ class HeadingFuser:
         s = self.S.get(name)
         return s is not None and s["doubt"] is None and abs(s["off"]) > SIGNIF_K * math.sqrt(s["P"])
 
+    def advice(self, name):
+        """What to do with this robot's heading now: None (keep its own), "hand" (hand the fused heading on: its own is
+        measurably off by a plausible drift), "check" (far off: ask the camera-measured heading check instead)."""
+        s = self.S.get(name)
+        if s is None or s["doubt"] is not None or s["n"] < HAND_MIN_N or not self.significant(name):
+            return None
+        return "check" if abs(s["off"]) > HAND_MAX_DEG else "hand"
+
     def take_new_doubt(self, name):
         s = self.S.get(name)
         if s is not None and s.pop("new_doubt", False):
@@ -442,6 +454,7 @@ class TagFree:
         self.last_ml = []
         self.events = []
         self.handed = 0               # fused headings handed on (the own heading measurably off)
+        self.big_asked = set()        # robots a far-off heading asked the heading check for (until it ends)
 
     def before(self, t):
         c = self.ctrl
@@ -458,6 +471,7 @@ class TagFree:
                 self.asked.discard(n)
             if prev is not None and hc is None:
                 self.fuser.reset(n, "heading check ended")      # the controller confirmed or set it: trust it again
+                self.big_asked.discard(n)
             self.hd_seen[n] = hc
 
     def after(self, t, fixes, ml_dets):
@@ -487,7 +501,16 @@ class TagFree:
                     continue
             th, sig, verdict = self.fuser.update(n, t, own_th, d.th)
             f["th_src"] = "detector+own" if own_th is not None else "detector"
-            if verdict == "no own" or self.fuser.significant(n):
+            adv = self.fuser.advice(n)
+            if adv == "check":
+                f["th"] = None
+                if n not in self.big_asked:
+                    self.big_asked.add(n)
+                    self.fuser.counts["checks_asked"] = self.fuser.counts.get("checks_asked", 0) + 1
+                    self._doubt(n, t, own_th, d.th, "the overhead detector puts its heading %.0f deg from its own"
+                                % abs(self.fuser.S[n]["off"]))
+                continue
+            if verdict == "no own" or adv == "hand":
                 f["th"] = th                      # the own heading is measurably off (or there is none): corrected
                 if sig is not None:
                     f["sigma_th"] = round(max(sig, 1.0), 2)
@@ -501,7 +524,10 @@ class TagFree:
             if self.fuser.take_new_doubt(n):
                 self._doubt(n, t, own_th, d.th)
 
-    def _doubt(self, n, t, own_th, det_th):
+    def _doubt(self, n, t, own_th, det_th, why=None):
+        why = why or "the overhead detector disagrees with its own heading twice (own %s, detector %.0f deg)" % (
+            "?" if own_th is None else "%.0f" % own_th, det_th)
+        self.events.append(dict(t=round(t, 2), robot=n, why=why))
         c = self.ctrl
         if c is None or n not in getattr(c, "R", {}):
             return
@@ -511,10 +537,7 @@ class TagFree:
             on = FC.HEADING_CONFIRM
         except Exception:  # noqa: BLE001
             on = True
-        why = "the overhead detector disagrees with its own heading twice (own %s, detector %.0f deg)" % (
-            "?" if own_th is None else "%.0f" % own_th, det_th)
         self.layer.log("tracking", dict(t=round(t, 2), robot=n, what="heading in doubt (tag-free)", why=why))
-        self.events.append(dict(t=round(t, 2), robot=n, why=why))
         if on and r.__dict__.get("hd_confirm") is None and getattr(r, "mode", None) not in ("out", "gone"):
             r.hd_confirm = dict(t=getattr(c, "t", t), why="tag-free: " + why, tries=0, stage=None)
             try:
